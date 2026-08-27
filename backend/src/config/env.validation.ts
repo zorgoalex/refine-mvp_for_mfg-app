@@ -76,6 +76,22 @@ export function isBitrix24WebhookUrl(value: string): boolean {
   }
 }
 
+function isBase64Key32(value: string): boolean {
+  try {
+    const decoded = Buffer.from(value, 'base64');
+    return (
+      decoded.length === 32 &&
+      decoded.toString('base64').replace(/=+$/, '') === value.replace(/=+$/, '')
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isBitrix24PortalDomain(value: string): boolean {
+  return value === 'mebelkz.bitrix24.kz';
+}
+
 export const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'staging', 'production']).default('development'),
@@ -369,6 +385,58 @@ export const envSchema = z
     BITRIX24_ASSIGNED_BY_ID: z
       .union([emptyTrimmedStringFromEnv, z.coerce.number().int().positive()])
       .optional(),
+    BACKEND_ENABLE_BITRIX24_REVERSE_SYNC: booleanFromEnv.default(false),
+    BACKEND_BITRIX24_REVERSE_SYNC_RELAY_OWNER: z
+      .enum(['none', 'in_process', 'external'])
+      .default('none'),
+    BACKEND_BITRIX24_REVERSE_SYNC_DRY_RUN: booleanFromEnv.default(false),
+    BACKEND_BITRIX24_REVERSE_SYNC_POLL_INTERVAL_MS: z.coerce
+      .number()
+      .int()
+      .min(1000)
+      .default(5000),
+    BACKEND_BITRIX24_REVERSE_SYNC_BATCH_SIZE: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(100)
+      .default(25),
+    BACKEND_BITRIX24_REVERSE_SYNC_MAX_ATTEMPTS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(100)
+      .default(10),
+    BACKEND_BITRIX24_REVERSE_SYNC_WORKER_ID: z
+      .string()
+      .trim()
+      .min(1)
+      .default('bitrix24-reverse-local'),
+    BACKEND_BITRIX24_REVERSE_SYNC_LEASE_MS: z.coerce
+      .number()
+      .int()
+      .min(60000)
+      .default(300000),
+    BACKEND_BITRIX24_REVERSE_SYNC_ACTOR_USER_ID: z
+      .union([emptyTrimmedStringFromEnv, z.coerce.number().int().positive()])
+      .optional(),
+    BACKEND_ORDER_INITIAL_STATUS_CODE: optionalTrimmedStringFromEnv,
+    BACKEND_ORDER_INITIAL_PRODUCTION_STATUS_CODE: optionalTrimmedStringFromEnv,
+    BACKEND_BITRIX24_RECONCILE_INTERVAL_MS: z.coerce
+      .number()
+      .int()
+      .min(60000)
+      .default(900000),
+    BITRIX24_APP_CLIENT_ID: optionalTrimmedStringFromEnv,
+    BITRIX24_APP_CLIENT_SECRET: optionalTrimmedStringFromEnv,
+    BITRIX24_APP_TOKEN_ENCRYPTION_KEY: optionalTrimmedStringFromEnv,
+    BITRIX24_APP_PUBLIC_BASE_URL: optionalUrlFromEnv,
+    BITRIX24_APP_PORTAL_DOMAIN: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .default('mebelkz.bitrix24.kz'),
+    BITRIX24_PORTAL_TIMEZONE: z.literal('Asia/Almaty').default('Asia/Almaty'),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production' && !env.FRONTEND_ORIGIN) {
@@ -761,6 +829,70 @@ export const envSchema = z
         path: ['BITRIX24_REQUEST_TIMEOUT_MS'],
         message: 'must be less than BACKEND_BITRIX24_SYNC_LEASE_MS',
       });
+    }
+    if (env.BACKEND_ENABLE_BITRIX24_REVERSE_SYNC) {
+      const required = [
+        'DATABASE_URL',
+        'BACKEND_BITRIX24_REVERSE_SYNC_ACTOR_USER_ID',
+        'BACKEND_ORDER_INITIAL_STATUS_CODE',
+        'BACKEND_ORDER_INITIAL_PRODUCTION_STATUS_CODE',
+        'BITRIX24_APP_CLIENT_ID',
+        'BITRIX24_APP_CLIENT_SECRET',
+        'BITRIX24_APP_TOKEN_ENCRYPTION_KEY',
+        'BITRIX24_APP_PUBLIC_BASE_URL',
+      ] as const;
+      for (const key of required) {
+        if (!env[key]) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [key],
+            message: `required when BACKEND_ENABLE_BITRIX24_REVERSE_SYNC=true`,
+          });
+        }
+      }
+
+      if (
+        !env.BACKEND_ENABLE_ORDERS
+        || env.BACKEND_ORDERS_READ_ONLY
+        || !env.BACKEND_ENABLE_PAYMENTS
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['BACKEND_ENABLE_BITRIX24_REVERSE_SYNC'],
+          message:
+            'backend order read/write and payments ownership is required when reverse sync is enabled',
+        });
+      }
+
+      if (
+        env.BITRIX24_APP_PUBLIC_BASE_URL &&
+        !env.BITRIX24_APP_PUBLIC_BASE_URL.startsWith('https://')
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['BITRIX24_APP_PUBLIC_BASE_URL'],
+          message: 'must use HTTPS when reverse sync is enabled',
+        });
+      }
+
+      if (
+        env.BITRIX24_APP_TOKEN_ENCRYPTION_KEY &&
+        !isBase64Key32(env.BITRIX24_APP_TOKEN_ENCRYPTION_KEY)
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['BITRIX24_APP_TOKEN_ENCRYPTION_KEY'],
+          message: 'must be base64 encoding of exactly 32 bytes',
+        });
+      }
+
+      if (!isBitrix24PortalDomain(env.BITRIX24_APP_PORTAL_DOMAIN)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['BITRIX24_APP_PORTAL_DOMAIN'],
+          message: 'must be mebelkz.bitrix24.kz',
+        });
+      }
     }
   })
   .transform((env) => ({

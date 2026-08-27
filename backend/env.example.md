@@ -122,6 +122,42 @@ npm --prefix backend run crm-sync:backfill -- --dry-run --scope clients
 npm --prefix backend run crm-sync:backfill -- --scope clients
 ```
 
+## Bitrix24 Reverse Sync
+
+Reverse sync uses a server local application and OAuth. Keep it disabled until
+migrations `144_bitrix24_reverse_sync.sql` and
+`145_order_kinds_bitrix_crm_requests.sql` are applied and the installation
+callback has successfully bound CRM events.
+
+```env
+BACKEND_ENABLE_BITRIX24_REVERSE_SYNC=false
+BACKEND_BITRIX24_REVERSE_SYNC_RELAY_OWNER=none
+BACKEND_BITRIX24_REVERSE_SYNC_DRY_RUN=false
+BACKEND_BITRIX24_REVERSE_SYNC_POLL_INTERVAL_MS=5000
+BACKEND_BITRIX24_REVERSE_SYNC_BATCH_SIZE=25
+BACKEND_BITRIX24_REVERSE_SYNC_MAX_ATTEMPTS=10
+BACKEND_BITRIX24_REVERSE_SYNC_WORKER_ID=bitrix24-reverse-local
+BACKEND_BITRIX24_REVERSE_SYNC_LEASE_MS=300000
+BACKEND_BITRIX24_REVERSE_SYNC_ACTOR_USER_ID=
+BACKEND_ORDER_INITIAL_STATUS_CODE=
+BACKEND_ORDER_INITIAL_PRODUCTION_STATUS_CODE=
+BACKEND_BITRIX24_RECONCILE_INTERVAL_MS=900000
+BITRIX24_APP_CLIENT_ID=local.REPLACE
+BITRIX24_APP_CLIENT_SECRET=replace
+BITRIX24_APP_TOKEN_ENCRYPTION_KEY=base64-of-exactly-32-random-bytes
+BITRIX24_APP_PUBLIC_BASE_URL=https://backend.example.invalid
+BITRIX24_APP_PORTAL_DOMAIN=mebelkz.bitrix24.kz
+BITRIX24_PORTAL_TIMEZONE=Asia/Almaty
+```
+
+Set local application installation callback to
+`https://backend.example.invalid/api/v1/integrations/bitrix24/install`. Event
+handler is bound automatically at
+`https://backend.example.invalid/api/v1/integrations/bitrix24/events`.
+Installation is accepted only when `app.info` confirms configured local
+application code. The callback `application_token` is stored only as a hash and
+authenticates all later event deliveries.
+
 ## Auth Session Adapter
 
 Use only local/dev secrets here. Real secrets must stay in local untracked env

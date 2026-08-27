@@ -275,6 +275,8 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "milling_type_id",
     "milling_type_name",
     "cost_per_sqm",
+    "min_width_mm",
+    "min_height_mm",
     "sort_order",
     "description",
     "is_active",

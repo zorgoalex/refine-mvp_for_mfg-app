@@ -186,6 +186,8 @@ describe('up-all.sh provision', () => {
     expect(deploySource).toMatch(/compose_profile_enabled cnc-telegram; then[\s\S]*require_compose_override_support/);
     expect(readFileSync(resolve(__dirname, 'templates/docker-compose.cnc-telegram-worker.yml'), 'utf8'))
       .toContain('profiles: !override ["cnc-telegram-glm"]');
+    expect(readFileSync(resolve(__dirname, 'templates/docker-compose.cnc-telegram-worker.yml'), 'utf8'))
+      .toContain('stop_grace_period: 30s');
     expect(deploySource).toMatch(/COMPOSE_FILE_ARGS=\(-f "\$COMPOSE_FILE"\)/);
     expect(deploySource).toMatch(/COMPOSE_FILE_ARGS\+=\(-f "\$BACKEND_IDENTITY_OVERLAY"\)/);
     expect(deploySource).toMatch(/docker compose --env-file "\$ENV_FILE" "\$\{COMPOSE_FILE_ARGS\[@\]\}"/);
@@ -196,6 +198,8 @@ describe('up-all.sh provision', () => {
     expect(deploySource).toMatch(/docker_compose config --format json/);
     expect(deploySource).toContain('command != ["serve"]');
     expect(deploySource).toMatch(/ensure_worker_build_identity[\s\S]*assert_rendered_worker_serve_command/);
+    expect(deploySource).not.toContain('worker_up_args');
+    expect(deploySource).not.toContain('--force-recreate cnc-telegram-worker');
   });
 
   it('requires an explicit stack env and blocks non-prod Telegram writers', () => {

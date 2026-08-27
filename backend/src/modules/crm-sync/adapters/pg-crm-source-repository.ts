@@ -75,7 +75,8 @@ export class PgCrmSourceRepository implements CrmSourcePort {
   async getOrderById(id: string): Promise<OrderRow | null> {
     const { rows } = await this.db.query(
       `SELECT o.order_id, o.order_name, o.client_id, o.total_amount, o.final_amount, o.paid_amount,
-              o.order_date, o.completion_date, o.delete_flag, os.order_status_name, ps.payment_status_name
+              o.order_date, o.completion_date, o.delete_flag, o.order_kind, o.source_system,
+              os.order_status_name, ps.payment_status_name
          FROM orders o
          LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
          LEFT JOIN payment_statuses ps ON ps.payment_status_id = o.payment_status_id
@@ -99,6 +100,8 @@ export class PgCrmSourceRepository implements CrmSourcePort {
       orderDate: dat(r.order_date),
       completionDate: dat(r.completion_date),
       deleteFlag: Boolean(r.delete_flag),
+      orderKind: r.order_kind,
+      sourceSystem: r.source_system,
     };
   }
 
@@ -143,7 +146,9 @@ export class PgCrmSourceRepository implements CrmSourcePort {
 
   async listOrderIds(afterId: string, limit: number): Promise<string[]> {
     const { rows } = await this.db.query(
-      `SELECT order_id FROM orders WHERE order_id > $1 ORDER BY order_id ASC LIMIT $2`,
+      `SELECT order_id FROM orders
+        WHERE order_id > $1 AND order_kind = 'production_order'
+        ORDER BY order_id ASC LIMIT $2`,
       [afterId, limit],
     );
     return rows.map((r) => String(r.order_id));

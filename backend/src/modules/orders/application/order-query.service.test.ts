@@ -486,7 +486,7 @@ describe('OrderQueryService', () => {
     });
 
     await expect(service.getFormData({ currentUser: currentUser('operator') })).resolves.toMatchObject({
-      millingTypes: [{ id: 3, name: 'Modern', costPerSqm: null }],
+      millingTypes: [{ id: 3, name: 'Modern', costPerSqm: null, minWidthMm: 300, minHeightMm: 500 }],
       paymentStatuses: [],
       paymentTypes: [],
     });
@@ -667,7 +667,7 @@ function createOrderFormDataResponse(): OrderFormDataResponseDto {
   return {
     clients: [{ id: 1, name: 'Client' }],
     materials: [{ id: 2, name: 'MDF', unitId: 1 }],
-    millingTypes: [{ id: 3, name: 'Modern', costPerSqm: 120 }],
+    millingTypes: [{ id: 3, name: 'Modern', costPerSqm: 120, minWidthMm: 300, minHeightMm: 500 }],
     edgeTypes: [{ id: 4, name: 'PVC' }],
     films: [{ id: 5, name: 'White' }],
     orderStatuses: [{ id: 6, name: 'New', color: '#ffffff' }],

@@ -18,7 +18,10 @@ describe('PgGroupOverviewRepository', () => {
 
     const sql = database.queries.map((query) => query.text).join('\n');
     expect(sql).toContain('public.group_order_groups');
-    expect(sql).not.toMatch(/payment|audit|deadline|production|client_phone|order_details|group_members|users/i);
+    expect(sql).not.toMatch(
+      /payment|audit|deadline|production_status_events|client_phone|order_details|group_members|users/i,
+    );
+    expect(sql).toContain("eligible_order.order_kind = 'production_order'");
     expect(response.orders.totalCount).toBe(2);
     expect(response.omitted).toContain('payments');
     expect(response.omitted).toEqual(GROUP_OVERVIEW_OMITTED);

@@ -44,6 +44,39 @@ describe('Bitrix24ApiClient', () => {
     });
   });
 
+  it('uses OAuth auth and refreshes once after an expired token response', async () => {
+    let accessToken = 'old-access';
+    const refreshAccessToken = vi.fn(async () => {
+      accessToken = 'new-access';
+    });
+    const fetchFn = vi.fn<FetchFn>()
+      .mockResolvedValueOnce(jsonResponse({
+        error: 'expired_token',
+        error_description: 'token expired',
+      }, 401))
+      .mockResolvedValueOnce(jsonResponse({
+        result: { item: { id: 42, title: 'Deal' } },
+      }));
+    const client = new Bitrix24ApiClient(
+      'https://portal.bitrix24.kz/rest',
+      fetchFn,
+      30_000,
+      {
+        ...noWait,
+        getAccessToken: async () => accessToken,
+        refreshAccessToken,
+      },
+    );
+
+    await expect(client.getCrmItem(2, '42')).resolves.toMatchObject({ title: 'Deal' });
+    expect(refreshAccessToken).toHaveBeenCalledTimes(1);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(
+      fetchFn.mock.calls.map((call) =>
+        JSON.parse(String(call[1]?.body)).auth),
+    ).toEqual(['old-access', 'new-access']);
+  });
+
   it('finds an ERP element by origin fields', async () => {
     const fetchFn = vi.fn<FetchFn>().mockResolvedValue(
       jsonResponse({ result: { items: [{ id: 17 }] } }),
@@ -211,6 +244,21 @@ describe('Bitrix24ApiClient', () => {
     expect(fetchFn.mock.calls.map(([url]) => url)).toEqual([
       'https://portal/rest/1/token/crm.item.payment.add',
     ]);
+  });
+
+  it('retries a transient payment read because sale.payment.get is idempotent', async () => {
+    const fetchFn = vi.fn<FetchFn>()
+      .mockRejectedValueOnce(new Error('temporary network failure'))
+      .mockResolvedValueOnce(jsonResponse({ result: { payment: { id: 1033 } } }));
+    const client = new Bitrix24ApiClient(
+      'https://portal/rest/1/token',
+      fetchFn,
+      30_000,
+      noWait,
+    );
+
+    await expect(client.getPayment('1033')).resolves.toMatchObject({ id: 1033 });
+    expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 
   it('paginates every Deal payment for guard snapshots and membership checks', async () => {

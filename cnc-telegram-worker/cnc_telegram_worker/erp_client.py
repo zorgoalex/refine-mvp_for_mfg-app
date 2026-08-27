@@ -174,6 +174,16 @@ class ErpClient:
         self._session_lease = updated
         return updated
 
+    async def release_worker_session(self) -> None:
+        if self._session_lease is None:
+            return
+        await self._authorized_post(
+            "/cnc-telegram/worker-session/release",
+            payload={"workerInstanceId": self.worker_instance_id},
+            session_bound=True,
+        )
+        self.set_session_lease(None)
+
     async def ingest_packet(self, packet: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
         headers = {
             "Idempotency-Key": idempotency_key,

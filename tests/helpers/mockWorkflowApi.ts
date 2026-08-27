@@ -192,6 +192,8 @@ export function createWorkflowMockDb(): WorkflowMockDb {
                 milling_type_id: 1,
                 milling_type_name: 'Модерн',
                 cost_per_sqm: 10000,
+                min_width_mm: null,
+                min_height_mm: null,
                 sort_order: 10,
                 description: '',
                 is_active: true,
@@ -922,6 +924,8 @@ function createOrderFormDataResponse(db: WorkflowMockDb) {
         millingTypes: getRows(db, 'milling_types').map((row) => ({
             ...toIdName(row, 'milling_type_id', 'milling_type_name'),
             costPerSqm: toNullableNumber(row.cost_per_sqm),
+            minWidthMm: toNullableNumber(row.min_width_mm),
+            minHeightMm: toNullableNumber(row.min_height_mm),
         })),
         edgeTypes: getRows(db, 'edge_types').map((row) =>
             toIdName(row, 'edge_type_id', 'edge_type_name'),

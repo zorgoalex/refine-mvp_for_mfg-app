@@ -27,6 +27,7 @@ async function createSchema(client: import('pg').PoolClient): Promise<void> {
       status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','deleted','failed')),
       attempts      INTEGER NOT NULL DEFAULT 0,
       last_hash     TEXT,
+      source_system TEXT NOT NULL DEFAULT 'erp',
       last_error    TEXT,
       last_synced_at TIMESTAMPTZ,
       created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),

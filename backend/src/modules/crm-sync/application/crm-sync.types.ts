@@ -28,6 +28,8 @@ export interface OrderRow {
   orderDate: string | null;
   completionDate: string | null;
   deleteFlag: boolean;
+  orderKind?: 'draft' | 'crm_request' | 'production_order';
+  sourceSystem?: 'erp' | 'bitrix24' | 'customer_portal';
 }
 
 export interface PaymentRow {
@@ -57,6 +59,7 @@ export interface MappingRow {
   parentErpId: string | null;
   status: string;
   lastHash: string | null;
+  sourceSystem?: 'erp' | 'bitrix24';
 }
 
 export interface PaymentCreateGuardRow {

@@ -241,6 +241,23 @@ class ErpClientTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(client.session_lease)
 
+    async def test_releases_current_session_with_fencing_headers(self) -> None:
+        fake_http = FakeAsyncClient([response(200, {"released": True})])
+        client = ErpClient("http://backend/api/v1", BackendAuth(bearer_token="test-token"))
+        client.set_worker_identity("worker-1")
+        client.session_chat_id = "-100"
+        client.set_session_lease(WorkerSessionLease("lease-1", 4))
+
+        with patch("cnc_telegram_worker.erp_client.httpx.AsyncClient", return_value=fake_http):
+            await client.release_worker_session()
+
+        request = fake_http.requests[0]
+        self.assertTrue(request[0][0].endswith("/cnc-telegram/worker-session/release"))
+        self.assertEqual(request[1]["headers"]["X-CNC-Telegram-Session-Token"], "lease-1")
+        self.assertEqual(request[1]["headers"]["X-CNC-Telegram-Session-Generation"], "4")
+        self.assertEqual(request[1]["json"], {"workerInstanceId": "worker-1"})
+        self.assertIsNone(client.session_lease)
+
     async def test_item_lease_is_sent_on_queue_completion_and_failure(self) -> None:
         fake_http = FakeAsyncClient([
             response(200, {"status": "completed"}),

@@ -129,27 +129,49 @@ export class Bitrix24SyncConsumer {
     event: OutboxEventRecord,
   ): Promise<{ id: string; object: Bitrix24CounterpartyObject; intent: SyncIntent | null }> {
     const payload = mapClient(row, this.deps.options.assignedById);
-    const nextHash = hash({ object: payload.object, fields: payload.fields });
     const mapping = await this.deps.mapping.get(this.deps.db, 'client', row.clientId);
+    const bitrixOwned = mapping?.sourceSystem === 'bitrix24';
     const sameObject = mapping?.bitrixObject === payload.object;
+    if (bitrixOwned && (!sameObject || !mapping.bitrixId || mapping.status !== 'active')) {
+      throw new Error(
+        `CRM sync: Bitrix-owned client ${row.clientId} cannot be reclassified or recreated automatically`,
+      );
+    }
+    const fields = bitrixOwned
+      ? omitFields(payload.fields, ['originatorId', 'originId', 'assignedById'])
+      : payload.fields;
+    const nextHash = hash({ object: payload.object, fields });
     const usableId =
       mapping?.status === 'active' && sameObject ? mapping.bitrixId : null;
 
     if (
+      !bitrixOwned &&
       mapping?.status === 'active' &&
       mapping.bitrixId &&
       mapping.bitrixObject !== payload.object
     ) {
+      const operationId = await this.deps.mapping.prepareOutboundOperation(
+        this.deps.db,
+        {
+          objectType: toCounterpartyObject(mapping.bitrixObject),
+          bitrixId: mapping.bitrixId,
+          operation: 'delete',
+        },
+      );
       await this.deps.bitrix.deleteCrmItem(
         entityTypeIdForObject(mapping.bitrixObject),
         mapping.bitrixId,
+      );
+      await this.deps.mapping.completeOutboundOperation(
+        this.deps.db,
+        operationId,
       );
     }
 
     const bitrixId = await this.upsertCrmItem(
       payload.entityTypeId,
       payload.originId,
-      payload.fields,
+      fields,
       usableId,
     );
     const intent: SyncIntent = {
@@ -250,8 +272,37 @@ export class Bitrix24SyncConsumer {
     op: 'upsert' | 'delete',
     event: OutboxEventRecord,
   ): Promise<SyncIntent[]> {
-    if (op === 'delete') return this.deleteOrder(erpId, event);
     const order = await this.deps.source.getOrderById(erpId);
+    if (order && order.orderKind && order.orderKind !== 'production_order') return [];
+    const mapping = await this.deps.mapping.get(this.deps.db, 'order', erpId);
+    if (mapping?.sourceSystem === 'bitrix24' && mapping.status === 'remote_deleted') {
+      return [{
+        mapping: {
+          ...mapping,
+          status: 'remote_deleted',
+          lastHash: hash({ remoteDeleted: true, orderVersion: event.outboxEventId }),
+        },
+        audit: {
+          event: 'crm_sync.remote_deleted_skipped',
+          entityType: 'order',
+          entityId: erpId,
+          requestId: event.outboxEventId,
+          source: 'crm-sync',
+          actorUserId: null,
+          relatedOrderId: Number(erpId),
+          relatedClientId: order?.clientId
+            ? Number(order.clientId)
+            : mapping.parentErpId
+              ? Number(mapping.parentErpId)
+              : null,
+          metadata: {
+            bitrixId: mapping.bitrixId,
+            conflictCode: 'BITRIX24_DEAL_REMOTE_DELETED',
+          },
+        },
+      }];
+    }
+    if (op === 'delete') return this.deleteOrder(erpId, event);
     if (!order || order.deleteFlag) return this.deleteOrder(erpId, event);
 
     const intents: SyncIntent[] = [];
@@ -259,20 +310,29 @@ export class Bitrix24SyncConsumer {
     if (counterparty.intent) intents.push(counterparty.intent);
 
     const payload = mapOrder(order, counterparty, this.deps.options);
-    const nextHash = hash({ fields: payload.fields, productRows: payload.productRows });
-    const mapping = await this.deps.mapping.get(this.deps.db, 'order', erpId);
+    const bitrixOwned = mapping?.sourceSystem === 'bitrix24';
+    const fields = bitrixOwned ? bitrixOwnedProductionFields(payload.fields) : payload.fields;
+    const nextHash = hash({ fields, productRows: payload.productRows });
     const usableId =
       mapping?.status === 'active' && mapping.bitrixObject === 'deal'
         ? mapping.bitrixId
         : null;
     let dealId = usableId;
 
-    dealId = await this.upsertCrmItem(
-      BITRIX24_ENTITY_TYPE.deal,
-      payload.originId,
-      payload.fields,
-      usableId,
-    );
+    if (bitrixOwned) {
+      if (!usableId) {
+        throw new Error(`CRM sync: Bitrix-owned order ${erpId} has no active Deal mapping`);
+      }
+      await this.deps.bitrix.updateCrmItem(BITRIX24_ENTITY_TYPE.deal, usableId, fields);
+      dealId = usableId;
+    } else {
+      dealId = await this.upsertCrmItem(
+        BITRIX24_ENTITY_TYPE.deal,
+        payload.originId,
+        fields,
+        usableId,
+      );
+    }
     await this.deps.bitrix.setDealProductRows(dealId, payload.productRows);
     intents.push({
         mapping: {
@@ -320,6 +380,16 @@ export class Bitrix24SyncConsumer {
     const client = await this.deps.source.getClientById(clientId);
     if (!client) {
       throw new Error(`CRM sync: order cannot be projected — client ${clientId} not found in ERP`);
+    }
+    const expectedObject: Bitrix24CounterpartyObject =
+      client.personType === 'legal' ? 'company' : 'contact';
+    const mapping = await this.deps.mapping.get(this.deps.db, 'client', clientId);
+    if (
+      mapping?.status === 'active' &&
+      mapping.bitrixId &&
+      mapping.bitrixObject === expectedObject
+    ) {
+      return { id: mapping.bitrixId, object: expectedObject, intent: null };
     }
     return this.upsertClientRow(client, event);
   }
@@ -389,6 +459,7 @@ export class Bitrix24SyncConsumer {
     for (const mapping of mappedForOrder) {
       if (
         mapping.status === 'deleted' ||
+        mapping.sourceSystem === 'bitrix24' ||
         currentIds.has(mapping.erpId) ||
         guardedDeletionIds.has(mapping.erpId)
       ) continue;
@@ -431,6 +502,7 @@ export class Bitrix24SyncConsumer {
     const payload = mapPayment(payment, this.deps.options);
     const nextHash = hash(payload.fields);
     const mapping = await this.deps.mapping.get(this.deps.db, 'payment', payment.paymentId);
+    if (mapping?.sourceSystem === 'bitrix24') return null;
     const sameDeal = mapping?.parentErpId === payment.orderId;
     let guard = this.deps.durablePaymentCreates === false
       ? null
@@ -654,6 +726,7 @@ export class Bitrix24SyncConsumer {
     for (const paymentMapping of paymentMappings) {
       if (
         paymentMapping.status === 'deleted' ||
+        paymentMapping.sourceSystem === 'bitrix24' ||
         guardedDeletionIds.has(paymentMapping.erpId)
       ) continue;
       try {
@@ -783,6 +856,27 @@ function toCounterpartyObject(value: string | undefined): Bitrix24CounterpartyOb
 
 function entityTypeIdForObject(value: string): number {
   return value === 'company' ? BITRIX24_ENTITY_TYPE.company : BITRIX24_ENTITY_TYPE.contact;
+}
+
+function omitFields(
+  fields: Record<string, unknown>,
+  omitted: readonly string[],
+): Record<string, unknown> {
+  const result = { ...fields };
+  for (const key of omitted) delete result[key];
+  return result;
+}
+
+function bitrixOwnedProductionFields(fields: Record<string, unknown>): Record<string, unknown> {
+  const allowed = new Set([
+    'title',
+    'additionalInfo',
+    'begindate',
+    'closedate',
+    'companyId',
+    'contactId',
+  ]);
+  return Object.fromEntries(Object.entries(fields).filter(([key]) => allowed.has(key)));
 }
 
 function isAmbiguousCreateFailure(error: unknown): boolean {

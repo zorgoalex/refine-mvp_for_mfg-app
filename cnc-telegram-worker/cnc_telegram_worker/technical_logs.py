@@ -296,6 +296,7 @@ async def deliver_technical_logs(
     interval_seconds: int = 5,
     heartbeat_seconds: int = 30,
     fatal_event: asyncio.Event | None = None,
+    ready: Callable[[], bool] | None = None,
 ) -> None:
     last_heartbeat = 0.0
     loop = asyncio.get_running_loop()
@@ -304,15 +305,16 @@ async def deliver_technical_logs(
         if now - last_heartbeat >= heartbeat_seconds:
             print(f"worker heartbeat instance={spool.worker_instance_id} phase=running delivery=active", flush=True)
             last_heartbeat = now
-        try:
-            await flush_technical_logs_once(spool, sender)
-        except SessionLeaseLost:
-            if fatal_event is not None:
-                fatal_event.set()
-            stop_event.set()
-            raise
-        except Exception as exc:
-            spool.internal_error(str(exc))
+        if ready is None or ready():
+            try:
+                await flush_technical_logs_once(spool, sender)
+            except SessionLeaseLost:
+                if fatal_event is not None:
+                    fatal_event.set()
+                stop_event.set()
+                raise
+            except Exception as exc:
+                spool.internal_error(str(exc))
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
         except asyncio.TimeoutError:

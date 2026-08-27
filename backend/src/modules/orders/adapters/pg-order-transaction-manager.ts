@@ -232,7 +232,8 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       sheet_material_type_id: number | string | null;
       sheet_eligible: boolean | null;
     }>(
-      `SELECT sheet_material_type_id, sheet_eligible FROM orders WHERE order_id = $1`,
+      `SELECT sheet_material_type_id, sheet_eligible FROM orders
+        WHERE order_id = $1 AND order_kind = 'production_order'`,
       [orderId],
     );
     const details = await this.tx.query<{
@@ -354,7 +355,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       `
       SELECT order_name
       FROM orders
-      WHERE order_id = $1
+      WHERE order_id = $1 AND order_kind = 'production_order'
       `,
       [orderId],
     );
@@ -362,32 +363,65 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
   }
 
   async lockOrderName(orderName: string): Promise<void> {
-    const normalized = orderName.trim().toLowerCase();
     // Advisory xact lock по нормализованному имени: два конкурентных сохранения
     // одного номера сериализуются, второй видит первого после его коммита.
     // Хэш-коллизия имён лишь добавляет ложную сериализацию — корректность цела.
     await this.tx.query(
-      `SELECT pg_advisory_xact_lock(hashtextextended('order_name:' || $1, 0))`,
-      [normalized],
+      `SELECT pg_advisory_xact_lock(hashtextextended('order_name:' || normalize_order_name($1), 0))`,
+      [orderName],
     );
   }
 
   async assertOrderNameAvailable(input: { orderName: string; excludeOrderId?: number }): Promise<void> {
-    const normalized = input.orderName.trim().toLowerCase();
+    if (input.excludeOrderId !== undefined) {
+      const current = await this.tx.query<{
+        legacy_duplicate_name_exempt: boolean;
+        same_normalized_name: boolean;
+      }>(
+        `
+        SELECT legacy_duplicate_name_exempt,
+               normalize_order_name(order_name) = normalize_order_name($2) AS same_normalized_name
+        FROM orders
+        WHERE order_id = $1
+          AND order_kind = 'production_order'
+        `,
+        [input.excludeOrderId, input.orderName],
+      );
+      const currentRow = current.rows[0];
+      if (currentRow?.legacy_duplicate_name_exempt && currentRow.same_normalized_name) {
+        return;
+      }
+    }
+
     const duplicate = await this.tx.query<{ order_id: string | number; order_name: string }>(
       `
       SELECT order_id, order_name
       FROM orders
-      WHERE lower(trim(order_name)) = $1
+      WHERE normalize_order_name(order_name) = normalize_order_name($1)
         AND delete_flag = false
+        AND order_kind = 'production_order'
         AND ($2::bigint IS NULL OR order_id <> $2)
       ORDER BY order_id
       LIMIT 1
       `,
-      [normalized, input.excludeOrderId ?? null],
+      [input.orderName, input.excludeOrderId ?? null],
     );
     const row = duplicate.rows[0];
-    if (!row) {
+    const reserved = row
+      ? null
+      : await this.tx.query<{ order_id: string | number }>(
+          `
+          SELECT MIN(ledger.order_id) AS order_id
+          FROM order_legacy_duplicate_name_registry registry
+          JOIN order_legacy_duplicate_name_ledger ledger
+            ON ledger.normalized_name = registry.normalized_name
+          WHERE registry.normalized_name = normalize_order_name($1)
+          GROUP BY registry.normalized_name
+          `,
+          [input.orderName],
+        );
+    const reservedRow = reserved?.rows[0];
+    if (!row && !reservedRow) {
       return;
     }
 
@@ -401,11 +435,12 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       FROM orders
       WHERE order_name ~ '^\\d{1,15}$'
         AND delete_flag = false
+        AND order_kind = 'production_order'
         AND order_date >= DATE '2025-12-01'
       `,
     );
     throw new OrderNameDuplicateError({
-      existingOrderId: Number(row.order_id),
+      existingOrderId: Number(row?.order_id ?? reservedRow!.order_id),
       orderName: input.orderName.trim(),
       suggestedOrderName: suggestion.rows[0]?.next ?? null,
     });
@@ -417,7 +452,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       SELECT order_id, order_name, client_id, version, created_by, manager_id,
              delete_flag, deleted_at, deleted_by
       FROM orders
-      WHERE order_id = $1
+      WHERE order_id = $1 AND order_kind = 'production_order'
       FOR UPDATE
       `,
       [orderId],
@@ -471,6 +506,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       SELECT order_id, order_name, version, created_by, manager_id
       FROM orders
       WHERE order_id = $1 AND delete_flag = false
+        AND order_kind = 'production_order'
       FOR UPDATE
       `,
       [orderId],
@@ -494,6 +530,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       SELECT order_id, order_name, client_id, version, created_by, manager_id
       FROM orders
       WHERE order_id = $1 AND delete_flag = false
+        AND order_kind = 'production_order'
       FOR UPDATE
       `,
       [orderId],
@@ -523,6 +560,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       SELECT client_id, project_id
       FROM orders
       WHERE order_id = $1 AND delete_flag = false
+        AND order_kind = 'production_order'
       `,
       [orderId],
     );
@@ -557,7 +595,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       SELECT p.project_id, p.client_id, p.code
       FROM projects p
       JOIN orders o USING (project_id)
-      WHERE o.order_id = $1
+      WHERE o.order_id = $1 AND o.order_kind = 'production_order'
       FOR UPDATE
       `,
       [orderId],
@@ -581,7 +619,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       -- перезаписал бы client_id и архивным заказам — deleted удерживают клиента корня.
       SELECT COUNT(*)::int AS count
       FROM orders
-      WHERE project_id = $1
+      WHERE project_id = $1 AND order_kind = 'production_order'
       `,
       [projectId],
     );
@@ -670,7 +708,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
              sheet_material_type_id AS "sheetMaterialTypeId", sheet_eligible AS "sheetEligible",
              hdf_min_threshold_mm AS "hdfMinThresholdMm"
       FROM orders
-      WHERE order_id = $1
+      WHERE order_id = $1 AND order_kind = 'production_order'
       `,
       [orderId],
     );

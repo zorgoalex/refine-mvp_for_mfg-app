@@ -481,6 +481,11 @@ export const orderHeaderResponseSwaggerSchema = {
   required: [
     'orderId',
     'orderName',
+    'orderKind',
+    'sourceSystem',
+    'projectId',
+    'projectCode',
+    'fullNumber',
     'clientId',
     'clientName',
     'orderDate',
@@ -519,6 +524,11 @@ export const orderHeaderResponseSwaggerSchema = {
   properties: {
     orderId: { type: 'integer' },
     orderName: { type: 'string' },
+    orderKind: { type: 'string', enum: ['draft', 'crm_request', 'production_order'] },
+    sourceSystem: { type: 'string', enum: ['erp', 'bitrix24', 'customer_portal'] },
+    projectId: nullableIntegerSwaggerSchema,
+    projectCode: nullableStringSwaggerSchema,
+    fullNumber: nullableStringSwaggerSchema,
     clientId: { type: 'integer' },
     clientName: nullableStringSwaggerSchema,
     orderDate: dateOnlySwaggerSchema,
@@ -681,13 +691,15 @@ const orderRefreshResponseSwaggerSchema = {
 
 const orderListItemSwaggerSchema = {
   type: 'object',
-  required: ['orderId', 'orderName', 'projectId', 'projectCode', 'fullNumber', 'clientId', 'clientName', 'orderDate', 'plannedCompletionDate', 'completionDate', 'issueDate', 'paymentDate', 'orderStatusId', 'orderStatusName', 'paymentStatusId', 'paymentStatusName', 'productionStatusId', 'productionStatusName', 'priority', 'totalAmount', 'discount', 'surcharge', 'finalAmount', 'paidAmount', 'debtAmount', 'partsCount', 'totalArea', 'managerId', 'notes', 'materialIds', 'materialNames', 'basisProjects', 'bazisCutNumbers', 'cutNumbers', 'bathCutNumbers', 'millingTypeId', 'millingTypeName', 'dowelingOrderId', 'dowelingOrderName', 'designEngineerId', 'passedProductionStatusCodes', 'primaryGroup', 'groups', 'createdBy', 'editedBy', 'updatedAt', 'version'],
+  required: ['orderId', 'orderName', 'orderKind', 'sourceSystem', 'projectId', 'projectCode', 'fullNumber', 'clientId', 'clientName', 'orderDate', 'plannedCompletionDate', 'completionDate', 'issueDate', 'paymentDate', 'orderStatusId', 'orderStatusName', 'paymentStatusId', 'paymentStatusName', 'productionStatusId', 'productionStatusName', 'priority', 'totalAmount', 'discount', 'surcharge', 'finalAmount', 'paidAmount', 'debtAmount', 'partsCount', 'totalArea', 'managerId', 'notes', 'materialIds', 'materialNames', 'basisProjects', 'bazisCutNumbers', 'cutNumbers', 'bathCutNumbers', 'millingTypeId', 'millingTypeName', 'dowelingOrderId', 'dowelingOrderName', 'designEngineerId', 'passedProductionStatusCodes', 'primaryGroup', 'groups', 'createdBy', 'editedBy', 'updatedAt', 'version'],
   properties: {
     orderId: { type: 'integer' },
     orderName: { type: 'string' },
-    projectId: { type: 'integer' },
-    projectCode: { type: 'string' },
-    fullNumber: { type: 'string' },
+    orderKind: { type: 'string', enum: ['draft', 'crm_request', 'production_order'] },
+    sourceSystem: { type: 'string', enum: ['erp', 'bitrix24', 'customer_portal'] },
+    projectId: nullableIntegerSwaggerSchema,
+    projectCode: nullableStringSwaggerSchema,
+    fullNumber: nullableStringSwaggerSchema,
     clientId: { type: 'integer' },
     clientName: nullableStringSwaggerSchema,
     orderDate: dateOnlySwaggerSchema,
@@ -770,11 +782,13 @@ const materialLookupSwaggerSchema = {
 
 const millingTypeLookupSwaggerSchema = {
   type: 'object',
-  required: ['id', 'name', 'costPerSqm', 'sortOrder'],
+  required: ['id', 'name', 'costPerSqm', 'minWidthMm', 'minHeightMm', 'sortOrder'],
   properties: {
     id: { type: 'integer' },
     name: { type: 'string' },
     costPerSqm: nullableNumberSwaggerSchema,
+    minWidthMm: nullableNumberSwaggerSchema,
+    minHeightMm: nullableNumberSwaggerSchema,
     sortOrder: { type: 'integer' },
   },
 } as const;

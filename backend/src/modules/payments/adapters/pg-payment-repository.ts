@@ -49,6 +49,9 @@ interface LockedOrderRow extends QueryResultRow {
   version: string | number;
   created_by: string | number | null;
   manager_id: string | number | null;
+  order_kind: string;
+  legacy_zero_detail_exempt: boolean;
+  has_active_details: boolean;
 }
 
 interface PaymentTotalsRow extends QueryResultRow {
@@ -66,6 +69,7 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
       await setSessionUser(tx, command.currentUser.id);
       const orders = await loadOrdersForUpdate(tx, [command.dto.orderId]);
       const order = requireLockedOrder(orders, command.dto.orderId);
+      assertPaymentReadyProductionOrder(order);
       await this.assertPaymentScope(command.currentUser, 'create', 0, order, command.requestId ?? 'payment-command');
       const inserted = await tx.query<PaymentRow>(
         `
@@ -137,6 +141,8 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
       const orders = await loadOrdersForUpdate(tx, uniqueNumbers([previousOrderId, nextOrderId]));
       const previousOrder = requireLockedOrder(orders, previousOrderId);
       const nextOrder = requireLockedOrder(orders, nextOrderId);
+      assertPaymentReadyProductionOrder(previousOrder);
+      assertPaymentReadyProductionOrder(nextOrder);
       await this.assertPaymentScope(command.currentUser, 'update', command.paymentId, previousOrder, command.requestId ?? 'payment-command');
       if (nextOrderId !== previousOrderId) {
         await this.assertPaymentScope(command.currentUser, 'create', command.paymentId, nextOrder, command.requestId ?? 'payment-command');
@@ -213,6 +219,7 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
       const orderId = toNumber(existing.order_id);
       const orders = await loadOrdersForUpdate(tx, [orderId]);
       const order = requireLockedOrder(orders, orderId);
+      assertPaymentReadyProductionOrder(order);
       await this.assertPaymentScope(command.currentUser, 'delete', command.paymentId, order, command.requestId ?? 'payment-command');
       await tx.query('DELETE FROM payments WHERE payment_id = $1', [command.paymentId]);
       const orderSummary = await recalculateOrderPaymentState(tx, order);
@@ -339,7 +346,12 @@ async function loadOrdersForUpdate(
 ): Promise<Map<number, LockedOrder>> {
   const result = await tx.query<LockedOrderRow>(
     `
-    SELECT order_id, final_amount, payment_status_id, version, created_by, manager_id
+    SELECT order_id, final_amount, payment_status_id, version, created_by, manager_id,
+           order_kind, legacy_zero_detail_exempt,
+           EXISTS (
+             SELECT 1 FROM order_details detail
+              WHERE detail.order_id=orders.order_id AND detail.delete_flag=false
+           ) AS has_active_details
     FROM orders
     WHERE order_id = ANY($1::bigint[]) AND delete_flag = false
     ORDER BY order_id
@@ -433,6 +445,9 @@ interface LockedOrder {
   paymentStatusId: number;
   version: number;
   policySubject: ScopedEntity;
+  orderKind: string;
+  legacyZeroDetailExempt: boolean;
+  hasActiveDetails: boolean;
 }
 
 function mapLockedOrder(row: LockedOrderRow): LockedOrder {
@@ -445,7 +460,21 @@ function mapLockedOrder(row: LockedOrderRow): LockedOrder {
       createdByUserId: toNullableString(row.created_by),
       managerUserId: toNullableString(row.manager_id),
     },
+    orderKind: row.order_kind,
+    legacyZeroDetailExempt: row.legacy_zero_detail_exempt,
+    hasActiveDetails: row.has_active_details,
   };
+}
+
+function assertPaymentReadyProductionOrder(order: LockedOrder): void {
+  if (order.orderKind !== 'production_order' || !order.hasActiveDetails) {
+    throw new ApiError(
+      409,
+      'ORDER_NOT_READY_FOR_PAYMENTS',
+      'Payments are allowed only for a production order with active details',
+      { orderId: order.orderId, orderKind: order.orderKind },
+    );
+  }
 }
 
 function requireLockedOrder(orders: Map<number, LockedOrder>, orderId: number): LockedOrder {

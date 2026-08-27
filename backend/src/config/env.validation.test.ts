@@ -657,6 +657,52 @@ describe('backend env validation', () => {
       .toThrow(/BITRIX24_LIMIT_RETRY_MAX_ATTEMPTS/);
   });
 
+  it('keeps Bitrix24 reverse sync disabled and validates complete local-app config', () => {
+    expect(validateEnv({})).toMatchObject({
+      BACKEND_ENABLE_BITRIX24_REVERSE_SYNC: false,
+      BACKEND_BITRIX24_REVERSE_SYNC_RELAY_OWNER: 'none',
+      BITRIX24_APP_PORTAL_DOMAIN: 'mebelkz.bitrix24.kz',
+    });
+
+    const complete = {
+      BACKEND_ENABLE_BITRIX24_REVERSE_SYNC: 'true',
+      BACKEND_ENABLE_ORDERS: 'true',
+      BACKEND_ORDERS_READ_ONLY: 'false',
+      BACKEND_ENABLE_PAYMENTS: 'true',
+      DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
+      BACKEND_BITRIX24_REVERSE_SYNC_ACTOR_USER_ID: '42',
+      BACKEND_ORDER_INITIAL_STATUS_CODE: 'legacy_20',
+      BACKEND_ORDER_INITIAL_PRODUCTION_STATUS_CODE: 'new',
+      BITRIX24_APP_CLIENT_ID: 'local.erp',
+      BITRIX24_APP_CLIENT_SECRET: 'client-secret',
+      BITRIX24_APP_TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 4).toString('base64'),
+      BITRIX24_APP_PUBLIC_BASE_URL: 'https://backend.example.test',
+      BITRIX24_APP_PORTAL_DOMAIN: 'mebelkz.bitrix24.kz',
+    };
+    expect(validateEnv(complete)).toMatchObject({
+      BACKEND_ENABLE_BITRIX24_REVERSE_SYNC: true,
+      BACKEND_BITRIX24_REVERSE_SYNC_ACTOR_USER_ID: 42,
+      BITRIX24_APP_CLIENT_ID: 'local.erp',
+      BITRIX24_PORTAL_TIMEZONE: 'Asia/Almaty',
+    });
+    expect(() => validateEnv({
+      ...complete,
+      BITRIX24_APP_TOKEN_ENCRYPTION_KEY: Buffer.alloc(31, 4).toString('base64'),
+    })).toThrow(/BITRIX24_APP_TOKEN_ENCRYPTION_KEY/);
+    expect(() => validateEnv({
+      ...complete,
+      BITRIX24_APP_PORTAL_DOMAIN: 'other.bitrix24.kz',
+    })).toThrow(/BITRIX24_APP_PORTAL_DOMAIN/);
+
+    for (const invalid of [
+      { ...complete, BACKEND_ENABLE_ORDERS: 'false' },
+      { ...complete, BACKEND_ORDERS_READ_ONLY: 'true' },
+      { ...complete, BACKEND_ENABLE_PAYMENTS: 'false' },
+    ]) {
+      expect(() => validateEnv(invalid)).toThrow(/backend order read\/write and payments ownership/);
+    }
+  });
+
   it('pins WORKOS_API_BASE to workos.com over https (localhost http only for mocks)', () => {
     expect(validateEnv({})).toMatchObject({ WORKOS_API_BASE: 'https://api.workos.com' });
     expect(

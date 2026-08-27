@@ -9,6 +9,7 @@ import type {
 } from './save-order.dto';
 import type { OrderGroupSummaryDto } from './order-group-link.dto';
 import type { StatusAutomationOrderRefreshSummaryDto } from '../../status-automation/dto/status-automation.dto';
+import type { OrderKind, OrderSourceSystem } from '../domain/order-identity';
 
 export interface OrderDto {
   header: OrderHeaderDto;
@@ -110,9 +111,11 @@ export interface PaginationDto {
 export interface OrderListItemDto {
   orderId: number;
   orderName: string;
-  projectId: number;
-  projectCode: string;
-  fullNumber: string;
+  orderKind: OrderKind;
+  sourceSystem: OrderSourceSystem;
+  projectId: number | null;
+  projectCode: string | null;
+  fullNumber: string | null;
   clientId: number;
   clientName: string | null;
   orderDate: string;
@@ -169,6 +172,8 @@ export interface OrderListItemDto {
 
 export type OrderHeaderDto = NormalizedSaveOrderHeaderDto & {
   orderId: number;
+  orderKind: OrderKind;
+  sourceSystem: OrderSourceSystem;
   clientName: string | null;
   orderStatusName: string;
   paymentStatusId: number;
@@ -192,8 +197,9 @@ export type OrderHeaderDto = NormalizedSaveOrderHeaderDto & {
   deletedAt?: string | null;
   deletedByName?: string | null;
   // Projects: заполняются в create-ответе (авто-созданный или выбранный корень).
-  projectId?: number;
-  projectCode?: string;
+  projectId: number | null;
+  projectCode: string | null;
+  fullNumber: string | null;
 };
 
 export type OrderDetailDto = CalculatedOrderDetailDto & {

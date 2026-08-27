@@ -34,6 +34,10 @@ export const MillingTypeShow: React.FC<IResourceComponentsProps> = () => {
           <Title level={5}>Стоимость за м²</Title>
           <TextField value={record?.cost_per_sqm} />
         </Col>
+        <Col span={8}>
+          <Title level={5}>Минимальные размеры детали</Title>
+          <TextField value={`${record?.min_width_mm ?? '—'} × ${record?.min_height_mm ?? '—'} мм`} />
+        </Col>
       </Row>
 
       <Divider />

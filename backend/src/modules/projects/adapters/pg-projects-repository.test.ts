@@ -288,7 +288,7 @@ describe('PgProjectsRepository.moveOrder', () => {
     expect(sql).toContain('SELECT set_session_user($1)');
     expect(sql).toContain('INSERT INTO command_idempotency_keys');
     expect(sql).toContain('command_name, actor_user_id, entity_type, entity_id, request_hash, status');
-    expect(sql).toContain('FROM orders o WHERE o.order_id = $1 AND o.delete_flag = false FOR UPDATE');
+    expect(sql).toContain("FROM orders o WHERE o.order_id = $1 AND o.delete_flag = false AND o.order_kind = 'production_order' FOR UPDATE");
     expect(sql).toContain('UPDATE orders SET project_id = $2, version = version + 1');
     expect(sql).toContain('SELECT COUNT(*) AS c FROM orders WHERE project_id = $1');
     expect(sql).toContain('UPDATE projects SET delete_flag = true, version = version + 1');
@@ -892,7 +892,7 @@ describe('PgProjectsRepository.merge', () => {
     });
 
     expect(normalizedSql(database.queries)).toContain(
-      'SELECT order_id, order_name, client_id, project_id, created_by, manager_id FROM orders WHERE project_id = $1 AND delete_flag = false ORDER BY order_id FOR UPDATE',
+      "SELECT order_id, order_name, client_id, project_id, created_by, manager_id FROM orders WHERE project_id = $1 AND delete_flag = false AND order_kind = 'production_order' ORDER BY order_id FOR UPDATE",
     );
   });
 });
@@ -1009,7 +1009,7 @@ function createDatabase(
 
       if (
         normalized.startsWith(
-          'SELECT o.order_id, o.order_name, o.client_id, o.project_id, o.created_by, o.manager_id FROM orders o WHERE o.order_id = $1 AND o.delete_flag = false FOR UPDATE',
+          "SELECT o.order_id, o.order_name, o.client_id, o.project_id, o.created_by, o.manager_id FROM orders o WHERE o.order_id = $1 AND o.delete_flag = false AND o.order_kind = 'production_order' FOR UPDATE",
         )
       ) {
         return {
@@ -1027,7 +1027,7 @@ function createDatabase(
 
       if (
         normalized.startsWith(
-          'SELECT order_id, order_name, client_id, project_id, created_by, manager_id FROM orders WHERE project_id = $1 AND delete_flag = false ORDER BY order_id FOR UPDATE',
+          "SELECT order_id, order_name, client_id, project_id, created_by, manager_id FROM orders WHERE project_id = $1 AND delete_flag = false AND order_kind = 'production_order' ORDER BY order_id FOR UPDATE",
         )
       ) {
         const rows = options.sourceOrderRows ?? [

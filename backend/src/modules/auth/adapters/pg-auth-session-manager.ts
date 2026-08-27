@@ -43,6 +43,7 @@ interface RefreshSessionRow extends QueryResultRow {
   username: string;
   role_id: string | number;
   is_active: boolean;
+  is_service_account: boolean;
   /** Present only when supportsProviderSessions selects it (post-052). */
   auth_source?: string | null;
 }
@@ -100,14 +101,14 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
       // snapshot BEFORE bcrypt; re-prove both under a row lock in the same
       // transaction that issues the session, so an account tightened to
       // external-only (or deactivated) mid-login cannot get one more session.
-      const guard = await tx.query<{ is_active: boolean; login_policy?: string | null } & QueryResultRow>(
-        `SELECT is_active${this.options.enforceLoginPolicy ? ', login_policy' : ''}
+      const guard = await tx.query<{ is_active: boolean; is_service_account: boolean; login_policy?: string | null } & QueryResultRow>(
+        `SELECT is_active, is_service_account${this.options.enforceLoginPolicy ? ', login_policy' : ''}
          FROM users WHERE user_id = $1 FOR UPDATE`,
         [user.id],
       );
       const guardRow = guard.rows[0];
 
-      if (!guardRow?.is_active) {
+      if (!guardRow?.is_active || guardRow.is_service_account) {
         throw new UserInactiveError();
       }
 
@@ -257,7 +258,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         throw new ApiError(401, 'REFRESH_TOKEN_INVALID', 'Refresh session is not active');
       }
 
-      if (!current.is_active) {
+      if (!current.is_active || current.is_service_account) {
         await this.revokeTokenFamily(tx, current, 'user_inactive');
         throw new UserInactiveError();
       }
@@ -487,7 +488,8 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         s.expires_at AS session_expires_at,
         u.username,
         u.role_id,
-        u.is_active${this.options.supportsProviderSessions ? ',\n        s.auth_source' : ''}
+        u.is_active,
+        u.is_service_account${this.options.supportsProviderSessions ? ',\n        s.auth_source' : ''}
       FROM refresh_tokens rt
       JOIN auth_sessions s ON s.session_id = rt.session_id
       JOIN users u ON u.user_id = rt.user_id

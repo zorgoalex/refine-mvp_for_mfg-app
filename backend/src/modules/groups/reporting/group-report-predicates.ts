@@ -26,10 +26,16 @@ export function appendGroupReportPredicate(input: AppendGroupReportPredicateInpu
 
   const temporalPredicate = appendTemporalPredicate(input.params, alias, input.filter.temporal);
   const orderPredicate = `${alias}.order_id = ${input.orderIdExpression}`;
+  const productionPredicate = `EXISTS (
+        SELECT 1 FROM public.orders eligible_order
+        WHERE eligible_order.order_id = ${input.orderIdExpression}
+          AND eligible_order.order_kind = 'production_order'
+      )`;
 
   if (input.filter.mode === 'none') {
     return `
-      NOT EXISTS (
+      ${productionPredicate}
+      AND NOT EXISTS (
         SELECT 1
         FROM public.group_order_groups ${alias}
         WHERE ${orderPredicate}
@@ -44,7 +50,8 @@ export function appendGroupReportPredicate(input: AppendGroupReportPredicateInpu
 
   if (input.filter.mode === 'all') {
     return `
-      (
+      ${productionPredicate}
+      AND (
         SELECT COUNT(DISTINCT ${alias}.group_id)::int
         FROM public.group_order_groups ${alias}
         WHERE ${orderPredicate}
@@ -57,7 +64,8 @@ export function appendGroupReportPredicate(input: AppendGroupReportPredicateInpu
   const primaryPredicate = input.filter.mode === 'primary' ? `\n          AND ${alias}.is_primary` : '';
 
   return `
-    EXISTS (
+    ${productionPredicate}
+    AND EXISTS (
       SELECT 1
       FROM public.group_order_groups ${alias}
       WHERE ${orderPredicate}

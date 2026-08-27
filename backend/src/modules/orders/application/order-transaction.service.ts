@@ -237,6 +237,11 @@ export class OrderTransactionService {
       }
       this.requirePermission(command, 'orders.create');
       this.requirePermission(command, 'orders.view_financials');
+      if (command.dto.details.length === 0) {
+        throw new ApiError(422, 'ORDER_DETAILS_REQUIRED', 'Production order requires at least one detail', {
+          field: 'details',
+        });
+      }
       const normalized = prepareOrderSave(command.dto, { mode: 'create' });
       const appliedDefaults = await this.applyDefaultSchedule(
         normalized,

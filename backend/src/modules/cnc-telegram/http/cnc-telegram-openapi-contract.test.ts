@@ -71,6 +71,18 @@ describe('CNC Telegram OpenAPI contract', () => {
     expect(section).toContain('default: desc');
   });
 
+  it('documents explicit fenced Telegram worker session release', () => {
+    const start = contract.indexOf('  /api/v1/cnc-telegram/worker-session/release:');
+    const end = contract.indexOf('\n  /api/v1/', start + 1);
+    expect(start).toBeGreaterThanOrEqual(0);
+    const section = contract.slice(start, end < 0 ? undefined : end);
+    expect(section).toContain('operationId: releaseCncTelegramWorkerSession');
+    expect(section).toContain('x-permission: cut.manage');
+    for (const status of ['200', '401', '403', '409']) {
+      expect(section).toContain(`'${status}':`);
+    }
+  });
+
   it('documents the chronological all-message view for an explicit scan', () => {
     const start = contract.indexOf('  /api/v1/cnc-telegram/import-scans/{scanId}/messages:');
     const end = contract.indexOf('\n  /api/v1/', start + 1);

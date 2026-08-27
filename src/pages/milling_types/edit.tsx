@@ -31,6 +31,12 @@ export const MillingTypeEdit: React.FC<IResourceComponentsProps> = () => {
         <Form.Item label="Cost per sqm" name="cost_per_sqm">
           <InputNumber min={0} step={0.01} style={{ width: '100%' }} />
         </Form.Item>
+        <Form.Item label="Минимальная ширина детали, мм" name="min_width_mm">
+          <InputNumber min={1} precision={0} style={{ width: '100%' }} placeholder="Без ограничения" />
+        </Form.Item>
+        <Form.Item label="Минимальная высота детали, мм" name="min_height_mm">
+          <InputNumber min={1} precision={0} style={{ width: '100%' }} placeholder="Без ограничения" />
+        </Form.Item>
         <Form.Item label="Порядок сортировки" name="sort_order" rules={[{ required: true }]}>
           <InputNumber min={1} style={{ width: '100%' }} />
         </Form.Item>

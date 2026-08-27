@@ -93,6 +93,7 @@ import {
   restoreAntFormCheckpoint,
 } from '../../../../workspace/workspaceFormCheckpoint';
 import { useDeferredWorkspaceEditingKey } from '../../../../workspace/useDeferredWorkspaceEditingKey';
+import { millingTypeDimensionWarning } from '../../../../utils/millingTypeDimensions';
 
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
@@ -1150,7 +1151,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   // Reference selects (enabled only while editing)
   // Prefetch reference data (variant A) so context-menu labels appear instantly.
   const selectsEnabled = true;
-  const { selectProps: millingTypeSelectProps } = useSelect({
+  const { selectProps: millingTypeSelectProps, queryResult: millingTypeQueryResult } = useSelect<any>({
     resource: 'milling_types',
     optionLabel: 'milling_type_name',
     optionValue: 'milling_type_id',
@@ -1159,9 +1160,28 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     pagination: { mode: 'off' },
     queryOptions: { enabled: selectsEnabled && !useBackendReferences },
   });
+  const legacyMillingDimensionsById = useMemo(() => new Map(
+    (millingTypeQueryResult.data?.data ?? []).map((record: any) => [
+      Number(record.milling_type_id),
+      {
+        minWidthMm: record.min_width_mm == null ? null : Number(record.min_width_mm),
+        minHeightMm: record.min_height_mm == null ? null : Number(record.min_height_mm),
+      },
+    ]),
+  ), [millingTypeQueryResult.data?.data]);
+  const legacyMillingOptions = useMemo(
+    () => (millingTypeSelectProps.options ?? []).map((option: any) => ({
+      ...option,
+      ...(legacyMillingDimensionsById.get(Number(option.value)) ?? {
+        minWidthMm: null,
+        minHeightMm: null,
+      }),
+    })),
+    [legacyMillingDimensionsById, millingTypeSelectProps.options],
+  );
   const resolvedMillingTypeSelectProps = useBackendReferences
     ? createBackendSelectProps(orderFormData.references.millingTypes, orderFormData.isLoading)
-    : millingTypeSelectProps;
+    : { ...millingTypeSelectProps, options: legacyMillingOptions };
   const { selectProps: edgeTypeSelectProps } = useSelect({
     resource: 'edge_types',
     optionLabel: 'edge_type_name',
@@ -1207,6 +1227,18 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const resolvedProductionStatusSelectProps = useBackendReferences
     ? createBackendSelectProps(orderFormData.references.productionStatuses, orderFormData.isLoading)
     : productionStatusSelectProps;
+  const selectedMillingTypeDimensionWarning = useMemo(() => millingTypeDimensionWarning(
+    ((resolvedMillingTypeSelectProps.options ?? []) as any[]).find(
+      (option) => String(option.value) === String(watchedMillingTypeId),
+    ),
+    watchedWidth,
+    watchedHeight,
+  ), [
+    resolvedMillingTypeSelectProps.options,
+    watchedHeight,
+    watchedMillingTypeId,
+    watchedWidth,
+  ]);
 
   const editingDetailForOptions = useMemo(
     () => sortedDetails.find((detail) => orderDetailRowKey(detail) === editingKey),
@@ -1935,7 +1967,13 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const d = asDetail(row);
         if (!d) return null;
         return isEditingField(d, 'milling_type_id') ? (
-          <Form.Item name="milling_type_id" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
+          <Form.Item
+            name="milling_type_id"
+            style={{ margin: 0, padding: '0 4px' }}
+            rules={[{ required: true }]}
+            validateStatus={selectedMillingTypeDimensionWarning ? 'warning' : undefined}
+            help={selectedMillingTypeDimensionWarning}
+          >
             <Select
               {...resolvedMillingTypeSelectProps}
               options={orderedMillingOptions}

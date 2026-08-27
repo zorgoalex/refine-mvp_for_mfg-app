@@ -2613,6 +2613,7 @@ async function loadOrderForUpdate(tx: TransactionClient, orderId: number): Promi
       production_status_id, production_status_from_details_enabled, version, created_by, manager_id
     FROM orders
     WHERE order_id = $1 AND delete_flag = false
+      AND order_kind = 'production_order'
     FOR UPDATE
     `,
     [orderId],
@@ -2674,7 +2675,8 @@ async function loadOrderDetailForUpdate(
       o.manager_id
     FROM order_details od
     JOIN orders o ON o.order_id = od.order_id
-    WHERE od.detail_id = $1 AND COALESCE(od.delete_flag, false) = false AND o.delete_flag = false
+    WHERE od.detail_id = $1 AND COALESCE(od.delete_flag, false) = false
+      AND o.delete_flag = false AND o.order_kind = 'production_order'
     FOR UPDATE
     `,
     [detailId],
@@ -3094,7 +3096,9 @@ async function loadOrderProductionStatusId(
   orderId: number,
 ): Promise<number | null> {
   const result = await tx.query<{ production_status_id: string | number | null }>(
-    'SELECT production_status_id FROM orders WHERE order_id = $1 AND delete_flag = false',
+    `SELECT production_status_id FROM orders
+      WHERE order_id = $1 AND delete_flag = false
+        AND order_kind = 'production_order'`,
     [orderId],
   );
   const row = result.rows[0];

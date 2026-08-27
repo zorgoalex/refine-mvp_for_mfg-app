@@ -25,13 +25,14 @@ import type {
 import {
   addCutJobHeadingToSvg,
   buildBathProfileSheetSvg,
+  buildManualSvgSheetSvg,
   buildSheetSvg,
   composePieceLabelLines,
   createOrderFillResolver,
 } from '../../cut/render/sheet-svg';
 import {
   RENDER_PRESETS,
-  renderRawSvgPng,
+  renderSheetPng,
 } from '../../cut/render/sheet-png';
 import type {
   CncTelegramDeniedAuditPort,
@@ -426,6 +427,7 @@ interface ManualSvgDecodedUploadFile {
   sha256: string;
   raw: Buffer;
   generated: boolean;
+  renderAudit?: ManualSvgRenderAudit;
 }
 
 interface ManualSvgStoredFile {
@@ -437,6 +439,16 @@ interface ManualSvgStoredFile {
   sha256: string;
   generated: boolean;
   expiresAt: string;
+  renderAudit?: ManualSvgRenderAudit;
+}
+
+interface ManualSvgRenderAudit {
+  contractVersion: 'cut_sheet_render_v1';
+  profile: typeof CUT_RENDER_STYLE_MDF_BOARD_PREVIEW;
+  styleDigest: string;
+  styleSnapshot: CutRenderStyleRule;
+  settingVersion: number | null;
+  targetPx: number;
 }
 
 interface ManualSvgFilePersistenceResult {
@@ -543,6 +555,7 @@ export class PgCncTelegramRepository
           MIN(o.order_id)::bigint AS order_id
         FROM orders o
         WHERE o.delete_flag = false
+          AND o.order_kind = 'production_order'
           AND NULLIF(trim(o.order_name), '') IS NOT NULL
         GROUP BY lower(trim(o.order_name))
         HAVING COUNT(*) = 1
@@ -2076,10 +2089,10 @@ async function persistManualSvgUploadFiles(
     externalPacketKey: string;
   },
 ): Promise<ManualSvgFilePersistenceResult> {
-  const renderStyle = await loadManualSvgUploadRenderStyle(tx);
+  const render = await loadManualSvgUploadRenderStyle(tx);
   const decodedFiles = prepareManualSvgUploadFiles(
     input.command.dto,
-    renderStyle,
+    render,
     input.packet.svgCutJobDisplayNumber ?? input.packet.svgCutJobId ?? null,
   );
   if (decodedFiles.length === 0) {
@@ -2141,6 +2154,7 @@ async function persistManualSvgUploadFiles(
       sha256: file.sha256,
       generated: file.generated,
       expiresAt: toIso(expiresAt),
+      renderAudit: file.renderAudit,
     };
     stored.push(storedFile);
     await tx.query('DELETE FROM cnc_manual_svg_upload_file_orders WHERE file_id=$1::uuid', [fileId]);
@@ -2182,7 +2196,7 @@ async function lockActiveManualSvgTelegramSend(
 
 function prepareManualSvgUploadFiles(
   dto: CncTelegramManualSvgUploadDto,
-  renderStyle: CutRenderStyleRule,
+  render: { style: CutRenderStyleRule; audit: ManualSvgRenderAudit },
   cutJobDisplayNumber: string | number | null,
 ): ManualSvgDecodedUploadFile[] {
   const files = (dto.sourceFiles ?? []).map(decodeManualSvgUploadFile);
@@ -2197,7 +2211,8 @@ function prepareManualSvgUploadFiles(
   }
   const svg = files.find((file) => file.kind === 'svg');
   if (svg && !files.some((file) => file.kind === 'screenshot')) {
-    const screenshot = renderManualSvgScreenshot(dto, svg, renderStyle, cutJobDisplayNumber);
+    const screenshot = renderManualSvgScreenshot(dto, svg, render.style, cutJobDisplayNumber);
+    screenshot.renderAudit = render.audit;
     files.push(screenshot);
   }
   return files.sort((left, right) => manualSvgFileKindOrder(left.kind) - manualSvgFileKindOrder(right.kind));
@@ -2268,13 +2283,15 @@ export function renderManualSvgScreenshot(
   renderStyle: CutRenderStyleRule,
   cutJobDisplayNumber: string | number | null,
 ): ManualSvgDecodedUploadFile {
-  const png = renderRawSvgPng({
-    svg: addCutJobHeadingToSvg(svg.raw.toString('utf8'), cutJobDisplayNumber),
+  const sheetSvg = buildManualSvgSheetSvg(dto.cutLayout, renderStyle);
+  if (!sheetSvg || !dto.cutLayout.sheet) {
+    throw new ApiError(422, 'MANUAL_SVG_RENDER_INVALID', 'Не удалось построить единый рендер SVG-раскроя');
+  }
+  const png = renderSheetPng({
+    svg: addCutJobHeadingToSvg(sheetSvg, cutJobDisplayNumber),
     targetPx: RENDER_PRESETS.screen,
-    sheetWidthMm: dto.cutLayout.sheet?.widthMm ?? null,
-    sheetHeightMm: dto.cutLayout.sheet?.heightMm ?? null,
-    contrast: dto.generatedScreenshot?.contrast,
-    renderStyle,
+    sheetWidthMm: dto.cutLayout.sheet.widthMm,
+    sheetHeightMm: dto.cutLayout.sheet.heightMm,
   });
   const sha256 = createHash('sha256').update(png).digest('hex');
   return {
@@ -2288,16 +2305,33 @@ export function renderManualSvgScreenshot(
   };
 }
 
-async function loadManualSvgUploadRenderStyle(client: DatabaseClient): Promise<CutRenderStyleRule> {
+async function loadManualSvgUploadRenderStyle(
+  client: DatabaseClient,
+): Promise<{ style: CutRenderStyleRule; audit: ManualSvgRenderAudit }> {
+  let settingVersion: number | null = null;
+  let style: CutRenderStyleRule;
   try {
-    const result = await client.query<{ value: unknown | null }>(
-      `SELECT value FROM cut_settings WHERE key = $1 LIMIT 1`,
+    const result = await client.query<{ value: unknown | null; version: string | number | null }>(
+      `SELECT value, version FROM cut_settings WHERE key = $1 LIMIT 1`,
       [CUT_RENDER_STYLES_SETTING_KEY],
     );
-    return resolveCutRenderStyleFromSetting(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, result.rows[0]?.value ?? null);
+    style = resolveCutRenderStyleFromSetting(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, result.rows[0]?.value ?? null);
+    const rawVersion = Number(result.rows[0]?.version);
+    settingVersion = Number.isInteger(rawVersion) && rawVersion >= 0 ? rawVersion : null;
   } catch {
-    return resolveCutRenderStyle(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW);
+    style = resolveCutRenderStyle(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW);
   }
+  return {
+    style,
+    audit: {
+      contractVersion: 'cut_sheet_render_v1',
+      profile: CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
+      styleDigest: createHash('sha256').update(JSON.stringify(style)).digest('hex'),
+      styleSnapshot: style,
+      settingVersion,
+      targetPx: RENDER_PRESETS.screen,
+    },
+  };
 }
 
 async function linkManualSvgFileOrders(
@@ -2355,9 +2389,12 @@ async function writeManualSvgFileUploadedAudit(
       sizeBytes: input.file.sizeBytes,
       sha256: input.file.sha256,
       generated: input.file.generated,
-      generatedScreenshotContrast: input.file.kind === 'screenshot' && input.file.generated
-        ? input.command.dto.generatedScreenshot?.contrast ?? null
-        : null,
+      renderContractVersion: input.file.renderAudit?.contractVersion ?? null,
+      renderProfile: input.file.renderAudit?.profile ?? null,
+      renderStyleDigest: input.file.renderAudit?.styleDigest ?? null,
+      renderStyleSnapshot: input.file.renderAudit?.styleSnapshot ?? null,
+      renderSettingVersion: input.file.renderAudit?.settingVersion ?? null,
+      renderTargetPx: input.file.renderAudit?.targetPx ?? null,
       expiresAt: input.file.expiresAt,
       packetId: input.packet.packetId,
       externalPacketKey: input.externalPacketKey,
@@ -2396,6 +2433,7 @@ function manualSvgStoredFileAuditSnapshot(input: {
     sizeBytes: input.file.sizeBytes,
     sha256: input.file.sha256,
     generated: input.file.generated,
+    render: input.file.renderAudit ?? null,
     expiresAt: input.file.expiresAt,
     cutJobId: input.packet.svgCutJobId ?? null,
     cutJobDisplayNumber: input.packet.svgCutJobDisplayNumber ?? null,
@@ -3005,6 +3043,7 @@ function packetSelectSql(
         MIN(o.order_id)::bigint AS order_id
       FROM orders o
       WHERE o.delete_flag = false
+        AND o.order_kind = 'production_order'
         AND NULLIF(trim(o.order_name), '') IS NOT NULL
       GROUP BY lower(trim(o.order_name))
       HAVING COUNT(*) = 1
@@ -3588,6 +3627,7 @@ async function loadPacketOrderIds(tx: TransactionClient, packetId: string): Prom
         MIN(o.order_id)::bigint AS order_id
       FROM orders o
       WHERE o.delete_flag = false
+        AND o.order_kind = 'production_order'
         AND NULLIF(trim(o.order_name), '') IS NOT NULL
       GROUP BY lower(trim(o.order_name))
       HAVING COUNT(*) = 1
@@ -5554,6 +5594,7 @@ async function resolveItemMatches(
     WHERE lower(trim(o.order_name)) = ANY($1::text[])
       AND ($2::bigint[] IS NULL OR o.order_id = ANY($2::bigint[]))
       AND o.delete_flag = false
+      AND o.order_kind = 'production_order'
       AND od.delete_flag = false
     ORDER BY o.order_id, od.detail_number NULLS LAST, od.detail_id
     `,
@@ -7313,6 +7354,7 @@ async function loadBathCards(
         MIN(o.order_id)::bigint AS order_id
       FROM orders o
       WHERE o.delete_flag = false
+        AND o.order_kind = 'production_order'
         AND NULLIF(trim(o.order_name), '') IS NOT NULL
       GROUP BY lower(trim(o.order_name))
       HAVING COUNT(*) = 1
@@ -7524,6 +7566,7 @@ async function loadBathCards(
     LEFT JOIN orders o
       ON o.order_id = placement.order_id
      AND o.delete_flag = false
+     AND o.order_kind = 'production_order'
     LEFT JOIN order_details od
       ON od.detail_id = placement.order_detail_id
      AND od.delete_flag = false

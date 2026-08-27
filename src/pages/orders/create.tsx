@@ -8,12 +8,16 @@ import { OrderForm } from './components/OrderForm';
 
 export const OrderCreate: React.FC = () => {
   const navigate = useNavigate();
-
   const handleSaveSuccess = (orderId: number) => {
     navigate(`/orders/edit/${orderId}`, { replace: true });
   };
 
   // Без onCancel: в tabbed workspace OrderForm сам владеет закрытием
   // (closeTab + переход к соседу); onCancel форсит embedded/modal-ветку.
-  return <OrderForm mode="create" onSaveSuccess={handleSaveSuccess} />;
+  return (
+    <OrderForm
+      mode="create"
+      onSaveSuccess={handleSaveSuccess}
+    />
+  );
 };

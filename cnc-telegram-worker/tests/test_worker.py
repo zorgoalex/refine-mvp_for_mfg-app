@@ -460,18 +460,32 @@ class WorkerServeSafetyTest(unittest.IsolatedAsyncioTestCase):
             busy_response = httpx.Response(
                 409,
                 request=httpx.Request("POST", "http://backend/cnc-telegram/worker-session/claim"),
-                json={"code": "CNC_TELEGRAM_SESSION_LEASE_BUSY"},
+                json={
+                    "error": {
+                        "code": "CNC_TELEGRAM_SESSION_LEASE_BUSY",
+                        "details": {
+                            "workerInstanceId": "old-worker",
+                            "workerImageRevision": "old-image",
+                            "expiresAt": "2026-08-27T18:00:00Z",
+                        },
+                    },
+                },
             )
             worker.erp.claim_worker_session = AsyncMock(side_effect=[
                 ErpResponseError(busy_response, "worker session claim"),
                 WorkerSessionLease("lease-token", 4),
             ])
 
-            with patch("cnc_telegram_worker.worker.asyncio.sleep", new=AsyncMock()) as sleep:
+            with (
+                patch("cnc_telegram_worker.worker.asyncio.sleep", new=AsyncMock()) as sleep,
+                patch("builtins.print") as output,
+            ):
                 await worker._claim_session_lease()
 
             self.assertEqual(worker.erp.claim_worker_session.await_count, 2)
             self.assertEqual([call.args[0] for call in sleep.await_args_list], [1])
+            self.assertIn("ownerInstance=old-worker", output.call_args.args[0])
+            self.assertIn("ownerRevision=old-image", output.call_args.args[0])
 
     async def test_session_claim_does_not_retry_other_409_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -609,6 +623,7 @@ class WorkerServeSafetyTest(unittest.IsolatedAsyncioTestCase):
             with (
                 patch("cnc_telegram_worker.worker.TelegramClient", side_effect=ServeClient),
                 patch("cnc_telegram_worker.worker.assert_allowed_chat"),
+                patch("cnc_telegram_worker.worker.peer_id", return_value="-100"),
                 patch("cnc_telegram_worker.worker.backfill_sheet_previews"),
                 patch("cnc_telegram_worker.worker.flush_audit_spool", new=AsyncMock()),
                 patch("cnc_telegram_worker.worker.reconcile_pending_processing_attempts", new=reconcile),

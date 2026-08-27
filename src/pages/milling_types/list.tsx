@@ -39,6 +39,14 @@ export const MillingTypeList: React.FC<IResourceComponentsProps> = () => {
           title="Стоимость за м²"
         />
         <Table.Column
+          title="Минимальные размеры детали"
+          render={(_, record: any) => {
+            const width = record.min_width_mm ?? '—';
+            const height = record.min_height_mm ?? '—';
+            return `${width} × ${height} мм`;
+          }}
+        />
+        <Table.Column
           dataIndex="sort_order"
           title="Сортировка по умолчанию"
           sorter

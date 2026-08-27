@@ -5,6 +5,11 @@ export function createOrderDtoForQueryTest(orderId: number): OrderDto {
     header: {
       orderId,
       orderName: 'Test order',
+      orderKind: 'production_order',
+      sourceSystem: 'erp',
+      projectId: 501,
+      projectCode: 'МП-501',
+      fullNumber: 'МП-501-Test order',
       clientId: 1001,
       clientName: 'Test client',
       orderDate: '2026-04-30',

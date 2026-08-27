@@ -503,6 +503,7 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
       SELECT manager_id, created_by
       FROM orders
       WHERE order_id = $1 AND delete_flag = false
+        AND order_kind = 'production_order'
       `,
       [command.orderId],
     );
@@ -528,6 +529,7 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
       SELECT order_id AS id
       FROM orders
       WHERE delete_flag = false
+        AND order_kind = 'production_order'
         AND created_at::date >= $1::date
         AND created_at::date <= $2::date
       ORDER BY created_at ASC, order_id ASC
@@ -603,6 +605,7 @@ async function buildSnapshot(tx: TransactionClient, orderId: number): Promise<Or
     FROM orders o
     INNER JOIN clients c ON c.client_id = o.client_id
     WHERE o.order_id = $1 AND o.delete_flag = false
+      AND o.order_kind = 'production_order'
     `,
     [orderId],
     () => new OrderNotFoundError(orderId),

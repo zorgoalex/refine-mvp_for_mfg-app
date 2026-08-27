@@ -53,6 +53,32 @@ export class CncTelegramWorkerSessionController {
     );
   }
 
+  @ApiOperation({ operationId: 'releaseCncTelegramWorkerSession', summary: 'Release the current Telegram worker session lease' })
+  @ApiHeader({ name: 'X-CNC-Telegram-Session-Token', required: true })
+  @ApiHeader({ name: 'X-CNC-Telegram-Session-Generation', required: true })
+  @ApiHeader({ name: 'X-CNC-Telegram-Chat-Id', required: false })
+  @ApiHeader({ name: 'X-CNC-Telegram-Worker-Instance', required: true })
+  @ApiResponse({ status: 200, description: 'Session lease released' })
+  @ApiResponse({ status: 409, description: 'Session lease is stale or expired' })
+  @Post('release')
+  @HttpCode(200)
+  async release(
+    @Req() request: RequestWithCurrentUser,
+    @Headers('x-cnc-telegram-session-token') token: string | string[] | undefined,
+    @Headers('x-cnc-telegram-session-generation') generation: string | string[] | undefined,
+    @Headers('x-cnc-telegram-chat-id') sourceChatId: string | string[] | undefined,
+    @Headers('x-cnc-telegram-worker-instance') workerInstanceId: string | string[] | undefined,
+    @Body() body: unknown,
+  ): Promise<{ released: true }> {
+    this.assertEnabled();
+    await this.session.release(
+      this.requireCurrentUser(request),
+      parseWorkerSessionHeartbeat(body),
+      parseWorkerSessionLeaseHeaders(token, generation, sourceChatId, workerInstanceId),
+    );
+    return { released: true };
+  }
+
   private assertEnabled(): void {
     if (!this.runtimeConfig.getFeatureFlags().cncTelegramEnabled) {
       throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'CNC Telegram API is disabled', {

@@ -87,6 +87,9 @@ describeIntegration('Bitrix24 migration runner end-state guards', () => {
         order_id BIGINT PRIMARY KEY,
         client_id BIGINT NOT NULL REFERENCES clients(client_id)
       );
+      CREATE TABLE payment_types (
+        type_paid_id BIGINT PRIMARY KEY
+      );
       CREATE TABLE payments (
         payment_id BIGINT PRIMARY KEY,
         order_id BIGINT NOT NULL REFERENCES orders(order_id)
@@ -187,6 +190,58 @@ describeIntegration('Bitrix24 migration runner end-state guards', () => {
     const repaired087 = runApply(dir087);
     expect(repaired087.status, repaired087.output).toBe(0);
 
+    const dir144 = migrationOnlyDirectory('144_bitrix24_reverse_sync.sql');
+    temporaryDirectories.push(dir144);
+    await pool.query(`
+      CREATE TABLE bitrix24_reconcile_cursor (
+        scope TEXT PRIMARY KEY
+      );
+    `);
+    const failed144 = runApply(dir144);
+    expect(failed144.status).not.toBe(0);
+    expect(failed144.output).toContain('end-state probe is still PENDING');
+    expect(failed144.output).toContain('was NOT recorded in schema_migrations');
+    const ledger144 = await pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+         FROM schema_migrations
+        WHERE filename = '144_bitrix24_reverse_sync.sql'`,
+    );
+    expect(ledger144.rows[0].count).toBe('0');
+
+    await pool.query('DROP TABLE bitrix24_reconcile_cursor');
+    const repaired144 = runApply(dir144);
+    expect(repaired144.status, repaired144.output).toBe(0);
+
+    await pool.query(`
+      INSERT INTO clients (client_id, client_name)
+      VALUES (1, 'forward');
+    `);
+    const forwardOutbox = await pool.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM crm_sync_outbox',
+    );
+    expect(forwardOutbox.rows[0].count).toBe('1');
+    await pool.query('TRUNCATE crm_sync_outbox');
+
+    await pool.query('BEGIN');
+    await pool.query(
+      `SELECT set_config('app.crm_sync_origin', 'bitrix24', true)`,
+    );
+    await pool.query(`
+      INSERT INTO clients (client_id, client_name)
+      VALUES (2, 'reverse');
+      INSERT INTO client_phones (phone_id, client_id, phone_number)
+      VALUES (1, 2, '77000000000');
+      INSERT INTO orders (order_id, client_id)
+      VALUES (1, 2);
+      INSERT INTO payments (payment_id, order_id)
+      VALUES (1, 1);
+    `);
+    await pool.query('COMMIT');
+    const reverseOutbox = await pool.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM crm_sync_outbox',
+    );
+    expect(reverseOutbox.rows[0].count).toBe('0');
+
     const finalLedger = await pool.query<{ filename: string }>(
       'SELECT filename FROM schema_migrations ORDER BY filename',
     );
@@ -194,6 +249,7 @@ describeIntegration('Bitrix24 migration runner end-state guards', () => {
       '073_bitrix24_crm_sync.sql',
       '074_bitrix24_payment_delivery_guards.sql',
       '087_bitrix24_backfill_checkpoint.sql',
+      '144_bitrix24_reverse_sync.sql',
     ]);
   }, 120_000);
 });

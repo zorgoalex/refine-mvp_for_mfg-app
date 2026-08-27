@@ -13,6 +13,8 @@ export interface MillingTypeLookupDto extends IdNameLookupDto {
   hdfEnabled?: boolean;
   hdfEdgeMm?: number | null;
   version?: number;
+  minWidthMm: number | null;
+  minHeightMm: number | null;
 }
 
 // SP3: sheet-material picker option. Carries dimensions for the FE dimension

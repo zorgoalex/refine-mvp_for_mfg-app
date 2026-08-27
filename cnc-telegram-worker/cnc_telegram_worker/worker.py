@@ -198,9 +198,11 @@ class CncTelegramWorker:
             except ErpResponseError as exc:
                 if not self._is_busy_session_claim_error(exc) or attempt + 1 >= max_attempts:
                     raise
+                owner_context = self._busy_session_claim_owner_context(exc)
                 print(
                     "CNC Telegram session lease is busy; "
-                    f"retry {attempt + 2}/{max_attempts} in {retry_delay_seconds:g}s",
+                    f"retry {attempt + 2}/{max_attempts} in {retry_delay_seconds:g}s"
+                    f"{owner_context}",
                     flush=True,
                 )
                 await asyncio.sleep(retry_delay_seconds)
@@ -229,6 +231,26 @@ class CncTelegramWorker:
         if isinstance(nested_error, dict):
             candidates.extend([nested_error.get("code"), nested_error.get("errorCode")])
         return any(candidate == "CNC_TELEGRAM_SESSION_LEASE_BUSY" for candidate in candidates)
+
+    @staticmethod
+    def _busy_session_claim_owner_context(exc: ErpResponseError) -> str:
+        try:
+            payload = exc.response.json()
+        except (ValueError, json.JSONDecodeError):
+            return ""
+        if not isinstance(payload, dict):
+            return ""
+        nested_error = payload.get("error")
+        details = nested_error.get("details") if isinstance(nested_error, dict) else payload.get("details")
+        if not isinstance(details, dict):
+            return ""
+        fields = (
+            ("ownerInstance", details.get("workerInstanceId")),
+            ("ownerRevision", details.get("workerImageRevision")),
+            ("ownerExpiresAt", details.get("expiresAt")),
+        )
+        values = [f"{name}={str(value)[:160]}" for name, value in fields if isinstance(value, str) and value]
+        return f" {' '.join(values)}" if values else ""
 
     async def run_once(
         self,
@@ -510,7 +532,6 @@ class CncTelegramWorker:
                     print(f"audit delivery deferred: {exc}", flush=True)
             finally:
                 audit_spool.close()
-                self.erp.set_session_lease(None)
             cleanup_temp_dir(
                 self.config.temp_dir,
                 min(self.config.temp_ttl_hours, self.config.attachment_ttl_hours),

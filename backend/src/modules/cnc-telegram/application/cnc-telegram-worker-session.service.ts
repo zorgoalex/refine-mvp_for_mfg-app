@@ -36,6 +36,17 @@ export class CncTelegramWorkerSessionService {
     return this.repository.heartbeat({ ...dto, ...context, sourceChatId });
   }
 
+  async release(
+    currentUser: CurrentUser,
+    dto: CncTelegramWorkerSessionHeartbeatDto,
+    context: CncTelegramWorkerSessionLeaseContext,
+  ): Promise<void> {
+    const sourceChatId = this.resolveChatId(context.sourceChatId);
+    this.assertWorker(currentUser, sourceChatId);
+    if (context.workerInstanceId !== dto.workerInstanceId) throw staleLeaseError();
+    await this.repository.release({ ...dto, ...context, sourceChatId });
+  }
+
   async assertCurrent(currentUser: CurrentUser, context: CncTelegramWorkerSessionLeaseContext): Promise<void> {
     const sourceChatId = this.resolveChatId(context.sourceChatId);
     this.assertWorker(currentUser, sourceChatId);

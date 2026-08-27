@@ -50,13 +50,27 @@ describe('CncTelegramWorkerSessionService', () => {
 
     expect(repository.assertCurrent).toHaveBeenCalledWith({ ...context, sourceChatId: '-100123' });
   });
+
+  it('releases only when body and fenced worker identity match', async () => {
+    const repository = repositoryMock();
+    const service = new CncTelegramWorkerSessionService(repository, config());
+    const currentUser = user('cnc-worker', ['cut.manage']);
+
+    await expect(service.release(currentUser, { workerInstanceId: '650e8400-e29b-41d4-a716-446655440000' }, context))
+      .rejects.toMatchObject({ code: 'CNC_TELEGRAM_SESSION_LEASE_STALE' });
+    await service.release(currentUser, { workerInstanceId: context.workerInstanceId }, context);
+
+    expect(repository.release).toHaveBeenCalledWith({ ...context, sourceChatId: '-100123' });
+  });
 });
 
 function repositoryMock(): CncTelegramWorkerSessionLeaseRepositoryPort {
   return {
     claim: vi.fn().mockResolvedValue({}),
     heartbeat: vi.fn().mockResolvedValue({}),
+    release: vi.fn().mockResolvedValue(undefined),
     assertCurrent: vi.fn().mockResolvedValue(undefined),
+    assertCurrentInTransaction: vi.fn().mockResolvedValue(undefined),
   };
 }
 
