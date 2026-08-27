@@ -81,7 +81,9 @@ describe('PgCncTelegramRepository', () => {
     expect(repositorySource).toContain('writeManualSvgFileUploadedAudit');
     expect(repositorySource).toContain("entityType: 'cnc_manual_svg_upload_file'");
     expect(repositorySource).toContain('telegramSendEnabled');
-    expect(repositorySource).toContain('generatedScreenshotContrast');
+    expect(repositorySource).toContain('renderStyleDigest');
+    expect(repositorySource).toContain('renderStyleSnapshot');
+    expect(repositorySource).toContain('renderSettingVersion');
     expect(repositorySource).toContain('enqueueManualSvgTelegramSendRequest');
     expect(repositorySource).toContain('assertManualSvgTelegramCutJobReady');
     expect(repositorySource).toContain('manualSvgCutJobDisplayNumber(packet) !== null');
@@ -97,10 +99,10 @@ describe('PgCncTelegramRepository', () => {
     expect(repositorySource).toContain('message_text, destination_chat_id');
   });
 
-  it('renders the Telegram screenshot from the exact uploaded SVG geometry', () => {
-    expect(repositorySource).toContain("svg: addCutJobHeadingToSvg(svg.raw.toString('utf8'), cutJobDisplayNumber)");
-    expect(repositorySource).not.toContain('buildManualSvgScreenshotSvg');
-    expect(repositorySource).not.toContain('manualSvgVisualLabelLines');
+  it('renders the Telegram screenshot through the canonical cut-sheet renderer', () => {
+    expect(repositorySource).toContain('const sheetSvg = buildManualSvgSheetSvg(dto.cutLayout, renderStyle)');
+    expect(repositorySource).toContain('renderSheetPng({');
+    expect(repositorySource).not.toContain('renderRawSvgPng({');
 
     const source = [
       '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">',
@@ -111,8 +113,24 @@ describe('PgCncTelegramRepository', () => {
     ].join('');
     const screenshot = renderManualSvgScreenshot(
       {
-        cutLayout: { sheet: { widthMm: 100, heightMm: 100 } },
-        generatedScreenshot: { contrast: 1 },
+        cutLayout: {
+          sheet: { widthMm: 100, heightMm: 100 },
+          items: [{
+            orderName: '2723',
+            detailNumber: 1,
+            widthMm: 80,
+            heightMm: 80,
+            xMm: 10,
+            yMm: 10,
+            placedWidthMm: 80,
+            placedHeightMm: 80,
+            rotated: false,
+            sourceSvg: {
+              viewBox: { xMm: 0, yMm: 0, widthMm: 80, heightMm: 80 },
+              body: '<path d="M40 10 L40 70" fill="none" stroke="#0000ff" stroke-width="2"/>',
+            },
+          }],
+        },
       } as never,
       {
         fileName: 'milling.svg',
@@ -123,7 +141,7 @@ describe('PgCncTelegramRepository', () => {
     );
     const image = PNG.sync.read(screenshot.raw);
 
-    expect(countBluePixels(image)).toBeGreaterThan(100);
+    expect(countNonWhitePixels(image)).toBeGreaterThan(100);
     expect(screenshot.generated).toBe(true);
     expect(screenshot.fileName).toBe('milling.png');
     expect(screenshot.sizeBytes).toBe(screenshot.raw.length);
@@ -3704,13 +3722,13 @@ describe('PgCncTelegramRepository', () => {
   });
 });
 
-function countBluePixels(image: PNG): number {
+function countNonWhitePixels(image: PNG): number {
   let count = 0;
   for (let index = 0; index < image.data.length; index += 4) {
     const red = image.data[index] ?? 255;
     const green = image.data[index + 1] ?? 255;
-    const blue = image.data[index + 2] ?? 0;
-    if (red < 80 && green < 80 && blue > 160) count += 1;
+    const blue = image.data[index + 2] ?? 255;
+    if (red < 245 || green < 245 || blue < 245) count += 1;
   }
   return count;
 }

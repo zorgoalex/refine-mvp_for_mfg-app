@@ -48,12 +48,10 @@ describe('manual SVG cut upload UI guard', () => {
     expect(modal).toContain('createPortal(previewNode, document.body)');
     expect(modal).toContain('zIndex: 2000');
     expect(modal).toContain('Превью SVG');
-    expect(modal).toContain('Контраст скрина');
-    expect(modal).toContain('MANUAL_SVG_SCREENSHOT_CONTRAST_DEFAULT');
-    expect(modal).toContain('manualSvgScreenshotPreviewFilter');
-    expect(modal).toContain('manualSvgGeneratedScreenshotContrastKey');
-    expect(modal).toContain('generatedScreenshot');
-    expect(modal).toContain('<Slider');
+    expect(modal).not.toContain('Контраст скрина');
+    expect(modal).not.toContain('manualSvgScreenshotPreviewFilter');
+    expect(modal).not.toContain('generatedScreenshot');
+    expect(modal).not.toContain('<Slider');
     expect(modal).toContain('Превью SVG-раскроя');
     expect(modal).toContain('Крупное превью SVG-раскроя');
     expect(modal).toContain('Открыть крупное превью SVG');
@@ -67,7 +65,7 @@ describe('manual SVG cut upload UI guard', () => {
     expect(modal).toContain('printSvgPreview');
     expect(modal).toContain('Распечатать SVG');
     expect(modal).toContain('URL.createObjectURL');
-    expect(modal).toContain('createRawSvgUploadPreviewBlob');
+    expect(modal).toContain('createStyledSvgUploadPreviewBlob');
     expect(modal).toContain('URL.revokeObjectURL');
     expect(modal).toContain("objectFit: 'contain'");
     expect(modal).toContain("flex: '0 0 320px'");
@@ -111,11 +109,12 @@ describe('manual SVG cut upload UI guard', () => {
     expect(modal).toContain('manual-svg-upload-minimized');
   });
 
-  it('keeps the exact uploaded SVG in the preview so milling geometry is not lost', () => {
+  it('uses current backend render.styles and the canonical styled sheet preview', () => {
     expect(modal).toContain('replaceSvgPreview(createSvgPreview(file))');
-    expect(modal).not.toContain('createStyledSvgPreview');
-    expect(modal).not.toContain('createStyledSvgUploadPreviewBlob');
-    expect(modal).not.toContain('cutConfigApi.get');
+    expect(modal).toContain('createStyledSvgPreview');
+    expect(modal).toContain('createStyledSvgUploadPreviewBlob');
+    expect(modal).toContain('cutConfigApi.get');
+    expect(modal).toContain('CUT_RENDER_STYLES_SETTING_KEY');
   });
 
   it('wires upload into cut screen and global app actions, not orders screens', () => {

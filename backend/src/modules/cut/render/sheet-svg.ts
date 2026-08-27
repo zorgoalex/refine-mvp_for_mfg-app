@@ -222,6 +222,96 @@ export interface BuildSheetSvgInput {
   renderStyle?: CutRenderStyleRef;
 }
 
+export interface ManualSvgSheetLayout {
+  sheet: { widthMm: number; heightMm: number } | null;
+  items: Array<{
+    orderName: string;
+    detailNumber: number;
+    widthMm: number;
+    heightMm: number;
+    xMm: number;
+    yMm: number;
+    placedWidthMm: number;
+    placedHeightMm: number;
+    rotated: boolean;
+    sourceSvg?: {
+      viewBox: { xMm: number; yMm: number; widthMm: number; heightMm: number };
+      body: string;
+    } | null;
+  }>;
+}
+
+/**
+ * Canonical manual-SVG adapter. Upload preview and Telegram rasterization both
+ * pass through this adapter and then through buildSheetSvg, the same renderer
+ * used by cut-job sheets and MDF board cards.
+ */
+export function buildManualSvgSheetSvg(
+  layout: ManualSvgSheetLayout,
+  renderStyle: CutRenderStyleRef,
+): string | null {
+  if (!layout.sheet || layout.items.length === 0) return null;
+
+  const itemById = new Map<string, ManualSvgSheetLayout['items'][number]>();
+  const orderIndexByName = new Map<string, number>();
+  const pieces: SheetPlacementsJson['pieces'] = layout.items.map((item, index) => {
+    const itemId = `manual-svg-${index + 1}`;
+    itemById.set(itemId, item);
+    const orderName = item.orderName.trim();
+    if (!orderIndexByName.has(orderName)) orderIndexByName.set(orderName, orderIndexByName.size);
+    return {
+      item_id: itemId,
+      instance: 1,
+      x_mm: item.xMm,
+      y_mm: item.yMm,
+      width_mm: item.placedWidthMm,
+      height_mm: item.placedHeightMm,
+      rotated: item.rotated,
+      source_svg: item.sourceSvg?.body.trim()
+        ? {
+            viewBox: {
+              x_mm: item.sourceSvg.viewBox.xMm,
+              y_mm: item.sourceSvg.viewBox.yMm,
+              width_mm: item.sourceSvg.viewBox.widthMm,
+              height_mm: item.sourceSvg.viewBox.heightMm,
+            },
+            body: item.sourceSvg.body,
+          }
+        : undefined,
+    };
+  });
+  const sheet: SheetPlacementsJson = {
+    trim_mm: { left: 0, right: 0, top: 0, bottom: 0 },
+    sheet_width_mm: layout.sheet.widthMm,
+    sheet_height_mm: layout.sheet.heightMm,
+    pieces,
+  };
+  const fillForOrder = createOrderFillResolver([...orderIndexByName.values()], renderStyle);
+
+  return buildSheetSvg({
+    sheet,
+    renderStyle,
+    labelFor: (piece) => {
+      const item = itemById.get(piece.item_id);
+      return composePieceLabelLines({
+        orderId: null,
+        orderName: item?.orderName ?? null,
+        detailId: null,
+        detailNumber: item?.detailNumber ?? null,
+        widthMm: item?.widthMm ?? null,
+        heightMm: item?.heightMm ?? null,
+        itemId: piece.item_id,
+        instance: piece.instance,
+        qty: 1,
+      });
+    },
+    fillFor: (piece) => {
+      const orderName = itemById.get(piece.item_id)?.orderName.trim() ?? '';
+      return fillForOrder(orderIndexByName.get(orderName) ?? null);
+    },
+  });
+}
+
 function escapeXml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
