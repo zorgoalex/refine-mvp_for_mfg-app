@@ -770,11 +770,13 @@ const materialLookupSwaggerSchema = {
 
 const millingTypeLookupSwaggerSchema = {
   type: 'object',
-  required: ['id', 'name', 'costPerSqm', 'sortOrder'],
+  required: ['id', 'name', 'costPerSqm', 'minWidthMm', 'minHeightMm', 'sortOrder'],
   properties: {
     id: { type: 'integer' },
     name: { type: 'string' },
     costPerSqm: nullableNumberSwaggerSchema,
+    minWidthMm: nullableNumberSwaggerSchema,
+    minHeightMm: nullableNumberSwaggerSchema,
     sortOrder: { type: 'integer' },
   },
 } as const;

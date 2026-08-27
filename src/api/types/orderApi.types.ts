@@ -317,6 +317,8 @@ export interface MillingTypeLookup extends IdNameLookup {
   hdfEnabled?: boolean;
   hdfEdgeMm?: number | null;
   version?: number;
+  minWidthMm: number | null;
+  minHeightMm: number | null;
 }
 
 // SP3: present only when the caller has sheet_materials.view (service-masked).

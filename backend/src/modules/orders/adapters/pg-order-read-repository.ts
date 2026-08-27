@@ -342,6 +342,8 @@ interface MillingTypeLookupRow extends IdNameLookupRow {
   hdf_enabled: boolean | null;
   hdf_edge_mm: string | number | null;
   version: string | number | null;
+  min_width_mm: string | number | null;
+  min_height_mm: string | number | null;
 }
 
 interface SheetMaterialTypeLookupRow extends IdNameLookupRow {
@@ -1168,7 +1170,8 @@ export class PgOrderReadRepository
       ),
       this.database.query<MillingTypeLookupRow>(
         `
-        SELECT milling_type_id AS id, milling_type_name AS name, cost_per_sqm, sort_order,
+        SELECT milling_type_id AS id, milling_type_name AS name, cost_per_sqm,
+               min_width_mm, min_height_mm, sort_order,
                hdf_enabled, hdf_edge_mm, version
         FROM milling_types
         WHERE is_active = true
@@ -1443,6 +1446,8 @@ function mapMillingTypeLookup(row: MillingTypeLookupRow) {
     hdfEnabled: row.hdf_enabled === true,
     hdfEdgeMm: toNullableNumber(row.hdf_edge_mm),
     version: toNumber(row.version ?? 0),
+    minWidthMm: toNullableNumber(row.min_width_mm),
+    minHeightMm: toNullableNumber(row.min_height_mm),
     sortOrder: toNumber(row.sort_order),
   };
 }

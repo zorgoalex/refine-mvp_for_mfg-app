@@ -9,6 +9,11 @@ export interface ReferenceOption {
   sortOrder: number;
 }
 
+export interface MillingTypeOption extends ReferenceOption {
+  minWidthMm: number | null;
+  minHeightMm: number | null;
+}
+
 export interface SheetMaterialTypeOption extends ReferenceOption {
   widthMm: number | null;
   heightMm: number | null;
@@ -19,7 +24,7 @@ export interface SheetMaterialTypeOption extends ReferenceOption {
 export interface OrderFormDataReferences {
   clients: ReferenceOption[];
   materials: ReferenceOption[];
-  millingTypes: ReferenceOption[];
+  millingTypes: MillingTypeOption[];
   edgeTypes: ReferenceOption[];
   films: ReferenceOption[];
   orderStatuses: ReferenceOption[];
@@ -50,7 +55,13 @@ export function mapOrderFormDataToReferences(
 
   const clients = toOptions(data.clients, (item) => item.name);
   const materials = toOptions(data.materials, (item) => item.name);
-  const millingTypes = toOptions(data.millingTypes, (item) => item.name);
+  const millingTypes: MillingTypeOption[] = data.millingTypes.map((item) => ({
+    label: item.name,
+    value: item.id,
+    minWidthMm: item.minWidthMm,
+    minHeightMm: item.minHeightMm,
+    sortOrder: item.sortOrder,
+  }));
   const edgeTypes = toOptions(data.edgeTypes, (item) => item.name);
   const films = toOptions(data.films, (item) => item.name);
   const orderStatuses = toOptions(data.orderStatuses, (item) => item.name);

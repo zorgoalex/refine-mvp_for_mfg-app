@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { OrderFormDataResponse } from '../api/types/orderApi.types';
-import { mapOrderFormDataToReferences } from './useOrderFormData';
+import { mapOrderFormDataToReferences } from '../query/orderFormDataReferences';
 
 describe('useOrderFormData mapping', () => {
   it('maps backend form-data response to select options, maps, and defaults', () => {
@@ -13,6 +13,7 @@ describe('useOrderFormData mapping', () => {
     expect(references.defaultProductionStatus).toBe(4);
     expect(references.materialNameById.get(5)).toBe('MDF');
     expect(references.millingTypeNameById.get(6)).toBe('Modern');
+    expect(references.millingTypes[0]).toMatchObject({ minWidthMm: 300, minHeightMm: 500 });
     expect(references.paymentTypeNameById.get(10)).toBe('Cash');
   });
 
@@ -58,7 +59,7 @@ function createFormDataResponse(): OrderFormDataResponse {
     paymentStatuses: [{ id: 3, name: 'Unpaid', code: 'unpaid', color: null }],
     productionStatuses: [{ id: 4, name: 'Cut', code: 'cut', color: null }],
     materials: [{ id: 5, name: 'MDF', unitId: null }],
-    millingTypes: [{ id: 6, name: 'Modern', costPerSqm: 120 }],
+    millingTypes: [{ id: 6, name: 'Modern', costPerSqm: 120, minWidthMm: 300, minHeightMm: 500 }],
     edgeTypes: [{ id: 7, name: 'PVC' }],
     films: [{ id: 8, name: 'White' }],
     workshops: [{ id: 9, name: 'Main' }],

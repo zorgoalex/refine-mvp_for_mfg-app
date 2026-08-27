@@ -30,6 +30,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-08-27",
+    title: "Типы фрезеровки: минимальные размеры детали",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "Для типа фрезеровки можно необязательно задать минимальную ширину и высоту детали; таблица заказа предупреждает о возможной проблеме, но не блокирует ввод и сохранение детали.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-24",
     title: "Календарь: актуальные этапы производства",
     services: ["ERP"],

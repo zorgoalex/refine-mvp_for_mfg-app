@@ -477,6 +477,8 @@ describe('PgOrderReadRepository', () => {
         hdfEnabled: false,
         hdfEdgeMm: null,
         version: 0,
+        minWidthMm: 300,
+        minHeightMm: 500,
         sortOrder: 10,
       }],
       edgeTypes: [{ id: 30, name: 'PVC 2mm', sortOrder: 10 }],
@@ -916,7 +918,16 @@ function createDatabase() {
       }
 
       if (text.includes('FROM milling_types')) {
-        return { rows: [{ id: '20', name: 'Modern', cost_per_sqm: '120.50', sort_order: 10 }] };
+        return {
+          rows: [{
+            id: '20',
+            name: 'Modern',
+            cost_per_sqm: '120.50',
+            min_width_mm: '300',
+            min_height_mm: '500',
+            sort_order: 10,
+          }],
+        };
       }
 
       if (text.includes('FROM edge_types')) {

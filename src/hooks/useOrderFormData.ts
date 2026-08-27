@@ -30,6 +30,7 @@ export {
 export {
   createBackendSelectProps,
   mapOrderFormDataToReferences,
+  type MillingTypeOption,
   type OrderFormDataReferences,
   type ReferenceOption,
   type SheetMaterialTypeOption,
