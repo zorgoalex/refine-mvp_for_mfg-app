@@ -1511,6 +1511,11 @@ probe_file() {
                      "$(q_col milling_type_extra_resources version)" \
                      "$(q_idx idx_milling_type_extra_resources_milling)" \
                      "$(q_idx idx_milling_type_extra_resources_hdf_auto)" ;;
+    127_milling_type_min_dimensions*) probe_all \
+                     "$(q_col milling_types min_width_mm)" \
+                     "$(q_col milling_types min_height_mm)" \
+                     "$(q_con_on milling_types chk_milling_types_min_width_mm)" \
+                     "$(q_con_on milling_types chk_milling_types_min_height_mm)" ;;
     128_order_detail_hdf_parameter_override*) probe_all \
                      "$(q_col order_details hdf_parameter_override_mm)" \
                      "$(q_con_on order_details chk_order_details_hdf_parameter_override_mm)" ;;
