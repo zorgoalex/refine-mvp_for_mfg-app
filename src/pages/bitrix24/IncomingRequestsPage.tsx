@@ -12,7 +12,6 @@ import {
   Space,
   Spin,
   Switch,
-  Table,
   Tag,
   Typography,
   notification,
@@ -29,6 +28,7 @@ import {
 import { useSelect } from '@refinedev/antd';
 import type { Dayjs } from 'dayjs';
 import { useNavigate } from 'react-router-dom';
+import { Table } from '../../ui/tooltipDelay';
 import { authSession } from '../../api/authSession';
 import {
   bitrix24Api,
