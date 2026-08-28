@@ -255,6 +255,20 @@ describe('CncTelegramWorkerAuditService', () => {
     expect(listTechnical).toHaveBeenCalledWith(query);
   });
 
+  it('exposes only heartbeat health to top-management capabilities', async () => {
+    const health = { latestLineAt: null, latestHeartbeatAt: '2026-08-28T10:00:00.000Z', droppedLines: 0 };
+    const technicalHealth = vi.fn().mockResolvedValue(health);
+    const service = createService(deniedAuditPort(), { technicalHealth });
+
+    expect(() => service.technicalHealth(user('manager', ['cut.manage'])))
+      .toThrow(expect.objectContaining({ code: 'PERMISSION_DENIED', statusCode: 403 }));
+    expect(technicalHealth).not.toHaveBeenCalled();
+
+    await expect(service.technicalHealth(user('top-manager', ['cut.manage', 'org.view'])))
+      .resolves.toEqual(health);
+    expect(technicalHealth).toHaveBeenCalledTimes(1);
+  });
+
   it('redacts worker credentials again before storing technical lines', async () => {
     const writeTechnicalBatch = vi.fn().mockResolvedValue({ accepted: 1 });
     const service = createService(deniedAuditPort(), {
@@ -320,6 +334,7 @@ function createService(
     capabilities: vi.fn().mockResolvedValue(true),
     writeBatch: vi.fn().mockResolvedValue({ accepted: 1 }),
     listTechnical: vi.fn().mockResolvedValue({}),
+    technicalHealth: vi.fn().mockResolvedValue({ latestLineAt: null, latestHeartbeatAt: null, droppedLines: 0 }),
     ...repositoryOverrides,
   } as unknown as PgCncTelegramWorkerAuditRepository;
   const config = {

@@ -89,6 +89,15 @@ export class CncTelegramWorkerAuditService {
     return this.repository.list(query);
   }
 
+  technicalHealth(currentUser: CurrentUser): Promise<{
+    latestLineAt: string | null;
+    latestHeartbeatAt: string | null;
+    droppedLines: number;
+  }> {
+    this.assertHealthViewer(currentUser);
+    return this.repository.technicalHealth();
+  }
+
   async exportDetailed(
     currentUser: CurrentUser,
     query: WorkerAuditExportQueryDto,
@@ -217,6 +226,17 @@ export class CncTelegramWorkerAuditService {
     if (!this.permissions.canUser(currentUser, 'audit.technical.view')) {
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для технических логов worker', {
         requiredPermissions: ['audit.technical.view'],
+      });
+    }
+  }
+
+  private assertHealthViewer(currentUser: CurrentUser): void {
+    if (
+      !this.permissions.canUser(currentUser, 'cut.manage')
+      || !this.permissions.canUser(currentUser, 'org.view')
+    ) {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для статуса Telegram Worker', {
+        requiredPermissions: ['cut.manage', 'org.view'],
       });
     }
   }

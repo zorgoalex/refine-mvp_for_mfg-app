@@ -1948,7 +1948,7 @@ async function suggestAvailableCutJobNumbers(cutJobId: number): Promise<number[]
 }
 
 async function cutJobExists(cutJobId: number): Promise<boolean> {
-  const jobs = await cutApi.list({ jobNumber: String(cutJobId) });
+  const jobs = await cutApi.list({ jobNumber: String(cutJobId), includeArchived: true });
   return jobs.some((job) => normalizeDisplayNumberForCompare(job.displayNumber) === String(cutJobId));
 }
 

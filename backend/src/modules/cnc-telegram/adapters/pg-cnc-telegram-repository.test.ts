@@ -229,6 +229,7 @@ describe('PgCncTelegramRepository', () => {
     expect(repositorySource).toContain('suggestedCutJobIds');
     expect(repositorySource).toContain('ensureSvgCutJobDisplayNumberAvailable');
     expect(repositorySource).toContain('suggestCutJobDisplayNumbers');
+    expect(repositorySource).toContain("error.code !== 'CUT_JOB_NUMBER_CONFLICT'");
     expect(repositorySource).toContain('source_display_number');
     expect(repositorySource).toContain('existing_job.cut_job_id <> $2::bigint');
     expect(repositorySource).not.toContain('ON CONFLICT (cut_job_id) DO NOTHING');

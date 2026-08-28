@@ -9,6 +9,11 @@ const errorBoundarySource = readFileSync(
 );
 
 describe('stale chunk recovery wiring', () => {
+  it('handles Vite preload errors before bootstrap and route error boundaries', () => {
+    expect(indexSource).toContain("window.addEventListener('vite:preloadError'");
+    expect(indexSource).toContain('handleVitePreloadError');
+  });
+
   it('recovers bootstrap App chunk failures before React mounts', () => {
     expect(indexSource).toContain('reloadPageOnceForStaleChunk');
     expect(indexSource).toMatch(

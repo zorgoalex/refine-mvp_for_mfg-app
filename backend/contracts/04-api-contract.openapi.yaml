@@ -11129,6 +11129,42 @@ paths:
         '422':
           $ref: '#/components/responses/ValidationError'
 
+  /api/v1/cnc-telegram/worker-logs/health:
+    get:
+      tags:
+        - CncTelegramWorkerAudit
+      operationId: getCncTelegramWorkerHealth
+      summary: Get safe Telegram worker heartbeat status
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - cut.manage
+        - org.view
+      responses:
+        '200':
+          description: Latest worker heartbeat and dropped-line counters
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [latestLineAt, latestHeartbeatAt, droppedLines]
+                properties:
+                  latestLineAt:
+                    type: string
+                    format: date-time
+                    nullable: true
+                  latestHeartbeatAt:
+                    type: string
+                    format: date-time
+                    nullable: true
+                  droppedLines:
+                    type: integer
+                    minimum: 0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/v1/cnc-telegram/worker-logs/technical:
     get:
       tags:
@@ -12494,6 +12530,26 @@ paths:
       x-permission: cut.manage
       parameters:
         - { name: cutJobId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      tags: [CutJobs]
+      operationId: deleteCutJobMdfBoardCard
+      summary: Remove the current vacuum bath card from the MDF board
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - { name: cutJobId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
       responses:
         '200': { description: OK }
         '401': { $ref: '#/components/responses/Unauthorized' }

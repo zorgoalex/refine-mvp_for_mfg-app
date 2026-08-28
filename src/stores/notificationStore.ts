@@ -11,6 +11,7 @@ export interface Notification {
   read: boolean;
   userId?: string; // для персональных уведомлений (undefined = системное)
   isSystem?: boolean; // системное уведомление (видно всем)
+  dedupeKey?: string; // предотвращает повтор одного и того же системного события
 }
 
 interface NotificationStore {
@@ -18,7 +19,7 @@ interface NotificationStore {
   addNotification: (
     message: string,
     level: NotificationLevel,
-    options?: { userId?: string; isSystem?: boolean }
+    options?: { userId?: string; isSystem?: boolean; dedupeKey?: string }
   ) => void;
   getNotificationsForUser: (userId?: string) => Notification[];
   markAsRead: (ids: string | string[], userId?: string) => void;
@@ -40,7 +41,7 @@ export const useNotificationStore = create<NotificationStore>()(
       addNotification: (
         message: string,
         level: NotificationLevel,
-        options?: { userId?: string; isSystem?: boolean }
+        options?: { userId?: string; isSystem?: boolean; dedupeKey?: string }
       ) => {
         const notification: Notification = {
           id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -50,9 +51,19 @@ export const useNotificationStore = create<NotificationStore>()(
           read: false,
           userId: options?.userId,
           isSystem: options?.isSystem ?? false,
+          dedupeKey: options?.dedupeKey,
         };
 
         set((state) => {
+          if (
+            notification.dedupeKey
+            && state.notifications.some((item) => (
+              item.dedupeKey === notification.dedupeKey
+              && item.userId === notification.userId
+            ))
+          ) {
+            return state;
+          }
           const updated = [notification, ...state.notifications];
 
           // Ограничение до 100 сообщений (удаляем старые)

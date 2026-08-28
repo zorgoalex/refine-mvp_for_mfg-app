@@ -20,6 +20,7 @@ import type {
   TelegramWorkerAuditExportQuery,
   TelegramWorkerAuditListResponse,
   TelegramWorkerAuditQuery,
+  TelegramWorkerHealthResponse,
   TelegramWorkerTechnicalLogExportQuery,
   TelegramWorkerTechnicalLogListResponse,
   TelegramWorkerTechnicalLogQuery,
@@ -170,6 +171,9 @@ export const cncTelegramApi = {
     return httpClient.get<TelegramWorkerTechnicalLogListResponse>(
       withQuery(apiRoutes.cncTelegram.workerTechnicalLogs, query),
     );
+  },
+  workerHealth(): Promise<TelegramWorkerHealthResponse> {
+    return httpClient.get<TelegramWorkerHealthResponse>(apiRoutes.cncTelegram.workerHealth);
   },
   exportWorkerTechnicalLogs(query: TelegramWorkerTechnicalLogExportQuery): Promise<{ blob: Blob; fileName: string | null; status: number }> {
     return httpClient.download(withQuery(apiRoutes.cncTelegram.workerTechnicalLogsExport, query));

@@ -35,6 +35,7 @@ describe('doweling order full edit form', () => {
 
     expect(linkFields).toContain('"delete_flag"');
     expect(linkFields).toContain('"version"');
+    expect(linkFields).not.toContain('"order {');
   });
 
   it('keeps full edit-only fields writable on doweling_orders', () => {

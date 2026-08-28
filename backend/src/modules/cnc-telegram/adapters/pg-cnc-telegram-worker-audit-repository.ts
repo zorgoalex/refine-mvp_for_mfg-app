@@ -169,6 +169,19 @@ export class PgCncTelegramWorkerAuditRepository {
       ORDER BY observed_at DESC, sequence DESC
       LIMIT $${pageParams.length - 1} OFFSET $${pageParams.length}
     `, pageParams);
+    const health = await this.technicalHealth();
+    return {
+      data: rows.rows,
+      health,
+      pagination: { page: query.page, pageSize: query.pageSize, total: Number(count.rows[0]?.total ?? 0) },
+    };
+  }
+
+  async technicalHealth(): Promise<{
+    latestLineAt: string | null;
+    latestHeartbeatAt: string | null;
+    droppedLines: number;
+  }> {
     const health = await this.database.query<{ latest_line_at: string | null; latest_heartbeat_at: string | null; dropped: string }>(`
       SELECT max(observed_at)::text AS latest_line_at,
         max(observed_at) FILTER (WHERE message LIKE 'worker heartbeat%')::text AS latest_heartbeat_at,
@@ -177,13 +190,9 @@ export class PgCncTelegramWorkerAuditRepository {
       WHERE observed_at >= now() - interval '14 days'
     `);
     return {
-      data: rows.rows,
-      health: {
-        latestLineAt: health.rows[0]?.latest_line_at ?? null,
-        latestHeartbeatAt: health.rows[0]?.latest_heartbeat_at ?? null,
-        droppedLines: Number(health.rows[0]?.dropped ?? 0),
-      },
-      pagination: { page: query.page, pageSize: query.pageSize, total: Number(count.rows[0]?.total ?? 0) },
+      latestLineAt: health.rows[0]?.latest_line_at ?? null,
+      latestHeartbeatAt: health.rows[0]?.latest_heartbeat_at ?? null,
+      droppedLines: Number(health.rows[0]?.dropped ?? 0),
     };
   }
 

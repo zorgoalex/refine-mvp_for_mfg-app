@@ -6,8 +6,16 @@ import {
   resolveInitialUiVariant,
   seedLegacyAuthSession,
 } from "./ui-variant/uiVariantBootstrap";
-import { reloadPageOnceForStaleChunk } from "./utils/staleChunkReload";
+import {
+  handleVitePreloadError,
+  reloadPageOnceForStaleChunk,
+  type VitePreloadErrorEvent,
+} from "./utils/staleChunkReload";
 import { resolveOrderLifecycleCohort } from "./performance/orderLifecycleCohortStore";
+
+window.addEventListener('vite:preloadError', (event) => {
+  handleVitePreloadError(event as VitePreloadErrorEvent);
+});
 
 async function bootstrap() {
   try {

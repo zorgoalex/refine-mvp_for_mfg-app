@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { featureFlags } from './featureFlags';
 import {
   applyRuntimeConfig,
+  fetchLatestBuildSha,
   getLoadedRuntimeConfig,
   getRuntimeApiUrl,
   getRuntimeHasuraUrl,
@@ -143,6 +144,20 @@ describe('runtimeConfig', () => {
       observability: { performanceRum: true },
       rollouts: { orderLifecycleV2: { enabled: true, percent: 25 } },
     });
+  });
+
+  it('reads the latest build sha without applying newer runtime config', async () => {
+    applyRuntimeConfig({ build: { sha: 'loaded-sha' }, features: { backendVlm: false } });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        build: { sha: 'deployed-sha' },
+        features: { backendVlm: true },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+
+    expect(await fetchLatestBuildSha({ fetchImpl: fetchMock, timeoutMs: 10 })).toBe('deployed-sha');
+    expect(getLoadedRuntimeConfig()?.build?.sha).toBe('loaded-sha');
+    expect(featureFlags.useBackendVlm).toBe(false);
   });
 
   it('rejects enabled lifecycle rollout without safe version and salt', async () => {

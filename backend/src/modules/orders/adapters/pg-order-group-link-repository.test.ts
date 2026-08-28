@@ -144,7 +144,7 @@ describe('PgOrderGroupLinkRepository', () => {
     expect(database.state.outboxRows).toHaveLength(0);
     expect(writesAfterFirst).toEqual(['complete-idempotency']);
     expect(database.state.writes).toEqual(writesAfterFirst);
-    expect(normalizedSql(database.queries.slice(queryCountAfterFirst))).toContain('FROM orders WHERE order_id = $1 AND delete_flag = false FOR UPDATE');
+    expect(normalizedSql(database.queries.slice(queryCountAfterFirst))).toContain("FROM orders WHERE order_id = $1 AND delete_flag = false AND order_kind = 'production_order' FOR UPDATE");
   });
 
   it('denies completed idempotency replay when the order is no longer in update scope', async () => {

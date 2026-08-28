@@ -5519,7 +5519,10 @@ function cutLayoutReason(layout: CncTelegramCutLayoutDto, fallback: string): str
 }
 
 function isReviewableSvgCutImportError(error: unknown): error is ApiError {
-  return error instanceof ApiError && error.statusCode >= 400 && error.statusCode < 500;
+  return error instanceof ApiError
+    && error.code !== 'CUT_JOB_NUMBER_CONFLICT'
+    && error.statusCode >= 400
+    && error.statusCode < 500;
 }
 
 function svgCutImportErrorNote(error: ApiError): string {

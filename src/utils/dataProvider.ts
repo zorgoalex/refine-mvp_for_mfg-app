@@ -806,7 +806,6 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "delete_flag",
     "version",
     "doweling_order { doweling_order_id doweling_order_name design_engineer_id operator_id payment_status_id production_status_id doweling_order_date parts_count total_amount final_amount discount paid_amount payment_date issue_date }",
-    "order { order_id order_name client_id }",
     "created_by",
     "edited_by",
     "created_at",

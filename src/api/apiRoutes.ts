@@ -221,6 +221,7 @@ export const apiRoutes = {
       backendApiPath(`/cnc-telegram/orders/${orderId}/screenshots/${encodeURIComponent(packetId)}/restore`),
     workerLogs: backendApiPath('/cnc-telegram/worker-logs'),
     workerLogsExport: backendApiPath('/cnc-telegram/worker-logs/export'),
+    workerHealth: backendApiPath('/cnc-telegram/worker-logs/health'),
     workerTechnicalLogs: backendApiPath('/cnc-telegram/worker-logs/technical'),
     workerTechnicalLogsExport: backendApiPath('/cnc-telegram/worker-logs/technical/export'),
     importScans: backendApiPath('/cnc-telegram/import-scans'),
