@@ -446,6 +446,49 @@ class WorkerDayHistoryTest(unittest.IsolatedAsyncioTestCase):
 
 
 class WorkerServeSafetyTest(unittest.IsolatedAsyncioTestCase):
+    async def test_unauthorized_telegram_session_never_claims_worker_lease(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            worker = make_worker(Path(temp))
+            worker.config.enabled = True
+            worker.config.stack_env = "test"
+            worker.config.worker_role = "reader"
+            worker.config.telegram_session_path = Path(temp) / "session"
+            worker.config.telegram_api_id = 1
+            worker.config.telegram_api_hash = "hash"
+            worker.config.telegram_chat = "-100"
+            worker.config.telegram_allowed_chat_ids = ("-100",)
+            worker.config.erp_bearer_token = "token"
+            worker.config.erp_worker_login = ""
+            worker.config.erp_worker_password = ""
+            worker.config.audit_spool_path = Path(temp) / "audit.sqlite3"
+            worker.config.audit_allow_unsafe_path = True
+            worker.config.temp_ttl_hours = 1
+            worker.config.attachment_ttl_hours = 1
+            worker.config.require_worker_enabled = lambda: None
+            worker.config.require_telegram = lambda: None
+            worker.config.require_backend_auth = lambda: None
+            worker._claim_session_lease = AsyncMock()
+            worker.erp.audit_capabilities = AsyncMock(return_value={})
+
+            class UnauthorizedClient:
+                async def connect(self) -> None:
+                    return None
+
+                async def is_user_authorized(self) -> bool:
+                    return False
+
+                async def disconnect(self) -> None:
+                    return None
+
+            with (
+                patch("cnc_telegram_worker.worker.TelegramClient", return_value=UnauthorizedClient()),
+                patch("cnc_telegram_worker.worker.backfill_sheet_previews"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "Telethon session is not authorized"):
+                    await worker.run_serve()
+
+            worker._claim_session_lease.assert_not_awaited()
+
     async def test_session_claim_waits_for_exact_busy_lease_error(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             worker = make_worker(Path(temp))
@@ -591,6 +634,7 @@ class WorkerServeSafetyTest(unittest.IsolatedAsyncioTestCase):
                     return None
 
                 async def is_user_authorized(self) -> bool:
+                    events.append("telegram-authorized")
                     return True
 
                 async def get_entity(self, _chat: object) -> object:
@@ -632,7 +676,8 @@ class WorkerServeSafetyTest(unittest.IsolatedAsyncioTestCase):
 
             worker.scan_workday.assert_not_awaited()
             reconcile.assert_not_awaited()
-            self.assertLess(events.index("lease-success"), events.index("telegram-init"))
+            self.assertLess(events.index("telegram-authorized"), events.index("lease-success"))
+            self.assertLess(events.index("lease-success"), events.index("queue"))
             self.assertLess(events.index("telegram-connect"), events.index("queue"))
 
     async def test_heartbeat_failure_stops_serve_fail_closed(self) -> None:
