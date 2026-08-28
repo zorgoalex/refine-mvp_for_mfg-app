@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { USER_ROLES } from '../../backend/src/permissions/permissions';
 
 const metadata = JSON.parse(
   readFileSync(new URL('./metadata.json', import.meta.url), 'utf8'),
@@ -9,7 +10,9 @@ const tables = metadata.sources.flatMap((source: any) => source.tables);
 describe('reference sort-order Hasura permissions', () => {
   it('keeps backend-owned sheet materials select-only', () => {
     const table = tables.find((entry: any) => entry.table.name === 'sheet_material_types');
-    expect(table.select_permissions).toHaveLength(5);
+    expect(table.select_permissions.map((entry: any) => entry.role).sort()).toEqual(
+      USER_ROLES.filter((role) => role !== 'admin').sort(),
+    );
     expect(table.select_permissions.every((entry: any) => entry.permission.columns === '*')).toBe(true);
     expect(table.insert_permissions ?? []).toHaveLength(0);
     expect(table.update_permissions ?? []).toHaveLength(0);
