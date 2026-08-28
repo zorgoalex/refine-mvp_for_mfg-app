@@ -1021,6 +1021,15 @@
                             "comment": ""
                         },
                         {
+                            "role": "packer",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
                             "role": "superadmin",
                             "permission": {
                                 "columns": "*",
@@ -1040,6 +1049,15 @@
                         },
                         {
                             "role": "viewer",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "worker",
                             "permission": {
                                 "columns": "*",
                                 "filter": {},
@@ -3015,6 +3033,15 @@
                             "comment": ""
                         },
                         {
+                            "role": "packer",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
                             "role": "superadmin",
                             "permission": {
                                 "columns": "*",
@@ -3034,6 +3061,15 @@
                         },
                         {
                             "role": "viewer",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "worker",
                             "permission": {
                                 "columns": "*",
                                 "filter": {},
@@ -3237,6 +3273,15 @@
                             "comment": ""
                         },
                         {
+                            "role": "packer",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
                             "role": "superadmin",
                             "permission": {
                                 "columns": "*",
@@ -3256,6 +3301,15 @@
                         },
                         {
                             "role": "viewer",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "worker",
                             "permission": {
                                 "columns": "*",
                                 "filter": {},
@@ -3798,13 +3852,143 @@
                     "table": {
                         "name": "order_details",
                         "schema": "public"
-                    }
+                    },
+                    "select_permissions": [
+                        {
+                            "role": "manager",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "operator",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "packer",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "superadmin",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "top_manager",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "viewer",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "worker",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        }
+                    ]
                 },
                 {
                     "table": {
                         "name": "order_details_view",
                         "schema": "public"
-                    }
+                    },
+                    "select_permissions": [
+                        {
+                            "role": "manager",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "operator",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "packer",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "superadmin",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "top_manager",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "viewer",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "worker",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        }
+                    ]
                 },
                 {
                     "table": {
@@ -3823,6 +4007,71 @@
                             "using": {
                                 "foreign_key_constraint_on": "order_id"
                             }
+                        }
+                    ],
+                    "select_permissions": [
+                        {
+                            "role": "manager",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "operator",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "packer",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "superadmin",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "top_manager",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "viewer",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "worker",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
                         }
                     ]
                 },
@@ -4209,6 +4458,19 @@
                             "comment": ""
                         },
                         {
+                            "role": "packer",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {
+                                    "order_kind": {
+                                        "_eq": "production_order"
+                                    }
+                                },
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
                             "role": "superadmin",
                             "permission": {
                                 "columns": "*",
@@ -4236,6 +4498,19 @@
                         },
                         {
                             "role": "viewer",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {
+                                    "order_kind": {
+                                        "_eq": "production_order"
+                                    }
+                                },
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "worker",
                             "permission": {
                                 "columns": "*",
                                 "filter": {
@@ -4597,19 +4872,6 @@
                     ],
                     "select_permissions": [
                         {
-                            "role": "packer",
-                            "permission": {
-                                "columns": [
-                                    "event_id",
-                                    "order_id",
-                                    "production_status_id",
-                                    "event_at"
-                                ],
-                                "filter": {}
-                            },
-                            "comment": "Read-only production stage markers for order header"
-                        },
-                        {
                             "role": "manager",
                             "permission": {
                                 "columns": "*",
@@ -4620,6 +4882,15 @@
                         },
                         {
                             "role": "operator",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "packer",
                             "permission": {
                                 "columns": "*",
                                 "filter": {},
@@ -4647,6 +4918,15 @@
                         },
                         {
                             "role": "viewer",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "worker",
                             "permission": {
                                 "columns": "*",
                                 "filter": {},
@@ -4739,21 +5019,6 @@
                     ],
                     "select_permissions": [
                         {
-                            "role": "packer",
-                            "permission": {
-                                "columns": [
-                                    "production_status_id",
-                                    "production_status_name",
-                                    "production_status_code",
-                                    "sort_order",
-                                    "color",
-                                    "is_active"
-                                ],
-                                "filter": {}
-                            },
-                            "comment": "Read-only production stage catalog for order header"
-                        },
-                        {
                             "role": "manager",
                             "permission": {
                                 "columns": "*",
@@ -4764,6 +5029,15 @@
                         },
                         {
                             "role": "operator",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "packer",
                             "permission": {
                                 "columns": "*",
                                 "filter": {},
@@ -4791,6 +5065,15 @@
                         },
                         {
                             "role": "viewer",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "worker",
                             "permission": {
                                 "columns": "*",
                                 "filter": {},
@@ -5700,7 +5983,8 @@
                                 "columns": "*",
                                 "filter": {},
                                 "allow_aggregations": true
-                            }
+                            },
+                            "comment": ""
                         },
                         {
                             "role": "operator",
@@ -5708,7 +5992,17 @@
                                 "columns": "*",
                                 "filter": {},
                                 "allow_aggregations": true
-                            }
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "packer",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
                         },
                         {
                             "role": "superadmin",
@@ -5716,7 +6010,8 @@
                                 "columns": "*",
                                 "filter": {},
                                 "allow_aggregations": true
-                            }
+                            },
+                            "comment": ""
                         },
                         {
                             "role": "top_manager",
@@ -5724,7 +6019,8 @@
                                 "columns": "*",
                                 "filter": {},
                                 "allow_aggregations": true
-                            }
+                            },
+                            "comment": ""
                         },
                         {
                             "role": "viewer",
@@ -5732,7 +6028,17 @@
                                 "columns": "*",
                                 "filter": {},
                                 "allow_aggregations": true
-                            }
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "worker",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
                         }
                     ]
                 },

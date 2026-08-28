@@ -30,6 +30,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-08-28",
+    title: "Календарь: одинаковые данные для всех ролей",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Карточки календаря снова показывают материалы, фрезеровку, этапы производства и присадку независимо от роли пользователя.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-27",
     title: "Типы фрезеровки: минимальные размеры детали",
     services: ["ERP"],

@@ -25,11 +25,9 @@ function table(name: string): TableMetadata {
 describe('Hasura order aggregate boundary', () => {
   it.each([
     'orders',
-    'order_details',
     'payments',
     'order_workshops',
     'order_resource_requirements',
-    'order_doweling_links',
   ])('removes every direct read/write permission from public.%s', (name) => {
     const entry = table(name);
     expect(entry.insert_permissions).toBeUndefined();
@@ -38,7 +36,18 @@ describe('Hasura order aggregate boundary', () => {
     expect(entry.delete_permissions).toBeUndefined();
   });
 
-  it.each(['order_details_view', 'payments_view', 'details_of_order', 'orders_alias_view'])(
+  it.each(['order_details', 'order_doweling_links'])(
+    'keeps public.%s read-only for calendar compatibility',
+    (name) => {
+      const entry = table(name);
+      expect(entry.select_permissions?.length).toBeGreaterThan(0);
+      expect(entry.insert_permissions).toBeUndefined();
+      expect(entry.update_permissions).toBeUndefined();
+      expect(entry.delete_permissions).toBeUndefined();
+    },
+  );
+
+  it.each(['payments_view', 'details_of_order', 'orders_alias_view'])(
     'removes legacy aggregate reads from public.%s',
     (name) => {
       const entry = tables.find(
@@ -75,6 +84,11 @@ describe('Hasura order aggregate boundary', () => {
       for (const relationship of relationships) {
         const definition = JSON.stringify(relationship.using);
         for (const protectedTable of protectedTables) {
+          const allowedCalendarTraversal =
+            entry.table.name === 'order_doweling_links' &&
+            relationship.name === 'order' &&
+            protectedTable === 'orders';
+          if (allowedCalendarTraversal) continue;
           expect(
             definition,
             `${entry.table.name}.${relationship.name} traverses to ${protectedTable}`,
