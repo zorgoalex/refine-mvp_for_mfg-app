@@ -37,9 +37,11 @@ const calendarResources = [
 ];
 
 function expectedFilter(name: string): unknown {
-  return name === 'orders_view'
-    ? { order_kind: { _eq: 'production_order' } }
-    : {};
+  if (name === 'orders_view') return { order_kind: { _eq: 'production_order' } };
+  if (['order_details', 'order_details_view', 'order_doweling_links'].includes(name)) {
+    return { order: { order_kind: { _eq: 'production_order' } } };
+  }
+  return {};
 }
 
 describe('Hasura calendar role independence', () => {

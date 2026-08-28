@@ -85,7 +85,9 @@ describe('Hasura order aggregate boundary', () => {
         const definition = JSON.stringify(relationship.using);
         for (const protectedTable of protectedTables) {
           const allowedCalendarTraversal =
-            entry.table.name === 'order_doweling_links' &&
+            ['order_details', 'order_details_view', 'order_doweling_links'].includes(
+              entry.table.name,
+            ) &&
             relationship.name === 'order' &&
             protectedTable === 'orders';
           if (allowedCalendarTraversal) continue;

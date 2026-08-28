@@ -3858,7 +3858,13 @@
                             "role": "manager",
                             "permission": {
                                 "columns": "*",
-                                "filter": {},
+                                "filter": {
+                                    "order": {
+                                        "order_kind": {
+                                            "_eq": "production_order"
+                                        }
+                                    }
+                                },
                                 "allow_aggregations": true
                             },
                             "comment": ""
@@ -3867,7 +3873,13 @@
                             "role": "operator",
                             "permission": {
                                 "columns": "*",
-                                "filter": {},
+                                "filter": {
+                                    "order": {
+                                        "order_kind": {
+                                            "_eq": "production_order"
+                                        }
+                                    }
+                                },
                                 "allow_aggregations": true
                             },
                             "comment": ""
@@ -3876,7 +3888,13 @@
                             "role": "packer",
                             "permission": {
                                 "columns": "*",
-                                "filter": {},
+                                "filter": {
+                                    "order": {
+                                        "order_kind": {
+                                            "_eq": "production_order"
+                                        }
+                                    }
+                                },
                                 "allow_aggregations": true
                             },
                             "comment": ""
@@ -3885,7 +3903,13 @@
                             "role": "superadmin",
                             "permission": {
                                 "columns": "*",
-                                "filter": {},
+                                "filter": {
+                                    "order": {
+                                        "order_kind": {
+                                            "_eq": "production_order"
+                                        }
+                                    }
+                                },
                                 "allow_aggregations": true
                             },
                             "comment": ""
@@ -3894,7 +3918,13 @@
                             "role": "top_manager",
                             "permission": {
                                 "columns": "*",
-                                "filter": {},
+                                "filter": {
+                                    "order": {
+                                        "order_kind": {
+                                            "_eq": "production_order"
+                                        }
+                                    }
+                                },
                                 "allow_aggregations": true
                             },
                             "comment": ""
@@ -3903,7 +3933,13 @@
                             "role": "viewer",
                             "permission": {
                                 "columns": "*",
-                                "filter": {},
+                                "filter": {
+                                    "order": {
+                                        "order_kind": {
+                                            "_eq": "production_order"
+                                        }
+                                    }
+                                },
                                 "allow_aggregations": true
                             },
                             "comment": ""
@@ -3912,10 +3948,24 @@
                             "role": "worker",
                             "permission": {
                                 "columns": "*",
-                                "filter": {},
+                                "filter": {
+                                    "order": {
+                                        "order_kind": {
+                                            "_eq": "production_order"
+                                        }
+                                    }
+                                },
                                 "allow_aggregations": true
                             },
                             "comment": ""
+                        }
+                    ],
+                    "object_relationships": [
+                        {
+                            "name": "order",
+                            "using": {
+                                "foreign_key_constraint_on": "order_id"
+                            }
                         }
                     ]
                 },
@@ -3929,7 +3979,13 @@
                             "role": "manager",
                             "permission": {
                                 "columns": "*",
-                                "filter": {},
+                                "filter": {
+                                    "order": {
+                                        "order_kind": {
+                                            "_eq": "production_order"
+                                        }
+                                    }
+                                },
                                 "allow_aggregations": true
                             },
                             "comment": ""
@@ -3938,7 +3994,13 @@
                             "role": "operator",
                             "permission": {
                                 "columns": "*",
-                                "filter": {},
+                                "filter": {
+                                    "order": {
+                                        "order_kind": {
+                                            "_eq": "production_order"
+                                        }
+                                    }
+                                },
                                 "allow_aggregations": true
                             },
                             "comment": ""
@@ -3947,7 +4009,13 @@
                             "role": "packer",
                             "permission": {
                                 "columns": "*",
-                                "filter": {},
+                                "filter": {
+                                    "order": {
+                                        "order_kind": {
+                                            "_eq": "production_order"
+                                        }
+                                    }
+                                },
                                 "allow_aggregations": true
                             },
                             "comment": ""
@@ -3956,7 +4024,13 @@
                             "role": "superadmin",
                             "permission": {
                                 "columns": "*",
-                                "filter": {},
+                                "filter": {
+                                    "order": {
+                                        "order_kind": {
+                                            "_eq": "production_order"
+                                        }
+                                    }
+                                },
                                 "allow_aggregations": true
                             },
                             "comment": ""
@@ -3965,7 +4039,13 @@
                             "role": "top_manager",
                             "permission": {
                                 "columns": "*",
-                                "filter": {},
+                                "filter": {
+                                    "order": {
+                                        "order_kind": {
+                                            "_eq": "production_order"
+                                        }
+                                    }
+                                },
                                 "allow_aggregations": true
                             },
                             "comment": ""
@@ -3974,7 +4054,13 @@
                             "role": "viewer",
                             "permission": {
                                 "columns": "*",
-                                "filter": {},
+                                "filter": {
+                                    "order": {
+                                        "order_kind": {
+                                            "_eq": "production_order"
+                                        }
+                                    }
+                                },
                                 "allow_aggregations": true
                             },
                             "comment": ""
@@ -3983,10 +4069,33 @@
                             "role": "worker",
                             "permission": {
                                 "columns": "*",
-                                "filter": {},
+                                "filter": {
+                                    "order": {
+                                        "order_kind": {
+                                            "_eq": "production_order"
+                                        }
+                                    }
+                                },
                                 "allow_aggregations": true
                             },
                             "comment": ""
+                        }
+                    ],
+                    "object_relationships": [
+                        {
+                            "name": "order",
+                            "using": {
+                                "manual_configuration": {
+                                    "column_mapping": {
+                                        "order_id": "order_id"
+                                    },
+                                    "insertion_order": null,
+                                    "remote_table": {
+                                        "name": "orders",
+                                        "schema": "public"
+                                    }
+                                }
+                            }
                         }
                     ]
                 },
@@ -4014,7 +4123,13 @@
                             "role": "manager",
                             "permission": {
                                 "columns": "*",
-                                "filter": {},
+                                "filter": {
+                                    "order": {
+                                        "order_kind": {
+                                            "_eq": "production_order"
+                                        }
+                                    }
+                                },
                                 "allow_aggregations": true
                             },
                             "comment": ""
@@ -4023,7 +4138,13 @@
                             "role": "operator",
                             "permission": {
                                 "columns": "*",
-                                "filter": {},
+                                "filter": {
+                                    "order": {
+                                        "order_kind": {
+                                            "_eq": "production_order"
+                                        }
+                                    }
+                                },
                                 "allow_aggregations": true
                             },
                             "comment": ""
@@ -4032,7 +4153,13 @@
                             "role": "packer",
                             "permission": {
                                 "columns": "*",
-                                "filter": {},
+                                "filter": {
+                                    "order": {
+                                        "order_kind": {
+                                            "_eq": "production_order"
+                                        }
+                                    }
+                                },
                                 "allow_aggregations": true
                             },
                             "comment": ""
@@ -4041,7 +4168,13 @@
                             "role": "superadmin",
                             "permission": {
                                 "columns": "*",
-                                "filter": {},
+                                "filter": {
+                                    "order": {
+                                        "order_kind": {
+                                            "_eq": "production_order"
+                                        }
+                                    }
+                                },
                                 "allow_aggregations": true
                             },
                             "comment": ""
@@ -4050,7 +4183,13 @@
                             "role": "top_manager",
                             "permission": {
                                 "columns": "*",
-                                "filter": {},
+                                "filter": {
+                                    "order": {
+                                        "order_kind": {
+                                            "_eq": "production_order"
+                                        }
+                                    }
+                                },
                                 "allow_aggregations": true
                             },
                             "comment": ""
@@ -4059,7 +4198,13 @@
                             "role": "viewer",
                             "permission": {
                                 "columns": "*",
-                                "filter": {},
+                                "filter": {
+                                    "order": {
+                                        "order_kind": {
+                                            "_eq": "production_order"
+                                        }
+                                    }
+                                },
                                 "allow_aggregations": true
                             },
                             "comment": ""
@@ -4068,7 +4213,13 @@
                             "role": "worker",
                             "permission": {
                                 "columns": "*",
-                                "filter": {},
+                                "filter": {
+                                    "order": {
+                                        "order_kind": {
+                                            "_eq": "production_order"
+                                        }
+                                    }
+                                },
                                 "allow_aggregations": true
                             },
                             "comment": ""
