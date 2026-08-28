@@ -5,6 +5,7 @@ import { AppFooter } from '../../components/AppFooter';
 import { GlobalTableTopScrollbars } from '../../components/GlobalTableTopScrollbars';
 import { KeepAliveOutlet } from '../../components/workspace/KeepAliveOutlet';
 import { PersistentMdfBoardHost } from '../../components/workspace/PersistentMdfBoardHost';
+import { FrontendVersionNotice } from '../../components/FrontendVersionNotice';
 import { authSession } from '../../api/authSession';
 import { featureFlags } from '../../config/featureFlags';
 import {
@@ -179,6 +180,7 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
             tablet={isTabletPortrait}
           />
         ) : null}
+        <FrontendVersionNotice />
         {!isOperational ? <EvolutionWorkspaceTabs /> : null}
         <Layout.Content
           className="evolution-shell__content"

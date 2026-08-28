@@ -66,6 +66,20 @@ export async function initializeRuntimeConfig(
   return config;
 }
 
+/** Reads the deployed build without applying newer runtime flags to an older bundle. */
+export async function fetchLatestBuildSha(
+  options: InitializeRuntimeConfigOptions = {},
+): Promise<string | null> {
+  const env = options.env ?? (import.meta as { env?: Record<string, string | boolean | undefined> }).env ?? {};
+  const config = await fetchRuntimeConfig({
+    url: options.url ?? getRuntimeConfigUrl(env),
+    timeoutMs: options.timeoutMs ?? DEFAULT_RUNTIME_CONFIG_TIMEOUT_MS,
+    fetchImpl: options.fetchImpl,
+  });
+  const sha = config?.build?.sha?.trim();
+  return sha || null;
+}
+
 export function applyRuntimeConfig(
   config: FrontendRuntimeConfig | null,
   env: Record<string, string | boolean | undefined> =

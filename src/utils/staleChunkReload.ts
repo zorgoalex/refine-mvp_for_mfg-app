@@ -22,6 +22,10 @@ export interface StaleChunkReloadEnvironment {
   globalThis?: Record<string, unknown>;
 }
 
+export interface VitePreloadErrorEvent extends Event {
+  payload?: unknown;
+}
+
 export function isStaleChunkLoadError(error: unknown): boolean {
   const message =
     error instanceof Error
@@ -46,6 +50,15 @@ export function reloadPageOnceForStaleChunk(
   }
 
   environment.location.reload();
+  return true;
+}
+
+export function handleVitePreloadError(
+  event: VitePreloadErrorEvent,
+  environment = getDefaultEnvironment(),
+): boolean {
+  if (!environment || !reloadPageOnceForStaleChunk(event.payload, environment)) return false;
+  event.preventDefault();
   return true;
 }
 

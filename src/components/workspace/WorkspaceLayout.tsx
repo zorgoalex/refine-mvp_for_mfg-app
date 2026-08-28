@@ -12,6 +12,7 @@ import { useTabSync } from '../../hooks/useTabSync';
 import { useGlobalUnloadGuard } from '../../hooks/useTabDirty';
 import { GlobalTableTopScrollbars } from '../GlobalTableTopScrollbars';
 import { PersistentMdfBoardHost } from './PersistentMdfBoardHost';
+import { FrontendVersionNotice } from '../FrontendVersionNotice';
 
 const WorkspaceRouteSkeleton: React.FC = () => (
   <div
@@ -71,6 +72,7 @@ export const WorkspaceLayout: React.FC = () => {
     >
       <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column' }}>
         <GlobalTableTopScrollbars />
+        <FrontendVersionNotice />
         <WorkspaceTabs />
         <div style={{ flex: 1 }}>
           <Suspense fallback={<WorkspaceRouteSkeleton />}>

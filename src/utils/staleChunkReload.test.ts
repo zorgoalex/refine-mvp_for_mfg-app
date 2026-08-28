@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { isStaleChunkLoadError, reloadPageOnceForStaleChunk } from './staleChunkReload';
+import {
+  handleVitePreloadError,
+  isStaleChunkLoadError,
+  reloadPageOnceForStaleChunk,
+} from './staleChunkReload';
 
 function createStorage() {
   const values = new Map<string, string>();
@@ -88,5 +92,15 @@ describe('stale chunk reload recovery', () => {
     expect(reloadPageOnceForStaleChunk(error, withoutSessionStorage)).toBe(true);
     expect(reloadPageOnceForStaleChunk(error, withoutSessionStorage)).toBe(false);
     expect(environment.location.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('handles Vite preload errors before React renders the failed route', () => {
+    const event = new Event('vite:preloadError', { cancelable: true });
+    Object.assign(event, {
+      payload: new TypeError('Failed to fetch dynamically imported module: /assets/edit-old.js'),
+    });
+
+    expect(handleVitePreloadError(event, createEnvironment())).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
   });
 });
