@@ -31,6 +31,19 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-28",
+    title: "Раскрой: точные номера и контроль Telegram Worker",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "Администраторы получают постоянное уведомление, если heartbeat Telegram Worker отсутствует больше 90 секунд, и уведомление после восстановления.",
+    ],
+    fixed: [
+      "Проверка принудительного номера задания учитывает архивные раскрои и показывает конфликт номера вместо ошибки создания карточки MDF.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-28",
     title: "Календарь: одинаковые данные для всех ролей",
     services: ["ERP"],
     repositories: ["repo_erp"],
