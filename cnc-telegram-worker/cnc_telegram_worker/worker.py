@@ -409,16 +409,6 @@ class CncTelegramWorker:
         heartbeat_task: asyncio.Task[None] | None = None
         technical_lease_wait: asyncio.Task[bool] | None = None
         try:
-            # Claim the DB lease before connecting Telethon. This also fences
-            # crash-recovery ingest and all queue calls made below.
-            await self._claim_session_lease()
-            self._raise_if_technical_lease_lost(technical_lease_lost_event)
-            await self.erp.audit_capabilities()
-            await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
-            audit_spool.abandon_running_scans()
-            await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
-            self._raise_if_technical_lease_lost(technical_lease_lost_event)
-
             client = TelegramClient(
                 str(self.config.telegram_session_path),
                 self.config.telegram_api_id,
@@ -433,6 +423,17 @@ class CncTelegramWorker:
             assert_allowed_chat(chat_id, self.config.telegram_allowed_chat_ids)
             me = await client.get_me()
             session_user_id = str(me.id) if getattr(me, "id", None) is not None else None
+
+            # Telegram readiness comes first. Claiming the backend lease makes
+            # technical-log delivery publish phase=running heartbeats, so an
+            # unauthorized session must never reach that point.
+            await self._claim_session_lease()
+            self._raise_if_technical_lease_lost(technical_lease_lost_event)
+            await self.erp.audit_capabilities()
+            await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
+            audit_spool.abandon_running_scans()
+            await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
+            self._raise_if_technical_lease_lost(technical_lease_lost_event)
 
             heartbeat_task = asyncio.create_task(
                 self._heartbeat_session(stop_event, lease_lost_event),
