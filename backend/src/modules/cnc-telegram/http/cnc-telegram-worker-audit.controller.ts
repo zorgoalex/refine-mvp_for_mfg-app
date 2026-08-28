@@ -89,6 +89,16 @@ export class CncTelegramWorkerAuditController {
     return this.audit.listTechnical(this.requireCurrentUser(request), parseTechnicalLogListQuery(query));
   }
 
+  @ApiOperation({ operationId: 'getCncTelegramWorkerHealth', summary: 'Get safe Telegram worker heartbeat status' })
+  @Get('health')
+  health(@Req() request: RequestWithCurrentUser): Promise<{
+    latestLineAt: string | null;
+    latestHeartbeatAt: string | null;
+    droppedLines: number;
+  }> {
+    return this.audit.technicalHealth(this.requireCurrentUser(request));
+  }
+
   @ApiOperation({ operationId: 'exportCncTelegramWorkerAudit', summary: 'Export full Telegram worker audit evidence as JSON' })
   @ApiProduces('application/json')
   @ApiResponse({ status: 200, description: 'Detailed JSON audit export', schema: { type: 'string', format: 'binary' } })

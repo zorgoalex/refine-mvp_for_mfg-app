@@ -1,11 +1,10 @@
 import { useEffect } from 'react';
-import { notification } from 'antd';
 import { cncTelegramApi } from '../api/cncTelegramApi';
 import { authSession } from '../api/authSession';
 import { featureFlags } from '../config/featureFlags';
 import { useNotificationStore } from '../stores/notificationStore';
 import { authStorage } from '../utils/auth';
-import { can } from '../utils/permissions';
+import { canAll } from '../utils/permissions';
 import { observeUserWarnings } from '../utils/warningNotificationCapture';
 
 export const TELEGRAM_WORKER_HEARTBEAT_STALE_MS = 90_000;
@@ -33,6 +32,12 @@ export function telegramWorkerHealthTransition(
   return null;
 }
 
+export function canReceiveTelegramWorkerHealthNotification(
+  user: Parameters<typeof canAll>[1],
+): boolean {
+  return canAll(['cut.manage', 'org.view'], user);
+}
+
 export function WarningNotificationBridge() {
   useEffect(() => {
     if (!document.body) return;
@@ -57,39 +62,32 @@ export function WarningNotificationBridge() {
     const check = async () => {
       if (stopped || checking || document.visibilityState !== 'visible') return;
       const user = authSession.getUser();
-      if (!authSession.getAccessToken() || !can('audit.technical.view', user)) {
+      if (!authSession.getAccessToken() || !user?.id || !canReceiveTelegramWorkerHealthNotification(user)) {
         previous = null;
-        notification.destroy(TELEGRAM_WORKER_HEALTH_NOTIFICATION_KEY);
         return;
       }
 
       checking = true;
       try {
-        const today = new Date().toISOString().slice(0, 10);
-        const response = await cncTelegramApi.workerTechnicalLogs({
-          dateFrom: today,
-          dateTo: today,
-          page: 1,
-          pageSize: 1,
-        });
+        const response = await cncTelegramApi.workerHealth();
         if (stopped) return;
-        const next = telegramWorkerHealthState(response.health.latestHeartbeatAt);
+        const next = telegramWorkerHealthState(response.latestHeartbeatAt);
         const transition = telegramWorkerHealthTransition(previous, next);
         previous = next;
         if (transition === 'stale') {
-          notification.error({
-            key: TELEGRAM_WORKER_HEALTH_NOTIFICATION_KEY,
-            message: 'Telegram Worker не отвечает',
-            description: 'Heartbeat отсутствует больше 90 секунд. Проверьте CNC Telegram worker.',
-            duration: 0,
-          });
+          addBellNotificationOnce(
+            user.id,
+            `${TELEGRAM_WORKER_HEALTH_NOTIFICATION_KEY}:stale:${response.latestHeartbeatAt ?? 'missing'}`,
+            'Telegram Worker не отвечает: heartbeat отсутствует больше 90 секунд. Проверьте CNC Telegram worker.',
+            'error',
+          );
         } else if (transition === 'recovered') {
-          notification.success({
-            key: TELEGRAM_WORKER_HEALTH_NOTIFICATION_KEY,
-            message: 'Telegram Worker восстановлен',
-            description: 'Heartbeat снова поступает.',
-            duration: 5,
-          });
+          addBellNotificationOnce(
+            user.id,
+            `${TELEGRAM_WORKER_HEALTH_NOTIFICATION_KEY}:recovered:${response.latestHeartbeatAt ?? 'missing'}`,
+            'Telegram Worker восстановлен: heartbeat снова поступает.',
+            'info',
+          );
         }
       } catch {
         // Не смешиваем недоступность backend/API с состоянием отдельного worker.
@@ -108,9 +106,18 @@ export function WarningNotificationBridge() {
       stopped = true;
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisibilityChange);
-      notification.destroy(TELEGRAM_WORKER_HEALTH_NOTIFICATION_KEY);
     };
   }, []);
 
   return null;
+}
+
+export function addBellNotificationOnce(
+  userId: string,
+  dedupeMarker: string,
+  message: string,
+  level: 'info' | 'error',
+): void {
+  const store = useNotificationStore.getState();
+  store.addNotification(message, level, { userId, dedupeKey: dedupeMarker });
 }

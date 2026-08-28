@@ -187,3 +187,9 @@ export interface TelegramWorkerTechnicalLogListResponse {
   health: { latestLineAt: string | null; latestHeartbeatAt: string | null; droppedLines: number };
   pagination: { page: number; pageSize: number; total: number };
 }
+
+export interface TelegramWorkerHealthResponse {
+  latestLineAt: string | null;
+  latestHeartbeatAt: string | null;
+  droppedLines: number;
+}
