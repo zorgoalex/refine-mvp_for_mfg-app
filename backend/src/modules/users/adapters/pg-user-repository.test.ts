@@ -52,6 +52,27 @@ describe('PgUserRepository', () => {
     expect(database.queries[1].params).toEqual(['%manager%', 10, true, 10, 10]);
   });
 
+  it('excludes service accounts from user-facing list and get queries', async () => {
+    const database = new FakeUserDatabase([
+      { rows: [{ total: 0 }] },
+      { rows: [] },
+      { rows: [] },
+    ]);
+    const repository = new PgUserRepository(database);
+
+    await repository.listUsers({
+      currentUser: currentUser('admin'),
+      query: { page: 1, pageSize: 10 },
+    });
+    await expect(
+      repository.getUserById({ currentUser: currentUser('admin'), userId: 86 }),
+    ).resolves.toBeNull();
+
+    expect(database.queries[0].text).toContain('u.is_service_account = false');
+    expect(database.queries[1].text).toContain('u.is_service_account = false');
+    expect(database.queries[2].text).toContain('u.is_service_account = false');
+  });
+
   it('creates a user with backend role mapping, bcrypt hash, and audit event', async () => {
     const database = new FakeUserDatabase([], [
       {
@@ -248,6 +269,70 @@ describe('PgUserRepository', () => {
     expect(diffJson).toContain('"from":true');
     expect(diffJson).toContain('"to":false');
     expect(audit?.params[22]).toBe(JSON.stringify({ revokedSessions: 1 })); // $23 metadata_json
+  });
+
+  it('blocks service accounts from user-facing update, password, and activation queries', async () => {
+    const updateDatabase = new FakeUserDatabase([], [
+      { match: 'FROM users u', rows: [] },
+      { match: 'UPDATE users u', rows: [] },
+    ]);
+    const updateRepository = new PgUserRepository(updateDatabase);
+
+    await expect(
+      updateRepository.updateUser({
+        currentUser: currentUser('admin', '1'),
+        userId: 86,
+        dto: { fullName: 'Blocked service account update' },
+      }),
+    ).rejects.toMatchObject({ statusCode: 404, code: 'USER_NOT_FOUND' });
+
+    expect(updateDatabase.queries[0].text).toContain('u.is_service_account = false');
+    expect(updateDatabase.queries[1].text).toContain('u.is_service_account = false');
+
+    const passwordDatabase = new FakeUserDatabase([], [{ match: 'UPDATE users', rows: [] }]);
+    const passwordRepository = new PgUserRepository(passwordDatabase);
+
+    await expect(
+      passwordRepository.changePassword({
+        currentUser: currentUser('admin', '1'),
+        userId: 86,
+        dto: { newPassword: 'new-secure-password', revokeExistingSessions: true },
+      }),
+    ).rejects.toMatchObject({ statusCode: 404, code: 'USER_NOT_FOUND' });
+
+    expect(passwordDatabase.queries[0].text).toContain('is_service_account = false');
+
+    const activationDatabase = new FakeUserDatabase([], [
+      { match: 'FROM users u', rows: [] },
+      { match: 'UPDATE users u', rows: [] },
+    ]);
+    const activationRepository = new PgUserRepository(activationDatabase);
+
+    await expect(
+      activationRepository.deactivateUser({
+        currentUser: currentUser('admin', '1'),
+        userId: 86,
+      }),
+    ).rejects.toMatchObject({ statusCode: 404, code: 'USER_NOT_FOUND' });
+
+    expect(activationDatabase.queries[0].text).toContain('u.is_service_account = false');
+    expect(activationDatabase.queries[1].text).toContain('u.is_service_account = false');
+
+    const reactivationDatabase = new FakeUserDatabase([], [
+      { match: 'FROM users u', rows: [] },
+      { match: 'UPDATE users u', rows: [] },
+    ]);
+    const reactivationRepository = new PgUserRepository(reactivationDatabase);
+
+    await expect(
+      reactivationRepository.activateUser({
+        currentUser: currentUser('admin', '1'),
+        userId: 86,
+      }),
+    ).rejects.toMatchObject({ statusCode: 404, code: 'USER_NOT_FOUND' });
+
+    expect(reactivationDatabase.queries[0].text).toContain('u.is_service_account = false');
+    expect(reactivationDatabase.queries[1].text).toContain('u.is_service_account = false');
   });
 });
 

@@ -184,6 +184,7 @@ export class PgUserRepository implements UserRepositoryPort {
           UPDATE users u
           SET ${assignments.join(', ')}
           WHERE u.user_id = $${userIdIndex}
+            AND u.is_service_account = false
           RETURNING
             u.user_id, u.username, u.email, u.full_name, u.role_id,
             (SELECT role_code FROM roles WHERE role_id = u.role_id) AS role_code,
@@ -221,6 +222,7 @@ export class PgUserRepository implements UserRepositoryPort {
         UPDATE users
         SET password_hash = $1, edited_by = $2
         WHERE user_id = $3
+          AND is_service_account = false
         RETURNING user_id
         `,
         [passwordHash, toNullableUserId(command.currentUser.id), command.userId],
@@ -266,6 +268,7 @@ export class PgUserRepository implements UserRepositoryPort {
         UPDATE users u
         SET is_active = $1, edited_by = $2
         WHERE u.user_id = $3
+          AND u.is_service_account = false
         RETURNING
           u.user_id, u.username, u.email, u.full_name, u.role_id,
           (SELECT role_code FROM roles WHERE role_id = u.role_id) AS role_code,
@@ -303,6 +306,7 @@ export class PgUserRepository implements UserRepositoryPort {
       FROM users u
       LEFT JOIN roles r ON r.role_id = u.role_id
       WHERE u.user_id = $1
+        AND u.is_service_account = false
       `,
       [userId],
     );
@@ -337,7 +341,7 @@ export class PgUserRepository implements UserRepositoryPort {
 }
 
 function buildListWhere(command: ListUsersCommand, params: unknown[]): string {
-  const predicates: string[] = [];
+  const predicates: string[] = ['u.is_service_account = false'];
 
   if (command.query.search) {
     const index = params.push(`%${command.query.search}%`);
@@ -354,7 +358,7 @@ function buildListWhere(command: ListUsersCommand, params: unknown[]): string {
     predicates.push(`u.is_active = $${index}`);
   }
 
-  return predicates.length ? `WHERE ${predicates.join(' AND ')}` : '';
+  return `WHERE ${predicates.join(' AND ')}`;
 }
 
 function normalizeRole(roleIdValue: string | number, roleCode: string | null): UserRole {
