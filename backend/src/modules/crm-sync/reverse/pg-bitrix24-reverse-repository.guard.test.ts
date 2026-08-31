@@ -36,6 +36,12 @@ describe('Bitrix24 reverse repository financial guards', () => {
     expect(controllerSource).toContain("@Post('mapped-orders/:orderId/materialize-payments')");
   });
 
+  it('reads the canonical payment type name column', () => {
+    expect(source).toContain('type.type_paid_name AS type_paid_name');
+    expect(source).toContain('type.type_paid_name, mapping.active');
+    expect(source).not.toMatch(/type\.type_paid(?!_)/);
+  });
+
   it('edits CRM request details in place with optimistic and aggregate guards', () => {
     expect(source).toMatch(/replaceIncomingRequestDetails[\s\S]*FOR UPDATE OF request, orders/);
     expect(source).toMatch(/aggregate\.order_kind !== 'crm_request'/);
