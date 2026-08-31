@@ -30,6 +30,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-08-31",
+    title: "Заказы: закрытие формы после сохранения",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Сохранённую форму заказа теперь можно закрыть сразу, не дожидаясь завершения фоновой выгрузки Excel в Google Drive.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-28",
     title: "Раскрой: точные номера и контроль Telegram Worker",
     services: ["ERP", "Cutting"],
