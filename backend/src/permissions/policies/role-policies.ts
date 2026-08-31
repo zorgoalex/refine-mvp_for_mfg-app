@@ -33,12 +33,12 @@ export const ROLE_POLICIES = {
     productionTasks: { view: 'all', update: 'all' },
   },
   top_manager: {
-    orders: { view: 'all', update: 'all', export: 'all', delete: 'none' },
+    orders: { view: 'all', update: 'all', export: 'all', delete: 'all' },
     payments: { view: 'all', create: 'all', update: 'all', delete: 'own' },
     productionTasks: { view: 'all', update: 'all' },
   },
   manager: {
-    orders: { view: 'own', update: 'own', export: 'own', delete: 'none' },
+    orders: { view: 'own', update: 'own', export: 'own', delete: 'own' },
     payments: { view: 'own', create: 'own', update: 'own', delete: 'own' },
     productionTasks: { view: 'all', update: 'all' },
   },

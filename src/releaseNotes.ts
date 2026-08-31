@@ -30,6 +30,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-08-31",
+    title: "Заказы: удаление по роли и владельцу",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Топ-менеджер снова может удалить любой заказ, а менеджер — только созданный им или назначенный ему заказ; действие возвращено в формы просмотра и редактирования.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-28",
     title: "Раскрой: точные номера и контроль Telegram Worker",
     services: ["ERP", "Cutting"],

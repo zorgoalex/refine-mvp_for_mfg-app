@@ -1801,6 +1801,39 @@ probe_file() {
                      "$(q_col cnc_telegram_worker_session_leases can_send_manual_svg_uploads)" \
                      "$(q_col cnc_telegram_worker_session_leases manual_svg_send_poll_interval_seconds)" \
                      "$(q_con_on cnc_telegram_worker_session_leases chk_cnc_tg_session_runtime_evidence)" ;;
+    146_order_delete_role_scopes*) probe_all \
+                     "SELECT EXISTS (
+                        SELECT 1
+                        FROM role_permissions rp
+                        JOIN roles r ON r.role_id = rp.role_id
+                        WHERE r.role_code = 'top_manager'
+                          AND rp.permission_name = 'orders.delete'
+                          AND rp.is_enabled = true
+                     );" \
+                     "SELECT EXISTS (
+                        SELECT 1
+                        FROM role_permissions rp
+                        JOIN roles r ON r.role_id = rp.role_id
+                        WHERE r.role_code = 'manager'
+                          AND rp.permission_name = 'orders.delete'
+                          AND rp.is_enabled = true
+                     );" \
+                     "SELECT EXISTS (
+                        SELECT 1
+                        FROM role_policy_scopes rps
+                        JOIN roles r ON r.role_id = rps.role_id
+                        WHERE r.role_code = 'top_manager'
+                          AND rps.scope_key = 'orders.delete'
+                          AND rps.scope_value = 'all'
+                     );" \
+                     "SELECT EXISTS (
+                        SELECT 1
+                        FROM role_policy_scopes rps
+                        JOIN roles r ON r.role_id = rps.role_id
+                        WHERE r.role_code = 'manager'
+                          AND rps.scope_key = 'orders.delete'
+                          AND rps.scope_value = 'own'
+                     );" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -1811,7 +1844,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*|127_*|128_*|129_*|130_*|131_*|132_*|133_*|134_*|135_*|136_*|137_*|138_*|139_*|140_*|141_*|142_*|143_*|144_*|145_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*|127_*|128_*|129_*|130_*|131_*|132_*|133_*|134_*|135_*|136_*|137_*|138_*|139_*|140_*|141_*|142_*|143_*|144_*|145_*|146_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

@@ -33,6 +33,7 @@ import { OrderDetail, OrderFormMode } from '../../../types/orders';
 import { orderFormSchema } from '../../../schemas/orderSchema';
 import { featureFlags } from '../../../config/featureFlags';
 import { can } from '../../../utils/permissions';
+import { authSession } from '../../../api/authSession';
 import { useOrderFinancialVisibility } from '../../../hooks/useOrderFinancialVisibility';
 import { resolveOrderTabLabel } from '../../../utils/tabLabels';
 import {
@@ -87,6 +88,7 @@ import { OrderTelegramScreenshots } from './sections/OrderTelegramScreenshots';
 import { OrderAggregatesDisplay } from './sections/OrderAggregatesDisplay';
 import { OrderLabelDataEditor } from './labels/OrderLabelDataEditor';
 import { makeOrderDeleteHandler } from '../orderDeleteAction';
+import { canDeleteOrderForUser } from '../orderDeleteVisibility';
 import { isAuthoritativeDirtyOrderDraft } from '../orderDraftAuthority';
 import {
   OrderFormProgressiveSurface,
@@ -505,7 +507,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   );
   const labelsEnabled = featureFlags.labels && can('labels.view');
   const cutTabEnabled = featureFlags.useBackendCut && can('cut.view');
-  const canManageOrderTrash = !featureFlags.useBackendPermissions || can('orders.delete');
+  const canDeleteCurrentOrder = !featureFlags.useBackendPermissions
+    || canDeleteOrderForUser(authSession.getUser(), header);
 
   useEffect(() => {
     if (saveValidation?.invalidDetailKeys.length) {
@@ -2022,7 +2025,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
                     Просмотр
                   </Button>
                 ) : null}
-                {featureFlags.useBackendOrdersWrite && canManageOrderTrash && mode === 'edit' && orderId && !header.delete_flag ? (
+                {featureFlags.useBackendOrdersWrite && canDeleteCurrentOrder && mode === 'edit' && orderId && !header.delete_flag ? (
                   <Popconfirm
                     title={`Удалить заказ №${header.order_name}?`}
                     description="Заказ попадёт в корзину, его можно будет восстановить."
@@ -2106,7 +2109,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
               Просмотр
             </Button>
           )}
-          {featureFlags.useBackendOrdersWrite && canManageOrderTrash && mode === 'edit' && orderId && !header.delete_flag ? (
+          {featureFlags.useBackendOrdersWrite && canDeleteCurrentOrder && mode === 'edit' && orderId && !header.delete_flag ? (
             <Popconfirm
               title={`Удалить заказ №${header.order_name}?`}
               description="Заказ попадёт в корзину, его можно будет восстановить."

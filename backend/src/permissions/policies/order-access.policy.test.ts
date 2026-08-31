@@ -30,6 +30,12 @@ describe('OrderAccessPolicy', () => {
     expect(policy.canExport(user('manager'), ownOrder)).toBe(true);
   });
 
+  it('allows top manager to delete any order and manager to delete only own orders', () => {
+    expect(policy.canDelete(user('top_manager'), otherOrder)).toBe(true);
+    expect(policy.canDelete(user('manager'), ownOrder)).toBe(true);
+    expect(policy.canDelete(user('manager'), otherOrder)).toBe(false);
+  });
+
   it('allows worker only assigned order view and no whole-order update', () => {
     expect(policy.canView(user('worker'), assignedOrder)).toBe(true);
     expect(policy.canView(user('worker'), otherOrder)).toBe(false);

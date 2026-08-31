@@ -84,6 +84,7 @@ import { useIsMobile } from '../../hooks/useDeviceTier';
 import { DetailCardList } from './mobile/DetailCardList';
 import type { DetailCardLookups } from './mobile/detailCardModel';
 import { makeOrderDeleteHandler } from './orderDeleteAction';
+import { canDeleteOrderForUser } from './orderDeleteVisibility';
 import { makeRestoreHandler } from './orderRestoreAction';
 import { DeletedOrderCard } from './DeletedOrderCard';
 import { buildDeletedOrderCardModel } from './deletedOrderCard';
@@ -2390,8 +2391,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const canMoveOrderProject = Boolean(
     canEditOrderContent && featureFlags.projects && record?.order_id && record?.client_id,
   );
+  const canDeleteCurrentOrder = !featureFlags.useBackendPermissions
+    || canDeleteOrderForUser(authSession.getUser(), record);
   const canDeleteOrder = Boolean(
-    featureFlags.useBackendOrdersWrite && canManageOrderTrash && record?.order_id && !record?.delete_flag,
+    featureFlags.useBackendOrdersWrite && canDeleteCurrentOrder && record?.order_id && !record?.delete_flag,
   );
 
   const handleDeleteOrder = useCallback(() => {
