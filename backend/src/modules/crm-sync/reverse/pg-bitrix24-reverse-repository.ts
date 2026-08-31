@@ -3233,14 +3233,14 @@ export class PgBitrix24ReverseRepository {
        SELECT systems.pay_system_id,
               MAX(systems.pay_system_name) AS pay_system_name,
               mapping.type_paid_id,
-              type.type_paid AS type_paid_name,
+              type.type_paid_name AS type_paid_name,
               COALESCE(mapping.active, false) AS active
          FROM systems
          LEFT JOIN bitrix24_payment_type_mapping mapping
            ON mapping.pay_system_id=systems.pay_system_id
          LEFT JOIN payment_types type ON type.type_paid_id=mapping.type_paid_id
         GROUP BY systems.pay_system_id, mapping.type_paid_id,
-                 type.type_paid, mapping.active
+                 type.type_paid_name, mapping.active
         ORDER BY systems.pay_system_id`,
     );
     return result.rows.map((row) => ({
