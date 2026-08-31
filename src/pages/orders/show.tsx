@@ -804,8 +804,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const canRestore = canManageOrderTrash && featureFlags.useBackendOrdersWrite;
   const showTitle = deletedOrder
     ? `Заказ №${deletedOrder.header.orderName} (удалён)`
-    : record?.order_full_number
-      ? `Заказ ${record.order_full_number}`
+    : record?.order_name
+      ? `Заказ ${record.order_name}`
       : 'Просмотр заказа';
 
   useEffect(() => {
