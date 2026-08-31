@@ -211,6 +211,14 @@ describe('permissions foundation', () => {
     expect(can('top_manager', 'orders.view_financials')).toBe(true);
   });
 
+  it('grants order delete only to roles approved for scoped deletion', () => {
+    expect(can('top_manager', 'orders.delete')).toBe(true);
+    expect(can('manager', 'orders.delete')).toBe(true);
+    expect(can('operator', 'orders.delete')).toBe(false);
+    expect(can('worker', 'orders.delete')).toBe(false);
+    expect(can('viewer', 'orders.delete')).toBe(false);
+  });
+
   it('grants notification rule permissions to admin and superadmin only', () => {
     expect(can('superadmin', 'notifications.manage_rules')).toBe(true);
     expect(can('admin', 'notifications.manage_rules')).toBe(true);

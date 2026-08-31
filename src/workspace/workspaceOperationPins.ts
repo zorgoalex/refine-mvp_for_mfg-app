@@ -33,6 +33,12 @@ export const PAGE_OWNED_WORKSPACE_OPERATION_IDS = [
 export type PageOwnedWorkspaceOperationId =
   typeof PAGE_OWNED_WORKSPACE_OPERATION_IDS[number];
 
+// Background export still pins its mounted owner until completion, but it does
+// not mutate the order draft and must not keep an already-saved tab open.
+const NON_BLOCKING_TAB_CLOSE_OPERATION_IDS = new Set<PageOwnedWorkspaceOperationId>([
+  'order-excel-export',
+]);
+
 interface WorkspaceOperationPin {
   namespace: string;
   workspaceKey: string;
@@ -138,6 +144,18 @@ export function hasWorkspaceOperationPins(workspaceKey: string): boolean {
   const namespace = getWorkspaceStateNamespace();
   for (const pin of pins.values()) {
     if (pin.namespace === namespace && pin.workspaceKey === workspaceKey) return true;
+  }
+  return false;
+}
+
+export function hasWorkspaceCloseBlockingOperationPins(workspaceKey: string): boolean {
+  const namespace = getWorkspaceStateNamespace();
+  for (const pin of pins.values()) {
+    if (
+      pin.namespace === namespace
+      && pin.workspaceKey === workspaceKey
+      && !NON_BLOCKING_TAB_CLOSE_OPERATION_IDS.has(pin.operationId)
+    ) return true;
   }
   return false;
 }

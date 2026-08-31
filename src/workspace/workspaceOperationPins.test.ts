@@ -7,6 +7,7 @@ import {
   acquireWorkspaceOperationPin,
   clearWorkspaceOperationPins,
   getWorkspaceOperationPinDiagnostics,
+  hasWorkspaceCloseBlockingOperationPins,
   hasWorkspaceOperationPins,
   listWorkspaceOperationPins,
   recordWorkspaceOperationEvictionPin,
@@ -58,6 +59,20 @@ describe('page-owned workspace operation pins', () => {
     )).rejects.toThrow('refresh failed');
 
     expect(getWorkspaceOperationPinDiagnostics().activePinCount).toBe(0);
+  });
+
+  it('keeps background Excel export mounted without blocking explicit tab close', () => {
+    const workspaceKey = '/orders/edit/42';
+    const releaseExport = acquireWorkspaceOperationPin(workspaceKey, 'order-excel-export');
+
+    expect(hasWorkspaceOperationPins(workspaceKey)).toBe(true);
+    expect(hasWorkspaceCloseBlockingOperationPins(workspaceKey)).toBe(false);
+
+    const releaseSave = acquireWorkspaceOperationPin(workspaceKey, 'order-save');
+    expect(hasWorkspaceCloseBlockingOperationPins(workspaceKey)).toBe(true);
+
+    releaseSave();
+    releaseExport();
   });
 
   it('clears actor A pins before actor B can observe the namespace', () => {

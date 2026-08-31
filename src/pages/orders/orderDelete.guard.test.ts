@@ -8,12 +8,14 @@ const deletedOrderCardSource = readFileSync(new URL('./DeletedOrderCard.tsx', im
 describe('order delete guards', () => {
   it('delete action is gated by the unified permission gate in BOTH cards', () => {
     for (const source of [showSource, orderFormSource]) {
-      expect(source).toMatch(/canManageOrderTrash\s*=\s*!featureFlags\.useBackendPermissions\s*\|\|\s*can\('orders\.delete'\)/);
-      expect(source).toContain('featureFlags.useBackendOrdersWrite && canManageOrderTrash');
+      expect(source).toContain('canDeleteOrderForUser');
+      expect(source).toContain('featureFlags.useBackendOrdersWrite && canDeleteCurrentOrder');
       expect(source).toContain('ordersApi.delete');
       expect(source).toContain('capturePublicationGuard');
       expect(source).toContain('isSameResource(token)');
     }
+
+    expect(showSource).toMatch(/canManageOrderTrash\s*=\s*!featureFlags\.useBackendPermissions\s*\|\|\s*can\('orders\.delete'\)/);
 
     expect(showSource).toContain('Modal.confirm');
     expect(showSource).toContain("key: 'delete-order'");

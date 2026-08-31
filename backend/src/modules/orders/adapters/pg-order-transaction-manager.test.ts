@@ -162,7 +162,8 @@ describe('PgOrderTransactionManager', () => {
     expect(detailInsert?.params.at(-2)).toBe('Прихожка');
     expect(detailInsert?.params.at(-1)).toBe(false);
     expect(sql).toContain('INSERT INTO payments');
-    expect(sql).toContain('DELETE FROM order_details');
+    expect(sql).toContain('UPDATE order_details SET delete_flag = true');
+    expect(sql).not.toContain('DELETE FROM order_details');
     expect(sql).toContain('SELECT recalc_order_production_status($1)');
     expect(sql).toContain('INSERT INTO audit_log');
   });
@@ -306,7 +307,7 @@ describe('PgOrderTransactionManager', () => {
     });
   });
 
-  it('rejects child ids from another order before mutation', async () => {
+  it('rejects soft-deleted or foreign detail ids before mutation', async () => {
     const database = createDatabase({ childCount: 0 });
     const manager = new PgOrderTransactionManager(database.service);
 
@@ -317,6 +318,25 @@ describe('PgOrderTransactionManager', () => {
     ).rejects.toMatchObject({
       code: 'CHILD_ENTITY_NOT_OWNED',
     });
+
+    const ownershipQuery = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('SELECT COUNT(*)::int AS count FROM order_details'),
+    );
+    expect(normalizeSql(ownershipQuery?.text ?? '')).toContain('delete_flag = false');
+  });
+
+  it('never updates a soft-deleted detail row', async () => {
+    const database = createDatabase();
+    const manager = new PgOrderTransactionManager(database.service);
+
+    await manager.runInTransaction((uow) => uow.upsertDetails(100, [{ ...detail(), id: 200 }]));
+
+    const updateQuery = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('UPDATE order_details SET detail_number'),
+    );
+    expect(normalizeSql(updateQuery?.text ?? '')).toContain(
+      'WHERE detail_id = $1 AND order_id = $2 AND delete_flag = false',
+    );
   });
 
   it('updates discount and final amount in the same header statement', async () => {
@@ -808,6 +828,7 @@ describe('PgOrderTransactionManager', () => {
     expect(normalizedSql(queries)).toContain('FROM order_statuses');
     expect(normalizedSql(queries)).toContain('FROM production_statuses');
     expect(normalizedSql(queries)).toContain('FROM order_details od');
+    expect(normalizedSql(queries)).toContain('od.delete_flag = false');
   });
 
   it('writes a non-null diff_json for orders.create audit when before/after snapshots are provided', async () => {

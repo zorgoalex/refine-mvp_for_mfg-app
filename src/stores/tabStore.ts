@@ -6,7 +6,10 @@ import { resolveTabLabel, shouldPreserveTabLabel } from '../utils/tabLabels';
 import { destroyOrderDraftStore } from './orderFormStore';
 import { removeWorkspaceCheckpoint } from '../workspace/workspaceCheckpointRegistry';
 import { releaseWorkspaceAttachments } from '../workspace/workspaceAttachmentRegistry';
-import { recordWorkspaceOperationEvictionPin } from '../workspace/workspaceOperationPins';
+import {
+  hasWorkspaceCloseBlockingOperationPins,
+  recordWorkspaceOperationEvictionPin,
+} from '../workspace/workspaceOperationPins';
 
 export const LEGACY_WORKSPACE_TABS_STORAGE_KEY = 'workspace-tabs';
 const INACTIVE_WORKSPACE_TABS_STORAGE_KEY = 'erp.workspaceTabs.anonymous';
@@ -167,7 +170,10 @@ export const useTabStore = create<TabState>()(
           return { tabs: [...state.tabs, { ...nextTab, openerKey, dirty: false }] };
         }),
       closeTab: (key, opts) => {
-        if (recordWorkspaceOperationEvictionPin(key)) return false;
+        if (hasWorkspaceCloseBlockingOperationPins(key)) {
+          recordWorkspaceOperationEvictionPin(key);
+          return false;
+        }
         removeWorkspaceCheckpoint(key);
         releaseWorkspaceAttachments(key);
         if (opts?.discard) {

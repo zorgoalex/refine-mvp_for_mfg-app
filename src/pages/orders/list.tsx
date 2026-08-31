@@ -125,7 +125,6 @@ import { useOrderLifecycleCohort } from "../../performance/orderLifecycleCohortS
 import "./list.css";
 
 const ORDER_LIST_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
-  { key: 'order_id', label: 'id', lockVisible: true },
   { key: 'order_name', label: 'Заказ', lockVisible: true },
   ...(featureFlags.projects ? [{ key: 'project_code', label: '№ проекта' }] : []),
   { key: 'doweling_order_name', label: 'Базис-проект' },
@@ -1358,17 +1357,6 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   };
 
   const orderListColumns: ColumnsType<any> = withOrderListHeaderTitles([
-    {
-      dataIndex: "order_id",
-      key: "order_id",
-      title: <span style={{ fontSize: '42%' }}>ID заказа</span>,
-      sorter: true,
-      fixed: "left",
-      width: 39,
-      className: "col-order-id",
-      onHeaderCell: () => ({ className: "col-order-id" }),
-      render: (value) => <span style={{ fontSize: '75%', whiteSpace: 'nowrap' }}>{value}</span>,
-    },
     {
       dataIndex: "order_name",
       key: "order_name",
