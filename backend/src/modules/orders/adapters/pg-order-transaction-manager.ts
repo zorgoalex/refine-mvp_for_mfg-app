@@ -774,6 +774,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       FROM order_details od
       LEFT JOIN production_statuses ps ON ps.production_status_id = od.production_status_id
       WHERE od.order_id = $1
+        AND od.delete_flag = false
       ORDER BY od.detail_id
       `,
       [orderId],
@@ -799,11 +800,12 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       }
 
       const table = CHILD_TABLES[entityType];
+      const activeRowPredicate = entityType === 'detail' ? ' AND delete_flag = false' : '';
       const result = await this.tx.query<{ count: string | number }>(
         `
         SELECT COUNT(*)::int AS count
         FROM ${table.table}
-        WHERE ${table.pk} = ANY($1::bigint[]) AND order_id = $2
+        WHERE ${table.pk} = ANY($1::bigint[]) AND order_id = $2${activeRowPredicate}
         `,
         [ids, orderId],
       );
@@ -975,7 +977,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
               link_pdf_file = $22, ref_key_1c = $23, sheet_material_type_id = $24,
               hdf_parameter_override_mm = $25, basis_project = $26, basis_data = $27,
               basis_designation = $28, basis_product = $29, doweling = $30
-          WHERE detail_id = $1 AND order_id = $2
+          WHERE detail_id = $1 AND order_id = $2 AND delete_flag = false
           `,
           detailParams(effective.id, orderId, effective),
         );
@@ -1001,7 +1003,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
   }
 
   async deleteDetails(orderId: number, ids: readonly number[]): Promise<void> {
-    await deleteByIds(this.tx, 'order_details', 'detail_id', orderId, ids);
+    await softDeleteByIds(this.tx, 'order_details', 'detail_id', 'delete_flag', true, orderId, ids);
   }
 
   async applyHdfStatusEdits(input: {
