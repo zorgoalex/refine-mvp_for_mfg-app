@@ -16,7 +16,7 @@ const allAuthenticatedRoutes: SmokeRoute[] = [
     { path: '/', label: 'home route', waitForText: /Заказы|Orders/i },
     { path: '/orders', label: 'orders list', waitForText: /Заказы|Orders/i },
     { path: '/orders/edit/15', label: 'orders edit', waitForText: /E2E all-pages order|Основная/i },
-    { path: '/orders/show/15', label: 'orders show', waitForText: 'Просмотр заказа' },
+    { path: '/orders/show/15', label: 'orders show', waitForText: 'Заказ E2E all-pages order' },
     { path: '/calendar', label: 'calendar list', waitForText: 'Производственный календарь' },
     { path: '/doweling-orders', label: 'doweling orders list' },
     { path: '/doweling-orders/edit/1', label: 'doweling orders edit' },
