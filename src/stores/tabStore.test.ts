@@ -145,6 +145,19 @@ describe('tabStore', () => {
     expect(mod.useTabStore.getState().tabs.some((tab) => tab.key === key)).toBe(false);
   });
 
+  it('closes the tab while its background Excel export finishes in the retained owner', () => {
+    const state = mod.useTabStore.getState();
+    const key = '/orders/edit/42';
+    state.openTab({ key, path: key, label: '42', resource: 'orders_view' });
+    const release = acquireWorkspaceOperationPin(key, 'order-excel-export');
+
+    expect(state.closeTab(key)).toBe(true);
+    expect(mod.useTabStore.getState().tabs.some((tab) => tab.key === key)).toBe(false);
+    expect(getWorkspaceOperationPinDiagnostics().activePinCount).toBe(1);
+
+    release();
+  });
+
   it('persists {key,path,label,resource} (not dirty) to user-scoped localStorage', () => {
     mod.useTabStore.getState().openTab({ key: '/orders', path: '/orders', label: 'Заказы', resource: 'orders_view' });
     mod.useTabStore.getState().openTab({
