@@ -4288,8 +4288,8 @@ async function enqueueUnresolvedDealsForCounterparty(
             request.bitrix_deal_id, now(),
             jsonb_build_object(
               'source','counterparty-resume',
-              'counterpartyObjectType',$1,
-              'counterpartyBitrixId',$2
+              'counterpartyObjectType',$1::text,
+              'counterpartyBitrixId',$2::text
             ),
             'counterparty-resume:' || $1 || ':' || $2 || ':deal:' ||
               request.bitrix_deal_id || ':' || COALESCE(request.remote_revision,'legacy')
