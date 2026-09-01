@@ -24,6 +24,7 @@ import { CurrencyInput } from '../../../../components/CurrencyInput';
 import { getMaterialColor, getMillingBgColor } from '../../../../config/displayColors';
 import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/useOrderFormData';
 import {
+  getDefaultSheetMaterialTypeId,
   useSheetMaterialOptions,
   toSheetSelectOptions,
   filterCuttableOptions,
@@ -94,6 +95,7 @@ import {
 } from '../../../../workspace/workspaceFormCheckpoint';
 import { useDeferredWorkspaceEditingKey } from '../../../../workspace/useDeferredWorkspaceEditingKey';
 import { millingTypeDimensionWarning } from '../../../../utils/millingTypeDimensions';
+import { newDetailMaterialDefault } from '../../newDetailMaterialDefault';
 
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
@@ -826,6 +828,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   // SP3: sheet picker gating (backend write + sheet_materials.view) + order-era
   // eligibility (create OR loaded order's sheet_eligible !== false).
   const sheetMaterials = useSheetMaterialOptions();
+  const defaultSheetMaterialTypeId = useMemo(
+    () => getDefaultSheetMaterialTypeId(sheetMaterials.catalogOptions),
+    [sheetMaterials.catalogOptions],
+  );
 
   // Ref for table scroll container (for auto-scroll)
   const tableContainerRef = useRef<HTMLDivElement>(null);
@@ -925,6 +931,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   );
 
   const [form] = Form.useForm();
+  const defaultMaterialAppliedKeyRef = useRef<React.Key | null>(null);
   const restoredEditingKey = useRef(readDetailCheckpointKey(restored?.editingKey)).current;
   const {
     editingKey,
@@ -1244,6 +1251,30 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     () => sortedDetails.find((detail) => orderDetailRowKey(detail) === editingKey),
     [editingKey, sortedDetails],
   );
+  useEffect(() => {
+    if (editingKey == null) return;
+    if (defaultMaterialAppliedKeyRef.current === editingKey) return;
+
+    const record = sortedDetails.find((detail) => orderDetailRowKey(detail) === editingKey);
+    if (!record || record.detail_id != null) {
+      defaultMaterialAppliedKeyRef.current = editingKey;
+      return;
+    }
+    if (form.getFieldValue('sheet_material_type_id') != null) {
+      defaultMaterialAppliedKeyRef.current = editingKey;
+      return;
+    }
+
+    const materialDefault = newDetailMaterialDefault(
+      sortedDetails,
+      defaultSheetMaterialTypeId,
+      record.detail_number ?? Number.POSITIVE_INFINITY,
+    );
+    if (materialDefault == null) return;
+
+    form.setFieldValue('sheet_material_type_id', materialDefault);
+    defaultMaterialAppliedKeyRef.current = editingKey;
+  }, [defaultSheetMaterialTypeId, editingKey, form, sortedDetails]);
   const localRecentIds = useMemo(() => {
     if (!editingDetailForOptions) {
       return { milling: [], edge: [], material: [], film: [], status: [] };
@@ -1456,7 +1487,15 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       width: record.width ?? null,
       quantity: record.quantity ?? null,
       area: record.area,
-      sheet_material_type_id: record.sheet_material_type_id ?? null,
+      sheet_material_type_id:
+        record.sheet_material_type_id ??
+        (record.detail_id == null
+          ? newDetailMaterialDefault(
+              sortedDetails,
+              defaultSheetMaterialTypeId,
+              record.detail_number ?? Number.POSITIVE_INFINITY,
+            )
+          : null),
       milling_type_id: record.milling_type_id,
       hdf_parameter_override_mm: record.hdf_parameter_override_mm ?? null,
       edge_type_id: record.edge_type_id,

@@ -1,7 +1,7 @@
 // Order Detail Modal
 // Modal for creating/editing order details with auto-calculation
 
-import React, { useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Modal, Form, Input, InputNumber, Row, Col, Select, Space, Button, Alert, Checkbox } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { useSelect } from '../../../../query/orderLifecycleQueries';
@@ -33,6 +33,7 @@ interface OrderDetailModalProps {
   open: boolean;
   mode: 'create' | 'edit';
   detail?: OrderDetail;
+  defaultSheetMaterialTypeId?: number;
   onSave: (detail: Omit<OrderDetail, 'temp_id'>) => void;
   onCancel: () => void;
 }
@@ -41,6 +42,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   open,
   mode,
   detail,
+  defaultSheetMaterialTypeId,
   onSave,
   onCancel,
 }) => {
@@ -177,6 +179,18 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
       setDimensionValidationError(null);
     }
   }, [open, mode, detail, form, restored]);
+
+  // References can arrive after modal opens. Fill only an untouched create field.
+  useEffect(() => {
+    if (
+      open &&
+      mode === 'create' &&
+      defaultSheetMaterialTypeId != null &&
+      form.getFieldValue('sheet_material_type_id') == null
+    ) {
+      form.setFieldValue('sheet_material_type_id', defaultSheetMaterialTypeId);
+    }
+  }, [defaultSheetMaterialTypeId, form, mode, open]);
 
   // Validate dimensions against material limits
   const validateDimensions = () => {
