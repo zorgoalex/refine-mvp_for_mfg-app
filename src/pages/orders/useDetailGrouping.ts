@@ -9,6 +9,7 @@ export interface DetailGroupingState {
 }
 
 const DEFAULT_STATE: DetailGroupingState = { field: null, showSeparation: true };
+const NEW_ORDER_STATE: DetailGroupingState = { field: null, showSeparation: false };
 const VALID_FIELDS = new Set<string>(GROUP_FIELDS.map(f => f.field));
 
 export function detailGroupingKey(userId: string, orderId: string | number): string {
@@ -49,13 +50,27 @@ export function nextStateForField(
   return { field, showSeparation: field !== null ? true : prev.showSeparation };
 }
 
-export function useDetailGrouping(userId: string, orderId: string | number) {
-  const [state, setState] = useState<DetailGroupingState>(() => loadDetailGrouping(userId, orderId));
+export function initialDetailGroupingState(
+  userId: string,
+  orderId: string | number,
+  startDisabled = false,
+): DetailGroupingState {
+  return startDisabled ? { ...NEW_ORDER_STATE } : loadDetailGrouping(userId, orderId);
+}
+
+export function useDetailGrouping(
+  userId: string,
+  orderId: string | number,
+  startDisabled = false,
+) {
+  const [state, setState] = useState<DetailGroupingState>(() =>
+    initialDetailGroupingState(userId, orderId, startDisabled),
+  );
 
   // Re-load when the identity/order changes (e.g. tab switches to another order).
   useEffect(() => {
-    setState(loadDetailGrouping(userId, orderId));
-  }, [userId, orderId]);
+    setState(initialDetailGroupingState(userId, orderId, startDisabled));
+  }, [userId, orderId, startDisabled]);
 
   const persist = useCallback(
     (next: DetailGroupingState) => {

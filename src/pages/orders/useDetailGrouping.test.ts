@@ -1,6 +1,12 @@
 // src/pages/orders/useDetailGrouping.test.ts
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { detailGroupingKey, loadDetailGrouping, saveDetailGrouping, nextStateForField } from './useDetailGrouping';
+import {
+  detailGroupingKey,
+  initialDetailGroupingState,
+  loadDetailGrouping,
+  saveDetailGrouping,
+  nextStateForField,
+} from './useDetailGrouping';
 
 // Minimal localStorage mock for node env.
 beforeEach(() => {
@@ -46,5 +52,23 @@ describe('nextStateForField', () => {
   it('keeps prior showSeparation when clearing the field', () => {
     expect(nextStateForField({ field: 'milling', showSeparation: false }, null))
       .toEqual({ field: null, showSeparation: false });
+  });
+});
+
+describe('initialDetailGroupingState', () => {
+  it('starts disabled for a new order even when a prior new-order preference exists', () => {
+    saveDetailGrouping('u7', 'new', { field: 'material', showSeparation: true });
+    expect(initialDetailGroupingState('u7', 'new', true)).toEqual({
+      field: null,
+      showSeparation: false,
+    });
+  });
+
+  it('keeps saved behavior for an existing order', () => {
+    saveDetailGrouping('u7', 42, { field: 'material', showSeparation: true });
+    expect(initialDetailGroupingState('u7', 42, false)).toEqual({
+      field: 'material',
+      showSeparation: true,
+    });
   });
 });

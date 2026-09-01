@@ -1,3 +1,4 @@
+import { XMLBuilder, XMLParser } from 'fast-xml-parser';
 import {
   BATH_METER_GUIDE_OUTSIDE_LEFT_GUTTER_RATIO,
   BATH_METER_GUIDE_OUTSIDE_TOP_GUTTER_RATIO,
@@ -138,6 +139,13 @@ const BATH_CENTER_BASELINE_DISTANCE_SCALE = 0.8;
 const BATH_ORDER_LABEL_WEIGHT = 900;
 const BATH_ORDER_LABEL_STROKE_RATIO = 0.04;
 const SOURCE_SVG_FRAGMENT_UNSAFE_RE = /<\s*(?:script|foreignObject)\b|\bon[a-z]+\s*=|\b(?:href|xlink:href)\s*=|(?:javascript:|data:|https?:|file:)/i;
+const SOURCE_SVG_GRAPHICS = new Set(['path', 'line', 'polyline', 'polygon', 'rect', 'circle', 'ellipse']);
+const SOURCE_SVG_XML_OPTIONS = {
+  ignoreAttributes: false,
+  attributeNamePrefix: '@',
+  preserveOrder: true,
+  suppressEmptyNode: true,
+} as const;
 
 /** Deterministic contour color for a source order. The historical function
  * name remains API-compatible with frozen render call sites. */
@@ -608,6 +616,7 @@ function renderPieceSourceSvgFragment(
   orderContour?: string | null,
   pieceIndex = 0,
 ): string {
+  const resolvedStyle = resolveCutRenderStyle(renderStyle);
   const source = (piece as {
     source_svg?: {
       viewBox?: {
@@ -633,13 +642,92 @@ function renderPieceSourceSvgFragment(
     return '';
   }
   const scopeClass = `cut-sheet-piece-source-svg-${pieceIndex}`;
-  const css = cutRenderSourceSvgCss(renderStyle, pieceFill, orderContour, `.${scopeClass}`);
+  const css = cutRenderSourceSvgCss(resolvedStyle, pieceFill, orderContour, `.${scopeClass}`);
+  if (resolvedStyle.sourceSvg.strokeColorMode !== 'fixed') {
+    return [
+      `<svg class="cut-sheet-piece-source-svg ${scopeClass}" x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(rect.h)}" viewBox="0 0 ${num(width)} ${num(height)}" preserveAspectRatio="none" overflow="hidden">`,
+      css ? `<style>${css}</style>` : '',
+      body,
+      '</svg>',
+    ].join('');
+  }
+
+  const clipId = `cut-sheet-piece-source-clip-${pieceIndex}`;
+  const scaleX = rect.w / width;
+  const scaleY = rect.h / height;
+  const renderedBody = applyFixedSourceSvgStroke(body, resolvedStyle);
   return [
-    `<svg class="cut-sheet-piece-source-svg ${scopeClass}" x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(rect.h)}" viewBox="0 0 ${num(width)} ${num(height)}" preserveAspectRatio="none" overflow="hidden">`,
-    css ? `<style>${css}</style>` : '',
-    body,
-    '</svg>',
+    `<defs><clipPath id="${clipId}"><rect x="0" y="0" width="${num(width)}" height="${num(height)}"/></clipPath></defs>`,
+    `<g class="cut-sheet-piece-source-svg ${scopeClass}" transform="translate(${num(rect.x)} ${num(rect.y)}) scale(${num(scaleX)} ${num(scaleY)})" clip-path="url(#${clipId})">`,
+    renderedBody,
+    '</g>',
   ].join('');
+}
+
+function applyFixedSourceSvgStroke(body: string, renderStyle: CutRenderStyleRef): string {
+  const style = resolveCutRenderStyle(renderStyle);
+  const minStroke = style.sourceSvg.minStrokePx;
+  if (minStroke === null) return body;
+  try {
+    const parser = new XMLParser(SOURCE_SVG_XML_OPTIONS);
+    const document = parser.parse(`<root>${body}</root>`) as Array<Record<string, unknown>>;
+    const root = document[0]?.root;
+    if (!Array.isArray(root)) return body;
+    applyFixedSourceSvgStrokeNodes(root as Array<Record<string, unknown>>, style, 1);
+    return new XMLBuilder(SOURCE_SVG_XML_OPTIONS).build(root);
+  } catch {
+    return body;
+  }
+}
+
+function applyFixedSourceSvgStrokeNodes(
+  nodes: Array<Record<string, unknown>>,
+  style: ReturnType<typeof resolveCutRenderStyle>,
+  parentScale: number,
+): void {
+  for (const node of nodes) {
+    const elementName = Object.keys(node).find((key) => key !== ':@' && key !== '#text');
+    if (!elementName) continue;
+    const attributes = (node[':@'] ?? {}) as Record<string, string>;
+    node[':@'] = attributes;
+    const elementScale = parentScale * sourceSvgTransformMinScale(attributes['@transform']);
+    if (SOURCE_SVG_GRAPHICS.has(elementName)) {
+      attributes['@stroke'] = style.sourceSvg.fixedStroke;
+      attributes['@stroke-width'] = formatSvgNumber((style.sourceSvg.minStrokePx ?? 0) / elementScale);
+      attributes['@stroke-opacity'] = formatSvgNumber(style.sourceSvg.strokeOpacity);
+      attributes['@fill'] = 'none';
+      attributes['@vector-effect'] = 'non-scaling-stroke';
+    }
+    const children = node[elementName];
+    if (Array.isArray(children)) {
+      applyFixedSourceSvgStrokeNodes(children as Array<Record<string, unknown>>, style, elementScale);
+    }
+  }
+}
+
+function sourceSvgTransformMinScale(transform: string | undefined): number {
+  if (!transform) return 1;
+  let scale = 1;
+  for (const match of transform.matchAll(/matrix\(\s*([-+\d.eE]+)[ ,]+([-+\d.eE]+)[ ,]+([-+\d.eE]+)[ ,]+([-+\d.eE]+)/g)) {
+    const [, aRaw, bRaw, cRaw, dRaw] = match;
+    const a = Number(aRaw);
+    const b = Number(bRaw);
+    const c = Number(cRaw);
+    const d = Number(dRaw);
+    const candidate = Math.min(Math.hypot(a, b), Math.hypot(c, d));
+    if (Number.isFinite(candidate) && candidate > 0) scale *= candidate;
+  }
+  for (const match of transform.matchAll(/scale\(\s*([-+\d.eE]+)(?:[ ,]+([-+\d.eE]+))?/g)) {
+    const x = Math.abs(Number(match[1]));
+    const y = Math.abs(Number(match[2] ?? match[1]));
+    const candidate = Math.min(x, y);
+    if (Number.isFinite(candidate) && candidate > 0) scale *= candidate;
+  }
+  return scale;
+}
+
+function formatSvgNumber(value: number): string {
+  return String(Number(value.toFixed(6)));
 }
 
 export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {

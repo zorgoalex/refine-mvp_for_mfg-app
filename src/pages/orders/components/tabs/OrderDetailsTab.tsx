@@ -24,7 +24,10 @@ import { ImportDropdownButton } from '../import';
 import { useOrderFormStore, useOrderDraftStoreApi } from '../../../../stores/orderFormStore';
 import { OrderDetail } from '../../../../types/orders';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
-import { useSheetMaterialOptions, filterCuttableOptions } from '../../../../hooks/useSheetMaterialOptions';
+import {
+  getDefaultSheetMaterialTypeId,
+  useSheetMaterialOptions,
+} from '../../../../hooks/useSheetMaterialOptions';
 import { useDetailGrouping } from '../../useDetailGrouping';
 import { DetailGroupingControls } from '../DetailGroupingControls';
 import { authSession } from '../../../../api/authSession';
@@ -65,14 +68,18 @@ import {
   businessOrderDetails,
   isOrderDetailPlaceholder,
 } from '../../../../utils/orderDetailRows';
+import {
+  insertedDetailMaterialDefault,
+  newDetailMaterialDefault,
+} from '../../newDetailMaterialDefault';
 
 // Exposed methods via ref
 export interface OrderDetailsTabRef {
   applyCurrentEdits: () => Promise<boolean>;
 }
 
-// Static defaults for quick add (sheet_material_type_id is resolved dynamically
-// from the first active cuttable option in the component body).
+// Static defaults for quick add. Material is resolved per row: first new row
+// uses catalog minimum, later new rows inherit the preceding new row.
 const QUICK_ADD_DEFAULTS_BASE = {
   milling_type_id: 1,  // Модерн
   edge_type_id: 1,     // р-1
@@ -109,7 +116,10 @@ const AccessibleToolbarTooltip: React.FC<{
   </Tooltip>
 );
 
-export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boolean }>(({ isSaving = false }, ref) => {
+export const OrderDetailsTab = forwardRef<
+  OrderDetailsTabRef,
+  { isSaving?: boolean; isNewOrder?: boolean }
+>(({ isSaving = false, isNewOrder = false }, ref) => {
   const {
     details,
     addDetail,
@@ -134,25 +144,27 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
   const refreshScopeKey = `${refreshGuard.authNamespace}|order:${header?.order_id ?? 'new'}`;
 
   const groupingUserId = authSession.getUser()?.id ?? 'anon';
-  const grouping = useDetailGrouping(groupingUserId, header?.order_id ?? 'new');
+  const grouping = useDetailGrouping(groupingUserId, header?.order_id ?? 'new', isNewOrder);
   const orderFormData = useOrderFormData(featureFlags.useBackendReferences);
 
-  // Sheet-material quick-add default: first active cuttable type; falls back to
-  // undefined so form validation prompts the user if no cuttable types are loaded.
   const sheetMaterials = useSheetMaterialOptions();
-  const defaultSheetMaterialTypeId = React.useMemo(() => {
-    const cuttable = filterCuttableOptions(sheetMaterials.options).filter((o) => o.isActive);
-    return cuttable[0]?.value ?? undefined;
-  }, [sheetMaterials.options]);
+  const defaultSheetMaterialTypeId = React.useMemo(
+    () => getDefaultSheetMaterialTypeId(sheetMaterials.catalogOptions),
+    [sheetMaterials.catalogOptions],
+  );
+  const nextDetailSheetMaterialTypeId = React.useMemo(
+    () => newDetailMaterialDefault(details, defaultSheetMaterialTypeId),
+    [defaultSheetMaterialTypeId, details],
+  );
 
   const QUICK_ADD_DEFAULTS = React.useMemo(
     () => ({
       ...QUICK_ADD_DEFAULTS_BASE,
-      ...(defaultSheetMaterialTypeId != null
-        ? { sheet_material_type_id: defaultSheetMaterialTypeId }
+      ...(nextDetailSheetMaterialTypeId != null
+        ? { sheet_material_type_id: nextDetailSheetMaterialTypeId }
         : {}),
     }),
-    [defaultSheetMaterialTypeId],
+    [nextDetailSheetMaterialTypeId],
   );
 
   const restoredModalOpen = restored?.detailModalOpen === true;
@@ -631,8 +643,16 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
     const afterTempId = detail.temp_id || detail.detail_id;
     if (!afterTempId) return;
 
-    // Insert new row with defaults after the selected row
-    insertDetailAfter(afterTempId, QUICK_ADD_DEFAULTS as Omit<OrderDetail, 'temp_id'>);
+    const insertedMaterialTypeId = insertedDetailMaterialDefault(
+      detail,
+      defaultSheetMaterialTypeId,
+    );
+    insertDetailAfter(afterTempId, {
+      ...QUICK_ADD_DEFAULTS_BASE,
+      ...(insertedMaterialTypeId != null
+        ? { sheet_material_type_id: insertedMaterialTypeId }
+        : {}),
+    } as Omit<OrderDetail, 'temp_id'>);
 
     // Get the newly inserted detail and start editing it
     await new Promise(resolve => setTimeout(resolve, 50));
@@ -1043,6 +1063,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
             open={modalOpen}
             mode={modalMode}
             detail={editingDetail}
+            defaultSheetMaterialTypeId={nextDetailSheetMaterialTypeId}
             onSave={handleSave}
             onCancel={() => {
               cancelDeferredDetailRestore();

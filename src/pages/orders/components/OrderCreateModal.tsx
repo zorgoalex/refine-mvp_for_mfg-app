@@ -2,11 +2,13 @@
 // Modal window for creating a new order with transition to edit mode after save
 
 import React, { useEffect, useState } from 'react';
-import { Modal } from 'antd';
+import { Button, Modal, Space, Typography } from 'antd';
+import { ExpandOutlined, MinusOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { OrderForm } from './OrderForm';
 import { getOrderDraftStore, destroyOrderDraftStore, NEW_ORDER_KEY } from '../../../stores/orderFormStore';
 import { DraggableModalWrapper } from '../../../components/DraggableModalWrapper';
+import './orderCreateModal.css';
 
 interface OrderCreateModalProps {
   open: boolean;
@@ -16,6 +18,7 @@ interface OrderCreateModalProps {
 export const OrderCreateModal: React.FC<OrderCreateModalProps> = ({ open, onClose }) => {
   const navigate = useNavigate();
   const [isReady, setIsReady] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false);
 
   // Reset store when modal opens and mark as ready.
   // NOTE: depend ONLY on `open`. Destroying the "new" draft store recreates a fresh
@@ -25,6 +28,7 @@ export const OrderCreateModal: React.FC<OrderCreateModalProps> = ({ open, onClos
   // store imperatively instead of subscribing to it.
   useEffect(() => {
     if (open) {
+      setIsMinimized(false);
       // Drop any stale "new" draft (and its sessionStorage) so each create starts clean.
       destroyOrderDraftStore(NEW_ORDER_KEY);
       getOrderDraftStore(NEW_ORDER_KEY).getState().reset();
@@ -62,30 +66,89 @@ export const OrderCreateModal: React.FC<OrderCreateModalProps> = ({ open, onClos
     console.log('[OrderCreateModal] ========== handleSaveSuccess ENDED ==========');
   };
 
-  const handleCancel = () => {
-    console.log('[OrderCreateModal] Modal cancelled');
-    // Close modal without saving
+  const closeAndDiscard = () => {
+    destroyOrderDraftStore(NEW_ORDER_KEY);
     onClose();
   };
 
+  const requestClose = () => {
+    const isDirty = getOrderDraftStore(NEW_ORDER_KEY).getState().isDirty;
+    if (!isDirty) {
+      closeAndDiscard();
+      return;
+    }
+    Modal.confirm({
+      title: 'Несохранённый заказ',
+      content: 'Закрыть форму и удалить несохранённые данные?',
+      okText: 'Закрыть без сохранения',
+      okButtonProps: { danger: true },
+      cancelText: 'Продолжить работу',
+      modalRender: (modal) => <DraggableModalWrapper>{modal}</DraggableModalWrapper>,
+      onOk: closeAndDiscard,
+    });
+  };
+
+  const restore = () => {
+    navigate('/orders');
+    setIsMinimized(false);
+  };
+
   return (
-    <Modal
-      open={open}
-      onCancel={handleCancel}
-      footer={null}
-      width="95%"
-      style={{ top: 20 }}
-      destroyOnClose
-      title="Создание нового заказа"
-      modalRender={(modal) => <DraggableModalWrapper open={open}>{modal}</DraggableModalWrapper>}
-    >
-      {isReady && (
-        <OrderForm
-          mode="create"
-          onSaveSuccess={handleSaveSuccess}
-          onCancel={handleCancel}
-        />
+    <>
+      <Modal
+        open={open && !isMinimized}
+        onCancel={requestClose}
+        footer={null}
+        width="95%"
+        style={{ top: 20 }}
+        maskClosable={false}
+        keyboard={false}
+        title={(
+          <div className="order-create-modal__title">
+            <Typography.Text strong>Создание нового заказа</Typography.Text>
+            <Button
+              aria-label="Свернуть форму создания заказа"
+              className="order-create-modal__minimize"
+              icon={<MinusOutlined />}
+              onClick={() => setIsMinimized(true)}
+              size="small"
+              type="text"
+            >
+              Свернуть
+            </Button>
+          </div>
+        )}
+        modalRender={(modal) => (
+          <DraggableModalWrapper open={open && !isMinimized}>{modal}</DraggableModalWrapper>
+        )}
+      >
+        {isReady && (
+          <OrderForm
+            mode="create"
+            onSaveSuccess={handleSaveSuccess}
+            onCancel={closeAndDiscard}
+          />
+        )}
+      </Modal>
+
+      {open && isMinimized && (
+        <div className="order-create-modal__minimized" role="status">
+          <Space size="middle">
+            <span className="order-create-modal__minimized-copy">
+              <Typography.Text strong>Новый заказ</Typography.Text>
+              <Typography.Text type="secondary">Черновик сохранён</Typography.Text>
+            </span>
+            <Button
+              aria-label="Развернуть форму создания заказа"
+              icon={<ExpandOutlined />}
+              onClick={restore}
+              type="primary"
+            >
+              Развернуть
+            </Button>
+          </Space>
+        </div>
       )}
-    </Modal>
+    </>
   );
 };

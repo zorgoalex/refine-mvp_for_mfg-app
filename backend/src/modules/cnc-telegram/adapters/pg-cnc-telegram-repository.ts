@@ -7,9 +7,8 @@ import type { DatabaseClient, TransactionClient } from '../../../database/databa
 import type { CurrentUser } from '../../../permissions/current-user';
 import {
   CUT_RENDER_STYLES_SETTING_KEY,
-  CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
-  resolveCutRenderStyle,
-  resolveCutRenderStyleFromSetting,
+  CUT_RENDER_STYLE_TELEGRAM_PHOTO,
+  resolveTelegramPhotoRenderStyle,
   type CutRenderStyleRule,
 } from '../../../shared/cut-render-style';
 import { freecutItemId, type FreecutPlacement, type SheetPlacementsJson } from '../../cut/application/cut-freecut-mapping';
@@ -444,7 +443,7 @@ interface ManualSvgStoredFile {
 
 interface ManualSvgRenderAudit {
   contractVersion: 'cut_sheet_render_v1';
-  profile: typeof CUT_RENDER_STYLE_MDF_BOARD_PREVIEW;
+  profile: typeof CUT_RENDER_STYLE_TELEGRAM_PHOTO;
   styleDigest: string;
   styleSnapshot: CutRenderStyleRule;
   settingVersion: number | null;
@@ -2315,17 +2314,17 @@ async function loadManualSvgUploadRenderStyle(
       `SELECT value, version FROM cut_settings WHERE key = $1 LIMIT 1`,
       [CUT_RENDER_STYLES_SETTING_KEY],
     );
-    style = resolveCutRenderStyleFromSetting(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, result.rows[0]?.value ?? null);
+    style = resolveTelegramPhotoRenderStyle(result.rows[0]?.value ?? null);
     const rawVersion = Number(result.rows[0]?.version);
     settingVersion = Number.isInteger(rawVersion) && rawVersion >= 0 ? rawVersion : null;
   } catch {
-    style = resolveCutRenderStyle(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW);
+    style = resolveTelegramPhotoRenderStyle(null);
   }
   return {
     style,
     audit: {
       contractVersion: 'cut_sheet_render_v1',
-      profile: CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
+      profile: CUT_RENDER_STYLE_TELEGRAM_PHOTO,
       styleDigest: createHash('sha256').update(JSON.stringify(style)).digest('hex'),
       styleSnapshot: style,
       settingVersion,
