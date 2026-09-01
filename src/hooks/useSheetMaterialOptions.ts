@@ -133,6 +133,21 @@ export function filterCuttableOptions(options: SheetMaterialTypeOption[]): Sheet
   return options.filter((o) => o.isCuttable === true);
 }
 
+/** Catalog default for new details. User recency must not affect this choice. */
+export function getDefaultSheetMaterialTypeId(
+  options: readonly SheetMaterialTypeOption[],
+): number | undefined {
+  return options
+    .filter((option) => option.isActive && option.isCuttable)
+    .reduce<SheetMaterialTypeOption | undefined>((best, option) => {
+      if (!best) return option;
+      if (option.sortOrder !== best.sortOrder) {
+        return option.sortOrder < best.sortOrder ? option : best;
+      }
+      return option.value < best.value ? option : best;
+    }, undefined)?.value;
+}
+
 /**
  * antd Select options for a sheet picker: disables inactive types EXCEPT the one
  * currently selected on this row/header (so a deactivated selected sheet stays

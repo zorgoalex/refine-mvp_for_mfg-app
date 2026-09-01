@@ -1701,7 +1701,11 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
           <OrderLifecycleReadSurface active={activeTab === 'details'}>
             <div ref={orderFormDetailsBlockRef} className="order-form-details-section">
               <OrderSaveValidationContext.Provider value={saveValidation}>
-                <OrderDetailsTab ref={detailsTabRef} isSaving={isSaving} />
+                <OrderDetailsTab
+                  ref={detailsTabRef}
+                  isSaving={isSaving}
+                  isNewOrder={mode === 'create'}
+                />
               </OrderSaveValidationContext.Provider>
             </div>
           </OrderLifecycleReadSurface>
