@@ -140,6 +140,7 @@
     "@vitejs/plugin-react": "^4.0.0",
     "baseline-browser-mapping": "^2.9.11",
     "concurrently": "^9.2.1",
+    "fast-xml-parser": "^4.5.7",
     "react-test-renderer": "18.2.0",
     "typescript": "5.9.3",
     "vercel": "^53.1.0",

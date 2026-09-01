@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   CUT_RENDER_STYLE_DEFAULT,
   CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
+  CUT_RENDER_STYLE_TELEGRAM_PHOTO,
   DEFAULT_CUT_RENDER_STYLES_SETTING,
   cutRenderSourceSvgCss,
   resolveCutRenderStyleFromSetting,
+  resolveTelegramPhotoRenderStyle,
 } from '../../../shared/cut-render-style';
 import {
   addCutJobHeadingToSvg,
@@ -249,6 +251,7 @@ describe('buildSheetSvg multi-line labels', () => {
     });
 
     expect(svg).toContain(cutRenderSourceSvgCss(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, '#ffffff', '#d7e9ff', '.cut-sheet-piece-source-svg-0'));
+    expect(svg).toContain('<svg class="cut-sheet-piece-source-svg cut-sheet-piece-source-svg-0"');
     expect(svg).toContain('<style>.cut-sheet-piece-source-svg-0 *{');
     expect(svg).not.toContain('<style>.cut-sheet-piece-source-svg *{');
     expect(svg).toContain('stroke:#d7e9ff!important;fill:none!important;stroke-opacity:1!important');
@@ -257,6 +260,18 @@ describe('buildSheetSvg multi-line labels', () => {
     expect(svg).toContain('fill="#111827" stroke="#ffffff"');
     expect(svg).toContain('font-weight="800"');
     expect(svg).toContain('paint-order="stroke"');
+  });
+
+  it('uses an opaque fixed milling stroke for Telegram photos', () => {
+    const style = resolveTelegramPhotoRenderStyle(null);
+    const css = cutRenderSourceSvgCss(style, '#ffffff', '#d7e9ff');
+
+    expect(style.id).toBe(CUT_RENDER_STYLE_TELEGRAM_PHOTO);
+    expect(css).toContain('stroke-width:3px!important');
+    expect(css).toContain('stroke:#111827!important');
+    expect(css).not.toContain('#d7e9ff');
+    expect(css).not.toContain('stroke-opacity:0.72');
+    expect(css).toContain('vector-effect:non-scaling-stroke!important');
   });
 
   it('honors a custom render style rule from render.styles config', () => {

@@ -1,10 +1,13 @@
 export const CUT_RENDER_STYLE_DEFAULT = 'default';
 export const CUT_RENDER_STYLE_MDF_BOARD_PREVIEW = 'mdf_board_preview';
+export const CUT_RENDER_STYLE_TELEGRAM_PHOTO = 'telegram_photo';
 export const CUT_RENDER_STYLES_SETTING_KEY = 'render.styles';
 
 export type CutRenderStyleName =
   | typeof CUT_RENDER_STYLE_DEFAULT
   | typeof CUT_RENDER_STYLE_MDF_BOARD_PREVIEW;
+
+export type CutRenderStyleRuleId = CutRenderStyleName | typeof CUT_RENDER_STYLE_TELEGRAM_PHOTO;
 
 export interface CutRenderStyleProfile {
   piece: {
@@ -44,7 +47,7 @@ export interface CutRenderStyleProfile {
 }
 
 export interface CutRenderStyleRule extends CutRenderStyleProfile {
-  id: CutRenderStyleName;
+  id: CutRenderStyleRuleId;
 }
 
 export interface CutRenderStyleTemplate {
@@ -229,6 +232,28 @@ export function resolveCutRenderStyleFromSetting(
   return cutRenderStyleRuleFromProfile(styleName, setting.profiles[styleName]);
 }
 
+/**
+ * Keeps configured MDF fills and labels, but makes tool paths resilient to
+ * raster downscaling and Telegram photo compression.
+ */
+export function resolveTelegramPhotoRenderStyle(settingValue: unknown): CutRenderStyleRule {
+  const base = resolveCutRenderStyleFromSetting(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, settingValue);
+  return cutRenderStyleRuleFromProfile(CUT_RENDER_STYLE_TELEGRAM_PHOTO, {
+    ...cutRenderStyleProfileJson(base),
+    sourceSvg: {
+      ...base.sourceSvg,
+      minStrokePx: 3,
+      nonScalingStroke: true,
+      strokeColorMode: 'fixed',
+      fixedStroke: '#111827',
+      strokeOpacity: 1,
+    },
+    rawSvgScreenshot: {
+      minStrokePx: 3,
+    },
+  });
+}
+
 export function parseCutRenderStylesSetting(value: unknown): CutRenderStylesSetting {
   const root = requireObject(value, 'value');
   const version = root.version;
@@ -409,12 +434,13 @@ export function cutRenderSourceSvgCss(
   const minStrokePx = style.sourceSvg.minStrokePx;
   const declarations: string[] = [];
   if (minStrokePx !== null) declarations.push(`stroke-width:${formatNumber(minStrokePx)}px!important`);
-  const sourceStroke = orderContour || cutRenderSourceSvgStroke(style, pieceFill);
+  const contourOverride = style.sourceSvg.strokeColorMode === 'fixed' ? null : orderContour;
+  const sourceStroke = contourOverride || cutRenderSourceSvgStroke(style, pieceFill);
   if (sourceStroke) {
     declarations.push(`stroke:${sourceStroke}!important`);
     declarations.push('fill:none!important');
   }
-  if (orderContour) {
+  if (contourOverride) {
     declarations.push('stroke-opacity:1!important');
   } else if (style.sourceSvg.strokeOpacity < 1) {
     declarations.push(`stroke-opacity:${formatNumber(style.sourceSvg.strokeOpacity)}!important`);
@@ -671,7 +697,7 @@ function parseTemplateName(value: unknown, field: string): string {
 }
 
 function cutRenderStyleRuleFromProfile(
-  id: CutRenderStyleName,
+  id: CutRenderStyleRuleId,
   profile: CutRenderStyleProfile,
 ): CutRenderStyleRule {
   return {

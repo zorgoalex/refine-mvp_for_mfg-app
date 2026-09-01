@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
+import sharp from 'sharp';
 import { describe, expect, it, vi } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
 import {
-  CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
-  resolveCutRenderStyle,
+  resolveTelegramPhotoRenderStyle,
 } from '../../../shared/cut-render-style';
+import { cnc2866MillingLayout } from './fixtures/cnc-2866-milling-layout';
 import {
   cncWholeOrderIds,
   cncWholeOrderKeys,
@@ -136,7 +137,7 @@ describe('PgCncTelegramRepository', () => {
         fileName: 'milling.svg',
         raw: Buffer.from(source),
       } as never,
-      resolveCutRenderStyle(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW),
+      resolveTelegramPhotoRenderStyle(null),
       null,
     );
     const image = PNG.sync.read(screenshot.raw);
@@ -146,6 +147,36 @@ describe('PgCncTelegramRepository', () => {
     expect(screenshot.fileName).toBe('milling.png');
     expect(screenshot.sizeBytes).toBe(screenshot.raw.length);
     expect(screenshot.sha256).toBe(createHash('sha256').update(screenshot.raw).digest('hex'));
+  });
+
+  it('keeps CNC#2_2866 milling visible after photo downscaling and compression', async () => {
+    const style = resolveTelegramPhotoRenderStyle(null);
+    const sourceFile = { fileName: 'CNC#2_2866.svg', raw: Buffer.from('<svg/>') } as never;
+    const withMilling = renderManualSvgScreenshot(
+      { cutLayout: cnc2866MillingLayout } as never,
+      sourceFile,
+      style,
+      189,
+    );
+    const withoutMilling = renderManualSvgScreenshot(
+      {
+        cutLayout: {
+          ...cnc2866MillingLayout,
+          items: cnc2866MillingLayout.items.map(({ sourceSvg: _sourceSvg, ...item }) => item),
+        },
+      } as never,
+      sourceFile,
+      style,
+      189,
+    );
+    const [compressedWithMilling, compressedWithoutMilling] = await Promise.all([
+      simulateTelegramPhoto(withMilling.raw),
+      simulateTelegramPhoto(withoutMilling.raw),
+    ]);
+
+    expect(compressedWithMilling.width).toBe(compressedWithoutMilling.width);
+    expect(compressedWithMilling.height).toBe(compressedWithoutMilling.height);
+    expect(countDarkerPixels(compressedWithMilling.data, compressedWithoutMilling.data)).toBeGreaterThan(300);
   });
 
   it('skips Telegram SVG reverse import when source file already belongs to a cut job', () => {
@@ -3730,6 +3761,27 @@ function countNonWhitePixels(image: PNG): number {
     const green = image.data[index + 1] ?? 255;
     const blue = image.data[index + 2] ?? 255;
     if (red < 245 || green < 245 || blue < 245) count += 1;
+  }
+  return count;
+}
+
+async function simulateTelegramPhoto(input: Buffer): Promise<{ data: Buffer; width: number; height: number }> {
+  const jpeg = await sharp(input)
+    .resize({ width: 900, withoutEnlargement: true })
+    .jpeg({ quality: 75, chromaSubsampling: '4:2:0' })
+    .toBuffer();
+  const result = await sharp(jpeg)
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  return { data: result.data, width: result.info.width, height: result.info.height };
+}
+
+function countDarkerPixels(actual: Buffer, baseline: Buffer): number {
+  let count = 0;
+  for (let index = 0; index < actual.length; index += 3) {
+    const actualLight = (actual[index] ?? 255) + (actual[index + 1] ?? 255) + (actual[index + 2] ?? 255);
+    const baselineLight = (baseline[index] ?? 255) + (baseline[index + 1] ?? 255) + (baseline[index + 2] ?? 255);
+    if (baselineLight - actualLight >= 60) count += 1;
   }
   return count;
 }
