@@ -1,0 +1,57 @@
+.order-create-modal__title {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding-inline-end: 28px;
+  text-wrap: balance;
+}
+
+.order-create-modal__minimize {
+  min-height: 40px;
+  transition: background-color 150ms ease-out, scale 150ms ease-out;
+}
+
+.order-create-modal__minimize:active,
+.order-create-modal__minimized .ant-btn:active {
+  scale: 0.96;
+}
+
+.order-create-modal__minimized {
+  background: var(--ant-color-bg-elevated, #fff);
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.06),
+    0 8px 24px rgba(0, 0, 0, 0.14),
+    0 2px 8px rgba(0, 0, 0, 0.08);
+  left: 50%;
+  max-width: calc(100vw - 24px);
+  padding: 8px 10px 8px 14px;
+  position: fixed;
+  top: 12px;
+  transform: translateX(-50%);
+  z-index: 1100;
+}
+
+.order-create-modal__minimized-copy {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+  min-width: 160px;
+  text-wrap: pretty;
+}
+
+.order-create-modal__minimized .ant-btn {
+  min-height: 40px;
+  transition: background-color 150ms ease-out, box-shadow 150ms ease-out, scale 150ms ease-out;
+}
+
+@media (max-width: 575px) {
+  .order-create-modal__minimized {
+    top: 8px;
+  }
+
+  .order-create-modal__minimized-copy {
+    min-width: 0;
+  }
+}
