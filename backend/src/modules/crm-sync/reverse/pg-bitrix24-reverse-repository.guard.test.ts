@@ -74,6 +74,8 @@ describe('Bitrix24 reverse repository financial guards', () => {
   it('resumes unresolved Deals after exact counterparty mapping', () => {
     expect(source).toContain('enqueueUnresolvedDealsForCounterparty');
     expect(source).toContain("request.state='unresolved'");
+    expect(source).toContain("'counterpartyObjectType',$1::text");
+    expect(source).toContain("'counterpartyBitrixId',$2::text");
     expect(source).toContain('request.counterparty_object_type=$1');
     expect(source).toContain('request.counterparty_bitrix_id=$2');
   });
