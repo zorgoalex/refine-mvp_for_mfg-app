@@ -162,6 +162,7 @@ export interface CncTelegramPacketDto {
   svgCutImportStatus?: 'none' | 'skipped' | 'needs_review' | 'imported';
   svgCutImportNote?: string | null;
   allLinkedOrderDetailsPackedOrLater: boolean;
+  allLinkedOrderDetailsIssuedOrLater: boolean;
   svgCutSheets?: CncTelegramPacketCutSheetDto[];
   itemCount: number;
   itemQuantityTotal: number;

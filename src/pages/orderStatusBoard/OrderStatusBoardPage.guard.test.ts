@@ -233,7 +233,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('resolveCncOrderStatusColumn(card) === null');
     expect(page).toContain('const statusColumn = resolveCncOrderStatusColumn(card);');
     expect(page).toContain("if (statusName === 'выдан') return 'orders_issued';");
-    expect(page).toContain("if (statusName === 'готов к выдаче') return 'orders_ready';");
+    expect(page).toContain("if (statusName === 'готов к выдаче' || statusName === 'готов') return 'orders_ready';");
   });
 
   it('keeps order status badge in the header and overdue as a clock icon', () => {

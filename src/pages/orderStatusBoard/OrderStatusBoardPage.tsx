@@ -79,6 +79,7 @@ import type {
 import { featureFlags } from '../../config/featureFlags';
 import { SETTING_KEYS, useAppSettings } from '../../hooks/useAppSettings';
 import { useOrderFinancialVisibility } from '../../hooks/useOrderFinancialVisibility';
+import { useOrderStatuses } from '../calendar/hooks/useOrderStatuses';
 import { useCoarsePointer } from '../../hooks/useDeviceTier';
 import { OrderDeletedTag, ORDER_DELETED_REFERENCE_LINE_CLASS } from '../../components/OrderDeletedTag';
 import { ImagePrintPreviewModal } from '../../components/ImagePrintPreviewModal';
@@ -599,6 +600,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     return parsed;
   }, [defaultCncOrderSearchPeriod, defaultSort, fixedView, searchParams]);
   const isCncToday = viewState.view === 'cnc_today';
+  const {
+    orderStatuses: cncOrderStatuses,
+    isLoading: cncOrderStatusesLoading,
+  } = useOrderStatuses({ loadPaymentAndProduction: false });
   const hasExplicitMdfCardDeepLink = Boolean(
     viewState.cncCardKind && viewState.cncCardId && viewState.cncWorkday,
   );
@@ -1928,6 +1933,74 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     targetTitle: string,
     trigger: HTMLElement | null,
   ) => {
+    if (kind === 'order') {
+      const orderId = Number(cardId);
+      const card = cncDisplayOrderStatusCards.find((candidate) => candidate.orderId === orderId);
+      const targetStatus = resolveCncOrderTargetStatus(cncOrderStatuses, targetColumn);
+      if (!card || !Number.isSafeInteger(orderId) || orderId <= 0) {
+        message.warning('Заказ для перемещения не найден. Доска будет обновлена.');
+        void fetchInitial({ mutationRefetch: true, preserveLoading: true });
+        return;
+      }
+      if (!card.canChangeOrderStatus) {
+        message.error('Недостаточно прав для изменения статуса этого заказа.');
+        return;
+      }
+      if (!targetStatus) {
+        message.warning(`Статус для колонки «${targetTitle}» не найден или неоднозначен.`);
+        return;
+      }
+      const nextPending = reserveOrderStatusBoardMutation(pendingRef.current, orderId);
+      if (!nextPending) return;
+      replacePending(nextPending);
+      commandInFlightRef.current = true;
+      actionFocusRef.current = trigger;
+      const idempotencyKey = createProductionActionIdempotencyKey('mdf-board-order-status');
+      void executeOrderStatusBoardMove(
+        {
+          board: 'order',
+          card,
+          targetStatusId: targetStatus.id,
+          targetName: targetStatus.name,
+          idempotencyKey,
+        },
+        {
+          changeOrderStatus: productionActionsApi.changeOrderStatus,
+          changeProductionStatus: productionActionsApi.changeProductionStatus,
+          afterCommand: () => {
+            commandInFlightRef.current = false;
+            focusOrderRef.current = orderId;
+          },
+          refetch: () => fetchInitial({ mutationRefetch: true, preserveLoading: true }),
+        },
+      )
+        .then((result) => {
+          if (result.kind === 'refreshed') {
+            message.success(`Заказ ${card.orderName}: статус «${targetStatus.name}» применён.`);
+            setAnnouncement(`Заказ ${card.orderName}. Актуальный статус и связанные МДФ-карточки загружены.`);
+          }
+        })
+        .catch(async (error) => {
+          commandInFlightRef.current = false;
+          const failure = classifyOrderStatusBoardMoveFailure(error);
+          if (failure === 'version-conflict') {
+            message.warning('Заказ уже изменён другим пользователем. Доска обновляется.');
+          } else if (failure === 'permission-denied') {
+            message.error('Недостаточно прав для изменения статуса этого заказа.');
+          } else if (failure === 'status-unavailable') {
+            message.warning('Целевой статус больше недоступен. Доска обновляется.');
+          } else {
+            message.error(errorMessage(error, 'Не удалось изменить статус заказа.'));
+          }
+          await fetchInitial({ mutationRefetch: true, preserveLoading: true });
+        })
+        .finally(() => {
+          commandInFlightRef.current = false;
+          replacePending(new Set());
+          window.requestAnimationFrame(() => trigger?.focus());
+        });
+      return;
+    }
     if (!isCncManualMoveAllowed(kind, targetColumn)) {
       message.warning('Эту карточку нельзя переместить в выбранную колонку.');
       return;
@@ -1990,7 +2063,13 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
         }
         message.error(errorMessage(error, 'Не удалось сохранить ручное перемещение МДФ-доски.'));
       });
-  }, [fetchCncManualMoves]);
+  }, [
+    cncDisplayOrderStatusCards,
+    cncOrderStatuses,
+    fetchCncManualMoves,
+    fetchInitial,
+    replacePending,
+  ]);
 
   const syncCncBoardScrollTopButton = useCallback((viewportOverride?: HTMLElement | null) => {
     const viewport = viewportOverride ?? boardViewportRef.current;
@@ -2865,12 +2944,14 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             ) : (
               <CncTelegramTodayColumns
                 columns={cncRenderColumns}
-                readinessColumns={cncShownDataColumns}
+                readinessColumns={cncActiveColumns}
                 orderCards={cncOrderCards}
                 manualMoves={cncManualMoves}
                 mutedOrderIds={cncMutedOrderIds}
                 orderStatusColumns={cncOrderBoardColumns}
                 orderCardsLoading={cncOrderBoardLoading}
+                orderMovesEnabled={!cncOrderStatusesLoading}
+                pendingOrderIds={pendingOrders}
                 terminalColumnsVisible={cncTerminalColumnsVisible}
                 originalMode={cncOriginalView}
                 currentLocations={cncOriginalCurrentLocations}
@@ -3029,6 +3110,8 @@ interface CncTelegramTodayColumnsProps {
   mutedOrderIds: ReadonlySet<number>;
   orderStatusColumns: OrderStatusBoardColumn[];
   orderCardsLoading: boolean;
+  orderMovesEnabled: boolean;
+  pendingOrderIds: ReadonlySet<number>;
   terminalColumnsVisible: boolean;
   originalMode: boolean;
   currentLocations: CncOriginalCurrentLocationMap;
@@ -3410,6 +3493,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   mutedOrderIds,
   orderStatusColumns,
   orderCardsLoading,
+  orderMovesEnabled,
+  pendingOrderIds,
   terminalColumnsVisible,
   originalMode,
   currentLocations,
@@ -3758,7 +3843,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
           packetSourceCards,
           bazisCutSetStateFor,
           packetStateFor,
-          relationContext || detailedPacketHighlightEnabled,
+          Boolean(relationContext) || detailedPacketHighlightEnabled,
         );
         const bathCards = deferOverflowCards
           ? allBathCards.slice(0, CNC_INITIAL_VISIBLE_CARDS_PER_COLUMN)
@@ -3919,7 +4004,12 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         cardId={String(card.orderId)}
                         sourceColumn={column.key}
                         onMove={onMove}
-                        movesEnabled={!originalMode}
+                        movesEnabled={
+                          !originalMode
+                          && orderMovesEnabled
+                          && card.canChangeOrderStatus
+                          && !pendingOrderIds.has(card.orderId)
+                        }
                         currentLocation={originalMode
                           ? currentOrderLocations[cncManualMoveStorageKey('order', String(card.orderId))]
                             ?? 'не отображается в стандартном виде'
@@ -8393,6 +8483,8 @@ function mapMdfBoardManualMovesResponse(
   const state: CncBoardManualMoveState = {};
   for (const move of moves) {
     if (
+      move.cardKind !== 'order'
+      &&
       isCncManualCardKind(move.cardKind)
       && isCncManualColumnKey(move.targetColumn)
       && isCncManualMoveAllowed(move.cardKind, move.targetColumn)
@@ -8409,6 +8501,7 @@ function resolveCncManualTarget(
   autoColumn: CncTelegramTodayDisplayColumnKey,
   manualMoves: CncBoardManualMoveState,
 ): CncTelegramTodayDisplayColumnKey {
+  if (kind === 'order' || isCncTerminalColumnKey(autoColumn)) return autoColumn;
   const target = manualMoves[cncManualMoveStorageKey(kind, cardId)];
   return target && isCncManualMoveAllowed(kind, target) ? target : autoColumn;
 }
@@ -8765,8 +8858,29 @@ export function resolveCncOrderStatusColumn(
 ): CncOrderDisplayColumnKey | null {
   const statusName = normalizeCncOrderStatusName(card.orderStatusName);
   if (statusName === 'выдан') return 'orders_issued';
-  if (statusName === 'готов к выдаче') return 'orders_ready';
+  if (statusName === 'готов к выдаче' || statusName === 'готов') return 'orders_ready';
+  if (statusName === 'в производстве') return 'orders';
   return null;
+}
+
+export function resolveCncOrderTargetStatus(
+  statuses: ReadonlyArray<{ id: number; name: string }>,
+  targetColumn: CncTelegramTodayDisplayColumnKey,
+): { id: number; name: string } | null {
+  const acceptedNames = targetColumn === 'orders_issued'
+    ? new Set(['выдан'])
+    : targetColumn === 'orders_ready'
+      ? new Set(['готов', 'готов к выдаче'])
+      : targetColumn === 'orders'
+        ? new Set(['в производстве'])
+        : null;
+  if (!acceptedNames) return null;
+  const matches = statuses.filter((status) =>
+    Number.isSafeInteger(status.id)
+    && status.id > 0
+    && acceptedNames.has(normalizeCncOrderStatusName(status.name)),
+  );
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function normalizeCncOrderStatusName(value: string | null | undefined): string {

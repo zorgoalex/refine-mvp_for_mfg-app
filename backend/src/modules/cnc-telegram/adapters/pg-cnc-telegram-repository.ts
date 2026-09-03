@@ -163,6 +163,7 @@ interface PacketJoinedRow extends QueryResultRow {
   review_note: string | null;
   laminated_or_later: boolean | null;
   all_linked_order_details_packed_or_later: boolean | null;
+  all_linked_order_details_issued_or_later: boolean | null;
 }
 
 interface PacketReplayRow extends QueryResultRow {
@@ -3028,7 +3029,11 @@ function packetSelectSql(
       linked_order.order_id IS NOT NULL
         AND linked_order.delete_flag = false
         AND COALESCE(linked_order_status.all_details_packed_or_later, false)
-        AS all_linked_order_details_packed_or_later
+        AS all_linked_order_details_packed_or_later,
+      linked_order.order_id IS NOT NULL
+        AND linked_order.delete_flag = false
+        AND COALESCE(linked_order_status.all_details_issued_or_later, false)
+        AS all_linked_order_details_issued_or_later
     FROM cnc_telegram_packets p
     LEFT JOIN cut_job svg_job
       ON svg_job.cut_job_id = p.svg_cut_job_id
@@ -3115,13 +3120,30 @@ function packetSelectSql(
       FROM production_statuses ps
     ) packed_status ON true
     LEFT JOIN LATERAL (
+      SELECT COALESCE(
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(COALESCE(ps.production_status_code, ''))) = 'issued'
+        ),
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(ps.production_status_name)) = 'выдан'
+        )
+      ) AS sort_order
+      FROM production_statuses ps
+    ) issued_production_status ON true
+    LEFT JOIN LATERAL (
       SELECT
         COUNT(linked_detail.detail_id) > 0
           AND BOOL_AND(
             linked_detail_status.sort_order IS NOT NULL
             AND packed_status.sort_order IS NOT NULL
             AND linked_detail_status.sort_order >= packed_status.sort_order
-          ) AS all_details_packed_or_later
+          ) AS all_details_packed_or_later,
+        COUNT(linked_detail.detail_id) > 0
+          AND BOOL_AND(
+            linked_detail_status.sort_order IS NOT NULL
+            AND issued_production_status.sort_order IS NOT NULL
+            AND linked_detail_status.sort_order >= issued_production_status.sort_order
+          ) AS all_details_issued_or_later
       FROM order_details linked_detail
       LEFT JOIN production_statuses linked_detail_status
         ON linked_detail_status.production_status_id = linked_detail.production_status_id
@@ -7780,7 +7802,6 @@ async function loadPeriodBazisCutSetCards(
           AND issued_status.sort_order IS NOT NULL
           AND source_order_status.sort_order >= issued_status.sort_order
         ) THEN true
-        WHEN issued_order_move.move_id IS NOT NULL THEN true
         ELSE false
       END AS packed_or_later
     FROM target_bazis_cut_sets target
@@ -7796,10 +7817,6 @@ async function loadPeriodBazisCutSetCards(
       ON source_order_status.order_status_id = source_order.order_status_id
     LEFT JOIN production_statuses detail_status
       ON detail_status.production_status_id = source_detail.production_status_id
-    LEFT JOIN mdf_board_manual_moves issued_order_move
-      ON issued_order_move.card_kind = 'order'
-      AND issued_order_move.card_id = source_order.order_id::text
-      AND issued_order_move.target_column = 'orders_issued'
     CROSS JOIN packed_status_threshold packed_status
     CROSS JOIN issued_status_threshold issued_status
     ORDER BY cut_set.created_at DESC, cut_set.bazis_cut_set_id DESC,
@@ -8010,6 +8027,9 @@ function compareBathSheets(left: CncTelegramBathSheetDto, right: CncTelegramBath
 function packetColumnKey(
   packet: CncTelegramPacketDto,
 ): 'parsed' | 'completed' | 'completed_laminated' {
+  if (packet.allLinkedOrderDetailsIssuedOrLater) {
+    return 'completed_laminated';
+  }
   if (packet.completionStatus === 'completed' || packet.thumbsUp) {
     return packet.allLinkedOrderDetailsPackedOrLater ? 'completed_laminated' : 'completed';
   }
@@ -8074,6 +8094,7 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
         svgCutImportStatus: row.svg_cut_import_status ?? 'none',
         svgCutImportNote: row.svg_cut_import_note,
         allLinkedOrderDetailsPackedOrLater: false,
+        allLinkedOrderDetailsIssuedOrLater: false,
         svgCutSheets: packetCutSheetsArray(row.svg_cut_sheets_json),
         itemCount: 0,
         itemQuantityTotal: 0,
@@ -8088,6 +8109,10 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
         ? row.all_linked_order_details_packed_or_later === true
         : packet.allLinkedOrderDetailsPackedOrLater
           && row.all_linked_order_details_packed_or_later === true;
+      packet.allLinkedOrderDetailsIssuedOrLater = packet.itemCount === 0
+        ? row.all_linked_order_details_issued_or_later === true
+        : packet.allLinkedOrderDetailsIssuedOrLater
+          && row.all_linked_order_details_issued_or_later === true;
       const item: CncTelegramPacketItemDto = {
         packetItemId: row.packet_item_id,
         sourceItemKey: row.source_item_key ?? '',

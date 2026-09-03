@@ -59,11 +59,33 @@ describe('evaluateStatusAutomation', () => {
     expect(mocks.loadOrderAutomationState).not.toHaveBeenCalled();
   });
 
-  it('returns for automation-origin events', async () => {
-    await evaluateStatusAutomation(tx(), event({ origin: 'automation' }));
+  it('runs only detail cascades for automation-origin order status events', async () => {
+    mocks.listEnabledRulesForEvent.mockResolvedValue([
+      makeRule({ id: 1, eventType: 'order.status_changed', actionType: 'change_order_status' }),
+      makeRule({
+        id: 2,
+        eventType: 'order.status_changed',
+        actionType: 'change_details_production_status',
+        targetStatusId: 7,
+      }),
+    ]);
+    mocks.changeDetailsProductionStatusFromAutomationInTransaction.mockResolvedValue({ status: 'executed' });
 
-    expect(mocks.listEnabledRulesForEvent).not.toHaveBeenCalled();
-    expect(mocks.loadOrderAutomationState).not.toHaveBeenCalled();
+    await evaluateStatusAutomation(tx(), event({
+      eventType: 'order.status_changed',
+      origin: 'automation',
+      orderStatusIdBefore: 5,
+      orderStatusIdAfter: 7,
+    }));
+
+    expect(mocks.changeOrderStatusFromAutomationInTransaction).not.toHaveBeenCalled();
+    expect(mocks.changeDetailsProductionStatusFromAutomationInTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      100,
+      7,
+      expect.objectContaining({ ruleId: 2 }),
+      'set_exact',
+    );
   });
 
   it('does not load state when no enabled rules match the event', async () => {
@@ -339,6 +361,28 @@ describe('evaluateStatusAutomation', () => {
       100,
       7,
       expect.objectContaining({ ruleId: 40 }),
+    );
+  });
+
+  it('forwards advance-only mode to a direct detail cascade', async () => {
+    const rule = makeRule({
+      id: 41,
+      eventType: 'order.status_changed',
+      actionType: 'change_details_production_status',
+      targetStatusId: 9,
+      actionConfig: { detailTransitionMode: 'advance_only' },
+    });
+    mocks.listEnabledRulesForEvent.mockResolvedValue([rule]);
+    mocks.changeDetailsProductionStatusFromAutomationInTransaction.mockResolvedValue({ status: 'executed' });
+
+    await evaluateStatusAutomation(tx(), event({ eventType: 'order.status_changed' }));
+
+    expect(mocks.changeDetailsProductionStatusFromAutomationInTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      100,
+      9,
+      expect.objectContaining({ ruleId: 41 }),
+      'advance_only',
     );
   });
 

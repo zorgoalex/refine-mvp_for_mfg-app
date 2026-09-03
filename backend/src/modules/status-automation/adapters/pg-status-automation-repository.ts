@@ -399,11 +399,22 @@ function assertActionConfigShape(
     actionType === 'map_order_status_to_details_production_status' ||
     actionType === 'map_production_status_to_order_status';
   const entries = actionConfig.statusMapping?.entries ?? [];
+  const detailTransitionMode = actionConfig.detailTransitionMode;
   if (isMapping && entries.length === 0) {
     throw new ApiError(422, 'VALIDATION_ERROR', 'Для действия маппинга нужны строки соответствий', { ruleId });
   }
   if (!isMapping && targetStatusId === null) {
     throw new ApiError(422, 'VALIDATION_ERROR', 'Для действия нужен целевой статус', { ruleId });
+  }
+  if (isMapping && detailTransitionMode !== undefined) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Режим изменения деталей неприменим к маппингу', { ruleId });
+  }
+  if (
+    !isMapping
+    && detailTransitionMode !== undefined
+    && actionType !== 'change_details_production_status'
+  ) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Режим изменения деталей применим только к деталям', { ruleId });
   }
 }
 
@@ -435,6 +446,12 @@ async function validateConditionStatusReferences(
     tx,
     'order',
     [...(conditions.currentOrderStatusIn ?? []), ...(conditions.currentOrderStatusNotIn ?? [])],
+    'conditions',
+  );
+  await validateStatusIds(
+    tx,
+    'order',
+    conditions.previousOrderStatusIn ?? [],
     'conditions',
   );
   await validateStatusIds(
@@ -530,7 +547,9 @@ async function writeRuleAudit(
       eventType: event.rule.eventType,
       actionType: event.rule.actionType,
       targetStatusId: event.rule.targetStatusId,
-      ...(event.rule.actionConfig?.statusMapping ? { actionConfig: event.rule.actionConfig } : {}),
+      ...(event.rule.actionConfig && Object.keys(event.rule.actionConfig).length > 0
+        ? { actionConfig: event.rule.actionConfig }
+        : {}),
     },
   });
 }

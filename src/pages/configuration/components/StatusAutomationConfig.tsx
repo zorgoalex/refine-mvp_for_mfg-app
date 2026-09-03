@@ -127,6 +127,7 @@ type ConditionKey = StatusAutomationConditionKey;
 const CONDITION_LABELS: Record<ConditionKey, string> = {
   currentOrderStatusIn: 'Статус заказа — один из',
   currentOrderStatusNotIn: 'Статус заказа — не входит в',
+  previousOrderStatusIn: 'Предыдущий статус заказа — один из',
   currentPaymentStatusIn: 'Статус оплаты — один из',
   currentPaymentStatusNotIn: 'Статус оплаты — не входит в',
   currentProductionStatusIn: 'Общий статус производства заказа — один из',
@@ -143,8 +144,10 @@ function emptyForm(eventType: StatusAutomationEventType = 'order.created'): Stat
     actionType: 'change_order_status',
     targetStatusId: null,
     statusMappingEntries: [{ sourceStatusIds: [], targetStatusId: 0 }],
+    detailTransitionMode: 'set_exact',
     currentOrderStatusIn: [],
     currentOrderStatusNotIn: [],
+    previousOrderStatusIn: [],
     currentPaymentStatusIn: [],
     currentPaymentStatusNotIn: [],
     currentProductionStatusIn: [],
@@ -167,8 +170,10 @@ function formFromRule(rule: StatusAutomationRuleDto): StatusAutomationFormValues
       sourceStatusIds: [...entry.sourceStatusIds],
       targetStatusId: entry.targetStatusId,
     })) ?? [{ sourceStatusIds: [], targetStatusId: 0 }],
+    detailTransitionMode: rule.actionConfig?.detailTransitionMode ?? 'set_exact',
     currentOrderStatusIn: [...(rule.conditions.currentOrderStatusIn ?? [])],
     currentOrderStatusNotIn: [...(rule.conditions.currentOrderStatusNotIn ?? [])],
+    previousOrderStatusIn: [...(rule.conditions.previousOrderStatusIn ?? [])],
     currentPaymentStatusIn: [...(rule.conditions.currentPaymentStatusIn ?? [])],
     currentPaymentStatusNotIn: [...(rule.conditions.currentPaymentStatusNotIn ?? [])],
     currentProductionStatusIn: [...(rule.conditions.currentProductionStatusIn ?? [])],
@@ -1262,11 +1267,17 @@ export function StatusAutomationConfig() {
               )}
               {activeConditionKeys.map((key) => {
                 let control;
-                if (key === 'currentOrderStatusIn' || key === 'currentOrderStatusNotIn') {
+                if (
+                  key === 'currentOrderStatusIn'
+                  || key === 'currentOrderStatusNotIn'
+                  || key === 'previousOrderStatusIn'
+                ) {
                   const value =
                     key === 'currentOrderStatusIn'
                       ? form.currentOrderStatusIn
-                      : form.currentOrderStatusNotIn;
+                      : key === 'currentOrderStatusNotIn'
+                        ? form.currentOrderStatusNotIn
+                        : form.previousOrderStatusIn;
                   control = (
                     <Select<number[]>
                       aria-label={CONDITION_LABELS[key]}
@@ -1464,25 +1475,44 @@ export function StatusAutomationConfig() {
                 <Button onClick={addMappingEntry}>+ Добавить ещё соответствие</Button>
               </Space>
             ) : (
-              <Form.Item
-                label={targetStatusQuestion}
-                required
-                style={{ marginBottom: 0 }}
-                extra="Этот статус будет установлен, когда событие произойдёт и все условия совпадут."
-              >
-                <Select<number>
-                  aria-label={targetStatusQuestion}
-                  value={
-                    (form.targetStatusId ?? 0) > 0 ? form.targetStatusId ?? undefined : undefined
-                  }
-                  onChange={(value) => updateForm({ targetStatusId: value })}
-                  options={targetStatusOptions}
-                  style={{ width: '100%' }}
-                  placeholder="Выберите статус"
-                  showSearch
-                  optionFilterProp="label"
-                />
-              </Form.Item>
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                <Form.Item
+                  label={targetStatusQuestion}
+                  required
+                  style={{ marginBottom: 0 }}
+                  extra="Этот статус будет установлен, когда событие произойдёт и все условия совпадут."
+                >
+                  <Select<number>
+                    aria-label={targetStatusQuestion}
+                    value={
+                      (form.targetStatusId ?? 0) > 0 ? form.targetStatusId ?? undefined : undefined
+                    }
+                    onChange={(value) => updateForm({ targetStatusId: value })}
+                    options={targetStatusOptions}
+                    style={{ width: '100%' }}
+                    placeholder="Выберите статус"
+                    showSearch
+                    optionFilterProp="label"
+                  />
+                </Form.Item>
+                {form.actionType === 'change_details_production_status' && (
+                  <Form.Item
+                    label="Как менять статусы деталей?"
+                    style={{ marginBottom: 0 }}
+                  >
+                    <Select
+                      aria-label="Режим изменения статусов деталей"
+                      value={form.detailTransitionMode ?? 'set_exact'}
+                      onChange={(value) => updateForm({ detailTransitionMode: value })}
+                      options={[
+                        { value: 'set_exact', label: 'Установить точно, включая откат' },
+                        { value: 'advance_only', label: 'Только продвигать вперёд' },
+                      ]}
+                      style={{ width: '100%' }}
+                    />
+                  </Form.Item>
+                )}
+              </Space>
             )}
           </Card>
 

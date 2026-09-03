@@ -89,6 +89,7 @@ interface ProductionStatusRow extends QueryResultRow {
   production_status_id: string | number;
   production_status_name: string;
   production_status_code: string;
+  sort_order: string | number;
 }
 
 interface ProductionEventRow extends QueryResultRow {
@@ -434,6 +435,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           orderId: order.orderId,
           clientId: order.clientId,
           orderStatusId: status.orderStatusId,
+          previousOrderStatusId: order.orderStatusId,
           orderStatusName: status.orderStatusName,
           action: 'order_status_change',
           statusField: 'orderStatus',
@@ -455,6 +457,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           orderId: order.orderId,
           clientId: order.clientId,
           orderStatusId: status.orderStatusId,
+          previousOrderStatusId: order.orderStatusId,
           action: 'order_status_change',
           scope: { source: 'calendar|order-header|kanban' },
           idempotencyKey: command.dto.idempotencyKey,
@@ -468,6 +471,8 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
         actor: command.currentUser,
         requestId,
         sourceIdempotencyKey: command.dto.idempotencyKey,
+        orderStatusIdBefore: order.orderStatusId,
+        orderStatusIdAfter: status.orderStatusId,
       });
       const responseVersion = await readOrderVersion(tx, order.orderId);
 
@@ -1915,11 +1920,23 @@ export async function changeOrderStatusFromDeadlineInTransaction(
     },
   });
 
+  await evaluateStatusAutomationInTransaction(tx, {
+    eventType: 'order.status_changed',
+    origin: 'user',
+    orderId: order.orderId,
+    actor: deadlineSystemActorAsCurrentUser(command.systemActor),
+    requestId,
+    sourceIdempotencyKey: command.idempotencyKey,
+    orderStatusIdBefore: order.orderStatusId,
+    orderStatusIdAfter: status.orderStatusId,
+  });
+  const responseVersion = await readOrderVersion(tx, order.orderId);
+
   const response = {
     order: {
       orderId: order.orderId,
       orderStatusId: status.orderStatusId,
-      version: nextVersion,
+      version: responseVersion,
     },
     auditId,
     requestId,
@@ -2176,11 +2193,24 @@ export async function changeOrderStatusFromAutomationInTransaction(
       orderId: order.orderId,
       clientId: order.clientId,
       orderStatusId: status.orderStatusId,
+      orderStatusIdBefore: order.orderStatusId,
+      orderStatusIdAfter: status.orderStatusId,
       action: 'order_status_change',
       scope: { source: 'calendar|order-header' },
       origin: 'automation',
       idempotencyKey: ctx.outboxIdempotencyKey,
     },
+  });
+
+  await evaluateStatusAutomationInTransaction(tx, {
+    eventType: 'order.status_changed',
+    origin: 'automation',
+    orderId: order.orderId,
+    actor: ctx.actor,
+    requestId: ctx.requestId,
+    sourceIdempotencyKey: ctx.outboxIdempotencyKey,
+    orderStatusIdBefore: order.orderStatusId,
+    orderStatusIdAfter: status.orderStatusId,
   });
 
   return { status: 'executed', auditId };
@@ -2297,19 +2327,26 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
   orderId: number,
   targetStatusId: number,
   ctx: AutomationActionContext,
+  detailTransitionMode: 'set_exact' | 'advance_only' = 'set_exact',
 ): Promise<AutomationActionResult> {
   const order = await loadOrderForUpdate(tx, orderId);
+  const status = await loadProductionStatus(tx, targetStatusId);
   const currentDetails = await loadOrderDetailsForBatch(tx, order.orderId);
   if (currentDetails.length === 0) {
     return { status: 'skipped', skipReason: 'no_details' };
   }
   // Все живые детали уже в целевом статусе → no-op без version-бампа/audit/outbox
   // (тот же same-status контракт, что у order-level automation-действий).
-  if (currentDetails.every((detail) => detail.productionStatusId === targetStatusId)) {
+  const detailNeedsChange = (detail: typeof currentDetails[number]) =>
+    detailTransitionMode === 'set_exact'
+      ? detail.productionStatusId !== targetStatusId
+      : detail.productionStatusId === null
+        || detail.productionStatusSortOrder === null
+        || detail.productionStatusSortOrder < status.sortOrder;
+  if (!currentDetails.some(detailNeedsChange)) {
     return { status: 'skipped', skipReason: 'same_status' };
   }
 
-  const status = await loadProductionStatus(tx, targetStatusId);
   const detailIds = currentDetails.map((detail) => detail.detailId);
   const beforeStatusDistribution = detailStatusDistribution(currentDetails);
   const currentById = new Map(
@@ -2323,9 +2360,24 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
       AND detail_id = ANY($3::bigint[])
       AND COALESCE(delete_flag, false) = false
       AND production_status_id IS DISTINCT FROM $1
+      AND (
+        $4::text = 'set_exact'
+        OR production_status_id IS NULL
+        OR COALESCE((
+          SELECT current_status.sort_order
+          FROM production_statuses current_status
+          WHERE current_status.production_status_id = order_details.production_status_id
+        ), -2147483648) < $5
+      )
     RETURNING detail_id
     `,
-    [status.productionStatusId, order.orderId, detailIds],
+    [
+      status.productionStatusId,
+      order.orderId,
+      detailIds,
+      detailTransitionMode,
+      status.sortOrder,
+    ],
   );
   const changedDetailIds = updated.rows.map((row) => toNumber(row.detail_id));
   const affectedDetailCount = changedDetailIds.length;
@@ -2446,8 +2498,59 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
     requestId: ctx.requestId,
     sourceIdempotencyKey: ctx.outboxIdempotencyKey,
   });
+  await clearMdfBoardManualMovesForOrder(tx, order.orderId);
 
   return { status: 'executed', auditId };
+}
+
+async function clearMdfBoardManualMovesForOrder(
+  tx: TransactionClient,
+  orderId: number,
+): Promise<void> {
+  await tx.query(
+    `
+    WITH target_order AS (
+      SELECT order_id, lower(trim(order_name)) AS order_key
+      FROM orders
+      WHERE order_id = $1
+    ),
+    unique_target_order AS (
+      SELECT target.order_id, target.order_key
+      FROM target_order target
+      WHERE target.order_key <> ''
+        AND (
+          SELECT COUNT(*)
+          FROM orders candidate
+          WHERE COALESCE(candidate.delete_flag, false) = false
+            AND lower(trim(candidate.order_name)) = target.order_key
+        ) = 1
+    ),
+    related_cards AS (
+      SELECT 'order'::text AS card_kind, $1::text AS card_id
+      UNION
+      SELECT 'packet', item.packet_id::text
+      FROM cnc_telegram_packet_items item
+      LEFT JOIN unique_target_order target
+        ON target.order_key = lower(trim(item.order_name))
+      WHERE item.match_order_id = $1 OR target.order_id = $1
+      UNION
+      SELECT 'bazisCutSet', detail.bazis_cut_set_id::text
+      FROM bazis_cut_set_details detail
+      LEFT JOIN order_details source_detail
+        ON source_detail.detail_id = detail.source_order_detail_id
+      WHERE COALESCE(detail.source_order_id, source_detail.order_id) = $1
+      UNION
+      SELECT 'bath', 'cut-result:' || placement.cut_result_id::text
+      FROM cut_result_placement placement
+      WHERE placement.order_id = $1
+    )
+    DELETE FROM mdf_board_manual_moves move
+    USING related_cards related
+    WHERE move.card_kind = related.card_kind
+      AND move.card_id = related.card_id
+    `,
+    [orderId],
+  );
 }
 
 function deadlineSystemActorAsCurrentUser(
@@ -2759,10 +2862,11 @@ async function loadProductionStatus(
   productionStatusId: number;
   productionStatusName: string;
   productionStatusCode: string;
+  sortOrder: number;
 }> {
   const result = await tx.query<ProductionStatusRow>(
     `
-    SELECT production_status_id, production_status_name, production_status_code
+    SELECT production_status_id, production_status_name, production_status_code, sort_order
     FROM production_statuses
     WHERE production_status_id = $1 AND is_active = true
     LIMIT 1
@@ -2778,6 +2882,7 @@ async function loadProductionStatus(
     productionStatusId: toNumber(row.production_status_id),
     productionStatusName: row.production_status_name,
     productionStatusCode: row.production_status_code,
+    sortOrder: toNumber(row.sort_order),
   };
 }
 
@@ -3035,24 +3140,38 @@ async function runRecalcOrderProductionStatus(tx: TransactionClient, orderId: nu
 async function loadOrderDetailsForBatch(
   tx: TransactionClient,
   orderId: number,
-): Promise<Array<{ detailId: number; productionStatusId: number | null }>> {
+): Promise<Array<{
+  detailId: number;
+  productionStatusId: number | null;
+  productionStatusSortOrder: number | null;
+}>> {
   const result = await tx.query<{
     detail_id: string | number;
     production_status_id: string | number | null;
+    production_status_sort_order: string | number | null;
   }>(
     `
-    SELECT detail_id, production_status_id
-    FROM order_details
-    WHERE order_id = $1
-      AND COALESCE(delete_flag, false) = false
-    ORDER BY detail_id
-    FOR UPDATE
+    SELECT
+      detail.detail_id,
+      detail.production_status_id,
+      status.sort_order AS production_status_sort_order
+    FROM order_details detail
+    LEFT JOIN production_statuses status
+      ON status.production_status_id = detail.production_status_id
+    WHERE detail.order_id = $1
+      AND COALESCE(detail.delete_flag, false) = false
+    ORDER BY detail.detail_id
+    FOR UPDATE OF detail
     `,
     [orderId],
   );
   return result.rows.map((row) => ({
     detailId: toNumber(row.detail_id),
     productionStatusId: row.production_status_id === null ? null : toNumber(row.production_status_id),
+    productionStatusSortOrder:
+      row.production_status_sort_order === null
+        ? null
+        : toNumber(row.production_status_sort_order),
   }));
 }
 

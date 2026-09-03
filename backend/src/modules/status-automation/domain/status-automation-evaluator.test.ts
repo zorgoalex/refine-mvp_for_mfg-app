@@ -171,6 +171,29 @@ describe('evaluateRuleConditions', () => {
     ).toEqual({ matched: false, reason: 'order_source_not_in_list' });
   });
 
+  it('matches the previous order status from the change event', () => {
+    const rule = makeRule({
+      eventType: 'order.status_changed',
+      conditions: { previousOrderStatusIn: [5, 6] },
+    });
+
+    expect(evaluateRuleConditions(
+      rule,
+      makeState(),
+      makeEvent({ eventType: 'order.status_changed', orderStatusIdBefore: 5, orderStatusIdAfter: 7 }),
+    )).toEqual({ matched: true });
+    expect(evaluateRuleConditions(
+      rule,
+      makeState(),
+      makeEvent({ eventType: 'order.status_changed', orderStatusIdBefore: 4, orderStatusIdAfter: 7 }),
+    )).toEqual({ matched: false, reason: 'previous_order_status_not_in_list' });
+    expect(evaluateRuleConditions(
+      rule,
+      makeState(),
+      makeEvent({ eventType: 'order.status_changed' }),
+    )).toEqual({ matched: false, reason: 'previous_order_status_not_in_list' });
+  });
+
   it.each([
     { paymentsCountAfter: 1, matched: true },
     { paymentsCountAfter: 2, matched: false },
@@ -192,6 +215,7 @@ describe('evaluateRuleConditions', () => {
     const conditions: StatusAutomationConditions = {
       currentOrderStatusIn: [],
       currentOrderStatusNotIn: [],
+      previousOrderStatusIn: [],
       currentPaymentStatusIn: [],
       currentPaymentStatusNotIn: [],
       currentProductionStatusIn: [],

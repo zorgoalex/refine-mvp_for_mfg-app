@@ -10,14 +10,17 @@ import {
 
 const statusAutomationMocks = vi.hoisted(() => ({
   evaluateMdfBoardColumnAutomation: vi.fn(),
+  evaluateStatusAutomation: vi.fn(),
 }));
 
 vi.mock('../../status-automation/application/status-automation-runtime', () => ({
   evaluateMdfBoardColumnAutomation: statusAutomationMocks.evaluateMdfBoardColumnAutomation,
+  evaluateStatusAutomation: statusAutomationMocks.evaluateStatusAutomation,
 }));
 
 beforeEach(() => {
   statusAutomationMocks.evaluateMdfBoardColumnAutomation.mockReset();
+  statusAutomationMocks.evaluateStatusAutomation.mockReset();
 });
 
 describe('production-action automation in-transaction actions', () => {
@@ -88,8 +91,21 @@ describe('production-action automation in-transaction actions', () => {
     expect(database.outboxCalls[0]).toMatchObject({
       eventType: 'order.status_changed',
       idempotencyKey: context.outboxIdempotencyKey,
-      payload: expect.objectContaining({ origin: 'automation' }),
+      payload: expect.objectContaining({
+        origin: 'automation',
+        orderStatusIdBefore: 5,
+        orderStatusIdAfter: 7,
+      }),
     });
+    expect(statusAutomationMocks.evaluateStatusAutomation).toHaveBeenCalledWith(
+      database.tx,
+      expect.objectContaining({
+        eventType: 'order.status_changed',
+        origin: 'automation',
+        orderStatusIdBefore: 5,
+        orderStatusIdAfter: 7,
+      }),
+    );
   });
 
   it('skips detail automation when the order has no live details', async () => {
@@ -144,6 +160,30 @@ describe('production-action automation in-transaction actions', () => {
     expect(database.recalcCalls).toEqual([15]);
   });
 
+  it('advance-only detail cascade never selects details above the target status', async () => {
+    const database = createAutomationTx({
+      targetProductionSortOrder: 50,
+      detailRows: [
+        { detail_id: 101, production_status_id: 1, production_status_sort_order: 20 },
+        { detail_id: 102, production_status_id: 8, production_status_sort_order: 80 },
+      ],
+      updatedDetailIds: [101],
+    });
+
+    await expect(changeDetailsProductionStatusFromAutomationInTransaction(
+      database.tx,
+      15,
+      7,
+      automationContext(),
+      'advance_only',
+    )).resolves.toMatchObject({ status: 'executed' });
+
+    const updateIndex = database.sql.findIndex((sql) => sql.startsWith('UPDATE order_details'));
+    expect(database.sql[updateIndex]).toContain("$4::text = 'set_exact'");
+    expect(database.sql.some((sql) => sql.includes('DELETE FROM mdf_board_manual_moves'))).toBe(true);
+    expect(database.auditCalls[0]?.metadata).toMatchObject({ affectedDetailCount: 1 });
+  });
+
   it('emits MDF-board laminated automation after a detail-status automation action', async () => {
     const database = createAutomationTx({
       detailRows: [
@@ -172,7 +212,12 @@ interface AutomationTxOptions {
   orderStatusId?: number;
   productionStatusId?: number | null;
   productionStatusFromDetailsEnabled?: boolean;
-  detailRows?: Array<{ detail_id: number; production_status_id: number | null }>;
+  detailRows?: Array<{
+    detail_id: number;
+    production_status_id: number | null;
+    production_status_sort_order?: number | null;
+  }>;
+  targetProductionSortOrder?: number;
   updatedDetailIds?: number[];
   recalcOrderProductionStatusId?: number;
   mdfLaminatedBathRows?: Array<{ cut_result_id: number | string; order_id: number | string }>;
@@ -223,7 +268,12 @@ function createAutomationTx(options: AutomationTxOptions = {}): AutomationTxStat
         return { rows: [{ order_status_id: params[0], order_status_name: 'Выдан' } as T] };
       }
       if (normalized.startsWith('SELECT production_status_id, production_status_name')) {
-        return { rows: [{ production_status_id: params[0], production_status_name: 'Крой', production_status_code: 'cut' } as T] };
+        return { rows: [{
+          production_status_id: params[0],
+          production_status_name: 'Крой',
+          production_status_code: 'cut',
+          sort_order: options.targetProductionSortOrder ?? 50,
+        } as T] };
       }
       if (normalized.includes('FROM order_details') && normalized.includes('FOR UPDATE')) {
         return { rows: detailRows as T[] };
