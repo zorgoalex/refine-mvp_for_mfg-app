@@ -90,8 +90,10 @@ export interface StatusAutomationFormValues {
   actionType: StatusAutomationActionType;
   targetStatusId: number | null;
   statusMappingEntries?: StatusAutomationStatusMappingEntryDto[];
+  detailTransitionMode?: 'set_exact' | 'advance_only';
   currentOrderStatusIn?: number[];
   currentOrderStatusNotIn?: number[];
+  previousOrderStatusIn?: number[];
   currentPaymentStatusIn?: number[];
   currentPaymentStatusNotIn?: number[];
   currentProductionStatusIn?: number[];
@@ -106,6 +108,7 @@ export interface StatusAutomationFormValues {
 export const STATUS_AUTOMATION_CONDITION_KEYS = [
   'currentOrderStatusIn',
   'currentOrderStatusNotIn',
+  'previousOrderStatusIn',
   'currentPaymentStatusIn',
   'currentPaymentStatusNotIn',
   'currentProductionStatusIn',
@@ -161,7 +164,11 @@ export function describeAction(
   const targetNames = rule.actionType === 'change_order_status'
     ? catalogs.orderStatusNames
     : catalogs.productionStatusNames;
-  return `${targetNames.get(rule.targetStatusId ?? 0) ?? `#${rule.targetStatusId ?? '?'}`}`;
+  const target = `${targetNames.get(rule.targetStatusId ?? 0) ?? `#${rule.targetStatusId ?? '?'}`}`;
+  return rule.actionType === 'change_details_production_status'
+    && rule.actionConfig?.detailTransitionMode === 'advance_only'
+    ? `${target} (только вперёд)`
+    : target;
 }
 
 const ORDER_SOURCES: StatusAutomationOrderSource[] = ['manual', 'bazis', 'import'];
@@ -183,6 +190,9 @@ export function describeConditions(
         catalogs.orderStatusNames,
       )}`,
     );
+  }
+  if (current.previousOrderStatusIn?.length) {
+    parts.push(`Предыдущий статус заказа — один из: ${formatStatusIds(current.previousOrderStatusIn, catalogs.orderStatusNames)}`);
   }
   if (current.currentPaymentStatusIn?.length) {
     parts.push(`Статус оплаты — один из: ${formatStatusIds(current.currentPaymentStatusIn, catalogs.paymentStatusNames)}`);
@@ -361,6 +371,7 @@ function clearStatusAutomationCondition(
   switch (key) {
     case 'currentOrderStatusIn': return { ...form, currentOrderStatusIn: [] };
     case 'currentOrderStatusNotIn': return { ...form, currentOrderStatusNotIn: [] };
+    case 'previousOrderStatusIn': return { ...form, previousOrderStatusIn: [] };
     case 'currentPaymentStatusIn': return { ...form, currentPaymentStatusIn: [] };
     case 'currentPaymentStatusNotIn': return { ...form, currentPaymentStatusNotIn: [] };
     case 'currentProductionStatusIn': return { ...form, currentProductionStatusIn: [] };
@@ -420,6 +431,9 @@ function buildConditions(form: StatusAutomationFormValues): StatusAutomationCond
   }
   if (form.currentOrderStatusNotIn?.length) {
     conditions.currentOrderStatusNotIn = [...form.currentOrderStatusNotIn];
+  }
+  if (form.previousOrderStatusIn?.length) {
+    conditions.previousOrderStatusIn = [...form.previousOrderStatusIn];
   }
   if (form.currentPaymentStatusIn?.length) {
     conditions.currentPaymentStatusIn = [...form.currentPaymentStatusIn];
@@ -481,8 +495,11 @@ export function buildUpdatePayload(
 }
 
 function buildActionConfig(form: StatusAutomationFormValues) {
-  return isStatusMappingAction(form.actionType)
-    ? { statusMapping: { entries: (form.statusMappingEntries ?? []).map((entry) => ({ ...entry, sourceStatusIds: [...entry.sourceStatusIds] })) } }
+  if (isStatusMappingAction(form.actionType)) {
+    return { statusMapping: { entries: (form.statusMappingEntries ?? []).map((entry) => ({ ...entry, sourceStatusIds: [...entry.sourceStatusIds] })) } };
+  }
+  return form.actionType === 'change_details_production_status'
+    ? { detailTransitionMode: form.detailTransitionMode ?? 'set_exact' as const }
     : undefined;
 }
 
@@ -499,7 +516,9 @@ export function buildStatusAutomationRulesExportFile(
       actionType: rule.actionType,
       targetStatusId: rule.targetStatusId,
       conditions: normalizeConditionsForExport(rule.conditions),
-      ...(rule.actionConfig?.statusMapping ? { actionConfig: rule.actionConfig } : {}),
+      ...(rule.actionConfig && Object.keys(rule.actionConfig).length > 0
+        ? { actionConfig: rule.actionConfig }
+        : {}),
       priority: rule.priority,
       isEnabled: rule.isEnabled,
     })),
@@ -663,7 +682,23 @@ function parseImportedActionConfig(
   rawConfig: unknown,
   mappingAction: boolean,
 ): { actionConfig: CreateStatusAutomationRuleRequest['actionConfig']; errors: string[] } {
-  if (!mappingAction) return { actionConfig: undefined, errors: [] };
+  if (!mappingAction) {
+    if (rawConfig === undefined || rawConfig === null) {
+      return { actionConfig: undefined, errors: [] };
+    }
+    if (
+      isRecord(rawConfig)
+      && (rawConfig.detailTransitionMode === 'set_exact'
+        || rawConfig.detailTransitionMode === 'advance_only')
+      && Object.keys(rawConfig).every((key) => key === 'detailTransitionMode')
+    ) {
+      return {
+        actionConfig: { detailTransitionMode: rawConfig.detailTransitionMode },
+        errors: [],
+      };
+    }
+    return { actionConfig: undefined, errors: ['Некорректный режим изменения деталей'] };
+  }
   if (!isRecord(rawConfig) || !isRecord(rawConfig.statusMapping) || !Array.isArray(rawConfig.statusMapping.entries)) {
     return { actionConfig: undefined, errors: ['Не указан маппинг статусов'] };
   }
@@ -715,6 +750,7 @@ function parseImportedConditions(
   const statusArrays: Array<[keyof StatusAutomationConditionsDto, unknown]> = [
     ['currentOrderStatusIn', rawConditions.currentOrderStatusIn],
     ['currentOrderStatusNotIn', rawConditions.currentOrderStatusNotIn],
+    ['previousOrderStatusIn', rawConditions.previousOrderStatusIn],
     ['currentPaymentStatusIn', rawConditions.currentPaymentStatusIn],
     ['currentPaymentStatusNotIn', rawConditions.currentPaymentStatusNotIn],
     ['currentProductionStatusIn', rawConditions.currentProductionStatusIn],
@@ -816,6 +852,7 @@ function validateImportedStatusAutomationRule(
   const conditions = rule.conditions ?? {};
   pushMissingStatusErrors(errors, conditions.currentOrderStatusIn, statusCatalog.orderStatusIds, 'статусы заказа');
   pushMissingStatusErrors(errors, conditions.currentOrderStatusNotIn, statusCatalog.orderStatusIds, 'исключающие статусы заказа');
+  pushMissingStatusErrors(errors, conditions.previousOrderStatusIn, statusCatalog.orderStatusIds, 'предыдущие статусы заказа');
   pushMissingStatusErrors(errors, conditions.currentPaymentStatusIn, statusCatalog.paymentStatusIds, 'статусы оплаты');
   pushMissingStatusErrors(errors, conditions.currentPaymentStatusNotIn, statusCatalog.paymentStatusIds, 'исключающие статусы оплаты');
   pushMissingStatusErrors(errors, conditions.currentProductionStatusIn, statusCatalog.productionStatusIds, 'статусы производства');
@@ -833,6 +870,9 @@ function normalizeConditionsForExport(
   }
   if (conditions?.currentOrderStatusNotIn?.length) {
     normalized.currentOrderStatusNotIn = uniqueNumbers(conditions.currentOrderStatusNotIn);
+  }
+  if (conditions?.previousOrderStatusIn?.length) {
+    normalized.previousOrderStatusIn = uniqueNumbers(conditions.previousOrderStatusIn);
   }
   if (conditions?.currentPaymentStatusIn?.length) {
     normalized.currentPaymentStatusIn = uniqueNumbers(conditions.currentPaymentStatusIn);
@@ -881,6 +921,9 @@ function assignStatusArrayCondition(
       return;
     case 'currentOrderStatusNotIn':
       conditions.currentOrderStatusNotIn = value;
+      return;
+    case 'previousOrderStatusIn':
+      conditions.previousOrderStatusIn = value;
       return;
     case 'currentPaymentStatusIn':
       conditions.currentPaymentStatusIn = value;

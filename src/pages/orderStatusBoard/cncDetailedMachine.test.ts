@@ -423,6 +423,7 @@ function packet(overrides: Partial<CncTelegramPacket> = {}): CncTelegramPacket {
     svgCutImportStatus: 'imported',
     svgCutImportNote: null,
     allLinkedOrderDetailsPackedOrLater: false,
+    allLinkedOrderDetailsIssuedOrLater: false,
     itemCount: 1,
     itemQuantityTotal: 1,
     updatedAt: '2026-08-01T08:00:00.000Z',

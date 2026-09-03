@@ -87,6 +87,20 @@ describe('status automation DTO', () => {
       });
     });
 
+    it('parses an order-status detail cascade with previous status and advance-only mode', () => {
+      expect(parseCreateStatusAutomationRuleRequest({
+        name: 'Выдан → детали выданы',
+        eventType: 'order.status_changed',
+        actionType: 'change_details_production_status',
+        targetStatusId: 9,
+        conditions: { previousOrderStatusIn: [5, 6] },
+        actionConfig: { detailTransitionMode: 'advance_only' },
+      })).toMatchObject({
+        conditions: { previousOrderStatusIn: [5, 6] },
+        actionConfig: { detailTransitionMode: 'advance_only' },
+      });
+    });
+
     it.each([
       ['Файлы заказа на станке', 'mdf.order_machine_files_present'],
       ['МДФ-доска распилено', 'mdf.board.completed'],
@@ -116,6 +130,19 @@ describe('status automation DTO', () => {
       ['firstPaymentOnly on another event', {
         eventType: 'order.created',
         conditions: { firstPaymentOnly: true },
+      }],
+      ['previous order status on another event', {
+        eventType: 'order.created',
+        conditions: { previousOrderStatusIn: [1] },
+      }],
+      ['detail transition mode on another action', {
+        actionType: 'change_order_status',
+        actionConfig: { detailTransitionMode: 'advance_only' },
+      }],
+      ['unknown detail transition mode', {
+        eventType: 'order.status_changed',
+        actionType: 'change_details_production_status',
+        actionConfig: { detailTransitionMode: 'forward' },
       }],
       ['paidShareGte below zero', { conditions: { paidShareGte: -1 } }],
       ['paidShareGte above 100', { conditions: { paidShareGte: 101 } }],

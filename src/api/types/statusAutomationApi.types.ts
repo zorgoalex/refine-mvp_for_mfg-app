@@ -27,6 +27,7 @@ export interface StatusAutomationStatusMappingEntryDto {
 }
 
 export interface StatusAutomationActionConfigDto {
+  detailTransitionMode?: 'set_exact' | 'advance_only';
   statusMapping?: { entries: StatusAutomationStatusMappingEntryDto[] };
 }
 
@@ -35,6 +36,7 @@ export type StatusAutomationOrderSource = 'manual' | 'bazis' | 'import';
 export interface StatusAutomationConditionsDto {
   currentOrderStatusIn?: number[];
   currentOrderStatusNotIn?: number[];
+  previousOrderStatusIn?: number[];
   currentPaymentStatusIn?: number[];
   currentPaymentStatusNotIn?: number[];
   currentProductionStatusIn?: number[];
@@ -63,7 +65,7 @@ export interface StatusAutomationEventTypeDto {
   group?: StatusAutomationEventGroup;
   description?: string;
   allowedConditions: string[];
-  allowedActions: string[];
+  allowedActions: StatusAutomationActionType[];
 }
 
 export interface CreateStatusAutomationRuleRequest {

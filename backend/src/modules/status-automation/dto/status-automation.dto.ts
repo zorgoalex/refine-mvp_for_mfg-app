@@ -32,6 +32,7 @@ const statusMappingEntrySchema = z
 
 const actionConfigSchema = z
   .object({
+    detailTransitionMode: z.enum(['set_exact', 'advance_only']).optional(),
     statusMapping: z
       .object({ entries: z.array(statusMappingEntrySchema).min(1) })
       .strict()
@@ -43,6 +44,7 @@ const conditionSchema = z
   .object({
     currentOrderStatusIn: z.array(z.number().int().positive()).optional(),
     currentOrderStatusNotIn: z.array(z.number().int().positive()).optional(),
+    previousOrderStatusIn: z.array(z.number().int().positive()).optional(),
     currentPaymentStatusIn: z.array(z.number().int().positive()).optional(),
     currentPaymentStatusNotIn: z.array(z.number().int().positive()).optional(),
     currentProductionStatusIn: z.array(z.number().int().positive()).optional(),
@@ -160,7 +162,7 @@ export function parseCreateStatusAutomationRuleRequest(body: unknown): CreateSta
     actionType: data.actionType,
     targetStatusId: data.targetStatusId ?? null,
     conditions: normalizeConditions(data.conditions),
-    ...(actionConfig.statusMapping ? { actionConfig } : {}),
+    ...(Object.keys(actionConfig).length > 0 ? { actionConfig } : {}),
     priority: data.priority,
     isEnabled: data.isEnabled,
   };
@@ -251,6 +253,9 @@ function normalizeConditions(value: z.infer<typeof conditionSchema>): StatusAuto
   if (value.currentOrderStatusNotIn !== undefined && value.currentOrderStatusNotIn.length > 0) {
     conditions.currentOrderStatusNotIn = value.currentOrderStatusNotIn;
   }
+  if (value.previousOrderStatusIn !== undefined && value.previousOrderStatusIn.length > 0) {
+    conditions.previousOrderStatusIn = value.previousOrderStatusIn;
+  }
   if (value.currentPaymentStatusIn !== undefined && value.currentPaymentStatusIn.length > 0) {
     conditions.currentPaymentStatusIn = value.currentPaymentStatusIn;
   }
@@ -287,8 +292,16 @@ function validateActionSpecificFields(
     actionType === 'map_order_status_to_details_production_status' ||
     actionType === 'map_production_status_to_order_status';
   const entries = actionConfig?.statusMapping?.entries ?? [];
+  const detailTransitionMode = actionConfig?.detailTransitionMode;
 
   if (isMappingAction) {
+    if (detailTransitionMode !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['actionConfig', 'detailTransitionMode'],
+        message: 'Detail transition mode is allowed only for direct detail status actions',
+      });
+    }
     if (entries.length === 0) {
       context.addIssue({
         code: 'custom',
@@ -328,6 +341,16 @@ function validateActionSpecificFields(
       message: 'Status mapping is allowed only for mapping actions',
     });
   }
+  if (
+    detailTransitionMode !== undefined &&
+    actionType !== 'change_details_production_status'
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['actionConfig', 'detailTransitionMode'],
+      message: 'Detail transition mode is allowed only for detail status actions',
+    });
+  }
 }
 
 function normalizeActionConfig(value: z.infer<typeof actionConfigSchema>): StatusAutomationActionConfig {
@@ -335,7 +358,12 @@ function normalizeActionConfig(value: z.infer<typeof actionConfigSchema>): Statu
     sourceStatusIds: Array.from(new Set(entry.sourceStatusIds)),
     targetStatusId: entry.targetStatusId,
   }));
-  return entries?.length ? { statusMapping: { entries } } : {};
+  return {
+    ...(value.detailTransitionMode
+      ? { detailTransitionMode: value.detailTransitionMode }
+      : {}),
+    ...(entries?.length ? { statusMapping: { entries } } : {}),
+  };
 }
 
 function validationError(error: z.ZodError): ApiError {

@@ -252,6 +252,8 @@ export interface OrderAutomationSourceOutboxEvent {
   requestId: string;
   idempotencyKey: string;
   sourceIdempotencyKey?: string;
+  orderStatusIdBefore?: number;
+  orderStatusIdAfter?: number;
   payload: Record<string, unknown>;
 }
 

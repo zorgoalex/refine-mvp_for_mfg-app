@@ -62,6 +62,28 @@ Read projection: `GET /api/v1/orders/status-board`. Начальная загр�
 деталь откатывается на более ранний статус, статус заказа тоже возвращается к
 этому раннему статусу.
 
+На МДФ-доске перенос карточки заказа между колонками меняет именно статус
+заказа через `PATCH /api/v1/orders/:orderId/status`; отдельный manual move для
+заказа backend отклоняет с `MDF_ORDER_MOVE_REQUIRES_STATUS_CHANGE`. Колонки
+разрешаются по активным справочникам однозначно: «Заказы» → «В производстве»,
+«Готовые заказы» → «Готов»/«Готов к выдаче», «Выданные» → «Выдан». После
+команды UI перечитывает доску, поэтому показывает результат всей серверной
+цепочки, а не локально переставленную карточку.
+
+Миграция `backend/db/migrations/147_mdf_order_status_detail_cascade.sql`
+устанавливает правила этой цепочки: «Выдан» переводит все ещё не дошедшие до
+него активные детали в производственный статус «Выдан» без понижения более
+поздних статусов; «Готов»/«Готов к выдаче» ставит деталям «Упакован»; возврат
+из готового/выданного состояния в «В производстве» ставит «Закатан». После
+изменения деталей backend пересчитывает производственный статус заказа и
+очищает устаревшие ручные позиции связанных МДФ-карточек.
+
+Файл станка, набор Базис-раскроя или ванна уходит в свою терминальную колонку
+только когда правило выполнено для каждого связанного заказа. Смешанная
+карточка остаётся рабочей, пока хотя бы один заказ не достиг нужного статуса;
+карточка с неизвестной связью также не завершается автоматически. Файлы и
+наборы переходят в «Распиленные файлы», ванны — в «Завершённые ванны».
+
 Включение:
 
 ```env
@@ -348,14 +370,16 @@ outbox (`order.deleted`, `order.restored`).
 - `order.status_changed`;
 - `order.production_status_changed`.
 
-Условия: текущие статусы, `paidShareGte`, источник заказа
+Условия: текущие статусы, предыдущий статус заказа
+`previousOrderStatusIn`, `paidShareGte`, источник заказа
 `manual|bazis|import`, `firstPaymentOnly`.
 
 Действия:
 
 - `change_order_status`;
 - `change_production_status`;
-- `change_details_production_status`.
+- `change_details_production_status` с режимом деталей `set_exact` или
+  `advance_only`;
 - `map_order_status_to_details_production_status` для события `order.status_changed`;
 - `map_production_status_to_order_status` для события `order.production_status_changed`.
 
@@ -395,7 +419,8 @@ VITE_STATUS_AUTOMATION=true
 
 Миграция:
 `backend/db/migrations/066_status_automation_rules.sql`, mapping extension:
-`backend/db/migrations/134_status_automation_mapping_actions.sql`.
+`backend/db/migrations/134_status_automation_mapping_actions.sql`, правила
+МДФ-цикла заказа: `backend/db/migrations/147_mdf_order_status_detail_cascade.sql`.
 
 ## Шаблоны бирок
 

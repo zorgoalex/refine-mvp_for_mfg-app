@@ -994,6 +994,14 @@ describe('PgCncTelegramRepository', () => {
                 match_status: 'needs_review',
                 all_linked_order_details_packed_or_later: false,
               }),
+              packetRow({
+                packet_id: '00000000-0000-0000-0000-000000000035',
+                packet_item_id: '00000000-0000-0000-0000-000000000047',
+                completion_status: 'pending',
+                thumbs_up: false,
+                all_linked_order_details_packed_or_later: false,
+                all_linked_order_details_issued_or_later: true,
+              }),
             ],
           };
         }
@@ -1007,11 +1015,20 @@ describe('PgCncTelegramRepository', () => {
     expect(result.columns.find((column) => column.key === 'completed')?.packets)
       .toHaveLength(3);
     expect(result.columns.find((column) => column.key === 'completed_laminated')?.packets)
-      .toMatchObject([{
-        packetId: '00000000-0000-0000-0000-000000000031',
-        allLinkedOrderDetailsPackedOrLater: true,
-    }]);
+      .toMatchObject([
+        {
+          packetId: '00000000-0000-0000-0000-000000000031',
+          allLinkedOrderDetailsPackedOrLater: true,
+          allLinkedOrderDetailsIssuedOrLater: false,
+        },
+        {
+          packetId: '00000000-0000-0000-0000-000000000035',
+          completionStatus: 'pending',
+          allLinkedOrderDetailsIssuedOrLater: true,
+        },
+      ]);
     expect(database.query.mock.calls[0]?.[0]).toContain("= 'packed'");
+    expect(database.query.mock.calls[0]?.[0]).toContain("= 'issued'");
     expect(database.query.mock.calls[0]?.[0]).toContain('FROM order_details linked_detail');
     expect(database.query.mock.calls[0]?.[0]).toContain('COUNT(linked_detail.detail_id) > 0');
     expect(database.query.mock.calls[0]?.[0]).toContain(
@@ -1390,10 +1407,8 @@ describe('PgCncTelegramRepository', () => {
     expect(basisQuery?.text).toContain('issued_status_threshold');
     expect(basisQuery?.text).not.toContain('order_status_code');
     expect(basisQuery?.text).toContain('LEFT JOIN order_statuses source_order_status');
-    expect(basisQuery?.text).toContain('LEFT JOIN mdf_board_manual_moves issued_order_move');
-    expect(basisQuery?.text).toContain("issued_order_move.target_column = 'orders_issued'");
+    expect(basisQuery?.text).not.toContain('LEFT JOIN mdf_board_manual_moves issued_order_move');
     expect(basisQuery?.text).toContain('source_order_status.sort_order >= issued_status.sort_order');
-    expect(basisQuery?.text).toContain('WHEN issued_order_move.move_id IS NOT NULL THEN true');
     expect(basisQuery?.text).toContain('AS packed_or_later');
     expect(basisQuery?.text).toContain('cut_set.created_at >= $1::date');
     expect(basisQuery?.text).toContain("cut_set.created_at < ($2::date + INTERVAL '1 day')");

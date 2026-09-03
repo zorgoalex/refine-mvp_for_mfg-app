@@ -151,6 +151,7 @@ export interface CncTelegramPacket {
   svgCutImportStatus?: 'none' | 'skipped' | 'needs_review' | 'imported';
   svgCutImportNote?: string | null;
   allLinkedOrderDetailsPackedOrLater: boolean;
+  allLinkedOrderDetailsIssuedOrLater: boolean;
   svgCutSheets?: CncTelegramPacketCutSheet[];
   itemCount: number;
   itemQuantityTotal: number;

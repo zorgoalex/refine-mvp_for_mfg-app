@@ -26,6 +26,7 @@ export type StatusAutomationOrigin = 'user' | 'automation';
 export interface StatusAutomationConditions {
   currentOrderStatusIn?: number[];
   currentOrderStatusNotIn?: number[];
+  previousOrderStatusIn?: number[];
   currentPaymentStatusIn?: number[];
   currentPaymentStatusNotIn?: number[];
   currentProductionStatusIn?: number[];
@@ -41,6 +42,7 @@ export interface StatusAutomationStatusMappingEntry {
 }
 
 export interface StatusAutomationActionConfig {
+  detailTransitionMode?: 'set_exact' | 'advance_only';
   statusMapping?: {
     entries: StatusAutomationStatusMappingEntry[];
   };
@@ -69,6 +71,8 @@ export interface StatusAutomationEvent {
   paymentsCountAfter?: number;
   paymentStatusIdBefore?: number;
   paymentStatusIdAfter?: number;
+  orderStatusIdBefore?: number;
+  orderStatusIdAfter?: number;
   plannedCompletionDateBefore?: string | null;
   plannedCompletionDateAfter?: string | null;
 }

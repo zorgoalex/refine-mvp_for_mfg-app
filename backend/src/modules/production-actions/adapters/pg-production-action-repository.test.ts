@@ -454,7 +454,14 @@ describe('PgProductionActionRepository', () => {
     expect(params).toContain('rule-1');
     expect(params).toContain('sha256:rule-1');
     expect(params).toContain('deadline-status-key-1');
-    expect(evaluateStatusAutomationMock).not.toHaveBeenCalled();
+    expect(evaluateStatusAutomationMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        eventType: 'order.status_changed',
+        orderStatusIdBefore: 5,
+        orderStatusIdAfter: 7,
+      }),
+    );
 
     const idempotencyInsert = database.queries.find((query) =>
       normalizeSql(query.text).startsWith('INSERT INTO command_idempotency_keys'),
@@ -1585,7 +1592,10 @@ describe('assigned-worker audit metadata across production commands', () => {
       const detailLockIdx = database.queries.findIndex((query) => {
         const n = normalizeSql(query.text);
         return (
-          n.startsWith('SELECT detail_id, production_status_id FROM order_details') &&
+          (
+            n.startsWith('SELECT detail_id, production_status_id FROM order_details')
+            || n.startsWith('SELECT detail.detail_id, detail.production_status_id')
+          ) &&
           n.includes('FOR UPDATE')
         );
       });
@@ -2068,7 +2078,10 @@ function createDatabase(options: {
         return { rows: ids.map((id) => ({ detail_id: id })), rowCount: ids.length };
       }
 
-      if (normalized.startsWith('SELECT detail_id, production_status_id FROM order_details')) {
+      if (
+        normalized.startsWith('SELECT detail_id, production_status_id FROM order_details')
+        || normalized.startsWith('SELECT detail.detail_id, detail.production_status_id')
+      ) {
         const updateAlreadyRan = queries.some((query) => {
           const n = normalizeSql(query.text);
           return (

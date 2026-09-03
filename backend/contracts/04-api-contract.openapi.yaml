@@ -20660,11 +20660,16 @@ components:
             - change_order_status
             - change_production_status
             - change_details_production_status
+            - map_order_status_to_details_production_status
+            - map_production_status_to_order_status
         targetStatusId:
           type: integer
           minimum: 1
+          nullable: true
         conditions:
           $ref: '#/components/schemas/StatusAutomationConditionsDto'
+        actionConfig:
+          $ref: '#/components/schemas/StatusAutomationActionConfigDto'
         priority:
           type: integer
         isEnabled:
@@ -20681,6 +20686,11 @@ components:
             type: integer
             minimum: 1
         currentOrderStatusNotIn:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+        previousOrderStatusIn:
           type: array
           items:
             type: integer
@@ -20764,6 +20774,7 @@ components:
             enum:
               - currentOrderStatusIn
               - currentOrderStatusNotIn
+              - previousOrderStatusIn
               - currentPaymentStatusIn
               - currentPaymentStatusNotIn
               - currentProductionStatusIn
@@ -20779,6 +20790,40 @@ components:
               - change_order_status
               - change_production_status
               - change_details_production_status
+              - map_order_status_to_details_production_status
+              - map_production_status_to_order_status
+
+    StatusAutomationActionConfigDto:
+      type: object
+      properties:
+        detailTransitionMode:
+          type: string
+          enum:
+            - set_exact
+            - advance_only
+        statusMapping:
+          type: object
+          required:
+            - entries
+          properties:
+            entries:
+              type: array
+              minItems: 1
+              items:
+                type: object
+                required:
+                  - sourceStatusIds
+                  - targetStatusId
+                properties:
+                  sourceStatusIds:
+                    type: array
+                    minItems: 1
+                    items:
+                      type: integer
+                      minimum: 1
+                  targetStatusId:
+                    type: integer
+                    minimum: 1
 
     StatusAutomationOrderRefreshSummary:
       type: object
@@ -20921,11 +20966,16 @@ components:
             - change_order_status
             - change_production_status
             - change_details_production_status
+            - map_order_status_to_details_production_status
+            - map_production_status_to_order_status
         targetStatusId:
           type: integer
           minimum: 1
+          nullable: true
         conditions:
           $ref: '#/components/schemas/StatusAutomationConditionsDto'
+        actionConfig:
+          $ref: '#/components/schemas/StatusAutomationActionConfigDto'
         priority:
           type: integer
           default: 100
@@ -20963,11 +21013,16 @@ components:
             - change_order_status
             - change_production_status
             - change_details_production_status
+            - map_order_status_to_details_production_status
+            - map_production_status_to_order_status
         targetStatusId:
           type: integer
           minimum: 1
+          nullable: true
         conditions:
           $ref: '#/components/schemas/StatusAutomationConditionsDto'
+        actionConfig:
+          $ref: '#/components/schemas/StatusAutomationActionConfigDto'
         priority:
           type: integer
         isEnabled:
