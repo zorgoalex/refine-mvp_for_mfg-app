@@ -24,7 +24,8 @@ function installGitHooks({ env = process.env, run = spawnSync, exists = existsSy
     return { installed: false, reason: 'not-a-git-worktree' };
   }
 
-  if (!exists('.githooks/pre-push')) {
+  const requiredHooks = ['.githooks/pre-commit', '.githooks/pre-push'];
+  if (requiredHooks.some((hook) => !exists(hook))) {
     return { installed: false, reason: 'hooks-not-found' };
   }
 
