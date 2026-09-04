@@ -30,6 +30,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-09-05",
+    title: "Заказы: печать и экспорт PDF",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Печать карточки заказа и экспорт в PDF больше не создают пустой лист после загрузки МДФ-доски.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-31",
     title: "Заказы: закрытие формы после сохранения",
     services: ["ERP"],
