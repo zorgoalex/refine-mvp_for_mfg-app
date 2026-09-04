@@ -1267,14 +1267,15 @@ describe('PgCncTelegramRepository', () => {
     expect(sql).toContain('candidate.result_created_at DESC');
     expect(sql).toContain('lower(trim(i.order_name)) AS order_key');
     expect(sql).toContain('od.detail_number = item.detail_number');
-    expect(sql).toContain('jsonb_array_elements_text(p.comments_json)');
+    expect(sql).toContain("COALESCE(p.material_name, '') ~* '(mdf|мдф)'");
+    expect(sql).toContain("COALESCE(p.material_name, '') !~* '(^|[^a-zа-яё])(hdf|хдф|лдсп|ldsp|lдсп");
+    expect(sql).toContain("COALESCE(p.program_name, '') !~*");
+    expect(sql).toContain("COALESCE(p.external_packet_key, '') !~*");
+    expect(sql).toContain("jsonb_array_elements_text(COALESCE(p.comments_json, '[]'::jsonb))");
     expect(sql).toContain('item.mdf_relevant');
-    expect(sql).toContain('%hdf%');
-    expect(sql).toContain('%хдф%');
-    expect(sql).toContain('%лдсп%');
-    expect(sql).toContain('%ldsp%');
-    expect(sql).toContain('%fanera%');
-    expect(sql).toContain('%фанера%');
+    expect(sql).toContain('дсп|dsp|двп|dvp|osb|осп');
+    expect(sql).toContain('fanera|фанера|plywood');
+    expect(sql).toContain('акрил|acrylic|пластик|plastic');
     expect(sql).toContain("item.source <> 'ocr'");
     expect(sql).toContain('item.width_mm::numeric = od.width::numeric');
     expect(sql).toContain("item.source = 'ocr'");
@@ -3372,6 +3373,10 @@ describe('PgCncTelegramRepository', () => {
     await repo.ingest({ currentUser: user(), dto, requestId: 'request-cnc-auto-cut' });
 
     const targetQuery = queries.find((query) => /WITH completed_quantities AS/i.test(query.text));
+    const bathStateQuery = queries.find((query) =>
+      /placement\.cut_result_id = \$1/i.test(query.text)
+      && /layout_mode.*vacuum_table/is.test(query.text),
+    );
     const orderLockIndex = queries.findIndex((query) =>
       /FROM orders\s+WHERE order_id = ANY/i.test(query.text),
     );
@@ -3392,6 +3397,10 @@ describe('PgCncTelegramRepository', () => {
     expect(targetQuery?.params).toEqual([[3101], [], [2689]]);
     expect(targetQuery?.text).toContain('SUM(GREATEST(item.quantity, 0))');
     expect(targetQuery?.text).toContain('completed.completed_quantity, 0) >= GREATEST');
+    expect(bathStateQuery?.text).toContain("COALESCE(packet.material_name, '') ~*");
+    expect(bathStateQuery?.text).toContain("COALESCE(packet.program_name, '') !~*");
+    expect(bathStateQuery?.text).toContain("COALESCE(packet.external_packet_key, '') !~*");
+    expect(bathStateQuery?.text).toContain('jsonb_array_elements_text(COALESCE(packet.comments_json');
     expect(orderLockIndex).toBeGreaterThan(-1);
     expect(targetQueryIndex).toBeGreaterThan(orderLockIndex);
     expect(currentStatusLockIndex).toBeGreaterThan(detailLockIndex);

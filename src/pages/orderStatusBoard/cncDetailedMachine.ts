@@ -6,10 +6,14 @@ import type {
   CncTelegramTodayColumn,
 } from '../../api/types/cncTelegramApi.types';
 import type { CutResultDto } from '../../api/types/cutApi.types';
+import {
+  CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE,
+  CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE,
+} from '@shared/cnc-material';
 
 export const CNC_MACHINE_DETAIL_SIZE_TOLERANCE_MM = 3;
-const CNC_OTHER_MATERIAL_MARKER_PATTERN = /(?:^|[^a-zа-яё])(?:hdf|хдф|лдсп|ldsp|lдсп|дсп|dsp|двп|dvp|osb|осп|fanera|фанера|plywood|акрил|acrylic|пластик|plastic)(?=$|[^a-zа-яё])/i;
-const CNC_MDF_MATERIAL_PATTERN = /(?:^|[^a-zа-яё])(?:mdf|мдф)(?=$|[^a-zа-яё])/i;
+const CNC_OTHER_MATERIAL_MARKER_PATTERN = new RegExp(CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE, 'i');
+const CNC_MDF_MATERIAL_PATTERN = new RegExp(CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE, 'i');
 const CNC_UNKNOWN_MATERIAL_PATTERN = /^(?:не\s*(?:определ[её]н(?:о)?|распознан(?:о)?)|неизвестн(?:ый|о)?|unknown|[-—])$/i;
 
 export type CncDetailedMachineMatchKind = 'exact' | 'fallback' | 'whole_order' | 'order';

@@ -6,6 +6,10 @@ import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import {
+  CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE,
+  CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE,
+} from '../../../shared/cnc-material';
+import {
   CUT_RENDER_STYLES_SETTING_KEY,
   CUT_RENDER_STYLE_TELEGRAM_PHOTO,
   resolveTelegramPhotoRenderStyle,
@@ -107,6 +111,21 @@ const CNC_AUTO_CUT_STATUS_CONFIGURE_EVENT = 'cnc.telegram_packet.auto_cut_status
 const IGNORED_ANALYSIS_WARNINGS = new Set([
   'RapidOCR found text, but no detail rows with order and size',
 ]);
+
+function cncPacketCountsForMdfReadinessSql(packetAlias: 'p' | 'packet'): string {
+  return `(
+    COALESCE(${packetAlias}.material_name, '') ~* '${CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE}'
+    AND COALESCE(${packetAlias}.material_name, '') !~* '${CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE}'
+    AND COALESCE(${packetAlias}.program_name, '') !~* '${CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE}'
+    AND COALESCE(${packetAlias}.external_packet_key, '') !~* '${CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE}'
+    AND NOT EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements_text(COALESCE(${packetAlias}.comments_json, '[]'::jsonb))
+        AS material_comment(comment_text)
+      WHERE material_comment.comment_text ~* '${CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE}'
+    )
+  )`;
+}
 
 interface PacketJoinedRow extends QueryResultRow {
   packet_id: string;
@@ -6099,13 +6118,7 @@ async function loadMdfBathColumnAutomationState(
         item.match_detail_id::bigint AS order_detail_id,
         SUM(
           CASE
-            WHEN NOT EXISTS (
-              SELECT 1
-              FROM jsonb_array_elements_text(packet.comments_json) AS packet_comment(comment_text)
-              WHERE lower(packet_comment.comment_text) LIKE ANY (
-                ARRAY['%hdf%', '%хдф%', '%лдсп%', '%ldsp%', '%fanera%', '%фанера%']
-              )
-            )
+            WHEN ${cncPacketCountsForMdfReadinessSql('packet')}
               AND (packet.completion_status = 'completed' OR packet.thumbs_up = true)
               THEN GREATEST(item.quantity, 0)
             ELSE 0
@@ -7335,13 +7348,7 @@ async function loadBathCards(
       SELECT
         p.completion_status,
         p.thumbs_up,
-        NOT EXISTS (
-          SELECT 1
-          FROM jsonb_array_elements_text(p.comments_json) AS packet_comment(comment_text)
-          WHERE lower(packet_comment.comment_text) LIKE ANY (
-            ARRAY['%hdf%', '%хдф%', '%лдсп%', '%ldsp%', '%fanera%', '%фанера%']
-          )
-        ) AS mdf_relevant,
+        ${cncPacketCountsForMdfReadinessSql('p')} AS mdf_relevant,
         i.match_order_id,
         i.match_detail_id,
         i.source,
@@ -7391,13 +7398,7 @@ async function loadBathCards(
       WHERE ${packetDatePredicate}
         ${packetVisibilityPredicate}
         AND (p.completion_status = 'completed' OR p.thumbs_up = true)
-        AND NOT EXISTS (
-          SELECT 1
-          FROM jsonb_array_elements_text(p.comments_json) AS material_comment(comment_text)
-          WHERE lower(material_comment.comment_text) LIKE ANY (
-            ARRAY['%hdf%', '%хдф%', '%лдсп%', '%ldsp%', '%fanera%', '%фанера%']
-          )
-        )
+        AND ${cncPacketCountsForMdfReadinessSql('p')}
     ),
     whole_order_target_details AS (
       SELECT
