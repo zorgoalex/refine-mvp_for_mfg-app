@@ -34,11 +34,14 @@ describe('Bitrix24 reverse repository financial guards', () => {
     expect(source).toMatch(/updated\.rowCount !== 1[\s\S]*paymentChanged = true/);
     expect(source).toContain('async materializeMappedOrderPayments');
     expect(controllerSource).toContain("@Post('mapped-orders/:orderId/materialize-payments')");
+    expect(source).toMatch(
+      /replaceMappedOrderPaymentSnapshots[\s\S]*FROM crm_sync_mapping[\s\S]*status='active'[\s\S]*FOR UPDATE[\s\S]*BITRIX24_DEAL_MAPPING_CHANGED/,
+    );
   });
 
   it('reads the canonical payment type name column', () => {
     expect(source).toContain('type.type_paid_name AS type_paid_name');
-    expect(source).toContain('type.type_paid_name, mapping.active');
+    expect(source).toContain('COALESCE(mapping.active, false) AS active');
     expect(source).not.toMatch(/type\.type_paid(?!_)/);
   });
 

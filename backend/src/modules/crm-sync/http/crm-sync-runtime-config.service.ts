@@ -84,6 +84,33 @@ export class CrmSyncRuntimeConfigService {
     };
   }
 
+  getPaymentWidget() {
+    return {
+      enabled:
+        this.config.get('BACKEND_ENABLE_BITRIX24_PAYMENT_WIDGET', { infer: true }) ?? false,
+      sessionEncryptionKey:
+        this.config.get('BITRIX24_WIDGET_SESSION_ENCRYPTION_KEY', { infer: true }) ?? null,
+      commandTokenEncryptionKey:
+        this.config.get('BITRIX24_WIDGET_COMMAND_TOKEN_ENCRYPTION_KEY', { infer: true }) ?? null,
+      sessionTtlSeconds: this.config.get(
+        'BITRIX24_WIDGET_SESSION_TTL_SECONDS',
+        { infer: true },
+      ),
+      commandTokenRetentionDays: this.config.get(
+        'BITRIX24_WIDGET_COMMAND_TOKEN_RETENTION_DAYS',
+        { infer: true },
+      ),
+      paySystemCacheTtlSeconds: this.config.get(
+        'BITRIX24_WIDGET_PAY_SYSTEM_CACHE_TTL_SECONDS',
+        { infer: true },
+      ),
+      commandLeaseMs: this.config.get(
+        'BITRIX24_WIDGET_COMMAND_LEASE_MS',
+        { infer: true },
+      ),
+    };
+  }
+
   isProductionInitializationReady(): boolean {
     return Boolean(
       this.config.get('BACKEND_ENABLE_DEADLINES', { infer: true }) &&

@@ -46,12 +46,29 @@ export class Bitrix24ReverseIngressService {
       expectedAppCode: settings.appClientId,
     });
 
+    let executor: { id: string; active: boolean; admin: boolean } | null = null;
+    if (this.config.getPaymentWidget().enabled) {
+      executor = await this.localApp.currentUser({
+        domain: payload.domain,
+        accessToken: payload.accessToken,
+      });
+      if (!executor.active || !executor.admin) {
+        throw new ApiError(
+          403,
+          'BITRIX24_INSTALL_ADMIN_REQUIRED',
+          'Bitrix24 administrator must install the payment widget',
+        );
+      }
+    }
+
     const cipher = new Bitrix24TokenCipher(settings.tokenEncryptionKey);
     await this.repository.saveInstallation({
       payload,
       accessTokenCiphertext: cipher.encrypt(payload.accessToken),
       refreshTokenCiphertext: cipher.encrypt(payload.refreshToken),
       applicationTokenHash: hashBitrix24ApplicationToken(payload.applicationToken),
+      executorBitrixUserId: executor?.id ?? null,
+      executorIsAdmin: Boolean(executor?.active && executor.admin),
       requestId,
     });
 

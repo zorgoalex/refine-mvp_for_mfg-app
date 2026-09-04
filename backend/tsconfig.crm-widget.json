@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [
+    "src/modules/crm-sync/crm-sync.module.ts",
+    "src/modules/crm-sync/widget/**/*.ts",
+    "src/modules/crm-sync/reverse/bitrix24-local-app-client.ts",
+    "src/modules/crm-sync/reverse/bitrix24-reverse-admin.controller.ts",
+    "src/modules/crm-sync/reverse/bitrix24-reverse-ingress.service.ts",
+    "src/modules/crm-sync/reverse/pg-bitrix24-reverse-repository.ts",
+    "src/config/env.validation.ts",
+    "src/permissions/permissions.ts",
+    "src/permissions/permissions.service.ts"
+  ],
+  "exclude": ["dist", "node_modules", "**/*.test.ts", "**/*.spec.ts"]
+}

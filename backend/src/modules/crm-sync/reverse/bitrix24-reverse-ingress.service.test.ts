@@ -16,6 +16,7 @@ const installationBody = {
 
 function config() {
   return {
+    getPaymentWidget: () => ({ enabled: false }),
     getReverseSync: () => ({
       enabled: true,
       appClientId: 'local.erp',

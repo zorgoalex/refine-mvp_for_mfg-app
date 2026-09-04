@@ -148,6 +148,13 @@ BITRIX24_APP_TOKEN_ENCRYPTION_KEY=base64-of-exactly-32-random-bytes
 BITRIX24_APP_PUBLIC_BASE_URL=https://backend.example.invalid
 BITRIX24_APP_PORTAL_DOMAIN=mebelkz.bitrix24.kz
 BITRIX24_PORTAL_TIMEZONE=Asia/Almaty
+BACKEND_ENABLE_BITRIX24_PAYMENT_WIDGET=false
+BITRIX24_WIDGET_SESSION_ENCRYPTION_KEY=base64-of-another-32-random-bytes
+BITRIX24_WIDGET_COMMAND_TOKEN_ENCRYPTION_KEY=base64-of-a-third-32-random-bytes
+BITRIX24_WIDGET_SESSION_TTL_SECONDS=600
+BITRIX24_WIDGET_COMMAND_TOKEN_RETENTION_DAYS=30
+BITRIX24_WIDGET_PAY_SYSTEM_CACHE_TTL_SECONDS=900
+BITRIX24_WIDGET_COMMAND_LEASE_MS=180000
 ```
 
 Set local application installation callback to
@@ -157,6 +164,13 @@ handler is bound automatically at
 Installation is accepted only when `app.info` confirms configured local
 application code. The callback `application_token` is stored only as a hash and
 authenticates all later event deliveries.
+
+For the Deal payment widget, disable `Использует только API`, set the main
+handler to `/api/v1/integrations/bitrix24/app`, and the initial-install handler
+to `/api/v1/integrations/bitrix24/install-ui`. Grant `crm`, `sale`,
+`pay_system`, `placement`, and a user scope supporting `user.current`. The two
+widget encryption keys must differ from each other and from the installation
+token key.
 
 ## Auth Session Adapter
 
