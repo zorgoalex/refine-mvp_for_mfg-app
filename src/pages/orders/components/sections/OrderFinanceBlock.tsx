@@ -9,6 +9,7 @@ import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { useOrderFinancialVisibility } from '../../../../hooks/useOrderFinancialVisibility';
 import dayjs from 'dayjs';
+import { BitrixOrderPaymentsPanel } from './BitrixOrderPaymentsPanel';
 
 const { Text } = Typography;
 
@@ -286,6 +287,9 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record, pa
             </Text>
           )}
         </div>
+      )}
+      {Number.isSafeInteger(Number(record?.order_id)) && Number(record?.order_id) > 0 && (
+        <BitrixOrderPaymentsPanel orderId={Number(record.order_id)} />
       )}
     </div>
   );

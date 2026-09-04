@@ -123,6 +123,10 @@ export const apiRoutes = {
       backendApiPath(`/bitrix24/incoming-requests/${requestId}/materialize-payments`),
     materializeMappedOrderPayments: (orderId: number) =>
       backendApiPath(`/bitrix24/mapped-orders/${orderId}/materialize-payments`),
+    mappedOrderPayments: (orderId: number) =>
+      backendApiPath(`/bitrix24/mapped-orders/${orderId}/payments`),
+    reconcileMappedOrderPayments: (orderId: number) =>
+      backendApiPath(`/bitrix24/mapped-orders/${orderId}/reconcile-payments`),
     userMappings: backendApiPath('/bitrix24/user-mappings'),
     userMappingTargets: backendApiPath('/bitrix24/user-mapping-targets'),
     userMapping: (bitrixUserId: string) =>
@@ -130,6 +134,10 @@ export const apiRoutes = {
     paymentTypeMappings: backendApiPath('/bitrix24/payment-type-mappings'),
     paymentTypeMapping: (paySystemId: number) =>
       backendApiPath(`/bitrix24/payment-type-mappings/${paySystemId}`),
+    refreshPaymentSystems: backendApiPath('/bitrix24/payment-systems/refresh'),
+    ambiguousPaymentCommands: backendApiPath('/bitrix24/payment-commands/ambiguous'),
+    resolvePaymentAmbiguity: (commandId: string) =>
+      backendApiPath(`/bitrix24/payment-commands/${encodeURIComponent(commandId)}/resolve-ambiguity`),
     syncHealth: backendApiPath('/bitrix24/sync-health'),
     retryFailed: backendApiPath('/bitrix24/sync-health/retry-failed'),
   },
