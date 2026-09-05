@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { parseImportCandidateBatch } from './cnc-telegram-import.dto';
+import { parseImportCandidateBatch, parseImportPrepare } from './cnc-telegram-import.dto';
+
+describe('Telegram import requested numbers', () => {
+  const first = '00000000-0000-4000-8000-000000000001';
+  const second = '00000000-0000-4000-8000-000000000002';
+  it('accepts optional per-candidate numbers including values above int32', () => {
+    expect(parseImportPrepare({ candidateIds: [first] }).requestedCutJobIds).toBeUndefined();
+    expect(parseImportPrepare({ candidateIds: [first, second], requestedCutJobIds: { [first]: 3000000000 } }).requestedCutJobIds)
+      .toEqual({ [first]: 3000000000 });
+  });
+  it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, '42', null])('rejects invalid number %s', (number) => {
+    expect(() => parseImportPrepare({ candidateIds: [first], requestedCutJobIds: { [first]: number } })).toThrow();
+  });
+  it('rejects assignments to unselected candidates and duplicate batch numbers', () => {
+    expect(() => parseImportPrepare({ candidateIds: [first], requestedCutJobIds: { [second]: 42 } })).toThrow();
+    expect(() => parseImportPrepare({ candidateIds: [first, second], requestedCutJobIds: { [first]: 42, [second]: 42 } })).toThrow();
+  });
+});
 
 const lease = {
   itemLeaseToken: 'l'.repeat(32),

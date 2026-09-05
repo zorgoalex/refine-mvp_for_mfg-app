@@ -30,7 +30,7 @@ export class CncTelegramImportService {
   async getScan(currentUser: CurrentUser, scanId: string) { this.requireEnabled(); this.requireUserRead(currentUser); return this.repository.getScan({ currentUser, scanId }); }
   async listCandidates(input: { currentUser: CurrentUser; scanId: string; page: number; pageSize: number }) { this.requireEnabled(); this.requireUserRead(input.currentUser); return this.repository.listCandidates(input); }
   async listMessages(input: { currentUser: CurrentUser; scanId: string; page: number; pageSize: number }) { this.requireEnabled(); this.requireUserRead(input.currentUser); return this.repository.listMessages(input); }
-  async prepare(input: { currentUser: CurrentUser; scanId: string; candidateIds: string[]; repeatOfImportRequestId?: string | null; requestId?: string; idempotencyKey: string }) {
+  async prepare(input: { currentUser: CurrentUser; scanId: string; candidateIds: string[]; requestedCutJobIds?: Record<string, number>; replaceDraft?: { importRequestId: string; confirmationId: string }; repeatOfImportRequestId?: string | null; requestId?: string; idempotencyKey: string }) {
     this.requireEnabled(); this.requireUserManage(input.currentUser);
     return this.repository.prepare({ ...input, requestId: input.requestId ?? 'cnc-telegram-import-prepare' });
   }
@@ -38,7 +38,7 @@ export class CncTelegramImportService {
     this.requireEnabled(); this.requireUserManage(input.currentUser);
     return this.repository.confirm({ ...input, requestId: input.requestId ?? 'cnc-telegram-import-confirm' });
   }
-  async repeatPrepare(input: { currentUser: CurrentUser; importRequestId: string; candidateIds: string[]; requestId?: string; idempotencyKey: string }) {
+  async repeatPrepare(input: { currentUser: CurrentUser; importRequestId: string; candidateIds: string[]; requestedCutJobIds?: Record<string, number>; replaceDraft?: { importRequestId: string; confirmationId: string }; requestId?: string; idempotencyKey: string }) {
     this.requireEnabled(); this.requireUserManage(input.currentUser);
     return this.repository.repeatPrepare({ ...input, requestId: input.requestId ?? 'cnc-telegram-import-repeat' });
   }

@@ -35,6 +35,7 @@ export function normalizePrepared(
     duplicateMatchVersion: '',
     duplicateCount: request.items.filter((item) => item.matches.length > 0).length,
     candidates: [],
+    items: request.items,
     refreshedMatches: Object.fromEntries(request.items.map((item) => [item.candidateId, item.matches as CncTelegramImportMatch[]])),
     status: request.status,
   };
@@ -141,12 +142,12 @@ export const cncTelegramImportApi = {
       });
   },
 
-  prepareRepeat(importRequestId: string, candidateIds: string[], idempotencyKey: string): Promise<CncTelegramImportPrepareResponse> {
+  prepareRepeat(importRequestId: string, candidateIds: string[], idempotencyKey: string, requestedCutJobIds?: Record<string, number>, replaceDraft?: CncTelegramImportPrepareRequest['replaceDraft']): Promise<CncTelegramImportPrepareResponse> {
     assertUuid(importRequestId, 'importRequestId');
     assertCandidateIds(candidateIds);
     return httpClient.post<CncTelegramImportPrepareResponse | CncTelegramImportRequest>(
       apiRoutes.cncTelegram.importRepeatPrepare(importRequestId),
-      { candidateIds },
+      { candidateIds, ...(requestedCutJobIds ? { requestedCutJobIds } : {}), ...(replaceDraft ? { replaceDraft } : {}) },
       { headers: { 'Idempotency-Key': idempotencyKey } },
     ).then(normalizePrepared);
   },

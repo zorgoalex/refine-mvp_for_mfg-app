@@ -131,6 +131,18 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     ]) expect(scriptText).toContain(marker);
   });
 
+  it('requires migration 148 active-number index and durable import-number probes', () => {
+    const verifyStart = scriptText.indexOf('verify_applied_effect() {');
+    const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
+    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('|148_*');
+    const arm = probeFn.slice(probeFn.indexOf('148_cut_job_number_reuse*)'), probeFn.indexOf('*) return 2'));
+    expect(arm).toContain('q_col cnc_telegram_import_items requested_cut_job_id');
+    expect(arm).toContain('chk_cnc_tg_import_requested_number');
+    expect(arm).toContain('i.indisunique AND i.indisvalid');
+    expect(arm).toContain('pg_get_expr(i.indpred, i.indrelid)');
+    expect(arm).toContain('pg_get_expr(i.indexprs, i.indrelid)');
+  });
+
   it('pins the complete Telegram worker audit schema before advancing 107/108/109', () => {
     const workerProbe = probeFn.slice(probeFn.indexOf('107_cnc_telegram_worker_audit*'), probeFn.indexOf('*) return 2'));
     expect(workerProbe.match(/q_colset_hash cnc_telegram_worker_/g)).toHaveLength(4);

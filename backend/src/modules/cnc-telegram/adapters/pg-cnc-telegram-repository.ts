@@ -3847,7 +3847,7 @@ function svgImportOptionsFromDto(dto: CncTelegramStructuredIngestDto): {
   };
 }
 
-async function syncSvgCutJobSourceDisplayNumber(
+export async function syncSvgCutJobSourceDisplayNumber(
   tx: TransactionClient,
   cutJobId: string | number | null,
   requestedCutJobId: string | number | null,
@@ -3855,6 +3855,13 @@ async function syncSvgCutJobSourceDisplayNumber(
   const displayNumber = sourceDisplayNumberFromRequestedCutJobId(requestedCutJobId);
   const resolvedCutJobId = toNullableNumber(cutJobId);
   if (resolvedCutJobId === null || displayNumber === null) return;
+  const job = await tx.query<{ status: string }>(
+    'SELECT status FROM cut_job WHERE cut_job_id = $1 FOR UPDATE',
+    [resolvedCutJobId],
+  );
+  // A delayed Telegram replay must not rewrite the history of a deleted job.
+  if (!job.rows[0] || job.rows[0].status === 'archived') return;
+  await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['cut_job_display_number:regular']);
   await ensureSvgCutJobDisplayNumberAvailable(tx, displayNumber, resolvedCutJobId);
   await tx.query(
     `UPDATE cut_job
@@ -4658,6 +4665,7 @@ async function createSvgCutJob(
   const params = SVG_REVERSE_IMPORT_PARAMS;
   const requestedSourceDisplayNumber = requestedCutJobId === null ? null : String(requestedCutJobId);
   if (requestedSourceDisplayNumber !== null) {
+    await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['cut_job_display_number:regular']);
     await ensureSvgCutJobDisplayNumberAvailable(tx, requestedSourceDisplayNumber, null);
   }
   const isManualSvgUpload = dto.source.chatId === MANUAL_SVG_CHAT_ID;
@@ -5079,7 +5087,7 @@ function svgPlanCanCreateCutResult(plan: Extract<SvgCutImportPlan, { ok: true }>
   return !plan.informational || plan.placements.every((placement) => placement.orderId !== null);
 }
 
-async function ensureSvgCutJobDisplayNumberAvailable(
+export async function ensureSvgCutJobDisplayNumberAvailable(
   tx: TransactionClient,
   displayNumber: string,
   currentCutJobId: number | null,
@@ -5089,6 +5097,7 @@ async function ensureSvgCutJobDisplayNumberAvailable(
     SELECT existing_job.cut_job_id
     FROM cut_job existing_job
     WHERE NULLIF(trim(existing_job.source_display_number::text), '') = $1
+      AND existing_job.status <> 'archived'
       AND ($2::bigint IS NULL OR existing_job.cut_job_id <> $2::bigint)
     LIMIT 1
     `,
@@ -5111,11 +5120,12 @@ async function suggestCutJobDisplayNumbers(tx: TransactionClient, requestedCutJo
   const result = await tx.query<{ cut_job_id: string | number }>(
     `
     SELECT candidate.cut_job_id
-    FROM generate_series($1::bigint + 1, $1::bigint + 200) AS candidate(cut_job_id)
+    FROM generate_series($1::bigint + 1, LEAST($1::bigint + 200, 9007199254740991)) AS candidate(cut_job_id)
     WHERE NOT EXISTS (
       SELECT 1
       FROM cut_job existing_job
       WHERE NULLIF(trim(existing_job.source_display_number::text), '') = candidate.cut_job_id::text
+        AND existing_job.status <> 'archived'
     )
     ORDER BY candidate.cut_job_id
     LIMIT 5
