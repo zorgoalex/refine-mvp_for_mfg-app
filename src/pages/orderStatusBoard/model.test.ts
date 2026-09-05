@@ -1345,6 +1345,14 @@ describe('order status board model', () => {
         ],
         bazisCutSets: [],
       },
+      {
+        key: 'completed',
+        title: 'Выполнено',
+        total: 1,
+        packets: [cncPacket('packet-already-completed', ['2700', '2701'], [2700, 2701])],
+        baths: [],
+        bazisCutSets: [],
+      },
     ] as CncTelegramTodayColumn[];
     const cards = [
       card(2700, { orderStatusId: 8, orderStatusName: 'Выдан' }),
@@ -1367,6 +1375,7 @@ describe('order status board model', () => {
     ]);
     expect(moved.find((column) => column.key === 'parsed')?.bazisCutSets?.map((set) => set.bazisCutSetId)).toEqual([902, 903]);
     expect(moved.find((column) => column.key === 'completed_laminated')?.packets.map((packet) => packet.packetId)).toEqual(['packet-terminal']);
+    expect(moved.find((column) => column.key === 'completed')?.packets.map((packet) => packet.packetId)).toEqual(['packet-already-completed']);
     expect(moved.find((column) => column.key === 'completed_laminated')?.bazisCutSets?.map((set) => set.bazisCutSetId)).toEqual([901]);
     expect(moved.find((column) => column.key === 'completed_laminated')?.title).toBe('Распиленные файлы');
     expect(moved.find((column) => column.key === 'baths')?.baths.map((bath) => bath.bathCardId)).toEqual([
@@ -1375,6 +1384,37 @@ describe('order status board model', () => {
     ]);
     expect(moved.find((column) => column.key === 'completed_baths')?.baths.map((bath) => bath.bathCardId)).toEqual(['bath-terminal']);
     expect(moved.find((column) => column.key === 'completed_baths')?.title).toBe('Завершённые ванны');
+  });
+
+  it('keeps an issued packet in its fresh manual column when backend columns are stale', () => {
+    const packet = cncPacket('packet-manual-completed', ['2700'], [2700]);
+    const columns = [{
+      key: 'parsed',
+      title: 'Файлы на станке',
+      total: 1,
+      packets: [packet],
+      baths: [],
+      bazisCutSets: [],
+    }] as CncTelegramTodayColumn[];
+    const manualMoves: CncBoardManualMoveState = {
+      [cncManualMoveStorageKey('packet', packet.packetId)]: 'completed',
+    };
+    const hiddenRulesApplied = applyMdfBoardHiddenCardRulesToColumns(
+      columns,
+      [card(2700, { orderStatusId: 8, orderStatusName: 'Выдан' })],
+      { cardRules: [{ cardKind: 'packet', orderStatusIds: [8] }] },
+      undefined,
+      undefined,
+      (candidate, sourceColumn) => (
+        manualMoves[cncManualMoveStorageKey('packet', candidate.packetId)] as CncTelegramTodayColumn['key']
+          | undefined
+      ) ?? sourceColumn,
+    );
+
+    const displayed = applyCncManualMovesToColumns(hiddenRulesApplied, manualMoves);
+
+    expect(displayed.find((column) => column.key === 'completed')?.packets).toEqual([packet]);
+    expect(displayed.find((column) => column.key === 'completed_laminated')?.packets ?? []).toEqual([]);
   });
 
   it('moves legacy-config cards to terminal columns when every linked order is hidden by production status', () => {

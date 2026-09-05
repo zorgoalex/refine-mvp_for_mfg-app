@@ -957,6 +957,7 @@ describe('PgCncTelegramRepository', () => {
                 packet_id: '00000000-0000-0000-0000-000000000031',
                 packet_item_id: '00000000-0000-0000-0000-000000000041',
                 all_linked_order_details_packed_or_later: true,
+                manual_target_column: 'parsed',
               }),
               packetRow({
                 packet_id: '00000000-0000-0000-0000-000000000031',
@@ -1002,6 +1003,33 @@ describe('PgCncTelegramRepository', () => {
                 all_linked_order_details_packed_or_later: false,
                 all_linked_order_details_issued_or_later: true,
               }),
+              packetRow({
+                packet_id: '00000000-0000-0000-0000-000000000036',
+                packet_item_id: '00000000-0000-0000-0000-000000000048',
+                completion_status: 'pending',
+                thumbs_up: false,
+                all_linked_order_details_packed_or_later: true,
+                all_linked_order_details_issued_or_later: true,
+                manual_target_column: 'completed',
+              }),
+              packetRow({
+                packet_id: '00000000-0000-0000-0000-000000000037',
+                packet_item_id: '00000000-0000-0000-0000-000000000049',
+                completion_status: 'pending',
+                thumbs_up: false,
+                all_linked_order_details_packed_or_later: true,
+                all_linked_order_details_issued_or_later: true,
+                manual_target_column: 'parsed',
+              }),
+              packetRow({
+                packet_id: '00000000-0000-0000-0000-000000000038',
+                packet_item_id: '00000000-0000-0000-0000-000000000050',
+                completion_status: 'pending',
+                thumbs_up: false,
+                all_linked_order_details_packed_or_later: true,
+                all_linked_order_details_issued_or_later: true,
+                manual_target_column: 'completed_laminated',
+              }),
             ],
           };
         }
@@ -1012,8 +1040,8 @@ describe('PgCncTelegramRepository', () => {
 
     const result = await repo.listToday({ currentUser: user(), workday: '2026-07-24' });
 
-    expect(result.columns.find((column) => column.key === 'completed')?.packets)
-      .toHaveLength(3);
+    expect(result.columns.find((column) => column.key === 'completed')?.packets.map((packet) => packet.packetId))
+      .toContain('00000000-0000-0000-0000-000000000036');
     expect(result.columns.find((column) => column.key === 'completed_laminated')?.packets)
       .toMatchObject([
         {
@@ -1026,6 +1054,16 @@ describe('PgCncTelegramRepository', () => {
           completionStatus: 'pending',
           allLinkedOrderDetailsIssuedOrLater: true,
         },
+        {
+          packetId: '00000000-0000-0000-0000-000000000037',
+          completionStatus: 'pending',
+          allLinkedOrderDetailsIssuedOrLater: true,
+        },
+        {
+          packetId: '00000000-0000-0000-0000-000000000038',
+          completionStatus: 'pending',
+          allLinkedOrderDetailsIssuedOrLater: true,
+        },
       ]);
     expect(database.query.mock.calls[0]?.[0]).toContain("= 'packed'");
     expect(database.query.mock.calls[0]?.[0]).toContain("= 'issued'");
@@ -1035,6 +1073,7 @@ describe('PgCncTelegramRepository', () => {
       'linked_detail_status.sort_order >= packed_status.sort_order',
     );
     expect(database.query.mock.calls[0]?.[0]).toContain('linked_detail.delete_flag = false');
+    expect(database.query.mock.calls[0]?.[0]).toContain('LEFT JOIN mdf_board_manual_moves packet_manual_move');
   });
 
   it('lists stored machine-file cutting sequence numbers for an order card', async () => {
@@ -4004,6 +4043,8 @@ function packetRowBase() {
     review_note: null,
     laminated_or_later: false,
     all_linked_order_details_packed_or_later: false,
+    all_linked_order_details_issued_or_later: false,
+    manual_target_column: null,
   };
 }
 

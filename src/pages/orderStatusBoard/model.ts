@@ -650,6 +650,10 @@ export function applyMdfBoardHiddenCardRulesToColumns(
   setting: MdfBoardHiddenStatusesSetting | null | undefined,
   legacyHiddenProductionStatusIds?: ReadonlySet<number>,
   legacyHiddenOrderStatusIds?: ReadonlySet<number>,
+  resolvePacketSourceColumn?: (
+    packet: CncTelegramPacket,
+    sourceColumn: CncTelegramTodayColumn['key'],
+  ) => CncTelegramTodayColumn['key'],
 ): CncTelegramTodayColumn[] {
   const hasCardRules = Array.isArray(setting?.cardRules);
   const rulesByKind = new Map<MdfBoardHiddenCardKind, Set<number>>(
@@ -701,7 +705,8 @@ export function applyMdfBoardHiddenCardRulesToColumns(
 
   for (const column of columns) {
     for (const packet of column.packets) {
-      const target = mdfBoardHiddenCardRuleMatches(
+      const effectiveSourceColumn = resolvePacketSourceColumn?.(packet, column.key) ?? column.key;
+      const target = effectiveSourceColumn === 'parsed' && mdfBoardHiddenCardRuleMatches(
         'packet',
         collectPacketOrderIds(packet),
         rulesByKind,

@@ -183,7 +183,10 @@ interface PacketJoinedRow extends QueryResultRow {
   laminated_or_later: boolean | null;
   all_linked_order_details_packed_or_later: boolean | null;
   all_linked_order_details_issued_or_later: boolean | null;
+  manual_target_column: string | null;
 }
+
+const packetManualTargetColumns = new WeakMap<CncTelegramPacketDto, string | null>();
 
 interface PacketReplayRow extends QueryResultRow {
   packet_id: string;
@@ -3015,6 +3018,7 @@ function packetSelectSql(
       ) AS svg_cut_sheets_json,
       p.updated_at,
       p.mdf_board_hidden_at,
+      packet_manual_move.target_column AS manual_target_column,
       i.packet_item_id,
       i.source_item_key,
       i.order_name,
@@ -3054,6 +3058,9 @@ function packetSelectSql(
         AND COALESCE(linked_order_status.all_details_issued_or_later, false)
         AS all_linked_order_details_issued_or_later
     FROM cnc_telegram_packets p
+    LEFT JOIN mdf_board_manual_moves packet_manual_move
+      ON packet_manual_move.card_kind = 'packet'
+     AND packet_manual_move.card_id = p.packet_id::text
     LEFT JOIN cut_job svg_job
       ON svg_job.cut_job_id = p.svg_cut_job_id
     LEFT JOIN cut_result svg_result
@@ -8038,13 +8045,16 @@ function compareBathSheets(left: CncTelegramBathSheetDto, right: CncTelegramBath
 function packetColumnKey(
   packet: CncTelegramPacketDto,
 ): 'parsed' | 'completed' | 'completed_laminated' {
-  if (packet.allLinkedOrderDetailsIssuedOrLater) {
-    return 'completed_laminated';
-  }
   if (packet.completionStatus === 'completed' || packet.thumbsUp) {
     return packet.allLinkedOrderDetailsPackedOrLater ? 'completed_laminated' : 'completed';
   }
-  return 'parsed';
+  const manualTarget = packetManualTargetColumns.get(packet);
+  const sourceColumn = manualTarget === 'completed' || manualTarget === 'completed_laminated'
+    ? manualTarget
+    : 'parsed';
+  return sourceColumn === 'parsed' && packet.allLinkedOrderDetailsIssuedOrLater
+    ? 'completed_laminated'
+    : sourceColumn;
 }
 
 function mapOrderCuttingSequenceRow(row: OrderCuttingSequenceRow): CncTelegramOrderCuttingSequenceDto {
@@ -8113,6 +8123,7 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
         items: [],
       };
       packets.set(row.packet_id, packet);
+      packetManualTargetColumns.set(packet, row.manual_target_column);
     }
 
     if (row.packet_item_id) {

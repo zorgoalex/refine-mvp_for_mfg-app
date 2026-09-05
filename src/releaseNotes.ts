@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-09-05",
+    title: "МДФ-работы: завершение выданных файлов",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Файл станка автоматически переходит в «Распиленные файлы» по выданным деталям только пока его карточка находится в колонке «Файлы на станке».",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-09-05",
     title: "Заказы: выделение и распознавание Excel при импорте",
     services: ["ERP"],
     repositories: ["repo_erp"],
