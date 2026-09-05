@@ -146,6 +146,10 @@ for (const mode of ['create', 'edit'] as const) {
     expect(details.at(-1)).toMatchObject({ detail_number: 170, height: 869 });
     expect(details.some(row => row.is_placeholder)).toBe(false);
     expect(details[0][mode === 'edit' ? 'detail_name' : 'note']).toBe('Деталь 1');
+    const firstHeightCell = page.getByRole('grid', { name: 'Детали заказа, табличный режим' }).getByRole('gridcell').nth(1);
+    await expect.poll(() => firstHeightCell.evaluate(node =>
+      Number((node.querySelector('input')?.value ?? node.textContent ?? '').replace(/\s/g, '').replace(',', '.')),
+    )).toBe(700);
   });
 }
 
@@ -235,6 +239,47 @@ test('edit import preserves saved rows and never consumes the separate new-order
   expect(edited[0]).toEqual(saved[0]);
   expect(edited.slice(1).map(row => row.height)).toEqual([700, 701, 702]);
   expect(await draftDetails(page, 'new')).toEqual(before);
+});
+
+test('Excel wizard preserves and blocks an invalid pending note instead of discarding it', async ({ page }) => {
+  const dialog = await openImport(page);
+  await dialog.getByRole('button', { name: 'Отмена', exact: true }).click();
+  const grid = page.getByRole('grid', { name: 'Детали заказа, табличный режим' });
+  const noteCell = grid.getByRole('gridcell').nth(9);
+  await noteCell.dblclick();
+  const note = noteCell.getByRole('textbox');
+  await note.fill('Не терять ручной ввод');
+  await page.getByRole('button', { name: 'Импорт деталей из файла', exact: true }).click();
+  await page.getByRole('menuitem', { name: /Импорт из Excel/ }).click();
+  await expect(page.getByText('Позиция №1: исправьте данные')).toBeVisible();
+  await expect(dialog).not.toBeVisible();
+  await expect(note).toHaveValue('Не терять ручной ввод');
+});
+
+test('Excel wizard saves a valid pending row before filling the following slots', async ({ page }) => {
+  const dialog = await openImport(page);
+  await dialog.getByRole('button', { name: 'Отмена', exact: true }).click();
+  const grid = page.getByRole('grid', { name: 'Детали заказа, табличный режим' });
+  for (const [index, value] of [[1, '888'], [2, '400'], [3, '2'], [11, '100']] as const) {
+    const cell = grid.getByRole('gridcell').nth(index);
+    await cell.dblclick();
+    const input = cell.getByRole('spinbutton');
+    await expect(input).toBeVisible();
+    await input.focus();
+    await input.evaluate(async () => { await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame); });
+    await input.fill(value);
+    await expect(input).toHaveValue(value);
+    await input.press('Tab');
+  }
+  await page.getByRole('button', { name: 'Импорт деталей из файла', exact: true }).click();
+  await page.getByRole('menuitem', { name: /Импорт из Excel/ }).click();
+  await expect(dialog).toBeVisible();
+  expect((await draftDetails(page, 'new'))[0]).toMatchObject({ height: 888, width: 400, quantity: 2, is_placeholder: false });
+  await upload(dialog, await exportBuffer(3));
+  await dialog.getByRole('button', { name: /Далее/ }).click();
+  await dialog.getByRole('button', { name: 'Импортировать (3 шт)' }).click();
+  await expect(dialog).not.toBeVisible();
+  expect((await draftDetails(page, 'new')).slice(0, 4).map(row => row.height)).toEqual([888, 700, 701, 702]);
 });
 
 function genericBuffer() {

@@ -1,8 +1,8 @@
 import { Tooltip } from '../../../../ui/tooltipDelay';
 // Dropdown button with Excel, PDF and VLM image import options
 
-import React, { useState, useCallback, Suspense, lazy } from 'react';
-import { Dropdown, Button, Spin } from 'antd';
+import React, { useState, useRef, useCallback, Suspense, lazy } from 'react';
+import { Dropdown, Button, Spin, message } from 'antd';
 import type { MenuProps } from 'antd';
 import { ImportOutlined, FileExcelOutlined, FilePdfOutlined, CameraOutlined, DownOutlined } from '@ant-design/icons';
 import { OrderToolbarLabel } from '../OrderDetailsToolbar';
@@ -24,9 +24,11 @@ const VlmImportModal = lazy(async () => ({
 
 interface ImportDropdownButtonProps {
   disabled?: boolean;
+  beforeExcelImport?: () => Promise<boolean>;
 }
 
-export const ImportDropdownButton: React.FC<ImportDropdownButtonProps> = ({ disabled }) => {
+export const ImportDropdownButton: React.FC<ImportDropdownButtonProps> = ({ disabled, beforeExcelImport }) => {
+  const excelPreparing = useRef(false);
   const { tabKey } = useKeepAlive();
   const workspaceKey = tabKey || '/orders/create';
   const restored = readWorkspaceCheckpointAdapterState(workspaceKey, 'order-import-surfaces');
@@ -42,9 +44,18 @@ export const ImportDropdownButton: React.FC<ImportDropdownButtonProps> = ({ disa
     }),
   });
 
-  const handleExcelOpen = useCallback(() => {
-    setExcelModalOpen(true);
-  }, []);
+  const handleExcelOpen = useCallback(async () => {
+    if (excelPreparing.current) return;
+    excelPreparing.current = true;
+    try {
+      if (beforeExcelImport && !await beforeExcelImport()) return;
+      setExcelModalOpen(true);
+    } catch {
+      message.error('Не удалось завершить редактирование детали. Повторите открытие импорта.');
+    } finally {
+      excelPreparing.current = false;
+    }
+  }, [beforeExcelImport]);
 
   const handleExcelClose = useCallback(() => {
     setExcelModalOpen(false);
