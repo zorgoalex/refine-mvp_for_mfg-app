@@ -390,7 +390,7 @@ export const PaymentsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
                 <Form.Item label="Сумма платежа">
                   <div className="range-group range-group-money">
                     <Form.Item name="amount_min" noStyle>
-                      <InputNumber
+                      <InputNumber<number>
                         min={0}
                         placeholder="Мин"
                         size="small"
@@ -399,7 +399,7 @@ export const PaymentsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
                       />
                     </Form.Item>
                     <Form.Item name="amount_max" noStyle>
-                      <InputNumber
+                      <InputNumber<number>
                         min={0}
                         placeholder="Макс"
                         size="small"
@@ -453,7 +453,7 @@ export const PaymentsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
                 <Form.Item label="Сумма заказа">
                   <div className="range-group range-group-money">
                     <Form.Item name="order_effective_final_amount_min" noStyle>
-                      <InputNumber
+                      <InputNumber<number>
                         min={0}
                         placeholder="Мин"
                         size="small"
@@ -462,7 +462,7 @@ export const PaymentsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
                       />
                     </Form.Item>
                     <Form.Item name="order_effective_final_amount_max" noStyle>
-                      <InputNumber
+                      <InputNumber<number>
                         min={0}
                         placeholder="Макс"
                         size="small"
@@ -478,7 +478,7 @@ export const PaymentsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
                 <Form.Item label="Оплаты по заказу">
                   <div className="range-group range-group-money">
                     <Form.Item name="total_payments_for_order_min" noStyle>
-                      <InputNumber
+                      <InputNumber<number>
                         min={0}
                         placeholder="Мин"
                         size="small"
@@ -487,7 +487,7 @@ export const PaymentsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
                       />
                     </Form.Item>
                     <Form.Item name="total_payments_for_order_max" noStyle>
-                      <InputNumber
+                      <InputNumber<number>
                         min={0}
                         placeholder="Макс"
                         size="small"
