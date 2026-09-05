@@ -9,13 +9,19 @@ test.use({ actionTimeout: 15_000,
   ...(process.env.PLAYWRIGHT_BASE_URL ? { baseURL: process.env.PLAYWRIGHT_BASE_URL } : {}),
 });
 
-async function openImport(page: Page, mode: 'create' | 'edit' = 'create') {
+async function openImport(page: Page, mode: 'create' | 'edit' = 'create', prepare?: () => Promise<void>, savedDetail = false) {
   const db = createWorkflowMockDb();
   db.orders.push({ order_id: 501, order_name: 'Excel 501', client_id: 1, manager_id: 1,
     order_date: '2026-09-05', order_status_id: 1, payment_status_id: 2, production_status_id: 1,
     final_amount: 0, total_amount: 0, paid_amount: 0, discount: 0, surcharge: 0,
     priority: 100, parts_count: 0, total_area: 0, delete_flag: false, version: 1 });
+  if (savedDetail) db.order_details.push({ detail_id: 9001, order_id: 501, detail_number: 1,
+    height: 999, width: 500, quantity: 1, area: 0.499, milling_type_id: 1, edge_type_id: 1,
+    material_id: null, sheet_material_type_id: 1, note: 'Сохранённая деталь', delete_flag: false, version: 1 });
   await setupWorkflowMockApi(page, db, { uiVariant: 'legacy' });
+  await page.route('**/api/v1/me/preferences/reference-usage', route => route.fulfill({
+    json: { preferences: { recentReferences: {} } },
+  }));
   await page.route('**/api/v1/orders/name-suggestion*', route => route.fulfill({
     json: { suggestedOrderName: 'Excel test' },
   }));
@@ -24,6 +30,7 @@ async function openImport(page: Page, mode: 'create' | 'edit' = 'create') {
     await page.getByRole('button', { name: 'Создать заказ' }).click();
   } else await page.goto('/orders/edit/501');
   await page.getByRole('tab', { name: 'Детали заказа', exact: true }).click();
+  await prepare?.();
   await page.getByRole('button', { name: 'Импорт деталей из файла', exact: true }).click();
   await page.getByRole('menuitem', { name: /Импорт из Excel/ }).click();
   const dialog = page.getByRole('dialog', { name: 'Импорт деталей из Excel', exact: true });
@@ -40,18 +47,27 @@ async function upload(dialog: Locator, buffer: Buffer) {
   expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(720);
 }
 
-async function exportBuffer() {
+async function exportBuffer(count = 170) {
   const template = readFileSync('public/templates/order_template.xlsx');
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(template);
   try {
     return Buffer.from(await buildOrderExcelBuffer({
       order: { order_id: 501, order_name: 'Excel 501', order_date: '2026-09-05' }, pricingMode: 'omit',
-      details: Array.from({ length: 170 }, (_, i) => ({ detail_id: i + 1, length: 700 + i, width: 400, quantity: 2,
+      details: Array.from({ length: count }, (_, i) => ({ detail_id: i + 1, length: 700 + i, width: 400, quantity: 2,
         milling_type: { milling_type_name: 'Классика' }, edge_type: { edge_type_name: 'Р-1' },
         film: { film_name: 'Белая' }, material: { material_name: 'МДФ 16 мм (Лист)' }, notes: `Деталь ${i + 1}` })),
     }));
   } finally { globalThis.fetch = originalFetch; }
+}
+
+async function draftDetails(page: Page, orderKey: string) {
+  return page.evaluate(key => {
+    const storageKey = Object.keys(sessionStorage).find(candidate => candidate.startsWith('order-form-storage:')
+      && candidate.endsWith(`:order:${key}`));
+    return storageKey ? JSON.parse(sessionStorage.getItem(storageKey)!).state.details : [];
+  }, orderKey) as Promise<Array<{ temp_id?: number; detail_number: number; height: number;
+    width: number; quantity: number; is_placeholder?: boolean; note?: string; detail_name?: string }>>;
 }
 
 for (const mode of ['create', 'edit'] as const) {
@@ -68,6 +84,32 @@ for (const mode of ['create', 'edit'] as const) {
     const grid = dialog.getByTestId('excel-range-grid');
     const numericWidth = await grid.locator('[data-row="0"][data-col="1"]').evaluate(node => node.getBoundingClientRect().width);
     expect(numericWidth).toBeLessThan(90);
+    const scroll = await grid.evaluate(async node => {
+      const target = Math.min(170 * 26, node.scrollHeight - node.clientHeight);
+      node.scrollTop = target;
+      const samples: number[] = [];
+      for (let i = 0; i < 30; i++) {
+        await new Promise(requestAnimationFrame);
+        samples.push(node.scrollTop);
+      }
+      return { target, samples };
+    });
+    expect(Math.max(...scroll.samples.map(top => Math.abs(top - scroll.target)))).toBeLessThanOrEqual(1);
+    await grid.evaluate(node => { node.scrollTop = 0; });
+    const wheelBounds = (await grid.boundingBox())!;
+    await page.mouse.move(wheelBounds.x + 200, wheelBounds.y + 100);
+    const wheelSamples: number[] = [];
+    for (let i = 0; i < 40; i++) {
+      await page.mouse.wheel(0, 150);
+      wheelSamples.push(await grid.evaluate(async node => {
+        await new Promise(requestAnimationFrame);
+        await new Promise(requestAnimationFrame);
+        return node.scrollTop;
+      }));
+    }
+    expect(wheelSamples.at(-1)).toBeGreaterThan(4300);
+    expect(wheelSamples.every((top, index) => index === 0 || top >= wheelSamples[index - 1])).toBe(true);
+    await grid.evaluate(node => { node.scrollTop = 0; });
     if (mode === 'edit') {
       await dialog.getByRole('combobox', { name: 'Поле колонки H', exact: true }).locator('..').locator('..').click();
       await page.getByText('Назв.', { exact: true }).click();
@@ -91,12 +133,109 @@ for (const mode of ['create', 'edit'] as const) {
       await dialog.locator('.ant-pagination-item-1').click();
       await expect(firstHeight).toHaveValue('700');
     }
-    // No actual save/API mutation: imported details would remain in the draft.
     await dialog.getByRole('button', { name: /Назад/ }).click();
     await expect(dialog.locator('.ant-tag')).toHaveCount(1);
     if (mode === 'edit') await expect(dialog.getByRole('combobox', { name: 'Поле колонки H', exact: true }).locator('..').locator('..')).toContainText('Назв.');
+    // Revalidation restores all 170 source rows. Import into the scoped draft, without saving the order/API.
+    await dialog.getByRole('button', { name: /Далее/ }).click();
+    await dialog.getByRole('button', { name: 'Импортировать (170 шт)' }).click();
+    await expect(dialog).not.toBeVisible();
+    const details = await draftDetails(page, mode === 'create' ? 'new' : '501');
+    expect(details).toHaveLength(170);
+    expect(details[0]).toMatchObject({ detail_number: 1, height: 700, width: 400, quantity: 2 });
+    expect(details.at(-1)).toMatchObject({ detail_number: 170, height: 869 });
+    expect(details.some(row => row.is_placeholder)).toBe(false);
+    expect(details[0][mode === 'edit' ? 'detail_name' : 'note']).toBe('Деталь 1');
   });
 }
+
+test('small repeated imports fill the remaining starting slots and preserve materialized rows', async ({ page }) => {
+  const buffer = await exportBuffer(3);
+  let dialog = await openImport(page);
+  const initial = await draftDetails(page, 'new');
+  expect(initial).toHaveLength(20);
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    await upload(dialog, buffer);
+    await dialog.getByRole('button', { name: /Далее/ }).click();
+    await dialog.getByRole('button', { name: 'Импортировать (3 шт)' }).click();
+    await expect(dialog).not.toBeVisible();
+    const rows = await draftDetails(page, 'new');
+    expect(rows).toHaveLength(20);
+    expect(rows.map(row => row.temp_id)).toEqual(initial.map(row => row.temp_id));
+    expect(rows.slice(0, attempt * 3).map(row => row.height)).toEqual(attempt === 1 ? [700, 701, 702] : [700, 701, 702, 700, 701, 702]);
+    expect(rows.slice(0, attempt * 3).every(row => row.is_placeholder === false)).toBe(true);
+    expect(rows.slice(attempt * 3).every(row => row.is_placeholder === true && row.height === 0)).toBe(true);
+    if (attempt === 1) {
+      await page.getByRole('button', { name: 'Импорт деталей из файла', exact: true }).click();
+      await page.getByRole('menuitem', { name: /Импорт из Excel/ }).click();
+      dialog = page.getByRole('dialog', { name: 'Импорт деталей из Excel', exact: true });
+    }
+  }
+});
+
+test('burst wheel scrolling stays at the bottom without changing the recognized range', async ({ page }) => {
+  const dialog = await openImport(page);
+  await upload(dialog, await exportBuffer());
+  const grid = dialog.getByTestId('excel-range-grid');
+  const box = (await grid.boundingBox())!;
+  await page.mouse.move(box.x + 200, box.y + 100);
+  for (let i = 0; i < 40; i++) await page.mouse.wheel(0, 200);
+  await expect.poll(() => grid.evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop)).toBeLessThanOrEqual(1);
+  const positions = await grid.evaluate(async node => {
+    const samples: number[] = [];
+    for (let i = 0; i < 90; i++) {
+      await new Promise(requestAnimationFrame);
+      samples.push(node.scrollTop);
+    }
+    return samples;
+  });
+  expect(Math.max(...positions) - Math.min(...positions)).toBeLessThanOrEqual(1);
+  await expect(dialog.locator('.ant-tag')).toContainText(['A11:K181']);
+  await expect(grid).toHaveAttribute('data-selecting', 'false');
+});
+
+test('import preserves a restored partial draft row and fills the following empty slots', async ({ page }) => {
+  const dialog = await openImport(page, 'create', async () => {
+    // Seed a recovered, partly entered draft. Inline-entry validation is outside this import test.
+    await page.evaluate(() => {
+      const key = Object.keys(sessionStorage).find(candidate => candidate.startsWith('order-form-storage:')
+        && candidate.endsWith(':order:new'))!;
+      const draft = JSON.parse(sessionStorage.getItem(key)!);
+      Object.assign(draft.state.details[0], { height: 888, is_placeholder: false });
+      draft.state.isDirty = true;
+      sessionStorage.setItem(key, JSON.stringify(draft));
+    });
+    await page.goto('/orders/create');
+    await page.getByRole('tab', { name: 'Детали заказа', exact: true }).click();
+    await expect.poll(async () => (await draftDetails(page, 'new'))[0]?.height).toBe(888);
+  });
+  await upload(dialog, await exportBuffer(3));
+  await dialog.getByRole('button', { name: /Далее/ }).click();
+  await dialog.getByRole('button', { name: 'Импортировать (3 шт)' }).click();
+  await expect(dialog).not.toBeVisible();
+  const rows = await draftDetails(page, 'new');
+  expect(rows).toHaveLength(20);
+  expect(rows.slice(0, 4).map(row => row.height)).toEqual([888, 700, 701, 702]);
+});
+
+test('edit import preserves saved rows and never consumes the separate new-order draft', async ({ page }) => {
+  const createDialog = await openImport(page);
+  await createDialog.getByRole('button', { name: 'Отмена', exact: true }).click();
+  const before = await draftDetails(page, 'new');
+  expect(before).toHaveLength(20);
+  const dialog = await openImport(page, 'edit', undefined, true);
+  const saved = await draftDetails(page, '501');
+  expect(saved).toHaveLength(1);
+  await upload(dialog, await exportBuffer(3));
+  await dialog.getByRole('button', { name: /Далее/ }).click();
+  await dialog.getByRole('button', { name: 'Импортировать (3 шт)' }).click();
+  await expect(dialog).not.toBeVisible();
+  const edited = await draftDetails(page, '501');
+  expect(edited).toHaveLength(4);
+  expect(edited[0]).toEqual(saved[0]);
+  expect(edited.slice(1).map(row => row.height)).toEqual([700, 701, 702]);
+  expect(await draftDetails(page, 'new')).toEqual(before);
+});
 
 function genericBuffer() {
   const rows = Array.from({ length: 220 }, (_, r) => Array.from({ length: 40 }, (_, c) => r === 0

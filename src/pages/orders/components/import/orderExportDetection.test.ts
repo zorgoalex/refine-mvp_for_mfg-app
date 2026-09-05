@@ -3,7 +3,41 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as XLSX from 'xlsx';
 import { buildOrderExcelBuffer, type OrderExcelDetailRow } from '../../../../utils/excel/orderExcelBuilder';
 import { parseWorksheet } from './hooks/useExcelParser';
-import { detectOrderExport, extractImportRows } from './orderExportDetection';
+import { detectOrderExport, extractImportRows, getExcelImportPlaceholderIds } from './orderExportDetection';
+import type { OrderDetail } from '../../../../types/orders';
+
+function placeholder(number: number): OrderDetail {
+  return { temp_id: 1000 + number, detail_number: number, is_placeholder: true,
+    height: 0, width: 0, quantity: 0, area: 0, material_id: null,
+    milling_type_id: 1, edge_type_id: 1, priority: 100, delete_flag: false } as OrderDetail;
+}
+
+describe('Excel import empty draft slots', () => {
+  it('reuses all 20 pristine starting rows in detail order without changing the input', () => {
+    const rows = Array.from({ length: 20 }, (_, i) => placeholder(20 - i));
+    const before = structuredClone(rows);
+    expect(getExcelImportPlaceholderIds(rows)).toEqual(Array.from({ length: 20 }, (_, i) => 1001 + i));
+    expect(rows).toEqual(before);
+  });
+
+  it.each([
+    ['is_placeholder', false], ['detail_id', 501], ['delete_flag', true], ['temp_id', undefined],
+    ['temp_id', -1], ['height', 700], ['width', 400], ['quantity', 2], ['area', 0.28],
+    ['note', 'Оставить'], ['detail_name', 'Вручную'], ['price', 100], ['total_price', 200],
+    ['material_id', 1], ['sheet_material_type_id', 2], ['milling_type_id', 2], ['edge_type_id', 3],
+    ['film_id', 4], ['priority', 50], ['production_status_id', 2], ['doweling', true],
+    ['hdf', true], ['bazis_source_id', 'source'], ['links', [1]], ['future_business_field', 'keep'],
+  ])('preserves populated, saved or edited rows (%s=%s), even with a stale placeholder marker', (key, value) => {
+    expect(getExcelImportPlaceholderIds([{ ...placeholder(1), [key]: value }, placeholder(2)]))
+      .toEqual([1002]);
+  });
+
+  it('stops offering materialized slots on subsequent imports', () => {
+    const rows = [placeholder(1), placeholder(2), placeholder(3)];
+    rows[0] = { ...rows[0], height: 700, width: 400, quantity: 2, is_placeholder: false };
+    expect(getExcelImportPlaceholderIds(rows)).toEqual([1002, 1003]);
+  });
+});
 
 async function exportedSheet(details: OrderExcelDetailRow[], pricingMode: 'full' | 'omit' = 'full') {
   const template = readFileSync('public/templates/order_template.xlsx');

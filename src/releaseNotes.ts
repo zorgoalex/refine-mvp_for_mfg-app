@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-09-05",
+    title: "Excel: заполнение пустых строк заказа",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Импорт из Excel заполняет нетронутые стартовые строки заказа; новые позиции добавляются только после их заполнения. Уже введённые детали сохраняются.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-09-05",
     title: "МДФ-работы: завершение выданных файлов",
     services: ["ERP"],
     repositories: ["repo_erp"],
