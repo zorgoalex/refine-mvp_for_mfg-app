@@ -6,6 +6,7 @@ import type {
   CncTelegramImportCandidate,
   CncTelegramImportMessage,
   CncTelegramImportPrepareResponse,
+  CncTelegramImportPrepareRequest,
   CncTelegramImportRequest,
   CncTelegramImportScan,
   CncTelegramImportScanRequest,
@@ -44,6 +45,7 @@ export function useCncTelegramImport(open: boolean) {
   const [messagePagination, setMessagePagination] = useState({ page: 1, pageSize: 100, total: 0, totalPages: 0 });
   const [importRequest, setImportRequest] = useState<CncTelegramImportRequest | null>(null);
   const [prepared, setPrepared] = useState<CncTelegramImportPrepareResponse | null>(null);
+  const [replacementDraft, setReplacementDraft] = useState<CncTelegramImportPrepareRequest['replaceDraft']>();
   const [loadingCandidates, setLoadingCandidates] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -110,6 +112,7 @@ export function useCncTelegramImport(open: boolean) {
   const refreshImport = useCallback(async (importRequestId: string) => {
     const next = await cncTelegramImportApi.getRequest(importRequestId);
     setImportRequest(next);
+    if (next.candidates?.length) setCandidates(next.candidates);
     if (!activeImportStatuses.has(next.status)) {
       writeStoredId(ACTIVE_REQUEST_STORAGE_KEY, null);
       await Promise.all([
@@ -175,6 +178,7 @@ export function useCncTelegramImport(open: boolean) {
     setMessages([]);
     setMessagePagination({ page: 1, pageSize: 100, total: 0, totalPages: 0 });
     setPrepared(null);
+    setReplacementDraft(undefined);
     setImportRequest(null);
     const next = await cncTelegramImportApi.createScan(body, createCncTelegramImportIdempotencyKey('cnc-telegram-scan'));
     setScan(next);
@@ -182,28 +186,41 @@ export function useCncTelegramImport(open: boolean) {
     return next;
   }, []);
 
-  const prepareImport = useCallback(async (candidateIds: string[]) => {
+  const prepareImport = useCallback(async (candidateIds: string[], requestedCutJobIds?: Record<string, number>) => {
     if (!scan) throw new Error('Scan is not ready');
     const next = await cncTelegramImportApi.prepare(
       scan.scanId,
-      { candidateIds },
+      { candidateIds, ...(requestedCutJobIds ? { requestedCutJobIds } : {}), ...(replacementDraft ? { replaceDraft: replacementDraft } : {}) },
       createCncTelegramImportIdempotencyKey('cnc-telegram-import-prepare'),
     );
     setPrepared(next);
+    setReplacementDraft(undefined);
     setCandidates(next.candidates.length > 0 ? next.candidates : candidates);
     return next;
-  }, [candidates, scan]);
+  }, [candidates, replacementDraft, scan]);
 
-  const prepareRepeat = useCallback(async (importRequestId: string, candidateIds: string[]) => {
+  const prepareRepeat = useCallback(async (importRequestId: string, candidateIds: string[], requestedCutJobIds?: Record<string, number>) => {
     const next = await cncTelegramImportApi.prepareRepeat(
       importRequestId,
       candidateIds,
       createCncTelegramImportIdempotencyKey('cnc-telegram-import-repeat'),
+      requestedCutJobIds,
+      replacementDraft,
     );
     setPrepared(next);
+    setReplacementDraft(undefined);
+    if (next.candidates.length > 0) setCandidates(next.candidates);
     setImportRequest(null);
     return next;
-  }, []);
+  }, [replacementDraft]);
+
+  const returnToSelection = useCallback(() => {
+    setReplacementDraft(!importRequest && prepared
+      ? { importRequestId: prepared.importRequestId, confirmationId: prepared.confirmationId }
+      : undefined);
+    setPrepared(null);
+    setImportRequest(null);
+  }, [importRequest, prepared]);
 
   const confirmImport = useCallback(async (acknowledgements: Array<{ candidateId: string; duplicateAcknowledged: boolean }>) => {
     if (!prepared) throw new Error('Import is not prepared');
@@ -244,6 +261,7 @@ export function useCncTelegramImport(open: boolean) {
     confirmImport,
     reconfirmImport,
     prepareRepeat,
+    returnToSelection,
     loadMessages,
     refreshScan,
     refreshImport,

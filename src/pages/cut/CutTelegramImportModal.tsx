@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Checkbox, DatePicker, Empty, Modal, Pagination, Progress, Space, Spin, Steps, Tabs, Tag, Typography, message } from 'antd';
+import { Alert, Button, Checkbox, DatePicker, Empty, InputNumber, Modal, Pagination, Progress, Space, Spin, Steps, Tabs, Tag, Typography, message } from 'antd';
 import type { ColumnsType, TableProps } from 'antd/es/table';
 import { CheckCircleOutlined, CloseOutlined, ExclamationCircleOutlined, LinkOutlined, SearchOutlined, SendOutlined, ZoomInOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -7,6 +7,7 @@ import { ApiError } from '../../api/httpClient';
 import { can } from '../../utils/permissions';
 import { featureFlags } from '../../config/featureFlags';
 import { useCncTelegramImport } from '../../hooks/useCncTelegramImport';
+import { useCutJobNumberChecks } from '../../hooks/useCutJobNumberChecks';
 import type { CncTelegramImportCandidate, CncTelegramImportItem, CncTelegramImportMatch, CncTelegramImportMessage, CncTelegramImportScan } from '../../api/types/cncTelegramImportApi.types';
 import { buildStyledCutLayoutPreview } from './svgCutRenderPreview';
 import { candidateLayoutSummary, candidateScreenshotLabel, eligibleCandidateIdForMessage, importMessageAttachmentLabel, importMessageHumanContent, importMessageTimeLabel, needsDuplicateReconfirmation, repeatableItems, sortImportMessages } from './cutTelegramImportHelpers';
@@ -363,7 +364,8 @@ export const CutTelegramImportModal: React.FC<CutTelegramImportModalProps> = ({ 
   const [messageView, setMessageView] = useState<MessageViewMode>('original');
   const [preparing, setPreparing] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const [repeatPreparing, setRepeatPreparing] = useState(false);
+  const [repeatOfRequestId, setRepeatOfRequestId] = useState<string | null>(null);
+  const [requestedNumbers, setRequestedNumbers] = useState<Record<string, number | null>>({});
   const [reconfirming, setReconfirming] = useState(false);
   const [preview, setPreview] = useState<PreviewImage | null>(null);
   const doneRequestRef = React.useRef<string | null>(null);
@@ -387,9 +389,11 @@ export const CutTelegramImportModal: React.FC<CutTelegramImportModalProps> = ({ 
     confirmImport,
     reconfirmImport,
     prepareRepeat,
+    returnToSelection,
     loadMessages,
   } = useCncTelegramImport(open);
   const canImport = featureFlags.cncTelegram && can('cut.manage');
+  const numberChecks = useCutJobNumberChecks(selectedIds, requestedNumbers, open && step === 1);
 
   useEffect(() => {
     if (!open) return;
@@ -432,11 +436,12 @@ export const CutTelegramImportModal: React.FC<CutTelegramImportModalProps> = ({ 
 
   const tableRowSelection: TableProps<CncTelegramImportCandidate>['rowSelection'] = {
     selectedRowKeys: selectedIds,
-    onChange: (keys) => setSelectedIds(Array.from(new Set(keys.map(String)))),
+    onChange: (keys) => { if (!preparing) setSelectedIds(Array.from(new Set(keys.map(String)))); },
     getCheckboxProps: (record) => ({ disabled: record.eligibility !== 'eligible' || record.sourceStatus === 'expired' }),
   };
 
   const toggleCandidateSelection = (candidateId: string, checked: boolean) => {
+    if (preparing) return;
     setSelectedIds((current) => checked
       ? (current.includes(candidateId) ? current : [...current, candidateId])
       : current.filter((id) => id !== candidateId));
@@ -447,6 +452,40 @@ export const CutTelegramImportModal: React.FC<CutTelegramImportModalProps> = ({ 
       title: 'Файл и источник',
       key: 'file',
       render: (_value, candidate) => <CandidateDetails candidate={candidate} />,
+    },
+    {
+      title: 'Номер задания',
+      key: 'number',
+      width: 230,
+      render: (_value, candidate) => {
+        const check = numberChecks.checks[candidate.candidateId];
+        return (
+          <Space direction="vertical" size={4}>
+            <InputNumber
+              aria-label={`Номер задания для ${candidate.svgFileName}`}
+              placeholder="Авто"
+              min={1}
+              max={Number.MAX_SAFE_INTEGER}
+              controls={false}
+              value={requestedNumbers[candidate.candidateId] ?? null}
+              status={check?.status === 'error' ? 'error' : undefined}
+              disabled={!canImport || preparing || candidate.eligibility !== 'eligible' || candidate.sourceStatus === 'expired'}
+              onChange={(value) => setRequestedNumbers((current) => ({ ...current, [candidate.candidateId]: value }))}
+              style={{ width: '100%' }}
+            />
+            {check && <Text type={check.status === 'error' ? 'danger' : 'secondary'}>{check.message}</Text>}
+            {check?.suggestions?.length ? (
+              <Space size={4} wrap>
+                {check.suggestions.map((number) => (
+                  <Button key={number} size="small" disabled={preparing} onClick={() => setRequestedNumbers((current) => ({ ...current, [candidate.candidateId]: number }))}>
+                    №{number}
+                  </Button>
+                ))}
+              </Space>
+            ) : null}
+          </Space>
+        );
+      },
     },
     {
       title: 'Превью',
@@ -471,6 +510,8 @@ export const CutTelegramImportModal: React.FC<CutTelegramImportModalProps> = ({ 
     }
     try {
       setSelectedIds([]);
+      setRequestedNumbers({});
+      setRepeatOfRequestId(null);
       setMessageView('original');
       await startScan({ dateFrom: range[0].format('YYYY-MM-DD'), dateTo: range[1].format('YYYY-MM-DD') });
     } catch (nextError) {
@@ -484,9 +525,17 @@ export const CutTelegramImportModal: React.FC<CutTelegramImportModalProps> = ({ 
       message.warning('Выберите хотя бы один комплект');
       return;
     }
+    if (!numberChecks.ready) return;
     setPreparing(true);
     try {
-      await prepareImport(selectedIds);
+      const requestedCutJobIds = Object.fromEntries(selectedIds
+        .filter((id) => requestedNumbers[id] != null)
+        .map((id) => [id, requestedNumbers[id]!]));
+      if (repeatOfRequestId) {
+        await prepareRepeat(repeatOfRequestId, selectedIds, requestedCutJobIds);
+      } else {
+        await prepareImport(selectedIds, requestedCutJobIds);
+      }
       setStep(2);
     } catch (nextError) {
       message.error(nextError instanceof ApiError ? nextError.message : 'Не удалось подготовить импорт');
@@ -519,18 +568,14 @@ export const CutTelegramImportModal: React.FC<CutTelegramImportModalProps> = ({ 
       message.info('Нет элементов, доступных для повторной обработки');
       return;
     }
-    setRepeatPreparing(true);
-    try {
-      const next = await prepareRepeat(importRequest.importRequestId, items.map((item) => item.candidateId));
-      setSelectedIds(items.map((item) => item.candidateId));
-      setMessageView('original');
-      setStep(2);
-      if (next.duplicateCount > 0) message.warning('Появились совпадения. Подтвердите создание копии ещё раз.');
-    } catch (nextError) {
-      message.error(nextError instanceof ApiError ? nextError.message : 'Не удалось подготовить повторную копию');
-    } finally {
-      setRepeatPreparing(false);
-    }
+    setRepeatOfRequestId(importRequest.importRequestId);
+    setRequestedNumbers(importRequest.status === 'completed' ? {} : Object.fromEntries(
+      items.map((item) => [item.candidateId, item.requestedCutJobId ?? null]),
+    ));
+    setSelectedIds(items.map((item) => item.candidateId));
+    returnToSelection();
+    setMessageView('original');
+    setStep(1);
   };
 
   const handleMessagePageChange = (page: number) => {
@@ -560,10 +605,10 @@ export const CutTelegramImportModal: React.FC<CutTelegramImportModalProps> = ({ 
       Найти файлы
     </Button>,
   ] : step === 1 ? [
-    <Button key="back" onClick={() => setStep(0)}>Изменить период</Button>,
-    <Button key="prepare" type="primary" onClick={() => void handlePrepare()} loading={preparing} disabled={!canImport || selectedIds.length === 0}>Подготовить создание ({selectedIds.length})</Button>,
+    <Button key="back" onClick={() => setStep(0)} disabled={preparing}>Изменить период</Button>,
+    <Button key="prepare" type="primary" onClick={() => void handlePrepare()} loading={preparing} disabled={!canImport || selectedIds.length === 0 || !numberChecks.ready}>Подготовить создание ({selectedIds.length})</Button>,
   ] : [
-    <Button key="back" onClick={() => setStep(1)} disabled={confirming || Boolean(importRequest)}>Вернуться к выбору</Button>,
+    <Button key="back" onClick={() => { returnToSelection(); setStep(1); }} disabled={confirming || Boolean(importRequest)}>Вернуться к выбору</Button>,
     <Button key="confirm" type="primary" danger={selectedDuplicateCount > 0} icon={<CheckCircleOutlined />} onClick={() => void handleConfirm()} loading={confirming} disabled={!canImport || Boolean(importRequest) || !selectionReady}>
       {selectedDuplicateCount > 0 ? 'Создать всё равно' : 'Создать выбранные'}
     </Button>,
@@ -628,6 +673,10 @@ export const CutTelegramImportModal: React.FC<CutTelegramImportModalProps> = ({ 
             onPageChange={handleMessagePageChange}
           />
           <section className="cut-telegram-import__candidate-picker" aria-label="Выбор SVG-комплектов">
+            <Paragraph type="secondary">Номер можно задать вручную, в том числе освободившийся после удаления задания. Пустое поле — автоматический номер.</Paragraph>
+            {Object.values(numberChecks.checks).some((check) => check.status === 'error') && (
+              <Button size="small" onClick={numberChecks.retry}>Повторить проверку номеров</Button>
+            )}
             <div className="cut-telegram-import__candidate-picker-header">
               <div>
                 <Text strong>Комплекты для создания</Text>
@@ -651,7 +700,7 @@ export const CutTelegramImportModal: React.FC<CutTelegramImportModalProps> = ({ 
 
       {step === 2 && (
         <div className="cut-telegram-import__step">
-          {importRequest ? <ImportResult request={importRequest} candidates={candidates} onRepeat={() => void handleRepeat()} repeatLoading={repeatPreparing} onReconfirm={() => void handleReconfirm()} reconfirmLoading={reconfirming} /> : prepared ? (
+          {importRequest ? <ImportResult request={importRequest} candidates={candidates} onRepeat={() => void handleRepeat()} repeatLoading={false} onReconfirm={() => void handleReconfirm()} reconfirmLoading={reconfirming} /> : prepared ? (
             <>
               <Alert
                 type={selectedDuplicateCount > 0 ? 'warning' : 'info'}
@@ -661,7 +710,12 @@ export const CutTelegramImportModal: React.FC<CutTelegramImportModalProps> = ({ 
               />
               <Paragraph type="secondary">Это явное подтверждение. Повторный клик безопасен: сервер сохранит один результат для этого подтверждения.</Paragraph>
               <Space direction="vertical" className="cut-telegram-import__confirm-list">
-                {selectedCandidates.map((candidate) => <CandidateDetails key={candidate.candidateId} candidate={candidate} />)}
+                {selectedCandidates.map((candidate) => (
+                  <div key={candidate.candidateId}>
+                    <CandidateDetails candidate={candidate} />
+                    <Text strong>Номер задания: {prepared.items?.find((item) => item.candidateId === candidate.candidateId)?.requestedCutJobId ?? 'Автоматически'}</Text>
+                  </div>
+                ))}
               </Space>
             </>
           ) : <Spin />}
@@ -693,7 +747,7 @@ const ImportResult: React.FC<{ request: NonNullable<ReturnType<typeof useCncTele
       {request.items.map((item) => (
         <div className="cut-telegram-import__result-item" key={item.importItemId}>
           <Space><Tag color={item.status === 'imported' ? 'success' : item.status === 'failed' ? 'error' : 'processing'}>{itemStatusLabel(item.status)}</Tag><Text strong>{item.svgFileName || candidates.find((candidate) => candidate.candidateId === item.candidateId)?.svgFileName || item.candidateId}</Text></Space>
-          {item.cutJobId && <a href={`/cut?job=${item.cutJobId}`}>Раскрой {item.cutJobDisplayNumber ?? `#${item.cutJobId}`} <LinkOutlined /></a>}
+          {item.cutJobId && <a href={`/cut?job=${item.cutJobId}`}>Раскрой {item.cutJobDisplayNumber ?? item.requestedCutJobId ?? `#${item.cutJobId}`} <LinkOutlined /></a>}
           {item.error && <Text type="danger">{item.error}</Text>}
         </div>
       ))}

@@ -152,6 +152,7 @@ export interface CncTelegramImportRequestDto {
 export interface CncTelegramImportItemDto {
   importItemId: string;
   candidateId: string;
+  requestedCutJobId: number | null;
   status: 'pending' | 'processing' | 'confirmation_required' | 'imported' | 'failed' | 'unknown';
   duplicateAcknowledged: boolean;
   duplicateMatchVersion: number;
@@ -250,8 +251,18 @@ export interface CncTelegramImportFailDto extends z.infer<typeof workerItemLease
 const createScanSchema = z.object({ dateFrom: dateOnly, dateTo: dateOnly }).strict();
 const prepareSchema = z.object({
   candidateIds: z.array(uuid).min(1).max(500),
+  requestedCutJobIds: z.record(uuid, z.number().int().positive().max(Number.MAX_SAFE_INTEGER)).optional(),
+  replaceDraft: z.object({ importRequestId: uuid, confirmationId: uuid }).strict().optional(),
   repeatOfImportRequestId: uuid.nullable().optional(),
-}).strict();
+}).strict().superRefine((value, context) => {
+  const entries = Object.entries(value.requestedCutJobIds ?? {});
+  if (entries.some(([id]) => !value.candidateIds.includes(id))) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['requestedCutJobIds'], message: 'Numbers must belong to selected candidates' });
+  }
+  if (new Set(entries.map(([, number]) => number)).size !== entries.length) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['requestedCutJobIds'], message: 'Selected candidates must have different numbers' });
+  }
+});
 const confirmSchema = z.object({
   confirmationId: uuid,
   duplicateAcknowledgements: z.array(z.object({ candidateId: uuid, duplicateAcknowledged: z.boolean() }).strict()).min(1).max(500),
