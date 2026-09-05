@@ -5287,7 +5287,7 @@ const CncPinchZoomImage: React.FC<CncPinchZoomImageProps> = ({
   );
 };
 
-function cncTouchPoint(touch: Touch): CncPinchZoomPoint {
+function cncTouchPoint(touch: Pick<Touch, 'clientX' | 'clientY'>): CncPinchZoomPoint {
   return { x: touch.clientX, y: touch.clientY };
 }
 

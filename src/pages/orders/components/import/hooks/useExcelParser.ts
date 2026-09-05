@@ -3,7 +3,7 @@
 // and does NOT land in the entry bundle.
 
 import { useState, useCallback } from 'react';
-import type { WorkBook, WorkSheet, Utils } from 'xlsx';
+import type { WorkBook, WorkSheet } from 'xlsx';
 import type { ParsedSheet, CellValue } from '../types/importTypes';
 import { getColumnLetter } from '../types/importTypes';
 
@@ -35,7 +35,7 @@ const SUPPORTED_EXTENSIONS = ['.xlsx', '.xls', '.xlsm', '.xlsb'];
  * Receives the xlsx utils object so there is NO top-level runtime reference to
  * the xlsx package — the caller obtains it via dynamic import.
  */
-export const parseWorksheet = (ws: WorkSheet, utils: Utils): ParsedSheet => {
+export const parseWorksheet = (ws: WorkSheet, utils: typeof import('xlsx').utils): ParsedSheet => {
   const range = utils.decode_range(ws['!ref'] || 'A1');
   const rowCount = range.e.r - range.s.r + 1;
   const colCount = range.e.c - range.s.c + 1;
