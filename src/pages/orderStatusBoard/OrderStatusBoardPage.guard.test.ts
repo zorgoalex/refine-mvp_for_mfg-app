@@ -55,6 +55,16 @@ const pdfPreview = readFileSync(
 );
 
 describe('OrderStatusBoardPage UX guards', () => {
+  it('applies planned-today visibility after MDF lifecycle placement with complete order statuses', () => {
+    const activeColumns = page.match(/const cncActiveColumns = useMemo\([\s\S]*?\n  \);/)?.[0] ?? '';
+    const plannedColumns = page.match(/const cncPlannedDateColumns = useMemo\([\s\S]*?\n  \);/)?.[0] ?? '';
+    expect(activeColumns).toMatch(/applyMdfBoardHiddenCardRulesToColumns\(\s*cncFilteredColumns,\s*cncOrderStatusCards,/);
+    expect(activeColumns).not.toContain('cncDisplayOrderStatusCards');
+    expect(activeColumns).not.toContain('cncPlannedDateColumns');
+    expect(plannedColumns).toMatch(/filterCncTodayColumnsByPlannedOrderDate\(\s*cncActiveColumns,/);
+    expect(page).toContain('readinessColumns={cncActiveColumns}');
+  });
+
   it('defers optional MDF PDF and label tooling until the operator opens it', () => {
     expect(page).not.toContain("new URL('pdfjs-dist/build/pdf.worker.min.mjs'");
     expect(page).not.toContain("import('pdfjs-dist')");

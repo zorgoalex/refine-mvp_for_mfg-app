@@ -484,6 +484,69 @@ describe('order status board model', () => {
     ).toEqual([2706, 2800]);
   });
 
+  it.each([
+    { legacy: false, allFinished: true },
+    { legacy: false, allFinished: false },
+    { legacy: true, allFinished: true },
+    { legacy: true, allFinished: false },
+  ])('planned-today changes visibility, not mixed-card placement ($legacy legacy, $allFinished finished)', ({ legacy, allFinished }) => {
+    const orderCards = [
+      card(2706, { orderName: '2706', plannedCompletionDate: '2026-09-05', orderStatusId: 7, productionStatusId: 6 }),
+      card(2707, { orderName: '2707', plannedCompletionDate: '2026-09-06', orderStatusId: allFinished ? 7 : 4, productionStatusId: allFinished ? 6 : 2 }),
+    ];
+    const columns: CncTelegramTodayColumn[] = [
+      {
+        key: 'parsed', title: 'Файлы на станке', total: 4,
+        packets: [
+          cncPacket('mixed', ['2706', '2707'], [2706, 2707]),
+          cncPacket('tomorrow', ['2707'], [2707]),
+        ],
+        baths: [],
+        bazisCutSets: [
+          cncBazisCutSet(901, [
+            { orderName: '2706', orderId: 2706, detailId: 7001 },
+            { orderName: '2707', orderId: 2707, detailId: 7002 },
+          ]),
+          cncBazisCutSet(902, [{ orderName: '2707', orderId: 2707, detailId: 7002 }]),
+        ],
+      },
+      {
+        key: 'baths', title: 'Карты ванн', total: 2,
+        packets: [],
+        baths: [cncBath('mixed', ['2706', '2707'], [2706, 2707]), cncBath('tomorrow', ['2707'], [2707])],
+      },
+    ];
+    const original = JSON.stringify({ columns, orderCards });
+    const activeColumns = applyMdfBoardHiddenCardRulesToColumns(
+      columns,
+      orderCards,
+      legacy ? { productionStatusIds: [6], orderStatusIds: [7] } : {
+        cardRules: [
+          { cardKind: 'packet', orderStatusIds: [7] },
+          { cardKind: 'bazisCutSet', orderStatusIds: [7] },
+          { cardKind: 'bath', orderStatusIds: [7] },
+        ],
+      },
+      new Set([6]),
+      new Set([7]),
+    );
+    const visible = filterCncTodayColumnsByPlannedOrderDate(activeColumns, orderCards, '2026-09-05');
+    const fileColumn = allFinished ? 'completed_laminated' : 'parsed';
+    const bathColumn = allFinished ? 'completed_baths' : 'baths';
+    expect(visible.find((column) => column.key === fileColumn)?.packets.map((packet) => packet.packetId)).toEqual(['mixed']);
+    expect(visible.find((column) => column.key === fileColumn)?.bazisCutSets?.map((set) => set.bazisCutSetId)).toEqual([901]);
+    expect(visible.find((column) => column.key === bathColumn)?.baths.map((bath) => bath.bathCardId)).toEqual(['mixed']);
+    for (const column of visible) {
+      const before = activeColumns.find((candidate) => candidate.key === column.key);
+      expect(column.packets).toEqual(before?.packets.filter((packet) => packet.packetId === 'mixed'));
+      expect(column.baths).toEqual(before?.baths.filter((bath) => bath.bathCardId === 'mixed'));
+      expect(column.bazisCutSets ?? []).toEqual((before?.bazisCutSets ?? []).filter((set) => set.bazisCutSetId === 901));
+    }
+    expect(buildCncOrderReadiness(visible, {}).get(2706)).toEqual(buildCncOrderReadiness(activeColumns, {}).get(2706));
+    expect(filterCncOrderCardsByPlannedOrderDate(orderCards, '2026-09-05').map((order) => order.orderId)).toEqual([2706]);
+    expect(JSON.stringify({ columns, orderCards })).toBe(original);
+  });
+
   it('keeps only bath cards with order numbers present in machine file cards', () => {
     const columns = [
       {

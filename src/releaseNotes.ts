@@ -45,6 +45,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-09-05",
+    title: "МДФ-работы: фильтр плана на сегодня",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Фильтр «План на сегодня» меняет только видимость карточек: колонки и готовность рассчитываются по всем связанным заказам, включая заказы с другой плановой датой.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-09-05",
     title: "Раскрой: колонка даты в списке заданий",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
