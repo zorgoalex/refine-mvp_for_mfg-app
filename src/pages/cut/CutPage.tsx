@@ -3338,18 +3338,6 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         title: 'Дата',
         dataIndex: 'createdAt',
         key: 'createdAt',
-        width: 92,
-        sorter: (a, b) => cutJobCreatedAtSortValue(a.createdAt) - cutJobCreatedAtSortValue(b.createdAt),
-        render: (value: string) => (
-          <Tooltip title={formatCutJobCreatedDateTime(value)}>
-            <span>{formatCutJobCreatedDate(value)}</span>
-          </Tooltip>
-        ),
-      },
-      {
-        title: 'Дата',
-        dataIndex: 'createdAt',
-        key: 'createdAt',
         width: 84,
         sorter: (a, b) => cutJobCreatedAtSortValue(a.createdAt) - cutJobCreatedAtSortValue(b.createdAt),
         render: (value: string | undefined) => (

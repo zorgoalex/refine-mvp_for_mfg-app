@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-09-05",
+    title: "Раскрой: колонка даты в списке заданий",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "В списке заданий на раскрой убрана повторная колонка даты создания; сортировка и подсказка времени сохранены.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-09-05",
     title: "Заказы: печать и экспорт PDF",
     services: ["ERP"],
     repositories: ["repo_erp"],
