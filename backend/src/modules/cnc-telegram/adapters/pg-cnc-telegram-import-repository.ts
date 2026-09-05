@@ -25,8 +25,32 @@ import type {
 } from '../dto/cnc-telegram-import.dto';
 import type { CncTelegramManualSvgUploadDto, CncTelegramManualSvgUploadResponseDto, CncTelegramStructuredIngestDto } from '../dto/cnc-telegram.dto';
 import type { ManualSvgUploadCommand } from '../application/cnc-telegram.types';
+import { ensureSvgCutJobDisplayNumberAvailable } from './pg-cnc-telegram-repository';
 
 type Row = QueryResultRow;
+
+/** Retire only an untouched draft; its old idempotency record stays immutable. */
+export async function replaceUnconfirmedImportDraft(tx: TransactionClient, input: {
+  importRequestId: string; confirmationId: string; actorUserId: string; scanId: string; repeatOfImportRequestId: string | null;
+}): Promise<void> {
+  const locked = await tx.query<Row>(
+    'SELECT * FROM cnc_telegram_import_requests WHERE import_request_id=$1 AND requested_by=$2 FOR UPDATE',
+    [input.importRequestId, input.actorUserId],
+  );
+  const draft = locked.rows[0];
+  if (!draft || text(draft, 'scan_id') !== input.scanId || text(draft, 'status') !== 'draft'
+    || draft.confirmed_at != null || text(draft, 'confirmation_id') !== input.confirmationId
+    || nullableText(draft, 'repeat_of_import_request_id') !== input.repeatOfImportRequestId) {
+    throw new ApiError(409, 'CNC_TELEGRAM_DRAFT_STALE', 'Подготовка уже изменилась или была подтверждена. Обновите состояние импорта');
+  }
+  await tx.query(`UPDATE cnc_telegram_import_requests SET status='failed',
+    error_code='CNC_TELEGRAM_DRAFT_REPLACED', error_message='Подготовка заменена новым выбором',
+    failed_count=selected_count, completed_at=now() WHERE import_request_id=$1`, [input.importRequestId]);
+  await tx.query(`UPDATE cnc_telegram_import_items SET status='failed',
+    error_code='CNC_TELEGRAM_DRAFT_REPLACED', error_message='Подготовка заменена новым выбором',
+    updated_at=now() WHERE import_request_id=$1`, [input.importRequestId]);
+}
+
 const BUSINESS_TIMEZONE = 'Asia/Almaty';
 const MAX_ATTEMPTS = 5;
 const LEASE_MINUTES = 5;
@@ -115,11 +139,11 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
     });
   }
 
-  async prepare(input: { currentUser: CurrentUser; scanId: string; candidateIds: string[]; repeatOfImportRequestId?: string | null; requestId: string; idempotencyKey: string }): Promise<CncTelegramImportRequestDto> {
+  async prepare(input: { currentUser: CurrentUser; scanId: string; candidateIds: string[]; requestedCutJobIds?: Record<string, number>; replaceDraft?: { importRequestId: string; confirmationId: string }; repeatOfImportRequestId?: string | null; requestId: string; idempotencyKey: string }): Promise<CncTelegramImportRequestDto> {
     return this.database.transaction(async (tx) => this.createRequest(tx, input));
   }
 
-  async repeatPrepare(input: { currentUser: CurrentUser; importRequestId: string; candidateIds: string[]; requestId: string; idempotencyKey: string }): Promise<CncTelegramImportRequestDto> {
+  async repeatPrepare(input: { currentUser: CurrentUser; importRequestId: string; candidateIds: string[]; requestedCutJobIds?: Record<string, number>; replaceDraft?: { importRequestId: string; confirmationId: string }; requestId: string; idempotencyKey: string }): Promise<CncTelegramImportRequestDto> {
     return this.database.transaction(async (tx) => {
       const original = await this.owned(tx, 'cnc_telegram_import_requests', 'import_request_id', input.importRequestId, input.currentUser);
       if (!['completed', 'partial', 'failed'].includes(text(original, 'status'))) {
@@ -128,6 +152,8 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
       const ids = input.candidateIds.length > 0 ? input.candidateIds : await this.requestCandidateIds(tx, text(original, 'import_request_id'));
       return this.createRequest(tx, {
         currentUser: input.currentUser, scanId: text(original, 'scan_id'), candidateIds: ids,
+        requestedCutJobIds: input.requestedCutJobIds,
+        replaceDraft: input.replaceDraft,
         repeatOfImportRequestId: text(original, 'import_request_id'), requestId: input.requestId, idempotencyKey: input.idempotencyKey,
       });
     });
@@ -308,7 +334,14 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
           JOIN cnc_telegram_import_candidates c USING(candidate_id)
           WHERE r.status IN ('pending','processing') AND c.source_chat_id=$1 AND i.attempt_count < $3
             AND (i.status='pending' OR (i.status='processing' AND i.lease_expires_at<=now()))
-          ORDER BY i.created_at,i.import_item_id FOR UPDATE SKIP LOCKED LIMIT $2
+            AND (i.requested_cut_job_id IS NOT NULL OR NOT EXISTS (
+              SELECT 1 FROM cnc_telegram_import_items numbered
+              WHERE numbered.import_request_id=i.import_request_id
+                AND numbered.requested_cut_job_id IS NOT NULL
+                AND numbered.status IN ('pending','processing','confirmation_required')
+            ))
+          ORDER BY r.created_at,(i.requested_cut_job_id IS NULL),i.created_at,i.import_item_id
+          FOR UPDATE OF i SKIP LOCKED LIMIT $2
         )
         UPDATE cnc_telegram_import_items i SET status='processing', lease_token=encode(gen_random_bytes(32),'hex'),
           lease_generation=i.lease_generation+1, lease_expires_at=now()+interval '${LEASE_MINUTES} minutes',
@@ -357,6 +390,7 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
       if (!sourceFiles || sourceFiles.length === 0) throw new ApiError(422, 'CNC_TELEGRAM_SOURCE_FILES_REQUIRED', 'Selected Telegram files must be re-downloaded and verified before import');
       const dto: CncTelegramManualSvgUploadDto = {
         idempotencyKey: `cnc-telegram-import:${text(item, 'import_item_id')}`,
+        requestedCutJobId: nullableNumber(item, 'requested_cut_job_id'),
         selectedOrderIds, createMdfMachineFileCard: true,
         // Telegram imports are intentionally lenient: unresolved/ambiguous ERP
         // names remain informational, while uniquely matched names still link
@@ -369,8 +403,8 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
       const response = await importer.manualSvgUploadInTransaction(tx, { currentUser: requester, dto, requestId: input.requestId });
       const updated = await tx.query<Row>(`UPDATE cnc_telegram_import_items SET status='imported', packet_id=$2, cut_job_id=$3, cut_result_id=$4, updated_at=now() WHERE import_item_id=$1 RETURNING *`, [text(item, 'import_item_id'), response.packet.packetId, response.cutJobId, response.cutResultId]);
       await updateRequestCounts(tx, text(item, 'import_request_id'));
-      await auditService.record(tx, { event: 'cnc.telegram_import.item_imported', actorUserId: requester.id, actorUsername: requester.username, actorRole: requester.role, entityType: 'cnc_telegram_import_item', entityId: text(item, 'import_item_id'), source: 'cnc_telegram_import', requestId: input.requestId, metadata: { technicalWorker: input.currentUser.username, packetId: response.packet.packetId, cutJobId: response.cutJobId } });
-      await enqueueImportOutbox(tx, 'cnc.telegram_import.item_imported', text(item, 'import_item_id'), input.requestId, { actorUserId: requester.id, technicalWorkerUserId: input.currentUser.id, packetId: response.packet.packetId, cutJobId: response.cutJobId });
+      await auditService.record(tx, { event: 'cnc.telegram_import.item_imported', actorUserId: requester.id, actorUsername: requester.username, actorRole: requester.role, entityType: 'cnc_telegram_import_item', entityId: text(item, 'import_item_id'), source: 'cnc_telegram_import', requestId: input.requestId, metadata: { technicalWorker: input.currentUser.username, packetId: response.packet.packetId, cutJobId: response.cutJobId, requestedCutJobId: dto.requestedCutJobId } });
+      await enqueueImportOutbox(tx, 'cnc.telegram_import.item_imported', text(item, 'import_item_id'), input.requestId, { actorUserId: requester.id, technicalWorkerUserId: input.currentUser.id, packetId: response.packet.packetId, cutJobId: response.cutJobId, requestedCutJobId: dto.requestedCutJobId });
       return itemDto(requiredRow(updated.rows[0], 'import completion'));
     });
   }
@@ -391,31 +425,64 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
     });
   }
 
-  private async createRequest(tx: TransactionClient, input: { currentUser: CurrentUser; scanId: string; candidateIds: string[]; repeatOfImportRequestId?: string | null; requestId: string; idempotencyKey: string }): Promise<CncTelegramImportRequestDto> {
+  private async createRequest(tx: TransactionClient, input: { currentUser: CurrentUser; scanId: string; candidateIds: string[]; requestedCutJobIds?: Record<string, number>; replaceDraft?: { importRequestId: string; confirmationId: string }; repeatOfImportRequestId?: string | null; requestId: string; idempotencyKey: string }): Promise<CncTelegramImportRequestDto> {
     if (new Set(input.candidateIds).size !== input.candidateIds.length) throw new ApiError(422, 'INVALID_CNC_TELEGRAM_CANDIDATES', 'Candidate selection must not contain duplicates');
+    const requestedNumbers = Object.entries(input.requestedCutJobIds ?? {}).sort(([a], [b]) => a.localeCompare(b));
+    if (requestedNumbers.some(([id, value]) => !input.candidateIds.includes(id) || !Number.isSafeInteger(value) || value <= 0)
+      || new Set(requestedNumbers.map(([, value]) => value)).size !== requestedNumbers.length) {
+      throw new ApiError(422, 'INVALID_CNC_TELEGRAM_IMPORT_NUMBERS', 'Укажите разные положительные целые номера для выбранных комплектов');
+    }
     const scan = await this.owned(tx, 'cnc_telegram_import_scans', 'scan_id', input.scanId, input.currentUser);
     if (text(scan, 'status') !== 'ready') throw new ApiError(409, 'CNC_TELEGRAM_SCAN_NOT_READY', 'Scan is not ready');
     const candidates = await tx.query<Row>('SELECT * FROM cnc_telegram_import_candidates WHERE scan_id=$1 AND candidate_id=ANY($2::uuid[]) FOR UPDATE', [text(scan, 'scan_id'), input.candidateIds]);
     if (candidates.rowCount !== input.candidateIds.length || candidates.rows.some((row) => text(row, 'eligibility_status') !== 'valid' || new Date(text(row, 'expires_at')).getTime() <= Date.now())) throw new ApiError(422, 'INVALID_CNC_TELEGRAM_CANDIDATES', 'Selection contains an expired or ineligible candidate');
     const selectionHash = digest(JSON.stringify([text(scan, 'scan_id'), input.currentUser.id, [...input.candidateIds].sort(), input.repeatOfImportRequestId ?? null]));
-    const requestHash = digest(JSON.stringify({ selectionHash, actor: input.currentUser.id, repeat: input.repeatOfImportRequestId ?? null }));
+    const requestHash = digest(JSON.stringify({
+      selectionHash, actor: input.currentUser.id, repeat: input.repeatOfImportRequestId ?? null,
+      ...(requestedNumbers.length > 0 ? { requestedCutJobIds: requestedNumbers } : {}),
+      ...(input.replaceDraft ? { replaceDraft: [input.replaceDraft.importRequestId, input.replaceDraft.confirmationId] } : {}),
+    }));
     const prior = await tx.query<Row>('SELECT * FROM cnc_telegram_import_requests WHERE requested_by=$1 AND idempotency_key=$2 FOR UPDATE', [input.currentUser.id, input.idempotencyKey]);
     if (prior.rows[0]) {
       if (text(prior.rows[0], 'request_hash') !== requestHash) throw idempotencyConflict();
       return this.loadRequest(tx, prior.rows[0]);
     }
+    if (input.replaceDraft) {
+      await replaceUnconfirmedImportDraft(tx, {
+        ...input.replaceDraft, actorUserId: input.currentUser.id, scanId: text(scan, 'scan_id'),
+        repeatOfImportRequestId: input.repeatOfImportRequestId ?? null,
+      });
+    }
+    // Advisory precheck only: completion checks again under the allocation lock.
+    for (const [, requestedNumber] of requestedNumbers) {
+      await ensureSvgCutJobDisplayNumberAvailable(tx, String(requestedNumber), null);
+    }
     for (const candidate of candidates.rows) await this.refreshMatches(tx, candidate);
     if (!input.repeatOfImportRequestId) {
-      const terminal = await tx.query<Row>(`SELECT import_request_id FROM cnc_telegram_import_requests WHERE scan_id=$1 AND requested_by=$2 AND selection_hash=$3 AND status IN ('completed','partial','failed') LIMIT 1`, [text(scan, 'scan_id'), input.currentUser.id, selectionHash]);
+      const terminal = await tx.query<Row>(`SELECT import_request_id FROM cnc_telegram_import_requests WHERE scan_id=$1 AND requested_by=$2 AND selection_hash=$3 AND status IN ('completed','partial','failed') AND error_code IS DISTINCT FROM 'CNC_TELEGRAM_DRAFT_REPLACED' LIMIT 1`, [text(scan, 'scan_id'), input.currentUser.id, selectionHash]);
       if (terminal.rows[0]) throw new ApiError(409, 'CNC_TELEGRAM_REPEAT_REQUIRED', 'An explicit repeat relation is required for an already imported selection');
     }
     const req = await tx.query<Row>(`INSERT INTO cnc_telegram_import_requests (scan_id,requested_by,request_id,idempotency_key,request_hash,selection_hash,repeat_of_import_request_id,status,selected_count,duplicate_match_version) VALUES ($1,$2,$3,$4,$5,$6,$7,'draft',$8,(SELECT COALESCE(MAX(duplicate_match_version),1) FROM cnc_telegram_import_candidates WHERE candidate_id=ANY($9::uuid[]))) RETURNING *`, [text(scan, 'scan_id'), input.currentUser.id, input.requestId, input.idempotencyKey, requestHash, selectionHash, input.repeatOfImportRequestId ?? null, input.candidateIds.length, input.candidateIds]);
     const request = requiredRow(req.rows[0], 'request creation');
+    if (input.replaceDraft) {
+      const replacedId = input.replaceDraft.importRequestId;
+      const replacementId = text(request, 'import_request_id');
+      await auditService.record(tx, {
+        event: 'cnc.telegram_import.draft_replaced', entityType: 'cnc_telegram_import_request', entityId: replacedId,
+        actorUserId: input.currentUser.id, actorUsername: input.currentUser.username, actorRole: input.currentUser.role,
+        source: 'cnc_telegram_import', requestId: input.requestId,
+        before: { status: 'draft' }, after: { status: 'failed', errorCode: 'CNC_TELEGRAM_DRAFT_REPLACED' },
+        metadata: { replacementImportRequestId: replacementId },
+      });
+      await enqueueImportOutbox(tx, 'cnc.telegram_import.draft_replaced', replacedId, input.requestId, {
+        actorUserId: input.currentUser.id, importRequestId: replacedId, replacementImportRequestId: replacementId,
+      });
+    }
     for (const candidate of candidates.rows) {
       const matches = await this.matches(tx, text(candidate, 'candidate_id'));
-      await tx.query(`INSERT INTO cnc_telegram_import_items (import_request_id,candidate_id,duplicate_acknowledged,duplicate_match_version,duplicate_snapshot_json,status,source_set_fingerprint) VALUES ($1,$2,false,$3,$4::jsonb,'pending',$5)`, [text(request, 'import_request_id'), text(candidate, 'candidate_id'), number(candidate, 'duplicate_match_version'), JSON.stringify(matches), text(candidate, 'source_set_fingerprint')]);
+      await tx.query(`INSERT INTO cnc_telegram_import_items (import_request_id,candidate_id,duplicate_acknowledged,duplicate_match_version,duplicate_snapshot_json,status,source_set_fingerprint,requested_cut_job_id) VALUES ($1,$2,false,$3,$4::jsonb,'pending',$5,$6)`, [text(request, 'import_request_id'), text(candidate, 'candidate_id'), number(candidate, 'duplicate_match_version'), JSON.stringify(matches), text(candidate, 'source_set_fingerprint'), input.requestedCutJobIds?.[text(candidate, 'candidate_id')] ?? null]);
     }
-    await auditService.record(tx, { event: 'cnc.telegram_import.selection_prepared', actorUserId: input.currentUser.id, actorUsername: input.currentUser.username, actorRole: input.currentUser.role, entityType: 'cnc_telegram_import_request', entityId: text(request, 'import_request_id'), source: 'cnc_telegram_import', requestId: input.requestId, metadata: { selectionHash, candidateCount: input.candidateIds.length, repeatOfImportRequestId: input.repeatOfImportRequestId ?? null } });
+    await auditService.record(tx, { event: 'cnc.telegram_import.selection_prepared', actorUserId: input.currentUser.id, actorUsername: input.currentUser.username, actorRole: input.currentUser.role, entityType: 'cnc_telegram_import_request', entityId: text(request, 'import_request_id'), source: 'cnc_telegram_import', requestId: input.requestId, metadata: { requestedCutJobIds: Object.fromEntries(requestedNumbers), selectionHash, candidateCount: input.candidateIds.length, repeatOfImportRequestId: input.repeatOfImportRequestId ?? null } });
     return this.loadRequest(tx, request);
   }
 
@@ -598,7 +665,7 @@ function messageDto(row: Row): CncTelegramImportMessageDto {
   };
 }
 function requestDto(row: Row): CncTelegramImportRequestDto { return { importRequestId: text(row, 'import_request_id'), scanId: text(row, 'scan_id'), requestedBy: text(row, 'requested_by'), status: text(row, 'status') as CncTelegramImportRequestDto['status'], confirmationId: text(row, 'confirmation_id'), repeatOfImportRequestId: nullableText(row, 'repeat_of_import_request_id'), totalCount: number(row, 'selected_count'), importedCount: number(row, 'imported_count'), failedCount: number(row, 'failed_count'), items: [], error: nullableText(row, 'error_message'), selectionHash: text(row, 'selection_hash'), duplicateMatchVersion: number(row, 'duplicate_match_version') }; }
-function itemDto(row: Row, matches: CncTelegramImportMatchDto[] = parseMatches(json(row, 'duplicate_snapshot_json'))): CncTelegramImportItemDto { const candidate = typeof row['svg_file_name'] === 'string' ? candidateDto({ ...row, duplicate_match_version: row['candidate_duplicate_match_version'] ?? row['duplicate_match_version'] }, matches) : undefined; return { importItemId: text(row, 'import_item_id'), candidateId: text(row, 'candidate_id'), status: text(row, 'status') as CncTelegramImportItemDto['status'], duplicateAcknowledged: bool(row, 'duplicate_acknowledged'), duplicateMatchVersion: number(row, 'duplicate_match_version'), duplicateSnapshot: matches, matches, packetId: nullableText(row, 'packet_id'), cutJobId: nullableNumber(row, 'cut_job_id'), cutResultId: nullableNumber(row, 'cut_result_id'), errorCode: nullableText(row, 'error_code'), errorMessage: nullableText(row, 'error_message'), itemLeaseToken: nullableText(row, 'lease_token') ?? undefined, itemLeaseGeneration: number(row, 'lease_generation'), itemLeaseOwner: nullableText(row, 'lease_worker_instance_id') ?? undefined, candidate }; }
+function itemDto(row: Row, matches: CncTelegramImportMatchDto[] = parseMatches(json(row, 'duplicate_snapshot_json'))): CncTelegramImportItemDto { const candidate = typeof row['svg_file_name'] === 'string' ? candidateDto({ ...row, duplicate_match_version: row['candidate_duplicate_match_version'] ?? row['duplicate_match_version'] }, matches) : undefined; return { importItemId: text(row, 'import_item_id'), candidateId: text(row, 'candidate_id'), requestedCutJobId: nullableNumber(row, 'requested_cut_job_id'), status: text(row, 'status') as CncTelegramImportItemDto['status'], duplicateAcknowledged: bool(row, 'duplicate_acknowledged'), duplicateMatchVersion: number(row, 'duplicate_match_version'), duplicateSnapshot: matches, matches, packetId: nullableText(row, 'packet_id'), cutJobId: nullableNumber(row, 'cut_job_id'), cutResultId: nullableNumber(row, 'cut_result_id'), errorCode: nullableText(row, 'error_code'), errorMessage: nullableText(row, 'error_message'), itemLeaseToken: nullableText(row, 'lease_token') ?? undefined, itemLeaseGeneration: number(row, 'lease_generation'), itemLeaseOwner: nullableText(row, 'lease_worker_instance_id') ?? undefined, candidate }; }
 function iso(row: Row, key: string): string { return new Date(text(row, key)).toISOString(); }
 function nullableIso(row: Row, key: string): string | null { const value = row[key]; return value === null || value === undefined ? null : new Date(String(value)).toISOString(); }
 function arrayStrings(value: unknown): string[] { return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []; }

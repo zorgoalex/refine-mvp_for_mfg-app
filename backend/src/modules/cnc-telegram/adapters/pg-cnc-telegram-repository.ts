@@ -6,6 +6,10 @@ import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import {
+  CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE,
+  CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE,
+} from '../../../shared/cnc-material';
+import {
   CUT_RENDER_STYLES_SETTING_KEY,
   CUT_RENDER_STYLE_TELEGRAM_PHOTO,
   resolveTelegramPhotoRenderStyle,
@@ -108,6 +112,21 @@ const IGNORED_ANALYSIS_WARNINGS = new Set([
   'RapidOCR found text, but no detail rows with order and size',
 ]);
 
+function cncPacketCountsForMdfReadinessSql(packetAlias: 'p' | 'packet'): string {
+  return `(
+    COALESCE(${packetAlias}.material_name, '') ~* '${CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE}'
+    AND COALESCE(${packetAlias}.material_name, '') !~* '${CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE}'
+    AND COALESCE(${packetAlias}.program_name, '') !~* '${CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE}'
+    AND COALESCE(${packetAlias}.external_packet_key, '') !~* '${CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE}'
+    AND NOT EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements_text(COALESCE(${packetAlias}.comments_json, '[]'::jsonb))
+        AS material_comment(comment_text)
+      WHERE material_comment.comment_text ~* '${CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE}'
+    )
+  )`;
+}
+
 interface PacketJoinedRow extends QueryResultRow {
   packet_id: string;
   external_packet_key: string;
@@ -163,6 +182,7 @@ interface PacketJoinedRow extends QueryResultRow {
   review_note: string | null;
   laminated_or_later: boolean | null;
   all_linked_order_details_packed_or_later: boolean | null;
+  all_linked_order_details_issued_or_later: boolean | null;
 }
 
 interface PacketReplayRow extends QueryResultRow {
@@ -3028,7 +3048,11 @@ function packetSelectSql(
       linked_order.order_id IS NOT NULL
         AND linked_order.delete_flag = false
         AND COALESCE(linked_order_status.all_details_packed_or_later, false)
-        AS all_linked_order_details_packed_or_later
+        AS all_linked_order_details_packed_or_later,
+      linked_order.order_id IS NOT NULL
+        AND linked_order.delete_flag = false
+        AND COALESCE(linked_order_status.all_details_issued_or_later, false)
+        AS all_linked_order_details_issued_or_later
     FROM cnc_telegram_packets p
     LEFT JOIN cut_job svg_job
       ON svg_job.cut_job_id = p.svg_cut_job_id
@@ -3115,13 +3139,30 @@ function packetSelectSql(
       FROM production_statuses ps
     ) packed_status ON true
     LEFT JOIN LATERAL (
+      SELECT COALESCE(
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(COALESCE(ps.production_status_code, ''))) = 'issued'
+        ),
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(ps.production_status_name)) = 'выдан'
+        )
+      ) AS sort_order
+      FROM production_statuses ps
+    ) issued_production_status ON true
+    LEFT JOIN LATERAL (
       SELECT
         COUNT(linked_detail.detail_id) > 0
           AND BOOL_AND(
             linked_detail_status.sort_order IS NOT NULL
             AND packed_status.sort_order IS NOT NULL
             AND linked_detail_status.sort_order >= packed_status.sort_order
-          ) AS all_details_packed_or_later
+          ) AS all_details_packed_or_later,
+        COUNT(linked_detail.detail_id) > 0
+          AND BOOL_AND(
+            linked_detail_status.sort_order IS NOT NULL
+            AND issued_production_status.sort_order IS NOT NULL
+            AND linked_detail_status.sort_order >= issued_production_status.sort_order
+          ) AS all_details_issued_or_later
       FROM order_details linked_detail
       LEFT JOIN production_statuses linked_detail_status
         ON linked_detail_status.production_status_id = linked_detail.production_status_id
@@ -3806,7 +3847,7 @@ function svgImportOptionsFromDto(dto: CncTelegramStructuredIngestDto): {
   };
 }
 
-async function syncSvgCutJobSourceDisplayNumber(
+export async function syncSvgCutJobSourceDisplayNumber(
   tx: TransactionClient,
   cutJobId: string | number | null,
   requestedCutJobId: string | number | null,
@@ -3814,6 +3855,13 @@ async function syncSvgCutJobSourceDisplayNumber(
   const displayNumber = sourceDisplayNumberFromRequestedCutJobId(requestedCutJobId);
   const resolvedCutJobId = toNullableNumber(cutJobId);
   if (resolvedCutJobId === null || displayNumber === null) return;
+  const job = await tx.query<{ status: string }>(
+    'SELECT status FROM cut_job WHERE cut_job_id = $1 FOR UPDATE',
+    [resolvedCutJobId],
+  );
+  // A delayed Telegram replay must not rewrite the history of a deleted job.
+  if (!job.rows[0] || job.rows[0].status === 'archived') return;
+  await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['cut_job_display_number:regular']);
   await ensureSvgCutJobDisplayNumberAvailable(tx, displayNumber, resolvedCutJobId);
   await tx.query(
     `UPDATE cut_job
@@ -4617,6 +4665,7 @@ async function createSvgCutJob(
   const params = SVG_REVERSE_IMPORT_PARAMS;
   const requestedSourceDisplayNumber = requestedCutJobId === null ? null : String(requestedCutJobId);
   if (requestedSourceDisplayNumber !== null) {
+    await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['cut_job_display_number:regular']);
     await ensureSvgCutJobDisplayNumberAvailable(tx, requestedSourceDisplayNumber, null);
   }
   const isManualSvgUpload = dto.source.chatId === MANUAL_SVG_CHAT_ID;
@@ -5038,7 +5087,7 @@ function svgPlanCanCreateCutResult(plan: Extract<SvgCutImportPlan, { ok: true }>
   return !plan.informational || plan.placements.every((placement) => placement.orderId !== null);
 }
 
-async function ensureSvgCutJobDisplayNumberAvailable(
+export async function ensureSvgCutJobDisplayNumberAvailable(
   tx: TransactionClient,
   displayNumber: string,
   currentCutJobId: number | null,
@@ -5048,6 +5097,7 @@ async function ensureSvgCutJobDisplayNumberAvailable(
     SELECT existing_job.cut_job_id
     FROM cut_job existing_job
     WHERE NULLIF(trim(existing_job.source_display_number::text), '') = $1
+      AND existing_job.status <> 'archived'
       AND ($2::bigint IS NULL OR existing_job.cut_job_id <> $2::bigint)
     LIMIT 1
     `,
@@ -5070,11 +5120,12 @@ async function suggestCutJobDisplayNumbers(tx: TransactionClient, requestedCutJo
   const result = await tx.query<{ cut_job_id: string | number }>(
     `
     SELECT candidate.cut_job_id
-    FROM generate_series($1::bigint + 1, $1::bigint + 200) AS candidate(cut_job_id)
+    FROM generate_series($1::bigint + 1, LEAST($1::bigint + 200, 9007199254740991)) AS candidate(cut_job_id)
     WHERE NOT EXISTS (
       SELECT 1
       FROM cut_job existing_job
       WHERE NULLIF(trim(existing_job.source_display_number::text), '') = candidate.cut_job_id::text
+        AND existing_job.status <> 'archived'
     )
     ORDER BY candidate.cut_job_id
     LIMIT 5
@@ -6077,13 +6128,7 @@ async function loadMdfBathColumnAutomationState(
         item.match_detail_id::bigint AS order_detail_id,
         SUM(
           CASE
-            WHEN NOT EXISTS (
-              SELECT 1
-              FROM jsonb_array_elements_text(packet.comments_json) AS packet_comment(comment_text)
-              WHERE lower(packet_comment.comment_text) LIKE ANY (
-                ARRAY['%hdf%', '%хдф%', '%лдсп%', '%ldsp%', '%fanera%', '%фанера%']
-              )
-            )
+            WHEN ${cncPacketCountsForMdfReadinessSql('packet')}
               AND (packet.completion_status = 'completed' OR packet.thumbs_up = true)
               THEN GREATEST(item.quantity, 0)
             ELSE 0
@@ -7313,13 +7358,7 @@ async function loadBathCards(
       SELECT
         p.completion_status,
         p.thumbs_up,
-        NOT EXISTS (
-          SELECT 1
-          FROM jsonb_array_elements_text(p.comments_json) AS packet_comment(comment_text)
-          WHERE lower(packet_comment.comment_text) LIKE ANY (
-            ARRAY['%hdf%', '%хдф%', '%лдсп%', '%ldsp%', '%fanera%', '%фанера%']
-          )
-        ) AS mdf_relevant,
+        ${cncPacketCountsForMdfReadinessSql('p')} AS mdf_relevant,
         i.match_order_id,
         i.match_detail_id,
         i.source,
@@ -7369,13 +7408,7 @@ async function loadBathCards(
       WHERE ${packetDatePredicate}
         ${packetVisibilityPredicate}
         AND (p.completion_status = 'completed' OR p.thumbs_up = true)
-        AND NOT EXISTS (
-          SELECT 1
-          FROM jsonb_array_elements_text(p.comments_json) AS material_comment(comment_text)
-          WHERE lower(material_comment.comment_text) LIKE ANY (
-            ARRAY['%hdf%', '%хдф%', '%лдсп%', '%ldsp%', '%fanera%', '%фанера%']
-          )
-        )
+        AND ${cncPacketCountsForMdfReadinessSql('p')}
     ),
     whole_order_target_details AS (
       SELECT
@@ -7780,7 +7813,6 @@ async function loadPeriodBazisCutSetCards(
           AND issued_status.sort_order IS NOT NULL
           AND source_order_status.sort_order >= issued_status.sort_order
         ) THEN true
-        WHEN issued_order_move.move_id IS NOT NULL THEN true
         ELSE false
       END AS packed_or_later
     FROM target_bazis_cut_sets target
@@ -7796,10 +7828,6 @@ async function loadPeriodBazisCutSetCards(
       ON source_order_status.order_status_id = source_order.order_status_id
     LEFT JOIN production_statuses detail_status
       ON detail_status.production_status_id = source_detail.production_status_id
-    LEFT JOIN mdf_board_manual_moves issued_order_move
-      ON issued_order_move.card_kind = 'order'
-      AND issued_order_move.card_id = source_order.order_id::text
-      AND issued_order_move.target_column = 'orders_issued'
     CROSS JOIN packed_status_threshold packed_status
     CROSS JOIN issued_status_threshold issued_status
     ORDER BY cut_set.created_at DESC, cut_set.bazis_cut_set_id DESC,
@@ -8010,6 +8038,9 @@ function compareBathSheets(left: CncTelegramBathSheetDto, right: CncTelegramBath
 function packetColumnKey(
   packet: CncTelegramPacketDto,
 ): 'parsed' | 'completed' | 'completed_laminated' {
+  if (packet.allLinkedOrderDetailsIssuedOrLater) {
+    return 'completed_laminated';
+  }
   if (packet.completionStatus === 'completed' || packet.thumbsUp) {
     return packet.allLinkedOrderDetailsPackedOrLater ? 'completed_laminated' : 'completed';
   }
@@ -8074,6 +8105,7 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
         svgCutImportStatus: row.svg_cut_import_status ?? 'none',
         svgCutImportNote: row.svg_cut_import_note,
         allLinkedOrderDetailsPackedOrLater: false,
+        allLinkedOrderDetailsIssuedOrLater: false,
         svgCutSheets: packetCutSheetsArray(row.svg_cut_sheets_json),
         itemCount: 0,
         itemQuantityTotal: 0,
@@ -8088,6 +8120,10 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
         ? row.all_linked_order_details_packed_or_later === true
         : packet.allLinkedOrderDetailsPackedOrLater
           && row.all_linked_order_details_packed_or_later === true;
+      packet.allLinkedOrderDetailsIssuedOrLater = packet.itemCount === 0
+        ? row.all_linked_order_details_issued_or_later === true
+        : packet.allLinkedOrderDetailsIssuedOrLater
+          && row.all_linked_order_details_issued_or_later === true;
       const item: CncTelegramPacketItemDto = {
         packetItemId: row.packet_item_id,
         sourceItemKey: row.source_item_key ?? '',

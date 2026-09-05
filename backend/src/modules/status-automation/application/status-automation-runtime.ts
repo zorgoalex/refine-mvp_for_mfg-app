@@ -85,11 +85,14 @@ export async function evaluateStatusAutomation(
   if (!isStatusAutomationEnabled()) {
     return;
   }
-  if (event.origin === 'automation') {
-    return;
-  }
-
-  const rules = await listEnabledRulesForEvent(tx, event.eventType);
+  const allRules = await listEnabledRulesForEvent(tx, event.eventType);
+  // Automation-originated order status changes still need their downstream detail cascade.
+  // Restrict that second hop to detail-only actions so status rules cannot recurse in cycles.
+  const rules = event.origin === 'automation'
+    ? allRules.filter((rule) =>
+      rule.actionType === 'change_details_production_status'
+      || rule.actionType === 'map_order_status_to_details_production_status')
+    : allRules;
   if (rules.length === 0) {
     return;
   }
@@ -323,7 +326,13 @@ async function runAutomationAction(
       );
     case 'change_details_production_status':
       return run(requireTargetStatusId(rule), () =>
-        changeDetailsProductionStatusFromAutomationInTransaction(tx, orderId, requireTargetStatusId(rule), context),
+        changeDetailsProductionStatusFromAutomationInTransaction(
+          tx,
+          orderId,
+          requireTargetStatusId(rule),
+          context,
+          rule.actionConfig?.detailTransitionMode ?? 'set_exact',
+        ),
       );
     case 'map_order_status_to_details_production_status': {
       const targetStatusId = resolveMappedStatusId(rule, state.orderStatusId);

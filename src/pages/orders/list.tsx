@@ -1808,22 +1808,22 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                   <>
                     <Col xs={12} sm={6} md={4} lg={3}>
                       <Form.Item name="final_amount_min" label="Сумма от">
-                        <InputNumber style={{ width: "100%" }} placeholder="Мин" min={0} precision={0} formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} parser={(value) => value?.replace(/\s/g, '') as unknown as number} />
+                        <InputNumber<number> style={{ width: "100%" }} placeholder="Мин" min={0} precision={0} formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} parser={(value) => value?.replace(/\s/g, '') as unknown as number} />
                       </Form.Item>
                     </Col>
                     <Col xs={12} sm={6} md={4} lg={3}>
                       <Form.Item name="final_amount_max" label="Сумма до">
-                        <InputNumber style={{ width: "100%" }} placeholder="Макс" min={0} precision={0} formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} parser={(value) => value?.replace(/\s/g, '') as unknown as number} />
+                        <InputNumber<number> style={{ width: "100%" }} placeholder="Макс" min={0} precision={0} formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} parser={(value) => value?.replace(/\s/g, '') as unknown as number} />
                       </Form.Item>
                     </Col>
                     <Col xs={12} sm={6} md={4} lg={3}>
                       <Form.Item name="paid_amount_min" label="Оплата от">
-                        <InputNumber style={{ width: "100%" }} placeholder="Мин" min={0} precision={0} formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} parser={(value) => value?.replace(/\s/g, '') as unknown as number} />
+                        <InputNumber<number> style={{ width: "100%" }} placeholder="Мин" min={0} precision={0} formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} parser={(value) => value?.replace(/\s/g, '') as unknown as number} />
                       </Form.Item>
                     </Col>
                     <Col xs={12} sm={6} md={4} lg={3}>
                       <Form.Item name="paid_amount_max" label="Оплата до">
-                        <InputNumber style={{ width: "100%" }} placeholder="Макс" min={0} precision={0} formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} parser={(value) => value?.replace(/\s/g, '') as unknown as number} />
+                        <InputNumber<number> style={{ width: "100%" }} placeholder="Макс" min={0} precision={0} formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} parser={(value) => value?.replace(/\s/g, '') as unknown as number} />
                       </Form.Item>
                     </Col>
                   </>

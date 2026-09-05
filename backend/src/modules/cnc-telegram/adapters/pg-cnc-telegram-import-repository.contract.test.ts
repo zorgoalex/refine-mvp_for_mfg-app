@@ -232,8 +232,9 @@ describe('explicit Telegram import backend contracts', () => {
     expect(queries.some((sql) => sql.includes('INSERT INTO cnc_telegram_import_items'))).toBe(true);
   });
 
-  it('completes an unresolved Telegram SVG through the importer in lenient mode without selected orders', async () => {
+  it.each([null, 42, 3000000000])('completes an unresolved Telegram SVG with durable requested number %s', async (requestedCutJobId) => {
     const candidate = {
+      requested_cut_job_id: requestedCutJobId === null ? null : String(requestedCutJobId),
       import_item_id: 'item-1', import_request_id: 'request-1', requested_by: 'user-1', scan_id: 'scan-1',
       source_chat_id: '-1001', source_message_id: 42, source_thread_id: null,
       source_created_at: '2026-08-19T10:00:00.000Z', source_updated_at: null, workday: '2026-08-19',
@@ -285,6 +286,7 @@ describe('explicit Telegram import backend contracts', () => {
       dto: expect.objectContaining({
         matchMode: 'order_details', validationMode: 'lenient', selectedOrderIds: [],
         programName: 'CNC#1_2808+2807-18ММ.TXT',
+        requestedCutJobId,
       }),
     }));
     expect(queries.some((sql) => sql.includes('INSERT INTO cut_job'))).toBe(false); // importer owns cut-job creation

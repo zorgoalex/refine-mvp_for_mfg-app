@@ -8,6 +8,19 @@ const hookSource = readFileSync(
   'utf8',
 );
 
+describe('Excel-only pagination', () => {
+  it('keeps pagination disabled by default for PDF/VLM callers', () => {
+    expect(source).toContain('pageSize = false');
+    expect(source).toContain('pagination={pageSize ? { pageSize, showSizeChanger: false, hideOnSinglePage: true } : false}');
+  });
+  it('uses global record keys for every edit and removal, never page-local render indices', () => {
+    expect(source).not.toContain('onUpdateRow(index,');
+    expect(source).not.toContain('onRemoveRow(index)');
+    expect(source).toContain('onRemoveRow(row.key)');
+    expect(source).toContain('key: index');
+  });
+});
+
 // Guard: the cell editors must stay declared at module scope (stable identity),
 // not re-created inside the component (e.g. via useCallback). Inline definitions
 // get a new identity every render, remounting the editors and losing input focus.

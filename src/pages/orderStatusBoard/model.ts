@@ -38,7 +38,7 @@ const MDF_BOARD_HIDDEN_COLUMN_TITLES: Partial<
   Record<CncTelegramTodayColumn['key'], string>
 > = {
   completed_laminated: 'Распиленные файлы',
-  baths_laminated: 'Завершённые ванны',
+  completed_baths: 'Завершённые ванны',
 };
 
 export const DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES = [
@@ -651,25 +651,31 @@ export function applyMdfBoardHiddenCardRulesToColumns(
   legacyHiddenProductionStatusIds?: ReadonlySet<number>,
   legacyHiddenOrderStatusIds?: ReadonlySet<number>,
 ): CncTelegramTodayColumn[] {
-  if (!Array.isArray(setting?.cardRules)) {
-    return filterCncBathColumnsByOrderStatuses(
-      columns,
-      orderCards,
-      legacyHiddenProductionStatusIds,
-      legacyHiddenOrderStatusIds,
-    );
-  }
-
-  const rulesByKind = new Map(
-    normalizeMdfBoardHiddenCardRules(setting).map((rule) => [
-      rule.cardKind,
-      new Set(rule.orderStatusIds),
-    ]),
+  const hasCardRules = Array.isArray(setting?.cardRules);
+  const rulesByKind = new Map<MdfBoardHiddenCardKind, Set<number>>(
+    hasCardRules
+      ? normalizeMdfBoardHiddenCardRules(setting).map((rule) => [
+        rule.cardKind,
+        new Set(rule.orderStatusIds),
+      ])
+      : MDF_BOARD_HIDDEN_CARD_KINDS.map((cardKind) => [cardKind, new Set([1])]),
   );
-  const orderStatusIdByOrderId = new Map(
-    orderCards
-      .filter((card) => isPositiveInteger(card.orderId) && isPositiveInteger(card.orderStatusId))
-      .map((card) => [card.orderId, card.orderStatusId] as const),
+  const orderStatusIdByOrderId = new Map<number, number>(
+    orderCards.flatMap((card) => {
+      if (!isPositiveInteger(card.orderId)) return [];
+      if (hasCardRules) {
+        return isPositiveInteger(card.orderStatusId)
+          ? [[card.orderId, card.orderStatusId] as const]
+          : [];
+      }
+      return isCncOrderHiddenFromMdfBoard(
+        card,
+        legacyHiddenProductionStatusIds,
+        legacyHiddenOrderStatusIds,
+      )
+        ? [[card.orderId, 1] as const]
+        : [];
+    }),
   );
 
   const byKey = new Map<CncTelegramTodayColumn['key'], CncTelegramTodayColumn>();
@@ -725,7 +731,7 @@ export function applyMdfBoardHiddenCardRulesToColumns(
         rulesByKind,
         orderStatusIdByOrderId,
       )
-        ? 'baths_laminated'
+        ? 'completed_baths'
         : column.key;
       ensureColumn(target).baths.push(bath);
     }
@@ -762,17 +768,18 @@ function mdfBoardHiddenCardRuleMatches(
 }
 
 function collectPacketOrderIds(packet: CncTelegramPacket): number[] {
-  return normalizePositiveIntegerArray(
-    packet.items.map((item) => item.matchOrderId ?? item.orderId),
-  );
+  const orderIds = packet.items.map((item) => item.matchOrderId ?? item.orderId);
+  return orderIds.every(isPositiveInteger) ? normalizePositiveIntegerArray(orderIds) : [];
 }
 
 function collectBazisCutSetOrderIds(bazisCutSet: CncTelegramBazisCutSetCard): number[] {
-  return normalizePositiveIntegerArray(bazisCutSet.items.map((item) => item.orderId));
+  const orderIds = bazisCutSet.items.map((item) => item.orderId);
+  return orderIds.every(isPositiveInteger) ? normalizePositiveIntegerArray(orderIds) : [];
 }
 
 function collectBathOrderIds(bath: CncTelegramBathCard): number[] {
-  return normalizePositiveIntegerArray(bath.items.map((item) => item.orderId));
+  const orderIds = bath.items.map((item) => item.orderId);
+  return orderIds.every(isPositiveInteger) ? normalizePositiveIntegerArray(orderIds) : [];
 }
 
 function isCncBathColumnKey(key: CncTelegramTodayColumn['key']): boolean {

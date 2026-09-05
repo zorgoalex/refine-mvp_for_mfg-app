@@ -214,6 +214,8 @@ describe('CNC detailed machine sources', () => {
   it('counts only explicit MDF material for cut readiness', () => {
     expect(cncMaterialNameIsMdf('МДФ 16 мм')).toBe(true);
     expect(cncMaterialNameIsMdf('MDF 18')).toBe(true);
+    expect(cncMaterialNameIsMdf('ЛМДФ 10мм')).toBe(true);
+    expect(cncMaterialNameIsMdf('painted-MDF18')).toBe(true);
     expect(cncMaterialNameIsMdf('ХДФ 3 мм')).toBe(false);
     expect(cncMaterialNameIsMdf('ЛДСП 16 мм')).toBe(false);
     expect(cncMaterialNameIsMdf('Фанера 12 мм')).toBe(false);
@@ -423,6 +425,7 @@ function packet(overrides: Partial<CncTelegramPacket> = {}): CncTelegramPacket {
     svgCutImportStatus: 'imported',
     svgCutImportNote: null,
     allLinkedOrderDetailsPackedOrLater: false,
+    allLinkedOrderDetailsIssuedOrLater: false,
     itemCount: 1,
     itemQuantityTotal: 1,
     updatedAt: '2026-08-01T08:00:00.000Z',

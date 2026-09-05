@@ -1162,6 +1162,8 @@ export class OrderTransactionService {
         requestId: input.requestId,
         idempotencyKey: `${outboxSeed}:order.status_changed`,
         sourceIdempotencyKey: input.sourceIdempotencyKey,
+        orderStatusIdBefore: beforeOrderStatusId ?? undefined,
+        orderStatusIdAfter: afterOrderStatusId ?? undefined,
         payload: {
           eventType: 'order.status_changed',
           actorUserId: input.currentUser.id,
@@ -1318,6 +1320,8 @@ export class OrderTransactionService {
         actor: input.currentUser,
         requestId: event.requestId,
         sourceIdempotencyKey: event.sourceIdempotencyKey,
+        orderStatusIdBefore: event.orderStatusIdBefore,
+        orderStatusIdAfter: event.orderStatusIdAfter,
       });
     }
   }

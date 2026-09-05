@@ -190,11 +190,13 @@ export function assertMdfManualMoveAllowed(
   ) {
     return;
   }
-  if (
-    cardKind === 'order'
-    && (targetColumn === 'orders' || targetColumn === 'orders_ready' || targetColumn === 'orders_issued')
-  ) {
-    return;
+  if (cardKind === 'order') {
+    throw new ApiError(
+      422,
+      'MDF_ORDER_MOVE_REQUIRES_STATUS_CHANGE',
+      'Карточка заказа перемещается изменением статуса заказа',
+      { cardKind, targetColumn },
+    );
   }
   throw validationError('targetColumn', 'targetColumn is not allowed for this cardKind');
 }

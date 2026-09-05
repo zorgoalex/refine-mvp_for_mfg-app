@@ -1834,6 +1834,18 @@ probe_file() {
                           AND rps.scope_key = 'orders.delete'
                           AND rps.scope_value = 'own'
                      );" ;;
+    148_cut_job_number_reuse*) probe_all \
+                     "$(q_col cnc_telegram_import_items requested_cut_job_id)" \
+                     "$(q_con_on cnc_telegram_import_items chk_cnc_tg_import_requested_number)" \
+                     "SELECT EXISTS (
+                       SELECT 1 FROM pg_index i
+                       WHERE i.indexrelid = to_regclass('public.uq_cut_job_source_display_number')
+                         AND i.indisunique AND i.indisvalid
+                         AND pg_get_expr(i.indpred, i.indrelid) =
+                           '((status <> ''archived''::text) AND (NULLIF(btrim(source_display_number), ''''::text) IS NOT NULL))'
+                         AND pg_get_expr(i.indexprs, i.indrelid) =
+                           'NULLIF(btrim(source_display_number), ''''::text)'
+                     );" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -1844,7 +1856,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*|127_*|128_*|129_*|130_*|131_*|132_*|133_*|134_*|135_*|136_*|137_*|138_*|139_*|140_*|141_*|142_*|143_*|144_*|145_*|146_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*|127_*|128_*|129_*|130_*|131_*|132_*|133_*|134_*|135_*|136_*|137_*|138_*|139_*|140_*|141_*|142_*|143_*|144_*|145_*|146_*|148_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

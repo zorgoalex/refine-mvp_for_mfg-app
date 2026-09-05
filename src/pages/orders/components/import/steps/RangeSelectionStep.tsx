@@ -1,10 +1,11 @@
 // Step 2: Visual range selection with column mapping in headers
 
-import React, { useCallback, useRef, useMemo } from 'react';
+import React, { useCallback, useRef, useMemo, useState, useEffect } from 'react';
 import { Typography, Checkbox, Space, Tag, Button, Select } from 'antd';
 import { ClearOutlined } from '@ant-design/icons';
 import type { ParsedSheet, SelectionRange, NormalizedRange, FieldMapping, ImportableField } from '../types/importTypes';
 import { getColumnLetter, FIELD_CONFIGS } from '../types/importTypes';
+import { getColumnWidths, getGridCell, getEdgeVelocity, getScrollFrameScale, ROW_HEIGHT, HEADER_HEIGHT } from './excelGridGeometry';
 
 const { Text, Title } = Typography;
 
@@ -21,9 +22,11 @@ interface RangeSelectionStepProps {
   mapping: FieldMapping;
   onHasHeadersChange: (value: boolean) => void;
   onMappingChange: (field: ImportableField, column: string | null) => void;
-  onStartSelection: (row: number, col: number) => void;
+  onStartSelection: (row: number, col: number, moveId?: string) => void;
   onUpdateSelection: (row: number, col: number) => void;
   onEndSelection: () => void;
+  onCancelSelection: () => void;
+  recognitionNotice?: string;
   onRemoveRange: (id: string) => void;
   onClearRanges: () => void;
   onSetActiveRange: (id: string | null) => void;
@@ -35,9 +38,6 @@ const normalizeRange = (range: SelectionRange): NormalizedRange => ({
   minCol: Math.min(range.startCol, range.endCol),
   maxCol: Math.max(range.startCol, range.endCol),
 });
-
-const MAX_VISIBLE_ROWS = 150;
-const MAX_VISIBLE_COLS = 30;
 
 // Short labels for mapping dropdown
 const FIELD_OPTIONS = [
@@ -69,31 +69,91 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
   onStartSelection,
   onUpdateSelection,
   onEndSelection,
+  onCancelSelection,
+  recognitionNotice,
   onRemoveRange,
   onClearRanges,
   onSetActiveRange,
 }) => {
   const tableRef = useRef<HTMLDivElement>(null);
 
-  const visibleRows = Math.min(sheetData.rowCount, MAX_VISIBLE_ROWS);
-  const visibleCols = Math.min(sheetData.colCount, MAX_VISIBLE_COLS);
-
-  // Calculate dynamic height based on actual rows (26px per row + 50px header)
-  // Max height is 75vh to fit in modal, min is 200px
-  const calculatedHeight = Math.min(
-    Math.max(visibleRows * 26 + 60, 200),
-    window.innerHeight * 0.75
-  );
-  const gridHeight = `${Math.round(calculatedHeight)}px`;
+  const visibleCols = sheetData.colCount;
+  const [viewport, setViewport] = useState({ top: 0, height: 400 });
+  const firstRow = Math.max(0, Math.floor((viewport.top - HEADER_HEIGHT) / ROW_HEIGHT) - 8);
+  const lastRow = Math.min(sheetData.rowCount, firstRow + Math.ceil(viewport.height / ROW_HEIGHT) + 18);
 
   // Get selected columns from first range
   const selectedCols = useMemo(() => {
-    if (ranges.length === 0) return new Set<number>();
-    const { minCol, maxCol } = normalizeRange(ranges[0]);
     const cols = new Set<number>();
-    for (let c = minCol; c <= maxCol; c++) cols.add(c);
+    for (const range of ranges) {
+      const { minCol, maxCol } = normalizeRange(range);
+      for (let c = minCol; c <= maxCol; c++) cols.add(c);
+    }
     return cols;
   }, [ranges]);
+
+  const columnWidths = useMemo(() => {
+    const context = document.createElement('canvas').getContext('2d');
+    if (context) context.font = '12px Consolas, Monaco, monospace';
+    return getColumnWidths(sheetData, text => context?.measureText(text).width ?? text.length * 7.2, selectedCols);
+  }, [sheetData, selectedCols]);
+  const drag = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  const animation = useRef<number | null>(null);
+  const previousFrame = useRef<number | null>(null);
+  const callbacks = useRef({ onUpdateSelection, onEndSelection, onCancelSelection });
+  callbacks.current = { onUpdateSelection, onEndSelection, onCancelSelection };
+
+  const finishSelection = useCallback((commit: boolean) => {
+    const pointer = drag.current;
+    if (!pointer) return;
+    drag.current = null;
+    if (animation.current !== null) cancelAnimationFrame(animation.current);
+    animation.current = null;
+    previousFrame.current = null;
+    const table = tableRef.current;
+    if (table?.hasPointerCapture(pointer.pointerId)) table.releasePointerCapture(pointer.pointerId);
+    if (commit) callbacks.current.onEndSelection();
+    else callbacks.current.onCancelSelection();
+  }, []);
+
+  const updatePointerCell = useCallback(() => {
+    const table = tableRef.current;
+    const pointer = drag.current;
+    if (!table || !pointer) return;
+    const bounds = table.getBoundingClientRect();
+    const x = Math.max(bounds.left + 40, Math.min(pointer.x, bounds.left + table.clientWidth - 1));
+    const y = Math.max(bounds.top + HEADER_HEIGHT, Math.min(pointer.y, bounds.top + table.clientHeight - 1));
+    const cell = getGridCell(columnWidths, sheetData.rowCount,
+      x - bounds.left + table.scrollLeft, y - bounds.top + table.scrollTop);
+    callbacks.current.onUpdateSelection(cell.row, cell.col);
+  }, [columnWidths, sheetData.rowCount]);
+
+  const scrollSelection = useCallback(function tick(timestamp: number) {
+    const table = tableRef.current;
+    const pointer = drag.current;
+    if (!table || !pointer) return;
+    const frameScale = getScrollFrameScale(timestamp, previousFrame.current);
+    previousFrame.current = timestamp;
+    const bounds = table.getBoundingClientRect();
+    table.scrollLeft += getEdgeVelocity(pointer.x, bounds.left + 40, bounds.left + table.clientWidth) * frameScale;
+    table.scrollTop += getEdgeVelocity(pointer.y, bounds.top + HEADER_HEIGHT, bounds.top + table.clientHeight) * frameScale;
+    updatePointerCell();
+    animation.current = requestAnimationFrame(tick);
+  }, [updatePointerCell]);
+
+  useEffect(() => {
+    const table = tableRef.current;
+    if (!table) return;
+    table.scrollTop = 0;
+    table.scrollLeft = 0;
+    const observe = () => setViewport({ top: table.scrollTop, height: table.clientHeight });
+    const observer = new ResizeObserver(observe);
+    observer.observe(table);
+    observe();
+    const cancel = () => finishSelection(false);
+    window.addEventListener('blur', cancel);
+    return () => { observer.disconnect(); window.removeEventListener('blur', cancel); cancel(); };
+  }, [sheetData, finishSelection]);
 
   // Get which field is mapped to which column
   const getFieldForColumn = useCallback((colLetter: string): ImportableField | null => {
@@ -127,6 +187,7 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
       }
     }
     for (const range of ranges) {
+      if (range.id === currentSelection?.id) continue;
       const { minRow, maxRow, minCol, maxCol } = normalizeRange(range);
       if (row >= minRow && row <= maxRow && col >= minCol && col <= maxCol) {
         return range;
@@ -135,22 +196,16 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
     return null;
   }, [ranges, currentSelection]);
 
-  const handleMouseDown = useCallback((row: number, col: number, e: React.MouseEvent) => {
+  const handlePointerDown = useCallback((row: number, col: number, e: React.PointerEvent) => {
+    if (e.button !== 0 || !e.isPrimary || !tableRef.current) return;
     e.preventDefault();
-    onStartSelection(row, col);
-  }, [onStartSelection]);
-
-  const handleMouseMove = useCallback((row: number, col: number) => {
-    if (isSelecting) {
-      onUpdateSelection(row, col);
-    }
-  }, [isSelecting, onUpdateSelection]);
-
-  const handleMouseUp = useCallback(() => {
-    if (isSelecting) {
-      onEndSelection();
-    }
-  }, [isSelecting, onEndSelection]);
+    const existing = getCellRange(row, col);
+    onStartSelection(row, col, !e.shiftKey && existing?.id === activeRangeId ? existing.id : undefined);
+    drag.current = { pointerId: e.pointerId, x: e.clientX, y: e.clientY };
+    previousFrame.current = null;
+    tableRef.current.setPointerCapture(e.pointerId);
+    animation.current = requestAnimationFrame(scrollSelection);
+  }, [onStartSelection, getCellRange, activeRangeId, scrollSelection]);
 
   // Format range as A1:B10
   const formatRange = (range: SelectionRange): string => {
@@ -171,6 +226,7 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
     // Corner cell
     cells.push(
       <div key="corner" className="excel-cell excel-header-cell corner" style={{
+        height: HEADER_HEIGHT,
         position: 'sticky',
         left: 0,
         top: 0,
@@ -199,7 +255,7 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
             borderBottom: '1px solid var(--app-border)',
             flexDirection: 'column',
             padding: '2px 4px',
-            minHeight: 50,
+            height: HEADER_HEIGHT,
           }}
         >
           <div style={{ fontWeight: 600, fontSize: 11 }}>{colLetter}</div>
@@ -211,6 +267,7 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
               options={FIELD_OPTIONS}
               style={{ width: '100%', fontSize: 10 }}
               dropdownStyle={{ minWidth: 100 }}
+              aria-label={`Поле колонки ${colLetter}`}
               onClick={(e) => e.stopPropagation()}
             />
           )}
@@ -219,7 +276,8 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
     }
 
     // Data rows
-    for (let row = 0; row < visibleRows; row++) {
+    if (firstRow > 0) cells.push(<div key="before" style={{ gridColumn: '1 / -1', height: firstRow * ROW_HEIGHT }} />);
+    for (let row = firstRow; row < lastRow; row++) {
       // Row number cell
       cells.push(
         <div
@@ -248,13 +306,14 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
           <div
             key={`${row}-${col}`}
             className={`excel-cell ${isSelected ? 'selected' : ''}`}
+            data-row={row}
+            data-col={col}
+            title={cellValue == null ? '' : String(cellValue)}
             style={{
               backgroundColor: isSelected ? range?.color : undefined,
-              cursor: 'cell',
+              cursor: isSelected && range?.id === activeRangeId ? 'move' : 'cell',
             }}
-            onMouseDown={(e) => handleMouseDown(row, col, e)}
-            onMouseMove={() => handleMouseMove(row, col)}
-            onMouseUp={handleMouseUp}
+            onPointerDown={(e) => handlePointerDown(row, col, e)}
           >
             <span className="cell-content">
               {cellValue != null ? String(cellValue) : ''}
@@ -264,34 +323,38 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
       }
     }
 
+    if (lastRow < sheetData.rowCount) cells.push(<div key="after" style={{ gridColumn: '1 / -1', height: (sheetData.rowCount - lastRow) * ROW_HEIGHT }} />);
     return cells;
-  }, [sheetData.data, visibleRows, visibleCols, selectedCols, getFieldForColumn, getCellRange, handleMouseDown, handleMouseMove, handleMouseUp, handleHeaderMappingChange]);
+  }, [sheetData.data, sheetData.rowCount, firstRow, lastRow, visibleCols, selectedCols, getFieldForColumn, getCellRange, handlePointerDown, handleHeaderMappingChange, activeRangeId]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, minWidth: 0 }}>
       <style>{`
         .excel-grid-container {
           overflow: auto;
           border: 1px solid var(--app-border);
           border-radius: 4px;
           user-select: none;
-          height: ${gridHeight};
-          max-height: 75vh;
-          min-height: 200px;
-          resize: vertical;
+          flex: 1;
+          min-height: 160px;
+          min-width: 0;
+          touch-action: none;
+          overscroll-behavior: contain;
         }
         .excel-grid {
           display: grid;
-          grid-template-columns: 40px repeat(${visibleCols}, minmax(80px, 120px));
           font-family: 'Consolas', 'Monaco', monospace;
           font-size: 12px;
+          font-variant-numeric: tabular-nums;
           width: max-content;
         }
         .excel-cell {
           padding: 4px 6px;
           border-right: 1px solid var(--app-border-soft);
           border-bottom: 1px solid var(--app-border-soft);
-          min-height: 26px;
+          height: ${ROW_HEIGHT}px;
+          box-sizing: border-box;
+          min-width: 0;
           display: flex;
           align-items: center;
           white-space: nowrap;
@@ -322,6 +385,10 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
       `}</style>
 
       <Space direction="vertical" style={{ marginBottom: 8 }} size="small">
+        {recognitionNotice && <Text type="secondary" data-testid="excel-export-recognized">{recognitionNotice}</Text>}
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          Тяните ЛКМ к краю для прокрутки. Внутри активной области — перенос; Shift — новое выделение. Отпустите ЛКМ для завершения.
+        </Text>
         {/* Sheet selector */}
         {sheets.length > 1 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -388,9 +455,30 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
       <div
         ref={tableRef}
         className="excel-grid-container"
-        onMouseLeave={handleMouseUp}
+        data-testid="excel-range-grid"
+        data-selecting={isSelecting}
+        onScroll={() => {
+          const table = tableRef.current;
+          if (table) setViewport({ top: table.scrollTop, height: table.clientHeight });
+        }}
+        onPointerMove={event => {
+          if (!drag.current || event.pointerId !== drag.current.pointerId) return;
+          if (!(event.buttons & 1)) { finishSelection(false); return; }
+          drag.current.x = event.clientX;
+          drag.current.y = event.clientY;
+          updatePointerCell();
+        }}
+        onPointerUp={event => {
+          if (event.pointerId !== drag.current?.pointerId || event.button !== 0) return;
+          drag.current.x = event.clientX;
+          drag.current.y = event.clientY;
+          updatePointerCell();
+          finishSelection(true);
+        }}
+        onPointerCancel={() => finishSelection(false)}
+        onLostPointerCapture={() => finishSelection(false)}
       >
-        <div className="excel-grid">
+        <div className="excel-grid" style={{ gridTemplateColumns: `40px ${columnWidths.map(width => `${width}px`).join(' ')}` }}>
           {gridCells}
         </div>
       </div>

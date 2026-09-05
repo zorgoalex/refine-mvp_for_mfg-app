@@ -12,6 +12,18 @@ import { getColumnLetter } from '../types/importTypes';
 import { parseWorksheet } from './useExcelParser';
 
 describe('parseWorksheet (dynamic xlsx)', () => {
+  it('preserves actual A1 coordinates and merged spans when the used range starts at C5', async () => {
+    const XLSX = await import('xlsx');
+    const result = parseWorksheet({ '!ref': 'C5:D6', C5: { t: 's', v: 'Высота' },
+      C6: { t: 'n', v: 700 }, D6: { t: 'n', v: 400 },
+      '!merges': [{ s: { r: 4, c: 2 }, e: { r: 4, c: 3 } }],
+    }, XLSX.utils);
+    expect(result.data[4][2]).toBe('Высота');
+    expect(result.data[5][2]).toBe(700);
+    expect(result.data[0][0]).toBeNull();
+    expect(result.headers).toEqual(['A', 'B', 'C', 'D']);
+    expect(result.merges).toEqual([{ startRow: 4, endRow: 4, startCol: 2, endCol: 3 }]);
+  });
   it('parses a small in-memory workbook correctly', async () => {
     // Dynamically import xlsx (mirrors what the refactored hook does at runtime)
     const XLSX = await import('xlsx');

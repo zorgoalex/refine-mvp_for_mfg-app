@@ -54,7 +54,9 @@ describe('MdfBoardManualMoveController parsing', () => {
     expect(() => assertMdfManualMoveAllowed('bazisCutSet', 'completed_laminated')).not.toThrow();
     expect(() => assertMdfManualMoveAllowed('bath', 'baths_ready')).not.toThrow();
     expect(() => assertMdfManualMoveAllowed('bath', 'completed_baths')).not.toThrow();
-    expect(() => assertMdfManualMoveAllowed('order', 'orders_issued')).not.toThrow();
+    expect(() => assertMdfManualMoveAllowed('order', 'orders_issued')).toThrowError(
+      expect.objectContaining({ code: 'MDF_ORDER_MOVE_REQUIRES_STATUS_CHANGE' }),
+    );
 
     expect(() => assertMdfManualMoveAllowed('packet', 'baths_ready')).toThrow(ApiError);
     expect(() => assertMdfManualMoveAllowed('bath', 'orders_ready')).toThrow(ApiError);

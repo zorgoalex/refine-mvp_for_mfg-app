@@ -1940,7 +1940,8 @@ async function checkRequestedCutJobNumber(cutJobId: number): Promise<CutJobNumbe
 }
 
 async function suggestAvailableCutJobNumbers(cutJobId: number): Promise<number[]> {
-  const candidates = Array.from({ length: 30 }, (_item, index) => cutJobId + index + 1);
+  const candidates = Array.from({ length: 30 }, (_item, index) => cutJobId + index + 1)
+    .filter(Number.isSafeInteger);
   const checked = await Promise.all(candidates.map(async (candidate) => (
     await cutJobExists(candidate) ? null : candidate
   )));
@@ -1948,7 +1949,7 @@ async function suggestAvailableCutJobNumbers(cutJobId: number): Promise<number[]
 }
 
 async function cutJobExists(cutJobId: number): Promise<boolean> {
-  const jobs = await cutApi.list({ jobNumber: String(cutJobId), includeArchived: true });
+  const jobs = await cutApi.list({ jobNumber: String(cutJobId), includeArchived: false });
   return jobs.some((job) => normalizeDisplayNumberForCompare(job.displayNumber) === String(cutJobId));
 }
 

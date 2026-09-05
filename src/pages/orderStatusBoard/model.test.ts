@@ -22,6 +22,7 @@ import {
   cncManualMoveStorageKey,
   formatStatusBoardOrderNumber,
   isCncManualMoveAllowed,
+  resolveCncOrderTargetStatus,
   splitCncOrderCardsByManualColumn,
   sortCncRelationCards,
   type CncBoardManualMoveState,
@@ -483,6 +484,69 @@ describe('order status board model', () => {
     ).toEqual([2706, 2800]);
   });
 
+  it.each([
+    { legacy: false, allFinished: true },
+    { legacy: false, allFinished: false },
+    { legacy: true, allFinished: true },
+    { legacy: true, allFinished: false },
+  ])('planned-today changes visibility, not mixed-card placement ($legacy legacy, $allFinished finished)', ({ legacy, allFinished }) => {
+    const orderCards = [
+      card(2706, { orderName: '2706', plannedCompletionDate: '2026-09-05', orderStatusId: 7, productionStatusId: 6 }),
+      card(2707, { orderName: '2707', plannedCompletionDate: '2026-09-06', orderStatusId: allFinished ? 7 : 4, productionStatusId: allFinished ? 6 : 2 }),
+    ];
+    const columns: CncTelegramTodayColumn[] = [
+      {
+        key: 'parsed', title: 'Файлы на станке', total: 4,
+        packets: [
+          cncPacket('mixed', ['2706', '2707'], [2706, 2707]),
+          cncPacket('tomorrow', ['2707'], [2707]),
+        ],
+        baths: [],
+        bazisCutSets: [
+          cncBazisCutSet(901, [
+            { orderName: '2706', orderId: 2706, detailId: 7001 },
+            { orderName: '2707', orderId: 2707, detailId: 7002 },
+          ]),
+          cncBazisCutSet(902, [{ orderName: '2707', orderId: 2707, detailId: 7002 }]),
+        ],
+      },
+      {
+        key: 'baths', title: 'Карты ванн', total: 2,
+        packets: [],
+        baths: [cncBath('mixed', ['2706', '2707'], [2706, 2707]), cncBath('tomorrow', ['2707'], [2707])],
+      },
+    ];
+    const original = JSON.stringify({ columns, orderCards });
+    const activeColumns = applyMdfBoardHiddenCardRulesToColumns(
+      columns,
+      orderCards,
+      legacy ? { productionStatusIds: [6], orderStatusIds: [7] } : {
+        cardRules: [
+          { cardKind: 'packet', orderStatusIds: [7] },
+          { cardKind: 'bazisCutSet', orderStatusIds: [7] },
+          { cardKind: 'bath', orderStatusIds: [7] },
+        ],
+      },
+      new Set([6]),
+      new Set([7]),
+    );
+    const visible = filterCncTodayColumnsByPlannedOrderDate(activeColumns, orderCards, '2026-09-05');
+    const fileColumn = allFinished ? 'completed_laminated' : 'parsed';
+    const bathColumn = allFinished ? 'completed_baths' : 'baths';
+    expect(visible.find((column) => column.key === fileColumn)?.packets.map((packet) => packet.packetId)).toEqual(['mixed']);
+    expect(visible.find((column) => column.key === fileColumn)?.bazisCutSets?.map((set) => set.bazisCutSetId)).toEqual([901]);
+    expect(visible.find((column) => column.key === bathColumn)?.baths.map((bath) => bath.bathCardId)).toEqual(['mixed']);
+    for (const column of visible) {
+      const before = activeColumns.find((candidate) => candidate.key === column.key);
+      expect(column.packets).toEqual(before?.packets.filter((packet) => packet.packetId === 'mixed'));
+      expect(column.baths).toEqual(before?.baths.filter((bath) => bath.bathCardId === 'mixed'));
+      expect(column.bazisCutSets ?? []).toEqual((before?.bazisCutSets ?? []).filter((set) => set.bazisCutSetId === 901));
+    }
+    expect(buildCncOrderReadiness(visible, {}).get(2706)).toEqual(buildCncOrderReadiness(activeColumns, {}).get(2706));
+    expect(filterCncOrderCardsByPlannedOrderDate(orderCards, '2026-09-05').map((order) => order.orderId)).toEqual([2706]);
+    expect(JSON.stringify({ columns, orderCards })).toBe(original);
+  });
+
   it('keeps only bath cards with order numbers present in machine file cards', () => {
     const columns = [
       {
@@ -578,6 +642,39 @@ describe('order status board model', () => {
       'baths_ready',
       'baths_laminated',
     ]);
+  });
+
+  it('resolves order-column moves to one canonical active order status', () => {
+    const statuses = [
+      { id: 5, name: 'В производстве' },
+      { id: 7, name: 'Готов к выдаче' },
+      { id: 8, name: 'Выдан' },
+    ];
+
+    expect(resolveCncOrderTargetStatus(statuses, 'orders')).toEqual(statuses[0]);
+    expect(resolveCncOrderTargetStatus(statuses, 'orders_ready')).toEqual(statuses[1]);
+    expect(resolveCncOrderTargetStatus(statuses, 'orders_issued')).toEqual(statuses[2]);
+    expect(resolveCncOrderTargetStatus(statuses, 'parsed')).toBeNull();
+    expect(resolveCncOrderTargetStatus([...statuses, { id: 9, name: 'Выдан' }], 'orders_issued')).toBeNull();
+  });
+
+  it('keeps a lifecycle-terminal machine card terminal despite a stale manual move', () => {
+    const terminalPacket = cncPacket('packet-issued', ['2706'], [2706]);
+    const moved = applyCncManualMovesToColumns([
+      {
+        key: 'completed_laminated',
+        title: 'Распиленные файлы',
+        total: 1,
+        packets: [terminalPacket],
+        baths: [],
+        bazisCutSets: [],
+      },
+    ], {
+      [cncManualMoveStorageKey('packet', terminalPacket.packetId)]: 'parsed',
+    });
+
+    expect(moved.find((column) => column.key === 'completed_laminated')?.packets).toEqual([terminalPacket]);
+    expect(moved.find((column) => column.key === 'parsed')).toBeUndefined();
   });
 
   it('applies MDF manual moves to packet, bath, and Basis cut set display columns', () => {
@@ -898,9 +995,9 @@ describe('order status board model', () => {
       },
     );
 
-    expect(split.orders).toEqual([]);
+    expect(split.orders.map(({ card: item }) => item.orderId)).toEqual([3004]);
     expect(split.orders_ready.map(({ card: item }) => item.orderId)).toEqual([3002, 3003]);
-    expect(split.orders_issued.map(({ card: item }) => item.orderId)).toEqual([3001, 3004]);
+    expect(split.orders_issued.map(({ card: item }) => item.orderId)).toEqual([3001]);
   });
 
   it('sorts MDF order cards by order number by default and supports selected direction', () => {
@@ -1218,6 +1315,7 @@ describe('order status board model', () => {
         packets: [
           cncPacket('packet-terminal', ['2700', '2701'], [2700, 2701]),
           cncPacket('packet-mixed', ['2700', '2702'], [2700, 2702]),
+          cncPacket('packet-unlinked', ['2700', 'unlinked'], [2700, null]),
           cncPacket('packet-missing-order', ['9999'], [9999]),
         ],
         baths: [],
@@ -1229,6 +1327,10 @@ describe('order status board model', () => {
           cncBazisCutSet(902, [
             { orderName: '2702', orderId: 2702, detailId: 7003 },
           ]),
+          cncBazisCutSet(903, [
+            { orderName: '2700', orderId: 2700, detailId: 7004 },
+            { orderName: 'unlinked', orderId: null, detailId: null },
+          ]),
         ],
       },
       {
@@ -1239,6 +1341,7 @@ describe('order status board model', () => {
         baths: [
           cncBath('bath-terminal', ['2700', '2701'], [2700, 2701]),
           cncBath('bath-mixed', ['2700', '2702'], [2700, 2702]),
+          cncBath('bath-unlinked', ['2700', 'unlinked'], [2700, null]),
         ],
         bazisCutSets: [],
       },
@@ -1259,15 +1362,53 @@ describe('order status board model', () => {
 
     expect(moved.find((column) => column.key === 'parsed')?.packets.map((packet) => packet.packetId)).toEqual([
       'packet-mixed',
+      'packet-unlinked',
       'packet-missing-order',
     ]);
-    expect(moved.find((column) => column.key === 'parsed')?.bazisCutSets?.map((set) => set.bazisCutSetId)).toEqual([902]);
+    expect(moved.find((column) => column.key === 'parsed')?.bazisCutSets?.map((set) => set.bazisCutSetId)).toEqual([902, 903]);
     expect(moved.find((column) => column.key === 'completed_laminated')?.packets.map((packet) => packet.packetId)).toEqual(['packet-terminal']);
     expect(moved.find((column) => column.key === 'completed_laminated')?.bazisCutSets?.map((set) => set.bazisCutSetId)).toEqual([901]);
     expect(moved.find((column) => column.key === 'completed_laminated')?.title).toBe('Распиленные файлы');
-    expect(moved.find((column) => column.key === 'baths')?.baths.map((bath) => bath.bathCardId)).toEqual(['bath-mixed']);
-    expect(moved.find((column) => column.key === 'baths_laminated')?.baths.map((bath) => bath.bathCardId)).toEqual(['bath-terminal']);
-    expect(moved.find((column) => column.key === 'baths_laminated')?.title).toBe('Завершённые ванны');
+    expect(moved.find((column) => column.key === 'baths')?.baths.map((bath) => bath.bathCardId)).toEqual([
+      'bath-mixed',
+      'bath-unlinked',
+    ]);
+    expect(moved.find((column) => column.key === 'completed_baths')?.baths.map((bath) => bath.bathCardId)).toEqual(['bath-terminal']);
+    expect(moved.find((column) => column.key === 'completed_baths')?.title).toBe('Завершённые ванны');
+  });
+
+  it('moves legacy-config cards to terminal columns when every linked order is hidden by production status', () => {
+    const columns = [
+      {
+        key: 'parsed',
+        title: 'Файлы на станке',
+        total: 1,
+        packets: [cncPacket('packet-issued', ['2700'], [2700])],
+        baths: [],
+        bazisCutSets: [],
+      },
+      {
+        key: 'baths',
+        title: 'Карты ванн',
+        total: 1,
+        packets: [],
+        baths: [cncBath('bath-issued', ['2700'], [2700])],
+        bazisCutSets: [],
+      },
+    ] as CncTelegramTodayColumn[];
+    const cards = [card(2700, { productionStatusId: 11, productionStatusName: 'Выдан' })];
+
+    const moved = applyMdfBoardHiddenCardRulesToColumns(
+      columns,
+      cards,
+      { productionStatusIds: [11] },
+      new Set([11]),
+    );
+
+    expect(moved.find((column) => column.key === 'completed_laminated')?.packets.map((packet) => packet.packetId))
+      .toEqual(['packet-issued']);
+    expect(moved.find((column) => column.key === 'completed_baths')?.baths.map((bath) => bath.bathCardId))
+      .toEqual(['bath-issued']);
   });
 
   it('reports the Basis cut set location after standard-board hidden-card rules', () => {
@@ -1485,7 +1626,7 @@ function cncPacket(
 function cncBath(
   bathCardId: string,
   orderNames: string[],
-  orderIds: number[] = [],
+  orderIds: Array<number | null> = [],
 ) {
   return {
     bathCardId,

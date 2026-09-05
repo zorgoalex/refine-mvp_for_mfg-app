@@ -1,4 +1,5 @@
 import type { QueryResultRow } from 'pg';
+import { ApiError } from '../../../common/errors/api-error';
 import type { TransactionClient } from '../../../database/database.types';
 import { VACUUM_CUT_NUMBER_PREFIX, normalizeCutJobDisplayNumber } from '../application/cut-numbering';
 
@@ -25,16 +26,19 @@ export async function allocateCutJobSourceDisplayNumber(
   const result = await tx.query<NextDisplayNumberRow>(
     kind === 'vacuum'
       ? `
-        SELECT COALESCE(MAX(substring(NULLIF(btrim(source_display_number), '') FROM 3)::integer), 0) + 1 AS next_no
+        SELECT COALESCE(MAX(substring(NULLIF(btrim(source_display_number), '') FROM 3)::numeric), 0) + 1 AS next_no
         FROM cut_job
         WHERE NULLIF(btrim(source_display_number), '') ~ '^В-[0-9]+$'
         `
       : `
-        SELECT COALESCE(MAX(NULLIF(btrim(source_display_number), '')::integer), 0) + 1 AS next_no
+        SELECT COALESCE(MAX(NULLIF(btrim(source_display_number), '')::numeric), 0) + 1 AS next_no
         FROM cut_job
         WHERE NULLIF(btrim(source_display_number), '') ~ '^[0-9]+$'
         `,
   );
   const next = Number(result.rows[0]?.next_no ?? 1);
-  return formatCutJobSourceDisplayNumber(kind, Number.isFinite(next) && next > 0 ? next : 1);
+  if (!Number.isSafeInteger(next) || next <= 0) {
+    throw new ApiError(409, 'CUT_JOB_NUMBER_EXHAUSTED', 'Автоматическая нумерация раскроев достигла предела');
+  }
+  return formatCutJobSourceDisplayNumber(kind, next);
 }

@@ -16,6 +16,7 @@ import type {
 } from '../types/importTypes';
 import { FIELD_CONFIGS, FIELD_KEYWORDS, IMPORT_DEFAULTS } from '../types/importTypes';
 import { calculateOrderTotalArea } from '../../../../../utils/orderArea';
+import { detectOrderExport, extractImportRows } from '../orderExportDetection';
 
 export interface UnresolvedReference {
   originalValue: string;
@@ -278,6 +279,14 @@ export const useImportValidation = (): UseImportValidationReturn => {
     range: SelectionRange,
     hasHeaders: boolean
   ): FieldMapping => {
+    const exported = detectOrderExport(sheet);
+    if (exported && hasHeaders && Math.min(range.startRow, range.endRow) === exported.range.startRow) {
+      const minCol = Math.min(range.startCol, range.endCol);
+      const maxCol = Math.max(range.startCol, range.endCol);
+      return Object.fromEntries(Object.entries(exported.mapping).map(([field, column]) => [
+        field, column && sheet.headers.indexOf(column) >= minCol && sheet.headers.indexOf(column) <= maxCol ? column : null,
+      ])) as unknown as FieldMapping;
+    }
     const mapping = emptyMapping();
     const { minRow, maxRow, minCol, maxCol } = normalizeRange(range);
     const dataStartRow = hasHeaders ? minRow + 1 : minRow;
@@ -415,47 +424,7 @@ export const useImportValidation = (): UseImportValidationReturn => {
     setIsLoading(true);
 
     try {
-      const allRows: ImportRow[] = [];
-
-      for (const range of ranges) {
-        const { minRow, maxRow, minCol, maxCol } = normalizeRange(range);
-        const dataStartRow = hasHeaders ? minRow + 1 : minRow;
-
-        // Build column index map from letters
-        const colMap: Record<string, number> = {};
-        for (let c = minCol; c <= maxCol; c++) {
-          colMap[sheet.headers[c]] = c;
-        }
-
-        for (let r = dataStartRow; r <= maxRow; r++) {
-          const row = sheet.data[r];
-          if (!row) continue;
-
-          const getVal = (colLetter: string | null): unknown => {
-            if (!colLetter) return null;
-            const colIdx = colMap[colLetter];
-            return colIdx !== undefined ? row[colIdx] : null;
-          };
-
-          const importRow: ImportRow = {
-            sourceRowIndex: r,
-            height: getVal(mapping.height) as number | null,
-            width: getVal(mapping.width) as number | null,
-            quantity: getVal(mapping.quantity) as number | null,
-            edgeTypeName: getVal(mapping.edge_type) as string | null,
-            filmName: getVal(mapping.film) as string | null,
-            materialName: getVal(mapping.material) as string | null,
-            millingTypeName: getVal(mapping.milling_type) as string | null,
-            note: getVal(mapping.note) as string | null,
-            detailName: getVal(mapping.detail_name) as string | null,
-          };
-
-          // Skip empty rows
-          if (!importRow.height && !importRow.width && !importRow.quantity) continue;
-
-          allRows.push(importRow);
-        }
-      }
+      const allRows = extractImportRows(sheet, ranges, mapping, hasHeaders);
 
       // Validate and resolve references
       const validated: ValidatedRow[] = allRows.map(row => {

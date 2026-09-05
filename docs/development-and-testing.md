@@ -34,6 +34,20 @@ npm run dev:full
 Полный актуальный список находится в `package.json` и
 `backend/package.json`.
 
+## Git hooks
+
+`npm install` и `npm ci` автоматически подключают hooks из `.githooks`.
+Для уже установленного проекта их можно подключить вручную:
+
+```bash
+npm run hooks:install
+```
+
+Перед каждым commit запускается `npm run typecheck:ratchet`. Проверка запрещает
+новые TypeScript diagnostics относительно committed baseline; известный долг
+может только уменьшаться. Перед push отдельно запускаются business-reference
+contracts.
+
 ## Базовые проверки
 
 Frontend/root:

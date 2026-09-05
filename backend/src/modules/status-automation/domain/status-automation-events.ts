@@ -86,7 +86,7 @@ export const STATUS_AUTOMATION_EVENTS: ReadonlyArray<StatusAutomationEventDescri
     title: 'Изменился статус заказа',
     group: 'statuses',
     description: 'Когда заказу назначен другой обычный статус.',
-    allowedConditions: BASE_CONDITIONS,
+    allowedConditions: [...BASE_CONDITIONS, 'previousOrderStatusIn'],
     allowedActions: ORDER_STATUS_CHANGED_ACTIONS,
   },
   {

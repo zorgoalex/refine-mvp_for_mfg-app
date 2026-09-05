@@ -9,7 +9,7 @@ const require = createRequire(import.meta.url);
 const { installGitHooks, isCiEnvironment } = require('./install-git-hooks.js');
 
 describe('installGitHooks', () => {
-  it('configures repository pre-push hooks outside CI', () => {
+  it('configures repository hooks outside CI', () => {
     const run = vi.fn()
       .mockReturnValueOnce({ status: 0, stdout: 'true\n' })
       .mockReturnValueOnce({ status: 0, stdout: '' });
@@ -51,15 +51,22 @@ describe('installGitHooks', () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
-  it('preserves Git configuration when hook files are unavailable', () => {
-    const run = vi.fn().mockReturnValue({ status: 0, stdout: 'true\n' });
+  it.each(['.githooks/pre-commit', '.githooks/pre-push'])(
+    'preserves Git configuration when %s is unavailable',
+    (missingHook) => {
+      const run = vi.fn().mockReturnValue({ status: 0, stdout: 'true\n' });
 
-    expect(installGitHooks({ env: {}, run, exists: () => false })).toEqual({
-      installed: false,
-      reason: 'hooks-not-found',
-    });
-    expect(run).toHaveBeenCalledTimes(1);
-  });
+      expect(installGitHooks({
+        env: {},
+        run,
+        exists: (path: string) => path !== missingHook,
+      })).toEqual({
+        installed: false,
+        reason: 'hooks-not-found',
+      });
+      expect(run).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('reports a failed Git configuration update', () => {
     const run = vi.fn()
@@ -67,6 +74,32 @@ describe('installGitHooks', () => {
       .mockReturnValueOnce({ status: 1, stdout: '' });
 
     expect(() => installGitHooks({ env: {}, run })).toThrow('Failed to configure core.hooksPath');
+  });
+});
+
+describe('pre-commit hook', () => {
+  it('falls back to npm when RTK guard is unavailable', () => {
+    const sandbox = mkdtempSync(resolve(tmpdir(), 'erp-pre-commit-'));
+    const npmPath = resolve(sandbox, 'npm');
+    const markerPath = resolve(sandbox, 'npm-args');
+    writeFileSync(npmPath, `#!/bin/sh\nprintf '%s' "$*" > "${markerPath}"\n`);
+    chmodSync(npmPath, 0o755);
+
+    try {
+      const result = spawnSync('/bin/sh', [resolve('.githooks/pre-commit')], {
+        env: {
+          PATH: sandbox,
+          HOME: sandbox,
+          RTK_HEAVY_GUARD: resolve(sandbox, 'missing-guard'),
+        },
+        encoding: 'utf8',
+      });
+
+      expect(result.status).toBe(0);
+      expect(readFileSync(markerPath, 'utf8')).toBe('run typecheck:ratchet');
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
   });
 });
 

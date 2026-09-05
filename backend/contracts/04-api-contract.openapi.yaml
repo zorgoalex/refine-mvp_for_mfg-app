@@ -11530,6 +11530,41 @@ paths:
       summary: Prepare an explicit candidate selection
       security: [{ bearerAuth: [] }]
       x-permission: cut.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [candidateIds]
+              properties:
+                candidateIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  uniqueItems: true
+                  items: { type: string, format: uuid }
+                requestedCutJobIds:
+                  type: object
+                  description: Optional candidate UUID to display-number assignments. Keys must belong to candidateIds; values must be distinct. Omitted candidates use automatic numbering. Numbers are frozen on prepare and rechecked at completion; deleted jobs do not reserve their numbers.
+                  additionalProperties:
+                    type: integer
+                    format: int64
+                    minimum: 1
+                    maximum: 9007199254740991
+                replaceDraft:
+                  type: object
+                  additionalProperties: false
+                  required: [importRequestId, confirmationId]
+                  description: Replace this unconfirmed draft atomically. Same requester, scan and repeat lineage required; confirmed or stale drafts return 409.
+                  properties:
+                    importRequestId: { type: string, format: uuid }
+                    confirmationId: { type: string, format: uuid }
+                repeatOfImportRequestId:
+                  type: string
+                  format: uuid
+                  nullable: true
       responses:
         '201': { description: Selection prepared for confirmation }
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -11558,6 +11593,41 @@ paths:
       summary: Prepare an intentional repeat of a terminal import
       security: [{ bearerAuth: [] }]
       x-permission: cut.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [candidateIds]
+              properties:
+                candidateIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  uniqueItems: true
+                  items: { type: string, format: uuid }
+                requestedCutJobIds:
+                  type: object
+                  description: Optional candidate UUID to display-number assignments. Keys must belong to candidateIds; values must be distinct. Omitted candidates use automatic numbering. Numbers are frozen on prepare and rechecked at completion; deleted jobs do not reserve their numbers.
+                  additionalProperties:
+                    type: integer
+                    format: int64
+                    minimum: 1
+                    maximum: 9007199254740991
+                replaceDraft:
+                  type: object
+                  additionalProperties: false
+                  required: [importRequestId, confirmationId]
+                  description: Replace this unconfirmed draft atomically. Same requester, scan and repeat lineage required; confirmed or stale drafts return 409.
+                  properties:
+                    importRequestId: { type: string, format: uuid }
+                    confirmationId: { type: string, format: uuid }
+                repeatOfImportRequestId:
+                  type: string
+                  format: uuid
+                  nullable: true
       responses:
         '201': { description: Repeat prepared for confirmation }
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -20660,11 +20730,16 @@ components:
             - change_order_status
             - change_production_status
             - change_details_production_status
+            - map_order_status_to_details_production_status
+            - map_production_status_to_order_status
         targetStatusId:
           type: integer
           minimum: 1
+          nullable: true
         conditions:
           $ref: '#/components/schemas/StatusAutomationConditionsDto'
+        actionConfig:
+          $ref: '#/components/schemas/StatusAutomationActionConfigDto'
         priority:
           type: integer
         isEnabled:
@@ -20681,6 +20756,11 @@ components:
             type: integer
             minimum: 1
         currentOrderStatusNotIn:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+        previousOrderStatusIn:
           type: array
           items:
             type: integer
@@ -20764,6 +20844,7 @@ components:
             enum:
               - currentOrderStatusIn
               - currentOrderStatusNotIn
+              - previousOrderStatusIn
               - currentPaymentStatusIn
               - currentPaymentStatusNotIn
               - currentProductionStatusIn
@@ -20779,6 +20860,40 @@ components:
               - change_order_status
               - change_production_status
               - change_details_production_status
+              - map_order_status_to_details_production_status
+              - map_production_status_to_order_status
+
+    StatusAutomationActionConfigDto:
+      type: object
+      properties:
+        detailTransitionMode:
+          type: string
+          enum:
+            - set_exact
+            - advance_only
+        statusMapping:
+          type: object
+          required:
+            - entries
+          properties:
+            entries:
+              type: array
+              minItems: 1
+              items:
+                type: object
+                required:
+                  - sourceStatusIds
+                  - targetStatusId
+                properties:
+                  sourceStatusIds:
+                    type: array
+                    minItems: 1
+                    items:
+                      type: integer
+                      minimum: 1
+                  targetStatusId:
+                    type: integer
+                    minimum: 1
 
     StatusAutomationOrderRefreshSummary:
       type: object
@@ -20921,11 +21036,16 @@ components:
             - change_order_status
             - change_production_status
             - change_details_production_status
+            - map_order_status_to_details_production_status
+            - map_production_status_to_order_status
         targetStatusId:
           type: integer
           minimum: 1
+          nullable: true
         conditions:
           $ref: '#/components/schemas/StatusAutomationConditionsDto'
+        actionConfig:
+          $ref: '#/components/schemas/StatusAutomationActionConfigDto'
         priority:
           type: integer
           default: 100
@@ -20963,11 +21083,16 @@ components:
             - change_order_status
             - change_production_status
             - change_details_production_status
+            - map_order_status_to_details_production_status
+            - map_production_status_to_order_status
         targetStatusId:
           type: integer
           minimum: 1
+          nullable: true
         conditions:
           $ref: '#/components/schemas/StatusAutomationConditionsDto'
+        actionConfig:
+          $ref: '#/components/schemas/StatusAutomationActionConfigDto'
         priority:
           type: integer
         isEnabled:

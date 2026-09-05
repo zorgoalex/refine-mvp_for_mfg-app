@@ -12,6 +12,21 @@ import { describe, expect, it } from 'vitest';
 const src = readFileSync(fileURLToPath(new URL('./CutPage.tsx', import.meta.url)), 'utf8');
 
 describe('CutPage cut-fixes guard', () => {
+  it('declares one creation-date column and unique job-list column keys', () => {
+    const start = src.indexOf('const jobColumns:');
+    const end = src.indexOf('const eligibleColumns:', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const columns = src.slice(start, end);
+    expect(columns.match(/dataIndex:\s*'createdAt'/g)).toHaveLength(1);
+    expect(columns.match(/title:\s*'Дата'/g)).toHaveLength(1);
+    const keys = [...columns.matchAll(/\bkey:\s*'([^']+)'/g)].map((match) => match[1]);
+    expect(keys.length).toBeGreaterThan(0);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(columns).toContain('cutJobCreatedAtSortValue(a.createdAt) - cutJobCreatedAtSortValue(b.createdAt)');
+    expect(columns).toContain('formatCutJobCreatedDateTime(value)');
+  });
+
   it('move guard uses the job sheet override as the effective piece material', () => {
     // Without the override fallback every cross-sheet move on override jobs is
     // vetoed with «другой материал листа» (group carries the override id while

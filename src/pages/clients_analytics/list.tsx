@@ -511,7 +511,7 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
                 <Form.Item label="Сумма заказов">
                   <div className="range-group range-group-money">
                     <Form.Item name="total_amount_sum_min" noStyle>
-                      <InputNumber
+                      <InputNumber<number>
                         min={0}
                         placeholder="Мин"
                         size="small"
@@ -520,7 +520,7 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
                       />
                     </Form.Item>
                     <Form.Item name="total_amount_sum_max" noStyle>
-                      <InputNumber
+                      <InputNumber<number>
                         min={0}
                         placeholder="Макс"
                         size="small"
@@ -535,7 +535,7 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
                 <Form.Item label="Фин. сумма заказов">
                   <div className="range-group range-group-money">
                     <Form.Item name="final_amount_sum_min" noStyle>
-                      <InputNumber
+                      <InputNumber<number>
                         min={0}
                         placeholder="Мин"
                         size="small"
@@ -544,7 +544,7 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
                       />
                     </Form.Item>
                     <Form.Item name="final_amount_sum_max" noStyle>
-                      <InputNumber
+                      <InputNumber<number>
                         min={0}
                         placeholder="Макс"
                         size="small"
@@ -559,7 +559,7 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
                 <Form.Item label="Оплачено">
                   <div className="range-group range-group-money">
                     <Form.Item name="paid_amount_sum_min" noStyle>
-                      <InputNumber
+                      <InputNumber<number>
                         min={0}
                         placeholder="Мин"
                         size="small"
@@ -568,7 +568,7 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
                       />
                     </Form.Item>
                     <Form.Item name="paid_amount_sum_max" noStyle>
-                      <InputNumber
+                      <InputNumber<number>
                         min={0}
                         placeholder="Макс"
                         size="small"
@@ -605,7 +605,7 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
                 <Form.Item label="Скидки">
                   <div className="range-group range-group-money">
                     <Form.Item name="discount_sum_min" noStyle>
-                      <InputNumber
+                      <InputNumber<number>
                         min={0}
                         placeholder="Мин"
                         size="small"
@@ -614,7 +614,7 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
                       />
                     </Form.Item>
                     <Form.Item name="discount_sum_max" noStyle>
-                      <InputNumber
+                      <InputNumber<number>
                         min={0}
                         placeholder="Макс"
                         size="small"
@@ -629,7 +629,7 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
                 <Form.Item label="Наценки">
                   <div className="range-group range-group-money">
                     <Form.Item name="surcharge_sum_min" noStyle>
-                      <InputNumber
+                      <InputNumber<number>
                         min={0}
                         placeholder="Мин"
                         size="small"
@@ -638,7 +638,7 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
                       />
                     </Form.Item>
                     <Form.Item name="surcharge_sum_max" noStyle>
-                      <InputNumber
+                      <InputNumber<number>
                         min={0}
                         placeholder="Макс"
                         size="small"

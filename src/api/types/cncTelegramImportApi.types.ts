@@ -116,6 +116,8 @@ export interface CncTelegramImportMessagesResponse {
 
 export interface CncTelegramImportPrepareRequest {
   candidateIds: string[];
+  requestedCutJobIds?: Record<string, number>;
+  replaceDraft?: { importRequestId: string; confirmationId: string };
   repeatOfImportRequestId?: string | null;
 }
 
@@ -127,6 +129,7 @@ export interface CncTelegramImportPrepareResponse {
   duplicateMatchVersion: string;
   duplicateCount: number;
   candidates: CncTelegramImportCandidate[];
+  items?: CncTelegramImportItem[];
   refreshedMatches?: Record<string, CncTelegramImportMatch[]>;
   status: CncTelegramImportRequestStatus;
 }
@@ -142,6 +145,7 @@ export interface CncTelegramImportConfirmRequest {
 export interface CncTelegramImportItem {
   importItemId: string;
   candidateId: string;
+  requestedCutJobId?: number | null;
   svgFileName?: string;
   status: CncTelegramImportItemStatus;
   error?: string | null;
@@ -162,5 +166,6 @@ export interface CncTelegramImportRequest {
   importedCount: number;
   failedCount: number;
   items: CncTelegramImportItem[];
+  candidates?: CncTelegramImportCandidate[];
   error: string | null;
 }

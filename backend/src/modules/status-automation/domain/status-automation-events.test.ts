@@ -73,7 +73,11 @@ describe('status automation event catalog', () => {
     for (const descriptor of STATUS_AUTOMATION_EVENTS) {
       expect(descriptor.allowedConditions).toEqual(expect.arrayContaining(baseConditions));
       expect(descriptor.allowedConditions).toHaveLength(
-        baseConditions.length + (descriptor.eventType === 'payment.created' ? 1 : 0),
+        baseConditions.length + (
+          descriptor.eventType === 'payment.created' || descriptor.eventType === 'order.status_changed'
+            ? 1
+            : 0
+        ),
       );
       expect(descriptor.allowedActions).toEqual(expect.arrayContaining(actionTypes));
     }

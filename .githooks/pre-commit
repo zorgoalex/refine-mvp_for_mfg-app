@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+echo "Running TypeScript ratchet before commit..."
+
+guard=${RTK_HEAVY_GUARD:-${HOME:-}/.codex/rtk-heavy-guard}
+if command -v rtk >/dev/null 2>&1 && [ -n "$guard" ] && [ -x "$guard" ]; then
+  exec rtk nice -n 10 "$guard" -- npm run typecheck:ratchet
+fi
+
+exec npm run typecheck:ratchet

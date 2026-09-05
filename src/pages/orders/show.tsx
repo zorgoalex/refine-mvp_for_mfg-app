@@ -11,6 +11,7 @@ import { useTabStore } from "../../stores/tabStore";
 import { resolveOrderTabLabel } from "../../utils/tabLabels";
 import { resolveDetailMaterialName, resolveHeaderMaterialName } from "../../utils/materialDisplayName";
 import { formatNumber } from "../../utils/numberFormat";
+import orderPrintStyles from "./components/print/OrderPrintView.css?raw";
 import { downloadOrderExcel } from "../../utils/excel/generateOrderExcel";
 import type { OrderExcelDetailRow } from "../../utils/excel/orderExcelBuilder";
 import { generateOrderFileName } from "../../utils/excel/fileNameGenerator";
@@ -2179,6 +2180,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const handlePrint = useReactToPrint({
     contentRef: printRef,
     documentTitle: `Заказ-${record?.order_id}`,
+    // Other routes have global print rules (e.g. the MDF board hides body children).
+    // Copy only this form's stylesheet into the isolated print document.
+    ignoreGlobalStyles: true,
+    pageStyle: orderPrintStyles,
   });
 
   const buildOrderExportDetailRows = (): OrderExcelDetailRow[] => {

@@ -43,6 +43,17 @@ export function evaluateRuleConditions(
   }
 
   if (
+    conditions.previousOrderStatusIn !== undefined &&
+    conditions.previousOrderStatusIn.length > 0 &&
+    (
+      event.orderStatusIdBefore === undefined ||
+      !conditions.previousOrderStatusIn.includes(event.orderStatusIdBefore)
+    )
+  ) {
+    return failed('previous_order_status_not_in_list');
+  }
+
+  if (
     conditions.currentPaymentStatusIn !== undefined &&
     conditions.currentPaymentStatusIn.length > 0 &&
     !conditions.currentPaymentStatusIn.includes(state.paymentStatusId)

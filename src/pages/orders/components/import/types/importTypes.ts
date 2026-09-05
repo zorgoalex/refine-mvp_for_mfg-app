@@ -15,6 +15,7 @@ export interface ParsedSheet {
   headers: string[];
   rowCount: number;
   colCount: number;
+  merges?: Array<{ startRow: number; endRow: number; startCol: number; endCol: number }>;
 }
 
 // ============================================================================
