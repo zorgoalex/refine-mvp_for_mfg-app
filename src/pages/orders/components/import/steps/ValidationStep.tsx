@@ -8,6 +8,7 @@ import type { ValidatedRow, ReferenceData } from '../types/importTypes';
 import type { ImportStats, UnresolvedReferences } from '../hooks/useImportValidation';
 
 const { Text } = Typography;
+type ValidationTableRow = ValidatedRow & { key: number };
 
 const NumberEditor: React.FC<{ value: number | null | undefined; onChange: (val: number | null) => void; min?: number }> = ({
   value,
@@ -68,6 +69,7 @@ interface ValidationStepProps {
   onRemoveRow: (index: number) => void;
   onBatchReplace: (field: 'edge_type' | 'film' | 'material' | 'milling_type', originalValue: string, newId: number) => void;
   onMaterialUsed?: (materialId: number) => void;
+  pageSize?: number | false;
 }
 
 export const ValidationStep: React.FC<ValidationStepProps> = ({
@@ -79,6 +81,7 @@ export const ValidationStep: React.FC<ValidationStepProps> = ({
   onRemoveRow,
   onBatchReplace,
   onMaterialUsed,
+  pageSize = false,
 }) => {
   const columns = useMemo(() => [
     {
@@ -102,8 +105,8 @@ export const ValidationStep: React.FC<ValidationStepProps> = ({
       dataIndex: 'height',
       key: 'height',
       width: 90,
-      render: (value: number | null, _: ValidatedRow, index: number) => (
-        <NumberEditor value={value} onChange={(val) => onUpdateRow(index, 'height', val)} min={1} />
+      render: (value: number | null, row: ValidationTableRow) => (
+        <NumberEditor value={value} onChange={(val) => onUpdateRow(row.key, 'height', val)} min={1} />
       ),
     },
     {
@@ -111,8 +114,8 @@ export const ValidationStep: React.FC<ValidationStepProps> = ({
       dataIndex: 'width',
       key: 'width',
       width: 90,
-      render: (value: number | null, _: ValidatedRow, index: number) => (
-        <NumberEditor value={value} onChange={(val) => onUpdateRow(index, 'width', val)} min={1} />
+      render: (value: number | null, row: ValidationTableRow) => (
+        <NumberEditor value={value} onChange={(val) => onUpdateRow(row.key, 'width', val)} min={1} />
       ),
     },
     {
@@ -120,8 +123,8 @@ export const ValidationStep: React.FC<ValidationStepProps> = ({
       dataIndex: 'quantity',
       key: 'quantity',
       width: 80,
-      render: (value: number | null, _: ValidatedRow, index: number) => (
-        <NumberEditor value={value} onChange={(val) => onUpdateRow(index, 'quantity', val)} min={1} />
+      render: (value: number | null, row: ValidationTableRow) => (
+        <NumberEditor value={value} onChange={(val) => onUpdateRow(row.key, 'quantity', val)} min={1} />
       ),
     },
     {
@@ -129,12 +132,12 @@ export const ValidationStep: React.FC<ValidationStepProps> = ({
       dataIndex: 'edge_type_id',
       key: 'edge_type_id',
       width: 140,
-      render: (value: number | null, row: ValidatedRow, index: number) => (
+      render: (value: number | null, row: ValidationTableRow) => (
         <div>
           <RefSelectEditor
             value={value}
             items={referenceData.edgeTypes}
-            onChange={(val) => onUpdateRow(index, 'edge_type_id', val)}
+            onChange={(val) => onUpdateRow(row.key, 'edge_type_id', val)}
           />
           {row.edgeTypeName && !value && (
             <Text type="secondary" style={{ fontSize: 10 }}>{row.edgeTypeName}</Text>
@@ -147,12 +150,12 @@ export const ValidationStep: React.FC<ValidationStepProps> = ({
       dataIndex: 'film_id',
       key: 'film_id',
       width: 140,
-      render: (value: number | null, row: ValidatedRow, index: number) => (
+      render: (value: number | null, row: ValidationTableRow) => (
         <div>
           <RefSelectEditor
             value={value}
             items={referenceData.films}
-            onChange={(val) => onUpdateRow(index, 'film_id', val)}
+            onChange={(val) => onUpdateRow(row.key, 'film_id', val)}
           />
           {row.filmName && !value && (
             <Text type="secondary" style={{ fontSize: 10 }}>{row.filmName}</Text>
@@ -165,13 +168,13 @@ export const ValidationStep: React.FC<ValidationStepProps> = ({
       dataIndex: 'sheet_material_type_id',
       key: 'sheet_material_type_id',
       width: 140,
-      render: (value: number | null, row: ValidatedRow, index: number) => (
+      render: (value: number | null, row: ValidationTableRow) => (
         <div>
           <RefSelectEditor
             value={value}
             items={referenceData.sheetMaterialTypes ?? []}
             onChange={(val) => {
-              onUpdateRow(index, 'sheet_material_type_id', val);
+              onUpdateRow(row.key, 'sheet_material_type_id', val);
               if (val) onMaterialUsed?.(val);
             }}
           />
@@ -186,12 +189,12 @@ export const ValidationStep: React.FC<ValidationStepProps> = ({
       dataIndex: 'milling_type_id',
       key: 'milling_type_id',
       width: 140,
-      render: (value: number | null, row: ValidatedRow, index: number) => (
+      render: (value: number | null, row: ValidationTableRow) => (
         <div>
           <RefSelectEditor
             value={value}
             items={referenceData.millingTypes}
-            onChange={(val) => onUpdateRow(index, 'milling_type_id', val)}
+            onChange={(val) => onUpdateRow(row.key, 'milling_type_id', val)}
           />
           {row.millingTypeName && !value && (
             <Text type="secondary" style={{ fontSize: 10 }}>{row.millingTypeName}</Text>
@@ -204,8 +207,8 @@ export const ValidationStep: React.FC<ValidationStepProps> = ({
       dataIndex: 'detailName',
       key: 'detailName',
       width: 150,
-      render: (value: string | null, _: ValidatedRow, index: number) => (
-        <TextEditor value={value} onChange={(val) => onUpdateRow(index, 'detailName', val)} />
+      render: (value: string | null, row: ValidationTableRow) => (
+        <TextEditor value={value} onChange={(val) => onUpdateRow(row.key, 'detailName', val)} />
       ),
     },
     {
@@ -213,8 +216,8 @@ export const ValidationStep: React.FC<ValidationStepProps> = ({
       dataIndex: 'note',
       key: 'note',
       width: 150,
-      render: (value: string | null, _: ValidatedRow, index: number) => (
-        <TextEditor value={value} onChange={(val) => onUpdateRow(index, 'note', val)} />
+      render: (value: string | null, row: ValidationTableRow) => (
+        <TextEditor value={value} onChange={(val) => onUpdateRow(row.key, 'note', val)} />
       ),
     },
     {
@@ -222,10 +225,10 @@ export const ValidationStep: React.FC<ValidationStepProps> = ({
       key: 'actions',
       width: 50,
       fixed: 'right' as const,
-      render: (_: unknown, __: ValidatedRow, index: number) => (
+      render: (_: unknown, row: ValidationTableRow) => (
         <Popconfirm
           title="Удалить строку?"
-          onConfirm={() => onRemoveRow(index)}
+          onConfirm={() => onRemoveRow(row.key)}
           okText="Да"
           cancelText="Нет"
         >
@@ -236,7 +239,7 @@ export const ValidationStep: React.FC<ValidationStepProps> = ({
   ], [referenceData, onUpdateRow, onRemoveRow, onMaterialUsed]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', ...(pageSize ? { overflow: 'auto', minHeight: 0 } : {}) }}>
       {/* Statistics cards - compact */}
       <Row gutter={8} style={{ marginBottom: 8 }}>
         <Col span={6}>
@@ -415,7 +418,7 @@ export const ValidationStep: React.FC<ValidationStepProps> = ({
         <Table
           columns={columns}
           dataSource={validatedRows.map((row, index) => ({ ...row, key: index }))}
-          pagination={false}
+          pagination={pageSize ? { pageSize, showSizeChanger: false, hideOnSinglePage: true } : false}
           size="small"
           scroll={{ x: 'max-content', y: 350 }}
           bordered

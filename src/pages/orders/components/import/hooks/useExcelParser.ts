@@ -37,8 +37,9 @@ const SUPPORTED_EXTENSIONS = ['.xlsx', '.xls', '.xlsm', '.xlsb'];
  */
 export const parseWorksheet = (ws: WorkSheet, utils: typeof import('xlsx').utils): ParsedSheet => {
   const range = utils.decode_range(ws['!ref'] || 'A1');
-  const rowCount = range.e.r - range.s.r + 1;
-  const colCount = range.e.c - range.s.c + 1;
+  // Keep actual Excel addresses, including leading empty rows/columns in !ref.
+  const rowCount = range.e.r + 1;
+  const colCount = range.e.c + 1;
 
   const headers: string[] = [];
   for (let c = 0; c < colCount; c++) {
@@ -46,9 +47,9 @@ export const parseWorksheet = (ws: WorkSheet, utils: typeof import('xlsx').utils
   }
 
   const data: CellValue[][] = [];
-  for (let r = range.s.r; r <= range.e.r; r++) {
+  for (let r = 0; r <= range.e.r; r++) {
     const row: CellValue[] = [];
-    for (let c = range.s.c; c <= range.e.c; c++) {
+    for (let c = 0; c <= range.e.c; c++) {
       const cellAddress = utils.encode_cell({ r, c });
       const cell = ws[cellAddress];
 
@@ -69,7 +70,11 @@ export const parseWorksheet = (ws: WorkSheet, utils: typeof import('xlsx').utils
     data.push(row);
   }
 
-  return { name: '', data, headers, rowCount, colCount };
+  return { name: '', data, headers, rowCount, colCount,
+    merges: (ws['!merges'] ?? []).map(({ s, e }) => ({
+      startRow: s.r, endRow: e.r, startCol: s.c, endCol: e.c,
+    })),
+  };
 };
 
 export const useExcelParser = (): UseExcelParserReturn => {

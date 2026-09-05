@@ -7,7 +7,8 @@ import { useList } from '../../../../query/orderLifecycleQueries';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 import { useExcelParser, useRangeSelection, useImportValidation } from './hooks';
 import { FileUploadStep, RangeSelectionStep, ValidationStep } from './steps';
-import type { ImportStep, FieldMapping, ImportableField, SelectionRange, ReferenceData, ValidatedRow } from './types/importTypes';
+import type { ImportStep, FieldMapping, ImportableField, SelectionRange, ReferenceData, ValidatedRow, ParsedSheet } from './types/importTypes';
+import { detectOrderExport } from './orderExportDetection';
 import type { WorkBook } from 'xlsx';
 import { IMPORT_DEFAULTS } from './types/importTypes';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
@@ -61,8 +62,11 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
   const [mapping, setMapping] = useState<FieldMapping>(() => readFieldMapping(restored?.mapping));
 
   const excelParser = useExcelParser();
-  const rangeSelection = useRangeSelection();
+  const rangeSelection = useRangeSelection(excelParser.sheetData?.rowCount, excelParser.sheetData?.colCount);
   const importValidation = useImportValidation();
+  const initializedSheetRef = useRef<ParsedSheet | null>(null);
+  const mappingEditedRef = useRef(restored?.open === true && Object.values(readFieldMapping(restored.mapping)).some(Boolean));
+  const detectedExport = useMemo(() => excelParser.sheetData ? detectOrderExport(excelParser.sheetData) : null, [excelParser.sheetData]);
 
   const addDetail = useOrderFormStore((state) => state.addDetail);
   const recalculateFinancials = useOrderFormStore((state) => state.recalculateFinancials);
@@ -229,6 +233,8 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
         rangeSelection.clearRanges();
         setMapping(emptyMapping());
         setHasHeaders(false);
+        initializedSheetRef.current = null;
+        mappingEditedRef.current = false;
       }
 
       setCurrentStep(prevStep);
@@ -236,6 +242,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
   }, [currentStepIndex, currentStep, importValidation, rangeSelection]);
 
   const handleMappingChange = useCallback((field: ImportableField, column: string | null) => {
+    mappingEditedRef.current = true;
     setMapping(prev => ({ ...prev, [field]: column }));
   }, []);
 
@@ -243,6 +250,9 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
   const handleSheetChange = useCallback((sheetName: string) => {
     rangeSelection.clearRanges();
     setMapping(emptyMapping());
+    setHasHeaders(false);
+    initializedSheetRef.current = null;
+    mappingEditedRef.current = false;
     lastAutoDetectRangeRef.current = null;
     excelParser.selectSheet(sheetName);
   }, [rangeSelection, excelParser]);
@@ -261,6 +271,19 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
   // Track last auto-detected range to avoid re-running
   const lastAutoDetectRangeRef = useRef<string | null>(null);
 
+  useEffect(() => {
+    const sheet = excelParser.sheetData;
+    if (currentStep !== 'select' || !sheet || initializedSheetRef.current === sheet) return;
+    initializedSheetRef.current = sheet;
+    // Restored or manually selected state wins over automatic defaults.
+    if (rangeSelection.ranges.length > 0 || Object.values(mapping).some(Boolean) || !detectedExport) return;
+    const { range } = detectedExport;
+    rangeSelection.addRange(range);
+    setMapping(detectedExport.mapping);
+    setHasHeaders(true);
+    lastAutoDetectRangeRef.current = `${range.startRow}-${range.endRow}-${range.startCol}-${range.endCol}-true`;
+  }, [currentStep, excelParser.sheetData, detectedExport, rangeSelection.addRange, rangeSelection.ranges, mapping]);
+
   // Auto-detect mapping when range is selected (only once per range)
   useEffect(() => {
     if (currentStep === 'select' && rangeSelection.ranges.length > 0 && excelParser.sheetData) {
@@ -269,7 +292,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
       const rangeKey = `${range.startRow}-${range.endRow}-${range.startCol}-${range.endCol}-${hasHeaders}`;
 
       // Only auto-detect if range changed
-      if (lastAutoDetectRangeRef.current !== rangeKey) {
+      if (!mappingEditedRef.current && lastAutoDetectRangeRef.current !== rangeKey) {
         lastAutoDetectRangeRef.current = rangeKey;
         const detected = importValidation.autoDetectMapping(
           excelParser.sheetData,
@@ -291,6 +314,8 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
     setCurrentStep('upload');
     setHasHeaders(false);
     setMapping(emptyMapping());
+    initializedSheetRef.current = null;
+    mappingEditedRef.current = false;
     releaseWorkspaceAttachment(workspaceKey, 'excel-file');
     releaseWorkspaceAttachment(workspaceKey, 'excel-workbook');
     deleteWorkspaceCheckpointAdapterState(workspaceKey, 'excel-import-wizard');
@@ -311,9 +336,15 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
         throw error;
       }
       releaseWorkspaceAttachment(workspaceKey, 'excel-workbook');
+      rangeSelection.clearRanges();
+      importValidation.reset();
+      setMapping(emptyMapping());
+      setHasHeaders(false);
+      initializedSheetRef.current = null;
+      mappingEditedRef.current = false;
       await excelParser.parseFile(file);
     });
-  }, [excelParser, workspaceKey]);
+  }, [excelParser, workspaceKey, rangeSelection.clearRanges, importValidation.reset]);
 
   const handleImport = useCallback(() => {
     const validRows = importValidation.getValidRows();
@@ -370,13 +401,13 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
         return !!excelParser.sheetData && !excelParser.isLoading;
       case 'select':
         // Need range selected AND required fields mapped
-        return rangeSelection.ranges.length > 0 && !!mapping.height && !!mapping.width && !!mapping.quantity;
+        return !rangeSelection.isSelecting && rangeSelection.ranges.length > 0 && !!mapping.height && !!mapping.width && !!mapping.quantity;
       case 'validation':
         return importValidation.stats.validRows > 0;
       default:
         return false;
     }
-  }, [currentStep, excelParser, rangeSelection.ranges, mapping, importValidation.stats]);
+  }, [currentStep, excelParser, rangeSelection.ranges, rangeSelection.isSelecting, mapping, importValidation.stats]);
 
   const renderStepContent = () => {
     switch (currentStep) {
@@ -389,7 +420,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
             isLoading={excelParser.isLoading}
             error={excelParser.error}
             onFileUpload={handleFileUpload}
-            onSheetSelect={excelParser.selectSheet}
+            onSheetSelect={handleSheetChange}
           />
         );
 
@@ -411,6 +442,8 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
             onStartSelection={rangeSelection.startSelection}
             onUpdateSelection={rangeSelection.updateSelection}
             onEndSelection={rangeSelection.endSelection}
+            onCancelSelection={rangeSelection.cancelSelection}
+            recognitionNotice={detectedExport ? `Распознан Excel-экспорт заказа: область деталей и колонки выбраны автоматически. ${detectedExport.materialName ? `Общий материал из шапки: ${detectedExport.materialName}. ` : ''}Названия деталей, материалы отдельных строк и флаг присадки не сохранены в этом формате; примечания переносятся без изменений.` : undefined}
             onRemoveRange={rangeSelection.removeRange}
             onClearRanges={rangeSelection.clearRanges}
             onSetActiveRange={rangeSelection.setActiveRange}
@@ -420,6 +453,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
       case 'validation':
         return (
           <ValidationStep
+            pageSize={25}
             validatedRows={importValidation.validatedRows}
             referenceData={importValidation.referenceData}
             stats={importValidation.stats}
@@ -441,16 +475,14 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
         title="Импорт деталей из Excel"
         open={open}
         onCancel={handleClose}
-        width={1200}
+        width="min(1200px, calc(100vw - 32px))"
         style={{ top: 20 }}
-        styles={{
-          body: {
-            minHeight: 500,
-            maxHeight: 'calc(90vh - 120px)',
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-          },
+        bodyStyle={{
+          height: 'min(700px, calc(100dvh - 180px))',
+          minHeight: 240,
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
         }}
         footer={
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -497,7 +529,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
           size="small"
         />
 
-        <div style={{ flex: 1, overflow: 'hidden' }}>
+        <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden' }}>
           {renderStepContent()}
         </div>
       </Modal>
