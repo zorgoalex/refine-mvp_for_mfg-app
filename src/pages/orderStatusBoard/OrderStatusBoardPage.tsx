@@ -1511,22 +1511,6 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     () => buildCncOrderStatusCards(cncOrderBoardColumns, cncOrderIds),
     [cncOrderBoardColumns, cncOrderIds],
   );
-  const cncPlannedDateColumns = useMemo(
-    () => !cncOriginalView && viewState.cncPlannedTodayOnly
-      ? filterCncTodayColumnsByPlannedOrderDate(
-          cncFilteredColumns,
-          cncOrderStatusCards,
-          cncPlannedTodayDate,
-        )
-      : cncFilteredColumns,
-    [
-      cncFilteredColumns,
-      cncOrderStatusCards,
-      cncPlannedTodayDate,
-      cncOriginalView,
-      viewState.cncPlannedTodayOnly,
-    ],
-  );
   const cncDisplayOrderStatusCards = useMemo(
     () => !cncOriginalView && viewState.cncPlannedTodayOnly
       ? filterCncOrderCardsByPlannedOrderDate(
@@ -1554,30 +1538,48 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   );
   const cncActiveColumns = useMemo(
     () => cncOriginalView
-      ? cncPlannedDateColumns
+      ? cncFilteredColumns
       : applyMdfBoardHiddenCardRulesToColumns(
-          cncPlannedDateColumns,
-          cncDisplayOrderStatusCards,
+          cncFilteredColumns,
+          cncOrderStatusCards,
           mdfBoardHiddenStatusesSetting,
           cncHiddenProductionStatusIds,
           cncHiddenOrderStatusIds,
         ),
     [
-      cncDisplayOrderStatusCards,
+      cncOrderStatusCards,
       cncHiddenOrderStatusIds,
       cncHiddenProductionStatusIds,
-      cncPlannedDateColumns,
+      cncFilteredColumns,
       mdfBoardHiddenStatusesSetting,
       cncOriginalView,
     ],
   );
+  // Planned date affects visibility only. Lifecycle placement and readiness keep
+  // every linked order, including non-today orders inside a mixed card.
+  const cncPlannedDateColumns = useMemo(
+    () => !cncOriginalView && viewState.cncPlannedTodayOnly
+      ? filterCncTodayColumnsByPlannedOrderDate(
+          cncActiveColumns,
+          cncOrderStatusCards,
+          cncPlannedTodayDate,
+        )
+      : cncActiveColumns,
+    [
+      cncActiveColumns,
+      cncOrderStatusCards,
+      cncPlannedTodayDate,
+      cncOriginalView,
+      viewState.cncPlannedTodayOnly,
+    ],
+  );
   const cncShownDataColumns = useMemo(
     () => cncOriginalView
-      ? cncActiveColumns
-      : cncActiveColumns.filter((column) =>
+      ? cncPlannedDateColumns
+      : cncPlannedDateColumns.filter((column) =>
           cncTerminalColumnsVisible || !isCncTerminalColumnKey(column.key),
         ),
-    [cncActiveColumns, cncOriginalView, cncTerminalColumnsVisible],
+    [cncPlannedDateColumns, cncOriginalView, cncTerminalColumnsVisible],
   );
   useEffect(() => {
     const kind = viewState.cncCardKind;
