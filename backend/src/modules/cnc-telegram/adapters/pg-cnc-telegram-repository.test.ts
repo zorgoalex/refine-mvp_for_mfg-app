@@ -946,7 +946,7 @@ describe('PgCncTelegramRepository', () => {
     });
   });
 
-  it('archives a completed machine file only when every detail of every linked order is packed or later', async () => {
+  it('archives a completed machine file by statuses of its own resolved details only', async () => {
     const database = {
       query: vi.fn(async (text: string) => {
         if (/latest_vacuum_results/i.test(text)) return { rows: [] };
@@ -1067,12 +1067,13 @@ describe('PgCncTelegramRepository', () => {
       ]);
     expect(database.query.mock.calls[0]?.[0]).toContain("= 'packed'");
     expect(database.query.mock.calls[0]?.[0]).toContain("= 'issued'");
-    expect(database.query.mock.calls[0]?.[0]).toContain('FROM order_details linked_detail');
-    expect(database.query.mock.calls[0]?.[0]).toContain('COUNT(linked_detail.detail_id) > 0');
+    expect(database.query.mock.calls[0]?.[0]).not.toContain('FROM order_details linked_detail');
     expect(database.query.mock.calls[0]?.[0]).toContain(
-      'linked_detail_status.sort_order >= packed_status.sort_order',
+      'detail_status.sort_order >= packed_status.sort_order',
     );
-    expect(database.query.mock.calls[0]?.[0]).toContain('linked_detail.delete_flag = false');
+    expect(database.query.mock.calls[0]?.[0]).toContain(
+      'COALESCE(matched_detail.detail_id, inferred_detail.detail_id) IS NOT NULL',
+    );
     expect(database.query.mock.calls[0]?.[0]).toContain('LEFT JOIN mdf_board_manual_moves packet_manual_move');
   });
 

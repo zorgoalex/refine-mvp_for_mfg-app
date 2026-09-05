@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-09-05",
+    title: "МДФ-работы: состав файлов станка",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Перемещение файла станка по производственным статусам теперь учитывает только детали самого файла; другие детали тех же заказов больше не блокируют карточку.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-09-05",
     title: "Excel: заполнение пустых строк заказа",
     services: ["ERP"],
     repositories: ["repo_erp"],

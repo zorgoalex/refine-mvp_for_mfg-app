@@ -3049,13 +3049,15 @@ function packetSelectSql(
           THEN detail_status.sort_order >= laminated_status.sort_order
         ELSE false
       END AS laminated_or_later,
-      linked_order.order_id IS NOT NULL
-        AND linked_order.delete_flag = false
-        AND COALESCE(linked_order_status.all_details_packed_or_later, false)
+      COALESCE(matched_detail.detail_id, inferred_detail.detail_id) IS NOT NULL
+        AND detail_status.sort_order IS NOT NULL
+        AND packed_status.sort_order IS NOT NULL
+        AND detail_status.sort_order >= packed_status.sort_order
         AS all_linked_order_details_packed_or_later,
-      linked_order.order_id IS NOT NULL
-        AND linked_order.delete_flag = false
-        AND COALESCE(linked_order_status.all_details_issued_or_later, false)
+      COALESCE(matched_detail.detail_id, inferred_detail.detail_id) IS NOT NULL
+        AND detail_status.sort_order IS NOT NULL
+        AND issued_production_status.sort_order IS NOT NULL
+        AND detail_status.sort_order >= issued_production_status.sort_order
         AS all_linked_order_details_issued_or_later
     FROM cnc_telegram_packets p
     LEFT JOIN mdf_board_manual_moves packet_manual_move
@@ -3119,8 +3121,6 @@ function packetSelectSql(
         )
       HAVING COUNT(*) = 1
     ) inferred_detail ON matched_detail.detail_id IS NULL
-    LEFT JOIN orders linked_order
-      ON linked_order.order_id = COALESCE(active_matched_order.order_id, item_order.order_id)
     LEFT JOIN production_statuses detail_status
       ON detail_status.production_status_id = COALESCE(matched_detail.production_status_id, inferred_detail.production_status_id)
     LEFT JOIN LATERAL (
@@ -3156,26 +3156,6 @@ function packetSelectSql(
       ) AS sort_order
       FROM production_statuses ps
     ) issued_production_status ON true
-    LEFT JOIN LATERAL (
-      SELECT
-        COUNT(linked_detail.detail_id) > 0
-          AND BOOL_AND(
-            linked_detail_status.sort_order IS NOT NULL
-            AND packed_status.sort_order IS NOT NULL
-            AND linked_detail_status.sort_order >= packed_status.sort_order
-          ) AS all_details_packed_or_later,
-        COUNT(linked_detail.detail_id) > 0
-          AND BOOL_AND(
-            linked_detail_status.sort_order IS NOT NULL
-            AND issued_production_status.sort_order IS NOT NULL
-            AND linked_detail_status.sort_order >= issued_production_status.sort_order
-          ) AS all_details_issued_or_later
-      FROM order_details linked_detail
-      LEFT JOIN production_statuses linked_detail_status
-        ON linked_detail_status.production_status_id = linked_detail.production_status_id
-      WHERE linked_detail.order_id = linked_order.order_id
-        AND linked_detail.delete_flag = false
-    ) linked_order_status ON true
     WHERE ${whereSql}
     ORDER BY p.updated_at DESC, p.packet_id, i.order_name ASC NULLS LAST, i.detail_number ASC NULLS LAST
   `;

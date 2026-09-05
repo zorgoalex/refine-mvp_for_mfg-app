@@ -29,7 +29,6 @@ export interface MdfBoardHiddenCardRule {
 }
 
 export const MDF_BOARD_HIDDEN_CARD_KINDS: readonly MdfBoardHiddenCardKind[] = [
-  'packet',
   'bazisCutSet',
   'bath',
 ] as const;
@@ -705,15 +704,7 @@ export function applyMdfBoardHiddenCardRulesToColumns(
 
   for (const column of columns) {
     for (const packet of column.packets) {
-      const effectiveSourceColumn = resolvePacketSourceColumn?.(packet, column.key) ?? column.key;
-      const target = effectiveSourceColumn === 'parsed' && mdfBoardHiddenCardRuleMatches(
-        'packet',
-        collectPacketOrderIds(packet),
-        rulesByKind,
-        orderStatusIdByOrderId,
-      )
-        ? 'completed_laminated'
-        : column.key;
+      const target = resolvePacketSourceColumn?.(packet, column.key) ?? column.key;
       ensureColumn(target).packets.push(packet);
     }
 
@@ -770,11 +761,6 @@ function mdfBoardHiddenCardRuleMatches(
     const orderStatusId = orderStatusIdByOrderId.get(orderId);
     return isPositiveInteger(orderStatusId) && allowedStatusIds.has(orderStatusId);
   });
-}
-
-function collectPacketOrderIds(packet: CncTelegramPacket): number[] {
-  const orderIds = packet.items.map((item) => item.matchOrderId ?? item.orderId);
-  return orderIds.every(isPositiveInteger) ? normalizePositiveIntegerArray(orderIds) : [];
 }
 
 function collectBazisCutSetOrderIds(bazisCutSet: CncTelegramBazisCutSetCard): number[] {
