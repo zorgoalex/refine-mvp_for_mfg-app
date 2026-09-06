@@ -15,6 +15,14 @@ const orderPrimaryResourceSource = readFileSync(
   'src/query/orderPrimaryResource.ts',
   'utf8',
 );
+const financeBlockSource = readFileSync(
+  'src/pages/orders/components/sections/OrderFinanceBlock.tsx',
+  'utf8',
+);
+const bitrixPaymentsSource = readFileSync(
+  'src/pages/orders/components/sections/BitrixOrderPaymentsPanel.tsx',
+  'utf8',
+);
 
 describe('order show finance action wiring', () => {
   it('routes Add payment to the edit Finance tab', () => {
@@ -32,5 +40,13 @@ describe('order show finance action wiring', () => {
     expect(showHeaderSource).toContain('resolveCurrentProductionStatusCodes');
     expect(showHeaderSource).toContain('currentProductionStatusCodes');
     expect(showHeaderSource).not.toContain('productionEventsData');
+  });
+
+  it('shows exact-ID Bitrix payments in the order finance block', () => {
+    expect(financeBlockSource).toContain('<BitrixOrderPaymentsPanel');
+    expect(bitrixPaymentsSource).toContain('getMappedOrderPayments');
+    expect(bitrixPaymentsSource).toContain('reconcileMappedOrderPayments');
+    expect(bitrixPaymentsSource).toContain('bitrixPaymentIds: selectedIds');
+    expect(bitrixPaymentsSource).toContain("can('bitrix24.payments.materialize')");
   });
 });

@@ -4,12 +4,30 @@ import {
   buildTelegramWorkerAuditExportQuery,
   buildTelegramWorkerAuditQuery,
   isTelegramWorkerScanStale,
+  telegramWorkerAuditErrorText,
 } from './TelegramWorkerAudit';
+import { telegramWorkerTechnicalErrorText } from './TelegramWorkerTechnicalLogs';
+import { ApiError } from '../../api/httpClient';
 import type { TelegramWorkerScan } from '../../api/types/cncTelegramWorkerAudit.types';
 import dayjs from 'dayjs';
 import { describe, expect, it } from 'vitest';
 
 describe('Telegram worker audit UI', () => {
+  it('maps ApiError 403 from status to permission messages', () => {
+    const forbidden = new ApiError({ code: 'PERMISSION_DENIED', message: 'Forbidden', status: 403 });
+
+    expect(telegramWorkerAuditErrorText(forbidden, 'fallback')).toBe('Нет права audit.view.');
+    expect(telegramWorkerTechnicalErrorText(forbidden, 'fallback')).toBe('Нет права audit.technical.view.');
+  });
+
+  it('keeps non-403 ApiError messages and unknown fallbacks', () => {
+    const unauthorized = new ApiError({ code: 'AUTH_REQUIRED', message: 'Unauthorized', status: 401 });
+
+    expect(telegramWorkerAuditErrorText(unauthorized, 'fallback')).toBe('Unauthorized');
+    expect(telegramWorkerTechnicalErrorText(unauthorized, 'fallback')).toBe('Unauthorized');
+    expect(telegramWorkerAuditErrorText({ statusCode: 403 }, 'fallback')).toBe('fallback');
+  });
+
   it('encodes bounded filters', () => {
     const values: Parameters<typeof buildTelegramWorkerAuditQuery>[0] = {
       period: [dayjs('2026-08-01'), dayjs('2026-08-06')], status: 'failed',

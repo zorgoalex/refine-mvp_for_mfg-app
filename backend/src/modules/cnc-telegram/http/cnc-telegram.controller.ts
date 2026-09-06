@@ -341,6 +341,8 @@ export class CncTelegramController {
   @ApiQuery({ name: 'date', required: false, type: String })
   @ApiQuery({ name: 'dateFrom', required: false, type: String })
   @ApiQuery({ name: 'dateTo', required: false, type: String })
+  @ApiQuery({ name: 'operationalWindow', required: false, enum: ['month'] })
+  @ApiQuery({ name: 'focusBathCardId', required: false, type: String })
   @ApiResponse({ status: 200, description: 'Current-day CNC Telegram packets' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
@@ -359,6 +361,8 @@ export class CncTelegramController {
       workday: parsedQuery.workday,
       workdayFrom: parsedQuery.workdayFrom,
       workdayTo: parsedQuery.workdayTo,
+      operationalWindow: parsedQuery.operationalWindow,
+      focusBathCardId: parsedQuery.focusBathCardId,
       requestId: request.requestId,
     });
   }
@@ -743,6 +747,8 @@ export function parseTodayQuery(query: Record<string, unknown>): {
   workday: string | null;
   workdayFrom: string | null;
   workdayTo: string | null;
+  operationalWindow?: 'month';
+  focusBathCardId?: string;
 } {
   const workday = parseDateQuery(query.date, 'date');
   const workdayFrom = parseDateQuery(query.dateFrom, 'dateFrom');
@@ -762,7 +768,22 @@ export function parseTodayQuery(query: Record<string, unknown>): {
       field: 'dateFrom',
     });
   }
-  return { workday, workdayFrom, workdayTo };
+  if (query.operationalWindow !== undefined && query.operationalWindow !== 'month') {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid operationalWindow', { field: 'operationalWindow' });
+  }
+  if (query.focusBathCardId !== undefined && (
+    query.operationalWindow !== 'month'
+    || typeof query.focusBathCardId !== 'string'
+    || !/^cut-result:[1-9]\d{0,15}$/.test(query.focusBathCardId)
+    || !Number.isSafeInteger(Number(query.focusBathCardId.slice('cut-result:'.length)))
+  )) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid focusBathCardId', { field: 'focusBathCardId' });
+  }
+  return {
+    workday, workdayFrom, workdayTo,
+    ...(query.operationalWindow === 'month' ? { operationalWindow: 'month' as const } : {}),
+    ...(typeof query.focusBathCardId === 'string' ? { focusBathCardId: query.focusBathCardId } : {}),
+  };
 }
 
 export function parseDateQuery(value: unknown, field = 'date'): string | null {

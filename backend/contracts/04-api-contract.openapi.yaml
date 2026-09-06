@@ -11735,6 +11735,20 @@ paths:
           schema:
             type: string
             format: date
+        - name: dateFrom
+          in: query
+          schema: { type: string, format: date }
+        - name: dateTo
+          in: query
+          schema: { type: string, format: date }
+        - name: operationalWindow
+          in: query
+          description: Opt-in 31-day operational window; older unfinished eligible baths remain.
+          schema: { type: string, enum: [month] }
+        - name: focusBathCardId
+          in: query
+          description: In month mode, bypass age trimming for one otherwise eligible bath.
+          schema: { type: string, pattern: '^cut-result:[1-9][0-9]{0,15}$' }
       responses:
         '200':
           description: Current-day CNC Telegram packets
@@ -11742,6 +11756,33 @@ paths:
             application/json:
               schema:
                 type: object
+                properties:
+                  operationalWindow:
+                    type: object
+                    required: [dateFrom, dateTo]
+                    properties:
+                      dateFrom: { type: string, format: date }
+                      dateTo: { type: string, format: date }
+                  historicalBathReadiness:
+                    type: array
+                    description: Required with operationalWindow. Calculation-only completed bath composition; not cards or order-list inputs.
+                    items:
+                      type: object
+                      required: [bathCardId, forced, items]
+                      properties:
+                        bathCardId: { type: string }
+                        forced: { type: boolean }
+                        items:
+                          type: array
+                          items:
+                            type: object
+                            required: [orderId, orderName, detailId, detailNumber, quantity]
+                            properties:
+                              orderId: { type: integer }
+                              orderName: { type: string }
+                              detailId: { type: integer }
+                              detailNumber: { type: integer, nullable: true }
+                              quantity: { type: integer }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':

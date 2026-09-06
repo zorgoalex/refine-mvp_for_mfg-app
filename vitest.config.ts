@@ -13,6 +13,7 @@ export default defineConfig({
             '.idea',
             '.git',
             '.worktrees/**',
+            '.claude/worktrees/**',
             '.cache',
             'ai_docs/**',
             'tests/**',

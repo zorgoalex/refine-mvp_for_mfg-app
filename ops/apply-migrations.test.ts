@@ -99,7 +99,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     const verifyStart = scriptText.indexOf('verify_applied_effect() {');
     const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
     const verifyFn = scriptText.slice(verifyStart, verifyEnd);
-    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\|108_\*\|109_\*\|110_\*\|111_\*\|112_\*\|113_\*\|114_\*\|115_\*\|116_\*\|117_\*\|118_\*\|119_\*\|120_\*\|121_\*\|122_\*\|123_\*\|124_\*\|125_\*\|126_\*\|127_\*\|128_\*\|129_\*\|130_\*\|131_\*\|132_\*\|133_\*\|134_\*\|135_\*\|136_\*\|137_\*\|138_\*\|139_\*\|140_\*\|141_\*\|142_\*\|143_\*\|144_\*\|145_\*\)/);
+    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\|108_\*\|109_\*\|110_\*\|111_\*\|112_\*\|113_\*\|114_\*\|115_\*\|116_\*\|117_\*\|118_\*\|119_\*\|120_\*\|121_\*\|122_\*\|123_\*\|124_\*\|125_\*\|126_\*\|127_\*\|128_\*\|129_\*\|130_\*\|131_\*\|132_\*\|133_\*\|134_\*\|135_\*\|136_\*\|137_\*\|138_\*\|139_\*\|140_\*\|141_\*\|142_\*\|143_\*\|144_\*\|145_\*\|146_\*\|147_\*\|148_\*\|149_\*\|150_\*\)/);
     expect(scriptText).toMatch(/verify_applied_effect "\$f"[\s\S]*INSERT INTO schema_migrations/);
   });
 
@@ -129,6 +129,25 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       'idx_cnc_tg_import_item_claim',
       "cnc.telegram_import.manage_all",
     ]) expect(scriptText).toContain(marker);
+  });
+
+  it('classifies widget 147 separately from MDF 147 and verifies payment safety markers', () => {
+    const start = probeFn.indexOf('147_bitrix24_payment_widget*)');
+    const end = probeFn.indexOf('147_mdf_order_status_detail_cascade*)');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const arm = probeFn.slice(start, end);
+    for (const marker of [
+      'executor_bitrix_user_id', 'executor_is_admin',
+      'q_tbl bitrix24_app_install_attempt', 'q_tbl bitrix24_widget_session',
+      'q_tbl bitrix24_manual_payment_command', 'q_tbl bitrix24_pay_system_catalog',
+      'uq_bitrix24_manual_payment_idempotency', 'uq_bitrix24_manual_payment_remote_create',
+      'chk_bitrix24_manual_payment_owner', 'chk_bitrix24_manual_payment_overpayment_confirmation',
+      'payment_local_date', 'manual_command_id', 'fk_bitrix24_request_payment_manual_command',
+      'uq_bitrix24_request_payment_manual_command', 'widget_enabled', 'is_default',
+      'uq_bitrix24_payment_type_mapping_widget_default',
+      'bitrix24.payments.create', 'bitrix24.payments.confirm_overpayment',
+    ]) expect(arm).toContain(marker);
   });
 
   it('requires migration 148 active-number index and durable import-number probes', () => {
@@ -414,7 +433,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       "pg_get_functiondef('recalc_order_production_status(bigint)'::regprocedure)",
     ]) expect(migration125Probe).toContain(marker);
 
-    expect(scriptText).toMatch(/111_\*\|112_\*\|113_\*\|114_\*\|115_\*\|116_\*\|117_\*\|118_\*\|119_\*\|120_\*\|121_\*\|122_\*\|123_\*\|124_\*\|125_\*\|126_\*\|127_\*\|128_\*\|129_\*\|130_\*\|131_\*\|132_\*\|133_\*\|134_\*\|135_\*\|136_\*\|137_\*\|138_\*\|139_\*\|140_\*\|141_\*\|142_\*\|143_\*\|144_\*\|145_\*\)/);
+    expect(scriptText).toMatch(/111_\*\|112_\*\|113_\*\|114_\*\|115_\*\|116_\*\|117_\*\|118_\*\|119_\*\|120_\*\|121_\*\|122_\*\|123_\*\|124_\*\|125_\*\|126_\*\|127_\*\|128_\*\|129_\*\|130_\*\|131_\*\|132_\*\|133_\*\|134_\*\|135_\*\|136_\*\|137_\*\|138_\*\|139_\*\|140_\*\|141_\*\|142_\*\|143_\*\|144_\*\|145_\*\|146_\*\|147_\*\|148_\*\|149_\*\|150_\*\)/);
   });
 });
 
@@ -516,4 +535,13 @@ describe('apply-migrations.sh auto — detect-only against the live erp_test con
     expect(out).not.toMatch(/PENDING \(will apply\)/);
     expect(out).not.toMatch(/no classification/);
   }, 180_000);
+
+  it.skipIf(!containerUp)('probes widget by full filename despite another migration 147', () => {
+    expect(run(['probe', '147_bitrix24_payment_widget.sql']))
+      .toContain('147_bitrix24_payment_widget.sql PRESENT');
+  });
+
+  it.skipIf(!containerUp)('rejects an ambiguous numeric version 147', () => {
+    expect(() => run(['probe', '147'])).toThrow();
+  });
 });

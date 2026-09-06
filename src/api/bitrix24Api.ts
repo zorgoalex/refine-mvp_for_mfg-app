@@ -42,7 +42,21 @@ export interface Bitrix24IncomingPayment {
   state: 'active' | 'deleted' | 'materialized';
   erpPaymentId: number | null;
   mappedTypePaidId: number | null;
+  source?: 'widget' | 'native';
+  commandStatus?: string | null;
 }
+
+export type Bitrix24MappedOrderPayments =
+  | { linked: false; orderId: number }
+  | {
+      linked: true;
+      orderId: number;
+      orderVersion: number;
+      bitrixDealId: string;
+      bitrixUrl: string;
+      lastReconciledAt: string | null;
+      payments: Bitrix24IncomingPayment[];
+    };
 
 export interface Bitrix24IncomingRequestDetail {
   id: number;
@@ -94,6 +108,9 @@ export interface Bitrix24PaymentTypeMapping {
   typePaidId: number | null;
   typePaidName: string | null;
   active: boolean;
+  widgetEnabled: boolean;
+  isDefault: boolean;
+  lastFetchedAt: string | null;
 }
 
 export interface Bitrix24UserMapping {
@@ -125,6 +142,29 @@ export interface Bitrix24SyncHealth {
   installationStatus: string | null;
   tokenExpiresAt: string | null;
   lastError: string | null;
+  widget: {
+    lastSubmitAt: string | null;
+    awaitingOrder: number;
+    awaitingRetry: number;
+    ambiguous: number;
+  };
+  paymentSystemCatalogLastFetchedAt: string | null;
+}
+
+export interface Bitrix24AmbiguousPaymentCommand {
+  commandId: string;
+  bitrixDealId: string;
+  bitrixActorUserId: string;
+  erpActorUserId: number;
+  amount: string;
+  currencyId: string;
+  paymentDate: string;
+  paySystemId: number;
+  beforePaymentIds: string[];
+  diagnosticCandidateIds: string[];
+  version: number;
+  errorCode: string | null;
+  createdAt: string;
 }
 
 export const bitrix24Api = {
@@ -176,10 +216,13 @@ export const bitrix24Api = {
     );
   },
 
-  materializePayments(requestId: number): Promise<Bitrix24IncomingRequest> {
+  materializePayments(
+    requestId: number,
+    input: { bitrixPaymentIds: string[]; expectedOrderVersion: number },
+  ): Promise<Bitrix24IncomingRequest> {
     return httpClient.post(
       apiRoutes.bitrix24.materializePayments(validId(requestId)),
-      {},
+      input,
     );
   },
 
@@ -199,13 +242,27 @@ export const bitrix24Api = {
     );
   },
 
-  materializeMappedOrderPayments(orderId: number): Promise<{
+  materializeMappedOrderPayments(
+    orderId: number,
+    input: { bitrixPaymentIds: string[]; expectedOrderVersion: number },
+  ): Promise<{
     orderId: number;
     changedPaymentCount: number;
     deletedPaymentCount: number;
   }> {
     return httpClient.post(
       apiRoutes.bitrix24.materializeMappedOrderPayments(validId(orderId)),
+      input,
+    );
+  },
+
+  getMappedOrderPayments(orderId: number): Promise<Bitrix24MappedOrderPayments> {
+    return httpClient.get(apiRoutes.bitrix24.mappedOrderPayments(validId(orderId)));
+  },
+
+  reconcileMappedOrderPayments(orderId: number): Promise<Bitrix24MappedOrderPayments> {
+    return httpClient.post(
+      apiRoutes.bitrix24.reconcileMappedOrderPayments(validId(orderId)),
       {},
     );
   },
@@ -252,12 +309,34 @@ export const bitrix24Api = {
 
   updatePaymentTypeMapping(
     paySystemId: number,
-    input: { typePaidId: number; active: boolean },
+    input: {
+      typePaidId: number;
+      active: boolean;
+      widgetEnabled?: boolean;
+      isDefault?: boolean;
+    },
   ): Promise<Bitrix24PaymentTypeMapping> {
     return httpClient.put(
       apiRoutes.bitrix24.paymentTypeMapping(validId(paySystemId)),
       input,
     );
+  },
+
+  refreshPaymentSystems(): Promise<{ refreshed: number }> {
+    return httpClient.post(apiRoutes.bitrix24.refreshPaymentSystems, {});
+  },
+
+  listAmbiguousPaymentCommands(): Promise<Bitrix24AmbiguousPaymentCommand[]> {
+    return httpClient.get(apiRoutes.bitrix24.ambiguousPaymentCommands);
+  },
+
+  resolvePaymentAmbiguity(
+    commandId: string,
+    input:
+      | { resolution: 'attach_existing'; bitrixPaymentId: string; reason: string; expectedVersion: number }
+      | { resolution: 'confirm_absent'; reason: string; expectedVersion: number },
+  ): Promise<Record<string, unknown>> {
+    return httpClient.post(apiRoutes.bitrix24.resolvePaymentAmbiguity(commandId), input);
   },
 
   getSyncHealth(): Promise<Bitrix24SyncHealth> {

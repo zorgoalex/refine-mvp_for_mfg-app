@@ -36,7 +36,7 @@ export const TelegramWorkerTechnicalLogs: React.FC = () => {
       setRows(response.data); setHealth(response.health); setPagination(response.pagination);
     } catch (caught) {
       setRows([]);
-      setError(errorText(caught, 'Не удалось загрузить технические логи.'));
+      setError(telegramWorkerTechnicalErrorText(caught, 'Не удалось загрузить технические логи.'));
     } finally { setLoading(false); }
   }, [allowed, query]);
 
@@ -54,7 +54,7 @@ export const TelegramWorkerTechnicalLogs: React.FC = () => {
       });
       saveBlob(result.blob, result.fileName ?? `telegram-worker-technical_${current.dateFrom}_${current.dateTo}.log`);
       message.success('Raw technical log выгружен');
-    } catch (caught) { setError(errorText(caught, 'Не удалось выгрузить технические логи.')); }
+    } catch (caught) { setError(telegramWorkerTechnicalErrorText(caught, 'Не удалось выгрузить технические логи.')); }
     finally { setExporting(false); }
   };
 
@@ -96,7 +96,13 @@ function buildQuery(values: Filters, pageSize = 100): TelegramWorkerTechnicalLog
 }
 
 function formatDateTime(value: string | null): string { return value ? dayjs(value).format('DD.MM.YYYY HH:mm:ss') : '—'; }
-function errorText(caught: unknown, fallback: string): string { return caught instanceof ApiError && caught.statusCode === 403 ? 'Нет права audit.technical.view.' : caught instanceof Error ? caught.message : fallback; }
+export function telegramWorkerTechnicalErrorText(caught: unknown, fallback: string): string {
+  return caught instanceof ApiError && caught.status === 403
+    ? 'Нет права audit.technical.view.'
+    : caught instanceof Error
+      ? caught.message
+      : fallback;
+}
 async function copyLine(row: TelegramWorkerTechnicalLog): Promise<void> {
   try {
     await navigator.clipboard.writeText(`${row.observedAt} ${row.stream.toUpperCase()} ${row.workerInstanceId}#${row.sequence} ${row.message}`);

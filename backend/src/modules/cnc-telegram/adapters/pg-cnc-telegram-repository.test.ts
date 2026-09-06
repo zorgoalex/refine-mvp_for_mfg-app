@@ -23,7 +23,7 @@ describe('PgCncTelegramRepository', () => {
   it('keeps forced baths visible and preserves hidden bath history', () => {
     expect(repositorySource).toContain("forced_seed.mdf_board_card_kind = 'bath_seed'");
     expect(repositorySource).toContain("hidden_seed.mdf_board_card_kind = 'bath_seed'");
-    expect(repositorySource).toContain("COALESCE(r.snapshot_job ->> 'isVacuum', 'false') = 'true'");
+    expect(repositorySource).toContain('board_metadata.is_vacuum = true');
     expect(repositorySource).toContain("? 'hidden' as const");
     expect(repositorySource).toContain('currentByResult.get(bath.cutResultId)');
   });
@@ -53,8 +53,8 @@ describe('PgCncTelegramRepository', () => {
     const listTodayStart = repositorySource.indexOf('async listToday(');
     const listTodayEnd = repositorySource.indexOf('\n  async listOriginalBoard(', listTodayStart);
     const listTodaySource = repositorySource.slice(listTodayStart, listTodayEnd);
-    expect(listTodaySource).toContain('const [rows, baths, bazisCutSets] = await Promise.all([');
-    expect(listTodaySource).toContain('loadBathCards(this.database, workdayFrom, workdayTo)');
+    expect(listTodaySource).toContain('const [rows, bathResult, bazisCutSets] = await Promise.all([');
+    expect(listTodaySource).toContain('loadBathCards(this.database, workdayFrom, workdayTo, {');
     expect(listTodaySource).toContain('loadPeriodBazisCutSetCards(this.database, workdayFrom, workdayTo)');
   });
 
@@ -946,7 +946,7 @@ describe('PgCncTelegramRepository', () => {
     });
   });
 
-  it('archives a completed machine file only when every detail of every linked order is packed or later', async () => {
+  it('archives a completed machine file by statuses of its own resolved details only', async () => {
     const database = {
       query: vi.fn(async (text: string) => {
         if (/latest_vacuum_results/i.test(text)) return { rows: [] };
@@ -957,6 +957,7 @@ describe('PgCncTelegramRepository', () => {
                 packet_id: '00000000-0000-0000-0000-000000000031',
                 packet_item_id: '00000000-0000-0000-0000-000000000041',
                 all_linked_order_details_packed_or_later: true,
+                manual_target_column: 'parsed',
               }),
               packetRow({
                 packet_id: '00000000-0000-0000-0000-000000000031',
@@ -1002,6 +1003,33 @@ describe('PgCncTelegramRepository', () => {
                 all_linked_order_details_packed_or_later: false,
                 all_linked_order_details_issued_or_later: true,
               }),
+              packetRow({
+                packet_id: '00000000-0000-0000-0000-000000000036',
+                packet_item_id: '00000000-0000-0000-0000-000000000048',
+                completion_status: 'pending',
+                thumbs_up: false,
+                all_linked_order_details_packed_or_later: true,
+                all_linked_order_details_issued_or_later: true,
+                manual_target_column: 'completed',
+              }),
+              packetRow({
+                packet_id: '00000000-0000-0000-0000-000000000037',
+                packet_item_id: '00000000-0000-0000-0000-000000000049',
+                completion_status: 'pending',
+                thumbs_up: false,
+                all_linked_order_details_packed_or_later: true,
+                all_linked_order_details_issued_or_later: true,
+                manual_target_column: 'parsed',
+              }),
+              packetRow({
+                packet_id: '00000000-0000-0000-0000-000000000038',
+                packet_item_id: '00000000-0000-0000-0000-000000000050',
+                completion_status: 'pending',
+                thumbs_up: false,
+                all_linked_order_details_packed_or_later: true,
+                all_linked_order_details_issued_or_later: true,
+                manual_target_column: 'completed_laminated',
+              }),
             ],
           };
         }
@@ -1012,8 +1040,8 @@ describe('PgCncTelegramRepository', () => {
 
     const result = await repo.listToday({ currentUser: user(), workday: '2026-07-24' });
 
-    expect(result.columns.find((column) => column.key === 'completed')?.packets)
-      .toHaveLength(3);
+    expect(result.columns.find((column) => column.key === 'completed')?.packets.map((packet) => packet.packetId))
+      .toContain('00000000-0000-0000-0000-000000000036');
     expect(result.columns.find((column) => column.key === 'completed_laminated')?.packets)
       .toMatchObject([
         {
@@ -1026,15 +1054,27 @@ describe('PgCncTelegramRepository', () => {
           completionStatus: 'pending',
           allLinkedOrderDetailsIssuedOrLater: true,
         },
+        {
+          packetId: '00000000-0000-0000-0000-000000000037',
+          completionStatus: 'pending',
+          allLinkedOrderDetailsIssuedOrLater: true,
+        },
+        {
+          packetId: '00000000-0000-0000-0000-000000000038',
+          completionStatus: 'pending',
+          allLinkedOrderDetailsIssuedOrLater: true,
+        },
       ]);
     expect(database.query.mock.calls[0]?.[0]).toContain("= 'packed'");
     expect(database.query.mock.calls[0]?.[0]).toContain("= 'issued'");
-    expect(database.query.mock.calls[0]?.[0]).toContain('FROM order_details linked_detail');
-    expect(database.query.mock.calls[0]?.[0]).toContain('COUNT(linked_detail.detail_id) > 0');
+    expect(database.query.mock.calls[0]?.[0]).not.toContain('FROM order_details linked_detail');
     expect(database.query.mock.calls[0]?.[0]).toContain(
-      'linked_detail_status.sort_order >= packed_status.sort_order',
+      'detail_status.sort_order >= packed_status.sort_order',
     );
-    expect(database.query.mock.calls[0]?.[0]).toContain('linked_detail.delete_flag = false');
+    expect(database.query.mock.calls[0]?.[0]).toContain(
+      'COALESCE(matched_detail.detail_id, inferred_detail.detail_id) IS NOT NULL',
+    );
+    expect(database.query.mock.calls[0]?.[0]).toContain('LEFT JOIN mdf_board_manual_moves packet_manual_move');
   });
 
   it('lists stored machine-file cutting sequence numbers for an order card', async () => {
@@ -1242,7 +1282,7 @@ describe('PgCncTelegramRepository', () => {
     const result = await repo.listToday({ currentUser: user(), workday: '2026-07-24' });
     const sql = queries.join('\n');
 
-    expect(sql).toContain("COALESCE(r.snapshot_job ->> 'isVacuum', 'false') = 'true'");
+    expect(sql).toContain('board_metadata.is_vacuum = true');
     expect(sql).toContain('cut_result_placement');
     expect(sql).toContain('cut_result_sheet_map');
     expect(sql).toContain('cut_result_label_map_projection');
@@ -3224,6 +3264,166 @@ describe('PgCncTelegramRepository', () => {
     expect(snapshot.groups[0].sheets[0].placements.pieces[0].label.orderName).toBe('2689');
   });
 
+  it('keeps a partially resolved selected-order SVG as a cut job without an invalid cut result', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) return { rows: [] };
+        if (/FROM orders o\s+JOIN order_details od/i.test(text)) {
+          return { rows: [{
+            order_key: '2689', order_id: 2689, detail_id: 3101,
+            detail_number: 31, width: 497, height: 477,
+          }] };
+        }
+        if (/SELECT\s+order_id,\s+order_name\s+FROM orders/i.test(text)) {
+          return { rows: [{ order_id: 2689, order_name: '2689' }] };
+        }
+        if (/INSERT INTO cnc_telegram_packets/i.test(text)) {
+          return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000001' }] };
+        }
+        if (/SELECT svg_cut_job_id, svg_cut_result_id, svg_cut_import_status, cutting_sequence_no/i.test(text)) {
+          return { rows: [{ svg_cut_job_id: null, svg_cut_result_id: null, svg_cut_import_status: 'none', cutting_sequence_no: 92 }] };
+        }
+        if (/SELECT existing_job\.cut_job_id/i.test(text)) return { rows: [] };
+        if (/SELECT od\.detail_id, od\.order_id/i.test(text)) {
+          return { rows: [{
+            detail_id: 3101,
+            order_id: 2689,
+            order_name: '2689',
+            order_delete_flag: false,
+            detail_number: 31,
+            detail_name: 'Detail 31',
+            height: 477,
+            width: 497,
+            order_quantity: 1,
+            area: 0.237,
+            material_id: 10,
+            sheet_material_type_id: 77,
+            sheet_material_width_mm: 2070,
+            sheet_material_height_mm: 2800,
+            material_name: 'MDF 18',
+            doweling: false,
+            milling_type_id: null,
+            milling_type_name: null,
+            edge_type_id: null,
+            edge_type_name: null,
+            film_id: null,
+            film_name: null,
+            priority: null,
+            production_status_id: null,
+            production_status_name: null,
+            joint_order_id: null,
+            note: null,
+            link_cutting_file: null,
+            link_cutting_image_file: null,
+            link_cad_file: null,
+            link_pdf_file: null,
+          }] };
+        }
+        if (/INSERT INTO cut_job\s*\(/i.test(text)) {
+          return { rows: [{ cut_job_id: 720, created_at: '2026-08-12T08:00:00.000Z' }] };
+        }
+        if (/INSERT INTO cut_group\s*\(/i.test(text)) return { rows: [{ cut_group_id: 721 }] };
+        if (/INSERT INTO cut_job_item\s*\(/i.test(text)) return { rows: [{ cut_job_item_id: 723 }] };
+        if (/INSERT INTO cut_group_sheet\s*\(/i.test(text)) return { rows: [{ cut_group_sheet_id: 722 }] };
+        if (/FROM cnc_telegram_packets p/i.test(text) && /p\.workday/i.test(text)) {
+          return { rows: [packetRow({
+            source_chat_id: 'erp-manual-svg-upload',
+            cutting_sequence_no: 92,
+            svg_cut_job_id: 720,
+            svg_cut_result_id: null,
+            svg_cut_import_status: 'imported',
+          })] };
+        }
+        if (/INSERT INTO audit_log/i.test(text)) return { rows: [{ audit_id: 'audit-1' }] };
+        return { rows: [] };
+      }),
+    };
+    const repo = new PgCncTelegramRepository({
+      transaction: vi.fn((handler) => handler(tx)),
+    } as never);
+    const resolvedItem = {
+      sourceItemKey: '2689:31:497x477',
+      orderName: '2689',
+      detailNumber: 31,
+      widthMm: 497,
+      heightMm: 477,
+      quantity: 1,
+      source: 'vector' as const,
+      confidence: 0.99,
+    };
+    const unresolvedItem = {
+      sourceItemKey: '2689:999:497x477',
+      orderName: '2689',
+      detailNumber: 999,
+      widthMm: 497,
+      heightMm: 477,
+      quantity: 1,
+      source: 'vector' as const,
+      confidence: 0.99,
+    };
+    const dto = {
+      ...manualSvgUploadDto(false, 'cnc:test:manual-svg:lenient-unresolved'),
+      validationMode: 'lenient' as const,
+      items: [resolvedItem, unresolvedItem],
+      cutLayout: {
+        ...manualSvgValidCutLayout(),
+        acceptedItemCount: 2,
+        partContourCount: 2,
+        items: [
+          {
+            ...resolvedItem,
+            sourceElementId: 'PartContour-resolved',
+            xMm: 10,
+            yMm: 20,
+            placedWidthMm: 497,
+            placedHeightMm: 477,
+            rotated: false,
+          },
+          {
+            ...unresolvedItem,
+            sourceElementId: 'PartContour-unresolved',
+            xMm: 520,
+            yMm: 20,
+            placedWidthMm: 497,
+            placedHeightMm: 477,
+            rotated: false,
+          },
+        ],
+      },
+    };
+
+    const result = await repo.manualSvgUpload({
+      currentUser: user(),
+      dto,
+      requestId: 'request-manual-svg-lenient-unresolved',
+    });
+
+    const sheetInsert = queries.find((query) => /INSERT INTO cut_group_sheet\s*\(/i.test(query.text));
+    const importUpdate = queries.find((query) =>
+      /UPDATE cnc_telegram_packets/i.test(query.text) && /svg_cut_import_status = \$2/i.test(query.text));
+    expect(JSON.parse(String(sheetInsert?.params[2]))).toMatchObject({
+      pieces: [
+        { label: { orderId: 2689, orderName: '2689', detailId: 3101 } },
+        { label: { orderId: 2689, orderName: '2689', detailId: null } },
+      ],
+    });
+    expect(queries.filter((query) => /INSERT INTO cut_job_item\s*\(/i.test(query.text))).toHaveLength(1);
+    expect(queries.some((query) => /INSERT INTO cut_result_command/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO cut_result\s*\(/i.test(query.text))).toBe(false);
+    expect(importUpdate?.params.slice(1, 5)).toEqual([
+      'imported',
+      'Предупреждение: раскрой создан в информативном режиме; связь с деталями ERP неполная',
+      720,
+      null,
+    ]);
+    expect(result.packet).toMatchObject({ svgCutJobId: 720, svgCutResultId: null, svgCutImportStatus: 'imported' });
+  });
+
   it('does not consult ERP resolver before same-version payload conflict checks', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const tx = {
@@ -4004,6 +4204,8 @@ function packetRowBase() {
     review_note: null,
     laminated_or_later: false,
     all_linked_order_details_packed_or_later: false,
+    all_linked_order_details_issued_or_later: false,
+    manual_target_column: null,
   };
 }
 

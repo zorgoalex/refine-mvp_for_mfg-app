@@ -228,6 +228,28 @@ describe('CNC detailed machine sources', () => {
     }))).toBe(false);
   });
 
+  it.each([
+    '2701_FANERA18mm.tap', '2701-ldsp16.nc', '2701_hdf3.txt',
+    '2701_khdf3.tap', '2701_xdf3.tap', '2701_dsp16.tap',
+    '2701_dvp3.tap', '2701_osb12.tap', '2701_osp12.tap',
+    '2701_akril4.tap', '2701_plastik4.tap', '2701_plywood18.tap',
+  ])('rejects another material in Latin filename %s even with default MDF and no comments', (programName) => {
+    const value = packet({ materialName: 'МДФ 16мм', programName, comments: [] });
+    expect(cncPacketHasOtherMaterialMarker(value)).toBe(true);
+    expect(cncPacketCountsForMdfReadiness(value)).toBe(false);
+    expect(cncPacketCountsForMdfReadiness(packet({
+      materialName: 'МДФ 16мм', programName: null, externalPacketKey: programName, comments: [],
+    }))).toBe(false);
+  });
+
+  it.each(['МДФ 10мм', 'МДФ 16мм', 'MDF18mm', 'ЛМДФ 22мм', 'new-MDF-type'])(
+    'keeps all MDF variants eligible: %s', (materialName) => {
+      expect(cncPacketCountsForMdfReadiness(packet({
+        materialName, programName: '2701_MDF10mm.tap', comments: [],
+      }))).toBe(true);
+    },
+  );
+
   it('shows cards for every bath detail before a concrete detail is selected', () => {
     const secondDetailPacket = packet({
       packetId: 'packet-second-detail',

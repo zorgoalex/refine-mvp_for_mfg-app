@@ -8,10 +8,10 @@ import { DraggableModalWrapper } from '../../../../components/DraggableModalWrap
 import { useExcelParser, useRangeSelection, useImportValidation } from './hooks';
 import { FileUploadStep, RangeSelectionStep, ValidationStep } from './steps';
 import type { ImportStep, FieldMapping, ImportableField, SelectionRange, ReferenceData, ValidatedRow, ParsedSheet } from './types/importTypes';
-import { detectOrderExport } from './orderExportDetection';
+import { detectOrderExport, getExcelImportPlaceholderIds } from './orderExportDetection';
 import type { WorkBook } from 'xlsx';
 import { IMPORT_DEFAULTS } from './types/importTypes';
-import { useOrderFormStore } from '../../../../stores/orderFormStore';
+import { useOrderFormStore, useOrderDraftStoreApi } from '../../../../stores/orderFormStore';
 import { calculateOrderDetailArea } from '../../../../utils/orderArea';
 import { sortOptionsByRecency, useRecentReferences } from '../../../../hooks/useRecentReferences';
 import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
@@ -69,6 +69,8 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
   const detectedExport = useMemo(() => excelParser.sheetData ? detectOrderExport(excelParser.sheetData) : null, [excelParser.sheetData]);
 
   const addDetail = useOrderFormStore((state) => state.addDetail);
+  const updateDetail = useOrderFormStore((state) => state.updateDetail);
+  const draftStore = useOrderDraftStoreApi();
   const recalculateFinancials = useOrderFormStore((state) => state.recalculateFinancials);
   const materialRecency = useRecentReferences('sheet_material_types');
 
@@ -354,6 +356,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
     }
 
     let importedDetails = 0;
+    const placeholderIds = getExcelImportPlaceholderIds(draftStore.getState().details);
     const usedMaterialIds = new Set<number>();
 
     for (const row of validRows) {
@@ -379,7 +382,9 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
         detail_name: row.detailName || null,
       };
 
-      addDetail(detail);
+      const placeholderId = placeholderIds.shift();
+      if (placeholderId !== undefined) updateDetail(placeholderId, { ...detail, is_placeholder: false });
+      else addDetail(detail);
       if (Number.isSafeInteger(row.sheet_material_type_id) && Number(row.sheet_material_type_id) > 0) {
         usedMaterialIds.add(Number(row.sheet_material_type_id));
       }
@@ -392,7 +397,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
 
     // Close modal immediately after successful import
     handleClose();
-  }, [importValidation, addDetail, materialRecency.promote, recalculateFinancials, handleClose]);
+  }, [importValidation, addDetail, updateDetail, draftStore, materialRecency.promote, recalculateFinancials, handleClose]);
 
   // Validation for next button
   const canGoNext = useMemo(() => {

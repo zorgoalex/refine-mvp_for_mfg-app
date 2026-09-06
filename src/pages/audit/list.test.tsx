@@ -5,7 +5,15 @@ import dayjs from 'dayjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AuditLogEventDto } from '../../api/types/auditApi.types';
-import { buildAuditQuery, RelatedIds, ContextBlock, ReadableAuditEvent, isRowExpandable } from './list';
+import { ApiError } from '../../api/httpClient';
+import {
+  buildAuditQuery,
+  RelatedIds,
+  ContextBlock,
+  ReadableAuditEvent,
+  isAuditPermissionError,
+  isRowExpandable,
+} from './list';
 
 function event(overrides: Partial<AuditLogEventDto> = {}): AuditLogEventDto {
   return {
@@ -92,6 +100,18 @@ describe('buildAuditQuery', () => {
       createdFrom: '2026-01-01T00:00:00.000Z',
       createdTo: '2026-01-02T00:00:00.000Z',
     });
+  });
+});
+
+describe('isAuditPermissionError', () => {
+  it('recognizes ApiError 401 and 403 by status', () => {
+    expect(isAuditPermissionError(new ApiError({ code: 'AUTH_REQUIRED', message: 'Unauthorized', status: 401 }))).toBe(true);
+    expect(isAuditPermissionError(new ApiError({ code: 'PERMISSION_DENIED', message: 'Forbidden', status: 403 }))).toBe(true);
+  });
+
+  it('rejects other statuses and legacy statusCode-shaped objects', () => {
+    expect(isAuditPermissionError(new ApiError({ code: 'ORDER_NOT_FOUND', message: 'Not found', status: 404 }))).toBe(false);
+    expect(isAuditPermissionError({ statusCode: 403 })).toBe(false);
   });
 });
 

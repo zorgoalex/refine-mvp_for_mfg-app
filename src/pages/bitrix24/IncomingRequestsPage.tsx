@@ -32,6 +32,7 @@ import { Table } from '../../ui/tooltipDelay';
 import { authSession } from '../../api/authSession';
 import {
   bitrix24Api,
+  type Bitrix24AmbiguousPaymentCommand,
   type Bitrix24IncomingPayment,
   type Bitrix24IncomingRequest,
   type Bitrix24IncomingRequestDetailInput,
@@ -91,14 +92,24 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
   const [savingDetails, setSavingDetails] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [materializing, setMaterializing] = useState(false);
+  const [selectedPaymentIds, setSelectedPaymentIds] = useState<string[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(false);
+  const [catalogRefreshing, setCatalogRefreshing] = useState(false);
   const [mappings, setMappings] = useState<Bitrix24PaymentTypeMapping[]>([]);
   const [userMappings, setUserMappings] = useState<Bitrix24UserMapping[]>([]);
   const [userMappingTargets, setUserMappingTargets] = useState<Bitrix24UserMappingTarget[]>([]);
   const [newBitrixUserId, setNewBitrixUserId] = useState('');
   const [newErpUserId, setNewErpUserId] = useState<number | null>(null);
   const [health, setHealth] = useState<Bitrix24SyncHealth | null>(null);
+  const [ambiguousCommands, setAmbiguousCommands] = useState<Bitrix24AmbiguousPaymentCommand[]>([]);
+  const [ambiguityResolution, setAmbiguityResolution] = useState<{
+    command: Bitrix24AmbiguousPaymentCommand;
+    resolution: 'attach_existing' | 'confirm_absent';
+  } | null>(null);
+  const [ambiguityPaymentId, setAmbiguityPaymentId] = useState('');
+  const [ambiguityReason, setAmbiguityReason] = useState('');
+  const [ambiguityResolving, setAmbiguityResolving] = useState(false);
   const { selectProps: paymentTypeSelectProps } = useSelect({
     resource: 'payment_types',
     optionLabel: 'type_paid_name',
@@ -173,6 +184,7 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
 
   const openDetails = async (requestId: number) => {
     setDetailLoading(true);
+    setSelectedPaymentIds([]);
     try {
       setSelected(await bitrix24Api.getIncomingRequest(requestId));
     } catch (error) {
@@ -300,10 +312,20 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
   };
 
   const materializePayments = async () => {
-    if (!selected) return;
+    if (!selected || selected.orderVersion === null) return;
+    const bitrixPaymentIds = selectedPaymentIds.filter((id) =>
+      selected.payments.some((payment) =>
+        payment.bitrixPaymentId === id && payment.paid && payment.state !== 'deleted'));
+    if (bitrixPaymentIds.length === 0) {
+      notification.info({ message: 'Нет активных оплат для переноса' });
+      return;
+    }
     setMaterializing(true);
     try {
-      const updated = await bitrix24Api.materializePayments(selected.requestId);
+      const updated = await bitrix24Api.materializePayments(selected.requestId, {
+        bitrixPaymentIds,
+        expectedOrderVersion: selected.orderVersion,
+      });
       setSelected(updated);
       await load();
       notification.success({ message: 'Платежи перенесены в ERP' });
@@ -351,16 +373,18 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
   const loadSettings = useCallback(async () => {
     setSettingsLoading(true);
     try {
-      const [nextMappings, nextUserMappings, nextUserTargets, nextHealth] = await Promise.all([
+      const [nextMappings, nextUserMappings, nextUserTargets, nextHealth, nextAmbiguous] = await Promise.all([
         bitrix24Api.listPaymentTypeMappings(),
         bitrix24Api.listUserMappings(),
         bitrix24Api.listUserMappingTargets(),
         bitrix24Api.getSyncHealth(),
+        bitrix24Api.listAmbiguousPaymentCommands(),
       ]);
       setMappings(nextMappings);
       setUserMappings(nextUserMappings);
       setUserMappingTargets(nextUserTargets);
       setHealth(nextHealth);
+      setAmbiguousCommands(nextAmbiguous);
     } catch (error) {
       notification.error({
         message: 'Не удалось загрузить настройки Bitrix',
@@ -375,6 +399,8 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
     mapping: Bitrix24PaymentTypeMapping,
     typePaidId: number | null,
     active: boolean,
+    widgetEnabled = mapping.widgetEnabled,
+    isDefault = mapping.isDefault,
   ) => {
     if (!typePaidId) return;
     setSettingsLoading(true);
@@ -382,6 +408,8 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
       await bitrix24Api.updatePaymentTypeMapping(mapping.paySystemId, {
         typePaidId,
         active,
+        widgetEnabled,
+        isDefault,
       });
       await loadSettings();
     } catch (error) {
@@ -390,6 +418,22 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
         description: errorMessage(error),
       });
       setSettingsLoading(false);
+    }
+  };
+
+  const refreshPaymentSystems = async () => {
+    setCatalogRefreshing(true);
+    try {
+      const result = await bitrix24Api.refreshPaymentSystems();
+      notification.success({ message: `Платёжных систем обновлено: ${result.refreshed}` });
+      await loadSettings();
+    } catch (error) {
+      notification.error({
+        message: 'Не удалось обновить платёжные системы Bitrix',
+        description: errorMessage(error),
+      });
+    } finally {
+      setCatalogRefreshing(false);
     }
   };
 
@@ -427,6 +471,43 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
         description: errorMessage(error),
       });
       setSettingsLoading(false);
+    }
+  };
+
+  const resolveAmbiguity = async () => {
+    if (!ambiguityResolution || ambiguityReason.trim().length < 10) return;
+    if (
+      ambiguityResolution.resolution === 'attach_existing' &&
+      !/^[1-9][0-9]*$/.test(ambiguityPaymentId)
+    ) return;
+    setAmbiguityResolving(true);
+    try {
+      const common = {
+        reason: ambiguityReason.trim(),
+        expectedVersion: ambiguityResolution.command.version,
+      };
+      await bitrix24Api.resolvePaymentAmbiguity(
+        ambiguityResolution.command.commandId,
+        ambiguityResolution.resolution === 'attach_existing'
+          ? {
+              resolution: 'attach_existing',
+              bitrixPaymentId: ambiguityPaymentId,
+              ...common,
+            }
+          : { resolution: 'confirm_absent', ...common },
+      );
+      setAmbiguityResolution(null);
+      setAmbiguityPaymentId('');
+      setAmbiguityReason('');
+      await loadSettings();
+      notification.success({ message: 'Неопределённая команда оплаты разрешена' });
+    } catch (error) {
+      notification.error({
+        message: 'Не удалось разрешить команду оплаты',
+        description: errorMessage(error),
+      });
+    } finally {
+      setAmbiguityResolving(false);
     }
   };
 
@@ -500,6 +581,10 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
     selected?.payments.filter(
       (payment) => payment.state !== 'deleted' && payment.mappedTypePaidId === null,
     ).length ?? 0;
+  const selectedUnmappedPaymentCount = selected?.payments.filter(
+    (payment) => selectedPaymentIds.includes(payment.bitrixPaymentId) &&
+      payment.mappedTypePaidId === null,
+  ).length ?? 0;
 
   return (
     <div style={{ padding: 16 }}>
@@ -538,6 +623,7 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
               </Button>
             )}
           </Space>
+
         </Space>
 
         <Space wrap>
@@ -622,7 +708,10 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
       <Drawer
         width={720}
         open={selected !== null || detailLoading}
-        onClose={() => setSelected(null)}
+        onClose={() => {
+          setSelected(null);
+          setSelectedPaymentIds([]);
+        }}
         title={selected?.title ?? 'Заявка Bitrix'}
         extra={selected ? (
           <Button
@@ -771,6 +860,13 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
               size="small"
               pagination={false}
               dataSource={selected.payments}
+              rowSelection={selected.state === 'converted' && canMaterialize ? {
+                selectedRowKeys: selectedPaymentIds,
+                onChange: (keys) => setSelectedPaymentIds(keys.map(String)),
+                getCheckboxProps: (payment) => ({
+                  disabled: !payment.paid || payment.state === 'deleted',
+                }),
+              } : undefined}
               columns={[
                 { title: 'ID', dataIndex: 'bitrixPaymentId' },
                 {
@@ -802,10 +898,10 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
                 type="primary"
                 icon={<WalletOutlined />}
                 loading={materializing}
-                disabled={unmappedPaymentCount > 0}
+                disabled={selectedPaymentIds.length === 0 || selectedUnmappedPaymentCount > 0}
                 onClick={() => void materializePayments()}
               >
-                Перенести платежи в ERP
+                Перенести выбранные платежи в ERP
               </Button>
                 )}
               </>
@@ -813,6 +909,52 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
           </Space>
         )}
       </Drawer>
+
+      <Modal
+        open={ambiguityResolution !== null}
+        title={ambiguityResolution?.resolution === 'attach_existing'
+          ? 'Привязать существующий платёж Bitrix24'
+          : 'Подтвердить отсутствие платежа'}
+        okText="Подтвердить решение"
+        cancelText="Отмена"
+        confirmLoading={ambiguityResolving}
+        okButtonProps={{
+          danger: ambiguityResolution?.resolution === 'confirm_absent',
+          disabled: ambiguityReason.trim().length < 10 || (
+            ambiguityResolution?.resolution === 'attach_existing' &&
+            !/^[1-9][0-9]*$/.test(ambiguityPaymentId)
+          ),
+        }}
+        onOk={() => void resolveAmbiguity()}
+        onCancel={() => {
+          setAmbiguityResolution(null);
+          setAmbiguityPaymentId('');
+          setAmbiguityReason('');
+        }}
+      >
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <Alert
+            type="warning"
+            showIcon
+            message="Финансовое решение будет записано в аудит"
+            description="Перед подтверждением вручную откройте точную сделку Bitrix24 и проверьте оплаты."
+          />
+          {ambiguityResolution?.resolution === 'attach_existing' && (
+            <Input
+              value={ambiguityPaymentId}
+              onChange={(event) => setAmbiguityPaymentId(event.target.value.replace(/\D/g, ''))}
+              placeholder="Числовой ID платежа Bitrix24"
+            />
+          )}
+          <Input.TextArea
+            value={ambiguityReason}
+            onChange={(event) => setAmbiguityReason(event.target.value)}
+            maxLength={2000}
+            rows={4}
+            placeholder="Причина решения (минимум 10 символов)"
+          />
+        </Space>
+      </Modal>
 
       <Drawer
         width={760}
@@ -842,6 +984,17 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
             <Descriptions.Item label="Последняя сверка платежей" span={2}>
               {formatDateTime(health?.lastReconcileAt ?? null)}
             </Descriptions.Item>
+            <Descriptions.Item label="Последняя оплата из виджета" span={2}>
+              {formatDateTime(health?.widget.lastSubmitAt ?? null)}
+            </Descriptions.Item>
+            <Descriptions.Item label="Оплаты ожидают заказа">
+              {health?.widget.awaitingOrder ?? '—'}
+            </Descriptions.Item>
+            <Descriptions.Item label="Повтор ERP / неопределённые">
+              {health
+                ? `${health.widget.awaitingRetry} / ${health.widget.ambiguous}`
+                : '—'}
+            </Descriptions.Item>
             {health?.lastError && (
               <Descriptions.Item label="Последняя ошибка" span={2}>
                 {health.lastError}
@@ -865,6 +1018,67 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
               Повторить ошибки
             </Button>
           </Space>
+
+          {ambiguousCommands.length > 0 && (
+            <>
+              <Alert
+                type="error"
+                showIcon
+                message={`Неопределённых созданий оплаты: ${ambiguousCommands.length}`}
+                description="Не повторяйте создание. Сверьте сделку Bitrix24 и вручную привяжите найденный платёж либо подтвердите его отсутствие."
+              />
+              <Table<Bitrix24AmbiguousPaymentCommand>
+                rowKey="commandId"
+                pagination={false}
+                dataSource={ambiguousCommands}
+                scroll={{ x: 820 }}
+                columns={[
+                  { title: 'Сделка', dataIndex: 'bitrixDealId', width: 90 },
+                  {
+                    title: 'Сумма / дата',
+                    key: 'money',
+                    render: (_, command) =>
+                      `${money(Number(command.amount), command.currencyId)} · ${command.paymentDate}`,
+                  },
+                  { title: 'Actor Bitrix', dataIndex: 'bitrixActorUserId', width: 110 },
+                  {
+                    title: 'Кандидаты',
+                    key: 'candidates',
+                    render: (_, command) =>
+                      command.diagnosticCandidateIds.join(', ') || 'Не определены',
+                  },
+                  {
+                    title: 'Действия',
+                    key: 'actions',
+                    width: 230,
+                    render: (_, command) => (
+                      <Space>
+                        <Button
+                          size="small"
+                          onClick={() => setAmbiguityResolution({
+                            command,
+                            resolution: 'attach_existing',
+                          })}
+                        >
+                          Привязать ID
+                        </Button>
+                        <Button
+                          size="small"
+                          danger
+                          onClick={() => setAmbiguityResolution({
+                            command,
+                            resolution: 'confirm_absent',
+                          })}
+                        >
+                          Не создан
+                        </Button>
+                      </Space>
+                    ),
+                  },
+                ]}
+              />
+            </>
+          )}
 
           <Typography.Title level={5} style={{ marginBottom: 0 }}>
             Ответственные пользователи
@@ -956,8 +1170,24 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
             Платёжные системы
           </Typography.Title>
           <Typography.Text type="secondary">
-            Без сопоставления платёж Bitrix не меняет деньги заказа ERP.
+            Без сопоставления платёж Bitrix не меняет деньги заказа ERP. В виджете доступны
+            только активные системы с включённым переключателем.
           </Typography.Text>
+          <Space wrap>
+            <Button
+              icon={<ReloadOutlined />}
+              loading={catalogRefreshing}
+              onClick={() => void refreshPaymentSystems()}
+            >
+              Обновить платёжные системы Bitrix
+            </Button>
+            <Typography.Text type="secondary">
+              Последнее обновление: {formatDateTime(
+                health?.paymentSystemCatalogLastFetchedAt ??
+                  mappings.map((mapping) => mapping.lastFetchedAt).find(Boolean) ?? null,
+              )}
+            </Typography.Text>
+          </Space>
           <Table<Bitrix24PaymentTypeMapping>
             rowKey="paySystemId"
             loading={settingsLoading}
@@ -983,6 +1213,44 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
                     style={{ width: '100%' }}
                     onChange={(value) =>
                       void updateMapping(mapping, Number(value), true)}
+                  />
+                ),
+              },
+              {
+                title: 'В виджете',
+                key: 'widgetEnabled',
+                width: 100,
+                render: (_, mapping) => (
+                  <Switch
+                    checked={mapping.widgetEnabled}
+                    disabled={mapping.typePaidId === null || !mapping.active}
+                    onChange={(widgetEnabled) =>
+                      void updateMapping(
+                        mapping,
+                        mapping.typePaidId,
+                        mapping.active,
+                        widgetEnabled,
+                        widgetEnabled ? mapping.isDefault : false,
+                      )}
+                  />
+                ),
+              },
+              {
+                title: 'По умолчанию',
+                key: 'isDefault',
+                width: 120,
+                render: (_, mapping) => (
+                  <Switch
+                    checked={mapping.isDefault}
+                    disabled={!mapping.active || !mapping.widgetEnabled}
+                    onChange={(isDefault) =>
+                      void updateMapping(
+                        mapping,
+                        mapping.typePaidId,
+                        mapping.active,
+                        mapping.widgetEnabled,
+                        isDefault,
+                      )}
                   />
                 ),
               },

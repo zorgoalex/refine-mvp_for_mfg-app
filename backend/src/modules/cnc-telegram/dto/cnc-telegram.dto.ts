@@ -260,6 +260,16 @@ export interface CncTelegramTodayResponseDto {
   workday: string;
   generatedAt: string;
   columns: CncTelegramTodayColumnDto[];
+  operationalWindow?: { dateFrom: string; dateTo: string };
+  historicalBathReadiness?: CncHistoricalBathReadinessDto[];
+}
+
+/** Calculation inputs only; never render these as historical cards. */
+export interface CncHistoricalBathReadinessDto {
+  bathCardId: string;
+  forced: boolean;
+  items: Array<Pick<CncTelegramBathItemDto,
+    'orderId' | 'orderName' | 'detailId' | 'detailNumber' | 'quantity'>>;
 }
 
 export interface CncTelegramOriginalPacketDto extends CncTelegramPacketDto {

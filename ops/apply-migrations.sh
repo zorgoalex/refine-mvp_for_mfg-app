@@ -1834,6 +1834,29 @@ probe_file() {
                           AND rps.scope_key = 'orders.delete'
                           AND rps.scope_value = 'own'
                      );" ;;
+    147_bitrix24_payment_widget*) probe_all \
+                     "$(q_col bitrix24_app_installation executor_bitrix_user_id)" \
+                     "$(q_col bitrix24_app_installation executor_is_admin)" \
+                     "$(q_con_on bitrix24_app_installation chk_bitrix24_installation_executor_user)" \
+                     "$(q_tbl bitrix24_app_install_attempt)" \
+                     "$(q_tbl bitrix24_widget_session)" \
+                     "$(q_tbl bitrix24_manual_payment_command)" \
+                     "$(q_tbl bitrix24_pay_system_catalog)" \
+                     "$(q_con_on bitrix24_manual_payment_command uq_bitrix24_manual_payment_idempotency)" \
+                     "$(q_con_on bitrix24_manual_payment_command chk_bitrix24_manual_payment_owner)" \
+                     "$(q_con_on bitrix24_manual_payment_command chk_bitrix24_manual_payment_overpayment_confirmation)" \
+                     "$(q_idx uq_bitrix24_manual_payment_remote_create)" \
+                     "$(q_col bitrix24_incoming_request_payment payment_local_date)" \
+                     "$(q_col bitrix24_incoming_request_payment manual_command_id)" \
+                     "$(q_con_on bitrix24_incoming_request_payment fk_bitrix24_request_payment_manual_command)" \
+                     "$(q_idx uq_bitrix24_request_payment_manual_command)" \
+                     "$(q_col bitrix24_payment_type_mapping widget_enabled)" \
+                     "$(q_col bitrix24_payment_type_mapping is_default)" \
+                     "$(q_idx uq_bitrix24_payment_type_mapping_widget_default)" \
+                     "SELECT count(*) = 2 FROM permissions_catalog WHERE permission_name IN ('bitrix24.payments.create','bitrix24.payments.confirm_overpayment');" ;;
+    147_mdf_order_status_detail_cascade*) probe_true \
+                     "SELECT obj_description(to_regclass('public.status_automation_rules')) =
+                       'Status automation rules; MDF order lifecycle cascade installed by migration 147';" ;;
     148_cut_job_number_reuse*) probe_all \
                      "$(q_col cnc_telegram_import_items requested_cut_job_id)" \
                      "$(q_con_on cnc_telegram_import_items chk_cnc_tg_import_requested_number)" \
@@ -1846,6 +1869,24 @@ probe_file() {
                          AND pg_get_expr(i.indexprs, i.indrelid) =
                            'NULLIF(btrim(source_display_number), ''''::text)'
                      );" ;;
+    149_cut_result_board_projection*) probe_all \
+                     "$(q_col cut_result_board_projection snapshot_digest)" \
+                     "$(q_col cut_result_board_projection is_vacuum)" \
+                     "$(q_col cut_result_board_projection cut_job_name)" \
+                     "$(q_col cut_result_board_projection result_created_at)" \
+                     "SELECT to_regprocedure('public.project_cut_result_board_metadata(bigint)') IS NOT NULL;" \
+                     "SELECT to_regprocedure('public.cut_result_snapshot_is_vacuum(jsonb)') IS NOT NULL;" \
+                     "SELECT EXISTS (SELECT 1 FROM pg_index WHERE indexrelid = to_regclass('public.idx_cut_result_board_vacuum_created') AND indisvalid);" \
+                     "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = to_regclass('public.cut_result') AND tgname = 'trg_cut_result_board_projection' AND tgenabled = 'O');" \
+                     "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = to_regclass('public.cut_result_board_projection') AND tgname = 'trg_cut_result_board_projection_guard' AND tgenabled = 'O');" ;;
+    150_cut_result_board_projection_backfill*) probe_true "SELECT NOT EXISTS (
+                     SELECT 1 FROM cut_result r
+                     LEFT JOIN cut_result_board_projection p USING (cut_result_id)
+                     WHERE p.cut_result_id IS NULL OR p.snapshot_digest IS DISTINCT FROM r.snapshot_digest
+                        OR p.result_created_at IS DISTINCT FROM r.created_at
+                        OR p.is_vacuum IS DISTINCT FROM cut_result_snapshot_is_vacuum(r.snapshot_job)
+                        OR p.cut_job_name IS DISTINCT FROM r.snapshot_job ->> 'name'
+                     );" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -1856,7 +1897,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*|127_*|128_*|129_*|130_*|131_*|132_*|133_*|134_*|135_*|136_*|137_*|138_*|139_*|140_*|141_*|142_*|143_*|144_*|145_*|146_*|148_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*|127_*|128_*|129_*|130_*|131_*|132_*|133_*|134_*|135_*|136_*|137_*|138_*|139_*|140_*|141_*|142_*|143_*|144_*|145_*|146_*|147_*|148_*|149_*|150_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac
@@ -2159,7 +2200,8 @@ case "$MODE" in
     PROBE_MATCHES=0
     for f in "${FILES[@]}"; do
       if [ "$f" = "${TARGETS[0]}" ] \
-         || [ "$(version_of "$f")" = "$(version_of "${TARGETS[0]}")" ]; then
+         || { [[ "${TARGETS[0]}" =~ ^[0-9]+$ ]] \
+              && [ "$(version_of "$f")" = "$(version_of "${TARGETS[0]}")" ]; }; then
         PROBE_TARGET="$f"
         PROBE_MATCHES=$((PROBE_MATCHES + 1))
       fi

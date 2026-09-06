@@ -57,6 +57,8 @@ const DANGEROUS_PERMISSIONS = new Set<PermissionName>([
   'users.manage_sso',
   'orders.delete',
   'payments.delete',
+  'bitrix24.payments.create',
+  'bitrix24.payments.confirm_overpayment',
   'settings.manage',
   'audit.technical.view',
 ]);

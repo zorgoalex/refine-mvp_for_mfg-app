@@ -16,6 +16,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { PermissionsGuard } from '../../../permissions/permissions.guard';
 import { RequirePermissions } from '../../../permissions/require-permissions.decorator';
+import { Bitrix24ReverseProcessorService } from './bitrix24-reverse-processor.service';
 import { PgBitrix24ReverseRepository } from './pg-bitrix24-reverse-repository';
 
 const positiveId = z.coerce.number().int().positive();
@@ -40,7 +41,10 @@ const requestDetailSchema = z.object({
 @UseGuards(PermissionsGuard)
 @Controller('bitrix24')
 export class Bitrix24ReverseAdminController {
-  constructor(private readonly repository: PgBitrix24ReverseRepository) {}
+  constructor(
+    private readonly repository: PgBitrix24ReverseRepository,
+    private readonly processor: Bitrix24ReverseProcessorService,
+  ) {}
 
   @ApiOperation({ summary: 'List Bitrix24 incoming requests' })
   @Get('incoming-requests')
@@ -167,10 +171,15 @@ export class Bitrix24ReverseAdminController {
   materializePayments(
     @Req() request: RequestWithCurrentUser,
     @Param('requestId') requestId: string,
+    @Body() body: unknown,
   ) {
     const actor = requireUser(request);
+    const parsed = materializePaymentsSchema.safeParse(body);
+    if (!parsed.success) throw validationError(parsed.error);
     return this.repository.materializeRequestPayments({
       requestId: parseId(requestId, 'requestId'),
+      bitrixPaymentIds: parsed.data.bitrixPaymentIds,
+      expectedOrderVersion: parsed.data.expectedOrderVersion,
       actorUserId: actor.id,
       auditRequestId: requireRequestId(request),
       scope: crmRequestScope(actor),
@@ -184,14 +193,56 @@ export class Bitrix24ReverseAdminController {
   materializeMappedOrderPayments(
     @Req() request: RequestWithCurrentUser,
     @Param('orderId') orderId: string,
+    @Body() body: unknown,
   ) {
     const actor = requireUser(request);
+    const parsed = materializePaymentsSchema.safeParse(body);
+    if (!parsed.success) throw validationError(parsed.error);
     return this.repository.materializeMappedOrderPayments({
       orderId: parseId(orderId, 'orderId'),
+      bitrixPaymentIds: parsed.data.bitrixPaymentIds,
+      expectedOrderVersion: parsed.data.expectedOrderVersion,
       actorUserId: actor.id,
       auditRequestId: requireRequestId(request),
       scope: crmRequestScope(actor),
     });
+  }
+
+  @ApiOperation({ summary: 'List Bitrix24 payment snapshots for a mapped ERP order' })
+  @Get('mapped-orders/:orderId/payments')
+  @RequirePermissions('orders.view_financials')
+  getMappedOrderPayments(
+    @Req() request: RequestWithCurrentUser,
+    @Param('orderId') orderId: string,
+  ) {
+    const actor = requireUser(request);
+    return this.repository.getMappedOrderPayments(
+      parseId(orderId, 'orderId'),
+      crmRequestScope(actor),
+    );
+  }
+
+  @ApiOperation({ summary: 'Refresh Bitrix24 payment snapshots for a mapped ERP order' })
+  @Post('mapped-orders/:orderId/reconcile-payments')
+  @HttpCode(200)
+  @RequirePermissions('orders.view_financials')
+  async reconcileMappedOrderPayments(
+    @Req() request: RequestWithCurrentUser,
+    @Param('orderId') orderIdValue: string,
+  ) {
+    const actor = requireUser(request);
+    const orderId = parseId(orderIdValue, 'orderId');
+    const scope = crmRequestScope(actor);
+    const current = await this.repository.getMappedOrderPayments(orderId, scope);
+    if (current.linked !== true || typeof current.bitrixDealId !== 'string') {
+      return current;
+    }
+    await this.processor.reconcileMappedOrderPaymentsNow({
+      dealId: current.bitrixDealId,
+      orderId,
+      auditRequestId: requireRequestId(request),
+    });
+    return this.repository.getMappedOrderPayments(orderId, scope);
   }
 
   @ApiOperation({ summary: 'List Bitrix24 responsible-user mappings' })
@@ -255,12 +306,16 @@ export class Bitrix24ReverseAdminController {
     const parsed = z.object({
       typePaidId: positiveId,
       active: z.boolean(),
+      widgetEnabled: z.boolean().optional(),
+      isDefault: z.boolean().optional(),
     }).strict().safeParse(body);
     if (!parsed.success) throw validationError(parsed.error);
     return this.repository.upsertPaymentTypeMapping({
       paySystemId: parseId(paySystemId, 'paySystemId'),
       typePaidId: parsed.data.typePaidId,
       active: parsed.data.active,
+      widgetEnabled: parsed.data.widgetEnabled,
+      isDefault: parsed.data.isDefault,
       actorUserId: actor.id,
       auditRequestId: requireRequestId(request),
     });
@@ -287,6 +342,12 @@ export class Bitrix24ReverseAdminController {
     };
   }
 }
+
+const materializePaymentsSchema = z.object({
+  bitrixPaymentIds: z.array(z.string().regex(/^[1-9][0-9]*$/)).min(1).max(500)
+    .refine((values) => new Set(values).size === values.length, 'Payment IDs must be unique'),
+  expectedOrderVersion: positiveId,
+}).strict();
 
 function parseId(value: string, field: string): number {
   const parsed = positiveId.safeParse(value);
