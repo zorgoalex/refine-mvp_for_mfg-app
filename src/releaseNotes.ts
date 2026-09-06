@@ -41,6 +41,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-09-06",
+    title: "Bitrix24: виджет оплаты и сверка платежей",
+    services: ["ERP", "CRM"],
+    repositories: ["repo_erp"],
+    added: [
+      "После подключения виджета вкладка «Оплата ERP» в сделке Bitrix24 позволяет регистрировать оплату для связанного заказа или CRM-заявки.",
+      "В настройках синхронизации доступны обновление платёжных систем Bitrix, выбор систем для виджета и системы по умолчанию. В финансах заказа доступна сверка платежей Bitrix.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-09-06",
     title: "МДФ-работы: быстрая загрузка и месячное окно",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
