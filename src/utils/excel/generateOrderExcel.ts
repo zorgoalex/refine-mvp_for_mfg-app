@@ -53,12 +53,14 @@ export const buildOrderExcelBufferInWorker = (params: GenerateOrderExcelParams):
         return;
       }
 
-      if (response.error.name === 'ExcelGenerationError') {
-        reject(new ExcelGenerationError(response.error.message));
-        return;
-      }
+      if ('error' in response) {
+        if (response.error.name === 'ExcelGenerationError') {
+          reject(new ExcelGenerationError(response.error.message));
+          return;
+        }
 
-      reject(new Error(response.error.message));
+        reject(new Error(response.error.message));
+      }
     };
 
     worker.onerror = (event) => {
