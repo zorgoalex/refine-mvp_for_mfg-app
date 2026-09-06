@@ -131,6 +131,25 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     ]) expect(scriptText).toContain(marker);
   });
 
+  it('classifies widget 147 separately from MDF 147 and verifies payment safety markers', () => {
+    const start = probeFn.indexOf('147_bitrix24_payment_widget*)');
+    const end = probeFn.indexOf('147_mdf_order_status_detail_cascade*)');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const arm = probeFn.slice(start, end);
+    for (const marker of [
+      'executor_bitrix_user_id', 'executor_is_admin',
+      'q_tbl bitrix24_app_install_attempt', 'q_tbl bitrix24_widget_session',
+      'q_tbl bitrix24_manual_payment_command', 'q_tbl bitrix24_pay_system_catalog',
+      'uq_bitrix24_manual_payment_idempotency', 'uq_bitrix24_manual_payment_remote_create',
+      'chk_bitrix24_manual_payment_owner', 'chk_bitrix24_manual_payment_overpayment_confirmation',
+      'payment_local_date', 'manual_command_id', 'fk_bitrix24_request_payment_manual_command',
+      'uq_bitrix24_request_payment_manual_command', 'widget_enabled', 'is_default',
+      'uq_bitrix24_payment_type_mapping_widget_default',
+      'bitrix24.payments.create', 'bitrix24.payments.confirm_overpayment',
+    ]) expect(arm).toContain(marker);
+  });
+
   it('requires migration 148 active-number index and durable import-number probes', () => {
     const verifyStart = scriptText.indexOf('verify_applied_effect() {');
     const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
@@ -516,4 +535,13 @@ describe('apply-migrations.sh auto — detect-only against the live erp_test con
     expect(out).not.toMatch(/PENDING \(will apply\)/);
     expect(out).not.toMatch(/no classification/);
   }, 180_000);
+
+  it.skipIf(!containerUp)('probes widget by full filename despite another migration 147', () => {
+    expect(run(['probe', '147_bitrix24_payment_widget.sql']))
+      .toContain('147_bitrix24_payment_widget.sql PRESENT');
+  });
+
+  it.skipIf(!containerUp)('rejects an ambiguous numeric version 147', () => {
+    expect(() => run(['probe', '147'])).toThrow();
+  });
 });

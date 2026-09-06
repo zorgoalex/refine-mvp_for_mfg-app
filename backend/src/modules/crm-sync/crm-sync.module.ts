@@ -2,6 +2,7 @@ import { Logger, Module } from '@nestjs/common';
 import { DatabaseModule } from '../../database/database.module';
 import { PermissionsModule } from '../../permissions/permissions.module';
 import { PermissionsGuard } from '../../permissions/permissions.guard';
+import { PermissionsService } from '../../permissions/permissions.service';
 import { DatabaseService } from '../../database/database.service';
 import { AuditService } from '../../common/audit/audit.service';
 import { CrmSyncRuntimeConfigService } from './http/crm-sync-runtime-config.service';
@@ -24,6 +25,15 @@ import { Bitrix24ReverseIngressService } from './reverse/bitrix24-reverse-ingres
 import { Bitrix24ReverseProcessorService } from './reverse/bitrix24-reverse-processor.service';
 import { Bitrix24ReverseSchedulerService } from './reverse/bitrix24-reverse-scheduler.service';
 import { PgBitrix24ReverseRepository } from './reverse/pg-bitrix24-reverse-repository';
+import { Bitrix24ManualPaymentCommandService } from './widget/bitrix24-manual-payment-command.service';
+import { Bitrix24PaymentWidgetAuthService } from './widget/bitrix24-payment-widget-auth.service';
+import { Bitrix24PaymentWidgetController } from './widget/bitrix24-payment-widget.controller';
+import { Bitrix24PaymentWidgetInstallController } from './widget/bitrix24-payment-widget-install.controller';
+import { Bitrix24PaymentWidgetInstallService } from './widget/bitrix24-payment-widget-install.service';
+import { Bitrix24PaymentWidgetRepository } from './widget/bitrix24-payment-widget.repository';
+import { Bitrix24PaymentWidgetSchedulerService } from './widget/bitrix24-payment-widget-scheduler.service';
+import { Bitrix24PaymentSystemCatalogService } from './widget/bitrix24-payment-system-catalog.service';
+import { Bitrix24PaymentWidgetAdminController } from './widget/bitrix24-payment-widget-admin.controller';
 import type { Bitrix24ApiPort } from './adapters/bitrix24-api-client';
 
 const BITRIX24_API_PORT = Symbol('BITRIX24_API_PORT');
@@ -35,6 +45,9 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
     Bitrix24ReverseController,
     Bitrix24ReverseAdminController,
     Bitrix24OrderConversionController,
+    Bitrix24PaymentWidgetController,
+    Bitrix24PaymentWidgetInstallController,
+    Bitrix24PaymentWidgetAdminController,
   ],
   providers: [
     CrmSyncRuntimeConfigService,
@@ -42,6 +55,12 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
     PgCrmSyncMappingRepository,
     PgCrmSyncOutboxRepository,
     PermissionsGuard,
+    {
+      provide: Bitrix24PaymentWidgetRepository,
+      useFactory: (database: DatabaseService, audit: AuditService) =>
+        new Bitrix24PaymentWidgetRepository(database, audit),
+      inject: [DatabaseService, AuditService],
+    },
     {
       provide: BITRIX24_API_PORT,
       useFactory: (config: CrmSyncRuntimeConfigService): Bitrix24ApiPort => {
@@ -76,9 +95,17 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
     },
     {
       provide: PgBitrix24ReverseRepository,
-      useFactory: (database: DatabaseService, audit: AuditService) =>
-        new PgBitrix24ReverseRepository(database, audit),
-      inject: [DatabaseService, AuditService],
+      useFactory: (
+        database: DatabaseService,
+        audit: AuditService,
+        config: CrmSyncRuntimeConfigService,
+      ) => new PgBitrix24ReverseRepository(
+        database,
+        audit,
+        config.getReverseSync().portalTimezone,
+        config.getReverseSync().portalDomain,
+      ),
+      inject: [DatabaseService, AuditService, CrmSyncRuntimeConfigService],
     },
     {
       provide: Bitrix24LocalAppClient,
@@ -95,6 +122,39 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
       ) => new Bitrix24ReverseIngressService(repository, config, localApp),
       inject: [
         PgBitrix24ReverseRepository,
+        CrmSyncRuntimeConfigService,
+        Bitrix24LocalAppClient,
+      ],
+    },
+    {
+      provide: Bitrix24PaymentWidgetAuthService,
+      useFactory: (
+        repository: Bitrix24PaymentWidgetRepository,
+        permissions: PermissionsService,
+        config: CrmSyncRuntimeConfigService,
+        localApp: Bitrix24LocalAppClient,
+      ) => new Bitrix24PaymentWidgetAuthService(
+        repository,
+        permissions,
+        config,
+        localApp,
+      ),
+      inject: [
+        Bitrix24PaymentWidgetRepository,
+        PermissionsService,
+        CrmSyncRuntimeConfigService,
+        Bitrix24LocalAppClient,
+      ],
+    },
+    {
+      provide: Bitrix24PaymentWidgetInstallService,
+      useFactory: (
+        repository: Bitrix24PaymentWidgetRepository,
+        config: CrmSyncRuntimeConfigService,
+        localApp: Bitrix24LocalAppClient,
+      ) => new Bitrix24PaymentWidgetInstallService(repository, config, localApp),
+      inject: [
+        Bitrix24PaymentWidgetRepository,
         CrmSyncRuntimeConfigService,
         Bitrix24LocalAppClient,
       ],
@@ -158,6 +218,60 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
       inject: [
         PgBitrix24ReverseRepository,
         BITRIX24_REVERSE_API_PORT,
+        CrmSyncRuntimeConfigService,
+      ],
+    },
+    {
+      provide: Bitrix24ManualPaymentCommandService,
+      useFactory: (
+        repository: Bitrix24PaymentWidgetRepository,
+        auth: Bitrix24PaymentWidgetAuthService,
+        localApp: Bitrix24LocalAppClient,
+        installationTokens: Bitrix24OAuthTokenService,
+        config: CrmSyncRuntimeConfigService,
+        catalog: Bitrix24PaymentSystemCatalogService,
+      ) => new Bitrix24ManualPaymentCommandService(
+        repository,
+        auth,
+        localApp,
+        installationTokens,
+        config,
+        catalog,
+      ),
+      inject: [
+        Bitrix24PaymentWidgetRepository,
+        Bitrix24PaymentWidgetAuthService,
+        Bitrix24LocalAppClient,
+        Bitrix24OAuthTokenService,
+        CrmSyncRuntimeConfigService,
+        Bitrix24PaymentSystemCatalogService,
+      ],
+    },
+    {
+      provide: Bitrix24PaymentSystemCatalogService,
+      useFactory: (
+        repository: Bitrix24PaymentWidgetRepository,
+        localApp: Bitrix24LocalAppClient,
+        tokens: Bitrix24OAuthTokenService,
+        config: CrmSyncRuntimeConfigService,
+      ) => new Bitrix24PaymentSystemCatalogService(repository, localApp, tokens, config),
+      inject: [
+        Bitrix24PaymentWidgetRepository,
+        Bitrix24LocalAppClient,
+        Bitrix24OAuthTokenService,
+        CrmSyncRuntimeConfigService,
+      ],
+    },
+    {
+      provide: Bitrix24PaymentWidgetSchedulerService,
+      useFactory: (
+        commands: Bitrix24ManualPaymentCommandService,
+        repository: Bitrix24PaymentWidgetRepository,
+        config: CrmSyncRuntimeConfigService,
+      ) => new Bitrix24PaymentWidgetSchedulerService(commands, repository, config),
+      inject: [
+        Bitrix24ManualPaymentCommandService,
+        Bitrix24PaymentWidgetRepository,
         CrmSyncRuntimeConfigService,
       ],
     },

@@ -89,6 +89,31 @@ export class Bitrix24OAuthTokenService {
     await this.refreshDomain(domain, true, this.requireCredentials());
   }
 
+  async refreshCallerToken(input: {
+    domain: string;
+    memberId: string;
+    refreshToken: string;
+  }): Promise<{ accessToken: string; refreshToken: string; expiresAt: Date }> {
+    const settings = this.requireCredentials();
+    const refreshed = await this.refresh({
+      clientId: settings.appClientId,
+      clientSecret: settings.appClientSecret,
+      refreshToken: input.refreshToken,
+    });
+    if (refreshed.domain !== input.domain || refreshed.memberId !== input.memberId) {
+      throw new ApiError(
+        502,
+        'BITRIX24_OAUTH_CONTEXT_MISMATCH',
+        'Bitrix24 OAuth refresh returned another portal context',
+      );
+    }
+    return {
+      accessToken: refreshed.accessToken,
+      refreshToken: refreshed.refreshToken,
+      expiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
+    };
+  }
+
   private async refreshDomain(
     domain: string,
     force: boolean,

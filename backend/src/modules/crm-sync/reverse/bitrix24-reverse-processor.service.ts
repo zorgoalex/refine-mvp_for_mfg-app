@@ -1,5 +1,6 @@
 import type { Bitrix24ApiPort } from '../adapters/bitrix24-api-client';
 import { Bitrix24ApiError } from '../adapters/bitrix24-api-client';
+import { ApiError } from '../../../common/errors/api-error';
 import { BITRIX24_ENTITY_TYPE } from '../application/bitrix24-sync-mapper';
 import { CrmSyncRuntimeConfigService } from '../http/crm-sync-runtime-config.service';
 import {
@@ -104,6 +105,28 @@ export class Bitrix24ReverseProcessorService {
       batchSize: flags.batchSize,
       intervalMs: flags.reconcileIntervalMs,
     });
+  }
+
+  async reconcileMappedOrderPaymentsNow(input: {
+    dealId: string;
+    orderId: number;
+    auditRequestId: string;
+  }): Promise<void> {
+    const flags = this.config.getReverseSync();
+    if (!flags.enabled || flags.dryRun) {
+      throw new ApiError(
+        503,
+        'BITRIX24_REVERSE_SYNC_DISABLED',
+        'Bitrix24 reverse synchronization is not active',
+      );
+    }
+    await this.assertReady();
+    await this.reconcileMappedOrderPayments(
+      input.dealId,
+      input.orderId,
+      input.auditRequestId,
+      undefined,
+    );
   }
 
   private async processEvent(
@@ -269,7 +292,7 @@ export class Bitrix24ReverseProcessorService {
     dealId: string,
     orderId: number,
     auditRequestId: string,
-    lockToken: string,
+    lockToken?: string,
   ): Promise<void> {
     const payments = await this.loadManualPayments(dealId);
     await this.repository.replaceMappedOrderPaymentSnapshots(
@@ -277,6 +300,7 @@ export class Bitrix24ReverseProcessorService {
       payments,
       auditRequestId,
       lockToken,
+      dealId,
     );
   }
 

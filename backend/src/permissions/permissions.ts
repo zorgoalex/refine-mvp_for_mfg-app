@@ -69,6 +69,8 @@ export const PERMISSIONS = [
   'bitrix24.requests.update',
   'bitrix24.requests.convert',
   'bitrix24.payments.materialize',
+  'bitrix24.payments.create',
+  'bitrix24.payments.confirm_overpayment',
   'bitrix24.integration.manage',
 
   'suppliers.view',
@@ -234,6 +236,8 @@ export const ROLE_PERMISSIONS = {
     'bitrix24.requests.update',
     'bitrix24.requests.convert',
     'bitrix24.payments.materialize',
+    'bitrix24.payments.create',
+    'bitrix24.payments.confirm_overpayment',
 
     'suppliers.view',
     'suppliers.manage',
@@ -326,6 +330,7 @@ export const ROLE_PERMISSIONS = {
     'bitrix24.requests.update',
     'bitrix24.requests.convert',
     'bitrix24.payments.materialize',
+    'bitrix24.payments.create',
 
     'suppliers.view',
     'vendors.view',
