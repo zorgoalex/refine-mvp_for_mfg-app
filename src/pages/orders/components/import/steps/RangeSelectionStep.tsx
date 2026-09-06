@@ -340,6 +340,9 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
           min-width: 0;
           touch-action: none;
           overscroll-behavior: contain;
+          /* Virtual spacers already preserve row positions; native anchoring
+             can move scrollTop backwards when the rendered window changes. */
+          overflow-anchor: none;
         }
         .excel-grid {
           display: grid;

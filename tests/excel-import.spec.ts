@@ -9,7 +9,7 @@ test.use({ actionTimeout: 15_000,
   ...(process.env.PLAYWRIGHT_BASE_URL ? { baseURL: process.env.PLAYWRIGHT_BASE_URL } : {}),
 });
 
-async function openImport(page: Page, mode: 'create' | 'edit' = 'create', prepare?: () => Promise<void>, savedDetail = false) {
+async function openImport(page: Page, mode: 'create' | 'edit' = 'create', prepare?: () => Promise<void>, savedDetail = false, uiVariant: 'legacy' | 'air' = 'legacy') {
   const db = createWorkflowMockDb();
   db.orders.push({ order_id: 501, order_name: 'Excel 501', client_id: 1, manager_id: 1,
     order_date: '2026-09-05', order_status_id: 1, payment_status_id: 2, production_status_id: 1,
@@ -18,7 +18,7 @@ async function openImport(page: Page, mode: 'create' | 'edit' = 'create', prepar
   if (savedDetail) db.order_details.push({ detail_id: 9001, order_id: 501, detail_number: 1,
     height: 999, width: 500, quantity: 1, area: 0.499, milling_type_id: 1, edge_type_id: 1,
     material_id: null, sheet_material_type_id: 1, note: 'Сохранённая деталь', delete_flag: false, version: 1 });
-  await setupWorkflowMockApi(page, db, { uiVariant: 'legacy' });
+  await setupWorkflowMockApi(page, db, { uiVariant });
   await page.route('**/api/v1/me/preferences/reference-usage', route => route.fulfill({
     json: { preferences: { recentReferences: {} } },
   }));
@@ -29,7 +29,7 @@ async function openImport(page: Page, mode: 'create' | 'edit' = 'create', prepar
     await page.goto('/orders');
     await page.getByRole('button', { name: 'Создать заказ' }).click();
   } else await page.goto('/orders/edit/501');
-  await page.getByRole('tab', { name: 'Детали заказа', exact: true }).click();
+  await page.getByRole('tab', { name: uiVariant === 'air' ? 'Состав' : 'Детали заказа', exact: true }).click();
   await prepare?.();
   await page.getByRole('button', { name: 'Импорт деталей из файла', exact: true }).click();
   await page.getByRole('menuitem', { name: /Импорт из Excel/ }).click();
@@ -44,7 +44,7 @@ async function upload(dialog: Locator, buffer: Buffer) {
   await dialog.getByRole('button', { name: /Далее/ }).click();
   await expect(dialog.getByTestId('excel-range-grid')).toBeVisible();
   const bounds = await dialog.boundingBox();
-  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(720);
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(await dialog.page().evaluate(() => window.innerHeight));
 }
 
 async function exportBuffer(count = 170) {
@@ -176,6 +176,52 @@ test('small repeated imports fill the remaining starting slots and preserve mate
     }
   }
 });
+
+for (const [count, uiVariant] of [[48, 'legacy'], [66, 'air']] as const) {
+  test(`${uiVariant}: ${count} Excel details scroll without anchoring or blank virtual rows`, async ({ page }) => {
+    await page.setViewportSize({ width: 1546, height: 1006 });
+    const dialog = await openImport(page, 'create', undefined, false, uiVariant);
+    await upload(dialog, await exportBuffer(count));
+    const grid = dialog.getByTestId('excel-range-grid');
+    const rangeText = `A11:K${count + 11}`;
+    await expect(dialog.locator('.ant-tag')).toContainText([rangeText]);
+    // Native anchoring caused reversals in the user's Chrome/Edge. Headless
+    // engines may not reproduce them, so explicitly protect the opt-out too.
+    await expect(grid).toHaveCSS('overflow-anchor', 'none');
+    const box = (await grid.boundingBox())!;
+    await page.mouse.move(box.x + 938, box.y + box.height / 2);
+    let previousTop = 0;
+    let sawLastDetail = false;
+    for (let i = 0; i < 80; i++) {
+      // Non-row-sized wheel steps exercise changes between virtual windows.
+      await page.mouse.wheel(0, 37);
+      const state = await grid.evaluate(async (node, lastDetailRow) => {
+        for (let frame = 0; frame < 2; frame++) await new Promise(requestAnimationFrame);
+        const bounds = node.getBoundingClientRect();
+        const first = node.querySelector<HTMLElement>('[data-row][data-col="1"]')!;
+        const last = node.querySelector(`[data-row="${lastDetailRow}"][data-col="1"]`)?.getBoundingClientRect();
+        return {
+          top: node.scrollTop,
+          expectedFirst: Math.max(0, Math.floor((node.scrollTop - 52) / 26) - 8),
+          firstRow: Number(first.dataset.row),
+          gap: first.getBoundingClientRect().top - bounds.top - 52,
+          lastVisible: !!last && last.top >= bounds.top + 52 && last.bottom <= bounds.top + node.clientHeight,
+          remaining: node.scrollHeight - node.clientHeight - node.scrollTop,
+        };
+      }, count + 10);
+      expect(state.top).toBeGreaterThanOrEqual(previousTop);
+      expect(state.firstRow).toBeLessThanOrEqual(state.expectedFirst + 2);
+      expect(state.gap).toBeLessThanOrEqual(1);
+      previousTop = state.top;
+      sawLastDetail ||= state.lastVisible;
+      if (state.remaining <= 1) break;
+    }
+    expect(sawLastDetail).toBe(true);
+    expect(await grid.evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop)).toBeLessThanOrEqual(1);
+    await expect(dialog.locator('.ant-tag')).toContainText([rangeText]);
+    await expect(grid).toHaveAttribute('data-selecting', 'false');
+  });
+}
 
 test('burst wheel scrolling stays at the bottom without changing the recognized range', async ({ page }) => {
   const dialog = await openImport(page);

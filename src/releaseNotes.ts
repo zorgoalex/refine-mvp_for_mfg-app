@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-09-06",
+    title: "Excel: прокрутка выбранной области",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Убран принудительный возврат вверх при прокрутке предпросмотра Excel в Chrome и Edge: нижние строки выбранной области снова доступны для просмотра.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-09-06",
     title: "МДФ-работы: быстрая загрузка и месячное окно",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
