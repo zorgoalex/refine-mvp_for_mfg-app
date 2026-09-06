@@ -7,10 +7,7 @@ import type { CncHistoricalBathReadinessDto } from '../dto/cnc-telegram.dto';
 import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
-import {
-  CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE,
-  CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE,
-} from '../../../shared/cnc-material';
+import { cncPacketCountsForMdfReadinessSql } from '../../../shared/cnc-material';
 import {
   CUT_RENDER_STYLES_SETTING_KEY,
   CUT_RENDER_STYLE_TELEGRAM_PHOTO,
@@ -113,21 +110,6 @@ const CNC_AUTO_CUT_STATUS_CONFIGURE_EVENT = 'cnc.telegram_packet.auto_cut_status
 const IGNORED_ANALYSIS_WARNINGS = new Set([
   'RapidOCR found text, but no detail rows with order and size',
 ]);
-
-function cncPacketCountsForMdfReadinessSql(packetAlias: 'p' | 'packet'): string {
-  return `(
-    COALESCE(${packetAlias}.material_name, '') ~* '${CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE}'
-    AND COALESCE(${packetAlias}.material_name, '') !~* '${CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE}'
-    AND COALESCE(${packetAlias}.program_name, '') !~* '${CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE}'
-    AND COALESCE(${packetAlias}.external_packet_key, '') !~* '${CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE}'
-    AND NOT EXISTS (
-      SELECT 1
-      FROM jsonb_array_elements_text(COALESCE(${packetAlias}.comments_json, '[]'::jsonb))
-        AS material_comment(comment_text)
-      WHERE material_comment.comment_text ~* '${CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE}'
-    )
-  )`;
-}
 
 interface PacketJoinedRow extends QueryResultRow {
   packet_id: string;

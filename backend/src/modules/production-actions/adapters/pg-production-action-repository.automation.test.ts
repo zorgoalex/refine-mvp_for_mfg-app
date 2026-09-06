@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { TransactionClient } from '../../../database/database.types';
@@ -206,6 +207,101 @@ describe('production-action automation in-transaction actions', () => {
     });
     expect(Array.from(call?.[1].orderIds as Iterable<number>)).toEqual([15]);
   });
+
+  it('checks explicit MDF and all packet material metadata before counting laminated bath quantities', async () => {
+    const database = createAutomationTx({ updatedDetailIds: [101] });
+    await changeDetailsProductionStatusFromAutomationInTransaction(database.tx, 15, 7, automationContext());
+
+    const query = database.sql.find((sql) => sql.startsWith('WITH laminated_status_threshold AS'));
+    expect(query).toBeDefined();
+    expect(query).toContain("COALESCE(packet.material_name, '') ~* '(mdf|мдф)'");
+    for (const field of ['material_name', 'program_name', 'external_packet_key']) {
+      expect(query).toContain(`COALESCE(packet.${field}, '') !~*`);
+    }
+    expect(query).toContain("jsonb_array_elements_text(COALESCE(packet.comments_json, '[]'::jsonb))");
+    expect(query).not.toContain('LIKE ANY');
+    expect(query).toContain("packet.completion_status = 'completed' OR packet.thumbs_up = true");
+    expect(query).toContain('candidate.completed_quantity < candidate.quantity');
+    expect(query).toContain('candidate.laminated_or_later = false');
+  });
+
+  // Opt-in stage SQL smoke: all relations are temporary, no public-table writes.
+  it.runIf(process.env.MDF_MATERIAL_STAGE_SQL_TEST === '1')(
+    'evaluates real PostgreSQL bath quantities with filename material and unchanged status guards', async () => {
+      const database = createAutomationTx({ updatedDetailIds: [101] });
+      await changeDetailsProductionStatusFromAutomationInTransaction(database.tx, 15, 7, automationContext());
+      const query = database.sql.find((sql) => sql.startsWith('WITH laminated_status_threshold AS'));
+      expect(query).toBeDefined();
+      const cases: Array<{ name: string; update: string; eligible: boolean }> = [
+        { name: 'default MDF', update: '', eligible: true },
+        ...['fanera18', 'LDSP16', 'hdf3', 'khdf3', 'xdf3', 'dsp16', 'dvp3', 'osb12', 'osp12', 'akril4', 'plastik4', 'plywood18'].map((name) => ({
+          name: `filename ${name}`,
+          update: `UPDATE cnc_telegram_packets SET program_name = '2701_${name}mm.tap' WHERE packet_id = 1;`,
+          eligible: false,
+        })),
+        ...['МДФ 10мм', 'MDF16mm', 'ЛМДФ 18мм', 'new-MDF-type'].map((name) => ({
+          name,
+          update: `UPDATE cnc_telegram_packets SET material_name = '${name}';`,
+          eligible: true,
+        })),
+        { name: 'comment overrides MDF', update: `UPDATE cnc_telegram_packets SET comments_json = '["фанера 18мм"]' WHERE packet_id = 1;`, eligible: false },
+        { name: 'external key overrides MDF', update: `UPDATE cnc_telegram_packets SET external_packet_key = '2701_fanera18' WHERE packet_id = 1;`, eligible: false },
+        { name: 'explicit plywood', update: `UPDATE cnc_telegram_packets SET material_name = 'Фанера 18мм' WHERE packet_id = 1;`, eligible: false },
+        { name: 'unknown material', update: `UPDATE cnc_telegram_packets SET material_name = 'Не определён' WHERE packet_id = 1;`, eligible: false },
+        { name: 'empty material', update: `UPDATE cnc_telegram_packets SET material_name = '' WHERE packet_id = 1;`, eligible: false },
+        { name: 'null material', update: `UPDATE cnc_telegram_packets SET material_name = NULL WHERE packet_id = 1;`, eligible: false },
+        { name: 'null optional fields', update: `UPDATE cnc_telegram_packets SET program_name = NULL, comments_json = NULL;`, eligible: true },
+        { name: 'pending', update: `UPDATE cnc_telegram_packets SET completion_status = 'pending' WHERE packet_id = 1;`, eligible: false },
+        { name: 'thumbs up', update: `UPDATE cnc_telegram_packets SET completion_status = 'pending', thumbs_up = true WHERE packet_id = 1;`, eligible: true },
+        { name: 'thumbs up cannot bypass material', update: `UPDATE cnc_telegram_packets SET completion_status = 'pending', thumbs_up = true, program_name = '2701_fanera18.tap' WHERE packet_id = 1;`, eligible: false },
+        { name: 'insufficient quantity', update: `UPDATE cnc_telegram_packet_items SET quantity = 1 WHERE packet_id = 1;`, eligible: false },
+        { name: 'unmatched item', update: `UPDATE cnc_telegram_packet_items SET match_status = 'needs_review' WHERE packet_id = 1;`, eligible: false },
+        { name: 'not laminated', update: `UPDATE order_details SET production_status_id = 1 WHERE detail_id = 101;`, eligible: false },
+        { name: 'another bath detail not laminated', update: `UPDATE order_details SET production_status_id = 1 WHERE detail_id = 102;`, eligible: false },
+      ];
+      const fixture = `
+        BEGIN;
+        SET LOCAL search_path = pg_temp;
+        SET LOCAL statement_timeout = '5s';
+        CREATE TEMP TABLE production_statuses (production_status_id int, production_status_code text, production_status_name text, sort_order int);
+        CREATE TEMP TABLE cut_result (cut_result_id bigint, cut_job_id bigint, result_no int, revision_no int, created_at timestamptz, snapshot_job jsonb);
+        CREATE TEMP TABLE cut_result_placement (cut_result_id bigint, order_id bigint, order_detail_id bigint);
+        CREATE TEMP TABLE cut_job (cut_job_id bigint, current_cut_result_id bigint, param_profile_id bigint, status text, params jsonb);
+        CREATE TEMP TABLE cut_param_profiles (cut_param_profile_id bigint, params jsonb);
+        CREATE TEMP TABLE cut_result_archive_state (cut_job_id bigint, result_no int, archived_at timestamptz);
+        CREATE TEMP TABLE orders (order_id bigint, delete_flag boolean);
+        CREATE TEMP TABLE order_details (detail_id bigint, production_status_id int, delete_flag boolean);
+        CREATE TEMP TABLE cnc_telegram_packets (packet_id int, material_name text, program_name text, external_packet_key text, comments_json jsonb, completion_status text, thumbs_up boolean);
+        CREATE TEMP TABLE cnc_telegram_packet_items (packet_id int, match_detail_id bigint, quantity int, match_status text);
+        INSERT INTO production_statuses VALUES (1, 'cut', 'Крой', 10), (7, 'laminated', 'Закатан', 30);
+        INSERT INTO cut_result VALUES (701, 70, 1, 1, now(), '{}');
+        INSERT INTO cut_result_placement VALUES (701, 15, 101), (701, 15, 101), (701, 15, 102);
+        INSERT INTO cut_job VALUES (70, 701, NULL, 'active', '{"layout_mode":"vacuum_table"}');
+        INSERT INTO orders VALUES (15, false);
+        INSERT INTO order_details VALUES (101, 7, false), (102, 7, false);
+        INSERT INTO cnc_telegram_packets (packet_id) VALUES (1), (2);
+        INSERT INTO cnc_telegram_packet_items VALUES (1, 101, 2, 'matched'), (2, 102, 2, 'matched');
+        ${cases.map(({ update }) => `
+          UPDATE cnc_telegram_packets SET material_name = 'МДФ 16мм', program_name = '2701_MDF16.tap',
+            external_packet_key = 'telegram:test:1', comments_json = '[]', completion_status = 'completed', thumbs_up = false;
+          UPDATE cnc_telegram_packet_items SET quantity = 2, match_status = 'matched';
+          UPDATE order_details SET production_status_id = 7;
+          ${update}
+          SELECT count(*) FROM (${query!.replace('$1', 'ARRAY[101]')}) AS eligible_baths;
+        `).join('\n')}
+        ROLLBACK;
+      `;
+      const output = execFileSync('rtk', [
+        'docker', 'exec', '-i', 'erp_test-postgresdb-1', 'sh', '-c',
+        'exec psql -X -qAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"',
+      ], { input: fixture, encoding: 'utf8', timeout: 30_000 });
+      const counts = output.trim().split('\n');
+      expect(counts).toHaveLength(cases.length);
+      cases.forEach((testCase, index) => {
+        expect(counts[index], testCase.name).toBe(testCase.eligible ? '1' : '0');
+      });
+    }, 35_000,
+  );
 });
 
 interface AutomationTxOptions {
