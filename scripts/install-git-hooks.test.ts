@@ -122,7 +122,9 @@ describe('pre-push hook', () => {
       });
 
       expect(result.status).toBe(0);
-      expect(readFileSync(markerPath, 'utf8')).toBe('run test:business-references');
+      expect(readFileSync(markerPath, 'utf8')).toBe(
+        'run test:business-references -- --maxWorkers=1 --no-file-parallelism --exclude .claude/worktrees/**',
+      );
     } finally {
       rmSync(sandbox, { recursive: true, force: true });
     }
