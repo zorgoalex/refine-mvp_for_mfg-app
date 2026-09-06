@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(fileURLToPath(new URL('./pg-cnc-telegram-repository.ts', import.meta.url)), 'utf8');
+const classifier = readFileSync(fileURLToPath(new URL('../../../shared/cnc-material/index.ts', import.meta.url)), 'utf8');
 
 describe('MDF whole-order projection', () => {
   it('uses normalized keys and the shared strict MDF classifier', () => {
@@ -14,10 +15,9 @@ describe('MDF whole-order projection', () => {
     expect(cte).not.toContain('regexp_matches');
     expect(cte).toContain("cncPacketCountsForMdfReadinessSql('p')");
 
-    const classifier = source.slice(
-      source.indexOf('function cncPacketCountsForMdfReadinessSql('),
-      source.indexOf('interface PacketJoinedRow'),
-    );
+    expect(source).toContain("import { cncPacketCountsForMdfReadinessSql } from '../../../shared/cnc-material'");
+    expect(source).not.toContain('function cncPacketCountsForMdfReadinessSql(');
+    expect(classifier).toContain('export function cncPacketCountsForMdfReadinessSql(');
     expect(classifier).toContain('.material_name');
     expect(classifier).toContain('.program_name');
     expect(classifier).toContain('.external_packet_key');

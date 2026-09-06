@@ -19,6 +19,14 @@ const TYPE_LABELS: Record<string, string> = { svg: 'SVG', dxf: 'DXF', image: 'И
 const STATUS_COLORS: Record<string, string> = { ingested: 'green', used: 'blue', skipped: 'gold', failed: 'red', abandoned: 'volcano', completed: 'green', running: 'processing', succeeded: 'green', planned: 'processing', reconciled: 'green', ambiguous: 'volcano', incomplete: 'red' };
 export const TELEGRAM_WORKER_EXPECTED_POLL_INTERVAL_SECONDS = 60;
 
+export function telegramWorkerAuditErrorText(caught: unknown, fallback: string): string {
+  return caught instanceof ApiError && caught.status === 403
+    ? 'Нет права audit.view.'
+    : caught instanceof Error
+      ? caught.message
+      : fallback;
+}
+
 interface FilterValues {
   period?: [Dayjs, Dayjs];
   status?: TelegramWorkerMessageStatus;
@@ -147,7 +155,7 @@ const TelegramWorkerStructuredAudit: React.FC = () => {
       setData(response.data); setScans(response.scans); setPagination(response.pagination);
     } catch (caught) {
       setData([]); setScans([]);
-      setError(caught instanceof ApiError && caught.statusCode === 403 ? 'Нет права audit.view.' : caught instanceof Error ? caught.message : 'Не удалось загрузить журнал.');
+      setError(telegramWorkerAuditErrorText(caught, 'Не удалось загрузить журнал.'));
     } finally { setLoading(false); }
   }, [query]);
   const exportDetailed = useCallback(async () => {
@@ -162,13 +170,7 @@ const TelegramWorkerStructuredAudit: React.FC = () => {
       );
       message.success('Подробный JSON-журнал выгружен');
     } catch (caught) {
-      setError(
-        caught instanceof ApiError && caught.statusCode === 403
-          ? 'Нет права audit.view.'
-          : caught instanceof Error
-            ? caught.message
-            : 'Не удалось выгрузить JSON-журнал.',
-      );
+      setError(telegramWorkerAuditErrorText(caught, 'Не удалось выгрузить JSON-журнал.'));
     } finally {
       setExporting(false);
     }

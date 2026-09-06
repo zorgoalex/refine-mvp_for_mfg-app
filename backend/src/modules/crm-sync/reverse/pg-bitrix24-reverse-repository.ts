@@ -107,6 +107,8 @@ export class PgBitrix24ReverseRepository {
   constructor(
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
+    private readonly portalTimezone = 'Asia/Almaty',
+    private readonly portalDomain = 'mebelkz.bitrix24.kz',
   ) {}
 
   async assertReverseSyncReady(actorUserId: number): Promise<void> {
@@ -144,6 +146,8 @@ export class PgBitrix24ReverseRepository {
     accessTokenCiphertext: string;
     refreshTokenCiphertext: string;
     applicationTokenHash: string;
+    executorBitrixUserId?: string | null;
+    executorIsAdmin?: boolean;
     requestId: string;
   }): Promise<void> {
     const expiresAt = new Date(Date.now() + input.payload.expiresIn * 1000);
@@ -152,15 +156,18 @@ export class PgBitrix24ReverseRepository {
         `INSERT INTO bitrix24_app_installation (
            member_id, domain, access_token_ciphertext, refresh_token_ciphertext,
            access_token_expires_at, application_token_hash, status,
+           executor_bitrix_user_id, executor_is_admin,
            installed_at, refreshed_at, last_error, updated_at
          )
-         VALUES ($1,$2,$3,$4,$5,$6,'active',now(),NULL,NULL,now())
+         VALUES ($1,$2,$3,$4,$5,$6,'active',$7,$8,now(),NULL,NULL,now())
          ON CONFLICT (member_id) DO UPDATE SET
            domain=EXCLUDED.domain,
            access_token_ciphertext=EXCLUDED.access_token_ciphertext,
            refresh_token_ciphertext=EXCLUDED.refresh_token_ciphertext,
            access_token_expires_at=EXCLUDED.access_token_expires_at,
            application_token_hash=EXCLUDED.application_token_hash,
+           executor_bitrix_user_id=EXCLUDED.executor_bitrix_user_id,
+           executor_is_admin=EXCLUDED.executor_is_admin,
            status='active', last_error=NULL, updated_at=now()`,
         [
           input.payload.memberId,
@@ -169,6 +176,8 @@ export class PgBitrix24ReverseRepository {
           input.refreshTokenCiphertext,
           expiresAt,
           input.applicationTokenHash,
+          input.executorBitrixUserId ?? null,
+          input.executorIsAdmin ?? false,
         ],
       );
       await this.audit.record(tx, {
@@ -1500,10 +1509,11 @@ export class PgBitrix24ReverseRepository {
           `INSERT INTO bitrix24_incoming_request_payment (
              bitrix_payment_id, request_id, erp_order_id,
              pay_system_id, pay_system_name,
-             amount, currency_id, paid, payment_date, normalized_hash, state,
+             amount, currency_id, paid, payment_date, payment_local_date,
+             normalized_hash, state,
              bitrix_created_at, bitrix_updated_at, last_fetched_at, updated_at
            )
-           VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8,$9,'active',$10,$11,now(),now())
+           VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8,$9,$10,'active',$11,$12,now(),now())
            ON CONFLICT (bitrix_payment_id) DO UPDATE SET
              request_id=EXCLUDED.request_id,
              erp_order_id=NULL,
@@ -1511,6 +1521,7 @@ export class PgBitrix24ReverseRepository {
              pay_system_name=EXCLUDED.pay_system_name,
              amount=EXCLUDED.amount, currency_id=EXCLUDED.currency_id,
              paid=EXCLUDED.paid, payment_date=EXCLUDED.payment_date,
+             payment_local_date=EXCLUDED.payment_local_date,
              normalized_hash=EXCLUDED.normalized_hash,
              sync_version=bitrix24_incoming_request_payment.sync_version+1,
              state=CASE
@@ -1530,6 +1541,7 @@ export class PgBitrix24ReverseRepository {
             payment.currencyId,
             payment.paid,
             payment.paymentDate,
+            payment.paymentDate ? dateInTimezone(payment.paymentDate, this.portalTimezone) : null,
             payment.normalizedHash,
             payment.bitrixCreatedAt,
             payment.bitrixUpdatedAt,
@@ -1693,20 +1705,26 @@ export class PgBitrix24ReverseRepository {
     payments: ReversePaymentSnapshot[],
     auditRequestId: string,
     lockToken?: string,
+    expectedDealId?: string,
   ): Promise<void> {
-    const owner = await this.db.query<{ bitrix_id: string }>(
-      `SELECT bitrix_id
-         FROM crm_sync_mapping
-        WHERE entity_type='order' AND erp_id=$1
-          AND bitrix_object='deal' AND bitrix_id IS NOT NULL`,
-      [String(orderId)],
-    );
-    const bitrixDealId = owner.rows[0]?.bitrix_id;
-    if (!bitrixDealId) {
-      throw conflict('BITRIX24_DEAL_MAPPING_MISSING', 'Bitrix24 Deal mapping is missing');
-    }
     await this.db.transaction(async (tx) => {
       await assertInboundOwnership(tx, auditRequestId, lockToken);
+      const owner = await tx.query<{ bitrix_id: string }>(
+        `SELECT bitrix_id
+           FROM crm_sync_mapping
+          WHERE entity_type='order' AND erp_id=$1
+            AND bitrix_object='deal' AND bitrix_id IS NOT NULL
+            AND status='active'
+          FOR UPDATE`,
+        [String(orderId)],
+      );
+      const bitrixDealId = owner.rows[0]?.bitrix_id;
+      if (!bitrixDealId) {
+        throw conflict('BITRIX24_DEAL_MAPPING_MISSING', 'Bitrix24 Deal mapping is missing');
+      }
+      if (expectedDealId && bitrixDealId !== expectedDealId) {
+        throw conflict('BITRIX24_DEAL_MAPPING_CHANGED', 'Bitrix24 Deal mapping changed');
+      }
       await lockAggregate(tx, `deal:${bitrixDealId}`);
       await setReverseOrigin(tx);
       const lockedOrder = await tx.query(
@@ -1734,10 +1752,10 @@ export class PgBitrix24ReverseRepository {
           `INSERT INTO bitrix24_incoming_request_payment (
              bitrix_payment_id, request_id, erp_order_id,
              pay_system_id, pay_system_name, amount, currency_id, paid,
-             payment_date, normalized_hash, state, bitrix_created_at,
+             payment_date, payment_local_date, normalized_hash, state, bitrix_created_at,
              bitrix_updated_at, last_fetched_at, updated_at
            )
-           VALUES ($1,NULL,$2,$3,$4,$5,$6,$7,$8,$9,'active',$10,$11,now(),now())
+           VALUES ($1,NULL,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active',$11,$12,now(),now())
            ON CONFLICT (bitrix_payment_id) DO UPDATE SET
              erp_order_id=EXCLUDED.erp_order_id,
              request_id=NULL,
@@ -1745,6 +1763,7 @@ export class PgBitrix24ReverseRepository {
              pay_system_name=EXCLUDED.pay_system_name,
              amount=EXCLUDED.amount, currency_id=EXCLUDED.currency_id,
              paid=EXCLUDED.paid, payment_date=EXCLUDED.payment_date,
+             payment_local_date=EXCLUDED.payment_local_date,
              normalized_hash=EXCLUDED.normalized_hash,
              sync_version=bitrix24_incoming_request_payment.sync_version+1,
              state=CASE
@@ -1764,6 +1783,7 @@ export class PgBitrix24ReverseRepository {
             payment.currencyId,
             payment.paid,
             payment.paymentDate,
+            payment.paymentDate ? dateInTimezone(payment.paymentDate, this.portalTimezone) : null,
             payment.normalizedHash,
             payment.bitrixCreatedAt,
             payment.bitrixUpdatedAt,
@@ -2108,14 +2128,19 @@ export class PgBitrix24ReverseRepository {
       state: string;
       erp_payment_id: string | number | null;
       mapped_type_paid_id: string | number | null;
+      manual_command_id: string | null;
+      command_status: string | null;
     }>(
       `SELECT payment.bitrix_payment_id, payment.pay_system_id,
               payment.pay_system_name, payment.amount, payment.currency_id,
               payment.paid, payment.payment_date, payment.state,
-              payment.erp_payment_id, mapping.type_paid_id AS mapped_type_paid_id
+              payment.erp_payment_id, mapping.type_paid_id AS mapped_type_paid_id,
+              payment.manual_command_id, command.status AS command_status
          FROM bitrix24_incoming_request_payment payment
          LEFT JOIN bitrix24_payment_type_mapping mapping
            ON mapping.pay_system_id=payment.pay_system_id AND mapping.active=true
+         LEFT JOIN bitrix24_manual_payment_command command
+           ON command.command_id=payment.manual_command_id
         WHERE payment.request_id=$1
         ORDER BY payment.payment_date, payment.bitrix_payment_id`,
       [requestId],
@@ -2170,6 +2195,8 @@ export class PgBitrix24ReverseRepository {
           payment.mapped_type_paid_id === null
             ? null
             : Number(payment.mapped_type_paid_id),
+        source: payment.manual_command_id ? 'widget' : 'native',
+        commandStatus: payment.command_status,
       })) : [],
     };
   }
@@ -2853,6 +2880,8 @@ export class PgBitrix24ReverseRepository {
 
   async materializeRequestPayments(input: {
     requestId: number;
+    bitrixPaymentIds: string[];
+    expectedOrderVersion: number;
     actorUserId: string;
     auditRequestId: string;
     scope: { mode: 'all' } | { mode: 'assigned'; userId: number };
@@ -2887,10 +2916,11 @@ export class PgBitrix24ReverseRepository {
     await this.db.transaction(async (tx) => {
       await lockAggregate(tx, `deal:${discovered.bitrix_deal_id}`);
       await setReverseOrigin(tx);
-      const productionOrder = await tx.query(
-        `SELECT 1
+      const productionOrder = await tx.query<{ version: string | number }>(
+        `SELECT version
            FROM orders
           WHERE order_id=$1 AND order_kind='production_order'
+            AND version=$2
             AND delete_flag=false
             AND EXISTS (
               SELECT 1 FROM order_details
@@ -2898,7 +2928,7 @@ export class PgBitrix24ReverseRepository {
                  AND order_details.delete_flag=false
             )
           FOR UPDATE`,
-        [orderId],
+        [orderId, input.expectedOrderVersion],
       );
       if (productionOrder.rowCount !== 1) {
         throw conflict(
@@ -2941,15 +2971,22 @@ export class PgBitrix24ReverseRepository {
             SET delete_flag=true, updated_at=now()
            FROM bitrix24_incoming_request_payment remote
           WHERE remote.request_id=$1
+            AND remote.bitrix_payment_id=ANY($2::text[])
             AND (remote.state='deleted' OR remote.paid=false)
             AND remote.erp_payment_id=erp.payment_id
             AND erp.delete_flag=false`,
-        [input.requestId],
+        [input.requestId, input.bitrixPaymentIds],
+      );
+      const activePaymentIds = await selectActivePaymentIds(
+        tx,
+        input.bitrixPaymentIds,
+        { requestId: input.requestId, orderId: null },
       );
       const count = await materializeActivePayments(
         tx,
         input.requestId,
         orderId,
+        activePaymentIds,
         true,
       );
       const deletedCount = deleted.rowCount ?? 0;
@@ -2973,8 +3010,100 @@ export class PgBitrix24ReverseRepository {
     return this.getIncomingRequest(input.requestId, input.scope, true);
   }
 
+  async getMappedOrderPayments(
+    orderId: number,
+    scope: { mode: 'all' } | { mode: 'assigned'; userId: number },
+  ): Promise<Record<string, unknown>> {
+    const owner = await this.db.query<{
+      bitrix_deal_id: string;
+      version: string | number;
+    }>(
+      `SELECT mapping.bitrix_id AS bitrix_deal_id, orders.version
+         FROM orders
+         JOIN crm_sync_mapping mapping
+           ON mapping.entity_type='order'
+          AND mapping.erp_id=orders.order_id::text
+          AND mapping.bitrix_object='deal'
+          AND mapping.bitrix_id IS NOT NULL
+          AND mapping.status='active'
+        WHERE orders.order_id=$1
+          AND orders.order_kind='production_order'
+          AND orders.delete_flag=false
+          AND ($2::boolean OR orders.manager_id=$3)
+        LIMIT 1`,
+      [
+        orderId,
+        scope.mode === 'all',
+        scope.mode === 'assigned' ? scope.userId : null,
+      ],
+    );
+    const mapped = owner.rows[0];
+    if (!mapped) return { linked: false, orderId };
+    const payments = await this.db.query<{
+      bitrix_payment_id: string;
+      pay_system_id: number | null;
+      pay_system_name: string | null;
+      amount: string | number;
+      currency_id: string | null;
+      paid: boolean;
+      payment_local_date: Date | string | null;
+      state: string;
+      erp_payment_id: string | number | null;
+      mapped_type_paid_id: string | number | null;
+      manual_command_id: string | null;
+      command_status: string | null;
+      last_fetched_at: Date | string | null;
+    }>(
+      `SELECT payment.bitrix_payment_id, payment.pay_system_id,
+              payment.pay_system_name, payment.amount, payment.currency_id,
+              payment.paid, payment.payment_local_date, payment.state,
+              payment.erp_payment_id, mapping.type_paid_id AS mapped_type_paid_id,
+              payment.manual_command_id, command.status AS command_status,
+              payment.last_fetched_at
+         FROM bitrix24_incoming_request_payment payment
+         LEFT JOIN bitrix24_payment_type_mapping mapping
+           ON mapping.pay_system_id=payment.pay_system_id AND mapping.active=true
+         LEFT JOIN bitrix24_manual_payment_command command
+           ON command.command_id=payment.manual_command_id
+        WHERE payment.erp_order_id=$1
+        ORDER BY payment.payment_local_date, payment.bitrix_payment_id`,
+      [orderId],
+    );
+    const lastFetchedAt = payments.rows.reduce<Date | null>((latest, payment) => {
+      if (!payment.last_fetched_at) return latest;
+      const candidate = new Date(payment.last_fetched_at);
+      return !latest || candidate > latest ? candidate : latest;
+    }, null);
+    return {
+      linked: true,
+      orderId,
+      orderVersion: Number(mapped.version),
+      bitrixDealId: mapped.bitrix_deal_id,
+      bitrixUrl: `https://${this.portalDomain}/crm/deal/details/${mapped.bitrix_deal_id}/`,
+      lastReconciledAt: lastFetchedAt?.toISOString() ?? null,
+      payments: payments.rows.map((payment) => ({
+        bitrixPaymentId: payment.bitrix_payment_id,
+        paySystemId: payment.pay_system_id,
+        paySystemName: payment.pay_system_name,
+        amount: Number(payment.amount),
+        currencyId: payment.currency_id,
+        paid: payment.paid,
+        paymentDate: toDate(payment.payment_local_date),
+        state: payment.state,
+        erpPaymentId: payment.erp_payment_id === null ? null : Number(payment.erp_payment_id),
+        mappedTypePaidId: payment.mapped_type_paid_id === null
+          ? null
+          : Number(payment.mapped_type_paid_id),
+        source: payment.manual_command_id ? 'widget' : 'native',
+        commandStatus: payment.command_status,
+      })),
+    };
+  }
+
   async materializeMappedOrderPayments(input: {
     orderId: number;
+    bitrixPaymentIds: string[];
+    expectedOrderVersion: number;
     actorUserId: string;
     auditRequestId: string;
     scope: { mode: 'all' } | { mode: 'assigned'; userId: number };
@@ -3014,6 +3143,7 @@ export class PgBitrix24ReverseRepository {
            FROM orders
           WHERE order_id=$1
             AND order_kind='production_order'
+            AND version=$4
             AND delete_flag=false
             AND ($2::boolean OR manager_id=$3)
             AND EXISTS (
@@ -3026,6 +3156,7 @@ export class PgBitrix24ReverseRepository {
           input.orderId,
           input.scope.mode === 'all',
           input.scope.mode === 'assigned' ? input.scope.userId : null,
+          input.expectedOrderVersion,
         ],
       );
       if (lockedOrder.rowCount !== 1) {
@@ -3050,12 +3181,22 @@ export class PgBitrix24ReverseRepository {
             SET delete_flag=true, updated_at=now()
            FROM bitrix24_incoming_request_payment remote
           WHERE remote.erp_order_id=$1
+            AND remote.bitrix_payment_id=ANY($2::text[])
             AND (remote.state='deleted' OR remote.paid=false)
             AND remote.erp_payment_id=erp.payment_id
             AND erp.delete_flag=false`,
-        [input.orderId],
+        [input.orderId, input.bitrixPaymentIds],
       );
-      changedPaymentCount = await materializeMappedOrderPaymentRows(tx, input.orderId);
+      const activePaymentIds = await selectActivePaymentIds(
+        tx,
+        input.bitrixPaymentIds,
+        { requestId: null, orderId: input.orderId },
+      );
+      changedPaymentCount = await materializeMappedOrderPaymentRows(
+        tx,
+        input.orderId,
+        activePaymentIds,
+      );
       deletedPaymentCount = deleted.rowCount ?? 0;
       if (changedPaymentCount > 0 || deletedPaymentCount > 0) {
         await recalculatePaymentState(tx, input.orderId);
@@ -3219,28 +3360,40 @@ export class PgBitrix24ReverseRepository {
       type_paid_id: number | null;
       type_paid_name: string | null;
       active: boolean;
+      widget_enabled: boolean;
+      is_default: boolean;
+      last_fetched_at: Date | string | null;
     }>(
       `WITH systems AS (
+         SELECT catalog.pay_system_id, catalog.name AS pay_system_name,
+                catalog.last_fetched_at
+           FROM bitrix24_pay_system_catalog catalog
+         UNION ALL
          SELECT payment.pay_system_id,
-                MAX(payment.pay_system_name) AS pay_system_name
+                MAX(payment.pay_system_name) AS pay_system_name,
+                NULL::timestamptz AS last_fetched_at
            FROM bitrix24_incoming_request_payment payment
           WHERE payment.pay_system_id IS NOT NULL
           GROUP BY payment.pay_system_id
-         UNION
-         SELECT mapping.pay_system_id, NULL::text
+         UNION ALL
+         SELECT mapping.pay_system_id, NULL::text, NULL::timestamptz
            FROM bitrix24_payment_type_mapping mapping
+       ), distinct_systems AS (
+         SELECT pay_system_id, MAX(pay_system_name) AS pay_system_name,
+                MAX(last_fetched_at) AS last_fetched_at
+           FROM systems GROUP BY pay_system_id
        )
-       SELECT systems.pay_system_id,
-              MAX(systems.pay_system_name) AS pay_system_name,
+       SELECT systems.pay_system_id, systems.pay_system_name,
               mapping.type_paid_id,
               type.type_paid_name AS type_paid_name,
-              COALESCE(mapping.active, false) AS active
-         FROM systems
+              COALESCE(mapping.active, false) AS active,
+              COALESCE(mapping.widget_enabled, false) AS widget_enabled,
+              COALESCE(mapping.is_default, false) AS is_default,
+              systems.last_fetched_at
+         FROM distinct_systems systems
          LEFT JOIN bitrix24_payment_type_mapping mapping
            ON mapping.pay_system_id=systems.pay_system_id
          LEFT JOIN payment_types type ON type.type_paid_id=mapping.type_paid_id
-        GROUP BY systems.pay_system_id, mapping.type_paid_id,
-                 type.type_paid_name, mapping.active
         ORDER BY systems.pay_system_id`,
     );
     return result.rows.map((row) => ({
@@ -3249,6 +3402,9 @@ export class PgBitrix24ReverseRepository {
       typePaidId: row.type_paid_id,
       typePaidName: row.type_paid_name,
       active: row.active,
+      widgetEnabled: row.widget_enabled,
+      isDefault: row.is_default,
+      lastFetchedAt: toIso(row.last_fetched_at),
     }));
   }
 
@@ -3256,6 +3412,8 @@ export class PgBitrix24ReverseRepository {
     paySystemId: number;
     typePaidId: number;
     active: boolean;
+    widgetEnabled?: boolean;
+    isDefault?: boolean;
     actorUserId: string;
     auditRequestId: string;
   }): Promise<Record<string, unknown>> {
@@ -3267,15 +3425,33 @@ export class PgBitrix24ReverseRepository {
       if (exists.rowCount !== 1) {
         throw notFound('PAYMENT_TYPE_NOT_FOUND', 'ERP payment type not found');
       }
+      if (input.isDefault === true) {
+        await tx.query(
+          `UPDATE bitrix24_payment_type_mapping
+              SET is_default=false, updated_by=$2, updated_at=now()
+            WHERE pay_system_id<>$1 AND is_default=true`,
+          [input.paySystemId, input.actorUserId],
+        );
+      }
       await tx.query(
         `INSERT INTO bitrix24_payment_type_mapping (
-           pay_system_id, type_paid_id, active, created_by, updated_by
+           pay_system_id, type_paid_id, active, widget_enabled, is_default,
+           created_by, updated_by
          )
-         VALUES ($1,$2,$3,$4,$4)
+         VALUES ($1,$2,$3,COALESCE($4,false),COALESCE($5,false),$6,$6)
          ON CONFLICT (pay_system_id) DO UPDATE SET
            type_paid_id=EXCLUDED.type_paid_id, active=EXCLUDED.active,
+           widget_enabled=COALESCE($4,bitrix24_payment_type_mapping.widget_enabled),
+           is_default=COALESCE($5,bitrix24_payment_type_mapping.is_default),
            updated_by=EXCLUDED.updated_by, updated_at=now()`,
-        [input.paySystemId, input.typePaidId, input.active, input.actorUserId],
+        [
+          input.paySystemId,
+          input.typePaidId,
+          input.active,
+          input.widgetEnabled ?? null,
+          input.isDefault ?? null,
+          input.actorUserId,
+        ],
       );
       await this.audit.record(tx, {
         event: 'bitrix24_reverse.payment_type_mapping_upsert',
@@ -3287,6 +3463,8 @@ export class PgBitrix24ReverseRepository {
         after: {
           typePaidId: input.typePaidId,
           active: input.active,
+          widgetEnabled: input.widgetEnabled,
+          isDefault: input.isDefault,
         },
       });
     });
@@ -3305,6 +3483,11 @@ export class PgBitrix24ReverseRepository {
       installation_status: string | null;
       token_expires_at: Date | string | null;
       last_installation_error: string | null;
+      last_widget_submit: Date | string | null;
+      widget_awaiting_order: string | number;
+      widget_awaiting_retry: string | number;
+      widget_ambiguous: string | number;
+      catalog_last_fetched_at: Date | string | null;
     }>(
       `SELECT
          COUNT(*) FILTER (WHERE event.status='pending') AS pending,
@@ -3319,7 +3502,18 @@ export class PgBitrix24ReverseRepository {
          (SELECT access_token_expires_at FROM bitrix24_app_installation
            ORDER BY updated_at DESC LIMIT 1) AS token_expires_at,
          (SELECT last_error FROM bitrix24_app_installation
-           ORDER BY updated_at DESC LIMIT 1) AS last_installation_error
+           ORDER BY updated_at DESC LIMIT 1) AS last_installation_error,
+         (SELECT MAX(created_at) FROM bitrix24_manual_payment_command)
+           AS last_widget_submit,
+         (SELECT COUNT(*) FROM bitrix24_manual_payment_command
+           WHERE status IN ('awaiting_order','awaiting_order_ready'))
+           AS widget_awaiting_order,
+         (SELECT COUNT(*) FROM bitrix24_manual_payment_command
+           WHERE status='awaiting_erp_retry') AS widget_awaiting_retry,
+         (SELECT COUNT(*) FROM bitrix24_manual_payment_command
+           WHERE status='remote_create_ambiguous') AS widget_ambiguous,
+         (SELECT MAX(last_fetched_at) FROM bitrix24_pay_system_catalog)
+           AS catalog_last_fetched_at
        FROM bitrix24_inbound_event event`,
     );
     const row = result.rows[0];
@@ -3335,6 +3529,13 @@ export class PgBitrix24ReverseRepository {
       installationStatus: row?.installation_status ?? null,
       tokenExpiresAt: toIso(row?.token_expires_at ?? null),
       lastError: row?.last_installation_error ?? null,
+      widget: {
+        lastSubmitAt: toIso(row?.last_widget_submit ?? null),
+        awaitingOrder: Number(row?.widget_awaiting_order ?? 0),
+        awaitingRetry: Number(row?.widget_awaiting_retry ?? 0),
+        ambiguous: Number(row?.widget_ambiguous ?? 0),
+      },
+      paymentSystemCatalogLastFetchedAt: toIso(row?.catalog_last_fetched_at ?? null),
     };
   }
 
@@ -4007,48 +4208,94 @@ async function materializeActivePayments(
   tx: TransactionClient,
   requestId: number,
   orderId: number,
+  bitrixPaymentIds: string[],
   includeMaterialized = true,
 ): Promise<number> {
   const result = await tx.query<MaterializablePaymentRow>(
     `SELECT payment.bitrix_payment_id, payment.pay_system_id,
-            payment.amount, payment.payment_date, payment.normalized_hash,
+            payment.amount, payment.payment_local_date, payment.currency_id,
+            payment.normalized_hash,
             payment.sync_version,
             payment.erp_payment_id, mapping.type_paid_id
        FROM bitrix24_incoming_request_payment payment
        LEFT JOIN bitrix24_payment_type_mapping mapping
          ON mapping.pay_system_id=payment.pay_system_id AND mapping.active=true
       WHERE payment.request_id=$1
+        AND payment.bitrix_payment_id=ANY($2::text[])
         AND (
           payment.state='active'
-          OR ($2::boolean AND payment.state='materialized')
+          OR ($3::boolean AND payment.state='materialized')
         )
         AND payment.paid=true
       ORDER BY payment.bitrix_payment_id
       FOR UPDATE OF payment`,
-    [requestId, includeMaterialized],
+    [requestId, bitrixPaymentIds, includeMaterialized],
   );
+  assertExactPaymentSelection(result.rows, bitrixPaymentIds);
   return materializePaymentRows(tx, result.rows, orderId);
+}
+
+async function selectActivePaymentIds(
+  tx: TransactionClient,
+  requestedIds: string[],
+  owner: { requestId: number | null; orderId: number | null },
+): Promise<string[]> {
+  const result = await tx.query<{
+    bitrix_payment_id: string;
+    state: string;
+    paid: boolean;
+  }>(
+    `SELECT bitrix_payment_id, state, paid
+       FROM bitrix24_incoming_request_payment
+      WHERE bitrix_payment_id=ANY($1::text[])
+        AND request_id IS NOT DISTINCT FROM $2::bigint
+        AND erp_order_id IS NOT DISTINCT FROM $3::bigint
+      FOR UPDATE`,
+    [requestedIds, owner.requestId, owner.orderId],
+  );
+  return filterActivePaymentSelection(result.rows, requestedIds);
+}
+
+export function filterActivePaymentSelection(
+  rows: Array<{ bitrix_payment_id: string; state: string; paid: boolean }>,
+  requestedIds: string[],
+): string[] {
+  const found = new Set(rows.map((row) => row.bitrix_payment_id));
+  const missing = requestedIds.filter((id) => !found.has(id));
+  if (missing.length > 0) {
+    throw conflict(
+      'BITRIX24_PAYMENT_SELECTION_INVALID',
+      `Bitrix24 payments are absent or belong to another target: ${missing.join(', ')}`,
+    );
+  }
+  return rows
+    .filter((row) => row.paid && ['active', 'materialized'].includes(row.state))
+    .map((row) => row.bitrix_payment_id);
 }
 
 async function materializeMappedOrderPaymentRows(
   tx: TransactionClient,
   orderId: number,
+  bitrixPaymentIds: string[],
 ): Promise<number> {
   const result = await tx.query<MaterializablePaymentRow>(
     `SELECT payment.bitrix_payment_id, payment.pay_system_id,
-            payment.amount, payment.payment_date, payment.normalized_hash,
+            payment.amount, payment.payment_local_date, payment.currency_id,
+            payment.normalized_hash,
             payment.sync_version,
             payment.erp_payment_id, mapping.type_paid_id
        FROM bitrix24_incoming_request_payment payment
        LEFT JOIN bitrix24_payment_type_mapping mapping
          ON mapping.pay_system_id=payment.pay_system_id AND mapping.active=true
       WHERE payment.erp_order_id=$1
+        AND payment.bitrix_payment_id=ANY($2::text[])
         AND payment.state IN ('active','materialized')
         AND payment.paid=true
       ORDER BY payment.bitrix_payment_id
       FOR UPDATE OF payment`,
-    [orderId],
+    [orderId, bitrixPaymentIds],
   );
+  assertExactPaymentSelection(result.rows, bitrixPaymentIds);
   return materializePaymentRows(tx, result.rows, orderId);
 }
 
@@ -4056,11 +4303,26 @@ interface MaterializablePaymentRow {
   bitrix_payment_id: string;
   pay_system_id: number | null;
   amount: string | number;
-  payment_date: Date | string | null;
+  payment_local_date: Date | string | null;
+  currency_id: string | null;
   normalized_hash: string;
   sync_version: string | number;
   erp_payment_id: string | number | null;
   type_paid_id: string | number | null;
+}
+
+function assertExactPaymentSelection(
+  rows: MaterializablePaymentRow[],
+  requestedIds: string[],
+): void {
+  const found = new Set(rows.map((row) => row.bitrix_payment_id));
+  const missing = requestedIds.filter((id) => !found.has(id));
+  if (missing.length > 0) {
+    throw conflict(
+      'BITRIX24_PAYMENT_SELECTION_INVALID',
+      `Bitrix24 payments are absent, inactive, unpaid, or belong to another target: ${missing.join(', ')}`,
+    );
+  }
 }
 
 async function materializePaymentRows(
@@ -4070,6 +4332,12 @@ async function materializePaymentRows(
 ): Promise<number> {
   let changed = 0;
   for (const payment of rows) {
+    if (payment.currency_id !== 'KZT') {
+      throw conflict(
+        'BITRIX24_PAYMENT_CURRENCY_MISMATCH',
+        `Bitrix24 payment ${payment.bitrix_payment_id} currency is not KZT`,
+      );
+    }
     if (payment.type_paid_id === null) {
       throw conflict(
         'BITRIX24_PAYMENT_SYSTEM_UNMAPPED',
@@ -4083,7 +4351,13 @@ async function materializePaymentRows(
         `Bitrix24 payment ${payment.bitrix_payment_id} has invalid amount`,
       );
     }
-    const paymentDate = toDate(payment.payment_date) ?? new Date().toISOString().slice(0, 10);
+    const paymentDate = toDate(payment.payment_local_date);
+    if (!paymentDate) {
+      throw conflict(
+        'BITRIX24_PAYMENT_DATE_MISSING',
+        `Bitrix24 payment ${payment.bitrix_payment_id} has no portal-local date`,
+      );
+    }
     let paymentChanged = payment.erp_payment_id === null;
     let erpPaymentId = payment.erp_payment_id === null
       ? null
@@ -4417,4 +4691,16 @@ function toDate(value: Date | string | null): string | null {
   return value instanceof Date
     ? value.toISOString().slice(0, 10)
     : String(value).slice(0, 10);
+}
+
+function dateInTimezone(value: Date, timezone: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(value);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((candidate) => candidate.type === type)?.value;
+  return `${part('year')}-${part('month')}-${part('day')}`;
 }

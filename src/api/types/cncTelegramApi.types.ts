@@ -247,6 +247,15 @@ export interface CncTelegramTodayResponse {
   workday: string;
   generatedAt: string;
   columns: CncTelegramTodayColumn[];
+  operationalWindow?: { dateFrom: string; dateTo: string };
+  historicalBathReadiness?: CncHistoricalBathReadiness[];
+}
+
+export interface CncHistoricalBathReadiness {
+  bathCardId: string;
+  forced: boolean;
+  items: Array<Pick<CncTelegramBathItem,
+    'orderId' | 'orderName' | 'detailId' | 'detailNumber' | 'quantity'>>;
 }
 
 export interface CncTelegramOriginalPacket extends CncTelegramPacket {

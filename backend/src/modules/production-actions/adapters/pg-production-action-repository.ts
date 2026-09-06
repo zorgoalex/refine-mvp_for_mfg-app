@@ -4,6 +4,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import { auditService } from '../../../common/audit/audit.service';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
+import { cncPacketCountsForMdfReadinessSql } from '../../../shared/cnc-material';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole, type PermissionName } from '../../../permissions/permissions';
 import type { MdfBoardColumnAutomationInput } from '../../status-automation/application/status-automation-runtime';
@@ -3585,13 +3586,7 @@ async function loadMdfLaminatedBathAutomationRows(
         item.match_detail_id::bigint AS order_detail_id,
         SUM(
           CASE
-            WHEN NOT EXISTS (
-              SELECT 1
-              FROM jsonb_array_elements_text(packet.comments_json) AS packet_comment(comment_text)
-              WHERE lower(packet_comment.comment_text) LIKE ANY (
-                ARRAY['%hdf%', '%хдф%', '%лдсп%', '%ldsp%', '%fanera%', '%фанера%']
-              )
-            )
+            WHEN ${cncPacketCountsForMdfReadinessSql('packet')}
               AND (packet.completion_status = 'completed' OR packet.thumbs_up = true)
               THEN GREATEST(item.quantity, 0)
             ELSE 0

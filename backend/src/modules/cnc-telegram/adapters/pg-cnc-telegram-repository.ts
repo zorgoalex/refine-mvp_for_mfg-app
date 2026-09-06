@@ -2,13 +2,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { auditService } from '../../../common/audit/audit.service';
 import { ApiError } from '../../../common/errors/api-error';
+import { mdfOperationalMonthStart } from '../application/mdf-operational-window';
+import type { CncHistoricalBathReadinessDto } from '../dto/cnc-telegram.dto';
 import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
-import {
-  CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE,
-  CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE,
-} from '../../../shared/cnc-material';
+import { cncPacketCountsForMdfReadinessSql } from '../../../shared/cnc-material';
 import {
   CUT_RENDER_STYLES_SETTING_KEY,
   CUT_RENDER_STYLE_TELEGRAM_PHOTO,
@@ -112,21 +111,6 @@ const IGNORED_ANALYSIS_WARNINGS = new Set([
   'RapidOCR found text, but no detail rows with order and size',
 ]);
 
-function cncPacketCountsForMdfReadinessSql(packetAlias: 'p' | 'packet'): string {
-  return `(
-    COALESCE(${packetAlias}.material_name, '') ~* '${CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE}'
-    AND COALESCE(${packetAlias}.material_name, '') !~* '${CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE}'
-    AND COALESCE(${packetAlias}.program_name, '') !~* '${CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE}'
-    AND COALESCE(${packetAlias}.external_packet_key, '') !~* '${CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE}'
-    AND NOT EXISTS (
-      SELECT 1
-      FROM jsonb_array_elements_text(COALESCE(${packetAlias}.comments_json, '[]'::jsonb))
-        AS material_comment(comment_text)
-      WHERE material_comment.comment_text ~* '${CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE}'
-    )
-  )`;
-}
-
 interface PacketJoinedRow extends QueryResultRow {
   packet_id: string;
   external_packet_key: string;
@@ -183,7 +167,10 @@ interface PacketJoinedRow extends QueryResultRow {
   laminated_or_later: boolean | null;
   all_linked_order_details_packed_or_later: boolean | null;
   all_linked_order_details_issued_or_later: boolean | null;
+  manual_target_column: string | null;
 }
+
+const packetManualTargetColumns = new WeakMap<CncTelegramPacketDto, string | null>();
 
 interface PacketReplayRow extends QueryResultRow {
   packet_id: string;
@@ -283,6 +270,7 @@ interface ManualSvgCommentPresetRow extends QueryResultRow {
 }
 
 interface BathJoinedRow extends QueryResultRow {
+  readiness_only?: boolean;
   cut_result_id: string | number;
   cut_job_id: string | number;
   source_display_number: string | number | null;
@@ -486,9 +474,12 @@ export class PgCncTelegramRepository
       command.workday ??
       command.workdayTo ??
       await currentDatabaseWorkday(this.database);
-    const workdayFrom = command.workdayFrom ?? workday;
     const workdayTo = command.workdayTo ?? workday;
-    const [rows, baths, bazisCutSets] = await Promise.all([
+    const requestedFrom = command.workdayFrom ?? workday;
+    const monthStart = mdfOperationalMonthStart(workdayTo);
+    const workdayFrom = command.operationalWindow === 'month' && requestedFrom < monthStart
+      ? monthStart : requestedFrom;
+    const [rows, bathResult, bazisCutSets] = await Promise.all([
       this.database.query<PacketJoinedRow>(
         packetSelectSql(`
           p.workday BETWEEN $1::date AND $2::date
@@ -506,14 +497,21 @@ export class PgCncTelegramRepository
         `),
         [workdayFrom, workdayTo, MANUAL_SVG_CHAT_ID],
       ),
-      loadBathCards(this.database, workdayFrom, workdayTo),
+      loadBathCards(this.database, workdayFrom, workdayTo, {
+        operationalWindow: command.operationalWindow,
+        focusBathCardId: command.focusBathCardId,
+      }),
       loadPeriodBazisCutSetCards(this.database, workdayFrom, workdayTo),
     ]);
     const packets = mapPacketRows(rows.rows);
     return {
       workday: workdayTo,
       generatedAt: new Date().toISOString(),
-      columns: buildTodayColumns(packets, baths, bazisCutSets),
+      columns: buildTodayColumns(packets, bathResult.cards, bazisCutSets),
+      ...(command.operationalWindow === 'month' ? {
+        operationalWindow: { dateFrom: monthStart, dateTo: workdayTo },
+        historicalBathReadiness: bathResult.historicalBathReadiness,
+      } : {}),
     };
   }
 
@@ -556,8 +554,8 @@ export class PgCncTelegramRepository
       generatedAt: new Date().toISOString(),
       packets: mapOriginalPackets(packetRows.rows),
       baths: mapOriginalBathCards(
-        await loadBathCards(this.database, dateFrom, dateTo, { includeHistory: true }),
-        await loadBathCards(this.database, dateTo, dateTo),
+        (await loadBathCards(this.database, dateFrom, dateTo, { includeHistory: true })).cards,
+        (await loadBathCards(this.database, dateTo, dateTo)).cards,
       ),
       bazisCutSets: mapOriginalBazisCutSets(bazisCutSets),
     };
@@ -3015,6 +3013,7 @@ function packetSelectSql(
       ) AS svg_cut_sheets_json,
       p.updated_at,
       p.mdf_board_hidden_at,
+      packet_manual_move.target_column AS manual_target_column,
       i.packet_item_id,
       i.source_item_key,
       i.order_name,
@@ -3045,15 +3044,20 @@ function packetSelectSql(
           THEN detail_status.sort_order >= laminated_status.sort_order
         ELSE false
       END AS laminated_or_later,
-      linked_order.order_id IS NOT NULL
-        AND linked_order.delete_flag = false
-        AND COALESCE(linked_order_status.all_details_packed_or_later, false)
+      COALESCE(matched_detail.detail_id, inferred_detail.detail_id) IS NOT NULL
+        AND detail_status.sort_order IS NOT NULL
+        AND packed_status.sort_order IS NOT NULL
+        AND detail_status.sort_order >= packed_status.sort_order
         AS all_linked_order_details_packed_or_later,
-      linked_order.order_id IS NOT NULL
-        AND linked_order.delete_flag = false
-        AND COALESCE(linked_order_status.all_details_issued_or_later, false)
+      COALESCE(matched_detail.detail_id, inferred_detail.detail_id) IS NOT NULL
+        AND detail_status.sort_order IS NOT NULL
+        AND issued_production_status.sort_order IS NOT NULL
+        AND detail_status.sort_order >= issued_production_status.sort_order
         AS all_linked_order_details_issued_or_later
     FROM cnc_telegram_packets p
+    LEFT JOIN mdf_board_manual_moves packet_manual_move
+      ON packet_manual_move.card_kind = 'packet'
+     AND packet_manual_move.card_id = p.packet_id::text
     LEFT JOIN cut_job svg_job
       ON svg_job.cut_job_id = p.svg_cut_job_id
     LEFT JOIN cut_result svg_result
@@ -3112,8 +3116,6 @@ function packetSelectSql(
         )
       HAVING COUNT(*) = 1
     ) inferred_detail ON matched_detail.detail_id IS NULL
-    LEFT JOIN orders linked_order
-      ON linked_order.order_id = COALESCE(active_matched_order.order_id, item_order.order_id)
     LEFT JOIN production_statuses detail_status
       ON detail_status.production_status_id = COALESCE(matched_detail.production_status_id, inferred_detail.production_status_id)
     LEFT JOIN LATERAL (
@@ -3149,26 +3151,6 @@ function packetSelectSql(
       ) AS sort_order
       FROM production_statuses ps
     ) issued_production_status ON true
-    LEFT JOIN LATERAL (
-      SELECT
-        COUNT(linked_detail.detail_id) > 0
-          AND BOOL_AND(
-            linked_detail_status.sort_order IS NOT NULL
-            AND packed_status.sort_order IS NOT NULL
-            AND linked_detail_status.sort_order >= packed_status.sort_order
-          ) AS all_details_packed_or_later,
-        COUNT(linked_detail.detail_id) > 0
-          AND BOOL_AND(
-            linked_detail_status.sort_order IS NOT NULL
-            AND issued_production_status.sort_order IS NOT NULL
-            AND linked_detail_status.sort_order >= issued_production_status.sort_order
-          ) AS all_details_issued_or_later
-      FROM order_details linked_detail
-      LEFT JOIN production_statuses linked_detail_status
-        ON linked_detail_status.production_status_id = linked_detail.production_status_id
-      WHERE linked_detail.order_id = linked_order.order_id
-        AND linked_detail.delete_flag = false
-    ) linked_order_status ON true
     WHERE ${whereSql}
     ORDER BY p.updated_at DESC, p.packet_id, i.order_name ASC NULLS LAST, i.detail_number ASC NULLS LAST
   `;
@@ -3645,7 +3627,7 @@ async function packetIntersectsPendingBaths(
 ): Promise<boolean> {
   const workdayTo = dto.workday ?? await currentDatabaseWorkday(tx);
   const workdayFrom = dateOnlyDaysBefore(workdayTo, 6);
-  const baths = await loadBathCards(tx, workdayFrom, workdayTo);
+  const { cards: baths } = await loadBathCards(tx, workdayFrom, workdayTo);
   const pendingBathOrderIds = new Set<number>();
   for (const bath of baths) {
     if (bath.ready) continue;
@@ -5084,7 +5066,10 @@ async function syncSvgCutJobItemsForPlan(
 }
 
 function svgPlanCanCreateCutResult(plan: Extract<SvgCutImportPlan, { ok: true }>): boolean {
-  return !plan.informational || plan.placements.every((placement) => placement.orderId !== null);
+  return !plan.informational || (
+    plan.details.length > 0 &&
+    plan.placements.every((placement) => placement.orderDetailId !== null)
+  );
 }
 
 export async function ensureSvgCutJobDisplayNumberAvailable(
@@ -7299,8 +7284,9 @@ async function loadBathCards(
   database: DatabaseClient,
   workdayFrom: string,
   workdayTo: string,
-  options: { includeHistory?: boolean } = {},
-): Promise<CncTelegramBathCardDto[]> {
+  options: { includeHistory?: boolean; operationalWindow?: 'month'; focusBathCardId?: string } = {},
+): Promise<{ cards: CncTelegramBathCardDto[]; historicalBathReadiness: CncHistoricalBathReadinessDto[] }> {
+  const operational = options.operationalWindow === 'month' && !options.includeHistory;
   const packetDatePredicate = options.includeHistory
     ? `COALESCE(p.source_created_at, p.created_at) >= $1::date
         AND COALESCE(p.source_created_at, p.created_at) < ($2::date + INTERVAL '1 day')`
@@ -7500,7 +7486,7 @@ async function loadBathCards(
         r.result_no,
         r.revision_no,
         r.created_at AS result_created_at,
-        COALESCE(r.snapshot_job ->> 'name', j.name, 'Раскрой ' || j.cut_job_id::text) AS cut_job_name,
+        COALESCE(board_metadata.cut_job_name, j.name, 'Раскрой ' || j.cut_job_id::text) AS cut_job_name,
         (current_result.result_no = r.result_no) AS is_current_result,
         EXISTS (
           SELECT 1
@@ -7518,6 +7504,9 @@ async function loadBathCards(
         ) AS hidden_bath_seed
       FROM cut_job j
       JOIN cut_result r ON r.cut_job_id = j.cut_job_id
+      JOIN cut_result_board_projection board_metadata
+        ON board_metadata.cut_result_id = r.cut_result_id
+       AND board_metadata.snapshot_digest = r.snapshot_digest
       LEFT JOIN cut_result current_result
         ON current_result.cut_result_id = j.current_cut_result_id
       LEFT JOIN cut_result_archive_state archive
@@ -7526,8 +7515,7 @@ async function loadBathCards(
       JOIN cut_result_label_map_projection projection
         ON projection.cut_result_id = r.cut_result_id
        AND projection.snapshot_digest = r.snapshot_digest
-      WHERE r.snapshot_job IS NOT NULL
-        AND COALESCE(r.snapshot_job ->> 'isVacuum', 'false') = 'true'
+      WHERE board_metadata.is_vacuum = true
         ${candidateVisibilityPredicate}
         ${hiddenTombstonePredicate}
         AND (
@@ -7557,7 +7545,41 @@ async function loadBathCards(
         candidate.revision_no DESC,
         candidate.cut_result_id DESC
     )
+    ${operational ? `,
+    operational_completion AS (
+      SELECT selected.cut_result_id,
+        COUNT(*) > 0 AND BOOL_AND(COALESCE(
+          placement.order_id > 0 AND placement.order_detail_id > 0
+          AND detail.detail_id IS NOT NULL AND detail.order_id = placement.order_id
+          AND owner.order_id IS NOT NULL
+          AND status.sort_order >= packed.sort_order,
+          false
+        )) AS physically_complete
+      FROM latest_vacuum_results selected
+      JOIN cut_result_placement placement ON placement.cut_result_id = selected.cut_result_id
+      JOIN cut_result_sheet_map sheet
+        ON sheet.cut_result_sheet_map_id = placement.cut_result_sheet_map_id
+       AND sheet.is_effective = true
+      LEFT JOIN order_details detail
+        ON detail.detail_id = placement.order_detail_id AND detail.delete_flag = false
+      LEFT JOIN orders owner
+        ON owner.order_id = placement.order_id AND owner.delete_flag = false
+       AND owner.order_kind = 'production_order'
+      LEFT JOIN production_statuses status ON status.production_status_id = detail.production_status_id
+      CROSS JOIN packed_status_threshold packed
+      GROUP BY selected.cut_result_id
+    ),
+    operational_vacuum_results AS (
+      SELECT selected.*,
+        selected.result_created_at < ($2::date - INTERVAL '30 days')
+        AND COALESCE(completion.physically_complete, false)
+        AND ('cut-result:' || selected.cut_result_id::text) IS DISTINCT FROM $3::text AS readiness_only
+      FROM latest_vacuum_results selected
+      LEFT JOIN operational_completion completion USING (cut_result_id)
+      WHERE selected.result_created_at < ($2::date + INTERVAL '1 day')
+    )` : ''}
     SELECT
+      ${operational ? 'result.readiness_only' : 'false'} AS readiness_only,
       result.cut_result_id,
       result.cut_job_id,
       result.source_display_number,
@@ -7571,8 +7593,8 @@ async function loadBathCards(
       placement.order_detail_id,
       COALESCE(NULLIF(trim(o.order_name), ''), placement.order_id::text) AS order_name,
       od.detail_number,
-      COALESCE(od.width, placement.detail_width_mm) AS width_mm,
-      COALESCE(od.height, placement.detail_height_mm) AS height_mm,
+      CASE WHEN ${operational ? 'result.readiness_only' : 'false'} THEN NULL ELSE COALESCE(od.width, placement.detail_width_mm) END AS width_mm,
+      CASE WHEN ${operational ? 'result.readiness_only' : 'false'} THEN NULL ELSE COALESCE(od.height, placement.detail_height_mm) END AS height_mm,
       COALESCE(target.completed_quantity, 0) AS completed_quantity,
       CASE
         WHEN detail_status.sort_order IS NOT NULL
@@ -7586,13 +7608,13 @@ async function loadBathCards(
           THEN detail_status.sort_order >= packed_status.sort_order
         ELSE false
       END AS packed_or_later,
-      sheet.cut_group_id,
+      CASE WHEN ${operational ? 'result.readiness_only' : 'false'} THEN NULL ELSE sheet.cut_group_id END AS cut_group_id,
       sheet.variant,
       sheet.sheet_index,
       sheet.sheet_ordinal,
       sheet.sheet_width_mm,
       sheet.sheet_height_mm
-    FROM latest_vacuum_results result
+    FROM ${operational ? 'operational_vacuum_results' : 'latest_vacuum_results'} result
     JOIN cut_result_placement placement
       ON placement.cut_result_id = result.cut_result_id
     JOIN cut_result_sheet_map sheet
@@ -7621,9 +7643,21 @@ async function loadBathCards(
       placement.order_detail_id ASC,
       placement.instance ASC
     `,
-    [workdayFrom, workdayTo],
+    operational ? [workdayFrom, workdayTo, options.focusBathCardId ?? null] : [workdayFrom, workdayTo],
   );
-  return mapBathRows(result.rows);
+  const factsOnly = new Set(result.rows.filter((row) => row.readiness_only === true)
+    .map((row) => `cut-result:${row.cut_result_id}`));
+  const cards = mapBathRows(result.rows);
+  return {
+    cards: cards.filter((card) => !factsOnly.has(card.bathCardId)),
+    historicalBathReadiness: cards.filter((card) => factsOnly.has(card.bathCardId)).map((card) => ({
+      bathCardId: card.bathCardId,
+      forced: card.forced === true,
+      items: card.items.map(({ orderId, orderName, detailId, detailNumber, quantity }) => ({
+        orderId, orderName, detailId, detailNumber, quantity,
+      })),
+    })),
+  };
 }
 
 function mapOriginalBathCards(
@@ -8038,13 +8072,16 @@ function compareBathSheets(left: CncTelegramBathSheetDto, right: CncTelegramBath
 function packetColumnKey(
   packet: CncTelegramPacketDto,
 ): 'parsed' | 'completed' | 'completed_laminated' {
-  if (packet.allLinkedOrderDetailsIssuedOrLater) {
-    return 'completed_laminated';
-  }
   if (packet.completionStatus === 'completed' || packet.thumbsUp) {
     return packet.allLinkedOrderDetailsPackedOrLater ? 'completed_laminated' : 'completed';
   }
-  return 'parsed';
+  const manualTarget = packetManualTargetColumns.get(packet);
+  const sourceColumn = manualTarget === 'completed' || manualTarget === 'completed_laminated'
+    ? manualTarget
+    : 'parsed';
+  return sourceColumn === 'parsed' && packet.allLinkedOrderDetailsIssuedOrLater
+    ? 'completed_laminated'
+    : sourceColumn;
 }
 
 function mapOrderCuttingSequenceRow(row: OrderCuttingSequenceRow): CncTelegramOrderCuttingSequenceDto {
@@ -8113,6 +8150,7 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
         items: [],
       };
       packets.set(row.packet_id, packet);
+      packetManualTargetColumns.set(packet, row.manual_target_column);
     }
 
     if (row.packet_item_id) {

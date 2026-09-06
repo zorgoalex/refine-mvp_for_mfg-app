@@ -7,7 +7,7 @@ import { useSearchParams } from "react-router-dom";
  * const { highlightProps } = useHighlightRow("record_id", tableProps.dataSource);
  * <Table {...tableProps} {...highlightProps} />
  */
-export const useHighlightRow = (idField: string = "id", dataSource?: any[]) => {
+export const useHighlightRow = (idField: string = "id", dataSource?: readonly any[]) => {
   const [searchParams, setSearchParams] = useSearchParams();
   const highlightId = searchParams.get("highlightId");
   const highlightedRowRef = useRef<HTMLTableRowElement | null>(null);

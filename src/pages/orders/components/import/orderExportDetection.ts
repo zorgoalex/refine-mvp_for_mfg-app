@@ -1,5 +1,25 @@
 import type { FieldMapping, ImportRow, ParsedSheet, SelectionRange } from './types/importTypes';
 import { getColumnLetter, getColumnIndex } from './types/importTypes';
+import { IMPORT_DEFAULTS } from './types/importTypes';
+import type { OrderDetail } from '../../../../types/orders';
+
+/** Reuse only pristine UI scaffolding, never saved, edited or populated rows.
+ * Unknown nonempty fields fail closed, including links, references and provenance.
+ */
+export function getExcelImportPlaceholderIds(details: readonly OrderDetail[]): number[] {
+  return details.filter(detail => detail.is_placeholder === true
+    && detail.detail_id == null && detail.delete_flag !== true
+    && Number.isSafeInteger(detail.temp_id) && Number(detail.temp_id) > 0
+    && Object.entries(detail).every(([key, value]) => {
+      if (['temp_id', 'detail_number', 'is_placeholder', 'order_id'].includes(key)) return true;
+      if (key === 'priority' && value === IMPORT_DEFAULTS.priority) return true;
+      if (key === 'milling_type_id' && value === IMPORT_DEFAULTS.milling_type_id) return true;
+      if (key === 'edge_type_id' && value === IMPORT_DEFAULTS.edge_type_id) return true;
+      return value == null || value === '' || value === 0 || value === false;
+    }))
+    .sort((left, right) => (left.detail_number ?? 0) - (right.detail_number ?? 0))
+    .map(detail => detail.temp_id!);
+}
 
 const signature = ['№', 'Высота', 'Ширина', 'Кол-во', 'Площадь', 'Тип детали', 'Обкат',
   'Примечание', 'Цена за кв.м.', 'Сумма', 'Пленка'];

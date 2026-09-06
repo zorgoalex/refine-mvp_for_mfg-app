@@ -38,6 +38,10 @@ type AuditViewMode = 'readable' | 'technical';
 type AuditTableMode = 'audit' | 'business-history';
 type FilterSelectOption = { value: string | number; label: string };
 
+export function isAuditPermissionError(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 403 || error.status === 401);
+}
+
 const AUDIT_ENTITY_LABELS: Record<string, string> = {
   order: 'Заказ',
   order_detail: 'Деталь',
@@ -481,7 +485,7 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
           total: response.pagination.total,
         });
       } catch (err) {
-        if (err instanceof ApiError && (err.statusCode === 403 || err.statusCode === 401)) {
+        if (isAuditPermissionError(err)) {
           setPermissionError('Недостаточно прав для просмотра журналов (audit.view).');
           setData([]);
         } else if (err instanceof Error && err.name !== 'AbortError') {
@@ -509,7 +513,7 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return;
       setFilterOptionsLoaded(true);
-      if (err instanceof ApiError && (err.statusCode === 403 || err.statusCode === 401)) {
+      if (isAuditPermissionError(err)) {
         setPermissionError('Недостаточно прав для просмотра журналов (audit.view).');
       } else if (err instanceof Error) {
         setPermissionError(`Ошибка загрузки фильтров: ${err.message}`);

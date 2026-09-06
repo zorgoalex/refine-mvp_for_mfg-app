@@ -2,6 +2,30 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cncTelegramApi } from './cncTelegramApi';
 
 describe('cncTelegramApi', () => {
+  it('rejects trimmed month data without readiness facts, but accepts legacy full responses', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(JSON.stringify({
+      workday: '2026-09-06', generatedAt: '2026-09-06T08:00:00Z', columns: [],
+      operationalWindow: { dateFrom: '2026-08-07', dateTo: '2026-09-06' },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    await expect(cncTelegramApi.today({ operationalWindow: 'month' })).rejects.toThrow('расчётные итоги');
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(JSON.stringify({
+      workday: '2026-09-06', generatedAt: '2026-09-06T08:00:00Z', columns: [],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    await expect(cncTelegramApi.today({ operationalWindow: 'month' })).resolves.toMatchObject({ columns: [] });
+  });
+
+  it('does not consume a legacy prefetch for a month/focused query', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({
+      workday: '2026-09-06', generatedAt: '2026-09-06T08:00:00Z', columns: [],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await cncTelegramApi.prefetchToday({ date: '2026-09-06' });
+    await cncTelegramApi.consumePrefetchedToday({ date: '2026-09-06',
+      operationalWindow: 'month', focusBathCardId: 'cut-result:9' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toContain('operationalWindow=month');
+    expect(fetchMock.mock.calls[1][0]).toContain('focusBathCardId=cut-result%3A9');
+  });
   beforeEach(() => {
     vi.stubEnv('VITE_API_URL', '');
   });

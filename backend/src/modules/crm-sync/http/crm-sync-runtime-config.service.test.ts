@@ -75,6 +75,27 @@ describe('CrmSyncRuntimeConfigService', () => {
       assignedById: null,
     });
   });
+
+  it('reads fail-closed Bitrix24 payment widget settings', () => {
+    expect(svc({}).getPaymentWidget()).toMatchObject({ enabled: false });
+    expect(svc({
+      BACKEND_ENABLE_BITRIX24_PAYMENT_WIDGET: true,
+      BITRIX24_WIDGET_SESSION_ENCRYPTION_KEY: 'session-key',
+      BITRIX24_WIDGET_COMMAND_TOKEN_ENCRYPTION_KEY: 'command-key',
+      BITRIX24_WIDGET_SESSION_TTL_SECONDS: 600,
+      BITRIX24_WIDGET_COMMAND_TOKEN_RETENTION_DAYS: 30,
+      BITRIX24_WIDGET_PAY_SYSTEM_CACHE_TTL_SECONDS: 900,
+      BITRIX24_WIDGET_COMMAND_LEASE_MS: 180000,
+    }).getPaymentWidget()).toEqual({
+      enabled: true,
+      sessionEncryptionKey: 'session-key',
+      commandTokenEncryptionKey: 'command-key',
+      sessionTtlSeconds: 600,
+      commandTokenRetentionDays: 30,
+      paySystemCacheTtlSeconds: 900,
+      commandLeaseMs: 180000,
+    });
+  });
 });
 
 describe('envSchema Bitrix24 sync guards', () => {
@@ -124,5 +145,33 @@ describe('envSchema Bitrix24 sync guards', () => {
       ...valid,
       BITRIX24_LIMIT_RETRY_MAX_ATTEMPTS: 0,
     })).toThrow(/BITRIX24_LIMIT_RETRY_MAX_ATTEMPTS/);
+  });
+
+  it('requires three distinct 32-byte encryption keys for the payment widget', () => {
+    const key = Buffer.alloc(32, 1).toString('base64');
+    const sessionKey = Buffer.alloc(32, 2).toString('base64');
+    const commandKey = Buffer.alloc(32, 3).toString('base64');
+    const widget = {
+      BACKEND_ENABLE_BITRIX24_REVERSE_SYNC: true,
+      BACKEND_ENABLE_BITRIX24_PAYMENT_WIDGET: true,
+      BACKEND_ENABLE_ORDERS: true,
+      BACKEND_ORDERS_READ_ONLY: false,
+      BACKEND_ENABLE_PAYMENTS: true,
+      BACKEND_BITRIX24_REVERSE_SYNC_ACTOR_USER_ID: 86,
+      BACKEND_ORDER_INITIAL_STATUS_CODE: 'new',
+      BACKEND_ORDER_INITIAL_PRODUCTION_STATUS_CODE: 'new',
+      DATABASE_URL: 'postgres://user:pass@localhost:5432/db',
+      BITRIX24_APP_CLIENT_ID: 'local.erp',
+      BITRIX24_APP_CLIENT_SECRET: 'secret',
+      BITRIX24_APP_TOKEN_ENCRYPTION_KEY: key,
+      BITRIX24_APP_PUBLIC_BASE_URL: 'https://backend.example.test',
+      BITRIX24_WIDGET_SESSION_ENCRYPTION_KEY: sessionKey,
+      BITRIX24_WIDGET_COMMAND_TOKEN_ENCRYPTION_KEY: commandKey,
+    };
+    expect(() => envSchema.parse(widget)).not.toThrow();
+    expect(() => envSchema.parse({
+      ...widget,
+      BITRIX24_WIDGET_COMMAND_TOKEN_ENCRYPTION_KEY: sessionKey,
+    })).toThrow(/must be distinct/);
   });
 });

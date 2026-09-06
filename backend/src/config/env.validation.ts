@@ -437,6 +437,33 @@ export const envSchema = z
       .toLowerCase()
       .default('mebelkz.bitrix24.kz'),
     BITRIX24_PORTAL_TIMEZONE: z.literal('Asia/Almaty').default('Asia/Almaty'),
+    BACKEND_ENABLE_BITRIX24_PAYMENT_WIDGET: booleanFromEnv.default(false),
+    BITRIX24_WIDGET_SESSION_ENCRYPTION_KEY: optionalTrimmedStringFromEnv,
+    BITRIX24_WIDGET_COMMAND_TOKEN_ENCRYPTION_KEY: optionalTrimmedStringFromEnv,
+    BITRIX24_WIDGET_SESSION_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(60)
+      .max(3600)
+      .default(600),
+    BITRIX24_WIDGET_COMMAND_TOKEN_RETENTION_DAYS: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(30)
+      .default(30),
+    BITRIX24_WIDGET_PAY_SYSTEM_CACHE_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(60)
+      .max(86400)
+      .default(900),
+    BITRIX24_WIDGET_COMMAND_LEASE_MS: z.coerce
+      .number()
+      .int()
+      .min(30000)
+      .max(600000)
+      .default(180000),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production' && !env.FRONTEND_ORIGIN) {
@@ -891,6 +918,64 @@ export const envSchema = z
           code: 'custom',
           path: ['BITRIX24_APP_PORTAL_DOMAIN'],
           message: 'must be mebelkz.bitrix24.kz',
+        });
+      }
+    }
+
+    if (env.BACKEND_ENABLE_BITRIX24_PAYMENT_WIDGET) {
+      if (!env.BACKEND_ENABLE_BITRIX24_REVERSE_SYNC) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['BACKEND_ENABLE_BITRIX24_PAYMENT_WIDGET'],
+          message: 'Bitrix24 reverse sync must be enabled for the payment widget',
+        });
+      }
+      for (const key of [
+        'DATABASE_URL',
+        'BITRIX24_APP_CLIENT_ID',
+        'BITRIX24_APP_CLIENT_SECRET',
+        'BITRIX24_APP_TOKEN_ENCRYPTION_KEY',
+        'BITRIX24_APP_PUBLIC_BASE_URL',
+        'BITRIX24_WIDGET_SESSION_ENCRYPTION_KEY',
+        'BITRIX24_WIDGET_COMMAND_TOKEN_ENCRYPTION_KEY',
+      ] as const) {
+        if (!env[key]) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [key],
+            message: 'required when BACKEND_ENABLE_BITRIX24_PAYMENT_WIDGET=true',
+          });
+        }
+      }
+      for (const key of [
+        'BITRIX24_WIDGET_SESSION_ENCRYPTION_KEY',
+        'BITRIX24_WIDGET_COMMAND_TOKEN_ENCRYPTION_KEY',
+      ] as const) {
+        if (env[key] && !isBase64Key32(env[key])) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [key],
+            message: 'must be base64 encoding of exactly 32 bytes',
+          });
+        }
+      }
+      const widgetKeys = [
+        env.BITRIX24_APP_TOKEN_ENCRYPTION_KEY,
+        env.BITRIX24_WIDGET_SESSION_ENCRYPTION_KEY,
+        env.BITRIX24_WIDGET_COMMAND_TOKEN_ENCRYPTION_KEY,
+      ].filter((value): value is string => Boolean(value));
+      if (new Set(widgetKeys).size !== widgetKeys.length) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['BITRIX24_WIDGET_SESSION_ENCRYPTION_KEY'],
+          message: 'installation, session, and command encryption keys must be distinct',
+        });
+      }
+      if (env.BITRIX24_CURRENCY_ID !== 'KZT') {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['BITRIX24_CURRENCY_ID'],
+          message: 'Bitrix24 payment widget currently supports KZT only',
         });
       }
     }
