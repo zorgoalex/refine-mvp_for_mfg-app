@@ -5071,7 +5071,10 @@ async function syncSvgCutJobItemsForPlan(
 }
 
 function svgPlanCanCreateCutResult(plan: Extract<SvgCutImportPlan, { ok: true }>): boolean {
-  return !plan.informational || plan.placements.every((placement) => placement.orderId !== null);
+  return !plan.informational || (
+    plan.details.length > 0 &&
+    plan.placements.every((placement) => placement.orderDetailId !== null)
+  );
 }
 
 export async function ensureSvgCutJobDisplayNumberAvailable(
