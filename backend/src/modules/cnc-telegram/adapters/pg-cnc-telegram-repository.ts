@@ -7,7 +7,7 @@ import type { CncHistoricalBathReadinessDto } from '../dto/cnc-telegram.dto';
 import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { cncPacketCountsForMdfReadinessSql } from '../../../shared/cnc-material';
+import { mdfCutReadinessCtes } from '../../../shared/cnc-material/cut-readiness-sql';
 import {
   CUT_RENDER_STYLES_SETTING_KEY,
   CUT_RENDER_STYLE_TELEGRAM_PHOTO,
@@ -6065,7 +6065,7 @@ function mdfBoardBathColumnEventType(
   }
 }
 
-async function loadMdfBathColumnAutomationState(
+export async function loadMdfBathColumnAutomationState(
   tx: TransactionClient,
   cutResultId: number,
 ): Promise<{ column: 'baths' | 'baths_ready' | 'baths_laminated'; orderIds: number[] } | null> {
@@ -6108,25 +6108,9 @@ async function loadMdfBathColumnAutomationState(
         AND COALESCE(profile.params ->> 'layout_mode', job.params ->> 'layout_mode') = 'vacuum_table'
         AND archive.archived_at IS NULL
     ),
+    ${mdfCutReadinessCtes({ targetDetails: 'target_details' })},
     completed_quantities AS (
-      SELECT
-        item.match_detail_id::bigint AS order_detail_id,
-        SUM(
-          CASE
-            WHEN ${cncPacketCountsForMdfReadinessSql('packet')}
-              AND (packet.completion_status = 'completed' OR packet.thumbs_up = true)
-              THEN GREATEST(item.quantity, 0)
-            ELSE 0
-          END
-        )::integer AS completed_quantity
-      FROM cnc_telegram_packets packet
-      JOIN cnc_telegram_packet_items item
-        ON item.packet_id = packet.packet_id
-      JOIN target_details target
-        ON target.order_detail_id = item.match_detail_id
-      WHERE item.match_status = 'matched'
-        AND item.match_detail_id IS NOT NULL
-      GROUP BY item.match_detail_id
+      SELECT detail_id AS order_detail_id, completed_quantity FROM mdf_cut_quantities
     )
     SELECT
       placement.order_id,
@@ -7340,143 +7324,12 @@ async function loadBathCards(
       ) AS sort_order
       FROM production_statuses ps
     ),
-    packet_items AS (
-      SELECT
-        p.completion_status,
-        p.thumbs_up,
-        ${cncPacketCountsForMdfReadinessSql('p')} AS mdf_relevant,
-        i.match_order_id,
-        i.match_detail_id,
-        i.source,
-        lower(trim(i.order_name)) AS order_key,
-        i.detail_number,
-        i.width_mm,
-        i.height_mm,
-        i.quantity
-      FROM cnc_telegram_packets p
-      JOIN cnc_telegram_packet_items i ON i.packet_id = p.packet_id
-      WHERE ${packetDatePredicate}
-        ${packetVisibilityPredicate}
-    ),
-    matched_target_details AS (
-      SELECT
-        item.match_order_id::bigint AS order_id,
-        item.match_detail_id::bigint AS detail_id,
-        SUM(
-          CASE
-            WHEN item.mdf_relevant
-              AND (item.completion_status = 'completed' OR item.thumbs_up = true)
-              THEN GREATEST(item.quantity, 0)
-            ELSE 0
-          END
-        )::integer AS completed_quantity
-      FROM packet_items item
-      WHERE item.match_order_id IS NOT NULL
-        AND item.match_detail_id IS NOT NULL
-      GROUP BY item.match_order_id, item.match_detail_id
-    ),
-    unique_order_keys AS (
-      SELECT
-        lower(trim(o.order_name)) AS order_key,
-        MIN(o.order_id)::bigint AS order_id
-      FROM orders o
-      WHERE o.delete_flag = false
-        AND o.order_kind = 'production_order'
-        AND NULLIF(trim(o.order_name), '') IS NOT NULL
-      GROUP BY lower(trim(o.order_name))
-      HAVING COUNT(*) = 1
-    ),
-    completed_whole_order_keys AS (
-      SELECT DISTINCT whole_order.order_key
-      FROM cnc_telegram_packets p
-      JOIN cnc_telegram_packet_whole_order_keys whole_order
-        ON whole_order.packet_id = p.packet_id
-      WHERE ${packetDatePredicate}
-        ${packetVisibilityPredicate}
-        AND (p.completion_status = 'completed' OR p.thumbs_up = true)
-        AND ${cncPacketCountsForMdfReadinessSql('p')}
-    ),
-    whole_order_target_details AS (
-      SELECT
-        order_key.order_id,
-        od.detail_id::bigint AS detail_id,
-        1000000000::integer AS completed_quantity
-      FROM completed_whole_order_keys whole_order
-      JOIN unique_order_keys order_key
-        ON order_key.order_key = whole_order.order_key
-      JOIN order_details od
-        ON od.order_id = order_key.order_id
-       AND od.delete_flag = false
-    ),
-    fallback_target_details AS (
-      SELECT
-        order_key.order_id,
-        od.detail_id::bigint AS detail_id,
-        SUM(
-          CASE
-            WHEN item.mdf_relevant
-              AND (item.completion_status = 'completed' OR item.thumbs_up = true)
-              THEN GREATEST(item.quantity, 0)
-            ELSE 0
-          END
-        )::integer AS completed_quantity
-      FROM packet_items item
-      JOIN unique_order_keys order_key
-        ON order_key.order_key = item.order_key
-      JOIN order_details od
-        ON od.order_id = order_key.order_id
-       AND od.delete_flag = false
-      WHERE item.match_order_id IS NULL
-        AND item.match_detail_id IS NULL
-        AND item.detail_number IS NOT NULL
-        AND od.detail_number = item.detail_number
-        AND item.width_mm IS NOT NULL
-        AND item.height_mm IS NOT NULL
-        AND od.width IS NOT NULL
-        AND od.height IS NOT NULL
-        AND (
-          (
-            item.source <> 'ocr'
-            AND (
-              (
-                item.width_mm::numeric = od.width::numeric
-                AND item.height_mm::numeric = od.height::numeric
-              )
-              OR (
-                item.width_mm::numeric = od.height::numeric
-                AND item.height_mm::numeric = od.width::numeric
-              )
-            )
-          )
-          OR (
-            item.source = 'ocr'
-            AND (
-              (
-                ABS(item.width_mm::numeric - od.width::numeric) <= 3
-                AND ABS(item.height_mm::numeric - od.height::numeric) <= 3
-              )
-              OR (
-                ABS(item.width_mm::numeric - od.height::numeric) <= 3
-                AND ABS(item.height_mm::numeric - od.width::numeric) <= 3
-              )
-            )
-          )
-        )
-      GROUP BY order_key.order_id, od.detail_id
-    ),
+    ${mdfCutReadinessCtes({
+      packetPredicate: `${packetDatePredicate} ${packetVisibilityPredicate}`,
+      bazisPredicate: `cut_set.created_at >= $1::date AND cut_set.created_at < ($2::date + INTERVAL '1 day')`,
+    })},
     target_details AS (
-      SELECT
-        target.order_id,
-        target.detail_id,
-        LEAST(SUM(target.completed_quantity), 1000000000::bigint)::integer AS completed_quantity
-      FROM (
-        SELECT * FROM matched_target_details
-        UNION ALL
-        SELECT * FROM fallback_target_details
-        UNION ALL
-        SELECT * FROM whole_order_target_details
-      ) target
-      GROUP BY target.order_id, target.detail_id
+      SELECT order_id, detail_id, completed_quantity FROM mdf_cut_quantities
     ),
     candidate_vacuum_results AS (
       SELECT

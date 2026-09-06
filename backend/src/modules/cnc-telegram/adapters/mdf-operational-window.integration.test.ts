@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Client } from 'pg';
-import { PgCncTelegramRepository } from './pg-cnc-telegram-repository';
+import { PgCncTelegramRepository, loadMdfBathColumnAutomationState } from './pg-cnc-telegram-repository';
+import { loadMdfLaminatedBathAutomationRows } from '../../production-actions/adapters/pg-production-action-repository';
+import type { TransactionClient } from '../../../database/database.types';
 
 // Opt-in, single connection. All fixtures live ONLY in session-local pg_temp
 // tables; public data is never inserted, changed, or deleted by these tests.
@@ -10,6 +12,8 @@ const tables = [
   'cut_result_archive_state', 'cut_result_placement', 'cut_result_sheet_map',
   'orders', 'order_details', 'production_statuses', 'cnc_telegram_packets',
   'cnc_telegram_packet_items', 'cnc_telegram_packet_whole_order_keys',
+  'mdf_board_manual_moves', 'bazis_cut_sets', 'bazis_cut_set_details',
+  'order_statuses', 'app_settings', 'cut_param_profiles', 'outbox_events',
 ] as const;
 
 describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtures)', () => {
@@ -58,8 +62,9 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
 
   async function seed(id: number, details: Array<number | null>, createdAt = '2026-07-20T12:00:00+05',
     job = id, snapshot: Record<string, unknown> = { isVacuum: true }) {
-    await client.query(`INSERT INTO pg_temp.cut_job(cut_job_id,status,current_cut_result_id,name)
-      SELECT $1,'completed',$2,'E2E-Тест' WHERE NOT EXISTS(SELECT 1 FROM pg_temp.cut_job WHERE cut_job_id=$1)`, [job, id]);
+    await client.query(`INSERT INTO pg_temp.cut_job(cut_job_id,status,current_cut_result_id,name,params)
+      SELECT $1,'completed',$2,'E2E-Тест','{"layout_mode":"vacuum_table"}'::jsonb
+      WHERE NOT EXISTS(SELECT 1 FROM pg_temp.cut_job WHERE cut_job_id=$1)`, [job, id]);
     await client.query(`INSERT INTO pg_temp.cut_result(cut_result_id,cut_job_id,result_no,revision_no,created_at,snapshot_digest,snapshot_job)
       VALUES($1::bigint,$2,$1::integer,1,$3,$4,$5::jsonb)`, [id, job, createdAt, `test-${id}`, JSON.stringify({
       name: 'E2E-Тест снимок', groups: [{ summary: { engine_used: 'vacuum_table' } }], ...snapshot,
@@ -81,6 +86,152 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
       ...(month ? { operationalWindow: 'month' as const } : {}), focusBathCardId });
   }
   const ids = (response: Awaited<ReturnType<typeof load>>) => response.columns.flatMap((column) => column.baths.map((bath) => bath.cutResultId));
+
+  async function expectAllReadiness(ready: boolean) {
+    const response = await load();
+    expect(response.columns.flatMap((column) => column.baths).find((bath) => bath.cutResultId === 1)?.ready).toBe(ready);
+    const state = await loadMdfBathColumnAutomationState(client as unknown as TransactionClient, 1);
+    expect(state).not.toBeNull();
+    expect(state?.column !== 'baths').toBe(ready);
+    const laminated = await loadMdfLaminatedBathAutomationRows(client as unknown as TransactionClient, [1]);
+    expect(laminated.length > 0).toBe(ready);
+  }
+
+  async function addBasis(quantity: number, target = 'completed', material = 'МДФ 18мм') {
+    await client.query(`INSERT INTO pg_temp.bazis_cut_sets(bazis_cut_set_id,name,created_at)
+      VALUES(1,'E2E-БАЗИС','2026-09-06T12:00:00+05')`);
+    await client.query(`INSERT INTO pg_temp.mdf_board_manual_moves(card_kind,card_id,target_column)
+      VALUES('bazisCutSet','1',$1)`, [target]);
+    await client.query(`INSERT INTO pg_temp.bazis_cut_set_details(bazis_cut_set_detail_id,
+      bazis_cut_set_id,source_order_id,source_order_detail_id,quantity,material_name)
+      VALUES(1,1,1,1,$1,$2)`, [quantity, material]);
+  }
+
+  it('counts a manually cut pending file without changing actual completion', async () => {
+    await seed(1, [1, 1], '2026-09-06T12:00:00+05');
+    await client.query(`UPDATE pg_temp.order_details SET production_status_id=2 WHERE detail_id=1;
+      UPDATE pg_temp.cnc_telegram_packets SET completion_status='pending';
+      INSERT INTO pg_temp.mdf_board_manual_moves(card_kind,card_id,target_column)
+      VALUES('packet','00000000-0000-0000-0000-000000000001','completed')`);
+    await expectAllReadiness(true);
+  });
+
+  it('discovers and completes a BASIS-only bath', async () => {
+    await seed(1, [1, 1], '2026-09-06T12:00:00+05');
+    await client.query('TRUNCATE pg_temp.cnc_telegram_packets, pg_temp.cnc_telegram_packet_items');
+    await addBasis(2);
+    const response = await load();
+    expect(ids(response)).toContain(1);
+    expect(response.columns.flatMap((column) => column.baths)[0]?.ready).toBe(true);
+    await expectAllReadiness(true);
+  });
+
+  it('does not double-count overlapping CNC and BASIS quantities', async () => {
+    await seed(1, [1, 1], '2026-09-06T12:00:00+05');
+    await client.query('UPDATE pg_temp.cnc_telegram_packet_items SET quantity=1');
+    await addBasis(1);
+    await expectAllReadiness(false);
+  });
+
+  it('respects a manual return to parsed unless the file is automatically terminal', async () => {
+    await seed(1, [1, 1], '2026-09-06T12:00:00+05');
+    await client.query(`UPDATE pg_temp.order_details SET production_status_id=2 WHERE detail_id=1;
+      INSERT INTO pg_temp.mdf_board_manual_moves(card_kind,card_id,target_column)
+      VALUES('packet','00000000-0000-0000-0000-000000000001','parsed')`);
+    await expectAllReadiness(false);
+    await client.query('UPDATE pg_temp.order_details SET production_status_id=1 WHERE detail_id=1');
+    await expectAllReadiness(true);
+  });
+
+  it.each([
+    ['parsed', 2, 'МДФ 10мм', false],
+    ['completed', 1, 'МДФ 10мм', false],
+    ['completed', 2, 'Фанера 18мм', false],
+    ['completed_laminated', 2, 'new-MDF-type', true],
+  ] as const)('BASIS %s quantity %i material %s', async (target, quantity, material, ready) => {
+    await seed(1, [1, 1], '2026-09-06T12:00:00+05');
+    await client.query(`TRUNCATE pg_temp.cnc_telegram_packets, pg_temp.cnc_telegram_packet_items;
+      UPDATE pg_temp.order_details SET production_status_id=2 WHERE detail_id=1`);
+    await addBasis(quantity, target, material);
+    await expectAllReadiness(ready);
+  });
+
+  it('classifies the whole BASIS set before filtering to the bath details', async () => {
+    await seed(1, [1], '2026-09-06T12:00:00+05');
+    await client.query('TRUNCATE pg_temp.cnc_telegram_packets, pg_temp.cnc_telegram_packet_items');
+    await addBasis(1, 'parsed');
+    await client.query(`INSERT INTO pg_temp.bazis_cut_set_details(bazis_cut_set_id,source_order_id,source_order_detail_id,quantity,material_name)
+      VALUES(1,2,2,1,'МДФ 18мм')`);
+    await expectAllReadiness(false); // packed bath detail cannot hide the other, unpacked member
+    await client.query('UPDATE pg_temp.order_details SET production_status_id=1 WHERE detail_id=2');
+    await expectAllReadiness(true); // full terminal set wins over stale manual parsed
+    await client.query('UPDATE pg_temp.bazis_cut_set_details SET source_order_detail_id=999 WHERE source_order_id=2');
+    await expectAllReadiness(false); // unresolved non-bath member also blocks terminal
+  });
+
+  it.each([
+    { productionStatusIds: [2], orderStatusIds: [] },
+    { cardRules: [{ cardKind: 'bazisCutSet', orderStatusIds: [6] }] },
+  ])('counts BASIS terminal placement from stored hidden-status settings: %j', async (setting) => {
+    await seed(1, [1], '2026-09-06T12:00:00+05');
+    await client.query(`TRUNCATE pg_temp.cnc_telegram_packets, pg_temp.cnc_telegram_packet_items;
+      UPDATE pg_temp.order_details SET production_status_id=2 WHERE detail_id=1;
+      UPDATE pg_temp.orders SET production_status_id=2,order_status_id=6 WHERE order_id=1`);
+    await addBasis(1, 'parsed');
+    await client.query(`INSERT INTO pg_temp.app_settings(setting_key,value_json,is_active)
+      VALUES('status_automation.mdf_board_hidden_production_statuses',$1,true)`, [JSON.stringify(setting)]);
+    await expectAllReadiness(true);
+    await client.query('UPDATE pg_temp.orders SET production_status_id=NULL,order_status_id=NULL WHERE order_id=1');
+    await expectAllReadiness(false);
+  });
+
+  it('requires the whole file to be issued for the pending-file terminal shortcut', async () => {
+    await seed(1, [1], '2026-09-06T12:00:00+05');
+    await client.query(`UPDATE pg_temp.order_details SET production_status_id=3 WHERE detail_id=1;
+      UPDATE pg_temp.cnc_telegram_packets SET completion_status='pending';
+      INSERT INTO pg_temp.cnc_telegram_packet_items(packet_id,match_order_id,match_detail_id,quantity)
+      VALUES('00000000-0000-0000-0000-000000000001',2,999,1)`);
+    await expectAllReadiness(false);
+    await client.query(`UPDATE pg_temp.cnc_telegram_packet_items SET match_detail_id=2 WHERE match_order_id=2;
+      UPDATE pg_temp.order_details SET production_status_id=3 WHERE detail_id=2`);
+    await expectAllReadiness(true);
+  });
+
+  it('expands whole-order chat coverage only after actual completion, never from a manual move', async () => {
+    await seed(1, [1, 3], '2026-09-06T12:00:00+05');
+    await client.query(`UPDATE pg_temp.order_details SET production_status_id=2 WHERE detail_id IN (1,3);
+      UPDATE pg_temp.cnc_telegram_packets SET completion_status='pending';
+      INSERT INTO pg_temp.mdf_board_manual_moves(card_kind,card_id,target_column)
+        VALUES('packet','00000000-0000-0000-0000-000000000001','completed');
+      INSERT INTO pg_temp.cnc_telegram_packet_whole_order_keys(packet_id,order_key)
+        VALUES('00000000-0000-0000-0000-000000000001','e2e-тест 1')`);
+    await expectAllReadiness(false);
+    await client.query("UPDATE pg_temp.cnc_telegram_packets SET completion_status='completed'");
+    await expectAllReadiness(true);
+  });
+
+  it('resolves a unique OCR fallback by active owner even without an order name', async () => {
+    await seed(1, [1], '2026-09-06T12:00:00+05');
+    await client.query(`UPDATE pg_temp.order_details SET width=100,height=200 WHERE detail_id=1;
+      UPDATE pg_temp.cnc_telegram_packet_items SET match_detail_id=NULL,detail_number=1,
+        width_mm=202,height_mm=98,source='ocr'`);
+    await expectAllReadiness(true);
+    await client.query('UPDATE pg_temp.cnc_telegram_packet_items SET width_mm=204');
+    const state = await loadMdfBathColumnAutomationState(client as unknown as TransactionClient, 1);
+    expect(state?.column).toBe('baths');
+    expect(await loadMdfLaminatedBathAutomationRows(client as unknown as TransactionClient, [1])).toEqual([]);
+  });
+
+  it.each([
+    "rework=true", "mdf_board_card_kind='bath_seed'", "program_name='2701_fanera18.tap'",
+    "source_chat_id='erp-manual-svg-upload',source_version=1",
+  ])('does not count ineligible files despite manual completion: %s', async (update) => {
+    await seed(1, [1], '2026-09-06T12:00:00+05');
+    await client.query(`UPDATE pg_temp.cnc_telegram_packets SET ${update};
+      INSERT INTO pg_temp.mdf_board_manual_moves(card_kind,card_id,target_column)
+      VALUES('packet','00000000-0000-0000-0000-000000000001','completed')`);
+    await expectAllReadiness(false);
+  });
 
   it('keeps month boundary and old unfinished; compacts only complete full compositions', async () => {
     await seed(1, [1, 1]);

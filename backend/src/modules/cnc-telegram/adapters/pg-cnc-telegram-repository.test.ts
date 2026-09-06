@@ -1286,13 +1286,14 @@ describe('PgCncTelegramRepository', () => {
     expect(sql).toContain('cut_result_placement');
     expect(sql).toContain('cut_result_sheet_map');
     expect(sql).toContain('cut_result_label_map_projection');
-    expect(sql).toContain('fallback_target_details');
+    expect(sql).toContain('mdf_resolved_packet_items');
     expect(sql).toContain('completed_whole_order_keys');
     expect(sql).toContain('whole_order_target_details');
     expect(sql).toContain('JOIN cnc_telegram_packet_whole_order_keys whole_order');
     expect(sql).toContain('whole_order.order_key');
-    expect(sql).toContain('1000000000::integer AS completed_quantity');
-    expect(sql).toContain('LEAST(SUM(target.completed_quantity), 1000000000::bigint)::integer');
+    expect(sql).toContain('1000000000::bigint AS quantity');
+    expect(sql).toContain('LEAST(SUM(quantity), 1000000000::bigint)::integer');
+    expect(sql).toContain('MAX(completed_quantity)::integer AS completed_quantity');
     expect(sql).toContain('candidate_vacuum_results AS (');
     expect(sql).toContain('latest_vacuum_results AS (');
     expect(sql).toContain('SELECT DISTINCT ON (candidate.cut_job_id)');
@@ -1305,8 +1306,8 @@ describe('PgCncTelegramRepository', () => {
     expect(sql).toContain('archive.archived_at IS NULL');
     expect(sql).toContain('candidate.is_current_result DESC');
     expect(sql).toContain('candidate.result_created_at DESC');
-    expect(sql).toContain('lower(trim(i.order_name)) AS order_key');
-    expect(sql).toContain('od.detail_number = item.detail_number');
+    expect(sql).toContain('named_owner.order_key = lower(trim(i.order_name))');
+    expect(sql).toContain('candidate.detail_number = i.detail_number');
     expect(sql).toContain("COALESCE(p.material_name, '') ~* '(mdf|мдф)'");
     expect(sql).toContain("COALESCE(p.material_name, '') !~* '(^|[^a-zа-яё])(hdf|хдф|лдсп|ldsp|lдсп");
     expect(sql).toContain("COALESCE(p.program_name, '') !~*");
@@ -1316,10 +1317,10 @@ describe('PgCncTelegramRepository', () => {
     expect(sql).toContain('дсп|dsp|двп|dvp|osb|осп');
     expect(sql).toContain('fanera|фанера|plywood');
     expect(sql).toContain('акрил|acrylic|пластик|plastic');
-    expect(sql).toContain("item.source <> 'ocr'");
-    expect(sql).toContain('item.width_mm::numeric = od.width::numeric');
-    expect(sql).toContain("item.source = 'ocr'");
-    expect(sql).toContain('ABS(item.width_mm::numeric - od.width::numeric) <= 3');
+    expect(sql).toContain("i.source <> 'ocr'");
+    expect(sql).toContain('i.width_mm::numeric = candidate.width::numeric');
+    expect(sql).toContain("i.source = 'ocr'");
+    expect(sql).toContain('ABS(i.width_mm::numeric - candidate.width::numeric) <= 3');
     expect(result.columns.map((column) => [column.key, column.total])).toEqual([
       ['parsed', 0],
       ['completed', 0],
@@ -3597,10 +3598,10 @@ describe('PgCncTelegramRepository', () => {
     expect(targetQuery?.params).toEqual([[3101], [], [2689]]);
     expect(targetQuery?.text).toContain('SUM(GREATEST(item.quantity, 0))');
     expect(targetQuery?.text).toContain('completed.completed_quantity, 0) >= GREATEST');
-    expect(bathStateQuery?.text).toContain("COALESCE(packet.material_name, '') ~*");
-    expect(bathStateQuery?.text).toContain("COALESCE(packet.program_name, '') !~*");
-    expect(bathStateQuery?.text).toContain("COALESCE(packet.external_packet_key, '') !~*");
-    expect(bathStateQuery?.text).toContain('jsonb_array_elements_text(COALESCE(packet.comments_json');
+    expect(bathStateQuery?.text).toContain("COALESCE(p.material_name, '') ~*");
+    expect(bathStateQuery?.text).toContain("COALESCE(p.program_name, '') !~*");
+    expect(bathStateQuery?.text).toContain("COALESCE(p.external_packet_key, '') !~*");
+    expect(bathStateQuery?.text).toContain('jsonb_array_elements_text(COALESCE(p.comments_json');
     expect(orderLockIndex).toBeGreaterThan(-1);
     expect(targetQueryIndex).toBeGreaterThan(orderLockIndex);
     expect(currentStatusLockIndex).toBeGreaterThan(detailLockIndex);
@@ -3670,7 +3671,8 @@ describe('PgCncTelegramRepository', () => {
       currentThumbsUp: false,
     });
 
-    expect(queries.some((query) => /FROM app_settings/i.test(query.text))).toBe(false);
+    // Read-only bath classification may load its own settings; auto-cut must not run.
+    expect(queries.some((query) => /FROM app_settings\s+WHERE setting_key = \$1/i.test(query.text))).toBe(false);
     expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
   });
 

@@ -214,11 +214,11 @@ describe('production-action automation in-transaction actions', () => {
 
     const query = database.sql.find((sql) => sql.startsWith('WITH laminated_status_threshold AS'));
     expect(query).toBeDefined();
-    expect(query).toContain("COALESCE(packet.material_name, '') ~* '(mdf|мдф)'");
+    expect(query).toContain("COALESCE(p.material_name, '') ~* '(mdf|мдф)'");
     for (const field of ['material_name', 'program_name', 'external_packet_key']) {
-      expect(query).toContain(`COALESCE(packet.${field}, '') !~*`);
+      expect(query).toContain(`COALESCE(p.${field}, '') !~*`);
     }
-    expect(query).toContain("jsonb_array_elements_text(COALESCE(packet.comments_json, '[]'::jsonb))");
+    expect(query).toContain("jsonb_array_elements_text(COALESCE(p.comments_json, '[]'::jsonb))");
     expect(query).not.toContain('LIKE ANY');
     expect(query).toContain("packet.completion_status = 'completed' OR packet.thumbs_up = true");
     expect(query).toContain('candidate.completed_quantity < candidate.quantity');
@@ -255,7 +255,7 @@ describe('production-action automation in-transaction actions', () => {
         { name: 'thumbs up', update: `UPDATE cnc_telegram_packets SET completion_status = 'pending', thumbs_up = true WHERE packet_id = 1;`, eligible: true },
         { name: 'thumbs up cannot bypass material', update: `UPDATE cnc_telegram_packets SET completion_status = 'pending', thumbs_up = true, program_name = '2701_fanera18.tap' WHERE packet_id = 1;`, eligible: false },
         { name: 'insufficient quantity', update: `UPDATE cnc_telegram_packet_items SET quantity = 1 WHERE packet_id = 1;`, eligible: false },
-        { name: 'unmatched item', update: `UPDATE cnc_telegram_packet_items SET match_status = 'needs_review' WHERE packet_id = 1;`, eligible: false },
+        { name: 'unmatched item', update: `UPDATE cnc_telegram_packet_items SET match_detail_id = NULL, match_status = 'needs_review' WHERE packet_id = 1;`, eligible: false },
         { name: 'not laminated', update: `UPDATE order_details SET production_status_id = 1 WHERE detail_id = 101;`, eligible: false },
         { name: 'another bath detail not laminated', update: `UPDATE order_details SET production_status_id = 1 WHERE detail_id = 102;`, eligible: false },
       ];
@@ -269,22 +269,32 @@ describe('production-action automation in-transaction actions', () => {
         CREATE TEMP TABLE cut_job (cut_job_id bigint, current_cut_result_id bigint, param_profile_id bigint, status text, params jsonb);
         CREATE TEMP TABLE cut_param_profiles (cut_param_profile_id bigint, params jsonb);
         CREATE TEMP TABLE cut_result_archive_state (cut_job_id bigint, result_no int, archived_at timestamptz);
-        CREATE TEMP TABLE orders (order_id bigint, delete_flag boolean);
-        CREATE TEMP TABLE order_details (detail_id bigint, production_status_id int, delete_flag boolean);
-        CREATE TEMP TABLE cnc_telegram_packets (packet_id int, material_name text, program_name text, external_packet_key text, comments_json jsonb, completion_status text, thumbs_up boolean);
-        CREATE TEMP TABLE cnc_telegram_packet_items (packet_id int, match_detail_id bigint, quantity int, match_status text);
+        CREATE TEMP TABLE orders (order_id bigint, delete_flag boolean, order_name text, order_kind text, order_status_id int, production_status_id int);
+        CREATE TEMP TABLE order_details (detail_id bigint, production_status_id int, delete_flag boolean, order_id bigint, detail_number int, width numeric, height numeric);
+        CREATE TEMP TABLE cnc_telegram_packets (packet_id int, material_name text, program_name text, external_packet_key text, comments_json jsonb, completion_status text, thumbs_up boolean,
+          rework boolean, mdf_board_card_kind text, mdf_board_hidden_at timestamptz, source_chat_id text, source_version int);
+        CREATE TEMP TABLE cnc_telegram_packet_items (packet_id int, match_detail_id bigint, quantity int, match_status text,
+          match_order_id bigint, order_name text, detail_number int, width_mm numeric, height_mm numeric, source text);
+        CREATE TEMP TABLE mdf_board_manual_moves AS TABLE public.mdf_board_manual_moves WITH NO DATA;
+        CREATE TEMP TABLE bazis_cut_sets AS TABLE public.bazis_cut_sets WITH NO DATA;
+        CREATE TEMP TABLE bazis_cut_set_details AS TABLE public.bazis_cut_set_details WITH NO DATA;
+        CREATE TEMP TABLE order_statuses AS TABLE public.order_statuses WITH NO DATA;
+        CREATE TEMP TABLE app_settings AS TABLE public.app_settings WITH NO DATA;
+        CREATE TEMP TABLE cnc_telegram_packet_whole_order_keys (packet_id int, order_key text);
+        CREATE TEMP TABLE outbox_events AS TABLE public.outbox_events WITH NO DATA;
         INSERT INTO production_statuses VALUES (1, 'cut', 'Крой', 10), (7, 'laminated', 'Закатан', 30);
         INSERT INTO cut_result VALUES (701, 70, 1, 1, now(), '{}');
         INSERT INTO cut_result_placement VALUES (701, 15, 101), (701, 15, 101), (701, 15, 102);
         INSERT INTO cut_job VALUES (70, 701, NULL, 'active', '{"layout_mode":"vacuum_table"}');
-        INSERT INTO orders VALUES (15, false);
-        INSERT INTO order_details VALUES (101, 7, false), (102, 7, false);
+        INSERT INTO orders(order_id,delete_flag,order_name,order_kind) VALUES (15, false, 'E2E-Test', 'production_order');
+        INSERT INTO order_details(detail_id,production_status_id,delete_flag,order_id) VALUES (101, 7, false, 15), (102, 7, false, 15);
         INSERT INTO cnc_telegram_packets (packet_id) VALUES (1), (2);
-        INSERT INTO cnc_telegram_packet_items VALUES (1, 101, 2, 'matched'), (2, 102, 2, 'matched');
+        INSERT INTO cnc_telegram_packet_items(packet_id,match_detail_id,quantity,match_status,match_order_id)
+          VALUES (1, 101, 2, 'matched', 15), (2, 102, 2, 'matched', 15);
         ${cases.map(({ update }) => `
           UPDATE cnc_telegram_packets SET material_name = 'МДФ 16мм', program_name = '2701_MDF16.tap',
             external_packet_key = 'telegram:test:1', comments_json = '[]', completion_status = 'completed', thumbs_up = false;
-          UPDATE cnc_telegram_packet_items SET quantity = 2, match_status = 'matched';
+          UPDATE cnc_telegram_packet_items SET quantity = 2, match_status = 'matched', match_detail_id = 100 + packet_id;
           UPDATE order_details SET production_status_id = 7;
           ${update}
           SELECT count(*) FROM (${query!.replace('$1', 'ARRAY[101]')}) AS eligible_baths;

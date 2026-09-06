@@ -4,7 +4,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import { auditService } from '../../../common/audit/audit.service';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
-import { cncPacketCountsForMdfReadinessSql } from '../../../shared/cnc-material';
+import { mdfCutReadinessCtes } from '../../../shared/cnc-material/cut-readiness-sql';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole, type PermissionName } from '../../../permissions/permissions';
 import type { MdfBoardColumnAutomationInput } from '../../status-automation/application/status-automation-runtime';
@@ -3504,7 +3504,7 @@ async function evaluateMdfBoardLaminatedBathAutomationForDetails(
   }
 }
 
-async function loadMdfLaminatedBathAutomationRows(
+export async function loadMdfLaminatedBathAutomationRows(
   tx: TransactionClient,
   detailIds: number[],
 ): Promise<MdfLaminatedBathAutomationRow[]> {
@@ -3581,25 +3581,9 @@ async function loadMdfLaminatedBathAutomationRows(
         ON detail.detail_id = placement.order_detail_id
        AND COALESCE(detail.delete_flag, false) = false
     ),
+    ${mdfCutReadinessCtes({ targetDetails: 'result_details' })},
     completed_quantities AS (
-      SELECT
-        item.match_detail_id::bigint AS order_detail_id,
-        SUM(
-          CASE
-            WHEN ${cncPacketCountsForMdfReadinessSql('packet')}
-              AND (packet.completion_status = 'completed' OR packet.thumbs_up = true)
-              THEN GREATEST(item.quantity, 0)
-            ELSE 0
-          END
-        )::integer AS completed_quantity
-      FROM cnc_telegram_packets packet
-      JOIN cnc_telegram_packet_items item
-        ON item.packet_id = packet.packet_id
-      JOIN result_details detail
-        ON detail.order_detail_id = item.match_detail_id
-      WHERE item.match_status = 'matched'
-        AND item.match_detail_id IS NOT NULL
-      GROUP BY item.match_detail_id
+      SELECT detail_id AS order_detail_id, completed_quantity FROM mdf_cut_quantities
     ),
     detail_state AS (
       SELECT

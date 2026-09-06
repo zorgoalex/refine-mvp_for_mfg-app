@@ -2065,6 +2065,11 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
           return next;
         });
         message.success(`Карточка перемещена в «${targetTitle}».`);
+        if (kind === 'packet' || kind === 'bazisCutSet') {
+          // Bath quantities are backend-owned and include sources hidden by UI
+          // filters. Reload after the source move has committed.
+          void fetchInitial({ mutationRefetch: true, preserveLoading: true });
+        }
       })
       .catch((error) => {
         if (cncManualMoveRequestSeqRef.current[key] !== requestSeq) return;
