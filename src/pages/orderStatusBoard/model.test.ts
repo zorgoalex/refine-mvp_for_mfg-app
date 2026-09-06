@@ -38,6 +38,7 @@ import {
   DEFAULT_MDF_ORDER_CARD_SORT,
   filterBoardColumns,
   filterCncBathColumnsByMachineOrderMatches,
+  filterCncHistoricalBathReadiness,
   filterCncBathColumnsByOrderStatuses,
   filterCncOrderCardsByPlannedOrderDate,
   filterCncTodayColumnsByOrders,
@@ -56,6 +57,26 @@ import {
 } from './model';
 
 describe('order status board model', () => {
+  it('preserves rolled volume using historical facts without recreating old cards', () => {
+    const bath = cncBath('cut-result:9', ['2706', '2707'], [2706, 2707]);
+    const columns: CncTelegramTodayColumn[] = [{
+      key: 'completed_baths', title: 'Завершенные ванны', total: 1,
+      packets: [], baths: [bath], bazisCutSets: [],
+    }];
+    const facts = [{ bathCardId: bath.bathCardId, forced: false,
+      items: bath.items.map(({ orderId, orderName, detailId, detailNumber, quantity }) => ({
+        orderId, orderName, detailId, detailNumber, quantity,
+      })) }];
+    expect(buildCncOrderReadiness([], {}, facts)).toEqual(buildCncOrderReadiness(columns, {}));
+    expect(collectCncOrderIds([])).toEqual([]);
+    const filtered = filterCncHistoricalBathReadiness(facts, [], ['2706'], false);
+    expect(filtered[0].items).toHaveLength(2);
+    expect(buildCncOrderReadiness([], {}, filtered).has(2707)).toBe(true);
+    expect(filterCncHistoricalBathReadiness(facts, [], [], true)).toEqual([]);
+    expect(filterCncHistoricalBathReadiness([{ ...facts[0], forced: true }], [], [], true)).toHaveLength(1);
+    expect(filterCncHistoricalBathReadiness(facts, [], ['other'], false)).toEqual([]);
+    expect(filterCncHistoricalBathReadiness(facts, [], [], true, bath.bathCardId)).toHaveLength(1);
+  });
   it('builds a stable CNC order-board request key for equivalent order sets', () => {
     const sort = { sortBy: 'priority' as const, sortOrder: 'asc' as const };
 

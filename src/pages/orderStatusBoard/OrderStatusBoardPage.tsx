@@ -68,6 +68,7 @@ import type {
 } from '../../api/types/orderStatusBoardApi.types';
 import type {
   CncTelegramBathCard,
+  CncHistoricalBathReadiness,
   CncTelegramBazisCutSetCard,
   CncTelegramOriginalBoardResponse,
   CncTelegramPacket,
@@ -112,6 +113,7 @@ import {
   applyMdfBoardHiddenCardRulesToColumns,
   filterBoardColumns,
   filterCncBathColumnsByMachineOrderMatches,
+  filterCncHistoricalBathReadiness,
   filterCncOrderCardsByPlannedOrderDate,
   filterCncTodayColumnsByOrders,
   filterCncTodayColumnsByPlannedOrderDate,
@@ -930,6 +932,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
               cncTelegramApi.consumePrefetchedToday({
                 dateFrom: displayRange.dateFrom,
                 dateTo: displayRange.dateTo,
+                operationalWindow: 'month',
+                ...(currentViewState.cncCardKind === 'bath' && currentViewState.cncCardId
+                  ? { focusBathCardId: currentViewState.cncCardId } : {}),
               }, { cache: 'no-store' }),
               fetchCncManualMoves({ cache: 'no-store' }),
               refetchMdfBoardSettings(),
@@ -1502,6 +1507,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const cncOrderIds = useMemo(
     () => collectCncOrderIds(cncFilteredColumns),
     [cncFilteredColumns],
+  );
+  const cncHistoricalBathReadiness = useMemo(
+    () => cncOriginalView ? [] : filterCncHistoricalBathReadiness(
+      cncToday?.historicalBathReadiness ?? [],
+      cncOrderFilteredColumns,
+      cncOrderFilters,
+      cncBathsRequireMachineFiles,
+      preservedCncBathCardId,
+    ),
+    [cncOriginalView, cncToday?.historicalBathReadiness, cncOrderFilteredColumns,
+      cncOrderFilterKey, cncBathsRequireMachineFiles, preservedCncBathCardId],
   );
   const cncOrderBoardColumns = useMemo(
     () => filterBoardColumns('production', cncOrderBoard?.columns ?? [], true),
@@ -2961,6 +2977,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
               <CncTelegramTodayColumns
                 columns={cncRenderColumns}
                 readinessColumns={cncActiveColumns}
+                historicalBathReadiness={cncHistoricalBathReadiness}
                 orderCards={cncOrderCards}
                 manualMoves={cncManualMoves}
                 mutedOrderIds={cncMutedOrderIds}
@@ -3121,6 +3138,7 @@ const StatusBoardToolbarIconToggle: React.FC<{
 interface CncTelegramTodayColumnsProps {
   columns: CncTelegramTodayColumn[];
   readinessColumns: CncTelegramTodayColumn[];
+  historicalBathReadiness?: readonly CncHistoricalBathReadiness[];
   orderCards: OrderStatusBoardCard[];
   manualMoves: CncBoardManualMoveState;
   mutedOrderIds: ReadonlySet<number>;
@@ -3504,6 +3522,7 @@ function buildCncOriginalOrderCreatedAt(
 const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   columns,
   readinessColumns,
+  historicalBathReadiness,
   orderCards,
   manualMoves,
   mutedOrderIds,
@@ -3628,8 +3647,10 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
     }));
   }, []);
   const orderReadinessByOrderId = useMemo(
-    () => buildCncOrderReadiness(applyCncManualMovesToColumns(readinessColumns, manualMoves), {}),
-    [manualMoves, readinessColumns],
+    () => buildCncOrderReadiness(
+      applyCncManualMovesToColumns(readinessColumns, manualMoves), {}, historicalBathReadiness,
+    ),
+    [manualMoves, readinessColumns, historicalBathReadiness],
   );
   const orderMissingDetailsByOrderId = useMemo(
     () => buildCncOrderMissingDetails(orderCards, readinessColumns),
@@ -8658,6 +8679,7 @@ function shouldProjectCncManualTarget(
 export function buildCncOrderReadiness(
   columns: CncTelegramTodayColumn[],
   manualMoves: CncBoardManualMoveState,
+  historicalBathReadiness: readonly CncHistoricalBathReadiness[] = [],
 ): Map<number, CncOrderReadiness> {
   const orders = new Map<number, Map<string, CncReadinessDetailTotals>>();
   const getDetail = (
@@ -8759,6 +8781,19 @@ export function buildCncOrderReadiness(
           detail.rolled += quantity;
         }
       }
+    }
+  }
+
+  // These sources are physically packed: terminal automatic placement wins over
+  // every manual override. Preserve volume without recreating visible cards.
+  for (const bath of historicalBathReadiness) {
+    for (const [index, item] of bath.items.entries()) {
+      const detail = getDetail(item.orderId, item.detailId, item.detailNumber,
+        `historical-bath:${bath.bathCardId}:${index}`);
+      if (!detail) continue;
+      const quantity = nonNegativeInteger(item.quantity);
+      detail.bathTotal += quantity;
+      detail.rolled += quantity;
     }
   }
 

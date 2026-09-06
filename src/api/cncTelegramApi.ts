@@ -30,6 +30,8 @@ export interface CncTelegramTodayQuery {
   date?: string;
   dateFrom?: string;
   dateTo?: string;
+  operationalWindow?: 'month';
+  focusBathCardId?: string;
 }
 
 interface CncTodayPrefetch {
@@ -50,7 +52,14 @@ function requestCncToday(
   query: CncTelegramTodayQuery,
   options?: RequestOptions,
 ): Promise<CncTelegramTodayResponse> {
-  return httpClient.get<CncTelegramTodayResponse>(cncTodayQueryKey(query), options);
+  return httpClient.get<CncTelegramTodayResponse>(cncTodayQueryKey(query), options).then((response) => {
+    // An old backend returns the full legacy card set, which remains safe during
+    // rollback. A trimmed response without its calculation facts is NOT safe.
+    if (response.operationalWindow && !Array.isArray(response.historicalBathReadiness)) {
+      throw new Error('МДФ-доска: отсутствуют расчётные итоги исторических ванн');
+    }
+    return response;
+  });
 }
 
 export const cncTelegramApi = {

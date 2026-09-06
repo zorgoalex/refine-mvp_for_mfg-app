@@ -1,4 +1,5 @@
 import type {
+  CncHistoricalBathReadiness,
   CncTelegramBathCard,
   CncTelegramBazisCutSetCard,
   CncTelegramPacket,
@@ -395,6 +396,37 @@ export function filterCncBathColumnsByMachineOrderMatches(
   columns: CncTelegramTodayColumn[],
   preservedBathCardId?: string,
 ): CncTelegramTodayColumn[] {
+  const machineOrderKeys = collectCncMachineOrderKeys(columns);
+
+  return columns.map((column) => {
+    if (!isCncBathColumnKey(column.key)) return column;
+    const baths = (column.baths ?? []).filter((bath) =>
+      bath.bathCardId === preservedBathCardId
+      || bath.forced === true
+      || bath.items.some((item) => machineOrderKeys.has(normalizeCncOrderKey(item.orderName))),
+    );
+    return { ...column, baths, total: baths.length };
+  });
+}
+
+/** Keep whole-bath membership; these facts must never follow planned-today visibility. */
+export function filterCncHistoricalBathReadiness(
+  facts: readonly CncHistoricalBathReadiness[],
+  orderFilteredColumns: CncTelegramTodayColumn[],
+  orderFilters: readonly string[],
+  requireMachineFiles: boolean,
+  preservedBathCardId?: string,
+): CncHistoricalBathReadiness[] {
+  const orderKeys = new Set(normalizeCncOrderFilterValues(orderFilters).map(normalizeCncOrderKey));
+  const machineOrderKeys = collectCncMachineOrderKeys(orderFilteredColumns);
+  return facts.filter((bath) =>
+    (orderKeys.size === 0 || bath.items.some((item) => orderKeys.has(normalizeCncOrderKey(item.orderName))))
+    && (!requireMachineFiles || bath.forced || bath.bathCardId === preservedBathCardId
+      || bath.items.some((item) => machineOrderKeys.has(normalizeCncOrderKey(item.orderName)))),
+  );
+}
+
+function collectCncMachineOrderKeys(columns: CncTelegramTodayColumn[]): Set<string> {
   const machineOrderKeys = new Set<string>();
   for (const column of columns) {
     if (
@@ -416,15 +448,7 @@ export function filterCncBathColumnsByMachineOrderMatches(
     }
   }
 
-  return columns.map((column) => {
-    if (!isCncBathColumnKey(column.key)) return column;
-    const baths = (column.baths ?? []).filter((bath) =>
-      bath.bathCardId === preservedBathCardId
-      || bath.forced === true
-      || bath.items.some((item) => machineOrderKeys.has(normalizeCncOrderKey(item.orderName))),
-    );
-    return { ...column, baths, total: baths.length };
-  });
+  return machineOrderKeys;
 }
 
 export function buildCncOrderMissingDetails(

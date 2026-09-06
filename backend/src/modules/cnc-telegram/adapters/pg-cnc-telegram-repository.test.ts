@@ -23,7 +23,7 @@ describe('PgCncTelegramRepository', () => {
   it('keeps forced baths visible and preserves hidden bath history', () => {
     expect(repositorySource).toContain("forced_seed.mdf_board_card_kind = 'bath_seed'");
     expect(repositorySource).toContain("hidden_seed.mdf_board_card_kind = 'bath_seed'");
-    expect(repositorySource).toContain("COALESCE(r.snapshot_job ->> 'isVacuum', 'false') = 'true'");
+    expect(repositorySource).toContain('board_metadata.is_vacuum = true');
     expect(repositorySource).toContain("? 'hidden' as const");
     expect(repositorySource).toContain('currentByResult.get(bath.cutResultId)');
   });
@@ -53,8 +53,8 @@ describe('PgCncTelegramRepository', () => {
     const listTodayStart = repositorySource.indexOf('async listToday(');
     const listTodayEnd = repositorySource.indexOf('\n  async listOriginalBoard(', listTodayStart);
     const listTodaySource = repositorySource.slice(listTodayStart, listTodayEnd);
-    expect(listTodaySource).toContain('const [rows, baths, bazisCutSets] = await Promise.all([');
-    expect(listTodaySource).toContain('loadBathCards(this.database, workdayFrom, workdayTo)');
+    expect(listTodaySource).toContain('const [rows, bathResult, bazisCutSets] = await Promise.all([');
+    expect(listTodaySource).toContain('loadBathCards(this.database, workdayFrom, workdayTo, {');
     expect(listTodaySource).toContain('loadPeriodBazisCutSetCards(this.database, workdayFrom, workdayTo)');
   });
 
@@ -1282,7 +1282,7 @@ describe('PgCncTelegramRepository', () => {
     const result = await repo.listToday({ currentUser: user(), workday: '2026-07-24' });
     const sql = queries.join('\n');
 
-    expect(sql).toContain("COALESCE(r.snapshot_job ->> 'isVacuum', 'false') = 'true'");
+    expect(sql).toContain('board_metadata.is_vacuum = true');
     expect(sql).toContain('cut_result_placement');
     expect(sql).toContain('cut_result_sheet_map');
     expect(sql).toContain('cut_result_label_map_projection');

@@ -30,6 +30,17 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-09-06",
+    title: "МДФ-работы: быстрая загрузка и месячное окно",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Ванны загружаются по компактным метаданным без чтения архивных снимков раскроя; старые вакуумные результаты распознаются по сохранённым данным.",
+      "Оперативное окно ограничено 31 днём. Старые незавершённые ванны остаются; завершённые сохраняют вклад в готовность заказов без загрузки их карточек.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-09-05",
     title: "МДФ-работы: состав файлов станка",
     services: ["ERP"],
