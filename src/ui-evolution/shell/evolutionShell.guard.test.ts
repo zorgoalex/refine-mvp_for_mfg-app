@@ -68,6 +68,9 @@ describe('evolution shell behavior preservation', () => {
     expect(tabletUtilities).toContain('aria-label="Персональные действия"');
     expect(tabletUtilities).toContain('aria-label="Сканер бирок"');
     expect(tabletUtilities).toContain("canViewNavigationResource('scan', identity");
+    expect(tabletUtilities).toContain("presentation === 'rail' ? 'bottomLeft' : 'topRight'");
+    expect(tabletUtilities).toContain("'topRight'");
+    expect(tabletUtilities).not.toContain("'rightBottom'");
     expect(tabletUtilities).toContain('className="evolution-tablet-utility evolution-tablet-utility--theme"');
     expect(tabletUtilities).toContain('className="evolution-tablet-utility evolution-tablet-utility--avatar"');
     expect(notificationBell).toContain('aria-label="Уведомления"');

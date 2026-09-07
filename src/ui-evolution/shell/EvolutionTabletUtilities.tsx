@@ -46,7 +46,7 @@ export const EvolutionTabletUtilities: React.FC<EvolutionTabletUtilitiesProps> =
     featureFlags.labels &&
     canViewNavigationResource('scan', identity, featureFlags.useBackendPermissions);
   const tooltipPlacement = presentation === 'rail' ? 'right' : 'top';
-  const popupPlacement = presentation === 'rail' ? 'rightBottom' : 'topRight';
+  const popupPlacement = presentation === 'rail' ? 'bottomLeft' : 'topRight';
   const nextThemeLabel = mode === 'dark' ? 'Включить светлую тему' : 'Включить темную тему';
 
   return (
