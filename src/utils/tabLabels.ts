@@ -42,7 +42,7 @@ export const RESOURCE_LABELS: Record<string, string> = {
   audit: 'Журналы',
   sheet_material_types: 'Листовые материалы',
   cut: 'Раскрой',
-  cad: 'Фрезеровки CAD',
+  cad: 'CAD',
   bazis: 'Базис-проекты',
   'bazis-cut-sets': 'Базис-раскрой',
   scan: 'Сканер бирок',

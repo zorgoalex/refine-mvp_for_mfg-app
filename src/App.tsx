@@ -415,7 +415,7 @@ const ThemedApp = () => {
                       },
                     ]
                   : []),
-                { name: 'cad', list: '/cad', meta: { label: 'Фрезеровки заказов' } },
+                { name: 'cad', list: '/cad', meta: { label: 'CAD' } },
                 ...(featureFlags.useBackendCut
                   ? [
                       {

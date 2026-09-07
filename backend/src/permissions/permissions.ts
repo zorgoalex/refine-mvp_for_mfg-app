@@ -183,9 +183,6 @@ export type PermissionName = (typeof PERMISSIONS)[number];
 const ALL_PERMISSIONS = [...PERMISSIONS];
 
 const ADMIN_SERVICE_EXCLUDED_PERMISSIONS = [
-  'cad.view',
-  'cad.edit',
-  'cad.export',
   'roles.manage',
   'permissions.manage',
   'system.superadmin',

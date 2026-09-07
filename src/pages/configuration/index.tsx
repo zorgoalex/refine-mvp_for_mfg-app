@@ -620,7 +620,7 @@ export const ConfigurationPage: React.FC = () => {
       label: (
         <span>
           <EyeOutlined />
-          Видимость таблиц для юзеров
+          Видимость экранов
         </span>
       ),
       children: <TableVisibilityByRoleTab />,

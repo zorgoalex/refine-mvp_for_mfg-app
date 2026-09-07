@@ -30,6 +30,15 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-09-07",
+    title: "CAD: меню и видимость экрана",
+    services: ["ERP", "SVG/DXF"],
+    repositories: ["repo_erp", "repo_svgdxf"],
+    added: ["Пункт CAD в разделе «Производство» и строка CAD в конфигурации «Видимость экранов»."],
+    changed: ["По умолчанию CAD доступен только admin и superadmin. Настроенная видимость сохраняется; серверные права CAD проверяются отдельно."],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-09-06",
     title: "CAD: оригиналы заказов и рабочие версии",
     services: ["ERP", "SVG/DXF"],
