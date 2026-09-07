@@ -260,6 +260,8 @@ services:
       # CAD SVG/DXF service over the internal "back" network. Backend calls it
       # by service DNS and skips the token (trusted Docker CIDR).
       CAD_SERVICE_BASE_URL: ${CAD_SERVICE_BASE_URL:-http://cad-service:8000}
+      BACKEND_ENABLE_CAD: ${BACKEND_ENABLE_CAD:-false}
+      CAD_ERP_API_TOKEN: ${CAD_ERP_API_TOKEN:-}
       OCR_SERVICE_BASE_URL: ${OCR_SERVICE_BASE_URL:-http://ocr-service:8000}
       CAD_SERVICE_API_TOKEN: ${CAD_SERVICE_API_TOKEN:-}
       # Bitrix24 one-way CRM projection — default OFF and fail-closed.
@@ -586,6 +588,11 @@ services:
     environment:
       CAD_SERVICE_API_TOKEN: ${CAD_SERVICE_API_TOKEN:-}
       CAD_SERVICE_TRUSTED_CIDRS: ${CAD_SERVICE_TRUSTED_CIDRS:-127.0.0.0/8,::1/128,172.16.0.0/12}
+      CAD_ERP_API_TOKEN: ${CAD_ERP_API_TOKEN:-}
+      CAD_ERP_WORKSPACE: ${CAD_ERP_WORKSPACE:-}
+      CAD_ADMIN_API_TOKEN: ${CAD_ADMIN_API_TOKEN:-}
+      CAD_ADMIN_USER: ${CAD_SERVICE_USER:-}
+      CAD_ADMIN_PASSWORD: ${CAD_SERVICE_USER_PASSWORD:-}
       # Public traffic arrives via traefik, so trust X-Forwarded-For: the real
       # external client IP is evaluated (not traefik's trusted Docker IP), which
       # keeps internal backend token-free while forcing a token for outside IPs.

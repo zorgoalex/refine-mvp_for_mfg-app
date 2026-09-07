@@ -42,6 +42,7 @@ export const RESOURCE_LABELS: Record<string, string> = {
   audit: 'Журналы',
   sheet_material_types: 'Листовые материалы',
   cut: 'Раскрой',
+  cad: 'Фрезеровки CAD',
   bazis: 'Базис-проекты',
   'bazis-cut-sets': 'Базис-раскрой',
   scan: 'Сканер бирок',
@@ -84,6 +85,7 @@ export const resolveOrderTabLabel = (orderName: unknown): string =>
   typeof orderName === 'string' && orderName.trim() ? orderName.trim() : 'Заказ';
 
 export const shouldPreserveTabLabel = (pathname: string): boolean => {
+  if (/^\/cad\/orders\/\d+$/.test(pathname)) return true;
   const segs = pathname.split('/').filter(Boolean);
   if ((segs[1] === 'show' || segs[1] === 'edit') && Boolean(segs[2])) {
     return true;
@@ -95,6 +97,8 @@ export const shouldPreserveTabLabel = (pathname: string): boolean => {
 };
 
 export const resolveTabLabel = (pathname: string): string => {
+  const cadOrder = pathname.match(/^\/cad\/orders\/(\d+)/);
+  if (cadOrder) return `CAD · заказ ${cadOrder[1]}`;
   const normalizedPath = pathname.replace(/\/+$/, '') || '/';
   const segs = pathname.split('/').filter(Boolean);
   if (normalizedPath === '/orders/trash') {

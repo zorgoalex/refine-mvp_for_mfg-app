@@ -335,6 +335,8 @@ export const envSchema = z
     BACKEND_CUT_HEURISTIC_AUTO_THRESHOLD: z.coerce.number().int().min(0).default(100),
     CAD_SERVICE_BASE_URL: optionalUrlFromEnv,
     CAD_SERVICE_API_TOKEN: optionalTrimmedStringFromEnv,
+    CAD_ERP_API_TOKEN: optionalTrimmedStringFromEnv,
+    BACKEND_ENABLE_CAD: booleanFromEnv.default(false),
     OCR_SERVICE_BASE_URL: optionalUrlFromEnv,
     GAS_WEBAPP_URL: optionalUrlFromEnv,
     GAS_API_KEY: optionalTrimmedStringFromEnv,

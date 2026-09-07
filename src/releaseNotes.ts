@@ -31,6 +31,18 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-09-06",
+    title: "CAD: оригиналы заказов и рабочие версии",
+    services: ["ERP", "SVG/DXF"],
+    repositories: ["repo_erp", "repo_svgdxf"],
+    added: [
+      "Экран подготовки фрезеровок: неизменяемый оригинал, рабочие версии, частичные количества и объединение деталей разных заказов.",
+      "Послойный просмотр, параметры рецептов, диагностика и SVG/DXF, manifest.json, ZIP выбранной редакции после проверки настроек CAD.",
+    ],
+    changed: ["Функция включается отдельно администратором после настройки CAD API, прав и соответствий фрезеровок; исходные заказы не изменяются."],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-09-06",
     title: "Excel: прокрутка выбранной области",
     services: ["ERP"],
     repositories: ["repo_erp"],

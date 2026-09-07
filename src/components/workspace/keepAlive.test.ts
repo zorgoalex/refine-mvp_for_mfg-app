@@ -10,6 +10,12 @@ import {
 } from './keepAlive';
 
 describe('keep-alive policy', () => {
+  it('retains five CAD documents; their scene is separately mounted only when active', () => {
+    const keys = [1, 2, 3, 4, 5].map(id => `/cad/orders/${id}`);
+    for (const key of keys) expect(isKeepAliveEligible(key, { dirty: false })).toBe(true);
+    const next = nextKeepAliveCache(new Set(keys), { activeKey: keys[4], tabs: keys.map(key => ({ key, dirty: false })) });
+    expect(next.size).toBe(5);
+  });
   it('keeps /orders list always; calendar never', () => {
     expect(isKeepAliveEligible('/orders', { dirty: false })).toBe(true);
     expect(isKeepAliveEligible('/calendar', { dirty: false })).toBe(false);
