@@ -8806,9 +8806,10 @@ export function buildCncOrderReadiness(
   for (const [orderId, details] of orders) {
     const order = Array.from(details.values()).reduce(
       (accumulator, detail) => {
-        const sourceTotal = Math.max(detail.packetTotal, detail.bazisCutTotal);
+        // CNC files and BASIS sets contain independent portions of a position.
+        const sourceTotal = detail.packetTotal + detail.bazisCutTotal;
         const sourceCut = Math.min(
-          Math.max(detail.packetCut, detail.bazisCutReady),
+          detail.packetCut + detail.bazisCutReady,
           sourceTotal,
         );
         const bathTotal = detail.bathTotal;
@@ -9030,11 +9031,9 @@ function normalizeCncOrderReadiness(
     remainingDetails: 0,
   };
   const totalDetails = fallbackTotal > 0 ? fallbackTotal : nonNegativeInteger(source.totalDetails);
-  const rolledDetails = Math.min(nonNegativeInteger(source.rolledDetails), totalDetails);
-  const cutDetails = Math.min(
-    nonNegativeInteger(source.cutDetails),
-    Math.max(0, totalDetails - rolledDetails),
-  );
+  // Keep excess visible in numeric facts; only the progress bar is capped.
+  const rolledDetails = nonNegativeInteger(source.rolledDetails);
+  const cutDetails = nonNegativeInteger(source.cutDetails);
   return {
     totalDetails,
     cutDetails,

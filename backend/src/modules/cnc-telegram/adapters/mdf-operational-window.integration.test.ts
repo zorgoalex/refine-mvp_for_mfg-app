@@ -126,11 +126,36 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
     await expectAllReadiness(true);
   });
 
-  it('does not double-count overlapping CNC and BASIS quantities', async () => {
+  it('adds CNC and BASIS portions of the same detail in every bath calculation', async () => {
     await seed(1, [1, 1], '2026-09-06T12:00:00+05');
     await client.query('UPDATE pg_temp.cnc_telegram_packet_items SET quantity=1');
     await addBasis(1);
-    await expectAllReadiness(false);
+    await expectAllReadiness(true);
+  });
+
+  it.each([
+    [2, 1, 1, 2, false],
+    [2, 2, 3, 3, true],
+    [3, 3, 3, 3, true],
+  ])('sums multiple files and sets (%i+%i+%i+%i) for ten bath instances', async (fileA, fileB, basisA, basisB, ready) => {
+    await seed(1, Array(10).fill(1), '2026-09-06T12:00:00+05');
+    await client.query('UPDATE pg_temp.cnc_telegram_packet_items SET quantity=$1', [fileA]);
+    await client.query(`INSERT INTO pg_temp.cnc_telegram_packets(packet_id,workday,completion_status,thumbs_up,material_name)
+      VALUES('00000000-0000-0000-0000-000000000002','2026-09-06','completed',false,'MDF 10mm');
+      INSERT INTO pg_temp.bazis_cut_sets(bazis_cut_set_id,name,created_at)
+      VALUES(2,'E2E-БАЗИС-2','2026-09-06T12:00:00+05');
+      INSERT INTO pg_temp.mdf_board_manual_moves(card_kind,card_id,target_column)
+      VALUES('bazisCutSet','2','completed')`);
+    await client.query(`INSERT INTO pg_temp.cnc_telegram_packet_items(packet_id,match_order_id,match_detail_id,quantity)
+      VALUES('00000000-0000-0000-0000-000000000002',1,1,$1)`, [fileB]);
+    await addBasis(basisA);
+    await client.query(`INSERT INTO pg_temp.bazis_cut_set_details(bazis_cut_set_detail_id,
+      bazis_cut_set_id,source_order_id,source_order_detail_id,quantity,material_name)
+      VALUES(2,2,1,1,$1,'МДФ 18мм')`, [basisB]);
+    await expectAllReadiness(ready);
+    const response = await load();
+    expect(response.columns.flatMap((column) => column.baths)[0]?.items[0].completedQuantity)
+      .toBe(fileA + fileB + basisA + basisB);
   });
 
   it('respects a manual return to parsed unless the file is automatically terminal', async () => {

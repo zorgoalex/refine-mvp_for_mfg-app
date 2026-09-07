@@ -1293,7 +1293,7 @@ describe('PgCncTelegramRepository', () => {
     expect(sql).toContain('whole_order.order_key');
     expect(sql).toContain('1000000000::bigint AS quantity');
     expect(sql).toContain('LEAST(SUM(quantity), 1000000000::bigint)::integer');
-    expect(sql).toContain('MAX(completed_quantity)::integer AS completed_quantity');
+    expect(sql).toContain('LEAST(SUM(completed_quantity), 1000000000::bigint)::integer AS completed_quantity');
     expect(sql).toContain('candidate_vacuum_results AS (');
     expect(sql).toContain('latest_vacuum_results AS (');
     expect(sql).toContain('SELECT DISTINCT ON (candidate.cut_job_id)');

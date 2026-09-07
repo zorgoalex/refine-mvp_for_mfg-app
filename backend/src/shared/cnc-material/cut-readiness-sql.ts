@@ -195,7 +195,8 @@ export function mdfCutReadinessCtes(scope: CutReadinessScope = {}): string {
       GROUP BY item.order_id, item.detail_id
     ),
     mdf_cut_quantities AS (
-      SELECT order_id, detail_id, MAX(completed_quantity)::integer AS completed_quantity
+      SELECT order_id, detail_id,
+        LEAST(SUM(completed_quantity), 1000000000::bigint)::integer AS completed_quantity
       FROM (SELECT * FROM mdf_cnc_quantities UNION ALL SELECT * FROM mdf_bazis_quantities) source
       GROUP BY order_id, detail_id
     )`;
