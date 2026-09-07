@@ -6,6 +6,10 @@ import {
 } from './navigationPermissions';
 
 describe('navigation permissions', () => {
+  it('requires explicit CAD view permission, not only order read access', () => {
+    expect(canViewNavigationResource('cad', { permissions: ['orders.view'] }, true)).toBe(false);
+    expect(canViewNavigationResource('cad', { permissions: ['cad.view', 'orders.view'] }, true)).toBe(true);
+  });
   it('keeps legacy navigation visible while backend permissions are disabled', () => {
     expect(canViewNavigationResource('users', null, false)).toBe(true);
     expect(canViewSettingsCategory(null, false, true)).toBe(true);

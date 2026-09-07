@@ -1887,6 +1887,22 @@ probe_file() {
                         OR p.is_vacuum IS DISTINCT FROM cut_result_snapshot_is_vacuum(r.snapshot_job)
                         OR p.cut_job_name IS DISTINCT FROM r.snapshot_job ->> 'name'
                      );" ;;
+    151_cad_workspaces*) probe_all \
+                     "$(q_col cad_workspaces order_id)" \
+                     "$(q_col cad_sources data)" \
+                     "$(q_col cad_variants revision)" \
+                     "$(q_col cad_variant_revisions data)" \
+                     "$(q_col cad_recipe_mappings recipe)" \
+                     "$(q_col cad_commands access_order_ids)" \
+                     "$(q_col cad_runs package_actor)" \
+                     "$(q_col cad_runs package_request_id)" \
+                     "$(q_col cad_events audit_id)" \
+                     "$(q_col cad_event_sources detail_id)" \
+                     "SELECT EXISTS (SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('public.cad_one_original') AND indisunique AND indisvalid);" \
+                     "SELECT count(*)=3 FROM pg_trigger WHERE NOT tgisinternal AND tgenabled='O' AND
+                       (tgrelid=to_regclass('public.cad_sources') AND tgname='cad_sources_immutable'
+                        OR tgrelid=to_regclass('public.cad_variant_revisions') AND tgname='cad_revisions_immutable'
+                        OR tgrelid=to_regclass('public.cad_variants') AND tgname='cad_original_immutable');" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -1897,6 +1913,9 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
+    151_*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
     073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*|127_*|128_*|129_*|130_*|131_*|132_*|133_*|134_*|135_*|136_*|137_*|138_*|139_*|140_*|141_*|142_*|143_*|144_*|145_*|146_*|147_*|148_*|149_*|150_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;

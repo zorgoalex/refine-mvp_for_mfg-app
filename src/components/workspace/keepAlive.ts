@@ -23,6 +23,8 @@ export const isHeavyOrderViewKey = (key: string): boolean =>
 export const isLightweightOrdersListKey = (key: string): boolean => key === ORDERS_LIST_KEY;
 
 export const isKeepAliveEligible = (key: string, { dirty }: { dirty: boolean }): boolean => {
+  // CAD retains document controls/drafts; its inactive Konva scene is unmounted.
+  if (/^\/cad\/orders\/\d+$/.test(key)) return true;
   if (key === CALENDAR_KEY) return false;            // B7: global-class hack ⇒ remount only
   if (ALWAYS_KEEP.has(key) || isOrderFormKey(key) || isBazisProjectKey(key)) return true;
   return dirty;                                       // dirty non-orders tab kept while dirty

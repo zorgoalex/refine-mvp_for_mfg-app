@@ -8,6 +8,27 @@ import {
 } from './resourceVisibility';
 
 describe('resource visibility matrix', () => {
+  it('registers CAD with matching admin-only defaults in menu and configuration', () => {
+    const resources = getMenuResources([{ name: 'cad', list: '/cad', meta: { label: 'CAD' } }], {});
+    expect(resources).toEqual([{ name: 'cad', label: 'CAD', route: '/cad' }]);
+    const roles = [1, 2, 10, 11, 15, 20, 30, 100, 999].map(role_id => ({ role_id }));
+    const matrix = buildInitialResourceVisibility(resources, roles, {});
+    for (const role of roles) {
+      const roleKey = normalizeRoleKey(role), expected = role.role_id === 1 || role.role_id === 2;
+      expect(matrix.cad[roleKey]).toBe(expected);
+      expect(canViewResourceByRoleVisibility('cad', roleKey, null)).toBe(expected);
+      expect(canViewResourceByRoleVisibility('cad', roleKey, { cad: {} })).toBe(expected);
+    }
+    expect(canViewResourceByRoleVisibility('cad', undefined, null)).toBe(false);
+  });
+
+  it('preserves explicit CAD visibility overrides without changing other defaults', () => {
+    const matrix = { cad: { manager: true, admin: false } };
+    expect(canViewResourceByRoleVisibility('cad', 'manager', matrix)).toBe(true);
+    expect(canViewResourceByRoleVisibility('cad', 'admin', matrix)).toBe(false);
+    expect(canViewResourceByRoleVisibility('cad', 'worker', matrix)).toBe(false);
+    expect(canViewResourceByRoleVisibility('orders_view', 'worker', matrix)).toBe(true);
+  });
   it('keeps navigation visible when no matrix exists yet', () => {
     expect(canViewResourceByRoleVisibility('orders_view', 'manager', null)).toBe(true);
     expect(canViewResourceByRoleVisibility('orders_view', undefined, undefined)).toBe(true);

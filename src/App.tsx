@@ -52,6 +52,7 @@ const CalendarList = lazy(async () => ({ default: (await import("./pages/calenda
 const loadOrderStatusBoardModule = () => import("./pages/orderStatusBoard");
 const OrderStatusBoardPage = lazy(async () => ({ default: (await loadOrderStatusBoardModule()).OrderStatusBoardPage }));
 const CutPage = lazy(async () => ({ default: (await import("./pages/cut/CutPage")).CutPage }));
+const CadPage = lazy(async () => ({ default: (await import("./pages/cad/CadPage")).CadPage }));
 const BazisPage = lazy(async () => ({ default: (await import("./pages/bazis/BazisPage")).BazisPage }));
 const BazisProjectViewPage = lazy(async () => ({ default: (await import("./pages/bazis/BazisProjectViewPage")).BazisProjectViewPage }));
 const BazisCutListPage = lazy(async () => ({ default: (await import("./pages/bazis-cut/BazisCutListPage")).BazisCutListPage }));
@@ -414,6 +415,7 @@ const ThemedApp = () => {
                       },
                     ]
                   : []),
+                { name: 'cad', list: '/cad', meta: { label: 'CAD' } },
                 ...(featureFlags.useBackendCut
                   ? [
                       {
@@ -846,6 +848,8 @@ const ThemedApp = () => {
                       <Route index element={<CutPage />} />
                     </Route>
                   )}
+                  <Route path="/cad" element={<CadPage />} />
+                  <Route path="/cad/orders/:orderId" element={<CadPage />} />
                   {featureFlags.bazisCut && (
                     <Route path="/bazis-cut">
                       <Route index element={<BazisCutListPage />} />

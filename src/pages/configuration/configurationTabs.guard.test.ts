@@ -19,7 +19,7 @@ describe('configuration tabs layout', () => {
     const source = fs.readFileSync(path.resolve(__dirname, 'index.tsx'), 'utf8');
 
     expect(source).toContain("key: 'table-visibility'");
-    expect(source).toContain('Видимость таблиц для юзеров');
+    expect(source).toContain('Видимость экранов');
     expect(source).toContain('<TableVisibilityByRoleTab />');
   });
 

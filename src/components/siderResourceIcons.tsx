@@ -50,6 +50,7 @@ export const SIDER_RESOURCE_ICONS: Record<string, React.ReactNode> = {
   groups: <ProjectOutlined />,
   projects: <ProjectOutlined />,
   'cut-jobs': <ScissorOutlined />,
+  cad: <TableOutlined />,
   'bazis-cut-sets': <TableOutlined />,
   bazis: <FileSearchOutlined />,
   clients: <UserOutlined />,

@@ -1083,6 +1083,13 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('cncAuxiliaryRefreshRevisionRef.current === requestRevision');
   });
 
+  it('refreshes backend bath readiness after a successful file or BASIS move', () => {
+    const start = page.indexOf('// Bath quantities are backend-owned');
+    expect(start).toBeGreaterThan(-1);
+    expect(page.slice(start - 100, start)).toContain("kind === 'packet' || kind === 'bazisCutSet'");
+    expect(page.slice(start, start + 300)).toContain('void fetchInitial({ mutationRefetch: true, preserveLoading: true })');
+  });
+
   it('prevents failed manual-move recovery from overwriting a strong MDF refresh', () => {
     const fallbackStart = page.indexOf(
       'const refreshSupersededMove =',

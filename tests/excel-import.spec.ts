@@ -27,7 +27,7 @@ async function openImport(page: Page, mode: 'create' | 'edit' = 'create', prepar
   }));
   if (mode === 'create') {
     await page.goto('/orders');
-    await page.getByRole('button', { name: 'Создать заказ' }).click();
+    await page.getByRole('button', { name: 'Создать заказ', exact: uiVariant === 'air' }).click();
   } else await page.goto('/orders/edit/501');
   await page.getByRole('tab', { name: uiVariant === 'air' ? 'Состав' : 'Детали заказа', exact: true }).click();
   await prepare?.();
