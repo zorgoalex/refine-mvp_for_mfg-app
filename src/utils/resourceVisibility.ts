@@ -41,11 +41,12 @@ export function canViewResourceByRoleVisibility(
   roleKey: string | undefined,
   matrix: RoleVisibilityMatrix | null | undefined,
 ): boolean {
-  if (!matrix || !roleKey) return true;
+  const defaultVisible = resourceName !== 'cad' || roleKey === 'admin' || roleKey === 'superadmin';
+  if (!matrix || !roleKey) return defaultVisible;
   const resourceVisibility = matrix[resourceName];
-  if (!resourceVisibility) return true;
+  if (!resourceVisibility) return defaultVisible;
   const visible = resourceVisibility[roleKey];
-  return visible === undefined ? true : visible;
+  return visible === undefined ? defaultVisible : visible;
 }
 
 export function normalizeRoleVisibilityMatrix(value: unknown): RoleVisibilityMatrix {
@@ -97,7 +98,7 @@ export function buildInitialResourceVisibility(
 
   return resources.reduce<RoleVisibilityMatrix>((acc, resource) => {
     acc[resource.name] = roleKeys.reduce<Record<string, boolean>>((roleAcc, roleKey) => {
-      roleAcc[roleKey] = existing?.[resource.name]?.[roleKey] ?? true;
+      roleAcc[roleKey] = canViewResourceByRoleVisibility(resource.name, roleKey, existing);
       return roleAcc;
     }, {});
     return acc;

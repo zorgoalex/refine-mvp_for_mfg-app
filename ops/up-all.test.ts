@@ -202,6 +202,13 @@ describe('up-all.sh provision', () => {
     expect(deploySource).not.toContain('--force-recreate cnc-telegram-worker');
   });
 
+  it('keeps CAD integration configuration in the overlay used with existing stack files', () => {
+    const overlay = readFileSync(resolve(__dirname, 'templates/docker-compose.backend-build-identity.yml'), 'utf8');
+    expect(overlay).toContain('BACKEND_ENABLE_CAD: ${BACKEND_ENABLE_CAD:-false}');
+    expect(overlay).toContain('CAD_SERVICE_BASE_URL: ${CAD_SERVICE_BASE_URL:-http://cad-service:8000}');
+    expect(overlay).toContain('CAD_ERP_API_TOKEN: ${CAD_ERP_API_TOKEN:-}');
+  });
+
   it('requires an explicit stack env and blocks non-prod Telegram writers', () => {
     expect(checkEnvSource).toContain('require_var ERP_STACK_ENV');
     expect(checkEnvSource).toMatch(/ERP_STACK_ENV must be one of: test, prod, dev/);

@@ -36,6 +36,9 @@ export const ROLE_TO_ROLE_ID = {
 } as const satisfies Record<UserRole, KnownRoleId>;
 
 export const PERMISSIONS = [
+  'cad.view',
+  'cad.edit',
+  'cad.export',
   'profile.view',
   'profile.update_own',
   'sessions.logout_own',

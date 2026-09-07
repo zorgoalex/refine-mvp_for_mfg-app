@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { CadModule } from './modules/cad/cad.module';
 import { ConfigModule } from '@nestjs/config';
 import { validateEnvForNest } from './config/env.validation';
 import { DatabaseModule } from './database/database.module';
@@ -43,6 +44,7 @@ import { PerformanceModule } from './performance/performance.module';
     RateLimitModule,
     PerformanceModule,
     DatabaseModule,
+    CadModule,
     AuditModule,
     AuthModule,
     ClientPhonesModule,

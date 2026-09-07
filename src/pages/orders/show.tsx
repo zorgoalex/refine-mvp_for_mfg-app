@@ -3229,6 +3229,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                         Изменить
                       </Button>
                     ) : null}
+                    {can('cad.view') && <Button onClick={() => navigate(`/cad/orders/${record.order_id}`)}>Фрезеровки CAD</Button>}
                     {canUpdateOrders ? (
                       <Button
                         icon={<ReloadOutlined />}
