@@ -5505,8 +5505,12 @@ function buildSvgCutResultManifest(snapshot: CutJobDto): Record<string, unknown>
   );
   return {
     groups: snapshot.groups.length,
-    items: uniqueValues(snapshotPieces.map((piece) => piece.item_id)).length || snapshot.items.length,
-    instances: snapshotPieces.length || snapshot.items.reduce((sum, item) => sum + item.qty, 0),
+    items: snapshot.items.length > 0
+      ? snapshot.items.length
+      : uniqueValues(snapshotPieces.map((piece) => piece.item_id)).length,
+    instances: snapshot.items.length > 0
+      ? snapshot.items.reduce((sum, item) => sum + item.qty, 0)
+      : snapshotPieces.length,
     unplaced: snapshot.unplaced?.length ?? 0,
     variants: snapshot.groups.map((group) => ({
       groupKey: group.groupKey ?? `group:${group.cutGroupId}`,

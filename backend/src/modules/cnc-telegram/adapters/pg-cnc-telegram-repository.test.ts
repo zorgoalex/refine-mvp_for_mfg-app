@@ -3462,6 +3462,11 @@ describe('PgCncTelegramRepository', () => {
     const snapshot = JSON.parse(String(resultInsert?.params[4]));
     expect(snapshot.groups[0].sheets[0].placements.pieces).toHaveLength(2);
     expect(snapshot.items).toHaveLength(informational ? 0 : 1);
+    // PostgreSQL counts ERP items when present; source-only geometry still projects separately.
+    expect(JSON.parse(String(resultInsert?.params[5]))).toMatchObject({
+      items: informational ? 2 : 1,
+      instances: informational ? 2 : 1,
+    });
     expect(importUpdate?.params.slice(1, 5)).toEqual([
       'imported',
       expect.any(String),
