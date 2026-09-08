@@ -1,9 +1,10 @@
 import { Edit, useForm } from "@refinedev/antd";
-import { IResourceComponentsProps } from "@refinedev/core";
+import type { BaseRecord, HttpError, IResourceComponentsProps } from "@refinedev/core";
+import type { RequisitionStatusFormValues } from "./formValues";
 import { Form, Input, InputNumber, Checkbox, message } from "antd";
 
 export const RequisitionStatusEdit: React.FC<IResourceComponentsProps> = () => {
-  const { formProps, saveButtonProps } = useForm();
+  const { formProps, saveButtonProps } = useForm<BaseRecord, HttpError, RequisitionStatusFormValues>();
 
   return (
     <Edit saveButtonProps={saveButtonProps}>

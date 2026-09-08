@@ -1,10 +1,11 @@
 import { Create, useForm } from "@refinedev/antd";
-import { IResourceComponentsProps } from "@refinedev/core";
+import type { BaseRecord, HttpError, IResourceComponentsProps } from "@refinedev/core";
+import type { TransactionDirectionFormValues } from "./formValues";
 import { Form, Input, Checkbox, message } from "antd";
 import { ReferenceSortOrderFormItem } from "../../components/ReferenceSortOrder";
 
 export const TransactionDirectionCreate: React.FC<IResourceComponentsProps> = () => {
-  const { formProps, saveButtonProps } = useForm();
+  const { formProps, saveButtonProps } = useForm<BaseRecord, HttpError, TransactionDirectionFormValues>();
 
   return (
     <Create saveButtonProps={saveButtonProps}>
