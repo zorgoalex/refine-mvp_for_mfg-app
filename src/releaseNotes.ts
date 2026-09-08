@@ -29,6 +29,12 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-09-08",
+    title: "МДФ: поиск в скрытых завершённых колонках",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: ["Поиск заказа временно раскрывает завершённые колонки файлов и ванн, если в выбранном периоде есть совпадения, включая карточки с ручным переносом. После очистки поиска возвращаются обычные настройки видимости. Статусы и готовность не меняются."],
+  },
+  {
     version: APP_VERSION,
     date: "2026-09-08",
     title: "Bitrix: установка платёжного виджета",

@@ -213,6 +213,9 @@ export interface OrderCardProps {
  */
 export type OrdersByDate = Record<string, CalendarOrder[]>;
 
+/** Calendar consumers only require a message, not a native Error instance. */
+export type CalendarError = Pick<Error, 'message'>;
+
 /**
  * Тип результата хука useCalendarData
  */
@@ -223,7 +226,7 @@ export interface CalendarDataResult {
   productionWorkflowDisplay?: ProductionWorkflowDisplay;
   materialOptions: CalendarFilterOption[];
   millingTypeOptions: CalendarFilterOption[];
-  error?: Error;
+  error?: CalendarError;
 }
 
 /**

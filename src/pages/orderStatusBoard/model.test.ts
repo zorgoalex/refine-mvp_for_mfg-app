@@ -13,6 +13,7 @@ import type {
 } from '../../api/types/orderStatusBoardApi.types';
 import {
   applyCncManualMovesToColumns,
+  buildCncTerminalSearchVisibility,
   buildCncOriginalCurrentColumns,
   buildCncOriginalCurrentLocations,
   buildCncMachineColumnCards,
@@ -57,8 +58,84 @@ import {
   toggleCncCardStandardOverride,
   toOrderStatusBoardQuery,
 } from './model';
+import { filterVisibleStatusBoardColumns } from './statusBoardColumnVisibility';
 
 describe('order status board model', () => {
+  it.each([
+    ['packet', false], ['packet', true],
+    ['bazisCutSet', false], ['bazisCutSet', true],
+    ['bath', false], ['bath', true],
+  ] as const)('reveals searched terminal %s cards (manual=%s) without changing preferences or readiness', (kind, manual) => {
+    const target = kind === 'bath' ? 'completed_baths' : 'completed_laminated';
+    const source = kind === 'bath' ? 'baths_ready' : 'parsed';
+    const packet = cncPacket('found', ['2706', '2707'], [2706, 2707]);
+    const bath = cncBath('found', ['2706', '2707'], [2706, 2707]);
+    const bazis = cncBazisCutSet(9001, [{ orderName: '2706', orderId: 2706, detailId: 101 }]);
+    const columns: CncTelegramTodayColumn[] = [
+      { key: manual ? source : target, title: 'Source', total: 1,
+        packets: kind === 'packet' ? [packet] : [], baths: kind === 'bath' ? [bath] : [],
+        bazisCutSets: kind === 'bazisCutSet' ? [bazis] : [] },
+      { key: 'completed_laminated', title: 'Other files', total: 1,
+        packets: [cncPacket('unrelated', ['2999'], [2999])], baths: [], bazisCutSets: [] },
+      { key: 'completed_baths', title: 'Other baths', total: 1,
+        packets: [], baths: [cncBath('unrelated', ['2999'], [2999])], bazisCutSets: [] },
+    ];
+    const moves: CncBoardManualMoveState = manual
+      ? { [cncManualMoveStorageKey(kind, kind === 'bazisCutSet' ? '9001' : 'found')]: target }
+      : {};
+    const hidden = ['parsed', 'baths_ready', 'completed_laminated', 'completed_baths'];
+    const before = JSON.stringify({ columns, moves, hidden });
+    const readiness = buildCncOrderReadiness(columns, moves);
+    const matching = filterCncTodayColumnsByOrders(columns, ['2706']);
+    const result = buildCncTerminalSearchVisibility(matching, moves, {
+      searchActive: true, terminalColumnsVisible: false,
+    });
+    const displayed = applyCncManualMovesToColumns(
+      filterVisibleStatusBoardColumns(result.columns, hidden, result.revealedColumnKeys), moves,
+      { includeTerminalManualMoves: true },
+    );
+    expect(result.revealedColumnKeys).toEqual([target]);
+    expect(displayed.map((column) => column.key)).toEqual([target]);
+    expect(displayed[0].total).toBe(1);
+    expect(displayed[0].packets).toEqual(kind === 'packet' ? [packet] : []);
+    expect(displayed[0].baths).toEqual(kind === 'bath' ? [bath] : []);
+    expect(displayed[0].bazisCutSets).toEqual(kind === 'bazisCutSet' ? [bazis] : []);
+    expect(buildCncOrderReadiness(columns, moves)).toEqual(readiness);
+    expect(JSON.stringify({ columns, moves, hidden })).toBe(before);
+    const cleared = buildCncTerminalSearchVisibility(columns, moves, {
+      searchActive: false, terminalColumnsVisible: false,
+    });
+    expect(cleared.revealedColumnKeys).toEqual([]);
+    expect(applyCncManualMovesToColumns(cleared.columns, moves, { includeTerminalManualMoves: false })
+      .every((column) => column.total === 0)).toBe(true);
+  });
+
+  it('reveals both matching terminal columns, neither for a miss, and preserves the explicit toggle', () => {
+    const columns: CncTelegramTodayColumn[] = [
+      { key: 'completed_laminated', title: 'Files', total: 1,
+        packets: [cncPacket('found', ['2706'], [2706])], baths: [] },
+      { key: 'completed_baths', title: 'Baths', total: 1,
+        packets: [], baths: [cncBath('found', ['2706'], [2706])] },
+    ];
+    const found = buildCncTerminalSearchVisibility(filterCncTodayColumnsByOrders(columns, ['2706']), {}, {
+      searchActive: true, terminalColumnsVisible: false,
+    });
+    expect(found.revealedColumnKeys).toEqual(['completed_laminated', 'completed_baths']);
+    expect(found.columns).toHaveLength(2);
+    const miss = filterCncTodayColumnsByOrders(columns, ['2999']);
+    expect(buildCncTerminalSearchVisibility(miss, {}, {
+      searchActive: true, terminalColumnsVisible: false,
+    })).toEqual({ columns: [], revealedColumnKeys: [] });
+    const explicitlyShown = buildCncTerminalSearchVisibility(miss, {}, {
+      searchActive: true, terminalColumnsVisible: true,
+    });
+    expect(explicitlyShown.columns).toHaveLength(2);
+    expect(explicitlyShown.revealedColumnKeys).toEqual([]);
+    expect(filterVisibleStatusBoardColumns(explicitlyShown.columns,
+      ['completed_baths'], explicitlyShown.revealedColumnKeys).map((column) => column.key))
+      .toEqual(['completed_laminated']);
+  });
+
   it.each(['packet', 'bazisCutSet'] as const)(
     'keeps a mixed order ready when search hides its manually cut %s source',
     (sourceKind) => {
