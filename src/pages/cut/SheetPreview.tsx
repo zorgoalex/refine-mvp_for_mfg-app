@@ -29,6 +29,7 @@ export interface SheetPreviewProps {
   full: boolean;
   thumbHeight?: number;
   overlays?: CutPieceOverlay[];
+  labelsInImage?: boolean;
   onOpen?: () => void;
   onCollapse?: () => void;
 }
@@ -56,12 +57,14 @@ const BASE_FONT_PX = 11;
 
 function OverlayLayer({
   overlays,
+  labelsInImage = false,
   imgWidthPx,
   imgHeightPx,
   onClick,
   onDoubleClick,
 }: {
   overlays?: CutPieceOverlay[];
+  labelsInImage?: boolean;
   /** Rendered image width in px (used for auto-shrink font fitting). */
   imgWidthPx: number;
   /** Rendered image height in px (used for auto-shrink font fitting). */
@@ -131,12 +134,12 @@ function OverlayLayer({
                   </span>
                 </Tooltip>
               )}
-              {/* 3-line label overlay. The PNG image has no baked labels
+              {/* Optimizer-only label overlay. The PNG image has no baked labels
                   (backend renders with showLabels=false for the on-screen
                   preview), so this overlay is the sole label source.
                   L0 (order name) is large+bold; L2 (dims) has a half-size '*'.
                   A subtle semi-transparent background keeps it legible. */}
-              <span
+              {!labelsInImage && <span
                 style={{
                   background: 'rgba(255,255,255,0.78)',
                   borderRadius: 3,
@@ -187,7 +190,7 @@ function OverlayLayer({
                     </span>
                   );
                 })}
-              </span>
+              </span>}
             </span>
           </Tooltip>
         );
@@ -208,6 +211,7 @@ export function SheetPreview({
   full,
   thumbHeight = 170,
   overlays,
+  labelsInImage = false,
   onOpen,
   onCollapse,
 }: SheetPreviewProps) {
@@ -260,6 +264,7 @@ export function SheetPreview({
             />
             <OverlayLayer
               overlays={overlays}
+              labelsInImage={labelsInImage}
               imgWidthPx={fullImgSize.w}
               imgHeightPx={fullImgSize.h}
               onDoubleClick={onCollapse}

@@ -5218,9 +5218,9 @@ export function buildSvgSheetPlacements(
         orderId: item.orderId,
         orderName: item.orderName,
         detailId: item.orderDetailId,
-        detailNumber: jobItem?.detail?.detailNumber ?? item.detailNumber,
-        widthMm: jobItem?.detail?.width ?? item.widthMm,
-        heightMm: jobItem?.detail?.height ?? item.heightMm,
+        detailNumber: item.detailNumber,
+        widthMm: item.widthMm,
+        heightMm: item.heightMm,
         materialName: item.materialName ?? jobItem?.detail?.materialName ?? plan.materialName ?? null,
       },
     };

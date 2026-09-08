@@ -411,3 +411,8 @@ function formatTooltipArea(value: number | null | undefined): string {
   if (value === null || value === undefined) return '—';
   return value.toFixed(2);
 }
+
+/** SVG sheets carry their own canonical geometry and labels. */
+export function sheetUsesSourceSvgRendering(placements?: SheetPlacements): boolean {
+  return !!placements && (Array.isArray(placements.renderOnlyContours) || placements.pieces.some(piece => !!piece.source_svg?.body));
+}

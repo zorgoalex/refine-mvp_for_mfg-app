@@ -1,3 +1,4 @@
+import type { CutJobItemDto } from '../../cut/dto/cut.dto';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -34,10 +35,11 @@ describe('persisted SVG render contract', () => {
       expect(buildManualSvgSheetSvg(stored, CUT_RENDER_STYLE_MDF_BOARD_PREVIEW)).toBe(preview);
       const placements = buildSvgSheetPlacements({ok:true,sheetWidthMm:stored.sheet!.widthMm,sheetHeightMm:stored.sheet!.heightMm,
         sheetMaterialTypeId:null,filmId:null,materialName:null,informational:true,details:[],
-        placements:stored.items.map((item,i)=>({...item,itemKey:`svg-${i}`,orderId:null,orderDetailId:null})),
-      }, new Map(), stored.renderOnlyContours);
+        placements:stored.items.map((item,i)=>({...item,itemKey:`svg-${i}`,orderId:null,orderDetailId:i===0?42:null})),
+      }, new Map([[42,{detail:{detailNumber:999,width:1,height:2}} as CutJobItemDto]]), stored.renderOnlyContours);
       const persisted = JSON.parse(JSON.stringify(placements));
       expect(persisted.pieces).toHaveLength(accepted);
+      expect(persisted.pieces[0].label).toMatchObject({detailNumber:stored.items[0].detailNumber,widthMm:stored.items[0].widthMm,heightMm:stored.items[0].heightMm});
       for (const rotate90 of [false,true]) for (const showLabels of [false,true]) {
         expect(count(buildSheetSvg({sheet:persisted,labelFor:()=>[],rotate90,showLabels}))).toBe(contours);
       }

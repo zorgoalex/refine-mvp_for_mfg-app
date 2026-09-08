@@ -1,3 +1,4 @@
+import type { SvgRenderContour } from '@shared/svg-render-contours';
 export interface CutSelectionCriteria {
   /** Variant B: filter by sheet_material_type_id (replaces materialIds post-034). */
   sheetMaterialTypeIds?: number[];
@@ -91,6 +92,7 @@ export interface CutJobItemDto {
 }
 
 export interface SheetPlacementPiece {
+  source_svg?: { body: string; viewBox: { x_mm: number; y_mm: number; width_mm: number; height_mm: number } };
   item_id: string;
   instance: number;
   x_mm: number;
@@ -119,6 +121,7 @@ export interface SheetPlacementPiece {
 }
 
 export interface SheetPlacements {
+  renderOnlyContours?: SvgRenderContour[];
   coordinate_contract?: 'native_portrait_v1';
   trim_mm: { left: number; right: number; top: number; bottom: number };
   sheet_width_mm: number;
