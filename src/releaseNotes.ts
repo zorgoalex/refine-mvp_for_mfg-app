@@ -31,6 +31,14 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-09-08",
+    title: "Bitrix: проверка прав для платёжного виджета",
+    services: ["ERP", "CRM"],
+    repositories: ["repo_erp"],
+    fixed: ["Обновление платёжных систем и виджет проверяют права управления приложениями через user.admin. Отсутствие поля ADMIN в профиле user.current больше не вызывает ложный отказ; пользователи без прав по-прежнему не допускаются."],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-09-08",
     title: "SVG: все безопасные контуры в превью загрузки",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
