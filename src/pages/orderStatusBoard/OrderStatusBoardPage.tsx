@@ -726,7 +726,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const cncManualMoveRequestSeqRef = useRef<Record<string, number>>({});
   const [cncDetailedEnabled, setCncDetailedEnabled] = useState(false);
   const [cncBathsRequireMachineFiles, setCncBathsRequireMachineFiles] =
-    useState(true);
+    useState(false);
   const [cncTerminalColumnsVisible, setCncTerminalColumnsVisible] = useState(false);
   const [activeCncDetailedBathId, setActiveCncDetailedBathId] =
     useState<string | null>(null);
@@ -8378,8 +8378,8 @@ function hasPrefetchedCncOrderStatusBoard(
 export async function prefetchMdfOrderStatusBoard(
   response: CncTelegramTodayResponse,
 ): Promise<void> {
-  const columns = filterCncBathColumnsByMachineOrderMatches(response.columns);
-  const orderIds = collectCncOrderIds(columns);
+  // Match the initial view: machine-file matching is opt-in in the gear settings.
+  const orderIds = collectCncOrderIds(response.columns);
   const [responses, manualMovesResponse] = await Promise.all([
     Promise.all(
       chunkCncOrderIds(orderIds).map((chunk) =>

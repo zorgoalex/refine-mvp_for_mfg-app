@@ -1455,9 +1455,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('extraContent={cncSettingsContent}');
     expect(page).toContain('status-board-settings__modes');
     expect(page).toContain('const [cncBathsRequireMachineFiles, setCncBathsRequireMachineFiles] =');
-    expect(page).toContain('useState(true)');
-    expect(page).toContain('Ванны с файлами');
-    expect(page).toContain('checked={cncBathsRequireMachineFiles}');
+    expect(page).toMatch(/const \[cncBathsRequireMachineFiles, setCncBathsRequireMachineFiles\] =\s*useState\(false\);/);
+    expect(settings).toContain('Ванны с файлами');
+    expect(settings).toContain('checked={cncBathsRequireMachineFiles}');
+    expect(settings).toContain('onChange={setCncBathsRequireMachineFiles}');
+    expect(cncToolbar).not.toContain('Ванны с файлами');
+    expect(cncToolbar).not.toContain('checked={cncBathsRequireMachineFiles}');
     expect(page).toContain('filterCncBathColumnsByMachineOrderMatches(cncOrderFilteredColumns, preservedCncBathCardId)');
     expect(page).toContain('const [cncTerminalColumnsVisible, setCncTerminalColumnsVisible] = useState(false)');
     expect(page).toContain('terminalColumnsVisible={cncTerminalColumnsVisible}');

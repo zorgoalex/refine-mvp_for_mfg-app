@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { orderStatusBoardApi } from '../../api/orderStatusBoardApi';
 import type {
   CncTelegramBazisCutSetCard,
   CncTelegramOriginalBoardResponse,
@@ -23,6 +24,7 @@ import {
   formatStatusBoardOrderNumber,
   isCncManualMoveAllowed,
   resolveCncOrderTargetStatus,
+  prefetchMdfOrderStatusBoard,
   splitCncOrderCardsByManualColumn,
   sortCncRelationCards,
   type CncBoardManualMoveState,
@@ -57,6 +59,30 @@ import {
 } from './model';
 
 describe('order status board model', () => {
+  it('prefetches orders of ordinary baths without machine files or BASIS cards', async () => {
+    const bath = cncBath('cut-result:100', ['2706', '2707'], [2706, 2707]);
+    const columns: CncTelegramTodayColumn[] = [{
+      key: 'baths', title: 'Карты ванн', total: 1, packets: [], bazisCutSets: [], baths: [bath],
+    }];
+    const before = JSON.stringify(columns);
+    const prefetch = vi.spyOn(orderStatusBoardApi, 'prefetchGet').mockResolvedValue(board([]));
+    const moves = vi.spyOn(orderStatusBoardApi, 'listMdfManualMoves').mockResolvedValue({
+      generatedAt: '2026-09-08T00:00:00Z', moves: [],
+    });
+    try {
+      await prefetchMdfOrderStatusBoard({ workday: '2026-09-08', generatedAt: '2026-09-08T00:00:00Z', columns });
+      expect(prefetch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ orderIds: [2706, 2707] }));
+      expect(moves).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(columns)).toBe(before);
+      // Opting in still hides unmatched baths, without mutating their source data.
+      expect(filterCncBathColumnsByMachineOrderMatches(columns)[0].baths).toEqual([]);
+      expect(columns[0].baths).toEqual([bath]);
+    } finally {
+      prefetch.mockRestore();
+      moves.mockRestore();
+    }
+  });
+
   it('preserves rolled volume using historical facts without recreating old cards', () => {
     const bath = cncBath('cut-result:9', ['2706', '2707'], [2706, 2707]);
     const columns: CncTelegramTodayColumn[] = [{
