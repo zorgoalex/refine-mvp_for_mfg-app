@@ -1481,7 +1481,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(cncToolbar).not.toContain('checked={!cncBathsRequireMachineFiles}');
     expect(page).toContain('filterCncBathColumnsByMachineOrderMatches(cncOrderFilteredColumns, preservedCncBathCardId)');
     expect(page).toContain('const [cncTerminalColumnsVisible, setCncTerminalColumnsVisible] = useState(false)');
-    expect(page).toContain('terminalColumnsVisible={cncTerminalColumnsVisible}');
+    expect(page).toContain('terminalColumnsVisible={cncTerminalColumnsVisible || cncSearchActive}');
+    expect(page).toContain('buildCncTerminalSearchVisibility(cncPlannedDateColumns, cncManualMoves, {');
+    expect(page).toContain('cncTerminalSearchVisibility.revealedColumnKeys,');
     expect(settings).toContain('checked={cncTerminalColumnsVisible}');
     expect(settings).toContain('Завершенные файлы и ванны');
     expect(page).toContain("const CNC_MOBILE_FONT_SIZE_STORAGE_PREFIX = 'erp.status-board.cnc-mobile-font-size'");
