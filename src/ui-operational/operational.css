@@ -2146,7 +2146,6 @@
   color: var(--operational-brand);
 }
 
-:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .cut-page-modern--standalone.cut-page-modern--detail > .ant-space-item:has(.cut-page-modern__details),
 :root:where([data-ui-variant="line"], [data-ui-variant="air"]) .cut-page-modern--standalone.cut-page-modern--detail > .ant-space-item:has(.cut-sheet-view-controls) {
   display: none;
 }
