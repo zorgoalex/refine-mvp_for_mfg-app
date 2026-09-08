@@ -10,6 +10,70 @@ function response(result: unknown, status = 200): Response {
 }
 
 describe('Bitrix24LocalAppClient', () => {
+  it('checks admin rights with user.admin when user.current has no ADMIN field', async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(response({ ID: '17', NAME: 'Тест', ACTIVE: true }))
+      .mockResolvedValueOnce(response(true));
+    const client = new Bitrix24LocalAppClient(fetchFn);
+
+    await expect(client.currentUser({
+      domain: 'bitrix.example', accessToken: 'test-oauth-token',
+    })).resolves.toEqual({ id: '17', name: 'Тест', active: true, admin: true });
+    expect(fetchFn.mock.calls.map(([url, init]) => ({
+      url, body: JSON.parse(String(init.body)),
+    }))).toEqual([
+      { url: 'https://bitrix.example/rest/user.current', body: { auth: 'test-oauth-token' } },
+      { url: 'https://bitrix.example/rest/user.admin', body: { auth: 'test-oauth-token' } },
+    ]);
+  });
+
+  it('does not trust an ADMIN field when user.admin denies permission', async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(response({ ID: '17', ACTIVE: true, ADMIN: true }))
+      .mockResolvedValueOnce(response(false));
+    await expect(new Bitrix24LocalAppClient(fetchFn).currentUser({
+      domain: 'bitrix.example', accessToken: 'test-oauth-token',
+    })).resolves.toMatchObject({ active: true, admin: false });
+  });
+
+  it('keeps inactive users inactive even with admin rights', async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(response({ ID: '17', ACTIVE: false }))
+      .mockResolvedValueOnce(response(true));
+    await expect(new Bitrix24LocalAppClient(fetchFn).currentUser({
+      domain: 'bitrix.example', accessToken: 'test-oauth-token',
+    })).resolves.toMatchObject({ active: false, admin: true });
+  });
+
+  it.each([undefined, null, 'true', 'false', 1, {}, { ADMIN: true }])(
+    'rejects malformed user.admin result %j instead of granting rights', async (result) => {
+      const fetchFn = vi.fn()
+        .mockResolvedValueOnce(response({ ID: '17', ACTIVE: true, ADMIN: true }))
+        .mockResolvedValueOnce(response(result));
+      await expect(new Bitrix24LocalAppClient(fetchFn).currentUser({
+        domain: 'bitrix.example', accessToken: 'test-oauth-token',
+      })).rejects.toMatchObject({ code: 'BITRIX24_INVALID_RESPONSE' });
+    },
+  );
+
+  it('fails closed on user.admin API errors', async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(response({ ID: '17', ACTIVE: true, ADMIN: true }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'expired_token' }), { status: 401 }));
+    await expect(new Bitrix24LocalAppClient(fetchFn).currentUser({
+      domain: 'bitrix.example', accessToken: 'test-oauth-token',
+    })).rejects.toMatchObject({ code: 'BITRIX24_APP_REQUEST_FAILED' });
+  });
+
+  it('fails closed on user.admin network errors', async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(response({ ID: '17', ACTIVE: true, ADMIN: true }))
+      .mockRejectedValueOnce(new TypeError('fetch failed'));
+    await expect(new Bitrix24LocalAppClient(fetchFn).currentUser({
+      domain: 'bitrix.example', accessToken: 'test-oauth-token',
+    })).rejects.toMatchObject({ code: 'BITRIX24_APP_REQUEST_FAILED' });
+  });
+
   it('verifies local app context and binds only missing handlers', async () => {
     const fetchFn = vi.fn()
       .mockResolvedValueOnce(response({

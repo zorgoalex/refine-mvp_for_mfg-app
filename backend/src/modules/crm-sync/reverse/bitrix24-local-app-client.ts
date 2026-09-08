@@ -85,11 +85,26 @@ export class Bitrix24LocalAppClient {
     if (!/^[1-9][0-9]*$/.test(id)) {
       throw new ApiError(502, 'BITRIX24_INVALID_RESPONSE', 'Bitrix24 user.current returned no ID');
     }
+    // user.current does not expose ADMIN. Check application-management rights
+    // with the documented method, using the very same user's OAuth token.
+    const admin = await this.call<unknown>(
+      input.domain,
+      input.accessToken,
+      'user.admin',
+      {},
+    );
+    if (typeof admin !== 'boolean') {
+      throw new ApiError(
+        502,
+        'BITRIX24_INVALID_RESPONSE',
+        'Bitrix24 user.admin returned an invalid permission flag',
+      );
+    }
     return {
       id,
       name: String(user?.NAME ?? user?.name ?? '').trim() || `Bitrix24 #${id}`,
       active: booleanFlag(user?.ACTIVE ?? user?.active, true),
-      admin: booleanFlag(user?.ADMIN ?? user?.admin, false),
+      admin,
     };
   }
 
