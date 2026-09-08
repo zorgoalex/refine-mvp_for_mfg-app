@@ -60,6 +60,29 @@
     notice.className = `notice ${kind}`.trim();
   };
 
+  // Canonicalize decimal text without float parsing or silent rounding.
+  const canonicalAmount = (value) => {
+    const match = /^(0|[1-9][0-9]{0,11})(?:[.,]([0-9]{1,2}))?$/.exec(value.trim());
+    if (!match) throw new Error('Сумма: введите положительное число, не более двух знаков после точки или запятой. Например: 5000 или 5000,50.');
+    const result = `${match[1]}.${(match[2] || '').padEnd(2, '0')}`;
+    if (result === '0.00') throw new Error('Сумма должна быть больше нуля.');
+    return result;
+  };
+
+  const validationMessage = (error) => {
+    const messages = {
+      amount: 'Сумма: проверьте положительное значение и не более двух дробных знаков.',
+      paymentDate: 'Дата оплаты: укажите существующую календарную дату.',
+      paySystemId: 'Платёжная система: выберите значение из списка.',
+      comment: 'Комментарий: не более 1000 символов.',
+      expectedOrderVersion: 'Версия заказа: нажмите «Обновить» перед отправкой.',
+      confirmOverpayment: 'Подтверждение переплаты: проверьте состояние флажка.',
+    };
+    const errors = Array.isArray(error.details?.errors) ? error.details.errors : [];
+    const known = errors.map((item) => Object.prototype.hasOwnProperty.call(messages, item?.field) ? messages[item.field] : null).filter(Boolean);
+    return [...new Set(known)].join(' ') || 'Проверьте заполнение полей оплаты и обновите форму.';
+  };
+
   const waitForCommand = async (initial) => {
     let command = initial;
     for (let attempt = 0; attempt < 15 && inProgressStatuses.has(command.status); attempt += 1) {
@@ -140,15 +163,15 @@
     event.preventDefault();
     submit.disabled = true;
     setNotice('Создаю оплату…');
-    const body = {
-      amount: amount.value.trim().replace(',', '.'),
-      paymentDate: paymentDate.value,
-      paySystemId: Number(paySystem.value),
-      comment: comment.value.trim() || null,
-      expectedOrderVersion: context.erp.orderVersion,
-      confirmOverpayment: confirmBox.checked,
-    };
     try {
+      const body = {
+        amount: canonicalAmount(amount.value),
+        paymentDate: paymentDate.value,
+        paySystemId: Number(paySystem.value),
+        comment: comment.value.trim() || null,
+        expectedOrderVersion: context.erp.orderVersion,
+        confirmOverpayment: confirmBox.checked,
+      };
       if (pendingOverpaymentCommandId && !confirmBox.checked) {
         setNotice('Подтвердите перенос переплаты в ERP.', 'warning');
         return;
@@ -177,7 +200,9 @@
       await load();
       setNotice(result.message, result.status === 'completed' ? 'success' : 'warning');
     } catch (error) {
-      if (error.code === 'PAYMENT_OVERPAYMENT_CONFIRMATION_REQUIRED') {
+      if (error.code === 'VALIDATION_ERROR') {
+        setNotice(validationMessage(error), 'error');
+      } else if (error.code === 'PAYMENT_OVERPAYMENT_CONFIRMATION_REQUIRED') {
         confirmRow.hidden = false;
         setNotice(
           'Сумма создаёт переплату. Отметьте подтверждение и отправьте снова.',
