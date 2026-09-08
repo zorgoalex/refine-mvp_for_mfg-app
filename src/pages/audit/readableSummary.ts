@@ -1,4 +1,5 @@
 import type { AuditLogEventDto, AuditRelatedEntity } from '../../api/types/auditApi.types';
+import { auditEventTitle } from './eventLabels';
 
 export interface AuditReadableChange {
   label: string;
@@ -49,41 +50,6 @@ const STATUS_EVENT_CONFIG: Record<string, StatusEventConfig> = {
   },
 };
 
-const EVENT_TITLES: Record<string, string> = {
-  'orders.create': 'Создан заказ',
-  'orders.update': 'Обновлён заказ',
-  'orders.delete': 'Удалён заказ',
-  'orders.restore': 'Восстановлен заказ',
-  'orders.detail_transfer': 'Перенесены детали заказа',
-  'orders.status_change': STATUS_EVENT_CONFIG['orders.status_change'].title,
-  'orders.production_status_change': STATUS_EVENT_CONFIG['orders.production_status_change'].title,
-  'orders.detail_production_status_change': STATUS_EVENT_CONFIG['orders.detail_production_status_change'].title,
-  'orders.detail_production_status_batch_change':
-    STATUS_EVENT_CONFIG['orders.detail_production_status_batch_change'].title,
-  'orders.production_status_mode_restore': 'Включён авторасчёт производственного статуса',
-  'orders.production_status_mode_manual': 'Включён ручной производственный статус',
-  'payments.create': 'Добавлен платёж',
-  'payments.update': 'Изменён платёж',
-  'payments.delete': 'Удалён платёж',
-  'client_phones.create': 'Добавлен телефон клиента',
-  'client_phones.update': 'Изменён телефон клиента',
-  'client_phones.delete': 'Удалён телефон клиента',
-  'deadlines.create': 'Создан дедлайн',
-  'deadlines.update': 'Изменён дедлайн',
-  'deadlines.delete': 'Удалён дедлайн',
-  'groups.notification_created': 'Создано уведомление по группе',
-  'org.direction_head_added': 'Назначен руководитель направления',
-  'org.direction_head_removed': 'Снят руководитель направления',
-  'production.action_denied': 'Отказано в производственном действии',
-  'cnc.manual_svg_upload.file_uploaded': 'Загружен файл раскроя',
-  'cnc.manual_svg_upload.telegram_send_requested': 'Файлы раскроя поставлены в очередь Telegram',
-  'cnc.manual_svg_upload.telegram_send_completed': 'Файлы раскроя отправлены в Telegram',
-  'cnc.manual_svg_upload.telegram_send_failed': 'Ошибка отправки файлов раскроя в Telegram',
-  'cnc.manual_svg_upload.telegram_send_unknown': 'Статус отправки файлов раскроя неизвестен',
-  'status_automation.rule_applied': 'Применено правило автостатусов',
-  'status_automation.rule_skipped': 'Правило автостатусов не применено',
-};
-
 const STATUS_AUTOMATION_TRIGGER_LABELS: Record<string, string> = {
   'order.created': 'создания заказа',
   'order.status_changed': 'изменения статуса заказа',
@@ -119,6 +85,10 @@ const ENTITY_LABELS: Record<string, string> = {
   employee: 'Сотрудник',
   direction: 'Направление',
   group: 'Группа',
+  cut_job: 'Задание на раскрой',
+  cut_group: 'Группа раскроя',
+  cut_result: 'Результат раскроя',
+  sheet_material_type: 'Тип листового материала',
   cnc_manual_svg_upload_file: 'Файл раскроя',
   cnc_manual_svg_telegram_send_request: 'Отправка файлов раскроя',
 };
@@ -194,6 +164,9 @@ export function buildAuditReadableSummary(record: AuditLogEventDto): AuditReadab
   addGenericChanges(diff, changes);
   addDetailNotes(record, diff, metadata, notes);
   addSourceNote(record, metadata, notes);
+  if (record.entityType === 'cut_job' && metadata.cutJobIdentitySource === 'current_record') {
+    notes.push('Номер и название получены из сохранённого задания');
+  }
 
   if (changes.length === 0) {
     changes.push({
@@ -204,7 +177,7 @@ export function buildAuditReadableSummary(record: AuditLogEventDto): AuditReadab
   }
 
   return {
-    title: EVENT_TITLES[record.event] ?? humanizeEvent(record.event),
+    title: auditEventTitle(record.event),
     actor: auditActor(record, metadata),
     object: auditObject(record, metadata),
     changes: dedupeChanges(changes).slice(0, 6),
@@ -320,6 +293,15 @@ export function auditActor(record: AuditLogEventDto, metadata?: JsonObject): str
 
 export function auditObject(record: AuditLogEventDto, metadata?: JsonObject): string {
   const meta = metadata ?? objectOrEmpty(record.metadata);
+  if (record.entityType === 'cut_job') {
+    const number = stringValue(meta.cutJobDisplayNumber);
+    const name = stringValue(meta.cutJobName);
+    const id = record.entityId ?? 'не сохранён';
+    const label = number
+      ? `Задание на раскрой №${number} (ID: ${id})`
+      : `Задание на раскрой (ID: ${id}; номер не сохранён)`;
+    return name ? `${label} — ${name}` : label;
+  }
   if (record.event === 'orders.detail_transfer') {
     return detailTransferRouteLabel(record, meta);
   }
@@ -783,11 +765,6 @@ function formatBytes(value: number): string {
   if (value < 1024) return `${value} Б`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} КБ`;
   return `${(value / 1024 / 1024).toFixed(1)} МБ`;
-}
-
-function humanizeEvent(event: string): string {
-  const readable = event.split('.').map(humanizeToken).filter(Boolean).join(': ');
-  return readable ? `Выполнено действие — ${readable}` : 'Выполнено действие';
 }
 
 function humanizeToken(value: string): string {

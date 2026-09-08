@@ -11,6 +11,7 @@ import {
   RelatedIds,
   ContextBlock,
   ReadableAuditEvent,
+  AuditPrimaryEntity,
   isAuditPermissionError,
   isRowExpandable,
 } from './list';
@@ -149,6 +150,18 @@ describe('Journals source guards', () => {
 });
 
 describe('RelatedIds', () => {
+  it('shows the cutting number and ID before the related orders in either presentation', () => {
+    const record = event({ event: 'cut_job.deleted', entityType: 'cut_job', entityId: '912',
+      metadata: { cutJobDisplayNumber: 'В-27', cutJobName: 'Тест раскрой' },
+      relatedOrderId: 42, relatedOrderName: '2728' });
+    for (const Component of [ReadableAuditEvent, AuditPrimaryEntity]) {
+      const html = renderToString(<Component record={record} />);
+      expect(html).toContain('Задание на раскрой №В-27 (ID: 912)');
+    }
+    const html = renderToString(<ReadableAuditEvent record={record} />);
+    expect(html.indexOf('Задание на раскрой №В-27')).toBeLessThan(html.indexOf('Заказ 2728'));
+    expect(html).toContain('Удалено задание на раскрой');
+  });
   it('renders a related user tag when relatedUserId is set', () => {
     const html = renderToString(<RelatedIds record={event({ relatedUserId: 158 })} />);
     expect(html).toContain('Пользователь #');

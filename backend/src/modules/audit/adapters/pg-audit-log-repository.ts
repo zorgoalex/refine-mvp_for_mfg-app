@@ -1,6 +1,7 @@
 import type { QueryResultRow } from 'pg';
 import type { DatabaseClient } from '../../../database/database.types';
 import { redactLogValue } from '../../../common/logging/redaction';
+import { loadCutJobAuditIdentities } from '../../cut/adapters/cut-job-audit-identity';
 import type {
   AuditFilterOptionsDto,
   AuditFilterOptionsResponseDto,
@@ -673,6 +674,19 @@ export class PgAuditLogRepository implements AuditLogRepositoryPort {
       `SELECT ${SELECT_COLUMNS} FROM audit_log ${AUDIT_LABEL_JOINS} ${where} ORDER BY audit_log.created_at DESC, audit_log.audit_id DESC LIMIT $${limitParam} OFFSET $${offsetParam}`,
       [...params, command.pageSize, (command.page - 1) * command.pageSize]
     );
+    // Older events kept only the job PK. Enrich the response, never rewrite history.
+    const legacyCutRows = rowsResult.rows.filter((row) =>
+      row.entity_type === 'cut_job' && /^[0-9]+$/.test(row.entity_id ?? '')
+      && Number.isSafeInteger(Number(row.entity_id)) && Number(row.entity_id) > 0
+      && !str(jsonObject(row.metadata_json)?.cutJobDisplayNumber),
+    );
+    const cutIdentities = await loadCutJobAuditIdentities(this.database, legacyCutRows.map((row) => Number(row.entity_id)));
+    for (const row of legacyCutRows) {
+      const identity = cutIdentities.get(Number(row.entity_id));
+      if (identity) row.metadata_json = {
+        ...jsonObject(row.metadata_json), ...identity, cutJobIdentitySource: 'current_record',
+      };
+    }
     const linkedAuditIds = Array.from(new Set(
       rowsResult.rows.map(linkedStatusCommandAuditId).filter((value): value is string => value !== null),
     ));

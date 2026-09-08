@@ -23,6 +23,7 @@ import {
   type CutRenderStyleName,
 } from '../../../shared/cut-render-style';
 import { buildCutAuditEvent, buildCutDeniedEvent, CUT_AUDIT_EVENTS, type CutAuditActor } from '../application/cut-audit';
+import { loadCutJobAuditIdentities } from './cut-job-audit-identity';
 import {
   cutJobSnapshotUsesVacuumTable,
   formatCutJobNumber,
@@ -4484,6 +4485,7 @@ export class PgCutRepository implements CutRepositoryPort {
       username: currentUser.username,
       role: currentUser.role,
     };
+    const identity = (await loadCutJobAuditIdentities(tx, [input.cutJobId])).get(input.cutJobId);
     await auditService.record(
       tx,
       buildCutAuditEvent({
@@ -4498,7 +4500,11 @@ export class PgCutRepository implements CutRepositoryPort {
           cutGroupIds: cleanIds(input.related?.cutGroupIds),
           cutResultIds: cleanIds(input.related?.cutResultIds),
         },
-        metadata: input.metadata ?? null,
+        metadata: {
+          ...input.metadata,
+          ...identity,
+          cutJobIdentitySource: 'event_snapshot',
+        },
         before: input.before ?? null,
         after: input.after ?? null,
         diff: input.diff ?? null,
