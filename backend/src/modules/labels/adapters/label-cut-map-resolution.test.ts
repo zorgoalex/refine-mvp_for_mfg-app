@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import type { DatabaseClient } from '../../../database/database.types';
+import type { DatabaseService } from '../../../database/database.service';
+import { auditService } from '../../../common/audit/audit.service';
 import { renderSvgPages } from '../application/label-renderer';
 import type { LabelRow } from '../application/label-row-builder';
 import type { LabelTemplateDto } from '../application/labels.types';
@@ -11,7 +13,161 @@ import {
   closePreparedTelegramImages,
   TELEGRAM_IMAGE_LIMITS,
 } from '../../cnc-telegram/application/telegram-media-reader';
-import { insertGenerationTelegramSources, resolveLabelCutMaps } from './pg-labels-repository';
+import { insertGenerationTelegramSources, PgLabelsRepository, resolveDetailLabelCutMaps, resolveLabelCutMaps } from './pg-labels-repository';
+
+describe('partial label generation contract', () => {
+  const input = {
+    templateId: 1, templateVersion: 1, detailIds: [11, 10],
+    cutSheetScope: { cutJobId: 30, cutGroupId: 40, sheetIndex: 9,
+      detailInstances: [{ detailId: 11, instance: 1 }, { detailId: 10, instance: 1 }] },
+  };
+  const context = { currentUser: { id: '1', username: 'Тест', role: 'manager', roleId: 1, permissions: ['labels.generate', 'cut.view'] },
+    requestId: 'test-partial-labels' };
+
+  function repository() {
+    let available = true;
+    const query = vi.fn(async (sql: string, params: unknown[] = []) => {
+      let rows: unknown[] = [];
+      if (sql.includes('FROM label_templates')) rows = [{
+        label_template_id: 1, name: 'Тест', description: null, version: 1, is_active: true,
+        canvas_width_mm: 85, canvas_height_mm: 55, dpi: 203, default_export_formats: ['png'],
+        custom_field_schema: {
+          'custom.counter': { type: 'string', expression: {
+            type: 'custom_expression', version: 1, root: { type: 'field', field: 'label.counter_text' },
+          } },
+        }, field_catalog_snapshot: {},
+      }];
+      else if (sql.includes('FROM label_template_elements')) rows = [{
+        label_template_element_id: 1, element_key: 'cut-map', kind: 'cut_map', source_field: null,
+        static_text: null, x_mm: 1, y_mm: 1, width_mm: 40, height_mm: 20, rotation_deg: 0,
+        z_index: 0, style_json: template().elements[0].style, condition_json: {},
+      }];
+      else if (sql.includes('FROM order_details_view od')) rows = [11, 10].map((id) => ({
+        detail_id: id, order_id: 20, detail_number: id, detail_name: 'Тест', width: 500,
+        height: 300, quantity: 1, material_name: 'Тест', note: null, basis_project: null, basis_data: null,
+      }));
+      else if (sql.includes('FROM orders_view o')) rows = [{ order_id: 20, order_fields: { order_name: 'Тест' } }];
+      else if (sql.includes('FROM cut_result_placement p')) rows = available ? [placementRow()] : [];
+      else if (sql.includes('INSERT INTO command_idempotency_keys')) rows = [{ idempotency_key: params[0] }];
+      else if (sql.includes('INSERT INTO order_label_generations')) rows = [{
+        order_label_generation_id: 7, order_id: null, label_template_id: 1, template_version: 1,
+        label_count: params[9], generated_at: '2026-09-08T00:00:00Z',
+      }];
+      return { rowCount: rows.length, rows };
+    });
+    const database = {
+      query, transaction: (work: (client: DatabaseClient) => Promise<unknown>) => work({ query } as unknown as DatabaseClient),
+    } as unknown as DatabaseService;
+    return { repo: new PgLabelsRepository(database), query, setAvailable: (value: boolean) => { available = value; } };
+  }
+
+  it('persists exactly the previewed subset, its omissions, and its audit', async () => {
+    const { repo, query } = repository();
+    const audit = vi.spyOn(auditService, 'record').mockResolvedValue('audit-test');
+    try {
+      const preview = await repo.previewDetailLabels({ ...context, input });
+      expect(preview.labelCount).toBe(1);
+      expect(preview.skippedRows?.map((row) => row.detailId)).toEqual([11]);
+      expect(preview.rows[0]).toMatchObject({ values: { 'custom.counter': 'Бир. № 1 / 1' } });
+      const result = await repo.generateDetailLabels({ ...context, input: {
+        ...input, previewToken: preview.previewToken, exportFormats: ['png'], idempotencyKey: 'test-partial',
+      } });
+      expect(result.labelCount).toBe(1);
+      const insert = query.mock.calls.find(([sql]) => sql.includes('INSERT INTO order_label_generations'))!;
+      expect(JSON.parse(String(insert[1][8]))).toEqual(preview.rows);
+      expect(JSON.parse(String(insert[1][6])).skippedRows).toEqual(preview.skippedRows);
+      expect(audit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+        event: 'detail_labels.generated', metadata: expect.objectContaining({ skippedRows: preview.skippedRows }),
+        relatedEntities: expect.arrayContaining([
+          { entityType: 'order_detail', entityId: 11 },
+          { entityType: 'order_detail', entityId: 10 },
+          { entityType: 'order', entityId: 20 },
+        ]),
+      }));
+    } finally { audit.mockRestore(); }
+  });
+
+  it('rejects a changed printable subset after preview before saving a generation', async () => {
+    const { repo, query, setAvailable } = repository();
+    const preview = await repo.previewDetailLabels({ ...context, input });
+    setAvailable(false);
+    await expect(repo.generateDetailLabels({ ...context, input: {
+      ...input, previewToken: preview.previewToken, exportFormats: ['png'], idempotencyKey: 'test-stale',
+    } })).rejects.toMatchObject({ code: 'LABEL_PREVIEW_TOKEN_STALE' });
+    expect(query.mock.calls.some(([sql]) => sql.includes('INSERT INTO order_label_generations'))).toBe(false);
+  });
+
+  it('never saves an empty generation', async () => {
+    const { repo, query, setAvailable } = repository();
+    setAvailable(false);
+    const preview = await repo.previewDetailLabels({ ...context, input });
+    expect(preview.labelCount).toBe(0);
+    await expect(repo.generateDetailLabels({ ...context, input: {
+      ...input, previewToken: preview.previewToken, exportFormats: ['png'], idempotencyKey: 'test-empty',
+    } })).rejects.toMatchObject({ code: 'LABEL_NO_PRINTABLE_ROWS' });
+    expect(query.mock.calls.some(([sql]) => sql.includes('INSERT INTO order_label_generations'))).toBe(false);
+  });
+});
+
+describe('partial sheet labels', () => {
+  const input = {
+    templateId: 1, templateVersion: 1, detailIds: [10, 11],
+    cutSheetScope: {
+      cutJobId: 30, cutGroupId: 40, sheetIndex: 9,
+      detailInstances: [{ detailId: 11, instance: 1 }, { detailId: 10, instance: 2 }],
+    },
+  };
+  const rows = [labelRow({ detailId: 11 }), labelRow({ rowIndex: 2, copyIndex: 2 })];
+
+  it('prints remaining copies with contiguous counters when one placement is missing', async () => {
+    const placement = placementRow({ instance: 2 });
+    const client = databaseReturningSequence([placement], [placement]);
+    const resolved = await resolveDetailLabelCutMaps(client, template(), rows, input, '/unused');
+
+    expect(resolved.rows).toHaveLength(1);
+    expect(resolved.rows[0]).toMatchObject({
+      detailId: 10, copyIndex: 2, rowIndex: 1, copyCount: 1,
+      values: { 'label.counter': 1, 'label.counter_total': 1, 'label.counter_text': 'Бир. № 1 / 1' },
+    });
+    expect(resolved.skippedRows).toEqual([expect.objectContaining({
+      detailId: 11, copyIndex: 1, code: 'LABEL_CUT_SHEET_PLACEMENT_MISSING',
+    })]);
+    expect(renderSvgPages(template(), resolved.rows, resolved.assets).pages).toHaveLength(1);
+    expect(client.query).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['changed', 'stale'])('skips a %s placement while preserving valid labels', async (state) => {
+    const good = placementRow({ instance: 2 });
+    const bad = placementRow({ cut_result_placement_id: 701, order_detail_id: 11, dimensions_match: false });
+    const client = databaseReturningSequence([bad, good], state === 'changed' ? [bad, good] : [good]);
+    const resolved = await resolveDetailLabelCutMaps(client, template(), rows, input, '/unused');
+    expect(resolved.rows.map((row) => row.detailId)).toEqual([10]);
+    expect(resolved.skippedRows).toEqual([expect.objectContaining({
+      detailId: 11, code: state === 'changed' ? 'LABEL_CUT_MAP_DETAIL_CHANGED' : 'LABEL_CUT_MAP_SELECTION_STALE',
+    })]);
+  });
+
+  it('returns an empty preview with reasons when no placement is available', async () => {
+    const resolved = await resolveDetailLabelCutMaps(databaseReturning(), template(), rows, input, '/unused');
+    expect(resolved.rows).toEqual([]);
+    expect(resolved.skippedRows).toHaveLength(2);
+    expect(renderSvgPages(template(), resolved.rows, resolved.assets).pages).toEqual([]);
+  });
+
+  it('keeps every row for templates without cut maps', async () => {
+    const client = databaseReturning();
+    const resolved = await resolveDetailLabelCutMaps(client, { ...template(), elements: [] }, rows, input, '/unused');
+    expect(resolved.rows).toEqual(rows);
+    expect(resolved.skippedRows).toEqual([]);
+    expect(client.query).not.toHaveBeenCalled();
+  });
+
+  it('does not swallow database errors', async () => {
+    const client = { query: vi.fn().mockRejectedValue(new Error('database unavailable')) } as unknown as DatabaseClient;
+    await expect(resolveDetailLabelCutMaps(client, template(), rows, input, '/unused'))
+      .rejects.toThrow('database unavailable');
+  });
+});
 
 describe('label cut-map resolution', () => {
   it('binds an exact physical placement and frozen sheet asset to the row', async () => {

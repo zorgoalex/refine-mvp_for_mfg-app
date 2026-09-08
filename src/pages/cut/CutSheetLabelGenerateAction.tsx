@@ -152,6 +152,7 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
     if (!selectedTemplate || detailIds.length === 0) return;
     const requestId = previewRequestRef.current + 1;
     previewRequestRef.current = requestId;
+    setPreview(null);
     setLoading(true);
     try {
       const nextPreview = await labelsApi.previewDetailLabels({
@@ -180,6 +181,15 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
       const generationPreview = await labelsApi.previewDetailLabels({
         ...buildRequest(selectedTemplate),
       });
+      setPreview(generationPreview);
+      setPreviewPageIndex(0);
+      if (generationPreview.labelCount === 0) {
+        message.warning('Нет доступных бирок для формирования');
+        return;
+      }
+      if (generationPreview.skippedRows?.length) {
+        message.warning(`Будет сформировано ${generationPreview.labelCount} бирок. Пропущено: ${generationPreview.skippedRows.length}`);
+      }
       const generation = await labelsApi.generateDetailLabels({
         ...buildRequest(selectedTemplate),
         previewToken: generationPreview.previewToken,
@@ -209,6 +219,13 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
       });
       setPreview(printPreview);
       setPreviewPageIndex(0);
+      if (printPreview.labelCount === 0) {
+        message.warning('Нет доступных бирок для печати');
+        return;
+      }
+      if (printPreview.skippedRows?.length) {
+        message.warning(`На печать отправлено ${printPreview.labelCount} бирок. Пропущено: ${printPreview.skippedRows.length}`);
+      }
       const printed = printLabelSvgPages(printPreview.svgPages, `Бирки ${resolvedSheetLabel}`, {
         appendBlankPage: appendBlankLabelOnPrint,
       });
@@ -240,7 +257,7 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
             icon={<PrinterOutlined />}
             onClick={runPrint}
             loading={printing}
-            disabled={!selectedTemplate || detailIds.length === 0 || generating}
+            disabled={!selectedTemplate || !preview?.labelCount || loading || generating || printing}
           >
             Печать
           </Button>,
@@ -250,7 +267,7 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
             icon={<DownloadOutlined />}
             onClick={runGenerate}
             loading={generating}
-            disabled={!preview || exportFormats.length === 0}
+            disabled={!preview?.labelCount || loading || printing || generating || exportFormats.length === 0}
           >
             Скачать ZIP
           </Button>,
@@ -269,6 +286,25 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
         `}</style>
         <Space direction="vertical" style={{ width: '100%' }} size={12}>
           {detailIds.length === 0 && <Alert type="warning" showIcon message="На листе нет деталей для бирок" />}
+          {preview && preview.labelCount === 0 && (
+            <Alert type="warning" showIcon message="Нет доступных бирок для печати" />
+          )}
+          {Boolean(preview?.skippedRows?.length) && (
+            <Alert
+              type="warning"
+              showIcon
+              message={`Доступно бирок: ${preview?.labelCount}. Пропущено: ${preview?.skippedRows?.length}`}
+              description={(
+                <ul style={{ margin: 0, paddingInlineStart: 20 }}>
+                  {preview?.skippedRows?.map((row) => (
+                    <li key={`${row.detailId}:${row.copyIndex}`}>
+                      {`Заказ ${row.orderId}, деталь ${row.detailId}, экземпляр ${row.copyIndex}: ${row.message}`}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            />
+          )}
           {incompleteCoverage && labelCoverage && (
             <Alert
               type="warning"

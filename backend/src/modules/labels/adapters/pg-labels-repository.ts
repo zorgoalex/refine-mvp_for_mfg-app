@@ -9,6 +9,7 @@ import { actorId } from '../application/labels.service';
 import {
   buildLabelRows,
   hashLabelRows,
+  refreshLabelRowCustomFields,
   type CutResultLabelRowCutMapSnapshot,
   type LabelRow,
   type LabelRowCutMapSnapshot,
@@ -45,6 +46,7 @@ import type {
   LabelsPort,
   LabelCutMapSource,
   DetailLabelsPreviewDto,
+  SkippedLabelRowDto,
   LatestOrderLabelsPreviewDto,
   ListLabelOcrTemplatesQuery,
   ListLabelQrTemplatesQuery,
@@ -1573,21 +1575,22 @@ export class PgLabelsRepository implements LabelsPort {
     const template = await this.readTemplate(this.database, command.input.templateId, true);
     assertTemplateVersion(template.version, command.input.templateVersion);
     const useBasisFields = command.input.useBasisFields ?? true;
-    const baseRows = await buildDetailLabelRowsForInput(this.database, template, command.input, useBasisFields);
+    const base = await buildDetailLabelRowsForInput(this.database, template, command.input, useBasisFields);
     const resolved = await resolveDetailLabelCutMaps(
       this.database,
       template,
-      baseRows,
+      base.rows,
       command.input,
       this.telegramMediaDir,
     );
     try {
-      const rows = resolved.rows;
+      const rows = refreshLabelRowCustomFields(resolved.rows, template, base.details, useBasisFields);
       const rowHash = hashLabelRows(rows);
       const svgPages = renderSvgPages(template, rows, resolved.assets).pages;
       assertTelegramSvgPagesLimit(rows, svgPages);
       return {
         generationScope: 'details',
+        skippedRows: resolved.skippedRows,
         templateId: template.labelTemplateId,
         templateVersion: template.version,
         labelCount: rows.length,
@@ -1671,21 +1674,25 @@ export class PgLabelsRepository implements LabelsPort {
 
       const template = await this.readTemplate(tx, command.input.templateId, true, true);
       assertTemplateVersion(template.version, command.input.templateVersion);
-      const baseRows = await buildDetailLabelRowsForInput(tx, template, command.input, useBasisFields);
+      const base = await buildDetailLabelRowsForInput(tx, template, command.input, useBasisFields);
       const resolved = await resolveDetailLabelCutMaps(
         tx,
         template,
-        baseRows,
+        base.rows,
         command.input,
         this.telegramMediaDir,
         generationPreparedImages,
       );
-      const rows = resolved.rows;
+      const rows = refreshLabelRowCustomFields(resolved.rows, template, base.details, useBasisFields);
       const rowHash = hashLabelRows(rows);
       if (
         token.rowHash !== rowHash
       ) {
         throw new ApiError(409, 'LABEL_PREVIEW_TOKEN_STALE', 'Label preview token is stale');
+      }
+
+      if (rows.length === 0) {
+        throw new ApiError(422, 'LABEL_NO_PRINTABLE_ROWS', 'Нет доступных бирок для формирования');
       }
 
       const inserted = await tx.query<GenerationRow>(
@@ -1703,7 +1710,7 @@ export class PgLabelsRepository implements LabelsPort {
           requestHash,
           sha256(command.input.previewToken),
           JSON.stringify({ detailIds, useBasisFields, ...scopeSnapshot }),
-          JSON.stringify({ detailIds, orderIds: [...new Set(rows.map((row) => row.orderId))], ...scopeSnapshot }),
+          JSON.stringify({ detailIds, orderIds: [...new Set(rows.map((row) => row.orderId))], ...scopeSnapshot, skippedRows: resolved.skippedRows }),
           JSON.stringify(template),
           JSON.stringify(rows),
           rows.length,
@@ -1735,10 +1742,13 @@ export class PgLabelsRepository implements LabelsPort {
         before: null,
         after: { ...generation, exportFormats: command.input.exportFormats, detailIds },
         diff: { labelCount: generation.labelCount },
-        metadata: { idempotencyKey: command.input.idempotencyKey, generationScope: 'details', telegramPacketIds, telegramSourceMessageIds, telegramAssetKeys },
+        metadata: { idempotencyKey: command.input.idempotencyKey, generationScope: 'details', skippedRows: resolved.skippedRows, telegramPacketIds, telegramSourceMessageIds, telegramAssetKeys },
         relatedEntities: [
           { entityType: 'order_label_generation', entityId: generation.generationId },
-          ...[...new Set(rows.map((row) => row.detailId))].map((detailId) => ({ entityType: 'order_detail', entityId: detailId })),
+          ...[...new Set([...rows, ...resolved.skippedRows].map((row) => row.detailId))]
+            .map((detailId) => ({ entityType: 'order_detail', entityId: detailId })),
+          ...[...new Set([...rows, ...resolved.skippedRows].map((row) => row.orderId))]
+            .map((orderId) => ({ entityType: 'order', entityId: orderId })),
           ...cutResultIds.map((cutResultId) => ({ entityType: 'cut_result', entityId: cutResultId })),
           ...cutJobIds.map((cutJobId) => ({ entityType: 'cut_job', entityId: cutJobId })),
         ],
@@ -2090,7 +2100,7 @@ async function buildDetailLabelRowsForInput(
   template: LabelTemplateDto,
   input: PreviewDetailLabelsCommand['input'],
   useBasisFields: boolean,
-): Promise<LabelRow[]> {
+): Promise<{ rows: LabelRow[]; details: OrderLabelDataDetailDto[] }> {
   const detailInstances = detailInstancesForInput(input);
   const detailIds = detailInstances ? detailInstances.map((instance) => instance.detailId) : input.detailIds;
   if (detailInstances) assertDetailIdsCoverInstances(input.detailIds, detailInstances);
@@ -2102,10 +2112,10 @@ async function buildDetailLabelRowsForInput(
     detailInstances ? { quantityMode: 'actual' } : undefined,
   );
   const rows = buildLabelRows({ orderName: null, template, details, useBasisFields });
-  return detailInstances ? selectLabelRowsByInstances(rows, detailInstances) : rows;
+  return { rows: detailInstances ? selectLabelRowsByInstances(rows, detailInstances) : rows, details };
 }
 
-async function resolveDetailLabelCutMaps(
+export async function resolveDetailLabelCutMaps(
   client: DatabaseClient,
   template: LabelTemplateDto,
   rows: LabelRow[],
@@ -2116,9 +2126,19 @@ async function resolveDetailLabelCutMaps(
   rows: LabelRow[];
   assets: LabelCutMapAssets;
   preparedImages: Map<string, PreparedTelegramImage>;
+  skippedRows: SkippedLabelRowDto[];
 }> {
+  const skippedRows: SkippedLabelRowDto[] = [];
+  const finish = (resolved: ReturnType<typeof pickCutMapResolution>) => ({
+    ...resolved,
+    rows: skippedRows.length === 0 ? resolved.rows : selectLabelRowsByInstances(
+      resolved.rows,
+      resolved.rows.map((row) => ({ detailId: row.detailId, instance: row.copyIndex })),
+    ),
+    skippedRows,
+  });
   const usesCutMap = template.elements.some((element) => element.kind === 'cut_map');
-  if (!usesCutMap) return { rows, assets: new Map(), preparedImages: new Map() };
+  if (!usesCutMap) return finish({ rows, assets: new Map(), preparedImages: new Map() });
   if (!input.cutSheetScope && !input.cutMapFallbackImage) {
     throw new ApiError(
       422,
@@ -2130,26 +2150,29 @@ async function resolveDetailLabelCutMaps(
   const selections = input.cutSheetScope
     ? await resolveCutSheetScopeSelections(client, input.cutSheetScope, rows)
     : [];
+  const selectedKeys = new Set(selections.map((selection) => `${selection.detailId}:${selection.copyIndex}`));
   if (!input.cutMapFallbackImage) {
-    if (selections.length !== rows.length) {
-      throw new ApiError(409, 'LABEL_CUT_SHEET_PLACEMENT_MISSING', 'Лист раскроя больше недоступен для бирок');
+    for (const row of rows) {
+      if (!selectedKeys.has(`${row.detailId}:${row.copyIndex}`)) {
+        skippedRows.push(skippedLabelRow(row, 'LABEL_CUT_SHEET_PLACEMENT_MISSING', 'Размещение экземпляра на листе раскроя недоступно'));
+      }
     }
-    return pickCutMapResolution(
-      await resolveLabelCutMaps(client, template, rows, selections, undefined, undefined, undefined),
-    );
+    const selectedRows = rows.filter((row) => selectedKeys.has(`${row.detailId}:${row.copyIndex}`));
+    return finish(pickCutMapResolution(
+      await resolveLabelCutMaps(client, template, selectedRows, selections, undefined, undefined, undefined, skippedRows),
+    ));
   }
 
-  const selectedKeys = new Set(selections.map((selection) => `${selection.detailId}:${selection.copyIndex}`));
   if (selectedKeys.size === rows.length) {
-    return pickCutMapResolution(
-      await resolveLabelCutMaps(client, template, rows, selections, undefined, undefined, undefined),
-    );
+    return finish(pickCutMapResolution(
+      await resolveLabelCutMaps(client, template, rows, selections, undefined, undefined, undefined, skippedRows),
+    ));
   }
 
   const exactRows = rows.filter((row) => selectedKeys.has(`${row.detailId}:${row.copyIndex}`));
   const fallbackRows = rows.filter((row) => !selectedKeys.has(`${row.detailId}:${row.copyIndex}`));
   const exact = exactRows.length > 0
-    ? pickCutMapResolution(await resolveLabelCutMaps(client, template, exactRows, selections, undefined, undefined, undefined))
+    ? pickCutMapResolution(await resolveLabelCutMaps(client, template, exactRows, selections, undefined, undefined, undefined, skippedRows))
     : { rows: [] as LabelRow[], assets: new Map() as LabelCutMapAssets, preparedImages: new Map<string, PreparedTelegramImage>() };
   const fallback = await resolveExplicitTelegramSheetImageRows(
     client,
@@ -2161,11 +2184,18 @@ async function resolveDetailLabelCutMaps(
   );
   const exactByKey = new Map(exact.rows.map((row) => [`${row.detailId}:${row.copyIndex}`, row]));
   const fallbackByKey = new Map(fallback.rows.map((row) => [`${row.detailId}:${row.copyIndex}`, row]));
-  return {
-    rows: rows.map((row) => exactByKey.get(`${row.detailId}:${row.copyIndex}`) ?? fallbackByKey.get(`${row.detailId}:${row.copyIndex}`) ?? row),
+  return finish({
+    rows: rows.flatMap((row) => {
+      const resolved = exactByKey.get(`${row.detailId}:${row.copyIndex}`) ?? fallbackByKey.get(`${row.detailId}:${row.copyIndex}`);
+      return resolved ? [resolved] : [];
+    }),
     assets: new Map([...exact.assets, ...fallback.assets]),
     preparedImages: new Map([...exact.preparedImages, ...fallback.preparedImages]),
-  };
+  });
+}
+
+function skippedLabelRow(row: LabelRow, code: string, message: string): SkippedLabelRowDto {
+  return { orderId: row.orderId, detailId: row.detailId, copyIndex: row.copyIndex, code, message };
 }
 
 function pickCutMapResolution(resolved: Awaited<ReturnType<typeof resolveLabelCutMaps>>): {
@@ -2463,6 +2493,7 @@ export async function resolveLabelCutMaps(
     preparedImages?: Map<string, PreparedTelegramImage>;
     imageMode?: 'prepare' | 'validate';
   },
+  skippedRows?: SkippedLabelRowDto[],
 ): Promise<{
   rows: LabelRow[];
   assets: LabelCutMapAssets;
@@ -2641,7 +2672,7 @@ export async function resolveLabelCutMaps(
     [[...placementIds], orderId ?? null],
   );
   const placementById = new Map(result.rows.map((row) => [toNumber(row.cut_result_placement_id), row]));
-  if (placementById.size !== placementIds.size) {
+  if (placementById.size !== placementIds.size && !skippedRows) {
     throw new ApiError(409, 'LABEL_CUT_MAP_SELECTION_STALE', 'Выбранный раскрой больше недоступен');
   }
   if (cutMapSource) {
@@ -2658,10 +2689,14 @@ export async function resolveLabelCutMaps(
   }
 
   const assets = new Map<string | number, LabelCutMapAsset>();
-  const resolvedRows = rows.map((row): LabelRow => {
+  const resolvedRows = rows.flatMap((row): LabelRow[] => {
     const selection = selectionByCopy.get(`${row.detailId}:${row.copyIndex}`);
-    if (!selection) return row;
+    if (!selection) return [row];
     const placement = placementById.get(selection.cutResultPlacementId);
+    if (!placement && skippedRows) {
+      skippedRows.push(skippedLabelRow(row, 'LABEL_CUT_MAP_SELECTION_STALE', 'Выбранный раскрой больше недоступен'));
+      return [];
+    }
     if (
       !placement
       || toNumber(placement.order_detail_id) !== row.detailId
@@ -2674,6 +2709,10 @@ export async function resolveLabelCutMaps(
       });
     }
     if (!placement.dimensions_match) {
+      if (skippedRows) {
+        skippedRows.push(skippedLabelRow(row, 'LABEL_CUT_MAP_DETAIL_CHANGED', 'Размер или количество детали изменились после раскроя'));
+        return [];
+      }
       throw new ApiError(409, 'LABEL_CUT_MAP_DETAIL_CHANGED', 'Размер или количество детали изменились после раскроя', {
         detailId: row.detailId,
       });
@@ -2700,7 +2739,7 @@ export async function resolveLabelCutMaps(
       svg: placement.base_svg,
       isVacuum: placement.is_vacuum === true,
     });
-    return {
+    return [{
       ...row,
       cutMap,
       values: {
@@ -2710,7 +2749,7 @@ export async function resolveLabelCutMaps(
         'cut.sheet_number': cutMap.sheetNumber,
         'cut.variant': cutMap.variant,
       },
-    };
+    }];
   });
   return resolveTelegramFallbackRows(client, resolvedRows, assets, orderId, cutMapSource, telegram);
 }
