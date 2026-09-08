@@ -1,4 +1,5 @@
 import { useList } from '@refinedev/core';
+import type { CalendarError } from '../types/calendar';
 
 export interface StatusItem {
   id: number;
@@ -10,7 +11,7 @@ export interface OrderStatusesResult {
   paymentStatuses: StatusItem[];
   productionStatuses: StatusItem[];
   isLoading: boolean;
-  error: Error | undefined;
+  error: CalendarError | undefined;
 }
 
 /**
@@ -70,11 +71,11 @@ export const useOrderStatuses = (
 
   // Объединяем ошибки
   const error = isErrorOrderStatuses
-    ? (errorOrderStatuses as Error)
+    ? errorOrderStatuses
     : loadPayment && isErrorPaymentStatuses
-    ? (errorPaymentStatuses as Error)
+    ? errorPaymentStatuses
     : loadPaymentAndProduction && isErrorProductionStatuses
-    ? (errorProductionStatuses as Error)
+    ? errorProductionStatuses
     : undefined;
 
   // Маппим данные в единый формат { id, name }
