@@ -4345,7 +4345,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 Импорт из Telegram
               </Button>
             )}
-            <Button onClick={loadJobs} loading={jobsLoading}>
+            <Button onClick={() => void loadJobs()} loading={jobsLoading}>
               Обновить
             </Button>
           </Space>
@@ -4409,7 +4409,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               </Space.Compact>
             )}
             <Tooltip title="Обновить">
-              <Button aria-label="Обновить список" icon={<ReloadOutlined />} onClick={loadJobs} loading={jobsLoading} />
+              <Button aria-label="Обновить список" icon={<ReloadOutlined />} onClick={() => void loadJobs()} loading={jobsLoading} />
             </Tooltip>
             <Tooltip title="Плотность строк">
               <Button aria-label="Плотность строк" icon={<ColumnHeightOutlined />} />
