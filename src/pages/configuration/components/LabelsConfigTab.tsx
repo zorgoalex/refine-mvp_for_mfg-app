@@ -2369,7 +2369,7 @@ export const LabelsConfigTab: React.FC = () => {
         title={editingCustomFieldId ? 'Редактировать пользовательское поле' : 'Добавить пользовательское поле'}
         open={customFieldEditorOpen}
         width={960}
-        styles={{ body: { maxHeight: '72vh', overflowY: 'auto' } }}
+        bodyStyle={{ maxHeight: '72vh', overflowY: 'auto' }}
         okText={editingCustomFieldId ? 'Сохранить поле' : 'Добавить поле'}
         cancelText="Отмена"
         destroyOnClose

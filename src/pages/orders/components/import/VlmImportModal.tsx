@@ -332,12 +332,10 @@ export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose })
           onCancel={handleClose}
           width={1200}
           style={{ top: 20 }}
-          styles={{
-            body: {
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
-            },
+          bodyStyle={{
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
           }}
           footer={
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
