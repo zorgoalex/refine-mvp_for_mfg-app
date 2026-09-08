@@ -44,7 +44,10 @@ for (const uiVariant of ['legacy', 'air'] as const) {
 
     // Unapplied draft edits must not replace the last applied criteria either.
     await filters.getByPlaceholder('2700').fill('9999');
-    const refresh = page.getByRole('button', { name: uiVariant === 'legacy' ? 'Обновить' : 'Обновить список', exact: true });
+    // AntD's leaving loading icon can remain in the accessible name after the
+    // request completes. Match the label, but independently require idle state.
+    const refresh = page.getByRole('button', { name: uiVariant === 'legacy' ? /Обновить$/ : 'Обновить список' });
+    await expect(refresh).not.toHaveClass(/ant-btn-loading/);
     const refreshedRequest = listRequest();
     await refresh.click();
     expect(Object.fromEntries(new URL((await refreshedRequest).url()).searchParams)).toEqual(Object.fromEntries(applied));
@@ -52,6 +55,7 @@ for (const uiVariant of ['legacy', 'air'] as const) {
     const archivedRequest = listRequest();
     await page.getByRole('checkbox', { name: 'Показывать удалённые' }).check();
     await archivedRequest;
+    await expect(refresh).not.toHaveClass(/ant-btn-loading/);
     const archivedRefresh = listRequest();
     await refresh.click();
     expect(Object.fromEntries(new URL((await archivedRefresh).url()).searchParams)).toEqual({ ...Object.fromEntries(applied), includeArchived: 'true' });
@@ -61,6 +65,7 @@ for (const uiVariant of ['legacy', 'air'] as const) {
     const reset = new URL((await resetRequest).url()).searchParams;
     expect(reset.get('orderSearch')).toBeNull();
     expect(reset.get('includeArchived')).not.toBe('true');
+    await expect(refresh).not.toHaveClass(/ant-btn-loading/);
     const resetRefresh = listRequest();
     await refresh.click();
     expect(Object.fromEntries(new URL((await resetRefresh).url()).searchParams)).toEqual(Object.fromEntries(reset));
