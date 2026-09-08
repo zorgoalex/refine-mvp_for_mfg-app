@@ -66,7 +66,7 @@ describe('manual SVG cut upload UI guard', () => {
     expect(modal).toContain('Распечатать SVG');
     expect(modal).toContain('URL.createObjectURL');
     expect(modal).toContain('createStyledSvgUploadPreviewBlob');
-    expect(modal).toContain('URL.revokeObjectURL');
+    expect(modal).toContain('useOwnedObjectUrlState');
     expect(modal).toContain("objectFit: 'contain'");
     expect(modal).toContain("flex: '0 0 320px'");
     expect(modal).toContain('replaceSvgPreview(null)');
@@ -110,7 +110,8 @@ describe('manual SVG cut upload UI guard', () => {
   });
 
   it('uses current backend render.styles and the canonical styled sheet preview', () => {
-    expect(modal).toContain('replaceSvgPreview(createSvgPreview(file))');
+    expect(modal).not.toContain('createSvgPreview(file)');
+    expect(modal.match(/replaceSvgPreview\(createStyledSvgPreview/g)).toHaveLength(1);
     expect(modal).toContain('createStyledSvgPreview');
     expect(modal).toContain('createStyledSvgUploadPreviewBlob');
     expect(modal).toContain('cutConfigApi.get');

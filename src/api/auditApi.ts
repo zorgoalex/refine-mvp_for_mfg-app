@@ -11,7 +11,7 @@ import type {
 
 type QueryValue = string | number | boolean | null | undefined | readonly (string | number | boolean)[];
 
-export function withAuditQuery<T extends Record<string, QueryValue>>(path: string, params: T = {} as T): string {
+export function withAuditQuery<T extends { [K in keyof T]: QueryValue }>(path: string, params: T = {} as T): string {
   const searchParams = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value === null || value === undefined || value === '') continue;

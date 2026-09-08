@@ -136,12 +136,13 @@ export const normalizeProductionWorkflowConfig = (
       )
       .map((status) => status.production_status_code),
   ];
-  const storedLayoutRows = Array.isArray(base?.layout_rows)
+  const storedLayoutRowsSource: unknown[] = Array.isArray(base?.layout_rows)
     ? base.layout_rows
-        .filter((row): row is unknown[] => Array.isArray(row))
-        .map((row) => row.filter((code): code is string => typeof code === 'string'))
-        .filter((row) => row.length > 0)
     : [];
+  const storedLayoutRows = storedLayoutRowsSource
+    .filter((row): row is unknown[] => Array.isArray(row))
+    .map((row) => row.filter((code): code is string => typeof code === 'string'))
+    .filter((row) => row.length > 0);
   const layoutCodes = new Set(storedLayoutRows.flat());
   const layoutRows =
     storedLayoutRows.length > 0

@@ -746,7 +746,7 @@ function parseCustomExpressionNode(
     return { type: 'concat', parts };
   }
   if (value.type === 'aggregate') {
-    const separator = value.separator === undefined ? undefined : value.separator;
+    const separator = value.separator;
     if (!hasAllowedKeys(value, ['type', 'source', 'field', 'fn'], ['separator'])
       || !isCustomExpressionAggregateSource(value.source)
       || !isCustomExpressionFieldId(value.field)
@@ -754,12 +754,13 @@ function parseCustomExpressionNode(
       || (separator !== undefined && (typeof separator !== 'string' || separator.length > 1000))) {
       return null;
     }
+    const normalizedSeparator = typeof separator === 'string' ? separator : undefined;
     return {
       type: 'aggregate',
       source: value.source,
       field: value.field.trim(),
       fn: value.fn,
-      ...(separator === undefined ? {} : { separator }),
+      ...(normalizedSeparator === undefined ? {} : { separator: normalizedSeparator }),
     };
   }
   if (value.type === 'if_else') {
@@ -886,9 +887,8 @@ function evaluateCustomAggregatePreviewNode(
 }
 
 function normalizeCustomPreviewScalar(value: unknown): string | number | boolean | null | undefined {
-  if (value == null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-    return value ?? null;
-  }
+  if (value == null) return null;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
   return JSON.stringify(value);
 }
 

@@ -210,6 +210,7 @@ class VectorParserTest(unittest.TestCase):
             self.assertEqual(len(layout.items), 1)
             self.assertEqual(layout.items[0].detail_number, 12)
             self.assertIn("collapsed-PartContour", ";".join(layout.reasons))
+            self.assertEqual(layout_to_dict(layout)["renderOnlyContours"], [])
 
     def test_supplied_stale_metadata_file_preserves_all_four_parts(self):
         path = Path(__file__).resolve().parents[2] / "tests/fixtures/svg-source-priority/stale-comment-size.svg"
@@ -226,7 +227,11 @@ class VectorParserTest(unittest.TestCase):
             self.assertEqual(layout.status, "valid")
             self.assertEqual(len(layout.items), 20)
             self.assertTrue(layout.reasons)
-            self.assertEqual(len(layout_to_dict(layout)["items"]), 20)
+            payload = layout_to_dict(layout)
+            self.assertEqual(len(payload["items"]), 20)
+            self.assertEqual(len(payload["renderOnlyContours"]), 1)
+            self.assertIn("# Test", payload["renderOnlyContours"][0]["labelLines"])
+            self.assertNotIn("detailNumber", payload["renderOnlyContours"][0])
 
 
 def write_svg(content: str) -> Path:

@@ -2185,6 +2185,12 @@ def canonical_layout_fingerprint(layout: dict[str, Any] | None) -> str | None:
         },
         "items": sorted(geometry_items, key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":"))),
     }
+    extras = layout.get("renderOnlyContours") or []
+    if extras:
+        canonical["renderOnlyContours"] = sorted([
+            {key: rounded(item.get(key)) for key in ["xMm", "yMm", "placedWidthMm", "placedHeightMm"]}
+            for item in extras if isinstance(item, dict)
+        ], key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":")))
     return fingerprint_json(canonical)
 
 

@@ -92,7 +92,7 @@ class WorkerConfig:
             ocr_command_timeout_seconds=positive_int_env("CNC_OCR_COMMAND_TIMEOUT_SECONDS", 180),
             glm_ocr_client_timeout_seconds=positive_int_env("GLM_OCR_CLIENT_TIMEOUT_SECONDS", 660),
             ocr_engine=env("CNC_OCR_ENGINE", "rapidocr-ppocrv5-eslav"),
-            parser_version=env("CNC_PARSER_VERSION", "cnc-telegram-worker-v16-svg-source-priority"),
+            parser_version=env("CNC_PARSER_VERSION", "cnc-telegram-worker-v17-unified-svg-render"),
             svg_validation_mode=validated_env("CNC_SVG_VALIDATION_MODE", "lenient", SVG_VALIDATION_MODES),
             default_machine=env("CNC_MACHINE_DEFAULT"),
             default_material=env("CNC_DEFAULT_MATERIAL", "МДФ 16мм"),

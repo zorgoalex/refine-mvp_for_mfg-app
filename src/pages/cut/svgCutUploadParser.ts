@@ -54,15 +54,9 @@ export interface VisualDetailLabel {
   rawLines: string[];
 }
 
-export interface SvgPreviewOnlyContour extends PartContourGeometry {
-  labelLines: string[];
-}
-
 export interface ParsedSvgUpload {
   fileName: string;
   svgContentHash: string;
-  /** Safe physical contours excluded from business import, retained only for display. */
-  previewOnlyContours?: SvgPreviewOnlyContour[];
   cutLayout: CncTelegramCutLayout;
   items: CncTelegramManualSvgUploadRequest['items'];
 }
@@ -266,10 +260,13 @@ export function parseSvgCutUploadText(
   };
   const acceptedContourIds = new Set(cutLayout.items.map((item) => item.sourceElementId));
   const previewTextLines = collectVisualTextLines(root, vbMinX, vbMinY, scaleX, scaleY);
-  const previewOnlyContours = selectedContours
+  const renderOnlyContours = selectedContours
     .filter((contour) => !acceptedContourIds.has(contour.elementId))
     .map((contour) => ({
-      ...contour,
+      sourceElementId: contour.elementId,
+      xMm: contour.xMm, yMm: contour.yMm,
+      placedWidthMm: contour.placedWidthMm, placedHeightMm: contour.placedHeightMm,
+      sourceSvg: contour.sourceSvg,
       labelLines: previewTextLines
         .filter((line) => line.xMm >= contour.xMm && line.xMm <= contour.xMm + contour.placedWidthMm &&
           line.yMm >= contour.yMm && line.yMm <= contour.yMm + contour.placedHeightMm)
@@ -279,8 +276,7 @@ export function parseSvgCutUploadText(
     }));
   return {
     fileName,
-    cutLayout,
-    previewOnlyContours,
+    cutLayout: { ...cutLayout, renderOnlyContours },
     items: layoutItemsToRequestItems(cutLayout),
   };
 }

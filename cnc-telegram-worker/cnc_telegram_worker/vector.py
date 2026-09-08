@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import re
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -93,6 +93,7 @@ class SvgCutLayout:
     items: list[VectorItem]
     raw_comment_count: int = 0
     part_contour_count: int = 0
+    render_only_contours: list[dict[str, Any]] = field(default_factory=list)
 
 
 def parse_vector_file(path: Path) -> list[dict[str, Any]]:
@@ -255,7 +256,25 @@ def parse_svg_cut_layout(path: Path, mode: str = "strict") -> SvgCutLayout:
     if not lenient and part_contour_count > 0 and not parts:
         reasons.append("PartContour outlines exist but no placed detail passed geometry checks")
 
+    accepted_ids = {part.source_element_id for part in parts}
+    text_lines = collect_visual_text_lines(root, vb_min_x, vb_min_y, scale_x, scale_y)
+    render_only_contours = []
+    for contour in selected_contours:
+        if contour.element_id in accepted_ids:
+            continue
+        lines = sorted((line for line in text_lines
+            if contour.x_mm <= line.x_mm <= contour.x_mm + contour.placed_width_mm
+            and contour.y_mm <= line.y_mm <= contour.y_mm + contour.placed_height_mm),
+            key=lambda line: (line.y_mm, line.x_mm))
+        render_only_contours.append({
+            "sourceElementId": contour.element_id,
+            "xMm": contour.x_mm, "yMm": contour.y_mm,
+            "placedWidthMm": contour.placed_width_mm, "placedHeightMm": contour.placed_height_mm,
+            "labelLines": [line.text[:200] for line in lines[:4]],
+            "sourceSvg": {"viewBox": contour.source_svg.view_box, "body": contour.source_svg.body} if contour.source_svg else None,
+        })
     return SvgCutLayout(
+        render_only_contours=render_only_contours,
         status="valid" if parts else "invalid",
         reasons=reasons,
         sheet_width_mm=round(sheet_width, 2),
@@ -299,6 +318,7 @@ def layout_to_dict(layout: SvgCutLayout) -> dict[str, Any]:
             "widthMm": layout.sheet_width_mm,
             "heightMm": layout.sheet_height_mm,
         } if layout.sheet_width_mm is not None and layout.sheet_height_mm is not None else None,
+        "renderOnlyContours": layout.render_only_contours,
         "rawCommentCount": layout.raw_comment_count,
         "partContourCount": layout.part_contour_count,
         "acceptedItemCount": len(layout.items) if layout.status == "valid" else 0,

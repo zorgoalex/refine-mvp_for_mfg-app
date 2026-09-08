@@ -1,3 +1,4 @@
+import { normalizeSvgRenderContours } from '../../../shared/svg-render-contours';
 import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
@@ -670,7 +671,7 @@ function iso(row: Row, key: string): string { return new Date(text(row, key)).to
 function nullableIso(row: Row, key: string): string | null { const value = row[key]; return value === null || value === undefined ? null : new Date(String(value)).toISOString(); }
 function arrayStrings(value: unknown): string[] { return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []; }
 function objectOrNull(value: unknown): Record<string, unknown> | null { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null; }
-function toCutLayout(value: unknown): CncTelegramManualSvgUploadDto['cutLayout'] { const source = object(value); const sheetValue = objectOrNull(source.sheet); return { status: source.status === 'invalid' ? 'invalid' : 'valid', reasons: arrayStrings(source.reasons), sheet: sheetValue && typeof sheetValue.widthMm === 'number' && typeof sheetValue.heightMm === 'number' ? { widthMm: sheetValue.widthMm, heightMm: sheetValue.heightMm } : null, items: Array.isArray(source.items) ? source.items.filter((entry): entry is CncTelegramManualSvgUploadDto['cutLayout']['items'][number] => Boolean(entry && typeof entry === 'object')) : [] }; }
+function toCutLayout(value: unknown): CncTelegramManualSvgUploadDto['cutLayout'] { const source = object(value); const sheetValue = objectOrNull(source.sheet); return { renderOnlyContours: normalizeSvgRenderContours(source.renderOnlyContours, sheetValue && typeof sheetValue.widthMm === 'number' && typeof sheetValue.heightMm === 'number' ? {widthMm:sheetValue.widthMm,heightMm:sheetValue.heightMm} : null), status: source.status === 'invalid' ? 'invalid' : 'valid', reasons: arrayStrings(source.reasons), sheet: sheetValue && typeof sheetValue.widthMm === 'number' && typeof sheetValue.heightMm === 'number' ? { widthMm: sheetValue.widthMm, heightMm: sheetValue.heightMm } : null, items: Array.isArray(source.items) ? source.items.filter((entry): entry is CncTelegramManualSvgUploadDto['cutLayout']['items'][number] => Boolean(entry && typeof entry === 'object')) : [] }; }
 
 export function telegramImportItemsFromLayout(
   layout: CncTelegramManualSvgUploadDto['cutLayout'],
