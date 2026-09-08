@@ -16,7 +16,9 @@ const mocks = vi.hoisted(() => ({
   changeProductionStatusFromAutomationInTransaction: vi.fn(),
   changeDetailsProductionStatusFromAutomationInTransaction: vi.fn(),
   record: vi.fn(),
+  loadMdfBoardEvents: vi.fn(),
 }));
+vi.mock('../adapters/pg-mdf-board-event-repository', () => ({ loadMdfBoardEvents: mocks.loadMdfBoardEvents }));
 
 vi.mock('../adapters/pg-status-automation-repository', () => ({
   listEnabledRulesForEvent: mocks.listEnabledRulesForEvent,
@@ -39,6 +41,7 @@ import {
   evaluateMdfBoardColumnAutomation,
   evaluateMdfOrderMachineFilesPresentAutomation,
   evaluateStatusAutomation,
+  dispatchMdfBoardEvent,
 } from './status-automation-runtime';
 
 describe('evaluateStatusAutomation', () => {
@@ -48,6 +51,7 @@ describe('evaluateStatusAutomation', () => {
     mocks.record.mockResolvedValue('automation-audit-id');
     mocks.loadOrderAutomationState.mockResolvedValue(makeState());
     mocks.listEnabledRulesForManualRefresh.mockResolvedValue([]);
+    mocks.loadMdfBoardEvents.mockResolvedValue([]);
   });
 
   it('returns before querying when the feature flag is off', async () => {
@@ -57,6 +61,33 @@ describe('evaluateStatusAutomation', () => {
 
     expect(mocks.listEnabledRulesForEvent).not.toHaveBeenCalled();
     expect(mocks.loadOrderAutomationState).not.toHaveBeenCalled();
+  });
+
+  it.each(['mdf.order_machine_files_present', 'mdf.board.completed', 'mdf.board.baths',
+    'mdf.board.baths_ready', 'mdf.board.baths_laminated'] as const)(
+    'rejects unscoped %s instead of updating the whole order', async (eventType) => {
+      mocks.listEnabledRulesForEvent.mockResolvedValue([
+        makeRule({ eventType, actionType: 'change_details_production_status' }),
+      ]);
+      mocks.changeDetailsProductionStatusFromAutomationInTransaction.mockResolvedValue({ status: 'executed' });
+      await evaluateStatusAutomation(tx(), event({ eventType }));
+      expect(mocks.changeDetailsProductionStatusFromAutomationInTransaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not synthesize MDF events during mass order refresh', async () => {
+    mocks.listEnabledRulesForManualRefresh.mockResolvedValue([
+      makeRule({ eventType: 'mdf.board.baths_laminated', actionType: 'change_details_production_status' }),
+    ]);
+    mocks.changeDetailsProductionStatusFromAutomationInTransaction.mockResolvedValue({ status: 'executed' });
+    const summary = await evaluateAllStatusAutomationRulesForOrder(tx(), {
+      orderId: 100, actor: currentUser(), requestId: 'refresh', sourceIdempotencyKey: 'refresh',
+    });
+    expect(summary.executedActionCount).toBe(0);
+    expect(mocks.changeDetailsProductionStatusFromAutomationInTransaction).not.toHaveBeenCalled();
+    expect(mocks.record).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      metadata: expect.objectContaining({ reason: 'mdf_source_required' }),
+    }));
   });
 
   it('runs only detail cascades for automation-origin order status events', async () => {
@@ -144,14 +175,20 @@ describe('evaluateStatusAutomation', () => {
   });
 
   it('evaluates the MDF machine-files event for each unique order id from a card', async () => {
-    const rule = makeRule({ id: 10, eventType: 'mdf.order_machine_files_present' });
+    const rule = makeRule({ id: 10, eventType: 'mdf.order_machine_files_present', actionType: 'change_details_production_status' });
     mocks.listEnabledRulesForEvent.mockResolvedValue([rule]);
-    mocks.changeOrderStatusFromAutomationInTransaction.mockResolvedValue({
+    mocks.listEnabledRulesForManualRefresh.mockResolvedValue([rule]);
+    mocks.loadMdfBoardEvents.mockResolvedValue([100, 200].map(orderId => ({
+      eventType: rule.eventType, orderId, scope: { source: { kind: 'packet', id: 'card-1' },
+        details: [{ detailId: orderId + 1, requiredQuantity: 10, eligibleQuantity: 10 }] },
+    })));
+    mocks.changeDetailsProductionStatusFromAutomationInTransaction.mockResolvedValue({
       status: 'executed',
       auditId: 'command-audit-id',
     });
 
     await evaluateMdfOrderMachineFilesPresentAutomation(tx(), {
+      source: { kind: 'packet', id: 'card-1' },
       orderIds: [200, null, 100, 100, 0],
       actor: currentUser(),
       requestId: 'request-2',
@@ -163,22 +200,28 @@ describe('evaluateStatusAutomation', () => {
       expect.anything(),
       'mdf.order_machine_files_present',
     );
-    expect(mocks.changeOrderStatusFromAutomationInTransaction.mock.calls.map((call) => call[1])).toEqual([100, 200]);
-    expect(mocks.changeOrderStatusFromAutomationInTransaction.mock.calls.map((call) => call[3].outboxIdempotencyKey)).toEqual([
-      'cnc-card-1:order-100:automation-10:order-100',
-      'cnc-card-1:order-200:automation-10:order-200',
+    expect(mocks.changeDetailsProductionStatusFromAutomationInTransaction.mock.calls.map((call) => call[1])).toEqual([100, 200]);
+    expect(mocks.changeDetailsProductionStatusFromAutomationInTransaction.mock.calls.map((call) => call[3].outboxIdempotencyKey)).toEqual([
+      'cnc-card-1:packet:card-1:mdf.order_machine_files_present:order-100:automation-10:order-100',
+      'cnc-card-1:packet:card-1:mdf.order_machine_files_present:order-200:automation-10:order-200',
     ]);
   });
 
   it('evaluates an MDF board column event for each unique order id from a moved card', async () => {
-    const rule = makeRule({ id: 11, eventType: 'mdf.board.baths_ready' });
+    const rule = makeRule({ id: 11, eventType: 'mdf.board.baths_ready', actionType: 'change_details_production_status' });
     mocks.listEnabledRulesForEvent.mockResolvedValue([rule]);
-    mocks.changeOrderStatusFromAutomationInTransaction.mockResolvedValue({
+    mocks.listEnabledRulesForManualRefresh.mockResolvedValue([rule]);
+    mocks.loadMdfBoardEvents.mockResolvedValue([100, 300].map(orderId => ({
+      eventType: rule.eventType, orderId, scope: { source: { kind: 'bath', id: 'cut-result:1' },
+        details: [{ detailId: orderId + 1, requiredQuantity: 10, eligibleQuantity: 10 }] },
+    })));
+    mocks.changeDetailsProductionStatusFromAutomationInTransaction.mockResolvedValue({
       status: 'executed',
       auditId: 'command-audit-id',
     });
 
     await evaluateMdfBoardColumnAutomation(tx(), {
+      source: { kind: 'bath', id: 'cut-result:1' },
       eventType: 'mdf.board.baths_ready',
       orderIds: [300, 100, 300, null],
       actor: currentUser(),
@@ -191,11 +234,41 @@ describe('evaluateStatusAutomation', () => {
       expect.anything(),
       'mdf.board.baths_ready',
     );
-    expect(mocks.changeOrderStatusFromAutomationInTransaction.mock.calls.map((call) => call[1])).toEqual([100, 300]);
-    expect(mocks.changeOrderStatusFromAutomationInTransaction.mock.calls.map((call) => call[3].outboxIdempotencyKey)).toEqual([
-      'bath-card-1:order-100:automation-11:order-100',
-      'bath-card-1:order-300:automation-11:order-300',
+    expect(mocks.changeDetailsProductionStatusFromAutomationInTransaction.mock.calls.map((call) => call[1])).toEqual([100, 300]);
+    expect(mocks.changeDetailsProductionStatusFromAutomationInTransaction.mock.calls.map((call) => call[3].outboxIdempotencyKey)).toEqual([
+      'bath-card-1:bath:cut-result:1:mdf.board.baths_ready:order-100:automation-11:order-100',
+      'bath-card-1:bath:cut-result:1:mdf.board.baths_ready:order-300:automation-11:order-300',
     ]);
+  });
+
+  it.each([4, 10, 12])('dispatches only complete scoped quantity %i and forces forward-only', async quantity => {
+    const rule = makeRule({ eventType: 'mdf.board.completed', actionType: 'change_details_production_status',
+      actionConfig: { detailTransitionMode: 'set_exact' } });
+    mocks.listEnabledRulesForEvent.mockResolvedValue([rule]);
+    mocks.listEnabledRulesForManualRefresh.mockResolvedValue([rule]);
+    const scope = { source: { kind: 'packet' as const, id: 'file' },
+      details: [{ detailId: 101, requiredQuantity: 10, eligibleQuantity: quantity }] };
+    mocks.loadMdfBoardEvents.mockResolvedValue([{ eventType: rule.eventType, orderId: 100, scope }]);
+    mocks.changeDetailsProductionStatusFromAutomationInTransaction.mockResolvedValue({ status: 'executed' });
+    await dispatchMdfBoardEvent(tx(), { source: scope.source, actor: currentUser(), requestId: 'r', sourceIdempotencyKey: 'r' });
+    if (quantity < 10) expect(mocks.changeDetailsProductionStatusFromAutomationInTransaction).not.toHaveBeenCalled();
+    else expect(mocks.changeDetailsProductionStatusFromAutomationInTransaction).toHaveBeenCalledWith(
+      expect.anything(), 100, 2, expect.objectContaining({ mdfBoardScope: scope }), 'advance_only',
+    );
+    expect(mocks.changeOrderStatusFromAutomationInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects legacy whole-order MDF actions even with valid card evidence', async () => {
+    const rule = makeRule({ eventType: 'mdf.board.completed', actionType: 'change_order_status' });
+    mocks.listEnabledRulesForEvent.mockResolvedValue([rule]);
+    mocks.listEnabledRulesForManualRefresh.mockResolvedValue([rule]);
+    mocks.loadMdfBoardEvents.mockResolvedValue([{ eventType: rule.eventType, orderId: 100,
+      scope: { source: { kind: 'packet', id: 'file' }, details: [{ detailId: 101, requiredQuantity: 1, eligibleQuantity: 1 }] } }]);
+    await dispatchMdfBoardEvent(tx(), { source: { kind: 'packet', id: 'file' }, actor: currentUser(), requestId: 'r', sourceIdempotencyKey: 'r' });
+    expect(mocks.changeOrderStatusFromAutomationInTransaction).not.toHaveBeenCalled();
+    expect(mocks.record).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      metadata: expect.objectContaining({ reason: 'mdf_detail_action_required' }),
+    }));
   });
 
   it('continues after a target-status-not-found error and audits the skip', async () => {

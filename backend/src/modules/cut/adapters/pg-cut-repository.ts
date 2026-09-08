@@ -169,7 +169,7 @@ import {
   CutStaleVersionError,
 } from '../errors/cut.errors';
 import type { LabelCustomExpressionScalar } from '../../labels/application/label-custom-field-expression';
-import { evaluateMdfOrderMachineFilesPresentAutomation } from '../../status-automation/application/status-automation-runtime';
+import { dispatchMdfBoardEvent, evaluateMdfOrderMachineFilesPresentAutomation } from '../../status-automation/application/status-automation-runtime';
 
 const AUDIT_SOURCE = 'backend-cut-command';
 const MANUAL_SVG_CHAT_ID = 'erp-manual-svg-upload';
@@ -1773,6 +1773,7 @@ export class PgCutRepository implements CutRepositoryPort {
       });
 
       await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
+        source: { kind: 'packet', id: packet.packet_id },
         orderIds,
         actor: command.currentUser,
         requestId,
@@ -7123,10 +7124,16 @@ async function createForcedMdfBoardPacket(
   );
   if (input.cardKind === 'machine_file') {
     await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
+      source: { kind: 'packet', id: existing.packet_id },
       orderIds,
       actor: input.currentUser,
       requestId: input.requestId,
       sourceIdempotencyKey: eventKey,
+    });
+  } else {
+    await dispatchMdfBoardEvent(tx, {
+      source: { kind: 'bath', id: `cut-result:${cutResultId}` },
+      actor: input.currentUser, requestId: input.requestId, sourceIdempotencyKey: eventKey,
     });
   }
   return existing.packet_id;

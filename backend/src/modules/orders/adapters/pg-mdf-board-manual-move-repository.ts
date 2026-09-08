@@ -4,7 +4,7 @@ import type { AuditRelatedEntity } from '../../../common/audit/audit-event.types
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import {
-  evaluateMdfBoardColumnAutomation,
+  dispatchMdfBoardEvent,
   type MdfBoardColumnAutomationInput,
 } from '../../status-automation/application/status-automation-runtime';
 import type {
@@ -104,11 +104,9 @@ export class PgMdfBoardManualMoveRepository implements MdfBoardManualMoveReposit
         }),
         relatedEntities: relatedEntities(command.cardKind, command.cardId, relatedOrderIds),
       });
-      const eventType = statusAutomationEventTypeForTargetColumn(command.targetColumn);
-      if (eventType !== null) {
-        await evaluateMdfBoardColumnAutomation(tx, {
-          eventType,
-          orderIds: relatedOrderIds,
+      if (command.cardKind !== 'order') {
+        await dispatchMdfBoardEvent(tx, {
+          source: { kind: command.cardKind, id: command.cardId },
           actor: command.currentUser,
           requestId: command.requestId ?? 'mdf-board-manual-move',
           sourceIdempotencyKey: `mdf-board:manual:${command.cardKind}:${command.cardId}:version-${saved.version}:${command.targetColumn}`,
@@ -170,6 +168,11 @@ export class PgMdfBoardManualMoveRepository implements MdfBoardManualMoveReposit
           notificationEventDecision: 'polling_refresh_contract',
         }),
         relatedEntities: relatedEntities(command.cardKind, command.cardId),
+      });
+      if (command.cardKind !== 'order') await dispatchMdfBoardEvent(tx, {
+        source: { kind: command.cardKind, id: command.cardId }, actor: command.currentUser,
+        requestId: command.requestId ?? 'mdf-board-manual-move',
+        sourceIdempotencyKey: `mdf-board:manual-delete:${command.cardKind}:${command.cardId}:${auditId}`,
       });
       return {
         generatedAt: new Date().toISOString(),

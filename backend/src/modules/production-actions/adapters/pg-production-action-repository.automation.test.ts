@@ -25,6 +25,32 @@ beforeEach(() => {
 });
 
 describe('production-action automation in-transaction actions', () => {
+  it('limits a scoped MDF action to eligible source members and preserves every manual move', async () => {
+    const database = createAutomationTx({ detailRows: [
+      { detail_id: 101, production_status_id: 1, production_status_sort_order: 10 },
+      { detail_id: 102, production_status_id: 1, production_status_sort_order: 10 },
+    ] });
+    const context = { ...automationContext(), eventType: 'mdf.board.completed', mdfBoardScope: {
+      source: { kind: 'packet' as const, id: 'file' }, details: [
+        { detailId: 101, requiredQuantity: 10, eligibleQuantity: 10 },
+        { detailId: 102, requiredQuantity: 10, eligibleQuantity: 4 },
+      ],
+    } };
+    await expect(changeDetailsProductionStatusFromAutomationInTransaction(database.tx, 15, 2, context, 'set_exact'))
+      .resolves.toMatchObject({ status: 'executed' });
+    expect(database.sql.some(sql => sql.includes('AND detail.detail_id = ANY($2::bigint[])'))).toBe(true);
+    expect(database.auditCalls[0]?.metadata).toMatchObject({ changedDetailIds: [101], mdfBoardScope: context.mdfBoardScope });
+    expect(database.sql.some(sql => sql.includes('DELETE FROM mdf_board_manual_moves'))).toBe(false);
+    expect(statusAutomationMocks.evaluateMdfBoardColumnAutomation).not.toHaveBeenCalled();
+  });
+
+  it('rejects direct unscoped MDF batch commands before any database access', async () => {
+    const database = createAutomationTx({});
+    await expect(changeDetailsProductionStatusFromAutomationInTransaction(database.tx, 15, 2,
+      { ...automationContext(), eventType: 'mdf.board.completed' }))
+      .resolves.toEqual({ status: 'skipped', skipReason: 'mdf_source_required' });
+    expect(database.sql).toEqual([]);
+  });
   it('skips an order status action when the target is already current without audit or outbox', async () => {
     const database = createAutomationTx({ orderStatusId: 7 });
 
@@ -382,10 +408,13 @@ function createAutomationTx(options: AutomationTxOptions = {}): AutomationTxStat
         } as T] };
       }
       if (normalized.includes('FROM order_details') && normalized.includes('FOR UPDATE')) {
-        return { rows: detailRows as T[] };
+        return { rows: (normalized.includes('detail.detail_id = ANY($2::bigint[])')
+          ? detailRows.filter(row => (params[1] as number[]).includes(row.detail_id)) : detailRows) as T[] };
       }
       if (normalized.startsWith('UPDATE order_details')) {
-        return { rows: (options.updatedDetailIds ?? detailRows.map((row) => row.detail_id)).map((detail_id) => ({ detail_id } as T)) };
+        return { rows: (options.updatedDetailIds ?? detailRows.map((row) => row.detail_id))
+          .filter(id => !normalized.includes('detail_id = ANY($3::bigint[])') || (params[2] as number[]).includes(id))
+          .map((detail_id) => ({ detail_id } as T)) };
       }
       if (normalized.startsWith('UPDATE orders SET order_status_id')) {
         return { rows: [{ version: 4 } as T] };

@@ -3,6 +3,8 @@ import { Client } from 'pg';
 import { PgCncTelegramRepository, loadMdfBathColumnAutomationState } from './pg-cnc-telegram-repository';
 import { loadMdfLaminatedBathAutomationRows } from '../../production-actions/adapters/pg-production-action-repository';
 import type { TransactionClient } from '../../../database/database.types';
+import { loadMdfBoardEvents } from '../../status-automation/adapters/pg-mdf-board-event-repository';
+import { dispatchMdfBoardEvent } from '../../status-automation/application/status-automation-runtime';
 
 // Opt-in, single connection. All fixtures live ONLY in session-local pg_temp
 // tables; public data is never inserted, changed, or deleted by these tests.
@@ -14,6 +16,8 @@ const tables = [
   'cnc_telegram_packet_items', 'cnc_telegram_packet_whole_order_keys',
   'mdf_board_manual_moves', 'bazis_cut_sets', 'bazis_cut_set_details',
   'order_statuses', 'app_settings', 'cut_param_profiles', 'outbox_events',
+  'materials', 'sheet_material_types',
+  'status_automation_rules', 'audit_log', 'audit_log_related_entity', 'bazis_order_links', 'order_import_entity_map',
 ] as const;
 
 describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtures)', () => {
@@ -35,6 +39,8 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
       await client.query(`CREATE TEMP TABLE ${table} AS TABLE public.${table} WITH NO DATA`);
     }
     await client.query(`
+      ALTER TABLE pg_temp.audit_log ALTER COLUMN audit_id SET DEFAULT gen_random_uuid();
+      CREATE UNIQUE INDEX test_mdf_outbox_key ON pg_temp.outbox_events(idempotency_key);
       ALTER TABLE pg_temp.cut_result_board_projection ADD PRIMARY KEY(cut_result_id);
       CREATE TRIGGER project_header AFTER INSERT ON pg_temp.cut_result
         FOR EACH ROW EXECUTE FUNCTION public.project_new_cut_result_board_metadata();
@@ -106,6 +112,129 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
       bazis_cut_set_id,source_order_id,source_order_detail_id,quantity,material_name)
       VALUES(1,1,1,1,$1,$2)`, [quantity, material]);
   }
+
+  const sourcePacket = { kind: 'packet' as const, id: '00000000-0000-0000-0000-000000000001' };
+  const eventsFor = (source = sourcePacket as { kind: 'packet' | 'bazisCutSet' | 'bath'; id: string }) =>
+    loadMdfBoardEvents(client as unknown as TransactionClient, source);
+
+  it.each([false, true])('scopes the event to the file position, pending=%s, preserving full-quantity evidence', async pending => {
+    await client.query(`UPDATE pg_temp.order_details SET quantity=10,production_status_id=NULL WHERE detail_id=1;
+      UPDATE pg_temp.cnc_telegram_packet_items SET quantity=4;`);
+    await client.query('UPDATE pg_temp.cnc_telegram_packets SET completion_status=$1', [pending ? 'pending' : 'completed']);
+    const events = await eventsFor();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toEqual({ eventType: pending ? 'mdf.order_machine_files_present' : 'mdf.board.completed', orderId: 1,
+      scope: { source: sourcePacket, details: [{ detailId: 1, requiredQuantity: 10, eligibleQuantity: 4 }] } });
+  });
+
+  it('combines manual CNC and BASIS portions without expanding candidate membership', async () => {
+    await client.query(`UPDATE pg_temp.order_details SET quantity=10,production_status_id=NULL WHERE detail_id=1;
+      UPDATE pg_temp.cnc_telegram_packet_items SET quantity=4;
+      UPDATE pg_temp.cnc_telegram_packets SET completion_status='pending';
+      INSERT INTO pg_temp.mdf_board_manual_moves(card_kind,card_id,target_column)
+        VALUES('packet','00000000-0000-0000-0000-000000000001','completed');
+      INSERT INTO pg_temp.cnc_telegram_packets(packet_id,completion_status,material_name)
+        VALUES('00000000-0000-0000-0000-000000000002','completed','МДФ 16');
+      INSERT INTO pg_temp.cnc_telegram_packet_items(packet_id,match_order_id,match_detail_id,quantity)
+        VALUES('00000000-0000-0000-0000-000000000002',1,1,3),
+          ('00000000-0000-0000-0000-000000000002',1,3,20);`);
+    await addBasis(3);
+    const [event] = await eventsFor();
+    expect(event.scope.details).toEqual([{ detailId: 1, requiredQuantity: 10, eligibleQuantity: 10 }]);
+    const [basis] = await eventsFor({ kind: 'bazisCutSet', id: '1' });
+    expect(basis.eventType).toBe('mdf.board.completed');
+    expect(basis.scope.details).toEqual(event.scope.details);
+  });
+
+  it.each(['baths', 'baths_ready', 'baths_laminated'] as const)('resolves %s from real bath state and sums partial bath quantities', async column => {
+    await client.query(`UPDATE pg_temp.order_details SET production_status_id=NULL,quantity=3 WHERE detail_id=1`);
+    await seed(1, [1], '2026-09-06T12:00:00+05');
+    await seed(2, [1, 1], '2026-07-06T12:00:00+05');
+    await client.query(`INSERT INTO pg_temp.mdf_board_manual_moves(card_kind,card_id,target_column)
+      VALUES('bath','cut-result:1',$1),('bath','cut-result:2',$1)`, [column]);
+    const events = await eventsFor({ kind: 'bath', id: 'cut-result:1' });
+    expect(events).toEqual([{ eventType: `mdf.board.${column}`, orderId: 1,
+      scope: { source: { kind: 'bath', id: 'cut-result:1' },
+        details: [{ detailId: 1, requiredQuantity: 3, eligibleQuantity: 3 }] } }]);
+  });
+
+  it('uses only current effective bath sheets, excluding old revisions and unresolved identities', async () => {
+    await client.query(`UPDATE pg_temp.order_details SET production_status_id=NULL,quantity=3 WHERE detail_id=1`);
+    await seed(1, [1, 1, 1], '2026-09-05T12:00:00+05', 1);
+    await seed(2, [1], '2026-09-06T12:00:00+05', 1);
+    await seed(3, [1, 1], '2026-09-06T12:00:00+05', 3);
+    await client.query('UPDATE pg_temp.cut_result_sheet_map SET is_effective=false WHERE cut_result_id=3');
+    expect(await eventsFor({ kind: 'bath', id: 'cut-result:1' })).toEqual([]);
+    const [event] = await eventsFor({ kind: 'bath', id: 'cut-result:2' });
+    expect(event.scope.details).toEqual([{ detailId: 1, requiredQuantity: 3, eligibleQuantity: 1 }]);
+  });
+
+  it.each(['rework', 'material', 'deleted', 'mismatch'] as const)('fails closed for invalid source membership: %s', async problem => {
+    if (problem === 'rework') await client.query('UPDATE pg_temp.cnc_telegram_packets SET rework=true');
+    if (problem === 'material') await client.query("UPDATE pg_temp.cnc_telegram_packets SET program_name='fanera_18.nc'");
+    if (problem === 'deleted') await client.query('UPDATE pg_temp.order_details SET delete_flag=true WHERE detail_id=1');
+    if (problem === 'mismatch') await client.query('UPDATE pg_temp.cnc_telegram_packet_items SET match_order_id=2');
+    expect(await eventsFor()).toEqual([]);
+  });
+
+  it('does not expand ordinary card scope through a whole-order chat marker', async () => {
+    await client.query(`INSERT INTO pg_temp.cnc_telegram_packet_whole_order_keys(packet_id,order_key)
+      VALUES('00000000-0000-0000-0000-000000000001','e2e-тест 1')`);
+    const [event] = await eventsFor();
+    expect(event.scope.details.map(d => d.detailId)).toEqual([1]);
+  });
+
+  it('executes a real scoped batch, preserves partial/unrelated/advanced positions and manual moves, then replays without effects', async () => {
+    const previousFlag = process.env.BACKEND_STATUS_AUTOMATION;
+    process.env.BACKEND_STATUS_AUTOMATION = 'true';
+    await client.query('BEGIN');
+    try {
+      await client.query(`UPDATE pg_temp.orders SET version=1,order_status_id=4,payment_status_id=1;
+        UPDATE pg_temp.order_details SET quantity=10,production_status_id=NULL WHERE detail_id=1;
+        UPDATE pg_temp.cnc_telegram_packet_items SET quantity=4;
+        INSERT INTO pg_temp.cnc_telegram_packet_items(packet_id,match_order_id,match_detail_id,quantity)
+          VALUES('00000000-0000-0000-0000-000000000001',2,2,1);
+        INSERT INTO pg_temp.production_statuses(production_status_id,production_status_code,production_status_name,sort_order,is_active)
+          VALUES(4,'cut','Распилен',10,true);
+        INSERT INTO pg_temp.status_automation_rules(id,name,event_type,action_type,target_status_id,conditions_json,
+          priority,is_enabled,version,action_config_json)
+          VALUES(901,'E2E scoped','mdf.board.completed','change_details_production_status',4,'{}',100,true,1,'{"detailTransitionMode":"set_exact"}');
+        INSERT INTO pg_temp.mdf_board_manual_moves(card_kind,card_id,target_column)
+          VALUES('packet','00000000-0000-0000-0000-000000000001','completed'),('bath','cut-result:999','baths');`);
+      const tx = { raw: client, query: (sql: string, params: unknown[]) =>
+        // The production aggregate function has its own regression suite. Never
+        // execute public stored-function code from this isolated writer fixture.
+        sql.trim().startsWith('SELECT recalc_order_production_status')
+          ? client.query('SELECT 1') : client.query(sql, params),
+      } as unknown as TransactionClient;
+      const input = { source: sourcePacket, actor: { id: '3', username: 'E2E', role: 'admin', permissions: [] } as never,
+        requestId: 'E2E-scoped', sourceIdempotencyKey: 'E2E-scoped' };
+      await dispatchMdfBoardEvent(tx, input);
+      expect((await client.query('SELECT production_status_id FROM pg_temp.order_details WHERE detail_id=1')).rows[0].production_status_id).toBeNull();
+      await addBasis(6);
+      await dispatchMdfBoardEvent(tx, input);
+      const beforeReplay = (await client.query('SELECT detail_id,production_status_id FROM pg_temp.order_details ORDER BY detail_id')).rows;
+      expect(beforeReplay.map(r => [Number(r.detail_id), Number(r.production_status_id) || null])).toEqual([
+        [1,4], [2,2], [3,null], [4,3],
+      ]);
+      const count = async (table: 'outbox_events' | 'mdf_board_manual_moves') =>
+        Number((await client.query(`SELECT COUNT(*) FROM pg_temp.${table}`)).rows[0].count);
+      expect(await count('mdf_board_manual_moves')).toBe(3);
+      const outbox = await count('outbox_events');
+      await dispatchMdfBoardEvent(tx, input);
+      expect(await count('outbox_events')).toBe(outbox);
+      expect((await client.query('SELECT detail_id,production_status_id FROM pg_temp.order_details ORDER BY detail_id')).rows).toEqual(beforeReplay);
+      expect(await count('mdf_board_manual_moves')).toBe(3);
+      const audits = await client.query(`SELECT metadata_json FROM pg_temp.audit_log WHERE event='orders.detail_production_status_batch_change'`);
+      expect(audits.rows).toHaveLength(1);
+      expect(audits.rows[0].metadata_json).toMatchObject({ changedDetailIds: [1], mdfBoardScope: { source: sourcePacket } });
+    } finally {
+      await client.query('ROLLBACK');
+      if (previousFlag === undefined) delete process.env.BACKEND_STATUS_AUTOMATION;
+      else process.env.BACKEND_STATUS_AUTOMATION = previousFlag;
+    }
+    expect((await client.query('SELECT production_status_id FROM pg_temp.order_details WHERE detail_id=1')).rows[0].production_status_id).toBe(1);
+  });
 
   it('counts a manually cut pending file without changing actual completion', async () => {
     await seed(1, [1, 1], '2026-09-06T12:00:00+05');

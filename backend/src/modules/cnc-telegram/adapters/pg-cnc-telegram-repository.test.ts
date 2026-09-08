@@ -3495,6 +3495,9 @@ describe('PgCncTelegramRepository', () => {
             })],
           };
         }
+        if (/SELECT DISTINCT details.order_id, details.detail_id/i.test(text)) {
+          return { rows: [{ order_id: 2689, detail_id: 3101 }] };
+        }
         if (/FROM app_settings/i.test(text)) {
           return { rows: [{ is_active: true, value_json: { value: true } }] };
         }
@@ -3510,9 +3513,6 @@ describe('PgCncTelegramRepository', () => {
         }
         if (/FROM production_statuses/i.test(text) && /production_status_id = ANY/i.test(text)) {
           return { rows: [{ production_status_id: 2, sort_order: 20 }] };
-        }
-        if (/WITH completed_quantities AS/i.test(text)) {
-          return { rows: [{ order_id: 2689, detail_id: 3101 }] };
         }
         if (/FROM orders\s+WHERE order_id = ANY/i.test(text)) {
           return {
@@ -3573,7 +3573,7 @@ describe('PgCncTelegramRepository', () => {
 
     await repo.ingest({ currentUser: user(), dto, requestId: 'request-cnc-auto-cut' });
 
-    const targetQuery = queries.find((query) => /WITH completed_quantities AS/i.test(query.text));
+    const targetQuery = queries.find((query) => /SELECT DISTINCT details.order_id, details.detail_id/i.test(query.text));
     const bathStateQuery = queries.find((query) =>
       /placement\.cut_result_id = \$1/i.test(query.text)
       && /layout_mode.*vacuum_table/is.test(query.text),
@@ -3581,7 +3581,7 @@ describe('PgCncTelegramRepository', () => {
     const orderLockIndex = queries.findIndex((query) =>
       /FROM orders\s+WHERE order_id = ANY/i.test(query.text),
     );
-    const targetQueryIndex = queries.findIndex((query) => /WITH completed_quantities AS/i.test(query.text));
+    const targetQueryIndex = queries.findIndex((query) => /SELECT DISTINCT details.order_id, details.detail_id/i.test(query.text));
     const detailLockIndex = queries.findIndex((query) => /FOR UPDATE OF details/i.test(query.text));
     const currentStatusLockIndex = queries.findIndex((query) =>
       /FROM production_statuses/i.test(query.text)
@@ -3596,7 +3596,8 @@ describe('PgCncTelegramRepository', () => {
     );
 
     expect(targetQuery?.params).toEqual([[3101], [], [2689]]);
-    expect(targetQuery?.text).toContain('SUM(GREATEST(item.quantity, 0))');
+    expect(targetQuery?.text).toContain('SELECT detail_id, completed_quantity FROM mdf_cut_quantities');
+    expect(targetQuery?.text).toContain('UNION ALL SELECT * FROM mdf_bazis_quantities');
     expect(targetQuery?.text).toContain('completed.completed_quantity, 0) >= GREATEST');
     expect(bathStateQuery?.text).toContain("COALESCE(p.material_name, '') ~*");
     expect(bathStateQuery?.text).toContain("COALESCE(p.program_name, '') !~*");
@@ -3725,7 +3726,7 @@ describe('PgCncTelegramRepository', () => {
   it('waits for the cumulative completed quantity before marking a detail as cut', async () => {
     const queries = await runAutoCutIngest({ targetRows: [] });
 
-    expect(queries.some((query) => /WITH completed_quantities AS/i.test(query.text))).toBe(true);
+    expect(queries.some((query) => /SELECT DISTINCT details.order_id, details.detail_id/i.test(query.text))).toBe(true);
     expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
   });
 
@@ -3761,7 +3762,7 @@ describe('PgCncTelegramRepository', () => {
     const queries = await runAutoCutIngest({ orderRows: [] });
 
     expect(queries.some((query) => /FROM orders\s+WHERE order_id = ANY/i.test(query.text))).toBe(true);
-    expect(queries.some((query) => /WITH completed_quantities AS/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /SELECT DISTINCT details.order_id, details.detail_id/i.test(query.text))).toBe(false);
     expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
   });
 
@@ -3796,7 +3797,7 @@ describe('PgCncTelegramRepository', () => {
     const orderLock = queries.find((query) =>
       /FROM orders\s+WHERE order_id = ANY/i.test(query.text),
     );
-    const targetQuery = queries.find((query) => /WITH completed_quantities AS/i.test(query.text));
+    const targetQuery = queries.find((query) => /SELECT DISTINCT details.order_id, details.detail_id/i.test(query.text));
 
     expect(orderLock?.params).toEqual([[2689]]);
     expect(orderLock?.text).not.toContain('lower(trim(order_name))');
@@ -3810,7 +3811,7 @@ describe('PgCncTelegramRepository', () => {
     const settingReadIndex = queries.findIndex((query) => /FROM app_settings/i.test(query.text));
     const settingWriteIndex = queries.findIndex((query) => /INSERT INTO app_settings/i.test(query.text));
     const backfillIndex = queries.findIndex((query) => /COUNT\(DISTINCT packet.packet_id\)/i.test(query.text));
-    const targetQuery = queries.find((query) => /WITH completed_quantities AS/i.test(query.text));
+    const targetQuery = queries.find((query) => /SELECT DISTINCT details.order_id, details.detail_id/i.test(query.text));
 
     expect(result).toEqual({
       settingEnabled: true,
@@ -4300,7 +4301,7 @@ async function runManualSvgMdfFollowupSequence() {
         if (params[4] === mdfCardEventKey) mdfCardCreated = true;
         return { rows: [] };
       }
-      if (/FROM cnc_telegram_packets p/i.test(text)) {
+      if (/FROM cnc_telegram_packets p/i.test(text) && !/SELECT DISTINCT details.order_id, details.detail_id/i.test(text)) {
         return {
           rows: [manualSvgPacketRow(packetId, completed)],
         };
@@ -4576,7 +4577,7 @@ async function runAutoCutIngest(options: AutoCutIngestOptions = {}) {
       if (/FROM unnest\(\$1::bigint\[\], \$2::bigint\[\]\)/i.test(text)) {
         return { rows: [] };
       }
-      if (/FROM cnc_telegram_packets p/i.test(text)) {
+      if (/FROM cnc_telegram_packets p/i.test(text) && !/SELECT DISTINCT details.order_id, details.detail_id/i.test(text)) {
         return {
           rows: [packetRow({
             source_version: 2,
@@ -4589,6 +4590,7 @@ async function runAutoCutIngest(options: AutoCutIngestOptions = {}) {
           })],
         };
       }
+      if (/SELECT DISTINCT details.order_id, details.detail_id/i.test(text)) return { rows: targetRows };
       if (/FROM app_settings/i.test(text)) {
         return {
           rows: options.settingRows ?? [{ is_active: true, value_json: { value: true } }],
@@ -4617,7 +4619,6 @@ async function runAutoCutIngest(options: AutoCutIngestOptions = {}) {
             })),
         };
       }
-      if (/WITH completed_quantities AS/i.test(text)) return { rows: targetRows };
       if (/FROM orders\s+WHERE order_id = ANY/i.test(text)) return { rows: orderRows };
       if (/FROM order_details details/i.test(text) && /FOR UPDATE OF details/i.test(text)) {
         return { rows: detailRows };
@@ -4696,6 +4697,9 @@ async function runAutoCutConfigure(options: AutoCutConfigureOptions = {}) {
           }],
         };
       }
+      if (/SELECT DISTINCT details.order_id, details.detail_id/i.test(text)) {
+        return { rows: [{ order_id: 2689, detail_id: 3101 }] };
+      }
       if (/FROM app_settings/i.test(text)) {
         return { rows: [{ is_active: true, value_json: { value: false } }] };
       }
@@ -4740,9 +4744,6 @@ async function runAutoCutConfigure(options: AutoCutConfigureOptions = {}) {
             production_status_from_details_enabled: true,
           }],
         };
-      }
-      if (/WITH completed_quantities AS/i.test(text)) {
-        return { rows: [{ order_id: 2689, detail_id: 3101 }] };
       }
       if (/FROM order_details details/i.test(text) && /FOR UPDATE OF details/i.test(text)) {
         return {

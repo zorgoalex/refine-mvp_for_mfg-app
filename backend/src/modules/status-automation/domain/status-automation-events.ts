@@ -29,6 +29,7 @@ const ALLOWED_ACTIONS: ReadonlyArray<StatusAutomationActionType> = [
   'change_production_status',
   'change_details_production_status',
 ];
+const MDF_ACTIONS: ReadonlyArray<StatusAutomationActionType> = ['change_details_production_status'];
 
 const ORDER_STATUS_CHANGED_ACTIONS: ReadonlyArray<StatusAutomationActionType> = [
   ...ALLOWED_ACTIONS,
@@ -101,41 +102,41 @@ export const STATUS_AUTOMATION_EVENTS: ReadonlyArray<StatusAutomationEventDescri
     eventType: 'mdf.order_machine_files_present',
     title: 'Файлы заказа на станке',
     group: 'production',
-    description: 'Когда карточка в колонке «Файлы на станке» доски МДФ-работы содержит номер заказа.',
+    description: 'Файлы на станке: только позиции исходной карточки, после размещения полного количества позиции в файлах станка и БАЗИС. Статусы деталей — только вперёд.',
     allowedConditions: BASE_CONDITIONS,
-    allowedActions: ALLOWED_ACTIONS,
+    allowedActions: MDF_ACTIONS,
   },
   {
     eventType: 'mdf.board.completed',
     title: 'МДФ-доска распилено',
     group: 'production',
-    description: 'Когда карточка доски МДФ-работы с заказом попадает в колонку «Распилено».',
+    description: 'Распилено: только позиции исходной карточки, после распила полного количества позиции суммарно в файлах станка и БАЗИС. Статусы деталей — только вперёд.',
     allowedConditions: BASE_CONDITIONS,
-    allowedActions: ALLOWED_ACTIONS,
+    allowedActions: MDF_ACTIONS,
   },
   {
     eventType: 'mdf.board.baths',
     title: 'МДФ-доска карты ванн',
     group: 'production',
-    description: 'Когда карта ванн с заказом появляется в колонке «Карты ванн» доски МДФ-работы.',
+    description: 'Карты ванн: только позиции исходной ванны, после размещения полного количества позиции в ваннах. Статусы деталей — только вперёд.',
     allowedConditions: BASE_CONDITIONS,
-    allowedActions: ALLOWED_ACTIONS,
+    allowedActions: MDF_ACTIONS,
   },
   {
     eventType: 'mdf.board.baths_ready',
     title: 'МДФ-работы готовы к закатке',
     group: 'production',
-    description: 'Когда карта ванн с заказом попадает в колонку «Готовы к закатке» доски МДФ-работы.',
+    description: 'Готовы к закатке: только позиции исходной ванны, когда полное количество позиции готово в ваннах. Статусы деталей — только вперёд.',
     allowedConditions: BASE_CONDITIONS,
-    allowedActions: ALLOWED_ACTIONS,
+    allowedActions: MDF_ACTIONS,
   },
   {
     eventType: 'mdf.board.baths_laminated',
     title: 'МДФ-работы закатаны',
     group: 'production',
-    description: 'Когда карта ванн с заказом попадает в колонку «Закатаны» доски МДФ-работы.',
+    description: 'Закатаны: только позиции исходной ванны, после закатки полного количества позиции суммарно в ваннах. Статусы деталей — только вперёд.',
     allowedConditions: BASE_CONDITIONS,
-    allowedActions: ALLOWED_ACTIONS,
+    allowedActions: MDF_ACTIONS,
   },
 ];
 

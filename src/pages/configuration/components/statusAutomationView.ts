@@ -499,7 +499,7 @@ function buildActionConfig(form: StatusAutomationFormValues) {
     return { statusMapping: { entries: (form.statusMappingEntries ?? []).map((entry) => ({ ...entry, sourceStatusIds: [...entry.sourceStatusIds] })) } };
   }
   return form.actionType === 'change_details_production_status'
-    ? { detailTransitionMode: form.detailTransitionMode ?? 'set_exact' as const }
+    ? { detailTransitionMode: form.eventType.startsWith('mdf.') ? 'advance_only' as const : form.detailTransitionMode ?? 'set_exact' as const }
     : undefined;
 }
 

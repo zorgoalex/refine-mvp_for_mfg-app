@@ -815,6 +815,7 @@ export class PgCncTelegramRepository
         });
         await evaluateMdfBoardColumnAutomation(tx, {
           eventType: 'mdf.board.completed',
+          source: { kind: 'packet', id: packet.packetId },
           orderIds: packet.items.map((item) => item.orderId ?? item.matchOrderId),
           actor: command.currentUser,
           requestId,
@@ -828,6 +829,7 @@ export class PgCncTelegramRepository
       });
       if (packetColumnKey(packet) === 'parsed') {
         await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
+          source: { kind: 'packet', id: packet.packetId },
           orderIds: packet.items.map((item) => item.orderId),
           actor: command.currentUser,
           requestId,
@@ -989,6 +991,7 @@ export class PgCncTelegramRepository
         });
         if (command.dto.createMdfMachineFileCard && packetColumnKey(packet) === 'parsed') {
           await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
+            source: { kind: 'packet', id: packet.packetId },
             orderIds: packet.items.map((item) => item.orderId),
             actor: command.currentUser,
             requestId,
@@ -1097,6 +1100,7 @@ export class PgCncTelegramRepository
       });
       if (command.dto.createMdfMachineFileCard && packetColumnKey(packet) === 'parsed') {
         await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
+          source: { kind: 'packet', id: packet.packetId },
           orderIds: packet.items.map((item) => item.orderId),
           actor: command.currentUser,
           requestId,
@@ -6045,6 +6049,7 @@ async function evaluateMdfBoardBathColumnAutomationForPacket(
   const eventType = mdfBoardBathColumnEventType(state.column);
   await evaluateMdfBoardColumnAutomation(tx, {
     eventType,
+    source: { kind: 'bath', id: `cut-result:${cutResultId}` },
     orderIds: state.orderIds,
     actor: input.actor,
     requestId: input.requestId,
@@ -6324,16 +6329,12 @@ async function applyCncAutoCutStatusCandidates(
 
   const targets = await tx.query<CncAutoCutTargetRow>(
     `
-    WITH completed_quantities AS (
-      SELECT
-        item.match_detail_id::bigint AS detail_id,
-        SUM(GREATEST(item.quantity, 0))::integer AS completed_quantity
-      FROM cnc_telegram_packet_items item
-      JOIN cnc_telegram_packets packet ON packet.packet_id = item.packet_id
-      WHERE item.match_status = 'matched'
-        AND item.match_detail_id = ANY($1::bigint[])
-        AND (packet.completion_status = 'completed' OR packet.thumbs_up = true)
-      GROUP BY item.match_detail_id
+    WITH target_details AS (
+      SELECT order_id, detail_id AS order_detail_id FROM order_details
+      WHERE detail_id = ANY($1::bigint[]) AND delete_flag = false
+    ), ${mdfCutReadinessCtes({ targetDetails: 'target_details' })},
+    completed_quantities AS (
+      SELECT detail_id, completed_quantity FROM mdf_cut_quantities
     )
     SELECT DISTINCT details.order_id, details.detail_id
     FROM order_details details

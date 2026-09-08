@@ -275,6 +275,26 @@ describe('PgStatusAutomationRepository', () => {
     expect(database.queries.some((entry) => /UPDATE status_automation_rules/.test(entry.text))).toBe(false);
   });
 
+  it('allows disabling an incompatible legacy MDF rule but rejects re-enabling it', async () => {
+    const before = ruleRow({ id: '41', version: '1', event_type: 'mdf.board.completed', is_enabled: true });
+    const database = createDatabase({
+      responses: ({ text }) => {
+        if (text.includes('SELECT id, name')) return result([before]);
+        if (/UPDATE status_automation_rules/.test(text)) return result([{ ...before, is_enabled: false, version: '2' }]);
+        return result([]);
+      },
+    });
+    const repository = new PgStatusAutomationRepository(database.service);
+    await expect(repository.updateRule({
+      currentUser: currentUser(), requestId: 'disable-legacy-mdf', ruleId: 41,
+      dto: { isEnabled: false, version: 1 },
+    })).resolves.toMatchObject({ isEnabled: false });
+    await expect(repository.updateRule({
+      currentUser: currentUser(), requestId: 'enable-legacy-mdf', ruleId: 41,
+      dto: { isEnabled: true, version: 1 },
+    })).rejects.toMatchObject({ statusCode: 422, code: 'VALIDATION_ERROR' });
+  });
+
   it('rejects re-enabling a rule whose persisted target status went stale', async () => {
     const before = ruleRow({ id: '41', version: '1', is_enabled: false });
     const database = createDatabase({
