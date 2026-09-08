@@ -1,3 +1,4 @@
+import { normalizeSvgRenderContours, type SvgRenderContour } from '../../../shared/svg-render-contours';
 import { createHash, randomUUID } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { auditService } from '../../../common/audit/audit.service';
@@ -4745,7 +4746,7 @@ async function createSvgCutJob(
   }
 
   const itemByDetailId = new Map(items.map((item) => [item.orderDetailId, item]));
-  const placements = buildSvgSheetPlacements(plan, itemByDetailId);
+  const placements = buildSvgSheetPlacements(plan, itemByDetailId, layout.renderOnlyContours);
   const renderSnapshot = buildSvgRenderSnapshot(placements, itemByDetailId, dto.programName ?? dto.externalPacketKey, plan);
   const sheet = await tx.query<{ cut_group_sheet_id: string | number }>(
     `
@@ -4899,7 +4900,7 @@ async function refreshImportedSvgCutResult(
   const sheet = group.sheets[0]!;
   const items = await syncSvgCutJobItemsForPlan(tx, cutJobId, group.cutGroupId, plan, baseSnapshot.items);
   const itemByDetailId = new Map(items.map((item) => [item.orderDetailId, item]));
-  const placements = buildSvgSheetPlacements(plan, itemByDetailId);
+  const placements = buildSvgSheetPlacements(plan, itemByDetailId, dto.cutLayout?.renderOnlyContours);
   const renderSnapshot = buildSvgRenderSnapshot(placements, itemByDetailId, dto.programName ?? dto.externalPacketKey, plan);
   const summary = buildSvgCutSummary(plan, 'cnc_telegram_svg');
   const totals = buildSvgCutTotals(plan);
@@ -5194,9 +5195,10 @@ function buildCutJobItemDto(
   };
 }
 
-function buildSvgSheetPlacements(
+export function buildSvgSheetPlacements(
   plan: Extract<SvgCutImportPlan, { ok: true }>,
   itemByDetailId: ReadonlyMap<number, CutJobItemDto>,
+  renderOnlyContours?: SvgRenderContour[],
 ): SheetPlacementsJson {
   const nextInstance = new Map<string, number>();
   const pieces = plan.placements.map((item) => {
@@ -5227,6 +5229,7 @@ function buildSvgSheetPlacements(
     trim_mm: { left: 0, right: 0, top: 0, bottom: 0 },
     sheet_width_mm: plan.sheetWidthMm,
     sheet_height_mm: plan.sheetHeightMm,
+    renderOnlyContours: normalizeSvgRenderContours(renderOnlyContours, {widthMm:plan.sheetWidthMm,heightMm:plan.sheetHeightMm}),
     pieces,
   };
 }
@@ -8125,6 +8128,9 @@ export function canonicalLayoutFingerprint(layout: CncTelegramStructuredIngestDt
     quantity: Number.isInteger(item.quantity) ? item.quantity : 1,
   })).sort((left, right) => stableStringify(left).localeCompare(stableStringify(right)));
   const canonical = {
+    ...(layout.renderOnlyContours?.length ? {renderOnlyContours: layout.renderOnlyContours.map(c => ({
+      xMm:rounded(c.xMm),yMm:rounded(c.yMm),placedWidthMm:rounded(c.placedWidthMm),placedHeightMm:rounded(c.placedHeightMm),
+    })).sort((a,b)=>stableStringify(a).localeCompare(stableStringify(b)))} : {}),
     version: 'cnc-layout-fingerprint-v1',
     material: null,
     sheet: {
@@ -8258,7 +8264,7 @@ function packetCutSheetOrNull(value: unknown): CncTelegramPacketCutSheetDto | nu
   };
 }
 
-function cutLayoutOrNull(value: unknown): CncTelegramCutLayoutDto | null {
+export function cutLayoutOrNull(value: unknown): CncTelegramCutLayoutDto | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Record<string, unknown>;
   if (raw.status !== 'valid' && raw.status !== 'invalid') return null;
@@ -8274,6 +8280,7 @@ function cutLayoutOrNull(value: unknown): CncTelegramCutLayoutDto | null {
     : [];
   return {
     status: raw.status,
+    renderOnlyContours: normalizeSvgRenderContours(raw.renderOnlyContours, sheet),
     reasons: stringArray(raw.reasons),
     sheet: sheet && sheet.widthMm > 0 && sheet.heightMm > 0 ? sheet : null,
     rawCommentCount: toNullableNumber(raw.rawCommentCount as string | number | null | undefined),

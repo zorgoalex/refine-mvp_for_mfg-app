@@ -1,3 +1,4 @@
+import type { SvgRenderContour } from '../../../shared/svg-render-contours';
 import { ApiError } from '../../../common/errors/api-error';
 import { PieceLabelSnapshot } from '../../../shared/cut-geometry';
 
@@ -550,6 +551,7 @@ export type SheetPlacementPieceJson = FreecutPlacement & {
 
 /** Frozen per-sheet placements JSONB (plan §3). Render source of truth. */
 export interface SheetPlacementsJson {
+  renderOnlyContours?: SvgRenderContour[];
   coordinate_contract?: typeof NATIVE_PORTRAIT_COORDINATE_CONTRACT;
   trim_mm: TrimMm;
   sheet_width_mm: number;

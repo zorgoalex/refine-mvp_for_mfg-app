@@ -1,10 +1,10 @@
 import { test, expect } from '@playwright/test';
 import { build } from 'esbuild';
 import { readFileSync } from 'node:fs';
-import type { buildStyledSvgUploadPreview } from '../src/pages/cut/svgCutRenderPreview';
+import type { buildStyledSvgUploadPreview, buildStyledCutLayoutPreview } from '../src/pages/cut/svgCutRenderPreview';
 import type { parseSvgCutUploadText } from '../src/pages/cut/svgCutUploadParser';
 
-declare global { interface Window { svgPriorityParser: { parseSvgCutUploadText: typeof parseSvgCutUploadText; buildStyledSvgUploadPreview: typeof buildStyledSvgUploadPreview }; } }
+declare global { interface Window { svgPriorityParser: { parseSvgCutUploadText: typeof parseSvgCutUploadText; buildStyledSvgUploadPreview: typeof buildStyledSvgUploadPreview; buildStyledCutLayoutPreview: typeof buildStyledCutLayoutPreview }; } }
 let bundle: string;
 test.beforeAll(async () => {
   const result = await build({stdin: {contents: "export * from './src/pages/cut/svgCutUploadParser'; export * from './src/pages/cut/svgCutRenderPreview';", resolveDir: process.cwd()}, alias: {'@shared': './backend/src/shared'}, bundle: true, write: false, format: 'iife', globalName: 'svgPriorityParser'});
@@ -53,7 +53,7 @@ test('real Test position remains visible without becoming an imported detail', a
   const svg = readFileSync('tests/fixtures/svg-source-priority/mixed-test-position.svg', 'utf8');
   const result = await page.evaluate(svg => {
     const parsed = window.svgPriorityParser.parseSvgCutUploadText(svg, 'mixed.svg');
-    const rendered = window.svgPriorityParser.buildStyledSvgUploadPreview({...parsed, svgContentHash: ''}) ?? '';
+    const rendered = window.svgPriorityParser.buildStyledCutLayoutPreview(JSON.parse(JSON.stringify(parsed.cutLayout))) ?? '';
     const doc = new DOMParser().parseFromString(rendered, 'image/svg+xml');
     return {accepted: parsed.cutLayout.items.length, requested: parsed.items.reduce((n,i)=>n+i.quantity,0),
       contours: doc.querySelectorAll('.cut-sheet-piece-geometry-layer > .cut-sheet-piece').length,
@@ -73,7 +73,7 @@ test('unidentified safe contours render even when no detail can be imported; uns
       <rect id="outside-PartContour" x="1200" y="20" width="200" height="100"/>
       <path id="collapsed-PartContour" d="M700 50 L700 50"/>
     </svg>`, 'unknown.svg');
-    const rendered = window.svgPriorityParser.buildStyledSvgUploadPreview({...parsed, svgContentHash: ''}) ?? '';
+    const rendered = window.svgPriorityParser.buildStyledCutLayoutPreview(JSON.parse(JSON.stringify(parsed.cutLayout))) ?? '';
     const doc = new DOMParser().parseFromString(rendered, 'image/svg+xml');
     return {status: parsed.cutLayout.status, accepted: parsed.cutLayout.items.length, requested: parsed.items.length,
       contours: doc.querySelectorAll('.cut-sheet-piece-geometry-layer > .cut-sheet-piece').length,

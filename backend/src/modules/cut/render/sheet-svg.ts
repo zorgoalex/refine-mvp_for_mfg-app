@@ -1,3 +1,4 @@
+import { normalizeSvgRenderContours, type SvgRenderContour } from '../../../shared/svg-render-contours';
 import { XMLBuilder, XMLParser } from 'fast-xml-parser';
 import {
   BATH_METER_GUIDE_OUTSIDE_LEFT_GUTTER_RATIO,
@@ -30,6 +31,7 @@ import {
   type BackMappedSheet,
   type FreecutPlacement,
   type SheetPlacementsJson,
+  type SheetPlacementPieceJson,
 } from '../application/cut-freecut-mapping';
 
 /**
@@ -231,6 +233,7 @@ export interface BuildSheetSvgInput {
 }
 
 export interface ManualSvgSheetLayout {
+  renderOnlyContours?: SvgRenderContour[];
   sheet: { widthMm: number; heightMm: number } | null;
   items: Array<{
     orderName: string;
@@ -260,7 +263,7 @@ export function buildManualSvgSheetSvg(
   layout: ManualSvgSheetLayout,
   renderStyle: CutRenderStyleRef,
 ): string | null {
-  if (!layout.sheet || layout.items.length === 0) return null;
+  if (!layout.sheet || (layout.items.length === 0 && !layout.renderOnlyContours?.length)) return null;
 
   const itemById = new Map<string, ManualSvgSheetLayout['items'][number]>();
   const orderIndexByName = new Map<string, number>();
@@ -292,6 +295,7 @@ export function buildManualSvgSheetSvg(
   });
   const sheet: SheetPlacementsJson = {
     trim_mm: { left: 0, right: 0, top: 0, bottom: 0 },
+    renderOnlyContours: layout.renderOnlyContours,
     sheet_width_mm: layout.sheet.widthMm,
     sheet_height_mm: layout.sheet.heightMm,
     pieces,
@@ -502,6 +506,17 @@ export function addBathMeterGuidesToSvg(
     : `${upgraded.slice(0, closingTag)}${overlay}${upgraded.slice(closingTag)}`;
 }
 
+/** Shared geometry preparation for manual upload, stored cut jobs, Telegram and sheet profiles. */
+function sheetRenderPieces(sheet: SheetPlacementsJson): Array<SheetPlacementPieceJson & { renderOnlyLabelLines?: string[] }> {
+  const contours = normalizeSvgRenderContours(sheet.renderOnlyContours, {widthMm: sheet.sheet_width_mm, heightMm: sheet.sheet_height_mm});
+  return [...sheet.pieces, ...contours.map((c, i) => ({
+    item_id: `render-only-${i + 1}`, instance: 1,
+    x_mm: c.xMm, y_mm: c.yMm, width_mm: c.placedWidthMm, height_mm: c.placedHeightMm, rotated: false,
+    renderOnlyLabelLines: c.labelLines.length ? c.labelLines : ['Не распознано', '# —', formatPieceSize(c.placedWidthMm,c.placedHeightMm)],
+    source_svg: c.sourceSvg ? {viewBox: {x_mm:c.sourceSvg.viewBox.xMm,y_mm:c.sourceSvg.viewBox.yMm,width_mm:c.sourceSvg.viewBox.widthMm,height_mm:c.sourceSvg.viewBox.heightMm},body:c.sourceSvg.body} : undefined,
+  }))];
+}
+
 export function buildSheetSvg(input: BuildSheetSvgInput): string {
   const { sheet, labelFor, fillFor, rotate90 = false, showLabels = true, axisOrigin = 'top-left' } = input;
   const renderStyle = resolveCutRenderStyle(input.renderStyle);
@@ -517,7 +532,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
   // from a full-sheet sentinel rect so the function is called once, not per piece.
   const { vw: vbW, vh: vbH } = orientPieceRect({ x: 0, y: 0, w, h }, w, h, rotate90, originTopLeft);
 
-  const renderedPieces = sheet.pieces
+  const renderedPieces = sheetRenderPieces(sheet)
     .map((piece, pieceIndex) => {
       const x = sheet.trim_mm.left + piece.x_mm;
       const y = sheet.trim_mm.top + piece.y_mm;
@@ -527,7 +542,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       const cx = rect.x + rect.w / 2;
       const cy = rect.y + rect.h / 2;
       const fill = renderStyle.piece.defaultFill;
-      const stroke = fillFor?.(piece) ?? renderStyle.piece.stroke;
+      const stroke = piece.renderOnlyLabelLines ? renderStyle.piece.stroke : fillFor?.(piece) ?? renderStyle.piece.stroke;
       const rectEl = `<rect x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(
         rect.h,
       )}" fill="${escapeXml(fill)}" stroke="${escapeXml(stroke)}" stroke-width="${num(renderStyle.piece.strokeWidthMm)}"/>`;
@@ -536,7 +551,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       if (!showLabels) {
         return { geometry, label: '' };
       }
-      const resolved = labelFor(piece);
+      const resolved = piece.renderOnlyLabelLines ?? labelFor(piece);
       const lines = Array.isArray(resolved) ? resolved : [resolved];
       const labelFill = cutRenderLabelFillForBackground(fill, renderStyle);
       const labelStroke = cutRenderLabelStrokeForBackground(fill, fontMm, renderStyle);
@@ -745,14 +760,14 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
   const baseSideFontMm = Math.max(18, Math.round(fontMm * 0.85));
   const { vw: vbW, vh: vbH } = orientPieceRect({ x: 0, y: 0, w, h }, w, h, rotate90, originTopLeft);
 
-  const pieces = sheet.pieces
+  const pieces = sheetRenderPieces(sheet)
     .map((piece, pieceIndex) => {
       const x = sheet.trim_mm.left + piece.x_mm;
       const y = sheet.trim_mm.top + piece.y_mm;
       const rect = applyAxisOrigin(orientPieceRect({ x, y, w: piece.width_mm, h: piece.height_mm }, w, h, rotate90, originTopLeft), axisOrigin, rotate90);
       const cx = rect.x + rect.w / 2;
       const cy = rect.y + rect.h / 2;
-      const stroke = fillFor?.(piece) ?? renderStyle.piece.stroke;
+      const stroke = piece.renderOnlyLabelLines ? renderStyle.piece.stroke : fillFor?.(piece) ?? renderStyle.piece.stroke;
       const rectEl = `<rect x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(
         rect.h,
       )}" fill="${escapeXml(renderStyle.piece.defaultFill)}" stroke="${escapeXml(stroke)}" stroke-width="${num(renderStyle.piece.strokeWidthMm)}"/>`;
@@ -786,7 +801,7 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
       }
       const labelBox = bathCenterLabelBox(rect, reservedTop, reservedLeft);
       const centerLabel = renderBathDetailCenterLabel({
-        lines: labelFor(piece),
+        lines: piece.renderOnlyLabelLines ?? labelFor(piece),
         cx: labelBox.cx,
         cy: labelBox.cy,
         rectW: labelBox.w,
@@ -794,7 +809,7 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
         baseFontMm: detailFontMm,
         compact: !shouldRenderBathCenterLabel(labelBox.w, labelBox.h),
       });
-      const bathDetailInfo = input.bathDetailInfoFor?.(piece);
+      const bathDetailInfo = piece.renderOnlyLabelLines ? undefined : input.bathDetailInfoFor?.(piece);
       const detailMeta = bathDetailInfo
         ? renderBathDetailMeta({
             info: bathDetailInfo,

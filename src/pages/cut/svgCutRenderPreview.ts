@@ -19,18 +19,7 @@ export function buildStyledSvgUploadPreview(
   parsed: ParsedSvgUpload,
   renderStylesSetting?: CutRenderStylesSetting | null,
 ): string | null {
-  const previewOnlyItems = (parsed.previewOnlyContours ?? []).map((contour) => ({
-    ...contour,
-    orderName: 'Не распознано',
-    detailNumber: null,
-    widthMm: Math.max(contour.placedWidthMm, contour.placedHeightMm),
-    heightMm: Math.min(contour.placedWidthMm, contour.placedHeightMm),
-    rotated: false,
-  }));
-  return renderStyledLayout({
-    sheet: parsed.cutLayout.sheet,
-    items: [...parsed.cutLayout.items, ...previewOnlyItems],
-  }, renderStylesSetting);
+  return buildStyledCutLayoutPreview(parsed.cutLayout, renderStylesSetting);
 }
 
 export function buildStyledCutLayoutPreview(

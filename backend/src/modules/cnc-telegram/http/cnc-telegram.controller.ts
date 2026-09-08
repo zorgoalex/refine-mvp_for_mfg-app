@@ -1,3 +1,4 @@
+import { svgRenderContourSchema } from '../../../shared/svg-render-contours';
 import { Body, Controller, Get, Headers, Inject, Param, Post, Query, Req, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -130,6 +131,7 @@ const cutLayoutItemSchema = z.object({
 }).strict();
 
 const cutLayoutSchema = z.object({
+  renderOnlyContours: z.array(svgRenderContourSchema).max(5000).optional(),
   status: z.enum(['valid', 'invalid']),
   reasons: z.array(z.string().trim().min(1).max(500)).max(100).default([]),
   sheet: z.object({

@@ -29,6 +29,12 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-09-08",
+    title: "SVG: единый рендер всей сохранённой раскладки",
+    services: ["ERP", "Cutting"], repositories: ["repo_erp"],
+    fixed: ["Модалка загрузки, задание раскроя, карточка файла станка и изображение для Telegram используют общий рендер с сохранёнными контурами. Нечисловая позиция больше не скрывает физическую деталь после сохранения и не блокирует бирки распознанных деталей."],
+  },
+  {
     version: APP_VERSION,
     date: "2026-09-08",
     title: "SVG: все безопасные контуры в превью загрузки",

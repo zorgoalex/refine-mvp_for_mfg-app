@@ -56,8 +56,8 @@ describe('buildStyledSvgUploadPreview', () => {
 
   it('escapes preview-only labels and never adds their identity to accepted items', () => {
     const parsed = parsedUpload();
-    parsed.previewOnlyContours = [{
-      elementId: 'unknown-PartContour', xMm: 10, yMm: 400,
+    parsed.cutLayout.renderOnlyContours = [{
+      sourceElementId: 'unknown-PartContour', xMm: 10, yMm: 400,
       placedWidthMm: 300, placedHeightMm: 200,
       labelLines: ['2885', '# <Test> " & onload="alert(1)"', '300*200'],
     }];

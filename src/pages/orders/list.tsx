@@ -697,7 +697,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       // Добавляем фильтр по текущему пользователю
       const newFilters = [
         ...(filters || []).filter((f: any) => f.field !== "created_by"),
-        { field: "created_by", operator: "eq", value: Number(currentUser.id) },
+        { field: "created_by", operator: "eq" as const, value: Number(currentUser.id) },
       ];
       setFilters(newFilters, "replace");
     } else {
