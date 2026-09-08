@@ -90,7 +90,8 @@ describe('StatusAutomationConfig CNC cut-status setting guards', () => {
   it('offers a manage-only force refresh for recent orders', () => {
     expect(config).toContain('refreshingRecentOrders');
     expect(config).toContain('statusAutomationApi.refreshRecentOrders()');
-    expect(config).toContain('Будут проверены все заказы за последние два месяца');
+    expect(config).toContain('Будут проверены заказы за последние два месяца');
+    expect(config).toContain('Правила событий МДФ-доски пропускаются: для них нужна исходная карточка.');
     expect(config).toContain('действий ${result.totals.executedActionCount}');
     expect(config).toContain('Ошибок: ${result.failedOrderCount}');
     expect(config).toContain('<Button');
