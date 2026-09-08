@@ -1518,15 +1518,13 @@ function buildInformationalManualSvgDto(
   dto: CncTelegramStructuredIngestDto,
   selectedOrders: ManualSvgSelectedOrder[],
 ): CncTelegramStructuredIngestDto {
-  const orders = selectedOrders.length > 0 ? selectedOrders : [{ orderId: 0, orderName: null }];
   return {
     ...dto,
-    items: dto.items.map((item, index) => {
-      const order = informationalOrderForItem(item, index, orders);
+    items: dto.items.map((item) => {
+      const order = exactSvgOrderForName(item.orderName, selectedOrders);
       return {
         ...item,
-        orderName: informationalOrderNameForItem(item, order),
-        matchOrderId: order.orderId > 0 ? order.orderId : null,
+        matchOrderId: order?.orderId ?? null,
         matchDetailId: null,
         matchStatus: 'needs_review',
         reviewNote: 'Информативный SVG: связь с деталями ERP не требуется',
@@ -1535,36 +1533,15 @@ function buildInformationalManualSvgDto(
   };
 }
 
-function informationalOrderForItem(
-  item: IngestItemInput,
-  index: number,
+/** Selection scopes upload/file association; it cannot replace a source identity. */
+function exactSvgOrderForName(
+  sourceName: string,
   selectedOrders: ManualSvgSelectedOrder[],
-): ManualSvgSelectedOrder {
-  const itemOrderKey = normalizeOrderKey(item.orderName);
-  const exact = itemOrderKey
-    ? selectedOrders.find((order) => (
-        normalizeOrderKey(order.orderName) === itemOrderKey ||
-        String(order.orderId) === item.orderName.trim()
-      ))
-    : null;
-  return exact ?? selectedOrders[index % selectedOrders.length] ?? selectedOrders[0]!;
-}
-
-function informationalOrderNameForItem(
-  item: IngestItemInput,
-  order: ManualSvgSelectedOrder,
-): string {
-  const current = normalizeOptional(item.orderName);
-  if (current && current !== 'SVG' && !current.includes('+')) {
-    const currentKey = normalizeOrderKey(current);
-    if (
-      currentKey &&
-      (currentKey === normalizeOrderKey(order.orderName) || current.trim() === String(order.orderId))
-    ) {
-      return current;
-    }
-  }
-  return normalizeOptional(order.orderName) ?? String(order.orderId);
+): ManualSvgSelectedOrder | null {
+  const key = normalizeOrderKey(sourceName);
+  if (!key) return null;
+  const matches = selectedOrders.filter((order) => normalizeOrderKey(order.orderName) === key);
+  return matches.length === 1 ? matches[0] : null;
 }
 
 async function assertManualSvgOrderScope(
@@ -4377,18 +4354,9 @@ async function buildLenientSvgCutImportPlan(
     const match = key ? matchedItems.get(key) : null;
     const matchedOrderId = match?.matchStatus === 'matched' ? toPositiveInteger(match.matchOrderId) : null;
     const matchedDetailId = match?.matchStatus === 'matched' ? toPositiveInteger(match.matchDetailId) : null;
-    // Explicit manual selections may use the selected order as a fallback.
-    // Telegram's empty selection is an inferred scope: never attach an
-    // unresolved layout item to a different matched order by position.
-    const fallbackOrder = selectedOrderIds.length > 0
-      ? informationalOrderForLayoutItem(item, index, selectedOrders)
-      : null;
-    const orderId = matchedOrderId ?? fallbackOrder?.orderId ?? null;
-    const orderName = matchedOrderId !== null
-      ? item.orderName || match?.orderName || String(matchedOrderId)
-      : fallbackOrder
-        ? informationalLayoutOrderName(item, fallbackOrder)
-        : normalizeOptional(item.orderName) ?? 'SVG';
+    const sourceOrder = exactSvgOrderForName(item.orderName, selectedOrders);
+    const orderId = matchedOrderId ?? sourceOrder?.orderId ?? null;
+    const orderName = item.orderName;
     const orderDetailId = matchedDetailId;
     placements.push({
       ...item,
@@ -4458,11 +4426,10 @@ async function buildInformationalSvgCutImportPlan(
     if (!options.allowOutOfSheet && !layoutGeometryInsideSheet(item, sheet.widthMm, sheet.heightMm)) {
       return { ok: false, reason: `SVG деталь ${item.orderName}#${item.detailNumber} выходит за границы листа` };
     }
-    const order = informationalOrderForLayoutItem(item, index, selectedOrders);
+    const order = exactSvgOrderForName(item.orderName, selectedOrders);
     placements.push({
       ...item,
-      orderName: informationalLayoutOrderName(item, order),
-      orderId: order.orderId,
+      orderId: order?.orderId ?? null,
       orderDetailId: null,
       itemKey: informationalSvgItemKey(item, index),
       materialName: normalizeOptional(dto.materialName),
@@ -4529,38 +4496,6 @@ function buildTelegramInformationalSvgCutImportPlan(
 function isTelegramSvgDetailMatchFailure(reason: string): boolean {
   return reason.includes('is not uniquely matched to an order detail')
     || reason === 'Для нестрогой загрузки SVG не выбраны заказы';
-}
-
-function informationalOrderForLayoutItem(
-  item: CncTelegramCutLayoutItemDto,
-  index: number,
-  selectedOrders: ManualSvgSelectedOrder[],
-): ManualSvgSelectedOrder {
-  const itemOrderKey = normalizeOrderKey(item.orderName);
-  const exact = itemOrderKey
-    ? selectedOrders.find((order) => (
-        normalizeOrderKey(order.orderName) === itemOrderKey ||
-        String(order.orderId) === item.orderName.trim()
-      ))
-    : null;
-  return exact ?? selectedOrders[index % selectedOrders.length] ?? selectedOrders[0]!;
-}
-
-function informationalLayoutOrderName(
-  item: CncTelegramCutLayoutItemDto,
-  order: ManualSvgSelectedOrder,
-): string {
-  const current = normalizeOptional(item.orderName);
-  if (current && current !== 'SVG' && !current.includes('+')) {
-    const currentKey = normalizeOrderKey(current);
-    if (
-      currentKey &&
-      (currentKey === normalizeOrderKey(order.orderName) || current.trim() === String(order.orderId))
-    ) {
-      return current;
-    }
-  }
-  return normalizeOptional(order.orderName) ?? String(order.orderId);
 }
 
 function informationalSvgItemKey(item: CncTelegramCutLayoutItemDto, index: number): string {

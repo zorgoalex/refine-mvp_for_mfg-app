@@ -3265,7 +3265,14 @@ describe('PgCncTelegramRepository', () => {
     expect(snapshot.groups[0].sheets[0].placements.pieces[0].label.orderName).toBe('2689');
   });
 
-  it('keeps a partially resolved selected-order SVG as a cut job without an invalid cut result', async () => {
+  it.each([
+    { name: 'known order, unknown detail', sourceOrder: '2689', expectedOrderId: 2689, informational: false, extraOrders: [] },
+    { name: 'unknown order in mixed import', sourceOrder: '2900', expectedOrderId: null, informational: false, extraOrders: [] },
+    { name: 'unknown order in informational import', sourceOrder: '2900', expectedOrderId: null, informational: true, extraOrders: [] },
+    { name: 'internal ID is not a source order name', sourceOrder: '2900', expectedOrderId: null, informational: false, extraOrders: [{ order_id: 2900, order_name: 'E2E-2894' }] },
+    { name: 'ambiguous name stays unlinked', sourceOrder: '2900', expectedOrderId: null, informational: false, extraOrders: [{ order_id: 8001, order_name: '2900' }, { order_id: 8002, order_name: '2900' }] },
+    { name: 'informational internal ID collision', sourceOrder: '2900', expectedOrderId: null, informational: true, extraOrders: [{ order_id: 2900, order_name: 'E2E-2895' }] },
+  ])('preserves SVG identity: $name', async ({ sourceOrder, expectedOrderId, informational, extraOrders }) => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const tx = {
       query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
@@ -3281,7 +3288,7 @@ describe('PgCncTelegramRepository', () => {
           }] };
         }
         if (/SELECT\s+order_id,\s+order_name\s+FROM orders/i.test(text)) {
-          return { rows: [{ order_id: 2689, order_name: '2689' }] };
+          return { rows: [{ order_id: 2689, order_name: '2689' }, ...extraOrders] };
         }
         if (/INSERT INTO cnc_telegram_packets/i.test(text)) {
           return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000001' }] };
@@ -3358,8 +3365,8 @@ describe('PgCncTelegramRepository', () => {
       confidence: 0.99,
     };
     const unresolvedItem = {
-      sourceItemKey: '2689:999:497x477',
-      orderName: '2689',
+      sourceItemKey: `${sourceOrder}:999:497x477`,
+      orderName: sourceOrder,
       detailNumber: 999,
       widthMm: 497,
       heightMm: 477,
@@ -3370,6 +3377,8 @@ describe('PgCncTelegramRepository', () => {
     const dto = {
       ...manualSvgUploadDto(false, 'cnc:test:manual-svg:lenient-unresolved'),
       validationMode: 'lenient' as const,
+      matchMode: informational ? 'informational' as const : 'order_details' as const,
+      selectedOrderIds: [2689, ...extraOrders.map(order => order.order_id)],
       items: [resolvedItem, unresolvedItem],
       cutLayout: {
         ...manualSvgValidCutLayout(),
@@ -3409,19 +3418,23 @@ describe('PgCncTelegramRepository', () => {
       /UPDATE cnc_telegram_packets/i.test(query.text) && /svg_cut_import_status = \$2/i.test(query.text));
     expect(JSON.parse(String(sheetInsert?.params[2]))).toMatchObject({
       pieces: [
-        { label: { orderId: 2689, orderName: '2689', detailId: 3101 } },
-        { label: { orderId: 2689, orderName: '2689', detailId: null } },
+        { label: { orderId: 2689, orderName: '2689', detailId: informational ? null : 3101 } },
+        { label: { orderId: expectedOrderId, orderName: sourceOrder, detailId: null, detailNumber: 999, widthMm: 497, heightMm: 477 } },
       ],
     });
-    expect(queries.filter((query) => /INSERT INTO cut_job_item\s*\(/i.test(query.text))).toHaveLength(1);
+    expect(queries.filter((query) => /INSERT INTO cut_job_item\s*\(/i.test(query.text))).toHaveLength(informational ? 0 : 1);
     expect(queries.some((query) => /INSERT INTO cut_result_command/i.test(query.text))).toBe(false);
     expect(queries.some((query) => /INSERT INTO cut_result\s*\(/i.test(query.text))).toBe(false);
     expect(importUpdate?.params.slice(1, 5)).toEqual([
       'imported',
-      'Предупреждение: раскрой создан в информативном режиме; связь с деталями ERP неполная',
+      expect.any(String),
       720,
       null,
     ]);
+    const unknownInsert = queries.filter(query => /INSERT INTO cnc_telegram_packet_items/i.test(query.text))[1];
+    expect(unknownInsert.params[2]).toBe(sourceOrder);
+    expect(unknownInsert.params[10]).toBeNull();
+    if (expectedOrderId === null) expect(unknownInsert.params[9]).toBeNull();
     expect(result.packet).toMatchObject({ svgCutJobId: 720, svgCutResultId: null, svgCutImportStatus: 'imported' });
   });
 
