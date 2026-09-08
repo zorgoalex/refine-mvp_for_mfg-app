@@ -31,6 +31,13 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-09-08",
+    title: "Bitrix: установка платёжного виджета",
+    services: ["ERP", "CRM"],
+    fixed: ["Исправлены открытие приложения с параметрами Bitrix в URL и завершение установки вкладки «Оплата ERP» после перезагрузки окна."],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-09-08",
     title: "WhatsApp: управление ботом внутри ERP",
     services: ["ERP"],
     repositories: ["repo_erp"],
