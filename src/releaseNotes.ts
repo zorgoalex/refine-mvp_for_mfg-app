@@ -30,6 +30,14 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-09-08",
+    title: "Bitrix: проверка прав для платёжного виджета",
+    services: ["ERP", "CRM"],
+    repositories: ["repo_erp"],
+    fixed: ["Обновление платёжных систем и виджет проверяют права управления приложениями через user.admin. Отсутствие поля ADMIN в профиле user.current больше не вызывает ложный отказ; пользователи без прав по-прежнему не допускаются."],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-09-07",
     title: "МДФ-работы: суммарный объём распила",
     services: ["ERP", "Cutting"],
