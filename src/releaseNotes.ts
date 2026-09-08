@@ -30,6 +30,12 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION, date: "2026-09-08",
+    title: "SVG: проверка деталей после поиска заказов",
+    services: ["ERP", "Cutting"], repositories: ["repo_erp"],
+    fixed: ["Повторная загрузка SVG ожидает поиск заказов и проверяет детали только по актуальному файлу и выбранным заказам. Ошибка запроса больше не отображается как отсутствие заказа."],
+  },
+  {
+    version: APP_VERSION, date: "2026-09-08",
     title: "МДФ: поиск не меняет готовность заказов",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: ["Поиск заказа и настройка видимости ванн меняют только отображение карточек. Готовность, колонки и недостающие детали рассчитываются по всем источникам периода, включая скрытые файлы станка, БАЗИС и историческое закатанное количество."],
