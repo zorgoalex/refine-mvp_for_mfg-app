@@ -67,7 +67,7 @@ describe('Telegram label-map projector structural guards', () => {
             source_updated_at: '2026-08-07T00:01:00.000Z',
             cut_layout_json: {
               status: 'valid',
-              reasons: [],
+              reasons: ["Bad SVG contour skipped; good labels remain printable"],
               sheet: { widthMm: 1000, heightMm: 500 },
               items: [
                 layoutItem('Order 1', 31, 10, 20),

@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-09-08",
+    title: "SVG: приоритет подписей и печать корректных деталей",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Импорт SVG из Telegram и через модалку использует видимые подписи в первую очередь, размеры контура — во вторую, а Comments — только как запасной источник.",
+      "Ошибки отдельных деталей показываются как предупреждения и не блокируют импорт и печать бирок остальных распознанных деталей.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-09-08",
     title: "МДФ: единая обработка событий карточек",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

@@ -93,13 +93,13 @@ describe('svgCutUploadParser visual labels', () => {
     expect(parserSource).toContain('extractVisualDetailLabels');
     expect(parserSource).toContain('matchVisualLabelsToPartContours');
     expect(parserSource).toContain('visualLabels.length > 0');
-    expect(parserSource).toContain('Для контура детали PartContour не найдена верхняя подпись');
+    expect(parserSource).toContain('не найдена верхняя подпись с заказом/позицией');
     expect(parserSource).toContain('Не найдены читаемые верхние подписи деталей');
     expect(parserSource).not.toContain('PartContour detail outline has no matching visual label');
     expect(parserSource).not.toContain('no readable top-layer detail labels');
     expect(parserSource).not.toContain('parseDetailComment');
     expect(parserSource).not.toContain('DETAIL_HEADER_RE');
-    expect(parserSource).not.toContain('odm');
+    expect(parserSource).toContain('extractCommentIdentity');
   });
 
   it('keeps a geometry fallback path for informative non-MDF uploads only', () => {
@@ -404,5 +404,42 @@ describe('svgCutUploadParser visual labels', () => {
     expect(result.layoutItems[0]?.sourceSvg).toEqual(sourceSvg);
     expect(parserSource).toContain('buildSourceSvgFragmentForContour');
     expect(parserSource).toContain('SOURCE_SVG_FRAGMENT_TAGS');
+  });
+});
+
+
+describe('SVG source priority and partial label availability', () => {
+  it('uses visible identity and dimensions ahead of conflicting Comments', () => {
+    const result = buildSvgUploadLayoutItemsFromContours([
+      contour({ commentIdentity: { orderName: '9999', detailNumber: 99 } }),
+    ], [visualLabel({ widthMm: 101, heightMm: 102 })]);
+    expect(result.layoutItems).toHaveLength(1);
+    expect(result.layoutItems[0]).toMatchObject({orderName: '2776', detailNumber: 1, widthMm: 101, heightMm: 102, placedWidthMm: 100});
+  });
+  it('uses contour size when the visible label has no size', () => {
+    const result = buildSvgUploadLayoutItemsFromContours([
+      contour({placedWidthMm: 200, commentIdentity: {orderName: '9999', detailNumber: 99}}),
+    ], [visualLabel({widthMm: null, heightMm: null, hasExplicitSize: false})]);
+    expect(result.layoutItems[0]).toMatchObject({orderName: '2776', detailNumber: 1, widthMm: 200, heightMm: 100});
+  });
+  it('uses Comments identity only for a contour without a visual label', () => {
+    const result = buildSvgUploadLayoutItemsFromContours([
+      contour({commentIdentity: {orderName: '2872', detailNumber: 12}, placedWidthMm: 412, placedHeightMm: 1617}),
+    ], []);
+    expect(result.layoutItems[0]).toMatchObject({orderName: '2872', detailNumber: 12, widthMm: 1617, heightMm: 412});
+    expect(result.layoutItems[0].visualLabel).toBeUndefined();
+  });
+  it('keeps good details when a separate contour has unreadable identity', () => {
+    const result = buildSvgUploadLayoutItemsFromContours([
+      contour({elementId: 'good', commentIdentity: {orderName: '2872', detailNumber: 12}}),
+      contour({elementId: 'bad', xMm: 500}),
+    ], []);
+    expect(result.layoutItems).toHaveLength(1);
+    expect(result.rejected.join(';')).toContain('bad');
+  });
+  it('deduplicates identical label-only keys but preserves separate physical copies', () => {
+    const a = visualLabel();
+    const result = buildSvgUploadLayoutItemsFromContours([], [a, {...a}, visualLabel({key: 'second-copy', cxMm: 300})], {includeVisualLabelOnlyItems: true});
+    expect(result.layoutItems).toHaveLength(2);
   });
 });

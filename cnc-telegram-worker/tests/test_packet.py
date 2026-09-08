@@ -12,10 +12,17 @@ from cnc_telegram_worker.packet import (
     build_structured_packet,
     canonical_payload_hash,
     idempotency_key,
+    cut_layout_warnings,
 )
 
 
 class PacketBuilderTest(unittest.TestCase):
+    def test_partial_svg_warnings_do_not_mark_accepted_layout_ignored(self):
+        warnings = cut_layout_warnings({"status": "valid", "reasons": ["PartContour-bad: unreadable position"]})
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("PartContour-bad", warnings[0])
+        self.assertNotIn("ignored", warnings[0])
+
     def test_builds_raw_free_packet_from_comments_ocr_reaction_and_gcode(self) -> None:
         image = ImageMeta(
             chat_id="-100123",
