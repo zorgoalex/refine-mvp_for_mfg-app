@@ -41,6 +41,23 @@ function event(overrides: Partial<AuditLogEventDto> = {}): AuditLogEventDto {
 }
 
 describe('buildAuditReadableSummary', () => {
+  it.each(['cut_job.deleted', 'cut_job.created', 'cut_job.result_archived'])('keeps the cutting job primary for %s', (name) => {
+    const summary = buildAuditReadableSummary(event({
+      event: name, entityType: 'cut_job', entityId: '912', entityName: null,
+      metadata: { cutJobId: 912, cutJobDisplayNumber: 'В-27', cutJobName: 'Тест раскрой' },
+      relatedEntities: [{ entityType: 'sheet_material_type', entityId: 3 }],
+    }));
+    expect(summary.object).toBe('Задание на раскрой №В-27 (ID: 912) — Тест раскрой');
+    expect(summary.related).toContain('Заказ 2728 (#42)');
+    expect(summary.related).toContain('Тип листового материала #3');
+    if (name === 'cut_job.deleted') expect(summary.title).toBe('Удалено задание на раскрой');
+  });
+
+  it('never invents a cutting display number from its internal ID', () => {
+    const summary = buildAuditReadableSummary(event({ event: 'cut_job.deleted', entityType: 'cut_job', entityId: '912', entityName: null }));
+    expect(summary.object).toBe('Задание на раскрой (ID: 912; номер не сохранён)');
+  });
+
   it('shows the applied automation rule and exact detail status transition', () => {
     const summary = buildAuditReadableSummary(
       event({

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildCutPieceTooltipRows,
+  sheetUsesSourceSvgRendering,
   buildSheetPieceOverlays,
   buildSheetVacuumOrientationWarnings,
   cutPdfPreviewBlockReason,
@@ -526,5 +527,15 @@ describe('cutPreviewHelpers', () => {
       expect(result.map((sheet) => sheet.sheetIndex)).toEqual([0, 1, 2]);
       expect(result[2].placements.pieces.map((p) => p.item_id)).toEqual(['det-3']);
     });
+  });
+});
+
+
+describe('SVG sheet label source', () => {
+  it('uses canonical labels for imported SVG and unidentified contours, keeping optimizer overlays', () => {
+    const placements = makeSheet(0, ['det-1']).placements;
+    expect(sheetUsesSourceSvgRendering(placements)).toBe(false);
+    expect(sheetUsesSourceSvgRendering({...placements,renderOnlyContours:[]})).toBe(true);
+    expect(sheetUsesSourceSvgRendering({...placements,pieces:[{...placements.pieces[0],source_svg:{body:'<path/>',viewBox:{x_mm:0,y_mm:0,width_mm:600,height_mm:400}}}]})).toBe(true);
   });
 });

@@ -1,3 +1,4 @@
+import { cutJobInformationalDetails, type InformationalCutDetailRow } from './cutJobInformationalDetails';
 import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Collapse, DatePicker, Empty, Form, Input, Modal, Popconfirm, Radio, Select, Space, Spin, Tabs, Tag, Typography, message, theme } from 'antd';
@@ -44,6 +45,7 @@ import {
 } from './cutVacuumProfile';
 import {
   buildSheetPieceOverlays,
+  sheetUsesSourceSvgRendering,
   buildSheetVacuumOrientationWarnings,
   cutPdfPreviewBlockReason,
   loadNonVacuumSheetAxisOrigin,
@@ -217,16 +219,6 @@ type CutJobOrderRef = {
   orderDeleted: boolean;
 };
 
-type InformationalCutDetailRow = {
-  key: string;
-  orderId: number | null;
-  orderName: string | null;
-  detailNumber: number | null;
-  widthMm: number | null;
-  heightMm: number | null;
-  materialName: string | null;
-  quantity: number;
-};
 
 type CutPreviewSummaryRow = {
   key: string;
@@ -658,51 +650,6 @@ function cutJobOrderRefsForJob(job: CutJobDto): CutJobOrderRef[] {
   return [...byId.values()].sort((a, b) => cutJobOrderLabel(a).localeCompare(cutJobOrderLabel(b), 'ru', { numeric: true }));
 }
 
-function cutJobInformationalDetails(job: CutJobDto): InformationalCutDetailRow[] {
-  const rows = new Map<string, InformationalCutDetailRow>();
-  for (const group of job.groups) {
-    for (const sheet of group.sheets) {
-      for (const piece of sheet.placements.pieces) {
-        const label = piece.label;
-        if (!label) continue;
-        const orderName = label.orderName?.trim() || null;
-        const widthMm = label.widthMm ?? piece.width_mm ?? null;
-        const heightMm = label.heightMm ?? piece.height_mm ?? null;
-        if (!orderName && !isPositiveInt(label.orderId) && label.detailNumber == null && widthMm == null && heightMm == null) continue;
-        const materialName = label.materialName?.trim() || null;
-        const key = [
-          label.orderId ?? '',
-          orderName ?? '',
-          label.detailNumber ?? '',
-          widthMm ?? '',
-          heightMm ?? '',
-          materialName ?? '',
-        ].join(':');
-        const existing = rows.get(key);
-        if (existing) {
-          existing.quantity += 1;
-          continue;
-        }
-        rows.set(key, {
-          key,
-          orderId: isPositiveInt(label.orderId) ? label.orderId : null,
-          orderName,
-          detailNumber: label.detailNumber ?? null,
-          widthMm,
-          heightMm,
-          materialName,
-          quantity: 1,
-        });
-      }
-    }
-  }
-  return [...rows.values()].sort((a, b) => (
-    (a.orderName ?? String(a.orderId ?? '')).localeCompare(b.orderName ?? String(b.orderId ?? ''), 'ru', { numeric: true }) ||
-    (a.detailNumber ?? 0) - (b.detailNumber ?? 0) ||
-    (a.widthMm ?? 0) - (b.widthMm ?? 0) ||
-    (a.heightMm ?? 0) - (b.heightMm ?? 0)
-  ));
-}
 
 function isPositiveInt(value: number | null | undefined): value is number {
   return Number.isInteger(value) && Number(value) > 0;
@@ -2659,8 +2606,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       // [REGRESSION-DEBT] for origin). Layout changes still bust via
       // resetSheetViews() (clears maps + thumbReqRef + epoch); renderVersion stays
       // in the FETCH to bust the SERVER render cache.
-      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}:${sheetAxisOrigin}`;
       const sheet = selectVariantSheets(group, variant).find((candidate) => candidate.sheetIndex === sheetIndex);
+      const labelsInImage = sheetUsesSourceSvgRendering(sheet?.placements);
+      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}:${sheetAxisOrigin}:${labelsInImage ? 'svg' : 'overlay'}`;
       const rotate90 = sheet
         ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
         : sheetPortrait;
@@ -2679,7 +2627,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           sheetAxisOrigin,
           isHistoricalResult ? selectedResult?.resultNo : undefined,
           false,
-          false,
+          labelsInImage,
           CUT_TASK_SHEET_RENDER_STYLE,
         );
         // Discard a completion that lands after a job switch/reset (stale blob).
@@ -2710,11 +2658,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       // origin in the key too (same rehydration reason as orientation — a persisted
       // RAW-origin job opening with the stale default-TL state must re-fetch, not
       // dedupe to a TL thumb; Codex code-review R1 [REGRESSION-DEBT]).
-      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}:${sheetAxisOrigin}`;
+      const sheet = selectVariantSheets(group, variant).find((candidate) => candidate.sheetIndex === sheetIndex);
+      const labelsInImage = sheetUsesSourceSvgRendering(sheet?.placements);
+      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}:${sheetAxisOrigin}:${labelsInImage ? 'svg' : 'overlay'}`;
       const reqKey = `${cutJobId}:${key}`;
       if (thumbReqRef.current.has(reqKey)) return;
       thumbReqRef.current.add(reqKey);
-      const sheet = selectVariantSheets(group, variant).find((candidate) => candidate.sheetIndex === sheetIndex);
       const rotate90 = sheet
         ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
         : sheetPortrait;
@@ -2733,7 +2682,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           sheetAxisOrigin,
           isHistoricalResult ? selectedResult?.resultNo : undefined,
           false,
-          false,
+          labelsInImage,
           CUT_TASK_SHEET_RENDER_STYLE,
         );
         // Discard a completion that lands after a job switch/reset (stale blob).
@@ -3663,12 +3612,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     [job?.items],
   );
   const informationalJobDetails = useMemo(
-    () => job && job.items.length === 0 ? cutJobInformationalDetails(job) : [],
+    () => job ? cutJobInformationalDetails(job) : [],
     [job],
-  );
-  const informationalJobDetailTotal = useMemo(
-    () => informationalJobDetails.reduce((sum, row) => sum + row.quantity, 0),
-    [informationalJobDetails],
   );
   const jobOrderRefs = useMemo(
     () => job ? cutJobOrderRefsForJob(job) : [],
@@ -3827,19 +3772,20 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           ) : dash(row.orderName)
         ),
       },
-      { title: 'Поз.', dataIndex: 'detailNumber', key: 'position', width: 80, render: dash },
+      { title: 'Поз.', dataIndex: 'detailNumber', key: 'position', width: 80, render: (value: unknown, row: InformationalCutDetailRow) => row.positionLabel ?? dash(value) },
       {
         title: 'Размер (Ш×В)',
         key: 'size',
         width: 140,
         render: (_: unknown, row: InformationalCutDetailRow) => (
-          row.widthMm !== null || row.heightMm !== null
+          row.sizeLabel ?? (row.widthMm !== null || row.heightMm !== null
             ? `${dash(row.widthMm)}×${dash(row.heightMm)}`
-            : '—'
+            : '—')
         ),
       },
       { title: 'Кол-во', dataIndex: 'quantity', key: 'quantity', width: 90 },
       { title: 'Материал', dataIndex: 'materialName', key: 'material', width: 180, render: dash },
+      { title: 'Связь с БД', key: 'link', width: 170, render: (_: unknown, row: InformationalCutDetailRow) => row.sourceOnly ? 'Исходная подпись SVG' : row.orderId === null ? 'Заказ не сопоставлен' : 'Деталь не сопоставлена' },
     ];
   }, [show]);
 
@@ -4963,9 +4909,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
 
       {job && (
         <Collapse className="cut-page-modern__details" size="small" defaultActiveKey={[]}>
-          <Panel header={`Детали задания (${job.items.length > 0 ? job.items.length : informationalJobDetailTotal})`} key="cut-job-details">
+          <Panel header={`Детали задания (${job.items.length + informationalJobDetails.length})`} key="cut-job-details">
             <TableTopScroll>
-              {job.items.length > 0 ? (
+              {job.items.length > 0 && (
                 <Table<CutJobItemDto>
                   className="cut-job-details-table details-grouped"
                   size="small"
@@ -4982,7 +4928,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   }
                   locale={{ emptyText: 'В задании пока нет деталей — добавьте их из заказа или через «Загрузить подходящие детали»' }}
                 />
-              ) : (
+              )}
+              {(informationalJobDetails.length > 0 || job.items.length === 0) && (
                 <Table<InformationalCutDetailRow>
                   className="cut-job-details-table details-grouped"
                   size="small"
@@ -5408,7 +5355,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   // switch may rehydrate a different saved orientation/origin); renderVersion
                   // stays only in the fetch (server bust). Keeps the cached preview stable
                   // across no-recalc version bumps.
-                  const key = `${group.cutGroupId}:${sheet.sheetIndex}:${displayVariant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}:${sheetAxisOrigin}`;
+                  const key = `${group.cutGroupId}:${sheet.sheetIndex}:${displayVariant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}:${sheetAxisOrigin}:${sheetUsesSourceSvgRendering(sheet.placements) ? 'svg' : 'overlay'}`;
                   // Stable React element identity per (group, sheet) — deliberately NOT
                   // the cache key. A renderVersion bump (e.g. changing profile/material,
                   // which only marks the job stale) then refreshes the image in place
@@ -5513,6 +5460,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                           landscape={rotate90}
                           full={false}
                           overlays={overlays}
+                          labelsInImage={sheetUsesSourceSvgRendering(sheet.placements)}
                           onOpen={() => loadSheet(group, sheet.sheetIndex, displayVariant, renderVersion)}
                         />
                       )}
@@ -5525,6 +5473,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                           landscape={rotate90}
                           full
                           overlays={overlays}
+                          labelsInImage={sheetUsesSourceSvgRendering(sheet.placements)}
                           onCollapse={() => collapseSheet(key)}
                         />
                       )}

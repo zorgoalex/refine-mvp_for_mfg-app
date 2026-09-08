@@ -1,6 +1,17 @@
 import { Tooltip, Table } from '../../ui/tooltipDelay';
 import React, { useState, useEffect, useMemo } from 'react';
-import { Card, Tabs, Typography, Space, InputNumber, Input, Button, message, Spin, Checkbox } from 'antd';
+import {
+  Card,
+  Tabs,
+  Typography,
+  Space,
+  InputNumber,
+  Input,
+  Button,
+  message,
+  Spin,
+  Checkbox,
+} from 'antd';
 import { useList, useResource } from '@refinedev/core';
 import {
   SettingOutlined,
@@ -18,6 +29,7 @@ import {
   TagsOutlined,
   FileExcelOutlined,
   SafetyCertificateOutlined,
+  MessageOutlined,
 } from '@ant-design/icons';
 import { useAppSettings, SETTING_KEYS, CurrencySettings } from '../../hooks/useAppSettings';
 import { featureFlags } from '../../config/featureFlags';
@@ -33,7 +45,14 @@ import { LabelsConfigTab } from './components/LabelsConfigTab';
 import { FinancialLayerAccessMatrix } from './components/FinancialLayerAccessMatrix';
 import { ExportTemplatesConfigTab } from './components/ExportTemplatesConfigTab';
 import { ProductionThresholdsConfigTab } from './components/ProductionThresholdsConfigTab';
-import { RolesPermissionsMatrixTab, canViewRolesMatrixTab } from './components/RolesPermissionsMatrixTab';
+import {
+  RolesPermissionsMatrixTab,
+  canViewRolesMatrixTab,
+} from './components/RolesPermissionsMatrixTab';
+import {
+  WhatsAppAutomationConfig,
+  WhatsAppConnectionConfig,
+} from './components/WhatsAppConfigTabs';
 import { can } from '../../utils/permissions';
 import {
   buildInitialResourceVisibility,
@@ -53,17 +72,24 @@ const { Text } = Typography;
 
 export const CONFIGURATION_ACTIVE_TAB_STORAGE_KEY = 'configuration:activeTab';
 
-export const resolveConfigurationActiveTab = (storedKey: string | null | undefined, availableKeys: string[]): string => {
+export const resolveConfigurationActiveTab = (
+  storedKey: string | null | undefined,
+  availableKeys: string[],
+): string => {
   if (storedKey && availableKeys.includes(storedKey)) return storedKey;
   return availableKeys[0] ?? 'orders';
 };
 
-export const filterConfigurationTabItems = <T extends { key: string },>(
+export const filterConfigurationTabItems = <T extends { key: string }>(
   items: T[],
   generalSettingsVisible: boolean,
   deadlineSettingsVisible: boolean,
+  whatsappSettingsVisible = false,
 ): T[] =>
   items.filter((item) => {
+    if (item.key === 'whatsapp-connection' || item.key === 'whatsapp-automation') {
+      return whatsappSettingsVisible;
+    }
     if (generalSettingsVisible) return true;
     if (deadlineSettingsVisible && item.key === 'production') return true;
     return false;
@@ -161,8 +187,17 @@ const EditableSettingField: React.FC<EditableSettingFieldProps> = ({
   };
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-      <Text strong style={{ minWidth: 200 }}>{label}:</Text>
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        marginBottom: 12,
+      }}
+    >
+      <Text strong style={{ minWidth: 200 }}>
+        {label}:
+      </Text>
 
       {isEditing ? (
         <>
@@ -242,11 +277,7 @@ const OrdersConfigTab: React.FC = () => {
   const minOrderAmount = getSetting<number>(SETTING_KEYS.ORDERS_MIN_TOTAL_AMOUNT);
 
   const handleSaveMinAmount = async (value: number | null) => {
-    await saveSetting(
-      SETTING_KEYS.ORDERS_MIN_TOTAL_AMOUNT,
-      value,
-      'Минимальная сумма заказа'
-    );
+    await saveSetting(SETTING_KEYS.ORDERS_MIN_TOTAL_AMOUNT, value, 'Минимальная сумма заказа');
   };
 
   if (isLoading) {
@@ -305,7 +336,7 @@ const FinanceConfigTab: React.FC = () => {
       await saveSetting(
         SETTING_KEYS.APP_CURRENCY,
         { code: editCode, symbol: editSymbol },
-        'Базовая валюта приложения'
+        'Базовая валюта приложения',
       );
       setIsEditing(false);
       message.success('Сохранено');
@@ -332,9 +363,18 @@ const FinanceConfigTab: React.FC = () => {
 
   return (
     <div style={{ padding: '16px 0' }}>
-      <Text strong style={{ display: 'block', marginBottom: 16 }}>Базовая валюта приложения</Text>
+      <Text strong style={{ display: 'block', marginBottom: 16 }}>
+        Базовая валюта приложения
+      </Text>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          marginBottom: 12,
+        }}
+      >
         <Text style={{ minWidth: 200 }}>Код валюты:</Text>
 
         {isEditing ? (
@@ -436,13 +476,20 @@ const TableVisibilityByRoleTab: React.FC = () => {
     [rolesData],
   );
   const menuResources = useMemo(
-    () => getMenuResources(
-      resources,
-      RESOURCE_LABELS,
-      bitrix24MenuConfig
-        ? [{ name: 'crm', label: bitrix24MenuConfig.label, route: bitrix24MenuConfig.url }]
-        : [],
-    ),
+    () =>
+      getMenuResources(
+        resources,
+        RESOURCE_LABELS,
+        bitrix24MenuConfig
+          ? [
+              {
+                name: 'crm',
+                label: bitrix24MenuConfig.label,
+                route: bitrix24MenuConfig.url,
+              },
+            ]
+          : [],
+      ),
     [resources],
   );
   const savedMatrix = normalizeRoleVisibilityMatrix(
@@ -481,7 +528,9 @@ const TableVisibilityByRoleTab: React.FC = () => {
       render: (_: string, record: { name: string; label: string; route: string }) => (
         <Space direction="vertical" size={0}>
           <Text strong>{record.label}</Text>
-          <Text type="secondary" style={{ fontSize: 12 }}>{record.route}</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {record.route}
+          </Text>
         </Space>
       ),
     },
@@ -524,7 +573,9 @@ const TableVisibilityByRoleTab: React.FC = () => {
 export const ConfigurationPage: React.FC = () => {
   const isOperational = useOperationalUi();
   const [activeTab, setActiveTab] = useState(() => readStoredConfigurationActiveTab() ?? 'orders');
-  const statusAutomationVisible = featureFlags.statusAutomation && (!featureFlags.useBackendPermissions || can('status_automation.view'));
+  const statusAutomationVisible =
+    featureFlags.statusAutomation &&
+    (!featureFlags.useBackendPermissions || can('status_automation.view'));
   const deadlineSettingsVisible =
     featureFlags.useBackendDeadlines &&
     (!featureFlags.useBackendPermissions || can('deadlines.view') || can('settings.manage'));
@@ -533,8 +584,33 @@ export const ConfigurationPage: React.FC = () => {
     can('settings.view') ||
     can('settings.manage') ||
     canViewRolesMatrixTab();
+  const whatsappSettingsVisible =
+    featureFlags.useBackendWhatsApp &&
+    (!featureFlags.useBackendPermissions || can('whatsapp.view') || can('whatsapp.manage'));
 
   const allTabItems = [
+    ...(whatsappSettingsVisible
+      ? [
+          {
+            key: 'whatsapp-connection',
+            label: (
+              <span>
+                <MessageOutlined /> WhatsApp
+              </span>
+            ),
+            children: <WhatsAppConnectionConfig />,
+          },
+          {
+            key: 'whatsapp-automation',
+            label: (
+              <span>
+                <BellOutlined /> WhatsApp-правила
+              </span>
+            ),
+            children: <WhatsAppAutomationConfig />,
+          },
+        ]
+      : []),
     {
       key: 'orders',
       label: (
@@ -692,6 +768,7 @@ export const ConfigurationPage: React.FC = () => {
     allTabItems,
     generalSettingsVisible,
     deadlineSettingsVisible,
+    whatsappSettingsVisible,
   );
 
   const availableTabKeys = tabItems.map((item) => item.key);

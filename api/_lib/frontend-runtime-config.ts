@@ -33,6 +33,7 @@ export interface FrontendRuntimeConfigResponse {
     pdfImportLayoutPatterns: boolean;
     enableLegacyHasura: boolean;
     workosAuth: boolean;
+    backendWhatsApp: boolean;
   };
   observability: {
     performanceRum: boolean;
@@ -62,8 +63,7 @@ export function buildFrontendRuntimeConfig(
   );
   const backendGroups = readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_GROUPS, false);
   const backendClientPhones =
-    readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_CLIENT_PHONES, false) &&
-    backendProductionActions;
+    readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_CLIENT_PHONES, false) && backendProductionActions;
 
   return {
     apiUrl: normalizeApiUrl(env.RUNTIME_CONFIG_API_URL),
@@ -97,12 +97,10 @@ export function buildFrontendRuntimeConfig(
       orderStatusBoard: readBooleanEnv(env.RUNTIME_CONFIG_ORDER_STATUS_BOARD, false),
       orderRealtime: readBooleanEnv(env.RUNTIME_CONFIG_ORDER_REALTIME, false),
       cncTelegram: readBooleanEnv(env.RUNTIME_CONFIG_CNC_TELEGRAM, false),
-      pdfImportLayoutPatterns: readBooleanEnv(
-        env.RUNTIME_CONFIG_PDF_IMPORT_LAYOUT_PATTERNS,
-        false,
-      ),
+      pdfImportLayoutPatterns: readBooleanEnv(env.RUNTIME_CONFIG_PDF_IMPORT_LAYOUT_PATTERNS, false),
       enableLegacyHasura: readBooleanEnv(env.RUNTIME_CONFIG_ENABLE_LEGACY_HASURA, true),
       workosAuth: readBooleanEnv(env.RUNTIME_CONFIG_WORKOS_AUTH, false),
+      backendWhatsApp: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_WHATSAPP, false),
     },
     observability: {
       performanceRum: readBooleanEnv(env.RUNTIME_CONFIG_PERFORMANCE_RUM, false),
@@ -141,7 +139,12 @@ function buildOrderLifecycleRollout(env: EnvSource) {
   const configVersion = normalizeRolloutToken(env.RUNTIME_CONFIG_ORDER_LIFECYCLE_VERSION);
 
   if (!enabled || !allocationSalt || !configVersion) {
-    return { enabled: false, percent: 0, allocationSalt: '', configVersion: '' };
+    return {
+      enabled: false,
+      percent: 0,
+      allocationSalt: '',
+      configVersion: '',
+    };
   }
 
   return { enabled: true, percent, allocationSalt, configVersion };

@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import re
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -93,6 +93,7 @@ class SvgCutLayout:
     items: list[VectorItem]
     raw_comment_count: int = 0
     part_contour_count: int = 0
+    render_only_contours: list[dict[str, Any]] = field(default_factory=list)
 
 
 def parse_vector_file(path: Path) -> list[dict[str, Any]]:
@@ -154,12 +155,12 @@ def parse_svg_cut_layout(path: Path, mode: str = "strict") -> SvgCutLayout:
     parts: list[VectorItem] = []
     part_contours: list[ContourGeometry] = []
     generic_contours: list[ContourGeometry] = []
-    seen_geometry: set[tuple[str, str, float | None, float | None, str]] = set()
+    unsafe_contours: list[ContourGeometry] = []
     raw_comment_count = 0
     part_contour_count = 0
     rejected_detail_contour_reasons: set[str] = set()
     parent_map = build_parent_map(root)
-    visual_labels = extract_visual_detail_labels(root, vb_min_x, vb_min_y, scale_x, scale_y) if lenient else []
+    visual_labels = extract_visual_detail_labels(root, vb_min_x, vb_min_y, scale_x, scale_y)
 
     for element, matrix in traversed(root):
         if local_name(element.tag) not in GEOMETRY_TAGS:
@@ -178,7 +179,7 @@ def parse_svg_cut_layout(path: Path, mode: str = "strict") -> SvgCutLayout:
         transformed = [apply_matrix(point, matrix) for point in raw_points]
         bbox = points_bbox(transformed)
         if bbox is None:
-            if is_part_contour and any(parse_detail_comment(comment, None) is not None for comment in comments):
+            if is_part_contour:
                 rejected_detail_contour_reasons.add("PartContour detail outlines have no geometry")
             continue
         x_mm = (bbox[0] - vb_min_x) / scale_x
@@ -194,15 +195,12 @@ def parse_svg_cut_layout(path: Path, mode: str = "strict") -> SvgCutLayout:
             placed_width_mm=placed_width_mm,
             placed_height_mm=placed_height_mm,
         )
+        if not all(math.isfinite(value) for value in (x_mm, y_mm, placed_width_mm, placed_height_mm)) or placed_width_mm <= 0 or placed_height_mm <= 0:
+            unsafe_contours.append(contour)
+            rejected_detail_contour_reasons.add(f"{contour.element_id}: invalid or collapsed detail contour geometry")
+            continue
         if not is_part_contour and not svg_geometry_is_detail_contour(contour, sheet_width, sheet_height, element_id, element.attrib.get("class", "")):
             continue
-        parsed_comments = [
-            parsed
-            for comment in comments
-            if (parsed := parse_detail_comment(comment, (placed_width_mm, placed_height_mm))) is not None
-        ]
-        if is_part_contour and not parsed_comments:
-            rejected_detail_contour_reasons.add("PartContour detail outlines have unreadable detail comments")
         inside_sheet = (
             x_mm >= -LAYOUT_BOUNDS_TOLERANCE_MM
             and y_mm >= -LAYOUT_BOUNDS_TOLERANCE_MM
@@ -210,6 +208,7 @@ def parse_svg_cut_layout(path: Path, mode: str = "strict") -> SvgCutLayout:
             and y_mm + placed_height_mm <= sheet_height + LAYOUT_BOUNDS_TOLERANCE_MM
         )
         if not inside_sheet:
+            unsafe_contours.append(contour)
             if is_part_contour:
                 rejected_detail_contour_reasons.add("PartContour detail outlines outside sheet")
             continue
@@ -230,51 +229,19 @@ def parse_svg_cut_layout(path: Path, mode: str = "strict") -> SvgCutLayout:
             part_contours.append(contour)
         elif lenient:
             generic_contours.append(contour)
-        if not is_part_contour or not parsed_comments:
-            continue
-        matched_comment = False
-        for parsed in parsed_comments:
-            if not size_matches(parsed["widthMm"], parsed["heightMm"], placed_width_mm, placed_height_mm):
-                continue
-            matched_comment = True
-            item = VectorItem(
-                order_name=parsed["orderName"],
-                detail_number=parsed["detailNumber"],
-                width_mm=parsed["widthMm"],
-                height_mm=parsed["heightMm"],
-                source_element_id=element_id,
-                x_mm=round(x_mm, 2),
-                y_mm=round(y_mm, 2),
-                placed_width_mm=round(placed_width_mm, 2),
-                placed_height_mm=round(placed_height_mm, 2),
-                rotated=round(placed_width_mm) == round(parsed["heightMm"])
-                and round(placed_height_mm) == round(parsed["widthMm"]),
-                source_svg=contour.source_svg,
-            )
-            key = (
-                item.order_name,
-                str(item.detail_number),
-                item.width_mm,
-                item.height_mm,
-                item.source_element_id,
-            )
-            if key in seen_geometry:
-                continue
-            seen_geometry.add(key)
-            parts.append(item)
-        if not matched_comment:
-            rejected_detail_contour_reasons.add("PartContour detail outline size does not match detail comment")
-
-    if lenient and not parts:
-        selected_contours = part_contours if part_contours else generic_contours
-        parts, visual_reasons = build_items_from_visual_contours(selected_contours, visual_labels)
-        rejected_detail_contour_reasons.update(visual_reasons)
-        raw_comment_count = max(raw_comment_count, len(visual_labels))
-        if part_contour_count == 0:
-            part_contour_count = len(selected_contours)
+    # Resolve every contour independently: visible label, geometry, then Comments.
+    selected_contours = part_contours if part_contours else generic_contours
+    all_matches = match_visual_labels_to_contours([*selected_contours, *unsafe_contours], visual_labels)
+    unsafe_labels = {id(all_matches[id(contour)]) for contour in unsafe_contours if id(contour) in all_matches}
+    safe_labels = [label for label in visual_labels if id(label) not in unsafe_labels]
+    parts, visual_reasons = build_items_from_visual_contours(selected_contours, safe_labels, allow_informational=lenient)
+    rejected_detail_contour_reasons.update(visual_reasons)
+    raw_comment_count = max(raw_comment_count, len(visual_labels))
+    if part_contour_count == 0:
+        part_contour_count = len(selected_contours)
 
     reasons: list[str] = []
-    if raw_comment_count == 0 and not lenient:
+    if raw_comment_count == 0 and not lenient and not parts:
         reasons.append("no detail comments")
     if part_contour_count == 0 and not lenient:
         reasons.append("no PartContour detail outlines")
@@ -285,13 +252,30 @@ def parse_svg_cut_layout(path: Path, mode: str = "strict") -> SvgCutLayout:
             reasons.append("no detail outlines")
         if (part_contours or generic_contours) and not parts:
             reasons.append("detail outlines exist but no detail passed lenient checks")
-    else:
-        reasons.extend(sorted(rejected_detail_contour_reasons))
+    reasons.extend(sorted(rejected_detail_contour_reasons))
     if not lenient and part_contour_count > 0 and not parts:
         reasons.append("PartContour outlines exist but no placed detail passed geometry checks")
 
+    accepted_ids = {part.source_element_id for part in parts}
+    text_lines = collect_visual_text_lines(root, vb_min_x, vb_min_y, scale_x, scale_y)
+    render_only_contours = []
+    for contour in selected_contours:
+        if contour.element_id in accepted_ids:
+            continue
+        lines = sorted((line for line in text_lines
+            if contour.x_mm <= line.x_mm <= contour.x_mm + contour.placed_width_mm
+            and contour.y_mm <= line.y_mm <= contour.y_mm + contour.placed_height_mm),
+            key=lambda line: (line.y_mm, line.x_mm))
+        render_only_contours.append({
+            "sourceElementId": contour.element_id,
+            "xMm": contour.x_mm, "yMm": contour.y_mm,
+            "placedWidthMm": contour.placed_width_mm, "placedHeightMm": contour.placed_height_mm,
+            "labelLines": [line.text[:200] for line in lines[:4]],
+            "sourceSvg": {"viewBox": contour.source_svg.view_box, "body": contour.source_svg.body} if contour.source_svg else None,
+        })
     return SvgCutLayout(
-        status="valid" if parts and (lenient or not reasons) else "invalid",
+        render_only_contours=render_only_contours,
+        status="valid" if parts else "invalid",
         reasons=reasons,
         sheet_width_mm=round(sheet_width, 2),
         sheet_height_mm=round(sheet_height, 2),
@@ -334,6 +318,7 @@ def layout_to_dict(layout: SvgCutLayout) -> dict[str, Any]:
             "widthMm": layout.sheet_width_mm,
             "heightMm": layout.sheet_height_mm,
         } if layout.sheet_width_mm is not None and layout.sheet_height_mm is not None else None,
+        "renderOnlyContours": layout.render_only_contours,
         "rawCommentCount": layout.raw_comment_count,
         "partContourCount": layout.part_contour_count,
         "acceptedItemCount": len(layout.items) if layout.status == "valid" else 0,
@@ -356,7 +341,7 @@ def detail_comments(element: ET.Element) -> list[str]:
 
 def parse_detail_comment(comment: str, bbox_size: tuple[float, float] | None) -> dict[str, Any] | None:
     match = DETAIL_HEADER_RE.search(comment)
-    if not match:
+    if not match or int(match.group("detail")) <= 0:
         return None
     size_match = DETAIL_SIZE_RE.search(comment)
     width = positive_float(size_match.group("width")) if size_match else None
@@ -375,16 +360,18 @@ def parse_detail_comment(comment: str, bbox_size: tuple[float, float] | None) ->
 def build_items_from_visual_contours(
     contours: list[ContourGeometry],
     labels: list[VisualDetailLabel],
+    *, allow_informational: bool = True,
 ) -> tuple[list[VectorItem], set[str]]:
     items: list[VectorItem] = []
     rejected: set[str] = set()
     seen: set[str] = set()
     matches = match_visual_labels_to_contours(contours, labels) if labels else {}
     for index, contour in enumerate(contours):
-        label = matches.get(id(contour))
+        visual_label = matches.get(id(contour))
+        label = visual_label or comment_identity_label(contour)
         if label is None:
-            if labels:
-                rejected.add("detail contour has no readable visual label")
+            if labels or not allow_informational:
+                rejected.add(f"{contour.element_id}: detail contour has no readable visual label or unambiguous Comments identity")
                 continue
             fallback = VectorItem(
                 order_name="SVG",
@@ -420,7 +407,7 @@ def build_items_from_visual_contours(
             rotated=round(contour.placed_width_mm) == round(height_mm)
             and round(contour.placed_height_mm) == round(width_mm),
             source_svg=contour.source_svg,
-            visual_label={"rawLines": [line for line in label.raw_lines if line][:4]},
+            visual_label={"rawLines": [line for line in visual_label.raw_lines if line][:4]} if visual_label else None,
         )
         key = f"{item.order_name}:{item.detail_number}:{item.width_mm}:{item.height_mm}:{item.source_element_id}"
         if key in seen:
@@ -428,6 +415,24 @@ def build_items_from_visual_contours(
         seen.add(key)
         items.append(item)
     return items, rejected
+
+
+def comment_identity_label(contour: ContourGeometry) -> VisualDetailLabel | None:
+    # Comments cannot replace real contour dimensions or an existing visual label.
+    identities = {
+        (parsed["orderName"], parsed["detailNumber"])
+        for value in detail_comments(contour.element)
+        if (parsed := parse_detail_comment(value, None)) is not None
+    }
+    if len(identities) != 1:
+        return None
+    order_name, detail_number = next(iter(identities))
+    return VisualDetailLabel(
+        key=f"comments:{contour.element_id}", order_name=order_name, detail_number=detail_number,
+        width_mm=None, height_mm=None, has_explicit_size=False,
+        cx_mm=contour.x_mm + contour.placed_width_mm / 2,
+        cy_mm=contour.y_mm + contour.placed_height_mm / 2, line_points_mm=[], raw_lines=[],
+    )
 
 
 def extract_visual_detail_labels(

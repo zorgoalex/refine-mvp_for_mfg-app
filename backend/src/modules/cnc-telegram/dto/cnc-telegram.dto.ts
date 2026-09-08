@@ -1,3 +1,4 @@
+import type { SvgRenderContour } from '../../../shared/svg-render-contours';
 export type CncTelegramParseStatus = 'received' | 'parsed' | 'needs_review';
 export type CncTelegramCompletionStatus = 'pending' | 'completed';
 export type CncTelegramItemSource = 'vector' | 'ocr' | 'gcode' | 'manual';
@@ -65,6 +66,7 @@ export interface CncTelegramCutLayoutItemVisualLabelDto {
 }
 
 export interface CncTelegramCutLayoutDto {
+  renderOnlyContours?: SvgRenderContour[];
   status: 'valid' | 'invalid';
   reasons: string[];
   sheet: {

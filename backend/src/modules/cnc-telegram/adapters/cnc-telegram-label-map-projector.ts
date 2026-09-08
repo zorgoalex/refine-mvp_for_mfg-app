@@ -1,3 +1,4 @@
+import { normalizeSvgRenderContours } from '../../../shared/svg-render-contours';
 import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { auditService } from '../../../common/audit/audit.service';
@@ -288,6 +289,7 @@ export async function projectTelegramLabelMap(
 
   const sheet: SheetPlacementsJson = {
     trim_mm: { left: 0, right: 0, top: 0, bottom: 0 },
+    renderOnlyContours: normalizeSvgRenderContours(layout.renderOnlyContours, layout.sheet),
     sheet_width_mm: layout.sheet.widthMm,
     sheet_height_mm: layout.sheet.heightMm,
     pieces: layout.items.map((item, index) => ({
@@ -300,6 +302,7 @@ export async function projectTelegramLabelMap(
       rotated: item.rotated,
     })),
   };
+  const totalContourCount = layout.items.length + (sheet.renderOnlyContours?.length ?? 0);
   const baseSvg = buildSheetSvg({ sheet, labelFor: () => '', showLabels: false });
   const layoutDigest = digest(layout);
   const totalSafePlacements = safeCandidates.reduce((sum, candidate) => sum + candidate.items.length, 0);
@@ -324,7 +327,7 @@ export async function projectTelegramLabelMap(
       packet.source_message_id,
       packet.source_created_at,
       packet.source_updated_at,
-      layout.items.length,
+      totalContourCount,
       totalSafePlacements,
       Number(input.context.actorUserId),
       input.context.requestId,
@@ -378,7 +381,7 @@ export async function projectTelegramLabelMap(
       payloadHash: packet.payload_hash,
       evidenceSetDigest: header.evidence_set_digest,
       layoutDigest,
-      totalContourCount: layout.items.length,
+      totalContourCount,
       projectionSource: input.source,
     },
     relatedEntities: [
@@ -395,7 +398,7 @@ export async function projectTelegramLabelMap(
       sheetMapId,
       layoutDigest,
       safePlacementCount: totalSafePlacements,
-      totalContourCount: layout.items.length,
+      totalContourCount,
       auditId,
       requestId: input.context.requestId,
     },

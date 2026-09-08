@@ -1,9 +1,12 @@
 import { Body, Controller, Get, Post, Query, Req, Res } from '@nestjs/common';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { ApiExcludeController } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { ApiError } from '../../../common/errors/api-error';
 import { CrmSyncRuntimeConfigService } from '../http/crm-sync-runtime-config.service';
 import { Bitrix24PaymentWidgetInstallService } from './bitrix24-payment-widget-install.service';
+import { normalizeBitrix24AppCallback } from './bitrix24-payment-widget.dto';
 
 @ApiExcludeController()
 @Controller('integrations/bitrix24')
@@ -13,6 +16,15 @@ export class Bitrix24PaymentWidgetInstallController {
     private readonly config: CrmSyncRuntimeConfigService,
   ) {}
 
+  @Get('widget-assets/install.js')
+  installJs(@Res() response: Response): void {
+    response.set({
+      'Content-Type': 'text/javascript; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+    }).send(readFileSync(join(__dirname, '../../../../assets/bitrix24-payment-widget/install.js'), 'utf8'));
+  }
+
   @Post('install-ui')
   async installUi(
     @Req() request: Request & { requestId?: string },
@@ -20,7 +32,7 @@ export class Bitrix24PaymentWidgetInstallController {
     @Res() response: Response,
   ): Promise<void> {
     try {
-      const result = await this.install.begin(body);
+      const result = await this.install.begin(normalizeBitrix24AppCallback(request.query, body));
       installHeaders(response, result.domain);
       const apiPrefix = this.config.getReverseSync().apiPrefix;
       response.status(200).send(installHtml(result.state, `${apiPrefix}/integrations/bitrix24/app`));
@@ -55,7 +67,7 @@ export class Bitrix24PaymentWidgetInstallController {
     try {
       const result = await this.install.finish({
         state,
-        body,
+        body: normalizeBitrix24AppCallback(request.query, body),
         requestId: request.requestId ?? 'bitrix24-app',
       });
       installHeaders(response, result.domain);

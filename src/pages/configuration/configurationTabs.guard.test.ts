@@ -127,6 +127,19 @@ describe('configuration tabs layout', () => {
     ]);
   });
 
+  it('shows only the two WhatsApp tabs to a WhatsApp-only administrator', () => {
+    const items = [
+      { key: 'orders' },
+      { key: 'production' },
+      { key: 'whatsapp-connection' },
+      { key: 'whatsapp-automation' },
+    ];
+    expect(filterConfigurationTabItems(items, false, false, true)).toEqual([
+      { key: 'whatsapp-connection' },
+      { key: 'whatsapp-automation' },
+    ]);
+  });
+
   it('restores the last active configuration tab when it is still available', () => {
     expect(CONFIGURATION_ACTIVE_TAB_STORAGE_KEY).toBe('configuration:activeTab');
     expect(resolveConfigurationActiveTab('cut', ['orders', 'cut', 'labels'])).toBe('cut');

@@ -463,6 +463,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
         command.idempotencyKey, fieldsAudit(before), command.fields, set,
         set.details.filter((detail) => detail.bazisCutSetDetailId === command.detailId),
         { updatedDetailId: command.detailId });
+      await evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'detail-updated');
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
     });
@@ -491,6 +492,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       await recordMutation(tx, command.currentUser, command.requestId, 'bazis_cut_set.detail_removed', command.setId,
         command.idempotencyKey, fieldsAudit(before), null, set, [before],
         { removedDetailId: command.detailId });
+      await evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'detail-removed');
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
     });
@@ -956,9 +958,10 @@ async function evaluateBazisCutSetMachineFilesPresentAutomation(
   currentUser: CurrentUser,
   requestId: string | undefined,
   set: BazisCutSetDto,
-  eventSource: 'created' | 'details-added',
+  eventSource: 'created' | 'details-added' | 'detail-updated' | 'detail-removed',
 ): Promise<void> {
   await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
+    source: { kind: 'bazisCutSet', id: String(set.bazisCutSetId) },
     orderIds: set.details.map((detail) => detail.sourceOrderId),
     actor: currentUser,
     requestId: requestId ?? `bazis-cut-set-${eventSource}-${set.bazisCutSetId}`,

@@ -29,6 +29,30 @@ function db(results: Array<{ rows: QueryResultRow[] }>): {
 }
 
 describe('PgAuditLogRepository.list', () => {
+  it('resolves legacy cut-job numbers by primary ID, without modifying audit storage', async () => {
+    const { client, calls } = db([
+      { rows: [{ total: 1 }] },
+      { rows: [{ audit_id: 'cut-audit', event: 'cut_job.deleted', entity_type: 'cut_job', entity_id: '912',
+        metadata_json: { releasedCount: 48 }, created_at: '2026-09-08T10:00:00.000Z' }] },
+      { rows: [{ cut_job_id: '912', name: 'Тест раскрой', source_display_number: 'В-27' }] },
+    ]);
+    const result = await new PgAuditLogRepository(client).list({ currentUser: undefined, filters: {}, page: 1, pageSize: 50, requestId: 'test' });
+    expect(result.data[0].metadata).toMatchObject({ releasedCount: 48, cutJobId: 912, cutJobDisplayNumber: 'В-27', cutJobName: 'Тест раскрой', cutJobIdentitySource: 'current_record' });
+    expect(calls[2].params).toEqual([[912]]);
+    expect(calls.every((call) => !/UPDATE|INSERT/i.test(call.text))).toBe(true);
+  });
+
+  it('preserves the event snapshot even after the job is renamed or its number reused', async () => {
+    const metadata = { cutJobId: 912, cutJobDisplayNumber: 'В-27', cutJobName: 'Тест старое имя', cutJobIdentitySource: 'event_snapshot' };
+    const { client, calls } = db([
+      { rows: [{ total: 1 }] },
+      { rows: [{ audit_id: 'cut-audit', event: 'cut_job.deleted', entity_type: 'cut_job', entity_id: '912', metadata_json: metadata, created_at: '2026-09-08T10:00:00.000Z' }] },
+    ]);
+    const result = await new PgAuditLogRepository(client).list({ currentUser: undefined, filters: {}, page: 1, pageSize: 50, requestId: 'test' });
+    expect(result.data[0].metadata).toEqual(metadata);
+    expect(calls).toHaveLength(2);
+  });
+
   it('enriches status automation rule events with the linked status command audit', async () => {
     const statusCommandAuditId = '29987552-3914-4bb9-985b-c9690d366fd1';
     const { client, calls } = db([

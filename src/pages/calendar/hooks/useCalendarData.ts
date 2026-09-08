@@ -386,6 +386,6 @@ export const useCalendarData = (
     productionWorkflowDisplay,
     materialOptions,
     millingTypeOptions,
-    error: isError ? (error as Error) : undefined,
+    error: isError ? error : undefined,
   };
 };

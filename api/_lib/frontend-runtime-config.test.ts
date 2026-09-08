@@ -36,6 +36,7 @@ describe('frontend runtime config delivery', () => {
         bazisImport: false,
         enableLegacyHasura: true,
         workosAuth: false,
+        backendWhatsApp: false,
       },
       observability: { performanceRum: false },
       rollouts: {
@@ -67,6 +68,7 @@ describe('frontend runtime config delivery', () => {
         RUNTIME_CONFIG_BACKEND_USERS: 'true',
         RUNTIME_CONFIG_BACKEND_VLM: 'true',
         RUNTIME_CONFIG_BACKEND_REFERENCES: 'false',
+        RUNTIME_CONFIG_BACKEND_WHATSAPP: 'true',
         RUNTIME_CONFIG_BAZIS_CUT: 'true',
         RUNTIME_CONFIG_ORDER_STATUS_BOARD: 'true',
         RUNTIME_CONFIG_ORDER_REALTIME: 'true',
@@ -113,6 +115,7 @@ describe('frontend runtime config delivery', () => {
         bazisImport: false,
         enableLegacyHasura: false,
         workosAuth: false,
+        backendWhatsApp: true,
       },
       observability: { performanceRum: true },
       rollouts: {

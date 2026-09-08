@@ -10,20 +10,63 @@ function readTemplate(path: string): string {
 }
 
 describe('VPS compose backend runtime flags', () => {
+  it('defines WAHA as a bounded internal profile with dedicated egress', () => {
+    const composePath = resolve(repoRoot, 'ops/templates/docker-compose.vps.yml');
+    const envPath = resolve(repoRoot, 'ops/templates/env.vps.example');
+    const rendered = JSON.parse(
+      execFileSync(
+        'docker',
+        [
+          'compose',
+          '--env-file',
+          envPath,
+          '-f',
+          composePath,
+          '--profile',
+          'whatsapp',
+          'config',
+          '--format',
+          'json',
+        ],
+        {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            COMPOSE_PROFILES: 'whatsapp',
+            CNC_TELEGRAM_WORKER_IMAGE_REVISION: 'd0e683b40744',
+          },
+        },
+      ),
+    );
+    const waha = rendered.services.waha;
+    expect(waha.image).toBe('devlikeapro/waha:gows-2026.8.2');
+    expect(waha.ports).toBeUndefined();
+    expect(waha.labels).toBeUndefined();
+    expect(Object.keys(waha.networks).sort()).toEqual(
+      expect.arrayContaining(['back', 'whatsapp_egress']),
+    );
+    expect(Object.keys(waha.networks)).not.toEqual(expect.arrayContaining(['edge', 'host_access']));
+    expect(waha.environment.WAHA_DASHBOARD_ENABLED).toBe('false');
+    expect(waha.environment.WHATSAPP_SWAGGER_ENABLED).toBe('false');
+    expect(waha.environment.WHATSAPP_DOWNLOAD_MEDIA).toBe('false');
+    const egressUsers = Object.entries(rendered.services)
+      .filter(([, service]) =>
+        Object.keys((service as { networks?: object }).networks ?? {}).includes('whatsapp_egress'),
+      )
+      .map(([name]) => name);
+    expect(egressUsers).toEqual(['waha']);
+  });
+
   it('keeps browser auth sessions active for 48 hours by default', () => {
     const compose = readTemplate('ops/templates/docker-compose.vps.yml');
     const envExample = readTemplate('ops/templates/env.vps.example');
 
-    expect(compose).toContain(
-      'AUTH_SESSION_TTL_SECONDS: ${AUTH_SESSION_TTL_SECONDS:-172800}',
-    );
+    expect(compose).toContain('AUTH_SESSION_TTL_SECONDS: ${AUTH_SESSION_TTL_SECONDS:-172800}');
     expect(envExample).toContain('AUTH_SESSION_TTL_SECONDS=172800');
   });
 
   it('injects exact identity and realtime gates into the backend runtime environment', () => {
-    const identityOverlay = readTemplate(
-      'ops/templates/docker-compose.backend-build-identity.yml',
-    );
+    const identityOverlay = readTemplate('ops/templates/docker-compose.backend-build-identity.yml');
 
     expect(identityOverlay).toMatch(
       /environment:\s*\n\s+BACKEND_BUILD_SHA: \$\{BACKEND_BUILD_SHA:\?BACKEND_BUILD_SHA must identify the exact repository HEAD\}/,
@@ -46,27 +89,33 @@ describe('VPS compose backend runtime flags', () => {
     );
     const envPath = resolve(repoRoot, 'ops/templates/env.vps.example');
     const backendContext = resolve(repoRoot, 'backend');
-    const rendered = JSON.parse(execFileSync(
-      'docker',
-      [
-        'compose',
-        '--env-file', envPath,
-        '-f', composePath,
-        '-f', identityOverlayPath,
-        'config',
-        '--format', 'json',
-      ],
-      {
-        encoding: 'utf8',
-        env: {
-          ...process.env,
-          BACKEND_BUILD_CONTEXT: backendContext,
-          BACKEND_BUILD_IMAGE: `erp-backend:${sha}`,
-          BACKEND_BUILD_SHA: sha,
-          CNC_TELEGRAM_WORKER_IMAGE_REVISION: sha,
+    const rendered = JSON.parse(
+      execFileSync(
+        'docker',
+        [
+          'compose',
+          '--env-file',
+          envPath,
+          '-f',
+          composePath,
+          '-f',
+          identityOverlayPath,
+          'config',
+          '--format',
+          'json',
+        ],
+        {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            BACKEND_BUILD_CONTEXT: backendContext,
+            BACKEND_BUILD_IMAGE: `erp-backend:${sha}`,
+            BACKEND_BUILD_SHA: sha,
+            CNC_TELEGRAM_WORKER_IMAGE_REVISION: sha,
+          },
         },
-      },
-    ));
+      ),
+    );
 
     expect(rendered.services.backend.image).toBe(`erp-backend:${sha}`);
     expect(rendered.services.backend.build.context).toBe(backendContext);
@@ -110,9 +159,7 @@ describe('VPS compose backend runtime flags', () => {
     const compose = readTemplate('ops/templates/docker-compose.vps.yml');
     const envExample = readTemplate('ops/templates/env.vps.example');
 
-    expect(compose).toContain(
-      'BACKEND_STATUS_AUTOMATION: ${BACKEND_STATUS_AUTOMATION:-false}',
-    );
+    expect(compose).toContain('BACKEND_STATUS_AUTOMATION: ${BACKEND_STATUS_AUTOMATION:-false}');
     expect(envExample).toContain('# событийные автостатусы, движок off by default');
     expect(envExample).toContain('BACKEND_STATUS_AUTOMATION=false');
   });
@@ -141,37 +188,51 @@ describe('VPS compose backend runtime flags', () => {
     const envExample = readTemplate('ops/templates/env.vps.example');
 
     expect(compose).toContain('BACKEND_ENABLE_CNC_TELEGRAM: ${BACKEND_ENABLE_CNC_TELEGRAM:-false}');
-    expect(localCompose).toContain('BACKEND_ENABLE_CNC_TELEGRAM: ${BACKEND_ENABLE_CNC_TELEGRAM:-false}');
+    expect(localCompose).toContain(
+      'BACKEND_ENABLE_CNC_TELEGRAM: ${BACKEND_ENABLE_CNC_TELEGRAM:-false}',
+    );
     expect(envExample).toContain('BACKEND_ENABLE_CNC_TELEGRAM=false');
   });
 
   it('renders explicit worker audit policy for bearer-only backend auth', () => {
     const composePath = resolve(repoRoot, 'ops/templates/docker-compose.vps.yml');
     const envPath = resolve(repoRoot, 'ops/templates/env.vps.example');
-    const rendered = JSON.parse(execFileSync(
-      'docker',
-      ['compose', '--env-file', envPath, '-f', composePath, 'config', '--format', 'json'],
-      {
-        encoding: 'utf8',
-        env: {
-          ...process.env,
-          ERP_BEARER_TOKEN: 'test-bearer-token',
-          CNC_TELEGRAM_WORKER_IMAGE_REVISION: 'd0e683b40744',
-          COMPOSE_PROFILES: 'cnc-telegram',
-          ERP_WORKER_LOGIN: '',
-          TELEGRAM_ALLOWED_CHAT_ID: '',
-          CNC_TELEGRAM_WORKER_USERNAME: 'cnc-bearer-worker',
-          CNC_TELEGRAM_ALLOWED_CHAT_IDS: '-1009007199254740993',
+    const rendered = JSON.parse(
+      execFileSync(
+        'docker',
+        ['compose', '--env-file', envPath, '-f', composePath, 'config', '--format', 'json'],
+        {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            ERP_BEARER_TOKEN: 'test-bearer-token',
+            CNC_TELEGRAM_WORKER_IMAGE_REVISION: 'd0e683b40744',
+            COMPOSE_PROFILES: 'cnc-telegram',
+            ERP_WORKER_LOGIN: '',
+            TELEGRAM_ALLOWED_CHAT_ID: '',
+            CNC_TELEGRAM_WORKER_USERNAME: 'cnc-bearer-worker',
+            CNC_TELEGRAM_ALLOWED_CHAT_IDS: '-1009007199254740993',
+          },
         },
-      },
-    ));
+      ),
+    );
 
-    expect(rendered.services.backend.environment.CNC_TELEGRAM_WORKER_USERNAME).toBe('cnc-bearer-worker');
-    expect(rendered.services.backend.environment.CNC_TELEGRAM_ALLOWED_CHAT_IDS).toBe('-1009007199254740993');
+    expect(rendered.services.backend.environment.CNC_TELEGRAM_WORKER_USERNAME).toBe(
+      'cnc-bearer-worker',
+    );
+    expect(rendered.services.backend.environment.CNC_TELEGRAM_ALLOWED_CHAT_IDS).toBe(
+      '-1009007199254740993',
+    );
     expect(rendered.services.backend.environment.CNC_TELEGRAM_MANUAL_IMPORT_ENABLED).toBe('false');
     expect(rendered.services['cnc-telegram-worker'].command).toEqual(['serve']);
-    expect(rendered.services['cnc-telegram-worker'].labels['com.mebelkz.cnc-telegram-worker.command']).toBe('serve');
-    expect(rendered.services['cnc-telegram-worker'].labels['com.mebelkz.cnc-telegram-worker.image-revision']).toBe('d0e683b40744');
+    expect(
+      rendered.services['cnc-telegram-worker'].labels['com.mebelkz.cnc-telegram-worker.command'],
+    ).toBe('serve');
+    expect(
+      rendered.services['cnc-telegram-worker'].labels[
+        'com.mebelkz.cnc-telegram-worker.image-revision'
+      ],
+    ).toBe('d0e683b40744');
   });
 
   it('defines the CNC Telegram Telethon worker as an internal profile service', () => {
@@ -203,14 +264,20 @@ describe('VPS compose backend runtime flags', () => {
 
     expect(compose).toContain('glm-ocr-model-init:');
     expect(compose).toContain('image: ${GLM_OCR_MODEL_INIT_IMAGE:-curlimages/curl:8.10.1}');
-    expect(compose).toContain('GLM_OCR_MODEL_URL: ${GLM_OCR_MODEL_URL:-https://huggingface.co/ggml-org/GLM-OCR-GGUF/resolve/main/GLM-OCR-Q8_0.gguf?download=true}');
-    expect(compose).toContain('GLM_OCR_MMPROJ_URL: ${GLM_OCR_MMPROJ_URL:-https://huggingface.co/ggml-org/GLM-OCR-GGUF/resolve/main/mmproj-GLM-OCR-Q8_0.gguf?download=true}');
+    expect(compose).toContain(
+      'GLM_OCR_MODEL_URL: ${GLM_OCR_MODEL_URL:-https://huggingface.co/ggml-org/GLM-OCR-GGUF/resolve/main/GLM-OCR-Q8_0.gguf?download=true}',
+    );
+    expect(compose).toContain(
+      'GLM_OCR_MMPROJ_URL: ${GLM_OCR_MMPROJ_URL:-https://huggingface.co/ggml-org/GLM-OCR-GGUF/resolve/main/mmproj-GLM-OCR-Q8_0.gguf?download=true}',
+    );
     expect(compose).toContain('glm-ocr-llama:');
     expect(compose).toContain('image: ${GLM_OCR_LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}');
     expect(compose).toContain('/models/${GLM_OCR_MODEL_FILE:-GLM-OCR-Q8_0.gguf}');
     expect(compose).toContain('/models/${GLM_OCR_MMPROJ_FILE:-mmproj-GLM-OCR-Q8_0.gguf}');
     expect(compose).toContain('glm-ocr-runner:');
-    expect(compose).toContain('context: ${GLM_OCR_RUNNER_BUILD_CONTEXT:-./repo_erp/glm-ocr-runner}');
+    expect(compose).toContain(
+      'context: ${GLM_OCR_RUNNER_BUILD_CONTEXT:-./repo_erp/glm-ocr-runner}',
+    );
     expect(compose).toContain('LLAMA_SERVER_URL: ${LLAMA_SERVER_URL:-http://glm-ocr-llama:8080}');
     expect(glmModelInitSegment).toContain('profiles: ["cnc-telegram-glm"]');
     expect(glmLlamaSegment).toContain('profiles: ["cnc-telegram-glm"]');
@@ -221,28 +288,42 @@ describe('VPS compose backend runtime flags', () => {
     expect(compose).not.toContain('CNC_TELEGRAM_WORKER_BUILD_CONTEXT');
     expect(compose).toContain('ERP_STACK_ENV: ${ERP_STACK_ENV:-test}');
     expect(compose).toContain('CNC_TELEGRAM_WORKER_ROLE: ${CNC_TELEGRAM_WORKER_ROLE:-reader}');
-    expect(compose).toContain('CNC_TELEGRAM_ALLOW_NON_PROD_WRITER: ${CNC_TELEGRAM_ALLOW_NON_PROD_WRITER:-false}');
+    expect(compose).toContain(
+      'CNC_TELEGRAM_ALLOW_NON_PROD_WRITER: ${CNC_TELEGRAM_ALLOW_NON_PROD_WRITER:-false}',
+    );
     expect(workerSegment).toContain('command: ["serve"]');
     expect(workerSegment).not.toContain('command: ["daemon"]');
     expect(workerSegment).toContain('com.mebelkz.cnc-telegram-worker.image-revision');
     expect(workerSegment).not.toContain(':-unknown');
-    expect(workerSegment).toContain('CNC_TELEGRAM_WORKER_IMAGE_REVISION must be an immutable git revision');
+    expect(workerSegment).toContain(
+      'CNC_TELEGRAM_WORKER_IMAGE_REVISION must be an immutable git revision',
+    );
     expect(workerSegment).toContain('CNC_TELEGRAM_SESSION_LEASE_TTL_SECONDS');
     expect(workerSegment).toContain('CNC_TELEGRAM_SESSION_HEARTBEAT_SECONDS');
     expect(workerSegment).toContain('CNC_TELEGRAM_MANUAL_IMPORT_ENABLED');
     expect(compose).toContain('TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}');
-    expect(compose).toContain('ERP_API_URL: ${CNC_TELEGRAM_ERP_API_URL:-http://backend:3000/api/v1}');
+    expect(compose).toContain(
+      'ERP_API_URL: ${CNC_TELEGRAM_ERP_API_URL:-http://backend:3000/api/v1}',
+    );
     expect(compose).toContain('CNC_ENABLE_GLM_OCR: ${CNC_ENABLE_GLM_OCR:-false}');
-    expect(compose).toContain('CNC_OCR_COMMAND: ${CNC_OCR_COMMAND:-python -m cnc_telegram_worker.rapid_ocr_client --image {image}}');
-    expect(compose).toContain('CNC_OCR_COMMAND_TIMEOUT_SECONDS: ${CNC_OCR_COMMAND_TIMEOUT_SECONDS:-180}');
-    expect(compose).toContain('GLM_OCR_RUNNER_URL: ${GLM_OCR_RUNNER_URL:-http://glm-ocr-runner:8001/ocr}');
+    expect(compose).toContain(
+      'CNC_OCR_COMMAND: ${CNC_OCR_COMMAND:-python -m cnc_telegram_worker.rapid_ocr_client --image {image}}',
+    );
+    expect(compose).toContain(
+      'CNC_OCR_COMMAND_TIMEOUT_SECONDS: ${CNC_OCR_COMMAND_TIMEOUT_SECONDS:-180}',
+    );
+    expect(compose).toContain(
+      'GLM_OCR_RUNNER_URL: ${GLM_OCR_RUNNER_URL:-http://glm-ocr-runner:8001/ocr}',
+    );
     expect(compose).toContain('CNC_TEMP_TTL_HOURS: ${CNC_TEMP_TTL_HOURS:-24}');
     expect(compose).toContain('CNC_POLL_INTERVAL_SECONDS: ${CNC_POLL_INTERVAL_SECONDS:-60}');
     expect(compose).toContain('cnc-telegram-worker-data:/data');
     expect(compose).toContain('cnc-telegram-worker-data:');
     expect(compose).toContain('glm-ocr-model-cache:');
     expect(workerSegment).toMatch(/networks:[\s\S]*- back[\s\S]*- host_access[\s\S]*cpus:/);
-    expect(overlay).toMatch(/cnc-telegram-worker:[\s\S]*networks:[\s\S]*- back[\s\S]*- host_access/);
+    expect(overlay).toMatch(
+      /cnc-telegram-worker:[\s\S]*networks:[\s\S]*- back[\s\S]*- host_access/,
+    );
     expect(workerSegment).not.toMatch(/traefik\.enable=true|ports:/);
     expect(overlay).toContain('glm-ocr-model-init:');
     expect(overlay).toContain('glm-ocr-llama:');
@@ -286,7 +367,9 @@ describe('VPS compose backend runtime flags', () => {
     expect(normalUpSegment).not.toContain('compose up -d --build glm-ocr-model-init');
     expect(workerScript).toContain('enable_profile cnc-telegram-glm');
     expect(workerScript).toContain('export CNC_ENABLE_GLM_OCR="true"');
-    expect(workerScript).toContain('export CNC_OCR_COMMAND_TIMEOUT_SECONDS="$((10#$client_timeout + 60))"');
+    expect(workerScript).toContain(
+      'export CNC_OCR_COMMAND_TIMEOUT_SECONDS="$((10#$client_timeout + 60))"',
+    );
     expect(workerScript).toContain('export CNC_OCR_ENGINE="glm-ocr-0.9b-q8"');
     expect(workerScript).toContain(
       'compose up -d --build --wait --wait-timeout 1800 glm-ocr-runner',
@@ -316,8 +399,12 @@ describe('VPS compose backend runtime flags', () => {
     expect(compose).toContain('context: ${CAD_BUILD_CONTEXT:-./repo_svgdxf}');
     expect(compose).toContain('traefik.http.routers.cad.rule=Host(`${CAD_FQDN}`)');
     expect(compose).toContain('traefik.http.services.cad.loadbalancer.server.port=8000');
-    expect(compose).toContain('CAD_SERVICE_TRUST_PROXY_HEADERS: ${CAD_SERVICE_TRUST_PROXY_HEADERS:-1}');
-    expect(compose).toContain('CAD_SERVICE_BASE_URL: ${CAD_SERVICE_BASE_URL:-http://cad-service:8000}');
+    expect(compose).toContain(
+      'CAD_SERVICE_TRUST_PROXY_HEADERS: ${CAD_SERVICE_TRUST_PROXY_HEADERS:-1}',
+    );
+    expect(compose).toContain(
+      'CAD_SERVICE_BASE_URL: ${CAD_SERVICE_BASE_URL:-http://cad-service:8000}',
+    );
   });
 
   it('documents the CAD service env vars in the VPS env example', () => {

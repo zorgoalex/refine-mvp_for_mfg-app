@@ -316,6 +316,35 @@ describe('PgCncTelegramRepository', () => {
     )).toBe(false);
   });
 
+  it.each([500, null])('restores hidden cards once and reuses active jobs with result %s', async (resultId) => {
+    const { queries, first, second, hiddenAt } = await runManualSvgMdfFollowupSequence({ hidden: true, resultId });
+    expect(first.createdMdfMachineFileCard).toBe(true);
+    expect(second.createdMdfMachineFileCard).toBe(false);
+    expect(first.packet.svgCutJobId).toBe(30);
+    expect(second.packet.svgCutJobId).toBe(30);
+    expect(hiddenAt).toBeNull();
+    expect(queries.filter(q => /INSERT INTO cut_job\s*\(/i.test(q.text))).toHaveLength(0);
+    const events = queries.filter(q => /INSERT INTO outbox_events/i.test(q.text));
+    expect(events.filter(q => q.params[0] === 'cnc.manual_svg_upload.mdf_card_restored')).toHaveLength(1);
+    expect(events.filter(q => q.params[0] === 'cnc.manual_svg_upload.mdf_card_created')).toHaveLength(0);
+  });
+
+  it('keeps the card hidden when its creation is not requested', async () => {
+    const { first, second, hiddenAt } = await runManualSvgMdfFollowupSequence({ hidden: true, createCard: false });
+    expect(first.createdMdfMachineFileCard).toBe(false);
+    expect(second.createdMdfMachineFileCard).toBe(false);
+    expect(hiddenAt).not.toBeNull();
+  });
+
+  it('records distinct restoration events across repeated hide cycles', async () => {
+    const { queries, first, second } = await runManualSvgMdfFollowupSequence({ hidden: true, hideAgain: true });
+    expect(first.createdMdfMachineFileCard).toBe(true);
+    expect(second.createdMdfMachineFileCard).toBe(true);
+    const events = queries.filter(q => /INSERT INTO outbox_events/i.test(q.text) && q.params[0] === 'cnc.manual_svg_upload.mdf_card_restored');
+    expect(events).toHaveLength(2);
+    expect(new Set(events.map(q => q.params[4])).size).toBe(2);
+  });
+
   it('uses database current date for today when caller omits date', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const database = {
@@ -2928,6 +2957,7 @@ describe('PgCncTelegramRepository', () => {
         if (/INSERT INTO cut_job\s*\(/i.test(text)) {
           return { rows: [{ cut_job_id: 800, created_at: '2026-08-17T07:00:00.000Z' }] };
         }
+        if (/INSERT INTO cut_result\s*\(/i.test(text)) return { rows: [{ cut_result_id: 899 }] };
         if (/INSERT INTO cut_group\s*\(/i.test(text)) {
           return { rows: [{ cut_group_id: 801 }] };
         }
@@ -2942,7 +2972,7 @@ describe('PgCncTelegramRepository', () => {
             rows: [packetRow({
               cutting_sequence_no: 104,
               svg_cut_job_id: 800,
-              svg_cut_result_id: null,
+              svg_cut_result_id: 899,
               svg_cut_import_status: 'imported',
             })],
           };
@@ -3040,8 +3070,8 @@ describe('PgCncTelegramRepository', () => {
 
     expect(queries.some((query) => /FROM orders o/i.test(query.text) && /JOIN order_details od/i.test(query.text))).toBe(true);
     expect(jobInsert?.params[7]).toBe('1');
-    expect(queries.some((query) => /INSERT INTO cut_result_command/i.test(query.text))).toBe(false);
-    expect(queries.some((query) => /INSERT INTO cut_result\s*\(/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO cut_result_command/i.test(query.text))).toBe(true);
+    expect(queries.some((query) => /INSERT INTO cut_result\s*\(/i.test(query.text))).toBe(true);
     expect(JSON.parse(String(sheetInsert?.params[2]))).toMatchObject({
       pieces: [
         { label: { orderId: 2808, orderName: '2808', detailId: 8801 } },
@@ -3052,10 +3082,10 @@ describe('PgCncTelegramRepository', () => {
       'imported',
       'Предупреждение: раскрой создан в информативном режиме; связь с деталями ERP неполная',
       800,
-      null,
+      899,
     ]);
     expect(result.packet.svgCutJobId).toBe(800);
-    expect(result.packet.svgCutResultId).toBeNull();
+    expect(result.packet.svgCutResultId).toBe(899);
     expect(result.packet.svgCutImportStatus).toBe('imported');
   });
 
@@ -3078,10 +3108,11 @@ describe('PgCncTelegramRepository', () => {
         if (/INSERT INTO cut_job\s*\(/i.test(text)) {
           return { rows: [{ cut_job_id: 810, created_at: '2026-08-19T10:00:00.000Z' }] };
         }
+        if (/INSERT INTO cut_result\s*\(/i.test(text)) return { rows: [{ cut_result_id: 899 }] };
         if (/INSERT INTO cut_group\s*\(/i.test(text)) return { rows: [{ cut_group_id: 811 }] };
         if (/INSERT INTO cut_group_sheet\s*\(/i.test(text)) return { rows: [{ cut_group_sheet_id: 812 }] };
         if (/FROM cnc_telegram_packets p/i.test(text)) {
-          return { rows: [packetRow({ cutting_sequence_no: 105, svg_cut_job_id: 810, svg_cut_result_id: null, svg_cut_import_status: 'imported' })] };
+          return { rows: [packetRow({ cutting_sequence_no: 105, svg_cut_job_id: 810, svg_cut_result_id: 899, svg_cut_import_status: 'imported' })] };
         }
         if (/INSERT INTO audit_log/i.test(text)) return { rows: [{ audit_id: 'audit-1' }] };
         return { rows: [] };
@@ -3128,9 +3159,9 @@ describe('PgCncTelegramRepository', () => {
       'imported',
       'Предупреждение: раскрой создан без привязки к ERP-заказу; проверьте заказ вручную',
       810,
-      null,
+      899,
     ]);
-    expect(result.packet).toMatchObject({ svgCutJobId: 810, svgCutResultId: null, svgCutImportStatus: 'imported' });
+    expect(result.packet).toMatchObject({ svgCutJobId: 810, svgCutResultId: 899, svgCutImportStatus: 'imported' });
   });
 
   it('keeps ERP detail matches when manual SVG upload uses lenient validation', async () => {
@@ -3211,6 +3242,7 @@ describe('PgCncTelegramRepository', () => {
         if (/INSERT INTO cut_job\s*\(/i.test(text)) {
           return { rows: [{ cut_job_id: 700, created_at: '2026-08-12T08:00:00.000Z' }] };
         }
+        if (/INSERT INTO cut_result\s*\(/i.test(text)) return { rows: [{ cut_result_id: 899 }] };
         if (/INSERT INTO cut_group\s*\(/i.test(text)) {
           return { rows: [{ cut_group_id: 701 }] };
         }
@@ -3265,7 +3297,14 @@ describe('PgCncTelegramRepository', () => {
     expect(snapshot.groups[0].sheets[0].placements.pieces[0].label.orderName).toBe('2689');
   });
 
-  it('keeps a partially resolved selected-order SVG as a cut job without an invalid cut result', async () => {
+  it.each([
+    { name: 'known order, unknown detail', sourceOrder: '2689', expectedOrderId: 2689, informational: false, extraOrders: [] },
+    { name: 'unknown order in mixed import', sourceOrder: '2900', expectedOrderId: null, informational: false, extraOrders: [] },
+    { name: 'unknown order in informational import', sourceOrder: '2900', expectedOrderId: null, informational: true, extraOrders: [] },
+    { name: 'internal ID is not a source order name', sourceOrder: '2900', expectedOrderId: null, informational: false, extraOrders: [{ order_id: 2900, order_name: 'E2E-2894' }] },
+    { name: 'ambiguous name stays unlinked', sourceOrder: '2900', expectedOrderId: null, informational: false, extraOrders: [{ order_id: 8001, order_name: '2900' }, { order_id: 8002, order_name: '2900' }] },
+    { name: 'informational internal ID collision', sourceOrder: '2900', expectedOrderId: null, informational: true, extraOrders: [{ order_id: 2900, order_name: 'E2E-2895' }] },
+  ])('preserves SVG identity: $name', async ({ sourceOrder, expectedOrderId, informational, extraOrders }) => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const tx = {
       query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
@@ -3281,7 +3320,7 @@ describe('PgCncTelegramRepository', () => {
           }] };
         }
         if (/SELECT\s+order_id,\s+order_name\s+FROM orders/i.test(text)) {
-          return { rows: [{ order_id: 2689, order_name: '2689' }] };
+          return { rows: [{ order_id: 2689, order_name: '2689' }, ...extraOrders] };
         }
         if (/INSERT INTO cnc_telegram_packets/i.test(text)) {
           return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000001' }] };
@@ -3328,6 +3367,7 @@ describe('PgCncTelegramRepository', () => {
         if (/INSERT INTO cut_job\s*\(/i.test(text)) {
           return { rows: [{ cut_job_id: 720, created_at: '2026-08-12T08:00:00.000Z' }] };
         }
+        if (/INSERT INTO cut_result\s*\(/i.test(text)) return { rows: [{ cut_result_id: 724 }] };
         if (/INSERT INTO cut_group\s*\(/i.test(text)) return { rows: [{ cut_group_id: 721 }] };
         if (/INSERT INTO cut_job_item\s*\(/i.test(text)) return { rows: [{ cut_job_item_id: 723 }] };
         if (/INSERT INTO cut_group_sheet\s*\(/i.test(text)) return { rows: [{ cut_group_sheet_id: 722 }] };
@@ -3336,7 +3376,7 @@ describe('PgCncTelegramRepository', () => {
             source_chat_id: 'erp-manual-svg-upload',
             cutting_sequence_no: 92,
             svg_cut_job_id: 720,
-            svg_cut_result_id: null,
+            svg_cut_result_id: 724,
             svg_cut_import_status: 'imported',
           })] };
         }
@@ -3358,8 +3398,8 @@ describe('PgCncTelegramRepository', () => {
       confidence: 0.99,
     };
     const unresolvedItem = {
-      sourceItemKey: '2689:999:497x477',
-      orderName: '2689',
+      sourceItemKey: `${sourceOrder}:999:497x477`,
+      orderName: sourceOrder,
       detailNumber: 999,
       widthMm: 497,
       heightMm: 477,
@@ -3370,6 +3410,8 @@ describe('PgCncTelegramRepository', () => {
     const dto = {
       ...manualSvgUploadDto(false, 'cnc:test:manual-svg:lenient-unresolved'),
       validationMode: 'lenient' as const,
+      matchMode: informational ? 'informational' as const : 'order_details' as const,
+      selectedOrderIds: [2689, ...extraOrders.map(order => order.order_id)],
       items: [resolvedItem, unresolvedItem],
       cutLayout: {
         ...manualSvgValidCutLayout(),
@@ -3409,20 +3451,33 @@ describe('PgCncTelegramRepository', () => {
       /UPDATE cnc_telegram_packets/i.test(query.text) && /svg_cut_import_status = \$2/i.test(query.text));
     expect(JSON.parse(String(sheetInsert?.params[2]))).toMatchObject({
       pieces: [
-        { label: { orderId: 2689, orderName: '2689', detailId: 3101 } },
-        { label: { orderId: 2689, orderName: '2689', detailId: null } },
+        { label: { orderId: 2689, orderName: '2689', detailId: informational ? null : 3101 } },
+        { label: { orderId: expectedOrderId, orderName: sourceOrder, detailId: null, detailNumber: 999, widthMm: 497, heightMm: 477 } },
       ],
     });
-    expect(queries.filter((query) => /INSERT INTO cut_job_item\s*\(/i.test(query.text))).toHaveLength(1);
-    expect(queries.some((query) => /INSERT INTO cut_result_command/i.test(query.text))).toBe(false);
-    expect(queries.some((query) => /INSERT INTO cut_result\s*\(/i.test(query.text))).toBe(false);
+    expect(queries.filter((query) => /INSERT INTO cut_job_item\s*\(/i.test(query.text))).toHaveLength(informational ? 0 : 1);
+    expect(queries.some((query) => /INSERT INTO cut_result_command/i.test(query.text))).toBe(true);
+    const resultInsert = queries.find((query) => /INSERT INTO cut_result\s*\(/i.test(query.text));
+    expect(resultInsert).toBeDefined();
+    const snapshot = JSON.parse(String(resultInsert?.params[4]));
+    expect(snapshot.groups[0].sheets[0].placements.pieces).toHaveLength(2);
+    expect(snapshot.items).toHaveLength(informational ? 0 : 1);
+    // PostgreSQL counts ERP items when present; source-only geometry still projects separately.
+    expect(JSON.parse(String(resultInsert?.params[5]))).toMatchObject({
+      items: informational ? 2 : 1,
+      instances: informational ? 2 : 1,
+    });
     expect(importUpdate?.params.slice(1, 5)).toEqual([
       'imported',
-      'Предупреждение: раскрой создан в информативном режиме; связь с деталями ERP неполная',
+      expect.any(String),
       720,
-      null,
+      724,
     ]);
-    expect(result.packet).toMatchObject({ svgCutJobId: 720, svgCutResultId: null, svgCutImportStatus: 'imported' });
+    const unknownInsert = queries.filter(query => /INSERT INTO cnc_telegram_packet_items/i.test(query.text))[1];
+    expect(unknownInsert.params[2]).toBe(sourceOrder);
+    expect(unknownInsert.params[10]).toBeNull();
+    if (expectedOrderId === null) expect(unknownInsert.params[9]).toBeNull();
+    expect(result.packet).toMatchObject({ svgCutJobId: 720, svgCutResultId: 724, svgCutImportStatus: 'imported' });
   });
 
   it('does not consult ERP resolver before same-version payload conflict checks', async () => {
@@ -3495,6 +3550,9 @@ describe('PgCncTelegramRepository', () => {
             })],
           };
         }
+        if (/SELECT DISTINCT details.order_id, details.detail_id/i.test(text)) {
+          return { rows: [{ order_id: 2689, detail_id: 3101 }] };
+        }
         if (/FROM app_settings/i.test(text)) {
           return { rows: [{ is_active: true, value_json: { value: true } }] };
         }
@@ -3510,9 +3568,6 @@ describe('PgCncTelegramRepository', () => {
         }
         if (/FROM production_statuses/i.test(text) && /production_status_id = ANY/i.test(text)) {
           return { rows: [{ production_status_id: 2, sort_order: 20 }] };
-        }
-        if (/WITH completed_quantities AS/i.test(text)) {
-          return { rows: [{ order_id: 2689, detail_id: 3101 }] };
         }
         if (/FROM orders\s+WHERE order_id = ANY/i.test(text)) {
           return {
@@ -3573,7 +3628,7 @@ describe('PgCncTelegramRepository', () => {
 
     await repo.ingest({ currentUser: user(), dto, requestId: 'request-cnc-auto-cut' });
 
-    const targetQuery = queries.find((query) => /WITH completed_quantities AS/i.test(query.text));
+    const targetQuery = queries.find((query) => /SELECT DISTINCT details.order_id, details.detail_id/i.test(query.text));
     const bathStateQuery = queries.find((query) =>
       /placement\.cut_result_id = \$1/i.test(query.text)
       && /layout_mode.*vacuum_table/is.test(query.text),
@@ -3581,7 +3636,7 @@ describe('PgCncTelegramRepository', () => {
     const orderLockIndex = queries.findIndex((query) =>
       /FROM orders\s+WHERE order_id = ANY/i.test(query.text),
     );
-    const targetQueryIndex = queries.findIndex((query) => /WITH completed_quantities AS/i.test(query.text));
+    const targetQueryIndex = queries.findIndex((query) => /SELECT DISTINCT details.order_id, details.detail_id/i.test(query.text));
     const detailLockIndex = queries.findIndex((query) => /FOR UPDATE OF details/i.test(query.text));
     const currentStatusLockIndex = queries.findIndex((query) =>
       /FROM production_statuses/i.test(query.text)
@@ -3596,7 +3651,8 @@ describe('PgCncTelegramRepository', () => {
     );
 
     expect(targetQuery?.params).toEqual([[3101], [], [2689]]);
-    expect(targetQuery?.text).toContain('SUM(GREATEST(item.quantity, 0))');
+    expect(targetQuery?.text).toContain('SELECT detail_id, completed_quantity FROM mdf_cut_quantities');
+    expect(targetQuery?.text).toContain('UNION ALL SELECT * FROM mdf_bazis_quantities');
     expect(targetQuery?.text).toContain('completed.completed_quantity, 0) >= GREATEST');
     expect(bathStateQuery?.text).toContain("COALESCE(p.material_name, '') ~*");
     expect(bathStateQuery?.text).toContain("COALESCE(p.program_name, '') !~*");
@@ -3725,7 +3781,7 @@ describe('PgCncTelegramRepository', () => {
   it('waits for the cumulative completed quantity before marking a detail as cut', async () => {
     const queries = await runAutoCutIngest({ targetRows: [] });
 
-    expect(queries.some((query) => /WITH completed_quantities AS/i.test(query.text))).toBe(true);
+    expect(queries.some((query) => /SELECT DISTINCT details.order_id, details.detail_id/i.test(query.text))).toBe(true);
     expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
   });
 
@@ -3761,7 +3817,7 @@ describe('PgCncTelegramRepository', () => {
     const queries = await runAutoCutIngest({ orderRows: [] });
 
     expect(queries.some((query) => /FROM orders\s+WHERE order_id = ANY/i.test(query.text))).toBe(true);
-    expect(queries.some((query) => /WITH completed_quantities AS/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /SELECT DISTINCT details.order_id, details.detail_id/i.test(query.text))).toBe(false);
     expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
   });
 
@@ -3796,7 +3852,7 @@ describe('PgCncTelegramRepository', () => {
     const orderLock = queries.find((query) =>
       /FROM orders\s+WHERE order_id = ANY/i.test(query.text),
     );
-    const targetQuery = queries.find((query) => /WITH completed_quantities AS/i.test(query.text));
+    const targetQuery = queries.find((query) => /SELECT DISTINCT details.order_id, details.detail_id/i.test(query.text));
 
     expect(orderLock?.params).toEqual([[2689]]);
     expect(orderLock?.text).not.toContain('lower(trim(order_name))');
@@ -3810,7 +3866,7 @@ describe('PgCncTelegramRepository', () => {
     const settingReadIndex = queries.findIndex((query) => /FROM app_settings/i.test(query.text));
     const settingWriteIndex = queries.findIndex((query) => /INSERT INTO app_settings/i.test(query.text));
     const backfillIndex = queries.findIndex((query) => /COUNT\(DISTINCT packet.packet_id\)/i.test(query.text));
-    const targetQuery = queries.find((query) => /WITH completed_quantities AS/i.test(query.text));
+    const targetQuery = queries.find((query) => /SELECT DISTINCT details.order_id, details.detail_id/i.test(query.text));
 
     expect(result).toEqual({
       settingEnabled: true,
@@ -4211,30 +4267,41 @@ function packetRowBase() {
   };
 }
 
-async function runManualSvgMdfFollowupSequence() {
+async function runManualSvgMdfFollowupSequence(options: {
+  hidden?: boolean; resultId?: number | null; createCard?: boolean; hideAgain?: boolean;
+} = {}) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
   const packetId = '00000000-0000-0000-0000-000000000091';
-  const dto = manualSvgUploadDto(true, 'cnc:test:manual-svg:mdf-followup-1');
+  const dto = manualSvgUploadDto(options.createCard ?? true, 'cnc:test:manual-svg:mdf-followup-1');
   const payloadHash = manualSvgPayloadHashForTest(dto);
   let completed = false;
-  let mdfCardCreated = false;
+  let mdfCardCreated = options.hidden ?? false;
+  let hiddenAt: string | null = options.hidden ? '2026-09-08T10:00:00.000Z' : null;
+  const resultId = options.resultId === undefined ? 500 : options.resultId;
+  const row = () => ({ ...manualSvgPacketRow(packetId, completed), svg_cut_result_id: resultId, mdf_board_hidden_at: hiddenAt });
   let auditIndex = 0;
   const mdfCardEventKey = `cnc-manual-svg:${packetId}:source-1:mdf-card-created`;
   const tx = {
     query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
       queries.push({ text, params });
+      if (/WITH hidden_machine_file AS/i.test(text)) {
+        const before = hiddenAt;
+        hiddenAt = null;
+        return { rows: before ? [{ hidden_at: before, hidden_by: 1, hidden_reason: 'cut_job_deleted', hidden_cut_job_id: 29 }] : [] };
+      }
+      if (/SELECT status FROM cut_job/i.test(text)) return { rows: [{ status: 'ready' }] };
       if (/INSERT INTO command_idempotency_keys/i.test(text)) {
         return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
       }
       if (/p\.workday/i.test(text) && /p\.packet_id = \$1::uuid/i.test(text)) {
         return {
-          rows: [manualSvgPacketRow(packetId, completed)],
+          rows: [row()],
         };
       }
       if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
         return {
           rows: [{
-            ...manualSvgPacketRow(packetId, completed),
+            ...row(),
             packet_id: packetId,
             source_version: 1,
             payload_hash: payloadHash,
@@ -4278,9 +4345,9 @@ async function runManualSvgMdfFollowupSequence() {
       if (/SELECT svg_cut_job_id, svg_cut_result_id, svg_cut_import_status, cutting_sequence_no/i.test(text)) {
         return {
           rows: [{
-            ...manualSvgPacketRow(packetId, completed),
+            ...row(),
             svg_cut_job_id: 30,
-            svg_cut_result_id: 500,
+            svg_cut_result_id: resultId,
             svg_cut_import_status: 'imported',
             cutting_sequence_no: 91,
           }],
@@ -4300,9 +4367,9 @@ async function runManualSvgMdfFollowupSequence() {
         if (params[4] === mdfCardEventKey) mdfCardCreated = true;
         return { rows: [] };
       }
-      if (/FROM cnc_telegram_packets p/i.test(text)) {
+      if (/FROM cnc_telegram_packets p/i.test(text) && !/SELECT DISTINCT details.order_id, details.detail_id/i.test(text)) {
         return {
-          rows: [manualSvgPacketRow(packetId, completed)],
+          rows: [row()],
         };
       }
       if (/FROM app_settings/i.test(text)) {
@@ -4324,12 +4391,13 @@ async function runManualSvgMdfFollowupSequence() {
     dto,
     requestId: 'request-manual-svg-mdf-followup-1',
   });
+  if (options.hideAgain) hiddenAt = '2026-09-08T11:00:00.000Z';
   const second = await repo.manualSvgUpload({
     currentUser: user(),
-    dto: manualSvgUploadDto(true, 'cnc:test:manual-svg:mdf-followup-2'),
+    dto: manualSvgUploadDto(options.createCard ?? true, 'cnc:test:manual-svg:mdf-followup-2'),
     requestId: 'request-manual-svg-mdf-followup-2',
   });
-  return { queries, first, second };
+  return { queries, first, second, hiddenAt };
 }
 
 function manualSvgPacketRow(packetId: string, completed: boolean) {
@@ -4576,7 +4644,7 @@ async function runAutoCutIngest(options: AutoCutIngestOptions = {}) {
       if (/FROM unnest\(\$1::bigint\[\], \$2::bigint\[\]\)/i.test(text)) {
         return { rows: [] };
       }
-      if (/FROM cnc_telegram_packets p/i.test(text)) {
+      if (/FROM cnc_telegram_packets p/i.test(text) && !/SELECT DISTINCT details.order_id, details.detail_id/i.test(text)) {
         return {
           rows: [packetRow({
             source_version: 2,
@@ -4589,6 +4657,7 @@ async function runAutoCutIngest(options: AutoCutIngestOptions = {}) {
           })],
         };
       }
+      if (/SELECT DISTINCT details.order_id, details.detail_id/i.test(text)) return { rows: targetRows };
       if (/FROM app_settings/i.test(text)) {
         return {
           rows: options.settingRows ?? [{ is_active: true, value_json: { value: true } }],
@@ -4617,7 +4686,6 @@ async function runAutoCutIngest(options: AutoCutIngestOptions = {}) {
             })),
         };
       }
-      if (/WITH completed_quantities AS/i.test(text)) return { rows: targetRows };
       if (/FROM orders\s+WHERE order_id = ANY/i.test(text)) return { rows: orderRows };
       if (/FROM order_details details/i.test(text) && /FOR UPDATE OF details/i.test(text)) {
         return { rows: detailRows };
@@ -4696,6 +4764,9 @@ async function runAutoCutConfigure(options: AutoCutConfigureOptions = {}) {
           }],
         };
       }
+      if (/SELECT DISTINCT details.order_id, details.detail_id/i.test(text)) {
+        return { rows: [{ order_id: 2689, detail_id: 3101 }] };
+      }
       if (/FROM app_settings/i.test(text)) {
         return { rows: [{ is_active: true, value_json: { value: false } }] };
       }
@@ -4740,9 +4811,6 @@ async function runAutoCutConfigure(options: AutoCutConfigureOptions = {}) {
             production_status_from_details_enabled: true,
           }],
         };
-      }
-      if (/WITH completed_quantities AS/i.test(text)) {
-        return { rows: [{ order_id: 2689, detail_id: 3101 }] };
       }
       if (/FROM order_details details/i.test(text) && /FOR UPDATE OF details/i.test(text)) {
         return {

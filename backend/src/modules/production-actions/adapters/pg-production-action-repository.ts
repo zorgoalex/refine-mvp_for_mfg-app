@@ -5,6 +5,7 @@ import { auditService } from '../../../common/audit/audit.service';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import { mdfCutReadinessCtes } from '../../../shared/cnc-material/cut-readiness-sql';
+import type { MdfBoardDetailScope } from '../../status-automation/application/mdf-board-event.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole, type PermissionName } from '../../../permissions/permissions';
 import type { MdfBoardColumnAutomationInput } from '../../status-automation/application/status-automation-runtime';
@@ -53,6 +54,7 @@ export interface AutomationActionContext {
   ruleName: string;
   eventType: string;
   outboxIdempotencyKey: string;
+  mdfBoardScope?: MdfBoardDetailScope;
 }
 
 export interface AutomationActionResult {
@@ -2330,9 +2332,14 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
   ctx: AutomationActionContext,
   detailTransitionMode: 'set_exact' | 'advance_only' = 'set_exact',
 ): Promise<AutomationActionResult> {
+  if (ctx.eventType.startsWith('mdf.') && !ctx.mdfBoardScope) {
+    return { status: 'skipped', skipReason: 'mdf_source_required' };
+  }
+  if (ctx.mdfBoardScope) detailTransitionMode = 'advance_only';
   const order = await loadOrderForUpdate(tx, orderId);
   const status = await loadProductionStatus(tx, targetStatusId);
-  const currentDetails = await loadOrderDetailsForBatch(tx, order.orderId);
+  const currentDetails = await loadOrderDetailsForBatch(tx, order.orderId,
+    ctx.mdfBoardScope?.details.filter(d => d.requiredQuantity > 0 && d.eligibleQuantity >= d.requiredQuantity).map(d => d.detailId));
   if (currentDetails.length === 0) {
     return { status: 'skipped', skipReason: 'no_details' };
   }
@@ -2422,6 +2429,7 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
     productionStatusFromDetailsEnabled: true,
     action: 'automation_status_change',
     statusField: 'productionDetailBatch',
+    ...(ctx.mdfBoardScope ? { mdfBoardScope: ctx.mdfBoardScope } : {}),
   });
   const auditId = await writeAudit(tx, {
     event: 'orders.detail_production_status_batch_change',
@@ -2493,13 +2501,15 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
       idempotencyKey: ctx.outboxIdempotencyKey,
     },
   });
-  await evaluateMdfBoardLaminatedBathAutomationForDetails(tx, {
-    detailIds: changedDetailIds,
-    actor: ctx.actor,
-    requestId: ctx.requestId,
-    sourceIdempotencyKey: ctx.outboxIdempotencyKey,
-  });
-  await clearMdfBoardManualMovesForOrder(tx, order.orderId);
+  if (!ctx.mdfBoardScope) {
+    await evaluateMdfBoardLaminatedBathAutomationForDetails(tx, {
+      detailIds: changedDetailIds,
+      actor: ctx.actor,
+      requestId: ctx.requestId,
+      sourceIdempotencyKey: ctx.outboxIdempotencyKey,
+    });
+    await clearMdfBoardManualMovesForOrder(tx, order.orderId);
+  }
 
   return { status: 'executed', auditId };
 }
@@ -3141,6 +3151,7 @@ async function runRecalcOrderProductionStatus(tx: TransactionClient, orderId: nu
 async function loadOrderDetailsForBatch(
   tx: TransactionClient,
   orderId: number,
+  selectedDetailIds?: number[],
 ): Promise<Array<{
   detailId: number;
   productionStatusId: number | null;
@@ -3161,10 +3172,11 @@ async function loadOrderDetailsForBatch(
       ON status.production_status_id = detail.production_status_id
     WHERE detail.order_id = $1
       AND COALESCE(detail.delete_flag, false) = false
+      ${selectedDetailIds === undefined ? '' : 'AND detail.detail_id = ANY($2::bigint[])'}
     ORDER BY detail.detail_id
     FOR UPDATE OF detail
     `,
-    [orderId],
+    selectedDetailIds === undefined ? [orderId] : [orderId, selectedDetailIds],
   );
   return result.rows.map((row) => ({
     detailId: toNumber(row.detail_id),
@@ -3496,6 +3508,7 @@ async function evaluateMdfBoardLaminatedBathAutomationForDetails(
   for (const [cutResultId, orderIds] of orderIdsByCutResult) {
     await evaluateMdfBoardColumnAutomationInTransaction(tx, {
       eventType: 'mdf.board.baths_laminated',
+      source: { kind: 'bath', id: `cut-result:${cutResultId}` },
       orderIds,
       actor: input.actor,
       requestId: input.requestId,

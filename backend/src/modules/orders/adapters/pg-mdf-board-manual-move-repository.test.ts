@@ -8,7 +8,7 @@ const runtimeMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../status-automation/application/status-automation-runtime', () => ({
-  evaluateMdfBoardColumnAutomation: runtimeMocks.evaluateMdfBoardColumnAutomation,
+  dispatchMdfBoardEvent: runtimeMocks.evaluateMdfBoardColumnAutomation,
 }));
 
 describe('PgMdfBoardManualMoveRepository', () => {
@@ -38,8 +38,7 @@ describe('PgMdfBoardManualMoveRepository', () => {
     expect(tx.texts.some((text) => text.includes('INSERT INTO mdf_board_manual_moves'))).toBe(true);
     expect(tx.texts.some((text) => text.includes('INSERT INTO audit_log'))).toBe(true);
     expect(runtimeMocks.evaluateMdfBoardColumnAutomation).toHaveBeenCalledWith(expect.anything(), {
-      eventType: 'mdf.board.completed',
-      orderIds: [1001, 1002],
+      source: { kind: 'packet', id: 'packet-1' },
       actor: user(),
       requestId: 'req-1',
       sourceIdempotencyKey: 'mdf-board:manual:packet:packet-1:version-1:completed',

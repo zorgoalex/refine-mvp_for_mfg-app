@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import { RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
-import { json, urlencoded } from 'express';
+import { json, raw, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import { ApiErrorFilter } from './common/errors/api-error.filter';
 import { createRequestIdMiddleware } from './common/request-id/request-id.middleware';
@@ -22,7 +22,10 @@ import {
 } from './performance/performance-rum-body-parser';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true, bodyParser: false });
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true,
+    bodyParser: false,
+  });
   const config = app.get(ConfigService<BackendEnv, true>);
   const apiPrefix = config.get('API_PREFIX', { infer: true });
 
@@ -34,7 +37,9 @@ async function bootstrap(): Promise<void> {
 
   const cors = createCorsRuntimeOptions({
     CORS_ALLOWED_ORIGINS: config.get('CORS_ALLOWED_ORIGINS', { infer: true }),
-    CORS_ALLOW_CREDENTIALS: config.get('CORS_ALLOW_CREDENTIALS', { infer: true }),
+    CORS_ALLOW_CREDENTIALS: config.get('CORS_ALLOW_CREDENTIALS', {
+      infer: true,
+    }),
   });
 
   // RUM is a tiny, fixed-shape payload. Mount its parser first so oversized
@@ -44,12 +49,15 @@ async function bootstrap(): Promise<void> {
     createPerformanceRumBodyParser(),
     createPerformanceRumFormBodyParser(),
   );
-  const bitrixCallbackPath =
-    `${normalizeApiPrefix(apiPrefix)}/integrations/bitrix24`;
+  const bitrixCallbackPath = `${normalizeApiPrefix(apiPrefix)}/integrations/bitrix24`;
   app.use(
     bitrixCallbackPath,
     json({ limit: '256kb' }),
     urlencoded({ limit: '256kb', extended: true, parameterLimit: 200 }),
+  );
+  app.use(
+    `${normalizeApiPrefix(apiPrefix)}/whatsapp/webhook`,
+    raw({ type: 'application/json', limit: '256kb' }),
   );
   app.use(json({ limit: '50mb' }));
   app.use(urlencoded({ limit: '50mb', extended: true }));

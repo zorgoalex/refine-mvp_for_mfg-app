@@ -33,6 +33,7 @@ import { PermissionsModule } from './permissions/permissions.module';
 import { RateLimitModule } from './rate-limit/rate-limit.module';
 import { RequestContextModule } from './common/request-context/request-context.module';
 import { PerformanceModule } from './performance/performance.module';
+import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 
 @Module({
   imports: [
@@ -72,6 +73,7 @@ import { PerformanceModule } from './performance/performance.module';
     UsersModule,
     VlmModule,
     PermissionsModule,
+    WhatsAppModule,
   ],
 })
 export class AppModule {}

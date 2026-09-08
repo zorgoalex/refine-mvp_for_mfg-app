@@ -59,6 +59,22 @@ describe('production workflow visual layout', () => {
 
     expect(normalized.layout_rows).toEqual([['drawn', 'cut'], ['packed']]);
   });
+
+  it('drops malformed persisted rows and non-string stage codes', () => {
+    const normalized = normalizeProductionWorkflowConfig(
+      {
+        ...buildDefaultProductionWorkflowConfig(
+          statuses,
+          'production.workflow.default',
+        ),
+        layout_rows: ['invalid', ['drawn', 42], [], ['cut']] as unknown as string[][],
+      },
+      statuses,
+      'production.workflow.default',
+    );
+
+    expect(normalized.layout_rows).toEqual([['drawn'], ['cut'], ['packed']]);
+  });
 });
 
 function status(

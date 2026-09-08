@@ -7,10 +7,11 @@ import {
   Bitrix24TokenCipher,
   hashBitrix24ApplicationToken,
 } from '../reverse/bitrix24-token-cipher';
-import { parseRuntimeAuth } from './bitrix24-payment-widget.dto';
+import { parseAppApplicationToken, parseRuntimeAuth } from './bitrix24-payment-widget.dto';
 import {
   Bitrix24PaymentWidgetRepository,
   hashWidgetToken,
+  type WidgetInstallAttempt,
 } from './bitrix24-payment-widget.repository';
 
 export class Bitrix24PaymentWidgetInstallService {
@@ -92,25 +93,42 @@ export class Bitrix24PaymentWidgetInstallService {
         'Bitrix24 administrator must finish the application installation',
       );
     }
-    if (!input.state) {
-      const active = await this.repository.getActiveInstallation(auth.memberId, auth.domain);
-      if (!active || active.executorBitrixUserId !== executor.id) {
-        throw new ApiError(
-          409,
-          'BITRIX24_INSTALL_ATTEMPT_INVALID',
-          'Open installation flow to activate this application',
-        );
+    const applicationToken = parseAppApplicationToken(input.body);
+    const applicationTokenHash = applicationToken === null
+      ? null : hashBitrix24ApplicationToken(applicationToken);
+    let stateTokenHash: string;
+    let attempt: WidgetInstallAttempt | null;
+    if (input.state === undefined) {
+      const pending = applicationTokenHash === null ? null
+        : await this.repository.getPendingInstallAttempt({
+          memberId: auth.memberId, domain: auth.domain,
+          executorBitrixUserId: executor.id, applicationTokenHash,
+        });
+      if (!pending) {
+        const active = await this.repository.getActiveInstallation(auth.memberId, auth.domain);
+        if (!active || active.executorBitrixUserId !== executor.id ||
+          (applicationTokenHash !== null && active.applicationTokenHash !== applicationTokenHash)) {
+          throw new ApiError(
+            409,
+            'BITRIX24_INSTALL_ATTEMPT_INVALID',
+            'Open installation flow to activate this application',
+          );
+        }
+        return { status: 'active', domain: auth.domain, executorBitrixUserId: executor.id };
       }
-      return { status: 'active', domain: auth.domain, executorBitrixUserId: executor.id };
+      stateTokenHash = pending.stateTokenHash;
+      attempt = pending;
+    } else {
+      if (typeof input.state !== 'string' || !/^[A-Za-z0-9_-]{32,256}$/.test(input.state)) throw invalidContext();
+      stateTokenHash = hashWidgetToken(input.state);
+      attempt = await this.repository.getInstallAttempt(stateTokenHash);
     }
-    if (!/^[A-Za-z0-9_-]{32,256}$/.test(input.state)) throw invalidContext();
-    const stateTokenHash = hashWidgetToken(input.state);
-    const attempt = await this.repository.getInstallAttempt(stateTokenHash);
     if (
       !attempt ||
       attempt.memberId !== auth.memberId ||
       attempt.domain !== auth.domain ||
-      attempt.executorBitrixUserId !== executor.id
+      attempt.executorBitrixUserId !== executor.id ||
+      (applicationTokenHash !== null && attempt.applicationTokenHash !== applicationTokenHash)
     ) {
       throw new ApiError(
         409,

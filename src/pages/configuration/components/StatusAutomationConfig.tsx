@@ -490,7 +490,9 @@ export function StatusAutomationConfig() {
     form.actionType === 'change_order_status'
       ? 'Какой статус установить заказу?'
       : form.actionType === 'change_details_production_status'
-        ? 'Какой статус установить всем деталям?'
+        ? form.eventType.startsWith('mdf.')
+          ? 'Какой статус установить позициям исходной карточки после выполнения полного количества?'
+          : 'Какой статус установить всем деталям?'
         : 'Какой общий статус производства установить?';
   const availableConditionOptions = STATUS_AUTOMATION_CONDITION_KEYS
     .filter((key) => allowedConditionSet.has(key) && !activeConditionKeys.includes(key))
@@ -1058,7 +1060,7 @@ export function StatusAutomationConfig() {
           {canManage && (
             <Popconfirm
               title="Обновить автостатусы"
-              description="Будут проверены все заказы за последние два месяца через все включённые правила."
+              description="Будут проверены заказы за последние два месяца. Правила событий МДФ-доски пропускаются: для них нужна исходная карточка."
               okText="Обновить"
               cancelText="Отмена"
               onConfirm={() => void handleRefreshRecentOrders()}
@@ -1502,7 +1504,8 @@ export function StatusAutomationConfig() {
                   >
                     <Select
                       aria-label="Режим изменения статусов деталей"
-                      value={form.detailTransitionMode ?? 'set_exact'}
+                      value={form.eventType.startsWith('mdf.') ? 'advance_only' : form.detailTransitionMode ?? 'set_exact'}
+                      disabled={form.eventType.startsWith('mdf.')}
                       onChange={(value) => updateForm({ detailTransitionMode: value })}
                       options={[
                         { value: 'set_exact', label: 'Установить точно, включая откат' },

@@ -238,6 +238,26 @@ describe('label template editor helpers', () => {
     expect(isCustomFieldExpressionValid(rows[0].expression!, new Set(['detail.edge_type_name']))).toBe(true);
   });
 
+  it.each([
+    {
+      type: 'aggregate',
+      source: 'sheet.details',
+      field: 'detail.edge_type_name',
+      fn: 'unique_join',
+      separator: 42,
+    },
+    {
+      type: 'if_else',
+      when: { field: 'detail.material_name', op: 'equals', value: { nested: true } },
+      then: { type: 'text', value: 'yes' },
+      else: { type: 'text', value: 'no' },
+    },
+  ])('rejects malformed persisted custom expression values: %j', (root) => {
+    const [row] = customFieldRowsFromSchema({ 'custom.invalid': expressionSchema(root) });
+
+    expect(row.expression).toBeNull();
+  });
+
   it('detects custom formula dependency cycles and reports oversized preview output', () => {
     const rows = customFieldRowsFromSchema({
       'custom.a': expressionSchema({ type: 'field', field: 'custom.b' }),
@@ -272,6 +292,20 @@ describe('label template editor helpers', () => {
     expect(evaluateCustomFieldPreviewValues(rows, { 'detail.optional_value': null })).toMatchObject({
       'custom.source': '',
       'custom.exists': 'нет',
+    });
+  });
+
+  it('keeps primitive constants and JSON-normalizes structured preview values', () => {
+    const rows = customFieldRowsFromSchema({
+      'custom.null': { type: 'string', label: 'Null', defaultValue: null },
+      'custom.boolean': { type: 'boolean', label: 'Boolean', defaultValue: false },
+      'custom.object': { type: 'string', label: 'Object', defaultValue: { nested: true } },
+    });
+
+    expect(evaluateCustomFieldPreviewValues(rows, {})).toEqual({
+      'custom.null': '',
+      'custom.boolean': 'false',
+      'custom.object': '{"nested":true}',
     });
   });
 

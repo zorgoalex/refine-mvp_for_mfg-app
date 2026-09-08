@@ -112,13 +112,13 @@ describe('status automation DTO', () => {
         parseCreateStatusAutomationRuleRequest({
           name,
           eventType,
-          actionType: 'change_production_status',
+          actionType: 'change_details_production_status',
           targetStatusId: 3,
           conditions: { currentOrderStatusIn: [1] },
         }),
       ).toMatchObject({
         eventType,
-        actionType: 'change_production_status',
+        actionType: 'change_details_production_status',
         conditions: { currentOrderStatusIn: [1] },
       });
     });

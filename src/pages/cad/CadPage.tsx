@@ -12,6 +12,7 @@ import { useTabStore } from '../../stores/tabStore';
 import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
 import { CadCanvas } from './CadCanvas';
 import { loadCadTabs, saveCadTabs } from './cadViewState';
+import { useCadRecipeCatalog } from './useCadRecipeCatalog';
 import './cad.css';
 
 interface Draft { groups: CadGroup[]; sources: CadSourceSnapshot[] }
@@ -35,8 +36,8 @@ export function CadPage() {
   const enabled = allowed && capabilities.data?.enabled === true;
   const orders = useQuery(['cad-order-picker', debounced], () => ordersApi.list({ search: debounced, page: 1, pageSize: 100 }), { enabled: allowed });
   const workspace = useQuery(['cad-workspace', orderId], () => cadApi.workspace(orderId), { enabled: enabled && Number.isSafeInteger(orderId) && orderId > 0, retry: false });
-  const catalog = useQuery(['cad-recipes'], cadApi.catalog, { enabled, retry: false });
-  const mappings = useQuery(['cad-mappings'], cadApi.mappings, { enabled: enabled && mappingOpen });
+  const catalog = useCadRecipeCatalog(enabled, active, mappingOpen);
+  const mappings = useQuery(['cad-mappings'], cadApi.mappings, { enabled: enabled && active && mappingOpen });
   const variants = workspace.data?.variants ?? [];
   const variant = variants.find(v => v.id === variantId) ?? variants.find(v => v.kind === 'original');
   const visibleVariants = variants.filter(v => v.kind === 'original' || openIds === null || openIds.includes(v.id) || v.id === variantId);
@@ -151,7 +152,14 @@ export function CadPage() {
     </Modal>
     <Modal open={mappingOpen} title="Соответствия ERP → CAD" footer={null} onCancel={() => setMappingOpen(false)} width={850}>
       <p>Только одобренные версии CAD. Изменения не затронут сохранённые оригиналы.</p>
-      {mappings.data?.map(m => <label key={m.milling_type_id} className="cad-import-row"><span>{m.milling_type_name}</span><Select style={{ width: 380 }} value={m.recipe ? `${m.recipe.code}@${m.recipe.version}` : undefined} placeholder="Не сопоставлено" disabled={busy} options={catalog.data?.recipes.filter(r => r.status === 'production').map(r => ({ value: `${r.code}@${r.version}`, label: `${r.display_name} · ${r.version}` }))} onChange={value => void action(async () => { const r = catalog.data?.recipes.find(r => `${r.code}@${r.version}` === value); if (r) { await cadApi.map(m.milling_type_id, { code: r.code, version: r.version, parameters: {} }, m.revision ?? 0); await mappings.refetch(); } })} /></label>)}
+      <Space wrap>
+        <Typography.Text type="secondary">Каталог обновляется каждые 10 секунд, пока окно активно.</Typography.Text>
+        <Button loading={catalog.isFetching || mappings.isFetching} onClick={() => { void catalog.refetch({ cancelRefetch: false }); void mappings.refetch({ cancelRefetch: false }); }}>Обновить список</Button>
+      </Space>
+      {catalog.isError && <Alert type="warning" message="Не удалось обновить каталог CAD" description={catalog.data ? 'Показан ранее загруженный список. Повторите обновление.' : 'Проверьте доступность CAD и повторите обновление.'} />}
+      {mappings.isError && <Alert type="warning" message="Не удалось загрузить соответствия" description="Повторите обновление списка." />}
+      {!catalog.isError && catalog.data && !catalog.data.recipes.some(r => r.status === 'production') && <Alert type="info" message="Нет одобренных версий рецептов" description="Сохраните и одобрите нужную версию в CAD-сервисе — она появится здесь автоматически." />}
+      {mappings.data?.map(m => <label key={m.milling_type_id} className="cad-import-row"><span>{m.milling_type_name}</span><Select aria-label={`Рецепт CAD: ${m.milling_type_name}`} style={{ width: 380 }} value={m.recipe ? `${m.recipe.code}@${m.recipe.version}` : undefined} placeholder="Не сопоставлено" disabled={busy} loading={catalog.isFetching} options={catalog.data?.recipes.filter(r => r.status === 'production').map(r => ({ value: `${r.code}@${r.version}`, label: `${r.display_name} · ${r.version}` }))} onChange={value => void action(async () => { const r = catalog.data?.recipes.find(r => `${r.code}@${r.version}` === value); if (r) { await cadApi.map(m.milling_type_id, { code: r.code, version: r.version, parameters: {} }, m.revision ?? 0); await mappings.refetch(); } })} /></label>)}
     </Modal>
   </div>;
 }

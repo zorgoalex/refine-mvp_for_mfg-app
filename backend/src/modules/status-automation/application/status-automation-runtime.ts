@@ -9,6 +9,8 @@ import {
   type AutomationActionResult,
 } from '../../production-actions/adapters/pg-production-action-repository';
 import { ProductionActionStatusNotFoundError } from '../../production-actions/errors/production-action.errors';
+import { loadMdfBoardEvents } from '../adapters/pg-mdf-board-event-repository';
+import { isMdfBoardEvent, type MdfBoardDetailScope, type MdfBoardEventInput } from './mdf-board-event.types';
 import {
   listEnabledRulesForEvent,
   listEnabledRulesForManualRefresh,
@@ -25,23 +27,22 @@ import type {
   StatusAutomationRule,
 } from './status-automation.types';
 
-export interface MdfOrderMachineFilesPresentAutomationInput {
-  orderIds: Iterable<number | null | undefined>;
-  actor: CurrentUser;
-  requestId: string;
-  sourceIdempotencyKey: string;
+export interface MdfOrderMachineFilesPresentAutomationInput extends MdfBoardEventInput {
+  /** Legacy audit hint only. Membership is always resolved from source. */
+  orderIds?: Iterable<number | null | undefined>;
 }
 
-export interface MdfBoardColumnAutomationInput {
+export interface MdfBoardColumnAutomationInput extends MdfBoardEventInput {
   eventType: Extract<
     StatusAutomationEvent['eventType'],
     'mdf.board.completed' | 'mdf.board.baths' | 'mdf.board.baths_ready' | 'mdf.board.baths_laminated'
   >;
-  orderIds: Iterable<number | null | undefined>;
-  actor: CurrentUser;
-  requestId: string;
-  sourceIdempotencyKey: string;
+  orderIds?: Iterable<number | null | undefined>;
 }
+
+// Only the server resolver can attach a scope. A generic event cannot opt into
+// an all-order MDF action by supplying an event name or fabricated detail IDs.
+const mdfScopes = new WeakMap<StatusAutomationEvent, MdfBoardDetailScope>();
 
 export interface ManualStatusAutomationOrderRefreshInput {
   orderId: number;
@@ -85,14 +86,20 @@ export async function evaluateStatusAutomation(
   if (!isStatusAutomationEnabled()) {
     return;
   }
+  const mdfScope = mdfScopes.get(event);
+  if (isMdfBoardEvent(event.eventType) && !mdfScope) return;
   const allRules = await listEnabledRulesForEvent(tx, event.eventType);
   // Automation-originated order status changes still need their downstream detail cascade.
   // Restrict that second hop to detail-only actions so status rules cannot recurse in cycles.
+  const compatibleRules = mdfScope ? allRules.filter(rule => rule.actionType === 'change_details_production_status') : allRules;
+  if (mdfScope) for (const rule of allRules) {
+    if (rule.actionType !== 'change_details_production_status') await recordRuleSkipped(tx, event, rule, 'mdf_detail_action_required');
+  }
   const rules = event.origin === 'automation'
-    ? allRules.filter((rule) =>
+    ? compatibleRules.filter((rule) =>
       rule.actionType === 'change_details_production_status'
       || rule.actionType === 'map_order_status_to_details_production_status')
-    : allRules;
+    : compatibleRules;
   if (rules.length === 0) {
     return;
   }
@@ -112,6 +119,7 @@ export async function evaluateStatusAutomation(
       ruleName: rule.name,
       eventType: event.eventType,
       outboxIdempotencyKey,
+      ...(mdfScope ? { mdfBoardScope: mdfScope } : {}),
     };
 
     let result: StatusAutomationActionRunResult;
@@ -163,6 +171,11 @@ export async function evaluateAllStatusAutomationRulesForOrder(
   const appliedActionTypes = new Set<string>();
   for (const rule of rules) {
     const event = manualRefreshEventForRule(input, rule.eventType);
+    if (isMdfBoardEvent(rule.eventType)) {
+      summary.skippedRuleCount += 1;
+      await recordRuleSkipped(tx, event, rule, 'mdf_source_required');
+      continue;
+    }
     const evaluation = evaluateRuleConditions(rule, state, event);
     if (!evaluation.matched) {
       summary.skippedRuleCount += 1;
@@ -217,46 +230,45 @@ export async function evaluateMdfOrderMachineFilesPresentAutomation(
   tx: TransactionClient,
   input: MdfOrderMachineFilesPresentAutomationInput,
 ): Promise<void> {
-  const orderIds = normalizeAutomationOrderIds(input.orderIds);
-  for (const orderId of orderIds) {
-    await evaluateStatusAutomation(tx, {
-      eventType: 'mdf.order_machine_files_present',
-      origin: 'user',
-      orderId,
-      actor: input.actor,
-      requestId: input.requestId,
-      sourceIdempotencyKey: `${input.sourceIdempotencyKey}:order-${orderId}`,
-    });
-  }
+  await dispatchMdfBoardEvent(tx, input);
 }
 
 export async function evaluateMdfBoardColumnAutomation(
   tx: TransactionClient,
   input: MdfBoardColumnAutomationInput,
 ): Promise<void> {
-  const orderIds = normalizeAutomationOrderIds(input.orderIds);
-  for (const orderId of orderIds) {
-    await evaluateStatusAutomation(tx, {
-      eventType: input.eventType,
-      origin: 'user',
-      orderId,
-      actor: input.actor,
-      requestId: input.requestId,
-      sourceIdempotencyKey: `${input.sourceIdempotencyKey}:order-${orderId}`,
-    });
-  }
+  await dispatchMdfBoardEvent(tx, input);
 }
 
-function normalizeAutomationOrderIds(
-  values: Iterable<number | null | undefined>,
-): number[] {
-  const ids = new Set<number>();
-  for (const value of values) {
-    if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) {
-      ids.add(value);
+/** Single internal API for all five MDF events. Never called from board GET. */
+export async function dispatchMdfBoardEvent(tx: TransactionClient, input: MdfBoardEventInput): Promise<void> {
+  if (!isStatusAutomationEnabled() || !input.source) return;
+  const rules = (await listEnabledRulesForManualRefresh(tx)).filter(rule => isMdfBoardEvent(rule.eventType));
+  if (!rules.length) return;
+  const initial = await loadMdfBoardEvents(tx, input.source);
+  const resolved = initial.filter(e => e.scope.source.kind === input.source.kind && e.scope.source.id === input.source.id);
+  // Resolve impacted mixed-order baths in their own full context, before any
+  // status writes. This avoids circular evidence from earlier rules in the batch.
+  const baths = new Set(initial.filter(e => e.scope.source.kind === 'bath'
+    && !(input.source.kind === 'bath' && e.scope.source.id === input.source.id)).map(e => e.scope.source.id));
+  for (const id of baths) resolved.push(...await loadMdfBoardEvents(tx, { kind: 'bath', id }));
+  for (const entry of resolved) {
+    if (!rules.some(rule => rule.eventType === entry.eventType)) continue;
+    const eligible = entry.scope.details.filter(d => d.requiredQuantity > 0 && d.eligibleQuantity >= d.requiredQuantity);
+    const event: StatusAutomationEvent = {
+      eventType: entry.eventType, origin: 'user', orderId: entry.orderId,
+      actor: input.actor, requestId: input.requestId,
+      sourceIdempotencyKey: `${input.sourceIdempotencyKey}:${entry.scope.source.kind}:${entry.scope.source.id}:${entry.eventType}:order-${entry.orderId}`,
+    };
+    mdfScopes.set(event, entry.scope);
+    if (!eligible.length) {
+      for (const rule of rules.filter(r => r.eventType === event.eventType)) {
+        await recordRuleSkipped(tx, event, rule, 'mdf_quantity_incomplete');
+      }
+      continue;
     }
+    await evaluateStatusAutomation(tx, event);
   }
-  return Array.from(ids).sort((left, right) => left - right);
 }
 
 function emptyOrderRefreshSummary(
@@ -331,7 +343,7 @@ async function runAutomationAction(
           orderId,
           requireTargetStatusId(rule),
           context,
-          rule.actionConfig?.detailTransitionMode ?? 'set_exact',
+          context.mdfBoardScope ? 'advance_only' : rule.actionConfig?.detailTransitionMode ?? 'set_exact',
         ),
       );
     case 'map_order_status_to_details_production_status': {
@@ -402,6 +414,7 @@ async function recordRuleApplied(
       } : {}),
       ruleName: rule.name,
       statusCommandAuditId: result.auditId ?? null,
+      ...(mdfScopes.has(event) ? { mdfBoardScope: mdfScopes.get(event), sourceIdempotencyKey: event.sourceIdempotencyKey } : {}),
       paymentStatusIdBefore: event.paymentStatusIdBefore ?? null,
       paymentStatusIdAfter: event.paymentStatusIdAfter ?? null,
       plannedCompletionDateBefore: event.plannedCompletionDateBefore ?? null,
@@ -432,6 +445,7 @@ async function recordRuleSkipped(
       targetStatusId: rule.targetStatusId,
       ruleName: rule.name,
       reason,
+      ...(mdfScopes.has(event) ? { mdfBoardScope: mdfScopes.get(event), sourceIdempotencyKey: event.sourceIdempotencyKey } : {}),
       plannedCompletionDateBefore: event.plannedCompletionDateBefore ?? null,
       plannedCompletionDateAfter: event.plannedCompletionDateAfter ?? null,
     },

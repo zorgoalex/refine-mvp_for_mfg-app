@@ -19,7 +19,8 @@ import { featureFlags } from '../../config/featureFlags';
 import { authSession } from '../../api/authSession';
 import { can } from '../../utils/permissions';
 import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
-import { buildAuditReadableSummary } from './readableSummary';
+import { auditObject, buildAuditReadableSummary } from './readableSummary';
+import { auditEventOptions, auditEventTitle } from './eventLabels';
 import { TelegramWorkerAudit } from './TelegramWorkerAudit';
 
 const { Text } = Typography;
@@ -154,7 +155,7 @@ function entityTypeLabel(entityType: string): string {
   return AUDIT_ENTITY_LABELS[entityType] ?? entityType;
 }
 
-function orderLabel(id: number | null | undefined, name?: string | null): string {
+function orderLabel(id: number | string | null | undefined, name?: string | null): string {
   const cleanName = name?.trim();
   if (cleanName && id != null) return `Заказ ${cleanName} (#${id})`;
   if (cleanName) return `Заказ ${cleanName}`;
@@ -409,6 +410,19 @@ export function ReadableAuditEvent({ record }: { record: AuditLogEventDto }) {
   );
 }
 
+export function AuditPrimaryEntity({ record }: { record: AuditLogEventDto }) {
+  if (record.entityType === 'cut_job') {
+    return <Text style={{ fontSize: 12 }}>{auditObject(record)}</Text>;
+  }
+  if (record.entityType === 'order' && record.entityId) {
+    return <Text style={{ fontSize: 12 }}>{orderLabel(record.entityId, record.entityName)}</Text>;
+  }
+  return <div>
+    <Text style={{ fontSize: 12 }}>{record.entityType ?? '—'}</Text>
+    {record.entityId && <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>#{record.entityId}</Text>}
+  </div>;
+}
+
 export interface HistoryJournalTableProps {
   mode?: AuditTableMode;
   embedded?: boolean;
@@ -621,7 +635,7 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
 
   const filterSelectOptions = useMemo(
     () => ({
-      events: stringSelectOptions(filterOptions.events),
+      events: auditEventOptions(filterOptions.events),
       entityTypes: stringSelectOptions(filterOptions.entityTypes),
       entityIds: stringSelectOptions(filterOptions.entityIds),
       users: userSelectOptions(filterOptions.users),
@@ -770,6 +784,7 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
                       mode="multiple"
                       placeholder="События"
                       options={filterSelectOptions.events}
+                      dropdownMatchSelectWidth={720}
                       maxTagCount="responsive"
                       style={{ width: 260 }}
                     />
@@ -832,6 +847,7 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
                     {...commonSelectProps}
                     placeholder="Событие"
                     options={filterSelectOptions.events}
+                    dropdownMatchSelectWidth={720}
                     style={{ width: 190 }}
                   />
                 </Form.Item>
@@ -1070,7 +1086,7 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
             title="Событие"
             width={180}
             ellipsis
-            render={(value: string) => <Tag color="blue">{value}</Tag>}
+            render={(value: string) => <Tag color="blue">{auditEventTitle(value)} — {value}</Tag>}
           />
           <Table.Column<AuditLogEventDto>
             title="Актор"
@@ -1092,16 +1108,7 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
           <Table.Column<AuditLogEventDto>
             title="Сущность"
             width={130}
-            render={(_, record) => (
-              <div>
-                <Text style={{ fontSize: 12 }}>{record.entityType ?? <span style={{ color: '#bfbfbf' }}>—</span>}</Text>
-                {record.entityId && (
-                  <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
-                    #{record.entityId}
-                  </Text>
-                )}
-              </div>
-            )}
+            render={(_, record) => <AuditPrimaryEntity record={record} />}
           />
           <Table.Column<AuditLogEventDto>
             title="Связанные объекты"

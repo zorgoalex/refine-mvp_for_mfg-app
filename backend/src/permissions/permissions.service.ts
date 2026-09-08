@@ -60,6 +60,7 @@ const DANGEROUS_PERMISSIONS = new Set<PermissionName>([
   'bitrix24.payments.create',
   'bitrix24.payments.confirm_overpayment',
   'settings.manage',
+  'whatsapp.manage',
   'audit.technical.view',
 ]);
 
@@ -162,7 +163,10 @@ export class PermissionsService {
     return Boolean(user?.permissions.includes(permission));
   }
 
-  canUserAny(user: CurrentUser | null | undefined, permissions: readonly PermissionName[]): boolean {
+  canUserAny(
+    user: CurrentUser | null | undefined,
+    permissions: readonly PermissionName[],
+  ): boolean {
     return permissions.some((permission) => this.canUser(user, permission));
   }
 
@@ -171,7 +175,9 @@ export class PermissionsService {
 
     if (!this.database?.isConfigured) {
       if (!staticRole) {
-        throw new ApiError(500, 'UNKNOWN_ROLE', 'User role is not supported by backend', { roleId });
+        throw new ApiError(500, 'UNKNOWN_ROLE', 'User role is not supported by backend', {
+          roleId,
+        });
       }
       return {
         permissions: getPermissionsForRole(staticRole),
@@ -189,7 +195,9 @@ export class PermissionsService {
       );
 
       if (!roleResult.rows[0]) {
-        throw new ApiError(500, 'UNKNOWN_ROLE', 'User role is not supported by backend', { roleId });
+        throw new ApiError(500, 'UNKNOWN_ROLE', 'User role is not supported by backend', {
+          roleId,
+        });
       }
 
       const [permissionResult, scopeResult, version] = await Promise.all([
@@ -235,7 +243,11 @@ export class PermissionsService {
     );
     const version = Number(result.rows[0]?.version);
     if (!Number.isSafeInteger(version) || version < 1) {
-      throw new ApiError(503, 'PERMISSIONS_NOT_READY', 'Permissions runtime state is not initialized');
+      throw new ApiError(
+        503,
+        'PERMISSIONS_NOT_READY',
+        'Permissions runtime state is not initialized',
+      );
     }
     return version;
   }
@@ -285,7 +297,9 @@ export class PermissionsService {
       const before = await this.readMatrix(tx, { lockState: true });
       const role = before.roles.find((row) => row.roleId === roleId);
       if (!role) {
-        throw new ApiError(404, 'ROLE_NOT_FOUND', 'Role was not found', { roleId });
+        throw new ApiError(404, 'ROLE_NOT_FOUND', 'Role was not found', {
+          roleId,
+        });
       }
       const next = cloneMatrixState(before);
       next.rolePermissions[String(roleId)] = defaultPermissionsForRoleCode(role.roleCode);
@@ -322,38 +336,39 @@ export class PermissionsService {
     client: DatabaseClient,
     options: { lockState?: boolean; version?: number } = {},
   ): Promise<RolesMatrixDto> {
-    const version = options.version ?? await this.readVersion(client, options.lockState === true);
-    const [rolesResult, permissionsResult, rolePermissionsResult, roleScopesResult] = await Promise.all([
-      client.query<RoleRow>(
-        `
+    const version = options.version ?? (await this.readVersion(client, options.lockState === true));
+    const [rolesResult, permissionsResult, rolePermissionsResult, roleScopesResult] =
+      await Promise.all([
+        client.query<RoleRow>(
+          `
         SELECT role_id, role_code, role_name, is_active
         FROM roles
         ORDER BY role_id
         `,
-      ),
-      client.query<PermissionCatalogRow>(
-        `
+        ),
+        client.query<PermissionCatalogRow>(
+          `
         SELECT permission_name, domain, label, description, sort_order, is_dangerous, is_active
         FROM permissions_catalog
         WHERE is_active = true
         ORDER BY sort_order, permission_name
         `,
-      ),
-      client.query<RolePermissionMatrixRow>(
-        `
+        ),
+        client.query<RolePermissionMatrixRow>(
+          `
         SELECT role_id, permission_name, is_enabled
         FROM role_permissions
         ORDER BY role_id, permission_name
         `,
-      ),
-      client.query<RoleScopeMatrixRow>(
-        `
+        ),
+        client.query<RoleScopeMatrixRow>(
+          `
         SELECT role_id, scope_key, scope_value
         FROM role_policy_scopes
         ORDER BY role_id, scope_key
         `,
-      ),
-    ]);
+        ),
+      ]);
 
     const roles = rolesResult.rows.map((row) => ({
       roleId: Number(row.role_id),
@@ -425,7 +440,11 @@ export class PermissionsService {
     );
     const version = Number(result.rows[0]?.version);
     if (!Number.isSafeInteger(version) || version < 1) {
-      throw new ApiError(503, 'PERMISSIONS_NOT_READY', 'Permissions runtime state is not initialized');
+      throw new ApiError(
+        503,
+        'PERMISSIONS_NOT_READY',
+        'Permissions runtime state is not initialized',
+      );
     }
     return version;
   }
@@ -435,10 +454,15 @@ export class PermissionsService {
       throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid permissions matrix version');
     }
     if (expected !== actual) {
-      throw new ApiError(409, 'PERMISSIONS_VERSION_CONFLICT', 'Права были изменены. Обновите матрицу.', {
-        expectedVersion: expected,
-        currentVersion: actual,
-      });
+      throw new ApiError(
+        409,
+        'PERMISSIONS_VERSION_CONFLICT',
+        'Права были изменены. Обновите матрицу.',
+        {
+          expectedVersion: expected,
+          currentVersion: actual,
+        },
+      );
     }
   }
 
@@ -455,7 +479,14 @@ export class PermissionsService {
     const catalogParams: unknown[] = [];
     const catalogValues = catalogRows.map((row) => {
       const base = catalogParams.length;
-      catalogParams.push(row.permission, row.domain, row.label, row.description, row.sortOrder, row.isDangerous);
+      catalogParams.push(
+        row.permission,
+        row.domain,
+        row.label,
+        row.description,
+        row.sortOrder,
+        row.isDangerous,
+      );
       return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6})`;
     });
 
@@ -586,7 +617,9 @@ function flattenRolePolicy(policy: RolePolicy): Record<RolePolicyScopeKey, Scope
 }
 
 function scopesFromRows(rows: readonly ScopeRow[]): RolePolicy {
-  const flat = Object.fromEntries(ROLE_POLICY_SCOPE_KEYS.map((key) => [key, 'none' as Scope])) as Record<RolePolicyScopeKey, Scope>;
+  const flat = Object.fromEntries(
+    ROLE_POLICY_SCOPE_KEYS.map((key) => [key, 'none' as Scope]),
+  ) as Record<RolePolicyScopeKey, Scope>;
   for (const row of rows) {
     if (isRolePolicyScopeKey(row.scope_key) && isScope(row.scope_value)) {
       flat[row.scope_key] = row.scope_value;
@@ -639,15 +672,22 @@ function cloneMatrixState(matrix: RolesMatrixDto): RolesMatrixDto {
   };
 }
 
-function cloneNestedBooleanMap(input: Record<string, Record<string, boolean>>): Record<string, Record<string, boolean>> {
+function cloneNestedBooleanMap(
+  input: Record<string, Record<string, boolean>>,
+): Record<string, Record<string, boolean>> {
   return Object.fromEntries(Object.entries(input).map(([key, value]) => [key, { ...value }]));
 }
 
-function cloneNestedScopeMap(input: Record<string, Record<string, Scope>>): Record<string, Record<string, Scope>> {
+function cloneNestedScopeMap(
+  input: Record<string, Record<string, Scope>>,
+): Record<string, Record<string, Scope>> {
   return Object.fromEntries(Object.entries(input).map(([key, value]) => [key, { ...value }]));
 }
 
-function normalizeRequestedMatrix(request: UpdateRolesMatrixRequest, before: RolesMatrixDto): RolesMatrixDto {
+function normalizeRequestedMatrix(
+  request: UpdateRolesMatrixRequest,
+  before: RolesMatrixDto,
+): RolesMatrixDto {
   const next = cloneMatrixState(before);
   const validRoleIds = new Set(before.roles.map((role) => String(role.roleId)));
   const validPermissions = new Set(before.permissions.map((permission) => permission.name));
@@ -712,7 +752,11 @@ function normalizeRequestedMatrix(request: UpdateRolesMatrixRequest, before: Rol
 function applyPermissionDependencies(row: Record<string, boolean>): void {
   for (const permission of Object.keys(row)) {
     if (!row[permission]) continue;
-    if (permission.endsWith('.create') || permission.endsWith('.update') || permission.endsWith('.delete')) {
+    if (
+      permission.endsWith('.create') ||
+      permission.endsWith('.update') ||
+      permission.endsWith('.delete')
+    ) {
       const viewPermission = `${permission.split('.')[0]}.view`;
       if (viewPermission in row) {
         row[viewPermission] = true;
@@ -724,9 +768,18 @@ function applyPermissionDependencies(row: Record<string, boolean>): void {
   }
 }
 
-function assertDangerousConfirmed(before: RolesMatrixDto, next: RolesMatrixDto, confirmed: boolean): void {
+function assertDangerousConfirmed(
+  before: RolesMatrixDto,
+  next: RolesMatrixDto,
+  confirmed: boolean,
+): void {
   if (confirmed) return;
-  const changed: Array<{ roleId: string; permission: string; before: boolean; after: boolean }> = [];
+  const changed: Array<{
+    roleId: string;
+    permission: string;
+    before: boolean;
+    after: boolean;
+  }> = [];
   for (const role of next.roles) {
     const roleId = String(role.roleId);
     for (const permission of next.permissions) {
@@ -734,7 +787,12 @@ function assertDangerousConfirmed(before: RolesMatrixDto, next: RolesMatrixDto, 
       const was = before.rolePermissions[roleId]?.[permission.name] === true;
       const now = next.rolePermissions[roleId]?.[permission.name] === true;
       if (was !== now) {
-        changed.push({ roleId, permission: permission.name, before: was, after: now });
+        changed.push({
+          roleId,
+          permission: permission.name,
+          before: was,
+          after: now,
+        });
       }
     }
   }
@@ -754,7 +812,9 @@ async function assertLockoutSafe(tx: TransactionClient, next: RolesMatrixDto): P
   );
   const activeRoleIds = activeUsers.rows.map((row) => String(row.role_id));
   const hasManagerPath = activeRoleIds.some((roleId) =>
-    REQUIRED_SUPERADMIN_PERMISSIONS.every((permission) => next.rolePermissions[roleId]?.[permission] === true),
+    REQUIRED_SUPERADMIN_PERMISSIONS.every(
+      (permission) => next.rolePermissions[roleId]?.[permission] === true,
+    ),
   );
   if (!hasManagerPath) {
     throw new ApiError(
@@ -782,7 +842,10 @@ async function assertLockoutSafe(tx: TransactionClient, next: RolesMatrixDto): P
         409,
         'SUPERADMIN_CONTROL_DENIED',
         'Нельзя убрать базовые права у активной роли superadmin',
-        { roleId: superadminRole.roleId, requiredPermissions: REQUIRED_SUPERADMIN_PERMISSIONS },
+        {
+          roleId: superadminRole.roleId,
+          requiredPermissions: REQUIRED_SUPERADMIN_PERMISSIONS,
+        },
       );
     }
   }
@@ -868,7 +931,9 @@ async function writePermissionsAudit(
       input.requestId,
       JSON.stringify(sanitizeMatrixForAudit(input.before)),
       JSON.stringify(sanitizeMatrixForAudit(input.after)),
-      JSON.stringify(computeDiff(sanitizeMatrixForAudit(input.before), sanitizeMatrixForAudit(input.after))),
+      JSON.stringify(
+        computeDiff(sanitizeMatrixForAudit(input.before), sanitizeMatrixForAudit(input.after)),
+      ),
       JSON.stringify({
         permissionsVersionBefore: input.before.version,
         permissionsVersionAfter: input.after.version,
@@ -903,9 +968,16 @@ function mapPermissionsRuntimeError(error: unknown): never {
   if (error instanceof ApiError) {
     throw error;
   }
-  const code = typeof error === 'object' && error && 'code' in error ? String((error as { code?: unknown }).code) : '';
+  const code =
+    typeof error === 'object' && error && 'code' in error
+      ? String((error as { code?: unknown }).code)
+      : '';
   if (code === '42P01' || code === '42703') {
-    throw new ApiError(503, 'PERMISSIONS_SCHEMA_MISSING', 'Permissions runtime schema is not ready');
+    throw new ApiError(
+      503,
+      'PERMISSIONS_SCHEMA_MISSING',
+      'Permissions runtime schema is not ready',
+    );
   }
   throw error;
 }

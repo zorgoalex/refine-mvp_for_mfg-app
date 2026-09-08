@@ -23,6 +23,7 @@ import {
   type CutRenderStyleName,
 } from '../../../shared/cut-render-style';
 import { buildCutAuditEvent, buildCutDeniedEvent, CUT_AUDIT_EVENTS, type CutAuditActor } from '../application/cut-audit';
+import { loadCutJobAuditIdentities } from './cut-job-audit-identity';
 import {
   cutJobSnapshotUsesVacuumTable,
   formatCutJobNumber,
@@ -169,7 +170,7 @@ import {
   CutStaleVersionError,
 } from '../errors/cut.errors';
 import type { LabelCustomExpressionScalar } from '../../labels/application/label-custom-field-expression';
-import { evaluateMdfOrderMachineFilesPresentAutomation } from '../../status-automation/application/status-automation-runtime';
+import { dispatchMdfBoardEvent, evaluateMdfOrderMachineFilesPresentAutomation } from '../../status-automation/application/status-automation-runtime';
 
 const AUDIT_SOURCE = 'backend-cut-command';
 const MANUAL_SVG_CHAT_ID = 'erp-manual-svg-upload';
@@ -1773,6 +1774,7 @@ export class PgCutRepository implements CutRepositoryPort {
       });
 
       await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
+        source: { kind: 'packet', id: packet.packet_id },
         orderIds,
         actor: command.currentUser,
         requestId,
@@ -4483,6 +4485,7 @@ export class PgCutRepository implements CutRepositoryPort {
       username: currentUser.username,
       role: currentUser.role,
     };
+    const identity = (await loadCutJobAuditIdentities(tx, [input.cutJobId])).get(input.cutJobId);
     await auditService.record(
       tx,
       buildCutAuditEvent({
@@ -4497,7 +4500,11 @@ export class PgCutRepository implements CutRepositoryPort {
           cutGroupIds: cleanIds(input.related?.cutGroupIds),
           cutResultIds: cleanIds(input.related?.cutResultIds),
         },
-        metadata: input.metadata ?? null,
+        metadata: {
+          ...input.metadata,
+          ...identity,
+          cutJobIdentitySource: 'event_snapshot',
+        },
         before: input.before ?? null,
         after: input.after ?? null,
         diff: input.diff ?? null,
@@ -7123,10 +7130,16 @@ async function createForcedMdfBoardPacket(
   );
   if (input.cardKind === 'machine_file') {
     await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
+      source: { kind: 'packet', id: existing.packet_id },
       orderIds,
       actor: input.currentUser,
       requestId: input.requestId,
       sourceIdempotencyKey: eventKey,
+    });
+  } else {
+    await dispatchMdfBoardEvent(tx, {
+      source: { kind: 'bath', id: `cut-result:${cutResultId}` },
+      actor: input.currentUser, requestId: input.requestId, sourceIdempotencyKey: eventKey,
     });
   }
   return existing.packet_id;

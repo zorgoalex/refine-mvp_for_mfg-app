@@ -281,6 +281,13 @@ export interface OrderLabelsPreview {
 
 export interface DetailLabelsPreview {
   generationScope: 'details';
+  skippedRows?: {
+    detailId: number;
+    orderId: number;
+    copyIndex: number;
+    code: string;
+    message: string;
+  }[];
   templateId: number;
   templateVersion: number;
   labelCount: number;

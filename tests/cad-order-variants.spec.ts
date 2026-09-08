@@ -10,6 +10,10 @@ async function setup(page: Page, count = 2) {
   await setupWorkflowMockApi(page, createWorkflowMockDb(), { authUser });
   const variants: CadVariant[] = [], sources: CadSourceSnapshot[] = [], requests: string[] = [];
   const recipe = { code: 'contour_only', version: '1.0.0', parameters: {} };
+  const catalog = { fail: false, recipes: [
+    { ...recipe, display_name: 'Без фрезеровки', status: 'production', snapshot_hash: '1'.repeat(64), defaults: {}, parameter_schema: {} },
+    { code: 'rib_sq', version: '1', display_name: 'Квадратная лапша', status: 'review', snapshot_hash: '2'.repeat(64), defaults: { depth_mm: 2 }, parameter_schema: { depth_mm: { type: 'number', default: 2 } } },
+  ] };
   const capture = (orderId: number): CadSourceSnapshot => {
     const source = { id: randomUUID(), orderId, orderName: `Тест CAD ${orderId}`, capturedAt: '2026-09-06',
       parts: Array.from({ length: count }, (_, n) => ({ orderId, detailId: orderId * 1000 + n + 1, detailNumber: n + 1,
@@ -22,11 +26,10 @@ async function setup(page: Page, count = 2) {
     const body = request.postDataJSON(); requests.push(`${request.method()} ${path}`);
     const ok = (json: unknown) => route.fulfill({ json });
     if (path === '/capabilities') return ok({ enabled: true });
-    if (path === '/recipes') return ok({ recipes: [
-      { ...recipe, display_name: 'Без фрезеровки', status: 'production', snapshot_hash: '1'.repeat(64), defaults: {}, parameter_schema: {} },
-      { code: 'rib_sq', version: '1', display_name: 'Квадратная лапша', status: 'review', snapshot_hash: '2'.repeat(64), defaults: { depth_mm: 2 }, parameter_schema: { depth_mm: { type: 'number', default: 2 } } },
-    ] });
-    if (path === '/mappings') return ok([]);
+    if (path === '/recipes') return catalog.fail
+      ? route.fulfill({ status: 503, json: { error: { code: 'CAD_UNAVAILABLE', message: 'Тест: CAD недоступен' } } })
+      : ok({ recipes: catalog.recipes });
+    if (path === '/mappings') return ok([{ milling_type_id: 1, milling_type_name: 'Тест фрезеровка', recipe, revision: 1 }]);
     const sourceMatch = path.match(/^\/orders\/(\d+)\/source$/);
     if (sourceMatch) return ok(capture(Number(sourceMatch[1])));
     const order = path.match(/^\/orders\/(\d+)(\/render)?$/);
@@ -52,8 +55,82 @@ async function setup(page: Page, count = 2) {
     if (path === '/runs/run/artifacts/package') return route.fulfill({ body: 'mock-package', contentType: 'application/zip', headers: { 'Content-Disposition': 'attachment; filename=test.zip' } });
     return route.fulfill({ status: 404, json: { error: { code: 'NOT_FOUND', message: path } } });
   });
-  return { variants, requests };
+  return { variants, requests, catalog };
 }
+
+test('recipe catalog refreshes on modal open and polls without changing the assigned version', async ({ page }) => {
+  const { catalog, requests } = await setup(page);
+  await page.clock.install();
+  await page.goto('/cad');
+  await expect.poll(() => requests.filter(r => r === 'GET /recipes').length).toBe(1);
+  catalog.recipes.push({ ...catalog.recipes[0], version: '1.0.1' });
+  await page.getByRole('button', { name: 'Соответствия фрезеровок' }).click();
+  const select = page.locator('.ant-select[aria-label="Рецепт CAD: Тест фрезеровка"]');
+  await select.locator('.ant-select-selector').click();
+  await expect(page.getByText('Без фрезеровки · 1.0.1', { exact: true }).last()).toBeVisible();
+  await expect(page.getByText('Квадратная лапша · 1', { exact: true })).toHaveCount(0);
+  catalog.recipes.push({ ...catalog.recipes[0], version: '1.0.2' });
+  await page.clock.fastForward(10_100);
+  await expect(page.getByText('Без фрезеровки · 1.0.2', { exact: true }).last()).toBeVisible();
+  await expect(select.locator('.ant-select-selection-item')).toHaveText('Без фрезеровки · 1.0.0');
+  expect(requests.filter(r => !r.startsWith('GET '))).toEqual([]);
+
+  await page.keyboard.press('Escape');
+  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+  const count = requests.filter(r => r === 'GET /recipes').length;
+  await page.clock.fastForward(30_100);
+  expect(requests.filter(r => r === 'GET /recipes')).toHaveLength(count);
+});
+
+test('catalog pauses when hidden, refreshes on return, retains options on error and supports retry', async ({ page }) => {
+  const { catalog, requests } = await setup(page);
+  await page.clock.install();
+  await page.goto('/cad');
+  await page.getByRole('button', { name: 'Соответствия фрезеровок' }).click();
+  await expect(page.getByRole('button', { name: 'Обновить список' })).not.toHaveClass(/ant-btn-loading/);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  const count = requests.filter(r => r === 'GET /recipes').length;
+  catalog.recipes.push({ ...catalog.recipes[0], version: '1.0.3' });
+  await page.clock.fastForward(30_100);
+  expect(requests.filter(r => r === 'GET /recipes')).toHaveLength(count);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('focus'));
+  });
+  const select = page.locator('.ant-select[aria-label="Рецепт CAD: Тест фрезеровка"]');
+  await select.locator('.ant-select-selector').click();
+  await expect(page.getByText('Без фрезеровки · 1.0.3', { exact: true }).last()).toBeVisible();
+  await page.keyboard.press('Escape');
+  catalog.fail = true;
+  await page.getByRole('button', { name: 'Обновить список' }).click();
+  await expect(page.getByText('Не удалось обновить каталог CAD', { exact: true })).toBeVisible();
+  await expect(select.locator('.ant-select-selection-item')).toHaveText('Без фрезеровки · 1.0.0');
+  await select.locator('.ant-select-selector').click();
+  await expect(page.getByText('Без фрезеровки · 1.0.3', { exact: true }).last()).toBeVisible();
+  await page.keyboard.press('Escape');
+  catalog.fail = false;
+  await page.getByRole('button', { name: 'Обновить список' }).click();
+  await expect(page.getByText('Не удалось обновить каталог CAD', { exact: true })).toHaveCount(0);
+  expect(requests.filter(r => !r.startsWith('GET '))).toEqual([]);
+});
+
+test('unapproved-only catalog explains the empty list and an approval appears without reload', async ({ page }) => {
+  const { catalog } = await setup(page);
+  catalog.recipes = catalog.recipes.filter(r => r.status === 'review');
+  await page.clock.install();
+  await page.goto('/cad');
+  await page.getByRole('button', { name: 'Соответствия фрезеровок' }).click();
+  await expect(page.getByText('Нет одобренных версий рецептов', { exact: true })).toBeVisible();
+  catalog.recipes[0].status = 'production';
+  await page.clock.fastForward(10_100);
+  await expect(page.getByText('Нет одобренных версий рецептов', { exact: true })).toHaveCount(0);
+  await page.locator('.ant-select[aria-label="Рецепт CAD: Тест фрезеровка"] .ant-select-selector').click();
+  await expect(page.getByText('Квадратная лапша · 1', { exact: true }).last()).toBeVisible();
+});
 
 test('original stays immutable; split/import/save/clone/export through actual controls', async ({ page }) => {
   const { variants, requests } = await setup(page); const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));

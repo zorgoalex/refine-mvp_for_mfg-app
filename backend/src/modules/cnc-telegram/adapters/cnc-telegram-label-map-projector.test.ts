@@ -1,3 +1,4 @@
+import { auditService } from '../../../common/audit/audit.service';
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import type { QueryResultRow } from 'pg';
@@ -50,9 +51,10 @@ describe('Telegram label-map projector structural guards', () => {
     }, item)).toBe(false);
   });
 
-  it('keeps every contour in mixed SVG but projects only safely matched ERP placements', async () => {
+  it.each([false, true])('keeps every contour and only safely matched placements (20+Test=%s)', async (withRenderOnly) => {
     const placementQueries: Array<readonly unknown[]> = [];
     let sheetInsertParams: readonly unknown[] = [];
+    let outboxParams: readonly unknown[] = [];
     const tx: TransactionClient = {
       raw: {} as never,
       async query<T extends QueryResultRow = QueryResultRow>(sql: string, params: readonly unknown[] = []) {
@@ -67,9 +69,10 @@ describe('Telegram label-map projector structural guards', () => {
             source_updated_at: '2026-08-07T00:01:00.000Z',
             cut_layout_json: {
               status: 'valid',
-              reasons: [],
+              reasons: ["Bad SVG contour skipped; good labels remain printable"],
               sheet: { widthMm: 1000, heightMm: 500 },
-              items: [
+              renderOnlyContours: withRenderOnly ? [{sourceElementId:'Test',xMm:600,yMm:300,placedWidthMm:200,placedHeightMm:100,labelLines:['2885','# Test','200*100']},{sourceElementId:'unsafe',xMm:1200,yMm:300,placedWidthMm:200,placedHeightMm:100,labelLines:['unsafe']}] : [],
+              items: withRenderOnly ? Array.from({length:20},(_,i)=>layoutItem('Order 1',31,(i%4)*210,Math.floor(i/4)*100)) : [
                 layoutItem('Order 1', 31, 10, 20),
                 layoutItem('External', 99, 400, 20),
               ],
@@ -78,24 +81,24 @@ describe('Telegram label-map projector structural guards', () => {
         }
         if (sql.includes('FROM cnc_telegram_label_sheet_map') && sql.includes('WHERE packet_id')) return result<T>([]);
         if (sql.includes('FROM cnc_telegram_packet_evidence_set')) {
-          return result<T>([{ payload_hash: 'sha256:payload', evidence_set_digest: 'sha256:evidence', item_count: 2 }]);
+          return result<T>([{ payload_hash: 'sha256:payload', evidence_set_digest: 'sha256:evidence', item_count: withRenderOnly ? 1 : 2 }]);
         }
         if (sql.includes('FROM cnc_telegram_packet_item_evidence')) {
           return result<T>([
             {
               payload_hash: 'sha256:payload', source_item_key: 'matched', order_name: 'Order 1', detail_number: 31,
-              width_mm: 200, height_mm: 100, quantity: 1, source: 'vector', match_order_id: 7,
+              width_mm: 200, height_mm: 100, quantity: withRenderOnly ? 20 : 1, source: 'vector', match_order_id: 7,
               match_detail_id: 70, match_status: 'matched',
             },
-            {
+            ...(!withRenderOnly ? [{
               payload_hash: 'sha256:payload', source_item_key: 'external', order_name: 'External', detail_number: 99,
               width_mm: 200, height_mm: 100, quantity: 1, source: 'vector', match_order_id: null,
               match_detail_id: null, match_status: 'unmatched',
-            },
+            }] : []),
           ]);
         }
         if (sql.includes('FROM order_details od')) {
-          return result<T>([{ detail_id: 70, order_id: 7, width: 200, height: 100, quantity: 1 }]);
+          return result<T>([{ detail_id: 70, order_id: 7, width: 200, height: 100, quantity: withRenderOnly ? 20 : 1 }]);
         }
         if (sql.includes('INSERT INTO cnc_telegram_label_sheet_map')) {
           sheetInsertParams = params;
@@ -105,7 +108,7 @@ describe('Telegram label-map projector structural guards', () => {
           placementQueries.push(params);
           return result<T>([]);
         }
-        if (sql.includes('INSERT INTO outbox_events')) return result<T>([]);
+        if (sql.includes('INSERT INTO outbox_events')) { outboxParams = params; return result<T>([]); }
         throw new Error(`Unexpected query: ${sql}`);
       },
     };
@@ -115,11 +118,18 @@ describe('Telegram label-map projector structural guards', () => {
       source: 'ingest',
       context: { actorUserId: 1, requestId: 'request-1' },
     })).resolves.toEqual({ projected: true, sheetMapId: 88 });
-    expect(sheetInsertParams[12]).toBe(2);
-    expect(sheetInsertParams[13]).toBe(1);
-    expect(String(sheetInsertParams[7]).match(/class="cut-sheet-piece"/g)).toHaveLength(2);
-    expect(placementQueries).toHaveLength(1);
+    expect(sheetInsertParams[12]).toBe(withRenderOnly ? 21 : 2);
+    expect(sheetInsertParams[13]).toBe(withRenderOnly ? 20 : 1);
+    expect(String(sheetInsertParams[7]).match(/class="cut-sheet-piece"/g)).toHaveLength(withRenderOnly ? 21 : 2);
+    expect(placementQueries).toHaveLength(withRenderOnly ? 20 : 1);
+    expect(placementQueries.every(params => params[2] === 70)).toBe(true);
     expect(placementQueries[0]?.[2]).toBe(70);
+    const expectedTotal = withRenderOnly ? 21 : 2;
+    const expectedSafe = withRenderOnly ? 20 : 1;
+    expect(vi.mocked(auditService.record).mock.calls.at(-1)?.[1]).toMatchObject({
+      metadata: {totalContourCount:expectedTotal},after:{safePlacementCount:expectedSafe},
+    });
+    expect(outboxParams.some(value => typeof value === 'string' && value.includes('"totalContourCount":'+expectedTotal) && value.includes('"safePlacementCount":'+expectedSafe))).toBe(true);
   });
 });
 

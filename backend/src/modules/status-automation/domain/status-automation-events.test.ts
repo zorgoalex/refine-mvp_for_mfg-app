@@ -79,7 +79,12 @@ describe('status automation event catalog', () => {
             : 0
         ),
       );
-      expect(descriptor.allowedActions).toEqual(expect.arrayContaining(actionTypes));
+      expect(descriptor.allowedActions).toEqual(expect.arrayContaining(
+        descriptor.eventType.startsWith('mdf.') ? ['change_details_production_status'] : actionTypes,
+      ));
+      if (descriptor.eventType.startsWith('mdf.')) {
+        expect(descriptor.allowedActions).toEqual(['change_details_production_status']);
+      }
     }
     expect(getEventDescriptor('payment.created')?.allowedActions).toHaveLength(3);
     expect(getEventDescriptor('order.status_changed')?.allowedActions).toContain(

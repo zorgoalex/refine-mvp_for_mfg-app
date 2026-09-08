@@ -58,11 +58,27 @@ describe('OrderStatusBoardPage UX guards', () => {
   it('applies planned-today visibility after MDF lifecycle placement with complete order statuses', () => {
     const activeColumns = page.match(/const cncActiveColumns = useMemo\([\s\S]*?\n  \);/)?.[0] ?? '';
     const plannedColumns = page.match(/const cncPlannedDateColumns = useMemo\([\s\S]*?\n  \);/)?.[0] ?? '';
-    expect(activeColumns).toMatch(/applyMdfBoardHiddenCardRulesToColumns\(\s*cncFilteredColumns,\s*cncOrderStatusCards,/);
+    expect(activeColumns).toMatch(/applyMdfBoardHiddenCardRulesToColumns\(\s*cncPeriodColumns,\s*cncOrderStatusCards,/);
     expect(activeColumns).not.toContain('cncDisplayOrderStatusCards');
     expect(activeColumns).not.toContain('cncPlannedDateColumns');
-    expect(plannedColumns).toMatch(/filterCncTodayColumnsByPlannedOrderDate\(\s*cncActiveColumns,/);
+    expect(plannedColumns).toMatch(/filterCncTodayColumnsByPlannedOrderDate\(\s*cncFilteredColumns,/);
     expect(page).toContain('readinessColumns={cncActiveColumns}');
+  });
+
+  it('keeps order search and bath visibility out of lifecycle, readiness and status loading', () => {
+    const memo = (name: string) => page.match(new RegExp(`const ${name} = useMemo\\([\\s\\S]*?\\n  \\);`))?.[0] ?? '';
+    expect(memo('cncOrderIds')).toContain('collectCncOrderIds(cncPeriodColumns)');
+    expect(memo('cncActiveColumns')).not.toContain('cncFilteredColumns');
+    expect(memo('cncOrderFilteredColumns')).toContain('filterCncTodayColumnsByOrders(cncActiveColumns, cncOrderFilters)');
+    expect(memo('cncVisibleOrderIds')).toContain('collectCncOrderIds(cncFilteredColumns)');
+    expect(memo('cncVisibleOrderStatusCards')).toContain('cncVisibleOrderIds');
+    expect(memo('cncDisplayOrderStatusCards')).toContain('cncVisibleOrderStatusCards');
+    expect(memo('cncHistoricalBathReadiness')).toContain('cncToday?.historicalBathReadiness');
+    expect(memo('cncHistoricalBathReadiness')).not.toContain('filterCncHistoricalBathReadiness');
+    expect(page).toContain('const refreshedOrderIds = collectCncOrderIds(response.columns)');
+    expect(page).not.toContain('collectCncOrderStatusBoardIds');
+    expect(page).toContain('readinessColumns={cncActiveColumns}');
+    expect(page).toContain('historicalBathReadiness={cncHistoricalBathReadiness}');
   });
 
   it('defers optional MDF PDF and label tooling until the operator opens it', () => {
@@ -237,9 +253,9 @@ describe('OrderStatusBoardPage UX guards', () => {
   });
 
   it('refreshes MDF order statuses and forces status-owned order columns', () => {
-    expect(page).toContain('const refreshedOrderIds = collectCncOrderStatusBoardIds(');
+    expect(page).toContain('const refreshedOrderIds = collectCncOrderIds(response.columns)');
     expect(page).toContain('startTransition(() => setCncOrderBoard(orderBoardResponse));');
-    expect(page).toContain('function collectCncOrderStatusBoardIds(');
+    expect(page).toContain('collectCncOrderIds(cncPeriodColumns)');
     expect(page).toContain('resolveCncOrderStatusColumn(card) === null');
     expect(page).toContain('const statusColumn = resolveCncOrderStatusColumn(card);');
     expect(page).toContain("if (statusName === 'выдан') return 'orders_issued';");
@@ -672,7 +688,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('suffixIcon={<SearchOutlined />}');
     expect(page).toContain('options={cncOrderFilterOptions}');
     expect(page).toContain('aria-label="Фильтр МДФ-работ по номеру заказа"');
-    expect(page).toContain('filterCncTodayColumnsByOrders(cncPeriodColumns, cncOrderFilters)');
+    expect(page).toContain('filterCncTodayColumnsByOrders(cncActiveColumns, cncOrderFilters)');
     expect(page).toContain('viewState.cncPlannedTodayOnly');
     expect(page).toContain('cncPlannedTodayDate');
     expect(page).not.toContain('filterCncBazisCutSetsByMissingBathDetails');
@@ -1075,7 +1091,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("}, { cache: 'no-store' })");
     expect(page).toContain("fetchCncManualMoves({ cache: 'no-store' })");
     expect(page).toContain('refetchMdfBoardSettings()');
-    expect(page).toContain('const refreshedOrderIds = collectCncOrderStatusBoardIds(');
+    expect(page).toContain('const refreshedOrderIds = collectCncOrderIds(response.columns)');
     expect(page).toContain('fetchCncOrderStatusBoard(\n              refreshedOrderIds,');
     expect(page).toContain("}, { cache: 'no-store' });");
     expect(page).toContain('cncAuxiliaryRefreshRevisionRef.current !== auxiliaryRevision');
@@ -1455,12 +1471,19 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('extraContent={cncSettingsContent}');
     expect(page).toContain('status-board-settings__modes');
     expect(page).toContain('const [cncBathsRequireMachineFiles, setCncBathsRequireMachineFiles] =');
-    expect(page).toContain('useState(true)');
-    expect(page).toContain('Ванны с файлами');
-    expect(page).toContain('checked={cncBathsRequireMachineFiles}');
+    expect(page).toMatch(/const \[cncBathsRequireMachineFiles, setCncBathsRequireMachineFiles\] =\s*useState\(false\);/);
+    expect(settings).toContain('Отображать карточки ванн без связанных файлов станка');
+    expect(settings).toContain('aria-label="Отображать карточки ванн без связанных файлов станка"');
+    expect(settings).toContain('checked={!cncBathsRequireMachineFiles}');
+    expect(settings).toContain('onChange={(checked) => setCncBathsRequireMachineFiles(!checked)}');
+    expect(settings).not.toContain('Ванны с файлами');
+    expect(cncToolbar).not.toContain('Отображать карточки ванн без связанных файлов станка');
+    expect(cncToolbar).not.toContain('checked={!cncBathsRequireMachineFiles}');
     expect(page).toContain('filterCncBathColumnsByMachineOrderMatches(cncOrderFilteredColumns, preservedCncBathCardId)');
     expect(page).toContain('const [cncTerminalColumnsVisible, setCncTerminalColumnsVisible] = useState(false)');
-    expect(page).toContain('terminalColumnsVisible={cncTerminalColumnsVisible}');
+    expect(page).toContain('terminalColumnsVisible={cncTerminalColumnsVisible || cncSearchActive}');
+    expect(page).toContain('buildCncTerminalSearchVisibility(cncPlannedDateColumns, cncManualMoves, {');
+    expect(page).toContain('cncTerminalSearchVisibility.revealedColumnKeys,');
     expect(settings).toContain('checked={cncTerminalColumnsVisible}');
     expect(settings).toContain('Завершенные файлы и ванны');
     expect(page).toContain("const CNC_MOBILE_FONT_SIZE_STORAGE_PREFIX = 'erp.status-board.cnc-mobile-font-size'");

@@ -1,3 +1,4 @@
+import { normalizeSvgRenderContours, type SvgRenderContour } from '../../../shared/svg-render-contours';
 import { createHash, randomUUID } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { auditService } from '../../../common/audit/audit.service';
@@ -815,6 +816,7 @@ export class PgCncTelegramRepository
         });
         await evaluateMdfBoardColumnAutomation(tx, {
           eventType: 'mdf.board.completed',
+          source: { kind: 'packet', id: packet.packetId },
           orderIds: packet.items.map((item) => item.orderId ?? item.matchOrderId),
           actor: command.currentUser,
           requestId,
@@ -828,6 +830,7 @@ export class PgCncTelegramRepository
       });
       if (packetColumnKey(packet) === 'parsed') {
         await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
+          source: { kind: 'packet', id: packet.packetId },
           orderIds: packet.items.map((item) => item.orderId),
           actor: command.currentUser,
           requestId,
@@ -933,6 +936,13 @@ export class PgCncTelegramRepository
         dto.source.version === Number(existing.source_version) &&
         existing.payload_hash === payloadHash
       ) {
+        // A new command for an already active source file reuses its job/card,
+        // including informational jobs without a frozen cut result.
+        const reusedSourceFile = await reuseExistingManualSvgSourceFile(tx, { command, dto, requestId });
+        if (reusedSourceFile) {
+          await completeIdempotency(tx, dto.idempotencyKey, reusedSourceFile);
+          return reusedSourceFile;
+        }
         const prepared = await prepareManualSvgUploadDto(tx, dto, command.dto);
         const { resolvedDto, matchSourceDto } = prepared;
         await ensureStoredCutLayout(tx, existing.packet_id, dto.cutLayout ?? null);
@@ -954,28 +964,9 @@ export class PgCncTelegramRepository
           },
         });
         const packet = await loadPacket(tx, existing.packet_id);
-        let mdfCardCreatedAuditId: string | undefined;
-        let mdfCardCreatedNow = false;
-        if (command.dto.createMdfMachineFileCard) {
-          assertManualSvgMachineFileCardReady(packet);
-          if (!await manualSvgMdfCardEventExists(tx, packet)) {
-            mdfCardCreatedAuditId = await writeManualSvgMdfCardAudit(tx, {
-              command,
-              beforePacket: null,
-              packet,
-              requestId,
-              externalPacketKey: dto.externalPacketKey,
-            });
-            await enqueueManualSvgMdfCardEvent(tx, {
-              command,
-              packet,
-              requestId,
-              auditId: mdfCardCreatedAuditId,
-              externalPacketKey: dto.externalPacketKey,
-            });
-            mdfCardCreatedNow = true;
-          }
-        }
+        const card = command.dto.createMdfMachineFileCard
+          ? await ensureManualSvgMdfMachineFileCard(tx, { command, packet, requestId, externalPacketKey: dto.externalPacketKey })
+          : { createdNow: false, auditId: undefined };
         const filePersistence = await persistManualSvgUploadFiles(tx, {
           command,
           packet,
@@ -989,6 +980,7 @@ export class PgCncTelegramRepository
         });
         if (command.dto.createMdfMachineFileCard && packetColumnKey(packet) === 'parsed') {
           await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
+            source: { kind: 'packet', id: packet.packetId },
             orderIds: packet.items.map((item) => item.orderId),
             actor: command.currentUser,
             requestId,
@@ -998,10 +990,10 @@ export class PgCncTelegramRepository
         const response = manualSvgResponse({
           packet,
           requestId,
-          auditId: mdfCardCreatedAuditId,
+          auditId: card.auditId,
           applied: false,
           ignoredStaleSourceVersion: false,
-        }, mdfCardCreatedNow, filePersistence);
+        }, card.createdNow, filePersistence);
         await completeIdempotency(tx, dto.idempotencyKey, response);
         return response;
       }
@@ -1097,6 +1089,7 @@ export class PgCncTelegramRepository
       });
       if (command.dto.createMdfMachineFileCard && packetColumnKey(packet) === 'parsed') {
         await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
+          source: { kind: 'packet', id: packet.packetId },
           orderIds: packet.items.map((item) => item.orderId),
           actor: command.currentUser,
           requestId,
@@ -1513,15 +1506,13 @@ function buildInformationalManualSvgDto(
   dto: CncTelegramStructuredIngestDto,
   selectedOrders: ManualSvgSelectedOrder[],
 ): CncTelegramStructuredIngestDto {
-  const orders = selectedOrders.length > 0 ? selectedOrders : [{ orderId: 0, orderName: null }];
   return {
     ...dto,
-    items: dto.items.map((item, index) => {
-      const order = informationalOrderForItem(item, index, orders);
+    items: dto.items.map((item) => {
+      const order = exactSvgOrderForName(item.orderName, selectedOrders);
       return {
         ...item,
-        orderName: informationalOrderNameForItem(item, order),
-        matchOrderId: order.orderId > 0 ? order.orderId : null,
+        matchOrderId: order?.orderId ?? null,
         matchDetailId: null,
         matchStatus: 'needs_review',
         reviewNote: 'Информативный SVG: связь с деталями ERP не требуется',
@@ -1530,36 +1521,15 @@ function buildInformationalManualSvgDto(
   };
 }
 
-function informationalOrderForItem(
-  item: IngestItemInput,
-  index: number,
+/** Selection scopes upload/file association; it cannot replace a source identity. */
+function exactSvgOrderForName(
+  sourceName: string,
   selectedOrders: ManualSvgSelectedOrder[],
-): ManualSvgSelectedOrder {
-  const itemOrderKey = normalizeOrderKey(item.orderName);
-  const exact = itemOrderKey
-    ? selectedOrders.find((order) => (
-        normalizeOrderKey(order.orderName) === itemOrderKey ||
-        String(order.orderId) === item.orderName.trim()
-      ))
-    : null;
-  return exact ?? selectedOrders[index % selectedOrders.length] ?? selectedOrders[0]!;
-}
-
-function informationalOrderNameForItem(
-  item: IngestItemInput,
-  order: ManualSvgSelectedOrder,
-): string {
-  const current = normalizeOptional(item.orderName);
-  if (current && current !== 'SVG' && !current.includes('+')) {
-    const currentKey = normalizeOrderKey(current);
-    if (
-      currentKey &&
-      (currentKey === normalizeOrderKey(order.orderName) || current.trim() === String(order.orderId))
-    ) {
-      return current;
-    }
-  }
-  return normalizeOptional(order.orderName) ?? String(order.orderId);
+): ManualSvgSelectedOrder | null {
+  const key = normalizeOrderKey(sourceName);
+  if (!key) return null;
+  const matches = selectedOrders.filter((order) => normalizeOrderKey(order.orderName) === key);
+  return matches.length === 1 ? matches[0] : null;
 }
 
 async function assertManualSvgOrderScope(
@@ -1975,6 +1945,73 @@ function assertManualSvgTelegramCutJobReady(packet: CncTelegramPacketDto): void 
   );
 }
 
+async function ensureManualSvgMdfMachineFileCard(
+  tx: TransactionClient,
+  input: {
+    command: ManualSvgUploadCommand;
+    packet: CncTelegramPacketDto;
+    requestId: string;
+    externalPacketKey: string;
+  },
+): Promise<{ createdNow: boolean; auditId?: string }> {
+  assertManualSvgMachineFileCardReady(input.packet);
+  const restored = await tx.query<{
+    hidden_at: string | Date;
+    hidden_by: string | number | null;
+    hidden_reason: string | null;
+    hidden_cut_job_id: string | number | null;
+  }>(
+    `WITH hidden_machine_file AS (
+       SELECT p.packet_id, p.mdf_board_hidden_at AS hidden_at,
+              p.mdf_board_hidden_by AS hidden_by, p.mdf_board_hidden_reason AS hidden_reason,
+              p.mdf_board_hidden_cut_job_id AS hidden_cut_job_id
+       FROM cnc_telegram_packets p
+       JOIN cut_job job ON job.cut_job_id = p.svg_cut_job_id
+       WHERE p.packet_id = $1::uuid AND p.svg_cut_job_id = $2::bigint
+         AND p.mdf_board_card_kind = 'machine_file'
+         AND p.mdf_board_hidden_at IS NOT NULL AND job.status <> 'archived'
+       FOR UPDATE OF p, job
+     )
+     UPDATE cnc_telegram_packets p
+     SET mdf_board_hidden_at = NULL, mdf_board_hidden_by = NULL,
+         mdf_board_hidden_reason = NULL, mdf_board_hidden_cut_job_id = NULL,
+         updated_by = $3::bigint, updated_at = now()
+     FROM hidden_machine_file old
+     WHERE p.packet_id = old.packet_id
+     RETURNING old.hidden_at, old.hidden_by, old.hidden_reason, old.hidden_cut_job_id`,
+    [input.packet.packetId, input.packet.svgCutJobId, Number(input.command.currentUser.id)],
+  );
+  let auditId: string | undefined;
+  const before = restored.rows[0];
+  if (before) {
+    const event = 'cnc.manual_svg_upload.mdf_card_restored';
+    auditId = await auditService.record(tx, {
+      event, entityType: 'cnc_telegram_packet', entityId: input.packet.packetId,
+      actorUserId: input.command.currentUser.id, actorUsername: input.command.currentUser.username ?? null,
+      actorRole: input.command.currentUser.role ?? null, requestId: input.requestId, source: MANUAL_SVG_SOURCE,
+      before, after: { hidden: false, cutJobId: input.packet.svgCutJobId },
+      diff: { mdfMachineFileCardRestored: true },
+      metadata: { ...manualSvgEventMetadata(input, 'manual_svg_mdf_card_create'), previousHiddenCutJobId: before.hidden_cut_job_id },
+      relatedEntities: [
+        ...manualSvgRelatedEntities(input.packet),
+        ...(before.hidden_cut_job_id != null && Number(before.hidden_cut_job_id) !== input.packet.svgCutJobId
+          ? [{ entityType: 'cut_job', entityId: Number(before.hidden_cut_job_id) }] : []),
+      ],
+    });
+    await enqueueOutbox(tx, {
+      eventType: event, aggregateType: 'cnc_telegram_packet', aggregateId: input.packet.packetId,
+      idempotencyKey: `cnc-manual-svg:${input.packet.packetId}:job-${input.packet.svgCutJobId}:restore-${toIso(before.hidden_at)}`,
+      payload: { ...manualSvgOutboxPayload({ ...input, auditId }, event), before },
+    });
+  }
+  if (!await manualSvgMdfCardEventExists(tx, input.packet)) {
+    const createdAuditId = await writeManualSvgMdfCardAudit(tx, { ...input, beforePacket: null });
+    await enqueueManualSvgMdfCardEvent(tx, { ...input, auditId: createdAuditId });
+    return { createdNow: true, auditId: auditId ?? createdAuditId };
+  }
+  return { createdNow: Boolean(before), auditId };
+}
+
 async function manualSvgMdfCardEventExists(
   tx: TransactionClient,
   packet: CncTelegramPacketDto,
@@ -2062,19 +2099,39 @@ async function reuseExistingManualSvgSourceFile(
     dto: { ...input.command.dto, sourceFiles: effectiveSourceFiles },
   };
   const refreshedPacket = promoteToGcode ? await loadPacket(tx, packet.packetId) : packet;
+  const card = effectiveCommand.dto.createMdfMachineFileCard
+    ? await ensureManualSvgMdfMachineFileCard(tx, {
+        command: effectiveCommand, packet: refreshedPacket,
+        requestId: input.requestId, externalPacketKey: input.dto.externalPacketKey,
+      })
+    : { createdNow: false, auditId: undefined };
   const filePersistence = await persistManualSvgUploadFiles(tx, {
     command: effectiveCommand,
     packet: refreshedPacket,
     requestId: input.requestId,
     externalPacketKey: input.dto.externalPacketKey,
   });
+  if (card.createdNow) {
+    await evaluateMdfBoardBathColumnAutomationForPacket(tx, {
+      packet: refreshedPacket, actor: input.command.currentUser, requestId: input.requestId,
+    });
+    if (packetColumnKey(refreshedPacket) === 'parsed') {
+      await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
+        source: { kind: 'packet', id: refreshedPacket.packetId },
+        orderIds: refreshedPacket.items.map((item) => item.orderId),
+        actor: input.command.currentUser, requestId: input.requestId,
+        sourceIdempotencyKey: `cnc-manual-svg:${refreshedPacket.packetId}:source-${refreshedPacket.sourceVersion}:machine-files`,
+      });
+    }
+  }
   return manualSvgResponse({
     packet: refreshedPacket,
     requestId: input.requestId,
+    auditId: card.auditId,
     applied: false,
     ignoredStaleSourceVersion: false,
     skippedDuplicateSourceFile: skippedDuplicateSourceFileDto({ ...match, packetId: packet.packetId }),
-  }, false, filePersistence);
+  }, card.createdNow, filePersistence);
 }
 
 export function mergeCanonicalSourceFiles(
@@ -3710,10 +3767,15 @@ async function syncSvgCutImport(
   );
   const row = state.rows[0];
   if (!row) return;
+  const importedJob = row.svg_cut_job_id === null ? null : (await tx.query<{ status: string }>(
+    'SELECT status FROM cut_job WHERE cut_job_id = $1 FOR UPDATE',
+    [row.svg_cut_job_id],
+  )).rows[0];
   const alreadyImported = row.svg_cut_import_status === 'imported'
     && row.svg_cut_job_id !== null
-    && row.svg_cut_result_id !== null;
-  if (alreadyImported && options.refreshImported !== true) {
+    && importedJob != null
+    && importedJob.status !== 'archived';
+  if (alreadyImported && (options.refreshImported !== true || row.svg_cut_result_id === null)) {
     await syncSvgCutJobSourceDisplayNumber(tx, row.svg_cut_job_id, options.requestedCutJobId ?? row.cutting_sequence_no);
     return;
   }
@@ -3998,6 +4060,7 @@ async function findExistingSvgCutJobForSourceFile(
              packet.packet_id::text AS packet_id,
              file.original_file_name AS file_name,
              'manual_svg_upload_file'::text AS matched_by,
+             CASE WHEN packet.mdf_board_hidden_at IS NULL THEN 0 ELSE 1 END AS hidden_priority,
              1 AS priority,
              file.updated_at AS matched_at
       FROM cnc_manual_svg_upload_files file
@@ -4009,7 +4072,7 @@ async function findExistingSvgCutJobForSourceFile(
         AND packet.svg_cut_job_id IS NOT NULL
         AND svg_job.status <> 'archived'
         AND ($2::uuid IS NULL OR packet.packet_id <> $2::uuid)
-      ORDER BY file.updated_at DESC
+      ORDER BY hidden_priority, file.updated_at DESC
       LIMIT 1
     ),
     cut_job_selection AS (
@@ -4026,6 +4089,7 @@ async function findExistingSvgCutJobForSourceFile(
              ) AS packet_id,
              source_file.value->>'fileName' AS file_name,
              'cut_job_selection'::text AS matched_by,
+             CASE WHEN packet.packet_id IS NOT NULL AND packet.mdf_board_hidden_at IS NULL THEN 0 ELSE 1 END AS hidden_priority,
              2 AS priority,
              job.created_at AS matched_at
       FROM cut_job job
@@ -4035,7 +4099,7 @@ async function findExistingSvgCutJobForSourceFile(
         AND lower(source_file.value->>'sha256')=lower($1)
         AND job.status <> 'archived'
         AND ($2::uuid IS NULL OR packet.packet_id IS NULL OR packet.packet_id <> $2::uuid)
-      ORDER BY job.created_at DESC
+      ORDER BY hidden_priority, job.created_at DESC
       LIMIT 1
     )
     SELECT cut_job_id, cut_job_display_number, cut_result_id, packet_id, file_name, matched_by
@@ -4044,7 +4108,7 @@ async function findExistingSvgCutJobForSourceFile(
       UNION ALL
       SELECT * FROM cut_job_selection
     ) matched
-    ORDER BY priority, matched_at DESC
+    ORDER BY hidden_priority, priority, matched_at DESC
     LIMIT 1
     `,
     [sourceFile.sha256, currentPacketId],
@@ -4372,18 +4436,9 @@ async function buildLenientSvgCutImportPlan(
     const match = key ? matchedItems.get(key) : null;
     const matchedOrderId = match?.matchStatus === 'matched' ? toPositiveInteger(match.matchOrderId) : null;
     const matchedDetailId = match?.matchStatus === 'matched' ? toPositiveInteger(match.matchDetailId) : null;
-    // Explicit manual selections may use the selected order as a fallback.
-    // Telegram's empty selection is an inferred scope: never attach an
-    // unresolved layout item to a different matched order by position.
-    const fallbackOrder = selectedOrderIds.length > 0
-      ? informationalOrderForLayoutItem(item, index, selectedOrders)
-      : null;
-    const orderId = matchedOrderId ?? fallbackOrder?.orderId ?? null;
-    const orderName = matchedOrderId !== null
-      ? item.orderName || match?.orderName || String(matchedOrderId)
-      : fallbackOrder
-        ? informationalLayoutOrderName(item, fallbackOrder)
-        : normalizeOptional(item.orderName) ?? 'SVG';
+    const sourceOrder = exactSvgOrderForName(item.orderName, selectedOrders);
+    const orderId = matchedOrderId ?? sourceOrder?.orderId ?? null;
+    const orderName = item.orderName;
     const orderDetailId = matchedDetailId;
     placements.push({
       ...item,
@@ -4453,11 +4508,10 @@ async function buildInformationalSvgCutImportPlan(
     if (!options.allowOutOfSheet && !layoutGeometryInsideSheet(item, sheet.widthMm, sheet.heightMm)) {
       return { ok: false, reason: `SVG деталь ${item.orderName}#${item.detailNumber} выходит за границы листа` };
     }
-    const order = informationalOrderForLayoutItem(item, index, selectedOrders);
+    const order = exactSvgOrderForName(item.orderName, selectedOrders);
     placements.push({
       ...item,
-      orderName: informationalLayoutOrderName(item, order),
-      orderId: order.orderId,
+      orderId: order?.orderId ?? null,
       orderDetailId: null,
       itemKey: informationalSvgItemKey(item, index),
       materialName: normalizeOptional(dto.materialName),
@@ -4524,38 +4578,6 @@ function buildTelegramInformationalSvgCutImportPlan(
 function isTelegramSvgDetailMatchFailure(reason: string): boolean {
   return reason.includes('is not uniquely matched to an order detail')
     || reason === 'Для нестрогой загрузки SVG не выбраны заказы';
-}
-
-function informationalOrderForLayoutItem(
-  item: CncTelegramCutLayoutItemDto,
-  index: number,
-  selectedOrders: ManualSvgSelectedOrder[],
-): ManualSvgSelectedOrder {
-  const itemOrderKey = normalizeOrderKey(item.orderName);
-  const exact = itemOrderKey
-    ? selectedOrders.find((order) => (
-        normalizeOrderKey(order.orderName) === itemOrderKey ||
-        String(order.orderId) === item.orderName.trim()
-      ))
-    : null;
-  return exact ?? selectedOrders[index % selectedOrders.length] ?? selectedOrders[0]!;
-}
-
-function informationalLayoutOrderName(
-  item: CncTelegramCutLayoutItemDto,
-  order: ManualSvgSelectedOrder,
-): string {
-  const current = normalizeOptional(item.orderName);
-  if (current && current !== 'SVG' && !current.includes('+')) {
-    const currentKey = normalizeOrderKey(current);
-    if (
-      currentKey &&
-      (currentKey === normalizeOrderKey(order.orderName) || current.trim() === String(order.orderId))
-    ) {
-      return current;
-    }
-  }
-  return normalizeOptional(order.orderName) ?? String(order.orderId);
 }
 
 function informationalSvgItemKey(item: CncTelegramCutLayoutItemDto, index: number): string {
@@ -4741,7 +4763,7 @@ async function createSvgCutJob(
   }
 
   const itemByDetailId = new Map(items.map((item) => [item.orderDetailId, item]));
-  const placements = buildSvgSheetPlacements(plan, itemByDetailId);
+  const placements = buildSvgSheetPlacements(plan, itemByDetailId, layout.renderOnlyContours);
   const renderSnapshot = buildSvgRenderSnapshot(placements, itemByDetailId, dto.programName ?? dto.externalPacketKey, plan);
   const sheet = await tx.query<{ cut_group_sheet_id: string | number }>(
     `
@@ -4754,9 +4776,6 @@ async function createSvgCutJob(
     [cutGroupId, plan.sheetMaterialTypeId, JSON.stringify(placements)],
   );
   const cutGroupSheetId = toNumber(sheet.rows[0].cut_group_sheet_id);
-  if (!svgPlanCanCreateCutResult(plan)) {
-    return { cutJobId, cutResultId: null };
-  }
   const totals = buildSvgCutTotals(plan);
   const snapshot: CutJobDto = {
     cutJobId,
@@ -4895,7 +4914,7 @@ async function refreshImportedSvgCutResult(
   const sheet = group.sheets[0]!;
   const items = await syncSvgCutJobItemsForPlan(tx, cutJobId, group.cutGroupId, plan, baseSnapshot.items);
   const itemByDetailId = new Map(items.map((item) => [item.orderDetailId, item]));
-  const placements = buildSvgSheetPlacements(plan, itemByDetailId);
+  const placements = buildSvgSheetPlacements(plan, itemByDetailId, dto.cutLayout?.renderOnlyContours);
   const renderSnapshot = buildSvgRenderSnapshot(placements, itemByDetailId, dto.programName ?? dto.externalPacketKey, plan);
   const summary = buildSvgCutSummary(plan, 'cnc_telegram_svg');
   const totals = buildSvgCutTotals(plan);
@@ -5065,13 +5084,6 @@ async function syncSvgCutJobItemsForPlan(
   return result;
 }
 
-function svgPlanCanCreateCutResult(plan: Extract<SvgCutImportPlan, { ok: true }>): boolean {
-  return !plan.informational || (
-    plan.details.length > 0 &&
-    plan.placements.every((placement) => placement.orderDetailId !== null)
-  );
-}
-
 export async function ensureSvgCutJobDisplayNumberAvailable(
   tx: TransactionClient,
   displayNumber: string,
@@ -5190,9 +5202,10 @@ function buildCutJobItemDto(
   };
 }
 
-function buildSvgSheetPlacements(
+export function buildSvgSheetPlacements(
   plan: Extract<SvgCutImportPlan, { ok: true }>,
   itemByDetailId: ReadonlyMap<number, CutJobItemDto>,
+  renderOnlyContours?: SvgRenderContour[],
 ): SheetPlacementsJson {
   const nextInstance = new Map<string, number>();
   const pieces = plan.placements.map((item) => {
@@ -5212,9 +5225,9 @@ function buildSvgSheetPlacements(
         orderId: item.orderId,
         orderName: item.orderName,
         detailId: item.orderDetailId,
-        detailNumber: jobItem?.detail?.detailNumber ?? item.detailNumber,
-        widthMm: jobItem?.detail?.width ?? item.widthMm,
-        heightMm: jobItem?.detail?.height ?? item.heightMm,
+        detailNumber: item.detailNumber,
+        widthMm: item.widthMm,
+        heightMm: item.heightMm,
         materialName: item.materialName ?? jobItem?.detail?.materialName ?? plan.materialName ?? null,
       },
     };
@@ -5223,6 +5236,7 @@ function buildSvgSheetPlacements(
     trim_mm: { left: 0, right: 0, top: 0, bottom: 0 },
     sheet_width_mm: plan.sheetWidthMm,
     sheet_height_mm: plan.sheetHeightMm,
+    renderOnlyContours: normalizeSvgRenderContours(renderOnlyContours, {widthMm:plan.sheetWidthMm,heightMm:plan.sheetHeightMm}),
     pieces,
   };
 }
@@ -5491,8 +5505,12 @@ function buildSvgCutResultManifest(snapshot: CutJobDto): Record<string, unknown>
   );
   return {
     groups: snapshot.groups.length,
-    items: uniqueValues(snapshotPieces.map((piece) => piece.item_id)).length || snapshot.items.length,
-    instances: snapshotPieces.length || snapshot.items.reduce((sum, item) => sum + item.qty, 0),
+    items: snapshot.items.length > 0
+      ? snapshot.items.length
+      : uniqueValues(snapshotPieces.map((piece) => piece.item_id)).length,
+    instances: snapshot.items.length > 0
+      ? snapshot.items.reduce((sum, item) => sum + item.qty, 0)
+      : snapshotPieces.length,
     unplaced: snapshot.unplaced?.length ?? 0,
     variants: snapshot.groups.map((group) => ({
       groupKey: group.groupKey ?? `group:${group.cutGroupId}`,
@@ -6045,6 +6063,7 @@ async function evaluateMdfBoardBathColumnAutomationForPacket(
   const eventType = mdfBoardBathColumnEventType(state.column);
   await evaluateMdfBoardColumnAutomation(tx, {
     eventType,
+    source: { kind: 'bath', id: `cut-result:${cutResultId}` },
     orderIds: state.orderIds,
     actor: input.actor,
     requestId: input.requestId,
@@ -6324,16 +6343,12 @@ async function applyCncAutoCutStatusCandidates(
 
   const targets = await tx.query<CncAutoCutTargetRow>(
     `
-    WITH completed_quantities AS (
-      SELECT
-        item.match_detail_id::bigint AS detail_id,
-        SUM(GREATEST(item.quantity, 0))::integer AS completed_quantity
-      FROM cnc_telegram_packet_items item
-      JOIN cnc_telegram_packets packet ON packet.packet_id = item.packet_id
-      WHERE item.match_status = 'matched'
-        AND item.match_detail_id = ANY($1::bigint[])
-        AND (packet.completion_status = 'completed' OR packet.thumbs_up = true)
-      GROUP BY item.match_detail_id
+    WITH target_details AS (
+      SELECT order_id, detail_id AS order_detail_id FROM order_details
+      WHERE detail_id = ANY($1::bigint[]) AND delete_flag = false
+    ), ${mdfCutReadinessCtes({ targetDetails: 'target_details' })},
+    completed_quantities AS (
+      SELECT detail_id, completed_quantity FROM mdf_cut_quantities
     )
     SELECT DISTINCT details.order_id, details.detail_id
     FROM order_details details
@@ -8124,6 +8139,9 @@ export function canonicalLayoutFingerprint(layout: CncTelegramStructuredIngestDt
     quantity: Number.isInteger(item.quantity) ? item.quantity : 1,
   })).sort((left, right) => stableStringify(left).localeCompare(stableStringify(right)));
   const canonical = {
+    ...(layout.renderOnlyContours?.length ? {renderOnlyContours: layout.renderOnlyContours.map(c => ({
+      xMm:rounded(c.xMm),yMm:rounded(c.yMm),placedWidthMm:rounded(c.placedWidthMm),placedHeightMm:rounded(c.placedHeightMm),
+    })).sort((a,b)=>stableStringify(a).localeCompare(stableStringify(b)))} : {}),
     version: 'cnc-layout-fingerprint-v1',
     material: null,
     sheet: {
@@ -8257,7 +8275,7 @@ function packetCutSheetOrNull(value: unknown): CncTelegramPacketCutSheetDto | nu
   };
 }
 
-function cutLayoutOrNull(value: unknown): CncTelegramCutLayoutDto | null {
+export function cutLayoutOrNull(value: unknown): CncTelegramCutLayoutDto | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Record<string, unknown>;
   if (raw.status !== 'valid' && raw.status !== 'invalid') return null;
@@ -8273,6 +8291,7 @@ function cutLayoutOrNull(value: unknown): CncTelegramCutLayoutDto | null {
     : [];
   return {
     status: raw.status,
+    renderOnlyContours: normalizeSvgRenderContours(raw.renderOnlyContours, sheet),
     reasons: stringArray(raw.reasons),
     sheet: sheet && sheet.widthMm > 0 && sheet.heightMm > 0 ? sheet : null,
     rawCommentCount: toNullableNumber(raw.rawCommentCount as string | number | null | undefined),

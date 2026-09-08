@@ -79,10 +79,12 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       'chk_realtime_event_log_domain_revisions',
     ];
     const sql098 = readFileSync(resolve(migDir, '098_order_realtime_producer_bridge.sql'), 'utf8');
-    const requiredFunctions = [...sql098.matchAll(/CREATE OR REPLACE FUNCTION\s+(\w+)/g)]
-      .map((match) => match[1]);
-    const requiredTriggers = [...sql098.matchAll(/CREATE TRIGGER\s+(\w+)/g)]
-      .map((match) => match[1]);
+    const requiredFunctions = [...sql098.matchAll(/CREATE OR REPLACE FUNCTION\s+(\w+)/g)].map(
+      (match) => match[1],
+    );
+    const requiredTriggers = [...sql098.matchAll(/CREATE TRIGGER\s+(\w+)/g)].map(
+      (match) => match[1],
+    );
 
     expect(requiredFunctions).toHaveLength(18);
     expect(requiredTriggers).toHaveLength(11);
@@ -92,14 +94,18 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText).toMatch(/q_fun_hash\(\).*md5\(pg_get_functiondef\(oid\)\)/);
     expect(scriptText).not.toMatch(/q_fun_hash\(\).*md5\(prosrc\)/);
     expect(probeFn).toContain("q_fun_hash 'cnc_telegram_worker_reason_code_valid(text)'");
-    expect(probeFn.match(/q_fun_hash '[^']+' [a-f0-9]{32}/g)).toHaveLength(requiredFunctions.length + 2);
+    expect(probeFn.match(/q_fun_hash '[^']+' [a-f0-9]{32}/g)).toHaveLength(
+      requiredFunctions.length + 2,
+    );
   });
 
   it('requires realtime end-state probes before advancing the migration ledger', () => {
     const verifyStart = scriptText.indexOf('verify_applied_effect() {');
     const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
     const verifyFn = scriptText.slice(verifyStart, verifyEnd);
-    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\|108_\*\|109_\*\|110_\*\|111_\*\|112_\*\|113_\*\|114_\*\|115_\*\|116_\*\|117_\*\|118_\*\|119_\*\|120_\*\|121_\*\|122_\*\|123_\*\|124_\*\|125_\*\|126_\*\|127_\*\|128_\*\|129_\*\|130_\*\|131_\*\|132_\*\|133_\*\|134_\*\|135_\*\|136_\*\|137_\*\|138_\*\|139_\*\|140_\*\|141_\*\|142_\*\|143_\*\|144_\*\|145_\*\|146_\*\|147_\*\|148_\*\|149_\*\|150_\*\)/);
+    expect(verifyFn).toMatch(
+      /\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\|108_\*\|109_\*\|110_\*\|111_\*\|112_\*\|113_\*\|114_\*\|115_\*\|116_\*\|117_\*\|118_\*\|119_\*\|120_\*\|121_\*\|122_\*\|123_\*\|124_\*\|125_\*\|126_\*\|127_\*\|128_\*\|129_\*\|130_\*\|131_\*\|132_\*\|133_\*\|134_\*\|135_\*\|136_\*\|137_\*\|138_\*\|139_\*\|140_\*\|141_\*\|142_\*\|143_\*\|144_\*\|145_\*\|146_\*\|147_\*\|148_\*\|149_\*\|150_\*\|153_\*\|154_\*\)/,
+    );
     expect(scriptText).toMatch(/verify_applied_effect "\$f"[\s\S]*INSERT INTO schema_migrations/);
   });
 
@@ -127,8 +133,9 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       'chk_cnc_tg_import_item_lease',
       'uq_cnc_tg_import_request_active_selection',
       'idx_cnc_tg_import_item_claim',
-      "cnc.telegram_import.manage_all",
-    ]) expect(scriptText).toContain(marker);
+      'cnc.telegram_import.manage_all',
+    ])
+      expect(scriptText).toContain(marker);
   });
 
   it('classifies widget 147 separately from MDF 147 and verifies payment safety markers', () => {
@@ -138,23 +145,37 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(end).toBeGreaterThan(start);
     const arm = probeFn.slice(start, end);
     for (const marker of [
-      'executor_bitrix_user_id', 'executor_is_admin',
-      'q_tbl bitrix24_app_install_attempt', 'q_tbl bitrix24_widget_session',
-      'q_tbl bitrix24_manual_payment_command', 'q_tbl bitrix24_pay_system_catalog',
-      'uq_bitrix24_manual_payment_idempotency', 'uq_bitrix24_manual_payment_remote_create',
-      'chk_bitrix24_manual_payment_owner', 'chk_bitrix24_manual_payment_overpayment_confirmation',
-      'payment_local_date', 'manual_command_id', 'fk_bitrix24_request_payment_manual_command',
-      'uq_bitrix24_request_payment_manual_command', 'widget_enabled', 'is_default',
+      'executor_bitrix_user_id',
+      'executor_is_admin',
+      'q_tbl bitrix24_app_install_attempt',
+      'q_tbl bitrix24_widget_session',
+      'q_tbl bitrix24_manual_payment_command',
+      'q_tbl bitrix24_pay_system_catalog',
+      'uq_bitrix24_manual_payment_idempotency',
+      'uq_bitrix24_manual_payment_remote_create',
+      'chk_bitrix24_manual_payment_owner',
+      'chk_bitrix24_manual_payment_overpayment_confirmation',
+      'payment_local_date',
+      'manual_command_id',
+      'fk_bitrix24_request_payment_manual_command',
+      'uq_bitrix24_request_payment_manual_command',
+      'widget_enabled',
+      'is_default',
       'uq_bitrix24_payment_type_mapping_widget_default',
-      'bitrix24.payments.create', 'bitrix24.payments.confirm_overpayment',
-    ]) expect(arm).toContain(marker);
+      'bitrix24.payments.create',
+      'bitrix24.payments.confirm_overpayment',
+    ])
+      expect(arm).toContain(marker);
   });
 
   it('requires migration 148 active-number index and durable import-number probes', () => {
     const verifyStart = scriptText.indexOf('verify_applied_effect() {');
     const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
     expect(scriptText.slice(verifyStart, verifyEnd)).toContain('|148_*');
-    const arm = probeFn.slice(probeFn.indexOf('148_cut_job_number_reuse*)'), probeFn.indexOf('*) return 2'));
+    const arm = probeFn.slice(
+      probeFn.indexOf('148_cut_job_number_reuse*)'),
+      probeFn.indexOf('*) return 2'),
+    );
     expect(arm).toContain('q_col cnc_telegram_import_items requested_cut_job_id');
     expect(arm).toContain('chk_cnc_tg_import_requested_number');
     expect(arm).toContain('i.indisunique AND i.indisvalid');
@@ -162,8 +183,31 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(arm).toContain('pg_get_expr(i.indexprs, i.indrelid)');
   });
 
+  it('requires the complete WhatsApp schema and permission markers for migration 152', () => {
+    const arm = probeFn.slice(
+      probeFn.indexOf('152_whatsapp_admin*)'),
+      probeFn.indexOf('*) return 2'),
+    );
+    for (const marker of [
+      'whatsapp_message_templates',
+      'whatsapp_keyword_rules',
+      'whatsapp_webhook_events',
+      'whatsapp_delivery_jobs',
+      'whatsapp_delivery_jobs_claim_idx',
+      'whatsapp.view',
+      'whatsapp.manage',
+    ])
+      expect(arm).toContain(marker);
+    const verifyStart = scriptText.indexOf('verify_applied_effect() {');
+    const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
+    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('151_*|152_*');
+  });
+
   it('pins the complete Telegram worker audit schema before advancing 107/108/109', () => {
-    const workerProbe = probeFn.slice(probeFn.indexOf('107_cnc_telegram_worker_audit*'), probeFn.indexOf('*) return 2'));
+    const workerProbe = probeFn.slice(
+      probeFn.indexOf('107_cnc_telegram_worker_audit*'),
+      probeFn.indexOf('*) return 2'),
+    );
     expect(workerProbe.match(/q_colset_hash cnc_telegram_worker_/g)).toHaveLength(4);
     expect(workerProbe.match(/q_conset_hash cnc_telegram_worker_/g)).toHaveLength(4);
     expect(workerProbe.match(/q_idxset_hash cnc_telegram_worker_/g)).toHaveLength(4);
@@ -180,7 +224,8 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       'chk_cnc_tg_worker_operation_reason_codes',
       'chk_cnc_tg_worker_observation_reason_codes',
       'chk_cnc_tg_worker_observation_classification_code',
-    ]) expect(workerProbe).toContain(marker);
+    ])
+      expect(workerProbe).toContain(marker);
     expect(scriptText).toMatch(/q_colset_hash\(\).*ordinal_position.*column_default/);
     expect(scriptText).toMatch(/q_conset_hash\(\).*pg_get_constraintdef/);
     expect(scriptText).toMatch(/q_idxset_hash\(\).*indexdef/);
@@ -196,7 +241,10 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(probeFn).toContain('q_idx uq_export_templates_live_name');
     expect(probeFn).toContain('q_idx uq_export_templates_active_default');
     expect(probeFn).toContain('q_idx idx_export_templates_runtime');
-    const migration101Probe = probeFn.slice(probeFn.indexOf('101_export_templates*'), probeFn.indexOf('*) return 2'));
+    const migration101Probe = probeFn.slice(
+      probeFn.indexOf('101_export_templates*'),
+      probeFn.indexOf('*) return 2'),
+    );
     expect(migration101Probe).not.toContain('bazis-cut-set-standard-v1');
     expect(migration101Probe).not.toContain('bazis-project-cut-standard-v1');
   });
@@ -223,17 +271,25 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(probeFn).toContain('104_bazis_panel_order_links*');
     expect(probeFn).toContain('q_col bazis_node_order_detail_map import_source');
     expect(probeFn).toContain('q_con_hash_on bazis_node_order_detail_map_mapping_kind_check');
-    expect(probeFn).toContain("q_fun_hash 'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)'");
-    expect(probeFn).toContain('v104 exact current-revision Basis PDF detail to Bazis panel reconciliation');
+    expect(probeFn).toContain(
+      "q_fun_hash 'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)'",
+    );
+    expect(probeFn).toContain(
+      'v104 exact current-revision Basis PDF detail to Bazis panel reconciliation',
+    );
     expect(probeFn).toContain('d4f7e31052321242dfea61056bae41e7');
-    expect(probeFn).toContain('v109 exact current-revision panel reconciliation with one-product NULL product support');
+    expect(probeFn).toContain(
+      'v109 exact current-revision panel reconciliation with one-product NULL product support',
+    );
     expect(probeFn).toContain('105_bazis_order_detail_product_link_fallback*');
-    expect(probeFn).toContain("products.root_product_count <= 1");
+    expect(probeFn).toContain('products.root_product_count <= 1');
   });
 
   it('pins migration 109 and lets its function supersede the migration 104 marker', () => {
     expect(probeFn).toContain('109_bazis_single_product_reprojection*');
-    expect(probeFn).toContain("q_fun_hash 'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)' d4f7e31052321242dfea61056bae41e7");
+    expect(probeFn).toContain(
+      "q_fun_hash 'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)' d4f7e31052321242dfea61056bae41e7",
+    );
     const migration104Probe = probeFn.slice(
       probeFn.indexOf('104_bazis_panel_order_links*'),
       probeFn.indexOf('105_bazis_order_detail_product_link_fallback*'),
@@ -268,7 +324,8 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       'trg_label_generation_cut_source_exclusive_telegram',
       'reject_cnc_telegram_label_immutable_mutation()',
       'guard_label_generation_cut_source_exclusive()',
-    ]) expect(migration110Probe).toContain(marker);
+    ])
+      expect(migration110Probe).toContain(marker);
   });
 
   it('pins migration 111 Telegram media restore queue end state', () => {
@@ -284,7 +341,8 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       'uq_cnc_telegram_media_restore_active_packet',
       'idx_cnc_telegram_media_restore_claim',
       'idx_cnc_telegram_media_restore_packet_history',
-    ]) expect(migration111Probe).toContain(marker);
+    ])
+      expect(migration111Probe).toContain(marker);
   });
   it('pins migrations 112/113 cut-job orientation and 115 CNC/vacuum end states', () => {
     const migration112Probe = probeFn.slice(
@@ -296,7 +354,8 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       "data_type = 'boolean'",
       "is_nullable = 'NO'",
       "column_default = 'true'",
-    ]) expect(migration112Probe).toContain(marker);
+    ])
+      expect(migration112Probe).toContain(marker);
 
     const migration113Probe = probeFn.slice(
       probeFn.indexOf('113_cut_job_texture_direction*'),
@@ -311,7 +370,8 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       "LIKE '%vertical%'",
       "LIKE '%horizontal%'",
       "LIKE '%none%'",
-    ]) expect(migration113Probe).toContain(marker);
+    ])
+      expect(migration113Probe).toContain(marker);
 
     const migration115MdfProbe = probeFn.slice(
       probeFn.indexOf('115_cnc_telegram_packet_mdf_board_hidden*'),
@@ -324,7 +384,8 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       'q_col cnc_telegram_packets mdf_board_hidden_cut_job_id',
       'q_idx idx_cnc_telegram_packets_mdf_visible_workday',
       'q_idx idx_cnc_telegram_packets_mdf_hidden_cut_job',
-    ]) expect(migration115MdfProbe).toContain(marker);
+    ])
+      expect(migration115MdfProbe).toContain(marker);
 
     const migration115Probe = probeFn.slice(
       probeFn.indexOf('115_vacuum_cut_numbering*'),
@@ -334,7 +395,8 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       'q_col bazis_cut_set_details source_bath_cut_number',
       "LIKE 'bazis-cut-bath-number-v2:%'",
       "source_bath_cut_number ~ '^[0-9]+-[0-9]+$'",
-    ]) expect(migration115Probe).toContain(marker);
+    ])
+      expect(migration115Probe).toContain(marker);
 
     const migration116Probe = probeFn.slice(
       probeFn.indexOf('116_telegram_svg_cut_job_display_number*'),
@@ -346,7 +408,8 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       "packet.svg_cut_import_status = 'imported'",
       "job.selection_criteria->>'source' = 'cnc_telegram_svg'",
       'job.source_display_number IS DISTINCT FROM packet.cutting_sequence_no::text',
-    ]) expect(migration116Probe).toContain(marker);
+    ])
+      expect(migration116Probe).toContain(marker);
 
     const migration117DedupeProbe = probeFn.slice(
       probeFn.indexOf('117_dedupe_telegram_svg_image_packets*'),
@@ -355,10 +418,11 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     for (const marker of [
       'packet.cutting_sequence_no IS NOT NULL',
       "regexp_replace(lower(trim(COALESCE(packet.program_name, ''))), '\\.[^.]+$', '') AS program_key",
-      "duplicate.cut_layout_json = canonical.cut_layout_json",
+      'duplicate.cut_layout_json = canonical.cut_layout_json',
       'duplicate.detail_signature IS NOT DISTINCT FROM canonical.detail_signature',
       'canonical.cutting_sequence_no < duplicate.cutting_sequence_no',
-    ]) expect(migration117DedupeProbe).toContain(marker);
+    ])
+      expect(migration117DedupeProbe).toContain(marker);
 
     const migration117ManualMovesProbe = probeFn.slice(
       probeFn.indexOf('117_mdf_board_manual_moves*'),
@@ -370,7 +434,8 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       'chk_mdf_board_manual_moves_kind_target',
       'idx_mdf_board_manual_moves_lookup',
       "LIKE 'mdf-board-manual-moves-v1:%'",
-    ]) expect(migration117ManualMovesProbe).toContain(marker);
+    ])
+      expect(migration117ManualMovesProbe).toContain(marker);
 
     const migration118Probe = probeFn.slice(
       probeFn.indexOf('118_mdf_board_completed_baths_terminal*'),
@@ -381,7 +446,8 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       'q_con_on mdf_board_manual_moves chk_mdf_board_manual_moves_kind_target',
       'completed_baths',
       "obj_description(oid, 'pg_constraint') LIKE 'mdf-board-manual-moves-v2:%'",
-    ]) expect(migration118Probe).toContain(marker);
+    ])
+      expect(migration118Probe).toContain(marker);
 
     const migration133Probe = probeFn.slice(
       probeFn.indexOf('133_cut_job_split_display_numbers*'),
@@ -393,7 +459,8 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       "NULLIF(btrim(j.source_display_number), '') ~ '^[0-9]+$'",
       "profile.params->>'layout_mode' = 'vacuum_table'",
       "g.summary->>'engine_used' = 'vacuum_table'",
-    ]) expect(migration133Probe).toContain(marker);
+    ])
+      expect(migration133Probe).toContain(marker);
 
     const migration125Probe = probeFn.slice(
       probeFn.indexOf('125_order_hdf_details*'),
@@ -418,7 +485,8 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       'idx_role_permissions_permission_enabled',
       'idx_role_policy_scopes_key_value',
       'version >= 1',
-    ]) expect(migration124RolesProbe).toContain(marker);
+    ])
+      expect(migration124RolesProbe).toContain(marker);
 
     for (const marker of [
       'q_tbl order_hdf_details',
@@ -431,9 +499,12 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       'q_col order_realtime_stream hdf_details_revision',
       'production.hdf.min_side_threshold_mm',
       "pg_get_functiondef('recalc_order_production_status(bigint)'::regprocedure)",
-    ]) expect(migration125Probe).toContain(marker);
+    ])
+      expect(migration125Probe).toContain(marker);
 
-    expect(scriptText).toMatch(/111_\*\|112_\*\|113_\*\|114_\*\|115_\*\|116_\*\|117_\*\|118_\*\|119_\*\|120_\*\|121_\*\|122_\*\|123_\*\|124_\*\|125_\*\|126_\*\|127_\*\|128_\*\|129_\*\|130_\*\|131_\*\|132_\*\|133_\*\|134_\*\|135_\*\|136_\*\|137_\*\|138_\*\|139_\*\|140_\*\|141_\*\|142_\*\|143_\*\|144_\*\|145_\*\|146_\*\|147_\*\|148_\*\|149_\*\|150_\*\)/);
+    expect(scriptText).toMatch(
+      /111_\*\|112_\*\|113_\*\|114_\*\|115_\*\|116_\*\|117_\*\|118_\*\|119_\*\|120_\*\|121_\*\|122_\*\|123_\*\|124_\*\|125_\*\|126_\*\|127_\*\|128_\*\|129_\*\|130_\*\|131_\*\|132_\*\|133_\*\|134_\*\|135_\*\|136_\*\|137_\*\|138_\*\|139_\*\|140_\*\|141_\*\|142_\*\|143_\*\|144_\*\|145_\*\|146_\*\|147_\*\|148_\*\|149_\*\|150_\*\|153_\*\|154_\*\)/,
+    );
   });
 });
 
@@ -461,13 +532,24 @@ describe('apply-migrations.sh auto — semantic view markers (pinned to real SQL
     expect(viewBlock(sql029, 'order_details_view')).toContain('m.material_name');
     expect(viewBlock(sql034, 'order_details_view')).not.toContain('m.material_name');
     expect(viewBlock(sql036, 'order_details_view')).not.toContain('m.material_name');
-    for (const v of ['orders_view', 'orders_alias_view', 'doweling_orders_view', 'details_of_order']) {
+    for (const v of [
+      'orders_view',
+      'orders_alias_view',
+      'doweling_orders_view',
+      'details_of_order',
+    ]) {
       expect(viewBlock(sql034, v)).not.toContain('m.material_name');
     }
   });
 
   it('all five 034 views are probed', () => {
-    for (const v of ['orders_view', 'order_details_view', 'orders_alias_view', 'doweling_orders_view', 'details_of_order']) {
+    for (const v of [
+      'orders_view',
+      'order_details_view',
+      'orders_alias_view',
+      'doweling_orders_view',
+      'details_of_order',
+    ]) {
       expect(scriptText).toContain(v);
     }
   });
@@ -512,7 +594,9 @@ describe('apply-migrations.sh — hard-stop is enforced in all mutating modes', 
 
   it('auto clears the sentinel only with --clear-hard-stop', () => {
     expect(scriptText).toMatch(/CLEAR_HARD_STOP.*-eq 1.*ledger_exists/);
-    expect(scriptText).toMatch(/DELETE FROM schema_migrations WHERE filename LIKE '\$\{HARD_STOP_PREFIX\}%'/);
+    expect(scriptText).toMatch(
+      /DELETE FROM schema_migrations WHERE filename LIKE '\$\{HARD_STOP_PREFIX\}%'/,
+    );
   });
 });
 
@@ -522,23 +606,30 @@ describe('apply-migrations.sh auto — detect-only against the live erp_test con
   // the container is not reachable (e.g. CI without the stage stack).
   const containerUp = (() => {
     try {
-      execFileSync('docker', ['inspect', process.env.PG_CONTAINER ?? 'erp_test-postgresdb-1'], { stdio: 'ignore' });
+      execFileSync('docker', ['inspect', process.env.PG_CONTAINER ?? 'erp_test-postgresdb-1'], {
+        stdio: 'ignore',
+      });
       return true;
     } catch {
       return false;
     }
   })();
 
-  it.skipIf(!containerUp)('classifies the full head as applied/PRESENT', () => {
-    const out = run(['auto', '--detect-only']);
-    expect(out).toMatch(/detect-only: nothing changed/);
-    expect(out).not.toMatch(/PENDING \(will apply\)/);
-    expect(out).not.toMatch(/no classification/);
-  }, 180_000);
+  it.skipIf(!containerUp)(
+    'classifies the full head as applied/PRESENT',
+    () => {
+      const out = run(['auto', '--detect-only']);
+      expect(out).toMatch(/detect-only: nothing changed/);
+      expect(out).not.toMatch(/PENDING \(will apply\)/);
+      expect(out).not.toMatch(/no classification/);
+    },
+    180_000,
+  );
 
   it.skipIf(!containerUp)('probes widget by full filename despite another migration 147', () => {
-    expect(run(['probe', '147_bitrix24_payment_widget.sql']))
-      .toContain('147_bitrix24_payment_widget.sql PRESENT');
+    expect(run(['probe', '147_bitrix24_payment_widget.sql'])).toContain(
+      '147_bitrix24_payment_widget.sql PRESENT',
+    );
   });
 
   it.skipIf(!containerUp)('rejects an ambiguous numeric version 147', () => {

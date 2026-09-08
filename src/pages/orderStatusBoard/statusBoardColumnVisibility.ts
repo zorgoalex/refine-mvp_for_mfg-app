@@ -35,7 +35,9 @@ export const CNC_TERMINAL_COLUMN_DEFINITIONS = [
 export function filterVisibleStatusBoardColumns<T extends { key: string }>(
   columns: readonly T[],
   hiddenKeys: readonly string[],
+  revealedKeys: readonly string[] = [],
 ): T[] {
   const hidden = new Set(hiddenKeys);
-  return columns.filter((column) => !hidden.has(column.key));
+  const revealed = new Set(revealedKeys);
+  return columns.filter((column) => !hidden.has(column.key) || revealed.has(column.key));
 }

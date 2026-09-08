@@ -172,7 +172,11 @@ export class PgStatusAutomationRepository {
         command.dto.targetStatusId !== undefined ? command.dto.targetStatusId : existing.targetStatusId;
       const nextConditions = command.dto.conditions ?? existing.conditions;
       const nextActionConfig = command.dto.actionConfig ?? existing.actionConfig ?? {};
-      if (existing.version === command.dto.version) {
+      const disablingLegacyMdfAction = existing.eventType.startsWith('mdf.')
+        && existing.actionType !== 'change_details_production_status'
+        && command.dto.isEnabled === false
+        && Object.keys(command.dto).every(key => key === 'version' || key === 'isEnabled');
+      if (existing.version === command.dto.version && !disablingLegacyMdfAction) {
         // Валидируется СМЕРДЖЕННОЕ правило, не только дельта: смена eventType без
         // повторной отправки conditions и «оживление» правила с протухшим целевым
         // статусом (PATCH { isEnabled: true }) обязаны падать 422 здесь.

@@ -322,6 +322,16 @@ describe('statusAutomationView', () => {
     });
   });
 
+  it.each([
+    'mdf.order_machine_files_present', 'mdf.board.completed', 'mdf.board.baths',
+    'mdf.board.baths_ready', 'mdf.board.baths_laminated',
+  ] as const)('forces advance-only for %s even when editing a legacy exact rule', (eventType) => {
+    expect(buildCreatePayload({
+      ...baseForm, eventType, actionType: 'change_details_production_status',
+      detailTransitionMode: 'set_exact',
+    }).actionConfig).toEqual({ detailTransitionMode: 'advance_only' });
+  });
+
   it('builds an update payload and forwards the rule version', () => {
     expect(
       buildUpdatePayload(

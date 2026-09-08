@@ -246,6 +246,35 @@ export class Bitrix24PaymentWidgetRepository {
     return mapInstallAttempt(result.rows[0]);
   }
 
+  // installFinish reloads the iframe without our random state URL parameter.
+  // Caller must first verify the app and administrator with the callback token.
+  async getPendingInstallAttempt(input: {
+    memberId: string;
+    domain: string;
+    executorBitrixUserId: string;
+    applicationTokenHash: string;
+  }): Promise<(WidgetInstallAttempt & { stateTokenHash: string }) | null> {
+    const result = await this.db.query<{
+      attempt_id: string; member_id: string; domain: string;
+      application_token_hash: string; executor_bitrix_user_id: string;
+      expires_at: Date | string; state_token_hash: string;
+    }>(
+      `SELECT attempt_id, member_id, domain, application_token_hash,
+              executor_bitrix_user_id, expires_at, state_token_hash
+         FROM (
+           SELECT * FROM bitrix24_app_install_attempt
+            WHERE member_id=$1 AND domain=$2 AND executor_bitrix_user_id=$3
+              AND application_token_hash=$4
+            ORDER BY created_at DESC, attempt_id DESC
+            LIMIT 1
+         ) latest
+        WHERE status='installing' AND expires_at>now()`,
+      [input.memberId, input.domain, input.executorBitrixUserId, input.applicationTokenHash],
+    );
+    const row = result.rows[0];
+    return row ? { ...mapInstallAttempt(row), stateTokenHash: row.state_token_hash } : null;
+  }
+
   async getInstallAttempt(stateTokenHash: string): Promise<WidgetInstallAttempt | null> {
     const result = await this.db.query<{
       attempt_id: string;

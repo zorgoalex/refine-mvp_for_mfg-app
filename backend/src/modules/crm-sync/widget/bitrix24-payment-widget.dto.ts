@@ -214,6 +214,39 @@ export function parseRuntimeAuth(body: unknown): Bitrix24RuntimeAuth {
   };
 }
 
+// Iframe navigation sends DOMAIN in the URL and OAuth fields in the form.
+// Normalize both transports before using either strict app/install parser.
+export function normalizeBitrix24AppCallback(query: unknown, body: unknown): {
+  auth: Record<string, string>;
+} {
+  const merged = collectCallbackFields(query, 'query');
+  for (const [key, value] of collectCallbackFields(body, 'body')) {
+    const existing = merged.get(key);
+    if (existing !== undefined && existing !== value) {
+      throw new ApiError(400, 'BITRIX24_WIDGET_CALLBACK_CONFLICT',
+        `Bitrix24 callback field ${key} conflicts between query and body`);
+    }
+    merged.set(key, value);
+  }
+  const auth: Record<string, string> = {};
+  for (const [canonical, field] of [
+    ['accessToken', 'access_token'], ['refreshToken', 'refresh_token'],
+    ['expiresIn', 'expires_in'], ['domain', 'domain'], ['memberId', 'member_id'],
+    ['status', 'status'], ['applicationToken', 'application_token'],
+  ]) {
+    const value = merged.get(canonical);
+    if (value !== undefined) auth[field] = value;
+  }
+  return { auth };
+}
+
+export function parseAppApplicationToken(body: unknown): string | null {
+  if (!isRecord(body)) throw invalidCallback('Invalid Bitrix24 app callback');
+  const auth = isRecord(body.auth) ? body.auth : body;
+  const token = auth.application_token ?? auth.APPLICATION_TOKEN;
+  return token === undefined ? null : scalar(token, 'application token', 8, 4096);
+}
+
 export function parseWidgetAuthorization(value: unknown): string {
   if (typeof value !== 'string') throw widgetAuthError();
   const match = /^BitrixWidget ([A-Za-z0-9_-]{32,256})$/.exec(value.trim());
@@ -237,6 +270,9 @@ export function requestHash(input: CreateWidgetPaymentInput): string {
 
 function collectCallbackFields(value: unknown, label: string): Map<string, string> {
   if (!isRecord(value)) throw invalidCallback(`Invalid callback ${label}`);
+  if (value.auth !== undefined && !isRecord(value.auth)) {
+    throw invalidCallback(`Invalid callback ${label} auth`);
+  }
   const result = new Map<string, string>();
   collectRecord(value, result);
   const auth = isRecord(value.auth) ? value.auth : null;
