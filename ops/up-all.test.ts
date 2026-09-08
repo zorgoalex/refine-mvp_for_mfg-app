@@ -28,24 +28,30 @@ function runCncWorker(
   const envFile = resolve(tempDir, '.env');
   const fakeDocker = resolve(fakeBinDir, 'docker');
   mkdirSync(fakeBinDir);
-  writeFileSync(envFile, [
-    `ERP_STACK_ENV=${stackEnv}`,
-    `CNC_TELEGRAM_WORKER_ROLE=${role}`,
-    `CNC_TELEGRAM_ALLOW_NON_PROD_WRITER=${allowNonProdWriter}`,
-    'COMPOSE_PROJECT_NAME=erp_test',
-  ].join('\n'));
-  writeFileSync(fakeDocker, [
-    '#!/usr/bin/env bash',
-    'if [[ " $* " == *" config --format json "* ]]; then',
-    '  printf \'{"services":{"cnc-telegram-worker":{"command":["%s"]}}}\n\' "${FAKE_WORKER_COMMAND:-serve}"',
-    '  exit 0',
-    'fi',
-    'if [[ " $* " == *" ps -aq glm-ocr-model-init "* ]]; then',
-    '  [[ "${FAKE_GLM_CONTAINER:-false}" == "true" ]] && printf \'legacy-glm-container\\n\'',
-    '  exit 0',
-    'fi',
-    'printf \'profiles=%s glm=%s timeout=%s ocr=%s docker %s\\n\' "${COMPOSE_PROFILES:-}" "${CNC_ENABLE_GLM_OCR:-false}" "${CNC_OCR_COMMAND_TIMEOUT_SECONDS:-}" "${CNC_OCR_COMMAND:-}" "$*"',
-  ].join('\n'));
+  writeFileSync(
+    envFile,
+    [
+      `ERP_STACK_ENV=${stackEnv}`,
+      `CNC_TELEGRAM_WORKER_ROLE=${role}`,
+      `CNC_TELEGRAM_ALLOW_NON_PROD_WRITER=${allowNonProdWriter}`,
+      'COMPOSE_PROJECT_NAME=erp_test',
+    ].join('\n'),
+  );
+  writeFileSync(
+    fakeDocker,
+    [
+      '#!/usr/bin/env bash',
+      'if [[ " $* " == *" config --format json "* ]]; then',
+      '  printf \'{"services":{"cnc-telegram-worker":{"command":["%s"]}}}\n\' "${FAKE_WORKER_COMMAND:-serve}"',
+      '  exit 0',
+      'fi',
+      'if [[ " $* " == *" ps -aq glm-ocr-model-init "* ]]; then',
+      '  [[ "${FAKE_GLM_CONTAINER:-false}" == "true" ]] && printf \'legacy-glm-container\\n\'',
+      '  exit 0',
+      'fi',
+      'printf \'profiles=%s glm=%s timeout=%s ocr=%s docker %s\\n\' "${COMPOSE_PROFILES:-}" "${CNC_ENABLE_GLM_OCR:-false}" "${CNC_OCR_COMMAND_TIMEOUT_SECONDS:-}" "${CNC_OCR_COMMAND:-}" "$*"',
+    ].join('\n'),
+  );
   chmodSync(fakeDocker, 0o755);
   try {
     return spawnSync('bash', [resolve(__dirname, 'cnc-telegram-worker.sh'), ...args], {
@@ -101,19 +107,76 @@ function runCheckEnv(overrides: Record<string, string>) {
     CNC_ENABLE_GLM_OCR: 'false',
     ...overrides,
   };
-  writeFileSync(envFile, Object.entries(values)
-    .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
-    .join('\n'));
+  writeFileSync(
+    envFile,
+    Object.entries(values)
+      .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+      .join('\n'),
+  );
   try {
-    return spawnSync('bash', [resolve(__dirname, 'check-env.sh'),
-      '--env-file', envFile,
-      '--compose-file', resolve(tempDir, 'missing-compose.yml')], { encoding: 'utf8' });
+    return spawnSync(
+      'bash',
+      [
+        resolve(__dirname, 'check-env.sh'),
+        '--env-file',
+        envFile,
+        '--compose-file',
+        resolve(tempDir, 'missing-compose.yml'),
+      ],
+      { encoding: 'utf8' },
+    );
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
 }
 
 describe('up-all.sh provision', () => {
+  it('accepts a complete WhatsApp canary profile with relay disabled', () => {
+    const result = runCheckEnv({
+      COMPOSE_PROFILES: 'whatsapp',
+      BACKEND_ENABLE_WHATSAPP: 'true',
+      WAHA_BASE_URL: 'http://waha:3000',
+      WAHA_API_KEY: 'a'.repeat(32),
+      WAHA_SESSION_NAME: 'erp',
+      WAHA_WEBHOOK_HMAC_SECRET: 'b'.repeat(32),
+      WAHA_REQUEST_TIMEOUT_MS: '10000',
+      BACKEND_WHATSAPP_RELAY_OWNER: 'none',
+      BACKEND_WHATSAPP_RELAY_POLL_INTERVAL_MS: '10000',
+      BACKEND_WHATSAPP_RELAY_BATCH_SIZE: '20',
+      BACKEND_WHATSAPP_RELAY_MAX_ATTEMPTS: '5',
+      BACKEND_WHATSAPP_RELAY_STALE_LOCK_MS: '600000',
+      BACKEND_WHATSAPP_CLEANUP_OWNER: 'in_process',
+      WAHA_CPUS: '1.0',
+      WAHA_MEM_LIMIT: '1024m',
+      WAHA_PIDS_LIMIT: '256',
+    });
+    expect(result.status).toBe(0);
+  });
+
+  it('rejects WhatsApp profile exposure without independent secrets and cleanup', () => {
+    const shared = 'a'.repeat(32);
+    const result = runCheckEnv({
+      COMPOSE_PROFILES: 'whatsapp',
+      BACKEND_ENABLE_WHATSAPP: 'true',
+      WAHA_BASE_URL: 'http://waha:3000',
+      WAHA_API_KEY: shared,
+      WAHA_SESSION_NAME: 'default',
+      WAHA_WEBHOOK_HMAC_SECRET: shared,
+      WAHA_REQUEST_TIMEOUT_MS: '10000',
+      BACKEND_WHATSAPP_RELAY_OWNER: 'none',
+      BACKEND_WHATSAPP_RELAY_POLL_INTERVAL_MS: '10000',
+      BACKEND_WHATSAPP_RELAY_BATCH_SIZE: '20',
+      BACKEND_WHATSAPP_RELAY_MAX_ATTEMPTS: '5',
+      BACKEND_WHATSAPP_RELAY_STALE_LOCK_MS: '600000',
+      BACKEND_WHATSAPP_CLEANUP_OWNER: 'none',
+      WAHA_CPUS: '1.0',
+      WAHA_MEM_LIMIT: '999999g',
+      WAHA_PIDS_LIMIT: '256',
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/independent|cleanup owner|default is not allowed|between 256m and 2048m/);
+  });
+
   it('--dry-run prints the ordered plan and runs nothing destructive', () => {
     const out = run(['provision', '--dry-run']);
     expect(out).toMatch(/update-build-repos/);
@@ -143,7 +206,9 @@ describe('up-all.sh provision', () => {
   });
 
   it('updates Freecut before rebuilding it, including a multi-service rebuild', () => {
-    expect(source).toMatch(/for service in "\$@"[\s\S]*--update --only repo_freecut[\s\S]*compose build "\$@"[\s\S]*verify_freecut_sha[\s\S]*compose up -d --no-build --no-deps/);
+    expect(source).toMatch(
+      /for service in "\$@"[\s\S]*--update --only repo_freecut[\s\S]*compose build "\$@"[\s\S]*verify_freecut_sha[\s\S]*compose up -d --no-build --no-deps/,
+    );
   });
 
   it('holds a deployment lock and re-verifies Freecut after build', () => {
@@ -152,7 +217,9 @@ describe('up-all.sh provision', () => {
   });
 
   it('setup-vps updates and verifies Freecut under the same deployment lock', () => {
-    expect(setupSource).toMatch(/flock 9[\s\S]*ensure_freecut_repo_if_missing[\s\S]*run_deploy[\s\S]*Freecut build source verified/);
+    expect(setupSource).toMatch(
+      /flock 9[\s\S]*ensure_freecut_repo_if_missing[\s\S]*run_deploy[\s\S]*Freecut build source verified/,
+    );
     expect(setupSource).toMatch(/remote get-url origin[\s\S]*FREECUT_REPO_URL/);
   });
 
@@ -177,42 +244,61 @@ describe('up-all.sh provision', () => {
     expect(deploySource).toContain('docker-compose.cnc-telegram-worker.yml');
     expect(deploySource).toContain('docker-compose.backend-build-identity.yml');
     expect(deploySource).toContain('docker-compose.${stack_env}.yml');
-    expect(deploySource).toMatch(/COMPOSE_FILE_ARGS\+=\(-f "\$CNC_TELEGRAM_OVERLAY"\)[\s\S]*COMPOSE_FILE_ARGS\+=\(-f "\$STACK_ENV_OVERLAY"\)/);
+    expect(deploySource).toMatch(
+      /COMPOSE_FILE_ARGS\+=\(-f "\$CNC_TELEGRAM_OVERLAY"\)[\s\S]*COMPOSE_FILE_ARGS\+=\(-f "\$STACK_ENV_OVERLAY"\)/,
+    );
     expect(deploySource).toMatch(
       /compose_profile_enabled cnc-telegram; then[\s\S]*COMPOSE_FILE_ARGS\+=\(-f "\$CNC_TELEGRAM_OVERLAY"\)/,
     );
     expect(deploySource).not.toMatch(/compose_profile_enabled cnc-telegram && ! grep/);
     expect(deploySource).toContain('docker compose >= 2.24.4 is required');
-    expect(deploySource).toMatch(/compose_profile_enabled cnc-telegram; then[\s\S]*require_compose_override_support/);
-    expect(readFileSync(resolve(__dirname, 'templates/docker-compose.cnc-telegram-worker.yml'), 'utf8'))
-      .toContain('profiles: !override ["cnc-telegram-glm"]');
-    expect(readFileSync(resolve(__dirname, 'templates/docker-compose.cnc-telegram-worker.yml'), 'utf8'))
-      .toContain('stop_grace_period: 30s');
+    expect(deploySource).toMatch(
+      /compose_profile_enabled cnc-telegram; then[\s\S]*require_compose_override_support/,
+    );
+    expect(
+      readFileSync(resolve(__dirname, 'templates/docker-compose.cnc-telegram-worker.yml'), 'utf8'),
+    ).toContain('profiles: !override ["cnc-telegram-glm"]');
+    expect(
+      readFileSync(resolve(__dirname, 'templates/docker-compose.cnc-telegram-worker.yml'), 'utf8'),
+    ).toContain('stop_grace_period: 30s');
     expect(deploySource).toMatch(/COMPOSE_FILE_ARGS=\(-f "\$COMPOSE_FILE"\)/);
     expect(deploySource).toMatch(/COMPOSE_FILE_ARGS\+=\(-f "\$BACKEND_IDENTITY_OVERLAY"\)/);
-    expect(deploySource).toMatch(/docker compose --env-file "\$ENV_FILE" "\$\{COMPOSE_FILE_ARGS\[@\]\}"/);
+    expect(deploySource).toMatch(
+      /docker compose --env-file "\$ENV_FILE" "\$\{COMPOSE_FILE_ARGS\[@\]\}"/,
+    );
     expect(deploySource).toMatch(/git -C "\$REPO_DIR" rev-parse --verify HEAD/);
     expect(deploySource).toMatch(/export CNC_TELEGRAM_WORKER_IMAGE_REVISION="\$revision"/);
     expect(deploySource).toMatch(/export CNC_TELEGRAM_WORKER_BUILD_CONTEXT="\$worker_context"/);
-    expect(deploySource).toContain('CNC_TELEGRAM_WORKER_BUILD_CONTEXT must resolve to this exact repository worker');
+    expect(deploySource).toContain(
+      'CNC_TELEGRAM_WORKER_BUILD_CONTEXT must resolve to this exact repository worker',
+    );
     expect(deploySource).toMatch(/docker_compose config --format json/);
     expect(deploySource).toContain('command != ["serve"]');
-    expect(deploySource).toMatch(/ensure_worker_build_identity[\s\S]*assert_rendered_worker_serve_command/);
+    expect(deploySource).toMatch(
+      /ensure_worker_build_identity[\s\S]*assert_rendered_worker_serve_command/,
+    );
     expect(deploySource).not.toContain('worker_up_args');
     expect(deploySource).not.toContain('--force-recreate cnc-telegram-worker');
   });
 
   it('keeps CAD integration configuration in the overlay used with existing stack files', () => {
-    const overlay = readFileSync(resolve(__dirname, 'templates/docker-compose.backend-build-identity.yml'), 'utf8');
+    const overlay = readFileSync(
+      resolve(__dirname, 'templates/docker-compose.backend-build-identity.yml'),
+      'utf8',
+    );
     expect(overlay).toContain('BACKEND_ENABLE_CAD: ${BACKEND_ENABLE_CAD:-false}');
-    expect(overlay).toContain('CAD_SERVICE_BASE_URL: ${CAD_SERVICE_BASE_URL:-http://cad-service:8000}');
+    expect(overlay).toContain(
+      'CAD_SERVICE_BASE_URL: ${CAD_SERVICE_BASE_URL:-http://cad-service:8000}',
+    );
     expect(overlay).toContain('CAD_ERP_API_TOKEN: ${CAD_ERP_API_TOKEN:-}');
   });
 
   it('requires an explicit stack env and blocks non-prod Telegram writers', () => {
     expect(checkEnvSource).toContain('require_var ERP_STACK_ENV');
     expect(checkEnvSource).toMatch(/ERP_STACK_ENV must be one of: test, prod, dev/);
-    expect(checkEnvSource).toMatch(/CNC_TELEGRAM_WORKER_ROLE must be one of: disabled, reader, writer/);
+    expect(checkEnvSource).toMatch(
+      /CNC_TELEGRAM_WORKER_ROLE must be one of: disabled, reader, writer/,
+    );
     expect(checkEnvSource).toMatch(/CNC_TELEGRAM_WORKER_ROLE=writer requires ERP_STACK_ENV=prod/);
     expect(cncWorkerSource).toMatch(/stack_env" == "prod"[\s\S]*role="writer"/);
     expect(cncWorkerSource).toMatch(/reader\)[\s\S]*writer\)/);
@@ -295,9 +381,7 @@ describe('up-all.sh provision', () => {
     expect(fallback.stdout).toContain(
       'ocr=python -m cnc_telegram_worker.glm_ocr_client --image {image}',
     );
-    expect(fallback.stdout).toMatch(
-      /up -d --build --wait --wait-timeout 1800 glm-ocr-runner/,
-    );
+    expect(fallback.stdout).toMatch(/up -d --build --wait --wait-timeout 1800 glm-ocr-runner/);
     expect(fallback.stdout).toMatch(
       /--wait-timeout 1800 glm-ocr-runner[\s\S]*up -d --build cnc-telegram-worker/,
     );

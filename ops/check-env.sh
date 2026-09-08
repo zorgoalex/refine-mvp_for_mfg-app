@@ -81,6 +81,35 @@ require_fqdn() {
   [[ "$value" != http://* && "$value" != https://* && "$value" != */* ]] || mark_error "$name must be a hostname only, without scheme/path"
 }
 
+require_int_range() {
+  local name="$1"
+  local min="$2"
+  local max="$3"
+  local value="${!name:-}"
+  if [[ ! "$value" =~ ^[0-9]+$ ]] || (( 10#$value < min || 10#$value > max )); then
+    mark_error "$name must be an integer between $min and $max"
+  fi
+}
+
+require_memory_range_mb() {
+  local name="$1"
+  local min_mb="$2"
+  local max_mb="$3"
+  local value="${!name:-}"
+  local amount unit amount_mb
+  if [[ ! "$value" =~ ^([1-9][0-9]*)(m|g)$ ]]; then
+    mark_error "$name must use a Docker size such as 1024m or 1g"
+    return
+  fi
+  amount="${BASH_REMATCH[1]}"
+  unit="${BASH_REMATCH[2]}"
+  amount_mb=$((10#$amount))
+  [[ "$unit" == "g" ]] && amount_mb=$((amount_mb * 1024))
+  if (( amount_mb < min_mb || amount_mb > max_mb )); then
+    mark_error "$name must be between ${min_mb}m and ${max_mb}m"
+  fi
+}
+
 csv_contains() {
   local csv="$1"
   local needle="$2"
@@ -171,6 +200,50 @@ if csv_contains "${COMPOSE_PROFILES:-}" "cnc-telegram"; then
   elif [[ "${CNC_TEMP_TTL_HOURS:-24}" -gt 24 ]]; then
     mark_error "CNC_TEMP_TTL_HOURS must be <= 24 for Telegram raw media retention"
   fi
+fi
+
+if csv_contains "${COMPOSE_PROFILES:-}" "whatsapp"; then
+  [[ "${BACKEND_ENABLE_WHATSAPP:-false}" == "true" ]] \
+    || mark_error "COMPOSE_PROFILES=whatsapp requires BACKEND_ENABLE_WHATSAPP=true"
+  require_var WAHA_BASE_URL
+  require_var WAHA_API_KEY
+  require_var WAHA_SESSION_NAME
+  require_var WAHA_WEBHOOK_HMAC_SECRET
+  waha_api_key_value="${WAHA_API_KEY:-}"
+  waha_webhook_secret_value="${WAHA_WEBHOOK_HMAC_SECRET:-}"
+  [[ "${WAHA_BASE_URL:-}" == "http://waha:3000" ]] \
+    || mark_error "WAHA_BASE_URL must be http://waha:3000 for the managed WhatsApp profile"
+  [[ "${#waha_api_key_value}" -ge 32 ]] \
+    || mark_error "WAHA_API_KEY must be at least 32 characters"
+  [[ "${#waha_webhook_secret_value}" -ge 32 ]] \
+    || mark_error "WAHA_WEBHOOK_HMAC_SECRET must be at least 32 characters"
+  [[ "${WAHA_SESSION_NAME:-}" =~ ^[A-Za-z0-9_-]{1,100}$ ]] \
+    || mark_error "WAHA_SESSION_NAME must contain 1-100 letters, digits, _ or -"
+  [[ "${WAHA_SESSION_NAME:-}" != "default" ]] \
+    || mark_error "WAHA_SESSION_NAME=default is not allowed for an active WhatsApp profile"
+  [[ "${WAHA_API_KEY:-}" != "${WAHA_WEBHOOK_HMAC_SECRET:-}" ]] \
+    || mark_error "WAHA_API_KEY and WAHA_WEBHOOK_HMAC_SECRET must be independent"
+  case "${BACKEND_WHATSAPP_RELAY_OWNER:-none}" in
+    none|in_process|external) ;;
+    *) mark_error "BACKEND_WHATSAPP_RELAY_OWNER must be none, in_process, or external" ;;
+  esac
+  case "${BACKEND_WHATSAPP_CLEANUP_OWNER:-none}" in
+    none|in_process|external) ;;
+    *) mark_error "BACKEND_WHATSAPP_CLEANUP_OWNER must be none, in_process, or external" ;;
+  esac
+  if [[ "${ERP_STACK_ENV:-test}" == "prod" || "${BACKEND_NODE_ENV:-production}" =~ ^(staging|production)$ ]]; then
+    [[ "${BACKEND_WHATSAPP_CLEANUP_OWNER:-none}" != "none" ]] \
+      || mark_error "WhatsApp requires a cleanup owner in staging/production"
+  fi
+  require_int_range WAHA_REQUEST_TIMEOUT_MS 1000 30000
+  require_int_range BACKEND_WHATSAPP_RELAY_POLL_INTERVAL_MS 1000 300000
+  require_int_range BACKEND_WHATSAPP_RELAY_BATCH_SIZE 1 100
+  require_int_range BACKEND_WHATSAPP_RELAY_MAX_ATTEMPTS 1 20
+  require_int_range BACKEND_WHATSAPP_RELAY_STALE_LOCK_MS 60000 3600000
+  require_int_range WAHA_PIDS_LIMIT 32 1024
+  require_memory_range_mb WAHA_MEM_LIMIT 256 2048
+  [[ "${WAHA_CPUS:-}" =~ ^(0\.[1-9]|1(\.0)?|2(\.0)?)$ ]] \
+    || mark_error "WAHA_CPUS must be between 0.1 and 2.0"
 fi
 
 case "${CNC_ENABLE_GLM_OCR:-false}" in

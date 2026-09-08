@@ -1,0 +1,12 @@
+.whatsapp-config { display: grid; gap: 16px; min-width: 0; }
+.whatsapp-config__header, .whatsapp-config__toolbar, .whatsapp-config__actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.whatsapp-config__header h4, .whatsapp-config__header p, .whatsapp-config__toolbar h5 { margin: 0; }
+.whatsapp-config__header p { margin-top: 4px; max-width: 760px; }
+.whatsapp-config__status-card { border-color: rgba(5, 5, 5, 0.12); }
+.whatsapp-config__actions { justify-content: flex-start; }
+.whatsapp-config__qr { max-width: 420px; }
+.whatsapp-config__qr .ant-card-body { display: grid; justify-items: center; gap: 12px; text-align: center; }
+.whatsapp-config__qr img { width: min(100%, 280px); height: auto; image-rendering: pixelated; }
+.whatsapp-config__row-link { min-height: 40px; padding-inline: 0; text-align: left; }
+.whatsapp-config__loading { min-height: 240px; display: grid; place-items: center; }
+@media (max-width: 575px) { .whatsapp-config__header > .ant-btn, .whatsapp-config__actions > *, .whatsapp-config__toolbar > .ant-btn { width: 100%; } }

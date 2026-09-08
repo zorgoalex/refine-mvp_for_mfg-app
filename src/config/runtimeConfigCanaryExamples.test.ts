@@ -33,6 +33,7 @@ const EXPECTED_FEATURE_KEYS = [
   'cncTelegram',
   'enableLegacyHasura',
   'workosAuth',
+  'backendWhatsApp',
 ];
 
 describe('runtime config canary examples', () => {

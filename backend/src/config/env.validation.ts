@@ -35,20 +35,19 @@ const sameSiteFromEnv = z
   )
   .default('lax');
 
-const emptyTrimmedStringFromEnv = z.string().trim().length(0).transform(() => undefined);
+const emptyTrimmedStringFromEnv = z
+  .string()
+  .trim()
+  .length(0)
+  .transform(() => undefined);
 
 const optionalTrimmedStringFromEnv = z
   .union([z.string().trim().min(1), emptyTrimmedStringFromEnv])
   .optional();
 
-const optionalUrlFromEnv = z
-  .union([z.string().trim().url(), emptyTrimmedStringFromEnv])
-  .optional();
+const optionalUrlFromEnv = z.union([z.string().trim().url(), emptyTrimmedStringFromEnv]).optional();
 
-const LOCAL_DEV_CORS_ORIGINS = [
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-] as const;
+const LOCAL_DEV_CORS_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173'] as const;
 
 function isPostgresUrl(value: string): boolean {
   try {
@@ -92,12 +91,39 @@ function isBitrix24PortalDomain(value: string): boolean {
   return value === 'mebelkz.bitrix24.kz';
 }
 
+export function isWahaBaseUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.username || url.password || url.search || url.hash) return false;
+    if (url.protocol === 'https:') return true;
+    if (url.protocol !== 'http:') return false;
+    const host = url.hostname.toLowerCase();
+    return (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === '::1' ||
+      host === 'waha' ||
+      /^10\./.test(host) ||
+      /^192\.168\./.test(host) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+    );
+  } catch {
+    return false;
+  }
+}
+
 export const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'staging', 'production']).default('development'),
     APP_NAME: z.string().trim().min(1).default('erp-backend'),
     BACKEND_BUILD_SHA: z
-      .union([z.string().trim().regex(/^[0-9a-fA-F]{40}$/), emptyTrimmedStringFromEnv])
+      .union([
+        z
+          .string()
+          .trim()
+          .regex(/^[0-9a-fA-F]{40}$/),
+        emptyTrimmedStringFromEnv,
+      ])
       .optional()
       .transform((value) => value?.toLowerCase()),
     API_PREFIX: z
@@ -167,8 +193,7 @@ export const envSchema = z
           return url.hostname === 'api.workos.com' || url.hostname.endsWith('.workos.com');
         }
         return (
-          url.protocol === 'http:' &&
-          (url.hostname === 'localhost' || url.hostname === '127.0.0.1')
+          url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1')
         );
       }, 'WORKOS_API_BASE must be an https://*.workos.com URL (or http://localhost for local mocks)')
       .default('https://api.workos.com'),
@@ -180,8 +205,18 @@ export const envSchema = z
     BACKEND_ORDER_REALTIME_CATCHUP_MS: z.coerce.number().int().min(250).default(1000),
     BACKEND_ORDER_REALTIME_RETENTION_HOURS: z.coerce.number().int().min(1).max(168).default(24),
     BACKEND_ORDER_REALTIME_MAX_CONNECTIONS: z.coerce.number().int().min(1).max(10000).default(500),
-    BACKEND_ORDER_REALTIME_MAX_CONNECTIONS_PER_USER: z.coerce.number().int().min(1).max(20).default(3),
-    BACKEND_ORDER_REALTIME_MAX_QUEUE_EVENTS: z.coerce.number().int().min(10).max(10000).default(250),
+    BACKEND_ORDER_REALTIME_MAX_CONNECTIONS_PER_USER: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(20)
+      .default(3),
+    BACKEND_ORDER_REALTIME_MAX_QUEUE_EVENTS: z.coerce
+      .number()
+      .int()
+      .min(10)
+      .max(10000)
+      .default(250),
     BACKEND_ORDER_REALTIME_MAX_DETAIL_IDS: z.coerce.number().int().min(1).max(10000).default(500),
     BACKEND_ENABLE_PAYMENTS: booleanFromEnv.default(false),
     BACKEND_ENABLE_CLIENT_PHONES: booleanFromEnv.default(false),
@@ -253,13 +288,21 @@ export const envSchema = z
     TELEGRAM_NOTIFICATION_BOT_TOKEN: optionalTrimmedStringFromEnv,
     TELEGRAM_NOTIFICATION_BOT_USERNAME: z
       .union([
-        z.string().trim().regex(/^[A-Za-z0-9_]{2,29}bot$/i),
+        z
+          .string()
+          .trim()
+          .regex(/^[A-Za-z0-9_]{2,29}bot$/i),
         emptyTrimmedStringFromEnv,
       ])
       .optional(),
     TELEGRAM_NOTIFICATION_WEBHOOK_SECRET: z
       .union([
-        z.string().trim().min(32).max(256).regex(/^[A-Za-z0-9_-]+$/),
+        z
+          .string()
+          .trim()
+          .min(32)
+          .max(256)
+          .regex(/^[A-Za-z0-9_-]+$/),
         emptyTrimmedStringFromEnv,
       ])
       .optional(),
@@ -282,8 +325,7 @@ export const envSchema = z
           );
         }
         return (
-          url.protocol === 'http:' &&
-          (url.hostname === 'localhost' || url.hostname === '127.0.0.1')
+          url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1')
         );
       }, 'TELEGRAM_NOTIFICATION_API_BASE must be https://api.telegram.org (or http://localhost for local mocks)')
       .default('https://api.telegram.org'),
@@ -293,12 +335,7 @@ export const envSchema = z
       .min(1000)
       .max(30000)
       .default(10000),
-    TELEGRAM_NOTIFICATION_LINK_TTL_SECONDS: z.coerce
-      .number()
-      .int()
-      .min(60)
-      .max(3600)
-      .default(600),
+    TELEGRAM_NOTIFICATION_LINK_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(600),
     BACKEND_TELEGRAM_NOTIFICATION_RELAY_OWNER: z
       .enum(['none', 'in_process', 'external'])
       .default('none'),
@@ -329,6 +366,50 @@ export const envSchema = z
       .int()
       .min(60000)
       .default(600000),
+    BACKEND_ENABLE_WHATSAPP: booleanFromEnv.default(false),
+    WAHA_BASE_URL: z
+      .union([
+        z
+          .string()
+          .trim()
+          .url()
+          .refine(isWahaBaseUrl, 'WAHA_BASE_URL must be HTTPS or private/loopback HTTP'),
+        emptyTrimmedStringFromEnv,
+      ])
+      .optional(),
+    WAHA_API_KEY: z.union([z.string().min(32).max(256), emptyTrimmedStringFromEnv]).optional(),
+    WAHA_SESSION_NAME: z
+      .union([
+        z
+          .string()
+          .trim()
+          .min(1)
+          .max(100)
+          .regex(/^[A-Za-z0-9_-]+$/),
+        emptyTrimmedStringFromEnv,
+      ])
+      .optional(),
+    WAHA_WEBHOOK_HMAC_SECRET: z
+      .union([z.string().min(32).max(256), emptyTrimmedStringFromEnv])
+      .optional(),
+    WAHA_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(30000).default(10000),
+    BACKEND_WHATSAPP_RELAY_OWNER: z.enum(['none', 'in_process', 'external']).default('none'),
+    BACKEND_WHATSAPP_RELAY_POLL_INTERVAL_MS: z.coerce
+      .number()
+      .int()
+      .min(1000)
+      .max(300000)
+      .default(10000),
+    BACKEND_WHATSAPP_RELAY_BATCH_SIZE: z.coerce.number().int().positive().max(100).default(20),
+    BACKEND_WHATSAPP_RELAY_WORKER_ID: z.string().trim().min(1).max(100).default('whatsapp-local'),
+    BACKEND_WHATSAPP_RELAY_MAX_ATTEMPTS: z.coerce.number().int().positive().max(20).default(5),
+    BACKEND_WHATSAPP_RELAY_STALE_LOCK_MS: z.coerce
+      .number()
+      .int()
+      .min(60000)
+      .max(3600000)
+      .default(600000),
+    BACKEND_WHATSAPP_CLEANUP_OWNER: z.enum(['none', 'in_process', 'external']).default('none'),
     FREECUT_BASE_URL: optionalUrlFromEnv,
     FREECUT_OPTIMIZE_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
     /** Auto engine=heuristic for cut groups with >= this many item instances; 0 disables auto mode. */
@@ -351,11 +432,7 @@ export const envSchema = z
     AUTH0_M2M_CLIENT_SECRET: optionalTrimmedStringFromEnv,
     AUTH0_M2M_AUDIENCE: optionalTrimmedStringFromEnv,
     VLM_MAX_UPLOAD_MB: z.coerce.number().positive().default(20),
-    VLM_ALLOWED_MIME_TYPES: z
-      .string()
-      .trim()
-      .min(1)
-      .default('image/jpeg,image/png,image/webp'),
+    VLM_ALLOWED_MIME_TYPES: z.string().trim().min(1).default('image/jpeg,image/png,image/webp'),
     BACKEND_ENABLE_BITRIX24_SYNC: booleanFromEnv.default(false),
     BACKEND_BITRIX24_SYNC_RELAY_OWNER: z.enum(['none', 'in_process', 'external']).default('none'),
     BACKEND_BITRIX24_SYNC_DRY_RUN: booleanFromEnv.default(false),
@@ -368,19 +445,19 @@ export const envSchema = z
     BITRIX24_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(30000),
     BITRIX24_MAX_REQUESTS_PER_SECOND: z.coerce.number().int().min(1).max(5).default(2),
     BITRIX24_LIMIT_RETRY_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(11),
-    BITRIX24_QUERY_LIMIT_BASE_DELAY_MS: z.coerce
-      .number()
-      .int()
-      .min(100)
-      .max(60000)
-      .default(1000),
+    BITRIX24_QUERY_LIMIT_BASE_DELAY_MS: z.coerce.number().int().min(100).max(60000).default(1000),
     BITRIX24_OPERATION_LIMIT_FALLBACK_MS: z.coerce
       .number()
       .int()
       .min(1000)
       .max(600000)
       .default(60000),
-    BITRIX24_CURRENCY_ID: z.string().trim().length(3).transform((value) => value.toUpperCase()).default('KZT'),
+    BITRIX24_CURRENCY_ID: z
+      .string()
+      .trim()
+      .length(3)
+      .transform((value) => value.toUpperCase())
+      .default('KZT'),
     BITRIX24_PAY_SYSTEM_ID: z
       .union([emptyTrimmedStringFromEnv, z.coerce.number().int().positive()])
       .optional(),
@@ -392,11 +469,7 @@ export const envSchema = z
       .enum(['none', 'in_process', 'external'])
       .default('none'),
     BACKEND_BITRIX24_REVERSE_SYNC_DRY_RUN: booleanFromEnv.default(false),
-    BACKEND_BITRIX24_REVERSE_SYNC_POLL_INTERVAL_MS: z.coerce
-      .number()
-      .int()
-      .min(1000)
-      .default(5000),
+    BACKEND_BITRIX24_REVERSE_SYNC_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).default(5000),
     BACKEND_BITRIX24_REVERSE_SYNC_BATCH_SIZE: z.coerce
       .number()
       .int()
@@ -414,40 +487,23 @@ export const envSchema = z
       .trim()
       .min(1)
       .default('bitrix24-reverse-local'),
-    BACKEND_BITRIX24_REVERSE_SYNC_LEASE_MS: z.coerce
-      .number()
-      .int()
-      .min(60000)
-      .default(300000),
+    BACKEND_BITRIX24_REVERSE_SYNC_LEASE_MS: z.coerce.number().int().min(60000).default(300000),
     BACKEND_BITRIX24_REVERSE_SYNC_ACTOR_USER_ID: z
       .union([emptyTrimmedStringFromEnv, z.coerce.number().int().positive()])
       .optional(),
     BACKEND_ORDER_INITIAL_STATUS_CODE: optionalTrimmedStringFromEnv,
     BACKEND_ORDER_INITIAL_PRODUCTION_STATUS_CODE: optionalTrimmedStringFromEnv,
-    BACKEND_BITRIX24_RECONCILE_INTERVAL_MS: z.coerce
-      .number()
-      .int()
-      .min(60000)
-      .default(900000),
+    BACKEND_BITRIX24_RECONCILE_INTERVAL_MS: z.coerce.number().int().min(60000).default(900000),
     BITRIX24_APP_CLIENT_ID: optionalTrimmedStringFromEnv,
     BITRIX24_APP_CLIENT_SECRET: optionalTrimmedStringFromEnv,
     BITRIX24_APP_TOKEN_ENCRYPTION_KEY: optionalTrimmedStringFromEnv,
     BITRIX24_APP_PUBLIC_BASE_URL: optionalUrlFromEnv,
-    BITRIX24_APP_PORTAL_DOMAIN: z
-      .string()
-      .trim()
-      .toLowerCase()
-      .default('mebelkz.bitrix24.kz'),
+    BITRIX24_APP_PORTAL_DOMAIN: z.string().trim().toLowerCase().default('mebelkz.bitrix24.kz'),
     BITRIX24_PORTAL_TIMEZONE: z.literal('Asia/Almaty').default('Asia/Almaty'),
     BACKEND_ENABLE_BITRIX24_PAYMENT_WIDGET: booleanFromEnv.default(false),
     BITRIX24_WIDGET_SESSION_ENCRYPTION_KEY: optionalTrimmedStringFromEnv,
     BITRIX24_WIDGET_COMMAND_TOKEN_ENCRYPTION_KEY: optionalTrimmedStringFromEnv,
-    BITRIX24_WIDGET_SESSION_TTL_SECONDS: z.coerce
-      .number()
-      .int()
-      .min(60)
-      .max(3600)
-      .default(600),
+    BITRIX24_WIDGET_SESSION_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(600),
     BITRIX24_WIDGET_COMMAND_TOKEN_RETENTION_DAYS: z.coerce
       .number()
       .int()
@@ -504,7 +560,8 @@ export const envSchema = z
     if (env.READINESS_REQUIRE_REDIS && !(env.REDIS_URL || env.RATE_LIMIT_REDIS_URL)) {
       ctx.addIssue({
         code: 'custom',
-        message: 'REDIS_URL or RATE_LIMIT_REDIS_URL is required when READINESS_REQUIRE_REDIS is true',
+        message:
+          'REDIS_URL or RATE_LIMIT_REDIS_URL is required when READINESS_REQUIRE_REDIS is true',
         path: ['REDIS_URL'],
       });
     }
@@ -520,7 +577,8 @@ export const envSchema = z
     if (env.BACKEND_RATE_LIMIT_STORE === 'redis' && !(env.REDIS_URL || env.RATE_LIMIT_REDIS_URL)) {
       ctx.addIssue({
         code: 'custom',
-        message: 'REDIS_URL or RATE_LIMIT_REDIS_URL is required when BACKEND_RATE_LIMIT_STORE=redis',
+        message:
+          'REDIS_URL or RATE_LIMIT_REDIS_URL is required when BACKEND_RATE_LIMIT_STORE=redis',
         path: ['BACKEND_RATE_LIMIT_STORE'],
       });
     }
@@ -588,7 +646,8 @@ export const envSchema = z
     ) {
       ctx.addIssue({
         code: 'custom',
-        message: 'TELEGRAM_NOTIFICATION_API_BASE must be https://api.telegram.org in staging/production',
+        message:
+          'TELEGRAM_NOTIFICATION_API_BASE must be https://api.telegram.org in staging/production',
         path: ['TELEGRAM_NOTIFICATION_API_BASE'],
       });
     }
@@ -633,6 +692,49 @@ export const envSchema = z
         message:
           'BACKEND_ENABLE_TELEGRAM_NOTIFICATIONS=true is required when Telegram notification relay owns scheduling',
         path: ['BACKEND_ENABLE_TELEGRAM_NOTIFICATIONS'],
+      });
+    }
+
+    if (env.BACKEND_ENABLE_WHATSAPP) {
+      for (const key of [
+        'DATABASE_URL',
+        'WAHA_BASE_URL',
+        'WAHA_API_KEY',
+        'WAHA_SESSION_NAME',
+        'WAHA_WEBHOOK_HMAC_SECRET',
+      ] as const) {
+        if (!env[key]) {
+          ctx.addIssue({
+            code: 'custom',
+            message: `${key} is required when BACKEND_ENABLE_WHATSAPP is true`,
+            path: [key],
+          });
+        }
+      }
+    }
+
+    if (
+      (env.BACKEND_WHATSAPP_RELAY_OWNER !== 'none' ||
+        env.BACKEND_WHATSAPP_CLEANUP_OWNER !== 'none') &&
+      !env.BACKEND_ENABLE_WHATSAPP
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'BACKEND_ENABLE_WHATSAPP=true is required when a WhatsApp worker owns scheduling',
+        path: ['BACKEND_ENABLE_WHATSAPP'],
+      });
+    }
+
+    if (
+      (env.NODE_ENV === 'staging' || env.NODE_ENV === 'production') &&
+      env.BACKEND_ENABLE_WHATSAPP &&
+      env.BACKEND_WHATSAPP_CLEANUP_OWNER === 'none'
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'BACKEND_WHATSAPP_CLEANUP_OWNER must not be none when WhatsApp is enabled in staging/production',
+        path: ['BACKEND_WHATSAPP_CLEANUP_OWNER'],
       });
     }
 
@@ -711,7 +813,8 @@ export const envSchema = z
     if (env.BACKEND_ENABLE_CLIENT_PHONES && !env.BACKEND_ENABLE_PRODUCTION_ACTIONS) {
       ctx.addIssue({
         code: 'custom',
-        message: 'BACKEND_ENABLE_PRODUCTION_ACTIONS=true is required when BACKEND_ENABLE_CLIENT_PHONES is true',
+        message:
+          'BACKEND_ENABLE_PRODUCTION_ACTIONS=true is required when BACKEND_ENABLE_CLIENT_PHONES is true',
         path: ['BACKEND_ENABLE_PRODUCTION_ACTIONS'],
       });
     }
@@ -881,9 +984,9 @@ export const envSchema = z
       }
 
       if (
-        !env.BACKEND_ENABLE_ORDERS
-        || env.BACKEND_ORDERS_READ_ONLY
-        || !env.BACKEND_ENABLE_PAYMENTS
+        !env.BACKEND_ENABLE_ORDERS ||
+        env.BACKEND_ORDERS_READ_ONLY ||
+        !env.BACKEND_ENABLE_PAYMENTS
       ) {
         ctx.addIssue({
           code: 'custom',
@@ -1034,11 +1137,9 @@ function shouldAllowLocalDevCorsOrigins(
     return true;
   }
 
-  return [
-    env.FRONTEND_ORIGIN,
-    env.CORS_ALLOWED_ORIGINS,
-    ...configuredOrigins,
-  ].some(hasNonProductionOrigin);
+  return [env.FRONTEND_ORIGIN, env.CORS_ALLOWED_ORIGINS, ...configuredOrigins].some(
+    hasNonProductionOrigin,
+  );
 }
 
 function hasNonProductionOrigin(value: string | undefined): boolean {

@@ -220,6 +220,19 @@ services:
       BACKEND_TELEGRAM_NOTIFICATION_RELAY_WORKER_ID: ${BACKEND_TELEGRAM_NOTIFICATION_RELAY_WORKER_ID:-telegram-notifications-local}
       BACKEND_TELEGRAM_NOTIFICATION_RELAY_MAX_ATTEMPTS: ${BACKEND_TELEGRAM_NOTIFICATION_RELAY_MAX_ATTEMPTS:-10}
       BACKEND_TELEGRAM_NOTIFICATION_RELAY_STALE_LOCK_MS: ${BACKEND_TELEGRAM_NOTIFICATION_RELAY_STALE_LOCK_MS:-600000}
+      BACKEND_ENABLE_WHATSAPP: ${BACKEND_ENABLE_WHATSAPP:-false}
+      WAHA_BASE_URL: ${WAHA_BASE_URL:-}
+      WAHA_API_KEY: ${WAHA_API_KEY:-}
+      WAHA_SESSION_NAME: ${WAHA_SESSION_NAME:-}
+      WAHA_WEBHOOK_HMAC_SECRET: ${WAHA_WEBHOOK_HMAC_SECRET:-}
+      WAHA_REQUEST_TIMEOUT_MS: ${WAHA_REQUEST_TIMEOUT_MS:-10000}
+      BACKEND_WHATSAPP_RELAY_OWNER: ${BACKEND_WHATSAPP_RELAY_OWNER:-none}
+      BACKEND_WHATSAPP_RELAY_POLL_INTERVAL_MS: ${BACKEND_WHATSAPP_RELAY_POLL_INTERVAL_MS:-10000}
+      BACKEND_WHATSAPP_RELAY_BATCH_SIZE: ${BACKEND_WHATSAPP_RELAY_BATCH_SIZE:-20}
+      BACKEND_WHATSAPP_RELAY_WORKER_ID: ${BACKEND_WHATSAPP_RELAY_WORKER_ID:-whatsapp-local}
+      BACKEND_WHATSAPP_RELAY_MAX_ATTEMPTS: ${BACKEND_WHATSAPP_RELAY_MAX_ATTEMPTS:-5}
+      BACKEND_WHATSAPP_RELAY_STALE_LOCK_MS: ${BACKEND_WHATSAPP_RELAY_STALE_LOCK_MS:-600000}
+      BACKEND_WHATSAPP_CLEANUP_OWNER: ${BACKEND_WHATSAPP_CLEANUP_OWNER:-none}
       BACKEND_ENABLE_SHEET_MATERIALS: ${BACKEND_ENABLE_SHEET_MATERIALS:-false}
       BACKEND_SHEET_ORDERS_READS: ${BACKEND_SHEET_ORDERS_READS:-false}
       BACKEND_ENABLE_CUT_JOBS: ${BACKEND_ENABLE_CUT_JOBS:-false}
@@ -328,6 +341,42 @@ services:
     networks:
       - back
       - edge
+
+  waha:
+    profiles: ["whatsapp"]
+    image: devlikeapro/waha:gows-2026.8.2
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      WAHA_API_KEY: ${WAHA_API_KEY:-}
+      WAHA_DASHBOARD_ENABLED: "false"
+      WHATSAPP_SWAGGER_ENABLED: "false"
+      WHATSAPP_DOWNLOAD_MEDIA: "false"
+      WAHA_API_DOWNLOAD_MEDIA: "false"
+      WAHA_EVENTS_DOWNLOAD_MEDIA: "false"
+      WHATSAPP_DEFAULT_ENGINE: GOWS
+      WHATSAPP_START_SESSION: ${WAHA_SESSION_NAME:-default}
+      WHATSAPP_HOOK_URL: http://backend:3000/api/v1/whatsapp/webhook
+      WHATSAPP_HOOK_EVENTS: message
+      WHATSAPP_HOOK_HMAC_KEY: ${WAHA_WEBHOOK_HMAC_SECRET:-}
+      # Constant retry stays inside ERP's five-minute signed-webhook freshness window.
+      WHATSAPP_HOOK_RETRIES_POLICY: constant
+      WHATSAPP_HOOK_RETRIES_DELAY_SECONDS: 2
+      WHATSAPP_HOOK_RETRIES_ATTEMPTS: 15
+    volumes:
+      - waha-sessions:/app/.sessions
+    networks:
+      - back
+      - whatsapp_egress
+    cpus: ${WAHA_CPUS:-1.0}
+    mem_limit: ${WAHA_MEM_LIMIT:-1024m}
+    pids_limit: ${WAHA_PIDS_LIMIT:-256}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   freecut:
     build:
@@ -647,6 +696,8 @@ networks:
     internal: true
   host_access:
     driver: bridge
+  whatsapp_egress:
+    driver: bridge
 
 volumes:
   valkey_data:
@@ -655,3 +706,4 @@ volumes:
   cnc-telegram-worker-data:
   cnc-telegram-media:
   glm-ocr-model-cache:
+  waha-sessions:

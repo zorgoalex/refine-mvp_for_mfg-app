@@ -37,6 +37,7 @@ describe('featureFlags', () => {
       sheetMaterialsReads: false,
       enableLegacyHasura: true,
       workosAuth: false,
+      useBackendWhatsApp: false,
     });
   });
 
@@ -44,6 +45,12 @@ describe('featureFlags', () => {
     expect(getFeatureFlags({}).statusAutomation).toBe(false);
     expect(getFeatureFlags({ VITE_STATUS_AUTOMATION: 'true' }).statusAutomation).toBe(true);
     expect(getFeatureFlags({}, { statusAutomation: true }).statusAutomation).toBe(true);
+  });
+
+  it('reads the WhatsApp flag from build-time and runtime config, default off', () => {
+    expect(getFeatureFlags({}).useBackendWhatsApp).toBe(false);
+    expect(getFeatureFlags({ VITE_USE_BACKEND_WHATSAPP: 'true' }).useBackendWhatsApp).toBe(true);
+    expect(getFeatureFlags({}, { backendWhatsApp: true }).useBackendWhatsApp).toBe(true);
   });
 
   it('fails closed for the order status board until backend orders reads are enabled', () => {

@@ -168,6 +168,8 @@ export const PERMISSIONS = [
 
   'settings.view',
   'settings.manage',
+  'whatsapp.view',
+  'whatsapp.manage',
   'audit.view',
   'audit.technical.view',
   'notifications.view_rules',
@@ -512,7 +514,16 @@ export const ROLE_PERMISSIONS = {
 } as const satisfies Record<UserRole, readonly PermissionName[]>;
 
 export const HASURA_ALLOWED_ROLES = {
-  superadmin: ['superadmin', 'admin', 'top_manager', 'manager', 'operator', 'worker', 'packer', 'viewer'],
+  superadmin: [
+    'superadmin',
+    'admin',
+    'top_manager',
+    'manager',
+    'operator',
+    'worker',
+    'packer',
+    'viewer',
+  ],
   admin: ['admin', 'top_manager', 'manager', 'operator', 'worker', 'packer', 'viewer'],
   top_manager: ['top_manager', 'manager', 'operator', 'packer', 'viewer'],
   manager: ['manager', 'operator', 'packer', 'viewer'],

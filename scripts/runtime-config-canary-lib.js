@@ -21,6 +21,7 @@ const ROLLOUT_FEATURE_KEYS = [
   'orderRealtime',
   'cncTelegram',
   'workosAuth',
+  'backendWhatsApp',
 ];
 
 const STATIC_FEATURE_EXPECTATIONS = {

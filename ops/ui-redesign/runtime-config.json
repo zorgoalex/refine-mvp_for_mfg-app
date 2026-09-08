@@ -29,6 +29,7 @@
     "pdfImportLayoutPatterns": true,
     "sheetMaterialsReads": true,
     "enableLegacyHasura": false,
-    "workosAuth": false
+    "workosAuth": false,
+    "backendWhatsApp": false
   }
 }
