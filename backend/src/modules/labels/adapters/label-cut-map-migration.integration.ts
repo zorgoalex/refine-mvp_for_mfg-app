@@ -11,6 +11,7 @@ const migration079Compat = readFileSync(new URL('../../../../db/migrations/079_z
 const migration080 = readFileSync(new URL('../../../../db/migrations/080_cut_result_history_finalize.sql', import.meta.url), 'utf8');
 const migration081 = readFileSync(new URL('../../../../db/migrations/081_label_cut_maps.sql', import.meta.url), 'utf8');
 const migration121 = readFileSync(new URL('../../../../db/migrations/121_cut_result_informational_snapshots.sql', import.meta.url), 'utf8');
+const migration154 = readFileSync(new URL('../../../../db/migrations/154_svg_source_instance_sequences.sql', import.meta.url), 'utf8');
 const migration153 = readFileSync(new URL('../../../../db/migrations/153_svg_partial_label_maps.sql', import.meta.url), 'utf8');
 const migration122 = readFileSync(new URL('../../../../db/migrations/122_cut_result_informational_label_maps.sql', import.meta.url), 'utf8');
 const migration082 = readFileSync(new URL('../../../../db/migrations/082_label_cut_maps_backfill.sql', import.meta.url), 'utf8');
@@ -139,6 +140,7 @@ describeIntegration('label cut-map migration chain', () => {
       await client.query(migration121.replace(/BEGIN;|COMMIT;/g, ''));
       await client.query(migration122.replace(/BEGIN;|COMMIT;/g, ''));
       await client.query(migration153.replace(/BEGIN;|COMMIT;/g, ''));
+      await client.query(migration154.replace(/BEGIN;|COMMIT;/g, ''));
       const mixed = structuredClone(snapshot);
       if (allUnknown) mixed.items = [];
       const pieces = mixed.groups[0].sheets[0].placements.pieces;
@@ -164,6 +166,38 @@ describeIntegration('label cut-map migration chain', () => {
          VALUES ($1, 21, 'legacy', 1, $2::jsonb, $3::jsonb, cut_result_snapshot_digest($2::jsonb), $4::jsonb)`,
         [cutJobId, JSON.stringify(corrupt), JSON.stringify({...manifest(corrupt), items:allUnknown ? 2 : 1, instances:allUnknown ? 3 : 2}), JSON.stringify(corrupt.totals)],
       )).rejects.toThrow(/unknown item|snapshot_shape/);
+    } finally { await client.query('ROLLBACK'); }
+  });
+
+  it.each([false, true])('preserves unplaced ERP instance numbering with source-only pieces=%s', async (withSourcePiece) => {
+    await client.query('BEGIN');
+    try {
+      for (const migration of [migration121, migration122, migration153, migration154]) {
+        await client.query(migration.replace(/BEGIN;|COMMIT;/g, ''));
+      }
+      const withUnplaced = { ...structuredClone(snapshot), unplaced: [{ itemId: 'det-10', instance: 1 }] };
+      const pieces = withUnplaced.groups[0].sheets[0].placements.pieces;
+      pieces.shift(); // ERP instance 2 is placed; instance 1 remains unplaced.
+      if (withSourcePiece) pieces.push(Object.assign({ ...pieces[0], item_id: 'svg-source', instance: 1 }, { label: { orderId: null, detailId: null } }));
+      const inserted = await client.query<{ cut_result_id: string }>(
+        `INSERT INTO cut_result (cut_job_id, result_no, result_kind, source_job_version,
+          snapshot_job, snapshot_manifest, snapshot_digest, totals_snapshot)
+         VALUES ($1, 22, 'legacy', 1, $2::jsonb, $3::jsonb, cut_result_snapshot_digest($2::jsonb), $4::jsonb)
+         RETURNING cut_result_id`,
+        [cutJobId, JSON.stringify(withUnplaced), JSON.stringify({ ...manifest(snapshot), unplaced: 1 }), JSON.stringify(withUnplaced.totals)],
+      );
+      const projected = await client.query('SELECT item_id, instance FROM cut_result_placement WHERE cut_result_id=$1', [inserted.rows[0].cut_result_id]);
+      expect(projected.rows).toHaveLength(withSourcePiece ? 2 : 1);
+      expect(projected.rows.find(row => row.item_id === 'det-10')?.instance).toBe(2);
+      if (withSourcePiece) {
+        pieces[1].instance = 2;
+        await expect(client.query(
+          `INSERT INTO cut_result (cut_job_id, result_no, result_kind, source_job_version,
+            snapshot_job, snapshot_manifest, snapshot_digest, totals_snapshot)
+           VALUES ($1, 23, 'legacy', 1, $2::jsonb, $3::jsonb, cut_result_snapshot_digest($2::jsonb), $4::jsonb)`,
+          [cutJobId, JSON.stringify(withUnplaced), JSON.stringify({ ...manifest(snapshot), unplaced: 1 }), JSON.stringify(withUnplaced.totals)],
+        )).rejects.toThrow(/snapshot_shape/);
+      }
     } finally { await client.query('ROLLBACK'); }
   });
 
