@@ -30,6 +30,15 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION, date: "2026-09-08",
+    title: "SVG: повторная загрузка и карточка МДФ",
+    services: ["ERP", "Cutting"], repositories: ["repo_erp"],
+    fixed: [
+      "После удаления раскроя повторная загрузка SVG снова создаёт видимую карточку файла станка на доске МДФ. Активный раскрой переиспользуется, в том числе без результата расчёта.",
+      "Устранена ошибка blob ERR_FILE_NOT_FOUND при загрузке и смене SVG в превью.",
+    ],
+  },
+  {
+    version: APP_VERSION, date: "2026-09-08",
     title: "SVG: неизвестные заказы без подмены данных",
     services: ["ERP", "Cutting"], repositories: ["repo_erp"],
     fixed: ["Если заказ из SVG отсутствует в ERP, раскрой сохраняет исходные надписи и размеры без подстановки выбранного заказа. Несвязанные детали видны в списке вместе с найденными, без ссылок на чужие заказы."],

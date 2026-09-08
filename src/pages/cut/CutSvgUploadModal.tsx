@@ -1,4 +1,5 @@
 import { Tooltip } from '../../ui/tooltipDelay';
+import { useOwnedObjectUrlState } from './useOwnedObjectUrlState';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Alert, Button, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Tag, Typography, Upload, message } from 'antd';
@@ -130,10 +131,10 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     label: formatDefaultOrderOptionLabel(orderId, defaultOrderNames[index]),
   })), [defaultOrderIdsKey, defaultOrderNamesKey]);
   const [parsed, setParsed] = useState<ParsedSvgUpload | null>(null);
-  const [svgPreview, setSvgPreview] = useState<SvgPreviewState | null>(null);
+  const [svgPreview, setSvgPreview] = useOwnedObjectUrlState<SvgPreviewState>();
   const [svgPreviewExpanded, setSvgPreviewExpanded] = useState(false);
   const [minimized, setMinimized] = useState(false);
-  const svgPreviewUrlRef = useRef<string | null>(null);
+  const fileParseGeneration = useRef(0);
   const [parsing, setParsing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [lenientValidation, setLenientValidation] = useState(true);
@@ -243,11 +244,9 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   );
 
   const replaceSvgPreview = useCallback((next: SvgPreviewState | null) => {
-    revokeObjectUrl(svgPreviewUrlRef.current);
-    svgPreviewUrlRef.current = next?.url ?? null;
     setSvgPreview(next);
     if (!next) setSvgPreviewExpanded(false);
-  }, []);
+  }, [setSvgPreview]);
 
   useEffect(() => {
     if (!parsed) return;
@@ -255,8 +254,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   }, [parsed, renderStylesSetting, replaceSvgPreview]);
 
   useEffect(() => () => {
-    revokeObjectUrl(svgPreviewUrlRef.current);
-    svgPreviewUrlRef.current = null;
+    fileParseGeneration.current += 1;
   }, []);
 
   const matchSummary = useMemo(() => {
@@ -280,6 +278,9 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       return false;
     },
     onRemove: () => {
+      fileParseGeneration.current += 1;
+      setParsing(false);
+      setOrderSearchLoading(false);
       setParsed(null);
       replaceSvgPreview(null);
       setEligibleDetails([]);
@@ -339,6 +340,9 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   }, [commentText, rework]);
 
   const resetFormState = useCallback(() => {
+    fileParseGeneration.current += 1;
+    setParsing(false);
+    setOrderSearchLoading(false);
     setParsed(null);
     setCommentText('');
     setTelegramMessage('');
@@ -557,11 +561,14 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   }, [onClose, resetFormState]);
 
   async function handleFile(file: File) {
+    const generation = ++fileParseGeneration.current;
+    setParsed(null);
+    setOrderSearchLoading(false);
     setParsing(true);
     setSvgSourceFile(null);
     setGcodeSourceFile(null);
     setScreenshotSourceFile(null);
-    replaceSvgPreview(createSvgPreview(file));
+    replaceSvgPreview(null);
     try {
       const sourceFile = await fileToManualSvgUploadFile(file, 'svg');
       const fileNameHints = parseSvgCutUploadFileNameHints(file.name);
@@ -574,8 +581,8 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
         includeVisualLabelOnlyItems: true,
         fallbackOrderName: fileNameHints.orderNames.join('+') || defaultOrderNames[0] || null,
       });
+      if (generation !== fileParseGeneration.current) return;
       setParsed(result);
-      replaceSvgPreview(createStyledSvgPreview(result, renderStylesSetting));
       setSvgSourceFile({ payload: sourceFile, selectedAt: Date.now() });
       if (fileNameHints.machineName) {
         setMachineName(fileNameHints.machineName);
@@ -584,16 +591,16 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
         setMaterialName(fileNameHints.materialName);
       }
       if (fileNameHints.orderNames.length > 0) {
-        void applyFileNameOrderHints(fileNameHints.orderNames);
+        void applyFileNameOrderHints(fileNameHints.orderNames, generation);
       }
       if (result.cutLayout.status === 'valid') {
         const inferredMaterial = inferMaterialName(result.cutLayout.items, result.fileName);
         if (inferredMaterial && !fileNameHints.materialName) setMaterialName(inferredMaterial);
       }
     } catch (error) {
-      message.error(error instanceof Error ? error.message : 'Не удалось прочитать SVG');
+      if (generation === fileParseGeneration.current) message.error(error instanceof Error ? error.message : 'Не удалось прочитать SVG');
     } finally {
-      setParsing(false);
+      if (generation === fileParseGeneration.current) setParsing(false);
     }
   }
 
@@ -608,10 +615,11 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     }
   }
 
-  async function applyFileNameOrderHints(orderNames: string[]) {
+  async function applyFileNameOrderHints(orderNames: string[], generation: number) {
     setOrderSearchLoading(true);
     try {
       const lookup = await findOrdersByFileNameHints(orderNames);
+      if (generation !== fileParseGeneration.current) return;
       setOrderOptions((current) => mergeOrderOptions(current, lookup.orders));
       if (lookup.matchedOrderIds.length > 0) {
         setSelectedOrderIds(uniqueNumbers([...defaultOrderIds, ...lookup.matchedOrderIds]));
@@ -621,9 +629,9 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
         message.warning(`Не найдены заказы из имени файла: ${lookup.missingOrderNames.join(', ')}`);
       }
     } catch {
-      message.warning('Не удалось найти заказы из имени SVG-файла');
+      if (generation === fileParseGeneration.current) message.warning('Не удалось найти заказы из имени SVG-файла');
     } finally {
-      setOrderSearchLoading(false);
+      if (generation === fileParseGeneration.current) setOrderSearchLoading(false);
     }
   }
 
@@ -1400,14 +1408,6 @@ function escapeHtml(value: string): string {
   })[character] ?? character);
 }
 
-function createSvgPreview(file: File): SvgPreviewState | null {
-  if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return null;
-  return {
-    url: URL.createObjectURL(file),
-    fileName: file.name,
-  };
-}
-
 function createStyledSvgPreview(
   parsed: ParsedSvgUpload,
   renderStylesSetting: CutRenderStylesSetting | null,
@@ -1421,10 +1421,6 @@ function createStyledSvgPreview(
   };
 }
 
-function revokeObjectUrl(url: string | null): void {
-  if (!url || typeof URL === 'undefined' || typeof URL.revokeObjectURL !== 'function') return;
-  URL.revokeObjectURL(url);
-}
 
 function SvgValidationSummary({
   parsed,

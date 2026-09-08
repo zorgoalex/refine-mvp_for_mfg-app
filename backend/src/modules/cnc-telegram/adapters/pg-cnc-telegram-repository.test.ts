@@ -316,6 +316,35 @@ describe('PgCncTelegramRepository', () => {
     )).toBe(false);
   });
 
+  it.each([500, null])('restores hidden cards once and reuses active jobs with result %s', async (resultId) => {
+    const { queries, first, second, hiddenAt } = await runManualSvgMdfFollowupSequence({ hidden: true, resultId });
+    expect(first.createdMdfMachineFileCard).toBe(true);
+    expect(second.createdMdfMachineFileCard).toBe(false);
+    expect(first.packet.svgCutJobId).toBe(30);
+    expect(second.packet.svgCutJobId).toBe(30);
+    expect(hiddenAt).toBeNull();
+    expect(queries.filter(q => /INSERT INTO cut_job\s*\(/i.test(q.text))).toHaveLength(0);
+    const events = queries.filter(q => /INSERT INTO outbox_events/i.test(q.text));
+    expect(events.filter(q => q.params[0] === 'cnc.manual_svg_upload.mdf_card_restored')).toHaveLength(1);
+    expect(events.filter(q => q.params[0] === 'cnc.manual_svg_upload.mdf_card_created')).toHaveLength(0);
+  });
+
+  it('keeps the card hidden when its creation is not requested', async () => {
+    const { first, second, hiddenAt } = await runManualSvgMdfFollowupSequence({ hidden: true, createCard: false });
+    expect(first.createdMdfMachineFileCard).toBe(false);
+    expect(second.createdMdfMachineFileCard).toBe(false);
+    expect(hiddenAt).not.toBeNull();
+  });
+
+  it('records distinct restoration events across repeated hide cycles', async () => {
+    const { queries, first, second } = await runManualSvgMdfFollowupSequence({ hidden: true, hideAgain: true });
+    expect(first.createdMdfMachineFileCard).toBe(true);
+    expect(second.createdMdfMachineFileCard).toBe(true);
+    const events = queries.filter(q => /INSERT INTO outbox_events/i.test(q.text) && q.params[0] === 'cnc.manual_svg_upload.mdf_card_restored');
+    expect(events).toHaveLength(2);
+    expect(new Set(events.map(q => q.params[4])).size).toBe(2);
+  });
+
   it('uses database current date for today when caller omits date', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const database = {
@@ -4225,30 +4254,41 @@ function packetRowBase() {
   };
 }
 
-async function runManualSvgMdfFollowupSequence() {
+async function runManualSvgMdfFollowupSequence(options: {
+  hidden?: boolean; resultId?: number | null; createCard?: boolean; hideAgain?: boolean;
+} = {}) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
   const packetId = '00000000-0000-0000-0000-000000000091';
-  const dto = manualSvgUploadDto(true, 'cnc:test:manual-svg:mdf-followup-1');
+  const dto = manualSvgUploadDto(options.createCard ?? true, 'cnc:test:manual-svg:mdf-followup-1');
   const payloadHash = manualSvgPayloadHashForTest(dto);
   let completed = false;
-  let mdfCardCreated = false;
+  let mdfCardCreated = options.hidden ?? false;
+  let hiddenAt: string | null = options.hidden ? '2026-09-08T10:00:00.000Z' : null;
+  const resultId = options.resultId === undefined ? 500 : options.resultId;
+  const row = () => ({ ...manualSvgPacketRow(packetId, completed), svg_cut_result_id: resultId, mdf_board_hidden_at: hiddenAt });
   let auditIndex = 0;
   const mdfCardEventKey = `cnc-manual-svg:${packetId}:source-1:mdf-card-created`;
   const tx = {
     query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
       queries.push({ text, params });
+      if (/WITH hidden_machine_file AS/i.test(text)) {
+        const before = hiddenAt;
+        hiddenAt = null;
+        return { rows: before ? [{ hidden_at: before, hidden_by: 1, hidden_reason: 'cut_job_deleted', hidden_cut_job_id: 29 }] : [] };
+      }
+      if (/SELECT status FROM cut_job/i.test(text)) return { rows: [{ status: 'ready' }] };
       if (/INSERT INTO command_idempotency_keys/i.test(text)) {
         return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
       }
       if (/p\.workday/i.test(text) && /p\.packet_id = \$1::uuid/i.test(text)) {
         return {
-          rows: [manualSvgPacketRow(packetId, completed)],
+          rows: [row()],
         };
       }
       if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
         return {
           rows: [{
-            ...manualSvgPacketRow(packetId, completed),
+            ...row(),
             packet_id: packetId,
             source_version: 1,
             payload_hash: payloadHash,
@@ -4292,9 +4332,9 @@ async function runManualSvgMdfFollowupSequence() {
       if (/SELECT svg_cut_job_id, svg_cut_result_id, svg_cut_import_status, cutting_sequence_no/i.test(text)) {
         return {
           rows: [{
-            ...manualSvgPacketRow(packetId, completed),
+            ...row(),
             svg_cut_job_id: 30,
-            svg_cut_result_id: 500,
+            svg_cut_result_id: resultId,
             svg_cut_import_status: 'imported',
             cutting_sequence_no: 91,
           }],
@@ -4316,7 +4356,7 @@ async function runManualSvgMdfFollowupSequence() {
       }
       if (/FROM cnc_telegram_packets p/i.test(text) && !/SELECT DISTINCT details.order_id, details.detail_id/i.test(text)) {
         return {
-          rows: [manualSvgPacketRow(packetId, completed)],
+          rows: [row()],
         };
       }
       if (/FROM app_settings/i.test(text)) {
@@ -4338,12 +4378,13 @@ async function runManualSvgMdfFollowupSequence() {
     dto,
     requestId: 'request-manual-svg-mdf-followup-1',
   });
+  if (options.hideAgain) hiddenAt = '2026-09-08T11:00:00.000Z';
   const second = await repo.manualSvgUpload({
     currentUser: user(),
-    dto: manualSvgUploadDto(true, 'cnc:test:manual-svg:mdf-followup-2'),
+    dto: manualSvgUploadDto(options.createCard ?? true, 'cnc:test:manual-svg:mdf-followup-2'),
     requestId: 'request-manual-svg-mdf-followup-2',
   });
-  return { queries, first, second };
+  return { queries, first, second, hiddenAt };
 }
 
 function manualSvgPacketRow(packetId: string, completed: boolean) {
