@@ -1448,7 +1448,7 @@ function SvgValidationSummary({
   const informational = matchMode === 'informational';
   return (
     <Alert
-      type={!valid || errorCount > 0 ? 'error' : warningCount > 0 ? 'warning' : informational ? 'info' : 'success'}
+      type={!valid || errorCount > 0 ? 'error' : warningCount > 0 || layout.reasons.length > 0 ? 'warning' : informational ? 'info' : 'success'}
       showIcon
       message={valid
         ? informational
@@ -1483,7 +1483,7 @@ function SvgValidationSummary({
             </Typography.Text>
           )}
           {layout.reasons.length > 0 && (
-            <Typography.Text type="danger">
+            <Typography.Text type={valid ? "warning" : "danger"}>
               {layout.reasons.join('; ')}
             </Typography.Text>
           )}

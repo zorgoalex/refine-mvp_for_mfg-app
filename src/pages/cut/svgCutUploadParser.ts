@@ -27,6 +27,7 @@ type Bbox = [number, number, number, number];
 export interface PartContourGeometry {
   elementId: string;
   groupKey?: string | null;
+  commentIdentity?: { orderName: string; detailNumber: number } | null;
   xMm: number;
   yMm: number;
   placedWidthMm: number;
@@ -133,6 +134,7 @@ export function parseSvgCutUploadText(
 
   const partContours: PartContourGeometry[] = [];
   const genericContours: PartContourGeometry[] = [];
+  const unsafeContours: PartContourGeometry[] = [];
   const rejectedPartContours = new Set<string>();
   const rejectedGenericContours = new Set<string>();
   const visualLabels = extractVisualDetailLabels(root, vbMinX, vbMinY, scaleX, scaleY);
@@ -154,7 +156,7 @@ export function parseSvgCutUploadText(
     const points = elementPoints(element).map((point) => applyMatrix(point, matrix));
     const bbox = pointsBbox(points);
     if (!bbox) {
-      if (visualLabels.length > 0 || options.allowGeometryFallbackItems === true) {
+      if (isPartContour || visualLabels.length > 0 || options.allowGeometryFallbackItems === true) {
         rejected.add(isPartContour ? 'Контуры деталей PartContour без геометрии' : 'Контуры деталей без геометрии');
       }
       continue;
@@ -167,11 +169,17 @@ export function parseSvgCutUploadText(
     const contour = {
       elementId: elementId || `${localName(element)}-${partContours.length + 1}`,
       groupKey: isPartContour ? partContourGroupKey(element) : null,
+      commentIdentity: extractCommentIdentity(element),
       xMm,
       yMm,
       placedWidthMm,
       placedHeightMm,
     };
+    if (![xMm, yMm, placedWidthMm, placedHeightMm].every(Number.isFinite) || placedWidthMm <= 0 || placedHeightMm <= 0) {
+      unsafeContours.push(contour);
+      rejected.add(`Контур ${contour.elementId}: некорректная или вырожденная геометрия`);
+      continue;
+    }
     if (!isPartContour && !svgUploadGeometryIsInformationalDetailContour(
       contour,
       sheetWidth,
@@ -188,6 +196,7 @@ export function parseSvgCutUploadText(
       xMm + placedWidthMm <= sheetWidth + LAYOUT_BOUNDS_TOLERANCE_MM &&
       yMm + placedHeightMm <= sheetHeight + LAYOUT_BOUNDS_TOLERANCE_MM;
     if (!insideSheet) {
+      unsafeContours.push(contour);
       rejected.add(isPartContour ? 'Контуры деталей PartContour выходят за границы листа' : 'Контуры деталей выходят за границы листа');
       continue;
     }
@@ -201,13 +210,15 @@ export function parseSvgCutUploadText(
   }
 
   const selectedContours = partContours.length > 0 || !allowGenericGeometry ? partContours : genericContours;
-  const builtLayout = buildSvgUploadLayoutItemsFromContours(selectedContours, visualLabels, {
+  const allMatches = matchVisualLabelsToPartContours([...selectedContours, ...unsafeContours], visualLabels);
+  const unsafeLabels = new Set(unsafeContours.map((contour) => allMatches.get(contour)).filter(Boolean));
+  const builtLayout = buildSvgUploadLayoutItemsFromContours(selectedContours, visualLabels.filter((label) => !unsafeLabels.has(label)), {
     ...options,
     sheetWidthMm: sheetWidth,
     sheetHeightMm: sheetHeight,
   });
   const rejected = new Set<string>();
-  if (!allowGenericGeometry || selectedContours.length === 0) {
+  {
     for (const reason of rejectedPartContours) rejected.add(reason);
     if (allowGenericGeometry) {
       for (const reason of rejectedGenericContours) rejected.add(reason);
@@ -216,7 +227,7 @@ export function parseSvgCutUploadText(
   for (const reason of builtLayout.rejected) rejected.add(reason);
 
   const reasons: string[] = [];
-  if (visualLabels.length === 0 && options.allowGeometryFallbackItems !== true) {
+  if (visualLabels.length === 0 && options.allowGeometryFallbackItems !== true && builtLayout.layoutItems.length === 0) {
     reasons.push('Не найдены читаемые верхние подписи деталей: заказ / позиция / размер');
   }
   if (visualLabels.length > 0 && builtLayout.layoutItems.length === 0) {
@@ -237,7 +248,7 @@ export function parseSvgCutUploadText(
       : 'Контуры PartContour есть, но ни одна деталь не прошла проверку геометрии');
   }
 
-  const status = builtLayout.layoutItems.length > 0 && reasons.length === 0 ? 'valid' : 'invalid';
+  const status = builtLayout.layoutItems.length > 0 ? 'valid' : 'invalid';
   const cutLayout: CncTelegramCutLayout = {
     status,
     reasons,
@@ -268,7 +279,8 @@ export function buildSvgUploadLayoutItemsFromContours(
   const usedVisualLabels = new Set<VisualDetailLabel>();
 
   for (const [index, contour] of contours.entries()) {
-    const parsed = visualMatches.get(contour);
+    const visual = visualMatches.get(contour);
+    const parsed = visual ?? commentIdentityLabel(contour);
     if (!parsed) {
       if (options.allowGeometryFallbackItems === true) {
         const fallback = fallbackLayoutItemFromContour(contour, index, options.fallbackOrderName);
@@ -282,12 +294,12 @@ export function buildSvgUploadLayoutItemsFromContours(
         if (seenGeometry.has(key)) continue;
         seenGeometry.add(key);
         layoutItems.push(fallback);
-      } else if (visualLabels.length > 0) {
-        rejected.add('Для контура детали PartContour не найдена верхняя подпись с заказом/позицией');
+      } else {
+        rejected.add(`Для контура детали PartContour ${contour.elementId} не найдена верхняя подпись с заказом/позицией или однозначный Comments`);
       }
       continue;
     }
-    usedVisualLabels.add(parsed);
+    if (visual) usedVisualLabels.add(visual);
     const resolvedSize = resolveVisualLabelSize(parsed, contour);
     const key = [
       parsed.orderName,
@@ -313,7 +325,7 @@ export function buildSvgUploadLayoutItemsFromContours(
       rotated: Math.round(contour.placedWidthMm) === Math.round(resolvedSize.heightMm) &&
         Math.round(contour.placedHeightMm) === Math.round(resolvedSize.widthMm),
       sourceSvg: contour.sourceSvg ?? null,
-      visualLabel: visualLabelSnapshot(parsed),
+      visualLabel: visual ? visualLabelSnapshot(visual) : undefined,
     });
   }
 
@@ -341,6 +353,29 @@ export function buildSvgUploadLayoutItemsFromContours(
   return { layoutItems, rejected: Array.from(rejected).sort() };
 }
 
+function extractCommentIdentity(element: Element): PartContourGeometry['commentIdentity'] {
+  const identities = new Map<string, { orderName: string; detailNumber: number }>();
+  for (const child of Array.from(element.getElementsByTagName('*'))) {
+    if (localName(child) !== 'odm' || child.getAttribute('name') !== 'Comments') continue;
+    const match = (child.getAttribute('value') ?? '').match(/(\d{4,})#(\d{1,5})#/);
+    if (!match || Number(match[2]) <= 0) continue;
+    identities.set(`${match[1]}:${Number(match[2])}`, { orderName: match[1], detailNumber: Number(match[2]) });
+  }
+  return identities.size === 1 ? identities.values().next().value : null;
+}
+
+function commentIdentityLabel(contour: PartContourGeometry): VisualDetailLabel | null {
+  if (!contour.commentIdentity) return null;
+  return {
+    ...contour.commentIdentity, key: `comments:${contour.elementId}`,
+    widthMm: null, heightMm: null, hasExplicitSize: false,
+    cxMm: contour.xMm + contour.placedWidthMm / 2,
+    cyMm: contour.yMm + contour.placedHeightMm / 2,
+    linePointsMm: [], rawLines: [],
+  };
+}
+
+
 function buildVisualLabelOnlyLayoutItems(
   labels: VisualDetailLabel[],
   startIndex: number,
@@ -348,7 +383,10 @@ function buildVisualLabelOnlyLayoutItems(
 ): { layoutItems: CncTelegramCutLayout['items']; rejected: string[] } {
   const layoutItems: CncTelegramCutLayout['items'] = [];
   const rejected = new Set<string>();
+  const seenLabels = new Set<string>();
   for (const [offset, label] of labels.entries()) {
+    if (seenLabels.has(label.key)) continue;
+    seenLabels.add(label.key);
     if (!label.hasExplicitSize || label.widthMm === null || label.heightMm === null) {
       rejected.add(`Для верхней подписи ${label.orderName} #${label.detailNumber} не найден контур детали и нет размера`);
       continue;
@@ -356,6 +394,11 @@ function buildVisualLabelOnlyLayoutItems(
     const index = startIndex + offset;
     const placedWidthMm = round2(label.widthMm);
     const placedHeightMm = round2(label.heightMm);
+    if ((options.sheetWidthMm && placedWidthMm > options.sheetWidthMm + LAYOUT_BOUNDS_TOLERANCE_MM) ||
+        (options.sheetHeightMm && placedHeightMm > options.sheetHeightMm + LAYOUT_BOUNDS_TOLERANCE_MM)) {
+      rejected.add(`Для верхней подписи ${label.orderName} #${label.detailNumber} размер превышает размер листа`);
+      continue;
+    }
     const xMm = labelOnlyCoordinate(label.cxMm - placedWidthMm / 2, placedWidthMm, options.sheetWidthMm);
     const yMm = labelOnlyCoordinate(label.cyMm - placedHeightMm / 2, placedHeightMm, options.sheetHeightMm);
     layoutItems.push({

@@ -286,8 +286,6 @@ def cut_layout_warnings(cut_layout: dict[str, Any] | None) -> list[str]:
     if not cut_layout:
         return []
     status = clean_string(cut_layout.get("status"), 32)
-    if status == "valid":
-        return []
     raw_reasons = cut_layout.get("reasons")
     reasons = raw_reasons if isinstance(raw_reasons, list) else []
     clean_reasons = [
@@ -295,6 +293,8 @@ def cut_layout_warnings(cut_layout: dict[str, Any] | None) -> list[str]:
         for reason in (clean_string(item, 200) for item in reasons)
         if reason
     ]
+    if status == "valid":
+        return [f"SVG detail warnings: {'; '.join(clean_reasons[:3])}"] if clean_reasons else []
     if clean_reasons:
         return [f"SVG layout ignored: {'; '.join(clean_reasons[:3])}"]
     if status:
