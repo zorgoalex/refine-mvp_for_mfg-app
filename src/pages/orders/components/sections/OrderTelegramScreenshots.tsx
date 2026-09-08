@@ -305,7 +305,7 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
         closable={false}
         width="calc(100vw - 24px)"
         style={{ top: 12, maxWidth: 'none', paddingBottom: 0 }}
-        styles={{ body: { padding: 0 } }}
+        bodyStyle={{ padding: 0 }}
         destroyOnClose
         title={null}
       >

@@ -119,7 +119,7 @@ export const MobileSiderDrawer: React.FC<MobileSiderDrawerProps> = ({ open, onCl
         open={open}
         onClose={onClose}
         closeIcon={<CloseOutlined />}
-        styles={{ body: { padding: 0 } }}
+        bodyStyle={{ padding: 0 }}
       >
         {canCreateOrders && (
           <div style={{ padding: "12px 16px" }}>

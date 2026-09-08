@@ -816,9 +816,9 @@ export class Bitrix24PaymentWidgetRepository {
              caller_refresh_token_ciphertext, caller_access_token_expires_at,
              token_user_id, status
            ) VALUES (
-             $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
-             $19,CASE WHEN $19 THEN $7 ELSE NULL END,
-             CASE WHEN $19 THEN now() ELSE NULL END,$20,$21,$22,$6,'processing'
+             $1,$2,$3,$4,$5,$6,$7::bigint,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
+             $19::boolean,CASE WHEN $19::boolean THEN $7::bigint ELSE NULL::bigint END,
+             CASE WHEN $19::boolean THEN now() ELSE NULL END,$20,$21,$22,$6,'processing'
            ) RETURNING *`,
           [
             input.idempotencyKey, input.requestHash, input.session.memberId,

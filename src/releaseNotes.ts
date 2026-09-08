@@ -29,6 +29,19 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION,
+    date: "2026-09-09",
+    title: "Bitrix: создание оплаты через виджет",
+    services: ["ERP", "CRM"],
+    fixed: ["Исправлена SQL-ошибка при сохранении команды оплаты. Суммы без копеек и с запятой приводятся к нужному формату без округления; ошибки заполнения показывают конкретное поле."],
+  },
+  {
+    version: APP_VERSION, date: "2026-09-08",
+    title: "Совместимость оформления модальных окон",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: ["Исправлено применение отступов в мобильном меню и просмотре изображений, прокрутки редактора бирок и оформления PDF/фото-импорта для установленной версии интерфейсной библиотеки. Данные и правила импорта не менялись."],
+  },
+  {
     version: APP_VERSION, date: "2026-09-08",
     title: "МДФ: поиск в скрытых завершённых колонках",
     services: ["ERP"], repositories: ["repo_erp"],

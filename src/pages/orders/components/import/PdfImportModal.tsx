@@ -381,14 +381,12 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
         onCancel={handleClose}
         width={1200}
         style={{ top: 20 }}
-        styles={{
-          body: {
-            minHeight: 500,
-            maxHeight: 'calc(90vh - 120px)',
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-          },
+        bodyStyle={{
+          minHeight: 500,
+          maxHeight: 'calc(90vh - 120px)',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
         }}
         footer={
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
