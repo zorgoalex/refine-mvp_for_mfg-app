@@ -10,6 +10,9 @@ const migration079 = readFileSync(new URL('../../../../db/migrations/079_cut_res
 const migration079Compat = readFileSync(new URL('../../../../db/migrations/079_z_cut_result_jsonb_object_length_compat.sql', import.meta.url), 'utf8');
 const migration080 = readFileSync(new URL('../../../../db/migrations/080_cut_result_history_finalize.sql', import.meta.url), 'utf8');
 const migration081 = readFileSync(new URL('../../../../db/migrations/081_label_cut_maps.sql', import.meta.url), 'utf8');
+const migration121 = readFileSync(new URL('../../../../db/migrations/121_cut_result_informational_snapshots.sql', import.meta.url), 'utf8');
+const migration153 = readFileSync(new URL('../../../../db/migrations/153_svg_partial_label_maps.sql', import.meta.url), 'utf8');
+const migration122 = readFileSync(new URL('../../../../db/migrations/122_cut_result_informational_label_maps.sql', import.meta.url), 'utf8');
 const migration082 = readFileSync(new URL('../../../../db/migrations/082_label_cut_maps_backfill.sql', import.meta.url), 'utf8');
 
 describeIntegration('label cut-map migration chain', () => {
@@ -128,6 +131,40 @@ describeIntegration('label cut-map migration chain', () => {
           sheet_ordinal, is_effective, sheet_width_mm, sheet_height_mm, base_svg)
        VALUES (1, 1, 1, 'forged', 'auto', 99, 1, true, 1, 1, '<svg></svg>')`,
     )).rejects.toThrow(/only by the projection function/i);
+  });
+
+  it.each([{ allUnknown: false, orderId: null }, { allUnknown: false, orderId: 20 }, { allUnknown: true, orderId: null }])('projects SVG source-only geometry independently (%j)', async ({ allUnknown, orderId }) => {
+    await client.query('BEGIN');
+    try {
+      await client.query(migration121.replace(/BEGIN;|COMMIT;/g, ''));
+      await client.query(migration122.replace(/BEGIN;|COMMIT;/g, ''));
+      await client.query(migration153.replace(/BEGIN;|COMMIT;/g, ''));
+      const mixed = structuredClone(snapshot);
+      if (allUnknown) mixed.items = [];
+      const pieces = mixed.groups[0].sheets[0].placements.pieces;
+      if (allUnknown) for (const piece of pieces) Object.assign(piece, {item_id:'svg-source', label:{orderId:null,detailId:null}});
+      pieces.push(Object.assign({ ...pieces[0], item_id: 'svg-unmatched', instance: 1, x_mm: 1200 }, {label:{orderId,detailId:null}}));
+      const inserted = await client.query<{ cut_result_id: string }>(
+        `INSERT INTO cut_result (cut_job_id, result_no, result_kind, source_job_version,
+          snapshot_job, snapshot_manifest, snapshot_digest, totals_snapshot)
+         VALUES ($1, 20, 'legacy', 1, $2::jsonb, $3::jsonb, cut_result_snapshot_digest($2::jsonb), $4::jsonb)
+         RETURNING cut_result_id`,
+        [cutJobId, JSON.stringify(mixed), JSON.stringify({...manifest(mixed), items:allUnknown ? 2 : 1, instances:allUnknown ? 3 : 2}), JSON.stringify(mixed.totals)],
+      );
+      const projected = await client.query(`SELECT order_id, order_detail_id, item_id FROM cut_result_placement WHERE cut_result_id=$1`, [inserted.rows[0].cut_result_id]);
+      expect(projected.rows).toHaveLength(3);
+      expect(projected.rows.filter(row => row.order_detail_id != null)).toHaveLength(allUnknown ? 0 : 2);
+      expect(projected.rows.filter(row => row.item_id.startsWith('svg-')).every(row => row.order_detail_id === null)).toBe(true);
+      expect(projected.rows.find(row => row.item_id === 'svg-unmatched')?.order_id).toBe(orderId === null ? null : String(orderId));
+      const corrupt = structuredClone(mixed);
+      corrupt.groups[0].sheets[0].placements.pieces[2].item_id = 'det-999999';
+      await expect(client.query(
+        `INSERT INTO cut_result (cut_job_id, result_no, result_kind, source_job_version,
+          snapshot_job, snapshot_manifest, snapshot_digest, totals_snapshot)
+         VALUES ($1, 21, 'legacy', 1, $2::jsonb, $3::jsonb, cut_result_snapshot_digest($2::jsonb), $4::jsonb)`,
+        [cutJobId, JSON.stringify(corrupt), JSON.stringify({...manifest(corrupt), items:allUnknown ? 2 : 1, instances:allUnknown ? 3 : 2}), JSON.stringify(corrupt.totals)],
+      )).rejects.toThrow(/unknown item|snapshot_shape/);
+    } finally { await client.query('ROLLBACK'); }
   });
 
   it('clears the insert guard inside the transaction that creates a cut result', async () => {

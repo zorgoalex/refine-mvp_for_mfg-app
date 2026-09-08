@@ -1,3 +1,4 @@
+import { svgUploadOrderNames } from './svgUploadOrderNames';
 import { Tooltip } from '../../ui/tooltipDelay';
 import { useOwnedObjectUrlState } from './useOwnedObjectUrlState';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -389,6 +390,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   }, [open, requestedCutJobId]);
 
   const submit = useCallback(async () => {
+    if (parsing) return;
     if (!parsed) {
       message.warning('Загрузите SVG-файл');
       return;
@@ -547,6 +549,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     onClose,
     onDone,
     parsed,
+    parsing,
     cutJobNumberCheck.status,
     requestedCutJobId,
     resetFormState,
@@ -590,9 +593,11 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       if (fileNameHints.materialName) {
         setMaterialName(fileNameHints.materialName);
       }
-      if (fileNameHints.orderNames.length > 0) {
-        void applyFileNameOrderHints(fileNameHints.orderNames, generation);
+      const sourceOrderNames = svgUploadOrderNames(result.cutLayout.items, fileNameHints.orderNames);
+      if (sourceOrderNames.length > 0) {
+        await applyFileNameOrderHints(sourceOrderNames, generation);
       }
+      if (generation !== fileParseGeneration.current) return;
       if (result.cutLayout.status === 'valid') {
         const inferredMaterial = inferMaterialName(result.cutLayout.items, result.fileName);
         if (inferredMaterial && !fileNameHints.materialName) setMaterialName(inferredMaterial);
@@ -623,13 +628,13 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       setOrderOptions((current) => mergeOrderOptions(current, lookup.orders));
       if (lookup.matchedOrderIds.length > 0) {
         setSelectedOrderIds(uniqueNumbers([...defaultOrderIds, ...lookup.matchedOrderIds]));
-        message.success(`Заказы из имени файла найдены: ${lookup.matchedOrderNames.join(', ')}`);
+        message.success(`Заказы из SVG найдены: ${lookup.matchedOrderNames.join(', ')}`);
       }
       if (lookup.missingOrderNames.length > 0) {
-        message.warning(`Не найдены заказы из имени файла: ${lookup.missingOrderNames.join(', ')}`);
+        message.warning(`Не найдены заказы из SVG: ${lookup.missingOrderNames.join(', ')}`);
       }
     } catch {
-      if (generation === fileParseGeneration.current) message.warning('Не удалось найти заказы из имени SVG-файла');
+      if (generation === fileParseGeneration.current) message.warning('Не удалось найти заказы из SVG');
     } finally {
       if (generation === fileParseGeneration.current) setOrderSearchLoading(false);
     }
@@ -690,7 +695,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
         onOk={() => void submit()}
         confirmLoading={submitting}
         okButtonProps={{
-          disabled: !parsed || strictSvgValidationBlocked || noRecognizedSvgItems || selectedOrderIds.length === 0 || orderDetailMatchSubmitBlocked || cutJobNumberSubmitBlocked,
+          disabled: parsing || !parsed || strictSvgValidationBlocked || noRecognizedSvgItems || selectedOrderIds.length === 0 || orderDetailMatchSubmitBlocked || cutJobNumberSubmitBlocked,
           icon: <FileAddOutlined />,
         }}
       >
@@ -1825,7 +1830,8 @@ async function findOrdersByFileNameHints(orderNames: string[]): Promise<{
     for (const order of response.orders) {
       ordersById.set(order.orderId, order);
     }
-    const exactOrder = response.orders.find((order) => orderMatchesFileNameHint(order, response.orderName));
+    const exactOrders = response.orders.filter((order) => orderMatchesFileNameHint(order, response.orderName));
+    const exactOrder = exactOrders.length === 1 ? exactOrders[0] : undefined;
     if (!exactOrder) {
       missingOrderNames.push(response.orderName);
       continue;
@@ -1846,9 +1852,7 @@ async function findOrdersByFileNameHints(orderNames: string[]): Promise<{
 function orderMatchesFileNameHint(order: OrderListItemDto, orderName: string): boolean {
   const normalized = orderName.trim();
   if (!normalized) return false;
-  if (String(order.orderName ?? '').trim() === normalized) return true;
-  if (String(order.fullNumber ?? '').trim() === normalized) return true;
-  return (String(order.fullNumber ?? '').match(/\d{3,8}/g) ?? []).includes(normalized);
+  return String(order.orderName ?? '').trim().toLowerCase() === normalized.toLowerCase();
 }
 
 function uniqueNumbers(values: number[]): number[] {

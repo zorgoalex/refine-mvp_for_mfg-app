@@ -2957,6 +2957,7 @@ describe('PgCncTelegramRepository', () => {
         if (/INSERT INTO cut_job\s*\(/i.test(text)) {
           return { rows: [{ cut_job_id: 800, created_at: '2026-08-17T07:00:00.000Z' }] };
         }
+        if (/INSERT INTO cut_result\s*\(/i.test(text)) return { rows: [{ cut_result_id: 899 }] };
         if (/INSERT INTO cut_group\s*\(/i.test(text)) {
           return { rows: [{ cut_group_id: 801 }] };
         }
@@ -2971,7 +2972,7 @@ describe('PgCncTelegramRepository', () => {
             rows: [packetRow({
               cutting_sequence_no: 104,
               svg_cut_job_id: 800,
-              svg_cut_result_id: null,
+              svg_cut_result_id: 899,
               svg_cut_import_status: 'imported',
             })],
           };
@@ -3069,8 +3070,8 @@ describe('PgCncTelegramRepository', () => {
 
     expect(queries.some((query) => /FROM orders o/i.test(query.text) && /JOIN order_details od/i.test(query.text))).toBe(true);
     expect(jobInsert?.params[7]).toBe('1');
-    expect(queries.some((query) => /INSERT INTO cut_result_command/i.test(query.text))).toBe(false);
-    expect(queries.some((query) => /INSERT INTO cut_result\s*\(/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO cut_result_command/i.test(query.text))).toBe(true);
+    expect(queries.some((query) => /INSERT INTO cut_result\s*\(/i.test(query.text))).toBe(true);
     expect(JSON.parse(String(sheetInsert?.params[2]))).toMatchObject({
       pieces: [
         { label: { orderId: 2808, orderName: '2808', detailId: 8801 } },
@@ -3081,10 +3082,10 @@ describe('PgCncTelegramRepository', () => {
       'imported',
       'Предупреждение: раскрой создан в информативном режиме; связь с деталями ERP неполная',
       800,
-      null,
+      899,
     ]);
     expect(result.packet.svgCutJobId).toBe(800);
-    expect(result.packet.svgCutResultId).toBeNull();
+    expect(result.packet.svgCutResultId).toBe(899);
     expect(result.packet.svgCutImportStatus).toBe('imported');
   });
 
@@ -3107,10 +3108,11 @@ describe('PgCncTelegramRepository', () => {
         if (/INSERT INTO cut_job\s*\(/i.test(text)) {
           return { rows: [{ cut_job_id: 810, created_at: '2026-08-19T10:00:00.000Z' }] };
         }
+        if (/INSERT INTO cut_result\s*\(/i.test(text)) return { rows: [{ cut_result_id: 899 }] };
         if (/INSERT INTO cut_group\s*\(/i.test(text)) return { rows: [{ cut_group_id: 811 }] };
         if (/INSERT INTO cut_group_sheet\s*\(/i.test(text)) return { rows: [{ cut_group_sheet_id: 812 }] };
         if (/FROM cnc_telegram_packets p/i.test(text)) {
-          return { rows: [packetRow({ cutting_sequence_no: 105, svg_cut_job_id: 810, svg_cut_result_id: null, svg_cut_import_status: 'imported' })] };
+          return { rows: [packetRow({ cutting_sequence_no: 105, svg_cut_job_id: 810, svg_cut_result_id: 899, svg_cut_import_status: 'imported' })] };
         }
         if (/INSERT INTO audit_log/i.test(text)) return { rows: [{ audit_id: 'audit-1' }] };
         return { rows: [] };
@@ -3157,9 +3159,9 @@ describe('PgCncTelegramRepository', () => {
       'imported',
       'Предупреждение: раскрой создан без привязки к ERP-заказу; проверьте заказ вручную',
       810,
-      null,
+      899,
     ]);
-    expect(result.packet).toMatchObject({ svgCutJobId: 810, svgCutResultId: null, svgCutImportStatus: 'imported' });
+    expect(result.packet).toMatchObject({ svgCutJobId: 810, svgCutResultId: 899, svgCutImportStatus: 'imported' });
   });
 
   it('keeps ERP detail matches when manual SVG upload uses lenient validation', async () => {
@@ -3240,6 +3242,7 @@ describe('PgCncTelegramRepository', () => {
         if (/INSERT INTO cut_job\s*\(/i.test(text)) {
           return { rows: [{ cut_job_id: 700, created_at: '2026-08-12T08:00:00.000Z' }] };
         }
+        if (/INSERT INTO cut_result\s*\(/i.test(text)) return { rows: [{ cut_result_id: 899 }] };
         if (/INSERT INTO cut_group\s*\(/i.test(text)) {
           return { rows: [{ cut_group_id: 701 }] };
         }
@@ -3364,6 +3367,7 @@ describe('PgCncTelegramRepository', () => {
         if (/INSERT INTO cut_job\s*\(/i.test(text)) {
           return { rows: [{ cut_job_id: 720, created_at: '2026-08-12T08:00:00.000Z' }] };
         }
+        if (/INSERT INTO cut_result\s*\(/i.test(text)) return { rows: [{ cut_result_id: 724 }] };
         if (/INSERT INTO cut_group\s*\(/i.test(text)) return { rows: [{ cut_group_id: 721 }] };
         if (/INSERT INTO cut_job_item\s*\(/i.test(text)) return { rows: [{ cut_job_item_id: 723 }] };
         if (/INSERT INTO cut_group_sheet\s*\(/i.test(text)) return { rows: [{ cut_group_sheet_id: 722 }] };
@@ -3372,7 +3376,7 @@ describe('PgCncTelegramRepository', () => {
             source_chat_id: 'erp-manual-svg-upload',
             cutting_sequence_no: 92,
             svg_cut_job_id: 720,
-            svg_cut_result_id: null,
+            svg_cut_result_id: 724,
             svg_cut_import_status: 'imported',
           })] };
         }
@@ -3452,19 +3456,23 @@ describe('PgCncTelegramRepository', () => {
       ],
     });
     expect(queries.filter((query) => /INSERT INTO cut_job_item\s*\(/i.test(query.text))).toHaveLength(informational ? 0 : 1);
-    expect(queries.some((query) => /INSERT INTO cut_result_command/i.test(query.text))).toBe(false);
-    expect(queries.some((query) => /INSERT INTO cut_result\s*\(/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO cut_result_command/i.test(query.text))).toBe(true);
+    const resultInsert = queries.find((query) => /INSERT INTO cut_result\s*\(/i.test(query.text));
+    expect(resultInsert).toBeDefined();
+    const snapshot = JSON.parse(String(resultInsert?.params[4]));
+    expect(snapshot.groups[0].sheets[0].placements.pieces).toHaveLength(2);
+    expect(snapshot.items).toHaveLength(informational ? 0 : 1);
     expect(importUpdate?.params.slice(1, 5)).toEqual([
       'imported',
       expect.any(String),
       720,
-      null,
+      724,
     ]);
     const unknownInsert = queries.filter(query => /INSERT INTO cnc_telegram_packet_items/i.test(query.text))[1];
     expect(unknownInsert.params[2]).toBe(sourceOrder);
     expect(unknownInsert.params[10]).toBeNull();
     if (expectedOrderId === null) expect(unknownInsert.params[9]).toBeNull();
-    expect(result.packet).toMatchObject({ svgCutJobId: 720, svgCutResultId: null, svgCutImportStatus: 'imported' });
+    expect(result.packet).toMatchObject({ svgCutJobId: 720, svgCutResultId: 724, svgCutImportStatus: 'imported' });
   });
 
   it('does not consult ERP resolver before same-version payload conflict checks', async () => {

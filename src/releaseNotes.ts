@@ -30,6 +30,12 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION, date: "2026-09-08",
+    title: "SVG: поиск заказов по надписям и бирки найденных деталей",
+    services: ["ERP", "Cutting"], repositories: ["repo_erp"],
+    fixed: ["Загрузка SVG находит заказы по надписям деталей, даже если их нет в имени файла. Частично сопоставленный раскрой сохраняет размещения для бирок: неизвестная деталь не блокирует печать найденных."],
+  },
+  {
+    version: APP_VERSION, date: "2026-09-08",
     title: "SVG: повторная загрузка и карточка МДФ",
     services: ["ERP", "Cutting"], repositories: ["repo_erp"],
     fixed: [

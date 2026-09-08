@@ -4776,9 +4776,6 @@ async function createSvgCutJob(
     [cutGroupId, plan.sheetMaterialTypeId, JSON.stringify(placements)],
   );
   const cutGroupSheetId = toNumber(sheet.rows[0].cut_group_sheet_id);
-  if (!svgPlanCanCreateCutResult(plan)) {
-    return { cutJobId, cutResultId: null };
-  }
   const totals = buildSvgCutTotals(plan);
   const snapshot: CutJobDto = {
     cutJobId,
@@ -5085,13 +5082,6 @@ async function syncSvgCutJobItemsForPlan(
     result.push(buildCutJobItemDto(inserted.rows[0].cut_job_item_id, cutGroupId, detail));
   }
   return result;
-}
-
-function svgPlanCanCreateCutResult(plan: Extract<SvgCutImportPlan, { ok: true }>): boolean {
-  return !plan.informational || (
-    plan.details.length > 0 &&
-    plan.placements.every((placement) => placement.orderDetailId !== null)
-  );
 }
 
 export async function ensureSvgCutJobDisplayNumberAvailable(
