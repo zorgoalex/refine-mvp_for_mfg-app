@@ -2340,11 +2340,12 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       <label className="status-board-toolbar__switch">
         <Switch
           size="small"
-          checked={cncBathsRequireMachineFiles}
+          checked={!cncBathsRequireMachineFiles}
           disabled={cncOriginalView}
-          onChange={setCncBathsRequireMachineFiles}
+          onChange={(checked) => setCncBathsRequireMachineFiles(!checked)}
+          aria-label="Отображать карточки ванн без связанных файлов станка"
         />
-        Ванны с файлами
+        Отображать карточки ванн без связанных файлов станка
       </label>
       <label className="status-board-toolbar__switch">
         <Switch

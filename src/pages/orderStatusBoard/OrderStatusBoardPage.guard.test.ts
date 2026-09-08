@@ -1456,11 +1456,13 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('status-board-settings__modes');
     expect(page).toContain('const [cncBathsRequireMachineFiles, setCncBathsRequireMachineFiles] =');
     expect(page).toMatch(/const \[cncBathsRequireMachineFiles, setCncBathsRequireMachineFiles\] =\s*useState\(false\);/);
-    expect(settings).toContain('Ванны с файлами');
-    expect(settings).toContain('checked={cncBathsRequireMachineFiles}');
-    expect(settings).toContain('onChange={setCncBathsRequireMachineFiles}');
-    expect(cncToolbar).not.toContain('Ванны с файлами');
-    expect(cncToolbar).not.toContain('checked={cncBathsRequireMachineFiles}');
+    expect(settings).toContain('Отображать карточки ванн без связанных файлов станка');
+    expect(settings).toContain('aria-label="Отображать карточки ванн без связанных файлов станка"');
+    expect(settings).toContain('checked={!cncBathsRequireMachineFiles}');
+    expect(settings).toContain('onChange={(checked) => setCncBathsRequireMachineFiles(!checked)}');
+    expect(settings).not.toContain('Ванны с файлами');
+    expect(cncToolbar).not.toContain('Отображать карточки ванн без связанных файлов станка');
+    expect(cncToolbar).not.toContain('checked={!cncBathsRequireMachineFiles}');
     expect(page).toContain('filterCncBathColumnsByMachineOrderMatches(cncOrderFilteredColumns, preservedCncBathCardId)');
     expect(page).toContain('const [cncTerminalColumnsVisible, setCncTerminalColumnsVisible] = useState(false)');
     expect(page).toContain('terminalColumnsVisible={cncTerminalColumnsVisible}');
