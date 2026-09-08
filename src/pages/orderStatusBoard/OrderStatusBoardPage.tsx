@@ -113,7 +113,6 @@ import {
   applyMdfBoardHiddenCardRulesToColumns,
   filterBoardColumns,
   filterCncBathColumnsByMachineOrderMatches,
-  filterCncHistoricalBathReadiness,
   filterCncOrderCardsByPlannedOrderDate,
   filterCncTodayColumnsByOrders,
   filterCncTodayColumnsByPlannedOrderDate,
@@ -939,11 +938,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
               fetchCncManualMoves({ cache: 'no-store' }),
               refetchMdfBoardSettings(),
             ]);
-            const refreshedOrderIds = collectCncOrderStatusBoardIds(
-              response.columns,
-              currentViewState,
-              cncBathsRequireMachineFiles,
-            );
+            const refreshedOrderIds = collectCncOrderIds(response.columns);
             const orderSortPreference = {
               sortBy: currentViewState.sortBy,
               sortOrder: currentViewState.sortOrder,
@@ -1073,7 +1068,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
         return false;
       }
     },
-    [cncBathsRequireMachineFiles, fetchCncManualMoves, refetchMdfBoardSettings, replacePending],
+    [fetchCncManualMoves, refetchMdfBoardSettings, replacePending],
   );
 
   useEffect(() => {
@@ -1488,36 +1483,15 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       })),
     [cncPeriodColumns],
   );
-  const cncOrderFilteredColumns = useMemo(
-    () => cncOriginalView
-      ? cncPeriodColumns
-      : filterCncTodayColumnsByOrders(cncPeriodColumns, cncOrderFilters),
-    [cncOriginalView, cncPeriodColumns, cncOrderFilterKey],
-  );
-  const preservedCncBathCardId = viewState.cncCardKind === 'bath'
-    ? viewState.cncCardId
-    : undefined;
-  const cncFilteredColumns = useMemo(
-    () =>
-      !cncOriginalView && cncBathsRequireMachineFiles
-        ? filterCncBathColumnsByMachineOrderMatches(cncOrderFilteredColumns, preservedCncBathCardId)
-        : cncOrderFilteredColumns,
-    [cncBathsRequireMachineFiles, cncOrderFilteredColumns, cncOriginalView, preservedCncBathCardId],
-  );
+  // Status loading and readiness use the full period, never the visibility filters.
+  // A hidden B-only source still contributes to B inside a visible A+B card.
   const cncOrderIds = useMemo(
-    () => collectCncOrderIds(cncFilteredColumns),
-    [cncFilteredColumns],
+    () => collectCncOrderIds(cncPeriodColumns),
+    [cncPeriodColumns],
   );
   const cncHistoricalBathReadiness = useMemo(
-    () => cncOriginalView ? [] : filterCncHistoricalBathReadiness(
-      cncToday?.historicalBathReadiness ?? [],
-      cncOrderFilteredColumns,
-      cncOrderFilters,
-      cncBathsRequireMachineFiles,
-      preservedCncBathCardId,
-    ),
-    [cncOriginalView, cncToday?.historicalBathReadiness, cncOrderFilteredColumns,
-      cncOrderFilterKey, cncBathsRequireMachineFiles, preservedCncBathCardId],
+    () => cncOriginalView ? [] : cncToday?.historicalBathReadiness ?? [],
+    [cncOriginalView, cncToday?.historicalBathReadiness],
   );
   const cncOrderBoardColumns = useMemo(
     () => filterBoardColumns('production', cncOrderBoard?.columns ?? [], true),
@@ -1526,20 +1500,6 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const cncOrderStatusCards = useMemo(
     () => buildCncOrderStatusCards(cncOrderBoardColumns, cncOrderIds),
     [cncOrderBoardColumns, cncOrderIds],
-  );
-  const cncDisplayOrderStatusCards = useMemo(
-    () => !cncOriginalView && viewState.cncPlannedTodayOnly
-      ? filterCncOrderCardsByPlannedOrderDate(
-          cncOrderStatusCards,
-          cncPlannedTodayDate,
-        )
-      : cncOrderStatusCards,
-    [
-      cncOrderStatusCards,
-      cncPlannedTodayDate,
-      cncOriginalView,
-      viewState.cncPlannedTodayOnly,
-    ],
   );
   const cncHiddenProductionStatusIds = useMemo(
     () => resolveMdfBoardHiddenProductionStatusIds(
@@ -1554,9 +1514,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   );
   const cncActiveColumns = useMemo(
     () => cncOriginalView
-      ? cncFilteredColumns
+      ? cncPeriodColumns
       : applyMdfBoardHiddenCardRulesToColumns(
-          cncFilteredColumns,
+          cncPeriodColumns,
           cncOrderStatusCards,
           mdfBoardHiddenStatusesSetting,
           cncHiddenProductionStatusIds,
@@ -1572,10 +1532,48 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       cncOrderStatusCards,
       cncHiddenOrderStatusIds,
       cncHiddenProductionStatusIds,
-      cncFilteredColumns,
+      cncPeriodColumns,
       cncManualMoves,
       mdfBoardHiddenStatusesSetting,
       cncOriginalView,
+    ],
+  );
+  const cncOrderFilteredColumns = useMemo(
+    () => cncOriginalView
+      ? cncActiveColumns
+      : filterCncTodayColumnsByOrders(cncActiveColumns, cncOrderFilters),
+    [cncOriginalView, cncActiveColumns, cncOrderFilterKey],
+  );
+  const preservedCncBathCardId = viewState.cncCardKind === 'bath'
+    ? viewState.cncCardId
+    : undefined;
+  const cncFilteredColumns = useMemo(
+    () =>
+      !cncOriginalView && cncBathsRequireMachineFiles
+        ? filterCncBathColumnsByMachineOrderMatches(cncOrderFilteredColumns, preservedCncBathCardId)
+        : cncOrderFilteredColumns,
+    [cncBathsRequireMachineFiles, cncOrderFilteredColumns, cncOriginalView, preservedCncBathCardId],
+  );
+  const cncVisibleOrderIds = useMemo(
+    () => new Set(collectCncOrderIds(cncFilteredColumns)),
+    [cncFilteredColumns],
+  );
+  const cncVisibleOrderStatusCards = useMemo(
+    () => cncOrderStatusCards.filter((card) => cncVisibleOrderIds.has(card.orderId)),
+    [cncOrderStatusCards, cncVisibleOrderIds],
+  );
+  const cncDisplayOrderStatusCards = useMemo(
+    () => !cncOriginalView && viewState.cncPlannedTodayOnly
+      ? filterCncOrderCardsByPlannedOrderDate(
+          cncVisibleOrderStatusCards,
+          cncPlannedTodayDate,
+        )
+      : cncVisibleOrderStatusCards,
+    [
+      cncVisibleOrderStatusCards,
+      cncPlannedTodayDate,
+      cncOriginalView,
+      viewState.cncPlannedTodayOnly,
     ],
   );
   // Planned date affects visibility only. Lifecycle placement and readiness keep
@@ -1583,13 +1581,13 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const cncPlannedDateColumns = useMemo(
     () => !cncOriginalView && viewState.cncPlannedTodayOnly
       ? filterCncTodayColumnsByPlannedOrderDate(
-          cncActiveColumns,
+          cncFilteredColumns,
           cncOrderStatusCards,
           cncPlannedTodayDate,
         )
-      : cncActiveColumns,
+      : cncFilteredColumns,
     [
-      cncActiveColumns,
+      cncFilteredColumns,
       cncOrderStatusCards,
       cncPlannedTodayDate,
       cncOriginalView,
@@ -8442,19 +8440,6 @@ export function buildCncOrderStatusBoardRequestKey(
 ): string {
   const normalizedOrderIds = [...new Set(orderIds)].sort((left, right) => left - right);
   return `${sortPreference.sortBy}|${sortPreference.sortOrder}|${normalizedOrderIds.join(',')}`;
-}
-
-function collectCncOrderStatusBoardIds(
-  columns: CncTelegramTodayColumn[],
-  viewState: OrderStatusBoardViewState,
-  bathsRequireMachineFiles: boolean,
-): number[] {
-  const filteredByOrder = filterCncTodayColumnsByOrders(columns, viewState.cncOrderFilters);
-  const preservedBathCardId = viewState.cncCardKind === 'bath' ? viewState.cncCardId : undefined;
-  const filteredColumns = bathsRequireMachineFiles
-    ? filterCncBathColumnsByMachineOrderMatches(filteredByOrder, preservedBathCardId)
-    : filteredByOrder;
-  return collectCncOrderIds(filteredColumns);
 }
 
 function chunkCncOrderIds(orderIds: readonly number[]): number[][] {

@@ -59,6 +59,69 @@ import {
 } from './model';
 
 describe('order status board model', () => {
+  it.each(['packet', 'bazisCutSet'] as const)(
+    'keeps a mixed order ready when search hides its manually cut %s source',
+    (sourceKind) => {
+      const mixed = cncPacket('mixed', ['2706', '2707'], [2706, 2707], [2706, 2707], [101, 201]);
+      const hiddenPacket = cncPacket('only-b', ['2707'], [2707], [2707], [202]);
+      const hiddenSet = cncBazisCutSet(9001, [{ orderName: '2707', orderId: 2707, detailId: 202 }]);
+      const columns: CncTelegramTodayColumn[] = [
+        { key: 'completed', title: 'Распилено', total: 1, packets: [mixed], baths: [], bazisCutSets: [] },
+        {
+          key: 'parsed', title: 'Файлы на станке', total: 2,
+          packets: [cncPacket('only-c', ['2708'], [2708]), ...(sourceKind === 'packet' ? [hiddenPacket] : [])],
+          bazisCutSets: sourceKind === 'bazisCutSet' ? [hiddenSet] : [], baths: [],
+        },
+      ];
+      const moves: CncBoardManualMoveState = {
+        [cncManualMoveStorageKey(sourceKind, sourceKind === 'packet' ? 'only-b' : '9001')]: 'completed',
+      };
+      const orderCards = [card(2706, { partsCount: 1 }), card(2707, { partsCount: 2 }), card(2708, { partsCount: 1 })];
+      const before = JSON.stringify(columns);
+      const activeColumns = applyMdfBoardHiddenCardRulesToColumns(columns, orderCards, null, new Set(), new Set());
+      const readiness = buildCncOrderReadiness(applyCncManualMovesToColumns(activeColumns, moves), {});
+      const visibleColumns = filterCncTodayColumnsByOrders(activeColumns, ['2706']);
+      const visibleIds = collectCncOrderIds(visibleColumns);
+      const visibleCards = orderCards.filter((order) => visibleIds.includes(order.orderId));
+      const result = splitCncOrderCardsByManualColumn(visibleCards, readiness, moves);
+
+      expect(collectCncOrderIds(activeColumns)).toEqual([2706, 2707, 2708]);
+      expect(visibleIds).toEqual([2706, 2707]);
+      expect(visibleColumns[0].packets).toEqual([mixed]);
+      expect(visibleColumns[0].packets[0].items).toHaveLength(2);
+      expect(visibleColumns[1].total).toBe(0);
+      expect(result.orders_ready.find(({ card: order }) => order.orderId === 2707)?.readiness).toEqual({
+        totalDetails: 2, cutDetails: 2, rolledDetails: 0, remainingDetails: 0,
+      });
+      expect(result.orders_ready).toEqual(
+        splitCncOrderCardsByManualColumn(orderCards, readiness, moves).orders_ready,
+      );
+      // Original failure: computing from visible columns loses B's second source.
+      const truncated = splitCncOrderCardsByManualColumn(visibleCards,
+        buildCncOrderReadiness(applyCncManualMovesToColumns(visibleColumns, moves), {}), moves);
+      expect(truncated.orders.find(({ card: order }) => order.orderId === 2707)?.readiness.remainingDetails).toBe(1);
+      expect(JSON.stringify(columns)).toBe(before);
+    },
+  );
+
+  it('keeps historical rolled quantities when search hides the matching bath fact', () => {
+    const mixed = cncPacket('mixed-history', ['2706', '2707'], [2706, 2707], [2706, 2707], [101, 201]);
+    mixed.items[1].quantity = 2;
+    const columns: CncTelegramTodayColumn[] = [
+      { key: 'completed', title: 'Распилено', total: 1, packets: [mixed], baths: [], bazisCutSets: [] },
+    ];
+    const facts = [{ bathCardId: 'old-b', forced: false,
+      items: [{ orderId: 2707, orderName: '2707', detailId: 201, detailNumber: 1, quantity: 1 }] }];
+    const cards = [card(2706, { partsCount: 1 }), card(2707, { partsCount: 2 })];
+    const visibleIds = collectCncOrderIds(filterCncTodayColumnsByOrders(columns, ['2706']));
+    const result = splitCncOrderCardsByManualColumn(cards.filter((order) => visibleIds.includes(order.orderId)),
+      buildCncOrderReadiness(columns, {}, facts), {});
+    expect(result.orders_ready.find(({ card: order }) => order.orderId === 2707)?.readiness).toEqual({
+      totalDetails: 2, cutDetails: 1, rolledDetails: 1, remainingDetails: 0,
+    });
+    expect(filterCncHistoricalBathReadiness(facts, columns, ['2706'], false)).toEqual([]);
+  });
+
   it('prefetches orders of ordinary baths without machine files or BASIS cards', async () => {
     const bath = cncBath('cut-result:100', ['2706', '2707'], [2706, 2707]);
     const columns: CncTelegramTodayColumn[] = [{
