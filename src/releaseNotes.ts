@@ -30,6 +30,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-09-08",
+    title: "Бирки: печать доступной части комплекта",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Отсутствующее или устаревшее размещение детали на листе раскроя больше не блокирует бирки остальных деталей. Предпросмотр показывает пропущенные экземпляры и причины; нумерация учитывает только доступные бирки.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-09-07",
     title: "МДФ-работы: суммарный объём распила",
     services: ["ERP", "Cutting"],

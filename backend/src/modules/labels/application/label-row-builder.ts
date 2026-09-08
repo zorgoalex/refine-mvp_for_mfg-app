@@ -147,6 +147,32 @@ export function hashLabelRows(rows: LabelRow[]): string {
   return createHash('sha256').update(JSON.stringify(rows)).digest('hex');
 }
 
+/** Re-evaluate formulas after selecting/renumbering printable rows. Preserve manual
+ * overrides and the original detail collection used by aggregate expressions. */
+export function refreshLabelRowCustomFields(
+  rows: LabelRow[],
+  template: Pick<LabelTemplateDto, 'customFieldSchema'>,
+  details: OrderLabelDataDetailDto[],
+  useBasisFields: boolean,
+): LabelRow[] {
+  const detailById = new Map(details.map((detail) => [detail.detailId, detail]));
+  const collection = details.map((detail) => buildBaseValues(
+    readOrderNameFromFields(detail.orderFields), detail.orderFields, detail, useBasisFields,
+  ));
+  const context: LabelCustomExpressionContext = {
+    getCollectionValues: (source, fieldId) => (
+      source === 'order.details' ? collection.map((values) => values[fieldId] ?? null) : undefined
+    ),
+  };
+  return rows.map((row) => {
+    const detail = detailById.get(row.detailId);
+    if (!detail) throw new Error('Label detail snapshot missing while refreshing custom fields');
+    const values = { ...row.values };
+    applyCustomFieldValues(values, template.customFieldSchema, detail.customFields, context);
+    return { ...row, values };
+  });
+}
+
 function buildBaseValues(
   orderName: string | null,
   orderFields: Record<string, unknown>,
