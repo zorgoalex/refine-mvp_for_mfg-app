@@ -1,3 +1,4 @@
+import { useSvgUploadDetailValidation } from './useSvgUploadDetailValidation';
 import { svgUploadOrderNames } from './svgUploadOrderNames';
 import { Tooltip } from '../../ui/tooltipDelay';
 import { useOwnedObjectUrlState } from './useOwnedObjectUrlState';
@@ -142,8 +143,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   const [selectedOrderIds, setSelectedOrderIds] = useState<number[]>(defaultOrderIds);
   const [orderOptions, setOrderOptions] = useState<OrderOption[]>(defaultOrderOptions);
   const [orderSearchLoading, setOrderSearchLoading] = useState(false);
-  const [eligibleDetails, setEligibleDetails] = useState<EligibleDetailDto[]>([]);
-  const [eligibleLoading, setEligibleLoading] = useState(false);
+  const [sourceOrderLookupLoading, setSourceOrderLookupLoading] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [telegramMessage, setTelegramMessage] = useState('');
   const [sendToTelegram, setSendToTelegram] = useState(true);
@@ -195,27 +195,15 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     return () => { cancelled = true; };
   }, [open]);
 
-  useEffect(() => {
-    if (!open || informationalUpload || selectedOrderIds.length === 0 || !parsed?.cutLayout.items.length) {
-      setEligibleDetails([]);
-      return;
-    }
-    let cancelled = false;
-    setEligibleLoading(true);
-    cutApi.listEligibleDetailsPreview({ orderIds: selectedOrderIds })
-      .then((response) => {
-        if (!cancelled) setEligibleDetails(response.details);
-      })
-      .catch(() => {
-        if (!cancelled) setEligibleDetails([]);
-      })
-      .finally(() => {
-        if (!cancelled) setEligibleLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [informationalUpload, open, parsed, selectedOrderIds]);
+  const detailValidation = useSvgUploadDetailValidation({
+    enabled: open && !informationalUpload && !parsing && !sourceOrderLookupLoading
+      && Boolean(parsed?.cutLayout.items.length),
+    sourceKey: parsed?.svgContentHash ?? null,
+    orderIds: selectedOrderIds,
+  });
+  const eligibleLoading = !informationalUpload
+    && (parsing || sourceOrderLookupLoading || detailValidation.status === 'loading');
+  const eligibleDetails = detailValidation.details;
 
   const orderPresetText = useMemo(() => {
     const labels = selectedOrderIds
@@ -231,9 +219,9 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
 
   const matchProblems = useMemo(() => {
     if (informationalUpload) return [];
-    if (!parsed?.cutLayout.items.length || eligibleLoading) return [];
+    if (!parsed?.cutLayout.items.length || detailValidation.status !== 'ready') return [];
     return buildSvgMatchProblems(parsed.cutLayout.items, eligibleDetails);
-  }, [eligibleDetails, eligibleLoading, informationalUpload, parsed]);
+  }, [eligibleDetails, detailValidation.status, informationalUpload, parsed]);
 
   const blockingMatchProblems = useMemo(
     () => matchProblems.filter((problem) => problem.severity === 'error'),
@@ -260,7 +248,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
 
   const matchSummary = useMemo(() => {
     if (informationalUpload) return null;
-    if (!parsed?.cutLayout.items.length) return null;
+    if (!parsed?.cutLayout.items.length || detailValidation.status !== 'ready') return null;
     const unmatched = blockingMatchProblems.reduce((sum, problem) => sum + Math.max(1, problem.quantity), 0);
     const matched = parsed.cutLayout.items.length - unmatched;
     return {
@@ -268,7 +256,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       total: parsed.cutLayout.items.length,
       unmatched,
     };
-  }, [blockingMatchProblems, informationalUpload, parsed]);
+  }, [blockingMatchProblems, detailValidation.status, informationalUpload, parsed]);
 
   const uploadProps: UploadProps = {
     accept: '.svg,image/svg+xml',
@@ -282,9 +270,9 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       fileParseGeneration.current += 1;
       setParsing(false);
       setOrderSearchLoading(false);
+      setSourceOrderLookupLoading(false);
       setParsed(null);
       replaceSvgPreview(null);
-      setEligibleDetails([]);
       setSelectedOrderIds(defaultOrderIds);
       setOrderOptions(defaultOrderOptions);
       setRequestedCutJobId(null);
@@ -344,6 +332,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     fileParseGeneration.current += 1;
     setParsing(false);
     setOrderSearchLoading(false);
+    setSourceOrderLookupLoading(false);
     setParsed(null);
     setCommentText('');
     setTelegramMessage('');
@@ -357,7 +346,6 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     setRequestedCutJobId(null);
     setCutJobNumberCheck(EMPTY_CUT_JOB_NUMBER_CHECK);
     setRework(false);
-    setEligibleDetails([]);
     replaceSvgPreview(null);
   }, [replaceSvgPreview]);
 
@@ -407,8 +395,10 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       message.warning('Укажите заказы для раскроя');
       return;
     }
-    if (!lenientValidation && !informationalUpload && eligibleLoading) {
-      message.warning('Дождитесь проверки деталей выбранных заказов');
+    if (!lenientValidation && !informationalUpload && detailValidation.status !== 'ready') {
+      message.warning(detailValidation.status === 'error'
+        ? 'Не удалось проверить детали выбранных заказов. Повторите загрузку файла.'
+        : 'Дождитесь проверки деталей выбранных заказов');
       return;
     }
     if (!lenientValidation && !informationalUpload && blockingMatchProblems.length > 0) {
@@ -543,7 +533,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     matchSummary,
     blockingMatchProblems,
     warningMatchProblems,
-    eligibleLoading,
+    detailValidation.status,
     informationalUpload,
     navigate,
     onClose,
@@ -567,6 +557,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     const generation = ++fileParseGeneration.current;
     setParsed(null);
     setOrderSearchLoading(false);
+    setSourceOrderLookupLoading(false);
     setParsing(true);
     setSvgSourceFile(null);
     setGcodeSourceFile(null);
@@ -621,7 +612,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   }
 
   async function applyFileNameOrderHints(orderNames: string[], generation: number) {
-    setOrderSearchLoading(true);
+    setSourceOrderLookupLoading(true);
     try {
       const lookup = await findOrdersByFileNameHints(orderNames);
       if (generation !== fileParseGeneration.current) return;
@@ -636,7 +627,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     } catch {
       if (generation === fileParseGeneration.current) message.warning('Не удалось найти заказы из SVG');
     } finally {
-      if (generation === fileParseGeneration.current) setOrderSearchLoading(false);
+      if (generation === fileParseGeneration.current) setSourceOrderLookupLoading(false);
     }
   }
 
@@ -644,7 +635,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   const orderDetailMatchLoading = !informationalUpload && eligibleLoading;
   const strictSvgValidationBlocked = !lenientValidation && parsed !== null && parsed.cutLayout.status !== 'valid';
   const noRecognizedSvgItems = parsed !== null && (parsed.cutLayout.items.length === 0 || parsed.items.length === 0);
-  const orderDetailMatchSubmitBlocked = !lenientValidation && orderDetailMatchLoading;
+  const orderDetailMatchSubmitBlocked = !lenientValidation && !informationalUpload && detailValidation.status !== 'ready';
   const floatingPreview = svgPreview && svgPreviewExpanded ? (
     <FloatingSvgPreview
       preview={svgPreview}
@@ -732,6 +723,13 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
             />
           )}
 
+          {detailValidation.status === 'error' && (
+            <Alert type="warning" showIcon
+              message="Не удалось проверить детали выбранных заказов"
+              description="Сопоставление не проверено. Повторите загрузку файла или продолжите в нестрогом режиме."
+            />
+          )}
+
           <Form layout="vertical">
             <Form.Item>
               <Checkbox
@@ -749,7 +747,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
                 filterOption={false}
                 value={selectedOrderIds}
                 options={orderOptions}
-                loading={orderSearchLoading}
+                loading={orderSearchLoading || sourceOrderLookupLoading}
                 onSearch={searchOrders}
                 onChange={(values) => setSelectedOrderIds(values)}
                 placeholder="Найдите заказ по номеру или названию"
@@ -1467,11 +1465,13 @@ function SvgValidationSummary({
             <Tag>{layout.partContourCount ?? 0} контуров</Tag>
             {lenientValidation && <Tag color="gold">нестрогий режим</Tag>}
             {informational && <Tag color="blue">без сверки ERP-деталей</Tag>}
-            {matchSummary && (
+            {eligibleLoading ? (
+              <Tag>проверка заказов...</Tag>
+            ) : matchSummary ? (
               <Tag color={matchSummary.unmatched ? 'orange' : 'green'}>
-                {eligibleLoading ? 'проверка заказов...' : `${matchSummary.matched}/${matchSummary.total} найдены в заказах`}
+                {`${matchSummary.matched}/${matchSummary.total} найдены в заказах`}
               </Tag>
-            )}
+            ) : null}
           </Space>
           {informational && valid && (
             <Typography.Text type="secondary">
