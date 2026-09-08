@@ -54,9 +54,15 @@ export interface VisualDetailLabel {
   rawLines: string[];
 }
 
+export interface SvgPreviewOnlyContour extends PartContourGeometry {
+  labelLines: string[];
+}
+
 export interface ParsedSvgUpload {
   fileName: string;
   svgContentHash: string;
+  /** Safe physical contours excluded from business import, retained only for display. */
+  previewOnlyContours?: SvgPreviewOnlyContour[];
   cutLayout: CncTelegramCutLayout;
   items: CncTelegramManualSvgUploadRequest['items'];
 }
@@ -258,9 +264,23 @@ export function parseSvgCutUploadText(
     acceptedItemCount: builtLayout.layoutItems.length,
     items: builtLayout.layoutItems,
   };
+  const acceptedContourIds = new Set(cutLayout.items.map((item) => item.sourceElementId));
+  const previewTextLines = collectVisualTextLines(root, vbMinX, vbMinY, scaleX, scaleY);
+  const previewOnlyContours = selectedContours
+    .filter((contour) => !acceptedContourIds.has(contour.elementId))
+    .map((contour) => ({
+      ...contour,
+      labelLines: previewTextLines
+        .filter((line) => line.xMm >= contour.xMm && line.xMm <= contour.xMm + contour.placedWidthMm &&
+          line.yMm >= contour.yMm && line.yMm <= contour.yMm + contour.placedHeightMm)
+        .sort((a, b) => a.yMm - b.yMm || a.xMm - b.xMm)
+        .slice(0, 4)
+        .map((line) => line.text.slice(0, 200)),
+    }));
   return {
     fileName,
     cutLayout,
+    previewOnlyContours,
     items: layoutItemsToRequestItems(cutLayout),
   };
 }

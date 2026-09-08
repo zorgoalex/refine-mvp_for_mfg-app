@@ -234,7 +234,9 @@ export interface ManualSvgSheetLayout {
   sheet: { widthMm: number; heightMm: number } | null;
   items: Array<{
     orderName: string;
-    detailNumber: number;
+    detailNumber: number | null;
+    /** Display-only source text; never used for business identity or matching. */
+    labelLines?: string[];
     widthMm: number;
     heightMm: number;
     xMm: number;
@@ -301,6 +303,7 @@ export function buildManualSvgSheetSvg(
     renderStyle,
     labelFor: (piece) => {
       const item = itemById.get(piece.item_id);
+      if (item?.labelLines?.length) return item.labelLines;
       return composePieceLabelLines({
         orderId: null,
         orderName: item?.orderName ?? null,

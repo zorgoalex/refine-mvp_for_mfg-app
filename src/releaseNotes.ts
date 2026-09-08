@@ -31,6 +31,14 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-09-08",
+    title: "SVG: все безопасные контуры в превью загрузки",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: ["Детали с нечитаемой или нечисловой позицией сохраняют контур и исходную надпись в превью. Предупреждение остаётся; выдуманные номера позиций не добавляются в импорт."],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-09-08",
     title: "МДФ: ванны без обязательной связи с файлами",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

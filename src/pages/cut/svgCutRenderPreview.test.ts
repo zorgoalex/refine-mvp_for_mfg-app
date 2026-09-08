@@ -54,6 +54,21 @@ describe('buildStyledSvgUploadPreview', () => {
     expect(rendered.indexOf('>2724</tspan>')).toBeGreaterThan(labelLayer);
   });
 
+  it('escapes preview-only labels and never adds their identity to accepted items', () => {
+    const parsed = parsedUpload();
+    parsed.previewOnlyContours = [{
+      elementId: 'unknown-PartContour', xMm: 10, yMm: 400,
+      placedWidthMm: 300, placedHeightMm: 200,
+      labelLines: ['2885', '# <Test> " & onload="alert(1)"', '300*200'],
+    }];
+    const rendered = buildStyledSvgUploadPreview(parsed) ?? '';
+    expect(rendered).toContain('# &lt;Test&gt; &quot; &amp; onload=&quot;alert(1)&quot;');
+    expect(rendered).not.toContain('<Test>');
+    expect(rendered).not.toContain(' onload="');
+    expect(parsed.cutLayout.items).toHaveLength(2);
+    expect(parsed.items).toEqual([]);
+  });
+
   it('uses custom render.styles values in the local upload preview', () => {
     const setting = {
       ...DEFAULT_CUT_RENDER_STYLES_SETTING,

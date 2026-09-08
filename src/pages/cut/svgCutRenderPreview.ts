@@ -3,7 +3,7 @@ import {
   resolveCutRenderStyleFromSetting,
   type CutRenderStylesSetting,
 } from '@shared/cut-render-style';
-import { buildManualSvgSheetSvg } from '../../../backend/src/modules/cut/render/sheet-svg';
+import { buildManualSvgSheetSvg, type ManualSvgSheetLayout } from '../../../backend/src/modules/cut/render/sheet-svg';
 import type { CncTelegramCutLayout } from '../../api/types/cncTelegramApi.types';
 import type { ParsedSvgUpload } from './svgCutUploadParser';
 
@@ -19,11 +19,29 @@ export function buildStyledSvgUploadPreview(
   parsed: ParsedSvgUpload,
   renderStylesSetting?: CutRenderStylesSetting | null,
 ): string | null {
-  return buildStyledCutLayoutPreview(parsed.cutLayout, renderStylesSetting);
+  const previewOnlyItems = (parsed.previewOnlyContours ?? []).map((contour) => ({
+    ...contour,
+    orderName: 'Не распознано',
+    detailNumber: null,
+    widthMm: Math.max(contour.placedWidthMm, contour.placedHeightMm),
+    heightMm: Math.min(contour.placedWidthMm, contour.placedHeightMm),
+    rotated: false,
+  }));
+  return renderStyledLayout({
+    sheet: parsed.cutLayout.sheet,
+    items: [...parsed.cutLayout.items, ...previewOnlyItems],
+  }, renderStylesSetting);
 }
 
 export function buildStyledCutLayoutPreview(
   layout: CncTelegramCutLayout,
+  renderStylesSetting?: CutRenderStylesSetting | null,
+): string | null {
+  return renderStyledLayout(layout, renderStylesSetting);
+}
+
+function renderStyledLayout(
+  layout: ManualSvgSheetLayout,
   renderStylesSetting?: CutRenderStylesSetting | null,
 ): string | null {
   const renderStyle = resolveCutRenderStyleFromSetting(
