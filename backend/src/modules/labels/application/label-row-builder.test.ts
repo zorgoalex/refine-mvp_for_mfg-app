@@ -1,8 +1,35 @@
 import { describe, expect, it } from 'vitest';
-import { buildLabelRows, hashLabelRows } from './label-row-builder';
+import { buildLabelRows, hashLabelRows, refreshLabelRowCustomFields } from './label-row-builder';
 import type { OrderLabelDataDetailDto } from './labels.types';
 
 describe('label row builder', () => {
+  it('refreshes counter formulas after omissions while preserving manual values and aggregate scope', () => {
+    const template = { customFieldSchema: {
+      'custom.counter': expressionSchema({ type: 'field', field: 'label.counter_text' }),
+      'custom.dependent': expressionSchema({ type: 'field', field: 'custom.counter' }),
+      'custom.manual': expressionSchema({ type: 'field', field: 'label.counter_text' }),
+      'custom.edges': expressionSchema({
+        type: 'aggregate', source: 'order.details', field: 'detail.edge_type_name',
+        fn: 'unique_join', separator: ', ',
+      }),
+    } };
+    const details = [
+      detail({ detailId: 101, detailFields: { edge_type_name: 'ПВХ' } }),
+      detail({ detailId: 102, detailFields: { edge_type_name: 'ABS' }, customFields: { 'custom.manual': null } }),
+    ];
+    const original = buildLabelRows({ orderName: null, template, details });
+    const [row] = refreshLabelRowCustomFields([{
+      ...original[1], rowIndex: 1, values: {
+        ...original[1].values, 'label.counter': 1, 'label.counter_total': 1, 'label.counter_text': 'Бир. № 1 / 1',
+      },
+    }], template, details, true);
+    expect(row.values).toMatchObject({
+      'custom.counter': 'Бир. № 1 / 1', 'custom.dependent': 'Бир. № 1 / 1',
+      'custom.manual': null, 'custom.edges': 'ПВХ, ABS',
+    });
+    expect(original[1].values['custom.counter']).toBe('Бир. № 2 / 2');
+  });
+
   it('expands quantity into physical label rows and dynamic counters', () => {
     const rows = buildLabelRows({
       orderName: '8602',

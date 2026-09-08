@@ -249,8 +249,17 @@ export interface OrderLabelsPreviewDto {
   previewToken: string;
 }
 
+export interface SkippedLabelRowDto {
+  detailId: number;
+  orderId: number;
+  copyIndex: number;
+  code: string;
+  message: string;
+}
+
 export interface DetailLabelsPreviewDto {
   generationScope: 'details';
+  skippedRows?: SkippedLabelRowDto[];
   templateId: number;
   templateVersion: number;
   labelCount: number;
