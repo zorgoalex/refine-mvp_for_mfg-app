@@ -29,6 +29,20 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION,
+    date: "2026-09-08",
+    title: "WhatsApp: управление ботом внутри ERP",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "В конфигурации появились отдельные вкладки подключения WhatsApp и управления сообщениями, ключевыми словами, правилами, очередью и аудитом.",
+      "Внутренний WAHA GOWS запускается отдельным production-профилем без публичного порта; доступ и опасные действия защищены отдельными правами.",
+    ],
+    changed: [
+      "Отправка включается отдельно после QR-pairing и canary-проверки; неоднозначные доставки не повторяются автоматически.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-09-08",
     title: "МДФ: поиск не меняет готовность заказов",
     services: ["ERP"], repositories: ["repo_erp"],

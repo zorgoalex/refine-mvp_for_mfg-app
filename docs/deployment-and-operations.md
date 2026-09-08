@@ -202,6 +202,14 @@ READINESS_REQUIRE_REDIS=true
 Для managed Redis/Valkey локальный Compose service не нужен; используйте
 `RATE_LIMIT_REDIS_URL` либо `REDIS_URL`.
 
+## WhatsApp / WAHA
+
+WAHA запускается opt-in profile `whatsapp`, доступен только backend-у и имеет
+отдельную egress-сеть. Сообщения, ключевые слова, правила, очередь и аудит
+управляются двумя permission-filtered вкладками основной ERP-конфигурации.
+Полный порядок backup → migration 152 → pairing → canary → relay описан в
+[WhatsApp production runbook](whatsapp-production-runbook.md).
+
 ## PostgreSQL bind
 
 Bind address задаётся `PG_TAILSCALE_BIND_IP`, затем fallback

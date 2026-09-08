@@ -166,9 +166,11 @@ describe('backend env validation', () => {
   });
 
   it('normalizes and validates the immutable backend build identity', () => {
-    expect(validateEnv({
-      BACKEND_BUILD_SHA: 'A154FEF554948D9643630A827CB1AA4795117E54',
-    })).toMatchObject({
+    expect(
+      validateEnv({
+        BACKEND_BUILD_SHA: 'A154FEF554948D9643630A827CB1AA4795117E54',
+      }),
+    ).toMatchObject({
       BACKEND_BUILD_SHA: 'a154fef554948d9643630a827cb1aa4795117e54',
     });
     expect(() => validateEnv({ BACKEND_BUILD_SHA: 'latest' })).toThrow(/BACKEND_BUILD_SHA/);
@@ -242,7 +244,7 @@ describe('backend env validation', () => {
       BACKEND_ENABLE_AUTH: true,
       JWT_ACCESS_SECRET: 'x'.repeat(32),
       REFRESH_TOKEN_PEPPER: 'y'.repeat(32),
-      });
+    });
   });
 
   it('validates Redis-backed rate limit runtime settings', () => {
@@ -456,7 +458,9 @@ describe('backend env validation', () => {
         BACKEND_ENABLE_VLM: 'true',
         BACKEND_VLM_DISABLED: 'false',
       }),
-    ).toThrow(/DATABASE_URL.*VLM_API_URL.*AUTH0_M2M_DOMAIN.*AUTH0_M2M_CLIENT_ID.*AUTH0_M2M_CLIENT_SECRET.*AUTH0_M2M_AUDIENCE/);
+    ).toThrow(
+      /DATABASE_URL.*VLM_API_URL.*AUTH0_M2M_DOMAIN.*AUTH0_M2M_CLIENT_ID.*AUTH0_M2M_CLIENT_SECRET.*AUTH0_M2M_AUDIENCE/,
+    );
 
     expect(
       validateEnv({
@@ -590,21 +594,27 @@ describe('backend env validation', () => {
   });
 
   it('requires DATABASE_URL when Basis-cut sets are enabled', () => {
-    expect(() => validateEnv({ BACKEND_ENABLE_BAZIS_CUT: 'true' }))
-      .toThrow(/DATABASE_URL is required when BACKEND_ENABLE_BAZIS_CUT is true/);
-    expect(validateEnv({
-      BACKEND_ENABLE_BAZIS_CUT: 'true',
-      DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
-    })).toMatchObject({ BACKEND_ENABLE_BAZIS_CUT: true });
+    expect(() => validateEnv({ BACKEND_ENABLE_BAZIS_CUT: 'true' })).toThrow(
+      /DATABASE_URL is required when BACKEND_ENABLE_BAZIS_CUT is true/,
+    );
+    expect(
+      validateEnv({
+        BACKEND_ENABLE_BAZIS_CUT: 'true',
+        DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
+      }),
+    ).toMatchObject({ BACKEND_ENABLE_BAZIS_CUT: true });
   });
 
   it('requires DATABASE_URL when CNC Telegram ingest is enabled', () => {
-    expect(() => validateEnv({ BACKEND_ENABLE_CNC_TELEGRAM: 'true' }))
-      .toThrow(/DATABASE_URL is required when BACKEND_ENABLE_CNC_TELEGRAM is true/);
-    expect(validateEnv({
-      BACKEND_ENABLE_CNC_TELEGRAM: 'true',
-      DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
-    })).toMatchObject({ BACKEND_ENABLE_CNC_TELEGRAM: true });
+    expect(() => validateEnv({ BACKEND_ENABLE_CNC_TELEGRAM: 'true' })).toThrow(
+      /DATABASE_URL is required when BACKEND_ENABLE_CNC_TELEGRAM is true/,
+    );
+    expect(
+      validateEnv({
+        BACKEND_ENABLE_CNC_TELEGRAM: 'true',
+        DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
+      }),
+    ).toMatchObject({ BACKEND_ENABLE_CNC_TELEGRAM: true });
   });
 
   it('requires complete Bitrix24 configuration when CRM sync is enabled', () => {
@@ -631,14 +641,18 @@ describe('backend env validation', () => {
   });
 
   it('keeps the Bitrix24 HTTP timeout below the writer lease', () => {
-    expect(() => validateEnv({
-      BACKEND_BITRIX24_SYNC_LEASE_MS: '60000',
-      BITRIX24_REQUEST_TIMEOUT_MS: '60000',
-    })).toThrow(/BITRIX24_REQUEST_TIMEOUT_MS/);
-    expect(validateEnv({
-      BACKEND_BITRIX24_SYNC_LEASE_MS: '60000',
-      BITRIX24_REQUEST_TIMEOUT_MS: '30000',
-    })).toMatchObject({
+    expect(() =>
+      validateEnv({
+        BACKEND_BITRIX24_SYNC_LEASE_MS: '60000',
+        BITRIX24_REQUEST_TIMEOUT_MS: '60000',
+      }),
+    ).toThrow(/BITRIX24_REQUEST_TIMEOUT_MS/);
+    expect(
+      validateEnv({
+        BACKEND_BITRIX24_SYNC_LEASE_MS: '60000',
+        BITRIX24_REQUEST_TIMEOUT_MS: '30000',
+      }),
+    ).toMatchObject({
       BACKEND_BITRIX24_SYNC_LEASE_MS: 60000,
       BITRIX24_REQUEST_TIMEOUT_MS: 30000,
     });
@@ -651,10 +665,12 @@ describe('backend env validation', () => {
       BITRIX24_QUERY_LIMIT_BASE_DELAY_MS: 1000,
       BITRIX24_OPERATION_LIMIT_FALLBACK_MS: 60000,
     });
-    expect(() => validateEnv({ BITRIX24_MAX_REQUESTS_PER_SECOND: '6' }))
-      .toThrow(/BITRIX24_MAX_REQUESTS_PER_SECOND/);
-    expect(() => validateEnv({ BITRIX24_LIMIT_RETRY_MAX_ATTEMPTS: '21' }))
-      .toThrow(/BITRIX24_LIMIT_RETRY_MAX_ATTEMPTS/);
+    expect(() => validateEnv({ BITRIX24_MAX_REQUESTS_PER_SECOND: '6' })).toThrow(
+      /BITRIX24_MAX_REQUESTS_PER_SECOND/,
+    );
+    expect(() => validateEnv({ BITRIX24_LIMIT_RETRY_MAX_ATTEMPTS: '21' })).toThrow(
+      /BITRIX24_LIMIT_RETRY_MAX_ATTEMPTS/,
+    );
   });
 
   it('keeps Bitrix24 reverse sync disabled and validates complete local-app config', () => {
@@ -685,51 +701,64 @@ describe('backend env validation', () => {
       BITRIX24_APP_CLIENT_ID: 'local.erp',
       BITRIX24_PORTAL_TIMEZONE: 'Asia/Almaty',
     });
-    expect(() => validateEnv({
-      ...complete,
-      BITRIX24_APP_TOKEN_ENCRYPTION_KEY: Buffer.alloc(31, 4).toString('base64'),
-    })).toThrow(/BITRIX24_APP_TOKEN_ENCRYPTION_KEY/);
-    expect(() => validateEnv({
-      ...complete,
-      BITRIX24_APP_PORTAL_DOMAIN: 'other.bitrix24.kz',
-    })).toThrow(/BITRIX24_APP_PORTAL_DOMAIN/);
+    expect(() =>
+      validateEnv({
+        ...complete,
+        BITRIX24_APP_TOKEN_ENCRYPTION_KEY: Buffer.alloc(31, 4).toString('base64'),
+      }),
+    ).toThrow(/BITRIX24_APP_TOKEN_ENCRYPTION_KEY/);
+    expect(() =>
+      validateEnv({
+        ...complete,
+        BITRIX24_APP_PORTAL_DOMAIN: 'other.bitrix24.kz',
+      }),
+    ).toThrow(/BITRIX24_APP_PORTAL_DOMAIN/);
 
     for (const invalid of [
       { ...complete, BACKEND_ENABLE_ORDERS: 'false' },
       { ...complete, BACKEND_ORDERS_READ_ONLY: 'true' },
       { ...complete, BACKEND_ENABLE_PAYMENTS: 'false' },
     ]) {
-      expect(() => validateEnv(invalid)).toThrow(/backend order read\/write and payments ownership/);
+      expect(() => validateEnv(invalid)).toThrow(
+        /backend order read\/write and payments ownership/,
+      );
     }
   });
 
   it('pins WORKOS_API_BASE to workos.com over https (localhost http only for mocks)', () => {
-    expect(validateEnv({})).toMatchObject({ WORKOS_API_BASE: 'https://api.workos.com' });
-    expect(
-      validateEnv({ WORKOS_API_BASE: 'https://api.workos.com' }).WORKOS_API_BASE,
-    ).toBe('https://api.workos.com');
-    expect(
-      validateEnv({ WORKOS_API_BASE: 'http://localhost:8787' }).WORKOS_API_BASE,
-    ).toBe('http://localhost:8787');
+    expect(validateEnv({})).toMatchObject({
+      WORKOS_API_BASE: 'https://api.workos.com',
+    });
+    expect(validateEnv({ WORKOS_API_BASE: 'https://api.workos.com' }).WORKOS_API_BASE).toBe(
+      'https://api.workos.com',
+    );
+    expect(validateEnv({ WORKOS_API_BASE: 'http://localhost:8787' }).WORKOS_API_BASE).toBe(
+      'http://localhost:8787',
+    );
 
     // A loose value would be an open redirect AND would receive the client
     // secret + one-time code from the server-side exchange.
     expect(() => validateEnv({ WORKOS_API_BASE: 'https://evil.example.com' })).toThrow(
       /workos\.com/,
     );
-    expect(() => validateEnv({ WORKOS_API_BASE: 'http://api.workos.com' })).toThrow(
-      /workos\.com/,
-    );
+    expect(() => validateEnv({ WORKOS_API_BASE: 'http://api.workos.com' })).toThrow(/workos\.com/);
     expect(() => validateEnv({ WORKOS_API_BASE: 'https://api.workos.com.evil.example' })).toThrow(
       /workos\.com/,
     );
 
     // Loopback mocks are for local development only.
     expect(() =>
-      validateEnv({ NODE_ENV: 'production', FRONTEND_ORIGIN: 'https://app.example', WORKOS_API_BASE: 'http://localhost:8787' }),
+      validateEnv({
+        NODE_ENV: 'production',
+        FRONTEND_ORIGIN: 'https://app.example',
+        WORKOS_API_BASE: 'http://localhost:8787',
+      }),
     ).toThrow(/staging\/production/);
     expect(() =>
-      validateEnv({ NODE_ENV: 'staging', WORKOS_API_BASE: 'http://127.0.0.1:8787' }),
+      validateEnv({
+        NODE_ENV: 'staging',
+        WORKOS_API_BASE: 'http://127.0.0.1:8787',
+      }),
     ).toThrow(/staging\/production/);
   });
 
@@ -798,7 +827,9 @@ describe('backend env validation', () => {
 
   it('pins Telegram Bot API host and validates scheduler ownership', () => {
     expect(() =>
-      validateEnv({ TELEGRAM_NOTIFICATION_API_BASE: 'https://evil.example.com' }),
+      validateEnv({
+        TELEGRAM_NOTIFICATION_API_BASE: 'https://evil.example.com',
+      }),
     ).toThrow(/api\.telegram\.org/);
     expect(
       validateEnv({ TELEGRAM_NOTIFICATION_API_BASE: 'http://localhost:8788' })
@@ -813,8 +844,56 @@ describe('backend env validation', () => {
         TELEGRAM_NOTIFICATION_API_BASE: 'http://localhost:8788',
       }),
     ).toThrow(/staging\/production/);
+    expect(() => validateEnv({ BACKEND_TELEGRAM_NOTIFICATION_RELAY_OWNER: 'in_process' })).toThrow(
+      /BACKEND_ENABLE_TELEGRAM_NOTIFICATIONS=true/,
+    );
+  });
+
+  it('keeps WhatsApp fail-closed and validates complete worker ownership', () => {
+    expect(validateEnv({})).toMatchObject({
+      BACKEND_ENABLE_WHATSAPP: false,
+      BACKEND_WHATSAPP_RELAY_OWNER: 'none',
+      BACKEND_WHATSAPP_CLEANUP_OWNER: 'none',
+    });
+    expect(() => validateEnv({ BACKEND_ENABLE_WHATSAPP: 'true' })).toThrow(
+      /DATABASE_URL is required when BACKEND_ENABLE_WHATSAPP is true/,
+    );
+    expect(() => validateEnv({ BACKEND_WHATSAPP_RELAY_OWNER: 'in_process' })).toThrow(
+      /BACKEND_ENABLE_WHATSAPP=true/,
+    );
+
+    expect(
+      validateEnv({
+        BACKEND_ENABLE_WHATSAPP: 'true',
+        DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
+        WAHA_BASE_URL: 'http://waha:3000',
+        WAHA_API_KEY: 'a'.repeat(32),
+        WAHA_SESSION_NAME: 'default',
+        WAHA_WEBHOOK_HMAC_SECRET: 'b'.repeat(32),
+        BACKEND_WHATSAPP_RELAY_OWNER: 'in_process',
+        BACKEND_WHATSAPP_CLEANUP_OWNER: 'in_process',
+      }),
+    ).toMatchObject({
+      BACKEND_ENABLE_WHATSAPP: true,
+      WAHA_BASE_URL: 'http://waha:3000',
+      BACKEND_WHATSAPP_RELAY_OWNER: 'in_process',
+    });
+  });
+
+  it('requires a WhatsApp cleanup owner in staging and production', () => {
     expect(() =>
-      validateEnv({ BACKEND_TELEGRAM_NOTIFICATION_RELAY_OWNER: 'in_process' }),
-    ).toThrow(/BACKEND_ENABLE_TELEGRAM_NOTIFICATIONS=true/);
+      validateEnv({
+        NODE_ENV: 'staging',
+        FRONTEND_ORIGIN: 'https://app.example',
+        BACKEND_RATE_LIMIT_STORE: 'redis',
+        REDIS_URL: 'redis://localhost:6379',
+        BACKEND_ENABLE_WHATSAPP: 'true',
+        DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
+        WAHA_BASE_URL: 'http://waha:3000',
+        WAHA_API_KEY: 'a'.repeat(32),
+        WAHA_SESSION_NAME: 'default',
+        WAHA_WEBHOOK_HMAC_SECRET: 'b'.repeat(32),
+      }),
+    ).toThrow(/BACKEND_WHATSAPP_CLEANUP_OWNER must not be none/);
   });
 });

@@ -35,6 +35,8 @@ export interface FrontendFeatureFlags {
   enableLegacyHasura: boolean;
   /** Hybrid SSO login via WorkOS AuthKit; requires useBackendAuth. */
   workosAuth: boolean;
+  /** WhatsApp administration backed by ERP API and WAHA. */
+  useBackendWhatsApp: boolean;
 }
 
 type EnvSource = Record<string, string | boolean | undefined>;
@@ -68,6 +70,7 @@ export type RuntimeFeatureFlagSource = Partial<{
   enableLegacyHasura: string | boolean;
   legacyHasura: string | boolean;
   workosAuth: string | boolean;
+  backendWhatsApp: string | boolean;
 }>;
 
 export function getFeatureFlags(
@@ -79,20 +82,11 @@ export function getFeatureFlags(
   const envFlags: FrontendFeatureFlags = {
     useBackendAuth: readBooleanFlag(env.VITE_USE_BACKEND_AUTH, false),
     useBackendPermissions: readBooleanFlag(env.VITE_USE_BACKEND_PERMISSIONS, false),
-    useBackendOrdersRead: readBooleanFlag(
-      env.VITE_USE_BACKEND_ORDERS_READ,
-      legacyOrdersFlag,
-    ),
-    useBackendOrdersWrite: readBooleanFlag(
-      env.VITE_USE_BACKEND_ORDERS_WRITE,
-      legacyOrdersFlag,
-    ),
+    useBackendOrdersRead: readBooleanFlag(env.VITE_USE_BACKEND_ORDERS_READ, legacyOrdersFlag),
+    useBackendOrdersWrite: readBooleanFlag(env.VITE_USE_BACKEND_ORDERS_WRITE, legacyOrdersFlag),
     useBackendPayments: readBooleanFlag(env.VITE_USE_BACKEND_PAYMENTS, false),
     useBackendClientPhones: readBooleanFlag(env.VITE_USE_BACKEND_CLIENT_PHONES, false),
-    useBackendProductionActions: readBooleanFlag(
-      env.VITE_USE_BACKEND_PRODUCTION_ACTIONS,
-      false,
-    ),
+    useBackendProductionActions: readBooleanFlag(env.VITE_USE_BACKEND_PRODUCTION_ACTIONS, false),
     useBackendDeadlines: readBooleanFlag(env.VITE_USE_BACKEND_DEADLINES, false),
     useBackendOrderExport: readBooleanFlag(env.VITE_USE_BACKEND_ORDER_EXPORT, false),
     useBackendGroups: backendGroupsFlag,
@@ -112,6 +106,7 @@ export function getFeatureFlags(
     sheetMaterialsReads: readBooleanFlag(env.VITE_SHEET_MATERIALS_READS, false),
     enableLegacyHasura: readBooleanFlag(env.VITE_ENABLE_LEGACY_HASURA, true),
     workosAuth: readBooleanFlag(env.VITE_WORKOS_AUTH, false),
+    useBackendWhatsApp: readBooleanFlag(env.VITE_USE_BACKEND_WHATSAPP, false),
   };
 
   return mergeRuntimeFeatureFlags(envFlags, runtimeFeatures);
@@ -146,12 +141,12 @@ export function mergeRuntimeFeatureFlags(
       readOptionalBooleanFlag(runtimeFeatures.backendProductionActions) ??
       fallback.useBackendProductionActions,
     useBackendDeadlines:
-      readOptionalBooleanFlag(runtimeFeatures.backendDeadlines) ??
-      fallback.useBackendDeadlines,
+      readOptionalBooleanFlag(runtimeFeatures.backendDeadlines) ?? fallback.useBackendDeadlines,
     useBackendOrderExport:
       readOptionalBooleanFlag(runtimeFeatures.backendOrderExport) ?? fallback.useBackendOrderExport,
     useBackendGroups,
-    useBackendUsers: readOptionalBooleanFlag(runtimeFeatures.backendUsers) ?? fallback.useBackendUsers,
+    useBackendUsers:
+      readOptionalBooleanFlag(runtimeFeatures.backendUsers) ?? fallback.useBackendUsers,
     useBackendVlm: readOptionalBooleanFlag(runtimeFeatures.backendVlm) ?? fallback.useBackendVlm,
     useBackendReferences:
       readOptionalBooleanFlag(runtimeFeatures.backendReferences) ?? fallback.useBackendReferences,
@@ -165,10 +160,8 @@ export function mergeRuntimeFeatureFlags(
       readOptionalBooleanFlag(runtimeFeatures.statusAutomation) ?? fallback.statusAutomation,
     orderStatusBoard:
       readOptionalBooleanFlag(runtimeFeatures.orderStatusBoard) ?? fallback.orderStatusBoard,
-    orderRealtime:
-      readOptionalBooleanFlag(runtimeFeatures.orderRealtime) ?? fallback.orderRealtime,
-    cncTelegram:
-      readOptionalBooleanFlag(runtimeFeatures.cncTelegram) ?? fallback.cncTelegram,
+    orderRealtime: readOptionalBooleanFlag(runtimeFeatures.orderRealtime) ?? fallback.orderRealtime,
+    cncTelegram: readOptionalBooleanFlag(runtimeFeatures.cncTelegram) ?? fallback.cncTelegram,
     pdfImportLayoutPatterns:
       readOptionalBooleanFlag(runtimeFeatures.pdfImportLayoutPatterns) ??
       fallback.pdfImportLayoutPatterns,
@@ -181,6 +174,8 @@ export function mergeRuntimeFeatureFlags(
       readOptionalBooleanFlag(runtimeFeatures.legacyHasura) ??
       fallback.enableLegacyHasura,
     workosAuth: readOptionalBooleanFlag(runtimeFeatures.workosAuth) ?? fallback.workosAuth,
+    useBackendWhatsApp:
+      readOptionalBooleanFlag(runtimeFeatures.backendWhatsApp) ?? fallback.useBackendWhatsApp,
   });
 }
 
@@ -196,16 +191,13 @@ function enforceFrontendFeatureDependencies(flags: FrontendFeatureFlags): Fronte
 
   return {
     ...flags,
-    useBackendClientPhones:
-      flags.useBackendClientPhones && flags.useBackendProductionActions,
+    useBackendClientPhones: flags.useBackendClientPhones && flags.useBackendProductionActions,
     useBackendDeadlines:
       flags.useBackendDeadlines && flags.useBackendAuth && flags.useBackendOrdersRead,
     bazisCut: flags.bazisCut && flags.useBackendCut,
     orderStatusBoard: flags.orderStatusBoard && flags.useBackendOrdersRead,
-    orderRealtime:
-      flags.orderRealtime && flags.useBackendAuth && flags.useBackendOrdersRead,
-    cncTelegram:
-      flags.cncTelegram && flags.orderStatusBoard && flags.useBackendOrdersRead,
+    orderRealtime: flags.orderRealtime && flags.useBackendAuth && flags.useBackendOrdersRead,
+    cncTelegram: flags.cncTelegram && flags.orderStatusBoard && flags.useBackendOrdersRead,
     workosAuth: flags.workosAuth && flags.useBackendAuth,
   };
 }

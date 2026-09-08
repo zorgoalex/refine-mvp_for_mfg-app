@@ -21,6 +21,7 @@
     "orderRealtime": false,
     "cncTelegram": false,
     "enableLegacyHasura": true,
-    "workosAuth": false
+    "workosAuth": false,
+    "backendWhatsApp": false
   }
 }
