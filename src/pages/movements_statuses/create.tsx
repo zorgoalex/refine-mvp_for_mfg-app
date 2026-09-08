@@ -1,9 +1,10 @@
 import { Create, useForm } from "@refinedev/antd";
-import { IResourceComponentsProps } from "@refinedev/core";
+import type { BaseRecord, HttpError, IResourceComponentsProps } from "@refinedev/core";
+import type { MovementStatusFormValues } from "./formValues";
 import { Form, Input, InputNumber, Checkbox, message } from "antd";
 
 export const MovementStatusCreate: React.FC<IResourceComponentsProps> = () => {
-  const { formProps, saveButtonProps } = useForm();
+  const { formProps, saveButtonProps } = useForm<BaseRecord, HttpError, MovementStatusFormValues>();
 
   return (
     <Create saveButtonProps={saveButtonProps}>

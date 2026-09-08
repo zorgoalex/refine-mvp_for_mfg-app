@@ -1,9 +1,10 @@
 import { Create, useForm, useSelect } from "@refinedev/antd";
-import { IResourceComponentsProps } from "@refinedev/core";
+import type { BaseRecord, HttpError, IResourceComponentsProps } from "@refinedev/core";
+import type { MaterialTransactionTypeFormValues } from "./formValues";
 import { Form, Input, InputNumber, Checkbox, Select, message } from "antd";
 
 export const MaterialTransactionTypeCreate: React.FC<IResourceComponentsProps> = () => {
-  const { formProps, saveButtonProps } = useForm();
+  const { formProps, saveButtonProps } = useForm<BaseRecord, HttpError, MaterialTransactionTypeFormValues>();
 
   const { selectProps: directionSelectProps } = useSelect({
     resource: "transaction_direction",
