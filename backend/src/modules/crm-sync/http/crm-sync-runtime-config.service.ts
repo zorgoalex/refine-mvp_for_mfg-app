@@ -112,10 +112,11 @@ export class CrmSyncRuntimeConfigService {
   }
 
   isProductionInitializationReady(): boolean {
+    // Explicit CRM conversion owns deadline registration in its transaction.
+    // The generic order-save sync flag and background relays do not own it.
     return Boolean(
       this.config.get('BACKEND_ENABLE_DEADLINES', { infer: true }) &&
-      !this.config.get('BACKEND_DEADLINES_READ_ONLY', { infer: true }) &&
-      this.config.get('BACKEND_ENABLE_DEADLINE_ORDER_SYNC', { infer: true }),
+      !this.config.get('BACKEND_DEADLINES_READ_ONLY', { infer: true }),
     );
   }
 }
