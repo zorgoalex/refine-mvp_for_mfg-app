@@ -1286,7 +1286,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       //    order-before-detail lock discipline of the order-level production commands
       //    (changeProductionStatus / restoreAuto / enterManual / *FromDeadline), which all lock the
       //    order row (loadOrderForUpdate) before locking detail rows (loadDetailProductionStatusSnapshot).
-      //    See "Lock ordering" note below for the residual batch<->detail-stage debt.
+      //    Detail-stage activation follows the same parent-before-detail lock order.
       const order = await loadOrderForUpdate(tx, command.orderId);
       // Additive assigned-production-worker path (parity with the sibling production commands from
       // §7.1): a worker who is responsible_employee on an order_workshops row may act even without
@@ -2791,12 +2791,30 @@ async function loadOrderDetailForUpdate(
     JOIN orders o ON o.order_id = od.order_id
     WHERE od.detail_id = $1 AND COALESCE(od.delete_flag, false) = false
       AND o.delete_flag = false AND o.order_kind = 'production_order'
-    FOR UPDATE
+    FOR UPDATE OF o
     `,
     [detailId],
   );
   const row = result.rows[0];
   if (!row) {
+    throw new ProductionActionOrderDetailNotFoundError(detailId);
+  }
+
+  // Lock only the parent in the join above: locking both tables leaves their
+  // order to the query plan and can deadlock with order-level/payment commands.
+  // Recheck membership and deletion while taking the detail lock; the detail
+  // may have moved or disappeared since the parent lookup.
+  const detail = await tx.query<{ detail_id: string | number }>(
+    `
+    SELECT detail_id
+    FROM order_details
+    WHERE detail_id = $1 AND order_id = $2
+      AND COALESCE(delete_flag, false) = false
+    FOR UPDATE
+    `,
+    [detailId, row.order_id],
+  );
+  if (!detail.rows[0]) {
     throw new ProductionActionOrderDetailNotFoundError(detailId);
   }
 
@@ -3140,14 +3158,9 @@ async function runRecalcOrderProductionStatus(tx: TransactionClient, orderId: nu
 // the order-level production commands (changeProductionStatus / restoreAuto / enterManual /
 // *FromDeadline, which all loadOrderForUpdate then loadDetailProductionStatusSnapshot FOR UPDATE).
 //
-// Lock-ordering debt: the detail-stage command (activate/deactivateDetailProductionStage) locks in
-// the OPPOSITE order (detail-before-order, via its `order_details JOIN orders ... FOR UPDATE`). A
-// concurrent batch (or any order-level command) and detail-stage on the SAME order can therefore
-// deadlock — Postgres aborts one with 40P01, and this command's idempotencyKey makes a retry safe.
-// This is a PRE-EXISTING family-wide inconsistency (changeProductionStatus<->detail-stage already
-// cycles the same way); the batch adds no new deadlock class. Unifying the whole family onto one
-// lock order is deferred to a follow-up (see docs follow-up note). Ascending detail_id avoids
-// batch<->batch / batch<->order-level cycles on overlapping detail sets.
+// Detail-stage activation locks only the parent first, then the selected detail.
+// Keep that invariant for every entrypoint; ascending detail_id also orders
+// overlapping detail sets consistently across batch/order-level commands.
 async function loadOrderDetailsForBatch(
   tx: TransactionClient,
   orderId: number,

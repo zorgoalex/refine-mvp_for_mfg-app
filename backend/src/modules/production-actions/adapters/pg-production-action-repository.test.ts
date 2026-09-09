@@ -882,7 +882,7 @@ describe('PgProductionActionRepository', () => {
     expect(evaluateStatusAutomationMock).not.toHaveBeenCalled();
   });
 
-  it('activates a detail production stage with detail lock, event, audit, and outbox', async () => {
+  it('activates a detail production stage with parent-before-detail locks, event, audit, and outbox', async () => {
     const database = createDatabase({ existingDetailProductionEventId: null });
     const repository = new PgProductionActionRepository(database.service);
 
@@ -906,7 +906,14 @@ describe('PgProductionActionRepository', () => {
     expect(sql).toContain('FROM order_details od JOIN orders o ON o.order_id = od.order_id');
     expect(sql).toContain('o.production_status_id');
     expect(sql).toContain('o.production_status_from_details_enabled');
-    expect(sql).toContain('FOR UPDATE');
+    const parentLock = database.queries.findIndex((query) => normalizeSql(query.text).endsWith('FOR UPDATE OF o'));
+    const detailLock = database.queries.findIndex((query) =>
+      normalizeSql(query.text).startsWith('SELECT detail_id FROM order_details WHERE detail_id = $1 AND order_id = $2'),
+    );
+    expect(parentLock).toBeGreaterThanOrEqual(0);
+    expect(detailLock).toBeGreaterThan(parentLock);
+    expect(database.queries[detailLock]?.params).toEqual([99, 15]);
+    expect(normalizeSql(database.queries[detailLock]?.text ?? '')).toContain('AND COALESCE(delete_flag, false) = false FOR UPDATE');
     expect(sql).toContain('INSERT INTO production_status_events');
     expect(sql).toContain('ON CONFLICT (detail_id, production_status_id) WHERE detail_id IS NOT NULL');
     expect(sql).not.toContain('UPDATE orders SET version = version + 1');
@@ -2067,6 +2074,10 @@ function createDatabase(options: {
           ],
           rowCount: 1,
         };
+      }
+
+      if (normalized.startsWith('SELECT detail_id FROM order_details WHERE detail_id = $1 AND order_id = $2')) {
+        return { rows: [{ detail_id: 99 }], rowCount: 1 };
       }
 
       if (normalized.startsWith('INSERT INTO production_status_events')) {
