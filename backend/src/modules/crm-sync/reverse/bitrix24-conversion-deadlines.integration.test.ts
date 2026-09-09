@@ -8,7 +8,7 @@ import type { BackendEnv } from '../../../config/env.validation';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import { PgOrderDeadlineSync } from '../../deadlines/adapters/pg-order-deadline-sync';
-import { PgBitrix24ReverseRepository } from './pg-bitrix24-reverse-repository';
+import { PgBitrix24ReverseRepository, type ReversePaymentSnapshot } from './pg-bitrix24-reverse-repository';
 
 // Explicit test-only target. All fixture writes remain inside an outer ROLLBACK;
 // conversion uses real SQL/savepoints, including real constraints/audit/outbox.
@@ -101,6 +101,112 @@ describe.skipIf(!url)('CRM conversion deadlines on real PostgreSQL (rollback-onl
       (SELECT count(*)::int FROM projects WHERE created_by=$3) AS projects
       FROM orders WHERE order_id=$1`, [orderId, input.requestId, actorId])).rows[0];
   }
+
+  async function seedPayment() {
+    const request = (await client.query('SELECT request_id,bitrix_deal_id FROM bitrix24_incoming_request WHERE linked_order_id=$1', [orderId])).rows[0];
+    await client.query("INSERT INTO crm_sync_mapping (entity_type,erp_id,bitrix_object,bitrix_id,status,source_system) VALUES ('order',$1,'deal',$2,'active','bitrix24')", [String(orderId), request.bitrix_deal_id]);
+    await client.query('INSERT INTO bitrix24_payment_type_mapping (pay_system_id,type_paid_id,active) SELECT $1,min(type_paid_id),true FROM payment_types', [orderId + 900000000]);
+    const payment: ReversePaymentSnapshot = {
+      bitrixPaymentId: String(orderId + 900000000), paySystemId: orderId + 900000000,
+      paySystemName: 'E2E-cash', amount: 500, currencyId: 'KZT', paid: true,
+      paymentDate: new Date('2026-09-09T10:00:00+05:00'), normalizedHash: 'E2E-payment',
+      bitrixCreatedAt: null, bitrixUpdatedAt: null,
+    };
+    await repository.replaceRequestPaymentSnapshots(Number(request.request_id), [payment], input.requestId);
+    return { payment, requestId: Number(request.request_id), dealId: String(request.bitrix_deal_id) };
+  }
+
+  async function importPayment(paymentId: string) {
+    const version = Number((await client.query('SELECT version FROM orders WHERE order_id=$1', [orderId])).rows[0].version);
+    return repository.materializeMappedOrderPayments({ orderId, bitrixPaymentIds: [paymentId], expectedOrderVersion: version,
+      actorUserId: String(actorId), auditRequestId: input.requestId, scope: { mode: 'all' } });
+  }
+
+  it('refreshes a converted request payment through order finances without changing ownership', async () => {
+    const { payment, requestId, dealId } = await seedPayment();
+    await repository.convertCrmRequestToProduction(input);
+    await repository.replaceMappedOrderPaymentSnapshots(orderId, [payment], input.requestId, undefined, dealId);
+    const listed = await repository.getMappedOrderPayments(orderId, { mode: 'all' });
+    expect(listed.payments).toEqual([expect.objectContaining({ bitrixPaymentId: payment.bitrixPaymentId, amount: 500, erpPaymentId: null })]);
+    expect((await client.query('SELECT request_id,erp_order_id FROM bitrix24_incoming_request_payment WHERE bitrix_payment_id=$1', [payment.bitrixPaymentId])).rows[0]).toEqual({ request_id: String(requestId), erp_order_id: null });
+    expect((await client.query('SELECT count(*)::int AS n FROM payments WHERE order_id=$1', [orderId])).rows[0].n).toBe(0);
+    expect(await importPayment(payment.bitrixPaymentId)).toMatchObject({ changedPaymentCount: 1 });
+    await repository.replaceRequestPaymentSnapshots(requestId, [payment], input.requestId);
+    await repository.replaceMappedOrderPaymentSnapshots(orderId, [payment], input.requestId, undefined, dealId);
+    expect(await importPayment(payment.bitrixPaymentId)).toMatchObject({ changedPaymentCount: 0 });
+    const erp = (await client.query('SELECT amount,payment_date::text,created_by FROM payments WHERE order_id=$1', [orderId])).rows;
+    expect(erp).toEqual([{ amount: '500.00', payment_date: '2026-09-09', created_by: String(actorId) }]);
+    expect((await client.query('SELECT paid_amount FROM orders WHERE order_id=$1', [orderId])).rows[0].paid_amount).toBe('500.00');
+    expect((await client.query("SELECT count(*)::int AS n FROM audit_log WHERE request_id=$1 AND event='bitrix24_reverse.mapped_order_payments_materialize'", [input.requestId])).rows[0].n).toBe(1);
+    expect((await client.query("SELECT count(*)::int AS n FROM outbox_events WHERE event_type='bitrix24.payment.materialized' AND payload_json->>'orderId'=$1", [String(orderId)])).rows[0].n).toBe(1);
+  });
+
+  it.each(['unpaid', 'deleted'])('keeps %s request snapshots explicit and applies selected changes once', async (mode) => {
+    const { payment, dealId } = await seedPayment();
+    await repository.convertCrmRequestToProduction(input);
+    await repository.replaceMappedOrderPaymentSnapshots(orderId, [payment], input.requestId, undefined, dealId);
+    await importPayment(payment.bitrixPaymentId);
+    await repository.replaceMappedOrderPaymentSnapshots(orderId, mode === 'deleted' ? [] : [{ ...payment, paid: false }], input.requestId, undefined, dealId);
+    expect((await client.query('SELECT delete_flag FROM payments WHERE order_id=$1', [orderId])).rows[0].delete_flag).toBe(false);
+    expect(await importPayment(payment.bitrixPaymentId)).toMatchObject({ deletedPaymentCount: 1 });
+    expect(await importPayment(payment.bitrixPaymentId)).toMatchObject({ changedPaymentCount: 0, deletedPaymentCount: 0 });
+    expect((await client.query('SELECT paid_amount FROM orders WHERE order_id=$1', [orderId])).rows[0].paid_amount).toBe('0.00');
+  });
+
+  it('rejects a different Deal and foreign scope without snapshot or money changes', async () => {
+    const { payment, dealId } = await seedPayment();
+    await repository.convertCrmRequestToProduction(input);
+    await client.query('UPDATE crm_sync_mapping SET bitrix_id=$2 WHERE entity_type=\'order\' AND erp_id=$1', [String(orderId), String(Number(dealId) + 1)]);
+    await expect(repository.replaceMappedOrderPaymentSnapshots(orderId, [payment], input.requestId, undefined, dealId)).rejects.toThrow('Deal mapping changed');
+    await expect(repository.replaceMappedOrderPaymentSnapshots(orderId, [payment], input.requestId, undefined, String(Number(dealId) + 1))).rejects.toThrow('linked to another Deal');
+    await expect(importPayment(payment.bitrixPaymentId)).rejects.toThrow('absent or belong to another target');
+    expect(await repository.getMappedOrderPayments(orderId, { mode: 'assigned', userId: actorId + 999999 })).toEqual({ linked: false, orderId });
+    expect((await client.query('SELECT count(*)::int AS n FROM payments WHERE order_id=$1', [orderId])).rows[0].n).toBe(0);
+  });
+
+  it('supports new post-conversion payments and still denies stale or foreign materialization', async () => {
+    const { payment, requestId, dealId } = await seedPayment();
+    await repository.convertCrmRequestToProduction(input);
+    const added = { ...payment, bitrixPaymentId: String(Number(payment.bitrixPaymentId) + 1000000) };
+    await repository.replaceMappedOrderPaymentSnapshots(orderId, [payment, added], input.requestId, undefined, dealId);
+    await repository.replaceRequestPaymentSnapshots(requestId, [payment, added], input.requestId);
+    const version = Number((await client.query('SELECT version FROM orders WHERE order_id=$1', [orderId])).rows[0].version);
+    const args = { orderId, bitrixPaymentIds: [added.bitrixPaymentId], expectedOrderVersion: version,
+      actorUserId: String(actorId), auditRequestId: input.requestId, scope: { mode: 'all' as const } };
+    await expect(repository.materializeMappedOrderPayments({ ...args, expectedOrderVersion: version + 1 })).rejects.toThrow('required for payments');
+    await expect(repository.materializeMappedOrderPayments({ ...args, scope: { mode: 'assigned', userId: actorId + 999999 } })).rejects.toThrow('Mapped production order not found');
+    expect(await repository.materializeMappedOrderPayments(args)).toMatchObject({ changedPaymentCount: 1 });
+    expect((await client.query('SELECT request_id,erp_order_id FROM bitrix24_incoming_request_payment WHERE bitrix_payment_id=$1', [added.bitrixPaymentId])).rows[0]).toEqual({ request_id: String(requestId), erp_order_id: null });
+  });
+
+  it('keeps native mapped orders on direct order ownership', async () => {
+    const { payment, requestId, dealId } = await seedPayment();
+    await repository.convertCrmRequestToProduction(input);
+    // Model a normal ERP-origin production order with no incoming CRM request.
+    await client.query('DELETE FROM bitrix24_incoming_request_payment WHERE request_id=$1', [requestId]);
+    await client.query('DELETE FROM bitrix24_incoming_request WHERE request_id=$1', [requestId]);
+    await repository.replaceMappedOrderPaymentSnapshots(orderId, [payment], input.requestId, undefined, dealId);
+    expect((await repository.getMappedOrderPayments(orderId, { mode: 'all' })).payments).toEqual([expect.objectContaining({ bitrixPaymentId: payment.bitrixPaymentId })]);
+    expect(await importPayment(payment.bitrixPaymentId)).toMatchObject({ changedPaymentCount: 1 });
+    expect(await importPayment(payment.bitrixPaymentId)).toMatchObject({ changedPaymentCount: 0 });
+    expect((await client.query('SELECT request_id,erp_order_id FROM bitrix24_incoming_request_payment WHERE bitrix_payment_id=$1', [payment.bitrixPaymentId])).rows[0]).toEqual({ request_id: null, erp_order_id: String(orderId) });
+  });
+
+  it('preserves payment identity and original author when another actor updates through request finances', async () => {
+    const { payment, requestId, dealId } = await seedPayment();
+    await repository.convertCrmRequestToProduction(input);
+    await repository.replaceMappedOrderPaymentSnapshots(orderId, [payment], input.requestId, undefined, dealId);
+    await importPayment(payment.bitrixPaymentId);
+    const before = (await client.query('SELECT payment_id,created_by FROM payments WHERE order_id=$1', [orderId])).rows[0];
+    const name = 'E2E-conversion-editor-' + randomUUID();
+    const editor = String((await client.query("INSERT INTO users (username,email,password_hash,role_id) VALUES ($1,$2,'E2E-NO-LOGIN',1) RETURNING user_id", [name, name + '@example.invalid'])).rows[0].user_id);
+    await repository.replaceRequestPaymentSnapshots(requestId, [{ ...payment, amount: 600 }], input.requestId);
+    const version = Number((await client.query('SELECT version FROM orders WHERE order_id=$1', [orderId])).rows[0].version);
+    await repository.materializeRequestPayments({ requestId, bitrixPaymentIds: [payment.bitrixPaymentId], expectedOrderVersion: version,
+      actorUserId: editor, auditRequestId: input.requestId, scope: { mode: 'all' } });
+    expect((await client.query('SELECT payment_id,created_by,edited_by,amount FROM payments WHERE order_id=$1', [orderId])).rows).toEqual([{ ...before, edited_by: editor, amount: '600.00' }]);
+    expect((await repository.getMappedOrderPayments(orderId, { mode: 'all' })).payments).toEqual([expect.objectContaining({ erpPaymentId: Number(before.payment_id), amount: 600 })]);
+  });
 
   it('registers deadline, audit and outbox before success; replay creates nothing twice', async () => {
     const result = await repository.convertCrmRequestToProduction(input);

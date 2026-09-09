@@ -167,16 +167,13 @@ export const orderDetailSchema = z.object({
   // Required fields
   detail_number: z.number().int().positive("Номер детали должен быть > 0"),
   height: z.number({
-    required_error: "Укажите высоту детали",
-    invalid_type_error: "Укажите высоту детали",
+    error: "Укажите высоту детали",
   }).positive("Высота должна быть больше 0"),
   width: z.number({
-    required_error: "Укажите ширину детали",
-    invalid_type_error: "Укажите ширину детали",
+    error: "Укажите ширину детали",
   }).positive("Ширина должна быть больше 0"),
   quantity: z.number({
-    required_error: "Укажите количество деталей",
-    invalid_type_error: "Укажите количество деталей",
+    error: "Укажите количество деталей",
   }).int("Количество должно быть целым числом").positive("Количество должно быть больше 0"),
   area: z.number().min(0, "Площадь должна быть >= 0"),
 
@@ -196,13 +193,11 @@ export const orderDetailSchema = z.object({
 
   // Costs
   milling_cost_per_sqm: z.number({
-    required_error: "Укажите цену за кв.м.",
-    invalid_type_error: "Укажите цену за кв.м.",
+    error: "Укажите цену за кв.м.",
   }).positive("Цена за кв.м. должна быть больше 0"),
   detail_cost: z
     .number({
-      required_error: "Сумма детали обязательна",
-      invalid_type_error: "Сумма детали обязательна",
+      error: "Сумма детали обязательна",
     })
     .positive("Сумма детали должна быть больше 0"),
 
@@ -337,7 +332,7 @@ export const workshopSchema = z
 export const requirementSchema = z.object({
   // Required fields
   resource_type: z.enum(['material', 'film', 'edge'], {
-    errorMap: () => ({ message: "Выберите тип ресурса: material, film или edge" }),
+    error: "Выберите тип ресурса: material, film или edge",
   }),
   required_quantity: z.number().positive("Требуемое количество должно быть > 0"),
   unit_id: z.number().positive("Выберите единицу измерения"),

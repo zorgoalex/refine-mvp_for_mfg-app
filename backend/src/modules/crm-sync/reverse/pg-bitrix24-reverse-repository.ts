@@ -1716,8 +1716,7 @@ export class PgBitrix24ReverseRepository {
            FROM crm_sync_mapping
           WHERE entity_type='order' AND erp_id=$1
             AND bitrix_object='deal' AND bitrix_id IS NOT NULL
-            AND status='active'
-          FOR UPDATE`,
+            AND status='active'`,
         [String(orderId)],
       );
       const bitrixDealId = owner.rows[0]?.bitrix_id;
@@ -1730,24 +1729,32 @@ export class PgBitrix24ReverseRepository {
       await lockAggregate(tx, `deal:${bitrixDealId}`);
       await setReverseOrigin(tx);
       const lockedOrder = await tx.query(
-        'SELECT order_id FROM orders WHERE order_id=$1 FOR UPDATE',
+        "SELECT order_id FROM orders WHERE order_id=$1 AND order_kind='production_order' AND delete_flag=false FOR UPDATE",
         [orderId],
       );
       if (lockedOrder.rowCount !== 1) {
         throw notFound('ORDER_NOT_FOUND', 'Order not found');
       }
+      const lockedMapping = await tx.query(
+        `SELECT 1 FROM crm_sync_mapping
+          WHERE entity_type='order' AND erp_id=$1 AND bitrix_object='deal'
+            AND bitrix_id=$2 AND status='active' FOR UPDATE`,
+        [String(orderId), bitrixDealId],
+      );
+      if (lockedMapping.rowCount !== 1) {
+        throw conflict('BITRIX24_DEAL_MAPPING_CHANGED', 'Bitrix24 Deal mapping changed');
+      }
+      const paymentOwner = await resolveMappedPaymentOwner(tx, orderId, bitrixDealId, true);
       const activeIds = payments.map((payment) => payment.bitrixPaymentId);
-      await assertPaymentSnapshotOwnership(tx, activeIds, {
-        requestId: null,
-        orderId,
-      });
+      await assertPaymentSnapshotOwnership(tx, activeIds, paymentOwner);
       await tx.query(
         `UPDATE bitrix24_incoming_request_payment
             SET state='deleted', updated_at=now()
-          WHERE erp_order_id=$1
+          WHERE erp_order_id IS NOT DISTINCT FROM $1::bigint
+            AND request_id IS NOT DISTINCT FROM $3::bigint
             AND state IN ('active','materialized')
             AND NOT (bitrix_payment_id = ANY($2::text[]))`,
-        [orderId, activeIds],
+        [paymentOwner.orderId, activeIds, paymentOwner.requestId],
       );
       for (const payment of payments) {
         await tx.query(
@@ -1757,10 +1764,10 @@ export class PgBitrix24ReverseRepository {
              payment_date, payment_local_date, normalized_hash, state, bitrix_created_at,
              bitrix_updated_at, last_fetched_at, updated_at
            )
-           VALUES ($1,NULL,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active',$11,$12,now(),now())
+           VALUES ($1,$13,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active',$11,$12,now(),now())
            ON CONFLICT (bitrix_payment_id) DO UPDATE SET
              erp_order_id=EXCLUDED.erp_order_id,
-             request_id=NULL,
+             request_id=EXCLUDED.request_id,
              pay_system_id=EXCLUDED.pay_system_id,
              pay_system_name=EXCLUDED.pay_system_name,
              amount=EXCLUDED.amount, currency_id=EXCLUDED.currency_id,
@@ -1778,7 +1785,7 @@ export class PgBitrix24ReverseRepository {
              last_fetched_at=now(), updated_at=now()`,
           [
             payment.bitrixPaymentId,
-            orderId,
+            paymentOwner.orderId,
             payment.paySystemId,
             payment.paySystemName,
             payment.amount,
@@ -1789,6 +1796,7 @@ export class PgBitrix24ReverseRepository {
             payment.normalizedHash,
             payment.bitrixCreatedAt,
             payment.bitrixUpdatedAt,
+            paymentOwner.requestId,
           ],
         );
       }
@@ -2933,6 +2941,7 @@ export class PgBitrix24ReverseRepository {
     }
     const orderId = Number(discovered.linked_order_id);
     await this.db.transaction(async (tx) => {
+      await tx.query("SELECT set_config('app.user_id', $1, true)", [input.actorUserId]);
       await lockAggregate(tx, `deal:${discovered.bitrix_deal_id}`);
       await setReverseOrigin(tx);
       const productionOrder = await tx.query<{ version: string | number }>(
@@ -3058,6 +3067,7 @@ export class PgBitrix24ReverseRepository {
     );
     const mapped = owner.rows[0];
     if (!mapped) return { linked: false, orderId };
+    const paymentOwner = await resolveMappedPaymentOwner(this.db, orderId, mapped.bitrix_deal_id);
     const payments = await this.db.query<{
       bitrix_payment_id: string;
       pay_system_id: number | null;
@@ -3084,9 +3094,10 @@ export class PgBitrix24ReverseRepository {
            ON mapping.pay_system_id=payment.pay_system_id AND mapping.active=true
          LEFT JOIN bitrix24_manual_payment_command command
            ON command.command_id=payment.manual_command_id
-        WHERE payment.erp_order_id=$1
+        WHERE payment.erp_order_id IS NOT DISTINCT FROM $1::bigint
+          AND payment.request_id IS NOT DISTINCT FROM $2::bigint
         ORDER BY payment.payment_local_date, payment.bitrix_payment_id`,
-      [orderId],
+      [paymentOwner.orderId, paymentOwner.requestId],
     );
     const lastFetchedAt = payments.rows.reduce<Date | null>((latest, payment) => {
       if (!payment.last_fetched_at) return latest;
@@ -3155,6 +3166,7 @@ export class PgBitrix24ReverseRepository {
     let changedPaymentCount = 0;
     let deletedPaymentCount = 0;
     await this.db.transaction(async (tx) => {
+      await tx.query("SELECT set_config('app.user_id', $1, true)", [input.actorUserId]);
       await lockAggregate(tx, `deal:${discovered.bitrix_deal_id}`);
       await setReverseOrigin(tx);
       const lockedOrder = await tx.query(
@@ -3195,27 +3207,27 @@ export class PgBitrix24ReverseRepository {
       if (mapping.rowCount !== 1) {
         throw conflict('BITRIX24_DEAL_MAPPING_CHANGED', 'Bitrix24 Deal mapping changed');
       }
+      const paymentOwner = await resolveMappedPaymentOwner(tx, input.orderId, discovered.bitrix_deal_id, true);
       const deleted = await tx.query(
         `UPDATE payments erp
             SET delete_flag=true, updated_at=now()
            FROM bitrix24_incoming_request_payment remote
-          WHERE remote.erp_order_id=$1
+          WHERE remote.erp_order_id IS NOT DISTINCT FROM $1::bigint
+            AND remote.request_id IS NOT DISTINCT FROM $3::bigint
             AND remote.bitrix_payment_id=ANY($2::text[])
             AND (remote.state='deleted' OR remote.paid=false)
             AND remote.erp_payment_id=erp.payment_id
             AND erp.delete_flag=false`,
-        [input.orderId, input.bitrixPaymentIds],
+        [paymentOwner.orderId, input.bitrixPaymentIds, paymentOwner.requestId],
       );
       const activePaymentIds = await selectActivePaymentIds(
         tx,
         input.bitrixPaymentIds,
-        { requestId: null, orderId: input.orderId },
+        paymentOwner,
       );
-      changedPaymentCount = await materializeMappedOrderPaymentRows(
-        tx,
-        input.orderId,
-        activePaymentIds,
-      );
+      changedPaymentCount = paymentOwner.requestId === null
+        ? await materializeMappedOrderPaymentRows(tx, input.orderId, activePaymentIds)
+        : await materializeActivePayments(tx, paymentOwner.requestId, input.orderId, activePaymentIds);
       deletedPaymentCount = deleted.rowCount ?? 0;
       if (changedPaymentCount > 0 || deletedPaymentCount > 0) {
         await recalculatePaymentState(tx, input.orderId);
@@ -3840,6 +3852,34 @@ async function lockAggregate(tx: TransactionClient, key: string): Promise<void> 
     `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
     [`bitrix24-reverse:${key}`],
   );
+}
+
+// Conversion preserves request-owned snapshots: the widget and background
+// request reconciliation continue using them. Mapped-order finances must use
+// that same owner, but only for the exact converted request + active Deal map.
+async function resolveMappedPaymentOwner(
+  db: DatabaseClient,
+  orderId: number,
+  dealId: string,
+  lockRequest = false,
+): Promise<{ requestId: number | null; orderId: number | null }> {
+  const result = await db.query<{ request_id: string | number }>(
+    `SELECT request.request_id
+       FROM bitrix24_incoming_request request
+       JOIN orders ON orders.order_id=request.linked_order_id
+       JOIN crm_sync_mapping mapping
+         ON mapping.entity_type='order' AND mapping.erp_id=orders.order_id::text
+        AND mapping.bitrix_object='deal' AND mapping.bitrix_id=request.bitrix_deal_id
+        AND mapping.status='active'
+      WHERE request.linked_order_id=$1 AND request.bitrix_deal_id=$2
+        AND request.state='converted' AND orders.order_kind='production_order'
+        AND orders.delete_flag=false
+      ${lockRequest ? 'FOR UPDATE OF request' : ''}`,
+    [orderId, dealId],
+  );
+  return result.rows[0]
+    ? { requestId: Number(result.rows[0].request_id), orderId: null }
+    : { requestId: null, orderId };
 }
 
 async function assertPaymentSnapshotOwnership(
