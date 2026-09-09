@@ -29,6 +29,12 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-09-09",
+    title: "МДФ: готовность по каждой позиции заказа",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: ["Избыток одной позиции больше не закрывает нехватку другой. Остаток и индикатор прогресса рассчитываются по составу заказа, включая отсутствующие позиции. Фактические количества распила и закатки сохраняют превышение; неизвестные позиции не засчитываются в готовность."],
+  },
+  {
     version: APP_VERSION,
     date: "2026-09-09",
     title: "Bitrix: преобразование заявки в заказ",

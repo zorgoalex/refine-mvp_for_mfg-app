@@ -3222,6 +3222,15 @@ export interface CncOrderReadiness {
   cutDetails: number;
   rolledDetails: number;
   remainingDetails: number;
+  // Source facts retain position identity until matched to the order composition.
+  positionQuantities?: ReadonlyMap<string, CncPositionQuantities>;
+  // Capped per-position credit is separate from fact totals, which may exceed demand.
+  creditedQuantities?: CncPositionQuantities;
+}
+
+interface CncPositionQuantities {
+  cut: number;
+  rolled: number;
 }
 
 interface CncOrderBoardCard {
@@ -8847,6 +8856,10 @@ export function buildCncOrderReadiness(
       cutDetails,
       rolledDetails,
       remainingDetails: Math.max(0, totalDetails - cutDetails - rolledDetails),
+      positionQuantities: new Map(Array.from(details, ([key, detail]) => [key, {
+        cut: detail.packetCut + detail.bazisCutReady,
+        rolled: detail.rolled,
+      }])),
     });
   }
   return result;
@@ -9039,13 +9052,47 @@ function normalizeCncOrderReadiness(
   readiness: CncOrderReadiness | undefined,
 ): CncOrderReadiness {
   const fallbackTotal = nonNegativeInteger(card.partsCount);
-  const source = readiness ?? {
+  const source: CncOrderReadiness = readiness ?? {
     totalDetails: 0,
     cutDetails: 0,
     rolledDetails: 0,
     remainingDetails: 0,
   };
-  const totalDetails = fallbackTotal > 0 ? fallbackTotal : nonNegativeInteger(source.totalDetails);
+  // Match the complete order composition, not its aggregate quantity. A source
+  // with a known but conflicting ID must never fall back to its detail number.
+  const requiredById = new Map<number, OrderStatusBoardCard['details'][number]>();
+  for (const detail of card.details ?? []) {
+    const id = positiveIntegerOrNull(detail.detailId);
+    if (id === null || nonNegativeInteger(detail.quantity) === 0) continue;
+    const previous = requiredById.get(id);
+    if (!previous || detail.quantity > previous.quantity) requiredById.set(id, detail);
+  }
+  const numberCounts = new Map<number, number>();
+  for (const detail of requiredById.values()) {
+    const number = positiveIntegerOrNull(detail.detailNumber);
+    if (number !== null) numberCounts.set(number, (numberCounts.get(number) ?? 0) + 1);
+  }
+  const creditedQuantities: CncPositionQuantities = { cut: 0, rolled: 0 };
+  let requiredTotal = 0;
+  for (const detail of requiredById.values()) {
+    const required = nonNegativeInteger(detail.quantity);
+    requiredTotal += required;
+    const byId = source.positionQuantities?.get(`id:${detail.detailId}`);
+    const number = positiveIntegerOrNull(detail.detailNumber);
+    const byNumber = number !== null && numberCounts.get(number) === 1
+      ? source.positionQuantities?.get(`number:${number}`)
+      : undefined;
+    // ID-based and ID-less number-based rows are independent source portions.
+    const cut = nonNegativeInteger(byId?.cut ?? 0) + nonNegativeInteger(byNumber?.cut ?? 0);
+    const rolled = nonNegativeInteger(byId?.rolled ?? 0) + nonNegativeInteger(byNumber?.rolled ?? 0);
+    const rolledCredit = Math.min(required, rolled);
+    creditedQuantities.rolled += rolledCredit;
+    creditedQuantities.cut += Math.min(required - rolledCredit, Math.max(0, cut - rolled));
+  }
+  // Missing composition/identity never becomes ready by aggregate arithmetic.
+  // A partsCount larger than the known composition leaves an uncovered remainder.
+  const totalDetails = Math.max(fallbackTotal, requiredTotal)
+    || nonNegativeInteger(source.totalDetails);
   // Keep excess visible in numeric facts; only the progress bar is capped.
   const rolledDetails = nonNegativeInteger(source.rolledDetails);
   const cutDetails = nonNegativeInteger(source.cutDetails);
@@ -9053,19 +9100,21 @@ function normalizeCncOrderReadiness(
     totalDetails,
     cutDetails,
     rolledDetails,
-    remainingDetails: Math.max(0, totalDetails - cutDetails - rolledDetails),
+    remainingDetails: Math.max(0, totalDetails - creditedQuantities.cut - creditedQuantities.rolled),
+    creditedQuantities,
   };
 }
 
-function cncOrderReadinessProgress(readiness: CncOrderReadiness): {
+export function cncOrderReadinessProgress(readiness: CncOrderReadiness): {
   cutPercent: number;
   rolledPercent: number;
 } {
   const total = Math.max(readiness.totalDetails, 1);
-  const cutPercent = Math.max(0, Math.min(100, (readiness.cutDetails / total) * 100));
+  const credited = readiness.creditedQuantities ?? { cut: 0, rolled: 0 };
+  const cutPercent = Math.max(0, Math.min(100, (credited.cut / total) * 100));
   const rolledPercent = Math.max(
     0,
-    Math.min(100 - cutPercent, (readiness.rolledDetails / total) * 100),
+    Math.min(100 - cutPercent, (credited.rolled / total) * 100),
   );
   return { cutPercent, rolledPercent };
 }

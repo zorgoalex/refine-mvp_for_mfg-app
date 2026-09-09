@@ -1288,6 +1288,10 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('if (!cncMaterialNameIsMdf(item.materialName)) continue;');
     expect(page).toContain('Закатано {cncReadiness.rolledDetails}');
     expect(page).toContain('Осталось {cncReadiness.remainingDetails}');
+    expect(page).toContain('positionQuantities: new Map(Array.from(details,');
+    expect(page).toContain('const byId = source.positionQuantities?.get(`id:${detail.detailId}`)');
+    expect(page).toContain('totalDetails - creditedQuantities.cut - creditedQuantities.rolled');
+    expect(page).toContain('const credited = readiness.creditedQuantities ?? { cut: 0, rolled: 0 }');
     expect(page).toContain('className="cnc-order-card__client"');
     expect(page).toContain("cncOrderCard ? 'cnc-order-card__parts-total' : ''");
     expect(page).toContain('paymentSummary && !cncOrderCard');
