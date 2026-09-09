@@ -30,6 +30,12 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION, date: "2026-09-09",
+    title: "Bitrix: оплаты после преобразования заявки",
+    services: ["ERP", "CRM"], repositories: ["repo_erp"],
+    fixed: ["Финансы заказа показывают и обновляют оплаты исходной CRM-заявки без ложного конфликта другой сделки. Перенос в реестр ERP остаётся отдельным действием; повторный перенос не создаёт дублей."],
+  },
+  {
+    version: APP_VERSION, date: "2026-09-09",
     title: "Производство: одновременные действия с заказом",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: ["Устранена причина взаимной блокировки при одновременном включении этапа детали и изменении производственных статусов заказа, в том числе правилом после оплаты."],
