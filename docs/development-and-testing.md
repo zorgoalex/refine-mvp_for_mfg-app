@@ -86,6 +86,22 @@ configs и проверки, включаемые переменными окр�
 merge настраивается отдельно в GitHub ruleset: required context должен точно
 называться `Backend typecheck and tests`. Сам workflow не включает branch protection.
 
+Тест `production-statuses-seed.test.ts` в CI проверяет версионируемый SQL-снимок
+`backend/src/schema/fixtures/production-statuses-seed.v14.sql`. Он содержит точные
+`CREATE TABLE production_statuses` и `INSERT INTO production_statuses` из
+`spec_erp/docs/reference/postgresql_schema_v_14.sql` на 2026-09-09. Внешний файл
+не входит в checkout и автоматически не отслеживается. При его изменении
+обновляйте оба SQL-оператора снимка вместе. Текущую внешнюю схему можно проверить
+явно (путь выбирается относительно текущей рабочей папки):
+
+```bash
+ERP_CANONICAL_SCHEMA_PATH=/path/to/spec_erp/docs/reference/postgresql_schema_v_14.sql \
+  npx vitest run backend/src/schema/production-statuses-seed.test.ts --maxWorkers=1 --no-file-parallelism
+```
+
+Отсутствующий явно заданный файл завершит тест ошибкой. Проверка анализирует
+SQL-текст; реальное применение seed к БД требует отдельной SQL-интеграции.
+
 Playwright:
 
 ```bash
