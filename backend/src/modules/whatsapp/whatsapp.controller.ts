@@ -12,7 +12,7 @@ import {
   Res,
   UseGuards,
 } from "@nestjs/common";
-import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { Request, Response } from "express";
 import { ApiError } from "../../common/errors/api-error";
 import type { RequestWithCurrentUser } from "../../permissions/current-user";
@@ -34,13 +34,15 @@ export class WhatsAppController {
   constructor(
     @Inject(WhatsAppService) private readonly service: WhatsAppService
   ) {}
+  @ApiOperation({ summary: 'Get WhatsApp session status' })
   @Get("status")
-  @ApiBearerAuth()
+  @ApiBearerAuth('bearerAuth')
   @RequirePermissions("whatsapp.view")
   status() {
     return this.service.status();
   }
-  @Get("qr") @ApiBearerAuth() @RequirePermissions("whatsapp.manage") async qr(
+  @ApiOperation({ summary: 'Get the WhatsApp pairing QR image' })
+  @Get("qr") @ApiBearerAuth('bearerAuth') @RequirePermissions("whatsapp.manage") async qr(
     @Res() response: Response
   ) {
     const qr = await this.service.qr();
@@ -49,8 +51,9 @@ export class WhatsAppController {
       .setHeader("Cache-Control", "no-store")
       .send(Buffer.from(qr.bytes));
   }
+  @ApiOperation({ summary: 'Restart the WhatsApp session after confirmation' })
   @Post("restart")
-  @ApiBearerAuth()
+  @ApiBearerAuth('bearerAuth')
   @RequirePermissions("whatsapp.manage")
   restart(@Req() request: RequestWithCurrentUser, @Body() body: unknown) {
     const value = parseRestart(body);
@@ -60,14 +63,16 @@ export class WhatsAppController {
       value.restrictionConfirmed
     );
   }
+  @ApiOperation({ summary: 'List WhatsApp reply templates' })
   @Get("templates")
-  @ApiBearerAuth()
+  @ApiBearerAuth('bearerAuth')
   @RequirePermissions("whatsapp.view")
   templates() {
     return this.service.listTemplates();
   }
+  @ApiOperation({ summary: 'Create a WhatsApp reply template' })
   @Post("templates")
-  @ApiBearerAuth()
+  @ApiBearerAuth('bearerAuth')
   @RequirePermissions("whatsapp.manage")
   createTemplate(
     @Req() request: RequestWithCurrentUser,
@@ -79,8 +84,9 @@ export class WhatsAppController {
       requestId(request)
     );
   }
+  @ApiOperation({ summary: 'Update a WhatsApp reply template' })
   @Patch("templates/:id")
-  @ApiBearerAuth()
+  @ApiBearerAuth('bearerAuth')
   @RequirePermissions("whatsapp.manage")
   updateTemplate(
     @Param("id") id: string,
@@ -94,11 +100,13 @@ export class WhatsAppController {
       requestId(request)
     );
   }
-  @Get("rules") @ApiBearerAuth() @RequirePermissions("whatsapp.view") rules() {
+  @ApiOperation({ summary: 'List WhatsApp reply rules' })
+  @Get("rules") @ApiBearerAuth('bearerAuth') @RequirePermissions("whatsapp.view") rules() {
     return this.service.listRules();
   }
+  @ApiOperation({ summary: 'Create a WhatsApp reply rule' })
   @Post("rules")
-  @ApiBearerAuth()
+  @ApiBearerAuth('bearerAuth')
   @RequirePermissions("whatsapp.manage")
   createRule(@Req() request: RequestWithCurrentUser, @Body() body: unknown) {
     return this.service.createRule(
@@ -107,8 +115,9 @@ export class WhatsAppController {
       requestId(request)
     );
   }
+  @ApiOperation({ summary: 'Update a WhatsApp reply rule' })
   @Patch("rules/:id")
-  @ApiBearerAuth()
+  @ApiBearerAuth('bearerAuth')
   @RequirePermissions("whatsapp.manage")
   updateRule(
     @Param("id") id: string,
@@ -122,14 +131,17 @@ export class WhatsAppController {
       requestId(request)
     );
   }
-  @Get("queue") @ApiBearerAuth() @RequirePermissions("whatsapp.view") queue() {
+  @ApiOperation({ summary: 'List WhatsApp delivery jobs' })
+  @Get("queue") @ApiBearerAuth('bearerAuth') @RequirePermissions("whatsapp.view") queue() {
     return this.service.listJobs();
   }
-  @Get("audit") @ApiBearerAuth() @RequirePermissions("whatsapp.view") audit() {
+  @ApiOperation({ summary: 'List WhatsApp audit events' })
+  @Get("audit") @ApiBearerAuth('bearerAuth') @RequirePermissions("whatsapp.view") audit() {
     return this.service.listAudit();
   }
+  @ApiOperation({ summary: 'Retry a WhatsApp delivery job' })
   @Post("queue/:id/retry")
-  @ApiBearerAuth()
+  @ApiBearerAuth('bearerAuth')
   @RequirePermissions("whatsapp.manage")
   retry(@Param("id") id: string, @Req() request: RequestWithCurrentUser) {
     return this.service.retryJob(
@@ -138,18 +150,21 @@ export class WhatsAppController {
       requestId(request)
     );
   }
+  @ApiOperation({ summary: 'Process the WhatsApp delivery queue' })
   @Post("queue/process-now")
-  @ApiBearerAuth()
+  @ApiBearerAuth('bearerAuth')
   @RequirePermissions("whatsapp.manage")
   process() {
     return this.service.processBatch();
   }
+  @ApiOperation({ summary: 'Clean up retained WhatsApp data' })
   @Post("cleanup")
-  @ApiBearerAuth()
+  @ApiBearerAuth('bearerAuth')
   @RequirePermissions("whatsapp.manage")
   cleanup() {
     return this.service.cleanup();
   }
+  @ApiOperation({ summary: 'Accept a WAHA webhook authenticated with HMAC' })
   @Post("webhook") @HttpCode(202) webhook(
     @Req() request: RequestWithCurrentUser & Request,
     @Headers("x-webhook-hmac") signature: string | undefined,

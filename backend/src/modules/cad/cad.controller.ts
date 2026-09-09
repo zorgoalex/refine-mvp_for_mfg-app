@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Headers, Inject, Param, Post, Req, Res } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { z } from 'zod';
 import { ApiError } from '../../common/errors/api-error';
@@ -19,11 +19,12 @@ const saveBody = versionBody.extend({ groups: z.array(cadGroupSchema).max(500), 
 const cloneBody = z.object({ name: z.string().trim().min(1).max(100), refresh: z.boolean().default(false) }).strict();
 
 @ApiTags('CAD preparation')
-@ApiBearerAuth()
+@ApiBearerAuth('bearerAuth')
 @Controller('cad')
 export class CadController {
   constructor(@Inject(CadService) private readonly cad: CadService) {}
   private user(req: RequestWithCurrentUser) { if (!req.user) throw new ApiError(401, 'AUTH_REQUIRED', 'Authentication required'); return req.user; }
+  @ApiOperation({ summary: 'Get CAD availability and capabilities' })
   @Get('capabilities')
   async capabilities(@Req() req: RequestWithCurrentUser) {
     const user = this.user(req);
@@ -32,41 +33,54 @@ export class CadController {
     this.cad.require(user, 'cad.view');
     return { enabled: true, ...await this.cad.client.capabilities() };
   }
+  @ApiOperation({ summary: 'List CAD recipes' })
   @Get('recipes')
   async recipes(@Req() req: RequestWithCurrentUser) { this.cad.require(this.user(req), 'cad.view'); return this.cad.client.catalog(); }
+  @ApiOperation({ summary: 'List milling type recipe mappings' })
   @Get('mappings')
   mappings(@Req() req: RequestWithCurrentUser) { return this.cad.mappings(this.user(req)); }
+  @ApiOperation({ summary: 'Update a milling type recipe mapping' })
   @Post('mappings/:id')
   map(@Req() req: RequestWithCurrentUser, @Param('id') id: string, @Headers('idempotency-key') key: string, @Body() body: unknown) {
     const value = parse(z.object({ recipe: cadRecipeSchema, revision: z.number().int().nonnegative() }).strict(), body);
     return this.cad.mapRecipe(this.user(req), numberId(id), value.recipe, value.revision, key);
   }
+  @ApiOperation({ summary: 'Get the CAD workspace for an order' })
   @Get('orders/:id')
   workspace(@Req() req: RequestWithCurrentUser, @Param('id') id: string) { return this.cad.workspace(this.user(req), numberId(id)); }
+  @ApiOperation({ summary: 'Create and render the original CAD variant' })
   @Post('orders/:id/render')
   create(@Req() req: RequestWithCurrentUser, @Param('id') id: string, @Headers('idempotency-key') key: string) { return this.cad.create(this.user(req), numberId(id), key); }
+  @ApiOperation({ summary: 'Capture an order source snapshot' })
   @Post('orders/:id/source')
   source(@Req() req: RequestWithCurrentUser, @Param('id') id: string, @Headers('idempotency-key') key: string) { return this.cad.source(this.user(req), numberId(id), key); }
+  @ApiOperation({ summary: 'Save a CAD variant revision' })
   @Post('variants/:id/save')
   save(@Req() req: RequestWithCurrentUser, @Param('id') id: string, @Headers('idempotency-key') key: string, @Body() body: unknown) {
     const v = parse(saveBody, body); return this.cad.save(this.user(req), uuid(id), v.version, v.groups, v.sourceIds, key);
   }
+  @ApiOperation({ summary: 'Compare CAD sources with current order details' })
   @Get('variants/:id/source-status')
   sourceStatus(@Req() req: RequestWithCurrentUser, @Param('id') id: string) { return this.cad.sourceStatus(this.user(req), uuid(id)); }
+  @ApiOperation({ summary: 'Clone a CAD variant' })
   @Post('variants/:id/clone')
   clone(@Req() req: RequestWithCurrentUser, @Param('id') id: string, @Headers('idempotency-key') key: string, @Body() body: unknown) {
     const v = parse(cloneBody, body); return this.cad.clone(this.user(req), uuid(id), v.name, v.refresh, key);
   }
+  @ApiOperation({ summary: 'Render a CAD variant revision' })
   @Post('variants/:id/render')
   render(@Req() req: RequestWithCurrentUser, @Param('id') id: string, @Headers('idempotency-key') key: string, @Body() body: unknown) {
     return this.cad.render(this.user(req), uuid(id), parse(versionBody, body).version, key);
   }
+  @ApiOperation({ summary: 'Get the render run for a CAD revision' })
   @Get('variants/:id/runs/:revision')
   run(@Req() req: RequestWithCurrentUser, @Param('id') id: string, @Param('revision') revision: string) { return this.cad.run(this.user(req), uuid(id), numberId(revision)); }
+  @ApiOperation({ summary: 'Request an approved CAD production package' })
   @Post('variants/:id/package')
   package(@Req() req: RequestWithCurrentUser, @Param('id') id: string, @Headers('idempotency-key') key: string, @Body() body: unknown) {
     return this.cad.requestPackage(this.user(req), uuid(id), parse(versionBody, body).version, key);
   }
+  @ApiOperation({ summary: 'Download an artifact from an approved CAD run' })
   @Get('runs/:runId/artifacts/:id')
   async download(@Req() req: RequestWithCurrentUser, @Param('runId') runId: string, @Param('id') id: string, @Res() res: Response) {
     const response = await this.cad.download(this.user(req), uuid(runId), parse(z.string().regex(/^[a-z0-9]{32}$/), id));
