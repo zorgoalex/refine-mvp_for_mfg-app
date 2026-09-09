@@ -92,6 +92,9 @@ import { ROLE_TO_ROLE_ID, type UserRole } from '../../permissions/permissions';
         const productionInitializationConsumer: OutboxConsumer = {
           supports: (eventType) => eventType === 'orders.production_initialized',
           process: async (client, event) => {
+            // New conversions already registered deadlines atomically. Keep
+            // unmarked historical events on the legacy gated path below.
+            if (event.payload.deadlineInitialization === 'transactional_v1') return;
             const enabled =
               config.get('BACKEND_ENABLE_DEADLINES', { infer: true }) &&
               !config.get('BACKEND_DEADLINES_READ_ONLY', { infer: true }) &&

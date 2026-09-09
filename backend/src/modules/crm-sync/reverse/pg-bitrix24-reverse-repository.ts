@@ -2,6 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { AuditService } from '../../../common/audit/audit.service';
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
+import { ROLE_TO_ROLE_ID, type UserRole } from '../../../permissions/permissions';
+import { PgOrderDeadlineSync } from '../../deadlines/adapters/pg-order-deadline-sync';
 import {
   calculateDetailArea,
   calculateDetailCost,
@@ -2499,7 +2501,7 @@ export class PgBitrix24ReverseRepository {
     idempotencyKey: string;
     actorUserId: number;
     actorUsername: string;
-    actorRole: string;
+    actorRole: UserRole;
     requestId: string;
     scope: { mode: 'all' } | { mode: 'assigned'; userId: number };
     initialOrderStatusCode: string;
@@ -2730,23 +2732,6 @@ export class PgBitrix24ReverseRepository {
         projectCode = project.rows[0].code;
       }
 
-      await tx.query(
-        `UPDATE order_details
-            SET production_status_id=$2
-          WHERE order_id=$1 AND delete_flag=false`,
-        [input.orderId, status.production_status_id],
-      );
-      await tx.query(
-        `INSERT INTO production_status_events (
-           detail_id, production_status_id, event_by, note, payload
-         )
-         SELECT detail_id, $2, $3, 'CRM request conversion',
-                jsonb_build_object('origin','crm_request_conversion')
-           FROM order_details
-          WHERE order_id=$1 AND delete_flag=false
-         ON CONFLICT DO NOTHING`,
-        [input.orderId, status.production_status_id, input.actorUserId],
-      );
       const totals = await tx.query<{
         parts_count: string | number;
         total_area: string | number;
@@ -2791,6 +2776,25 @@ export class PgBitrix24ReverseRepository {
           totalAmount,
           finalAmount,
         ],
+      );
+      await tx.query(
+        // The parent must already be production: detail status triggers roll
+        // the status back up to it, which is forbidden for a CRM precursor.
+        `UPDATE order_details
+            SET production_status_id=$2
+          WHERE order_id=$1 AND delete_flag=false`,
+        [input.orderId, status.production_status_id],
+      );
+      await tx.query(
+        `INSERT INTO production_status_events (
+           detail_id, production_status_id, event_by, note, payload
+         )
+         SELECT detail_id, $2, $3, 'CRM request conversion',
+                jsonb_build_object('origin','crm_request_conversion')
+           FROM order_details
+          WHERE order_id=$1 AND delete_flag=false
+         ON CONFLICT DO NOTHING`,
+        [input.orderId, status.production_status_id, input.actorUserId],
       );
       await tx.query(
         `INSERT INTO production_status_events (
@@ -2854,12 +2858,27 @@ export class PgBitrix24ReverseRepository {
           requestId: input.requestId,
         },
       });
+      // Register only already planned dates. Deadline history/audit/outbox use
+      // this same transaction; a failure must roll back the whole conversion.
+      await new PgOrderDeadlineSync(this.db).syncOrderDeadlinesInTransaction(tx, {
+        orderId: input.orderId,
+        currentUser: {
+          id: String(input.actorUserId),
+          username: input.actorUsername,
+          role: input.actorRole,
+          roleId: ROLE_TO_ROLE_ID[input.actorRole],
+          permissions: [],
+        },
+        eventType: 'ORDER_CREATED',
+        requestId: input.requestId,
+      }, false);
       await enqueueDomainEvent(tx, {
         eventType: 'orders.production_initialized',
         aggregateType: 'order',
         aggregateId: String(input.orderId),
         idempotencyKey: `production-init:${input.orderId}:${input.idempotencyKey}`,
         payload: {
+          deadlineInitialization: 'transactional_v1',
           orderId: input.orderId,
           actorUserId: input.actorUserId,
           actorUsername: input.actorUsername,

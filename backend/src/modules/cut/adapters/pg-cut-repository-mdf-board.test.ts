@@ -61,12 +61,27 @@ describe('MDF board status projection', () => {
     });
   });
 
-  it('keeps hidden cards non-clickable and enables ready missing cards', () => {
+  it('allows restoring a hidden ready bath without exposing a navigation target', () => {
     expect(buildMdfBoardStatus(row({ card_kind: 'bath', hidden_packet_count: 1 }))).toMatchObject({
-      state: 'hidden', target: null, canCreateCard: false,
+      state: 'hidden', target: null, canCreateCard: true, canDeleteCard: false,
     });
-    expect(buildMdfBoardStatus(row({ card_kind: 'bath' }))).toMatchObject({
-      state: 'not_created', target: null, canCreateCard: true,
+  });
+
+  it('keeps a hidden ready machine-file card non-clickable and unavailable for creation', () => {
+    expect(buildMdfBoardStatus(row({ card_kind: 'machine_file', hidden_packet_count: 1 }))).toMatchObject({
+      state: 'hidden', target: null, canCreateCard: false, canDeleteCard: false,
+    });
+  });
+
+  it.each(['draft', 'calculating', 'failed', 'archived'])('does not offer to restore a hidden %s bath', (status) => {
+    expect(buildMdfBoardStatus(row({ card_kind: 'bath', hidden_packet_count: 1, status }))).toMatchObject({
+      state: 'hidden', target: null, canCreateCard: false, canDeleteCard: false,
+    });
+  });
+
+  it.each(['bath', 'machine_file'])('enables creation of a ready missing %s card', (cardKind) => {
+    expect(buildMdfBoardStatus(row({ card_kind: cardKind }))).toMatchObject({
+      state: 'not_created', target: null, canCreateCard: true, canDeleteCard: false,
     });
   });
 

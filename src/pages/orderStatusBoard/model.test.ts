@@ -18,6 +18,7 @@ import {
   buildCncOriginalCurrentLocations,
   buildCncMachineColumnCards,
   buildCncOrderReadiness,
+  cncOrderReadinessProgress,
   buildCncOrderStatusBoardRequestKey,
   cncRelationStatePriority,
   cncManualMoveDestinations,
@@ -61,6 +62,107 @@ import {
 import { filterVisibleStatusBoardColumns } from './statusBoardColumnVisibility';
 
 describe('order status board model', () => {
+  it.each(['cnc', 'bazis', 'bath', 'history'] as const)(
+    'does not let excess A from %s cover missing B or show 100 percent', (kind) => {
+      const order = card(2705, { partsCount: 10, details: [
+        { detailId: 101, detailNumber: 1, quantity: 5, bazisCutQuantity: 0 },
+        { detailId: 102, detailNumber: 2, quantity: 5, bazisCutQuantity: 0 },
+      ] });
+      const packet = cncPacket('excess-a', ['2705'], [2705], [2705], [101]);
+      packet.items[0] = { ...packet.items[0], quantity: 10 };
+      const set = cncBazisCutSet(9001, [{ orderName: '2705', orderId: 2705, detailId: 101 }]);
+      set.items[0].quantity = 10;
+      const bath = { ...cncBath('excess-a', ['2705'], [2705]), items: [{
+        ...cncBath('excess-a', ['2705'], [2705]).items[0], detailId: 101, detailNumber: 1, quantity: 10,
+      }] };
+      const columns: CncTelegramTodayColumn[] = [{
+        key: kind === 'bath' ? 'baths_laminated' : 'completed', title: 'Source', total: 1,
+        packets: kind === 'cnc' ? [packet] : [], bazisCutSets: kind === 'bazis' ? [set] : [],
+        baths: kind === 'bath' ? [bath] : [],
+      }];
+      const sources = buildCncOrderReadiness(columns, {}, kind === 'history'
+        ? [{ bathCardId: 'old-a', forced: false, items: [{ orderId: 2705, orderName: '2705', detailId: 101, detailNumber: 1, quantity: 10 }] }]
+        : []);
+      const split = splitCncOrderCardsByManualColumn([order], sources, {});
+      expect(split.orders_ready).toEqual([]);
+      expect(split.orders[0].readiness).toMatchObject({
+        totalDetails: 10, remainingDetails: 5,
+        cutDetails: kind === 'cnc' || kind === 'bazis' ? 10 : 0,
+        rolledDetails: kind === 'cnc' || kind === 'bazis' ? 0 : 10,
+      });
+      const progress = cncOrderReadinessProgress(split.orders[0].readiness);
+      expect(progress.cutPercent + progress.rolledPercent).toBe(50);
+      expect(splitCncOrderCardsByManualColumn([{ ...order, orderStatusName: 'В производстве' }], sources, {})
+        .orders[0].readiness.remainingDetails).toBe(5);
+    },
+  );
+
+  it.each([0, 2, 5])('counts B deficit independently when B cut quantity is %s', (bQuantity) => {
+    const order = card(2705, { partsCount: 10, details: [
+      { detailId: 101, detailNumber: 1, quantity: 5, bazisCutQuantity: 0 },
+      { detailId: 102, detailNumber: 2, quantity: 5, bazisCutQuantity: 0 },
+    ] });
+    const packet = cncPacket('a-b', ['2705', '2705'], [2705, 2705], [2705, 2705], [101, 102]);
+    packet.items[0].quantity = 10;
+    packet.items[1].quantity = bQuantity;
+    const split = splitCncOrderCardsByManualColumn([order], buildCncOrderReadiness([
+      { key: 'completed', title: 'Cut', total: 1, packets: [packet], baths: [] },
+    ], {}), {});
+    const entry = [...split.orders, ...split.orders_ready][0];
+    expect(entry.readiness.remainingDetails).toBe(5 - bQuantity);
+    expect(entry.readiness.cutDetails).toBe(10 + bQuantity);
+    expect(split.orders_ready).toHaveLength(bQuantity === 5 ? 1 : 0);
+    expect(cncOrderReadinessProgress(entry.readiness).cutPercent).toBe(50 + bQuantity * 10);
+  });
+
+  it('does not infer readiness from aggregate quantities without source position identity or order composition', () => {
+    const order = card(2705, { partsCount: 10, details: [
+      { detailId: 101, detailNumber: 1, quantity: 10, bazisCutQuantity: 0 },
+    ] });
+    const aggregate = new Map([[2705, { totalDetails: 10, cutDetails: 10, rolledDetails: 0, remainingDetails: 0 }]]);
+    expect(splitCncOrderCardsByManualColumn([order], aggregate, {}).orders[0]?.readiness.remainingDetails).toBe(10);
+    const unknown = cncPacket('unmatched', ['2705'], [2705]);
+    unknown.items[0].quantity = 10;
+    const sources = buildCncOrderReadiness([{ key: 'completed', title: 'Cut', total: 1, packets: [unknown], baths: [] }], {});
+    expect(splitCncOrderCardsByManualColumn([order], sources, {}).orders[0]?.readiness.remainingDetails).toBe(10);
+    expect(splitCncOrderCardsByManualColumn([{ ...order, details: [] }], sources, {}).orders[0]?.readiness.remainingDetails).toBe(10);
+  });
+
+  it.each(['same-id', 'number-only', 'foreign-id', 'ambiguous-number'] as const)(
+    'sums independent CNC and BASIS portions with safe %s matching', (identity) => {
+      const order = card(2705, { partsCount: 10, details: [
+        { detailId: 101, detailNumber: 1, quantity: 5, bazisCutQuantity: 0 },
+        { detailId: 102, detailNumber: identity === 'ambiguous-number' ? 1 : 2, quantity: 5, bazisCutQuantity: 0 },
+      ] });
+      const packet = cncPacket('part', ['2705'], [2705], [2705], [101]);
+      packet.items[0].quantity = 2;
+      const set = cncBazisCutSet(9001, [{ orderName: '2705', orderId: 2705,
+        detailId: identity === 'same-id' ? 101 : identity === 'foreign-id' ? 999 : null }]);
+      set.items[0] = { ...set.items[0], detailNumber: 1, quantity: 3 };
+      const sources = buildCncOrderReadiness([
+        { key: 'parsed', title: 'Machine', total: 2, packets: [packet], bazisCutSets: [set], baths: [] },
+      ], { 'packet:part': 'completed', 'bazisCutSet:9001': 'completed' });
+      const remaining = identity === 'same-id' || identity === 'number-only' ? 5 : 8;
+      expect(splitCncOrderCardsByManualColumn([order], sources, {}).orders[0]?.readiness)
+        .toMatchObject({ cutDetails: 5, remainingDetails: remaining });
+    },
+  );
+
+  it('does not add rolled volume to the cut volume of the same position', () => {
+    const order = card(2705, { partsCount: 15, details: [
+      { detailId: 101, detailNumber: 1, quantity: 10, bazisCutQuantity: 0 },
+      { detailId: 102, detailNumber: 2, quantity: 5, bazisCutQuantity: 0 },
+    ] });
+    const packet = cncPacket('cut-a', ['2705'], [2705], [2705], [101]);
+    packet.items[0].quantity = 5;
+    const sources = buildCncOrderReadiness([
+      { key: 'completed', title: 'Cut', total: 1, packets: [packet], baths: [] },
+    ], {}, [{ bathCardId: 'old-a', forced: false, items: [
+      { orderId: 2705, orderName: '2705', detailId: 101, detailNumber: 1, quantity: 5 },
+    ] }]);
+    expect(splitCncOrderCardsByManualColumn([order], sources, {}).orders[0]?.readiness.remainingDetails).toBe(10);
+  });
+
   it.each([
     ['packet', false], ['packet', true],
     ['bazisCutSet', false], ['bazisCutSet', true],
@@ -153,7 +255,8 @@ describe('order status board model', () => {
       const moves: CncBoardManualMoveState = {
         [cncManualMoveStorageKey(sourceKind, sourceKind === 'packet' ? 'only-b' : '9001')]: 'completed',
       };
-      const orderCards = [card(2706, { partsCount: 1 }), card(2707, { partsCount: 2 }), card(2708, { partsCount: 1 })];
+      const orderCards = [card(2706, { partsCount: 1, details: [orderDetail(101)] }),
+        card(2707, { partsCount: 2, details: [orderDetail(201), orderDetail(202)] }), card(2708, { partsCount: 1 })];
       const before = JSON.stringify(columns);
       const activeColumns = applyMdfBoardHiddenCardRulesToColumns(columns, orderCards, null, new Set(), new Set());
       const readiness = buildCncOrderReadiness(applyCncManualMovesToColumns(activeColumns, moves), {});
@@ -167,7 +270,7 @@ describe('order status board model', () => {
       expect(visibleColumns[0].packets).toEqual([mixed]);
       expect(visibleColumns[0].packets[0].items).toHaveLength(2);
       expect(visibleColumns[1].total).toBe(0);
-      expect(result.orders_ready.find(({ card: order }) => order.orderId === 2707)?.readiness).toEqual({
+      expect(result.orders_ready.find(({ card: order }) => order.orderId === 2707)?.readiness).toMatchObject({
         totalDetails: 2, cutDetails: 2, rolledDetails: 0, remainingDetails: 0,
       });
       expect(result.orders_ready).toEqual(
@@ -189,11 +292,12 @@ describe('order status board model', () => {
     ];
     const facts = [{ bathCardId: 'old-b', forced: false,
       items: [{ orderId: 2707, orderName: '2707', detailId: 201, detailNumber: 1, quantity: 1 }] }];
-    const cards = [card(2706, { partsCount: 1 }), card(2707, { partsCount: 2 })];
+    const cards = [card(2706, { partsCount: 1, details: [orderDetail(101)] }),
+      card(2707, { partsCount: 2, details: [orderDetail(201, 2)] })];
     const visibleIds = collectCncOrderIds(filterCncTodayColumnsByOrders(columns, ['2706']));
     const result = splitCncOrderCardsByManualColumn(cards.filter((order) => visibleIds.includes(order.orderId)),
       buildCncOrderReadiness(columns, {}, facts), {});
-    expect(result.orders_ready.find(({ card: order }) => order.orderId === 2707)?.readiness).toEqual({
+    expect(result.orders_ready.find(({ card: order }) => order.orderId === 2707)?.readiness).toMatchObject({
       totalDetails: 2, cutDetails: 1, rolledDetails: 1, remainingDetails: 0,
     });
     expect(filterCncHistoricalBathReadiness(facts, columns, ['2706'], false)).toEqual([]);
@@ -224,7 +328,10 @@ describe('order status board model', () => {
   });
 
   it('preserves rolled volume using historical facts without recreating old cards', () => {
-    const bath = cncBath('cut-result:9', ['2706', '2707'], [2706, 2707]);
+    const originalBath = cncBath('cut-result:9', ['2706', '2707'], [2706, 2707]);
+    const bath = { ...originalBath, items: originalBath.items.map((item, index) => ({
+      ...item, detailId: 101 + index, detailNumber: 1,
+    })) };
     const columns: CncTelegramTodayColumn[] = [{
       key: 'completed_baths', title: 'Завершенные ванны', total: 1,
       packets: [], baths: [bath], bazisCutSets: [],
@@ -975,19 +1082,19 @@ describe('order status board model', () => {
 
     const readiness = buildCncOrderReadiness(columns, manualMoves);
 
-    expect(readiness.get(2706)).toEqual({
+    expect(readiness.get(2706)).toMatchObject({
       totalDetails: 1,
       cutDetails: 1,
       rolledDetails: 0,
       remainingDetails: 0,
     });
-    expect(readiness.get(2712)).toEqual({
+    expect(readiness.get(2712)).toMatchObject({
       totalDetails: 1,
       cutDetails: 1,
       rolledDetails: 0,
       remainingDetails: 0,
     });
-    expect(readiness.get(3000)).toEqual({
+    expect(readiness.get(3000)).toMatchObject({
       totalDetails: 1,
       cutDetails: 0,
       rolledDetails: 1,
@@ -1023,7 +1130,7 @@ describe('order status board model', () => {
 
     const readiness = buildCncOrderReadiness(columns, {});
 
-    expect(readiness.get(2705)).toEqual({
+    expect(readiness.get(2705)).toMatchObject({
       totalDetails: 4,
       cutDetails: 4,
       rolledDetails: 0,
@@ -1046,12 +1153,12 @@ describe('order status board model', () => {
       { key: 'completed', title: 'Распилено', total: 3, packets, bazisCutSets: [sets[0]], baths: [] },
       { key: 'parsed', title: 'Файлы на станке', total: 1, packets: [], bazisCutSets: [sets[1]], baths: [] },
     ];
-    expect(buildCncOrderReadiness(columns, {}).get(2705)).toEqual({
+    expect(buildCncOrderReadiness(columns, {}).get(2705)).toMatchObject({
       totalDetails: 10, cutDetails: 7, rolledDetails: 0, remainingDetails: 3,
     });
     expect(buildCncOrderReadiness(columns, {
       [cncManualMoveStorageKey('bazisCutSet', '9002')]: 'completed',
-    }).get(2705)).toEqual({ totalDetails: 10, cutDetails: 10, rolledDetails: 0, remainingDetails: 0 });
+    }).get(2705)).toMatchObject({ totalDetails: 10, cutDetails: 10, rolledDetails: 0, remainingDetails: 0 });
   });
 
   it('shows additive excess after rolling without counting the bath as another cut source', () => {
@@ -1066,10 +1173,10 @@ describe('order status board model', () => {
       { key: 'baths_laminated', title: 'Закатано', total: 1, packets: [], baths: [bath] },
     ];
     const split = splitCncOrderCardsByManualColumn(
-      [{ ...card(2705), partsCount: 10, orderStatusName: 'В производстве' }],
+      [{ ...card(2705), partsCount: 10, details: [orderDetail(101, 10)], orderStatusName: 'В производстве' }],
       buildCncOrderReadiness(columns, {}), {},
     );
-    expect(split.orders[0]?.readiness).toEqual({
+    expect(split.orders[0]?.readiness).toMatchObject({
       totalDetails: 10, cutDetails: 7, rolledDetails: 5, remainingDetails: 0,
     });
   });
@@ -1141,13 +1248,14 @@ describe('order status board model', () => {
 
     const readiness = buildCncOrderReadiness(columns, {});
     const split = splitCncOrderCardsByManualColumn(
-      [{ ...card(2678), orderName: '2678', partsCount: 80 }],
+      [{ ...card(2678), orderName: '2678', partsCount: 80,
+        details: [orderDetail(267801, 20), orderDetail(267802, 13), orderDetail(267803, 47)] }],
       readiness,
       {},
     );
 
     expect(readiness.get(2678)?.cutDetails).toBe(33);
-    expect(split.orders[0]?.readiness).toEqual({
+    expect(split.orders[0]?.readiness).toMatchObject({
       totalDetails: 80,
       cutDetails: 33,
       rolledDetails: 0,
@@ -1157,20 +1265,21 @@ describe('order status board model', () => {
 
   it('keeps MDF order readiness total at least the order detail count', () => {
     const split = splitCncOrderCardsByManualColumn(
-      [{ ...card(501), partsCount: 50 }],
+      [{ ...card(501), partsCount: 50, details: [orderDetail(501, 40)] }],
       new Map([
         [501, {
           totalDetails: 40,
           cutDetails: 25,
           rolledDetails: 15,
           remainingDetails: 0,
+          positionQuantities: new Map([['id:501', { cut: 40, rolled: 15 }]]),
         }],
       ]),
       {},
     );
 
     expect(split.orders.map(({ card: item }) => item.orderId)).toEqual([501]);
-    expect(split.orders[0]?.readiness).toEqual({
+    expect(split.orders[0]?.readiness).toMatchObject({
       totalDetails: 50,
       cutDetails: 25,
       rolledDetails: 15,
@@ -1181,13 +1290,14 @@ describe('order status board model', () => {
 
   it('preserves excess cut quantity while using ordered quantity as the denominator', () => {
     const split = splitCncOrderCardsByManualColumn(
-      [{ ...card(2705), partsCount: 34 }],
+      [{ ...card(2705), partsCount: 34, details: [orderDetail(101, 34)] }],
       new Map([
         [2705, {
           totalDetails: 53,
           cutDetails: 53,
           rolledDetails: 0,
           remainingDetails: 0,
+          positionQuantities: new Map([['id:101', { cut: 53, rolled: 0 }]]),
         }],
       ]),
       {},
@@ -1195,7 +1305,7 @@ describe('order status board model', () => {
 
     expect(split.orders).toEqual([]);
     expect(split.orders_ready.map(({ card: item }) => item.orderId)).toEqual([2705]);
-    expect(split.orders_ready[0]?.readiness).toEqual({
+    expect(split.orders_ready[0]?.readiness).toMatchObject({
       totalDetails: 34,
       cutDetails: 53,
       rolledDetails: 0,
@@ -1205,11 +1315,13 @@ describe('order status board model', () => {
 
   it('keeps both numeric stage counts above the order quantity without a negative remainder', () => {
     const split = splitCncOrderCardsByManualColumn(
-      [{ ...card(2705), partsCount: 10, orderStatusName: 'В производстве' }],
-      new Map([[2705, { totalDetails: 15, cutDetails: 3, rolledDetails: 12, remainingDetails: 0 }]]),
+      [{ ...card(2705), partsCount: 10, details: [orderDetail(101, 10)], orderStatusName: 'В производстве' }],
+      new Map([[2705, { totalDetails: 15, cutDetails: 3, rolledDetails: 12, remainingDetails: 0,
+        positionQuantities: new Map([['id:101', { cut: 15, rolled: 12 }]]),
+      }]]),
       {},
     );
-    expect(split.orders[0]?.readiness).toEqual({
+    expect(split.orders[0]?.readiness).toMatchObject({
       totalDetails: 10, cutDetails: 3, rolledDetails: 12, remainingDetails: 0,
     });
     expect(split.orders_ready).toEqual([]); // real order status still owns placement
@@ -1220,7 +1332,7 @@ describe('order status board model', () => {
       [
         card(3001, { orderStatusName: 'Выдан' }),
         card(3002, { orderStatusName: ' готов к выдаче ' }),
-        card(3003, { orderStatusName: 'Новый', partsCount: 2 }),
+        card(3003, { orderStatusName: 'Новый', partsCount: 2, details: [orderDetail(101, 2)] }),
         card(3004, { orderStatusName: 'Новый' }),
       ],
       new Map([
@@ -1229,6 +1341,7 @@ describe('order status board model', () => {
           cutDetails: 2,
           rolledDetails: 0,
           remainingDetails: 0,
+          positionQuantities: new Map([['id:101', { cut: 2, rolled: 0 }]]),
         }],
       ]),
       {
@@ -1841,6 +1954,10 @@ function column(
     cards,
     nextCursor,
   };
+}
+
+function orderDetail(detailId: number, quantity = 1, detailNumber: number | null = detailId) {
+  return { detailId, detailNumber, quantity, bazisCutQuantity: 0 };
 }
 
 function card(
