@@ -1,7 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { getMaterialsForCard, hasDrawnProductionStatus } from './statusColors';
+import { getMaterialsForCard, hasDrawnProductionStatus, areAllProductionStagesReady } from './statusColors';
+
+describe('all production ready uses ordinary detail composition', () => {
+  it('does not trust a packed header, ignore nulls or accept an empty order', () => {
+    for (const details of [[], [{ production_status_name: 'Упакован' }, { production_status_name: null }],
+      [{ production_status_name: 'Упакован' }, { production_status_name: 'Распилен' }]]) {
+      expect(areAllProductionStagesReady({ production_status_name: 'Упакован', order_details: details })).toBe(false);
+    }
+  });
+  it('accepts all packed details without including deleted ones', () => {
+    expect(areAllProductionStagesReady({ production_detail_count: 2, order_details: [
+      { production_status_name: 'Упакован' }, { production_status_name: 'Упакован' },
+      { production_status_name: null, delete_flag: true },
+    ] })).toBe(true);
+  });
+});
 
 describe('calendar material card tags', () => {
   it('renders short material tags from resolved sheet material names', () => {

@@ -1,5 +1,29 @@
 # ERP Backend Stage 1
 
+## Order goods and services
+
+Order create/update accepts optional `catalogLines`: `id` (existing) or `clientKey`
+(new), `catalogItemId`, `catalogVersion` (new selection), decimal-string `quantity`
+(up to three fractional digits), decimal-string `unitPrice` (up to two), and `notes`.
+Prices default in the UI; the command validates explicit prices and snapshots the
+catalogue name, type, unit and `1C_key`. Existing rows keep those snapshots when the
+catalogue changes. `deleted.catalogLineIds` explicitly removes owned rows; omitting
+`catalogLines` preserves them. Parent order version and existing financial permissions
+apply. Row changes, totals, audit and outbox commit atomically.
+
+A normal order must retain at least one active detail or goods/service row. Its amount
+includes both subtotals, with the existing discount/surcharge applied once. Goods-only
+orders have no manufacturing detail count or area. CRM requests may remain empty until
+conversion, which requires the same union of positions.
+
+Excel, Google Drive and production PDF remain details-only. Google Drive rejects a
+goods-only order with `422 ORDER_EXPORT_DETAILS_REQUIRED`, without calling the provider.
+JSON snapshots include catalogue rows and require valid catalogue reference mappings
+when imported into another instance; existing-order imports retain their skip policy.
+
+Apply migration `162_order_catalog_lines.sql` before this backend. After using catalogue
+rows, do not downgrade to a detail-only backend: retain compatible code and forward-fix.
+
 This directory is the starting point for the stage-1 backend migration described in
 `../spec_back-erp/prd_v1/prd_backend-erp.md`.
 

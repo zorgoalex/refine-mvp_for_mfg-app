@@ -18,6 +18,7 @@ import {
 import { calculateOrderTotalArea } from '../utils/orderArea';
 import { getWorkspaceStateNamespace } from '../workspace/workspaceStateNamespace';
 import { businessOrderDetails } from '../utils/orderDetailRows';
+import { orderCatalogSubtotal, type OrderCatalogLine } from '../utils/orderCatalogLines';
 
 // ============================================================================
 // UNIQUE ID GENERATOR
@@ -37,6 +38,9 @@ const generateTempId = (): number => {
   // ========== STATE ==========
   header: Partial<Order>;
   details: OrderDetail[];
+  catalogLines: OrderCatalogLine[];
+  deletedCatalogLineIds: number[];
+  setCatalogLines: (lines: OrderCatalogLine[], deletedIds?: number[]) => void;
   hdfDetails: OrderHdfDetail[];
   dirtyHdfDetailIds: number[];
   payments: Payment[];
@@ -140,6 +144,8 @@ const generateTempId = (): number => {
       production_status_from_details_enabled: true, // По умолчанию автообновление включено
     },
     details: [],
+    catalogLines: [],
+    deletedCatalogLineIds: [],
     hdfDetails: [],
     dirtyHdfDetailIds: [],
     payments: [],
@@ -640,6 +646,12 @@ const createOrderDraftStore = (orderKey: string, namespace: string): OrderDraftS
             'deleteDowelingLink'
           ),
 
+        setCatalogLines: (lines, deletedIds = []) => {
+          set(state => ({ catalogLines: lines, deletedCatalogLineIds: [...new Set([...state.deletedCatalogLineIds, ...deletedIds])],
+            isDirty: true, isTotalAmountManual: false }), false, 'setCatalogLines');
+          get().recalculateFinancials();
+        },
+
         // ========== COMPUTED ==========
         calculatedTotals: () => {
           const state = get();
@@ -649,7 +661,7 @@ const createOrderDraftStore = (orderKey: string, namespace: string): OrderDraftS
             parts_count: businessDetails.reduce((sum, d) => sum + (d.quantity || 0), 0), // Количество деталей (сумма quantity)
             total_area: calculateOrderTotalArea(businessDetails),
             total_paid: state.payments.reduce((sum, p) => sum + (p.amount || 0), 0),
-            total_amount: businessDetails.reduce((sum, d) => sum + (d.detail_cost || 0), 0), // Сумма всех detail_cost
+            total_amount: businessDetails.reduce((sum, d) => sum + (d.detail_cost || 0), 0) + orderCatalogSubtotal(state.catalogLines),
           };
         },
 
@@ -660,7 +672,7 @@ const createOrderDraftStore = (orderKey: string, namespace: string): OrderDraftS
           set(
             (state) => {
               const totalAmount = businessOrderDetails(state.details)
-                .reduce((sum, d) => sum + (d.detail_cost || 0), 0);
+                .reduce((sum, d) => sum + (d.detail_cost || 0), 0) + orderCatalogSubtotal(state.catalogLines);
               const discount = state.header.discount || 0;
               const surcharge = state.header.surcharge || 0;
               // Formula: final_amount = total_amount - discount + surcharge
@@ -701,6 +713,8 @@ const createOrderDraftStore = (orderKey: string, namespace: string): OrderDraftS
                   temp_id: d.detail_id || generateTempId(),
                 })) || [],
               hdfDetails: order.hdfDetails || [],
+              catalogLines: order.catalogLines || [],
+              deletedCatalogLineIds: [],
               dirtyHdfDetailIds: [],
               payments:
                 order.payments?.map((p) => ({
@@ -788,6 +802,8 @@ const createOrderDraftStore = (orderKey: string, namespace: string): OrderDraftS
           const formValues = {
             header: state.header as Order,
             details: state.details,
+            catalogLines: state.catalogLines,
+            deletedCatalogLineIds: state.deletedCatalogLineIds,
             hdfDetails: state.hdfDetails,
             dirtyHdfDetailIds: state.dirtyHdfDetailIds,
             payments: state.payments,
@@ -878,6 +894,7 @@ const createOrderDraftStore = (orderKey: string, namespace: string): OrderDraftS
                 return acc;
               }, {}),
               // Clear deleted trackers after sync
+              deletedCatalogLineIds: [],
               deletedDetails: [],
               deletedHdfDetails: [],
               dirtyHdfDetailIds: [],
@@ -937,6 +954,8 @@ const createOrderDraftStore = (orderKey: string, namespace: string): OrderDraftS
         partialize: (state) => ({
           header: state.header,
           details: state.details,
+          catalogLines: state.catalogLines,
+          deletedCatalogLineIds: state.deletedCatalogLineIds,
           payments: state.payments,
           workshops: state.workshops,
           requirements: state.requirements,

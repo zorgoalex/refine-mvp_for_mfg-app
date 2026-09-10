@@ -140,15 +140,14 @@ export function getCardBorderColor(order: {
 /**
  * Проверяет, все ли статусы производства в "Готов"
  * @param order - объект заказа
- * @returns true если статус производства = "Упакован" (последняя стадия)
- *
- * Статус производства хранится на уровне заказа (orders.production_status_id)
- * и отображается в orders_view как production_status_name.
+ * @returns true только для полного непустого состава обычных деталей,
+ * в котором каждая деталь упакована. Производственная сводка не является доказательством.
  */
 export function areAllProductionStagesReady(order: Record<string, any>): boolean {
-  const status = order.production_status_name?.toLowerCase() || '';
-  // Считаем производство готовым, если статус "Упакован"
-  return status.includes('упаков');
+  const details = (order.order_details ?? []).filter((detail: { delete_flag?: boolean }) => detail.delete_flag !== true);
+  return details.length > 0 && details.length === order.production_detail_count
+    && details.every((detail: { production_status_name?: string | null }) =>
+      detail.production_status_name?.trim().toLocaleLowerCase('ru-RU') === 'упакован');
 }
 
 /**

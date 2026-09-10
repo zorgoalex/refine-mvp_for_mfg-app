@@ -7,6 +7,7 @@ import type { MenuProps } from 'antd';
 import { CalculatorOutlined, DownOutlined } from '@ant-design/icons';
 import { useSelect } from '../../../../query/orderLifecycleQueries';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
+import { orderCatalogSubtotal } from '../../../../utils/orderCatalogLines';
 import { formatNumber, numberParser } from '../../../../utils/numberFormat';
 import { CurrencyInput } from '../../../../components/CurrencyInput';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
@@ -18,7 +19,7 @@ import { calculateOrderTotalArea } from '../../../../utils/orderArea';
 import { businessOrderDetails } from '../../../../utils/orderDetailRows';
 
 export const OrderFinanceSection: React.FC = () => {
-  const { header, updateHeaderField, payments, details } = useOrderFormStore();
+  const { header, updateHeaderField, payments, details, catalogLines } = useOrderFormStore();
   const { getSetting } = useOrderAppSettings();
   const businessDetails = useMemo(
     () => businessOrderDetails(details),
@@ -37,8 +38,8 @@ export const OrderFinanceSection: React.FC = () => {
     parts_count: businessDetails.reduce((sum, d) => sum + (d.quantity || 0), 0),
     total_area: calculateOrderTotalArea(businessDetails),
     total_paid: payments.reduce((sum, p) => sum + (p.amount || 0), 0),
-    total_amount: businessDetails.reduce((sum, d) => sum + (d.detail_cost || 0), 0),
-  }), [businessDetails, payments]);
+    total_amount: businessDetails.reduce((sum, d) => sum + (d.detail_cost || 0), 0) + orderCatalogSubtotal(catalogLines),
+  }), [businessDetails, payments, catalogLines]);
 
   // State for showing/hiding percent input field
   const [showPercentInput, setShowPercentInput] = useState(false);
@@ -248,13 +249,17 @@ export const OrderFinanceSection: React.FC = () => {
         background: 'var(--app-surface-muted)',
       }}
     >
+      {catalogLines.length > 0 && <div style={{ marginBottom: 8, fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>
+        Детали: {businessDetails.reduce((sum, row) => sum + (row.detail_cost || 0), 0).toFixed(2)} {CURRENCY_SYMBOL}
+        {' · '}Товары/услуги: {orderCatalogSubtotal(catalogLines).toFixed(2)} {CURRENCY_SYMBOL}
+      </div>}
       <Form layout="vertical" size="small">
         <Row gutter={8}>
           {/* Общая сумма (read-only, авторасчёт из деталей) */}
           <Col span={3}>
             <Form.Item
               label={<span style={{ fontSize: 11 }}>Сумма заказа ({CURRENCY_SYMBOL})</span>}
-              tooltip="Авторасчёт из деталей"
+              tooltip="Авторасчёт из деталей и товаров/услуг"
               style={{ marginBottom: 0 }}
             >
               <InputNumber

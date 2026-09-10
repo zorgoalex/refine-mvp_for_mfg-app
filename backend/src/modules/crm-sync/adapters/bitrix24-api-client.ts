@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { bitrixActorId, bitrixFullName } from '../reverse/bitrix24-authorship';
 import { BITRIX24_ORIGINATOR_ID } from '../application/bitrix24-sync-mapper';
 
 export type Bitrix24RequestGuard = () => Promise<void>;
@@ -21,6 +22,7 @@ export interface Bitrix24ApiPort {
   findPaymentByXmlId(xmlId: string): Promise<string | null>;
   listDealPaymentIds(dealId: string): Promise<string[]>;
   getPayment(id: string): Promise<Record<string, unknown>>;
+  getUserDisplayName?(id: string): Promise<string | null>;
   createDealPayment(dealId: string): Promise<string>;
   updatePayment(id: string, fields: Record<string, unknown>): Promise<void>;
   deletePayment(id: string): Promise<void>;
@@ -74,6 +76,7 @@ interface BitrixEnvelope<T> {
 // Create methods are intentionally absent: a lost response can hide a successful
 // create, so repeating crm.item.add or crm.item.payment.add could create a duplicate.
 const NETWORK_RETRY_SAFE_METHODS = new Set([
+  'user.get',
   'crm.item.get',
   'crm.item.update',
   'crm.item.list',
@@ -133,6 +136,28 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
   private admissionTail: Promise<void> = Promise.resolve();
   private nextAdmissionAt = 0;
   private queryBlockedUntil = 0;
+  private readonly actorNames = new Map<string, { name: string | null; expires: number }>();
+  private actorLookupBlockedUntil = 0;
+
+  async getUserDisplayName(id: string): Promise<string | null> {
+    if (!bitrixActorId(id)) return null;
+    const cached = this.actorNames.get(id);
+    if (cached && cached.expires > this.now()) return cached.name;
+    if (this.actorLookupBlockedUntil > this.now()) return null;
+    let name: string | null = null;
+    try {
+      const users = await this.call<Array<Record<string, unknown>>>('user.get', { filter: { ID: id } });
+      const user = Array.isArray(users) ? users.find(user => user !== null && typeof user === 'object' && bitrixActorId(user.ID) === id) : undefined;
+      name = user ? bitrixFullName(user) : null;
+    } catch (error) {
+      // Ownership/lease errors must propagate; only optional REST enrichment may fail open.
+      if (!(error instanceof Bitrix24ApiError)) throw error;
+      this.actorLookupBlockedUntil = this.now() + 60_000;
+    }
+    if (this.actorNames.size >= 256) this.actorNames.delete(this.actorNames.keys().next().value!);
+    this.actorNames.set(id, { name, expires: this.now() + (name ? 300_000 : 60_000) });
+    return name;
+  }
 
   constructor(
     webhookUrl: string,

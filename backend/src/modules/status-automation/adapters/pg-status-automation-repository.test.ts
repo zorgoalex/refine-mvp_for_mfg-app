@@ -275,8 +275,12 @@ describe('PgStatusAutomationRepository', () => {
     expect(database.queries.some((entry) => /UPDATE status_automation_rules/.test(entry.text))).toBe(false);
   });
 
-  it('allows disabling an incompatible legacy MDF rule but rejects re-enabling it', async () => {
-    const before = ruleRow({ id: '41', version: '1', event_type: 'mdf.board.completed', is_enabled: true });
+  it.each([
+    ['mdf.board.completed', 'change_order_status'],
+    ['order.production_status_changed', 'change_details_production_status'],
+    ['order.production_status_changed', 'change_production_status'],
+  ])('allows disabling an incompatible legacy %s/%s rule but rejects re-enabling it', async (eventType, actionType) => {
+    const before = ruleRow({ id: '41', version: '1', event_type: eventType, action_type: actionType, is_enabled: true });
     const database = createDatabase({
       responses: ({ text }) => {
         if (text.includes('SELECT id, name')) return result([before]);
@@ -393,6 +397,9 @@ describe('PgStatusAutomationRepository', () => {
                 order_status_id: '2',
                 payment_status_id: '3',
                 production_status_id: null,
+                detail_count: '3',
+                unassigned_count: '1',
+                status_ids: [2, 6],
                 production_status_from_details_enabled: true,
                 final_amount: '1000.50',
                 paid_amount: '250.25',
@@ -410,6 +417,7 @@ describe('PgStatusAutomationRepository', () => {
       orderStatusId: 2,
       paymentStatusId: 3,
       productionStatusId: null,
+      productionSummary: { detailCount: 3, unassignedCount: 1, statusIds: [2, 6] },
       productionStatusFromDetailsEnabled: true,
       finalAmount: 1000.5,
       paidAmount: 250.25,

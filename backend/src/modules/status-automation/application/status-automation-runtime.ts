@@ -1,6 +1,7 @@
 import { auditService } from '../../../common/audit/audit.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
+import { uniformProductionStatus } from '../../../shared/production-status/production-summary';
 import {
   changeDetailsProductionStatusFromAutomationInTransaction,
   changeOrderStatusFromAutomationInTransaction,
@@ -18,7 +19,6 @@ import {
 } from '../adapters/pg-status-automation-repository';
 import {
   evaluateRuleConditions,
-  selectApplicableRules,
 } from '../domain/status-automation-evaluator';
 import type {
   OrderAutomationState,
@@ -43,6 +43,8 @@ export interface MdfBoardColumnAutomationInput extends MdfBoardEventInput {
 // Only the server resolver can attach a scope. A generic event cannot opt into
 // an all-order MDF action by supplying an event name or fabricated detail IDs.
 const mdfScopes = new WeakMap<StatusAutomationEvent, MdfBoardDetailScope>();
+const evaluationStates = new WeakMap<StatusAutomationEvent, OrderAutomationState>();
+const executedRules = new WeakMap<TransactionClient, Set<string>>();
 
 export interface ManualStatusAutomationOrderRefreshInput {
   orderId: number;
@@ -67,6 +69,9 @@ const MEANINGFUL_SKIP_REASONS = new Set([
   'no_details',
   'lower_priority_same_target',
   'mapping_source_status_missing',
+  'production_status_not_in_list',
+  'production_status_excluded',
+  'production_composition_not_uniform',
 ]);
 
 interface StatusAutomationActionRunResult extends AutomationActionResult {
@@ -86,16 +91,45 @@ export async function evaluateStatusAutomation(
   if (!isStatusAutomationEnabled()) {
     return;
   }
+  if (event.eventType === 'order.status_changed' && event.cause === 'derived_from_production_composition') return;
+  await evaluateEventRules(tx, event);
+  if (event.eventType === 'order.created' || event.eventType === 'order.updated') {
+    await evaluateProductionCompositionAutomation(tx, event);
+  }
+}
+
+/** Called after the source command persists its complete ordinary-detail changes. */
+export async function evaluateProductionCompositionAutomation(
+  tx: TransactionClient,
+  input: Pick<StatusAutomationEvent, 'orderId' | 'actor' | 'requestId' | 'sourceIdempotencyKey'>,
+): Promise<void> {
+  await evaluateStatusAutomation(tx, {
+    ...input, eventType: 'order.production_status_changed', origin: 'automation',
+    cause: 'derived_from_production_composition',
+    sourceIdempotencyKey: `${input.sourceIdempotencyKey ?? input.requestId}:production-composition`,
+  });
+}
+
+async function evaluateEventRules(tx: TransactionClient, event: StatusAutomationEvent): Promise<void> {
   const mdfScope = mdfScopes.get(event);
   if (isMdfBoardEvent(event.eventType) && !mdfScope) return;
-  const allRules = await listEnabledRulesForEvent(tx, event.eventType);
+  const allRules = (await listEnabledRulesForEvent(tx, event.eventType))
+    .filter(rule => rule.eventType === event.eventType);
   // Automation-originated order status changes still need their downstream detail cascade.
   // Restrict that second hop to detail-only actions so status rules cannot recurse in cycles.
-  const compatibleRules = mdfScope ? allRules.filter(rule => rule.actionType === 'change_details_production_status') : allRules;
+  const productionEvent = event.eventType === 'order.production_status_changed';
+  const compatibleRules = allRules.filter(rule => mdfScope
+    ? rule.actionType === 'change_details_production_status'
+    : !productionEvent || isProductionOrderAction(rule));
+  if (productionEvent) for (const rule of allRules) {
+    if (!isProductionOrderAction(rule)) await recordRuleSkipped(tx, event, rule, 'production_order_action_required');
+  }
   if (mdfScope) for (const rule of allRules) {
     if (rule.actionType !== 'change_details_production_status') await recordRuleSkipped(tx, event, rule, 'mdf_detail_action_required');
   }
-  const rules = event.origin === 'automation'
+  const rules = productionEvent || event.cause === 'derived_from_production_composition'
+    ? compatibleRules.filter(rule => rule.actionType === 'change_order_status' || rule.actionType === 'map_production_status_to_order_status')
+    : event.origin === 'automation'
     ? compatibleRules.filter((rule) =>
       rule.actionType === 'change_details_production_status'
       || rule.actionType === 'map_order_status_to_details_production_status')
@@ -104,13 +138,31 @@ export async function evaluateStatusAutomation(
     return;
   }
 
-  const state = await loadOrderAutomationState(tx, event.orderId);
-  if (state === null) {
-    return;
-  }
-
-  const { applied, skipped } = selectApplicableRules(rules, state, event);
-  for (const rule of applied) {
+  const appliedActionTypes = new Set<string>();
+  const visited = executedRules.get(tx) ?? new Set<string>();
+  executedRules.set(tx, visited);
+  const eligibleDetailIds = mdfScope ? [...new Set(mdfScope.details
+    .filter(detail => detail.requiredQuantity > 0 && detail.eligibleQuantity >= detail.requiredQuantity)
+    .map(detail => detail.detailId))] : undefined;
+  for (const rule of rules) {
+    const state = await loadOrderAutomationState(tx, event.orderId, eligibleDetailIds);
+    if (!state) return;
+    evaluationStates.set(event, state);
+    const evaluation = evaluateRuleConditions(rule, state, event);
+    if (!evaluation.matched) {
+      if (evaluation.reason && MEANINGFUL_SKIP_REASONS.has(evaluation.reason)) {
+        await recordRuleSkipped(tx, event, rule, evaluation.reason);
+      }
+      continue;
+    }
+    if (appliedActionTypes.has(rule.actionType)) {
+      await recordRuleSkipped(tx, event, rule, 'lower_priority_same_target');
+      continue;
+    }
+    const visitKey = `${event.orderId}:${rule.id}:${mdfScope ? `${mdfScope.source.kind}:${mdfScope.source.id}` : 'order'}`;
+    if (visited.has(visitKey)) continue;
+    visited.add(visitKey);
+    appliedActionTypes.add(rule.actionType);
     const outboxIdempotencyKey = buildOutboxIdempotencyKey(event, rule);
     const context: AutomationActionContext = {
       actor: event.actor,
@@ -119,6 +171,8 @@ export async function evaluateStatusAutomation(
       ruleName: rule.name,
       eventType: event.eventType,
       outboxIdempotencyKey,
+      ...(event.eventType === 'order.production_status_changed'
+        ? { cause: 'derived_from_production_composition' as const } : {}),
       ...(mdfScope ? { mdfBoardScope: mdfScope } : {}),
     };
 
@@ -130,33 +184,27 @@ export async function evaluateStatusAutomation(
         throw error;
       }
       await recordRuleSkipped(tx, event, rule, 'target_status_missing');
+      visited.delete(visitKey);
       continue;
     }
 
     if (result.status === 'executed') {
       await recordRuleApplied(tx, event, rule, result);
-    } else if (result.skipReason !== undefined && MEANINGFUL_SKIP_REASONS.has(result.skipReason)) {
-      await recordRuleSkipped(tx, event, rule, result.skipReason);
+    } else {
+      visited.delete(visitKey);
+      if (result.skipReason !== undefined && MEANINGFUL_SKIP_REASONS.has(result.skipReason)) {
+        await recordRuleSkipped(tx, event, rule, result.skipReason);
+      }
     }
   }
 
-  const rulesById = new Map(rules.map((rule) => [rule.id, rule]));
-  for (const skippedRule of skipped) {
-    if (!MEANINGFUL_SKIP_REASONS.has(skippedRule.reason)) {
-      continue;
-    }
-    const rule = rulesById.get(skippedRule.ruleId);
-    if (rule !== undefined) {
-      await recordRuleSkipped(tx, event, rule, skippedRule.reason);
-    }
-  }
 }
 
 export async function evaluateAllStatusAutomationRulesForOrder(
   tx: TransactionClient,
   input: ManualStatusAutomationOrderRefreshInput,
 ): Promise<StatusAutomationOrderRefreshSummary> {
-  const state = await loadOrderAutomationState(tx, input.orderId);
+  let state = await loadOrderAutomationState(tx, input.orderId);
   if (state === null) {
     return emptyOrderRefreshSummary(input.orderId, false);
   }
@@ -169,8 +217,18 @@ export async function evaluateAllStatusAutomationRulesForOrder(
   }
 
   const appliedActionTypes = new Set<string>();
+  const visited = executedRules.get(tx) ?? new Set<string>();
+  executedRules.set(tx, visited);
   for (const rule of rules) {
     const event = manualRefreshEventForRule(input, rule.eventType);
+    state = await loadOrderAutomationState(tx, input.orderId);
+    if (!state) break;
+    evaluationStates.set(event, state);
+    if (event.eventType === 'order.production_status_changed' && !isProductionOrderAction(rule)) {
+      summary.skippedRuleCount += 1;
+      await recordRuleSkipped(tx, event, rule, 'production_order_action_required');
+      continue;
+    }
     if (isMdfBoardEvent(rule.eventType)) {
       summary.skippedRuleCount += 1;
       await recordRuleSkipped(tx, event, rule, 'mdf_source_required');
@@ -179,6 +237,9 @@ export async function evaluateAllStatusAutomationRulesForOrder(
     const evaluation = evaluateRuleConditions(rule, state, event);
     if (!evaluation.matched) {
       summary.skippedRuleCount += 1;
+      if (evaluation.reason && MEANINGFUL_SKIP_REASONS.has(evaluation.reason)) {
+        await recordRuleSkipped(tx, event, rule, evaluation.reason);
+      }
       continue;
     }
 
@@ -189,6 +250,9 @@ export async function evaluateAllStatusAutomationRulesForOrder(
     }
 
     appliedActionTypes.add(rule.actionType);
+    const visitKey = `${input.orderId}:${rule.id}:order`;
+    if (visited.has(visitKey)) { summary.skippedRuleCount += 1; continue; }
+    visited.add(visitKey);
     summary.matchedRuleCount += 1;
     const outboxIdempotencyKey = buildOutboxIdempotencyKey(event, rule);
     const context: AutomationActionContext = {
@@ -198,6 +262,8 @@ export async function evaluateAllStatusAutomationRulesForOrder(
       ruleName: rule.name,
       eventType: rule.eventType,
       outboxIdempotencyKey,
+      ...(rule.eventType === 'order.production_status_changed'
+        ? { cause: 'derived_from_production_composition' as const } : {}),
     };
 
     let result: StatusAutomationActionRunResult;
@@ -209,6 +275,7 @@ export async function evaluateAllStatusAutomationRulesForOrder(
       }
       summary.skippedActionCount += 1;
       await recordRuleSkipped(tx, event, rule, 'target_status_missing');
+      visited.delete(visitKey);
       continue;
     }
 
@@ -216,6 +283,7 @@ export async function evaluateAllStatusAutomationRulesForOrder(
       summary.executedActionCount += 1;
       await recordRuleApplied(tx, event, rule, result);
     } else {
+      visited.delete(visitKey);
       summary.skippedActionCount += 1;
       if (result.skipReason !== undefined && MEANINGFUL_SKIP_REASONS.has(result.skipReason)) {
         await recordRuleSkipped(tx, event, rule, result.skipReason);
@@ -293,11 +361,16 @@ function manualRefreshEventForRule(
   return {
     eventType,
     origin: 'user',
+    ...(eventType === 'order.production_status_changed' ? { cause: 'derived_from_production_composition' as const } : {}),
     orderId: input.orderId,
     actor: input.actor,
     requestId: input.requestId,
     sourceIdempotencyKey: `${input.sourceIdempotencyKey}:manual-${eventType}:order-${input.orderId}`,
   };
+}
+
+function isProductionOrderAction(rule: StatusAutomationRule): boolean {
+  return rule.actionType === 'change_order_status' || rule.actionType === 'map_production_status_to_order_status';
 }
 
 function buildOutboxIdempotencyKey(
@@ -358,17 +431,19 @@ async function runAutomationAction(
       );
     }
     case 'map_production_status_to_order_status': {
-      if (state.productionStatusId === null) {
+      const sourceStatusId = uniformProductionStatus(state.productionSummary);
+      if (sourceStatusId === null) {
         return { status: 'skipped', skipReason: 'mapping_source_status_missing', resolvedTargetStatusId: null };
       }
-      const targetStatusId = resolveMappedStatusId(rule, state.productionStatusId);
+      const targetStatusId = resolveMappedStatusId(rule, sourceStatusId);
       if (targetStatusId === null) {
         return { status: 'skipped', skipReason: 'mapping_source_status_missing', resolvedTargetStatusId: null };
       }
       return run(
         targetStatusId,
-        () => changeOrderStatusFromAutomationInTransaction(tx, orderId, targetStatusId, context),
-        { mappingSourceStatusId: state.productionStatusId, mappingDirection: 'production_to_order' },
+        () => changeOrderStatusFromAutomationInTransaction(tx, orderId, targetStatusId,
+          { ...context, cause: 'derived_from_production_composition' }),
+        { mappingSourceStatusId: sourceStatusId, mappingDirection: 'production_to_order' },
       );
     }
   }
@@ -404,6 +479,7 @@ async function recordRuleApplied(
     source: 'backend-status-automation',
     relatedOrderId: event.orderId,
     metadata: {
+      ...productionEvaluationAudit(event, rule),
       eventType: event.eventType,
       actionType: rule.actionType,
       targetStatusId: result.resolvedTargetStatusId,
@@ -440,6 +516,7 @@ async function recordRuleSkipped(
     source: 'backend-status-automation',
     relatedOrderId: event.orderId,
     metadata: {
+      ...productionEvaluationAudit(event, rule),
       eventType: event.eventType,
       actionType: rule.actionType,
       targetStatusId: rule.targetStatusId,
@@ -450,4 +527,19 @@ async function recordRuleSkipped(
       plannedCompletionDateAfter: event.plannedCompletionDateAfter ?? null,
     },
   });
+}
+
+function productionEvaluationAudit(event: StatusAutomationEvent, rule: StatusAutomationRule) {
+  return {
+    ruleVersion: rule.version,
+    cause: event.cause ?? (event.eventType === 'order.production_status_changed'
+      || rule.actionType === 'map_production_status_to_order_status'
+      ? 'derived_from_production_composition' : null),
+    productionSummary: evaluationStates.get(event)?.productionSummary ?? null,
+    productionScope: mdfScopes.has(event) ? 'mdf_eligible_details' : 'ordinary_order_details',
+    productionConditionMode: rule.conditions.currentProductionStatusIn?.length
+      || rule.actionType === 'map_production_status_to_order_status'
+      || event.eventType === 'order.production_status_changed'
+      ? 'uniform_equality' : rule.conditions.currentProductionStatusNotIn?.length ? 'forbidden_status_absence' : null,
+  };
 }

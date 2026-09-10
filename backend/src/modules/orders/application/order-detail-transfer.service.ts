@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { mapProductionSummary, type ProductionSummaryRow } from '../../../shared/production-status/production-summary';
 import { ApiError } from '../../../common/errors/api-error';
 import { auditService } from '../../../common/audit/audit.service';
 import { computeDiff } from '../../../common/audit/audit-diff';
@@ -7,9 +8,11 @@ import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import { PermissionsService } from '../../../permissions/permissions.service';
-import { evaluateStatusAutomation } from '../../status-automation/application/status-automation-runtime';
+import { evaluateStatusAutomation, evaluateProductionCompositionAutomation } from '../../status-automation/application/status-automation-runtime';
 import type { StatusAutomationEvent } from '../../status-automation/application/status-automation.types';
 import { calculateOrderTotals } from '../domain/order-calculations';
+import type { OrderCatalogLineDto } from '../domain/order-catalog-lines';
+import { readOrderCatalogLines } from '../adapters/pg-order-catalog-lines';
 import type { OrderDto } from '../dto/order.dto';
 import type { CalculatedOrderDetailDto, NormalizedSaveOrderPaymentDto, OrderTotalsDto } from '../dto/save-order.dto';
 import { OrderNameDuplicateError, OrderNotFoundError, OrderVersionConflictError } from '../errors/order.errors';
@@ -39,6 +42,9 @@ export interface TransferOrderDetailsCommand {
 }
 
 export interface OrderTransferTargetDto {
+  productionDetailCount?: number;
+  productionUnassignedCount?: number;
+  productionDistinctStatusCount?: number;
   orderId: number;
   orderName: string;
   clientId: number;
@@ -151,7 +157,7 @@ interface VersionRow {
   version: string | number;
 }
 
-interface TargetSearchRow {
+interface TargetSearchRow extends ProductionSummaryRow {
   order_id: string | number;
   order_name: string;
   client_id: string | number;
@@ -189,6 +195,7 @@ export class OrderDetailTransferService {
              o.project_id, p.code AS project_code, p.name AS project_name,
              o.order_status_id, os.order_status_name,
              o.production_status_id, ps.production_status_name,
+             o.production_detail_count, o.production_unassigned_count, o.production_distinct_status_count,
              o.version, o.created_by, o.manager_id
       FROM orders o
       LEFT JOIN clients c ON c.client_id = o.client_id
@@ -218,6 +225,7 @@ export class OrderDetailTransferService {
              o.project_id, p.code AS project_code, p.name AS project_name,
              o.order_status_id, os.order_status_name,
              o.production_status_id, ps.production_status_name,
+             o.production_detail_count, o.production_unassigned_count, o.production_distinct_status_count,
              o.version, o.created_by, o.manager_id
       FROM orders o
       LEFT JOIN clients c ON c.client_id = o.client_id
@@ -374,8 +382,9 @@ export class OrderDetailTransferService {
         });
       }
       const remainingSourceDetails = sourceDetails.filter((detail) => !selectedSet.has(toNumber(detail.detail_id)));
-      if (remainingSourceDetails.length === 0) {
-        throw new ApiError(409, 'ORDER_DETAIL_TRANSFER_SOURCE_EMPTY', 'В исходном заказе должна остаться хотя бы одна деталь', {
+      const sourceCatalogLines = await readOrderCatalogLines(tx, command.sourceOrderId);
+      if (remainingSourceDetails.length === 0 && sourceCatalogLines.length === 0) {
+        throw new ApiError(409, 'ORDER_DETAIL_TRANSFER_SOURCE_EMPTY', 'В исходном заказе должна остаться хотя бы одна деталь или позиция товаров/услуг', {
           sourceOrderId: command.sourceOrderId,
         });
       }
@@ -433,7 +442,7 @@ export class OrderDetailTransferService {
       }
 
       const sourceTotals = await calculateTotalsFromDb(tx, command.sourceOrderId, source);
-      const persistedSourceVersion = await updateOrderTotals(tx, {
+      let persistedSourceVersion = await updateOrderTotals(tx, {
           orderId: command.sourceOrderId,
           totals: sourceTotals,
           actorUserId: actorUserIdOf(command.currentUser),
@@ -452,7 +461,7 @@ export class OrderDetailTransferService {
         persistedTargetVersion = await readOrderVersion(tx, targetOrderId);
       }
 
-      const sourceAfter = await loadOrderSnapshot(tx, command.sourceOrderId);
+      let sourceAfter = await loadOrderSnapshot(tx, command.sourceOrderId);
       let targetAfter = await loadOrderSnapshot(tx, targetOrderId);
       let createAuditId: string | null = null;
       if (targetCreated) {
@@ -499,6 +508,17 @@ export class OrderDetailTransferService {
         });
         targetAfter = await loadOrderSnapshot(tx, targetOrderId);
       }
+
+      for (const orderId of [command.sourceOrderId, targetOrderId].sort((a, b) => a - b)) {
+        await evaluateProductionCompositionAutomation(tx, {
+          orderId, actor: command.currentUser, requestId,
+          sourceIdempotencyKey: command.idempotencyKey,
+        });
+      }
+      persistedSourceVersion = await readOrderVersion(tx, command.sourceOrderId);
+      persistedTargetVersion = await readOrderVersion(tx, targetOrderId);
+      sourceAfter = await loadOrderSnapshot(tx, command.sourceOrderId);
+      targetAfter = await loadOrderSnapshot(tx, targetOrderId);
 
       const transferAuditId = await auditService.record(tx, {
         event: 'orders.detail_transfer',
@@ -986,16 +1006,18 @@ async function calculateTotalsFromDb(
     discount: toNullableNumber(order.discount) ?? 0,
     surcharge: toNullableNumber(order.surcharge) ?? 0,
     paymentStatusId: toNullableNumber(order.payment_status_id),
-  });
+  }, await readOrderCatalogLines(tx, orderId));
 }
 
 function calculateTotalsForRows(
   details: readonly LockedDetailRow[],
   payments: readonly PaymentRow[],
   header: { discount: number; surcharge: number; paymentStatusId: number | null },
+  catalogLines: OrderCatalogLineDto[] = [],
 ): OrderTotalsDto {
   return calculateOrderTotals({
     header,
+    catalogLines,
     details: details.map((detail) => ({
       height: Number(detail.height),
       width: Number(detail.width),
@@ -1381,6 +1403,7 @@ function mapTransferTarget(row: TargetSearchRow): OrderTransferTargetDto {
     orderStatusName: row.order_status_name,
     productionStatusId: toNullableNumber(row.production_status_id),
     productionStatusName: row.production_status_name,
+    ...mapProductionSummary(row),
     version: toNumber(row.version),
   };
 }

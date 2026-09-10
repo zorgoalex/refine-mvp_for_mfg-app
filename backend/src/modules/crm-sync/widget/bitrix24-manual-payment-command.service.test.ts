@@ -112,7 +112,7 @@ describe('Bitrix24ManualPaymentCommandService safety', () => {
         paidAmount: '50000.00',
         managerId: 7,
         createdBy: 7,
-        hasActiveDetails: false,
+        hasActivePositions: false,
       }),
       listWidgetPaymentSystems: vi.fn().mockResolvedValue([{
         paySystemId: 14,

@@ -207,7 +207,7 @@ export function describeConditions(
   }
   if (current.currentProductionStatusIn?.length) {
     parts.push(
-      `Общий статус производства заказа — один из: ${formatStatusIds(
+      `Все учитываемые детали имеют одинаковый статус — один из: ${formatStatusIds(
         current.currentProductionStatusIn,
         catalogs.productionStatusNames,
       )}`,
@@ -215,7 +215,7 @@ export function describeConditions(
   }
   if (current.currentProductionStatusNotIn?.length) {
     parts.push(
-      `Общий статус производства заказа — не входит в: ${formatStatusIds(
+      `Ни одна учитываемая деталь не имеет статус из списка: ${formatStatusIds(
         current.currentProductionStatusNotIn,
         catalogs.productionStatusNames,
       )}`,

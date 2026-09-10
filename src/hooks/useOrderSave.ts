@@ -5,6 +5,7 @@ import { createElement, useCallback, useState } from 'react';
 import { useDataProvider, useInvalidate } from '@refinedev/core';
 import { notification, Modal } from 'antd';
 import { bazisApi } from '../api/bazisApi';
+import { ordersApi } from '../api/ordersApi';
 import { OrderFormValues } from '../types/orders';
 import { peekOrderDraftStore, orderDraftStoreExists } from '../stores/orderFormStore';
 import { isApiError } from '../api/apiError';
@@ -231,6 +232,12 @@ export const useOrderSave = (
       }
 
       // Legacy rollback path for useBackendOrdersWrite=false. Backend-enabled
+      if (isEdit && values.header.order_id && (await ordersApi.getById(values.header.order_id)).catalogLines?.length) {
+        throw new Error('Этот заказ содержит товары/услуги. Для сохранения включите backend-режим записи заказов.');
+      }
+      if ((values.catalogLines?.length ?? 0) > 0 || (values.deletedCatalogLineIds?.length ?? 0) > 0) {
+        throw new Error('Товары/услуги требуют включённого backend-режима сохранения заказов. Изменения не сохранены.');
+      }
       // order saves return above through saveOrderViaBackend with one order command.
       //
       // Bazis-draft hard backstop: провенанс (node-map/links/audit) пишется только

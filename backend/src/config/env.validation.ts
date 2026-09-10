@@ -418,6 +418,7 @@ export const envSchema = z
     CAD_SERVICE_API_TOKEN: optionalTrimmedStringFromEnv,
     CAD_ERP_API_TOKEN: optionalTrimmedStringFromEnv,
     BACKEND_ENABLE_CAD: booleanFromEnv.default(false),
+    BACKEND_CAD_EDITOR_V2: booleanFromEnv.default(false),
     OCR_SERVICE_BASE_URL: optionalUrlFromEnv,
     GAS_WEBAPP_URL: optionalUrlFromEnv,
     GAS_API_KEY: optionalTrimmedStringFromEnv,

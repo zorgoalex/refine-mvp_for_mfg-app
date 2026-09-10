@@ -22,6 +22,8 @@ servers:
     description: Production backend placeholder
 
 tags:
+  - name: Catalog
+    description: Независимый справочник товаров и услуг
   - name: Audit
     description: Журнал аудита событий системы
   - name: Auth
@@ -55,7 +57,881 @@ tags:
   - name: Bitrix24
     description: Bitrix24 reverse synchronization, incoming requests and callbacks
 
+  - name: CAD preparation
+    description: CAD workspaces, revisions, rendering and production packages
+  - name: WhatsApp
+    description: WhatsApp administration and authenticated WAHA webhook
+
 paths:
+  /api/v1/catalog-items:
+    get:
+      tags: [Catalog]
+      operationId: listCatalogItems
+      summary: Список товаров и услуг
+      security: [{bearerAuth: []}]
+      x-permission: references.view OR references.manage
+      parameters:
+        - {name: q, in: query, schema: {type: string, maxLength: 200}, description: Literal substring of name or SKU}
+        - {name: kind, in: query, schema: {type: string, enum: [made_to_order, stock_item, service]}}
+        - {name: active, in: query, schema: {type: string, enum: ['true', 'false', all], default: 'true'}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 25}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 2147483647, default: 0}}
+      responses:
+        '200':
+          description: Stable name/id order, filtered total including empty pages
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/CatalogItem'}}
+                  total: {type: integer}
+        '401': {description: Authentication required}
+        '403': {description: Missing reference permissions}
+        '422': {description: Invalid query}
+    post:
+      tags: [Catalog]
+      operationId: createCatalogItem
+      summary: Создать товар или услугу
+      security: [{bearerAuth: []}]
+      x-permission: references.manage
+      parameters:
+        - {$ref: '#/components/parameters/CatalogCommandKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CatalogInput'}
+      responses:
+        '201':
+          description: Created item or same-key committed response; no duplicate business event
+          content: {application/json: {schema: {$ref: '#/components/schemas/CatalogItem'}}}
+        '401': {description: Authentication required}
+        '403': {description: Missing references.manage or invalid actor}
+        '409': {description: SKU or idempotency-key conflict}
+        '422': {description: Invalid fields or missing unit}
+  /api/v1/catalog-items/units:
+    get:
+      tags: [Catalog]
+      operationId: listCatalogUnits
+      summary: Все существующие единицы измерения
+      security: [{bearerAuth: []}]
+      x-permission: references.view OR references.manage
+      responses:
+        '200':
+          description: Existing units, no active/deleted lifecycle filtering
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [id, name, code, symbol]
+                  properties:
+                    id: {type: integer}
+                    name: {type: string}
+                    code: {type: string}
+                    symbol: {type: string, nullable: true}
+        '401': {description: Authentication required}
+        '403': {description: Missing reference permissions}
+  /api/v1/catalog-items/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, minimum: 1, maximum: 9007199254740991}}
+    get:
+      tags: [Catalog]
+      operationId: getCatalogItem
+      summary: Карточка товара или услуги, включая архив
+      security: [{bearerAuth: []}]
+      x-permission: references.view OR references.manage
+      responses:
+        '200':
+          description: Catalogue item
+          content: {application/json: {schema: {$ref: '#/components/schemas/CatalogItem'}}}
+        '401': {description: Authentication required}
+        '403': {description: Missing reference permissions}
+        '404': {description: Item not found}
+        '422': {description: Invalid ID}
+    put:
+      tags: [Catalog]
+      operationId: updateCatalogItem
+      summary: Изменить, архивировать или восстановить позицию
+      security: [{bearerAuth: []}]
+      x-permission: references.manage
+      parameters:
+        - {$ref: '#/components/parameters/CatalogCommandKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CatalogUpdate'}
+      responses:
+        '200':
+          description: Updated item; no-op/replay emits no extra audit or outbox event
+          content: {application/json: {schema: {$ref: '#/components/schemas/CatalogItem'}}}
+        '401': {description: Authentication required}
+        '403': {description: Missing references.manage or invalid actor}
+        '404': {description: Item not found}
+        '409': {description: Version, SKU or idempotency-key conflict; preserve user draft}
+        '422': {description: Invalid fields or missing unit}
+  /api/v1/cad/capabilities:
+    get:
+      tags:
+        - CAD preparation
+      operationId: getCadCapabilities
+      summary: Get CAD availability and capabilities
+      description: >-
+        When disabled, returns enabled=false after checking cad.view. When enabled, orders.view is also
+        required.
+      security:
+        - {bearerAuth: []}
+      x-permission: cad.view
+      responses:
+        '200': {description: Get CAD availability and capabilities}
+  /api/v1/cad/recipes:
+    get:
+      tags:
+        - CAD preparation
+      operationId: listCadRecipes
+      summary: List CAD recipes
+      description: >-
+        Requires enabled CAD integration, the listed permissions and applicable order access. Writes use
+        actor-scoped Idempotency-Key; versioned operations reject stale revisions.
+      security:
+        - {bearerAuth: []}
+      x-permissions:
+        - cad.view
+        - orders.view
+      responses:
+        '200': {description: List CAD recipes}
+  /api/v1/cad/mappings:
+    get:
+      tags:
+        - CAD preparation
+      operationId: listCadMappings
+      summary: List milling type recipe mappings
+      description: >-
+        Requires enabled CAD integration, the listed permissions and applicable order access. Writes use
+        actor-scoped Idempotency-Key; versioned operations reject stale revisions.
+      security:
+        - {bearerAuth: []}
+      x-permissions:
+        - cad.view
+        - orders.view
+      responses:
+        '200': {description: List milling type recipe mappings}
+  /api/v1/cad/mappings/{id}:
+    post:
+      tags:
+        - CAD preparation
+      operationId: updateCadMapping
+      summary: Update an approved default recipe mapping
+      description: >-
+        Requires an approved production recipe with empty parameters and the current mapping revision.
+        Idempotency-Key is scoped to the actor.
+      security:
+        - {bearerAuth: []}
+      x-permissions:
+        - references.manage
+        - orders.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/CadMappingRequest'}}}
+      responses:
+        '201': {description: Update an approved default recipe mapping}
+  /api/v1/cad/orders/{id}:
+    get:
+      tags:
+        - CAD preparation
+      operationId: getCadWorkspace
+      summary: Get the CAD workspace for an order
+      description: >-
+        Requires enabled CAD integration, the listed permissions and applicable order access. Writes use
+        actor-scoped Idempotency-Key; versioned operations reject stale revisions.
+      security:
+        - {bearerAuth: []}
+      x-permissions:
+        - cad.view
+        - orders.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Get the CAD workspace for an order}
+  /api/v1/cad/orders/{id}/render:
+    post:
+      tags:
+        - CAD preparation
+      operationId: createCadOriginal
+      summary: Create and render the original CAD variant
+      description: >-
+        Requires enabled CAD integration, the listed permissions and applicable order access. Writes use
+        actor-scoped Idempotency-Key; versioned operations reject stale revisions.
+      security:
+        - {bearerAuth: []}
+      x-permissions:
+        - cad.edit
+        - orders.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      responses:
+        '201': {description: Create and render the original CAD variant}
+  /api/v1/cad/orders/{id}/source:
+    post:
+      tags:
+        - CAD preparation
+      operationId: captureCadSource
+      summary: Capture an order source snapshot
+      description: >-
+        Requires enabled CAD integration, the listed permissions and applicable order access. Writes use
+        actor-scoped Idempotency-Key; versioned operations reject stale revisions.
+      security:
+        - {bearerAuth: []}
+      x-permissions:
+        - cad.edit
+        - orders.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      responses:
+        '201': {description: Capture an order source snapshot}
+  /api/v1/cad/variants/{id}/save:
+    post:
+      tags:
+        - CAD preparation
+      operationId: saveCadVariant
+      summary: Save a CAD variant revision
+      description: >-
+        Requires enabled CAD integration, the listed permissions and applicable order access. Writes use
+        actor-scoped Idempotency-Key; versioned operations reject stale revisions.
+      security:
+        - {bearerAuth: []}
+      x-permissions:
+        - cad.edit
+        - orders.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/CadSaveRequest'}}}
+      responses:
+        '201': {description: Save a CAD variant revision}
+  /api/v1/cad/variants/{id}/fork:
+    post:
+      tags: [CAD preparation]
+      operationId: forkCadVariant
+      summary: Fork own draft from an exact archived CAD revision
+      description: Atomic archived base plus own draft. All source access and manufacturing permissions are rechecked.
+      security: [{bearerAuth: []}]
+      x-permissions: [cad.edit, orders.view]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/CadForkRequest'}}}
+      responses:
+        '201': {description: Saved new working variant}
+  /api/v1/cad/variants/{id}/preview:
+    post:
+      tags: [CAD preparation]
+      operationId: previewCadVariant
+      summary: Preview up to twenty CAD parts without export artifacts
+      description: Unchanged viewing requires cad.view; manufacturing changes also require cad.edit and an approved envelope or cad.technology.
+      security: [{bearerAuth: []}]
+      x-permissions: [cad.view, orders.view]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/CadPreviewRequest'}}}
+      responses:
+        '201': {description: Geometry, material regions, quality and dimension anchors per part}
+  /api/v1/cad/variants/{id}/preflight:
+    post:
+      tags: [CAD preparation]
+      operationId: preflightCadVariant
+      summary: Review CAD export eligibility and current source differences
+      description: Review expires after fifteen minutes and binds actor, run, revision and current source comparison hashes.
+      security: [{bearerAuth: []}]
+      x-permissions: [cad.export, orders.view]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/CadVersionRequest'}}}
+      responses:
+        '201': {description: Readiness and source differences; reviewId only when all included parts are eligible}
+  /api/v1/cad/variants/{id}/approve:
+    post:
+      tags: [CAD preparation]
+      operationId: approveCadPart
+      summary: Request a scoped approval for one frozen CAD part
+      description: Durable command, not global recipe approval. Pending does not mean approved; CAD receipt is required.
+      security: [{bearerAuth: []}]
+      x-permissions: [cad.approve, cad.view, orders.view]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/CadApprovalRequest'}}}
+      responses:
+        '201': {description: Durable approval command with pending, succeeded or failed status}
+  /api/v1/cad/approval-commands/{id}:
+    get:
+      tags: [CAD preparation]
+      operationId: getCadApprovalCommand
+      summary: Get the durable CAD approval receipt status
+      security: [{bearerAuth: []}]
+      x-permissions: [cad.view, orders.view]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Scoped command status and remote receipt}
+  /api/v1/cad/variants/{id}/source-status:
+    get:
+      tags:
+        - CAD preparation
+      operationId: getCadSourceStatus
+      summary: Compare CAD sources with current order details
+      description: >-
+        Requires enabled CAD integration, the listed permissions and applicable order access. Writes use
+        actor-scoped Idempotency-Key; versioned operations reject stale revisions.
+      security:
+        - {bearerAuth: []}
+      x-permissions:
+        - cad.view
+        - orders.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Compare CAD sources with current order details}
+  /api/v1/cad/variants/{id}/clone:
+    post:
+      tags:
+        - CAD preparation
+      operationId: cloneCadVariant
+      summary: Clone a CAD variant
+      description: >-
+        Requires enabled CAD integration, the listed permissions and applicable order access. Writes use
+        actor-scoped Idempotency-Key; versioned operations reject stale revisions.
+      security:
+        - {bearerAuth: []}
+      x-permissions:
+        - cad.edit
+        - orders.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/CadCloneRequest'}}}
+      responses:
+        '201': {description: Clone a CAD variant}
+  /api/v1/cad/variants/{id}/render:
+    post:
+      tags:
+        - CAD preparation
+      operationId: renderCadVariant
+      summary: Render a CAD variant revision
+      description: >-
+        Requires enabled CAD integration, the listed permissions and applicable order access. Writes use
+        actor-scoped Idempotency-Key; versioned operations reject stale revisions.
+      security:
+        - {bearerAuth: []}
+      x-permissions:
+        - cad.edit
+        - orders.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/CadVersionRequest'}}}
+      responses:
+        '201': {description: Render a CAD variant revision}
+  /api/v1/cad/variants/{id}/runs/{revision}:
+    get:
+      tags:
+        - CAD preparation
+      operationId: getCadRevisionRun
+      summary: Get the render run for a CAD revision
+      description: >-
+        Requires enabled CAD integration, the listed permissions and applicable order access. Writes use
+        actor-scoped Idempotency-Key; versioned operations reject stale revisions.
+      security:
+        - {bearerAuth: []}
+      x-permissions:
+        - cad.view
+        - orders.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: revision, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Get the render run for a CAD revision}
+  /api/v1/cad/variants/{id}/package:
+    post:
+      tags:
+        - CAD preparation
+      operationId: requestCadPackage
+      summary: Request an approved CAD production package
+      description: >-
+        Requires a valid actor-bound preflight review and explicit acknowledgement for stale sources.
+        Rechecks all source access, readiness and comparison hashes; legacy callers cannot bypass confirmation.
+      security:
+        - {bearerAuth: []}
+      x-permissions:
+        - cad.export
+        - orders.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/CadPackageRequest'}}}
+      responses:
+        '201': {description: Request an approved CAD production package}
+  /api/v1/cad/runs/{runId}/artifacts/{id}:
+    get:
+      tags:
+        - CAD preparation
+      operationId: downloadCadArtifact
+      summary: Download an artifact from an approved CAD run
+      description: >-
+        Requires enabled CAD integration, the listed permissions and applicable order access. Writes use
+        actor-scoped Idempotency-Key; versioned operations reject stale revisions.
+      security:
+        - {bearerAuth: []}
+      x-permissions:
+        - cad.export
+        - orders.view
+      parameters:
+        - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: id, in: path, required: true, schema: {type: string, pattern: '^[a-z0-9]{32}$'}}
+        - {name: reviewId, in: query, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Response content, content: {application/octet-stream: {schema: {type: string, format: binary}}}}
+  /api/v1/whatsapp/status:
+    get:
+      tags:
+        - WhatsApp
+      operationId: getWhatsAppStatus
+      summary: Get WhatsApp session status
+      security:
+        - {bearerAuth: []}
+      x-permission: whatsapp.view
+      responses:
+        '200': {description: Get WhatsApp session status}
+  /api/v1/whatsapp/qr:
+    get:
+      tags:
+        - WhatsApp
+      operationId: getWhatsAppQr
+      summary: Get the WhatsApp pairing QR image
+      security:
+        - {bearerAuth: []}
+      x-permission: whatsapp.manage
+      responses:
+        '200': {description: Response content, content: {image/*: {schema: {type: string, format: binary}}}}
+  /api/v1/whatsapp/restart:
+    post:
+      tags:
+        - WhatsApp
+      operationId: restartWhatsApp
+      summary: Restart the WhatsApp session after confirmation
+      security:
+        - {bearerAuth: []}
+      x-permission: whatsapp.manage
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppRestart'}}}
+      responses:
+        '201': {description: Restart the WhatsApp session after confirmation}
+  /api/v1/whatsapp/templates:
+    get:
+      tags:
+        - WhatsApp
+      operationId: listWhatsAppTemplates
+      summary: List WhatsApp reply templates
+      security:
+        - {bearerAuth: []}
+      x-permission: whatsapp.view
+      responses:
+        '200': {description: List WhatsApp reply templates}
+    post:
+      tags:
+        - WhatsApp
+      operationId: createWhatsAppTemplate
+      summary: Create a WhatsApp reply template
+      security:
+        - {bearerAuth: []}
+      x-permission: whatsapp.manage
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppTemplateCreate'}}}
+      responses:
+        '201': {description: Create a WhatsApp reply template}
+  /api/v1/whatsapp/templates/{id}:
+    patch:
+      tags:
+        - WhatsApp
+      operationId: updateWhatsAppTemplate
+      summary: Update a WhatsApp reply template
+      security:
+        - {bearerAuth: []}
+      x-permission: whatsapp.manage
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppTemplateUpdate'}}}
+      responses:
+        '200': {description: Update a WhatsApp reply template}
+  /api/v1/whatsapp/rules:
+    get:
+      tags:
+        - WhatsApp
+      operationId: listWhatsAppRules
+      summary: List WhatsApp reply rules
+      security:
+        - {bearerAuth: []}
+      x-permission: whatsapp.view
+      responses:
+        '200': {description: List WhatsApp reply rules}
+    post:
+      tags:
+        - WhatsApp
+      operationId: createWhatsAppRule
+      summary: Create a WhatsApp reply rule
+      security:
+        - {bearerAuth: []}
+      x-permission: whatsapp.manage
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppRuleCreate'}}}
+      responses:
+        '201': {description: Create a WhatsApp reply rule}
+  /api/v1/whatsapp/rules/{id}:
+    patch:
+      tags:
+        - WhatsApp
+      operationId: updateWhatsAppRule
+      summary: Update a WhatsApp reply rule
+      security:
+        - {bearerAuth: []}
+      x-permission: whatsapp.manage
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppRuleUpdate'}}}
+      responses:
+        '200': {description: Update a WhatsApp reply rule}
+  /api/v1/whatsapp/queue:
+    get:
+      tags:
+        - WhatsApp
+      operationId: listWhatsAppQueue
+      summary: List WhatsApp delivery jobs
+      security:
+        - {bearerAuth: []}
+      x-permission: whatsapp.view
+      responses:
+        '200': {description: List WhatsApp delivery jobs}
+  /api/v1/whatsapp/audit:
+    get:
+      tags:
+        - WhatsApp
+      operationId: listWhatsAppAudit
+      summary: List WhatsApp audit events
+      security:
+        - {bearerAuth: []}
+      x-permission: whatsapp.view
+      responses:
+        '200': {description: List WhatsApp audit events}
+  /api/v1/whatsapp/queue/{id}/retry:
+    post:
+      tags:
+        - WhatsApp
+      operationId: retryWhatsAppJob
+      summary: Retry a WhatsApp delivery job
+      security:
+        - {bearerAuth: []}
+      x-permission: whatsapp.manage
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '201': {description: Retry a WhatsApp delivery job}
+  /api/v1/whatsapp/queue/process-now:
+    post:
+      tags:
+        - WhatsApp
+      operationId: processWhatsAppQueue
+      summary: Process the WhatsApp delivery queue
+      security:
+        - {bearerAuth: []}
+      x-permission: whatsapp.manage
+      responses:
+        '201': {description: Process the WhatsApp delivery queue}
+  /api/v1/whatsapp/cleanup:
+    post:
+      tags:
+        - WhatsApp
+      operationId: cleanupWhatsApp
+      summary: Clean up retained WhatsApp data
+      security:
+        - {bearerAuth: []}
+      x-permission: whatsapp.manage
+      responses:
+        '201': {description: Clean up retained WhatsApp data}
+  /api/v1/whatsapp/webhook:
+    post:
+      tags:
+        - WhatsApp
+      operationId: receiveWhatsAppWebhook
+      summary: Accept a WAHA webhook authenticated with HMAC
+      description: >-
+        HMAC-SHA512 covers the raw JSON body. Requires a timestamp within five minutes and the configured WAHA
+        session. Unsupported events/messages may be accepted and ignored. No ERP bearer token.
+      security:
+        - {whatsAppWebhookHmac: []}
+      parameters:
+        - {name: x-webhook-hmac-algorithm, in: header, required: true, schema: {type: string, enum: [sha512]}}
+        - {name: x-webhook-timestamp, in: header, required: true, schema: {type: string, description: 'Unix seconds, Unix milliseconds, or a parseable date-time.'}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, required: [session], properties: {session: {type: string}, event: {type: string}, payload: {type: object, additionalProperties: true}}, additionalProperties: true}}}
+      responses:
+        '202': {description: 'Accepted, duplicate, or intentionally ignored event'}
+        '400': {description: Invalid JSON}
+        '401': {description: 'Invalid signature, algorithm, timestamp or session'}
+        '415': {description: Expected raw application/json body}
+        '422': {description: Invalid webhook payload}
+        '503': {description: Integration is not configured}
+  /api/v1/bitrix24/mapped-orders/{orderId}/payments:
+    get:
+      tags:
+        - Bitrix24
+      operationId: getMappedOrderBitrix24Payments
+      summary: List Bitrix24 payment snapshots for a mapped ERP order
+      security:
+        - {bearerAuth: []}
+      x-permission: orders.view_financials
+      parameters:
+        - {name: orderId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: 'Mapped order payment snapshots, subject to order access scope'}
+  /api/v1/bitrix24/mapped-orders/{orderId}/reconcile-payments:
+    post:
+      tags:
+        - Bitrix24
+      operationId: reconcileMappedOrderBitrix24Payments
+      summary: Refresh Bitrix24 payment snapshots for a mapped ERP order
+      security:
+        - {bearerAuth: []}
+      x-permission: orders.view_financials
+      parameters:
+        - {name: orderId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: 'Mapped order payment snapshots, subject to order access scope'}
+  /api/v1/bitrix24/payment-systems/refresh:
+    post:
+      tags:
+        - Bitrix24
+      operationId: refreshBitrix24PaymentSystems
+      summary: Refresh Bitrix24 payment system catalog
+      security:
+        - {bearerAuth: []}
+      x-permission: bitrix24.integration.manage
+      responses:
+        '200': {description: Number of refreshed payment systems}
+  /api/v1/bitrix24/payment-commands/ambiguous:
+    get:
+      tags:
+        - Bitrix24
+      operationId: listAmbiguousBitrix24PaymentCommands
+      summary: List ambiguous Bitrix24 payment commands
+      security:
+        - {bearerAuth: []}
+      x-permission: bitrix24.integration.manage
+      responses:
+        '200': {description: List ambiguous Bitrix24 payment commands}
+  /api/v1/bitrix24/payment-commands/{commandId}/resolve-ambiguity:
+    post:
+      tags:
+        - Bitrix24
+      operationId: resolveBitrix24PaymentAmbiguity
+      summary: Resolve an ambiguous Bitrix24 payment create
+      security:
+        - {bearerAuth: []}
+      x-permission: bitrix24.integration.manage
+      parameters:
+        - {name: commandId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/BitrixPaymentAmbiguityResolution'}}}
+      responses:
+        '200': {description: Resolved command after membership and expected-version checks}
+  /api/v1/integrations/bitrix24/widget-assets/install.js:
+    get:
+      tags:
+        - Bitrix24
+      operationId: getBitrix24InstallScript
+      summary: Serve Bitrix24 install.js
+      security: []
+      responses:
+        '200': {description: Response content, content: {text/javascript: {schema: {type: string}}}}
+  /api/v1/integrations/bitrix24/widget-assets/widget.css:
+    get:
+      tags:
+        - Bitrix24
+      operationId: getBitrix24WidgetStyles
+      summary: Serve Bitrix24 widget.css
+      security: []
+      responses:
+        '200': {description: Response content, content: {text/css: {schema: {type: string}}}}
+  /api/v1/integrations/bitrix24/widget-assets/widget.js:
+    get:
+      tags:
+        - Bitrix24
+      operationId: getBitrix24WidgetScript
+      summary: Serve Bitrix24 widget.js
+      security: []
+      responses:
+        '200': {description: Response content, content: {text/javascript: {schema: {type: string}}}}
+  /api/v1/integrations/bitrix24/install-ui:
+    post:
+      tags:
+        - Bitrix24
+      operationId: beginBitrix24WidgetInstall
+      summary: Begin verified Bitrix24 widget installation
+      description: >-
+        Verifies the Bitrix24 callback and returns the installation iframe. Authentication is carried in the
+        callback; this is not an ERP bearer endpoint.
+      security: []
+      requestBody:
+        description: Bitrix24 local-app OAuth/placement callback fields may be supplied in query and/or form/JSON body. Auth tokens are verified against the configured portal; conflicting duplicates are rejected. Never log this payload.
+        content: {application/x-www-form-urlencoded: {schema: {type: object, additionalProperties: {type: string}}}, application/json: {schema: {type: object, additionalProperties: true}}}
+      responses:
+        '200': {description: Response content, content: {text/html: {schema: {type: string}}}}
+  /api/v1/integrations/bitrix24/app:
+    get:
+      tags:
+        - Bitrix24
+      operationId: getBitrix24AppPage
+      summary: Show the Bitrix24 app entry page
+      security: []
+      responses:
+        '200': {description: Response content, content: {text/html: {schema: {type: string}}}}
+    post:
+      tags:
+        - Bitrix24
+      operationId: finishBitrix24WidgetInstall
+      summary: Verify the callback and finish Bitrix24 widget installation
+      security: []
+      parameters:
+        - {name: state, in: query, schema: {type: string}, description: Installation state for completing a pending setup.}
+      requestBody:
+        description: Bitrix24 local-app OAuth/placement callback fields may be supplied in query and/or form/JSON body. Auth tokens are verified against the configured portal; conflicting duplicates are rejected. Never log this payload.
+        content: {application/x-www-form-urlencoded: {schema: {type: object, additionalProperties: {type: string}}}, application/json: {schema: {type: object, additionalProperties: true}}}
+      responses:
+        '200': {description: Response content, content: {text/html: {schema: {type: string}}}}
+  /api/v1/integrations/bitrix24/widget/deal-payment:
+    post:
+      tags:
+        - Bitrix24
+      operationId: bootstrapBitrix24PaymentWidget
+      summary: Verify a Deal placement callback and open the payment widget
+      description: >-
+        Validates Bitrix24 OAuth, portal, application scope and CRM_DEAL_DETAIL_TAB placement before issuing a
+        scoped widget session.
+      security: []
+      requestBody:
+        description: Bitrix24 local-app OAuth/placement callback fields may be supplied in query and/or form/JSON body. Auth tokens are verified against the configured portal; conflicting duplicates are rejected. Never log this payload.
+        content: {application/x-www-form-urlencoded: {schema: {type: object, additionalProperties: {type: string}}}, application/json: {schema: {type: object, additionalProperties: true}}}
+      responses:
+        '200': {description: Response content, content: {text/html: {schema: {type: string}}}}
+  /api/v1/integrations/bitrix24/widget-api/context:
+    get:
+      tags:
+        - Bitrix24
+      operationId: getBitrix24WidgetContext
+      summary: Get payment context for the authenticated widget session
+      security:
+        - {bitrixWidgetSession: []}
+      responses:
+        '200': {description: Get payment context for the authenticated widget session}
+  /api/v1/integrations/bitrix24/widget-api/payments:
+    post:
+      tags:
+        - Bitrix24
+      operationId: createBitrix24WidgetPayment
+      summary: Create a payment command for the authenticated widget session
+      security:
+        - {bitrixWidgetSession: []}
+      parameters:
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/BitrixWidgetPaymentCreate'}}}
+      responses:
+        '200': {description: Existing idempotent command replayed}
+        '201': {description: New payment command created}
+  /api/v1/integrations/bitrix24/widget-api/commands/{commandId}:
+    get:
+      tags:
+        - Bitrix24
+      operationId: getBitrix24WidgetCommand
+      summary: Get a payment command in the widget session scope
+      security:
+        - {bitrixWidgetSession: []}
+      parameters:
+        - {name: commandId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Get a payment command in the widget session scope}
+  /api/v1/integrations/bitrix24/widget-api/commands/{commandId}/retry:
+    post:
+      tags:
+        - Bitrix24
+      operationId: retryBitrix24WidgetCommand
+      summary: Retry a payment command in the widget session scope
+      security:
+        - {bitrixWidgetSession: []}
+      parameters:
+        - {name: commandId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '201': {description: Retry a payment command in the widget session scope}
+  /api/v1/integrations/bitrix24/widget-api/commands/{commandId}/reauthorize:
+    post:
+      tags:
+        - Bitrix24
+      operationId: reauthorizeBitrix24WidgetCommand
+      summary: Reauthorize a payment command in the widget session scope
+      security:
+        - {bitrixWidgetSession: []}
+      parameters:
+        - {name: commandId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '201': {description: Reauthorize a payment command in the widget session scope}
+  /api/v1/integrations/bitrix24/widget-api/commands/{commandId}/confirm-overpayment:
+    post:
+      tags:
+        - Bitrix24
+      operationId: confirmBitrix24WidgetOverpayment
+      summary: Confirm overpayment for a payment command
+      security:
+        - {bitrixWidgetSession: []}
+      parameters:
+        - {name: commandId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '201': {description: Confirm overpayment for a payment command}
+
   /api/v1/integrations/bitrix24/install:
     post:
       tags:
@@ -1790,8 +2666,12 @@ paths:
         - bearerAuth: []
       x-permission: orders.view
       parameters:
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/PageSize'
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 10000, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
         - name: search
           in: query
           required: false
@@ -1815,21 +2695,25 @@ paths:
           required: false
           schema:
             type: integer
+            minimum: 1
         - name: filmId
           in: query
           required: false
           schema:
             type: integer
+            minimum: 1
         - name: supplierId
           in: query
           required: false
           schema:
             type: integer
+            minimum: 1
         - name: vendorId
           in: query
           required: false
           schema:
             type: integer
+            minimum: 1
       responses:
         '200':
           description: Live order resource demand projection
@@ -2138,6 +3022,17 @@ paths:
       responses:
         '200':
           description: Compact detail live-state snapshot
+          headers:
+            ETag:
+              schema:
+                type: string
+            X-ERP-Stream-Cursor:
+              schema:
+                type: string
+            X-ERP-Realtime-Enabled:
+              schema:
+                type: string
+                enum: ['true', 'false']
           content:
             application/json:
               schema:
@@ -2150,6 +3045,10 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/v1/orders/{orderId}/live-events:
     get:
@@ -2184,6 +3083,10 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '429':
           description: Realtime connection limit reached
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/v1/orders/{orderId}/restore:
     parameters:
@@ -2490,58 +3393,6 @@ paths:
           $ref: '#/components/responses/FeatureDisabled'
         '500':
           $ref: '#/components/responses/InternalError'
-
-  /api/v1/orders/resource-demands:
-    get:
-      tags:
-        - Orders
-      operationId: listOrderResourceDemands
-      summary: List live resource demands by production order
-      security:
-        - bearerAuth: []
-      x-permission: orders.view
-      parameters:
-        - name: page
-          in: query
-          schema: { type: integer, minimum: 1 }
-        - name: pageSize
-          in: query
-          schema: { type: integer, minimum: 1, maximum: 100 }
-        - name: search
-          in: query
-          schema: { type: string, maxLength: 200 }
-        - name: dateFrom
-          in: query
-          schema: { type: string, format: date }
-        - name: dateTo
-          in: query
-          schema: { type: string, format: date }
-        - name: sheetMaterialTypeId
-          in: query
-          schema: { type: integer, minimum: 1 }
-        - name: filmId
-          in: query
-          schema: { type: integer, minimum: 1 }
-        - name: supplierId
-          in: query
-          schema: { type: integer, minimum: 1 }
-        - name: vendorId
-          in: query
-          schema: { type: integer, minimum: 1 }
-      responses:
-        '200':
-          description: Live production-order resource demand projection
-          content:
-            application/json:
-              schema: { type: object }
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '422':
-          $ref: '#/components/responses/ValidationError'
-        '503':
-          $ref: '#/components/responses/FeatureDisabled'
 
   /api/v1/orders/{orderId}/project:
     parameters:
@@ -3250,88 +4101,6 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/OrderNotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
-  /api/v1/orders/{orderId}/detail-live-state:
-    parameters:
-      - $ref: '#/components/parameters/OrderId'
-    get:
-      tags:
-        - Orders
-      operationId: getOrderDetailLiveState
-      summary: Получить актуальное состояние производственных ячеек заказа
-      security:
-        - bearerAuth: []
-      x-permission: orders.view
-      responses:
-        '200':
-          description: Компактный снимок текущих статусов деталей и ссылок на раскрой
-          headers:
-            ETag:
-              schema:
-                type: string
-            X-ERP-Stream-Cursor:
-              schema:
-                type: string
-            X-ERP-Realtime-Enabled:
-              schema:
-                type: string
-                enum: ['true', 'false']
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
-        '304':
-          description: Состояние не изменилось
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/OrderNotFound'
-        '422':
-          $ref: '#/components/responses/ValidationError'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
-  /api/v1/orders/{orderId}/live-events:
-    parameters:
-      - $ref: '#/components/parameters/OrderId'
-    get:
-      tags:
-        - Orders
-      operationId: streamOrderLiveEvents
-      summary: Получать realtime-инвалидации состояния заказа
-      security:
-        - bearerAuth: []
-      x-permission: orders.view
-      parameters:
-        - name: Last-Event-ID
-          in: header
-          required: false
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Поток Server-Sent Events
-          content:
-            text/event-stream:
-              schema:
-                type: string
-        '204':
-          description: Realtime выключен для пользователя
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/OrderNotFound'
-        '422':
-          $ref: '#/components/responses/ValidationError'
-        '429':
-          $ref: '#/components/responses/RateLimitExceeded'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -11321,6 +12090,8 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '503':
           $ref: '#/components/responses/FeatureDisabled'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/cnc-telegram/worker-logs/batch:
     post:
@@ -11383,46 +12154,6 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '503':
           $ref: '#/components/responses/FeatureDisabled'
-
-  /api/v1/cnc-telegram/worker-logs/technical:
-    get:
-      tags: [CncTelegramWorkerAudit]
-      operationId: listCncTelegramWorkerTechnicalLogs
-      summary: List raw Telegram worker stdout and stderr lines
-      security: [{ bearerAuth: [] }]
-      x-permission: audit.view
-      responses:
-        '200': { description: Paginated technical log lines }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '422': { $ref: '#/components/responses/ValidationError' }
-
-  /api/v1/cnc-telegram/worker-logs/technical/export:
-    get:
-      tags: [CncTelegramWorkerAudit]
-      operationId: exportCncTelegramWorkerTechnicalLogs
-      summary: Export raw Telegram worker technical logs
-      security: [{ bearerAuth: [] }]
-      x-permission: audit.view
-      responses:
-        '200': { description: Plain-text technical log export }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '422': { $ref: '#/components/responses/ValidationError' }
-
-  /api/v1/cnc-telegram/worker-logs/technical/batch:
-    post:
-      tags: [CncTelegramWorkerAudit]
-      operationId: writeCncTelegramWorkerTechnicalLogBatch
-      summary: Persist a fenced bounded batch of raw worker lines
-      security: [{ bearerAuth: [] }]
-      x-permission: cut.manage
-      responses:
-        '201': { description: Technical log batch persisted }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
 
   /api/v1/cnc-telegram/worker-session/claim:
     post:
@@ -14332,6 +15063,20 @@ paths:
 
 components:
   securitySchemes:
+    bitrixWidgetSession:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: >-
+        BitrixWidget <opaque-session-token>. Scoped short-lived session issued by the verified Deal placement
+        callback; not an ERP bearer token.
+    whatsAppWebhookHmac:
+      type: apiKey
+      in: header
+      name: x-webhook-hmac
+      description: >-
+        128 hexadecimal characters: HMAC-SHA512 of the raw JSON body using the configured webhook secret.
+        Algorithm and timestamp headers are also required.
     bearerAuth:
       type: http
       scheme: bearer
@@ -14351,6 +15096,12 @@ components:
         example: req_01HZX8K5T3M2F5F7K9A2S1QW3E
 
   parameters:
+    CatalogCommandKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, minLength: 8, maxLength: 200}
+      description: Reuse for identical retry; different actor/action/payload returns 409
     WorkosUserId:
       name: userId
       in: path
@@ -14801,6 +15552,353 @@ components:
                   requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
 
   schemas:
+    CatalogInput:
+      type: object
+      additionalProperties: false
+      required: [name, sku, kind, unitId, basePrice, description, isActive]
+      properties: &catalogInputProperties
+        name: {type: string, minLength: 1, maxLength: 200}
+        sku: {type: string, nullable: true, maxLength: 80, description: Case-insensitive unique including archived items; empty becomes null}
+        kind: {type: string, enum: [made_to_order, stock_item, service]}
+        unitId: {type: integer, minimum: 1, maximum: 32767}
+        basePrice: {type: string, nullable: true, pattern: '^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$', description: Decimal KZT string or null; no rounding}
+        description: {type: string, maxLength: 2000}
+        isActive: {type: boolean}
+        refKey1c: {type: string, format: uuid, nullable: true, description: '1C reference key; unique including archived items. Omitted on update: preserve; null or empty: clear. Not generated.'}
+        sortOrder: {type: integer, minimum: -32768, maximum: 32767, description: 'Default 100 on create; omitted on update preserves value. Lists ordered by sortOrder/name/id.'}
+    CatalogUpdate:
+      type: object
+      additionalProperties: false
+      required: [name, sku, kind, unitId, basePrice, description, isActive, expectedVersion]
+      properties:
+        <<: *catalogInputProperties
+        expectedVersion: {type: integer, minimum: 1, maximum: 2147483646}
+    CatalogItem:
+      type: object
+      required: [id, version, name, sku, kind, unitId, basePrice, description, isActive, currency, unitName, unitSymbol, createdAt, updatedAt]
+      properties:
+        <<: *catalogInputProperties
+        id: {type: integer, minimum: 1, maximum: 9007199254740991}
+        version: {type: integer, minimum: 1}
+        currency: {type: string, enum: [KZT]}
+        unitName: {type: string}
+        unitSymbol: {type: string, nullable: true}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        createdBy: {type: string, readOnly: true}
+        editedBy: {type: string, readOnly: true}
+        createdByName: {type: string, readOnly: true}
+        editedByName: {type: string, readOnly: true}
+    CadRecipe:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - version
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 80
+        version:
+          type: string
+          minLength: 1
+          maxLength: 40
+        parameters:
+          type: object
+          additionalProperties: true
+          default: {}
+    CadGroup:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - sourceSnapshotId
+        - orderId
+        - detailId
+        - quantity
+        - recipe
+        - xMm
+        - yMm
+        - rotationDeg
+      properties:
+        id:
+          type: string
+          format: uuid
+        sourceSnapshotId:
+          type: string
+          format: uuid
+        orderId:
+          type: integer
+          minimum: 1
+        detailId:
+          type: integer
+          minimum: 1
+        quantity:
+          type: integer
+          minimum: 1
+        recipe:
+          type: object
+          additionalProperties: false
+          required: [code, version]
+          properties: {code: {type: string, minLength: 1, maxLength: 80}, version: {type: string, minLength: 1, maxLength: 40}, parameters: {type: object, additionalProperties: true, default: {}}}
+          nullable: true
+        xMm:
+          type: number
+        yMm:
+          type: number
+        rotationDeg:
+          type: number
+        placementGroupId:
+          type: string
+          format: uuid
+    CadVersionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+      properties:
+        version:
+          type: integer
+          minimum: 1
+    CadSaveRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+        - groups
+        - sourceIds
+      properties:
+        version:
+          type: integer
+          minimum: 1
+        groups:
+          type: array
+          maxItems: 500
+          items: {$ref: '#/components/schemas/CadGroup'}
+        sourceIds:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: {type: string, format: uuid}
+    CadForkRequest:
+      type: object
+      additionalProperties: false
+      required: [version, groups, sourceIds, name]
+      properties:
+        version: {type: integer, minimum: 1}
+        groups: {type: array, maxItems: 500, items: {$ref: '#/components/schemas/CadGroup'}}
+        sourceIds: {type: array, minItems: 1, maxItems: 500, items: {type: string, format: uuid}}
+        name: {type: string, minLength: 1, maxLength: 100}
+    CadPreviewRequest:
+      type: object
+      additionalProperties: false
+      required: [version, groups]
+      properties:
+        version: {type: integer, minimum: 1}
+        groups: {type: array, minItems: 1, maxItems: 20, items: {$ref: '#/components/schemas/CadGroup'}}
+    CadPackageRequest:
+      type: object
+      additionalProperties: false
+      required: [version, reviewId]
+      properties:
+        version: {type: integer, minimum: 1}
+        reviewId: {type: string, format: uuid}
+        acknowledgeStale: {type: boolean, default: false}
+    CadApprovalRequest:
+      type: object
+      additionalProperties: false
+      required: [version, groupId, manufacturingHash, reason]
+      properties:
+        version: {type: integer, minimum: 1}
+        groupId: {type: string, format: uuid}
+        manufacturingHash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        reason: {type: string, minLength: 1, maxLength: 1000}
+    CadCloneRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        refresh:
+          type: boolean
+          default: false
+    CadMappingRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - recipe
+        - revision
+      properties:
+        recipe:
+          $ref: '#/components/schemas/CadRecipe'
+        revision:
+          type: integer
+          minimum: 0
+    WhatsAppTemplateCreate:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - name
+        - body
+      properties:
+        code:
+          type: string
+          pattern: '^[a-z][a-z0-9_]{1,63}$'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        body:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        enabled:
+          type: boolean
+          default: true
+    WhatsAppTemplateUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+      properties:
+        version:
+          type: integer
+          minimum: 1
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        body:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        enabled:
+          type: boolean
+    WhatsAppRuleCreate:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - name
+        - matchMode
+        - keywords
+        - templateId
+      properties:
+        code:
+          type: string
+          pattern: '^[a-z][a-z0-9_]{1,63}$'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        matchMode:
+          type: string
+          enum: [contains_any, exact_any]
+        keywords:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: {type: string, minLength: 1, maxLength: 120}
+          description: 'Trimmed, lowercased and deduplicated by the server.'
+        templateId:
+          type: integer
+          minimum: 1
+        priority:
+          type: integer
+          minimum: 0
+          maximum: 10000
+          default: 100
+        enabled:
+          type: boolean
+          default: true
+    WhatsAppRuleUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+      properties:
+        version:
+          type: integer
+          minimum: 1
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        matchMode:
+          type: string
+          enum: [contains_any, exact_any]
+        keywords:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: {type: string, minLength: 1, maxLength: 120}
+          description: 'Trimmed, lowercased and deduplicated by the server.'
+        templateId:
+          type: integer
+          minimum: 1
+        priority:
+          type: integer
+          minimum: 0
+          maximum: 10000
+        enabled:
+          type: boolean
+    WhatsAppRestart:
+      type: object
+      additionalProperties: false
+      required:
+        - confirmed
+      properties:
+        confirmed:
+          type: boolean
+          enum: [true]
+        restrictionConfirmed:
+          type: boolean
+          default: false
+    BitrixPaymentAmbiguityResolution:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [resolution, bitrixPaymentId, reason, expectedVersion]
+          properties: {resolution: {type: string, enum: [attach_existing]}, bitrixPaymentId: {type: string, pattern: '^[1-9][0-9]*$'}, reason: {type: string, minLength: 10, maxLength: 2000}, expectedVersion: {type: integer, minimum: 1}}
+        - type: object
+          additionalProperties: false
+          required: [resolution, reason, expectedVersion]
+          properties: {resolution: {type: string, enum: [confirm_absent]}, reason: {type: string, minLength: 10, maxLength: 2000}, expectedVersion: {type: integer, minimum: 1}}
+    BitrixWidgetPaymentCreate:
+      type: object
+      additionalProperties: false
+      required:
+        - amount
+        - paymentDate
+        - paySystemId
+      properties:
+        amount:
+          type: string
+          pattern: '^(?:0|[1-9][0-9]{0,11})\.[0-9]{2}$'
+          description: 'Positive decimal amount, greater than zero.'
+        paymentDate:
+          type: string
+          format: date
+        paySystemId:
+          type: integer
+          minimum: 1
+        comment:
+          type: string
+          maxLength: 1000
+          nullable: true
+        expectedOrderVersion:
+          type: integer
+          minimum: 1
+          nullable: true
+        confirmOverpayment:
+          type: boolean
+          default: false
     MdfBoardHistoryColumn:
       type: string
       enum: [parsed, completed, completed_laminated, baths, baths_ready, baths_laminated, completed_baths, orders, orders_ready, orders_issued]
@@ -17828,6 +18926,16 @@ components:
           nullable: true
         productionStatusFromDetailsEnabled:
           type: boolean
+        productionDetailCount:
+          type: integer
+          minimum: 0
+          description: Live ordinary detail rows; HDF excluded.
+        productionUnassignedCount:
+          type: integer
+          minimum: 0
+        productionDistinctStatusCount:
+          type: integer
+          minimum: 0
         paymentStatusId:
           type: integer
           format: int64
@@ -18082,6 +19190,15 @@ components:
         totalAmount:
           type: number
           format: decimal
+        productionDetailCount:
+          type: integer
+          minimum: 0
+        productionUnassignedCount:
+          type: integer
+          minimum: 0
+        productionDistinctStatusCount:
+          type: integer
+          minimum: 0
         discount:
           type: number
           format: decimal
@@ -18249,6 +19366,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/OrderDetailDto'
+        catalogLines:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderCatalogLineDto'
         payments:
           type: array
           items:
@@ -18734,6 +19855,73 @@ components:
           format: decimal
           minimum: 0
 
+    SaveOrderCatalogLineDto:
+      type: object
+      additionalProperties: false
+      required: [catalogItemId, quantity, unitPrice]
+      description: id для существующей строки или clientKey для новой. catalogVersion обязателен при выборе новой позиции. Снимки названия, типа и единицы берёт сервер. Количество до 3 знаков; цена до 2; сумма округляется до 2 знаков.
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        clientKey:
+          type: string
+          minLength: 1
+          maxLength: 200
+        catalogItemId:
+          type: integer
+          minimum: 1
+        catalogVersion:
+          type: integer
+          minimum: 1
+        quantity:
+          type: string
+          pattern: '^\d{1,9}(\.\d{1,3})?$'
+        unitPrice:
+          type: string
+          pattern: '^\d{1,10}(\.\d{1,2})?$'
+        notes:
+          type: string
+          maxLength: 2000
+    OrderCatalogLineDto:
+      type: object
+      required: [id, catalogItemId, catalogVersion, lineNumber, name, kind, unitId, unitName, quantity, unitPrice, amount, catalogActive]
+      properties:
+        id:
+          type: integer
+        catalogItemId:
+          type: integer
+        catalogVersion:
+          type: integer
+        lineNumber:
+          type: integer
+        name:
+          type: string
+        sku:
+          type: string
+          nullable: true
+        kind:
+          type: string
+          enum: [made_to_order, stock_item, service]
+        unitId:
+          type: integer
+        unitName:
+          type: string
+        refKey1c:
+          type: string
+          format: uuid
+          nullable: true
+        quantity:
+          type: string
+        unitPrice:
+          type: string
+        amount:
+          type: string
+        notes:
+          type: string
+        catalogActive:
+          type: boolean
+
     SaveOrderDto:
       type: object
       required:
@@ -18751,6 +19939,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SaveOrderDetailDto'
+        catalogLines:
+          type: array
+          maxItems: 1000
+          description: Отсутствие поля или пустой массив сохраняет существующие строки. Удаление только через deleted.catalogLineIds. Заказ должен иметь активную деталь либо товар/услугу.
+          items:
+            $ref: '#/components/schemas/SaveOrderCatalogLineDto'
         payments:
           type: array
           items:
@@ -19146,6 +20340,12 @@ components:
     DeletedOrderChildrenDto:
       type: object
       properties:
+        catalogLineIds:
+          type: array
+          uniqueItems: true
+          items:
+            type: integer
+            minimum: 1
         detailIds:
           type: array
           items:
@@ -19325,6 +20525,15 @@ components:
               productionStatusName:
                 type: string
                 nullable: true
+              productionDetailCount:
+                type: integer
+                minimum: 0
+              productionUnassignedCount:
+                type: integer
+                minimum: 0
+              productionDistinctStatusCount:
+                type: integer
+                minimum: 0
               version:
                 type: integer
         requestId:

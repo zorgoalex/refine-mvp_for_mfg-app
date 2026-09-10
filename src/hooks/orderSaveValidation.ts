@@ -233,6 +233,7 @@ function fieldScope(field: ParsedField, detailNumber: number | null): string {
     return field.index === null ? 'Позиции заказа' : `Позиция №${detailNumber ?? field.index + 1}`;
   }
   if (field.section === 'header') return 'Основная информация';
+  if (field.section === 'catalogLines') return field.index === null ? 'Услуги/товары' : `Товар/услуга №${field.index + 1}`;
   if (field.section === 'payments') return field.index === null ? 'Платежи' : `Платёж №${field.index + 1}`;
   if (field.section === 'workshops') return field.index === null ? 'Производство' : `Производство №${field.index + 1}`;
   if (field.section === 'requirements') return field.index === null ? 'Материалы' : `Материал №${field.index + 1}`;

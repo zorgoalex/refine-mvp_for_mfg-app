@@ -46,6 +46,8 @@ export type PermissionName =
   | 'cad.view'
   | 'cad.edit'
   | 'cad.export'
+  | 'cad.technology'
+  | 'cad.approve'
   | 'cut.manage'
   | 'cnc.telegram_import.manage_all'
   | 'sheet_materials.view'

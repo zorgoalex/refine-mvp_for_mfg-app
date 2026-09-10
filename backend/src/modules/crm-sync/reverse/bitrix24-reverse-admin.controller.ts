@@ -124,12 +124,17 @@ export class Bitrix24ReverseAdminController {
     const parsed = z.object({
       orderVersion: z.coerce.number().int().positive(),
       details: z.array(requestDetailSchema).max(1_000),
+      catalogLines: z.unknown().optional(),
+      deletedCatalogLineIds: z.array(z.number().int().positive().safe()).optional(),
     }).strict().safeParse(body);
     if (!parsed.success) throw validationError(parsed.error);
     return this.repository.replaceIncomingRequestDetails({
       requestId: parseId(requestId, 'requestId'),
       orderVersion: parsed.data.orderVersion,
       details: parsed.data.details,
+      catalogLines: parsed.data.catalogLines,
+      deletedCatalogLineIds: parsed.data.deletedCatalogLineIds,
+      catalogActor: actor,
       actorUserId: Number(actor.id),
       actorUsername: actor.username,
       actorRole: actor.role,
@@ -219,6 +224,7 @@ export class Bitrix24ReverseAdminController {
     return this.repository.getMappedOrderPayments(
       parseId(orderId, 'orderId'),
       crmRequestScope(actor),
+      actor.permissions.includes('bitrix24.requests.view'),
     );
   }
 
@@ -242,7 +248,7 @@ export class Bitrix24ReverseAdminController {
       orderId,
       auditRequestId: requireRequestId(request),
     });
-    return this.repository.getMappedOrderPayments(orderId, scope);
+    return this.repository.getMappedOrderPayments(orderId, scope, actor.permissions.includes('bitrix24.requests.view'));
   }
 
   @ApiOperation({ summary: 'List Bitrix24 responsible-user mappings' })

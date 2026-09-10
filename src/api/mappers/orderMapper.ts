@@ -54,6 +54,9 @@ const FRONTEND_ONLY_FIELDS = new Set([
   'order_status_name',
   'payment_status_name',
   'production_status_name',
+  'production_detail_count',
+  'production_unassigned_count',
+  'production_distinct_status_count',
   'milling_type_name',
   'edge_type_name',
   'film_name',
@@ -120,6 +123,10 @@ export function mapOrderFormToSaveOrderDto(values: OrderFormValues): SaveOrderDt
       refKey1c: normalizeOptionalString(header.ref_key_1c),
     },
     details,
+    ...(values.catalogLines === undefined ? {} : { catalogLines: values.catalogLines.map(row => ({
+      id: row.id, clientKey: row.clientKey, catalogItemId: row.catalogItemId, catalogVersion: row.catalogVersion,
+      quantity: row.quantity, unitPrice: row.unitPrice, notes: row.notes ?? '',
+    })) }),
     hdfDetails: normalizeHdfDetails(values.hdfDetails ?? [], values.dirtyHdfDetailIds ?? []),
     bazisImportCandidateClientKeys: details
       .filter(
@@ -134,6 +141,7 @@ export function mapOrderFormToSaveOrderDto(values: OrderFormValues): SaveOrderDt
     requirements: normalizeRequirements(values.requirements ?? []),
     dowelingLinks: normalizeDowelingLinks(values.dowelingLinks ?? []),
     deleted: {
+      ...(values.deletedCatalogLineIds === undefined ? {} : { catalogLineIds: normalizeDeletedIds(values.deletedCatalogLineIds) }),
       detailIds: normalizeDeletedIds(values.deletedDetails),
       hdfDetailIds: normalizeDeletedIds(values.deletedHdfDetails),
       paymentIds: normalizeDeletedIds(values.deletedPayments),
@@ -196,6 +204,9 @@ export function mapOrderDtoToFormValues(order: OrderDto): OrderFormValues {
     payment_status_name: order.header.paymentStatusName ?? undefined,
     production_status_id: optionalNumber(order.header.productionStatusId),
     production_status_name: order.header.productionStatusName ?? undefined,
+    production_detail_count: order.header.productionDetailCount,
+    production_unassigned_count: order.header.productionUnassignedCount,
+    production_distinct_status_count: order.header.productionDistinctStatusCount,
     passed_production_status_codes: order.header.passedProductionStatusCodes ?? [],
     production_status_from_details_enabled: normalizeBoolean(
       order.header.productionStatusFromDetailsEnabled,
@@ -238,6 +249,8 @@ export function mapOrderDtoToFormValues(order: OrderDto): OrderFormValues {
     updated_at: order.header.updatedAt ?? undefined,
     created_by: optionalNumber(order.header.createdBy) ?? undefined,
     edited_by: optionalNumber(order.header.editedBy) ?? undefined,
+    created_by_label: order.header.createdByLabel ?? null,
+    edited_by_label: order.header.editedByLabel ?? null,
     version: order.version,
   };
 
@@ -253,6 +266,8 @@ export function mapOrderDtoToFormValues(order: OrderDto): OrderFormValues {
   return {
     header,
     details: mapDetailsFromDto(order.details ?? [], order.header.orderId),
+    catalogLines: order.catalogLines ?? [],
+    deletedCatalogLineIds: [],
     hdfDetails: mapHdfDetailsFromDto(order.hdfDetails ?? [], order.header.orderId),
     payments: mapPaymentsFromDto(order.payments ?? [], order.header.orderId),
     workshops: mapWorkshopsFromDto(order.workshops ?? [], order.header.orderId),
@@ -292,6 +307,9 @@ export function mapOrderListItemToLegacyRow(item: OrderListItemDto): LegacyOrder
     payment_status_name: item.paymentStatusName ?? null,
     production_status_id: item.productionStatusId ?? null,
     production_status_name: item.productionStatusName ?? null,
+    production_detail_count: item.productionDetailCount,
+    production_unassigned_count: item.productionUnassignedCount,
+    production_distinct_status_count: item.productionDistinctStatusCount,
     total_amount: item.totalAmount ?? null,
     final_amount: item.finalAmount ?? null,
     paid_amount: item.paidAmount ?? undefined,

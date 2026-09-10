@@ -353,20 +353,10 @@ export const useCalendarData = (
     const ordersWithDetails = data.data.map((order) => {
       const details = detailsByOrderId[order.order_id] || [];
 
-      // Агрегируем уникальные статусы производства из всех деталей
-      const productionStatusNames = details
-        .map((d) => d.production_status_name)
-        .filter((name): name is string => !!name);
-      const uniqueStatuses = Array.from(new Set(productionStatusNames));
-      // Объединяем все статусы в одну строку (для поиска ключевых слов)
-      const aggregatedProductionStatus = uniqueStatuses.join(' ').toLowerCase();
-
       return {
         ...order,
         order_details: details,
         doweling_order_name: dowelingByOrderId[order.order_id] || undefined,
-        // Приоритет: статус уровня заказа (из orders_view), затем агрегация из деталей
-        production_status_name: order.production_status_name || aggregatedProductionStatus,
         passedProductionCodes: resolveCalendarProductionStatusCodes({
           order,
           details,

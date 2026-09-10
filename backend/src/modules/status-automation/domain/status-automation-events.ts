@@ -37,7 +37,7 @@ const ORDER_STATUS_CHANGED_ACTIONS: ReadonlyArray<StatusAutomationActionType> = 
 ];
 
 const PRODUCTION_STATUS_CHANGED_ACTIONS: ReadonlyArray<StatusAutomationActionType> = [
-  ...ALLOWED_ACTIONS,
+  'change_order_status',
   'map_production_status_to_order_status',
 ];
 
@@ -94,7 +94,7 @@ export const STATUS_AUTOMATION_EVENTS: ReadonlyArray<StatusAutomationEventDescri
     eventType: 'order.production_status_changed',
     title: 'Изменился статус производства',
     group: 'statuses',
-    description: 'Когда заказу назначен другой производственный статус.',
+    description: 'После изменения производственных статусов или состава обычных деталей заказа. Для перехода заказа все детали должны иметь одинаковый непустой статус. ХДФ исключён.',
     allowedConditions: BASE_CONDITIONS,
     allowedActions: PRODUCTION_STATUS_CHANGED_ACTIONS,
   },

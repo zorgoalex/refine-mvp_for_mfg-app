@@ -1,3 +1,5 @@
+import type { SaveOrderCatalogLineDto } from '../domain/order-catalog-lines';
+
 export const STANDARD_PAYMENT_STATUS_IDS = {
   NOT_PAID: 1,
   PARTIALLY_PAID: 2,
@@ -9,6 +11,7 @@ export type OrderSaveMode = 'create' | 'update';
 export interface SaveOrderDto {
   header: SaveOrderHeaderDto;
   details: SaveOrderDetailDto[];
+  catalogLines?: SaveOrderCatalogLineDto[];
   hdfDetails?: SaveOrderHdfDetailDto[];
   payments: SaveOrderPaymentDto[];
   workshops: SaveOrderWorkshopDto[];
@@ -152,6 +155,7 @@ export interface SaveOrderDowelingLinkDto {
 }
 
 export interface SaveOrderDeletedDto {
+  catalogLineIds?: number[];
   detailIds?: number[];
   hdfDetailIds?: number[];
   paymentIds?: number[];

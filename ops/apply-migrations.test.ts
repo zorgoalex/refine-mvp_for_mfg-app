@@ -57,6 +57,15 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText).toMatch(/--skip-041/);
   });
 
+  it('verifies catalogue rows, generated money and union aggregate invariant before recording migration162', () => {
+    expect(probeFn).toContain('162_order_catalog_lines*) probe_all');
+    expect(probeFn).toContain("attgenerated='s'");
+    expect(probeFn).toContain('ctrg_order_catalog_lines_kind_aggregate');
+    expect(probeFn).toContain('order_catalog_lines_order_id_fkey');
+    expect(probeFn).toContain("position('order_catalog_lines' in prosrc)>0");
+    expect(scriptText).toContain('|161_*|162_*)');
+  });
+
   it('the three 040_* files have distinct arms (filename-keyed map)', () => {
     expect(scriptText).toMatch(/040_cut_job_sheet_material\*/);
     expect(scriptText).toMatch(/040_seed_standard_label_template\*/);

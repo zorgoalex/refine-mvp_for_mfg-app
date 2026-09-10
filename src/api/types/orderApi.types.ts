@@ -6,6 +6,7 @@ import type { CutDetailLastReadyJobRef } from './cutApi.types';
 import type { StatusAutomationOrderRefreshSummaryDto } from './statusAutomationApi.types';
 
 export interface SaveOrderDto {
+  catalogLines?: ReturnType<typeof import('../../utils/orderCatalogLines').orderCatalogLineInput>[];
   header: SaveOrderHeaderDto;
   details: SaveOrderDetailDto[];
   hdfDetails?: SaveOrderHdfDetailDto[];
@@ -179,6 +180,9 @@ export interface RestoreOrderResponse {
 }
 
 export interface OrderTransferTarget {
+  productionDetailCount?: number;
+  productionUnassignedCount?: number;
+  productionDistinctStatusCount?: number;
   orderId: number;
   orderName: string;
   clientId: number;
@@ -234,6 +238,7 @@ export interface ExportOrderResponse {
 }
 
 export type OrderSnapshotReferenceEntityType =
+  | 'catalogItem'
   | 'material'
   | 'sheetMaterialType'
   | 'millingType'
@@ -523,6 +528,7 @@ export interface SaveOrderDowelingLinkDto {
 }
 
 export interface DeletedOrderChildrenDto {
+  catalogLineIds?: number[];
   detailIds: number[];
   hdfDetailIds?: number[];
   paymentIds: number[];
@@ -532,6 +538,7 @@ export interface DeletedOrderChildrenDto {
 }
 
 export interface OrderDto {
+  catalogLines?: import('../../utils/orderCatalogLines').OrderCatalogLine[];
   header: OrderHeaderDto;
   details: OrderDetailDto[];
   hdfDetails?: OrderHdfDetailDto[];
@@ -546,6 +553,9 @@ export interface OrderDto {
 }
 
 export interface OrderHeaderDto {
+  productionDetailCount?: number;
+  productionUnassignedCount?: number;
+  productionDistinctStatusCount?: number;
   orderId: number;
   orderName: string;
   clientId: number;
@@ -587,6 +597,8 @@ export interface OrderHeaderDto {
   updatedAt?: IsoDateTimeString | null;
   createdBy?: number | null;
   editedBy?: number | null;
+  createdByLabel?: string | null;
+  editedByLabel?: string | null;
   version?: number;
   /** Присутствуют только в ответе getOrder с includeDeleted=true. */
   deleteFlag?: boolean;
@@ -761,6 +773,9 @@ export interface OrderTotalsDto {
 }
 
 export interface OrderListItemDto {
+  productionDetailCount?: number;
+  productionUnassignedCount?: number;
+  productionDistinctStatusCount?: number;
   orderId: number;
   orderName: string;
   clientId: number;

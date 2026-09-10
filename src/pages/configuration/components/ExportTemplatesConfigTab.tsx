@@ -1,3 +1,4 @@
+import { PopconfirmContent } from "../../../components/PopconfirmContent";
 import { Table, Tooltip } from '../../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Col, Empty, Form, Input, List, Popconfirm, Row, Select, Space, Spin, Tag, Typography, message } from 'antd';
@@ -139,7 +140,7 @@ export const ExportTemplatesConfigTab: React.FC = () => {
           </div>)}
           <Space wrap><Button onClick={() => void runPreview()} style={{ minHeight: 40 }}>Проверить и показать пример</Button>
             {selected && !selected.isDefault && <Button disabled={!canManage} style={{ minHeight: 40 }} onClick={() => void setDefault()}>Сделать по умолчанию</Button>}
-            {selected && <Popconfirm title="Удалить шаблон?" description="Это действие скроет шаблон из экспорта." disabled={selected.isDefault}
+            {selected && <Popconfirm title={<PopconfirmContent title="Удалить шаблон?" description="Это действие скроет шаблон из экспорта." />} disabled={selected.isDefault}
               onConfirm={() => void remove()}><Button danger icon={<DeleteOutlined />} disabled={!canManage || selected.isDefault} style={{ minHeight: 40 }}>Удалить</Button></Popconfirm>}</Space>
           {preview.length > 0 && <Table size="small" pagination={false} rowKey="columnKey" dataSource={preview} columns={[
             { title: 'Колонка', dataIndex: 'header' }, { title: 'Пример', dataIndex: 'value', render: (value) => value == null ? <Text type="secondary">пусто</Text> : String(value) },

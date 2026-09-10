@@ -217,7 +217,7 @@ function createDatabase(options: DatabaseOptions = {}) {
         payment_status_id: orderStatuses[orderId] ?? 1,
         order_kind: 'production_order',
         legacy_zero_detail_exempt: false,
-        has_active_details: true,
+        has_active_positions: true,
         version: 3,
         created_by: 1,
         manager_id: null,

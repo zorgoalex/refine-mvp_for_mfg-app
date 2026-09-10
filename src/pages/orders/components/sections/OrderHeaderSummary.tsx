@@ -1,4 +1,5 @@
 // Order Header Summary (Read-only)
+import { OrderProductionSummary } from '../../../../components/OrderProductionSummary';
 // Compact minimalist design - 3 rows with minimal padding
 // Right-click to open context menu for status changes
 
@@ -7,6 +8,7 @@ import { Tag, Space, Typography } from 'antd';
 import { StarOutlined } from '@ant-design/icons';
 import { useList, useOne } from '../../../../query/orderLifecycleQueries';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
+import { orderCatalogSubtotal } from '../../../../utils/orderCatalogLines';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { getMaterialColor } from '../../../../config/displayColors';
@@ -38,7 +40,7 @@ interface OrderHeaderSummaryProps {
 
 export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactSticky = false }) => {
   const isOperational = useOperationalUi();
-  const { header, details, hdfDetails, payments, isPaymentStatusManual, dowelingLinks } = useOrderFormStore();
+  const { header, details, hdfDetails, payments, isPaymentStatusManual, dowelingLinks, catalogLines } = useOrderFormStore();
   const { getSetting } = useOrderAppSettings();
   const productionStatusEvents = useProductionStatusEvent({
     orderId: header.order_id,
@@ -75,8 +77,8 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
     parts_count: businessDetails.reduce((sum, d) => sum + (d.quantity || 0), 0),
     total_area: calculateOrderTotalArea(businessDetails),
     total_paid: payments.reduce((sum, p) => sum + (p.amount || 0), 0),
-    total_amount: businessDetails.reduce((sum, d) => sum + (d.detail_cost || 0), 0),
-  }), [businessDetails, payments]);
+    total_amount: businessDetails.reduce((sum, d) => sum + (d.detail_cost || 0), 0) + orderCatalogSubtotal(catalogLines),
+  }), [businessDetails, payments, catalogLines]);
 
   // Get the latest (last added) doweling link for header display
   const latestDowelingLink = useMemo(() => {
@@ -320,6 +322,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
   const discount = Number(header.discount) || 0;
   const surcharge = Number(header.surcharge) || 0;
   const remainingAmount = Math.max(0, finalAmount - paidAmount);
+  const amountBreakdown = `Детали: ${formatNumber(totals.total_amount - orderCatalogSubtotal(catalogLines), 2)} ${CURRENCY_SYMBOL}; товары/услуги: ${formatNumber(orderCatalogSubtotal(catalogLines), 2)} ${CURRENCY_SYMBOL}`;
   const compactFinanceItems = [
     `${formatNumber(finalAmount, 2)} ${CURRENCY_SYMBOL}`,
     discount > 0 ? `скид. ${formatNumber(discount, 2)} ${CURRENCY_SYMBOL}` : null,
@@ -431,7 +434,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
               {primaryPhone ? <a href={`tel:${primaryPhone.replace(/[^+\d]/g, '')}`}>{primaryPhone}</a> : null}
             </span>
             <span className="order-show-header__compact-item order-show-header__compact-money">
-              <span className="order-show-header__compact-text">{compactFinanceItems.join(' / ')}</span>
+              <span className="order-show-header__compact-text" title={amountBreakdown}>{compactFinanceItems.join(' / ')}</span>
               <Tag color={paymentStatusName === 'Оплачен' ? '#059669' : '#D97706'}>
                 {paymentStatusName}
               </Tag>
@@ -440,6 +443,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
               {header.order_date ? dayjs(header.order_date).format('DD.MM.YYYY') : '—'}
               {' → '}
               {header.planned_completion_date ? dayjs(header.planned_completion_date).format('DD.MM.YYYY') : '—'}
+              <OrderProductionSummary order={header} />
               {passedProductionCodes.length > 0 ? (
                 <ProductionStagesDisplay
                   passedCodes={passedProductionCodes}
@@ -556,7 +560,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
 
         {/* Column 3: Final amount + discount % + Payment status */}
         <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
-          <Text strong style={{ fontSize: 15, color: '#4F46E5' }}>
+          <Text strong title={amountBreakdown} style={{ fontSize: 15, color: '#4F46E5' }}>
             {formatNumber(header.final_amount || header.total_amount || 0, 2)} {CURRENCY_SYMBOL}
           </Text>
           {(header.discount != null && Number(header.discount) > 0) && (() => {
@@ -612,6 +616,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
             {header.planned_completion_date ? dayjs(header.planned_completion_date).format('DD.MM.YYYY') : '—'}
           </Text>
           {/* Production stages display */}
+          <OrderProductionSummary order={header} />
           {passedProductionCodes.length > 0 && (
             <>
               <span style={{ color: 'var(--app-border)' }}>|</span>

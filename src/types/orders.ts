@@ -9,6 +9,9 @@ import type { CutDetailLastReadyJobRef } from '../api/types/cutApi.types';
 // ============================================================================
 
 export interface Order {
+  production_detail_count?: number;
+  production_unassigned_count?: number;
+  production_distinct_status_count?: number;
   order_id?: number;
   order_name: string;
   client_id: number;
@@ -87,6 +90,8 @@ export interface Order {
   version?: number;
   ref_key_1c?: string | null;
   created_by?: number;
+  created_by_label?: string | null;
+  edited_by_label?: string | null;
   edited_by?: number | null;
   created_at?: Date | string;
   updated_at?: Date | string;
@@ -333,6 +338,8 @@ export interface OrderDowelingLink {
 // ============================================================================
 
 export interface OrderFormValues {
+  catalogLines?: import('../utils/orderCatalogLines').OrderCatalogLine[];
+  deletedCatalogLineIds?: number[];
   // Header
   header: Order;
 

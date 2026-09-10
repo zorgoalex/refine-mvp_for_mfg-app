@@ -1887,7 +1887,33 @@ probe_file() {
                         OR p.is_vacuum IS DISTINCT FROM cut_result_snapshot_is_vacuum(r.snapshot_job)
                         OR p.cut_job_name IS DISTINCT FROM r.snapshot_job ->> 'name'
                      );" ;;
+    156_bitrix24_authorship*) probe_all "$(q_col bitrix24_incoming_request_payment paid_by_id)" "$(q_col bitrix24_incoming_request_payment paid_by_name)" "$(q_col bitrix24_manual_payment_command bitrix_actor_name)" ;;
+    157_products_services_catalog*) probe_all "$(q_col catalog_items base_price)" "$(q_col catalog_items version)" "$(q_col catalog_items currency)" \
+      "$(q_col catalog_items created_by)" "$(q_col catalog_items edited_by)" "$(q_col catalog_item_commands response_json)" \
+      "$(q_col catalog_item_commands request_hash)" "$(q_col catalog_item_commands actor_user_id)" \
+      "$(q_idx catalog_items_sku_unique)" "$(q_idx catalog_items_list_idx)" \
+      "$(q_con catalog_items_unit_id_fkey)" "$(q_con catalog_items_kind_check)" "$(q_con catalog_items_currency_check)" \
+      "$(q_con catalog_items_base_price_check)" "$(q_con catalog_item_commands_pkey)" ;;
+    160_cad_editor_workflow*) probe_all "$(q_tbl cad_export_reviews)" "$(q_tbl cad_approval_commands)" "$(q_col cad_export_reviews acknowledged_at)" "$(q_col cad_approval_commands receipt)" ;;
+    161_catalog_reference_service_fields*) probe_all "$(q_col catalog_items ref_key_1c)" "$(q_col catalog_items sort_order)" "$(q_idx catalog_items_sort_idx)" "$(q_idx catalog_items_ref_key_1c_unique)" ;;
+    162_order_catalog_lines*) probe_all "$(q_tbl order_catalog_lines)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass('public.order_catalog_lines') AND attname='amount' AND attgenerated='s');" \
+      "SELECT EXISTS (SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('public.order_catalog_lines_order_idx') AND indisvalid);" \
+      "$(q_con_on order_catalog_lines order_catalog_lines_order_id_fkey)" \
+      "$(q_con_on order_catalog_lines order_catalog_lines_catalog_item_id_fkey)" \
+      "$(q_con_on order_catalog_lines order_catalog_lines_unit_id_fkey)" \
+      "$(q_con_on order_catalog_lines order_catalog_lines_created_by_fkey)" \
+      "$(q_con_on order_catalog_lines order_catalog_lines_edited_by_fkey)" \
+      "$(q_con_on order_catalog_lines order_catalog_lines_quantity_check)" \
+      "$(q_con_on order_catalog_lines order_catalog_lines_unit_price_check)" \
+      "$(q_con_on order_catalog_lines order_catalog_lines_kind_check)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.order_catalog_lines') AND tgname='ctrg_order_catalog_lines_kind_aggregate' AND tgenabled='O' AND tgdeferrable AND tginitdeferred);" \
+      "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE oid=to_regprocedure('public.validate_order_kind_aggregate_id(bigint)') AND position('order_catalog_lines' in prosrc)>0 AND position('FOR UPDATE' in prosrc)>0);" ;;
     154_svg_source_instance_sequences*) probe_all "SELECT position('svg_source_instance_sequence_v1' in pg_get_functiondef('cut_result_snapshot_is_complete(jsonb,jsonb,text)'::regprocedure)) > 0;" ;;
+    155_order_production_composition*) probe_all \
+                     "$(q_col orders production_detail_count)" \
+                     "$(q_col orders_view production_unassigned_count)" \
+                     "SELECT obj_description('recalc_order_production_status(bigint)'::regprocedure) LIKE 'v155:%';" ;;
     153_svg_partial_label_maps*) probe_all \
                      "$(q_con chk_cut_result_placement_source_only_order)" \
                      "SELECT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid='public.cut_result_placement'::regclass AND attname='order_id' AND attnotnull=false);" ;;
@@ -1924,7 +1950,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    151_*|152_*)
+    151_*|152_*|156_*|157_*|160_*|161_*|162_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*|127_*|128_*|129_*|130_*|131_*|132_*|133_*|134_*|135_*|136_*|137_*|138_*|139_*|140_*|141_*|142_*|143_*|144_*|145_*|146_*|147_*|148_*|149_*|150_*|153_*|154_*)

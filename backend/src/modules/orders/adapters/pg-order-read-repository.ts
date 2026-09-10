@@ -1,4 +1,6 @@
 import type { QueryResultRow } from 'pg';
+import { readOrderCatalogLines } from './pg-order-catalog-lines';
+import { mapProductionSummary, type ProductionSummaryRow } from '../../../shared/production-status/production-summary';
 import type { DatabaseClient } from '../../../database/database.types';
 import type { OrderFormDataResponseDto } from '../dto/order-form-data.dto';
 import type {
@@ -59,7 +61,7 @@ const PAGE_SORT_COLUMNS: Record<OrderListSortBy, string> = {
   updatedAt: 'o.updated_at',
 };
 
-interface OrderHeaderRow extends QueryResultRow {
+interface OrderHeaderRow extends QueryResultRow, ProductionSummaryRow {
   order_id: string | number;
   order_name: string;
   order_kind: OrderKind;
@@ -99,6 +101,8 @@ interface OrderHeaderRow extends QueryResultRow {
   updated_at: string | Date;
   created_by: string | number | null;
   edited_by: string | number | null;
+  created_by_label?: string | null;
+  edited_by_label?: string | null;
   version: string | number;
   ref_key_1c: string | null;
   sheet_material_type_id: string | number | null;
@@ -471,6 +475,7 @@ export class PgOrderReadRepository
           o.order_status_id, os.order_status_name,
           o.payment_status_id, pay_s.payment_status_name,
           o.production_status_id, prod_s.production_status_name,
+          o.production_detail_count, o.production_unassigned_count, o.production_distinct_status_count,
           o.production_status_from_details_enabled,
           o.planned_completion_date, o.completion_date, o.issue_date, o.payment_date,
           o.discount, o.surcharge, o.notes, o.manager_id,
@@ -743,6 +748,7 @@ export class PgOrderReadRepository
         o.order_status_id, os.order_status_name,
         o.payment_status_id, pay_s.payment_status_name,
         o.production_status_id, prod_s.production_status_name,
+        o.production_detail_count, o.production_unassigned_count, o.production_distinct_status_count,
         o.production_status_from_details_enabled,
         (
           SELECT ARRAY_AGG(statuses.production_status_code ORDER BY statuses.sort_order, statuses.production_status_code)
@@ -775,6 +781,8 @@ export class PgOrderReadRepository
         o.created_at, o.updated_at, o.created_by, o.edited_by, o.version, o.ref_key_1c,
         o.hdf_min_threshold_mm,
         ${headerSheetCols}${deletedHeaderSelect}
+        , (SELECT CASE WHEN u.is_service_account THEN 'Сервис интеграции ERP' ELSE COALESCE(NULLIF(u.full_name,''),u.username) END FROM users u WHERE u.user_id=o.created_by) AS created_by_label
+        , (SELECT CASE WHEN u.is_service_account THEN 'Сервис интеграции ERP' ELSE COALESCE(NULLIF(u.full_name,''),u.username) END FROM users u WHERE u.user_id=o.edited_by) AS edited_by_label
       FROM orders o
       LEFT JOIN projects mp ON mp.project_id = o.project_id
       LEFT JOIN clients c ON c.client_id = o.client_id
@@ -1089,7 +1097,7 @@ export class PgOrderReadRepository
       [command.orderId],
     );
 
-    return mapOrderDto(
+    const result = mapOrderDto(
       header,
       details.rows,
       hdfDetails.rows,
@@ -1100,6 +1108,8 @@ export class PgOrderReadRepository
       groupLinks.rows.map(mapGroupLinkRow),
       includeDeleted,
     );
+    result.catalogLines = await readOrderCatalogLines(this.database, command.orderId);
+    return result;
   }
 
   async getOrderAudit(command: GetOrderAuditCommand): Promise<OrderAuditListResponseDto> {
@@ -1550,6 +1560,7 @@ function mapOrderDto(
       orderStatusName: row.order_status_name ?? '',
       paymentStatusId: toNumber(row.payment_status_id),
       paymentStatusName: row.payment_status_name ?? '',
+      ...mapProductionSummary(row),
       productionStatusId: toNullableNumber(row.production_status_id),
       productionStatusName: row.production_status_name,
       productionStatusFromDetailsEnabled: row.production_status_from_details_enabled,
@@ -1591,6 +1602,8 @@ function mapOrderDto(
       updatedAt: toIsoString(row.updated_at),
       createdBy: toNullableNumber(row.created_by),
       editedBy: toNullableNumber(row.edited_by),
+      createdByLabel: row.created_by_label ?? null,
+      editedByLabel: row.edited_by_label ?? null,
       version: toNumber(row.version),
     },
     details: details.map(mapDetail),
@@ -1638,6 +1651,7 @@ function mapListItem(row: OrderHeaderRow, includeDeleted: boolean = false): Orde
     orderStatusName: row.order_status_name ?? '',
     paymentStatusId: toNumber(row.payment_status_id),
     paymentStatusName: row.payment_status_name ?? '',
+    ...mapProductionSummary(row),
     productionStatusId: toNullableNumber(row.production_status_id),
     productionStatusName: row.production_status_name,
     priority: toNumber(row.priority),

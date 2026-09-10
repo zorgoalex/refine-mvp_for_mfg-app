@@ -39,6 +39,8 @@ export const PERMISSIONS = [
   'cad.view',
   'cad.edit',
   'cad.export',
+  'cad.technology',
+  'cad.approve',
   'profile.view',
   'profile.update_own',
   'sessions.logout_own',

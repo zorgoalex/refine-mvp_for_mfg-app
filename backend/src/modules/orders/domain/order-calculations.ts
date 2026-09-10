@@ -7,6 +7,8 @@ import type {
 } from '../dto/save-order.dto';
 import { STANDARD_PAYMENT_STATUS_IDS } from '../dto/save-order.dto';
 import { OrderFinalAmountNegativeError } from '../errors/order.errors';
+import { ApiError } from '../../../common/errors/api-error';
+import { catalogSubtotal, type SaveOrderCatalogLineDto } from './order-catalog-lines';
 
 const STANDARD_PAYMENT_STATUS_SET = new Set<number>([
   STANDARD_PAYMENT_STATUS_IDS.NOT_PAID,
@@ -18,6 +20,7 @@ export interface CalculateOrderTotalsInput {
   header: Pick<NormalizedSaveOrderHeaderDto, 'discount' | 'surcharge' | 'paymentStatusId'>;
   details: CalculatedOrderDetailDto[];
   payments: Pick<NormalizedSaveOrderPaymentDto, 'amount' | 'paymentDate'>[];
+  catalogLines?: ReadonlyArray<Pick<SaveOrderCatalogLineDto, 'quantity' | 'unitPrice'>>;
 }
 
 export function calculateDetailArea(detail: Pick<NormalizedSaveOrderDetailDto, 'height' | 'width' | 'quantity'>): number {
@@ -64,11 +67,14 @@ export function calculateOrderTotals(input: CalculateOrderTotalsInput): OrderTot
     (sum, detail) => sum + detail.height * detail.width * detail.quantity,
     0,
   ));
-  const totalAmount = sumMoney(input.details.map((detail) => detail.detailCost));
+  const totalAmount = sumMoney([...input.details.map((detail) => detail.detailCost), catalogSubtotal(input.catalogLines ?? [])]);
   const paidAmount = sumMoney(input.payments.map((payment) => payment.amount));
   const discount = roundMoney(input.header.discount ?? 0);
   const surcharge = roundMoney(input.header.surcharge ?? 0);
   const finalAmount = roundMoney(totalAmount - discount + surcharge);
+  if (totalAmount > 9999999999.99 || finalAmount > 9999999999.99) {
+    throw new ApiError(422, 'ORDER_AMOUNT_OVERFLOW', 'Сумма заказа превышает допустимое значение');
+  }
 
   if (finalAmount < 0) {
     throw new OrderFinalAmountNegativeError(finalAmount);

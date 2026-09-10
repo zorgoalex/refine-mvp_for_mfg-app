@@ -12,16 +12,19 @@ import {
 const statusAutomationMocks = vi.hoisted(() => ({
   evaluateMdfBoardColumnAutomation: vi.fn(),
   evaluateStatusAutomation: vi.fn(),
+  evaluateProductionCompositionAutomation: vi.fn(),
 }));
 
 vi.mock('../../status-automation/application/status-automation-runtime', () => ({
   evaluateMdfBoardColumnAutomation: statusAutomationMocks.evaluateMdfBoardColumnAutomation,
   evaluateStatusAutomation: statusAutomationMocks.evaluateStatusAutomation,
+  evaluateProductionCompositionAutomation: statusAutomationMocks.evaluateProductionCompositionAutomation,
 }));
 
 beforeEach(() => {
   statusAutomationMocks.evaluateMdfBoardColumnAutomation.mockReset();
   statusAutomationMocks.evaluateStatusAutomation.mockReset();
+  statusAutomationMocks.evaluateProductionCompositionAutomation.mockReset();
 });
 
 describe('production-action automation in-transaction actions', () => {

@@ -6,6 +6,8 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { auditService } from '../../../common/audit/audit.service';
 import { computeDiff } from '../../../common/audit/audit-diff';
 import { PgOrderReadRepository } from './pg-order-read-repository';
+import { prepareOrderCatalogLines, persistOrderCatalogLines, recordOrderCatalogLinesChange } from './pg-order-catalog-lines';
+import type { OrderCatalogPlan } from '../domain/order-catalog-lines';
 import type {
   DeleteOrderCommand,
   LockedProjectRow,
@@ -220,6 +222,18 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
 
   getTransactionClient(): TransactionClient {
     return this.tx;
+  }
+
+  prepareCatalogLines(orderId: number | null, input: unknown, deleted: unknown, user: CurrentUser) {
+    return prepareOrderCatalogLines(this.tx, orderId, input, deleted, user);
+  }
+
+  persistCatalogLines(orderId: number, plan: OrderCatalogPlan, user: CurrentUser, requestId: string) {
+    return persistOrderCatalogLines(this.tx, orderId, plan, user, requestId);
+  }
+
+  recordCatalogLinesChange(orderId: number, plan: OrderCatalogPlan, user: CurrentUser, requestId: string) {
+    return recordOrderCatalogLinesChange(this.tx, orderId, plan, user, requestId);
   }
 
   // VARIANT B: dead after shadow removal — delete in follow-up (no-op; no longer read by upsertDetails)

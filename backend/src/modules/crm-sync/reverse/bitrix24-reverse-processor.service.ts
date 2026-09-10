@@ -245,13 +245,19 @@ export class Bitrix24ReverseProcessorService {
     }
 
     const reverseConfig = this.config.getReverseSync();
-    const result = await this.repository.upsertDeal(
-      normalizeBitrixDeal(bitrixId, item, {
+    const snapshot = normalizeBitrixDeal(bitrixId, item, {
         clientId,
         portalDomain,
         portalTimezone: reverseConfig.portalTimezone,
         counterparty,
-      }),
+      });
+    for (const field of ['createdBy', 'updatedBy']) {
+      const id = snapshot.rawSnapshot[field];
+      snapshot.rawSnapshot[`${field}Name`] = typeof id === 'string'
+        ? await this.bitrix.getUserDisplayName?.(id) ?? null : null;
+    }
+    const result = await this.repository.upsertDeal(
+      snapshot,
       requestId,
       lockToken,
       { actorUserId: requireActorUserId(reverseConfig.actorUserId) },
@@ -312,7 +318,10 @@ export class Bitrix24ReverseProcessorService {
     for (const paymentId of paymentIds) {
       const payment = await this.bitrix.getPayment(paymentId);
       if (paymentIsErpOrigin(payment)) continue;
-      payments.push(normalizeBitrixPayment(paymentId, payment));
+      const snapshot = normalizeBitrixPayment(paymentId, payment);
+      snapshot.paidByName = snapshot.paidById
+        ? await this.bitrix.getUserDisplayName?.(snapshot.paidById) ?? null : null;
+      payments.push(snapshot);
     }
     return payments;
   }

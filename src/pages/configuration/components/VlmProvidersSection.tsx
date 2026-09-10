@@ -1,3 +1,4 @@
+import { PopconfirmContent } from "../../../components/PopconfirmContent";
 import { Table, Tooltip } from '../../../ui/tooltipDelay';
 /**
  * VlmProvidersSection - CRUD для провайдеров VLM
@@ -215,8 +216,7 @@ export const VlmProvidersSection: React.FC = () => {
             />
           </Tooltip>
           <Popconfirm
-            title="Удалить провайдера?"
-            description={`"${record.name}" будет удалён вместе со всеми моделями`}
+            title={<PopconfirmContent title="Удалить провайдера?" description={`"${record.name}" будет удалён вместе со всеми моделями`} />}
             onConfirm={() => handleDelete(record)}
             okText="Удалить"
             cancelText="Отмена"

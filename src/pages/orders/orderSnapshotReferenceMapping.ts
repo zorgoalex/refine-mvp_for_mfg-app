@@ -151,4 +151,5 @@ const REFERENCE_ENTITY_TYPES = new Set<string>([
   "workshop",
   "employee",
   "resourceRequirementStatus",
+  'catalogItem',
 ]);

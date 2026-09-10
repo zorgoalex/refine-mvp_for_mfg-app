@@ -27,6 +27,7 @@ import { ProjectsModule } from './modules/projects/projects.module';
 import { GroupsModule } from './modules/groups/groups.module';
 import { OrgModule } from './modules/org/org.module';
 import { ProfileModule } from './modules/profile/profile.module';
+import { CatalogModule } from './modules/catalog/catalog.module';
 import { UsersModule } from './modules/users/users.module';
 import { VlmModule } from './modules/vlm/vlm.module';
 import { PermissionsModule } from './permissions/permissions.module';
@@ -70,6 +71,7 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
     GroupsModule,
     OrgModule,
     ProfileModule,
+    CatalogModule,
     UsersModule,
     VlmModule,
     PermissionsModule,

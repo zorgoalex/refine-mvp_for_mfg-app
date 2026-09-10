@@ -163,10 +163,7 @@ export function mdfCutReadinessCtes(scope: CutReadinessScope = {}): string {
             ${idsContain(`(SELECT rule -> 'orderStatusIds' FROM jsonb_array_elements(setting.value -> 'cardRules') rule
               WHERE rule ->> 'cardKind' = 'bazisCutSet' LIMIT 1)`, 'owner.order_status_id')}
           ELSE (
-            CASE WHEN jsonb_typeof(setting.value -> 'productionStatusIds') = 'array'
-              THEN ${idsContain("setting.value -> 'productionStatusIds'", 'owner.production_status_id')}
-              ELSE lower(trim(owner_status.production_status_name)) IN ('закатан', 'упакован', 'выдан') END
-            OR CASE WHEN jsonb_typeof(setting.value -> 'orderStatusIds') = 'array'
+            CASE WHEN jsonb_typeof(setting.value -> 'orderStatusIds') = 'array'
               THEN ${idsContain("setting.value -> 'orderStatusIds'", 'owner.order_status_id')}
               ELSE order_status.sort_order >= threshold.order_issued
                 OR lower(trim(order_status.order_status_name)) IN ('выдан', 'завершен', 'завершён') END
@@ -176,7 +173,6 @@ export function mdfCutReadinessCtes(scope: CutReadinessScope = {}): string {
       LEFT JOIN order_details detail ON detail.detail_id = item.source_order_detail_id
       LEFT JOIN orders owner ON owner.order_id = COALESCE(item.source_order_id, detail.order_id)
       LEFT JOIN production_statuses status ON status.production_status_id = detail.production_status_id
-      LEFT JOIN production_statuses owner_status ON owner_status.production_status_id = owner.production_status_id
       LEFT JOIN order_statuses order_status ON order_status.order_status_id = owner.order_status_id
       CROSS JOIN mdf_cut_thresholds threshold CROSS JOIN mdf_board_setting setting
     ),

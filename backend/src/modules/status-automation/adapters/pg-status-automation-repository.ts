@@ -51,6 +51,9 @@ interface StatusAutomationRuleRow extends QueryResultRow {
 }
 
 interface OrderAutomationStateRow extends QueryResultRow {
+  detail_count?: string | number;
+  unassigned_count?: string | number;
+  status_ids?: number[];
   order_id: string | number;
   order_status_id: string | number;
   payment_status_id: string | number;
@@ -172,11 +175,10 @@ export class PgStatusAutomationRepository {
         command.dto.targetStatusId !== undefined ? command.dto.targetStatusId : existing.targetStatusId;
       const nextConditions = command.dto.conditions ?? existing.conditions;
       const nextActionConfig = command.dto.actionConfig ?? existing.actionConfig ?? {};
-      const disablingLegacyMdfAction = existing.eventType.startsWith('mdf.')
-        && existing.actionType !== 'change_details_production_status'
+      const disablingLegacyIncompatibleAction = !getEventDescriptor(existing.eventType)?.allowedActions.includes(existing.actionType)
         && command.dto.isEnabled === false
         && Object.keys(command.dto).every(key => key === 'version' || key === 'isEnabled');
-      if (existing.version === command.dto.version && !disablingLegacyMdfAction) {
+      if (existing.version === command.dto.version && !disablingLegacyIncompatibleAction) {
         // Валидируется СМЕРДЖЕННОЕ правило, не только дельта: смена eventType без
         // повторной отправки conditions и «оживление» правила с протухшим целевым
         // статусом (PATCH { isEnabled: true }) обязаны падать 422 здесь.
@@ -316,18 +318,20 @@ export async function listEnabledRulesForManualRefresh(
 export async function loadOrderAutomationState(
   tx: TransactionClient,
   orderId: number,
+  detailIds?: readonly number[],
 ): Promise<OrderAutomationState | null> {
   const result = await tx.query<OrderAutomationStateRow>(
     `
     SELECT o.order_id, o.order_status_id, o.payment_status_id, o.production_status_id,
            o.production_status_from_details_enabled, o.final_amount, o.paid_amount,
-           o.version, o.client_id,
+           o.version, o.client_id, composition.detail_count, composition.unassigned_count, composition.status_ids,
            EXISTS (SELECT 1 FROM bazis_order_links bol WHERE bol.order_id = o.order_id) AS is_bazis,
            EXISTS (SELECT 1 FROM order_import_entity_map m WHERE m.local_order_id = o.order_id) AS is_import
     FROM orders o
+    CROSS JOIN LATERAL order_production_summary(o.order_id, $2::bigint[]) composition
     WHERE o.order_id = $1 AND o.delete_flag = false
     `,
-    [orderId],
+    [orderId, detailIds ?? null],
   );
   const row = result.rows[0];
   if (!row) {
@@ -339,6 +343,14 @@ export async function loadOrderAutomationState(
     orderStatusId: toNumber(row.order_status_id),
     paymentStatusId: toNumber(row.payment_status_id),
     productionStatusId: row.production_status_id === null ? null : toNumber(row.production_status_id),
+    productionSummary: row.detail_count === undefined
+      || row.unassigned_count === undefined || row.status_ids === undefined
+      || (detailIds !== undefined && toNumber(row.detail_count) !== new Set(detailIds).size)
+      ? undefined : {
+      detailCount: toNumber(row.detail_count),
+      unassignedCount: toNumber(row.unassigned_count),
+      statusIds: row.status_ids,
+    },
     productionStatusFromDetailsEnabled: row.production_status_from_details_enabled,
     finalAmount: toNumber(row.final_amount),
     paidAmount: toNumber(row.paid_amount),

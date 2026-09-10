@@ -1521,12 +1521,12 @@ describe('order status board model', () => {
     expect(collectCncOrderIds(columns)).toEqual([2700, 2706, 2712, 2800]);
   });
 
-  it('hides MDF orders for default production names until explicit setting exists', () => {
+  it('never treats informative production headers as completion; normal order archival remains', () => {
     for (const productionStatusName of [' Закатан ', 'УПАКОВАН', 'выдан']) {
       expect(isCncOrderHiddenFromMdfBoard({
         ...card(2700),
         productionStatusName,
-      })).toBe(true);
+      })).toBe(false);
     }
     for (const orderStatusName of ['Выдан', 'Завершен', 'Завершён']) {
       expect(isCncOrderHiddenFromMdfBoard({
@@ -1559,7 +1559,7 @@ describe('order status board model', () => {
       productionStatusId: 11,
       productionStatusName: 'На отгрузку',
       orderStatusName: 'В работе',
-    }, new Set([11]))).toBe(true);
+    }, new Set([11]))).toBe(false);
     expect(isCncOrderHiddenFromMdfBoard({
       ...card(2700),
       orderStatusId: 7,
@@ -1805,7 +1805,7 @@ describe('order status board model', () => {
 
     expect(moved.find((column) => column.key === 'parsed')?.packets.map((packet) => packet.packetId))
       .toEqual(['packet-issued']);
-    expect(moved.find((column) => column.key === 'completed_baths')?.baths.map((bath) => bath.bathCardId))
+    expect(moved.find((column) => column.key === 'baths')?.baths.map((bath) => bath.bathCardId))
       .toEqual(['bath-issued']);
   });
 
@@ -1876,10 +1876,12 @@ describe('order status board model', () => {
     );
 
     expect(filtered[0]?.baths.map((bath) => bath.bathCardId)).toEqual([
+      'terminal',
+      'cross-status-terminal',
       'mixed',
       'status-missing',
     ]);
-    expect(filtered[0]?.total).toBe(2);
+    expect(filtered[0]?.total).toBe(4);
     expect(filtered[1]?.baths.map((bath) => bath.bathCardId)).toEqual(['ready-inconsistent']);
     expect(filtered[2]?.baths.map((bath) => bath.bathCardId)).toEqual(['archived']);
   });

@@ -1,3 +1,4 @@
+import { PopconfirmContent } from "../../components/PopconfirmContent";
 import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Drawer, Empty, Popconfirm, Space, Tag, Typography, message } from 'antd';
@@ -264,8 +265,7 @@ export const BazisPage: React.FC = () => {
             }
           >
             <Popconfirm
-              title="Удалить Базис-проект?"
-              description={`«${record.name}» и все его ревизии будут удалены безвозвратно.`}
+              title={<PopconfirmContent title="Удалить Базис-проект?" description={`«${record.name}» и все его ревизии будут удалены безвозвратно.`} />}
               okText="Удалить"
               okButtonProps={{ danger: true }}
               cancelText="Отмена"

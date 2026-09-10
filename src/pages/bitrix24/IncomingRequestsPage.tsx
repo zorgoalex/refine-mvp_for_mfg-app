@@ -1,4 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { OrderCatalogLinesTable } from '../orders/components/OrderCatalogLinesTable';
+import { orderCatalogLineAmount, orderCatalogLineInput, type OrderCatalogLine } from '../../utils/orderCatalogLines';
+import { BitrixActorLabel, BitrixPaymentAuthorship } from '../../components/bitrix24/BitrixAuthorship';
 import {
   Alert,
   Button,
@@ -89,6 +92,8 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
   const [converting, setConverting] = useState(false);
   const [detailEditorOpen, setDetailEditorOpen] = useState(false);
   const [detailDrafts, setDetailDrafts] = useState<EditableRequestDetail[]>([]);
+  const [catalogDrafts, setCatalogDrafts] = useState<OrderCatalogLine[]>([]);
+  const [deletedCatalogLineIds, setDeletedCatalogLineIds] = useState<number[]>([]);
   const [savingDetails, setSavingDetails] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [materializing, setMaterializing] = useState(false);
@@ -224,6 +229,8 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
 
   const openDetailEditor = () => {
     if (!selected) return;
+    setCatalogDrafts(selected.catalogLines ?? []);
+    setDeletedCatalogLineIds([]);
     setDetailDrafts(selected.details.map((detail) => ({
       id: detail.id,
       localKey: `saved-${detail.id}`,
@@ -277,6 +284,10 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
 
   const saveDetails = async () => {
     if (!selected || selected.orderVersion === null) return;
+    if (catalogDrafts.some(row => orderCatalogLineAmount(row.quantity, row.unitPrice) === null)) {
+      notification.error({ message: 'Проверьте количество и цену товаров/услуг' });
+      return;
+    }
     const invalid = detailDrafts.some((detail) =>
       detail.height <= 0 || detail.width <= 0 || !Number.isInteger(detail.quantity) ||
       detail.quantity <= 0 || detail.sheetMaterialTypeId <= 0 ||
@@ -290,10 +301,12 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
       const updated = await bitrix24Api.replaceIncomingRequestDetails(selected.requestId, {
         orderVersion: selected.orderVersion,
         details: detailDrafts.map(({ localKey: _localKey, ...detail }) => detail),
+        ...(canViewFinancials ? { catalogLines: catalogDrafts.map(orderCatalogLineInput), deletedCatalogLineIds } : {}),
       });
       setSelected({
         ...selected,
         details: updated.details,
+        catalogLines: updated.catalogLines,
         detailCount: updated.detailCount,
         erpFinalAmount: updated.erpFinalAmount,
         orderVersion: updated.orderVersion,
@@ -750,6 +763,9 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
               <Descriptions.Item label="Ответственный">
                 {selected.assignedByName || selected.assignedById || '—'}
               </Descriptions.Item>
+              <Descriptions.Item label="Создал в Bitrix">
+                <BitrixActorLabel actor={selected.createdByBitrix} />
+              </Descriptions.Item>
               <Descriptions.Item label="Обновлено">
                 {formatDateTime(selected.bitrixUpdatedAt)}
               </Descriptions.Item>
@@ -782,7 +798,7 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
             )}
             <Space style={{ justifyContent: 'space-between', width: '100%' }}>
               <Typography.Title level={5} style={{ margin: 0 }}>
-                Детали ERP
+                Состав ERP: детали и товары/услуги
               </Typography.Title>
               {selected.state === 'active' && canUpdate && (
                 <Button
@@ -814,10 +830,11 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
                 }] : []),
               ]}
             />
+            <OrderCatalogLinesTable rows={selected.catalogLines ?? []} canViewFinancials={canViewFinancials} />
             {selected.state === 'active' && canConvert && (
               <Button
                 type="primary"
-                disabled={selected.detailCount === 0 || selected.syncStatus === 'blocked'}
+                disabled={(selected.detailCount === 0 && !selected.catalogLines?.length) || selected.syncStatus === 'blocked'}
                 onClick={() => {
                   setConversionName(selected.title);
                   setConversionProjectId(null);
@@ -838,8 +855,8 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
                 Архивировать только в ERP
               </Button>
             )}
-            {selected.state === 'active' && selected.detailCount === 0 && (
-              <Alert type="info" showIcon message="Для преобразования добавьте минимум одну деталь в CRM-заявку." />
+            {selected.state === 'active' && selected.detailCount === 0 && !selected.catalogLines?.length && (
+              <Alert type="info" showIcon message="Для преобразования добавьте минимум одну деталь или позицию товаров/услуг." />
             )}
 
             {canViewFinancials && (
@@ -869,6 +886,7 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
               } : undefined}
               columns={[
                 { title: 'ID', dataIndex: 'bitrixPaymentId' },
+                { title: 'Авторство', key: 'authorship', render: (_, payment) => <BitrixPaymentAuthorship payment={payment} /> },
                 {
                   title: 'Система',
                   key: 'system',
@@ -1274,7 +1292,7 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
 
       <Modal
         width={1280}
-        title="Детали CRM-заявки"
+        title="Состав CRM-заявки: детали и товары/услуги"
         open={detailEditorOpen}
         confirmLoading={savingDetails}
         okText="Сохранить"
@@ -1286,8 +1304,11 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
           <Alert
             type="info"
             showIcon
-            message="Сумма CRM хранится отдельно. Расчёт ERP формируется только из этих деталей."
+            message="Сумма CRM хранится отдельно. Расчёт ERP формируется из деталей и товаров/услуг."
           />
+          <OrderCatalogLinesTable rows={catalogDrafts} canViewFinancials={canViewFinancials}
+            canSelect={can('references.view', user) || can('references.manage', user)}
+            onChange={canViewFinancials && !savingDetails ? (rows, ids = []) => { setCatalogDrafts(rows); setDeletedCatalogLineIds(current => [...new Set([...current, ...ids])]); } : undefined} />
           <Button icon={<PlusOutlined />} onClick={addDetailDraft}>
             Добавить деталь
           </Button>

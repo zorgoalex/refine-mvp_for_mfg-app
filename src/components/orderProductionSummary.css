@@ -1,0 +1,54 @@
+.order-production-summary {
+  display: inline-block;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  vertical-align: middle;
+  border-radius: 4px;
+  background: var(--app-surface-muted, #f1f5f9);
+  color: var(--app-text, #334155);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.order-production-summary__text {
+  display: block;
+  padding: 0 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.order-production-summary[data-mixed='true'] {
+  background: linear-gradient(90deg, #fed7aa 50%, #bae6fd 50%);
+  color: #0c4a6e;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+/* Both gradients cover the same box: the word crosses the 50% seam. */
+@supports (background-clip: text) or (-webkit-background-clip: text) {
+  .order-production-summary[data-mixed='true'] .order-production-summary__text {
+    background: linear-gradient(90deg, #7c2d12 50%, #0c4a6e 50%);
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+  }
+}
+
+@media (forced-colors: active) {
+  .order-production-summary {
+    border: 1px solid CanvasText;
+    background: Canvas;
+    color: CanvasText;
+  }
+  .order-production-summary[data-mixed='true'] .order-production-summary__text {
+    background: none;
+    color: CanvasText;
+  }
+  .order-production-summary[data-mixed='true'] .order-production-summary__text::after {
+    content: ' ≠';
+  }
+}

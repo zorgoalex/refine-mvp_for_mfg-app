@@ -23,6 +23,7 @@ export const RESOURCE_LABELS: Record<string, string> = {
   edge_types: 'Типы кромок',
   milling_types: 'Типы фрезеровки',
   extra_resources: 'Доп. ресурсы',
+  catalog_items: 'Товары и услуги',
   order_statuses: 'Статусы заказов',
   payment_statuses: 'Статусы оплат',
   production_statuses: 'Статусы производства',
@@ -65,6 +66,7 @@ const PATH_TO_RESOURCE: Record<string, string> = {
   audit: 'audit',
   'sheet-material-types': 'sheet_material_types',
   'extra-resources': 'extra_resources',
+  'catalog-items': 'catalog_items',
   'bazis-cut': 'bazis-cut-sets',
 };
 

@@ -546,20 +546,15 @@ export function buildCncOrderMissingDetails(
 
 export function isCncOrderHiddenFromMdfBoard(
   card: OrderStatusBoardCard,
-  hiddenProductionStatusIds?: ReadonlySet<number>,
+  _hiddenProductionStatusIds?: ReadonlySet<number>,
   hiddenOrderStatusIds?: ReadonlySet<number>,
 ): boolean {
-  const productionStatusName = normalizeStatusName(card.productionStatusName);
   const orderStatusName = normalizeStatusName(card.orderStatusName);
-  const hiddenByProductionStatus = hiddenProductionStatusIds
-    ? isPositiveInteger(card.productionStatusId) && hiddenProductionStatusIds.has(card.productionStatusId)
-    : MDF_DEFAULT_HIDDEN_PRODUCTION_STATUS_NAMES.has(productionStatusName);
   const hiddenByOrderStatus = hiddenOrderStatusIds
     ? isPositiveInteger(card.orderStatusId) && hiddenOrderStatusIds.has(card.orderStatusId)
     : card.orderStatusIssuedOrLater === true || MDF_HIDDEN_ORDER_STATUS_NAMES.has(orderStatusName);
   return (
-    hiddenByProductionStatus
-    || hiddenByOrderStatus
+    hiddenByOrderStatus
   );
 }
 

@@ -1,3 +1,4 @@
+import { PopconfirmContent } from "../../../components/PopconfirmContent";
 import { Table } from '../../../ui/tooltipDelay';
 import { DownloadOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
 import { useList } from '@refinedev/core';
@@ -130,8 +131,8 @@ const CONDITION_LABELS: Record<ConditionKey, string> = {
   previousOrderStatusIn: 'Предыдущий статус заказа — один из',
   currentPaymentStatusIn: 'Статус оплаты — один из',
   currentPaymentStatusNotIn: 'Статус оплаты — не входит в',
-  currentProductionStatusIn: 'Общий статус производства заказа — один из',
-  currentProductionStatusNotIn: 'Общий статус производства заказа — не входит в',
+  currentProductionStatusIn: 'Все учитываемые детали имеют одинаковый статус — один из',
+  currentProductionStatusNotIn: 'Ни одна учитываемая деталь не имеет статус из списка',
   paidShareGte: 'Оплачено не менее',
   orderSourceIn: 'Источник заказа — один из',
   firstPaymentOnly: 'Это первый платёж по заказу',
@@ -979,10 +980,8 @@ export function StatusAutomationConfig() {
             ]}
           />
           <Text type="secondary">
-            Статусы ниже скрывают карточки заказов с МДФ-доски: если заказ имеет
-            любой из выбранных обычных или производственных статусов, его карточка
-            убирается из активных колонок. Статусы, которых нет в этих списках,
-            сами по себе карточку не скрывают.
+            Архивирование по обычному статусу заказа сохраняется. Производственная
+            сводка заказа больше не завершает карточки: проверяется их собственный состав деталей.
           </Text>
           <div>
             <Text strong>Обычные статусы заказа, скрывающие карточки</Text>
@@ -1003,7 +1002,7 @@ export function StatusAutomationConfig() {
             />
           </div>
           <div>
-            <Text strong>Производственные статусы, скрывающие карточки</Text>
+            <Text strong>Старое правило по производственной сводке — не применяется</Text>
             <Select<number[]>
               mode="multiple"
               value={mdfBoardHiddenProductionStatusIds}
@@ -1011,7 +1010,7 @@ export function StatusAutomationConfig() {
                 normalizeStatusIds(value),
               )}
               options={productionStatusOptions}
-              disabled={!canManage || appSettingsLoading || productionStatusesLoading}
+              disabled
               loading={appSettingsLoading || productionStatusesLoading}
               placeholder="Выберите производственные статусы, которые убирают карточки"
               style={{ width: '100%', marginTop: 4 }}
@@ -1059,8 +1058,7 @@ export function StatusAutomationConfig() {
           </Button>
           {canManage && (
             <Popconfirm
-              title="Обновить автостатусы"
-              description="Будут проверены заказы за последние два месяца. Правила событий МДФ-доски пропускаются: для них нужна исходная карточка."
+              title={<PopconfirmContent title="Обновить автостатусы" description="Будут проверены заказы за последние два месяца. Правила событий МДФ-доски пропускаются: для них нужна исходная карточка." />}
               okText="Обновить"
               cancelText="Отмена"
               onConfirm={() => void handleRefreshRecentOrders()}
@@ -1258,6 +1256,10 @@ export function StatusAutomationConfig() {
               <Text type="secondary">
                 Все добавленные условия должны совпасть. Внутри списка достаточно одного из
                 выбранных статусов.
+                {' '}Для производственного условия все учитываемые детали должны иметь один
+                одинаковый непустой статус из списка. В событиях МДФ учитываются только
+                подходящие по количеству детали исходной карточки; в остальных — весь
+                состав обычных деталей заказа. ХДФ исключён.
               </Text>
               {activeConditionKeys.length === 0 && (
                 <Alert
@@ -1329,7 +1331,7 @@ export function StatusAutomationConfig() {
                       value={value ?? []}
                       onChange={(next) => updateForm({ [key]: next })}
                       options={activeProductionStatusOptions}
-                      placeholder="Выберите общие статусы производства"
+                      placeholder="Выберите статусы деталей"
                       style={{ width: '100%' }}
                       showSearch
                       optionFilterProp="label"

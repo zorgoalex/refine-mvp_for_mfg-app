@@ -51,7 +51,7 @@ interface LockedOrderRow extends QueryResultRow {
   manager_id: string | number | null;
   order_kind: string;
   legacy_zero_detail_exempt: boolean;
-  has_active_details: boolean;
+  has_active_positions: boolean;
 }
 
 interface PaymentTotalsRow extends QueryResultRow {
@@ -348,10 +348,10 @@ async function loadOrdersForUpdate(
     `
     SELECT order_id, final_amount, payment_status_id, version, created_by, manager_id,
            order_kind, legacy_zero_detail_exempt,
-           EXISTS (
+           (EXISTS (
              SELECT 1 FROM order_details detail
               WHERE detail.order_id=orders.order_id AND detail.delete_flag=false
-           ) AS has_active_details
+           ) OR EXISTS (SELECT 1 FROM order_catalog_lines line WHERE line.order_id=orders.order_id AND line.delete_flag=false)) AS has_active_positions
     FROM orders
     WHERE order_id = ANY($1::bigint[]) AND delete_flag = false
     ORDER BY order_id
@@ -447,7 +447,7 @@ interface LockedOrder {
   policySubject: ScopedEntity;
   orderKind: string;
   legacyZeroDetailExempt: boolean;
-  hasActiveDetails: boolean;
+  hasActivePositions: boolean;
 }
 
 function mapLockedOrder(row: LockedOrderRow): LockedOrder {
@@ -462,16 +462,16 @@ function mapLockedOrder(row: LockedOrderRow): LockedOrder {
     },
     orderKind: row.order_kind,
     legacyZeroDetailExempt: row.legacy_zero_detail_exempt,
-    hasActiveDetails: row.has_active_details,
+    hasActivePositions: row.has_active_positions,
   };
 }
 
 function assertPaymentReadyProductionOrder(order: LockedOrder): void {
-  if (order.orderKind !== 'production_order' || !order.hasActiveDetails) {
+  if (order.orderKind !== 'production_order' || !order.hasActivePositions) {
     throw new ApiError(
       409,
       'ORDER_NOT_READY_FOR_PAYMENTS',
-      'Payments are allowed only for a production order with active details',
+      'Payments require a production order with an active detail or catalogue line',
       { orderId: order.orderId, orderKind: order.orderKind },
     );
   }

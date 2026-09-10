@@ -1,4 +1,5 @@
 import type { QueryResultRow } from 'pg';
+import { mapProductionSummary, productionSummaryLabel, type ProductionSummaryRow } from '../../../shared/production-status/production-summary';
 import { ApiError } from '../../../common/errors/api-error';
 import { auditService } from '../../../common/audit/audit.service';
 import { DatabaseService } from '../../../database/database.service';
@@ -20,7 +21,7 @@ export interface PgOrderExporterOptions {
   fetchImpl?: FetchLike;
 }
 
-interface OrderExportHeaderRow extends QueryResultRow {
+interface OrderExportHeaderRow extends QueryResultRow, ProductionSummaryRow {
   order_id: string | number;
   order_name: string;
   order_date: string | Date;
@@ -137,6 +138,9 @@ export class PgOrderExporter implements OrderExportPort {
     }
 
     const details = await readDetails(tx, command.orderId);
+    if (details.length === 0) {
+      throw new ApiError(422, 'ORDER_EXPORT_DETAILS_REQUIRED', 'Экспорт в Google Drive доступен только для заказов с деталями');
+    }
     const payments = await readPayments(tx, command.orderId);
     const doweling = await readDoweling(tx, command.orderId);
     const orderDate = parseDate(header.order_date);
@@ -184,7 +188,7 @@ export class PgOrderExporter implements OrderExportPort {
       orderStatusName: header.order_status_name ?? '',
       paymentStatusName: header.payment_status_name ?? '',
       issueDate: formatDateForPayload(header.issue_date),
-      productionStatusName: header.production_status_name ?? '',
+      productionStatusName: productionSummaryLabel({ ...mapProductionSummary(header), productionStatusName: header.production_status_name }),
     };
 
     return { payload, clientId };
@@ -260,6 +264,7 @@ async function readHeader(
       o.total_area, o.planned_completion_date,
       os.order_status_name, ps.payment_status_name,
       o.issue_date, prod.production_status_name,
+      o.production_detail_count, o.production_unassigned_count, o.production_distinct_status_count,
       o.manager_id, o.created_by,
       -- Variant B: order header material = sheet name only (material_id is NULL post-034).
       hsmt.name AS material_name

@@ -20,7 +20,7 @@ describe('StatusAutomationConfig CNC cut-status setting guards', () => {
     expect(config).toContain('storedAutoCutStatusEnabled === confirmedAutoCutStatusEnabled');
   });
 
-  it('stores explicit MDF board order and production statuses in the Auto statuses tab', () => {
+  it('preserves order archival and keeps the legacy production-summary filter disabled', () => {
     expect(settings).toContain(
       "STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES:",
     );
@@ -40,13 +40,14 @@ describe('StatusAutomationConfig CNC cut-status setting guards', () => {
     expect(config).toContain('Базис-раскрой');
     expect(config).toContain('Карты ванн');
     expect(config).toContain('Переносить, когда все заказы в статусах');
-    expect(config).toContain('Статусы ниже скрывают карточки заказов с МДФ-доски');
-    expect(config).toContain('убирается из активных колонок');
-    expect(config).toContain('сами по себе карточку не скрывают');
+    expect(config).toContain('Архивирование по обычному статусу заказа сохраняется.');
+    expect(config).toContain('сводка заказа больше не завершает карточки: проверяется их собственный состав деталей.');
     expect(config).toContain('aria-label="Производственные статусы, скрывающие карточки с МДФ-доски"');
     expect(config).toContain('aria-label="Статусы заказа, скрывающие карточки с МДФ-доски"');
     expect(config).toContain('Обычные статусы заказа, скрывающие карточки');
-    expect(config).toContain('Производственные статусы, скрывающие карточки');
+    expect(config).toContain('Старое правило по производственной сводке — не применяется');
+    const legacySelect = config.match(/<Select<number\[\]>\s+mode="multiple"\s+value=\{mdfBoardHiddenProductionStatusIds\}[\s\S]*?\/>/)?.[0];
+    expect(legacySelect).toMatch(/\n\s+disabled\s*\n/);
   });
 
   it('shows a permission-aware toggle in the Auto statuses tab', () => {

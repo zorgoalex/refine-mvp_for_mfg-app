@@ -34,6 +34,12 @@ test.describe('Order created-by stage canary', () => {
         expect(order.header?.orderName ?? order.orderName ?? order.order_name).toBe(orderName);
         expect(order.header?.createdBy ?? order.createdBy ?? order.created_by).toBeTruthy();
         expect(order.header?.editedBy ?? order.editedBy ?? order.edited_by).toBeTruthy();
+        expect(order.header?.createdByLabel).toEqual(expect.any(String));
+        expect(order.header?.createdByLabel.length).toBeGreaterThan(0);
+        expect(order.header?.editedByLabel).toEqual(expect.any(String));
+        // General order reads expose safe ERP audit labels, not CRM-scoped provenance.
+        expect(order.header).not.toHaveProperty('createdByBitrix');
+        expect(order).not.toHaveProperty('createdByBitrix');
     });
 });
 

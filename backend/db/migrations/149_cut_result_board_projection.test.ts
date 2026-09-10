@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { expectMigrationEffectGate } from '../../test-support/migration-runner';
 
 const sql = readFileSync(new URL('./149_cut_result_board_projection.sql', import.meta.url), 'utf8');
 const backfill = readFileSync(new URL('./150_cut_result_board_projection_backfill.sql', import.meta.url), 'utf8');
@@ -21,6 +22,7 @@ describe('cut-result MDF metadata projection', () => {
     expect(backfill).toContain('p.snapshot_digest IS DISTINCT FROM r.snapshot_digest');
     expect(runner).toContain('149_cut_result_board_projection*) probe_all');
     expect(runner).toContain('150_cut_result_board_projection_backfill*) probe_true');
-    expect(runner).toContain('|149_*|150_*)');
+    expectMigrationEffectGate(runner, '149_cut_result_board_projection.sql');
+    expectMigrationEffectGate(runner, '150_cut_result_board_projection_backfill.sql');
   });
 });

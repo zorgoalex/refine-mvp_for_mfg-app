@@ -70,6 +70,7 @@ export const SIDER_RESOURCE_ICONS: Record<string, React.ReactNode> = {
   edge_types: <BorderOutlined />,
   milling_types: <ToolOutlined />,
   extra_resources: <ToolOutlined />,
+  catalog_items: <ShoppingCartOutlined />,
   order_statuses: <CheckCircleOutlined />,
   payment_statuses: <DollarCircleOutlined />,
   production_statuses: <SyncOutlined />,

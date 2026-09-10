@@ -10,10 +10,12 @@ import type {
 import type { OrderGroupSummaryDto } from './order-group-link.dto';
 import type { StatusAutomationOrderRefreshSummaryDto } from '../../status-automation/dto/status-automation.dto';
 import type { OrderKind, OrderSourceSystem } from '../domain/order-identity';
+import type { OrderCatalogLineDto } from '../domain/order-catalog-lines';
 
 export interface OrderDto {
   header: OrderHeaderDto;
   details: OrderDetailDto[];
+  catalogLines?: OrderCatalogLineDto[];
   hdfDetails: OrderHdfDetailDto[];
   payments: OrderPaymentDto[];
   workshops: OrderWorkshopDto[];
@@ -109,6 +111,9 @@ export interface PaginationDto {
 }
 
 export interface OrderListItemDto {
+  productionDetailCount?: number;
+  productionUnassignedCount?: number;
+  productionDistinctStatusCount?: number;
   orderId: number;
   orderName: string;
   orderKind: OrderKind;
@@ -171,6 +176,11 @@ export interface OrderListItemDto {
 }
 
 export type OrderHeaderDto = NormalizedSaveOrderHeaderDto & {
+  productionDetailCount?: number;
+  productionUnassignedCount?: number;
+  productionDistinctStatusCount?: number;
+  createdByLabel?: string | null;
+  editedByLabel?: string | null;
   orderId: number;
   orderKind: OrderKind;
   sourceSystem: OrderSourceSystem;
