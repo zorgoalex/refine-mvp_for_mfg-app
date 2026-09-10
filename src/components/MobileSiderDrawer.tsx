@@ -41,6 +41,7 @@ const RESOURCE_LABELS: Record<string, string> = {
   configuration: "Конфигурация",
   sheet_material_types: "Листовые материалы",
   extra_resources: "Доп. ресурсы",
+  catalog_items: "Товары и услуги",
   scan: "Сканер бирок",
 };
 

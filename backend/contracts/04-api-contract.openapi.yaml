@@ -22,6 +22,8 @@ servers:
     description: Production backend placeholder
 
 tags:
+  - name: Catalog
+    description: Независимый справочник товаров и услуг
   - name: Audit
     description: Журнал аудита событий системы
   - name: Auth
@@ -61,6 +63,117 @@ tags:
     description: WhatsApp administration and authenticated WAHA webhook
 
 paths:
+  /api/v1/catalog-items:
+    get:
+      tags: [Catalog]
+      operationId: listCatalogItems
+      summary: Список товаров и услуг
+      security: [{bearerAuth: []}]
+      x-permission: references.view OR references.manage
+      parameters:
+        - {name: q, in: query, schema: {type: string, maxLength: 200}, description: Literal substring of name or SKU}
+        - {name: kind, in: query, schema: {type: string, enum: [made_to_order, stock_item, service]}}
+        - {name: active, in: query, schema: {type: string, enum: ['true', 'false', all], default: 'true'}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 25}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 2147483647, default: 0}}
+      responses:
+        '200':
+          description: Stable name/id order, filtered total including empty pages
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/CatalogItem'}}
+                  total: {type: integer}
+        '401': {description: Authentication required}
+        '403': {description: Missing reference permissions}
+        '422': {description: Invalid query}
+    post:
+      tags: [Catalog]
+      operationId: createCatalogItem
+      summary: Создать товар или услугу
+      security: [{bearerAuth: []}]
+      x-permission: references.manage
+      parameters:
+        - {$ref: '#/components/parameters/CatalogCommandKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CatalogInput'}
+      responses:
+        '201':
+          description: Created item or same-key committed response; no duplicate business event
+          content: {application/json: {schema: {$ref: '#/components/schemas/CatalogItem'}}}
+        '401': {description: Authentication required}
+        '403': {description: Missing references.manage or invalid actor}
+        '409': {description: SKU or idempotency-key conflict}
+        '422': {description: Invalid fields or missing unit}
+  /api/v1/catalog-items/units:
+    get:
+      tags: [Catalog]
+      operationId: listCatalogUnits
+      summary: Все существующие единицы измерения
+      security: [{bearerAuth: []}]
+      x-permission: references.view OR references.manage
+      responses:
+        '200':
+          description: Existing units, no active/deleted lifecycle filtering
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [id, name, code, symbol]
+                  properties:
+                    id: {type: integer}
+                    name: {type: string}
+                    code: {type: string}
+                    symbol: {type: string, nullable: true}
+        '401': {description: Authentication required}
+        '403': {description: Missing reference permissions}
+  /api/v1/catalog-items/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, minimum: 1, maximum: 9007199254740991}}
+    get:
+      tags: [Catalog]
+      operationId: getCatalogItem
+      summary: Карточка товара или услуги, включая архив
+      security: [{bearerAuth: []}]
+      x-permission: references.view OR references.manage
+      responses:
+        '200':
+          description: Catalogue item
+          content: {application/json: {schema: {$ref: '#/components/schemas/CatalogItem'}}}
+        '401': {description: Authentication required}
+        '403': {description: Missing reference permissions}
+        '404': {description: Item not found}
+        '422': {description: Invalid ID}
+    put:
+      tags: [Catalog]
+      operationId: updateCatalogItem
+      summary: Изменить, архивировать или восстановить позицию
+      security: [{bearerAuth: []}]
+      x-permission: references.manage
+      parameters:
+        - {$ref: '#/components/parameters/CatalogCommandKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CatalogUpdate'}
+      responses:
+        '200':
+          description: Updated item; no-op/replay emits no extra audit or outbox event
+          content: {application/json: {schema: {$ref: '#/components/schemas/CatalogItem'}}}
+        '401': {description: Authentication required}
+        '403': {description: Missing references.manage or invalid actor}
+        '404': {description: Item not found}
+        '409': {description: Version, SKU or idempotency-key conflict; preserve user draft}
+        '422': {description: Invalid fields or missing unit}
   /api/v1/cad/capabilities:
     get:
       tags:
@@ -14908,6 +15021,12 @@ components:
         example: req_01HZX8K5T3M2F5F7K9A2S1QW3E
 
   parameters:
+    CatalogCommandKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, minLength: 8, maxLength: 200}
+      description: Reuse for identical retry; different actor/action/payload returns 409
     WorkosUserId:
       name: userId
       in: path
@@ -15358,6 +15477,37 @@ components:
                   requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
 
   schemas:
+    CatalogInput:
+      type: object
+      additionalProperties: false
+      required: [name, sku, kind, unitId, basePrice, description, isActive]
+      properties: &catalogInputProperties
+        name: {type: string, minLength: 1, maxLength: 200}
+        sku: {type: string, nullable: true, maxLength: 80, description: Case-insensitive unique including archived items; empty becomes null}
+        kind: {type: string, enum: [made_to_order, stock_item, service]}
+        unitId: {type: integer, minimum: 1, maximum: 32767}
+        basePrice: {type: string, nullable: true, pattern: '^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$', description: Decimal KZT string or null; no rounding}
+        description: {type: string, maxLength: 2000}
+        isActive: {type: boolean}
+    CatalogUpdate:
+      type: object
+      additionalProperties: false
+      required: [name, sku, kind, unitId, basePrice, description, isActive, expectedVersion]
+      properties:
+        <<: *catalogInputProperties
+        expectedVersion: {type: integer, minimum: 1, maximum: 2147483646}
+    CatalogItem:
+      type: object
+      required: [id, version, name, sku, kind, unitId, basePrice, description, isActive, currency, unitName, unitSymbol, createdAt, updatedAt]
+      properties:
+        <<: *catalogInputProperties
+        id: {type: integer, minimum: 1, maximum: 9007199254740991}
+        version: {type: integer, minimum: 1}
+        currency: {type: string, enum: [KZT]}
+        unitName: {type: string}
+        unitSymbol: {type: string, nullable: true}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
     CadRecipe:
       type: object
       additionalProperties: false

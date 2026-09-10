@@ -87,6 +87,7 @@ const MillingTypeCreate = lazy(async () => ({ default: (await import("./pages/mi
 const MillingTypeEdit = lazy(async () => ({ default: (await import("./pages/milling_types/edit")).MillingTypeEdit }));
 const MillingTypeShow = lazy(async () => ({ default: (await import("./pages/milling_types/show")).MillingTypeShow }));
 const ExtraResourcesList = lazy(async () => ({ default: (await import("./pages/extra_resources/list")).ExtraResourcesList }));
+const CatalogItemsList = lazy(async () => ({ default: (await import("./pages/catalog_items/list")).CatalogItemsList }));
 
 const FilmList = lazy(async () => ({ default: (await import("./pages/films/list")).FilmList }));
 const FilmCreate = lazy(async () => ({ default: (await import("./pages/films/create")).FilmCreate }));
@@ -493,6 +494,7 @@ const ThemedApp = () => {
                     label: "Доп. ресурсы",
                   },
                 },
+                { name: "catalog_items", list: "/catalog-items", meta: { label: "Товары и услуги" } },
                 {
                   name: "films",
                   list: "/films",
@@ -893,6 +895,7 @@ const ThemedApp = () => {
                   <Route path="/extra-resources" >
                     <Route index element={<ExtraResourcesList />} />
                   </Route>
+                  <Route path="/catalog-items" element={<CatalogItemsList />} />
                   <Route path="/films" >
                     <Route index element={<FilmList />} />
                     <Route path="create" element={<FilmCreate />} />
