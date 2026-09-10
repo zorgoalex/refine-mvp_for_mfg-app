@@ -64,11 +64,12 @@ try {
     await page.getByRole('button', { name: 'Войти', exact: true }).click();
     await page.waitForURL(url => !url.pathname.includes('/login'), { timeout: 30000 });
     await page.goto('https://app-test.mebelkz.app/catalog-items', { waitUntil: 'domcontentloaded' });
-    await page.getByRole('button', { name: 'Создать позицию', exact: true }).waitFor();
+    const createButton = page.getByRole('button', { name: /Создать позицию$/ });
+    await createButton.waitFor();
     const search = page.getByLabel('Поиск товара или услуги', { exact: true });
     await search.fill(prefix); await search.press('Enter');
     await page.getByText(prefix, { exact: true }).first().waitFor();
-    await page.getByRole('button', { name: 'Создать позицию', exact: true }).click();
+    await createButton.click();
     await page.getByLabel('Название', { exact: true }).fill(prefix + '-UI');
     await page.getByLabel('Единица измерения', { exact: true }).click();
     await page.locator('.ant-select-dropdown:visible .ant-select-item-option').first().click();
