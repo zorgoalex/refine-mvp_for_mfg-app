@@ -11,7 +11,8 @@ describe('catalog migration contract', () => {
   });
   it('has strict end-state verification before ledger advancement', () => {
     expect(runner).toContain('157_products_services_catalog*) probe_all');
-    expect(runner).toContain('151_*|152_*|156_*|157_*)');
+    // Adding another guarded migration must not break the catalog contract.
+    expect(runner).toMatch(/(?:^|\n)\s*(?:\d{3}_\*\|)*157_\*(?:\|\d{3}_\*)*\)\s*\n\s*probe_file "\$f" \|\| die /);
     for (const name of ['catalog_items_sku_unique', 'catalog_item_commands', 'catalog_items_unit_id_fkey', 'catalog_items_kind_check']) expect(runner).toContain(name);
   });
 });
