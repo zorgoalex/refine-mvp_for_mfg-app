@@ -578,12 +578,31 @@ export const orderHeaderResponseSwaggerSchema = {
   },
 } as const;
 
+const saveOrderCatalogLineSwaggerSchema = {
+  type: 'object', required: ['catalogItemId','quantity','unitPrice'],
+  properties: {
+    id: { type: 'integer' }, clientKey: { type: 'string' }, catalogItemId: { type: 'integer' },
+    catalogVersion: { type: 'integer', description: 'Required for a new or reselected catalogue item' },
+    quantity: { type: 'string', description: 'Positive decimal, up to 3 fractional digits' },
+    unitPrice: { type: 'string', description: 'Nonnegative decimal KZT, up to 2 fractional digits' },
+    notes: { type: 'string', maxLength: 2000 },
+  },
+} as const;
+const orderCatalogLineSwaggerSchema = {
+  type: 'object', properties: { ...saveOrderCatalogLineSwaggerSchema.properties,
+    name: { type: 'string' }, sku: { type: 'string', nullable: true }, kind: { type: 'string', enum: ['made_to_order','stock_item','service'] },
+    lineNumber: { type: 'integer' }, unitId: { type: 'integer' }, unitName: { type: 'string' },
+    refKey1c: { type: 'string', nullable: true }, amount: { type: 'string' }, catalogActive: { type: 'boolean' },
+  },
+} as const;
+
 const saveOrderRequestSwaggerSchema = {
   type: 'object',
   required: ['header', 'details', 'payments', 'workshops', 'requirements', 'dowelingLinks', 'deleted'],
   properties: {
     header: saveOrderHeaderSwaggerSchema,
     details: { type: 'array', items: saveOrderDetailSwaggerSchema },
+    catalogLines: { type: 'array', items: saveOrderCatalogLineSwaggerSchema, description: 'Omission preserves stored lines; delete only through deleted.catalogLineIds. At least one active detail or catalogue line required.' },
     payments: { type: 'array', items: saveOrderPaymentSwaggerSchema },
     workshops: { type: 'array', items: saveOrderWorkshopSwaggerSchema },
     requirements: { type: 'array', items: saveOrderRequirementSwaggerSchema },
@@ -592,6 +611,7 @@ const saveOrderRequestSwaggerSchema = {
       type: 'object',
       properties: {
         detailIds: { type: 'array', items: { type: 'integer' } },
+        catalogLineIds: { type: 'array', items: { type: 'integer' } },
         paymentIds: { type: 'array', items: { type: 'integer' } },
         workshopIds: { type: 'array', items: { type: 'integer' } },
         requirementIds: { type: 'array', items: { type: 'integer' } },
@@ -609,6 +629,7 @@ const orderSwaggerSchema = {
   properties: {
     header: orderHeaderResponseSwaggerSchema,
     details: { type: 'array', items: orderDetailResponseSwaggerSchema },
+    catalogLines: { type: 'array', items: orderCatalogLineSwaggerSchema },
     payments: { type: 'array', items: orderPaymentResponseSwaggerSchema },
     workshops: { type: 'array', items: orderWorkshopResponseSwaggerSchema },
     requirements: { type: 'array', items: orderRequirementResponseSwaggerSchema },

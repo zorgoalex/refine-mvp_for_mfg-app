@@ -9,6 +9,7 @@ export const ORDER_SNAPSHOT_SUPPORTED_IMPORT_VERSIONS = [
 ] as const;
 
 export const ORDER_SNAPSHOT_REFERENCE_ENTITY_TYPES = [
+  'catalogItem',
   'material',
   'sheetMaterialType',
   'millingType',
@@ -80,6 +81,7 @@ export interface OrderSnapshotDto {
     clientPhones: ClientPhoneSnapshotDto[];
     order: OrderSnapshotHeaderDto;
     details: OrderSnapshotDetailDto[];
+    catalogLines?: Array<Omit<import('../domain/order-catalog-lines').OrderCatalogLineDto, 'id' | 'clientKey' | 'catalogActive'> & { sourceId: string }>;
     payments: OrderSnapshotPaymentDto[];
     workshops: OrderSnapshotWorkshopDto[];
     requirements: OrderSnapshotRequirementDto[];

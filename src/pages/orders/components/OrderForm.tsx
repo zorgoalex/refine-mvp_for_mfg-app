@@ -9,6 +9,7 @@ import { Alert, Card, Tabs, Button, Empty, Space, notification, Modal, Form, Sel
 import { SaveOutlined, CloseOutlined, EyeOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useNavigation, useParsed } from '@refinedev/core';
 import { toClientKey } from '../../../api/mappers/orderMapper';
+import { orderSaveRetryKey } from '../../../utils/orderSaveRetryKey';
 import type { BazisOrderDraftResponse } from '../../../api/types/bazisApi.types';
 import {
   useOrderDraftStore,
@@ -33,6 +34,8 @@ import { projectsApi, type ProjectDto } from '../../../api/projectsApi';
 import { OrderDetail, OrderFormMode } from '../../../types/orders';
 import { orderFormSchema } from '../../../schemas/orderSchema';
 import { featureFlags } from '../../../config/featureFlags';
+import { OrderCatalogLinesTable } from './OrderCatalogLinesTable';
+import { orderCatalogSubtotal } from '../../../utils/orderCatalogLines';
 import { can } from '../../../utils/permissions';
 import { authSession } from '../../../api/authSession';
 import { useOrderFinancialVisibility } from '../../../hooks/useOrderFinancialVisibility';
@@ -246,6 +249,9 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   const {
     header,
     details,
+    catalogLines,
+    deletedCatalogLineIds,
+    setCatalogLines,
     payments,
     workshops,
     requirements,
@@ -393,6 +399,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         deletedWorkshops,
         deletedRequirements,
         deletedDowelingLinks,
+        catalogLines,
+        deletedCatalogLineIds,
       }),
     [
       header,
@@ -406,6 +414,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       deletedWorkshops,
       deletedRequirements,
       deletedDowelingLinks,
+      catalogLines,
+      deletedCatalogLineIds,
     ],
   );
   const applicableProductionStatusIds = useMemo(
@@ -1328,7 +1338,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       return sum;
     }, 0);
 
-    const autoTotal = Number(autoTotalRaw.toFixed(2));
+    const autoTotal = Number((autoTotalRaw + orderCatalogSubtotal(catalogLines)).toFixed(2));
     const currentTotal =
       typeof header.total_amount === 'number'
         ? Number(header.total_amount.toFixed(2))
@@ -1345,6 +1355,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     }
   }, [
     businessDetails,
+    catalogLines,
     header.total_amount,
     isTotalAmountManual,
     isOrderDataLoading,
@@ -1507,6 +1518,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       console.log('[OrderForm] handleSave - full result object:', result);
 
       if (!result.success) {
+        if (result.error.issues.some(issue => issue.path[0] === 'catalogLines')) setActiveTab('services');
         showValidationErrors(result.error.issues, formValues.details);
         return false;
       }
@@ -1515,9 +1527,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       if (bazisDraftRuntimeRef.current) {
         formValues.idempotencyKey = bazisDraftRuntimeRef.current.idempotencyKey;
       } else {
-        if (!saveKeyRef.current) {
-          saveKeyRef.current = createOrderSaveIdempotencyKey();
-        }
+        saveKeyRef.current = orderSaveRetryKey(saveKeyRef.current, saveKeySignatureRef.current,
+          saveSignature, createOrderSaveIdempotencyKey);
         saveKeySignatureRef.current = saveSignature;
         formValues.idempotencyKey = saveKeyRef.current;
       }
@@ -1583,7 +1594,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         // Export is optional and runs in background, but remains owned by its
         // workspace/auth scope so stale completions cannot publish.
         console.log('[OrderForm] handleSave - starting background auto-export to Google Drive');
-        void runPageOwnedWorkspaceOperation(
+        if (businessOrderDetails(formValues.details).length > 0) void runPageOwnedWorkspaceOperation(
             workspaceKey,
             'order-excel-export',
             (owner) => exportToDrive({
@@ -1750,9 +1761,11 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         : []),
       {
         key: 'services',
-        label: isOperational ? 'Активность' : 'Услуги/работы',
-        children: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={isOperational ? 'События заказа отсутствуют' : 'Услуги и работы не добавлены'} />,
-        disabled: mode === 'create' && !header.order_id,
+        label: 'Услуги/товары',
+        children: <OrderCatalogLinesTable rows={catalogLines}
+          canViewFinancials={can('orders.view_financials')}
+          canSelect={can('references.view') || can('references.manage')}
+          onChange={!isSaving && featureFlags.useBackendOrdersWrite && can('orders.view_financials') && can(mode === 'create' ? 'orders.create' : 'orders.update') ? setCatalogLines : undefined} />,
       },
       {
         key: 'workshops',
@@ -1835,6 +1848,9 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       projectOptions,
       loadProjectOptions,
       updateHeaderField,
+      catalogLines,
+      setCatalogLines,
+      can,
     ]
   );
 

@@ -335,7 +335,7 @@ function createDatabase(options: {
           payment_status_id: 1,
           order_kind: 'production_order',
           legacy_zero_detail_exempt: false,
-          has_active_details: true,
+          has_active_positions: true,
           version: 3,
           created_by: options.orderCreatedByUserId ?? 1,
           manager_id: options.orderManagerUserId ?? null,

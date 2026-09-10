@@ -131,6 +131,7 @@ describe('OrderQueryService', () => {
       const totals = result.totals as Record<string, unknown>;
 
       expect(result.payments).toEqual([]);
+      expect(result.catalogLines).toMatchObject([{ name: 'Service', quantity: '2', unitPrice: '0.00', amount: '0.00' }]);
       expect(result.details).toMatchObject([
         {
           millingCostPerSqm: null,
@@ -688,6 +689,8 @@ function createFinancialOrderDtoForQueryTest(orderId: number): OrderDto {
 
   return {
     ...order,
+    catalogLines: [{ id: 501, catalogItemId: 7, catalogVersion: 1, lineNumber: 1, name: 'Service', sku: null,
+      kind: 'service', unitId: 1, unitName: 'шт', refKey1c: null, quantity: '2', unitPrice: '25.00', amount: '50.00', notes: '', catalogActive: true }],
     header: {
       ...order.header,
       paymentStatusId: 2,

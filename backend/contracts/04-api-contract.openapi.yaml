@@ -19366,6 +19366,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/OrderDetailDto'
+        catalogLines:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderCatalogLineDto'
         payments:
           type: array
           items:
@@ -19851,6 +19855,73 @@ components:
           format: decimal
           minimum: 0
 
+    SaveOrderCatalogLineDto:
+      type: object
+      additionalProperties: false
+      required: [catalogItemId, quantity, unitPrice]
+      description: id для существующей строки или clientKey для новой. catalogVersion обязателен при выборе новой позиции. Снимки названия, типа и единицы берёт сервер. Количество до 3 знаков; цена до 2; сумма округляется до 2 знаков.
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        clientKey:
+          type: string
+          minLength: 1
+          maxLength: 200
+        catalogItemId:
+          type: integer
+          minimum: 1
+        catalogVersion:
+          type: integer
+          minimum: 1
+        quantity:
+          type: string
+          pattern: '^\d{1,9}(\.\d{1,3})?$'
+        unitPrice:
+          type: string
+          pattern: '^\d{1,10}(\.\d{1,2})?$'
+        notes:
+          type: string
+          maxLength: 2000
+    OrderCatalogLineDto:
+      type: object
+      required: [id, catalogItemId, catalogVersion, lineNumber, name, kind, unitId, unitName, quantity, unitPrice, amount, catalogActive]
+      properties:
+        id:
+          type: integer
+        catalogItemId:
+          type: integer
+        catalogVersion:
+          type: integer
+        lineNumber:
+          type: integer
+        name:
+          type: string
+        sku:
+          type: string
+          nullable: true
+        kind:
+          type: string
+          enum: [made_to_order, stock_item, service]
+        unitId:
+          type: integer
+        unitName:
+          type: string
+        refKey1c:
+          type: string
+          format: uuid
+          nullable: true
+        quantity:
+          type: string
+        unitPrice:
+          type: string
+        amount:
+          type: string
+        notes:
+          type: string
+        catalogActive:
+          type: boolean
+
     SaveOrderDto:
       type: object
       required:
@@ -19868,6 +19939,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SaveOrderDetailDto'
+        catalogLines:
+          type: array
+          maxItems: 1000
+          description: Отсутствие поля или пустой массив сохраняет существующие строки. Удаление только через deleted.catalogLineIds. Заказ должен иметь активную деталь либо товар/услугу.
+          items:
+            $ref: '#/components/schemas/SaveOrderCatalogLineDto'
         payments:
           type: array
           items:
@@ -20263,6 +20340,12 @@ components:
     DeletedOrderChildrenDto:
       type: object
       properties:
+        catalogLineIds:
+          type: array
+          uniqueItems: true
+          items:
+            type: integer
+            minimum: 1
         detailIds:
           type: array
           items:

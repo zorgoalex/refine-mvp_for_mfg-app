@@ -138,6 +138,9 @@ export class PgOrderExporter implements OrderExportPort {
     }
 
     const details = await readDetails(tx, command.orderId);
+    if (details.length === 0) {
+      throw new ApiError(422, 'ORDER_EXPORT_DETAILS_REQUIRED', 'Экспорт в Google Drive доступен только для заказов с деталями');
+    }
     const payments = await readPayments(tx, command.orderId);
     const doweling = await readDoweling(tx, command.orderId);
     const orderDate = parseDate(header.order_date);

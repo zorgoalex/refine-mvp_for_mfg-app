@@ -338,6 +338,8 @@ export interface OrderDowelingLink {
 // ============================================================================
 
 export interface OrderFormValues {
+  catalogLines?: import('../utils/orderCatalogLines').OrderCatalogLine[];
+  deletedCatalogLineIds?: number[];
   // Header
   header: Order;
 

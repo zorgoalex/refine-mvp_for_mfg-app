@@ -1,4 +1,8 @@
 import { createHash } from 'node:crypto';
+import { z } from 'zod';
+import { readOrderCatalogLines, persistOrderCatalogLines, recordOrderCatalogLinesChange } from './pg-order-catalog-lines';
+import { assertOrderHasPositions, catalogLineAmount, catalogPlanInputs, normalizeCatalogLineInputs, type OrderCatalogPlan } from '../domain/order-catalog-lines';
+import { requireCatalogPermission } from '../../catalog/catalog.validation';
 import JSZip from 'jszip';
 import { evaluateProductionCompositionAutomation } from '../../status-automation/application/status-automation-runtime';
 import type { QueryResultRow } from 'pg';
@@ -75,6 +79,7 @@ const SNAPSHOT_ENTITY_TYPES = {
   client: 'client',
   clientPhone: 'client_phone',
   detail: 'order_detail',
+  catalogLine: 'order_catalog_line',
   payment: 'payment',
   workshop: 'order_workshop',
   requirement: 'order_resource_requirement',
@@ -98,6 +103,9 @@ interface SnapshotReferenceConfig {
 }
 
 const SNAPSHOT_REFERENCE_CONFIGS: Record<OrderSnapshotReferenceEntityType, SnapshotReferenceConfig> = {
+  catalogItem: { entityType: 'catalogItem', table: 'catalog_items', idColumn: 'id', nameColumn: 'name',
+    refKeyColumn: 'ref_key_1c', sortColumn: 'sort_order', activeColumn: 'is_active',
+    selectColumns: ['id','name','sku','kind','unit_id','ref_key_1c','version','is_active','sort_order'] },
   material: {
     entityType: 'material',
     table: 'materials',
@@ -675,6 +683,7 @@ async function buildSnapshot(tx: TransactionClient, orderId: number): Promise<Or
     clientPhones: clientPhones.map(mapClientPhoneSnapshot),
     order: mapOrderHeaderSnapshot(header),
     details: details.map(mapDetailSnapshot),
+    catalogLines: (await readOrderCatalogLines(tx, orderId)).map(({ id, clientKey: _key, catalogActive: _active, ...line }) => ({ ...line, sourceId: String(id) })),
     payments: payments.map(mapPaymentSnapshot),
     workshops: workshops.map(mapWorkshopSnapshot),
     requirements: requirements.map(mapRequirementSnapshot),
@@ -766,6 +775,10 @@ function collectSnapshotReferenceIds(data: OrderSnapshotDto['data']): Map<OrderS
   add('millingType', data.order.millingTypeId);
   add('edgeType', data.order.edgeTypeId);
   add('film', data.order.filmId);
+  for (const line of data.catalogLines ?? []) {
+    add('catalogItem', line.catalogItemId);
+    add('unit', line.unitId);
+  }
 
   for (const detail of data.details) {
     add('material', detail.materialId);
@@ -924,6 +937,10 @@ async function remapSnapshotReferencesForImport(
       productionStatusId: await resolver.optional('productionStatus', detail.productionStatusId),
       jointOrderId: null,
     })),
+    ...(data.catalogLines === undefined ? {} : { catalogLines: await mapSeries(data.catalogLines, async line => ({
+      ...line, catalogItemId: await resolver.required('catalogItem', line.catalogItemId),
+      unitId: await resolver.required('unit', line.unitId),
+    })) }),
     payments: await mapSeries(data.payments, async (payment) => ({
       ...payment,
       typePaidId: await resolver.required('paymentType', payment.typePaidId),
@@ -1048,9 +1065,10 @@ class SnapshotReferenceResolver {
     }
 
     const reference = findSnapshotReference(this.snapshot, type, sourceId);
-    const targetId = reference
+    const sameInstance = type === 'catalogItem' && this.snapshot.source.sourceInstanceId === await readSourceInstanceId(this.tx);
+    const targetId = sameInstance ? await readReferenceIdIfExists(this.tx, type, sourceIdNumber) : reference
       ? await findTargetReferenceId(this.tx, type, reference)
-      : await readReferenceIdIfExists(this.tx, type, sourceIdNumber);
+      : type === 'catalogItem' ? null : await readReferenceIdIfExists(this.tx, type, sourceIdNumber);
 
     if (targetId) {
       this.resolved.set(key, targetId);
@@ -1097,6 +1115,8 @@ async function findTargetReferenceId(
     );
     if (byRef) return byRef;
   }
+
+  if (type === 'catalogItem') return null; // Nullable 1C key: cross-instance imports require an explicit mapping.
 
   if (config.codeColumn && reference.code) {
     const byCode = await readUniqueReferenceIdByField(tx, config, config.codeColumn, reference.code);
@@ -1349,12 +1369,16 @@ function snapshotHeaderToSaveOrderDto(
   version?: number,
 ): SaveOrderDto {
   const dto = snapshotToSaveOrderDto(snapshot, clientId, {
-    details: [],
+    details: snapshot.data.details,
     payments: [],
     workshops: [],
     requirements: [],
     dowelingLinks: [],
   });
+  if (snapshot.data.catalogLines !== undefined) dto.catalogLines = snapshot.data.catalogLines.map(row => ({
+    clientKey: row.sourceId, catalogItemId: row.catalogItemId, catalogVersion: row.catalogVersion,
+    quantity: row.quantity, unitPrice: row.unitPrice, notes: row.notes,
+  }));
   return version === undefined ? dto : { ...dto, version };
 }
 
@@ -1372,6 +1396,33 @@ async function createImportProject(
   return project.projectId;
 }
 
+async function importCatalogLines(tx: TransactionClient, snapshot: OrderSnapshotDto, orderId: number,
+  payloadHash: string, command: ImportOrderSnapshotCommand): Promise<OrderCatalogPlan> {
+  const before = await readOrderCatalogLines(tx, orderId);
+  if (snapshot.data.catalogLines === undefined) return { before, after: before, writes: [], deletedIds: [] };
+  requireCatalogPermission(command.currentUser);
+  const lines = snapshot.data.catalogLines;
+  const source = snapshot.source.sourceInstanceId;
+  const ids = await localIdsFor(tx, source, SNAPSHOT_ENTITY_TYPES.catalogLine, lines);
+  if (new Set(ids.values()).size !== ids.size) throw new ApiError(409, 'SNAPSHOT_CATALOG_MAPPING_CONFLICT', 'Повторяющиеся связи позиций');
+  if (ids.size) {
+    const owned = await tx.query<{ id: string }>('SELECT id FROM order_catalog_lines WHERE order_id=$1 AND id=ANY($2::bigint[]) FOR UPDATE', [orderId, [...ids.values()]]);
+    if (owned.rows.length !== ids.size) throw new ApiError(409, 'SNAPSHOT_CATALOG_MAPPING_CONFLICT', 'Позиция принадлежит другому заказу или отсутствует');
+  }
+  const maps = await tx.query<{ source_entity_id: string; local_entity_id: string }>(`SELECT source_entity_id,local_entity_id FROM order_import_entity_map
+    WHERE source_instance_id=$1 AND entity_type=$2 AND local_order_id=$3`, [source, SNAPSHOT_ENTITY_TYPES.catalogLine, orderId]);
+  const sourceIds = new Set(lines.map(row => row.sourceId));
+  const deletedIds = maps.rows.filter(row => !sourceIds.has(row.source_entity_id)).map(row => Number(row.local_entity_id));
+  const writes = lines.map(({ sourceId, ...row }, index) => ({ ...row, id: ids.get(sourceId), clientKey: sourceId,
+    lineNumber: index + 1, catalogActive: true, amount: catalogLineAmount(row.quantity, row.unitPrice) }));
+  const replaced = new Set([...ids.values(), ...deletedIds]);
+  const plan: OrderCatalogPlan = { before, writes, deletedIds, after: [...before.filter(row => !replaced.has(row.id)), ...writes] };
+  await persistOrderCatalogLines(tx, orderId, plan, command.currentUser, command.requestId ?? 'orders-snapshot-import');
+  for (const row of writes) await upsertMap(tx, { source, entityType: SNAPSHOT_ENTITY_TYPES.catalogLine,
+    sourceId: row.clientKey, localId: String(row.id), localOrderId: orderId, payloadHash });
+  return plan;
+}
+
 async function upsertOrderChildren(
   tx: TransactionClient,
   snapshot: OrderSnapshotDto,
@@ -1382,6 +1433,7 @@ async function upsertOrderChildren(
 ): Promise<void> {
   const source = snapshot.source.sourceInstanceId;
   const detailIds = await localIdsFor(tx, source, SNAPSHOT_ENTITY_TYPES.detail, snapshot.data.details);
+  const catalogPlan = await importCatalogLines(tx, snapshot, orderId, payloadHash, command);
   const paymentIds = await localIdsFor(tx, source, SNAPSHOT_ENTITY_TYPES.payment, snapshot.data.payments);
   const workshopIds = await localIdsFor(tx, source, SNAPSHOT_ENTITY_TYPES.workshop, snapshot.data.workshops);
   const requirementIds = await localIdsFor(tx, source, SNAPSHOT_ENTITY_TYPES.requirement, snapshot.data.requirements);
@@ -1401,6 +1453,7 @@ async function upsertOrderChildren(
   const prepared = prepareOrderSave(
     {
       ...dto,
+      catalogLines: catalogPlanInputs(catalogPlan),
       header: { ...dto.header, orderId, clientId: await readOrderClientId(tx, orderId) },
       version: await readOrderVersion(tx, orderId),
     },
@@ -1453,7 +1506,10 @@ async function upsertOrderChildren(
   await deleteMissingImportedRows(tx, source, SNAPSHOT_ENTITY_TYPES.dowelingLink, orderId, savedLinks, 'order_doweling_links', 'order_doweling_link_id');
 
   await recalcOrderProductionStatus(tx, orderId);
+  const activeDetails = await tx.query<{ count: number }>('SELECT count(*)::int AS count FROM order_details WHERE order_id=$1 AND delete_flag=false', [orderId]);
+  assertOrderHasPositions(activeDetails.rows[0].count, catalogPlan.after.length);
   await updateOrderTotals(tx, orderId, prepared.totals, await readOrderVersion(tx, orderId));
+  await recordOrderCatalogLinesChange(tx, orderId, catalogPlan, command.currentUser, command.requestId ?? 'orders-snapshot-import');
 }
 
 async function upsertClientPhones(
@@ -3079,6 +3135,22 @@ function assertSupportedSnapshot(snapshot: OrderSnapshotDto): OrderSnapshotDto {
     throw new ApiError(422, 'SNAPSHOT_HASH_MISMATCH', 'Order snapshot payload hash does not match');
   }
 
+  if (snapshot.data.catalogLines !== undefined) {
+    const result = z.array(z.object({
+      sourceId: z.string().min(1).max(200), catalogItemId: z.number().int().positive().safe(),
+      catalogVersion: z.number().int().positive(), lineNumber: z.number().int().positive(),
+      name: z.string().trim().min(1).max(200), sku: z.string().max(80).nullable(),
+      kind: z.enum(['made_to_order','stock_item','service']), unitId: z.number().int().positive().max(32767),
+      unitName: z.string().min(1).max(200), refKey1c: z.string().uuid().nullable(),
+      quantity: z.string(), unitPrice: z.string(), amount: z.string(), notes: z.string().max(2000).optional(),
+    }).strict()).max(1000).safeParse(snapshot.data.catalogLines);
+    if (!result.success || new Set(result.data.map(row => row.sourceId)).size !== result.data.length) {
+      throw new ApiError(422, 'SNAPSHOT_CATALOG_INVALID', 'Некорректные товары/услуги в снимке заказа');
+    }
+    normalizeCatalogLineInputs(result.data.map(row => ({ clientKey: row.sourceId, catalogItemId: row.catalogItemId,
+      catalogVersion: row.catalogVersion, quantity: row.quantity, unitPrice: row.unitPrice, notes: row.notes })));
+  }
+
   return snapshot;
 }
 
@@ -3163,7 +3235,7 @@ async function readStoredSheetState(
   return { eligible, headerSheetId, detailSheetIds };
 }
 
-async function readSourceInstanceId(tx: TransactionClient): Promise<string> {
+async function readSourceInstanceId(tx: DatabaseClient): Promise<string> {
   const result = await tx.query<SourceInstanceRow>(
     "SELECT 'erp-backend:' || current_database() AS source_instance_id",
   );

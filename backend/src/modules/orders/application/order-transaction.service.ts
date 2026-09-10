@@ -40,6 +40,7 @@ import {
   OrderVersionConflictError,
 } from '../errors/order.errors';
 import { prepareOrderSave } from '../domain/order-save-preparer';
+import { assertOrderHasPositions, catalogPlanInputs } from '../domain/order-catalog-lines';
 import { ProjectClientMismatchError } from '../../projects/errors/projects.errors';
 import {
   addCalendarDays,
@@ -237,12 +238,10 @@ export class OrderTransactionService {
       }
       this.requirePermission(command, 'orders.create');
       this.requirePermission(command, 'orders.view_financials');
-      if (command.dto.details.length === 0) {
-        throw new ApiError(422, 'ORDER_DETAILS_REQUIRED', 'Production order requires at least one detail', {
-          field: 'details',
-        });
-      }
-      const normalized = prepareOrderSave(command.dto, { mode: 'create' });
+      const catalogPlan = await unitOfWork.prepareCatalogLines(null, command.dto.catalogLines,
+        command.dto.deleted?.catalogLineIds, command.currentUser);
+      const normalized = prepareOrderSave({ ...command.dto, catalogLines: catalogPlanInputs(catalogPlan) }, { mode: 'create' });
+      assertOrderHasPositions(normalized.details.length, catalogPlan.after.length);
       const appliedDefaults = await this.applyDefaultSchedule(
         normalized,
         unitOfWork,
@@ -285,6 +284,8 @@ export class OrderTransactionService {
         currentUser: command.currentUser,
       });
 
+      await unitOfWork.persistCatalogLines(orderId, catalogPlan, command.currentUser, command.requestId ?? 'orders-create');
+
       const detailIdsByClientKey = await this.persistChildren(
         unitOfWork,
         orderId,
@@ -298,6 +299,7 @@ export class OrderTransactionService {
         previousVersion: null,
         currentUser: command.currentUser,
       });
+      await unitOfWork.recordCatalogLinesChange(orderId, catalogPlan, command.currentUser, command.requestId ?? 'orders-create');
       const bazisPanelLinks = await this.reconcilePdfImportedBazisPanels(unitOfWork, {
         orderId,
         version,
@@ -522,7 +524,9 @@ export class OrderTransactionService {
         throw new OrderVersionConflictError(lockedOrder.version, clientVersion);
       }
 
-      const prepared = prepareOrderSave({ ...command.dto, version: clientVersion }, {
+      const catalogPlan = await unitOfWork.prepareCatalogLines(command.orderId, command.dto.catalogLines,
+        command.dto.deleted?.catalogLineIds, command.currentUser);
+      const prepared = prepareOrderSave({ ...command.dto, catalogLines: catalogPlanInputs(catalogPlan), version: clientVersion }, {
         mode: 'update',
         pathOrderId: command.orderId,
       });
@@ -606,9 +610,11 @@ export class OrderTransactionService {
         command.orderId,
         collectChildReferences(prepared.order),
       );
+      assertOrderHasPositions(prepared.details.length, catalogPlan.after.length);
       if (command.prePersistHook) {
         await command.prePersistHook(unitOfWork, lockedOrder);
       }
+      await unitOfWork.persistCatalogLines(command.orderId, catalogPlan, command.currentUser, command.requestId ?? 'orders-update');
       await unitOfWork.updateOrderHeader({
         orderId: command.orderId,
         header: prepared.order.header,
@@ -628,6 +634,7 @@ export class OrderTransactionService {
         previousVersion: lockedOrder.version,
         currentUser: command.currentUser,
       });
+      await unitOfWork.recordCatalogLinesChange(command.orderId, catalogPlan, command.currentUser, command.requestId ?? 'orders-update');
       const bazisPanelLinks = await this.reconcilePdfImportedBazisPanels(unitOfWork, {
         orderId: command.orderId,
         version,
@@ -1062,9 +1069,10 @@ export class OrderTransactionService {
     order: OrderDto,
     command: Pick<CreateOrderCommand | UpdateOrderCommand | RecalculateOrderHdfCommand, 'currentUser'>,
   ): OrderDto {
-    return this.permissions.canUser(command.currentUser, 'payments.view')
-      ? order
-      : { ...order, payments: [] };
+    const filtered = this.permissions.canUser(command.currentUser, 'payments.view') ? order : { ...order, payments: [] };
+    return this.permissions.canUser(command.currentUser, 'orders.view_financials') || filtered.catalogLines === undefined
+      ? filtered
+      : { ...filtered, catalogLines: filtered.catalogLines.map(row => ({ ...row, unitPrice: '0.00', amount: '0.00' })) };
   }
 
   private async emitAutomationSourceEvent(

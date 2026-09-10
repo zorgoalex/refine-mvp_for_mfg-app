@@ -6,6 +6,7 @@ import type { CutDetailLastReadyJobRef } from './cutApi.types';
 import type { StatusAutomationOrderRefreshSummaryDto } from './statusAutomationApi.types';
 
 export interface SaveOrderDto {
+  catalogLines?: ReturnType<typeof import('../../utils/orderCatalogLines').orderCatalogLineInput>[];
   header: SaveOrderHeaderDto;
   details: SaveOrderDetailDto[];
   hdfDetails?: SaveOrderHdfDetailDto[];
@@ -237,6 +238,7 @@ export interface ExportOrderResponse {
 }
 
 export type OrderSnapshotReferenceEntityType =
+  | 'catalogItem'
   | 'material'
   | 'sheetMaterialType'
   | 'millingType'
@@ -526,6 +528,7 @@ export interface SaveOrderDowelingLinkDto {
 }
 
 export interface DeletedOrderChildrenDto {
+  catalogLineIds?: number[];
   detailIds: number[];
   hdfDetailIds?: number[];
   paymentIds: number[];
@@ -535,6 +538,7 @@ export interface DeletedOrderChildrenDto {
 }
 
 export interface OrderDto {
+  catalogLines?: import('../../utils/orderCatalogLines').OrderCatalogLine[];
   header: OrderHeaderDto;
   details: OrderDetailDto[];
   hdfDetails?: OrderHdfDetailDto[];

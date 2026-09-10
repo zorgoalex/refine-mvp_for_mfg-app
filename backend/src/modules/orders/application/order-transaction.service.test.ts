@@ -245,6 +245,9 @@ class FakeOrderTransactions implements OrderTransactionManagerPort {
 }
 
 class FakeUnitOfWork implements OrderWriteUnitOfWork {
+  async prepareCatalogLines() { return { before: [], after: [], writes: [], deletedIds: [] }; }
+  async persistCatalogLines() {}
+  async recordCatalogLinesChange() {}
   constructor(
     private readonly owner: FakeOrderTransactions,
     private readonly state: FakeState,

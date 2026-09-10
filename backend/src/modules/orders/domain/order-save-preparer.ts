@@ -15,6 +15,7 @@ export function prepareOrderSave(
     header: order.header,
     details,
     payments: order.payments,
+    catalogLines: order.catalogLines,
   });
 
   return {

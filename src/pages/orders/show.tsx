@@ -1,7 +1,7 @@
 import { Table, Tooltip } from '../../ui/tooltipDelay';
 import { useDataProvider, useParsed, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
-import { Alert, Button, Checkbox, Breadcrumb, message, Dropdown, Space, Modal, Select } from "antd";
+import { Alert, Button, Card, Checkbox, Breadcrumb, message, Dropdown, Space, Modal, Select } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { forwardRef, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
@@ -82,6 +82,7 @@ import { DetailGroupingControls } from './components/DetailGroupingControls';
 import { groupCheckboxState, toggleGroupSelection, filterNumericKeys } from './groupSelection';
 import { authSession } from '../../api/authSession';
 import { mapOrderDtoToFormValues } from '../../api/mappers/orderMapper';
+import { OrderCatalogLinesTable } from './components/OrderCatalogLinesTable';
 import { useIsMobile } from '../../hooks/useDeviceTier';
 import { DetailCardList } from './mobile/DetailCardList';
 import type { DetailCardLookups } from './mobile/detailCardModel';
@@ -3836,6 +3837,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             )}
 
           {/* Детали заказа - компактная таблица */}
+          {!!backendOrder?.catalogLines?.length && <Card title="Услуги/товары" size="small" style={{ marginBottom: 16 }}>
+            <OrderCatalogLinesTable rows={backendOrder.catalogLines} canViewFinancials={canViewFinancials} />
+          </Card>}
           <div ref={orderShowDetailsBlockRef} className="order-show-details-section">
             {isMobile ? (
               <DetailCardList rows={details} lookups={detailCardLookups} highlightDetailId={highlightDetail}

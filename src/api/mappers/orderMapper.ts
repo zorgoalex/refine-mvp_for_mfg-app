@@ -123,6 +123,10 @@ export function mapOrderFormToSaveOrderDto(values: OrderFormValues): SaveOrderDt
       refKey1c: normalizeOptionalString(header.ref_key_1c),
     },
     details,
+    ...(values.catalogLines === undefined ? {} : { catalogLines: values.catalogLines.map(row => ({
+      id: row.id, clientKey: row.clientKey, catalogItemId: row.catalogItemId, catalogVersion: row.catalogVersion,
+      quantity: row.quantity, unitPrice: row.unitPrice, notes: row.notes ?? '',
+    })) }),
     hdfDetails: normalizeHdfDetails(values.hdfDetails ?? [], values.dirtyHdfDetailIds ?? []),
     bazisImportCandidateClientKeys: details
       .filter(
@@ -137,6 +141,7 @@ export function mapOrderFormToSaveOrderDto(values: OrderFormValues): SaveOrderDt
     requirements: normalizeRequirements(values.requirements ?? []),
     dowelingLinks: normalizeDowelingLinks(values.dowelingLinks ?? []),
     deleted: {
+      ...(values.deletedCatalogLineIds === undefined ? {} : { catalogLineIds: normalizeDeletedIds(values.deletedCatalogLineIds) }),
       detailIds: normalizeDeletedIds(values.deletedDetails),
       hdfDetailIds: normalizeDeletedIds(values.deletedHdfDetails),
       paymentIds: normalizeDeletedIds(values.deletedPayments),
@@ -261,6 +266,8 @@ export function mapOrderDtoToFormValues(order: OrderDto): OrderFormValues {
   return {
     header,
     details: mapDetailsFromDto(order.details ?? [], order.header.orderId),
+    catalogLines: order.catalogLines ?? [],
+    deletedCatalogLineIds: [],
     hdfDetails: mapHdfDetailsFromDto(order.hdfDetails ?? [], order.header.orderId),
     payments: mapPaymentsFromDto(order.payments ?? [], order.header.orderId),
     workshops: mapWorkshopsFromDto(order.workshops ?? [], order.header.orderId),

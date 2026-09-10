@@ -98,6 +98,7 @@ describe('normalizeSaveOrderDto', () => {
       notes: null,
     });
     expect(normalized.deleted).toEqual({
+      catalogLineIds: [],
       detailIds: [11],
       paymentIds: [],
       workshopIds: [],

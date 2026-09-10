@@ -1,4 +1,5 @@
 import type { QueryResultRow } from 'pg';
+import { readOrderCatalogLines } from './pg-order-catalog-lines';
 import { mapProductionSummary, type ProductionSummaryRow } from '../../../shared/production-status/production-summary';
 import type { DatabaseClient } from '../../../database/database.types';
 import type { OrderFormDataResponseDto } from '../dto/order-form-data.dto';
@@ -1096,7 +1097,7 @@ export class PgOrderReadRepository
       [command.orderId],
     );
 
-    return mapOrderDto(
+    const result = mapOrderDto(
       header,
       details.rows,
       hdfDetails.rows,
@@ -1107,6 +1108,8 @@ export class PgOrderReadRepository
       groupLinks.rows.map(mapGroupLinkRow),
       includeDeleted,
     );
+    result.catalogLines = await readOrderCatalogLines(this.database, command.orderId);
+    return result;
   }
 
   async getOrderAudit(command: GetOrderAuditCommand): Promise<OrderAuditListResponseDto> {

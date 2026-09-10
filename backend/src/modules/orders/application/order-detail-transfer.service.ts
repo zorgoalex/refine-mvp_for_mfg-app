@@ -11,6 +11,8 @@ import { PermissionsService } from '../../../permissions/permissions.service';
 import { evaluateStatusAutomation, evaluateProductionCompositionAutomation } from '../../status-automation/application/status-automation-runtime';
 import type { StatusAutomationEvent } from '../../status-automation/application/status-automation.types';
 import { calculateOrderTotals } from '../domain/order-calculations';
+import type { OrderCatalogLineDto } from '../domain/order-catalog-lines';
+import { readOrderCatalogLines } from '../adapters/pg-order-catalog-lines';
 import type { OrderDto } from '../dto/order.dto';
 import type { CalculatedOrderDetailDto, NormalizedSaveOrderPaymentDto, OrderTotalsDto } from '../dto/save-order.dto';
 import { OrderNameDuplicateError, OrderNotFoundError, OrderVersionConflictError } from '../errors/order.errors';
@@ -380,8 +382,9 @@ export class OrderDetailTransferService {
         });
       }
       const remainingSourceDetails = sourceDetails.filter((detail) => !selectedSet.has(toNumber(detail.detail_id)));
-      if (remainingSourceDetails.length === 0) {
-        throw new ApiError(409, 'ORDER_DETAIL_TRANSFER_SOURCE_EMPTY', 'В исходном заказе должна остаться хотя бы одна деталь', {
+      const sourceCatalogLines = await readOrderCatalogLines(tx, command.sourceOrderId);
+      if (remainingSourceDetails.length === 0 && sourceCatalogLines.length === 0) {
+        throw new ApiError(409, 'ORDER_DETAIL_TRANSFER_SOURCE_EMPTY', 'В исходном заказе должна остаться хотя бы одна деталь или позиция товаров/услуг', {
           sourceOrderId: command.sourceOrderId,
         });
       }
@@ -1003,16 +1006,18 @@ async function calculateTotalsFromDb(
     discount: toNullableNumber(order.discount) ?? 0,
     surcharge: toNullableNumber(order.surcharge) ?? 0,
     paymentStatusId: toNullableNumber(order.payment_status_id),
-  });
+  }, await readOrderCatalogLines(tx, orderId));
 }
 
 function calculateTotalsForRows(
   details: readonly LockedDetailRow[],
   payments: readonly PaymentRow[],
   header: { discount: number; surcharge: number; paymentStatusId: number | null },
+  catalogLines: OrderCatalogLineDto[] = [],
 ): OrderTotalsDto {
   return calculateOrderTotals({
     header,
+    catalogLines,
     details: details.map((detail) => ({
       height: Number(detail.height),
       width: Number(detail.width),

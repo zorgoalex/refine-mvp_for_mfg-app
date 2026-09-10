@@ -48,6 +48,7 @@ const ENTITY_LABELS: Record<OrderSnapshotReferenceEntityType, string> = {
   workshop: "Цех",
   employee: "Сотрудник",
   resourceRequirementStatus: "Статус потребности",
+  catalogItem: 'Товар/услуга',
 };
 
 export const OrderSnapshotReferenceMappingModal: React.FC<OrderSnapshotReferenceMappingModalProps> = ({

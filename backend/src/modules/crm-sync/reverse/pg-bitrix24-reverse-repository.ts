@@ -1,4 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
+import type { CurrentUser } from '../../../permissions/current-user';
+import { readOrderCatalogLines, prepareOrderCatalogLines, persistOrderCatalogLines, recordOrderCatalogLinesChange } from '../../orders/adapters/pg-order-catalog-lines';
+import { assertOrderHasPositions, catalogSubtotal, type OrderCatalogPlan } from '../../orders/domain/order-catalog-lines';
 import { dealCreatorSql, PAYMENT_AUTHORSHIP_SQL, type BitrixActor } from './bitrix24-authorship';
 import type { AuditService } from '../../../common/audit/audit.service';
 import { ApiError } from '../../../common/errors/api-error';
@@ -2207,6 +2210,8 @@ export class PgBitrix24ReverseRepository {
       bitrixUpdatedAt: toIso(row.bitrix_updated_at),
       version: row.version,
       details: details.rows.map((detail) => mapIncomingRequestDetail(detail, canViewFinancials)),
+      catalogLines: row.linked_order_id === null ? [] : (await readOrderCatalogLines(this.db, Number(row.linked_order_id)))
+        .map(line => canViewFinancials ? line : { ...line, unitPrice: '0.00', amount: '0.00' }),
       payments: canViewFinancials ? payments.rows.map((payment) => ({
         bitrixPaymentId: payment.bitrix_payment_id,
         paySystemId: payment.pay_system_id,
@@ -2233,6 +2238,9 @@ export class PgBitrix24ReverseRepository {
     requestId: number;
     orderVersion: number;
     details: IncomingRequestDetailInput[];
+    catalogLines?: unknown;
+    deletedCatalogLineIds?: number[];
+    catalogActor?: CurrentUser;
     actorUserId: number;
     actorUsername: string;
     actorRole: string;
@@ -2340,6 +2348,14 @@ export class PgBitrix24ReverseRepository {
       }
 
       const orderId = Number(aggregate.linked_order_id);
+      let catalogPlan: OrderCatalogPlan | undefined;
+      if (input.catalogLines !== undefined || input.deletedCatalogLineIds !== undefined) {
+        if (!input.canViewFinancials || !input.catalogActor || input.catalogActor.id !== String(input.actorUserId)) {
+          throw new ApiError(403, 'PERMISSION_DENIED', 'Для изменения товаров/услуг нужны права на финансы заказа');
+        }
+        catalogPlan = await prepareOrderCatalogLines(tx, orderId, input.catalogLines, input.deletedCatalogLineIds, input.catalogActor);
+        await persistOrderCatalogLines(tx, orderId, catalogPlan, input.catalogActor, input.auditRequestId);
+      }
       const existing = await tx.query<{
         detail_id: string | number;
         milling_cost_per_sqm: string | number | null;
@@ -2462,10 +2478,12 @@ export class PgBitrix24ReverseRepository {
           WHERE order_id=$1 AND delete_flag=false`,
         [orderId],
       );
-      const totalAmount = roundMoney(Number(totals.rows[0]?.total_amount ?? 0));
+      const savedCatalogLines = await readOrderCatalogLines(tx, orderId);
+      const totalAmount = roundMoney(Number(totals.rows[0]?.total_amount ?? 0) + catalogSubtotal(savedCatalogLines));
       const finalAmount = roundMoney(
         totalAmount - Number(aggregate.discount) + Number(aggregate.surcharge),
       );
+      if (totalAmount > 9999999999.99 || finalAmount > 9999999999.99) throw new ApiError(422, 'ORDER_AMOUNT_OVERFLOW', 'Сумма заказа превышает допустимое значение');
       if (finalAmount < 0) {
         throw new ApiError(422, 'ORDER_FINAL_AMOUNT_NEGATIVE', 'ERP final amount cannot be negative');
       }
@@ -2484,6 +2502,7 @@ export class PgBitrix24ReverseRepository {
           input.actorUserId,
         ],
       );
+      if (catalogPlan && input.catalogActor) await recordOrderCatalogLinesChange(tx, orderId, catalogPlan, input.catalogActor, input.auditRequestId);
       const savedDetails = await tx.query<IncomingRequestDetailRow>(
         `SELECT detail_id, detail_number, detail_name, height, width, quantity,
                 area, sheet_material_type_id, milling_type_id, edge_type_id,
@@ -2514,6 +2533,7 @@ export class PgBitrix24ReverseRepository {
         ...(input.canViewFinancials ? { erpFinalAmount: finalAmount } : {}),
         details: savedDetails.rows.map((detail) =>
           mapIncomingRequestDetail(detail, input.canViewFinancials)),
+        catalogLines: savedCatalogLines.map(line => input.canViewFinancials ? line : { ...line, unitPrice: '0.00', amount: '0.00' }),
       };
     });
   }
@@ -2658,9 +2678,8 @@ export class PgBitrix24ReverseRepository {
           ORDER BY detail_id FOR UPDATE`,
         [input.orderId],
       );
-      if (details.rows.length === 0) {
-        throw new ApiError(422, 'ORDER_DETAILS_REQUIRED', 'Production order requires at least one detail');
-      }
+      const catalogLines = await readOrderCatalogLines(tx, input.orderId);
+      assertOrderHasPositions(details.rows.length, catalogLines.length);
       const statuses = await tx.query<{
         order_status_id: string | number;
         production_status_id: string | number;
@@ -2770,10 +2789,11 @@ export class PgBitrix24ReverseRepository {
           WHERE order_id=$1 AND delete_flag=false`,
         [input.orderId],
       );
-      const totalAmount = roundMoney(Number(totals.rows[0]?.total_amount ?? 0));
+      const totalAmount = roundMoney(Number(totals.rows[0]?.total_amount ?? 0) + catalogSubtotal(catalogLines));
       const finalAmount = roundMoney(
         totalAmount - Number(orderRow.discount) + Number(orderRow.surcharge),
       );
+      if (totalAmount > 9999999999.99 || finalAmount > 9999999999.99) throw new ApiError(422, 'ORDER_AMOUNT_OVERFLOW', 'Сумма заказа превышает допустимое значение');
       if (finalAmount < 0) {
         throw new ApiError(
           422,
@@ -2795,7 +2815,7 @@ export class PgBitrix24ReverseRepository {
           normalizedName,
           projectId,
           status.order_status_id,
-          status.production_status_id,
+          details.rows.length > 0 ? status.production_status_id : null,
           input.actorUserId,
           Number(totals.rows[0]?.parts_count ?? 0),
           Number(totals.rows[0]?.total_area ?? 0),
@@ -2825,10 +2845,10 @@ export class PgBitrix24ReverseRepository {
       await tx.query(
         `INSERT INTO production_status_events (
            order_id, production_status_id, event_by, note, payload
-         ) VALUES ($1,$2,$3,'CRM request conversion',
-                   jsonb_build_object('origin','crm_request_conversion'))
+         ) SELECT $1,$2,$3,'CRM request conversion',
+                   jsonb_build_object('origin','crm_request_conversion') WHERE $4::boolean
          ON CONFLICT DO NOTHING`,
-        [input.orderId, status.production_status_id, input.actorUserId],
+        [input.orderId, status.production_status_id, input.actorUserId, details.rows.length > 0],
       );
       await tx.query(
         `UPDATE bitrix24_incoming_request
@@ -2861,7 +2881,7 @@ export class PgBitrix24ReverseRepository {
         after: {
           orderKind: 'production_order', projectId, orderName: normalizedName,
           requestState: 'converted', orderStatusCode: input.initialOrderStatusCode,
-          productionStatusCode: input.initialProductionStatusCode,
+          productionStatusCode: details.rows.length > 0 ? input.initialProductionStatusCode : null,
         },
         metadata: { bitrixDealId: requestRow.bitrix_deal_id },
       });
@@ -2898,7 +2918,7 @@ export class PgBitrix24ReverseRepository {
         eventType: 'ORDER_CREATED',
         requestId: input.requestId,
       }, false);
-      await enqueueDomainEvent(tx, {
+      if (details.rows.length > 0) await enqueueDomainEvent(tx, {
         eventType: 'orders.production_initialized',
         aggregateType: 'order',
         aggregateId: String(input.orderId),
@@ -2968,18 +2988,18 @@ export class PgBitrix24ReverseRepository {
           WHERE order_id=$1 AND order_kind='production_order'
             AND version=$2
             AND delete_flag=false
-            AND EXISTS (
+            AND (EXISTS (
               SELECT 1 FROM order_details
                WHERE order_details.order_id=orders.order_id
                  AND order_details.delete_flag=false
-            )
+            ) OR EXISTS (SELECT 1 FROM order_catalog_lines line WHERE line.order_id=orders.order_id AND line.delete_flag=false))
           FOR UPDATE`,
         [orderId, input.expectedOrderVersion],
       );
       if (productionOrder.rowCount !== 1) {
         throw conflict(
           'ORDER_NOT_READY_FOR_PAYMENTS',
-          'Production order with an active detail is required for payments',
+          'Production order with an active detail or catalogue line is required for payments',
         );
       }
       const request = await tx.query<{
@@ -3213,11 +3233,11 @@ export class PgBitrix24ReverseRepository {
             AND version=$4
             AND delete_flag=false
             AND ($2::boolean OR manager_id=$3)
-            AND EXISTS (
+            AND (EXISTS (
               SELECT 1 FROM order_details
                WHERE order_details.order_id=orders.order_id
                  AND order_details.delete_flag=false
-            )
+            ) OR EXISTS (SELECT 1 FROM order_catalog_lines line WHERE line.order_id=orders.order_id AND line.delete_flag=false))
           FOR UPDATE`,
         [
           input.orderId,
@@ -3229,7 +3249,7 @@ export class PgBitrix24ReverseRepository {
       if (lockedOrder.rowCount !== 1) {
         throw conflict(
           'ORDER_NOT_READY_FOR_PAYMENTS',
-          'Mapped production order with an active detail is required for payments',
+          'Mapped production order with an active detail or catalogue line is required for payments',
         );
       }
       const mapping = await tx.query(

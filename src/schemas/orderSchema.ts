@@ -2,6 +2,7 @@
 // Based on PostgreSQL schema v11.6 and business requirements
 
 import { z } from 'zod';
+import { orderCatalogLineAmount } from '../utils/orderCatalogLines';
 
 // ============================================================================
 // HELPER SCHEMAS
@@ -392,7 +393,17 @@ export const hdfDetailSchema = z.object({
 export const orderFormSchema = z
   .object({
     header: orderHeaderSchema,
-    details: z.array(orderDetailSchema).min(1, "Необходимо добавить минимум одну позицию (деталь)"),
+    details: z.preprocess(value => Array.isArray(value)
+      ? value.filter(row => row?.is_placeholder !== true && row?.delete_flag !== true) : value, z.array(orderDetailSchema)),
+    catalogLines: z.array(z.object({
+      catalogItemId: z.number().int().positive(),
+      quantity: z.string().regex(/^(?:0|[1-9]\d{0,8})(?:\.\d{1,3})?$/).refine(value => Number(value) > 0),
+      unitPrice: z.string().regex(/^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/),
+      notes: z.string().max(2000).optional(),
+    }).passthrough().refine(row => orderCatalogLineAmount(row.quantity, row.unitPrice) !== null, {
+      message: 'Сумма позиции превышает допустимый предел', path: ['unitPrice'],
+    })).max(1000).optional(),
+    deletedCatalogLineIds: z.array(z.number().int().positive()).optional(),
     hdfDetails: z.array(hdfDetailSchema).optional(),
     dirtyHdfDetailIds: z.array(z.number()).optional(),
     payments: z.array(paymentSchema),
@@ -409,6 +420,9 @@ export const orderFormSchema = z
     // Metadata
     isDirty: z.boolean().optional(),
     version: z.number().int().optional(),
+  })
+  .refine(data => data.details.length > 0 || (data.catalogLines?.length ?? 0) > 0, {
+    message: 'Добавьте хотя бы одну деталь или позицию товаров/услуг', path: ['catalogLines'],
   })
   .refine(
     (data) => {

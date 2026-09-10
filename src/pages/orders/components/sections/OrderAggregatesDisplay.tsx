@@ -5,13 +5,14 @@ import React, { useMemo } from 'react';
 import { Card, Statistic, Row, Col } from 'antd';
 import { FileTextOutlined, ColumnHeightOutlined } from '@ant-design/icons';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
+import { orderCatalogSubtotal } from '../../../../utils/orderCatalogLines';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { calculateOrderTotalArea } from '../../../../utils/orderArea';
 import { businessOrderDetails } from '../../../../utils/orderDetailRows';
 
 export const OrderAggregatesDisplay: React.FC = () => {
-  const { details, payments } = useOrderFormStore();
+  const { details, payments, catalogLines } = useOrderFormStore();
   const businessDetails = useMemo(
     () => businessOrderDetails(details),
     [details],
@@ -23,8 +24,8 @@ export const OrderAggregatesDisplay: React.FC = () => {
     parts_count: businessDetails.reduce((sum, d) => sum + (d.quantity || 0), 0),
     total_area: calculateOrderTotalArea(businessDetails),
     total_paid: payments.reduce((sum, p) => sum + (p.amount || 0), 0),
-    total_amount: businessDetails.reduce((sum, d) => sum + (d.detail_cost || 0), 0),
-  }), [businessDetails, payments]);
+    total_amount: businessDetails.reduce((sum, d) => sum + (d.detail_cost || 0), 0) + orderCatalogSubtotal(catalogLines),
+  }), [businessDetails, payments, catalogLines]);
 
   return (
     <Card title="Итоговые показатели" size="small">

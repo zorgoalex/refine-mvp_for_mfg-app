@@ -249,6 +249,7 @@ function maskOrderFinancials(
       millingCostPerSqm: null,
       detailCost: 0,
     })),
+    catalogLines: order.catalogLines?.map(line => ({ ...line, unitPrice: '0.00', amount: '0.00' })),
     payments: [],
     requirements: order.requirements.map((requirement) => ({
       ...requirement,

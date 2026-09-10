@@ -6,6 +6,19 @@ import { getPermissionsForRole } from '../../../permissions/permissions';
 import { PgOrderExporter } from './pg-order-exporter';
 
 describe('PgOrderExporter', () => {
+  it('rejects orders without details before GAS or export-start audit', async () => {
+    let calls = 0;
+    const database = new FakeExportDatabase([], [
+      { match: 'FROM orders o', rows: [headerRow()] },
+      { match: 'FROM order_details od', rows: [] },
+    ]);
+    const exporter = new PgOrderExporter(database, { gasWebappUrl: 'https://example.invalid/export', gasApiKey: 'test', timeoutMs: 1000,
+      fetchImpl: async () => { calls++; return response({ success: true }); } });
+    await expect(exporter.exportToGoogleDrive({ currentUser: manager(), orderId: 42, requestId: 'E2E-no-details', request: {} }))
+      .rejects.toMatchObject({ code: 'ORDER_EXPORT_DETAILS_REQUIRED', statusCode: 422 });
+    expect(calls).toBe(0);
+    expect(database.queries.filter(row => row.text.includes('INSERT INTO audit_log'))).toHaveLength(0);
+  });
   it('builds export payload from DB, calls GAS, and writes success audit', async () => {
     const fetchCalls: Array<{ url: string; body: Record<string, unknown> }> = [];
     const database = new FakeExportDatabase(
@@ -170,10 +183,8 @@ describe('PgOrderExporter', () => {
       expect(body.materialSummary).toBe('ЛДСП Дуб');
     });
 
-    it('header-only sheet order (no details) exports the header sheet material', async () => {
-      const { body } = await runExport({ material_name: 'МДФ 18 мм' }, []);
-      expect(body.materialSummary).toBe('МДФ 18 мм');
-      expect(body.items).toEqual([]);
+    it('header-only sheet order cannot export without details', async () => {
+      await expect(runExport({ material_name: 'МДФ 18 мм' }, [])).rejects.toMatchObject({ code: 'ORDER_EXPORT_DETAILS_REQUIRED' });
     });
   });
 
@@ -205,7 +216,7 @@ describe('PgOrderExporter', () => {
       [],
       [
         { match: 'FROM orders o', rows: [headerRow()] },
-        { match: 'FROM order_details od', rows: [] },
+        { match: 'FROM order_details od', rows: [detailRow()] },
         { match: 'FROM payments p', rows: [] },
         { match: 'FROM doweling_orders d', rows: [] },
         { match: 'INSERT INTO audit_log', rows: [{ audit_id: 'aud-s' }] },

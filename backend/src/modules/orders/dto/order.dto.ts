@@ -10,10 +10,12 @@ import type {
 import type { OrderGroupSummaryDto } from './order-group-link.dto';
 import type { StatusAutomationOrderRefreshSummaryDto } from '../../status-automation/dto/status-automation.dto';
 import type { OrderKind, OrderSourceSystem } from '../domain/order-identity';
+import type { OrderCatalogLineDto } from '../domain/order-catalog-lines';
 
 export interface OrderDto {
   header: OrderHeaderDto;
   details: OrderDetailDto[];
+  catalogLines?: OrderCatalogLineDto[];
   hdfDetails: OrderHdfDetailDto[];
   payments: OrderPaymentDto[];
   workshops: OrderWorkshopDto[];

@@ -19,6 +19,7 @@ import type {
 } from '../dto/save-order.dto';
 import { OrderValidationError, type OrderFieldError } from '../errors/order.errors';
 import { noteRequiresDoweling } from './order-doweling';
+import { normalizeCatalogLineInputs, normalizeDeletedCatalogLineIds } from './order-catalog-lines';
 
 type RawRecord = Record<string, unknown>;
 
@@ -67,6 +68,7 @@ export function normalizeSaveOrderDto(input: SaveOrderDto): NormalizedSaveOrderD
   return {
     header: normalizeHeader(raw.header as SaveOrderHeaderDto),
     details: details.filter((detail) => !isBlankNewDetail(detail)).map(normalizeDetail),
+    ...(raw.catalogLines === undefined ? {} : { catalogLines: normalizeCatalogLineInputs(raw.catalogLines) }),
     hdfDetails: hdfDetails.map(normalizeHdfDetail),
     payments: payments.filter((payment) => !isBlankNewPayment(payment)).map(normalizePayment),
     workshops: workshops.map(normalizeWorkshop),
@@ -278,6 +280,7 @@ function normalizeDeleted(deleted: SaveOrderDeletedDto): Required<SaveOrderDelet
 
   return {
     detailIds: normalizeIdArray(raw.detailIds),
+    catalogLineIds: normalizeDeletedCatalogLineIds(raw.catalogLineIds),
     hdfDetailIds: normalizeIdArray(raw.hdfDetailIds),
     paymentIds: normalizeIdArray(raw.paymentIds),
     workshopIds: normalizeIdArray(raw.workshopIds),

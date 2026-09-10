@@ -21,7 +21,7 @@ describe.skipIf(!container)('Bitrix payment INSERT on real PostgreSQL', () => {
       idempotencyKey: '11111111-1111-4111-8111-111111111111', requestHash: 'a'.repeat(64),
       session: { sessionId: 'test-session', memberId: 'test-member', domain: 'bitrix.example', dealId: '9860', bitrixUserId: '1', erpUserId: 2147483650, accessTokenCiphertext: 'synthetic', refreshTokenCiphertext: 'synthetic', accessTokenExpiresAt: new Date('2026-09-09T03:00:00Z') },
       installation: { memberId: 'test-member', domain: 'bitrix.example', applicationTokenHash: 'b'.repeat(64), executorBitrixUserId: '1', accessTokenCiphertext: 'synthetic', refreshTokenCiphertext: 'synthetic', accessTokenExpiresAt: new Date('2026-09-09T03:00:00Z') },
-      deal: { dealId: '9860', requestId: null, requestState: null, orderId: 11634, orderKind: 'production_order', orderVersion: 12, finalAmount: '0.00', paidAmount: '0.00', managerId: 2147483650, createdBy: 2147483650, hasActiveDetails: true },
+      deal: { dealId: '9860', requestId: null, requestState: null, orderId: 11634, orderKind: 'production_order', orderVersion: 12, finalAmount: '0.00', paidAmount: '0.00', managerId: 2147483650, createdBy: 2147483650, hasActivePositions: true },
       amount: '5000.00', currencyId: 'KZT', paymentDate: '2026-09-09',
       paySystem: { paySystemId: 14, name: 'Тест наличные', typePaidId: 1, isDefault: true },
       comment: 'E2E-Test SQL typing', confirmOverpayment,

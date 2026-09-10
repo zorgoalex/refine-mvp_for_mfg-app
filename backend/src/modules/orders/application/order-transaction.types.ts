@@ -1,6 +1,7 @@
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName } from '../../../permissions/permissions';
 import type { TransactionClient } from '../../../database/database.types';
+import type { OrderCatalogPlan } from '../domain/order-catalog-lines';
 import type { StatusAutomationEvent } from '../../status-automation/application/status-automation.types';
 import type { DeleteOrderResponseDto, OrderDto, RestoreOrderResponseDto } from '../dto/order.dto';
 import type {
@@ -322,6 +323,9 @@ export interface OrderRestoreOutboxInput extends OrderRestoreAuditInput {
 export interface OrderWriteUnitOfWork {
   setSessionUser(userId: string): Promise<void>;
   getTransactionClient(): TransactionClient;
+  prepareCatalogLines(orderId: number | null, input: unknown, deleted: unknown, user: CurrentUser): Promise<OrderCatalogPlan>;
+  persistCatalogLines(orderId: number, plan: OrderCatalogPlan, user: CurrentUser, requestId: string): Promise<void>;
+  recordCatalogLinesChange(orderId: number, plan: OrderCatalogPlan, user: CurrentUser, requestId: string): Promise<void>;
   /** SP3: transaction-scoped context for shadow-material audit attribution. */
   setSaveContext(context: SaveContext): void;
   /** SP3: stored sheet state of an existing order (new-only/no-clear + permission gate). */

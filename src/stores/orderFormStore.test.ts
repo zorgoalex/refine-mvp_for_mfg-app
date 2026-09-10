@@ -16,6 +16,22 @@ describe('orderFormStore version sync', () => {
     vi.unstubAllGlobals();
   });
 
+  it('keeps catalogue drafts in totals and clears explicit deletion tracker after save/reset', () => {
+    const store = useOrderFormStore.getState();
+    store.setHeader({ discount: 1, surcharge: 0 });
+    store.setCatalogLines([{ id: 7, catalogItemId: 8, name: 'E2E-service', kind: 'service', sku: null, unitId: 1,
+      unitName: 'шт', refKey1c: null, quantity: '2', unitPrice: '1500.50', catalogActive: true }]);
+    expect(useOrderFormStore.getState().header.final_amount).toBe(3000);
+    expect(store.calculatedTotals()).toMatchObject({ total_amount: 3001, parts_count: 0, total_area: 0 });
+    expect(store.getFormValues().catalogLines).toHaveLength(1);
+    store.setCatalogLines([], [7]);
+    expect(useOrderFormStore.getState().deletedCatalogLineIds).toEqual([7]);
+    store.syncOriginals();
+    expect(useOrderFormStore.getState().deletedCatalogLineIds).toEqual([]);
+    store.reset();
+    expect(useOrderFormStore.getState().catalogLines).toEqual([]);
+  });
+
   it('keeps root order version aligned when header version changes', () => {
     useOrderFormStore.getState().loadOrder({
       header: {

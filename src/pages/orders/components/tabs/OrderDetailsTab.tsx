@@ -22,6 +22,7 @@ import { OrderDetailModal } from '../modals/OrderDetailModal';
 import { BulkEditModal } from '../modals/BulkEditModal';
 import { ImportDropdownButton } from '../import';
 import { useOrderFormStore, useOrderDraftStoreApi } from '../../../../stores/orderFormStore';
+import { orderCatalogSubtotal } from '../../../../utils/orderCatalogLines';
 import { OrderDetail } from '../../../../types/orders';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 import {
@@ -719,7 +720,7 @@ export const OrderDetailsTab = forwardRef<
 
     // Round totals
     const totalArea = calculateOrderTotalArea(businessDetails);
-    totalAmount = Number(totalAmount.toFixed(2));
+    totalAmount = Number((totalAmount + orderCatalogSubtotal(storeApi.getState().catalogLines)).toFixed(2));
 
     // Update total_amount in header
     updateHeaderField('total_amount', totalAmount);
@@ -727,7 +728,7 @@ export const OrderDetailsTab = forwardRef<
     // Calculate final_amount
     // Note: discount is now stored as absolute amount (not percent)
     const discount = header.discount || 0;
-    const discountedAmount = Math.max(0, Number((totalAmount - discount).toFixed(2)));
+    const discountedAmount = Math.max(0, Number((totalAmount - discount + (header.surcharge || 0)).toFixed(2)));
     updateHeaderField('final_amount', discountedAmount);
 
     if (discount > 0) {
@@ -848,7 +849,7 @@ export const OrderDetailsTab = forwardRef<
     if (dimensionsChanged || priceChanged) {
       // Update total_amount in header
       const updatedDetails = businessOrderDetails(storeApi.getState().details);
-      const totalAmount = updatedDetails.reduce((sum, d) => sum + (d.detail_cost || 0), 0);
+      const totalAmount = updatedDetails.reduce((sum, d) => sum + (d.detail_cost || 0), 0) + orderCatalogSubtotal(storeApi.getState().catalogLines);
       updateHeaderField('total_amount', Number(totalAmount.toFixed(2)));
 
       // Calculate final_amount (considering discount/surcharge)

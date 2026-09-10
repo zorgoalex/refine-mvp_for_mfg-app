@@ -73,7 +73,7 @@ export interface WidgetDealContext {
   paidAmount: string | null;
   managerId: number | null;
   createdBy: number | null;
-  hasActiveDetails: boolean;
+  hasActivePositions: boolean;
 }
 
 export interface WidgetPaymentSystem {
@@ -619,15 +619,15 @@ export class Bitrix24PaymentWidgetRepository {
       paid_amount: string | number | null;
       manager_id: string | number | null;
       created_by: string | number | null;
-      has_details: boolean;
+      has_positions: boolean;
     }>(
       `SELECT request.request_id, request.state, request.linked_order_id,
               orders.order_kind, orders.version, orders.final_amount,
               orders.paid_amount, orders.manager_id, orders.created_by,
-              EXISTS (
+              (EXISTS (
                 SELECT 1 FROM order_details detail
                  WHERE detail.order_id=orders.order_id AND detail.delete_flag=false
-              ) AS has_details
+              ) OR EXISTS (SELECT 1 FROM order_catalog_lines line WHERE line.order_id=orders.order_id AND line.delete_flag=false)) AS has_positions
          FROM bitrix24_incoming_request request
          LEFT JOIN orders ON orders.order_id=request.linked_order_id
         WHERE request.bitrix_deal_id=$1
@@ -646,15 +646,15 @@ export class Bitrix24PaymentWidgetRepository {
       paid_amount: string | number | null;
       manager_id: string | number | null;
       created_by: string | number | null;
-      has_details: boolean;
+      has_positions: boolean;
     }>(
       `SELECT orders.order_id AS linked_order_id, orders.order_kind,
               orders.version, orders.final_amount, orders.paid_amount,
               orders.manager_id, orders.created_by,
-              EXISTS (
+              (EXISTS (
                 SELECT 1 FROM order_details detail
                  WHERE detail.order_id=orders.order_id AND detail.delete_flag=false
-              ) AS has_details
+              ) OR EXISTS (SELECT 1 FROM order_catalog_lines line WHERE line.order_id=orders.order_id AND line.delete_flag=false)) AS has_positions
          FROM crm_sync_mapping mapping
          JOIN orders ON orders.order_id=mapping.erp_id::bigint
         WHERE mapping.entity_type='order'
@@ -678,7 +678,7 @@ export class Bitrix24PaymentWidgetRepository {
         paidAmount: null,
         managerId: null,
         createdBy: null,
-        hasActiveDetails: false,
+        hasActivePositions: false,
       };
     }
     return mapDealContext(dealId, mappedRow, null);
@@ -1350,14 +1350,14 @@ export class Bitrix24PaymentWidgetRepository {
         payment_status_id: string | number;
         manager_id: string | number | null;
         created_by: string | number | null;
-        has_details: boolean;
+        has_positions: boolean;
       }>(
         `SELECT orders.order_kind, orders.version, orders.final_amount,
                 orders.payment_status_id, orders.manager_id, orders.created_by,
-                EXISTS (
+                (EXISTS (
                   SELECT 1 FROM order_details detail
                    WHERE detail.order_id=orders.order_id AND detail.delete_flag=false
-                ) AS has_details
+                ) OR EXISTS (SELECT 1 FROM order_catalog_lines line WHERE line.order_id=orders.order_id AND line.delete_flag=false)) AS has_positions
            FROM orders
           WHERE orders.order_id=$1 AND orders.delete_flag=false
           FOR UPDATE`,
@@ -1368,7 +1368,7 @@ export class Bitrix24PaymentWidgetRepository {
         command = await setAwaiting(tx, this.audit, command, 'awaiting_order');
         return command;
       }
-      if (!orderRow.has_details) {
+      if (!orderRow.has_positions) {
         command = await setAwaiting(tx, this.audit, command, 'awaiting_order_ready');
         return command;
       }
@@ -1928,7 +1928,7 @@ function mapDealContext(
     paid_amount: string | number | null;
     manager_id: string | number | null;
     created_by: string | number | null;
-    has_details: boolean;
+    has_positions: boolean;
   },
   requestId: number | null,
 ): WidgetDealContext {
@@ -1943,7 +1943,7 @@ function mapDealContext(
     paidAmount: row.paid_amount === null ? null : money(row.paid_amount),
     managerId: nullableNumber(row.manager_id),
     createdBy: nullableNumber(row.created_by),
-    hasActiveDetails: Boolean(row.has_details),
+    hasActivePositions: Boolean(row.has_positions),
   };
 }
 

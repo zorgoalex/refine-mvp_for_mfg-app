@@ -67,6 +67,7 @@ describe.skipIf(!url)('CRM conversion deadlines on real PostgreSQL (rollback-onl
     const authorshipMigration = readFileSync(new URL('../../../../db/migrations/156_bitrix24_authorship.sql', import.meta.url), 'utf8');
     await client.query(authorshipMigration);
     await client.query(authorshipMigration); // additive/idempotent, rolled back with fixture
+    await client.query(readFileSync(new URL('../../../../db/migrations/162_order_catalog_lines.sql', import.meta.url), 'utf8'));
     db = new FixtureDatabase(client);
     repository = new Repository(db, new AuditService());
     const name = 'E2E-conversion-' + randomUUID();
@@ -309,7 +310,21 @@ describe.skipIf(!url)('CRM conversion deadlines on real PostgreSQL (rollback-onl
     expect(await conversionState()).toEqual(before);
     await client.query('UPDATE order_details SET delete_flag=true WHERE order_id=$1', [orderId]);
     input.expectedVersion = Number((await client.query('SELECT version FROM orders WHERE order_id=$1', [orderId])).rows[0].version);
-    await expect(repository.convertCrmRequestToProduction(input)).rejects.toThrow('Production order requires at least one detail');
+    await expect(repository.convertCrmRequestToProduction(input)).rejects.toMatchObject({ code: 'ORDER_POSITIONS_REQUIRED' });
+  });
+
+  it('converts a goods-only request and materializes its payment without manufacturing details', async () => {
+    await client.query('DELETE FROM order_details WHERE order_id=$1', [orderId]);
+    const unit = (await client.query('SELECT min(unit_id) AS id FROM units')).rows[0].id;
+    const catalogId = (await client.query(`INSERT INTO catalog_items(name,kind,unit_id,base_price,created_by,edited_by) VALUES($1,'service',$2,1000,$3,$3) RETURNING id`, [input.orderName, unit, actorId])).rows[0].id;
+    await client.query(`INSERT INTO order_catalog_lines(order_id,catalog_item_id,line_number,name,kind,unit_id,unit_name,catalog_version,quantity,unit_price,created_by,edited_by)
+      VALUES($1,$2,1,'E2E-service','service',$3,'unit',1,2,1000,$4,$4)`, [orderId, catalogId, unit, actorId]);
+    input.expectedVersion = Number((await client.query('SELECT version FROM orders WHERE order_id=$1', [orderId])).rows[0].version);
+    const { payment } = await seedPayment();
+    await repository.convertCrmRequestToProduction(input);
+    expect(await conversionState()).toMatchObject({ order_kind: 'production_order', request_state: 'converted', deadlines: 1, detail_statuses: null, production_events: 0 });
+    expect((await client.query('SELECT total_amount,parts_count,production_status_id FROM orders WHERE order_id=$1', [orderId])).rows[0]).toMatchObject({ total_amount: '2000.00', parts_count: 0, production_status_id: null });
+    expect(await importPayment(payment.bitrixPaymentId)).toMatchObject({ changedPaymentCount: 1 });
   });
   it('retains stage deadline registration via the existing sync after stages exist', async () => {
     await repository.convertCrmRequestToProduction(input);

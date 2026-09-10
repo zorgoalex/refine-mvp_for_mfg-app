@@ -92,6 +92,7 @@ export type Bitrix24IncomingRequestDetailInput = Omit<
 > & { id?: number };
 
 export interface Bitrix24IncomingRequest extends Bitrix24IncomingRequestListItem {
+  catalogLines?: import('../utils/orderCatalogLines').OrderCatalogLine[];
   createdByBitrix?: BitrixActor | null;
   stageName: string | null;
   assignedByName: string | null;
@@ -213,6 +214,8 @@ export const bitrix24Api = {
     input: {
       orderVersion: number;
       details: Bitrix24IncomingRequestDetailInput[];
+      catalogLines?: ReturnType<typeof import('../utils/orderCatalogLines').orderCatalogLineInput>[];
+      deletedCatalogLineIds?: number[];
     },
   ): Promise<{
     orderId: number;
@@ -220,6 +223,7 @@ export const bitrix24Api = {
     detailCount: number;
     erpFinalAmount?: number;
     details: Bitrix24IncomingRequestDetail[];
+    catalogLines?: import('../utils/orderCatalogLines').OrderCatalogLine[];
   }> {
     return httpClient.put(
       apiRoutes.bitrix24.incomingRequestDetails(validId(requestId)),
