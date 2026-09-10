@@ -15,6 +15,7 @@ import { CadAutosave, type CadDraft } from './cadAutosave';
 import { useCadPreview } from './useCadPreview';
 import { CadCanvas, cadPathData } from './CadCanvas';
 import { CadParameterField } from './CadParameterField';
+import { CadSidePanel } from './CadSidePanel';
 import { CadExportDialog } from './CadExportDialog';
 import { CadImportDialog, CadMappingDialog } from './CadLibraryDialogs';
 import './cad.css';
@@ -59,6 +60,11 @@ function CadEditorDocument({ variant, variants, orderId, active, tabKey, registe
   const [advanced, setAdvanced] = useState(false), [trajectories, setTrajectories] = useState(false), [expanded, setExpanded] = useState(false);
   const [hidden, setHidden] = useState<Set<string>>(new Set()), [dimension, setDimension] = useState<string | null>(null);
   const [panel, setPanel] = useState<'parts' | 'properties' | 'issues' | null>(null), [filter, setFilter] = useState(''), [scroll, setScroll] = useState(0);
+  const [partsOpen, setPartsOpen] = useState(false), [propertiesOpen, setPropertiesOpen] = useState(false);
+  const listScroll = useRef(0); listScroll.current = scroll;
+  const listNode = useRef<HTMLDivElement>(null);
+  const restoreListScroll = () => { if (listNode.current) listNode.current.scrollTop = listScroll.current; };
+  useEffect(() => { if (!tablet && partsOpen) restoreListScroll(); }, [tablet, partsOpen]);
   const [importOpen, setImportOpen] = useState(false), [exportOpen, setExportOpen] = useState(false);
   const [clone, setClone] = useState<'clone' | 'refresh' | 'fork' | null>(null), [name, setName] = useState(''), [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<CadDraft[]>([]), [redo, setRedo] = useState<CadDraft[]>([]);
@@ -99,6 +105,10 @@ function CadEditorDocument({ variant, variants, orderId, active, tabKey, registe
   const changeGroup = (patch: Partial<CadGroup>) => { if (group) edit({ ...draft, groups: draft.groups.map(g => g.id === group.id ? { ...g, ...patch } : g) }); };
   const validity = useCallback((key: string, valid: boolean) => { if (valid) invalid.current.delete(key); else invalid.current.add(key); queue.setIncomplete(invalid.current.size > 0); }, [queue]);
   const select = (ids: string[]) => { if (state.incomplete) { message.warning('Завершите ввод параметра перед сменой детали'); return; } setSelected(ids); setDimension(null); };
+  const toggleProperties = () => {
+    if (propertiesOpen && state.incomplete) { message.warning('Сначала завершите ввод параметра'); return; }
+    setPropertiesOpen(open => !open);
+  };
   const activate = (id: string) => void act(async () => { await flush(); onActivate(id); });
   const recipeName = (g: CadGroup) => catalog.data?.recipes.find(r => r.code === g.recipe?.code && r.version === g.recipe.version)?.display_name ?? (g.recipe ? 'Сохранённая фрезеровка' : 'Нет фрезеровки');
   const fields = recipe ? Object.entries(recipe.parameter_schema).filter(([, s]) => advanced || s.manager_editable) : [];
@@ -108,7 +118,7 @@ function CadEditorDocument({ variant, variants, orderId, active, tabKey, registe
   const partsPanel = <><div className="cad-panel-title"><h2>Детали <span>{draft.groups.length}</span></h2><Button disabled={readOnly} onClick={() => setImportOpen(true)}>Добавить</Button></div>
     <Input.Search aria-label="Найти деталь" placeholder="Позиция или фрезеровка" value={filter} onChange={e => { setFilter(e.target.value); setScroll(0); }} />
     <Checkbox checked={multiSelect} onChange={e => setMultiSelect(e.target.checked)}>Выбрать несколько</Checkbox>
-    <div className="cad-part-list" onScroll={e => setScroll(e.currentTarget.scrollTop)}><div style={{ height: filtered.length * 96, position: 'relative' }}>{rows.map((g, i) => {
+    <div className="cad-part-list" ref={listNode} onScroll={e => setScroll(e.currentTarget.scrollTop)}><div style={{ height: filtered.length * 96, position: 'relative' }}>{rows.map((g, i) => {
       const p = draft.sources.find(s => s.id === g.sourceSnapshotId)?.parts.find(p => p.detailId === g.detailId), drawn = preview.scene.items.find(i => i.part_id === g.id);
       return <button key={g.id} type="button" style={{ top: (firstRow + i) * 96 }} aria-pressed={selected.includes(g.id)} className={`cad-part-card ${selected.includes(g.id) ? 'selected' : ''}`} onClick={e => select(multiSelect || e.ctrlKey || e.shiftKey ? selected.includes(g.id) ? selected.filter(id => id !== g.id) : [...selected, g.id] : [g.id])}>
         <svg width="42" height="62" viewBox={`-8 -8 ${(p?.widthMm ?? 100) + 16} ${(p?.heightMm ?? 100) + 16}`} aria-hidden="true"><g transform={`translate(0 ${p?.heightMm ?? 100}) scale(1 -1)`}><rect width={p?.widthMm ?? 100} height={p?.heightMm ?? 100} fill="#f4e8ce" stroke="#87919c" strokeWidth={6} />{drawn?.result?.geometry?.milling.slice(0, 100).map(path => <path key={path.path_id} d={cadPathData(path)} fill="none" stroke="#9c7641" strokeWidth={5} />)}</g></svg>
@@ -140,13 +150,13 @@ function CadEditorDocument({ variant, variants, orderId, active, tabKey, registe
     {state.status === 'conflict' && <Alert type="warning" message="Коллега уже изменил этот вариант" description="Ваши изменения сохранены локально. Выберите отдельный вариант или загрузите изменения коллеги." action={<Space><Button onClick={() => { forkKey.current = crypto.randomUUID(); setName(`${base.name} · мои изменения`); setClone('fork'); }}>Сохранить мои в новый вариант</Button><Button onClick={() => Modal.confirm({ title: 'Отбросить мои несохранённые изменения?', content: 'Будет загружен текущий вариант коллеги.', onOk: async () => { const current = await cadApi.workspace(orderId); const fresh = current.variants.find(v => v.id === base.id); if (fresh) { invalid.current.clear(); queue.reset(fresh); setHistory([]); setRedo([]); await queryClient.invalidateQueries(['cad-workspace', orderId]); } } })}>Загрузить вариант коллеги</Button></Space>} />}
     {source.data?.some(s => s.stale) && <Alert type="warning" message="Исходные заказы изменились. Этот вариант сохранён без изменений." action={<Button disabled={!can('cad.edit')} onClick={() => { setName(`Актуальный состав ${variants.length}`); setClone('refresh'); }}>Новый вариант из актуальных данных</Button>} />}
     {source.isError && <Alert type="warning" message="Актуальность заказов пока не проверена" />}
-    <div className="cad-view-bar"><Space>{tablet && <><Button onClick={() => setPanel('parts')}>Детали ({draft.groups.length})</Button><Button onClick={() => setPanel('properties')}>Свойства</Button></>}<Checkbox checked={trajectories} onChange={e => setTrajectories(e.target.checked)}>Траектории</Checkbox><span className="cad-hint">{preview.pending ? 'Обновляем предпросмотр…' : 'Вид детали · 2D'}</span></Space><Button type={issues.length ? 'default' : 'text'} danger={issues.length > 0} onClick={() => setPanel('issues')}>Проверки{issues.length ? ` (${issues.length})` : ''}</Button></div>
+    <div className="cad-view-bar"><Space>{tablet && <><Button aria-expanded={panel === 'parts'} onClick={() => setPanel('parts')}>Детали ({draft.groups.length})</Button><Button aria-expanded={panel === 'properties'} onClick={() => setPanel('properties')}>Свойства</Button></>}<Checkbox checked={trajectories} onChange={e => setTrajectories(e.target.checked)}>Траектории</Checkbox><span className="cad-hint">{preview.pending ? 'Обновляем предпросмотр…' : 'Вид детали · 2D'}</span></Space><Button aria-expanded={panel === 'issues'} type={issues.length ? 'default' : 'text'} danger={issues.length > 0} onClick={() => setPanel('issues')}>Проверки{issues.length ? ` (${issues.length})` : ''}</Button></div>
     {preview.error && <Alert type="warning" message={preview.error} />}
-    <div className="cad-editor-layout">{!tablet && <aside className="cad-panel cad-parts-panel">{partsPanel}</aside>}
+    <div className="cad-editor-layout">{!tablet && <CadSidePanel side="left" title={`Детали (${draft.groups.length})`} open={partsOpen} onToggle={() => setPartsOpen(open => !open)}>{partsPanel}</CadSidePanel>}
       {active ? <CadCanvas documentId={base.id} groups={draft.groups} sources={draft.sources} job={preview.scene} readOnly={readOnly} selected={selected} onSelect={select} onChange={groups => edit({ ...draft, groups }, true)} hiddenLayers={hidden} expanded={expanded} finished trajectories={trajectories} dimension={dimension} onVisible={setVisible} /> : <div className="cad-canvas-shell" />}
-      {!tablet && <aside className="cad-panel cad-inspector">{inspector}</aside>}</div>
-    <Drawer open={panel !== null} placement={panel === 'parts' ? 'left' : 'right'} width={Math.min(420, window.innerWidth)} title={panel === 'parts' ? 'Детали' : panel === 'properties' ? 'Свойства детали' : 'Что нужно проверить'} onClose={() => { if (state.incomplete) message.warning('Сначала завершите ввод параметра'); else setPanel(null); }}>
-      {panel === 'parts' ? partsPanel : panel === 'properties' ? inspector : <>{!issues.length && <Alert type="info" message="Ошибок предпросмотра не обнаружено" description="Полная проверка всех деталей и одобрений выполняется перед скачиванием." />}{issues.map((i, n) => <div key={n} className="cad-export-issue"><p>{i.message}</p>{advanced && <code>{i.code}</code>}{i.groupId && <Button onClick={() => { select([i.groupId!]); setPanel('properties'); }}>Перейти к детали</Button>}</div>)}<p className="cad-hint">Пунктирный контур означает, что фрезеровка ещё не рассчитана. Схематичный вид не заменяет проверку в CAM.</p></>}
+      {!tablet && <CadSidePanel side="right" title="Свойства" open={propertiesOpen} onToggle={toggleProperties}>{inspector}</CadSidePanel>}</div>
+    <Drawer open={panel !== null} placement={panel === 'parts' ? 'left' : 'right'} width={Math.min(420, window.innerWidth)} title={panel === 'parts' ? 'Детали' : panel === 'properties' ? 'Свойства детали' : 'Что нужно проверить'} afterOpenChange={open => { if (open && panel === 'parts') restoreListScroll(); }} onClose={() => { if (state.incomplete) message.warning('Сначала завершите ввод параметра'); else setPanel(null); }}>
+      {panel === 'parts' ? partsPanel : panel === 'properties' ? inspector : <>{!issues.length && <Alert type="info" message="Ошибок предпросмотра не обнаружено" description="Полная проверка всех деталей и одобрений выполняется перед скачиванием." />}{issues.map((i, n) => <div key={n} className="cad-export-issue"><p>{i.message}</p>{advanced && <code>{i.code}</code>}{i.groupId && <Button onClick={() => { if (state.incomplete) { message.warning('Сначала завершите ввод параметра'); return; } select([i.groupId!]); if (tablet) setPanel('properties'); else { setPanel(null); setPropertiesOpen(true); } }}>Перейти к детали</Button>}</div>)}<p className="cad-hint">Пунктирный контур означает, что фрезеровка ещё не рассчитана. Схематичный вид не заменяет проверку в CAM.</p></>}
     </Drawer>
     <Modal open={clone !== null} title={clone === 'fork' ? 'Сохранить мои изменения отдельно' : clone === 'refresh' ? 'Вариант из актуальных данных' : 'Новый рабочий вариант'} onCancel={() => setClone(null)} confirmLoading={busy} okButtonProps={{ disabled: !name.trim() }} onOk={() => void act(async () => {
       const next = clone === 'fork' ? await cadApi.fork(base, draft.groups, draft.sources.map(s => s.id), name, forkKey.current) : await cadApi.clone((await flush()).id, name, clone === 'refresh');

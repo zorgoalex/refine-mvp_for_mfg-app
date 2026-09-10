@@ -30,6 +30,12 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION, date: "2026-09-10",
+    title: "CAD: больше места для чертежа",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: ["Боковые панели CAD изначально свёрнуты. «Детали» и «Свойства» раскрываются независимо кнопками по краям поля; на планшете — выдвижными панелями. Выбор детали и прокрутка сохраняются при сворачивании."],
+  },
+  {
+    version: APP_VERSION, date: "2026-09-10",
     title: "Переключатели: совместимость типов",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: ["Устранён конфликт типов переключателей Segmented в настройках, заказах, отчётах, аудите, доске статусов и календаре. Внешний вид, выбор значений и ограничения доступа не менялись."],

@@ -52,12 +52,73 @@ async function setup(page: Page, count = 2, technical = false) {
   return { variants, original, working, control };
 }
 
+test('CAD side panels start collapsed, expand independently and preserve selection and scroll', async ({ page }) => {
+  const { control } = await setup(page, 500);
+  await page.setViewportSize({ width: 1500, height: 1000 }); await page.goto('/cad/orders/1');
+  const parts = page.getByRole('button', { name: 'Детали (500)', exact: true });
+  const properties = page.getByRole('button', { name: 'Свойства', exact: true });
+  await expect(parts).toHaveAttribute('aria-expanded', 'false');
+  await expect(properties).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('button', { name: 'Проверки', exact: true })).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByLabel('Найти деталь')).toBeHidden();
+  const canvas = page.getByRole('application', { name: /Поле CAD/ });
+  const fullWidth = (await canvas.boundingBox())!.width;
+  await page.screenshot({ path: 'test-results/cad-editor-ux/desktop-collapsed.png', fullPage: true });
+  await parts.focus(); await page.keyboard.press('Enter');
+  await expect(parts).toHaveAttribute('aria-expanded', 'true');
+  await page.locator('.cad-part-card').first().click();
+  await expect(properties).toHaveAttribute('aria-expanded', 'false');
+  await properties.focus(); await page.keyboard.press('Space');
+  await expect(page.getByLabel('Количество', { exact: true })).toHaveValue('4');
+  await expect.poll(async () => (await canvas.boundingBox())!.width).toBeLessThan(fullWidth - 400);
+  await page.screenshot({ path: 'test-results/cad-editor-ux/desktop-expanded.png', fullPage: true });
+  const list = page.locator('.cad-part-list');
+  await list.evaluate(el => { el.scrollTop = 5000; });
+  await expect(page.locator('.cad-part-card').first()).not.toContainText('Позиция 1 ');
+  const firstVisible = await page.locator('.cad-part-card').first().textContent();
+  await parts.click(); await expect(page.getByLabel('Найти деталь')).toBeHidden();
+  await expect(properties).toHaveAttribute('aria-expanded', 'true');
+  await parts.click();
+  await expect.poll(() => list.evaluate(el => el.scrollTop)).toBe(5000);
+  await expect(page.locator('.cad-part-card').first()).toHaveText(firstVisible!);
+  await expect(page.getByLabel('Количество', { exact: true })).toHaveValue('4');
+  await parts.click(); await properties.click();
+  await expect.poll(async () => (await canvas.boundingBox())!.width).toBe(fullWidth);
+  expect(control.saves).toEqual([]);
+  await page.getByRole('tab', { name: /Оригинал/ }).click();
+  await expect(parts).toHaveAttribute('aria-expanded', 'false');
+  await expect(properties).toHaveAttribute('aria-expanded', 'false');
+  await page.reload();
+  await expect(parts).toHaveAttribute('aria-expanded', 'false');
+  await expect(properties).toHaveAttribute('aria-expanded', 'false');
+});
+
+async function selectFirstDesktopPart(page: Page) {
+  await page.getByRole('button', { name: 'Детали (2)', exact: true }).click();
+  await page.locator('.cad-part-card').first().click();
+  await page.getByRole('button', { name: 'Свойства', exact: true }).click();
+}
+
+test('issues open the collapsed desktop inspector without a duplicate drawer form', async ({ page }) => {
+  const { working } = await setup(page); working.groups[0].recipe = null;
+  await page.setViewportSize({ width: 1500, height: 1000 }); await page.goto('/cad/orders/1');
+  const properties = page.getByRole('button', { name: 'Свойства', exact: true });
+  await expect(properties).toHaveAttribute('aria-expanded', 'false');
+  await page.getByRole('button', { name: 'Проверки (1)', exact: true }).click();
+  await page.getByRole('button', { name: 'Перейти к детали', exact: true }).click();
+  await expect(properties).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('dialog')).toBeHidden();
+  await expect(page.getByRole('combobox', { name: 'Фрезеровка детали', exact: true })).toHaveCount(1);
+  await expect(page.getByRole('combobox', { name: 'Фрезеровка детали', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Детали (2)', exact: true })).toHaveAttribute('aria-expanded', 'false');
+});
+
 test('manager starts in working variant; human parameters autosave; original remains locked', async ({ page }) => {
   const state = await setup(page); const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
   await page.setViewportSize({ width: 1500, height: 1000 }); await page.goto('/cad/orders/1');
   await expect(page.getByRole('heading', { name: 'Фрезеровки заказов' })).toBeVisible({ timeout: 60000 });
   await expect(page.getByRole('tab', { name: 'Рабочая 1' })).toHaveAttribute('aria-selected', 'true');
-  await page.locator('.cad-part-card').first().click();
+  await selectFirstDesktopPart(page);
   await expect(page.getByLabel('Глубина, мм', { exact: true })).toHaveCount(0);
   await page.getByLabel('Ширина рамки, мм', { exact: true }).fill('30');
   await expect.poll(() => state.control.saves.length).toBe(1);
@@ -72,7 +133,7 @@ test('manager starts in working variant; human parameters autosave; original rem
 
 test('network failure keeps draft and stable key; incomplete input blocks export', async ({ page }) => {
   const { control } = await setup(page); await page.setViewportSize({ width: 1500, height: 1000 }); await page.goto('/cad/orders/1');
-  await page.locator('.cad-part-card').first().click(); control.failSave = true;
+  await selectFirstDesktopPart(page); control.failSave = true;
   await page.getByLabel('Ширина рамки, мм', { exact: true }).fill('33');
   await expect(page.getByText('Изменения остались в этой вкладке', { exact: true })).toBeVisible();
   control.failSave = false; await page.getByRole('button', { name: 'Повторить сохранение' }).click();
@@ -81,11 +142,20 @@ test('network failure keeps draft and stable key; incomplete input blocks export
   await page.getByLabel('Ширина рамки, мм', { exact: true }).fill('');
   await expect(page.getByRole('button', { name: 'Скачать фрезеровки', exact: true })).toBeDisabled();
   await expect(page.getByText('Введите число', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Свойства', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Свойства', exact: true })).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByLabel('Ширина рамки, мм', { exact: true })).toHaveValue('');
+  await expect(page.getByRole('button', { name: 'Скачать фрезеровки', exact: true })).toBeDisabled();
+  await page.getByLabel('Ширина рамки, мм', { exact: true }).fill('35');
+  await page.getByRole('button', { name: 'Свойства', exact: true }).click();
+  await expect(page.getByLabel('Ширина рамки, мм', { exact: true })).toBeHidden();
+  await page.getByRole('button', { name: 'Свойства', exact: true }).click();
+  await expect(page.getByLabel('Ширина рамки, мм', { exact: true })).toHaveValue('35');
 });
 
 test('CAS conflict forks exact original base plus own draft', async ({ page }) => {
   const { control, working, variants } = await setup(page); await page.setViewportSize({ width: 1500, height: 1000 }); await page.goto('/cad/orders/1');
-  await page.locator('.cad-part-card').first().click(); control.conflict = true;
+  await selectFirstDesktopPart(page); control.conflict = true;
   await page.getByLabel('Ширина рамки, мм', { exact: true }).fill('34');
   await expect(page.getByText('Коллега уже изменил этот вариант', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Сохранить мои в новый вариант' }).click();
@@ -109,6 +179,9 @@ test('one download flow requires explicit source acknowledgement', async ({ page
 
 test('tablet drawers, keyboard placement and 500-group virtualization', async ({ page }) => {
   const { control } = await setup(page, 500); await page.setViewportSize({ width: 1024, height: 768 }); await page.goto('/cad/orders/1');
+  await expect(page.getByRole('button', { name: 'Детали (500)' })).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('button', { name: 'Свойства', exact: true })).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.getByRole('button', { name: 'Детали (500)' }).click();
   await expect(page.locator('.cad-part-card')).toHaveCount(14); await page.locator('.cad-part-card').first().click();
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click(); await page.getByRole('button', { name: 'Свойства', exact: true }).click();
@@ -120,6 +193,11 @@ test('tablet drawers, keyboard placement and 500-group virtualization', async ({
   await expect(page.getByText('Расстояние: 10.00 мм', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Детали (500)' }).click(); await page.getByRole('checkbox', { name: 'Выбрать несколько' }).check(); await page.locator('.cad-part-card').nth(1).click();
   await expect(page.locator('.cad-part-card[aria-pressed="true"]')).toHaveCount(2);
+  await page.locator('.cad-part-list').evaluate(el => { el.scrollTop = 5000; });
+  await expect(page.locator('.cad-part-card').first()).not.toContainText('Позиция 1 ');
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
+  await page.getByRole('button', { name: 'Детали (500)' }).click();
+  await expect.poll(() => page.locator('.cad-part-list').evaluate(el => el.scrollTop)).toBe(5000);
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
   await page.screenshot({ path: 'test-results/cad-editor-ux/tablet-500.png', fullPage: true });
 });
@@ -127,7 +205,7 @@ test('tablet drawers, keyboard placement and 500-group virtualization', async ({
 test('technologist edits depth and waits for scoped approval receipt before ZIP', async ({ page }) => {
   const { control } = await setup(page, 2, true); control.requireApproval = true;
   await page.setViewportSize({ width: 1500, height: 1000 }); await page.goto('/cad/orders/1');
-  await page.locator('.cad-part-card').first().click(); await page.getByRole('checkbox', { name: 'Расширенный режим' }).check();
+  await selectFirstDesktopPart(page); await page.getByRole('checkbox', { name: 'Расширенный режим' }).check();
   await page.getByLabel('Глубина, мм', { exact: true }).fill('7');
   await expect(page.getByText('Все изменения сохранены', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Скачать фрезеровки', exact: true }).click();
