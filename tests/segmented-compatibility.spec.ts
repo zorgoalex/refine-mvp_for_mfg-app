@@ -95,6 +95,10 @@ for (const width of [320, 1280]) {
           // AntD 5.0 hides the radio at 0×0; users click its visible label.
           await control.locator('label').filter({ hasText: 'Тест B' }).click();
           await expect(control.getByRole('radio', { name: 'Тест B' })).toBeChecked();
+          // Exercise two completed transitions. Native rc-segmented 2.1.2 can
+          // retain its thumb when a transition is reversed before it starts.
+          await expect(control.locator('.ant-segmented-item-selected')).toHaveText('Тест B');
+          await expect(control.locator('.ant-segmented-thumb')).toHaveCount(0);
           await control.getByRole('button', { name: 'Тест: внешнее значение' }).click();
           await expect(control.getByRole('radio', { name: 'Тест A' })).toBeChecked();
         }
