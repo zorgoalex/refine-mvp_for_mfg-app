@@ -47,6 +47,7 @@ async function setup(page: Page, count = 2) {
       if (match[2] === 'save') { const next = applyVariantChanges(variant, body.version, body.groups, sources.filter(s => body.sourceIds.includes(s.id))); variants[variants.indexOf(variant)] = next; return ok(next); }
       if (match[2] === 'clone') { const next = cloneVariant(variant, randomUUID(), body.name, '2026-09-06'); variants.push(next); return ok(next); }
       if (match[2] === 'render' || match[2] === 'package') return ok({ runId: 'run' });
+      if (match[2] === 'preflight') return ok({ ready: true, reviewId: 'review', runId: 'run', version: body.version, variantName: variant.name, positions: variant.groups.length, quantity: variant.groups.reduce((n, g) => n + g.quantity, 0), changedGroupIds: [], sourceStatus: variant.sources.map(s => ({ orderId: s.orderId, orderName: s.orderName, stale: false, changedDetailIds: [] })), readiness: { job_id: 'job', ready: true, items: [] } });
       if (match[2].startsWith('runs/')) return ok({ run: { id: 'run', status: 'succeeded', packageId: 'package', packageRequested: true, lastError: null }, job: {
         id: 'job', status: 'succeeded', total: variant.groups.length, completed: variant.groups.length, package_files: [],
         items: variant.groups.map(g => ({ part_id: g.id, status: 'succeeded', result: {
@@ -161,7 +162,10 @@ test('original stays immutable; split/import/save/clone/export through actual co
   await page.locator('.ant-select[aria-label="Открыть сохранённую версию"] .ant-select-selector').click();
   await page.getByText('Тест альтернативная', { exact: true }).last().click();
   await expect(page.getByRole('tab', { name: 'Тест альтернативная' })).toHaveAttribute('aria-selected', 'true');
-  const download = page.waitForEvent('download'); await page.getByRole('button', { name: 'Скачать ZIP', exact: true }).click(); await download;
+  await page.getByRole('button', { name: 'Скачать фрезеровки', exact: true }).click();
+  await page.getByRole('button', { name: 'Подтвердить и подготовить ZIP' }).click();
+  const download = page.waitForEvent('download'); await page.getByRole('button', { name: /Скачать ZIP$/ }).click(); await download;
+  await page.getByRole('dialog').getByRole('button', { name: 'Закрыть', exact: true }).click();
   expect(requests.some(r => r.endsWith('/save'))).toBe(true); expect(errors).toEqual([]);
   expect(requests.filter(r => /^POST .*\/render$/.test(r))).toHaveLength(1);
   await page.screenshot({ path: 'test-results/cad-working-variant.png', fullPage: true });
@@ -189,7 +193,7 @@ test('CAD admin reviews exact ERP overrides, clears old preview and approves its
   await page.route('**/cad-admin-test', route => route.fulfill({ body: html, contentType: 'text/html' }));
   await page.route('**/api/v2/**', route => {
     const path = new URL(route.request().url()).pathname;
-    if (path.endsWith('/recipes')) return route.fulfill({ json: { recipes: [{ code: recipe.code, version: recipe.version, display_name: 'Тест рецепт', algorithm: 'test', defaults: { depth_mm: 2 }, snapshot_hash: 'b'.repeat(64), status: 'review' }] } });
+    if (path.endsWith('/recipes')) return route.fulfill({ json: { recipes: [{ code: recipe.code, version: recipe.version, display_name: 'Тест рецепт', algorithm: 'test', defaults: { depth_mm: 2 }, parameter_schema: { depth_mm: { type: 'number', label: 'Глубина', default: 2 } }, snapshot_hash: 'b'.repeat(64), status: 'review' }] } });
     if (path.endsWith('/capabilities')) return route.fulfill({ json: { formats: ['svg', 'dxf'] } });
     if (path.includes('/snapshots/')) return route.fulfill({ json: { snapshot_hash: snapshot, recipe, snapshot: { resolved_parameters: recipe.parameters }, tools: {} } });
     if (path.endsWith('/approve')) { approvals.push(route.request().postDataJSON().snapshot_hash); return route.fulfill({ json: { approved: true } }); }

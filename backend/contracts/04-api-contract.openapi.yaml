@@ -320,6 +320,80 @@ paths:
         content: {application/json: {schema: {$ref: '#/components/schemas/CadSaveRequest'}}}
       responses:
         '201': {description: Save a CAD variant revision}
+  /api/v1/cad/variants/{id}/fork:
+    post:
+      tags: [CAD preparation]
+      operationId: forkCadVariant
+      summary: Fork own draft from an exact archived CAD revision
+      description: Atomic archived base plus own draft. All source access and manufacturing permissions are rechecked.
+      security: [{bearerAuth: []}]
+      x-permissions: [cad.edit, orders.view]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/CadForkRequest'}}}
+      responses:
+        '201': {description: Saved new working variant}
+  /api/v1/cad/variants/{id}/preview:
+    post:
+      tags: [CAD preparation]
+      operationId: previewCadVariant
+      summary: Preview up to twenty CAD parts without export artifacts
+      description: Unchanged viewing requires cad.view; manufacturing changes also require cad.edit and an approved envelope or cad.technology.
+      security: [{bearerAuth: []}]
+      x-permissions: [cad.view, orders.view]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/CadPreviewRequest'}}}
+      responses:
+        '201': {description: Geometry, material regions, quality and dimension anchors per part}
+  /api/v1/cad/variants/{id}/preflight:
+    post:
+      tags: [CAD preparation]
+      operationId: preflightCadVariant
+      summary: Review CAD export eligibility and current source differences
+      description: Review expires after fifteen minutes and binds actor, run, revision and current source comparison hashes.
+      security: [{bearerAuth: []}]
+      x-permissions: [cad.export, orders.view]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/CadVersionRequest'}}}
+      responses:
+        '201': {description: Readiness and source differences; reviewId only when all included parts are eligible}
+  /api/v1/cad/variants/{id}/approve:
+    post:
+      tags: [CAD preparation]
+      operationId: approveCadPart
+      summary: Request a scoped approval for one frozen CAD part
+      description: Durable command, not global recipe approval. Pending does not mean approved; CAD receipt is required.
+      security: [{bearerAuth: []}]
+      x-permissions: [cad.approve, cad.view, orders.view]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/CadApprovalRequest'}}}
+      responses:
+        '201': {description: Durable approval command with pending, succeeded or failed status}
+  /api/v1/cad/approval-commands/{id}:
+    get:
+      tags: [CAD preparation]
+      operationId: getCadApprovalCommand
+      summary: Get the durable CAD approval receipt status
+      security: [{bearerAuth: []}]
+      x-permissions: [cad.view, orders.view]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Scoped command status and remote receipt}
   /api/v1/cad/variants/{id}/source-status:
     get:
       tags:
@@ -408,8 +482,8 @@ paths:
       operationId: requestCadPackage
       summary: Request an approved CAD production package
       description: >-
-        Requires enabled CAD integration, the listed permissions and applicable order access. Writes use
-        actor-scoped Idempotency-Key; versioned operations reject stale revisions.
+        Requires a valid actor-bound preflight review and explicit acknowledgement for stale sources.
+        Rechecks all source access, readiness and comparison hashes; legacy callers cannot bypass confirmation.
       security:
         - {bearerAuth: []}
       x-permissions:
@@ -420,7 +494,7 @@ paths:
         - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
       requestBody:
         required: true
-        content: {application/json: {schema: {$ref: '#/components/schemas/CadVersionRequest'}}}
+        content: {application/json: {schema: {$ref: '#/components/schemas/CadPackageRequest'}}}
       responses:
         '201': {description: Request an approved CAD production package}
   /api/v1/cad/runs/{runId}/artifacts/{id}:
@@ -440,6 +514,7 @@ paths:
       parameters:
         - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: id, in: path, required: true, schema: {type: string, pattern: '^[a-z0-9]{32}$'}}
+        - {name: reviewId, in: query, required: true, schema: {type: string, format: uuid}}
       responses:
         '200': {description: Response content, content: {application/octet-stream: {schema: {type: string, format: binary}}}}
   /api/v1/whatsapp/status:
@@ -15600,6 +15675,39 @@ components:
           minItems: 1
           maxItems: 500
           items: {type: string, format: uuid}
+    CadForkRequest:
+      type: object
+      additionalProperties: false
+      required: [version, groups, sourceIds, name]
+      properties:
+        version: {type: integer, minimum: 1}
+        groups: {type: array, maxItems: 500, items: {$ref: '#/components/schemas/CadGroup'}}
+        sourceIds: {type: array, minItems: 1, maxItems: 500, items: {type: string, format: uuid}}
+        name: {type: string, minLength: 1, maxLength: 100}
+    CadPreviewRequest:
+      type: object
+      additionalProperties: false
+      required: [version, groups]
+      properties:
+        version: {type: integer, minimum: 1}
+        groups: {type: array, minItems: 1, maxItems: 20, items: {$ref: '#/components/schemas/CadGroup'}}
+    CadPackageRequest:
+      type: object
+      additionalProperties: false
+      required: [version, reviewId]
+      properties:
+        version: {type: integer, minimum: 1}
+        reviewId: {type: string, format: uuid}
+        acknowledgeStale: {type: boolean, default: false}
+    CadApprovalRequest:
+      type: object
+      additionalProperties: false
+      required: [version, groupId, manufacturingHash, reason]
+      properties:
+        version: {type: integer, minimum: 1}
+        groupId: {type: string, format: uuid}
+        manufacturingHash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        reason: {type: string, minLength: 1, maxLength: 1000}
     CadCloneRequest:
       type: object
       additionalProperties: false

@@ -274,6 +274,7 @@ services:
       # by service DNS and skips the token (trusted Docker CIDR).
       CAD_SERVICE_BASE_URL: ${CAD_SERVICE_BASE_URL:-http://cad-service:8000}
       BACKEND_ENABLE_CAD: ${BACKEND_ENABLE_CAD:-false}
+      BACKEND_CAD_EDITOR_V2: ${BACKEND_CAD_EDITOR_V2:-false}
       CAD_ERP_API_TOKEN: ${CAD_ERP_API_TOKEN:-}
       OCR_SERVICE_BASE_URL: ${OCR_SERVICE_BASE_URL:-http://ocr-service:8000}
       CAD_SERVICE_API_TOKEN: ${CAD_SERVICE_API_TOKEN:-}
