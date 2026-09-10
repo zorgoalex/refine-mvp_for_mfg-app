@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Button, Empty, Input, Pagination, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Empty, Input, Pagination, Popconfirm, Select, Space, Tag, Typography } from 'antd';
+import { Table } from '../../../ui/tooltipDelay';
 import { DeleteOutlined } from '@ant-design/icons';
 import { catalogApi, type CatalogItem } from '../../../api/catalogApi';
 import { catalogKindLabels, orderCatalogLineAmount, orderCatalogSubtotal, type OrderCatalogLine } from '../../../utils/orderCatalogLines';

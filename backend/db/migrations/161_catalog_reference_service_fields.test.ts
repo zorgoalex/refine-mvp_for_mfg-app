@@ -8,6 +8,7 @@ describe('catalog reference service fields migration', () => {
     expect(sql).not.toMatch(/DROP|UPDATE public|ADD COLUMN.*(?:created_by|is_active)/i);
     const runner = readFileSync(new URL('../../../ops/apply-migrations.sh', import.meta.url), 'utf8');
     expect(runner).toContain('161_catalog_reference_service_fields*) probe_all');
-    expect(runner).toContain('|161_*)');
+    // Future migrations may follow 161 in this effect-verification case arm.
+    expect(runner).toMatch(/\|161_\*(?:\||\))/);
   });
 });

@@ -5,6 +5,7 @@ import { OrderCatalogLinesTable } from './OrderCatalogLinesTable';
 import { catalogApi } from '../../../api/catalogApi';
 
 vi.mock('../../../api/catalogApi', () => ({ catalogApi: { list: vi.fn() } }));
+vi.mock('../../../ui/tooltipDelay', () => ({ Table: ({ children, ...props }: any) => React.createElement('table', props, children) }));
 vi.mock('@ant-design/icons', () => ({ DeleteOutlined: () => null }));
 vi.mock('antd', () => {
   const component = (tag: string) => ({ children, ...props }: any) => React.createElement(tag, props, children);

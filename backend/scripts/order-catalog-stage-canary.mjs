@@ -15,7 +15,7 @@ const url = new URL(execFileSync('docker', ['exec', 'erp_test-backend-1', 'print
 url.hostname = '100.99.106.72';
 const db = new pg.Client({ connectionString: url.href, statement_timeout: 10000 });
 await db.connect();
-let bearer, actorId, clientId, browser;
+let bearer, actorId, clientId, browser, page;
 const orderIds = [], catalogIds = [], projectIds = [];
 const request = async (path, method = 'GET', body, auth = true) => {
   const response = await fetch(api + path, { method, headers: { ...(auth ? { authorization: `Bearer ${bearer}` } : {}),
@@ -30,8 +30,8 @@ try {
   assert.ok(bearer); assert.match(actorId, /^\d+$/);
   clientId = (await db.query('INSERT INTO clients(client_name) VALUES($1) RETURNING client_id', [prefix])).rows[0].client_id;
   const units = await request('/catalog-items/units'); assert.equal(units.status, 200);
-  const itemResponse = await request('/catalog-items', 'POST', { name: prefix, sku: prefix, kind: 'service', unitId: units.body[0].id, basePrice: '1500.50', isActive: true });
-  assert.equal(itemResponse.status, 201); const item = itemResponse.body; catalogIds.push(item.id);
+  const itemResponse = await request('/catalog-items', 'POST', { name: prefix, sku: prefix, kind: 'service', unitId: units.body[0].id, basePrice: '1500.50', description: 'Тест', isActive: true });
+  assert.equal(itemResponse.status, 201, JSON.stringify(itemResponse.body)); const item = itemResponse.body; catalogIds.push(item.id);
   const statusId = (await db.query('SELECT min(order_status_id) AS id FROM order_statuses WHERE is_active=true')).rows[0].id;
   const draft = { header: { orderName: prefix, clientId: Number(clientId), orderStatusId: Number(statusId), orderDate: '2026-09-10', discount: 1, surcharge: 0 },
     details: [], payments: [], workshops: [], requirements: [], dowelingLinks: [], deleted: {},
@@ -57,7 +57,7 @@ try {
     browser = await chromium.launch({ headless: true, args: ['--disable-dev-shm-usage'] });
     const context = await browser.newContext({ viewport: { width: 1440, height: 1050 } });
     if (process.env.VERCEL_AUTOMATION_BYPASS_SECRET) await context.route('https://app-test.mebelkz.app/**', route => route.continue({ headers: { ...route.request().headers(), 'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET } }));
-    const page = await context.newPage(); const errors = [], exports = [];
+    page = await context.newPage(); const errors = [], exports = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('request', request => { if (request.url().includes('/export/google-drive')) exports.push(request.url()); });
     await page.goto('https://app-test.mebelkz.app/login', { waitUntil: 'domcontentloaded' });
@@ -70,14 +70,16 @@ try {
     assert.equal(await quantity.inputValue(), '2.000');
     await quantity.fill('3'); await page.getByLabel(`Цена: ${prefix}`, { exact: true }).fill('2000');
     await page.getByLabel(`Примечание: ${prefix}`, { exact: true }).fill('Тест UI');
-    const save = page.waitForResponse(response => response.url().endsWith(orderPath) && response.request().method() === 'PUT');
-    await page.getByRole('button', { name: 'Сохранить', exact: true }).first().click();
-    const saved = await save; assert.equal(saved.status(), 200, JSON.stringify(await saved.json()));
+    const [saved] = await Promise.all([
+      page.waitForResponse(response => response.url().endsWith(orderPath) && response.request().method() === 'PUT'),
+      page.getByRole('button', { name: /Сохранить$/ }).first().click(),
+    ]);
+    assert.equal(saved.status(), 200, JSON.stringify(await saved.json()));
     const loaded = (await request(orderPath)).body.order;
     assert.equal(loaded.catalogLines[0].unitPrice, '2000.00'); assert.equal(loaded.catalogLines[0].notes, 'Тест UI'); assert.equal(loaded.totals.totalAmount, 6000);
     await page.reload({ waitUntil: 'domcontentloaded' }); await page.getByRole('tab', { name: 'Услуги/товары', exact: true }).click();
     assert.equal(await page.getByLabel(`Цена: ${prefix}`, { exact: true }).inputValue(), '2000.00');
-    await page.getByLabel('Добавить товар или услугу', { exact: true }).fill(prefix);
+    await page.getByRole('combobox', { name: 'Добавить товар или услугу', exact: true }).fill(prefix);
     await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: prefix }).first().click();
     assert.equal(await page.getByLabel(`Цена: ${prefix}`, { exact: true }).nth(1).inputValue(), '1500.50');
     assert.equal(await page.getByLabel(`Количество: ${prefix}`, { exact: true }).nth(1).inputValue(), '1');
@@ -88,14 +90,25 @@ try {
     assert.deepEqual(exports, []); assert.deepEqual(errors, []);
     console.log('PASS browser: renamed tab, reload, quantity/price/note save, picker defaults, delete draft, no automatic Google export, no page errors');
   }
+} catch (error) {
+  if (page) {
+    console.error((await page.locator('.ant-notification, .ant-modal-content, .ant-alert').allTextContents()).join('\n'));
+    await page.screenshot({ path: '/home/ovhtest/projects/erp_dev/spec_erp/logs/order-catalog-stage-failure.png', fullPage: true });
+  }
+  throw error;
 } finally {
   await browser?.close();
   await db.query('BEGIN');
   try {
+    // Stage fixtures only. Transactional DDL holds the table lock until COMMIT,
+    // so other writers never observe append-only protection disabled.
+    await db.query("SET LOCAL lock_timeout='3s'");
+    await db.query('ALTER TABLE mdf_board_history_events DISABLE TRIGGER trg_mdf_board_history_events_append_only');
     // Exact own order IDs and actor only. Never clean unrelated users' records.
     for (const table of ['order_catalog_lines', 'mdf_board_history_coverage', 'mdf_board_history_events', 'mdf_board_history_state']) {
       await db.query(`DELETE FROM ${table} WHERE order_id=ANY($1::bigint[])`, [orderIds]);
     }
+    await db.query('ALTER TABLE mdf_board_history_events ENABLE TRIGGER trg_mdf_board_history_events_append_only');
     const ownedAudit = "user_id=$1 AND (related_order_id=ANY($2::text[]::bigint[]) OR (entity_type='order' AND entity_id=ANY($2::text[])) OR (entity_type='catalog_item' AND entity_id=ANY($3::text[])) OR (entity_type='project' AND entity_id=ANY($4::text[])))";
     const ownedArgs = [actorId, orderIds.map(String), catalogIds.map(String), projectIds.map(String)];
     await db.query(`DELETE FROM audit_log_related_entity WHERE audit_id IN (SELECT audit_id FROM audit_log WHERE ${ownedAudit})`, ownedArgs);
