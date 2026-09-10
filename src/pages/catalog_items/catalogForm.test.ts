@@ -13,8 +13,17 @@ describe('catalog form', () => {
     expect(() => catalogPayload({ ...input, basePrice: '0.001' })).toThrow();
   });
   it('does not invent an existing unit or Bitrix identity', () => {
-    expect(catalogDraft()).toEqual({ name: '', sku: null, kind: 'service', basePrice: null, description: '', isActive: true });
+    expect(catalogDraft()).toEqual({ name: '', sku: null, kind: 'service', basePrice: null, description: '', isActive: true, refKey1c: null, sortOrder: 100 });
     expect(RESOURCE_PERMISSION_MAP.catalog_items).toEqual(['references.view', 'references.manage']);
+  });
+  it('normalizes 1C key and sort order but never sends read-only audit fields', () => {
+    expect(catalogPayload({ ...input, refKey1c: ' ABCDEF00-1234-0000-0000-000000000000 ', sortOrder: -2 })).toMatchObject({ refKey1c: 'abcdef00-1234-0000-0000-000000000000', sortOrder: -2 });
+    expect(catalogPayload({ ...input, refKey1c: ' ' })).toMatchObject({ refKey1c: null, sortOrder: 100 });
+    const extra = { ...input, createdBy: '999', editedBy: '999', createdAt: 'fake', version: 42, id: 88 };
+    const payload = catalogPayload(extra);
+    for (const field of ['createdBy', 'editedBy', 'createdAt', 'version', 'id']) expect(payload).not.toHaveProperty(field);
+    expect(() => catalogPayload({ ...input, refKey1c: 'not-uuid' })).toThrow('UUID');
+    for (const sortOrder of [-32769, 32768, 1.5]) expect(() => catalogPayload({ ...input, sortOrder })).toThrow('Порядок');
   });
   it('unfreezes definitive failure after same-key unknown-result retry without changing draft', () => {
     const draft = { ...input, name: 'Несохранённый текст' };

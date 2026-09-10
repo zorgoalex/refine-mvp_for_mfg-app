@@ -8,6 +8,13 @@ const actor: CurrentUser = { id: '1', username: 'test', role: 'admin', roleId: 1
 const item = { name: ' Доставка ', sku: ' SKU ', kind: 'service', unitId: 1, basePrice: '12.5', description: '', isActive: true };
 
 describe('catalog validation and permissions', () => {
+  it('validates reference service fields without changing legacy command input', () => {
+    expect(parseItem(item)).not.toHaveProperty('refKey1c');
+    expect(parseItem(item)).not.toHaveProperty('sortOrder');
+    expect(parseItem({ ...item, refKey1c: ' ABCDEF00-1234-0000-0000-000000000000 ', sortOrder: -32768 })).toMatchObject({ refKey1c: 'abcdef00-1234-0000-0000-000000000000', sortOrder: -32768 });
+    expect(parseItem({ ...item, refKey1c: ' ', sortOrder: 32767 })).toMatchObject({ refKey1c: null, sortOrder: 32767 });
+    for (const patch of [{ refKey1c: 'bad' }, { sortOrder: 32768 }, { sortOrder: -32769 }, { sortOrder: 1.5 }, { sortOrder: null }, { createdBy: 1 }, { editedBy: 1 }, { createdAt: '2026-01-01' }]) expect(() => parseItem({ ...item, ...patch })).toThrow();
+  });
   it('normalizes fields and decimal strings without floating arithmetic', () => {
     expect(parseItem(item)).toMatchObject({ name: 'Доставка', sku: 'SKU', basePrice: '12.50' });
     expect(parseItem({ ...item, sku: ' ', basePrice: null })).toMatchObject({ sku: null, basePrice: null });
