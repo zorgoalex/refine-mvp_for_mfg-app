@@ -22,7 +22,8 @@ import {
   useSelect,
 } from "../../query/orderLifecycleQueries";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
-import { Space, Button, Input, message, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Checkbox, Modal, Upload, Dropdown, Spin, Badge, Segmented } from "antd";
+import { Space, Button, Input, message, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Checkbox, Modal, Upload, Dropdown, Spin, Badge } from "antd";
+import { Segmented } from "../../ui/Segmented";
 import {
   AppstoreOutlined,
   EyeOutlined,

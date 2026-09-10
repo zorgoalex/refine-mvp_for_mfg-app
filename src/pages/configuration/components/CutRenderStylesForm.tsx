@@ -1,6 +1,7 @@
 import { Table, Tooltip } from '../../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Col, Input, InputNumber, Row, Segmented, Slider, Space, Switch, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Col, Input, InputNumber, Row, Slider, Space, Switch, Tag, Typography, message } from 'antd';
+import { Segmented } from "../../../ui/Segmented";
 import {
   CheckCircleOutlined,
   CopyOutlined,

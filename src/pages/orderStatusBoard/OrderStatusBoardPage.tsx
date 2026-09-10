@@ -10,7 +10,8 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { Alert, Badge, Button, Checkbox, Collapse, DatePicker, Dropdown, Empty, Input, Modal, Segmented, Select, Skeleton, Spin, Switch, Tabs, Tag, Typography, message } from 'antd';
+import { Alert, Badge, Button, Checkbox, Collapse, DatePicker, Dropdown, Empty, Input, Modal, Select, Skeleton, Spin, Switch, Tabs, Tag, Typography, message } from 'antd';
+import { Segmented } from "../../ui/Segmented";
 import type { MenuProps } from 'antd';
 import {
   CalendarOutlined,

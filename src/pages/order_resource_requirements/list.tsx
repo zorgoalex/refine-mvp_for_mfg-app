@@ -3,7 +3,8 @@ import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, us
 import type { Key } from 'react';
 import type { IResourceComponentsProps } from '@refinedev/core';
 import { DownloadOutlined, FileTextOutlined, FilterFilled, ReloadOutlined } from '@ant-design/icons';
-import { Alert, Button, Checkbox, DatePicker, Input, Modal, Segmented, Select, Space, Tag, Typography } from 'antd';
+import { Alert, Button, Checkbox, DatePicker, Input, Modal, Select, Space, Tag, Typography } from 'antd';
+import { Segmented } from "../../ui/Segmented";
 import type { TableProps } from 'antd';
 import type { FilterDropdownProps, SortOrder } from 'antd/es/table/interface';
 import dayjs, { type Dayjs } from 'dayjs';

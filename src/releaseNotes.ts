@@ -30,6 +30,12 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION, date: "2026-09-10",
+    title: "Переключатели: совместимость типов",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: ["Устранён конфликт типов переключателей Segmented в настройках, заказах, отчётах, аудите, доске статусов и календаре. Внешний вид, выбор значений и ограничения доступа не менялись."],
+  },
+  {
+    version: APP_VERSION, date: "2026-09-10",
     title: "Производство: точный состав деталей и автостатусы",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: ["Компактная сводка показывает самый ранний этап. Оранжево-голубая плашка обозначает разные этапы, подробности доступны в подсказке. Детали без статуса не пропускаются. ХДФ учитывается отдельно и в эту сводку не входит."],
