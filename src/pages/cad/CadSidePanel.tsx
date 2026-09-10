@@ -1,6 +1,7 @@
 import { useId, type ReactNode } from 'react';
-import { Button, Tooltip } from 'antd';
+import { Button } from 'antd';
 import { LeftOutlined, RightOutlined, SettingOutlined, UnorderedListOutlined } from '@ant-design/icons';
+import { Tooltip } from '../../ui/tooltipDelay';
 
 /** Keep the body mounted: collapsing must not discard field drafts or list scroll. */
 export function CadSidePanel({ side, title, open, onToggle, children }: {
