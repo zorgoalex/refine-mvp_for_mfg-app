@@ -12,12 +12,17 @@ export interface CatalogItem extends CatalogInput {
   id: number; version: number; currency: 'KZT';
   unitName: string; unitSymbol: string | null;
   createdAt: string; updatedAt: string;
+  refKey1c: string | null; sortOrder: number;
+  createdBy: string; editedBy: string; createdByName: string; editedByName: string;
 }
 interface ItemRow extends QueryResultRow { dto: CatalogItem }
 const itemProjection = `jsonb_build_object('id',c.id,'name',c.name,'sku',c.sku,'kind',c.kind,'unitId',c.unit_id,
   'basePrice',c.base_price::text,'currency',c.currency,'description',c.description,'isActive',c.is_active,
   'version',c.version,'unitName',coalesce(u.unit_name,u.unit_code),'unitSymbol',u.unit_symbol,
-  'createdAt',c.created_at,'updatedAt',c.updated_at) AS dto`;
+  'createdAt',c.created_at,'updatedAt',c.updated_at,'refKey1c',c.ref_key_1c,'sortOrder',c.sort_order,
+  'createdBy',c.created_by::text,'editedBy',c.edited_by::text,
+  'createdByName',(SELECT coalesce(nullif(btrim(a.full_name),''),a.username) FROM users a WHERE a.user_id=c.created_by),
+  'editedByName',(SELECT coalesce(nullif(btrim(a.full_name),''),a.username) FROM users a WHERE a.user_id=c.edited_by)) AS dto`;
 
 export class CatalogService {
   constructor(private readonly database: DatabaseService) {}
@@ -36,10 +41,10 @@ export class CatalogService {
     const result = await this.database.query<{ items: CatalogItem[]; total: number }>(`WITH filtered AS (
       SELECT c.*,coalesce(u.unit_name,u.unit_code) AS unit_name,u.unit_symbol FROM catalog_items c JOIN units u USING(unit_id)
       WHERE ($1::boolean IS NULL OR c.is_active=$1::boolean) AND ($2::text IS NULL OR c.kind=$2::text)
-      AND (c.name ILIKE $3 ESCAPE E'\\\\' OR coalesce(c.sku,'') ILIKE $3 ESCAPE E'\\\\')
-    ), page AS (SELECT * FROM filtered ORDER BY name,id LIMIT $4 OFFSET $5)
-    SELECT (SELECT count(*)::int FROM filtered) AS total,coalesce((SELECT jsonb_agg(dto ORDER BY name,id)
-      FROM (SELECT c.name,c.id,${itemProjection} FROM page c JOIN units u USING(unit_id)) rows),'[]'::jsonb) AS items`,
+      AND (c.name ILIKE $3 ESCAPE E'\\\\' OR coalesce(c.sku,'') ILIKE $3 ESCAPE E'\\\\' OR coalesce(c.ref_key_1c::text,'') ILIKE $3 ESCAPE E'\\\\')
+    ), page AS (SELECT * FROM filtered ORDER BY sort_order,name,id LIMIT $4 OFFSET $5)
+    SELECT (SELECT count(*)::int FROM filtered) AS total,coalesce((SELECT jsonb_agg(dto ORDER BY sort_order,name,id)
+      FROM (SELECT c.sort_order,c.name,c.id,${itemProjection} FROM page c JOIN units u USING(unit_id)) rows),'[]'::jsonb) AS items`,
     [query.active === 'all' ? null : query.active === 'true', query.kind ?? null, pattern, query.limit, query.offset]);
     return result.rows[0];
   }
@@ -88,12 +93,16 @@ export class CatalogService {
         const changed = !before || Object.entries(input).some(([field, value]) => before![field as keyof CatalogInput] !== value);
         let after = before;
         if (changed) {
-          const values = [input.name, input.sku, input.kind, input.unitId, input.basePrice, input.description, input.isActive, actorId];
+          // Omission preserves fields during rolling upgrades; hash above stays compatible with old receipts.
+          const values = [input.name, input.sku, input.kind, input.unitId, input.basePrice, input.description, input.isActive, actorId,
+            input.refKey1c === undefined ? before?.refKey1c ?? null : input.refKey1c,
+            input.sortOrder ?? before?.sortOrder ?? 100];
           const result = id === undefined
-            ? await tx.query<{ id: string }>(`INSERT INTO catalog_items(name,sku,kind,unit_id,base_price,description,is_active,created_by,edited_by)
-                VALUES($1,$2,$3,$4,$5::numeric,$6,$7,$8::bigint,$8::bigint) RETURNING id`, values)
+            ? await tx.query<{ id: string }>(`INSERT INTO catalog_items(name,sku,kind,unit_id,base_price,description,is_active,created_by,edited_by,ref_key_1c,sort_order)
+                VALUES($1,$2,$3,$4,$5::numeric,$6,$7,$8::bigint,$8::bigint,$9::uuid,$10::smallint) RETURNING id`, values)
             : await tx.query<{ id: string }>(`UPDATE catalog_items SET name=$1,sku=$2,kind=$3,unit_id=$4,base_price=$5::numeric,
-                description=$6,is_active=$7,edited_by=$8::bigint,version=version+1,updated_at=now() WHERE id=$9 RETURNING id`, [...values, id]);
+                description=$6,is_active=$7,edited_by=$8::bigint,ref_key_1c=$9::uuid,sort_order=$10::smallint,
+                version=version+1,updated_at=now() WHERE id=$11 RETURNING id`, [...values, id]);
           after = await this.read(tx, Number(result.rows[0].id));
           const event = !before ? 'catalog.item_created' : before.isActive === after.isActive ? 'catalog.item_updated'
             : after.isActive ? 'catalog.item_restored' : 'catalog.item_archived';
@@ -115,6 +124,9 @@ export class CatalogService {
         return after;
       });
     } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === '23505' && 'constraint' in error && error.constraint === 'catalog_items_ref_key_1c_unique') {
+        throw new ApiError(409, 'CATALOG_1C_KEY_CONFLICT', 'Этот 1C_key уже используется, включая архивные записи');
+      }
       if (error && typeof error === 'object' && 'code' in error && error.code === '23505' && 'constraint' in error && error.constraint === 'catalog_items_sku_unique') {
         throw new ApiError(409, 'CATALOG_SKU_CONFLICT', 'Этот артикул уже используется, включая архивные записи');
       }

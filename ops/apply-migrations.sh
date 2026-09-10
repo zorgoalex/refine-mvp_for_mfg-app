@@ -1895,6 +1895,7 @@ probe_file() {
       "$(q_con catalog_items_unit_id_fkey)" "$(q_con catalog_items_kind_check)" "$(q_con catalog_items_currency_check)" \
       "$(q_con catalog_items_base_price_check)" "$(q_con catalog_item_commands_pkey)" ;;
     160_cad_editor_workflow*) probe_all "$(q_tbl cad_export_reviews)" "$(q_tbl cad_approval_commands)" "$(q_col cad_export_reviews acknowledged_at)" "$(q_col cad_approval_commands receipt)" ;;
+    161_catalog_reference_service_fields*) probe_all "$(q_col catalog_items ref_key_1c)" "$(q_col catalog_items sort_order)" "$(q_idx catalog_items_sort_idx)" "$(q_idx catalog_items_ref_key_1c_unique)" ;;
     154_svg_source_instance_sequences*) probe_all "SELECT position('svg_source_instance_sequence_v1' in pg_get_functiondef('cut_result_snapshot_is_complete(jsonb,jsonb,text)'::regprocedure)) > 0;" ;;
     153_svg_partial_label_maps*) probe_all \
                      "$(q_con chk_cut_result_placement_source_only_order)" \
@@ -1932,7 +1933,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    151_*|152_*|156_*|157_*|160_*)
+    151_*|152_*|156_*|157_*|160_*|161_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*|127_*|128_*|129_*|130_*|131_*|132_*|133_*|134_*|135_*|136_*|137_*|138_*|139_*|140_*|141_*|142_*|143_*|144_*|145_*|146_*|147_*|148_*|149_*|150_*|153_*|154_*)

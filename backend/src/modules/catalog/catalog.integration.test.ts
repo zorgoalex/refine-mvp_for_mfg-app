@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { Pool, type PoolClient, type QueryResultRow } from 'pg';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -53,6 +53,9 @@ describe.skipIf(!url)('catalog real PostgreSQL, rollback-only fixtures', () => {
     const migration = readFileSync(new URL('../../../db/migrations/157_products_services_catalog.sql', import.meta.url), 'utf8');
     await client.query(migration);
     await client.query(migration);
+    const serviceFields = readFileSync(new URL('../../../db/migrations/161_catalog_reference_service_fields.sql', import.meta.url), 'utf8');
+    await client.query(serviceFields);
+    await client.query(serviceFields);
     prefix = 'E2E-catalog-' + randomUUID();
     const user = (await client.query(`INSERT INTO users(username,email,password_hash,role_id) VALUES($1,$2,'E2E-NO-LOGIN',1) RETURNING user_id`, [prefix, prefix + '@example.invalid'])).rows[0];
     actor = { id: String(user.user_id), username: prefix, role: 'admin', roleId: 1, permissions: ['references.manage'] };
@@ -63,6 +66,38 @@ describe.skipIf(!url)('catalog real PostgreSQL, rollback-only fixtures', () => {
   });
   afterEach(async () => { if (client) { await client.query('ROLLBACK'); client.release(); } await pool?.end(); });
   const key = () => randomUUID();
+  it('persists service fields, preserves omitted values, sorts/searches and audits changes', async () => {
+    const uuid = randomUUID();
+    const first = await service.save(actor, { ...input, refKey1c: uuid.toUpperCase(), sortOrder: 200 }, key(), prefix);
+    expect(first).toMatchObject({ refKey1c: uuid, sortOrder: 200, createdBy: actor.id, editedBy: actor.id, createdByName: actor.username, editedByName: actor.username });
+    const second = await service.save(actor, { ...input, sku: null, sortOrder: -1 }, key(), prefix);
+    expect((await service.list(actor, { q: prefix })).items.map(item => item.id)).toEqual([second.id, first.id]);
+    expect((await service.list(actor, { q: uuid })).items.map(item => item.id)).toEqual([first.id]);
+    const edited = await service.save(actor, { ...input, description: 'legacy client', expectedVersion: 1 }, key(), prefix, first.id);
+    expect(edited).toMatchObject({ refKey1c: uuid, sortOrder: 200, version: 2 });
+    const cleared = await service.save(actor, { ...input, refKey1c: null, sortOrder: 0, expectedVersion: 2 }, key(), prefix, first.id);
+    expect(cleared).toMatchObject({ refKey1c: null, sortOrder: 0, version: 3 });
+    const audit = (await client.query("SELECT diff_json FROM audit_log WHERE entity_type='catalog_item' AND entity_id=$1 AND request_id=$2 AND after_json->>'version'='3'", [String(first.id), prefix])).rows[0];
+    expect(audit.diff_json).toMatchObject({ refKey1c: { from: uuid, to: null }, sortOrder: { from: 200, to: 0 } });
+  });
+  it('replays a pre-upgrade receipt unchanged and supplies defaults on new legacy creates', async () => {
+    const legacyKey = key();
+    const legacyResponse = { id: 123, name: 'E2E historical response' };
+    const hash = createHash('sha256').update(JSON.stringify({ actorId: Number(actor.id), id: null, expectedVersion: null, input })).digest('hex');
+    await client.query('INSERT INTO catalog_item_commands(idempotency_key,request_hash,actor_user_id,response_json) VALUES($1,$2,$3,$4)', [legacyKey, hash, actor.id, JSON.stringify(legacyResponse)]);
+    expect(await service.save(actor, input, legacyKey, prefix)).toEqual(legacyResponse);
+    expect(await service.save(actor, input, key(), prefix)).toMatchObject({ refKey1c: null, sortOrder: 100 });
+  });
+  it('keeps UUID unique across archived items and accepts multiple empty keys', async () => {
+    const uuid = randomUUID();
+    const first = await service.save(actor, { ...input, refKey1c: uuid, isActive: false }, key(), prefix);
+    await expect(service.save(actor, { ...input, sku: null, refKey1c: uuid.toUpperCase() }, key(), prefix)).rejects.toMatchObject({ code: 'CATALOG_1C_KEY_CONFLICT' });
+    const second = await service.save(actor, { ...input, sku: null, refKey1c: null }, key(), prefix);
+    await service.save(actor, { ...input, sku: null, refKey1c: null }, key(), prefix);
+    await expect(service.save(actor, { ...input, sku: null, refKey1c: uuid, expectedVersion: second.version }, key(), prefix, second.id)).rejects.toMatchObject({ code: 'CATALOG_1C_KEY_CONFLICT' });
+    expect(await service.get(actor, first.id)).toMatchObject({ refKey1c: uuid, version: 1 });
+    expect(await service.get(actor, second.id)).toMatchObject({ refKey1c: null, version: 1 });
+  });
   async function counts() {
     return (await client.query(`SELECT
       (SELECT count(*)::int FROM catalog_items WHERE created_by=$1) AS items,

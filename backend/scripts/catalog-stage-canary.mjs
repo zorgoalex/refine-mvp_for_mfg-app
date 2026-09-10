@@ -74,13 +74,26 @@ try {
     await page.getByLabel('Единица измерения', { exact: true }).click();
     await page.locator('.ant-select-dropdown:visible .ant-select-item-option').first().click();
     await page.getByLabel('Базовая цена, ₸', { exact: true }).fill('2500');
+    const refKey1c = randomUUID();
+    await page.getByLabel('1C_key', { exact: true }).fill(refKey1c);
+    await page.getByLabel('Порядок сортировки', { exact: true }).fill('5');
+    assert.equal(await page.getByRole('switch', { name: 'Активен', exact: true }).isChecked(), true);
     const savedResponse = page.waitForResponse(response => response.url().endsWith('/api/v1/catalog-items') && response.request().method() === 'POST');
     await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
-    assert.equal((await savedResponse).status(), 201);
+    const saved = await savedResponse;
+    assert.equal(saved.status(), 201);
+    const savedItem = await saved.json();
+    assert.equal(savedItem.refKey1c, refKey1c);
+    assert.equal(savedItem.sortOrder, 5);
+    assert.equal(savedItem.createdBy, actorId);
     await page.getByText(prefix + '-UI', { exact: true }).waitFor();
+    await page.getByRole('row').filter({ hasText: prefix + '-UI' }).getByRole('button', { name: 'Изменить', exact: true }).click();
+    await page.getByText('Данные записи — заполняются системой', { exact: true }).waitFor();
+    for (const label of ['Кто создал', 'Кто изменил', 'Дата создания', 'Дата изменения']) await page.getByText(label, { exact: true }).waitFor();
+    assert.equal(await page.getByLabel('1C_key', { exact: true }).inputValue(), refKey1c);
     await page.screenshot({ path: process.env.ERP_CATALOG_SCREENSHOT ?? '/home/ovhtest/projects/erp_dev/spec_erp/logs/catalog-items-stage.png', fullPage: true });
     assert.deepEqual(errors, []);
-    console.log('PASS stage browser: login, catalogue, search, create, price, row refresh, no page errors');
+    console.log('PASS stage browser: login, catalogue, search, create, price, 1C UUID, sort, active, metadata, row refresh, no page errors');
   }
 } finally {
   await browser?.close();

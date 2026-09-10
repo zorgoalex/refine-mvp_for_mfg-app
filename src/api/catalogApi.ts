@@ -5,10 +5,13 @@ export type CatalogKind = 'made_to_order' | 'stock_item' | 'service';
 export interface CatalogInput {
   name: string; sku: string | null; kind: CatalogKind; unitId: number;
   basePrice: string | null; description: string; isActive: boolean;
+  refKey1c?: string | null; sortOrder?: number;
 }
 export interface CatalogItem extends CatalogInput {
   id: number; version: number; currency: 'KZT'; unitName: string; unitSymbol: string | null;
   createdAt: string; updatedAt: string;
+  refKey1c: string | null; sortOrder: number;
+  createdBy: string; editedBy: string; createdByName: string; editedByName: string;
 }
 export interface CatalogUnit { id: number; name: string; code: string; symbol: string | null }
 const path = backendApiPath('/catalog-items');

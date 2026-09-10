@@ -12,6 +12,10 @@ export const itemSchema = z.object({
   basePrice: price,
   description: z.string().trim().max(2000),
   isActive: z.boolean(),
+  refKey1c: z.string().trim().transform(value => value || null).nullable()
+    .refine(value => value === null || /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value), '1C_key должен быть UUID')
+    .transform(value => value?.toLowerCase() ?? null).optional(),
+  sortOrder: z.number().int().min(-32768).max(32767).optional(),
 }).strict();
 const updateSchema = itemSchema.extend({ expectedVersion: z.number().int().positive().max(2147483646) }).strict();
 const integerQuery = z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().safe());
