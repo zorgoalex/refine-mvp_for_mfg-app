@@ -1,3 +1,4 @@
+import { PopconfirmContent } from "../../components/PopconfirmContent";
 import {
   Alert,
   Button,
@@ -133,8 +134,7 @@ export function TelegramNotificationsCard() {
             </Text>
           )}
           <Popconfirm
-            title="Отключить Telegram?"
-            description="Новые уведомления по правилам Telegram приходить не будут."
+            title={<PopconfirmContent title="Отключить Telegram?" description="Новые уведомления по правилам Telegram приходить не будут." />}
             okText="Отключить"
             cancelText="Отмена"
             onConfirm={() => void unlink()}

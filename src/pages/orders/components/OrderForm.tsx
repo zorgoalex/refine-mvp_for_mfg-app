@@ -1,3 +1,4 @@
+import { PopconfirmContent } from "../../../components/PopconfirmContent";
 import { Tooltip } from '../../../ui/tooltipDelay';
 // Main Order Form Component
 // Master-Detail form with Tabs for child entities
@@ -2031,8 +2032,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
                 ) : null}
                 {featureFlags.useBackendOrdersWrite && canDeleteCurrentOrder && mode === 'edit' && orderId && !header.delete_flag ? (
                   <Popconfirm
-                    title={`Удалить заказ №${header.order_name}?`}
-                    description="Заказ попадёт в корзину, его можно будет восстановить."
+                    title={<PopconfirmContent title={`Удалить заказ №${header.order_name}?`} description="Заказ попадёт в корзину, его можно будет восстановить." />}
                     okText="Удалить"
                     okButtonProps={{ danger: true }}
                     cancelText="Отмена"
@@ -2115,8 +2115,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
           )}
           {featureFlags.useBackendOrdersWrite && canDeleteCurrentOrder && mode === 'edit' && orderId && !header.delete_flag ? (
             <Popconfirm
-              title={`Удалить заказ №${header.order_name}?`}
-              description="Заказ попадёт в корзину, его можно будет восстановить."
+              title={<PopconfirmContent title={`Удалить заказ №${header.order_name}?`} description="Заказ попадёт в корзину, его можно будет восстановить." />}
               okText="Удалить"
               okButtonProps={{ danger: true }}
               cancelText="Отмена"

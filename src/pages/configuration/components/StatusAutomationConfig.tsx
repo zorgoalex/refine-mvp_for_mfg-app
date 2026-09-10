@@ -1,3 +1,4 @@
+import { PopconfirmContent } from "../../../components/PopconfirmContent";
 import { Table } from '../../../ui/tooltipDelay';
 import { DownloadOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
 import { useList } from '@refinedev/core';
@@ -1059,8 +1060,7 @@ export function StatusAutomationConfig() {
           </Button>
           {canManage && (
             <Popconfirm
-              title="Обновить автостатусы"
-              description="Будут проверены заказы за последние два месяца. Правила событий МДФ-доски пропускаются: для них нужна исходная карточка."
+              title={<PopconfirmContent title="Обновить автостатусы" description="Будут проверены заказы за последние два месяца. Правила событий МДФ-доски пропускаются: для них нужна исходная карточка." />}
               okText="Обновить"
               cancelText="Отмена"
               onConfirm={() => void handleRefreshRecentOrders()}
