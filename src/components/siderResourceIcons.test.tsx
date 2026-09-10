@@ -26,6 +26,7 @@ const NAVIGATION_RESOURCES = [
   'edge_types',
   'milling_types',
   'extra_resources',
+  'catalog_items',
   'order_statuses',
   'payment_statuses',
   'production_statuses',

@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { normalizeBitrixDeal } from './bitrix24-reverse-normalizer';
+import { PgOrderReadRepository } from '../../orders/adapters/pg-order-read-repository';
 import { createRequire } from 'node:module';
 import { ConfigService } from '@nestjs/config';
 import { Pool, type PoolClient, type QueryResultRow } from 'pg';
@@ -61,6 +64,9 @@ describe.skipIf(!url)('CRM conversion deadlines on real PostgreSQL (rollback-onl
     client = await pool.connect();
     await client.query('BEGIN');
     await client.query("SET LOCAL lock_timeout='3s'");
+    const authorshipMigration = readFileSync(new URL('../../../../db/migrations/156_bitrix24_authorship.sql', import.meta.url), 'utf8');
+    await client.query(authorshipMigration);
+    await client.query(authorshipMigration); // additive/idempotent, rolled back with fixture
     db = new FixtureDatabase(client);
     repository = new Repository(db, new AuditService());
     const name = 'E2E-conversion-' + randomUUID();
@@ -139,6 +145,52 @@ describe.skipIf(!url)('CRM conversion deadlines on real PostgreSQL (rollback-onl
     expect((await client.query('SELECT paid_amount FROM orders WHERE order_id=$1', [orderId])).rows[0].paid_amount).toBe('500.00');
     expect((await client.query("SELECT count(*)::int AS n FROM audit_log WHERE request_id=$1 AND event='bitrix24_reverse.mapped_order_payments_materialize'", [input.requestId])).rows[0].n).toBe(1);
     expect((await client.query("SELECT count(*)::int AS n FROM outbox_events WHERE event_type='bitrix24.payment.materialized' AND payload_json->>'orderId'=$1", [String(orderId)])).rows[0].n).toBe(1);
+  });
+
+  it('retains source authors through conversion, lookup failure and payment materialization', async () => {
+    const { payment, requestId, dealId } = await seedPayment();
+    const authored = { ...payment, paidById: '700000001', paidByName: 'Native status actor' };
+    await repository.replaceRequestPaymentSnapshots(requestId, [authored], input.requestId);
+    await client.query("INSERT INTO bitrix24_remote_state (object_type,bitrix_id,normalized_hash,raw_snapshot) VALUES ('deal',$1,'E2E',$2::jsonb)", [dealId, JSON.stringify({ createdBy: '700000002', createdByName: 'Request creator', assignedById: '700000003' })]);
+    expect((await repository.getIncomingRequest(requestId, { mode: 'all' }, true)).createdByBitrix).toMatchObject({ bitrixUserId: '700000002', displayName: 'Request creator' });
+    expect((await repository.getIncomingRequest(requestId, { mode: 'all' }, false)).payments).toEqual([]);
+    await repository.convertCrmRequestToProduction(input);
+    await repository.replaceMappedOrderPaymentSnapshots(orderId, [{ ...authored, paidByName: null }], input.requestId, undefined, dealId);
+    const view = await repository.getMappedOrderPayments(orderId, { mode: 'all' }, true);
+    const redacted = await repository.getMappedOrderPayments(orderId, { mode: 'all' });
+    expect(redacted).not.toHaveProperty('createdByBitrix');
+    expect((redacted.payments as Record<string, unknown>[])[0]).not.toHaveProperty('authorship');
+    expect(view.createdByBitrix).toMatchObject({ bitrixUserId: '700000002' });
+    expect(view.payments).toEqual([expect.objectContaining({ authorship: { createdBy: null, paidBy: expect.objectContaining({ bitrixUserId: '700000001', displayName: 'Native status actor' }) } })]);
+    await importPayment(payment.bitrixPaymentId);
+    expect(await importPayment(payment.bitrixPaymentId)).toMatchObject({ changedPaymentCount: 0 });
+    expect((await client.query('SELECT created_by FROM payments WHERE order_id=$1', [orderId])).rows[0].created_by).toBe(String(actorId));
+    await repository.replaceMappedOrderPaymentSnapshots(orderId, [{ ...authored, paidById: '700000004', paidByName: null }], input.requestId, undefined, dealId);
+    expect((await client.query('SELECT paid_by_name FROM bitrix24_incoming_request_payment WHERE bitrix_payment_id=$1', [payment.bitrixPaymentId])).rows[0].paid_by_name).toBeNull();
+    expect(await repository.getMappedOrderPayments(orderId, { mode: 'assigned', userId: actorId + 999999 })).toEqual({ linked: false, orderId });
+  });
+
+  it('reads minimal technical audit labels without exposing Bitrix provenance in general orders', async () => {
+    await repository.convertCrmRequestToProduction(input);
+    const reader = new PgOrderReadRepository(db);
+    const view = await reader.getOrderById({ orderId, currentUser: { id: String(actorId), username: input.actorUsername, role: 'admin', roleId: 1, permissions: ['orders.view'] } });
+    expect(view?.header.createdByLabel).toBe(input.actorUsername);
+    expect(view?.header).not.toHaveProperty('createdByBitrix');
+    expect(view?.header).not.toHaveProperty('email');
+  });
+
+  it('enriches unchanged Deal metadata without business versions or events and rejects stale authors', async () => {
+    const { dealId } = await seedPayment();
+    const snapshot = normalizeBitrixDeal(dealId, { title: 'E2E', createdBy: 700000002, updatedTime: '2026-09-10T00:00:00Z' }, { clientId: null, portalDomain: 'example.invalid', portalTimezone: 'Asia/Almaty', counterparty: null });
+    snapshot.rawSnapshot.createdByName = 'Creator';
+    await client.query("UPDATE crm_sync_mapping SET last_bitrix_hash=$2,last_bitrix_updated_at=$3 WHERE entity_type='order' AND erp_id=$1", [String(orderId), snapshot.normalizedHash, snapshot.bitrixUpdatedAt]);
+    await client.query("INSERT INTO bitrix24_remote_state (object_type,bitrix_id,normalized_hash,raw_snapshot,bitrix_updated_at) VALUES ('deal',$1,$2,'{}',$3)", [dealId, snapshot.normalizedHash, snapshot.bitrixUpdatedAt]);
+    const before = await conversionState();
+    await repository.upsertDeal(snapshot, input.requestId);
+    await repository.upsertDeal({ ...snapshot, rawSnapshot: { ...snapshot.rawSnapshot, createdByName: null } }, input.requestId);
+    await repository.upsertDeal({ ...snapshot, bitrixUpdatedAt: new Date('2020-01-01'), rawSnapshot: { ...snapshot.rawSnapshot, createdBy: '999' } }, input.requestId);
+    expect(await conversionState()).toEqual(before);
+    expect((await client.query("SELECT raw_snapshot FROM bitrix24_remote_state WHERE object_type='deal' AND bitrix_id=$1", [dealId])).rows[0].raw_snapshot).toMatchObject({ createdBy: '700000002', createdByName: 'Creator' });
   });
 
   it.each(['unpaid', 'deleted'])('keeps %s request snapshots explicit and applies selected changes once', async (mode) => {

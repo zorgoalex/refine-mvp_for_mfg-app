@@ -47,6 +47,8 @@ export const ALLOWED_SCOPE_VALUES = {
 } as const satisfies Record<RolePolicyScopeKey, readonly Scope[]>;
 
 const DANGEROUS_PERMISSIONS = new Set<PermissionName>([
+  'cad.technology',
+  'cad.approve',
   'system.superadmin',
   'roles.manage',
   'permissions.manage',
@@ -471,7 +473,8 @@ export class PermissionsService {
     const catalogRows = PERMISSIONS.map((permission, index) => ({
       permission,
       domain: permissionDomain(permission),
-      label: permission,
+      label: ({ 'cad.view': 'CAD: просмотр', 'cad.edit': 'CAD: работа с деталями', 'cad.export': 'CAD: скачивание файлов',
+        'cad.technology': 'CAD: технологические настройки', 'cad.approve': 'CAD: одобрение исключений' } as Partial<Record<PermissionName, string>>)[permission] ?? permission,
       description: null as string | null,
       sortOrder: index + 1,
       isDangerous: DANGEROUS_PERMISSIONS.has(permission),

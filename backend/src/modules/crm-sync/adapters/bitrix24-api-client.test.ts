@@ -22,6 +22,32 @@ const noWait = {
 };
 
 describe('Bitrix24ApiClient', () => {
+  it('loads exact user names only and caches optional enrichment', async () => {
+    const fetchFn = vi.fn<FetchFn>().mockResolvedValue(jsonResponse({ result: [{ ID: '7', NAME: 'Айдар', LAST_NAME: 'Тест', EMAIL: 'secret@example.invalid' }] }));
+    const client = new Bitrix24ApiClient('https://portal/rest/1/secret', fetchFn, 30_000, noWait);
+    expect(await client.getUserDisplayName('7')).toBe('Айдар Тест');
+    expect(await client.getUserDisplayName('7')).toBe('Айдар Тест');
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body))).toEqual({ filter: { ID: '7' } });
+    expect(await client.getUserDisplayName('-1')).toBeNull();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not accept a different user and backs off on permission errors', async () => {
+    const fetchFn = vi.fn<FetchFn>()
+      .mockResolvedValueOnce(jsonResponse({ result: [{ ID: '8', NAME: 'Wrong' }] }))
+      .mockResolvedValueOnce(jsonResponse({ error: 'ACCESS_DENIED' }, 403));
+    const client = new Bitrix24ApiClient('https://portal/rest/1/secret', fetchFn, 30_000, noWait);
+    expect(await client.getUserDisplayName('7')).toBeNull();
+    expect(await client.getUserDisplayName('9')).toBeNull();
+    expect(await client.getUserDisplayName('10')).toBeNull();
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('never swallows lost request ownership during name enrichment', async () => {
+    const client = new Bitrix24ApiClient('https://portal/rest/1/secret', vi.fn(), 30_000, noWait);
+    await expect(client.withRequestGuard(async () => { throw new Error('lease lost'); }, () => client.getUserDisplayName('7'))).rejects.toThrow('lease lost');
+  });
   it('creates a CRM item through incoming webhook', async () => {
     const fetchFn = vi.fn<FetchFn>().mockResolvedValue(
       jsonResponse({ result: { item: { id: 42 } } }),

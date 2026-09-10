@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { BitrixActorLabel, BitrixPaymentAuthorship } from '../../components/bitrix24/BitrixAuthorship';
 import {
   Alert,
   Button,
@@ -750,6 +751,9 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
               <Descriptions.Item label="Ответственный">
                 {selected.assignedByName || selected.assignedById || '—'}
               </Descriptions.Item>
+              <Descriptions.Item label="Создал в Bitrix">
+                <BitrixActorLabel actor={selected.createdByBitrix} />
+              </Descriptions.Item>
               <Descriptions.Item label="Обновлено">
                 {formatDateTime(selected.bitrixUpdatedAt)}
               </Descriptions.Item>
@@ -869,6 +873,7 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
               } : undefined}
               columns={[
                 { title: 'ID', dataIndex: 'bitrixPaymentId' },
+                { title: 'Авторство', key: 'authorship', render: (_, payment) => <BitrixPaymentAuthorship payment={payment} /> },
                 {
                   title: 'Система',
                   key: 'system',

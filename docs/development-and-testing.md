@@ -60,10 +60,47 @@ npm run build
 Backend:
 
 ```bash
-cd backend
-npm test
-npm run build
+npm ci
+npm ci --prefix backend
+npm run typecheck --prefix backend
+npm run test:backend -- --maxWorkers=1 --no-file-parallelism
+npm run build --prefix backend
 ```
+
+Команды выполняются из корня репозитория. Root Vitest использует общий config,
+aliases и fixtures; зависимости NestJS устанавливаются отдельно из
+`backend/package-lock.json`. Запуск `npm test` из `backend` не эквивалентен этому
+набору. Python 3.12 нужен SVG contract-тестам; внешние сервисы им не требуются.
+
+Workflow `Backend Quality` запускает отдельный job `Backend typecheck and tests`
+для push в `main`/`feat/backend-erp-stage1`, PR с любой исходной веткой в эти две
+ветки и ручного запуска. Он устанавливает оба lockfile, проверяет production
+backend с `strict: true` без допуска старых ошибок и запускает весь
+`test:backend` из корня. Ненулевой exit typecheck или тестов завершает job ошибкой.
+JUnit-отчёт сохраняется в artifact `backend-test-results`.
+
+Этот gate охватывает автономные unit/contract-тесты. SQL-интеграции с отдельными
+configs и проверки, включаемые переменными окружения, требуют отдельной тестовой
+БД и не считаются пройденными при skip. Типы тестов и declarations зависимостей
+не входят в backend typecheck (`skipLibCheck: true`). Обязательность job для
+merge настраивается отдельно в GitHub ruleset: required context должен точно
+называться `Backend typecheck and tests`. Сам workflow не включает branch protection.
+
+Тест `production-statuses-seed.test.ts` в CI проверяет версионируемый SQL-снимок
+`backend/src/schema/fixtures/production-statuses-seed.v14.sql`. Он содержит точные
+`CREATE TABLE production_statuses` и `INSERT INTO production_statuses` из
+`spec_erp/docs/reference/postgresql_schema_v_14.sql` на 2026-09-09. Внешний файл
+не входит в checkout и автоматически не отслеживается. При его изменении
+обновляйте оба SQL-оператора снимка вместе. Текущую внешнюю схему можно проверить
+явно (путь выбирается относительно текущей рабочей папки):
+
+```bash
+ERP_CANONICAL_SCHEMA_PATH=/path/to/spec_erp/docs/reference/postgresql_schema_v_14.sql \
+  npx vitest run backend/src/schema/production-statuses-seed.test.ts --maxWorkers=1 --no-file-parallelism
+```
+
+Отсутствующий явно заданный файл завершит тест ошибкой. Проверка анализирует
+SQL-текст; реальное применение seed к БД требует отдельной SQL-интеграции.
 
 Playwright:
 
@@ -107,8 +144,7 @@ API перехватываются Playwright route mocks.
 
 ```bash
 npm test
-cd backend && npm test
-cd ..
+npm run typecheck --prefix backend
 npx playwright test
 ```
 

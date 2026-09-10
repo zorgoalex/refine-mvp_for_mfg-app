@@ -10,19 +10,30 @@ import { OrderQueryService } from '../orders/application/order-query.service';
 import { PgOrderReadRepository } from '../orders/adapters/pg-order-read-repository';
 import { CadDocumentError, applyVariantChanges, cloneVariant, createGroups, refreshVariant, validateComposition,
   type CadGroup, type CadRecipeRef, type CadSourceSnapshot, type CadVariant } from '../../shared/cad-workspace';
-import type { CadJob } from '../../shared/cad-api';
+import type { CadJob, CadExportReview, CadSourceStatus, CadApprovalReceipt, CadApprovalCommand } from '../../shared/cad-api';
 import { CadClient } from './cad-client';
+import { cadRenderPart, compareCadSource, sourceComparisonHash, manufacturingChanges } from './cad-editor-rules';
 
 interface RunRow {
   id: string; variant_id: string; revision: number; payload: unknown; actor: CurrentUser; request_id: string;
   remote_job_id: string | null; status: CadJob['status']; last_error: string | null; package_id: string | null; package_requested: boolean; attempts: number;
   package_actor: CurrentUser | null; package_request_id: string | null;
 }
+interface ReviewRow {
+  id: string; actor_id: string; variant_id: string; revision: number; run_id: string;
+  remote_job_id: string; source_hash: string; source_status: CadSourceStatus[]; expires_at: Date;
+  acknowledged_at: Date | null;
+}
+interface ApprovalRow {
+  id: string; run_id: string; group_id: string; manufacturing_hash: string; reason: string;
+  actor: CurrentUser; request_id: string; status: CadApprovalCommand['status']; receipt: CadApprovalReceipt | null;
+  last_error: string | null; attempts: number;
+}
 
 export class CadService implements OnModuleInit, OnModuleDestroy {
   private timer?: ReturnType<typeof setTimeout>;
   private stopping = false;
-  constructor(private readonly database: DatabaseService, readonly client: CadClient, readonly enabled: boolean) {}
+  constructor(private readonly database: DatabaseService, readonly client: CadClient, readonly enabled: boolean, readonly editorEnabled = false) {}
   onModuleInit() { if (this.enabled) this.schedule(); }
   onModuleDestroy() { this.stopping = true; if (this.timer) clearTimeout(this.timer); }
   private schedule() {
@@ -112,14 +123,7 @@ export class CadService implements OnModuleInit, OnModuleDestroy {
     const existing = await db.query<{ id: string }>('SELECT id FROM cad_runs WHERE variant_id=$1 AND revision=$2', [variant.id, variant.version]);
     if (existing.rows[0]) return existing.rows[0].id;
     const id = randomUUID();
-    const parts = variant.groups.map(g => {
-      const source = variant.sources.find(s => s.id === g.sourceSnapshotId);
-      const part = source?.parts.find(p => p.detailId === g.detailId);
-      return { part_id: g.id, side: 'front', width_mm: part?.widthMm, height_mm: part?.heightMm, quantity: g.quantity,
-        material: part?.material, thickness_mm: part?.thicknessMm, recipe: g.recipe,
-        metadata: { workspaceId: variant.workspaceId, variantId: variant.id, revision: variant.version,
-          orderId: g.orderId, detailId: g.detailId, sourceSnapshotId: g.sourceSnapshotId, originalRecipe: part?.recipe ?? null, edgeType: part?.edgeName ?? '', excludedOperations: ['obkat'] } };
-    });
+    const parts = variant.groups.map(g => cadRenderPart(variant, g));
     await db.query('INSERT INTO cad_runs(id,variant_id,revision,payload,actor,request_id) VALUES($1,$2,$3,$4::jsonb,$5::jsonb,$6)',
       [id, variant.id, variant.version, JSON.stringify({ units: 'mm', parts, formats: ['svg', 'dxf'] }), JSON.stringify(user), key]);
     await this.event(db, user, key, 'cad.render.requested', variant, id, { revision: variant.version }, id);
@@ -162,7 +166,9 @@ export class CadService implements OnModuleInit, OnModuleDestroy {
     });
   }
   async save(user: CurrentUser, id: string, version: number, groups: CadGroup[], sourceIds: string[], key: string) {
-    this.require(user, 'cad.edit'); await this.variant(this.database, user, id);
+    this.require(user, 'cad.edit');
+    const base = await this.revision(this.database, user, id, version);
+    await this.checkManufacturingChanges(user, base, groups);
     const sourceRows = await this.database.query<{ data: CadSourceSnapshot }>('SELECT data FROM cad_sources WHERE id=ANY($1::uuid[])', [sourceIds]);
     if (sourceRows.rows.length !== new Set(sourceIds).size) throw new ApiError(422, 'SOURCE_NOT_FOUND', 'Unknown source');
     const sources = sourceRows.rows.map(r => r.data); await this.access(this.database, user, sources.map(s => s.orderId));
@@ -183,10 +189,105 @@ export class CadService implements OnModuleInit, OnModuleDestroy {
       const next = refresh
         ? refreshVariant(previous, await Promise.all(previous.sources.map(s => this.capture(db, user, s.orderId))), randomUUID(), name, now).variant
         : cloneVariant(previous, randomUUID(), name, now);
+      await this.checkManufacturingChanges(user, previous, next.groups);
       await this.insertVariant(db, next);
       await this.event(db, user, key, refresh ? 'cad.variant.refreshed' : 'cad.variant.created', next, next.id, { parentId: previous.id, conflicts: validateComposition(next.groups, next.sources) });
       return next;
     });
+  }
+  private async checkManufacturingChanges(user: CurrentUser, before: CadVariant, groups: CadGroup[]) {
+    const changes = manufacturingChanges(before, groups).filter(g => g.recipe !== null);
+    if (!changes.length) return;
+    const evaluations = await this.client.evaluate(changes.flatMap(g => g.recipe ? [g.recipe] : []));
+    if (evaluations.length !== changes.length) throw new ApiError(502, 'CAD_EVALUATION_INCOMPLETE', 'Incomplete policy evaluation');
+    const denied = evaluations.flatMap((result, index) => !result.manager_allowed && !user.permissions.includes('cad.technology')
+      ? [{ groupId: changes[index].id, code: 'CAD_TECHNOLOGY_REQUIRED', message: 'Для этих настроек требуется технолог' }] : []);
+    if (denied.length) throw new ApiError(403, 'CAD_TECHNOLOGY_REQUIRED', 'Technology permission required', { issues: denied });
+    // Technologists may save incomplete configurations for correction, but never
+    // unknown parameters/tools. CAD will validate concrete geometry before export.
+    const invalid = evaluations.flatMap((result, index) => result.errors.filter(e =>
+      !['RECIPE_PARAMETER_REQUIRED', 'RECIPE_PARAMETER_INVALID'].includes(e.code)).map(e => ({ ...e, groupId: changes[index].id })));
+    if (invalid.length) throw new ApiError(422, 'CAD_RECIPE_INVALID', 'Unsupported recipe configuration', { issues: invalid });
+  }
+
+  async fork(user: CurrentUser, id: string, version: number, name: string, groups: CadGroup[], sourceIds: string[], key: string) {
+    this.require(user, 'cad.edit');
+    const base = await this.revision(this.database, user, id, version);
+    await this.checkManufacturingChanges(user, base, groups);
+    const rows = await this.database.query<{ data: CadSourceSnapshot }>('SELECT data FROM cad_sources WHERE id=ANY($1::uuid[])', [sourceIds]);
+    if (rows.rows.length !== new Set(sourceIds).size) throw new ApiError(422, 'SOURCE_NOT_FOUND', 'Unknown source');
+    const sources = rows.rows.map(r => r.data); await this.access(this.database, user, sources.map(s => s.orderId));
+    return this.mutate(user, key, 'fork', { id, version, name, groups, sourceIds }, async db => {
+      await this.revision(db, user, id, version);
+      const seed = cloneVariant(base, randomUUID(), name, new Date().toISOString());
+      const next = { ...applyVariantChanges(seed, 1, groups, sources), version: 1 };
+      await this.insertVariant(db, next);
+      await this.event(db, user, key, 'cad.variant.forked', next, next.id, { parentId: id, baseRevision: version });
+      return next;
+    });
+  }
+
+  async preview(user: CurrentUser, id: string, version: number, groups: CadGroup[]) {
+    this.require(user, 'cad.view');
+    const base = await this.revision(this.database, user, id, version);
+    const changed = manufacturingChanges(base, groups);
+    if (changed.length) {
+      this.require(user, 'cad.edit');
+      if (base.kind === 'original') throw new ApiError(409, 'CAD_ORIGINAL_IMMUTABLE', 'Original is immutable');
+      await this.checkManufacturingChanges(user, base, groups);
+    }
+    for (const group of groups) {
+      const trusted = base.groups.find(g => g.id === group.id);
+      if (!trusted || trusted.sourceSnapshotId !== group.sourceSnapshotId || trusted.orderId !== group.orderId || trusted.detailId !== group.detailId) {
+        throw new ApiError(422, 'CAD_PROVENANCE_IMMUTABLE', 'Preview must reference a persisted source part');
+      }
+    }
+    return this.client.preview({ units: 'mm', parts: groups.map(g => cadRenderPart(base, g)) });
+  }
+
+  private async sourceState(db: DatabaseClient, user: CurrentUser, variant: CadVariant) {
+    const fresh: CadSourceSnapshot[] = [];
+    for (const source of variant.sources) fresh.push(await this.capture(db, user, source.orderId, false));
+    return { hash: sourceComparisonHash(fresh), status: variant.sources.map(source => compareCadSource(source, fresh.find(s => s.orderId === source.orderId)!)) };
+  }
+
+  async preflight(user: CurrentUser, id: string, revision: number, key: string): Promise<CadExportReview> {
+    this.require(user, 'cad.export');
+    const variant = await this.revision(this.database, user, id, revision);
+    const rows = await this.database.query<RunRow>('SELECT * FROM cad_runs WHERE variant_id=$1 AND revision=$2', [id, revision]);
+    const run = rows.rows[0];
+    if (!run?.remote_job_id || run.status !== 'succeeded') throw new ApiError(409, 'CAD_RENDER_REQUIRED', 'Complete render required');
+    const readiness = await this.client.readiness(run.remote_job_id);
+    const original = await this.database.query<{ data: CadVariant }>("SELECT data FROM cad_variants WHERE workspace_id=$1 AND kind='original'", [variant.workspaceId]);
+    const source = await this.database.transaction(async db => {
+      await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      return this.sourceState(db, user, variant);
+    });
+    const base = { ready: readiness.ready, reviewId: null, runId: run.id, version: revision, variantName: variant.name,
+      sourceStatus: source.status, readiness, positions: variant.groups.length, quantity: variant.groups.reduce((n, g) => n + g.quantity, 0),
+      changedGroupIds: variant.groups.filter(g => !original.rows[0]?.data.groups.some(old => JSON.stringify(old) === JSON.stringify(g))).map(g => g.id) };
+    if (!readiness.ready) return base;
+    return this.mutate(user, key, 'export-review', { id, revision, sourceHash: source.hash }, async db => {
+      const reviewId = randomUUID(), expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+      await db.query(`INSERT INTO cad_export_reviews(id,actor_id,variant_id,revision,run_id,remote_job_id,source_hash,source_status,expires_at)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)`, [reviewId, user.id, id, revision, run.id, run.remote_job_id, source.hash, JSON.stringify(source.status), expiresAt]);
+      await this.event(db, user, key, 'cad.export.reviewed', variant, reviewId, { revision, sourceHash: source.hash, sourceStatus: source.status }, run.id);
+      return { ...base, reviewId, expiresAt };
+    });
+  }
+
+  private async checkExportReview(db: DatabaseClient, user: CurrentUser, run: RunRow, reviewId?: string, requireAcknowledged = true) {
+    if (!reviewId) throw new ApiError(409, 'CAD_EXPORT_REVIEW_REQUIRED', 'Review this version before download');
+    const rows = await db.query<ReviewRow>('SELECT * FROM cad_export_reviews WHERE id=$1 AND actor_id=$2 AND run_id=$3', [reviewId, user.id, run.id]);
+    const review = rows.rows[0];
+    if (!review || review.remote_job_id !== run.remote_job_id || review.variant_id !== run.variant_id || review.revision !== run.revision || new Date(review.expires_at).getTime() <= Date.now()) {
+      throw new ApiError(409, 'CAD_EXPORT_REVIEW_EXPIRED', 'Review the current source differences again');
+    }
+    const variant = await this.revision(db, user, run.variant_id, run.revision);
+    const source = await this.sourceState(db, user, variant);
+    if (source.hash !== review.source_hash) throw new ApiError(409, 'CAD_EXPORT_SOURCE_CHANGED', 'Source changed after review');
+    if (requireAcknowledged && !review.acknowledged_at) throw new ApiError(409, 'CAD_EXPORT_CONFIRM_REQUIRED', 'Confirm export summary');
+    return review;
   }
   async render(user: CurrentUser, id: string, version: number, key: string) {
     this.require(user, 'cad.edit'); await this.variant(this.database, user, id); await this.client.capabilities();
@@ -217,16 +318,23 @@ export class CadService implements OnModuleInit, OnModuleDestroy {
     await this.access(db, user, stored.rows[0].data.sources.map(s => s.orderId));
     return stored.rows[0].data;
   }
-  async requestPackage(user: CurrentUser, id: string, revision: number, key: string) {
+  async requestPackage(user: CurrentUser, id: string, revision: number, key: string, reviewId?: string, acknowledgeStale = false) {
     this.require(user, 'cad.export'); const archived = await this.revision(this.database, user, id, revision);
     const selected = await this.database.query<RunRow>('SELECT * FROM cad_runs WHERE variant_id=$1 AND revision=$2', [id, revision]);
     const run = selected.rows[0];
-    if (!run || run.status !== 'succeeded') throw new ApiError(409, 'CAD_RENDER_REQUIRED', 'Complete render required');
+    if (!run?.remote_job_id || run.status !== 'succeeded') throw new ApiError(409, 'CAD_RENDER_REQUIRED', 'Complete render required');
     await this.checkRunSources(user, run);
-    return this.mutate(user, key, 'package', { id, revision }, async db => {
+    const review = await this.checkExportReview(this.database, user, run, reviewId, false);
+    if (review.source_status.some(s => s.stale) && !acknowledgeStale) throw new ApiError(409, 'CAD_EXPORT_STALE_ACK_REQUIRED', 'Acknowledge changed source details');
+    if (!(await this.client.readiness(run.remote_job_id)).ready) throw new ApiError(409, 'CAD_APPROVAL_REQUIRED', 'Every included part must be approved');
+    return this.mutate(user, key, 'package', { id, revision, reviewId, acknowledgeStale }, async db => {
+      await this.checkExportReview(db, user, run, reviewId, false);
       const locked = await db.query<RunRow>('SELECT * FROM cad_runs WHERE id=$1 FOR UPDATE', [run.id]);
       const current = locked.rows[0];
-      if (current.package_requested && !current.package_id) throw new ApiError(409, 'CAD_PACKAGE_PENDING', 'Package request already running');
+      await db.query('UPDATE cad_export_reviews SET acknowledged_at=COALESCE(acknowledged_at,now()) WHERE id=$1', [reviewId]);
+      await this.event(db, user, key, 'cad.export.confirmed', archived, review.id,
+        { revision, sourceHash: review.source_hash, sourceStatus: review.source_status, acknowledgeStale }, run.id);
+      if (current.package_requested && !current.package_id) return { runId: run.id };
       await db.query(`UPDATE cad_runs SET package_requested=true,package_actor=$2::jsonb,package_request_id=$3,
         attempts=0,last_error=NULL,next_attempt_at=now() WHERE id=$1`, [run.id, JSON.stringify(user), key]);
       await this.event(db, user, key, 'cad.package.requested', archived, run.id, { revision }, run.id);
@@ -234,20 +342,106 @@ export class CadService implements OnModuleInit, OnModuleDestroy {
       return { runId: run.id };
     });
   }
-  async download(user: CurrentUser, runId: string, artifactId: string) {
+  async download(user: CurrentUser, runId: string, artifactId: string, reviewId?: string): Promise<Response> {
     this.require(user, 'cad.export');
     const rows = await this.database.query<RunRow>('SELECT * FROM cad_runs WHERE id=$1', [runId]); const run = rows.rows[0];
     if (!run) throw new ApiError(404, 'CAD_RUN_NOT_FOUND', 'Run not found');
     await this.checkRunSources(user, run);
     // Production exports only after package eligibility has been checked by CAD.
     if (!run.package_id || !run.remote_job_id) throw new ApiError(409, 'CAD_PACKAGE_REQUIRED', 'Approved package required');
+    await this.checkExportReview(this.database, user, run, reviewId);
+    if (!(await this.client.readiness(run.remote_job_id)).ready) throw new ApiError(409, 'CAD_APPROVAL_REQUIRED', 'Every included part must be approved');
     const job = await this.client.job(run.remote_job_id);
     if (artifactId !== run.package_id && !job.package_files.some(f => f.id === artifactId) && !job.items.some(i => i.result?.files?.some(f => f.id === artifactId))) throw new ApiError(404, 'ARTIFACT_NOT_FOUND', 'Artifact not in selected revision');
-    return this.client.artifact(artifactId);
+    const response = await this.client.artifact(artifactId), bytes = await response.arrayBuffer();
+    await this.database.transaction(async db => {
+      await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+      await this.checkExportReview(db, user, run, reviewId);
+      const variant = await this.revision(db, user, run.variant_id, run.revision);
+      await this.event(db, user, randomUUID(), 'cad.export.downloaded', variant, artifactId, { reviewId, revision: run.revision }, run.id);
+    });
+    return new Response(bytes, { headers: response.headers });
   }
   async mappings(user: CurrentUser) {
     this.require(user, 'cad.view');
     return (await this.database.query('SELECT mt.milling_type_id,mt.milling_type_name,m.recipe,m.revision FROM milling_types mt LEFT JOIN cad_recipe_mappings m USING(milling_type_id) ORDER BY mt.milling_type_name')).rows;
+  }
+  async requestApproval(user: CurrentUser, id: string, version: number, groupId: string, manufacturingHash: string, reason: string, key: string) {
+    this.require(user, 'cad.approve'); this.require(user, 'cad.view');
+    const variant = await this.revision(this.database, user, id, version);
+    const row = await this.database.query<RunRow>('SELECT * FROM cad_runs WHERE variant_id=$1 AND revision=$2', [id, version]);
+    const run = row.rows[0];
+    if (!run?.remote_job_id) throw new ApiError(409, 'CAD_RENDER_REQUIRED', 'Render this version first');
+    const part = (await this.client.readiness(run.remote_job_id)).items.find(p => p.part_id === groupId);
+    if (!part || part.manufacturing_hash !== manufacturingHash || part.status !== 'succeeded') throw new ApiError(409, 'CAD_APPROVAL_TARGET_CHANGED', 'Review the successful frozen part again');
+    if (!reason.trim() || reason.length > 1000) throw new ApiError(422, 'CAD_APPROVAL_REASON_REQUIRED', 'Approval reason required');
+    return this.mutate(user, key, 'approve', { id, version, groupId, manufacturingHash, reason }, async db => {
+      await this.revision(db, user, id, version);
+      const commandId = randomUUID();
+      await db.query(`INSERT INTO cad_approval_commands(id,run_id,group_id,manufacturing_hash,reason,actor,request_id)
+        VALUES($1,$2,$3,$4,$5,$6::jsonb,$7)`, [commandId, run.id, groupId, manufacturingHash, reason.trim(), JSON.stringify(user), key]);
+      await this.event(db, user, key, 'cad.approval.requested', variant, commandId, { groupId, manufacturingHash, reason: reason.trim() }, run.id);
+      return { id: commandId, status: 'pending' as const, lastError: null, receipt: null };
+    });
+  }
+  async approvalStatus(user: CurrentUser, id: string): Promise<CadApprovalCommand> {
+    this.require(user, 'cad.view');
+    const rows = await this.database.query<ApprovalRow>('SELECT * FROM cad_approval_commands WHERE id=$1', [id]);
+    const command = rows.rows[0];
+    if (!command) throw new ApiError(404, 'CAD_APPROVAL_NOT_FOUND', 'Approval command not found');
+    const run = await this.database.query<RunRow>('SELECT * FROM cad_runs WHERE id=$1', [command.run_id]);
+    await this.checkRunSources(user, run.rows[0]);
+    return { id, status: command.status, lastError: command.last_error, receipt: command.receipt };
+  }
+  private async dispatchApproval(assertOwned: () => Promise<void>) {
+    const rows = await this.database.query<ApprovalRow>("SELECT * FROM cad_approval_commands WHERE status='pending' AND next_attempt_at<=now() ORDER BY created_at LIMIT 1");
+    const command = rows.rows[0]; if (!command) return;
+    const selected = await this.database.query<RunRow>('SELECT * FROM cad_runs WHERE id=$1', [command.run_id]);
+    const run = selected.rows[0];
+    try {
+      await assertOwned();
+      if (!run?.remote_job_id) throw new ApiError(409, 'CAD_APPROVAL_TARGET_CHANGED', 'Missing frozen job');
+      // Reconcile a lost ACK before checking today's authority: never issue a new
+      // approval using revoked rights, never lose an already committed receipt.
+      let receipt = await this.client.exceptionReceipt(run.remote_job_id, command.id);
+      if (!receipt) {
+        const actor = command.actor;
+        this.require(actor, 'cad.approve'); this.require(actor, 'cad.view');
+        const authorization = await this.database.query<{ allowed: boolean }>(`SELECT EXISTS (
+          SELECT 1 FROM users u JOIN roles r ON r.role_id=u.role_id CROSS JOIN permissions_state ps
+          WHERE u.user_id=$1 AND u.is_active AND r.is_active AND u.role_id=$2
+            AND ps.id=true AND ps.version=$3 AND NOT EXISTS (
+              SELECT unnest(ARRAY['cad.approve','cad.view','orders.view']) EXCEPT
+              SELECT rp.permission_name FROM role_permissions rp JOIN permissions_catalog pc USING(permission_name)
+              WHERE rp.role_id=u.role_id AND rp.is_enabled AND pc.is_active)) AS allowed`, [actor.id, actor.roleId, actor.permissionsVersion ?? -1]);
+        if (!authorization.rows[0]?.allowed) throw new ApiError(403, 'CAD_APPROVAL_AUTHORITY_CHANGED', 'Approver permissions changed; submit again');
+        await this.checkRunSources(actor, run);
+        const part = (await this.client.readiness(run.remote_job_id)).items.find(p => p.part_id === command.group_id);
+        if (part?.manufacturing_hash !== command.manufacturing_hash || part.status !== 'succeeded') throw new ApiError(409, 'CAD_APPROVAL_TARGET_CHANGED', 'Frozen target changed');
+        await assertOwned();
+        receipt = await this.client.approveException(run.remote_job_id, command.id, { part_id: command.group_id,
+          actor: { id: Number(actor.id), name: actor.username }, reason: command.reason });
+      }
+      if (receipt.manufacturing_hash !== command.manufacturing_hash || receipt.part_id !== command.group_id) throw new ApiError(502, 'CAD_APPROVAL_RECEIPT_MISMATCH', 'Unexpected approval receipt');
+      await assertOwned();
+      await this.database.transaction(async db => {
+        await db.query("UPDATE cad_approval_commands SET status='succeeded',receipt=$2::jsonb,last_error=NULL WHERE id=$1", [command.id, JSON.stringify(receipt)]);
+        const stored = await db.query<{ data: CadVariant }>('SELECT data FROM cad_variant_revisions WHERE variant_id=$1 AND revision=$2', [run.variant_id, run.revision]);
+        await this.event(db, command.actor, command.request_id, 'cad.approval.completed', stored.rows[0].data, command.id, { receipt }, run.id);
+      });
+    } catch (error) {
+      await assertOwned();
+      const code = error instanceof ApiError ? error.code : 'CAD_TRANSIENT_ERROR';
+      const terminal = command.attempts >= 4 || (error instanceof ApiError && [403, 409, 422].includes(error.statusCode));
+      await this.database.transaction(async db => {
+        await db.query(`UPDATE cad_approval_commands SET status=CASE WHEN $3 THEN 'failed' ELSE 'pending' END,
+          last_error=$2,attempts=attempts+1,next_attempt_at=now()+interval '15 seconds' WHERE id=$1`, [command.id, code, terminal]);
+        if (terminal) {
+          const stored = await db.query<{ data: CadVariant }>('SELECT data FROM cad_variant_revisions WHERE variant_id=$1 AND revision=$2', [run.variant_id, run.revision]);
+          await this.event(db, command.actor, command.request_id, 'cad.approval.failed', stored.rows[0].data, command.id, { code }, run.id);
+        }
+      });
+    }
   }
   async sourceStatus(user: CurrentUser, id: string) {
     this.require(user, 'cad.view');
@@ -282,6 +476,7 @@ export class CadService implements OnModuleInit, OnModuleDestroy {
   async tick() {
     if (!this.enabled || this.stopping) return;
     await this.database.withAdvisoryLock('cad-dispatcher-v1', async assertOwned => {
+      await this.dispatchApproval(assertOwned);
       const rows = await this.database.query<RunRow>(`SELECT * FROM cad_runs WHERE next_attempt_at<=now() AND
         (status IN ('queued','running') OR (package_requested AND package_id IS NULL)) ORDER BY updated_at LIMIT 1`);
       const run = rows.rows[0]; if (!run) return;

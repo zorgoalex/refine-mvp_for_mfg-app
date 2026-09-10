@@ -8,6 +8,21 @@ import {
 } from './bitrix24-reverse-normalizer';
 
 describe('Bitrix24 reverse normalizer', () => {
+  it('keeps creator separate from assignment without changing business hash', () => {
+    const options = { clientId: null, portalDomain: 'mebelkz.bitrix24.kz', portalTimezone: 'Asia/Almaty', counterparty: null };
+    const base = normalizeBitrixDeal('20', { title: 'Test', assignedById: 9 }, options);
+    const authored = normalizeBitrixDeal('20', { title: 'Test', assignedById: 9, createdBy: 2, updatedBy: 3 }, options);
+    expect(authored.rawSnapshot).toMatchObject({ createdBy: '2', updatedBy: '3', assignedById: '9' });
+    expect(authored.normalizedHash).toBe(base.normalizedHash);
+  });
+
+  it('records paid-state actor, never infers creator from responsible user', () => {
+    const base = normalizeBitrixPayment('44', { sum: 100, paid: 'Y' });
+    const authored = normalizeBitrixPayment('44', { sum: 100, paid: 'Y', empPaidId: 4, responsibleId: 5 });
+    expect(authored).toMatchObject({ paidById: '4' });
+    expect(authored.normalizedHash).toBe(base.normalizedHash);
+    expect(normalizeBitrixPayment('44', { empPaidId: 0, responsibleId: 5 }).paidById).toBeNull();
+  });
   it('normalizes Contact names, phones and ERP origin', () => {
     const result = normalizeBitrixClient('contact', '77', {
       name: 'Иван',

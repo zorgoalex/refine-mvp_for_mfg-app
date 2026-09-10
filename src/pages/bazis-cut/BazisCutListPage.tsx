@@ -1,3 +1,4 @@
+import { PopconfirmContent } from "../../components/PopconfirmContent";
 import { Table } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Card, Input, Popconfirm, Space, Typography, message } from 'antd';
@@ -73,7 +74,7 @@ export const BazisCutListPage: React.FC = () => {
           Удалить
         </Button>;
         if (!empty) return <span onClick={(event) => event.stopPropagation()}>{button}</span>;
-        return <span onClick={(event) => event.stopPropagation()}><Popconfirm title="Удалить пустой набор?" description={`«${row.name}» будет удалён безвозвратно.`}
+        return <span onClick={(event) => event.stopPropagation()}><Popconfirm title={<PopconfirmContent title="Удалить пустой набор?" description={`«${row.name}» будет удалён безвозвратно.`} />}
           okText="Удалить" cancelText="Отмена" onConfirm={() => void removeSet(row)}>
           {button}
         </Popconfirm></span>;

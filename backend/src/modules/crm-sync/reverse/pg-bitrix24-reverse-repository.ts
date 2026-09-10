@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { dealCreatorSql, PAYMENT_AUTHORSHIP_SQL, type BitrixActor } from './bitrix24-authorship';
 import type { AuditService } from '../../../common/audit/audit.service';
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
@@ -74,6 +75,8 @@ export interface ReverseDealSnapshot {
 
 export interface ReversePaymentSnapshot {
   bitrixPaymentId: string;
+  paidById?: string | null;
+  paidByName?: string | null;
   paySystemId: number | null;
   paySystemName: string | null;
   amount: number;
@@ -681,6 +684,7 @@ export class PgBitrix24ReverseRepository {
       await assertInboundOwnership(tx, requestId, lockToken);
       await lockAggregate(tx, `deal:${snapshot.bitrixId}`);
       await setReverseOrigin(tx);
+      await refreshDealAuthorship(tx, snapshot);
       const exact = await this.readMapping(
         tx,
         `entity_type='order' AND bitrix_object='deal' AND bitrix_id=$1`,
@@ -1513,12 +1517,14 @@ export class PgBitrix24ReverseRepository {
              pay_system_id, pay_system_name,
              amount, currency_id, paid, payment_date, payment_local_date,
              normalized_hash, state,
-             bitrix_created_at, bitrix_updated_at, last_fetched_at, updated_at
+             bitrix_created_at, bitrix_updated_at, last_fetched_at, updated_at, paid_by_id, paid_by_name
            )
-           VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8,$9,$10,'active',$11,$12,now(),now())
+           VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8,$9,$10,'active',$11,$12,now(),now(),$13,$14)
            ON CONFLICT (bitrix_payment_id) DO UPDATE SET
              request_id=EXCLUDED.request_id,
              erp_order_id=NULL,
+             paid_by_id=EXCLUDED.paid_by_id,
+             paid_by_name=COALESCE(EXCLUDED.paid_by_name, CASE WHEN bitrix24_incoming_request_payment.paid_by_id=EXCLUDED.paid_by_id THEN bitrix24_incoming_request_payment.paid_by_name END),
              pay_system_id=EXCLUDED.pay_system_id,
              pay_system_name=EXCLUDED.pay_system_name,
              amount=EXCLUDED.amount, currency_id=EXCLUDED.currency_id,
@@ -1547,6 +1553,8 @@ export class PgBitrix24ReverseRepository {
             payment.normalizedHash,
             payment.bitrixCreatedAt,
             payment.bitrixUpdatedAt,
+            payment.paidById ?? null,
+            payment.paidByName ?? null,
           ],
         );
       }
@@ -1762,12 +1770,14 @@ export class PgBitrix24ReverseRepository {
              bitrix_payment_id, request_id, erp_order_id,
              pay_system_id, pay_system_name, amount, currency_id, paid,
              payment_date, payment_local_date, normalized_hash, state, bitrix_created_at,
-             bitrix_updated_at, last_fetched_at, updated_at
+             bitrix_updated_at, last_fetched_at, updated_at, paid_by_id, paid_by_name
            )
-           VALUES ($1,$13,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active',$11,$12,now(),now())
+           VALUES ($1,$13,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active',$11,$12,now(),now(),$14,$15)
            ON CONFLICT (bitrix_payment_id) DO UPDATE SET
              erp_order_id=EXCLUDED.erp_order_id,
              request_id=EXCLUDED.request_id,
+             paid_by_id=EXCLUDED.paid_by_id,
+             paid_by_name=COALESCE(EXCLUDED.paid_by_name, CASE WHEN bitrix24_incoming_request_payment.paid_by_id=EXCLUDED.paid_by_id THEN bitrix24_incoming_request_payment.paid_by_name END),
              pay_system_id=EXCLUDED.pay_system_id,
              pay_system_name=EXCLUDED.pay_system_name,
              amount=EXCLUDED.amount, currency_id=EXCLUDED.currency_id,
@@ -1797,6 +1807,8 @@ export class PgBitrix24ReverseRepository {
             payment.bitrixCreatedAt,
             payment.bitrixUpdatedAt,
             paymentOwner.requestId,
+            payment.paidById ?? null,
+            payment.paidByName ?? null,
           ],
         );
       }
@@ -2070,6 +2082,7 @@ export class PgBitrix24ReverseRepository {
     canViewFinancials: boolean,
   ): Promise<Record<string, unknown>> {
     const request = await this.db.query<{
+      created_by_bitrix: BitrixActor | null;
       request_id: string | number;
       bitrix_deal_id: string;
       client_id: string | number | null;
@@ -2107,7 +2120,8 @@ export class PgBitrix24ReverseRepository {
               (SELECT COUNT(*) FROM order_details detail
                 WHERE detail.order_id=linked_order.order_id AND detail.delete_flag=false) AS detail_count,
               linked_order.final_amount AS erp_final_amount,
-              linked_order.version AS order_version
+              linked_order.version AS order_version,
+              ${dealCreatorSql('request.bitrix_deal_id')} AS created_by_bitrix
          FROM bitrix24_incoming_request request
          LEFT JOIN clients client ON client.client_id=request.client_id
          LEFT JOIN orders linked_order ON linked_order.order_id=request.linked_order_id
@@ -2140,12 +2154,14 @@ export class PgBitrix24ReverseRepository {
       mapped_type_paid_id: string | number | null;
       manual_command_id: string | null;
       command_status: string | null;
+      authorship: { createdBy: BitrixActor | null; paidBy: BitrixActor | null };
     }>(
       `SELECT payment.bitrix_payment_id, payment.pay_system_id,
               payment.pay_system_name, payment.amount, payment.currency_id,
               payment.paid, payment.payment_date, payment.state,
               payment.erp_payment_id, mapping.type_paid_id AS mapped_type_paid_id,
-              payment.manual_command_id, command.status AS command_status
+              payment.manual_command_id, command.status AS command_status,
+              ${PAYMENT_AUTHORSHIP_SQL} AS authorship
          FROM bitrix24_incoming_request_payment payment
          LEFT JOIN bitrix24_payment_type_mapping mapping
            ON mapping.pay_system_id=payment.pay_system_id AND mapping.active=true
@@ -2169,6 +2185,7 @@ export class PgBitrix24ReverseRepository {
       stageName: row.stage_name,
       assignedById: row.assigned_by_id,
       assignedByName: row.assigned_by_name,
+      createdByBitrix: row.created_by_bitrix ?? null,
       beginDate: toDate(row.begin_date),
       closeDate: toDate(row.close_date),
       comments: row.comments,
@@ -2207,6 +2224,7 @@ export class PgBitrix24ReverseRepository {
             : Number(payment.mapped_type_paid_id),
         source: payment.manual_command_id ? 'widget' : 'native',
         commandStatus: payment.command_status,
+        authorship: payment.authorship ?? { createdBy: null, paidBy: null },
       })) : [],
     };
   }
@@ -3041,12 +3059,24 @@ export class PgBitrix24ReverseRepository {
   async getMappedOrderPayments(
     orderId: number,
     scope: { mode: 'all' } | { mode: 'assigned'; userId: number },
+    canViewAuthorship = false,
   ): Promise<Record<string, unknown>> {
     const owner = await this.db.query<{
       bitrix_deal_id: string;
       version: string | number;
+      created_by_bitrix: BitrixActor | null;
+      source_request_id: string | number | null;
     }>(
-      `SELECT mapping.bitrix_id AS bitrix_deal_id, orders.version
+      `SELECT mapping.bitrix_id AS bitrix_deal_id, orders.version,
+              (SELECT ${dealCreatorSql('source_request.bitrix_deal_id')}
+                 FROM bitrix24_incoming_request source_request
+                WHERE source_request.linked_order_id=orders.order_id
+                  AND source_request.bitrix_deal_id=mapping.bitrix_id
+                  AND mapping.source_system='bitrix24') AS created_by_bitrix,
+              (SELECT source_request.request_id FROM bitrix24_incoming_request source_request
+                WHERE source_request.linked_order_id=orders.order_id
+                  AND source_request.bitrix_deal_id=mapping.bitrix_id
+                  AND mapping.source_system='bitrix24') AS source_request_id
          FROM orders
          JOIN crm_sync_mapping mapping
            ON mapping.entity_type='order'
@@ -3081,6 +3111,7 @@ export class PgBitrix24ReverseRepository {
       mapped_type_paid_id: string | number | null;
       manual_command_id: string | null;
       command_status: string | null;
+      authorship: { createdBy: BitrixActor | null; paidBy: BitrixActor | null };
       last_fetched_at: Date | string | null;
     }>(
       `SELECT payment.bitrix_payment_id, payment.pay_system_id,
@@ -3088,7 +3119,7 @@ export class PgBitrix24ReverseRepository {
               payment.paid, payment.payment_local_date, payment.state,
               payment.erp_payment_id, mapping.type_paid_id AS mapped_type_paid_id,
               payment.manual_command_id, command.status AS command_status,
-              payment.last_fetched_at
+              payment.last_fetched_at, ${PAYMENT_AUTHORSHIP_SQL} AS authorship
          FROM bitrix24_incoming_request_payment payment
          LEFT JOIN bitrix24_payment_type_mapping mapping
            ON mapping.pay_system_id=payment.pay_system_id AND mapping.active=true
@@ -3108,6 +3139,10 @@ export class PgBitrix24ReverseRepository {
       linked: true,
       orderId,
       orderVersion: Number(mapped.version),
+      ...(canViewAuthorship ? {
+        createdByBitrix: mapped.created_by_bitrix ?? null,
+        sourceRequestId: mapped.source_request_id == null ? null : Number(mapped.source_request_id),
+      } : {}),
       bitrixDealId: mapped.bitrix_deal_id,
       bitrixUrl: `https://${this.portalDomain}/crm/deal/details/${mapped.bitrix_deal_id}/`,
       lastReconciledAt: lastFetchedAt?.toISOString() ?? null,
@@ -3126,6 +3161,7 @@ export class PgBitrix24ReverseRepository {
           : Number(payment.mapped_type_paid_id),
         source: payment.manual_command_id ? 'widget' : 'native',
         commandStatus: payment.command_status,
+        ...(canViewAuthorship ? { authorship: payment.authorship ?? { createdBy: null, paidBy: null } } : {}),
       })),
     };
   }
@@ -4738,6 +4774,32 @@ function notFound(code: string, message: string): ApiError {
 
 function conflict(code: string, message: string): ApiError {
   return new ApiError(409, code, message);
+}
+
+async function refreshDealAuthorship(tx: TransactionClient, snapshot: ReverseDealSnapshot): Promise<void> {
+  // Caller owns inbound lease + Deal advisory lock. No business revisions/events.
+  const previous = await tx.query<{ raw_snapshot: Record<string, unknown> }>(
+    `SELECT raw_snapshot FROM bitrix24_remote_state
+      WHERE object_type='deal' AND bitrix_id=$1
+        AND (bitrix_updated_at IS NULL OR bitrix_updated_at <= $2::timestamptz)
+      FOR UPDATE`, [snapshot.bitrixId, snapshot.bitrixUpdatedAt],
+  );
+  const old = previous.rows[0]?.raw_snapshot;
+  if (!old) return;
+  const metadata: Record<string, unknown> = {};
+  for (const field of ['createdBy', 'updatedBy']) {
+    const id = snapshot.rawSnapshot[field] ?? null;
+    const name = snapshot.rawSnapshot[`${field}Name`] ?? (id && id === old[field] ? old[`${field}Name`] : null) ?? null;
+    metadata[field] = id;
+    metadata[`${field}Name`] = name;
+    snapshot.rawSnapshot[`${field}Name`] = name;
+  }
+  await tx.query(
+    `UPDATE bitrix24_remote_state SET raw_snapshot=raw_snapshot || $2::jsonb
+      WHERE object_type='deal' AND bitrix_id=$1
+        AND raw_snapshot IS DISTINCT FROM (raw_snapshot || $2::jsonb)`,
+    [snapshot.bitrixId, JSON.stringify(metadata)],
+  );
 }
 
 function toIso(value: Date | string | null): string | null {

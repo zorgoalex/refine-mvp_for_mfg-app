@@ -1,4 +1,5 @@
 import { hash } from '../application/bitrix24-sync-mapper';
+import { bitrixActorId } from './bitrix24-authorship';
 import type {
   ReverseClientSnapshot,
   ReverseDealSnapshot,
@@ -79,7 +80,7 @@ export function normalizeBitrixDeal(
     remoteRevision: `${(updatedAt ?? createdAt)?.toISOString() ?? 'unknown'}:${hash(rawSnapshot)}`,
     bitrixCreatedAt: createdAt,
     bitrixUpdatedAt: updatedAt,
-    rawSnapshot,
+    rawSnapshot: { ...rawSnapshot, createdBy: bitrixActorId(item.createdBy), updatedBy: bitrixActorId(item.updatedBy) },
   };
 }
 
@@ -121,6 +122,7 @@ export function normalizeBitrixPayment(
   };
   return {
     bitrixPaymentId,
+    paidById: bitrixActorId(payment.empPaidId),
     paySystemId: positiveNumber(payment.paySystemId),
     paySystemName: cleanText(payment.paySystemName),
     amount: finiteNumber(payment.sum) ?? 0,

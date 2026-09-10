@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
 import { relative, resolve, sep } from 'path';
+import { load } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
 
 const API_PREFIX = '/api/v1';
@@ -112,26 +113,13 @@ function walk(directory: string): string[] {
 }
 
 function collectDocumentedRoutes(contract: string): string[] {
-  const routes: string[] = [];
-  const lines = contract.split('\n');
-  let currentPath: string | null = null;
-
-  for (const line of lines) {
-    const pathMatch = /^  (\/[^:]+):$/.exec(line);
-    if (pathMatch) {
-      currentPath = pathMatch[1].startsWith('/api/v1/')
-        ? canonicalizePathParameters(pathMatch[1])
-        : null;
-      continue;
-    }
-
-    const methodMatch = /^    (get|post|put|patch|delete):$/.exec(line);
-    if (currentPath && methodMatch) {
-      routes.push(`${methodMatch[1].toUpperCase()} ${currentPath}`);
-    }
-  }
-
-  return routes;
+  // Strict parsing rejects duplicate path keys; indentation/text scans hid them.
+  const document = load(contract) as { paths: Record<string, Record<string, unknown>> };
+  return Object.entries(document.paths)
+    .filter(([path]) => path.startsWith('/api/v1/'))
+    .flatMap(([path, item]) => Object.keys(item)
+      .filter((method) => /^(get|post|put|patch|delete)$/.test(method))
+      .map((method) => `${method.toUpperCase()} ${canonicalizePathParameters(path)}`));
 }
 
 function canonicalizePathParameters(path: string): string {

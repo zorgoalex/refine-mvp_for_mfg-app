@@ -774,6 +774,7 @@ export class Bitrix24PaymentWidgetRepository {
   }
 
   async createCommand(input: {
+    actorDisplayName?: string | null;
     idempotencyKey: string;
     requestHash: string;
     session: WidgetSession;
@@ -814,11 +815,11 @@ export class Bitrix24PaymentWidgetRepository {
              overpayment_confirmed, overpayment_confirmed_by,
              overpayment_confirmed_at, caller_access_token_ciphertext,
              caller_refresh_token_ciphertext, caller_access_token_expires_at,
-             token_user_id, status
+             token_user_id, status, bitrix_actor_name
            ) VALUES (
              $1,$2,$3,$4,$5,$6,$7::bigint,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
              $19::boolean,CASE WHEN $19::boolean THEN $7::bigint ELSE NULL::bigint END,
-             CASE WHEN $19::boolean THEN now() ELSE NULL END,$20,$21,$22,$6,'processing'
+             CASE WHEN $19::boolean THEN now() ELSE NULL END,$20,$21,$22,$6,'processing',$23
            ) RETURNING *`,
           [
             input.idempotencyKey, input.requestHash, input.session.memberId,
@@ -830,6 +831,7 @@ export class Bitrix24PaymentWidgetRepository {
             input.paySystem.paySystemId, input.paySystem.typePaidId, input.comment,
             input.confirmOverpayment, input.callerAccessTokenCiphertext,
             input.callerRefreshTokenCiphertext, input.callerAccessTokenExpiresAt,
+            input.actorDisplayName?.slice(0, 300) ?? null,
           ],
         );
         await this.audit.record(tx, {

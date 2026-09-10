@@ -177,6 +177,8 @@ export type OrderHeaderDto = NormalizedSaveOrderHeaderDto & {
   productionDetailCount?: number;
   productionUnassignedCount?: number;
   productionDistinctStatusCount?: number;
+  createdByLabel?: string | null;
+  editedByLabel?: string | null;
   orderId: number;
   orderKind: OrderKind;
   sourceSystem: OrderSourceSystem;

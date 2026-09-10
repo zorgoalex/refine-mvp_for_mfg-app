@@ -1,38 +1,20 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
 import { relative, resolve, sep } from 'path';
 import { describe, expect, it } from 'vitest';
+import { inspectSwaggerMetadata } from '../../test-support/swagger-metadata';
 
 describe('Swagger controller metadata', () => {
-  it('tags every backend-owned controller included in the stage-1 API contract', () => {
+  it('tags every backend-owned controller included in runtime Swagger', () => {
     const missingTags = backendControllerFiles()
-      .filter((file) => !readFileSync(file, 'utf8').includes('@ApiTags('))
-      .map(relativeBackendPath);
+      .flatMap((file) => controllerMetadata(file).missingTags
+        .map((name) => `${relativeBackendPath(file)}:${name}`));
 
     expect(missingTags).toEqual([]);
   });
 
-  it('documents every route handler with @ApiOperation metadata', () => {
-    const missingOperationMetadata = backendControllerFiles().flatMap((file) => {
-      const source = readFileSync(file, 'utf8');
-      const lines = source.split('\n');
-      const missing: string[] = [];
-
-      for (let index = 0; index < lines.length; index += 1) {
-        if (!/^\s+@(Get|Post|Put|Patch|Delete)\(/.test(lines[index])) {
-          continue;
-        }
-
-        const precedingDecoratorBlock = lines
-          .slice(Math.max(0, index - 24), index)
-          .join('\n');
-
-        if (!precedingDecoratorBlock.includes('@ApiOperation(')) {
-          missing.push(`${relativeBackendPath(file)}:${index + 1}:${lines[index].trim()}`);
-        }
-      }
-
-      return missing;
-    });
+  it('documents every runtime Swagger route handler with its own @ApiOperation metadata', () => {
+    const missingOperationMetadata = backendControllerFiles().flatMap((file) =>
+      controllerMetadata(file).missingOperations.map((route) => `${relativeBackendPath(file)}:${route}`));
 
     expect(missingOperationMetadata).toEqual([]);
   });
@@ -224,6 +206,12 @@ function backendRoot(): string {
   expect(root, 'Expected to find backend root from repo root or backend cwd').toBeDefined();
 
   return root as string;
+}
+
+function controllerMetadata(file: string) {
+  const result = inspectSwaggerMetadata(readFileSync(file, 'utf8'));
+  expect(result.controllerCount, `${relativeBackendPath(file)} should contain a controller`).toBeGreaterThan(0);
+  return result;
 }
 
 function backendControllerFiles(): string[] {

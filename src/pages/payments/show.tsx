@@ -1,4 +1,8 @@
 import { useShow, IResourceComponentsProps, useOne } from "@refinedev/core";
+import { useEffect, useState } from 'react';
+import { bitrix24Api, type Bitrix24IncomingPayment } from '../../api/bitrix24Api';
+import { BitrixPaymentAuthorship } from '../../components/bitrix24/BitrixAuthorship';
+import { can } from '../../utils/permissions';
 import { Show, TextField, DateField } from "@refinedev/antd";
 import { Typography, Row, Col, Divider } from "antd";
 import { formatNumber } from "../../utils/numberFormat";
@@ -10,6 +14,23 @@ export const PaymentShow: React.FC<IResourceComponentsProps> = () => {
   const { queryResult } = useShow({ meta: { idColumnName: "payment_id" } });
   const { data, isLoading } = queryResult;
   const record = data?.data;
+  const [sourcePayment, setSourcePayment] = useState<Bitrix24IncomingPayment | null>(null);
+  const [sourceStatus, setSourceStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const canViewFinancials = can('orders.view_financials') && can('bitrix24.requests.view');
+  useEffect(() => {
+    let cancelled = false;
+    setSourcePayment(null);
+    setSourceStatus('idle');
+    if (record?.order_id && canViewFinancials) {
+      setSourceStatus('loading');
+      void bitrix24Api.getMappedOrderPayments(Number(record.order_id)).then(view => {
+        if (cancelled) return;
+        setSourcePayment(view.linked ? view.payments.find(payment => payment.erpPaymentId === Number(record.payment_id)) ?? null : null);
+        setSourceStatus('idle');
+      }).catch(() => { if (!cancelled) setSourceStatus('error'); });
+    }
+    return () => { cancelled = true; };
+  }, [record?.order_id, record?.payment_id, canViewFinancials]);
 
   useCurrentRecordTabTitle(record);
 
@@ -27,6 +48,9 @@ export const PaymentShow: React.FC<IResourceComponentsProps> = () => {
   return (
     <Show isLoading={isLoading} title="Просмотр Платежа">
       <Title level={5}>Основная информация</Title>
+      {sourceStatus === 'loading' && <p>Загрузка авторства Bitrix…</p>}
+      {sourceStatus === 'error' && <p role="status">Не удалось загрузить авторство Bitrix. Обновите страницу.</p>}
+      {sourcePayment && <section aria-label="Авторство оплаты Bitrix"><BitrixPaymentAuthorship payment={sourcePayment} /><Divider /></section>}
       <Row gutter={[16, 16]}>
         <Col span={8}>
           <Title level={5}>ID</Title>
@@ -103,4 +127,3 @@ export const PaymentShow: React.FC<IResourceComponentsProps> = () => {
     </Show>
   );
 };
-
