@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-09-10",
+    title: "Bitrix: авторы заявок и оплат",
+    services: ["ERP", "CRM"], repositories: ["repo_erp"],
+    added: ["В CRM-заявке виден создатель из Bitrix, отдельно от ответственного. У оплат виджета отображается сотрудник, внёсший платёж; у штатных оплат — пользователь изменения статуса, если Bitrix передал его. Авторство сохраняется после преобразования заявки в заказ."],
+    fixed: ["Служебный автор интеграции отображается без ошибочного запроса к справочнику пользователей. Технический аудит ERP не подменяется пользователями Bitrix."],
+  },
+  {
     version: APP_VERSION, date: "2026-09-09",
     title: "Заказы: понятные сообщения проверки полей",
     services: ["ERP"], repositories: ["repo_erp"],

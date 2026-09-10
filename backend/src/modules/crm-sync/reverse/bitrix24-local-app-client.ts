@@ -1,4 +1,5 @@
 import { ApiError } from '../../../common/errors/api-error';
+import { bitrixFullName } from './bitrix24-authorship';
 import { BITRIX24_REVERSE_EVENTS } from './bitrix24-reverse-payload';
 
 type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
@@ -102,7 +103,7 @@ export class Bitrix24LocalAppClient {
     }
     return {
       id,
-      name: String(user?.NAME ?? user?.name ?? '').trim() || `Bitrix24 #${id}`,
+      name: bitrixFullName(user ?? {}) || `Bitrix24 #${id}`,
       active: booleanFlag(user?.ACTIVE ?? user?.active, true),
       admin,
     };

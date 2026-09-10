@@ -238,6 +238,8 @@ export function mapOrderDtoToFormValues(order: OrderDto): OrderFormValues {
     updated_at: order.header.updatedAt ?? undefined,
     created_by: optionalNumber(order.header.createdBy) ?? undefined,
     edited_by: optionalNumber(order.header.editedBy) ?? undefined,
+    created_by_label: order.header.createdByLabel ?? null,
+    edited_by_label: order.header.editedByLabel ?? null,
     version: order.version,
   };
 

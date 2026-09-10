@@ -219,6 +219,7 @@ export class Bitrix24ReverseAdminController {
     return this.repository.getMappedOrderPayments(
       parseId(orderId, 'orderId'),
       crmRequestScope(actor),
+      actor.permissions.includes('bitrix24.requests.view'),
     );
   }
 
@@ -242,7 +243,7 @@ export class Bitrix24ReverseAdminController {
       orderId,
       auditRequestId: requireRequestId(request),
     });
-    return this.repository.getMappedOrderPayments(orderId, scope);
+    return this.repository.getMappedOrderPayments(orderId, scope, actor.permissions.includes('bitrix24.requests.view'));
   }
 
   @ApiOperation({ summary: 'List Bitrix24 responsible-user mappings' })

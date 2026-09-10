@@ -87,6 +87,8 @@ export interface Order {
   version?: number;
   ref_key_1c?: string | null;
   created_by?: number;
+  created_by_label?: string | null;
+  edited_by_label?: string | null;
   edited_by?: number | null;
   created_at?: Date | string;
   updated_at?: Date | string;

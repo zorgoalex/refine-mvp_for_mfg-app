@@ -167,6 +167,7 @@ export class Bitrix24ManualPaymentCommandService {
       comment: body.comment,
       confirmOverpayment: body.confirmOverpayment,
       callerAccessTokenCiphertext: commandCipher.encrypt(authenticated.accessToken),
+      actorDisplayName: authenticated.actorDisplayName,
       callerRefreshTokenCiphertext: commandCipher.encrypt(authenticated.refreshToken),
       callerAccessTokenExpiresAt: authenticated.session.accessTokenExpiresAt,
       originatingRequestId: input.requestId,

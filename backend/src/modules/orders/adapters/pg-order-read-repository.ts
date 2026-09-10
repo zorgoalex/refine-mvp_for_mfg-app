@@ -99,6 +99,8 @@ interface OrderHeaderRow extends QueryResultRow {
   updated_at: string | Date;
   created_by: string | number | null;
   edited_by: string | number | null;
+  created_by_label?: string | null;
+  edited_by_label?: string | null;
   version: string | number;
   ref_key_1c: string | null;
   sheet_material_type_id: string | number | null;
@@ -775,6 +777,8 @@ export class PgOrderReadRepository
         o.created_at, o.updated_at, o.created_by, o.edited_by, o.version, o.ref_key_1c,
         o.hdf_min_threshold_mm,
         ${headerSheetCols}${deletedHeaderSelect}
+        , (SELECT CASE WHEN u.is_service_account THEN 'Сервис интеграции ERP' ELSE COALESCE(NULLIF(u.full_name,''),u.username) END FROM users u WHERE u.user_id=o.created_by) AS created_by_label
+        , (SELECT CASE WHEN u.is_service_account THEN 'Сервис интеграции ERP' ELSE COALESCE(NULLIF(u.full_name,''),u.username) END FROM users u WHERE u.user_id=o.edited_by) AS edited_by_label
       FROM orders o
       LEFT JOIN projects mp ON mp.project_id = o.project_id
       LEFT JOIN clients c ON c.client_id = o.client_id
@@ -1591,6 +1595,8 @@ function mapOrderDto(
       updatedAt: toIsoString(row.updated_at),
       createdBy: toNullableNumber(row.created_by),
       editedBy: toNullableNumber(row.edited_by),
+      createdByLabel: row.created_by_label ?? null,
+      editedByLabel: row.edited_by_label ?? null,
       version: toNumber(row.version),
     },
     details: details.map(mapDetail),

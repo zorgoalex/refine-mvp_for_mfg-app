@@ -3,6 +3,13 @@ import { httpClient } from './httpClient';
 
 export type Bitrix24RequestState = 'unresolved' | 'active' | 'converted' | 'archived';
 
+export interface BitrixActor {
+  bitrixUserId: string;
+  displayName: string | null;
+  erpUserId?: number | null;
+  erpDisplayName?: string | null;
+}
+
 export interface Bitrix24IncomingRequestListItem {
   requestId: number;
   bitrixDealId: string;
@@ -32,6 +39,7 @@ export interface Bitrix24IncomingRequestListItem {
 }
 
 export interface Bitrix24IncomingPayment {
+  authorship?: { createdBy: BitrixActor | null; paidBy: BitrixActor | null };
   bitrixPaymentId: string;
   paySystemId: number | null;
   paySystemName: string | null;
@@ -50,6 +58,8 @@ export type Bitrix24MappedOrderPayments =
   | { linked: false; orderId: number }
   | {
       linked: true;
+      createdByBitrix?: BitrixActor | null;
+      sourceRequestId?: number | null;
       orderId: number;
       orderVersion: number;
       bitrixDealId: string;
@@ -82,6 +92,7 @@ export type Bitrix24IncomingRequestDetailInput = Omit<
 > & { id?: number };
 
 export interface Bitrix24IncomingRequest extends Bitrix24IncomingRequestListItem {
+  createdByBitrix?: BitrixActor | null;
   stageName: string | null;
   assignedByName: string | null;
   beginDate: string | null;

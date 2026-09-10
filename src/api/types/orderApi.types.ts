@@ -587,6 +587,8 @@ export interface OrderHeaderDto {
   updatedAt?: IsoDateTimeString | null;
   createdBy?: number | null;
   editedBy?: number | null;
+  createdByLabel?: string | null;
+  editedByLabel?: string | null;
   version?: number;
   /** Присутствуют только в ответе getOrder с includeDeleted=true. */
   deleteFlag?: boolean;

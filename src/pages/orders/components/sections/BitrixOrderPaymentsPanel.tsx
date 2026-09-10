@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { BitrixActorLabel, BitrixPaymentAuthorship } from '../../../../components/bitrix24/BitrixAuthorship';
 import { useInvalidate } from '@refinedev/core';
 import { Alert, Button, Space, Tag, Typography, message } from 'antd';
 import { LinkOutlined, ReloadOutlined, WalletOutlined } from '@ant-design/icons';
@@ -166,6 +167,7 @@ export const BitrixOrderPaymentsPanel: React.FC<BitrixOrderPaymentsPanelProps> =
         </Space>
 
         {error && <Alert type="error" showIcon message={error} />}
+        {(view.sourceRequestId != null || view.createdByBitrix) && <div>Создал заявку в Bitrix: <BitrixActorLabel actor={view.createdByBitrix} /></div>}
         {!canMaterialize && (
           <Alert
             type="info"
@@ -190,6 +192,7 @@ export const BitrixOrderPaymentsPanel: React.FC<BitrixOrderPaymentsPanelProps> =
             }),
           } : undefined}
           columns={[
+            ...(can('bitrix24.requests.view') ? [{ title: 'Авторство', key: 'authorship', render: (_: unknown, payment: Bitrix24IncomingPayment) => <BitrixPaymentAuthorship payment={payment} /> }] : []),
             {
               title: 'ID',
               dataIndex: 'bitrixPaymentId',

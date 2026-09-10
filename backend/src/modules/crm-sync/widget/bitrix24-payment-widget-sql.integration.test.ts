@@ -17,6 +17,7 @@ describe.skipIf(!container)('Bitrix payment INSERT on real PostgreSQL', () => {
     const audit = { record: vi.fn() };
     const repository = new Bitrix24PaymentWidgetRepository({ transaction: (fn: (client: typeof tx) => unknown) => fn(tx) } as never, audit as never);
     await expect(repository.createCommand({
+      actorDisplayName: 'Actual widget creator',
       idempotencyKey: '11111111-1111-4111-8111-111111111111', requestHash: 'a'.repeat(64),
       session: { sessionId: 'test-session', memberId: 'test-member', domain: 'bitrix.example', dealId: '9860', bitrixUserId: '1', erpUserId: 2147483650, accessTokenCiphertext: 'synthetic', refreshTokenCiphertext: 'synthetic', accessTokenExpiresAt: new Date('2026-09-09T03:00:00Z') },
       installation: { memberId: 'test-member', domain: 'bitrix.example', applicationTokenHash: 'b'.repeat(64), executorBitrixUserId: '1', accessTokenCiphertext: 'synthetic', refreshTokenCiphertext: 'synthetic', accessTokenExpiresAt: new Date('2026-09-09T03:00:00Z') },
@@ -35,9 +36,11 @@ describe.skipIf(!container)('Bitrix payment INSERT on real PostgreSQL', () => {
     const sql = `BEGIN;
 SET LOCAL statement_timeout='10s';
 CREATE TEMP TABLE bitrix24_manual_payment_command (LIKE public.bitrix24_manual_payment_command INCLUDING DEFAULTS INCLUDING CONSTRAINTS) ON COMMIT DROP;
+ALTER TABLE bitrix24_manual_payment_command ADD COLUMN IF NOT EXISTS bitrix_actor_name varchar(300);
 PREPARE widget_payment_insert AS ${insert};
 EXECUTE widget_payment_insert(${params.map(literal).join(',')});
 DO $check$ BEGIN
+IF NOT EXISTS (SELECT 1 FROM bitrix24_manual_payment_command WHERE bitrix_actor_name='Actual widget creator') THEN RAISE EXCEPTION 'widget author missing'; END IF;
 IF NOT EXISTS (SELECT 1 FROM bitrix24_manual_payment_command WHERE erp_actor_user_id=2147483650 AND amount=5000.00 AND status='processing' AND overpayment_confirmed=${confirmOverpayment} AND ${confirmOverpayment ? 'overpayment_confirmed_by=2147483650 AND overpayment_confirmed_at IS NOT NULL' : 'overpayment_confirmed_by IS NULL AND overpayment_confirmed_at IS NULL'}) THEN RAISE EXCEPTION 'actor/confirmation persistence mismatch'; END IF;
 END $check$;
 ROLLBACK;`;

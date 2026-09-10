@@ -171,6 +171,8 @@ export interface OrderListItemDto {
 }
 
 export type OrderHeaderDto = NormalizedSaveOrderHeaderDto & {
+  createdByLabel?: string | null;
+  editedByLabel?: string | null;
   orderId: number;
   orderKind: OrderKind;
   sourceSystem: OrderSourceSystem;

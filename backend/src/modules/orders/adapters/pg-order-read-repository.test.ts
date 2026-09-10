@@ -1319,6 +1319,8 @@ function mergeBaseDefaultGetByIdSql(): string {
     '        smt.name AS material_name,',
     '        NULL::bigint AS material_id,',
     '        o.milling_type_id, o.edge_type_id, o.film_id',
+    "        , (SELECT CASE WHEN u.is_service_account THEN 'Сервис интеграции ERP' ELSE COALESCE(NULLIF(u.full_name,''),u.username) END FROM users u WHERE u.user_id=o.created_by) AS created_by_label",
+    "        , (SELECT CASE WHEN u.is_service_account THEN 'Сервис интеграции ERP' ELSE COALESCE(NULLIF(u.full_name,''),u.username) END FROM users u WHERE u.user_id=o.edited_by) AS edited_by_label",
     '      FROM orders o',
     '      LEFT JOIN projects mp ON mp.project_id = o.project_id',
     '      LEFT JOIN clients c ON c.client_id = o.client_id',

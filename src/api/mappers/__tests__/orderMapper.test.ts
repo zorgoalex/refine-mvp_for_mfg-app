@@ -100,6 +100,13 @@ describe('orderMapper inbound (OrderDto -> form values)', () => {
     expect(values.details[0].sheet_material_type_id).toBe(7);
   });
 
+  it('carries read-only audit labels into the actual order bootstrap shape', () => {
+    const values = mapOrderDtoToFormValues({ ...dto, header: { ...dto.header, createdBy: 86, createdByLabel: 'Сервис интеграции ERP', editedByLabel: 'ERP User' } });
+    expect(values.header.created_by_label).toBe('Сервис интеграции ERP');
+    expect(values.header.edited_by_label).toBe('ERP User');
+    expect(mapOrderFormToSaveOrderDto(values).header).not.toHaveProperty('createdByLabel');
+  });
+
   it('carries production history onto the order-show header', () => {
     const values = mapOrderDtoToFormValues({
       ...dto,
