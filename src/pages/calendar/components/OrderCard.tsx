@@ -16,6 +16,7 @@ import {
 } from '../utils/statusColors';
 import { formatDateKey } from '../utils/dateUtils';
 import { ProductionStagesDisplay } from '../../../components/ProductionStagesDisplay';
+import { OrderProductionSummary } from '../../../components/OrderProductionSummary';
 import { useOperationalUi } from '../../../ui-operational/OperationalPrimitives';
 import { buildCalendarOrderDragPreview } from './calendarDragPreview';
 
@@ -401,6 +402,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
 
       {/* Индикаторы производства — плашка с пройденными этапами */}
       <div className="order-card__footer">
+        <OrderProductionSummary order={order} />
         {isOperational ? (
           <span className="order-card__due">Срок {dueDate ?? '—'}</span>
         ) : null}

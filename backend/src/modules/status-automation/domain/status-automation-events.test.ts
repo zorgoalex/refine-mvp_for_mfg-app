@@ -80,7 +80,9 @@ describe('status automation event catalog', () => {
         ),
       );
       expect(descriptor.allowedActions).toEqual(expect.arrayContaining(
-        descriptor.eventType.startsWith('mdf.') ? ['change_details_production_status'] : actionTypes,
+        descriptor.eventType.startsWith('mdf.') ? ['change_details_production_status']
+          : descriptor.eventType === 'order.production_status_changed'
+            ? ['change_order_status', 'map_production_status_to_order_status'] : actionTypes,
       ));
       if (descriptor.eventType.startsWith('mdf.')) {
         expect(descriptor.allowedActions).toEqual(['change_details_production_status']);
@@ -93,9 +95,9 @@ describe('status automation event catalog', () => {
     expect(getEventDescriptor('order.status_changed')?.allowedActions).not.toContain(
       'map_production_status_to_order_status',
     );
-    expect(getEventDescriptor('order.production_status_changed')?.allowedActions).toContain(
-      'map_production_status_to_order_status',
-    );
+    expect(getEventDescriptor('order.production_status_changed')?.allowedActions).toEqual([
+      'change_order_status', 'map_production_status_to_order_status',
+    ]);
   });
 
   it('looks up known events and returns null for unknown events', () => {

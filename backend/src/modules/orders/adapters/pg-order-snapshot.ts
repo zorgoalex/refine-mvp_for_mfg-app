@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import JSZip from 'jszip';
+import { evaluateProductionCompositionAutomation } from '../../status-automation/application/status-automation-runtime';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
 import { auditService } from '../../../common/audit/audit.service';
@@ -452,6 +453,13 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
           },
           collectSnapshotSheetIds(remappedSnapshot),
         );
+        if (result.status === 'created' || result.status === 'updated') {
+          await evaluateProductionCompositionAutomation(tx, {
+            orderId: result.orderId, actor: command.currentUser,
+            requestId: command.requestId ?? runId,
+            sourceIdempotencyKey: `snapshot-import:${runId}`,
+          });
+        }
         return result;
       });
       return { ...result, importRunId: runId };

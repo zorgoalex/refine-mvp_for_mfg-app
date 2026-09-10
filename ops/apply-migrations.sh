@@ -1888,6 +1888,10 @@ probe_file() {
                         OR p.cut_job_name IS DISTINCT FROM r.snapshot_job ->> 'name'
                      );" ;;
     154_svg_source_instance_sequences*) probe_all "SELECT position('svg_source_instance_sequence_v1' in pg_get_functiondef('cut_result_snapshot_is_complete(jsonb,jsonb,text)'::regprocedure)) > 0;" ;;
+    155_order_production_composition*) probe_all \
+                     "$(q_col orders production_detail_count)" \
+                     "$(q_col orders_view production_unassigned_count)" \
+                     "SELECT obj_description('recalc_order_production_status(bigint)'::regprocedure) LIKE 'v155:%';" ;;
     153_svg_partial_label_maps*) probe_all \
                      "$(q_con chk_cut_result_placement_source_only_order)" \
                      "SELECT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid='public.cut_result_placement'::regclass AND attname='order_id' AND attnotnull=false);" ;;

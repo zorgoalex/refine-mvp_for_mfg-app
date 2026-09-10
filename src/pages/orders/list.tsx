@@ -1,4 +1,5 @@
 import { Table, Tooltip } from '../../ui/tooltipDelay';
+import { OrderProductionSummary } from '../../components/OrderProductionSummary';
 import React, { useMemo, useState, useCallback, useEffect } from "react";
 import type { Dayjs } from "dayjs";
 import {
@@ -1500,7 +1501,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         const codes = passedCodesByOrderId[record.order_id]
           || (backendCodes.length > 0 ? backendCodes : getPassedCodesFromStatusName(value || ''));
         return (
-          <ProductionStagesDisplay
+          <div><ProductionStagesDisplay
             passedCodes={codes}
             displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
             codeToLetter={productionWorkflowDisplay?.codeToLetter}
@@ -1509,6 +1510,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             showTooltip={true}
             maxWidth={85}
           />
+          <div><OrderProductionSummary order={record} /></div></div>
         );
       },
     },

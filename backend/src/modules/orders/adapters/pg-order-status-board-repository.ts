@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
+import { mapProductionSummary, type ProductionSummaryRow } from '../../../shared/production-status/production-summary';
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
@@ -40,7 +41,7 @@ interface BoardCursor {
   orderId: number;
 }
 
-interface BoardRow extends QueryResultRow {
+interface BoardRow extends QueryResultRow, ProductionSummaryRow {
   status_key: string;
   status_id: string | number | null;
   status_code: string | null;
@@ -233,6 +234,7 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
             IN ('выдан', 'завершен', 'завершён')
         END AS order_status_issued_or_later,
         o.production_status_id,
+        o.production_detail_count, o.production_unassigned_count, o.production_distinct_status_count,
         prod_s.production_status_name,
         o.production_status_from_details_enabled,
         o.payment_status_id,
@@ -702,6 +704,7 @@ function mapBoardCard(row: BoardRow, currentUser: CurrentUser): OrderStatusBoard
     orderStatusIssuedOrLater: row.order_status_issued_or_later === true,
     productionStatusId: toNullableNumber(row.production_status_id),
     productionStatusName: row.production_status_name,
+    ...mapProductionSummary(row),
     productionStatusFromDetailsEnabled:
       row.production_status_from_details_enabled !== false,
     paymentStatusId: toNullableNumber(row.payment_status_id),

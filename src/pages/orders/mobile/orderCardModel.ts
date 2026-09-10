@@ -1,4 +1,5 @@
 import { DEFAULT_STATUS_COLOR, normalizeStatusColor } from '../../../components/statusColorUtils';
+import { orderProductionSummaryLabel } from '../../../utils/orderProductionSummary';
 
 export type OrderCardStatusKind = 'order' | 'payment' | 'production';
 
@@ -114,7 +115,7 @@ export function buildOrderCardModel(
     statusTagColor: colorForStatus(statusColors?.order, row.order_status_id),
     paymentTag: showFinancials && typeof row.payment_status_name === 'string' ? row.payment_status_name : '',
     paymentTagColor: colorForStatus(statusColors?.payment, row.payment_status_id),
-    productionTag: typeof row.production_status_name === 'string' ? row.production_status_name : '',
+    productionTag: orderProductionSummaryLabel(row),
     productionTagColor: colorForStatus(statusColors?.production, row.production_status_id),
     amountLine: showFinancials
       ? `${formatMoney(row.final_amount)} · оплачено ${formatMoney(row.paid_amount)}`

@@ -48,6 +48,7 @@ const AUTOMATION_SOURCE = 'backend-status-automation';
 const PACKER_ALLOWED_ORDER_STATUS_NAMES = new Set(['готов к выдаче', 'выдан']);
 
 export interface AutomationActionContext {
+  cause?: 'derived_from_production_composition';
   actor: CurrentUser;
   requestId: string;
   ruleId: number;
@@ -756,7 +757,8 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
 
       await evaluateStatusAutomationInTransaction(tx, {
         eventType: 'order.production_status_changed',
-        origin: 'user',
+        origin: 'automation',
+        cause: 'derived_from_production_composition',
         orderId: order.orderId,
         actor: command.currentUser,
         requestId,
@@ -769,12 +771,13 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
         sourceIdempotencyKey: command.dto.idempotencyKey,
       });
 
+      const currentOrder = await loadOrderForUpdate(tx, order.orderId);
       const response = {
         order: {
           orderId: order.orderId,
-          productionStatusId: cascade.nextProductionStatusId ?? undefined,
-          productionStatusFromDetailsEnabled: cascade.nextProductionStatusFromDetailsEnabled,
-          version: cascade.nextVersion,
+          productionStatusId: currentOrder.productionStatusId ?? undefined,
+          productionStatusFromDetailsEnabled: true,
+          version: currentOrder.version,
         },
         auditId,
         requestId,
@@ -1085,12 +1088,17 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
         },
       });
 
+      await evaluateProductionCompositionAfterChange(tx, {
+        orderId: order.orderId, actor: command.currentUser, requestId,
+        sourceIdempotencyKey: command.dto.idempotencyKey,
+      });
+      const currentOrder = await loadOrderForUpdate(tx, order.orderId);
       const response: ProductionActionResponseDto = {
         order: {
           orderId: order.orderId,
-          productionStatusId: recalculatedStatusId ?? undefined,
+          productionStatusId: currentOrder.productionStatusId ?? undefined,
           productionStatusFromDetailsEnabled: true,
-          version: nextVersion,
+          version: currentOrder.version,
         },
         auditId,
         requestId,
@@ -1461,10 +1469,11 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           idempotencyKey: command.dto.idempotencyKey,
         },
       });
-      if (order.productionStatusId !== afterProductionStatusId) {
+      if (affectedDetailCount > 0) {
         await evaluateStatusAutomationInTransaction(tx, {
           eventType: 'order.production_status_changed',
-          origin: 'user',
+          origin: 'automation',
+          cause: 'derived_from_production_composition',
           orderId: order.orderId,
           actor: command.currentUser,
           requestId,
@@ -1478,11 +1487,12 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
         sourceIdempotencyKey: command.dto.idempotencyKey,
       });
 
+      const currentOrder = await loadOrderForUpdate(tx, order.orderId);
       const response: BatchDetailProductionStatusResponseDto = {
         order: {
           orderId: order.orderId,
-          productionStatusId: afterProductionStatusId ?? undefined,
-          version: newVersion,
+          productionStatusId: currentOrder.productionStatusId ?? undefined,
+          version: currentOrder.version,
         },
         selectedDetailCount,
         affectedDetailCount,
@@ -2116,13 +2126,18 @@ export async function changeProductionStatusFromDeadlineInTransaction(
     requestId,
     sourceIdempotencyKey: command.idempotencyKey,
   });
+  await evaluateProductionCompositionAfterChange(tx, {
+    orderId: order.orderId, actor: deadlineSystemActorAsCurrentUser(command.systemActor),
+    requestId, sourceIdempotencyKey: command.idempotencyKey,
+  });
 
+  const currentOrder = await loadOrderForUpdate(tx, order.orderId);
   const response = {
     order: {
       orderId: order.orderId,
-      productionStatusId: cascade.nextProductionStatusId ?? undefined,
-      productionStatusFromDetailsEnabled: cascade.nextProductionStatusFromDetailsEnabled,
-      version: cascade.nextVersion,
+      productionStatusId: currentOrder.productionStatusId ?? undefined,
+      productionStatusFromDetailsEnabled: true,
+      version: currentOrder.version,
     },
     auditId,
     requestId,
@@ -2201,6 +2216,7 @@ export async function changeOrderStatusFromAutomationInTransaction(
       action: 'order_status_change',
       scope: { source: 'calendar|order-header' },
       origin: 'automation',
+      cause: ctx.cause ?? null,
       idempotencyKey: ctx.outboxIdempotencyKey,
     },
   });
@@ -2208,6 +2224,7 @@ export async function changeOrderStatusFromAutomationInTransaction(
   await evaluateStatusAutomationInTransaction(tx, {
     eventType: 'order.status_changed',
     origin: 'automation',
+    cause: ctx.cause,
     orderId: order.orderId,
     actor: ctx.actor,
     requestId: ctx.requestId,
@@ -2319,6 +2336,12 @@ export async function changeProductionStatusFromAutomationInTransaction(
     requestId: ctx.requestId,
     sourceIdempotencyKey: ctx.outboxIdempotencyKey,
   });
+  if (ctx.eventType !== 'order.status_changed') {
+    await evaluateProductionCompositionAfterChange(tx, {
+      orderId: order.orderId, actor: ctx.actor, requestId: ctx.requestId,
+      sourceIdempotencyKey: ctx.outboxIdempotencyKey,
+    });
+  }
 
   return { status: 'executed', auditId };
 }
@@ -2511,6 +2534,13 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
     await clearMdfBoardManualMovesForOrder(tx, order.orderId);
   }
 
+  if (ctx.eventType !== 'order.status_changed') {
+    await evaluateProductionCompositionAfterChange(tx, {
+      orderId: order.orderId, actor: ctx.actor, requestId: ctx.requestId,
+      sourceIdempotencyKey: ctx.outboxIdempotencyKey,
+    });
+  }
+
   return { status: 'executed', auditId };
 }
 
@@ -2585,6 +2615,7 @@ function automationMetadata(
   return {
     source: AUTOMATION_SOURCE,
     origin: 'automation',
+    cause: ctx.cause ?? null,
     orderId,
     clientId,
     ruleId: ctx.ruleId,
@@ -3068,14 +3099,12 @@ async function cascadeProductionStatusToDetails(
     [order.orderId, productionStatusId],
   );
 
-  if (beforeDetails.detailIds.length > 0) {
-    await runRecalcOrderProductionStatus(tx, order.orderId);
-  }
+  await runRecalcOrderProductionStatus(tx, order.orderId);
 
   const bumped = await bumpOrderProductionStatusCascadeVersion(
     tx,
     order.orderId,
-    beforeDetails.detailIds.length === 0,
+    false,
     productionStatusId,
   );
   const afterDetails = await loadDetailProductionStatusSnapshot(tx, order.orderId);
@@ -3671,6 +3700,16 @@ async function evaluateStatusAutomationInTransaction(
     '../../status-automation/application/status-automation-runtime'
   );
   await evaluateStatusAutomation(tx, event);
+}
+
+async function evaluateProductionCompositionAfterChange(
+  tx: TransactionClient,
+  input: Pick<StatusAutomationEvent, 'orderId' | 'actor' | 'requestId' | 'sourceIdempotencyKey'>,
+): Promise<void> {
+  const { evaluateProductionCompositionAutomation } = await import(
+    '../../status-automation/application/status-automation-runtime'
+  );
+  await evaluateProductionCompositionAutomation(tx, input);
 }
 
 async function evaluateMdfBoardColumnAutomationInTransaction(

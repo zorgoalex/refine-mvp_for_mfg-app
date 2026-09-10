@@ -50,6 +50,8 @@ import { cutApi } from '../../api/cutApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
 import type { RequestOptions } from '../../api/httpClient';
 import { orderStatusBoardApi } from '../../api/orderStatusBoardApi';
+import { orderProductionSummaryLabel } from '../../utils/orderProductionSummary';
+import { OrderProductionSummary } from '../../components/OrderProductionSummary';
 import {
   createProductionActionIdempotencyKey,
   productionActionsApi,
@@ -5572,16 +5574,12 @@ const CncTelegramPrintCard: React.FC<{
   }
 
   if (card.kind === 'order') {
-    const status = card.order.productionStatusName || 'Без статуса';
-    const statusColor =
-      resolveStatusBoardStatusColor('production', card.order, orderStatusColumns) ??
-      '#8c8c8c';
     return (
       <div className="cnc-print-card cnc-print-card--order">
         <strong className="cnc-print-card__order-number">
           {formatStatusBoardOrderNumber(card.order)}
         </strong>
-        <Tag color={statusColor}>{status}</Tag>
+        <OrderProductionSummary order={card.order} />
         <span className="cnc-print-card__client">
           {card.order.clientName || 'Клиент не указан'}
         </span>
@@ -7864,7 +7862,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   const primaryStatus =
     primaryStatusKind === 'order' || board === 'order'
       ? card.orderStatusName || 'Без статуса'
-      : card.productionStatusName || 'Без статуса';
+      : orderProductionSummaryLabel(card);
   const primaryStatusColor =
     (
       primaryStatusKind === 'order' && board !== 'order'
@@ -8042,13 +8040,14 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
             {orderNumber}
           </Button>
           {!cncNumberOnly && (
-            <Tag
+            primaryStatusKind !== 'order' && board === 'production' ? <OrderProductionSummary order={card} /> : <Tag
               className="status-board-card__status-badge"
               color={primaryStatusColor}
             >
               {primaryStatus}
             </Tag>
           )}
+          {cncOrderCard && !cncNumberOnly && <OrderProductionSummary order={card} />}
         </div>
         {displayToggleVisible && (
           <div className="status-board-card__actions">

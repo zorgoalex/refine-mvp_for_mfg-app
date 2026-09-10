@@ -9,6 +9,9 @@ import type { CutDetailLastReadyJobRef } from '../api/types/cutApi.types';
 // ============================================================================
 
 export interface Order {
+  production_detail_count?: number;
+  production_unassigned_count?: number;
+  production_distinct_status_count?: number;
   order_id?: number;
   order_name: string;
   client_id: number;

@@ -4,6 +4,7 @@ import type {
   StatusAutomationEvent,
   StatusAutomationRule,
 } from '../application/status-automation.types';
+import { uniformProductionStatus } from '../../../shared/production-status/production-summary';
 
 export interface RuleEvaluationResult {
   applied: StatusAutomationRule[];
@@ -25,6 +26,7 @@ export function evaluateRuleConditions(
   event: StatusAutomationEvent,
 ): ConditionEvaluationResult {
   const conditions = rule.conditions;
+  const commonProductionStatus = uniformProductionStatus(state.productionSummary);
 
   if (
     conditions.currentOrderStatusIn !== undefined &&
@@ -72,8 +74,8 @@ export function evaluateRuleConditions(
   if (
     conditions.currentProductionStatusIn !== undefined &&
     conditions.currentProductionStatusIn.length > 0 &&
-    (state.productionStatusId === null ||
-      !conditions.currentProductionStatusIn.includes(state.productionStatusId))
+    (commonProductionStatus === null ||
+      !conditions.currentProductionStatusIn.includes(commonProductionStatus))
   ) {
     return failed('production_status_not_in_list');
   }
@@ -81,10 +83,17 @@ export function evaluateRuleConditions(
   if (
     conditions.currentProductionStatusNotIn !== undefined &&
     conditions.currentProductionStatusNotIn.length > 0 &&
-    state.productionStatusId !== null &&
-    conditions.currentProductionStatusNotIn.includes(state.productionStatusId)
+    (!state.productionSummary || state.productionSummary.statusIds.some(
+      (statusId) => conditions.currentProductionStatusNotIn!.includes(statusId),
+    ))
   ) {
     return failed('production_status_excluded');
+  }
+
+  if ((rule.actionType === 'map_production_status_to_order_status'
+    || (event.eventType === 'order.production_status_changed' && rule.actionType === 'change_order_status'))
+    && commonProductionStatus === null) {
+    return failed('production_composition_not_uniform');
   }
 
   if (conditions.paidShareGte !== undefined) {

@@ -1,4 +1,5 @@
 // Order Header Summary (Read-only)
+import { OrderProductionSummary } from '../../../../components/OrderProductionSummary';
 // Compact minimalist design - 3 rows with minimal padding
 // Right-click to open context menu for status changes
 
@@ -440,6 +441,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
               {header.order_date ? dayjs(header.order_date).format('DD.MM.YYYY') : '—'}
               {' → '}
               {header.planned_completion_date ? dayjs(header.planned_completion_date).format('DD.MM.YYYY') : '—'}
+              <OrderProductionSummary order={header} />
               {passedProductionCodes.length > 0 ? (
                 <ProductionStagesDisplay
                   passedCodes={passedProductionCodes}
@@ -612,6 +614,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
             {header.planned_completion_date ? dayjs(header.planned_completion_date).format('DD.MM.YYYY') : '—'}
           </Text>
           {/* Production stages display */}
+          <OrderProductionSummary order={header} />
           {passedProductionCodes.length > 0 && (
             <>
               <span style={{ color: 'var(--app-border)' }}>|</span>

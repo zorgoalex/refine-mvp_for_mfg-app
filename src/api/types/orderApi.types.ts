@@ -179,6 +179,9 @@ export interface RestoreOrderResponse {
 }
 
 export interface OrderTransferTarget {
+  productionDetailCount?: number;
+  productionUnassignedCount?: number;
+  productionDistinctStatusCount?: number;
   orderId: number;
   orderName: string;
   clientId: number;
@@ -546,6 +549,9 @@ export interface OrderDto {
 }
 
 export interface OrderHeaderDto {
+  productionDetailCount?: number;
+  productionUnassignedCount?: number;
+  productionDistinctStatusCount?: number;
   orderId: number;
   orderName: string;
   clientId: number;
@@ -761,6 +767,9 @@ export interface OrderTotalsDto {
 }
 
 export interface OrderListItemDto {
+  productionDetailCount?: number;
+  productionUnassignedCount?: number;
+  productionDistinctStatusCount?: number;
   orderId: number;
   orderName: string;
   clientId: number;

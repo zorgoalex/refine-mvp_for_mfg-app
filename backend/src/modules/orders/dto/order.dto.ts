@@ -109,6 +109,9 @@ export interface PaginationDto {
 }
 
 export interface OrderListItemDto {
+  productionDetailCount?: number;
+  productionUnassignedCount?: number;
+  productionDistinctStatusCount?: number;
   orderId: number;
   orderName: string;
   orderKind: OrderKind;
@@ -171,6 +174,9 @@ export interface OrderListItemDto {
 }
 
 export type OrderHeaderDto = NormalizedSaveOrderHeaderDto & {
+  productionDetailCount?: number;
+  productionUnassignedCount?: number;
+  productionDistinctStatusCount?: number;
   orderId: number;
   orderKind: OrderKind;
   sourceSystem: OrderSourceSystem;

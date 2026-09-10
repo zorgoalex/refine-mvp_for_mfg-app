@@ -1,4 +1,5 @@
 import type { QueryResultRow } from 'pg';
+import { mapProductionSummary, type ProductionSummaryRow } from '../../../shared/production-status/production-summary';
 import type { DatabaseClient } from '../../../database/database.types';
 import type { OrderFormDataResponseDto } from '../dto/order-form-data.dto';
 import type {
@@ -59,7 +60,7 @@ const PAGE_SORT_COLUMNS: Record<OrderListSortBy, string> = {
   updatedAt: 'o.updated_at',
 };
 
-interface OrderHeaderRow extends QueryResultRow {
+interface OrderHeaderRow extends QueryResultRow, ProductionSummaryRow {
   order_id: string | number;
   order_name: string;
   order_kind: OrderKind;
@@ -471,6 +472,7 @@ export class PgOrderReadRepository
           o.order_status_id, os.order_status_name,
           o.payment_status_id, pay_s.payment_status_name,
           o.production_status_id, prod_s.production_status_name,
+          o.production_detail_count, o.production_unassigned_count, o.production_distinct_status_count,
           o.production_status_from_details_enabled,
           o.planned_completion_date, o.completion_date, o.issue_date, o.payment_date,
           o.discount, o.surcharge, o.notes, o.manager_id,
@@ -743,6 +745,7 @@ export class PgOrderReadRepository
         o.order_status_id, os.order_status_name,
         o.payment_status_id, pay_s.payment_status_name,
         o.production_status_id, prod_s.production_status_name,
+        o.production_detail_count, o.production_unassigned_count, o.production_distinct_status_count,
         o.production_status_from_details_enabled,
         (
           SELECT ARRAY_AGG(statuses.production_status_code ORDER BY statuses.sort_order, statuses.production_status_code)
@@ -1550,6 +1553,7 @@ function mapOrderDto(
       orderStatusName: row.order_status_name ?? '',
       paymentStatusId: toNumber(row.payment_status_id),
       paymentStatusName: row.payment_status_name ?? '',
+      ...mapProductionSummary(row),
       productionStatusId: toNullableNumber(row.production_status_id),
       productionStatusName: row.production_status_name,
       productionStatusFromDetailsEnabled: row.production_status_from_details_enabled,
@@ -1638,6 +1642,7 @@ function mapListItem(row: OrderHeaderRow, includeDeleted: boolean = false): Orde
     orderStatusName: row.order_status_name ?? '',
     paymentStatusId: toNumber(row.payment_status_id),
     paymentStatusName: row.payment_status_name ?? '',
+    ...mapProductionSummary(row),
     productionStatusId: toNullableNumber(row.production_status_id),
     productionStatusName: row.production_status_name,
     priority: toNumber(row.priority),

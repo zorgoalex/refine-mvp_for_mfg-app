@@ -19,6 +19,7 @@ import { handleExcelError } from "../../utils/excel/excelErrorHandler";
 import { openOrderProductionPdfPreview } from "../../utils/pdf/orderProductionPdf";
 import { OrderPrintView } from "./components/print/OrderPrintView";
 import { OrderShowHeader } from "./components/sections/OrderShowHeader";
+import { overlayDetailProductionStatuses } from '../../utils/orderProductionSummary';
 import { OrderDatesBlock } from "./components/sections/OrderDatesBlock";
 import { OrderFinanceBlock } from "./components/sections/OrderFinanceBlock";
 import { OrderProductionBlock } from "./components/sections/OrderProductionBlock";
@@ -1171,6 +1172,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     });
     return map;
   }, [detailProductionStatusBaseById, liveDetailProductionStatusById, orderDetailLiveState]);
+
+  const detailsWithLiveProductionStatuses = useMemo(
+    () => overlayDetailProductionStatuses(details, currentDetailProductionStatusById),
+    [details, currentDetailProductionStatusById],
+  );
+  const productionSummaryDetailsLoaded = useBackendOrdersRead
+    ? Array.isArray(backendOrder?.details)
+    : Boolean(detailsData && !detailsError && detailsData.data.length === detailsData.total);
 
   useEffect(() => {
     liveDetailProductionStatusByIdRef.current = liveDetailProductionStatusById;
@@ -3307,7 +3316,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           >
             <OrderShowHeader
               record={record}
-              details={details}
+              details={detailsWithLiveProductionStatuses}
+              detailsLoaded={productionSummaryDetailsLoaded}
               dowelingLinks={dowelingLinks}
               compactSticky={orderShowStickyEnabled && orderShowSummaryStuck}
               detailMaterialNames={headerMaterialNames}

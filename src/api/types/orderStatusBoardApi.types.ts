@@ -83,6 +83,9 @@ export interface OrderStatusBoardCardDetail {
 }
 
 export interface OrderStatusBoardCard {
+  productionDetailCount?: number;
+  productionUnassignedCount?: number;
+  productionDistinctStatusCount?: number;
   orderId: number;
   orderName: string;
   fullNumber: string;

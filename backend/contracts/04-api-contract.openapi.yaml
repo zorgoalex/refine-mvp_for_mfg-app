@@ -17828,6 +17828,16 @@ components:
           nullable: true
         productionStatusFromDetailsEnabled:
           type: boolean
+        productionDetailCount:
+          type: integer
+          minimum: 0
+          description: Live ordinary detail rows; HDF excluded.
+        productionUnassignedCount:
+          type: integer
+          minimum: 0
+        productionDistinctStatusCount:
+          type: integer
+          minimum: 0
         paymentStatusId:
           type: integer
           format: int64
@@ -18082,6 +18092,15 @@ components:
         totalAmount:
           type: number
           format: decimal
+        productionDetailCount:
+          type: integer
+          minimum: 0
+        productionUnassignedCount:
+          type: integer
+          minimum: 0
+        productionDistinctStatusCount:
+          type: integer
+          minimum: 0
         discount:
           type: number
           format: decimal
@@ -19325,6 +19344,15 @@ components:
               productionStatusName:
                 type: string
                 nullable: true
+              productionDetailCount:
+                type: integer
+                minimum: 0
+              productionUnassignedCount:
+                type: integer
+                minimum: 0
+              productionDistinctStatusCount:
+                type: integer
+                minimum: 0
               version:
                 type: integer
         requestId:

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Card, List, Tag, Typography } from 'antd';
 import { StarFilled } from '@ant-design/icons';
+import { OrderProductionSummary } from '../../../components/OrderProductionSummary';
 import type { TablePaginationConfig } from 'antd';
 import {
   buildOrderCardModel,
@@ -82,7 +83,7 @@ export const OrderCardList: React.FC<OrderCardListProps> = ({ rows, loading, pag
           <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
             {m.statusTag && statusTag('order', m.statusTag, m.statusTagColor)}
             {m.paymentTag && statusTag('payment', m.paymentTag, m.paymentTagColor)}
-            {m.productionTag && statusTag('production', m.productionTag, m.productionTagColor)}
+            <OrderProductionSummary order={row} />
           </div>
           {m.amountLine && (
             <Typography.Text strong style={{ display: 'block', marginTop: 6 }}>{m.amountLine}</Typography.Text>

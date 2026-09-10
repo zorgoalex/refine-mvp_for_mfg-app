@@ -1,4 +1,5 @@
 import type { CurrentUser } from '../../../permissions/current-user';
+import type { ProductionComposition } from '../../../shared/production-status/production-summary';
 
 export type StatusAutomationEventType =
   | 'payment.created'
@@ -64,6 +65,7 @@ export interface StatusAutomationRule {
 export interface StatusAutomationEvent {
   eventType: StatusAutomationEventType;
   origin: StatusAutomationOrigin;
+  cause?: 'derived_from_production_composition';
   orderId: number;
   actor: CurrentUser;
   requestId: string;
@@ -82,6 +84,8 @@ export interface OrderAutomationState {
   orderStatusId: number;
   paymentStatusId: number;
   productionStatusId: number | null;
+  /** Missing = unknown; never infer composition from productionStatusId. */
+  productionSummary?: ProductionComposition;
   productionStatusFromDetailsEnabled: boolean;
   finalAmount: number;
   paidAmount: number;

@@ -1,4 +1,5 @@
 // Order Show Header (Read-only summary for show page)
+import { OrderProductionSummary } from '../../../../components/OrderProductionSummary';
 // Adapted from OrderHeaderSummary for use with props instead of store
 
 import React, { useMemo, useState } from 'react';
@@ -32,6 +33,7 @@ const { Text } = Typography;
 interface OrderShowHeaderProps {
   record: any; // order record from orders_view
   details: any[]; // order details array
+  detailsLoaded?: boolean;
   dowelingLinks?: any[]; // doweling links with nested doweling_order
   compactSticky?: boolean;
   // SP3: server-resolved COALESCE(sheet, material) display names from the parent
@@ -46,6 +48,7 @@ interface OrderShowHeaderProps {
 export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
   record,
   details,
+  detailsLoaded = false,
   dowelingLinks = [],
   compactSticky = false,
   detailMaterialNames,
@@ -371,6 +374,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
             {record?.order_date ? dayjs(record.order_date).format('DD.MM.YYYY') : '—'}
             {' → '}
             {record?.planned_completion_date ? dayjs(record.planned_completion_date).format('DD.MM.YYYY') : '—'}
+            <OrderProductionSummary order={record ?? {}} details={detailsLoaded ? details : undefined} statuses={statusesForWorkflow} />
             {currentProductionStatusCodes.length > 0 ? (
               <ProductionStagesDisplay
                 passedCodes={currentProductionStatusCodes}
@@ -534,6 +538,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
             {record?.planned_completion_date ? dayjs(record.planned_completion_date).format('DD.MM.YYYY') : '—'}
           </Text>
           {/* Production stages display */}
+            <OrderProductionSummary order={record ?? {}} details={detailsLoaded ? details : undefined} statuses={statusesForWorkflow} />
           {currentProductionStatusCodes.length > 0 && (
             <>
               <span style={{ color: 'var(--app-border)' }}>|</span>

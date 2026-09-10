@@ -10,15 +10,18 @@ import {
 
 const evaluateStatusAutomationMock = vi.hoisted(() => vi.fn());
 const evaluateMdfBoardColumnAutomationMock = vi.hoisted(() => vi.fn());
+const evaluateProductionCompositionAutomationMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../status-automation/application/status-automation-runtime', () => ({
   evaluateStatusAutomation: evaluateStatusAutomationMock,
   evaluateMdfBoardColumnAutomation: evaluateMdfBoardColumnAutomationMock,
+  evaluateProductionCompositionAutomation: evaluateProductionCompositionAutomationMock,
 }));
 
 beforeEach(() => {
   evaluateStatusAutomationMock.mockReset();
   evaluateMdfBoardColumnAutomationMock.mockReset();
+  evaluateProductionCompositionAutomationMock.mockReset();
 });
 
 describe('PgProductionActionRepository', () => {
@@ -788,7 +791,8 @@ describe('PgProductionActionRepository', () => {
       expect.anything(),
       expect.objectContaining({
         eventType: 'order.production_status_changed',
-        origin: 'user',
+        origin: 'automation',
+        cause: 'derived_from_production_composition',
         orderId: 15,
         actor: currentUser(),
         requestId: 'request-production-status',
@@ -1524,6 +1528,15 @@ describe('assigned-worker audit metadata across production commands', () => {
       },
     });
 
+    it('dispatches composition even when the least stage is unchanged', async () => {
+      const database = createDatabase({ orderProductionStatusId: 1, recalcOrderProductionStatusId: 1,
+        detailStatusRowsBefore: [{ detail_id: 100, production_status_id: 1 }], updatedDetailIds: [100] });
+      await new PgProductionActionRepository(database.service).changeBatchDetailProductionStatus(cmd({ detailIds: [100] }));
+      expect(evaluateStatusAutomationMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+        eventType: 'order.production_status_changed', cause: 'derived_from_production_composition', orderId: 15,
+      }));
+    });
+
     it('updates selected details, recalcs in auto mode, and bumps version', async () => {
       const database = createDatabase({
         productionStatusFromDetailsEnabled: true,
@@ -1961,6 +1974,7 @@ function createDatabase(options: {
       }
 
       if (normalized.startsWith('SELECT order_id, client_id')) {
+        const changed = queries.some(query => normalizeSql(query.text).startsWith('UPDATE orders SET'));
         return {
           rows: [
             {
@@ -1970,10 +1984,11 @@ function createDatabase(options: {
               planned_completion_date: options.plannedCompletionDate ?? '2026-05-10',
               order_status_id: options.orderStatusId ?? 5,
               payment_status_id: 1,
-              production_status_id: options.orderProductionStatusId ?? 1,
+              production_status_id: changed && options.recalcOrderProductionStatusId !== undefined
+                ? options.recalcOrderProductionStatusId : options.orderProductionStatusId ?? 1,
               production_status_from_details_enabled:
                 options.productionStatusFromDetailsEnabled ?? false,
-              version: options.orderVersion ?? 3,
+              version: changed ? options.readOrderVersion ?? 4 : options.orderVersion ?? 3,
               created_by: options.orderCreatedByUserId ?? 1,
               manager_id: options.orderManagerUserId ?? null,
             },

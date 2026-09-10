@@ -28,7 +28,9 @@ function makeRule(
 }
 
 function makeState(overrides: Partial<OrderAutomationState> = {}): OrderAutomationState {
+  const statusId = overrides.productionStatusId === undefined ? 3 : overrides.productionStatusId;
   return {
+    productionSummary: { detailCount: 1, unassignedCount: statusId === null ? 1 : 0, statusIds: statusId === null ? [] : [statusId] },
     orderId: 100,
     orderStatusId: 1,
     paymentStatusId: 2,
@@ -124,7 +126,7 @@ describe('evaluateRuleConditions', () => {
     });
   });
 
-  it('does not match a production exclusion when production status is null', () => {
+  it('allows initialization of an unassigned detail when no known status is excluded', () => {
     const result = evaluateRuleConditions(
       makeRule({ conditions: { currentProductionStatusNotIn: [3, 9] } }),
       makeState({ productionStatusId: null }),

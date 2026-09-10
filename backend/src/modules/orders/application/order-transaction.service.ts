@@ -910,6 +910,7 @@ export class OrderTransactionService {
           targetOrderName: effectiveTargetName,
           actorUserId: command.currentUser.id,
         });
+        await unitOfWork.recalcOrderProductionStatus(command.orderId);
         const auditId = await unitOfWork.writeOrderRestoreAudit({
           currentUser: command.currentUser,
           requestId,
@@ -927,6 +928,12 @@ export class OrderTransactionService {
           idempotencyKey: command.idempotencyKey,
         });
 
+        await unitOfWork.evaluateStatusAutomation({
+          eventType: 'order.production_status_changed', origin: 'automation',
+          cause: 'derived_from_production_composition', orderId: command.orderId,
+          actor: command.currentUser, requestId,
+          sourceIdempotencyKey: `${command.idempotencyKey}:production-composition`,
+        });
         const order = await unitOfWork.readOrder(command.orderId);
         const response: RestoreOrderResponseDto = { order, auditId, requestId };
         await unitOfWork.completeOrderRestoreIdempotency(command.idempotencyKey, response);
@@ -1315,7 +1322,9 @@ export class OrderTransactionService {
     for (const event of outboxEvents) {
       await unitOfWork.evaluateStatusAutomation({
         eventType: event.eventType,
-        origin: 'user',
+        origin: event.eventType === 'order.production_status_changed' ? 'automation' : 'user',
+        ...(event.eventType === 'order.production_status_changed'
+          ? { cause: 'derived_from_production_composition' as const } : {}),
         orderId: event.orderId,
         actor: input.currentUser,
         requestId: event.requestId,
