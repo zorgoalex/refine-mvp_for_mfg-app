@@ -43,10 +43,69 @@ npm run dev:full
 npm run hooks:install
 ```
 
-Перед каждым commit запускается `npm run typecheck:ratchet`. Проверка запрещает
-новые TypeScript diagnostics относительно committed baseline; известный долг
-может только уменьшаться. Перед push отдельно запускаются business-reference
-contracts.
+Перед каждым обычным commit запускается `npm run typecheck:ratchet`. Проверка
+сравнивает рабочие файлы с локальным baseline и запрещает новые TypeScript
+diagnostics. Отдельная CI baseline-policy запрещает рост baseline относительно
+base commit; локальный `--update` сам по себе такого запрета не обеспечивает.
+Перед push запускаются business-reference contracts и regression-тесты hooks.
+
+### Защита ресурсов в hooks
+
+По умолчанию оба hook работают в режиме `required`: запускают тяжёлую команду
+только через `rtk nice -n 10 <guard> -- ...`. Путь guard по умолчанию:
+`$HOME/.codex/rtk-heavy-guard`; доверенный executable можно явно задать через
+`RTK_HEAVY_GUARD`. Пустой override, отсутствие `rtk`, отсутствующий или
+неисполняемый guard блокируют hook **до запуска npm**. Отказ/abort guard и ошибка
+самой проверки передаются Git, без повторного запуска напрямую.
+
+На shared host режим `required` обязателен: guard отвечает за CPU admission,
+резерв системного ядра, память/swap, D-state monitoring и cleanup процессов.
+Один test worker не заменяет эту защиту. При отказе восстановите tooling/PATH
+или освободите ресурсы; не переключайте shared host в portable.
+
+На обычной developer-машине без shared-host ограничений прямой npm можно
+разрешить **явно, только для текущего clone**:
+
+```bash
+git config --local erp.hooksMode portable
+```
+
+Возврат к обязательному guard:
+
+```bash
+git config --local erp.hooksMode required
+```
+
+Отсутствующая настройка означает `required`, пустая/неизвестная или ошибка её
+чтения блокируют hook. Installer сохраняет явный выбор режима; новый clone
+не наследует локальную настройку. Installer проверяет наличие/readability
+общего runner и executable-bit обоих hooks; неполная установка завершается
+ошибкой. На dedicated CI hooks не устанавливаются, команды проверок запускает
+workflow напрямую.
+
+### Baseline-policy и первое создание baseline
+
+Baseline должен быть JSON-объектом `file|TSnumber|message → count`: counts —
+положительные safe integers, `{}` означает отсутствие долга. Сообщения могут
+содержать дополнительные `|` и переносы. Повреждённый JSON, неверная структура,
+ошибка чтения/Git или невалидный ref не означают «первый baseline» и блокируют
+проверку. Target ref обязан разрешаться в commit; baseline в его дереве обязан
+быть обычным file blob, не symlink или directory.
+
+Только при намеренном первом введении baseline в историю, где валидный base
+commit действительно не содержит этого файла, допустимо:
+
+```bash
+npm run typecheck:baseline-policy -- <base-commit> --allow-initial-baseline
+```
+
+Даже с этим флагом ref и candidate проходят валидацию. Обычный CI флаг не
+использует. Missing/shallow/all-zero ref требует исправить выбор или загрузку
+base commit, а не включать bootstrap.
+
+Hooks остаются локальной защитой от ошибок, а не серверным security boundary:
+`--no-verify`/настройки Git могут их отключить. Проверка staged snapshot и
+обязательность CI checks в branch rules — отдельные задачи.
 
 ## Базовые проверки
 

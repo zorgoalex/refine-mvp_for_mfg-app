@@ -3,9 +3,4 @@ set -eu
 
 echo "Running business reference contracts before push..."
 
-guard=${RTK_HEAVY_GUARD:-${HOME:-}/.codex/rtk-heavy-guard}
-if command -v rtk >/dev/null 2>&1 && [ -n "$guard" ] && [ -x "$guard" ]; then
-  exec rtk nice -n 10 "$guard" -- npm run test:business-references -- --maxWorkers=1 --no-file-parallelism --exclude '.claude/worktrees/**'
-fi
-
-exec npm run test:business-references -- --maxWorkers=1 --no-file-parallelism --exclude '.claude/worktrees/**'
+exec /bin/sh "${0%/*}/run-heavy.sh" npm run test:business-references -- --maxWorkers=1 --no-file-parallelism --exclude '.claude/worktrees/**'
