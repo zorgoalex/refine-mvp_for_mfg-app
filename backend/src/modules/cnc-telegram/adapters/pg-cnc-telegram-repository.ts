@@ -3475,9 +3475,7 @@ async function updatePacket(
       sheet_image_content_type = $14,
       sheet_image_size_bytes = $15::bigint,
       parse_status = $16,
-      completion_status = $17,
-      thumbs_up = $18,
-      completed_at = $19::timestamptz,
+      ${mdfCompletionUpdateSql('$17', '$18', '$19')},
       rework = $20,
       comments_json = $21::jsonb,
       tools_json = $22::jsonb,
@@ -3494,6 +3492,14 @@ async function updatePacket(
   );
   await persistPacketLayoutFingerprint(tx, packetId, dto);
   await replaceWholeOrderKeys(tx, packetId, dto.comments ?? []);
+}
+
+/** The same completion assignments are exercised against PostgreSQL by correction regression tests. */
+export function mdfCompletionUpdateSql(status: string, thumbs: string, completedAt: string): string {
+  return `completion_status = CASE WHEN mdf_completion_returned THEN 'pending' ELSE ${status} END,
+    thumbs_up = CASE WHEN mdf_completion_returned THEN false ELSE ${thumbs} END,
+    completed_at = CASE WHEN mdf_completion_returned THEN NULL ELSE ${completedAt}::timestamptz END,
+    mdf_completion_returned = mdf_completion_returned AND (${status} = 'completed' OR ${thumbs} = true)`;
 }
 
 async function replaceWholeOrderKeys(
@@ -7295,10 +7301,12 @@ async function loadBathCards(
   database: DatabaseClient,
   workdayFrom: string,
   workdayTo: string,
-  options: { includeHistory?: boolean; operationalWindow?: 'month'; focusBathCardId?: string } = {},
+  options: { includeHistory?: boolean; operationalWindow?: 'month'; focusBathCardId?: string; scopeOrderIds?: number[] } = {},
 ): Promise<{ cards: CncTelegramBathCardDto[]; historicalBathReadiness: CncHistoricalBathReadinessDto[] }> {
   const operational = options.operationalWindow === 'month' && !options.includeHistory;
-  const packetDatePredicate = options.includeHistory
+  const packetDatePredicate = options.scopeOrderIds
+    ? `${scopedPacketOwnersSql('$3')} AND p.workday BETWEEN $1::date AND $2::date`
+    : options.includeHistory
     ? `COALESCE(p.source_created_at, p.created_at) >= $1::date
         AND COALESCE(p.source_created_at, p.created_at) < ($2::date + INTERVAL '1 day')`
     : 'p.workday BETWEEN $1::date AND $2::date';
@@ -7353,7 +7361,9 @@ async function loadBathCards(
     ),
     ${mdfCutReadinessCtes({
       packetPredicate: `${packetDatePredicate} ${packetVisibilityPredicate}`,
-      bazisPredicate: `cut_set.created_at >= $1::date AND cut_set.created_at < ($2::date + INTERVAL '1 day')`,
+      bazisPredicate: options.scopeOrderIds
+        ? `cut_set.created_at >= $1::date AND cut_set.created_at < ($2::date + INTERVAL '1 day') AND EXISTS (SELECT 1 FROM bazis_cut_set_details i LEFT JOIN order_details d ON d.detail_id=i.source_order_detail_id WHERE i.bazis_cut_set_id=cut_set.bazis_cut_set_id AND COALESCE(i.source_order_id,d.order_id)=ANY($3::bigint[]))`
+        : `cut_set.created_at >= $1::date AND cut_set.created_at < ($2::date + INTERVAL '1 day')`,
     })},
     target_details AS (
       SELECT order_id, detail_id, completed_quantity FROM mdf_cut_quantities
@@ -7396,9 +7406,10 @@ async function loadBathCards(
         ON projection.cut_result_id = r.cut_result_id
        AND projection.snapshot_digest = r.snapshot_digest
       WHERE board_metadata.is_vacuum = true
+        ${options.scopeOrderIds ? `AND $1::date <= $2::date AND EXISTS (SELECT 1 FROM cut_result_placement scoped WHERE scoped.cut_result_id=r.cut_result_id AND scoped.order_id=ANY($3::bigint[]))` : ''}
         ${candidateVisibilityPredicate}
         ${hiddenTombstonePredicate}
-        AND (
+        AND (${options.scopeOrderIds ? 'true OR' : ''}
           EXISTS (
             SELECT 1
             FROM cut_result_placement placement
@@ -7523,7 +7534,8 @@ async function loadBathCards(
       placement.order_detail_id ASC,
       placement.instance ASC
     `,
-    operational ? [workdayFrom, workdayTo, options.focusBathCardId ?? null] : [workdayFrom, workdayTo],
+    options.scopeOrderIds ? [workdayFrom, workdayTo, options.scopeOrderIds]
+      : operational ? [workdayFrom, workdayTo, options.focusBathCardId ?? null] : [workdayFrom, workdayTo],
   );
   const factsOnly = new Set(result.rows.filter((row) => row.readiness_only === true)
     .map((row) => `cut-result:${row.cut_result_id}`));
@@ -7672,6 +7684,7 @@ async function loadPeriodBazisCutSetCards(
   database: DatabaseClient,
   workdayFrom: string,
   workdayTo: string,
+  scopeOrderIds?: number[],
 ): Promise<CncTelegramBazisCutSetCardDto[]> {
   const result = await database.query<BazisCutSetJoinedRow>(
     `
@@ -7695,8 +7708,10 @@ async function loadPeriodBazisCutSetCards(
     target_bazis_cut_sets AS (
       SELECT cut_set.bazis_cut_set_id
       FROM bazis_cut_sets cut_set
-      WHERE cut_set.created_at >= $1::date
-        AND cut_set.created_at < ($2::date + INTERVAL '1 day')
+      WHERE ${scopeOrderIds ? ` $1::date <= $2::date AND EXISTS (SELECT 1 FROM bazis_cut_set_details i
+        LEFT JOIN order_details d ON d.detail_id=i.source_order_detail_id
+        WHERE i.bazis_cut_set_id=cut_set.bazis_cut_set_id AND COALESCE(i.source_order_id,d.order_id)=ANY($3::bigint[]))`
+        : `cut_set.created_at >= $1::date AND cut_set.created_at < ($2::date + INTERVAL '1 day')`}
     )
     SELECT
       cut_set.bazis_cut_set_id,
@@ -7747,9 +7762,34 @@ async function loadPeriodBazisCutSetCards(
     ORDER BY cut_set.created_at DESC, cut_set.bazis_cut_set_id DESC,
       detail.sort_order, detail.bazis_cut_set_detail_id
     `,
-    [workdayFrom, workdayTo],
+    scopeOrderIds ? [workdayFrom, workdayTo, scopeOrderIds] : [workdayFrom, workdayTo],
   );
   return mapBazisCutSetRows(result.rows);
+}
+
+function scopedPacketOwnersSql(parameter: string): string {
+  return `(EXISTS (SELECT 1 FROM cnc_telegram_packet_items scoped
+    WHERE scoped.packet_id=p.packet_id AND (scoped.match_order_id=ANY(${parameter}::bigint[])
+      OR EXISTS (SELECT 1 FROM orders owner WHERE owner.order_id=ANY(${parameter}::bigint[])
+        AND lower(trim(owner.order_name))=lower(trim(scoped.order_name)))))
+    OR EXISTS (SELECT 1 FROM cnc_telegram_packet_whole_order_keys w JOIN orders owner
+      ON lower(trim(owner.order_name))=w.order_key
+      WHERE w.packet_id=p.packet_id AND owner.order_id=ANY(${parameter}::bigint[])))`;
+}
+
+/** Full source membership; only bath readiness uses the displayed board window. */
+export async function loadMdfReturnSources(database: DatabaseClient, orderIds: number[], boardWindow?: {dateFrom:string;dateTo:string}): Promise<CncTelegramTodayColumnDto[]> {
+  if (!orderIds.length) return [];
+  const packets = await database.query<PacketJoinedRow>(packetSelectSql(`
+    p.mdf_board_hidden_at IS NULL AND p.mdf_board_card_kind='machine_file'
+    AND ${scopedPacketOwnersSql('$1')}
+    AND (p.source_chat_id IS DISTINCT FROM 'erp-manual-svg-upload' OR EXISTS (
+      SELECT 1 FROM outbox_events e WHERE e.idempotency_key='cnc-manual-svg:' || p.packet_id::text
+        || ':source-' || p.source_version::text || ':mdf-card-created'))`), [orderIds]);
+  const today = new Date().toISOString().slice(0,10);
+  const baths = await loadBathCards(database, boardWindow?.dateFrom ?? today, boardWindow?.dateTo ?? today, { scopeOrderIds: orderIds });
+  const basis = await loadPeriodBazisCutSetCards(database, '2000-01-01', '2100-01-01', orderIds);
+  return buildTodayColumns(mapPacketRows(packets.rows), baths.cards, basis);
 }
 
 function mapBazisCutSetRows(

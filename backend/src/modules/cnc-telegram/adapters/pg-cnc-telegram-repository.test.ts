@@ -1649,7 +1649,8 @@ describe('PgCncTelegramRepository', () => {
 
     const update = queries.find((query) => /UPDATE cnc_telegram_packets/i.test(query.text));
     expect(update?.text).toContain('sheet_image_storage_key = $13');
-    expect(update?.text).not.toContain('THEN NULL');
+    expect(update?.text).toContain('sheet_image_content_type = $14');
+    expect(update?.text).toContain('sheet_image_size_bytes = $15::bigint');
     expect(update?.params[12]).toBe('tg_100_10.jpg');
     expect(update?.params[13]).toBe('image/jpeg');
     expect(update?.params[14]).toBe(12345);

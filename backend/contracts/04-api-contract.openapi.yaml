@@ -2525,6 +2525,62 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/orders/status-board/mdf-return/{cardKind}/{cardId}/preview:
+    parameters:
+      - { name: cardKind, in: path, required: true, schema: { type: string, enum: [packet, bath, bazisCutSet] } }
+      - { name: cardId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: previewMdfProductionReturn
+      summary: Предпросмотр исправления производственного этапа карточки МДФ
+      description: Только состав источника, включая явную отметку чата «весь заказ»; ХДФ исключён. Предпросмотр не сохраняет изменения. Завершённый заказ блокирует возврат. Причина не требуется.
+      x-permissions: [orders.view, production.tasks.update, orders.change_production_status]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MdfProductionReturnRequest' }
+      responses:
+        '200':
+          description: Последствия возврата и digest для подтверждения
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MdfProductionReturnPreview' }
+        '401': { description: Требуется вход }
+        '403': { description: Нет прав или доступа к связанному заказу; открытие заказа дополнительно требует orders.change_status }
+        '409': { description: Источник сейчас изменяется }
+        '422': { description: Неоднозначный состав, завершённый заказ либо недоступный этап }
+        '503': { description: Изменения заказов отключены }
+  /api/v1/orders/status-board/mdf-return/{cardKind}/{cardId}/confirm:
+    parameters:
+      - { name: cardKind, in: path, required: true, schema: { type: string, enum: [packet, bath, bazisCutSet] } }
+      - { name: cardId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: confirmMdfProductionReturn
+      summary: Подтвердить возврат производственного этапа
+      description: Атомарно меняет позиции, необходимые статусы заказов и положение карточки; записывает аудит и outbox. Повтор с тем же ключом возвращает сохранённый результат. Изменившийся предпросмотр требует обновления, не применяется автоматически.
+      x-permissions: [orders.view, production.tasks.update, orders.change_production_status]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MdfProductionReturnConfirm' }
+      responses:
+        '200':
+          description: Возврат выполнен
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [preview, auditId, requestId]
+                properties:
+                  preview: { $ref: '#/components/schemas/MdfProductionReturnPreview' }
+                  auditId: { type: string }
+                  requestId: { type: string }
+        '401': { description: Требуется вход }
+        '403': { description: Нет прав или доступа к затронутым заказам }
+        '409': { description: Устаревший digest, конфликт ключа либо параллельное изменение }
+        '422': { description: Возврат заблокирован условиями карточки }
+        '503': { description: Изменения заказов отключены }
   /api/v1/orders/status-board/mdf-manual-moves:
     get:
       tags:
@@ -18667,6 +18723,88 @@ components:
               type: string
               format: date-time
 
+    MdfProductionReturnRequest:
+      type: object
+      additionalProperties: false
+      required: [targetColumn]
+      properties:
+        targetColumn: { type: string, enum: [parsed, completed, baths, baths_ready, baths_laminated] }
+        productionStatusId: { type: integer, minimum: 1 }
+        boardWindow:
+          type: object
+          additionalProperties: false
+          description: Период только для расчёта готовности ванн как на открытой доске. Не ограничивает изменяемый состав карточки.
+          required: [dateFrom, dateTo]
+          properties:
+            dateFrom: { type: string, format: date }
+            dateTo: { type: string, format: date }
+    MdfProductionReturnConfirm:
+      type: object
+      additionalProperties: false
+      required: [targetColumn, expectedDigest, idempotencyKey]
+      properties:
+        targetColumn: { type: string, enum: [parsed, completed, baths, baths_ready, baths_laminated] }
+        productionStatusId: { type: integer, minimum: 1 }
+        boardWindow: { $ref: '#/components/schemas/MdfProductionReturnRequest/properties/boardWindow' }
+        expectedDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+        idempotencyKey: { type: string, minLength: 8, maxLength: 200 }
+    MdfProductionReturnStage:
+      type: object
+      required: [id, code, name, rank]
+      properties:
+        id: { type: integer }
+        code: { type: string }
+        name: { type: string }
+        rank: { type: integer }
+    MdfProductionReturnPreview:
+      type: object
+      required: [source, targetColumn, targetStage, stages, digest, details, orders, cards, resetsCompletion, warnings]
+      properties:
+        source:
+          type: object
+          required: [kind, id, label]
+          properties:
+            kind: { type: string, enum: [packet, bath, bazisCutSet] }
+            id: { type: string }
+            label: { type: string }
+        targetColumn: { type: string }
+        targetStage: { $ref: '#/components/schemas/MdfProductionReturnStage' }
+        stages: { type: array, items: { $ref: '#/components/schemas/MdfProductionReturnStage' } }
+        digest: { type: string }
+        resetsCompletion: { type: boolean }
+        warnings: { type: array, items: { type: string } }
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              detailId: { type: integer }
+              orderId: { type: integer }
+              orderName: { type: string }
+              detailNumber: { type: integer, nullable: true }
+              quantity: { type: number, description: Полное количество позиции заказа с общим статусом }
+              cardQuantity: { type: number, description: Количество в источнике }
+              before: { type: string, nullable: true }
+              after: { type: string }
+        orders:
+          type: array
+          items:
+            type: object
+            properties:
+              orderId: { type: integer }
+              orderName: { type: string }
+              before: { type: string, nullable: true }
+              after: { type: string, nullable: true }
+        cards:
+          type: array
+          items:
+            type: object
+            properties:
+              kind: { type: string, enum: [packet, bath, bazisCutSet] }
+              id: { type: string }
+              label: { type: string }
+              before: { type: string }
+              after: { type: string }
     MdfBoardManualMoveTargetColumn:
       type: string
       enum:

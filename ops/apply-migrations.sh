@@ -1896,6 +1896,7 @@ probe_file() {
       "$(q_con catalog_items_base_price_check)" "$(q_con catalog_item_commands_pkey)" ;;
     160_cad_editor_workflow*) probe_all "$(q_tbl cad_export_reviews)" "$(q_tbl cad_approval_commands)" "$(q_col cad_export_reviews acknowledged_at)" "$(q_col cad_approval_commands receipt)" ;;
     161_catalog_reference_service_fields*) probe_all "$(q_col catalog_items ref_key_1c)" "$(q_col catalog_items sort_order)" "$(q_idx catalog_items_sort_idx)" "$(q_idx catalog_items_ref_key_1c_unique)" ;;
+    163_mdf_production_return*) probe_all "$(q_col cnc_telegram_packets mdf_completion_returned)" ;;
     162_order_catalog_lines*) probe_all "$(q_tbl order_catalog_lines)" \
       "SELECT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass('public.order_catalog_lines') AND attname='amount' AND attgenerated='s');" \
       "SELECT EXISTS (SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('public.order_catalog_lines_order_idx') AND indisvalid);" \

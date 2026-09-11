@@ -1,4 +1,6 @@
 import type { QueryResultRow } from 'pg';
+import { ApiError } from '../../../common/errors/api-error';
+import { loadReturnSnapshot, returnSourceOwners } from './mdf-return-snapshot';
 import { auditService } from '../../../common/audit/audit.service';
 import type { AuditRelatedEntity } from '../../../common/audit/audit-event.types';
 import { DatabaseService } from '../../../database/database.service';
@@ -61,6 +63,38 @@ export class PgMdfBoardManualMoveRepository implements MdfBoardManualMoveReposit
   async upsert(command: UpsertMdfBoardManualMoveCommand): Promise<MdfBoardManualMoveUpsertResponseDto> {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
+      if (command.cardKind !== 'order') {
+        await tx.query('SET LOCAL jit=off');
+        const source = { kind: command.cardKind, id: command.cardId };
+        let card: {column:string} | undefined;
+        try {
+          const owners = await returnSourceOwners(tx, source.kind, source.id);
+          const snapshot = await loadReturnSnapshot(tx, source, owners);
+          card = snapshot.cards.find(c => c.kind === source.kind && c.id === source.id);
+        } catch (error) {
+          if (!(error instanceof ApiError) || error.code !== 'MDF_RETURN_UNRESOLVED') throw error;
+          // A completely unlinked card cannot auto-complete from ERP details. Preserve its
+          // existing forward/manual workflow without weakening the correction endpoint.
+          const unresolved=await tx.query<{column:string}>(`WITH source AS (
+            SELECT 'packet' AS kind,packet_id::text AS id,
+              CASE WHEN completion_status='completed' OR thumbs_up=true THEN 'completed' ELSE 'parsed' END AS automatic
+              FROM cnc_telegram_packets WHERE $1='packet' AND packet_id::text=$2
+            UNION ALL SELECT 'bazisCutSet',bazis_cut_set_id::text,'parsed' FROM bazis_cut_sets
+              WHERE $1='bazisCutSet' AND bazis_cut_set_id::text=$2
+            UNION ALL SELECT 'bath','cut-result:' || cut_result_id::text,'baths' FROM cut_result
+              WHERE $1='bath' AND ('cut-result:' || cut_result_id::text)=$2)
+            SELECT COALESCE(m.target_column,s.automatic) AS column FROM source s LEFT JOIN mdf_board_manual_moves m
+              ON m.card_kind=s.kind AND m.card_id=s.id`,[source.kind,source.id]);
+          card=unresolved.rows[0];
+        }
+        if (!card) throw new ApiError(422, 'MDF_RETURN_SOURCE_UNAVAILABLE', 'Карточка не найдена');
+        const sequence = source.kind === 'bath'
+          ? ['baths', 'baths_ready', 'baths_laminated', 'completed_baths']
+          : ['parsed', 'completed', 'completed_laminated'];
+        if (sequence.indexOf(command.targetColumn) < sequence.indexOf(card.column)) {
+          throw new ApiError(409, 'MDF_RETURN_CONFIRMATION_REQUIRED', 'Возврат требует предпросмотра и подтверждения изменения производственных данных');
+        }
+      }
       const current = await loadMoveForUpdate(tx, command.cardKind, command.cardId);
       if (current && current.targetColumn === command.targetColumn) {
         return {
@@ -105,6 +139,10 @@ export class PgMdfBoardManualMoveRepository implements MdfBoardManualMoveReposit
         relatedEntities: relatedEntities(command.cardKind, command.cardId, relatedOrderIds),
       });
       if (command.cardKind !== 'order') {
+        if (command.cardKind === 'packet' && ['completed', 'completed_laminated'].includes(command.targetColumn)) {
+          await tx.query(`UPDATE cnc_telegram_packets SET mdf_completion_returned=false
+            WHERE packet_id::text=$1 AND mdf_completion_returned=true`, [command.cardId]);
+        }
         await dispatchMdfBoardEvent(tx, {
           source: { kind: command.cardKind, id: command.cardId },
           actor: command.currentUser,

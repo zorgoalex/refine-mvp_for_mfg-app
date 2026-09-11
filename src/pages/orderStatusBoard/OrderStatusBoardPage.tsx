@@ -1,4 +1,5 @@
 import { Popover, Tooltip } from '../../ui/tooltipDelay';
+import { MdfProductionReturnDialog, isMdfBackwardMove, type MdfReturnIntent } from './MdfProductionReturnDialog';
 import React, {
   lazy,
   memo,
@@ -726,6 +727,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const cncAuxiliaryRefreshRevisionRef = useRef(0);
   const cncOrderBoardRequestKeyRef = useRef<string | null>(null);
   const cncManualMoveRequestSeqRef = useRef<Record<string, number>>({});
+  const [mdfReturnIntent, setMdfReturnIntent] = useState<MdfReturnIntent | null>(null);
   const [cncDetailedEnabled, setCncDetailedEnabled] = useState(false);
   const [cncBathsRequireMachineFiles, setCncBathsRequireMachineFiles] =
     useState(false);
@@ -1969,7 +1971,14 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     targetColumn: CncTelegramTodayDisplayColumnKey,
     targetTitle: string,
     trigger: HTMLElement | null,
+    sourceColumn?: CncTelegramTodayDisplayColumnKey,
   ) => {
+    if (kind !== 'order' && isMdfBackwardMove(kind, sourceColumn, targetColumn)) {
+      const state=viewStateRef.current;
+      const boardWindow=buildCncOrderSearchDateRange(state.cncWorkday ?? dayjs().format('YYYY-MM-DD'),state.cncOrderSearchPeriod);
+      setMdfReturnIntent({ source: { kind, id: cardId }, targetColumn:targetColumn as MdfReturnIntent['targetColumn'], targetTitle, boardWindow });
+      return;
+    }
     if (kind === 'order') {
       const orderId = Number(cardId);
       const card = cncDisplayOrderStatusCards.find((candidate) => candidate.orderId === orderId);
@@ -3114,6 +3123,14 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             onClick={() => scrollCncBoardHorizontally('right')}
           />
         )}
+        {mdfReturnIntent && <MdfProductionReturnDialog intent={mdfReturnIntent}
+          onCancel={() => setMdfReturnIntent(null)}
+          columnTitle={(key) => isCncManualColumnKey(key) ? cncColumnTitleByKey(key) : key}
+          onReturned={async () => {
+            setMdfReturnIntent(null);
+            message.success('Возврат выполнен. Производственные данные и положение карточек обновлены.');
+            await fetchInitial({ mutationRefetch: true, preserveLoading: true });
+          }} />}
       </main>
     </DndProvider>
   );
@@ -3191,6 +3208,7 @@ interface CncTelegramTodayColumnsProps {
     targetColumn: CncTelegramTodayDisplayColumnKey,
     targetTitle: string,
     trigger: HTMLElement | null,
+    sourceColumn?: CncTelegramTodayDisplayColumnKey,
   ) => void;
   showFinancials: boolean;
 }
@@ -4683,7 +4701,7 @@ const CncColumnDropZone: React.FC<CncColumnDropZoneProps> = ({
         item.sourceColumn !== columnKey &&
         isCncManualMoveAllowed(item.kind, columnKey)
       ) {
-        onMove(item.kind, item.cardId, columnKey, columnTitle, item.trigger);
+        onMove(item.kind, item.cardId, columnKey, columnTitle, item.trigger, item.sourceColumn);
       }
     },
     collect: (monitor) => ({
@@ -4872,9 +4890,9 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
       const targetKey = key.slice('move:'.length) as CncTelegramTodayDisplayColumnKey;
       const target = destinations.find((destination) => destination.key === targetKey);
       if (!target) return;
-      onMove(kind, cardId, target.key, target.title, shellRef.current);
+      onMove(kind, cardId, target.key, target.title, shellRef.current, sourceColumn);
     },
-  }), [cardId, destinations, kind, onMove]);
+  }), [cardId, destinations, kind, onMove, sourceColumn]);
 
   return (
     <Dropdown
@@ -9146,7 +9164,6 @@ function cncColumnBadgeColor(columnKey: CncTelegramTodayDisplayColumnKey): strin
   if (columnKey === 'completed' || columnKey === 'baths_ready') return '#389e0d';
   if (columnKey === 'baths_laminated') return '#13c2c2';
   if (columnKey === 'baths') return '#cf1322';
-  if (columnKey === 'orders') return '#d46b08';
   return '#1677ff';
 }
 
