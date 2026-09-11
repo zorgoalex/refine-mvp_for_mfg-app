@@ -298,7 +298,7 @@ describe('orderFormStore version sync', () => {
     const state = useOrderFormStore.getState();
     expect(state.details).toHaveLength(7);
     expect(state.details.slice(0, 4)).toEqual(protectedRows);
-    expect(state.details.find(row => row.detail_number === 5)).toMatchObject({ ...pdfDetail, is_placeholder: false });
+    expect(state.details.find(row => row.detail_number === 5)).toMatchObject({ ...pdfDetail, detail_number: 5, is_placeholder: false });
     expect(state.details.find(row => row.detail_number === 6)).toMatchObject({ detail_name: 'E2E second import', is_placeholder: false });
     expect(state.details.find(row => row.detail_number === 7)).toEqual(slots[6]);
     expect(state.pdfImportCandidateTempIds).toEqual([slots[4].temp_id, slots[5].temp_id]);
