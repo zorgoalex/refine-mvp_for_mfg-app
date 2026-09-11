@@ -17,7 +17,7 @@ import {
 } from '../types/orders';
 import { calculateOrderTotalArea } from '../utils/orderArea';
 import { getWorkspaceStateNamespace } from '../workspace/workspaceStateNamespace';
-import { businessOrderDetails } from '../utils/orderDetailRows';
+import { businessOrderDetails, getOrderImportPlaceholderIds } from '../utils/orderDetailRows';
 import { orderCatalogSubtotal, type OrderCatalogLine } from '../utils/orderCatalogLines';
 
 // ============================================================================
@@ -256,23 +256,29 @@ const createOrderDraftStore = (orderKey: string, namespace: string): OrderDraftS
         addPdfImportedDetail: (detail) => {
           set(
             (state) => {
+              const placeholderId = getOrderImportPlaceholderIds(state.details)[0];
+              const placeholder = placeholderId === undefined
+                ? undefined
+                : state.details.find(current => current.temp_id === placeholderId);
               const maxDetailNumber = state.details.reduce(
                 (max, current) => Math.max(max, current.detail_number || 0),
                 0,
               );
-              const tempId = generateTempId();
+              const tempId = placeholderId ?? generateTempId();
+              const importedDetail = {
+                ...placeholder,
+                ...detail,
+                temp_id: tempId,
+                detail_number: placeholder?.detail_number ?? maxDetailNumber + 1,
+                priority: detail.priority || 100,
+                quantity: detail.quantity,
+                delete_flag: false,
+                is_placeholder: false,
+              };
               return {
-                details: [
-                  ...state.details,
-                  {
-                    ...detail,
-                    temp_id: tempId,
-                    detail_number: maxDetailNumber + 1,
-                    priority: detail.priority || 100,
-                    quantity: detail.quantity,
-                    delete_flag: false,
-                  },
-                ],
+                details: placeholder
+                  ? state.details.map(current => current === placeholder ? importedDetail : current)
+                  : [...state.details, importedDetail],
                 pdfImportCandidateTempIds: [...state.pdfImportCandidateTempIds, tempId],
                 isDirty: true,
               };

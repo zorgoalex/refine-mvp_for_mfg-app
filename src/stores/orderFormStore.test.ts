@@ -1,4 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { OrderDetail } from '../types/orders';
+import { mapOrderFormToSaveOrderDto } from '../api/mappers/orderMapper';
 
 let useOrderFormStore: typeof import('./orderFormStore').useOrderFormStore;
 
@@ -232,6 +234,74 @@ describe('orderFormStore version sync', () => {
       total_area: 0,
       total_amount: 0,
     });
+  });
+
+  const emptyDetail: Omit<OrderDetail, 'temp_id'> = {
+    detail_number: 0, height: 0, width: 0, quantity: 0, area: 0, material_id: null,
+    milling_type_id: 1, edge_type_id: 1, priority: 100,
+  };
+  const pdfDetail: Omit<OrderDetail, 'temp_id'> = {
+    ...emptyDetail, height: 500, width: 300, quantity: 2, area: 0.3,
+    sheet_material_type_id: 5, detail_cost: 100, basis_project: 'E2E-project',
+    basis_product: 'E2E-product', basis_designation: 'E2E-panel', doweling: true,
+  };
+
+  it.each([3, 20, 23])('imports %i PDF details into the initial 20 rows before appending', (count) => {
+    const store = useOrderFormStore.getState();
+    store.setHeader({ order_name: 'E2E PDF import', client_id: 1,
+      order_date: '2026-09-11', order_status_id: 1 });
+    store.ensureMinimumDetailRows(20, emptyDetail);
+    const slots = useOrderFormStore.getState().details;
+
+    for (let index = 0; index < count; index++) {
+      store.addPdfImportedDetail({ ...pdfDetail, detail_name: `E2E-panel-${index + 1}` });
+    }
+
+    const state = useOrderFormStore.getState();
+    expect(state.details).toHaveLength(Math.max(20, count));
+    expect(state.details.slice(0, Math.min(count, 20)).map(row => row.temp_id))
+      .toEqual(slots.slice(0, count).map(row => row.temp_id));
+    state.details.slice(0, count).forEach((row, index) => {
+      expect(row).toMatchObject({ ...pdfDetail, detail_number: index + 1,
+        detail_name: `E2E-panel-${index + 1}`, is_placeholder: false });
+    });
+    expect(state.details.slice(count)).toEqual(slots.slice(count));
+    expect(state.pdfImportCandidateTempIds).toEqual(state.details.slice(0, count).map(row => row.temp_id));
+    expect(new Set(state.pdfImportCandidateTempIds).size).toBe(count);
+    expect(state.isDirty).toBe(true);
+    expect(state.calculatedTotals()).toMatchObject({ positions_count: count,
+      parts_count: count * 2, total_amount: count * 100 });
+    expect(state.calculatedTotals().total_area).toBeCloseTo(count * 0.3);
+
+    const dto = mapOrderFormToSaveOrderDto(state.getFormValues());
+    expect(dto.details).toHaveLength(count);
+    expect(dto.details.map(row => row.detailNumber)).toEqual(Array.from({ length: count }, (_, i) => i + 1));
+    expect(dto.bazisImportCandidateClientKeys).toEqual(state.pdfImportCandidateTempIds.map(String));
+  });
+
+  it('fills PDF slots in display order while preserving edited, saved and deleted rows', () => {
+    const store = useOrderFormStore.getState();
+    store.ensureMinimumDetailRows(7, emptyDetail);
+    const slots = useOrderFormStore.getState().details;
+    useOrderFormStore.setState({ details: [
+      { ...slots[0], note: 'E2E ручной ввод' },
+      { ...slots[1], detail_id: 501 },
+      { ...slots[2], delete_flag: true },
+      { ...slots[3], is_placeholder: false, height: 700 },
+      slots[6], slots[5], slots[4],
+    ] });
+    const protectedRows = useOrderFormStore.getState().details.slice(0, 4);
+
+    store.addPdfImportedDetail(pdfDetail);
+    store.addPdfImportedDetail({ ...pdfDetail, detail_name: 'E2E second import' });
+
+    const state = useOrderFormStore.getState();
+    expect(state.details).toHaveLength(7);
+    expect(state.details.slice(0, 4)).toEqual(protectedRows);
+    expect(state.details.find(row => row.detail_number === 5)).toMatchObject({ ...pdfDetail, is_placeholder: false });
+    expect(state.details.find(row => row.detail_number === 6)).toMatchObject({ detail_name: 'E2E second import', is_placeholder: false });
+    expect(state.details.find(row => row.detail_number === 7)).toEqual(slots[6]);
+    expect(state.pdfImportCandidateTempIds).toEqual([slots[4].temp_id, slots[5].temp_id]);
   });
 });
 

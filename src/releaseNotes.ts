@@ -29,6 +29,12 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-09-11",
+    title: "PDF-импорт: пустые строки и прокрутка сопоставления",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: ["Детали из PDF сначала заполняют свободные строки заказа; новые строки добавляются, когда свободных не осталось. Заполненные и сохранённые детали не заменяются.", "В окне импорта PDF длинный список сопоставления прокручивается внутри формы. Нижние поля доступны и на небольшом экране, кнопки перехода остаются видимыми."],
+  },
+  {
     version: APP_VERSION, date: "2026-09-10",
     title: "CAD: больше места для чертежа",
     services: ["ERP"], repositories: ["repo_erp"],

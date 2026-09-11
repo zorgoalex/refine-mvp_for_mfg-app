@@ -25,6 +25,24 @@ export function businessOrderDetails(details: readonly OrderDetail[]): OrderDeta
   return details.filter((detail) => !isOrderDetailPlaceholder(detail));
 }
 
+/** Reuse only pristine UI scaffolding, never saved, edited or populated rows.
+ * Unknown nonempty fields fail closed, including links, references and provenance.
+ */
+export function getOrderImportPlaceholderIds(details: readonly OrderDetail[]): number[] {
+  return details.filter(detail => detail.is_placeholder === true
+    && detail.detail_id == null && detail.delete_flag !== true
+    && Number.isSafeInteger(detail.temp_id) && Number(detail.temp_id) > 0
+    && Object.entries(detail).every(([key, value]) => {
+      if (['temp_id', 'detail_number', 'is_placeholder', 'order_id'].includes(key)) return true;
+      if (key === 'priority' && value === 100) return true;
+      if (key === 'milling_type_id' && value === 1) return true;
+      if (key === 'edge_type_id' && value === 1) return true;
+      return value == null || value === '' || value === 0 || value === false;
+    }))
+    .sort((left, right) => (left.detail_number ?? 0) - (right.detail_number ?? 0))
+    .map(detail => detail.temp_id!);
+}
+
 export function recentOrderDetailReferenceIds(
   details: readonly OrderDetail[],
   currentDetail: OrderDetail,
