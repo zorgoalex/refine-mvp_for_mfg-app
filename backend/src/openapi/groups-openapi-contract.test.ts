@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'fs';
 import { resolve } from 'path';
+import { dump, load } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
 
 describe('groups OpenAPI contract', () => {
@@ -488,11 +489,11 @@ describe('groups OpenAPI contract', () => {
       '    GroupOverviewCreatedMonthCount:',
       '    GroupOverviewFilter:',
     );
-    const filterSchema = sectionBetween(
-      contract,
-      '    GroupOverviewFilter:',
-      '    MdfBoardManualMoveTargetColumn:',
-    );
+    // Inspect the actual schema, not all text up to a historically adjacent
+    // component: adding MDF schemas must not look like a group-domain leak.
+    const parsed = load(contract) as { components: { schemas: Record<string, unknown> } };
+    expect(parsed.components.schemas.GroupOverviewFilter).toBeDefined();
+    const filterSchema = dump(parsed.components.schemas.GroupOverviewFilter);
 
     expect(overviewSection).toContain('operationId: getGroupOverview');
     expect(overviewSection).toContain('- groups.view');
