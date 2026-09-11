@@ -272,7 +272,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
         basis_data: row.basisData || null,
         basis_designation: row.basisDesignation || null,
         detail_name: row.detailName || null,
-        doweling: row.doweling === true,
+        doweling: row.doweling === true || /присадка/i.test(row.note ?? ''),
       };
 
       addPdfImportedDetail(detail);
@@ -405,7 +405,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
                   onClick={handleImport}
                   disabled={importValidation.stats.validRows === 0}
                 >
-                  Импортировать ({importValidation.stats.validRows} шт)
+                  Импортировать ({importValidation.stats.validRows} строк)
                 </Button>
               ) : (
                 <Button

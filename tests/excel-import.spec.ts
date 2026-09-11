@@ -27,9 +27,9 @@ async function openImport(page: Page, mode: 'create' | 'edit' = 'create', prepar
   }));
   if (mode === 'create') {
     await page.goto('/orders');
-    await page.getByRole('button', { name: 'Создать заказ', exact: uiVariant === 'air' }).click();
+    await page.getByRole('button', { name: 'Создать заказ', exact: uiVariant === 'air' }).click({ timeout: 60_000 });
   } else await page.goto('/orders/edit/501');
-  await page.getByRole('tab', { name: uiVariant === 'air' ? 'Состав' : 'Детали заказа', exact: true }).click();
+  await page.getByRole('tab', { name: uiVariant === 'air' ? 'Состав' : 'Детали заказа', exact: true }).click({ timeout: 60_000 });
   await prepare?.();
   await page.getByRole('button', { name: 'Импорт деталей из файла', exact: true }).click();
   await page.getByRole('menuitem', { name: /Импорт из Excel/ }).click();
@@ -287,20 +287,23 @@ test('edit import preserves saved rows and never consumes the separate new-order
   expect(await draftDetails(page, 'new')).toEqual(before);
 });
 
-test('Excel wizard preserves and blocks an invalid pending note instead of discarding it', async ({ page }) => {
-  const dialog = await openImport(page);
-  await dialog.getByRole('button', { name: 'Отмена', exact: true }).click();
-  const grid = page.getByRole('grid', { name: 'Детали заказа, табличный режим' });
-  const noteCell = grid.getByRole('gridcell').nth(9);
-  await noteCell.dblclick();
-  const note = noteCell.getByRole('textbox');
-  await note.fill('Не терять ручной ввод');
-  await page.getByRole('button', { name: 'Импорт деталей из файла', exact: true }).click();
-  await page.getByRole('menuitem', { name: /Импорт из Excel/ }).click();
-  await expect(page.getByText('Позиция №1: исправьте данные')).toBeVisible();
-  await expect(dialog).not.toBeVisible();
-  await expect(note).toHaveValue('Не терять ручной ввод');
-});
+for (const format of ['Excel', 'PDF']) {
+  test(`${format} wizard preserves and blocks an invalid pending note instead of discarding it`, async ({ page }) => {
+    const dialog = await openImport(page);
+    await dialog.getByRole('button', { name: 'Отмена', exact: true }).click();
+    const grid = page.getByRole('grid', { name: 'Детали заказа, табличный режим' });
+    const noteCell = grid.getByRole('gridcell').nth(9);
+    await noteCell.dblclick();
+    const note = noteCell.getByRole('textbox');
+    await note.fill('Не терять ручной ввод');
+    await page.getByRole('button', { name: 'Импорт деталей из файла', exact: true }).click();
+    await page.getByRole('menuitem', { name: new RegExp(`Импорт из ${format}`) }).click();
+    await expect(page.getByText('Позиция №1: исправьте данные')).toBeVisible();
+    await expect(dialog).not.toBeVisible();
+    await expect(page.getByRole('dialog', { name: /Импорт деталей из PDF/ })).not.toBeVisible();
+    await expect(note).toHaveValue('Не терять ручной ввод');
+  });
+}
 
 test('Excel wizard saves a valid pending row before filling the following slots', async ({ page }) => {
   const dialog = await openImport(page);

@@ -952,8 +952,8 @@ export const OrderDetailsTab = forwardRef<
                   <OrderToolbarLabel>Групповые действия</OrderToolbarLabel>
                 </Button>
               </AccessibleToolbarTooltip>
-              <ImportDropdownButton beforeExcelImport={async () =>
-                tableRef.current ? tableRef.current.prepareExcelImport() : false
+              <ImportDropdownButton beforeImport={async () =>
+                tableRef.current ? tableRef.current.prepareFileImport() : false
               } />
               <AccessibleToolbarTooltip
                 title={`Удалить выбранные (${selectedRowKeys.length})`}

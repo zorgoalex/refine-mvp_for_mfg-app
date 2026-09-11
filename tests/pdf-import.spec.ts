@@ -17,9 +17,9 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 600 
         table { width: 1400px; table-layout: fixed; border-collapse: collapse; font: 12px Arial; }
         td, th { padding: 10px 0; text-align: left; }
       </style>${[1, 2, 3].map(index => `<section><table>
-        <tr>${['Наименование', 'Кол-во', 'Длина', 'Ширина', 'Материал', 'Поле A', 'Поле B', `Тест поле ${index}`]
+        <tr>${['Наименование', 'Кол-во', 'Длина', 'Ширина', 'Материал', 'Поле A', 'Поле B', index === 3 ? 'Тест поле 3' : 'Примечание']
           .map(label => `<th>${label}</th>`).join('')}</tr>
-        <tr>${[`E2E-panel-${index}`, '2', '700', '400', 'МДФ 16 мм (Лист)', 'A', 'B', `E2E-note-${index}`]
+        <tr>${[`E2E-panel-${index}`, '2', '700', '400', 'МДФ 16 мм (Лист)', 'A', 'B', index === 1 ? 'Присадка:' : index === 3 ? 'E2E-note-3 ПРИСАДКА' : 'E2E-note-2']
           .map(value => `<td>${value}</td>`).join('')}</tr>
       </table></section>`).join('')}`);
       const pdf = await pdfPage.pdf({ preferCSSPageSize: true });
@@ -47,6 +47,8 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 600 
       const detailsTab = page.getByRole('tab', { name: 'Детали заказа', exact: true });
       await expect(detailsTab).toBeVisible({ timeout: 60_000 });
       if (await detailsTab.getAttribute('aria-selected') !== 'true') await detailsTab.click();
+      const editingRows = page.getByRole('row').filter({ has: page.getByRole('spinbutton') });
+      await expect(editingRows).toHaveCount(1);
       await page.getByRole('button', { name: 'Импорт деталей из файла', exact: true }).click();
       await page.getByRole('menuitem', { name: /Импорт из PDF/ }).click();
       const dialog = page.getByRole('dialog', { name: /Импорт деталей из PDF/ });
@@ -73,7 +75,7 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 600 
       await page.locator('.ant-select-dropdown:visible').getByTitle('Примечание', { exact: true }).click();
       await expect(lastRow).toContainText('Примечание');
       await next.click();
-      await dialog.getByRole('button', { name: 'Импортировать (3 шт)', exact: true }).click();
+      await dialog.getByRole('button', { name: 'Импортировать (3 строк)', exact: true }).click();
       await expect(dialog).not.toBeVisible();
 
       const details = await page.evaluate(() => {
@@ -83,8 +85,14 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 600 
       expect(details).toHaveLength(20);
       expect(details.slice(0, 3).map((row: { detail_number: number }) => row.detail_number)).toEqual([1, 2, 3]);
       expect(details.slice(0, 3).every((row: { is_placeholder: boolean }) => row.is_placeholder === false)).toBe(true);
-      expect(details[2].note).toBe('E2E-note-3');
+      expect(details[2].note).toBe('E2E-note-3 ПРИСАДКА');
+      expect.soft(details.slice(0, 3).map((row: { doweling: boolean }) => row.doweling)).toEqual([true, false, true]);
       expect(details.slice(3).every((row: { is_placeholder: boolean }) => row.is_placeholder === true)).toBe(true);
+      // Imported state must also replace the initial inline editor on screen.
+      await expect.soft(editingRows).toHaveCount(0);
+      const firstRow = page.locator(`tr[data-row-key="${details[0].temp_id}"]`);
+      await expect(firstRow).toContainText('700');
+      await expect(firstRow).toContainText('Присадка:');
     });
   });
 }

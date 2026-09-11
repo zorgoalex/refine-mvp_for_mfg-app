@@ -128,7 +128,7 @@ export interface OrderDetailTableRef {
   saveCurrentAndStartNew: (newDetail: OrderDetail) => Promise<boolean>;
   isEditing: () => boolean;
   applyCurrentEdits: () => Promise<boolean>;
-  prepareExcelImport: () => Promise<boolean>;
+  prepareFileImport: () => Promise<boolean>;
 }
 
 // ============================================================================
@@ -935,7 +935,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const defaultMaterialAppliedKeyRef = useRef<React.Key | null>(null);
   const restoredEditingKey = useRef(readDetailCheckpointKey(restored?.editingKey)).current;
   // Programmatic defaults are not user edits. Restored editors fail closed.
-  const excelImportHasPendingEdits = useRef(restoredEditingKey !== null);
+  const importHasPendingEdits = useRef(restoredEditingKey !== null);
   const {
     editingKey,
     setEditingKey,
@@ -1450,7 +1450,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     initialValue?: string | number,
     markDirty = true,
   ) => {
-    excelImportHasPendingEdits.current = initialValue !== undefined;
+    importHasPendingEdits.current = initialValue !== undefined;
     if (!groupingActive) {
       setCurrentPage(pageContainingOrderDetail(paginatedDetails, record, pageSize));
     }
@@ -1722,10 +1722,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       if (editingKey === null && !inlineRestorePending) return true; // Nothing to save
       return await saveCurrentRow({ allowEmptyTailRow: true });
     },
-    prepareExcelImport: async () => {
+    prepareFileImport: async () => {
       if (inlineRestorePending || !canApplyCurrentEdit) return false;
       if (editingKey === null) return true;
-      if (!excelImportHasPendingEdits.current) {
+      if (!importHasPendingEdits.current) {
         cancelEdit();
         return true;
       }
@@ -2696,7 +2696,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     if (editingKey !== null && String(editingKey) === rowKey) {
       setEditingField(columnKey);
       if (initialValue !== undefined) {
-        excelImportHasPendingEdits.current = true;
+        importHasPendingEdits.current = true;
         form.setFieldValue(String(columnKey), initialValue);
         cellRuntime.notifyCell(editingKey, columnKey);
       }
@@ -3807,7 +3807,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
   // Handle film quick create success
   const handleFilmCreated = (filmId: number) => {
-    excelImportHasPendingEdits.current = true;
+    importHasPendingEdits.current = true;
     // Set the newly created film in the current editing row
     form.setFieldsValue({ film_id: filmId });
     cellRuntime.notifyCell(editingKey, 'film_id');
@@ -3846,7 +3846,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   return (
     <>
     <Form form={form} component={false} onValuesChange={() => {
-      excelImportHasPendingEdits.current = true;
+      importHasPendingEdits.current = true;
       setDetailEditing(true);
     }}>
       <div
