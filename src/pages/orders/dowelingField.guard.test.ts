@@ -99,6 +99,6 @@ describe('order detail doweling field guards', () => {
 
   it('PDF import auto-sets doweling from the note', () => {
     expect(pdfExtractor).toMatch(/doweling: \/присадка\/i\.test\(detail\.note \?\? ''\)/);
-    expect(pdfImportModal).toContain('doweling: row.doweling === true,');
+    expect(pdfImportModal).toContain("doweling: row.doweling === true || /присадка/i.test(row.note ?? '')");
   });
 });
