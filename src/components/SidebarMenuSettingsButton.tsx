@@ -188,7 +188,7 @@ export const SidebarMenuSettingsButton: React.FC<SidebarMenuSettingsButtonProps>
           setDragOverState(null);
         }}
         width={520}
-        footer={() => (
+        footer={(
           <Space style={{ width: '100%', justifyContent: 'space-between' }}>
             <Button onClick={reset}>Сбросить по умолчанию</Button>
             <Space>

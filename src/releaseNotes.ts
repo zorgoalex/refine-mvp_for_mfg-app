@@ -29,6 +29,12 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-09-12",
+    title: "Настройки меню и колонок: кнопки и статус сохранения",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: ["В окнах настройки порядка меню и колонок деталей восстановлены кнопки «Сбросить по умолчанию», «Закрыть» и отображение состояния сохранения."],
+  },
+  {
     version: APP_VERSION, date: "2026-09-11",
     title: "МДФ-доска: возврат производственного этапа",
     services: ["ERP"], repositories: ["repo_erp"],
