@@ -20,6 +20,18 @@ RUNTIME_CONFIG_BACKEND_PRODUCTION_ACTIONS=true
 BACKEND_ENABLE_PRODUCTION_ACTIONS=true
 ```
 
+## CAD: редактор фрезеровок
+
+Порядок включения: сначала CAD с `editor_version=2`, затем миграция
+`160_cad_editor_workflow.sql` и ERP backend/frontend; последним
+`BACKEND_CAD_EDITOR_V2=true` (по умолчанию false). `BACKEND_ENABLE_CAD=true`
+остаётся обязательным.
+
+Флаг нового UI не отключает серверные проверки. Откат допустим через этот флаг,
+но не на backend без поддержки политик и подтверждений.
+См. [права и флаги CAD](configuration-and-auth.md#cad) и
+[руководство редактора](feature-guides.md#cad-редактор-фрезеровок).
+
 ## Source of truth
 
 Tracked Compose template:
