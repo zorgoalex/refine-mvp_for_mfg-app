@@ -1036,7 +1036,8 @@ function handleGraphql(query: string, db: WorkflowMockDb) {
     for (const resource of RESOURCES) {
         if (new RegExp(`\\b${resource}_aggregate\\b`).test(query)) {
             data[`${resource}_aggregate`] = {
-                aggregate: { count: applyQuery(getRows(db, resource), query).length },
+                // The list's limit/offset must not truncate the aggregate count.
+                aggregate: { count: applyQuery(getRows(db, resource), query, false).length },
             };
         }
 
@@ -1113,7 +1114,7 @@ function handleDelete(query: string, db: WorkflowMockDb) {
     };
 }
 
-function applyQuery(rows: Row[], query: string): Row[] {
+function applyQuery(rows: Row[], query: string, paginate = true): Row[] {
     let result = [...rows];
 
     for (const filter of parseFilters(query)) {
@@ -1132,6 +1133,7 @@ function applyQuery(rows: Row[], query: string): Row[] {
         });
     }
 
+    if (!paginate) return result;
     const offset = Number(query.match(/offset:\s*(\d+)/)?.[1] || 0);
     const limitMatch = query.match(/limit:\s*(\d+)/);
     if (limitMatch) {

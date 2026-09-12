@@ -30,6 +30,12 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION, date: "2026-09-12",
+    title: "Платежи: навигация на телефоне",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: ["В мобильном списке платежей восстановлены переходы между страницами. Выбранный размер страницы сохраняется; табличный вид не изменён."],
+  },
+  {
+    version: APP_VERSION, date: "2026-09-12",
     title: "CAD: компактные кнопки и поля",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: ["Высота кнопок и однострочных полей CAD уменьшена примерно вдвое — до 20 px. Компактность действует также в панелях и окнах CAD; остальные экраны ERP не изменены."],

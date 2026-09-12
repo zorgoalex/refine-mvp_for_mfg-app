@@ -19,6 +19,7 @@ export const PaymentCardList: React.FC<PaymentCardListProps> = ({ rows, loading,
     loading={loading}
     pagination={pagination === false ? false : {
       ...pagination,
+      position: 'bottom',
       simple: false,
       showLessItems: true,
       showSizeChanger: true,
