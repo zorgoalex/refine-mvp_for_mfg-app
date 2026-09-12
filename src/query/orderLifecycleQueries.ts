@@ -4,7 +4,7 @@ import {
   useOne as useRefineOne,
   useShow as useRefineShow,
 } from '@refinedev/core';
-import { useSelect as useRefineSelect } from '@refinedev/antd';
+import { useSelect as useRefineSelect } from '../ui/refineSelect';
 import { createElement, useCallback, useLayoutEffect, useRef, type PropsWithChildren } from 'react';
 
 import {

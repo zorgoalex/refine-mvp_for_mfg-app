@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { InboxOutlined, LinkOutlined, LoadingOutlined, CheckCircleOutlined, MinusOutlined } from '@ant-design/icons';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useSelect } from '@refinedev/antd';
+import { useSelect } from '../../ui/refineSelect';
 import { Alert, Button, Descriptions, Input, Modal, Radio, Select, Space, Spin, Steps, Tree, Typography, Upload, message } from 'antd';
 import { ApiError } from '../../api/apiError';
 import { bazisApi } from '../../api/bazisApi';
