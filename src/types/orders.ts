@@ -78,6 +78,9 @@ export interface Order {
   // Для обратной совместимости оставляем старые поля (будут заполняться из первой связи)
   doweling_order_id?: number | null;
   doweling_order_name?: string | null;
+  // View-only engineer fields from the linked doweling order, not orders columns.
+  design_engineer_id?: number | null;
+  design_engineer?: string | null;
   // Массив всех связанных присадок
   doweling_links?: OrderDowelingLink[];
 
