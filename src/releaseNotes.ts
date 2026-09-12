@@ -30,6 +30,12 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION, date: "2026-09-12",
+    title: "Telegram: шаги обработки в журнале",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: ["В раскрытом событии журнала Telegram снова видны шаги обработки: сообщения, время и цвет результата. Ответы Telegram и ERP сохранены."],
+  },
+  {
+    version: APP_VERSION, date: "2026-09-12",
     title: "Платежи: навигация на телефоне",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: ["В мобильном списке платежей восстановлены переходы между страницами. Выбранный размер страницы сохраняется; табличный вид не изменён."],
