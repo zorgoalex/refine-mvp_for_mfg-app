@@ -278,7 +278,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
     return allPanels.filter((panel) => [
       panel.name,
       panel.designation,
-      panel.materialName,
+      panel.mainMaterialName,
       panel.pathTitle,
       panel.productName,
       panel.bazisProjectNo,
@@ -781,7 +781,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
     visiblePanels.map((panel) => panel.mainMaterialName?.trim()).filter(Boolean),
   ).size;
 
-  if (groupRows.length === 0) {
+  if (allPanels.length === 0) {
     return <Empty description="В ревизии нет панелей" />;
   }
 

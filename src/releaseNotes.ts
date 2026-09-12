@@ -30,6 +30,12 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION, date: "2026-09-12",
+    title: "Базис: поиск панелей по материалу",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: ["Поиск панелей Базис снова находит основной материал и остаётся доступным при пустом результате. Группировка и выбранные панели сохраняются при фильтрации."],
+  },
+  {
+    version: APP_VERSION, date: "2026-09-12",
     title: "Справочники: сортировка при быстром создании",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: ["В формах быстрого создания кромки и фрезеровки снова доступен порядок сортировки. Восстановленное из черновика значение сохраняется и без раскрытия раздела."],
