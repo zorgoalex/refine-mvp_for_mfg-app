@@ -5,6 +5,7 @@ import { cadApi } from '../../api/cadApi';
 import { can } from '../../utils/permissions';
 import { CadLegacyPage } from './CadLegacyPage';
 import { CadEditorPage } from './CadEditorPage';
+import './cadCompact.css';
 
 export function CadPage() {
   const allowed = can('cad.view') && can('orders.view');

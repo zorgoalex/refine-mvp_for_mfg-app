@@ -99,6 +99,69 @@ async function selectFirstDesktopPart(page: Page) {
   await page.getByRole('button', { name: 'Свойства', exact: true }).click();
 }
 
+test('CAD controls have desktop density in panels, portals and tablet shell only', async ({ page }) => {
+  const { control } = await setup(page);
+  await page.setViewportSize({ width: 1500, height: 1000 });
+  await page.goto('/cad/orders/1');
+  const height = async (selector: string, expected = 20) => {
+    const el = page.locator(selector).first();
+    await expect(el).toBeVisible();
+    await expect.poll(async () => (await el.boundingBox())!.height).toBe(expected);
+    // A control must not hide its own single-line text after shrinking.
+    expect(await el.evaluate(e => parseFloat(getComputedStyle(e).fontSize))).toBeGreaterThanOrEqual(12);
+    const content = el.locator('.ant-select-selection-item, .ant-select-selection-placeholder').first();
+    if (await content.isVisible()) expect((await content.boundingBox())!.height).toBeLessThanOrEqual(expected - 2);
+    else expect(await el.evaluate(e => {
+      const s = getComputedStyle(e);
+      return parseFloat(s.lineHeight) + parseFloat(s.paddingTop) + parseFloat(s.paddingBottom);
+    })).toBeLessThanOrEqual(expected);
+  };
+  await height('.cad-editor-toolbar .ant-btn');
+  await height('.cad-editor-header .ant-select-selector');
+  await height('.cad-side-panel-toggle', 22);
+  await page.getByRole('button', { name: 'Измерить', exact: true }).click();
+  await height('.cad-canvas-tools .ant-input-number');
+  await height('.cad-canvas-tools .ant-input-number-input', 18);
+  await page.getByRole('button', { name: 'Выбор', exact: true }).click();
+  await selectFirstDesktopPart(page);
+  await height('.cad-parts-panel .ant-input-search input');
+  await height('.cad-parts-panel .ant-input-search-button');
+  await height('.cad-parameter input');
+  await height('.cad-inspector .ant-select-selector');
+  await page.locator('.cad-inspector .ant-select-selector').click();
+  await expect(page.locator('.cad-compact.ant-select-dropdown')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Новый вариант', exact: true }).click();
+  await height('.cad-compact .ant-modal-body input');
+  await height('.cad-compact .ant-modal-footer .ant-btn');
+  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+  await page.getByRole('button', { name: 'Детали (2)', exact: true }).click();
+  await page.getByRole('button', { name: 'Свойства', exact: true }).click();
+  await page.setViewportSize({ width: 1024, height: 850 });
+  // Exercise the physical tablet hit-box override without changing non-CAD controls.
+  await page.addStyleTag({ path: 'src/ui-evolution/styles/tablet.css' });
+  await page.evaluate(() => {
+    document.documentElement.dataset.uiVariant = 'line';
+    const shell = document.createElement('div');
+    shell.className = 'evolution-shell evolution-shell--tablet';
+    const button = document.createElement('button');
+    button.className = 'ant-btn'; button.id = 'non-cad-density-probe'; button.textContent = 'ERP';
+    shell.append(button); document.body.append(shell);
+    document.querySelector('.cad-page')!.parentElement!.classList.add('evolution-shell', 'evolution-shell--tablet');
+  });
+  await height('.cad-editor-toolbar .ant-btn');
+  await expect.poll(async () => (await page.locator('#non-cad-density-probe').boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await page.getByRole('button', { name: 'Детали (2)', exact: true }).click();
+  await height('.cad-compact .ant-input-search input');
+  await height('.cad-compact .ant-input-search-button');
+  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+  await page.getByRole('button', { name: 'Свойства', exact: true }).click();
+  await height('.cad-compact .cad-parameter input');
+  await height('.cad-compact .ant-select-selector');
+  await page.screenshot({ path: 'test-results/cad-editor-ux/tablet-compact-properties.png', fullPage: true });
+  expect(control.saves).toEqual([]);
+});
+
 test('issues open the collapsed desktop inspector without a duplicate drawer form', async ({ page }) => {
   const { working } = await setup(page); working.groups[0].recipe = null;
   await page.setViewportSize({ width: 1500, height: 1000 }); await page.goto('/cad/orders/1');

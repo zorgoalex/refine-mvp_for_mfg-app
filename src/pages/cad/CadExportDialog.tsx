@@ -60,7 +60,7 @@ export function CadExportDialog({ open, flush, onClose }: Props) {
   }, [receipt.data]);
   const act = async (fn: () => Promise<void>) => { if (busy) return; setBusy(true); setError(''); try { await fn(); } catch (e) { setError(e instanceof Error ? e.message : 'Ошибка связи. Повторите действие.'); } finally { setBusy(false); } };
   const partLabel = (id: string) => { const g = target?.groups.find(g => g.id === id); const p = target?.sources.find(s => s.id === g?.sourceSnapshotId)?.parts.find(p => p.detailId === g?.detailId); return `Позиция ${p?.detailNumber ?? '?'} · заказ ${g?.orderId ?? ''}`; };
-  return <Modal open={open} title="Скачать фрезеровки" width={680} onCancel={onClose} footer={<Button onClick={onClose}>Закрыть</Button>}>
+  return <Modal className="cad-compact" open={open} title="Скачать фрезеровки" width={680} onCancel={onClose} footer={<Button onClick={onClose}>Закрыть</Button>}>
     <p>SVG и DXF каждой детали, manifest.json и ZIP. Файлы требуют настройки обработки в CAM.</p>
     {['saving', 'rendering', 'packing'].includes(phase) && <Space role="status"><Spin size="small" />{phase === 'saving' ? 'Сохраняем и проверяем редакцию…' : phase === 'packing' ? 'Собираем ZIP…' : `Рассчитываем все включённые детали: ${run.data?.job?.completed ?? 0} / ${target?.groups.length ?? '…'}`}</Space>}
     {(error || run.error) && <Alert type="error" message={error || 'Не удалось получить состояние расчёта'} />}
