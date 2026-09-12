@@ -30,6 +30,12 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION, date: "2026-09-12",
+    title: "Заказы: повторное сохранение при занятом номере",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: ["При занятом номере заказа предупреждение показывает исходный номер, а повторное сохранение отправляет предложенный свободный номер. Остальные данные формы сохраняются без изменений."],
+  },
+  {
+    version: APP_VERSION, date: "2026-09-12",
     title: "Настройки меню и колонок: кнопки и статус сохранения",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: ["В окнах настройки порядка меню и колонок деталей восстановлены кнопки «Сбросить по умолчанию», «Закрыть» и отображение состояния сохранения."],
