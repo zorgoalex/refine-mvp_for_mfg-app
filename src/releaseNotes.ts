@@ -30,6 +30,12 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION, date: "2026-09-12",
+    title: "Справочники: сортировка при быстром создании",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: ["В формах быстрого создания кромки и фрезеровки снова доступен порядок сортировки. Восстановленное из черновика значение сохраняется и без раскрытия раздела."],
+  },
+  {
+    version: APP_VERSION, date: "2026-09-12",
     title: "Telegram: шаги обработки в журнале",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: ["В раскрытом событии журнала Telegram снова видны шаги обработки: сообщения, время и цвет результата. Ответы Telegram и ERP сохранены."],

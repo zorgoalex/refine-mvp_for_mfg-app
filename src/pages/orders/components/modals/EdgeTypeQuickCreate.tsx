@@ -94,29 +94,23 @@ export const EdgeTypeQuickCreate: React.FC<EdgeTypeQuickCreateProps> = ({
           />
         </Form.Item>
 
-        <Collapse
-          defaultActiveKey={[]}
-          items={[
-            {
-              key: 'sort_order',
-              label: 'Порядок сортировки',
-              children: (
-                <Form.Item
-                  name="sort_order"
-                  tooltip="Определяет порядок отображения в списках"
-                >
-                  <InputNumber
-                    min={1}
-                    max={32767}
-                    formatter={(value) => numberFormatter(value, 0)}
-                    parser={numberParser}
-                    style={{ width: '100%' }}
-                  />
-                </Form.Item>
-              ),
-            },
-          ]}
-        />
+        <Collapse defaultActiveKey={[]}>
+          {/* Register restored sort_order before validateFields, even while collapsed. */}
+          <Collapse.Panel key="sort_order" header="Порядок сортировки" forceRender>
+            <Form.Item
+              name="sort_order"
+              tooltip="Определяет порядок отображения в списках"
+            >
+              <InputNumber
+                min={1}
+                max={32767}
+                formatter={(value) => numberFormatter(value, 0)}
+                parser={numberParser}
+                style={{ width: '100%' }}
+              />
+            </Form.Item>
+          </Collapse.Panel>
+        </Collapse>
       </Form>
     </Modal>
   );
