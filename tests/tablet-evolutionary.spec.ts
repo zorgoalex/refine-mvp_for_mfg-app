@@ -424,7 +424,7 @@ test.describe('Evolutionary tablet UI', () => {
         await expect(page.locator('[data-status-board-column-key="production-2"] [data-status-board-order-id="15"]')).toBeVisible();
         await captureTabletState(page, testInfo, '04-production-board');
 
-        await page.goto('/mdf-work-board');
+        await page.goto('/mdf-work-board?date=2026-08-05');
         await expectTabletShell(page, 'status-board');
         await expect(page.locator('.evolution-shell__content')).toHaveAttribute('data-tablet-header-compact', 'true');
         await expect(page.locator('.status-board-page__header')).toBeHidden();
@@ -436,7 +436,7 @@ test.describe('Evolutionary tablet UI', () => {
         await captureTabletState(page, testInfo, '05-cnc-board');
 
         await page.setViewportSize(REAL_87_TABLET_CSS_VIEWPORT);
-        await page.goto('/mdf-work-board');
+        await page.goto('/mdf-work-board?date=2026-08-05');
         await expectTabletShell(page, 'status-board');
         await expectSingleLineBoardToolbar(page);
         await expectFullHeightBoardViewport(page);
@@ -479,12 +479,16 @@ test.describe('Evolutionary tablet UI', () => {
         await setupBoardTabletMocks(page, db);
 
         await page.route(/\/api\/v1\/cnc-telegram\/today(?:\?.*)?$/, async (route) => {
+            expect(new URL(route.request().url()).searchParams.get('operationalWindow')).toBe('two_months');
             await route.fulfill({
                 status: 200,
                 contentType: 'application/json',
                 body: JSON.stringify({
                     workday: '2026-08-05',
                     generatedAt: '2026-08-05T10:00:00.000Z',
+                    operationalWindow: { dateFrom: '2026-06-05', dateTo: '2026-08-05' },
+                    historicalBathReadiness: [],
+                    historicalReadinessSources: [],
                     columns: [{
                         key: 'parsed',
                         title: 'Файлы на станке',
@@ -506,7 +510,7 @@ test.describe('Evolutionary tablet UI', () => {
             });
         });
 
-        await page.goto('/mdf-work-board');
+        await page.goto('/mdf-work-board?date=2026-08-05');
         const card = page.locator('.cnc-packet-card').filter({ hasText: 'CNC#1_2701.TXT' });
         await expect(card).toBeVisible({ timeout: 30_000 });
         await card.getByRole('button', { name: 'Скрин' }).click();
@@ -659,12 +663,16 @@ async function setupBoardTabletMocks(page: Page, db: WorkflowMockDb) {
         });
     });
     await page.route(/\/api\/v1\/cnc-telegram\/today(?:\?.*)?$/, async (route) => {
+        expect(new URL(route.request().url()).searchParams.get('operationalWindow')).toBe('two_months');
         await route.fulfill({
             status: 200,
             contentType: 'application/json',
             body: JSON.stringify({
                 workday: '2026-08-05',
                 generatedAt: '2026-08-05T10:00:00.000Z',
+                operationalWindow: { dateFrom: '2026-06-05', dateTo: '2026-08-05' },
+                historicalBathReadiness: [],
+                historicalReadinessSources: [],
                 columns: ['parsed', 'completed', 'baths', 'baths_ready'].map((key) => ({
                     key,
                     title: key,
