@@ -182,7 +182,8 @@ paths:
       summary: Get CAD availability and capabilities
       description: >-
         When disabled, returns enabled=false after checking cad.view. When enabled, orders.view is also
-        required.
+        required. independentInstances is true only when editorEnabled and the CAD service reports
+        max_parts=5000, bounded_runs=true, file_pages=true and readiness_pages=true.
       security:
         - {bearerAuth: []}
       x-permission: cad.view
@@ -497,6 +498,89 @@ paths:
         content: {application/json: {schema: {$ref: '#/components/schemas/CadPackageRequest'}}}
       responses:
         '201': {description: Request an approved CAD production package}
+  /api/v1/cad/runs/{runId}/files:
+    get:
+      tags: [CAD preparation]
+      operationId: listCadRunFiles
+      summary: Page through CAD artifact metadata
+      description: >-
+        Returns at most 100 files, never artifact bytes or part geometry. Checks access to every
+        archived source order before exposing metadata. total is the total file count for the run.
+      security: [{bearerAuth: []}]
+      x-permissions: [cad.export, orders.view]
+      parameters:
+        - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 20000, default: 0}}
+      responses:
+        '200':
+          description: Bounded file metadata page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [files, total, offset]
+                properties:
+                  total: {type: integer, minimum: 0}
+                  offset: {type: integer, minimum: 0}
+                  files:
+                    type: array
+                    maxItems: 100
+                    items:
+                      type: object
+                      required: [id, name, media_type, sha256]
+                      properties:
+                        id: {type: string}
+                        name: {type: string}
+                        media_type: {type: string}
+                        sha256: {type: string}
+                        size_bytes: {type: number}
+        '403': {description: Missing export permission or source access}
+        '404': {description: Run or remote job not found}
+        '422': {description: Invalid run ID or offset}
+  /api/v1/cad/runs/{runId}/readiness:
+    get:
+      tags: [CAD preparation]
+      operationId: getCadRunReadiness
+      summary: Page through unresolved CAD production checks
+      description: >-
+        Returns at most 50 unresolved parts, scoped to all archived source orders.
+        ready is global production readiness, total counts all parts, unresolved counts all
+        parts requiring attention. offset indexes unresolved parts, not the complete part list.
+      security: [{bearerAuth: []}]
+      x-permissions: [cad.export, orders.view]
+      parameters:
+        - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 5000, default: 0}}
+      responses:
+        '200':
+          description: Bounded unresolved checks with global readiness
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job_id, ready, total, unresolved, offset, items]
+                properties:
+                  job_id: {type: string}
+                  ready: {type: boolean}
+                  total: {type: integer, minimum: 0}
+                  unresolved: {type: integer, minimum: 0}
+                  offset: {type: integer, minimum: 0}
+                  items:
+                    type: array
+                    maxItems: 50
+                    items:
+                      type: object
+                      required: [part_id, status, ready, manufacturing_hash, approval, errors]
+                      properties:
+                        part_id: {type: string}
+                        status: {type: string}
+                        ready: {type: boolean}
+                        manufacturing_hash: {type: string, nullable: true}
+                        approval: {type: object, nullable: true, additionalProperties: true}
+                        errors: {type: array, items: {type: object, additionalProperties: true}}
+        '403': {description: Missing export permission or source access}
+        '404': {description: Run or remote job not found}
+        '422': {description: Invalid run ID or offset}
   /api/v1/cad/runs/{runId}/artifacts/{id}:
     get:
       tags:
@@ -15730,7 +15814,7 @@ components:
           minimum: 1
         groups:
           type: array
-          maxItems: 500
+          maxItems: 5000
           items: {$ref: '#/components/schemas/CadGroup'}
         sourceIds:
           type: array
@@ -15743,7 +15827,7 @@ components:
       required: [version, groups, sourceIds, name]
       properties:
         version: {type: integer, minimum: 1}
-        groups: {type: array, maxItems: 500, items: {$ref: '#/components/schemas/CadGroup'}}
+        groups: {type: array, maxItems: 5000, items: {$ref: '#/components/schemas/CadGroup'}}
         sourceIds: {type: array, minItems: 1, maxItems: 500, items: {type: string, format: uuid}}
         name: {type: string, minLength: 1, maxLength: 100}
     CadPreviewRequest:
