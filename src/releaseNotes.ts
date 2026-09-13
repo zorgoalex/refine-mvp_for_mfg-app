@@ -30,6 +30,12 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION, date: "2026-09-12",
+    title: "Календарь: подсветка выданных заказов",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: ["Дни, в которых все заказы имеют статус «Выдан», снова выделяются в стандартном и компактном календаре. Пустые и смешанные дни не получают эту подсветку."],
+  },
+  {
+    version: APP_VERSION, date: "2026-09-12",
     title: "Базис: поиск панелей по материалу",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: ["Поиск панелей Базис снова находит основной материал и остаётся доступным при пустом результате. Группировка и выбранные панели сохраняются при фильтрации."],

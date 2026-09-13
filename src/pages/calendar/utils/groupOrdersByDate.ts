@@ -63,7 +63,7 @@ export function areAllOrdersIssued(orders: CalendarOrder[]): boolean {
 
   return orders.every(
     (order) =>
-      order.order_status?.toLowerCase() === 'выдан' ||
+      order.order_status_name?.toLowerCase() === 'выдан' ||
       order.is_issued === true
   );
 }
