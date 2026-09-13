@@ -29,6 +29,12 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-09-13", title: "CAD: раскладка блоками позиций",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: ["Новые заказы раскладываются отдельными блоками позиций справа налево и сверху вниз, под пропорции канваса. При открытии виден весь комплект; экземпляры остаются независимыми."],
+    added: ["Кнопка «Разложить по позициям» с отменой действия. Сохранённые ручные координаты и исходный состав заказа не меняются при открытии или изменении размера окна."],
+  },
+  {
     version: APP_VERSION, date: "2026-09-13",
     title: "МДФ-доска: ограниченный двухмесячный расчёт",
     services: ["ERP"], repositories: ["repo_erp"],

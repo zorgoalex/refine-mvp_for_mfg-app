@@ -252,15 +252,20 @@ test('one download flow requires explicit source acknowledgement', async ({ page
 
 test('tablet drawers, keyboard placement and 500-group virtualization', async ({ page }) => {
   const { control } = await setup(page, 500); await page.setViewportSize({ width: 1024, height: 768 }); await page.goto('/cad/orders/1');
+  const initialCanvas = page.getByRole('application', { name: /Поле CAD/ });
+  await expect(initialCanvas).toHaveAttribute('data-visible-instance-count', '2000');
   await expect(page.getByRole('button', { name: 'Детали (2000)' })).toHaveAttribute('aria-expanded', 'false');
   await expect(page.getByRole('button', { name: 'Свойства', exact: true })).toHaveAttribute('aria-expanded', 'false');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.getByRole('button', { name: 'Детали (2000)' }).click();
   await expect(page.locator('.cad-part-card')).toHaveCount(24); await page.locator('.cad-part-card').first().click();
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click(); await page.getByRole('button', { name: 'Свойства', exact: true }).click();
-  await expect(page.getByLabel('Ширина рамки, мм', { exact: true })).toBeVisible(); await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
+  await expect(page.getByLabel('Ширина рамки, мм', { exact: true })).toBeVisible();
+  await page.getByText('Положение на поле', { exact: true }).click();
+  const initialX = Number(await page.getByLabel('По горизонтали, мм', { exact: true }).inputValue());
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
   const canvas = page.getByRole('application', { name: /Поле CAD/ }); await canvas.focus(); await page.keyboard.press('ArrowRight');
-  await expect.poll(() => control.saves.length).toBe(1); expect(control.saves[0].groups[0].xMm).toBe(1);
+  await expect.poll(() => control.saves.length).toBe(1); expect(control.saves[0].groups[0].xMm).toBe(initialX + 1);
   await page.getByRole('button', { name: 'Панорама', exact: true }).click(); await expect(page.getByRole('button', { name: 'Выбор', exact: true })).toHaveAttribute('aria-pressed', 'false');
   await canvas.focus(); await page.keyboard.press('m'); await page.keyboard.press('Enter'); await page.keyboard.press('Shift+ArrowRight'); await page.keyboard.press('Enter');
   await expect(page.getByText('Расстояние: 10.00 мм', { exact: true })).toBeVisible();
@@ -329,6 +334,7 @@ test('every copy moves and changes milling independently, persists and warns aga
   await page.setViewportSize({ width: 1500, height: 1000 }); await page.goto('/cad/orders/1');
   const canvas = page.getByRole('application', { name: /Поле CAD/ });
   await expect(canvas).toHaveAttribute('data-instance-count', '8');
+  await expect(canvas).toHaveAttribute('data-visible-instance-count', '8');
   await page.getByRole('button', { name: 'Весь комплект', exact: true }).click();
   await expect(canvas).toHaveAttribute('data-visible-instance-count', '8');
   const tabs = page.locator('.cad-document-footer');
@@ -343,7 +349,7 @@ test('every copy moves and changes milling independently, persists and warns aga
   const firstSave = structuredClone(control.saves[0].groups);
   expect(firstSave).toHaveLength(8);
   expect(firstSave.every(g => g.quantity === 1)).toBe(true);
-  expect(firstSave[0].xMm).toBe(original.groups[0].xMm);
+  expect(firstSave[0].xMm - firstSave[1].xMm).toBe(449); // 450mm pitch, only second instance moved +1.
   await page.getByRole('button', { name: 'Свойства', exact: true }).click();
   await page.getByLabel('Ширина рамки, мм', { exact: true }).fill('30');
   await expect(page.locator('.cad-instance-difference')).toBeVisible();
@@ -363,4 +369,52 @@ test('every copy moves and changes milling independently, persists and warns aga
   await expect.poll(() => control.saves.length).toBe(3);
   expect(original).toEqual(originalBefore);
   await page.screenshot({ path: 'test-results/cad-editor-ux/independent-copies.png', fullPage: true });
+});
+
+test('position layout fits initially, stays fixed on resize, and explicit rearrangement can be undone', async ({ page }) => {
+  const { control, original } = await setup(page, 12);
+  const originalBefore = structuredClone(original);
+  await page.setViewportSize({ width: 1500, height: 1000 }); await page.goto('/cad/orders/1');
+  const canvas = page.getByRole('application', { name: /Поле CAD/ });
+  await expect(canvas).toHaveAttribute('data-visible-instance-count', '48');
+  await page.screenshot({ path: 'test-results/cad-editor-ux/position-blocks.png', fullPage: true });
+  expect(control.saves).toHaveLength(0);
+  await page.getByRole('button', { name: 'Детали (48)', exact: true }).click();
+  await page.locator('.cad-part-card').first().click();
+  await page.getByRole('button', { name: 'Свойства', exact: true }).click();
+  await page.getByText('Положение на поле', { exact: true }).click();
+  const xField = page.getByLabel('По горизонтали, мм', { exact: true });
+  const initialX = await xField.inputValue();
+  await page.setViewportSize({ width: 1250, height: 1050 });
+  await expect(xField).toHaveValue(initialX); expect(control.saves).toHaveLength(0);
+  await canvas.focus(); await page.keyboard.press('ArrowRight');
+  await expect.poll(() => control.saves.length).toBe(1);
+  const moved = structuredClone(control.saves[0].groups);
+  expect(moved[0].xMm).toBe(Number(initialX) + 1);
+  expect(moved[0].xMm).toBeGreaterThan(moved[4].xMm);
+  expect(moved[0].yMm).toBe(moved[4].yMm);
+  expect(new Set(moved.map(g => g.yMm)).size).toBeGreaterThan(1);
+  await page.getByRole('button', { name: 'Разложить по позициям', exact: true }).click();
+  await expect.poll(() => control.saves.length).toBe(2);
+  expect(control.saves[1].groups).not.toEqual(moved);
+  await expect(canvas).toHaveAttribute('data-visible-instance-count', '48');
+  await page.getByRole('button', { name: 'Отменить последнее изменение' }).click();
+  await expect.poll(() => control.saves.length).toBe(3); expect(control.saves[2].groups).toEqual(moved);
+  await page.getByRole('button', { name: 'Увеличить', exact: true }).click();
+  await expect(page.getByText('Все изменения сохранены', { exact: true })).toBeVisible();
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => Object.keys(localStorage).some(k => k.startsWith('erp.cad.view.') && !k.includes('.tabs:')))).toBe(true);
+  // Workflow auth fixture intentionally clears localStorage on every navigation,
+  // so reload verifies server coordinates, not a camera erased by that fixture.
+  await page.reload();
+  await page.getByRole('button', { name: 'Детали (48)', exact: true }).click();
+  await page.locator('.cad-part-card').first().click();
+  await page.getByRole('button', { name: 'Свойства', exact: true }).click();
+  await page.getByText('Положение на поле', { exact: true }).click();
+  await expect(page.getByLabel('По горизонтали, мм', { exact: true })).toHaveValue(String(moved[0].xMm));
+  await expect(page.getByLabel('По вертикали, мм', { exact: true })).toHaveValue(String(moved[0].yMm));
+  expect(control.saves).toHaveLength(3);
+  await page.getByRole('tab', { name: /Оригинал/ }).click();
+  await expect(page.getByRole('button', { name: 'Разложить по позициям', exact: true })).toBeDisabled();
+  expect(original).toEqual(originalBefore);
 });
