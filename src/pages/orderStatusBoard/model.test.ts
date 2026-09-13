@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { orderStatusBoardApi } from '../../api/orderStatusBoardApi';
 import type {
   CncTelegramBazisCutSetCard,
+  CncHistoricalReadinessSource,
   CncTelegramOriginalBoardResponse,
   CncTelegramPacket,
   CncTelegramTodayColumn,
@@ -34,6 +35,7 @@ import {
 } from './OrderStatusBoardPage';
 import {
   applyMdfBoardHiddenCardRulesToColumns,
+  applyMdfHiddenRulesToReadinessSources,
   buildCncOrderSearchDateRange,
   buildCncOrderFilterOptions,
   buildCncOrderMissingDetails,
@@ -62,6 +64,12 @@ import {
 import { filterVisibleStatusBoardColumns } from './statusBoardColumnVisibility';
 
 describe('MDF order quantity accounting regressions', () => {
+  const historical = (kind: CncHistoricalReadinessSource['kind'], id: string, quantity: number,
+    column: CncHistoricalReadinessSource['column'] = 'completed'): CncHistoricalReadinessSource => ({
+    kind, cardId: id, column,
+    linkedOrders: [{ orderId: 2705, orderStatusId: 7, orderStatusName: 'В производстве', orderStatusIssuedOrLater: false }],
+    items: [{ orderId: 2705, detailId: 101, detailNumber: 1, quantity }],
+  });
   const demand = (quantities = [1, 1]) => card(2705, {
     orderName: 'E2E-quantity', orderStatusName: 'В производстве',
     partsCount: quantities.reduce((sum, q) => sum + q, 0),
@@ -83,6 +91,46 @@ describe('MDF order quantity accounting regressions', () => {
   ];
   const calculate = (order: OrderStatusBoardCard, sources: CncTelegramTodayColumn[]) =>
     splitCncOrderCardsByManualColumn([order], buildCncOrderReadiness(sources, {}), {}).orders[0].readiness;
+
+  it('sums current and compact historical CNC/BASIS before position-local rolling', () => {
+    const sources = columns([cut('current', 101, 1, 2)]);
+    const facts = [historical('packet', 'old', 3), historical('bazisCutSet', '9', 4),
+      historical('bath', 'cut-result:9', 5, 'baths_laminated')];
+    const readiness = buildCncOrderReadiness(sources, {}, [], facts);
+    expect(splitCncOrderCardsByManualColumn([demand([7, 2])], readiness, {}).orders[0].readiness)
+      .toMatchObject({ cutDetails: 4, rolledDetails: 5, remainingDetails: 2,
+        creditedQuantities: { cut: 2, rolled: 5 } });
+    expect(buildCncOrderMissingDetails([demand([7, 2])], sources, facts).get(2705))
+      .toEqual([{ detailId: 102, detailNumber: 2, requiredQuantity: 2, presentQuantity: 0, missingQuantity: 2 }]);
+  });
+
+  it('uses visible sources once, and ignores all-period BASIS aggregate in bounded mode', () => {
+    const sources = columns([cut('same', 101, 1, 2)]);
+    const facts = [historical('packet', 'same', 90), historical('bazisCutSet', '9', 1)];
+    expect(buildCncOrderReadiness(sources, {}, [], [...facts, facts[1]]).get(2705)?.cutDetails).toBe(3);
+    const order = demand([10]);
+    order.details[0].bazisCutQuantity = 100;
+    expect(buildCncOrderMissingDetails([order], sources, facts).get(2705)?.[0].missingQuantity).toBe(7);
+    expect(buildCncOrderMissingDetails([order], sources, []).get(2705)?.[0].missingQuantity).toBe(8);
+    expect(buildCncOrderMissingDetails([order], sources).get(2705)).toBeUndefined();
+  });
+
+  it('applies current manual moves to compact history but preserves terminal precedence', () => {
+    const source = historical('packet', 'old', 3, 'parsed');
+    expect(buildCncOrderReadiness([], { 'packet:old': 'completed' }, [], [source]).get(2705)?.cutDetails).toBe(3);
+    expect(buildCncOrderReadiness([], { 'packet:old': 'parsed' }, [], [{ ...source, column: 'completed' }]).get(2705)?.cutDetails).toBe(0);
+    expect(buildCncOrderReadiness([], { 'packet:old': 'parsed' }, [], [{ ...source, column: 'completed_laminated' }]).get(2705)?.cutDetails).toBe(3);
+  });
+
+  it('checks every historical source owner before hidden-rule completion, not only its selected quantities', () => {
+    const source = historical('bath', 'cut-result:9', 3, 'baths');
+    const setting = { cardRules: [{ cardKind: 'bath' as const, orderStatusIds: [7] }] };
+    expect(applyMdfHiddenRulesToReadinessSources([source], [], setting)[0].column).toBe('completed_baths');
+    const foreign = { orderId: 999, orderStatusId: 8, orderStatusName: 'Оформлен', orderStatusIssuedOrLater: false };
+    expect(applyMdfHiddenRulesToReadinessSources([{ ...source, linkedOrders: [...source.linkedOrders, foreign] }], [], setting)[0].column).toBe('baths');
+    expect(applyMdfHiddenRulesToReadinessSources([{ ...source, linkedOrders: [{ ...foreign, orderId: null }] }], [], setting)[0].column).toBe('baths');
+    expect(applyMdfHiddenRulesToReadinessSources([source], [card(2705, { orderStatusId: 8 })], setting)[0].column).toBe('baths');
+  });
 
   it('keeps raw cut A when another position B is already rolled', () => {
     const sources = columns([cut('E2E-A', 101, 1, 1)], [rolled(102, 2, 1)]);
@@ -537,6 +585,9 @@ describe('order status board model', () => {
     );
     expect(buildCncOrderStatusBoardRequestKey([3, 7], sort)).not.toBe(
       buildCncOrderStatusBoardRequestKey([3, 7], { ...sort, sortOrder: 'desc' }),
+    );
+    expect(buildCncOrderStatusBoardRequestKey([3, 7], sort, false)).not.toBe(
+      buildCncOrderStatusBoardRequestKey([3, 7], sort),
     );
   });
 

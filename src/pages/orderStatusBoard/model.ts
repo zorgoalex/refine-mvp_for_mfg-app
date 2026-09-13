@@ -1,5 +1,6 @@
 import type {
   CncHistoricalBathReadiness,
+  CncHistoricalReadinessSource,
   CncTelegramBathCard,
   CncTelegramBazisCutSetCard,
   CncTelegramPacket,
@@ -491,6 +492,7 @@ export function cncOrderDetailSourceKeys(
 export function buildCncOrderMissingDetails(
   cards: readonly OrderStatusBoardCard[],
   columns: readonly CncTelegramTodayColumn[],
+  historicalSources?: readonly CncHistoricalReadinessSource[],
 ): Map<number, CncOrderMissingDetail[]> {
   const orderIdByOrderKey = new Map<string, number>();
   const ambiguousOrderKeys = new Set<string>();
@@ -559,6 +561,20 @@ export function buildCncOrderMissingDetails(
     }
   }
 
+  const seen = new Set(columns.flatMap(column => [
+    ...column.packets.map(card => `packet:${card.packetId}`),
+    ...(column.bazisCutSets ?? []).map(card => `bazisCutSet:${card.bazisCutSetId}`),
+  ]));
+  for (const source of historicalSources ?? []) {
+    const key = `${source.kind}:${source.cardId}`;
+    if (source.kind === 'bath' || seen.has(key)) continue;
+    seen.add(key);
+    for (const item of source.items) addPresentQuantity(
+      source.kind === 'packet' ? cncQuantities : basisQuantities,
+      item.orderId, null, item.detailId, item.detailNumber, item.quantity,
+    );
+  }
+
   const result = new Map<number, CncOrderMissingDetail[]>();
   for (const card of cards) {
     const cnc = cncQuantities.get(card.orderId);
@@ -571,7 +587,7 @@ export function buildCncOrderMissingDetails(
       // The all-period BASIS aggregate contains only ID-linked rows. Its visible
       // subset must not be added twice; number-only portions are independent.
       const allocated = keys.reduce((sum, key) => sum + (cnc?.get(key) ?? 0)
-        + (key.startsWith('id:')
+        + (historicalSources === undefined && key.startsWith('id:')
           ? Math.max(basis?.get(key) ?? 0, nonNegativeInteger(detail.bazisCutQuantity))
           : basis?.get(key) ?? 0), 0);
       const presentQuantity = Math.min(
@@ -595,7 +611,7 @@ export function buildCncOrderMissingDetails(
 }
 
 export function isCncOrderHiddenFromMdfBoard(
-  card: OrderStatusBoardCard,
+  card: Pick<OrderStatusBoardCard, 'orderStatusId' | 'orderStatusName' | 'orderStatusIssuedOrLater'>,
   _hiddenProductionStatusIds?: ReadonlySet<number>,
   hiddenOrderStatusIds?: ReadonlySet<number>,
 ): boolean {
@@ -818,6 +834,34 @@ export function applyMdfBoardHiddenCardRulesToColumns(
   });
 }
 
+export function applyMdfHiddenRulesToReadinessSources(
+  sources: readonly CncHistoricalReadinessSource[],
+  cards: readonly OrderStatusBoardCard[],
+  setting: MdfBoardHiddenStatusesSetting | null | undefined,
+): CncHistoricalReadinessSource[] {
+  const current = new Map(cards.map(card => [card.orderId, card]));
+  const hasRules = Array.isArray(setting?.cardRules);
+  const rules = new Map(hasRules
+    ? normalizeMdfBoardHiddenCardRules(setting).map(rule => [rule.cardKind, new Set(rule.orderStatusIds)] as const)
+    : MDF_BOARD_HIDDEN_CARD_KINDS.map(kind => [kind, new Set([1])] as const));
+  const legacyIds = resolveMdfBoardHiddenOrderStatusIds(setting);
+  return sources.map(source => {
+    if (source.kind === 'packet') return source;
+    const statuses = new Map<number, number>();
+    for (const linked of source.linkedOrders) {
+      if (linked.orderId === null) continue;
+      const owner = current.get(linked.orderId) ?? linked;
+      const statusId = hasRules ? owner.orderStatusId
+        : isCncOrderHiddenFromMdfBoard(owner, undefined, legacyIds) ? 1 : null;
+      if (isPositiveInteger(statusId)) statuses.set(linked.orderId, statusId);
+    }
+    const ids = source.linkedOrders.map(owner => owner.orderId);
+    const matches = ids.every(isPositiveInteger)
+      && mdfBoardHiddenCardRuleMatches(source.kind, ids, rules, statuses);
+    return matches ? { ...source, column: source.kind === 'bath' ? 'completed_baths' : 'completed_laminated' } : source;
+  });
+}
+
 function mdfBoardHiddenCardRuleMatches(
   cardKind: MdfBoardHiddenCardKind,
   orderIds: readonly number[],
@@ -838,6 +882,7 @@ function collectBazisCutSetOrderIds(bazisCutSet: CncTelegramBazisCutSetCard): nu
 }
 
 function collectBathOrderIds(bath: CncTelegramBathCard): number[] {
+  if (bath.compositionComplete === false) return [];
   const orderIds = bath.items.map((item) => item.orderId);
   return orderIds.every(isPositiveInteger) ? normalizePositiveIntegerArray(orderIds) : [];
 }

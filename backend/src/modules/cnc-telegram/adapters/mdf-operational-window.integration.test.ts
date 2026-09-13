@@ -95,6 +95,130 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
   }
   const ids = (response: Awaited<ReturnType<typeof load>>) => response.columns.flatMap((column) => column.baths.map((bath) => bath.cutResultId));
 
+  async function boundedLoad(displayFrom = '2026-09-06', focusBathCardId?: string,
+    currentUser: CurrentUser = { id: '158', role: 'admin', permissions: [] }) {
+    await client.query(`UPDATE pg_temp.cnc_telegram_packets SET
+      mdf_board_card_kind=COALESCE(mdf_board_card_kind,'machine_file'),
+      updated_at=COALESCE(updated_at,now()), source_version=COALESCE(source_version,1);
+      UPDATE pg_temp.cnc_telegram_packet_items SET packet_item_id=COALESCE(packet_item_id,gen_random_uuid());`);
+    const calls: Array<{ sql: string; params: unknown[] }> = [];
+    const repo = new PgCncTelegramRepository({ query: (sql: string, params: unknown[]) => {
+      calls.push({ sql, params });
+      return client.query(sql, params);
+    } } as never);
+    const response = await repo.listToday({ currentUser,
+      operationalWindow: 'two_months', workdayFrom: displayFrom, workdayTo: '2026-09-06', focusBathCardId });
+    return { response, calls };
+  }
+
+  async function oldPacket(id: number, date: string, owner = 1, detail = 1, quantity = 3) {
+    const packetId = `00000000-0000-0000-0000-${String(id).padStart(12, '0')}`;
+    await client.query(`INSERT INTO pg_temp.cnc_telegram_packets(packet_id,workday,completion_status,thumbs_up,material_name,cut_layout_json)
+      VALUES($1,$2,'completed',false,'МДФ 16мм','{"large":"E2E-not-for-history"}');
+    `, [packetId, date]);
+    await client.query(`INSERT INTO pg_temp.cnc_telegram_packet_items(packet_id,match_order_id,match_detail_id,quantity)
+      VALUES($1,$2,$3,$4)`, [packetId, owner, detail, quantity]);
+    return packetId;
+  }
+
+  it('bounds all historical sources, scopes quantities and never reads packet layouts for history', async () => {
+    const included = await oldPacket(10, '2026-07-06');
+    const excluded = await oldPacket(11, '2026-07-05');
+    const foreign = await oldPacket(12, '2026-08-01', 2, 2);
+    const future = await oldPacket(13, '2026-09-07');
+    await addBasis(4);
+    await client.query("UPDATE pg_temp.bazis_cut_sets SET created_at='2026-08-01T12:00:00+05'");
+    await seed(10, [1, 1], '2026-07-06T00:00:00+05');
+    await seed(11, [1], '2026-07-05T23:59:59+05');
+    const { response, calls } = await boundedLoad();
+    expect(response.operationalWindow).toEqual({ dateFrom: '2026-07-06', dateTo: '2026-09-06' });
+    expect(response.columns.flatMap(column => column.packets).map(packet => packet.packetId)).toEqual([sourcePacket.id]);
+    expect(response.columns.flatMap(column => column.baths)).toEqual([]);
+    const facts = response.historicalReadinessSources!;
+    expect(facts.find(source => source.cardId === included)?.items).toEqual([{ orderId: 1, detailId: 1, detailNumber: null, quantity: 3 }]);
+    expect(facts.map(source => source.cardId)).not.toEqual(expect.arrayContaining([excluded]));
+    for (const id of [excluded, foreign, future, 'cut-result:11']) expect(facts.map(source => source.cardId)).not.toContain(id);
+    expect(facts.find(source => source.cardId === 'cut-result:10')?.items[0].quantity).toBe(2);
+    expect(facts.find(source => source.kind === 'bazisCutSet')?.items[0].quantity).toBe(4);
+    expect(JSON.stringify(facts)).not.toMatch(/cutLayout|svgCutSheets|sheetWidth|E2E-not-for-history/);
+    const compactPacketSql = calls.find(call => call.sql.includes('p.workday < $2::date'))!.sql;
+    expect(compactPacketSql).not.toContain('p.cut_layout_json');
+    expect(compactPacketSql).not.toContain('sheet_summary');
+    for (const call of calls.filter(call => call.sql.includes('candidate_vacuum_results'))) {
+      expect(call.sql).toContain('board_metadata.result_created_at >= $4::date');
+      expect(call.sql).not.toContain('snapshot_job');
+    }
+    await client.query("UPDATE pg_temp.bazis_cut_sets SET created_at='2026-07-05T23:59:59+05'");
+    expect((await boundedLoad()).response.historicalReadinessSources?.some(source => source.kind === 'bazisCutSet')).toBe(false);
+  });
+
+  it('evaluates whole mixed source before trimming quantities to displayed orders', async () => {
+    const packetId = await oldPacket(10, '2026-08-01');
+    await client.query(`INSERT INTO pg_temp.cnc_telegram_packet_items(packet_id,match_order_id,match_detail_id,quantity)
+      VALUES($1,2,2,2)`, [packetId]);
+    await seed(10, [1, 2], '2026-08-01T12:00:00+05');
+    const { response } = await boundedLoad();
+    const facts = response.historicalReadinessSources!;
+    expect(facts.find(source => source.cardId === packetId)).toMatchObject({ column: 'completed', items: [{ orderId: 1, quantity: 3 }] });
+    expect(facts.find(source => source.cardId === packetId)?.linkedOrders.map(owner => owner.orderId).sort()).toEqual([1, 2]);
+    expect(facts.find(source => source.kind === 'bath')?.column).not.toBe('completed_baths');
+    expect(facts.find(source => source.kind === 'bath')?.items).toHaveLength(1);
+  });
+
+  it('keeps the same order evidence when display period changes from day to month', async () => {
+    await oldPacket(10, '2026-08-20');
+    await seed(10, [1, 1], '2026-08-20T12:00:00+05');
+    await addBasis(4);
+    await client.query("UPDATE pg_temp.bazis_cut_sets SET created_at='2026-08-20T12:00:00+05'");
+    const small = (await boundedLoad()).response;
+    const large = (await boundedLoad('2026-08-07')).response;
+    const evidence = (response: typeof small) => {
+      const rows = response.columns.flatMap(column => [
+        ...column.packets.map(card => ({ kind: 'packet', id: card.packetId, column: column.key,
+          quantity: card.items.filter(item => item.matchOrderId === 1).reduce((sum, item) => sum + item.quantity, 0) })),
+        ...column.bazisCutSets.map(card => ({ kind: 'bazisCutSet', id: String(card.bazisCutSetId), column: column.key,
+          quantity: card.items.filter(item => item.orderId === 1).reduce((sum, item) => sum + item.quantity, 0) })),
+        ...column.baths.map(card => ({ kind: 'bath', id: card.bathCardId, column: column.key,
+          quantity: card.items.filter(item => item.orderId === 1).reduce((sum, item) => sum + item.quantity, 0) })),
+      ]);
+      rows.push(...response.historicalReadinessSources!.map(source => ({ kind: source.kind, id: source.cardId, column: source.column,
+        quantity: source.items.filter(item => item.orderId === 1).reduce((sum, item) => sum + item.quantity, 0) })));
+      return rows.sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`));
+    };
+    expect(evidence(small)).toEqual(evidence(large));
+    expect(small.columns.flatMap(column => column.packets)).toHaveLength(1);
+    expect(large.columns.flatMap(column => column.packets)).toHaveLength(2);
+  });
+
+  it('does not disclose historical owner status outside the production-board read scope', async () => {
+    const packetId = await oldPacket(10, '2026-08-01');
+    await client.query(`UPDATE pg_temp.orders SET order_status_id=9;
+      INSERT INTO pg_temp.order_statuses(order_status_id,order_status_name,sort_order) VALUES(9,'E2E-closed',50);`);
+    const { response } = await boundedLoad(undefined, undefined, { id: '158', role: 'packer', permissions: [] });
+    expect(response.historicalReadinessSources?.find(source => source.cardId === packetId)?.linkedOrders)
+      .toEqual([{ orderId: 1, orderStatusId: null, orderStatusName: null, orderStatusIssuedOrLater: false }]);
+  });
+
+  it('focus cannot escape two months and invalid bath membership cannot complete automatically', async () => {
+    await seed(10, [1, null], '2026-08-01T12:00:00+05');
+    await seed(11, [1], '2026-07-05T12:00:00+05');
+    expect((await boundedLoad('2026-09-06', 'cut-result:11')).response.columns.flatMap(column => column.baths)).toEqual([]);
+    const { response } = await boundedLoad();
+    const source = response.historicalReadinessSources?.find(source => source.cardId === 'cut-result:10');
+    expect(source?.column).toBe('baths');
+    expect(source?.linkedOrders.some(owner => owner.orderId === null)).toBe(true);
+    const focused = (await boundedLoad('2026-09-06', 'cut-result:10')).response;
+    expect(focused.columns.find(column => column.key === 'baths')?.baths[0]).toMatchObject({ compositionComplete: false, ready: false });
+    expect(focused.historicalReadinessSources?.some(source => source.cardId === 'cut-result:10')).toBe(false);
+  });
+
+  it.each(["material_name='ХДФ 3мм'", "program_name='E2E_fanera18.tap'", "rework=true"])
+    ('excludes ineligible historical CNC quantity: %s', async change => {
+      const id = await oldPacket(10, '2026-08-01');
+      await client.query(`UPDATE pg_temp.cnc_telegram_packets SET ${change} WHERE packet_id=$1`, [id]);
+      expect((await boundedLoad()).response.historicalReadinessSources?.some(source => source.cardId === id)).toBe(false);
+    });
+
   async function expectAllReadiness(ready: boolean) {
     const response = await load();
     expect(response.columns.flatMap((column) => column.baths).find((bath) => bath.cutResultId === 1)?.ready).toBe(ready);

@@ -274,16 +274,16 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
             'detailId', od.detail_id,
             'detailNumber', od.detail_number,
             'quantity', GREATEST(od.quantity, 0),
-            'bazisCutQuantity', COALESCE(bazis_cut.quantity, 0)
+            'bazisCutQuantity', ${command.query.includeBazisAllocation === false ? '0' : 'COALESCE(bazis_cut.quantity, 0)'}
           )
           ORDER BY od.detail_number ASC NULLS LAST, od.detail_id ASC
         ) AS details_json
         FROM order_details od
-        LEFT JOIN LATERAL (
+        ${command.query.includeBazisAllocation === false ? '' : `LEFT JOIN LATERAL (
           SELECT SUM(GREATEST(detail.quantity, 0))::integer AS quantity
           FROM bazis_cut_set_details detail
           WHERE detail.source_order_detail_id = od.detail_id
-        ) bazis_cut ON true
+        ) bazis_cut ON true`}
         WHERE od.order_id = o.order_id
           AND od.delete_flag = false
       ) order_details_projection ON true
@@ -369,6 +369,13 @@ function appendUserFilters(
   if (query.plannedTo) {
     filters.push(`o.planned_completion_date <= $${params.push(query.plannedTo)}::date`);
   }
+}
+
+/** Shared by compact MDF owner summaries; same read boundary as production headers. */
+export function productionBoardReadScopeSql(user: CurrentUser, params: unknown[]): string {
+  const scope = rolePolicyForUser(user).productionTasks.view;
+  const actor = scope === 'own' || scope === 'assigned' ? params.push(normalizeActorUserId(user.id)) : null;
+  return buildReadScopePredicate(scope, actor, actor === null ? 'FALSE' : assignmentExistsSql(actor));
 }
 
 function buildReadScopePredicate(
@@ -755,6 +762,7 @@ export function createOrderStatusBoardFilterKey(query: OrderStatusBoardQuery): s
     onlyMyOrders: query.onlyMyOrders,
     overdueOnly: query.overdueOnly,
     includeDone: query.includeDone === true,
+    ...(query.includeBazisAllocation === false ? { includeBazisAllocation: false } : {}),
     plannedFrom: query.plannedFrom ?? null,
     plannedTo: query.plannedTo ?? null,
     orderIds: query.orderIds ? [...query.orderIds].sort((left, right) => left - right) : [],

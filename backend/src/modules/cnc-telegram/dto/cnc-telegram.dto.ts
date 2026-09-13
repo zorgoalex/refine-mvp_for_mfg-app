@@ -197,6 +197,7 @@ export interface CncTelegramBathSheetDto {
 }
 
 export interface CncTelegramBathCardDto {
+  compositionComplete?: boolean;
   bathCardId: string;
   cutJobId: number;
   cutResultId: number;
@@ -264,6 +265,27 @@ export interface CncTelegramTodayResponseDto {
   columns: CncTelegramTodayColumnDto[];
   operationalWindow?: { dateFrom: string; dateTo: string };
   historicalBathReadiness?: CncHistoricalBathReadinessDto[];
+  historicalReadinessSources?: CncHistoricalReadinessSourceDto[];
+}
+
+/** Compact calculation facts; never a source of visible cards/order headers. */
+export interface CncHistoricalReadinessSourceDto {
+  kind: 'packet' | 'bazisCutSet' | 'bath';
+  cardId: string;
+  column: CncTelegramTodayColumnDto['key'];
+  /** Full membership BEFORE selecting the currently displayed orders. */
+  linkedOrders: Array<{
+    orderId: number | null;
+    orderStatusId: number | null;
+    orderStatusName: string | null;
+    orderStatusIssuedOrLater: boolean;
+  }>;
+  items: Array<{
+    orderId: number;
+    detailId: number | null;
+    detailNumber: number | null;
+    quantity: number;
+  }>;
 }
 
 /** Calculation inputs only; never render these as historical cards. */

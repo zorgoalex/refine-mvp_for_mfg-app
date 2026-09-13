@@ -17,6 +17,7 @@ import { CadCanvas, cadPathData } from './CadCanvas';
 import { CadParameterField } from './CadParameterField';
 import { CadSidePanel } from './CadSidePanel';
 import { expandInstances, differsFromPosition } from './cadInstances';
+import { isInitialPositionLayout, layoutPositionBlocks } from './cadPositionLayout';
 import { CadExportDialog } from './CadExportDialog';
 import { CadImportDialog, CadMappingDialog } from './CadLibraryDialogs';
 import './cad.css';
@@ -71,6 +72,16 @@ function CadEditorDocument({ header, variant, variants, orderId, active, tabKey,
   const [queue] = useState(() => new CadAutosave(variant, cadApi.save));
   const state = useSyncExternalStore(queue.subscribe, queue.snapshot);
   const { base } = state;
+  const [initialAspect, setInitialAspect] = useState<number | null>(null);
+  const viewportAspect = useRef(1.6);
+  const [layoutRevision, setLayoutRevision] = useState(0);
+  const viewportChanged = useCallback((width: number, height: number) => {
+    if (width <= 100 || height <= 100) return;
+    const aspect = (width - 64) / (height - 64);
+    viewportAspect.current = aspect;
+    setInitialAspect(old => old ?? aspect);
+  }, []);
+  const automaticLayout = state.draft.groups === base.groups && isInitialPositionLayout(base.groups, base.sources, base.version);
   const instanceIds = useRef(new Map<string, string>());
   const copyId = useCallback((id: string, index: number) => {
     const key = `${id}:${index}`;
@@ -78,9 +89,12 @@ function CadEditorDocument({ header, variant, variants, orderId, active, tabKey,
     return instanceIds.current.get(key)!;
   }, []);
   const expansion = useMemo(() => {
-    try { return { groups: expandInstances(state.draft.groups, state.draft.sources, copyId), error: null }; }
+    try {
+      const groups = expandInstances(state.draft.groups, state.draft.sources, copyId);
+      return { groups: automaticLayout ? layoutPositionBlocks(groups, state.draft.sources, initialAspect ?? 1.6) : groups, error: null };
+    }
     catch (error) { return { groups: state.draft.groups, error: error instanceof Error ? error.message : 'Некорректное количество экземпляров' }; }
-  }, [state.draft, copyId]);
+  }, [state.draft, copyId, automaticLayout, initialAspect]);
   const draft = useMemo(() => ({ ...state.draft, groups: expansion.groups }), [state.draft, expansion.groups]);
   const [selected, setSelected] = useState<string[]>([]), [visible, setVisible] = useState<string[]>(variant.groups.slice(0, 20).map(g => g.id));
   const [multiSelect, setMultiSelect] = useState(false);
@@ -177,6 +191,10 @@ function CadEditorDocument({ header, variant, variants, orderId, active, tabKey,
   return <>
     <div className="cad-top-row">{header}<div className="cad-editor-toolbar">
       <Space wrap><Button disabled={!can('cad.edit') || busy} onClick={() => { setName(`Рабочая ${variants.length}`); setClone('clone'); }}>Новый вариант</Button>
+        <Button disabled={readOnly || state.incomplete || state.status === 'conflict' || initialAspect === null} onClick={() => {
+          try { edit({ ...draft, groups: layoutPositionBlocks(draft.groups, draft.sources, viewportAspect.current) }, true); setLayoutRevision(n => n + 1); }
+          catch (error) { message.error(error instanceof Error ? error.message : 'Не удалось разложить детали'); }
+        }}>Разложить по позициям</Button>
         <Button aria-label="Отменить последнее изменение" disabled={readOnly || !history.length || state.incomplete} onClick={() => { const prev = history.at(-1); if (prev) { setRedo(r => [...r, draft]); setHistory(h => h.slice(0, -1)); queue.edit(prev); } }}>↶</Button><Button aria-label="Повторить изменение" disabled={readOnly || !redo.length || state.incomplete} onClick={() => { const next = redo.at(-1); if (next) { setHistory(h => [...h, draft]); setRedo(r => r.slice(0, -1)); queue.edit(next); } }}>↷</Button>
         <Checkbox checked={advanced} disabled={state.incomplete} onChange={e => setAdvanced(e.target.checked)}>Расширенный режим</Checkbox><Button type="primary" disabled={!can('cad.export') || Boolean(expansion.error) || state.incomplete || state.status === 'conflict'} onClick={() => setExportOpen(true)}>Скачать фрезеровки</Button></Space></div></div>
     {state.status === 'error' && <Alert type="error" message="Изменения остались в этой вкладке" description="Не закрывайте её. Повторное сохранение не создаст дубль." action={<Button loading={busy} onClick={() => void act(async () => { await flush(); })}>Повторить сохранение</Button>} />}
@@ -186,7 +204,7 @@ function CadEditorDocument({ header, variant, variants, orderId, active, tabKey,
     <div className="cad-view-bar"><Space>{tablet && <><Button aria-expanded={panel === 'parts'} onClick={() => setPanel('parts')}>Детали ({draft.groups.length})</Button><Button aria-expanded={panel === 'properties'} onClick={() => setPanel('properties')}>Свойства</Button></>}<Checkbox checked={trajectories} onChange={e => setTrajectories(e.target.checked)}>Траектории</Checkbox><Checkbox checked={materialView} onChange={e => setMaterialView(e.target.checked)}>Материал</Checkbox><span className="cad-hint">{preview.pending ? 'Обновляем предпросмотр…' : 'Вид детали · 2D'}</span></Space><Button aria-expanded={panel === 'issues'} type={issues.length ? 'default' : 'text'} danger={issues.length > 0} onClick={() => setPanel('issues')}>Проверки{issues.length ? ` (${issues.length})` : ''}</Button></div>
     {preview.error && <Alert type="warning" message={preview.error} />}
     <div className="cad-editor-layout">
-      {expansion.error ? <Alert type="error" message={expansion.error} /> : active ? <CadCanvas documentId={base.id} groups={draft.groups} sources={draft.sources} job={preview.scene} readOnly={readOnly} selected={selected} onSelect={select} onChange={groups => edit({ ...draft, groups }, true)} hiddenLayers={hidden} expanded={false} finished={materialView} trajectories={trajectories} changed={changed} ordinals={ordinals} dimension={dimension} onVisible={setVisible} /> : <div className="cad-canvas-shell" />}
+      {expansion.error ? <Alert type="error" message={expansion.error} /> : active ? <CadCanvas documentId={base.id} groups={draft.groups} sources={draft.sources} job={preview.scene} readOnly={readOnly} selected={selected} onSelect={select} onChange={groups => edit({ ...draft, groups }, true)} hiddenLayers={hidden} expanded={false} finished={materialView} trajectories={trajectories} changed={changed} ordinals={ordinals} dimension={dimension} onVisible={setVisible} onViewportSize={viewportChanged} fitOnOpen={automaticLayout} fitKey={`${layoutRevision}`} layoutAspect={initialAspect} /> : <div className="cad-canvas-shell" />}
       {!tablet && <div className="cad-right-dock"><CadSidePanel side="right" kind="parts" title={`Детали (${draft.groups.length})`} open={partsOpen} onToggle={() => setPartsOpen(open => !open)}>{partsPanel}</CadSidePanel><CadSidePanel side="right" title="Свойства" open={propertiesOpen} onToggle={toggleProperties}>{inspector}</CadSidePanel></div>}</div>
     <footer className="cad-document-footer"><Tabs className="cad-variant-tabs" activeKey={base.id} onChange={activate} items={variants.map(v => ({ key: v.id, label: `${v.kind === 'original' ? '🔒 ' : ''}${v.name}${v.id === base.id && dirty ? ' •' : ''}` }))} /><div role="status" aria-live="polite">{base.kind === 'original' ? 'Оригинал · только просмотр' : state.incomplete ? 'Завершите ввод' : ({ saved: 'Все изменения сохранены', dirty: 'Есть изменения', saving: 'Сохраняем…', error: 'Не удалось сохранить', conflict: 'Конфликт версий' })[state.status]}</div></footer>
     <Drawer rootClassName="cad-compact" open={panel !== null} placement="right" width={Math.min(420, window.innerWidth)} title={panel === 'parts' ? 'Детали' : panel === 'properties' ? 'Свойства детали' : 'Что нужно проверить'} afterOpenChange={open => { if (open && panel === 'parts') restoreListScroll(); }} onClose={() => { if (state.incomplete) message.warning('Сначала завершите ввод параметра'); else setPanel(null); }}>
@@ -199,7 +217,7 @@ function CadEditorDocument({ header, variant, variants, orderId, active, tabKey,
     <CadImportDialog open={importOpen} draft={draft} onChange={edit} onClose={() => setImportOpen(false)} />
     <CadExportDialog open={exportOpen} flush={async () => {
       if (expansion.error) throw new Error(expansion.error);
-      if (!readOnly && state.draft.groups.some(g => g.quantity > 1)) queue.edit(draft, true);
+      if (!readOnly && (automaticLayout || state.draft.groups.some(g => g.quantity > 1))) queue.edit(draft, true);
       return flush();
     }} onClose={() => setExportOpen(false)} />
   </>;
