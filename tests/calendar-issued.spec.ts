@@ -41,6 +41,14 @@ test('native standard and compact DayColumn update the all-issued indicator', as
   for (const column of await columns.all()) await expect(column).toHaveClass(/day-column--all-issued/);
   await page.getByRole('button', { name: 'Все выданы' }).click();
   for (const column of await columns.all()) await expect(column).toHaveClass(/day-column--all-issued/);
+  const checkbox = page.locator('.order-card__checkbox input').first();
+  await expect(checkbox).toHaveAccessibleName('Отметить как выдан');
+  await checkbox.uncheck();
+  await expect(page.getByTestId('checkbox-changes')).toHaveText('[[1,false]]');
+  await expect(page.getByTestId('current-path')).toHaveText('/');
+  await checkbox.check();
+  await expect(page.getByTestId('checkbox-changes')).toHaveText('[[1,false],[1,true]]');
+  await expect(page.getByTestId('current-path')).toHaveText('/');
   expect(errors).toEqual([]);
   expect(unexpected).toEqual([]);
 });

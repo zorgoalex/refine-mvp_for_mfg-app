@@ -30,6 +30,12 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION, date: "2026-09-13",
+    title: "Календарь: сохранение состояния компактного меню",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: ["При закрытии меню заказа сохраняются компактный режим и направление подменю. Чекбокс выдачи получил доступное имя «Отметить как выдан»."],
+  },
+  {
+    version: APP_VERSION, date: "2026-09-13",
     title: "МДФ-доска: текущая дата при первом открытии",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: ["При первом открытии МДФ-доски поле даты сразу показывает сегодняшний день, не дожидаясь загрузки данных. Выбранная затем вручную дата сохраняется во время работы с доской."],
