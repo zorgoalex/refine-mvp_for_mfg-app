@@ -4,6 +4,7 @@ import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Alert, Button, Card, Checkbox, Breadcrumb, message, Dropdown, Space, Modal, Select } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
+import { getTableColumnDataIndex, getTableStickyOffsetHeader } from './utils/tableCompatibility';
 import { forwardRef, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useReactToPrint } from "react-to-print";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -632,7 +633,7 @@ const MemoizedOrderShowTable = memo(
     && previous.columns === current.columns
     && previous.components === current.components
     && previous.className === current.className
-    && previous.sticky?.offsetHeader === current.sticky?.offsetHeader
+    && getTableStickyOffsetHeader(previous.sticky) === getTableStickyOffsetHeader(current.sticky)
   ),
 );
 MemoizedOrderShowTable.displayName = 'MemoizedOrderShowTable';
@@ -2752,7 +2753,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       visibleDetailColumns.map((column, index) => {
         const originalRender = column.render;
         const originalShouldCellUpdate = column.shouldCellUpdate;
-        const dataIndex = typeof column.dataIndex === 'string' ? column.dataIndex : null;
+        const columnDataIndex = getTableColumnDataIndex(column);
+        const dataIndex = typeof columnDataIndex === 'string' ? columnDataIndex : null;
         const liveVersionKey = column.key === 'production_status_id'
           ? ORDER_SHOW_LIVE_STATUS_VERSION
           : column.key === 'cut_job'
