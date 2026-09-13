@@ -121,6 +121,97 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
     return packetId;
   }
 
+  describe('F01 bath visibility without related files', () => {
+    it.each([false, true])('preserves ingest numbering policy with bath source evidence=%s', async evidence => {
+      await seed(10, [3, 3], '2026-09-06T12:00:00+05');
+      await client.query(`UPDATE pg_temp.cnc_telegram_packets SET source_version=5,
+        external_packet_key='E2E-F01',updated_at=now(),source_created_at=now(),source_updated_at=now();`);
+      if (evidence) await client.query(`INSERT INTO pg_temp.cnc_telegram_packet_items(packet_id,match_order_id,match_detail_id,quantity)
+        VALUES('00000000-0000-0000-0000-000000000001',1,3,1)`);
+      let bathQueries = 0;
+      const repo = new PgCncTelegramRepository({ transaction: async (run: (tx: unknown) => unknown) => run({
+        query: async (sql: string, params: unknown[]) => {
+          if (sql.includes('INSERT INTO command_idempotency_keys')) return { rows: [{ request_hash: 'hash', status: 'processing' }] };
+          if (sql.includes('WITH laminated_status_threshold')) {
+            bathQueries++;
+            return client.query(sql, params);
+          }
+          // Actual source selection, owner intersection, sequence write and packet
+          // read; only idempotency/session plumbing is stubbed. All writes pg_temp.
+          if (/WHERE external_packet_key|FROM cnc_telegram_packets p|WITH unique_order_keys|WITH next_sequence/.test(sql)) return client.query(sql, params);
+          return { rows: [] };
+        },
+      }) } as never);
+      await repo.ingest({ currentUser: { id: '158', role: 'admin', permissions: [] }, requestId: 'E2E-F01', dto: {
+        idempotencyKey: 'E2E-F01', externalPacketKey: 'E2E-F01',
+        source: { chatId: 'E2E-F01', messageId: 1, version: 1, createdAt: '2026-09-06T00:00:00Z', updatedAt: '2026-09-06T00:00:00Z' },
+        workday: '2026-09-06', completionStatus: 'completed', thumbsUp: true, items: [],
+      } });
+      expect(bathQueries).toBe(1);
+      expect((await client.query('SELECT cutting_sequence_no FROM pg_temp.cnc_telegram_packets')).rows[0].cutting_sequence_no)
+        .toBe(evidence ? 1 : null);
+    });
+
+    it.each(['two_months', 'month', 'legacy'] as const)('returns a bath with no CNC or BASIS sources: %s', async mode => {
+      await client.query('DELETE FROM pg_temp.cnc_telegram_packet_items; DELETE FROM pg_temp.cnc_telegram_packets');
+      await seed(10, [3, 3], '2026-09-06T12:00:00+05');
+      const response = mode === 'two_months' ? (await boundedLoad()).response : await load(undefined, mode === 'month');
+      expect(ids(response)).toEqual([10]);
+      const bath = response.columns.find(column => column.key === 'baths')?.baths[0];
+      expect(bath).toMatchObject({ forced: false, ready: false, itemQuantityTotal: 2 });
+      expect(bath?.items).toEqual([expect.objectContaining({ detailId: 3, quantity: 2, completedQuantity: 0, ready: false })]);
+    });
+
+    it('shows a bath even when CNC contains only another position of the same order', async () => {
+      await seed(10, [3], '2026-09-06T12:00:00+05');
+      const { response } = await boundedLoad();
+      expect(ids(response)).toEqual([10]);
+      expect(response.columns.find(column => column.key === 'baths')?.baths[0]).toMatchObject({ ready: false });
+    });
+
+    it('selects current revision without file evidence instead of the older matching revision', async () => {
+      await seed(10, [1], '2026-09-06T10:00:00+05', 10);
+      await seed(11, [3], '2026-09-06T12:00:00+05', 10);
+      const { response } = await boundedLoad();
+      expect(ids(response)).toEqual([11]);
+      expect(response.historicalReadinessSources?.some(source => source.cardId === 'cut-result:10')).toBe(false);
+    });
+
+    it('preserves lifecycle, effective sheets and date limits without related files', async () => {
+      await client.query('DELETE FROM pg_temp.cnc_telegram_packet_items; DELETE FROM pg_temp.cnc_telegram_packets');
+      for (const id of [10, 11, 12, 13, 14]) await seed(id, [3], '2026-09-06T12:00:00+05');
+      await seed(15, [3], '2026-09-06T12:00:00+05', 15, { isVacuum: false });
+      await seed(16, [3], '2026-07-05T23:59:59+05');
+      await seed(17, [3], '2026-09-07T00:00:00+05');
+      await client.query(`UPDATE pg_temp.cut_job SET status='archived' WHERE cut_job_id=11;
+        INSERT INTO pg_temp.cut_result_archive_state(cut_job_id,result_no,archived_at) VALUES(12,12,now());
+        INSERT INTO pg_temp.cnc_telegram_packets(svg_cut_result_id,mdf_board_card_kind,mdf_board_hidden_at)
+          VALUES(13,'bath_seed',now());
+        UPDATE pg_temp.cut_result_sheet_map SET is_effective=false WHERE cut_result_id=14;`);
+      for (const focus of [undefined, 'cut-result:13', 'cut-result:16', 'cut-result:17']) {
+        expect(ids((await boundedLoad(undefined, focus)).response)).toEqual([10]);
+      }
+    });
+
+    it('returns original history without file evidence, retaining archive and hidden markers', async () => {
+      await client.query('DELETE FROM pg_temp.cnc_telegram_packet_items; DELETE FROM pg_temp.cnc_telegram_packets');
+      await seed(10, [3], '2026-09-06T12:00:00+05');
+      await seed(11, [3], '2026-07-05T23:59:59+05');
+      await seed(12, [3], '2026-09-06T12:00:00+05');
+      await client.query(`INSERT INTO pg_temp.cut_result_archive_state(cut_job_id,result_no,archived_at) VALUES(12,12,now());
+        INSERT INTO pg_temp.cnc_telegram_packets(svg_cut_result_id,mdf_board_card_kind,mdf_board_hidden_at)
+          VALUES(12,'bath_seed',now());`);
+      const historyRepo = new PgCncTelegramRepository({ query: (sql: string, params: unknown[]) =>
+        sql.includes('AS date_from') ? { rows: [{ date_from: '2026-07-06', date_to: '2026-09-06' }] }
+          : sql.includes('WITH laminated_status_threshold') ? client.query(sql, params) : { rows: [] },
+      } as never);
+      const response = await historyRepo.listOriginalBoard({ currentUser: {} as never });
+      expect(response.baths.map(bath => bath.cutResultId).sort()).toEqual([10, 12]);
+      expect(response.baths.find(bath => bath.cutResultId === 10)?.currentBoardVisibility).toBe('visible');
+      expect(response.baths.find(bath => bath.cutResultId === 12)?.currentBoardVisibility).toBe('hidden');
+    });
+  });
+
   it('bounds all historical sources, scopes quantities and never reads packet layouts for history', async () => {
     const included = await oldPacket(10, '2026-07-06');
     const excluded = await oldPacket(11, '2026-07-05');
@@ -757,9 +848,9 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
     expect(response.historicalBathReadiness?.map((bath) => bath.bathCardId)).toEqual(['cut-result:2']);
   });
 
-  it('preserves selection among matching results when the newest no longer overlaps', async () => {
+  it('selects the current result even when the newest no longer overlaps files', async () => {
     await seed(1, [1, 2], undefined, 1); await seed(2, [2], undefined, 1);
-    expect(ids(await load())).toEqual([1]);
+    expect(ids(await load())).toEqual([2]);
   });
 
   it('projects legacy flags transactionally, rejects malformed flags and guards immutable headers', async () => {

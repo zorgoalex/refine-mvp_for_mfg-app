@@ -3703,7 +3703,9 @@ async function packetIntersectsPendingBaths(
 ): Promise<boolean> {
   const workdayTo = dto.workday ?? await currentDatabaseWorkday(tx);
   const workdayFrom = dateOnlyDaysBefore(workdayTo, 6);
-  const { cards: baths } = await loadBathCards(tx, workdayFrom, workdayTo);
+  // Ingest numbering keeps its existing source-evidence policy. This must not
+  // become a visibility filter for the board or its history.
+  const { cards: baths } = await loadBathCards(tx, workdayFrom, workdayTo, { requireSourceEvidenceForSequence: true });
   const pendingBathOrderIds = new Set<number>();
   for (const bath of baths) {
     if (bath.ready) continue;
@@ -7417,6 +7419,7 @@ async function loadBathCards(
   workdayTo: string,
   options: {
     includeHistory?: boolean; operationalWindow?: 'month'; focusBathCardId?: string; scopeOrderIds?: number[];
+    requireSourceEvidenceForSequence?: boolean;
     bounded?: { dateFrom: string; displayFrom: string; compact?: boolean; cutQuantities: QueryResultRow[] };
   } = {},
 ): Promise<{ cards: CncTelegramBathCardDto[]; historicalBathReadiness: CncHistoricalBathReadinessDto[] }> {
@@ -7442,16 +7445,6 @@ async function loadBathCards(
             AND hidden_seed.mdf_board_card_kind = 'bath_seed'
             AND hidden_seed.mdf_board_hidden_at IS NOT NULL
         )`;
-  const forcedHistoryPredicate = options.includeHistory
-    ? `OR EXISTS (
-            SELECT 1
-            FROM cnc_telegram_packets forced_packet
-            WHERE forced_packet.svg_cut_result_id = r.cut_result_id
-              AND forced_packet.mdf_board_card_kind = 'bath_seed'
-              AND COALESCE(forced_packet.source_created_at, forced_packet.created_at) >= $1::date
-              AND COALESCE(forced_packet.source_created_at, forced_packet.created_at) < ($2::date + INTERVAL '1 day')
-          )`
-    : '';
   const result = await database.query<BathJoinedRow>(
     `
     WITH laminated_status_threshold AS (
@@ -7531,8 +7524,7 @@ async function loadBathCards(
         ${options.scopeOrderIds && !options.bounded ? `AND $1::date <= $2::date AND EXISTS (SELECT 1 FROM cut_result_placement scoped WHERE scoped.cut_result_id=r.cut_result_id AND scoped.order_id=ANY($3::bigint[]))` : ''}
         ${candidateVisibilityPredicate}
         ${hiddenTombstonePredicate}
-        AND (${options.scopeOrderIds && !options.bounded ? 'true OR' : ''}
-          EXISTS (
+        ${options.requireSourceEvidenceForSequence ? `AND EXISTS (
             SELECT 1
             FROM cut_result_placement placement
             JOIN cut_result_sheet_map sheet
@@ -7542,9 +7534,7 @@ async function loadBathCards(
               ON target.order_id = placement.order_id
              AND target.detail_id = placement.order_detail_id
             WHERE placement.cut_result_id = r.cut_result_id
-          )
-          ${forcedHistoryPredicate}
-        )
+          )` : ''}
     ),
     latest_vacuum_results AS (
       SELECT DISTINCT ON (candidate.cut_job_id)
