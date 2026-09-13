@@ -1837,7 +1837,7 @@ const PdfTemplateCanvas: React.FC<{
     onPatchMany(Array.from(gesture.starts, ([id]) => {
       const node = nodeRefs.current.get(id);
       return node ? { id, patch: { x: roundPdfMm(node.x()), y: roundPdfMm(node.y()) } } : null;
-    }).filter((item): item is { id: string; patch: Partial<PdfTemplateElement> } => Boolean(item)));
+    }).filter((item): item is NonNullable<typeof item> => Boolean(item)));
     dragGestureRef.current = null;
   };
   const transformSelectionEnd = (event: Konva.KonvaEventObject<Event>) => {

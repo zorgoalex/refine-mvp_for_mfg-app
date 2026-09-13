@@ -837,7 +837,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
           });
           return currentVerdict.ok ? null : currentVerdict;
         }, null);
-        if (verdict && !verdict.ok) {
+        if (verdict && verdict.ok === false) {
           void message.warning(
             verdict.reason === 'material'
               ? 'Нельзя переместить: другой материал листа'
