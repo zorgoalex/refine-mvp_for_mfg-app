@@ -24,9 +24,10 @@ interface Props {
   onSelect: (ids: string[]) => void; onChange: (groups: CadGroup[]) => void; hiddenLayers: Set<string>; expanded: boolean;
   finished?: boolean; trajectories?: boolean; dimension?: string | null; onVisible?: (ids: string[]) => void;
   changed?: Set<string>; ordinals?: Map<string, { number: number; total: number }>;
+  onViewportSize?: (width: number, height: number) => void; fitOnOpen?: boolean; fitKey?: string; layoutAspect?: number | null;
 }
 export function CadCanvas({ documentId, groups, sources, job, readOnly, selected, onSelect, onChange, hiddenLayers, expanded,
-  finished = false, trajectories = true, dimension, onVisible, changed, ordinals }: Props) {
+  finished = false, trajectories = true, dimension, onVisible, changed, ordinals, onViewportSize, fitOnOpen = false, fitKey, layoutAspect }: Props) {
   const root = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 900, height: 650 });
   const [camera, setCamera] = useState(() => loadCamera(documentId) ?? { x: 30, y: 620, zoom: .25 });
@@ -37,9 +38,12 @@ export function CadCanvas({ documentId, groups, sources, job, readOnly, selected
   const [measureCursor, setMeasureCursor] = useState({ x: 0, y: 0 });
   const markPoint = (point: { x: number; y: number }) => setPoints(old => [...(old.length === 2 ? [] : old), point]);
   useEffect(() => {
-    const observer = new ResizeObserver(([entry]) => setSize({ width: entry.contentRect.width, height: Math.max(100, entry.contentRect.height) }));
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      setSize({ width, height: Math.max(100, height) }); onViewportSize?.(width, height);
+    });
     if (root.current) observer.observe(root.current); return () => observer.disconnect();
-  }, []);
+  }, [onViewportSize]);
   const rendered = useMemo(() => new Map(job?.items.map(i => [i.part_id, i]) ?? []), [job]);
   const parts = useMemo(() => new Map(sources.flatMap(s => s.parts.map(p => [`${s.id}:${p.detailId}`, p] as const))), [sources]);
   const bounds = useMemo(() => new Map(groups.flatMap(g => {
@@ -57,8 +61,13 @@ export function CadCanvas({ documentId, groups, sources, job, readOnly, selected
     const zoom = Math.max(.001, Math.min(8, (size.width - 64) / Math.max(1, maxX - minX), (size.height - 64) / Math.max(1, maxY - minY)));
     setCamera({ zoom, x: (size.width - (maxX + minX) * zoom) / 2, y: (size.height + (maxY + minY) * zoom) / 2 });
   };
-  const autoFit = useRef(!loadCamera(documentId));
-  useEffect(() => { if (autoFit.current && groups.length && size.width > 100) fit(); }, [groups.length, size.width, size.height, documentId]);
+  const autoFit = useRef(fitOnOpen || !loadCamera(documentId));
+  const lastFitKey = useRef(fitKey);
+  useEffect(() => {
+    const requested = lastFitKey.current !== fitKey;
+    lastFitKey.current = fitKey;
+    if ((autoFit.current || requested) && groups.length && size.width > 100) fit();
+  }, [groups.length, size.width, size.height, documentId, fitKey, layoutAspect]);
   const zoomAt = (x: number, y: number, factor: number) => { autoFit.current = false; setCamera(c => { const z = Math.max(.001, Math.min(8, c.zoom * factor)); return { zoom: z, x: x - (x - c.x) / c.zoom * z, y: y - (y - c.y) / c.zoom * z }; }); };
   const choose = (g: CadGroup, multi: boolean) => {
     const ids = g.placementGroupId ? groups.filter(v => v.placementGroupId === g.placementGroupId).map(v => v.id) : [g.id];

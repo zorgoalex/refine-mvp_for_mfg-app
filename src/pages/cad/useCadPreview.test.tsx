@@ -60,3 +60,12 @@ it('renders only visible sources and keeps requests at20 unique persisted identi
   for (const call of preview.mock.calls) expect(new Set(call[1].map((g: CadGroup) => g.id)).size).toBe(call[1].length);
   expect(current.scene.items).toHaveLength(50);
 });
+
+it('previews5000 fitted same-position copies with one cached calculation', async () => {
+  const source = { ...base.sources[0], parts: [{ ...base.sources[0].parts[0], quantity: 5000 }] };
+  base = { ...base, sources: [source], groups: createGroups([source], () => 'persisted') };
+  draft = { ...base, groups: expandInstances(base.groups, base.sources, (g, n) => `${g}-${n}`) };
+  visible = draft.groups.map(g => g.id); await render(); await advance();
+  expect(preview).toHaveBeenCalledTimes(1); expect(preview.mock.calls[0][1]).toHaveLength(1);
+  expect(current.scene.items).toHaveLength(5000);
+});
