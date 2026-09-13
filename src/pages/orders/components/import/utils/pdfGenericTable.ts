@@ -263,6 +263,7 @@ export function mapGenericTableRows(
       millingTypeName: values.get('milling') || null,
       filmName: values.get('film') || null,
       note: values.get('note') || null,
+      doweling: /присадка/i.test(values.get('note') ?? ''),
     });
   });
   return { rows, issues };

@@ -42,6 +42,41 @@ test.describe('Calendar frontend', () => {
         expect(requestUrl.searchParams.get('sortBy')).toBe('plannedCompletionDate');
     });
 
+    test('keeps compact menu and move-date dialog usable across repeated closes', async ({ page }) => {
+        await page.setViewportSize({ width: 390, height: 844 });
+        const db = createWorkflowMockDb();
+        seedCalendarFrontendOrder(db, formatLocalDate(new Date()));
+        await setupWorkflowMockApi(page, db, { runtimeConfig: { backendOrdersRead: true } });
+        await routeCalendarBackendOrders(page, db, []);
+        const errors: string[] = [];
+        page.on('pageerror', error => errors.push(error.message));
+        await page.goto('/calendar', { waitUntil: 'domcontentloaded' });
+        await page.getByRole('region', { name: 'Производственный календарь' }).waitFor({ state: 'visible' });
+        // Mobile starts in BRIEF with its controls collapsed. Choose the real
+        // card mode through the UI before opening its compact context menu.
+        const controls = page.getByRole('button', { name: /Настройки календаря/ });
+        await controls.click();
+        await page.locator('.ant-segmented-item').filter({ hasText: 'Компакт' }).click();
+        await expect(page.getByRole('radio', { name: 'Компакт', exact: true })).toBeChecked();
+        await controls.click();
+        const card = page.locator('.order-card').filter({ hasText: 'E2E calendar frontend order' }).first();
+        await expect(card).toBeVisible();
+        for (let cycle = 0; cycle < 2; cycle += 1) {
+            await card.click({ button: 'right' });
+            const menu = page.locator('.calendar-context-menu');
+            await expect(menu).toHaveClass(/calendar-context-menu--compact/);
+            await menu.getByText('Перенести на дату', { exact: true }).click();
+            const dialog = page.getByRole('dialog', { name: /Перенести заказ E2E calendar frontend order/ });
+            await expect(dialog).toBeVisible();
+            await expect(menu).toHaveCount(0);
+            await expect(dialog.locator('input')).not.toHaveValue('');
+            await dialog.getByRole('button', { name: 'Отмена', exact: true }).click();
+            await expect(dialog).not.toBeVisible();
+        }
+        await expect(card).toBeVisible();
+        expect(errors).toEqual([]);
+    });
+
     test('surfaces backend order list errors', async ({ page }) => {
         const db = createWorkflowMockDb();
         await setupWorkflowMockApi(page, db, {

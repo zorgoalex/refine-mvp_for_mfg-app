@@ -27,6 +27,7 @@ import type {
   CncTelegramTodayColumnDto,
 } from '../dto/cnc-telegram.dto';
 import { PgCncTelegramRepository } from './pg-cnc-telegram-repository';
+import { resolveMdfProductionColumn } from '../../orders/domain/mdf-production-return';
 
 interface OrderRow extends QueryResultRow {
   order_id: string | number;
@@ -350,7 +351,7 @@ function currentSource(
   quantity: number,
   moves: ReadonlyMap<string, ManualMoveRow>,
 ): CurrentSource {
-  const target = parseColumn(moves.get(`${kind}:${id}`)?.target_column) ?? automaticColumn;
+  const target = resolveMdfProductionColumn(automaticColumn, parseColumn(moves.get(`${kind}:${id}`)?.target_column));
   return { kind, id, label, automaticColumn, currentColumn: target, quantity };
 }
 
@@ -503,6 +504,21 @@ function mapAuditEvent(
     consequence = completed
       ? 'Распил по этой карточке больше не блокирует готовность заказа.'
       : 'У заказа появился МДФ-источник; он может быть показан на доске.';
+  } else if (row.event === 'mdf_board.production_returned') {
+    const scope=recordValue(metadata.scope);
+    const kind=historySubjectKind(textValue(scope.kind));
+    if (!kind) return null;
+    subjectKind=kind;
+    subjectId=textValue(scope.id) ?? row.entity_id ?? row.audit_id;
+    subjectLabel=subjectLabelFor(subjectKind,subjectId,order);
+    const cards=recordValue(row.diff_json).cards;
+    const movement=Array.isArray(cards) ? cards.map(recordValue).find(c=>c.kind===kind && c.id===subjectId) : undefined;
+    fromColumn=parseColumn(textValue(movement?.before));
+    toColumn=parseColumn(row.status_code);
+    eventKind='moved';
+    reasonCode='PRODUCTION_RETURN';
+    reason=`Подтверждён возврат в «${columnTitle(toColumn)}»`;
+    consequence='Исправлены производственные статусы позиций карточки; связанные карточки и заказы пересчитаны.';
   } else if (row.event.startsWith('mdf_board.manual_move.')) {
     const cardKind = historySubjectKind(textValue(metadata.cardKind));
     if (!cardKind) return null;

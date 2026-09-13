@@ -1,4 +1,5 @@
 import { Table, Tooltip } from '../../ui/tooltipDelay';
+import type { TablePaginationConfig } from 'antd/es/table';
 import { OrderProductionSummary } from '../../components/OrderProductionSummary';
 import React, { useMemo, useState, useCallback, useEffect } from "react";
 import type { Dayjs } from "dayjs";
@@ -22,7 +23,8 @@ import {
   useSelect,
 } from "../../query/orderLifecycleQueries";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
-import { Space, Button, Input, message, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Checkbox, Modal, Upload, Dropdown, Spin, Badge, Segmented } from "antd";
+import { Space, Button, Input, message, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Checkbox, Modal, Upload, Dropdown, Spin, Badge } from "antd";
+import { Segmented } from "../../ui/Segmented";
 import {
   AppstoreOutlined,
   EyeOutlined,
@@ -897,7 +899,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
 
   // Количество записей
   const totalRecords = tableProps?.pagination && typeof tableProps.pagination === 'object' ? tableProps.pagination.total || 0 : 0;
-  const ordersCompactPagination = useMemo(() => ({
+  const ordersCompactPagination = useMemo<TablePaginationConfig>(() => ({
     ...(tableProps?.pagination && typeof tableProps.pagination === 'object' ? tableProps.pagination : {}),
     position: isTablet && shortTabletLandscape ? ['topRight'] : ['topRight', 'bottomRight'],
     size: 'small',

@@ -1,8 +1,4 @@
 import { createRequire } from 'node:module';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { describe, expect, it, vi } from 'vitest';
 
 const require = createRequire(import.meta.url);
@@ -51,19 +47,16 @@ describe('installGitHooks', () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['.githooks/pre-commit', '.githooks/pre-push'])(
-    'preserves Git configuration when %s is unavailable',
+  it.each(['.githooks/pre-commit', '.githooks/pre-push', '.githooks/run-heavy.sh'])(
+    'fails installation without changing Git configuration when %s is unavailable',
     (missingHook) => {
       const run = vi.fn().mockReturnValue({ status: 0, stdout: 'true\n' });
 
-      expect(installGitHooks({
+      expect(() => installGitHooks({
         env: {},
         run,
         exists: (path: string) => path !== missingHook,
-      })).toEqual({
-        installed: false,
-        reason: 'hooks-not-found',
-      });
+      })).toThrow(/missing/i);
       expect(run).toHaveBeenCalledTimes(1);
     },
   );
@@ -75,58 +68,17 @@ describe('installGitHooks', () => {
 
     expect(() => installGitHooks({ env: {}, run })).toThrow('Failed to configure core.hooksPath');
   });
-});
 
-describe('pre-commit hook', () => {
-  it('falls back to npm when RTK guard is unavailable', () => {
-    const sandbox = mkdtempSync(resolve(tmpdir(), 'erp-pre-commit-'));
-    const npmPath = resolve(sandbox, 'npm');
-    const markerPath = resolve(sandbox, 'npm-args');
-    writeFileSync(npmPath, `#!/bin/sh\nprintf '%s' "$*" > "${markerPath}"\n`);
-    chmodSync(npmPath, 0o755);
-
-    try {
-      const result = spawnSync('/bin/sh', [resolve('.githooks/pre-commit')], {
-        env: {
-          PATH: sandbox,
-          HOME: sandbox,
-          RTK_HEAVY_GUARD: resolve(sandbox, 'missing-guard'),
-        },
-        encoding: 'utf8',
-      });
-
-      expect(result.status).toBe(0);
-      expect(readFileSync(markerPath, 'utf8')).toBe('run typecheck:ratchet');
-    } finally {
-      rmSync(sandbox, { recursive: true, force: true });
-    }
+  it('rejects directories in place of required files', () => {
+    const run = vi.fn().mockReturnValue({ status: 0, stdout: 'true\n' });
+    expect(() => installGitHooks({ env: {}, run, stat: () => ({ isFile: () => false }) })).toThrow(/regular file/);
+    expect(run).toHaveBeenCalledTimes(1);
   });
-});
 
-describe('pre-push hook', () => {
-  it('falls back to npm when RTK guard is unavailable', () => {
-    const sandbox = mkdtempSync(resolve(tmpdir(), 'erp-pre-push-'));
-    const npmPath = resolve(sandbox, 'npm');
-    const markerPath = resolve(sandbox, 'npm-args');
-    writeFileSync(npmPath, `#!/bin/sh\nprintf '%s' "$*" > "${markerPath}"\n`);
-    chmodSync(npmPath, 0o755);
-
-    try {
-      const result = spawnSync('/bin/sh', [resolve('.githooks/pre-push')], {
-        env: {
-          PATH: sandbox,
-          HOME: sandbox,
-          RTK_HEAVY_GUARD: resolve(sandbox, 'missing-guard'),
-        },
-        encoding: 'utf8',
-      });
-
-      expect(result.status).toBe(0);
-      expect(readFileSync(markerPath, 'utf8')).toBe(
-        'run test:business-references -- --maxWorkers=1 --no-file-parallelism --exclude .claude/worktrees/**',
-      );
-    } finally {
-      rmSync(sandbox, { recursive: true, force: true });
-    }
+  it('fails when the runner cannot be read, before configuring Git', () => {
+    const run = vi.fn().mockReturnValue({ status: 0, stdout: 'true\n' });
+    const access = (file: string) => { if (file.endsWith('run-heavy.sh')) throw new Error('EACCES'); };
+    expect(() => installGitHooks({ env: {}, run, access })).toThrow(/runner must be readable/);
+    expect(run).toHaveBeenCalledTimes(1);
   });
 });

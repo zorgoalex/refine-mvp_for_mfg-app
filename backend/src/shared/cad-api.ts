@@ -23,6 +23,8 @@ export const cadPathSchema = z.object({
   segments: z.array(z.object({ segment_type: z.string(), start: point, end: point, center: point.optional(), radius_mm: z.number().optional(), clockwise: z.boolean().optional(), large_arc: z.boolean().optional() })).default([]),
 });
 export const cadFileSchema = z.object({ id: z.string(), name: z.string(), media_type: z.string(), sha256: z.string(), size_bytes: z.number().optional() });
+export const cadFilePageSchema = z.object({ files: z.array(cadFileSchema).max(100), total: z.number().int().nonnegative(), offset: z.number().int().nonnegative() });
+export type CadFilePage = z.infer<typeof cadFilePageSchema>;
 const diagnostic = z.object({ code: z.string(), message: z.string().optional() }).passthrough();
 export const cadPartResultSchema = z.object({
   input_recipe: cadRecipeSchema.nullable().optional(),
@@ -55,10 +57,12 @@ export const cadCatalogSchema = z.object({ recipes: z.array(z.object({
 })) });
 export const cadEvaluationSchema = z.object({ items: z.array(z.object({ recipe: cadRecipeSchema,
   manager_allowed: z.boolean(), snapshot_hash: z.string().optional(), resolved_parameters: z.record(z.string(), z.json()).optional(), errors: z.array(diagnostic) })) });
-export const cadReadinessSchema = z.object({ job_id: z.string(), ready: z.boolean(), items: z.array(z.object({
+export const cadReadinessItemSchema = z.object({
   part_id: z.string(), status: z.string(), ready: z.boolean(), manufacturing_hash: z.string().nullable(),
   approval: z.record(z.string(), z.unknown()).nullable(), errors: z.array(diagnostic),
-})) });
+});
+export const cadReadinessSchema = z.object({ job_id: z.string(), ready: z.boolean(), items: z.array(cadReadinessItemSchema).max(50),
+  total: z.number().int().nonnegative(), unresolved: z.number().int().nonnegative(), offset: z.number().int().nonnegative() });
 export const cadApprovalReceiptSchema = z.object({ id: z.string(), actor: z.object({ id: z.number(), name: z.string() }), reason: z.string(),
   approved_at: z.number(), scope_hash: z.string(), manufacturing_hash: z.string(), job_id: z.string(), part_id: z.string() });
 export type CadJob = z.infer<typeof cadJobSchema>;

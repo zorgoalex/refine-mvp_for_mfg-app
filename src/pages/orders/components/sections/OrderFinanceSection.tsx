@@ -9,6 +9,7 @@ import { useSelect } from '../../../../query/orderLifecycleQueries';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { orderCatalogSubtotal } from '../../../../utils/orderCatalogLines';
 import { formatNumber, numberParser } from '../../../../utils/numberFormat';
+import { formatInputNumber } from '../../../../utils/inputNumberFormat';
 import { CurrencyInput } from '../../../../components/CurrencyInput';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { SETTING_KEYS } from '../../../../hooks/useAppSettings';
@@ -266,7 +267,7 @@ export const OrderFinanceSection: React.FC = () => {
                 value={header.total_amount}
                 readOnly
                 precision={2}
-                formatter={(v) => formatNumber(v, 2)}
+                formatter={(v) => formatInputNumber(v, 2)}
                 parser={numberParser}
                 style={{ width: '100%', background: 'var(--app-surface-muted)' }}
               />
@@ -386,7 +387,7 @@ export const OrderFinanceSection: React.FC = () => {
                 value={header.paid_amount}
                 readOnly
                 precision={2}
-                formatter={(v) => formatNumber(v, 2)}
+                formatter={(v) => formatInputNumber(v, 2)}
                 parser={numberParser}
                 style={{ width: '100%', background: 'var(--app-surface-muted)' }}
               />
@@ -422,7 +423,7 @@ export const OrderFinanceSection: React.FC = () => {
                   value={remainingAmount}
                   readOnly
                   precision={2}
-                  formatter={(v) => formatNumber(v, 2)}
+                  formatter={(v) => formatInputNumber(v, 2)}
                   parser={numberParser}
                   style={{
                     width: '100%',

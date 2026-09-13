@@ -286,7 +286,7 @@ export async function pollPdf(
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const result = await fetchPdf();
-    if (!result.pending) return result;
+    if (result.pending === false) return result;
     if (attempt < maxAttempts - 1) await sleep(delayMs);
   }
   throw new Error('PDF готовится — попробуйте ещё раз через несколько секунд');

@@ -222,10 +222,10 @@ const SheetMaterialShow = lazy(async () => ({ default: (await import('./pages/sh
 const API_URL = import.meta.env.VITE_HASURA_GRAPHQL_URL as string;
 const MDF_PREFETCH_COOLDOWN_MS = 25_000;
 
-function mdfDefaultDateRange(now = new Date()): { dateFrom: string; dateTo: string; operationalWindow: 'month' } {
+function mdfDefaultDateRange(now = new Date()): { dateFrom: string; dateTo: string; operationalWindow: 'two_months' } {
   const dateTo = formatLocalDate(now);
   const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
-  return { dateFrom: formatLocalDate(from), dateTo, operationalWindow: 'month' };
+  return { dateFrom: formatLocalDate(from), dateTo, operationalWindow: 'two_months' };
 }
 
 function formatLocalDate(value: Date): string {

@@ -8,6 +8,23 @@ const item = (text: string, x: number, y: number): PdfTextItem => ({
 });
 
 describe('generic PDF table detector', () => {
+  it.each([
+    ['Присадка:', true],
+    ['Нужна ПРИСАДКА по чертежу', true],
+    ['Обычное примечание', false],
+    ['', false],
+  ])('sets doweling from each mapped note (%s)', (note, doweling) => {
+    const [table] = detectGenericPdfTables([[
+      item('Наименование', 100, 500), item('Кол-во', 300, 500),
+      item('Длина', 380, 500), item('Ширина', 450, 500), item('Примечание', 530, 500),
+      item('Полка', 100, 470), item('2', 300, 470),
+      item('700', 380, 470), item('400', 450, 470), item(note, 530, 470),
+    ]]);
+    const mapped = mapGenericTableRows(table, inferredMapping(table));
+    expect(mapped.issues).toEqual([]);
+    expect(mapped.rows[0]).toMatchObject({ note: note || null, doweling });
+  });
+
   it('detects translated table and retains wrapped designation', () => {
     const page = [
       item('№', 100, 500), item('Обозн.', 140, 500), item('Наименование', 230, 500),

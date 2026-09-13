@@ -5,6 +5,11 @@ import { PgMdfBoardManualMoveRepository } from './pg-mdf-board-manual-move-repos
 
 const runtimeMocks = vi.hoisted(() => ({
   evaluateMdfBoardColumnAutomation: vi.fn(async () => undefined),
+  snapshot: vi.fn(async () => ({cards:[{kind:'packet',id:'packet-1',column:'parsed'}]})),
+}));
+vi.mock('./mdf-return-snapshot', () => ({
+  returnSourceOwners: vi.fn(async () => [1001]),
+  loadReturnSnapshot: runtimeMocks.snapshot,
 }));
 
 vi.mock('../../status-automation/application/status-automation-runtime', () => ({
@@ -14,6 +19,7 @@ vi.mock('../../status-automation/application/status-automation-runtime', () => (
 describe('PgMdfBoardManualMoveRepository', () => {
   beforeEach(() => {
     runtimeMocks.evaluateMdfBoardColumnAutomation.mockClear();
+    runtimeMocks.snapshot.mockResolvedValue({cards:[{kind:'packet',id:'packet-1',column:'parsed'}]});
   });
 
   it('creates a shared move, writes audit, and emits MDF board automation per related order', async () => {
@@ -82,6 +88,15 @@ describe('PgMdfBoardManualMoveRepository', () => {
     expect(tx.texts.some((text) => text.includes('DELETE FROM mdf_board_manual_moves'))).toBe(false);
     expect(tx.texts.some((text) => text.includes('INSERT INTO audit_log'))).toBe(false);
   });
+
+  it('rejects legacy PUT that would cosmetically reopen a completed source', async () => {
+    runtimeMocks.snapshot.mockResolvedValue({cards:[{kind:'packet',id:'packet-1',column:'completed_laminated'}]});
+    const tx=fakeTx([rows()]);
+    await expect(new PgMdfBoardManualMoveRepository(fakeDatabase(tx)).upsert({
+      currentUser:user(),cardKind:'packet',cardId:'packet-1',targetColumn:'parsed',requestId:'return',
+    })).rejects.toMatchObject({code:'MDF_RETURN_CONFIRMATION_REQUIRED'});
+    expect(tx.texts.some(text=>text.includes('INSERT'))).toBe(false);
+  });
 });
 
 function fakeDatabase(tx: TransactionClient) {
@@ -98,6 +113,7 @@ function fakeTx(queue: QueryResult<QueryResultRow>[]): TransactionClient & { tex
     texts,
     async query<T extends QueryResultRow = QueryResultRow>(text: string): Promise<QueryResult<T>> {
       texts.push(text);
+      if (text==='SET LOCAL jit=off') return rows() as QueryResult<T>;
       return (queue.shift() ?? rows()) as QueryResult<T>;
     },
   };

@@ -2,6 +2,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cncTelegramApi } from './cncTelegramApi';
 
 describe('cncTelegramApi', () => {
+  it.each([
+    [{ kind: 'packet', cardId: 'old', column: 'completed', items: null, linkedOrders: [] }],
+    [{ kind: 'bath', cardId: 'old', column: 'completed', items: [], linkedOrders: [] }],
+    [{ kind: 'packet', cardId: 'old', column: 'completed', items: [{ orderId: 1, detailId: 2, detailNumber: 1, quantity: -1 }], linkedOrders: [] }],
+  ])('rejects malformed bounded source facts', async (source) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      workday: '2026-09-13', columns: [], historicalBathReadiness: [],
+      operationalWindow: { dateFrom: '2026-07-13', dateTo: '2026-09-13' }, historicalReadinessSources: [source],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    await expect(cncTelegramApi.today({ operationalWindow: 'two_months' })).rejects.toThrow('двухмесячного');
+  });
+  it('never accepts bounded data without its complete source facts', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      workday: '2026-09-13', columns: [], historicalBathReadiness: [],
+      operationalWindow: { dateFrom: '2026-07-13', dateTo: '2026-09-13' },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    await expect(cncTelegramApi.today({ operationalWindow: 'two_months' }))
+      .rejects.toThrow('двухмесячного');
+  });
   it('rejects trimmed month data without readiness facts, but accepts legacy full responses', async () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(JSON.stringify({
       workday: '2026-09-06', generatedAt: '2026-09-06T08:00:00Z', columns: [],

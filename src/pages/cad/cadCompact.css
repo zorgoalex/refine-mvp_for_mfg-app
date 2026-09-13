@@ -1,0 +1,105 @@
+/* Desktop CAD density. Scope includes explicitly marked Ant portals only.
+   Fixed control geometry wins over ERP shell/mobile minimums; text is not scaled. */
+.cad-page,
+.cad-compact {
+  --cad-control-height: 20px;
+  --cad-control-line-height: 18px;
+}
+
+:is(.cad-page, .cad-compact) .ant-btn {
+  height: var(--cad-control-height) !important;
+  min-height: var(--cad-control-height) !important;
+  padding: 0 8px;
+  font-size: 12px;
+  line-height: var(--cad-control-line-height);
+  border-radius: 3px;
+}
+
+:is(.cad-page, .cad-compact) :is(input.ant-input, .ant-input-affix-wrapper, .ant-input-number) {
+  box-sizing: border-box;
+  height: var(--cad-control-height);
+  min-height: var(--cad-control-height) !important;
+  padding-block: 0;
+  font-size: 12px;
+  line-height: var(--cad-control-line-height);
+  border-radius: 3px;
+}
+
+:is(.cad-page, .cad-compact) .ant-input-affix-wrapper > input.ant-input,
+:is(.cad-page, .cad-compact) .ant-input-number-input {
+  height: var(--cad-control-line-height);
+  min-height: 0 !important;
+  padding-block: 0;
+  font-size: 12px;
+  line-height: var(--cad-control-line-height);
+}
+
+:is(.cad-page, .cad-compact) .ant-select-single {
+  height: var(--cad-control-height);
+  font-size: 12px;
+}
+
+:is(.cad-page, .cad-compact) .ant-select-single .ant-select-selector {
+  height: var(--cad-control-height) !important;
+  min-height: var(--cad-control-height) !important;
+  padding-block: 0;
+  border-radius: 3px;
+}
+
+:is(.cad-page, .cad-compact) .ant-select-single :is(.ant-select-selection-item, .ant-select-selection-placeholder) {
+  line-height: var(--cad-control-line-height) !important;
+}
+
+:is(.cad-page, .cad-compact) .ant-select-single .ant-select-selector::after {
+  line-height: var(--cad-control-line-height) !important;
+}
+
+:is(.cad-page, .cad-compact) .ant-select-single .ant-select-selection-search-input {
+  height: var(--cad-control-line-height) !important;
+}
+
+/* Multiline text remains multiline. Checkboxes retain their native square. */
+:is(.cad-page, .cad-compact) textarea.ant-input {
+  min-height: 40px;
+  padding-block: 2px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+:is(.cad-page, .cad-compact) .ant-checkbox-wrapper {
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.cad-compact.ant-select-dropdown .ant-select-item {
+  min-height: 24px;
+  padding: 2px 8px;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.cad-page .cad-side-panel-toggle {
+  height: 22px !important;
+  min-height: 22px !important;
+}
+
+.cad-page .cad-canvas-tools { padding-block: 5px; }
+.cad-page .cad-variant-tabs .ant-tabs-tab { padding-block: 5px; }
+:is(.cad-page, .cad-compact) .cad-parameter { margin-block: 8px; }
+:is(.cad-page, .cad-compact) :is(.cad-field-label, .cad-parameter label) { margin-bottom: 3px !important; }
+:is(.cad-page, .cad-compact) .cad-panel-title { margin-bottom: 6px; }
+
+.cad-compact .ant-modal-close {
+  width: 28px;
+  height: 28px;
+}
+.cad-compact .ant-modal-close-x {
+  width: 28px;
+  height: 28px;
+  line-height: 28px;
+}
+.cad-compact .ant-drawer-close {
+  min-height: 20px;
+  padding-block: 0;
+  line-height: 20px;
+}

@@ -343,7 +343,7 @@ export class CncTelegramController {
   @ApiQuery({ name: 'date', required: false, type: String })
   @ApiQuery({ name: 'dateFrom', required: false, type: String })
   @ApiQuery({ name: 'dateTo', required: false, type: String })
-  @ApiQuery({ name: 'operationalWindow', required: false, enum: ['month'] })
+  @ApiQuery({ name: 'operationalWindow', required: false, enum: ['month', 'two_months'] })
   @ApiQuery({ name: 'focusBathCardId', required: false, type: String })
   @ApiResponse({ status: 200, description: 'Current-day CNC Telegram packets' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
@@ -749,7 +749,7 @@ export function parseTodayQuery(query: Record<string, unknown>): {
   workday: string | null;
   workdayFrom: string | null;
   workdayTo: string | null;
-  operationalWindow?: 'month';
+  operationalWindow?: 'month' | 'two_months';
   focusBathCardId?: string;
 } {
   const workday = parseDateQuery(query.date, 'date');
@@ -770,11 +770,11 @@ export function parseTodayQuery(query: Record<string, unknown>): {
       field: 'dateFrom',
     });
   }
-  if (query.operationalWindow !== undefined && query.operationalWindow !== 'month') {
+  if (query.operationalWindow !== undefined && query.operationalWindow !== 'month' && query.operationalWindow !== 'two_months') {
     throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid operationalWindow', { field: 'operationalWindow' });
   }
   if (query.focusBathCardId !== undefined && (
-    query.operationalWindow !== 'month'
+    (query.operationalWindow !== 'month' && query.operationalWindow !== 'two_months')
     || typeof query.focusBathCardId !== 'string'
     || !/^cut-result:[1-9]\d{0,15}$/.test(query.focusBathCardId)
     || !Number.isSafeInteger(Number(query.focusBathCardId.slice('cut-result:'.length)))
@@ -784,6 +784,7 @@ export function parseTodayQuery(query: Record<string, unknown>): {
   return {
     workday, workdayFrom, workdayTo,
     ...(query.operationalWindow === 'month' ? { operationalWindow: 'month' as const } : {}),
+    ...(query.operationalWindow === 'two_months' ? { operationalWindow: 'two_months' as const } : {}),
     ...(typeof query.focusBathCardId === 'string' ? { focusBathCardId: query.focusBathCardId } : {}),
   };
 }

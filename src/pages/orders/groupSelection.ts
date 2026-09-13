@@ -1,22 +1,24 @@
 // src/pages/orders/groupSelection.ts
+import type { Key } from 'react';
+
 export type GroupCheckboxState = 'checked' | 'indeterminate' | 'unchecked' | 'empty';
 
 export function groupCheckboxState(
-  selected: ReadonlyArray<number | string>,
-  groupKeys: ReadonlyArray<number | string>,
+  selected: ReadonlyArray<Key>,
+  groupKeys: ReadonlyArray<Key>,
 ): GroupCheckboxState {
   if (groupKeys.length === 0) return 'empty';
   const set = new Set(selected);
-  const inCount = groupKeys.reduce((n, k) => (set.has(k) ? n + 1 : n), 0);
+  const inCount = groupKeys.reduce<number>((n, k) => (set.has(k) ? n + 1 : n), 0);
   if (inCount === 0) return 'unchecked';
   if (inCount === groupKeys.length) return 'checked';
   return 'indeterminate';
 }
 
 export function toggleGroupSelection(
-  selected: ReadonlyArray<number | string>,
-  groupKeys: ReadonlyArray<number | string>,
-): Array<number | string> {
+  selected: ReadonlyArray<Key>,
+  groupKeys: ReadonlyArray<Key>,
+): Array<Key> {
   const set = new Set(selected);
   const allIn = groupKeys.length > 0 && groupKeys.every((k) => set.has(k));
   if (allIn) {
@@ -30,7 +32,7 @@ export function toggleGroupSelection(
 
 export function selectedDetailIds(
   details: ReadonlyArray<any>,
-  selectedKeys: ReadonlyArray<number | string>,
+  selectedKeys: ReadonlyArray<Key>,
 ): number[] {
   const selected = new Set(selectedKeys);
   return details
@@ -38,7 +40,7 @@ export function selectedDetailIds(
     .map((d) => d.detail_id as number);
 }
 
-export function filterNumericKeys(keys: ReadonlyArray<number | string>): number[] {
+export function filterNumericKeys(keys: ReadonlyArray<Key>): number[] {
   return keys
     .filter((k) => typeof k === 'number' || /^\d+$/.test(String(k)))
     .map((k) => Number(k));

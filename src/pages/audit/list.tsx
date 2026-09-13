@@ -1,6 +1,7 @@
 import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Form, Button, Card, Space, Typography, Tag, Empty, Alert, DatePicker, Segmented, Select, Tabs } from 'antd';
+import { Form, Button, Card, Space, Typography, Tag, Empty, Alert, DatePicker, Select, Tabs } from 'antd';
+import { Segmented } from "../../ui/Segmented";
 import { FilterOutlined, ClearOutlined, AuditOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import { auditApi } from '../../api/auditApi';

@@ -13,6 +13,17 @@ export function CadExportDialog({ open, flush, onClose }: Props) {
   const [error, setError] = useState(''), [ack, setAck] = useState(false), [busy, setBusy] = useState(false);
   const [approval, setApproval] = useState<{ groupId: string; hash: string } | null>(null), [reason, setReason] = useState('');
   const [command, setCommand] = useState<CadApprovalCommand | null>(null);
+  const [issuePage, setIssuePage] = useState(0), [fileOffset, setFileOffset] = useState(0), [filesOpen, setFilesOpen] = useState(false);
+  const files = useQuery(['cad-export-files', review?.runId, fileOffset], () => cadApi.files(review!.runId, fileOffset), {
+    enabled: open && phase === 'ready' && filesOpen && Boolean(review), retry: false,
+  });
+  const checks = useQuery(['cad-export-checks', review?.runId, review, issuePage], () => cadApi.readiness(review!.runId, issuePage * 50), {
+    enabled: open && phase === 'review' && Boolean(review) && issuePage > 0, retry: false,
+  });
+  const readiness = issuePage ? checks.data : review?.readiness;
+  const unresolved = readiness?.items.filter(i => !i.ready) ?? [];
+  const unresolvedCount = readiness?.unresolved ?? review?.readiness.unresolved ?? 0;
+  useEffect(() => { if (readiness) setIssuePage(page => Math.min(page, Math.max(0, Math.ceil(readiness.unresolved / 50) - 1))); }, [readiness]);
   const packageKey = useRef(crypto.randomUUID()), approvalKey = useRef(crypto.randomUUID());
   const generation = useRef(0), isOpen = useRef(open); isOpen.current = open;
   const run = useQuery(['cad-export-run', target?.id, target?.version], () => cadApi.run(target!.id, target!.version), {
@@ -24,12 +35,12 @@ export function CadExportDialog({ open, flush, onClose }: Props) {
   });
   const reviewTarget = async (v: CadVariant) => { const epoch = generation.current, value = await cadApi.preflight(v);
     if (!isOpen.current || epoch !== generation.current) return;
-    setReview(value); setPhase('review'); setAck(false); packageKey.current = crypto.randomUUID(); };
+    setReview(value); setIssuePage(0); setPhase('review'); setAck(false); packageKey.current = crypto.randomUUID(); };
   useEffect(() => {
     generation.current++;
     if (!open) return;
     let cancelled = false;
-    setTarget(null); setReview(null); setError(''); setCommand(null); setApproval(null); setPhase('saving');
+    setTarget(null); setReview(null); setError(''); setCommand(null); setApproval(null); setPhase('saving'); setIssuePage(0); setFileOffset(0); setFilesOpen(false);
     void (async () => {
       try {
         const v = await flush(); if (cancelled) return;
@@ -50,7 +61,12 @@ export function CadExportDialog({ open, flush, onClose }: Props) {
     } else if (phase === 'rendering' && ['failed', 'partial'].includes(run.data?.run?.status ?? '')) {
       setError('Не все детали рассчитаны. Исправьте отмеченные детали; они не будут исключены из ZIP автоматически.'); setPhase('error');
     } else if (phase === 'packing' && run.data?.run?.packageId) setPhase('ready');
-    else if (phase === 'packing' && run.data?.run?.lastError) { setError('Не удалось собрать ZIP. Проверьте одобрения и повторите.'); setPhase('error'); }
+    else if (phase === 'packing' && run.data?.run?.lastError) {
+      const code = run.data.run.lastError;
+      setError(code.includes('PACKAGE_SIZE_LIMIT') ? 'Комплект превышает допустимый размер ZIP. Разделите его на несколько рабочих вариантов.'
+        : code.includes('PACKAGE_TIME_LIMIT') ? 'Сборка ZIP превысила допустимое время. Разделите комплект на несколько рабочих вариантов.'
+        : 'Не удалось собрать ZIP. Проверьте одобрения и повторите.'); setPhase('error');
+    }
   }, [run.data, open, target, phase]);
   useEffect(() => {
     if (!receipt.data || receipt.data.status === 'pending' || !target) return;
@@ -60,7 +76,7 @@ export function CadExportDialog({ open, flush, onClose }: Props) {
   }, [receipt.data]);
   const act = async (fn: () => Promise<void>) => { if (busy) return; setBusy(true); setError(''); try { await fn(); } catch (e) { setError(e instanceof Error ? e.message : 'Ошибка связи. Повторите действие.'); } finally { setBusy(false); } };
   const partLabel = (id: string) => { const g = target?.groups.find(g => g.id === id); const p = target?.sources.find(s => s.id === g?.sourceSnapshotId)?.parts.find(p => p.detailId === g?.detailId); return `Позиция ${p?.detailNumber ?? '?'} · заказ ${g?.orderId ?? ''}`; };
-  return <Modal open={open} title="Скачать фрезеровки" width={680} onCancel={onClose} footer={<Button onClick={onClose}>Закрыть</Button>}>
+  return <Modal className="cad-compact" open={open} title="Скачать фрезеровки" width={680} onCancel={onClose} footer={<Button onClick={onClose}>Закрыть</Button>}>
     <p>SVG и DXF каждой детали, manifest.json и ZIP. Файлы требуют настройки обработки в CAM.</p>
     {['saving', 'rendering', 'packing'].includes(phase) && <Space role="status"><Spin size="small" />{phase === 'saving' ? 'Сохраняем и проверяем редакцию…' : phase === 'packing' ? 'Собираем ZIP…' : `Рассчитываем все включённые детали: ${run.data?.job?.completed ?? 0} / ${target?.groups.length ?? '…'}`}</Space>}
     {(error || run.error) && <Alert type="error" message={error || 'Не удалось получить состояние расчёта'} />}
@@ -69,14 +85,20 @@ export function CadExportDialog({ open, flush, onClose }: Props) {
       <p className="cad-hint">ZIP сохранит эту редакцию, даже если вы продолжите редактирование.</p>
       {review.sourceStatus.filter(s => s.stale).map(s => <Alert key={s.orderId} type="warning" message={`Заказ «${s.orderName}» изменился`} description={`Изменённых исходных позиций: ${s.changedDetailIds.length}. В ZIP останутся данные сохранённой редакции.`} />)}
       {review.sourceStatus.some(s => s.stale) && <Checkbox checked={ack} onChange={e => setAck(e.target.checked)}>Подтверждаю выгрузку сохранённого состава, несмотря на изменения заказов</Checkbox>}
-      {review.readiness.items.filter(i => !i.ready).map(i => <div className="cad-export-issue" key={i.part_id}><strong>{partLabel(i.part_id)}</strong><p>{i.status === 'succeeded' ? 'Настройки рассчитаны, но требуют одобрения технолога.' : 'Исправьте параметры и повторите расчёт.'}</p>
+      {checks.isFetching && <Spin size="small" />}{checks.isError && <Alert type="error" message="Проверки недоступны" action={<Button onClick={() => void checks.refetch()}>Повторить</Button>} />}
+      {unresolvedCount > 50 && <Space><Button disabled={!issuePage || checks.isFetching} onClick={() => setIssuePage(n => n - 1)}>Предыдущие проверки</Button><span>{issuePage * 50 + 1}–{Math.min(unresolvedCount, (issuePage + 1) * 50)} из {unresolvedCount}</span><Button disabled={checks.isFetching || (issuePage + 1) * 50 >= unresolvedCount} onClick={() => setIssuePage(n => n + 1)}>Следующие проверки</Button></Space>}
+      {unresolved.map(i => <div className="cad-export-issue" key={i.part_id}><strong>{partLabel(i.part_id)}</strong><p>{i.status === 'succeeded' ? 'Настройки рассчитаны, но требуют одобрения технолога.' : 'Исправьте параметры и повторите расчёт.'}</p>
         {can('cad.approve') && i.status === 'succeeded' && i.manufacturing_hash && <Button onClick={() => { setApproval({ groupId: i.part_id, hash: i.manufacturing_hash! }); setReason(''); setCommand(null); approvalKey.current = crypto.randomUUID(); }}>Одобрить для этой детали</Button>}</div>)}
       {approval && <div className="cad-approval-form"><p>{partLabel(approval.groupId)}. Одобрение не распространяется на другие детали или варианты.</p><Input.TextArea aria-label="Причина индивидуального одобрения" value={reason} maxLength={1000} disabled={command?.status === 'pending'} onChange={e => setReason(e.target.value)} placeholder="Почему эти настройки допустимы для данной детали" />
         <Button loading={busy || command?.status === 'pending'} disabled={!reason.trim() || command?.status === 'pending'} onClick={() => void act(async () => { setCommand(await cadApi.approve(target, approval.groupId, approval.hash, reason, approvalKey.current)); })}>Подтвердить одобрение</Button>
         {command?.status === 'pending' && <p role="status">Ожидаем подтверждение CAD. Деталь ещё не считается одобренной.</p>}</div>}
       {phase === 'review' && review.ready && <Button type="primary" loading={busy} disabled={review.sourceStatus.some(s => s.stale) && !ack} onClick={() => void act(async () => { await cadApi.package(target, review.reviewId!, ack, packageKey.current); setPhase('packing'); await run.refetch(); })}>Подтвердить и подготовить ZIP</Button>}
       {phase === 'ready' && <><Alert type="success" message="Готово к скачиванию" /><Button type="primary" loading={busy} onClick={() => void act(() => cadApi.download(review.runId, run.data!.run!.packageId!, `cad-${target.name}.zip`, review.reviewId!))}>Скачать ZIP</Button>
-        <details><summary>Отдельные файлы</summary>{[...(run.data?.job?.package_files.filter(f => f.name === 'manifest.json') ?? []), ...(run.data?.job?.items.flatMap(i => i.result?.files ?? []) ?? [])].map(f => <Button key={f.id} type="link" onClick={() => void act(() => cadApi.download(review.runId, f.id, f.name.split('/').at(-1) ?? f.id, review.reviewId!))}>{f.name}</Button>)}</details></>}
+        <details onToggle={e => setFilesOpen(e.currentTarget.open)}><summary>Отдельные файлы</summary>
+          {files.isFetching && <Spin size="small" />}{files.isError && <Alert type="error" message="Список файлов недоступен" action={<Button onClick={() => void files.refetch()}>Повторить</Button>} />}
+          {files.data?.files.map(f => <Button key={f.id} type="link" onClick={() => void act(() => cadApi.download(review.runId, f.id, f.name.split('/').at(-1) ?? f.id, review.reviewId!))}>{f.name}</Button>)}
+          {files.data && <Space><Button disabled={!fileOffset} onClick={() => setFileOffset(n => Math.max(0, n - 100))}>Предыдущие файлы</Button><span>{files.data.total ? fileOffset + 1 : 0}–{Math.min(fileOffset + 100, files.data.total)} из {files.data.total}</span><Button disabled={fileOffset + 100 >= files.data.total} onClick={() => setFileOffset(n => n + 100)}>Следующие файлы</Button></Space>}
+        </details></>}
       <Button disabled={busy || command?.status === 'pending'} onClick={() => void act(() => reviewTarget(target))}>Проверить сводку заново</Button>
     </>}
     {phase === 'error' && <p>Закройте окно, исправьте причины и повторите скачивание. Сохранённая версия остаётся доступна.</p>}

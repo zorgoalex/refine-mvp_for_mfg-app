@@ -1,4 +1,5 @@
 import { Popover, Tooltip } from '../../ui/tooltipDelay';
+import { MdfProductionReturnDialog, isMdfBackwardMove, type MdfReturnIntent } from './MdfProductionReturnDialog';
 import React, {
   lazy,
   memo,
@@ -10,7 +11,8 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { Alert, Badge, Button, Checkbox, Collapse, DatePicker, Dropdown, Empty, Input, Modal, Segmented, Select, Skeleton, Spin, Switch, Tabs, Tag, Typography, message } from 'antd';
+import { Alert, Badge, Button, Checkbox, Collapse, DatePicker, Dropdown, Empty, Input, Modal, Select, Skeleton, Spin, Switch, Tabs, Tag, Typography, message } from 'antd';
+import { Segmented } from "../../ui/Segmented";
 import type { MenuProps } from 'antd';
 import {
   CalendarOutlined,
@@ -71,6 +73,7 @@ import type {
 import type {
   CncTelegramBathCard,
   CncHistoricalBathReadiness,
+  CncHistoricalReadinessSource,
   CncTelegramBazisCutSetCard,
   CncTelegramOriginalBoardResponse,
   CncTelegramPacket,
@@ -108,11 +111,14 @@ import {
   buildCncOrderFilterOptions,
   buildOrderStatusBoardDatasetKey,
   buildCncOrderMissingDetails,
+  indexCncOrderComposition,
+  cncOrderDetailSourceKeys,
   collectCncOrderIds,
   DEFAULT_CNC_ORDER_SEARCH_PERIOD,
   DEFAULT_MDF_ORDER_CARD_SORT,
   DEFAULT_ORDER_STATUS_BOARD_SORT,
   applyMdfBoardHiddenCardRulesToColumns,
+  applyMdfHiddenRulesToReadinessSources,
   filterBoardColumns,
   filterCncBathColumnsByMachineOrderMatches,
   filterCncOrderCardsByPlannedOrderDate,
@@ -725,6 +731,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const cncAuxiliaryRefreshRevisionRef = useRef(0);
   const cncOrderBoardRequestKeyRef = useRef<string | null>(null);
   const cncManualMoveRequestSeqRef = useRef<Record<string, number>>({});
+  const [mdfReturnIntent, setMdfReturnIntent] = useState<MdfReturnIntent | null>(null);
   const [cncDetailedEnabled, setCncDetailedEnabled] = useState(false);
   const [cncBathsRequireMachineFiles, setCncBathsRequireMachineFiles] =
     useState(false);
@@ -933,7 +940,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
               cncTelegramApi.consumePrefetchedToday({
                 dateFrom: displayRange.dateFrom,
                 dateTo: displayRange.dateTo,
-                operationalWindow: 'month',
+                operationalWindow: 'two_months',
                 ...(currentViewState.cncCardKind === 'bath' && currentViewState.cncCardId
                   ? { focusBathCardId: currentViewState.cncCardId } : {}),
               }, { cache: 'no-store' }),
@@ -948,12 +955,14 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             const orderBoardWasPrefetched = hasPrefetchedCncOrderStatusBoard(
               refreshedOrderIds,
               orderSortPreference,
+              false,
             );
             const prefetchedOrderBoard = orderBoardWasPrefetched
               ? await fetchCncOrderStatusBoard(
                   refreshedOrderIds,
                   orderSortPreference,
                   { cache: 'no-store' },
+                  false,
                 )
               : null;
             if (
@@ -976,6 +985,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
               cncOrderBoardRequestKeyRef.current = buildCncOrderStatusBoardRequestKey(
                 refreshedOrderIds,
                 currentViewState,
+                false,
               );
               setCncOrderBoard(prefetchedOrderBoard);
             }
@@ -986,6 +996,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
               refreshedOrderIds,
               orderSortPreference,
               { cache: 'no-store' },
+              false,
             );
             if (
               datasetRevisionRef.current !== revision
@@ -996,6 +1007,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             cncOrderBoardRequestKeyRef.current = buildCncOrderStatusBoardRequestKey(
               refreshedOrderIds,
               currentViewState,
+              false,
             );
             startTransition(() => setCncOrderBoard(orderBoardResponse));
             return true;
@@ -1503,6 +1515,11 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     () => buildCncOrderStatusCards(cncOrderBoardColumns, cncOrderIds),
     [cncOrderBoardColumns, cncOrderIds],
   );
+  const cncHistoricalReadinessSources = useMemo(
+    () => cncOriginalView || cncToday?.historicalReadinessSources === undefined ? undefined
+      : applyMdfHiddenRulesToReadinessSources(cncToday.historicalReadinessSources, cncOrderStatusCards, mdfBoardHiddenStatusesSetting),
+    [cncOriginalView, cncToday?.historicalReadinessSources, cncOrderStatusCards, mdfBoardHiddenStatusesSetting],
+  );
   const cncHiddenProductionStatusIds = useMemo(
     () => resolveMdfBoardHiddenProductionStatusIds(
       cncOrderBoardColumns,
@@ -1796,7 +1813,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       return undefined;
     }
 
-    const requestKey = buildCncOrderStatusBoardRequestKey(cncOrderIds, viewState);
+    const requestKey = buildCncOrderStatusBoardRequestKey(cncOrderIds, viewState, cncOriginalView);
     if (preserveInitialMdfOrderBoardRef.current) {
       preserveInitialMdfOrderBoardRef.current = false;
       cncOrderBoardRequestKeyRef.current = requestKey;
@@ -1818,7 +1835,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
         const response = await fetchCncOrderStatusBoard(cncOrderIds, {
           sortBy: viewState.sortBy,
           sortOrder: viewState.sortOrder,
-        }, { cache: 'no-store' });
+        }, { cache: 'no-store' }, cncOriginalView);
         if (
           !cancelled
           && cncAuxiliaryRefreshRevisionRef.current === requestRevision
@@ -1845,7 +1862,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [active, cncOrderIds, isCncToday, viewState.sortBy, viewState.sortOrder]);
+  }, [active, cncOrderIds, isCncToday, viewState.sortBy, viewState.sortOrder, cncOriginalView]);
 
   useEffect(() => {
     if (!active) return undefined;
@@ -1968,7 +1985,14 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     targetColumn: CncTelegramTodayDisplayColumnKey,
     targetTitle: string,
     trigger: HTMLElement | null,
+    sourceColumn?: CncTelegramTodayDisplayColumnKey,
   ) => {
+    if (kind !== 'order' && isMdfBackwardMove(kind, sourceColumn, targetColumn)) {
+      const state=viewStateRef.current;
+      const boardWindow=buildCncOrderSearchDateRange(state.cncWorkday ?? dayjs().format('YYYY-MM-DD'),state.cncOrderSearchPeriod);
+      setMdfReturnIntent({ source: { kind, id: cardId }, targetColumn:targetColumn as MdfReturnIntent['targetColumn'], targetTitle, boardWindow });
+      return;
+    }
     if (kind === 'order') {
       const orderId = Number(cardId);
       const card = cncDisplayOrderStatusCards.find((candidate) => candidate.orderId === orderId);
@@ -2252,12 +2276,13 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   ];
   const cncMinDate = dayjs().subtract(CNC_HISTORY_DAYS - 1, 'day').startOf('day');
   const cncMaxDate = dayjs().endOf('day');
-  const cncSelectedDate = viewState.cncWorkday
-    ? dayjs(viewState.cncWorkday)
-    : cncToday?.workday
-      ? dayjs(cncToday.workday)
-      : null;
-  const cncNavigationDate = cncSelectedDate ?? dayjs();
+  // Show the opening date before URL synchronization or board data loading.
+  const cncSelectedDate = dayjs(
+    mdfWorkdayTodayOpenPatchNeeded
+      ? todayCncWorkday
+      : viewState.cncWorkday ?? todayCncWorkday,
+  );
+  const cncNavigationDate = cncSelectedDate;
   const cncCanStepBack = cncNavigationDate.startOf('day').isAfter(cncMinDate);
   const cncCanStepForward = cncNavigationDate.startOf('day').isBefore(cncMaxDate);
   const updateCncWorkday = (date: Dayjs) =>
@@ -2988,6 +3013,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                 columns={cncRenderColumns}
                 readinessColumns={cncActiveColumns}
                 historicalBathReadiness={cncHistoricalBathReadiness}
+                historicalReadinessSources={cncHistoricalReadinessSources}
                 orderCards={cncOrderCards}
                 manualMoves={cncManualMoves}
                 mutedOrderIds={cncMutedOrderIds}
@@ -3113,6 +3139,14 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             onClick={() => scrollCncBoardHorizontally('right')}
           />
         )}
+        {mdfReturnIntent && <MdfProductionReturnDialog intent={mdfReturnIntent}
+          onCancel={() => setMdfReturnIntent(null)}
+          columnTitle={(key) => isCncManualColumnKey(key) ? cncColumnTitleByKey(key) : key}
+          onReturned={async () => {
+            setMdfReturnIntent(null);
+            message.success('Возврат выполнен. Производственные данные и положение карточек обновлены.');
+            await fetchInitial({ mutationRefetch: true, preserveLoading: true });
+          }} />}
       </main>
     </DndProvider>
   );
@@ -3149,6 +3183,7 @@ interface CncTelegramTodayColumnsProps {
   columns: CncTelegramTodayColumn[];
   readinessColumns: CncTelegramTodayColumn[];
   historicalBathReadiness?: readonly CncHistoricalBathReadiness[];
+  historicalReadinessSources?: readonly CncHistoricalReadinessSource[];
   orderCards: OrderStatusBoardCard[];
   manualMoves: CncBoardManualMoveState;
   mutedOrderIds: ReadonlySet<number>;
@@ -3190,6 +3225,7 @@ interface CncTelegramTodayColumnsProps {
     targetColumn: CncTelegramTodayDisplayColumnKey,
     targetTitle: string,
     trigger: HTMLElement | null,
+    sourceColumn?: CncTelegramTodayDisplayColumnKey,
   ) => void;
   showFinancials: boolean;
 }
@@ -3542,6 +3578,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   columns,
   readinessColumns,
   historicalBathReadiness,
+  historicalReadinessSources,
   orderCards,
   manualMoves,
   mutedOrderIds,
@@ -3667,13 +3704,13 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   }, []);
   const orderReadinessByOrderId = useMemo(
     () => buildCncOrderReadiness(
-      applyCncManualMovesToColumns(readinessColumns, manualMoves), {}, historicalBathReadiness,
+      applyCncManualMovesToColumns(readinessColumns, manualMoves), manualMoves, historicalBathReadiness, historicalReadinessSources,
     ),
-    [manualMoves, readinessColumns, historicalBathReadiness],
+    [manualMoves, readinessColumns, historicalBathReadiness, historicalReadinessSources],
   );
   const orderMissingDetailsByOrderId = useMemo(
-    () => buildCncOrderMissingDetails(orderCards, readinessColumns),
-    [orderCards, readinessColumns],
+    () => buildCncOrderMissingDetails(orderCards, readinessColumns, historicalReadinessSources),
+    [orderCards, readinessColumns, historicalReadinessSources],
   );
   const currentOrderDisplayCards = useMemo(
     () => splitCncOrderCardsByManualColumn(
@@ -4682,7 +4719,7 @@ const CncColumnDropZone: React.FC<CncColumnDropZoneProps> = ({
         item.sourceColumn !== columnKey &&
         isCncManualMoveAllowed(item.kind, columnKey)
       ) {
-        onMove(item.kind, item.cardId, columnKey, columnTitle, item.trigger);
+        onMove(item.kind, item.cardId, columnKey, columnTitle, item.trigger, item.sourceColumn);
       }
     },
     collect: (monitor) => ({
@@ -4871,9 +4908,9 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
       const targetKey = key.slice('move:'.length) as CncTelegramTodayDisplayColumnKey;
       const target = destinations.find((destination) => destination.key === targetKey);
       if (!target) return;
-      onMove(kind, cardId, target.key, target.title, shellRef.current);
+      onMove(kind, cardId, target.key, target.title, shellRef.current, sourceColumn);
     },
-  }), [cardId, destinations, kind, onMove]);
+  }), [cardId, destinations, kind, onMove, sourceColumn]);
 
   return (
     <Dropdown
@@ -8361,12 +8398,13 @@ async function fetchCncOrderStatusBoard(
     sortOrder: OrderStatusBoardSortOrder;
   },
   options?: RequestOptions,
+  includeBazisAllocation = true,
 ): Promise<OrderStatusBoardResponse | null> {
   if (orderIds.length === 0) return null;
   const responses = await Promise.all(
     chunkCncOrderIds(orderIds).map((chunk) =>
       orderStatusBoardApi.consumePrefetchedGet(
-        cncOrderStatusBoardQuery(chunk, sortPreference),
+        cncOrderStatusBoardQuery(chunk, sortPreference, includeBazisAllocation),
         options,
       ),
     ),
@@ -8380,9 +8418,10 @@ function hasPrefetchedCncOrderStatusBoard(
     sortBy: OrderStatusBoardSortBy;
     sortOrder: OrderStatusBoardSortOrder;
   },
+  includeBazisAllocation = true,
 ): boolean {
   return orderIds.length > 0 && chunkCncOrderIds(orderIds).every((chunk) =>
-    orderStatusBoardApi.hasPrefetchedGet(cncOrderStatusBoardQuery(chunk, sortPreference)),
+    orderStatusBoardApi.hasPrefetchedGet(cncOrderStatusBoardQuery(chunk, sortPreference, includeBazisAllocation)),
   );
 }
 
@@ -8395,7 +8434,7 @@ export async function prefetchMdfOrderStatusBoard(
     Promise.all(
       chunkCncOrderIds(orderIds).map((chunk) =>
         orderStatusBoardApi.prefetchGet(
-          cncOrderStatusBoardQuery(chunk, DEFAULT_MDF_ORDER_CARD_SORT),
+          cncOrderStatusBoardQuery(chunk, DEFAULT_MDF_ORDER_CARD_SORT, response.historicalReadinessSources === undefined),
         ),
       ),
     ),
@@ -8432,11 +8471,13 @@ function cncOrderStatusBoardQuery(
     sortBy: OrderStatusBoardSortBy;
     sortOrder: OrderStatusBoardSortOrder;
   },
+  includeBazisAllocation = true,
 ) {
   return {
     board: 'production' as const,
     limit: CNC_ORDER_STATUS_BOARD_BATCH_SIZE,
     includeDone: true,
+    ...(includeBazisAllocation ? {} : { includeBazisAllocation: false }),
     orderIds,
     sortBy: sortPreference.sortBy,
     sortOrder: sortPreference.sortOrder,
@@ -8449,9 +8490,10 @@ export function buildCncOrderStatusBoardRequestKey(
     sortBy: OrderStatusBoardSortBy;
     sortOrder: OrderStatusBoardSortOrder;
   },
+  includeBazisAllocation = true,
 ): string {
   const normalizedOrderIds = [...new Set(orderIds)].sort((left, right) => left - right);
-  return `${sortPreference.sortBy}|${sortPreference.sortOrder}|${normalizedOrderIds.join(',')}`;
+  return `${sortPreference.sortBy}|${sortPreference.sortOrder}|${normalizedOrderIds.join(',')}${includeBazisAllocation ? '' : '|bounded'}`;
 }
 
 function chunkCncOrderIds(orderIds: readonly number[]): number[][] {
@@ -8708,8 +8750,10 @@ export function buildCncOrderReadiness(
   columns: CncTelegramTodayColumn[],
   manualMoves: CncBoardManualMoveState,
   historicalBathReadiness: readonly CncHistoricalBathReadiness[] = [],
+  historicalSources: readonly CncHistoricalReadinessSource[] = [],
 ): Map<number, CncOrderReadiness> {
   const orders = new Map<number, Map<string, CncReadinessDetailTotals>>();
+  const seenBathIds = new Set<string>();
   const getDetail = (
     orderId: number | null | undefined,
     detailId: number | null | undefined,
@@ -8789,6 +8833,8 @@ export function buildCncOrderReadiness(
     }
 
     for (const bath of column.baths) {
+      if (seenBathIds.has(bath.bathCardId)) continue;
+      seenBathIds.add(bath.bathCardId);
       const bathTarget = resolveCncManualTarget(
         'bath',
         bath.bathCardId,
@@ -8815,6 +8861,8 @@ export function buildCncOrderReadiness(
   // These sources are physically packed: terminal automatic placement wins over
   // every manual override. Preserve volume without recreating visible cards.
   for (const bath of historicalBathReadiness) {
+    if (seenBathIds.has(bath.bathCardId)) continue;
+    seenBathIds.add(bath.bathCardId);
     for (const [index, item] of bath.items.entries()) {
       const detail = getDetail(item.orderId, item.detailId, item.detailNumber,
         `historical-bath:${bath.bathCardId}:${index}`);
@@ -8822,6 +8870,34 @@ export function buildCncOrderReadiness(
       const quantity = nonNegativeInteger(item.quantity);
       detail.bathTotal += quantity;
       detail.rolled += quantity;
+    }
+  }
+
+  const seenSources = new Set(columns.flatMap(column => [
+    ...column.packets.map(card => `packet:${card.packetId}`),
+    ...(column.bazisCutSets ?? []).map(card => `bazisCutSet:${card.bazisCutSetId}`),
+    ...column.baths.map(card => `bath:${card.bathCardId}`),
+  ]));
+  for (const bathId of seenBathIds) seenSources.add(`bath:${bathId}`);
+  for (const source of historicalSources) {
+    const key = `${source.kind}:${source.cardId}`;
+    if (seenSources.has(key)) continue;
+    seenSources.add(key);
+    const target = resolveCncManualTarget(source.kind, source.cardId, source.column, manualMoves);
+    for (const [index, item] of source.items.entries()) {
+      const detail = getDetail(item.orderId, item.detailId, item.detailNumber, `history:${key}:${index}`);
+      if (!detail) continue;
+      const quantity = nonNegativeInteger(item.quantity);
+      if (source.kind === 'bath') {
+        detail.bathTotal += quantity;
+        if (target === 'baths_laminated' || target === 'completed_baths') detail.rolled += quantity;
+      } else if (source.kind === 'packet') {
+        detail.packetTotal += quantity;
+        if (target === 'completed' || target === 'completed_laminated') detail.packetCut += quantity;
+      } else {
+        detail.bazisCutTotal += quantity;
+        if (target === 'completed' || target === 'completed_laminated') detail.bazisCutReady += quantity;
+      }
     }
   }
 
@@ -8835,21 +8911,16 @@ export function buildCncOrderReadiness(
           detail.packetCut + detail.bazisCutReady,
           sourceTotal,
         );
-        const bathTotal = detail.bathTotal;
-        accumulator.packetTotal += sourceTotal;
-        accumulator.packetCut += sourceCut;
-        accumulator.bathTotal += bathTotal;
-        accumulator.rolled += Math.min(detail.rolled, Math.max(sourceTotal, bathTotal));
+        accumulator.total += Math.max(sourceTotal, detail.bathTotal);
+        accumulator.cut += Math.max(0, sourceCut - detail.rolled);
+        accumulator.rolled += detail.rolled;
         return accumulator;
       },
-      { bathTotal: 0, packetTotal: 0, packetCut: 0, rolled: 0 },
+      { total: 0, cut: 0, rolled: 0 },
     );
-    const totalDetails = Math.max(order.bathTotal, order.packetTotal);
-    const rolledDetails = Math.min(order.rolled, totalDetails);
-    const cutDetails = Math.min(
-      Math.max(0, order.packetCut - rolledDetails),
-      Math.max(0, totalDetails - rolledDetails),
-    );
+    const totalDetails = order.total;
+    const rolledDetails = order.rolled;
+    const cutDetails = order.cut;
     result.set(orderId, {
       totalDetails,
       cutDetails,
@@ -9059,31 +9130,26 @@ function normalizeCncOrderReadiness(
   };
   // Match the complete order composition, not its aggregate quantity. A source
   // with a known but conflicting ID must never fall back to its detail number.
-  const requiredById = new Map<number, OrderStatusBoardCard['details'][number]>();
-  for (const detail of card.details ?? []) {
-    const id = positiveIntegerOrNull(detail.detailId);
-    if (id === null || nonNegativeInteger(detail.quantity) === 0) continue;
-    const previous = requiredById.get(id);
-    if (!previous || detail.quantity > previous.quantity) requiredById.set(id, detail);
-  }
-  const numberCounts = new Map<number, number>();
-  for (const detail of requiredById.values()) {
-    const number = positiveIntegerOrNull(detail.detailNumber);
-    if (number !== null) numberCounts.set(number, (numberCounts.get(number) ?? 0) + 1);
-  }
+  const { details, numberCounts } = indexCncOrderComposition(card);
   const creditedQuantities: CncPositionQuantities = { cut: 0, rolled: 0 };
+  const consumedKeys = new Set<string>();
+  let cutDetails = 0;
+  let rolledDetails = 0;
   let requiredTotal = 0;
-  for (const detail of requiredById.values()) {
+  for (const detail of details) {
     const required = nonNegativeInteger(detail.quantity);
     requiredTotal += required;
-    const byId = source.positionQuantities?.get(`id:${detail.detailId}`);
-    const number = positiveIntegerOrNull(detail.detailNumber);
-    const byNumber = number !== null && numberCounts.get(number) === 1
-      ? source.positionQuantities?.get(`number:${number}`)
-      : undefined;
     // ID-based and ID-less number-based rows are independent source portions.
-    const cut = nonNegativeInteger(byId?.cut ?? 0) + nonNegativeInteger(byNumber?.cut ?? 0);
-    const rolled = nonNegativeInteger(byId?.rolled ?? 0) + nonNegativeInteger(byNumber?.rolled ?? 0);
+    let cut = 0;
+    let rolled = 0;
+    for (const key of cncOrderDetailSourceKeys(detail, numberCounts)) {
+      consumedKeys.add(key);
+      const quantities = source.positionQuantities?.get(key);
+      cut += nonNegativeInteger(quantities?.cut ?? 0);
+      rolled += nonNegativeInteger(quantities?.rolled ?? 0);
+    }
+    cutDetails += Math.max(0, cut - rolled);
+    rolledDetails += rolled;
     const rolledCredit = Math.min(required, rolled);
     creditedQuantities.rolled += rolledCredit;
     creditedQuantities.cut += Math.min(required - rolledCredit, Math.max(0, cut - rolled));
@@ -9092,9 +9158,18 @@ function normalizeCncOrderReadiness(
   // A partsCount larger than the known composition leaves an uncovered remainder.
   const totalDetails = Math.max(fallbackTotal, requiredTotal)
     || nonNegativeInteger(source.totalDetails);
-  // Keep excess visible in numeric facts; only the progress bar is capped.
-  const rolledDetails = nonNegativeInteger(source.rolledDetails);
-  const cutDetails = nonNegativeInteger(source.cutDetails);
+  // Unmatched source positions remain visible facts but grant no readiness.
+  for (const [key, quantities] of source.positionQuantities ?? []) {
+    if (consumedKeys.has(key)) continue;
+    const cut = nonNegativeInteger(quantities.cut);
+    const rolled = nonNegativeInteger(quantities.rolled);
+    cutDetails += Math.max(0, cut - rolled);
+    rolledDetails += rolled;
+  }
+  if (!source.positionQuantities) {
+    cutDetails = nonNegativeInteger(source.cutDetails);
+    rolledDetails = nonNegativeInteger(source.rolledDetails);
+  }
   return {
     totalDetails,
     cutDetails,
@@ -9145,7 +9220,6 @@ function cncColumnBadgeColor(columnKey: CncTelegramTodayDisplayColumnKey): strin
   if (columnKey === 'completed' || columnKey === 'baths_ready') return '#389e0d';
   if (columnKey === 'baths_laminated') return '#13c2c2';
   if (columnKey === 'baths') return '#cf1322';
-  if (columnKey === 'orders') return '#d46b08';
   return '#1677ff';
 }
 

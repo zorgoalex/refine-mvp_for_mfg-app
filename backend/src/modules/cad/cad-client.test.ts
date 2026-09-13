@@ -2,6 +2,19 @@ import { describe, it, expect, vi } from 'vitest';
 import { CadClient } from './cad-client';
 
 describe('CAD private client', () => {
+  it('chunks large policy evaluation in order and rejects incomplete batches', async () => {
+    const sizes: number[] = [];
+    const transport = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body)); sizes.push(body.recipes.length);
+      return new Response(JSON.stringify({ items: body.recipes.map((recipe: unknown) => ({ recipe, manager_allowed: true, errors: [] })) }));
+    });
+    const recipes = Array.from({ length: 1001 }, (_, n) => ({ code: 'neo', version: String(n), parameters: {} }));
+    const client = new CadClient('http://cad-service:8000', 'x'.repeat(40), transport);
+    expect((await client.evaluate(recipes)).map(i => i.recipe.version)).toEqual(recipes.map(r => r.version));
+    expect(sizes).toEqual([500, 500, 1]);
+    transport.mockResolvedValue(new Response(JSON.stringify({ items: [] })));
+    await expect(client.evaluate(recipes)).rejects.toMatchObject({ code: 'CAD_EVALUATION_INCOMPLETE' });
+  });
   it('requires both production formats before accepting order work', async () => {
     const transport = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ durable_jobs: true, scoped_auth: true, formats: ['svg'] })));
     await expect(new CadClient('http://cad-service:8000', 'x'.repeat(40), transport).capabilities()).rejects.toMatchObject({ code: 'CAD_FORMATS_UNAVAILABLE' });

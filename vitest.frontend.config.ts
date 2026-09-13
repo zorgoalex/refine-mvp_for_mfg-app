@@ -7,6 +7,7 @@ export default defineConfig({
     include: [
       'src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}',
       'scripts/typecheck-ratchet.test.js',
+      'scripts/typecheck-baseline-policy.test.js',
     ],
     exclude: ['node_modules/**', 'dist/**', '.worktrees/**', 'tests/**', 'backend/**'],
   },

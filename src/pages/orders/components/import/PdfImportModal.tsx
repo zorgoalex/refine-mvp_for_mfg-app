@@ -272,7 +272,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
         basis_data: row.basisData || null,
         basis_designation: row.basisDesignation || null,
         detail_name: row.detailName || null,
-        doweling: row.doweling === true,
+        doweling: row.doweling === true || /присадка/i.test(row.note ?? ''),
       };
 
       addPdfImportedDetail(detail);
@@ -382,8 +382,8 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
         width={1200}
         style={{ top: 20 }}
         bodyStyle={{
-          minHeight: 500,
-          maxHeight: 'calc(90vh - 120px)',
+          minHeight: 'min(500px, calc(100dvh - 200px))',
+          maxHeight: 'calc(100dvh - 200px)',
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
@@ -405,7 +405,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
                   onClick={handleImport}
                   disabled={importValidation.stats.validRows === 0}
                 >
-                  Импортировать ({importValidation.stats.validRows} шт)
+                  Импортировать ({importValidation.stats.validRows} строк)
                 </Button>
               ) : (
                 <Button
@@ -429,11 +429,14 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
         <Steps
           current={currentStepIndex}
           items={visibleSteps.map(s => ({ key: s.key, title: s.title, icon: s.icon }))}
-          style={{ marginBottom: 24 }}
+          style={{ marginBottom: 24, flexShrink: 0 }}
           size="small"
         />
 
-        <div style={{ flex: 1, overflow: 'hidden' }}>
+        <div
+          data-testid="pdf-import-step-scroll"
+          style={{ flex: 1, minHeight: 0, overflow: 'auto', overscrollBehavior: 'contain' }}
+        >
           {pdfParser.patternSaveWarning && (
             <Alert
               type="warning"

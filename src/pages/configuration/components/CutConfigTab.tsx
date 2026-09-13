@@ -1,6 +1,7 @@
 import { Table, Tooltip } from '../../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Col, Collapse, Form, Input, InputNumber, Modal, Popconfirm, Radio, Row, Segmented, Select, Space, Spin, Switch, Tabs, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Collapse, Form, Input, InputNumber, Modal, Popconfirm, Radio, Row, Select, Space, Spin, Switch, Tabs, Tag, Typography, message } from 'antd';
+import { Segmented } from "../../../ui/Segmented";
 import type { ColumnsType } from 'antd/es/table';
 import {
   AlignCenterOutlined,
@@ -1836,7 +1837,7 @@ const PdfTemplateCanvas: React.FC<{
     onPatchMany(Array.from(gesture.starts, ([id]) => {
       const node = nodeRefs.current.get(id);
       return node ? { id, patch: { x: roundPdfMm(node.x()), y: roundPdfMm(node.y()) } } : null;
-    }).filter((item): item is { id: string; patch: Partial<PdfTemplateElement> } => Boolean(item)));
+    }).filter((item): item is NonNullable<typeof item> => Boolean(item)));
     dragGestureRef.current = null;
   };
   const transformSelectionEnd = (event: Konva.KonvaEventObject<Event>) => {

@@ -30,7 +30,7 @@ export interface CncTelegramTodayQuery {
   date?: string;
   dateFrom?: string;
   dateTo?: string;
-  operationalWindow?: 'month';
+  operationalWindow?: 'month' | 'two_months';
   focusBathCardId?: string;
 }
 
@@ -53,6 +53,10 @@ function requestCncToday(
   options?: RequestOptions,
 ): Promise<CncTelegramTodayResponse> {
   return httpClient.get<CncTelegramTodayResponse>(cncTodayQueryKey(query), options).then((response) => {
+    if (query.operationalWindow === 'two_months' && (
+      !response.operationalWindow || !Array.isArray(response.historicalReadinessSources)
+      || !response.historicalReadinessSources.every(isHistoricalReadinessSource)
+    )) throw new Error('МДФ-доска: отсутствуют данные двухмесячного расчёта');
     // An old backend returns the full legacy card set, which remains safe during
     // rollback. A trimmed response without its calculation facts is NOT safe.
     if (response.operationalWindow && !Array.isArray(response.historicalBathReadiness)) {
@@ -60,6 +64,24 @@ function requestCncToday(
     }
     return response;
   });
+}
+
+function isHistoricalReadinessSource(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const source = value as Record<string, unknown>;
+  const columns = source.kind === 'bath' ? ['baths', 'baths_ready', 'baths_laminated', 'completed_baths']
+    : source.kind === 'packet' || source.kind === 'bazisCutSet' ? ['parsed', 'completed', 'completed_laminated'] : [];
+  const positive = (id: unknown) => typeof id === 'number' && Number.isSafeInteger(id) && id > 0;
+  const optionalId = (id: unknown) => id === null || positive(id);
+  return typeof source.cardId === 'string' && source.cardId.length > 0
+    && typeof source.column === 'string' && columns.includes(source.column)
+    && Array.isArray(source.items) && source.items.every(item => item && typeof item === 'object'
+      && positive(item.orderId) && optionalId(item.detailId) && optionalId(item.detailNumber)
+      && Number.isSafeInteger(item.quantity) && item.quantity >= 0)
+    && Array.isArray(source.linkedOrders) && source.linkedOrders.every(owner => owner && typeof owner === 'object'
+      && optionalId(owner.orderId) && optionalId(owner.orderStatusId)
+      && (owner.orderStatusName === null || typeof owner.orderStatusName === 'string')
+      && typeof owner.orderStatusIssuedOrLater === 'boolean');
 }
 
 export const cncTelegramApi = {

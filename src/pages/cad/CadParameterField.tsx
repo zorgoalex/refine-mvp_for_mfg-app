@@ -32,8 +32,8 @@ export function CadParameterField({ name, schema, value, disabled, bounded, tool
   return <div className="cad-parameter" onFocus={() => onFocus(name)}>
     <label htmlFor={`cad-param-${name}`}>{label}</label>
     {schema.type === 'boolean' ? <Checkbox id={`cad-param-${name}`} disabled={disabled} checked={value === true} onChange={e => onChange(e.target.checked)}>Включено</Checkbox>
-      : isTool ? <Select id={`cad-param-${name}`} aria-label={label} disabled={disabled} value={typeof value === 'string' ? value : undefined} options={tools.map(t => ({ value: t.id, label: t.display_name }))} onChange={onChange} />
-        : options ? <Select id={`cad-param-${name}`} aria-label={label} disabled={disabled} value={JSON.stringify(value)} options={options} onChange={v => onChange(JSON.parse(v))} />
+      : isTool ? <Select popupClassName="cad-compact" id={`cad-param-${name}`} aria-label={label} disabled={disabled} value={typeof value === 'string' ? value : undefined} options={tools.map(t => ({ value: t.id, label: t.display_name }))} onChange={onChange} />
+        : options ? <Select popupClassName="cad-compact" id={`cad-param-${name}`} aria-label={label} disabled={disabled} value={JSON.stringify(value)} options={options} onChange={v => onChange(JSON.parse(v))} />
           : <Input id={`cad-param-${name}`} aria-label={label} aria-invalid={Boolean(error)} aria-describedby={error ? `cad-error-${name}` : undefined} inputMode={schema.type === 'number' ? 'decimal' : undefined} disabled={disabled} value={text} status={error ? 'error' : undefined} onChange={e => accept(e.target.value)} />}
     {error && <small role="alert" id={`cad-error-${name}`}>{error}</small>}
     {bounded && schema.min != null && <small className="cad-hint">От {schema.min} до {schema.max} {schema.unit}</small>}

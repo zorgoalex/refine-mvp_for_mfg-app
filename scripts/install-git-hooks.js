@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const { spawnSync } = require('node:child_process');
-const { existsSync } = require('node:fs');
+const { accessSync, constants, existsSync, statSync } = require('node:fs');
 
 function isEnabled(value) {
   return ['1', 'true', 'yes'].includes(String(value ?? '').toLowerCase());
@@ -11,7 +11,7 @@ function isCiEnvironment(env) {
   return isEnabled(env.CI) || isEnabled(env.GITHUB_ACTIONS) || isEnabled(env.VERCEL);
 }
 
-function installGitHooks({ env = process.env, run = spawnSync, exists = existsSync } = {}) {
+function installGitHooks({ env = process.env, run = spawnSync, exists = existsSync, access = accessSync, stat = statSync } = {}) {
   if (isCiEnvironment(env)) {
     return { installed: false, reason: 'ci' };
   }
@@ -25,9 +25,17 @@ function installGitHooks({ env = process.env, run = spawnSync, exists = existsSy
   }
 
   const requiredHooks = ['.githooks/pre-commit', '.githooks/pre-push'];
-  if (requiredHooks.some((hook) => !exists(hook))) {
-    return { installed: false, reason: 'hooks-not-found' };
+  const runner = '.githooks/run-heavy.sh';
+  for (const file of [...requiredHooks, runner]) {
+    if (!exists(file)) throw new Error(`Required Git hook file is missing: ${file}`);
+    if (!stat(file).isFile()) throw new Error(`Git hook path must be a regular file: ${file}`);
   }
+  for (const hook of requiredHooks) {
+    try { access(hook, constants.R_OK | constants.X_OK); }
+    catch { throw new Error(`Git hook must be readable and executable: ${hook}`); }
+  }
+  try { access(runner, constants.R_OK); }
+  catch { throw new Error(`Git hook runner must be readable: ${runner}`); }
 
   const configured = run('git', ['config', 'core.hooksPath', '.githooks'], {
     encoding: 'utf8',
@@ -41,9 +49,12 @@ function installGitHooks({ env = process.env, run = spawnSync, exists = existsSy
 }
 
 if (require.main === module) {
-  const result = installGitHooks();
-  if (result.installed) {
-    console.log('Git hooks enabled from .githooks');
+  try {
+    const result = installGitHooks();
+    if (result.installed) console.log('Git hooks enabled from .githooks (resource guard required by default)');
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
   }
 }
 

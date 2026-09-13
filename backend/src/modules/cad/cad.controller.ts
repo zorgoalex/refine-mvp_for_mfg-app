@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { ApiError } from '../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../permissions/current-user';
 import { cadGroupSchema, cadRecipeSchema } from '../../shared/cad-api';
+import { CAD_MAX_GROUPS } from '../../shared/cad-workspace';
 import { CadService } from './cad.service';
 
 function parse<T>(schema: z.ZodType<T>, input: unknown): T {
@@ -15,7 +16,7 @@ function parse<T>(schema: z.ZodType<T>, input: unknown): T {
 const numberId = (value: string) => parse(z.coerce.number().int().positive(), value);
 const uuid = (value: string) => parse(z.string().uuid(), value);
 const versionBody = z.object({ version: z.number().int().positive() }).strict();
-const saveBody = versionBody.extend({ groups: z.array(cadGroupSchema).max(500), sourceIds: z.array(z.string().uuid()).min(1).max(500) }).strict();
+const saveBody = versionBody.extend({ groups: z.array(cadGroupSchema).max(CAD_MAX_GROUPS), sourceIds: z.array(z.string().uuid()).min(1).max(500) }).strict();
 const cloneBody = z.object({ name: z.string().trim().min(1).max(100), refresh: z.boolean().default(false) }).strict();
 const packageBody = versionBody.extend({ reviewId: z.string().uuid(), acknowledgeStale: z.boolean().default(false) }).strict();
 
@@ -33,7 +34,8 @@ export class CadController {
     if (!this.cad.enabled) return { enabled: false };
     this.cad.require(user, 'cad.view');
     const remote = await this.cad.client.capabilities();
-    return { enabled: true, ...remote, editorEnabled: this.cad.editorEnabled && remote.editor_version === 2 };
+    return { enabled: true, ...remote, editorEnabled: this.cad.editorEnabled && remote.editor_version === 2,
+      independentInstances: this.cad.editorEnabled && remote.max_parts === CAD_MAX_GROUPS && remote.bounded_runs === true && remote.file_pages === true && remote.readiness_pages === true };
   }
   @ApiOperation({ summary: 'List CAD recipes' })
   @Get('recipes')
@@ -108,6 +110,16 @@ export class CadController {
   package(@Req() req: RequestWithCurrentUser, @Param('id') id: string, @Headers('idempotency-key') key: string, @Body() body: unknown) {
     const v = parse(packageBody, body);
     return this.cad.requestPackage(this.user(req), uuid(id), v.version, key, v.reviewId, v.acknowledgeStale);
+  }
+  @ApiOperation({ summary: 'List one page of CAD run artifact metadata' })
+  @Get('runs/:runId/files')
+  files(@Req() req: RequestWithCurrentUser, @Param('runId') runId: string, @Query('offset') offset: string) {
+    return this.cad.files(this.user(req), uuid(runId), parse(z.coerce.number().int().min(0).max(20000), offset ?? 0));
+  }
+  @ApiOperation({ summary: 'List one page of unresolved CAD run checks' })
+  @Get('runs/:runId/readiness')
+  readiness(@Req() req: RequestWithCurrentUser, @Param('runId') runId: string, @Query('offset') offset: string) {
+    return this.cad.readiness(this.user(req), uuid(runId), parse(z.coerce.number().int().min(0).max(5000), offset ?? 0));
   }
   @ApiOperation({ summary: 'Download an artifact from an approved CAD run' })
   @Get('runs/:runId/artifacts/:id')

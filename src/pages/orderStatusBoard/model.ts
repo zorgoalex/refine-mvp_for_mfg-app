@@ -1,5 +1,6 @@
 import type {
   CncHistoricalBathReadiness,
+  CncHistoricalReadinessSource,
   CncTelegramBathCard,
   CncTelegramBazisCutSetCard,
   CncTelegramPacket,
@@ -14,6 +15,7 @@ import type {
   OrderStatusBoardSortOrder,
   OrderStatusBoardType,
 } from '../../api/types/orderStatusBoardApi.types';
+import { cncMaterialNameIsMdf, cncPacketCountsForMdfReadiness } from './cncDetailedMachine';
 
 const COMPLETED_ORDER_STATUS_NAMES = new Set<string>(['завершен', 'завершён']);
 export interface MdfBoardHiddenStatusesSetting {
@@ -60,7 +62,7 @@ export type OrderStatusBoardVisualFlow = OrderStatusBoardType | 'cnc_today';
 export type CncOrderSearchPeriod = '1d' | '1w' | '2w' | '1m';
 export type CncCardDisplayMode = 'standard' | 'compact' | 'minimal' | 'screenshot';
 export const DEFAULT_CNC_ORDER_SEARCH_PERIOD: CncOrderSearchPeriod = '1w';
-const CNC_ORDER_SEARCH_PERIODS = new Set<CncOrderSearchPeriod>(['1d', '1w', '2w', '1m']);
+const CNC_ORDER_SEARCH_PERIODS: ReadonlySet<string> = new Set<CncOrderSearchPeriod>(['1d', '1w', '2w', '1m']);
 export const DEFAULT_ORDER_STATUS_BOARD_SORT = {
   sortBy: 'priority',
   sortOrder: 'asc',
@@ -451,21 +453,64 @@ function collectCncMachineOrderKeys(columns: CncTelegramTodayColumn[]): Set<stri
   return machineOrderKeys;
 }
 
+/** Shared identity rules for progress, raw counters and allocation diagnostics. */
+export function indexCncOrderComposition(card: OrderStatusBoardCard) {
+  const byId = new Map<number, OrderStatusBoardCard['details'][number]>();
+  const unidentified: OrderStatusBoardCard['details'] = [];
+  for (const detail of card.details ?? []) {
+    const id = positiveIntegerOrNull(detail.detailId);
+    if (id === null) {
+      unidentified.push(detail);
+      continue;
+    }
+    const previous = byId.get(id);
+    if (!previous || nonNegativeInteger(detail.quantity) > nonNegativeInteger(previous.quantity)) {
+      byId.set(id, detail);
+    }
+  }
+  const details = [...byId.values(), ...unidentified];
+  const numberCounts = new Map<number, number>();
+  for (const detail of details) {
+    const number = positiveIntegerOrNull(detail.detailNumber);
+    if (number !== null) numberCounts.set(number, (numberCounts.get(number) ?? 0) + 1);
+  }
+  return { details, numberCounts };
+}
+
+export function cncOrderDetailSourceKeys(
+  detail: OrderStatusBoardCard['details'][number],
+  numberCounts: ReadonlyMap<number, number>,
+): string[] {
+  const id = positiveIntegerOrNull(detail.detailId);
+  if (id === null) return [];
+  const keys = [`id:${id}`];
+  const number = positiveIntegerOrNull(detail.detailNumber);
+  if (number !== null && numberCounts.get(number) === 1) keys.push(`number:${number}`);
+  return keys;
+}
+
 export function buildCncOrderMissingDetails(
   cards: readonly OrderStatusBoardCard[],
   columns: readonly CncTelegramTodayColumn[],
+  historicalSources?: readonly CncHistoricalReadinessSource[],
 ): Map<number, CncOrderMissingDetail[]> {
   const orderIdByOrderKey = new Map<string, number>();
+  const ambiguousOrderKeys = new Set<string>();
   for (const card of cards) {
     const orderKey = normalizeCncOrderKey(card.orderName);
-    if (orderKey && !orderIdByOrderKey.has(orderKey)) {
+    if (!orderKey || ambiguousOrderKeys.has(orderKey)) continue;
+    if (orderIdByOrderKey.has(orderKey) && orderIdByOrderKey.get(orderKey) !== card.orderId) {
+      orderIdByOrderKey.delete(orderKey);
+      ambiguousOrderKeys.add(orderKey);
+    } else {
       orderIdByOrderKey.set(orderKey, card.orderId);
     }
   }
 
-  const quantityByDetailId = new Map<number, Map<number, number>>();
-  const quantityByDetailNumber = new Map<number, Map<number, number>>();
+  const cncQuantities = new Map<number, Map<string, number>>();
+  const basisQuantities = new Map<number, Map<string, number>>();
   const addPresentQuantity = (
+    quantities: Map<number, Map<string, number>>,
     orderId: number | null | undefined,
     orderName: string | null | undefined,
     detailId: number | null | undefined,
@@ -478,19 +523,21 @@ export function buildCncOrderMissingDetails(
     if (safeQuantity <= 0) return;
     const safeDetailId = positiveIntegerOrNull(detailId);
     if (safeDetailId !== null) {
-      addNestedQuantity(quantityByDetailId, resolvedOrderId, safeDetailId, safeQuantity);
+      addNestedQuantity(quantities, resolvedOrderId, `id:${safeDetailId}`, safeQuantity);
       return;
     }
     const safeDetailNumber = positiveIntegerOrNull(detailNumber);
     if (safeDetailNumber !== null) {
-      addNestedQuantity(quantityByDetailNumber, resolvedOrderId, safeDetailNumber, safeQuantity);
+      addNestedQuantity(quantities, resolvedOrderId, `number:${safeDetailNumber}`, safeQuantity);
     }
   };
 
   for (const column of columns) {
     for (const packet of column.packets ?? []) {
+      if (packet.rework || !cncPacketCountsForMdfReadiness(packet)) continue;
       for (const item of packet.items) {
         addPresentQuantity(
+          cncQuantities,
           item.matchOrderId ?? item.orderId,
           item.orderName,
           item.matchDetailId,
@@ -501,7 +548,9 @@ export function buildCncOrderMissingDetails(
     }
     for (const bazisCutSet of column.bazisCutSets ?? []) {
       for (const item of bazisCutSet.items) {
+        if (!cncMaterialNameIsMdf(item.materialName)) continue;
         addPresentQuantity(
+          basisQuantities,
           item.orderId,
           item.orderName,
           item.detailId,
@@ -512,21 +561,38 @@ export function buildCncOrderMissingDetails(
     }
   }
 
+  const seen = new Set(columns.flatMap(column => [
+    ...column.packets.map(card => `packet:${card.packetId}`),
+    ...(column.bazisCutSets ?? []).map(card => `bazisCutSet:${card.bazisCutSetId}`),
+  ]));
+  for (const source of historicalSources ?? []) {
+    const key = `${source.kind}:${source.cardId}`;
+    if (source.kind === 'bath' || seen.has(key)) continue;
+    seen.add(key);
+    for (const item of source.items) addPresentQuantity(
+      source.kind === 'packet' ? cncQuantities : basisQuantities,
+      item.orderId, null, item.detailId, item.detailNumber, item.quantity,
+    );
+  }
+
   const result = new Map<number, CncOrderMissingDetail[]>();
   for (const card of cards) {
-    const detailIdQuantities = quantityByDetailId.get(card.orderId);
-    const detailNumberQuantities = quantityByDetailNumber.get(card.orderId);
-    const missing = (card.details ?? []).flatMap((detail): CncOrderMissingDetail[] => {
+    const cnc = cncQuantities.get(card.orderId);
+    const basis = basisQuantities.get(card.orderId);
+    const { details, numberCounts } = indexCncOrderComposition(card);
+    const missing = details.flatMap((detail): CncOrderMissingDetail[] => {
       const requiredQuantity = nonNegativeInteger(detail.quantity);
       if (requiredQuantity <= 0) return [];
-      const byDetailId = detailIdQuantities?.get(detail.detailId) ?? 0;
-      const byDetailNumber = detail.detailNumber === null
-        ? 0
-        : detailNumberQuantities?.get(detail.detailNumber) ?? 0;
-      const byBazisCut = nonNegativeInteger(detail.bazisCutQuantity);
+      const keys = cncOrderDetailSourceKeys(detail, numberCounts);
+      // The all-period BASIS aggregate contains only ID-linked rows. Its visible
+      // subset must not be added twice; number-only portions are independent.
+      const allocated = keys.reduce((sum, key) => sum + (cnc?.get(key) ?? 0)
+        + (historicalSources === undefined && key.startsWith('id:')
+          ? Math.max(basis?.get(key) ?? 0, nonNegativeInteger(detail.bazisCutQuantity))
+          : basis?.get(key) ?? 0), 0);
       const presentQuantity = Math.min(
         requiredQuantity,
-        Math.max(byDetailId, byDetailNumber, byBazisCut),
+        allocated,
       );
       const missingQuantity = requiredQuantity - presentQuantity;
       if (missingQuantity <= 0) return [];
@@ -545,7 +611,7 @@ export function buildCncOrderMissingDetails(
 }
 
 export function isCncOrderHiddenFromMdfBoard(
-  card: OrderStatusBoardCard,
+  card: Pick<OrderStatusBoardCard, 'orderStatusId' | 'orderStatusName' | 'orderStatusIssuedOrLater'>,
   _hiddenProductionStatusIds?: ReadonlySet<number>,
   hiddenOrderStatusIds?: ReadonlySet<number>,
 ): boolean {
@@ -768,6 +834,34 @@ export function applyMdfBoardHiddenCardRulesToColumns(
   });
 }
 
+export function applyMdfHiddenRulesToReadinessSources(
+  sources: readonly CncHistoricalReadinessSource[],
+  cards: readonly OrderStatusBoardCard[],
+  setting: MdfBoardHiddenStatusesSetting | null | undefined,
+): CncHistoricalReadinessSource[] {
+  const current = new Map(cards.map(card => [card.orderId, card]));
+  const hasRules = Array.isArray(setting?.cardRules);
+  const rules = new Map(hasRules
+    ? normalizeMdfBoardHiddenCardRules(setting).map(rule => [rule.cardKind, new Set(rule.orderStatusIds)] as const)
+    : MDF_BOARD_HIDDEN_CARD_KINDS.map(kind => [kind, new Set([1])] as const));
+  const legacyIds = resolveMdfBoardHiddenOrderStatusIds(setting);
+  return sources.map(source => {
+    if (source.kind === 'packet') return source;
+    const statuses = new Map<number, number>();
+    for (const linked of source.linkedOrders) {
+      if (linked.orderId === null) continue;
+      const owner = current.get(linked.orderId) ?? linked;
+      const statusId = hasRules ? owner.orderStatusId
+        : isCncOrderHiddenFromMdfBoard(owner, undefined, legacyIds) ? 1 : null;
+      if (isPositiveInteger(statusId)) statuses.set(linked.orderId, statusId);
+    }
+    const ids = source.linkedOrders.map(owner => owner.orderId);
+    const matches = ids.every(isPositiveInteger)
+      && mdfBoardHiddenCardRuleMatches(source.kind, ids, rules, statuses);
+    return matches ? { ...source, column: source.kind === 'bath' ? 'completed_baths' : 'completed_laminated' } : source;
+  });
+}
+
 function mdfBoardHiddenCardRuleMatches(
   cardKind: MdfBoardHiddenCardKind,
   orderIds: readonly number[],
@@ -788,6 +882,7 @@ function collectBazisCutSetOrderIds(bazisCutSet: CncTelegramBazisCutSetCard): nu
 }
 
 function collectBathOrderIds(bath: CncTelegramBathCard): number[] {
+  if (bath.compositionComplete === false) return [];
   const orderIds = bath.items.map((item) => item.orderId);
   return orderIds.every(isPositiveInteger) ? normalizePositiveIntegerArray(orderIds) : [];
 }
@@ -1045,9 +1140,9 @@ function resolveCncOrderId(
 }
 
 function addNestedQuantity(
-  map: Map<number, Map<number, number>>,
+  map: Map<number, Map<string, number>>,
   orderId: number,
-  itemKey: number,
+  itemKey: string,
   quantity: number,
 ): void {
   let orderMap = map.get(orderId);

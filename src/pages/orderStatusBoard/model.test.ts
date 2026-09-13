@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { orderStatusBoardApi } from '../../api/orderStatusBoardApi';
 import type {
   CncTelegramBazisCutSetCard,
+  CncHistoricalReadinessSource,
   CncTelegramOriginalBoardResponse,
   CncTelegramPacket,
   CncTelegramTodayColumn,
@@ -34,6 +35,7 @@ import {
 } from './OrderStatusBoardPage';
 import {
   applyMdfBoardHiddenCardRulesToColumns,
+  applyMdfHiddenRulesToReadinessSources,
   buildCncOrderSearchDateRange,
   buildCncOrderFilterOptions,
   buildCncOrderMissingDetails,
@@ -60,6 +62,231 @@ import {
   toOrderStatusBoardQuery,
 } from './model';
 import { filterVisibleStatusBoardColumns } from './statusBoardColumnVisibility';
+
+describe('MDF order quantity accounting regressions', () => {
+  const historical = (kind: CncHistoricalReadinessSource['kind'], id: string, quantity: number,
+    column: CncHistoricalReadinessSource['column'] = 'completed'): CncHistoricalReadinessSource => ({
+    kind, cardId: id, column,
+    linkedOrders: [{ orderId: 2705, orderStatusId: 7, orderStatusName: 'В производстве', orderStatusIssuedOrLater: false }],
+    items: [{ orderId: 2705, detailId: 101, detailNumber: 1, quantity }],
+  });
+  const demand = (quantities = [1, 1]) => card(2705, {
+    orderName: 'E2E-quantity', orderStatusName: 'В производстве',
+    partsCount: quantities.reduce((sum, q) => sum + q, 0),
+    details: quantities.map((q, i) => orderDetail(101 + i, q, i + 1)),
+  });
+  const cut = (id: string, detailId: number | null, detailNumber: number, quantity: number) => {
+    const packet = cncPacket(id, ['E2E-quantity'], [2705], [2705], [detailId]);
+    packet.items[0] = { ...packet.items[0], matchDetailId: detailId, detailNumber, quantity };
+    return packet;
+  };
+  const rolled = (detailId: number, detailNumber: number, quantity: number) => {
+    const bath = cncBath(`E2E-bath-${detailId}`, ['E2E-quantity'], [2705]);
+    bath.items[0] = { ...bath.items[0], detailId, detailNumber, quantity };
+    return bath;
+  };
+  const columns = (packets: CncTelegramPacket[], baths: ReturnType<typeof cncBath>[] = []): CncTelegramTodayColumn[] => [
+    { key: 'completed', title: 'Cut', total: packets.length, packets, baths: [] },
+    { key: 'baths_laminated', title: 'Rolled', total: baths.length, packets: [], baths },
+  ];
+  const calculate = (order: OrderStatusBoardCard, sources: CncTelegramTodayColumn[]) =>
+    splitCncOrderCardsByManualColumn([order], buildCncOrderReadiness(sources, {}), {}).orders[0].readiness;
+
+  it('sums current and compact historical CNC/BASIS before position-local rolling', () => {
+    const sources = columns([cut('current', 101, 1, 2)]);
+    const facts = [historical('packet', 'old', 3), historical('bazisCutSet', '9', 4),
+      historical('bath', 'cut-result:9', 5, 'baths_laminated')];
+    const readiness = buildCncOrderReadiness(sources, {}, [], facts);
+    expect(splitCncOrderCardsByManualColumn([demand([7, 2])], readiness, {}).orders[0].readiness)
+      .toMatchObject({ cutDetails: 4, rolledDetails: 5, remainingDetails: 2,
+        creditedQuantities: { cut: 2, rolled: 5 } });
+    expect(buildCncOrderMissingDetails([demand([7, 2])], sources, facts).get(2705))
+      .toEqual([{ detailId: 102, detailNumber: 2, requiredQuantity: 2, presentQuantity: 0, missingQuantity: 2 }]);
+  });
+
+  it('uses visible sources once, and ignores all-period BASIS aggregate in bounded mode', () => {
+    const sources = columns([cut('same', 101, 1, 2)]);
+    const facts = [historical('packet', 'same', 90), historical('bazisCutSet', '9', 1)];
+    expect(buildCncOrderReadiness(sources, {}, [], [...facts, facts[1]]).get(2705)?.cutDetails).toBe(3);
+    const order = demand([10]);
+    order.details[0].bazisCutQuantity = 100;
+    expect(buildCncOrderMissingDetails([order], sources, facts).get(2705)?.[0].missingQuantity).toBe(7);
+    expect(buildCncOrderMissingDetails([order], sources, []).get(2705)?.[0].missingQuantity).toBe(8);
+    expect(buildCncOrderMissingDetails([order], sources).get(2705)).toBeUndefined();
+  });
+
+  it('applies current manual moves to compact history but preserves terminal precedence', () => {
+    const source = historical('packet', 'old', 3, 'parsed');
+    expect(buildCncOrderReadiness([], { 'packet:old': 'completed' }, [], [source]).get(2705)?.cutDetails).toBe(3);
+    expect(buildCncOrderReadiness([], { 'packet:old': 'parsed' }, [], [{ ...source, column: 'completed' }]).get(2705)?.cutDetails).toBe(0);
+    expect(buildCncOrderReadiness([], { 'packet:old': 'parsed' }, [], [{ ...source, column: 'completed_laminated' }]).get(2705)?.cutDetails).toBe(3);
+  });
+
+  it('checks every historical source owner before hidden-rule completion, not only its selected quantities', () => {
+    const source = historical('bath', 'cut-result:9', 3, 'baths');
+    const setting = { cardRules: [{ cardKind: 'bath' as const, orderStatusIds: [7] }] };
+    expect(applyMdfHiddenRulesToReadinessSources([source], [], setting)[0].column).toBe('completed_baths');
+    const foreign = { orderId: 999, orderStatusId: 8, orderStatusName: 'Оформлен', orderStatusIssuedOrLater: false };
+    expect(applyMdfHiddenRulesToReadinessSources([{ ...source, linkedOrders: [...source.linkedOrders, foreign] }], [], setting)[0].column).toBe('baths');
+    expect(applyMdfHiddenRulesToReadinessSources([{ ...source, linkedOrders: [{ ...foreign, orderId: null }] }], [], setting)[0].column).toBe('baths');
+    expect(applyMdfHiddenRulesToReadinessSources([source], [card(2705, { orderStatusId: 8 })], setting)[0].column).toBe('baths');
+  });
+
+  it('keeps raw cut A when another position B is already rolled', () => {
+    const sources = columns([cut('E2E-A', 101, 1, 1)], [rolled(102, 2, 1)]);
+    expect(calculate(demand(), sources)).toMatchObject({
+      totalDetails: 2, cutDetails: 1, rolledDetails: 1, remainingDetails: 0,
+      creditedQuantities: { cut: 1, rolled: 1 },
+    });
+  });
+
+  it('sums the allocation union per position, not max of unrelated order totals', () => {
+    const sources = columns([cut('E2E-A', 101, 1, 5)], [rolled(102, 2, 7)]);
+    expect(buildCncOrderReadiness(sources, {}).get(2705)).toMatchObject({
+      totalDetails: 12, cutDetails: 5, rolledDetails: 7, remainingDetails: 0,
+    });
+  });
+
+  it.each([false, true])('merges ID and safe number before subtracting rolled quantity (reverse=%s)', (reverse) => {
+    const sources = columns([cut('E2E-ID', 101, 1, 4), cut('E2E-number', null, 1, 6)], [rolled(101, 1, 5)]);
+    if (reverse) sources.reverse();
+    expect(calculate(demand([10]), sources)).toMatchObject({ cutDetails: 5, rolledDetails: 5, remainingDetails: 0 });
+    expect(buildCncOrderMissingDetails([demand([10])], sources).get(2705)).toBeUndefined();
+  });
+
+  it('does not subtract known-position rolling from a foreign ID or ambiguous number', () => {
+    const order = demand([3, 3]);
+    order.details[1].detailNumber = 1;
+    const sources = columns([cut('E2E-foreign', 999, 1, 2), cut('E2E-ambiguous', null, 1, 2)], [rolled(101, 1, 3)]);
+    expect(calculate(order, sources)).toMatchObject({
+      cutDetails: 4, rolledDetails: 3, remainingDetails: 3, creditedQuantities: { cut: 0, rolled: 3 },
+    });
+    expect(buildCncOrderMissingDetails([order], sources).get(2705)?.map(d => d.missingQuantity)).toEqual([3, 3]);
+  });
+
+  it.each([0, 2, 6])('adds CNC to all-period BASIS without counting visible BASIS twice (%s visible)', (visible) => {
+    const order = demand([10]);
+    order.details[0].bazisCutQuantity = 6;
+    const sources = columns([cut('E2E-CNC', 101, 1, 4)]);
+    const set = cncBazisCutSet(9001, [{ orderName: 'E2E-quantity', orderId: 2705, detailId: 101 }]);
+    set.items[0] = { ...set.items[0], detailNumber: 1, quantity: visible };
+    sources[0].bazisCutSets = [set];
+    expect(buildCncOrderMissingDetails([order], sources).get(2705)).toBeUndefined();
+    // Allocation aggregate is not proof of cutting. Only visible completed parts count here.
+    expect(calculate(order, sources).remainingDetails).toBe(6 - visible);
+  });
+
+  it('does not use one ambiguous order name for either order', () => {
+    const first = demand([2]);
+    const second = { ...first, orderId: 2706, details: [orderDetail(201, 2, 1)] };
+    const packet = cut('E2E-name-only', null, 1, 2);
+    packet.items[0] = { ...packet.items[0], matchOrderId: null, orderId: null };
+    const missing = buildCncOrderMissingDetails([first, second], columns([packet]));
+    expect(missing.get(2705)?.[0].missingQuantity).toBe(2);
+    expect(missing.get(2706)?.[0].missingQuantity).toBe(2);
+  });
+
+  it('adds ID-less BASIS portions outside the ID-based aggregate', () => {
+    const order = demand([9]);
+    order.details[0].bazisCutQuantity = 6; // SQL aggregate only includes source_order_detail_id=101.
+    const set = cncBazisCutSet(9001, [{ orderName: 'E2E-quantity', orderId: 2705, detailId: null }]);
+    set.items[0] = { ...set.items[0], detailNumber: 1, quantity: 3 };
+    const sources = columns([]);
+    sources[0].bazisCutSets = [set];
+    expect(buildCncOrderMissingDetails([order], sources).get(2705)).toBeUndefined();
+    expect(calculate(order, sources).remainingDetails).toBe(6);
+  });
+
+  it('uses each order position once in missing diagnostics', () => {
+    const order = demand([3]);
+    order.details.push({ ...order.details[0] });
+    expect(buildCncOrderMissingDetails([order], []).get(2705)).toHaveLength(1);
+  });
+
+  it('does not count non-MDF or rework allocation as ordinary MDF coverage', () => {
+    const rework = cut('E2E-rework', 101, 1, 3);
+    rework.rework = true;
+    const plywood = cut('E2E-plywood', 101, 1, 3);
+    plywood.programName = 'E2E_fanera18.tap';
+    const sources = columns([rework, plywood]);
+    expect(calculate(demand([3]), sources).remainingDetails).toBe(3);
+    expect(buildCncOrderMissingDetails([demand([3])], sources).get(2705)?.[0].missingQuantity).toBe(3);
+  });
+
+  it('does not double count a bath in visible cards and compact historical facts', () => {
+    const bath = rolled(101, 1, 3);
+    const sources = columns([], [bath]);
+    const history = [{ bathCardId: bath.bathCardId, forced: false, items: bath.items }];
+    const readiness = buildCncOrderReadiness(sources, {}, history);
+    expect(splitCncOrderCardsByManualColumn([demand([3])], readiness, {}).orders[0].readiness)
+      .toMatchObject({ cutDetails: 0, rolledDetails: 3, remainingDetails: 0 });
+  });
+
+  it('keeps unidentifiable required quantities uncovered even when the header count is stale', () => {
+    const order = demand([3, 2]);
+    order.partsCount = 3;
+    order.details[1].detailId = 0;
+    expect(calculate(order, columns([cut('E2E-A', 101, 1, 3)])))
+      .toMatchObject({ totalDetails: 5, cutDetails: 3, remainingDetails: 2 });
+  });
+
+  it('matches an independent per-position oracle for 625 cut/rolled combinations', () => {
+    for (let ca = 0; ca <= 4; ca++) for (let la = 0; la <= 4; la++) {
+      for (let cb = 0; cb <= 4; cb++) for (let lb = 0; lb <= 4; lb++) {
+        const values = [[3, ca, la], [2, cb, lb]];
+        const expected = { cutDetails: 0, rolledDetails: 0, remainingDetails: 0 };
+        for (const [required, cutCount, rollCount] of values) {
+          expected.cutDetails += cutCount > rollCount ? cutCount - rollCount : 0;
+          expected.rolledDetails += rollCount;
+          // Every required physical slot is covered by cut OR rolled, never both.
+          for (let slot = 1; slot <= required; slot++) {
+            if (slot > cutCount && slot > rollCount) expected.remainingDetails++;
+          }
+        }
+        const sources = columns([cut('E2E-A', 101, 1, ca), cut('E2E-B', 102, 2, cb)],
+          [rolled(101, 1, la), rolled(102, 2, lb)]);
+        const actual = calculate(demand([3, 2]), sources);
+        expect(actual, JSON.stringify(values)).toMatchObject(expected);
+        const progress = cncOrderReadinessProgress(actual);
+        expect(progress.cutPercent + progress.rolledPercent).toBeCloseTo((5 - expected.remainingDetails) * 20);
+      }
+    }
+  });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, -3, 0])('ignores invalid or empty source quantities (%s)', (quantity) => {
+    const sources = columns([cut('E2E-invalid', 101, 1, quantity)], [rolled(101, 1, quantity)]);
+    expect(calculate(demand([3]), sources)).toMatchObject({
+      totalDetails: 3, cutDetails: 0, rolledDetails: 0, remainingDetails: 3,
+    });
+    expect(buildCncOrderMissingDetails([demand([3])], sources).get(2705)?.[0].missingQuantity).toBe(3);
+  });
+
+  it('keeps counts invariant when a position is split across CNC and BASIS', () => {
+    const single = columns([cut('E2E-whole', 101, 1, 10)], [rolled(101, 1, 4)]);
+    const split = columns([cut('E2E-part-1', 101, 1, 2), cut('E2E-part-2', null, 1, 3)], [rolled(101, 1, 4)]);
+    const basis = cncBazisCutSet(9001, [{ orderName: 'E2E-quantity', orderId: 2705, detailId: 101 }]);
+    basis.items[0] = { ...basis.items[0], detailNumber: 1, quantity: 5 };
+    split[0].bazisCutSets = [basis];
+    expect(calculate(demand([10]), split)).toEqual(calculate(demand([10]), single));
+    expect(buildCncOrderMissingDetails([demand([10])], split)).toEqual(buildCncOrderMissingDetails([demand([10])], single));
+  });
+
+  it('does not make a reused detail number unique by ignoring zero-quantity composition rows', () => {
+    const order = demand([3, 0]);
+    order.details[1].detailNumber = 1;
+    const sources = columns([cut('E2E-ambiguous-zero', null, 1, 3)]);
+    expect(calculate(order, sources)).toMatchObject({ cutDetails: 3, remainingDetails: 3 });
+    expect(buildCncOrderMissingDetails([order], sources).get(2705)?.[0].missingQuantity).toBe(3);
+  });
+
+  it('counts the same compact historical bath only once', () => {
+    const bath = rolled(101, 1, 3);
+    const history = { bathCardId: bath.bathCardId, forced: false, items: bath.items };
+    const readiness = buildCncOrderReadiness([], {}, [history, history]);
+    expect(splitCncOrderCardsByManualColumn([demand([3])], readiness, {}).orders[0].readiness)
+      .toMatchObject({ rolledDetails: 3, remainingDetails: 0 });
+  });
+});
 
 describe('order status board model', () => {
   it.each(['cnc', 'bazis', 'bath', 'history'] as const)(
@@ -359,6 +586,9 @@ describe('order status board model', () => {
     expect(buildCncOrderStatusBoardRequestKey([3, 7], sort)).not.toBe(
       buildCncOrderStatusBoardRequestKey([3, 7], { ...sort, sortOrder: 'desc' }),
     );
+    expect(buildCncOrderStatusBoardRequestKey([3, 7], sort, false)).not.toBe(
+      buildCncOrderStatusBoardRequestKey([3, 7], sort),
+    );
   });
 
   it('sorts CNC relation cards by active and related state before dimmed cards', () => {
@@ -532,6 +762,19 @@ describe('order status board model', () => {
     expect(serializeOrderStatusBoardViewState(state).toString()).toContain(
       'sort=priority&direction=asc',
     );
+  });
+
+  it.each(['1d', '1w', '2w', '1m'])('accepts the supported CNC period %s', period => {
+    const state = parseOrderStatusBoardViewState(new URLSearchParams({ flow: 'cnc', period }), { cncTelegram: true });
+    expect(state.cncOrderSearchPeriod).toBe(period);
+    expect(serializeOrderStatusBoardViewState(state).get('period')).toBe(period);
+  });
+
+  it.each(['', '1y', '1W', ' 1w', 'toString', '__proto__'])('rejects unsupported CNC period %j', period => {
+    const state = parseOrderStatusBoardViewState(new URLSearchParams({ flow: 'cnc', period }), {
+      cncTelegram: true, defaultCncOrderSearchPeriod: '1m',
+    });
+    expect(state.cncOrderSearchPeriod).toBe('1m');
   });
 
   it('keeps CNC today as visual flow without changing status-board API type', () => {

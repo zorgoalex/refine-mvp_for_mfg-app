@@ -71,6 +71,31 @@ function formatEntry({ key, count }) {
   return `  ${count}x ${key}`;
 }
 
+function parseBaseline(text, label) {
+  let counts;
+  try {
+    counts = JSON.parse(text);
+  } catch {
+    throw new Error(`${label}: invalid JSON.`);
+  }
+  if (counts === null || typeof counts !== 'object' || Array.isArray(counts)) {
+    throw new Error(`${label}: expected a diagnostic-count object.`);
+  }
+  let sum = 0;
+  for (const [key, count] of Object.entries(counts)) {
+    // Only the first two separators define the key; messages may contain |/LF.
+    if (!/^[^|]+\|TS[1-9]\d*\|[\s\S]+$/.test(key)) {
+      throw new Error(`${label}: invalid diagnostic key ${JSON.stringify(key)}.`);
+    }
+    if (!Number.isSafeInteger(count) || count <= 0) {
+      throw new Error(`${label}: diagnostic counts must be positive safe integers.`);
+    }
+    sum += count;
+    if (!Number.isSafeInteger(sum)) throw new Error(`${label}: diagnostic total exceeds the safe integer range.`);
+  }
+  return counts;
+}
+
 function main() {
   const update = process.argv.includes('--update');
   const baselineRefIndex = process.argv.indexOf('--verify-baseline-against');
@@ -81,8 +106,11 @@ function main() {
       process.exitCode = 1;
       return;
     }
-    verifyBaselineAgainstGitRef(baselineRef);
+    verifyBaselineAgainstGitRef(baselineRef, process.argv.includes('--allow-initial-baseline'));
     return;
+  }
+  if (process.argv.includes('--allow-initial-baseline')) {
+    throw new Error('--allow-initial-baseline requires --verify-baseline-against <ref>.');
   }
   const diagnostics = loadDiagnostics();
   const current = countDiagnostics(diagnostics);
@@ -109,7 +137,7 @@ function main() {
     return;
   }
 
-  const baseline = JSON.parse(fs.readFileSync(BASELINE_PATH, 'utf8'));
+  const baseline = parseBaseline(fs.readFileSync(BASELINE_PATH, 'utf8'), 'TypeScript baseline');
   const { added, removed } = compareDiagnosticCounts(current, baseline);
   console.log(`TypeScript ratchet: current ${total(current)}, baseline ${total(baseline)}, removed ${removed.reduce((sum, item) => sum + item.count, 0)}.`);
 
@@ -120,20 +148,31 @@ function main() {
   }
 }
 
-function verifyBaselineAgainstGitRef(gitRef) {
-  let targetBaseline;
+function readGit(args, label) {
   try {
-    targetBaseline = JSON.parse(execFileSync(
-      'git',
-      ['show', `${gitRef}:scripts/typecheck-baseline.json`],
-      { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
-    ));
-  } catch {
-    console.log(`TypeScript baseline policy: ${gitRef} has no baseline; allowing initial baseline.`);
+    return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (error) {
+    throw new Error(`${label}: ${error.stderr?.trim() || error.message}`);
+  }
+}
+
+function verifyBaselineAgainstGitRef(gitRef, allowInitial) {
+  const candidateBaseline = parseBaseline(fs.readFileSync(BASELINE_PATH, 'utf8'), 'Candidate baseline');
+  const commit = readGit(['rev-parse', '--verify', '--end-of-options', `${gitRef}^{commit}`], 'Cannot resolve baseline ref').trim();
+  const entries = readGit(['ls-tree', '-z', commit, '--', 'scripts/typecheck-baseline.json'], 'Cannot inspect baseline tree')
+    .split('\0').filter(Boolean);
+  if (entries.length === 0) {
+    if (!allowInitial) throw new Error(`Baseline is absent at ${gitRef}. Initial creation requires explicit --allow-initial-baseline.`);
+    console.log(`TypeScript baseline policy: verified absence at ${commit}; allowing explicitly requested initial baseline.`);
     return;
   }
-
-  const candidateBaseline = JSON.parse(fs.readFileSync(BASELINE_PATH, 'utf8'));
+  if (entries.length !== 1 || !/^(100644|100755) blob [0-9a-f]+\tscripts\/typecheck-baseline\.json$/.test(entries[0])) {
+    throw new Error(`Baseline at ${gitRef} is not a regular file blob.`);
+  }
+  const targetBaseline = parseBaseline(
+    readGit(['show', `${commit}:scripts/typecheck-baseline.json`], 'Cannot read target baseline'),
+    'Target baseline',
+  );
   // Dependency/type declaration changes can reorder or reword TypeScript's
   // message while preserving the same diagnostic debt. Promotion policy uses
   // stable file+code families; the branch-local ratchet above remains exact.
@@ -150,5 +189,10 @@ function verifyBaselineAgainstGitRef(gitRef) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main();
+  try {
+    main();
+  } catch (error) {
+    console.error(`TypeScript check failed: ${error.message}`);
+    process.exitCode = 1;
+  }
 }

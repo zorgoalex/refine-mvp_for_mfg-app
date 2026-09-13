@@ -1,6 +1,7 @@
 import { Tooltip } from '../../../ui/tooltipDelay';
 import React, { useRef } from 'react';
 import { Checkbox, Tag } from 'antd';
+import type { CheckboxChangeEvent } from 'antd/es/checkbox';
 import { EditOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useDrag, useDragDropManager } from 'react-dnd';
@@ -260,7 +261,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
   };
 
   // Обработчик чекбокса "Выдан"
-  const handleCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCheckboxChange = (e: CheckboxChangeEvent) => {
     e.stopPropagation();
     if (onCheckboxChange) {
       onCheckboxChange(order, e.target.checked);
@@ -335,7 +336,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
           onChange={handleCheckboxChange}
           onClick={(e) => e.stopPropagation()}
           className="order-card__checkbox"
-          title="Отметить как выдан"
+          aria-label="Отметить как выдан"
         />
         <span
           className="order-card__number"

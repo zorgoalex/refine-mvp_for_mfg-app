@@ -95,6 +95,221 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
   }
   const ids = (response: Awaited<ReturnType<typeof load>>) => response.columns.flatMap((column) => column.baths.map((bath) => bath.cutResultId));
 
+  async function boundedLoad(displayFrom = '2026-09-06', focusBathCardId?: string,
+    currentUser: CurrentUser = { id: '158', role: 'admin', permissions: [] }) {
+    await client.query(`UPDATE pg_temp.cnc_telegram_packets SET
+      mdf_board_card_kind=COALESCE(mdf_board_card_kind,'machine_file'),
+      updated_at=COALESCE(updated_at,now()), source_version=COALESCE(source_version,1);
+      UPDATE pg_temp.cnc_telegram_packet_items SET packet_item_id=COALESCE(packet_item_id,gen_random_uuid());`);
+    const calls: Array<{ sql: string; params: unknown[] }> = [];
+    const repo = new PgCncTelegramRepository({ query: (sql: string, params: unknown[]) => {
+      calls.push({ sql, params });
+      return client.query(sql, params);
+    } } as never);
+    const response = await repo.listToday({ currentUser,
+      operationalWindow: 'two_months', workdayFrom: displayFrom, workdayTo: '2026-09-06', focusBathCardId });
+    return { response, calls };
+  }
+
+  async function oldPacket(id: number, date: string, owner = 1, detail = 1, quantity = 3) {
+    const packetId = `00000000-0000-0000-0000-${String(id).padStart(12, '0')}`;
+    await client.query(`INSERT INTO pg_temp.cnc_telegram_packets(packet_id,workday,completion_status,thumbs_up,material_name,cut_layout_json)
+      VALUES($1,$2,'completed',false,'МДФ 16мм','{"large":"E2E-not-for-history"}');
+    `, [packetId, date]);
+    await client.query(`INSERT INTO pg_temp.cnc_telegram_packet_items(packet_id,match_order_id,match_detail_id,quantity)
+      VALUES($1,$2,$3,$4)`, [packetId, owner, detail, quantity]);
+    return packetId;
+  }
+
+  describe('F01 bath visibility without related files', () => {
+    it.each([false, true])('preserves ingest numbering policy with bath source evidence=%s', async evidence => {
+      await seed(10, [3, 3], '2026-09-06T12:00:00+05');
+      await client.query(`UPDATE pg_temp.cnc_telegram_packets SET source_version=5,
+        external_packet_key='E2E-F01',updated_at=now(),source_created_at=now(),source_updated_at=now();`);
+      if (evidence) await client.query(`INSERT INTO pg_temp.cnc_telegram_packet_items(packet_id,match_order_id,match_detail_id,quantity)
+        VALUES('00000000-0000-0000-0000-000000000001',1,3,1)`);
+      let bathQueries = 0;
+      const repo = new PgCncTelegramRepository({ transaction: async (run: (tx: unknown) => unknown) => run({
+        query: async (sql: string, params: unknown[]) => {
+          if (sql.includes('INSERT INTO command_idempotency_keys')) return { rows: [{ request_hash: 'hash', status: 'processing' }] };
+          if (sql.includes('WITH laminated_status_threshold')) {
+            bathQueries++;
+            return client.query(sql, params);
+          }
+          // Actual source selection, owner intersection, sequence write and packet
+          // read; only idempotency/session plumbing is stubbed. All writes pg_temp.
+          if (/WHERE external_packet_key|FROM cnc_telegram_packets p|WITH unique_order_keys|WITH next_sequence/.test(sql)) return client.query(sql, params);
+          return { rows: [] };
+        },
+      }) } as never);
+      await repo.ingest({ currentUser: { id: '158', role: 'admin', permissions: [] }, requestId: 'E2E-F01', dto: {
+        idempotencyKey: 'E2E-F01', externalPacketKey: 'E2E-F01',
+        source: { chatId: 'E2E-F01', messageId: 1, version: 1, createdAt: '2026-09-06T00:00:00Z', updatedAt: '2026-09-06T00:00:00Z' },
+        workday: '2026-09-06', completionStatus: 'completed', thumbsUp: true, items: [],
+      } });
+      expect(bathQueries).toBe(1);
+      expect((await client.query('SELECT cutting_sequence_no FROM pg_temp.cnc_telegram_packets')).rows[0].cutting_sequence_no)
+        .toBe(evidence ? 1 : null);
+    });
+
+    it.each(['two_months', 'month', 'legacy'] as const)('returns a bath with no CNC or BASIS sources: %s', async mode => {
+      await client.query('DELETE FROM pg_temp.cnc_telegram_packet_items; DELETE FROM pg_temp.cnc_telegram_packets');
+      await seed(10, [3, 3], '2026-09-06T12:00:00+05');
+      const response = mode === 'two_months' ? (await boundedLoad()).response : await load(undefined, mode === 'month');
+      expect(ids(response)).toEqual([10]);
+      const bath = response.columns.find(column => column.key === 'baths')?.baths[0];
+      expect(bath).toMatchObject({ forced: false, ready: false, itemQuantityTotal: 2 });
+      expect(bath?.items).toEqual([expect.objectContaining({ detailId: 3, quantity: 2, completedQuantity: 0, ready: false })]);
+    });
+
+    it('shows a bath even when CNC contains only another position of the same order', async () => {
+      await seed(10, [3], '2026-09-06T12:00:00+05');
+      const { response } = await boundedLoad();
+      expect(ids(response)).toEqual([10]);
+      expect(response.columns.find(column => column.key === 'baths')?.baths[0]).toMatchObject({ ready: false });
+    });
+
+    it('selects current revision without file evidence instead of the older matching revision', async () => {
+      await seed(10, [1], '2026-09-06T10:00:00+05', 10);
+      await seed(11, [3], '2026-09-06T12:00:00+05', 10);
+      const { response } = await boundedLoad();
+      expect(ids(response)).toEqual([11]);
+      expect(response.historicalReadinessSources?.some(source => source.cardId === 'cut-result:10')).toBe(false);
+    });
+
+    it('preserves lifecycle, effective sheets and date limits without related files', async () => {
+      await client.query('DELETE FROM pg_temp.cnc_telegram_packet_items; DELETE FROM pg_temp.cnc_telegram_packets');
+      for (const id of [10, 11, 12, 13, 14]) await seed(id, [3], '2026-09-06T12:00:00+05');
+      await seed(15, [3], '2026-09-06T12:00:00+05', 15, { isVacuum: false });
+      await seed(16, [3], '2026-07-05T23:59:59+05');
+      await seed(17, [3], '2026-09-07T00:00:00+05');
+      await client.query(`UPDATE pg_temp.cut_job SET status='archived' WHERE cut_job_id=11;
+        INSERT INTO pg_temp.cut_result_archive_state(cut_job_id,result_no,archived_at) VALUES(12,12,now());
+        INSERT INTO pg_temp.cnc_telegram_packets(svg_cut_result_id,mdf_board_card_kind,mdf_board_hidden_at)
+          VALUES(13,'bath_seed',now());
+        UPDATE pg_temp.cut_result_sheet_map SET is_effective=false WHERE cut_result_id=14;`);
+      for (const focus of [undefined, 'cut-result:13', 'cut-result:16', 'cut-result:17']) {
+        expect(ids((await boundedLoad(undefined, focus)).response)).toEqual([10]);
+      }
+    });
+
+    it('returns original history without file evidence, retaining archive and hidden markers', async () => {
+      await client.query('DELETE FROM pg_temp.cnc_telegram_packet_items; DELETE FROM pg_temp.cnc_telegram_packets');
+      await seed(10, [3], '2026-09-06T12:00:00+05');
+      await seed(11, [3], '2026-07-05T23:59:59+05');
+      await seed(12, [3], '2026-09-06T12:00:00+05');
+      await client.query(`INSERT INTO pg_temp.cut_result_archive_state(cut_job_id,result_no,archived_at) VALUES(12,12,now());
+        INSERT INTO pg_temp.cnc_telegram_packets(svg_cut_result_id,mdf_board_card_kind,mdf_board_hidden_at)
+          VALUES(12,'bath_seed',now());`);
+      const historyRepo = new PgCncTelegramRepository({ query: (sql: string, params: unknown[]) =>
+        sql.includes('AS date_from') ? { rows: [{ date_from: '2026-07-06', date_to: '2026-09-06' }] }
+          : sql.includes('WITH laminated_status_threshold') ? client.query(sql, params) : { rows: [] },
+      } as never);
+      const response = await historyRepo.listOriginalBoard({ currentUser: {} as never });
+      expect(response.baths.map(bath => bath.cutResultId).sort()).toEqual([10, 12]);
+      expect(response.baths.find(bath => bath.cutResultId === 10)?.currentBoardVisibility).toBe('visible');
+      expect(response.baths.find(bath => bath.cutResultId === 12)?.currentBoardVisibility).toBe('hidden');
+    });
+  });
+
+  it('bounds all historical sources, scopes quantities and never reads packet layouts for history', async () => {
+    const included = await oldPacket(10, '2026-07-06');
+    const excluded = await oldPacket(11, '2026-07-05');
+    const foreign = await oldPacket(12, '2026-08-01', 2, 2);
+    const future = await oldPacket(13, '2026-09-07');
+    await addBasis(4);
+    await client.query("UPDATE pg_temp.bazis_cut_sets SET created_at='2026-08-01T12:00:00+05'");
+    await seed(10, [1, 1], '2026-07-06T00:00:00+05');
+    await seed(11, [1], '2026-07-05T23:59:59+05');
+    const { response, calls } = await boundedLoad();
+    expect(response.operationalWindow).toEqual({ dateFrom: '2026-07-06', dateTo: '2026-09-06' });
+    expect(response.columns.flatMap(column => column.packets).map(packet => packet.packetId)).toEqual([sourcePacket.id]);
+    expect(response.columns.flatMap(column => column.baths)).toEqual([]);
+    const facts = response.historicalReadinessSources!;
+    expect(facts.find(source => source.cardId === included)?.items).toEqual([{ orderId: 1, detailId: 1, detailNumber: null, quantity: 3 }]);
+    expect(facts.map(source => source.cardId)).not.toEqual(expect.arrayContaining([excluded]));
+    for (const id of [excluded, foreign, future, 'cut-result:11']) expect(facts.map(source => source.cardId)).not.toContain(id);
+    expect(facts.find(source => source.cardId === 'cut-result:10')?.items[0].quantity).toBe(2);
+    expect(facts.find(source => source.kind === 'bazisCutSet')?.items[0].quantity).toBe(4);
+    expect(JSON.stringify(facts)).not.toMatch(/cutLayout|svgCutSheets|sheetWidth|E2E-not-for-history/);
+    const compactPacketSql = calls.find(call => call.sql.includes('p.workday < $2::date'))!.sql;
+    expect(compactPacketSql).not.toContain('p.cut_layout_json');
+    expect(compactPacketSql).not.toContain('sheet_summary');
+    for (const call of calls.filter(call => call.sql.includes('candidate_vacuum_results'))) {
+      expect(call.sql).toContain('board_metadata.result_created_at >= $4::date');
+      expect(call.sql).not.toContain('snapshot_job');
+    }
+    await client.query("UPDATE pg_temp.bazis_cut_sets SET created_at='2026-07-05T23:59:59+05'");
+    expect((await boundedLoad()).response.historicalReadinessSources?.some(source => source.kind === 'bazisCutSet')).toBe(false);
+  });
+
+  it('evaluates whole mixed source before trimming quantities to displayed orders', async () => {
+    const packetId = await oldPacket(10, '2026-08-01');
+    await client.query(`INSERT INTO pg_temp.cnc_telegram_packet_items(packet_id,match_order_id,match_detail_id,quantity)
+      VALUES($1,2,2,2)`, [packetId]);
+    await seed(10, [1, 2], '2026-08-01T12:00:00+05');
+    const { response } = await boundedLoad();
+    const facts = response.historicalReadinessSources!;
+    expect(facts.find(source => source.cardId === packetId)).toMatchObject({ column: 'completed', items: [{ orderId: 1, quantity: 3 }] });
+    expect(facts.find(source => source.cardId === packetId)?.linkedOrders.map(owner => owner.orderId).sort()).toEqual([1, 2]);
+    expect(facts.find(source => source.kind === 'bath')?.column).not.toBe('completed_baths');
+    expect(facts.find(source => source.kind === 'bath')?.items).toHaveLength(1);
+  });
+
+  it('keeps the same order evidence when display period changes from day to month', async () => {
+    await oldPacket(10, '2026-08-20');
+    await seed(10, [1, 1], '2026-08-20T12:00:00+05');
+    await addBasis(4);
+    await client.query("UPDATE pg_temp.bazis_cut_sets SET created_at='2026-08-20T12:00:00+05'");
+    const small = (await boundedLoad()).response;
+    const large = (await boundedLoad('2026-08-07')).response;
+    const evidence = (response: typeof small) => {
+      const rows = response.columns.flatMap(column => [
+        ...column.packets.map(card => ({ kind: 'packet', id: card.packetId, column: column.key,
+          quantity: card.items.filter(item => item.matchOrderId === 1).reduce((sum, item) => sum + item.quantity, 0) })),
+        ...column.bazisCutSets.map(card => ({ kind: 'bazisCutSet', id: String(card.bazisCutSetId), column: column.key,
+          quantity: card.items.filter(item => item.orderId === 1).reduce((sum, item) => sum + item.quantity, 0) })),
+        ...column.baths.map(card => ({ kind: 'bath', id: card.bathCardId, column: column.key,
+          quantity: card.items.filter(item => item.orderId === 1).reduce((sum, item) => sum + item.quantity, 0) })),
+      ]);
+      rows.push(...response.historicalReadinessSources!.map(source => ({ kind: source.kind, id: source.cardId, column: source.column,
+        quantity: source.items.filter(item => item.orderId === 1).reduce((sum, item) => sum + item.quantity, 0) })));
+      return rows.sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`));
+    };
+    expect(evidence(small)).toEqual(evidence(large));
+    expect(small.columns.flatMap(column => column.packets)).toHaveLength(1);
+    expect(large.columns.flatMap(column => column.packets)).toHaveLength(2);
+  });
+
+  it('does not disclose historical owner status outside the production-board read scope', async () => {
+    const packetId = await oldPacket(10, '2026-08-01');
+    await client.query(`UPDATE pg_temp.orders SET order_status_id=9;
+      INSERT INTO pg_temp.order_statuses(order_status_id,order_status_name,sort_order) VALUES(9,'E2E-closed',50);`);
+    const { response } = await boundedLoad(undefined, undefined, { id: '158', role: 'packer', permissions: [] });
+    expect(response.historicalReadinessSources?.find(source => source.cardId === packetId)?.linkedOrders)
+      .toEqual([{ orderId: 1, orderStatusId: null, orderStatusName: null, orderStatusIssuedOrLater: false }]);
+  });
+
+  it('focus cannot escape two months and invalid bath membership cannot complete automatically', async () => {
+    await seed(10, [1, null], '2026-08-01T12:00:00+05');
+    await seed(11, [1], '2026-07-05T12:00:00+05');
+    expect((await boundedLoad('2026-09-06', 'cut-result:11')).response.columns.flatMap(column => column.baths)).toEqual([]);
+    const { response } = await boundedLoad();
+    const source = response.historicalReadinessSources?.find(source => source.cardId === 'cut-result:10');
+    expect(source?.column).toBe('baths');
+    expect(source?.linkedOrders.some(owner => owner.orderId === null)).toBe(true);
+    const focused = (await boundedLoad('2026-09-06', 'cut-result:10')).response;
+    expect(focused.columns.find(column => column.key === 'baths')?.baths[0]).toMatchObject({ compositionComplete: false, ready: false });
+    expect(focused.historicalReadinessSources?.some(source => source.cardId === 'cut-result:10')).toBe(false);
+  });
+
+  it.each(["material_name='ХДФ 3мм'", "program_name='E2E_fanera18.tap'", "rework=true"])
+    ('excludes ineligible historical CNC quantity: %s', async change => {
+      const id = await oldPacket(10, '2026-08-01');
+      await client.query(`UPDATE pg_temp.cnc_telegram_packets SET ${change} WHERE packet_id=$1`, [id]);
+      expect((await boundedLoad()).response.historicalReadinessSources?.some(source => source.cardId === id)).toBe(false);
+    });
+
   async function expectAllReadiness(ready: boolean) {
     const response = await load();
     expect(response.columns.flatMap((column) => column.baths).find((bath) => bath.cutResultId === 1)?.ready).toBe(ready);
@@ -633,9 +848,9 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
     expect(response.historicalBathReadiness?.map((bath) => bath.bathCardId)).toEqual(['cut-result:2']);
   });
 
-  it('preserves selection among matching results when the newest no longer overlaps', async () => {
+  it('selects the current result even when the newest no longer overlaps files', async () => {
     await seed(1, [1, 2], undefined, 1); await seed(2, [2], undefined, 1);
-    expect(ids(await load())).toEqual([1]);
+    expect(ids(await load())).toEqual([2]);
   });
 
   it('projects legacy flags transactionally, rejects malformed flags and guards immutable headers', async () => {

@@ -7,7 +7,7 @@ export const bodyStyleCases = [
   { name: 'image preview', file: 'src/components/ImagePrintPreviewModal.tsx', tag: 'Modal', expected: { padding: 0 } },
   { name: 'mobile navigation', file: 'src/components/MobileSiderDrawer.tsx', tag: 'Drawer', expected: { padding: 0 } },
   { name: 'label editor', file: 'src/pages/configuration/components/LabelsConfigTab.tsx', tag: 'Modal', expected: { maxHeight: '72vh', overflowY: 'auto' } },
-  { name: 'PDF import', file: 'src/pages/orders/components/import/PdfImportModal.tsx', tag: 'Modal', expected: { minHeight: 500, maxHeight: 'calc(90vh - 120px)', overflow: 'hidden', display: 'flex', flexDirection: 'column' } },
+  { name: 'PDF import', file: 'src/pages/orders/components/import/PdfImportModal.tsx', tag: 'Modal', expected: { minHeight: 'min(500px, calc(100dvh - 200px))', maxHeight: 'calc(100dvh - 200px)', overflow: 'hidden', display: 'flex', flexDirection: 'column' } },
   { name: 'photo import', file: 'src/pages/orders/components/import/VlmImportModal.tsx', tag: 'Modal', expected: { overflow: 'hidden', display: 'flex', flexDirection: 'column' } },
   { name: 'Telegram preview', file: 'src/pages/orders/components/sections/OrderTelegramScreenshots.tsx', tag: 'Modal', expected: { padding: 0 } },
 ] as const;

@@ -77,6 +77,39 @@ function assertNoHorizontalOverflow(page: import('@playwright/test').Page) {
     return page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
 }
 
+test('/payments phone: page navigation and size preference use the real page adapter', async ({ page }) => {
+    test.setTimeout(90000);
+    const db = createWorkflowMockDb();
+    seedOrder(db);
+    db.payments = Array.from({ length: 31 }, (_, index) => ({
+        ...db.payments[0], payment_id: index + 1, notes: `E2E payment #${index + 1}`,
+    }));
+    await setupWorkflowMockApi(page, db);
+    await page.goto('/payments');
+    const cards = page.locator('.ant-list-items .ant-card');
+    const pager = page.locator('.ant-list-pagination');
+    await expect(cards).toHaveCount(10, { timeout: 30000 });
+    await expect(cards.first()).toContainText('E2E payment #31');
+    await pager.locator('.ant-pagination-next button').click();
+    await expect(cards.first()).toContainText('E2E payment #21');
+    await pager.locator('.ant-pagination-prev button').click();
+    await expect(cards.first()).toContainText('E2E payment #31');
+    await pager.locator('.ant-pagination-next button').click();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.locator('.ant-table-pagination .ant-select-selector').click();
+    await page.locator('.ant-select-item-option').filter({ hasText: /^20\s*\// }).click();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(cards).toHaveCount(20);
+    await expect(cards.first()).toContainText('E2E payment #31');
+    await page.reload();
+    await expect(cards).toHaveCount(20, { timeout: 30000 });
+    await expect(cards.first()).toContainText('E2E payment #31');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(page.locator('.ant-table')).toBeVisible();
+    await expect(page.locator('.ant-list-pagination')).toHaveCount(0);
+    await expect(page.locator('.ant-table-pagination')).toBeVisible();
+});
+
 test('/orders phone: no desktop table, order cards visible, tap navigates to order show', async ({ page }) => {
     const db = createWorkflowMockDb();
     seedOrder(db);

@@ -112,7 +112,16 @@ function OperationEvidence({ operation }: { operation: TelegramWorkerOperation }
         {operation.operationType === 'telegram_reply' && <Descriptions.Item label="Восстановление">{operation.reconciliationYieldedCount} сообщений · {operation.reconciliationExhausted ? 'полный поиск' : operation.reconciliationTruncated ? 'достигнут лимит' : operation.reconciliationErrorCode || 'не завершён'}</Descriptions.Item>}
         {operation.reconciliationWindowFrom && <Descriptions.Item label="Окно восстановления">{formatDateTime(operation.reconciliationWindowFrom)} — {formatDateTime(operation.reconciliationWindowTo)}</Descriptions.Item>}
       </Descriptions>
-      {operation.steps.length > 0 && <Timeline style={{ marginTop: 12 }} items={operation.steps.map((step) => ({ color: step.status === 'failed' ? 'red' : step.status === 'skipped' ? 'orange' : 'green', children: <><Text>{step.message}</Text><Text type="secondary" style={{ marginLeft: 8 }}>{formatDateTime(step.at)}</Text></> }))} />}
+      {operation.steps.length > 0 && (
+        <Timeline style={{ marginTop: 12 }}>
+          {operation.steps.map((step) => (
+            <Timeline.Item key={step.stepId} color={step.status === 'failed' ? 'red' : step.status === 'skipped' ? 'orange' : 'green'}>
+              <Text>{step.message}</Text>
+              <Text type="secondary" style={{ marginLeft: 8 }}>{formatDateTime(step.at)}</Text>
+            </Timeline.Item>
+          ))}
+        </Timeline>
+      )}
       {operation.responses.map((response) => <Alert key={response.responseId} style={{ marginTop: 8 }} type={response.status === 'failed' ? 'error' : 'info'} showIcon message={response.kind === 'telegram_reply' ? `Telegram: ${response.text ?? response.status}` : `ERP: ${response.status}`} description={response.errorMessage || (response.replyToMessageId ? `Ответ на #${response.replyToMessageId}` : undefined)} />)}
     </Card>
   );

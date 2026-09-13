@@ -312,7 +312,7 @@
   .ant-picker,
   .ant-input-affix-wrapper,
   .ant-menu-item
-) {
+):not(:where(.cad-page *, .cad-compact *)) {
   min-height: 44px !important;
 }
 
@@ -324,7 +324,7 @@
   .ant-pagination-next,
   .ant-pagination-jump-prev,
   .ant-pagination-jump-next
-) {
+):not(:where(.cad-page *, .cad-compact *)) {
   min-width: 44px !important;
 }
 
@@ -332,7 +332,7 @@
   label.ant-checkbox-wrapper,
   label.ant-radio-wrapper,
   .status-board-toolbar__switch
-) {
+):not(:where(.cad-page *, .cad-compact *)) {
   min-height: 44px;
   align-items: center;
   padding-inline: 4px;
@@ -1354,8 +1354,8 @@
   }
 }
 
-/* Keep the physical hit box touch-safe even when page-specific dense toolbars load later. */
-html[data-ui-variant] .evolution-shell.evolution-shell--tablet button.ant-btn {
+/* CAD explicitly opts into desktop-density controls, including on tablets. */
+html[data-ui-variant] .evolution-shell.evolution-shell--tablet button.ant-btn:not(.cad-page .ant-btn) {
   min-width: 44px !important;
   min-height: 44px !important;
 }

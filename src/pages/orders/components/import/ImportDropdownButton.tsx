@@ -24,11 +24,11 @@ const VlmImportModal = lazy(async () => ({
 
 interface ImportDropdownButtonProps {
   disabled?: boolean;
-  beforeExcelImport?: () => Promise<boolean>;
+  beforeImport?: () => Promise<boolean>;
 }
 
-export const ImportDropdownButton: React.FC<ImportDropdownButtonProps> = ({ disabled, beforeExcelImport }) => {
-  const excelPreparing = useRef(false);
+export const ImportDropdownButton: React.FC<ImportDropdownButtonProps> = ({ disabled, beforeImport }) => {
+  const importPreparing = useRef(false);
   const { tabKey } = useKeepAlive();
   const workspaceKey = tabKey || '/orders/create';
   const restored = readWorkspaceCheckpointAdapterState(workspaceKey, 'order-import-surfaces');
@@ -44,25 +44,22 @@ export const ImportDropdownButton: React.FC<ImportDropdownButtonProps> = ({ disa
     }),
   });
 
-  const handleExcelOpen = useCallback(async () => {
-    if (excelPreparing.current) return;
-    excelPreparing.current = true;
+  const handleImportOpen = useCallback(async (format: 'excel' | 'pdf') => {
+    if (importPreparing.current) return;
+    importPreparing.current = true;
     try {
-      if (beforeExcelImport && !await beforeExcelImport()) return;
-      setExcelModalOpen(true);
+      if (beforeImport && !await beforeImport()) return;
+      if (format === 'excel') setExcelModalOpen(true);
+      else setPdfModalOpen(true);
     } catch {
       message.error('Не удалось завершить редактирование детали. Повторите открытие импорта.');
     } finally {
-      excelPreparing.current = false;
+      importPreparing.current = false;
     }
-  }, [beforeExcelImport]);
+  }, [beforeImport]);
 
   const handleExcelClose = useCallback(() => {
     setExcelModalOpen(false);
-  }, []);
-
-  const handlePdfOpen = useCallback(() => {
-    setPdfModalOpen(true);
   }, []);
 
   const handlePdfClose = useCallback(() => {
@@ -82,13 +79,13 @@ export const ImportDropdownButton: React.FC<ImportDropdownButtonProps> = ({ disa
       key: 'excel',
       icon: <FileExcelOutlined style={{ color: '#217346' }} />,
       label: 'Импорт из Excel',
-      onClick: handleExcelOpen,
+      onClick: () => void handleImportOpen('excel'),
     },
     {
       key: 'pdf',
       icon: <FilePdfOutlined style={{ color: '#f5222d' }} />,
       label: 'Импорт из PDF Базис',
-      onClick: handlePdfOpen,
+      onClick: () => void handleImportOpen('pdf'),
     },
     {
       key: 'vlm',

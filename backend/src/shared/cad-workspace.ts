@@ -1,4 +1,5 @@
 /** Pure shared document rules. No ERP queries or milling geometry. */
+export const CAD_MAX_GROUPS = 5000;
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export interface CadRecipeRef { code: string; version: string; parameters: Record<string, JsonValue> }
 export interface CadSourcePart {
@@ -39,7 +40,7 @@ export function createGroups(sources: CadSourceSnapshot[], idGenerator: () => st
 }
 export function validateComposition(groups: CadGroup[], sources: CadSourceSnapshot[]): CadCompositionIssue[] {
   const issues: CadCompositionIssue[] = [];
-  if (!groups.length || groups.length > 500) issues.push({ code: 'GROUP_LIMIT', message: 'В версии должно быть от 1 до 500 групп' });
+  if (!groups.length || groups.length > CAD_MAX_GROUPS) issues.push({ code: 'GROUP_LIMIT', message: `В версии должно быть от 1 до ${CAD_MAX_GROUPS} экземпляров` });
   const sourceIds = new Set<string>(), orderIds = new Set<number>(), groupIds = new Set<string>();
   const sourceMap = new Map(sources.map(s => [s.id, s]));
   for (const s of sources) {

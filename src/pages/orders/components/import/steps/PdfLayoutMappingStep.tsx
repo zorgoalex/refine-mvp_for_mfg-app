@@ -59,7 +59,7 @@ export const PdfLayoutMappingStep: React.FC<Props> = ({
     .filter(item => item.isCuttable !== false)
     .map(item => ({ value: item.id, label: item.name }));
   return (
-  <Space direction="vertical" size="middle" style={{ width: '100%', overflow: 'auto', maxHeight: '100%' }}>
+  <Space direction="vertical" size="middle" style={{ width: '100%' }}>
     <Alert
       type="info"
       showIcon

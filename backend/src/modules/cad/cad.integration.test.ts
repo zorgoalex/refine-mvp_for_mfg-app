@@ -114,6 +114,22 @@ server.serve_forever()
     expect((await admin.query('SELECT quantity FROM order_details WHERE detail_id=$1', [orderId])).rows[0].quantity).toBe(10);
     working = next;
   });
+  it('persists independent copies with bounded audit referencing recoverable revisions', async () => {
+    const variant = await cad.clone(user, original.id, 'Тест отдельные экземпляры', false, randomUUID());
+    const seed = variant.groups[0];
+    const groups = Array.from({ length: 10 }, (_, i) => ({ ...seed, id: i ? randomUUID() : seed.id, quantity: 1, xMm: i * 250 }));
+    const key = randomUUID();
+    const saved = await cad.save(user, variant.id, 1, groups, variant.sources.map(s => s.id), key);
+    const event = (await admin.query("SELECT metadata FROM cad_events WHERE event='cad.variant.saved' AND request_id=$1", [key])).rows[0].metadata;
+    expect(event).toMatchObject({ beforeRevision: 1, revision: 2, beforeCount: 1, afterCount: 10, added: { count: 9 } });
+    expect(event).not.toHaveProperty('before'); expect(event).not.toHaveProperty('after');
+    const revisions = (await admin.query('SELECT data FROM cad_variant_revisions WHERE variant_id=$1 ORDER BY revision', [variant.id])).rows.map(r => r.data);
+    expect(revisions[0].groups).toEqual(variant.groups); expect(revisions[1].groups).toEqual(saved.groups);
+    const moved = groups.map((g, i) => i === 3 ? { ...g, xMm: g.xMm + 7 } : g);
+    const afterMove = await cad.save(user, variant.id, 2, moved, variant.sources.map(s => s.id), randomUUID());
+    expect(afterMove.groups.filter((g, i) => g.xMm !== saved.groups[i].xMm)).toHaveLength(1);
+    expect((await cad.workspace(user, orderId)).variants.find(v => v.id === original.id)).toEqual(original);
+  });
   it('refresh creates conflict, never silently trims or overwrites', async () => {
     await admin.query('UPDATE order_details SET quantity=2 WHERE detail_id=$1', [secondOrderId]);
     expect((await cad.sourceStatus(user, working.id)).find(s => s.orderId === secondOrderId)?.stale).toBe(true);
@@ -138,6 +154,11 @@ server.serve_forever()
     expect(review.sourceStatus.some(s => s.stale)).toBe(true);
     await expect(cad.requestPackage(exporter, working.id, working.version, packageKey, review.reviewId!)).rejects.toMatchObject({ code: 'CAD_EXPORT_STALE_ACK_REQUIRED' });
     await cad.requestPackage(exporter, working.id, working.version, packageKey, review.reviewId!, true);
+    for (const event of ['cad.export.reviewed', 'cad.export.confirmed']) {
+      const metadata = (await admin.query('SELECT metadata FROM cad_events WHERE event=$1 ORDER BY created_at DESC LIMIT 1', [event])).rows[0].metadata;
+      expect(metadata).toMatchObject({ revision: working.version, reviewId: review.reviewId, sourceStatus: { sourceCount: 2, changedSourceCount: 1 } });
+      expect(metadata.sourceStatus.changedDetails.length).toBeLessThanOrEqual(50);
+    }
     for (let i = 0; i < 20; i++) {
       await admin.query('UPDATE cad_runs SET next_attempt_at=now()'); await cad.tick();
       const result = await cad.run(user, working.id, working.version);
@@ -145,6 +166,13 @@ server.serve_forever()
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     const packed = await cad.run(user, working.id, working.version); expect(packed.run?.packageId).toBeTruthy();
+    const v2 = new CadService(db, cad.client, true, true);
+    expect((await v2.run(user, working.id, working.version)).job?.items).toEqual([]);
+    const files = await v2.files(user, packed.run!.id, 0);
+    expect(files.files.some(f => f.name === 'manifest.json')).toBe(true);
+    expect(await v2.readiness(user, packed.run!.id, 0)).toMatchObject({ ready: true, total: 2, unresolved: 0, items: [] });
+    await expect(v2.readiness({ ...user, permissions: ['orders.view', 'cad.view'] }, packed.run!.id, 0)).rejects.toMatchObject({ statusCode: 403 });
+    await expect(v2.files({ ...user, permissions: ['orders.view', 'cad.view'] }, packed.run!.id, 0)).rejects.toMatchObject({ statusCode: 403 });
     const manifest = packed.job!.package_files.find(f => f.name === 'manifest.json')!;
     await expect(cad.download(user, packed.run!.id, manifest.id, review.reviewId!)).rejects.toMatchObject({ code: 'CAD_EXPORT_REVIEW_EXPIRED' });
     const response = await cad.download(exporter, packed.run!.id, manifest.id, review.reviewId!); const document = await response.json();

@@ -932,12 +932,12 @@ export const useOrderSave = (
         if (suggested) {
           Modal.confirm({
             title: 'Номер заказа занят',
-            content: `Номер «${values.order_name}» уже используется заказом #${details?.existingOrderId ?? '—'}. Свободный номер: ${suggested}. Сохранить заказ под номером ${suggested}?`,
+            content: `Номер «${values.header.order_name}» уже используется заказом #${details?.existingOrderId ?? '—'}. Свободный номер: ${suggested}. Сохранить заказ под номером ${suggested}?`,
             okText: `Сохранить как ${suggested}`,
             cancelText: 'Изменить вручную',
             onOk: () => {
               retryPageOwnedSave(
-                { ...values, order_name: suggested },
+                { ...values, header: { ...values.header, order_name: suggested } },
                 isEdit,
                 saveOwnerNamespace,
               );
@@ -946,7 +946,7 @@ export const useOrderSave = (
         } else {
           Modal.warning({
             title: 'Номер заказа занят',
-            content: `Номер «${values.order_name}» уже используется заказом #${details?.existingOrderId ?? '—'}. Укажите другой номер заказа.`,
+            content: `Номер «${values.header.order_name}» уже используется заказом #${details?.existingOrderId ?? '—'}. Укажите другой номер заказа.`,
           });
         }
         return null;

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { authSession } from '../../api/authSession';
 import { authStorage } from '../../utils/auth';
-const cameraSchema = z.object({ x: z.number().finite(), y: z.number().finite(), zoom: z.number().min(.01).max(8) });
+const cameraSchema = z.object({ x: z.number().finite(), y: z.number().finite(), zoom: z.number().min(.001).max(8) });
 export type CadCamera = z.infer<typeof cameraSchema>;
 function key(document: string) {
   const id = authSession.getUser()?.id ?? authStorage.getUser()?.id;

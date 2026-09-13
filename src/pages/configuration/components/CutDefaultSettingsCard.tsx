@@ -8,13 +8,13 @@ import {
   InputNumber,
   Radio,
   Row,
-  Segmented,
   Slider,
   Space,
   Switch,
   Typography,
   message,
 } from 'antd';
+import { Segmented } from "../../../ui/Segmented";
 import { cutConfigApi, type CutConfig } from '../../../api/cutConfigApi';
 import { ApiError } from '../../../api/httpClient';
 import {

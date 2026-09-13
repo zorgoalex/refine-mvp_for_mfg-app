@@ -20,6 +20,7 @@ export interface OrderStatusBoardQuery {
   onlyMyOrders: boolean;
   overdueOnly: boolean;
   includeDone?: boolean;
+  includeBazisAllocation?: boolean;
   plannedFrom?: string;
   plannedTo?: string;
   orderIds?: number[];
