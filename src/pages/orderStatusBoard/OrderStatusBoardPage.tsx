@@ -2264,12 +2264,13 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   ];
   const cncMinDate = dayjs().subtract(CNC_HISTORY_DAYS - 1, 'day').startOf('day');
   const cncMaxDate = dayjs().endOf('day');
-  const cncSelectedDate = viewState.cncWorkday
-    ? dayjs(viewState.cncWorkday)
-    : cncToday?.workday
-      ? dayjs(cncToday.workday)
-      : null;
-  const cncNavigationDate = cncSelectedDate ?? dayjs();
+  // Show the opening date before URL synchronization or board data loading.
+  const cncSelectedDate = dayjs(
+    mdfWorkdayTodayOpenPatchNeeded
+      ? todayCncWorkday
+      : viewState.cncWorkday ?? todayCncWorkday,
+  );
+  const cncNavigationDate = cncSelectedDate;
   const cncCanStepBack = cncNavigationDate.startOf('day').isAfter(cncMinDate);
   const cncCanStepForward = cncNavigationDate.startOf('day').isBefore(cncMaxDate);
   const updateCncWorkday = (date: Dayjs) =>

@@ -30,6 +30,12 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION, date: "2026-09-13",
+    title: "МДФ-доска: текущая дата при первом открытии",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: ["При первом открытии МДФ-доски поле даты сразу показывает сегодняшний день, не дожидаясь загрузки данных. Выбранная затем вручную дата сохраняется во время работы с доской."],
+  },
+  {
+    version: APP_VERSION, date: "2026-09-13",
     title: "CAD: общий чертёж и независимые экземпляры",
     services: ["ERP", "SVG/DXF"], repositories: ["repo_erp", "repo_svgdxf"],
     added: ["Количество позиции разворачивается в отдельные детали на общем поле. Каждую можно переместить и изменить её фрезеровку; отличие от позиции отмечается предупреждением. Оригинал и состав заказа не меняются."],
