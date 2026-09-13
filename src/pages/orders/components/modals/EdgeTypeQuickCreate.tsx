@@ -4,7 +4,8 @@
 import React from 'react';
 import { Modal, Form, Input, InputNumber, notification, Collapse } from 'antd';
 import { useCreate } from '@refinedev/core';
-import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
+import { numberParser } from '../../../../utils/numberFormat';
+import { optionalInputNumberFormatter } from '../../../../utils/inputNumberFormat';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 import { useWorkspaceModalFormCheckpoint } from '../../../../workspace/workspaceModalFormCheckpoint';
 
@@ -104,7 +105,7 @@ export const EdgeTypeQuickCreate: React.FC<EdgeTypeQuickCreateProps> = ({
               <InputNumber
                 min={1}
                 max={32767}
-                formatter={(value) => numberFormatter(value, 0)}
+                formatter={(value) => optionalInputNumberFormatter(value, 0)}
                 parser={numberParser}
                 style={{ width: '100%' }}
               />

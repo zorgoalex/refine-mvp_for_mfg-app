@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   buildCutAddWarning,
   buildFilmTextureMap,
@@ -89,6 +89,13 @@ describe('cutPageHelpers', () => {
     expect(result.pending).toBe(false);
     expect(calls).toBe(3);
     expect(sleeps).toEqual([10, 10]); // slept between the two pending attempts
+  });
+
+  it('pollPdf returns the original ready result without sleeping', async () => {
+    const ready = { pending: false as const, blob: new Blob(['pdf']), fileName: null };
+    const sleep = vi.fn();
+    expect(await pollPdf(async () => ready, { sleep })).toBe(ready);
+    expect(sleep).not.toHaveBeenCalled();
   });
 
   it('pollPdf throws after exhausting attempts while still pending', async () => {

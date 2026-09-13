@@ -45,7 +45,12 @@ export const PaymentEdit: React.FC<IResourceComponentsProps> = () => {
 
         <Row gutter={16}>
           <Col span={8}>
-            <Form.Item label="Дата платежа" name="payment_date" rules={[{ required: true, message: "Обязательное поле" }]}>
+            <Form.Item
+              label="Дата платежа"
+              name="payment_date"
+              getValueProps={(value) => ({ value: value ? dayjs(value) : undefined })}
+              rules={[{ required: true, message: "Обязательное поле" }]}
+            >
               <DatePicker style={{ width: "100%" }} placeholder="Выберите дату" format="DD.MM.YYYY" />
             </Form.Item>
           </Col>

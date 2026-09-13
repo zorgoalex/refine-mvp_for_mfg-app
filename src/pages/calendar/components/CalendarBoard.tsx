@@ -549,6 +549,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   // управляет флаг `visible`, а не наличие order.
   const handleCloseContextMenu = () => {
     setContextMenu((prev) => ({
+      ...prev,
       visible: false,
       x: 0,
       y: 0,

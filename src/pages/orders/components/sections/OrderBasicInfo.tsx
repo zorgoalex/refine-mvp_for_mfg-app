@@ -12,7 +12,8 @@ import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { OrderLifecycleReadSurface, useSelect } from '../../../../query/orderLifecycleQueries';
 import { useDataProvider, useInvalidate } from '@refinedev/core';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
-import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
+import { numberParser } from '../../../../utils/numberFormat';
+import { optionalInputNumberFormatter } from '../../../../utils/inputNumberFormat';
 import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/useOrderFormData';
 import { ClientQuickCreate } from '../modals/ClientQuickCreate';
 import { DowellingOrderQuickCreate } from '../modals/DowellingOrderQuickCreate';
@@ -550,7 +551,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
                 onChange={(value) => updateHeaderField('priority', value || 100)}
                 min={1}
                 max={100}
-                formatter={(value) => numberFormatter(value, 0)}
+                formatter={(value) => optionalInputNumberFormatter(value, 0)}
                 parser={numberParser}
                 style={{ width: '100%' }}
               />

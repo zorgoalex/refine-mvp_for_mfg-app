@@ -334,7 +334,7 @@ export function buildSheetPieceOverlays(
         }),
       };
     })
-    .filter((overlay): overlay is CutPieceOverlay => overlay !== null);
+    .filter((overlay): overlay is NonNullable<typeof overlay> => overlay !== null);
 }
 
 export interface CutSheetVacuumOrientationWarningItem {

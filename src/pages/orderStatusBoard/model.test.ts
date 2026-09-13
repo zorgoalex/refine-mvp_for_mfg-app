@@ -764,6 +764,19 @@ describe('order status board model', () => {
     );
   });
 
+  it.each(['1d', '1w', '2w', '1m'])('accepts the supported CNC period %s', period => {
+    const state = parseOrderStatusBoardViewState(new URLSearchParams({ flow: 'cnc', period }), { cncTelegram: true });
+    expect(state.cncOrderSearchPeriod).toBe(period);
+    expect(serializeOrderStatusBoardViewState(state).get('period')).toBe(period);
+  });
+
+  it.each(['', '1y', '1W', ' 1w', 'toString', '__proto__'])('rejects unsupported CNC period %j', period => {
+    const state = parseOrderStatusBoardViewState(new URLSearchParams({ flow: 'cnc', period }), {
+      cncTelegram: true, defaultCncOrderSearchPeriod: '1m',
+    });
+    expect(state.cncOrderSearchPeriod).toBe('1m');
+  });
+
   it('keeps CNC today as visual flow without changing status-board API type', () => {
     const disabled = parseOrderStatusBoardViewState(new URLSearchParams('flow=cnc'));
     const state = parseOrderStatusBoardViewState(

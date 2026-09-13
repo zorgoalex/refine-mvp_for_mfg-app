@@ -62,7 +62,7 @@ export type OrderStatusBoardVisualFlow = OrderStatusBoardType | 'cnc_today';
 export type CncOrderSearchPeriod = '1d' | '1w' | '2w' | '1m';
 export type CncCardDisplayMode = 'standard' | 'compact' | 'minimal' | 'screenshot';
 export const DEFAULT_CNC_ORDER_SEARCH_PERIOD: CncOrderSearchPeriod = '1w';
-const CNC_ORDER_SEARCH_PERIODS = new Set<CncOrderSearchPeriod>(['1d', '1w', '2w', '1m']);
+const CNC_ORDER_SEARCH_PERIODS: ReadonlySet<string> = new Set<CncOrderSearchPeriod>(['1d', '1w', '2w', '1m']);
 export const DEFAULT_ORDER_STATUS_BOARD_SORT = {
   sortBy: 'priority',
   sortOrder: 'asc',

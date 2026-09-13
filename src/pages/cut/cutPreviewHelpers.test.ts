@@ -203,6 +203,21 @@ describe('cutPreviewHelpers', () => {
       ],
     };
 
+    it('filters missing unlabelled pieces without dropping or reordering valid overlays', () => {
+      const mixed = {
+        ...placements,
+        pieces: [
+          placements.pieces[0],
+          { ...placements.pieces[0], item_id: 'missing' },
+          { ...placements.pieces[0], instance: 2 },
+        ],
+      };
+      const overlays = buildSheetPieceOverlays(mixed, [{ ...item, orderDeleted: true }], false);
+      expect(overlays.map(overlay => overlay.key)).toEqual(['det-42:1', 'det-42:2']);
+      expect(overlays.every(overlay => overlay.orderDeleted === true)).toBe(true);
+      expect(buildSheetPieceOverlays(mixed, [], false)).toEqual([]);
+    });
+
     it('uses frozen original dimensions in native portrait labels', () => {
       const native = {
         ...placements,

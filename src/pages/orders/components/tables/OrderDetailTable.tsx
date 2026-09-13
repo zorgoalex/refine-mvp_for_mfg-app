@@ -14,6 +14,7 @@ import { Link } from 'react-router-dom';
 import { useDragSelection } from '../../../../hooks/useDragSelection';
 import { FilmQuickCreate } from '../modals/FilmQuickCreate';
 import type { ColumnsType } from 'antd/es/table';
+import { getTableColumnDataIndex } from '../../utils/tableCompatibility';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { OrderLifecycleReadSurface, useSelect } from '../../../../query/orderLifecycleQueries';
 import type { OrderDetail, OrderHdfDetail } from '../../../../types/orders';
@@ -2639,12 +2640,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     [columns, columnSettings],
   );
   const inlineTabFields = orderDetailInlineTabFields(
-    visibleColumns.map((column) => String(column.key ?? column.dataIndex ?? '')),
+    visibleColumns.map((column) => String(column.key ?? getTableColumnDataIndex(column) ?? '')),
     { detailCostEditable: isSumEditable },
   );
   inlineTabFieldsRef.current = inlineTabFields;
   const spreadsheetColumnKeys = orderDetailSpreadsheetColumnKeys(
-    visibleColumns.map((column) => String(column.key ?? column.dataIndex ?? '')),
+    visibleColumns.map((column) => String(column.key ?? getTableColumnDataIndex(column) ?? '')),
   );
   const isSpreadsheetCellEditable = (columnKey: React.Key) =>
     ORDER_DETAIL_EDITABLE_CELL_KEYS.has(columnKey)
