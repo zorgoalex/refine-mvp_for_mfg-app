@@ -1,7 +1,8 @@
 import { CAD_MAX_GROUPS, createGroups, type CadGroup, type CadSourcePart, type CadSourceSnapshot } from '@shared/cad-workspace';
 import { placedBounds } from './cadCanvasGeometry';
 
-export const POSITION_GAP_MM = 150;
+export const POSITION_GAP_X_MM = 300;
+export const POSITION_GAP_Y_MM = 150;
 export const INSTANCE_GAP_MM = 50;
 
 /** Conservative legacy auto-layout detection. Never infer pristine from version alone. */
@@ -45,15 +46,15 @@ export function layoutPositionBlocks(groups: CadGroup[], sources: CadSourceSnaps
   const pack = (limit: number) => {
     let x = 0, top = 0, rowHeight = 0, width = 0;
     const placements = blocks.map(block => {
-      if (x > 0 && x + block.width > limit) { top += rowHeight + POSITION_GAP_MM; x = 0; rowHeight = 0; }
+      if (x > 0 && x + block.width > limit) { top += rowHeight + POSITION_GAP_Y_MM; x = 0; rowHeight = 0; }
       const p = { x, top }; width = Math.max(width, x + block.width);
-      x += block.width + POSITION_GAP_MM; rowHeight = Math.max(rowHeight, block.height);
+      x += block.width + POSITION_GAP_X_MM; rowHeight = Math.max(rowHeight, block.height);
       return p;
     });
     const height = top + rowHeight;
     return { placements, width, height, score: Math.max(width / ratio, height) };
   };
-  const area = blocks.reduce((n, b) => n + (b.width + POSITION_GAP_MM) * (b.height + POSITION_GAP_MM), 0);
+  const area = blocks.reduce((n, b) => n + (b.width + POSITION_GAP_X_MM) * (b.height + POSITION_GAP_Y_MM), 0);
   const widest = Math.max(...blocks.map(b => b.width)), ideal = Math.sqrt(area * ratio);
   let best = pack(widest);
   // Fixed bounded search: <=50 linear passes even for5000 different positions.

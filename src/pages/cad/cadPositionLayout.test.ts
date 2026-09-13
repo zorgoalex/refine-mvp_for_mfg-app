@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createGroups, type CadSourceSnapshot } from '@shared/cad-workspace';
 import { expandInstances } from './cadInstances';
 import { placedBounds } from './cadCanvasGeometry';
-import { isInitialPositionLayout, layoutPositionBlocks, POSITION_GAP_MM } from './cadPositionLayout';
+import { isInitialPositionLayout, layoutPositionBlocks } from './cadPositionLayout';
 
 function fixture(count = 12, quantity = 4) {
   const source: CadSourceSnapshot = { id: 's', orderId: 1, orderName: 'Тест', capturedAt: '', parts: Array.from({ length: count }, (_, i) => ({
@@ -24,7 +24,7 @@ describe('position-block display layout', () => {
     const single = fixture(5, 1);
     expect(isInitialPositionLayout(single.groups, [single.source], 1)).toBe(true);
   });
-  it('keeps position blocks disjoint with equal XY gaps and source order RTL then down', () => {
+  it('doubles horizontal block gaps to300mm, retains150mm vertical and50mm internal gaps', () => {
     const { source, copies } = fixture();
     const layout = layoutPositionBlocks(copies, [source], 1.6);
     const blocks = source.parts.map(p => {
@@ -32,13 +32,15 @@ describe('position-block display layout', () => {
       return { minX: Math.min(...boxes.map(b => b.minX)), maxX: Math.max(...boxes.map(b => b.maxX)),
         minY: Math.min(...boxes.map(b => b.minY)), maxY: Math.max(...boxes.map(b => b.maxY)) };
     });
-    let rows = 1;
+    expect(layout[0].xMm - layout[1].xMm - source.parts[0].widthMm).toBe(50);
+    let rows = 1, horizontalGaps = 0;
     for (let i = 1; i < blocks.length; i++) {
       const prev = blocks[i - 1], next = blocks[i];
-      if (next.maxY === prev.maxY) expect(prev.minX - next.maxX).toBeCloseTo(POSITION_GAP_MM);
-      else { rows++; expect(prev.minY - next.maxY).toBeCloseTo(POSITION_GAP_MM); expect(next.maxX).toBe(blocks[0].maxX); }
+      if (next.maxY === prev.maxY) { horizontalGaps++; expect(prev.minX - next.maxX).toBeCloseTo(300); }
+      else { rows++; expect(prev.minY - next.maxY).toBeCloseTo(150); expect(next.maxX).toBe(blocks[0].maxX); }
     }
     expect(rows).toBeGreaterThan(1);
+    expect(horizontalGaps).toBeGreaterThan(0);
     for (let a = 0; a < blocks.length; a++) for (let b = a + 1; b < blocks.length; b++) {
       const x = blocks[a], y = blocks[b];
       expect(x.maxX <= y.minX || y.maxX <= x.minX || x.maxY <= y.minY || y.maxY <= x.minY).toBe(true);
