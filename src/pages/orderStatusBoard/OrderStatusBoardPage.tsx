@@ -110,6 +110,8 @@ import {
   buildCncOrderFilterOptions,
   buildOrderStatusBoardDatasetKey,
   buildCncOrderMissingDetails,
+  indexCncOrderComposition,
+  cncOrderDetailSourceKeys,
   collectCncOrderIds,
   DEFAULT_CNC_ORDER_SEARCH_PERIOD,
   DEFAULT_MDF_ORDER_CARD_SORT,
@@ -8729,6 +8731,7 @@ export function buildCncOrderReadiness(
   historicalBathReadiness: readonly CncHistoricalBathReadiness[] = [],
 ): Map<number, CncOrderReadiness> {
   const orders = new Map<number, Map<string, CncReadinessDetailTotals>>();
+  const seenBathIds = new Set<string>();
   const getDetail = (
     orderId: number | null | undefined,
     detailId: number | null | undefined,
@@ -8808,6 +8811,8 @@ export function buildCncOrderReadiness(
     }
 
     for (const bath of column.baths) {
+      if (seenBathIds.has(bath.bathCardId)) continue;
+      seenBathIds.add(bath.bathCardId);
       const bathTarget = resolveCncManualTarget(
         'bath',
         bath.bathCardId,
@@ -8834,6 +8839,8 @@ export function buildCncOrderReadiness(
   // These sources are physically packed: terminal automatic placement wins over
   // every manual override. Preserve volume without recreating visible cards.
   for (const bath of historicalBathReadiness) {
+    if (seenBathIds.has(bath.bathCardId)) continue;
+    seenBathIds.add(bath.bathCardId);
     for (const [index, item] of bath.items.entries()) {
       const detail = getDetail(item.orderId, item.detailId, item.detailNumber,
         `historical-bath:${bath.bathCardId}:${index}`);
@@ -8854,21 +8861,16 @@ export function buildCncOrderReadiness(
           detail.packetCut + detail.bazisCutReady,
           sourceTotal,
         );
-        const bathTotal = detail.bathTotal;
-        accumulator.packetTotal += sourceTotal;
-        accumulator.packetCut += sourceCut;
-        accumulator.bathTotal += bathTotal;
-        accumulator.rolled += Math.min(detail.rolled, Math.max(sourceTotal, bathTotal));
+        accumulator.total += Math.max(sourceTotal, detail.bathTotal);
+        accumulator.cut += Math.max(0, sourceCut - detail.rolled);
+        accumulator.rolled += detail.rolled;
         return accumulator;
       },
-      { bathTotal: 0, packetTotal: 0, packetCut: 0, rolled: 0 },
+      { total: 0, cut: 0, rolled: 0 },
     );
-    const totalDetails = Math.max(order.bathTotal, order.packetTotal);
-    const rolledDetails = Math.min(order.rolled, totalDetails);
-    const cutDetails = Math.min(
-      Math.max(0, order.packetCut - rolledDetails),
-      Math.max(0, totalDetails - rolledDetails),
-    );
+    const totalDetails = order.total;
+    const rolledDetails = order.rolled;
+    const cutDetails = order.cut;
     result.set(orderId, {
       totalDetails,
       cutDetails,
@@ -9078,31 +9080,26 @@ function normalizeCncOrderReadiness(
   };
   // Match the complete order composition, not its aggregate quantity. A source
   // with a known but conflicting ID must never fall back to its detail number.
-  const requiredById = new Map<number, OrderStatusBoardCard['details'][number]>();
-  for (const detail of card.details ?? []) {
-    const id = positiveIntegerOrNull(detail.detailId);
-    if (id === null || nonNegativeInteger(detail.quantity) === 0) continue;
-    const previous = requiredById.get(id);
-    if (!previous || detail.quantity > previous.quantity) requiredById.set(id, detail);
-  }
-  const numberCounts = new Map<number, number>();
-  for (const detail of requiredById.values()) {
-    const number = positiveIntegerOrNull(detail.detailNumber);
-    if (number !== null) numberCounts.set(number, (numberCounts.get(number) ?? 0) + 1);
-  }
+  const { details, numberCounts } = indexCncOrderComposition(card);
   const creditedQuantities: CncPositionQuantities = { cut: 0, rolled: 0 };
+  const consumedKeys = new Set<string>();
+  let cutDetails = 0;
+  let rolledDetails = 0;
   let requiredTotal = 0;
-  for (const detail of requiredById.values()) {
+  for (const detail of details) {
     const required = nonNegativeInteger(detail.quantity);
     requiredTotal += required;
-    const byId = source.positionQuantities?.get(`id:${detail.detailId}`);
-    const number = positiveIntegerOrNull(detail.detailNumber);
-    const byNumber = number !== null && numberCounts.get(number) === 1
-      ? source.positionQuantities?.get(`number:${number}`)
-      : undefined;
     // ID-based and ID-less number-based rows are independent source portions.
-    const cut = nonNegativeInteger(byId?.cut ?? 0) + nonNegativeInteger(byNumber?.cut ?? 0);
-    const rolled = nonNegativeInteger(byId?.rolled ?? 0) + nonNegativeInteger(byNumber?.rolled ?? 0);
+    let cut = 0;
+    let rolled = 0;
+    for (const key of cncOrderDetailSourceKeys(detail, numberCounts)) {
+      consumedKeys.add(key);
+      const quantities = source.positionQuantities?.get(key);
+      cut += nonNegativeInteger(quantities?.cut ?? 0);
+      rolled += nonNegativeInteger(quantities?.rolled ?? 0);
+    }
+    cutDetails += Math.max(0, cut - rolled);
+    rolledDetails += rolled;
     const rolledCredit = Math.min(required, rolled);
     creditedQuantities.rolled += rolledCredit;
     creditedQuantities.cut += Math.min(required - rolledCredit, Math.max(0, cut - rolled));
@@ -9111,9 +9108,18 @@ function normalizeCncOrderReadiness(
   // A partsCount larger than the known composition leaves an uncovered remainder.
   const totalDetails = Math.max(fallbackTotal, requiredTotal)
     || nonNegativeInteger(source.totalDetails);
-  // Keep excess visible in numeric facts; only the progress bar is capped.
-  const rolledDetails = nonNegativeInteger(source.rolledDetails);
-  const cutDetails = nonNegativeInteger(source.cutDetails);
+  // Unmatched source positions remain visible facts but grant no readiness.
+  for (const [key, quantities] of source.positionQuantities ?? []) {
+    if (consumedKeys.has(key)) continue;
+    const cut = nonNegativeInteger(quantities.cut);
+    const rolled = nonNegativeInteger(quantities.rolled);
+    cutDetails += Math.max(0, cut - rolled);
+    rolledDetails += rolled;
+  }
+  if (!source.positionQuantities) {
+    cutDetails = nonNegativeInteger(source.cutDetails);
+    rolledDetails = nonNegativeInteger(source.rolledDetails);
+  }
   return {
     totalDetails,
     cutDetails,
