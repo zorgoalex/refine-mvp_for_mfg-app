@@ -2,11 +2,12 @@ import React, { useState } from 'react';
 import { Alert, Button, InputNumber, Modal, Select, Space, message } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import type { CadSourceSnapshot } from '@shared/cad-workspace';
-import { createGroups, validateComposition } from '@shared/cad-workspace';
+import { CAD_MAX_GROUPS, createGroups, validateComposition } from '@shared/cad-workspace';
 import { cadApi } from '../../api/cadApi';
 import { ordersApi } from '../../api/ordersApi';
 import { useCadRecipeCatalog } from './useCadRecipeCatalog';
 import type { CadDraft } from './cadAutosave';
+import { placedBounds } from './cadCanvasGeometry';
 
 export function CadMappingDialog({ open, active, onClose }: { open: boolean; active: boolean; onClose: () => void }) {
   const catalog = useCadRecipeCatalog(open, active, open);
@@ -30,11 +31,18 @@ export function CadImportDialog({ open, draft, onChange, onClose }: { open: bool
   const orders = useQuery(['cad-import-orders', search], () => ordersApi.list({ search, page: 1, pageSize: 50 }), { enabled: open });
   const add = () => {
     if (!source) return;
-    const groups = createGroups([source], () => crypto.randomUUID()).filter(g => (qty[g.detailId] ?? 0) > 0).map(g => ({ ...g, quantity: qty[g.detailId], yMm: g.yMm + Math.max(0, ...draft.groups.map(g => g.yMm + 1000)) }));
+    const total = draft.groups.reduce((n, g) => n + g.quantity, 0) + Object.values(qty).reduce((n, value) => n + Math.max(0, value), 0);
+    if (total > CAD_MAX_GROUPS) { message.error(`В варианте допустимо до ${CAD_MAX_GROUPS} экземпляров. Уменьшите добавляемое количество.`); return; }
+    const bottom = Math.max(0, ...draft.groups.map(g => {
+      const part = draft.sources.find(s => s.id === g.sourceSnapshotId)?.parts.find(p => p.detailId === g.detailId);
+      return part ? placedBounds(g, part).maxY : g.yMm;
+    })) + 50;
+    const groups = createGroups([source], () => crypto.randomUUID()).filter(g => (qty[g.detailId] ?? 0) > 0).map(g => ({ ...g, quantity: qty[g.detailId], yMm: g.yMm + bottom }));
     if (!groups.length) { message.warning('Укажите количество хотя бы одной позиции'); return; }
     const next = { sources: draft.sources.some(s => s.id === source.id) ? draft.sources : [...draft.sources, source], groups: [...draft.groups, ...groups] };
     const issues = validateComposition(next.groups, next.sources); if (issues.length) { message.error(issues[0].message); return; }
-    onChange(next); setSource(null); onClose();
+    try { onChange(next); setSource(null); onClose(); }
+    catch (error) { message.error(error instanceof Error ? error.message : 'Не удалось добавить детали'); }
   };
   return <Modal className="cad-compact" open={open} title="Добавить детали другого заказа" onCancel={onClose} onOk={add} okText="Добавить в вариант" okButtonProps={{ disabled: !source }} width={700}>
     <p>Количество в исходных заказах не изменится.</p><Space wrap><Select popupClassName="cad-compact" aria-label="Заказ для добавления" showSearch filterOption={false} onSearch={setSearch} value={orderId} style={{ width: 300 }} options={orders.data?.data.map(o => ({ value: o.orderId, label: o.orderName }))} onChange={id => { setOrderId(id); setSource(null); }} />

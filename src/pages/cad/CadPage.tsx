@@ -6,6 +6,7 @@ import { can } from '../../utils/permissions';
 import { CadLegacyPage } from './CadLegacyPage';
 import { CadEditorPage } from './CadEditorPage';
 import './cadCompact.css';
+import './cadDesktop.css';
 
 export function CadPage() {
   const allowed = can('cad.view') && can('orders.view');
@@ -13,5 +14,7 @@ export function CadPage() {
   if (!allowed) return <Alert type="warning" message="Нет доступа к CAD" />;
   if (capabilities.isLoading) return <Spin />;
   if (capabilities.isError) return <Alert type="error" message="CAD API недоступен" />;
-  return capabilities.data?.enabled && capabilities.data.editorEnabled ? <CadEditorPage /> : <CadLegacyPage />;
+  if (capabilities.data?.enabled && capabilities.data.editorEnabled) return capabilities.data.independentInstances
+    ? <CadEditorPage /> : <Alert type="info" message="Редактор экземпляров ожидает обновления API CAD" description="Сохранённые варианты не изменены. Обновите ERP и CAD-сервис перед использованием нового редактора." />;
+  return <CadLegacyPage />;
 }

@@ -1,0 +1,46 @@
+/* Desktop drawing workspace. Scoped: ERP touch controls elsewhere are unchanged. */
+.cad-page.cad-editor { padding: 4px !important; gap: 2px; min-height: 360px; }
+.cad-top-row { display: flex; align-items: center; gap: 8px; flex-shrink: 0; min-width: 0; flex-wrap: wrap; }
+.cad-editor-header { gap: 6px; }
+.cad-editor-header h1 { font-size: 13px; letter-spacing: 0; }
+.cad-editor-header > .ant-select { min-width: 170px; width: 200px; max-width: 260px; }
+.cad-editor-toolbar { margin-left: auto; gap: 4px; }
+.cad-editor-toolbar .ant-space { gap: 4px !important; }
+.cad-view-bar { padding: 2px 4px; gap: 4px; border-block: 1px solid #dce1e8; }
+.cad-view-bar .ant-space { gap: 8px !important; }
+.cad-editor-layout { grid-template-columns: minmax(0,1fr) auto; gap: 2px; }
+.cad-right-dock { display: flex; flex-direction: column; min-height: 0; width: 28px; gap: 2px; }
+.cad-right-dock:has(.is-open) { width: 280px; }
+.cad-right-dock .cad-side-panel { width: 100%; border-radius: 0; box-shadow: none; border-left: 1px solid #dce1e8; flex-shrink: 0; }
+.cad-right-dock .cad-side-panel.is-open { flex: 1; min-height: 0; }
+.cad-right-dock .cad-side-panel-toggle { min-width: 24px; margin: 1px; border-radius: 2px; }
+.cad-right-dock .cad-side-panel-body { padding: 4px; }
+.cad-right-dock .cad-part-list { min-height: 80px; }
+.cad-page .cad-canvas-shell { display: grid; grid-template-columns: 28px minmax(0,1fr); border-radius: 0; background: #fff; }
+.cad-editor-layout .cad-canvas-shell { border-radius: 0; }
+.cad-page .cad-canvas-tools { display: flex; flex-direction: column; align-items: center; gap: 2px !important; padding: 2px; border-right: 1px solid #dce1e8; }
+.cad-page .cad-canvas-tools .ant-btn { width: 22px; min-width: 22px; padding: 0; border-radius: 2px; }
+.cad-canvas-workspace { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #fff; }
+.cad-editor .cad-canvas-workspace .cad-canvas { flex: 1; min-height: 0; }
+.cad-measure-tools { padding: 2px 4px; border-bottom: 1px solid #dce1e8; flex-shrink: 0; }
+.cad-measure-tools .ant-input-number { width: 90px; }
+.cad-canvas-status { display: flex; justify-content: space-between; gap: 8px; padding: 1px 4px; font-size: 11px; line-height: 18px; border-top: 1px solid #dce1e8; color: #52606d; flex-shrink: 0; }
+.cad-document-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0; min-width: 0; }
+.cad-document-footer .cad-variant-tabs { min-width: 0; flex: 1; }
+.cad-document-footer .ant-tabs-tab { padding: 2px 4px; font-size: 12px; }
+.cad-document-footer > [role=status] { font-size: 11px; flex-shrink: 0; }
+.cad-part-list { margin: 4px 0; }
+.cad-part-card { height: 46px; padding: 2px 4px; gap: 6px; border-radius: 2px; }
+.cad-part-card > span { gap: 1px; overflow: hidden; }
+.cad-part-card strong { font-size: 12px; white-space: nowrap; }
+.cad-instance-warning { color: #ad6800; }
+.cad-instance-difference { font-size: 12px; padding: 4px; border-left: 2px solid #d48806; background: #fffbe6; color: #614700; }
+.cad-instance-difference .ant-btn { display: block; margin-top: 4px; }
+.cad-inspector h3 { font-size: 13px; margin-bottom: 4px; }
+.cad-inspector p { margin-block: 4px; font-size: 12px; }
+.cad-inspector details { margin-block: 6px; }
+.cad-inspector summary { padding-block: 3px; }
+.cad-inspector .ant-alert { padding: 4px; font-size: 12px; }
+.cad-inspector .ant-alert-description { font-size: 11px; }
+@media(max-width:1199px) { .cad-editor-layout { grid-template-columns: minmax(0,1fr); } }
+@media(max-width:700px) { .cad-top-row { gap: 4px; } .cad-editor-toolbar { margin-left: 0; } .cad-document-footer { flex-wrap: wrap; } }

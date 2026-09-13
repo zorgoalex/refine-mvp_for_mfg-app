@@ -13,6 +13,7 @@ import { CadDocumentError, applyVariantChanges, cloneVariant, createGroups, refr
 import type { CadJob, CadExportReview, CadSourceStatus, CadApprovalReceipt, CadApprovalCommand } from '../../shared/cad-api';
 import { CadClient } from './cad-client';
 import { cadRenderPart, compareCadSource, sourceComparisonHash, manufacturingChanges } from './cad-editor-rules';
+import { cadChangeSummary, cadSourceAuditSummary } from './cad-change-summary';
 
 interface RunRow {
   id: string; variant_id: string; revision: number; payload: unknown; actor: CurrentUser; request_id: string;
@@ -177,7 +178,7 @@ export class CadService implements OnModuleInit, OnModuleDestroy {
       const next = applyVariantChanges(before, version, groups, sources);
       await db.query('UPDATE cad_variants SET revision=$2,data=$3::jsonb WHERE id=$1', [id, next.version, JSON.stringify(next)]);
       await db.query('INSERT INTO cad_variant_revisions VALUES($1,$2,$3::jsonb)', [id, next.version, JSON.stringify(next)]);
-      await this.event(db, user, key, 'cad.variant.saved', next, id, { before: before.groups, after: next.groups, revision: next.version });
+      await this.event(db, user, key, 'cad.variant.saved', next, id, cadChangeSummary(before.version, before.groups, next.groups));
       return next;
     });
   }
@@ -191,7 +192,8 @@ export class CadService implements OnModuleInit, OnModuleDestroy {
         : cloneVariant(previous, randomUUID(), name, now);
       await this.checkManufacturingChanges(user, previous, next.groups);
       await this.insertVariant(db, next);
-      await this.event(db, user, key, refresh ? 'cad.variant.refreshed' : 'cad.variant.created', next, next.id, { parentId: previous.id, conflicts: validateComposition(next.groups, next.sources) });
+      const conflicts = validateComposition(next.groups, next.sources);
+      await this.event(db, user, key, refresh ? 'cad.variant.refreshed' : 'cad.variant.created', next, next.id, { parentId: previous.id, conflicts: conflicts.slice(0, 50), conflictCount: conflicts.length, conflictsTruncated: conflicts.length > 50 });
       return next;
     });
   }
@@ -264,14 +266,14 @@ export class CadService implements OnModuleInit, OnModuleDestroy {
       return this.sourceState(db, user, variant);
     });
     const base = { ready: readiness.ready, reviewId: null, runId: run.id, version: revision, variantName: variant.name,
-      sourceStatus: source.status, readiness, positions: variant.groups.length, quantity: variant.groups.reduce((n, g) => n + g.quantity, 0),
+      sourceStatus: source.status, readiness, positions: new Set(variant.groups.map(g => `${g.orderId}:${g.detailId}`)).size, quantity: variant.groups.reduce((n, g) => n + g.quantity, 0),
       changedGroupIds: variant.groups.filter(g => !original.rows[0]?.data.groups.some(old => JSON.stringify(old) === JSON.stringify(g))).map(g => g.id) };
     if (!readiness.ready) return base;
     return this.mutate(user, key, 'export-review', { id, revision, sourceHash: source.hash }, async db => {
       const reviewId = randomUUID(), expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
       await db.query(`INSERT INTO cad_export_reviews(id,actor_id,variant_id,revision,run_id,remote_job_id,source_hash,source_status,expires_at)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)`, [reviewId, user.id, id, revision, run.id, run.remote_job_id, source.hash, JSON.stringify(source.status), expiresAt]);
-      await this.event(db, user, key, 'cad.export.reviewed', variant, reviewId, { revision, sourceHash: source.hash, sourceStatus: source.status }, run.id);
+      await this.event(db, user, key, 'cad.export.reviewed', variant, reviewId, { revision, reviewId, sourceHash: source.hash, sourceStatus: cadSourceAuditSummary(source.status) }, run.id);
       return { ...base, reviewId, expiresAt };
     });
   }
@@ -306,7 +308,7 @@ export class CadService implements OnModuleInit, OnModuleDestroy {
     if (!run) return { run: null, job: null };
     // Archived revisions can reference orders removed from the current working version.
     await this.checkRunSources(user, run);
-    const job = run.remote_job_id ? await this.client.job(run.remote_job_id, ['queued', 'running'].includes(run.status)) : null;
+    const job = run.remote_job_id ? await this.client.job(run.remote_job_id, this.editorEnabled || ['queued', 'running'].includes(run.status)) : null;
     return { run: { id: run.id, status: run.status, lastError: run.last_error, packageId: run.package_id, packageRequested: run.package_requested }, job };
   }
   private async checkRunSources(user: CurrentUser, run: RunRow) {
@@ -333,7 +335,7 @@ export class CadService implements OnModuleInit, OnModuleDestroy {
       const current = locked.rows[0];
       await db.query('UPDATE cad_export_reviews SET acknowledged_at=COALESCE(acknowledged_at,now()) WHERE id=$1', [reviewId]);
       await this.event(db, user, key, 'cad.export.confirmed', archived, review.id,
-        { revision, sourceHash: review.source_hash, sourceStatus: review.source_status, acknowledgeStale }, run.id);
+        { revision, reviewId: review.id, sourceHash: review.source_hash, sourceStatus: cadSourceAuditSummary(review.source_status), acknowledgeStale }, run.id);
       if (current.package_requested && !current.package_id) return { runId: run.id };
       await db.query(`UPDATE cad_runs SET package_requested=true,package_actor=$2::jsonb,package_request_id=$3,
         attempts=0,last_error=NULL,next_attempt_at=now() WHERE id=$1`, [run.id, JSON.stringify(user), key]);
@@ -341,6 +343,22 @@ export class CadService implements OnModuleInit, OnModuleDestroy {
       if (current.package_id) await this.event(db, user, key, 'cad.package.completed', archived, run.id, { artifactId: current.package_id, reused: true }, run.id);
       return { runId: run.id };
     });
+  }
+  async files(user: CurrentUser, runId: string, offset: number) {
+    this.require(user, 'cad.export');
+    const rows = await this.database.query<RunRow>('SELECT * FROM cad_runs WHERE id=$1', [runId]);
+    const run = rows.rows[0];
+    if (!run?.remote_job_id) throw new ApiError(404, 'CAD_RUN_NOT_FOUND', 'Run not found');
+    await this.checkRunSources(user, run);
+    return this.client.files(run.remote_job_id, offset);
+  }
+  async readiness(user: CurrentUser, runId: string, offset: number) {
+    this.require(user, 'cad.export');
+    const rows = await this.database.query<RunRow>('SELECT * FROM cad_runs WHERE id=$1', [runId]);
+    const run = rows.rows[0];
+    if (!run?.remote_job_id) throw new ApiError(404, 'CAD_RUN_NOT_FOUND', 'Run not found');
+    await this.checkRunSources(user, run);
+    return this.client.readiness(run.remote_job_id, offset);
   }
   async download(user: CurrentUser, runId: string, artifactId: string, reviewId?: string): Promise<Response> {
     this.require(user, 'cad.export');
@@ -351,8 +369,7 @@ export class CadService implements OnModuleInit, OnModuleDestroy {
     if (!run.package_id || !run.remote_job_id) throw new ApiError(409, 'CAD_PACKAGE_REQUIRED', 'Approved package required');
     await this.checkExportReview(this.database, user, run, reviewId);
     if (!(await this.client.readiness(run.remote_job_id)).ready) throw new ApiError(409, 'CAD_APPROVAL_REQUIRED', 'Every included part must be approved');
-    const job = await this.client.job(run.remote_job_id);
-    if (artifactId !== run.package_id && !job.package_files.some(f => f.id === artifactId) && !job.items.some(i => i.result?.files?.some(f => f.id === artifactId))) throw new ApiError(404, 'ARTIFACT_NOT_FOUND', 'Artifact not in selected revision');
+    await this.client.jobArtifact(run.remote_job_id, artifactId);
     const response = await this.client.artifact(artifactId), bytes = await response.arrayBuffer();
     await this.database.transaction(async db => {
       await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
@@ -372,7 +389,7 @@ export class CadService implements OnModuleInit, OnModuleDestroy {
     const row = await this.database.query<RunRow>('SELECT * FROM cad_runs WHERE variant_id=$1 AND revision=$2', [id, version]);
     const run = row.rows[0];
     if (!run?.remote_job_id) throw new ApiError(409, 'CAD_RENDER_REQUIRED', 'Render this version first');
-    const part = (await this.client.readiness(run.remote_job_id)).items.find(p => p.part_id === groupId);
+    const part = await this.client.readinessPart(run.remote_job_id, groupId);
     if (!part || part.manufacturing_hash !== manufacturingHash || part.status !== 'succeeded') throw new ApiError(409, 'CAD_APPROVAL_TARGET_CHANGED', 'Review the successful frozen part again');
     if (!reason.trim() || reason.length > 1000) throw new ApiError(422, 'CAD_APPROVAL_REASON_REQUIRED', 'Approval reason required');
     return this.mutate(user, key, 'approve', { id, version, groupId, manufacturingHash, reason }, async db => {
@@ -416,7 +433,7 @@ export class CadService implements OnModuleInit, OnModuleDestroy {
               WHERE rp.role_id=u.role_id AND rp.is_enabled AND pc.is_active)) AS allowed`, [actor.id, actor.roleId, actor.permissionsVersion ?? -1]);
         if (!authorization.rows[0]?.allowed) throw new ApiError(403, 'CAD_APPROVAL_AUTHORITY_CHANGED', 'Approver permissions changed; submit again');
         await this.checkRunSources(actor, run);
-        const part = (await this.client.readiness(run.remote_job_id)).items.find(p => p.part_id === command.group_id);
+        const part = await this.client.readinessPart(run.remote_job_id, command.group_id);
         if (part?.manufacturing_hash !== command.manufacturing_hash || part.status !== 'succeeded') throw new ApiError(409, 'CAD_APPROVAL_TARGET_CHANGED', 'Frozen target changed');
         await assertOwned();
         receipt = await this.client.approveException(run.remote_job_id, command.id, { part_id: command.group_id,
@@ -498,7 +515,7 @@ export class CadService implements OnModuleInit, OnModuleDestroy {
       } catch (error) {
         const code = error instanceof ApiError ? error.code : 'CAD_TRANSIENT_ERROR';
         await assertOwned();
-        const terminal = run.attempts >= 4 || code === 'PRODUCTION_APPROVAL_REQUIRED' || code === 'PACKAGE_INCOMPLETE';
+        const terminal = run.attempts >= 4 || ['PRODUCTION_APPROVAL_REQUIRED', 'PACKAGE_INCOMPLETE', 'PACKAGE_SIZE_LIMIT', 'PACKAGE_TIME_LIMIT'].includes(code);
         await this.database.transaction(async db => {
           await db.query(`UPDATE cad_runs SET last_error=$2,attempts=attempts+1,updated_at=now(),
             next_attempt_at=now()+interval '15 seconds',package_requested=CASE WHEN $3 THEN false ELSE package_requested END,

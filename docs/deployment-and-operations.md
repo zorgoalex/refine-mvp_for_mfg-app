@@ -29,6 +29,14 @@ BACKEND_ENABLE_PRODUCTION_ACTIONS=true
 
 Флаг нового UI не отключает серверные проверки. Откат допустим через этот флаг,
 но не на backend без поддержки политик и подтверждений.
+
+Для редактора независимых экземпляров сначала обновите CAD до capabilities
+`max_parts=5000`, `bounded_runs=true`, `file_pages=true`, `readiness_pages=true`, затем ERP backend и
+frontend. ERP возвращает `independentInstances=true` только при совместимом CAD;
+иначе новый frontend показывает сообщение об ожидаемом обновлении API.
+После сохранения развёрнутых вариантов нельзя откатывать серверы на лимит500
+групп. Отключение UI не заменяет совместимость архивов и экспортного API.
+Для запросов package ERP использует timeout120с, для остальных —30с.
 См. [права и флаги CAD](configuration-and-auth.md#cad) и
 [руководство редактора](feature-guides.md#cad-редактор-фрезеровок).
 
