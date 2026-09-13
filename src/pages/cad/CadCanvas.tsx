@@ -7,7 +7,7 @@ import { Button, InputNumber, Space } from 'antd';
 import { AimOutlined, DragOutlined, SelectOutlined, ColumnWidthOutlined, ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons';
 import { Tooltip } from '../../ui/tooltipDelay';
 import { loadCamera, saveCamera } from './cadViewState';
-import { placedBounds, regionPath } from './cadCanvasGeometry';
+import { cadInstanceLabel, placedBounds, regionPath } from './cadCanvasGeometry';
 
 const pathDataCache = new WeakMap<CadPath, string>();
 export function cadPathData(path: CadPath): string {
@@ -46,6 +46,7 @@ export function CadCanvas({ documentId, groups, sources, job, readOnly, selected
   }, [onViewportSize]);
   const rendered = useMemo(() => new Map(job?.items.map(i => [i.part_id, i]) ?? []), [job]);
   const parts = useMemo(() => new Map(sources.flatMap(s => s.parts.map(p => [`${s.id}:${p.detailId}`, p] as const))), [sources]);
+  const sourceById = useMemo(() => new Map(sources.map(s => [s.id, s])), [sources]);
   const bounds = useMemo(() => new Map(groups.flatMap(g => {
     const p = parts.get(`${g.sourceSnapshotId}:${g.detailId}`);
     return p ? [[g.id, placedBounds(g, p, expanded && selected.includes(g.id) ? Math.min(g.quantity, 200) : 1)] as const] : [];
@@ -132,7 +133,7 @@ export function CadCanvas({ documentId, groups, sources, job, readOnly, selected
                 {selected.includes(g.id) && <Rect width={part.widthMm} height={part.heightMm} stroke="#2563eb" strokeWidth={2 / camera.zoom} listening={false} />}
                 {selected.length === 1 && selected[0] === g.id && view?.dimensions.filter(d => d.parameter === dimension).map(d => <Group key={d.parameter} listening={false}><Line points={d.points.flatMap(p => [p.x, p.y])} stroke="#c026d3" strokeWidth={3 / camera.zoom} closed={d.kind === 'region'} dash={d.kind === 'region' ? [5 / camera.zoom, 3 / camera.zoom] : undefined} /><Text x={d.points[0]?.x ?? 0} y={d.points[0]?.y ?? 0} scaleY={-1} fill="#a21caf" fontSize={14 / camera.zoom} text={`${d.value} ${d.kind === 'angle' ? '°' : 'мм'}`} /></Group>)}
                 {changed?.has(g.id) && <Text x={4 / camera.zoom} y={part.heightMm - 4 / camera.zoom} scaleY={-1} text="⚠" fill="#ad6800" fontSize={14 / camera.zoom} listening={false} />}
-                {(part.widthMm * camera.zoom >= 90 || selected.includes(g.id)) && <Text x={0} y={-12 / camera.zoom} scaleY={-1} fontSize={12 / camera.zoom} fill="#344054" listening={false} text={`№${part.orderId} / ${part.detailNumber} · ${ordinals?.has(g.id) ? `${ordinals.get(g.id)!.number}/${ordinals.get(g.id)!.total}` : copies > 1 ? `${n + 1}/${g.quantity}` : `×${g.quantity}`}`} />}
+                {(part.widthMm * camera.zoom >= 90 || selected.includes(g.id)) && <Text x={0} y={-12 / camera.zoom} scaleY={-1} fontSize={12 / camera.zoom} fill="#344054" listening={false} text={cadInstanceLabel(sourceById.get(g.sourceSnapshotId), part.detailNumber, ordinals?.has(g.id) ? `${ordinals.get(g.id)!.number}/${ordinals.get(g.id)!.total}` : copies > 1 ? `${n + 1}/${g.quantity}` : `×${g.quantity}`)} />}
               </Group>)}
             </Group>;
           })}
