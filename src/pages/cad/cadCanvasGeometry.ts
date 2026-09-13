@@ -1,5 +1,8 @@
-import type { CadGroup, CadSourcePart } from '@shared/cad-workspace';
+import type { CadGroup, CadSourcePart, CadSourceSnapshot } from '@shared/cad-workspace';
 import type { CadVisualization } from '@shared/cad-api';
+export function cadInstanceLabel(source: CadSourceSnapshot | undefined, detailNumber: number, instance: string) {
+  return `№${source?.orderName.trim() || '—'} / ${detailNumber} · ${instance}`;
+}
 export function placedBounds(group: CadGroup, part: CadSourcePart, copies = 1) {
   const angle = group.rotationDeg * Math.PI / 180, c = Math.cos(angle), s = Math.sin(angle);
   const width = part.widthMm + (copies - 1) * (part.widthMm + 50);
