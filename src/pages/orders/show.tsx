@@ -149,6 +149,7 @@ import {
 } from '../../workspace/workspaceOperationPins';
 
 type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
+type OrderInfoTab = { key: string; panel: OrderInfoPanelKey | null; label: string; color: string };
 type OrderExcelExportMode = 'full' | 'without-prices';
 
 const productionPdfButtonStyle: CSSProperties = {
@@ -2884,12 +2885,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       </Space>
     </div>
   );
-  const visibleOrderInfoTabs: Array<{
-    key: string;
-    panel: OrderInfoPanelKey | null;
-    label: string;
-    color: string;
-  }> = (isOperational ? [
+  const visibleOrderInfoTabs: OrderInfoTab[] = (isOperational ? [
     { key: 'overview', panel: null, label: 'Обзор', color: 'var(--operational-brand)' },
     { key: 'composition', panel: 'groups', label: 'Состав', color: 'var(--operational-brand)' },
     { key: 'materials', panel: 'additional', label: 'Материалы', color: 'var(--operational-brand)' },
@@ -2899,7 +2895,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     { key: 'logistics', panel: 'deadlines', label: 'Логистика', color: 'var(--operational-brand)' },
     { key: 'labels', panel: 'additional', label: 'Бирки', color: 'var(--operational-brand)' },
     { key: 'activity', panel: 'deadlines', label: 'Активность', color: 'var(--operational-brand)' },
-  ] : orderInfoTabs.map((tab) => ({ ...tab, panel: tab.key })))
+  ] satisfies OrderInfoTab[] : orderInfoTabs.map((tab) => ({ ...tab, panel: tab.key })))
     .filter((tab) => canViewFinancials || tab.panel !== 'finance');
   const activeOrderInfoLabel = isOperational
     ? visibleOrderInfoTabs.find((tab) => tab.key === activeOperationalTab)?.label
