@@ -1552,9 +1552,9 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       fixed: "right",
       render: (_, record) => (
         <Space size={4}>
-          <ShowButton hideText size="small" icon={<EyeOutlined style={{ fontSize: 12 }} />} recordItemId={record.order_id} meta={{ syncWithLocation: true }} />
+          <ShowButton resource="orders_view" hideText size="small" icon={<EyeOutlined style={{ fontSize: 12 }} />} recordItemId={record.order_id} meta={{ syncWithLocation: true }} />
           {canUpdateOrders && (
-            <EditButton hideText size="small" icon={<EditOutlined style={{ fontSize: 12 }} />} recordItemId={record.order_id} meta={{ syncWithLocation: true }} />
+            <EditButton resource="orders_view" hideText size="small" icon={<EditOutlined style={{ fontSize: 12 }} />} recordItemId={record.order_id} meta={{ syncWithLocation: true }} />
           )}
         </Space>
       ),
