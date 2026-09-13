@@ -29,6 +29,11 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-09-13", title: "CAD: номер заказа в подписях деталей",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: ["Подписи на канвасе показывают номер исходного заказа, а не его внутренний ID. Номер позиции и экземпляра сохранены; добавленные детали подписываются своим заказом."],
+  },
+  {
     version: APP_VERSION, date: "2026-09-13", title: "CAD: больше места между позициями",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: ["Боковой промежуток между блоками позиций увеличен вдвое: со150 до300 мм. Вертикальный зазор150 мм и промежутки внутри позиции50 мм сохранены."],
