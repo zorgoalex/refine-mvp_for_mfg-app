@@ -17,7 +17,7 @@ export interface ListCncTelegramTodayCommand {
   workday?: string | null;
   workdayFrom?: string | null;
   workdayTo?: string | null;
-  operationalWindow?: 'month';
+  operationalWindow?: 'month' | 'two_months';
   focusBathCardId?: string;
   requestId?: string;
 }

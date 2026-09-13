@@ -73,6 +73,7 @@ import type {
 import type {
   CncTelegramBathCard,
   CncHistoricalBathReadiness,
+  CncHistoricalReadinessSource,
   CncTelegramBazisCutSetCard,
   CncTelegramOriginalBoardResponse,
   CncTelegramPacket,
@@ -117,6 +118,7 @@ import {
   DEFAULT_MDF_ORDER_CARD_SORT,
   DEFAULT_ORDER_STATUS_BOARD_SORT,
   applyMdfBoardHiddenCardRulesToColumns,
+  applyMdfHiddenRulesToReadinessSources,
   filterBoardColumns,
   filterCncBathColumnsByMachineOrderMatches,
   filterCncOrderCardsByPlannedOrderDate,
@@ -938,7 +940,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
               cncTelegramApi.consumePrefetchedToday({
                 dateFrom: displayRange.dateFrom,
                 dateTo: displayRange.dateTo,
-                operationalWindow: 'month',
+                operationalWindow: 'two_months',
                 ...(currentViewState.cncCardKind === 'bath' && currentViewState.cncCardId
                   ? { focusBathCardId: currentViewState.cncCardId } : {}),
               }, { cache: 'no-store' }),
@@ -953,12 +955,14 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             const orderBoardWasPrefetched = hasPrefetchedCncOrderStatusBoard(
               refreshedOrderIds,
               orderSortPreference,
+              false,
             );
             const prefetchedOrderBoard = orderBoardWasPrefetched
               ? await fetchCncOrderStatusBoard(
                   refreshedOrderIds,
                   orderSortPreference,
                   { cache: 'no-store' },
+                  false,
                 )
               : null;
             if (
@@ -981,6 +985,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
               cncOrderBoardRequestKeyRef.current = buildCncOrderStatusBoardRequestKey(
                 refreshedOrderIds,
                 currentViewState,
+                false,
               );
               setCncOrderBoard(prefetchedOrderBoard);
             }
@@ -991,6 +996,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
               refreshedOrderIds,
               orderSortPreference,
               { cache: 'no-store' },
+              false,
             );
             if (
               datasetRevisionRef.current !== revision
@@ -1001,6 +1007,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             cncOrderBoardRequestKeyRef.current = buildCncOrderStatusBoardRequestKey(
               refreshedOrderIds,
               currentViewState,
+              false,
             );
             startTransition(() => setCncOrderBoard(orderBoardResponse));
             return true;
@@ -1508,6 +1515,11 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     () => buildCncOrderStatusCards(cncOrderBoardColumns, cncOrderIds),
     [cncOrderBoardColumns, cncOrderIds],
   );
+  const cncHistoricalReadinessSources = useMemo(
+    () => cncOriginalView || cncToday?.historicalReadinessSources === undefined ? undefined
+      : applyMdfHiddenRulesToReadinessSources(cncToday.historicalReadinessSources, cncOrderStatusCards, mdfBoardHiddenStatusesSetting),
+    [cncOriginalView, cncToday?.historicalReadinessSources, cncOrderStatusCards, mdfBoardHiddenStatusesSetting],
+  );
   const cncHiddenProductionStatusIds = useMemo(
     () => resolveMdfBoardHiddenProductionStatusIds(
       cncOrderBoardColumns,
@@ -1801,7 +1813,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       return undefined;
     }
 
-    const requestKey = buildCncOrderStatusBoardRequestKey(cncOrderIds, viewState);
+    const requestKey = buildCncOrderStatusBoardRequestKey(cncOrderIds, viewState, cncOriginalView);
     if (preserveInitialMdfOrderBoardRef.current) {
       preserveInitialMdfOrderBoardRef.current = false;
       cncOrderBoardRequestKeyRef.current = requestKey;
@@ -1823,7 +1835,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
         const response = await fetchCncOrderStatusBoard(cncOrderIds, {
           sortBy: viewState.sortBy,
           sortOrder: viewState.sortOrder,
-        }, { cache: 'no-store' });
+        }, { cache: 'no-store' }, cncOriginalView);
         if (
           !cancelled
           && cncAuxiliaryRefreshRevisionRef.current === requestRevision
@@ -1850,7 +1862,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [active, cncOrderIds, isCncToday, viewState.sortBy, viewState.sortOrder]);
+  }, [active, cncOrderIds, isCncToday, viewState.sortBy, viewState.sortOrder, cncOriginalView]);
 
   useEffect(() => {
     if (!active) return undefined;
@@ -3001,6 +3013,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                 columns={cncRenderColumns}
                 readinessColumns={cncActiveColumns}
                 historicalBathReadiness={cncHistoricalBathReadiness}
+                historicalReadinessSources={cncHistoricalReadinessSources}
                 orderCards={cncOrderCards}
                 manualMoves={cncManualMoves}
                 mutedOrderIds={cncMutedOrderIds}
@@ -3170,6 +3183,7 @@ interface CncTelegramTodayColumnsProps {
   columns: CncTelegramTodayColumn[];
   readinessColumns: CncTelegramTodayColumn[];
   historicalBathReadiness?: readonly CncHistoricalBathReadiness[];
+  historicalReadinessSources?: readonly CncHistoricalReadinessSource[];
   orderCards: OrderStatusBoardCard[];
   manualMoves: CncBoardManualMoveState;
   mutedOrderIds: ReadonlySet<number>;
@@ -3564,6 +3578,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   columns,
   readinessColumns,
   historicalBathReadiness,
+  historicalReadinessSources,
   orderCards,
   manualMoves,
   mutedOrderIds,
@@ -3689,13 +3704,13 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   }, []);
   const orderReadinessByOrderId = useMemo(
     () => buildCncOrderReadiness(
-      applyCncManualMovesToColumns(readinessColumns, manualMoves), {}, historicalBathReadiness,
+      applyCncManualMovesToColumns(readinessColumns, manualMoves), manualMoves, historicalBathReadiness, historicalReadinessSources,
     ),
-    [manualMoves, readinessColumns, historicalBathReadiness],
+    [manualMoves, readinessColumns, historicalBathReadiness, historicalReadinessSources],
   );
   const orderMissingDetailsByOrderId = useMemo(
-    () => buildCncOrderMissingDetails(orderCards, readinessColumns),
-    [orderCards, readinessColumns],
+    () => buildCncOrderMissingDetails(orderCards, readinessColumns, historicalReadinessSources),
+    [orderCards, readinessColumns, historicalReadinessSources],
   );
   const currentOrderDisplayCards = useMemo(
     () => splitCncOrderCardsByManualColumn(
@@ -8383,12 +8398,13 @@ async function fetchCncOrderStatusBoard(
     sortOrder: OrderStatusBoardSortOrder;
   },
   options?: RequestOptions,
+  includeBazisAllocation = true,
 ): Promise<OrderStatusBoardResponse | null> {
   if (orderIds.length === 0) return null;
   const responses = await Promise.all(
     chunkCncOrderIds(orderIds).map((chunk) =>
       orderStatusBoardApi.consumePrefetchedGet(
-        cncOrderStatusBoardQuery(chunk, sortPreference),
+        cncOrderStatusBoardQuery(chunk, sortPreference, includeBazisAllocation),
         options,
       ),
     ),
@@ -8402,9 +8418,10 @@ function hasPrefetchedCncOrderStatusBoard(
     sortBy: OrderStatusBoardSortBy;
     sortOrder: OrderStatusBoardSortOrder;
   },
+  includeBazisAllocation = true,
 ): boolean {
   return orderIds.length > 0 && chunkCncOrderIds(orderIds).every((chunk) =>
-    orderStatusBoardApi.hasPrefetchedGet(cncOrderStatusBoardQuery(chunk, sortPreference)),
+    orderStatusBoardApi.hasPrefetchedGet(cncOrderStatusBoardQuery(chunk, sortPreference, includeBazisAllocation)),
   );
 }
 
@@ -8417,7 +8434,7 @@ export async function prefetchMdfOrderStatusBoard(
     Promise.all(
       chunkCncOrderIds(orderIds).map((chunk) =>
         orderStatusBoardApi.prefetchGet(
-          cncOrderStatusBoardQuery(chunk, DEFAULT_MDF_ORDER_CARD_SORT),
+          cncOrderStatusBoardQuery(chunk, DEFAULT_MDF_ORDER_CARD_SORT, response.historicalReadinessSources === undefined),
         ),
       ),
     ),
@@ -8454,11 +8471,13 @@ function cncOrderStatusBoardQuery(
     sortBy: OrderStatusBoardSortBy;
     sortOrder: OrderStatusBoardSortOrder;
   },
+  includeBazisAllocation = true,
 ) {
   return {
     board: 'production' as const,
     limit: CNC_ORDER_STATUS_BOARD_BATCH_SIZE,
     includeDone: true,
+    ...(includeBazisAllocation ? {} : { includeBazisAllocation: false }),
     orderIds,
     sortBy: sortPreference.sortBy,
     sortOrder: sortPreference.sortOrder,
@@ -8471,9 +8490,10 @@ export function buildCncOrderStatusBoardRequestKey(
     sortBy: OrderStatusBoardSortBy;
     sortOrder: OrderStatusBoardSortOrder;
   },
+  includeBazisAllocation = true,
 ): string {
   const normalizedOrderIds = [...new Set(orderIds)].sort((left, right) => left - right);
-  return `${sortPreference.sortBy}|${sortPreference.sortOrder}|${normalizedOrderIds.join(',')}`;
+  return `${sortPreference.sortBy}|${sortPreference.sortOrder}|${normalizedOrderIds.join(',')}${includeBazisAllocation ? '' : '|bounded'}`;
 }
 
 function chunkCncOrderIds(orderIds: readonly number[]): number[][] {
@@ -8730,6 +8750,7 @@ export function buildCncOrderReadiness(
   columns: CncTelegramTodayColumn[],
   manualMoves: CncBoardManualMoveState,
   historicalBathReadiness: readonly CncHistoricalBathReadiness[] = [],
+  historicalSources: readonly CncHistoricalReadinessSource[] = [],
 ): Map<number, CncOrderReadiness> {
   const orders = new Map<number, Map<string, CncReadinessDetailTotals>>();
   const seenBathIds = new Set<string>();
@@ -8849,6 +8870,34 @@ export function buildCncOrderReadiness(
       const quantity = nonNegativeInteger(item.quantity);
       detail.bathTotal += quantity;
       detail.rolled += quantity;
+    }
+  }
+
+  const seenSources = new Set(columns.flatMap(column => [
+    ...column.packets.map(card => `packet:${card.packetId}`),
+    ...(column.bazisCutSets ?? []).map(card => `bazisCutSet:${card.bazisCutSetId}`),
+    ...column.baths.map(card => `bath:${card.bathCardId}`),
+  ]));
+  for (const bathId of seenBathIds) seenSources.add(`bath:${bathId}`);
+  for (const source of historicalSources) {
+    const key = `${source.kind}:${source.cardId}`;
+    if (seenSources.has(key)) continue;
+    seenSources.add(key);
+    const target = resolveCncManualTarget(source.kind, source.cardId, source.column, manualMoves);
+    for (const [index, item] of source.items.entries()) {
+      const detail = getDetail(item.orderId, item.detailId, item.detailNumber, `history:${key}:${index}`);
+      if (!detail) continue;
+      const quantity = nonNegativeInteger(item.quantity);
+      if (source.kind === 'bath') {
+        detail.bathTotal += quantity;
+        if (target === 'baths_laminated' || target === 'completed_baths') detail.rolled += quantity;
+      } else if (source.kind === 'packet') {
+        detail.packetTotal += quantity;
+        if (target === 'completed' || target === 'completed_laminated') detail.packetCut += quantity;
+      } else {
+        detail.bazisCutTotal += quantity;
+        if (target === 'completed' || target === 'completed_laminated') detail.bazisCutReady += quantity;
+      }
     }
   }
 

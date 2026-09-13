@@ -3,12 +3,15 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { auditService } from '../../../common/audit/audit.service';
 import { ApiError } from '../../../common/errors/api-error';
-import { mdfOperationalMonthStart } from '../application/mdf-operational-window';
-import type { CncHistoricalBathReadinessDto } from '../dto/cnc-telegram.dto';
+import { mdfOperationalMonthStart, mdfOperationalTwoMonthStart } from '../application/mdf-operational-window';
+import type { CncHistoricalBathReadinessDto, CncHistoricalReadinessSourceDto } from '../dto/cnc-telegram.dto';
+import { cncPacketCountsForMdfReadinessSql, CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE,
+  CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE } from '../../../shared/cnc-material';
 import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { mdfCutReadinessCtes } from '../../../shared/cnc-material/cut-readiness-sql';
+import { productionBoardReadScopeSql } from '../../orders/adapters/pg-order-status-board-repository';
 import {
   CUT_RENDER_STYLES_SETTING_KEY,
   CUT_RENDER_STYLE_TELEGRAM_PHOTO,
@@ -272,6 +275,7 @@ interface ManualSvgCommentPresetRow extends QueryResultRow {
 }
 
 interface BathJoinedRow extends QueryResultRow {
+  valid_detail_owner?: boolean;
   readiness_only?: boolean;
   cut_result_id: string | number;
   cut_job_id: string | number;
@@ -478,6 +482,9 @@ export class PgCncTelegramRepository
       await currentDatabaseWorkday(this.database);
     const workdayTo = command.workdayTo ?? workday;
     const requestedFrom = command.workdayFrom ?? workday;
+    if (command.operationalWindow === 'two_months') {
+      return loadBoundedToday(this.database, command.currentUser, workdayTo, requestedFrom, command.focusBathCardId);
+    }
     const monthStart = mdfOperationalMonthStart(workdayTo);
     const workdayFrom = command.operationalWindow === 'month' && requestedFrom < monthStart
       ? monthStart : requestedFrom;
@@ -2983,7 +2990,7 @@ function manualSvgPresetSnapshot(preset: CncTelegramManualSvgCommentPresetDto): 
 
 function packetSelectSql(
   whereSql: string,
-  options: { coalesceSourceCreatedAt?: boolean } = {},
+  options: { coalesceSourceCreatedAt?: boolean; compact?: boolean } = {},
 ): string {
   return `
     SELECT
@@ -3011,19 +3018,19 @@ function packetSelectSql(
       p.completed_at,
       p.rework,
       p.comments_json,
-      p.tools_json,
-      p.doweling_links_json,
-      p.analysis_warnings_json,
+      ${options.compact ? 'NULL' : 'p.tools_json'} AS tools_json,
+      ${options.compact ? 'NULL' : 'p.doweling_links_json'} AS doweling_links_json,
+      ${options.compact ? 'NULL' : 'p.analysis_warnings_json'} AS analysis_warnings_json,
       p.ocr_engine,
       p.parser_version,
-      p.cut_layout_json,
+      ${options.compact ? 'NULL' : 'p.cut_layout_json'} AS cut_layout_json,
       p.svg_cut_job_id,
       svg_job.source_display_number AS svg_cut_job_display_number,
       p.svg_cut_result_id,
       svg_result.result_no AS svg_cut_result_no,
       p.svg_cut_import_status,
       p.svg_cut_import_note,
-      (
+      ${options.compact ? 'NULL' : `(
         SELECT COALESCE(jsonb_agg(
           jsonb_build_object(
             'cutGroupId', sheet_summary.cut_group_id,
@@ -3073,7 +3080,7 @@ function packetSelectSql(
           WHERE p.svg_cut_result_id IS NULL
             AND live_group.cut_job_id = p.svg_cut_job_id
         ) sheet_summary
-      ) AS svg_cut_sheets_json,
+      )`} AS svg_cut_sheets_json,
       p.updated_at,
       p.mdf_board_hidden_at,
       packet_manual_move.target_column AS manual_target_column,
@@ -7297,14 +7304,124 @@ async function enqueueOutbox(
   );
 }
 
+/** Bounded calculation history is separate from display cards and their order scope. */
+async function loadBoundedToday(
+  database: DatabaseClient, currentUser: CurrentUser, dateTo: string, requestedFrom: string, focusBathCardId?: string,
+): Promise<CncTelegramTodayResponseDto> {
+  const dateFrom = mdfOperationalTwoMonthStart(dateTo);
+  const displayFrom = requestedFrom < dateFrom ? dateFrom : requestedFrom;
+  const packetVisibility = `p.mdf_board_hidden_at IS NULL AND p.mdf_board_card_kind = 'machine_file'
+    AND (p.source_chat_id IS DISTINCT FROM 'erp-manual-svg-upload' OR EXISTS (
+      SELECT 1 FROM outbox_events e WHERE e.idempotency_key = 'cnc-manual-svg:' || p.packet_id::text
+        || ':source-' || p.source_version::text || ':mdf-card-created'))`;
+  // Calculate bath cut evidence once per response, not once per display/history
+  // query. This is bounded scalar data, including the established chat exception.
+  const cutQuantitiesPromise = database.query<QueryResultRow>(`WITH ${mdfCutReadinessCtes({
+    packetPredicate: 'p.workday BETWEEN $1::date AND $2::date AND p.mdf_board_hidden_at IS NULL',
+    bazisPredicate: "cut_set.created_at >= $1::date AND cut_set.created_at < ($2::date + INTERVAL '1 day')",
+  })} SELECT order_id, detail_id, completed_quantity FROM mdf_cut_quantities`, [dateFrom, dateTo]);
+  const [packets, baths, basis] = await Promise.all([
+    database.query<PacketJoinedRow>(packetSelectSql(`p.workday BETWEEN $1::date AND $2::date AND ${packetVisibility}`), [displayFrom, dateTo]),
+    cutQuantitiesPromise.then(result => loadBathCards(database, dateFrom, dateTo, {
+      bounded: { dateFrom, displayFrom, cutQuantities: result.rows }, focusBathCardId,
+    })),
+    loadPeriodBazisCutSetCards(database, displayFrom, dateTo),
+  ]);
+  const columns = buildTodayColumns(mapPacketRows(packets.rows), baths.cards, basis);
+  const cutQuantities = (await cutQuantitiesPromise).rows;
+  const orderIds = sourceOrderIds(columns);
+  let historicalReadinessSources: CncHistoricalReadinessSourceDto[] = [];
+  if (orderIds.length) {
+    const [oldPackets, oldBaths, oldBasis] = await Promise.all([
+      database.query<PacketJoinedRow>(packetSelectSql(`p.workday >= $1::date AND p.workday < $2::date
+        AND ${packetVisibility} AND ${scopedPacketOwnersSql('$3')}
+        AND NOT COALESCE(p.rework, false) AND ${cncPacketCountsForMdfReadinessSql('p')}`,
+      { compact: true }), [dateFrom, displayFrom, orderIds]),
+      loadBathCards(database, dateFrom, dateTo, {
+        bounded: { dateFrom, displayFrom: dateFrom, compact: true, cutQuantities }, scopeOrderIds: orderIds,
+      }),
+      loadPeriodBazisCutSetCards(database, dateFrom, dateTo, orderIds, true),
+    ]);
+    const history = buildTodayColumns(mapPacketRows(oldPackets.rows), oldBaths.cards, oldBasis);
+    const allOrderIds = sourceOrderIds(history);
+    const summaryParams: unknown[] = [allOrderIds];
+    const summaryScope = productionBoardReadScopeSql(currentUser, summaryParams);
+    const summaries = allOrderIds.length ? await database.query<{
+      order_id: string | number; order_status_id: string | number | null;
+      order_status_name: string | null; order_status_issued_or_later: boolean;
+    }>(`SELECT o.order_id, o.order_status_id, s.order_status_name,
+      CASE WHEN s.sort_order IS NOT NULL AND issued.sort_order IS NOT NULL
+        THEN s.sort_order >= issued.sort_order ELSE lower(trim(COALESCE(s.order_status_name, '')))
+        IN ('выдан', 'завершен', 'завершён') END AS order_status_issued_or_later
+      FROM orders o LEFT JOIN order_statuses s ON s.order_status_id = o.order_status_id
+      CROSS JOIN (SELECT MIN(sort_order) AS sort_order FROM order_statuses
+        WHERE lower(trim(order_status_name)) = 'выдан') issued
+      WHERE o.order_id = ANY($1::bigint[]) AND o.delete_flag = false AND o.order_kind = 'production_order'
+        AND ${summaryScope}`, summaryParams) : { rows: [] };
+    const owners = new Map(summaries.rows.map(row => [Number(row.order_id), {
+      orderId: Number(row.order_id), orderStatusId: toPositiveInteger(row.order_status_id),
+      orderStatusName: row.order_status_name, orderStatusIssuedOrLater: row.order_status_issued_or_later === true,
+    }]));
+    const scope = new Set(orderIds);
+    const visible = new Set(columns.flatMap(column => [
+      ...column.packets.map(card => `packet:${card.packetId}`),
+      ...column.baths.map(card => `bath:${card.bathCardId}`),
+      ...column.bazisCutSets.map(card => `bazisCutSet:${card.bazisCutSetId}`),
+    ]));
+    const mdf = new RegExp(CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE, 'iu');
+    const other = new RegExp(CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE, 'iu');
+    const add = (
+      kind: CncHistoricalReadinessSourceDto['kind'], cardId: string, column: CncTelegramTodayColumnDto['key'],
+      items: Array<{ orderId: number | null; detailId: number | null; detailNumber: number | null; quantity: number; eligible?: boolean }>,
+    ) => {
+      if (visible.has(`${kind}:${cardId}`)) return;
+      const selected = items.flatMap(item => item.orderId !== null && scope.has(item.orderId) && item.eligible !== false
+        ? [{ orderId: item.orderId, detailId: toPositiveInteger(item.detailId), detailNumber: toPositiveInteger(item.detailNumber),
+          quantity: Math.max(0, Math.trunc(item.quantity)) }] : []);
+      if (!selected.length) return;
+      historicalReadinessSources.push({ kind, cardId, column, items: selected,
+        linkedOrders: [...new Set(items.map(item => item.orderId))].map(orderId => owners.get(orderId ?? 0) ?? {
+          orderId, orderStatusId: null, orderStatusName: null, orderStatusIssuedOrLater: false,
+        }),
+      });
+    };
+    for (const column of history) {
+      for (const packet of column.packets) add('packet', packet.packetId, column.key, packet.items.map(item => ({
+        orderId: item.matchOrderId ?? item.orderId, detailId: item.matchDetailId,
+        detailNumber: item.detailNumber, quantity: item.quantity,
+      })));
+      for (const set of column.bazisCutSets) add('bazisCutSet', String(set.bazisCutSetId), column.key, set.items.map(item => ({
+        orderId: item.orderId, detailId: item.detailId, detailNumber: item.detailNumber, quantity: item.quantity,
+        eligible: mdf.test(item.materialName) && !other.test(item.materialName),
+      })));
+      for (const bath of column.baths) add('bath', bath.bathCardId, column.key,
+        bath.compositionComplete === false ? [...bath.items,
+          { orderId: null, detailId: null, detailNumber: null, quantity: 0 }] : bath.items);
+    }
+  }
+  return { workday: dateTo, generatedAt: new Date().toISOString(), columns,
+    operationalWindow: { dateFrom, dateTo }, historicalBathReadiness: [], historicalReadinessSources };
+}
+
+function sourceOrderIds(columns: CncTelegramTodayColumnDto[]): number[] {
+  return [...new Set(columns.flatMap(column => [
+    ...column.packets.flatMap(card => card.items.map(item => item.matchOrderId ?? item.orderId)),
+    ...column.baths.flatMap(card => card.items.map(item => item.orderId)),
+    ...column.bazisCutSets.flatMap(card => card.items.map(item => item.orderId)),
+  ]).filter((id): id is number => id !== null && Number.isSafeInteger(id) && id > 0))];
+}
+
 async function loadBathCards(
   database: DatabaseClient,
   workdayFrom: string,
   workdayTo: string,
-  options: { includeHistory?: boolean; operationalWindow?: 'month'; focusBathCardId?: string; scopeOrderIds?: number[] } = {},
+  options: {
+    includeHistory?: boolean; operationalWindow?: 'month'; focusBathCardId?: string; scopeOrderIds?: number[];
+    bounded?: { dateFrom: string; displayFrom: string; compact?: boolean; cutQuantities: QueryResultRow[] };
+  } = {},
 ): Promise<{ cards: CncTelegramBathCardDto[]; historicalBathReadiness: CncHistoricalBathReadinessDto[] }> {
   const operational = options.operationalWindow === 'month' && !options.includeHistory;
-  const packetDatePredicate = options.scopeOrderIds
+  const packetDatePredicate = options.scopeOrderIds && !options.bounded
     ? `${scopedPacketOwnersSql('$3')} AND p.workday BETWEEN $1::date AND $2::date`
     : options.includeHistory
     ? `COALESCE(p.source_created_at, p.created_at) >= $1::date
@@ -7359,15 +7476,18 @@ async function loadBathCards(
       ) AS sort_order
       FROM production_statuses ps
     ),
-    ${mdfCutReadinessCtes({
+    ${options.bounded ? `target_details AS (
+      SELECT * FROM jsonb_to_recordset($7::jsonb) AS fact(order_id bigint, detail_id bigint, completed_quantity integer)
+      WHERE $1::date <= $2::date
+    )` : `${mdfCutReadinessCtes({
       packetPredicate: `${packetDatePredicate} ${packetVisibilityPredicate}`,
-      bazisPredicate: options.scopeOrderIds
+      bazisPredicate: options.scopeOrderIds && !options.bounded
         ? `cut_set.created_at >= $1::date AND cut_set.created_at < ($2::date + INTERVAL '1 day') AND EXISTS (SELECT 1 FROM bazis_cut_set_details i LEFT JOIN order_details d ON d.detail_id=i.source_order_detail_id WHERE i.bazis_cut_set_id=cut_set.bazis_cut_set_id AND COALESCE(i.source_order_id,d.order_id)=ANY($3::bigint[]))`
         : `cut_set.created_at >= $1::date AND cut_set.created_at < ($2::date + INTERVAL '1 day')`,
     })},
     target_details AS (
       SELECT order_id, detail_id, completed_quantity FROM mdf_cut_quantities
-    ),
+    )`},
     candidate_vacuum_results AS (
       SELECT
         r.cut_result_id,
@@ -7406,10 +7526,12 @@ async function loadBathCards(
         ON projection.cut_result_id = r.cut_result_id
        AND projection.snapshot_digest = r.snapshot_digest
       WHERE board_metadata.is_vacuum = true
-        ${options.scopeOrderIds ? `AND $1::date <= $2::date AND EXISTS (SELECT 1 FROM cut_result_placement scoped WHERE scoped.cut_result_id=r.cut_result_id AND scoped.order_id=ANY($3::bigint[]))` : ''}
+        ${options.bounded ? `AND board_metadata.result_created_at >= $4::date
+          AND board_metadata.result_created_at < ($2::date + INTERVAL '1 day')` : ''}
+        ${options.scopeOrderIds && !options.bounded ? `AND $1::date <= $2::date AND EXISTS (SELECT 1 FROM cut_result_placement scoped WHERE scoped.cut_result_id=r.cut_result_id AND scoped.order_id=ANY($3::bigint[]))` : ''}
         ${candidateVisibilityPredicate}
         ${hiddenTombstonePredicate}
-        AND (${options.scopeOrderIds ? 'true OR' : ''}
+        AND (${options.scopeOrderIds && !options.bounded ? 'true OR' : ''}
           EXISTS (
             SELECT 1
             FROM cut_result_placement placement
@@ -7436,6 +7558,19 @@ async function loadBathCards(
         candidate.revision_no DESC,
         candidate.cut_result_id DESC
     )
+    ${options.bounded ? `,
+    bounded_vacuum_results AS (
+      SELECT selected.* FROM latest_vacuum_results selected
+      WHERE (selected.result_created_at >= $5::date
+        OR ('cut-result:' || selected.cut_result_id::text) = $6::text)
+        AND (cardinality($3::bigint[]) = 0 OR EXISTS (
+          SELECT 1 FROM cut_result_placement scoped
+          JOIN cut_result_sheet_map scoped_sheet
+            ON scoped_sheet.cut_result_sheet_map_id = scoped.cut_result_sheet_map_id
+           AND scoped_sheet.is_effective = true
+          WHERE scoped.cut_result_id = selected.cut_result_id AND scoped.order_id = ANY($3::bigint[])
+        ))
+    )` : ''}
     ${operational ? `,
     operational_completion AS (
       SELECT selected.cut_result_id,
@@ -7482,10 +7617,11 @@ async function loadBathCards(
       result.hidden_bath_seed,
       placement.order_id,
       placement.order_detail_id,
+      ${options.bounded ? 'o.order_id IS NOT NULL AND od.detail_id IS NOT NULL AND od.order_id = placement.order_id' : 'true'} AS valid_detail_owner,
       COALESCE(NULLIF(trim(o.order_name), ''), placement.order_id::text) AS order_name,
       od.detail_number,
-      CASE WHEN ${operational ? 'result.readiness_only' : 'false'} THEN NULL ELSE COALESCE(od.width, placement.detail_width_mm) END AS width_mm,
-      CASE WHEN ${operational ? 'result.readiness_only' : 'false'} THEN NULL ELSE COALESCE(od.height, placement.detail_height_mm) END AS height_mm,
+      CASE WHEN ${options.bounded?.compact ? 'true' : operational ? 'result.readiness_only' : 'false'} THEN NULL ELSE COALESCE(od.width, placement.detail_width_mm) END AS width_mm,
+      CASE WHEN ${options.bounded?.compact ? 'true' : operational ? 'result.readiness_only' : 'false'} THEN NULL ELSE COALESCE(od.height, placement.detail_height_mm) END AS height_mm,
       COALESCE(target.completed_quantity, 0) AS completed_quantity,
       CASE
         WHEN detail_status.sort_order IS NOT NULL
@@ -7499,13 +7635,13 @@ async function loadBathCards(
           THEN detail_status.sort_order >= packed_status.sort_order
         ELSE false
       END AS packed_or_later,
-      CASE WHEN ${operational ? 'result.readiness_only' : 'false'} THEN NULL ELSE sheet.cut_group_id END AS cut_group_id,
+      CASE WHEN ${options.bounded?.compact ? 'true' : operational ? 'result.readiness_only' : 'false'} THEN NULL ELSE sheet.cut_group_id END AS cut_group_id,
       sheet.variant,
       sheet.sheet_index,
       sheet.sheet_ordinal,
       sheet.sheet_width_mm,
       sheet.sheet_height_mm
-    FROM ${operational ? 'operational_vacuum_results' : 'latest_vacuum_results'} result
+    FROM ${options.bounded ? 'bounded_vacuum_results' : operational ? 'operational_vacuum_results' : 'latest_vacuum_results'} result
     JOIN cut_result_placement placement
       ON placement.cut_result_id = result.cut_result_id
     JOIN cut_result_sheet_map sheet
@@ -7534,12 +7670,21 @@ async function loadBathCards(
       placement.order_detail_id ASC,
       placement.instance ASC
     `,
-    options.scopeOrderIds ? [workdayFrom, workdayTo, options.scopeOrderIds]
+    options.bounded ? [workdayFrom, workdayTo, options.scopeOrderIds ?? [], options.bounded.dateFrom, options.bounded.displayFrom, options.focusBathCardId ?? null,
+      JSON.stringify(options.bounded.cutQuantities)]
+      : options.scopeOrderIds ? [workdayFrom, workdayTo, options.scopeOrderIds]
       : operational ? [workdayFrom, workdayTo, options.focusBathCardId ?? null] : [workdayFrom, workdayTo],
   );
   const factsOnly = new Set(result.rows.filter((row) => row.readiness_only === true)
     .map((row) => `cut-result:${row.cut_result_id}`));
   const cards = mapBathRows(result.rows);
+  if (options.bounded) {
+    const incomplete = new Set(result.rows.filter(row => row.valid_detail_owner !== true).map(row => Number(row.cut_result_id)));
+    for (const card of cards) {
+      card.compositionComplete = !incomplete.has(card.cutResultId);
+      if (!card.compositionComplete) card.ready = false;
+    }
+  }
   return {
     cards: cards.filter((card) => !factsOnly.has(card.bathCardId)),
     historicalBathReadiness: cards.filter((card) => factsOnly.has(card.bathCardId)).map((card) => ({
@@ -7623,8 +7768,8 @@ function buildTodayColumns(
     };
   });
 
-  const completedBaths = baths.filter((bath) => allItemsPackedOrLater(bath.items));
-  const activeBaths = baths.filter((bath) => !allItemsPackedOrLater(bath.items));
+  const completedBaths = baths.filter((bath) => bath.compositionComplete !== false && allItemsPackedOrLater(bath.items));
+  const activeBaths = baths.filter((bath) => bath.compositionComplete === false || !allItemsPackedOrLater(bath.items));
   const pendingBaths = activeBaths.filter((bath) => !bath.ready);
   const readyBaths = activeBaths.filter((bath) =>
     bath.ready && !allItemsLaminatedOrLater(bath.items),
@@ -7685,6 +7830,7 @@ async function loadPeriodBazisCutSetCards(
   workdayFrom: string,
   workdayTo: string,
   scopeOrderIds?: number[],
+  bounded = false,
 ): Promise<CncTelegramBazisCutSetCardDto[]> {
   const result = await database.query<BazisCutSetJoinedRow>(
     `
@@ -7708,7 +7854,7 @@ async function loadPeriodBazisCutSetCards(
     target_bazis_cut_sets AS (
       SELECT cut_set.bazis_cut_set_id
       FROM bazis_cut_sets cut_set
-      WHERE ${scopeOrderIds ? ` $1::date <= $2::date AND EXISTS (SELECT 1 FROM bazis_cut_set_details i
+      WHERE ${scopeOrderIds ? ` ${bounded ? "cut_set.created_at >= $1::date AND cut_set.created_at < ($2::date + INTERVAL '1 day')" : '$1::date <= $2::date'} AND EXISTS (SELECT 1 FROM bazis_cut_set_details i
         LEFT JOIN order_details d ON d.detail_id=i.source_order_detail_id
         WHERE i.bazis_cut_set_id=cut_set.bazis_cut_set_id AND COALESCE(i.source_order_id,d.order_id)=ANY($3::bigint[]))`
         : `cut_set.created_at >= $1::date AND cut_set.created_at < ($2::date + INTERVAL '1 day')`}

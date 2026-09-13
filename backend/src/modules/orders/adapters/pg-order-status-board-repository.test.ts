@@ -8,6 +8,16 @@ import {
 } from './pg-order-status-board-repository';
 
 describe('PgOrderStatusBoardRepository', () => {
+  it('omits the all-history BASIS scan only for explicitly bounded MDF headers', async () => {
+    const database = fakeDatabase([]);
+    const query = { board: 'production' as const, limit: 60, onlyMyOrders: false, overdueOnly: false };
+    await new PgOrderStatusBoardRepository(database.client).getBoard({ currentUser: worker(),
+      query: { ...query, includeBazisAllocation: false } });
+    expect(database.queries[0].text).not.toContain('FROM bazis_cut_set_details');
+    expect(database.queries[0].text).toContain("'bazisCutQuantity', 0");
+    expect(createOrderStatusBoardFilterKey(query)).not.toBe(createOrderStatusBoardFilterKey({ ...query, includeBazisAllocation: false }));
+    expect(createOrderStatusBoardFilterKey(query)).toBe(createOrderStatusBoardFilterKey({ ...query, includeBazisAllocation: true }));
+  });
   it('returns a virtual unassigned column, limit+1 cursor and exact total', async () => {
     const database = fakeDatabase([
       boardRow(null, null),

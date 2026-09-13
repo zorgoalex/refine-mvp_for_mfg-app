@@ -6,6 +6,12 @@ import {
 } from './order-status-board.controller';
 
 describe('parseOrderStatusBoardQuery', () => {
+  it('validates the optional BASIS projection switch without changing its default', () => {
+    expect(parseOrderStatusBoardQuery({ board: 'production', includeBazisAllocation: 'false' }).includeBazisAllocation).toBe(false);
+    expect(parseOrderStatusBoardQuery({ board: 'production' }).includeBazisAllocation).toBeUndefined();
+    expect(() => parseOrderStatusBoardQuery({ board: 'production', includeBazisAllocation: '0' })).toThrow();
+    expect(() => parseOrderStatusBoardQuery({ board: 'production', includeBazisAllocation: ['false', 'true'] })).toThrow();
+  });
   it('parses defaults and bounded filters', () => {
     expect(
       parseOrderStatusBoardQuery({

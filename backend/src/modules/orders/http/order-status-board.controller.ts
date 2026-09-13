@@ -38,6 +38,7 @@ export class OrderStatusBoardController {
   @ApiQuery({ name: 'onlyMyOrders', required: false, type: Boolean })
   @ApiQuery({ name: 'overdueOnly', required: false, type: Boolean })
   @ApiQuery({ name: 'includeDone', required: false, type: Boolean })
+  @ApiQuery({ name: 'includeBazisAllocation', required: false, type: Boolean })
   @ApiQuery({ name: 'plannedFrom', required: false, type: String })
   @ApiQuery({ name: 'plannedTo', required: false, type: String })
   @ApiQuery({ name: 'orderIds', required: false, type: String })
@@ -183,6 +184,9 @@ export function parseOrderStatusBoardQuery(
     onlyMyOrders: parseBoolean(query.onlyMyOrders, 'onlyMyOrders', false),
     overdueOnly: parseBoolean(query.overdueOnly, 'overdueOnly', false),
     includeDone,
+    ...(query.includeBazisAllocation !== undefined ? {
+      includeBazisAllocation: parseBoolean(query.includeBazisAllocation, 'includeBazisAllocation', true),
+    } : {}),
     ...(plannedFrom ? { plannedFrom } : {}),
     ...(plannedTo ? { plannedTo } : {}),
     ...(orderIds.length > 0 ? { orderIds } : {}),
