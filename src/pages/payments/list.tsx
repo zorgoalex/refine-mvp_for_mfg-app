@@ -27,6 +27,7 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
   const canViewUsers = canQueryUsersResource(currentUser);
 
   const { tableProps, pageSize, setCurrent, setPageSize, filters, setFilters } = useTable({
+    resource: "payments",
     syncWithLocation: true,
     sorters: { initial: [{ field: "payment_id", order: "desc" }] },
     pagination: { pageSize: 10 },
@@ -75,12 +76,14 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
     resource: "orders",
     optionLabel: "order_name",
     optionValue: "order_id",
+    queryOptions: { enabled: filtersVisible },
   });
 
   const { selectProps: typeSelectProps } = useSelect({
     resource: "payment_types",
     optionLabel: "type_paid_name",
     optionValue: "type_paid_id",
+    queryOptions: { enabled: filtersVisible },
   });
 
   const { selectProps: userSelectProps } = useSelect({
@@ -88,7 +91,7 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
     optionLabel: "username",
     optionValue: "user_id",
     queryOptions: {
-      enabled: canViewUsers,
+      enabled: filtersVisible && canViewUsers,
     },
   });
 
@@ -334,8 +337,8 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
             title="Действия"
             render={(_, record: any) => (
               <Space>
-                <ShowButton hideText size="small" recordItemId={record.payment_id} />
-                <EditButton hideText size="small" recordItemId={record.payment_id} />
+                <ShowButton resource="payments" hideText size="small" recordItemId={record.payment_id} />
+                <EditButton resource="payments" hideText size="small" recordItemId={record.payment_id} />
               </Space>
             )}
           />
