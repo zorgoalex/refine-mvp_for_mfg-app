@@ -42,9 +42,14 @@ test.describe('Order list author stage canary (no business writes)', () => {
     await page.locator('input#password').fill(password!);
     await page.getByRole('button', { name: 'Войти', exact: true }).click();
     await page.waitForURL(url => !url.pathname.includes('/login'));
-    await page.goto(`${frontend}/orders`);
-    await expect(page.getByText('Сервис интеграции ERP', { exact: true }).first()).toBeVisible();
-    await expect(page.getByText('ERP #2147483646', { exact: true }).first()).toBeVisible();
+    // Use in-app navigation, matching the other authenticated stage canaries.
+    await page.evaluate(() => {
+      window.history.pushState({}, '', '/orders');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await expect.poll(() => fixtureShown, { timeout: 30000 }).toBe(true);
+    await expect(page.getByText('Сервис интеграции ERP', { exact: true }).first()).toBeVisible({ timeout: 30000 });
+    await expect(page.getByText('ERP #2147483646', { exact: true }).first()).toBeVisible({ timeout: 30000 });
     expect(fixtureShown).toBe(true);
     expect(profileCalls).toEqual([]);
     await expect(page.getByText('User not found', { exact: false })).toHaveCount(0);
