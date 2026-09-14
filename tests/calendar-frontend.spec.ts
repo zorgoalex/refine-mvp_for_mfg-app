@@ -18,6 +18,53 @@ const vercelAutomationBypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET
 test.describe('Calendar frontend', () => {
     test.skip(stageCanaryEnabled, 'Stage canary runs only against the deployed frontend');
 
+    for (const backendOrdersRead of [true, false]) {
+        test(`shows doweling or Basis number in every calendar view (backend=${backendOrdersRead})`, async ({ page }) => {
+            test.setTimeout(120_000);
+            const mobile = !backendOrdersRead;
+            await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
+            const db = createWorkflowMockDb();
+            seedCalendarFrontendOrder(db, formatLocalDate(new Date()));
+            const basisOrder = db.orders.find((order) => order.order_id === 201)!;
+            basisOrder.order_name = 'E2E calendar Basis';
+            if (backendOrdersRead) basisOrder.basis_projects = [' 1491 ', '1491', '1492'];
+            db.order_details[0].basis_project = backendOrdersRead ? 'OLD-PROJECT' : ' 1491 ';
+            db.order_details.push(
+                { ...db.order_details[0], detail_id: 302, detail_number: 2, basis_project: '1491' },
+                { ...db.order_details[0], detail_id: 303, detail_number: 3, basis_project: '1492' },
+                { ...db.order_details[0], detail_id: 304, detail_number: 4, basis_project: 'DELETED-PROJECT', delete_flag: true },
+            );
+            db.orders.push(
+                { ...basisOrder, order_id: 202, order_name: 'E2E calendar doweling',
+                    basis_projects: ['HIDDEN-PROJECT'], doweling_order_name: backendOrdersRead ? 'П-104' : undefined },
+                { ...basisOrder, order_id: 203, order_name: 'E2E calendar without reference', basis_projects: [] },
+            );
+            db.order_details.push({ ...db.order_details[0], detail_id: 305, order_id: 202, basis_project: 'HIDDEN-PROJECT' });
+            if (!backendOrdersRead) db.order_doweling_links.push({
+                order_doweling_link_id: 1, order_id: 202, delete_flag: false,
+                doweling_order: { doweling_order_name: 'П-104' },
+            });
+            const errors: string[] = [];
+            page.on('pageerror', (error) => errors.push(error.message));
+            await setupWorkflowMockApi(page, db, {
+                runtimeConfig: { backendOrdersRead }, onGraphqlError: (error) => errors.push(error),
+            });
+            if (backendOrdersRead) await routeCalendarBackendOrders(page, db, []);
+            await page.goto('/calendar', { waitUntil: 'domcontentloaded' });
+            await expect(page.getByRole('region', { name: 'Производственный календарь' })).toBeVisible({ timeout: 60_000 });
+            if (mobile) await page.getByRole('button', { name: /Настройки календаря/ }).click();
+            for (const mode of [mobile ? 'Стандарт' : 'Стандартный', mobile ? 'Компакт' : 'Компактный', 'Краткий']) {
+                await page.locator('.ant-segmented-item').filter({ hasText: mode }).click();
+                const cards = page.locator(mode === 'Краткий' ? '.day-column-brief__order-item' : '.order-card');
+                await expect(cards.filter({ hasText: 'E2E calendar Basis' })).toContainText('E2E calendar Basis - 1491, 1492');
+                await expect(cards.filter({ hasText: 'E2E calendar doweling' })).toContainText('E2E calendar doweling - П-104');
+                await expect(cards.filter({ hasText: 'E2E calendar without reference' })).toBeVisible();
+                await expect(page.getByText(/HIDDEN-PROJECT|DELETED-PROJECT|OLD-PROJECT/)).toHaveCount(0);
+            }
+            expect(errors).toEqual([]);
+        });
+    }
+
     test('loads calendar orders through planned completion backend filters', async ({ page }) => {
         const db = createWorkflowMockDb();
         seedCalendarFrontendOrder(db, formatLocalDate(new Date()));
@@ -280,6 +327,8 @@ async function routeCalendarBackendOrders(
             totalArea: order.total_area,
             priority: order.priority,
             passedProductionStatusCodes,
+            basisProjects: order.basis_projects,
+            dowelingOrderName: order.doweling_order_name,
             version: order.version,
         }));
         await route.fulfill({

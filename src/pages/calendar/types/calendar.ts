@@ -22,6 +22,7 @@ export interface CalendarViewSettings {
  * Деталь заказа для вычисления фрезеровки, материалов и статусов производства
  */
 export interface CalendarOrderDetail {
+  basis_project?: string | null;
   milling_type_id?: number;
   milling_type?: {
     milling_type_name: string;
@@ -68,6 +69,10 @@ export interface CalendarOrder {
 
   // Присадка (из order_doweling_links)
   doweling_order_name?: string;
+
+  // Номера БАЗИС из backend aggregate и общее поле «Присадка / БАЗИС».
+  basis_projects?: string[];
+  basis_project_display?: string;
 
   // Пройденные этапы производства (коды из production_status_events)
   passed_production_status_codes?: string[];

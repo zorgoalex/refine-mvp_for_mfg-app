@@ -5,6 +5,25 @@ import { getPermissionsForRole } from '../../../permissions/permissions';
 import { parseOrderSearchInput, PgOrderReadRepository } from './pg-order-read-repository';
 
 describe('PgOrderReadRepository', () => {
+  it('returns a minimal creator label for service users without directory access', async () => {
+    const queries: string[] = [];
+    const database = { query: async (sql: string) => {
+      queries.push(sql);
+      return { rows: sql.includes('COUNT(*)::int') ? [{ total: 1 }] : [{ ...orderRow(), created_by: 86, created_by_label: 'Сервис интеграции ERP' }] };
+    } } as unknown as DatabaseService;
+    const result = await new PgOrderReadRepository(database).listOrders({
+      currentUser: { ...currentUser('42'), permissions: ['orders.view'] },
+      query: { page: 1, pageSize: 10, sortBy: 'updatedAt', sortOrder: 'desc' },
+    });
+    expect(result.data[0]).toMatchObject({ createdBy: 86, createdByLabel: 'Сервис интеграции ERP' });
+    expect(result.data[0]).not.toHaveProperty('createdByBitrix');
+    expect(queries).toHaveLength(2);
+    const sql = queries[1];
+    expect(sql).toContain("CASE WHEN creator.is_service_account THEN 'Сервис интеграции ERP'");
+    expect(sql.indexOf('LEFT JOIN users creator')).toBeGreaterThan(sql.indexOf('FROM page_orders o'));
+    expect(sql).not.toContain('creator.email');
+  });
+
   it('lists orders with pagination, whitelist sort and soft-delete filter', async () => {
     const database = createDatabase();
     const repository = new PgOrderReadRepository(database.service);
@@ -1091,6 +1110,9 @@ function mergeBaseDefaultListSql(): string {
     '      )',
     '      SELECT',
     '        o.*,',
+    "        CASE WHEN creator.is_service_account THEN 'Сервис интеграции ERP'",
+    "          ELSE COALESCE(NULLIF(creator.full_name, ''), creator.username)",
+    '        END AS created_by_label,',
     '        material_projection.material_ids,',
     '        material_projection.material_names,',
     '        basis_projection.basis_projects,',
@@ -1107,6 +1129,7 @@ function mergeBaseDefaultListSql(): string {
     '        production_projection.passed_production_status_codes,',
     '        group_projection.group_links_json',
     '      FROM page_orders o',
+    '      LEFT JOIN users creator ON creator.user_id = o.created_by',
     '      LEFT JOIN LATERAL (',
     '        SELECT',
     '          ARRAY_AGG(materials.material_id ORDER BY materials.first_detail_number, materials.first_detail_id) AS material_ids,',

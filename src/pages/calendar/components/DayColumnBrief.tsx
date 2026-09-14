@@ -94,10 +94,10 @@ const DayColumnBrief: React.FC<DayColumnBriefProps> = ({ date, orders, columnWid
                   }),
                 }}
               >
-                {/* Формат: номер - присадка - площадь - материал - фрезеровка */}
+                {/* Формат: номер - присадка/БАЗИС - площадь - материал - фрезеровка */}
                 <span style={{ fontWeight: 500 }}>{order.order_name}</span>
-                {order.doweling_order_name && (
-                  <span style={{ color: '#DC2626', fontWeight: 500 }}>{` - ${order.doweling_order_name}`}</span>
+                {order.basis_project_display && (
+                  <span style={{ color: '#DC2626', fontWeight: 500 }}>{` - ${order.basis_project_display}`}</span>
                 )}
                 {' - '}
                 <span>{order.total_area > 0 ? `${order.total_area.toFixed(2)} кв.м.` : '—'}</span>

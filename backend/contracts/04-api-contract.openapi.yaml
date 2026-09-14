@@ -19499,6 +19499,11 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/OrderGroupSummaryDto'
+        createdByLabel:
+          type: string
+          nullable: true
+          readOnly: true
+          description: "ERP audit creator display label; service accounts are masked, missing authors return null."
         deletedAt:
           type: string
           format: date-time

@@ -18,7 +18,6 @@ import {
   OrderLifecycleReadSurface,
   useCancelInactiveOrderQueriesOnDeactivate,
   useList,
-  useMany,
   useOrderLifecycleReadActive,
   useSelect,
 } from "../../query/orderLifecycleQueries";
@@ -940,32 +939,6 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     );
   };
 
-  const createdByIds = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          ((tableProps?.dataSource as any[]) || [])
-            .map((i) => i?.created_by)
-            .filter((v) => v !== undefined && v !== null),
-        ),
-      ),
-    [tableProps?.dataSource],
-  );
-
-  const { data: usersData } = useMany({
-    resource: "users",
-    ids: createdByIds,
-    queryOptions: { enabled: isActive && canViewUsers && createdByIds.length > 0 },
-  });
-
-  const createdByMap = useMemo(() => {
-    const map: Record<string | number, string> = {};
-    (usersData?.data || []).forEach((u: any) => {
-      map[u.user_id] = u.username;
-    });
-    return map;
-  }, [usersData]);
-
   // Получаем ID заказов на текущей странице
   const orderIds = useMemo(
     () =>
@@ -1544,7 +1517,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     { dataIndex: "film_name", key: "film_name", title: "Пленка", width: 120, className: "orders-col orders-col--wrap", render: (_, record) => getFilmsList(record.order_id, record) },
     { dataIndex: "created_by", key: "created_by", title: "Создано", width: 86, className: "orders-col", render: (_, record) => (
       <span style={{ fontSize: '80%' }}>
-        {createdByMap[record?.created_by] ?? record?.created_by}
+        {record?.created_by_label || (record?.created_by ? `ERP #${record.created_by}` : '—')}
       </span>
     ) },
     {
