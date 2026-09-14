@@ -29,6 +29,11 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-09-14", title: "МДФ-доска: сохранение открытых карточек",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: ["Фоновые обновления МДФ-доски больше не сбрасывают прокрутку и открытые превью файлов станка в стандартном режиме. Окно бирок остаётся открытым при обновлении данных."],
+  },
+  {
     version: APP_VERSION, date: "2026-09-14", title: "Календарь: производственные статусы кодами",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: ["Из нижней строки стандартной карточки календаря убрана лишняя текстовая плашка сводного статуса. Производственные этапы отображаются буквенными кодами."],
