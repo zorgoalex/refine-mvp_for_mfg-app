@@ -643,7 +643,6 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('CNC_OVERFLOW_CARD_DELAY_MS = 1_200');
     expect(page).toContain('onWheel={revealOverflowCards}');
     expect(page).not.toContain('onPointerEnter={revealOverflowCards}');
-    expect(page).toContain('if (!autoRevealOverflowCards) return;');
     expect(page).toContain('export async function prefetchMdfOrderStatusBoard(');
     expect(page).toContain('manualMoves: mapMdfBoardManualMovesResponse(manualMovesResponse.moves)');
     expect(page).toContain('if (preserveInitialSnapshot) {');

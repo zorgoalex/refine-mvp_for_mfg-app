@@ -3631,14 +3631,15 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
       setOverflowCardsVisible(true);
       return;
     }
-    setOverflowCardsVisible(false);
-    if (!autoRevealOverflowCards) return;
+    // Reveal once per mounted board. Polls replace columns/orderCards even
+    // without changes; hiding them again unmounts open previews and loses scroll.
+    if (overflowCardsVisible || !autoRevealOverflowCards || loading) return;
     const timer = window.setTimeout(
       () => setOverflowCardsVisible(true),
       CNC_OVERFLOW_CARD_DELAY_MS,
     );
     return () => window.clearTimeout(timer);
-  }, [autoRevealOverflowCards, cardDisplayMode, columns, orderCards]);
+  }, [autoRevealOverflowCards, cardDisplayMode, loading, overflowCardsVisible]);
 
   useEffect(() => {
     if (cardDisplayMode !== 'standard') return;
