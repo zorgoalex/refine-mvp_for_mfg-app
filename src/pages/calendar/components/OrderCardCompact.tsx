@@ -230,8 +230,8 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
         style={{ cursor: 'pointer', color: '#1890ff', fontWeight: 500 }}
       >
         Заказ {order.order_name}
-        {order.doweling_order_name && (
-          <span style={{ color: '#DC2626' }}>{` - ${order.doweling_order_name}`}</span>
+        {order.basis_project_display && (
+          <span style={{ color: '#DC2626' }}>{` - ${order.basis_project_display}`}</span>
         )}
       </div>
 

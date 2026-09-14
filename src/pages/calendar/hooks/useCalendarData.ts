@@ -1,9 +1,10 @@
 import { useMemo } from 'react';
 import { useList } from '@refinedev/core';
-import { CalendarOrder, CalendarDataResult, CalendarFilters, CalendarFilterOption } from '../types/calendar';
+import { CalendarOrder, CalendarOrderDetail, CalendarDataResult, CalendarFilters, CalendarFilterOption } from '../types/calendar';
 import { groupOrdersByDate } from '../utils/groupOrdersByDate';
 import { formatDateForApi } from '../utils/dateUtils';
 import { applyCalendarFilters } from '../utils/calendarFilters';
+import { resolveOrderListBasisProjectValues } from '../../orders/orderListBasisProjects';
 import { useAppSettings, SETTING_KEYS } from '../../../hooks/useAppSettings';
 import { resolveDetailMaterialName } from '../../../utils/materialDisplayName';
 import { buildProductionStagesDisplayConfig } from '../../../utils/productionWorkflow';
@@ -314,17 +315,13 @@ export const useCalendarData = (
 
   // Группируем детали по order_id и добавляем milling_type_name, material_name, production_status_name
   const detailsByOrderId = useMemo(() => {
-    const map: Record<number, Array<{
-      milling_type?: { milling_type_name: string };
-      material?: { material_name: string };
-      production_status_id?: number;
-      production_status_name?: string;
-    }>> = {};
+    const map: Record<number, CalendarOrderDetail[]> = {};
     (detailsData?.data || []).forEach((detail: any) => {
       if (!map[detail.order_id]) {
         map[detail.order_id] = [];
       }
       map[detail.order_id].push({
+        basis_project: detail.basis_project,
         milling_type_id: detail.milling_type_id,
         milling_type: detail.milling_type_id
           ? { milling_type_name: millingTypesMap.get(detail.milling_type_id) || '' }
@@ -352,11 +349,17 @@ export const useCalendarData = (
     // Добавляем order_details, doweling_order_name и production_status_name к каждому заказу
     const ordersWithDetails = data.data.map((order) => {
       const details = detailsByOrderId[order.order_id] || [];
+      const dowelingName = dowelingByOrderId[order.order_id] || order.doweling_order_name;
 
       return {
         ...order,
         order_details: details,
-        doweling_order_name: dowelingByOrderId[order.order_id] || undefined,
+        doweling_order_name: dowelingName || undefined,
+        basis_project_display: resolveOrderListBasisProjectValues({
+          dowelingOrderName: dowelingName,
+          basisProjects: order.basis_projects,
+          details,
+        }).join(', ') || undefined,
         passedProductionCodes: resolveCalendarProductionStatusCodes({
           order,
           details,

@@ -344,8 +344,8 @@ const OrderCard: React.FC<OrderCardProps> = ({
           style={{ color: orderNumberColor }}
         >
           {order.order_name}
-          {order.doweling_order_name && (
-            <span style={{ color: '#DC2626' }}>{` - ${order.doweling_order_name}`}</span>
+          {order.basis_project_display && (
+            <span style={{ color: '#DC2626' }}>{` - ${order.basis_project_display}`}</span>
           )}
         </span>
         {materials.length > 0 && (
