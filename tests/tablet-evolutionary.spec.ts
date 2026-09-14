@@ -526,6 +526,182 @@ test.describe('Evolutionary tablet UI', () => {
     });
 });
 
+test.describe('MDF background refresh', () => {
+    test.setTimeout(180_000);
+    test.use({ viewport: { width: 1440, height: 900 }, hasTouch: false, actionTimeout: 15_000 });
+
+    for (const endpoint of ['manual-moves', 'order-statuses'] as const) {
+        test(`opens MDF machine-file preview across ${endpoint} refreshes`, async ({ page }) => {
+            test.setTimeout(180_000);
+            page.setDefaultTimeout(15_000);
+            const db = createWorkflowMockDb();
+            seedTabletData(db);
+            const health = collectPageHealth(page);
+            const mocks = await setupBoardTabletMocks(page, db);
+            await setupMdfOverflowPreviewMocks(page);
+
+            // Hold both polls, then release each endpoint independently. Every
+            // fulfilled request returns fresh JSON with unchanged business data.
+            let hold = false;
+            let pollCycle = 0;
+            const pending: Record<typeof endpoint, Array<() => void>> = {
+                'manual-moves': [],
+                'order-statuses': [],
+            };
+            for (const [key, pattern] of [
+                ['manual-moves', /\/api\/v1\/orders\/status-board\/mdf-manual-moves$/],
+                ['order-statuses', /\/api\/v1\/orders\/status-board(?:\?.*)?$/],
+            ] as const) {
+                await page.route(pattern, async (route) => {
+                    if (hold) await new Promise<void>((resolve) => pending[key].push(resolve));
+                    if (key === 'order-statuses' && endpoint === key && pollCycle === 1) {
+                        await route.fulfill({ json: buildBoardResponse('production', 2, 1, 4) });
+                    } else if (key === 'order-statuses' && endpoint === key && pollCycle === 2) {
+                        await route.fulfill({ status: 503, json: { message: 'E2E temporary status refresh failure' } });
+                    } else {
+                        await route.fallback();
+                    }
+                });
+            }
+
+            await page.goto('/mdf-work-board?date=2026-08-05');
+            await page.locator('#status-board-viewport[aria-busy="false"]').waitFor({ timeout: 60_000 });
+            const cards = page.locator('[data-status-board-column-key="parsed"] .status-board-column__cards > .cnc-deferred-card');
+            await expect(cards).toHaveCount(30, { timeout: 30_000 });
+            hold = true;
+            const card = cards.nth(18).locator('.cnc-packet-card');
+            await cards.nth(18).scrollIntoViewIfNeeded();
+            await card.getByRole('button', { name: 'Скрин' }).click();
+            await expect(card.locator('.cnc-packet-card__sheet-image')).toBeVisible();
+            const labels = card.getByRole('button', { name: 'Бирки' });
+            await expect(labels).toBeEnabled();
+            const originalCard = await card.elementHandle();
+            expect(originalCard).not.toBeNull();
+            const viewport = page.locator('#status-board-viewport');
+            const scrollTop = await viewport.evaluate((element) => element.scrollTop);
+            expect(scrollTop).toBeGreaterThan(500);
+            for (let cycle = 0; cycle < (endpoint === 'order-statuses' ? 3 : 2); cycle += 1) {
+                pollCycle = cycle;
+                if (cycle < 2) expect(health.serverErrors).toEqual([]);
+                if (cycle === 1) {
+                    await labels.click();
+                    await expect(page.getByRole('dialog')).toBeVisible();
+                }
+                await expect.poll(() => pending[endpoint].length, { timeout: 25_000 }).toBeGreaterThan(0);
+                pending[endpoint].splice(0).forEach((release) => release());
+                // Wait beyond the old 1.2s re-reveal: even if card count and
+                // scroll recover, the removed node and its local state cannot.
+                await page.waitForTimeout(1_800);
+                expect(await originalCard!.evaluate((element) => element.isConnected)).toBe(true);
+                await expect(cards).toHaveCount(30);
+                await expect(card.locator('.cnc-packet-card__sheet-panel')).toBeVisible();
+                if (cycle === 0) {
+                    expect(await originalCard!.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+                    expect(Math.abs(await viewport.evaluate((element) => element.scrollTop) - scrollTop)).toBeLessThanOrEqual(1);
+                } else {
+                    await expect(page.getByRole('dialog')).toBeVisible();
+                }
+            }
+            hold = false;
+            Object.values(pending).flat().forEach((release) => release());
+            expect(mocks.unexpectedWrites).toEqual([]);
+            expect(health.pageErrors).toEqual([]);
+            if (endpoint === 'order-statuses') {
+                expect(health.serverErrors.length).toBeGreaterThan(0);
+                expect(health.serverErrors.every((error) => error.startsWith('503 ') && error.includes('/orders/status-board?'))).toBe(true);
+            } else {
+                expect(health.serverErrors).toEqual([]);
+            }
+        });
+    }
+
+    test('opens MDF machine-file preview without truncating after display-mode changes', async ({ page }) => {
+        const db = createWorkflowMockDb();
+        seedTabletData(db);
+        await setupBoardTabletMocks(page, db);
+        await setupMdfOverflowPreviewMocks(page, true);
+        await page.addInitScript(() => {
+            const counts: number[] = [];
+            (window as any).__mdfInitialCounts = counts;
+            new MutationObserver(() => {
+                const board = document.querySelector('#status-board-viewport[aria-busy="false"]');
+                const count = board?.querySelectorAll('[data-status-board-column-key="parsed"] .status-board-column__cards > .cnc-deferred-card').length ?? 0;
+                if (count && counts.at(-1) !== count) counts.push(count);
+            }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-busy'] });
+        });
+        await page.goto('/mdf-work-board?date=2026-08-05');
+        await page.locator('#status-board-viewport[aria-busy="false"]').waitFor({ timeout: 60_000 });
+        const cards = page.locator('[data-status-board-column-key="parsed"] .status-board-column__cards > .cnc-deferred-card');
+        await expect(cards).toHaveCount(30, { timeout: 30_000 });
+        expect(await page.evaluate(() => (window as any).__mdfInitialCounts.slice(0, 2))).toEqual([6, 30]);
+        // Observe every removal, rather than letting toHaveCount retry past a
+        // brief six-card clamp and accidentally pass on the broken behavior.
+        await page.evaluate(() => {
+            const list = document.querySelector('[data-status-board-column-key="parsed"] .status-board-column__cards')!;
+            const probe = { minimum: list.children.length };
+            (window as any).__mdfCardCountProbe = probe;
+            new MutationObserver(() => {
+                const count = list.querySelectorAll(':scope > .cnc-deferred-card').length;
+                if (count) probe.minimum = Math.min(probe.minimum, count);
+            })
+                .observe(list, { childList: true });
+        });
+        const modes = page.locator('.status-board-toolbar__cnc-card-mode');
+        for (const mode of ['Средний', 'Стандартный', 'Компактный', 'Стандартный']) {
+            await modes.locator('.ant-segmented-item').filter({ hasText: mode }).click();
+            await page.waitForTimeout(1_500);
+            await expect(cards).toHaveCount(30);
+        }
+        expect(await page.evaluate(() => (window as any).__mdfCardCountProbe.minimum)).toBe(30);
+        await cards.nth(18).scrollIntoViewIfNeeded();
+        const card = cards.nth(18).locator('.cnc-packet-card');
+        await card.getByRole('button', { name: 'Скрин' }).click();
+        await expect(card.locator('.cnc-packet-card__sheet-panel')).toBeVisible();
+        await page.getByRole('menuitem', { name: /Заказы/ }).first().click();
+        await expect(page).toHaveURL(/\/orders/);
+        await page.getByRole('tab', { name: 'МДФ-работы', exact: true }).click();
+        await expect(page).toHaveURL(/\/mdf-work-board/);
+        await page.waitForTimeout(1_500);
+        // The parent deliberately reloads the dataset on workspace return.
+        // Its loading placeholders may replace cards; the loaded list must
+        // still reveal all wrappers immediately, without a new six-card clamp.
+        await expect(cards).toHaveCount(30);
+        expect(await page.evaluate(() => (window as any).__mdfCardCountProbe.minimum)).toBe(30);
+    });
+});
+
+async function setupMdfOverflowPreviewMocks(page: Page, slowInitialLoad = false) {
+    await page.addInitScript(() => {
+        const user = JSON.parse(localStorage.getItem('user')!);
+        user.permissions = [...user.permissions, 'cut.view', 'labels.generate'];
+        localStorage.setItem('user', JSON.stringify(user));
+    });
+    await page.route(/\/api\/v1\/cnc-telegram\/today(?:\?.*)?$/, async (route) => {
+        if (slowInitialLoad) {
+            slowInitialLoad = false;
+            await new Promise((resolve) => setTimeout(resolve, 2_500));
+        }
+        const packets = Array.from({ length: 30 }, (_, index) => ({
+            ...buildMdfPreviewPacket(),
+            packetId: `e2e-overflow-packet-${index}`,
+            externalPacketKey: `e2e-overflow:${index}`,
+            cuttingSequenceNo: index + 1,
+            programName: `E2E-CNC-${index + 1}.TXT`,
+        }));
+        await route.fulfill({ json: {
+            workday: '2026-08-05', generatedAt: '2026-08-05T10:00:00.000Z',
+            operationalWindow: { dateFrom: '2026-06-05', dateTo: '2026-08-05' },
+            historicalBathReadiness: [], historicalReadinessSources: [],
+            columns: [{ key: 'parsed', title: 'Файлы на станке', total: packets.length, packets, baths: [] }],
+        } });
+    });
+    await page.route(/\/api\/v1\/cnc-telegram\/media\/sheet\.png$/, (route) => route.fulfill({
+        contentType: 'image/png',
+        body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64'),
+    }));
+    await page.route(/\/api\/v1\/label-templates(?:\?.*)?$/, (route) => route.fulfill({ json: [] }));
+}
+
 function buildMdfPreviewPacket() {
     return {
         packetId: 'packet-preview-1',
