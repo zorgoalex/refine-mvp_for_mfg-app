@@ -353,6 +353,7 @@ export function mapOrderListItemToLegacyRow(item: OrderListItemDto): LegacyOrder
     primary_group: item.primaryGroup ?? null,
     groups: item.groups ?? [],
     created_by: item.createdBy ?? undefined,
+    created_by_label: item.createdByLabel ?? null,
     edited_by: item.editedBy ?? undefined,
     updated_at: item.updatedAt,
     version: item.version,

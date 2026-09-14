@@ -768,6 +768,7 @@ const orderListItemSwaggerSchema = {
     primaryGroup: { ...orderGroupSummarySwaggerSchema, nullable: true },
     groups: { type: 'array', items: orderGroupSummarySwaggerSchema },
     createdBy: nullableIntegerSwaggerSchema,
+    createdByLabel: { ...nullableStringSwaggerSchema, readOnly: true },
     editedBy: nullableIntegerSwaggerSchema,
     deletedAt: { type: 'string', format: 'date-time', nullable: true },
     deletedBy: nullableIntegerSwaggerSchema,

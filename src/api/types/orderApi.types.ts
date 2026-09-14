@@ -832,6 +832,7 @@ export interface OrderListItemDto {
   primaryGroup?: EntityGroupLink | null;
   groups?: EntityGroupLink[];
   createdBy?: number | null;
+  createdByLabel?: string | null;
   editedBy?: number | null;
   updatedAt?: IsoDateTimeString;
   version?: number;

@@ -167,6 +167,7 @@ export interface OrderListItemDto {
   primaryGroup: OrderGroupSummaryDto | null;
   groups: OrderGroupSummaryDto[];
   createdBy: number | null;
+  createdByLabel?: string | null;
   editedBy: number | null;
   deletedAt?: string | null;
   deletedBy?: number | null;
