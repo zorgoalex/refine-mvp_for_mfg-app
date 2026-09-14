@@ -497,6 +497,9 @@ export class PgOrderReadRepository
       )
       SELECT
         o.*,
+        CASE WHEN creator.is_service_account THEN 'Сервис интеграции ERP'
+          ELSE COALESCE(NULLIF(creator.full_name, ''), creator.username)
+        END AS created_by_label,
         material_projection.material_ids,
         material_projection.material_names,
         basis_projection.basis_projects,
@@ -513,6 +516,7 @@ export class PgOrderReadRepository
         production_projection.passed_production_status_codes,
         group_projection.group_links_json
       FROM page_orders o
+      LEFT JOIN users creator ON creator.user_id = o.created_by
       LEFT JOIN LATERAL (
         SELECT
           ARRAY_AGG(materials.material_id ORDER BY materials.first_detail_number, materials.first_detail_id) AS material_ids,
@@ -1685,6 +1689,7 @@ function mapListItem(row: OrderHeaderRow, includeDeleted: boolean = false): Orde
     primaryGroup: groups.find((group) => group.isPrimary) ?? null,
     groups,
     createdBy: toNullableNumber(row.created_by),
+    createdByLabel: row.created_by_label ?? null,
     editedBy: toNullableNumber(row.edited_by),
     ...(includeDeleted
       ? {

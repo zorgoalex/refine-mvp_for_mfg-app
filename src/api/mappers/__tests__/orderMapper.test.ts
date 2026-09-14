@@ -194,6 +194,13 @@ function makeListItem(overrides: Partial<OrderListItemDto> = {}): OrderListItemD
 }
 
 describe('mapOrderListItemToLegacyRow — header-material fallback (critic R8)', () => {
+  it('carries the safe creator label, including service authors, without an account lookup', () => {
+    const row = mapOrderListItemToLegacyRow(makeListItem({ createdBy: 86, createdByLabel: 'Сервис интеграции ERP' }));
+    expect(row.created_by).toBe(86);
+    expect(row.created_by_label).toBe('Сервис интеграции ERP');
+    expect(mapOrderListItemToLegacyRow(makeListItem({ createdBy: 87 })).created_by_label).toBeNull();
+  });
+
   it('maps backend Basis-project aggregates for the orders list fallback', () => {
     const item = makeListItem({
       basisProjects: ['1491', '1492'],
