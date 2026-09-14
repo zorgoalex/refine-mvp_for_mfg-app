@@ -171,6 +171,74 @@ describe('dataProvider backend users cutover routing', () => {
       { user_id: 16, username: 'editor_user' },
     ]);
   });
+
+  it('keeps available creator labels when a service account is absent from the users API', async () => {
+    const { ApiError } = await import('../api/apiError');
+    getUserById.mockImplementation(async (id: number) => {
+      if (id === 86) {
+        throw new ApiError({ status: 404, code: 'USER_NOT_FOUND', message: 'User not found' });
+      }
+      return { id, username: 'creator_user', role: 'manager', isActive: true };
+    });
+    const { dataProvider } = await import('./dataProvider');
+
+    await expect(dataProvider('').getMany({ resource: 'users', ids: [15, 86] })).resolves.toMatchObject({
+      data: [{ user_id: 15, username: 'creator_user' }],
+    });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('returns a successful empty lookup when every requested user is unavailable', async () => {
+    const { ApiError } = await import('../api/apiError');
+    getUserById.mockRejectedValue(new ApiError({
+      status: 404, code: 'USER_NOT_FOUND', message: 'User not found',
+    }));
+    const { dataProvider } = await import('./dataProvider');
+    const { QueryClient } = await import('@tanstack/react-query');
+    const queryClient = new QueryClient();
+    try {
+      await expect(queryClient.fetchQuery({
+        queryKey: ['users', 'many', [86]],
+        queryFn: () => dataProvider('').getMany({ resource: 'users', ids: [86] }),
+        retry: 2,
+        retryDelay: 0,
+      })).resolves.toEqual({ data: [] });
+      expect(getUserById).toHaveBeenCalledTimes(1);
+    } finally {
+      queryClient.clear();
+    }
+  });
+
+  it.each([
+    [401, 'AUTH_REQUIRED'],
+    [403, 'PERMISSION_DENIED'],
+    [503, 'SERVICE_UNAVAILABLE'],
+    [404, 'HTTP_404'],
+    [503, 'USER_NOT_FOUND'],
+  ])('preserves failure %s/%s instead of masking it as an absent user', async (status, code) => {
+    const { ApiError } = await import('../api/apiError');
+    const error = new ApiError({ status, code, message: 'Request failed' });
+    getUserById.mockRejectedValue(error);
+    const { dataProvider } = await import('./dataProvider');
+
+    await expect(dataProvider('').getMany({ resource: 'users', ids: [86] })).rejects.toBe(error);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('preserves transport errors', async () => {
+    const error = new TypeError('Failed to fetch');
+    getUserById.mockRejectedValue(error);
+    const { dataProvider } = await import('./dataProvider');
+    await expect(dataProvider('').getMany({ resource: 'users', ids: [86] })).rejects.toBe(error);
+  });
+
+  it('still rejects an unavailable user opened directly', async () => {
+    const { ApiError } = await import('../api/apiError');
+    const error = new ApiError({ status: 404, code: 'USER_NOT_FOUND', message: 'User not found' });
+    getUserById.mockRejectedValue(error);
+    const { dataProvider } = await import('./dataProvider');
+    await expect(dataProvider('').getOne({ resource: 'users', id: 86 })).rejects.toBe(error);
+  });
 });
 
 describe('dataProvider users rollback routing', () => {

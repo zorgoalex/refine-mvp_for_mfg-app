@@ -28,6 +28,8 @@ export interface BackendErrorBody {
 export class ApiError extends Error {
   code: ApiErrorCode;
   status: number;
+  // Refine's HttpError uses statusCode; backend callers use status.
+  readonly statusCode: number;
   requestId?: string;
   details?: unknown;
 
@@ -36,6 +38,7 @@ export class ApiError extends Error {
     this.name = 'ApiError';
     this.code = params.code;
     this.status = params.status;
+    this.statusCode = params.status;
     this.requestId = params.requestId;
     this.details = params.details;
   }

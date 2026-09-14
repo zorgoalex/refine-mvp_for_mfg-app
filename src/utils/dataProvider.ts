@@ -8,6 +8,7 @@ import { clientPhonesApi } from '../api/clientPhonesApi';
 import { ordersApi } from '../api/ordersApi';
 import { paymentsApi } from '../api/paymentsApi';
 import { usersApi } from '../api/usersApi';
+import { isApiError } from '../api/apiError';
 import { notifyOrderFormReferencesChanged } from '../api/orderFormReferenceEvents';
 import type { ClientPhoneDto } from '../api/types/clientPhoneApi.types';
 import type { PaymentDto } from '../api/types/paymentApi.types';
@@ -1370,9 +1371,20 @@ async function getBackendUsersManyIfEnabled(resource: string, ids: Array<number 
     return null;
   }
 
-  const users = await Promise.all(ids.map((id) => usersApi.getById(Number(id))));
+  const users = await Promise.all(ids.map(async (id) => {
+    try {
+      return await usersApi.getById(Number(id));
+    } catch (error) {
+      // Service accounts are intentionally hidden by the users API. Like a
+      // GraphQL _in lookup, omit unavailable rows without failing other labels.
+      if (isApiError(error, 'USER_NOT_FOUND') && error.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }));
   return {
-    data: users.map(mapBackendUserToLegacyRow),
+    data: users.filter((user): user is UserDto => user !== null).map(mapBackendUserToLegacyRow),
   };
 }
 
