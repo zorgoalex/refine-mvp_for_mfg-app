@@ -1213,6 +1213,16 @@ const buildWhere = (resource: string, filters?: any[]) => {
   const andParts = safeFilters.map((f) => {
     const op = mapOperator(f.operator);
     let val = normalizeContains(f.operator, f.value);
+    // URL-synced Refine filters arrive as strings; GraphQL requires typed film scalars.
+    if (resource === "films") {
+      const scalar = (value: unknown) => {
+        if (["is_active", "film_texture"].includes(f.field)) return parseBooleanFilter(value) ?? value;
+        if (["film_id", "film_type_id", "vendor_id", "sort_order"].includes(f.field)
+          && typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
+        return value;
+      };
+      val = Array.isArray(val) ? val.map(scalar) : scalar(val);
+    }
     // Drop null/undefined from `_in` arrays — Hasura rejects `_in: [null]` for
     // non-null typed columns ("unexpected null value for type 'smallint'").
     if (op === "_in" && Array.isArray(val)) {

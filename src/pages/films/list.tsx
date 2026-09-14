@@ -2,18 +2,58 @@ import { Table } from '../../ui/tooltipDelay';
 import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
-import { Space, Badge } from "antd";
-import { useMemo } from "react";
+import { Space, Badge, Button, Card, Col, Form, Input, InputNumber, Row, Select } from "antd";
+import { useEffect, useMemo, useState } from "react";
+import { ClearOutlined, FilterOutlined, SearchOutlined } from "@ant-design/icons";
+import { useSelect } from "../../ui/refineSelect";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { LocalizedList } from "../../components/LocalizedList";
 import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
+import { buildFilmFilters, FILM_KEY_PATTERN, hasFilmFieldFilters, readFilmFilters, type FilmFilterValues } from "./filmFilters";
 
 export const FilmList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({
+  const [filtersVisible, setFiltersVisible] = useState(false);
+  const [form] = Form.useForm<FilmFilterValues>();
+  const { tableProps, filters, setFilters, setCurrent } = useTable({
+    resource: "films",
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "sort_order", order: "asc" }, { field: "film_id", order: "asc" }],
     },
+  });
+  const appliedFilters = useMemo(() => readFilmFilters(filters), [filters]);
+  const [search, setSearch] = useState(appliedFilters.film_name ?? "");
+  const hasFieldFilters = hasFilmFieldFilters(appliedFilters);
+
+  useEffect(() => setSearch(appliedFilters.film_name ?? ""), [appliedFilters.film_name]);
+  useEffect(() => {
+    if (filtersVisible) form.setFieldsValue(appliedFilters);
+  }, [appliedFilters, filtersVisible, form]);
+
+  const applyFilters = (values: FilmFilterValues) => {
+    setFilters(buildFilmFilters(values), "replace");
+    setCurrent(1);
+  };
+  const resetFilters = () => {
+    form.resetFields();
+    setSearch("");
+    applyFilters({});
+  };
+  const { selectProps: typeSelectProps } = useSelect({
+    resource: "film_types",
+    optionLabel: "film_type_name",
+    optionValue: "film_type_id",
+    defaultValue: appliedFilters.film_type_id,
+    filters: [{ field: "is_active", operator: "in", value: [true, false] }],
+    queryOptions: { enabled: filtersVisible },
+  });
+  const { selectProps: vendorSelectProps } = useSelect({
+    resource: "vendors",
+    optionLabel: "vendor_name",
+    optionValue: "vendor_id",
+    defaultValue: appliedFilters.vendor_id,
+    filters: [{ field: "is_active", operator: "in", value: [true, false] }],
+    queryOptions: { enabled: filtersVisible },
   });
 
   const { highlightProps } = useHighlightRow(
@@ -76,6 +116,86 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <LocalizedList title="Плёнки">
+      <Space wrap style={{ marginBottom: 16, width: "100%" }}>
+        <Input.Search
+          aria-label="Поиск плёнок по названию"
+          placeholder="Поиск по названию"
+          allowClear
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          onSearch={(value) => applyFilters({ ...appliedFilters, film_name: value })}
+          style={{ width: 280, maxWidth: "100%" }}
+        />
+        <Button
+          icon={<FilterOutlined aria-hidden />}
+          type={filtersVisible || hasFieldFilters ? "primary" : "default"}
+          aria-expanded={filtersVisible}
+          aria-controls="films-filters"
+          onClick={() => setFiltersVisible((visible) => !visible)}
+        >
+          {filtersVisible ? "Скрыть фильтры" : hasFieldFilters ? "Фильтры активны" : "Фильтры"}
+        </Button>
+      </Space>
+      {filtersVisible && (
+        <section id="films-filters" aria-label="Фильтры плёнок">
+          <Card title="Фильтры" style={{ marginBottom: 16 }}>
+            <Form form={form} layout="vertical" initialValues={appliedFilters}
+              onFinish={(values) => applyFilters({ ...values, film_name: search })}>
+              <Row gutter={16}>
+                <Col xs={24} sm={12} lg={6}>
+                  <Form.Item name="film_id" label="ID">
+                    <InputNumber min={1} precision={0} placeholder="ID плёнки" style={{ width: "100%" }} />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={12} lg={6}>
+                  <Form.Item name="film_type_id" label="Тип плёнки">
+                    <Select {...typeSelectProps} allowClear placeholder="Все типы" />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={12} lg={6}>
+                  <Form.Item name="vendor_id" label="Поставщик плёнки">
+                    <Select {...vendorSelectProps} allowClear placeholder="Все поставщики" />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={12} lg={6}>
+                  <Form.Item name="film_texture" label="Фактура">
+                    <Select allowClear placeholder="Любая" options={[
+                      { value: "yes", label: "С фактурой" }, { value: "no", label: "Без фактуры" },
+                    ]} />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={12} lg={6}>
+                  <Form.Item name="is_active" label="Активность">
+                    <Select options={[
+                      { value: "active", label: "Активные" },
+                      { value: "inactive", label: "Неактивные" },
+                      { value: "all", label: "Все" },
+                    ]} />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={12} lg={6}>
+                  <Form.Item name="ref_key_1c" label="Ключ 1С" rules={[{
+                    pattern: FILM_KEY_PATTERN,
+                    transform: (value: string) => value?.trim(),
+                    message: "Введите полный UUID ключа 1С",
+                  }]}>
+                    <Input allowClear placeholder="Полный ключ 1С" />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={12} lg={6}>
+                  <Form.Item name="sort_order" label="Порядок">
+                    <InputNumber precision={0} placeholder="Порядок сортировки" style={{ width: "100%" }} />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Space wrap>
+                <Button type="primary" htmlType="submit" icon={<SearchOutlined aria-hidden />}>Применить</Button>
+                <Button icon={<ClearOutlined aria-hidden />} onClick={resetFilters}>Сбросить</Button>
+              </Space>
+            </Form>
+          </Card>
+        </section>
+      )}
       <Table
         {...tableProps}
         {...highlightProps}
@@ -103,7 +223,7 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
             vendorMap[record?.vendor_id] ?? record?.vendor_id
           }
         />
-        <Table.Column dataIndex="film_texture" title="Фактура" />
+        <Table.Column dataIndex="film_texture" title="Фактура" render={(value: boolean) => value ? "Да" : "Нет"} />
         <Table.Column dataIndex="ref_key_1c" title="1C-key" />
         <Table.Column
           dataIndex="is_active"
@@ -114,10 +234,6 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
               text={value ? "Активен" : "Неактивен"}
             />
           )}
-          filters={[
-            { text: "Активен", value: true },
-            { text: "Неактивен", value: false },
-          ]}
         />
         <Table.Column
           title="Действия"
