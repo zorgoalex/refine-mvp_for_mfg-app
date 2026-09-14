@@ -29,6 +29,11 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-09-14", title: "Плёнки: подсказки при поиске",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: ["При вводе названия появляются подходящие плёнки с учётом выбранных фильтров. Выбор подсказки сразу применяет поиск; Enter и кнопка поиска также работают."],
+  },
+  {
     version: APP_VERSION, date: "2026-09-14",
     title: "Плёнки: поиск и фильтры",
     services: ["ERP"], repositories: ["repo_erp"],

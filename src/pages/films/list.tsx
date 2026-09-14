@@ -10,6 +10,7 @@ import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { LocalizedList } from "../../components/LocalizedList";
 import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
 import { buildFilmFilters, FILM_KEY_PATTERN, hasFilmFieldFilters, readFilmFilters, type FilmFilterValues } from "./filmFilters";
+import { FilmSearch } from "./FilmSearch";
 
 export const FilmList: React.FC<IResourceComponentsProps> = () => {
   const [filtersVisible, setFiltersVisible] = useState(false);
@@ -117,14 +118,11 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
   return (
     <LocalizedList title="Плёнки">
       <Space wrap style={{ marginBottom: 16, width: "100%" }}>
-        <Input.Search
-          aria-label="Поиск плёнок по названию"
-          placeholder="Поиск по названию"
-          allowClear
+        <FilmSearch
           value={search}
-          onChange={(event) => setSearch(event.target.value)}
+          filters={appliedFilters}
+          onChange={setSearch}
           onSearch={(value) => applyFilters({ ...appliedFilters, film_name: value })}
-          style={{ width: 280, maxWidth: "100%" }}
         />
         <Button
           icon={<FilterOutlined aria-hidden />}
