@@ -282,6 +282,7 @@ describe('httpClient', () => {
       name: 'ApiError',
       code: 'ORDER_VERSION_CONFLICT',
       status: 409,
+      statusCode: 409,
       requestId: 'req-2',
       details: { currentVersion: 4 },
     });
