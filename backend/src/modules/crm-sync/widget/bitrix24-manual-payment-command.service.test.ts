@@ -70,6 +70,22 @@ function setup() {
 }
 
 describe('Bitrix24ManualPaymentCommandService safety', () => {
+  it('resumes an ERP-only retry without creating another Bitrix payment', async () => {
+    const { service, repository, bitrix, tokens } = setup();
+    const pending = { ...command('awaiting_erp_retry'), bitrixPaymentId: '8322' };
+    const completed = { ...pending, status: 'completed' as const, erpPaymentId: 9001 };
+    const materializeCommand = vi.fn().mockResolvedValue(completed);
+    Object.assign(repository, { materializeCommand });
+
+    await expect((service as unknown as {
+      resume(value: ManualPaymentCommand): Promise<ManualPaymentCommand>;
+    }).resume(pending)).resolves.toBe(completed);
+    expect(materializeCommand).toHaveBeenCalledWith(pending.commandId);
+    expect(bitrix.createDealPayment).not.toHaveBeenCalled();
+    expect(tokens.refreshCallerToken).not.toHaveBeenCalled();
+    expect(repository.releaseCommand).toHaveBeenCalledOnce();
+  });
+
   it('never repeats remote create after takeover of remote_create_started', async () => {
     const { service, repository, bitrix } = setup();
     repository.listRecoverableCommands.mockResolvedValue([
