@@ -29,6 +29,11 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-09-15", title: "Bitrix: перенос оплаты в заказ ERP",
+    services: ["ERP", "CRM"], repositories: ["repo_erp"],
+    fixed: ["При переносе оплаты из виджета в производственный заказ корректно передаётся автор — сопоставленный пользователь ERP, принявший оплату. Исправлена ошибка сохранения дополнительного платежа."],
+  },
+  {
     version: APP_VERSION, date: "2026-09-14", title: "МДФ-доска: сохранение открытых карточек",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: ["Фоновые обновления МДФ-доски больше не сбрасывают прокрутку и открытые превью файлов станка в стандартном режиме. Окно бирок остаётся открытым при обновлении данных."],

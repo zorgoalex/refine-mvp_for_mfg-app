@@ -1428,6 +1428,10 @@ export class Bitrix24PaymentWidgetRepository {
           'ERP actor no longer has permission for this order',
         );
       }
+      // Widget/recovery requests have no ERP login context. The payment and
+      // order audit triggers must use the command's verified original actor,
+      // never the installation administrator or a previous pooled connection.
+      await tx.query("SELECT set_config('app.user_id', $1, true)", [String(command.erpActorUserId)]);
       const snapshot = await tx.query<{
         bitrix_payment_id: string;
         amount: string | number;
