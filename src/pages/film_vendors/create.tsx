@@ -1,10 +1,11 @@
 import { Create } from "@refinedev/antd";
-import { IResourceComponentsProps } from "@refinedev/core";
+import { IResourceComponentsProps, type BaseRecord, type HttpError } from "@refinedev/core";
 import { Form, Input, Checkbox, message } from "antd";
 import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
+import type { FilmVendorFormValues } from "./formValues";
 
 export const FilmVendorCreate: React.FC<IResourceComponentsProps> = () => {
-  const { formProps, saveButtonProps } = useFormWithHighlight({
+  const { formProps, saveButtonProps } = useFormWithHighlight<BaseRecord, HttpError, FilmVendorFormValues>({
     resource: "film_vendors",
     idField: "film_vendor_id",
   });
@@ -42,4 +43,3 @@ export const FilmVendorCreate: React.FC<IResourceComponentsProps> = () => {
     </Create>
   );
 };
-

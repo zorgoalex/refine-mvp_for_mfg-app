@@ -14,18 +14,15 @@ import { useRecordTabTitle } from "../utils/recordTitle";
 export const useFormWithHighlight = <
   TQueryFnData extends BaseRecord = BaseRecord,
   TError extends HttpError = HttpError,
-  TVariables = {},
-  TData extends BaseRecord = TQueryFnData,
-  TResponse extends BaseRecord = TData,
-  TResponseError extends HttpError = TError
+  TVariables = {}
 >(props: {
   resource: string;
   idField: string;
   action?: "create" | "edit";
   successResource?: string;
   navigateOnSuccess?: boolean;
-  formProps?: UseFormProps<TQueryFnData, TError, TVariables, TData, TResponse, TResponseError>;
-}): UseFormReturnType<TQueryFnData, TError, TVariables, TData, TResponse, TResponseError> => {
+  formProps?: UseFormProps<TQueryFnData, TError, TVariables>;
+}): UseFormReturnType<TQueryFnData, TError, TVariables> => {
   const {
     resource,
     idField,
@@ -36,7 +33,7 @@ export const useFormWithHighlight = <
   } = props;
   const go = useGo();
 
-  const formReturn = useRefineForm<TQueryFnData, TError, TVariables, TData, TResponse, TResponseError>({
+  const formReturn = useRefineForm<TQueryFnData, TError, TVariables>({
     ...additionalProps,
     resource,
     redirect: false,
