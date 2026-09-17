@@ -246,6 +246,56 @@ describe('orderFormStore version sync', () => {
     basis_product: 'E2E-product', basis_designation: 'E2E-panel', doweling: true,
   };
 
+  it.each(['addDetail', 'addPdfImportedDetail'] as const)(
+    '%s owns numbering for unnumbered imported input and ignores a supplied number',
+    (action) => {
+      const store = useOrderFormStore.getState();
+      store.setHeader({ order_name: 'E2E unnumbered import', client_id: 1,
+        order_date: '2026-09-17', order_status_id: 1 });
+      const { detail_number: ignoredNumber, ...input } = pdfDetail;
+      expect(ignoredNumber).toBe(0);
+      store[action](input);
+      store[action]({ ...input, detail_number: 999 });
+      const state = useOrderFormStore.getState();
+      expect(state.details.map(row => row.detail_number)).toEqual([1, 2]);
+      expect(new Set(state.details.map(row => row.temp_id)).size).toBe(2);
+      expect(state.details.every(row => row.delete_flag === false)).toBe(true);
+      expect(state.calculatedTotals()).toMatchObject({
+        positions_count: 2, parts_count: 4, total_amount: 200,
+      });
+      expect(state.calculatedTotals().total_area).toBeCloseTo(0.6);
+      const dto = mapOrderFormToSaveOrderDto(state.getFormValues());
+      expect(dto.details.map(row => row.detailNumber)).toEqual([1, 2]);
+    },
+  );
+
+  it('appends an unnumbered detail after the highest existing number without mutating existing rows', () => {
+    const store = useOrderFormStore.getState();
+    store.addDetail(pdfDetail);
+    const first = { ...useOrderFormStore.getState().details[0], detail_number: 7 };
+    useOrderFormStore.setState({ details: [first] });
+    const { detail_number: ignoredNumber, ...input } = pdfDetail;
+    expect(ignoredNumber).toBe(0);
+    store.addDetail(input);
+    expect(useOrderFormStore.getState().details[0]).toBe(first);
+    expect(useOrderFormStore.getState().details.map(row => row.detail_number)).toEqual([7, 8]);
+  });
+
+  it('fills a PDF placeholder with unnumbered input before appending', () => {
+    const store = useOrderFormStore.getState();
+    store.ensureMinimumDetailRows(1, emptyDetail);
+    const slot = useOrderFormStore.getState().details[0];
+    const { detail_number: ignoredNumber, ...input } = pdfDetail;
+    expect(ignoredNumber).toBe(0);
+    store.addPdfImportedDetail(input);
+    store.addPdfImportedDetail(input);
+    const state = useOrderFormStore.getState();
+    expect(state.details.map(row => row.detail_number)).toEqual([1, 2]);
+    expect(state.details[0].temp_id).toBe(slot.temp_id);
+    expect(state.details.every(row => row.is_placeholder === false)).toBe(true);
+    expect(state.pdfImportCandidateTempIds).toEqual(state.details.map(row => row.temp_id));
+  });
+
   it.each([3, 20, 23])('imports %i PDF details into the initial 20 rows before appending', (count) => {
     const store = useOrderFormStore.getState();
     store.setHeader({ order_name: 'E2E PDF import', client_id: 1,

@@ -34,6 +34,9 @@ const generateTempId = (): number => {
 // STATE INTERFACE
 // ============================================================================
 
+export type OrderDetailInput = Omit<OrderDetail, 'temp_id' | 'detail_number'>
+  & Partial<Pick<OrderDetail, 'detail_number'>>;
+
   interface OrderFormState {
   // ========== STATE ==========
   header: Partial<Order>;
@@ -81,8 +84,8 @@ const generateTempId = (): number => {
   updateHeaderField: <K extends keyof Order>(field: K, value: Order[K]) => void;
 
   // ========== ACTIONS: DETAILS ==========
-  addDetail: (detail: Omit<OrderDetail, 'temp_id'>) => void;
-  addPdfImportedDetail: (detail: Omit<OrderDetail, 'temp_id'>) => void;
+  addDetail: (detail: OrderDetailInput) => void;
+  addPdfImportedDetail: (detail: OrderDetailInput) => void;
   ensureMinimumDetailRows: (minimum: number, detail: Omit<OrderDetail, 'temp_id'>) => void;
   insertDetailAfter: (afterTempId: number, detail: Omit<OrderDetail, 'temp_id'>) => void;
   updateDetail: (tempId: number, data: Partial<OrderDetail>) => void;
