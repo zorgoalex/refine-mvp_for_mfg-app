@@ -1,5 +1,5 @@
 import { Controller, Get, Inject, Query, Req } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -45,11 +45,13 @@ export class BitrixAuditController {
   ) {}
 
   @Get('status')
+  @ApiOperation({ summary: 'Read Bitrix queue counters and runtime flags (audit.view)' })
   status(@Req() request: RequestWithCurrentUser) {
     return this.service.status(request.user);
   }
 
   @Get('queue')
+  @ApiOperation({ summary: 'Search the current forward or reverse Bitrix queue (audit.view)' })
   queue(
     @Req() request: RequestWithCurrentUser,
     @Query() query: Record<string, unknown>
@@ -58,6 +60,7 @@ export class BitrixAuditController {
   }
 
   @Get('event-options')
+  @ApiOperation({ summary: 'Search Bitrix audit event names without the recent-history cap (audit.view)' })
   events(
     @Req() request: RequestWithCurrentUser,
     @Query() query: Record<string, unknown>

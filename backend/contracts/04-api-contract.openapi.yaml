@@ -1425,6 +1425,34 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PageSize'
+        - name: scope
+          in: query
+          schema: { type: string, enum: [all, business, bitrix24], default: all }
+        - name: excludeBitrix24
+          in: query
+          schema: { type: boolean, default: false }
+          description: Exact integration ownership exclusion before counts/paging; incompatible with scope=bitrix24. Ordinary ERP events remain visible.
+        - name: bitrixDirection
+          in: query
+          schema: { type: string, enum: [forward, reverse, widget, settings, other] }
+          description: Requires scope=bitrix24, as do all bitrix-prefixed filters.
+        - name: bitrixCategory
+          in: query
+          schema: { type: string, enum: [client, order, payment, settings, processing, other] }
+        - name: bitrixOutcome
+          in: query
+          schema: { type: string, enum: [success, error, conflict, attention, started, skipped, unknown] }
+          description: attention includes both error and conflict, not retry commands.
+        - name: bitrixReconcile
+          in: query
+          schema: { type: string, enum: [exclude, only] }
+        - name: bitrixObject
+          in: query
+          schema: { type: string, enum: [contact, company, deal, payment] }
+        - name: bitrixId
+          in: query
+          schema: { type: string, pattern: '^[1-9][0-9]{0,17}$' }
+          description: Requires bitrixObject; namespaces are not interchangeable.
         - name: event
           in: query
           required: false
@@ -1531,6 +1559,14 @@ paths:
       security:
         - bearerAuth: []
       x-permission: audit.view
+      parameters:
+        - name: scope
+          in: query
+          schema: { type: string, enum: [all, business, bitrix24], default: all }
+        - name: excludeBitrix24
+          in: query
+          schema: { type: boolean, default: false }
+          description: Applied before the latest-5000-row options sample; incompatible with scope=bitrix24.
       responses:
         '200':
           description: Значения фильтров audit
@@ -1544,6 +1580,124 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalError'
+
+  /api/v1/audit/bitrix24/status:
+    get:
+      tags: [Audit]
+      operationId: getBitrixAuditStatus
+      summary: Current Bitrix queue counters and runtime configuration
+      description: Read-only. Returns fetchedAt and data for forward/reverse directions with enabled, owner, dryRun, pending, processing, failed, dead, oldestPendingAt and lastProcessedAt. Runtime ownership is not proof of a live worker; no OAuth tokens or portal calls.
+      security: [{ bearerAuth: [] }]
+      x-permission: audit.view
+      responses:
+        '200':
+          description: Whitelisted runtime flags and queue counters
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [fetchedAt, data]
+                properties:
+                  fetchedAt: { type: string, format: date-time }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        direction: { type: string, enum: [forward, reverse] }
+                        enabled: { type: boolean }
+                        owner: { type: string, enum: [none, in_process, external] }
+                        dryRun: { type: boolean }
+                        pending: { type: integer }
+                        processing: { type: integer }
+                        failed: { type: integer }
+                        dead: { type: integer }
+                        oldestPendingAt: { type: string, format: date-time, nullable: true }
+                        lastProcessedAt: { type: string, format: date-time, nullable: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/audit/bitrix24/queue:
+    get:
+      tags: [Audit]
+      operationId: listBitrixAuditQueue
+      summary: Search live forward/reverse queue state, including orders without mappings
+      description: Read-only current state, not historical events. Returns data and pagination (page,pageSize,total). Rows include queueId,direction,event,entityType,entityId,orderId,orderName,bitrixObject,bitrixId,status,attempts,createdAt,processedAt,nextAttemptAt,error,errorSource. Redacted errorSource=current_mapping means the latest object error, not necessarily this queue attempt. Forward failed is terminal; reverse failed may retry.
+      security: [{ bearerAuth: [] }]
+      x-permission: audit.view
+      parameters:
+        - name: direction
+          in: query
+          required: true
+          schema: { type: string, enum: [forward, reverse] }
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, processing, processed, failed, dead] }
+        - name: orderId
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: entityType
+          in: query
+          schema: { type: string, enum: [order, client, payment] }
+        - name: entityId
+          in: query
+          schema: { type: string, pattern: '^[1-9][0-9]{0,17}$' }
+          description: Requires entityType.
+        - name: bitrixObject
+          in: query
+          schema: { type: string, enum: [deal, contact, company, payment] }
+        - name: bitrixId
+          in: query
+          schema: { type: string, pattern: '^[1-9][0-9]{0,17}$' }
+          description: Requires bitrixObject.
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000000, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200': { description: Paginated queue rows with sanitized errors and explicit provenance }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/audit/bitrix24/event-options:
+    get:
+      tags: [Audit]
+      operationId: listBitrixAuditEventOptions
+      summary: Search the Bitrix event catalog and recorded names
+      description: Requires audit.view. Does not sample the last 5000 events. Merges matching known catalog entries with up to 50 distinct recorded names; unknown names stay visible. No audit mutation or portal calls.
+      security: [{ bearerAuth: [] }]
+      x-permission: audit.view
+      parameters:
+        - name: search
+          in: query
+          schema: { type: string, maxLength: 128 }
+      responses:
+        '200':
+          description: Matching event definitions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        event: { type: string }
+                        label: { type: string }
+                        direction: { type: string }
+                        category: { type: string }
+                        outcome: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
   /api/v1/audit/order-options:
     get:

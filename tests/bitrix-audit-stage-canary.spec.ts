@@ -6,10 +6,10 @@ const api = 'https://backend-test.mebelkz.app/api/v1';
 const frontend = 'https://app-test.mebelkz.app';
 const username = process.env.CODEX_PLAYWRIGHT_USERNAME ?? 'codex_playwright';
 const password = process.env.CODEX_PLAYWRIGHT_PASSWORD ?? '';
+test.use({ trace: 'off', video: 'off', screenshot: 'off' });
 
 test.describe('Bitrix audit stage: read-only, no portal calls', () => {
   test.skip(!enabled || !password, 'Explicit stage opt-in and test credentials required');
-  test.use({ trace: 'off', video: 'off', screenshot: 'off' });
   test('deployed API partitions history and exposes safe runtime/queue state', async ({ request }) => {
     const login = await request.post(`${api}/auth/login`, { data: { username, password } });
     expect(login.status()).toBe(200);
@@ -35,9 +35,13 @@ test.describe('Bitrix audit stage: read-only, no portal calls', () => {
     await page.goto(`${frontend}/login`);
     await page.locator('input[autocomplete="username"], input#username').fill(username);
     await page.locator('input[autocomplete="current-password"], input#password').fill(password);
-    await page.getByRole('button', { name: 'Войти' }).click();
+    await page.getByRole('button', { name: 'Войти', exact: true }).click();
     await page.waitForURL((url) => !url.pathname.includes('/login'));
-    await page.goto(`${frontend}/audit`);
+    // Preserve the in-memory session, as in the other authenticated stage canaries.
+    await page.evaluate(() => {
+      window.history.pushState({}, '', '/audit');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
     const list = page.waitForResponse((r) => r.url().includes('/api/v1/audit?') && r.url().includes('scope=bitrix24'));
     await page.getByRole('tab', { name: 'Bitrix24', exact: true }).click();
     expect((await list).status()).toBe(200);
