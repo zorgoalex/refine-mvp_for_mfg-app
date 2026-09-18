@@ -9,11 +9,11 @@ import {
   InputNumber,
   Select,
   Space,
-  Table,
   Tabs,
   Tag,
   Typography,
 } from 'antd';
+import { Table } from '../../ui/tooltipDelay';
 import type { Dayjs } from 'dayjs';
 import { auditApi } from '../../api/auditApi';
 import type {

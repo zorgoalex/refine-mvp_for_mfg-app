@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { auditApi } from '../../api/auditApi';
 import { AuditOrderLookup, Bitrix24Audit } from './Bitrix24Audit';
 
+vi.mock('../../ui/tooltipDelay', async () => ({ Table: (await import('antd')).Table }));
+
 vi.mock('../../api/auditApi', () => ({
   auditApi: {
     list: vi.fn(),
