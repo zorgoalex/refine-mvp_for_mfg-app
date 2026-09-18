@@ -31,6 +31,14 @@ function enabledConfig() {
 }
 
 describe('Bitrix24ReverseProcessorService', () => {
+  it.each([true, false])('counts a failed attempt only after winning CAS: %s', async (committed) => {
+    const repository = { claimEvents: vi.fn().mockResolvedValue([event]), heartbeatEvent: vi.fn().mockResolvedValue(true), markEventFailed: vi.fn().mockResolvedValue(committed) };
+    const bitrix = { withRequestGuard: vi.fn().mockRejectedValue(new Error('E2E failed read')) };
+    const service = new Bitrix24ReverseProcessorService(repository as never, bitrix as never, enabledConfig() as never);
+    await expect(service.runTick()).resolves.toEqual({ claimed: 1, processed: 0, failed: committed ? 1 : 0 });
+    expect(repository.markEventFailed).toHaveBeenCalledTimes(1);
+    expect(bitrix.withRequestGuard).toHaveBeenCalledTimes(1);
+  });
   it('proves inbox ownership around OAuth reads and commits the event', async () => {
     const repository = {
       claimEvents: vi.fn().mockResolvedValue([event]),

@@ -6,9 +6,16 @@ import type {
   AuditParticipantFilterOptionsResponseDto,
 } from '../dto/audit.dto';
 
-export type AuditLogScope = 'all' | 'business';
+export type AuditLogScope = 'all' | 'business' | 'bitrix24';
 
 export interface AuditLogFilters {
+  excludeBitrix24?: boolean;
+  bitrixDirection?: 'forward' | 'reverse' | 'widget' | 'settings' | 'other';
+  bitrixCategory?: 'client' | 'order' | 'payment' | 'settings' | 'processing' | 'other';
+  bitrixOutcome?: 'success' | 'error' | 'conflict' | 'attention' | 'started' | 'skipped' | 'unknown';
+  bitrixReconcile?: 'exclude' | 'only';
+  bitrixObject?: 'contact' | 'company' | 'deal' | 'payment';
+  bitrixId?: string;
   event?: string;
   events?: string[];
   entityType?: string;
@@ -41,6 +48,7 @@ export interface ListAuditCommand {
 }
 
 export interface AuditFilterOptionsCommand {
+  excludeBitrix24?: boolean;
   currentUser: CurrentUser | undefined;
   requestId: string;
   scope?: AuditLogScope;

@@ -13,6 +13,14 @@ export interface AuditPaginationDto {
 }
 
 export interface AuditLogEventDto {
+  bitrix?: {
+    label: string;
+    direction: string;
+    category: string;
+    outcome: string;
+    refs: Array<{ type: string; id: string; identitySource: string }>;
+    currentRequestOrderId: number | null;
+  };
   auditId: string;
   event: string;
   entityType: string | null;

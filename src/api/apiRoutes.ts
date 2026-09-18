@@ -386,6 +386,9 @@ export const apiRoutes = {
     analyze: backendApiPath('/vlm/analyze'),
   },
   audit: {
+    bitrixStatus: backendApiPath('/audit/bitrix24/status'),
+    bitrixQueue: backendApiPath('/audit/bitrix24/queue'),
+    bitrixEvents: backendApiPath('/audit/bitrix24/event-options'),
     list: backendApiPath('/audit'),
     filterOptions: backendApiPath('/audit/filter-options'),
     orderOptions: backendApiPath('/audit/order-options'),

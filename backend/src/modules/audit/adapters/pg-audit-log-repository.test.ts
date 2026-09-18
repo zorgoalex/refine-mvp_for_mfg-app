@@ -208,9 +208,11 @@ describe('PgAuditLogRepository.list', () => {
     });
     expect(calls).toHaveLength(2);
     expect(calls[0].text).toMatch(/COUNT\(\*\)/i);
-    expect(calls[0].text).toMatch(/related_order_id = \$/);
+    expect(calls[0].text).toMatch(/related_order_id = ANY\(/);
+    expect(calls[0].text).toContain("audit_log.entity_type = 'order'");
+    expect(calls[0].text).toContain('audit_log_related_entity');
     expect(calls[0].text).toMatch(/event = \$/);
-    expect(calls[0].params).toContain(1001);
+    expect(calls[0].params).toContainEqual([1001]);
     expect(calls[0].params).toContain('payments.create');
     expect(calls[1].text).toMatch(/LEFT JOIN orders related_order/i);
     expect(calls[1].text).toMatch(/LEFT JOIN clients related_client/i);

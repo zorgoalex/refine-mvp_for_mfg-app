@@ -6,6 +6,7 @@ export interface AuditRelatedEntity {
 }
 
 export interface AuditLogEventDto {
+  bitrix?: { label: string; direction: string; category: string; outcome: string; refs: Array<{ type: string; id: string; identitySource: string }>; currentRequestOrderId: number | null };
   auditId: string;
   event: string;
   entityType: string | null;
@@ -117,6 +118,13 @@ export interface AuditLookupOptionsQuery {
 }
 
 export interface AuditLogListQuery {
+  excludeBitrix24?: boolean;
+  bitrixDirection?: 'forward' | 'reverse' | 'widget' | 'settings' | 'other';
+  bitrixCategory?: 'client' | 'order' | 'payment' | 'settings' | 'processing' | 'other';
+  bitrixOutcome?: 'success' | 'error' | 'conflict' | 'attention' | 'started' | 'skipped' | 'unknown';
+  bitrixReconcile?: 'exclude' | 'only';
+  bitrixObject?: 'contact' | 'company' | 'deal' | 'payment';
+  bitrixId?: string;
   page?: number;
   pageSize?: number;
   event?: string;
@@ -139,5 +147,22 @@ export interface AuditLogListQuery {
   requestId?: string;
   createdFrom?: string;
   createdTo?: string;
-  scope?: 'all' | 'business';
+  scope?: 'all' | 'business' | 'bitrix24';
 }
+
+export interface BitrixAuditStatus {
+  fetchedAt: string;
+  data: Array<{ direction: 'forward' | 'reverse'; enabled: boolean; owner: string; dryRun: boolean; pending: number; processing: number; failed: number; dead: number; oldestPendingAt: string | null; lastProcessedAt: string | null }>;
+}
+export interface BitrixQueueQuery {
+  direction: 'forward' | 'reverse'; status?: string; orderId?: number;
+  entityType?: string; entityId?: string; bitrixObject?: string; bitrixId?: string;
+  page: number; pageSize: number;
+}
+export interface BitrixQueueRow {
+  id: string; queueId: string; direction: string; event: string; entityType: string | null; entityId: string | null;
+  orderId: string | null; orderName: string | null; bitrixObject: string | null; bitrixId: string | null;
+  status: string; attempts: number; createdAt: string; processedAt: string | null; nextAttemptAt: string | null;
+  error: string | null; errorSource: string | null;
+}
+export interface BitrixQueueResponse { data: BitrixQueueRow[]; pagination: { page: number; pageSize: number; total: number } }
