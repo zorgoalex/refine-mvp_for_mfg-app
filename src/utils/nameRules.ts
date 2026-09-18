@@ -1,4 +1,4 @@
-import { humanNameError, REFERENCE_NAME_LIMITS } from '@shared/human-name';
+import { humanNameError, REFERENCE_NAME_LIMITS } from '../../backend/src/shared/human-name';
 
 /** Optional emptiness is left to the field's required rule. */
 export function nameRule(field: string, maxOverride?: number, minOverride?: number) {
