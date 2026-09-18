@@ -1,3 +1,4 @@
+import { resolveOrderBasisProject } from '../../utils/orderBasisProject';
 import { Table, Tooltip } from '../../ui/tooltipDelay';
 import { useDataProvider, useParsed, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
@@ -2673,11 +2674,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       width: ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH,
       sorter: true,
       render: (value, row) => {
-        const projects = row.bazis_projects ?? [];
+        const project = resolveOrderBasisProject(row);
         return (
           <BasisProjectLink
-            value={value || projects[0]?.name}
-            bazisProjectId={row.bazis_project_id ?? projects[0]?.bazisProjectId}
+            value={project.name}
+            bazisProjectId={project.projectId}
             enabled={bazisProjectLinkEnabled}
             fallback="—"
           />

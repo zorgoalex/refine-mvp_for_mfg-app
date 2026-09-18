@@ -1,3 +1,4 @@
+import { resolveOrderBasisProject } from '../../../../utils/orderBasisProject';
 import { nameRule } from '../../../../utils/nameRules';
 import { Table, Tooltip } from '../../../../ui/tooltipDelay';
 // Order Details Table
@@ -2499,15 +2500,15 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       render: (_: any, row: any) => {
         const d = asDetail(row);
         if (!d) return null;
-        const primaryBazisProject = d.bazis_projects?.[0];
+        const project = resolveOrderBasisProject({ ...d, basis_project: getDisplayedField(d, 'basis_project'), bazis_project_id: getDisplayedField(d, 'bazis_project_id') });
         return isEditingField(d, 'basis_project') ? (
           <Form.Item name="basis_project" style={{ margin: 0, padding: '0 4px' }}>
             <Input placeholder="Базис проект" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
           <BasisProjectLink
-            value={getDisplayedField(d, 'basis_project') || primaryBazisProject?.name}
-            bazisProjectId={getDisplayedField(d, 'bazis_project_id') ?? primaryBazisProject?.bazisProjectId}
+            value={project.name}
+            bazisProjectId={project.projectId}
             enabled={bazisProjectLinkEnabled}
             style={{ fontSize: '90%' }}
           />
@@ -3378,8 +3379,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         return formatCutJobGroupLabel(ref ?? sample?.bath_cut_job);
       }
       case 'basis_project': {
-        const primaryBazisProject = sample.bazis_projects?.[0];
-        return String(getDisplayedField(sample, 'basis_project') || primaryBazisProject?.name || '').trim() || '—';
+        return resolveOrderBasisProject({ ...sample, basis_project: getDisplayedField(sample, 'basis_project') }).name || '—';
       }
       case 'bazis_cut_sets': return formatBazisCutSetsGroupLabel(sample.bazis_cut_sets);
       default: return '—';

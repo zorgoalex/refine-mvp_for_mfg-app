@@ -1,3 +1,4 @@
+import { resolveOrderBasisProject } from '../../../utils/orderBasisProject';
 import React, { useEffect, useRef } from 'react';
 import { Card, Checkbox, Space, Typography } from 'antd';
 import { Link } from 'react-router-dom';
@@ -54,9 +55,9 @@ export const DetailCardList: React.FC<{
               return [{ bazisProjectId, bazisRevisionId, revisionNo, name: typeof ref.name === 'string' ? ref.name : '' }];
             })
           : [];
-        const primaryBazisProject = bazisProjects[0];
-        const basisProjectValue = row.basis_project ?? row.basisProject ?? primaryBazisProject?.name;
-        const bazisProjectId = row.bazis_project_id ?? row.bazisProjectId ?? primaryBazisProject?.bazisProjectId;
+        const project = resolveOrderBasisProject({ ...row, bazis_projects: bazisProjects });
+        const basisProjectValue = project.name;
+        const bazisProjectId = project.projectId;
         const hasBasisProjectValue =
           (typeof basisProjectValue === 'string' || typeof basisProjectValue === 'number') &&
           String(basisProjectValue).trim().length > 0;

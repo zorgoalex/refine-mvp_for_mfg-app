@@ -420,6 +420,31 @@ describe('orderFormStore per-order isolation', () => {
     // re-create is a fresh slice
     expect(mod.getOrderDraftStore('9').getState().header.order_name).toBeUndefined();
   });
+
+  it('refreshes linked project names without changing dirty fields, snapshots or save payload', async () => {
+    const { getWorkspaceStateNamespace } = await import('../workspace/workspaceStateNamespace');
+    const { collectOrderBasisProjects } = await import('../pages/orders/components/sections/orderBasisProjects');
+    const store = mod.getOrderDraftStore('rename');
+    const detail = { detail_id: 17, detail_number: 1, height: 500, width: 300, quantity: 1,
+      area: 0.15, material_id: 1, milling_type_id: 1, edge_type_id: 1, priority: 100, detail_cost: 0,
+      basis_project: 'Imported-123', bazis_project_id: 8,
+      bazis_projects: [{ bazisProjectId: 8, bazisRevisionId: 3, revisionNo: 1, name: 'Old' }],
+    } as OrderDetail;
+    store.setState({ header: { order_name: 'Заказ', client_id: 1, order_date: '2026-09-18', order_status_id: 1 },
+      details: [{ ...detail, quantity: 2 }], originalDetails: { 17: detail }, isDirty: true, version: 4 });
+    const before = mapOrderFormToSaveOrderDto(store.getState().getFormValues());
+    mod.syncBazisProjectNameInDrafts(8, 'Кухня № 25', getWorkspaceStateNamespace());
+    const state = store.getState();
+    expect(collectOrderBasisProjects(state.details)).toEqual(['Кухня № 25']);
+    expect(state.details[0]).toMatchObject({ quantity: 2, basis_project: 'Imported-123' });
+    expect(state.originalDetails[17]).toMatchObject({ quantity: 1, basis_project: 'Imported-123', bazis_projects: [{ name: 'Кухня № 25' }] });
+    expect(state.isDirty).toBe(true);
+    expect(state.version).toBe(4);
+    expect(mapOrderFormToSaveOrderDto(state.getFormValues())).toEqual(before);
+    mod.syncBazisProjectNameInDrafts(8, 'Wrong session', 'other-namespace');
+    mod.syncBazisProjectNameInDrafts(99, 'Other project', getWorkspaceStateNamespace());
+    expect(store.getState().details).toBe(state.details);
+  });
 });
 
 function createMemoryStorage(): Storage {

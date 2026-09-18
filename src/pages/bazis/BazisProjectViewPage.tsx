@@ -1,4 +1,9 @@
 import { humanNameError } from '@shared/human-name';
+import { useInvalidate } from '@refinedev/core';
+import { appQueryClient } from '../../query/appQueryClient';
+import { isOrderPrimaryQuery } from '../../query/orderPrimaryFetchPolicy';
+import { syncBazisProjectNameInDrafts } from '../../stores/orderFormStore';
+import { getWorkspaceStateNamespace } from '../../workspace/workspaceStateNamespace';
 import { Tooltip } from '../../ui/tooltipDelay';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeftOutlined, CheckOutlined, CloseOutlined, DownloadOutlined, EditOutlined, HistoryOutlined, PlusOutlined, } from '@ant-design/icons';
@@ -31,6 +36,7 @@ import {
 const { Title, Text } = Typography;
 
 export const BazisProjectViewPage: React.FC = () => {
+  const invalidate = useInvalidate();
   const isOperational = useOperationalUi();
   const { bazisProjectId: bazisProjectIdParam } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -252,8 +258,16 @@ export const BazisProjectViewPage: React.FC = () => {
 
     setRenameSaving(true);
     setRenameErrorText(null);
+    const renameNamespace = getWorkspaceStateNamespace();
     try {
       const renamed = await bazisApi.renameProject(projectCard.bazisProjectId, name);
+      if (renameNamespace !== getWorkspaceStateNamespace()) return;
+      syncBazisProjectNameInDrafts(renamed.bazisProjectId, renamed.name, renameNamespace);
+      void Promise.all([
+        invalidate({ resource: 'orders', invalidates: ['detail', 'list'] }),
+        invalidate({ resource: 'orders_view', invalidates: ['detail', 'list'] }),
+        appQueryClient.invalidateQueries({ predicate: isOrderPrimaryQuery }),
+      ]).catch(error => console.error('Could not refresh order project labels', error));
       setProjectCard((current) => current ? { ...current, name: renamed.name } : current);
       setRenaming(false);
       message.success('Название Базис-проекта обновлено');

@@ -1,6 +1,6 @@
 // src/pages/orders/detailGrouping.test.ts
 import { describe, it, expect } from 'vitest';
-import { GROUP_FIELDS, extractGroupValue, buildGroupedRows, selectedGroupLabelForCut } from './detailGrouping';
+import { GROUP_FIELDS, extractGroupValue, buildGroupedRows, selectedGroupLabelForCut, formatBasisProjectGroupLabel } from './detailGrouping';
 import type { OrderDetail } from '../../types/orders';
 
 const d = (over: Partial<OrderDetail>): OrderDetail =>
@@ -53,6 +53,12 @@ describe('GROUP_FIELDS', () => {
 });
 
 describe('extractGroupValue', () => {
+  it('keeps the group identity after rename and displays the current linked name', () => {
+    const detail = d({ basis_project: '123', bazis_project_id: 9,
+      bazis_projects: [{ bazisProjectId: 9, bazisRevisionId: 2, revisionNo: 1, name: 'Кухня № 123' }] });
+    expect(extractGroupValue(detail, 'basis_project')).toBe('id:9');
+    expect(formatBasisProjectGroupLabel(detail)).toBe('Кухня № 123');
+  });
   it('treats null / 0 / negative ids as empty', () => {
     expect(extractGroupValue(d({ milling_type_id: 0 }), 'milling')).toBe('__EMPTY__');
     expect(extractGroupValue(d({ sheet_material_type_id: null }), 'material')).toBe('__EMPTY__');
