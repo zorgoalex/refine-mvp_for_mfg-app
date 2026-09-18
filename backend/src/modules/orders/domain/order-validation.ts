@@ -1,3 +1,4 @@
+import { humanNameError } from '../../../shared/human-name';
 import type {
   NormalizedSaveOrderDetailDto,
   NormalizedSaveOrderDto,
@@ -91,8 +92,9 @@ function validateHeader(
     }
   }
 
-  if (header.orderName.length === 0) {
-    errors.push({ field: 'header.orderName', message: 'orderName is required' });
+  const nameError = humanNameError(header.orderName, 200);
+  if (nameError) {
+    errors.push({ field: 'header.orderName', message: nameError });
   }
 
   requirePositiveIntegerIfPresent(header.projectId, 'header.projectId', errors);

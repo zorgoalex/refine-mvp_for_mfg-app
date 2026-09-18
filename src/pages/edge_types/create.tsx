@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { Create } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, InputNumber, Checkbox } from "antd";
@@ -12,7 +13,7 @@ export const EdgeTypeCreate: React.FC<IResourceComponentsProps> = () => {
   return (
     <Create saveButtonProps={saveButtonProps}>
       <Form {...formProps} layout="vertical" initialValues={{ is_active: true, sort_order: 100 }}>
-        <Form.Item label="Name" name="edge_type_name" rules={[{ required: true }]}>
+        <Form.Item label="Name" name="edge_type_name" rules={[...([{ required: true }]), nameRule("edge_type_name")]}>
           <Input />
         </Form.Item>
         <Form.Item label="Порядок сортировки" name="sort_order" rules={[{ required: true }]}>

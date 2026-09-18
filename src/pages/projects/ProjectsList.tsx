@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { Table } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSelect } from '../../ui/refineSelect';
@@ -191,14 +192,14 @@ export const ProjectsList: React.FC = () => {
             <Form.Item name="clientId" label="Клиент" rules={[{ required: true, message: 'Выберите клиента' }]}>
               <Select {...clientSelectProps} placeholder="Клиент" showSearch allowClear />
             </Form.Item>
-            <Form.Item name="name" label="Имя проекта" rules={[{ required: true, whitespace: true, message: 'Укажите имя' }, { max: 300 }]}>
+            <Form.Item name="name" label="Имя проекта" rules={[...([{ required: true, whitespace: true, message: 'Укажите имя' }, { max: 300 }]), nameRule("name", 300)]}>
               <Input placeholder="Например: Кухня Фрунзе 26" />
             </Form.Item>
             <Form.Item
               name="code"
               label="Код (необязательно)"
               tooltip="Пусто — присвоится автоматический «МП-N»"
-              rules={[{ pattern: /^[0-9A-Za-zА-Яа-яЁё-]{1,20}$/u, message: 'Буквы/цифры/дефис, до 20 символов' }]}
+              rules={[{ pattern: /^[\p{L}\p{N}-]{1,20}$/u, message: 'Буквы/цифры/дефис, до 20 символов' }]}
             >
               <Input placeholder="ФК26" maxLength={20} />
             </Form.Item>

@@ -1,3 +1,5 @@
+import { humanNameError } from '../../../shared/human-name';
+import { humanName } from '../../../shared/human-name-schema';
 import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
@@ -41,7 +43,7 @@ const criteriaSchema = z
 
 const createCutJobRequestSchema = z
   .object({
-    name: z.string().trim().min(1).max(200),
+    name: humanName(200, 1),
     criteria: criteriaSchema.optional(),
     detailIds: idArray.optional(),
     hdfDetailIds: idArray.optional(),
@@ -128,7 +130,7 @@ const setPdfTemplateBodySchema = z
 
 const setNameBodySchema = z
   .object({
-    name: z.string().trim().min(1).max(200),
+    name: humanName(200, 1),
     version: z.number().int().nonnegative(),
   })
   .strict();
@@ -1029,10 +1031,10 @@ export function parseSheetIndex(value: string): number {
 }
 
 /** Preset NAME (resolved to px from cut_render_presets config at render time).
- *  Sanitized to a short safe token; defaults to the standard `screen` preset. */
+ *  Unicode name passed as an encoded query parameter; defaults to `screen`. */
 export function parsePreset(value: string | undefined): string {
   const name = (value ?? 'screen').trim();
-  if (name.length === 0 || name.length > 64 || !/^[A-Za-z0-9_-]+$/.test(name)) {
+  if (humanNameError(value ?? 'screen', 100)) {
     throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid preset', { field: 'preset' });
   }
   return name;

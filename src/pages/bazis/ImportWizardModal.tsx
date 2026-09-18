@@ -1,3 +1,5 @@
+import { humanNameError } from '@shared/human-name';
+import { decodeXmlText } from '@shared/xml-text';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { InboxOutlined, LinkOutlined, LoadingOutlined, CheckCircleOutlined, MinusOutlined } from '@ant-design/icons';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -463,8 +465,9 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
           message.warning('Выберите клиента нового проекта');
           return;
         }
-        if (!newProjectName.trim()) {
-          message.warning('Укажите название проекта');
+        const nameError = humanNameError(newProjectName, 300);
+        if (nameError) {
+          message.warning(nameError);
           return;
         }
       }
@@ -593,12 +596,12 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
                 setXmlFile(file);
                 setPreview(null);
                 setPreviewError(null);
-                void file.text().then(
-                  (text) => {
+                void file.arrayBuffer().then(
+                  (buffer) => {
                     try {
-                      setPreview(parseXmlPreview(text));
+                      setPreview(parseXmlPreview(decodeXmlText(new Uint8Array(buffer))));
                     } catch (error) {
-                      setPreviewError(error instanceof XmlPreviewError ? error.message : 'Не удалось построить предпросмотр');
+                      setPreviewError(error instanceof Error ? error.message : 'Не удалось построить предпросмотр');
                     }
                   },
                   () => setPreviewError('Не удалось прочитать файл'),

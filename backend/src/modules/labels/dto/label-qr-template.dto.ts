@@ -1,8 +1,9 @@
+import { humanName } from '../../../shared/human-name-schema';
 import { z } from 'zod';
 
 export const createLabelQrTemplateSchema = z
   .object({
-    name: z.string().trim().min(1).max(200),
+    name: humanName(200, 1),
     contentTemplate: z.string().trim().min(1).max(2000),
     errorCorrection: z.enum(['L', 'M', 'Q', 'H']),
     defaultSizeMm: z.number().positive().max(1000),

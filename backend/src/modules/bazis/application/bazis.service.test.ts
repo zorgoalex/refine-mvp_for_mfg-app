@@ -236,7 +236,7 @@ describe('BazisService', () => {
     });
 
     expect(parseBazisXml).toHaveBeenCalledTimes(1);
-    expect(parseBazisXml).toHaveBeenCalledWith(xml);
+    expect(parseBazisXml).toHaveBeenCalledWith(Buffer.from(xml));
     expect(repository.importRevision).toHaveBeenCalledTimes(1);
     expect(repository.importRevision).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -379,7 +379,7 @@ describe('BazisService', () => {
       });
     });
 
-    it.each(['   ', 'x'.repeat(301)])('rejects invalid name %j with 422', async (name) => {
+    it.each(['   ', 'bad\u0000name'])('rejects invalid name %j with 422', async (name) => {
       const repository = createRepository();
       const service = createService(repository);
 

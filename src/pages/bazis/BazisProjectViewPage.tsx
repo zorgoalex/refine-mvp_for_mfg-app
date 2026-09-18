@@ -1,3 +1,4 @@
+import { humanNameError } from '@shared/human-name';
 import { Tooltip } from '../../ui/tooltipDelay';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeftOutlined, CheckOutlined, CloseOutlined, DownloadOutlined, EditOutlined, HistoryOutlined, PlusOutlined, } from '@ant-design/icons';
@@ -238,8 +239,9 @@ export const BazisProjectViewPage: React.FC = () => {
   const saveProjectName = async () => {
     if (!projectCard || renameSaving) return;
     const name = renameDraft.trim();
-    if (!name) {
-      setRenameErrorText('Введите название Базис-проекта');
+    const nameError = humanNameError(renameDraft, Number.MAX_SAFE_INTEGER);
+    if (nameError) {
+      setRenameErrorText(nameError);
       return;
     }
     if (name === projectCard.name) {
@@ -359,7 +361,6 @@ export const BazisProjectViewPage: React.FC = () => {
               autoFocus
               aria-label="Название Базис-проекта"
               value={renameDraft}
-              maxLength={300}
               style={{ width: 'min(420px, 48vw)', height: 40 }}
               onChange={(event) => setRenameDraft(event.target.value)}
               onPressEnter={() => void saveProjectName()}

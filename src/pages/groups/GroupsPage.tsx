@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { Table } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useGetIdentity } from '@refinedev/core';
@@ -396,11 +397,11 @@ export const GroupsPage: React.FC<GroupsPageProps> = ({
         <Form.Item
           name="code"
           label="Код группы"
-          rules={[{ required: true }, { pattern: /^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$/ }]}
+          rules={[{ required: true }, { pattern: /^[\p{L}\p{N}][\p{L}\p{N}_-]{1,63}$/u }]}
         >
           <Input disabled={!canCreate} style={{ width: 140 }} />
         </Form.Item>
-        <Form.Item name="name" label="Название" rules={[{ required: true, max: 256 }]}>
+        <Form.Item name="name" label="Название" rules={[...([{ required: true, max: 256 }]), nameRule("name", 256)]}>
           <Input disabled={!canCreate} style={{ width: 220 }} />
         </Form.Item>
         <Form.Item name="status" initialValue="active">

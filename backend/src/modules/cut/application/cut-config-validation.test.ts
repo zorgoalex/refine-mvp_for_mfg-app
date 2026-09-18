@@ -143,11 +143,11 @@ describe('cut-config validation', () => {
     expect(() => validateRenderPresetInput({ name: 'x', targetPx: 0 })).toThrow();
   });
 
-  it('rejects a render preset name that the /cut render endpoint could not serve', () => {
+  it('accepts Unicode preset names supported by the render endpoint', () => {
     expect(validateRenderPresetInput({ name: 'big_screen-2', targetPx: 1400 }).name).toBe('big_screen-2');
-    // spaces / non-ASCII would 422 at parsePreset, so reject them at write time
-    expect(() => validateRenderPresetInput({ name: 'Большой экран', targetPx: 1400 })).toThrow();
-    expect(() => validateRenderPresetInput({ name: 'with space', targetPx: 1400 })).toThrow();
+    // Human names are encoded in URL query parameters.
+    expect(validateRenderPresetInput({ name: 'Большой экран', targetPx: 1400 }).name).toBe('Большой экран');
+    expect(validateRenderPresetInput({ name: 'with space', targetPx: 1400 }).name).toBe('with space');
   });
 
   it('validates known freecut param keys in a profile (no out-of-range value reaches freecut)', () => {

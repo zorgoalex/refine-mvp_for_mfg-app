@@ -373,9 +373,9 @@ function extractCommentIdentity(element: Element): PartContourGeometry['commentI
   const identities = new Map<string, { orderName: string; detailNumber: number }>();
   for (const child of Array.from(element.getElementsByTagName('*'))) {
     if (localName(child) !== 'odm' || child.getAttribute('name') !== 'Comments') continue;
-    const match = (child.getAttribute('value') ?? '').match(/(\d{4,})#(\d{1,5})#/);
-    if (!match || Number(match[2]) <= 0) continue;
-    identities.set(`${match[1]}:${Number(match[2])}`, { orderName: match[1], detailNumber: Number(match[2]) });
+    const match = (child.getAttribute('value') ?? '').trim().match(/^([^#\u0000-\u001f\u007f-\u009f]{1,200})#(\d{1,5})#/);
+    if (!match || !match[1].trim() || Number(match[2]) <= 0) continue;
+    identities.set(`${match[1]}:${Number(match[2])}`, { orderName: match[1].trim(), detailNumber: Number(match[2]) });
   }
   return identities.size === 1 ? identities.values().next().value : null;
 }
@@ -716,7 +716,9 @@ function hasExplicitVisualLabelNear(
   );
 }
 
-function parseVisualOrderLine(text: string): string | null {
+export function parseVisualOrderLine(text: string): string | null {
+  const explicit = /^заказ\s*[:№]\s*(.{1,200})$/iu.exec(text.trim());
+  if (explicit && !/[\u0000-\u001f\u007f-\u009f]/.test(explicit[1])) return explicit[1].trim() || null;
   const match = VISUAL_ORDER_RE.exec(text);
   return match?.groups?.order ?? null;
 }

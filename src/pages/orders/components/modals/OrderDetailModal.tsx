@@ -1,3 +1,4 @@
+import { nameRule } from '../../../../utils/nameRules';
 // Order Detail Modal
 // Modal for creating/editing order details with auto-calculation
 
@@ -541,7 +542,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
           <Col span={12}>
             <Form.Item
               label="Название детали"
-              name="detail_name"
+              name="detail_name" rules={[nameRule("detail_name")]}
             >
               <Input placeholder="Опционально" />
             </Form.Item>

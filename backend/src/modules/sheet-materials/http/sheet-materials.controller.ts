@@ -1,3 +1,4 @@
+import { humanName } from '../../../shared/human-name-schema';
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put, Query, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
@@ -8,7 +9,7 @@ import type { SheetMaterialsContext, SheetMaterialTypeDto } from '../application
 import { SheetMaterialsRuntimeConfigService } from './sheet-materials-runtime-config.service';
 
 const inputSchema = z.object({
-  name: z.string().trim().min(1).max(200),
+  name: humanName(200, 1),
   materialTypeId: z.number().int().positive(),
   unitId: z.number().int().positive(),
   thicknessMm: z.number().positive(),

@@ -1,3 +1,4 @@
+import { humanName } from '../../../shared/human-name-schema';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type {
@@ -57,7 +58,7 @@ const conditionSchema = z
 
 const createSchema = z
   .object({
-    name: z.string().trim().min(1).max(200),
+    name: humanName(200, 1),
     eventType: z.string().trim().min(1),
     actionType: actionTypeSchema,
     targetStatusId: z.number().int().positive().nullable().optional(),
@@ -71,7 +72,7 @@ const createSchema = z
 
 const updateSchema = z
   .object({
-    name: z.string().trim().min(1).max(200).optional(),
+    name: humanName(200, 1).optional(),
     eventType: z.string().trim().min(1).optional(),
     actionType: actionTypeSchema.optional(),
     targetStatusId: z.number().int().positive().nullable().optional(),

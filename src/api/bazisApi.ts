@@ -36,6 +36,7 @@ export const bazisApi = {
   ): Promise<BazisImportResponse> {
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('fileName', file.name);
     if (params.projectId != null) formData.append('projectId', String(params.projectId));
     if (params.bazisProjectId != null) {
       formData.append('bazisProjectId', String(params.bazisProjectId));
@@ -156,7 +157,7 @@ export const bazisApi = {
     return httpClient.get<MaterialMapping[]>(
       normalizedNames.length === 0
         ? apiRoutes.bazis.materialMappings
-        : withQuery(apiRoutes.bazis.materialMappings, { names: normalizedNames.join(',') }),
+        : `${apiRoutes.bazis.materialMappings}?${new URLSearchParams(normalizedNames.map(name => ['name', name])).toString()}`,
     );
   },
 

@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { Edit, useForm } from "@refinedev/antd";
 import {
   IResourceComponentsProps,
@@ -136,12 +137,12 @@ export const ClientEdit: React.FC<IResourceComponentsProps> = () => {
         <Form.Item
           label="Название клиента"
           name="client_name"
-          rules={[
+          rules={[...([
             {
               required: true,
               message: "Введите название клиента",
             },
-          ]}
+          ]), nameRule("client_name")]}
         >
           <Input />
         </Form.Item>

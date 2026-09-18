@@ -1,3 +1,4 @@
+import { humanName } from '../../../shared/human-name-schema';
 import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
@@ -108,7 +109,7 @@ const retireOverrideSchema = z.object({
 
 const createGlobalTransitionRuleSchema = z
   .object({
-    ruleName: z.string().trim().min(1).max(160),
+    ruleName: humanName(160, 1),
     ruleCode: z.string().trim().min(1).max(100).optional(),
     policyId: uuidSchema.nullable().optional(),
     isEnabled: z.boolean().default(false),
@@ -133,7 +134,7 @@ const createGlobalTransitionRuleSchema = z
 const updateGlobalTransitionRuleSchema = z
   .object({
     expectedUpdatedAt: isoTimestampSchema,
-    ruleName: z.string().trim().min(1).max(160).optional(),
+    ruleName: humanName(160, 1).optional(),
     ruleCode: z.string().trim().min(1).max(100).nullable().optional(),
     policyId: uuidSchema.nullable().optional(),
     isEnabled: z.boolean().optional(),

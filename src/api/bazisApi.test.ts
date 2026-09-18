@@ -27,6 +27,21 @@ describe('bazisApi.deleteProject', () => {
     expect(fetchMock.mock.calls[0][1]?.method).toBe('DELETE');
   });
 
+  it('preserves material names containing commas, percent signs and Cyrillic', async () => {
+    const fetchMock = mockFetch([]);
+    const names = ['Кромка 0,4 мм', '100% белый', 'Ёлка & Әлия'];
+    await bazisApi.listMaterialMappings(names);
+    const url = new URL(fetchMock.mock.calls[0][0], 'https://erp.test');
+    expect(url.searchParams.getAll('name')).toEqual(names);
+  });
+
+  it('sends the original Unicode filename as a UTF-8 form field', async () => {
+    const fetchMock = mockFetch({});
+    await bazisApi.import(new File(['<Проект/>'], 'Кухня Ёлка.xml'), { projectId: 12 });
+    const body = fetchMock.mock.calls[0][1]?.body as FormData;
+    expect(body.get('fileName')).toBe('Кухня Ёлка.xml');
+  });
+
   it('rejects an invalid id before any request', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

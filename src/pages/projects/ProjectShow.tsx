@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { Table } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Form, Input, Modal, Select, Space, Typography, message, notification } from 'antd';
@@ -235,7 +236,7 @@ export const ProjectShow: React.FC = () => {
               <Form.Item
                 label="Имя"
                 name="name"
-                rules={[{ required: true, message: 'Укажите имя проекта' }]}
+                rules={[...([{ required: true, message: 'Укажите имя проекта' }]), nameRule("name", 300)]}
               >
                 <Input maxLength={255} />
               </Form.Item>

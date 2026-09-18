@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { Edit, useSelect } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, Select, Checkbox } from "antd";
@@ -20,7 +21,7 @@ export const VendorEdit: React.FC<IResourceComponentsProps> = () => {
   return (
     <Edit saveButtonProps={saveButtonProps}>
       <Form {...formProps} layout="vertical">
-        <Form.Item label="Название" name="vendor_name" rules={[{ required: true }]}>
+        <Form.Item label="Название" name="vendor_name" rules={[...([{ required: true }]), nameRule("vendor_name")]}>
           <Input />
         </Form.Item>
         <Form.Item label="Тип материала" name="material_type_id">

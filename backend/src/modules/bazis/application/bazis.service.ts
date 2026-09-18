@@ -1,3 +1,4 @@
+import { humanNameError } from '../../../shared/human-name';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
@@ -50,7 +51,7 @@ export interface BazisServicePorts {
 }
 
 const NODE_NOTES_MAX_LENGTH = 2000;
-const BAZIS_PROJECT_NAME_MAX_LENGTH = 300;
+
 
 export class BazisService {
   private readonly permissions: PermissionsService;
@@ -74,7 +75,7 @@ export class BazisService {
       const rawXmlGzip = await gzipFile(input.filePath);
 
       try {
-        const text = await readFile(input.filePath, 'utf8');
+        const text = await readFile(input.filePath);
         const parsed = parseBazisXml(text);
         return await this.ports.repository.importRevision({
           currentUser: input.currentUser,
@@ -127,12 +128,12 @@ export class BazisService {
   ): Promise<BazisProjectNameDto> {
     await this.requirePermission(currentUser, 'bazis.manage', 'rename_project', requestId);
     const name = rawName.trim();
-    if (name.length === 0 || name.length > BAZIS_PROJECT_NAME_MAX_LENGTH) {
+    if (humanNameError(rawName, Number.MAX_SAFE_INTEGER)) {
       throw new ApiError(
         422,
         'VALIDATION_ERROR',
-        `Название Базис-проекта должно содержать от 1 до ${BAZIS_PROJECT_NAME_MAX_LENGTH} символов`,
-        { field: 'name', maxLength: BAZIS_PROJECT_NAME_MAX_LENGTH },
+        humanNameError(rawName, Number.MAX_SAFE_INTEGER)!,
+        { field: 'name' },
       );
     }
     return this.ports.repository.renameProject({

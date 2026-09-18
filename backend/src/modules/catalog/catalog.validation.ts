@@ -1,3 +1,4 @@
+import { humanName } from '../../shared/human-name-schema';
 import { z } from 'zod';
 import { ApiError } from '../../common/errors/api-error';
 import type { CurrentUser } from '../../permissions/current-user';
@@ -5,7 +6,7 @@ import type { CurrentUser } from '../../permissions/current-user';
 const price = z.string().regex(/^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/, 'Цена: от 0 до 9999999999.99, максимум два знака после точки')
   .transform(value => { const [whole, fraction = ''] = value.split('.'); return `${whole}.${fraction.padEnd(2, '0')}`; }).nullable();
 export const itemSchema = z.object({
-  name: z.string().trim().min(1).max(200),
+  name: humanName(200, 1),
   sku: z.string().trim().max(80).nullable().transform(value => value || null),
   kind: z.enum(['made_to_order', 'stock_item', 'service']),
   unitId: z.number().int().min(1).max(32767),

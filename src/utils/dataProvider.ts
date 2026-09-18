@@ -1,3 +1,4 @@
+import { humanNameError, REFERENCE_NAME_LIMITS } from '@shared/human-name';
 // Minimal Hasura GraphQL data provider for Refine (MVP)
 // Implements: getList, getOne, create, update, deleteOne
 
@@ -1075,7 +1076,7 @@ const escapeValue = (v: any) => {
   return JSON.stringify(v);
 };
 
-const sanitizeVariables = (input: AnyObject) => {
+const sanitizeVariables = (input: AnyObject, resource?: string) => {
   const out: AnyObject = {};
 
   // Keys that should be treated as numeric even if provided as strings
@@ -1132,6 +1133,13 @@ const sanitizeVariables = (input: AnyObject) => {
     }
 
     if (typeof v === "string") {
+      const nameLimits = k === 'full_name' && resource === 'users' ? [0, 255] : REFERENCE_NAME_LIMITS[k];
+      if (nameLimits) {
+        const error = humanNameError(v, nameLimits[1], nameLimits[0]);
+        if (error) throw new Error(error);
+        out[k] = v.trim();
+        continue;
+      }
       if (isStringLikeKey(k)) {
         out[k] = v; // keep as string
         continue;
@@ -1906,7 +1914,7 @@ export const dataProvider = (_apiUrl: string) => {
       // console.log('[dataProvider.create] after omitting PK:', restVars);
 
       // Sanitize and drop null/undefined to avoid NOT NULL violations on inserts
-      const sanitized: AnyObject = sanitizeVariables(restVars);
+      const sanitized: AnyObject = sanitizeVariables(restVars, resource);
       // console.log('[dataProvider.create] after sanitize:', sanitized);
 
       const cleaned: AnyObject = {};
@@ -1988,7 +1996,7 @@ export const dataProvider = (_apiUrl: string) => {
       } = variables || {};
       const payloadForUpdate = rest;
       const { literal: setLiteral, varHeader, varValues } = buildGqlInput(
-        sanitizeVariables(payloadForUpdate),
+        sanitizeVariables(payloadForUpdate, resource),
       );
       const query = `
         mutation${varHeader} {

@@ -1,3 +1,4 @@
+import { humanName } from '../../../shared/human-name-schema';
 import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -32,22 +33,22 @@ const emailSchema = z.string().trim().email().nullable().optional();
 const employeeIdSchema = z.number().int().positive().nullable().optional();
 
 const createUserRequestSchema = z.object({
-  username: z.string().trim().min(3).max(100),
+  username: humanName(100, 3),
   email: emailSchema,
   password: z.string().min(8).max(200),
   role: userRoleSchema,
   employeeId: employeeIdSchema,
-  fullName: nullableTextSchema,
+  fullName: humanName(255, 0).nullable().optional(),
   isActive: z.boolean().optional(),
 });
 
 const updateUserRequestSchema = z
   .object({
-    username: z.string().trim().min(3).max(100).optional(),
+    username: humanName(100, 3).optional(),
     email: emailSchema,
     role: userRoleSchema.optional(),
     employeeId: employeeIdSchema,
-    fullName: nullableTextSchema,
+    fullName: humanName(255, 0).nullable().optional(),
     isActive: z.boolean().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {

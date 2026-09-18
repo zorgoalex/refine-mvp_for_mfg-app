@@ -1,3 +1,4 @@
+import { nameRule } from '../../../../utils/nameRules';
 import { Table, Tooltip } from '../../../../ui/tooltipDelay';
 // Order Details Table
 // Displays list of order details with inline editing capabilities
@@ -2581,7 +2582,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const d = asDetail(row);
         if (!d) return null;
         return isEditingField(d, 'detail_name') ? (
-          <Form.Item name="detail_name" style={{ margin: 0, padding: '0 4px' }}>
+          <Form.Item name="detail_name" style={{ margin: 0, padding: '0 4px' }} rules={[nameRule("detail_name")]}>
             <Input
               placeholder="Название детали"
               tabIndex={-1}

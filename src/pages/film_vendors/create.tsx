@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { Create } from "@refinedev/antd";
 import { IResourceComponentsProps, type BaseRecord, type HttpError } from "@refinedev/core";
 import { Form, Input, Checkbox, message } from "antd";
@@ -27,7 +28,7 @@ export const FilmVendorCreate: React.FC<IResourceComponentsProps> = () => {
           });
         }}
       >
-        <Form.Item label="Name" name="film_vendor_name" rules={[{ required: true, whitespace: true }]}>
+        <Form.Item label="Name" name="film_vendor_name" rules={[...([{ required: true, whitespace: true }]), nameRule("film_vendor_name")]}>
           <Input />
         </Form.Item>
         <Form.Item label="Ref Key 1C" name="ref_key_1c">

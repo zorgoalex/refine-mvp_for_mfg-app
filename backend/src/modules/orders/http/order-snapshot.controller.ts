@@ -1,3 +1,4 @@
+import { attachmentDisposition } from '../../../common/http/content-disposition';
 import { Body, Controller, Get, HttpCode, Inject, Param, Post, Query, Req, Res } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -364,5 +365,5 @@ function requireDateQuery(value: string | undefined, field: string): string {
 }
 
 function contentDisposition(fileName: string): string {
-  return `attachment; filename="${fileName.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+  return attachmentDisposition(fileName);
 }

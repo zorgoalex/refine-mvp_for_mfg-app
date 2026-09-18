@@ -1,3 +1,4 @@
+import { humanName } from '../../../shared/human-name-schema';
 import { svgRenderContourSchema } from '../../../shared/svg-render-contours';
 import { Body, Controller, Get, Headers, Inject, Param, Post, Query, Req, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -44,13 +45,13 @@ const toolSchema = z.object({
 }).strict();
 
 const dowelingLinkSchema = z.object({
-  orderName: z.string().trim().min(1).max(64),
+  orderName: humanName(200),
   dowelingNumber: z.string().trim().min(1).max(64),
 }).strict();
 
 const itemSchema = z.object({
   sourceItemKey: z.string().trim().min(1).max(120),
-  orderName: z.string().trim().min(1).max(64),
+  orderName: humanName(200),
   detailNumber: z.number().int().positive().nullable().optional(),
   widthMm: z.number().positive().max(10000).nullable().optional(),
   heightMm: z.number().positive().max(10000).nullable().optional(),
@@ -114,7 +115,7 @@ const cutLayoutItemVisualLabelSchema = z.object({
 }).strict();
 
 const cutLayoutItemSchema = z.object({
-  orderName: z.string().trim().min(1).max(64),
+  orderName: humanName(200),
   detailNumber: z.number().int().positive().max(100000),
   widthMm: z.number().positive().max(10000),
   heightMm: z.number().positive().max(10000),
@@ -172,8 +173,8 @@ const ingestSchema = z.object({
   workday: z.string().regex(DATE_ONLY).refine(isValidDateOnly).optional(),
   cuttingSequenceNo: z.number().int().positive().max(999999).nullable().optional(),
   machine: z.string().trim().min(1).max(64).nullable().optional(),
-  programName: z.string().trim().min(1).max(200).nullable().optional(),
-  materialName: z.string().trim().min(1).max(120).nullable().optional(),
+  programName: humanName(200, 1).nullable().optional(),
+  materialName: humanName(120, 1).nullable().optional(),
   sheetImage: z.object({
     storageKey: z.string().trim().regex(STORAGE_KEY_RE).max(220),
     contentType: z.string().trim().min(1).max(120).nullable().optional(),
@@ -237,8 +238,8 @@ const manualSvgUploadSchema = z.object({
   svgContentHash: z.string().trim().regex(SHA256_RE),
   workday: z.string().regex(DATE_ONLY).refine(isValidDateOnly).optional(),
   machine: z.string().trim().min(1).max(64).nullable().optional(),
-  programName: z.string().trim().min(1).max(200).nullable().optional(),
-  materialName: z.string().trim().min(1).max(120).nullable().optional(),
+  programName: humanName(200, 1).nullable().optional(),
+  materialName: humanName(120, 1).nullable().optional(),
   rework: z.boolean().optional(),
   comments: z.array(z.string().trim().min(1).max(500)).max(50).optional(),
   tools: z.array(toolSchema).max(50).optional(),
@@ -302,7 +303,7 @@ const manualSvgUploadSchema = z.object({
 });
 
 const commentPresetSchema = z.object({
-  label: z.string().trim().min(1).max(120),
+  label: humanName(120, 1),
   commentText: z.string().trim().min(1).max(500),
   category: z.enum(['general', 'order', 'tool', 'material', 'rework', 'custom']).optional(),
   sortOrder: z.number().int().min(0).max(100000).optional(),

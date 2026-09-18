@@ -1,3 +1,4 @@
+import { humanName } from '../../../shared/human-name-schema';
 import { Body, Controller, Get, Headers, Inject, Param, Post, Put, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
@@ -19,10 +20,10 @@ const millingExtraResourceBodySchema = z.object({
   resourceKind: z.string().trim().min(1).max(50).optional(),
   resourceRefType: z.string().trim().min(1).max(50).nullable().optional(),
   resourceRefId: z.number().int().positive().nullable().optional(),
-  resourceName: z.string().trim().min(1).max(200).optional(),
+  resourceName: humanName(200, 1).optional(),
   unitId: z.number().int().positive().nullable().optional(),
   accountingMethod: z.string().trim().max(500).optional(),
-  parameterName: z.string().trim().max(100).optional(),
+  parameterName: humanName(100, 0).optional(),
   parameterMm: z.number().positive().nullable().optional(),
   hdfAutoEnabled: z.boolean().optional(),
   comment: z.string().trim().max(1000).optional(),
@@ -35,10 +36,10 @@ const extraResourceBodySchema = z.object({
   resourceKind: z.string().trim().min(1).max(50),
   resourceRefType: z.string().trim().min(1).max(50).nullable().optional(),
   resourceRefId: z.number().int().positive().nullable().optional(),
-  resourceName: z.string().trim().min(1).max(200),
+  resourceName: humanName(200, 1),
   unitId: z.number().int().positive().nullable().optional(),
   accountingMethod: z.string().trim().max(500).optional(),
-  defaultParameterName: z.string().trim().max(100).optional(),
+  defaultParameterName: humanName(100, 0).optional(),
   defaultParameterMm: z.number().positive().nullable().optional(),
   hdfAutoDefault: z.boolean().optional(),
   comment: z.string().trim().max(1000).optional(),
@@ -49,7 +50,7 @@ const extraResourceBodySchema = z.object({
 const hdfMillingBodySchema = z.object({
   hdfEnabled: z.boolean().optional(),
   hdfEdgeMm: z.number().positive().nullable().optional(),
-  hdfParameterName: z.string().trim().max(100).nullable().optional(),
+  hdfParameterName: humanName(100, 0).nullable().optional(),
   extraResources: z.array(millingExtraResourceBodySchema).optional(),
   expectedVersion: z.number().int().positive(),
 }).strict();

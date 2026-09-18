@@ -1,3 +1,4 @@
+import { humanName } from '../../shared/human-name-schema';
 import { Body, Controller, Get, Headers, Inject, Param, Post, Query, Req, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
@@ -17,7 +18,7 @@ const numberId = (value: string) => parse(z.coerce.number().int().positive(), va
 const uuid = (value: string) => parse(z.string().uuid(), value);
 const versionBody = z.object({ version: z.number().int().positive() }).strict();
 const saveBody = versionBody.extend({ groups: z.array(cadGroupSchema).max(CAD_MAX_GROUPS), sourceIds: z.array(z.string().uuid()).min(1).max(500) }).strict();
-const cloneBody = z.object({ name: z.string().trim().min(1).max(100), refresh: z.boolean().default(false) }).strict();
+const cloneBody = z.object({ name: humanName(100, 1), refresh: z.boolean().default(false) }).strict();
 const packageBody = versionBody.extend({ reviewId: z.string().uuid(), acknowledgeStale: z.boolean().default(false) }).strict();
 
 @ApiTags('CAD preparation')
@@ -66,7 +67,7 @@ export class CadController {
   @ApiOperation({ summary: 'Fork own draft from an exact archived CAD revision' })
   @Post('variants/:id/fork')
   fork(@Req() req: RequestWithCurrentUser, @Param('id') id: string, @Headers('idempotency-key') key: string, @Body() body: unknown) {
-    const v = parse(saveBody.extend({ name: z.string().trim().min(1).max(100) }).strict(), body);
+    const v = parse(saveBody.extend({ name: humanName(100, 1) }).strict(), body);
     return this.cad.fork(this.user(req), uuid(id), v.version, v.name, v.groups, v.sourceIds, key);
   }
   @ApiOperation({ summary: 'Preview up to twenty CAD parts without export artifacts' })

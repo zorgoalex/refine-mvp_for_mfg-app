@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  parseVisualOrderLine,
   applySvgMatrixToPoint,
   buildSvgUploadLayoutItemsFromContours,
   matchVisualLabelsToPartContours,
@@ -442,4 +443,10 @@ describe('SVG source priority and partial label availability', () => {
     const result = buildSvgUploadLayoutItemsFromContours([], [a, {...a}, visualLabel({key: 'second-copy', cxMm: 300})], {includeVisualLabelOnlyItems: true});
     expect(result.layoutItems).toHaveLength(2);
   });
+});
+
+it('accepts explicit Unicode order labels without guessing from prose', () => {
+  expect(parseVisualOrderLine('Заказ: Кухня Әлия')).toBe('Кухня Әлия');
+  expect(parseVisualOrderLine('Заказ: 12')).toBe('12');
+  expect(parseVisualOrderLine('Просто текст')).toBeNull();
 });

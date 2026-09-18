@@ -1,3 +1,4 @@
+import { nameRule } from '../../../../utils/nameRules';
 // Quick Create Modal for Milling Type
 // Allows creating a new milling type without leaving the order form
 
@@ -84,10 +85,10 @@ export const MillingTypeQuickCreate: React.FC<MillingTypeQuickCreateProps> = ({
         <Form.Item
           label="Название типа"
           name="milling_type_name"
-          rules={[
+          rules={[...([
             { required: true, message: 'Обязательное поле' },
             { max: 100, message: 'Максимум 100 символов' },
-          ]}
+          ]), nameRule("milling_type_name")]}
         >
           <Input
             placeholder="Введите название типа фрезеровки"

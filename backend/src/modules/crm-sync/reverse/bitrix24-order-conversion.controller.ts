@@ -1,3 +1,4 @@
+import { humanName } from '../../../shared/human-name-schema';
 import { Body, Controller, HttpCode, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
@@ -10,7 +11,7 @@ import { PgBitrix24ReverseRepository } from './pg-bitrix24-reverse-repository';
 
 const bodySchema = z.object({
   version: z.number().int().positive(),
-  orderName: z.string().trim().min(1).max(200),
+  orderName: humanName(200, 1),
   projectId: z.number().int().positive().nullable().optional(),
   createProject: z.boolean().default(false),
   idempotencyKey: z.string().trim().min(8).max(200),

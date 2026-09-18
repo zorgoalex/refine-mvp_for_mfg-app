@@ -1,3 +1,4 @@
+import { humanNameError } from '@shared/human-name';
 import { Table, Tooltip } from '../../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Col, Collapse, Form, Input, InputNumber, Modal, Popconfirm, Radio, Row, Select, Space, Spin, Switch, Tabs, Tag, Typography, message } from 'antd';
@@ -1128,8 +1129,9 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ config, templates
   const saveDrafts = useCallback(async () => {
     if (!selected) return;
     const templateName = selected.name.trim();
-    if (!templateName) {
-      message.error('Укажите название шаблона PDF');
+    const nameError = humanNameError(selected.name, 200);
+    if (nameError) {
+      message.error(nameError);
       return;
     }
     const normalizedSelected = { ...selected, name: templateName };
@@ -3240,8 +3242,9 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ open, editing, onClose, onS
   }, []);
 
   const submit = useCallback(async () => {
-    if (!name.trim()) {
-      message.error('Укажите название профиля');
+    const nameError = humanNameError(name, 200);
+    if (nameError) {
+      message.error(nameError);
       return;
     }
     setSaving(true);
@@ -3620,8 +3623,9 @@ const PresetModal: React.FC<PresetModalProps> = ({ open, editing, onClose, onSav
   }, [open, editing]);
 
   const submit = useCallback(async () => {
-    if (!name.trim()) {
-      message.error('Укажите название пресета');
+    const nameError = humanNameError(name, 100);
+    if (nameError) {
+      message.error(nameError);
       return;
     }
     setSaving(true);

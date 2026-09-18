@@ -1,3 +1,4 @@
+import { humanName } from '../../../shared/human-name-schema';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { readOrderCatalogLines, persistOrderCatalogLines, recordOrderCatalogLinesChange } from './pg-order-catalog-lines';
@@ -3139,7 +3140,7 @@ function assertSupportedSnapshot(snapshot: OrderSnapshotDto): OrderSnapshotDto {
     const result = z.array(z.object({
       sourceId: z.string().min(1).max(200), catalogItemId: z.number().int().positive().safe(),
       catalogVersion: z.number().int().positive(), lineNumber: z.number().int().positive(),
-      name: z.string().trim().min(1).max(200), sku: z.string().max(80).nullable(),
+      name: humanName(200, 1), sku: z.string().max(80).nullable(),
       kind: z.enum(['made_to_order','stock_item','service']), unitId: z.number().int().positive().max(32767),
       unitName: z.string().min(1).max(200), refKey1c: z.string().uuid().nullable(),
       quantity: z.string(), unitPrice: z.string(), amount: z.string(), notes: z.string().max(2000).optional(),

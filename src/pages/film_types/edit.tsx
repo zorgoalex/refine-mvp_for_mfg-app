@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { Edit } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, Checkbox } from "antd";
@@ -14,7 +15,7 @@ export const FilmTypeEdit: React.FC<IResourceComponentsProps> = () => {
   return (
     <Edit saveButtonProps={saveButtonProps}>
       <Form {...formProps} layout="vertical">
-        <Form.Item label="Name" name="film_type_name" rules={[{ required: true }]}>
+        <Form.Item label="Name" name="film_type_name" rules={[...([{ required: true }]), nameRule("film_type_name")]}>
           <Input />
         </Form.Item>
         <Form.Item label="Ref Key 1C" name="ref_key_1c">

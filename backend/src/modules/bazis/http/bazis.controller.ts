@@ -1,3 +1,4 @@
+import { humanName } from '../../../shared/human-name-schema';
 import { unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Put, Query, Req, Res, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
@@ -40,6 +41,7 @@ const numericIdSchema = z.coerce.number().int().positive();
 const optionalNumericIdSchema = numericIdSchema.optional();
 
 const importFieldsSchema = z.object({
+  fileName: humanName(1024).optional(),
   projectId: optionalNumericIdSchema,
   bazisProjectId: optionalNumericIdSchema,
 });
@@ -79,7 +81,7 @@ const materialMappingsQuerySchema = z.object({
 const materialMappingItemSchema = z
   .object({
     sourceKind: z.enum(['sheet', 'film', 'edge']),
-    bazisName: z.string().trim().min(1).max(255),
+    bazisName: humanName(Number.MAX_SAFE_INTEGER),
     targetKind: z.enum(['sheet', 'film', 'edge', 'ignore']),
     sheetMaterialTypeId: optionalNumericIdSchema.nullish(),
     filmId: optionalNumericIdSchema.nullish(),
@@ -159,7 +161,7 @@ const upsertMappingsBodySchema = z.object({
 
 const createOrderFromRevisionBodySchema = z.object({
   clientId: z.coerce.number().int().positive(),
-  orderName: z.string().trim().min(1).max(200),
+  orderName: humanName(200, 1),
   orderStatusId: z.coerce.number().int().positive(),
   selectedNodeIds: z.array(z.coerce.number().int().positive()).min(1),
   idempotencyKey: z.string().min(8).max(200),
@@ -211,7 +213,7 @@ const setNodeNotesSchema = z
 
 const renameProjectSchema = z
   .object({
-    name: z.string().trim().min(1).max(300),
+    name: humanName(Number.MAX_SAFE_INTEGER),
   })
   .strict();
 
@@ -242,7 +244,7 @@ const upsertMappingsRequestSwaggerSchema = {
         required: ['sourceKind', 'bazisName', 'targetKind'],
         properties: {
           sourceKind: { type: 'string', enum: ['sheet', 'film', 'edge'] },
-          bazisName: { type: 'string', minLength: 1, maxLength: 255 },
+          bazisName: { type: 'string', minLength: 1 },
           targetKind: { type: 'string', enum: ['sheet', 'film', 'edge', 'ignore'] },
           sheetMaterialTypeId: { type: 'integer', nullable: true },
           filmId: { type: 'integer', nullable: true },
@@ -401,18 +403,17 @@ export class BazisController {
       throw new ApiError(422, 'VALIDATION_ERROR', 'Файл не передан');
     }
 
-    const fields = parseBazisImportFields(body);
-    if (fields.projectId == null && fields.bazisProjectId == null) {
-      throw new ApiError(422, 'VALIDATION_ERROR', 'Нужен projectId или bazisProjectId');
-    }
-
     try {
+      const fields = parseBazisImportFields(body);
+      if (fields.projectId == null && fields.bazisProjectId == null) {
+        throw new ApiError(422, 'VALIDATION_ERROR', 'Нужен projectId или bazisProjectId');
+      }
       return await this.bazis.importXml({
         currentUser,
         requestId: request.requestId,
         projectId: fields.projectId ?? null,
         bazisProjectId: fields.bazisProjectId ?? null,
-        fileName: file.originalname ?? 'bazis.xml',
+        fileName: fields.fileName ?? decodeUploadedFileName(file.originalname ?? 'bazis.xml'),
         filePath: file.path,
       });
     } finally {
@@ -441,7 +442,7 @@ export class BazisController {
       type: 'object',
       required: ['name'],
       additionalProperties: false,
-      properties: { name: { type: 'string', minLength: 1, maxLength: 300 } },
+      properties: { name: { type: 'string', minLength: 1 } },
     }),
   })
   @ApiResponse({ status: 200, description: 'Renamed Bazis project' })
@@ -869,7 +870,7 @@ export class BazisController {
   }
 }
 
-export function parseBazisImportFields(body: unknown): { projectId?: number; bazisProjectId?: number } {
+export function parseBazisImportFields(body: unknown): { projectId?: number; bazisProjectId?: number; fileName?: string } {
   return parseWithZod(importFieldsSchema, body, 'Bazis import payload validation failed');
 }
 
@@ -900,6 +901,10 @@ export function parseNodeSearchQuery(
 export function parseMaterialMappingsQuery(
   query: Record<string, string | string[] | undefined>,
 ): { names?: string[] } {
+  if (query.name !== undefined) {
+    const values = Array.isArray(query.name) ? query.name : [query.name];
+    return { names: parseWithZod(z.array(z.string().trim().min(1)).max(500), values, 'Invalid material names') };
+  }
   const parsed = parseWithZod(
     materialMappingsQuerySchema,
     flattenQuery(query),
@@ -912,7 +917,7 @@ export function parseMaterialMappingsQuery(
 
   const names = parsed.names
     .split(',')
-    .map((name) => decodeURIComponent(name).trim())
+    .map((name) => name.trim())
     .filter((name) => name.length > 0);
 
   return names.length > 0 ? { names } : {};
@@ -1045,4 +1050,11 @@ function buildBazisCutFilename(projectName: string, revisionId: number): string 
 function contentDisposition(filename: string): string {
   const ascii = filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+/** Multer decodes legacy multipart filename bytes as Latin-1. Leave real Unicode untouched. */
+export function decodeUploadedFileName(name: string): string {
+  if (/[^\u0000-\u00ff]/.test(name)) return name;
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(name, 'latin1')); }
+  catch { return name; }
 }

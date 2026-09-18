@@ -29,6 +29,11 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-09-18", title: "Кириллица и проверка названий",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: ["Импорт БАЗИС сохраняет кириллицу в именах файлов и читает XML в UTF-8, Windows-1251 и UTF-16. Материалы с запятыми и знаком процента корректно сопоставляются со справочниками.", "Согласованы проверки названий в формах и API. Исправлены кириллические имена скачиваемых файлов и пресетов раскроя; коды проектов и групп принимают буквы Unicode."],
+  },
+  {
     version: APP_VERSION, date: "2026-09-18", title: "Отдельный журнал Bitrix24",
     services: ["ERP", "CRM"], repositories: ["repo_erp"],
     added: ["В Журналах появилась вкладка Bitrix24: история обоих направлений, платежей и настроек; отдельные очереди и фактические флаги обработчиков. Поиск по номеру/ID заказа работает и до создания сделки в Bitrix."],
