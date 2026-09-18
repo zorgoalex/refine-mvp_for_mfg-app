@@ -327,14 +327,20 @@ function buildWhere(filters: AuditLogFilters): {
   const selectedOrders = filters.orderIds ?? (filters.relatedOrderId != null ? [filters.relatedOrderId] : []);
   if (selectedOrders.length > 0) {
     const p = addArrayParam(selectedOrders);
+    // Collect matching audit IDs through each indexed relation first. An OR
+    // across correlated relations forces scanning unrelated payment history.
+    // UNION deduplicates events with more than one matching order dimension.
     clauses.push(
-      `(` +
-        `audit_log.related_order_id = ANY($${p}::bigint[]) OR ` +
-        `(audit_log.entity_type = 'order' AND audit_log.entity_id ~ '^[0-9]{1,18}$' ` +
-        `AND audit_log.entity_id::bigint = ANY($${p}::bigint[])) OR ` +
-        `EXISTS (SELECT 1 FROM audit_log_related_entity r ` +
-        `WHERE r.audit_id = audit_log.audit_id AND r.entity_type = 'order' AND r.entity_id = ANY($${p}::bigint[]))` +
-        (filters.scope === 'bitrix24' ? ` OR ${BITRIX_REQUEST_ORDER_SQL} = ANY($${p}::bigint[])` : '') +
+      `audit_log.audit_id IN (` +
+        `SELECT candidate.audit_id FROM audit_log candidate WHERE candidate.related_order_id = ANY($${p}::bigint[]) UNION ` +
+        `SELECT candidate.audit_id FROM audit_log candidate WHERE candidate.entity_type = 'order' ` +
+        `AND candidate.entity_id ~ '^[0-9]{1,18}$' AND candidate.entity_id::bigint = ANY($${p}::bigint[]) UNION ` +
+        `SELECT r.audit_id FROM audit_log_related_entity r WHERE r.entity_type = 'order' AND r.entity_id = ANY($${p}::bigint[])` +
+        (filters.scope === 'bitrix24'
+          ? ` UNION SELECT candidate.audit_id FROM audit_log candidate JOIN bitrix24_incoming_request r ` +
+            `ON candidate.entity_id=r.request_id::text WHERE candidate.entity_type='bitrix24_incoming_request' ` +
+            `AND r.linked_order_id = ANY($${p}::bigint[])`
+          : '') +
       `)`,
     );
   }

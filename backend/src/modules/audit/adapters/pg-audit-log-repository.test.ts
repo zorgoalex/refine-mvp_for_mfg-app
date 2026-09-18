@@ -209,7 +209,7 @@ describe('PgAuditLogRepository.list', () => {
     expect(calls).toHaveLength(2);
     expect(calls[0].text).toMatch(/COUNT\(\*\)/i);
     expect(calls[0].text).toMatch(/related_order_id = ANY\(/);
-    expect(calls[0].text).toContain("audit_log.entity_type = 'order'");
+    expect(calls[0].text).toContain("candidate.entity_type = 'order'");
     expect(calls[0].text).toContain('audit_log_related_entity');
     expect(calls[0].text).toMatch(/event = \$/);
     expect(calls[0].params).toContainEqual([1001]);
@@ -524,12 +524,25 @@ describe('PgAuditLogRepository.list', () => {
       requestId: 'rq',
     });
 
-    expect(calls[0].text).toMatch(/audit_log\.related_order_id = ANY\(\$1::bigint\[\]\)/);
-    expect(calls[0].text).toMatch(/audit_log\.entity_type = 'order'/);
-    expect(calls[0].text).toMatch(/audit_log\.entity_id ~ '\^\[0-9\]\{1,18\}\$'/);
-    expect(calls[0].text).toMatch(/audit_log\.entity_id::bigint = ANY\(\$1::bigint\[\]\)/);
+    expect(calls[0].text).toMatch(/candidate\.related_order_id = ANY\(\$1::bigint\[\]\)/);
+    expect(calls[0].text).toMatch(/candidate\.entity_type = 'order'/);
+    expect(calls[0].text).toMatch(/candidate\.entity_id ~ '\^\[0-9\]\{1,18\}\$'/);
+    expect(calls[0].text).toMatch(/candidate\.entity_id::bigint = ANY\(\$1::bigint\[\]\)/);
     expect(calls[0].text).toMatch(/r\.entity_type = 'order' AND r\.entity_id = ANY\(\$1::bigint\[\]\)/);
     expect(calls[0].params[0]).toEqual([42, 43]);
+  });
+
+  it('resolves current Bitrix request order links without a per-audit-row scalar lookup', async () => {
+    const { client, calls } = db([{ rows: [{ total: 0 }] }, { rows: [] }]);
+    await new PgAuditLogRepository(client).list({
+      currentUser: undefined,
+      filters: { scope: 'bitrix24', orderIds: [42, 43] },
+      page: 1, pageSize: 50, requestId: 'rq',
+    });
+    expect(calls[0].text).toContain('audit_log.audit_id IN (SELECT candidate.audit_id');
+    expect(calls[0].text).toContain("candidate.entity_id=r.request_id::text WHERE candidate.entity_type='bitrix24_incoming_request'");
+    expect(calls[0].text).toContain('AND r.linked_order_id = ANY(');
+    expect(calls[0].text).not.toContain('SELECT r.linked_order_id');
   });
 
   it('filters participantUserIds across actor, related user and bridge user', async () => {

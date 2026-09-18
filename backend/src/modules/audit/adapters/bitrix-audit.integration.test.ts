@@ -66,7 +66,7 @@ describe.skipIf(!url)('Bitrix journal real PostgreSQL, rollback-only', () => {
     const generalOptions = await repository.filterOptions({ currentUser: actor, excludeBitrix24: true, requestId: prefix });
     expect(generalOptions.data.events).toContain('E2E.ordinary_old_event');
     expect(generalOptions.data.events).not.toContain('bitrix24_reverse.order_payments_reconcile');
-  });
+  }, 15000);
   it('filters typed identities and explicit outcomes; errors and conflicts survive reconciliation noise', async () => {
     const failed = await record('crm_sync.failed', 'crm-sync');
     await client.query(`UPDATE audit_log SET metadata_json=$1 WHERE audit_id=$2`, [JSON.stringify({ bitrixDealId: '9988', bitrixPaymentId: '9988', error: 'auth=E2ESECRET' }), failed]);
@@ -88,8 +88,10 @@ describe.skipIf(!url)('Bitrix journal real PostgreSQL, rollback-only', () => {
     await client.query('UPDATE audit_log SET related_order_id=$1 WHERE audit_id=$2', [orderId, related]);
     const bridge = await record('orders.update', 'backend', 'other', '2');
     await client.query("INSERT INTO audit_log_related_entity(audit_id,entity_type,entity_id) VALUES ($1,'order',$2)", [bridge, orderId]);
+    await client.query("INSERT INTO audit_log_related_entity(audit_id,entity_type,entity_id) VALUES ($1,'order',$2)", [related, orderId]);
+    await record('orders.update', 'backend', 'order', 'not-an-id');
     expect((await list({ relatedOrderId: orderId, excludeBitrix24: true })).pagination.total).toBe(3);
-  });
+  }, 15000);
   it('shows forward pending order without a mapping and safely redacts queue errors', async () => {
     const erpId = '1999999999';
     await client.query(`INSERT INTO crm_sync_outbox(event_type,aggregate_type,aggregate_id,payload_json,idempotency_key) VALUES('crm.sync.order.upsert','crm_sync',$1,jsonb_build_object('entity','order','id',$1::text,'op','upsert'),$2)`, [erpId, prefix]);
@@ -97,6 +99,16 @@ describe.skipIf(!url)('Bitrix journal real PostgreSQL, rollback-only', () => {
     expect(result.data).toEqual([expect.objectContaining({ entityType: 'order', entityId: erpId, orderId: erpId, bitrixId: null, status: 'pending', attempts: 0 })]);
     expect((await new BitrixAuditService(db, {} as never).queue(actor, { direction: 'forward', entityType: 'order', entityId: erpId, page: 1, pageSize: 50 })).pagination.total).toBe(1);
   });
+  it('finds current request links without matching another entity with the same ID', async () => {
+    const orderId = Number((await client.query('SELECT order_id FROM orders ORDER BY order_id DESC LIMIT 1')).rows[0].order_id);
+    const request = (await client.query(`INSERT INTO bitrix24_incoming_request(bitrix_deal_id,title,bitrix_url,state,linked_order_id) VALUES('1999999999',$1,'https://e2e.invalid','converted',$2) RETURNING request_id`, [prefix, orderId])).rows[0];
+    const match = await record('bitrix24_reverse.incoming_request_upsert', 'bitrix24', 'bitrix24_incoming_request', String(request.request_id));
+    await record('bitrix24.future', 'bitrix24', 'other', String(request.request_id));
+    const result = await list({ scope: 'bitrix24', orderIds: [orderId] });
+    expect(result.pagination.total).toBe(1);
+    expect(result.data.map((r) => r.auditId)).toEqual([match]);
+    expect((await list({ scope: 'bitrix24', orderIds: [1999999999] })).pagination.total).toBe(0);
+  }, 15000);
   async function inbound() {
     await client.query(`INSERT INTO bitrix24_app_installation(member_id,domain,access_token_ciphertext,refresh_token_ciphertext,access_token_expires_at,application_token_hash) VALUES($1,'e2e.example.invalid','E2E','E2E',now(),repeat('a',64))`, [prefix]);
     const row = (await client.query(`INSERT INTO bitrix24_inbound_event(member_id,event_name,object_type,bitrix_id,event_ts,payload_json,fingerprint,status,attempts,lock_token) VALUES($1,'ONCRMCONTACTADD','contact','1999999999',now(),'{}',$1,'processing',2,'E2E-lease') RETURNING inbound_event_id`, [prefix])).rows[0];
