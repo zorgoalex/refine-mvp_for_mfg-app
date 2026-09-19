@@ -209,7 +209,7 @@ export const MaterialMappingStep: React.FC<MaterialMappingStepProps> = ({
   );
 };
 
-function toOption(item: ReferenceOption | SheetMaterialTypeOption): ReferenceOption {
+function toOption(item: ReferenceOption | SheetMaterialTypeOption): Pick<ReferenceOption, 'label' | 'value'> {
   return {
     label: item.label,
     value: item.value,
