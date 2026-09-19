@@ -65,6 +65,7 @@ ai_docs/
 !/docs/configuration-and-auth.md
 !/docs/deployment-and-operations.md
 !/docs/backend-release-runbook.md
+!/docs/mdf-engine-foundation.md
 !/docs/archive/
 /docs/archive/*
 !/docs/archive/deployment-and-operations.before-backend-release-2026-09-18.md

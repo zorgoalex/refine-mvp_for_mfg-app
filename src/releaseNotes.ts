@@ -29,6 +29,11 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-09-19", title: "МДФ-доска: подготовка единого расчёта",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: ["Подготовлена основа нового учёта подтверждений производства и распределения распила между ваннами. Новый обработчик пока не включён; действующая логика доски не изменена."],
+  },
+  {
     version: APP_VERSION, date: "2026-09-18", title: "Название Базис-проекта в заказе",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: ["После переименования Базис-проекта заказ показывает актуальное название в шапке, деталях и группировке, включая мобильный вид. Несохранённые изменения открытого заказа сохраняются."],
