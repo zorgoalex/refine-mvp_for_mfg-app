@@ -2217,7 +2217,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     });
 
     return groupingActive && grouping.state.field
-      ? buildGroupedRows(details, grouping.state.field, { groupValueOf, groupLabelOf }).flatMap((row) => {
+      ? buildGroupedRows(details, grouping.state.field, { groupValueOf, groupLabelOf }).flatMap<OrderExcelDetailRow>((row) => {
         if (row.kind === 'separator') return [{ kind: 'blank' as const }];
         if (row.kind === 'detail') return [mapDetailToExcelRow(row.detail)];
         return [];
