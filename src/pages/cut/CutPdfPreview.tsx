@@ -97,6 +97,7 @@ async function renderCutPdfPagePreviews(blob: Blob): Promise<CutPdfPagePreview[]
       canvas.width = Math.floor(viewport.width * ratio);
       canvas.height = Math.floor(viewport.height * ratio);
       await page.render({
+        canvas,
         canvasContext,
         transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0],
         viewport,
