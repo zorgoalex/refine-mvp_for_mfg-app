@@ -3,6 +3,7 @@ import { ApiError } from "../../../common/errors/api-error";
 import { auditService } from "../../../common/audit/audit.service";
 import type { DatabaseService } from "../../../database/database.service";
 import type { TransactionClient } from "../../../database/database.types";
+import { observeMdfShadowCommand } from "../../mdf-board/application/mdf-shadow";
 import type { CurrentUser } from "../../../permissions/current-user";
 import { OrderAccessPolicy } from "../../../permissions/policies/order-access.policy";
 import {
@@ -200,6 +201,12 @@ export class PgMdfProductionReturn {
             completionBarrier: p.resetsCompletion,
           },
         });
+        // Observe the explicit correction, never dispatch forward automation here.
+        await observeMdfShadowCommand(tx, {
+          source, actor: user, requestId,
+          sourceIdempotencyKey: `mdf-board:return:${source.kind}:${source.id}:${request.idempotencyKey}`,
+        }, { kind: 'production_return', targetColumn: p.targetColumn, auditId,
+          targetStageId: p.targetStage.id, targetStageCode: p.targetStage.code, previewDigest: p.digest });
         const result: MdfReturnResult = { preview: p, auditId, requestId };
         await tx.query(
           `INSERT INTO outbox_events(event_type,aggregate_type,aggregate_id,payload_json,idempotency_key)

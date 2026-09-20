@@ -6,7 +6,9 @@ import { PgMdfBoardManualMoveRepository } from './pg-mdf-board-manual-move-repos
 const runtimeMocks = vi.hoisted(() => ({
   evaluateMdfBoardColumnAutomation: vi.fn(async () => undefined),
   snapshot: vi.fn(async () => ({cards:[{kind:'packet',id:'packet-1',column:'parsed'}]})),
+  observe: vi.fn(async () => undefined),
 }));
+vi.mock('../../mdf-board/application/mdf-shadow', () => ({ observeMdfShadowCommand: runtimeMocks.observe }));
 vi.mock('./mdf-return-snapshot', () => ({
   returnSourceOwners: vi.fn(async () => [1001]),
   loadReturnSnapshot: runtimeMocks.snapshot,
@@ -19,6 +21,7 @@ vi.mock('../../status-automation/application/status-automation-runtime', () => (
 describe('PgMdfBoardManualMoveRepository', () => {
   beforeEach(() => {
     runtimeMocks.evaluateMdfBoardColumnAutomation.mockClear();
+    runtimeMocks.observe.mockClear();
     runtimeMocks.snapshot.mockResolvedValue({cards:[{kind:'packet',id:'packet-1',column:'parsed'}]});
   });
 
@@ -43,6 +46,10 @@ describe('PgMdfBoardManualMoveRepository', () => {
     expect(result).toMatchObject({ changed: true, auditId: 'audit-1', move: { targetColumn: 'completed' } });
     expect(tx.texts.some((text) => text.includes('INSERT INTO mdf_board_manual_moves'))).toBe(true);
     expect(tx.texts.some((text) => text.includes('INSERT INTO audit_log'))).toBe(true);
+    expect(runtimeMocks.observe).toHaveBeenCalledWith(tx, expect.objectContaining({
+      source: { kind: 'packet', id: 'packet-1' }, actor: user(), requestId: 'req-1',
+    }), { kind: 'manual_move', targetColumn: 'completed', auditId: 'audit-1' });
+    expect(runtimeMocks.observe.mock.invocationCallOrder[0]).toBeLessThan(runtimeMocks.evaluateMdfBoardColumnAutomation.mock.invocationCallOrder[0]);
     expect(runtimeMocks.evaluateMdfBoardColumnAutomation).toHaveBeenCalledWith(expect.anything(), {
       source: { kind: 'packet', id: 'packet-1' },
       actor: user(),
@@ -82,6 +89,7 @@ describe('PgMdfBoardManualMoveRepository', () => {
 
     expect(result).toMatchObject({ changed: false, move: { targetColumn: 'completed' } });
     expect(tx.texts.some((text) => text.includes('INSERT INTO audit_log'))).toBe(false);
+    expect(runtimeMocks.observe).not.toHaveBeenCalled();
   });
 
   it('treats missing DELETE as no-op without audit', async () => {
@@ -101,6 +109,17 @@ describe('PgMdfBoardManualMoveRepository', () => {
     expect(result).toMatchObject({ deleted: false });
     expect(tx.texts.some((text) => text.includes('DELETE FROM mdf_board_manual_moves'))).toBe(false);
     expect(tx.texts.some((text) => text.includes('INSERT INTO audit_log'))).toBe(false);
+    expect(runtimeMocks.observe).not.toHaveBeenCalled();
+  });
+
+  it('observes deletion as visual clear before dispatch, not production return', async () => {
+    const tx = fakeTx([rows(), rows([row()]), rows(), rows([{ audit_id: 'audit-clear' }])]);
+    await new PgMdfBoardManualMoveRepository(fakeDatabase(tx)).delete({
+      currentUser: user(), cardKind: 'packet', cardId: 'packet-1', requestId: 'clear',
+    });
+    expect(runtimeMocks.observe).toHaveBeenCalledWith(tx, expect.objectContaining({ requestId: 'clear' }),
+      { kind: 'manual_clear', targetColumn: null, auditId: 'audit-clear' });
+    expect(runtimeMocks.observe.mock.invocationCallOrder[0]).toBeLessThan(runtimeMocks.evaluateMdfBoardColumnAutomation.mock.invocationCallOrder[0]);
   });
 
   it('rejects legacy PUT that would cosmetically reopen a completed source', async () => {

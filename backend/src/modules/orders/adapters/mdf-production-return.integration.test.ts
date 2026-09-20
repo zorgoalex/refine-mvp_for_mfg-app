@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Client, type PoolClient } from "pg";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -8,6 +8,7 @@ import type { TransactionClient } from "../../../database/database.types";
 import { getPermissionsForRole } from "../../../permissions/permissions";
 import { mdfCompletionUpdateSql } from "../../cnc-telegram/adapters/pg-cnc-telegram-repository";
 import { PgMdfBoardManualMoveRepository } from "./pg-mdf-board-manual-move-repository";
+import { beginTransactionHooks, flushTransactionHooks, discardTransactionHooks } from '../../../database/transaction-hooks';
 
 const enabled = process.env.MDF_RETURN_INTEGRATION === "1";
 const tables = [
@@ -77,18 +78,24 @@ describe.skipIf(!enabled)(
         handler: (tx: TransactionClient) => Promise<T>
       ) => {
         await client.query("BEGIN");
+        beginTransactionHooks(tx);
         try {
           const result = await handler(tx);
+          await flushTransactionHooks(tx);
           await client.query("COMMIT");
           return result;
         } catch (e) {
           await client.query("ROLLBACK");
           throw e;
+        } finally {
+          discardTransactionHooks(tx);
         }
       },
     };
     const repository = new PgMdfProductionReturn(database);
     beforeAll(async () => {
+      vi.stubEnv('BACKEND_MDF_SHADOW_INTAKE', 'true');
+      vi.stubEnv('BACKEND_ENABLE_STATUS_AUTOMATION', 'false');
       await client.connect();
       await client.query(
         `CREATE SCHEMA ${schema}; SET search_path=${schema},public`
@@ -115,8 +122,12 @@ describe.skipIf(!enabled)(
         .replace(/^BEGIN;$/m, "")
         .replace(/^COMMIT;$/m, "");
       await client.query(migration);
+      for (const file of ['165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql', '167_mdf_shadow_observations.sql', '171_mdf_shadow_commands.sql']) {
+        await client.query(readFileSync(new URL(`../../../../db/migrations/${file}`, import.meta.url), 'utf8'));
+      }
     }, 30000);
     afterAll(async () => {
+      vi.unstubAllEnvs();
       try {
         await client.query(
           `SET search_path=public; DROP SCHEMA IF EXISTS ${schema} CASCADE`
@@ -133,6 +144,7 @@ describe.skipIf(!enabled)(
       }
     });
     beforeEach(async () => {
+      await client.query(`TRUNCATE ${schema}.mdf_evidence_revisions CASCADE`);
       await client.query(`TRUNCATE ${tables
         .map((t) => `${schema}.${t}`)
         .join(",")};
@@ -205,6 +217,7 @@ describe.skipIf(!enabled)(
         })
       );
       expect(await production()).toEqual(before);
+      expect((await client.query('SELECT count(*) n FROM mdf_shadow_commands')).rows[0].n).toBe('0');
       expect(
         (
           await client.query(
@@ -246,6 +259,13 @@ describe.skipIf(!enabled)(
         mdf_completion_returned: true,
       });
       expect(await confirm(p, key)).toEqual(result);
+      expect((await client.query(`SELECT c.command_kind,c.target_column,c.target_stage_id,c.target_stage_code,
+        c.preview_digest,c.audit_event_id,r.actor_user_id,r.request_id,h.accepted_revision_key
+        FROM mdf_shadow_commands c JOIN mdf_evidence_revisions r USING(source_kind,source_id,revision_key)
+        JOIN mdf_source_heads h USING(source_kind,source_id)`)).rows).toEqual([{
+          command_kind: 'production_return', target_column: 'parsed', target_stage_id: '1', target_stage_code: 'drawn',
+          preview_digest: p.digest, audit_event_id: result.auditId, actor_user_id: '1', request_id: 'E2E-return', accepted_revision_key: null,
+        }]);
       expect(
         (
           await client.query(
@@ -423,6 +443,15 @@ describe.skipIf(!enabled)(
         await repository.preview(user, source, { targetColumn: "parsed" })
       );
       await manual.upsert({ ...command, targetColumn: "completed" });
+      await manual.upsert({ ...command, targetColumn: "completed" });
+      await manual.delete(command);
+      expect((await client.query(`SELECT c.command_kind,c.audit_event_id,a.audit_id,r.request_id,a.request_id AS audit_request
+        FROM mdf_shadow_commands c JOIN audit_log a ON a.audit_id=c.audit_event_id
+        JOIN mdf_evidence_revisions r USING(source_kind,source_id,revision_key) ORDER BY observation_id`)).rows)
+        .toEqual(['production_return', 'manual_move', 'manual_clear'].map(kind => expect.objectContaining({ command_kind: kind,
+          audit_event_id: expect.any(String), audit_id: expect.any(String),
+          request_id: kind === 'production_return' ? 'E2E-return' : 'E2E-manual',
+          audit_request: kind === 'production_return' ? 'E2E-return' : 'E2E-manual' })));
       expect(
         (
           await client.query(

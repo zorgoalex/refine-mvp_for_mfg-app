@@ -2101,6 +2101,25 @@ probe_file() {
       "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=to_regclass('public.mdf_shadow_comparison_attempts') AND indexrelid::regclass::text=ANY(string_to_array('mdf_shadow_comparison_attempts_pkey',',')) AND (NOT indisvalid OR NOT indisready));" \
       "$(q_trg_def_on mdf_shadow_comparison_immutable mdf_shadow_comparisons 'CREATE TRIGGER mdf_shadow_comparison_immutable BEFORE DELETE OR UPDATE ON public.mdf_shadow_comparisons FOR EACH ROW EXECUTE FUNCTION mdf_reject_evidence_change()')" \
       "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.mdf_shadow_comparisons') AND tgname='mdf_shadow_comparison_immutable' AND tgenabled='O' AND NOT tgisinternal);" ;;
+    171_mdf_shadow_commands*) probe_all \
+                     "$(q_tbl mdf_shadow_commands)" \
+                     "$(q_col mdf_shadow_commands observation_id)" \
+                     "$(q_col mdf_shadow_commands audit_event_id)" \
+                     "$(q_col mdf_shadow_commands composition_digest)" \
+                     "$(q_col mdf_shadow_commands target_stage_id)" \
+                     "$(q_col mdf_shadow_commands target_stage_code)" \
+                     "$(q_col mdf_shadow_commands preview_digest)" \
+                     "$(q_con_on mdf_shadow_commands mdf_shadow_commands_pkey)" \
+                     "$(q_con_on mdf_shadow_commands mdf_shadow_commands_audit_event_id_key)" \
+                     "$(q_con_on mdf_shadow_commands mdf_shadow_commands_observation_id_key)" \
+                     "$(q_con_on mdf_shadow_commands mdf_shadow_commands_source_kind_source_id_revision_key_fkey)" \
+                     "$(q_con_on mdf_shadow_commands mdf_shadow_commands_source_kind_check)" \
+                     "$(q_con_on mdf_shadow_commands mdf_shadow_commands_command_kind_check)" \
+                     "$(q_con_on mdf_shadow_commands mdf_shadow_commands_composition_digest_check)" \
+                     "$(q_con_on mdf_shadow_commands mdf_shadow_commands_check)" \
+                     "$(q_con_on mdf_shadow_commands mdf_shadow_commands_check1)" \
+                     "$(q_idx idx_mdf_shadow_commands_source)" \
+                     "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.mdf_shadow_commands') AND tgname='mdf_shadow_commands_immutable' AND tgenabled='O' AND tgfoid=to_regprocedure('public.mdf_reject_evidence_change()'));" ;;
     170_whatsapp_technical_logs*) probe_all \
                      "$(q_tbl whatsapp_technical_logs)" \
                      "$(q_con_on whatsapp_technical_logs whatsapp_technical_logs_pkey)" \
@@ -2128,7 +2147,7 @@ verify_applied_effect() {
     164_*|165_*|166_*|167_*|168_*|169_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    170_*)
+    170_*|171_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*|127_*|128_*|129_*|130_*|131_*|132_*|133_*|134_*|135_*|136_*|137_*|138_*|139_*|140_*|141_*|142_*|143_*|144_*|145_*|146_*|147_*|148_*|149_*|150_*|153_*|154_*)
