@@ -18,7 +18,7 @@ const DIB_FIELD_OFFSETS: Record<number, number> = {
   77: 84, // EMR_STRETCHBLT
 };
 
-export function extractBmpFromEmf(bytes: Uint8Array): Uint8Array | null {
+export function extractBmpFromEmf(bytes: Uint8Array): Uint8Array<ArrayBuffer> | null {
   if (bytes.length < 88) return null;
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (dv.getUint32(0, true) !== EMR_HEADER) return null;
