@@ -39,7 +39,7 @@ test.describe('Deployed order stages: read-only, no Bitrix portal calls', () => 
       window.dispatchEvent(new PopStateEvent('popstate'));
     });
     const stateResponse = page.waitForResponse((r) => r.url().endsWith('/api/v1/bitrix24/order-stages'));
-    await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+    await page.getByRole('button', { name: /Настройки$/ }).click();
     expect((await stateResponse).status()).toBe(200);
     await page.getByText('Статусы заказов ERP → стадии сделок Bitrix', { exact: true }).click();
     await expect(page.getByRole('combobox', { name: 'Существующая воронка Bitrix', exact: true })).toBeVisible();
