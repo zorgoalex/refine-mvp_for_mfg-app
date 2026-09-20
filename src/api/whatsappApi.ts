@@ -8,6 +8,8 @@ import type {
   WhatsAppStatusDto,
   WhatsAppTemplateDto,
   WhatsAppTemplateInput,
+  WhatsAppTechnicalLogQuery,
+  WhatsAppTechnicalLogResponse,
 } from "./types/whatsappApi.types";
 
 export const whatsappApi = {
@@ -46,4 +48,17 @@ export const whatsappApi = {
     ),
   processNow: () => httpClient.post(apiRoutes.whatsapp.processNow, {}),
   audit: () => httpClient.get<WhatsAppAuditDto[]>(apiRoutes.whatsapp.audit),
+  technicalLogs: (query: WhatsAppTechnicalLogQuery = {}) =>
+    httpClient.get<WhatsAppTechnicalLogResponse>(withQuery(apiRoutes.whatsapp.technicalLogs, query)),
+  exportTechnicalLogs: (query: WhatsAppTechnicalLogQuery = {}) =>
+    httpClient.download(withQuery(apiRoutes.whatsapp.technicalLogsExport, query)),
 };
+
+function withQuery(path: string, query: WhatsAppTechnicalLogQuery): string {
+  const params = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => {
+    if (value !== undefined && value !== "") params.set(key, String(value));
+  });
+  const encoded = params.toString();
+  return encoded ? `${path}?${encoded}` : path;
+}

@@ -52,6 +52,7 @@ import {
 import {
   WhatsAppAutomationConfig,
   WhatsAppConnectionConfig,
+  WhatsAppTechnicalLogsConfig,
 } from './components/WhatsAppConfigTabs';
 import { can } from '../../utils/permissions';
 import {
@@ -87,7 +88,7 @@ export const filterConfigurationTabItems = <T extends { key: string }>(
   whatsappSettingsVisible = false,
 ): T[] =>
   items.filter((item) => {
-    if (item.key === 'whatsapp-connection' || item.key === 'whatsapp-automation') {
+    if (item.key === 'whatsapp-connection' || item.key === 'whatsapp-automation' || item.key === 'whatsapp-technical-logs') {
       return whatsappSettingsVisible;
     }
     if (generalSettingsVisible) return true;
@@ -608,6 +609,15 @@ export const ConfigurationPage: React.FC = () => {
               </span>
             ),
             children: <WhatsAppAutomationConfig />,
+          },
+          {
+            key: 'whatsapp-technical-logs',
+            label: (
+              <span>
+                <FileTextOutlined /> WhatsApp-журнал
+              </span>
+            ),
+            children: <WhatsAppTechnicalLogsConfig />,
           },
         ]
       : []),

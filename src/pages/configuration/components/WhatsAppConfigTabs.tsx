@@ -20,12 +20,14 @@ import {
 } from "antd";
 import {
   PlusOutlined,
+  DownloadOutlined,
   QrcodeOutlined,
   ReloadOutlined,
   RetweetOutlined,
 } from "@ant-design/icons";
 import { Table } from "../../../ui/tooltipDelay";
 import { whatsappApi } from "../../../api/whatsappApi";
+import { ApiError, isApiError } from "../../../api/apiError";
 import { featureFlags } from "../../../config/featureFlags";
 import type {
   WhatsAppAuditDto,
@@ -35,11 +37,18 @@ import type {
   WhatsAppStatusDto,
   WhatsAppTemplateDto,
   WhatsAppTemplateInput,
+  WhatsAppTechnicalLogDto,
+  WhatsAppTechnicalLogQuery,
 } from "../../../api/types/whatsappApi.types";
 import { can } from "../../../utils/permissions";
 import "./WhatsAppConfigTabs.css";
 
 const { Paragraph, Text, Title } = Typography;
+
+export interface UserFacingError {
+  title: string;
+  description: string;
+}
 
 export const WhatsAppConnectionConfig: React.FC = () => {
   const canManage =
@@ -49,6 +58,7 @@ export const WhatsAppConnectionConfig: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [action, setAction] = useState(false);
+  const [actionError, setActionError] = useState<UserFacingError | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -74,14 +84,22 @@ export const WhatsAppConnectionConfig: React.FC = () => {
 
   const showQr = async () => {
     setAction(true);
+    setActionError(null);
     try {
       const blob = await whatsappApi.qr();
+      if (blob.type !== "image/png" || blob.size < 8) {
+        throw new ApiError({
+          code: "WAHA_QR_RESPONSE_INVALID",
+          message: "Invalid QR image",
+          status: 502,
+        });
+      }
       setQrUrl((current) => {
         if (current) URL.revokeObjectURL(current);
         return URL.createObjectURL(blob);
       });
     } catch (actionError) {
-      message.error(errorText(actionError, "Не удалось получить QR-код"));
+      setActionError(qrErrorPresentation(actionError));
     } finally {
       setAction(false);
     }
@@ -89,12 +107,13 @@ export const WhatsAppConnectionConfig: React.FC = () => {
 
   const restart = async () => {
     setAction(true);
+    setActionError(null);
     try {
       await whatsappApi.restart(Boolean(status?.restrictions.length));
-      message.success("Перезапуск сессии запрошен");
+      message.success("WAHA перезапущен. Новый QR действует ограниченное время.");
       await load();
     } catch (actionError) {
-      message.error(errorText(actionError, "Не удалось перезапустить сессию"));
+      setActionError(restartErrorPresentation(actionError));
     } finally {
       setAction(false);
     }
@@ -107,6 +126,7 @@ export const WhatsAppConnectionConfig: React.FC = () => {
     (sum, count) => sum + count,
     0
   );
+  const session = whatsappSessionPresentation(status?.session, status?.issues);
   return (
     <div className="whatsapp-config">
       <header className="whatsapp-config__header">
@@ -130,12 +150,18 @@ export const WhatsAppConnectionConfig: React.FC = () => {
           type="warning"
           showIcon
           message="Ограничения WhatsApp активны"
-          description={`Перезапуск их не снимет: ${status.restrictions.join(
-            ", "
-          )}.`}
+          description={`Перезапуск их не снимет: ${status.restrictions.map(restrictionLabel).join(", ")}.`}
         />
       ) : null}
       {error ? <Alert type="warning" showIcon message={error} /> : null}
+      {actionError ? (
+        <Alert type="error" showIcon closable message={actionError.title}
+          description={actionError.description} onClose={() => setActionError(null)} />
+      ) : null}
+      {session.notice ? (
+        <Alert type={session.notice.type} showIcon message={session.notice.title}
+          description={session.notice.description} />
+      ) : null}
       <Card className="whatsapp-config__status-card">
         <Descriptions column={{ xs: 1, sm: 2, lg: 3 }}>
           <Descriptions.Item label="Состояние">
@@ -147,7 +173,7 @@ export const WhatsAppConnectionConfig: React.FC = () => {
             {extractValue(status?.version, ["version", "current"])}
           </Descriptions.Item>
           <Descriptions.Item label="Сессия">
-            {extractValue(status?.session, ["status", "name"])}
+            <Tag color={session.color}>{session.label}</Tag>
           </Descriptions.Item>
           <Descriptions.Item label="Аккаунт">
             {extractValue(status?.account, ["pushName", "id", "name"])}
@@ -179,8 +205,8 @@ export const WhatsAppConnectionConfig: React.FC = () => {
           Показать QR-код
         </Button>
         <Popconfirm
-          title="Перезапустить WhatsApp-сессию? Активные timelock и capping сохранятся."
-          okText="Перезапустить"
+          title="Принудительно перезапустить WAHA-сессию? Очередь ERP и ограничения WhatsApp сохранятся."
+          okText="Перезапустить WAHA"
           cancelText="Отмена"
           onConfirm={() => void restart()}
         >
@@ -190,13 +216,17 @@ export const WhatsAppConnectionConfig: React.FC = () => {
             disabled={!canManage}
             loading={action}
           >
-            Перезапустить сессию
+            Принудительно перезапустить WAHA
           </Button>
         </Popconfirm>
       </div>
       {qrUrl ? (
         <Card title="QR-код подключения" className="whatsapp-config__qr">
-          <img src={qrUrl} alt="QR-код для подключения WhatsApp" />
+          <img src={qrUrl} alt="QR-код для подключения WhatsApp"
+            onError={() => setActionError(whatsappErrorPresentation(
+              new ApiError({ code: "WAHA_QR_RESPONSE_INVALID", message: "Invalid QR image", status: 502 }),
+              "QR-код повреждён",
+            ))} />
           <Text type="secondary">
             Откройте WhatsApp → Связанные устройства → Привязка устройства.
           </Text>
@@ -277,6 +307,15 @@ export const WhatsAppAutomationConfig: React.FC = () => {
       await load();
     } catch (actionError) {
       message.error(errorText(actionError, "Повтор недоступен"));
+    }
+  };
+  const processNow = async () => {
+    try {
+      await whatsappApi.processNow();
+      message.success("Обработка очереди завершена");
+      await load();
+    } catch (actionError) {
+      message.error(errorText(actionError, "Не удалось обработать очередь"));
     }
   };
 
@@ -439,10 +478,7 @@ export const WhatsAppAutomationConfig: React.FC = () => {
                   title="Доставка сообщений"
                   action="Обработать сейчас"
                   disabled={!canManage}
-                  onAction={async () => {
-                    await whatsappApi.processNow();
-                    await load();
-                  }}
+                  onAction={processNow}
                 />
                 <Table
                   rowKey="id"
@@ -467,6 +503,11 @@ export const WhatsAppAutomationConfig: React.FC = () => {
                       dataIndex: "attemptCount",
                       width: 90,
                       responsive: ["lg"],
+                    },
+                    {
+                      title: "Причина",
+                      width: 240,
+                      render: (_: unknown, item: WhatsAppDeliveryJobDto) => deliveryErrorText(item),
                     },
                     {
                       title: "",
@@ -541,6 +582,93 @@ export const WhatsAppAutomationConfig: React.FC = () => {
     </div>
   );
 };
+
+export const WhatsAppTechnicalLogsConfig: React.FC = () => {
+  const [rows, setRows] = useState<WhatsAppTechnicalLogDto[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState<WhatsAppTechnicalLogQuery>({ page: 1, pageSize: 100 });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await whatsappApi.technicalLogs(query);
+      setRows(result.data);
+      setTotal(result.pagination.total);
+    } catch (error) {
+      message.error(errorText(error, "Не удалось загрузить технический журнал WhatsApp"));
+    } finally {
+      setLoading(false);
+    }
+  }, [query]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const exportLogs = async () => {
+    try {
+      const result = await whatsappApi.exportTechnicalLogs(query);
+      saveBlob(result.blob, result.fileName ?? "whatsapp-technical.jsonl");
+    } catch (error) {
+      message.error(errorText(error, "Не удалось выгрузить технический журнал"));
+    }
+  };
+
+  return (
+    <div className="whatsapp-config">
+      <header className="whatsapp-config__header">
+        <div>
+          <Title level={4}>Технический журнал WhatsApp</Title>
+          <Paragraph type="secondary">События WAHA API, сессии, webhook, relay и cleanup. Хранение 14 дней; сообщения, JID, QR и секреты не записываются.</Paragraph>
+        </div>
+        <Space wrap>
+          <Button icon={<DownloadOutlined />} onClick={() => void exportLogs()}>Выгрузить JSONL</Button>
+          <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>Обновить</Button>
+        </Space>
+      </header>
+      <Space wrap className="whatsapp-config__technical-filters">
+        <Select allowClear placeholder="Уровень" style={{ width: 140 }} value={query.level}
+          options={["info", "warn", "error"].map((value) => ({ value, label: value }))}
+          onChange={(level) => setQuery((current) => ({ ...current, page: 1, level }))} />
+        <Select allowClear placeholder="Компонент" style={{ width: 160 }} value={query.component}
+          options={["backend", "waha", "webhook", "relay", "cleanup"].map((value) => ({ value, label: value }))}
+          onChange={(component) => setQuery((current) => ({ ...current, page: 1, component }))} />
+        <Input.Search allowClear placeholder="Событие, операция или код ошибки" style={{ width: 320 }}
+          onSearch={(search) => setQuery((current) => ({ ...current, page: 1, search: search || undefined }))} />
+      </Space>
+      <Table<WhatsAppTechnicalLogDto> rowKey="id" loading={loading} dataSource={rows}
+        pagination={{
+          current: query.page ?? 1,
+          pageSize: query.pageSize ?? 100,
+          total,
+          showSizeChanger: true,
+          pageSizeOptions: [50, 100, 200],
+          showTotal: (count) => `Всего: ${count}`,
+          onChange: (page, pageSize) => setQuery((current) => ({ ...current, page, pageSize })),
+        }}
+        scroll={{ x: 1100 }}
+        columns={[
+          { title: "Время", dataIndex: "occurredAt", width: 180, render: formatDate },
+          { title: "Уровень", dataIndex: "level", width: 90, render: (level: string) => <Tag color={level === "error" ? "red" : level === "warn" ? "orange" : "blue"}>{level}</Tag> },
+          { title: "Компонент", dataIndex: "component", width: 110 },
+          { title: "Событие", dataIndex: "eventCode", width: 210 },
+          { title: "Результат", dataIndex: "outcome", width: 110 },
+          { title: "Операция", dataIndex: "operation", width: 230 },
+          { title: "HTTP", dataIndex: "httpStatus", width: 75 },
+          { title: "мс", dataIndex: "durationMs", width: 80 },
+          { title: "Ошибка", dataIndex: "errorCode", width: 220 },
+        ]} />
+    </div>
+  );
+};
+
+function saveBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
 
 function TemplateEditor({
   open,
@@ -804,7 +932,15 @@ function StateTag({ state }: { state: string }) {
     processing: "blue",
     retry_wait: "gold",
   };
-  return <Tag color={color[state]}>{state}</Tag>;
+  const label: Record<string, string> = {
+    pending: "Ожидает",
+    processing: "Отправляется",
+    retry_wait: "Ожидает повтора",
+    sent: "Отправлено",
+    failed: "Ошибка",
+    unknown: "Требует проверки",
+  };
+  return <Tag color={color[state]}>{label[state] ?? "Неизвестно"}</Tag>;
 }
 function formatDate(value: string | null | undefined) {
   return value
@@ -825,6 +961,127 @@ function extractValue(value: unknown, keys: string[]) {
   }
   return "Нет данных";
 }
+export function whatsappErrorPresentation(error: unknown, fallback: string): UserFacingError {
+  if (!isApiError(error)) {
+    return {
+      title: fallback,
+      description: error instanceof TypeError
+        ? "Нет соединения с backend. Проверьте сеть и повторите действие."
+        : "Повторите действие. Если ошибка сохранится, откройте технический журнал WhatsApp.",
+    };
+  }
+  const messages: Record<string, UserFacingError> = {
+    AUTH_REQUIRED: { title: "Сеанс ERP завершён", description: "Войдите в ERP заново и повторите действие." },
+    PERMISSION_DENIED: { title: "Недостаточно прав", description: "Нужно разрешение whatsapp.manage. Обратитесь к администратору ERP." },
+    WHATSAPP_NOT_CONFIGURED: { title: "WhatsApp не настроен", description: "Интеграция выключена или не заполнены параметры WAHA на сервере." },
+    WAHA_UNAVAILABLE: { title: "WAHA не отвечает", description: "Сервис недоступен или перезапускается. Подождите несколько секунд и обновите статус." },
+    WAHA_PROVIDER_ERROR: { title: "WAHA отклонил запрос", description: "Обновите данные и повторите действие. Если ошибка сохранится, проверьте технический журнал WhatsApp." },
+    WAHA_QR_RESPONSE_INVALID: { title: "WAHA вернул некорректный QR-код", description: "ERP не будет показывать повреждённое изображение. Перезапустите WAHA и повторите запрос; подробности находятся в техническом журнале." },
+    WHATSAPP_RESTRICTION_CONFIRMATION_REQUIRED: { title: "Нужно подтверждение ограничений", description: "Перезапуск не снимает message capping или timelock. Подтвердите принудительный перезапуск ещё раз." },
+    WHATSAPP_VERSION_CONFLICT: { title: "Запись уже изменена", description: "Обновите страницу и повторите изменение с актуальной версией." },
+    WHATSAPP_RETRY_NOT_ALLOWED: { title: "Повтор запрещён", description: "Вручную повторять можно только задания со статусом «Ошибка». Обновите очередь." },
+    WHATSAPP_TEMPLATE_NOT_FOUND: { title: "Шаблон не найден", description: "Выбранный шаблон удалён или недоступен. Обновите список и выберите другой." },
+    WHATSAPP_NOT_FOUND: { title: "Запись не найдена", description: "Запись уже удалена или изменена другим пользователем. Обновите страницу." },
+    VALIDATION_ERROR: { title: "Проверьте введённые данные", description: "Одно или несколько полей заполнены неверно. Исправьте отмеченные значения." },
+    INVALID_WHATSAPP_TECHNICAL_LOG_QUERY: { title: "Некорректные фильтры журнала", description: "Сбросьте фильтры и повторите запрос." },
+    RATE_LIMIT_EXCEEDED: { title: "Слишком много запросов", description: "Подождите несколько секунд и повторите действие." },
+    INTERNAL_ERROR: { title: "Внутренняя ошибка ERP", description: "Повторите действие. Если ошибка сохранится, передайте Request ID администратору." },
+  };
+  const selected = messages[error.code] ?? (
+    error.status === 422
+      ? { title: "Действие сейчас невозможно", description: "Состояние WhatsApp изменилось. Обновите статус и повторите действие." }
+      : error.status >= 500
+        ? { title: "Сервис временно недоступен", description: "Повторите действие позже и проверьте технический журнал WhatsApp." }
+        : { title: fallback, description: "Обновите данные и повторите действие." }
+  );
+  return {
+    ...selected,
+    description: error.requestId ? `${selected.description} Request ID: ${error.requestId}` : selected.description,
+  };
+}
+
+export function qrErrorPresentation(error: unknown): UserFacingError {
+  if (isApiError(error) && error.code === "WAHA_PROVIDER_ERROR") {
+    return withRequestId({
+      title: "QR-код сейчас недоступен",
+      description: "Сессия не ожидает сканирования или срок QR истёк. Нажмите «Принудительно перезапустить WAHA», затем сразу запросите новый QR.",
+    }, error.requestId);
+  }
+  return whatsappErrorPresentation(error, "Не удалось получить QR-код");
+}
+
+export function restartErrorPresentation(error: unknown): UserFacingError {
+  if (isApiError(error) && error.code === "WAHA_PROVIDER_ERROR") {
+    return withRequestId({
+      title: "WAHA не принял перезапуск",
+      description: "Обновите статус и повторите действие. Если ошибка сохранится, откройте технический журнал WhatsApp.",
+    }, error.requestId);
+  }
+  return whatsappErrorPresentation(error, "Не удалось перезапустить WAHA");
+}
+
+function withRequestId(value: UserFacingError, requestId?: string): UserFacingError {
+  return {
+    ...value,
+    description: requestId ? `${value.description} Request ID: ${requestId}` : value.description,
+  };
+}
+
+export function whatsappSessionPresentation(value: unknown, issues?: Record<string, string | null>) {
+  const providerIssue = issues?.health ?? issues?.session;
+  if (providerIssue === "WAHA_UNAVAILABLE") return {
+    label: "WAHA недоступен", color: "red",
+    notice: { type: "error" as const, title: "WAHA не отвечает", description: "Сервис остановлен, перезапускается или недоступен по внутренней сети. Повторите проверку; если ошибка сохранится, обратитесь к администратору VPS." },
+  };
+  if (providerIssue === "WAHA_PROVIDER_ERROR") return {
+    label: "Ошибка WAHA", color: "red",
+    notice: { type: "error" as const, title: "WAHA отклонил запрос состояния", description: "Принудительно перезапустите WAHA. Если ошибка повторится, откройте технический журнал." },
+  };
+  const raw = extractValue(value, ["status"]);
+  const status = raw === "Нет данных" ? "UNKNOWN" : raw.toUpperCase();
+  if (status === "WORKING") return { label: "Подключена", color: "green", notice: null };
+  if (status === "SCAN_QR_CODE") return {
+    label: "Ожидает QR", color: "blue",
+    notice: { type: "info" as const, title: "Ожидается сканирование QR-кода", description: "Запросите QR и отсканируйте его сразу: код действует ограниченное время." },
+  };
+  if (status === "STARTING") return {
+    label: "Запускается", color: "processing",
+    notice: { type: "info" as const, title: "WAHA запускается", description: "Подождите несколько секунд и обновите статус." },
+  };
+  if (status === "FAILED") return {
+    label: "Ошибка", color: "red",
+    notice: { type: "error" as const, title: "WhatsApp-сессия остановлена", description: "QR мог истечь либо GOWS завершил сессию с ошибкой. Принудительно перезапустите WAHA и сразу запросите новый QR." },
+  };
+  if (status === "STOPPED") return {
+    label: "Остановлена", color: "default",
+    notice: { type: "warning" as const, title: "WhatsApp-сессия остановлена", description: "Принудительно перезапустите WAHA, чтобы возобновить подключение." },
+  };
+  return {
+    label: "Нет данных", color: "default",
+    notice: { type: "warning" as const, title: "Состояние сессии неизвестно", description: "Обновите статус. Если состояние не появится, проверьте технический журнал WhatsApp." },
+  };
+}
+
+function deliveryErrorText(item: WhatsAppDeliveryJobDto): string {
+  if (!item.errorCode) return "—";
+  const messages: Record<string, string> = {
+    INVALID_JOB: "Некорректное задание",
+    MAX_ATTEMPTS: "Исчерпаны попытки",
+    STALE_BEFORE_DISPATCH: "Отправка не началась; ожидается повтор",
+    STALE_AFTER_DISPATCH: "Результат отправки неизвестен; автоматический повтор запрещён",
+    WAHA_UNAVAILABLE: "WAHA не отвечал во время отправки",
+    WAHA_PROVIDER_ERROR: "WAHA отклонил отправку",
+  };
+  return messages[item.errorCode] ?? "Техническая ошибка; см. журнал";
+}
+
+function restrictionLabel(value: string): string {
+  return value === "message_capping" ? "лимит отправки сообщений"
+    : value === "reachout_timelock" ? "временный запрет новых диалогов"
+      : "ограничение WhatsApp";
+}
+
 function errorText(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
+  const presentation = whatsappErrorPresentation(error, fallback);
+  return `${presentation.title}. ${presentation.description}`;
 }

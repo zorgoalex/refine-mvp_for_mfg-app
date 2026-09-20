@@ -13,6 +13,8 @@ import type {
 import { WahaClient } from "./waha.client";
 import { WhatsAppRepository } from "./whatsapp.repository";
 import { WhatsAppRuntimeConfigService } from "./whatsapp-runtime-config.service";
+import type { WhatsAppTechnicalLogQuery } from "./whatsapp-technical-log.dto";
+import { WhatsAppTechnicalLogService } from "./whatsapp-technical-log.service";
 
 @Injectable()
 export class WhatsAppService {
@@ -21,7 +23,9 @@ export class WhatsAppService {
     private readonly runtime: WhatsAppRuntimeConfigService,
     @Inject(WhatsAppRepository) private readonly repository: WhatsAppRepository,
     @Inject(WahaClient) private readonly client: WahaClient,
-    @Inject(DatabaseService) private readonly database: DatabaseService
+    @Inject(DatabaseService) private readonly database: DatabaseService,
+    @Inject(WhatsAppTechnicalLogService)
+    private readonly technicalLog: WhatsAppTechnicalLogService
   ) {}
 
   async status() {
@@ -45,11 +49,22 @@ export class WhatsAppService {
       this.client.timelock(),
       this.repository.diagnostics(),
     ]);
+    const sessionValue = value(session);
+    const sessionStatus = safeStatus(sessionValue);
+    await this.technicalLog.record({
+      component: "waha",
+      level: session.status === "rejected" || sessionStatus === "FAILED" ? "error" : "info",
+      eventCode: "waha.session.snapshot",
+      outcome: session.status === "rejected" ? "failed" : "observed",
+      operation: "session.status",
+      errorCode: session.status === "rejected" ? "WAHA_SESSION_STATUS_UNAVAILABLE" : undefined,
+      details: { status: sessionStatus },
+    });
     return {
       health: value(health),
       version: value(version),
       server: value(server),
-      session: value(session),
+      session: sessionValue,
       account: value(me),
       capping: value(capping),
       timelock: value(timelock),
@@ -58,7 +73,21 @@ export class WhatsAppService {
         timelock: value(timelock),
       }),
       diagnostics: value(diagnostics),
-      degraded: [health, session].some((item) => item.status === "rejected"),
+      issues: {
+        health: issueCode(health),
+        version: issueCode(version),
+        server: issueCode(server),
+        session: issueCode(session),
+        account: issueCode(me),
+        capping: issueCode(capping),
+        timelock: issueCode(timelock),
+        diagnostics: issueCode(diagnostics),
+      },
+      degraded:
+        [health, session].some((item) => item.status === "rejected") ||
+        sessionStatus === "FAILED" ||
+        sessionStatus === "STOPPED" ||
+        sessionStatus === "UNKNOWN",
     };
   }
   qr() {
@@ -107,13 +136,27 @@ export class WhatsAppService {
     this.requireEnabled();
     return this.repository.listAudit();
   }
+  listTechnicalLogs(query: WhatsAppTechnicalLogQuery) {
+    this.requireEnabled();
+    return this.technicalLog.list(query);
+  }
+  exportTechnicalLogs(query: WhatsAppTechnicalLogQuery) {
+    this.requireEnabled();
+    return this.technicalLog.export(query);
+  }
   retryJob(id: number, actor: CurrentUser, requestId: string) {
     this.requireEnabled();
     return this.repository.retryJob(id, actor, requestId);
   }
   cleanup() {
     this.requireEnabled();
-    return this.repository.cleanupExpired();
+    return Promise.all([this.repository.cleanupExpired(), this.technicalLog.cleanup()])
+      .then(async ([data, technicalLogs]) => {
+        await this.technicalLog.record({ component: "cleanup", level: "info", eventCode: "whatsapp.cleanup.completed",
+          outcome: "succeeded", operation: "retention.cleanup",
+          details: { events: data.events, jobs: data.jobs, technicalLogs } });
+        return { ...data, technicalLogs };
+      });
   }
 
   async restart(
@@ -193,6 +236,11 @@ export class WhatsAppService {
         config.webhookSecret
       );
     } catch (error) {
+      await this.technicalLog.record({
+        component: "webhook", level: "warn", eventCode: "whatsapp.webhook.rejected",
+        outcome: "failed", operation: "webhook.verify", requestId,
+        errorCode: error instanceof ApiError ? error.code : "WHATSAPP_WEBHOOK_INVALID",
+      });
       await this.recordSystem(
         "whatsapp.webhook.rejected",
         "signature",
@@ -205,6 +253,11 @@ export class WhatsAppService {
     try {
       body = JSON.parse(rawBody.toString("utf8"));
     } catch {
+      await this.technicalLog.record({
+        component: "webhook", level: "warn", eventCode: "whatsapp.webhook.rejected",
+        outcome: "failed", operation: "webhook.parse", requestId,
+        errorCode: "WHATSAPP_WEBHOOK_INVALID_JSON",
+      });
       await this.recordSystem("whatsapp.webhook.rejected", "json", requestId, {
         reason: "INVALID_JSON",
       });
@@ -229,6 +282,11 @@ export class WhatsAppService {
       externalEventId: privateIdentifier(config.webhookSecret, parsed.message.externalEventId),
     };
     const result = await this.repository.acceptInbound(safeMessage);
+    await this.technicalLog.record({
+      component: "webhook", level: "info", eventCode: "whatsapp.webhook.processed",
+      outcome: "succeeded", operation: "webhook.receive", requestId,
+      details: { result: result.result, duplicate: result.duplicate },
+    });
     if (result.duplicate)
       await this.recordSystem(
         "whatsapp.webhook.duplicate",
@@ -290,6 +348,11 @@ export class WhatsAppService {
         unknown++;
       }
     }
+    await this.technicalLog.record({
+      component: "relay", level: unknown > 0 || failed > 0 ? "warn" : "info",
+      eventCode: "whatsapp.relay.batch", outcome: unknown > 0 ? "failed" : "succeeded",
+      operation: "delivery.process", details: { claimed: jobs.length, sent, failed, unknown },
+    });
     return { claimed: jobs.length, sent, failed, unknown };
   }
 
@@ -322,6 +385,12 @@ export class WhatsAppService {
       metadata: { ...metadata, correlationId: requestId },
     });
   }
+}
+
+function safeStatus(value: unknown): string {
+  if (!value || typeof value !== "object") return "UNKNOWN";
+  const status = (value as Record<string, unknown>).status;
+  return typeof status === "string" ? status.slice(0, 80) : "UNKNOWN";
 }
 
 export function verifyWebhook(
@@ -476,6 +545,10 @@ export function restrictionDetails(status: {
 }
 function value(result: PromiseSettledResult<unknown>) {
   return result.status === "fulfilled" ? result.value : null;
+}
+function issueCode(result: PromiseSettledResult<unknown>): string | null {
+  if (result.status === "fulfilled") return null;
+  return result.reason instanceof ApiError ? result.reason.code : "INTERNAL_ERROR";
 }
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object"
