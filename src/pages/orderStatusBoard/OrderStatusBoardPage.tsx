@@ -7051,11 +7051,9 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({
   return (
     <Collapse
       className="cnc-packet-card__sheet"
-      size="small"
       ghost
       activeKey={expanded ? ['bath-sheet'] : []}
       onChange={handleCollapseChange}
-      onClick={stopCncCardClickPropagation}
     >
       <Collapse.Panel
         key="bath-sheet"
