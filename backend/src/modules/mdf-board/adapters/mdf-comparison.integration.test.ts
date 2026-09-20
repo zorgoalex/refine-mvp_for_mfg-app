@@ -9,6 +9,9 @@ import type { PerformanceQueryTelemetryService } from '../../../performance/perf
 import { dispatchMdfBoardEvent } from '../../status-automation/application/status-automation-runtime';
 import { MdfShadowComparisonService } from '../application/mdf-shadow-comparison.service';
 import { loadMdfComparisonSnapshot } from './mdf-comparison-snapshot';
+import { observeMdfShadowCommand } from '../application/mdf-shadow';
+import type { MdfShadowCommand } from '../application/mdf-shadow-command';
+import { compareMdfShadow } from '../domain/mdf-shadow-comparison';
 
 describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF actual event â†’ snapshot comparison (PostgreSQL)', () => {
   const schema = `e2e_mdf_compare_${randomUUID().replaceAll('-', '')}`, packetId = randomUUID();
@@ -33,14 +36,14 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF actual event â†
     vi.stubEnv('BACKEND_MDF_SHADOW_INTAKE', 'true'); vi.stubEnv('BACKEND_MDF_SHADOW_COMPARE', 'true');
     vi.stubEnv('BACKEND_ENABLE_STATUS_AUTOMATION', 'false');
     await client.connect(); await client.query(`CREATE SCHEMA ${schema}; SET search_path=${schema},public`);
-    for (const file of ['165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql', '167_mdf_shadow_observations.sql', '169_mdf_shadow_comparison.sql']) {
+    for (const file of ['165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql', '167_mdf_shadow_observations.sql', '169_mdf_shadow_comparison.sql', '171_mdf_shadow_commands.sql']) {
       await client.query(readFileSync(new URL(`../../../../db/migrations/${file}`, import.meta.url), 'utf8'));
     }
     for (const table of ['orders','order_details','production_statuses','order_statuses','cnc_telegram_packets','cnc_telegram_packet_items',
       'cnc_telegram_packet_whole_order_keys','mdf_board_manual_moves','status_automation_rules','bazis_cut_sets','bazis_cut_set_details',
       'cut_result','cut_result_board_projection','cut_result_placement','cut_result_sheet_map','sheet_material_types','materials',
       'cut_job','cut_group','cut_group_sheet','cut_result_archive_state','cut_result_label_map_projection','app_settings','outbox_events',
-      'order_workshops','users']) {
+      'order_workshops','users','audit_log']) {
       await client.query(`CREATE TABLE ${schema}.${table} AS SELECT * FROM public.${table} WITH NO DATA`);
     }
     await client.query(`INSERT INTO orders(order_id,order_name,delete_flag,order_kind,version) VALUES(1,'E2E-shadow-order',false,'production_order',1);
@@ -78,7 +81,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF actual event â†
       FROM mdf_shadow_observations`);
     await new MdfShadowComparisonService(database).runTick();
     const result = await report();
-    expect(result).toMatchObject({ algorithmVersion: 'source-scope-v2', cutoverReady: false,
+    expect(result).toMatchObject({ algorithmVersion: 'source-scope-v3', cutoverReady: false,
       comparableDifferenceCount: 0, unverifiedDifferenceCount: 0,
       surface: 'legacy-server-return-model', ownerCount: 1, sourceCount: 1 });
     expect(result.positions).toHaveLength(1);
@@ -129,5 +132,61 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF actual event â†
     expect(result.positions.find((p: { detailId: number }) => p.detailId === 12))
       .toMatchObject({ candidate: { cut: 0, remaining: 3 } });
     expect(await business()).toEqual(before);
+  });
+  it('consumes audited journal through the real RR loader: split, dedup, clear and scoped return', async () => {
+    await client.query('UPDATE order_details SET production_status_id=2 WHERE detail_id=11');
+    const observe = async (kind: 'packet' | 'bazisCutSet', intent: Omit<MdfShadowCommand, 'auditId'>) => {
+      const auditId = randomUUID(), requestId = `E2E-proof-${auditId}`, id = kind === 'packet' ? packetId : '1';
+      const command: MdfShadowCommand = intent.kind === 'production_return'
+        ? { ...intent, targetColumn: intent.targetColumn!, auditId, targetStageId: 1, targetStageCode: 'drawn', previewDigest: 'a'.repeat(64) }
+        : intent.kind === 'manual_clear' ? { kind: 'manual_clear', targetColumn: null, auditId }
+          : { kind: 'manual_move', targetColumn: intent.targetColumn!, auditId };
+      await database.transaction(async tx => {
+        await tx.query(`INSERT INTO audit_log(audit_id,event,entity_type,entity_id,user_id,request_id,status_code,status_id,metadata_json)
+          VALUES($1,$2,$3,$4,1,$5,$6,$7,$8::jsonb)`, [auditId,
+          command.kind === 'production_return' ? 'mdf_board.production_returned'
+            : command.kind === 'manual_clear' ? 'mdf_board.manual_move.deleted' : 'mdf_board.manual_move.created',
+          command.kind === 'production_return' ? 'mdf_board_card' : 'mdf_board_manual_move', `${kind}:${id}`, requestId,
+          command.targetColumn, command.kind === 'production_return' ? command.targetStageId : null,
+          JSON.stringify(command.kind === 'production_return' ? { previewDigest: command.previewDigest } : {})]);
+        await observeMdfShadowCommand(tx, { source: { kind, id }, actor: { id: '1', username: 'e2e', role: 'admin', roleId: 1, permissions: [] },
+          requestId, sourceIdempotencyKey: requestId }, command);
+      });
+      return auditId;
+    };
+    const calculate = () => database.transaction(async tx => {
+      await tx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+      return compareMdfShadow((await loadMdfComparisonSnapshot(tx, source)).input);
+    });
+    await observe('packet', { kind: 'manual_move', targetColumn: 'completed' });
+    const basisAudit = await observe('bazisCutSet', { kind: 'manual_move', targetColumn: 'completed' });
+    const before = await business();
+    let result = await calculate();
+    expect(result.positions.find(p => p.detailId === 11)?.candidate.cut).toBe(8);
+    expect(result.proofs.every(p => p.cut && !p.issues.length)).toBe(true);
+    expect(await business()).toEqual(before);
+    await client.query("DELETE FROM mdf_board_manual_moves WHERE card_kind='bazisCutSet'");
+    await observe('bazisCutSet', { kind: 'manual_clear', targetColumn: null });
+    expect((await calculate()).positions.find(p => p.detailId === 11)?.candidate.cut).toBe(8);
+    await observe('bazisCutSet', { kind: 'production_return', targetColumn: 'parsed' });
+    expect((await calculate()).positions.find(p => p.detailId === 11)?.candidate.cut).toBe(5);
+    await observe('bazisCutSet', { kind: 'manual_move', targetColumn: 'completed' });
+    await observe('bazisCutSet', { kind: 'manual_move', targetColumn: 'completed' });
+    expect((await calculate()).positions.find(p => p.detailId === 11)?.candidate.cut).toBe(8);
+    await client.query('UPDATE bazis_cut_set_details SET quantity=4 WHERE bazis_cut_set_id=1');
+    result = await calculate();
+    expect(result.positions.find(p => p.detailId === 11)).toMatchObject({ comparable: false, candidate: { cut: 5 } });
+    expect(result.issues).toContain('COMMAND_COMPOSITION_CHANGED');
+    await client.query('UPDATE bazis_cut_set_details SET quantity=3 WHERE bazis_cut_set_id=1');
+    await client.query("UPDATE audit_log SET request_id='E2E-invalid' WHERE audit_id=$1", [basisAudit]);
+    expect((await calculate()).issues).toContain('COMMAND_PROVENANCE_INVALID');
+    await client.query(`INSERT INTO orders(order_id,order_name,delete_flag,order_kind,version) VALUES(2,'E2E-new-owner',false,'production_order',1);
+      INSERT INTO order_details(detail_id,order_id,detail_number,quantity,delete_flag,sheet_material_type_id,production_status_id)
+        VALUES(21,2,1,3,false,1,2);
+      UPDATE bazis_cut_set_details SET source_order_id=2,source_order_detail_id=21 WHERE bazis_cut_set_id=1`);
+    result = await calculate();
+    expect(result.orders.map(o => o.orderId)).toEqual([1,2]);
+    expect(result.proofs.some(p => p.kind === 'bazisCutSet')).toBe(true);
+    expect(result.orders.every(o => !o.comparable)).toBe(true);
   });
 });

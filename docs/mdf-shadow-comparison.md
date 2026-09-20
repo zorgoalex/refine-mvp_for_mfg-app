@@ -12,7 +12,8 @@ finish. This does not disable existing business logic.
 
 One committed intake observation is examined per 60-second tick. The observer
 uses a global nonblocking lock and a repeatable-read transaction. Limits:
-100 connected owners, 250 sources, 5,000 composition rows, 15 seconds of snapshot
+100 connected owners, 250 sources, 5,000 composition rows, 1,000 explicit commands,
+10,000 frozen command lines, 15 seconds of snapshot
 work, 5 seconds per SQL statement. Hidden and older connected sources participate;
 the legacy readiness window is two calendar months. Exceeded limits produce a
 blocked report, not truncated success. Transient failures retry with backoff;
@@ -47,7 +48,7 @@ event. `triggerSuperseded` records a changed source digest. This is explicitly
 `surface=legacy-server-return-model`, not browser filter/visibility parity or a
 simulation of all auto-status rule actions.
 
-Version `source-scope-v2` uses the pure `resolveMdfSourceColumn` resolver for all
+Version `source-scope-v3` uses the pure `resolveMdfSourceColumn` resolver for all
 three source kinds. Its inputs are complete **own** composition/statuses, cut
 confirmation, manual visual target and allocation readiness (ready/not-ready/
 unknown). Discovery, material/identity matching and allocation remain separate
@@ -72,12 +73,12 @@ and issues preventing comparison.
 `positions` and `orders` contain position-local cut-not-rolled, rolled, credited
 quantities and remaining demand for known live MDF positions. The independent
 legacy arithmetic is checked against the frontend formula. Candidate physical
-quantities currently use strictly linked raw CNC completion; manual/BASIS facts
-without immutable provenance and unfrozen whole-order declarations are reported
+quantities use strictly linked raw CNC completion and validated explicit command
+proofs described below; manual/BASIS facts without immutable provenance and unfrozen whole-order declarations are reported
 as gaps, not accepted manufacturing evidence. Candidate raw rework remains in
 statistics but grants no normal-demand credit.
 
-Candidate quantity semantics are explicitly `observed-cnc-facts-only`. A zero
+Candidate quantity semantics are `observed-cnc-and-audited-command-proofs`. A zero
 is zero **observed evidence**, not proof that no work occurred. Each position and
 order has `comparable` and `issues`; manual/BASIS provenance, historical
 lamination, different historical scope and rework-statistics semantics prevent
@@ -148,11 +149,43 @@ The separately bound receipt digest includes command/audit/actor/request/cause
 metadata and the raw command-point snapshot. Comparison observations retain the
 raw-row digest so `triggerSuperseded` remains a like-for-like check.
 
-This journal remains **unaccepted and unconsumed by comparator v2**. Reports still
-use `observed-cnc-facts-only`, mark unknown manual/BASIS provenance and always set
-`cutoverReady=false`. Do not treat journal presence as proof that manual quantities
-are valid, allocations exist, or historical evidence is complete. Acceptance,
-stage-aware correction folding, composition/demand preflight and remaining
-producer migration are required before activating the new engine. Disable intake
+Comparator **v3 consumes the journal for diagnostic projection only**; receipts
+remain unaccepted. `proofs` reports per-source cut/lamination flags, contributing
+command revisions, command count and blocking issues. It validates the sealed
+manual receipt, actual audit (actor/request/entity/target, return stage/digest),
+observation, composition digest and exact frozen membership. Missing/expired audit
+is unknown provenance. Only `EXPLICIT_COMMAND_UNVERIFIED` is retired locally;
+`SHADOW_ONLY`/`INCOMPLETE_PRODUCER_COVERAGE` remain report-level limitations, and
+other observation issues block proof. Legacy v1/v2 reports remain immutable.
+
+- Explicit CNC/BASIS move to `completed` confirms its own cut portion; explicit
+  bath move to `baths_laminated` confirms its own laminated portion. Terminal
+  archive placement alone is not a physical confirmation.
+- Same-source reconfirmation replaces proof, never adds another shipment. Raw
+  CNC and manual confirmation of the same source count once. Independent CNC
+  and BASIS portions add; normal readiness remains capped per order position.
+- `manual_clear` removes visual placement only; recorded work survives.
+- Confirmed return to `parsed` revokes that source's cut proof. Return to
+  `completed` preserves earlier cut. Bath return to `baths`/`baths_ready` revokes
+  lamination, while `baths_laminated` preserves earlier lamination. Return never
+  creates missing physical proof and never revokes independent sources.
+  These are the owning command's validated stage bands, including custom stages;
+  a later catalogue edit does not reinterpret the historical return.
+- Current effective raw CNC confirmation remains authoritative, subject to the
+  existing completion-returned barrier. This is not replay of CNC event history.
+- Any observed command composition differing from current composition blocks
+  that source, including changes back to a formerly observed composition. New
+  quantity cannot inherit old manual proof. Frozen journal members participate
+  in ownership discovery even after current membership is removed/reassigned.
+  Timestamp/visual changes alone do not change the composition digest.
+- Known bath lamination can contribute observed quantities, but historical
+  consumption still blocks allocation until reservation baseline is verified.
+  Bath readiness never manufactures cut supply.
+
+Reports always set `cutoverReady=false`. Unknown history and unobserved lifecycle
+changes remain baseline/producer gaps. Do not treat journal presence as proof
+that quantities have been accepted, allocations exist, or historical evidence is
+complete. Acceptance, composition/demand preflight and remaining producer
+migration are required before activating the new engine. Disable intake
 to stop new entries without removing history; rollback of the backend leaves the
 additive diagnostic table intact.

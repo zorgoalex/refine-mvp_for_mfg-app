@@ -9,6 +9,10 @@ import { getPermissionsForRole } from "../../../permissions/permissions";
 import { mdfCompletionUpdateSql } from "../../cnc-telegram/adapters/pg-cnc-telegram-repository";
 import { PgMdfBoardManualMoveRepository } from "./pg-mdf-board-manual-move-repository";
 import { beginTransactionHooks, flushTransactionHooks, discardTransactionHooks } from '../../../database/transaction-hooks';
+import { loadMdfShadowProofs } from '../../mdf-board/adapters/mdf-shadow-proof-loader';
+import { loadMdfShadowSource } from '../../mdf-board/adapters/mdf-shadow-source';
+import { mdfShadowCompositionDigest, prepareMdfShadow } from '../../mdf-board/application/mdf-shadow';
+import { projectMdfShadowProof } from '../../mdf-board/domain/mdf-shadow-proof';
 
 const enabled = process.env.MDF_RETURN_INTEGRATION === "1";
 const tables = [
@@ -425,6 +429,9 @@ describe.skipIf(!enabled)(
     });
 
     it("legacy backward PUT blocks; explicit forward move clears return barrier", async () => {
+      // The older return-only fixture omits the immutable ingest line key.
+      // Proof consumption intentionally refuses anonymous lines.
+      await client.query("UPDATE cnc_telegram_packet_items SET source_item_key='E2E-proof-line' WHERE packet_id=$1", [packetId]);
       const manual = new PgMdfBoardManualMoveRepository(
         database as ConstructorParameters<
           typeof PgMdfBoardManualMoveRepository
@@ -436,15 +443,29 @@ describe.skipIf(!enabled)(
         cardId: packetId,
         requestId: "E2E-manual",
       };
+      const proof = () => database.transaction(async tx => {
+        await tx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+        const rows = await loadMdfShadowSource(tx, source), prepared = prepareMdfShadow(rows);
+        return projectMdfShadowProof({ kind: 'packet', rawCut: false, rework: false,
+          compositionDigest: mdfShadowCompositionDigest(rows),
+          members: prepared.lines.filter(l => l.stageCode === 'membership').map(l => ({
+            line: l.lineKey, orderId: l.orderId, detailId: l.detailId, quantity: l.quantity })),
+          issues: prepared.issues.filter(i => i !== 'SHADOW_ONLY' && i !== 'INCOMPLETE_PRODUCER_COVERAGE'),
+          commands: (await loadMdfShadowProofs(tx, [source])).get(`packet:${packetId}`) ?? [] });
+      });
       await expect(
         manual.upsert({ ...command, targetColumn: "parsed" })
       ).rejects.toMatchObject({ code: "MDF_RETURN_CONFIRMATION_REQUIRED" });
       await confirm(
         await repository.preview(user, source, { targetColumn: "parsed" })
       );
+      expect(await proof()).toMatchObject({ cut: false, issues: [], commandCount: 1 });
       await manual.upsert({ ...command, targetColumn: "completed" });
       await manual.upsert({ ...command, targetColumn: "completed" });
       await manual.delete(command);
+      const beforeProjection = await production();
+      expect(await proof()).toMatchObject({ cut: true, issues: [], commandCount: 3 });
+      expect(await production()).toEqual(beforeProjection);
       expect((await client.query(`SELECT c.command_kind,c.audit_event_id,a.audit_id,r.request_id,a.request_id AS audit_request
         FROM mdf_shadow_commands c JOIN audit_log a ON a.audit_id=c.audit_event_id
         JOIN mdf_evidence_revisions r USING(source_kind,source_id,revision_key) ORDER BY observation_id`)).rows)

@@ -8,8 +8,53 @@ const source = (overrides: Partial<ShadowSource> = {}): ShadowSource => ({ kind:
 const input = (sources: ShadowSource[] = [source()]): ShadowComparisonInput => ({ sources,
   details: [{ ...member(10), rank: 2 }], thresholds: { laminated: 3, packed: 4, issued: 5 }, allocations: [], issues: [],
   legacyCards: sources.filter(s => s.legacyColumn).map(s => ({ kind: s.kind, id: s.id, column: s.legacyColumn!, members: s.members })) });
+const confirmed = (patch: Partial<ShadowSource> = {}): ShadowSource => {
+  const s = source({ rawCut: false, ...patch });
+  return { ...s, compositionDigest: 'a', commands: [{ sequence: '1', revision: 'confirmed', kind: 'manual_move',
+    target: s.kind === 'bath' ? 'baths_laminated' : 'completed', compositionDigest: 'a', provenanceValid: true,
+    issues: ['EXPLICIT_COMMAND_UNVERIFIED'], members: s.members.map(m => ({ ...m, rework: s.rework })) }] };
+};
 
 describe('MDF source-scope shadow comparison', () => {
+  it('adds independent CNC+BASIS portions, never CNC+manual confirmations of the same file', () => {
+    const data = input([confirmed({ rawCut: true, members: [member(2)] }),
+      confirmed({ kind: 'bazisCutSet', id: 'basis', manual: 'completed', members: [member(3)] })]);
+    const report = compareMdfShadow(data);
+    expect(report.positions[0]).toMatchObject({ comparable: true, candidate: { cut: 5, remaining: 5 } });
+    expect(report.issues).not.toContain('MANUAL_FACT_PROVENANCE_UNKNOWN');
+    expect(report.proofs.map(p => p.cut)).toEqual([true, true]);
+  });
+  it('cleared manual confirmation survives with own quantity and drives candidate column', () => {
+    const s = confirmed({ kind: 'bazisCutSet', manual: null, legacyColumn: 'parsed' });
+    s.commands!.push({ ...s.commands![0], sequence: '2', revision: 'clear', kind: 'manual_clear', target: null });
+    const report = compareMdfShadow(input([s]));
+    expect(report.positions[0].candidate.cut).toBe(5);
+    expect(report.columns[0]).toMatchObject({ candidate: 'completed', comparable: true });
+  });
+  it('correcting one file preserves the independent BASIS portion', () => {
+    const cnc = confirmed();
+    cnc.commands!.push({ ...cnc.commands![0], sequence: '2', revision: 'return', kind: 'production_return', target: 'parsed' });
+    const report = compareMdfShadow(input([cnc, confirmed({ kind: 'bazisCutSet', id: 'basis', members: [member(3)] })]));
+    expect(report.positions[0].candidate.cut).toBe(3);
+  });
+  it('known bath lamination counts only its position but cannot free historical consumed supply', () => {
+    const report = compareMdfShadow(input([confirmed(), confirmed({ kind: 'bath', id: 'bath', members: [member(2)] })]));
+    expect(report.positions[0].candidate).toMatchObject({ cut: 3, rolled: 2, remaining: 5 });
+    expect(report.allocation).toBeNull();
+    expect(report.issues).toContain('HISTORICAL_CONSUMPTION_UNKNOWN');
+    expect(report.issues).not.toContain('LAMINATION_FACT_PROVENANCE_UNKNOWN');
+  });
+  it('changed membership taints positions no longer in the current source', () => {
+    const s = confirmed(); s.compositionDigest = 'changed';
+    const data = input([s]); data.details.push({ ...member(2, 12), rank: 2 });
+    const report = compareMdfShadow(data);
+    expect(report.positions.every(p => !p.comparable && p.issues.includes('COMMAND_COMPOSITION_CHANGED'))).toBe(true);
+    expect(report.positions[0].candidate.cut).toBe(0);
+  });
+  it('explicit rework remains raw statistics, not normal-demand credit', () => {
+    const report = compareMdfShadow(input([confirmed({ rework: true })]));
+    expect(report.positions[0].candidate).toMatchObject({ cut: 5, creditedCut: 0, remaining: 10 });
+  });
   it('compares independent quantities and never declares cutover/match', () => {
     const report = compareMdfShadow(input());
     expect(report).toMatchObject({ status: 'blocked', cutoverReady: false, differenceCount: 0,
@@ -73,7 +118,7 @@ describe('MDF source-scope shadow comparison', () => {
     const data = input([source({ kind: 'bath', rawCut: false, legacyColumn: 'baths_laminated' })]);
     data.details[0].rank = 3;
     const report = compareMdfShadow(data);
-    expect(report).toMatchObject({ status: 'blocked', candidateSemantics: 'observed-cnc-facts-only',
+    expect(report).toMatchObject({ status: 'blocked', candidateSemantics: 'observed-cnc-and-audited-command-proofs',
       differenceCount: 1, comparableDifferenceCount: 0, unverifiedDifferenceCount: 1 });
     expect(report.positions[0]).toMatchObject({ comparable: false, candidate: { rolled: 0 }, legacy: { rolled: 5 } });
     expect(report.positions[0].issues).toContain('LAMINATION_FACT_PROVENANCE_UNKNOWN');

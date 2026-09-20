@@ -1,13 +1,16 @@
 import { calculateMdfQuantities, mdfPositionKey, mdfSum, type MdfPositionQuantity, type MdfQuantityEvidence } from './mdf-quantities';
 import { planMdfAllocations, type MdfAllocation } from './mdf-allocation';
 import { resolveMdfSourceColumn } from './mdf-source-column';
+import { projectMdfShadowProof, type ShadowCommandProof } from './mdf-shadow-proof';
 
-export const MDF_COMPARISON_VERSION = 'source-scope-v2';
+export const MDF_COMPARISON_VERSION = 'source-scope-v3';
+export const MDF_CANDIDATE_SEMANTICS = 'observed-cnc-and-audited-command-proofs';
 export interface ShadowMember extends MdfPositionQuantity { line: string }
 export interface ShadowSource {
   kind: 'packet' | 'bazisCutSet' | 'bath'; id: string; revision: string; createdAt: string;
   members: ShadowMember[]; issues: string[]; rawCut: boolean; rework: boolean;
   manual: string | null; legacyColumn: string | null;
+  compositionDigest?: string; commands?: ShadowCommandProof[];
 }
 export interface ShadowDetail extends MdfPositionQuantity { rank: number | null }
 export interface ShadowLegacyCard {
@@ -54,28 +57,31 @@ export function legacyShadowQuantities(demand: readonly MdfPositionQuantity[], c
 export function compareMdfShadow(input: ShadowComparisonInput) {
   const issues = new Set([...input.issues, 'BASELINE_NOT_VERIFIED', 'INCOMPLETE_PRODUCER_COVERAGE']);
   const detailByKey = new Map(input.details.map(d => [mdfPositionKey(d), d]));
+  const proofs = new Map(input.sources.map(s => [sourceKey(s), projectMdfShadowProof({ ...s, commands: s.commands ?? [] })]));
   const resolveColumn = (s: ShadowSource, bathReadiness: 'ready' | 'not_ready' | 'unknown') =>
     resolveMdfSourceColumn({ kind: s.kind,
       memberRanks: s.members.map(m => detailByKey.get(mdfPositionKey(m))?.rank ?? null),
       compositionComplete: !s.issues.length && s.members.every(m => detailByKey.has(mdfPositionKey(m))),
-      cutConfirmed: s.rawCut, manual: s.manual, thresholds: input.thresholds, bathReadiness,
+      cutConfirmed: proofs.get(sourceKey(s))!.cut, manual: s.manual, thresholds: input.thresholds, bathReadiness,
     });
   const evidence: MdfQuantityEvidence[] = [];
   const supply = new Map<string, MdfPositionQuantity>();
   const sourceIssues = new Map<string, Set<string>>();
   let allocationUnknown = false;
   for (const s of input.sources) {
-    const reasons = new Set([...input.issues, ...s.issues]);
+    const proof = proofs.get(sourceKey(s))!;
+    const reasons = new Set([...input.issues, ...s.issues, ...proof.issues]);
     sourceIssues.set(sourceKey(s), reasons);
     if (!s.members.length) reasons.add('EMPTY_COMPOSITION');
     for (const m of s.members) if (!detailByKey.has(mdfPositionKey(m))) reasons.add('MEMBER_OUTSIDE_LIVE_MDF_DEMAND');
     // A legacy manual column is not yet an immutable, disjoint physical fact.
-    if (s.manual && ['completed', 'completed_laminated', 'baths_laminated', 'completed_baths'].includes(s.manual)) {
+    if (s.manual && ['completed', 'completed_laminated', 'baths_laminated', 'completed_baths'].includes(s.manual)
+        && !(s.kind === 'bath' ? proof.laminated : proof.cut)) {
       reasons.add('MANUAL_FACT_PROVENANCE_UNKNOWN');
     }
     // BASIS/status-derived completion also lacks physical provenance even when
     // hidden from the legacy window and therefore absent from legacyColumn.
-    if (s.kind !== 'bath' && !(s.kind === 'packet' && s.rawCut)
+    if (s.kind !== 'bath' && !proof.cut
         && [s.legacyColumn, resolveColumn(s, 'unknown').column]
           .some(column => column === 'completed' || column === 'completed_laminated')) {
       reasons.add('CUT_FACT_PROVENANCE_UNKNOWN');
@@ -87,7 +93,7 @@ export function compareMdfShadow(input: ShadowComparisonInput) {
     }
     if (s.kind === 'bath') {
       // Old/hidden/finished consumers must not leave their supply available.
-      const hasUnverifiedConsumer = s.manual === 'baths_ready' || s.manual === 'baths_laminated' || s.manual === 'completed_baths'
+      const hasUnverifiedConsumer = proof.laminated || s.manual === 'baths_ready' || s.manual === 'baths_laminated' || s.manual === 'completed_baths'
         || s.members.some(m => {
           const rank = detailByKey.get(mdfPositionKey(m))?.rank;
           return rank != null && input.thresholds.laminated != null && rank >= input.thresholds.laminated;
@@ -97,7 +103,7 @@ export function compareMdfShadow(input: ShadowComparisonInput) {
         reasons.add('HISTORICAL_CONSUMPTION_UNKNOWN');
       }
     }
-    if (s.rawCut && s.kind === 'packet' && !s.issues.length) {
+    if (proof.cut) {
       for (const m of s.members) {
         evidence.push({ ...m, source: sourceKey(s), stage: 'cut', kind: 'physical', rework: s.rework });
         if (!s.rework) {
@@ -105,6 +111,9 @@ export function compareMdfShadow(input: ShadowComparisonInput) {
           supply.set(key, { ...m, quantity: mdfSum(old?.quantity ?? 0, m.quantity) });
         }
       }
+    }
+    if (proof.laminated) for (const m of s.members) {
+      evidence.push({ ...m, source: sourceKey(s), stage: 'laminated', kind: 'physical', rework: s.rework });
     }
   }
   // Accepted allocation provenance and candidate raw snapshots are different
@@ -134,9 +143,9 @@ export function compareMdfShadow(input: ShadowComparisonInput) {
     const reasons = new Set(sourceIssues.get(sourceKey(s)));
     // Unresolved lines / unfrozen whole-order membership may belong to positions
     // missing from the known subset. Conservatively taint the connected scope.
-    const unknownMembership = s.issues.some(i => ['UNRESOLVED_MEMBERSHIP', 'WHOLE_ORDER_DECLARATION_NOT_FROZEN',
-      'SOURCE_MISSING'].includes(i));
-    if (s.kind === 'bath' && (['baths_laminated', 'completed_baths'].includes(s.legacyColumn ?? '')
+    const unknownMembership = [...reasons].some(i => ['UNRESOLVED_MEMBERSHIP', 'WHOLE_ORDER_DECLARATION_NOT_FROZEN',
+      'SOURCE_MISSING', 'COMMAND_COMPOSITION_CHANGED', 'COMMAND_MEMBERSHIP_MISMATCH'].includes(i));
+    if (s.kind === 'bath' && !proofs.get(sourceKey(s))!.laminated && (['baths_laminated', 'completed_baths'].includes(s.legacyColumn ?? '')
         || ['baths_laminated', 'completed_baths'].includes(s.manual ?? '')
         || s.members.some(m => {
           const rank = detailByKey.get(mdfPositionKey(m))?.rank;
@@ -168,10 +177,11 @@ export function compareMdfShadow(input: ShadowComparisonInput) {
     + positions.filter(p => p.differences.length && p.comparable).length;
   return { algorithmVersion: MDF_COMPARISON_VERSION, surface: 'legacy-server-return-model',
     semantics: 'current-state-not-event-replay', cutoverReady: false as const,
-    candidateSemantics: 'observed-cnc-facts-only',
+    candidateSemantics: MDF_CANDIDATE_SEMANTICS,
     // Baseline/producer gaps deliberately prevent even an all-equal provisional result becoming a match.
     status: comparableDifferenceCount ? 'differences' as const : 'blocked' as const,
     issues: [...issues].sort(), differenceCount, comparableDifferenceCount,
     unverifiedDifferenceCount: differenceCount - comparableDifferenceCount, columns, positions, orders, allocation,
+    proofs: input.sources.map(s => ({ kind: s.kind, id: s.id, ...proofs.get(sourceKey(s))! })),
     candidateRawTotals: { cut: candidate.cut, rolled: candidate.rolled, unmatchedQuantity: candidate.unmatchedQuantity } };
 }

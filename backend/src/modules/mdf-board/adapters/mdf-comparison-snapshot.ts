@@ -2,10 +2,11 @@ import type { DatabaseClient } from '../../../database/database.types';
 import { CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE as MDF, CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE as OTHER } from '../../../shared/cnc-material';
 import type { MdfBoardSource } from '../../status-automation/application/mdf-board-event.types';
 import { loadReturnSnapshot } from '../../orders/adapters/mdf-return-snapshot';
-import { prepareMdfShadow } from '../application/mdf-shadow';
+import { mdfShadowCompositionDigest, prepareMdfShadow } from '../application/mdf-shadow';
 import type { MdfAllocation } from '../domain/mdf-allocation';
 import type { ShadowComparisonInput, ShadowDetail, ShadowSource } from '../domain/mdf-shadow-comparison';
 import { loadMdfShadowSource } from './mdf-shadow-source';
+import { loadMdfShadowProofs, ShadowProofLimitError } from './mdf-shadow-proof-loader';
 
 export class ShadowScopeError extends Error {
   constructor(readonly code: string) { super(code); }
@@ -27,6 +28,9 @@ const memberships = `members AS (
   UNION SELECT 'bath','cut-result:'||p.cut_result_id::text,p.order_id
     FROM cut_result_placement p JOIN cut_result_sheet_map s ON s.cut_result_sheet_map_id=p.cut_result_sheet_map_id AND s.is_effective
     JOIN cut_result_board_projection b ON b.cut_result_id=p.cut_result_id AND b.is_vacuum
+  UNION SELECT l.source_kind,l.source_id,l.order_id FROM mdf_evidence_lines l
+    JOIN mdf_shadow_commands c USING(source_kind,source_id,revision_key)
+    WHERE l.stage_code='membership'
 )`;
 
 /** Closure completed before hydration; SQL sentinel limits reject partial scope. */
@@ -82,6 +86,12 @@ export async function loadMdfComparisonSnapshot(db: DatabaseClient, trigger: Mdf
   [scope.ownerIds, MDF, OTHER, MAX_ROWS + 1])).rows;
   if (details.length > MAX_ROWS) throw new ShadowScopeError('DETAIL_LIMIT');
   const sources: ShadowSource[] = [];
+  let proofs: Awaited<ReturnType<typeof loadMdfShadowProofs>>;
+  try { proofs = await loadMdfShadowProofs(db, scope.sources); }
+  catch (error) {
+    if (error instanceof ShadowProofLimitError) throw new ShadowScopeError(error.code);
+    throw error;
+  }
   let sourceDigest = '', rowCount = details.length;
   for (const source of scope.sources) {
     const rows = await loadMdfShadowSource(db, source, MAX_ROWS - rowCount + 1);
@@ -92,6 +102,7 @@ export async function loadMdfComparisonSnapshot(db: DatabaseClient, trigger: Mdf
     const issues = prepared.issues.filter(i => i !== 'SHADOW_ONLY' && i !== 'INCOMPLETE_PRODUCER_COVERAGE');
     if (!meta || !Number.isFinite(Date.parse(meta.created_at))) issues.push('SOURCE_METADATA_MISSING');
     sources.push({ ...source, revision: prepared.sourceDigest, createdAt: meta?.created_at ?? '1970-01-01',
+      compositionDigest: mdfShadowCompositionDigest(rows), commands: proofs.get(key(source)) ?? [],
       members: prepared.lines.filter(l => l.stageCode === 'membership').map(l => ({ orderId: l.orderId,
         detailId: l.detailId, quantity: l.quantity, line: l.lineKey })), issues,
       rawCut: Boolean(meta?.raw_cut), rework: rows.some(r => r.rework), manual: meta?.target_column ?? null, legacyColumn: null });
