@@ -1,6 +1,7 @@
 import { resolveOrderBasisProject } from '../../utils/orderBasisProject';
 import { Table, Tooltip } from '../../ui/tooltipDelay';
 import { useDataProvider, useParsed, IResourceComponentsProps } from "@refinedev/core";
+import type { BaseRecord } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Alert, Button, Card, Checkbox, Breadcrumb, message, Dropdown, Space, Modal, Select } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
@@ -152,6 +153,18 @@ import {
 type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
 type OrderInfoTab = { key: string; panel: OrderInfoPanelKey | null; label: string; color: string };
 type OrderExcelExportMode = 'full' | 'without-prices';
+
+// Display fields shared by legacy and backend-adapted primary reads. Other
+// page fields retain their existing BaseRecord contract in this scoped change.
+interface OrderShowDisplayRecord extends BaseRecord {
+  client_name?: string | null;
+  clientName?: string | null;
+  material_name?: string | null;
+  material_name_resolved?: string | null;
+  headerMaterialName?: string | null;
+}
+
+type OrderShowClientRecord = Pick<OrderShowDisplayRecord, 'client_name' | 'clientName'>;
 
 const productionPdfButtonStyle: CSSProperties = {
   minWidth: 40,
@@ -765,7 +778,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     [authCacheNamespace, currentOrderId, parsedRouteParams],
   );
 
-  const { queryResult } = useShow({
+  const { queryResult } = useShow<OrderShowDisplayRecord>({
     resource: orderShowPrimaryIdentity.resource,
     id: orderShowPrimaryIdentity.orderId,
     meta: orderShowPrimaryIdentity.meta,
@@ -885,7 +898,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     }
   }, [record?.order_name, setTabTitle, tabKey]);
 
-  const { data: clientData, isLoading: clientLoading } = useOne({
+  const { data: clientData, isLoading: clientLoading } = useOne<OrderShowClientRecord>({
     resource: "clients",
     id: record?.client_id,
     queryOptions: {
@@ -1530,7 +1543,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
   // SP3: unique server-resolved display material names for the show header summary.
   const headerMaterialNames = useMemo(() => {
-    const names = (details || [])
+    const names: string[] = (details || [])
       .map((d: any) => resolveDetailMaterialName(d, resolvedNameByDetailId, materialsMap))
       .filter((v): v is string => Boolean(v));
     return Array.from(new Set(names));
