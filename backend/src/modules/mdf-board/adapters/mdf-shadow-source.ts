@@ -15,7 +15,7 @@ const material = (value: string) => `(COALESCE(${value},'') ~* '${MDF}' AND COAL
 /** Bounded by one exact source, never visibility/date or snapshot_job. Strict
  * linked identities only. Unknown identities are diagnostics, not guessed facts.
  * No production/order status is a physical manufacturing signal. */
-export async function loadMdfShadowSource(tx: DatabaseClient, source: MdfBoardSource): Promise<MdfShadowRow[]> {
+export async function loadMdfShadowSource(tx: DatabaseClient, source: MdfBoardSource, rowLimit?: number): Promise<MdfShadowRow[]> {
   const sql = source.kind === 'packet' ? `
     SELECT i.source_item_key AS line_key,d.order_id::text,d.detail_id::text,i.quantity::text,
       ${cncPacketCountsForMdfReadinessSql('p')} AND COALESCE(p.mdf_board_card_kind,'machine_file')='machine_file' AS relevant,
@@ -64,5 +64,6 @@ export async function loadMdfShadowSource(tx: DatabaseClient, source: MdfBoardSo
       smt.name,m.material_name,r.snapshot_digest,move.move_id,move.version,move.updated_at,move.target_column
     ORDER BY p.order_id,p.order_detail_id
   `;
-  return (await tx.query<MdfShadowRow>(sql, [source.kind, source.id])).rows;
+  return (await tx.query<MdfShadowRow>(rowLimit === undefined ? sql : `SELECT * FROM (${sql}) bounded LIMIT $3`,
+    rowLimit === undefined ? [source.kind, source.id] : [source.kind, source.id, rowLimit])).rows;
 }

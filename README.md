@@ -28,6 +28,7 @@ Ant Design; command API — на NestJS; read/report/reference слой — Hasu
 
 ## Специализированные документы
 
+- [МДФ: диагностическая сверка расчётов](docs/mdf-shadow-comparison.md)
 - [Контракт JSON snapshot заказов](docs/order-json-snapshot-v1.md)
 - [Frontend runtime config](docs/frontend-runtime-config-readiness.md)
 - [Runtime config canary](docs/runtime-config-canary-readiness.md)

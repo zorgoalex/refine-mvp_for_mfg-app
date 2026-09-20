@@ -61,6 +61,7 @@ __pycache__/
 ai_docs/
 /session-handoffs/
 /docs/*
+!/docs/mdf-shadow-comparison.md
 !/docs/project-overview.md
 !/docs/configuration-and-auth.md
 !/docs/deployment-and-operations.md
