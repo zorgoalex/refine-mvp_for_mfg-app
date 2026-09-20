@@ -212,6 +212,29 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText.slice(verifyStart, verifyEnd)).toContain('151_*|152_*');
   });
 
+  it('requires the complete WhatsApp technical log schema before advancing migration 170', () => {
+    const arm = probeFn.slice(
+      probeFn.indexOf('170_whatsapp_technical_logs*)'),
+      probeFn.indexOf('*) return 2'),
+    );
+    for (const marker of [
+      'q_tbl whatsapp_technical_logs',
+      'whatsapp_technical_logs_pkey',
+      'whatsapp_technical_logs_component_check',
+      'whatsapp_technical_logs_level_check',
+      'whatsapp_technical_logs_event_code_check',
+      'whatsapp_technical_logs_outcome_check',
+      'whatsapp_technical_logs_details_check',
+      'whatsapp_technical_logs_time_idx',
+      'whatsapp_technical_logs_error_idx',
+      'whatsapp_technical_logs_event_idx',
+    ])
+      expect(arm).toContain(marker);
+    const verifyStart = scriptText.indexOf('verify_applied_effect() {');
+    const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
+    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('170_*)');
+  });
+
   it('pins the complete Telegram worker audit schema before advancing 107/108/109', () => {
     const workerProbe = probeFn.slice(
       probeFn.indexOf('107_cnc_telegram_worker_audit*'),

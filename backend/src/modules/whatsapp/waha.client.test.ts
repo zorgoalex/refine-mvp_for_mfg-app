@@ -44,4 +44,61 @@ describe("WahaClient", () => {
       message: expect.not.stringContaining("secret provider body"),
     });
   });
+
+  it("records a redacted technical event for a provider failure", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("private body", { status: 500 })));
+    const record = vi.fn().mockResolvedValue(undefined);
+    const client = new WahaClient(
+      { getConfig: () => config } as WhatsAppRuntimeConfigService,
+      { record } as never,
+    );
+    await expect(client.qr()).rejects.toMatchObject({ code: "WAHA_PROVIDER_ERROR" });
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({
+      component: "waha",
+      level: "error",
+      operation: "GET /api/{session}/auth/qr?format=image",
+      httpStatus: 500,
+      errorCode: "WAHA_PROVIDER_ERROR",
+    }));
+    expect(JSON.stringify(record.mock.calls)).not.toContain("private body");
+    expect(JSON.stringify(record.mock.calls)).not.toContain(config.apiKey);
+  });
+
+  it("requests QR bytes as PNG instead of provider JSON", async () => {
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(png, {
+      status: 200,
+      headers: { "content-type": "image/png" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new WahaClient({ getConfig: () => config } as WhatsAppRuntimeConfigService);
+
+    const result = await client.qr();
+
+    expect(result.contentType).toBe("image/png");
+    expect(Array.from(result.bytes)).toEqual(Array.from(png));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://waha:3000/api/erp/auth/qr?format=image",
+      expect.objectContaining({ headers: expect.objectContaining({ Accept: "image/png" }) }),
+    );
+  });
+
+  it("rejects a JSON QR response instead of passing a broken image to the browser", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ mimetype: "image/png", data: "secret" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })));
+    const record = vi.fn().mockResolvedValue(undefined);
+    const client = new WahaClient(
+      { getConfig: () => config } as WhatsAppRuntimeConfigService,
+      { record } as never,
+    );
+
+    await expect(client.qr()).rejects.toMatchObject({ code: "WAHA_QR_RESPONSE_INVALID", statusCode: 502 });
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({
+      errorCode: "WAHA_QR_RESPONSE_INVALID",
+      details: expect.objectContaining({ contentType: "application/json" }),
+    }));
+    expect(JSON.stringify(record.mock.calls)).not.toContain("secret");
+  });
 });
