@@ -1,11 +1,37 @@
 import { createHmac } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { ApiError } from "../../common/errors/api-error";
 import {
+  WhatsAppService,
   parseInbound,
   privateIdentifier,
   restrictionDetails,
   verifyWebhook,
 } from "./whatsapp.service";
+
+function statusService(options: { session?: string; cappingError?: boolean } = {}) {
+  const resolved = vi.fn().mockResolvedValue({ ok: true });
+  const record = vi.fn().mockResolvedValue(undefined);
+  const client = {
+    health: resolved,
+    version: resolved,
+    serverStatus: resolved,
+    session: vi.fn().mockResolvedValue({ status: options.session ?? "WORKING" }),
+    me: resolved,
+    capping: options.cappingError
+      ? vi.fn().mockRejectedValue(new ApiError(502, "WAHA_PROVIDER_ERROR", "provider"))
+      : resolved,
+    timelock: resolved,
+  };
+  const service = new WhatsAppService(
+    { getConfig: () => ({ enabled: true }) } as never,
+    { diagnostics: resolved } as never,
+    client as never,
+    {} as never,
+    { record } as never,
+  );
+  return { service, record };
+}
 
 describe("WhatsApp webhook boundary", () => {
   it("verifies the exact WAHA raw-body HMAC and timestamp headers", () => {
@@ -142,5 +168,29 @@ describe("WhatsApp webhook boundary", () => {
         timelock: { isActive: true },
       })
     ).toEqual(["message_capping", "reachout_timelock"]);
+  });
+});
+
+describe("WhatsApp status diagnostics", () => {
+  it("marks partial provider failures as degraded and exposes their safe code", async () => {
+    const { service } = statusService({ cappingError: true });
+    const result = await service.status();
+    expect(result.degraded).toBe(true);
+    expect(result.issues.capping).toBe("WAHA_PROVIDER_ERROR");
+  });
+
+  it.each([
+    ["FAILED", "error"],
+    ["STOPPED", "warn"],
+    ["UNKNOWN", "warn"],
+  ])("logs degraded session %s with level %s", async (session, level) => {
+    const fixture = statusService({ session });
+    const result = await fixture.service.status();
+    expect(result.degraded).toBe(true);
+    expect(fixture.record).toHaveBeenCalledWith(expect.objectContaining({
+      eventCode: "waha.session.snapshot",
+      level,
+      details: { status: session },
+    }));
   });
 });

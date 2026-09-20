@@ -354,6 +354,8 @@ export const apiRoutes = {
     retryJob: (id: number) => backendApiPath(`/whatsapp/queue/${id}/retry`),
     processNow: backendApiPath('/whatsapp/queue/process-now'),
     audit: backendApiPath('/whatsapp/audit'),
+    technicalLogs: backendApiPath('/whatsapp/technical-logs'),
+    technicalLogsExport: backendApiPath('/whatsapp/technical-logs/export'),
   },
   groups: groupsRoutes,
   projects: {

@@ -8,6 +8,7 @@ import { WhatsAppRepository } from "./whatsapp.repository";
 import { WhatsAppRuntimeConfigService } from "./whatsapp-runtime-config.service";
 import { WhatsAppSchedulerService } from "./whatsapp-scheduler.service";
 import { WhatsAppService } from "./whatsapp.service";
+import { WhatsAppTechnicalLogService } from "./whatsapp-technical-log.service";
 
 @Module({
   imports: [DatabaseModule, PermissionsModule],
@@ -18,6 +19,7 @@ import { WhatsAppService } from "./whatsapp.service";
     WhatsAppRepository,
     WhatsAppService,
     WhatsAppSchedulerService,
+    WhatsAppTechnicalLogService,
     WhatsAppPermissionsGuard,
   ],
 })

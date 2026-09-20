@@ -11,6 +11,7 @@ export interface WhatsAppStatusDto {
     lastWebhookAt: string | null;
     queue: Record<string, number>;
   } | null;
+  issues: Record<string, string | null>;
   degraded: boolean;
 }
 
@@ -66,6 +67,36 @@ export interface WhatsAppAuditDto {
   requestId: string;
   source: string;
   createdAt: string;
+}
+
+export interface WhatsAppTechnicalLogDto {
+  id: string;
+  occurredAt: string;
+  component: "backend" | "waha" | "webhook" | "relay" | "cleanup";
+  level: "info" | "warn" | "error";
+  eventCode: string;
+  outcome: "started" | "succeeded" | "failed" | "observed";
+  operation: string | null;
+  httpStatus: number | null;
+  durationMs: number | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  requestId: string | null;
+  details: Record<string, string | number | boolean | null>;
+}
+
+export interface WhatsAppTechnicalLogResponse {
+  data: WhatsAppTechnicalLogDto[];
+  pagination: { page: number; pageSize: number; total: number };
+}
+
+export interface WhatsAppTechnicalLogQuery {
+  page?: number;
+  pageSize?: number;
+  level?: "info" | "warn" | "error";
+  component?: "backend" | "waha" | "webhook" | "relay" | "cleanup";
+  outcome?: "started" | "succeeded" | "failed" | "observed";
+  search?: string;
 }
 
 export interface WhatsAppTemplateInput {

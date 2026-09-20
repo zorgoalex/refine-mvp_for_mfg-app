@@ -739,6 +739,44 @@ paths:
       x-permission: whatsapp.view
       responses:
         '200': {description: List WhatsApp audit events}
+  /api/v1/whatsapp/technical-logs:
+    get:
+      tags:
+        - WhatsApp
+      operationId: listWhatsAppTechnicalLogs
+      summary: List redacted WhatsApp technical events
+      security:
+        - {bearerAuth: []}
+      x-permission: whatsapp.view
+      parameters:
+        - {name: page, in: query, schema: {type: integer, minimum: 1, default: 1}}
+        - {name: pageSize, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 100}}
+        - {name: level, in: query, schema: {type: string, enum: [info, warn, error]}}
+        - {name: component, in: query, schema: {type: string, enum: [backend, waha, webhook, relay, cleanup]}}
+        - {name: outcome, in: query, schema: {type: string, enum: [started, succeeded, failed, observed]}}
+        - {name: search, in: query, schema: {type: string, minLength: 1, maxLength: 120}}
+      responses:
+        '200': {description: Paginated redacted WhatsApp technical events}
+        '422': {description: Invalid technical log filters}
+  /api/v1/whatsapp/technical-logs/export:
+    get:
+      tags:
+        - WhatsApp
+      operationId: exportWhatsAppTechnicalLogs
+      summary: Export redacted WhatsApp technical events as JSONL
+      security:
+        - {bearerAuth: []}
+      x-permission: whatsapp.view
+      parameters:
+        - {name: page, in: query, schema: {type: integer, minimum: 1, default: 1}}
+        - {name: pageSize, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 100}}
+        - {name: level, in: query, schema: {type: string, enum: [info, warn, error]}}
+        - {name: component, in: query, schema: {type: string, enum: [backend, waha, webhook, relay, cleanup]}}
+        - {name: outcome, in: query, schema: {type: string, enum: [started, succeeded, failed, observed]}}
+        - {name: search, in: query, schema: {type: string, minLength: 1, maxLength: 120}}
+      responses:
+        '200': {description: Redacted WhatsApp technical events, content: {application/x-ndjson: {schema: {type: string}}}}
+        '422': {description: Invalid technical log filters}
   /api/v1/whatsapp/queue/{id}/retry:
     post:
       tags:

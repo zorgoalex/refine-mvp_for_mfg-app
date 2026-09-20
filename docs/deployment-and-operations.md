@@ -249,8 +249,9 @@ READINESS_REQUIRE_REDIS=true
 
 WAHA запускается opt-in profile `whatsapp`, доступен только backend-у и имеет
 отдельную egress-сеть. Сообщения, ключевые слова, правила, очередь и аудит
-управляются двумя permission-filtered вкладками основной ERP-конфигурации.
-Полный порядок backup → migration 152 → pairing → canary → relay описан в
+управляются тремя permission-filtered вкладками основной ERP-конфигурации,
+включая редактированный технический журнал.
+Полный порядок backup → migrations 152/170 → pairing → canary → relay описан в
 [WhatsApp production runbook](whatsapp-production-runbook.md).
 
 ## PostgreSQL bind
