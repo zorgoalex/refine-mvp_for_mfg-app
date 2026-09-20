@@ -210,8 +210,21 @@ describe('production-action automation in-transaction actions', () => {
 
     const updateIndex = database.sql.findIndex((sql) => sql.startsWith('UPDATE order_details'));
     expect(database.sql[updateIndex]).toContain("$4::text = 'set_exact'");
-    expect(database.sql.some((sql) => sql.includes('DELETE FROM mdf_board_manual_moves'))).toBe(true);
+    expect(database.sql.some((sql) => sql.includes('DELETE FROM mdf_board_manual_moves'))).toBe(false);
     expect(database.auditCalls[0]?.metadata).toMatchObject({ affectedDetailCount: 1 });
+  });
+
+  it.each(['advance_only', 'set_exact'] as const)('preserves source-owned manual facts for an unscoped %s order cascade', async (mode) => {
+    const database = createAutomationTx({
+      detailRows: [{ detail_id: 101, production_status_id: 1, production_status_sort_order: 20 }],
+      updatedDetailIds: [101],
+      targetProductionSortOrder: 50,
+    });
+
+    await expect(changeDetailsProductionStatusFromAutomationInTransaction(
+      database.tx, 15, 7, automationContext(), mode,
+    )).resolves.toMatchObject({ status: 'executed' });
+    expect(database.sql.some((sql) => /(?:DELETE FROM|UPDATE|INSERT INTO) mdf_board_manual_moves/.test(sql))).toBe(false);
   });
 
   it('emits MDF-board laminated automation after a detail-status automation action', async () => {

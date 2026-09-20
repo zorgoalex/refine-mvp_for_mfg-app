@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 
-DETAIL_HEADER_RE = re.compile(r"(?P<order>\d{4,})#(?P<detail>\d{1,5})#")
+DETAIL_HEADER_RE = re.compile(r"^(?P<order>[^#\x00-\x1f\x7f-\x9f]{1,200})#(?P<detail>\d{1,5})#")
 DETAIL_SIZE_RE = re.compile(r"@(?P<width>\d+(?:[.,]\d+)?)\*(?P<height>\d+(?:[.,]\d+)?)@")
 VISUAL_SIZE_RE = re.compile(r"(?P<width>\d+(?:[.,]\d+)?)\s*[xхХX*×]\s*(?P<height>\d+(?:[.,]\d+)?)")
 VISUAL_ORDER_RE = re.compile(r"\b(?P<order>\d{4,})\b")
@@ -340,8 +340,8 @@ def detail_comments(element: ET.Element) -> list[str]:
 
 
 def parse_detail_comment(comment: str, bbox_size: tuple[float, float] | None) -> dict[str, Any] | None:
-    match = DETAIL_HEADER_RE.search(comment)
-    if not match or int(match.group("detail")) <= 0:
+    match = DETAIL_HEADER_RE.search(comment.strip())
+    if not match or not match.group("order").strip() or int(match.group("detail")) <= 0:
         return None
     size_match = DETAIL_SIZE_RE.search(comment)
     width = positive_float(size_match.group("width")) if size_match else None
@@ -350,7 +350,7 @@ def parse_detail_comment(comment: str, bbox_size: tuple[float, float] | None) ->
         width = round(max(bbox_size), 2)
         height = round(min(bbox_size), 2)
     return {
-        "orderName": match.group("order"),
+        "orderName": match.group("order").strip(),
         "detailNumber": int(match.group("detail")),
         "widthMm": width,
         "heightMm": height,
@@ -614,6 +614,9 @@ def find_visual_order_line_for_detail(lines: list[VisualTextLine], detail_line: 
 
 
 def parse_visual_order_line(text: str) -> str | None:
+    explicit = re.fullmatch(r"заказ\s*[:№]\s*([^\x00-\x1f\x7f-\x9f]{1,200})", text.strip(), re.IGNORECASE)
+    if explicit and explicit.group(1).strip():
+        return explicit.group(1).strip()
     match = VISUAL_ORDER_RE.search(text)
     return match.group("order") if match else None
 

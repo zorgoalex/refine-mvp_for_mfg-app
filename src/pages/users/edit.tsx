@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { Edit, useForm } from "@refinedev/antd";
 import { IResourceComponentsProps, useGetIdentity } from "@refinedev/core";
 import {
@@ -122,10 +123,10 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
             <Form.Item
               label="Логин"
               name="username"
-              rules={[
+              rules={[...([
                 { required: true, message: 'Пожалуйста, введите логин' },
-                { min: 2, message: 'Логин должен содержать минимум 2 символа' },
-              ]}
+                { min: 3, message: 'Логин должен содержать минимум 3 символа' },
+              ]), nameRule("username")]}
             >
               <Input placeholder="ivanov" disabled />
             </Form.Item>
@@ -145,7 +146,7 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
           </Col>
 
           <Col xs={24} md={12}>
-            <Form.Item label="Полное имя" name="full_name">
+            <Form.Item label="Полное имя" name="full_name" rules={[nameRule("full_name", 255, 0)]}>
               <Input placeholder="Иванов Иван Иванович" />
             </Form.Item>
           </Col>

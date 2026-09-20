@@ -1,3 +1,4 @@
+import { humanName } from '../../../shared/human-name-schema';
 import { Body, Controller, Delete, Get, Inject, Param, Post, Put, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
@@ -17,7 +18,7 @@ import { CutRuntimeConfigService } from './cut-runtime-config.service';
 const settingBodySchema = z.object({ value: z.unknown(), version: z.number().int().min(0) }).strict();
 
 const profileInputSchema = z.object({
-  name: z.string().trim().min(1).max(200),
+  name: humanName(200, 1),
   params: z.record(z.string(), z.unknown()),
   isDefault: z.boolean().optional(),
   isActive: z.boolean().optional(),
@@ -26,7 +27,7 @@ const profileCreateSchema = profileInputSchema.strict();
 const profileUpdateSchema = profileInputSchema.extend({ version: z.number().int().min(0) }).strict();
 
 const presetInputSchema = z.object({
-  name: z.string().trim().min(1).max(100),
+  name: humanName(100, 1),
   targetPx: z.number().int().positive(),
   background: z.string().optional(),
   isActive: z.boolean().optional(),
@@ -35,14 +36,14 @@ const presetCreateSchema = presetInputSchema.strict();
 const presetUpdateSchema = presetInputSchema.extend({ version: z.number().int().min(0) }).strict();
 
 const pdfTemplateUpdateSchema = z.object({
-  name: z.string().trim().min(1).max(200),
+  name: humanName(200, 1),
   layout: z.record(z.string(), z.unknown()),
   isActive: z.boolean().optional(),
   version: z.number().int().min(0),
 }).strict();
 const pdfTemplateCreateSchema = z.object({
   code: z.string().trim().regex(/^[A-Za-z0-9_-]+$/).max(100),
-  name: z.string().trim().min(1).max(200),
+  name: humanName(200, 1),
   layout: z.record(z.string(), z.unknown()),
   isActive: z.boolean().optional(),
 }).strict();

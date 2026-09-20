@@ -1,3 +1,4 @@
+import { nameRule } from '../../../../utils/nameRules';
 // Quick Create Modal for Edge Type
 // Allows creating a new edge type without leaving the order form
 
@@ -83,10 +84,10 @@ export const EdgeTypeQuickCreate: React.FC<EdgeTypeQuickCreateProps> = ({
         <Form.Item
           label="Название типа"
           name="edge_type_name"
-          rules={[
+          rules={[...([
             { required: true, message: 'Обязательное поле' },
             { max: 50, message: 'Максимум 50 символов' },
-          ]}
+          ]), nameRule("edge_type_name")]}
         >
           <Input
             placeholder="Введите название типа кромки"

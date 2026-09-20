@@ -127,16 +127,18 @@ describe('configuration tabs layout', () => {
     ]);
   });
 
-  it('shows only the two WhatsApp tabs to a WhatsApp-only administrator', () => {
+  it('shows only the WhatsApp tabs to a WhatsApp-only administrator', () => {
     const items = [
       { key: 'orders' },
       { key: 'production' },
       { key: 'whatsapp-connection' },
       { key: 'whatsapp-automation' },
+      { key: 'whatsapp-technical-logs' },
     ];
     expect(filterConfigurationTabItems(items, false, false, true)).toEqual([
       { key: 'whatsapp-connection' },
       { key: 'whatsapp-automation' },
+      { key: 'whatsapp-technical-logs' },
     ]);
   });
 

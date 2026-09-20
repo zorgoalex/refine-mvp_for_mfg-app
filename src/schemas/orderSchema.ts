@@ -1,3 +1,4 @@
+import { NAME_CONTROL_CHARACTERS } from '@shared/human-name';
 // Zod Validation Schemas for Order Form
 // Based on PostgreSQL schema v11.6 and business requirements
 
@@ -27,7 +28,8 @@ export const orderHeaderSchema = z
     // Required fields
     order_name: z
       .string()
-      .min(2, "Название заказа должно содержать минимум 2 символа")
+      .refine(value => !NAME_CONTROL_CHARACTERS.test(value), "Название содержит управляющие символы")
+      .trim().min(1, "Введите название заказа")
       .max(200, "Название заказа не может превышать 200 символов"),
     client_id: z.number().positive("Выберите клиента"),
     order_date: z.date().or(z.string()),

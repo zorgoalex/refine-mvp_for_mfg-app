@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { Edit, useSelect } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, Switch, Select, Checkbox } from "antd";
@@ -30,11 +31,11 @@ export const FilmEdit: React.FC<IResourceComponentsProps> = () => {
         <Form.Item
           label="Name"
           name="film_name"
-          rules={[
+          rules={[...([
             {
               required: true,
             },
-          ]}
+          ]), nameRule("film_name")]}
         >
           <Input />
         </Form.Item>

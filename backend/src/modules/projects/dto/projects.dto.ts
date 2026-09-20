@@ -1,11 +1,12 @@
+import { humanName } from '../../../shared/human-name-schema';
 import { z } from 'zod';
 
-export const CODE_RE = /^[0-9A-Za-zА-Яа-яЁё-]{1,20}$/u;
+export const CODE_RE = /^[\p{L}\p{N}-]{1,20}$/u;
 
 export const updateProjectSchema = z
   .object({
     code: z.string().regex(CODE_RE, 'Код: буквы/цифры/дефис, до 20 символов').optional(),
-    name: z.string().trim().min(1).max(300).optional(),
+    name: humanName(300, 1).optional(),
     notes: z.string().max(4000).nullable().optional(),
     expectedVersion: z.number().int().min(0),
   })
@@ -39,7 +40,7 @@ export const mergeSchema = z.object({
 
 export const createProjectSchema = z.object({
   clientId: z.number().int().positive(),
-  name: z.string().trim().min(1).max(300),
+  name: humanName(300, 1),
   code: z.string().regex(CODE_RE, 'Код: буквы/цифры/дефис, до 20 символов').optional(),
   notes: z.string().max(4000).nullable().optional(),
   idempotencyKey: z.string().min(8).max(200),

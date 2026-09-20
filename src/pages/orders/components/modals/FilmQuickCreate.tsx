@@ -1,3 +1,4 @@
+import { nameRule } from '../../../../utils/nameRules';
 // Quick Create Modal for Film
 // Allows creating a new film without leaving the order form
 
@@ -106,10 +107,10 @@ export const FilmQuickCreate: React.FC<FilmQuickCreateProps> = ({
         <Form.Item
           label="Название плёнки"
           name="film_name"
-          rules={[
+          rules={[...([
             { required: true, message: 'Обязательное поле' },
             { max: 100, message: 'Максимум 100 символов' },
-          ]}
+          ]), nameRule("film_name")]}
         >
           <Input
             placeholder="Введите название плёнки"

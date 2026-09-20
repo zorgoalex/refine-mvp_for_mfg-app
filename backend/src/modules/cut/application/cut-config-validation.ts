@@ -1,3 +1,4 @@
+import { humanNameError } from '../../../shared/human-name';
 import { ApiError } from '../../../common/errors/api-error';
 import {
   CUT_RENDER_STYLES_SETTING_KEY,
@@ -253,17 +254,14 @@ export function validateParamProfileInput(input: CutParamProfileInput): CutParam
   return { ...input, name: input.name.trim() };
 }
 
-/** Preset names must be URL/path-safe so the /cut render endpoint can serve them
- *  (the render route's parsePreset only accepts this token shape). Enforcing it at
- *  write time prevents creating a preset that cannot be rendered. */
-export const RENDER_PRESET_NAME_RE = /^[A-Za-z0-9_-]+$/;
+/** Presets are looked up by parameterized name and sent as URL query values. */
+export const RENDER_PRESET_NAME_RE = /^[^\u0000-\u001f\u007f-\u009f]+$/u;
 
 export function validateRenderPresetInput(input: CutRenderPresetInput): CutRenderPresetInput {
   const name = (input.name ?? '').trim();
   if (name.length === 0) invalid('name', 'Укажите название пресета');
-  if (name.length > 64 || !RENDER_PRESET_NAME_RE.test(name)) {
-    invalid('name', 'Имя пресета: латиница/цифры/дефис/подчёркивание, до 64 символов');
-  }
+  const nameError = humanNameError(input.name ?? '', 100);
+  if (nameError) invalid('name', nameError);
   if (!Number.isInteger(input.targetPx) || input.targetPx <= 0) invalid('targetPx', 'targetPx должен быть > 0');
   return { ...input, name };
 }

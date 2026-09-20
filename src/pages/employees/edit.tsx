@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { Edit, useForm } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, Checkbox } from "antd";
@@ -8,7 +9,7 @@ export const EmployeeEdit: React.FC<IResourceComponentsProps> = () => {
   return (
     <Edit saveButtonProps={saveButtonProps}>
       <Form {...formProps} layout="vertical">
-        <Form.Item label="ФИО" name="full_name" rules={[{ required: true, message: 'Пожалуйста, введите ФИО сотрудника' }]}>
+        <Form.Item label="ФИО" name="full_name" rules={[...([{ required: true, message: 'Пожалуйста, введите ФИО сотрудника' }]), nameRule("full_name")]}>
           <Input placeholder="Иванов Иван Иванович" />
         </Form.Item>
         <Form.Item label="Должность" name="position" rules={[{ required: true, message: 'Пожалуйста, введите должность' }]}>

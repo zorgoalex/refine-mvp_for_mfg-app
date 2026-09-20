@@ -29,6 +29,7 @@ class OwnershipLost extends Error {
 }
 
 interface CrmSyncRelayServiceDeps {
+  stageLane?: { runLocked(proveWriter: () => Promise<void>): Promise<void> };
   outboxRepo: PgCrmSyncOutboxRepository;
   consumer: Bitrix24SyncConsumer;
   dryRunConsumer: Bitrix24SyncConsumer;
@@ -49,6 +50,7 @@ interface CrmSyncRelayServiceDeps {
  * - dryRun path uses peekPending (no claim) + dryRunConsumer (Noop) → zero DB/Bitrix24 mutations.
  */
 export class CrmSyncRelayService {
+  private readonly stageLane: CrmSyncRelayServiceDeps['stageLane'];
   private readonly outboxRepo: PgCrmSyncOutboxRepository;
   private readonly consumer: Bitrix24SyncConsumer;
   private readonly dryRunConsumer: Bitrix24SyncConsumer;
@@ -59,6 +61,7 @@ export class CrmSyncRelayService {
   private readonly logger: LoggerService;
 
   constructor(deps: CrmSyncRelayServiceDeps) {
+    this.stageLane = deps.stageLane;
     this.outboxRepo = deps.outboxRepo;
     this.consumer = deps.consumer;
     this.dryRunConsumer = deps.dryRunConsumer;
@@ -184,6 +187,19 @@ export class CrmSyncRelayService {
     let failed = 0;
 
     try {
+      // Already under bitrix24-live-writer. Stage delivery must never recurse
+      // through runTick, nor invoke the order/payment consumer.
+      try {
+        await this.stageLane?.runLocked(async () => {
+          await assertAdvisoryOwned();
+          if (writerOwnershipLost || !await this.outboxRepo.heartbeatWriterLock(this.db, writerToken)) {
+            writerOwnershipLost = true;
+            throw new OwnershipLost();
+          }
+        });
+      } catch (error) {
+        this.logger.error(redactLogFields({ event: 'crm_sync_stage_lane_failed', errorMessage: error instanceof Error ? error.message : String(error) }));
+      }
       for (const event of claimed) {
       if (writerOwnershipLost || !await proveOwnership(
         assertAdvisoryOwned,

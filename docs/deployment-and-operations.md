@@ -1,5 +1,13 @@
 # Деплой и эксплуатация
 
+Обновлено 2026-09-18: порядок backend-only обновления и применения настроек
+описан в [runbook версий backend](backend-release-runbook.md). Он использует
+один рабочий Compose и автоматически формируемый `backend-release.env`,
+не требует ручного ввода SHA в основной `.env`.
+
+Предыдущий вариант документа сохранён без изменений:
+[архив до перехода на файл версии](archive/deployment-and-operations.before-backend-release-2026-09-18.md).
+
 ## Контуры
 
 - Vercel: frontend и serverless runtime-config endpoint.
@@ -48,8 +56,13 @@ Tracked Compose template:
 Tracked env shape:
 `ops/templates/env.vps.example`.
 
-Реальные secrets находятся только во внешнем VPS `.env`. В tracked templates
-допустимы только `${VARIABLE}` references.
+Реальные secrets и постоянные настройки находятся во внешнем VPS `.env`.
+Версия backend не является секретом: `BACKEND_BUILD_IMAGE` и
+`BACKEND_BUILD_SHA` находятся в автоматически формируемом
+`backend-release.env` рядом с `.env`. Основной Compose получает оба файла
+через `--env-file`; release-файл передаётся последним. Не храните эти два
+ключа одновременно в основном `.env` и файле версии после завершения перехода.
+В tracked templates допустимы только `${VARIABLE}` references.
 
 `ops/setup-vps.sh` и `ops/deploy-stack.sh` создают live Compose из template,
 если live-файл отсутствует. Любое non-secret ручное изменение live Compose
@@ -81,6 +94,11 @@ sha256sum -c "$PACKET_DIR.tar.gz.sha256"
 
 ## Запуск tracked template
 
+Этот раздел — для первичного развёртывания. На существующем production VPS
+не подменяйте рабочий Compose шаблоном и не используйте пример ниже для
+обновления backend. После перехода на `backend-release.env` используйте
+[два файла переменных и действующий Compose](backend-release-runbook.md).
+
 Если runtime root и checkout различаются, всегда задавайте
 `--project-directory`; от него Compose ищет `.env`, `data/`, `config/`,
 `backups/` и `restore/`.
@@ -107,19 +125,24 @@ BACKEND_BUILD_CONTEXT=./repo_erp/backend
 
 ## Пересборка backend
 
-```bash
-cd ~/path/to/project
+Используйте [runbook версий backend](backend-release-runbook.md):
 
-docker compose \
-  --project-directory ~/path/to/project \
-  -p <test-compose-project> \
-  --env-file .env \
-  -f repo_erp/ops/templates/docker-compose.vps.yml \
-  up -d --build --no-deps backend
-```
+- **Изменить настройки:** читать сохранённый текущий релиз, не делать
+  `git pull`/build, пересоздать только backend с `--no-deps --no-build`.
+- **Обновить код:** взять проверенный коммит `main`, собрать отдельный образ,
+  автоматически сформировать candidate-файл, проверить конфигурацию,
+  запустить и проверить backend; только затем сохранить релиз как текущий.
+- **Откатить образ:** использовать сохранённый предыдущий release-файл после
+  проверки совместимости со схемой БД, не угадывать SHA по текущему Git HEAD.
 
-После rebuild проверьте `/health/live`, `/health/ready`, нужные route mappings
-и runtime flags.
+`healthy` не доказывает работу фоновой синхронизации. Для ERP → Bitrix отдельно
+проверяйте `enabled=true`, `relay_owner=in_process`, `dry_run=false` и прогресс
+`crm_sync_outbox`. `external` допустим только при реально работающем отдельном
+обработчике либо в согласованном окне первоначального backfill.
+
+Комментарий о текущей автоматизации: `ops/deploy-stack.sh` уже вычисляет SHA
+из HEAD, но пока не ведёт `backend-release.env`/previous/candidate и добавляет
+свои overlays. Это не замена backend-only процедуре из нового runbook.
 
 ## CNC Telegram worker
 
@@ -226,8 +249,9 @@ READINESS_REQUIRE_REDIS=true
 
 WAHA запускается opt-in profile `whatsapp`, доступен только backend-у и имеет
 отдельную egress-сеть. Сообщения, ключевые слова, правила, очередь и аудит
-управляются двумя permission-filtered вкладками основной ERP-конфигурации.
-Полный порядок backup → migration 152 → pairing → canary → relay описан в
+управляются тремя permission-filtered вкладками основной ERP-конфигурации,
+включая редактированный технический журнал.
+Полный порядок backup → migrations 152/170 → pairing → canary → relay описан в
 [WhatsApp production runbook](whatsapp-production-runbook.md).
 
 ## PostgreSQL bind
@@ -253,6 +277,7 @@ ${PG_TAILSCALE_BIND_IP:-${PG_BIND_IP:-127.0.0.1}}:5432:5432
 
 ## Связанные документы
 
+- [Версии backend: настройки, обновление и откат](backend-release-runbook.md)
 - [VPS Bootstrap And Deploy](../ops/README.md)
 - [Frontend runtime config](frontend-runtime-config-readiness.md)
 - [Runtime config canary](runtime-config-canary-readiness.md)

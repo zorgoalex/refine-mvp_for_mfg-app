@@ -289,17 +289,20 @@ function isKeyboardMoveMenuTrigger(event: React.KeyboardEvent<HTMLElement>): boo
   );
 }
 
-function scrollStatusBoardColumnCardsToTop(viewport: HTMLElement | null): void {
+function scrollStatusBoardColumnCardsToTop(
+  viewport: HTMLElement | null,
+  behavior: ScrollBehavior = 'smooth',
+): void {
   if (!viewport) return;
   (viewport.closest<HTMLElement>('.status-board-page') ?? viewport).scrollIntoView({
     block: 'start',
     inline: 'nearest',
-    behavior: 'smooth',
+    behavior,
   });
-  viewport.scrollTo({ top: 0, behavior: 'smooth' });
+  viewport.scrollTo({ top: 0, behavior });
   const cardLists = viewport.querySelectorAll<HTMLElement>('.status-board-column__cards');
   for (const cardList of cardLists) {
-    cardList.scrollTo({ top: 0, behavior: 'smooth' });
+    cardList.scrollTo({ top: 0, behavior });
   }
 }
 
@@ -588,6 +591,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const currentUser = authSession.getUser();
   const todayCncWorkday = dayjs().format('YYYY-MM-DD');
   const mdfWorkdayOpenSyncedRef = useRef(false);
+  const mdfOpeningScrollPendingRef = useRef(true);
   const sortPreferenceBoard: OrderStatusBoardType =
     fixedView === 'production' || (!fixedView && searchParams.get('board') === 'production')
       ? 'production'
@@ -825,11 +829,22 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     if (checked) setCncHistoryCollapsed(false);
   }, []);
   useEffect(() => {
+    // The persistent workspace host hides this page instead of unmounting it.
+    // Rearm opening defaults without changing the URL of the other active page.
+    if (!active) {
+      mdfWorkdayOpenSyncedRef.current = false;
+      mdfOpeningScrollPendingRef.current = true;
+      return;
+    }
     if (!shouldApplyMdfWorkdayTodayOnOpen) return;
-    mdfWorkdayOpenSyncedRef.current = true;
-    if (!mdfWorkdayTodayOpenPatchNeeded) return;
+    if (!mdfWorkdayTodayOpenPatchNeeded) {
+      mdfWorkdayOpenSyncedRef.current = true;
+      return;
+    }
+    // Finish synchronization only after the router reflects the opening date.
     updateViewState({ cncWorkday: todayCncWorkday, cncOrderFilters: [] });
   }, [
+    active,
     mdfWorkdayTodayOpenPatchNeeded,
     shouldApplyMdfWorkdayTodayOnOpen,
     todayCncWorkday,
@@ -1916,6 +1931,22 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       cncRelationTargetEquals(current, target) ? null : target,
     );
   }, []);
+
+  useEffect(() => {
+    if (!active || fixedView !== 'cnc_today' || !mdfOpeningScrollPendingRef.current) return;
+    // A dated card link owns its scroll/focus, including when opened from history.
+    if (hasExplicitMdfCardDeepLink) {
+      mdfOpeningScrollPendingRef.current = false;
+      return;
+    }
+    if (mdfWorkdayTodayOpenPatchNeeded || loading) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (!boardViewportRef.current) return;
+      scrollStatusBoardColumnCardsToTop(boardViewportRef.current, 'auto');
+      mdfOpeningScrollPendingRef.current = false;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [active, fixedView, hasExplicitMdfCardDeepLink, loading, mdfWorkdayTodayOpenPatchNeeded]);
 
   useEffect(() => {
     if (
@@ -7051,11 +7082,9 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({
   return (
     <Collapse
       className="cnc-packet-card__sheet"
-      size="small"
       ghost
       activeKey={expanded ? ['bath-sheet'] : []}
       onChange={handleCollapseChange}
-      onClick={stopCncCardClickPropagation}
     >
       <Collapse.Panel
         key="bath-sheet"

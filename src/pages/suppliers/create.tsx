@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { Create } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, Checkbox } from "antd";
@@ -13,7 +14,7 @@ export const SupplierCreate: React.FC<IResourceComponentsProps> = () => {
   return (
     <Create saveButtonProps={saveButtonProps}>
       <Form {...formProps} layout="vertical">
-        <Form.Item label="Name" name="supplier_name" rules={[{ required: true }]}>
+        <Form.Item label="Name" name="supplier_name" rules={[...([{ required: true }]), nameRule("supplier_name")]}>
           <Input />
         </Form.Item>
         <Form.Item label="Address" name="address">

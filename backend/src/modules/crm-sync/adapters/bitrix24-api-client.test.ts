@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   Bitrix24ApiClient,
+  Bitrix24AdmissionState,
   Bitrix24ApiError,
   NoopBitrix24ApiClient,
   type FetchFn,
@@ -22,6 +23,41 @@ const noWait = {
 };
 
 describe('Bitrix24ApiClient', () => {
+  it.each(['OPERATION_TIME_LIMIT','QUERY_LIMIT_EXCEEDED'])('does not replay stage writes or creates on %s',async(code)=>{
+    const fetchFn=vi.fn<FetchFn>().mockImplementation(async()=>jsonResponse({error:code},503));
+    const client=new Bitrix24ApiClient('https://portal/rest/1/synthetic',fetchFn,30000,noWait);
+    await expect(client.updateDealStage('42','WON')).rejects.toThrow(code);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    await expect(client.createWorkingStage({STATUS_ID:'ERP_S_1'})).rejects.toThrow(code);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+  it('shares admission between OAuth and webhook clients without sharing credentials',async()=>{
+    let now=0;const stamps:number[]=[];const admissionState=new Bitrix24AdmissionState();
+    const fetchFn=vi.fn<FetchFn>(async()=>{stamps.push(now);return jsonResponse({result:{item:{id:42}}});});
+    const options={admissionState,now:()=>now,sleep:async(ms:number)=>{now+=ms;}};
+    const webhook=new Bitrix24ApiClient('https://portal/rest/1/synthetic',fetchFn,30000,options);
+    const oauth=new Bitrix24ApiClient('https://portal/rest',fetchFn,30000,{...options,getAccessToken:async()=> 'oauth-test'});
+    await webhook.getCrmItem(2,'42');await oauth.getCrmItem(2,'42');
+    expect(stamps).toEqual([0,500]);
+    expect(JSON.parse(String(fetchFn.mock.calls[0][1]?.body))).not.toHaveProperty('auth');
+    expect(JSON.parse(String(fetchFn.mock.calls[1][1]?.body))).toHaveProperty('auth','oauth-test');
+  });
+  it('does not blindly retry a stage write after a lost response',async()=>{
+    const fetchFn=vi.fn<FetchFn>().mockRejectedValue(new TypeError('fetch failed'));
+    const client=new Bitrix24ApiClient('https://portal/rest/1/synthetic',fetchFn,30000,noWait);
+    await expect(client.updateDealStage('42','WON')).rejects.toThrow();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(fetchFn.mock.calls[0][1]?.body))).toEqual({entityTypeId:2,id:42,fields:{stageId:'WON'}});
+  });
+  it('reads funnel/stage catalogs and never retries ambiguous stage creation',async()=>{
+    const fetchFn=vi.fn<FetchFn>().mockResolvedValueOnce(jsonResponse({result:{categories:[{id:0,name:'Main'}]}})).mockResolvedValueOnce(jsonResponse({result:[{STATUS_ID:'NEW'}]})).mockRejectedValue(new TypeError('fetch failed'));
+    const client=new Bitrix24ApiClient('https://portal/rest/1/synthetic',fetchFn,30000,noWait);
+    expect(await client.listDealCategories()).toEqual([{id:0,name:'Main'}]);
+    expect(await client.listDealStages(3)).toEqual([{STATUS_ID:'NEW'}]);
+    expect(JSON.parse(String(fetchFn.mock.calls[1][1]?.body))).toMatchObject({filter:{ENTITY_ID:'DEAL_STAGE_3'}});
+    await expect(client.createWorkingStage({ENTITY_ID:'DEAL_STAGE',STATUS_ID:'ERP_S_1',NAME:'Test'})).rejects.toThrow();
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+  });
   it('loads exact user names only and caches optional enrichment', async () => {
     const fetchFn = vi.fn<FetchFn>().mockResolvedValue(jsonResponse({ result: [{ ID: '7', NAME: 'Айдар', LAST_NAME: 'Тест', EMAIL: 'secret@example.invalid' }] }));
     const client = new Bitrix24ApiClient('https://portal/rest/1/secret', fetchFn, 30_000, noWait);

@@ -1,3 +1,4 @@
+import { humanNameError } from '@shared/human-name';
 import { Table, Tooltip } from '../../../ui/tooltipDelay';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Col, Collapse, Form, Input, InputNumber, Modal, Radio, Row, Select, Space, Switch, Tag, Typography, message } from 'antd';
@@ -578,6 +579,8 @@ export const LabelsConfigTab: React.FC = () => {
   };
 
   const buildTemplatePayload = (values: TemplateFormValues, name = values.name): LabelTemplateInput => {
+    const nameError = humanNameError(name, 200);
+    if (nameError) throw new Error(nameError);
     const currentElements = elementsRef.current;
     const customFieldSchema = customFieldRowsToSchema(customFieldsRef.current);
     // QR is a first-class element: it may freely overlap other elements and sit

@@ -46,6 +46,7 @@ export function normalizeBitrixDeal(
   const createdAt = dateTime(item.createdTime);
   const rawSnapshot = {
     title: cleanText(item.title),
+    categoryId: item.categoryId != null && Number.isInteger(Number(item.categoryId)) && Number(item.categoryId)>=0 ? Number(item.categoryId) : null,
     opportunity: finiteNumber(item.opportunity),
     currencyId: cleanText(item.currencyId),
     stageId: cleanText(item.stageId),
@@ -64,6 +65,7 @@ export function normalizeBitrixDeal(
     bitrixId,
     title: normalizeOrderTitle(fullTitle, bitrixId),
     fullTitle,
+    categoryId: rawSnapshot.categoryId,
     clientId: input.clientId,
     counterpartyObjectType: input.counterparty?.objectType ?? null,
     counterpartyBitrixId: input.counterparty?.bitrixId ?? null,

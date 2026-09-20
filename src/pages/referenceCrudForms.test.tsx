@@ -158,7 +158,7 @@ for (const scenario of cases) {
           const fields = React.Children.toArray(mount().children)
             .filter(React.isValidElement<{ name?: string; rules?: unknown[] }>);
           const name = fields.find((field) => field.props.name === 'production_status_name');
-          expect(name?.props.rules).toEqual([{ required: true, whitespace: true }]);
+          expect(name?.props.rules).toEqual([{ required: true, whitespace: true }, { validator: expect.any(Function) }]);
           expect(fields.some((field) => field.props.name === 'production_status_code')).toBe(false);
         });
       }

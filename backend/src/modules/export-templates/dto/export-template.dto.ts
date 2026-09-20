@@ -1,3 +1,4 @@
+import { humanName } from '../../../shared/human-name-schema';
 import { z } from 'zod';
 import {
   EXPORT_TEMPLATE_FORMATS,
@@ -74,7 +75,7 @@ const sheetNameSchema = z.string().trim().min(1).max(31).refine((value) => !/[\[
 const idempotencyKeySchema = z.string().trim().min(8).max(200);
 
 export const createExportTemplateSchema = z.object({
-  name: z.string().trim().min(1).max(200),
+  name: humanName(200, 1),
   description: z.string().max(2000).nullable().optional(),
   targetScreen: z.enum(EXPORT_TEMPLATE_TARGETS),
   sourceType: z.enum(EXPORT_TEMPLATE_SOURCES),
@@ -87,7 +88,7 @@ export const createExportTemplateSchema = z.object({
 }).strict();
 
 export const updateExportTemplateSchema = z.object({
-  name: z.string().trim().min(1).max(200),
+  name: humanName(200, 1),
   description: z.string().max(2000).nullable().optional(),
   sheetName: sheetNameSchema,
   schemaVersion: z.literal(EXPORT_TEMPLATE_SCHEMA_VERSION),

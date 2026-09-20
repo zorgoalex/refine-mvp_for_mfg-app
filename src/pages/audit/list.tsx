@@ -23,6 +23,7 @@ import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSiz
 import { auditObject, buildAuditReadableSummary } from './readableSummary';
 import { auditEventOptions, auditEventTitle } from './eventLabels';
 import { TelegramWorkerAudit } from './TelegramWorkerAudit';
+import { Bitrix24Audit, AuditOrderLookup } from './Bitrix24Audit';
 
 const { Text } = Typography;
 
@@ -486,13 +487,15 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
       if (!hasPermission) return;
 
       abortRef.current?.abort();
-      abortRef.current = new AbortController();
+      const controller = new AbortController();
+      abortRef.current = controller;
 
       setLoading(true);
       setPermissionError(null);
 
       try {
-        const response = await auditApi.list(q);
+        const response = await auditApi.list({ ...q, excludeBitrix24: true });
+        if (controller.signal.aborted) return;
         setData(response.data);
         setPagination({
           page: response.pagination.page,
@@ -500,6 +503,7 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
           total: response.pagination.total,
         });
       } catch (err) {
+        if (controller.signal.aborted) return;
         if (isAuditPermissionError(err)) {
           setPermissionError('Недостаточно прав для просмотра журналов (audit.view).');
           setData([]);
@@ -508,7 +512,7 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
           setData([]);
         }
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     },
     [hasPermission]
@@ -522,7 +526,7 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
     setFilterOptionsLoading(true);
 
     try {
-      const response = await auditApi.filterOptions(businessHistoryMode ? { scope: 'business' } : {});
+      const response = await auditApi.filterOptions({ ...(businessHistoryMode ? { scope: 'business' as const } : {}), excludeBitrix24: true });
       setFilterOptions(response.data);
       setFilterOptionsLoaded(true);
     } catch (err) {
@@ -604,6 +608,7 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
   }, [businessHistoryMode, fetchOrderOptions, fetchParticipantOptions, filtersVisible]);
 
   useEffect(() => () => {
+    abortRef.current?.abort();
     if (orderSearchTimerRef.current) clearTimeout(orderSearchTimerRef.current);
     if (participantSearchTimerRef.current) clearTimeout(participantSearchTimerRef.current);
   }, []);
@@ -904,13 +909,8 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
                 </Form.Item>
               </div>
               <div className="aff-item">
-                <Form.Item name="relatedOrderId" label="Заказ #">
-                  <Select
-                    {...commonSelectProps}
-                    placeholder="ID"
-                    options={filterSelectOptions.relatedOrderIds}
-                    style={{ width: 120 }}
-                  />
+                <Form.Item name="relatedOrderId" label="Заказ: номер или ID">
+                  <AuditOrderLookup />
                 </Form.Item>
               </div>
               <div className="aff-item">
@@ -1155,6 +1155,7 @@ export const AuditList: React.FC = () => (
       className="journals-top-tabs"
       defaultActiveKey="business-history"
       items={[
+        { key: 'bitrix24', label: 'Bitrix24', children: <Bitrix24Audit /> },
         {
           key: 'business-history',
           label: 'История бизнеса',

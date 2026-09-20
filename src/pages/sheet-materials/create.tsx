@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import React, { useState } from 'react';
 import { IResourceComponentsProps } from '@refinedev/core';
 import { useSelect } from '@refinedev/antd';
@@ -58,7 +59,7 @@ export const SheetMaterialCreate: React.FC<IResourceComponentsProps> = () => {
       <Form form={form} layout="vertical" initialValues={{ isActive: true, isCuttable: true, sortOrder: 100 }}>
         <Row gutter={16}>
           <Col xs={24} sm={12} md={8}>
-            <Form.Item name="name" label="Название" rules={[{ required: true, message: 'Укажите название' }]}>
+            <Form.Item name="name" label="Название" rules={[...([{ required: true, message: 'Укажите название' }]), nameRule("name", 200)]}>
               <Input maxLength={200} placeholder="ЛДСП Egger H1234 16мм 2070x2800" />
             </Form.Item>
           </Col>

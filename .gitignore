@@ -37,6 +37,9 @@ yarn-error.log*
 
 # generated VPS runtime files
 /docker-compose.yml
+/backend-release.env
+/backend-release.candidate.env
+/backend-release.previous.env
 /config/postgres/pg_hba.conf
 /data/
 /backups/
@@ -58,9 +61,16 @@ __pycache__/
 ai_docs/
 /session-handoffs/
 /docs/*
+!/docs/mdf-shadow-comparison.md
 !/docs/project-overview.md
 !/docs/configuration-and-auth.md
 !/docs/deployment-and-operations.md
+!/docs/backend-release-runbook.md
+!/docs/mdf-engine-foundation.md
+!/docs/archive/
+/docs/archive/*
+!/docs/archive/deployment-and-operations.before-backend-release-2026-09-18.md
+!/docs/archive/ops-readme.before-backend-release-2026-09-18.md
 !/docs/whatsapp-production-runbook.md
 !/docs/feature-guides.md
 !/docs/development-and-testing.md

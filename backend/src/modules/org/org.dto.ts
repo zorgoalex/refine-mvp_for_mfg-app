@@ -1,3 +1,4 @@
+import { NAME_CONTROL_CHARACTERS } from '../../shared/human-name';
 import { ApiError } from '../../common/errors/api-error';
 import type { ReplaceIdSetRequestDto, UpdateDirectionRequestDto } from './org.types';
 
@@ -11,6 +12,7 @@ function asObject(body: unknown): Record<string, unknown> {
 function parseName(value: unknown, required: boolean): string | undefined {
   if (value === undefined && !required) return undefined;
   if (typeof value !== 'string') throw new ApiError(422, 'ORG_INVALID_NAME', 'name must be a string');
+  if (NAME_CONTROL_CHARACTERS.test(value)) throw new ApiError(422, 'ORG_INVALID_NAME', 'Название содержит управляющие символы');
   const trimmed = value.trim();
   if (trimmed.length === 0) throw new ApiError(422, 'ORG_INVALID_NAME', 'name must not be empty');
   if (trimmed.length > 128) throw new ApiError(422, 'ORG_INVALID_NAME', 'name must be <= 128 chars');

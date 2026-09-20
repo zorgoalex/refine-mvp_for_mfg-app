@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { Create, useForm, useSelect } from "@refinedev/antd";
 import type { BaseRecord, HttpError, IResourceComponentsProps } from "@refinedev/core";
 import type { MaterialTransactionTypeFormValues } from "./formValues";
@@ -42,7 +43,7 @@ export const MaterialTransactionTypeCreate: React.FC<IResourceComponentsProps> =
         <Form.Item
           label="Name"
           name="transaction_type_name"
-          rules={[{ required: true, whitespace: true }]}
+          rules={[...([{ required: true, whitespace: true }]), nameRule("transaction_type_name")]}
         >
           <Input />
         </Form.Item>

@@ -1,3 +1,4 @@
+import { assertSafeXml, decodeXmlText } from '../../../shared/xml-text';
 import { XMLParser } from 'fast-xml-parser';
 
 export interface ParsedBazisNode {
@@ -84,12 +85,11 @@ type BazisElement = Record<string, unknown>;
 // default grouped mode for simpler tree traversal, so mixed sibling interleave is not preserved:
 // siblings are walked per tag in first-occurrence order. UI can still sort via `Позиция`/`seq`.
 export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
-  let text = Buffer.isBuffer(source) ? source.toString('utf8') : source;
+  let text: string;
+  try { text = Buffer.isBuffer(source) ? decodeXmlText(source) : source; assertSafeXml(text); }
+  catch (error) { throw new BazisXmlParseError((error as Error).message); }
   if (text.charCodeAt(0) === 0xfeff) {
     text = text.slice(1);
-  }
-  if (/<!DOCTYPE/i.test(text.slice(0, 4096))) {
-    throw new BazisXmlParseError('DOCTYPE запрещён');
   }
 
   const parser = new XMLParser({
@@ -101,7 +101,7 @@ export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
     // (универсальный обход: новые контейнеры вроде Полуфабрикат не должны теряться).
     isArray: (name, jPath) =>
       ARRAY_TAGS.has(name) || /(^|\.)СписокЭлементов\.[^.]+$/.test(jPath),
-    processEntities: false,
+    processEntities: true,
   });
 
   let doc: Record<string, unknown>;

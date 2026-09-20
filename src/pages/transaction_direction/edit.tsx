@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { Edit, useForm } from "@refinedev/antd";
 import type { BaseRecord, HttpError, IResourceComponentsProps } from "@refinedev/core";
 import type { TransactionDirectionFormValues } from "./formValues";
@@ -40,7 +41,7 @@ export const TransactionDirectionEdit: React.FC<IResourceComponentsProps> = () =
         <Form.Item
           label="Name"
           name="direction_name"
-          rules={[{ required: true, whitespace: true }]}
+          rules={[...([{ required: true, whitespace: true }]), nameRule("direction_name")]}
         >
           <Input placeholder="e.g., Inbound, Outbound" />
         </Form.Item>

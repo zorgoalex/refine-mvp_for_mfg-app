@@ -1,12 +1,15 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { ApiError } from "../../common/errors/api-error";
 import { WhatsAppRuntimeConfigService } from "./whatsapp-runtime-config.service";
+import { WhatsAppTechnicalLogService } from "./whatsapp-technical-log.service";
 
 @Injectable()
 export class WahaClient {
   constructor(
     @Inject(WhatsAppRuntimeConfigService)
-    private readonly runtime: WhatsAppRuntimeConfigService
+    private readonly runtime: WhatsAppRuntimeConfigService,
+    @Optional() @Inject(WhatsAppTechnicalLogService)
+    private readonly technicalLogs?: WhatsAppTechnicalLogService
   ) {}
 
   health() {
@@ -38,11 +41,23 @@ export class WahaClient {
 
   async qr(): Promise<{ bytes: Uint8Array; contentType: string }> {
     const response = await this.raw(
-      `/api/${this.sessionPath()}/auth/qr?format=image`
+      `/api/${this.sessionPath()}/auth/qr?format=image`,
+      { headers: { Accept: "image/png" } }
     );
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.toLowerCase().startsWith("image/png") || !isPng(bytes)) {
+      await this.technicalLogs?.record({
+        component: "waha", level: "error", eventCode: "waha.qr.response",
+        outcome: "failed", operation: "GET /api/{session}/auth/qr",
+        errorCode: "WAHA_QR_RESPONSE_INVALID",
+        details: { contentType: contentType.slice(0, 80), size: bytes.byteLength },
+      });
+      throw new ApiError(502, "WAHA_QR_RESPONSE_INVALID", "WAHA returned an invalid QR image");
+    }
     return {
-      bytes: new Uint8Array(await response.arrayBuffer()),
-      contentType: response.headers.get("content-type") ?? "image/png",
+      bytes,
+      contentType: "image/png",
     };
   }
 
@@ -93,6 +108,8 @@ export class WahaClient {
     }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), config.requestTimeoutMs);
+    const startedAt = Date.now();
+    const operation = `${init.method ?? "GET"} ${this.safePath(path)}`;
     try {
       const response = await globalThis.fetch(`${config.baseUrl}${path}`, {
         ...init,
@@ -104,20 +121,38 @@ export class WahaClient {
         },
       });
       if (!response.ok) {
+        await this.technicalLogs?.record({ component: "waha", level: "error", eventCode: "waha.api.request",
+          outcome: "failed", operation, httpStatus: response.status, durationMs: Date.now() - startedAt,
+          errorCode: "WAHA_PROVIDER_ERROR" });
         throw new ApiError(
           502,
           "WAHA_PROVIDER_ERROR",
           `WAHA request failed (${response.status})`
         );
       }
+      await this.technicalLogs?.record({ component: "waha", level: "info", eventCode: "waha.api.request",
+        outcome: "succeeded", operation, httpStatus: response.status, durationMs: Date.now() - startedAt });
       return response;
     } catch (error) {
       if (error instanceof ApiError) throw error;
+      await this.technicalLogs?.record({ component: "waha", level: "error", eventCode: "waha.api.request",
+        outcome: "failed", operation, durationMs: Date.now() - startedAt, errorCode: "WAHA_UNAVAILABLE",
+        errorMessage: error instanceof Error ? error.name : "UnknownError" });
       throw new ApiError(503, "WAHA_UNAVAILABLE", "WAHA is unavailable");
     } finally {
       clearTimeout(timer);
     }
   }
+
+  private safePath(path: string): string {
+    const session = this.runtime.getConfig().sessionName;
+    return session ? path.replaceAll(encodeURIComponent(session), "{session}") : path;
+  }
+}
+
+function isPng(bytes: Uint8Array): boolean {
+  const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  return signature.every((value, index) => bytes[index] === value);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

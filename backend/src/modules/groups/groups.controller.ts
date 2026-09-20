@@ -1,3 +1,4 @@
+import { humanName } from '../../shared/human-name-schema';
 import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
@@ -23,8 +24,8 @@ const GROUP_MUTABLE_STATUSES = ['draft', 'active', 'paused', 'completed'] as con
 const groupStatusSchema = z.enum(GROUP_STATUSES);
 const groupMutableStatusSchema = z.enum(GROUP_MUTABLE_STATUSES);
 const uuidSchema = z.string().uuid();
-const groupCodeSchema = z.string().trim().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$/);
-const groupNameSchema = z.string().trim().min(1).max(256);
+const groupCodeSchema = z.string().trim().regex(/^[\p{L}\p{N}][\p{L}\p{N}_-]{1,63}$/u);
+const groupNameSchema = humanName(256);
 const groupDateSchema = z
   .string()
   .refine(isValidGroupDate, 'Invalid group date')
@@ -190,7 +191,7 @@ const createGroupRequestSwaggerSchema = {
   type: 'object',
   required: ['code', 'name'],
   properties: {
-    code: { type: 'string', minLength: 2, maxLength: 64, pattern: '^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$' },
+    code: { type: 'string', minLength: 2, maxLength: 64, pattern: '^[\\p{L}\\p{N}][\\p{L}\\p{N}_-]{1,63}$' },
     name: { type: 'string', minLength: 1, maxLength: 256 },
     description: { type: 'string', maxLength: 2000, nullable: true },
     status: { type: 'string', enum: GROUP_MUTABLE_STATUSES, default: 'active' },

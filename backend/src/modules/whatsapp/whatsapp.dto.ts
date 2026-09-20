@@ -1,3 +1,4 @@
+import { humanName } from '../../shared/human-name-schema';
 import { z } from "zod";
 import { ApiError } from "../../common/errors/api-error";
 
@@ -5,7 +6,7 @@ const code = z
   .string()
   .trim()
   .regex(/^[a-z][a-z0-9_]{1,63}$/);
-const name = z.string().trim().min(1).max(120);
+const name = humanName(120);
 const body = z.string().trim().min(1).max(4096);
 const keywords = z
   .array(z.string().trim().min(1).max(120))

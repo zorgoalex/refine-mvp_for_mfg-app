@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { Create, useForm, useSelect } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, Select, Checkbox } from "antd";
@@ -15,7 +16,7 @@ export const WorkshopCreate: React.FC<IResourceComponentsProps> = () => {
   return (
     <Create saveButtonProps={saveButtonProps}>
       <Form {...formProps} layout="vertical" initialValues={{ is_active: true }}>
-        <Form.Item label="Название" name="workshop_name" rules={[{ required: true, message: 'Пожалуйста, введите название цеха' }]}>
+        <Form.Item label="Название" name="workshop_name" rules={[...([{ required: true, message: 'Пожалуйста, введите название цеха' }]), nameRule("workshop_name")]}>
           <Input placeholder="Цех сборки, Цех обработки..." />
         </Form.Item>
         <Form.Item label="Адрес" name="address">

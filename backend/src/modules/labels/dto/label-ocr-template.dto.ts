@@ -1,3 +1,4 @@
+import { humanName } from '../../../shared/human-name-schema';
 import { z } from 'zod';
 import { DISCRIMINANT_FIELDS, isStrongField, OCR_FIELD_CODES } from '../application/scan/ocr-field-catalog';
 import type { OcrFieldCode } from '../application/scan/ocr-field-catalog';
@@ -60,7 +61,7 @@ function refineRules(rules: OcrRuleInput[], ctx: z.RefinementCtx): void {
 
 const baseLabelOcrTemplateSchema = z
   .object({
-    name: z.string().trim().min(1).max(120),
+    name: humanName(120, 1),
     rules: z.array(ocrRuleSchema).min(1).max(30),
     sampleLines: z.array(z.string().max(300)).max(100).default([]),
     isActive: z.boolean().default(true),

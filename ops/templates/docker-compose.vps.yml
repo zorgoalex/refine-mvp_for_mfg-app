@@ -352,6 +352,7 @@ services:
     environment:
       WAHA_API_KEY: ${WAHA_API_KEY:-}
       WAHA_DASHBOARD_ENABLED: "false"
+      WAHA_PRINT_QR: "false"
       WHATSAPP_SWAGGER_ENABLED: "false"
       WHATSAPP_DOWNLOAD_MEDIA: "false"
       WAHA_API_DOWNLOAD_MEDIA: "false"

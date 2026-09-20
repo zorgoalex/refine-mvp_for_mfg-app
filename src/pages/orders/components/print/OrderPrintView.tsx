@@ -8,11 +8,12 @@ import './OrderPrintView.css';
  */
 interface OrderDetail {
   detail_id: number;
-  length: number | null;
+  detail_number: number;
+  height: number | null;
   width: number | null;
   quantity: number;
   area: number | null;
-  notes: string | null;
+  note: string | null;
   milling_cost_per_sqm: number | null;
   detail_cost: number | null;
   milling_type?: { milling_type_name: string } | null;

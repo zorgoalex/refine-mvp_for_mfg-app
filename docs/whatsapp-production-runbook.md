@@ -2,12 +2,13 @@
 
 WAHA работает как внутренний Docker-сервис. Публичного поддомена, порта,
 dashboard или Swagger у него нет. Администрирование выполняется в ERP:
-`Конфигурация → WhatsApp` и `Конфигурация → WhatsApp-правила`.
+`Конфигурация → WhatsApp`, `Конфигурация → WhatsApp-правила` и
+`Конфигурация → WhatsApp-журнал`.
 
 ## Условия запуска
 
-- В `main` должен находиться одобренный release SHA с миграцией
-  `152_whatsapp_admin.sql`.
+- В release SHA должны находиться миграции `152_whatsapp_admin.sql` и
+  `170_whatsapp_technical_logs.sql`, а migration runner обязан классифицировать 170.
 - Frontend и backend build зелёные.
 - На VPS свободно минимум 1 GiB RAM и 2–3 GiB диска. Начальный лимит WAHA:
   1 CPU, 1 GiB RAM, 256 PID.
@@ -30,6 +31,8 @@ npm --prefix backend run build
 ERP_RELEASE_SHA="$(git rev-parse HEAD)"
 git show --stat --oneline "$ERP_RELEASE_SHA"
 git cat-file -e "$ERP_RELEASE_SHA:backend/db/migrations/152_whatsapp_admin.sql"
+git cat-file -e "$ERP_RELEASE_SHA:backend/db/migrations/170_whatsapp_technical_logs.sql"
+git show "$ERP_RELEASE_SHA:ops/apply-migrations.sh" | grep -q '170_whatsapp_technical_logs'
 ```
 
 ## 2. Обновить production checkout с WhatsApp выключенным
@@ -73,7 +76,7 @@ curl -fsS https://<backend-fqdn>/health/ready
 test "$(git rev-parse HEAD)" = "$ERP_RELEASE_SHA"
 ```
 
-## 3. Backup и миграция 152
+## 3. Backup и миграции 152/170
 
 ```bash
 cd ~/projects/erp_dev/repo_erp
@@ -102,9 +105,10 @@ ops/apply-migrations.sh auto --container "$ERP_PG_CONTAINER" --detect-only
 ops/apply-migrations.sh auto --container "$ERP_PG_CONTAINER" --yes --skip-041
 ops/apply-migrations.sh status --container "$ERP_PG_CONTAINER"
 ops/apply-migrations.sh probe 152 --container "$ERP_PG_CONTAINER"
+ops/apply-migrations.sh probe 170_whatsapp_technical_logs.sql --container "$ERP_PG_CONTAINER"
 ```
 
-Требуется `152: PRESENT` и `pending: 0`.
+Требуются `152: PRESENT`, `170_whatsapp_technical_logs.sql PRESENT` и `pending: 0`.
 
 ## 4. Настроить secrets и canary-режим
 
@@ -134,17 +138,25 @@ WAHA_MEM_LIMIT=1024m
 WAHA_PIDS_LIMIT=256
 ```
 
+В live Compose для сервиса `waha` обязательно должно быть
+`WAHA_PRINT_QR: "false"`: QR не должен попадать в stdout/stderr контейнера.
+
 Если уже используются другие profiles, не удаляйте их, например:
 `COMPOSE_PROFILES=cnc-telegram,whatsapp`.
 
 ```bash
 cd ~/projects/erp_dev/repo_erp
-ops/check-env.sh \
-  --env-file ~/projects/erp_dev/.env \
-  --compose-file ~/projects/erp_dev/docker-compose.yml
+( set -a
+  . ~/projects/erp_dev/backend-release.env
+  set +a
+  ops/check-env.sh \
+    --env-file ~/projects/erp_dev/.env \
+    --compose-file ~/projects/erp_dev/docker-compose.yml
+)
 docker compose \
   --project-directory ~/projects/erp_dev \
   --env-file ~/projects/erp_dev/.env \
+  --env-file ~/projects/erp_dev/backend-release.env \
   -f ~/projects/erp_dev/docker-compose.yml \
   --profile whatsapp config --quiet
 ```
@@ -198,8 +210,13 @@ RUNTIME_CONFIG_BACKEND_WHATSAPP=true
 ```
 
 После Vercel redeploy проверить `/api/runtime-config`: поле
-`features.backendWhatsApp=true`, frontend build SHA ожидаемый, две вкладки
+`features.backendWhatsApp=true`, frontend build SHA ожидаемый, три вкладки
 доступны только с `whatsapp.view`/`whatsapp.manage`.
+
+В `WhatsApp-журнале` проверить события WAHA API, session, webhook, relay и
+cleanup. Фильтры, пагинация и JSONL-экспорт должны работать; QR, JID, тексты
+сообщений и secrets в журнал не записываются. Кнопка принудительного
+перезапуска перезапускает WAHA-сессию, но не Docker-контейнер.
 
 ## 8. Наблюдение и rollback
 
@@ -217,4 +234,4 @@ RUNTIME_CONFIG_BACKEND_WHATSAPP=false
 После backend и Vercel redeploy входящие сообщения продолжат попадать в очередь.
 Для полной остановки сначала остановить WAHA/remove profile, затем выставить
 `BACKEND_ENABLE_WHATSAPP=false` и `BACKEND_WHATSAPP_CLEANUP_OWNER=none`. Volume
-`waha-sessions` и таблицы migration 152 не удалять.
+`waha-sessions` и таблицы migrations 152/170 не удалять.

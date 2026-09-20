@@ -1,3 +1,4 @@
+import { nameRule } from '../../../../utils/nameRules';
 // Quick Create Modal for Client
 // Allows creating a new client without leaving the order form
 
@@ -112,7 +113,7 @@ export const ClientQuickCreate: React.FC<ClientQuickCreateProps> = ({
         <Form.Item
           label="Название клиента"
           name="client_name"
-          rules={[
+          rules={[...([
             { required: true, message: 'Обязательное поле' },
             { min: 2, message: 'Минимум 2 символа' },
             { max: 200, message: 'Максимум 200 символов' },
@@ -120,7 +121,7 @@ export const ClientQuickCreate: React.FC<ClientQuickCreateProps> = ({
               pattern: /^(?!\s)(?!.*\s$)/,
               message: 'Название не должно начинаться или заканчиваться пробелом',
             },
-          ]}
+          ]), nameRule("client_name")]}
         >
           <Input
             placeholder="Введите название клиента"

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { safeBitrixError } from '../../audit/application/bitrix-audit-sanitization';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { readOrderCatalogLines, prepareOrderCatalogLines, persistOrderCatalogLines, recordOrderCatalogLinesChange } from '../../orders/adapters/pg-order-catalog-lines';
 import { assertOrderHasPositions, catalogSubtotal, type OrderCatalogPlan } from '../../orders/domain/order-catalog-lines';
@@ -54,6 +55,7 @@ export interface ReverseClientSnapshot {
 }
 
 export interface ReverseDealSnapshot {
+  categoryId?: number | null;
   bitrixId: string;
   title: string;
   fullTitle: string;
@@ -117,6 +119,7 @@ export class PgBitrix24ReverseRepository {
     private readonly audit: AuditService,
     private readonly portalTimezone = 'Asia/Almaty',
     private readonly portalDomain = 'mebelkz.bitrix24.kz',
+    private readonly stageObserver?: import('../stages/stage-repository').StageRepository,
   ) {}
 
   async assertReverseSyncReady(actorUserId: number): Promise<void> {
@@ -462,25 +465,60 @@ export class PgBitrix24ReverseRepository {
   async markEventFailed(
     event: Bitrix24InboundEventRow,
     error: string,
-    maxAttempts: number,
-  ): Promise<void> {
+    maxAttempts: number
+  ): Promise<boolean> {
     const dead = event.attempts >= maxAttempts;
     const delaySeconds = Math.min(3600, 2 ** Math.min(event.attempts, 10));
-    await this.db.query(
-      `UPDATE bitrix24_inbound_event
+    return this.db.transaction(async (tx) => {
+      const updated = await tx.query<{ next_attempt_at: Date | string }>(
+        `UPDATE bitrix24_inbound_event
           SET status=$3, last_error=$4,
               next_attempt_at=CASE WHEN $3='dead' THEN next_attempt_at
                                    ELSE now() + ($5::int * interval '1 second') END,
               locked_at=NULL, locked_by=NULL, lock_token=NULL
-        WHERE inbound_event_id=$1 AND status='processing' AND lock_token=$2`,
-      [
-        event.inboundEventId,
-        event.lockToken,
-        dead ? 'dead' : 'failed',
-        error.slice(0, 1000),
-        delaySeconds,
-      ],
-    );
+        WHERE inbound_event_id=$1 AND status='processing' AND lock_token=$2
+        RETURNING next_attempt_at`,
+        [
+          event.inboundEventId,
+          event.lockToken,
+          dead ? 'dead' : 'failed',
+          safeBitrixError(error),
+          delaySeconds,
+        ]
+      );
+      if (updated.rowCount !== 1) return false;
+      const mapping = await tx.query<{ entity_type: string; erp_id: string }>(
+        `SELECT entity_type, erp_id FROM crm_sync_mapping WHERE bitrix_object=$1 AND bitrix_id=$2 LIMIT 1`,
+        [event.objectType, event.bitrixId]
+      );
+      const owner = mapping.rows[0];
+      const id =
+        owner &&
+        /^[1-9][0-9]*$/.test(owner.erp_id) &&
+        Number.isSafeInteger(Number(owner.erp_id))
+          ? Number(owner.erp_id)
+          : null;
+      await this.audit.record(tx, {
+        event: dead
+          ? 'bitrix24_reverse.event_dead'
+          : 'bitrix24_reverse.event_failed',
+        entityType: `bitrix24_${event.objectType}`,
+        entityId: event.bitrixId,
+        source: 'bitrix24',
+        actorUserId: null,
+        requestId: event.inboundEventId,
+        relatedOrderId: owner?.entity_type === 'order' ? id : null,
+        relatedClientId: owner?.entity_type === 'client' ? id : null,
+        metadata: {
+          bitrixObject: event.objectType,
+          bitrixId: event.bitrixId,
+          attempts: event.attempts,
+          error: safeBitrixError(error),
+          nextAttemptAt: dead ? null : updated.rows[0].next_attempt_at,
+        },
+      });
+      return true;
+    });
   }
 
   async findMappingByBitrix(
@@ -706,6 +744,10 @@ export class PgBitrix24ReverseRepository {
           'SELECT order_id FROM orders WHERE order_id=$1 FOR UPDATE',
           [mapping.erpId],
         );
+        if (this.stageObserver && lockToken && snapshot.categoryId != null && snapshot.stageId) {
+          const inbound = await tx.query<{ member_id: string }>('SELECT member_id FROM bitrix24_inbound_event WHERE inbound_event_id::text=$1 AND lock_token=$2', [requestId,lockToken]);
+          if (inbound.rows[0]) await this.stageObserver.observe(tx,inbound.rows[0].member_id,snapshot.bitrixId,snapshot.categoryId,snapshot.stageId);
+        }
         const linkedRequest = mapping.sourceSystem === 'bitrix24'
           ? await tx.query<{
               request_id: string | number;

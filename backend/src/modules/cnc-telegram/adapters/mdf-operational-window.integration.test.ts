@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Client } from 'pg';
 import { PgCncTelegramRepository, loadMdfBathColumnAutomationState } from './pg-cnc-telegram-repository';
-import { loadMdfLaminatedBathAutomationRows } from '../../production-actions/adapters/pg-production-action-repository';
+import { changeDetailsProductionStatusFromAutomationInTransaction, loadMdfLaminatedBathAutomationRows } from '../../production-actions/adapters/pg-production-action-repository';
 import type { TransactionClient } from '../../../database/database.types';
 import { loadMdfBoardEvents } from '../../status-automation/adapters/pg-mdf-board-event-repository';
 import { dispatchMdfBoardEvent, evaluateAllStatusAutomationRulesForOrder, evaluateStatusAutomation } from '../../status-automation/application/status-automation-runtime';
@@ -451,6 +451,74 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
       else process.env.BACKEND_STATUS_AUTOMATION = previousFlag;
     }
     expect((await client.query('SELECT production_status_id FROM pg_temp.order_details WHERE detail_id=1')).rows[0].production_status_id).toBe(1);
+  });
+
+  describe('F07 order cascades preserve source-owned manual facts', () => {
+    it.each([
+      { target: 1, mode: 'advance_only' as const, initial: 2 },
+      { target: 3, mode: 'advance_only' as const, initial: 2 },
+      { target: 2, mode: 'set_exact' as const, initial: 3 },
+    ])('keeps mixed and single-owner facts through $mode to status $target and no-op replay', async ({ target, mode, initial }) => {
+      await client.query('BEGIN');
+      try {
+        await client.query(`UPDATE pg_temp.orders SET version=1,order_status_id=4,payment_status_id=1;
+          UPDATE pg_temp.production_statuses SET is_active=true;
+          UPDATE pg_temp.order_details SET quantity=1;
+          UPDATE pg_temp.cnc_telegram_packets SET completion_status='pending',thumbs_up=false,mdf_board_card_kind='machine_file';
+          UPDATE pg_temp.cnc_telegram_packet_items SET quantity=1;`);
+        await client.query('UPDATE pg_temp.order_details SET production_status_id=$1 WHERE detail_id=1', [initial]);
+        await client.query('UPDATE pg_temp.order_details SET production_status_id=$1 WHERE detail_id IN (3,4)', [target]);
+        await client.query(`INSERT INTO pg_temp.cnc_telegram_packet_items(packet_id,match_order_id,match_detail_id,quantity)
+          VALUES('00000000-0000-0000-0000-000000000001',2,2,1);`);
+        await addBasis(1);
+        await client.query(`INSERT INTO pg_temp.bazis_cut_set_details(bazis_cut_set_detail_id,bazis_cut_set_id,source_order_id,source_order_detail_id,quantity,material_name)
+          VALUES(2,1,2,2,1,'МДФ 18мм');`);
+        await oldPacket(2, '2026-09-06', 1, 3, 1); // same owner, unchanged position
+        await oldPacket(3, '2026-09-06', 2, 2, 1); // other owner only
+        await seed(1, [1, 2], '2026-09-06T12:00:00+05');
+        await seed(2, [3], '2026-09-06T12:00:00+05');
+        await client.query(`INSERT INTO pg_temp.mdf_board_manual_moves(card_kind,card_id,target_column) VALUES
+          ('packet','00000000-0000-0000-0000-000000000001','completed'),
+          ('packet','00000000-0000-0000-0000-000000000002','completed'),
+          ('packet','00000000-0000-0000-0000-000000000003','completed'),
+          ('bath','cut-result:1','completed_baths'),('bath','cut-result:2','baths'),
+          ('order','1','orders_ready');
+          UPDATE pg_temp.mdf_board_manual_moves SET version=7,created_at='2026-09-01',updated_at='2026-09-02';`);
+        const moves = async () => (await client.query('SELECT * FROM pg_temp.mdf_board_manual_moves ORDER BY card_kind,card_id')).rows;
+        const beforeMoves = await moves();
+        const beforeEvents = await eventsFor();
+        const tx = { raw: client, query: (sql: string, params: unknown[]) =>
+          sql.trim().startsWith('SELECT recalc_order_production_status')
+            ? client.query('SELECT 1') : client.query(sql, params),
+        } as unknown as TransactionClient;
+        const context = { actor: { id: '3', username: 'E2E-F07', role: 'admin', permissions: [] } as CurrentUser,
+          eventType: 'order.status_changed', ruleId: 905, ruleName: 'E2E-F07 order cascade',
+          requestId: 'E2E-F07', outboxIdempotencyKey: 'E2E-F07' };
+        const run = () => changeDetailsProductionStatusFromAutomationInTransaction(tx, 1, target, context, mode);
+        expect(await run()).toMatchObject({ status: 'executed' });
+        expect(await moves()).toEqual(beforeMoves);
+        expect(await eventsFor()).toEqual(beforeEvents); // B's cut credit does not disappear
+        expect((await client.query('SELECT detail_id,production_status_id FROM pg_temp.order_details ORDER BY detail_id')).rows)
+          .toEqual([
+            { detail_id: '1', production_status_id: target }, { detail_id: '2', production_status_id: 2 },
+            { detail_id: '3', production_status_id: target }, { detail_id: '4', production_status_id: target },
+          ]);
+        const audits = (await client.query("SELECT metadata_json FROM pg_temp.audit_log WHERE event='orders.detail_production_status_batch_change'")).rows;
+        expect(audits).toHaveLength(1);
+        expect(audits[0].metadata_json).toMatchObject({ changedDetailIds: [1], affectedDetailCount: 1 });
+        const effects = async () => ({
+          orders: (await client.query('SELECT order_id,version FROM pg_temp.orders ORDER BY order_id')).rows,
+          outbox: (await client.query('SELECT * FROM pg_temp.outbox_events ORDER BY idempotency_key')).rows,
+          auditCount: (await client.query('SELECT count(*) FROM pg_temp.audit_log')).rows,
+        });
+        const after = await effects();
+        expect(after.outbox).toHaveLength(1);
+        expect(after.orders).toEqual([{ order_id: '1', version: 2 }, { order_id: '2', version: 1 }]);
+        expect(await run()).toMatchObject({ status: 'skipped', skipReason: 'same_status' });
+        expect(await moves()).toEqual(beforeMoves);
+        expect(await effects()).toEqual(after);
+      } finally { await client.query('ROLLBACK'); }
+    });
   });
 
   describe('enabled stage MDF rules 16/17 (configuration captured 2026-09-08)', () => {

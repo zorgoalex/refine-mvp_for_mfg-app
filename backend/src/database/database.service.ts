@@ -5,6 +5,7 @@ import { ApiError } from '../common/errors/api-error';
 import type { BackendEnv } from '../config/env.validation';
 import type { DatabaseClient, DatabaseQueryOptions, TransactionClient } from './database.types';
 import { PerformanceQueryTelemetryService } from '../performance/performance-query-telemetry.service';
+import { beginTransactionHooks, flushTransactionHooks, discardTransactionHooks } from './transaction-hooks';
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
@@ -103,7 +104,9 @@ export class DatabaseService implements OnModuleDestroy, DatabaseClient {
 
     try {
       await client.query('BEGIN');
+      beginTransactionHooks(client);
       const result = await handler(client);
+      await flushTransactionHooks(client);
       await client.query('COMMIT');
       return result;
     } catch (error) {
@@ -114,6 +117,7 @@ export class DatabaseService implements OnModuleDestroy, DatabaseClient {
       }
       throw error;
     } finally {
+      discardTransactionHooks(client);
       rawClient.release();
     }
   }

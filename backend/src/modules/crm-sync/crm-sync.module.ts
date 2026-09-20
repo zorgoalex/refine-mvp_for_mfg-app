@@ -10,7 +10,7 @@ import { PgCrmSourceRepository } from './adapters/pg-crm-source-repository';
 import { UnavailableCrmSourceRepository } from './adapters/unavailable-crm-source-repository';
 import { PgCrmSyncMappingRepository } from './adapters/pg-crm-sync-mapping-repository';
 import { PgCrmSyncOutboxRepository } from './adapters/pg-crm-sync-outbox-repository';
-import { Bitrix24ApiClient, NoopBitrix24ApiClient } from './adapters/bitrix24-api-client';
+import { Bitrix24ApiClient, Bitrix24AdmissionState, NoopBitrix24ApiClient } from './adapters/bitrix24-api-client';
 import { FailingBitrix24ApiClient } from './adapters/failing-bitrix24-api-client';
 import { Bitrix24SyncConsumer } from './application/bitrix24-sync-consumer';
 import { CrmSyncRelayService } from './application/crm-sync-relay.service';
@@ -35,6 +35,10 @@ import { Bitrix24PaymentWidgetSchedulerService } from './widget/bitrix24-payment
 import { Bitrix24PaymentSystemCatalogService } from './widget/bitrix24-payment-system-catalog.service';
 import { Bitrix24PaymentWidgetAdminController } from './widget/bitrix24-payment-widget-admin.controller';
 import type { Bitrix24ApiPort } from './adapters/bitrix24-api-client';
+import { StageRepository } from './stages/stage-repository';
+import { StageWorker } from './stages/stage-worker';
+import { StageAdminService } from './stages/stage-admin.service';
+import { StageAdminController } from './stages/stage-admin.controller';
 
 const BITRIX24_API_PORT = Symbol('BITRIX24_API_PORT');
 const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
@@ -42,6 +46,7 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
 @Module({
   imports: [DatabaseModule, PermissionsModule],
   controllers: [
+    StageAdminController,
     Bitrix24ReverseController,
     Bitrix24ReverseAdminController,
     Bitrix24OrderConversionController,
@@ -50,6 +55,10 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
     Bitrix24PaymentWidgetAdminController,
   ],
   providers: [
+    { provide: Bitrix24AdmissionState, useFactory: () => new Bitrix24AdmissionState() },
+    { provide: StageRepository, useFactory: (db:DatabaseService,audit:AuditService)=>new StageRepository(db,audit), inject:[DatabaseService,AuditService] },
+    { provide: StageWorker, useFactory: (repo:StageRepository,bitrix:Bitrix24ApiPort,config:CrmSyncRuntimeConfigService)=>new StageWorker(repo,bitrix,config), inject:[StageRepository,BITRIX24_API_PORT,CrmSyncRuntimeConfigService] },
+    { provide: StageAdminService, useFactory: (repo:StageRepository,bitrix:Bitrix24ApiPort,config:CrmSyncRuntimeConfigService,tokens:Bitrix24OAuthTokenService,local:Bitrix24LocalAppClient)=>new StageAdminService(repo,bitrix,config,tokens,local), inject:[StageRepository,BITRIX24_REVERSE_API_PORT,CrmSyncRuntimeConfigService,Bitrix24OAuthTokenService,Bitrix24LocalAppClient] },
     CrmSyncRuntimeConfigService,
     AuditService,
     PgCrmSyncMappingRepository,
@@ -63,7 +72,7 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
     },
     {
       provide: BITRIX24_API_PORT,
-      useFactory: (config: CrmSyncRuntimeConfigService): Bitrix24ApiPort => {
+      useFactory: (config: CrmSyncRuntimeConfigService, admissionState: Bitrix24AdmissionState): Bitrix24ApiPort => {
         const bitrixConfig = config.getBitrix24();
         if (!bitrixConfig.webhookUrl) return new FailingBitrix24ApiClient();
         const bitrixLogger = new Logger(Bitrix24ApiClient.name);
@@ -73,6 +82,7 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
           bitrixConfig.requestTimeoutMs,
           {
             maxRequestsPerSecond: bitrixConfig.maxRequestsPerSecond,
+            admissionState,
             limitRetryMaxAttempts: bitrixConfig.limitRetryMaxAttempts,
             queryLimitBaseDelayMs: bitrixConfig.queryLimitBaseDelayMs,
             operationLimitFallbackDelayMs: bitrixConfig.operationLimitFallbackDelayMs,
@@ -91,7 +101,7 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
           },
         );
       },
-      inject: [CrmSyncRuntimeConfigService],
+      inject: [CrmSyncRuntimeConfigService, Bitrix24AdmissionState],
     },
     {
       provide: PgBitrix24ReverseRepository,
@@ -99,13 +109,15 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
         database: DatabaseService,
         audit: AuditService,
         config: CrmSyncRuntimeConfigService,
+        stageRepository: StageRepository,
       ) => new PgBitrix24ReverseRepository(
         database,
         audit,
         config.getReverseSync().portalTimezone,
         config.getReverseSync().portalDomain,
+        stageRepository,
       ),
-      inject: [DatabaseService, AuditService, CrmSyncRuntimeConfigService],
+      inject: [DatabaseService, AuditService, CrmSyncRuntimeConfigService, StageRepository],
     },
     {
       provide: Bitrix24LocalAppClient,
@@ -175,6 +187,7 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
       useFactory: (
         config: CrmSyncRuntimeConfigService,
         tokens: Bitrix24OAuthTokenService,
+        admissionState: Bitrix24AdmissionState,
       ): Bitrix24ApiPort => {
         const reverse = config.getReverseSync();
         const bitrixConfig = config.getBitrix24();
@@ -189,6 +202,7 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
             queryLimitBaseDelayMs: bitrixConfig.queryLimitBaseDelayMs,
             operationLimitFallbackDelayMs: bitrixConfig.operationLimitFallbackDelayMs,
             getAccessToken: () => tokens.getAccessToken(reverse.portalDomain),
+            admissionState,
             refreshAccessToken: () =>
               tokens.forceRefreshAccessToken(reverse.portalDomain),
             onLimitRetry: ({ method, code, attempt, maxAttempts, delayMs }) => {
@@ -206,7 +220,7 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
           },
         );
       },
-      inject: [CrmSyncRuntimeConfigService, Bitrix24OAuthTokenService],
+      inject: [CrmSyncRuntimeConfigService, Bitrix24OAuthTokenService, Bitrix24AdmissionState],
     },
     {
       provide: Bitrix24ReverseProcessorService,
@@ -300,6 +314,7 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
         outboxRepo: PgCrmSyncOutboxRepository,
         audit: AuditService,
         realBitrix: Bitrix24ApiPort,
+        stageLane: StageWorker,
       ) => {
         // Source repository — falls back to no-op if DB is not configured.
         const source = database.isConfigured
@@ -334,6 +349,7 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
         });
 
         return new CrmSyncRelayService({
+          stageLane,
           outboxRepo,
           consumer,
           dryRunConsumer,
@@ -350,6 +366,7 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
         PgCrmSyncOutboxRepository,
         AuditService,
         BITRIX24_API_PORT,
+        StageWorker,
       ],
     },
     {

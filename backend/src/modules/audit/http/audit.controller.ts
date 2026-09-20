@@ -18,7 +18,8 @@ const MAX_LOOKUP_SEARCH_LENGTH = 80;
 const MAX_LOOKUP_LIMIT = 50;
 
 const numeric = z.coerce.number().int().positive().optional();
-const scopeSchema = z.enum(['all', 'business']).default('all');
+const scopeSchema = z.enum(['all', 'business', 'bitrix24']).default('all');
+const booleanQuery = z.enum(['true', 'false']).transform((value) => value === 'true').optional();
 const querySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().positive().max(200).default(50),
@@ -40,6 +41,13 @@ const querySchema = z.object({
   createdFrom: z.string().datetime().optional(),
   createdTo: z.string().datetime().optional(),
   scope: scopeSchema,
+  excludeBitrix24: booleanQuery,
+  bitrixDirection: z.enum(['forward', 'reverse', 'widget', 'settings', 'other']).optional(),
+  bitrixCategory: z.enum(['client', 'order', 'payment', 'settings', 'processing', 'other']).optional(),
+  bitrixOutcome: z.enum(['success', 'error', 'conflict', 'attention', 'started', 'skipped', 'unknown']).optional(),
+  bitrixReconcile: z.enum(['exclude', 'only']).optional(),
+  bitrixObject: z.enum(['contact', 'company', 'deal', 'payment']).optional(),
+  bitrixId: z.string().regex(/^[1-9][0-9]{0,17}$/).optional(),
 });
 
 function firstQueryValue(value: string | string[] | undefined): string | undefined {
@@ -120,6 +128,9 @@ export function parseAuditListQuery(
     throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid audit list query', { issues: result.error.issues });
   }
   const { page, pageSize, ...filters } = result.data;
+  if (filters.scope === 'bitrix24' && filters.excludeBitrix24) failValidation('Conflicting Bitrix scope', 'excludeBitrix24');
+  if (filters.bitrixId && !filters.bitrixObject) failValidation('Bitrix object type is required', 'bitrixObject');
+  if (Object.entries(filters).some(([key, value]) => key.startsWith('bitrix') && value !== undefined) && filters.scope !== 'bitrix24') failValidation('Bitrix filters require bitrix24 scope', 'scope');
   const events = parseStringArrayParam(query, 'events', MAX_ARRAY_VALUES, MAX_EVENT_LENGTH);
   const orderIds = parsePositiveIntArrayParam(query, 'orderIds', MAX_ARRAY_VALUES);
   const participantUserIds = parsePositiveIntArrayParam(query, 'participantUserIds', MAX_ARRAY_VALUES);
@@ -158,12 +169,13 @@ export function parseAuditListQuery(
 
 export function parseAuditFilterOptionsQuery(
   query: Record<string, string | string[] | undefined>,
-): { scope: 'all' | 'business' } {
-  const result = z.object({ scope: scopeSchema }).safeParse({ scope: firstQueryValue(query.scope) });
+): { scope: 'all' | 'business' | 'bitrix24'; excludeBitrix24?: boolean } {
+  const result = z.object({ scope: scopeSchema, excludeBitrix24: booleanQuery }).safeParse({ scope: firstQueryValue(query.scope), excludeBitrix24: firstQueryValue(query.excludeBitrix24) });
   if (!result.success) {
     throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid audit filter options query', { issues: result.error.issues });
   }
-  return { scope: result.data.scope };
+  if (result.data.scope === 'bitrix24' && result.data.excludeBitrix24) failValidation('Conflicting Bitrix scope', 'excludeBitrix24');
+  return { scope: result.data.scope, ...(result.data.excludeBitrix24 !== undefined ? { excludeBitrix24: result.data.excludeBitrix24 } : {}) };
 }
 
 export function parseAuditLookupQuery(query: Record<string, string | string[] | undefined>): AuditLookupQuery {
@@ -210,6 +222,7 @@ export class AuditController {
       currentUser: request.user,
       requestId: request.requestId ?? 'audit-filter-options',
       scope: parsed.scope,
+      excludeBitrix24: parsed.excludeBitrix24,
     });
   }
 

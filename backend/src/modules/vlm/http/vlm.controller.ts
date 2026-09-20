@@ -1,3 +1,4 @@
+import { humanName } from '../../../shared/human-name-schema';
 import {
   Body,
   Controller,
@@ -35,7 +36,7 @@ const swaggerSchema = (schema: unknown): SchemaObject => schema as SchemaObject;
 
 const promptKvSchema = z.object({
   namespace: z.string().trim().min(1).max(100),
-  name: z.string().trim().min(1).max(100),
+  name: humanName(100, 1),
   version: z.string().trim().max(100).nullable().optional(),
   lang: z.string().trim().max(20).nullable().optional(),
 });

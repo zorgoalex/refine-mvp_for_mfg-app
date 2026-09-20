@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { MinusOutlined } from '@ant-design/icons';
 import { useSelect } from '@refinedev/antd';
@@ -254,7 +255,7 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
               label="Номер заказа"
               name="orderName"
               style={{ minWidth: 220, flex: 1 }}
-              rules={[{ required: true, message: 'Укажите номер заказа' }]}
+              rules={[{ required: true, message: 'Укажите номер заказа' }, nameRule('order_name')]}
               extra={defaultOrderNameLoading ? 'Подбираю следующий номер…' : undefined}
             >
               <Input placeholder="Например, 1259" />

@@ -1,3 +1,4 @@
+import { humanNameError } from '@shared/human-name';
 import { PopconfirmContent } from "../../../components/PopconfirmContent";
 import { Table, Tooltip } from '../../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -52,6 +53,8 @@ export const ExportTemplatesConfigTab: React.FC = () => {
   };
   const save = async () => {
     if (!draft || !canManage) return;
+    const nameError = humanNameError(draft.name, 200);
+    if (nameError) { message.error(nameError); return; }
     setSaving(true);
     try {
       const saved = selected

@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { Create, useForm } from "@refinedev/antd";
 import type { BaseRecord, HttpError, IResourceComponentsProps } from "@refinedev/core";
 import type { ProductionStatusFormValues } from "./formValues";
@@ -27,7 +28,7 @@ export const ProductionStatusCreate: React.FC<IResourceComponentsProps> = () => 
           label="Name"
           name="production_status_name"
           extra="Технический код создаётся автоматически."
-          rules={[{ required: true, whitespace: true }]}
+          rules={[...([{ required: true, whitespace: true }]), nameRule("production_status_name")]}
         >
           <Input />
         </Form.Item>

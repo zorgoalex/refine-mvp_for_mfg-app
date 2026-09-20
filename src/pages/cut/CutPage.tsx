@@ -4566,7 +4566,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                         columns={cutResultColumns}
                       />
                       {jobCutResults.length > 1 && (
-                        <Collapse size="small" className="cut-results-history-collapse" defaultActiveKey={[]}>
+                        <Collapse className="cut-results-history-collapse" defaultActiveKey={[]}>
                           <Panel header={`Все сохранённые раскрои (${jobCutResults.length})`} key="cut-results-history">
                             <Table<CutResultSummary>
                               size="small"
@@ -4908,7 +4908,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       )}
 
       {job && (
-        <Collapse className="cut-page-modern__details" size="small" defaultActiveKey={[]}>
+        <Collapse className="cut-page-modern__details" defaultActiveKey={[]}>
           <Panel header={`Детали задания (${job.items.length + informationalJobDetails.length})`} key="cut-job-details">
             <TableTopScroll>
               {job.items.length > 0 && (

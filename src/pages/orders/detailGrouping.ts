@@ -1,3 +1,4 @@
+import { resolveOrderBasisProject } from '../../utils/orderBasisProject';
 // src/pages/orders/detailGrouping.ts
 import type { OrderDetail } from '../../types/orders';
 import { calculateOrderTotalArea } from '../../utils/orderArea';
@@ -115,13 +116,13 @@ export function formatBazisCutSetsGroupLabel(cutSets: OrderDetail['bazis_cut_set
 }
 
 export function extractBasisProjectGroupValue(detail: OrderDetail): string {
-  const projectId = Number(detail.bazis_project_id ?? detail.bazis_projects?.[0]?.bazisProjectId);
-  if (Number.isFinite(projectId) && projectId > 0) return `id:${projectId}`;
-  return textValue(detail.basis_project ?? detail.bazis_projects?.[0]?.name);
+  const projectId = resolveOrderBasisProject(detail).projectId;
+  if (projectId != null) return `id:${projectId}`;
+  return textValue(resolveOrderBasisProject(detail).name);
 }
 
 export function formatBasisProjectGroupLabel(detail: OrderDetail): string {
-  return String(detail.basis_project || detail.bazis_projects?.[0]?.name || '').trim() || '—';
+  return resolveOrderBasisProject(detail).name || '—';
 }
 
 export function extractGroupValue(detail: OrderDetail, field: GroupField): string {

@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { Edit } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, InputNumber, Checkbox } from "antd";
@@ -14,7 +15,7 @@ export const OrderStatusEdit: React.FC<IResourceComponentsProps> = () => {
   return (
     <Edit saveButtonProps={saveButtonProps}>
       <Form {...formProps} layout="vertical">
-        <Form.Item label="Name" name="order_status_name" rules={[{ required: true }]}>
+        <Form.Item label="Name" name="order_status_name" rules={[...([{ required: true }]), nameRule("order_status_name")]}>
           <Input />
         </Form.Item>
         <Form.Item label="Порядок сортировки" name="sort_order" rules={[{ required: true }]}>

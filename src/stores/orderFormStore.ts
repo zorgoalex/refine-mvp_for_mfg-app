@@ -34,6 +34,9 @@ const generateTempId = (): number => {
 // STATE INTERFACE
 // ============================================================================
 
+export type OrderDetailInput = Omit<OrderDetail, 'temp_id' | 'detail_number'>
+  & Partial<Pick<OrderDetail, 'detail_number'>>;
+
   interface OrderFormState {
   // ========== STATE ==========
   header: Partial<Order>;
@@ -81,8 +84,8 @@ const generateTempId = (): number => {
   updateHeaderField: <K extends keyof Order>(field: K, value: Order[K]) => void;
 
   // ========== ACTIONS: DETAILS ==========
-  addDetail: (detail: Omit<OrderDetail, 'temp_id'>) => void;
-  addPdfImportedDetail: (detail: Omit<OrderDetail, 'temp_id'>) => void;
+  addDetail: (detail: OrderDetailInput) => void;
+  addPdfImportedDetail: (detail: OrderDetailInput) => void;
   ensureMinimumDetailRows: (minimum: number, detail: Omit<OrderDetail, 'temp_id'>) => void;
   insertDetailAfter: (afterTempId: number, detail: Omit<OrderDetail, 'temp_id'>) => void;
   updateDetail: (tempId: number, data: Partial<OrderDetail>) => void;
@@ -1008,6 +1011,25 @@ const createOrderDraftStore = (orderKey: string, namespace: string): OrderDraftS
 // ============================================================================
 
 const orderDraftStores = new Map<string, OrderDraftStore>();
+
+/** Refresh read-only project labels without replacing edits or advancing order versions. */
+export function syncBazisProjectNameInDrafts(projectId: number, name: string, namespace: string): void {
+  if (namespace !== getWorkspaceStateNamespace()) return;
+  const update = (detail: OrderDetail): OrderDetail => {
+    if (!detail.bazis_projects?.some(ref => ref.bazisProjectId === projectId && ref.name !== name)) return detail;
+    return { ...detail, bazis_projects: detail.bazis_projects.map(ref => ref.bazisProjectId === projectId ? { ...ref, name } : ref) };
+  };
+  for (const [key, store] of orderDraftStores) {
+    if (!key.startsWith(`${namespace}|order:`)) continue;
+    const state = store.getState();
+    const details = state.details.map(update);
+    if (details.every((detail, index) => detail === state.details[index])) continue;
+    store.setState({
+      details,
+      originalDetails: Object.fromEntries(Object.entries(state.originalDetails).map(([id, detail]) => [id, update(detail)])),
+    });
+  }
+}
 
 export const NEW_ORDER_KEY = 'new';
 

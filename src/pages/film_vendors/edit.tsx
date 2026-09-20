@@ -1,10 +1,12 @@
+import { nameRule } from '../../utils/nameRules';
 import { Edit } from "@refinedev/antd";
-import { IResourceComponentsProps } from "@refinedev/core";
+import { IResourceComponentsProps, type BaseRecord, type HttpError } from "@refinedev/core";
 import { Form, Input, Checkbox, message } from "antd";
 import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
+import type { FilmVendorFormValues } from "./formValues";
 
 export const FilmVendorEdit: React.FC<IResourceComponentsProps> = () => {
-  const { formProps, saveButtonProps } = useFormWithHighlight({
+  const { formProps, saveButtonProps } = useFormWithHighlight<BaseRecord, HttpError, FilmVendorFormValues>({
     resource: "film_vendors",
     idField: "film_vendor_id",
     action: "edit",
@@ -27,7 +29,7 @@ export const FilmVendorEdit: React.FC<IResourceComponentsProps> = () => {
           });
         }}
       >
-        <Form.Item label="Name" name="film_vendor_name" rules={[{ required: true, whitespace: true }]}>
+        <Form.Item label="Name" name="film_vendor_name" rules={[...([{ required: true, whitespace: true }]), nameRule("film_vendor_name")]}>
           <Input />
         </Form.Item>
         <Form.Item label="Ref Key 1C" name="ref_key_1c">
@@ -43,4 +45,3 @@ export const FilmVendorEdit: React.FC<IResourceComponentsProps> = () => {
     </Edit>
   );
 };
-

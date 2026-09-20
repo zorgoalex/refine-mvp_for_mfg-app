@@ -19,6 +19,12 @@ import "./list.css";
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
 
+const filterByOptionLabel = (input: string, option?: { label?: React.ReactNode }): boolean => {
+  const label = option?.label;
+  const text = typeof label === "string" || typeof label === "number" ? String(label) : "";
+  return text.toLowerCase().includes(input.toLowerCase());
+};
+
 export const PaymentList: React.FC<IResourceComponentsProps> = () => {
   const [form] = Form.useForm();
   const [filtersVisible, setFiltersVisible] = useState(false);
@@ -151,7 +157,7 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
   };
 
   // Получаем общее количество записей
-  const totalRecords = tableProps?.pagination?.total || 0;
+  const totalRecords = tableProps?.pagination ? tableProps.pagination.total || 0 : 0;
 
   return (
     <List
@@ -180,9 +186,7 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
                     allowClear
                     placeholder="Выберите заказ"
                     showSearch
-                    filterOption={(input, option) =>
-                      (option?.label ?? "").toLowerCase().includes(input.toLowerCase())
-                    }
+                    filterOption={filterByOptionLabel}
                   />
                 </Form.Item>
               </Col>
@@ -228,9 +232,7 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
                       allowClear
                       placeholder="Пользователь"
                       showSearch
-                      filterOption={(input, option) =>
-                        (option?.label ?? "").toLowerCase().includes(input.toLowerCase())
-                      }
+                      filterOption={filterByOptionLabel}
                     />
                   </Form.Item>
                 </Col>

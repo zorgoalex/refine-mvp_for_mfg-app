@@ -11,7 +11,14 @@ from `main`; `feat/backend-erp-prevprod` is retired. Stage integration remains o
 Russian from-scratch deployment runbook for the WHOLE complex (all of the
 above) is maintained in the workspace spec folder:
 `../spec_erp/docs/operations/full-stack-vps-deployment-from-scratch.ru.md`.
-For day-to-day operation of the merged stack use `ops/up-all.sh` (see below).
+For production backend updates and configuration-only recreation use the
+[backend release runbook](../docs/backend-release-runbook.md). It keeps the
+existing live Compose file and supplies both the configuration `.env` and the
+generated `backend-release.env`. Do not use `up-all.sh` as a production update
+shortcut: it selects the test contour's tracked Compose template.
+
+The previous version of this document is preserved byte-for-byte in
+[the 2026-09-18 archive](../docs/archive/ops-readme.before-backend-release-2026-09-18.md).
 
 No real secrets are stored here. Copy `ops/templates/env.vps.example` to `.env`
 on the VPS and fill real values there. `.env` is ignored by git.
@@ -54,6 +61,12 @@ Safe first rollout order:
 7. Only after the `all` backfill succeeds, recreate exactly one backend with
    `BACKEND_BITRIX24_SYNC_RELAY_OWNER=in_process`.
 
+Steps 1–7 are a **first import**, not routine deployment. Once steady-state
+sync runs in-process, persist `in_process` in the production configuration;
+do not restore `external` on the next deploy. `enabled=true` alone does not
+start the scheduler. Check the running container's value and queue progress
+after every recreation, not just `/health/ready`.
+
 CRM API deletes move Contact/Company/Deal records to the Bitrix24 recycle bin.
 If storage must be released immediately, an administrator must disable the
 recycle bin for those CRM types or empty it manually; the sync never tries an
@@ -83,12 +96,19 @@ Rules:
 - A final Compose identity overlay tags the backend image with exact HEAD and
   injects the same SHA as Docker build arg. This also covers existing VPS
   compose files that predate the identity fields in the current template.
+- These describe the existing full-stack script, not release-file persistence:
+  `deploy-stack.sh` does **not** yet maintain `backend-release.env`, candidate,
+  or previous-release files. Do not mix it with the backend-only release-file
+  workflow without explicit reconciliation. Use the linked runbook until that
+  automation is implemented and verified.
 - `ops/install-order-sse-continuous-monitor.sh <40-hex-stage-sha>` requires a
   clean checkout at that exact SHA and installs an immutable user-level runner
   bundle. The prepared systemd timer never executes code from a mutable main
   checkout and is not enabled or started by the installer. Reinstall requires
   the timer to be both disabled and inactive.
-- Keep real values only in the VPS `.env`.
+- Keep secrets and persistent runtime settings in the VPS `.env`. Generated
+  backend image/SHA metadata belongs in `backend-release.env`, not in Git or
+  duplicated in the primary `.env`.
 - Set `ERP_STACK_ENV=test|prod` explicitly. Test deploys load
   `docker-compose.test.yml` and use `CNC_TELEGRAM_WORKER_ROLE=reader`;
   prod deploys load `docker-compose.prod.yml` and may run
@@ -108,27 +128,10 @@ Rules:
   the current split VPS layout where the runtime root contains `repo_erp/`,
   `.env`, `data/`, and `config/`.
 
-After backend-only Compose/env changes, rebuild and recreate only the backend
-service:
-
-```bash
-docker compose --env-file .env -f docker-compose.yml up -d --build --no-deps backend
-```
-
-Direct-template equivalent for the current split VPS layout:
-
-```bash
-cd ~/projects/erp_dev
-
-# in ~/projects/erp_dev/.env:
-# BACKEND_BUILD_CONTEXT=./repo_erp/backend
-
-docker compose \
-  --env-file .env \
-  --project-directory . \
-  -f repo_erp/ops/templates/docker-compose.vps.yml \
-  up -d --build --no-deps backend
-```
+After backend-only Compose/env changes, **do not rebuild** or select a new
+Git revision. Recreate only backend using the currently recorded image and
+both env files, as shown in the [configuration-only procedure](../docs/backend-release-runbook.md#3-применить-настройки-без-смены-версии).
+The live production Compose must not be overwritten with a tracked test template.
 
 ## up-all.sh — whole-complex wrapper
 
@@ -620,22 +623,17 @@ project unless that project is actually running the NestJS backend.
 
 ## Updating An Existing VPS
 
-```bash
-cd ~/projects/erp_dev/repo_erp
-git switch main
-git pull --ff-only origin main
-sudo ops/setup-vps.sh --yes
-```
+For an existing production backend, use the
+[backend release runbook](../docs/backend-release-runbook.md). It separates
+configuration-only recreation from a code release, generates version metadata
+automatically, retains a rollback version, and checks Bitrix queue progress.
+All shell commands there are single-line and initialize their own session
+helpers; no stale container IDs from previous deploys are assumed.
 
-If only backend code or backend Compose/env flags changed:
-
-```bash
-cd ~/projects/erp_dev
-git -C repo_erp switch main
-git -C repo_erp pull --ff-only origin main
-docker compose --env-file .env -f docker-compose.yml up -d --build --no-deps backend
-repo_erp/ops/smoke-vps.sh --project-dir . --env-file .env --compose-file docker-compose.yml
-```
+Whole-stack `setup-vps.sh`/`deploy-stack.sh` is a separate workflow. It may
+rebuild/start other services and add overlays; it is not a substitute for
+applying one backend setting. After adopting the release-file workflow, those
+scripts are not release-state-aware until explicitly updated.
 
 When `BACKEND_ENABLE_DEADLINES=true`, `smoke-vps.sh` also checks the live
 business DB for `deadline_events.idempotency_key` and
@@ -643,28 +641,10 @@ business DB for `deadline_events.idempotency_key` and
 backend code against a database that has not received the additive Deadline
 Engine idempotency migration.
 
-If you are running the tracked template directly from the parent runtime root:
-
-```bash
-cd ~/projects/erp_dev
-git -C repo_erp pull
-docker compose \
-  --env-file .env \
-  --project-directory . \
-  -f repo_erp/ops/templates/docker-compose.vps.yml \
-  up -d --build --no-deps backend
-repo_erp/ops/smoke-vps.sh --project-dir . --env-file .env --compose-file docker-compose.yml
-```
-
-If only CORS/domain variables changed:
-
-```bash
-cd ~/projects/erp_dev/repo_erp
-ops/setup-vps.sh --skip-bootstrap --skip-deploy
-cd ..
-docker compose --env-file .env -f docker-compose.yml up -d --force-recreate hasura backend
-repo_erp/ops/smoke-vps.sh --project-dir . --env-file .env --compose-file docker-compose.yml
-```
+If only backend CORS changed, follow the configuration-only procedure; keep the
+same backend image. Hasura changes, migrations, frontend and other services
+require their own scoped update. Preserve existing CORS origins and allow only
+the exact verified Bitrix portal origin; do not allow `*` or `null` as a shortcut.
 
 ## Creating A Production Backup Packet
 

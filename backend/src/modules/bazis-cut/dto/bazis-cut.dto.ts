@@ -1,7 +1,8 @@
+import { humanName } from '../../../shared/human-name-schema';
 import { z } from 'zod';
 
 const text = (max: number) => z.string().max(max);
-const nonEmpty = (max: number) => text(max).trim().min(1);
+const nonEmpty = (max: number) => humanName(max);
 const positiveMm = z.number().positive().max(99_999_999.99);
 const edgeMm = z.number().min(0).max(99_999_999.99);
 const positiveId = z.number().int().positive();

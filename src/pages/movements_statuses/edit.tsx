@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { Edit, useForm } from "@refinedev/antd";
 import type { BaseRecord, HttpError, IResourceComponentsProps } from "@refinedev/core";
 import type { MovementStatusFormValues } from "./formValues";
@@ -35,7 +36,7 @@ export const MovementStatusEdit: React.FC<IResourceComponentsProps> = () => {
         <Form.Item
           label="Name"
           name="movement_status_name"
-          rules={[{ required: true, whitespace: true }]}
+          rules={[...([{ required: true, whitespace: true }]), nameRule("movement_status_name")]}
         >
           <Input />
         </Form.Item>

@@ -1,3 +1,4 @@
+import { assertSafeXml } from '@shared/xml-text';
 /**
  * Клиентский предпросмотр Bazis XML: строит дерево узлов прямо из файла
  * (DOMParser), ДО отправки на backend — чтобы показать состав проекта
@@ -52,6 +53,7 @@ function roundPanelDimensionMm(value: number | null): number | null {
 }
 
 export function parseXmlPreview(xmlText: string): XmlPreviewResult {
+  try { assertSafeXml(xmlText); } catch (error) { throw new XmlPreviewError((error as Error).message); }
   const doc = new DOMParser().parseFromString(xmlText, 'text/xml');
   if (doc.querySelector('parsererror')) {
     throw new XmlPreviewError('XML не распарсился');

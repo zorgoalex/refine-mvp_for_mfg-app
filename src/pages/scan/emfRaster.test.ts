@@ -52,4 +52,30 @@ describe('extractBmpFromEmf', () => {
     expect(extractBmpFromEmf(onlyHeader)).toBeNull();
     expect(extractBmpFromEmf(new Uint8Array(10))).toBeNull();
   });
+
+  it.each(['ordinary', 'shared'] as const)('returns an owned BMP from an offset %s input view', async (kind) => {
+    const emf = syntheticEmf();
+    const backing = kind === 'shared'
+      ? new SharedArrayBuffer(emf.length + 12)
+      : new ArrayBuffer(emf.length + 12);
+    const input = new Uint8Array(backing, 5, emf.length);
+    input.set(emf);
+    const bmp = extractBmpFromEmf(input)!;
+    expect(bmp.buffer).toBeInstanceOf(ArrayBuffer);
+    expect(bmp.buffer).not.toBe(backing);
+    expect(bmp.byteOffset).toBe(0);
+    expect(bmp.byteLength).toBe(58);
+    expect([...bmp.slice(-4)]).toEqual([0xaa, 0xbb, 0xcc, 0xdd]);
+    input.fill(0);
+    expect([...bmp.slice(-4)]).toEqual([0xaa, 0xbb, 0xcc, 0xdd]);
+    const blob = new Blob([bmp], { type: 'image/bmp' });
+    expect(blob.type).toBe('image/bmp');
+    expect([...new Uint8Array(await blob.arrayBuffer())]).toEqual([...bmp]);
+  });
+
+  it.each([0, 7, 10000])('rejects a malformed record size %s', (size) => {
+    const emf = syntheticEmf();
+    new DataView(emf.buffer).setUint32(88 + 4, size, true);
+    expect(extractBmpFromEmf(emf)).toBeNull();
+  });
 });

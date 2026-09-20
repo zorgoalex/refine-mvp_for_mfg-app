@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Descriptions, Divider, Form, Input, InputNumber, Modal, Select, Space, Switch, Tag, Typography, message } from 'antd';
 import dayjs from 'dayjs';
@@ -128,7 +129,7 @@ export function CatalogItemsList() {
       {formError && <Alert style={{ marginBottom: 16 }} type="error" showIcon message={formError} action={stale ? <Button onClick={reloadCard}>Загрузить версию</Button> : undefined} />}
       {uncertain && <Alert style={{ marginBottom: 16 }} type="warning" message="Результат сохранения неизвестен" description="Повторите проверку этой же команды. Поля временно заблокированы, чтобы не создать дубль." />}
       <Form form={form} layout="vertical" disabled={!canManage || saving || uncertain} onValuesChange={() => setDirty(true)}>
-        <Form.Item name="name" label="Название" rules={[{ required: true, whitespace: true, message: 'Введите название' }]}><Input maxLength={200} /></Form.Item>
+        <Form.Item name="name" label="Название" rules={[{ required: true, whitespace: true, message: 'Введите название' }, nameRule('name', 200)]}><Input maxLength={200} /></Form.Item>
         <Form.Item name="sku" label="Артикул" extra="Необязательно. Уникален также среди архивных записей."><Input maxLength={80} /></Form.Item>
         <Form.Item name="kind" label="Тип позиции" rules={[{ required: true }]}><Select options={CATALOG_KIND_OPTIONS} /></Form.Item>
         <Form.Item name="unitId" label="Единица измерения" rules={[{ required: true, message: 'Выберите единицу измерения' }]}><Select showSearch optionFilterProp="label" options={units.map(unit => ({ value: unit.id, label: `${unit.name}${unit.symbol ? ` (${unit.symbol})` : ''}` }))} /></Form.Item>

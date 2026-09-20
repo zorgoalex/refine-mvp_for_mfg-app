@@ -5,6 +5,11 @@ import { BITRIX24_ORIGINATOR_ID } from '../application/bitrix24-sync-mapper';
 export type Bitrix24RequestGuard = () => Promise<void>;
 
 export interface Bitrix24ApiPort {
+  /** Stage capability: never replay an ambiguous write without re-reading. */
+  updateDealStage?(id: string, stageId: string): Promise<void>;
+  listDealCategories?(): Promise<Array<Record<string, unknown>>>;
+  listDealStages?(categoryId: number): Promise<Array<Record<string, unknown>>>;
+  createWorkingStage?(fields: Record<string, unknown>): Promise<void>;
   withRequestGuard<T>(
     guard: Bitrix24RequestGuard,
     operation: () => Promise<T>,
@@ -48,6 +53,7 @@ export interface Bitrix24NetworkRetryEvent {
 }
 
 export interface Bitrix24ApiClientOptions {
+  admissionState?: Bitrix24AdmissionState;
   maxRequestsPerSecond?: number;
   limitRetryMaxAttempts?: number;
   queryLimitBaseDelayMs?: number;
@@ -60,6 +66,15 @@ export interface Bitrix24ApiClientOptions {
   onNetworkRetry?: (event: Bitrix24NetworkRetryEvent) => void;
   getAccessToken?: () => Promise<string>;
   refreshAccessToken?: () => Promise<void>;
+}
+
+/** Module-scoped portal budget shared by webhook and OAuth clients. */
+export class Bitrix24AdmissionState {
+  readonly operatingResetAtByMethod = new Map<string, number>();
+  readonly operationBlockedUntilByMethod = new Map<string, number>();
+  admissionTail: Promise<void> = Promise.resolve();
+  nextAdmissionAt = 0;
+  queryBlockedUntil = 0;
 }
 
 interface BitrixTime {
@@ -115,6 +130,27 @@ export class Bitrix24ApiError extends Error {
  * included in logs or errors.
  */
 export class Bitrix24ApiClient implements Bitrix24ApiPort {
+  async updateDealStage(id: string, stageId: string): Promise<void> {
+    await this.call('crm.item.update', { entityTypeId: 2, id: Number(id), fields: { stageId } }, false);
+  }
+
+  async listDealCategories(): Promise<Array<Record<string, unknown>>> {
+    const result = await this.call<{ categories?: Array<Record<string, unknown>> }>('crm.category.list', { entityTypeId: 2 });
+    if (!Array.isArray(result?.categories)) throw this.unexpected('crm.category.list', result);
+    return result.categories;
+  }
+
+  async listDealStages(categoryId: number): Promise<Array<Record<string, unknown>>> {
+    const rows = await this.call<Array<Record<string, unknown>>>('crm.status.list', {
+      filter: { ENTITY_ID: categoryId === 0 ? 'DEAL_STAGE' : `DEAL_STAGE_${categoryId}` }, order: { SORT: 'ASC' },
+    });
+    if (!Array.isArray(rows)) throw this.unexpected('crm.status.list', rows);
+    return rows;
+  }
+
+  async createWorkingStage(fields: Record<string, unknown>): Promise<void> {
+    await this.call('crm.status.add', { fields: { ...fields, SEMANTICS: '' } }, false);
+  }
   private readonly baseUrl: string;
   private readonly f: FetchFn;
   private readonly timeoutMs: number;
@@ -131,11 +167,7 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
   private readonly onNetworkRetry?: (event: Bitrix24NetworkRetryEvent) => void;
   private readonly getAccessToken?: () => Promise<string>;
   private readonly refreshAccessToken?: () => Promise<void>;
-  private readonly operatingResetAtByMethod = new Map<string, number>();
-  private readonly operationBlockedUntilByMethod = new Map<string, number>();
-  private admissionTail: Promise<void> = Promise.resolve();
-  private nextAdmissionAt = 0;
-  private queryBlockedUntil = 0;
+  private readonly admissionState: Bitrix24AdmissionState;
   private readonly actorNames = new Map<string, { name: string | null; expires: number }>();
   private actorLookupBlockedUntil = 0;
 
@@ -166,6 +198,7 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
     options: Bitrix24ApiClientOptions = {},
   ) {
     this.baseUrl = webhookUrl.replace(/\/+$/, '');
+    this.admissionState = options.admissionState ?? new Bitrix24AdmissionState();
     this.f = fetchFn ?? (fetch as unknown as FetchFn);
     this.timeoutMs = timeoutMs;
     const maxRequestsPerSecond = positiveNumber(
@@ -365,7 +398,7 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
     }
   }
 
-  private async call<T = unknown>(method: string, params: Record<string, unknown>): Promise<T> {
+  private async call<T = unknown>(method: string, params: Record<string, unknown>, networkRetry = true): Promise<T> {
     let authRefreshAttempted = false;
     let limitAttempt = 0;
     let networkAttempt = 0;
@@ -394,7 +427,7 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
             ? Math.min(this.queryLimitBaseDelayMs * 2 ** (limitAttempt - 1), 60_000)
             : this.operationLimitDelayMs(method, error.operatingResetAt);
           this.extendLimitCooldown(method, code, delayMs);
-          if (limitAttempt >= this.limitRetryMaxAttempts) {
+          if (!networkRetry || limitAttempt >= this.limitRetryMaxAttempts) {
             throw error;
           }
           try {
@@ -412,7 +445,7 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
         }
 
         if (
-          !NETWORK_RETRY_SAFE_METHODS.has(method) ||
+          !networkRetry || !NETWORK_RETRY_SAFE_METHODS.has(method) ||
           !isRetryableNetworkCode(error.code)
         ) {
           throw error;
@@ -500,7 +533,7 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
 
     const operatingResetAt = finiteNumberOrNull(envelope.time?.operating_reset_at);
     if (operatingResetAt !== null) {
-      this.operatingResetAtByMethod.set(method, operatingResetAt);
+      this.admissionState.operatingResetAtByMethod.set(method, operatingResetAt);
     }
 
     if (!response.ok || envelope.error !== undefined) {
@@ -509,7 +542,7 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
         String(envelope.error ?? 'HTTP_ERROR'),
         response.status,
         this.sanitizeDescription(envelope.error_description ?? text.slice(0, 500)),
-        operatingResetAt ?? this.operatingResetAtByMethod.get(method) ?? null,
+        operatingResetAt ?? this.admissionState.operatingResetAtByMethod.get(method) ?? null,
       );
     }
     if (!Object.prototype.hasOwnProperty.call(envelope, 'result')) {
@@ -530,23 +563,23 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
 
   private async tryAdmission(method: string): Promise<number> {
     let release!: () => void;
-    const predecessor = this.admissionTail;
-    this.admissionTail = new Promise<void>((resolve) => {
+    const predecessor = this.admissionState.admissionTail;
+    this.admissionState.admissionTail = new Promise<void>((resolve) => {
       release = resolve;
     });
 
     await predecessor;
     try {
       const blockedUntil = Math.max(
-        this.nextAdmissionAt,
-        this.queryBlockedUntil,
-        this.operationBlockedUntilByMethod.get(method) ?? 0,
+        this.admissionState.nextAdmissionAt,
+        this.admissionState.queryBlockedUntil,
+        this.admissionState.operationBlockedUntilByMethod.get(method) ?? 0,
       );
       const delayMs = Math.max(0, blockedUntil - this.now());
       if (delayMs > 0) return delayMs;
       const admittedAt = this.now();
-      this.nextAdmissionAt =
-        Math.max(this.nextAdmissionAt, admittedAt) + this.minimumRequestIntervalMs;
+      this.admissionState.nextAdmissionAt =
+        Math.max(this.admissionState.nextAdmissionAt, admittedAt) + this.minimumRequestIntervalMs;
       return 0;
     } finally {
       release();
@@ -554,7 +587,7 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
   }
 
   private operationLimitDelayMs(method: string, errorResetAt: number | null): number {
-    const resetAt = errorResetAt ?? this.operatingResetAtByMethod.get(method) ?? null;
+    const resetAt = errorResetAt ?? this.admissionState.operatingResetAtByMethod.get(method) ?? null;
     if (resetAt !== null) {
       const untilResetMs = resetAt * 1000 - this.now();
       if (untilResetMs > 0) {
@@ -572,13 +605,13 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
   ): void {
     const blockedUntil = this.now() + delayMs;
     if (code === 'QUERY_LIMIT_EXCEEDED') {
-      this.queryBlockedUntil = Math.max(this.queryBlockedUntil, blockedUntil);
+      this.admissionState.queryBlockedUntil = Math.max(this.admissionState.queryBlockedUntil, blockedUntil);
       return;
     }
-    this.operationBlockedUntilByMethod.set(
+    this.admissionState.operationBlockedUntilByMethod.set(
       method,
       Math.max(
-        this.operationBlockedUntilByMethod.get(method) ?? 0,
+        this.admissionState.operationBlockedUntilByMethod.get(method) ?? 0,
         blockedUntil,
       ),
     );

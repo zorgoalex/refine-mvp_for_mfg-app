@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   Res,
   UseGuards,
@@ -26,6 +27,7 @@ import {
 } from "./whatsapp.dto";
 import { WhatsAppPermissionsGuard } from "./whatsapp-permissions.guard";
 import { WhatsAppService } from "./whatsapp.service";
+import { parseWhatsAppTechnicalLogQuery } from "./whatsapp-technical-log.dto";
 
 @ApiTags("WhatsApp")
 @Controller("whatsapp")
@@ -138,6 +140,20 @@ export class WhatsAppController {
   @ApiOperation({ summary: 'List WhatsApp audit events' })
   @Get("audit") @ApiBearerAuth('bearerAuth') @RequirePermissions("whatsapp.view") audit() {
     return this.service.listAudit();
+  }
+  @ApiOperation({ summary: 'List redacted WhatsApp technical events' })
+  @Get("technical-logs") @ApiBearerAuth('bearerAuth') @RequirePermissions("whatsapp.view")
+  technicalLogs(@Query() query: Record<string, unknown>) {
+    return this.service.listTechnicalLogs(parseWhatsAppTechnicalLogQuery(query));
+  }
+  @ApiOperation({ summary: 'Export redacted WhatsApp technical events as JSONL' })
+  @Get("technical-logs/export") @ApiBearerAuth('bearerAuth') @RequirePermissions("whatsapp.view")
+  async exportTechnicalLogs(@Query() query: Record<string, unknown>, @Res() response: Response) {
+    const content = await this.service.exportTechnicalLogs(parseWhatsAppTechnicalLogQuery(query));
+    response.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+    response.setHeader("Content-Disposition", 'attachment; filename="whatsapp-technical.jsonl"');
+    response.setHeader("Cache-Control", "private, no-store");
+    response.send(content);
   }
   @ApiOperation({ summary: 'Retry a WhatsApp delivery job' })
   @Post("queue/:id/retry")

@@ -739,6 +739,44 @@ paths:
       x-permission: whatsapp.view
       responses:
         '200': {description: List WhatsApp audit events}
+  /api/v1/whatsapp/technical-logs:
+    get:
+      tags:
+        - WhatsApp
+      operationId: listWhatsAppTechnicalLogs
+      summary: List redacted WhatsApp technical events
+      security:
+        - {bearerAuth: []}
+      x-permission: whatsapp.view
+      parameters:
+        - {name: page, in: query, schema: {type: integer, minimum: 1, default: 1}}
+        - {name: pageSize, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 100}}
+        - {name: level, in: query, schema: {type: string, enum: [info, warn, error]}}
+        - {name: component, in: query, schema: {type: string, enum: [backend, waha, webhook, relay, cleanup]}}
+        - {name: outcome, in: query, schema: {type: string, enum: [started, succeeded, failed, observed]}}
+        - {name: search, in: query, schema: {type: string, minLength: 1, maxLength: 120}}
+      responses:
+        '200': {description: Paginated redacted WhatsApp technical events}
+        '422': {description: Invalid technical log filters}
+  /api/v1/whatsapp/technical-logs/export:
+    get:
+      tags:
+        - WhatsApp
+      operationId: exportWhatsAppTechnicalLogs
+      summary: Export redacted WhatsApp technical events as JSONL
+      security:
+        - {bearerAuth: []}
+      x-permission: whatsapp.view
+      parameters:
+        - {name: page, in: query, schema: {type: integer, minimum: 1, default: 1}}
+        - {name: pageSize, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 100}}
+        - {name: level, in: query, schema: {type: string, enum: [info, warn, error]}}
+        - {name: component, in: query, schema: {type: string, enum: [backend, waha, webhook, relay, cleanup]}}
+        - {name: outcome, in: query, schema: {type: string, enum: [started, succeeded, failed, observed]}}
+        - {name: search, in: query, schema: {type: string, minLength: 1, maxLength: 120}}
+      responses:
+        '200': {description: Redacted WhatsApp technical events, content: {application/x-ndjson: {schema: {type: string}}}}
+        '422': {description: Invalid technical log filters}
   /api/v1/whatsapp/queue/{id}/retry:
     post:
       tags:
@@ -824,6 +862,166 @@ paths:
         - {name: orderId, in: path, required: true, schema: {type: integer, minimum: 1}}
       responses:
         '200': {description: 'Mapped order payment snapshots, subject to order access scope'}
+  /api/v1/bitrix24/order-stages:
+    get:
+      tags: [Bitrix24]
+      operationId: bitrix24StagesRead
+      summary: Read stage settings, catalogs and queue counters
+      security: [{bearerAuth: []}]
+      x-permission: bitrix24.integration.manage
+      responses:
+        '200': {description: Current settings or durable reviewed settings job}
+        '403': {description: Missing integration management or required Bitrix administrator permission}
+        '409': {description: Stale preview, conflicting ownership, semantics or configuration}
+        '422': {description: Invalid input}
+        '503': {description: Required installation or sync runtime disabled}
+  /api/v1/bitrix24/order-stages/catalog/refresh:
+    post:
+      tags: [Bitrix24]
+      operationId: bitrix24StagesRefreshCatalog
+      summary: Refresh all categories and stages without modifying deals
+      security: [{bearerAuth: []}]
+      x-permission: bitrix24.integration.manage
+      responses:
+        '201': {description: Current settings or durable reviewed settings job}
+        '403': {description: Missing integration management or required Bitrix administrator permission}
+        '409': {description: Stale preview, conflicting ownership, semantics or configuration}
+        '422': {description: Invalid input}
+        '503': {description: Required installation or sync runtime disabled}
+  /api/v1/bitrix24/order-stages/settings/preview:
+    post:
+      tags: [Bitrix24]
+      operationId: bitrix24StagesPreviewSettings
+      summary: Preview mappings, enable/disable and enrolled-order impact
+      security: [{bearerAuth: []}]
+      x-permission: bitrix24.integration.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/StageSettings'}
+      responses:
+        '201': {description: Current settings or durable reviewed settings job}
+        '403': {description: Missing integration management or required Bitrix administrator permission}
+        '409': {description: Stale preview, conflicting ownership, semantics or configuration}
+        '422': {description: Invalid input}
+        '503': {description: Required installation or sync runtime disabled}
+  /api/v1/bitrix24/order-stages/settings/{jobId}/apply:
+    post:
+      tags: [Bitrix24]
+      operationId: bitrix24StagesApplySettings
+      summary: Apply versioned settings preview; disable cancels old epoch
+      security: [{bearerAuth: []}]
+      x-permission: bitrix24.integration.manage
+      parameters:
+        - {name: jobId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '201': {description: Current settings or durable reviewed settings job}
+        '403': {description: Missing integration management or required Bitrix administrator permission}
+        '409': {description: Stale preview, conflicting ownership, semantics or configuration}
+        '422': {description: Invalid input}
+        '503': {description: Required installation or sync runtime disabled}
+  /api/v1/bitrix24/order-stages/provision/preview:
+    post:
+      tags: [Bitrix24]
+      operationId: bitrix24StagesPreviewProvision
+      summary: Preview missing ongoing stages only
+      security: [{bearerAuth: []}]
+      x-permission: bitrix24.integration.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/StageProvisionInput'}
+      responses:
+        '201': {description: Durable operation or queued result}
+        '403': {description: Missing integration management or required Bitrix administrator permission}
+        '409': {description: Stale preview, conflicting ownership, semantics or configuration}
+        '422': {description: Invalid input}
+        '503': {description: Required installation or sync runtime disabled}
+  /api/v1/bitrix24/order-stages/provision/{jobId}/apply:
+    post:
+      tags: [Bitrix24]
+      operationId: bitrix24StagesApplyProvision
+      summary: Create reviewed ongoing stages with current Bitrix administrator proof
+      security: [{bearerAuth: []}]
+      x-permission: bitrix24.integration.manage
+      parameters:
+        - {name: jobId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '201': {description: Durable operation or queued result}
+        '403': {description: Missing integration management or required Bitrix administrator permission}
+        '409': {description: Stale preview, conflicting ownership, semantics or configuration}
+        '422': {description: Invalid input}
+        '503': {description: Required installation or sync runtime disabled}
+  /api/v1/bitrix24/order-stages/reconcile/preview:
+    post:
+      tags: [Bitrix24]
+      operationId: bitrix24StagesPreviewReconcile
+      summary: Read a bounded page of ERP-owned stage differences
+      security: [{bearerAuth: []}]
+      x-permission: bitrix24.integration.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/StageReconcileInput'}
+      responses:
+        '201': {description: Durable operation or queued result}
+        '403': {description: Missing integration management or required Bitrix administrator permission}
+        '409': {description: Stale preview, conflicting ownership, semantics or configuration}
+        '422': {description: Invalid input}
+        '503': {description: Required installation or sync runtime disabled}
+  /api/v1/bitrix24/order-stages/reconcile/{jobId}/apply:
+    post:
+      tags: [Bitrix24]
+      operationId: bitrix24StagesApplyReconcile
+      summary: Enroll selected unchanged rows in durable stage queue
+      security: [{bearerAuth: []}]
+      x-permission: bitrix24.integration.manage
+      parameters:
+        - {name: jobId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/StageReconcileSelection'}
+      responses:
+        '201': {description: Durable operation or queued result}
+        '403': {description: Missing integration management or required Bitrix administrator permission}
+        '409': {description: Stale preview, conflicting ownership, semantics or configuration}
+        '422': {description: Invalid input}
+        '503': {description: Required installation or sync runtime disabled}
+  /api/v1/bitrix24/order-stages/jobs/{jobId}:
+    get:
+      tags: [Bitrix24]
+      operationId: bitrix24StagesReadJob
+      summary: Read durable per-row stage operation results
+      security: [{bearerAuth: []}]
+      x-permission: bitrix24.integration.manage
+      parameters:
+        - {name: jobId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Durable operation or queued result}
+        '403': {description: Missing integration management or required Bitrix administrator permission}
+        '409': {description: Stale preview, conflicting ownership, semantics or configuration}
+        '422': {description: Invalid input}
+        '503': {description: Required installation or sync runtime disabled}
+  /api/v1/bitrix24/order-stages/orders/{orderId}/retry:
+    post:
+      tags: [Bitrix24]
+      operationId: bitrix24StagesRetryOrder
+      summary: Retry blocked enrolled stage work after resolving root cause
+      security: [{bearerAuth: []}]
+      x-permission: bitrix24.integration.manage
+      parameters:
+        - {name: orderId, in: path, required: true, schema: {type: string}}
+      responses:
+        '201': {description: Durable operation or queued result}
+        '403': {description: Missing integration management or required Bitrix administrator permission}
+        '409': {description: Stale preview, conflicting ownership, semantics or configuration}
+        '422': {description: Invalid input}
+        '503': {description: Required installation or sync runtime disabled}
   /api/v1/bitrix24/payment-systems/refresh:
     post:
       tags:
@@ -1425,6 +1623,34 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PageSize'
+        - name: scope
+          in: query
+          schema: { type: string, enum: [all, business, bitrix24], default: all }
+        - name: excludeBitrix24
+          in: query
+          schema: { type: boolean, default: false }
+          description: Exact integration ownership exclusion before counts/paging; incompatible with scope=bitrix24. Ordinary ERP events remain visible.
+        - name: bitrixDirection
+          in: query
+          schema: { type: string, enum: [forward, reverse, widget, settings, other] }
+          description: Requires scope=bitrix24, as do all bitrix-prefixed filters.
+        - name: bitrixCategory
+          in: query
+          schema: { type: string, enum: [client, order, payment, settings, processing, other] }
+        - name: bitrixOutcome
+          in: query
+          schema: { type: string, enum: [success, error, conflict, attention, started, skipped, unknown] }
+          description: attention includes both error and conflict, not retry commands.
+        - name: bitrixReconcile
+          in: query
+          schema: { type: string, enum: [exclude, only] }
+        - name: bitrixObject
+          in: query
+          schema: { type: string, enum: [contact, company, deal, payment] }
+        - name: bitrixId
+          in: query
+          schema: { type: string, pattern: '^[1-9][0-9]{0,17}$' }
+          description: Requires bitrixObject; namespaces are not interchangeable.
         - name: event
           in: query
           required: false
@@ -1531,6 +1757,14 @@ paths:
       security:
         - bearerAuth: []
       x-permission: audit.view
+      parameters:
+        - name: scope
+          in: query
+          schema: { type: string, enum: [all, business, bitrix24], default: all }
+        - name: excludeBitrix24
+          in: query
+          schema: { type: boolean, default: false }
+          description: Applied before the latest-5000-row options sample; incompatible with scope=bitrix24.
       responses:
         '200':
           description: Значения фильтров audit
@@ -1544,6 +1778,128 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalError'
+
+  /api/v1/audit/bitrix24/status:
+    get:
+      tags: [Audit]
+      operationId: getBitrixAuditStatus
+      summary: Current Bitrix queue counters and runtime configuration
+      description: Read-only. Returns fetchedAt and data for forward/reverse directions with enabled, owner, dryRun, pending, processing, failed, dead, oldestPendingAt and lastProcessedAt. Runtime ownership is not proof of a live worker; no OAuth tokens or portal calls.
+      security: [{ bearerAuth: [] }]
+      x-permission: audit.view
+      responses:
+        '200':
+          description: Whitelisted runtime flags and queue counters
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [fetchedAt, data]
+                properties:
+                  fetchedAt: { type: string, format: date-time }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        direction: { type: string, enum: [forward, reverse] }
+                        enabled: { type: boolean }
+                        owner: { type: string, enum: [none, in_process, external] }
+                        dryRun: { type: boolean }
+                        pending: { type: integer }
+                        processing: { type: integer }
+                        failed: { type: integer }
+                        dead: { type: integer }
+                        oldestPendingAt: { type: string, format: date-time, nullable: true }
+                        lastProcessedAt: { type: string, format: date-time, nullable: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/audit/bitrix24/queue:
+    get:
+      tags: [Audit]
+      operationId: listBitrixAuditQueue
+      summary: Search live forward/reverse queue state, including orders without mappings
+      description: Read-only current state, not historical events. Returns data and pagination (page,pageSize,total). Rows include queueId,direction,event,entityType,entityId,orderId,orderName,bitrixObject,bitrixId,status,attempts,createdAt,processedAt,nextAttemptAt,error,errorSource. Redacted errorSource=current_mapping means the latest object error, not necessarily this queue attempt. Forward failed is terminal; reverse failed may retry.
+      security: [{ bearerAuth: [] }]
+      x-permission: audit.view
+      parameters:
+        - name: direction
+          in: query
+          required: true
+          schema: { type: string, enum: [forward, reverse] }
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, processing, processed, failed, dead, blocked, waiting_mapping, cancelled] }
+        - name: queueType
+          in: query
+          schema: { type: string, enum: [entity, order_stage] }
+          description: Forward subtype; omitted includes normal entity work and order-stage work. Reverse has entity work only.
+        - name: orderId
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: entityType
+          in: query
+          schema: { type: string, enum: [order, client, payment] }
+        - name: entityId
+          in: query
+          schema: { type: string, pattern: '^[1-9][0-9]{0,17}$' }
+          description: Requires entityType.
+        - name: bitrixObject
+          in: query
+          schema: { type: string, enum: [deal, contact, company, payment] }
+        - name: bitrixId
+          in: query
+          schema: { type: string, pattern: '^[1-9][0-9]{0,17}$' }
+          description: Requires bitrixObject.
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000000, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200': { description: Paginated queue rows with sanitized errors and explicit provenance }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/audit/bitrix24/event-options:
+    get:
+      tags: [Audit]
+      operationId: listBitrixAuditEventOptions
+      summary: Search the Bitrix event catalog and recorded names
+      description: Requires audit.view. Does not sample the last 5000 events. Merges matching known catalog entries with up to 50 distinct recorded names; unknown names stay visible. No audit mutation or portal calls.
+      security: [{ bearerAuth: [] }]
+      x-permission: audit.view
+      parameters:
+        - name: search
+          in: query
+          schema: { type: string, maxLength: 128 }
+      responses:
+        '200':
+          description: Matching event definitions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        event: { type: string }
+                        label: { type: string }
+                        direction: { type: string }
+                        category: { type: string }
+                        outcome: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
   /api/v1/audit/order-options:
     get:
@@ -15692,6 +16048,43 @@ components:
                   requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
 
   schemas:
+    StageSettings:
+      type: object
+      additionalProperties: false
+      required: [version, categoryId, completedStatusId, enabled, mappings]
+      properties:
+        version: {type: integer, minimum: 1}
+        categoryId: {type: integer, minimum: 0}
+        completedStatusId: {type: integer, minimum: 1, description: Explicit FK for ERP Завершен; no other status may map to success}
+        enabled: {type: boolean}
+        mappings:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [orderStatusId, stageId]
+            additionalProperties: false
+            properties:
+              orderStatusId: {type: integer, minimum: 1}
+              stageId: {type: string, minLength: 1, maxLength: 100}
+    StageProvisionInput:
+      type: object
+      additionalProperties: false
+      required: [statusIds]
+      properties:
+        statusIds: {type: array, minItems: 1, maxItems: 20, items: {type: integer, minimum: 1}}
+    StageReconcileInput:
+      type: object
+      additionalProperties: false
+      properties:
+        afterId: {type: integer, minimum: 0, default: 0}
+        limit: {type: integer, minimum: 1, maximum: 25, default: 25}
+    StageReconcileSelection:
+      type: object
+      additionalProperties: false
+      required: [orderIds]
+      properties:
+        orderIds: {type: array, minItems: 1, maxItems: 25, items: {type: string, pattern: '^[1-9][0-9]*$'}}
     CatalogInput:
       type: object
       additionalProperties: false

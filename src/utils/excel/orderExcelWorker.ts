@@ -5,6 +5,13 @@ interface OrderExcelWorkerRequest {
   params: GenerateOrderExcelParams;
 }
 
+// This module runs in a dedicated worker. Keep its small host contract local
+// rather than adding WebWorker globals to the application's DOM compilation.
+declare const self: {
+  onmessage: ((event: MessageEvent<OrderExcelWorkerRequest>) => void) | null;
+  postMessage: Worker['postMessage'];
+};
+
 interface SerializedWorkerError {
   name: string;
   message: string;
@@ -27,7 +34,9 @@ const serializeError = (error: unknown): SerializedWorkerError => {
 const toTransferableArrayBuffer = (value: ArrayBuffer | ArrayBufferView): ArrayBuffer => {
   if (value instanceof ArrayBuffer) return value;
 
-  return value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
+  // A view may be backed by SharedArrayBuffer, which cannot be transferred.
+  // Copy its exact byte range, including DataView and non-byte typed arrays.
+  return new Uint8Array(new Uint8Array(value.buffer, value.byteOffset, value.byteLength)).buffer;
 };
 
 self.onmessage = async (event: MessageEvent<OrderExcelWorkerRequest>) => {

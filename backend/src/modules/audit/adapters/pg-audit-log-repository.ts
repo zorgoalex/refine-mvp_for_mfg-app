@@ -1,4 +1,7 @@
 import type { QueryResultRow } from 'pg';
+import { BITRIX_AUDIT_PREDICATE, BITRIX_RECONCILE_EVENTS, bitrixClassificationSql, bitrixEventDefinition } from '../application/bitrix-audit-events';
+import { BITRIX_OBJECT_IDS_SQL, BITRIX_REFS_SQL, BITRIX_REQUEST_ORDER_SQL } from '../application/bitrix-audit-identities';
+import { sanitizeBitrixAudit } from '../application/bitrix-audit-sanitization';
 import type { DatabaseClient } from '../../../database/database.types';
 import { redactLogValue } from '../../../common/logging/redaction';
 import { loadCutJobAuditIdentities } from '../../cut/adapters/cut-job-audit-identity';
@@ -33,6 +36,8 @@ interface CountRow extends QueryResultRow {
   total: number | string;
 }
 interface AuditRow extends QueryResultRow {
+  bitrix_refs?: Array<{ type: string; id: string; identitySource: string }>;
+  bitrix_current_order_id?: number | string | null;
   audit_id: string;
   event: string;
   entity_type: string | null;
@@ -289,6 +294,21 @@ function buildWhere(filters: AuditLogFilters): {
     params.push(value);
     return params.length;
   };
+  if (filters.scope === 'bitrix24') clauses.push(BITRIX_AUDIT_PREDICATE);
+  if (filters.excludeBitrix24) clauses.push(`NOT ${BITRIX_AUDIT_PREDICATE}`);
+  if (filters.bitrixDirection) add(bitrixClassificationSql('direction'), '=', filters.bitrixDirection);
+  if (filters.bitrixCategory) add(bitrixClassificationSql('category'), '=', filters.bitrixCategory);
+  if (filters.bitrixOutcome === 'attention') clauses.push(`${bitrixClassificationSql('outcome')} IN ('error','conflict')`);
+  else if (filters.bitrixOutcome) add(bitrixClassificationSql('outcome'), '=', filters.bitrixOutcome);
+  if (filters.bitrixReconcile) {
+    const p = addArrayParam(BITRIX_RECONCILE_EVENTS);
+    clauses.push(`${filters.bitrixReconcile === 'exclude' ? 'NOT ' : ''}(audit_log.event = ANY($${p}::text[]))`);
+  }
+  if (filters.bitrixObject) {
+    const identity = BITRIX_OBJECT_IDS_SQL[filters.bitrixObject].id;
+    if (filters.bitrixId) add(identity, '=', filters.bitrixId);
+    else clauses.push(`${identity} IS NOT NULL`);
+  }
   if (filters.scope === 'business') {
     const includeParam = addArrayParam(BUSINESS_HISTORY_EVENT_LIKE_PATTERNS);
     const excludeParam = addArrayParam(BUSINESS_HISTORY_EXCLUDED_EVENT_LIKE_PATTERNS);
@@ -304,15 +324,23 @@ function buildWhere(filters: AuditLogFilters): {
   if (filters.entityType) add('audit_log.entity_type', '=', filters.entityType);
   if (filters.entityId) add('audit_log.entity_id', '=', filters.entityId);
   if (filters.userId != null) add('audit_log.user_id', '=', filters.userId);
-  if (filters.orderIds && filters.orderIds.length > 0) {
-    const p = addArrayParam(filters.orderIds);
+  const selectedOrders = filters.orderIds ?? (filters.relatedOrderId != null ? [filters.relatedOrderId] : []);
+  if (selectedOrders.length > 0) {
+    const p = addArrayParam(selectedOrders);
+    // Collect matching audit IDs through each indexed relation first. An OR
+    // across correlated relations forces scanning unrelated payment history.
+    // UNION deduplicates events with more than one matching order dimension.
     clauses.push(
-      `(` +
-        `audit_log.related_order_id = ANY($${p}::bigint[]) OR ` +
-        `(audit_log.entity_type = 'order' AND audit_log.entity_id ~ '^[0-9]{1,18}$' ` +
-        `AND audit_log.entity_id::bigint = ANY($${p}::bigint[])) OR ` +
-        `EXISTS (SELECT 1 FROM audit_log_related_entity r ` +
-        `WHERE r.audit_id = audit_log.audit_id AND r.entity_type = 'order' AND r.entity_id = ANY($${p}::bigint[]))` +
+      `audit_log.audit_id IN (` +
+        `SELECT candidate.audit_id FROM audit_log candidate WHERE candidate.related_order_id = ANY($${p}::bigint[]) UNION ` +
+        `SELECT candidate.audit_id FROM audit_log candidate WHERE candidate.entity_type = 'order' ` +
+        `AND candidate.entity_id ~ '^[0-9]{1,18}$' AND candidate.entity_id::bigint = ANY($${p}::bigint[]) UNION ` +
+        `SELECT r.audit_id FROM audit_log_related_entity r WHERE r.entity_type = 'order' AND r.entity_id = ANY($${p}::bigint[])` +
+        (filters.scope === 'bitrix24'
+          ? ` UNION SELECT candidate.audit_id FROM audit_log candidate JOIN bitrix24_incoming_request r ` +
+            `ON candidate.entity_id=r.request_id::text WHERE candidate.entity_type='bitrix24_incoming_request' ` +
+            `AND r.linked_order_id = ANY($${p}::bigint[])`
+          : '') +
       `)`,
     );
   }
@@ -329,7 +357,6 @@ function buildWhere(filters: AuditLogFilters): {
   }
   if (filters.role) add('audit_log.role', '=', filters.role);
   if (filters.source) add('audit_log.source', '=', filters.source);
-  if (filters.relatedOrderId != null) add('audit_log.related_order_id', '=', filters.relatedOrderId);
   if (filters.relatedClientId != null) add('audit_log.related_client_id', '=', filters.relatedClientId);
   if (filters.relatedPaymentId != null) add('audit_log.related_payment_id', '=', filters.relatedPaymentId);
   if (filters.relatedDeadlineId != null) add('audit_log.related_deadline_id', '=', filters.relatedDeadlineId);
@@ -671,7 +698,7 @@ export class PgAuditLogRepository implements AuditLogRepositoryPort {
     const limitParam = params.length + 1;
     const offsetParam = params.length + 2;
     const rowsResult = await this.database.query<AuditRow>(
-      `SELECT ${SELECT_COLUMNS} FROM audit_log ${AUDIT_LABEL_JOINS} ${where} ORDER BY audit_log.created_at DESC, audit_log.audit_id DESC LIMIT $${limitParam} OFFSET $${offsetParam}`,
+      `SELECT ${SELECT_COLUMNS}${command.filters.scope === 'bitrix24' ? `, ${BITRIX_REFS_SQL} AS bitrix_refs, ${BITRIX_REQUEST_ORDER_SQL} AS bitrix_current_order_id` : ''} FROM audit_log ${AUDIT_LABEL_JOINS} ${where} ORDER BY audit_log.created_at DESC, audit_log.audit_id DESC LIMIT $${limitParam} OFFSET $${offsetParam}`,
       [...params, command.pageSize, (command.page - 1) * command.pageSize]
     );
     // Older events kept only the job PK. Enrich the response, never rewrite history.
@@ -720,7 +747,16 @@ export class PgAuditLogRepository implements AuditLogRepositoryPort {
     return {
       data: rowsResult.rows.map((row) => {
         const linkedAuditId = linkedStatusCommandAuditId(row);
-        return mapRow(row, linkedAuditId === null ? undefined : statusCommands.get(linkedAuditId));
+        const mapped = mapRow(row, linkedAuditId === null ? undefined : statusCommands.get(linkedAuditId));
+        if (command.filters.scope === 'bitrix24') {
+          const semantic = bitrixEventDefinition(row.event, row.entity_type);
+          mapped.bitrix = { ...semantic, refs: row.bitrix_refs ?? [], currentRequestOrderId: num(row.bitrix_current_order_id ?? null) };
+          mapped.before = sanitizeBitrixAudit(mapped.before);
+          mapped.after = sanitizeBitrixAudit(mapped.after);
+          mapped.diff = sanitizeBitrixAudit(mapped.diff);
+          mapped.metadata = sanitizeBitrixAudit(mapped.metadata);
+        }
+        return mapped;
       }),
       pagination: {
         page: command.page,
@@ -733,7 +769,7 @@ export class PgAuditLogRepository implements AuditLogRepositoryPort {
   }
 
   async filterOptions(command: AuditFilterOptionsCommand): Promise<AuditFilterOptionsResponseDto> {
-    const { where, params } = buildWhere({ scope: command.scope });
+    const { where, params } = buildWhere({ scope: command.scope, excludeBitrix24: command.excludeBitrix24 });
     const recentLimitParam = params.length + 1;
     const optionLimitParam = params.length + 2;
     const result = await this.database.query<AuditFilterOptionsRow>(filterOptionsSql(where, recentLimitParam, optionLimitParam), [

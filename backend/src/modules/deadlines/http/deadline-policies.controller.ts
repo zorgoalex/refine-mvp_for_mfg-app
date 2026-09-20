@@ -1,3 +1,4 @@
+import { humanName } from '../../../shared/human-name-schema';
 import { Body, Controller, Get, Inject, Param, Patch, Post, Req } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -29,7 +30,7 @@ const durationUnitSchema = z
 
 const createPolicyRequestSchema = z.object({
   policyCode: z.string().trim().min(3).max(100),
-  policyName: z.string().trim().min(1).max(255),
+  policyName: humanName(255, 1),
   scopeType: deadlineEntityTypeSchema,
   targetType: z.string().trim().max(100).nullable().optional(),
   targetCode: z.string().trim().max(100).nullable().optional(),

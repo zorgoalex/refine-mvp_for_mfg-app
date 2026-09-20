@@ -47,8 +47,22 @@ describe('PgMdfBoardManualMoveRepository', () => {
       source: { kind: 'packet', id: 'packet-1' },
       actor: user(),
       requestId: 'req-1',
-      sourceIdempotencyKey: 'mdf-board:manual:packet:packet-1:version-1:completed',
+      sourceIdempotencyKey: 'mdf-board:manual:packet:packet-1:version-1:completed:audit-audit-1',
     });
+  });
+
+  it('recreated version-one move has a new cause instead of replaying its deleted predecessor', async () => {
+    const causes: string[] = [];
+    for (const auditId of ['first-command', 'recreated-command']) {
+      const tx = fakeTx([rows(), rows(), rows([row()]), rows(), rows([{ audit_id: auditId }])]);
+      await new PgMdfBoardManualMoveRepository(fakeDatabase(tx)).upsert({
+        currentUser: user(), cardKind: 'packet', cardId: 'packet-1', targetColumn: 'completed', requestId: auditId,
+      });
+      const call = runtimeMocks.evaluateMdfBoardColumnAutomation.mock.calls.at(-1) as unknown as [unknown, { sourceIdempotencyKey: string }];
+      causes.push(call[1].sourceIdempotencyKey);
+    }
+    expect(causes[0]).not.toBe(causes[1]);
+    expect(causes.every(cause => cause.includes('version-1:completed:'))).toBe(true);
   });
 
   it('treats same-target PUT as no-op without duplicate audit', async () => {

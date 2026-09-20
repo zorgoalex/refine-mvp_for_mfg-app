@@ -2531,7 +2531,9 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
       requestId: ctx.requestId,
       sourceIdempotencyKey: ctx.outboxIdempotencyKey,
     });
-    await clearMdfBoardManualMovesForOrder(tx, order.orderId);
+    // An order cascade is not a source correction: preserve source-owned manual
+    // facts, including mixed cards. Full-composition terminal checks still apply;
+    // only explicit source actions may replace/remove the saved placement.
   }
 
   if (ctx.eventType !== 'order.status_changed') {
@@ -2542,56 +2544,6 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
   }
 
   return { status: 'executed', auditId };
-}
-
-async function clearMdfBoardManualMovesForOrder(
-  tx: TransactionClient,
-  orderId: number,
-): Promise<void> {
-  await tx.query(
-    `
-    WITH target_order AS (
-      SELECT order_id, lower(trim(order_name)) AS order_key
-      FROM orders
-      WHERE order_id = $1
-    ),
-    unique_target_order AS (
-      SELECT target.order_id, target.order_key
-      FROM target_order target
-      WHERE target.order_key <> ''
-        AND (
-          SELECT COUNT(*)
-          FROM orders candidate
-          WHERE COALESCE(candidate.delete_flag, false) = false
-            AND lower(trim(candidate.order_name)) = target.order_key
-        ) = 1
-    ),
-    related_cards AS (
-      SELECT 'order'::text AS card_kind, $1::text AS card_id
-      UNION
-      SELECT 'packet', item.packet_id::text
-      FROM cnc_telegram_packet_items item
-      LEFT JOIN unique_target_order target
-        ON target.order_key = lower(trim(item.order_name))
-      WHERE item.match_order_id = $1 OR target.order_id = $1
-      UNION
-      SELECT 'bazisCutSet', detail.bazis_cut_set_id::text
-      FROM bazis_cut_set_details detail
-      LEFT JOIN order_details source_detail
-        ON source_detail.detail_id = detail.source_order_detail_id
-      WHERE COALESCE(detail.source_order_id, source_detail.order_id) = $1
-      UNION
-      SELECT 'bath', 'cut-result:' || placement.cut_result_id::text
-      FROM cut_result_placement placement
-      WHERE placement.order_id = $1
-    )
-    DELETE FROM mdf_board_manual_moves move
-    USING related_cards related
-    WHERE move.card_kind = related.card_kind
-      AND move.card_id = related.card_id
-    `,
-    [orderId],
-  );
 }
 
 function deadlineSystemActorAsCurrentUser(

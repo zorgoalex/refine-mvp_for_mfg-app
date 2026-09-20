@@ -11,6 +11,7 @@ import {
 } from '../../production-actions/adapters/pg-production-action-repository';
 import { ProductionActionStatusNotFoundError } from '../../production-actions/errors/production-action.errors';
 import { loadMdfBoardEvents } from '../adapters/pg-mdf-board-event-repository';
+import { markMdfShadowSource } from '../../mdf-board/application/mdf-shadow';
 import { isMdfBoardEvent, type MdfBoardDetailScope, type MdfBoardEventInput } from './mdf-board-event.types';
 import {
   listEnabledRulesForEvent,
@@ -310,6 +311,7 @@ export async function evaluateMdfBoardColumnAutomation(
 
 /** Single internal API for all five MDF events. Never called from board GET. */
 export async function dispatchMdfBoardEvent(tx: TransactionClient, input: MdfBoardEventInput): Promise<void> {
+  if (input.source) markMdfShadowSource(tx, input);
   if (!isStatusAutomationEnabled() || !input.source) return;
   const rules = (await listEnabledRulesForManualRefresh(tx)).filter(rule => isMdfBoardEvent(rule.eventType));
   if (!rules.length) return;

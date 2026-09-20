@@ -85,12 +85,13 @@ export class Bitrix24ReverseProcessorService {
         }
       } catch (error) {
         if (ownershipLost) continue;
-        await this.repository.markEventFailed(
+        const committed = await this.repository.markEventFailed(
           event,
           safeError(error),
           flags.maxAttempts,
         );
-        failed += 1;
+        if (committed) failed += 1;
+        else ownershipLost = true;
       } finally {
         clearInterval(heartbeatTimer);
       }

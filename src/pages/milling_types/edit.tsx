@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { Edit } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, InputNumber, Checkbox, Card } from "antd";
@@ -20,11 +21,11 @@ export const MillingTypeEdit: React.FC<IResourceComponentsProps> = () => {
         <Form.Item
           label="Name"
           name="milling_type_name"
-          rules={[
+          rules={[...([
             {
               required: true,
             },
-          ]}
+          ]), nameRule("milling_type_name")]}
         >
           <Input />
         </Form.Item>

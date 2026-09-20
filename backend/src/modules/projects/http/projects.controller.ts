@@ -59,7 +59,7 @@ const updateProjectSwaggerSchema = {
   type: 'object',
   required: ['expectedVersion'],
   properties: {
-    code: { type: 'string', pattern: '^[0-9A-Za-zА-Яа-яЁё-]{1,20}$' },
+    code: { type: 'string', pattern: '^[\\p{L}\\p{N}-]{1,20}$' },
     name: { type: 'string', minLength: 1, maxLength: 300 },
     notes: { type: 'string', maxLength: 4000, nullable: true },
     expectedVersion: { type: 'integer', minimum: 0 },
@@ -72,7 +72,7 @@ const createProjectSwaggerSchema = {
   properties: {
     clientId: { type: 'integer', minimum: 1 },
     name: { type: 'string', minLength: 1, maxLength: 300 },
-    code: { type: 'string', pattern: '^[0-9A-Za-zА-Яа-яЁё-]{1,20}$' },
+    code: { type: 'string', pattern: '^[\\p{L}\\p{N}-]{1,20}$' },
     notes: { type: 'string', maxLength: 4000, nullable: true },
     idempotencyKey: { type: 'string', minLength: 8, maxLength: 200 },
   },

@@ -112,6 +112,7 @@ export const apiRoutes = {
     byId: (paymentId: number) => backendApiPath(`/payments/${paymentId}`),
   },
   bitrix24: {
+    orderStages: backendApiPath('/bitrix24/order-stages'),
     incomingRequests: backendApiPath('/bitrix24/incoming-requests'),
     incomingRequest: (requestId: number) =>
       backendApiPath(`/bitrix24/incoming-requests/${requestId}`),
@@ -353,6 +354,8 @@ export const apiRoutes = {
     retryJob: (id: number) => backendApiPath(`/whatsapp/queue/${id}/retry`),
     processNow: backendApiPath('/whatsapp/queue/process-now'),
     audit: backendApiPath('/whatsapp/audit'),
+    technicalLogs: backendApiPath('/whatsapp/technical-logs'),
+    technicalLogsExport: backendApiPath('/whatsapp/technical-logs/export'),
   },
   groups: groupsRoutes,
   projects: {
@@ -386,6 +389,9 @@ export const apiRoutes = {
     analyze: backendApiPath('/vlm/analyze'),
   },
   audit: {
+    bitrixStatus: backendApiPath('/audit/bitrix24/status'),
+    bitrixQueue: backendApiPath('/audit/bitrix24/queue'),
+    bitrixEvents: backendApiPath('/audit/bitrix24/event-options'),
     list: backendApiPath('/audit'),
     filterOptions: backendApiPath('/audit/filter-options'),
     orderOptions: backendApiPath('/audit/order-options'),

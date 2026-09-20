@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { Edit, useForm } from "@refinedev/antd";
 import type { BaseRecord, HttpError, IResourceComponentsProps } from "@refinedev/core";
 import type { RequisitionStatusFormValues } from "./formValues";
@@ -26,7 +27,7 @@ export const RequisitionStatusEdit: React.FC<IResourceComponentsProps> = () => {
         <Form.Item
           label="Name"
           name="requisition_status_name"
-          rules={[{ required: true, whitespace: true }]}
+          rules={[...([{ required: true, whitespace: true }]), nameRule("requisition_status_name")]}
         >
           <Input />
         </Form.Item>

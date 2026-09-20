@@ -23,6 +23,10 @@ import {
 import type { BazisRuntimeConfigService } from './bazis-runtime-config.service';
 
 describe('BazisController', () => {
+  it('preserves literal material names in structured query parameters', () => {
+    expect(parseMaterialMappingsQuery({ name: ['Тест 100%', 'Кромка 0,4 мм', 'Тест %20'] }))
+      .toEqual({ names: ['Тест 100%', 'Кромка 0,4 мм', 'Тест %20'] });
+  });
   let tempDir: string;
 
   beforeEach(async () => {
@@ -95,6 +99,21 @@ describe('BazisController', () => {
     expect(result.requestId).toBe('req-import');
   });
 
+  it('uses the explicit UTF-8 filename unchanged and cleans invalid uploads', async () => {
+    const filePath = join(tempDir, 'unicode.xml');
+    await writeFile(filePath, '<Проект><Изделие/></Проект>');
+    const importXml = vi.fn().mockResolvedValue({});
+    const controller = createController({ bazisEnabled: true, service: { importXml } });
+    await controller.importXml(request(), { path: filePath, size: 10, originalname: 'broken.xml' },
+      { projectId: '12', fileName: 'Кухня Ёлка 100%.xml' });
+    expect(importXml.mock.calls[0][0].fileName).toBe('Кухня Ёлка 100%.xml');
+    await expect(stat(filePath)).rejects.toThrow();
+    await writeFile(filePath, '<Проект/>');
+    await expect(controller.importXml(request(), { path: filePath, size: 10 },
+      { projectId: '12', fileName: 'bad\0.xml' })).rejects.toMatchObject({ statusCode: 422 });
+    await expect(stat(filePath)).rejects.toThrow();
+  });
+
   it('requires projectId or bazisProjectId for import', async () => {
     const controller = createController({ bazisEnabled: true });
     const filePath = join(tempDir, 'upload.xml');
@@ -128,7 +147,7 @@ describe('BazisController', () => {
   });
 
   it('parseMaterialMappingsQuery splits comma-separated names', () => {
-    expect(parseMaterialMappingsQuery({ names: 'oak%20white,edge-1' })).toEqual({
+    expect(parseMaterialMappingsQuery({ names: 'oak white,edge-1' })).toEqual({
       names: ['oak white', 'edge-1'],
     });
   });
@@ -568,7 +587,7 @@ describe('BazisController', () => {
       expect(parseRenameProjectBody({ name: ' 1485 ' })).toEqual({ name: '1485' });
     });
 
-    it.each([{}, { name: '' }, { name: 'x'.repeat(301) }, { name: '1485', extra: true }])(
+    it.each([{}, { name: '' }, { name: 'bad\u0000name' }, { name: '1485', extra: true }])(
       'rejects invalid payload %#',
       (body) => {
         expect(() => parseRenameProjectBody(body)).toThrowError(ApiError);

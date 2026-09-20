@@ -1,3 +1,4 @@
+import { humanName } from '../../../shared/human-name-schema';
 import {
   Body,
   Controller,
@@ -22,7 +23,7 @@ import { PgBitrix24ReverseRepository } from './pg-bitrix24-reverse-repository';
 const positiveId = z.coerce.number().int().positive();
 const requestDetailSchema = z.object({
   id: positiveId.optional(),
-  detailName: z.string().trim().max(200).nullable().optional(),
+  detailName: humanName(200, 0).nullable().optional(),
   height: z.coerce.number().positive().max(1_000_000),
   width: z.coerce.number().positive().max(1_000_000),
   quantity: z.coerce.number().int().positive().max(1_000_000),

@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { Create, useForm } from "@refinedev/antd";
 import type { BaseRecord, HttpError, IResourceComponentsProps } from "@refinedev/core";
 import type { UnitFormValues } from "./formValues";
@@ -36,7 +37,7 @@ export const UnitCreate: React.FC<IResourceComponentsProps> = () => {
         <Form.Item
           label="Name"
           name="unit_name"
-          rules={[{ required: true, whitespace: true }]}
+          rules={[...([{ required: true, whitespace: true }]), nameRule("unit_name")]}
         >
           <Input placeholder="e.g. квадратный метр, штука" />
         </Form.Item>

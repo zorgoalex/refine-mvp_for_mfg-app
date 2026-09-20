@@ -62,6 +62,7 @@ import {
   toOrderStatusBoardQuery,
 } from './model';
 import { filterVisibleStatusBoardColumns } from './statusBoardColumnVisibility';
+import { legacyShadowQuantities } from '../../../backend/src/modules/mdf-board/domain/mdf-shadow-comparison';
 
 describe('MDF order quantity accounting regressions', () => {
   const historical = (kind: CncHistoricalReadinessSource['kind'], id: string, quantity: number,
@@ -91,6 +92,25 @@ describe('MDF order quantity accounting regressions', () => {
   ];
   const calculate = (order: OrderStatusBoardCard, sources: CncTelegramTodayColumn[]) =>
     splitCncOrderCardsByManualColumn([order], buildCncOrderReadiness(sources, {}), {}).orders[0].readiness;
+
+  it('shadow legacy exact-ID adapter agrees with the actual board formula', () => {
+    for (const a of [0, 2, 7, 12]) for (const b of [0, 3, 8]) for (const roll of [0, 2, 9]) {
+      const order = demand([7, 3]);
+      const packets = [cut('a', 101, 1, a), cut('b', 102, 2, b)];
+      const baths = [rolled(101, 1, roll)];
+      const expected = calculate(order, columns(packets, baths));
+      const actual = legacyShadowQuantities(order.details.map(d => ({ orderId: 2705, detailId: d.detailId, quantity: d.quantity })), [
+        ...packets.map(p => ({ kind: 'packet' as const, id: p.packetId, column: 'completed', members: p.items.map(i =>
+          ({ orderId: i.matchOrderId!, detailId: i.matchDetailId!, quantity: i.quantity })) })),
+        ...baths.map(v => ({ kind: 'bath' as const, id: v.bathCardId, column: 'baths_laminated', members: v.items.map(i =>
+          ({ orderId: i.orderId!, detailId: i.detailId!, quantity: i.quantity })) })),
+      ], new Set());
+      const sum = (key: 'cut' | 'rolled' | 'remaining' | 'creditedCut' | 'creditedRolled') => actual.reduce((n,p) => n+p[key], 0);
+      expect({ cut: sum('cut'), rolled: sum('rolled'), remaining: sum('remaining'), creditedCut: sum('creditedCut'), creditedRolled: sum('creditedRolled') })
+        .toEqual({ cut: expected.cutDetails, rolled: expected.rolledDetails, remaining: expected.remainingDetails,
+          creditedCut: expected.creditedQuantities!.cut, creditedRolled: expected.creditedQuantities!.rolled });
+    }
+  });
 
   it('sums current and compact historical CNC/BASIS before position-local rolling', () => {
     const sources = columns([cut('current', 101, 1, 2)]);

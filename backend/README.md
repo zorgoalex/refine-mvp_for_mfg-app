@@ -353,3 +353,22 @@ Next implementation steps:
 2. Add a scheduled Deadline Worker poller only after operations agrees on runtime ownership.
 3. Configure staging/production `RUNTIME_CONFIG_*` env and run deployed runtime-config smoke
    before each canary step.
+# Bitrix order-stage synchronization
+
+`/api/v1/bitrix24/order-stages` manages an opt-in mapping from ERP order statuses
+to Deal stages in one existing Bitrix funnel. Requires
+`bitrix24.integration.manage`; stage creation additionally verifies the current
+Bitrix application user is an administrator. Migration 168 installs disabled
+configuration and a durable, versioned stage queue. No new environment variables.
+
+Production orders only. Unconverted CRM requests and drafts are excluded. ERP
+«Завершен» alone maps to success; earlier statuses can reopen a Deal. ERP owns
+the mapped stage, so observed manual drift is restored with a bounded conflict
+breaker. Existing unchanged Deals require preview and explicit selected enrollment;
+enabling does not bulk-update history. Disabling cancels the old queue epoch.
+
+Stage delivery shares the forward writer lock; webhook and OAuth clients share
+one admission/cooldown budget. Lost responses and operation-time limits do not
+blindly repeat stage writes. The Bitrix audit journal exposes stage events and a
+separate queue subtype (`order_stage`) searchable by ERP order ID and Deal ID.
+Check Bitrix robots, triggers and required stage fields before enabling writes.

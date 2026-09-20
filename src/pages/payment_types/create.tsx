@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { Create } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, InputNumber, Checkbox } from "antd";
@@ -12,7 +13,7 @@ export const PaymentTypeCreate: React.FC<IResourceComponentsProps> = () => {
   return (
     <Create saveButtonProps={saveButtonProps}>
       <Form {...formProps} layout="vertical" initialValues={{ sort_order: 100, is_active: true }}>
-        <Form.Item label="Name" name="type_paid_name" rules={[{ required: true }]}>
+        <Form.Item label="Name" name="type_paid_name" rules={[...([{ required: true }]), nameRule("type_paid_name")]}>
           <Input />
         </Form.Item>
         <Form.Item label="Порядок сортировки" name="sort_order" rules={[{ required: true }]}>

@@ -1,3 +1,4 @@
+import { nameRule } from '../../utils/nameRules';
 import { Create, useForm } from "@refinedev/antd";
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { Form, Input, Select, Checkbox, message } from "antd";
@@ -84,10 +85,10 @@ export const UserCreate: React.FC<IResourceComponentsProps> = () => {
         <Form.Item
           label="Логин"
           name="username"
-          rules={[
+          rules={[...([
             { required: true, message: 'Пожалуйста, введите логин' },
-            { min: 2, message: 'Логин должен содержать минимум 2 символа' },
-          ]}
+            { min: 3, message: 'Логин должен содержать минимум 3 символа' },
+          ]), nameRule("username")]}
         >
           <Input placeholder="ivanov" />
         </Form.Item>
@@ -130,7 +131,7 @@ export const UserCreate: React.FC<IResourceComponentsProps> = () => {
           </Select>
         </Form.Item>
 
-        <Form.Item label="Полное имя" name="full_name">
+        <Form.Item label="Полное имя" name="full_name" rules={[nameRule("full_name", 255, 0)]}>
           <Input placeholder="Иванов Иван Иванович" />
         </Form.Item>
 

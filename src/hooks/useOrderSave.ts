@@ -6,7 +6,7 @@ import { useDataProvider, useInvalidate } from '@refinedev/core';
 import { notification, Modal } from 'antd';
 import { bazisApi } from '../api/bazisApi';
 import { ordersApi } from '../api/ordersApi';
-import { OrderFormValues } from '../types/orders';
+import { OrderFormValues, type OrderDetail } from '../types/orders';
 import { peekOrderDraftStore, orderDraftStoreExists } from '../stores/orderFormStore';
 import { isApiError } from '../api/apiError';
 import { mapOrderFormToSaveOrderDto } from '../api/mappers/orderMapper';
@@ -524,7 +524,7 @@ export const useOrderSave = (
       // Fetch saved details from DB to get accurate data (including any DB-calculated fields)
       console.log('[useOrderSave] Fetching saved details from DB for order:', createdOrderId);
 
-      const savedDetailsResult = await dataProvider().getList({
+      const savedDetailsResult = await dataProvider().getList<OrderDetail>({
         resource: 'order_details',
         filters: [{ field: 'order_id', operator: 'eq', value: createdOrderId }],
         pagination: { current: 1, pageSize: 1000 },

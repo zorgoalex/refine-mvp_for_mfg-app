@@ -1,3 +1,4 @@
+import { humanName } from '../../../shared/human-name-schema';
 import { z } from 'zod';
 
 const jsonObjectSchema = z.record(z.string(), z.unknown());
@@ -123,7 +124,7 @@ export const labelTemplateElementInputSchema = z
 
 export const createLabelTemplateSchema = z
   .object({
-    name: z.string().trim().min(1).max(200),
+    name: humanName(200, 1),
     description: z.string().max(2000).nullable().optional(),
     isActive: z.boolean().optional(),
     canvasWidthMm: z.number().positive(),

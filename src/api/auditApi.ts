@@ -1,6 +1,7 @@
 import { apiRoutes } from './apiRoutes';
 import { httpClient } from './httpClient';
 import type {
+  BitrixAuditStatus, BitrixQueueQuery, BitrixQueueResponse,
   AuditFilterOptionsResponse,
   AuditLogListQuery,
   AuditLogListResponse,
@@ -29,10 +30,13 @@ export function withAuditQuery<T extends { [K in keyof T]: QueryValue }>(path: s
 }
 
 export const auditApi = {
+  bitrixStatus(): Promise<BitrixAuditStatus> { return httpClient.get(apiRoutes.audit.bitrixStatus); },
+  bitrixQueue(query: BitrixQueueQuery): Promise<BitrixQueueResponse> { return httpClient.get(withAuditQuery(apiRoutes.audit.bitrixQueue, query)); },
+  bitrixEvents(search?: string): Promise<{ data: Array<{ event: string; label: string }> }> { return httpClient.get(withAuditQuery(apiRoutes.audit.bitrixEvents, { search })); },
   list(params: AuditLogListQuery = {}): Promise<AuditLogListResponse> {
     return httpClient.get<AuditLogListResponse>(withAuditQuery(apiRoutes.audit.list, params));
   },
-  filterOptions(params: { scope?: 'all' | 'business' } = {}): Promise<AuditFilterOptionsResponse> {
+  filterOptions(params: { scope?: 'all' | 'business' | 'bitrix24'; excludeBitrix24?: boolean } = {}): Promise<AuditFilterOptionsResponse> {
     return httpClient.get<AuditFilterOptionsResponse>(withAuditQuery(apiRoutes.audit.filterOptions, params));
   },
   orderOptions(params: AuditLookupOptionsQuery = {}): Promise<AuditOrderFilterOptionsResponse> {

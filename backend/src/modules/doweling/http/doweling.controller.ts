@@ -1,3 +1,4 @@
+import { humanName } from '../../../shared/human-name-schema';
 import { Body, Controller, HttpCode, Inject, Post, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
@@ -21,7 +22,7 @@ function isRealCalendarDate(value: string): boolean {
 }
 
 const createDowelingRequestSchema = z.object({
-  dowelingOrderName: z.string().trim().min(1).max(200),
+  dowelingOrderName: humanName(200, 1),
   designEngineerId: z.number().int().positive(),
   paymentStatusId: z.number().int().positive(),
   dowelingOrderDate: z

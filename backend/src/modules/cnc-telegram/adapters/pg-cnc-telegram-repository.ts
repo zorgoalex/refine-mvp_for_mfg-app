@@ -3452,7 +3452,7 @@ async function insertPacket(
     throw new ApiError(500, 'CNC_TELEGRAM_PACKET_INSERT_FAILED', 'CNC packet insert failed');
   }
   await persistPacketLayoutFingerprint(tx, packetId, dto);
-  await replaceWholeOrderKeys(tx, packetId, dto.comments ?? []);
+  await replaceWholeOrderKeys(tx, packetId, dto);
   return packetId;
 }
 
@@ -3498,7 +3498,7 @@ async function updatePacket(
     [packetId, ...packetParams(dto, payloadHash, command.currentUser.id).slice(1)],
   );
   await persistPacketLayoutFingerprint(tx, packetId, dto);
-  await replaceWholeOrderKeys(tx, packetId, dto.comments ?? []);
+  await replaceWholeOrderKeys(tx, packetId, dto);
 }
 
 /** The same completion assignments are exercised against PostgreSQL by correction regression tests. */
@@ -3512,9 +3512,12 @@ export function mdfCompletionUpdateSql(status: string, thumbs: string, completed
 async function replaceWholeOrderKeys(
   tx: TransactionClient,
   packetId: string,
-  comments: readonly string[],
+  dto: CncTelegramStructuredIngestDto,
 ): Promise<void> {
-  const orderKeys = wholeOrderKeysFromComments(comments);
+  const orderKeys = Array.from(new Set([
+    ...verifiedWholeOrderKeys(dto),
+    ...wholeOrderKeysFromComments(dto.comments ?? []),
+  ]));
   await tx.query('DELETE FROM cnc_telegram_packet_whole_order_keys WHERE packet_id = $1::uuid', [packetId]);
   if (orderKeys.length === 0) return;
   await tx.query(
@@ -3526,13 +3529,31 @@ async function replaceWholeOrderKeys(
   );
 }
 
+/** Durable named identities require an unambiguous verified match. */
+export function verifiedWholeOrderKeys(dto: Pick<CncTelegramStructuredIngestDto, 'items' | 'comments'>): string[] {
+  const identities = new Map<string, { ids: Set<number>; valid: boolean }>();
+  for (const item of dto.items) {
+    const key = item.orderName.trim().toLocaleLowerCase('ru-RU');
+    const identity = identities.get(key) ?? { ids: new Set<number>(), valid: true };
+    if (item.matchStatus !== 'matched' || !isPositiveNumber(item.matchOrderId)) identity.valid = false;
+    else identity.ids.add(item.matchOrderId);
+    identities.set(key, identity);
+  }
+  return cncWholeOrderKeys({ comments: dto.comments ?? [], items: dto.items }).filter(key => {
+    const identity = identities.get(key);
+    return identity?.valid && identity.ids.size === 1;
+  });
+}
+
 export function wholeOrderKeysFromComments(comments: readonly string[]): string[] {
-  return Array.from(new Set(
-    comments.flatMap((comment) => {
-      if (!comment.toLocaleLowerCase('ru-RU').includes('весь')) return [];
-      return Array.from(comment.matchAll(/(^|[^0-9])([0-9]{4,})(?=[^0-9]|$)/g), (match) => match[2]);
-    }),
-  ));
+  return Array.from(new Set(comments.flatMap(comment => {
+    // Legacy numeric comments remain supported; arbitrary prose is not an identity.
+    const value = comment.trim();
+    const before = /^([0-9\s,;/]+)\s*[—–-]?\s*весь\s+заказ[.!]?$/iu.exec(value);
+    const after = /^весь\s+заказ\s*[:№-]?\s*([0-9\s,;/]+)[.!]?$/iu.exec(value);
+    const numbers = before?.[1] ?? after?.[1];
+    return numbers ? numbers.split(/[\s,;/]+/).filter(number => /^[0-9]{4,}$/.test(number)) : [];
+  })));
 }
 
 async function persistPacketLayoutFingerprint(
