@@ -824,6 +824,166 @@ paths:
         - {name: orderId, in: path, required: true, schema: {type: integer, minimum: 1}}
       responses:
         '200': {description: 'Mapped order payment snapshots, subject to order access scope'}
+  /api/v1/bitrix24/order-stages:
+    get:
+      tags: [Bitrix24]
+      operationId: bitrix24StagesRead
+      summary: Read stage settings, catalogs and queue counters
+      security: [{bearerAuth: []}]
+      x-permission: bitrix24.integration.manage
+      responses:
+        '200': {description: Current settings or durable reviewed settings job}
+        '403': {description: Missing integration management or required Bitrix administrator permission}
+        '409': {description: Stale preview, conflicting ownership, semantics or configuration}
+        '422': {description: Invalid input}
+        '503': {description: Required installation or sync runtime disabled}
+  /api/v1/bitrix24/order-stages/catalog/refresh:
+    post:
+      tags: [Bitrix24]
+      operationId: bitrix24StagesRefreshCatalog
+      summary: Refresh all categories and stages without modifying deals
+      security: [{bearerAuth: []}]
+      x-permission: bitrix24.integration.manage
+      responses:
+        '201': {description: Current settings or durable reviewed settings job}
+        '403': {description: Missing integration management or required Bitrix administrator permission}
+        '409': {description: Stale preview, conflicting ownership, semantics or configuration}
+        '422': {description: Invalid input}
+        '503': {description: Required installation or sync runtime disabled}
+  /api/v1/bitrix24/order-stages/settings/preview:
+    post:
+      tags: [Bitrix24]
+      operationId: bitrix24StagesPreviewSettings
+      summary: Preview mappings, enable/disable and enrolled-order impact
+      security: [{bearerAuth: []}]
+      x-permission: bitrix24.integration.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/StageSettings'}
+      responses:
+        '201': {description: Current settings or durable reviewed settings job}
+        '403': {description: Missing integration management or required Bitrix administrator permission}
+        '409': {description: Stale preview, conflicting ownership, semantics or configuration}
+        '422': {description: Invalid input}
+        '503': {description: Required installation or sync runtime disabled}
+  /api/v1/bitrix24/order-stages/settings/{jobId}/apply:
+    post:
+      tags: [Bitrix24]
+      operationId: bitrix24StagesApplySettings
+      summary: Apply versioned settings preview; disable cancels old epoch
+      security: [{bearerAuth: []}]
+      x-permission: bitrix24.integration.manage
+      parameters:
+        - {name: jobId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '201': {description: Current settings or durable reviewed settings job}
+        '403': {description: Missing integration management or required Bitrix administrator permission}
+        '409': {description: Stale preview, conflicting ownership, semantics or configuration}
+        '422': {description: Invalid input}
+        '503': {description: Required installation or sync runtime disabled}
+  /api/v1/bitrix24/order-stages/provision/preview:
+    post:
+      tags: [Bitrix24]
+      operationId: bitrix24StagesPreviewProvision
+      summary: Preview missing ongoing stages only
+      security: [{bearerAuth: []}]
+      x-permission: bitrix24.integration.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/StageProvisionInput'}
+      responses:
+        '201': {description: Durable operation or queued result}
+        '403': {description: Missing integration management or required Bitrix administrator permission}
+        '409': {description: Stale preview, conflicting ownership, semantics or configuration}
+        '422': {description: Invalid input}
+        '503': {description: Required installation or sync runtime disabled}
+  /api/v1/bitrix24/order-stages/provision/{jobId}/apply:
+    post:
+      tags: [Bitrix24]
+      operationId: bitrix24StagesApplyProvision
+      summary: Create reviewed ongoing stages with current Bitrix administrator proof
+      security: [{bearerAuth: []}]
+      x-permission: bitrix24.integration.manage
+      parameters:
+        - {name: jobId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '201': {description: Durable operation or queued result}
+        '403': {description: Missing integration management or required Bitrix administrator permission}
+        '409': {description: Stale preview, conflicting ownership, semantics or configuration}
+        '422': {description: Invalid input}
+        '503': {description: Required installation or sync runtime disabled}
+  /api/v1/bitrix24/order-stages/reconcile/preview:
+    post:
+      tags: [Bitrix24]
+      operationId: bitrix24StagesPreviewReconcile
+      summary: Read a bounded page of ERP-owned stage differences
+      security: [{bearerAuth: []}]
+      x-permission: bitrix24.integration.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/StageReconcileInput'}
+      responses:
+        '201': {description: Durable operation or queued result}
+        '403': {description: Missing integration management or required Bitrix administrator permission}
+        '409': {description: Stale preview, conflicting ownership, semantics or configuration}
+        '422': {description: Invalid input}
+        '503': {description: Required installation or sync runtime disabled}
+  /api/v1/bitrix24/order-stages/reconcile/{jobId}/apply:
+    post:
+      tags: [Bitrix24]
+      operationId: bitrix24StagesApplyReconcile
+      summary: Enroll selected unchanged rows in durable stage queue
+      security: [{bearerAuth: []}]
+      x-permission: bitrix24.integration.manage
+      parameters:
+        - {name: jobId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/StageReconcileSelection'}
+      responses:
+        '201': {description: Durable operation or queued result}
+        '403': {description: Missing integration management or required Bitrix administrator permission}
+        '409': {description: Stale preview, conflicting ownership, semantics or configuration}
+        '422': {description: Invalid input}
+        '503': {description: Required installation or sync runtime disabled}
+  /api/v1/bitrix24/order-stages/jobs/{jobId}:
+    get:
+      tags: [Bitrix24]
+      operationId: bitrix24StagesReadJob
+      summary: Read durable per-row stage operation results
+      security: [{bearerAuth: []}]
+      x-permission: bitrix24.integration.manage
+      parameters:
+        - {name: jobId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Durable operation or queued result}
+        '403': {description: Missing integration management or required Bitrix administrator permission}
+        '409': {description: Stale preview, conflicting ownership, semantics or configuration}
+        '422': {description: Invalid input}
+        '503': {description: Required installation or sync runtime disabled}
+  /api/v1/bitrix24/order-stages/orders/{orderId}/retry:
+    post:
+      tags: [Bitrix24]
+      operationId: bitrix24StagesRetryOrder
+      summary: Retry blocked enrolled stage work after resolving root cause
+      security: [{bearerAuth: []}]
+      x-permission: bitrix24.integration.manage
+      parameters:
+        - {name: orderId, in: path, required: true, schema: {type: string}}
+      responses:
+        '201': {description: Durable operation or queued result}
+        '403': {description: Missing integration management or required Bitrix administrator permission}
+        '409': {description: Stale preview, conflicting ownership, semantics or configuration}
+        '422': {description: Invalid input}
+        '503': {description: Required installation or sync runtime disabled}
   /api/v1/bitrix24/payment-systems/refresh:
     post:
       tags:
@@ -1633,7 +1793,11 @@ paths:
           schema: { type: string, enum: [forward, reverse] }
         - name: status
           in: query
-          schema: { type: string, enum: [pending, processing, processed, failed, dead] }
+          schema: { type: string, enum: [pending, processing, processed, failed, dead, blocked, waiting_mapping, cancelled] }
+        - name: queueType
+          in: query
+          schema: { type: string, enum: [entity, order_stage] }
+          description: Forward subtype; omitted includes normal entity work and order-stage work. Reverse has entity work only.
         - name: orderId
           in: query
           schema: { type: integer, minimum: 1 }
@@ -15846,6 +16010,43 @@ components:
                   requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
 
   schemas:
+    StageSettings:
+      type: object
+      additionalProperties: false
+      required: [version, categoryId, completedStatusId, enabled, mappings]
+      properties:
+        version: {type: integer, minimum: 1}
+        categoryId: {type: integer, minimum: 0}
+        completedStatusId: {type: integer, minimum: 1, description: Explicit FK for ERP Завершен; no other status may map to success}
+        enabled: {type: boolean}
+        mappings:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [orderStatusId, stageId]
+            additionalProperties: false
+            properties:
+              orderStatusId: {type: integer, minimum: 1}
+              stageId: {type: string, minLength: 1, maxLength: 100}
+    StageProvisionInput:
+      type: object
+      additionalProperties: false
+      required: [statusIds]
+      properties:
+        statusIds: {type: array, minItems: 1, maxItems: 20, items: {type: integer, minimum: 1}}
+    StageReconcileInput:
+      type: object
+      additionalProperties: false
+      properties:
+        afterId: {type: integer, minimum: 0, default: 0}
+        limit: {type: integer, minimum: 1, maximum: 25, default: 25}
+    StageReconcileSelection:
+      type: object
+      additionalProperties: false
+      required: [orderIds]
+      properties:
+        orderIds: {type: array, minItems: 1, maxItems: 25, items: {type: string, pattern: '^[1-9][0-9]*$'}}
     CatalogInput:
       type: object
       additionalProperties: false

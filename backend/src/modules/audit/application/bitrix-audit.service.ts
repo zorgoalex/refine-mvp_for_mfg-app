@@ -12,7 +12,8 @@ import { safeBitrixError } from './bitrix-audit-sanitization';
 
 export interface BitrixQueueQuery {
   direction: 'forward' | 'reverse';
-  status?: 'pending' | 'processing' | 'processed' | 'failed' | 'dead';
+  status?: 'pending' | 'processing' | 'processed' | 'failed' | 'dead' | 'blocked' | 'waiting_mapping' | 'cancelled';
+  queueType?: 'entity' | 'order_stage';
   orderId?: number;
   entityType?: 'order' | 'client' | 'payment';
   entityId?: string;
@@ -81,8 +82,11 @@ export class BitrixAuditService {
       UNION ALL SELECT 'reverse', count(*) FILTER (WHERE status='pending'), count(*) FILTER (WHERE status='processing'),
       count(*) FILTER (WHERE status='failed'), count(*) FILTER (WHERE status='dead'),
       min(created_at) FILTER (WHERE status='pending'), max(processed_at) FROM bitrix24_inbound_event`);
+    const stageQueue=await this.db.query<{status:string;count:string}>(`SELECT w.status,count(*)::text FROM bitrix24_stage_work w
+      JOIN bitrix24_stage_config c ON w.member_id=c.member_id AND w.category_id=c.category_id AND w.epoch=c.epoch GROUP BY w.status`);
     return {
       fetchedAt: new Date().toISOString(),
+      stageQueue: stageQueue.rows.map(r=>({status:r.status,count:Number(r.count)})),
       data: result.rows.map((row) => {
         const flags =
           row.direction === 'forward'
@@ -114,6 +118,7 @@ export class BitrixAuditService {
       clauses.push(`${column}=$${params.length}`);
     };
     if (query.status) add('q.status', query.status);
+    if (query.queueType) add('q.queue_type', query.queueType);
     if (query.orderId) add('q.order_id', String(query.orderId));
     if (query.entityType) add('q.entity_type', query.entityType);
     if (query.entityId) add('q.entity_id', query.entityId);
@@ -123,15 +128,19 @@ export class BitrixAuditService {
       ? `SELECT e.outbox_event_id::text AS id, e.event_type AS event, identity.entity_type,
       identity.entity_id, CASE WHEN identity.entity_type='order' THEN identity.entity_id ELSE m.parent_erp_id END AS order_id,
       m.bitrix_object, m.bitrix_id, e.status, e.attempts, e.created_at, e.processed_at, e.next_attempt_at,
-      m.last_error AS error, 'current_mapping'::text AS error_source
+      m.last_error AS error, 'current_mapping'::text AS error_source, 'entity'::text AS queue_type
       FROM crm_sync_outbox e
       CROSS JOIN LATERAL (SELECT e.payload_json->>'entity' AS entity_type,
         COALESCE(e.payload_json->>'id',e.aggregate_id) AS entity_id) identity
-      LEFT JOIN crm_sync_mapping m ON m.entity_type=identity.entity_type AND m.erp_id=identity.entity_id`
+      LEFT JOIN crm_sync_mapping m ON m.entity_type=identity.entity_type AND m.erp_id=identity.entity_id
+      UNION ALL SELECT 'stage:'||w.member_id||':'||w.category_id::text||':'||w.order_id::text, 'crm_sync.stage_transfer', 'order',w.order_id::text,w.order_id::text,
+      'deal',COALESCE(w.bitrix_id,m.bitrix_id),w.status,w.attempts,w.updated_at,w.processed_at,w.next_attempt_at,w.last_error,'queue','order_stage'
+      FROM bitrix24_stage_work w JOIN bitrix24_stage_config c ON w.member_id=c.member_id AND w.category_id=c.category_id
+      LEFT JOIN crm_sync_mapping m ON m.entity_type='order' AND m.erp_id=w.order_id::text AND m.bitrix_object='deal'`
       : `SELECT e.inbound_event_id::text AS id, e.event_name AS event, m.entity_type, m.erp_id AS entity_id,
       COALESCE(CASE WHEN m.entity_type='order' THEN m.erp_id END, r.linked_order_id::text) AS order_id,
       e.object_type AS bitrix_object, e.bitrix_id, e.status, e.attempts, e.created_at, e.processed_at, e.next_attempt_at,
-      e.last_error AS error, 'queue'::text AS error_source
+      e.last_error AS error, 'queue'::text AS error_source, 'entity'::text AS queue_type
       FROM bitrix24_inbound_event e LEFT JOIN crm_sync_mapping m ON m.bitrix_object=e.object_type AND m.bitrix_id=e.bitrix_id
       LEFT JOIN bitrix24_incoming_request r ON e.object_type='deal' AND r.bitrix_deal_id=e.bitrix_id`;
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
@@ -156,6 +165,7 @@ export class BitrixAuditService {
       next_attempt_at: Date;
       error: string | null;
       error_source: string;
+      queue_type: string;
     }>(
       `SELECT q.*, o.order_name ${from} ORDER BY q.created_at DESC, q.id DESC LIMIT $${
         params.length + 1
@@ -166,6 +176,7 @@ export class BitrixAuditService {
       data: rows.rows.map((row) => ({
         id: `${query.direction}:${row.id}`,
         queueId: row.id,
+        queueType: row.queue_type,
         direction: query.direction,
         event: row.event,
         entityType: row.entity_type,

@@ -12,8 +12,9 @@ const id = z
 const queueSchema = z
   .object({
     direction: z.enum(['forward', 'reverse']),
+    queueType: z.enum(['entity', 'order_stage']).optional(),
     status: z
-      .enum(['pending', 'processing', 'processed', 'failed', 'dead'])
+      .enum(['pending', 'processing', 'processed', 'failed', 'dead', 'blocked', 'waiting_mapping', 'cancelled'])
       .optional(),
     orderId: z.coerce.number().int().positive().safe().optional(),
     entityType: z.enum(['order', 'client', 'payment']).optional(),

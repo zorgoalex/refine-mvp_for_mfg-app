@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { OrderStageSettings } from './OrderStageSettings';
 import { OrderCatalogLinesTable } from '../orders/components/OrderCatalogLinesTable';
 import { orderCatalogLineAmount, orderCatalogLineInput, type OrderCatalogLine } from '../../utils/orderCatalogLines';
 import { BitrixActorLabel, BitrixPaymentAuthorship } from '../../components/bitrix24/BitrixAuthorship';
@@ -981,6 +982,7 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
         title="Настройки синхронизации Bitrix"
       >
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          {settingsOpen && canManage && <OrderStageSettings />}
           <Descriptions bordered size="small" column={2}>
             <Descriptions.Item label="Приложение">
               {health?.installationStatus || 'Не установлено'}

@@ -112,6 +112,7 @@ export const apiRoutes = {
     byId: (paymentId: number) => backendApiPath(`/payments/${paymentId}`),
   },
   bitrix24: {
+    orderStages: backendApiPath('/bitrix24/order-stages'),
     incomingRequests: backendApiPath('/bitrix24/incoming-requests'),
     incomingRequest: (requestId: number) =>
       backendApiPath(`/bitrix24/incoming-requests/${requestId}`),

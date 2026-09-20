@@ -55,6 +55,7 @@ export interface ReverseClientSnapshot {
 }
 
 export interface ReverseDealSnapshot {
+  categoryId?: number | null;
   bitrixId: string;
   title: string;
   fullTitle: string;
@@ -118,6 +119,7 @@ export class PgBitrix24ReverseRepository {
     private readonly audit: AuditService,
     private readonly portalTimezone = 'Asia/Almaty',
     private readonly portalDomain = 'mebelkz.bitrix24.kz',
+    private readonly stageObserver?: import('../stages/stage-repository').StageRepository,
   ) {}
 
   async assertReverseSyncReady(actorUserId: number): Promise<void> {
@@ -742,6 +744,10 @@ export class PgBitrix24ReverseRepository {
           'SELECT order_id FROM orders WHERE order_id=$1 FOR UPDATE',
           [mapping.erpId],
         );
+        if (this.stageObserver && lockToken && snapshot.categoryId != null && snapshot.stageId) {
+          const inbound = await tx.query<{ member_id: string }>('SELECT member_id FROM bitrix24_inbound_event WHERE inbound_event_id::text=$1 AND lock_token=$2', [requestId,lockToken]);
+          if (inbound.rows[0]) await this.stageObserver.observe(tx,inbound.rows[0].member_id,snapshot.bitrixId,snapshot.categoryId,snapshot.stageId);
+        }
         const linkedRequest = mapping.sourceSystem === 'bitrix24'
           ? await tx.query<{
               request_id: string | number;

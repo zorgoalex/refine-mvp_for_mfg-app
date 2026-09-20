@@ -141,6 +141,7 @@ function makeRelay(
     db?: ReturnType<typeof makeDb>['db'];
     config?: ReturnType<typeof makeConfig>;
     logger?: unknown;
+    stageLane?: {runLocked(prove:()=>Promise<void>):Promise<void>};
   } = {},
 ) {
   const config = opts.config ?? makeConfig();
@@ -153,6 +154,7 @@ function makeRelay(
     audit: (opts.audit ?? makeAudit()) as never,
     db: db as never,
     config: config as never,
+    stageLane: opts.stageLane,
     logger: (opts.logger as never) ?? { log: vi.fn(), error: vi.fn() },
   });
 }
@@ -160,6 +162,19 @@ function makeRelay(
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('CrmSyncRelayService', () => {
+  it('runs stage work with the same writer even when entity queue is empty',async()=>{
+    const {db}=makeDb();const outboxRepo=makeOutboxRepo({claimBatch:vi.fn().mockResolvedValue([])});
+    const stageLane={runLocked:vi.fn(async(prove:()=>Promise<void>)=>{await prove();})};
+    await makeRelay({db,outboxRepo,stageLane}).runTick();
+    expect(db.withAdvisoryLock).toHaveBeenCalledWith('bitrix24-live-writer',expect.any(Function));
+    expect(stageLane.runLocked).toHaveBeenCalledOnce();expect(outboxRepo.heartbeatWriterLock).toHaveBeenCalled();
+  });
+  it('stage failure does not block normal CRM delivery or release another writer',async()=>{
+    const outboxRepo=makeOutboxRepo({claimBatch:vi.fn().mockResolvedValue([makeClaimedEvent()]),markProcessed:vi.fn().mockResolvedValue(1)});
+    const consumer=makeConsumer([clientIntent()]);const stageLane={runLocked:vi.fn().mockRejectedValue(new Error('stage unavailable'))};
+    const result=await makeRelay({outboxRepo,consumer,stageLane}).runTick();
+    expect(result.processed).toBe(1);expect(consumer.sync).toHaveBeenCalledOnce();expect(outboxRepo.releaseWriterLock).toHaveBeenCalledOnce();
+  });
   // ── (a) consumer returns [clientIntent, orderIntent], markProcessed → 1 ──────
   describe('(a) two intents, markProcessed=1', () => {
     it('calls consumer.sync BEFORE the tx, then markProcessed FIRST inside tx, then both intents in order', async () => {

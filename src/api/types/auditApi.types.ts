@@ -151,15 +151,18 @@ export interface AuditLogListQuery {
 }
 
 export interface BitrixAuditStatus {
+  stageQueue?: Array<{status:string;count:number}>;
   fetchedAt: string;
   data: Array<{ direction: 'forward' | 'reverse'; enabled: boolean; owner: string; dryRun: boolean; pending: number; processing: number; failed: number; dead: number; oldestPendingAt: string | null; lastProcessedAt: string | null }>;
 }
 export interface BitrixQueueQuery {
+  queueType?: 'entity' | 'order_stage';
   direction: 'forward' | 'reverse'; status?: string; orderId?: number;
   entityType?: string; entityId?: string; bitrixObject?: string; bitrixId?: string;
   page: number; pageSize: number;
 }
 export interface BitrixQueueRow {
+  queueType?: 'entity' | 'order_stage';
   id: string; queueId: string; direction: string; event: string; entityType: string | null; entityId: string | null;
   orderId: string | null; orderName: string | null; bitrixObject: string | null; bitrixId: string | null;
   status: string; attempts: number; createdAt: string; processedAt: string | null; nextAttemptAt: string | null;

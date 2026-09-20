@@ -50,6 +50,16 @@ const definition = (
   outcome: BitrixOutcome
 ): BitrixEventDefinition => ({ event, label, direction, category, outcome });
 export const BITRIX_EVENT_CATALOG: BitrixEventDefinition[] = [
+  definition('crm_sync.stage_sync_applied','Передана стадия заказа','forward','order','success'),
+  definition('crm_sync.stage_restored','Восстановлена стадия ERP','forward','order','success'),
+  definition('crm_sync.stage_sync_blocked','Передача стадии заблокирована','forward','order','conflict'),
+  definition('crm_sync.stage_sync_failed','Ошибка передачи стадии','forward','order','error'),
+  definition('crm_sync.stage_reconcile_enqueued','Стадия включена в сверку','forward','order','started'),
+  definition('crm_sync.stage_retry_requested','Запрошен повтор передачи стадии','forward','order','started'),
+  definition('crm_sync.stage_created','Создана рабочая стадия Bitrix','settings','settings','success'),
+  definition('crm_sync.stage_catalog_refreshed','Обновлён каталог стадий','settings','settings','success'),
+  definition('crm_sync.stage_mapping_changed','Изменено сопоставление стадий','settings','settings','success'),
+  definition('crm_sync.stage_preview_created','Подготовлен предпросмотр стадий','settings','settings','started'),
   definition(
     'crm_sync.upsert',
     'Синхронизирована запись ERP → Bitrix',

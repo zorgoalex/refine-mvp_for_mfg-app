@@ -56,6 +56,9 @@ const statuses = {
   processed: 'Обработано',
   failed: 'Ошибка',
   dead: 'Остановлено',
+  blocked: 'Заблокировано',
+  waiting_mapping: 'Ожидает сделки',
+  cancelled: 'Отменено',
 };
 const objects = {
   contact: 'Контакт',
@@ -262,6 +265,7 @@ export function Bitrix24Audit() {
   const [loading, setLoading] = useState(false);
   const [events, setEvents] = useState<AuditLogEventDto[]>([]);
   const [queue, setQueue] = useState<BitrixQueueResponse['data']>([]);
+  const [queueType,setQueueType]=useState<'entity'|'order_stage'|undefined>();
   const [total, setTotal] = useState(0);
   const request = useRef(0);
   useEffect(() => {
@@ -301,6 +305,7 @@ export function Bitrix24Audit() {
         } else {
           const result = await auditApi.bitrixQueue({
             direction: queueDirection,
+            queueType: queueDirection==='forward'?queueType:undefined,
             page,
             pageSize,
             status: filters.status,
@@ -330,7 +335,7 @@ export function Bitrix24Audit() {
     return () => {
       request.current++;
     };
-  }, [allowed, mode, filters, queueDirection, page, pageSize, revision]);
+  }, [allowed, mode, filters, queueDirection, queueType, page, pageSize, revision]);
   if (!allowed)
     return <Alert type="error" message="Требуется право audit.view" />;
   const pagination = {
@@ -376,6 +381,7 @@ export function Bitrix24Audit() {
         />
       )}
       <Space wrap align="start">
+        {health?.stageQueue&&<Card size="small" title="ERP → Bitrix: стадии заказов" style={{minWidth:290}}>{health.stageQueue.length?health.stageQueue.map(s=><div key={s.status}>{label(statuses,s.status)}: {s.count}</div>):'Подключённых заказов нет'}</Card>}
         {health?.data.map((h) => (
           <Card
             key={h.direction}
@@ -523,6 +529,7 @@ export function Bitrix24Audit() {
                   style={{ width: 180 }}
                 />
               </Form.Item>
+              {queueDirection==='forward'&&<Form.Item label="Тип очереди"><Select aria-label="Тип очереди" allowClear placeholder="Все" value={queueType} onChange={v=>{setQueueType(v);setPage(1);}} options={[{value:'entity',label:'Клиенты, заказы, платежи'},{value:'order_stage',label:'Стадии заказов'}]} style={{width:220}}/></Form.Item>}
             </>
           )}
           <Form.Item name="entityType" label="Тип объекта ERP">
