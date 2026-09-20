@@ -289,7 +289,7 @@ async function resolveExistingJob(
   api: Pick<typeof cutApi, 'get'> = cutApi,
 ): Promise<CutJobDto> {
   if (targetJobId === null) {
-    throw new ApiError(400, 'NO_JOB_SELECTED', 'Выберите черновик раскроя');
+    throw new ApiError({ status: 400, code: 'NO_JOB_SELECTED', message: 'Выберите черновик раскроя' });
   }
   // Re-fetch for the freshest optimistic version before reserving.
   return api.get(targetJobId);

@@ -657,6 +657,7 @@ const EMPTY_ORDER_DETAIL_TABLE_ROWS: any[] = [];
 
 interface MemoizedOrderDetailTableProps extends React.ComponentProps<typeof Table> {
   renderVersion: string;
+  role?: React.AriaRole;
 }
 
 const MemoizedOrderDetailTable = React.memo(

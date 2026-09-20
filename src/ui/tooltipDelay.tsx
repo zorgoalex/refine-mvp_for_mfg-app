@@ -67,7 +67,7 @@ const DelayedTable = React.forwardRef<HTMLDivElement, AntdTableProps<any>>((prop
   );
 });
 
-Object.assign(DelayedTable, AntdTable);
+const TableWithStatics = Object.assign(DelayedTable, AntdTable);
 DelayedTable.displayName = 'Table';
 
-export const Table = DelayedTable as typeof AntdTable;
+export const Table: typeof AntdTable = TableWithStatics;

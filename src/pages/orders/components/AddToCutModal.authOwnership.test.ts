@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { authSession } from '../../../api/authSession';
+import { ApiError } from '../../../api/apiError';
 import type { CutJobDto } from '../../../api/types/cutApi.types';
 import type { UserIdentity } from '../../../types/auth';
 import {
@@ -54,5 +55,34 @@ describe('add-to-cut auth ownership', () => {
     expect(api.listEligibleDetails).not.toHaveBeenCalled();
     expect(api.addItems).not.toHaveBeenCalled();
     expect(api.archive).not.toHaveBeenCalled();
+  });
+
+  it('rejects a missing existing job with a complete ApiError before any request', async () => {
+    const api = { create: vi.fn(), get: vi.fn(), listEligibleDetails: vi.fn(), archive: vi.fn(), addItems: vi.fn() };
+    const operation = runPageOwnedWorkspaceOperation('/orders/edit/42', 'order-add-to-cut',
+      (owner) => executeAddToCutWorkflow({ mode: 'existing', name: 'Тест', orderIds: [42], targetJobId: null }, owner, api));
+    await expect(operation).rejects.toBeInstanceOf(ApiError);
+    await expect(operation).rejects.toMatchObject({
+      status: 400, statusCode: 400, code: 'NO_JOB_SELECTED', message: 'Выберите черновик раскроя',
+    });
+    for (const request of Object.values(api)) expect(request).not.toHaveBeenCalled();
+  });
+
+  it('refetches the selected existing job and preserves its optimistic version', async () => {
+    const job = { cutJobId: 7, version: 3 } as CutJobDto;
+    const updated = { ...job, version: 4 };
+    const api = {
+      create: vi.fn(), get: vi.fn().mockResolvedValue(job), listEligibleDetails: vi.fn(),
+      archive: vi.fn(), addItems: vi.fn().mockResolvedValue(updated),
+    };
+    const result = await runPageOwnedWorkspaceOperation('/orders/edit/42', 'order-add-to-cut',
+      (owner) => executeAddToCutWorkflow({ mode: 'existing', name: 'Тест', orderIds: [42],
+        targetJobId: 7, hdfDetailIds: [11] }, owner, api));
+    expect(api.get).toHaveBeenCalledExactlyOnceWith(7);
+    expect(api.addItems).toHaveBeenCalledExactlyOnceWith(7, { hdfDetailIds: [11], version: 3 });
+    expect(result).toEqual({ kind: 'updated', detailIds: [], job: updated });
+    expect(api.create).not.toHaveBeenCalled();
+    expect(api.archive).not.toHaveBeenCalled();
+    expect(api.listEligibleDetails).not.toHaveBeenCalled();
   });
 });
