@@ -147,7 +147,7 @@ export class PgMdfBoardManualMoveRepository implements MdfBoardManualMoveReposit
           source: { kind: command.cardKind, id: command.cardId },
           actor: command.currentUser,
           requestId: command.requestId ?? 'mdf-board-manual-move',
-          sourceIdempotencyKey: `mdf-board:manual:${command.cardKind}:${command.cardId}:version-${saved.version}:${command.targetColumn}`,
+          sourceIdempotencyKey: `mdf-board:manual:${command.cardKind}:${command.cardId}:version-${saved.version}:${command.targetColumn}:audit-${auditId}`,
         });
       }
       return {

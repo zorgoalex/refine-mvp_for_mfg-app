@@ -29,6 +29,11 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-09-20", title: "МДФ-доска: теневой приём событий",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: ["Подключена диагностическая запись событий общего обработчика МДФ-доски: состав карточки сохраняется вместе с командой. Теневой механизм не меняет статусы и колонки; основной расчёт пока остаётся прежним."],
+  },
+  {
     version: APP_VERSION, date: "2026-09-19", title: "МДФ-доска: подготовка единого расчёта",
     services: ["ERP"], repositories: ["repo_erp"],
     added: ["Подготовлена основа нового учёта подтверждений производства и распределения распила между ваннами. Новый обработчик пока не включён; действующая логика доски не изменена."],

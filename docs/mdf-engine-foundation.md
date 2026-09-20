@@ -1,6 +1,6 @@
 # MDF engine foundation
 
-Status: **dormant infrastructure**, not the active board calculation.
+Status: **optional shadow intake**, not the active board calculation.
 Applying migration `165_mdf_engine_foundation.sql` does not enable automation,
 modify existing production statuses, or change current board APIs.
 
@@ -8,8 +8,35 @@ modify existing production statuses, or change current board APIs.
 
 `backend/src/modules/mdf-board` contains pure per-position quantity arithmetic,
 a deterministic bath allocation planner and a transactional job runner primitive.
-No scheduler, HTTP command, source producer or replacement board reader is
-registered yet. Do not enable the engine by manually changing its mode.
+No scheduler, HTTP command or replacement board reader is registered yet.
+Do not enable the engine by manually changing its mode.
+
+`BACKEND_MDF_SHADOW_INTAKE=true` connects the existing MDF event dispatch to a
+transaction-finalization capture. The default is false. It works in `legacy` or
+`shadow` mode; it does not switch modes. Legacy automation and notification flags
+do not disable capture. All source snapshots are read after owning command writes,
+then persisted in deterministic source-lock order before the same COMMIT. A failed
+capture rolls back the command. The generic database hook never does external I/O.
+
+Shadow capture reads exact linked packet/BASIS/effective-bath composition and
+explicit completion/manual signals. It never opens `snapshot_job`, reads every
+historical source, applies the visible date filter, or treats detail/order status
+as physical production. Unresolved identities and whole-order declarations are
+diagnostic blockers, never guessed quantities. Source quantities in
+`mdf_shadow_observations` are NOT full order readiness or board-parity results.
+
+All shadow revisions remain unaccepted (`accept=false`); jobs require attention,
+no allocations or statuses are changed, and no published board revision advances.
+Revision/line storage records actor, request/cause and order/detail dimensions;
+existing owning-command audit remains unchanged. No extra notification is sent
+for a diagnostic observation. Disable the flag to stop intake without deleting
+history. Applied migrations165–167 are additive.
+
+Still required before active cutover: producers that bypass dispatch, frozen
+whole-order declarations, demand preflight, correction adapters, common resolver,
+allocation executor/worker, baseline and full-board shadow comparison. Legacy CNC
+processing is still inside its owning transaction: this increment does not yet
+make intake survive failure of that legacy processing.
 
 Physical production, whole-position declarations, derived card states and
 visibility are separate. Rework is included in raw statistics, excluded from
