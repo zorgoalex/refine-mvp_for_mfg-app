@@ -20,7 +20,7 @@ export const ReferenceSortOrderColumn: React.FC = () => (
   <Table.Column dataIndex="sort_order" title="Порядок" sorter />
 );
 
-export const ReferenceSortOrderShow: React.FC<{ value: unknown }> = ({ value }) => (
+export const ReferenceSortOrderShow: React.FC<{ value: number | string | null | undefined }> = ({ value }) => (
   <div>
     <Title level={5}>Порядок сортировки</Title>
     <TextField value={value} />
