@@ -6,6 +6,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { BackendEnv } from '../../../config/env.validation';
 import { DatabaseService } from '../../../database/database.service';
 import { beforeTransactionCommit } from '../../../database/transaction-hooks';
+import { observeMdfShadowCommand as observeCommand } from '../application/mdf-shadow';
+import type { TransactionClient } from '../../../database/database.types';
+import type { MdfShadowCommand } from '../application/mdf-shadow-command';
 import type { PerformanceQueryTelemetryService } from '../../../performance/performance-query-telemetry.service';
 import { dispatchMdfBoardEvent } from '../../status-automation/application/status-automation-runtime';
 import type { MdfBoardEventInput, MdfBoardSource } from '../../status-automation/application/mdf-board-event.types';
@@ -22,6 +25,17 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF shadow through 
   const event = (key: string, card = source): MdfBoardEventInput => ({ source: card,
     actor: { id: '1', username: 'e2e', role: 'admin', roleId: 1, permissions: [] },
     requestId: key, sourceIdempotencyKey: key });
+  const observeMdfShadowCommand = async (tx: TransactionClient, input: MdfBoardEventInput, command: MdfShadowCommand) => {
+    const returned = command.kind === 'production_return';
+    await tx.query(`INSERT INTO audit_log(audit_id,event,entity_type,entity_id,user_id,request_id,status_code,status_id,metadata_json)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb) ON CONFLICT(audit_id) DO NOTHING`,
+    [command.auditId, command.kind === 'manual_move' ? 'mdf_board.manual_move.created'
+      : command.kind === 'manual_clear' ? 'mdf_board.manual_move.deleted' : 'mdf_board.production_returned',
+      returned ? 'mdf_board_card' : 'mdf_board_manual_move', `${input.source.kind}:${input.source.id}`,
+      Number(input.actor.id), input.requestId, command.targetColumn, returned ? command.targetStageId : null,
+      JSON.stringify(returned ? { previewDigest: command.previewDigest } : {})]);
+    await observeCommand(tx, input, command);
+  };
   const send = (key: string, card = source) => database.transaction(async tx => {
     await tx.query(`SET LOCAL search_path=${schema},public`);
     await dispatchMdfBoardEvent(tx, event(key, card));
@@ -36,17 +50,18 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF shadow through 
     vi.stubEnv('BACKEND_ENABLE_STATUS_AUTOMATION', 'false');
     await client.connect();
     await client.query(`CREATE SCHEMA ${schema}; SET search_path=${schema},public`);
-    for (const file of ['165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql', '167_mdf_shadow_observations.sql']) {
+    for (const file of ['165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql', '167_mdf_shadow_observations.sql', '171_mdf_shadow_commands.sql']) {
       await client.query(readFileSync(new URL(`../../../../db/migrations/${file}`, import.meta.url), 'utf8'));
     }
     // Actual deployed column types; isolated owned schema, no operational writes.
     for (const table of ['orders', 'order_details', 'cnc_telegram_packets', 'cnc_telegram_packet_items',
       'cnc_telegram_packet_whole_order_keys', 'mdf_board_manual_moves', 'status_automation_rules',
       'bazis_cut_sets', 'bazis_cut_set_details', 'cut_result', 'cut_result_board_projection',
-      'cut_result_placement', 'cut_result_sheet_map', 'sheet_material_types', 'materials']) {
+      'cut_result_placement', 'cut_result_sheet_map', 'sheet_material_types', 'materials', 'audit_log']) {
       await client.query(`CREATE TABLE ${schema}.${table} AS SELECT * FROM public.${table} WITH NO DATA`);
     }
-    await client.query(`INSERT INTO orders(order_id,delete_flag) VALUES(1,false),(2,false);
+    await client.query(`CREATE UNIQUE INDEX shadow_audit_id ON audit_log(audit_id);
+      INSERT INTO orders(order_id,delete_flag) VALUES(1,false),(2,false);
       INSERT INTO sheet_material_types(sheet_material_type_id,name) VALUES(1,'МДФ 10мм');
       INSERT INTO order_details(detail_id,order_id,quantity,delete_flag,sheet_material_type_id)
         VALUES(11,1,20,false,1),(12,1,3,false,1),(21,2,7,false,1);
@@ -62,7 +77,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF shadow through 
     url.username = process.env.PG_USER ?? ''; url.password = process.env.PG_PASSWORD ?? '';
     url.searchParams.set('options', '-c max_parallel_workers_per_gather=0 -c jit=off -c lock_timeout=1000');
     const values: Partial<BackendEnv> = { DATABASE_URL: url.toString(), DATABASE_QUERY_TIMEOUT_MS: 10000,
-      DATABASE_POOL_MIN: 0, DATABASE_POOL_MAX: 1, DATABASE_SSL: false };
+      DATABASE_POOL_MIN: 0, DATABASE_POOL_MAX: 2, DATABASE_SSL: false };
     database = new DatabaseService({ get: (key: keyof BackendEnv) => values[key] } as ConfigService<BackendEnv, true>,
       { measure: <T>(_sql: string, op: () => Promise<T>) => op() } as PerformanceQueryTelemetryService);
   });
@@ -140,5 +155,117 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF shadow through 
     await client.query("UPDATE mdf_board_manual_moves SET target_column='baths_laminated',version=2 WHERE card_kind='bath'");
     await send('bath-laminated', bath);
     expect((await observation('bath-laminated'))[0].candidate_quantities).toMatchObject({ required: 2, cut: 0, rolled: 2 });
+  });
+  it('freezes explicit membership before later writes and generic dispatch, all commands survive in order', async () => {
+    const confirmAudit = randomUUID(), clearAudit = randomUUID();
+    await database.transaction(async tx => {
+      await tx.query(`SET LOCAL search_path=${schema},public`);
+      await observeMdfShadowCommand(tx, event('explicit-confirm'), { kind: 'manual_move', targetColumn: 'completed', auditId: confirmAudit });
+      await tx.query("UPDATE cnc_telegram_packet_items SET quantity=6 WHERE source_item_key='a'");
+      await observeMdfShadowCommand(tx, event('explicit-clear'), { kind: 'manual_clear', targetColumn: null, auditId: clearAudit });
+      await dispatchMdfBoardEvent(tx, event('explicit-final-state'));
+    });
+    const commands = (await client.query(`SELECT c.*,r.origin,r.actor_user_id,r.request_id,h.accepted_revision_key
+      FROM mdf_shadow_commands c JOIN mdf_evidence_revisions r USING(source_kind,source_id,revision_key)
+      JOIN mdf_source_heads h USING(source_kind,source_id) ORDER BY observation_id`)).rows;
+    expect(commands.map(c => c.command_kind)).toEqual(['manual_move', 'manual_clear']);
+    expect(commands[0]).toMatchObject({ audit_event_id: confirmAudit, origin: 'manual', actor_user_id: '1',
+      request_id: 'explicit-confirm', target_column: 'completed', accepted_revision_key: null });
+    expect(commands[1]).toMatchObject({ audit_event_id: clearAudit, target_column: null });
+    expect(commands[0].composition_digest).not.toBe(commands[1].composition_digest);
+    for (const [request, qty] of [['explicit-confirm', 7], ['explicit-clear', 8]] as const) {
+      expect((await observation(request))[0].candidate_quantities).toMatchObject({ required: qty, cut: 0, rolled: 0 });
+      const lines = (await client.query(`SELECT l.detail_id,l.quantity,l.evidence_kind FROM mdf_evidence_lines l
+        JOIN mdf_evidence_revisions r USING(source_kind,source_id,revision_key) WHERE r.request_id=$1 ORDER BY detail_id`, [request])).rows;
+      expect(lines).toEqual([{ detail_id: '11', quantity: String(qty - 2), evidence_kind: 'derived' },
+        { detail_id: '21', quantity: '2', evidence_kind: 'derived' }]);
+    }
+    expect(await observation('explicit-final-state')).toHaveLength(1);
+    await expect(client.query("UPDATE mdf_shadow_commands SET target_column='parsed' WHERE audit_event_id=$1", [confirmAudit])).rejects.toThrow();
+    await expect(client.query('DELETE FROM mdf_shadow_commands WHERE audit_event_id=$1', [clearAudit])).rejects.toThrow();
+  });
+  it('deduplicates explicit replay and rejects reused cause with changed audit or target', async () => {
+    const intent = { kind: 'manual_move' as const, targetColumn: 'completed', auditId: randomUUID() };
+    const sendCommand = (command = intent) => database.transaction(async tx => {
+      await tx.query(`SET LOCAL search_path=${schema},public`);
+      await observeMdfShadowCommand(tx, event('explicit-replay'), command);
+      await observeMdfShadowCommand(tx, event('explicit-replay'), command);
+    });
+    await sendCommand(); await sendCommand();
+    expect(await observation('explicit-replay')).toHaveLength(1);
+    await expect(sendCommand({ ...intent, targetColumn: 'completed_laminated' })).rejects.toThrow('MDF_RECEIPT_CONFLICT');
+    await expect(sendCommand({ ...intent, auditId: randomUUID() })).rejects.toThrow('MDF_RECEIPT_CONFLICT');
+    expect(await observation('explicit-replay')).toHaveLength(1);
+  });
+  it('captures BASIS/bath explicit commands and custom-stage return without accepting or fabricating work', async () => {
+    for (const card of [{ kind: 'bazisCutSet' as const, id: '1' }, { kind: 'bath' as const, id: 'cut-result:1' }]) {
+      const key = `explicit-${card.kind}`;
+      await database.transaction(async tx => {
+        await tx.query(`SET LOCAL search_path=${schema},public`);
+        await observeMdfShadowCommand(tx, event(key, card), { kind: 'production_return',
+          targetColumn: card.kind === 'bath' ? 'baths_ready' : 'completed', auditId: randomUUID(),
+          targetStageId: 4, targetStageCode: 'sanded', previewDigest: 'a'.repeat(64) });
+      });
+      expect((await observation(key))[0]).toMatchObject({ accepted_revision_key: null, status: 'needs_attention' });
+      expect((await observation(key))[0].candidate_quantities).toMatchObject({ cut: 0, rolled: 0 });
+      expect((await client.query('SELECT target_stage_id,target_stage_code,preview_digest FROM mdf_shadow_commands WHERE source_kind=$1', [card.kind])).rows[0])
+        .toEqual({ target_stage_id: '4', target_stage_code: 'sanded', preview_digest: 'a'.repeat(64) });
+    }
+    expect((await client.query('SELECT count(*) n FROM mdf_bath_allocations')).rows[0].n).toBe('0');
+    expect((await client.query('SELECT published_revision FROM mdf_engine_state')).rows[0].published_revision).toBe('0');
+  });
+  it('rolls back typed journal and source mutation together on late failure', async () => {
+    const before = (await client.query('SELECT program_name FROM cnc_telegram_packets')).rows[0].program_name;
+    await expect(database.transaction(async tx => {
+      await tx.query(`SET LOCAL search_path=${schema},public`);
+      await tx.query("UPDATE cnc_telegram_packets SET program_name='E2E-rollback'");
+      await observeMdfShadowCommand(tx, event('typed-rollback'), { kind: 'manual_move', targetColumn: 'completed', auditId: randomUUID() });
+      beforeTransactionCommit(tx, 'z-typed-fail', async () => { await tx.query('SELECT 1/0'); });
+    })).rejects.toMatchObject({ code: '22012' });
+    expect(await observation('typed-rollback')).toHaveLength(0);
+    expect((await client.query('SELECT program_name FROM cnc_telegram_packets')).rows[0].program_name).toBe(before);
+  });
+  it('serializes concurrent reverse-order source batches without dropping explicit commands', async () => {
+    const cards: MdfBoardSource[] = [source, { kind: 'bazisCutSet', id: '1' }];
+    await Promise.all([cards, [...cards].reverse()].map((batch, n) => database.transaction(async tx => {
+      await tx.query(`SET LOCAL search_path=${schema},public`);
+      for (const card of batch) await observeMdfShadowCommand(tx, event(`concurrent-${n}-${card.kind}`, card),
+        { kind: 'manual_move', targetColumn: 'completed', auditId: randomUUID() });
+    })));
+    const rows = (await client.query(`SELECT c.source_kind,c.observation_id FROM mdf_shadow_commands c
+      JOIN mdf_evidence_revisions r USING(source_kind,source_id,revision_key) WHERE r.request_id LIKE 'concurrent-%'`)).rows;
+    expect(rows).toHaveLength(4);
+    expect(new Set(rows.map(r => r.observation_id)).size).toBe(4);
+  });
+  it.each(['missing', 'request_id', 'entity_type', 'entity_id', 'event', 'user_id', 'status_code'] as const)
+  ('rejects %s audit provenance and rolls back source, receipt, journal and observation', async field => {
+    const key = `bad-audit-${field}`, auditId = randomUUID();
+    const before = (await client.query('SELECT program_name FROM cnc_telegram_packets')).rows[0].program_name;
+    await expect(database.transaction(async tx => {
+      await tx.query(`SET LOCAL search_path=${schema},public`);
+      await tx.query("UPDATE cnc_telegram_packets SET program_name='E2E-bad-audit'");
+      const intent = { kind: 'manual_move' as const, targetColumn: 'completed', auditId };
+      if (field === 'missing') await observeCommand(tx, event(key), intent);
+      else {
+        await observeMdfShadowCommand(tx, event(key), intent);
+        // Owned CTAS audit fixture, no production trigger or audit alteration.
+        const value = field === 'user_id' ? '2' : 'wrong';
+        await tx.query(`UPDATE audit_log SET ${field}=$2 WHERE audit_id=$1`, [auditId, value]);
+      }
+    })).rejects.toThrow('MDF_SHADOW_AUDIT_MISMATCH');
+    expect(await observation(key)).toHaveLength(0);
+    expect((await client.query('SELECT 1 FROM mdf_shadow_commands WHERE audit_event_id=$1', [auditId])).rows).toHaveLength(0);
+    expect((await client.query('SELECT 1 FROM mdf_evidence_revisions WHERE request_id=$1', [key])).rows).toHaveLength(0);
+    expect((await client.query('SELECT program_name FROM cnc_telegram_packets')).rows[0].program_name).toBe(before);
+  });
+  it.each(['status_id', 'metadata_json'] as const)('rejects return audit with mismatched %s', async field => {
+    const key = `bad-return-${field}`, auditId = randomUUID();
+    await expect(database.transaction(async tx => {
+      await tx.query(`SET LOCAL search_path=${schema},public`);
+      await observeMdfShadowCommand(tx, event(key), { kind: 'production_return', targetColumn: 'completed',
+        targetStageId: 4, targetStageCode: 'sanded', previewDigest: 'a'.repeat(64), auditId });
+      await tx.query(`UPDATE audit_log SET ${field}=$2 WHERE audit_id=$1`, [auditId, field === 'status_id' ? '5' : '{}']);
+    })).rejects.toThrow('MDF_SHADOW_AUDIT_MISMATCH');
+    expect(await observation(key)).toHaveLength(0);
   });
 });

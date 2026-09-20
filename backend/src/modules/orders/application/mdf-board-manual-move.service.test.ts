@@ -4,7 +4,8 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { MdfBoardManualMoveService } from './mdf-board-manual-move.service';
 import type { MdfBoardManualMoveRepositoryPort } from './mdf-board-manual-move.types';
 
-vi.mock('@nestjs/common', () => ({
+vi.mock('@nestjs/common', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@nestjs/common')>(),
   Injectable: () => () => undefined,
   Optional: () => () => undefined,
 }));

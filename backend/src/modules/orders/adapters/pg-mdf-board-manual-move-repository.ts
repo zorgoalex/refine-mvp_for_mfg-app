@@ -5,6 +5,8 @@ import { auditService } from '../../../common/audit/audit.service';
 import type { AuditRelatedEntity } from '../../../common/audit/audit-event.types';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
+import { observeMdfShadowCommand } from '../../mdf-board/application/mdf-shadow';
+import type { MdfBoardEventInput } from '../../status-automation/application/mdf-board-event.types';
 import {
   dispatchMdfBoardEvent,
   type MdfBoardColumnAutomationInput,
@@ -143,12 +145,14 @@ export class PgMdfBoardManualMoveRepository implements MdfBoardManualMoveReposit
           await tx.query(`UPDATE cnc_telegram_packets SET mdf_completion_returned=false
             WHERE packet_id::text=$1 AND mdf_completion_returned=true`, [command.cardId]);
         }
-        await dispatchMdfBoardEvent(tx, {
+        const event: MdfBoardEventInput = {
           source: { kind: command.cardKind, id: command.cardId },
           actor: command.currentUser,
           requestId: command.requestId ?? 'mdf-board-manual-move',
           sourceIdempotencyKey: `mdf-board:manual:${command.cardKind}:${command.cardId}:version-${saved.version}:${command.targetColumn}:audit-${auditId}`,
-        });
+        };
+        await observeMdfShadowCommand(tx, event, { kind: 'manual_move', targetColumn: command.targetColumn, auditId });
+        await dispatchMdfBoardEvent(tx, event);
       }
       return {
         generatedAt: new Date().toISOString(),
@@ -207,11 +211,15 @@ export class PgMdfBoardManualMoveRepository implements MdfBoardManualMoveReposit
         }),
         relatedEntities: relatedEntities(command.cardKind, command.cardId),
       });
-      if (command.cardKind !== 'order') await dispatchMdfBoardEvent(tx, {
-        source: { kind: command.cardKind, id: command.cardId }, actor: command.currentUser,
-        requestId: command.requestId ?? 'mdf-board-manual-move',
-        sourceIdempotencyKey: `mdf-board:manual-delete:${command.cardKind}:${command.cardId}:${auditId}`,
-      });
+      if (command.cardKind !== 'order') {
+        const event: MdfBoardEventInput = {
+          source: { kind: command.cardKind, id: command.cardId }, actor: command.currentUser,
+          requestId: command.requestId ?? 'mdf-board-manual-move',
+          sourceIdempotencyKey: `mdf-board:manual-delete:${command.cardKind}:${command.cardId}:${auditId}`,
+        };
+        await observeMdfShadowCommand(tx, event, { kind: 'manual_clear', targetColumn: null, auditId });
+        await dispatchMdfBoardEvent(tx, event);
+      }
       return {
         generatedAt: new Date().toISOString(),
         cardKind: command.cardKind,

@@ -57,6 +57,32 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText).toMatch(/--skip-041/);
   });
 
+  it('verifies migrations 164-169 before recording their ledger entries', () => {
+    const verify = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verify).toContain('164_*|165_*|166_*|167_*|168_*|169_*)');
+    const arm = verify.slice(verify.indexOf('164_*'), verify.indexOf('170_*|171_*)'));
+    expect(arm).toContain('probe_file "$f" || die');
+    for (const name of ['mdf_source_fence_guard', 'mdf_shadow_immutable',
+      'trg_bitrix24_stage_order_changed', 'trg_bitrix24_stage_mapping_available',
+      'mdf_shadow_comparison_immutable']) expect(probeFn).toContain(name);
+    expect(probeFn).toContain("q_fun_hash 'public.bitrix24_stage_enqueue(bigint)'");
+    expect(probeFn).toContain('idx_bitrix24_stage_work_due');
+    expect(probeFn).toContain('NOT indisvalid OR NOT indisready');
+  });
+
+  it('requires MDF command journal integrity before recording migration171', () => {
+    const start = probeFn.indexOf('171_mdf_shadow_commands*)');
+    const end = probeFn.indexOf('170_whatsapp_technical_logs*)', start);
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, end);
+    for (const marker of ['mdf_shadow_commands_audit_event_id_key', 'mdf_shadow_commands_observation_id_key',
+      'mdf_shadow_commands_source_kind_source_id_revision_key_fkey', 'mdf_shadow_commands_check1',
+      'mdf_shadow_commands_immutable', "tgenabled='O'", 'idx_mdf_shadow_commands_source', 'preview_digest']) {
+      expect(arm).toContain(marker);
+    }
+    expect(scriptText).toContain('170_*|171_*)');
+  });
+
   it('verifies catalogue rows, generated money and union aggregate invariant before recording migration162', () => {
     expect(probeFn).toContain('162_order_catalog_lines*) probe_all');
     expect(probeFn).toContain("attgenerated='s'");
@@ -104,7 +130,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText).not.toMatch(/q_fun_hash\(\).*md5\(prosrc\)/);
     expect(probeFn).toContain("q_fun_hash 'cnc_telegram_worker_reason_code_valid(text)'");
     expect(probeFn.match(/q_fun_hash '[^']+' [a-f0-9]{32}/g)).toHaveLength(
-      requiredFunctions.length + 2,
+      requiredFunctions.length + 2 + 9, // 164-169 add nine full function contracts
     );
   });
 
@@ -232,7 +258,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       expect(arm).toContain(marker);
     const verifyStart = scriptText.indexOf('verify_applied_effect() {');
     const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
-    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('170_*)');
+    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('170_*|171_*)');
   });
 
   it('pins the complete Telegram worker audit schema before advancing 107/108/109', () => {
