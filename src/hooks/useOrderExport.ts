@@ -15,12 +15,31 @@ import { uploadOrderExcelToApi, handleUploadError } from '../utils/excel/uploadT
 import { generateOrderFileName } from '../utils/excel/fileNameGenerator';
 import { resolveDetailMaterialName, resolveHeaderMaterialName } from '../utils/materialDisplayName';
 import type { PageOwnedWorkspaceOperationContext } from '../workspace/workspaceOperationPins';
+import type { OrderDowelingLink } from '../types/orders';
+import type { GenerateOrderExcelParams } from '../utils/excel/orderExcelBuilder';
 
 interface Order {
   order_id: number;
   order_name: string;
   order_date: string | Date;
   client?: { client_name: string } | null;
+}
+
+// Persisted order plus the metadata assembled locally for the legacy export.
+// This is not the partial order accepted by exportToDrive callers.
+interface LoadedExportOrder extends Order {
+  client_id?: number | null;
+  order_doweling_links?: Array<Pick<OrderDowelingLink, 'doweling_order'>> | null;
+  _exportData?: GenerateOrderExcelParams['order']['_exportData'];
+  _viewData?: {
+    total_area: number;
+    planned_completion_date: string | Date | null;
+    order_status_name: string;
+    payment_status_name: string;
+    issue_date: string | Date | null;
+    production_status_name: string;
+    material_name: string;
+  };
 }
 
 interface OrderDetail {
@@ -108,7 +127,7 @@ export const useOrderExport = (): UseOrderExportResult => {
       // А также orders_view для агрегированных полей (статусы, площадь)
       console.log('[useOrderExport] Fetching full order from DB...');
       const [{ data: fullOrder }, { data: orderViewData }] = await Promise.all([
-        dataProvider().getOne({
+        dataProvider().getOne<LoadedExportOrder>({
           resource: 'orders',
           id: order.order_id,
         }),
