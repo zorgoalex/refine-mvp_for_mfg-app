@@ -31,7 +31,7 @@ import { OrderSaveValidationContext } from '../../../hooks/orderSaveValidation';
 import { useOrderExport } from '../../../hooks/useOrderExport';
 import { useIsMobile } from '../../../hooks/useDeviceTier';
 import { projectsApi, type ProjectDto } from '../../../api/projectsApi';
-import { OrderDetail, OrderFormMode } from '../../../types/orders';
+import { OrderDetail, OrderFormMode, type Payment } from '../../../types/orders';
 import { orderFormSchema } from '../../../schemas/orderSchema';
 import { featureFlags } from '../../../config/featureFlags';
 import { OrderCatalogLinesTable } from './OrderCatalogLinesTable';
@@ -746,7 +746,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   // Load payments in edit mode (only if orderId is valid number)
   const shouldLoadPayments = canLoadOrderChildren && !useBackendOrderRead;
 
-  const { data: paymentsData, isLoading: paymentsLoading, isFetching: paymentsFetching } = useList({
+  const { data: paymentsData, isLoading: paymentsLoading, isFetching: paymentsFetching } = useList<Payment>({
     resource: 'payments',
     filters: [{ field: 'order_id', operator: 'eq', value: orderId || 0 }],
     pagination: { pageSize: 1000 },
