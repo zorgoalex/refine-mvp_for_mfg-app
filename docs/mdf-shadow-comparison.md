@@ -25,6 +25,10 @@ or Hasura write access is provided:
 
 ```sql
 SELECT c.created_at, c.source_kind, c.source_id, c.status, c.duration_ms,
+       c.algorithm_version,
+       c.report->'differenceCount' AS raw_differences,
+       c.report->'comparableDifferenceCount' AS comparable_differences,
+       c.report->'unverifiedDifferenceCount' AS unverified_differences,
        r.actor_user_id, r.request_id,
        c.report->'issues' AS issues,
        c.report->'columns' AS columns,
@@ -43,7 +47,28 @@ event. `triggerSuperseded` records a changed source digest. This is explicitly
 `surface=legacy-server-return-model`, not browser filter/visibility parity or a
 simulation of all auto-status rule actions.
 
-`columns` contains old/candidate placement and reasons preventing comparison.
+Version `source-scope-v2` uses the pure `resolveMdfSourceColumn` resolver for all
+three source kinds. Its inputs are complete **own** composition/statuses, cut
+confirmation, manual visual target and allocation readiness (ready/not-ready/
+unknown). Discovery, material/identity matching and allocation remain separate
+responsibilities. No date, visibility filter or order-header status enters this
+resolver. It is connected to shadow only; legacy production readers/handlers
+have **not** been switched to it.
+
+- CNC: cut confirmation (including visual manual completion) plus all own
+  details at least packed, or all own details at least issued, means terminal.
+- BASIS: all own details at least packed means terminal without a CNC signal.
+- Bath: all own details at least packed means terminal; all at least laminated
+  means laminated, without an additional preliminary cut-readiness gate.
+  Otherwise automatic readiness requires the allocation planner's decision.
+- Manual visual placement is preserved below automatic terminal priority. It
+  does not create physical supply. Actual backwards correction is a separate
+  command that must change the underlying facts/statuses.
+- Empty/incomplete composition, missing relevant thresholds and invalid
+  source-kind/manual-column combinations fail closed.
+
+`columns` contains old/candidate placement, calculation `reason`, `comparable`
+and issues preventing comparison.
 `positions` and `orders` contain position-local cut-not-rolled, rolled, credited
 quantities and remaining demand for known live MDF positions. The independent
 legacy arithmetic is checked against the frontend formula. Candidate physical
@@ -52,13 +77,32 @@ without immutable provenance and unfrozen whole-order declarations are reported
 as gaps, not accepted manufacturing evidence. Candidate raw rework remains in
 statistics but grants no normal-demand credit.
 
+Candidate quantity semantics are explicitly `observed-cnc-facts-only`. A zero
+is zero **observed evidence**, not proof that no work occurred. Each position and
+order has `comparable` and `issues`; manual/BASIS provenance, historical
+lamination, different historical scope and rework-statistics semantics prevent
+quantity comparison. Unresolved or unfrozen membership conservatively blocks
+all quantities in the connected scope, not just its resolved subset. An order
+is comparable only when every one of its positions is comparable. Comparability
+is local to these diagnostic projections, never verification of the baseline.
+
 Old/hidden bath consumption and accepted allocations without verified baseline
 mapping block allocation comparison. A manual ready column does not create
-physical cut supply. Allocation output, when possible, is a proposal only.
+physical cut supply. Unknown manual/BASIS supply (including automatic terminal
+BASIS placement from packed/issued statuses outside the visible window) also
+blocks an apparently definitive not-ready result for baths. Allocation output, when possible, is a
+proposal only.
 
-`differences` means at least one provisional value differs; inspect its issues
-before treating it as a defect. `blocked` means no differences established or a
-limit/missing-input prevented comparison. There is deliberately no `match`
+From v2, `differenceCount` retains all raw differing columns/positions;
+`comparableDifferenceCount` counts only comparable differing rows, and
+`unverifiedDifferenceCount` counts the rest. The two sum to `differenceCount`.
+Multiple differing fields in one position count as one row, not several defects.
+`differences` means at least one **comparable** diagnostic row differs; it still
+does not prove a business bug. `blocked` can have a nonzero raw difference count
+when every difference is unverified. It also covers equality and limits/missing
+inputs. Version v1 reports retain their original semantics and are never
+overwritten; a new version may compare the same observation's current state.
+There is deliberately no `match`
 status, and `cutoverReady` is always false: baseline and producer migration are
 not complete. These reports cannot authorize active cutover.
 

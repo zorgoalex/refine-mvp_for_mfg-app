@@ -71,15 +71,24 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF actual event â†
   });
   it('runs both real loaders, persists differences and leaves all business state unchanged', async () => {
     await send('first'); const before = await business();
+    await client.query(`INSERT INTO mdf_shadow_comparisons
+      (source_kind,source_id,revision_key,algorithm_version,status,snapshot_at,duration_ms,report)
+      SELECT source_kind,source_id,revision_key,'source-scope-v1','blocked',now(),0,
+        '{"legacyMarker":true,"cutoverReady":false,"surface":"legacy-server-return-model"}'::jsonb
+      FROM mdf_shadow_observations`);
     await new MdfShadowComparisonService(database).runTick();
     const result = await report();
-    expect(result).toMatchObject({ cutoverReady: false, surface: 'legacy-server-return-model', ownerCount: 1, sourceCount: 1 });
+    expect(result).toMatchObject({ algorithmVersion: 'source-scope-v2', cutoverReady: false,
+      comparableDifferenceCount: 0, unverifiedDifferenceCount: 0,
+      surface: 'legacy-server-return-model', ownerCount: 1, sourceCount: 1 });
     expect(result.positions).toHaveLength(1);
     expect(result.positions[0]).toMatchObject({ legacy: { cut: 5, remaining: 5 }, candidate: { cut: 5, remaining: 5 } });
     expect(result.columns[0]).toMatchObject({ legacy: 'completed', candidate: 'completed' });
     expect(await business()).toEqual(before);
     await new MdfShadowComparisonService(database).runTick();
-    expect((await client.query('SELECT count(*) n FROM mdf_shadow_comparisons')).rows[0].n).toBe('1');
+    expect((await client.query('SELECT count(*) n FROM mdf_shadow_comparisons')).rows[0].n).toBe('2');
+    expect((await client.query("SELECT report FROM mdf_shadow_comparisons WHERE algorithm_version='source-scope-v1'")).rows[0].report)
+      .toEqual({ legacyMarker: true, cutoverReady: false, surface: 'legacy-server-return-model' });
     await expect(client.query("UPDATE mdf_shadow_comparisons SET status='blocked'")).rejects.toMatchObject({ code: '55000' });
   });
   it('keeps one repeatable snapshot when demand changes between old/new reads', async () => {
@@ -101,9 +110,24 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF actual event â†
     await send('basis'); const before = await business();
     await new MdfShadowComparisonService(database).runTick();
     const result = await report();
-    expect(result.status).toBe('differences');
+    expect(result).toMatchObject({ status: 'blocked', comparableDifferenceCount: 0, unverifiedDifferenceCount: 1 });
     expect(result.positions[0]).toMatchObject({ legacy: { cut: 8 }, candidate: { cut: 5 } });
+    expect(result.positions[0].comparable).toBe(false);
+    expect(result.orders[0].comparable).toBe(false);
     expect(result.issues).toContain('MANUAL_FACT_PROVENANCE_UNKNOWN');
+    expect(await business()).toEqual(before);
+  });
+  it('resolves CNC and BASIS from their own packed members, ignoring another unfinished order position', async () => {
+    await client.query(`UPDATE order_details SET production_status_id=4 WHERE detail_id=11;
+      INSERT INTO order_details(detail_id,order_id,detail_number,quantity,delete_flag,sheet_material_type_id)
+        VALUES(12,1,2,3,false,1)`);
+    await send('own-packed'); const before = await business();
+    await new MdfShadowComparisonService(database).runTick();
+    const result = await report();
+    expect(result.columns).toHaveLength(2);
+    expect(result.columns.every((c: { candidate: string }) => c.candidate === 'completed_laminated')).toBe(true);
+    expect(result.positions.find((p: { detailId: number }) => p.detailId === 12))
+      .toMatchObject({ candidate: { cut: 0, remaining: 3 } });
     expect(await business()).toEqual(before);
   });
 });

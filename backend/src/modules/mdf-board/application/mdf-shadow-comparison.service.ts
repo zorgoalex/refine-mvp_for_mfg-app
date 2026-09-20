@@ -8,7 +8,9 @@ type Observation = { source_kind: 'packet' | 'bath' | 'bazisCutSet'; source_id: 
 const identity = (o: Observation) => [o.source_kind, o.source_id, o.revision_key, MDF_COMPARISON_VERSION];
 const failure = (code: string) => ({ algorithmVersion: MDF_COMPARISON_VERSION, surface: 'legacy-server-return-model',
   semantics: 'current-state-not-event-replay', cutoverReady: false, status: 'blocked',
-  issues: [code, 'BASELINE_NOT_VERIFIED', 'INCOMPLETE_PRODUCER_COVERAGE'], differenceCount: 0 });
+  candidateSemantics: 'observed-cnc-facts-only',
+  issues: [code, 'BASELINE_NOT_VERIFIED', 'INCOMPLETE_PRODUCER_COVERAGE'], differenceCount: 0,
+  comparableDifferenceCount: 0, unverifiedDifferenceCount: 0 });
 
 /** Only diagnostic tables can be written. Existing jobs/heads/evidence and
  * production state are intentionally not reachable through this service. */

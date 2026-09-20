@@ -18,9 +18,10 @@ describe('MDF source-scope shadow comparison', () => {
   });
   it('detects legacy visually finished volume without physical proof', () => {
     const report = compareMdfShadow(input([source({ rawCut: false, legacyColumn: 'completed_laminated' })]));
-    expect(report.status).toBe('differences');
+    expect(report.status).toBe('blocked');
     expect(report.columns[0]).toMatchObject({ legacy: 'completed_laminated', candidate: 'parsed', different: true });
     expect(report.positions[0].differences).toContain('remaining');
+    expect(report.positions[0].issues).toContain('CUT_FACT_PROVENANCE_UNKNOWN');
   });
   it('adds distinct raw CNC sources, retains rework statistics without readiness credit', () => {
     const report = compareMdfShadow(input([source(), source({ id: 'other' }), source({ id: 'redo', rework: true })]));
@@ -64,6 +65,64 @@ describe('MDF source-scope shadow comparison', () => {
     expect(report.columns[0]).toMatchObject({ candidate: 'completed', comparable: false });
     expect(report.positions[0].candidate.cut).toBe(0);
     expect(report.issues).toContain('MANUAL_FACT_PROVENANCE_UNKNOWN');
+    expect(report).toMatchObject({ status: 'blocked', comparableDifferenceCount: 0, unverifiedDifferenceCount: 1 });
+    expect(report.positions[0]).toMatchObject({ comparable: false });
+    expect(report.orders[0]).toMatchObject({ comparable: false });
+  });
+  it('distinguishes unknown historical lamination from zero physical production', () => {
+    const data = input([source({ kind: 'bath', rawCut: false, legacyColumn: 'baths_laminated' })]);
+    data.details[0].rank = 3;
+    const report = compareMdfShadow(data);
+    expect(report).toMatchObject({ status: 'blocked', candidateSemantics: 'observed-cnc-facts-only',
+      differenceCount: 1, comparableDifferenceCount: 0, unverifiedDifferenceCount: 1 });
+    expect(report.positions[0]).toMatchObject({ comparable: false, candidate: { rolled: 0 }, legacy: { rolled: 5 } });
+    expect(report.positions[0].issues).toContain('LAMINATION_FACT_PROVENANCE_UNKNOWN');
+  });
+  it('counts comparable differences separately from unverified differences', () => {
+    const data = input([source({ legacyColumn: 'parsed' }),
+      source({ id: 'basis', kind: 'bazisCutSet', rawCut: false, manual: 'completed', members: [member(3, 12)] })]);
+    data.details.push({ ...member(3, 12), rank: 2 });
+    const report = compareMdfShadow(data);
+    expect(report).toMatchObject({ status: 'differences', differenceCount: 3,
+      comparableDifferenceCount: 2, unverifiedDifferenceCount: 1 });
+    expect(report.positions.map(p => p.comparable)).toEqual([true, false]);
+    expect(report.orders[0].comparable).toBe(false);
+  });
+  it('unknown membership conservatively blocks quantities outside the resolved subset too', () => {
+    const data = input([source({ issues: ['UNRESOLVED_MEMBERSHIP'] })]);
+    data.details.push({ ...member(3, 12), rank: 2 });
+    const report = compareMdfShadow(data);
+    expect(report.positions.every(p => !p.comparable && p.issues.includes('UNRESOLVED_MEMBERSHIP'))).toBe(true);
+    expect(report.comparableDifferenceCount).toBe(0);
+  });
+  it('missing BASIS/manual supply cannot produce a comparable not-ready bath', () => {
+    const report = compareMdfShadow(input([
+      source({ kind: 'bazisCutSet', rawCut: false, manual: 'completed' }),
+      source({ kind: 'bath', id: 'bath', rawCut: false, legacyColumn: 'baths_ready' }),
+    ]));
+    expect(report.allocation).toBeNull();
+    expect(report.columns.find(c => c.kind === 'bath')).toMatchObject({ candidate: null, comparable: false });
+    expect(report.issues).toContain('CUT_SUPPLY_PROVENANCE_UNKNOWN');
+  });
+  it.each([4, 5])('automatically terminal BASIS at rank %i blocks unknown cut supply too', rank => {
+    const data = input([
+      source({ kind: 'bazisCutSet', rawCut: false, legacyColumn: null }),
+      source({ kind: 'bath', id: 'bath', rawCut: false, legacyColumn: 'baths', members: [member(3, 12)] }),
+    ]);
+    data.details[0].rank = rank;
+    data.details.push({ ...member(3, 12), rank: 2 });
+    const report = compareMdfShadow(data);
+    expect(report.allocation).toBeNull();
+    expect(report.columns.find(c => c.kind === 'bath')).toMatchObject({ candidate: null, comparable: false });
+    expect(report.issues).toContain('CUT_SUPPLY_PROVENANCE_UNKNOWN');
+  });
+  it('rework statistics and history-window differences are not arithmetic defects', () => {
+    for (const patch of [{ rework: true }, { legacyColumn: null }]) {
+      const report = compareMdfShadow(input([source(patch)]));
+      expect(report.positions[0].comparable).toBe(false);
+      expect(report.comparableDifferenceCount).toBe(0);
+      expect(report.status).toBe('blocked');
+    }
   });
   it('unknown identity/whole-order/material cannot become an apparently matching candidate', () => {
     for (const issue of ['UNRESOLVED_MEMBERSHIP', 'WHOLE_ORDER_DECLARATION_NOT_FROZEN', 'MATERIAL_OR_SOURCE_EXCLUDED']) {
