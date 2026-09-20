@@ -1941,6 +1941,166 @@ probe_file() {
                      "$(q_col whatsapp_delivery_jobs lock_token)" \
                      "SELECT EXISTS (SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('public.whatsapp_delivery_jobs_claim_idx') AND indisvalid);" \
                      "SELECT count(*)=2 FROM permissions_catalog WHERE permission_name IN ('whatsapp.view','whatsapp.manage') AND is_active;" ;;
+    # 164-169: PostgreSQL 16 fingerprints derived from the actual SQL in a
+    # disposable database. Pin only migration-owned objects, not mutable runtime
+    # values (enabled/mode/revision). New additive columns/constraints remain allowed.
+    # Keep these probes and the real-PostgreSQL regression test in sync.
+    164_unicode_business_names*) probe_all \
+      "$(q_tbl projects)" \
+      "$(q_con_hash_on chk_projects_code projects 87ffc4764527f15006178543a6b9c578)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.projects') AND conname='chk_projects_code' AND convalidated);" \
+      "$(q_tbl group_groups)" \
+      "$(q_con_hash_on chk_group_groups_code_format group_groups 07744ab3851eef752ac32def384dee66)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.group_groups') AND conname='chk_group_groups_code_format' AND convalidated);" \
+      "$(q_tbl cnc_telegram_packet_whole_order_keys)" \
+      "$(q_con_hash_on cnc_telegram_packet_whole_order_keys_order_key_check cnc_telegram_packet_whole_order_keys f321a543db86f38590f86e4d19956491)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.cnc_telegram_packet_whole_order_keys') AND conname='cnc_telegram_packet_whole_order_keys_order_key_check' AND convalidated);" ;;
+    165_mdf_engine_foundation*) probe_all \
+      "$(q_tbl mdf_engine_state)" \
+      "$(q_colset_hash mdf_engine_state singleton,mode,published_revision,updated_at 3351be2122967ff57258484929535b32)" \
+      "$(q_conset_hash mdf_engine_state mdf_engine_state_mode_check,mdf_engine_state_pkey,mdf_engine_state_published_revision_check,mdf_engine_state_singleton_check 370a0310fb34e9754cc2e78c9f759c48)" \
+      "$(q_idxset_hash mdf_engine_state mdf_engine_state_pkey faf1299cb88e62ceeaa800ca1bd73f90)" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.mdf_engine_state') AND conname=ANY(string_to_array('mdf_engine_state_mode_check,mdf_engine_state_pkey,mdf_engine_state_published_revision_check,mdf_engine_state_singleton_check',',')) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=to_regclass('public.mdf_engine_state') AND indexrelid::regclass::text=ANY(string_to_array('mdf_engine_state_pkey',',')) AND (NOT indisvalid OR NOT indisready));" \
+      "$(q_tbl mdf_evidence_revisions)" \
+      "$(q_colset_hash mdf_evidence_revisions source_kind,source_id,revision_key,payload_digest,origin,actor_user_id,request_id,cause_key,created_at 2756535717dc500e744466b436cefca9)" \
+      "$(q_conset_hash mdf_evidence_revisions mdf_evidence_revisions_cause_key_check,mdf_evidence_revisions_origin_check,mdf_evidence_revisions_payload_digest_check,mdf_evidence_revisions_pkey,mdf_evidence_revisions_request_id_check,mdf_evidence_revisions_revision_key_check,mdf_evidence_revisions_source_id_check,mdf_evidence_revisions_source_kind_check aa851e6d7696157951527a3d39815b4b)" \
+      "$(q_idxset_hash mdf_evidence_revisions mdf_evidence_revisions_pkey eb1dace4a1ac05ab6cf8ace31988e6d2)" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.mdf_evidence_revisions') AND conname=ANY(string_to_array('mdf_evidence_revisions_cause_key_check,mdf_evidence_revisions_origin_check,mdf_evidence_revisions_payload_digest_check,mdf_evidence_revisions_pkey,mdf_evidence_revisions_request_id_check,mdf_evidence_revisions_revision_key_check,mdf_evidence_revisions_source_id_check,mdf_evidence_revisions_source_kind_check',',')) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=to_regclass('public.mdf_evidence_revisions') AND indexrelid::regclass::text=ANY(string_to_array('mdf_evidence_revisions_pkey',',')) AND (NOT indisvalid OR NOT indisready));" \
+      "$(q_tbl mdf_revision_seals)" \
+      "$(q_colset_hash mdf_revision_seals source_kind,source_id,revision_key,sealed_at 74bef53014efde2fd9928d60a5464dca)" \
+      "$(q_conset_hash mdf_revision_seals mdf_revision_seals_pkey,mdf_revision_seals_source_kind_source_id_revision_key_fkey 9d0f34ff234c6732fc9bac130b0ae78b)" \
+      "$(q_idxset_hash mdf_revision_seals mdf_revision_seals_pkey e91f7fd8383b5644973a3a3515dd5b0d)" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.mdf_revision_seals') AND conname=ANY(string_to_array('mdf_revision_seals_pkey,mdf_revision_seals_source_kind_source_id_revision_key_fkey',',')) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=to_regclass('public.mdf_revision_seals') AND indexrelid::regclass::text=ANY(string_to_array('mdf_revision_seals_pkey',',')) AND (NOT indisvalid OR NOT indisready));" \
+      "$(q_tbl mdf_source_heads)" \
+      "$(q_colset_hash mdf_source_heads source_kind,source_id,received_revision_key,accepted_revision_key,correction_epoch,version,updated_at 7f515f65ed086aca98a19e4cc42c2933)" \
+      "$(q_conset_hash mdf_source_heads mdf_source_heads_correction_epoch_check,mdf_source_heads_pkey,mdf_source_heads_source_kind_source_id_accepted_revision_k_fkey,mdf_source_heads_source_kind_source_id_received_revision_k_fkey,mdf_source_heads_version_check 82235e455cfa10b584d702511b3f7f1b)" \
+      "$(q_idxset_hash mdf_source_heads mdf_source_heads_pkey 15ac5b1cb9b58a3a5ecdc430fdfbc214)" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.mdf_source_heads') AND conname=ANY(string_to_array('mdf_source_heads_correction_epoch_check,mdf_source_heads_pkey,mdf_source_heads_source_kind_source_id_accepted_revision_k_fkey,mdf_source_heads_source_kind_source_id_received_revision_k_fkey,mdf_source_heads_version_check',',')) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=to_regclass('public.mdf_source_heads') AND indexrelid::regclass::text=ANY(string_to_array('mdf_source_heads_pkey',',')) AND (NOT indisvalid OR NOT indisready));" \
+      "$(q_tbl mdf_evidence_lines)" \
+      "$(q_colset_hash mdf_evidence_lines evidence_line_id,source_kind,source_id,revision_key,line_key,order_id,detail_id,quantity,stage_code,evidence_kind,rework,created_at 56ea1f2fbd6af9a8741d1f00d9b23cb7)" \
+      "$(q_conset_hash mdf_evidence_lines mdf_evidence_lines_detail_id_check,mdf_evidence_lines_evidence_kind_check,mdf_evidence_lines_evidence_line_id_order_id_detail_id_key,mdf_evidence_lines_line_key_check,mdf_evidence_lines_order_id_check,mdf_evidence_lines_pkey,mdf_evidence_lines_quantity_check,mdf_evidence_lines_source_kind_source_id_revision_key_fkey,mdf_evidence_lines_source_kind_source_id_revision_key_line__key,mdf_evidence_lines_stage_code_check e59a64567956902b99c67c505d32389a)" \
+      "$(q_idxset_hash mdf_evidence_lines idx_mdf_evidence_position,mdf_evidence_lines_evidence_line_id_order_id_detail_id_key,mdf_evidence_lines_pkey,mdf_evidence_lines_source_kind_source_id_revision_key_line__key 08e74461f82132955762d89c72cc4b23)" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.mdf_evidence_lines') AND conname=ANY(string_to_array('mdf_evidence_lines_detail_id_check,mdf_evidence_lines_evidence_kind_check,mdf_evidence_lines_evidence_line_id_order_id_detail_id_key,mdf_evidence_lines_line_key_check,mdf_evidence_lines_order_id_check,mdf_evidence_lines_pkey,mdf_evidence_lines_quantity_check,mdf_evidence_lines_source_kind_source_id_revision_key_fkey,mdf_evidence_lines_source_kind_source_id_revision_key_line__key,mdf_evidence_lines_stage_code_check',',')) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=to_regclass('public.mdf_evidence_lines') AND indexrelid::regclass::text=ANY(string_to_array('idx_mdf_evidence_position,mdf_evidence_lines_evidence_line_id_order_id_detail_id_key,mdf_evidence_lines_pkey,mdf_evidence_lines_source_kind_source_id_revision_key_line__key',',')) AND (NOT indisvalid OR NOT indisready));" \
+      "$(q_tbl mdf_bath_allocations)" \
+      "$(q_colset_hash mdf_bath_allocations allocation_id,evidence_line_id,bath_id,bath_revision,order_id,detail_id,quantity,state,cause_key,created_at,updated_at 21b592a56ef199e2313221b5764b6b36)" \
+      "$(q_conset_hash mdf_bath_allocations mdf_bath_allocations_bath_id_check,mdf_bath_allocations_bath_revision_check,mdf_bath_allocations_cause_key_check,mdf_bath_allocations_cause_key_evidence_line_id_bath_id_bat_key,mdf_bath_allocations_evidence_line_id_order_id_detail_id_fkey,mdf_bath_allocations_pkey,mdf_bath_allocations_quantity_check,mdf_bath_allocations_state_check 1f82685dcd54390485b71186cc1190a3)" \
+      "$(q_idxset_hash mdf_bath_allocations idx_mdf_allocation_bath,idx_mdf_allocation_position,idx_mdf_allocation_supply,mdf_bath_allocations_cause_key_evidence_line_id_bath_id_bat_key,mdf_bath_allocations_pkey 8de862aedb7ca0d6adb2677e693eca8f)" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.mdf_bath_allocations') AND conname=ANY(string_to_array('mdf_bath_allocations_bath_id_check,mdf_bath_allocations_bath_revision_check,mdf_bath_allocations_cause_key_check,mdf_bath_allocations_cause_key_evidence_line_id_bath_id_bat_key,mdf_bath_allocations_evidence_line_id_order_id_detail_id_fkey,mdf_bath_allocations_pkey,mdf_bath_allocations_quantity_check,mdf_bath_allocations_state_check',',')) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=to_regclass('public.mdf_bath_allocations') AND indexrelid::regclass::text=ANY(string_to_array('idx_mdf_allocation_bath,idx_mdf_allocation_position,idx_mdf_allocation_supply,mdf_bath_allocations_cause_key_evidence_line_id_bath_id_bat_key,mdf_bath_allocations_pkey',',')) AND (NOT indisvalid OR NOT indisready));" \
+      "$(q_tbl mdf_recalculation_jobs)" \
+      "$(q_colset_hash mdf_recalculation_jobs job_id,event_key,source_kind,source_id,revision_key,correction_epoch,actor_user_id,request_id,status,attempts,next_attempt_at,error_code,created_at,finished_at c5f49ef45d0467d70084010ac017c506)" \
+      "$(q_conset_hash mdf_recalculation_jobs mdf_recalculation_jobs_attempts_check,mdf_recalculation_jobs_correction_epoch_check,mdf_recalculation_jobs_event_key_check,mdf_recalculation_jobs_event_key_key,mdf_recalculation_jobs_pkey,mdf_recalculation_jobs_request_id_check,mdf_recalculation_jobs_source_kind_source_id_revision_key_fkey,mdf_recalculation_jobs_status_check 1a1a594aeae089dd8ae8841aeaaf48cf)" \
+      "$(q_idxset_hash mdf_recalculation_jobs idx_mdf_job_pending,idx_mdf_job_source,mdf_recalculation_jobs_event_key_key,mdf_recalculation_jobs_pkey a2cf2f6f742549679dcbb5fd6055a635)" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.mdf_recalculation_jobs') AND conname=ANY(string_to_array('mdf_recalculation_jobs_attempts_check,mdf_recalculation_jobs_correction_epoch_check,mdf_recalculation_jobs_event_key_check,mdf_recalculation_jobs_event_key_key,mdf_recalculation_jobs_pkey,mdf_recalculation_jobs_request_id_check,mdf_recalculation_jobs_source_kind_source_id_revision_key_fkey,mdf_recalculation_jobs_status_check',',')) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=to_regclass('public.mdf_recalculation_jobs') AND indexrelid::regclass::text=ANY(string_to_array('idx_mdf_job_pending,idx_mdf_job_source,mdf_recalculation_jobs_event_key_key,mdf_recalculation_jobs_pkey',',')) AND (NOT indisvalid OR NOT indisready));" \
+      "$(q_tbl mdf_recalculation_job_rules)" \
+      "$(q_colset_hash mdf_recalculation_job_rules job_id,rule_id,rule_version 3469299f734218c1abb1fb8d19e354d4)" \
+      "$(q_conset_hash mdf_recalculation_job_rules mdf_recalculation_job_rules_job_id_fkey,mdf_recalculation_job_rules_pkey,mdf_recalculation_job_rules_rule_id_check,mdf_recalculation_job_rules_rule_version_check cb468e04796c960e1d9bf75bda14679b)" \
+      "$(q_idxset_hash mdf_recalculation_job_rules mdf_recalculation_job_rules_pkey 29b18004c0bdcf68b2ee2a6acf818bbe)" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.mdf_recalculation_job_rules') AND conname=ANY(string_to_array('mdf_recalculation_job_rules_job_id_fkey,mdf_recalculation_job_rules_pkey,mdf_recalculation_job_rules_rule_id_check,mdf_recalculation_job_rules_rule_version_check',',')) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=to_regclass('public.mdf_recalculation_job_rules') AND indexrelid::regclass::text=ANY(string_to_array('mdf_recalculation_job_rules_pkey',',')) AND (NOT indisvalid OR NOT indisready));" \
+      "$(q_fun_hash 'public.mdf_reject_evidence_change()' a51e1b51d407124a856f1993d9c54fe8)" \
+      "$(q_fun_hash 'public.mdf_guard_revision_membership()' 916d14bf7da7dd4d4ea73c68ad26bf0c)" \
+      "$(q_fun_hash 'public.mdf_guard_allocation()' beb8e18b0d57e88de4233e6f11cb3c37)" \
+      "$(q_fun_hash 'public.mdf_guard_accepted_revision()' 945aada9b298e291ecda1442e6391f6d)" \
+      "$(q_trg_def_on mdf_revision_immutable mdf_evidence_revisions 'CREATE TRIGGER mdf_revision_immutable BEFORE DELETE OR UPDATE ON public.mdf_evidence_revisions FOR EACH ROW EXECUTE FUNCTION mdf_reject_evidence_change()')" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.mdf_evidence_revisions') AND tgname='mdf_revision_immutable' AND tgenabled='O' AND NOT tgisinternal);" \
+      "$(q_trg_def_on mdf_line_immutable mdf_evidence_lines 'CREATE TRIGGER mdf_line_immutable BEFORE DELETE OR UPDATE ON public.mdf_evidence_lines FOR EACH ROW EXECUTE FUNCTION mdf_reject_evidence_change()')" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.mdf_evidence_lines') AND tgname='mdf_line_immutable' AND tgenabled='O' AND NOT tgisinternal);" \
+      "$(q_trg_def_on mdf_seal_immutable mdf_revision_seals 'CREATE TRIGGER mdf_seal_immutable BEFORE DELETE OR UPDATE ON public.mdf_revision_seals FOR EACH ROW EXECUTE FUNCTION mdf_reject_evidence_change()')" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.mdf_revision_seals') AND tgname='mdf_seal_immutable' AND tgenabled='O' AND NOT tgisinternal);" \
+      "$(q_trg_def_on mdf_job_rules_immutable mdf_recalculation_job_rules 'CREATE TRIGGER mdf_job_rules_immutable BEFORE DELETE OR UPDATE ON public.mdf_recalculation_job_rules FOR EACH ROW EXECUTE FUNCTION mdf_reject_evidence_change()')" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.mdf_recalculation_job_rules') AND tgname='mdf_job_rules_immutable' AND tgenabled='O' AND NOT tgisinternal);" \
+      "$(q_trg_def_on mdf_line_insert_guard mdf_evidence_lines 'CREATE TRIGGER mdf_line_insert_guard BEFORE INSERT ON public.mdf_evidence_lines FOR EACH ROW EXECUTE FUNCTION mdf_guard_revision_membership()')" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.mdf_evidence_lines') AND tgname='mdf_line_insert_guard' AND tgenabled='O' AND NOT tgisinternal);" \
+      "$(q_trg_def_on mdf_seal_insert_guard mdf_revision_seals 'CREATE TRIGGER mdf_seal_insert_guard BEFORE INSERT ON public.mdf_revision_seals FOR EACH ROW EXECUTE FUNCTION mdf_guard_revision_membership()')" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.mdf_revision_seals') AND tgname='mdf_seal_insert_guard' AND tgenabled='O' AND NOT tgisinternal);" \
+      "$(q_trg_def_on mdf_allocation_guard mdf_bath_allocations 'CREATE TRIGGER mdf_allocation_guard BEFORE INSERT OR DELETE OR UPDATE ON public.mdf_bath_allocations FOR EACH ROW EXECUTE FUNCTION mdf_guard_allocation()')" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.mdf_bath_allocations') AND tgname='mdf_allocation_guard' AND tgenabled='O' AND NOT tgisinternal);" \
+      "$(q_trg_def_on mdf_accepted_revision_guard mdf_source_heads 'CREATE TRIGGER mdf_accepted_revision_guard BEFORE UPDATE ON public.mdf_source_heads FOR EACH ROW EXECUTE FUNCTION mdf_guard_accepted_revision()')" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.mdf_source_heads') AND tgname='mdf_accepted_revision_guard' AND tgenabled='O' AND NOT tgisinternal);" \
+      "SELECT EXISTS (SELECT 1 FROM mdf_engine_state WHERE singleton);" ;;
+    166_mdf_engine_fences*) probe_all \
+      "$(q_fun_hash 'public.mdf_guard_source_fence()' 5865eedf3ea4c2cf2b715b6ac210d49a)" \
+      "$(q_fun_hash 'public.mdf_guard_published_fence()' a63689d699558290a343b5fd1829fef7)" \
+      "$(q_trg_def_on mdf_source_fence_guard mdf_source_heads 'CREATE TRIGGER mdf_source_fence_guard BEFORE DELETE OR UPDATE ON public.mdf_source_heads FOR EACH ROW EXECUTE FUNCTION mdf_guard_source_fence()')" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.mdf_source_heads') AND tgname='mdf_source_fence_guard' AND tgenabled='O' AND NOT tgisinternal);" \
+      "$(q_trg_def_on mdf_published_fence_guard mdf_engine_state 'CREATE TRIGGER mdf_published_fence_guard BEFORE DELETE OR UPDATE ON public.mdf_engine_state FOR EACH ROW EXECUTE FUNCTION mdf_guard_published_fence()')" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.mdf_engine_state') AND tgname='mdf_published_fence_guard' AND tgenabled='O' AND NOT tgisinternal);" ;;
+    167_mdf_shadow_observations*) probe_all \
+      "$(q_tbl mdf_shadow_observations)" \
+      "$(q_colset_hash mdf_shadow_observations source_kind,source_id,revision_key,source_digest,issues,candidate_quantities,created_at f66389a0112a62136ad760d1100ad594)" \
+      "$(q_conset_hash mdf_shadow_observations mdf_shadow_observations_pkey,mdf_shadow_observations_source_digest_check,mdf_shadow_observations_source_kind_source_id_revision_key_fkey 3903f9eeeb9fec0b9689e18b121fa69e)" \
+      "$(q_idxset_hash mdf_shadow_observations idx_mdf_shadow_created,mdf_shadow_observations_pkey e0a3cbfff6ae366bd8469fbbe1029c14)" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.mdf_shadow_observations') AND conname=ANY(string_to_array('mdf_shadow_observations_pkey,mdf_shadow_observations_source_digest_check,mdf_shadow_observations_source_kind_source_id_revision_key_fkey',',')) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=to_regclass('public.mdf_shadow_observations') AND indexrelid::regclass::text=ANY(string_to_array('idx_mdf_shadow_created,mdf_shadow_observations_pkey',',')) AND (NOT indisvalid OR NOT indisready));" \
+      "$(q_trg_def_on mdf_shadow_immutable mdf_shadow_observations 'CREATE TRIGGER mdf_shadow_immutable BEFORE DELETE OR UPDATE ON public.mdf_shadow_observations FOR EACH ROW EXECUTE FUNCTION mdf_reject_evidence_change()')" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.mdf_shadow_observations') AND tgname='mdf_shadow_immutable' AND tgenabled='O' AND NOT tgisinternal);" ;;
+    168_bitrix24_order_stages*) probe_all \
+      "$(q_tbl bitrix24_stage_config)" \
+      "$(q_colset_hash bitrix24_stage_config singleton,member_id,domain,category_id,completed_status_id,enabled,binding_locked,version,epoch,updated_by,updated_at 83fdd19a306683eea7aed9c08d11d600)" \
+      "$(q_conset_hash bitrix24_stage_config bitrix24_stage_config_category_id_check,bitrix24_stage_config_check,bitrix24_stage_config_completed_status_id_fkey,bitrix24_stage_config_member_id_fkey,bitrix24_stage_config_pkey,bitrix24_stage_config_singleton_check,bitrix24_stage_config_updated_by_fkey e26b3c3ef7ee9ed912dcc22bd0acc2af)" \
+      "$(q_idxset_hash bitrix24_stage_config bitrix24_stage_config_pkey 377253b38c014e7361aee51fbb236b83)" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.bitrix24_stage_config') AND conname=ANY(string_to_array('bitrix24_stage_config_category_id_check,bitrix24_stage_config_check,bitrix24_stage_config_completed_status_id_fkey,bitrix24_stage_config_member_id_fkey,bitrix24_stage_config_pkey,bitrix24_stage_config_singleton_check,bitrix24_stage_config_updated_by_fkey',',')) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=to_regclass('public.bitrix24_stage_config') AND indexrelid::regclass::text=ANY(string_to_array('bitrix24_stage_config_pkey',',')) AND (NOT indisvalid OR NOT indisready));" \
+      "$(q_tbl bitrix24_stage_catalog)" \
+      "$(q_colset_hash bitrix24_stage_catalog member_id,category_id,category_name,stages,revision,fetched_at 771547ab5261debc69e95b422459cf8c)" \
+      "$(q_conset_hash bitrix24_stage_catalog bitrix24_stage_catalog_category_id_check,bitrix24_stage_catalog_member_id_fkey,bitrix24_stage_catalog_pkey,bitrix24_stage_catalog_stages_check b6e8b412ec18e1c9e6ff7a22321b4d88)" \
+      "$(q_idxset_hash bitrix24_stage_catalog bitrix24_stage_catalog_pkey 43d53f00ca8bf5b0efb081f845706c63)" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.bitrix24_stage_catalog') AND conname=ANY(string_to_array('bitrix24_stage_catalog_category_id_check,bitrix24_stage_catalog_member_id_fkey,bitrix24_stage_catalog_pkey,bitrix24_stage_catalog_stages_check',',')) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=to_regclass('public.bitrix24_stage_catalog') AND indexrelid::regclass::text=ANY(string_to_array('bitrix24_stage_catalog_pkey',',')) AND (NOT indisvalid OR NOT indisready));" \
+      "$(q_tbl bitrix24_stage_mapping)" \
+      "$(q_colset_hash bitrix24_stage_mapping member_id,category_id,order_status_id,stage_id,updated_by,updated_at 57bee8b8054ce8ed63652e67443396e3)" \
+      "$(q_conset_hash bitrix24_stage_mapping bitrix24_stage_mapping_member_id_category_id_fkey,bitrix24_stage_mapping_order_status_id_fkey,bitrix24_stage_mapping_pkey,bitrix24_stage_mapping_updated_by_fkey 25994519c203673f982954429ea2d4b7)" \
+      "$(q_idxset_hash bitrix24_stage_mapping bitrix24_stage_mapping_pkey a742ca42193f52089431fc115b418c0c)" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.bitrix24_stage_mapping') AND conname=ANY(string_to_array('bitrix24_stage_mapping_member_id_category_id_fkey,bitrix24_stage_mapping_order_status_id_fkey,bitrix24_stage_mapping_pkey,bitrix24_stage_mapping_updated_by_fkey',',')) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=to_regclass('public.bitrix24_stage_mapping') AND indexrelid::regclass::text=ANY(string_to_array('bitrix24_stage_mapping_pkey',',')) AND (NOT indisvalid OR NOT indisready));" \
+      "$(q_tbl bitrix24_stage_work)" \
+      "$(q_colset_hash bitrix24_stage_work member_id,category_id,order_id,epoch,revision,initialized,source_status_id,applied_status_id,status,bitrix_id,observed_stage,target_stage,attempts,restore_count,restore_window,next_attempt_at,locked_at,lock_token,last_error,approval,job_id,actor_user_id,request_id,created_at,updated_at,processed_at c41fba3e884fecb27f5078dd9640be3a)" \
+      "$(q_conset_hash bitrix24_stage_work bitrix24_stage_work_actor_user_id_fkey,bitrix24_stage_work_member_id_category_id_fkey,bitrix24_stage_work_order_id_fkey,bitrix24_stage_work_pkey,bitrix24_stage_work_status_check ebdbccebde765b0ffda5c5f2e87f6885)" \
+      "$(q_idxset_hash bitrix24_stage_work bitrix24_stage_work_pkey,idx_bitrix24_stage_work_due 88152bcb8296c9943415dceb12a45ff0)" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.bitrix24_stage_work') AND conname=ANY(string_to_array('bitrix24_stage_work_actor_user_id_fkey,bitrix24_stage_work_member_id_category_id_fkey,bitrix24_stage_work_order_id_fkey,bitrix24_stage_work_pkey,bitrix24_stage_work_status_check',',')) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=to_regclass('public.bitrix24_stage_work') AND indexrelid::regclass::text=ANY(string_to_array('bitrix24_stage_work_pkey,idx_bitrix24_stage_work_due',',')) AND (NOT indisvalid OR NOT indisready));" \
+      "$(q_tbl bitrix24_stage_job)" \
+      "$(q_colset_hash bitrix24_stage_job job_id,member_id,category_id,epoch,config_version,kind,payload,results,actor_user_id,request_id,created_at,expires_at 994c53576b30902dff7655e8ebe01f8b)" \
+      "$(q_conset_hash bitrix24_stage_job bitrix24_stage_job_actor_user_id_fkey,bitrix24_stage_job_kind_check,bitrix24_stage_job_member_id_category_id_fkey,bitrix24_stage_job_pkey 2f3fb505a93491dba61e170af1b67294)" \
+      "$(q_idxset_hash bitrix24_stage_job bitrix24_stage_job_pkey e8c4c2a097f04fdf48720cfa2c5197ed)" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.bitrix24_stage_job') AND conname=ANY(string_to_array('bitrix24_stage_job_actor_user_id_fkey,bitrix24_stage_job_kind_check,bitrix24_stage_job_member_id_category_id_fkey,bitrix24_stage_job_pkey',',')) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=to_regclass('public.bitrix24_stage_job') AND indexrelid::regclass::text=ANY(string_to_array('bitrix24_stage_job_pkey',',')) AND (NOT indisvalid OR NOT indisready));" \
+      "$(q_tbl bitrix24_stage_attempt)" \
+      "$(q_colset_hash bitrix24_stage_attempt attempt_id,member_id,category_id,order_id,epoch,revision,config_version,bitrix_id,before_stage,target_stage,state,actor_user_id,request_id,created_at,verified_at 41977afb343beda1941969b31deadfd3)" \
+      "$(q_conset_hash bitrix24_stage_attempt bitrix24_stage_attempt_pkey,bitrix24_stage_attempt_state_check c8baa03091ac414fd9de4adbd4da4b79)" \
+      "$(q_idxset_hash bitrix24_stage_attempt bitrix24_stage_attempt_pkey,idx_bitrix24_stage_attempt_order 66ce78139696f92237beacf82894cd76)" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.bitrix24_stage_attempt') AND conname=ANY(string_to_array('bitrix24_stage_attempt_pkey,bitrix24_stage_attempt_state_check',',')) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=to_regclass('public.bitrix24_stage_attempt') AND indexrelid::regclass::text=ANY(string_to_array('bitrix24_stage_attempt_pkey,idx_bitrix24_stage_attempt_order',',')) AND (NOT indisvalid OR NOT indisready));" \
+      "$(q_fun_hash 'public.bitrix24_stage_enqueue(bigint)' 07ca83d0de7c5f5e382a4e52b99114f7)" \
+      "$(q_fun_hash 'public.bitrix24_stage_order_changed()' 4a39064a2ba080c5c72bc879de832c62)" \
+      "$(q_fun_hash 'public.bitrix24_stage_mapping_available()' a8f2f26ab3d033b56d7e346b86d94e7b)" \
+      "$(q_trg_def_on trg_bitrix24_stage_order_changed orders 'CREATE TRIGGER trg_bitrix24_stage_order_changed AFTER INSERT OR UPDATE ON public.orders FOR EACH ROW EXECUTE FUNCTION bitrix24_stage_order_changed()')" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.orders') AND tgname='trg_bitrix24_stage_order_changed' AND tgenabled='O' AND NOT tgisinternal);" \
+      "$(q_trg_def_on trg_bitrix24_stage_mapping_available crm_sync_mapping 'CREATE TRIGGER trg_bitrix24_stage_mapping_available AFTER INSERT OR UPDATE ON public.crm_sync_mapping FOR EACH ROW EXECUTE FUNCTION bitrix24_stage_mapping_available()')" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.crm_sync_mapping') AND tgname='trg_bitrix24_stage_mapping_available' AND tgenabled='O' AND NOT tgisinternal);" \
+      "SELECT EXISTS (SELECT 1 FROM bitrix24_stage_config WHERE singleton);" ;;
+    169_mdf_shadow_comparison*) probe_all \
+      "$(q_tbl mdf_shadow_comparisons)" \
+      "$(q_colset_hash mdf_shadow_comparisons source_kind,source_id,revision_key,algorithm_version,status,snapshot_at,duration_ms,report,created_at b0614cc238b42dc578015de62445c077)" \
+      "$(q_conset_hash mdf_shadow_comparisons mdf_shadow_comparisons_duration_ms_check,mdf_shadow_comparisons_pkey,mdf_shadow_comparisons_report_check,mdf_shadow_comparisons_source_kind_source_id_revision_key_fkey,mdf_shadow_comparisons_status_check eea3e7ed2d8a73739d3eb8990cb92c2c)" \
+      "$(q_idxset_hash mdf_shadow_comparisons idx_mdf_shadow_comparison_created,mdf_shadow_comparisons_pkey ebf389d2009f2b1f6a39040c7548b9cf)" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.mdf_shadow_comparisons') AND conname=ANY(string_to_array('mdf_shadow_comparisons_duration_ms_check,mdf_shadow_comparisons_pkey,mdf_shadow_comparisons_report_check,mdf_shadow_comparisons_source_kind_source_id_revision_key_fkey,mdf_shadow_comparisons_status_check',',')) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=to_regclass('public.mdf_shadow_comparisons') AND indexrelid::regclass::text=ANY(string_to_array('idx_mdf_shadow_comparison_created,mdf_shadow_comparisons_pkey',',')) AND (NOT indisvalid OR NOT indisready));" \
+      "$(q_tbl mdf_shadow_comparison_attempts)" \
+      "$(q_colset_hash mdf_shadow_comparison_attempts source_kind,source_id,revision_key,algorithm_version,attempts,next_attempt_at,error_code 0d35cf6e4a960b69191650dc144a771b)" \
+      "$(q_conset_hash mdf_shadow_comparison_attempts mdf_shadow_comparison_attempt_source_kind_source_id_revisi_fkey,mdf_shadow_comparison_attempts_attempts_check,mdf_shadow_comparison_attempts_pkey c02837aa007a1865e3b180b2dda73a13)" \
+      "$(q_idxset_hash mdf_shadow_comparison_attempts mdf_shadow_comparison_attempts_pkey adfedcdc67e358cd632d30a2ef60af33)" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.mdf_shadow_comparison_attempts') AND conname=ANY(string_to_array('mdf_shadow_comparison_attempt_source_kind_source_id_revisi_fkey,mdf_shadow_comparison_attempts_attempts_check,mdf_shadow_comparison_attempts_pkey',',')) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=to_regclass('public.mdf_shadow_comparison_attempts') AND indexrelid::regclass::text=ANY(string_to_array('mdf_shadow_comparison_attempts_pkey',',')) AND (NOT indisvalid OR NOT indisready));" \
+      "$(q_trg_def_on mdf_shadow_comparison_immutable mdf_shadow_comparisons 'CREATE TRIGGER mdf_shadow_comparison_immutable BEFORE DELETE OR UPDATE ON public.mdf_shadow_comparisons FOR EACH ROW EXECUTE FUNCTION mdf_reject_evidence_change()')" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.mdf_shadow_comparisons') AND tgname='mdf_shadow_comparison_immutable' AND tgenabled='O' AND NOT tgisinternal);" ;;
     170_whatsapp_technical_logs*) probe_all \
                      "$(q_tbl whatsapp_technical_logs)" \
                      "$(q_con_on whatsapp_technical_logs whatsapp_technical_logs_pkey)" \
@@ -1963,6 +2123,9 @@ verify_applied_effect() {
   local f="$1"
   case "$f" in
     151_*|152_*|156_*|157_*|160_*|161_*|162_*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    164_*|165_*|166_*|167_*|168_*|169_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     170_*)
