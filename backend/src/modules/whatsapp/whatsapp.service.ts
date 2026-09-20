@@ -53,13 +53,27 @@ export class WhatsAppService {
     const sessionStatus = safeStatus(sessionValue);
     await this.technicalLog.record({
       component: "waha",
-      level: session.status === "rejected" || sessionStatus === "FAILED" ? "error" : "info",
+      level: session.status === "rejected" || sessionStatus === "FAILED"
+        ? "error"
+        : sessionStatus === "STOPPED" || sessionStatus === "UNKNOWN"
+          ? "warn"
+          : "info",
       eventCode: "waha.session.snapshot",
       outcome: session.status === "rejected" ? "failed" : "observed",
       operation: "session.status",
       errorCode: session.status === "rejected" ? "WAHA_SESSION_STATUS_UNAVAILABLE" : undefined,
       details: { status: sessionStatus },
     });
+    const issues = {
+      health: issueCode(health),
+      version: issueCode(version),
+      server: issueCode(server),
+      session: issueCode(session),
+      account: issueCode(me),
+      capping: issueCode(capping),
+      timelock: issueCode(timelock),
+      diagnostics: issueCode(diagnostics),
+    };
     return {
       health: value(health),
       version: value(version),
@@ -73,18 +87,9 @@ export class WhatsAppService {
         timelock: value(timelock),
       }),
       diagnostics: value(diagnostics),
-      issues: {
-        health: issueCode(health),
-        version: issueCode(version),
-        server: issueCode(server),
-        session: issueCode(session),
-        account: issueCode(me),
-        capping: issueCode(capping),
-        timelock: issueCode(timelock),
-        diagnostics: issueCode(diagnostics),
-      },
+      issues,
       degraded:
-        [health, session].some((item) => item.status === "rejected") ||
+        Object.values(issues).some(Boolean) ||
         sessionStatus === "FAILED" ||
         sessionStatus === "STOPPED" ||
         sessionStatus === "UNKNOWN",
@@ -267,7 +272,17 @@ export class WhatsAppService {
         "Invalid webhook JSON"
       );
     }
-    const parsed = parseInbound(body, config.sessionName, requestId);
+    let parsed: ReturnType<typeof parseInbound>;
+    try {
+      parsed = parseInbound(body, config.sessionName, requestId);
+    } catch (error) {
+      await this.technicalLog.record({
+        component: "webhook", level: "warn", eventCode: "whatsapp.webhook.rejected",
+        outcome: "failed", operation: "webhook.validate", requestId,
+        errorCode: error instanceof ApiError ? error.code : "WHATSAPP_WEBHOOK_INVALID",
+      });
+      throw error;
+    }
     if (parsed.kind === "ignored") {
       await this.recordSystem(
         "whatsapp.webhook.received",

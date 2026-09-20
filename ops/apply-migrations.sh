@@ -1941,6 +1941,17 @@ probe_file() {
                      "$(q_col whatsapp_delivery_jobs lock_token)" \
                      "SELECT EXISTS (SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('public.whatsapp_delivery_jobs_claim_idx') AND indisvalid);" \
                      "SELECT count(*)=2 FROM permissions_catalog WHERE permission_name IN ('whatsapp.view','whatsapp.manage') AND is_active;" ;;
+    170_whatsapp_technical_logs*) probe_all \
+                     "$(q_tbl whatsapp_technical_logs)" \
+                     "$(q_con_on whatsapp_technical_logs whatsapp_technical_logs_pkey)" \
+                     "$(q_con_on whatsapp_technical_logs whatsapp_technical_logs_component_check)" \
+                     "$(q_con_on whatsapp_technical_logs whatsapp_technical_logs_level_check)" \
+                     "$(q_con_on whatsapp_technical_logs whatsapp_technical_logs_event_code_check)" \
+                     "$(q_con_on whatsapp_technical_logs whatsapp_technical_logs_outcome_check)" \
+                     "$(q_con_on whatsapp_technical_logs whatsapp_technical_logs_details_check)" \
+                     "$(q_idx whatsapp_technical_logs_time_idx)" \
+                     "$(q_idx whatsapp_technical_logs_error_idx)" \
+                     "$(q_idx whatsapp_technical_logs_event_idx)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -1952,6 +1963,9 @@ verify_applied_effect() {
   local f="$1"
   case "$f" in
     151_*|152_*|156_*|157_*|160_*|161_*|162_*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    170_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*|127_*|128_*|129_*|130_*|131_*|132_*|133_*|134_*|135_*|136_*|137_*|138_*|139_*|140_*|141_*|142_*|143_*|144_*|145_*|146_*|147_*|148_*|149_*|150_*|153_*|154_*)

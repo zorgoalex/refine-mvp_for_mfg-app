@@ -110,7 +110,7 @@ export const WhatsAppConnectionConfig: React.FC = () => {
     setActionError(null);
     try {
       await whatsappApi.restart(Boolean(status?.restrictions.length));
-      message.success("WAHA перезапущен. Новый QR действует ограниченное время.");
+      message.success("WAHA-сессия перезапущена. Новый QR действует ограниченное время.");
       await load();
     } catch (actionError) {
       setActionError(restartErrorPresentation(actionError));
@@ -127,6 +127,7 @@ export const WhatsAppConnectionConfig: React.FC = () => {
     0
   );
   const session = whatsappSessionPresentation(status?.session, status?.issues);
+  const partialIssueNames = whatsappPartialIssueNames(status?.issues);
   return (
     <div className="whatsapp-config">
       <header className="whatsapp-config__header">
@@ -161,6 +162,10 @@ export const WhatsAppConnectionConfig: React.FC = () => {
       {session.notice ? (
         <Alert type={session.notice.type} showIcon message={session.notice.title}
           description={session.notice.description} />
+      ) : null}
+      {partialIssueNames.length ? (
+        <Alert type="warning" showIcon message="Часть диагностики WhatsApp недоступна"
+          description={`Не удалось проверить: ${partialIssueNames.join(", ")}. Основное состояние может быть неполным; проверьте технический журнал.`} />
       ) : null}
       <Card className="whatsapp-config__status-card">
         <Descriptions column={{ xs: 1, sm: 2, lg: 3 }}>
@@ -205,8 +210,8 @@ export const WhatsAppConnectionConfig: React.FC = () => {
           Показать QR-код
         </Button>
         <Popconfirm
-          title="Принудительно перезапустить WAHA-сессию? Очередь ERP и ограничения WhatsApp сохранятся."
-          okText="Перезапустить WAHA"
+          title="Принудительно перезапустить WAHA-сессию? Контейнер не перезапускается; очередь ERP и ограничения WhatsApp сохранятся."
+          okText="Перезапустить сессию"
           cancelText="Отмена"
           onConfirm={() => void restart()}
         >
@@ -216,7 +221,7 @@ export const WhatsAppConnectionConfig: React.FC = () => {
             disabled={!canManage}
             loading={action}
           >
-            Принудительно перезапустить WAHA
+            Принудительно перезапустить сессию WAHA
           </Button>
         </Popconfirm>
       </div>
@@ -587,16 +592,18 @@ export const WhatsAppTechnicalLogsConfig: React.FC = () => {
   const [rows, setRows] = useState<WhatsAppTechnicalLogDto[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<UserFacingError | null>(null);
   const [query, setQuery] = useState<WhatsAppTechnicalLogQuery>({ page: 1, pageSize: 100 });
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const result = await whatsappApi.technicalLogs(query);
       setRows(result.data);
       setTotal(result.pagination.total);
     } catch (error) {
-      message.error(errorText(error, "Не удалось загрузить технический журнал WhatsApp"));
+      setLoadError(whatsappErrorPresentation(error, "Не удалось загрузить технический журнал WhatsApp"));
     } finally {
       setLoading(false);
     }
@@ -625,6 +632,8 @@ export const WhatsAppTechnicalLogsConfig: React.FC = () => {
           <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>Обновить</Button>
         </Space>
       </header>
+      {loadError ? <Alert type="error" showIcon message={loadError.title} description={loadError.description}
+        action={<Button onClick={() => void load()}>Повторить</Button>} /> : null}
       <Space wrap className="whatsapp-config__technical-filters">
         <Select allowClear placeholder="Уровень" style={{ width: 140 }} value={query.level}
           options={["info", "warn", "error"].map((value) => ({ value, label: value }))}
@@ -656,6 +665,12 @@ export const WhatsAppTechnicalLogsConfig: React.FC = () => {
           { title: "HTTP", dataIndex: "httpStatus", width: 75 },
           { title: "мс", dataIndex: "durationMs", width: 80 },
           { title: "Ошибка", dataIndex: "errorCode", width: 220 },
+          { title: "Сообщение", dataIndex: "errorMessage", width: 260, ellipsis: true },
+          { title: "Request ID", dataIndex: "requestId", width: 220, ellipsis: true },
+          { title: "Детали", dataIndex: "details", width: 320, ellipsis: true,
+            render: (details: Record<string, unknown>) => Object.keys(details ?? {}).length
+              ? <Text code copyable={{ text: JSON.stringify(details) }}>{JSON.stringify(details)}</Text>
+              : "—" },
         ]} />
     </div>
   );
@@ -1013,7 +1028,7 @@ export function qrErrorPresentation(error: unknown): UserFacingError {
 export function restartErrorPresentation(error: unknown): UserFacingError {
   if (isApiError(error) && error.code === "WAHA_PROVIDER_ERROR") {
     return withRequestId({
-      title: "WAHA не принял перезапуск",
+      title: "WAHA не принял перезапуск сессии",
       description: "Обновите статус и повторите действие. Если ошибка сохранится, откройте технический журнал WhatsApp.",
     }, error.requestId);
   }
@@ -1060,6 +1075,21 @@ export function whatsappSessionPresentation(value: unknown, issues?: Record<stri
     label: "Нет данных", color: "default",
     notice: { type: "warning" as const, title: "Состояние сессии неизвестно", description: "Обновите статус. Если состояние не появится, проверьте технический журнал WhatsApp." },
   };
+}
+
+export function whatsappPartialIssueNames(issues?: Record<string, string | null>): string[] {
+  if (!issues) return [];
+  const labels: Record<string, string> = {
+    version: "версию WAHA",
+    server: "состояние сервера WAHA",
+    account: "подключённый аккаунт",
+    capping: "лимит отправки сообщений",
+    timelock: "ограничение новых диалогов",
+    diagnostics: "очередь и webhook",
+  };
+  return Object.entries(labels)
+    .filter(([key]) => Boolean(issues[key]))
+    .map(([, label]) => label);
 }
 
 function deliveryErrorText(item: WhatsAppDeliveryJobDto): string {

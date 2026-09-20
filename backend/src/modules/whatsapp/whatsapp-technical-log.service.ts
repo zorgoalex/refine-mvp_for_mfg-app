@@ -20,21 +20,52 @@ export interface WhatsAppTechnicalLogEntry {
 @Injectable()
 export class WhatsAppTechnicalLogService {
   private readonly logger = new Logger(WhatsAppTechnicalLogService.name);
+  private readonly queue: WhatsAppTechnicalLogEntry[] = [];
+  private draining = false;
+  private dropped = 0;
 
   constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
 
-  async record(entry: WhatsAppTechnicalLogEntry): Promise<void> {
+  record(entry: WhatsAppTechnicalLogEntry): Promise<void> {
+    if (this.queue.length >= 1000) {
+      this.dropped += 1;
+      if (this.dropped === 1 || this.dropped % 100 === 0) {
+        this.logger.warn({
+          event: "whatsapp_technical_log_queue_full",
+          code: "TECHNICAL_LOG_DROPPED",
+          dropped: this.dropped,
+        });
+      }
+      return Promise.resolve();
+    }
+    this.queue.push(entry);
+    void this.drain();
+    return Promise.resolve();
+  }
+
+  private async drain(): Promise<void> {
+    if (this.draining) return;
+    this.draining = true;
     try {
-      await this.database.query(
-        `INSERT INTO whatsapp_technical_logs
-          (component,level,event_code,outcome,operation,http_status,duration_ms,error_code,error_message,request_id,details)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)`,
-        [entry.component, entry.level, entry.eventCode, entry.outcome, entry.operation ?? null,
-          entry.httpStatus ?? null, entry.durationMs ?? null, entry.errorCode ?? null,
-          bounded(entry.errorMessage, 500), bounded(entry.requestId, 200), JSON.stringify(entry.details ?? {})],
-      );
-    } catch {
-      this.logger.warn({ event: "whatsapp_technical_log_write_failed", code: "TECHNICAL_LOG_UNAVAILABLE" });
+      while (this.queue.length > 0) {
+        const entry = this.queue.shift();
+        if (!entry) continue;
+        try {
+          await this.database.query(
+            `INSERT INTO whatsapp_technical_logs
+              (component,level,event_code,outcome,operation,http_status,duration_ms,error_code,error_message,request_id,details)
+             VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)`,
+            [entry.component, entry.level, entry.eventCode, entry.outcome, entry.operation ?? null,
+              entry.httpStatus ?? null, entry.durationMs ?? null, entry.errorCode ?? null,
+              bounded(entry.errorMessage, 500), bounded(entry.requestId, 200), JSON.stringify(entry.details ?? {})],
+          );
+        } catch {
+          this.logger.warn({ event: "whatsapp_technical_log_write_failed", code: "TECHNICAL_LOG_UNAVAILABLE" });
+        }
+      }
+    } finally {
+      this.draining = false;
+      if (this.queue.length > 0) void this.drain();
     }
   }
 
@@ -46,10 +77,10 @@ export class WhatsAppTechnicalLogService {
     addFilter(where, params, "outcome", query.outcome);
     if (query.search) {
       params.push(`%${query.search}%`);
-      where.push(`(event_code ILIKE $${params.length} OR operation ILIKE $${params.length} OR error_code ILIKE $${params.length})`);
+      where.push(`(event_code ILIKE $${params.length} OR operation ILIKE $${params.length} OR error_code ILIKE $${params.length} OR error_message ILIKE $${params.length} OR request_id ILIKE $${params.length})`);
     }
     const count = await this.database.query<{ total: string }>(
-      `SELECT count(*)::text total FROM whatsapp_technical_logs WHERE ${where.join(" AND ")}`, params,
+      `SELECT count(*)::text total FROM whatsapp_technical_logs WHERE ${where.join(" AND ")}`, [...params],
     );
     params.push(query.pageSize, (query.page - 1) * query.pageSize);
     const rows = await this.database.query<QueryResultRow>(

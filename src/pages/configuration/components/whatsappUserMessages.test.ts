@@ -4,6 +4,7 @@ import {
   qrErrorPresentation,
   restartErrorPresentation,
   whatsappErrorPresentation,
+  whatsappPartialIssueNames,
   whatsappSessionPresentation,
 } from "./WhatsAppConfigTabs";
 
@@ -69,7 +70,17 @@ describe("WhatsApp user-facing diagnostics", () => {
     });
 
     expect(qrErrorPresentation(error).title).toBe("QR-код сейчас недоступен");
-    expect(restartErrorPresentation(error).title).toBe("WAHA не принял перезапуск");
+    expect(restartErrorPresentation(error).title).toBe("WAHA не принял перезапуск сессии");
     expect(qrErrorPresentation(error).description).toContain("req-operation");
+  });
+
+  it("surfaces partial diagnostic failures instead of reporting a clean state", () => {
+    expect(whatsappPartialIssueNames({
+      health: null,
+      session: null,
+      capping: "WAHA_PROVIDER_ERROR",
+      timelock: "WAHA_UNAVAILABLE",
+      diagnostics: null,
+    })).toEqual(["лимит отправки сообщений", "ограничение новых диалогов"]);
   });
 });
