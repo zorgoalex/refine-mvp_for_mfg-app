@@ -615,6 +615,61 @@ test.describe('MDF background refresh', () => {
         });
     }
 
+    test('opens MDF at today and resets retained scroll only on activation', async ({ page }) => {
+        const db = createWorkflowMockDb();
+        seedTabletData(db);
+        await setupBoardTabletMocks(page, db);
+        await setupMdfOverflowPreviewMocks(page, true);
+        await page.goto('/mdf-work-board?date=2026-08-05');
+        const today = await page.evaluate(() => {
+            const date = new Date();
+            return `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()}`;
+        });
+        const dateInput = page.getByRole('textbox', { name: 'Дата CNC-работ' });
+        await expect(dateInput).toHaveValue(today, { timeout: 60_000 });
+        const viewport = page.locator('#status-board-viewport');
+        await expect(viewport).toHaveAttribute('aria-busy', 'false', { timeout: 60_000 });
+        const cards = page.locator('[data-status-board-column-key="parsed"] .status-board-column__cards > .cnc-deferred-card');
+        await expect(cards).toHaveCount(30);
+
+        // A user-selected date must survive ordinary active-board renders.
+        await page.getByRole('button', { name: 'Предыдущий день', exact: true }).click();
+        await expect(dateInput).not.toHaveValue(today);
+        await expect(viewport).toHaveAttribute('aria-busy', 'false');
+        await cards.nth(18).scrollIntoViewIfNeeded();
+        const maximumScroll = () => viewport.evaluate((element) => Math.max(
+            element.scrollTop,
+            ...Array.from(element.querySelectorAll('.status-board-column__cards'), (list) => list.scrollTop),
+        ));
+        await expect.poll(maximumScroll).toBeGreaterThan(100);
+        await page.waitForTimeout(1_500);
+        await expect(dateInput).not.toHaveValue(today);
+        await expect.poll(maximumScroll).toBeGreaterThan(100);
+
+        await page.getByRole('menuitem', { name: /Заказы/ }).first().click();
+        await expect(page).toHaveURL(/\/orders/);
+        await page.getByRole('tab', { name: 'МДФ-работы', exact: true }).click();
+        await expect(page).toHaveURL(/\/mdf-work-board/);
+        await expect.soft(dateInput).toHaveValue(today);
+        await expect(viewport).toHaveAttribute('aria-busy', 'false');
+        await expect(cards).toHaveCount(30);
+        await expect.poll(maximumScroll).toBe(0);
+    });
+
+    test('preserves the date and focus of an explicit MDF historical card link', async ({ page }) => {
+        const db = createWorkflowMockDb();
+        seedTabletData(db);
+        await setupBoardTabletMocks(page, db);
+        await setupMdfOverflowPreviewMocks(page, true);
+        await page.goto('/mdf-work-board?date=2026-08-05&cardKind=packet&cardId=e2e-overflow-packet-0');
+        await expect(page.getByRole('textbox', { name: 'Дата CNC-работ' })).toHaveValue('05.08.2026', { timeout: 60_000 });
+        await expect(page.locator('#status-board-viewport')).toHaveAttribute('aria-busy', 'false');
+        const target = page.locator('[data-cnc-card-kind="packet"][data-cnc-card-id="e2e-overflow-packet-0"]');
+        await expect(target).toHaveClass(/cnc-board-card-shell--deep-linked/);
+        await expect(target).toBeFocused();
+        await expect(page).toHaveURL(/date=2026-08-05/);
+    });
+
     test('opens MDF machine-file preview without truncating after display-mode changes', async ({ page }) => {
         const db = createWorkflowMockDb();
         seedTabletData(db);

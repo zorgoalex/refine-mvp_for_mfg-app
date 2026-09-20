@@ -230,6 +230,10 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page.indexOf('deepLinkFocusAppliedRef.current = key;')).toBeLessThan(page.indexOf('target.focus({ preventScroll: true });'));
     expect(page).toContain('updateViewState({ cncWorkday: todayCncWorkday, cncOrderFilters: [] });');
     expect(page).toContain('if (mdfWorkdayTodayOpenPatchNeeded) return;');
+    expect(page).toMatch(/if \(!active\) \{\s*mdfWorkdayOpenSyncedRef.current = false;\s*mdfOpeningScrollPendingRef.current = true;/);
+    expect(page).toContain('if (mdfWorkdayTodayOpenPatchNeeded || loading) return;');
+    expect(page).toContain("scrollStatusBoardColumnCardsToTop(boardViewportRef.current, 'auto');");
+    expect(page).toMatch(/if \(hasExplicitMdfCardDeepLink\) \{\s*mdfOpeningScrollPendingRef.current = false;\s*return;/);
     expect(page).toContain('<OrderStatusBoardPage');
     expect(page).toContain('active={active}');
     expect(page).toContain('eagerFirstViewport');
@@ -425,9 +429,10 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("viewport.closest<HTMLElement>('.status-board-page')");
     expect(page).toContain("block: 'start'");
     expect(page).toContain("inline: 'nearest'");
-    expect(page).toContain("viewport.scrollTo({ top: 0, behavior: 'smooth' })");
+    expect(page).toContain("behavior: ScrollBehavior = 'smooth'");
+    expect(page).toContain('viewport.scrollTo({ top: 0, behavior })');
     expect(page).toContain("querySelectorAll<HTMLElement>('.status-board-column__cards')");
-    expect(page).toContain("cardList.scrollTo({ top: 0, behavior: 'smooth' })");
+    expect(page).toContain('cardList.scrollTo({ top: 0, behavior })');
     expect(page).toContain("activeCncRelation.kind === 'order'");
     expect(page).toContain('const sortedOrderCards = deferOverflowCards');
     expect(page).toContain('scrollStatusBoardColumnCardsToTop(boardViewportRef.current)');
