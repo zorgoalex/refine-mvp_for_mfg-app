@@ -31,7 +31,7 @@ import { OrderSaveValidationContext } from '../../../hooks/orderSaveValidation';
 import { useOrderExport } from '../../../hooks/useOrderExport';
 import { useIsMobile } from '../../../hooks/useDeviceTier';
 import { projectsApi, type ProjectDto } from '../../../api/projectsApi';
-import { OrderDetail, OrderFormMode, type Payment } from '../../../types/orders';
+import { OrderDetail, OrderFormMode, type Order, type OrderDowelingLink, type Payment } from '../../../types/orders';
 import { orderFormSchema } from '../../../schemas/orderSchema';
 import { featureFlags } from '../../../config/featureFlags';
 import { OrderCatalogLinesTable } from './OrderCatalogLinesTable';
@@ -129,6 +129,10 @@ const INITIAL_ORDER_DETAIL_DEFAULTS: Omit<OrderDetail, 'temp_id'> = {
   edge_type_id: 1,
   priority: 100,
 };
+
+interface LoadedFormOrder extends Order {
+  order_doweling_links?: OrderDowelingLink[] | null;
+}
 
 interface OrderFormProps {
   mode: OrderFormMode;
@@ -688,7 +692,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   // Load existing order data in edit mode
   // Use relationship to load doweling links via order_doweling_links (many-to-many)
   const shouldLoadOrder = mode === 'edit' && !!orderId && !useBackendOrderRead;
-  const { data: orderData, isLoading: orderLoading, isFetching: orderFetching } = useOne({
+  const { data: orderData, isLoading: orderLoading, isFetching: orderFetching } = useOne<LoadedFormOrder>({
     resource: orderEditLegacyPrimaryIdentity.resource,
     id: orderEditLegacyPrimaryIdentity.orderId,
     queryOptions: {
@@ -1601,7 +1605,6 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
               order_id: savedOrderId,
               order_name: formValues.header.order_name,
               order_date: formValues.header.order_date,
-              client: formValues.header.client,
             }, owner),
           )
           .then(() => {

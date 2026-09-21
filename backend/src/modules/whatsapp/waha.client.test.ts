@@ -36,6 +36,29 @@ describe("WahaClient", () => {
     }));
   });
 
+  it("uses the WAHA 2026 session routes for capping and timelock", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}", {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new WahaClient({ getConfig: () => config } as WhatsAppRuntimeConfigService);
+
+    await client.capping();
+    await client.timelock();
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://waha:3000/api/sessions/erp/capping",
+      expect.any(Object),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://waha:3000/api/sessions/erp/timelock",
+      expect.any(Object),
+    );
+  });
+
   it("does not leak provider response details through errors", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("secret provider body", { status: 500 })));
     const client = new WahaClient({ getConfig: () => config } as WhatsAppRuntimeConfigService);

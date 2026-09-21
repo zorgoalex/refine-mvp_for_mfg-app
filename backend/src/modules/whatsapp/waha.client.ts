@@ -28,10 +28,10 @@ export class WahaClient {
     return this.request(`/api/sessions/${this.sessionPath()}/me`);
   }
   capping() {
-    return this.request(`/api/${this.sessionPath()}/message-capping`);
+    return this.request(`/api/sessions/${this.sessionPath()}/capping`);
   }
   timelock() {
-    return this.request(`/api/${this.sessionPath()}/presence/timelock`);
+    return this.request(`/api/sessions/${this.sessionPath()}/timelock`);
   }
   restart() {
     return this.request(`/api/sessions/${this.sessionPath()}/restart`, {

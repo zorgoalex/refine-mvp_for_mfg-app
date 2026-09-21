@@ -74,12 +74,15 @@ export function prepareMdfShadowCommand(input: MdfBoardEventInput, command: MdfS
   const intent = normalizeMdfShadowCommand(input.source, command);
   const prepared = prepareMdfShadow(rows.map(row => ({ ...row, cut: false, laminated: false })));
   // Ignore mutable visual/status/timestamp fields, not identity, quantity or eligibility.
-  const composition = rows.map(row => [row.line_key, row.order_id, row.detail_id, row.quantity,
-    row.relevant, row.rework, row.unresolved, row.whole_order]).map(row => JSON.stringify(row)).sort();
-  return { ...prepared, command: intent, compositionDigest: digest(composition),
+  return { ...prepared, command: intent, compositionDigest: mdfShadowCompositionDigest(rows),
     sourceDigest: digest(rows), // Comparison's raw snapshot digest, NOT command envelope.
     receiptDigest: digest([input.source, input.actor.id, input.requestId, input.sourceIdempotencyKey, intent, rows]),
     issues: [...prepared.issues, 'EXPLICIT_COMMAND_UNVERIFIED'].sort() };
+}
+
+export function mdfShadowCompositionDigest(rows: readonly MdfShadowRow[]): string {
+  return digest(rows.map(row => [row.line_key, row.order_id, row.detail_id, row.quantity,
+    row.relevant, row.rework, row.unresolved, row.whole_order]).map(row => JSON.stringify(row)).sort());
 }
 
 function cloneInput(input: MdfBoardEventInput): MdfBoardEventInput {

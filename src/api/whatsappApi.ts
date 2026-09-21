@@ -1,5 +1,5 @@
 import { apiRoutes } from "./apiRoutes";
-import { httpClient } from "./httpClient";
+import { httpClient, type RequestOptions } from "./httpClient";
 import type {
   WhatsAppAuditDto,
   WhatsAppDeliveryJobDto,
@@ -48,8 +48,11 @@ export const whatsappApi = {
     ),
   processNow: () => httpClient.post(apiRoutes.whatsapp.processNow, {}),
   audit: () => httpClient.get<WhatsAppAuditDto[]>(apiRoutes.whatsapp.audit),
-  technicalLogs: (query: WhatsAppTechnicalLogQuery = {}) =>
-    httpClient.get<WhatsAppTechnicalLogResponse>(withQuery(apiRoutes.whatsapp.technicalLogs, query)),
+  technicalLogs: (query: WhatsAppTechnicalLogQuery = {}, options?: RequestOptions) =>
+    httpClient.get<WhatsAppTechnicalLogResponse>(
+      withQuery(apiRoutes.whatsapp.technicalLogs, query),
+      options,
+    ),
   exportTechnicalLogs: (query: WhatsAppTechnicalLogQuery = {}) =>
     httpClient.download(withQuery(apiRoutes.whatsapp.technicalLogsExport, query)),
 };

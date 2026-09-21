@@ -126,6 +126,76 @@ describe("WhatsApp webhook boundary", () => {
     ).toThrow(/session/i);
   });
 
+  it("accepts GOWS LID chats and normalizes internal WhatsApp user IDs", () => {
+    const payload = {
+      event: "message",
+      session: "default",
+      payload: {
+        id: "message-1",
+        body: "цена",
+        fromMe: false,
+        hasMedia: false,
+      },
+    };
+
+    expect(parseInbound({
+      ...payload,
+      payload: { ...payload.payload, from: "123456789@lid" },
+    }, "default", "request-lid")).toMatchObject({
+      kind: "message",
+      message: { chatId: "123456789@lid" },
+    });
+    expect(parseInbound({
+      ...payload,
+      payload: { ...payload.payload, from: "77001234567@s.whatsapp.net" },
+    }, "default", "request-internal")).toMatchObject({
+      kind: "message",
+      message: { chatId: "77001234567@c.us" },
+    });
+  });
+
+  it("records ignored webhooks in the redacted technical journal", async () => {
+    const secret = "s".repeat(32);
+    const body = Buffer.from(JSON.stringify({
+      event: "message",
+      session: "default",
+      payload: {
+        id: "private-message-id",
+        from: "private-group@g.us",
+        body: "private body",
+        fromMe: false,
+        hasMedia: false,
+      },
+    }));
+    const signature = createHmac("sha512", secret).update(body).digest("hex");
+    const record = vi.fn().mockResolvedValue(undefined);
+    const query = vi.fn().mockResolvedValue({ rows: [{ audit_id: "audit-1" }] });
+    const service = new WhatsAppService(
+      { getConfig: () => ({ enabled: true, webhookSecret: secret, sessionName: "default" }) } as never,
+      {} as never,
+      {} as never,
+      { query } as never,
+      { record } as never,
+    );
+
+    await expect(service.webhook(
+      body,
+      signature,
+      "sha512",
+      String(Date.now()),
+      "request-ignored",
+    )).resolves.toEqual({ accepted: true, result: "ignored" });
+
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({
+      component: "webhook",
+      eventCode: "whatsapp.webhook.ignored",
+      details: { reason: "non_direct_chat" },
+    }));
+    expect(JSON.stringify(record.mock.calls)).not.toContain("private-message-id");
+    expect(JSON.stringify(record.mock.calls)).not.toContain("private-group");
+    expect(JSON.stringify(record.mock.calls)).not.toContain("private body");
+  });
+
   it("rejects media captions, edits, reactions, and locations", () => {
     const base = {
       id: "false_77001234567@c.us_ABC",

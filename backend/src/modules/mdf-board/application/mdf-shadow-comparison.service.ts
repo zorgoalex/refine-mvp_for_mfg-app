@@ -2,13 +2,13 @@ import { Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common'
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import { DatabaseService } from '../../../database/database.service';
 import { loadMdfComparisonSnapshot, ShadowScopeError } from '../adapters/mdf-comparison-snapshot';
-import { compareMdfShadow, MDF_COMPARISON_VERSION } from '../domain/mdf-shadow-comparison';
+import { compareMdfShadow, MDF_COMPARISON_VERSION, MDF_CANDIDATE_SEMANTICS } from '../domain/mdf-shadow-comparison';
 
 type Observation = { source_kind: 'packet' | 'bath' | 'bazisCutSet'; source_id: string; revision_key: string; source_digest: string; attempts: number };
 const identity = (o: Observation) => [o.source_kind, o.source_id, o.revision_key, MDF_COMPARISON_VERSION];
 const failure = (code: string) => ({ algorithmVersion: MDF_COMPARISON_VERSION, surface: 'legacy-server-return-model',
   semantics: 'current-state-not-event-replay', cutoverReady: false, status: 'blocked',
-  candidateSemantics: 'observed-cnc-facts-only',
+  candidateSemantics: MDF_CANDIDATE_SEMANTICS,
   issues: [code, 'BASELINE_NOT_VERIFIED', 'INCOMPLETE_PRODUCER_COVERAGE'], differenceCount: 0,
   comparableDifferenceCount: 0, unverifiedDifferenceCount: 0 });
 
