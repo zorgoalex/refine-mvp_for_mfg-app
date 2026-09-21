@@ -38,6 +38,7 @@ import { VlmConfigTab } from './VlmConfigTab';
 import { ProductionWorkflowTab } from './components/ProductionWorkflowTab';
 import { DeadlineTransitionRulesConfig } from './components/DeadlineTransitionRulesConfig';
 import { StatusAutomationConfig } from './components/StatusAutomationConfig';
+import { MessageProcessingConfig } from './components/MessageProcessingConfig';
 import { NotificationRulesConfig } from './components/NotificationRulesConfig';
 import { OrgStructureConfig } from './components/OrgStructureConfig';
 import { CutConfigTab } from './components/CutConfigTab';
@@ -86,8 +87,10 @@ export const filterConfigurationTabItems = <T extends { key: string }>(
   generalSettingsVisible: boolean,
   deadlineSettingsVisible: boolean,
   whatsappSettingsVisible = false,
+  messageProcessingVisible = false,
 ): T[] =>
   items.filter((item) => {
+    if (item.key === 'message-processing') return messageProcessingVisible;
     if (item.key === 'whatsapp-connection' || item.key === 'whatsapp-automation' || item.key === 'whatsapp-technical-logs') {
       return whatsappSettingsVisible;
     }
@@ -590,6 +593,7 @@ export const ConfigurationPage: React.FC = () => {
     (!featureFlags.useBackendPermissions || can('whatsapp.view') || can('whatsapp.manage'));
 
   const allTabItems = [
+    ...(can('message_signals.manage_config') ? [{ key: 'message-processing', label: 'Обработка сообщений', children: <MessageProcessingConfig /> }] : []),
     ...(whatsappSettingsVisible
       ? [
           {
@@ -779,6 +783,7 @@ export const ConfigurationPage: React.FC = () => {
     generalSettingsVisible,
     deadlineSettingsVisible,
     whatsappSettingsVisible,
+    can('message_signals.manage_config'),
   );
 
   const availableTabKeys = tabItems.map((item) => item.key);

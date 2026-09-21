@@ -133,7 +133,12 @@ describe('StatusAutomationRulesService', () => {
     const { service } = buildService();
     const catalog = await service.listEventTypes(user(['status_automation.view']), 'req-event-types');
 
-    expect(catalog).toHaveLength(12);
+    expect(catalog).toHaveLength(13);
+    expect(catalog).toContainEqual(expect.objectContaining({
+      eventType: 'message.signal_detected',
+      group: 'messages',
+      allowedConditions: expect.arrayContaining(['signalCodeIn']),
+    }));
     expect(catalog).toContainEqual({
       eventType: 'payment.created',
       title: 'Платёж создан',

@@ -8,6 +8,15 @@ const config = readFileSync(
 const settings = readFileSync('src/hooks/useAppSettings.ts', 'utf8');
 
 describe('StatusAutomationConfig CNC cut-status setting guards', () => {
+  it('uses the signal catalog selector and explains order source independently of message channel', () => {
+    expect(config).toContain('<IncomingSignalSelect');
+    expect(config).toContain("signalCodeIn: 'Входящий сигнал — один из'");
+    expect(config).toContain('Это не группа WhatsApp и не канал сообщения.');
+    expect(config).toContain('Можно выбрать несколько значений — достаточно совпадения с любым из них.');
+    expect(config).toContain('Лишние значения убираются крестиком рядом с названием.');
+    expect(config).toContain('Если подходят все заказы, удалите это условие целиком.');
+    expect(config).not.toContain('Коды из «Обработки сообщений», например goods.ready');
+  });
   it('stores a dedicated disabled-by-default app setting for completed machine files', () => {
     expect(settings).toContain(
       "STATUS_AUTOMATION_CNC_MARK_CUT_DETAILS: 'status_automation.cnc_mark_cut_details'",

@@ -211,6 +211,7 @@ const PaymentsAnalyticsList = lazy(async () => ({ default: (await import("./page
 const PaymentsAnalyticsShow = lazy(async () => ({ default: (await import("./pages/payments_analytics")).PaymentsAnalyticsShow }));
 
 const AuditList = lazy(async () => ({ default: (await import("./pages/audit/list")).AuditList }));
+const InboundSignalsList = lazy(async () => ({ default: (await import("./pages/inbound-signals/list")).InboundSignalsList }));
 
 const SheetMaterialList = lazy(async () => ({ default: (await import('./pages/sheet-materials/list')).SheetMaterialList }));
 const SheetMaterialCreate = lazy(async () => ({ default: (await import('./pages/sheet-materials/create')).SheetMaterialCreate }));
@@ -748,6 +749,7 @@ const ThemedApp = () => {
                   list: "/audit",
                   meta: { label: "Журналы" },
                 },
+                { name: "inbound-signals", list: "/inbound-signals", meta: { label: "Входящие сигналы" } },
               ]}
               options={{
                 syncWithLocation: true,
@@ -1025,6 +1027,7 @@ const ThemedApp = () => {
                   </Route>
                   <Route path="/configuration" element={<ConfigurationPage />} />
                   <Route path="/profile" element={<ProfilePage />} />
+                  <Route path="/inbound-signals" element={<InboundSignalsList />} />
                   <Route path="/audit">
                     <Route index element={<AuditList />} />
                   </Route>

@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
+import { InboundSignalsService } from '../inbound-signals/inbound-signals.service';
 import { auditService } from "../../common/audit/audit.service";
 import { ApiError } from "../../common/errors/api-error";
 import { DatabaseService } from "../../database/database.service";
@@ -25,7 +26,8 @@ export class WhatsAppService {
     @Inject(WahaClient) private readonly client: WahaClient,
     @Inject(DatabaseService) private readonly database: DatabaseService,
     @Inject(WhatsAppTechnicalLogService)
-    private readonly technicalLog: WhatsAppTechnicalLogService
+    private readonly technicalLog: WhatsAppTechnicalLogService,
+    @Optional() @Inject(InboundSignalsService) private readonly inboundSignals?: InboundSignalsService
   ) {}
 
   async status() {
@@ -271,6 +273,9 @@ export class WhatsAppService {
         "WHATSAPP_WEBHOOK_INVALID_JSON",
         "Invalid webhook JSON"
       );
+    }
+    if (await this.inboundSignals?.acceptWaha(body, config.sessionName, requestId)) {
+      return { accepted: true, result: 'group_received' };
     }
     let parsed: ReturnType<typeof parseInbound>;
     try {

@@ -2101,6 +2101,20 @@ probe_file() {
       "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=to_regclass('public.mdf_shadow_comparison_attempts') AND indexrelid::regclass::text=ANY(string_to_array('mdf_shadow_comparison_attempts_pkey',',')) AND (NOT indisvalid OR NOT indisready));" \
       "$(q_trg_def_on mdf_shadow_comparison_immutable mdf_shadow_comparisons 'CREATE TRIGGER mdf_shadow_comparison_immutable BEFORE DELETE OR UPDATE ON public.mdf_shadow_comparisons FOR EACH ROW EXECUTE FUNCTION mdf_reject_evidence_change()')" \
       "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.mdf_shadow_comparisons') AND tgname='mdf_shadow_comparison_immutable' AND tgenabled='O' AND NOT tgisinternal);" ;;
+    173_inbound_signals*) probe_all \
+                     "$(q_tbl message_processing_configuration)" \
+                     "$(q_tbl inbound_message_receipts)" \
+                     "$(q_tbl inbound_messages)" \
+                     "$(q_tbl inbound_signal_occurrences)" \
+                     "$(q_tbl inbound_signal_steps)" \
+                     "$(q_tbl inbound_signal_commands)" \
+                     "$(q_col inbound_signal_occurrences execution_guard)" \
+                     "$(q_col inbound_signal_occurrences lock_token)" \
+                     "$(q_con_on inbound_signal_occurrences inbound_signal_occurrences_state_check)" \
+                     "$(q_con_on inbound_signal_occurrences inbound_signal_occurrences_message_id_signal_code_key)" \
+                     "$(q_idx inbound_messages_expiry_idx)" \
+                     "$(q_idx inbound_signals_queue_idx)" \
+                     "SELECT count(*)=4 FROM permissions_catalog WHERE permission_name IN ('message_signals.view','message_signals.resolve','message_signals.technical','message_signals.manage_config');" ;;
     171_mdf_shadow_commands*) probe_all \
                      "$(q_tbl mdf_shadow_commands)" \
                      "$(q_col mdf_shadow_commands observation_id)" \
@@ -2146,6 +2160,9 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
+    173_inbound_signals*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
     151_*|152_*|156_*|157_*|160_*|161_*|162_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;

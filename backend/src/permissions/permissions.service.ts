@@ -63,6 +63,8 @@ const DANGEROUS_PERMISSIONS = new Set<PermissionName>([
   'bitrix24.payments.confirm_overpayment',
   'settings.manage',
   'whatsapp.manage',
+  'message_signals.resolve',
+  'message_signals.manage_config',
   'audit.technical.view',
 ]);
 
@@ -474,6 +476,8 @@ export class PermissionsService {
       permission,
       domain: permissionDomain(permission),
       label: ({ 'cad.view': 'CAD: просмотр', 'cad.edit': 'CAD: работа с деталями', 'cad.export': 'CAD: скачивание файлов',
+        'message_signals.view': 'Входящие сигналы: просмотр', 'message_signals.resolve': 'Входящие сигналы: разбор',
+        'message_signals.technical': 'Входящие сигналы: диагностика', 'message_signals.manage_config': 'Обработка сообщений: настройка',
         'cad.technology': 'CAD: технологические настройки', 'cad.approve': 'CAD: одобрение исключений' } as Partial<Record<PermissionName, string>>)[permission] ?? permission,
       description: null as string | null,
       sortOrder: index + 1,

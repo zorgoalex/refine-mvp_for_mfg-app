@@ -249,6 +249,7 @@ export const envSchema = z
     BACKEND_ENABLE_CNC_TELEGRAM: booleanFromEnv.default(false),
     BACKEND_MDF_SHADOW_INTAKE: booleanFromEnv.default(false),
     BACKEND_MDF_SHADOW_COMPARE: booleanFromEnv.default(false),
+    BACKEND_MDF_PINNED_DISPATCH: booleanFromEnv.default(false),
     // Phase A safety gate: legacy background Telegram ingest is fail-closed.
     // The break-glass path remains unavailable until Phase B persists an
     // approved bounded scan artifact.
@@ -395,6 +396,8 @@ export const envSchema = z
       .union([z.string().min(32).max(256), emptyTrimmedStringFromEnv])
       .optional(),
     WAHA_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(30000).default(10000),
+    BACKEND_ENABLE_INBOUND_SIGNALS: booleanFromEnv.default(false),
+    BACKEND_INBOUND_SIGNALS_RELAY_OWNER: z.enum(['none', 'in_process']).default('none'),
     BACKEND_WHATSAPP_RELAY_OWNER: z.enum(['none', 'in_process', 'external']).default('none'),
     BACKEND_WHATSAPP_RELAY_POLL_INTERVAL_MS: z.coerce
       .number()
@@ -699,6 +702,9 @@ export const envSchema = z
       });
     }
 
+    if (env.BACKEND_INBOUND_SIGNALS_RELAY_OWNER !== 'none' && !env.BACKEND_ENABLE_INBOUND_SIGNALS) {
+      ctx.addIssue({ code: 'custom', message: 'BACKEND_ENABLE_INBOUND_SIGNALS=true is required when signal processing is enabled', path: ['BACKEND_ENABLE_INBOUND_SIGNALS'] });
+    }
     if (env.BACKEND_ENABLE_WHATSAPP) {
       for (const key of [
         'DATABASE_URL',

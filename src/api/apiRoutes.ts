@@ -342,6 +342,15 @@ export const apiRoutes = {
     eventTypes: backendApiPath('/status-automation/event-types'),
     refreshRecentOrders: backendApiPath('/status-automation/refresh-recent-orders'),
   },
+  inboundSignals: {
+    signalOptions: backendApiPath('/message-processing/signals'),
+    list: backendApiPath('/inbound-signals'),
+    detail: (id: string) => backendApiPath(`/inbound-signals/${encodeURIComponent(id)}`),
+    command: (id: string, action: 'resolve-preview' | 'resolve' | 'dismiss' | 'retry') => backendApiPath(`/inbound-signals/${encodeURIComponent(id)}/${action}`),
+    orders: backendApiPath('/inbound-signals/order-options'),
+    configuration: backendApiPath('/message-processing/configuration'),
+    test: backendApiPath('/message-processing/test'),
+  },
   whatsapp: {
     status: backendApiPath('/whatsapp/status'),
     qr: backendApiPath('/whatsapp/qr'),

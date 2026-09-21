@@ -6,8 +6,10 @@ import { Pool, type PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { TransactionClient } from '../../../database/database.types';
 import * as sourceRuntime from './status-automation-runtime';
+import { loadRulesForPinnedExecution } from '../adapters/pg-status-automation-repository';
+import type { PinnedMdfAutomationInput } from './mdf-pinned-batch';
 
-const { evaluateProductionCompositionAutomation }: typeof sourceRuntime = process.env.PRODUCTION_SUMMARY_TEST_USE_DIST === 'true'
+const { evaluateProductionCompositionAutomation, executePinnedMdfAutomation }: typeof sourceRuntime = process.env.PRODUCTION_SUMMARY_TEST_USE_DIST === 'true'
   ? createRequire(import.meta.url)('../../../../dist/modules/status-automation/application/status-automation-runtime.js')
   : sourceRuntime;
 
@@ -27,7 +29,7 @@ suite('production composition automation — real PostgreSQL', () => {
     const network = Object.values(container.NetworkSettings.Networks)[0] as { IPAddress: string };
     pool = new Pool({ host: network.IPAddress, port: 5432, database: 'erpdb',
       user: env.POSTGRES_USER ?? 'postgres', password: env.POSTGRES_PASSWORD,
-      max: 1, connectionTimeoutMillis: 5000, statement_timeout: 8000 });
+      max: 2, connectionTimeoutMillis: 5000, statement_timeout: 8000 });
     vi.stubEnv('BACKEND_STATUS_AUTOMATION', 'true');
   });
   afterAll(async () => { vi.unstubAllEnvs(); await pool?.end(); });
@@ -54,6 +56,7 @@ suite('production composition automation — real PostgreSQL', () => {
         CREATE TABLE order_import_entity_map (local_order_id bigint);
         CREATE TABLE status_automation_rules (LIKE public.status_automation_rules INCLUDING ALL);
         CREATE TABLE audit_log (LIKE public.audit_log INCLUDING ALL);
+        CREATE TABLE audit_log_related_entity (LIKE public.audit_log_related_entity INCLUDING ALL);
         CREATE TABLE outbox_events (LIKE public.outbox_events INCLUDING ALL);
         CREATE VIEW orders_view AS SELECT order_id, order_name FROM orders;
         INSERT INTO orders (order_id,order_name) VALUES (1,'E2E-Тест состав');
@@ -79,6 +82,101 @@ suite('production composition automation — real PostgreSQL', () => {
   }
   const input = () => ({ orderId: 1, actor: { id: '1', username: 'e2e-composition', role: 'admin', roleId: 1 },
     requestId: randomUUID(), sourceIdempotencyKey: randomUUID() });
+
+  const pinnedInput = (downstream = false): PinnedMdfAutomationInput => ({
+    ...input(), actor: { ...input().actor, role: 'admin', permissions: [] },
+    pins: [{ ruleId: 910003, version: 1 }, ...(downstream ? [{ ruleId: 910001, version: 1 }] : [])],
+    events: [{ eventType: 'mdf.board.completed', orderId: 1, scope: {
+      source: { kind: 'packet', id: '11111111-1111-1111-1111-111111111111' },
+      details: [{ detailId: 12, requiredQuantity: 10, eligibleQuantity: 10 }],
+    } }],
+  });
+  const addMdfRule = (client: PoolClient) => client.query(`INSERT INTO status_automation_rules
+    (id,name,event_type,action_type,target_status_id,conditions_json,priority,is_enabled,version)
+    OVERRIDING SYSTEM VALUE VALUES (910003,'E2E-Тест MDF pinned','mdf.board.completed',
+    'change_details_production_status',7,'{}',10,true,1)`);
+
+  it('pinned MDF changes only its own eligible detail; later and partial positions survive', async () => fixture(async (client, tx) => {
+    await addMdfRule(client);
+    await client.query(`UPDATE order_details SET production_status_id=22 WHERE detail_id=11;
+      INSERT INTO order_details VALUES (13,1,NULL,false,now()),(14,1,NULL,false,now())`);
+    const batch = pinnedInput(true);
+    batch.events[0].scope.details.push({ detailId: 11, requiredQuantity: 1, eligibleQuantity: 1 },
+      { detailId: 13, requiredQuantity: 10, eligibleQuantity: 9 });
+    await executePinnedMdfAutomation(tx, batch);
+    expect((await client.query('SELECT detail_id,production_status_id FROM order_details ORDER BY detail_id')).rows)
+      .toEqual([{ detail_id: '11', production_status_id: 22 }, { detail_id: '12', production_status_id: 7 },
+        { detail_id: '13', production_status_id: null }, { detail_id: '14', production_status_id: null }]);
+    expect((await client.query('SELECT order_status_id FROM orders')).rows[0].order_status_id).toBe(4);
+    const audit = (await client.query("SELECT metadata_json FROM audit_log WHERE event='orders.detail_production_status_batch_change'")).rows[0];
+    expect(audit.metadata_json.changedDetailIds).toEqual([12]);
+    expect((await client.query('SELECT payload_json FROM outbox_events')).rows)
+      .toEqual([expect.objectContaining({ payload_json: expect.objectContaining({ changedDetailIds: [12], actorUserId: '1' }) })]);
+    expect((await client.query('SELECT production_status_id FROM order_hdf_details')).rows[0].production_status_id).toBeNull();
+  }));
+
+  it.each([false, true])('real nested composition honors pins (downstream=%s)', async downstream => fixture(async (client, tx) => {
+    await addMdfRule(client);
+    await executePinnedMdfAutomation(tx, pinnedInput(downstream));
+    expect((await client.query('SELECT order_status_id FROM orders')).rows[0].order_status_id).toBe(downstream ? 6 : 4);
+    expect((await client.query('SELECT production_status_id FROM order_details ORDER BY detail_id')).rows.map(r => r.production_status_id)).toEqual([7, 7]);
+    expect((await client.query('SELECT count(*)::int AS n FROM outbox_events')).rows[0].n).toBe(downstream ? 2 : 1);
+    expect((await client.query("SELECT entity_id FROM audit_log WHERE event='status_automation.rule_applied' ORDER BY entity_id")).rows)
+      .toEqual((downstream ? ['910001', '910003'] : ['910003']).map(entity_id => ({ entity_id })));
+  }));
+
+  it('savepoint rollback restores DB effects and allows the same batch to execute again', async () => fixture(async (client, tx) => {
+    await addMdfRule(client); const batch = pinnedInput(true);
+    await client.query('SAVEPOINT e2e_pinned');
+    await executePinnedMdfAutomation(tx, batch);
+    await client.query('ROLLBACK TO SAVEPOINT e2e_pinned');
+    expect((await client.query('SELECT count(*)::int AS n FROM audit_log')).rows[0].n).toBe(0);
+    expect((await client.query('SELECT count(*)::int AS n FROM outbox_events')).rows[0].n).toBe(0);
+    expect((await client.query('SELECT production_status_id FROM order_details WHERE detail_id=12')).rows[0].production_status_id).toBeNull();
+    await executePinnedMdfAutomation(tx, batch);
+    expect((await client.query('SELECT order_status_id FROM orders')).rows[0].order_status_id).toBe(6);
+    expect((await client.query('SELECT count(*)::int AS n FROM outbox_events')).rows[0].n).toBe(2);
+    await executePinnedMdfAutomation(tx, batch);
+    expect((await client.query('SELECT count(*)::int AS n FROM outbox_events')).rows[0].n).toBe(2);
+  }));
+
+  it.each(['changed', 'disabled', 'missing'])('persists %s pin skip, without detail or outbox writes', async cause => fixture(async (client, tx) => {
+    await addMdfRule(client);
+    if (cause === 'changed') await client.query('UPDATE status_automation_rules SET version=2 WHERE id=910003');
+    if (cause === 'disabled') await client.query('UPDATE status_automation_rules SET is_enabled=false WHERE id=910003');
+    if (cause === 'missing') await client.query('DELETE FROM status_automation_rules WHERE id=910003');
+    await executePinnedMdfAutomation(tx, pinnedInput());
+    expect((await client.query('SELECT production_status_id FROM order_details WHERE detail_id=12')).rows[0].production_status_id).toBeNull();
+    const audit = (await client.query("SELECT entity_id,user_id,metadata_json FROM audit_log WHERE event='status_automation.rule_skipped'")).rows[0];
+    expect(audit).toMatchObject({ entity_id: '910003', user_id: '1', metadata_json: {
+      reason: `pinned_rule_${cause === 'changed' ? 'version_changed' : cause}`, expectedRuleVersion: 1,
+    } });
+    expect((await client.query('SELECT count(*)::int AS n FROM audit_log_related_entity')).rows[0].n).toBe(1);
+    expect((await client.query('SELECT count(*)::int AS n FROM outbox_events')).rows[0].n).toBe(0);
+  }));
+
+  it('locks pinned definitions against edits until transaction end', async () => {
+    const client = await pool.connect(), other = await pool.connect();
+    const schema = `e2e_mdf_pins_lock_${randomUUID().replaceAll('-', '')}`;
+    try {
+      await client.query(`CREATE SCHEMA ${schema}; SET search_path TO ${schema},public;
+        CREATE TABLE status_automation_rules (LIKE public.status_automation_rules INCLUDING ALL)`);
+      await addMdfRule(client);
+      await client.query('BEGIN');
+      const tx = { raw: client, query: (sql: string, params: readonly unknown[] = []) => client.query(sql, [...params]) } as TransactionClient;
+      expect((await loadRulesForPinnedExecution(tx, [910003]))[0].version).toBe(1);
+      await other.query(`SET search_path TO ${schema},public; SET lock_timeout='100ms'`);
+      await expect(other.query('UPDATE status_automation_rules SET version=2 WHERE id=910003')).rejects.toMatchObject({ code: '55P03' });
+      await client.query('COMMIT');
+      await other.query('UPDATE status_automation_rules SET version=2 WHERE id=910003');
+      expect((await loadRulesForPinnedExecution(tx, [910003]))[0].version).toBe(2);
+    } finally {
+      await client.query(`ROLLBACK; SET search_path TO public; DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      await other.query('RESET search_path; RESET lock_timeout');
+      expect((await client.query('SELECT count(*)::int AS n FROM pg_namespace WHERE nspname=$1', [schema])).rows[0].n).toBe(0);
+      client.release(); other.release();
+    }
+  });
 
   it('rejects one unassigned detail despite a corrupted matching header', async () => fixture(async (client, tx) => {
     await client.query("SET LOCAL session_replication_role=replica; UPDATE orders SET production_status_id=7; SET LOCAL session_replication_role=origin");

@@ -43,6 +43,7 @@ const actionConfigSchema = z
 
 const conditionSchema = z
   .object({
+    signalCodeIn: z.array(z.string().regex(/^[a-z][a-z0-9_.-]{1,63}$/)).min(1).max(200).optional(),
     currentOrderStatusIn: z.array(z.number().int().positive()).optional(),
     currentOrderStatusNotIn: z.array(z.number().int().positive()).optional(),
     previousOrderStatusIn: z.array(z.number().int().positive()).optional(),
@@ -116,7 +117,7 @@ const updateSchema = z
 export interface StatusAutomationEventTypeDto {
   eventType: StatusAutomationEventType;
   title: string;
-  group: 'order' | 'dates' | 'statuses' | 'payments' | 'production';
+  group: 'order' | 'dates' | 'statuses' | 'payments' | 'production' | 'messages';
   description: string;
   allowedConditions: Array<keyof StatusAutomationConditions>;
   allowedActions: StatusAutomationActionType[];
@@ -247,6 +248,7 @@ function validateEventSpecificFields(
 
 function normalizeConditions(value: z.infer<typeof conditionSchema>): StatusAutomationConditions {
   const conditions: StatusAutomationConditions = {};
+  if (value.signalCodeIn?.length) conditions.signalCodeIn = [...new Set(value.signalCodeIn)];
 
   if (value.currentOrderStatusIn !== undefined && value.currentOrderStatusIn.length > 0) {
     conditions.currentOrderStatusIn = value.currentOrderStatusIn;
