@@ -90,7 +90,7 @@ describe('StatusAutomationConfig CNC cut-status setting guards', () => {
     expect(config).toContain('readStatusAutomationRulesImportSource(parsedJson)');
     expect(config).toContain('planStatusAutomationRulesImport(rawRules');
     expect(config).toContain('statusAutomationApi.create(item.rule)');
-    expect(config).toContain('Выгрузить JSON');
+    expect(config).toContain('Выгрузить все правила');
     expect(config).toContain('Загрузить JSON');
     expect(config).toContain('Результат загрузки правил');
     expect(config).toContain('Не удалось загрузить из-за отсутствия или несоответствия элементов');

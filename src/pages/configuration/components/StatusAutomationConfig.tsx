@@ -3,7 +3,7 @@ import { Table } from '../../../ui/tooltipDelay';
 import { DownloadOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
 import { useList } from '@refinedev/core';
 import {
-  Alert, Button, Card, Checkbox, Collapse, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Spin, Switch, Typography, Upload, message } from 'antd';
+  Alert, Button, Card, Checkbox, Collapse, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Spin, Switch, Tabs, Typography, Upload, message } from 'antd';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError } from '../../../api/apiError';
 import { cncTelegramApi } from '../../../api/cncTelegramApi';
@@ -56,6 +56,8 @@ import {
   type StatusAutomationFormValues,
   type StatusAutomationStatusCatalog,
 } from './statusAutomationView';
+
+import { STATUS_AUTOMATION_SECTIONS, statusAutomationSection } from './statusAutomationSections';
 
 const { Text } = Typography;
 
@@ -230,6 +232,7 @@ export function StatusAutomationConfig() {
   const canManage = !featureFlags.useBackendPermissions || can('status_automation.manage');
 
   const [loading, setLoading] = useState(false);
+  const [activeSection, setActiveSection] = useState('mdf-board');
   const [rules, setRules] = useState<StatusAutomationRuleDto[]>([]);
   const [eventTypes, setEventTypes] = useState<StatusAutomationEventTypeDto[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -574,7 +577,7 @@ export function StatusAutomationConfig() {
 
   const openCreate = () => {
     const eventType =
-      eventTypes.find((candidate) => candidate.eventType === 'order.created')?.eventType ??
+      eventTypes.find((candidate) => statusAutomationSection(candidate.eventType, candidate) === activeSection)?.eventType ??
       eventTypes[0]?.eventType ??
       'order.created';
     const descriptor = eventTypeByName.get(eventType);
@@ -674,6 +677,7 @@ export function StatusAutomationConfig() {
         );
         message.success('Правило сохранено');
       }
+      setActiveSection(statusAutomationSection(form.eventType, eventTypeByName.get(form.eventType)));
       closeEditor();
     } catch (error) {
       message.error(
@@ -896,7 +900,16 @@ export function StatusAutomationConfig() {
   const rulesImportDisabled =
     !canManage || loading || catalogsLoading || rulesImporting || eventTypes.length === 0;
 
-  return (
+  const sectionRules = rules.filter((rule) =>
+    statusAutomationSection(rule.eventType, eventTypeByName.get(rule.eventType)) === activeSection,
+  );
+  const eventSections = STATUS_AUTOMATION_SECTIONS.filter(({ key }) =>
+    key === activeSection || !['production', 'other'].includes(key)
+    || eventTypes.some((event) => statusAutomationSection(event.eventType, event) === key)
+    || rules.some((rule) => statusAutomationSection(rule.eventType, eventTypeByName.get(rule.eventType)) === key),
+  );
+
+  const boardSettings = (
     <Space direction="vertical" size={16} style={{ width: '100%', padding: '16px 0' }}>
       <Card size="small" title="Автостатус распила">
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
@@ -1050,6 +1063,11 @@ export function StatusAutomationConfig() {
         </Space>
       </Card>
 
+    </Space>
+  );
+
+  const ruleList = (
+    <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
         <Text strong>Правила автостатусов</Text>
         <Space wrap>
@@ -1058,7 +1076,7 @@ export function StatusAutomationConfig() {
             onClick={handleRulesExport}
             disabled={loading || rules.length === 0}
           >
-            Выгрузить JSON
+            Выгрузить все правила
           </Button>
           {canManage && (
             <Popconfirm
@@ -1093,7 +1111,7 @@ export function StatusAutomationConfig() {
             </Upload>
           )}
           {canManage && (
-            <Button type="primary" onClick={openCreate} disabled={eventTypes.length === 0}>
+            <Button type="primary" onClick={openCreate} disabled={!eventTypes.some((event) => statusAutomationSection(event.eventType, event) === activeSection)}>
               Создать правило
             </Button>
           )}
@@ -1112,17 +1130,17 @@ export function StatusAutomationConfig() {
           description={loadError}
           action={<Button onClick={() => void loadRules()}>Повторить</Button>}
         />
-      ) : rules.length === 0 ? (
+      ) : sectionRules.length === 0 ? (
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={canManage ? 'Правил пока нет' : 'Нет опубликованных правил'}
+          description={canManage ? 'В этом разделе правил пока нет' : 'В этом разделе нет опубликованных правил'}
         />
       ) : (
         <Table<StatusAutomationRuleDto>
           size="small"
           rowKey="id"
           pagination={false}
-          dataSource={rules}
+          dataSource={sectionRules}
           scroll={{ x: 1100 }}
           columns={[
             {
@@ -1198,6 +1216,34 @@ export function StatusAutomationConfig() {
           ]}
         />
       )}
+
+    </Space>
+  );
+
+  return (
+    <div className="status-automation-config">
+      <Tabs
+        className="status-automation-tabs"
+        activeKey={activeSection}
+        onChange={setActiveSection}
+        items={[
+          { key: 'mdf-board', label: 'МДФ-доска', children: boardSettings },
+          ...eventSections.map(({ key, label }) => ({
+            key,
+            label: `${label} (${rules.filter((rule) => statusAutomationSection(rule.eventType, eventTypeByName.get(rule.eventType)) === key).length})`,
+            children: activeSection === key ? ruleList : null,
+          })),
+          {
+            key: 'deadlines', label: 'Дедлайны',
+            children: (
+              <Card size="small" title="Дедлайн-события">
+                <Text type="secondary">исполняются механизмом дедлайнов</Text>
+                <DeadlineTransitionRulesConfig />
+              </Card>
+            ),
+          },
+        ]}
+      />
 
       <Modal
         title={editorTitle}
@@ -1633,10 +1679,6 @@ export function StatusAutomationConfig() {
         )}
       </Modal>
 
-      <Card size="small" title="Дедлайн-события">
-        <Text type="secondary">исполняются механизмом дедлайнов</Text>
-        <DeadlineTransitionRulesConfig />
-      </Card>
-    </Space>
+    </div>
   );
 }
