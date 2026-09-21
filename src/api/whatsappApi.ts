@@ -2,6 +2,7 @@ import { apiRoutes } from "./apiRoutes";
 import { httpClient, type RequestOptions } from "./httpClient";
 import type {
   WhatsAppAuditDto,
+  WhatsAppReplyPreview,
   WhatsAppDeliveryJobDto,
   WhatsAppRuleDto,
   WhatsAppRuleInput,
@@ -13,6 +14,8 @@ import type {
 } from "./types/whatsappApi.types";
 
 export const whatsappApi = {
+  preview: (body: { matchMode: WhatsAppRuleInput['matchMode']; keywords: string[]; body: string; bodyMode: 'text' | 'template'; text: string }) =>
+    httpClient.post<WhatsAppReplyPreview>(apiRoutes.whatsapp.preview, body),
   status: () => httpClient.get<WhatsAppStatusDto>(apiRoutes.whatsapp.status),
   qr: async () => (await httpClient.download(apiRoutes.whatsapp.qr)).blob,
   restart: (restrictionConfirmed: boolean) =>
