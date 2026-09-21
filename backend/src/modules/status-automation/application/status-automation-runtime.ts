@@ -12,11 +12,13 @@ import {
 import { ProductionActionStatusNotFoundError } from '../../production-actions/errors/production-action.errors';
 import { loadMdfBoardEvents } from '../adapters/pg-mdf-board-event-repository';
 import { markMdfShadowSource } from '../../mdf-board/application/mdf-shadow';
-import { isMdfBoardEvent, type MdfBoardDetailScope, type MdfBoardEventInput } from './mdf-board-event.types';
+import { isMdfBoardEvent, type MdfBoardDetailScope, type MdfBoardEventInput, type MdfBoardResolvedEvent } from './mdf-board-event.types';
+import { snapshotPinnedMdfBatch, type PinnedMdfAutomationInput } from './mdf-pinned-batch';
 import {
   listEnabledRulesForEvent,
   listEnabledRulesForManualRefresh,
   loadOrderAutomationState,
+  loadRulesForPinnedExecution,
 } from '../adapters/pg-status-automation-repository';
 import {
   evaluateRuleConditions,
@@ -46,6 +48,56 @@ export interface MdfBoardColumnAutomationInput extends MdfBoardEventInput {
 const mdfScopes = new WeakMap<StatusAutomationEvent, MdfBoardDetailScope>();
 const evaluationStates = new WeakMap<StatusAutomationEvent, OrderAutomationState>();
 const executedRules = new WeakMap<TransactionClient, Set<string>>();
+const pinnedRules = new WeakMap<TransactionClient, readonly StatusAutomationRule[]>();
+
+/** INTERNAL execution primitive, not an API or complete job handler. Caller owns
+ * active-mode cutover lock, durable job claim/pins, verified evidence, actor authorization, demand
+ * fences and sorted owner/source locks BEFORE entering. No receipt acceptance,
+ * legacy evidence inference, publication, job completion or scheduler here.
+ * All synchronous downstream rules use the same pins. Caller must roll back
+ * business effects on any error; in-memory recursion guards are always restored.
+ */
+export async function executePinnedMdfAutomation(tx: TransactionClient, input: PinnedMdfAutomationInput) {
+  if (pinnedRules.has(tx)) throw new Error('MDF_PINNED_EXECUTION_REENTRANT');
+  const batch = snapshotPinnedMdfBatch(input);
+  if (!isStatusAutomationEnabled()) return { status: 'disabled' as const, selectedRuleCount: 0, skippedPins: [] };
+  const previousVisited = executedRules.get(tx);
+  // Install before the first await: concurrent/reentrant use of this same tx
+  // must not fall through to current rules while definitions are loading.
+  pinnedRules.set(tx, []);
+  executedRules.set(tx, new Set());
+  try {
+    const definitions = await loadRulesForPinnedExecution(tx, batch.pins.map(pin => pin.ruleId));
+    const byId = new Map(definitions.map(rule => [rule.id, rule]));
+    const selected: StatusAutomationRule[] = [];
+    const skippedPins: Array<{ ruleId: number; version: number; reason: string }> = [];
+    const orderIds = [...new Set(batch.events.map(event => event.orderId))].sort((a, b) => a - b);
+    for (const pin of batch.pins) {
+      const rule = byId.get(pin.ruleId);
+      const reason = !rule ? 'pinned_rule_missing' : !rule.isEnabled ? 'pinned_rule_disabled'
+        : rule.version !== pin.version ? 'pinned_rule_version_changed' : null;
+      if (!reason && rule) { selected.push(rule); continue; }
+      skippedPins.push({ ...pin, reason: reason! });
+      await auditService.record(tx, {
+        event: 'status_automation.rule_skipped', entityType: 'status_automation_rule', entityId: pin.ruleId,
+        actorUserId: batch.actor.id, actorUsername: batch.actor.username, actorRole: batch.actor.role,
+        requestId: batch.requestId, source: 'backend-status-automation',
+        relatedOrderId: orderIds.length === 1 ? orderIds[0] : null,
+        relatedEntities: orderIds.map(entityId => ({ entityType: 'order', entityId })),
+        metadata: { reason, expectedRuleVersion: pin.version, currentRuleVersion: rule?.version ?? null,
+          sourceIdempotencyKey: batch.sourceIdempotencyKey },
+      });
+    }
+    selected.sort((a, b) => a.priority - b.priority || a.id - b.id);
+    pinnedRules.set(tx, selected);
+    await executeResolvedMdfEvents(tx, batch, batch.events, selected);
+    return { status: 'evaluated' as const, selectedRuleCount: selected.length, skippedPins };
+  } finally {
+    pinnedRules.delete(tx);
+    if (previousVisited) executedRules.set(tx, previousVisited);
+    else executedRules.delete(tx);
+  }
+}
 
 export interface ManualStatusAutomationOrderRefreshInput {
   orderId: number;
@@ -114,7 +166,7 @@ export async function evaluateProductionCompositionAutomation(
 async function evaluateEventRules(tx: TransactionClient, event: StatusAutomationEvent): Promise<void> {
   const mdfScope = mdfScopes.get(event);
   if (isMdfBoardEvent(event.eventType) && !mdfScope) return;
-  const allRules = (await listEnabledRulesForEvent(tx, event.eventType))
+  const allRules = (pinnedRules.get(tx) ?? await listEnabledRulesForEvent(tx, event.eventType))
     .filter(rule => rule.eventType === event.eventType);
   // Automation-originated order status changes still need their downstream detail cascade.
   // Restrict that second hop to detail-only actions so status rules cannot recurse in cycles.
@@ -205,6 +257,7 @@ export async function evaluateAllStatusAutomationRulesForOrder(
   tx: TransactionClient,
   input: ManualStatusAutomationOrderRefreshInput,
 ): Promise<StatusAutomationOrderRefreshSummary> {
+  if (pinnedRules.has(tx)) throw new Error('MDF_PINNED_MANUAL_REFRESH_FORBIDDEN');
   let state = await loadOrderAutomationState(tx, input.orderId);
   if (state === null) {
     return emptyOrderRefreshSummary(input.orderId, false);
@@ -311,6 +364,7 @@ export async function evaluateMdfBoardColumnAutomation(
 
 /** Single internal API for all five MDF events. Never called from board GET. */
 export async function dispatchMdfBoardEvent(tx: TransactionClient, input: MdfBoardEventInput): Promise<void> {
+  if (pinnedRules.has(tx)) throw new Error('MDF_PINNED_LEGACY_DISPATCH_FORBIDDEN');
   if (input.source) markMdfShadowSource(tx, input);
   if (!isStatusAutomationEnabled() || !input.source) return;
   const rules = (await listEnabledRulesForManualRefresh(tx)).filter(rule => isMdfBoardEvent(rule.eventType));
@@ -322,6 +376,15 @@ export async function dispatchMdfBoardEvent(tx: TransactionClient, input: MdfBoa
   const baths = new Set(initial.filter(e => e.scope.source.kind === 'bath'
     && !(input.source.kind === 'bath' && e.scope.source.id === input.source.id)).map(e => e.scope.source.id));
   for (const id of baths) resolved.push(...await loadMdfBoardEvents(tx, { kind: 'bath', id }));
+  await executeResolvedMdfEvents(tx, input, resolved, rules);
+}
+
+async function executeResolvedMdfEvents(
+  tx: TransactionClient,
+  input: Pick<MdfBoardEventInput, 'actor' | 'requestId' | 'sourceIdempotencyKey'>,
+  resolved: readonly MdfBoardResolvedEvent[],
+  rules: readonly StatusAutomationRule[],
+): Promise<void> {
   for (const entry of resolved) {
     if (!rules.some(rule => rule.eventType === entry.eventType)) continue;
     const eligible = entry.scope.details.filter(d => d.requiredQuantity > 0 && d.eligibleQuantity >= d.requiredQuantity);

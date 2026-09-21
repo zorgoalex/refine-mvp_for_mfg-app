@@ -9,9 +9,26 @@ import {
   listEnabledRulesForEvent,
   listEnabledRulesForManualRefresh,
   loadOrderAutomationState,
+  loadRulesForPinnedExecution,
 } from './pg-status-automation-repository';
 
 describe('PgStatusAutomationRepository', () => {
+  it('locks only requested pin definitions in stable ID order, including disabled rules', async () => {
+    const database = createDatabase({ responses: () => result([ruleRow({ id: '17', is_enabled: false, version: '3' })]) });
+    expect(await loadRulesForPinnedExecution(database.tx, [18, 17, 18]))
+      .toEqual([expect.objectContaining({ id: 17, version: 3, isEnabled: false })]);
+    expect(database.queries[0].text).toMatch(/WHERE id = ANY\(\$1::bigint\[\]\) ORDER BY id FOR SHARE/);
+    expect(database.queries[0].params).toEqual([[17, 18]]);
+    expect(database.queries[0].text).not.toMatch(/is_enabled\s*=/);
+  });
+
+  it('empty pins do not query; unsafe identities fail instead of rounding', async () => {
+    const database = createDatabase({ responses: () => result([]) });
+    expect(await loadRulesForPinnedExecution(database.tx, [])).toEqual([]);
+    await expect(loadRulesForPinnedExecution(database.tx, [Number.MAX_SAFE_INTEGER + 1])).rejects.toThrow('MDF_INVALID_RULE_PIN');
+    expect(database.queries).toHaveLength(0);
+  });
+
   it('lists enabled rules for an event, ordered by priority and id, and maps conditions_json', async () => {
     const database = createDatabase({
       responses: ({ text }) =>

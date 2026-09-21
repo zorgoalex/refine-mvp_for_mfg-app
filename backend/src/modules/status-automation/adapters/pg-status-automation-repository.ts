@@ -315,6 +315,24 @@ export async function listEnabledRulesForManualRefresh(
   return result.rows.map(mapRuleRow);
 }
 
+/** Lock definitions through the caller transaction, including disabled rows so
+ * the executor can audit why an immutable pin no longer applies. Missing rows
+ * are never replaced by a current enabled-rule scan. Lock order is ID, not
+ * mutable priority; execution priority is applied after version validation.
+ */
+export async function loadRulesForPinnedExecution(
+  tx: TransactionClient,
+  ruleIds: readonly number[],
+): Promise<StatusAutomationRule[]> {
+  if (ruleIds.length === 0) return [];
+  if (ruleIds.some(id => !Number.isSafeInteger(id) || id <= 0)) throw new Error('MDF_INVALID_RULE_PIN');
+  const result = await tx.query<StatusAutomationRuleRow>(
+    ruleSelectSql('WHERE id = ANY($1::bigint[]) ORDER BY id FOR SHARE'),
+    [[...new Set(ruleIds)].sort((a, b) => a - b)],
+  );
+  return result.rows.map(mapRuleRow);
+}
+
 export async function loadOrderAutomationState(
   tx: TransactionClient,
   orderId: number,
