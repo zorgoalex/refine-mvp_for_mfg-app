@@ -2134,6 +2134,16 @@ probe_file() {
                      "$(q_con_on mdf_shadow_commands mdf_shadow_commands_check1)" \
                      "$(q_idx idx_mdf_shadow_commands_source)" \
                      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.mdf_shadow_commands') AND tgname='mdf_shadow_commands_immutable' AND tgenabled='O' AND tgfoid=to_regprocedure('public.mdf_reject_evidence_change()'));" ;;
+    176_whatsapp_reply_templates*) probe_all \
+                     "$(q_col whatsapp_message_templates body_mode)" \
+                     "$(q_col whatsapp_keyword_rules reply_mode)" \
+                     "$(q_col whatsapp_keyword_rules counter_value)" \
+                     "$(q_col whatsapp_delivery_jobs reply_to)" \
+                     "$(q_col whatsapp_delivery_jobs reply_mode)" \
+                     "$(q_col whatsapp_delivery_jobs rendered_at)" \
+                     "$(q_col whatsapp_delivery_jobs counter_value)" \
+                     "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='whatsapp_keyword_rules'::regclass AND conname='whatsapp_keyword_rules_match_mode_check' AND pg_get_constraintdef(oid) LIKE '%pattern_exact%');" \
+                     "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='whatsapp_webhook_events'::regclass AND conname='whatsapp_webhook_events_result_code_check' AND pg_get_constraintdef(oid) LIKE '%failed%');" ;;
     170_whatsapp_technical_logs*) probe_all \
                      "$(q_tbl whatsapp_technical_logs)" \
                      "$(q_con_on whatsapp_technical_logs whatsapp_technical_logs_pkey)" \

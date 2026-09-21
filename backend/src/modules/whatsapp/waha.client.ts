@@ -63,12 +63,13 @@ export class WahaClient {
 
   async sendText(
     chatId: string,
-    text: string
+    text: string,
+    replyTo?: string
   ): Promise<{ messageId?: string }> {
     const value = await this.request("/api/sendText", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session: this.sessionName(), chatId, text }),
+      body: JSON.stringify({ session: this.sessionName(), chatId, text, ...(replyTo ? { reply_to: replyTo } : {}) }),
     });
     const record = asRecord(value);
     return {

@@ -43,6 +43,7 @@ import type {
 } from "../../../api/types/whatsappApi.types";
 import { can } from "../../../utils/permissions";
 import "./WhatsAppConfigTabs.css";
+import { WhatsAppReplyPreview, splitWhatsAppKeywords } from './WhatsAppReplyPreview';
 
 const { Paragraph, Text, Title } = Typography;
 
@@ -810,7 +811,7 @@ function saveBlob(blob: Blob, fileName: string): void {
   URL.revokeObjectURL(url);
 }
 
-function TemplateEditor({
+export function TemplateEditor({
   open,
   onClose,
   onSaved,
@@ -824,7 +825,7 @@ function TemplateEditor({
   useEffect(() => {
     if (open)
       form.setFieldsValue(
-        open === "new" ? { code: "", name: "", body: "", enabled: true } : open
+        open === "new" ? { code: "", name: "", body: "", bodyMode: 'text', enabled: true } : { ...open, bodyMode: open.bodyMode ?? 'text' }
       );
   }, [form, open]);
   const save = async () => {
@@ -832,11 +833,13 @@ function TemplateEditor({
     setSaving(true);
     try {
       if (open === "new") await whatsappApi.createTemplate(values);
-      else if (open)
+      else if (open) {
+        const { code: _code, ...update } = values;
         await whatsappApi.updateTemplate(open.id, {
-          ...values,
+          ...update,
           version: open.version,
         });
+      }
       message.success("Сообщение сохранено");
       onClose();
       await onSaved();
@@ -874,9 +877,13 @@ function TemplateEditor({
         <Form.Item name="name" label="Название" rules={[{ required: true }]}>
           <Input maxLength={120} />
         </Form.Item>
+        <Form.Item name="bodyMode" label="Формат ответа" initialValue="text">
+          <Select options={[{ value: 'text', label: 'Обычный текст' }, { value: 'template', label: 'Шаблон с переменными' }]} />
+        </Form.Item>
         <Form.Item
           name="body"
           label="Текст ответа"
+          extra="В режиме шаблона: {order_number} из входящего сообщения; {current_date}, {current_time} (Asia/Almaty), {counter} — номер ответа для правила без сброса. Повтор отправки сохраняет значения. Для буквальных скобок: {{ и }}."
           rules={[{ required: true }]}
         >
           <Input.TextArea rows={6} maxLength={4096} showCount />
@@ -889,7 +896,7 @@ function TemplateEditor({
   );
 }
 
-function RuleEditor({
+export function RuleEditor({
   open,
   templates,
   onClose,
@@ -901,6 +908,10 @@ function RuleEditor({
   onSaved: () => Promise<void>;
 }) {
   const [form] = Form.useForm<WhatsAppRuleInput & { keywordText: string }>();
+  const matchMode = Form.useWatch('matchMode', form) ?? 'contains_any';
+  const keywordText = Form.useWatch('keywordText', form) ?? '';
+  const templateId = Form.useWatch('templateId', form);
+  const selectedTemplate = templates.find(t => t.id === templateId);
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     if (open)
@@ -910,12 +921,13 @@ function RuleEditor({
               code: "",
               name: "",
               matchMode: "contains_any",
+              replyMode: 'plain',
               keywordText: "",
               templateId: templates[0]?.id,
               priority: 100,
               enabled: true,
             }
-          : { ...open, keywordText: open.keywords.join("\n") }
+          : { ...open, replyMode: open.replyMode ?? 'plain', keywordText: open.keywords.join("\n") }
       );
   }, [form, open, templates]);
   const save = async () => {
@@ -923,19 +935,18 @@ function RuleEditor({
     const { keywordText, ...rest } = values;
     const input = {
       ...rest,
-      keywords: keywordText
-        .split(/[,\n]/)
-        .map((item) => item.trim())
-        .filter(Boolean),
+      keywords: splitWhatsAppKeywords(keywordText, rest.matchMode),
     };
     setSaving(true);
     try {
       if (open === "new") await whatsappApi.createRule(input);
-      else if (open)
+      else if (open) {
+        const { code: _code, ...update } = input;
         await whatsappApi.updateRule(open.id, {
-          ...input,
+          ...update,
           version: open.version,
         });
+      }
       message.success("Правило сохранено");
       onClose();
       await onSaved();
@@ -982,13 +993,15 @@ function RuleEditor({
             options={[
               { value: "contains_any", label: "Содержит любое слово" },
               { value: "exact_any", label: "Полное совпадение" },
+              { value: 'pattern_exact', label: 'По шаблону: сообщение целиком' },
+              { value: 'pattern_contains', label: 'По шаблону: фрагмент сообщения' },
             ]}
           />
         </Form.Item>
         <Form.Item
           name="keywordText"
-          label="Ключевые слова"
-          extra="По одному в строке или через запятую"
+          label={matchMode.startsWith('pattern_') ? 'Шаблоны входящего сообщения' : 'Ключевые слова'}
+          extra={matchMode.startsWith('pattern_') ? 'По одному шаблону в строке. Пример: Заказ {order_number:number} готов. number — цифры, word — слово (буквы, цифры, _ и -), text — несколько слов. Регистр не важен. Ведущие нули сохраняются. Это извлечение текста, не поиск заказа.' : 'По одному в строке или через запятую. Регистр не важен.'}
           rules={[{ required: true }]}
         >
           <Input.TextArea rows={4} />
@@ -1005,6 +1018,10 @@ function RuleEditor({
         <Form.Item name="priority" label="Приоритет">
           <InputNumber min={0} max={10000} />
         </Form.Item>
+        <Form.Item name="replyMode" label="Способ ответа" extra="Если цитирование не удалось, обычный ответ вместо него не отправляется.">
+          <Select options={[{ value: 'plain', label: 'Обычное сообщение' }, { value: 'quote', label: 'Ответ с цитатой исходного сообщения' }]} />
+        </Form.Item>
+        <WhatsAppReplyPreview matchMode={matchMode} keywordText={keywordText} body={selectedTemplate?.body} bodyMode={selectedTemplate?.bodyMode} />
         <Form.Item name="enabled" label="Включено" valuePropName="checked">
           <Switch />
         </Form.Item>
@@ -1113,6 +1130,8 @@ export function whatsappErrorPresentation(error: unknown, fallback: string): Use
     };
   }
   const messages: Record<string, UserFacingError> = {
+    WHATSAPP_TEMPLATE_INVALID: { title: 'Проверьте шаблон', description: error.message },
+    WHATSAPP_PATTERN_LIMIT: { title: 'Упростите шаблон', description: 'Добавьте фиксированные слова между полями и повторите проверку на примере.' },
     AUTH_REQUIRED: { title: "Сеанс ERP завершён", description: "Войдите в ERP заново и повторите действие." },
     PERMISSION_DENIED: { title: "Недостаточно прав", description: "Нужно разрешение whatsapp.manage. Обратитесь к администратору ERP." },
     WHATSAPP_NOT_CONFIGURED: { title: "WhatsApp не настроен", description: "Интеграция выключена или не заполнены параметры WAHA на сервере." },
@@ -1222,6 +1241,10 @@ export function whatsappPartialIssueNames(issues?: Record<string, string | null>
 function deliveryErrorText(item: WhatsAppDeliveryJobDto): string {
   if (!item.errorCode) return "—";
   const messages: Record<string, string> = {
+    WHATSAPP_TEMPLATE_INVALID: 'Не удалось сформировать ответ. Проверьте переменные и длину шаблона, затем отправьте новое тестовое сообщение.',
+    WHATSAPP_PATTERN_LIMIT: 'Шаблон слишком сложный. Уточните фиксированный текст и повторите проверку.',
+    WHATSAPP_REPLY_TARGET_MISSING: 'Не найдено исходное сообщение для цитирования. Ответ не отправлен.',
+    WHATSAPP_COUNTER_EXHAUSTED: 'Счётчик правила исчерпан. Создайте новое правило.',
     INVALID_JOB: "Некорректное задание",
     MAX_ATTEMPTS: "Исчерпаны попытки",
     STALE_BEFORE_DISPATCH: "Отправка не началась; ожидается повтор",
@@ -1354,6 +1377,7 @@ function readableTechnicalDescription(item: WhatsAppTechnicalLogDto): string {
   if (item.eventCode === "whatsapp.webhook.processed") {
     const results: Record<string, string> = {
       queued: "Найдено правило. Ответ поставлен в очередь.",
+      failed: 'Ответ не сформирован. Откройте очередь WhatsApp: в задании указана причина. Исправьте настройки и отправьте новое тестовое сообщение.',
       unmatched: "Подходящее правило не найдено. Ответ не отправлен.",
       duplicate: "Сообщение уже было обработано ранее.",
     };
