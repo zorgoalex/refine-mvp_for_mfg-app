@@ -189,3 +189,34 @@ complete. Acceptance, composition/demand preflight and remaining producer
 migration are required before activating the new engine. Disable intake
 to stop new entries without removing history; rollback of the backend leaves the
 additive diagnostic table intact.
+
+## Accepted-evidence allocation port (not enabled)
+
+`executeMdfAllocation(tx, jobId)` is an internal transactional accounting port,
+not a complete job handler, HTTP endpoint or registered scheduler. The shadow
+observer never calls it. Its existence does not make `active` safe to enable.
+
+The port requires a pending durable job, active engine mode and READ COMMITTED
+transaction. Actor/request come from the stored job. It discovers the connected
+owners through received/accepted membership and historical unreleased allocations,
+locks owners before source heads, and checks the closure again after waiting.
+Limits are 100 owners, 250 sources and 5,000 evidence/allocation rows. Any limit,
+pending acceptance, missing membership or conflicting baseline stops processing.
+All future acceptance commands must use the same owner-before-source lock order.
+
+Only accepted physical, non-rework CNC/BASIS cut evidence is reservable. Independent
+portions add; each reservation references an exact immutable evidence line. Baths
+are considered oldest first by original result creation time, and only complete
+sets reserve new stock. Existing reservations win over newly discovered older
+baths. Hidden/absent consumers do not free stock; an explicit correction must
+release or replace allocations. Full matching accepted physical lamination can
+change reservations to consumed. Rework baths require a separate supply policy
+and are not handled by this normal-stock port.
+
+Reservation and consumption emit `mdf_board.bath_supply_reserved` and
+`mdf_board.bath_supply_consumed` audit events with source, actor, request and
+normalized order/detail links. Repeating the same accounting step creates no
+duplicate reservations or audits. Failures roll back with the caller transaction.
+The owning job must still execute pinned rules, publish a coherent board revision,
+write its transition outbox and mark the job complete. None of those operations,
+nor acceptance/backfill, are performed by this port.
