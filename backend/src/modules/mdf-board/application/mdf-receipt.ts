@@ -3,6 +3,8 @@ import type { QueryResultRow } from 'pg';
 import type { DatabaseClient } from '../../../database/database.types';
 import { mdfPositionKey, mdfQuantity } from '../domain/mdf-quantities';
 import type { MdfSourceKind } from './mdf-job-runner';
+import { mdfDemandDigest, snapshotMdfExecutionContext, type MdfExecutionContext } from '../domain/mdf-execution-context';
+import { isMdfEvidenceContract } from '../domain/mdf-evidence-contract';
 
 export interface MdfReceiptLine {
   lineKey: string; orderId: number; detailId: number; quantity: number;
@@ -16,6 +18,9 @@ export interface MdfReceiptInput {
   expectedFence: MdfReceiptFence | null;
   /** Digest of source metadata not represented by accounting lines. */
   sourceDigest?: string;
+  /** Required by the accepted execution path; absent on old diagnostic receipts.
+   * This is frozen before the seal and covered by payload_digest. */
+  executionContext?: MdfExecutionContext;
   /** Only the owning command can authorize acceptance after scope/preflight.
    * Existing allocations must be explicitly released/replaced before acceptance. */
   accept: boolean;
@@ -26,7 +31,7 @@ export interface MdfReceiptResult extends MdfReceiptFence {
   replay: boolean; accepted: boolean; jobId: string;
 }
 interface HeadRow extends QueryResultRow {
-  version: string; correction_epoch: string; accepted_revision_key: string | null;
+  version: string; correction_epoch: string; accepted_revision_key: string | null; received_revision_key: string;
 }
 export class MdfReceiptError extends Error {
   constructor(readonly code: 'MDF_RECEIPT_INVALID' | 'MDF_RECEIPT_CONFLICT' | 'MDF_SOURCE_STALE' | 'MDF_RECEIPT_INCOMPLETE') {
@@ -50,6 +55,11 @@ function positive(value: number): number {
  * Business processing is separate; it must never run inside this function.
  */
 export async function recordMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput): Promise<MdfReceiptResult> {
+  // Capture before the first await. Neither caller mutation nor retry can replace
+  // a receipt's demand, actor or rule versions halfway through its transaction.
+  input = { ...input, expectedFence: input.expectedFence ? { ...input.expectedFence } : null,
+    lines: input.lines.map(line => ({ ...line })), rules: input.rules.map(rule => ({ ...rule })),
+    executionContext: input.executionContext ? snapshotMdfExecutionContext(input.executionContext) : undefined };
   if (!['packet', 'bazisCutSet', 'bath', 'order', 'orderDetail'].includes(input.sourceKind)
     || !['cnc', 'manual', 'order_cascade', 'legacy', 'derived'].includes(input.origin)
     || typeof input.accept !== 'boolean') invalid();
@@ -62,7 +72,7 @@ export async function recordMdfReceipt(tx: DatabaseClient, input: MdfReceiptInpu
   const lines = input.lines.map(line => {
     text(line.lineKey); text(line.stageCode);
     mdfPositionKey(line); positive(line.quantity);
-    if (keys.has(line.lineKey) || !['physical', 'declaration', 'derived'].includes(line.evidenceKind)
+    if (keys.has(line.lineKey) || !isMdfEvidenceContract(input.sourceKind,line.stageCode,line.evidenceKind)
       || typeof line.rework !== 'boolean') invalid();
     keys.add(line.lineKey);
     return [line.lineKey, line.orderId, line.detailId, line.quantity, line.stageCode, line.evidenceKind, line.rework];
@@ -72,10 +82,16 @@ export async function recordMdfReceipt(tx: DatabaseClient, input: MdfReceiptInpu
     positive(rule.ruleId); positive(rule.version);
     if (ruleIds.has(rule.ruleId)) invalid(); ruleIds.add(rule.ruleId);
   }
-  const digest = createHash('sha256').update(JSON.stringify([input.origin, lines, input.sourceDigest ?? null])).digest('hex');
+  const context = input.executionContext;
+  if (context && input.accept && (!context.compositionComplete || input.lines.some(line =>
+    !context.demand.some(d => d.orderId === line.orderId && d.detailId === line.detailId)))) invalid();
+  // Preserve v1 digests for receipts recorded before execution context existed.
+  const digestInput: unknown[] = [input.origin, lines, input.sourceDigest ?? null];
+  if (context) digestInput.push(context,input.accept);
+  const digest = createHash('sha256').update(JSON.stringify(digestInput)).digest('hex');
   const source = [input.sourceKind, input.sourceId];
   await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`mdf-source:${JSON.stringify(source)}`]);
-  const head = (await tx.query<HeadRow>(`SELECT version,correction_epoch,accepted_revision_key
+  const head = (await tx.query<HeadRow>(`SELECT version,correction_epoch,accepted_revision_key,received_revision_key
     FROM mdf_source_heads WHERE source_kind=$1 AND source_id=$2 FOR UPDATE`, source)).rows[0];
   const existing = (await tx.query<{ payload_digest: string; job_id: string | null }>(`
     SELECT r.payload_digest,j.job_id FROM mdf_evidence_revisions r
@@ -95,7 +111,8 @@ export async function recordMdfReceipt(tx: DatabaseClient, input: MdfReceiptInpu
   // use. Keep received != accepted until an explicit correction resolves it.
   const allocated = head && input.accept ? (await tx.query<{ allocated: boolean }>(`SELECT EXISTS (
     SELECT 1 FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
-    WHERE e.source_kind=$1 AND e.source_id=$2 AND e.revision_key=$3 AND a.state<>'released'
+    WHERE a.state<>'released' AND ((e.source_kind=$1 AND e.source_id=$2 AND e.revision_key=$3)
+      OR ($1='bath' AND a.bath_id=$2 AND a.bath_revision=$3))
   ) AS allocated`, [...source, head.accepted_revision_key])).rows[0].allocated : false;
   const accept = input.accept && !allocated;
   await tx.query(`INSERT INTO mdf_evidence_revisions
@@ -107,6 +124,17 @@ export async function recordMdfReceipt(tx: DatabaseClient, input: MdfReceiptInpu
     (source_kind,source_id,revision_key,line_key,order_id,detail_id,quantity,stage_code,evidence_kind,rework)
     SELECT $1,$2,$3,line->>0,(line->>1)::bigint,(line->>2)::bigint,(line->>3)::bigint,line->>4,line->>5,(line->>6)::boolean
     FROM jsonb_array_elements($4::jsonb) line`, [...source, input.revisionKey, JSON.stringify(lines)]);
+  if (context) {
+    await tx.query(`INSERT INTO mdf_revision_context
+      (source_kind,source_id,revision_key,source_created_at,display_name,prior_column,composition_complete,demand_digest,
+        acceptance_requested,predecessor_accepted_revision_key,predecessor_received_revision_key)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, [...source, input.revisionKey, context.sourceCreatedAt,
+      context.displayName, context.priorColumn, context.compositionComplete, mdfDemandDigest(context.demand),input.accept,
+      head?.accepted_revision_key ?? null,head?.received_revision_key ?? null]);
+    await tx.query(`INSERT INTO mdf_revision_demand(source_kind,source_id,revision_key,order_id,detail_id,quantity)
+      SELECT $1,$2,$3,(d->>'orderId')::bigint,(d->>'detailId')::bigint,(d->>'quantity')::bigint
+      FROM jsonb_array_elements($4::jsonb) d`, [...source, input.revisionKey, JSON.stringify(context.demand)]);
+  }
   await tx.query(`INSERT INTO mdf_revision_seals(source_kind,source_id,revision_key) VALUES($1,$2,$3)`, [...source, input.revisionKey]);
   const saved = (await tx.query<HeadRow>(head
     ? `UPDATE mdf_source_heads SET received_revision_key=$3,
@@ -120,7 +148,10 @@ export async function recordMdfReceipt(tx: DatabaseClient, input: MdfReceiptInpu
     (event_key,source_kind,source_id,revision_key,correction_epoch,actor_user_id,request_id,status,error_code)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING job_id`, [eventKey, ...source, input.revisionKey,
     saved.correction_epoch, input.actorUserId, input.requestId,
-    accept ? 'pending' : 'needs_attention', accept ? null : 'MDF_ACCEPTANCE_REQUIRED'])).rows[0];
+    // Executable context also needs a publication pass when acceptance fails:
+    // received!=accepted must invalidate old visible credit without waiting for
+    // an unrelated future event. Queueing NEVER accepts its physical quantities.
+    accept || context ? 'pending' : 'needs_attention', accept ? null : 'MDF_ACCEPTANCE_REQUIRED'])).rows[0];
   await tx.query(`INSERT INTO mdf_recalculation_job_rules(job_id,rule_id,rule_version)
     SELECT $1,(pin->>'ruleId')::bigint,(pin->>'version')::bigint FROM jsonb_array_elements($2::jsonb) pin`,
   [job.job_id, JSON.stringify(input.rules)]);

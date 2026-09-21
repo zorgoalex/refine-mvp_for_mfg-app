@@ -68,6 +68,21 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText).toMatch(/--skip-041/);
   });
 
+  it('checks MDF execution context integrity before recording migration174', () => {
+    const arm = probeFn.slice(probeFn.indexOf('174_mdf_execution_context*)'), probeFn.indexOf('*) return 2'));
+    for (const table of ['mdf_revision_context', 'mdf_revision_demand', 'mdf_published_sources',
+      'mdf_published_source_members', 'mdf_published_positions']) {
+      expect(arm).toContain(`q_colset_hash ${table} `);
+      expect(arm).toContain(`q_conset_hash ${table} `);
+      expect(arm).toContain(`q_idxset_hash ${table} `);
+    }
+    for (const marker of ['mdf_context_insert_guard', 'mdf_demand_insert_guard', 'mdf_context_immutable',
+      'mdf_demand_immutable', "t.tgenabled='O'", 't.tgqual IS NULL', 'NOT convalidated', 'NOT indisvalid OR NOT indisready',
+      "q_fun_hash 'public.mdf_guard_execution_context_insert()'"]) expect(arm).toContain(marker);
+    const verify = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'));
+    expect(verify).toMatch(/174_mdf_execution_context\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
   it('verifies migrations 164-169 before recording their ledger entries', () => {
     const verify = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
     expect(verify).toContain('164_*|165_*|166_*|167_*|168_*|169_*)');
@@ -141,7 +156,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText).not.toMatch(/q_fun_hash\(\).*md5\(prosrc\)/);
     expect(probeFn).toContain("q_fun_hash 'cnc_telegram_worker_reason_code_valid(text)'");
     expect(probeFn.match(/q_fun_hash '[^']+' [a-f0-9]{32}/g)).toHaveLength(
-      requiredFunctions.length + 2 + 9, // 164-169 add nine full function contracts
+      requiredFunctions.length + 2 + 9 + 1, // 164-169 add nine contracts; 174 adds the context seal guard
     );
   });
 

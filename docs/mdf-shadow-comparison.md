@@ -322,3 +322,29 @@ shadow comparator above retains its own conservative comparability rules; the
 live legacy handlers and UI are unchanged. Historical sources absent from the
 receipt graph still require baseline discovery. Neither quarantine nor these
 tests permit activation before producer coverage, baseline and cutover are ready.
+
+### Accepted-job execution and compact reader (disabled by default)
+
+Migration `174_mdf_execution_context.sql` adds sealed command-time context and
+owning MDF demand, plus compact source/member/position publication tables. It does
+not activate the engine or backfill historical evidence. Apply after migrations
+165 and 166; existing applied migrations must not be rewritten.
+
+`executeMdfAcceptedJob` combines strict allocation, pinned scoped rules and
+publication in the durable job transaction. Failures roll back effects while
+retaining the receipt for retry. Compatible forward revisions retain exact stock
+allocations; changed composition, quantities or missing proof require correction.
+
+`BACKEND_MDF_JOB_WORKER=false` controls the registered scheduler independently of
+notifications. It processes at most ten jobs sequentially per tick; active engine
+mode is a second mandatory gate. `BACKEND_MDF_PUBLISHED_READS=false` controls
+`GET /api/v1/orders/status-board/mdf`. Disabled reads return 503. Enabled reads
+use an authorized, read-only repeatable-read snapshot and do not enqueue work.
+The two-calendar-month period filters visibility, not accepted accounting history;
+an exact source focus can retrieve older cards. Unaccepted cards retain visibility
+with issues but provide no unverified production credit.
+
+Keep both flags false until live producers, corrections, frontend, verified
+historical baseline and the cutover procedure are connected and checked together.
+The current shadow producer does not supply execution context. Setting the engine
+to active directly is not a supported activation procedure.

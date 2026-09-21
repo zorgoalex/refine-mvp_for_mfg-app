@@ -250,6 +250,8 @@ export const envSchema = z
     BACKEND_MDF_SHADOW_INTAKE: booleanFromEnv.default(false),
     BACKEND_MDF_SHADOW_COMPARE: booleanFromEnv.default(false),
     BACKEND_MDF_PINNED_DISPATCH: booleanFromEnv.default(false),
+    BACKEND_MDF_JOB_WORKER: booleanFromEnv.default(false),
+    BACKEND_MDF_PUBLISHED_READS: booleanFromEnv.default(false),
     // Phase A safety gate: legacy background Telegram ingest is fail-closed.
     // The break-glass path remains unavailable until Phase B persists an
     // approved bounded scan artifact.
