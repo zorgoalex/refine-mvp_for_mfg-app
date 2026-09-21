@@ -1,6 +1,8 @@
 import { apiRoutes } from './apiRoutes';
 import { httpClient } from './httpClient';
 
+export interface SignalOption { code: string; name: string }
+
 export interface SignalConfiguration {
   version: number;
   sources: { code: string; name: string; channel: 'whatsapp'; connection: string; chatId: string; enabled: boolean }[];
@@ -29,6 +31,7 @@ function withQuery(path: string, query: Record<string, string | number | undefin
   return `${path}?${params}`;
 }
 export const inboundSignalsApi = {
+  signalOptions: () => httpClient.get<SignalOption[]>(apiRoutes.inboundSignals.signalOptions),
   list: (query: Record<string, string | number | undefined>) => httpClient.get<SignalList>(withQuery(apiRoutes.inboundSignals.list, query)),
   detail: (id: string) => httpClient.get<SignalDetail>(apiRoutes.inboundSignals.detail(id)),
   orders: (q: string) => httpClient.get<{ id: string; name: string }[]>(withQuery(apiRoutes.inboundSignals.orders, { q })),
