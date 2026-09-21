@@ -1,4 +1,5 @@
 import React from "react";
+import { installWorkspaceStateLifecycle } from "./workspace/workspaceStateLifecycle";
 import ReactDOM from "react-dom/client";
 import { getLoadedRuntimeConfig, initializeRuntimeConfig } from "./config/runtimeConfig";
 import { setDocumentUiVariant } from "./ui-variant/uiVariant";
@@ -26,6 +27,9 @@ async function bootstrap() {
 
   // Legacy auth persists user/token in localStorage while permission helpers
   // read authSession. Seed it even when UI evolution is unavailable.
+  // Install before any identity publication, independently of UI variant/device
+  // bootstrap timing, so F5 can recover only the confirmed owner's drafts.
+  installWorkspaceStateLifecycle();
   seedLegacyAuthSession();
   // Resolve the versioned lifecycle cohort before route rendering. Treatment
   // routes can then start their primary query before React invokes React.lazy;

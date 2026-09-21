@@ -36,9 +36,7 @@ import {
   OrderPrimaryRouteGate,
   OrderPrimaryRouteLoader,
 } from "./query/OrderPrimaryRouteLoader";
-import { installWorkspaceStateLifecycle } from "./workspace/workspaceStateLifecycle";
 
-installWorkspaceStateLifecycle();
 import { authSession } from "./api/authSession";
 import { cncTelegramApi } from "./api/cncTelegramApi";
 import { MDF_BOARD_PREFETCH_EVENT } from "./utils/siderMenuItems";
