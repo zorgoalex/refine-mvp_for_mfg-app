@@ -1067,7 +1067,9 @@ export const destroyOrderDraftStore = (orderKey: string): void => {
 export const orderDraftStoreExists = (orderKey: string): boolean =>
   orderDraftStores.has(draftRegistryKey(orderKey));
 
-export const clearAllOrderDraftStores = (): void => {
+/** Only initial document auth restoration may provide a confirmed owner namespace. */
+export const clearAllOrderDraftStores = (restoredNamespace?: string): void => {
+  const restoredDrafts = restoredNamespace ? collectRestorableDrafts(restoredNamespace) : [];
   for (const store of orderDraftStores.values()) store.getState().reset();
   orderDraftStores.clear();
   try {
@@ -1081,7 +1083,44 @@ export const clearAllOrderDraftStores = (): void => {
     /* sessionStorage unavailable */
   }
   persistedDraftStorageKeys.clear();
+  for (const [key, serialized] of restoredDrafts) {
+    try {
+      sessionStorage.setItem(key, serialized);
+      persistedDraftStorageKeys.add(key);
+    } catch { /* sessionStorage unavailable or full */ }
+  }
 };
+
+function collectRestorableDrafts(namespace: string): Array<[string, string]> {
+  const latest = new Map<string, { generation: number; serialized: string | null }>();
+  try {
+    const ownerPrefix = `${DRAFT_STORAGE_PREFIX}:${namespace}:order:`;
+    const generationPart = namespace.match(/\|session:\d+\|/)?.[0];
+    if (!generationPart) return [];
+    for (let index = 0; index < sessionStorage.length; index += 1) {
+      const key = sessionStorage.key(index);
+      if (!key?.startsWith(`${DRAFT_STORAGE_PREFIX}:`)) continue;
+      const oldGeneration = key.match(/\|session:(\d+)\|/);
+      if (!oldGeneration) continue;
+      const restoredKey = key.replace(oldGeneration[0], generationPart);
+      if (!restoredKey.startsWith(ownerPrefix)) continue;
+      const generation = Number(oldGeneration[1]);
+      if (!Number.isSafeInteger(generation)) continue;
+      if (generation > (latest.get(restoredKey)?.generation ?? -1)) {
+        latest.set(restoredKey, { generation, serialized: sessionStorage.getItem(key) });
+      }
+    }
+    return [...latest].flatMap(([key, { serialized }]): Array<[string, string]> => {
+      try {
+        if (!serialized) return [];
+        const { state } = JSON.parse(serialized);
+        if (state?.isDirty !== true || !state.header || !Array.isArray(state.details)) return [];
+        if (key.endsWith(`:order:${NEW_ORDER_KEY}`) && state.header.order_id != null) return [];
+        return [[key, serialized]];
+      } catch { return []; }
+    });
+  } catch { return []; }
+}
 
 export const getOrderDraftStorageKey = (orderKey: string): string => draftStorageKey(orderKey);
 
