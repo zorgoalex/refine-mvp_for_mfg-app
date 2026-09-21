@@ -192,6 +192,46 @@ additive diagnostic table intact.
 
 ## Accepted-evidence allocation port (not enabled)
 
+### Pinned automation execution port (not enabled)
+
+`executePinnedMdfAutomation(tx, input)` executes server-resolved MDF events using
+only the supplied durable rule pins. It is an internal transaction primitive,
+not a job handler, public command, scheduler or evidence acceptance operation.
+No production caller is registered. Existing board commands still use the legacy
+dispatch path; deploying this port does not switch the engine.
+
+The owning handler must first verify active mode under the cutover lock, claim
+the durable job, load its original pins/actor, authorize scope, lock owners and
+sources in order, and resolve events from accepted evidence against fenced demand.
+Never pass request-body events or promote shadow receipts to accepted facts.
+Source IDs use the board format: packet UUID, decimal BASIS ID, `cut-result:<id>`
+for baths. Full batch syntax and consistent position ownership/demand are checked
+before effects, but syntax checks do not prove physical work.
+
+Rule rows are locked in ID order through transaction end. Only enabled rules
+whose versions still match the pins execute, in priority/ID order. Missing,
+disabled and edited pins produce `status_automation.rule_skipped` audit entries
+with expected/current version, actor, request and normalized order links. Newly
+created or enabled rules are never substituted. Pins must include intended
+downstream composition rules: an absent downstream pin executes nothing, even
+when a matching current rule exists.
+
+The same pinned set covers nested detail-to-order evaluation. MDF actions remain
+own-detail-only and advance-only; partial position quantities do not advance.
+Full order composition still governs order changes, excluding HDF. Existing
+business action audit and idempotent outbox are reused. Legacy MDF re-resolution,
+manual refresh and nested pinned executions are forbidden inside the boundary.
+The owning transaction/savepoint rolls back effects on failure; per-execution
+in-memory recursion guards are restored even after errors, allowing safe retry.
+
+`status=evaluated` is not job completion or publication; `disabled` means the
+automation flag prevented evaluation. This port neither accepts receipts nor
+changes heads, reservations, engine mode or board revisions. Frozen demand/event
+context, producer integration, acceptance, coherent publication and verified
+historical baseline remain prerequisites for an active worker.
+
+### Allocation execution
+
 `executeMdfAllocation(tx, jobId)` is an internal transactional accounting port,
 not a complete job handler, HTTP endpoint or registered scheduler. The shadow
 observer never calls it. Its existence does not make `active` safe to enable.
