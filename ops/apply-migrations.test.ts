@@ -25,6 +25,17 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(files).toContain('034_order_material_sunset_legacy.sql');
   });
 
+  it('verifies signal queue and deduplication before recording migration173', () => {
+    const probe = scriptText.slice(scriptText.indexOf('173_inbound_signals*)'), scriptText.indexOf('171_mdf_shadow_commands*)'));
+    for (const marker of ['q_tbl inbound_message_receipts','q_tbl inbound_signal_commands',
+      'q_col inbound_signal_occurrences execution_guard','q_col inbound_signal_occurrences lock_token',
+      'inbound_signal_occurrences_message_id_signal_code_key','q_idx inbound_signals_queue_idx']) {
+      expect(probe).toContain(marker);
+    }
+    const verification=scriptText.slice(scriptText.indexOf('verify_applied_effect() {'));
+    expect(verification).toContain('173_inbound_signals*)');
+  });
+
   // Scope the arm scan to the probe_file() function body only — an arm in the
   // apply loop (e.g. the 034 gate) must NOT satisfy the classification guard.
   const probeFnStart = scriptText.indexOf('probe_file() {');

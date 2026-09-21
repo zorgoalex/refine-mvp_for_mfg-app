@@ -12,6 +12,10 @@ export type UserRole =
   | string;
 
 export type PermissionName =
+  | 'message_signals.view'
+  | 'message_signals.resolve'
+  | 'message_signals.technical'
+  | 'message_signals.manage_config'
   | 'orders.view'
   | 'orders.create'
   | 'orders.update'

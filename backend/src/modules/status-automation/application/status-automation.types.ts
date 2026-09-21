@@ -2,6 +2,7 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import type { ProductionComposition } from '../../../shared/production-status/production-summary';
 
 export type StatusAutomationEventType =
+  | 'message.signal_detected'
   | 'payment.created'
   | 'order.payment_status_changed'
   | 'order.created'
@@ -22,9 +23,16 @@ export type StatusAutomationActionType =
   | 'map_order_status_to_details_production_status'
   | 'map_production_status_to_order_status';
 
-export type StatusAutomationOrigin = 'user' | 'automation';
+export type StatusAutomationOrigin = 'user' | 'automation' | 'external';
+
+/** Internal execution identity, never an authenticated API principal. */
+export type AutomationActor = Pick<CurrentUser, 'username'> & {
+  id: string | null;
+  role: CurrentUser['role'] | null;
+};
 
 export interface StatusAutomationConditions {
+  signalCodeIn?: string[];
   currentOrderStatusIn?: number[];
   currentOrderStatusNotIn?: number[];
   previousOrderStatusIn?: number[];
@@ -67,7 +75,9 @@ export interface StatusAutomationEvent {
   origin: StatusAutomationOrigin;
   cause?: 'derived_from_production_composition';
   orderId: number;
-  actor: CurrentUser;
+  actor: AutomationActor;
+  signalCode?: string;
+  signalOccurrenceId?: string;
   requestId: string;
   sourceIdempotencyKey?: string;
   paymentsCountAfter?: number;

@@ -16,6 +16,7 @@ export interface StatusAutomationEventSelectGroup {
 }
 
 const EVENT_GROUPS = [
+  { key: 'messages', label: 'Входящие сообщения' },
   { key: 'order', label: 'Заказ' },
   { key: 'dates', label: 'Даты' },
   { key: 'statuses', label: 'Статусы' },
@@ -100,12 +101,14 @@ export interface StatusAutomationFormValues {
   currentProductionStatusNotIn?: number[];
   paidShareGte?: number;
   orderSourceIn?: StatusAutomationOrderSource[];
+  signalCodeIn?: string[];
   firstPaymentOnly?: boolean;
   priority: number;
   isEnabled: boolean;
 }
 
 export const STATUS_AUTOMATION_CONDITION_KEYS = [
+  'signalCodeIn',
   'currentOrderStatusIn',
   'currentOrderStatusNotIn',
   'previousOrderStatusIn',
@@ -231,6 +234,7 @@ export function describeConditions(
         .join(', ')}`,
     );
   }
+  if (current.signalCodeIn?.length) parts.push(`Сигналы: ${current.signalCodeIn.join(', ')}`);
   if (current.firstPaymentOnly === true) {
     parts.push('Только первый платёж');
   }
@@ -377,6 +381,7 @@ function clearStatusAutomationCondition(
     case 'currentProductionStatusIn': return { ...form, currentProductionStatusIn: [] };
     case 'currentProductionStatusNotIn': return { ...form, currentProductionStatusNotIn: [] };
     case 'paidShareGte': return { ...form, paidShareGte: undefined };
+    case 'signalCodeIn': return { ...form, signalCodeIn: [] };
     case 'orderSourceIn': return { ...form, orderSourceIn: [] };
     case 'firstPaymentOnly': return { ...form, firstPaymentOnly: undefined };
   }
@@ -453,6 +458,7 @@ function buildConditions(form: StatusAutomationFormValues): StatusAutomationCond
   if (form.orderSourceIn?.length) {
     conditions.orderSourceIn = [...form.orderSourceIn];
   }
+  if (form.signalCodeIn?.length) conditions.signalCodeIn = [...new Set(form.signalCodeIn)];
   if (form.firstPaymentOnly !== undefined) {
     conditions.firstPaymentOnly = form.firstPaymentOnly;
   }
@@ -747,6 +753,10 @@ function parseImportedConditions(
   }
 
   const conditions: StatusAutomationConditionsDto = {};
+  if (rawConditions.signalCodeIn !== undefined) {
+    if (!Array.isArray(rawConditions.signalCodeIn) || rawConditions.signalCodeIn.some(v => typeof v !== 'string' || !/^[a-z][a-z0-9_.-]{1,63}$/.test(v))) errors.push('Некорректные коды сигналов');
+    else conditions.signalCodeIn = [...new Set(rawConditions.signalCodeIn as string[])];
+  }
   const statusArrays: Array<[keyof StatusAutomationConditionsDto, unknown]> = [
     ['currentOrderStatusIn', rawConditions.currentOrderStatusIn],
     ['currentOrderStatusNotIn', rawConditions.currentOrderStatusNotIn],
@@ -892,6 +902,7 @@ function normalizeConditionsForExport(
   if (conditions?.orderSourceIn?.length) {
     normalized.orderSourceIn = uniqueByOrder(conditions.orderSourceIn, ORDER_SOURCES);
   }
+  if (conditions?.signalCodeIn?.length) normalized.signalCodeIn = [...new Set(conditions.signalCodeIn)].sort();
   if (conditions?.firstPaymentOnly !== undefined) {
     normalized.firstPaymentOnly = conditions.firstPaymentOnly;
   }

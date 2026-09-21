@@ -1,4 +1,5 @@
 export type StatusAutomationEventType =
+  | 'message.signal_detected'
   | 'payment.created'
   | 'order.payment_status_changed'
   | 'order.created'
@@ -12,7 +13,7 @@ export type StatusAutomationEventType =
   | 'mdf.board.baths_ready'
   | 'mdf.board.baths_laminated';
 
-export type StatusAutomationEventGroup = 'order' | 'dates' | 'statuses' | 'payments' | 'production';
+export type StatusAutomationEventGroup = 'order' | 'dates' | 'statuses' | 'payments' | 'production' | 'messages';
 
 export type StatusAutomationActionType =
   | 'change_order_status'
@@ -34,6 +35,7 @@ export interface StatusAutomationActionConfigDto {
 export type StatusAutomationOrderSource = 'manual' | 'bazis' | 'import';
 
 export interface StatusAutomationConditionsDto {
+  signalCodeIn?: string[];
   currentOrderStatusIn?: number[];
   currentOrderStatusNotIn?: number[];
   previousOrderStatusIn?: number[];

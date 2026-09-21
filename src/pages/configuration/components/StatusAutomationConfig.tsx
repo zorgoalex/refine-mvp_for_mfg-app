@@ -135,6 +135,7 @@ const CONDITION_LABELS: Record<ConditionKey, string> = {
   currentProductionStatusNotIn: 'Ни одна учитываемая деталь не имеет статус из списка',
   paidShareGte: 'Оплачено не менее',
   orderSourceIn: 'Источник заказа — один из',
+  signalCodeIn: 'Код входящего сигнала — один из',
   firstPaymentOnly: 'Это первый платёж по заказу',
 };
 
@@ -155,6 +156,7 @@ function emptyForm(eventType: StatusAutomationEventType = 'order.created'): Stat
     currentProductionStatusNotIn: [],
     paidShareGte: undefined,
     orderSourceIn: [],
+    signalCodeIn: [],
     firstPaymentOnly: undefined,
     priority: 100,
     isEnabled: false,
@@ -183,6 +185,7 @@ function formFromRule(rule: StatusAutomationRuleDto): StatusAutomationFormValues
     ],
     paidShareGte: rule.conditions.paidShareGte,
     orderSourceIn: [...(rule.conditions.orderSourceIn ?? [])],
+    signalCodeIn: [...(rule.conditions.signalCodeIn ?? [])],
     firstPaymentOnly: rule.conditions.firstPaymentOnly,
     priority: rule.priority,
     isEnabled: rule.isEnabled,
@@ -1350,6 +1353,9 @@ export function StatusAutomationConfig() {
                       style={{ width: 180 }}
                     />
                   );
+                } else if (key === 'signalCodeIn') {
+                  control = <Select mode="tags" aria-label={CONDITION_LABELS[key]} value={form.signalCodeIn ?? []}
+                    onChange={value => updateForm({ signalCodeIn: value })} placeholder="Коды из «Обработки сообщений», например goods.ready" style={{ width: '100%' }} />;
                 } else if (key === 'orderSourceIn') {
                   control = (
                     <Select<StatusAutomationOrderSource[]>

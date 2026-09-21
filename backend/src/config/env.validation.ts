@@ -395,6 +395,8 @@ export const envSchema = z
       .union([z.string().min(32).max(256), emptyTrimmedStringFromEnv])
       .optional(),
     WAHA_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(30000).default(10000),
+    BACKEND_ENABLE_INBOUND_SIGNALS: booleanFromEnv.default(false),
+    BACKEND_INBOUND_SIGNALS_RELAY_OWNER: z.enum(['none', 'in_process']).default('none'),
     BACKEND_WHATSAPP_RELAY_OWNER: z.enum(['none', 'in_process', 'external']).default('none'),
     BACKEND_WHATSAPP_RELAY_POLL_INTERVAL_MS: z.coerce
       .number()
@@ -698,6 +700,9 @@ export const envSchema = z
       });
     }
 
+    if (env.BACKEND_INBOUND_SIGNALS_RELAY_OWNER !== 'none' && !env.BACKEND_ENABLE_INBOUND_SIGNALS) {
+      ctx.addIssue({ code: 'custom', message: 'BACKEND_ENABLE_INBOUND_SIGNALS=true is required when signal processing is enabled', path: ['BACKEND_ENABLE_INBOUND_SIGNALS'] });
+    }
     if (env.BACKEND_ENABLE_WHATSAPP) {
       for (const key of [
         'DATABASE_URL',

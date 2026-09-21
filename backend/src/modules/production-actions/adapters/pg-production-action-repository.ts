@@ -9,7 +9,7 @@ import type { MdfBoardDetailScope } from '../../status-automation/application/md
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole, type PermissionName } from '../../../permissions/permissions';
 import type { MdfBoardColumnAutomationInput } from '../../status-automation/application/status-automation-runtime';
-import type { StatusAutomationEvent } from '../../status-automation/application/status-automation.types';
+import type { AutomationActor, StatusAutomationEvent } from '../../status-automation/application/status-automation.types';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import { rolePolicyForUser } from '../../../permissions/policies/scope';
 import type {
@@ -49,7 +49,7 @@ const PACKER_ALLOWED_ORDER_STATUS_NAMES = new Set(['готов к выдаче',
 
 export interface AutomationActionContext {
   cause?: 'derived_from_production_composition';
-  actor: CurrentUser;
+  actor: AutomationActor;
   requestId: string;
   ruleId: number;
   ruleName: string;
@@ -3405,7 +3405,7 @@ async function writeAudit(
   tx: TransactionClient,
   input: {
     event: CommandName;
-    currentUser?: CurrentUser;
+    currentUser?: AutomationActor;
     actorUserId?: string | number | null;
     requestId: string;
     order: LockedOrder;
@@ -3480,7 +3480,7 @@ async function evaluateMdfBoardLaminatedBathAutomationForDetails(
   tx: TransactionClient,
   input: {
     detailIds: number[];
-    actor: CurrentUser;
+    actor: AutomationActor;
     requestId: string;
     sourceIdempotencyKey: string;
   },

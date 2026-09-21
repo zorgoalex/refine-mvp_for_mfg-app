@@ -7,7 +7,7 @@ import type {
 export interface StatusAutomationEventDescriptor {
   eventType: StatusAutomationEventType;
   title: string; // русское название для UI
-  group: 'order' | 'dates' | 'statuses' | 'payments' | 'production';
+  group: 'order' | 'dates' | 'statuses' | 'payments' | 'production' | 'messages';
   description: string;
   allowedConditions: ReadonlyArray<keyof StatusAutomationConditions>;
   allowedActions: ReadonlyArray<StatusAutomationActionType>;
@@ -42,6 +42,11 @@ const PRODUCTION_STATUS_CHANGED_ACTIONS: ReadonlyArray<StatusAutomationActionTyp
 ];
 
 export const STATUS_AUTOMATION_EVENTS: ReadonlyArray<StatusAutomationEventDescriptor> = [
+  {
+    eventType: 'message.signal_detected', title: 'Получен входящий сигнал', group: 'messages',
+    description: 'Ключевое сообщение из подключённого источника связано с заказом.',
+    allowedConditions: [...BASE_CONDITIONS, 'signalCodeIn'], allowedActions: ALLOWED_ACTIONS,
+  },
   {
     eventType: 'payment.created',
     title: 'Платёж создан',

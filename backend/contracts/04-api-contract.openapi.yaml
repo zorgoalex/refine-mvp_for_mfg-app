@@ -63,6 +63,151 @@ tags:
     description: WhatsApp administration and authenticated WAHA webhook
 
 paths:
+  /api/v1/inbound-signals:
+    get:
+      operationId: listInboundSignals
+      tags: [Inbound signals]
+      security: [{ bearerAuth: [] }]
+      x-permission: message_signals.view
+      summary: Scoped incoming message signals, newest first
+      description: Order scope applies to rows, search and counts. Unresolved/unmatched evidence requires message_signals.resolve. Expired evidence is never returned. pageSize defaults to 50, maximum 100.
+      parameters:
+        - { in: query, name: page, schema: { type: integer, minimum: 1, maximum: 10000 } }
+        - { in: query, name: pageSize, schema: { type: integer, minimum: 1, maximum: 100 } }
+        - { in: query, name: q, schema: { type: string, maxLength: 150 } }
+        - { in: query, name: channel, schema: { type: string } }
+        - { in: query, name: source, schema: { type: string } }
+        - { in: query, name: signal, schema: { type: string } }
+        - { in: query, name: orderId, schema: { type: integer, minimum: 1 } }
+        - { in: query, name: state, schema: { type: string, enum: [needs_review, pending, processing, retry_wait, succeeded, no_action, failed, dismissed] } }
+        - { in: query, name: from, schema: { type: string, format: date-time } }
+        - { in: query, name: to, schema: { type: string, format: date-time } }
+        - { in: query, name: diagnostic, schema: { type: string, enum: ['true', 'false'] } }
+      responses:
+        '200':
+          description: Signal list and scoped counts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total, attention, completed, relayEnabled, automationEnabled]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/InboundSignalRow' } }
+                  total: { type: integer }
+                  attention: { type: integer }
+                  completed: { type: integer }
+                  relayEnabled: { type: boolean }
+                  automationEnabled: { type: boolean }
+        '403': { description: Permission denied }
+        '503': { description: Feature disabled or storage unavailable }
+  /api/v1/inbound-signals/order-options:
+    get:
+      operationId: inboundSignalOrderOptions
+      security: [{ bearerAuth: [] }]
+      x-permission: message_signals.resolve
+      parameters:
+        - { in: query, name: q, schema: { type: string, maxLength: 100 } }
+      responses:
+        '200':
+          description: Up to 30 visible orders
+          content:
+            application/json:
+              schema: { type: array, items: { type: object, properties: { id: { type: string }, name: { type: string } } } }
+  /api/v1/inbound-signals/{id}:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string, pattern: '^[1-9][0-9]{0,15}$' } }
+    get:
+      operationId: getInboundSignal
+      security: [{ bearerAuth: [] }]
+      x-permission: message_signals.view
+      description: Message, matching history, resolution and automation results. Technical request ID/config version/rule codes require message_signals.technical. Invisible and expired records return the same 404.
+      responses:
+        '200': { description: Signal detail with message, steps, actions and optional technical section }
+        '404': { description: Not found or outside order scope }
+  /api/v1/inbound-signals/{id}/resolve-preview:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string } }
+    post:
+      operationId: previewInboundSignalResolution
+      security: [{ bearerAuth: [] }]
+      x-permission: message_signals.resolve
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, orderId]
+              properties: { version: { type: integer, minimum: 1 }, orderId: { type: integer, minimum: 1 } }
+      responses:
+        '201': { description: Preview hash bound to signal version, current order state, rules and configuration; no business writes }
+        '409': { description: Signal changed or not awaiting resolution }
+  /api/v1/inbound-signals/{id}/{action}:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string } }
+      - { in: path, name: action, required: true, schema: { type: string, enum: [resolve, dismiss, retry] } }
+    post:
+      operationId: commandInboundSignal
+      security: [{ bearerAuth: [] }]
+      x-permission: message_signals.resolve
+      description: Resolve requires fresh previewHash and orderId. Dismiss requires reason; only needs_review or failed. Retry only failed, preserves prior approval fingerprint. Completed records never replay. Same idempotency key/actor/body returns original result.
+      parameters:
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, minLength: 16, maxLength: 100 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1 }
+                orderId: { type: integer, minimum: 1 }
+                previewHash: { type: string, minLength: 64, maxLength: 64 }
+                reason: { type: string, enum: [false_match, irrelevant, duplicate, other] }
+      responses:
+        '201': { description: Idempotent state transition queued or dismissed }
+        '409': { description: Version, preview or idempotency conflict }
+  /api/v1/message-processing/configuration:
+    get:
+      operationId: getMessageProcessingConfiguration
+      security: [{ bearerAuth: [] }]
+      x-permission: message_signals.manage_config
+      responses:
+        '200':
+          description: Versioned sources, signal catalog, templates and keyword rules
+          content: { application/json: { schema: { $ref: '#/components/schemas/MessageProcessingConfiguration' } } }
+    put:
+      operationId: saveMessageProcessingConfiguration
+      security: [{ bearerAuth: [] }]
+      x-permission: message_signals.manage_config
+      description: Atomic configuration replacement with optimistic version; duplicate codes and dangling references rejected. Every participant in enabled groups is trusted. No regex/SQL execution.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MessageProcessingConfiguration' } } }
+      responses:
+        '200': { description: Saved configuration with incremented version }
+        '409': { description: Configuration version conflict }
+        '422': { description: Invalid configuration }
+  /api/v1/message-processing/test:
+    post:
+      operationId: testMessageProcessingTemplate
+      security: [{ bearerAuth: [] }]
+      x-permission: message_signals.manage_config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [configuration, text, source]
+              properties:
+                configuration: { $ref: '#/components/schemas/MessageProcessingConfiguration' }
+                text: { type: string, maxLength: 16000 }
+                source: { type: string, maxLength: 64 }
+      responses:
+        '201': { description: Matching rule/signal codes and extracted references; no intake or business writes }
   /api/v1/catalog-items:
     get:
       tags: [Catalog]
@@ -16048,6 +16193,86 @@ components:
                   requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
 
   schemas:
+    InboundSignalRow:
+      type: object
+      properties:
+        id: { type: string, nullable: true }
+        message_id: { type: string }
+        channel: { type: string }
+        source_name: { type: string }
+        source_code: { type: string }
+        sender: { type: string }
+        message_text: { type: string }
+        sent_at: { type: string, format: date-time }
+        received_at: { type: string, format: date-time }
+        signal_code: { type: string, nullable: true }
+        signal_name: { type: string, nullable: true }
+        state: { type: string, nullable: true }
+        reason_code: { type: string, nullable: true }
+        order_id: { type: string, nullable: true }
+        order_name: { type: string, nullable: true }
+        version: { type: integer, nullable: true }
+    MessageProcessingConfiguration:
+      type: object
+      additionalProperties: false
+      required: [version, sources, signals, resolvers, rules]
+      properties:
+        version: { type: integer, minimum: 1 }
+        sources:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [code, name, channel, connection, chatId, enabled]
+            properties:
+              code: { type: string, pattern: '^[a-z][a-z0-9_.-]{1,63}$' }
+              name: { type: string, minLength: 1, maxLength: 120 }
+              channel: { type: string, enum: [whatsapp] }
+              connection: { type: string, minLength: 1, maxLength: 100 }
+              chatId: { type: string, description: 'WAHA group JID ending @g.us' }
+              enabled: { type: boolean }
+        signals:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            additionalProperties: false
+            required: [code, name]
+            properties:
+              code: { type: string, pattern: '^[a-z][a-z0-9_.-]{1,63}$' }
+              name: { type: string, minLength: 1, maxLength: 120 }
+        resolvers:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [code, name, target, prefixes, format]
+            properties:
+              code: { type: string, pattern: '^[a-z][a-z0-9_.-]{1,63}$' }
+              name: { type: string, minLength: 1, maxLength: 120 }
+              target: { type: string, enum: [order_id, order_name, cut_id, project_code] }
+              prefixes: { type: array, minItems: 1, maxItems: 50, items: { type: string, minLength: 1, maxLength: 100 } }
+              format: { type: string, enum: [digits, code] }
+        rules:
+          type: array
+          maxItems: 300
+          items:
+            type: object
+            additionalProperties: false
+            required: [code, name, sourceCodes, signalCode, resolverCode, keywords, exclusions, matchMode, enabled, priority]
+            properties:
+              code: { type: string, pattern: '^[a-z][a-z0-9_.-]{1,63}$' }
+              name: { type: string, minLength: 1, maxLength: 120 }
+              sourceCodes: { type: array, minItems: 1, maxItems: 100, items: { type: string } }
+              signalCode: { type: string }
+              resolverCode: { type: string }
+              keywords: { type: array, minItems: 1, maxItems: 50, items: { type: string, minLength: 1, maxLength: 100 } }
+              exclusions: { type: array, maxItems: 50, items: { type: string, minLength: 1, maxLength: 100 } }
+              matchMode: { type: string, enum: [phrase, contains, exact] }
+              enabled: { type: boolean }
+              priority: { type: integer, minimum: 0, maximum: 10000 }
     StageSettings:
       type: object
       additionalProperties: false
@@ -22594,6 +22819,7 @@ components:
             - mdf.board.baths
             - mdf.board.baths_ready
             - mdf.board.baths_laminated
+            - message.signal_detected
         actionType:
           type: string
           enum:
@@ -22620,6 +22846,11 @@ components:
     StatusAutomationConditionsDto:
       type: object
       properties:
+        signalCodeIn:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items: { type: string, pattern: '^[a-z][a-z0-9_.-]{1,63}$' }
         currentOrderStatusIn:
           type: array
           items:
@@ -22695,6 +22926,7 @@ components:
             - mdf.board.baths
             - mdf.board.baths_ready
             - mdf.board.baths_laminated
+            - message.signal_detected
         title:
           type: string
         group:
@@ -22705,6 +22937,7 @@ components:
             - statuses
             - payments
             - production
+            - messages
         description:
           type: string
         allowedConditions:
@@ -22722,6 +22955,7 @@ components:
               - paidShareGte
               - orderSourceIn
               - firstPaymentOnly
+              - signalCodeIn
         allowedActions:
           type: array
           items:
@@ -22900,6 +23134,7 @@ components:
             - mdf.board.baths
             - mdf.board.baths_ready
             - mdf.board.baths_laminated
+            - message.signal_detected
         actionType:
           type: string
           enum:
@@ -22947,6 +23182,7 @@ components:
             - mdf.board.baths
             - mdf.board.baths_ready
             - mdf.board.baths_laminated
+            - message.signal_detected
         actionType:
           type: string
           enum:

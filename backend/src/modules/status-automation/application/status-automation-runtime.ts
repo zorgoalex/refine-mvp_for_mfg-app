@@ -59,7 +59,7 @@ const pinnedRules = new WeakMap<TransactionClient, readonly StatusAutomationRule
  */
 export async function executePinnedMdfAutomation(tx: TransactionClient, input: PinnedMdfAutomationInput) {
   if (pinnedRules.has(tx)) throw new Error('MDF_PINNED_EXECUTION_REENTRANT');
-  const batch = snapshotPinnedMdfBatch(input);
+  const batch = snapshotPinnedMdfBatch(input, executionMode === 'live_command');
   if (!isStatusAutomationEnabled()) return { status: 'disabled' as const, selectedRuleCount: 0, skippedPins: [] };
   const previousVisited = executedRules.get(tx);
   // Install before the first await: concurrent/reentrant use of this same tx
@@ -212,7 +212,7 @@ async function evaluateEventRules(tx: TransactionClient, event: StatusAutomation
       await recordRuleSkipped(tx, event, rule, 'lower_priority_same_target');
       continue;
     }
-    const visitKey = `${event.orderId}:${rule.id}:${mdfScope ? `${mdfScope.source.kind}:${mdfScope.source.id}` : 'order'}`;
+    const visitKey = `${event.orderId}:${rule.id}:${event.signalOccurrenceId ?? (mdfScope ? `${mdfScope.source.kind}:${mdfScope.source.id}` : 'order')}`;
     if (visited.has(visitKey)) continue;
     visited.add(visitKey);
     appliedActionTypes.add(rule.actionType);
@@ -596,6 +596,7 @@ async function recordRuleSkipped(
 
 function productionEvaluationAudit(event: StatusAutomationEvent, rule: StatusAutomationRule) {
   return {
+    ...(event.signalOccurrenceId ? { signalOccurrenceId: event.signalOccurrenceId, signalCode: event.signalCode } : {}),
     ruleVersion: rule.version,
     cause: event.cause ?? (event.eventType === 'order.production_status_changed'
       || rule.actionType === 'map_production_status_to_order_status'

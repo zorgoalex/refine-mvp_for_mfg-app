@@ -1,9 +1,9 @@
-import type { CurrentUser } from '../../../permissions/current-user';
+import type { AutomationActor } from './status-automation.types';
 import { isMdfBoardEvent, type MdfBoardResolvedEvent } from './mdf-board-event.types';
 
 export interface MdfAutomationRulePin { ruleId: number; version: number }
 export interface PinnedMdfAutomationInput {
-  actor: CurrentUser;
+  actor: AutomationActor;
   requestId: string;
   sourceIdempotencyKey: string;
   pins: readonly MdfAutomationRulePin[];
@@ -14,12 +14,14 @@ export interface PinnedMdfAutomationInput {
  * accepted, demand-fenced evidence and durable pins under its ordered locks.
  * Snapshot synchronously so an awaited query cannot change this batch's intent.
  */
-export function snapshotPinnedMdfBatch(input: PinnedMdfAutomationInput): PinnedMdfAutomationInput {
+export function snapshotPinnedMdfBatch(input: PinnedMdfAutomationInput, allowSystemActor = false): PinnedMdfAutomationInput {
   const positive = (n: number) => Number.isSafeInteger(n) && n > 0;
   const text = (value: string) => typeof value === 'string' && value.trim().length > 0 && value.length <= 512;
   const invalid = () => { throw new Error('MDF_INVALID_PINNED_BATCH'); };
   if (!text(input.requestId) || !text(input.sourceIdempotencyKey) || !input.actor
-    || !/^[1-9]\d*$/.test(input.actor.id) || !text(input.actor.username)
+    || !(typeof input.actor.id === 'string' && /^[1-9]\d*$/.test(input.actor.id)
+      || allowSystemActor && input.actor.id === null && input.actor.role === null)
+    || !text(input.actor.username)
     || !Array.isArray(input.pins) || input.pins.length > 1000
     || !Array.isArray(input.events) || input.events.length > 5000) invalid();
   const pinIds = new Set<number>();
