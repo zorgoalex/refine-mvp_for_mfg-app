@@ -200,8 +200,10 @@ The port requires a pending durable job, active engine mode and READ COMMITTED
 transaction. Actor/request come from the stored job. It discovers the connected
 owners through received/accepted membership and historical unreleased allocations,
 locks owners before source heads, and checks the closure again after waiting.
-Limits are 100 owners, 250 sources and 5,000 evidence/allocation rows. Any limit,
-pending acceptance, missing membership or conflicting baseline stops processing.
+Limits are 100 owners, 250 sources and 5,000 evidence/allocation rows (accepted and
+received revisions combined). Limits, invalid identities, structural corruption
+or a changed locked closure stop the transaction. Unverified accounting data is
+quarantined locally as described below, not a component-wide processing failure.
 All future acceptance commands must use the same owner-before-source lock order.
 
 Only accepted physical, non-rework CNC/BASIS cut evidence is reservable. Independent
@@ -220,3 +222,35 @@ duplicate reservations or audits. Failures roll back with the caller transaction
 The owning job must still execute pinned rules, publish a coherent board revision,
 write its transition outbox and mark the job complete. None of those operations,
 nor acceptance/backfill, are performed by this port.
+
+### Dependency-local quarantine
+
+The port returns `quarantine` reasons with source kind/id, `positionKeys` and an
+explicit widened `orderIds` boundary when membership is unknown. It also returns
+`blockedPositionKeys`. These describe accounting uncertainty, not card visibility.
+`status=allocated` means the safe accounting pass ran; it does not mean every
+source is verified. The future owning handler must retain these reasons for
+explanation and reprocessing, not mark the whole component successfully resolved.
+
+- Pending/invalid CNC or BASIS evidence is excluded source-by-source. Confirmed
+  independent supply remains usable even for the same order position.
+- Existing allocations referencing excluded/invalid supply block the affected
+  position balance. They are never deleted, freed or reassigned.
+- An unverified bath blocks its possible consumption positions from accepted and
+  received revisions plus historical allocations. Missing revision membership
+  widens the boundary to known owners; if none can be bounded, the full locked
+  owner scope is explicitly quarantined.
+- Missing bath metadata, unsupported rework consumption, changed allocated bath
+  composition and unaccounted lamination are local blockers. Disjoint verified
+  positions in the same order can still progress.
+- A bath touching a blocked position cannot reserve a partial set or consume any
+  reservations. Its existing reservations on OTHER positions still debit stock.
+  Only final-ready baths with complete accepted lamination can consume.
+- Tentative plans are recalculated monotonically after new blockers; no tentative
+  reservation is persisted. Replay does not add reservations or duplicate audit.
+
+This policy is implemented in the dormant allocation port only. The diagnostic
+shadow comparator above retains its own conservative comparability rules; the
+live legacy handlers and UI are unchanged. Historical sources absent from the
+receipt graph still require baseline discovery. Neither quarantine nor these
+tests permit activation before producer coverage, baseline and cutover are ready.

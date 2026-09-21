@@ -1,9 +1,9 @@
 import type { DatabaseClient } from '../../../database/database.types';
 import { auditService } from '../../../common/audit/audit.service';
 import { MdfNeedsAttention, type MdfJob, type MdfSourceKind } from '../application/mdf-job-runner';
-import { planMdfEvidenceAllocations, type MdfEvidenceAllocation, type MdfEvidenceReservation } from '../domain/mdf-evidence-allocation';
-import { mdfPositionKey, mdfSum, type MdfPositionQuantity } from '../domain/mdf-quantities';
-import type { MdfBathDemand } from '../domain/mdf-allocation';
+import type { MdfEvidenceAllocation, MdfEvidenceReservation } from '../domain/mdf-evidence-allocation';
+import { planMdfQuarantinedAllocations } from '../domain/mdf-allocation-quarantine';
+import type { MdfPositionQuantity } from '../domain/mdf-quantities';
 
 type Source = { kind: MdfSourceKind; id: string };
 type Head = Source & { received: string; accepted: string | null; epoch: string };
@@ -13,7 +13,8 @@ const MAX_ORDERS = 100, MAX_SOURCES = 250, MAX_ROWS = 5000;
 const key = (s: Source) => JSON.stringify([s.kind, s.id]);
 function attention(code: string): never { throw new MdfNeedsAttention(`MDF_ALLOCATION_${code}`); }
 const result = (status: 'disabled' | 'superseded' | 'allocated') => ({ status, reservedCount: 0, consumedCount: 0,
-  readyBathIds: [] as string[], blockers: [] as ReturnType<typeof planMdfEvidenceAllocations>['blockers'] });
+  readyBathIds: [] as string[], blockers: [] as ReturnType<typeof planMdfQuarantinedAllocations>['blockers'],
+  quarantine: [] as ReturnType<typeof planMdfQuarantinedAllocations>['quarantine'], blockedPositionKeys: [] as string[] });
 
 // Pending membership and historic allocations are graph edges too: neither may
 // silently disappear from scope when a source changes, is hidden or is removed.
@@ -85,17 +86,15 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string) {
   if (!trigger?.accepted) attention('ACCEPTANCE_PENDING');
   if (trigger.accepted !== job.revision_key || trigger.epoch !== job.correction_epoch) return result('superseded');
   if (heads.length !== scope.sources.length) attention('HEAD_MISSING');
-  if (heads.some(h => !h.accepted || h.received !== h.accepted)) attention('ACCEPTANCE_PENDING');
   const lines = (await tx.query<Line>(`SELECT l.evidence_line_id "evidenceLineId",l.source_kind kind,l.source_id id,
     l.revision_key revision,l.order_id::float8 "orderId",l.detail_id::float8 "detailId",l.quantity::float8 quantity,
     l.stage_code stage,l.evidence_kind evidence,l.rework
-    FROM unnest($1::text[],$2::text[],$3::text[]) s(kind,id,revision) JOIN mdf_evidence_lines l
-      ON l.source_kind=s.kind AND l.source_id=s.id AND l.revision_key=s.revision LIMIT $4`,
-  [heads.map(h => h.kind), heads.map(h => h.id), heads.map(h => h.accepted), MAX_ROWS + 1])).rows;
+    FROM unnest($1::text[],$2::text[],$3::text[],$4::text[]) s(kind,id,accepted,received) JOIN mdf_evidence_lines l
+      ON l.source_kind=s.kind AND l.source_id=s.id
+      AND (l.revision_key=s.accepted OR l.revision_key=s.received) LIMIT $5`,
+  [heads.map(h => h.kind), heads.map(h => h.id), heads.map(h => h.accepted), heads.map(h => h.received), MAX_ROWS + 1])).rows;
   if (lines.length > MAX_ROWS) attention('ROW_LIMIT');
-  for (const l of lines) if (![l.orderId,l.detailId,l.quantity].every(n => Number.isSafeInteger(n) && n > 0)
-    || !['membership','cut','laminated'].includes(l.stage)
-    || (l.stage === 'membership' && l.evidence !== 'derived')) attention('INVALID_EVIDENCE');
+  for (const l of lines) if (![l.orderId,l.detailId,l.quantity].every(n => Number.isSafeInteger(n) && n > 0)) attention('INVALID_EVIDENCE');
   const allocations = (await tx.query<MdfEvidenceAllocation>(`SELECT a.allocation_id "allocationId",a.evidence_line_id "evidenceLineId",
     a.bath_id "bathId",a.bath_revision "bathRevision",a.order_id::float8 "orderId",a.detail_id::float8 "detailId",
     a.quantity::float8 quantity,a.state FROM mdf_bath_allocations a
@@ -107,35 +106,11 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string) {
     FROM cut_result WHERE ('cut-result:'||cut_result_id::text)=ANY($1::text[])`, [bathHeads.map(h => h.id)])).rows;
   const bySource = new Map<string, Line[]>();
   for (const line of lines) { const own = bySource.get(key(line)) ?? []; own.push(line); bySource.set(key(line), own); }
-  const baths: MdfBathDemand[] = [], laminated = new Set<string>();
-  for (const h of heads) {
-    const own = bySource.get(key(h)) ?? [];
-    const members = sumPositions(own.filter(l => l.stage === 'membership'));
-    // Empty accepted snapshots require explicit lifecycle handling, not a guess.
-    if (!members.size) attention('MEMBERSHIP_MISSING');
-    for (const stage of ['cut','laminated']) {
-      const physical = sumPositions(own.filter(l => l.stage === stage && l.evidence === 'physical'));
-      if ([...physical].some(([id, row]) => row.quantity > (members.get(id)?.quantity ?? 0))) attention('MEMBERSHIP_MISMATCH');
-    }
-    if (h.kind !== 'bath') continue;
-    const date = dates.find(d => d.id === h.id)?.createdAt;
-    if (!date || !Number.isFinite(Date.parse(date))) attention('BATH_METADATA_MISSING');
-    // Rework bath consumption needs a separate supply stream; never debit normal stock.
-    if (own.some(l => l.rework)) attention('REWORK_BATH_UNSUPPORTED');
-    const items = [...members.values()];
-    baths.push({ id: h.id, revision: h.accepted!, createdAt: date, complete: true, items });
-    const rolled = sumPositions(own.filter(l => l.stage === 'laminated' && l.evidence === 'physical'));
-    if (items.every(m => (rolled.get(mdfPositionKey(m))?.quantity ?? 0) === m.quantity)) laminated.add(h.id);
-  }
-  const supply = lines.filter(l => ['packet','bazisCutSet'].includes(l.kind)
-    && l.stage === 'cut' && l.evidence === 'physical' && !l.rework);
-  let plan: ReturnType<typeof planMdfEvidenceAllocations>;
-  try { plan = planMdfEvidenceAllocations({ supply, baths, allocations }); }
+  let plan: ReturnType<typeof planMdfQuarantinedAllocations>;
+  try { plan = planMdfQuarantinedAllocations({ sources: heads.map(h => ({ ...h,
+    lines: bySource.get(key(h)) ?? [], createdAt: dates.find(d => d.id === h.id)?.createdAt })),
+  allocations, orderIds: scope.orders }); }
   catch { return attention('INVALID_BALANCE'); }
-  // No partial writes for an unresolved historical revision/balance.
-  if (plan.blockers.length) attention('BASELINE_CONFLICT');
-  // Known lamination without its exact supply allocation is not new free work.
-  if ([...laminated].some(id => !plan.readyBathIds.includes(id))) attention('LAMINATION_SUPPLY_MISSING');
   let inserted: (MdfEvidenceReservation & { allocationId: string })[] = [];
   if (plan.reservations.length) {
     inserted = (await tx.query<MdfEvidenceReservation & { allocationId: string }>(`INSERT INTO mdf_bath_allocations
@@ -147,22 +122,14 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string) {
     [JSON.stringify(plan.reservations), job.event_key])).rows;
   }
   const toConsume = [...allocations.filter(a => a.state === 'reserved'), ...inserted]
-    .filter(a => laminated.has(a.bathId));
+    .filter(a => plan.consumableBathIds.includes(a.bathId));
   if (toConsume.length) await tx.query(`UPDATE mdf_bath_allocations SET state='consumed',updated_at=now()
     WHERE allocation_id=ANY($1::uuid[]) AND state='reserved'`, [toConsume.map(a => a.allocationId)]);
   await auditChanges(tx, job, 'reserved', inserted);
   await auditChanges(tx, job, 'consumed', toConsume);
   return { ...result('allocated'), readyBathIds: plan.readyBathIds, blockers: plan.blockers,
+    quarantine: plan.quarantine, blockedPositionKeys: plan.blockedPositionKeys,
     reservedCount: inserted.length, consumedCount: toConsume.length };
-}
-
-function sumPositions(lines: readonly MdfPositionQuantity[]) {
-  const result = new Map<string, MdfPositionQuantity>();
-  for (const l of lines) {
-    const k = mdfPositionKey(l);
-    result.set(k, { orderId: l.orderId, detailId: l.detailId, quantity: mdfSum(result.get(k)?.quantity ?? 0, l.quantity) });
-  }
-  return result;
 }
 
 async function auditChanges(tx: DatabaseClient, job: MdfJob, state: 'reserved' | 'consumed',

@@ -61,6 +61,15 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF allocation exec
   }
   const allocations = async (orderId: number) => (await db.query(`SELECT bath_id,quantity,state FROM mdf_bath_allocations
     WHERE order_id=$1 ORDER BY bath_id,quantity`, [orderId])).rows;
+  async function independentPosition(f: Awaited<ReturnType<typeof fixture>>) {
+    const id = f.orderId * 100 + 50, bathId = `cut-result:${id}`;
+    const receipt = { ...f.receipts[0], sourceId: `E2E-independent-${f.orderId}`,
+      lines: f.receipts[0].lines.map(l => ({ ...l, detailId: f.detailId + 1, quantity: 10 })) };
+    const saved = await tx(c => recordMdfReceipt(c, receipt));
+    await db.query("INSERT INTO cut_result VALUES($1,'2026-09-03')", [id]);
+    await tx(c => recordMdfReceipt(c, { ...receipt, sourceKind: 'bath', sourceId: bathId, lines: [receipt.lines[0]] }));
+    return { bathId, receipt, saved };
+  }
   it('reserves independent portions once, audits actor/scope, and leaves job/publication to caller', async () => {
     const f = await fixture();
     expect(await tx(c => executeMdfAllocation(c, f.jobId))).toMatchObject({ status: 'allocated', readyBathIds: [f.bathIds[0]], reservedCount: 2 });
@@ -89,7 +98,8 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF allocation exec
     const f = await fixture([10]);
     await tx(c => recordMdfReceipt(c, { ...f.receipts[0], revisionKey: '2', accept: false,
       expectedFence: { version: '1', correctionEpoch: '0' } }));
-    await expect(tx(c => executeMdfAllocation(c, f.jobId))).rejects.toMatchObject({ code: 'MDF_ALLOCATION_ACCEPTANCE_PENDING' });
+    expect(await tx(c => executeMdfAllocation(c, f.jobId))).toMatchObject({ readyBathIds: [], reservedCount: 0,
+      quarantine: [expect.objectContaining({ code: 'ACCEPTANCE_PENDING' })] });
     expect(await allocations(f.orderId)).toEqual([]);
   });
   it('stale job cannot reserve supply after source revision advances', async () => {
@@ -114,7 +124,8 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF allocation exec
   it('retains allocations if old bath source disappears; does not give them to a new bath', async () => {
     const f = await fixture([10]); await tx(c => executeMdfAllocation(c, f.jobId));
     await db.query('DELETE FROM cut_result WHERE cut_result_id=$1', [Number(f.bathIds[0].split(':')[1])]);
-    await expect(tx(c => executeMdfAllocation(c, f.jobId))).rejects.toMatchObject({ code: 'MDF_ALLOCATION_BATH_METADATA_MISSING' });
+    expect(await tx(c => executeMdfAllocation(c, f.jobId))).toMatchObject({ readyBathIds: [], reservedCount: 0,
+      quarantine: [expect.objectContaining({ code: 'BATH_METADATA_MISSING' })] });
     expect((await allocations(f.orderId)).every(a => a.bath_id === f.bathIds[0])).toBe(true);
   });
   it('rolls reservations and audit back on downstream failure', async () => {
@@ -162,7 +173,8 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF allocation exec
     const f = await fixture([10], [10]); await tx(c => executeMdfAllocation(c, f.jobId));
     await tx(c => recordMdfReceipt(c, { ...f.receipts[0], sourceKind: 'bath', sourceId: f.bathIds[0],
       revisionKey: '2', expectedFence: { version: '1', correctionEpoch: '0' }, lines: [f.receipts[0].lines[0]] }));
-    await expect(tx(c => executeMdfAllocation(c, f.jobId))).rejects.toMatchObject({ code: 'MDF_ALLOCATION_BASELINE_CONFLICT' });
+    expect(await tx(c => executeMdfAllocation(c, f.jobId))).toMatchObject({ readyBathIds: [], reservedCount: 0,
+      quarantine: [expect.objectContaining({ code: 'COMPOSITION_CHANGED' })] });
     expect((await db.query('SELECT bath_revision FROM mdf_bath_allocations WHERE order_id=$1', [f.orderId])).rows)
       .toEqual([{ bath_revision: '1' }]);
   });
@@ -170,6 +182,70 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF allocation exec
     const f = await fixture([10]);
     await db.query("UPDATE cut_result SET created_at='2026-08-01' WHERE cut_result_id=$1", [Number(f.bathIds[1].split(':')[1])]);
     expect(await tx(c => executeMdfAllocation(c, f.jobId))).toMatchObject({ readyBathIds: [f.bathIds[1]] });
+  });
+  it('pending CNC does not suppress verified BASIS supply for the same position', async () => {
+    const f = await fixture([10, 10], [10]);
+    await tx(c => recordMdfReceipt(c, { ...f.receipts[0], revisionKey: '2', accept: false,
+      expectedFence: { version: '1', correctionEpoch: '0' } }));
+    expect(await tx(c => executeMdfAllocation(c, f.saved[1].jobId))).toMatchObject({ readyBathIds: f.bathIds, reservedCount: 1 });
+    expect((await db.query(`SELECT e.source_kind FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+      WHERE a.order_id=$1`, [f.orderId])).rows).toEqual([{ source_kind: 'bazisCutSet' }]);
+  });
+  it('pending bath blocks its consumption balance, not another position in the same order', async () => {
+    const f = await fixture([10], [10]); const other = await independentPosition(f);
+    await tx(c => recordMdfReceipt(c, { ...f.receipts[0], sourceKind: 'bath', sourceId: f.bathIds[0],
+      revisionKey: '2', accept: false, expectedFence: { version: '1', correctionEpoch: '0' }, lines: [f.receipts[0].lines[0]] }));
+    const result = await tx(c => executeMdfAllocation(c, f.jobId));
+    expect(result).toMatchObject({ readyBathIds: [other.bathId], reservedCount: 1, consumedCount: 0 });
+    expect(await allocations(f.orderId)).toEqual([{ bath_id: other.bathId, quantity: '10', state: 'reserved' }]);
+    expect(await tx(c => executeMdfAllocation(c, f.jobId))).toMatchObject({ reservedCount: 0, consumedCount: 0 });
+    expect((await db.query('SELECT count(*) n FROM audit_log WHERE related_order_id=$1', [f.orderId])).rows[0].n).toBe('1');
+  });
+  it('allocated stale source never frees stock; independent position still progresses', async () => {
+    const f = await fixture([10]); await tx(c => executeMdfAllocation(c, f.jobId));
+    const before = await allocations(f.orderId); const other = await independentPosition(f);
+    await tx(c => recordMdfReceipt(c, { ...f.receipts[0], revisionKey: '2', accept: false,
+      expectedFence: { version: '1', correctionEpoch: '0' } }));
+    expect(await tx(c => executeMdfAllocation(c, other.saved.jobId))).toMatchObject({ readyBathIds: [other.bathId], reservedCount: 1 });
+    expect(await allocations(f.orderId)).toEqual(expect.arrayContaining(before));
+    expect((await allocations(f.orderId)).some(a => a.bath_id === f.bathIds[1])).toBe(false);
+  });
+  it('unaccounted lamination remains local, never consumes unrelated reservations', async () => {
+    const f = await fixture([10], [10], true); const other = await independentPosition(f);
+    const saved = await tx(c => recordMdfReceipt(c, { ...f.receipts[0], revisionKey: '2',
+      expectedFence: { version: '1', correctionEpoch: '0' }, lines: [f.receipts[0].lines[0]] }));
+    expect(await tx(c => executeMdfAllocation(c, saved.jobId))).toMatchObject({ readyBathIds: [other.bathId],
+      reservedCount: 1, consumedCount: 0, quarantine: [expect.objectContaining({ code: 'LAMINATION_SUPPLY_MISSING' })] });
+  });
+  it('quarantined mixed lamination preserves but does not consume its valid other-position reserve', async () => {
+    const f = await fixture([10], [10]); const other = await independentPosition(f);
+    const id = f.orderId * 100 + 60, bathId = `cut-result:${id}`;
+    await db.query("INSERT INTO cut_result VALUES($1,'2026-09-04')", [id]);
+    const members = [f.receipts[0].lines[0], { ...other.receipt.lines[0], lineKey: 'member-other' }];
+    await tx(c => recordMdfReceipt(c, { ...f.receipts[0], sourceKind: 'bath', sourceId: bathId,
+      lines: [...members, ...members.map(l => ({ ...l, lineKey: `${l.lineKey}-rolled`, stageCode: 'laminated', evidenceKind: 'physical' as const }))] }));
+    await tx(c => c.query(`INSERT INTO mdf_bath_allocations
+      (evidence_line_id,bath_id,bath_revision,order_id,detail_id,quantity,state,cause_key)
+      SELECT evidence_line_id,$1,'1',order_id,detail_id,quantity,'reserved','E2E-historic-reserve'
+      FROM mdf_evidence_lines WHERE source_kind='packet' AND source_id=$2 AND stage_code='cut'`, [bathId,other.receipt.sourceId]));
+    await tx(c => recordMdfReceipt(c, { ...f.receipts[0], sourceKind: 'bath', sourceId: f.bathIds[0],
+      revisionKey: '2', accept: false, expectedFence: { version: '1', correctionEpoch: '0' }, lines: members.slice(0,1) }));
+    expect(await tx(c => executeMdfAllocation(c, f.jobId))).toMatchObject({ readyBathIds: [], reservedCount: 0, consumedCount: 0 });
+    expect(await allocations(f.orderId)).toEqual([{ bath_id: bathId, quantity: '10', state: 'reserved' }]);
+    expect((await db.query('SELECT count(*) n FROM audit_log WHERE related_order_id=$1', [f.orderId])).rows[0].n).toBe('0');
+  });
+  it('concurrent passes with quarantine reserve independent supply once', async () => {
+    const f = await fixture([10,10],[10]);
+    await tx(c => recordMdfReceipt(c, { ...f.receipts[0], revisionKey: '2', accept: false,
+      expectedFence: { version: '1', correctionEpoch: '0' } }));
+    const other = new Client(config); await other.connect();
+    try {
+      await other.query(`SET search_path=${schema},public`);
+      const results = await Promise.all([tx(c => executeMdfAllocation(c,f.jobId)),
+        tx(c => executeMdfAllocation(c,f.saved[1].jobId),other)]);
+      expect(results.map(r => r.reservedCount).sort()).toEqual([0,1]);
+      expect(await allocations(f.orderId)).toHaveLength(1);
+    } finally { await other.end(); }
   });
   it('epoch correction fences reject an old job even when accepted revision did not change', async () => {
     const f = await fixture([10]);
