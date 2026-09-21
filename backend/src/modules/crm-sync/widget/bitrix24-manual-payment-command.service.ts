@@ -49,6 +49,8 @@ export interface WidgetCommandResponse {
   message: string;
 }
 
+import { Bitrix24PaidConversionService } from '../reverse/bitrix24-paid-conversion.service';
+
 export class Bitrix24ManualPaymentCommandService {
   constructor(
     private readonly repository: Bitrix24PaymentWidgetRepository,
@@ -57,6 +59,7 @@ export class Bitrix24ManualPaymentCommandService {
     private readonly installationTokens: Bitrix24OAuthTokenService,
     private readonly config: CrmSyncRuntimeConfigService,
     private readonly catalog: Bitrix24PaymentSystemCatalogService,
+    private readonly paidConversion?: Bitrix24PaidConversionService,
   ) {}
 
   async getContext(authenticated: AuthenticatedWidgetSession): Promise<WidgetContextResponse> {
@@ -300,7 +303,7 @@ export class Bitrix24ManualPaymentCommandService {
       return (await this.repository.getCommand(initial.commandId)) ?? initial;
     }
     try {
-      return await this.resumeClaimed(initial, freshActorToken);
+      return await this.resumeClaimed(initial, leaseToken, freshActorToken);
     } finally {
       await this.repository.releaseCommand(initial.commandId, leaseToken);
     }
@@ -308,6 +311,7 @@ export class Bitrix24ManualPaymentCommandService {
 
   private async resumeClaimed(
     initial: ManualPaymentCommand,
+    leaseToken: string,
     freshActorToken?: string,
   ): Promise<ManualPaymentCommand> {
     let command = initial;
@@ -389,6 +393,11 @@ export class Bitrix24ManualPaymentCommandService {
       command.status === 'awaiting_order_ready'
     ) {
       try {
+        const auto = await this.paidConversion?.run({ dealId: command.bitrixDealId, requestId: command.originatingRequestId,
+          widget: { commandId: command.commandId, leaseToken,
+            awaitConfirmation: (tx, id) => this.repository.awaitOverpaymentConfirmationInTransaction(tx, id),
+            materialize: (tx, id) => this.repository.materializeCommandInTransaction(tx, id) } });
+        if (auto?.reason === 'PAYMENT_REQUIRES_CONFIRMATION') return (await this.repository.getCommand(command.commandId)) ?? command;
         command = await this.repository.materializeCommand(command.commandId);
       } catch (error) {
         await this.repository.markPostCreateFailure(
