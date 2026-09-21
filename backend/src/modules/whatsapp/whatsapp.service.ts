@@ -284,6 +284,11 @@ export class WhatsAppService {
       throw error;
     }
     if (parsed.kind === "ignored") {
+      await this.technicalLog.record({
+        component: "webhook", level: "info", eventCode: "whatsapp.webhook.ignored",
+        outcome: "observed", operation: "webhook.receive", requestId,
+        details: { reason: parsed.reason },
+      });
       await this.recordSystem(
         "whatsapp.webhook.received",
         privateIdentifier(config.webhookSecret, parsed.entityId),
@@ -508,8 +513,8 @@ export function parseInbound(
     return { kind: "ignored", entityId: id, reason: "from_me" };
   if (payload.source === "api")
     return { kind: "ignored", entityId: id, reason: "api_source" };
-  const chatId = typeof payload.from === "string" ? payload.from : "";
-  if (!/^[^@\s]{1,140}@c\.us$/.test(chatId))
+  const chatId = directChatId(payload.from);
+  if (!chatId)
     return { kind: "ignored", entityId: id, reason: "non_direct_chat" };
   const text = typeof payload.body === "string" ? payload.body.trim() : "";
   if (!isPlainTextMessage(payload))
@@ -520,6 +525,13 @@ export function parseInbound(
     kind: "message",
     message: { externalEventId: id, sessionName, chatId, text, requestId },
   };
+}
+
+function directChatId(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const match = /^([^@\s]{1,140})@(c\.us|lid|s\.whatsapp\.net)$/.exec(value);
+  if (!match) return null;
+  return match[2] === "s.whatsapp.net" ? `${match[1]}@c.us` : value;
 }
 
 export function privateIdentifier(secret: string, value: string) {

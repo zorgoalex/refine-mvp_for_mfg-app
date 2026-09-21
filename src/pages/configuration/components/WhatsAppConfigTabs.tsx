@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   Button,
@@ -592,24 +592,46 @@ export const WhatsAppTechnicalLogsConfig: React.FC = () => {
   const [rows, setRows] = useState<WhatsAppTechnicalLogDto[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<UserFacingError | null>(null);
   const [query, setQuery] = useState<WhatsAppTechnicalLogQuery>({ page: 1, pageSize: 100 });
+  const requestRevision = useRef(0);
+  const activeRequest = useRef<AbortController | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (silent && activeRequest.current) return;
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    const revision = ++requestRevision.current;
+    if (!silent) setLoading(true);
     setLoadError(null);
     try {
-      const result = await whatsappApi.technicalLogs(query);
+      const result = await whatsappApi.technicalLogs(query, { signal: controller.signal });
+      if (revision !== requestRevision.current) return;
       setRows(result.data);
       setTotal(result.pagination.total);
+      setLastUpdatedAt(new Date().toISOString());
     } catch (error) {
+      if (controller.signal.aborted) return;
+      if (revision !== requestRevision.current) return;
       setLoadError(whatsappErrorPresentation(error, "Не удалось загрузить технический журнал WhatsApp"));
     } finally {
-      setLoading(false);
+      if (activeRequest.current === controller) activeRequest.current = null;
+      if (revision === requestRevision.current && !controller.signal.aborted) setLoading(false);
     }
   }, [query]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load(true);
+    }, 15_000);
+    return () => {
+      window.clearInterval(timer);
+      activeRequest.current?.abort();
+    };
+  }, [load]);
 
   const exportLogs = async () => {
     try {
@@ -628,6 +650,7 @@ export const WhatsAppTechnicalLogsConfig: React.FC = () => {
           <Paragraph type="secondary">События WAHA API, сессии, webhook, relay и cleanup. Хранение 14 дней; сообщения, JID, QR и секреты не записываются.</Paragraph>
         </div>
         <Space wrap>
+          <Text type="secondary">Обновлено: {formatDate(lastUpdatedAt)}</Text>
           <Button icon={<DownloadOutlined />} onClick={() => void exportLogs()}>Выгрузить JSONL</Button>
           <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>Обновить</Button>
         </Space>

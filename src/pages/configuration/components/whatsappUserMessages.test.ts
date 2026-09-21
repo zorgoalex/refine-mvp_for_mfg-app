@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../../../api/apiError";
 import {
@@ -9,6 +11,17 @@ import {
 } from "./WhatsAppConfigTabs";
 
 describe("WhatsApp user-facing diagnostics", () => {
+  it("refreshes the technical journal while its tab is visible", () => {
+    const source = readFileSync(resolve(__dirname, "WhatsAppConfigTabs.tsx"), "utf8");
+    expect(source).toContain("window.setInterval");
+    expect(source).toContain('document.visibilityState === "visible"');
+    expect(source).toContain("15_000");
+    expect(source).toContain("Обновлено:");
+    expect(source).toContain("if (silent && activeRequest.current) return");
+    expect(source).toContain("activeRequest.current?.abort()");
+    expect(source).toContain("signal: controller.signal");
+  });
+
   it.each([
     ["AUTH_REQUIRED", 401, "Сеанс ERP завершён"],
     ["PERMISSION_DENIED", 403, "Недостаточно прав"],
