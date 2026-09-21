@@ -48,6 +48,7 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
       continue;
     }
     sources.push({ ...h, kind: h.kind, verified: issues.length===0,
+      manualPlacementColumn: snapshot.metadata.get(mdfSourceKey(h))?.manualPlacementColumn ?? null,
       priorColumn: previousColumns.get(mdfSourceKey(h)) ?? snapshot.metadata.get(mdfSourceKey(h))?.priorColumn ?? null, issues,
       lines });
   }

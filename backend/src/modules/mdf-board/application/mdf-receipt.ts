@@ -83,6 +83,10 @@ export async function recordMdfReceipt(tx: DatabaseClient, input: MdfReceiptInpu
     if (ruleIds.has(rule.ruleId)) invalid(); ruleIds.add(rule.ruleId);
   }
   const context = input.executionContext;
+  const placement = context?.manualPlacementColumn;
+  if (placement != null && !(input.sourceKind === 'bath'
+    ? ['baths','baths_ready','baths_laminated','completed_baths'].includes(placement)
+    : ['packet','bazisCutSet'].includes(input.sourceKind) && ['parsed','completed','completed_laminated'].includes(placement))) invalid();
   if (context && input.accept && (!context.compositionComplete || input.lines.some(line =>
     !context.demand.some(d => d.orderId === line.orderId && d.detailId === line.detailId)))) invalid();
   // Preserve v1 digests for receipts recorded before execution context existed.
@@ -127,10 +131,10 @@ export async function recordMdfReceipt(tx: DatabaseClient, input: MdfReceiptInpu
   if (context) {
     await tx.query(`INSERT INTO mdf_revision_context
       (source_kind,source_id,revision_key,source_created_at,display_name,prior_column,composition_complete,demand_digest,
-        acceptance_requested,predecessor_accepted_revision_key,predecessor_received_revision_key)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, [...source, input.revisionKey, context.sourceCreatedAt,
+        acceptance_requested,predecessor_accepted_revision_key,predecessor_received_revision_key${placement === undefined ? '' : ',manual_placement_column'})
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11${placement === undefined ? '' : ',$12'})`, [...source, input.revisionKey, context.sourceCreatedAt,
       context.displayName, context.priorColumn, context.compositionComplete, mdfDemandDigest(context.demand),input.accept,
-      head?.accepted_revision_key ?? null,head?.received_revision_key ?? null]);
+      head?.accepted_revision_key ?? null,head?.received_revision_key ?? null,...(placement === undefined ? [] : [placement])]);
     await tx.query(`INSERT INTO mdf_revision_demand(source_kind,source_id,revision_key,order_id,detail_id,quantity)
       SELECT $1,$2,$3,(d->>'orderId')::bigint,(d->>'detailId')::bigint,(d->>'quantity')::bigint
       FROM jsonb_array_elements($4::jsonb) d`, [...source, input.revisionKey, JSON.stringify(context.demand)]);

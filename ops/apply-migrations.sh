@@ -2150,6 +2150,16 @@ probe_file() {
                      "$(q_col bitrix24_incoming_request auto_conversion_reason)" \
                      "$(q_con_on bitrix24_incoming_request bitrix24_incoming_request_auto_conversion_status_check)" \
                      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.orders') AND tgname='bitrix_paid_request_recheck' AND tgenabled='O' AND tgfoid=to_regprocedure('public.bitrix_paid_request_recheck()'));" ;;
+    175_mdf_command_placement*) probe_all \
+      "$(q_colset_hash mdf_revision_context manual_placement_column 14a75d57b0d8cf4a6eb566b34af50873)" \
+      "$(q_conset_hash mdf_revision_context mdf_context_manual_placement_check c614fa7218df99c3fa199b8609fc4fe2)" \
+      "$(q_colset_hash mdf_manual_command_results actor_user_id,command_key,request_digest,source_kind,source_id,order_ids,response,created_at 472e096aaefa864ed4b6e46f3626351d)" \
+      "$(q_conset_hash mdf_manual_command_results mdf_manual_command_results_actor_user_id_check,mdf_manual_command_results_command_key_check,mdf_manual_command_results_order_ids_check,mdf_manual_command_results_pkey,mdf_manual_command_results_request_digest_check,mdf_manual_command_results_response_check,mdf_manual_command_results_source_id_check,mdf_manual_command_results_source_kind_check 979383da95b11c5a7e68b6620044c355)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND tablename='mdf_manual_command_results' AND indexname='mdf_manual_command_results_pkey' AND indexdef='CREATE UNIQUE INDEX mdf_manual_command_results_pkey ON public.mdf_manual_command_results USING btree (actor_user_id, command_key)');" \
+      "$(q_fun_hash 'public.mdf_reject_evidence_change()' a51e1b51d407124a856f1993d9c54fe8)" \
+      "SELECT count(*)=2 FROM (VALUES ('mdf_revision_context','mdf_context_immutable'),('mdf_manual_command_results','mdf_manual_command_result_immutable')) expected(tbl,trg) JOIN pg_trigger t ON t.tgrelid=to_regclass('public.'||tbl) AND t.tgname=trg AND t.tgfoid=to_regprocedure('public.mdf_reject_evidence_change()') AND t.tgtype=27 AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgattr=''::int2vector;" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=ANY(ARRAY[to_regclass('public.mdf_revision_context'),to_regclass('public.mdf_manual_command_results')]) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=to_regclass('public.mdf_manual_command_results') AND (NOT indisvalid OR NOT indisready));" ;;
     174_mdf_execution_context*) probe_all \
       "$(q_colset_hash mdf_revision_context source_kind,source_id,revision_key,schema_version,source_created_at,display_name,prior_column,composition_complete,demand_digest,acceptance_requested,predecessor_accepted_revision_key,predecessor_received_revision_key f4409d464360dedee5ad9c390ffdc73c)" \
       "$(q_conset_hash mdf_revision_context mdf_revision_context_demand_digest_check,mdf_revision_context_display_name_check,mdf_revision_context_pkey,mdf_revision_context_prior_column_check,mdf_revision_context_schema_version_check,mdf_revision_context_source_kind_source_id_revision_key_fkey 5590dd3a1cd92da4b844f655e8a7ae62)" \
@@ -2180,6 +2190,9 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
+    175_mdf_command_placement*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
     174_mdf_execution_context*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;

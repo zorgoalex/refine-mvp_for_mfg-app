@@ -30,7 +30,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     vi.stubEnv('BACKEND_STATUS_AUTOMATION','true');
     vi.stubEnv('BACKEND_ENABLE_NOTIFICATION_ENGINE','false'); // MDF processing is independent.
     await db.connect(); await db.query(`CREATE SCHEMA ${schema}; SET search_path=${schema},public`);
-    for (const file of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql','174_mdf_execution_context.sql']) {
+    for (const file of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql','174_mdf_execution_context.sql','175_mdf_command_placement.sql']) {
       await db.query(readFileSync(new URL(`../../../../db/migrations/${file}`,import.meta.url),'utf8'));
     }
     // Own schema only, no public business mutations or hard-coded production ids.
@@ -382,5 +382,35 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
       expect((await readMdfPublishedSnapshot(database(),admin,{ dateTo: '2026-09-21' })).cards
         .find(c => c.id===f.receipts[0].sourceId)?.displayName).toBe('newer publication');
     } finally { await other.end(); }
+  });
+  it('explicit terminal placement does not manufacture cut proof; clear preserves real proof', async () => {
+    const f = await fixture();
+    await runner().processOne();
+    await db.query("UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now() WHERE status='pending'");
+    // This source contributes six real cut pieces before/after changing placement.
+    const source = f.receipts[1];
+    const next = { ...source, revisionKey: 'terminal', expectedFence: { version: '1', correctionEpoch: '0' },
+      executionContext: { ...source.executionContext!, manualPlacementColumn: 'completed_laminated' } };
+    await database().transaction(tx => recordMdfReceipt(tx, next));
+    expect(await runner().processOne()).toMatchObject({ status: 'done' });
+    expect((await db.query('SELECT column_key FROM mdf_published_sources WHERE source_kind=$1 AND source_id=$2',
+      [source.sourceKind,source.sourceId])).rows[0].column_key).toBe('completed_laminated');
+    const head = (await db.query('SELECT version,correction_epoch FROM mdf_source_heads WHERE source_kind=$1 AND source_id=$2',
+      [source.sourceKind,source.sourceId])).rows[0];
+    await database().transaction(tx => recordMdfReceipt(tx, { ...next, revisionKey: 'clear',
+      expectedFence: { version: head.version, correctionEpoch: head.correction_epoch },
+      executionContext: { ...next.executionContext, manualPlacementColumn: null } }));
+    expect(await runner().processOne()).toMatchObject({ status: 'done' });
+    expect((await positions(f.orderId))[0].credited_cut).toBe('10');
+    expect((await db.query('SELECT column_key FROM mdf_published_sources WHERE source_kind=$1 AND source_id=$2',
+      [source.sourceKind,source.sourceId])).rows[0].column_key).toBe('completed');
+    // Membership-only terminal card has no physical quantity to credit.
+    const uncut = { ...source, sourceId: String(100000 + f.orderId), revisionKey: '1',
+      lines: source.lines.filter(l => l.stageCode === 'membership'), expectedFence: null,
+      executionContext: { ...source.executionContext!, manualPlacementColumn: 'completed_laminated' } };
+    await database().transaction(tx => recordMdfReceipt(tx, uncut));
+    expect(await runner().processOne()).toMatchObject({ status: 'done' });
+    expect((await positions(f.orderId))[0].credited_cut).toBe('10');
+    expect((await db.query("SELECT 1 FROM mdf_evidence_lines WHERE source_id=$1 AND stage_code='cut'", [uncut.sourceId])).rows).toHaveLength(0);
   });
 });

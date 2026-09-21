@@ -156,7 +156,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText).not.toMatch(/q_fun_hash\(\).*md5\(prosrc\)/);
     expect(probeFn).toContain("q_fun_hash 'cnc_telegram_worker_reason_code_valid(text)'");
     expect(probeFn.match(/q_fun_hash '[^']+' [a-f0-9]{32}/g)).toHaveLength(
-      requiredFunctions.length + 2 + 9 + 1, // 164-169 add nine contracts; 174 adds the context seal guard
+      requiredFunctions.length + 2 + 9 + 1 + 1, // 164-169, 174 context seal, 175 immutable command results
     );
   });
 
@@ -685,10 +685,11 @@ describe('apply-migrations.sh — hard-stop is enforced in all mutating modes', 
 });
 
 describe('apply-migrations.sh auto — detect-only against the live erp_test container', () => {
-  // Cheap live smoke: erp_test is at head, so detect-only must classify every
-  // file as applied/PRESENT and exit 0 without mutating anything. Skips when
-  // the container is not reachable (e.g. CI without the stage stack).
+  // Optional deployed-head smoke. A developer worktree may contain unapplied
+  // migrations; ordinary tests must not require mutating the shared stage DB.
+  // Isolated real-DB probe coverage lives in apply-migrations-recent.integration.
   const containerUp = (() => {
+    if (process.env.ERP_MIGRATION_DEPLOYED_HEAD_SMOKE !== 'true') return false;
     try {
       execFileSync('docker', ['inspect', process.env.PG_CONTAINER ?? 'erp_test-postgresdb-1'], {
         stdio: 'ignore',

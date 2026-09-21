@@ -15,6 +15,7 @@ export interface MdfAcceptedSource extends MdfBoardSource {
   /** Set only by server loader after seal/context/demand validation. */
   verified: boolean;
   priorColumn: string | null;
+  manualPlacementColumn?: string | null;
   issues: readonly string[];
   /** Exactly one accepted revision (or received membership for unverified cards). */
   lines: readonly MdfAcceptedLine[];
@@ -120,7 +121,7 @@ export function projectMdfAcceptedState(input: MdfAcceptedStateInput) {
     const { source: s, members, verified, issues } = p;
     const resolved = verified ? resolveMdfSourceColumn({ kind: s.kind,
       memberRanks: [...members.keys()].map(k => details.get(k)?.rank ?? null), compositionComplete: true,
-      cutConfirmed: p.fullCut, manual: null, thresholds: input.thresholds,
+      cutConfirmed: p.fullCut, manual: s.manualPlacementColumn ?? null, thresholds: input.thresholds,
       bathReadiness: p.balanceBlocked ? 'unknown' : ready.has(s.id) ? 'ready' : 'not_ready',
     }) : null;
     for (const issue of resolved?.issues ?? []) issues.add(issue);

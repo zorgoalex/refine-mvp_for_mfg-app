@@ -28,7 +28,8 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('sealed MDF executio
     await db.connect(); await db.query(`CREATE SCHEMA ${schema}; SET search_path=${schema},public`);
     // Repeat the additive context migration deliberately: deployment retries must be safe.
     for (const file of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql',
-      '174_mdf_execution_context.sql','174_mdf_execution_context.sql']) {
+      '174_mdf_execution_context.sql','174_mdf_execution_context.sql',
+      '175_mdf_command_placement.sql','175_mdf_command_placement.sql']) {
       await db.query(readFileSync(new URL(`../../../../db/migrations/${file}`,import.meta.url),'utf8'));
     }
   });
@@ -91,5 +92,22 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('sealed MDF executio
     } },input));
     expect((await db.query('SELECT actor_user_id FROM mdf_evidence_revisions WHERE source_id=$1',[input.sourceId])).rows[0].actor_user_id).toBe('158');
     expect((await db.query('SELECT display_name FROM mdf_revision_context WHERE source_id=$1',[input.sourceId])).rows[0].display_name).toBe('E2E MDF 18');
+  });
+  it('seals manual placement separately and binds it into replay identity', async () => {
+    const input = receipt();
+    input.executionContext = { ...input.executionContext!, manualPlacementColumn: 'completed_laminated' };
+    await save(input);
+    expect((await db.query('SELECT prior_column,manual_placement_column FROM mdf_revision_context WHERE source_id=$1',
+      [input.sourceId])).rows[0]).toEqual({ prior_column: 'parsed', manual_placement_column: 'completed_laminated' });
+    await expect(save({ ...input, executionContext: { ...input.executionContext, manualPlacementColumn: null } }))
+      .rejects.toThrow('MDF_RECEIPT_CONFLICT');
+    await expect(db.query("UPDATE mdf_revision_context SET manual_placement_column=NULL WHERE source_id=$1", [input.sourceId]))
+      .rejects.toMatchObject({ code: '55000' });
+  });
+  it('rejects a bath placement on a machine source before writing anything', async () => {
+    const input = receipt();
+    input.executionContext = { ...input.executionContext!, manualPlacementColumn: 'baths_ready' };
+    await expect(save(input)).rejects.toThrow('MDF_RECEIPT_INVALID');
+    expect((await db.query('SELECT 1 FROM mdf_evidence_revisions WHERE source_id=$1', [input.sourceId])).rows).toHaveLength(0);
   });
 });

@@ -9,7 +9,7 @@ export interface MdfJob extends QueryResultRow {
 }
 export interface MdfPinnedRule extends QueryResultRow { rule_id: string; rule_version: string }
 export interface MdfJobDatabase<Client extends DatabaseClient = DatabaseClient> {
-  transaction<T>(handler: (client: Client) => Promise<T>): Promise<T>;
+  transaction<T>(handler: (client: Client) => Promise<T>, options?: { isolation: 'read committed' }): Promise<T>;
 }
 export type MdfJobOutcome = 'disabled' | 'idle' | 'done' | 'superseded' | 'retry' | 'needs_attention';
 export class MdfNeedsAttention extends Error {
@@ -73,6 +73,6 @@ export class MdfJobRunner<Client extends DatabaseClient = DatabaseClient> {
           WHERE job_id=$1`, [job.job_id, status, code, mdfRetrySeconds(attempts)]);
         return { status: needsAttention ? 'needs_attention' : 'retry', jobId: job.job_id };
       }
-    });
+    }, { isolation: 'read committed' });
   }
 }

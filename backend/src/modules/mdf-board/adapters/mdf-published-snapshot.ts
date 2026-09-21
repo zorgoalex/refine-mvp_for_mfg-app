@@ -3,6 +3,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { rolePolicyForUser } from '../../../permissions/policies/scope';
 import type { MdfJobDatabase } from '../application/mdf-job-runner';
+import { mdfSourceCommandToken } from '../domain/mdf-manual-proof';
 
 export interface MdfPublishedQuery {
   dateTo?: string;
@@ -14,6 +15,7 @@ export interface MdfPublishedQuery {
 export interface PublishedCard {
   kind: 'packet'|'bazisCutSet'|'bath'; id: string; displayName: string; column: string|null;
   sourceCreatedAt: string; acceptedRevision: string|null; receivedRevision: string; issues: string[];
+  commandToken?: string|null;
 }
 export interface PublishedPosition {
   orderId: number; detailId: number; required: number; cut: number; rolled: number;
@@ -43,11 +45,13 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
         AND u.is_active AND u.user_id=$1::bigint)` : 'FALSE';
     const owners = `SELECT o.order_id FROM orders o WHERE $1::bigint IS NOT NULL
       AND NOT o.delete_flag AND o.order_kind='production_order' AND ${allowed}`;
-    const cards = (await tx.query<PublishedCard>(`WITH allowed AS (${owners})
+    const cardRows = (await tx.query<PublishedCard & { headVersion: string; headEpoch: string; headReceived: string; headAccepted: string|null }>(`WITH allowed AS (${owners})
       SELECT p.source_kind kind,p.source_id id,p.display_name "displayName",p.column_key "column",
         p.source_created_at::text "sourceCreatedAt",p.accepted_revision_key "acceptedRevision",
-        p.received_revision_key "receivedRevision",p.issues
+        p.received_revision_key "receivedRevision",p.issues,h.version::text "headVersion",h.correction_epoch::text "headEpoch",
+        h.received_revision_key "headReceived",h.accepted_revision_key "headAccepted"
       FROM mdf_published_sources p
+      JOIN mdf_source_heads h ON h.source_kind=p.source_kind AND h.source_id=p.source_id
       WHERE ((p.source_created_at >= $2::date AND p.source_created_at < $3::date+interval '1 day')
         OR (p.source_kind=$4 AND p.source_id=$5))
         AND NOT EXISTS(SELECT 1 FROM mdf_published_source_members m WHERE m.source_kind=p.source_kind AND m.source_id=p.source_id
@@ -56,7 +60,10 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
           WHERE m.source_kind=p.source_kind AND m.source_id=p.source_id))
       ORDER BY p.source_created_at DESC,p.source_kind,p.source_id LIMIT 1001`,
     [user.id,state.dateFrom,state.dateTo,query.focus?.kind ?? null,query.focus?.id ?? null,scope==='all'])).rows;
-    checkLimit(cards,1000);
+    checkLimit(cardRows,1000);
+    const cards: PublishedCard[] = cardRows.map(({ headVersion,headEpoch,headReceived,headAccepted,...card }) => ({ ...card,
+      commandToken: headReceived === card.receivedRevision && headAccepted === headReceived && card.issues.length === 0
+        ? mdfSourceCommandToken(card,{ received: headReceived,version: headVersion,epoch: headEpoch }) : null }));
     const members = (await tx.query<PublishedMember>(`SELECT m.source_kind kind,m.source_id id,m.order_id::float8 "orderId",
       m.detail_id::float8 "detailId",m.quantity::float8 quantity FROM mdf_published_source_members m
       JOIN unnest($1::text[],$2::text[]) s(kind,id) ON m.source_kind=s.kind AND m.source_id=s.id

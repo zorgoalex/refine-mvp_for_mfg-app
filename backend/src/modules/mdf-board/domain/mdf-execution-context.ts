@@ -9,6 +9,8 @@ export interface MdfExecutionContext {
   sourceCreatedAt: string;
   displayName: string;
   priorColumn: string | null;
+  /** Explicit placement only. Omitted on v1 receipts; null clears an override. */
+  manualPlacementColumn?: string | null;
   compositionComplete: boolean;
   demand: readonly MdfPositionQuantity[];
 }
@@ -25,6 +27,9 @@ export function snapshotMdfExecutionContext(input: MdfExecutionContext): MdfExec
     || input.displayName.includes('\0') || typeof input.compositionComplete !== 'boolean'
     || (input.priorColumn !== null && !['parsed', 'completed', 'completed_laminated', 'baths',
       'baths_ready', 'baths_laminated', 'completed_baths'].includes(input.priorColumn))
+    || (input.manualPlacementColumn !== undefined && input.manualPlacementColumn !== null
+      && !['parsed', 'completed', 'completed_laminated', 'baths', 'baths_ready', 'baths_laminated', 'completed_baths']
+        .includes(input.manualPlacementColumn))
     || !Array.isArray(input.demand) || (!input.demand.length && input.compositionComplete) || input.demand.length > 5000) invalid();
   const ids = new Set<number>(), orders = new Set<number>();
   const demand = input.demand.map(row => {
@@ -35,5 +40,7 @@ export function snapshotMdfExecutionContext(input: MdfExecutionContext): MdfExec
   }).sort((a,b) => a.orderId-b.orderId || a.detailId-b.detailId);
   if (orders.size > 100) invalid();
   return { sourceCreatedAt: new Date(input.sourceCreatedAt).toISOString(), displayName: input.displayName,
-    priorColumn: input.priorColumn, compositionComplete: input.compositionComplete, demand };
+    priorColumn: input.priorColumn, compositionComplete: input.compositionComplete, demand,
+    // Preserve old receipt digests: do not attach a field absent from v1 input.
+    ...(input.manualPlacementColumn === undefined ? {} : { manualPlacementColumn: input.manualPlacementColumn }) };
 }

@@ -348,3 +348,33 @@ Keep both flags false until live producers, corrections, frontend, verified
 historical baseline and the cutover procedure are connected and checked together.
 The current shadow producer does not supply execution context. Setting the engine
 to active directly is not a supported activation procedure.
+
+### Manual commands through the queue (activation still gated)
+
+Migration `175_mdf_command_placement.sql` adds sealed manual placement and an
+immutable actor-scoped command-result journal. Production-card PUT/DELETE can
+route to accepted accounting in active mode; legacy/shadow keep the existing
+command path. This does not complete producer/return/UI/baseline coverage or
+authorize enabling the engine.
+
+Active clients send `X-Mdf-Source-Token` from `cards[].commandToken` and a unique
+`Idempotency-Key`. Reuse both for an identical network retry. Token is null while
+the card is unverified or its head is newer than the publication. A 409 requires
+refresh/reconciliation, not a blind retry with changed parameters. Authorization
+is checked for every owning order, including on a saved-response replay.
+
+- `completed` for a file/BASIS records only the missing own cut quantity.
+- `baths_laminated` records only the missing own lamination quantity.
+- Terminal visual placement creates no physical proof; DELETE removes only
+  manual placement and preserves confirmed work.
+- Backward movement requires the separate production-correction workflow.
+  Unsupported history is never implicitly accepted from its old visual column.
+- Response `jobId` means durable queued work, not finished status changes.
+  Audit, receipt, rule pins and replay response commit or roll back together.
+
+Tagged command transactions acquire the shared cutover fence before business
+effects and explicitly use READ COMMITTED. Stricter isolation is rejected before
+starting: an advisory-lock wait under a repeatable snapshot could otherwise read
+the pre-cutover mode. This boundary must cover the remaining writers before any
+activation. Ordinary unsupported writers and serializable returns are not yet
+connected by this increment.
