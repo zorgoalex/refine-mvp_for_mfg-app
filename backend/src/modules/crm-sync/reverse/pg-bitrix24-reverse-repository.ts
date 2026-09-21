@@ -7,7 +7,7 @@ import { dealCreatorSql, PAYMENT_AUTHORSHIP_SQL, type BitrixActor } from './bitr
 import type { AuditService } from '../../../common/audit/audit.service';
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
-import { ROLE_TO_ROLE_ID, type UserRole } from '../../../permissions/permissions';
+import { type UserRole } from '../../../permissions/permissions';
 import { PgOrderDeadlineSync } from '../../deadlines/adapters/pg-order-deadline-sync';
 import {
   calculateDetailArea,
@@ -36,6 +36,23 @@ export interface ReverseMappingRow {
   lastBitrixHash: string | null;
   lastBitrixUpdatedAt: Date | null;
 }
+
+type ConversionInput = {
+  orderId: number; expectedVersion: number; orderName: string;
+  projectId: number | null; createProject: boolean; idempotencyKey: string;
+  actorUserId: number; actorUsername: string; actorRole: string; requestId: string;
+  initialOrderStatusCode: string; initialProductionStatusCode: string;
+};
+
+export type PaidConversionInput = {
+  dealId: string; actorUserId: number; requestId: string;
+  initialOrderStatusCode: string; initialProductionStatusCode: string;
+  eventId?: string; lockToken?: string;
+  widget?: { commandId: string; leaseToken: string;
+    awaitConfirmation: (tx: TransactionClient, commandId: string) => Promise<unknown>;
+    materialize: (tx: TransactionClient, commandId: string) => Promise<{ status: string }> };
+};
+export type PaidConversionResult = { status: 'unchanged' | 'waiting' | 'converted'; reason?: string; orderId?: number };
 
 export interface ReverseClientSnapshot {
   objectType: 'contact' | 'company';
@@ -2128,6 +2145,8 @@ export class PgBitrix24ReverseRepository {
   ): Promise<Record<string, unknown>> {
     const request = await this.db.query<{
       created_by_bitrix: BitrixActor | null;
+      auto_conversion_status: string;
+      auto_conversion_reason: string | null;
       request_id: string | number;
       bitrix_deal_id: string;
       client_id: string | number | null;
@@ -2231,6 +2250,7 @@ export class PgBitrix24ReverseRepository {
       assignedById: row.assigned_by_id,
       assignedByName: row.assigned_by_name,
       createdByBitrix: row.created_by_bitrix ?? null,
+      ...(canViewFinancials ? { autoConversionStatus: row.auto_conversion_status, autoConversionReason: row.auto_conversion_reason } : {}),
       beginDate: toDate(row.begin_date),
       closeDate: toDate(row.close_date),
       comments: row.comments,
@@ -2626,14 +2646,19 @@ export class PgBitrix24ReverseRepository {
       throw notFound('ORDER_NOT_FOUND', 'Order not found');
     }
 
-    return this.db.transaction(async (tx) => {
+    return this.db.transaction((tx) => this.convertInTransaction(tx, input, normalizedName, requestHash, discovered.bitrix_deal_id));
+  }
+
+  private async convertInTransaction(
+    tx: TransactionClient, input: ConversionInput, normalizedName: string, requestHash: string, dealId: string,
+  ): Promise<Record<string, unknown>> {
       await tx.query(
         `SELECT pg_advisory_xact_lock(
            hashtextextended('order_name:' || normalize_order_name($1), 0)
          )`,
         [normalizedName],
       );
-      await lockAggregate(tx, `deal:${discovered.bitrix_deal_id}`);
+      await lockAggregate(tx, `deal:${dealId}`);
 
       const existingCommand = await tx.query<{
         request_hash: string;
@@ -2895,6 +2920,7 @@ export class PgBitrix24ReverseRepository {
       await tx.query(
         `UPDATE bitrix24_incoming_request
             SET state='converted', sync_version=sync_version+1,
+                auto_conversion_status='idle', auto_conversion_reason=NULL,
                 version=version+1, updated_at=now()
           WHERE request_id=$1`,
         [requestRow.request_id],
@@ -2940,7 +2966,7 @@ export class PgBitrix24ReverseRepository {
           projectId,
           incomingRequestId: Number(requestRow.request_id),
           bitrixDealId: requestRow.bitrix_deal_id,
-          actorType: 'erp_user',
+          actorType: input.actorRole === 'integration_service' ? 'system' : 'erp_user',
           actorUserId: input.actorUserId,
           sourceSystem: 'bitrix24',
           requestId: input.requestId,
@@ -2952,10 +2978,6 @@ export class PgBitrix24ReverseRepository {
         orderId: input.orderId,
         currentUser: {
           id: String(input.actorUserId),
-          username: input.actorUsername,
-          role: input.actorRole,
-          roleId: ROLE_TO_ROLE_ID[input.actorRole],
-          permissions: [],
         },
         eventType: 'ORDER_CREATED',
         requestId: input.requestId,
@@ -2982,7 +3004,149 @@ export class PgBitrix24ReverseRepository {
         [input.idempotencyKey, JSON.stringify(response)],
       );
       return response;
+  }
+
+  /** Internal command only. Callers must apply runtime gates before entering. */
+  async autoConvertPaidCrmRequest(input: PaidConversionInput): Promise<PaidConversionResult> {
+    return this.db.transaction(async (tx) => {
+      // A widget receipt is always first in the lock order. Reverse reconciliation
+      // never imports widget snapshots through the native payment path.
+      if (input.widget) {
+        const lease = await tx.query(`SELECT 1 FROM bitrix24_manual_payment_command
+          WHERE command_id=$1 AND bitrix_deal_id=$2 AND lease_token=$3::uuid
+            AND lease_expires_at>now() AND status IN ('snapshot_saved','awaiting_erp_retry','awaiting_order','awaiting_order_ready')
+          FOR UPDATE`, [input.widget.commandId, input.dealId, input.widget.leaseToken]);
+        if (lease.rowCount !== 1) return { status: 'unchanged' };
+      }
+      if (input.eventId) await assertInboundOwnership(tx, input.eventId, input.lockToken);
+      await tx.query("SELECT pg_advisory_xact_lock(hashtextextended('bitrix24:auto-order-number',0))");
+      // Number/name locks precede the Deal lock in BOTH manual and auto paths.
+      let name = String((await tx.query<{ next: string }>(`SELECT (COALESCE(MAX(order_name::bigint),0)+1)::text AS next
+        FROM orders WHERE order_name ~ '^\\d{1,15}$' AND delete_flag=false AND order_date>=DATE '2025-12-01'`)).rows[0].next);
+      for (let tries = 0; ; tries++) {
+        if (tries >= 100) throw conflict('ORDER_NAME_CONFLICT', 'Automatic order number allocation needs retry');
+        await tx.query("SELECT pg_advisory_xact_lock(hashtextextended('order_name:' || normalize_order_name($1),0))", [name]);
+        const occupied = await tx.query(`SELECT 1 FROM orders WHERE delete_flag=false AND order_kind='production_order'
+          AND normalize_order_name(order_name)=normalize_order_name($1)
+          UNION ALL SELECT 1 FROM order_legacy_duplicate_name_registry WHERE normalized_name=normalize_order_name($1) LIMIT 1`, [name]);
+        if (!occupied.rowCount) break;
+        name = String(BigInt(name) + 1n);
+      }
+      await lockAggregate(tx, `deal:${input.dealId}`);
+      const discovery = await tx.query<{ linked_order_id: string; project_id: string | null }>(`SELECT r.linked_order_id,o.project_id
+        FROM bitrix24_incoming_request r JOIN orders o ON o.order_id=r.linked_order_id
+        WHERE r.bitrix_deal_id=$1 AND r.state='active' AND o.order_kind='crm_request' AND NOT o.delete_flag`, [input.dealId]);
+      if (!discovery.rows[0]) return { status: 'unchanged' };
+      const orderId = Number(discovery.rows[0].linked_order_id);
+      if (discovery.rows[0].project_id) await tx.query('SELECT project_id FROM projects WHERE project_id=$1 FOR UPDATE', [discovery.rows[0].project_id]);
+      const order = (await tx.query<{ version: number; project_id: string | null; source_system: string; client_id: string }>(
+        'SELECT version,project_id,source_system,client_id FROM orders WHERE order_id=$1 FOR UPDATE', [orderId])).rows[0];
+      if (String(order.project_id ?? '') !== String(discovery.rows[0].project_id ?? '')) {
+        // Never acquire a newly attached project lock AFTER the order lock.
+        throw conflict('PROJECT_CHANGED', 'Project changed; retry conversion');
+      }
+      const request = (await tx.query<{ request_id: string; sync_status: string; client_id: string | null }>(`SELECT request_id,sync_status,client_id
+        FROM bitrix24_incoming_request WHERE bitrix_deal_id=$1 AND state='active' FOR UPDATE`, [input.dealId])).rows[0];
+      if (!request) return { status: 'unchanged' };
+      let observedPaymentId: string | undefined;
+      const wait = (reason: string) => this.recordAutoConversion(tx, input, orderId, 'waiting', reason, observedPaymentId);
+      const actor = (await tx.query<{ username: string }>(`SELECT u.username FROM users u JOIN roles r ON r.role_id=u.role_id
+        WHERE u.user_id=$1 AND u.is_active AND u.is_service_account AND r.is_active AND r.role_code='integration_service'`, [input.actorUserId])).rows[0];
+      if (!actor) return wait('ACTOR_UNAVAILABLE');
+      await tx.query("SELECT set_config('app.user_id',$1,true)", [String(input.actorUserId)]);
+      await setReverseOrigin(tx);
+      const mapping = await tx.query(`SELECT 1 FROM crm_sync_mapping WHERE entity_type='order' AND erp_id=$1
+        AND bitrix_object='deal' AND bitrix_id=$2 AND status='active' AND source_system='bitrix24'`, [String(orderId), input.dealId]);
+      if (order.source_system !== 'bitrix24' || mapping.rowCount !== 1 || request.sync_status !== 'ok' ||
+        Number(request.client_id) !== Number(order.client_id)) return wait('REQUEST_BLOCKED');
+      const payments = await tx.query<{ bitrix_payment_id: string; manual_command_id: string | null; currency_id: string;
+        payment_local_date: string | null; type_paid_id: number | null }>(`SELECT p.bitrix_payment_id,p.manual_command_id,p.currency_id,p.payment_local_date,m.type_paid_id
+        FROM bitrix24_incoming_request_payment p LEFT JOIN bitrix24_payment_type_mapping m ON m.pay_system_id=p.pay_system_id AND m.active
+        WHERE p.request_id=$1 AND p.state='active' AND p.paid AND p.amount>0
+          AND ($2::uuid IS NULL OR p.manual_command_id=$2::uuid)
+        ORDER BY p.bitrix_payment_id FOR UPDATE OF p`, [request.request_id, input.widget?.commandId ?? null]);
+      if (!payments.rows.length) return { status: 'unchanged' };
+      observedPaymentId = payments.rows[0].bitrix_payment_id;
+      const payment = payments.rows.find(p => (input.widget || !p.manual_command_id) && p.currency_id === 'KZT' && p.payment_local_date && p.type_paid_id);
+      if (!payment) return wait(payments.rows.every(p => p.manual_command_id) ? 'WIDGET_PENDING' : 'PAYMENT_MAPPING_REQUIRED');
+      observedPaymentId = payment.bitrix_payment_id;
+      if (input.widget) {
+        const compatible = await tx.query(`SELECT 1 FROM bitrix24_manual_payment_command c
+          JOIN bitrix24_payment_type_mapping m ON m.pay_system_id=c.pay_system_id AND m.type_paid_id=c.type_paid_id
+          JOIN bitrix24_incoming_request_payment p ON p.manual_command_id=c.command_id AND p.bitrix_payment_id=c.bitrix_payment_id
+          WHERE c.command_id=$1 AND m.active AND m.widget_enabled AND p.pay_system_id=c.pay_system_id`, [input.widget.commandId]);
+        if (compatible.rowCount !== 1) return wait('PAYMENT_MAPPING_REQUIRED');
+      }
+      // Savepoint makes conversion + money atomic, while a safe waiting reason
+      // can commit. Unexpected SQL errors still fail/retry the owning command.
+      await tx.query('SAVEPOINT paid_conversion');
+      try {
+        const conversion: ConversionInput = { ...input, orderId, expectedVersion: order.version, orderName: name,
+          projectId: order.project_id ? Number(order.project_id) : null, createProject: !order.project_id,
+          idempotencyKey: `bitrix-paid:${input.dealId}:${orderId}`, actorUsername: actor.username, actorRole: 'integration_service' };
+        await this.convertInTransaction(tx, conversion, name, createHash('sha256').update(conversion.idempotencyKey).digest('hex'), input.dealId);
+        if (input.widget) {
+          const command = await input.widget.materialize(tx, input.widget.commandId);
+          if (command.status !== 'completed') throw conflict(command.status === 'awaiting_overpayment_confirmation' ? 'PAYMENT_REQUIRES_CONFIRMATION' : 'CONVERSION_BLOCKED', 'Payment is not ready');
+        } else {
+          await materializeActivePayments(tx, Number(request.request_id), orderId, [payment.bitrix_payment_id]);
+          await recalculatePaymentState(tx, orderId);
+        }
+        await tx.query("SELECT set_config('app.user_id',$1,true)", [String(input.actorUserId)]);
+        // The conversion receipt must reflect the version AFTER payment totals.
+        await tx.query(`UPDATE order_kind_conversion_command SET response_json=jsonb_set(response_json,'{version}',to_jsonb(o.version))
+          FROM orders o WHERE idempotency_key=$1 AND o.order_id=$2`, [conversion.idempotencyKey, orderId]);
+        await this.recordAutoConversion(tx, input, orderId, 'converted', null, payment.bitrix_payment_id);
+        await tx.query('RELEASE SAVEPOINT paid_conversion');
+        return { status: 'converted', orderId };
+      } catch (error) {
+        await tx.query('ROLLBACK TO SAVEPOINT paid_conversion');
+        await tx.query('RELEASE SAVEPOINT paid_conversion');
+        if (!(error instanceof ApiError) || ![403,409,422,503].includes(error.statusCode)) throw error;
+        if (error.code === 'PAYMENT_REQUIRES_CONFIRMATION' && input.widget) {
+          await input.widget.awaitConfirmation(tx, input.widget.commandId);
+        }
+        // Public reason codes only; never persist raw SQL or remote responses.
+        return wait(error.code === 'ORDER_POSITIONS_REQUIRED' ? 'POSITIONS_REQUIRED' :
+          error.code === 'BITRIX24_WIDGET_PERMISSION_DENIED' ? 'PAYMENT_PERMISSION_REQUIRED' :
+          error.code === 'PAYMENT_REQUIRES_CONFIRMATION' ? 'PAYMENT_REQUIRES_CONFIRMATION' : 'CONVERSION_BLOCKED');
+      }
     });
+  }
+
+  private async recordAutoConversion(tx: TransactionClient, input: PaidConversionInput, orderId: number,
+    status: 'waiting' | 'converted', reason: string | null, paymentId?: string): Promise<PaidConversionResult> {
+    const changed = await tx.query(`UPDATE bitrix24_incoming_request SET auto_conversion_status=$2,auto_conversion_reason=$3
+      WHERE linked_order_id=$1 AND (auto_conversion_status IS DISTINCT FROM $2 OR auto_conversion_reason IS DISTINCT FROM $3)
+      RETURNING request_id`, [orderId, status, reason]);
+    if (!changed.rowCount) return { status, orderId, ...(reason ? { reason } : {}) };
+    const identity = (await tx.query<{ client_id: string; erp_payment_id: string | null; paid_by_id: string | null; paid_by_name: string | null; txid: string }>(
+      `SELECT o.client_id,p.erp_payment_id,p.paid_by_id,p.paid_by_name,txid_current()::text AS txid
+       FROM orders o LEFT JOIN bitrix24_incoming_request_payment p ON p.bitrix_payment_id=$2
+       WHERE o.order_id=$1`, [orderId, paymentId ?? null])).rows[0];
+    const event = `bitrix24.request_auto_conversion.${status === 'converted' ? 'completed' : 'waiting'}`;
+    const provenance = { bitrixDealId: input.dealId, bitrixPaymentId: paymentId ?? null,
+      commandId: input.widget?.commandId ?? null, incomingRequestId: Number(changed.rows[0].request_id),
+      // Native Bitrix exposes the paid-state actor, not necessarily its creator.
+      paidByBitrix: identity.paid_by_id ? { bitrixUserId: identity.paid_by_id, displayName: identity.paid_by_name } : null };
+    await this.audit.record(tx, {
+      event,
+      entityType: 'order', entityId: orderId, relatedOrderId: orderId, actorUserId: input.actorUserId,
+      relatedClientId: Number(identity.client_id), relatedPaymentId: identity.erp_payment_id ? Number(identity.erp_payment_id) : undefined,
+      requestId: input.requestId, source: 'backend-bitrix24', after: { status, reason },
+      metadata: provenance,
+    });
+    await enqueueDomainEvent(tx, {
+      eventType: event, aggregateType: 'order', aggregateId: String(orderId),
+      // Only a changed transition reaches here; replay of unchanged state emits
+      // nothing. A later transition back to the same reason is a new event.
+      idempotencyKey: `auto-conversion:${orderId}:${identity.txid}:${status}:${reason ?? 'done'}`,
+      payload: { eventName: event, eventVersion: 1, orderId, clientId: Number(identity.client_id),
+        paymentId: identity.erp_payment_id ? Number(identity.erp_payment_id) : null,
+        actorUserId: input.actorUserId, actorType: 'system', requestId: input.requestId,
+        status, reason, ...provenance },
+    });
+    return { status, orderId, ...(reason ? { reason } : {}) };
   }
 
   async materializeRequestPayments(input: {

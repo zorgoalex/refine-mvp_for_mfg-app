@@ -1,6 +1,8 @@
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
-import type { CurrentUser } from '../../../permissions/current-user';
+import type { CurrentUser as AuthenticatedUser } from '../../../permissions/current-user';
+// Deadline initialization needs an executor ID, not a fabricated login role.
+type CurrentUser = Pick<AuthenticatedUser, 'id'> & Partial<Omit<AuthenticatedUser, 'id'>>;
 import type { OrderDeadlineSyncPort } from '../../orders/application/order-transaction.types';
 import type { DeadlineInstanceDto } from '../dto/deadline-instance.dto';
 import type { DeadlineStatus } from '../domain/deadline-status';

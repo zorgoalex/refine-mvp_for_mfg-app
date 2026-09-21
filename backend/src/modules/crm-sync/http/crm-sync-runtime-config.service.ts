@@ -45,6 +45,8 @@ export class CrmSyncRuntimeConfigService {
     return {
       enabled:
         this.config.get('BACKEND_ENABLE_BITRIX24_REVERSE_SYNC', { infer: true }) ?? false,
+      autoConvertPaidRequests:
+        this.config.get('BACKEND_BITRIX24_AUTO_CONVERT_PAID_REQUESTS', { infer: true }) ?? false,
       relayOwner:
         this.config.get('BACKEND_BITRIX24_REVERSE_SYNC_RELAY_OWNER', { infer: true }) ?? 'none',
       dryRun:
