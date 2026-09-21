@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Button, Card, DatePicker, Descriptions, Drawer, Empty, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Timeline, Typography } from 'antd';
+import { Alert, Button, Card, DatePicker, Descriptions, Drawer, Empty, Input, InputNumber, Modal, Select, Space, Switch, Tag, Timeline, Typography } from 'antd';
+import { Table } from '../../ui/tooltipDelay';
 import { inboundSignalsApi as api, type SignalDetail, type SignalList, type SignalPreview, type SignalRow } from '../../api/inboundSignalsApi';
 import { can } from '../../utils/permissions';
 import { signalLabel, signalLabels } from './labels';
