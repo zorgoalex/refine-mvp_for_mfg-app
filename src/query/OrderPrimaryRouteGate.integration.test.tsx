@@ -51,7 +51,11 @@ describe('OrderPrimaryRouteGate integration', () => {
     await resolveOrderLifecycleCohort();
   });
 
+  let refreshRenderer: ReactTestRenderer | undefined;
+
   afterEach(() => {
+    act(() => refreshRenderer?.unmount());
+    refreshRenderer = undefined;
     appQueryClient.clear();
     authSession.clear();
     resetOrderLifecycleCohortStoreForTests();
@@ -111,6 +115,42 @@ describe('OrderPrimaryRouteGate integration', () => {
     expect(events.filter((event) => event === 'primary-query')).toHaveLength(1);
     expect(events.indexOf('primary-query')).toBeLessThan(events.indexOf('page-child-render'));
     renderer?.unmount();
+  });
+
+  it('keeps an open unsaved form mounted through a same-owner token refresh', async () => {
+    const getList = vi.fn().mockResolvedValue({ data: [], total: 0 });
+    const unmounted = vi.fn();
+    function DraftProbe() {
+      const [draft, setDraft] = React.useState('');
+      React.useEffect(() => () => unmounted(), []);
+      return <input value={draft} onChange={() => setDraft('unsaved three details')} />;
+    }
+    let renderer: ReactTestRenderer | undefined;
+    await act(async () => {
+      renderer = create(
+        <MemoryRouter initialEntries={['/orders']}>
+          <Refine
+            dataProvider={{ getList, getOne: async () => ({ data: null }) } as any}
+            routerProvider={routerProvider}
+            resources={[{ name: 'orders_view', list: '/orders', meta: { idColumnName: 'order_id' } }]}
+            options={{ disableTelemetry: true, useNewQueryKeys: true, reactQuery: appRefineReactQueryOptions }}
+          >
+            <OrderPrimaryRouteGate><DraftProbe /></OrderPrimaryRouteGate>
+          </Refine>
+        </MemoryRouter>,
+      );
+    });
+    refreshRenderer = renderer;
+    act(() => renderer!.root.findByType('input').props.onChange());
+    await act(async () => {
+      authSession.setAccessToken('refreshed-token');
+      authSession.setUser({ ...authSession.getUser()! });
+      await resolveOrderLifecycleCohort();
+    });
+    expect(unmounted).not.toHaveBeenCalled();
+    expect(renderer!.root.findByType('input').props.value).toBe('unsaved three details');
+    expect(getList).toHaveBeenCalledTimes(1);
+
   });
 
   it('starts a new primary query after an actor switch on the same route', async () => {

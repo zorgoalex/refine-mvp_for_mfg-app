@@ -20,19 +20,14 @@ export const OrderCreateModal: React.FC<OrderCreateModalProps> = ({ open, onClos
   const [isReady, setIsReady] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
 
-  // Reset store when modal opens and mark as ready.
-  // NOTE: depend ONLY on `open`. Destroying the "new" draft store recreates a fresh
-  // store instance on the next render, which would give a store action (e.g. `reset`)
-  // a new identity — putting such an action in the dep array re-fires this effect every
-  // render → destroy/recreate churn → "Maximum update depth exceeded". Resolve the fresh
-  // store imperatively instead of subscribing to it.
+  // Rehydrate the current owner's draft before mounting the form. Opening or
+  // remounting is not a discard action; explicit cancel still deletes the draft.
   useEffect(() => {
     if (open) {
       setIsMinimized(false);
-      // Drop any stale "new" draft (and its sessionStorage) so each create starts clean.
-      destroyOrderDraftStore(NEW_ORDER_KEY);
-      getOrderDraftStore(NEW_ORDER_KEY).getState().reset();
-      // Small delay to ensure store is reset
+      const draft = getOrderDraftStore(NEW_ORDER_KEY).getState();
+      // A successfully saved create must never reopen as another new order.
+      if (!draft.isDirty || draft.header.order_id != null) draft.reset();
       const timer = setTimeout(() => {
         setIsReady(true);
       }, 50);

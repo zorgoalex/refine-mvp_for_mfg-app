@@ -88,7 +88,9 @@ function getCurrentResolved(): boolean {
 
 function getCurrentAuthKey(): string {
   return [
-    authSession.getAccessTokenVersion(),
+    // Assignment belongs to the authenticated owner, not a rotating credential.
+    // Invalidating it on refresh makes the route gate unmount unsaved forms.
+    Boolean(authSession.getAccessToken()),
     authSession.getSessionGeneration(),
     authSession.getUser()?.id ?? '',
   ].join(':');
