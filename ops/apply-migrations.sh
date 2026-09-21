@@ -1947,7 +1947,7 @@ probe_file() {
     # Keep these probes and the real-PostgreSQL regression test in sync.
     164_unicode_business_names*) probe_all \
       "$(q_tbl projects)" \
-      "$(q_con_hash_on chk_projects_code projects 87ffc4764527f15006178543a6b9c578)" \
+      "$(q_con_hash_on chk_projects_code projects 929f2970be40bc035b96d7bf85e148dd)" \
       "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.projects') AND conname='chk_projects_code' AND convalidated);" \
       "$(q_tbl group_groups)" \
       "$(q_con_hash_on chk_group_groups_code_format group_groups 07744ab3851eef752ac32def384dee66)" \

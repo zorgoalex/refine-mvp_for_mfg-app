@@ -37,7 +37,10 @@ describe.skipIf(!enabled)('migration 164-169 probes against actual SQL on Postgr
     created = true;
     // Minimal pre-existing dependencies. New objects are created ONLY by the
     // committed migration SQL, not by a duplicated test schema.
-    sql(`CREATE TABLE projects(code text);
+    // Match migration 056: citext selects a different regex operator and
+    // constraint definition than text, which matters for the runner fingerprint.
+    sql(`CREATE EXTENSION IF NOT EXISTS citext;
+      CREATE TABLE projects(code citext);
       CREATE TABLE group_groups(code text);
       CREATE TABLE cnc_telegram_packet_whole_order_keys(order_key text);
       CREATE TABLE users(user_id bigint PRIMARY KEY);
