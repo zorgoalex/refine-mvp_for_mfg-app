@@ -2150,6 +2150,26 @@ probe_file() {
                      "$(q_col bitrix24_incoming_request auto_conversion_reason)" \
                      "$(q_con_on bitrix24_incoming_request bitrix24_incoming_request_auto_conversion_status_check)" \
                      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.orders') AND tgname='bitrix_paid_request_recheck' AND tgenabled='O' AND tgfoid=to_regprocedure('public.bitrix_paid_request_recheck()'));" ;;
+    174_mdf_execution_context*) probe_all \
+      "$(q_colset_hash mdf_revision_context source_kind,source_id,revision_key,schema_version,source_created_at,display_name,prior_column,composition_complete,demand_digest,acceptance_requested,predecessor_accepted_revision_key,predecessor_received_revision_key f4409d464360dedee5ad9c390ffdc73c)" \
+      "$(q_conset_hash mdf_revision_context mdf_revision_context_demand_digest_check,mdf_revision_context_display_name_check,mdf_revision_context_pkey,mdf_revision_context_prior_column_check,mdf_revision_context_schema_version_check,mdf_revision_context_source_kind_source_id_revision_key_fkey 5590dd3a1cd92da4b844f655e8a7ae62)" \
+      "$(q_idxset_hash mdf_revision_context mdf_revision_context_pkey 54dbfead0ba6ba83e61d877b42e84367)" \
+      "$(q_colset_hash mdf_revision_demand source_kind,source_id,revision_key,order_id,detail_id,quantity 2b399b430366ec3d70ea5c69fc6fb626)" \
+      "$(q_conset_hash mdf_revision_demand mdf_revision_demand_detail_id_check,mdf_revision_demand_order_id_check,mdf_revision_demand_pkey,mdf_revision_demand_quantity_check,mdf_revision_demand_source_kind_source_id_revision_key_fkey 6bb0193facf41c231b69c7075f43e3e8)" \
+      "$(q_idxset_hash mdf_revision_demand mdf_revision_demand_pkey f003a1f3a84cb82846a69c145ade490b)" \
+      "$(q_colset_hash mdf_published_sources source_kind,source_id,received_revision_key,accepted_revision_key,source_created_at,display_name,column_key,reason,issues,published_revision 7a1c1c0f454ea571f8b00cdc9e0494e3)" \
+      "$(q_conset_hash mdf_published_sources mdf_published_sources_column_key_check,mdf_published_sources_pkey,mdf_published_sources_published_revision_check,mdf_published_sources_source_kind_check,mdf_published_sources_source_kind_source_id_fkey a5f00e72298c782bd5a9c3ba48e8c38a)" \
+      "$(q_idxset_hash mdf_published_sources idx_mdf_published_source_window,mdf_published_sources_pkey 918635d839f1a99ca3ed2bb369b70dc2)" \
+      "$(q_colset_hash mdf_published_source_members source_kind,source_id,order_id,detail_id,quantity 01c391348f16fd1653f8ac5afb8de93c)" \
+      "$(q_conset_hash mdf_published_source_members mdf_published_source_members_pkey,mdf_published_source_members_quantity_check,mdf_published_source_members_source_kind_source_id_fkey 95f3538f8c796c76407959cf615b9ff7)" \
+      "$(q_idxset_hash mdf_published_source_members idx_mdf_published_member_order,mdf_published_source_members_pkey 078f6188fcbc58e1d1227cd517921c20)" \
+      "$(q_colset_hash mdf_published_positions order_id,detail_id,required_quantity,cut_quantity,rolled_quantity,credited_cut,credited_rolled,remaining,issues,published_revision 466dfad3e2dbbca6f8fcdf6711445f22)" \
+      "$(q_conset_hash mdf_published_positions mdf_published_positions_check,mdf_published_positions_credited_cut_check,mdf_published_positions_credited_rolled_check,mdf_published_positions_cut_quantity_check,mdf_published_positions_pkey,mdf_published_positions_published_revision_check,mdf_published_positions_remaining_check,mdf_published_positions_required_quantity_check,mdf_published_positions_rolled_quantity_check 947f7956a7c4b95c49928d121d65c1ae)" \
+      "$(q_idxset_hash mdf_published_positions mdf_published_positions_pkey cfc467ad9853f299daf442c23de4778f)" \
+      "$(q_fun_hash 'public.mdf_guard_execution_context_insert()' 59172c9dc4387441e1b7460e5e00df41)" \
+      "SELECT count(*)=4 FROM (VALUES ('mdf_revision_context','mdf_context_insert_guard','mdf_guard_execution_context_insert()',7),('mdf_revision_demand','mdf_demand_insert_guard','mdf_guard_execution_context_insert()',7),('mdf_revision_context','mdf_context_immutable','mdf_reject_evidence_change()',27),('mdf_revision_demand','mdf_demand_immutable','mdf_reject_evidence_change()',27)) expected(tbl,trg,fun,kind) JOIN pg_trigger t ON t.tgrelid=to_regclass('public.'||tbl) AND t.tgname=trg AND t.tgfoid=to_regprocedure('public.'||fun) AND t.tgtype=kind AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgattr=''::int2vector;" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=ANY(ARRAY[to_regclass('public.mdf_revision_context'),to_regclass('public.mdf_revision_demand'),to_regclass('public.mdf_published_sources'),to_regclass('public.mdf_published_source_members'),to_regclass('public.mdf_published_positions')]) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=ANY(ARRAY[to_regclass('public.mdf_revision_context'),to_regclass('public.mdf_revision_demand'),to_regclass('public.mdf_published_sources'),to_regclass('public.mdf_published_source_members'),to_regclass('public.mdf_published_positions')]) AND (NOT indisvalid OR NOT indisready));" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -2160,6 +2180,9 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
+    174_mdf_execution_context*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
     173_inbound_signals*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;

@@ -12,7 +12,7 @@ const db = `e2e_migration_probe_${randomBytes(10).toString('hex')}`;
 const script = resolve(__dirname, 'apply-migrations.sh');
 const source = readFileSync(script, 'utf8');
 const dir = resolve(__dirname, '../backend/db/migrations');
-const files = readdirSync(dir).filter((f) => /^16[4-9]_.*\.sql$/.test(f)).sort();
+const files = readdirSync(dir).filter((f) => /^16[4-9]_.*\.sql$/.test(f) || f === '174_mdf_execution_context.sql').sort();
 const helpers = source.slice(source.indexOf('q_col()'), source.indexOf('# These migrations contain conditional'));
 const queries = (file: string) => execFileSync('bash', ['-s', '--', file], {
   input: `${helpers}\nprobe_all() { printf '%s\\n' "$@"; }\nprobe_file "$1"`, encoding: 'utf8',
@@ -30,7 +30,7 @@ const present = (file: string, mutation = '') => {
 };
 const fileFor = (version: number) => files.find((f) => f.startsWith(`${version}_`))!;
 
-describe.skipIf(!enabled)('migration 164-169 probes against actual SQL on PostgreSQL', () => {
+describe.skipIf(!enabled)('migration 164-169 and 174 probes against actual SQL on PostgreSQL', () => {
   let created = false;
   beforeAll(() => {
     sql(`CREATE DATABASE ${db} TEMPLATE template0;`, 'postgres');
@@ -81,6 +81,19 @@ describe.skipIf(!enabled)('migration 164-169 probes against actual SQL on Postgr
     [169, 'ALTER TABLE mdf_shadow_comparison_attempts DROP CONSTRAINT mdf_shadow_comparison_attempts_attempts_check;'],
     [169, 'ALTER TABLE mdf_shadow_comparisons DISABLE TRIGGER mdf_shadow_comparison_immutable;'],
     [169, 'DROP INDEX idx_mdf_shadow_comparison_created;'],
+    [174, 'ALTER TABLE mdf_revision_context ALTER COLUMN acceptance_requested SET DEFAULT true;'],
+    [174, 'ALTER TABLE mdf_revision_demand ALTER COLUMN quantity DROP NOT NULL;'],
+    [174, 'ALTER TABLE mdf_published_sources DROP CONSTRAINT mdf_published_sources_source_kind_source_id_fkey;'],
+    [174, 'ALTER TABLE mdf_published_source_members DROP CONSTRAINT mdf_published_source_members_quantity_check;'],
+    [174, 'ALTER TABLE mdf_published_positions DROP CONSTRAINT mdf_published_positions_check;'],
+    [174, 'DROP INDEX idx_mdf_published_source_window;'],
+    [174, 'DROP INDEX idx_mdf_published_member_order;'],
+    [174, 'ALTER TABLE mdf_revision_context DISABLE TRIGGER mdf_context_insert_guard;'],
+    [174, 'ALTER TABLE mdf_revision_demand DISABLE TRIGGER mdf_demand_insert_guard;'],
+    [174, 'ALTER TABLE mdf_revision_context DISABLE TRIGGER mdf_context_immutable;'],
+    [174, 'ALTER TABLE mdf_revision_demand DISABLE TRIGGER mdf_demand_immutable;'],
+    [174, 'CREATE OR REPLACE FUNCTION mdf_guard_execution_context_insert() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;'],
+    [174, 'DROP TRIGGER mdf_context_insert_guard ON mdf_revision_context; CREATE TRIGGER mdf_context_insert_guard BEFORE INSERT ON mdf_revision_context FOR EACH ROW WHEN (NEW.acceptance_requested) EXECUTE FUNCTION mdf_guard_execution_context_insert();'],
   ] as const)('%s: rejects drift %s', (version, mutation) => {
     expect(present(fileFor(version), mutation)).toBe(false);
     expect(present(fileFor(version))).toBe(true); // rollback restored fixture
