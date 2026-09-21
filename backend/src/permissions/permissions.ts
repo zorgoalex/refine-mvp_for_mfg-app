@@ -172,6 +172,10 @@ export const PERMISSIONS = [
   'settings.manage',
   'whatsapp.view',
   'whatsapp.manage',
+  'message_signals.view',
+  'message_signals.resolve',
+  'message_signals.technical',
+  'message_signals.manage_config',
   'audit.view',
   'audit.technical.view',
   'notifications.view_rules',
@@ -212,6 +216,8 @@ export const ROLE_PERMISSIONS = {
   admin: adminServicePermissions,
 
   top_manager: [
+    'message_signals.view',
+    'message_signals.resolve',
     'profile.view',
     'profile.update_own',
     'sessions.logout_own',
@@ -308,6 +314,7 @@ export const ROLE_PERMISSIONS = {
   ],
 
   manager: [
+    'message_signals.view',
     'profile.view',
     'profile.update_own',
     'sessions.logout_own',

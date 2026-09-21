@@ -1086,6 +1086,7 @@ export class OrderTransactionService {
     },
   ): Promise<void> {
     const sourceKey = input.event.sourceIdempotencyKey ?? input.event.requestId;
+    if (input.event.actor.id === null) throw new Error('ORDER_WRITE_REQUIRES_USER_ACTOR');
     const outboxIdempotencyKey = `${sourceKey}:${input.event.eventType}`;
     await unitOfWork.enqueueAutomationSourceOutboxEvent({
       eventType: input.event.eventType,

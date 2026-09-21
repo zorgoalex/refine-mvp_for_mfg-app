@@ -127,11 +127,12 @@ async function captureMdfShadow(tx: TransactionClient, state: PendingShadow): Pr
     const revisionKey = `${explicit ? 'shadow-command' : 'shadow'}:${digest(input.sourceIdempotencyKey)}`;
     await recordMdfReceipt(tx, {
       sourceKind: input.source.kind, sourceId: input.source.id, revisionKey, origin: explicit ? 'manual' : 'legacy',
-      actorUserId: Number(input.actor.id), requestId: input.requestId, causeKey: input.sourceIdempotencyKey,
+      actorUserId: input.actor.id === null ? null : Number(input.actor.id), requestId: input.requestId, causeKey: input.sourceIdempotencyKey,
       expectedFence: head ? { version: head.version, correctionEpoch: head.correction_epoch } : null,
       sourceDigest: explicit?.receiptDigest ?? prepared.sourceDigest, accept: false, lines: prepared.lines, rules,
     });
     if (explicit) {
+      if (input.actor.id === null) throw new Error('MDF_SHADOW_MANUAL_ACTOR_REQUIRED');
       const c = explicit.command;
       // No retention-coupled FK, but provenance must reference this command's
       // actual persisted audit, not merely a well-formed UUID supplied by a caller.
