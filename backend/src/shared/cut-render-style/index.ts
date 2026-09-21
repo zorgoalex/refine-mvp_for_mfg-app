@@ -1,11 +1,14 @@
 export const CUT_RENDER_STYLE_DEFAULT = 'default';
 export const CUT_RENDER_STYLE_MDF_BOARD_PREVIEW = 'mdf_board_preview';
+export const CUT_RENDER_STYLE_VACUUM_TASK_PREVIEW = 'vacuum_task_preview';
 export const CUT_RENDER_STYLE_TELEGRAM_PHOTO = 'telegram_photo';
 export const CUT_RENDER_STYLES_SETTING_KEY = 'render.styles';
 
-export type CutRenderStyleName =
+type ConfigurableCutRenderStyleName =
   | typeof CUT_RENDER_STYLE_DEFAULT
   | typeof CUT_RENDER_STYLE_MDF_BOARD_PREVIEW;
+
+export type CutRenderStyleName = ConfigurableCutRenderStyleName | typeof CUT_RENDER_STYLE_VACUUM_TASK_PREVIEW;
 
 export type CutRenderStyleRuleId = CutRenderStyleName | typeof CUT_RENDER_STYLE_TELEGRAM_PHOTO;
 
@@ -67,7 +70,7 @@ export interface CutRenderLabelLineSpec {
 export interface CutRenderStylesSetting {
   version: 1;
   defaultProfileId: string;
-  profiles: Record<CutRenderStyleName, CutRenderStyleProfile>;
+  profiles: Record<ConfigurableCutRenderStyleName, CutRenderStyleProfile>;
   templates: CutRenderStyleTemplate[];
 }
 
@@ -173,9 +176,31 @@ const CUT_RENDER_STYLE_PROFILES = {
       minStrokePx: 2,
     },
   },
-} as const satisfies Record<CutRenderStyleName, CutRenderStyleProfile>;
+} as const satisfies Record<ConfigurableCutRenderStyleName, CutRenderStyleProfile>;
+
+// Screen-only bath task profile. Deliberately independent of saved MDF/print templates.
+const VACUUM_TASK_PREVIEW_PROFILE: CutRenderStyleProfile = {
+  ...CUT_RENDER_STYLE_PROFILES[CUT_RENDER_STYLE_DEFAULT],
+  piece: {
+    defaultFill: '#ffffff',
+    stroke: '#123b70',
+    strokeWidthMm: 10,
+    orderPalette: ['#123b70'],
+  },
+  sourceSvg: {
+    ...CUT_RENDER_STYLE_PROFILES[CUT_RENDER_STYLE_DEFAULT].sourceSvg,
+    minStrokePx: 2,
+    nonScalingStroke: true,
+    strokeColorMode: 'fixed',
+    fixedStroke: '#123b70',
+    strokeOpacity: 1,
+  },
+};
 
 export const CUT_RENDER_STYLE_RULES: Record<CutRenderStyleName, CutRenderStyleRule> = {
+  [CUT_RENDER_STYLE_VACUUM_TASK_PREVIEW]: cutRenderStyleRuleFromProfile(
+    CUT_RENDER_STYLE_VACUUM_TASK_PREVIEW, VACUUM_TASK_PREVIEW_PROFILE,
+  ),
   [CUT_RENDER_STYLE_DEFAULT]: cutRenderStyleRuleFromProfile(
     CUT_RENDER_STYLE_DEFAULT,
     CUT_RENDER_STYLE_PROFILES[CUT_RENDER_STYLE_DEFAULT],
@@ -209,6 +234,7 @@ export type CutRenderStyleRef = string | CutRenderStyleRule | null | undefined;
 
 export function normalizeCutRenderStyleName(value: string | null | undefined): CutRenderStyleName {
   const normalized = value?.trim().toLowerCase();
+  if (normalized === CUT_RENDER_STYLE_VACUUM_TASK_PREVIEW) return CUT_RENDER_STYLE_VACUUM_TASK_PREVIEW;
   return normalized === CUT_RENDER_STYLE_MDF_BOARD_PREVIEW
     ? CUT_RENDER_STYLE_MDF_BOARD_PREVIEW
     : CUT_RENDER_STYLE_DEFAULT;
@@ -226,6 +252,7 @@ export function resolveCutRenderStyleFromSetting(
   settingValue: unknown,
 ): CutRenderStyleRule {
   const styleName = normalizeCutRenderStyleName(value);
+  if (styleName === CUT_RENDER_STYLE_VACUUM_TASK_PREVIEW) return resolveCutRenderStyle(styleName);
   const setting = settingValue === null || settingValue === undefined
     ? DEFAULT_CUT_RENDER_STYLES_SETTING
     : parseCutRenderStylesSetting(settingValue);
@@ -706,7 +733,7 @@ function cutRenderStyleRuleFromProfile(
   };
 }
 
-function isCutRenderStyleName(value: string): value is CutRenderStyleName {
+function isCutRenderStyleName(value: string): value is ConfigurableCutRenderStyleName {
   return (CUT_RENDER_STYLE_NAMES as readonly string[]).includes(value);
 }
 

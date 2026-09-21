@@ -13,6 +13,7 @@ import {
 } from '../../../shared/cut-geometry';
 import {
   CUT_RENDER_STYLE_DEFAULT,
+  CUT_RENDER_STYLE_VACUUM_TASK_PREVIEW,
   cutRenderLabelFontWeight,
   cutRenderLabelLetterSpacingRatio,
   cutRenderLabelFillForBackground,
@@ -583,10 +584,17 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
     ? bathMeterGuideViewBox(sheet, rotate90, guideLabelFontMm)
     : `0 0 ${num(vbW)} ${num(vbH)}`;
 
+  // Fill the guide gutters too; transparent margins otherwise inherit the UI surface.
+  const [backgroundX, backgroundY, backgroundWidth, backgroundHeight] = viewBox.split(' ');
+  const taskBackground = renderStyle.id === CUT_RENDER_STYLE_VACUUM_TASK_PREVIEW
+    ? `<rect x="${backgroundX}" y="${backgroundY}" width="${backgroundWidth}" height="${backgroundHeight}" fill="#ffffff"/>`
+    : '';
+
   return [
     // viewBox only (no width/height attrs): the px size is chosen at raster time
     // via resvg fitTo; explicit width/height would make resvg ignore fitTo.
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" data-cut-order-label-font-mm="${num(orderLabelFontMm)}">`,
+    taskBackground,
     `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="${escapeXml(renderStyle.piece.defaultFill)}" stroke="${escapeXml(renderStyle.piece.stroke)}" stroke-width="${num(renderStyle.piece.strokeWidthMm)}"/>`,
     `<g class="cut-sheet-piece-geometry-layer">${pieces}</g>`,
     showLabels ? `<g class="cut-sheet-piece-label-layer">${labels}</g>` : '',

@@ -130,10 +130,14 @@ describe('CutPage source guards', () => {
     expect(source).toMatch(/minHeight:\s*Math\.round\(basis/);
   });
 
-  it('uses the configured per-order contour palette for every task sheet screen render', () => {
-    expect(source).toContain("import { CUT_RENDER_STYLE_MDF_BOARD_PREVIEW } from '@shared/cut-render-style'");
-    expect(source).toContain('const CUT_TASK_SHEET_RENDER_STYLE = CUT_RENDER_STYLE_MDF_BOARD_PREVIEW;');
-    expect(source.match(/CUT_TASK_SHEET_RENDER_STYLE/g)).toHaveLength(4);
+  it('isolates the vacuum profile to standalone task previews, keeping exports on their existing style', () => {
+    expect(source).toContain('const taskPreviewStyle = !isEmbeddedOrder && resolveCutJobLayoutKind(');
+    expect(source).toContain('? CUT_RENDER_STYLE_VACUUM_TASK_PREVIEW');
+    const previews = source.slice(source.indexOf('  const loadSheet ='), source.indexOf('  const downloadSheetSvg ='));
+    expect(previews.match(/          taskPreviewStyle,/g)).toHaveLength(2);
+    const download = source.slice(source.indexOf('  const downloadSheetSvg ='), source.indexOf('  const downloadSheetSvg =') + 2500);
+    expect(download).toContain('CUT_TASK_SHEET_RENDER_STYLE,');
+    expect(download).not.toContain('taskPreviewStyle,');
   });
 
   it('per-sheet button toggles Развернуть/Свернуть and collapses an opened sheet', () => {
