@@ -59,6 +59,11 @@ describe('Bazis-cut OpenAPI contract', () => {
       expect(list?.responses?.['200']?.content?.['application/json']?.schema).toBeDefined();
 
       const create = document.paths['/bazis-cut-sets']?.post;
+      const response = create?.responses?.['201']?.content?.['application/json']?.schema;
+      expect(response).toMatchObject({ properties: { mdfJobId: { type: 'string',format: 'uuid' } } });
+      expect(response && 'required' in response ? response.required : []).not.toContain('mdfJobId');
+      expect(contract.slice(contract.indexOf('    BazisCutMutationResult:'),contract.indexOf('    BazisCutDeleteSetResult:')))
+        .toContain('mdfJobId:');
       const createSchema = create?.requestBody && 'content' in create.requestBody
         ? create.requestBody.content['application/json']?.schema
         : undefined;

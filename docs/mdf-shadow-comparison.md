@@ -378,3 +378,25 @@ starting: an advisory-lock wait under a repeatable snapshot could otherwise read
 the pre-cutover mode. This boundary must cover the remaining writers before any
 activation. Ordinary unsupported writers and serializable returns are not yet
 connected by this increment.
+
+### New BASIS sources through the queue (activation still gated)
+
+In active mode, both BASIS creation commands (single order and multi-order
+picker) capture the saved MDF membership and complete owning-order demand in
+the same transaction as the set, audit, outbox and idempotent response. Selected
+details are locked before snapshotting. Only a source inserted in that exact
+transaction can use this path; existing sets require historical reconciliation.
+HDF sources and non-MDF materials are excluded. Creation supplies no physical cut
+quantity, even when a detail already has a later production status.
+
+Optional response `mdfJobId` identifies durable pending work. Once processed,
+the machine-files-present rule sees only positions belonging to that set. The
+published card can then use the separate manual confirmation command. Network
+replays return the same job, after rechecking access to every original owner.
+Active source IDs cannot reuse numbers retained in immutable production history.
+
+The remaining BASIS edits/deletions are explicitly classified as legacy-only:
+they retain existing behavior in legacy/shadow and reject before business writes
+in active/read_only until correction adapters are connected. This is a safety
+gate, not completed writer coverage. Keep the worker/read flags off and do not
+switch modes until all producer, correction, UI and baseline gates are complete.

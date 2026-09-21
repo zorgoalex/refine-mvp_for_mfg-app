@@ -4,8 +4,11 @@ import { ApiError } from '../../../common/errors/api-error';
 import { auditService } from '../../../common/audit/audit.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import { DatabaseService } from '../../../database/database.service';
-import { appendOrderReadScopeSql } from '../../../permissions/policies/order-read-scope-sql';
+import { appendOrderReadScopeSql, buildOrderReadScopePredicate, normalizeActorUserId, orderAssignmentExistsSql } from '../../../permissions/policies/order-read-scope-sql';
+import { rolePolicyForUser } from '../../../permissions/policies/scope';
 import type { CurrentUser } from '../../../permissions/current-user';
+import { requireMdfCommandBoundary } from '../../mdf-board/application/mdf-command-boundary';
+import { captureNewMdfBazisSource, registerNewMdfBazisSource } from '../../mdf-board/adapters/mdf-bazis-source';
 import { evaluateMdfOrderMachineFilesPresentAutomation } from '../../status-automation/application/status-automation-runtime';
 import { buildBazisCutXls, buildBazisCutXlsFromTemplate } from '../application/bazis-xls-writer';
 import { ExportTemplatesService } from '../../export-templates/application/export-templates.service';
@@ -261,6 +264,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
   async create(command: CreateBazisCutSetCommand): Promise<BazisCutMutationResultDto> {
     await this.assertOrderReadable(this.database, command.currentUser, command.orderId, command.requestId);
     return this.database.transaction(async (tx) => {
+      const boundary = await requireMdfCommandBoundary(tx,{ writer: 'bazis.create',capability: 'queued' });
       await setSessionUser(tx, command.currentUser);
       const detailIds = uniqueIds(command.detailIds);
       const hdfDetailIds = uniqueIds(command.hdfDetailIds ?? []);
@@ -269,9 +273,16 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       });
       const replay = await claimIdempotency<BazisCutMutationResultDto>(tx, command.idempotencyKey,
         'bazis_cut_set.create', actorId(command.currentUser), 'bazis_cut_set', 'pending', requestHash);
-      if (replay) return replay;
+      if (replay) {
+        if (boundary.queued) await authorizeCreationReplay(tx,command.currentUser,replay);
+        return replay;
+      }
+      if (boundary.queued) {
+        await lockPickerOrders(tx,command.currentUser,[command.orderId],true);
+        await lockCreationDetails(tx,command.orderId,detailIds,hdfDetailIds);
+      }
 
-      const setId = await insertSetHeader(tx, 'БР', actorId(command.currentUser));
+      const setId = await insertSetHeader(tx, 'БР', actorId(command.currentUser),boundary.queued);
       await tx.query(
         'UPDATE bazis_cut_sets SET name=$2 WHERE bazis_cut_set_id=$1',
         [setId, buildBazisCutSetName(setId)],
@@ -282,21 +293,25 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       ];
       await insertSnapshots(tx, setId, snapshots, 0, actorId(command.currentUser));
       const set = await loadSet(tx, setId);
-      const result = { set, addedCount: snapshots.length };
+      const mdfJobId = boundary.queued ? await captureNewMdfBazisSource(tx,{ setId,lockedOrderIds: [command.orderId],
+        user: command.currentUser,requestId: command.requestId ?? `bazis-create-${setId}` }) : undefined;
+      const result = { set, addedCount: snapshots.length,...(mdfJobId ? { mdfJobId } : {}) };
       await recordMutation(tx, command.currentUser, command.requestId, 'bazis_cut_set.created', setId,
         command.idempotencyKey, null, summaryAudit(set), set, set.details,
         {
+          ...(mdfJobId ? { mdfJobId,mdfEvidence: 'membership_only' } : {}),
           addedDetailIds: snapshots.map((item) => item.provenance.sourceOrderDetailId).filter((id): id is number => id !== null),
           addedHdfDetailIds: snapshots.map((item) => item.provenance.sourceOrderHdfDetailId).filter((id): id is number => id !== null),
         });
-      await evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'created');
+      if (!boundary.queued) await evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'created');
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
-    });
+    },{ mdf: { writer: 'bazis.create',capability: 'queued' } });
   }
 
   async createFromPicker(command: CreateBazisCutSetFromPickerCommand): Promise<BazisCutMutationResultDto> {
     return this.database.transaction(async (tx) => {
+      const boundary = await requireMdfCommandBoundary(tx,{ writer: 'bazis.create-picker',capability: 'queued' });
       await setSessionUser(tx, command.currentUser);
       const criteria = normalizeBazisCutPickerCriteria(command.criteria);
       const requested = normalizePickerDetails(command.details);
@@ -305,7 +320,10 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       });
       const replay = await claimIdempotency<BazisCutMutationResultDto>(tx, command.idempotencyKey,
         'bazis_cut_set.create_from_picker', actorId(command.currentUser), 'bazis_cut_set', 'pending', requestHash);
-      if (replay) return replay;
+      if (replay) {
+        if (boundary.queued) await authorizeCreationReplay(tx,command.currentUser,replay);
+        return replay;
+      }
 
       const canonicalHash = hashBazisCutPickerCriteria(criteria);
       if (canonicalHash !== command.criteriaHash) throw pickerSelectionStale();
@@ -314,7 +332,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       const initial = await picker.loadSelection(command.currentUser, criteria, requested.map((item) => item.detailId));
       assertPickerSelection(requested, initial.rows, canonicalHash);
       const orderIds = uniqueIds(initial.rows.map((row) => toNumber(row.order_id)));
-      await lockPickerOrders(tx, command.currentUser, orderIds);
+      await lockPickerOrders(tx, command.currentUser, orderIds,boundary.queued);
       await lockPickerDetails(tx, requested.map((item) => item.detailId));
 
       const fresh = await picker.loadSelection(command.currentUser, criteria, requested.map((item) => item.detailId));
@@ -322,21 +340,24 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       const detailIds = fresh.rows.map((row) => toNumber(row.detail_id));
       const snapshots = await loadSnapshots(tx, null, detailIds);
 
-      const setId = await insertSetHeader(tx, 'БР', actorId(command.currentUser));
+      const setId = await insertSetHeader(tx, 'БР', actorId(command.currentUser),boundary.queued);
       await tx.query('UPDATE bazis_cut_sets SET name=$2 WHERE bazis_cut_set_id=$1',
         [setId, buildBazisCutSetName(setId)]);
       await insertSnapshots(tx, setId, snapshots, 0, actorId(command.currentUser));
       const set = await loadSet(tx, setId);
-      const result = { set, addedCount: snapshots.length };
+      const mdfJobId = boundary.queued ? await captureNewMdfBazisSource(tx,{ setId,lockedOrderIds: orderIds,
+        user: command.currentUser,requestId: command.requestId ?? `bazis-create-picker-${setId}` }) : undefined;
+      const result = { set, addedCount: snapshots.length,...(mdfJobId ? { mdfJobId } : {}) };
       await recordMutation(tx, command.currentUser, command.requestId, 'bazis_cut_set.created', setId,
         command.idempotencyKey, null, summaryAudit(set), set, set.details, {
           creationSource: 'picker', criteriaHash: canonicalHash,
+          ...(mdfJobId ? { mdfJobId,mdfEvidence: 'membership_only' } : {}),
           addedDetailIds: snapshots.map((item) => item.provenance.sourceOrderDetailId),
         });
-      await evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'created');
+      if (!boundary.queued) await evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'created');
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
-    });
+    },{ mdf: { writer: 'bazis.create-picker',capability: 'queued' } });
   }
 
   async rename(command: RenameBazisCutSetCommand): Promise<BazisCutMutationResultDto> {
@@ -366,7 +387,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
         command.idempotencyKey, { name: before.name, version: before.version }, summaryAudit(set), set, set.details);
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
-    });
+    },{ mdf: { writer: 'bazis.rename',capability: 'legacy-only' } });
   }
 
   async addDetails(command: AddBazisCutDetailsCommand): Promise<BazisCutMutationResultDto> {
@@ -425,7 +446,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       await evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'details-added');
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
-    });
+    },{ mdf: { writer: 'bazis.add-details',capability: 'legacy-only' } });
   }
 
   async updateDetail(command: UpdateBazisCutDetailCommand): Promise<BazisCutMutationResultDto> {
@@ -466,7 +487,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       await evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'detail-updated');
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
-    });
+    },{ mdf: { writer: 'bazis.update-detail',capability: 'legacy-only' } });
   }
 
   async deleteDetail(command: DeleteBazisCutDetailCommand): Promise<BazisCutMutationResultDto> {
@@ -495,7 +516,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       await evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'detail-removed');
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
-    });
+    },{ mdf: { writer: 'bazis.delete-detail',capability: 'legacy-only' } });
   }
 
   async deleteEmptySet(command: DeleteBazisCutSetCommand): Promise<BazisCutDeleteSetResultDto> {
@@ -521,7 +542,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       await tx.query(`DELETE FROM bazis_cut_sets WHERE bazis_cut_set_id=$1`, [command.setId]);
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
-    });
+    },{ mdf: { writer: 'bazis.delete-empty',capability: 'legacy-only' } });
   }
 
   async export(input: Parameters<BazisCutRepositoryPort['export']>[0]): Promise<{ set: BazisCutSetDto; bytes: Buffer }> {
@@ -896,10 +917,16 @@ async function insertSnapshots(client: DatabaseClient, setId: number, snapshots:
   }
 }
 
-async function insertSetHeader(client: TransactionClient, name: string, userId: number | null): Promise<number> {
+async function insertSetHeader(client: TransactionClient, name: string, userId: number | null, queued = false): Promise<number> {
   await client.query('LOCK TABLE bazis_cut_sets IN SHARE ROW EXCLUSIVE MODE');
   const inserted = await client.query<{ bazis_cut_set_id: string | number }>(
-    `WITH next_id AS (
+    queued ? `WITH next_id AS (
+       SELECT GREATEST(COALESCE((SELECT MAX(bazis_cut_set_id)::numeric FROM bazis_cut_sets),0),
+         COALESCE((SELECT MAX(source_id::numeric) FROM mdf_source_heads
+           WHERE source_kind='bazisCutSet' AND source_id ~ '^[1-9][0-9]*$'),0))+1 AS id
+     ) INSERT INTO bazis_cut_sets(bazis_cut_set_id,name,created_by,updated_by)
+       SELECT id::bigint,$1,$2,$2 FROM next_id WHERE id<=9007199254740991 RETURNING bazis_cut_set_id`
+    : `WITH next_id AS (
        SELECT candidate AS bazis_cut_set_id
        FROM generate_series(
          1::bigint,
@@ -916,7 +943,9 @@ async function insertSetHeader(client: TransactionClient, name: string, userId: 
      RETURNING bazis_cut_set_id`,
     [name, userId],
   );
+  if (!inserted.rows.length) throw new ApiError(409,'BAZIS_CUT_ID_EXHAUSTED','Не удалось выделить идентификатор набора');
   const setId = toNumber(inserted.rows[0].bazis_cut_set_id);
+  if (queued) registerNewMdfBazisSource(client,setId);
   await client.query(
     `SELECT setval(
        pg_get_serial_sequence('bazis_cut_sets','bazis_cut_set_id'),
@@ -1220,16 +1249,43 @@ async function lockPickerOrders(
   client: DatabaseClient,
   user: CurrentUser,
   orderIds: readonly number[],
+  currentPolicy = false,
 ): Promise<void> {
   const params: unknown[] = [[...orderIds]];
-  const scope = appendOrderReadScopeSql(params, user, 'o');
+  // Active commands/replays must honor resolved per-user scope, not only the
+  // legacy role default used by the old picker SQL.
+  let predicate: string;
+  if (currentPolicy) {
+    if (!user.permissions.includes('cut.manage') || !user.permissions.includes('orders.view')) throw pickerSelectionStale();
+    const scope = rolePolicyForUser(user).orders.view;
+    const actor = scope === 'own' || scope === 'assigned' ? params.push(normalizeActorUserId(user.id)) : null;
+    predicate = buildOrderReadScopePredicate(scope,actor,actor === null ? 'FALSE' : orderAssignmentExistsSql('o',actor),'o');
+  } else predicate = appendOrderReadScopeSql(params, user, 'o').predicate;
   const result = await client.query<OrderScopeRow>(
     `SELECT o.order_id FROM orders o
-     WHERE o.order_id=ANY($1::bigint[]) AND o.delete_flag=false AND ${scope.predicate}
+     WHERE o.order_id=ANY($1::bigint[]) AND o.delete_flag=false AND ${predicate}
      ORDER BY o.order_id FOR UPDATE`,
     params,
   );
   if (result.rows.length !== orderIds.length) throw pickerSelectionStale();
+}
+
+async function authorizeCreationReplay(tx: TransactionClient, user: CurrentUser, response: BazisCutMutationResultDto): Promise<void> {
+  const ids = response.set.details.map(d => d.sourceOrderId);
+  if (!ids.length || ids.some(id => id === null || !Number.isSafeInteger(id) || id <= 0)) throw pickerSelectionStale();
+  await lockPickerOrders(tx,user,uniqueNullable(ids),true);
+}
+
+async function lockCreationDetails(tx: TransactionClient, orderId: number, detailIds: number[], hdfDetailIds: number[]): Promise<void> {
+  // Owner before details, normal before HDF, deterministic ordering. Querying
+  // snapshots alone is not a lock: concurrent raw detail writers must wait too.
+  for (const [table,key,ids] of [['order_details','detail_id',detailIds],
+    ['order_hdf_details','order_hdf_detail_id',hdfDetailIds]] as const) {
+    if (!ids.length) continue;
+    const rows = (await tx.query(`SELECT ${key} FROM ${table} WHERE order_id=$1
+      AND ${key}=ANY($2::bigint[]) AND NOT delete_flag ORDER BY ${key} FOR UPDATE`,[orderId,ids])).rows;
+    if (rows.length !== ids.length) throw new ApiError(404,'ORDER_NOT_FOUND','Order not found',{ orderId });
+  }
 }
 
 async function lockPickerDetails(client: DatabaseClient, detailIds: readonly number[]): Promise<void> {

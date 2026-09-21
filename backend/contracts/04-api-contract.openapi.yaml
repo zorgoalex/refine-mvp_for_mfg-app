@@ -17373,6 +17373,7 @@ components:
       properties:
         set: { $ref: '#/components/schemas/BazisCutSet' }
         addedCount: { type: integer, minimum: 0 }
+        mdfJobId: { type: string, format: uuid, description: 'Active MDF mode: queued calculation, not yet applied rules' }
     BazisCutDeleteSetResult:
       type: object
       required: [deleted, set]
