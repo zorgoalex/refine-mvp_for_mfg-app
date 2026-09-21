@@ -29,6 +29,11 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-09-21", title: "Понятные журналы WhatsApp",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: ["В журнале работы WhatsApp и аудите правил можно переключаться между понятным и техническим представлением. Понятный режим объясняет действия, результаты и ошибки обычными словами; исходные коды, идентификаторы и JSON остаются доступны в техническом режиме."],
+  },
+  {
     version: APP_VERSION, date: "2026-09-21", title: "Bitrix: выбор заказа для сверки стадий",
     services: ["CRM"], repositories: ["repo_erp"],
     added: ["В сверке стадий доступен точный поиск по номеру заказа или ID ERP. По умолчанию сначала показаны новые заказы; можно переключиться на старые. Поиск и порядок сохраняются при переходе между страницами. Передача в Bitrix по-прежнему требует выбора строк и подтверждения."],

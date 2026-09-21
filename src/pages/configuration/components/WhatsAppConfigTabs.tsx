@@ -9,6 +9,7 @@ import {
   InputNumber,
   Modal,
   Popconfirm,
+  Radio,
   Select,
   Space,
   Spin,
@@ -44,6 +45,16 @@ import { can } from "../../../utils/permissions";
 import "./WhatsAppConfigTabs.css";
 
 const { Paragraph, Text, Title } = Typography;
+
+type LogDisplayMode = "readable" | "technical";
+
+const LOG_DISPLAY_OPTIONS: Array<{
+  label: string;
+  value: LogDisplayMode;
+}> = [
+  { label: "Понятный", value: "readable" },
+  { label: "Технический", value: "technical" },
+];
 
 export interface UserFacingError {
   title: string;
@@ -248,6 +259,8 @@ export const WhatsAppAutomationConfig: React.FC = () => {
   const [rules, setRules] = useState<WhatsAppRuleDto[]>([]);
   const [jobs, setJobs] = useState<WhatsAppDeliveryJobDto[]>([]);
   const [audit, setAudit] = useState<WhatsAppAuditDto[]>([]);
+  const [auditDisplayMode, setAuditDisplayMode] =
+    useState<LogDisplayMode>("readable");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [templateEditor, setTemplateEditor] = useState<
@@ -537,36 +550,71 @@ export const WhatsAppAutomationConfig: React.FC = () => {
             label: `Аудит (${audit.length})`,
             children: (
               <>
-                <Toolbar title="Журнал WhatsApp" />
+                <Toolbar
+                  title="Журнал WhatsApp"
+                  extra={
+                    <Radio.Group
+                      aria-label="Вид журнала аудита WhatsApp"
+                      value={auditDisplayMode}
+                      optionType="button"
+                      buttonStyle="solid"
+                      onChange={(event) =>
+                        setAuditDisplayMode(event.target.value as LogDisplayMode)
+                      }
+                    >
+                      {LOG_DISPLAY_OPTIONS.map((option) => (
+                        <Radio.Button key={option.value} value={option.value}>
+                          {option.label}
+                        </Radio.Button>
+                      ))}
+                    </Radio.Group>
+                  }
+                />
                 <Table
                   rowKey="auditId"
                   pagination={{ pageSize: 20 }}
                   dataSource={audit}
-                  columns={[
-                    {
-                      title: "Время",
-                      dataIndex: "createdAt",
-                      render: formatDate,
-                    },
-                    { title: "Событие", dataIndex: "event" },
-                    {
-                      title: "Объект",
-                      render: (_: unknown, item: WhatsAppAuditDto) =>
-                        `${item.entityType} · ${item.entityId}`,
-                    },
-                    {
-                      title: "Пользователь",
-                      dataIndex: "username",
-                      responsive: ["md"],
-                      render: (value: string | null) => value ?? "Система",
-                    },
-                    {
-                      title: "Request ID",
-                      dataIndex: "requestId",
-                      responsive: ["lg"],
-                      ellipsis: true,
-                    },
-                  ]}
+                  columns={auditDisplayMode === "readable"
+                    ? [
+                        { title: "Время", dataIndex: "createdAt", render: formatDate },
+                        {
+                          title: "Что произошло",
+                          render: (_: unknown, item: WhatsAppAuditDto) =>
+                            whatsappAuditPresentation(item).action,
+                        },
+                        {
+                          title: "С чем",
+                          render: (_: unknown, item: WhatsAppAuditDto) =>
+                            whatsappAuditPresentation(item).object,
+                        },
+                        {
+                          title: "Кто",
+                          dataIndex: "username",
+                          responsive: ["md"],
+                          render: (value: string | null) => value ?? "Система",
+                        },
+                      ]
+                    : [
+                        { title: "Время", dataIndex: "createdAt", render: formatDate },
+                        { title: "Событие", dataIndex: "event" },
+                        {
+                          title: "Объект",
+                          render: (_: unknown, item: WhatsAppAuditDto) =>
+                            `${item.entityType} · ${item.entityId}`,
+                        },
+                        {
+                          title: "Пользователь",
+                          dataIndex: "username",
+                          responsive: ["md"],
+                          render: (value: string | null) => value ?? "Система",
+                        },
+                        {
+                          title: "Request ID",
+                          dataIndex: "requestId",
+                          responsive: ["lg"],
+                          ellipsis: true,
+                        },
+                      ]}
                 />
               </>
             ),
@@ -594,6 +642,7 @@ export const WhatsAppTechnicalLogsConfig: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<UserFacingError | null>(null);
+  const [displayMode, setDisplayMode] = useState<LogDisplayMode>("readable");
   const [query, setQuery] = useState<WhatsAppTechnicalLogQuery>({ page: 1, pageSize: 100 });
   const requestRevision = useRef(0);
   const activeRequest = useRef<AbortController | null>(null);
@@ -646,10 +695,23 @@ export const WhatsAppTechnicalLogsConfig: React.FC = () => {
     <div className="whatsapp-config">
       <header className="whatsapp-config__header">
         <div>
-          <Title level={4}>Технический журнал WhatsApp</Title>
-          <Paragraph type="secondary">События WAHA API, сессии, webhook, relay и cleanup. Хранение 14 дней; сообщения, JID, QR и секреты не записываются.</Paragraph>
+          <Title level={4}>Журнал работы WhatsApp</Title>
+          <Paragraph type="secondary">Понятный режим объясняет события обычными словами. Технический режим сохраняет исходные коды и детали. Хранение 14 дней; сообщения, номера, QR и секреты не записываются.</Paragraph>
         </div>
         <Space wrap>
+          <Radio.Group
+            aria-label="Вид технического журнала WhatsApp"
+            value={displayMode}
+            optionType="button"
+            buttonStyle="solid"
+            onChange={(event) => setDisplayMode(event.target.value as LogDisplayMode)}
+          >
+            {LOG_DISPLAY_OPTIONS.map((option) => (
+              <Radio.Button key={option.value} value={option.value}>
+                {option.label}
+              </Radio.Button>
+            ))}
+          </Radio.Group>
           <Text type="secondary">Обновлено: {formatDate(lastUpdatedAt)}</Text>
           <Button icon={<DownloadOutlined />} onClick={() => void exportLogs()}>Выгрузить JSONL</Button>
           <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>Обновить</Button>
@@ -659,12 +721,22 @@ export const WhatsAppTechnicalLogsConfig: React.FC = () => {
         action={<Button onClick={() => void load()}>Повторить</Button>} /> : null}
       <Space wrap className="whatsapp-config__technical-filters">
         <Select allowClear placeholder="Уровень" style={{ width: 140 }} value={query.level}
-          options={["info", "warn", "error"].map((value) => ({ value, label: value }))}
+          options={[
+            { value: "info", label: "Информация" },
+            { value: "warn", label: "Предупреждение" },
+            { value: "error", label: "Ошибка" },
+          ]}
           onChange={(level) => setQuery((current) => ({ ...current, page: 1, level }))} />
         <Select allowClear placeholder="Компонент" style={{ width: 160 }} value={query.component}
-          options={["backend", "waha", "webhook", "relay", "cleanup"].map((value) => ({ value, label: value }))}
+          options={[
+            { value: "backend", label: "ERP" },
+            { value: "waha", label: "Подключение" },
+            { value: "webhook", label: "Входящие" },
+            { value: "relay", label: "Исходящие" },
+            { value: "cleanup", label: "Очистка" },
+          ]}
           onChange={(component) => setQuery((current) => ({ ...current, page: 1, component }))} />
-        <Input.Search allowClear placeholder="Событие, операция или код ошибки" style={{ width: 320 }}
+        <Input.Search allowClear placeholder={displayMode === "readable" ? "Поиск по событиям и ошибкам" : "Событие, операция или код ошибки"} style={{ width: 320 }}
           onSearch={(search) => setQuery((current) => ({ ...current, page: 1, search: search || undefined }))} />
       </Space>
       <Table<WhatsAppTechnicalLogDto> rowKey="id" loading={loading} dataSource={rows}
@@ -677,24 +749,54 @@ export const WhatsAppTechnicalLogsConfig: React.FC = () => {
           showTotal: (count) => `Всего: ${count}`,
           onChange: (page, pageSize) => setQuery((current) => ({ ...current, page, pageSize })),
         }}
-        scroll={{ x: 1100 }}
-        columns={[
-          { title: "Время", dataIndex: "occurredAt", width: 180, render: formatDate },
-          { title: "Уровень", dataIndex: "level", width: 90, render: (level: string) => <Tag color={level === "error" ? "red" : level === "warn" ? "orange" : "blue"}>{level}</Tag> },
-          { title: "Компонент", dataIndex: "component", width: 110 },
-          { title: "Событие", dataIndex: "eventCode", width: 210 },
-          { title: "Результат", dataIndex: "outcome", width: 110 },
-          { title: "Операция", dataIndex: "operation", width: 230 },
-          { title: "HTTP", dataIndex: "httpStatus", width: 75 },
-          { title: "мс", dataIndex: "durationMs", width: 80 },
-          { title: "Ошибка", dataIndex: "errorCode", width: 220 },
-          { title: "Сообщение", dataIndex: "errorMessage", width: 260, ellipsis: true },
-          { title: "Request ID", dataIndex: "requestId", width: 220, ellipsis: true },
-          { title: "Детали", dataIndex: "details", width: 320, ellipsis: true,
-            render: (details: Record<string, unknown>) => Object.keys(details ?? {}).length
-              ? <Text code copyable={{ text: JSON.stringify(details) }}>{JSON.stringify(details)}</Text>
-              : "—" },
-        ]} />
+        scroll={displayMode === "technical" ? { x: 1100 } : undefined}
+        columns={displayMode === "readable"
+          ? [
+              { title: "Время", dataIndex: "occurredAt", width: 180, render: formatDate },
+              {
+                title: "Результат",
+                width: 130,
+                render: (_: unknown, item: WhatsAppTechnicalLogDto) => {
+                  const view = whatsappTechnicalLogPresentation(item);
+                  return <Tag color={view.color}>{view.result}</Tag>;
+                },
+              },
+              {
+                title: "Что произошло",
+                width: 260,
+                render: (_: unknown, item: WhatsAppTechnicalLogDto) =>
+                  whatsappTechnicalLogPresentation(item).event,
+              },
+              {
+                title: "Описание",
+                render: (_: unknown, item: WhatsAppTechnicalLogDto) =>
+                  whatsappTechnicalLogPresentation(item).description,
+              },
+              {
+                title: "Участок",
+                width: 170,
+                responsive: ["lg"],
+                render: (_: unknown, item: WhatsAppTechnicalLogDto) =>
+                  whatsappTechnicalLogPresentation(item).component,
+              },
+            ]
+          : [
+              { title: "Время", dataIndex: "occurredAt", width: 180, render: formatDate },
+              { title: "Уровень", dataIndex: "level", width: 90, render: (level: string) => <Tag color={level === "error" ? "red" : level === "warn" ? "orange" : "blue"}>{level}</Tag> },
+              { title: "Компонент", dataIndex: "component", width: 110 },
+              { title: "Событие", dataIndex: "eventCode", width: 210 },
+              { title: "Результат", dataIndex: "outcome", width: 110 },
+              { title: "Операция", dataIndex: "operation", width: 230 },
+              { title: "HTTP", dataIndex: "httpStatus", width: 75 },
+              { title: "мс", dataIndex: "durationMs", width: 80 },
+              { title: "Ошибка", dataIndex: "errorCode", width: 220 },
+              { title: "Сообщение", dataIndex: "errorMessage", width: 260, ellipsis: true },
+              { title: "Request ID", dataIndex: "requestId", width: 220, ellipsis: true },
+              { title: "Детали", dataIndex: "details", width: 320, ellipsis: true,
+                render: (details: Record<string, unknown>) => Object.keys(details ?? {}).length
+                  ? <Text code copyable={{ text: JSON.stringify(details) }}>{JSON.stringify(details)}</Text>
+                  : "—" },
+            ]} />
     </div>
   );
 };
@@ -916,16 +1018,18 @@ function Toolbar({
   action,
   disabled,
   onAction,
+  extra,
 }: {
   title: string;
   action?: string;
   disabled?: boolean;
   onAction?: () => void | Promise<void>;
+  extra?: React.ReactNode;
 }) {
   return (
     <div className="whatsapp-config__toolbar">
       <Title level={5}>{title}</Title>
-      {action ? (
+      {extra ?? (action ? (
         <Button
           type="primary"
           icon={<PlusOutlined />}
@@ -934,7 +1038,7 @@ function Toolbar({
         >
           {action}
         </Button>
-      ) : null}
+      ) : null)}
     </div>
   );
 }
@@ -1126,6 +1230,208 @@ function deliveryErrorText(item: WhatsAppDeliveryJobDto): string {
     WAHA_PROVIDER_ERROR: "WAHA отклонил отправку",
   };
   return messages[item.errorCode] ?? "Техническая ошибка; см. журнал";
+}
+
+export function whatsappAuditPresentation(item: WhatsAppAuditDto): {
+  action: string;
+  object: string;
+} {
+  const actions: Record<string, string> = {
+    "whatsapp.template.created": "Создан шаблон ответа",
+    "whatsapp.template.updated": "Изменён шаблон ответа",
+    "whatsapp.template.disabled": "Выключен шаблон ответа",
+    "whatsapp.rule.created": "Создано правило ответа",
+    "whatsapp.rule.updated": "Изменено правило ответа",
+    "whatsapp.rule.disabled": "Выключено правило ответа",
+    "whatsapp.webhook.received": "Получено входящее сообщение",
+    "whatsapp.webhook.rejected": "Входящее сообщение отклонено",
+    "whatsapp.webhook.duplicate": "Повторное сообщение пропущено",
+    "whatsapp.delivery.retry_requested": "Запрошена повторная отправка",
+    "whatsapp.delivery.sent": "Ответ отправлен",
+    "whatsapp.delivery.failed": "Ответ не отправлен",
+    "whatsapp.delivery.unknown": "Результат отправки требует проверки",
+    "whatsapp.session.restart_requested": "Запрошен перезапуск подключения",
+    "whatsapp.session.restart_completed": "Подключение перезапущено",
+    "whatsapp.session.restart_failed": "Не удалось перезапустить подключение",
+  };
+  const entities: Record<string, string> = {
+    whatsapp_template: "Шаблон ответа",
+    whatsapp_rule: "Правило",
+    whatsapp_webhook: "Входящее сообщение",
+    whatsapp_delivery: "Отправка",
+    whatsapp_session: "Подключение",
+  };
+  const entity = entities[item.entityType] ?? "Объект WhatsApp";
+  const showId = item.entityId
+    && ["whatsapp_template", "whatsapp_rule", "whatsapp_delivery"].includes(item.entityType);
+  return {
+    action: actions[item.event] ?? "Служебное действие WhatsApp",
+    object: showId ? `${entity} №${item.entityId}` : entity,
+  };
+}
+
+export function whatsappTechnicalLogPresentation(
+  item: WhatsAppTechnicalLogDto
+): {
+  event: string;
+  result: string;
+  description: string;
+  component: string;
+  color: string;
+} {
+  const events: Record<string, string> = {
+    "waha.api.request": "Обращение к WhatsApp",
+    "waha.qr.response": "Получение QR-кода",
+    "waha.session.snapshot": "Проверка подключения",
+    "whatsapp.webhook.processed": "Входящее сообщение обработано",
+    "whatsapp.webhook.ignored": "Входящее сообщение пропущено",
+    "whatsapp.webhook.rejected": "Входящее сообщение отклонено",
+    "whatsapp.relay.batch": "Отправка ответов",
+    "whatsapp.cleanup.completed": "Очистка старых записей",
+  };
+  const components: Record<WhatsAppTechnicalLogDto["component"], string> = {
+    backend: "ERP",
+    waha: "Подключение WhatsApp",
+    webhook: "Входящие сообщения",
+    relay: "Исходящие ответы",
+    cleanup: "Очистка журнала",
+  };
+  const outcomes: Record<WhatsAppTechnicalLogDto["outcome"], string> = {
+    started: "Выполняется",
+    succeeded: "Успешно",
+    failed: "Ошибка",
+    observed: "Информация",
+  };
+  const colors: Record<WhatsAppTechnicalLogDto["outcome"], string> = {
+    started: "processing",
+    succeeded: "green",
+    failed: "red",
+    observed: "blue",
+  };
+
+  let result = outcomes[item.outcome];
+  let color = item.level === "warn" && item.outcome !== "failed"
+    ? "orange"
+    : colors[item.outcome];
+  const detailResult = stringDetail(item.details, "result");
+  if (item.eventCode === "whatsapp.webhook.processed") {
+    if (detailResult === "queued") result = "Ответ в очереди";
+    if (detailResult === "unmatched") {
+      result = "Правило не найдено";
+      color = "orange";
+    }
+    if (detailResult === "duplicate") result = "Повтор";
+  } else if (item.eventCode === "whatsapp.webhook.ignored") {
+    result = "Пропущено";
+    color = "blue";
+  } else if (item.eventCode === "waha.session.snapshot") {
+    const status = stringDetail(item.details, "status");
+    if (status) {
+      const session = whatsappSessionPresentation({ status });
+      result = session.label;
+      color = session.color;
+    }
+  } else if (item.eventCode === "whatsapp.relay.batch") {
+    const problems = numberDetail(item.details, "failed")
+      + numberDetail(item.details, "unknown");
+    if (problems > 0) {
+      result = "Есть проблемы";
+      color = "orange";
+    }
+  }
+
+  return {
+    event: events[item.eventCode] ?? "Служебное событие WhatsApp",
+    result,
+    description: readableTechnicalDescription(item),
+    component: components[item.component],
+    color,
+  };
+}
+
+function readableTechnicalDescription(item: WhatsAppTechnicalLogDto): string {
+  const detailResult = stringDetail(item.details, "result");
+  if (item.eventCode === "whatsapp.webhook.processed") {
+    const results: Record<string, string> = {
+      queued: "Найдено правило. Ответ поставлен в очередь.",
+      unmatched: "Подходящее правило не найдено. Ответ не отправлен.",
+      duplicate: "Сообщение уже было обработано ранее.",
+    };
+    return results[detailResult ?? ""] ?? "Входящее сообщение обработано.";
+  }
+  if (item.eventCode === "whatsapp.webhook.ignored") {
+    const reasons: Record<string, string> = {
+      event: "Служебное событие не требует автоматического ответа.",
+      from_me: "Исходящее сообщение не запускает правило ответа.",
+      api_source: "Сообщение, отправленное ERP, не запускает правило повторно.",
+      non_direct_chat: "Сообщение не из личного чата, поэтому оно пропущено.",
+      non_text_message: "Медиа или другой нетекстовый тип сообщения пропущен.",
+      invalid_text: "Текст пустой или слишком длинный для обработки.",
+    };
+    return reasons[stringDetail(item.details, "reason") ?? ""]
+      ?? "Сообщение не требует автоматического ответа.";
+  }
+  if (item.eventCode === "waha.session.snapshot") {
+    const status = stringDetail(item.details, "status");
+    return status
+      ? `Состояние подключения: ${whatsappSessionPresentation({ status }).label}.`
+      : "Состояние подключения проверено.";
+  }
+  if (item.eventCode === "whatsapp.relay.batch") {
+    const claimed = numberDetail(item.details, "claimed");
+    const sent = numberDetail(item.details, "sent");
+    const failed = numberDetail(item.details, "failed");
+    const unknown = numberDetail(item.details, "unknown");
+    return `Обработано: ${claimed}; отправлено: ${sent}; ошибок: ${failed}; требуют проверки: ${unknown}.`;
+  }
+  if (item.eventCode === "whatsapp.cleanup.completed") {
+    return "Удалены устаревшие записи согласно сроку хранения.";
+  }
+  if (item.outcome === "failed") {
+    if (item.errorCode === "WAHA_UNAVAILABLE")
+      return "Сервис WhatsApp не ответил. Повторите действие позже.";
+    if (item.errorCode === "WAHA_PROVIDER_ERROR")
+      return item.httpStatus
+        ? `WhatsApp отклонил запрос (код ${item.httpStatus}).`
+        : "WhatsApp отклонил запрос.";
+    if (item.errorCode === "WAHA_QR_RESPONSE_INVALID")
+      return "Получен некорректный QR-код. Запросите новый код.";
+    if (item.eventCode === "whatsapp.webhook.rejected")
+      return "Входящее событие не прошло проверку безопасности или формата.";
+    return "Операция завершилась ошибкой. Подробности доступны в техническом режиме.";
+  }
+  return readableOperation(item.operation);
+}
+
+function readableOperation(operation: string | null): string {
+  if (!operation) return "Состояние WhatsApp обновлено.";
+  if (operation.includes("auth/qr")) return "QR-код получен.";
+  if (operation.includes("/restart")) return "Подключение WhatsApp перезапущено.";
+  if (operation.includes("/sendText")) return "Ответ передан в WhatsApp.";
+  if (operation.includes("/capping")) return "Проверены ограничения отправки сообщений.";
+  if (operation.includes("/timelock")) return "Проверены ограничения новых диалогов.";
+  if (operation.includes("/me")) return "Проверен подключённый аккаунт.";
+  if (operation.includes("/sessions/")) return "Проверено состояние подключения.";
+  if (operation.includes("/health") || operation.includes("server/status"))
+    return "Проверена доступность сервиса WhatsApp.";
+  if (operation.includes("server/version")) return "Проверена версия сервиса WhatsApp.";
+  return "Операция выполнена.";
+}
+
+function stringDetail(
+  details: WhatsAppTechnicalLogDto["details"],
+  key: string
+): string | null {
+  const value = details?.[key];
+  return typeof value === "string" ? value : null;
+}
+
+function numberDetail(
+  details: WhatsAppTechnicalLogDto["details"],
+  key: string
+): number {
+  const value = details?.[key];
+  return typeof value === "number" ? value : 0;
 }
 
 function restrictionLabel(value: string): string {
