@@ -13,7 +13,7 @@ import { ProductionActionStatusNotFoundError } from '../../production-actions/er
 import { loadMdfBoardEvents } from '../adapters/pg-mdf-board-event-repository';
 import { markMdfShadowSource } from '../../mdf-board/application/mdf-shadow';
 import { isMdfBoardEvent, type MdfBoardDetailScope, type MdfBoardEventInput, type MdfBoardResolvedEvent } from './mdf-board-event.types';
-import { snapshotPinnedMdfBatch, type PinnedMdfAutomationInput } from './mdf-pinned-batch';
+import { snapshotPinnedMdfBatch, type MdfAutomationRulePin, type PinnedMdfAutomationInput } from './mdf-pinned-batch';
 import {
   listEnabledRulesForEvent,
   listEnabledRulesForManualRefresh,
@@ -49,6 +49,10 @@ const mdfScopes = new WeakMap<StatusAutomationEvent, MdfBoardDetailScope>();
 const evaluationStates = new WeakMap<StatusAutomationEvent, OrderAutomationState>();
 const executedRules = new WeakMap<TransactionClient, Set<string>>();
 const pinnedRules = new WeakMap<TransactionClient, readonly StatusAutomationRule[]>();
+const pinnedExecutionModes = new WeakMap<TransactionClient, 'accepted_job' | 'live_command'>();
+// Live commands can dispatch several sources in one transaction. Freeze their
+// rule selection once, without treating live resolver output as accepted evidence.
+const liveMdfPins = new WeakMap<TransactionClient, readonly MdfAutomationRulePin[]>();
 
 /** INTERNAL execution primitive, not an API or complete job handler. Caller owns
  * active-mode cutover lock, durable job claim/pins, verified evidence, actor authorization, demand
@@ -58,6 +62,14 @@ const pinnedRules = new WeakMap<TransactionClient, readonly StatusAutomationRule
  * business effects on any error; in-memory recursion guards are always restored.
  */
 export async function executePinnedMdfAutomation(tx: TransactionClient, input: PinnedMdfAutomationInput) {
+  return executePinnedMdfBatch(tx, input, 'accepted_job');
+}
+
+/** Shared action engine. Only the private live-command route may supply legacy
+ * resolved events; it never accepts evidence or runs allocation/publication.
+ */
+async function executePinnedMdfBatch(tx: TransactionClient, input: PinnedMdfAutomationInput,
+  executionMode: 'accepted_job' | 'live_command') {
   if (pinnedRules.has(tx)) throw new Error('MDF_PINNED_EXECUTION_REENTRANT');
   const batch = snapshotPinnedMdfBatch(input);
   if (!isStatusAutomationEnabled()) return { status: 'disabled' as const, selectedRuleCount: 0, skippedPins: [] };
@@ -65,7 +77,8 @@ export async function executePinnedMdfAutomation(tx: TransactionClient, input: P
   // Install before the first await: concurrent/reentrant use of this same tx
   // must not fall through to current rules while definitions are loading.
   pinnedRules.set(tx, []);
-  executedRules.set(tx, new Set());
+  pinnedExecutionModes.set(tx, executionMode);
+  executedRules.set(tx, executionMode === 'accepted_job' ? new Set() : previousVisited ?? new Set());
   try {
     const definitions = await loadRulesForPinnedExecution(tx, batch.pins.map(pin => pin.ruleId));
     const byId = new Map(definitions.map(rule => [rule.id, rule]));
@@ -84,7 +97,7 @@ export async function executePinnedMdfAutomation(tx: TransactionClient, input: P
         requestId: batch.requestId, source: 'backend-status-automation',
         relatedOrderId: orderIds.length === 1 ? orderIds[0] : null,
         relatedEntities: orderIds.map(entityId => ({ entityType: 'order', entityId })),
-        metadata: { reason, expectedRuleVersion: pin.version, currentRuleVersion: rule?.version ?? null,
+        metadata: { reason, executionMode, expectedRuleVersion: pin.version, currentRuleVersion: rule?.version ?? null,
           sourceIdempotencyKey: batch.sourceIdempotencyKey },
       });
     }
@@ -94,8 +107,11 @@ export async function executePinnedMdfAutomation(tx: TransactionClient, input: P
     return { status: 'evaluated' as const, selectedRuleCount: selected.length, skippedPins };
   } finally {
     pinnedRules.delete(tx);
-    if (previousVisited) executedRules.set(tx, previousVisited);
-    else executedRules.delete(tx);
+    pinnedExecutionModes.delete(tx);
+    if (executionMode === 'accepted_job') {
+      if (previousVisited) executedRules.set(tx, previousVisited);
+      else executedRules.delete(tx);
+    }
   }
 }
 
@@ -367,8 +383,29 @@ export async function dispatchMdfBoardEvent(tx: TransactionClient, input: MdfBoa
   if (pinnedRules.has(tx)) throw new Error('MDF_PINNED_LEGACY_DISPATCH_FORBIDDEN');
   if (input.source) markMdfShadowSource(tx, input);
   if (!isStatusAutomationEnabled() || !input.source) return;
-  const rules = (await listEnabledRulesForManualRefresh(tx)).filter(rule => isMdfBoardEvent(rule.eventType));
-  if (!rules.length) return;
+  const usePins = process.env.BACKEND_MDF_PINNED_DISPATCH === 'true';
+  let pins = liveMdfPins.get(tx);
+  // Do not query a new set on later source dispatches in this transaction.
+  // New/enabled rules take effect on the NEXT transaction, not halfway through.
+  const rules = usePins && pins ? [] : await listEnabledRulesForManualRefresh(tx);
+  if (usePins && !pins) {
+    pins = !rules.some(rule => isMdfBoardEvent(rule.eventType)) ? [] : rules.filter(rule => isMdfBoardEvent(rule.eventType)
+      || rule.eventType === 'order.production_status_changed')
+      .map(rule => ({ ruleId: rule.id, version: rule.version }));
+    liveMdfPins.set(tx, pins);
+  }
+  if (usePins) {
+    if (!pins?.length) return;
+    const resolved = await resolveMdfDispatchEvents(tx, input);
+    await executePinnedMdfBatch(tx, { ...input, pins, events: resolved }, 'live_command');
+    return;
+  }
+  const mdfRules = rules.filter(rule => isMdfBoardEvent(rule.eventType));
+  if (!mdfRules.length) return;
+  await executeResolvedMdfEvents(tx, input, await resolveMdfDispatchEvents(tx, input), mdfRules);
+}
+
+async function resolveMdfDispatchEvents(tx: TransactionClient, input: MdfBoardEventInput): Promise<MdfBoardResolvedEvent[]> {
   const initial = await loadMdfBoardEvents(tx, input.source);
   const resolved = initial.filter(e => e.scope.source.kind === input.source.kind && e.scope.source.id === input.source.id);
   // Resolve impacted mixed-order baths in their own full context, before any
@@ -376,7 +413,7 @@ export async function dispatchMdfBoardEvent(tx: TransactionClient, input: MdfBoa
   const baths = new Set(initial.filter(e => e.scope.source.kind === 'bath'
     && !(input.source.kind === 'bath' && e.scope.source.id === input.source.id)).map(e => e.scope.source.id));
   for (const id of baths) resolved.push(...await loadMdfBoardEvents(tx, { kind: 'bath', id }));
-  await executeResolvedMdfEvents(tx, input, resolved, rules);
+  return resolved;
 }
 
 async function executeResolvedMdfEvents(
@@ -545,6 +582,7 @@ async function recordRuleApplied(
     relatedOrderId: event.orderId,
     metadata: {
       ...productionEvaluationAudit(event, rule),
+      ...(pinnedExecutionModes.has(tx) ? { executionMode: pinnedExecutionModes.get(tx) } : {}),
       eventType: event.eventType,
       actionType: rule.actionType,
       targetStatusId: result.resolvedTargetStatusId,
@@ -582,6 +620,7 @@ async function recordRuleSkipped(
     relatedOrderId: event.orderId,
     metadata: {
       ...productionEvaluationAudit(event, rule),
+      ...(pinnedExecutionModes.has(tx) ? { executionMode: pinnedExecutionModes.get(tx) } : {}),
       eventType: event.eventType,
       actionType: rule.actionType,
       targetStatusId: rule.targetStatusId,

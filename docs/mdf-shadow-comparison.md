@@ -190,6 +190,33 @@ migration are required before activating the new engine. Disable intake
 to stop new entries without removing history; rollback of the backend leaves the
 additive diagnostic table intact.
 
+## Live command rule bridge
+
+`BACKEND_MDF_PINNED_DISPATCH=true` connects all five existing MDF command events
+to the shared pinned rule executor. It requires `BACKEND_STATUS_AUTOMATION=true`.
+The new flag defaults to **false**, including Compose; enable per environment.
+It does not enable disabled rules in the Auto statuses settings.
+
+The server still resolves card membership and current readiness. Before status
+writes, it resolves affected baths in their own context. At the first MDF
+dispatch in a transaction, it snapshots the enabled MDF and downstream production
+composition rule IDs/versions. Later source dispatches reuse that selection;
+new rules take effect only in the next transaction. Exact versions are locked and
+checked before execution; missing/disabled/edited rules are skipped, not replaced.
+Both direct and nested rule audits carry `executionMode=live_command`.
+
+The bridge preserves transaction-wide recursion guards, own-detail-only and
+advance-only updates, full-position coverage, uniform order composition,
+HDF exclusion, existing audit/outbox and shadow observation. It does not run
+the legacy and pinned action paths together. The authoritative CNC AutoCut path
+is unchanged. Disable the new flag to return to the old synchronous dispatch.
+
+This is **not** the accepted-evidence accounting cutover: current resolver output
+does not become verified physical evidence. Quantity formulas, allocation,
+asynchronous queue, engine mode and historical baseline remain unchanged. Failed
+commands still roll back as a whole; no durable receipt-survival guarantee is
+introduced by this bridge.
+
 ## Accepted-evidence allocation port (not enabled)
 
 ### Pinned automation execution port (not enabled)
@@ -197,8 +224,9 @@ additive diagnostic table intact.
 `executePinnedMdfAutomation(tx, input)` executes server-resolved MDF events using
 only the supplied durable rule pins. It is an internal transaction primitive,
 not a job handler, public command, scheduler or evidence acceptance operation.
-No production caller is registered. Existing board commands still use the legacy
-dispatch path; deploying this port does not switch the engine.
+No production caller is registered for this accepted-job port. The opt-in live
+bridge above shares its private action engine, but not its evidence contract;
+deploying either does not switch the accounting engine.
 
 The owning handler must first verify active mode under the cutover lock, claim
 the durable job, load its original pins/actor, authorize scope, lock owners and

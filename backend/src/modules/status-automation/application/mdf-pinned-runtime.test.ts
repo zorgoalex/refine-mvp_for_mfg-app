@@ -37,6 +37,7 @@ const tx = () => ({ query: vi.fn(), raw: {} }) as unknown as TransactionClient;
 describe('pinned MDF execution boundary', () => {
   beforeEach(() => {
     vi.resetAllMocks(); vi.stubEnv('BACKEND_STATUS_AUTOMATION', 'true');
+    vi.stubEnv('BACKEND_MDF_PINNED_DISPATCH', 'false');
     mocks.load.mockResolvedValue([rule()]); mocks.current.mockResolvedValue([]); mocks.all.mockResolvedValue([]);
     mocks.state.mockResolvedValue({ orderId: 1, orderStatusId: 4, productionStatusId: 3,
       productionSummary: { detailCount: 2, unassignedCount: 0, statusIds: [3] },
@@ -208,5 +209,113 @@ describe('pinned MDF execution boundary', () => {
     }
     await expect(executePinnedMdfAutomation(tx(), batch)).rejects.toThrow('MDF_INVALID_PINNED_BATCH');
     expect(mocks.load).not.toHaveBeenCalled(); expect(mocks.details).not.toHaveBeenCalled();
+  });
+
+  describe('live command connection', () => {
+    const liveInput = () => ({ ...input(), source: input().events[0].scope.source });
+    beforeEach(() => {
+      vi.stubEnv('BACKEND_MDF_PINNED_DISPATCH', 'true');
+      mocks.all.mockResolvedValue([rule()]); mocks.resolve.mockResolvedValue(input().events);
+    });
+
+    it.each(['mdf.order_machine_files_present', 'mdf.board.completed', 'mdf.board.baths',
+      'mdf.board.baths_ready', 'mdf.board.baths_laminated'] as const)('connects %s exactly once through server scope', async eventType => {
+      const batch = input(); batch.events[0].eventType = eventType;
+      if (eventType.startsWith('mdf.board.baths')) batch.events[0].scope.source = { kind: 'bath', id: 'cut-result:42' };
+      mocks.all.mockResolvedValue([rule({ eventType })]); mocks.load.mockResolvedValue([rule({ eventType })]);
+      mocks.resolve.mockResolvedValue(batch.events);
+      const transaction = tx(), command = { ...batch, source: batch.events[0].scope.source };
+      await dispatchMdfBoardEvent(transaction, command);
+      expect(mocks.resolve).toHaveBeenCalledExactlyOnceWith(transaction, command.source);
+      expect(mocks.load).toHaveBeenCalledExactlyOnceWith(transaction, [17]);
+      expect(mocks.details).toHaveBeenCalledOnce(); expect(mocks.current).not.toHaveBeenCalled();
+      expect(mocks.shadow).toHaveBeenCalledExactlyOnceWith(transaction, command);
+      expect(mocks.audit.mock.calls.at(-1)?.[1].metadata).toMatchObject({ executionMode: 'live_command', ruleVersion: 2 });
+    });
+
+    it('flag off keeps the legacy path without pinned loading or audit marker', async () => {
+      vi.stubEnv('BACKEND_MDF_PINNED_DISPATCH', 'false'); mocks.current.mockResolvedValue([rule()]);
+      await dispatchMdfBoardEvent(tx(), liveInput());
+      expect(mocks.load).not.toHaveBeenCalled(); expect(mocks.details).toHaveBeenCalledOnce();
+      expect(mocks.audit.mock.calls.at(-1)?.[1].metadata.executionMode).toBeUndefined();
+    });
+
+    it('disabled automation still observes shadows but does not resolve or write', async () => {
+      vi.stubEnv('BACKEND_STATUS_AUTOMATION', 'false');
+      await dispatchMdfBoardEvent(tx(), liveInput());
+      expect(mocks.shadow).toHaveBeenCalledOnce(); expect(mocks.all).not.toHaveBeenCalled();
+      expect(mocks.resolve).not.toHaveBeenCalled(); expect(mocks.details).not.toHaveBeenCalled();
+    });
+
+    it.each(['missing', 'disabled', 'version_changed'] as const)('skips %s pin without legacy fallback', async reason => {
+      mocks.load.mockResolvedValue(reason === 'missing' ? [] : [rule(reason === 'disabled' ? { isEnabled: false } : { version: 3 })]);
+      await dispatchMdfBoardEvent(tx(), liveInput());
+      expect(mocks.details).not.toHaveBeenCalled(); expect(mocks.current).not.toHaveBeenCalled();
+      expect(mocks.audit.mock.calls[0][1].metadata).toMatchObject({ executionMode: 'live_command', reason: `pinned_rule_${reason}` });
+    });
+
+    it('freezes rules across multiple sources, preserving visited guard, then refreshes only on a new transaction', async () => {
+      const transaction = tx(), command = liveInput();
+      await dispatchMdfBoardEvent(transaction, command);
+      mocks.all.mockResolvedValue([rule({ id: 99, priority: 0 })]);
+      await dispatchMdfBoardEvent(transaction, command);
+      expect(mocks.details).toHaveBeenCalledOnce(); // same source already executed
+      const other = input().events; other[0].scope.source = { kind: 'bazisCutSet', id: '42' };
+      mocks.resolve.mockResolvedValue(other);
+      await dispatchMdfBoardEvent(transaction, { ...command, source: other[0].scope.source });
+      expect(mocks.details).toHaveBeenCalledTimes(2); // different source, original rule
+      expect(mocks.all).toHaveBeenCalledOnce();
+      expect(mocks.load.mock.calls.map(call => call[1])).toEqual([[17], [17], [17]]);
+      mocks.load.mockResolvedValue([rule({ id: 99, priority: 0 })]);
+      await dispatchMdfBoardEvent(tx(), { ...command, source: other[0].scope.source });
+      expect(mocks.all).toHaveBeenCalledTimes(2); expect(mocks.load.mock.calls.at(-1)?.[1]).toEqual([99]);
+    });
+
+    it('freezes an empty selection so newly enabled rules wait for next transaction', async () => {
+      const transaction = tx(); mocks.all.mockResolvedValueOnce([]);
+      await dispatchMdfBoardEvent(transaction, liveInput());
+      await dispatchMdfBoardEvent(transaction, liveInput());
+      expect(mocks.all).toHaveBeenCalledOnce(); expect(mocks.resolve).not.toHaveBeenCalled();
+      await dispatchMdfBoardEvent(tx(), liveInput());
+      expect(mocks.details).toHaveBeenCalledOnce();
+    });
+
+    it('preserves an existing downstream visited guard and pins nested composition', async () => {
+      const transaction = tx(), command = liveInput();
+      const downstream = rule({ id: 18, eventType: 'order.production_status_changed', actionType: 'change_order_status' });
+      mocks.current.mockResolvedValue([downstream]);
+      await evaluateProductionCompositionAutomation(transaction, { ...command, orderId: 1 });
+      mocks.all.mockResolvedValue([rule(), downstream]); mocks.load.mockResolvedValue([rule(), downstream]);
+      mocks.details.mockImplementation(async () => {
+        await evaluateProductionCompositionAutomation(transaction, { ...command, orderId: 1 });
+        return { status: 'executed' };
+      });
+      await dispatchMdfBoardEvent(transaction, command);
+      expect(mocks.order).toHaveBeenCalledOnce(); expect(mocks.current).toHaveBeenCalledOnce();
+      expect(mocks.load).toHaveBeenCalledWith(transaction, [17, 18]);
+    });
+
+    it('resolves impacted baths before any action, never substitutes caller events', async () => {
+      const bath = structuredClone(input().events[0]);
+      bath.scope.source = { kind: 'bath', id: 'cut-result:42' }; bath.eventType = 'mdf.board.baths_ready';
+      const bathRule = rule({ id: 18, eventType: bath.eventType });
+      mocks.all.mockResolvedValue([rule(), bathRule]); mocks.load.mockResolvedValue([rule(), bathRule]);
+      mocks.resolve.mockResolvedValueOnce([...input().events, bath]).mockResolvedValueOnce([bath]);
+      mocks.details.mockImplementation(async () => {
+        expect(mocks.resolve).toHaveBeenCalledTimes(2); return { status: 'executed' };
+      });
+      const command = { ...liveInput(), events: [] };
+      await dispatchMdfBoardEvent(tx(), command);
+      expect(mocks.details).toHaveBeenCalledTimes(2);
+      expect(mocks.details.mock.calls[1][3].mdfBoardScope.source).toEqual(bath.scope.source);
+    });
+
+    it('malformed server scope fails closed before action or fallback', async () => {
+      const batch = input(); batch.events[0].scope.details[0].eligibleQuantity = -1;
+      mocks.resolve.mockResolvedValue(batch.events);
+      await expect(dispatchMdfBoardEvent(tx(), liveInput())).rejects.toThrow('MDF_INVALID_PINNED_BATCH');
+      expect(mocks.load).not.toHaveBeenCalled(); expect(mocks.details).not.toHaveBeenCalled();
+      expect(mocks.current).not.toHaveBeenCalled();
+    });
   });
 });

@@ -10,8 +10,10 @@ export interface PinnedMdfAutomationInput {
   events: readonly MdfBoardResolvedEvent[];
 }
 
-/** Shape validation is NOT evidence verification. The owning handler supplies
- * accepted, demand-fenced evidence and durable pins under its ordered locks.
+/** Shape validation is NOT evidence verification. The accepted-job caller must
+ * supply accepted, demand-fenced evidence and durable pins under ordered locks.
+ * The private live-command bridge instead supplies current server-resolved
+ * events and transaction-local pins; this does NOT promote them to evidence.
  * Snapshot synchronously so an awaited query cannot change this batch's intent.
  */
 export function snapshotPinnedMdfBatch(input: PinnedMdfAutomationInput): PinnedMdfAutomationInput {

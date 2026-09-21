@@ -401,9 +401,11 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
     expect(event.scope.details.map(d => d.detailId)).toEqual([1]);
   });
 
-  it('executes a real scoped batch, preserves partial/unrelated/advanced positions and manual moves, then replays without effects', async () => {
+  it.each([false, true])('executes a real scoped batch and replays without effects (pinned=%s)', async pinned => {
     const previousFlag = process.env.BACKEND_STATUS_AUTOMATION;
+    const previousPinned = process.env.BACKEND_MDF_PINNED_DISPATCH;
     process.env.BACKEND_STATUS_AUTOMATION = 'true';
+    process.env.BACKEND_MDF_PINNED_DISPATCH = String(pinned);
     await client.query('BEGIN');
     try {
       await client.query(`UPDATE pg_temp.orders SET version=1,order_status_id=4,payment_status_id=1;
@@ -445,10 +447,15 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
       const audits = await client.query(`SELECT metadata_json FROM pg_temp.audit_log WHERE event='orders.detail_production_status_batch_change'`);
       expect(audits.rows).toHaveLength(1);
       expect(audits.rows[0].metadata_json).toMatchObject({ changedDetailIds: [1], mdfBoardScope: { source: sourcePacket } });
+      const applied = await client.query(`SELECT metadata_json FROM pg_temp.audit_log WHERE event='status_automation.rule_applied'`);
+      expect(applied.rows).toHaveLength(1);
+      expect(applied.rows[0].metadata_json.executionMode).toBe(pinned ? 'live_command' : undefined);
     } finally {
       await client.query('ROLLBACK');
       if (previousFlag === undefined) delete process.env.BACKEND_STATUS_AUTOMATION;
       else process.env.BACKEND_STATUS_AUTOMATION = previousFlag;
+      if (previousPinned === undefined) delete process.env.BACKEND_MDF_PINNED_DISPATCH;
+      else process.env.BACKEND_MDF_PINNED_DISPATCH = previousPinned;
     }
     expect((await client.query('SELECT production_status_id FROM pg_temp.order_details WHERE detail_id=1')).rows[0].production_status_id).toBe(1);
   });
@@ -521,7 +528,7 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
     });
   });
 
-  describe('enabled stage MDF rules 16/17 (configuration captured 2026-09-08)', () => {
+  describe.each([false, true])('MDF rules 16/17 fixture from 2026-09-08 (pinned=%s)', pinned => {
     const rules = [
       { id: 16, event_type: 'mdf.board.baths_laminated', target_status_id: 6,
         conditions_json: { currentOrderStatusNotIn: [8], currentProductionStatusNotIn: [22] } },
@@ -532,13 +539,15 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
       is_enabled: true, action_config_json: { detailTransitionMode: 'advance_only' } }));
     const actor: CurrentUser = { id: '3', username: 'E2E-Test', role: 'admin', roleId: 1, permissions: [] };
     let previousFlag: string | undefined;
-    const tx = { raw: client, query: (sql: string, params: unknown[]) =>
+    let previousPinned: string | undefined;
+    const makeTx = () => ({ raw: client, query: (sql: string, params: unknown[]) =>
       // Deliberately exclude the public stored aggregate function: its internals
       // are not guaranteed to honor pg_temp. This suite tests resolver -> rule
       // conditions -> actual detail UPDATE/audit/outbox, not DB trigger cascades.
       sql.trim().startsWith('SELECT recalc_order_production_status')
         ? client.query('SELECT 1') : client.query(sql, params),
-    } as unknown as TransactionClient;
+    }) as unknown as TransactionClient;
+    let tx: TransactionClient;
     const dispatch = (source: MdfBoardSource = sourcePacket, key = 'E2E-enabled-rule') =>
       dispatchMdfBoardEvent(tx, { source, actor, requestId: key, sourceIdempotencyKey: key });
     const statuses = async () => (await client.query(`SELECT detail_id,production_status_id
@@ -554,7 +563,10 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
 
     beforeEach(async () => {
       previousFlag = process.env.BACKEND_STATUS_AUTOMATION;
+      previousPinned = process.env.BACKEND_MDF_PINNED_DISPATCH;
       process.env.BACKEND_STATUS_AUTOMATION = 'true';
+      process.env.BACKEND_MDF_PINNED_DISPATCH = String(pinned);
+      tx = makeTx();
       await client.query('BEGIN');
       await client.query(`TRUNCATE pg_temp.production_statuses;
         INSERT INTO pg_temp.production_statuses(production_status_id,production_status_code,production_status_name,sort_order,is_active)
@@ -576,6 +588,8 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
       finally {
         if (previousFlag === undefined) delete process.env.BACKEND_STATUS_AUTOMATION;
         else process.env.BACKEND_STATUS_AUTOMATION = previousFlag;
+        if (previousPinned === undefined) delete process.env.BACKEND_MDF_PINNED_DISPATCH;
+        else process.env.BACKEND_MDF_PINNED_DISPATCH = previousPinned;
       }
     });
 
@@ -606,11 +620,21 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
       expect(await effects()).toEqual(before);
     });
 
-    it.each([7, 8, 22])('rule17 checks order-level production exclusion %i, not the candidate detail status', async productionStatus => {
+    it.each([7, 8, 22])('rule17 ignores stale header production exclusion %i when own details permit advancement', async productionStatus => {
       await client.query('UPDATE pg_temp.orders SET production_status_id=$1 WHERE order_id=1', [productionStatus]);
+      await dispatch();
+      expect(await statuses()).toEqual([[1, 2], [2, 16], [3, 16], [4, 16]]);
+      expect((await effects()).commands).toHaveLength(1);
+    });
+
+    it.each([7, 8, 22])('rule17 blocks forbidden status %i on its own detail even when header permits', async productionStatus => {
+      await client.query('UPDATE pg_temp.order_details SET production_status_id=$1 WHERE detail_id=1', [productionStatus]);
       const before = await effects();
       await dispatch();
       expect(await effects()).toEqual(before);
+      const audit = await client.query(`SELECT metadata_json FROM pg_temp.audit_log
+        WHERE event='status_automation.rule_skipped' AND metadata_json->>'reason'='production_status_excluded'`);
+      expect(audit.rows).toHaveLength(1);
     });
 
     it.each(['packet', 'bazisCutSet'] as const)('rule17 waits for 4 CNC + 3 CNC + 3 BASIS, triggered by %s', async kind => {
@@ -645,14 +669,20 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
       expect((await effects()).orders[0].order_status_id).toBe(orderStatus);
     });
 
-    it.each(['order8', 'production22'])('rule16 blocks its configured exclusion %s', async exclusion => {
+    it.each(['order8', 'detail22'])('rule16 blocks its configured exclusion %s', async exclusion => {
       await client.query(exclusion === 'order8'
         ? 'UPDATE pg_temp.orders SET order_status_id=8 WHERE order_id=1'
-        : 'UPDATE pg_temp.orders SET production_status_id=22 WHERE order_id=1');
+        : 'UPDATE pg_temp.order_details SET production_status_id=22 WHERE detail_id=1');
       const source = await bathSource();
       const before = await effects();
       await dispatch(source);
       expect(await effects()).toEqual(before);
+    });
+
+    it('rule16 ignores a stale production header and advances only its bath detail', async () => {
+      await client.query('UPDATE pg_temp.orders SET production_status_id=22 WHERE order_id=1');
+      await dispatch(await bathSource());
+      expect(await statuses()).toEqual([[1, 6], [2, 16], [3, 16], [4, 16]]);
     });
 
     it('rule16 waits for all three instances across two baths, including an old bath', async () => {
@@ -724,8 +754,37 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
       await dispatch(source);
       expect(await effects()).toEqual(before);
       await client.query('UPDATE pg_temp.status_automation_rules SET is_enabled=true');
+      if (pinned) {
+        await dispatch(source);
+        expect(await effects()).toEqual(before); // empty selection frozen for this command
+        tx = makeTx(); // next command receives newly enabled rules
+      }
       await dispatch(source);
       expect((await statuses())[0]).toEqual([1, 6]);
+    });
+
+    it.skipIf(!pinned)('retains rule versions across CNC/BASIS/bath sources and audits an edited pin', async () => {
+      await client.query('UPDATE pg_temp.order_details SET quantity=10 WHERE detail_id=1');
+      await dispatch(sourcePacket, 'E2E-freeze'); // partial quantity: pins selected, no detail action
+      await addBasis(9);
+      await client.query('UPDATE pg_temp.status_automation_rules SET version=4 WHERE id=17');
+      const source = { kind: 'bazisCutSet' as const, id: '1' };
+      await dispatch(source, 'E2E-version-drift');
+      expect((await statuses())[0]).toEqual([1, 16]);
+      const skipped = await client.query(`SELECT metadata_json FROM pg_temp.audit_log
+        WHERE event='status_automation.rule_skipped' AND metadata_json->>'reason'='pinned_rule_version_changed'`);
+      expect(skipped.rows).toHaveLength(1);
+      expect(skipped.rows[0].metadata_json).toMatchObject({ executionMode: 'live_command', expectedRuleVersion: 3, currentRuleVersion: 4 });
+      // Bath rule is still its original version; a full own-position bath advances.
+      await seed(1, Array(10).fill(1), '2026-09-06T12:00:00+05');
+      await client.query(`INSERT INTO pg_temp.mdf_board_manual_moves(card_kind,card_id,target_column)
+        VALUES('bath','cut-result:1','baths_laminated')`);
+      await dispatch({ kind: 'bath', id: 'cut-result:1' }, 'E2E-bath');
+      expect(await statuses()).toEqual([[1, 6], [2, 16], [3, 16], [4, 16]]);
+      const applied = await client.query(`SELECT metadata_json FROM pg_temp.audit_log WHERE event='status_automation.rule_applied'`);
+      expect(applied.rows).toHaveLength(1);
+      expect(applied.rows[0].metadata_json).toMatchObject({ executionMode: 'live_command', ruleVersion: 3, mdfBoardScope: { source: { kind: 'bath', id: 'cut-result:1' } } });
+      expect((await effects()).outbox).toHaveLength(1);
     });
   });
 
@@ -817,9 +876,9 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
   });
 
   it.each([
-    { productionStatusIds: [2], orderStatusIds: [] },
-    { cardRules: [{ cardKind: 'bazisCutSet', orderStatusIds: [6] }] },
-  ])('counts BASIS terminal placement from stored hidden-status settings: %j', async (setting) => {
+    { setting: { productionStatusIds: [2], orderStatusIds: [] }, ready: false },
+    { setting: { cardRules: [{ cardKind: 'bazisCutSet', orderStatusIds: [6] }] }, ready: true },
+  ])('BASIS terminal settings use order status, not legacy production header: %j', async ({ setting, ready }) => {
     await seed(1, [1], '2026-09-06T12:00:00+05');
     await client.query(`TRUNCATE pg_temp.cnc_telegram_packets, pg_temp.cnc_telegram_packet_items;
       UPDATE pg_temp.order_details SET production_status_id=2 WHERE detail_id=1;
@@ -827,7 +886,7 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
     await addBasis(1, 'parsed');
     await client.query(`INSERT INTO pg_temp.app_settings(setting_key,value_json,is_active)
       VALUES('status_automation.mdf_board_hidden_production_statuses',$1,true)`, [JSON.stringify(setting)]);
-    await expectAllReadiness(true);
+    await expectAllReadiness(ready);
     await client.query('UPDATE pg_temp.orders SET production_status_id=NULL,order_status_id=NULL WHERE order_id=1');
     await expectAllReadiness(false);
   });
