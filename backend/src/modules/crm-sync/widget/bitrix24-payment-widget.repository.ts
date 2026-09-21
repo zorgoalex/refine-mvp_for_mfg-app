@@ -1331,13 +1331,21 @@ export class Bitrix24PaymentWidgetRepository {
   }
 
   async materializeCommand(commandId: string): Promise<ManualPaymentCommand> {
-    return this.db.transaction(async (tx) => {
+    return this.db.transaction((tx) => this.materializeCommandInTransaction(tx, commandId));
+  }
+
+  async awaitOverpaymentConfirmationInTransaction(tx: TransactionClient, commandId: string): Promise<ManualPaymentCommand> {
+    return setAwaiting(tx, this.audit, await lockCommand(tx, commandId), 'awaiting_overpayment_confirmation');
+  }
+
+  async materializeCommandInTransaction(tx: TransactionClient, commandId: string): Promise<ManualPaymentCommand> {
       await tx.query(`SELECT set_config('app.crm_sync_origin', 'bitrix24', true)`);
       let command = await lockCommand(tx, commandId);
       if (command.status === 'completed') return command;
       if (!command.bitrixPaymentId) {
         throw conflict('BITRIX24_PAYMENT_ID_MISSING', 'Verified payment ID missing');
       }
+      await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`bitrix24-reverse:deal:${command.bitrixDealId}`]);
       const target = await resolveCommandOrder(tx, command);
       if (!target.orderId) {
         command = await setAwaiting(tx, this.audit, command, 'awaiting_order');
@@ -1363,6 +1371,12 @@ export class Bitrix24PaymentWidgetRepository {
           FOR UPDATE`,
         [target.orderId],
       );
+      if (command.requestId !== null) {
+        const owner = await tx.query(`SELECT 1 FROM bitrix24_incoming_request
+          WHERE request_id=$1 AND bitrix_deal_id=$2 AND linked_order_id=$3 FOR UPDATE`,
+        [command.requestId, command.bitrixDealId, target.orderId]);
+        if (owner.rowCount !== 1) throw conflict('BITRIX24_PAYMENT_MEMBERSHIP_MISMATCH', 'Payment request ownership changed');
+      }
       const orderRow = order.rows[0];
       if (!orderRow || orderRow.order_kind !== 'production_order') {
         command = await setAwaiting(tx, this.audit, command, 'awaiting_order');
@@ -1578,7 +1592,6 @@ export class Bitrix24PaymentWidgetRepository {
         erpPaymentId,
       });
       return command;
-    });
   }
 
   async confirmOverpayment(input: {
@@ -1706,7 +1719,7 @@ async function resolveCommandOrder(
   if (command.requestId !== null) {
     const result = await tx.query<{ linked_order_id: string | number | null }>(
       `SELECT linked_order_id FROM bitrix24_incoming_request
-        WHERE request_id=$1 AND bitrix_deal_id=$2 FOR UPDATE`,
+        WHERE request_id=$1 AND bitrix_deal_id=$2`,
       [command.requestId, command.bitrixDealId],
     );
     return { orderId: nullableNumber(result.rows[0]?.linked_order_id ?? null) };

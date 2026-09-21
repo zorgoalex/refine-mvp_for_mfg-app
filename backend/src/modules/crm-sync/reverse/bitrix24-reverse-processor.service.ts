@@ -12,12 +12,14 @@ import {
 } from './bitrix24-reverse-normalizer';
 import type { Bitrix24InboundEventRow } from './bitrix24-reverse.types';
 import { PgBitrix24ReverseRepository } from './pg-bitrix24-reverse-repository';
+import { Bitrix24PaidConversionService } from './bitrix24-paid-conversion.service';
 
 export class Bitrix24ReverseProcessorService {
   constructor(
     private readonly repository: PgBitrix24ReverseRepository,
     private readonly bitrix: Bitrix24ApiPort,
     private readonly config: CrmSyncRuntimeConfigService,
+    private readonly paidConversion?: Bitrix24PaidConversionService,
   ) {}
 
   async assertReady(): Promise<void> {
@@ -293,6 +295,7 @@ export class Bitrix24ReverseProcessorService {
       auditRequestId,
       lockToken,
     );
+    await this.paidConversion?.run({ dealId, requestId: auditRequestId, eventId: auditRequestId, lockToken });
   }
 
   private async reconcileMappedOrderPayments(

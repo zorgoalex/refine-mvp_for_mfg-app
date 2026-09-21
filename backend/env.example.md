@@ -131,6 +131,9 @@ callback has successfully bound CRM events.
 
 ```env
 BACKEND_ENABLE_BITRIX24_REVERSE_SYNC=false
+# First confirmed positive payment converts a ready CRM request, including older
+# paid requests on their next reconciliation. Review those before enabling.
+BACKEND_BITRIX24_AUTO_CONVERT_PAID_REQUESTS=false
 BACKEND_BITRIX24_REVERSE_SYNC_RELAY_OWNER=none
 BACKEND_BITRIX24_REVERSE_SYNC_DRY_RUN=false
 BACKEND_BITRIX24_REVERSE_SYNC_POLL_INTERVAL_MS=5000

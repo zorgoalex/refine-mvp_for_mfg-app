@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { BitrixPaidConversionNotice } from '../../components/bitrix24/BitrixPaidConversionNotice';
 import { OrderStageSettings } from './OrderStageSettings';
 import { OrderCatalogLinesTable } from '../orders/components/OrderCatalogLinesTable';
 import { orderCatalogLineAmount, orderCatalogLineInput, type OrderCatalogLine } from '../../utils/orderCatalogLines';
@@ -797,6 +798,7 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
             {selected.syncStatus === 'blocked' && (
               <Alert type="error" showIcon message="Синхронизация заявки заблокирована" description={selected.syncErrorCode || undefined} />
             )}
+            <BitrixPaidConversionNotice status={selected.autoConversionStatus} reason={selected.autoConversionReason} />
             <Space style={{ justifyContent: 'space-between', width: '100%' }}>
               <Typography.Title level={5} style={{ margin: 0 }}>
                 Состав ERP: детали и товары/услуги

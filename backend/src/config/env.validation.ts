@@ -468,6 +468,7 @@ export const envSchema = z
       .union([emptyTrimmedStringFromEnv, z.coerce.number().int().positive()])
       .optional(),
     BACKEND_ENABLE_BITRIX24_REVERSE_SYNC: booleanFromEnv.default(false),
+    BACKEND_BITRIX24_AUTO_CONVERT_PAID_REQUESTS: booleanFromEnv.default(false),
     BACKEND_BITRIX24_REVERSE_SYNC_RELAY_OWNER: z
       .enum(['none', 'in_process', 'external'])
       .default('none'),
