@@ -41,7 +41,17 @@ describe('isolated vacuum task preview', () => {
     const png = PNG.sync.read(renderSheetPng({ svg, targetPx, sheetWidthMm: 2800, sheetHeightMm: 1050 }));
     const pixel = (x: number, y: number) => [...png.data.subarray((y * png.width + x) * 4, (y * png.width + x) * 4 + 4)];
     expect(pixel(Math.round(1000 / 2800 * png.width), Math.round(300 / 1050 * png.height))).toEqual([255, 255, 255, 255]);
-    expect(pixel(Math.round(2400 / 2800 * png.width), Math.round(800 / 1050 * png.height))).toEqual([255, 255, 255, 255]);
+    // Free sheet area contains faint strokes and white gaps; the piece stays white.
+    const freePixels = [];
+    for (let y = Math.round(700 / 1050 * png.height); y < Math.round(900 / 1050 * png.height); y++) {
+      for (let x = Math.round(2200 / 2800 * png.width); x < Math.round(2600 / 2800 * png.width); x++) {
+        freePixels.push(pixel(x, y));
+      }
+    }
+    expect(freePixels.some(([r, g, b]) => r === 255 && g === 255 && b === 255)).toBe(true);
+    expect(freePixels.some(([r, g, b]) => r >= 210 && r < 250 && b > r && g >= r)).toBe(true);
+    expect(buildSheetSvg({ sheet, labelFor: () => '', renderStyle: 'default' })).not.toContain('vacuum-task-hatch');
+    expect(buildSheetSvg({ sheet, labelFor: () => '', renderStyle: 'mdf_board_preview' })).not.toContain('vacuum-task-hatch');
     const edgeX = Math.round(2000 / 2800 * png.width);
     const edgeY = Math.round(300 / 1050 * png.height);
     const edge = [-1, 0, 1].map((dx) => pixel(edgeX + dx, edgeY));
