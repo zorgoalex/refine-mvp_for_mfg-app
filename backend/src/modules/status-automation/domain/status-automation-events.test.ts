@@ -5,6 +5,7 @@ import {
 } from './status-automation-events';
 
 const expectedEventTypes = [
+  'message.signal_detected',
   'payment.created',
   'order.payment_status_changed',
   'order.created',
@@ -38,16 +39,16 @@ const actionTypes = [
 
 describe('status automation event catalog', () => {
   it('contains exactly the supported events', () => {
-    expect(STATUS_AUTOMATION_EVENTS).toHaveLength(12);
+    expect(STATUS_AUTOMATION_EVENTS).toHaveLength(expectedEventTypes.length);
     expect(STATUS_AUTOMATION_EVENTS.map((descriptor) => descriptor.eventType)).toEqual(
       expectedEventTypes,
     );
   });
 
   it('exposes unique event types, groups, and user-facing descriptions', () => {
-    expect(new Set(STATUS_AUTOMATION_EVENTS.map((descriptor) => descriptor.eventType)).size).toBe(12);
+    expect(new Set(STATUS_AUTOMATION_EVENTS.map((descriptor) => descriptor.eventType)).size).toBe(expectedEventTypes.length);
     for (const descriptor of STATUS_AUTOMATION_EVENTS) {
-      expect(['order', 'dates', 'statuses', 'payments', 'production']).toContain(descriptor.group);
+      expect(['order', 'dates', 'statuses', 'payments', 'production', 'messages']).toContain(descriptor.group);
       expect(descriptor.description.trim().length).toBeGreaterThan(10);
     }
     expect(getEventDescriptor('order.planned_completion_date_changed')).toMatchObject({
@@ -69,12 +70,20 @@ describe('status automation event catalog', () => {
     );
   });
 
+  it('allows signalCodeIn only for incoming signals', () => {
+    for (const descriptor of STATUS_AUTOMATION_EVENTS) {
+      expect(descriptor.allowedConditions.includes('signalCodeIn')).toBe(
+        descriptor.eventType === 'message.signal_detected',
+      );
+    }
+  });
+
   it('exposes all base conditions and actions for every event', () => {
     for (const descriptor of STATUS_AUTOMATION_EVENTS) {
       expect(descriptor.allowedConditions).toEqual(expect.arrayContaining(baseConditions));
       expect(descriptor.allowedConditions).toHaveLength(
         baseConditions.length + (
-          descriptor.eventType === 'payment.created' || descriptor.eventType === 'order.status_changed'
+          descriptor.eventType === 'payment.created' || descriptor.eventType === 'order.status_changed' || descriptor.eventType === 'message.signal_detected'
             ? 1
             : 0
         ),
