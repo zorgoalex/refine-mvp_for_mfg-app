@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { InboundSignalsModule } from '../inbound-signals/inbound-signals.module';
 import { DatabaseModule } from "../../database/database.module";
 import { PermissionsModule } from "../../permissions/permissions.module";
 import { WahaClient } from "./waha.client";
@@ -11,7 +12,7 @@ import { WhatsAppService } from "./whatsapp.service";
 import { WhatsAppTechnicalLogService } from "./whatsapp-technical-log.service";
 
 @Module({
-  imports: [DatabaseModule, PermissionsModule],
+  imports: [DatabaseModule, PermissionsModule, InboundSignalsModule],
   controllers: [WhatsAppController],
   providers: [
     WhatsAppRuntimeConfigService,

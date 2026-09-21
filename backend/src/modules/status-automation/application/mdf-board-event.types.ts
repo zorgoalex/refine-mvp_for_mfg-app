@@ -1,11 +1,10 @@
-import type { CurrentUser } from '../../../permissions/current-user';
-import type { StatusAutomationEventType } from './status-automation.types';
+import type { AutomationActor, StatusAutomationEventType } from './status-automation.types';
 
 export type MdfBoardSource = { kind: 'packet' | 'bazisCutSet' | 'bath'; id: string };
 export type MdfBoardEventType = Extract<StatusAutomationEventType, `mdf.${string}`>;
 export interface MdfBoardEventInput {
   source: MdfBoardSource;
-  actor: CurrentUser;
+  actor: AutomationActor;
   requestId: string;
   sourceIdempotencyKey: string;
 }

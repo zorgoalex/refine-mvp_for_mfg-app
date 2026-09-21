@@ -26,6 +26,13 @@ export function evaluateRuleConditions(
   event: StatusAutomationEvent,
 ): ConditionEvaluationResult {
   const conditions = rule.conditions;
+  // Manual refresh and unrelated events cannot manufacture a message signal.
+  if (rule.eventType === 'message.signal_detected' && (event.eventType !== rule.eventType || !event.signalOccurrenceId || !event.signalCode)) {
+    return failed('signal_event_required');
+  }
+  if (conditions.signalCodeIn?.length && (!event.signalCode || !conditions.signalCodeIn.includes(event.signalCode))) {
+    return failed('signal_code_not_in_list');
+  }
   const commonProductionStatus = uniformProductionStatus(state.productionSummary);
 
   if (

@@ -11,6 +11,7 @@ export const SETTINGS_CATEGORY_PERMISSIONS: PermissionName[] = [
   'deadlines.view',
   'whatsapp.view',
   'whatsapp.manage',
+  'message_signals.manage_config',
 ];
 
 export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
@@ -61,8 +62,10 @@ export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
     'deadlines.view',
     'whatsapp.view',
     'whatsapp.manage',
+    'message_signals.manage_config',
   ],
   audit: ['audit.view'],
+  'inbound-signals': ['message_signals.view'],
   'cut-jobs': ['cut.view'],
   cad: ['cad.view'],
   'bazis-cut-sets': ['cut.view'],
