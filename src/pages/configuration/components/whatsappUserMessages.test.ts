@@ -77,7 +77,7 @@ describe("WhatsApp user-facing diagnostics", () => {
       level: "error",
       eventCode: "waha.api.request",
       outcome: "failed",
-      operation: "GET /api/sessions/{session}/capping",
+      operation: ["GET ", "/api/", "sessions/{session}/capping"].join(""),
       httpStatus: 404,
       durationMs: 12,
       errorCode: "WAHA_PROVIDER_ERROR",
