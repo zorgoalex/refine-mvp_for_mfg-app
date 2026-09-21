@@ -76,6 +76,15 @@ describe('order export query and payload contract', () => {
     expect(mocks.upload.mock.calls[0][0].details).toEqual([]);
   });
 
+  it('resolves the client from the loaded order, ignoring obsolete caller client data', async () => {
+    await act(async () => { await hook.exportToDrive({ ...order, client: { client_name: 'Тест устаревшее имя' } }); });
+    const withCallerClient = mocks.upload.mock.calls[0][0];
+    mocks.upload.mockClear();
+    await run();
+    expect(mocks.upload.mock.calls[0][0]).toEqual(withCallerClient);
+    expect(withCallerClient.client).toEqual({ client_name: 'Тест клиент' });
+  });
+
   it('skips a genuinely empty order', async () => {
     lists.order_details = []; lists.orders_view = [];
     await run();
