@@ -589,6 +589,12 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
   const taskBackground = renderStyle.id === CUT_RENDER_STYLE_VACUUM_TASK_PREVIEW
     ? `<rect x="${backgroundX}" y="${backgroundY}" width="${backgroundWidth}" height="${backgroundHeight}" fill="#ffffff"/>`
     : '';
+  // Only unused sheet area is hatched: opaque white piece geometry paints over it.
+  const taskHatching = renderStyle.id === CUT_RENDER_STYLE_VACUUM_TASK_PREVIEW
+    ? '<defs><pattern id="vacuum-task-hatch" patternUnits="userSpaceOnUse" width="80" height="80">'
+      + '<path d="M-20 20L20-20M0 80L80 0M60 100L100 60" fill="none" stroke="#dce3eb" stroke-width="4"/></pattern></defs>'
+      + `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="url(#vacuum-task-hatch)"/>`
+    : '';
 
   return [
     // viewBox only (no width/height attrs): the px size is chosen at raster time
@@ -596,6 +602,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" data-cut-order-label-font-mm="${num(orderLabelFontMm)}">`,
     taskBackground,
     `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="${escapeXml(renderStyle.piece.defaultFill)}" stroke="${escapeXml(renderStyle.piece.stroke)}" stroke-width="${num(renderStyle.piece.strokeWidthMm)}"/>`,
+    taskHatching,
     `<g class="cut-sheet-piece-geometry-layer">${pieces}</g>`,
     showLabels ? `<g class="cut-sheet-piece-label-layer">${labels}</g>` : '',
     bathMeterGuides,
