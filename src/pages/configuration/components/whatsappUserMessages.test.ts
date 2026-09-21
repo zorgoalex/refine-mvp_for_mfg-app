@@ -5,9 +5,11 @@ import { ApiError } from "../../../api/apiError";
 import {
   qrErrorPresentation,
   restartErrorPresentation,
+  whatsappAuditPresentation,
   whatsappErrorPresentation,
   whatsappPartialIssueNames,
   whatsappSessionPresentation,
+  whatsappTechnicalLogPresentation,
 } from "./WhatsAppConfigTabs";
 
 describe("WhatsApp user-facing diagnostics", () => {
@@ -20,6 +22,71 @@ describe("WhatsApp user-facing diagnostics", () => {
     expect(source).toContain("if (silent && activeRequest.current) return");
     expect(source).toContain("activeRequest.current?.abort()");
     expect(source).toContain("signal: controller.signal");
+  });
+
+  it("offers readable and technical modes in both WhatsApp journals", () => {
+    const source = readFileSync(resolve(__dirname, "WhatsAppConfigTabs.tsx"), "utf8");
+    expect(source.match(/LOG_DISPLAY_OPTIONS\.map/g)).toHaveLength(2);
+    expect(source).toContain('label: "Понятный"');
+    expect(source).toContain('label: "Технический"');
+  });
+
+  it("translates audit events and entities for operators", () => {
+    expect(whatsappAuditPresentation({
+      auditId: "1",
+      event: "whatsapp.rule.created",
+      entityType: "whatsapp_rule",
+      entityId: "7",
+      username: "admin",
+      requestId: "req-1",
+      source: "operator",
+      createdAt: "2026-09-21T10:00:00.000Z",
+    })).toEqual({
+      action: "Создано правило ответа",
+      object: "Правило №7",
+    });
+  });
+
+  it("explains unmatched webhook and provider failures without raw codes", () => {
+    const unmatched = whatsappTechnicalLogPresentation({
+      id: "1",
+      occurredAt: "2026-09-21T10:00:00.000Z",
+      component: "webhook",
+      level: "info",
+      eventCode: "whatsapp.webhook.processed",
+      outcome: "succeeded",
+      operation: "webhook.receive",
+      httpStatus: null,
+      durationMs: null,
+      errorCode: null,
+      errorMessage: null,
+      requestId: "req-1",
+      details: { result: "unmatched", duplicate: false },
+    });
+    expect(unmatched).toMatchObject({
+      event: "Входящее сообщение обработано",
+      result: "Правило не найдено",
+      color: "orange",
+      description: "Подходящее правило не найдено. Ответ не отправлен.",
+    });
+
+    const failed = whatsappTechnicalLogPresentation({
+      id: "2",
+      occurredAt: "2026-09-21T10:01:00.000Z",
+      component: "waha",
+      level: "error",
+      eventCode: "waha.api.request",
+      outcome: "failed",
+      operation: "GET /api/sessions/{session}/capping",
+      httpStatus: 404,
+      durationMs: 12,
+      errorCode: "WAHA_PROVIDER_ERROR",
+      errorMessage: null,
+      requestId: null,
+      details: {},
+    });
+    expect(failed.description).toBe("WhatsApp отклонил запрос (код 404).");
+    expect(failed.description).not.toContain("WAHA_PROVIDER_ERROR");
   });
 
   it.each([

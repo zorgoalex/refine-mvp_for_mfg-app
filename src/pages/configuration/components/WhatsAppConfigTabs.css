@@ -8,5 +8,11 @@
 .whatsapp-config__qr .ant-card-body { display: grid; justify-items: center; gap: 12px; text-align: center; }
 .whatsapp-config__qr img { width: min(100%, 280px); height: auto; image-rendering: pixelated; }
 .whatsapp-config__row-link { min-height: 40px; padding-inline: 0; text-align: left; }
+.whatsapp-config .ant-radio-button-wrapper { min-height: 40px; display: inline-flex; align-items: center; }
+.whatsapp-config .ant-table-cell { font-variant-numeric: tabular-nums; }
 .whatsapp-config__loading { min-height: 240px; display: grid; place-items: center; }
-@media (max-width: 575px) { .whatsapp-config__header > .ant-btn, .whatsapp-config__actions > *, .whatsapp-config__toolbar > .ant-btn { width: 100%; } }
+@media (max-width: 575px) {
+  .whatsapp-config__header > .ant-btn, .whatsapp-config__actions > *, .whatsapp-config__toolbar > .ant-btn { width: 100%; }
+  .whatsapp-config__header .ant-radio-group, .whatsapp-config__toolbar .ant-radio-group { width: 100%; display: flex; }
+  .whatsapp-config__header .ant-radio-button-wrapper, .whatsapp-config__toolbar .ant-radio-button-wrapper { flex: 1; justify-content: center; }
+}
