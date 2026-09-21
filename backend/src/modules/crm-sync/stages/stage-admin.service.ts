@@ -563,20 +563,43 @@ export class StageAdminService {
     await this.refresh(actor);
     return this.job(id);
   }
-  async previewReconcile(afterId: number, limit: number, actor: StageActor) {
+  async previewReconcile(
+    afterId: number,
+    limit: number,
+    actor: StageActor,
+    selection: {
+      sort?: 'asc' | 'desc';
+      orderId?: number;
+      orderName?: string;
+    } = {}
+  ) {
     const c = await this.repo.config();
     await this.binding();
     const catalog = await this.repo.catalog(c),
       mappings = await this.repo.mappings(c);
     if (!catalog)
       throw stageError('CATALOG_REQUIRED', 'Сначала настройте воронку');
+    const sort = selection.sort === 'desc' ? 'desc' : 'asc';
     const ids = await this.repo.db.query<{ order_id: string }>(
-      `SELECT o.order_id::text FROM orders o JOIN crm_sync_mapping m ON m.entity_type='order' AND m.erp_id=o.order_id::text AND m.bitrix_object='deal' AND m.bitrix_id IS NOT NULL
-      WHERE o.order_kind='production_order' AND NOT o.delete_flag AND o.order_id>$1 ORDER BY o.order_id LIMIT $2`,
-      [afterId, limit]
+      `SELECT o.order_id::text FROM orders o
+      WHERE o.order_kind='production_order' AND NOT o.delete_flag
+        AND EXISTS (SELECT 1 FROM crm_sync_mapping m WHERE m.entity_type='order' AND m.erp_id=o.order_id::text AND m.bitrix_object='deal' AND m.bitrix_id IS NOT NULL)
+        AND ($1::bigint=0 OR o.order_id ${
+          sort === 'desc' ? '<' : '>'
+        } $1::bigint)
+        AND ($3::bigint IS NULL OR o.order_id=$3::bigint)
+        AND ($4::text IS NULL OR o.order_name::text=$4::text)
+      ORDER BY o.order_id ${sort === 'desc' ? 'DESC' : 'ASC'} LIMIT $2`,
+      [
+        afterId,
+        limit + 1,
+        selection.orderId ?? null,
+        selection.orderName ?? null,
+      ]
     );
+    const page = ids.rows.slice(0, limit);
     const rows: Array<Record<string, unknown>> = [];
-    for (const { order_id } of ids.rows) {
+    for (const { order_id } of page) {
       const order = await this.repo.order(order_id);
       if (!order?.bitrix_id) continue;
       try {
@@ -624,8 +647,9 @@ export class StageAdminService {
     }
     return this.createJob('reconcile', c, actor, {
       rows,
-      nextCursor: ids.rows.at(-1)?.order_id ?? String(afterId),
-      hasMore: ids.rows.length === limit,
+      nextCursor: page.at(-1)?.order_id ?? String(afterId),
+      hasMore: ids.rows.length > limit,
+      selection: { ...selection, sort },
     });
   }
   async applyReconcile(id: string, selected: string[], actor: StageActor) {

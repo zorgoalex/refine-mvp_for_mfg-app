@@ -20,6 +20,7 @@ import {
   type StageJob,
   type StageSettingsInput,
   type StageState,
+  type StageReconcileSelection,
 } from '../../api/bitrix24StagesApi';
 
 const labels: Record<string, string> = {
@@ -46,6 +47,27 @@ export function OrderStageSettings() {
   const [provision, setProvision] = useState<number[]>([]),
     [reviewed, setReviewed] = useState(false),
     [retryId, setRetryId] = useState('');
+  const [searchBy, setSearchBy] = useState<'orderName' | 'orderId'>(
+    'orderName'
+  );
+  const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<'asc' | 'desc'>('desc');
+  const searchValue = search.trim();
+  const invalidId =
+    searchBy === 'orderId' &&
+    searchValue !== '' &&
+    (!/^[1-9][0-9]*$/.test(searchValue) ||
+      !Number.isSafeInteger(Number(searchValue)));
+  const previewOrders = () =>
+    run(async () => {
+      if (invalidId) return;
+      const selection: StageReconcileSelection = { sort };
+      if (searchValue) {
+        if (searchBy === 'orderId') selection.orderId = Number(searchValue);
+        else selection.orderName = searchValue;
+      }
+      open(await api.previewReconcile(0, selection));
+    });
   const accept = (value: StageState) => {
     setState(value);
     setDraft({
@@ -356,11 +378,79 @@ export function OrderStageSettings() {
                       }))}
                     />
                   )}
+                  <Form layout="vertical">
+                    <Space wrap align="start">
+                      <Form.Item label="Искать по">
+                        <Select
+                          size="large"
+                          aria-label="Поле поиска заказа для сверки"
+                          style={{ minWidth: 180 }}
+                          disabled={busy}
+                          value={searchBy}
+                          options={[
+                            { value: 'orderName', label: 'Номер заказа' },
+                            { value: 'orderId', label: 'ID ERP' },
+                          ]}
+                          onChange={(value) => {
+                            setSearchBy(value);
+                            setSearch('');
+                          }}
+                        />
+                      </Form.Item>
+                      <Form.Item
+                        label={
+                          searchBy === 'orderId'
+                            ? 'Точный ID ERP'
+                            : 'Точный номер заказа'
+                        }
+                        validateStatus={invalidId ? 'error' : undefined}
+                        help={
+                          invalidId
+                            ? 'Введите положительный целочисленный ID ERP'
+                            : undefined
+                        }
+                      >
+                        <Input
+                          size="large"
+                          aria-label="Заказ для сверки"
+                          placeholder="Пусто — все связанные заказы"
+                          style={{ width: 280, maxWidth: '100%' }}
+                          value={search}
+                          disabled={busy}
+                          allowClear
+                          maxLength={200}
+                          onChange={(e) => setSearch(e.target.value)}
+                          onPressEnter={() => {
+                            if (!busy && state.config.enabled && !invalidId)
+                              void previewOrders();
+                          }}
+                        />
+                      </Form.Item>
+                      <Form.Item label="Порядок заказов">
+                        <Select
+                          size="large"
+                          aria-label="Порядок заказов для сверки"
+                          style={{ minWidth: 190 }}
+                          value={sort}
+                          disabled={busy}
+                          options={[
+                            { value: 'desc', label: 'Сначала новые' },
+                            { value: 'asc', label: 'Сначала старые' },
+                          ]}
+                          onChange={setSort}
+                        />
+                      </Form.Item>
+                    </Space>
+                  </Form>
+                  <Typography.Text type="secondary">
+                    Точный поиск по всем связанным производственным заказам ERP,
+                    не только текущей странице. Новые и старые определяются по
+                    ID ERP.
+                  </Typography.Text>
                   <Button
-                    disabled={busy || !state.config.enabled}
-                    onClick={() =>
-                      void run(async () => open(await api.previewReconcile()))
-                    }
+                    size="large"
+                    disabled={busy || !state.config.enabled || invalidId}
+                    onClick={() => void previewOrders()}
                   >
                     Предпросмотр сверки — 25 заказов
                   </Button>
@@ -485,6 +575,10 @@ export function OrderStageSettings() {
                 size="small"
                 pagination={false}
                 rowKey="orderId"
+                locale={{
+                  emptyText:
+                    'Подходящих связанных производственных заказов не найдено. Проверьте номер/ID и наличие связи с Bitrix.',
+                }}
                 dataSource={job.payload.rows ?? []}
                 scroll={{ x: 700 }}
                 rowSelection={{
@@ -553,7 +647,8 @@ export function OrderStageSettings() {
                     void run(async () =>
                       open(
                         await api.previewReconcile(
-                          Number(job.payload.nextCursor)
+                          Number(job.payload.nextCursor),
+                          job.payload.selection ?? { sort: 'asc' }
                         )
                       )
                     )

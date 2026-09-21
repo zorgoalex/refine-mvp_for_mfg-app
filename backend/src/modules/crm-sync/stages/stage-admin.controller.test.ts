@@ -3,7 +3,9 @@ import { describe, it, expect, vi } from 'vitest';
 import { Reflector } from '@nestjs/core';
 import { PermissionsGuard } from '../../../permissions/permissions.guard';
 import { PermissionsService } from '../../../permissions/permissions.service';
+import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { StageAdminController } from './stage-admin.controller';
+import type { StageAdminService } from './stage-admin.service';
 
 describe('stage admin permission and validation contract', () => {
   const controller = new StageAdminController({
@@ -57,5 +59,66 @@ describe('stage admin permission and validation contract', () => {
         {} as never
       )
     ).toThrow();
+  });
+});
+
+describe('stage reconcile preview request validation', () => {
+  const actor = {
+    user: { id: '1' },
+    requestId: 'E2E-stage-picker',
+  } as RequestWithCurrentUser;
+  function fixture() {
+    const previewReconcile = vi.fn();
+    return {
+      previewReconcile,
+      controller: new StageAdminController({
+        previewReconcile,
+      } as unknown as StageAdminService),
+    };
+  }
+  it('preserves old API ascending and accepts exact normalized name and descending cursor', () => {
+    const { controller, previewReconcile } = fixture();
+    controller.reconcilePreview({}, actor);
+    expect(previewReconcile).toHaveBeenLastCalledWith(
+      0,
+      25,
+      { id: '1', requestId: 'E2E-stage-picker' },
+      { sort: 'asc', orderId: undefined, orderName: undefined }
+    );
+    controller.reconcilePreview(
+      { afterId: 123, sort: 'desc', orderName: ' 2947 ' },
+      actor
+    );
+    expect(previewReconcile).toHaveBeenLastCalledWith(
+      123,
+      25,
+      expect.anything(),
+      { sort: 'desc', orderName: '2947', orderId: undefined }
+    );
+    controller.reconcilePreview({ orderId: 11634 }, actor);
+    expect(previewReconcile).toHaveBeenLastCalledWith(
+      0,
+      25,
+      expect.anything(),
+      { sort: 'asc', orderId: 11634, orderName: undefined }
+    );
+  });
+  it.each([
+    { sort: 'desc; DROP TABLE orders' },
+    { orderId: 0 },
+    { orderId: -1 },
+    { orderId: 1.5 },
+    { orderId: Number.MAX_SAFE_INTEGER + 1 },
+    { orderId: '11634' },
+    { orderName: ' ' },
+    { orderName: 'x'.repeat(201) },
+    { orderId: 1, orderName: '1' },
+    { afterId: -1 },
+    { limit: 26 },
+    { unknown: true },
+  ])('rejects invalid or ambiguous query %j before calling service', (body) => {
+    const { controller, previewReconcile } = fixture();
+    expect(() => controller.reconcilePreview(body, actor)).toThrow();
+    expect(previewReconcile).not.toHaveBeenCalled();
   });
 });

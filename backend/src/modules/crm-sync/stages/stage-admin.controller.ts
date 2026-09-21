@@ -100,11 +100,20 @@ export class StageAdminController {
         .object({
           afterId: z.number().int().nonnegative().safe().default(0),
           limit: z.number().int().min(1).max(25).default(25),
+          // Legacy clients/jobs paginate ascending; the new UI sends desc explicitly.
+          sort: z.enum(['asc', 'desc']).default('asc'),
+          orderId: z.number().int().positive().safe().optional(),
+          orderName: z.string().trim().min(1).max(200).optional(),
         })
-        .strict(),
+        .strict()
+        .refine((p) => p.orderId === undefined || p.orderName === undefined),
       body
     );
-    return this.service.previewReconcile(p.afterId, p.limit, actor(r));
+    return this.service.previewReconcile(p.afterId, p.limit, actor(r), {
+      sort: p.sort,
+      orderId: p.orderId,
+      orderName: p.orderName,
+    });
   }
   @Post('reconcile/:jobId/apply')
   @ApiOperation({ summary: 'Enroll only approved unchanged order-stage rows' })

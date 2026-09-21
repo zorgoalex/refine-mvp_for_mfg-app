@@ -72,7 +72,13 @@ export interface StageJob {
     >;
     nextCursor?: string;
     hasMore?: boolean;
+    selection?: StageReconcileSelection;
   };
+}
+export interface StageReconcileSelection {
+  sort: 'asc' | 'desc';
+  orderId?: number;
+  orderName?: string;
 }
 const base = apiRoutes.bitrix24.orderStages;
 export const bitrix24StagesApi = {
@@ -92,10 +98,14 @@ export const bitrix24StagesApi = {
       `${base}/provision/${encodeURIComponent(id)}/apply`,
       {}
     ),
-  previewReconcile: (afterId = 0) =>
+  previewReconcile: (
+    afterId = 0,
+    selection: StageReconcileSelection = { sort: 'desc' }
+  ) =>
     httpClient.post<StageJob>(`${base}/reconcile/preview`, {
       afterId,
       limit: 25,
+      ...selection,
     }),
   applyReconcile: (id: string, orderIds: string[]) =>
     httpClient.post<StageJob>(

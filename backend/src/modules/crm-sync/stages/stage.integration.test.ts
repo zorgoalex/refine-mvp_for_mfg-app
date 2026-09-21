@@ -67,6 +67,7 @@ describe.skipIf(!optIn)('stages real PostgreSQL + stub Bitrix', () => {
   ];
   let writes: ReturnType<typeof vi.fn>;
   let creates: ReturnType<typeof vi.fn>;
+  let reads: ReturnType<typeof vi.fn>;
   let createResponseLost = false;
   beforeEach(async () => {
     rawStages.splice(3);
@@ -169,6 +170,10 @@ describe.skipIf(!optIn)('stages real PostgreSQL + stub Bitrix', () => {
         throw new Error('NETWORK_ERROR synthetic create');
       }
     });
+    reads = vi.fn(async () => {
+      await guard();
+      return { ...remote };
+    });
     const bitrix = {
       createWorkingStage: creates,
       withRequestGuard: async (
@@ -183,10 +188,7 @@ describe.skipIf(!optIn)('stages real PostgreSQL + stub Bitrix', () => {
           guard = prior;
         }
       },
-      getCrmItem: async () => {
-        await guard();
-        return { ...remote };
-      },
+      getCrmItem: reads,
       updateDealStage: async (id: string, s: string) => {
         await guard();
         return writes(id, s);
@@ -485,6 +487,72 @@ describe.skipIf(!optIn)('stages real PostgreSQL + stub Bitrix', () => {
         )
       ).rows[0].n
     ).toBe(1);
+  });
+  it('pages both directions and filters exact order identity without remote writes', async () => {
+    await client.query(`INSERT INTO orders(order_id,order_name,order_status_id,order_kind,delete_flag) VALUES
+      (20,'E2E-Target',1,'production_order',false),(30,'E2E-Target',1,'production_order',false),
+      (40,'E2E-Target',1,'crm_request',false),(50,'E2E-Target',1,'production_order',true),
+      (60,'E2E-Unlinked',1,'production_order',false),(70,'E2E-Target',1,'production_order',false);
+      INSERT INTO crm_sync_mapping(entity_type,erp_id,bitrix_object,bitrix_id,status,source_system)
+      SELECT 'order',order_id::text,'deal','700','active','erp' FROM orders WHERE order_id IN (20,30,40,50);
+      INSERT INTO crm_sync_mapping VALUES('client','70','contact','700','active','erp');`);
+    const first = await admin.previewReconcile(0, 1, actor, { sort: 'desc' });
+    expect(first.payload.rows).toMatchObject([{ orderId: '30' }]);
+    expect(first.payload).toMatchObject({
+      hasMore: true,
+      nextCursor: '30',
+      selection: { sort: 'desc' },
+    });
+    const second = await admin.previewReconcile(30, 1, actor, { sort: 'desc' });
+    expect(second.payload.rows).toMatchObject([{ orderId: '20' }]);
+    expect(second.payload.hasMore).toBe(false);
+    const old = await admin.previewReconcile(0, 1, actor);
+    expect(old.payload.rows).toMatchObject([{ orderId: '20' }]);
+    expect(
+      (await admin.previewReconcile(20, 1, actor)).payload.rows
+    ).toMatchObject([{ orderId: '30' }]);
+    const exact = await admin.previewReconcile(0, 25, actor, {
+      sort: 'desc',
+      orderId: 20,
+    });
+    expect(exact.payload.rows).toMatchObject([{ orderId: '20' }]);
+    expect(exact.payload.hasMore).toBe(false);
+    const byName = await admin.previewReconcile(0, 25, actor, {
+      sort: 'desc',
+      orderName: 'E2E-Target',
+    });
+    expect(byName.payload.rows).toMatchObject([
+      { orderId: '30' },
+      { orderId: '20' },
+    ]);
+    expect(byName.payload.selection).toEqual({
+      sort: 'desc',
+      orderName: 'E2E-Target',
+    });
+    for (const orderName of ['E2E-Targ', 'E2E-Unlinked', "' OR true --", '%']) {
+      const empty = await admin.previewReconcile(0, 25, actor, { orderName });
+      expect(empty.payload.rows).toEqual([]);
+      expect(empty.payload.hasMore).toBe(false);
+    }
+    expect(writes).not.toHaveBeenCalled();
+    expect(creates).not.toHaveBeenCalled();
+  });
+  it('bounds remote reads at 25 and finishes a full final page without a phantom next page', async () => {
+    await client.query(`INSERT INTO orders(order_id,order_name,order_status_id,order_kind)
+      SELECT i,'E2E-page-'||i,1,'production_order' FROM generate_series(100,149) i;
+      INSERT INTO crm_sync_mapping(entity_type,erp_id,bitrix_object,bitrix_id,status,source_system)
+      SELECT 'order',order_id::text,'deal','700','active','erp' FROM orders WHERE order_id>=100;`);
+    const first = await admin.previewReconcile(0, 25, actor, { sort: 'desc' });
+    expect(first.payload.rows).toHaveLength(25);
+    expect(first.payload).toMatchObject({ nextCursor: '125', hasMore: true });
+    expect(reads).toHaveBeenCalledTimes(25);
+    const second = await admin.previewReconcile(125, 25, actor, {
+      sort: 'desc',
+    });
+    expect(second.payload.rows).toHaveLength(25);
+    expect(second.payload).toMatchObject({ nextCursor: '100', hasMore: false });
+    expect(reads).toHaveBeenCalledTimes(50);
+    expect(writes).not.toHaveBeenCalled();
   });
   it('refuses stale selected preview and changed portal installation before writes', async () => {
     await seed();
