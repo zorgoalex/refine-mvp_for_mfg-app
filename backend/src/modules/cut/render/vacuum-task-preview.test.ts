@@ -23,6 +23,8 @@ describe('isolated vacuum task preview', () => {
     const before = JSON.stringify(settings);
     const style = resolveCutRenderStyleFromSetting(CUT_RENDER_STYLE_VACUUM_TASK_PREVIEW, settings);
     expect(style.piece.defaultFill).toBe('#ffffff');
+    expect(style.piece.strokeWidthMm).toBe(6);
+    expect(style.sourceSvg.minStrokePx).toBe(1.2);
     expect(createOrderFillResolver([10, 20], style)(10)).toBe('#123b70');
     expect(createOrderFillResolver([10, 20], style)(20)).toBe('#123b70');
     expect(resolveCutRenderStyleFromSetting('mdf_board_preview', settings).piece.defaultFill).toBe('#eeeeee');
@@ -38,6 +40,7 @@ describe('isolated vacuum task preview', () => {
 
   it.each([360, 1400])('renders white interiors and visible navy contours at %i pixels', (targetPx) => {
     const svg = buildSheetSvg({ sheet, labelFor: () => '', showLabels: false, renderStyle: CUT_RENDER_STYLE_VACUUM_TASK_PREVIEW });
+    expect(svg).toContain('fill="none" stroke="#000000" stroke-width="14"/></svg>');
     const png = PNG.sync.read(renderSheetPng({ svg, targetPx, sheetWidthMm: 2800, sheetHeightMm: 1050 }));
     const pixel = (x: number, y: number) => [...png.data.subarray((y * png.width + x) * 4, (y * png.width + x) * 4 + 4)];
     expect(pixel(Math.round(1000 / 2800 * png.width), Math.round(300 / 1050 * png.height))).toEqual([255, 255, 255, 255]);
@@ -55,6 +58,6 @@ describe('isolated vacuum task preview', () => {
     const edgeX = Math.round(2000 / 2800 * png.width);
     const edgeY = Math.round(300 / 1050 * png.height);
     const edge = [-1, 0, 1].map((dx) => pixel(edgeX + dx, edgeY));
-    expect(edge.some(([r, g, b, a]) => r < 90 && g < 120 && b > g && a === 255)).toBe(true);
+    expect(edge.some(([r, g, b, a]) => r < 180 && g < 195 && b > g && a === 255)).toBe(true);
   });
 });

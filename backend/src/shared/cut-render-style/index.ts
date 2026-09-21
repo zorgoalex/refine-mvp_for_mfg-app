@@ -184,12 +184,12 @@ const VACUUM_TASK_PREVIEW_PROFILE: CutRenderStyleProfile = {
   piece: {
     defaultFill: '#ffffff',
     stroke: '#123b70',
-    strokeWidthMm: 10,
+    strokeWidthMm: 6,
     orderPalette: ['#123b70'],
   },
   sourceSvg: {
     ...CUT_RENDER_STYLE_PROFILES[CUT_RENDER_STYLE_DEFAULT].sourceSvg,
-    minStrokePx: 2,
+    minStrokePx: 1.2,
     nonScalingStroke: true,
     strokeColorMode: 'fixed',
     fixedStroke: '#123b70',

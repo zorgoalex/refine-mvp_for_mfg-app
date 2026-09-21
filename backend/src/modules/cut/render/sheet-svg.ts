@@ -584,6 +584,12 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
     ? bathMeterGuideViewBox(sheet, rotate90, guideLabelFontMm)
     : `0 0 ${num(vbW)} ${num(vbH)}`;
 
+  // The bath task sheet boundary is independent of the thinner piece contours.
+  // Draw it last so hatching and pieces touching the sheet edge cannot cover it.
+  const taskSheetOutline = renderStyle.id === CUT_RENDER_STYLE_VACUUM_TASK_PREVIEW
+    ? `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="none" stroke="#000000" stroke-width="14"/>`
+    : '';
+
   // Fill the guide gutters too; transparent margins otherwise inherit the UI surface.
   const [backgroundX, backgroundY, backgroundWidth, backgroundHeight] = viewBox.split(' ');
   const taskBackground = renderStyle.id === CUT_RENDER_STYLE_VACUUM_TASK_PREVIEW
@@ -606,6 +612,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
     `<g class="cut-sheet-piece-geometry-layer">${pieces}</g>`,
     showLabels ? `<g class="cut-sheet-piece-label-layer">${labels}</g>` : '',
     bathMeterGuides,
+    taskSheetOutline,
     `</svg>`,
   ].join('');
 }
