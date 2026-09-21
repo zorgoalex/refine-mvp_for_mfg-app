@@ -95,6 +95,14 @@ suite('Inbound signals — real PostgreSQL transactions, scopes, retention', () 
     await pool.query(`UPDATE message_processing_configuration SET version=$1,document=$2,source_activation=$3`, [version,document,{ shop: new Date(Date.now()-60000).toISOString() }]);
   });
   const row = async () => (await pool.query('SELECT * FROM inbound_signal_occurrences ORDER BY id LIMIT 1')).rows[0];
+  it('provides names and codes to automation readers without exposing group configuration', async () => {
+    const reader: CurrentUser = { ...manager, permissions: ['status_automation.view'] };
+    expect(await service.signalOptions(reader)).toEqual(configuration.signals);
+    await expect(service.getConfiguration(reader)).rejects.toMatchObject({ statusCode: 403 });
+    await expect(service.signalOptions(manager)).rejects.toMatchObject({ statusCode: 403 });
+    await pool.query(`UPDATE message_processing_configuration SET document=jsonb_set(document,'{signals}','[]')`);
+    expect(await service.signalOptions(reader)).toEqual([]);
+  });
   it('deduplicates concurrent deliveries and executes status/audit/outbox/job exactly once', async () => {
     const message = incoming();
     await Promise.all([service.accept(message,'test-1'),service.accept(message,'test-2')]);

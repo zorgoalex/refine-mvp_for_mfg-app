@@ -28,6 +28,7 @@ import {
   type MdfBoardHiddenStatusesSetting,
 } from '../../orderStatusBoard/model';
 import { DeadlineTransitionRulesConfig } from './DeadlineTransitionRulesConfig';
+import { IncomingSignalSelect } from './IncomingSignalSelect';
 import {
   allowedConditionKeysForEvent,
   addStatusAutomationCondition,
@@ -135,7 +136,7 @@ const CONDITION_LABELS: Record<ConditionKey, string> = {
   currentProductionStatusNotIn: 'Ни одна учитываемая деталь не имеет статус из списка',
   paidShareGte: 'Оплачено не менее',
   orderSourceIn: 'Источник заказа — один из',
-  signalCodeIn: 'Код входящего сигнала — один из',
+  signalCodeIn: 'Входящий сигнал — один из',
   firstPaymentOnly: 'Это первый платёж по заказу',
 };
 
@@ -1354,8 +1355,8 @@ export function StatusAutomationConfig() {
                     />
                   );
                 } else if (key === 'signalCodeIn') {
-                  control = <Select mode="tags" aria-label={CONDITION_LABELS[key]} value={form.signalCodeIn ?? []}
-                    onChange={value => updateForm({ signalCodeIn: value })} placeholder="Коды из «Обработки сообщений», например goods.ready" style={{ width: '100%' }} />;
+                  control = <IncomingSignalSelect value={form.signalCodeIn ?? []}
+                    onChange={value => updateForm({ signalCodeIn: value })} />;
                 } else if (key === 'orderSourceIn') {
                   control = (
                     <Select<StatusAutomationOrderSource[]>
@@ -1364,7 +1365,7 @@ export function StatusAutomationConfig() {
                       value={form.orderSourceIn ?? []}
                       onChange={(value) => updateForm({ orderSourceIn: value })}
                       options={SOURCE_OPTIONS}
-                      placeholder="Выберите источники"
+                      placeholder="Выберите один или несколько способов создания заказа"
                       style={{ width: '100%' }}
                     />
                   );
@@ -1394,6 +1395,12 @@ export function StatusAutomationConfig() {
                         </Button>
                       </Space>
                       {control}
+                      {key === 'orderSourceIn' && <Text type="secondary">
+                        Как заказ появился в ERP: вручную, из Базиса или через импорт. Это не группа WhatsApp и не канал сообщения.
+                        Можно выбрать несколько значений — достаточно совпадения с любым из них.
+                        Например, «Вручную» и «Базис» допускают оба способа, но исключают «Импорт».
+                        Лишние значения убираются крестиком рядом с названием. Если подходят все заказы, удалите это условие целиком.
+                      </Text>}
                       {!statusAutomationConditionIsFilled(form, key) && (
                         <Text type="danger">Заполните значение или удалите это условие.</Text>
                       )}

@@ -169,6 +169,27 @@ paths:
       responses:
         '201': { description: Idempotent state transition queued or dismissed }
         '409': { description: Version, preview or idempotency conflict }
+  /api/v1/message-processing/signals:
+    get:
+      operationId: listMessageSignalOptions
+      security: [{ bearerAuth: [] }]
+      x-permission: status_automation.view
+      responses:
+        '200':
+          description: Signal names and codes only; excludes sources, group identifiers and matching rules
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [code, name]
+                  properties:
+                    code: { type: string }
+                    name: { type: string }
+        '403': { description: Status automation permission required }
+        '503': { description: Incoming signals are disabled or storage unavailable }
   /api/v1/message-processing/configuration:
     get:
       operationId: getMessageProcessingConfiguration

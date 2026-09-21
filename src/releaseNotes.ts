@@ -29,6 +29,11 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-09-21", title: "Автостатусы: выбор входящих сигналов",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: ["Входящий сигнал выбирается из списка по названию и коду, без ручного ввода. Добавлены поиск, обновление списка и подсказки при ошибке или отсутствии сигналов. Условие «Источник заказа» объясняет способ создания заказа, а не канал сообщения."],
+  },
+  {
     version: APP_VERSION, date: "2026-09-21", title: "Раскрой: разная толщина контуров ванны и деталей",
     services: ["Cutting"], repositories: ["repo_erp"],
     changed: ["В превью заданий-ванн контур листа стал чёрным и на 40% толще, а тёмно-синие контуры деталей — на 40% тоньше. Штриховка свободной площади сохранена."],

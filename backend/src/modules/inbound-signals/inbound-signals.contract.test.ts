@@ -22,5 +22,6 @@ describe('inbound signals deployment and permission contracts', () => {
     const contract=load(readFileSync(new URL('../../../contracts/04-api-contract.openapi.yaml',import.meta.url),'utf8')) as { paths: Record<string, Record<string, Record<string, unknown>>> };
     expect(contract.paths['/api/v1/inbound-signals'].get['x-permission']).toBe('message_signals.view');
     expect(contract.paths['/api/v1/message-processing/configuration'].put['x-permission']).toBe('message_signals.manage_config');
+    expect(contract.paths['/api/v1/message-processing/signals'].get['x-permission']).toBe('status_automation.view');
   });
 });

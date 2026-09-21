@@ -91,6 +91,12 @@ export class InboundSignalsService implements OnModuleInit, OnModuleDestroy {
     const row = await this.config();
     return { ...row.document, version: row.version };
   }
+  async signalOptions(actor: CurrentUser) {
+    requirePermission(actor, 'status_automation.view'); this.requireEnabled();
+    const row = await this.config();
+    // The rule editor needs the public catalog, never group JIDs, sources or matching rules.
+    return row.document.signals.map(({ code, name }) => ({ code, name }));
+  }
   async saveConfiguration(body: unknown, actor: CurrentUser, requestId: string) {
     this.requireEnabled(); requirePermission(actor, 'message_signals.manage_config');
     const next = parseConfiguration(body);

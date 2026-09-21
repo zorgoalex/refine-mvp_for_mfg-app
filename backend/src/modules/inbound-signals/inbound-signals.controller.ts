@@ -31,6 +31,9 @@ export class InboundSignalsController {
   @Get('message-processing/configuration') @RequirePermissions('message_signals.manage_config')
   @ApiOperation({ operationId: 'getMessageProcessingConfiguration', summary: 'Get sources, signals, rules and templates' })
   configuration(@Req() req: RequestWithCurrentUser) { return this.service.getConfiguration(user(req)); }
+  @Get('message-processing/signals') @RequirePermissions('status_automation.view')
+  @ApiOperation({ operationId: 'listMessageSignalOptions', summary: 'List signal names and codes for status automation' })
+  signals(@Req() req: RequestWithCurrentUser) { return this.service.signalOptions(user(req)); }
   @Put('message-processing/configuration') @RequirePermissions('message_signals.manage_config')
   @ApiOperation({ operationId: 'saveMessageProcessingConfiguration', summary: 'Save versioned configuration atomically' })
   save(@Body() body: unknown,@Req() req: RequestWithCurrentUser) { return this.service.saveConfiguration(body,user(req),requestId(req)); }

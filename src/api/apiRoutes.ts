@@ -343,6 +343,7 @@ export const apiRoutes = {
     refreshRecentOrders: backendApiPath('/status-automation/refresh-recent-orders'),
   },
   inboundSignals: {
+    signalOptions: backendApiPath('/message-processing/signals'),
     list: backendApiPath('/inbound-signals'),
     detail: (id: string) => backendApiPath(`/inbound-signals/${encodeURIComponent(id)}`),
     command: (id: string, action: 'resolve-preview' | 'resolve' | 'dismiss' | 'retry') => backendApiPath(`/inbound-signals/${encodeURIComponent(id)}/${action}`),
