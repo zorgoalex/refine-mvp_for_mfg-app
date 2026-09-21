@@ -5,7 +5,7 @@ import { Table, Tooltip } from '../../../ui/tooltipDelay';
  */
 
 import React, { useState, useMemo } from 'react';
-import { Card, Button, Space, Modal, Form, Input, InputNumber, Switch, Tag, message, Popconfirm, Select } from 'antd';
+import { AutoComplete, Card, Button, Space, Modal, Form, Input, InputNumber, Switch, Tag, message, Popconfirm, Select } from 'antd';
 import {
   PlusOutlined,
   EditOutlined,
@@ -368,13 +368,11 @@ export const VlmPromptsSection: React.FC = () => {
               rules={[{ required: true, message: 'Введите namespace' }]}
               style={{ flex: 1 }}
             >
-              <Select
-                showSearch
+              <AutoComplete<string>
                 allowClear
+                filterOption
                 placeholder="Выберите или введите"
                 options={COMMON_NAMESPACES.map((ns) => ({ value: ns, label: ns }))}
-                mode="tags"
-                maxCount={1}
               />
             </Form.Item>
 

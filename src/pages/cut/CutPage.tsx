@@ -5498,7 +5498,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         open={pdfPreview.open}
         onCancel={closeGroupPdfPreview}
         width={1040}
-        destroyOnHidden
+        destroyOnClose
         footer={[
           <Button key="close" onClick={closeGroupPdfPreview}>
             Закрыть
