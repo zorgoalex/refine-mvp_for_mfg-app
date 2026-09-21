@@ -12,6 +12,9 @@ vi.mock('../../api/bitrix24StagesApi', () => ({
     refresh: vi.fn(),
     previewSettings: vi.fn(),
     applySettings: vi.fn(),
+    previewReconcile: vi.fn(),
+    applyReconcile: vi.fn(),
+    job: vi.fn(),
   },
 }));
 // Native test controls retain component props; no browser/network dependency.
@@ -81,6 +84,156 @@ const state: StageState = {
 };
 describe('independent stage settings UI', () => {
   beforeEach(() => vi.resetAllMocks());
+  const preview = (selection?: {
+    sort: 'asc' | 'desc';
+    orderName?: string;
+  }) => ({
+    job_id: 'preview',
+    kind: 'reconcile' as const,
+    expires_at: '2099-01-01',
+    results: {},
+    payload: {
+      rows: [
+        { orderId: '123', orderName: '2947', bitrixId: '700', error: null },
+      ],
+      hasMore: true,
+      nextCursor: '123',
+      ...(selection ? { selection } : {}),
+    },
+  });
+  it('defaults newest, sends exact filters, retains job selection between pages, resets row selection', async () => {
+    vi.mocked(api.state).mockResolvedValue({
+      ...state,
+      config: { ...state.config, enabled: true },
+    });
+    vi.mocked(api.previewReconcile).mockResolvedValue(
+      preview({ sort: 'desc', orderName: '2947' })
+    );
+    let view!: ReactTestRenderer;
+    await act(async () => {
+      view = create(<OrderStageSettings />);
+    });
+    const button = (label: string) =>
+      view.root
+        .findAllByType('button')
+        .find((x) => x.props.children === label)!;
+    expect(
+      view.root.findByProps({ 'aria-label': 'Порядок заказов для сверки' })
+        .props.value
+    ).toBe('desc');
+    act(() =>
+      view.root
+        .findByProps({ 'aria-label': 'Заказ для сверки' })
+        .props.onChange({ target: { value: ' 2947 ' } })
+    );
+    await act(async () =>
+      button('Предпросмотр сверки — 25 заказов').props.onClick()
+    );
+    expect(api.previewReconcile).toHaveBeenLastCalledWith(0, {
+      sort: 'desc',
+      orderName: '2947',
+    });
+    const table = () =>
+      view.root
+        .findAllByType('table')
+        .find((x) => x.props.rowKey === 'orderId')!;
+    act(() => table().props.rowSelection.onChange(['123']));
+    expect(table().props.rowSelection.selectedRowKeys).toEqual(['123']);
+    // Unsaved underlying form edits must not change the open job's cursor/query.
+    act(() =>
+      view.root
+        .findByProps({ 'aria-label': 'Порядок заказов для сверки' })
+        .props.onChange('asc')
+    );
+    await act(async () => button('Следующие 25 заказов').props.onClick());
+    expect(api.previewReconcile).toHaveBeenLastCalledWith(123, {
+      sort: 'desc',
+      orderName: '2947',
+    });
+    expect(table().props.rowSelection.selectedRowKeys).toEqual([]);
+    expect(api.applyReconcile).not.toHaveBeenCalled();
+    act(() => view.unmount());
+  });
+  it('validates ID, supports oldest and clears search when switching identity fields', async () => {
+    vi.mocked(api.state).mockResolvedValue({
+      ...state,
+      config: { ...state.config, enabled: true },
+    });
+    vi.mocked(api.previewReconcile).mockResolvedValue(preview());
+    let view!: ReactTestRenderer;
+    await act(async () => {
+      view = create(<OrderStageSettings />);
+    });
+    const input = () =>
+      view.root.findByProps({ 'aria-label': 'Заказ для сверки' });
+    const button = () =>
+      view.root
+        .findAllByType('button')
+        .find((x) => x.props.children === 'Предпросмотр сверки — 25 заказов')!;
+    act(() =>
+      view.root
+        .findByProps({ 'aria-label': 'Поле поиска заказа для сверки' })
+        .props.onChange('orderId')
+    );
+    act(() =>
+      input().props.onChange({ target: { value: '9007199254740992' } })
+    );
+    expect(button().props.disabled).toBe(true);
+    act(() => input().props.onChange({ target: { value: '11634' } }));
+    act(() =>
+      view.root
+        .findByProps({ 'aria-label': 'Порядок заказов для сверки' })
+        .props.onChange('asc')
+    );
+    await act(async () => button().props.onClick());
+    expect(api.previewReconcile).toHaveBeenLastCalledWith(0, {
+      sort: 'asc',
+      orderId: 11634,
+    });
+    act(() =>
+      view.root
+        .findByProps({ 'aria-label': 'Поле поиска заказа для сверки' })
+        .props.onChange('orderName')
+    );
+    expect(input().props.value).toBe('');
+    await act(async () => button().props.onClick());
+    expect(api.previewReconcile).toHaveBeenLastCalledWith(0, { sort: 'asc' });
+    act(() => view.unmount());
+  });
+  it('continues legacy jobs ascending and displays empty results without auto-apply', async () => {
+    vi.mocked(api.state).mockResolvedValue({
+      ...state,
+      jobs: [{ job_id: 'old', kind: 'reconcile', created_at: '2026-09-20' }],
+    });
+    vi.mocked(api.job).mockResolvedValue(preview());
+    vi.mocked(api.previewReconcile).mockResolvedValue({
+      ...preview(),
+      payload: { rows: [], hasMore: false },
+    });
+    let view!: ReactTestRenderer;
+    await act(async () => {
+      view = create(<OrderStageSettings />);
+    });
+    await act(async () =>
+      view.root
+        .findByProps({ 'aria-label': 'Ранее выполненные операции стадий' })
+        .props.onChange('old')
+    );
+    await act(async () =>
+      view.root
+        .findAllByType('button')
+        .find((x) => x.props.children === 'Следующие 25 заказов')!
+        .props.onClick()
+    );
+    expect(api.previewReconcile).toHaveBeenLastCalledWith(123, { sort: 'asc' });
+    const table = view.root
+      .findAllByType('table')
+      .find((x) => x.props.rowKey === 'orderId')!;
+    expect(table.props.dataSource).toEqual([]);
+    expect(table.props.locale.emptyText).toContain('не найдено');
+    expect(api.applyReconcile).not.toHaveBeenCalled();
+    act(() => view.unmount());
+  });
   it('fails independently and offers reload; never writes on mount', async () => {
     vi.mocked(api.state).mockRejectedValue(new Error('Catalog unavailable'));
     let view!: ReactTestRenderer;
