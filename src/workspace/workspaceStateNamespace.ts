@@ -1,3 +1,4 @@
+import type { UserIdentity } from '../types/auth';
 import { authSession } from '../api/authSession';
 import { getUserAuthorizationScopeKey } from '../api/authScopeIdentity';
 
@@ -19,7 +20,16 @@ export function getWorkspaceStateNamespaceParts(): WorkspaceStateNamespaceParts 
 }
 
 export function getWorkspaceStateNamespace(): string {
-  const parts = getWorkspaceStateNamespaceParts();
+  return getWorkspaceStateNamespaceForUser(authSession.getUser(), authSession.getSessionGeneration());
+}
+
+/** Computes the destination before authSession publishes an identity transition. */
+export function getWorkspaceStateNamespaceForUser(user: UserIdentity | null, sessionGeneration: number): string {
+  const parts: WorkspaceStateNamespaceParts = {
+    actorUserId: user ? String(user.id) : 'anonymous',
+    sessionGeneration,
+    scopeFingerprint: fingerprintWorkspaceScope(user ? getUserAuthorizationScopeKey(user) : 'anonymous'),
+  };
   return [
     `actor:${encodeURIComponent(parts.actorUserId)}`,
     `session:${parts.sessionGeneration}`,
