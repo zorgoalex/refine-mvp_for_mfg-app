@@ -13,7 +13,8 @@ const script = resolve(__dirname, 'apply-migrations.sh');
 const source = readFileSync(script, 'utf8');
 const dir = resolve(__dirname, '../backend/db/migrations');
 const files = readdirSync(dir).filter((f) => /^16[4-9]_.*\.sql$/.test(f)
-  || ['174_mdf_execution_context.sql','175_mdf_command_placement.sql','177_cut_result_typed_hdf.sql'].includes(f)).sort();
+  || ['174_mdf_execution_context.sql','175_mdf_command_placement.sql','177_cut_result_typed_hdf.sql',
+    '178_mdf_correction_receipts.sql'].includes(f)).sort();
 const helpers = source.slice(source.indexOf('q_col()'), source.indexOf('# These migrations contain conditional'));
 const queries = (file: string) => execFileSync('bash', ['-s', '--', file], {
   input: `${helpers}\nprobe_all() { printf '%s\\n' "$@"; }\nprobe_file "$1"`, encoding: 'utf8',
@@ -31,7 +32,7 @@ const present = (file: string, mutation = '') => {
 };
 const fileFor = (version: number) => files.find((f) => f.startsWith(`${version}_`))!;
 
-describe.skipIf(!enabled)('migration 164-169, 174-175 and 177 probes against actual SQL on PostgreSQL', () => {
+describe.skipIf(!enabled)('migration 164-169, 174-175 and 177-178 probes against actual SQL on PostgreSQL', () => {
   let created = false;
   beforeAll(() => {
     sql(`CREATE DATABASE ${db} TEMPLATE template0;`, 'postgres');
@@ -113,6 +114,15 @@ describe.skipIf(!enabled)('migration 164-169, 174-175 and 177 probes against act
     [177, "CREATE OR REPLACE FUNCTION cut_result_item_identity(p_item jsonb) RETURNS text LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE AS $$ SELECT 'det-' || (p_item->>'orderDetailId') $$;"],
     [177, 'CREATE OR REPLACE FUNCTION cut_result_snapshot_is_complete(p_snapshot jsonb,p_manifest jsonb,p_digest text) RETURNS boolean LANGUAGE sql IMMUTABLE STRICT AS $$ SELECT true $$;'],
     [177, 'CREATE OR REPLACE FUNCTION project_cut_result_label_maps(p_cut_result_id bigint) RETURNS void LANGUAGE plpgsql AS $$ BEGIN RETURN; END $$;'],
+    [178, 'ALTER TABLE mdf_revision_context ALTER COLUMN effect_policy DROP NOT NULL;'],
+    [178, 'ALTER TABLE mdf_recalculation_jobs ALTER COLUMN effect_policy DROP NOT NULL;'],
+    [178, "ALTER TABLE mdf_revision_context ALTER COLUMN effect_policy SET DEFAULT 'publish_only';"],
+    [178, "ALTER TABLE mdf_recalculation_jobs ALTER COLUMN effect_policy SET DEFAULT 'publish_only';"],
+    [178, "ALTER TABLE mdf_revision_context DROP CONSTRAINT mdf_revision_context_effect_policy_check; ALTER TABLE mdf_revision_context ADD CONSTRAINT mdf_revision_context_effect_policy_check CHECK(effect_policy IN ('forward','publish_only','evil'));"],
+    [178, "ALTER TABLE mdf_recalculation_jobs DROP CONSTRAINT mdf_recalculation_jobs_effect_policy_check; ALTER TABLE mdf_recalculation_jobs ADD CONSTRAINT mdf_recalculation_jobs_effect_policy_check CHECK(effect_policy IN ('forward','publish_only','evil'));"],
+    [178, 'ALTER TABLE mdf_recalculation_jobs DISABLE TRIGGER mdf_job_effect_policy_binding;'],
+    [178, 'CREATE OR REPLACE FUNCTION mdf_guard_job_effect_policy_binding() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;'],
+    [178, 'DROP TRIGGER mdf_job_effect_policy_binding ON mdf_recalculation_jobs; CREATE TRIGGER mdf_job_effect_policy_binding BEFORE INSERT ON mdf_recalculation_jobs FOR EACH ROW EXECUTE FUNCTION mdf_guard_job_effect_policy_binding();'],
   ] as const)('%s: rejects drift %s', (version, mutation) => {
     expect(present(fileFor(version), mutation)).toBe(false);
     expect(present(fileFor(version))).toBe(true); // rollback restored fixture

@@ -131,7 +131,8 @@ describe.skipIf(!enabled)(
         .replace(/^BEGIN;$/m, "")
         .replace(/^COMMIT;$/m, "");
       await client.query(migration);
-      for (const file of ['165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql', '167_mdf_shadow_observations.sql', '171_mdf_shadow_commands.sql']) {
+      for (const file of ['165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql', '167_mdf_shadow_observations.sql', '171_mdf_shadow_commands.sql',
+        '174_mdf_execution_context.sql', '175_mdf_command_placement.sql', '178_mdf_correction_receipts.sql']) {
         await client.query(readFileSync(new URL(`../../../../db/migrations/${file}`, import.meta.url), 'utf8'));
       }
     }, 30000);

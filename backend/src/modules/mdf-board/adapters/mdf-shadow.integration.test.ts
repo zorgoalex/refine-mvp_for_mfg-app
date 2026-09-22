@@ -53,7 +53,8 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF shadow through 
     vi.stubEnv('BACKEND_ENABLE_STATUS_AUTOMATION', 'false');
     await client.connect();
     await client.query(`CREATE SCHEMA ${schema}; SET search_path=${schema},public`);
-    for (const file of ['165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql', '167_mdf_shadow_observations.sql', '171_mdf_shadow_commands.sql']) {
+    for (const file of ['165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql', '167_mdf_shadow_observations.sql', '171_mdf_shadow_commands.sql',
+      '174_mdf_execution_context.sql', '175_mdf_command_placement.sql', '178_mdf_correction_receipts.sql']) {
       await client.query(readFileSync(new URL(`../../../../db/migrations/${file}`, import.meta.url), 'utf8'));
     }
     // Actual deployed column types; isolated owned schema, no operational writes.

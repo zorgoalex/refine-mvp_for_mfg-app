@@ -17,6 +17,13 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
   if (allocation.status==='superseded') return 'superseded';
   const snapshot = allocation.executionSnapshot;
   if (allocation.status!=='allocated' || !snapshot) throw new MdfNeedsAttention('MDF_JOB_CONTEXT_UNAVAILABLE');
+  const effectPolicy = job.effect_policy ?? 'forward';
+  const contextPolicy = snapshot.metadata.get(mdfSourceKey({ kind: job.source_kind,id: job.source_id }))?.effectPolicy;
+  if ((effectPolicy !== 'forward' && effectPolicy !== 'publish_only')
+    || (contextPolicy !== undefined && contextPolicy !== effectPolicy)
+    || (effectPolicy === 'publish_only' && contextPolicy !== 'publish_only')) {
+    throw new MdfNeedsAttention('MDF_JOB_POLICY_MISMATCH');
+  }
   const previous = (await tx.query<{ kind: string; id: string; column: string|null }>(`SELECT p.source_kind kind,p.source_id id,p.column_key "column"
     FROM mdf_published_sources p JOIN unnest($1::text[],$2::text[]) h(kind,id)
       ON p.source_kind=h.kind AND p.source_id=h.id`,
@@ -66,12 +73,12 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
   const user = job.actor_user_id ? (await tx.query<{ user_id: string; username: string; role_id: number }>(
     'SELECT user_id,username,role_id FROM users WHERE user_id=$1 AND is_active',[job.actor_user_id])).rows[0] : null;
   const actor = user ? mapUserRow(user) : null;
-  if (actor) await executePinnedMdfAutomation(tx,{ actor, requestId: job.request_id, sourceIdempotencyKey: job.event_key,
+  if (actor && effectPolicy === 'forward') await executePinnedMdfAutomation(tx,{ actor, requestId: job.request_id, sourceIdempotencyKey: job.event_key,
     pins: rules.map(r => ({ ruleId: Number(r.rule_id), version: Number(r.rule_version) })), events: resolved.events });
   // Actions can change ranks; republish placement from the SAME locked evidence
   // and post-action detail snapshot. They cannot create new physical quantities.
   const final = projectMdfAcceptedState({ ...input, details: await loadMdfExecutionDetails(tx,allocation.orderIds) });
-  if (!actor && rules.length) {
+  if (!actor && rules.length && effectPolicy === 'forward') {
     for (const card of final.cards) card.issues.push('MDF_ACTOR_UNAVAILABLE');
     for (const issues of final.positionIssues.values()) issues.push('MDF_ACTOR_UNAVAILABLE');
   }

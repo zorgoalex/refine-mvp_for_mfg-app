@@ -36,7 +36,8 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF actual event â†
     vi.stubEnv('BACKEND_MDF_SHADOW_INTAKE', 'true'); vi.stubEnv('BACKEND_MDF_SHADOW_COMPARE', 'true');
     vi.stubEnv('BACKEND_ENABLE_STATUS_AUTOMATION', 'false');
     await client.connect(); await client.query(`CREATE SCHEMA ${schema}; SET search_path=${schema},public`);
-    for (const file of ['165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql', '167_mdf_shadow_observations.sql', '169_mdf_shadow_comparison.sql', '171_mdf_shadow_commands.sql']) {
+    for (const file of ['165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql', '167_mdf_shadow_observations.sql', '169_mdf_shadow_comparison.sql', '171_mdf_shadow_commands.sql',
+      '174_mdf_execution_context.sql', '175_mdf_command_placement.sql', '178_mdf_correction_receipts.sql']) {
       await client.query(readFileSync(new URL(`../../../../db/migrations/${file}`, import.meta.url), 'utf8'));
     }
     for (const table of ['orders','order_details','production_statuses','order_statuses','cnc_telegram_packets','cnc_telegram_packet_items',

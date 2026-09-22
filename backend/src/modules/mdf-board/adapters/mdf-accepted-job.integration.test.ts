@@ -30,7 +30,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     vi.stubEnv('BACKEND_STATUS_AUTOMATION','true');
     vi.stubEnv('BACKEND_ENABLE_NOTIFICATION_ENGINE','false'); // MDF processing is independent.
     await db.connect(); await db.query(`CREATE SCHEMA ${schema}; SET search_path=${schema},public`);
-    for (const file of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql','174_mdf_execution_context.sql','175_mdf_command_placement.sql']) {
+    for (const file of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql','174_mdf_execution_context.sql','175_mdf_command_placement.sql','178_mdf_correction_receipts.sql']) {
       await db.query(readFileSync(new URL(`../../../../db/migrations/${file}`,import.meta.url),'utf8'));
     }
     // Own schema only, no public business mutations or hard-coded production ids.
@@ -126,6 +126,87 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     await db.query("UPDATE mdf_recalculation_jobs SET next_attempt_at=now()-interval '1 hour' WHERE job_id=$1",[f.jobs[0].jobId]);
     expect(await runner().processOne()).toMatchObject({ status: 'done',jobId: f.jobs[0].jobId });
     expect(await statuses(f.orderId)).toEqual([2,1]);
+  });
+  it('correction job publishes accounting without forwarding its pinned rules', async () => {
+    const forward = await fixture();
+    expect(await runner().processOne()).toMatchObject({ status: 'done',jobId: forward.jobs[0].jobId });
+    expect(await statuses(forward.orderId)).toEqual([2,1]); // Same pinned rule is effective on an ordinary forward job.
+
+    const f = await fixture();
+    // The initial receipt is intentionally prevented from applying its pinned
+    // rule, leaving a clean status baseline for the correction publication.
+    await db.query('UPDATE status_automation_rules SET version=2 WHERE id=17');
+    try {
+      expect(await runner().processOne()).toMatchObject({ status: 'done',jobId: f.jobs[0].jobId });
+    } finally {
+      await db.query('UPDATE status_automation_rules SET version=1 WHERE id=17');
+    }
+    await db.query("UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now() WHERE status='pending'");
+    const original = f.receipts[0];
+    const independentBasis = f.receipts[1];
+    const basisAllocations = (await db.query(`SELECT a.allocation_id,a.state,a.quantity FROM mdf_bath_allocations a
+      JOIN mdf_evidence_lines e USING(evidence_line_id) WHERE e.source_kind=$1 AND e.source_id=$2 AND e.revision_key=$3
+        AND a.state<>'released' ORDER BY a.allocation_id`,
+    [independentBasis.sourceKind,independentBasis.sourceId,independentBasis.revisionKey])).rows;
+    expect(basisAllocations.length).toBeGreaterThan(0);
+    // The owner command has released the old reservation before submitting
+    // the correction, so its guard sees no active allocation for the old proof.
+    await db.query(`UPDATE mdf_bath_allocations a SET state='released' FROM mdf_evidence_lines e
+      WHERE a.evidence_line_id=e.evidence_line_id AND e.source_kind=$1 AND e.source_id=$2
+        AND e.revision_key=$3 AND a.state<>'released'`,
+    [original.sourceKind,original.sourceId,original.revisionKey]);
+    // Simulate a delayed old-epoch delivery; it must be consumed as stale before
+    // the correction job is claimable.
+    await db.query("UPDATE mdf_recalculation_jobs SET status='pending',finished_at=NULL,next_attempt_at=now()-interval '1 hour' WHERE job_id=$1", [f.jobs[0].jobId]);
+    const correction: MdfReceiptInput = {
+      ...original, revisionKey: '2', correction: true,
+      expectedFence: { version: '1',correctionEpoch: '0' },
+      executionContext: { ...original.executionContext!, displayName: 'E2E corrected CNC source' },
+      // Preserve this source's cut proof. Together with the independent BASIS
+      // source it still covers all 10; a forward job demonstrably applies rule 17.
+      lines: original.lines,
+    };
+    const saved = await database().transaction(tx => recordMdfReceipt(tx,correction));
+    expect(saved).toMatchObject({ accepted: true,version: '2',correctionEpoch: '1' });
+    expect((await db.query('SELECT effect_policy FROM mdf_recalculation_jobs WHERE job_id=$1',[saved.jobId])).rows[0].effect_policy)
+      .toBe('publish_only');
+    expect((await db.query('SELECT correction_epoch FROM mdf_source_heads WHERE source_id=$1',[original.sourceId])).rows[0].correction_epoch)
+      .toBe('1');
+    expect(await runner().processOne()).toMatchObject({ status: 'superseded',jobId: f.jobs[0].jobId });
+    expect(await runner().processOne()).toMatchObject({ status: 'done',jobId: saved.jobId });
+    expect((await db.query(`SELECT a.allocation_id,a.state,a.quantity FROM mdf_bath_allocations a
+      JOIN mdf_evidence_lines e USING(evidence_line_id) WHERE e.source_kind=$1 AND e.source_id=$2 AND e.revision_key=$3
+        AND a.state<>'released' ORDER BY a.allocation_id`,
+    [independentBasis.sourceKind,independentBasis.sourceId,independentBasis.revisionKey])).rows).toEqual(basisAllocations);
+    expect(await statuses(f.orderId)).toEqual([1,1]);
+    expect((await positions(f.orderId))[0]).toMatchObject({ credited_cut: '10',remaining: '0' });
+    expect((await db.query("SELECT count(*) n FROM audit_log WHERE event='status_automation.rule_applied' AND related_order_id=$1",[f.orderId])).rows[0].n)
+      .toBe('0');
+    expect((await db.query("SELECT count(*) n FROM audit_log WHERE event='mdf_board.forward_revision_accepted' AND entity_id=$1",[`packet:${original.sourceId}`])).rows[0].n)
+      .toBe('0');
+    expect((await db.query('SELECT status,effect_policy FROM mdf_recalculation_jobs WHERE job_id=$1',[saved.jobId])).rows[0])
+      .toEqual({ status: 'done',effect_policy: 'publish_only' });
+  });
+  it('publish_only jobs with a missing historical actor do not publish a false actor warning', async () => {
+    const f = await fixture();
+    await db.query('UPDATE status_automation_rules SET version=2 WHERE id=17');
+    try {
+      expect(await runner().processOne()).toMatchObject({ status: 'done',jobId: f.jobs[0].jobId });
+    } finally {
+      await db.query('UPDATE status_automation_rules SET version=1 WHERE id=17');
+    }
+    await db.query("UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now() WHERE status='pending'");
+    const original = f.receipts[0];
+    await db.query(`UPDATE mdf_bath_allocations a SET state='released' FROM mdf_evidence_lines e
+      WHERE a.evidence_line_id=e.evidence_line_id AND e.source_kind=$1 AND e.source_id=$2
+        AND e.revision_key=$3 AND a.state<>'released'`,
+    [original.sourceKind,original.sourceId,original.revisionKey]);
+    const correction = { ...original,revisionKey: '2',correction: true as const,actorUserId: 999,
+      expectedFence: { version: '1',correctionEpoch: '0' } };
+    const saved = await database().transaction(tx => recordMdfReceipt(tx,correction));
+    expect(await runner().processOne()).toMatchObject({ status: 'done',jobId: saved.jobId });
+    expect((await db.query(`SELECT issues FROM mdf_published_sources WHERE source_kind='packet' AND source_id=$1`,[original.sourceId])).rows[0].issues)
+      .not.toContain('MDF_ACTOR_UNAVAILABLE');
   });
   it('accepted bath lamination consumes reservations and advances only own position', async () => {
     const f = await fixture({ rolled: true });

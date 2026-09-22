@@ -12,6 +12,7 @@ export interface MdfExecutionMetadata {
   kind: MdfSourceKind; id: string; revision: string; sourceCreatedAt: string; displayName: string;
   priorColumn: string | null; compositionComplete: boolean; demandDigest: string;
   manualPlacementColumn: string | null;
+  effectPolicy: 'forward' | 'publish_only';
 }
 export const mdfSourceKey = (source: { kind: string; id: string }) => JSON.stringify([source.kind,source.id]);
 
@@ -42,7 +43,8 @@ export async function loadMdfExecutionSnapshot(tx: DatabaseClient, heads: readon
   const args = [heads.map(h => h.kind),heads.map(h => h.id),heads.map(h => h.received)];
   const contexts = (await tx.query<MdfExecutionMetadata>(`SELECT c.source_kind kind,c.source_id id,c.revision_key revision,
     c.source_created_at::text "sourceCreatedAt",c.display_name "displayName",c.prior_column "priorColumn",
-    c.composition_complete "compositionComplete",c.demand_digest "demandDigest",c.manual_placement_column "manualPlacementColumn"
+    c.composition_complete "compositionComplete",c.demand_digest "demandDigest",c.manual_placement_column "manualPlacementColumn",
+    c.effect_policy "effectPolicy"
     FROM unnest($1::text[],$2::text[],$3::text[]) h(kind,id,revision)
     JOIN mdf_revision_context c ON c.source_kind=h.kind AND c.source_id=h.id AND c.revision_key=h.revision
     JOIN mdf_revision_seals z USING(source_kind,source_id,revision_key)`,args)).rows;
@@ -61,6 +63,7 @@ export async function loadMdfExecutionSnapshot(tx: DatabaseClient, heads: readon
     const owners = new Set(rows.map(d => d.orderId));
     const own: string[] = [];
     if (!c) own.push('MDF_CONTEXT_REQUIRED');
+    else if (c.effectPolicy !== 'forward' && c.effectPolicy !== 'publish_only') own.push('MDF_CONTEXT_INVALID');
     else if (!c.compositionComplete) own.push('MDF_COMPOSITION_UNRESOLVED');
     else if (!rows.length) own.push('MDF_CONTEXT_REQUIRED');
     else if (mdfDemandDigest(rows)!==c.demandDigest) own.push('MDF_CONTEXT_INVALID');

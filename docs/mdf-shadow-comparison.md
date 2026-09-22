@@ -357,6 +357,40 @@ historical baseline and the cutover procedure are connected and checked together
 The current shadow producer does not supply execution context. Setting the engine
 to active directly is not a supported activation procedure.
 
+### Correction primitives (not an active return endpoint)
+
+`planMdfCorrection` is a pure consequence planner. A return below the cut stage
+removes only that source's cut proof and lamination attributed through its exact
+allocations. Between cut and lamination it preserves cut stock, cancels linked
+lamination and proposes new reserved allocations. At or above lamination both
+facts remain. A direct bath return never cancels machine-file cut proof.
+Independent evidence and explicit order/detail declarations retain their quantity
+floors; partial coverage does not establish a whole-position stage. Ambiguous
+partial lamination, stale allocation revisions or insufficient supply block the
+plan. The planner emits replacement specifications, not database writes.
+
+Migration `178_mdf_correction_receipts.sql` must precede deployment of the new
+receipt/runner code. It adds an immutable `effect_policy` to sealed execution
+context and jobs: existing receipts and jobs default to `forward`. A job must
+match its sealed context; `publish_only` without that context is rejected.
+Historical context-free forward receipts remain unverified, not newly trusted.
+
+The internal `recordMdfReceipt(..., { correction: true })` path requires a current
+accepted/received revision, matching version/epoch, complete context, acceptance,
+and no unreleased source allocations. The owning correction command must release
+affected allocations before calling it, then insert replacement allocations
+against the new immutable revisions within the same transaction. The new receipt increments
+the correction epoch and version together; replay does not increment them again.
+Its `publish_only` job recalculates allocation/accounting and publishes, but does
+not execute forward automation from unchanged sibling evidence. Old-epoch jobs
+are superseded. Normal future receipts still use the forward policy.
+
+These primitives do not authorize a rollback by themselves. The active command
+must still provide permissions, complete scope locks, preview/digest confirmation,
+allocation replacements, detail changes, audit/outbox, idempotency and the real CNC
+fresh-signal fence. No public return API is connected by migration178; the legacy
+return remains fenced in active/read-only mode. Keep activation flags off.
+
 ### Manual commands through the queue (activation still gated)
 
 Migration `175_mdf_command_placement.sql` adds sealed manual placement and an

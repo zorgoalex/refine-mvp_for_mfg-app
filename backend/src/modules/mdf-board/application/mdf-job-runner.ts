@@ -2,10 +2,13 @@ import type { QueryResultRow } from 'pg';
 import type { DatabaseClient } from '../../../database/database.types';
 
 export type MdfSourceKind = 'packet' | 'bazisCutSet' | 'bath' | 'order' | 'orderDetail';
+export type MdfJobEffectPolicy = 'forward' | 'publish_only';
 export interface MdfJob extends QueryResultRow {
   job_id: string; event_key: string; source_kind: MdfSourceKind; source_id: string;
   revision_key: string; correction_epoch: string; actor_user_id: string | null;
   request_id: string; attempts: number;
+  /** Canonical value read from the durable job row, never request input. */
+  effect_policy?: MdfJobEffectPolicy;
 }
 export interface MdfPinnedRule extends QueryResultRow { rule_id: string; rule_version: string }
 export interface MdfJobDatabase<Client extends DatabaseClient = DatabaseClient> {
@@ -42,7 +45,7 @@ export class MdfJobRunner<Client extends DatabaseClient = DatabaseClient> {
       const state = await tx.query<{ mode: string }>('SELECT mode FROM mdf_engine_state WHERE singleton=true');
       if (state.rows[0]?.mode !== 'active') return { status: 'disabled' };
       const selected = await tx.query<MdfJob>(`SELECT job_id,event_key,source_kind,source_id,revision_key,
-        correction_epoch,actor_user_id,request_id,attempts FROM mdf_recalculation_jobs
+        correction_epoch,actor_user_id,request_id,attempts,effect_policy FROM mdf_recalculation_jobs
         WHERE status='pending' AND next_attempt_at<=now()
         ORDER BY next_attempt_at,created_at,job_id LIMIT 1 FOR UPDATE SKIP LOCKED`);
       const job = selected.rows[0];

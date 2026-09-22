@@ -2199,6 +2199,16 @@ probe_file() {
       "SELECT count(*)=4 FROM (VALUES ('mdf_revision_context','mdf_context_insert_guard','mdf_guard_execution_context_insert()',7),('mdf_revision_demand','mdf_demand_insert_guard','mdf_guard_execution_context_insert()',7),('mdf_revision_context','mdf_context_immutable','mdf_reject_evidence_change()',27),('mdf_revision_demand','mdf_demand_immutable','mdf_reject_evidence_change()',27)) expected(tbl,trg,fun,kind) JOIN pg_trigger t ON t.tgrelid=to_regclass('public.'||tbl) AND t.tgname=trg AND t.tgfoid=to_regprocedure('public.'||fun) AND t.tgtype=kind AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgattr=''::int2vector;" \
       "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=ANY(ARRAY[to_regclass('public.mdf_revision_context'),to_regclass('public.mdf_revision_demand'),to_regclass('public.mdf_published_sources'),to_regclass('public.mdf_published_source_members'),to_regclass('public.mdf_published_positions')]) AND NOT convalidated);" \
       "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=ANY(ARRAY[to_regclass('public.mdf_revision_context'),to_regclass('public.mdf_revision_demand'),to_regclass('public.mdf_published_sources'),to_regclass('public.mdf_published_source_members'),to_regclass('public.mdf_published_positions')]) AND (NOT indisvalid OR NOT indisready));" ;;
+    178_mdf_correction_receipts*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='mdf_revision_context' AND column_name='effect_policy' AND data_type='text' AND is_nullable='NO' AND column_default='''forward''::text');" \
+      "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='mdf_recalculation_jobs' AND column_name='effect_policy' AND data_type='text' AND is_nullable='NO' AND column_default='''forward''::text');" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.mdf_revision_context') AND conname='mdf_revision_context_effect_policy_check' AND contype='c' AND convalidated AND md5(pg_get_constraintdef(oid))='762134ad47d34c70223ce0ce81067951');" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.mdf_recalculation_jobs') AND conname='mdf_recalculation_jobs_effect_policy_check' AND contype='c' AND convalidated AND md5(pg_get_constraintdef(oid))='762134ad47d34c70223ce0ce81067951');" \
+      "$(q_fun_hash 'public.mdf_guard_job_effect_policy_binding()' 45e1620014c367515f61c170f2bcf0f5)" \
+      "SELECT count(*)=1 FROM pg_trigger t WHERE t.tgrelid=to_regclass('public.mdf_recalculation_jobs') AND t.tgname='mdf_job_effect_policy_binding' AND t.tgfoid=to_regprocedure('public.mdf_guard_job_effect_policy_binding()') AND t.tgtype=23 AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgattr=''::int2vector;" \
+      "$(q_fun_hash 'public.mdf_reject_evidence_change()' a51e1b51d407124a856f1993d9c54fe8)" \
+      "SELECT count(*)=1 FROM pg_trigger t WHERE t.tgrelid=to_regclass('public.mdf_revision_context') AND t.tgname='mdf_context_immutable' AND t.tgfoid=to_regprocedure('public.mdf_reject_evidence_change()') AND t.tgtype=27 AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgattr=''::int2vector;" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=ANY(ARRAY[to_regclass('public.mdf_revision_context'),to_regclass('public.mdf_recalculation_jobs')]) AND NOT convalidated);" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -2216,6 +2226,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     174_mdf_execution_context*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    178_mdf_correction_receipts*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     173_inbound_signals*)

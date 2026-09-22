@@ -92,6 +92,24 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(verify).toMatch(/174_mdf_execution_context\*\)\s+probe_file "\$f" \|\| die/);
   });
 
+  it('probes sealed correction policy integrity and verifies migration178 before ledgering it', () => {
+    const start = probeFn.indexOf('178_mdf_correction_receipts*)');
+    const end = probeFn.indexOf('*) return 2', start);
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, end);
+    for (const marker of ['mdf_revision_context', 'mdf_recalculation_jobs', 'effect_policy',
+      'is_nullable=\'NO\'', 'forward', 'mdf_revision_context_effect_policy_check',
+      'mdf_recalculation_jobs_effect_policy_check', 'mdf_job_effect_policy_binding',
+      'mdf_guard_job_effect_policy_binding()', 'tgenabled=\'O\'', 'tgtype=23', 'NOT convalidated',
+      "q_fun_hash 'public.mdf_guard_job_effect_policy_binding()' 45e1620014c367515f61c170f2bcf0f5",
+      "md5(pg_get_constraintdef(oid))='762134ad47d34c70223ce0ce81067951'",
+      "q_fun_hash 'public.mdf_reject_evidence_change()' a51e1b51d407124a856f1993d9c54fe8"]) {
+      expect(arm).toContain(marker);
+    }
+    const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verification).toMatch(/178_mdf_correction_receipts\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
   it('verifies migrations 164-169 before recording their ledger entries', () => {
     const verify = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
     expect(verify).toContain('164_*|165_*|166_*|167_*|168_*|169_*)');
@@ -165,7 +183,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText).not.toMatch(/q_fun_hash\(\).*md5\(prosrc\)/);
     expect(probeFn).toContain("q_fun_hash 'cnc_telegram_worker_reason_code_valid(text)'");
     expect(probeFn.match(/q_fun_hash '[^']+' [a-f0-9]{32}/g)).toHaveLength(
-      requiredFunctions.length + 2 + 9 + 1 + 1 + 3, // 164-169,174/175 guards,177 typed snapshot/projector
+      requiredFunctions.length + 2 + 9 + 1 + 1 + 5, // 164-169,174/175,177 and 178 guards
     );
   });
 
