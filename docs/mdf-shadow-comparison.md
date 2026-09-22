@@ -450,7 +450,7 @@ the full order demand stays frozen in execution context. Recalculation records
 new membership as unaccepted, preserves earlier evidence and requires review.
 No timestamp or missing ledger row grants historical trust.
 
-SVG imports, result lifecycle and manual-layout replacement remain unconnected;
+Historical/Telegram SVG imports, result lifecycle and manual-layout replacement remain unconnected;
 manual-layout writes reject in active mode. Typed HDF is excluded from MDF
 membership even if its material name contains MDF. Migration177 aligns immutable
 snapshot validation and label-map projection with typed `hdf-*` identities.
@@ -463,3 +463,32 @@ Apply migration177 before deploying these readers or relying on mixed/HDF
 calculation in either mode.
 No projection bypass or historical acceptance is added.
 Keep engine activation and worker/read flags gated until the full chain is ready.
+
+### New manual SVG machine cards through the queue (activation still gated)
+
+Direct manual SVG upload now has a transaction-entrance mode fence. In active
+mode, a newly inserted machine-file card records its exact ordinary MDF
+membership, complete owning demand and pinned rules in the same transaction as
+the packet, cut result, audit and outbox. Upload is membership, never physical
+cutting: even a whole-order comment or advanced detail status adds no cut credit.
+Foreign material in the file metadata or live detail excludes it. HDF remains
+outside MDF accounting. Normal position quantities aggregate within the file
+and cannot exceed live demand; explicit rework remains separate.
+Parsed membership must exactly match effective placements in the compact,
+digest-matched projection of that SVG's saved result. Missing or extra positions,
+unknown placements or quantity disagreement retain the upload as unaccepted;
+neither side is silently treated as authoritative. Parser and result digests
+are sealed into the receipt. This check does not read archive JSON.
+
+Owner authorization and sorted full-detail locks precede source locks. Exact
+idempotency replay rechecks owner access and creates no new job. Unresolved
+composition remains visible with verification issues and contributes no accepted
+credit. Queue failure cannot roll back a committed upload. The upload audit and
+created outbox event contain `mdfJobId` and `mdfEvidence: membership_only`.
+
+In active mode, a new command for an existing packet/source file is rejected
+before restoration or metadata promotion; these operations still need correction
+adapters. Explicit Telegram import completion is entrance-fenced as legacy-only.
+The intentionally disabled background CNC endpoint is not re-enabled. Legacy
+and shadow uploads retain their current behavior. These remaining gates prohibit
+activation; public engine stays legacy and worker/read flags stay off.

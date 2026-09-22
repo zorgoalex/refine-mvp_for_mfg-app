@@ -12,6 +12,9 @@ import type { DatabaseClient, TransactionClient } from '../../../database/databa
 import type { CurrentUser } from '../../../permissions/current-user';
 import { mdfCutReadinessCtes } from '../../../shared/cnc-material/cut-readiness-sql';
 import { productionBoardReadScopeSql } from '../../orders/adapters/pg-order-status-board-repository';
+import { requireMdfCommandBoundary } from '../../mdf-board/application/mdf-command-boundary';
+import { assertMdfManualSvgMatchScope, assertMdfManualSvgReplayScope, captureNewMdfManualSvgSource, lockMdfManualSvgOwners,
+  registerNewMdfManualSvgSource } from '../../mdf-board/adapters/mdf-manual-svg-source';
 import {
   CUT_RENDER_STYLES_SETTING_KEY,
   CUT_RENDER_STYLE_TELEGRAM_PHOTO,
@@ -860,12 +863,18 @@ export class PgCncTelegramRepository
   }
 
   async manualSvgUpload(command: ManualSvgUploadCommand): Promise<CncTelegramManualSvgUploadResponseDto> {
-    return this.database.transaction(async (tx) => this.manualSvgUploadInTransaction(tx, command));
+    return this.database.transaction(async (tx) => this.manualSvgUploadInTransaction(tx, command),
+      { mdf:{ writer:'cnc.manual_svg_upload',capability:'queued' } });
   }
 
   /** Used by explicit Telegram import so packet/job/result/card and its audit/outbox
    * share the item/session transaction. It is intentionally not part of the public port. */
   async manualSvgUploadInTransaction(tx: TransactionClient, command: ManualSvgUploadCommand): Promise<CncTelegramManualSvgUploadResponseDto> {
+      const boundary=await requireMdfCommandBoundary(tx,{ writer:'cnc.manual_svg_upload',capability:'queued' });
+      await lockMdfManualSvgOwners(tx,command.currentUser,command.dto.selectedOrderIds);
+      if (boundary.queued && command.dto.duplicatePolicy?.kind==='intentional_copy') {
+        throw new ApiError(503,'MDF_WRITER_NOT_CONNECTED','Импорт подтверждённой копии ещё не подключён к производственному учёту');
+      }
       await setSessionUser(tx, command.currentUser.id);
       if (command.dto.duplicatePolicy?.kind === 'intentional_copy') {
         const approval = await tx.query<{ import_item_id: string; requested_by: string; duplicate_acknowledged: boolean; has_duplicate_matches: boolean; status: string }>(`
@@ -891,7 +900,11 @@ export class PgCncTelegramRepository
         dto,
         payloadHash,
       });
-      if (replayResponse) return replayResponse;
+      if (replayResponse) {
+        assertMdfManualSvgMatchScope(tx,replayResponse.packet.items);
+        await assertMdfManualSvgReplayScope(tx,replayResponse.packet.packetId);
+        return replayResponse;
+      }
 
       const replay = await tx.query<PacketReplayRow>(
         `
@@ -903,6 +916,12 @@ export class PgCncTelegramRepository
         [dto.externalPacketKey],
       );
       const existing = replay.rows[0] ?? null;
+
+      // New command for an old source is NOT fresh membership. Restoration and
+      // source-file promotion need their own correction protocol before cutover.
+      if (boundary.queued && (existing || await findExistingSvgCutJobForSourceFile(tx,dto,null))) {
+        throw new ApiError(409,'MDF_SVG_EXISTING_SOURCE_REQUIRES_REVIEW','Для существующего SVG-файла требуется проверка производственной истории');
+      }
 
       if (existing && dto.source.version < Number(existing.source_version)) {
         const packet = await loadPacket(tx, existing.packet_id);
@@ -1020,6 +1039,7 @@ export class PgCncTelegramRepository
 
       const prepared = await prepareManualSvgUploadDto(tx, dto, command.dto);
       const { resolvedDto, matchSourceDto } = prepared;
+      assertMdfManualSvgMatchScope(tx,matchSourceDto.items);
       const resolvedCommand: IngestCncTelegramPacketCommand = {
         currentUser: command.currentUser,
         dto: resolvedDto,
@@ -1027,6 +1047,7 @@ export class PgCncTelegramRepository
       };
 
       const packetId = await insertPacket(tx, resolvedCommand, payloadHash);
+      registerNewMdfManualSvgSource(tx,packetId);
       await replaceItems(tx, packetId, resolvedDto);
       await ensureCuttingSequenceNo(tx, packetId, resolvedDto, Number(command.currentUser.id));
       await syncSvgCutImport(tx, packetId, resolvedDto, matchSourceDto, command.currentUser.id, {
@@ -1052,11 +1073,14 @@ export class PgCncTelegramRepository
       if (command.dto.createMdfMachineFileCard) {
         assertManualSvgMachineFileCardReady(packet);
       }
+      const mdfJobId=boundary.queued && command.dto.createMdfMachineFileCard
+        ? await captureNewMdfManualSvgSource(tx,{ packetId,user:command.currentUser,requestId }) : undefined;
       const auditId = await writeManualSvgCreatedAudit(tx, {
         command,
         packet,
         requestId,
         externalPacketKey: dto.externalPacketKey,
+        mdfJobId,
       });
       if (command.dto.createMdfMachineFileCard) {
         mdfCardAuditId = await writeManualSvgMdfCardAudit(tx, {
@@ -1074,6 +1098,7 @@ export class PgCncTelegramRepository
         requestId,
         auditId,
         externalPacketKey: dto.externalPacketKey,
+        mdfJobId,
       });
       if (mdfCardCreatedNow) {
         await enqueueManualSvgMdfCardEvent(tx, {
@@ -1090,12 +1115,12 @@ export class PgCncTelegramRepository
         requestId,
         externalPacketKey: dto.externalPacketKey,
       });
-      await evaluateMdfBoardBathColumnAutomationForPacket(tx, {
+      if (!boundary.queued) await evaluateMdfBoardBathColumnAutomationForPacket(tx, {
         packet,
         actor: command.currentUser,
         requestId,
       });
-      if (command.dto.createMdfMachineFileCard && packetColumnKey(packet) === 'parsed') {
+      if (!boundary.queued && command.dto.createMdfMachineFileCard && packetColumnKey(packet) === 'parsed') {
         await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
           source: { kind: 'packet', id: packet.packetId },
           orderIds: packet.items.map((item) => item.orderId),
@@ -2767,6 +2792,7 @@ async function writeManualSvgCreatedAudit(
     packet: CncTelegramPacketDto;
     requestId: string;
     externalPacketKey: string;
+    mdfJobId?: string;
   },
 ): Promise<string> {
   return auditService.record(tx, {
@@ -2786,7 +2812,7 @@ async function writeManualSvgCreatedAudit(
       itemQuantityTotal: input.packet.itemQuantityTotal,
       svgCutImportStatus: input.packet.svgCutImportStatus ?? 'none',
     },
-    metadata: manualSvgEventMetadata(input, 'manual_svg_upload'),
+    metadata: { ...manualSvgEventMetadata(input, 'manual_svg_upload'),...(input.mdfJobId ? { mdfJobId:input.mdfJobId,mdfEvidence:'membership_only' } : {}) },
     relatedEntities: manualSvgRelatedEntities(input.packet),
   });
 }
@@ -2831,6 +2857,7 @@ async function enqueueManualSvgCreatedEvent(
     requestId: string;
     auditId: string;
     externalPacketKey: string;
+    mdfJobId?: string;
   },
 ): Promise<void> {
   await enqueueOutbox(tx, {
@@ -2838,7 +2865,7 @@ async function enqueueManualSvgCreatedEvent(
     aggregateType: 'cnc_telegram_packet',
     aggregateId: input.packet.packetId,
     idempotencyKey: `cnc-manual-svg:${input.packet.packetId}:source-${input.packet.sourceVersion}:created`,
-    payload: manualSvgOutboxPayload(input, MANUAL_SVG_EVENT),
+    payload: { ...manualSvgOutboxPayload(input, MANUAL_SVG_EVENT),...(input.mdfJobId ? { mdfJobId:input.mdfJobId,mdfEvidence:'membership_only' } : {}) },
   });
 }
 

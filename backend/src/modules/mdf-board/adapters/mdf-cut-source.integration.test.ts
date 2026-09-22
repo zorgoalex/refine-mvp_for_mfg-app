@@ -11,6 +11,9 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { rolePolicyForUser } from '../../../permissions/policies/scope';
 import { PgCutRepository } from '../../cut/adapters/pg-cut-repository';
 import { PgBazisCutRepository } from '../../bazis-cut/adapters/pg-bazis-cut-repository';
+import { PgCncTelegramRepository } from '../../cnc-telegram/adapters/pg-cnc-telegram-repository';
+import { PgCncTelegramImportRepository } from '../../cnc-telegram/adapters/pg-cnc-telegram-import-repository';
+import type { ManualSvgUploadCommand } from '../../cnc-telegram/application/cnc-telegram.types';
 import { PgMdfBoardManualMoveRepository } from '../../orders/adapters/pg-mdf-board-manual-move-repository';
 import { StaticCutConfig } from '../../cut/application/cut-config';
 import type { OptimizeRequest, FreecutOptimizeResponse } from '../../cut/application/cut-freecut-mapping';
@@ -59,6 +62,9 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
       'cnc_telegram_packet_items','cnc_telegram_packet_whole_order_keys','cut_result_board_projection',
       'cut_result_placement','cut_result_sheet_map','cut_result_label_map_projection','command_idempotency_keys',
       'bazis_node_order_detail_map','bazis_nodes','bazis_project_revisions','bazis_order_links','order_import_entity_map'];
+    tables.push('cnc_telegram_packet_evidence_set','cnc_telegram_packet_item_evidence','cnc_telegram_label_sheet_map',
+      'cnc_telegram_label_placement','cnc_manual_svg_upload_files','cnc_manual_svg_upload_file_orders',
+      'cnc_manual_svg_telegram_send_requests','cnc_manual_svg_telegram_send_request_files');
     let serial = 0;
     for (const table of tables) {
       await db.query(`CREATE TABLE ${table} AS TABLE public.${table} WITH NO DATA`);
@@ -138,6 +144,171 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
     (SELECT count(*) FROM mdf_evidence_revisions) receipts,(SELECT count(*) FROM mdf_recalculation_jobs) jobs,
     (SELECT count(*) FROM audit_log) audits,(SELECT count(*) FROM outbox_events) outbox`)).rows[0];
   const resultId=async(job:number)=>Number((await db.query('SELECT current_cut_result_id FROM cut_job WHERE cut_job_id=$1',[job])).rows[0].current_cut_result_id);
+  async function svgFixture(quantity=2): Promise<{ orderId:number; detailId:number; command:ManualSvgUploadCommand }> {
+    const orderId=++sequence,detailId=orderId*10;
+    await db.query(`INSERT INTO orders(order_id,order_name,project_id,order_date,order_kind,delete_flag,version,order_status_id,payment_status_id,created_by)
+      VALUES($1,$2,1,'2026-09-22','production_order',false,1,4,1,1)`,[orderId,`E2E-SVG-${orderId}`]);
+    await db.query(`INSERT INTO order_details(detail_id,order_id,detail_number,detail_name,quantity,height,width,production_status_id,
+      delete_flag,sheet_material_type_id,version,updated_at) VALUES($1,$2,1,'E2E SVG own',2,200,100,1,false,1,1,now()),
+      ($3,$2,2,'E2E outside SVG',1,200,100,1,false,1,1,now())`,[detailId,orderId,detailId+1]);
+    const item={ sourceItemKey:`svg-${detailId}`,orderName:`E2E-SVG-${orderId}`,detailNumber:1,widthMm:100,heightMm:200,
+      quantity,source:'vector' as const,confidence:1 };
+    return { orderId,detailId,command:{ currentUser:user,requestId:'E2E SVG upload',dto:{
+      idempotencyKey:`E2E-${randomUUID()}`,selectedOrderIds:[orderId],createMdfMachineFileCard:true,
+      matchMode:'order_details',validationMode:'strict',svgContentHash:randomUUID().replaceAll('-','').repeat(2),
+      programName:`E2E-SVG-${orderId}.svg`,materialName:'МДФ 10 мм',workday:'2026-09-22',
+      comments:[`E2E-SVG-${orderId} — весь заказ`],items:[item],cutLayout:{ status:'valid',reasons:[],
+        sheet:{widthMm:2800,heightMm:2070},rawCommentCount:1,partContourCount:quantity,acceptedItemCount:quantity,
+        items:Array.from({length:quantity},(_,i)=>({...item,quantity:1,sourceElementId:`part-${i}`,
+          xMm:10+i*150,yMm:10,placedWidthMm:100,placedHeightMm:200,rotated:false})) } } } };
+  }
+  it('actual SVG upload commits membership only; own-detail rules execute in the queue, not intake',async()=>{
+    const f=await svgFixture();
+    await db.query(`INSERT INTO status_automation_rules(id,name,event_type,action_type,target_status_id,conditions_json,priority,is_enabled,version,action_config_json)
+      VALUES(19,'E2E SVG present','mdf.order_machine_files_present','change_details_production_status',2,'{}',100,true,1,'{}')`);
+    try {
+      const repo=new PgCncTelegramRepository(database),result=await repo.manualSvgUpload(f.command),id=result.packet.packetId;
+      expect((await db.query('SELECT stage_code,evidence_kind,quantity FROM mdf_evidence_lines WHERE source_id=$1',[id])).rows)
+        .toEqual([{stage_code:'membership',evidence_kind:'derived',quantity:'2'}]);
+      expect((await db.query("SELECT metadata_json->>'mdfJobId' job FROM audit_log WHERE event='cnc.manual_svg_upload.created' AND entity_id=$1",[id])).rows[0].job).toEqual(expect.any(String));
+      expect((await db.query('SELECT production_status_id FROM order_details WHERE order_id=$1 ORDER BY detail_id',[f.orderId])).rows)
+        .toEqual([{production_status_id:1},{production_status_id:1}]);
+      const before=await counts();await repo.manualSvgUpload(f.command);expect(await counts()).toEqual(before);
+      expect(await runner().processOne()).toMatchObject({status:'done'});
+      expect((await db.query('SELECT production_status_id FROM order_details WHERE order_id=$1 ORDER BY detail_id',[f.orderId])).rows)
+        .toEqual([{production_status_id:2},{production_status_id:1}]);
+      const board=await readMdfPublishedSnapshot(database,user,{focus:{kind:'packet',id}});
+      expect(board.cards.find(c=>c.kind==='packet' && c.id===id)).toMatchObject({column:'parsed',issues:[]});
+      expect((await db.query('SELECT credited_cut,credited_rolled,remaining FROM mdf_published_positions WHERE detail_id=$1',[f.detailId])).rows[0])
+        .toEqual({credited_cut:'0',credited_rolled:'0',remaining:'2'});
+    } finally { await db.query('DELETE FROM status_automation_rules WHERE id=19'); }
+  });
+  it('SVG partial position preserves its own quantity and complete order demand',async()=>{
+    const f=await svgFixture(1),result=await new PgCncTelegramRepository(database).manualSvgUpload(f.command),id=result.packet.packetId;
+    expect((await db.query('SELECT quantity FROM mdf_evidence_lines WHERE source_id=$1',[id])).rows).toEqual([{quantity:'1'}]);
+    expect((await db.query('SELECT detail_id,quantity FROM mdf_revision_demand WHERE source_id=$1 ORDER BY detail_id',[id])).rows)
+      .toEqual([{detail_id:String(f.detailId),quantity:'2'},{detail_id:String(f.detailId+1),quantity:'1'}]);
+    expect(await runner().processOne()).toMatchObject({status:'done'});
+  });
+  it.each(['quantity','extra_position'])('SVG %s mismatch with actual saved layout is unaccepted',async mismatch=>{
+    const f=await svgFixture(1);
+    if(mismatch==='quantity') { f.command.dto.validationMode='lenient';f.command.dto.items[0].quantity=2; }
+    else f.command.dto.items.push({...f.command.dto.items[0],sourceItemKey:'extra-position',detailNumber:2});
+    const repo=new PgCncTelegramRepository(database),id=(await repo.manualSvgUpload(f.command)).packet.packetId;
+    expect((await db.query('SELECT accepted_revision_key FROM mdf_source_heads WHERE source_id=$1',[id])).rows[0].accepted_revision_key).toBeNull();
+    const before=await counts();expect((await repo.manualSvgUpload(f.command)).packet.packetId).toBe(id);expect(await counts()).toEqual(before);
+    expect(await runner().processOne()).toMatchObject({status:'done'});
+    const board=await readMdfPublishedSnapshot(database,user,{focus:{kind:'packet',id}});
+    expect(board.cards.find(c=>c.id===id)?.issues).toContain('MDF_COMPOSITION_UNRESOLVED');
+    expect((await db.query('SELECT credited_cut,credited_rolled FROM mdf_published_positions WHERE detail_id=$1',[f.detailId])).rows[0])
+      .toEqual({credited_cut:'0',credited_rolled:'0'});
+  });
+  it.each(['material','filename','comment','detail'])('SVG excludes foreign material in %s without creating MDF evidence',async field=>{
+    const f=await svgFixture(),dto=f.command.dto;
+    if(field==='material') dto.materialName='HDF 3 mm';
+    if(field==='filename') dto.programName='machine-fanera-10.svg';
+    if(field==='comment') dto.comments=['ldsp 16 mm'];
+    if(field==='detail') await db.query('UPDATE order_details SET sheet_material_type_id=3 WHERE detail_id=$1',[f.detailId]);
+    dto.validationMode='lenient';const before=await counts();
+    await new PgCncTelegramRepository(database).manualSvgUpload(f.command);
+    expect((await counts()).receipts).toBe(before.receipts);
+  });
+  it('unresolved SVG stays visible but cannot contribute confirmed membership',async()=>{
+    const f=await svgFixture();f.command.dto.matchMode='informational';
+    const result=await new PgCncTelegramRepository(database).manualSvgUpload(f.command),id=result.packet.packetId;
+    expect((await db.query('SELECT accepted_revision_key FROM mdf_source_heads WHERE source_id=$1',[id])).rows[0].accepted_revision_key).toBeNull();
+    expect(await runner().processOne()).toMatchObject({status:'done'});
+    const board=await readMdfPublishedSnapshot(database,user,{focus:{kind:'packet',id}});
+    expect(board.cards.find(c=>c.id===id)).toMatchObject({column:'parsed',issues:expect.arrayContaining(['MDF_COMPOSITION_UNRESOLVED'])});
+  });
+  it('explicit SVG rework can exceed order quantity but grants no normal production credit',async()=>{
+    const f=await svgFixture(3);f.command.dto.rework=true;f.command.dto.validationMode='lenient';
+    const id=(await new PgCncTelegramRepository(database).manualSvgUpload(f.command)).packet.packetId;
+    expect((await db.query('SELECT quantity,rework FROM mdf_evidence_lines WHERE source_id=$1',[id])).rows).toEqual([{quantity:'3',rework:true}]);
+    expect(await runner().processOne()).toMatchObject({status:'done'});
+    expect((await db.query('SELECT credited_cut,remaining FROM mdf_published_positions WHERE detail_id=$1',[f.detailId])).rows[0])
+      .toEqual({credited_cut:'0',remaining:'2'});
+  });
+  it('normal SVG excess is rejected atomically, including receipt/audit/cut result',async()=>{
+    const f=await svgFixture(3);f.command.dto.validationMode='lenient';const before=await counts();
+    await expect(new PgCncTelegramRepository(database).manualSvgUpload(f.command)).rejects.toMatchObject({code:'MDF_SVG_SOURCE_INVALID'});
+    expect(await counts()).toEqual(before);
+  });
+  it('SVG replay reauthorizes owners; new-key replay cannot promote existing history',async()=>{
+    const f=await svgFixture(),repo=new PgCncTelegramRepository(database);await repo.manualSvgUpload(f.command);await runner().processOne();
+    const before=await counts();
+    await expect(repo.manualSvgUpload({...f.command,dto:{...f.command.dto,idempotencyKey:`E2E-${randomUUID()}`}}))
+      .rejects.toMatchObject({code:'MDF_SVG_EXISTING_SOURCE_REQUIRES_REVIEW'});
+    const base=rolePolicyForUser(user),restricted={...user,policyScopes:{...base,orders:{...base.orders,view:'own' as const}}};
+    await db.query('UPDATE orders SET created_by=999 WHERE order_id=$1',[f.orderId]);
+    await expect(repo.manualSvgUpload({...f.command,currentUser:restricted})).rejects.toMatchObject({code:'PERMISSION_DENIED'});
+    expect(await counts()).toEqual(before);
+  });
+  it('SVG read-only and missing permission rejection precede packet or source creation',async()=>{
+    const f=await svgFixture(),repo=new PgCncTelegramRepository(database),before=await counts();
+    await expect(repo.manualSvgUpload({...f.command,currentUser:{...user,permissions:['cut.manage']}}))
+      .rejects.toMatchObject({code:'PERMISSION_DENIED'});
+    await db.query("UPDATE mdf_engine_state SET mode='read_only'");
+    try { await expect(repo.manualSvgUpload(f.command)).rejects.toMatchObject({code:'MDF_ENGINE_READ_ONLY'}); }
+    finally { await db.query("UPDATE mdf_engine_state SET mode='active'"); }
+    expect(await counts()).toEqual(before);
+  });
+  it('SVG nested entry cannot acquire a late boundary',async()=>{
+    const f=await svgFixture(),before=await counts();
+    await expect(database.transaction(tx=>new PgCncTelegramRepository(database).manualSvgUploadInTransaction(tx,f.command)))
+      .rejects.toMatchObject({code:'MDF_COMMAND_BOUNDARY_REQUIRED'});
+    expect(await counts()).toEqual(before);
+  });
+  it('SVG cutover fence waits then observes the new mode before any business write',async()=>{
+    const f=await svgFixture(),before=await counts();
+    let entered!:()=>void;const waiting=new Promise<void>(resolve=>{entered=resolve;});
+    onQuery=sql=>{if(sql.includes("pg_advisory_xact_lock_shared(hashtextextended('mdf-engine-cutover'")) entered();};
+    await db.query("BEGIN; SELECT pg_advisory_xact_lock(hashtextextended('mdf-engine-cutover',0))");
+    const upload=new PgCncTelegramRepository(database).manualSvgUpload(f.command).then(()=>null,error=>error);
+    try {
+      await waiting;expect(await counts()).toEqual(before);
+      await db.query("UPDATE mdf_engine_state SET mode='read_only'; COMMIT");
+      expect(await upload).toMatchObject({code:'MDF_ENGINE_READ_ONLY'});
+      expect(await counts()).toEqual(before);
+    } finally { onQuery=undefined;await db.query("ROLLBACK; UPDATE mdf_engine_state SET mode='active'");await upload; }
+  });
+  it('SVG selected mixed owners require access to each owner before creation',async()=>{
+    const a=await svgFixture(),b=await svgFixture();a.command.dto.selectedOrderIds.push(b.orderId);
+    await db.query('UPDATE orders SET created_by=999 WHERE order_id=$1',[b.orderId]);
+    const base=rolePolicyForUser(user),restricted={...user,policyScopes:{...base,orders:{...base.orders,view:'own' as const}}};
+    const before=await counts();
+    await expect(new PgCncTelegramRepository(database).manualSvgUpload({...a.command,currentUser:restricted}))
+      .rejects.toMatchObject({code:'PERMISSION_DENIED'});expect(await counts()).toEqual(before);
+  });
+  it('non-card SVG still cannot resolve positions outside the locked selection',async()=>{
+    const f=await svgFixture();f.command.dto.selectedOrderIds=[];f.command.dto.validationMode='lenient';
+    f.command.dto.createMdfMachineFileCard=false;const before=await counts();
+    await expect(new PgCncTelegramRepository(database).manualSvgUpload(f.command)).rejects.toMatchObject({code:'PERMISSION_DENIED'});
+    expect(await counts()).toEqual(before);
+  });
+  it('explicit Telegram import remains fenced before lease or source mutations in active mode',async()=>{
+    const before=await counts();
+    const importer=new PgCncTelegramImportRepository(database,new PgCncTelegramRepository(database));
+    await expect(importer.completeImport({currentUser:user} as never)).rejects.toMatchObject({code:'MDF_WRITER_NOT_CONNECTED'});
+    expect(await counts()).toEqual(before);
+  });
+  it('failed SVG queued rule preserves intake; retry applies once',async()=>{
+    const f=await svgFixture();
+    await db.query(`INSERT INTO status_automation_rules(id,name,event_type,action_type,target_status_id,conditions_json,priority,is_enabled,version,action_config_json)
+      VALUES(19,'E2E SVG retry','mdf.order_machine_files_present','change_details_production_status',2,'{}',100,true,1,'{}');
+      CREATE FUNCTION e2e_svg_fail_rule() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'E2E rule failure'; END $$;
+      CREATE TRIGGER e2e_svg_fail_rule BEFORE UPDATE ON order_details FOR EACH ROW EXECUTE FUNCTION e2e_svg_fail_rule()`);
+    try {
+      const id=(await new PgCncTelegramRepository(database).manualSvgUpload(f.command)).packet.packetId,before=await counts();
+      expect(await runner().processOne()).toMatchObject({status:'retry'});
+      expect((await counts()).receipts).toBe(before.receipts);
+      expect((await db.query('SELECT production_status_id FROM order_details WHERE detail_id=$1',[f.detailId])).rows[0].production_status_id).toBe(1);
+      await db.query('DROP TRIGGER e2e_svg_fail_rule ON order_details');
+      await db.query('UPDATE mdf_recalculation_jobs SET next_attempt_at=now() WHERE source_id=$1',[id]);
+      expect(await runner().processOne()).toMatchObject({status:'done'});
+      expect((await db.query('SELECT production_status_id FROM order_details WHERE detail_id=$1',[f.detailId])).rows[0].production_status_id).toBe(2);
+    } finally { await db.query('DROP TRIGGER IF EXISTS e2e_svg_fail_rule ON order_details; DROP FUNCTION e2e_svg_fail_rule(); DELETE FROM status_automation_rules WHERE id=19'); }
+  });
   async function assertSettled(job:number,commandId:string,code:string,before:Awaited<ReturnType<typeof counts>>) {
     const after=await counts(); expect(after).toMatchObject({ results:before.results,receipts:before.receipts,jobs:before.jobs });
     expect(Number(after.audits)).toBe(Number(before.audits)+1); expect(Number(after.outbox)).toBe(Number(before.outbox)+1);

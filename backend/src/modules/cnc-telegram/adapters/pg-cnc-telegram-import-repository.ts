@@ -407,7 +407,7 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
       await auditService.record(tx, { event: 'cnc.telegram_import.item_imported', actorUserId: requester.id, actorUsername: requester.username, actorRole: requester.role, entityType: 'cnc_telegram_import_item', entityId: text(item, 'import_item_id'), source: 'cnc_telegram_import', requestId: input.requestId, metadata: { technicalWorker: input.currentUser.username, packetId: response.packet.packetId, cutJobId: response.cutJobId, requestedCutJobId: dto.requestedCutJobId } });
       await enqueueImportOutbox(tx, 'cnc.telegram_import.item_imported', text(item, 'import_item_id'), input.requestId, { actorUserId: requester.id, technicalWorkerUserId: input.currentUser.id, packetId: response.packet.packetId, cutJobId: response.cutJobId, requestedCutJobId: dto.requestedCutJobId });
       return itemDto(requiredRow(updated.rows[0], 'import completion'));
-    });
+    }, { mdf:{ writer:'cnc.telegram_import.complete',capability:'legacy-only' } });
   }
 
   async failImport(input: { currentUser: CurrentUser; importItemId: string; lease: CncTelegramWorkerSessionLeaseContext; failure: CncTelegramImportFailDto; requestId: string }): Promise<CncTelegramImportItemDto> {

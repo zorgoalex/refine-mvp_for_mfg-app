@@ -19,6 +19,12 @@ import {
 
 const repositorySource = readFileSync(new URL('./pg-cnc-telegram-repository.ts', import.meta.url), 'utf8');
 
+// This suite exercises legacy SQL with a lightweight fake DatabaseService.
+// Real cutover fences and queued uploads run in mdf-cut-source.integration.test.
+vi.mock('../../mdf-board/application/mdf-command-boundary', () => ({
+  requireMdfCommandBoundary: vi.fn(async () => ({ mode:'legacy',queued:false })),
+}));
+
 describe('PgCncTelegramRepository', () => {
   it('keeps forced baths visible and preserves hidden bath history', () => {
     expect(repositorySource).toContain("forced_seed.mdf_board_card_kind = 'bath_seed'");
