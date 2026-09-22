@@ -376,8 +376,18 @@ Tagged command transactions acquire the shared cutover fence before business
 effects and explicitly use READ COMMITTED. Stricter isolation is rejected before
 starting: an advisory-lock wait under a repeatable snapshot could otherwise read
 the pre-cutover mode. This boundary must cover the remaining writers before any
-activation. Ordinary unsupported writers and serializable returns are not yet
-connected by this increment.
+activation. Ordinary unsupported writers are not yet connected by this increment.
+
+The legacy production-return preview and confirmation have a separate, fixed
+legacy-only entrance. They retain SERIALIZABLE isolation: after the shared
+cutover fence, a separate `SELECT mode ... FOR SHARE` detects a mode-row change
+made after the transaction snapshot. Such a race rolls back as `MDF_RETURN_STALE`;
+it cannot authorize a return using the previous legacy mode. An existing boundary
+cache cannot be reused to enter this protocol, nor can its cache authorize queued
+commands. Both preview simulation and confirmation (including idempotent replay)
+reject active/read_only before any domain reads or writes. Legacy/shadow return
+behavior is unchanged. This is cutover protection, **not** the accepted-accounting
+correction adapter; that adapter remains required before activation.
 
 ### Browser command protocol and exact progress
 

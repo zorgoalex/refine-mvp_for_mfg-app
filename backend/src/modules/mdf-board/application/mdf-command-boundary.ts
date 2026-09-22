@@ -7,7 +7,8 @@ export interface MdfCommandWriter {
   writer: string;
   capability: 'legacy-only' | 'queued' | 'cnc-receipt' | 'cut-settlement';
 }
-const modes = new WeakMap<TransactionClient, Promise<MdfEngineMode>>();
+interface Boundary { protocol: 'read-committed' | 'serializable-legacy'; mode: Promise<MdfEngineMode> }
+const modes = new WeakMap<TransactionClient, Boundary>();
 
 /** Owning transaction calls this BEFORE any project/order/source locks or
  * mutations. It is not a late event-dispatch guard. Cutover takes the exclusive
@@ -21,22 +22,45 @@ const modes = new WeakMap<TransactionClient, Promise<MdfEngineMode>>();
 export async function enterMdfCommand(tx: TransactionClient, input: MdfCommandWriter): Promise<{
   mode: MdfEngineMode; queued: boolean;
 }> {
-  let pending = modes.get(tx);
-  if (!pending) {
-    pending = loadMode(tx);
-    modes.set(tx, pending);
+  let boundary = modes.get(tx);
+  if (boundary?.protocol === 'serializable-legacy') unsupportedIsolation();
+  if (!boundary) {
+    boundary = { protocol: 'read-committed', mode: loadMode(tx) };
+    modes.set(tx, boundary);
   }
-  return checkCapability(await pending, input);
+  return checkCapability(await boundary.mode, input);
+}
+
+/** Dedicated legacy-return entrance, BEFORE domain reads/locks and savepoints.
+ * Preserve SERIALIZABLE preview consistency without trusting its old snapshot:
+ * FOR SHARE forces 40001 if the mode row changed after snapshot creation while
+ * waiting for cutover. A plain SELECT here could authorize a stale legacy mode.
+ * This is never a queued-command entrance; do not widen its fixed capability.
+ */
+export async function enterMdfSerializableLegacyCommand(tx: TransactionClient, writer: string) {
+  if (modes.has(tx)) throw new ApiError(503, 'MDF_COMMAND_BOUNDARY_CONFLICT', 'Производственная граница уже установлена');
+  const mode = (async () => {
+    const isolation = (await tx.query<{ transaction_isolation: string }>('SHOW transaction_isolation')).rows[0]?.transaction_isolation;
+    if (isolation !== 'serializable') unsupportedIsolation();
+    return loadMode(tx, true);
+  })();
+  modes.set(tx, { protocol: 'serializable-legacy', mode });
+  return checkCapability(await mode, { writer, capability: 'legacy-only' });
 }
 
 /** Nested adapters may inspect existing ownership, never acquire a late fence. */
 export async function requireMdfCommandBoundary(tx: TransactionClient, input: MdfCommandWriter) {
-  const pending = modes.get(tx);
-  if (!pending) throw new ApiError(503, 'MDF_COMMAND_BOUNDARY_REQUIRED', 'Команда не получила границу производственной транзакции');
-  return checkCapability(await pending, input);
+  const boundary = modes.get(tx);
+  if (!boundary) throw new ApiError(503, 'MDF_COMMAND_BOUNDARY_REQUIRED', 'Команда не получила границу производственной транзакции');
+  if (boundary.protocol === 'serializable-legacy' && input.capability !== 'legacy-only') unsupportedIsolation();
+  return checkCapability(await boundary.mode, input);
 }
 
 export function discardMdfCommandBoundary(tx: TransactionClient): void { modes.delete(tx); }
+
+function unsupportedIsolation(): never {
+  throw new ApiError(503, 'MDF_COMMAND_ISOLATION_UNSUPPORTED', 'Команда требует отдельного протокола производственной транзакции');
+}
 
 function checkCapability(mode: MdfEngineMode, input: MdfCommandWriter) {
   // Only closes an already-owned external calculation attempt. This protocol
@@ -55,9 +79,9 @@ function checkCapability(mode: MdfEngineMode, input: MdfCommandWriter) {
   return { mode, queued: mode === 'active' || mode === 'read_only' };
 }
 
-async function loadMode(tx: TransactionClient): Promise<MdfEngineMode> {
+async function loadMode(tx: TransactionClient, lockState = false): Promise<MdfEngineMode> {
   await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended('mdf-engine-cutover',0))");
-  const rows = (await tx.query<{ mode: string }>('SELECT mode FROM mdf_engine_state WHERE singleton=true')).rows;
+  const rows = (await tx.query<{ mode: string }>(`SELECT mode FROM mdf_engine_state WHERE singleton=true${lockState ? ' FOR SHARE' : ''}`)).rows;
   const mode = rows[0]?.mode;
   if (rows.length === 1 && (mode === 'legacy' || mode === 'shadow' || mode === 'active' || mode === 'read_only')) return mode;
   throw new ApiError(503, 'MDF_ENGINE_STATE_UNAVAILABLE', 'Не удалось определить режим производственного учёта');

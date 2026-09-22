@@ -4,6 +4,7 @@ import { auditService } from "../../../common/audit/audit.service";
 import type { DatabaseService } from "../../../database/database.service";
 import type { TransactionClient } from "../../../database/database.types";
 import { observeMdfShadowCommand } from "../../mdf-board/application/mdf-shadow";
+import { enterMdfSerializableLegacyCommand } from "../../mdf-board/application/mdf-command-boundary";
 import type { CurrentUser } from "../../../permissions/current-user";
 import { OrderAccessPolicy } from "../../../permissions/policies/order-access.policy";
 import {
@@ -259,6 +260,7 @@ export class PgMdfProductionReturn {
     try {
       return await this.database.transaction(async (tx) => {
         await tx.query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+        await enterMdfSerializableLegacyCommand(tx, 'mdf.production_return');
         await tx.query("SET LOCAL jit=off");
         await tx.query("SELECT set_session_user($1)", [user.id]);
         const owners = await returnSourceOwners(tx, source.kind, source.id);

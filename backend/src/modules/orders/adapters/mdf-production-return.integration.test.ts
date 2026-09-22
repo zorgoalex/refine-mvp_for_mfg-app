@@ -75,8 +75,9 @@ describe.skipIf(!enabled)(
       options:
         "-c statement_timeout=20000 -c lock_timeout=1000 -c max_parallel_workers_per_gather=0 -c jit=off",
     });
+    const statements: string[] = [];
     const tx: TransactionClient = {
-      query: (text, params) => client.query(text, params ? [...params] : []),
+      query: (text, params) => { statements.push(text); return client.query(text, params ? [...params] : []); },
       raw: client as unknown as PoolClient,
     };
     const database = {
@@ -152,6 +153,7 @@ describe.skipIf(!enabled)(
       }
     });
     beforeEach(async () => {
+      await client.query("UPDATE mdf_engine_state SET mode='legacy'");
       await client.query(`TRUNCATE ${schema}.mdf_evidence_revisions CASCADE`);
       await client.query(`TRUNCATE ${tables
         .map((t) => `${schema}.${t}`)
@@ -197,7 +199,41 @@ describe.skipIf(!enabled)(
         },
         "E2E-return"
       );
-    it("preview rolls back all facts; confirm changes only source position and explicitly reopens issued order", async () => {
+    const facts = async () => {
+      const result: Record<string, unknown> = {};
+      for (const table of [...tables, 'mdf_evidence_revisions', 'mdf_source_heads', 'mdf_recalculation_jobs']) {
+        result[table] = (await client.query(`SELECT to_jsonb(t) row FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows;
+      }
+      return result;
+    };
+    it.each(['active', 'read_only'] as const)('%s blocks preview, confirm and successful legacy replay before effects', async mode => {
+      const p = await repository.preview(user, source, { targetColumn: 'parsed' });
+      await client.query('UPDATE mdf_engine_state SET mode=$1', [mode]);
+      const before = await facts();
+      const error = { code: mode === 'active' ? 'MDF_WRITER_NOT_CONNECTED' : 'MDF_ENGINE_READ_ONLY' };
+      statements.length = 0;
+      await expect(repository.preview(user, source, { targetColumn: 'parsed' })).rejects.toMatchObject(error);
+      expect(statements).toEqual(['SET TRANSACTION ISOLATION LEVEL SERIALIZABLE', 'SHOW transaction_isolation',
+        "SELECT pg_advisory_xact_lock_shared(hashtextextended('mdf-engine-cutover',0))",
+        'SELECT mode FROM mdf_engine_state WHERE singleton=true FOR SHARE']);
+      const entrance = [...statements];
+      statements.length = 0;
+      await expect(confirm(p)).rejects.toMatchObject(error);
+      expect(statements).toEqual(entrance);
+      expect(await facts()).toEqual(before);
+
+      await client.query("UPDATE mdf_engine_state SET mode='legacy'");
+      const key = randomUUID();
+      await confirm(p, key);
+      await client.query('UPDATE mdf_engine_state SET mode=$1', [mode]);
+      const after = await facts();
+      statements.length = 0;
+      await expect(confirm(p, key)).rejects.toMatchObject(error);
+      expect(statements).toEqual(entrance);
+      expect(await facts()).toEqual(after);
+    });
+    it.each(['legacy', 'shadow'] as const)('%s preview rolls back all facts; confirm changes only source position and explicitly reopens issued order', async mode => {
+      await client.query('UPDATE mdf_engine_state SET mode=$1', [mode]);
       const before = await production();
       const p = await repository.preview(user, source, {
         targetColumn: "parsed",

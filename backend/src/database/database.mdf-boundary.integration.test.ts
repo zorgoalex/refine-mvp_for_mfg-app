@@ -4,7 +4,7 @@ import { Client } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BackendEnv } from '../config/env.validation';
 import type { PerformanceQueryTelemetryService } from '../performance/performance-query-telemetry.service';
-import { requireMdfCommandBoundary } from '../modules/mdf-board/application/mdf-command-boundary';
+import { enterMdfSerializableLegacyCommand, requireMdfCommandBoundary } from '../modules/mdf-board/application/mdf-command-boundary';
 import { MdfJobRunner } from '../modules/mdf-board/application/mdf-job-runner';
 import { DatabaseService } from './database.service';
 
@@ -93,6 +93,44 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF command/cutover
     await expect(database.transaction(callback, { mdf: writer })).rejects.toMatchObject({ code: 'MDF_ENGINE_READ_ONLY' });
     expect(callback).not.toHaveBeenCalled();
     expect((await control.query('SELECT * FROM command_effect')).rows).toEqual([]);
+  });
+
+  it.each(['active', 'read_only'])('serializable legacy snapshot predating %s cutover fails stale before writes', async mode => {
+    await control.query('BEGIN');
+    await control.query(`SELECT pg_advisory_xact_lock(${fence})`);
+    await control.query('UPDATE mdf_engine_state SET mode=$1', [mode]);
+    const outcome = database.transaction(async tx => {
+      // Same old MVCC snapshot the advisory-lock SELECT can establish.
+      expect((await tx.query('SELECT mode FROM mdf_engine_state')).rows[0].mode).toBe('legacy');
+      await enterMdfSerializableLegacyCommand(tx, 'mdf.production_return');
+      await tx.query('INSERT INTO command_effect VALUES(1)');
+    }, { isolation: 'serializable' }).then(value => ({ value }), error => ({ error }));
+    try {
+      await vi.waitFor(async () => {
+        await control.query('SELECT pg_stat_clear_snapshot()');
+        expect((await control.query(`SELECT 1 FROM pg_stat_activity
+          WHERE application_name=$1 AND wait_event='advisory'`, [name])).rows).toHaveLength(1);
+      }, { timeout: 2000, interval: 20 });
+      await control.query('COMMIT');
+      expect(await outcome).toMatchObject({ error: { code: '40001' } });
+      expect((await control.query('SELECT * FROM command_effect')).rows).toEqual([]);
+      expect((await control.query(`SELECT pg_try_advisory_xact_lock(${fence}) locked`)).rows[0].locked).toBe(true);
+    } finally { await control.query('ROLLBACK'); await outcome; }
+  });
+
+  it('serializable legacy entrance holds cutover until commit and releases all locks on rollback', async () => {
+    const command = (fail: boolean) => database.transaction(async tx => {
+      expect(await enterMdfSerializableLegacyCommand(tx, 'mdf.production_return')).toEqual({ mode: 'legacy', queued: false });
+      expect((await control.query(`SELECT pg_try_advisory_xact_lock(${fence}) locked`)).rows[0].locked).toBe(false);
+      await tx.query('INSERT INTO command_effect VALUES($1)', [fail ? 2 : 1]);
+      if (fail) throw new Error('E2E_RETURN_ROLLBACK');
+    }, { isolation: 'serializable' });
+    await command(false);
+    await expect(command(true)).rejects.toThrow('E2E_RETURN_ROLLBACK');
+    expect((await control.query('SELECT * FROM command_effect')).rows).toEqual([{ id: 1 }]);
+    expect((await control.query(`SELECT pg_try_advisory_xact_lock(${fence}) locked`)).rows[0].locked).toBe(true);
+    await control.query("UPDATE mdf_engine_state SET mode='active'");
+    await expect(command(false)).rejects.toMatchObject({ code: 'MDF_WRITER_NOT_CONNECTED' });
   });
 
   it('queue also sees read_only after a waiting cutover, with a stricter pool default', async () => {

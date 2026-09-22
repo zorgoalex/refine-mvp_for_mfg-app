@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import type { QueryResult, QueryResultRow } from 'pg';
 import type { TransactionClient } from '../../../database/database.types';
-import { enterMdfCommand } from './mdf-command-boundary';
+import { enterMdfCommand, enterMdfSerializableLegacyCommand, requireMdfCommandBoundary } from './mdf-command-boundary';
 
-function transaction(mode: unknown = 'legacy') {
+function transaction(mode: unknown = 'legacy', isolation = 'serializable') {
   const queries: string[] = [];
   const tx: TransactionClient = {
     raw: {} as TransactionClient['raw'],
     async query<T extends QueryResultRow>(sql: string): Promise<QueryResult<T>> {
       queries.push(sql);
-      const rows = sql.includes('SELECT mode FROM mdf_engine_state') ? [{ mode }] : [];
+      const rows = sql.includes('SELECT mode FROM mdf_engine_state') ? [{ mode }]
+        : sql === 'SHOW transaction_isolation' ? [{ transaction_isolation: isolation }] : [];
       return { rows, rowCount: rows.length, command: 'SELECT', oid: 0, fields: [] } as QueryResult<T>;
     },
   };
@@ -17,6 +18,47 @@ function transaction(mode: unknown = 'legacy') {
 }
 
 describe('MDF command transaction boundary', () => {
+  it.each(['legacy', 'shadow'] as const)('serializable legacy entry locks current state in %s', async mode => {
+    const f = transaction(mode);
+    expect(await enterMdfSerializableLegacyCommand(f.tx, 'mdf.production_return')).toEqual({ mode, queued: false });
+    expect(f.queries).toEqual(['SHOW transaction_isolation',
+      "SELECT pg_advisory_xact_lock_shared(hashtextextended('mdf-engine-cutover',0))",
+      'SELECT mode FROM mdf_engine_state WHERE singleton=true FOR SHARE']);
+    expect(await requireMdfCommandBoundary(f.tx, { writer: 'nested-return', capability: 'legacy-only' }))
+      .toEqual({ mode, queued: false });
+    await expect(requireMdfCommandBoundary(f.tx, { writer: 'queued', capability: 'queued' }))
+      .rejects.toMatchObject({ code: 'MDF_COMMAND_ISOLATION_UNSUPPORTED' });
+    await expect(enterMdfCommand(f.tx, { writer: 'queued', capability: 'queued' }))
+      .rejects.toMatchObject({ code: 'MDF_COMMAND_ISOLATION_UNSUPPORTED' });
+    await expect(enterMdfSerializableLegacyCommand(f.tx, 'again'))
+      .rejects.toMatchObject({ code: 'MDF_COMMAND_BOUNDARY_CONFLICT' });
+    expect(f.queries).toHaveLength(3);
+  });
+
+  it.each(['active', 'read_only', 'invalid', null])('serializable legacy entry fails closed for %s', async mode => {
+    const f = transaction(mode);
+    await expect(enterMdfSerializableLegacyCommand(f.tx, 'mdf.production_return')).rejects.toMatchObject({
+      code: mode === 'active' ? 'MDF_WRITER_NOT_CONNECTED' : mode === 'read_only'
+        ? 'MDF_ENGINE_READ_ONLY' : 'MDF_ENGINE_STATE_UNAVAILABLE',
+    });
+    expect(f.queries.at(-1)).toContain('FOR SHARE');
+  });
+
+  it.each(['read committed', 'repeatable read', 'unknown'])('serializable legacy entry rejects isolation %s', async isolation => {
+    const f = transaction('legacy', isolation);
+    await expect(enterMdfSerializableLegacyCommand(f.tx, 'mdf.production_return'))
+      .rejects.toMatchObject({ code: 'MDF_COMMAND_ISOLATION_UNSUPPORTED' });
+    expect(f.queries).toEqual(['SHOW transaction_isolation']);
+  });
+
+  it('serializable legacy entry never reuses an existing RC boundary cache', async () => {
+    const f = transaction('legacy');
+    await enterMdfCommand(f.tx, { writer: 'other', capability: 'queued' });
+    await expect(enterMdfSerializableLegacyCommand(f.tx, 'mdf.production_return'))
+      .rejects.toMatchObject({ code: 'MDF_COMMAND_BOUNDARY_CONFLICT' });
+    expect(f.queries).toHaveLength(2);
+  });
+
   it.each(['legacy', 'shadow'] as const)('preserves legacy routing in %s mode', async mode => {
     const f = transaction(mode);
     expect(await enterMdfCommand(f.tx, { writer: 'manual-move', capability: 'queued' }))
