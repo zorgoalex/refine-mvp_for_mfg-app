@@ -15,6 +15,43 @@ function reference(value: Record<string, any>): Record<string, any> {
 }
 
 describe('OpenAPI document structure', () => {
+  it('documents WhatsApp reply preview with permissions, no-store and strict request/response shapes', () => {
+    const preview = contract.paths['/api/v1/whatsapp/rules/preview']?.post;
+    expect(preview).toBeDefined();
+    expect(preview.security).toEqual([{ bearerAuth: [] }]);
+    expect(preview['x-permission']).toBe('whatsapp.manage');
+    expect(preview.requestBody.required).toBe(true);
+    const request = reference(preview.requestBody.content['application/json'].schema);
+    expect(request.additionalProperties).toBe(false);
+    expect(request.required).toEqual(['matchMode', 'keywords', 'body', 'bodyMode', 'text']);
+    expect(request.properties.matchMode.enum).toEqual(['contains_any', 'exact_any', 'pattern_exact', 'pattern_contains']);
+    expect(request.properties.bodyMode.enum).toEqual(['text', 'template']);
+    expect(request.properties.keywords).toMatchObject({ minItems: 1, maxItems: 50, items: { minLength: 1, maxLength: 120 } });
+    for (const key of ['body', 'text']) expect(request.properties[key]).toMatchObject({ minLength: 1, maxLength: 4096 });
+    expect(preview.responses['200'].headers['Cache-Control'].schema.enum).toEqual(['private, no-store']);
+    const response = reference(preview.responses['200'].content['application/json'].schema);
+    expect(response.required).toEqual(['matched', 'captures', 'body', 'counterIsExample', 'timeZone']);
+    expect(response.properties.captures).toMatchObject({ type: 'object', nullable: true, additionalProperties: { type: 'string' } });
+    expect(response.properties.body).toMatchObject({ type: 'string', nullable: true });
+    expect(response.properties.counterIsExample.enum).toEqual([true]);
+    expect(response.properties.timeZone.enum).toEqual(['Asia/Almaty']);
+    for (const status of ['401', '403', '422', '503']) expect(preview.responses).toHaveProperty(status);
+    expect(preview.responses).not.toHaveProperty('201');
+  });
+
+  it('documents WhatsApp template and quote modes without changing PATCH defaults', () => {
+    const schemas = contract.components.schemas;
+    for (const suffix of ['Create', 'Update']) {
+      expect(schemas[`WhatsAppTemplate${suffix}`].properties.bodyMode.enum).toEqual(['text', 'template']);
+      expect(schemas[`WhatsAppRule${suffix}`].properties.replyMode.enum).toEqual(['plain', 'quote']);
+      expect(schemas[`WhatsAppRule${suffix}`].properties.matchMode.enum).toEqual(['contains_any', 'exact_any', 'pattern_exact', 'pattern_contains']);
+    }
+    expect(schemas.WhatsAppTemplateCreate.properties.bodyMode.default).toBe('text');
+    expect(schemas.WhatsAppRuleCreate.properties.replyMode.default).toBe('plain');
+    expect(schemas.WhatsAppTemplateUpdate.properties.bodyMode).not.toHaveProperty('default');
+    expect(schemas.WhatsAppRuleUpdate.properties.replyMode).not.toHaveProperty('default');
+  });
+
   it('has unique operation IDs and resolves every local reference and security scheme', () => {
     expect(contract.openapi).toBe('3.0.3');
     expect(operations.length).toBeGreaterThan(0);

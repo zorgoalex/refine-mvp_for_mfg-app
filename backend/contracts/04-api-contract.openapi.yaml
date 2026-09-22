@@ -867,6 +867,38 @@ paths:
         content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppRuleCreate'}}}
       responses:
         '201': {description: Create a WhatsApp reply rule}
+  /api/v1/whatsapp/rules/preview:
+    post:
+      tags: [WhatsApp]
+      operationId: previewWhatsAppReply
+      summary: Preview a WhatsApp reply without sending or allocating a counter
+      description: >-
+        Requires BACKEND_ENABLE_WHATSAPP. Evaluates only the supplied draft rule,
+        not competing rule priorities. Does not write to the database or call WAHA.
+        Uses an example counter of 1 and the current date/time in Asia/Almaty.
+      security:
+        - {bearerAuth: []}
+      x-permission: whatsapp.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/WhatsAppReplyPreviewRequest'}
+      responses:
+        '200':
+          description: Match result and rendered draft; captures and body are null when unmatched
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: ['private, no-store']}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WhatsAppReplyPreviewResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422':
+          description: 'VALIDATION_ERROR, WHATSAPP_TEMPLATE_INVALID or WHATSAPP_PATTERN_LIMIT'
+        '503':
+          description: 'WHATSAPP_NOT_CONFIGURED when the integration is disabled'
   /api/v1/whatsapp/rules/{id}:
     patch:
       tags:
@@ -16688,6 +16720,53 @@ components:
         revision:
           type: integer
           minimum: 0
+    WhatsAppReplyPreviewRequest:
+      type: object
+      additionalProperties: false
+      required: [matchMode, keywords, body, bodyMode, text]
+      properties:
+        matchMode:
+          type: string
+          enum: [contains_any, exact_any, pattern_exact, pattern_contains]
+        keywords:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: {type: string, minLength: 1, maxLength: 120}
+          description: 'Trimmed, lowercased and deduplicated; pattern modes accept typed placeholders such as {order_number:number}.'
+        body:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        bodyMode:
+          type: string
+          enum: [text, template]
+        text:
+          type: string
+          minLength: 1
+          maxLength: 4096
+      example:
+        matchMode: pattern_exact
+        keywords: ['Заказ {order_number:number} готов']
+        body: 'Заказ №{order_number} принят. Обращение №{counter}'
+        bodyMode: template
+        text: 'ЗАКАЗ 002222 готов'
+    WhatsAppReplyPreviewResponse:
+      type: object
+      additionalProperties: false
+      required: [matched, captures, body, counterIsExample, timeZone]
+      properties:
+        matched: {type: boolean}
+        captures:
+          type: object
+          nullable: true
+          additionalProperties: {type: string}
+        body:
+          type: string
+          nullable: true
+          maxLength: 4096
+        counterIsExample: {type: boolean, enum: [true]}
+        timeZone: {type: string, enum: [Asia/Almaty]}
     WhatsAppTemplateCreate:
       type: object
       additionalProperties: false
@@ -16707,6 +16786,10 @@ components:
           type: string
           minLength: 1
           maxLength: 4096
+        bodyMode:
+          type: string
+          enum: [text, template]
+          default: text
         enabled:
           type: boolean
           default: true
@@ -16727,6 +16810,9 @@ components:
           type: string
           minLength: 1
           maxLength: 4096
+        bodyMode:
+          type: string
+          enum: [text, template]
         enabled:
           type: boolean
     WhatsAppRuleCreate:
@@ -16748,7 +16834,11 @@ components:
           maxLength: 120
         matchMode:
           type: string
-          enum: [contains_any, exact_any]
+          enum: [contains_any, exact_any, pattern_exact, pattern_contains]
+        replyMode:
+          type: string
+          enum: [plain, quote]
+          default: plain
         keywords:
           type: array
           minItems: 1
@@ -16781,7 +16871,10 @@ components:
           maxLength: 120
         matchMode:
           type: string
-          enum: [contains_any, exact_any]
+          enum: [contains_any, exact_any, pattern_exact, pattern_contains]
+        replyMode:
+          type: string
+          enum: [plain, quote]
         keywords:
           type: array
           minItems: 1
