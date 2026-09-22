@@ -29,6 +29,11 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-09-22", title: "МДФ: счётчики ванн с неподтверждённым балансом",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: ["В новом учёте ванна с неподтверждённым балансом больше не засчитывает закатку и не вытесняет независимый распил из счётчиков заказа. История выполнения сохраняется. Полное переключение доски пока выключено."],
+  },
+  {
     version: APP_VERSION, date: "2026-09-22", title: "SVG: читаемые подписи соседних деталей",
     services: ["ERP", "Cutting"], repositories: ["repo_erp"],
     fixed: ["В превью загруженных SVG пересекающиеся подписи автоматически разнесены по вертикали. Размер шрифта и привязка к детали сохраняются; при выносе подписи за деталь добавляется линия-указатель."],

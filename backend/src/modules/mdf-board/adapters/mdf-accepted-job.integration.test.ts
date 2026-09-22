@@ -327,6 +327,35 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     expect((await db.query('SELECT column_key,issues FROM mdf_published_sources WHERE source_kind=\'bath\' AND source_id=$1',[sourceId])).rows[0])
       .toMatchObject({ column_key: 'baths',issues: expect.arrayContaining(['MDF_COMPOSITION_UNRESOLVED','ACCEPTANCE_PENDING']) });
   });
+  it('withholds a verified laminated bath on a blocked balance without deleting proof or independent cut', async () => {
+    const independent=await fixture({ rolled: true });
+    expect(await runner().processOne()).toMatchObject({ status: 'done' });
+    const f=await fixture({ rolled: true });
+    expect(await runner().processOne()).toMatchObject({ status: 'done' });
+    expect((await positions(f.orderId))[0]).toMatchObject({ credited_rolled: '10',credited_cut: '0' });
+    const allocations=(await db.query('SELECT * FROM mdf_bath_allocations WHERE order_id=$1 ORDER BY allocation_id',[f.orderId])).rows;
+    const evidence=(await db.query('SELECT * FROM mdf_evidence_lines WHERE source_kind=\'bath\' AND source_id=$1 ORDER BY evidence_line_id',
+      [f.receipts[2].sourceId])).rows;
+    const effects=(await db.query('SELECT count(*) n FROM outbox_events WHERE aggregate_id=$1',[String(f.orderId)])).rows;
+    await db.query("UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now() WHERE status='pending'");
+    // Unknown sibling bath blocks the balance, although the original laminated
+    // bath still has a sealed accepted revision and fully consumed allocations.
+    const saved=await database().transaction(tx => recordMdfReceipt(tx,{ ...f.receipts[2],
+      sourceId: `cut-result:${200000+f.orderId}`,accept: false,lines: [],
+      executionContext: { ...f.receipts[2].executionContext!,compositionComplete: false } }));
+    expect(await runner().processOne()).toMatchObject({ status: 'done',jobId: saved.jobId });
+    expect((await positions(f.orderId))[0]).toMatchObject({ cut_quantity: '10',rolled_quantity: '0',
+      credited_cut: '10',credited_rolled: '0',remaining: '0' });
+    expect((await positions(f.orderId))[1]).toMatchObject({ credited_cut: '0',credited_rolled: '0',remaining: '1' });
+    expect((await positions(independent.orderId))[0]).toMatchObject({ rolled_quantity: '10',credited_rolled: '10',remaining: '0' });
+    expect((await db.query('SELECT column_key,issues FROM mdf_published_sources WHERE source_kind=\'bath\' AND source_id=$1',
+      [f.receipts[2].sourceId])).rows[0]).toEqual({ column_key: 'baths_laminated',issues: ['ALLOCATION_BASELINE_UNKNOWN'] });
+    expect((await db.query('SELECT * FROM mdf_bath_allocations WHERE order_id=$1 ORDER BY allocation_id',[f.orderId])).rows).toEqual(allocations);
+    expect((await db.query('SELECT * FROM mdf_evidence_lines WHERE source_kind=\'bath\' AND source_id=$1 ORDER BY evidence_line_id',
+      [f.receipts[2].sourceId])).rows).toEqual(evidence);
+    expect((await db.query('SELECT count(*) n FROM outbox_events WHERE aggregate_id=$1',[String(f.orderId)])).rows).toEqual(effects);
+    expect(await statuses(f.orderId)).toEqual([3,1]); // Uncertainty alone is not a confirmed return.
+  });
   it('period/focus affect visibility only; selected order without visible files retains complete totals', async () => {
     const f = await fixture(); await runner().processOne();
     const hidden = await readMdfPublishedSnapshot(database(),admin,{ dateTo: '2026-12-21',orderIds: [f.orderId] });

@@ -69,12 +69,47 @@ describe('accepted MDF projection shared by jobs and publication', () => {
     expect(result.quantities).toMatchObject({ cut: 10, creditedCut: 6, remaining: 4 });
     expect(result.events.some(e => e.scope.source.kind === 'packet')).toBe(false);
   });
-  it('quarantined bath balance suppresses its ready/laminated event, not independent cut', () => {
-    const input = fixture(); input.blockedPositionKeys = ['1:11'];
+  it.each(['physical','declaration'] as const)('balance-blocked bath %s lamination stays visible but contributes no quantity', evidence => {
+    const input = fixture();
+    const blockedBath = source('bath','cut-result:blocked',10,'laminated');
+    blockedBath.priorColumn = 'baths_laminated';
+    blockedBath.lines[1].evidence = evidence;
+    input.sources = [blockedBath];
+    input.blockedPositionKeys = ['1:11'];
+
     const result = projectMdfAcceptedState(input);
-    expect(result.quantities.creditedCut).toBe(10);
-    expect(result.events).toHaveLength(1);
-    expect(result.cards[2].issues).toContain('ALLOCATION_BASELINE_UNKNOWN');
+
+    expect(result.quantities).toMatchObject({ rolled: 0, creditedRolled: 0, remaining: 10 });
+    expect(result.quantities.positions[0]).toMatchObject({ rawRolled: 0, rolled: 0, creditedRolled: 0 });
+    expect(result.cards[0]).toMatchObject({ column: 'baths_laminated', verified: true,
+      issues: ['ALLOCATION_BASELINE_UNKNOWN'] });
+    expect(result.events).toEqual([]);
+  });
+  it('blocked bath preserves same-position cut and unrelated bath quantities without mutating input', () => {
+    const input = fixture(); input.blockedPositionKeys = ['1:11'];
+    const blockedBath = source('bath','cut-result:blocked',10,'laminated');
+    blockedBath.priorColumn = 'baths_laminated';
+    const independentCut = source('packet',packet,4,'cut');
+    const unrelatedBath = source('bath','cut-result:unrelated',6,'laminated');
+    for (const line of unrelatedBath.lines) { line.orderId = 2; line.detailId = 21; }
+    input.sources = [blockedBath,independentCut,unrelatedBath];
+    input.details.push({ orderId: 2, detailId: 21, quantity: 6, rank: 1 });
+    input.readyBathIds = ['cut-result:unrelated'];
+    const before = JSON.stringify(input);
+
+    const result = projectMdfAcceptedState(input);
+
+    expect(result.quantities.positions).toEqual([
+      expect.objectContaining({ orderId: 1, detailId: 11, rawCut: 4, rawRolled: 0,
+        creditedCut: 4, creditedRolled: 0, remaining: 6 }),
+      expect.objectContaining({ orderId: 2, detailId: 21, rawRolled: 6,
+        creditedRolled: 6, remaining: 0 }),
+    ]);
+    expect(result.cards.find(card => card.id === 'cut-result:blocked')).toMatchObject({ column: 'baths_laminated',
+      issues: ['ALLOCATION_BASELINE_UNKNOWN'] });
+    expect(result.events.filter(event => event.scope.source.id === 'cut-result:blocked')).toEqual([]);
+    expect(result.events.some(event => event.scope.source.id === 'cut-result:unrelated')).toBe(true);
+    expect(JSON.stringify(input)).toBe(before);
   });
   it('never double counts duplicated immutable line identities', () => {
     const input = fixture(); input.sources[0].lines.push(input.sources[0].lines[1]);

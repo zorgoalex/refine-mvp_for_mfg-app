@@ -335,6 +335,14 @@ publication in the durable job transaction. Failures roll back effects while
 retaining the receipt for retry. Compatible forward revisions retain exact stock
 allocations; changed composition, quantities or missing proof require correction.
 
+A bath touching a blocked position contributes neither raw nor credited stage
+quantities to this publication, even when its own lamination revision is sealed
+and accepted. It carries `ALLOCATION_BASELINE_UNKNOWN`; independent verified
+cut evidence and unaffected baths still count. The immutable evidence and existing
+reservations/consumption remain intact, and its detail-derived column can remain
+laminated. Withholding uncertain quantities does not itself cancel a production
+stage or roll back detail statuses: that requires a confirmed correction.
+
 `BACKEND_MDF_JOB_WORKER=false` controls the registered scheduler independently of
 notifications. It processes at most ten jobs sequentially per tick; active engine
 mode is a second mandatory gate. `BACKEND_MDF_PUBLISHED_READS=false` controls

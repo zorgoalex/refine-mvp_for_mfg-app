@@ -84,7 +84,9 @@ export function projectMdfAcceptedState(input: MdfAcceptedStateInput) {
     const fullCut = normal.length > 0 && normal.every(([k,m]) => (cuts.get(k) ?? 0) >= m.quantity);
     const fullRolled = normal.length > 0 && normal.every(([k,m]) => (rolled.get(k) ?? 0) >= m.quantity);
     const balanceBlocked = s.kind === 'bath' && [...members.keys()].some(k => blocked.has(k));
-    if (verified) {
+    // Keep the accepted source lines on the card for review, but do not count
+    // this bath's proof while any of its positions has an unverified balance.
+    if (verified && !balanceBlocked) {
       for (const l of s.lines) if (l.stage === 'cut' || l.stage === 'laminated') {
         evidence.push({ ...l, source: key, line: l.evidenceLineId, stage: l.stage, kind: l.evidence });
       }
