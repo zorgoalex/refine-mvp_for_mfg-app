@@ -225,9 +225,10 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toMatch(/mdfWorkdayTodayOpenPatchNeeded\s*=\s*[\s\S]*?!hasExplicitMdfCardDeepLink/);
     expect(page).toContain('filterCncBathColumnsByMachineOrderMatches(cncOrderFilteredColumns, preservedCncBathCardId)');
     expect(page).toContain('const deepLinkFocusAppliedRef = useRef<string | null>(null);');
-    expect(page).toContain('if (deepLinkFocusAppliedRef.current === key) return undefined;');
+    expect(page).not.toContain('if (deepLinkFocusAppliedRef.current === key) return undefined;');
+    expect(page).toContain('deepLinkFocusAppliedRef.current === key ? null : window.requestAnimationFrame');
     expect(page).toContain('deepLinkFocusAppliedRef.current = key;');
-    expect(page.indexOf('deepLinkFocusAppliedRef.current = key;')).toBeLessThan(page.indexOf('target.focus({ preventScroll: true });'));
+    expect(page.indexOf('deepLinkFocusAppliedRef.current = key;')).toBeGreaterThan(page.indexOf('target.focus({ preventScroll: true });'));
     expect(page).toContain('updateViewState({ cncWorkday: todayCncWorkday, cncOrderFilters: [] });');
     expect(page).toContain('if (mdfWorkdayTodayOpenPatchNeeded) return;');
     expect(page).toMatch(/if \(!active\) \{\s*mdfWorkdayOpenSyncedRef.current = false;\s*mdfOpeningScrollPendingRef.current = true;/);

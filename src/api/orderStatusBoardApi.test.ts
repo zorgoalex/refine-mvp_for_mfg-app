@@ -139,6 +139,28 @@ describe('orderStatusBoardApi MDF manual moves', () => {
     expect(() => orderStatusBoardApi.upsertMdfManualMove('packet', '../bad', 'completed')).toThrow('Invalid cardId');
     expect(fetchMock).not.toHaveBeenCalled();
   });
+  it('sends identical proof and idempotency headers on explicit retries and delete', async () => {
+    const fetchMock=mockFetch({ jobId: 'job' },{ jobId: 'job' },{ jobId: 'clear' });
+    const command={ sourceToken: 'a'.repeat(64),idempotencyKey: 'mdf:test-1' };
+    await orderStatusBoardApi.upsertMdfManualMove('packet','p','completed',command);
+    await orderStatusBoardApi.upsertMdfManualMove('packet','p','completed',command);
+    await orderStatusBoardApi.deleteMdfManualMove('packet','p',command);
+    for (const [,options] of fetchMock.mock.calls) {
+      expect(new Headers(options.headers).get('X-Mdf-Source-Token')).toBe(command.sourceToken);
+      expect(new Headers(options.headers).get('Idempotency-Key')).toBe(command.idempotencyKey);
+    }
+    expect(fetchMock.mock.calls[0][1].body).toBe(fetchMock.mock.calls[1][1].body);
+  });
+  it.each([
+    { sourceToken: 'a'.repeat(64) },{ idempotencyKey: 'key' },
+    { sourceToken: 'wrong',idempotencyKey: 'key' },
+    { sourceToken: 'a'.repeat(64),idempotencyKey: 'invalid key' },
+  ])('rejects incomplete or malformed command metadata before fetch: %o',command => {
+    const fetchMock=mockFetch({});
+    expect(() => orderStatusBoardApi.upsertMdfManualMove('packet','p','completed',command as never)).toThrow();
+    expect(() => orderStatusBoardApi.deleteMdfManualMove('packet','p',command as never)).toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 function mockFetch(...bodies: unknown[]) {

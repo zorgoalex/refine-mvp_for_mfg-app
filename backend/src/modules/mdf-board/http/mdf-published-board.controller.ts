@@ -14,7 +14,7 @@ export class MdfPublishedBoardController {
   constructor(@Inject(MdfPublishedBoardService) private readonly board: MdfPublishedBoardService) {}
   @Get()
   @ApiOperation({ operationId: 'getPublishedMdfBoard',summary: 'Read one coherent MDF publication and queue snapshot' })
-  @ApiResponse({ status: 200,description: 'schemaVersion=1; compact cards, positions, pending jobs and verification issues' })
+  @ApiResponse({ status: 200,description: 'schemaVersion=1; compact cards, positions, pendingJobs, exact requested trackedJobs and verification issues' })
   @ApiResponse({ status: 304,description: 'Unchanged authorized snapshot' })
   @ApiResponse({ status: 401,description: 'Authentication required' })
   @ApiResponse({ status: 403,description: 'Insufficient order visibility' })
@@ -35,8 +35,14 @@ export class MdfPublishedBoardController {
 
 export function parseMdfPublishedQuery(raw: Record<string,unknown>): MdfPublishedQuery {
   const invalid = (): never => { throw new ApiError(422,'MDF_QUERY_INVALID','Неверный период или идентификатор карточки'); };
-  if (Object.keys(raw).some(k => !['dateTo','focusKind','focusId','orderIds'].includes(k))) invalid();
+  if (Object.keys(raw).some(k => !['dateTo','focusKind','focusId','orderIds','jobIds'].includes(k))) invalid();
   const query: MdfPublishedQuery = {};
+  if (raw.jobIds!==undefined) {
+    if (typeof raw.jobIds!=='string') invalid();
+    const ids=String(raw.jobIds).toLowerCase().split(',');
+    if (ids.length>20 || ids.some(id => !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(id))) invalid();
+    query.jobIds=[...new Set(ids)].sort();
+  }
   if (raw.orderIds!==undefined) {
     if (typeof raw.orderIds!=='string' || !/^[1-9]\d*(,[1-9]\d*)*$/.test(raw.orderIds)) invalid();
     const ids=String(raw.orderIds).split(',').map(Number);

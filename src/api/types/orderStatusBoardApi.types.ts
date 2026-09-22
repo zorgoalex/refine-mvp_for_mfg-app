@@ -36,6 +36,8 @@ export interface MdfBoardManualMovesResponse {
 }
 
 export interface MdfBoardManualMoveUpsertResponse {
+  /** Acceptance only: wait for this exact job before declaring completion. */
+  jobId?: string;
   generatedAt: string;
   changed: boolean;
   move: MdfBoardManualMove;
@@ -43,6 +45,7 @@ export interface MdfBoardManualMoveUpsertResponse {
 }
 
 export interface MdfBoardManualMoveDeleteResponse {
+  jobId?: string;
   generatedAt: string;
   cardKind: MdfBoardManualMoveCardKind;
   cardId: string;

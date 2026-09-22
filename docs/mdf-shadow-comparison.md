@@ -379,6 +379,32 @@ the pre-cutover mode. This boundary must cover the remaining writers before any
 activation. Ordinary unsupported writers and serializable returns are not yet
 connected by this increment.
 
+### Browser command protocol and exact progress
+
+The typed publication client reads one uncached snapshot. It retains the auth
+generation from the start of the read; late responses from a replaced session
+cannot become command inputs. `prepareMdfPublishedCommand` freezes the displayed
+source identity, target, source token, idempotency key and session generation.
+Explicit retry reuses this command, never a newly fetched token. Concurrent
+clicks share the in-flight request. Active writes disable automatic auth replay;
+logout/identity changes abort the request and quarantine late responses. An
+abort does not prove server rollback: resolve uncertain outcomes by replaying
+the original command in the same session, or reconciliation after login.
+
+`GET /api/v1/orders/status-board/mdf?jobIds=<UUID,...>` accepts up to 20 IDs.
+`trackedJobs` returns their exact statuses independently of the visible period
+and current source head. Both pending and tracked jobs require current access to
+every owner in frozen evidence **and** frozen demand. Unknown/inaccessible jobs
+are omitted. Missing, pending, needs_attention and superseded are not done.
+Only explicit `done` for the requested job/source proves that job finished; it
+does not prove that a later independent command has not superseded its effect.
+Tracking results participate in ETag under the same read-only MVCC snapshot.
+
+The protocol is not attached to legacy-calculated cards. The full-page coherent
+reader, remaining writers/corrections and historical reconciliation still gate
+activation. The existing page distinguishes a queue receipt from an applied move
+and preserves a historical link's highlight across refresh without refocusing it.
+
 ### New BASIS sources through the queue (activation still gated)
 
 In active mode, both BASIS creation commands (single order and multi-order

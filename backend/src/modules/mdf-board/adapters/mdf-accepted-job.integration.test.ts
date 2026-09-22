@@ -339,6 +339,42 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     expect(focused.cards).toHaveLength(1);
     expect(focused.positions).toEqual(hidden.positions);
   });
+  it('tracks exact jobs outside the period and after they leave pending, without treating absence as done', async () => {
+    const f=await fixture();
+    const query={ dateTo: '2026-12-21',jobIds: [...f.jobs.map(j => j.jobId!),randomUUID()] };
+    const before=await readMdfPublishedSnapshot(database(),admin,query);
+    expect(before.pendingJobs).toHaveLength(0);
+    expect(before.trackedJobs.map(j => j.status)).toEqual(['pending','pending','pending']);
+    await runner().processOne();
+    await db.query("UPDATE mdf_recalculation_jobs SET status='superseded' WHERE job_id=$1",[f.jobs[1].jobId]);
+    await db.query("UPDATE mdf_recalculation_jobs SET status='needs_attention',error_code='E2E_REVIEW' WHERE job_id=$1",[f.jobs[2].jobId]);
+    // Move the source head past the completed command. Tracking must still
+    // return that command, not substitute its newer pending job.
+    await database().transaction(tx => recordMdfReceipt(tx,{ ...f.receipts[0],revisionKey: '2',accept: false,
+      expectedFence: { version: '1',correctionEpoch: '0' } }));
+    const after=await readMdfPublishedSnapshot(database(),admin,query);
+    expect(after.trackedJobs).toHaveLength(3);
+    expect(after.trackedJobs.find(j => j.jobId===f.jobs[0].jobId)?.status).toBe('done');
+    expect(after.trackedJobs.find(j => j.jobId===f.jobs[1].jobId)?.status).toBe('superseded');
+    expect(after.trackedJobs.find(j => j.jobId===f.jobs[2].jobId)).toMatchObject({ status: 'needs_attention',code: 'E2E_REVIEW' });
+  });
+  it('hides tracked jobs unless every frozen demand owner remains visible, even outside membership', async () => {
+    const f=await fixture(),other=await fixture();
+    await db.query('UPDATE orders SET manager_id=42 WHERE order_id=$1',[f.orderId]);
+    const manager: CurrentUser={ ...admin,id: '42',role: 'manager',roleId: 4 };
+    const receipt={ ...f.receipts[0],sourceId: randomUUID(),causeKey: randomUUID(),executionContext: {
+      ...f.receipts[0].executionContext!,demand: [...f.receipts[0].executionContext!.demand,
+        { orderId: other.orderId,detailId: other.detailId,quantity: 10 }],
+    } };
+    const mixed=await database().transaction(tx => recordMdfReceipt(tx,receipt));
+    const query={ dateTo: '2026-09-22',jobIds: [f.jobs[0].jobId!,other.jobs[0].jobId!,mixed.jobId!] };
+    const view=await readMdfPublishedSnapshot(database(),manager,query);
+    expect(view.trackedJobs.map(j => j.jobId)).toEqual([f.jobs[0].jobId]);
+    expect(view.pendingJobs.some(j => j.jobId===mixed.jobId || j.orderIds.includes(other.orderId))).toBe(false);
+    expect((await readMdfPublishedSnapshot(database(),admin,query)).trackedJobs).toHaveLength(3);
+    await db.query('UPDATE orders SET delete_flag=true WHERE order_id=$1',[f.orderId]);
+    expect((await readMdfPublishedSnapshot(database(),manager,query)).trackedJobs).toEqual([]);
+  });
   it('own scope cannot read other owners via explicit IDs or mixed-card focus', async () => {
     const f = await fixture(); await runner().processOne();
     const manager: CurrentUser = { ...admin,id: '42',role: 'manager',roleId: 4 };

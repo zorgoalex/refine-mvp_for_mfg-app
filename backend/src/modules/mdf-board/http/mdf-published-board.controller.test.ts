@@ -8,7 +8,7 @@ import { MdfPublishedBoardController,mdfPublishedEtag,parseMdfPublishedQuery } f
 const user: CurrentUser = { id: '1',username: 'test',role: 'admin',roleId: 2,permissions: ['orders.view'] };
 const snapshot: Awaited<ReturnType<MdfPublishedBoardService['get']>> = {
   schemaVersion: 1,mode: 'active',revision: '1',generatedAt: '2026-09-21T12:00:00Z',dateFrom: '2026-07-21',dateTo: '2026-09-21',
-  cards: [],positions: [],members: [],pendingJobs: [],issues: [],
+  cards: [],positions: [],members: [],pendingJobs: [],trackedJobs: [],issues: [],
 };
 describe('published MDF read endpoint', () => {
   afterEach(() => vi.unstubAllEnvs());
@@ -16,11 +16,20 @@ describe('published MDF read endpoint', () => {
     expect(parseMdfPublishedQuery({ orderIds: '12,5,12',dateTo: '2026-09-21',focusKind: 'bath',focusId: 'cut-result:14' }))
       .toEqual({ dateTo: '2026-09-21',orderIds: [5,12],focus: { kind: 'bath',id: 'cut-result:14' } });
   });
+  it('normalizes exact job IDs and includes terminal results in the ETag', () => {
+    const id='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    expect(parseMdfPublishedQuery({ jobIds: `${id.toUpperCase()},${id}` })).toEqual({ jobIds: [id] });
+    const pending={ ...snapshot,trackedJobs: [{ jobId: id,kind: 'packet',id: 'p',status: 'pending',code: null,attempts: 0,orderIds: [1] }] };
+    expect(mdfPublishedEtag(user,{}, { ...pending,trackedJobs: [{ ...pending.trackedJobs[0],status: 'done' }] }))
+      .not.toBe(mdfPublishedEtag(user,{},pending));
+  });
   it.each([
     { dateFrom: '2020-01-01' },{ dateTo: '2026-02-30' },{ dateTo: ['2026-09-21'] },{ dateTo: '0000-01-01' },
     { focusKind: 'packet' },{ focusKind: 'order',focusId: '1' },{ focusKind: 'bath',focusId: 'cut-result:9007199254740992' },
     { orderIds: '0' },{ orderIds: '9007199254740992' },{ orderIds: ['1'] },{ orderIds: '1 OR true' },
     { orderIds: Array.from({ length: 101 },(_,i) => i+1).join(',') },
+    { jobIds: '' },{ jobIds: ['aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'] },{ jobIds: 'not-a-uuid' },
+    { jobIds: Array.from({ length: 21 },(_,i) => `${String(i).padStart(8,'0')}-aaaa-aaaa-aaaa-aaaaaaaaaaaa`).join(',') },
   ])('rejects malformed/unbounded query %o',raw => {
     expect(() => parseMdfPublishedQuery(raw)).toThrow('Неверный период');
   });

@@ -3141,12 +3141,15 @@ paths:
         Период карточек — два календарных месяца до dateTo; он не ограничивает учёт подтверждений.
         orderIds запрашивает расчёт выбранных заказов, в том числе без видимых файлов.
         focus открывает конкретную старую карточку, не расширяя остальную выборку.
+        jobIds отслеживает точные задания независимо от периода и текущей версии источника.
+        Недоступные и неизвестные задания не возвращаются; отсутствие не означает выполнение.
         Права проверяются до 304. Частично недоступная смешанная карточка скрывается целиком.
         Не создаёт подтверждений, резервов и действий автостатусов.
       security: [{ bearerAuth: [] }]
       parameters:
         - { name: dateTo, in: query, schema: { type: string, format: date } }
         - { name: orderIds, in: query, description: До 100 положительных safe-integer ID через запятую, schema: { type: string } }
+        - { name: jobIds, in: query, description: До 20 UUID через запятую; все владельцы зафиксированного состава и потребности должны быть доступны, schema: { type: string } }
         - { name: focusKind, in: query, schema: { type: string, enum: [packet, bazisCutSet, bath] } }
         - { name: focusId, in: query, description: Обязателен вместе с focusKind; UUID файла, ID БАЗИС либо cut-result:ID, schema: { type: string } }
         - { name: If-None-Match, in: header, schema: { type: string } }
@@ -16370,7 +16373,7 @@ components:
     MdfPublishedSnapshot:
       type: object
       additionalProperties: false
-      required: [schemaVersion, mode, revision, generatedAt, dateFrom, dateTo, cards, members, positions, pendingJobs, issues]
+      required: [schemaVersion, mode, revision, generatedAt, dateFrom, dateTo, cards, members, positions, pendingJobs, trackedJobs, issues]
       properties:
         schemaVersion: { type: integer, enum: [1] }
         mode: { type: string, enum: [legacy, shadow, active, read_only] }
@@ -16430,6 +16433,22 @@ components:
               creditedRolled: { type: integer, minimum: 0 }
               remaining: { type: integer, minimum: 0 }
               issues: { type: array, items: { type: string } }
+        trackedJobs:
+          type: array
+          maxItems: 20
+          description: Точные запрошенные задания, включая терминальные. Только явный done означает выполнение этого задания.
+          items:
+            type: object
+            additionalProperties: false
+            required: [jobId, kind, id, status, code, attempts, orderIds]
+            properties:
+              jobId: { type: string, format: uuid }
+              kind: { type: string, enum: [packet, bazisCutSet, bath, order, orderDetail] }
+              id: { type: string }
+              status: { type: string, enum: [pending, done, superseded, needs_attention] }
+              code: { type: string, nullable: true }
+              attempts: { type: integer, minimum: 0 }
+              orderIds: { type: array, items: { type: integer, minimum: 1 } }
         pendingJobs:
           type: array
           maxItems: 1000
