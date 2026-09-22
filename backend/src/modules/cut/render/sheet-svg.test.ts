@@ -978,3 +978,46 @@ describe('buildSheetSvg (§7 trim offset + labels)', () => {
     expect(svg).toMatch(/fill="#ffffff"|fill="white"/i);
   });
 });
+
+
+describe('imported SVG label staggering', () => {
+  const labelFor = () => ['2950', '# 10', '2700*34'];
+  const narrowSheet = {
+    ...sheet, trim_mm: { left: 0, right: 0, top: 0, bottom: 0 },
+    sheet_width_mm: 1000, sheet_height_mm: 2800,
+    pieces: [0, 1, 2].map(i => ({ item_id: `strip-${i}`, instance: 1,
+      x_mm: 400 + i * 40, y_mm: 50, width_mm: 34, height_mm: 2700, rotated: false })),
+  };
+  it('separates adjacent strips deterministically without changing geometry or font', () => {
+    const baseline = buildSheetSvg({ sheet: narrowSheet, labelFor, labelFontMm: 40 });
+    const input = { sheet: narrowSheet, labelFor, labelFontMm: 40, avoidLabelOverlap: true };
+    const svg = buildSheetSvg(input);
+    expect(svg).toBe(buildSheetSvg(input));
+    expect(svg.match(/translate\(0 [^)]+\)/g)).toHaveLength(2);
+    expect(svg.match(/font-size="[^"]+"/g)).toEqual(baseline.match(/font-size="[^"]+"/g));
+    expect(svg.split('cut-sheet-piece-label-layer')[0]).toBe(baseline.split('cut-sheet-piece-label-layer')[0]);
+    expect(svg).not.toContain('cut-sheet-label-leader');
+  });
+  it('preserves non-overlapping labels and disabled labels exactly', () => {
+    const single = { ...narrowSheet, pieces: narrowSheet.pieces.slice(0, 1) };
+    expect(buildSheetSvg({ sheet: single, labelFor, avoidLabelOverlap: true }))
+      .toBe(buildSheetSvg({ sheet: single, labelFor }));
+    expect(buildSheetSvg({ sheet: narrowSheet, labelFor, avoidLabelOverlap: true, showLabels: false }))
+      .toBe(buildSheetSvg({ sheet: narrowSheet, labelFor, showLabels: false }));
+  });
+  it('uses a vertical leader when adjacent short pieces have no internal slot', () => {
+    const short = { ...narrowSheet, pieces: narrowSheet.pieces.map(piece => ({...piece, y_mm: 1000, height_mm: 40})) };
+    const svg = buildSheetSvg({ sheet: short, labelFor, avoidLabelOverlap: true });
+    expect(svg).toContain('cut-sheet-label-leader');
+    expect(svg.lastIndexOf('class="cut-sheet-label-leader"')).toBeLessThan(svg.indexOf('<text '));
+    expect(svg.match(/<text /g)).toHaveLength(3);
+    expect(svg).not.toMatch(/NaN|Infinity/);
+  });
+  it('retains all labels when the sheet has no free vertical space', () => {
+    const crowded = { ...narrowSheet, sheet_height_mm: 40,
+      pieces: narrowSheet.pieces.map(piece => ({...piece, y_mm: 0, height_mm: 40})) };
+    const svg = buildSheetSvg({ sheet: crowded, labelFor, avoidLabelOverlap: true });
+    expect(svg.match(/<text /g)).toHaveLength(3);
+    expect(svg).not.toMatch(/NaN|Infinity/);
+  });
+});

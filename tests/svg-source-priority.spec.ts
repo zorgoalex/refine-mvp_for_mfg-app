@@ -105,3 +105,59 @@ test('unidentified safe contours render even when no detail can be imported; uns
   expect(result).toMatchObject({status:'invalid',accepted:0,requested:0,contours:1,injected:0});
   expect(result.text).toContain('# <Test>');
 });
+
+for (const stored of [false, true]) for (const orderName of ['2950', 'ШЖWWW']) test(`2950 preview labels do not overlap (stored layout: ${stored}, order: ${orderName})`, async ({page}) => {
+  const source = readFileSync('tests/fixtures/svg-source-priority/adjacent-2950.svg', 'utf8');
+  const result = await page.evaluate(async ({source, stored, orderName}) => {
+    const parsed = window.svgPriorityParser.parseSvgCutUploadText(source, '2950.svg');
+    for (const item of parsed.cutLayout.items) {
+      item.orderName = orderName;
+      if (item.labelLines?.length) item.labelLines[0] = orderName;
+    }
+    const svg = stored
+      ? window.svgPriorityParser.buildStyledCutLayoutPreview(JSON.parse(JSON.stringify(parsed.cutLayout)))
+      : window.svgPriorityParser.buildStyledSvgUploadPreview(parsed);
+    document.body.innerHTML = svg ?? '';
+    await document.fonts.ready;
+    const texts = Array.from(document.querySelectorAll<SVGTextElement>('.cut-sheet-piece-label-layer text'));
+    const boxes = texts.map(text => {
+      const r = text.getBoundingClientRect();
+      return { x: r.x, y: r.y, right: r.right, bottom: r.bottom, text: text.textContent };
+    });
+    const collisions = boxes.flatMap((a, i) => boxes.slice(i + 1).filter(b =>
+      a.x < b.right && a.right > b.x && a.y < b.bottom && a.bottom > b.y
+    ).map(b => [a.text, b.text]));
+    return { count: texts.length, collisions,
+      moved: document.querySelectorAll('.cut-sheet-piece-label-layer g[transform]').length,
+      xUnchanged: texts.every((text, i) => {
+        const item = parsed.cutLayout.items[i];
+        return Math.abs(Number(text.getAttribute('x')) - item.xMm - item.placedWidthMm / 2) < 0.01;
+      }),
+    };
+  }, {source, stored, orderName});
+  expect(result.count).toBe(14);
+  expect(result.collisions).toEqual([]);
+  expect(result.moved).toBeGreaterThan(0);
+  expect(result.xUnchanged).toBe(true);
+});
+
+
+test('wide order names on separated strips still trigger staggering', async ({page}) => {
+  const source = readFileSync('tests/fixtures/svg-source-priority/adjacent-2950.svg', 'utf8');
+  const result = await page.evaluate(async source => {
+    const parsed = window.svgPriorityParser.parseSvgCutUploadText(source, '2950.svg');
+    const layout = parsed.cutLayout;
+    layout.sheet = { widthMm: 1000, heightMm: 2800 };
+    layout.renderOnlyContours = [];
+    layout.items = [0, 1].map(i => ({ ...layout.items[0], xMm: 300 + 250 * i, yMm: 50,
+      placedWidthMm: 34, placedHeightMm: 2700, sourceSvg: undefined,
+      orderName: 'WWWWWWWWWWWW', labelLines: ['WWWWWWWWWWWW', '# 10', '2700*34'] }));
+    document.body.innerHTML = window.svgPriorityParser.buildStyledCutLayoutPreview(layout) ?? '';
+    await document.fonts.ready;
+    const [a, b] = Array.from(document.querySelectorAll<SVGTextElement>('.cut-sheet-piece-label-layer text'))
+      .map(text => text.getBoundingClientRect());
+    return { separated: a.bottom <= b.top || b.bottom <= a.top,
+      count: document.querySelectorAll('.cut-sheet-piece-label-layer text').length };
+  }, source);
+  expect(result).toEqual({separated: true, count: 2});
+});

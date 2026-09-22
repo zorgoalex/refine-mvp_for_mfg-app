@@ -201,6 +201,8 @@ export interface BuildSheetSvgInput {
   fillFor?: (piece: FreecutPlacement) => string | null | undefined;
   /** font-size in mm for piece labels (scaled with the mm viewBox). */
   labelFontMm?: number;
+  /** Stagger imported SVG labels vertically without changing piece geometry. */
+  avoidLabelOverlap?: boolean;
   /**
    * Rotate the layout 90° clockwise (sheet's long side horizontal / landscape).
    * The GEOMETRY is transposed — not the bitmap — so piece labels stay upright
@@ -304,6 +306,7 @@ export function buildManualSvgSheetSvg(
   const fillForOrder = createOrderFillResolver([...orderIndexByName.values()], renderStyle);
 
   return buildSheetSvg({
+    avoidLabelOverlap: true,
     sheet,
     renderStyle,
     labelFor: (piece) => {
@@ -550,7 +553,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       const sourceSvgEl = renderPieceSourceSvgFragment(piece, rect, renderStyle, fill, stroke, pieceIndex);
       const geometry = renderPieceGroup(piece, cx, cy, [rectEl, sourceSvgEl].join(''));
       if (!showLabels) {
-        return { geometry, label: '' };
+        return { geometry, label: '', placement: null };
       }
       const resolved = piece.renderOnlyLabelLines ?? labelFor(piece);
       const lines = Array.isArray(resolved) ? resolved : [resolved];
@@ -561,6 +564,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
         : '';
       return {
         geometry,
+        placement: { rect, cx, cy, lines },
         label: renderPieceLabelText({
           lines,
           cx,
@@ -575,7 +579,21 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       };
     });
   const pieces = renderedPieces.map((piece) => piece.geometry).join('');
-  const labels = renderedPieces.map((piece) => piece.label).join('');
+  const labelOffsets = input.avoidLabelOverlap
+    ? staggerPieceLabels(renderedPieces.map((piece) => piece.placement), fontMm, renderStyle, vbH)
+    : [];
+  const leaders: string[] = [];
+  const labels = renderedPieces.map((piece, index) => {
+    const { dy, halfHeight } = labelOffsets[index] ?? { dy: 0, halfHeight: 0 };
+    if (!dy || !piece.placement) return piece.label;
+    const { cx, cy, rect } = piece.placement;
+    // A callout keeps the association explicit if a short piece cannot contain the label.
+    const leader = cy + dy < rect.y || cy + dy > rect.y + rect.h
+      ? `<path class="cut-sheet-label-leader" d="M${num(cx)} ${num(cy)}V${num(cy + dy - Math.sign(dy) * halfHeight)}" fill="none" stroke="${escapeXml(renderStyle.piece.stroke)}" stroke-width="1"/>`
+      : '';
+    leaders.push(leader);
+    return `<g transform="translate(0 ${num(dy)})">${piece.label}</g>`;
+  }).join('');
   const guideLabelFontMm = bathMeterGuideLabelFontMm(w, h, input.labelFontMm);
   const bathMeterGuides = input.showBathMeterGuides
     ? renderBathMeterGuides(sheet, rotate90, guideLabelFontMm)
@@ -610,11 +628,74 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
     `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="${escapeXml(renderStyle.piece.defaultFill)}" stroke="${escapeXml(renderStyle.piece.stroke)}" stroke-width="${num(renderStyle.piece.strokeWidthMm)}"/>`,
     taskHatching,
     `<g class="cut-sheet-piece-geometry-layer">${pieces}</g>`,
-    showLabels ? `<g class="cut-sheet-piece-label-layer">${labels}</g>` : '',
+    showLabels ? `<g class="cut-sheet-piece-label-layer">${leaders.join('')}${labels}</g>` : '',
     bathMeterGuides,
     taskSheetOutline,
     `</svg>`,
   ].join('');
+}
+
+type PieceLabelPlacement = {
+  rect: { x: number; y: number; w: number; h: number };
+  cx: number;
+  cy: number;
+  lines: readonly string[];
+};
+
+/** Place the least movable labels first; long strips can use their free height. */
+function staggerPieceLabels(
+  placements: Array<PieceLabelPlacement | null>,
+  fontMm: number,
+  style: CutRenderStyleRef,
+  sheetHeight: number,
+): Array<{ dy: number; halfHeight: number }> {
+  const resolvedStyle = resolveCutRenderStyle(style);
+  const spacing = fontMm * cutRenderLabelLetterSpacingRatio(resolvedStyle);
+  const gap = Math.max(2, fontMm * 0.18);
+  const labels = placements.flatMap((placement, index) => {
+    if (!placement) return [];
+    const specs = cutRenderLabelLineSpecs(placement.lines, resolvedStyle);
+    if (!specs.length) return [];
+    // Match line layout below, with conservative ascent/descent and bold glyph padding.
+    const height = specs.reduce((sum, spec, i) => sum + fontMm *
+      (spec.fontRatio * 0.82 + (i < specs.length - 1 ? spec.gapAfterRatio : 0)), 0)
+      + fontMm * Math.max(...specs.map(spec => spec.fontRatio)) * 0.4;
+    const width = Math.max(...specs.map(spec =>
+      Array.from(spec.text).reduce((units, char) => units + (/\d/.test(char) ? 0.56 : /\s/.test(char) ? 0.32 : 1), 0)
+      * fontMm * spec.fontRatio * 1.12
+      + Math.max(0, spec.text.length - 1) * Math.max(0, spacing))) + gap;
+    return [{ ...placement, index, height, width }];
+  });
+  const offsets = placements.map(() => ({ dy: 0, halfHeight: 0 }));
+  const placed: Array<{ x: number; y: number; w: number; h: number }> = [];
+  labels.sort((a, b) => (a.rect.h - a.height) - (b.rect.h - b.height) || a.index - b.index);
+  for (const label of labels) {
+    const half = label.height / 2;
+    const left = label.cx - label.width / 2;
+    const neighbours = placed.filter(other => left < other.x + other.w + gap && left + label.width + gap > other.x);
+    const sheetMin = half;
+    const sheetMax = Math.max(sheetMin, sheetHeight - half);
+    const min = Math.max(sheetMin, label.rect.y + half);
+    const max = Math.min(sheetMax, label.rect.y + label.rect.h - half);
+    const candidates = [label.cy, min, max, sheetMin, sheetMax,
+      ...neighbours.flatMap(other => [other.y - gap - half, other.y + other.h + gap + half])];
+    const overlap = (y: number) => neighbours.reduce((sum, other) => sum +
+      Math.max(0, Math.min(y + half + gap, other.y + other.h) - Math.max(y - half - gap, other.y)), 0);
+    const nearest = (values: number[]) => values.sort((a, b) => Math.abs(a - label.cy) - Math.abs(b - label.cy) || a - b)[0];
+    const safe = candidates.filter(y => y >= sheetMin && y <= sheetMax && overlap(y) < 0.001);
+    // Preserve centres when clear. Prefer a contained block, then a vertical callout.
+    let y = overlap(label.cy) < 0.001 ? label.cy : nearest(safe.filter(value => value >= min && value <= max));
+    if (y === undefined) y = nearest(safe);
+    if (y === undefined) {
+      // Crowded sheets may have no collision-free vertical slot: retain every label
+      // and choose the least overlap, rather than hiding text or shrinking it away.
+      y = candidates.filter(value => value >= sheetMin && value <= sheetMax)
+        .sort((a, b) => overlap(a) - overlap(b) || Math.abs(a - label.cy) - Math.abs(b - label.cy) || a - b)[0] ?? label.cy;
+    }
+    offsets[label.index] = { dy: y - label.cy, halfHeight: half };
+    placed.push({ x: left, y: y - half, w: label.width, h: label.height });
+  }
+  return offsets;
 }
 
 function renderPieceLabelText(input: {
