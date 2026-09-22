@@ -27,6 +27,9 @@ import type {
 import type { CncTelegramManualSvgUploadDto, CncTelegramManualSvgUploadResponseDto, CncTelegramStructuredIngestDto } from '../dto/cnc-telegram.dto';
 import type { ManualSvgUploadCommand } from '../application/cnc-telegram.types';
 import { ensureSvgCutJobDisplayNumberAvailable } from './pg-cnc-telegram-repository';
+import { requireMdfCommandBoundary } from '../../mdf-board/application/mdf-command-boundary';
+import { lockMdfImportRequester } from '../../mdf-board/adapters/mdf-import-requester';
+import { lockMdfManualSvgOwners, assertMdfManualSvgReplayScope, authorizeMdfTelegramSvg } from '../../mdf-board/adapters/mdf-manual-svg-source';
 
 type Row = QueryResultRow;
 
@@ -363,14 +366,37 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
   async completeImport(input: { currentUser: CurrentUser; importItemId: string; lease: CncTelegramWorkerSessionLeaseContext; completion: CncTelegramImportCompleteDto; requestId: string }): Promise<CncTelegramImportItemDto> {
     const importer = this.explicitImporter;
     return this.database.transaction(async (tx) => {
+      const boundary=await requireMdfCommandBoundary(tx,{writer:'cnc.telegram_import.complete',capability:'queued'});
+      // Domain ownership must precede the worker lane and item/source locks.
+      // The preflight is read-only; the locked row is checked again below.
+      const preflight=boundary.queued ? await this.importItemWithSource(tx,input.importItemId) : null;
+      if (preflight) assertMdfImportSourceVersion(preflight);
+      const actor=preflight ? await lockMdfImportRequester(tx,text(preflight,'requested_by')) : null;
+      const owners=preflight ? await this.mdfImportOwners(tx,preflight) : [];
+      if (actor) await lockMdfManualSvgOwners(tx,actor,owners);
       await assertCurrentWorkerSessionInTransaction(tx, input.lease);
       const current = await this.importItemWithSource(tx, input.importItemId);
+      if (preflight) assertMdfImportSourceVersion(current);
       if (text(current, 'status') === 'imported') {
+        if (preflight) {
+          assertMdfImportUnchanged(preflight,current,owners,await this.mdfImportOwners(tx,current));
+          await assertMdfManualSvgReplayScope(tx,text(current,'packet_id'));
+        }
         assertTerminalItemLeaseReplay(current, input.completion, input.lease.sourceChatId);
         assertSourceMatches(current, input.completion);
         return itemDto(current);
       }
       const item = await this.lockItemLease(tx, input.importItemId, input.completion.itemLeaseToken, input.completion.itemLeaseGeneration, input.completion.itemLeaseOwner, input.lease.sourceChatId);
+      if (preflight) {
+        assertMdfImportSourceVersion(item);
+        assertMdfImportUnchanged(preflight,item,owners,await this.mdfImportOwners(tx,item));
+        if (text(item,'status')!=='processing') throw new ApiError(409,'CNC_TELEGRAM_ITEM_LEASE_STALE','Import item is not processing');
+        assertMdfImportFiles(input.completion);
+        // Same lock as direct SVG upload: duplicate discovery cannot race a
+        // second source with identical bytes after confirmation was checked.
+        await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',
+          [`cnc-svg-source:${text(item,'svg_content_sha256').toLowerCase()}`]);
+      }
       assertSourceMatches(item, input.completion);
       const candidate = await this.refreshMatches(tx, item);
       const currentMatches = await this.matches(tx, text(candidate, 'candidate_id'));
@@ -380,10 +406,10 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
       if (currentMatches.length > 0 && !bool(item, 'duplicate_acknowledged')) {
         return itemDto(await this.markConfirmationRequired(tx, item, candidate, currentMatches, input.currentUser, input.requestId));
       }
-      const requester = await this.requesterActor(tx, text(item, 'requested_by'));
+      const requester = actor ?? await this.requesterActor(tx, text(item, 'requested_by'));
       const layout = toCutLayout(json(item, 'cut_layout_json'));
-      const parsedItems = telegramImportItemsFromLayout(layout);
-      const selectedOrderIds = await inferTelegramImportSelectedOrderIds(
+      const parsedItems = telegramImportItemsFromLayout(layout,boundary.queued);
+      const selectedOrderIds = boundary.queued ? owners : await inferTelegramImportSelectedOrderIds(
         tx,
         parsedItems,
       );
@@ -401,13 +427,30 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
         cutLayout: layout, items: parsedItems, sourceFiles,
         duplicatePolicy: { kind: 'intentional_copy', approvedByImportItemId: text(item, 'import_item_id') },
       };
+      if (boundary.queued) authorizeMdfTelegramSvg(tx,{itemId:text(item,'import_item_id'),userId:requester.id,
+        sourceDigest:digest(JSON.stringify([input.completion.sourceSetFingerprint,input.completion.source])),
+        duplicate:currentMatches.length>0});
       const response = await importer.manualSvgUploadInTransaction(tx, { currentUser: requester, dto, requestId: input.requestId });
+      const mdfJobId=boundary.queued ? (await tx.query<{job_id:string}>(`SELECT job_id FROM mdf_recalculation_jobs
+        WHERE source_kind='packet' AND source_id=$1 ORDER BY created_at DESC LIMIT 1`,[response.packet.packetId])).rows[0]?.job_id : undefined;
       const updated = await tx.query<Row>(`UPDATE cnc_telegram_import_items SET status='imported', packet_id=$2, cut_job_id=$3, cut_result_id=$4, updated_at=now() WHERE import_item_id=$1 RETURNING *`, [text(item, 'import_item_id'), response.packet.packetId, response.cutJobId, response.cutResultId]);
       await updateRequestCounts(tx, text(item, 'import_request_id'));
-      await auditService.record(tx, { event: 'cnc.telegram_import.item_imported', actorUserId: requester.id, actorUsername: requester.username, actorRole: requester.role, entityType: 'cnc_telegram_import_item', entityId: text(item, 'import_item_id'), source: 'cnc_telegram_import', requestId: input.requestId, metadata: { technicalWorker: input.currentUser.username, packetId: response.packet.packetId, cutJobId: response.cutJobId, requestedCutJobId: dto.requestedCutJobId } });
-      await enqueueImportOutbox(tx, 'cnc.telegram_import.item_imported', text(item, 'import_item_id'), input.requestId, { actorUserId: requester.id, technicalWorkerUserId: input.currentUser.id, packetId: response.packet.packetId, cutJobId: response.cutJobId, requestedCutJobId: dto.requestedCutJobId });
+      await auditService.record(tx, { event: 'cnc.telegram_import.item_imported', actorUserId: requester.id, actorUsername: requester.username, actorRole: requester.role, entityType: 'cnc_telegram_import_item', entityId: text(item, 'import_item_id'), source: 'cnc_telegram_import', requestId: input.requestId, metadata: { technicalWorker: input.currentUser.username, packetId: response.packet.packetId, cutJobId: response.cutJobId, requestedCutJobId: dto.requestedCutJobId,mdfJobId } });
+      await enqueueImportOutbox(tx, 'cnc.telegram_import.item_imported', text(item, 'import_item_id'), input.requestId, { actorUserId: requester.id, technicalWorkerUserId: input.currentUser.id, packetId: response.packet.packetId, cutJobId: response.cutJobId, requestedCutJobId: dto.requestedCutJobId,mdfJobId });
       return itemDto(requiredRow(updated.rows[0], 'import completion'));
-    }, { mdf:{ writer:'cnc.telegram_import.complete',capability:'legacy-only' } });
+    }, { mdf:{ writer:'cnc.telegram_import.complete',capability:'queued' } });
+  }
+
+  private async mdfImportOwners(tx:TransactionClient,item:Row):Promise<number[]> {
+    const owners=await inferTelegramImportSelectedOrderIds(tx,telegramImportItemsFromLayout(toCutLayout(json(item,'cut_layout_json')),true),true);
+    if (nullableText(item,'packet_id')) {
+      const frozen=(await tx.query<{owner:number}>(`SELECT DISTINCT owner::float8 FROM (
+        SELECT match_order_id owner FROM cnc_telegram_packet_items WHERE packet_id=$1::uuid
+        UNION SELECT order_id FROM mdf_revision_demand WHERE source_kind='packet' AND source_id=$1::text
+        ) ids WHERE owner IS NOT NULL LIMIT 101`,[text(item,'packet_id')])).rows;
+      owners.push(...frozen.map(r=>r.owner));
+    }
+    return [...new Set(owners)].sort((a,b)=>a-b);
   }
 
   async failImport(input: { currentUser: CurrentUser; importItemId: string; lease: CncTelegramWorkerSessionLeaseContext; failure: CncTelegramImportFailDto; requestId: string }): Promise<CncTelegramImportItemDto> {
@@ -519,7 +562,7 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
   }
 
   private async importItemWithSource(tx: TransactionClient, itemId: string): Promise<Row> {
-    const result = await tx.query<Row>(`SELECT i.*,r.requested_by,r.import_request_id,r.scan_id,
+    const result = await tx.query<Row>(`SELECT i.*,i.source_set_fingerprint AS item_source_set_fingerprint,r.requested_by,r.import_request_id,r.scan_id,
       c.source_chat_id,c.source_message_id,c.source_thread_id,c.source_created_at,c.source_updated_at,c.workday,
       c.svg_message_id,c.gcode_message_id,c.screenshot_message_id,c.svg_file_name,c.gcode_file_name,c.screenshot_file_name,
       c.svg_content_sha256,c.gcode_content_sha256,c.screenshot_content_sha256,c.source_set_fingerprint,c.parser_version,
@@ -532,7 +575,7 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
   }
 
   private async lockItemLease(tx: TransactionClient, itemId: string, token: string, generation: number, owner: string, chat: string): Promise<Row> {
-    const result = await tx.query<Row>(`SELECT i.*,r.requested_by,r.import_request_id,r.scan_id,
+    const result = await tx.query<Row>(`SELECT i.*,i.source_set_fingerprint AS item_source_set_fingerprint,r.requested_by,r.import_request_id,r.scan_id,
       c.source_chat_id,c.source_message_id,c.source_thread_id,c.source_created_at,c.source_updated_at,c.workday,
       c.svg_message_id,c.gcode_message_id,c.screenshot_message_id,c.svg_file_name,c.gcode_file_name,c.screenshot_file_name,
       c.svg_content_sha256,c.gcode_content_sha256,c.screenshot_content_sha256,c.source_set_fingerprint,c.parser_version,
@@ -675,6 +718,7 @@ function toCutLayout(value: unknown): CncTelegramManualSvgUploadDto['cutLayout']
 
 export function telegramImportItemsFromLayout(
   layout: CncTelegramManualSvgUploadDto['cutLayout'],
+  allowIncompleteIdentity=false,
 ): CncTelegramStructuredIngestDto['items'] {
   return layout.items.map((item, index) => {
     const orderName = typeof item.orderName === 'string' ? item.orderName.trim() : '';
@@ -682,7 +726,7 @@ export function telegramImportItemsFromLayout(
     const widthMm = positiveFinite(item.widthMm);
     const heightMm = positiveFinite(item.heightMm);
     const quantity = positiveInteger(item.quantity) ?? 1;
-    if (!orderName || detailNumber === null || widthMm === null || heightMm === null) {
+    if (!allowIncompleteIdentity && (!orderName || detailNumber === null || widthMm === null || heightMm === null)) {
       throw new ApiError(
         422,
         'CNC_TELEGRAM_IMPORT_LAYOUT_INVALID',
@@ -711,6 +755,7 @@ export function telegramImportItemsFromLayout(
 export async function inferTelegramImportSelectedOrderIds(
   tx: TransactionClient,
   items: CncTelegramStructuredIngestDto['items'],
+  retainPartial=false,
 ): Promise<number[]> {
   const orderKeys = [...new Set(items
     .map((item) => item.orderName.trim().toLowerCase())
@@ -725,7 +770,7 @@ export async function inferTelegramImportSelectedOrderIds(
     HAVING COUNT(*) = 1
     ORDER BY MIN(o.order_id)
   `, [orderKeys]);
-  if (result.rows.length !== orderKeys.length) return [];
+  if (!retainPartial && result.rows.length !== orderKeys.length) return [];
   const orderIds = result.rows.map((row) => Number(row.order_id));
   if (
     orderIds.some((value) => !Number.isSafeInteger(value) || value <= 0) ||
@@ -757,5 +802,26 @@ export function assertCncTelegramScanMessageCount(total: number): void {
   }
 }
 function assertSourceMatches(row: Row, completion: CncTelegramImportCompleteDto): void { const source = completion.source; const checks: Array<[unknown, unknown]> = [[source.sourceChatId, text(row, 'source_chat_id')], [source.sourceMessageId, text(row, 'source_message_id')], [source.svgMessageId ?? null, nullableTelegramId(row, 'svg_message_id')], [source.gcodeMessageId ?? null, nullableTelegramId(row, 'gcode_message_id')], [source.screenshotMessageId ?? null, nullableTelegramId(row, 'screenshot_message_id')], [source.svgFileName, text(row, 'svg_file_name')], [source.gcodeFileName ?? null, nullableText(row, 'gcode_file_name')], [source.screenshotFileName ?? null, nullableText(row, 'screenshot_file_name')], [source.svgContentSha256, text(row, 'svg_content_sha256')], [source.gcodeContentSha256 ?? null, nullableText(row, 'gcode_content_sha256')], [source.screenshotContentSha256 ?? null, nullableText(row, 'screenshot_content_sha256')], [completion.sourceSetFingerprint, text(row, 'source_set_fingerprint')]]; if (checks.some(([left, right]) => left !== right)) throw new ApiError(409, 'CNC_TELEGRAM_SOURCE_CHANGED', 'Candidate source no longer matches the persisted source set'); }
+function assertMdfImportUnchanged(before:Row,after:Row,owners:number[],currentOwners:number[]):void {
+  const keys=['requested_by','candidate_id','import_request_id','cut_layout_json','source_set_fingerprint',
+    'svg_content_sha256','gcode_content_sha256','screenshot_content_sha256','requested_cut_job_id','eligibility_status'];
+  if (keys.some(key=>JSON.stringify(before[key])!==JSON.stringify(after[key]))
+    || JSON.stringify(owners)!==JSON.stringify(currentOwners)) {
+    throw new ApiError(409,'CNC_TELEGRAM_SOURCE_CHANGED','Состав или инициатор импорта изменился во время проверки');
+  }
+}
+function assertMdfImportSourceVersion(item:Row):void {
+  if (text(item,'item_source_set_fingerprint')!==text(item,'source_set_fingerprint')) {
+    throw new ApiError(409,'CNC_TELEGRAM_SOURCE_CHANGED','Источник изменился после подтверждения импорта');
+  }
+}
+function assertMdfImportFiles(completion:CncTelegramImportCompleteDto):void {
+  const files=completion.sourceFiles ?? [],source=completion.source;
+  const expected=[['svg',source.svgFileName,source.svgContentSha256],['gcode',source.gcodeFileName,source.gcodeContentSha256],
+    ['screenshot',source.screenshotFileName,source.screenshotContentSha256]].filter(([,name,hash])=>name && hash);
+  if (files.length!==expected.length || expected.some(([kind,name,hash])=>{
+    const matches=files.filter(f=>f.kind===kind);return matches.length!==1 || matches[0].fileName!==name || matches[0].sha256!==hash;
+  })) throw new ApiError(409,'CNC_TELEGRAM_SOURCE_CHANGED','Файлы не соответствуют подтверждённому источнику Telegram');
+}
 async function updateRequestCounts(tx: TransactionClient, requestId: string): Promise<void> { await tx.query(`UPDATE cnc_telegram_import_requests r SET imported_count=(SELECT count(*) FROM cnc_telegram_import_items WHERE import_request_id=r.import_request_id AND status='imported'), failed_count=(SELECT count(*) FROM cnc_telegram_import_items WHERE import_request_id=r.import_request_id AND status='failed'), status=CASE WHEN (SELECT count(*) FROM cnc_telegram_import_items WHERE import_request_id=r.import_request_id AND status IN ('pending','processing','confirmation_required','unknown'))=0 THEN CASE WHEN (SELECT count(*) FROM cnc_telegram_import_items WHERE import_request_id=r.import_request_id AND status='imported')=r.selected_count THEN 'completed' ELSE 'partial' END ELSE 'processing' END, completed_at=CASE WHEN (SELECT count(*) FROM cnc_telegram_import_items WHERE import_request_id=r.import_request_id AND status IN ('pending','processing','confirmation_required','unknown'))=0 THEN COALESCE(completed_at,now()) ELSE completed_at END WHERE r.import_request_id=$1`, [requestId]); }
 async function enqueueImportOutbox(tx: TransactionClient, eventType: string, aggregateId: string, requestId: string, payload: Record<string, unknown>): Promise<void> { await tx.query(`INSERT INTO outbox_events (event_type,aggregate_type,aggregate_id,payload_json,idempotency_key) VALUES ($1,'cnc_telegram_import',$2,$3::jsonb,$4) ON CONFLICT (idempotency_key) DO NOTHING`, [eventType, aggregateId, JSON.stringify({ ...payload, requestId }), `${eventType}:${aggregateId}:${requestId}`]); }

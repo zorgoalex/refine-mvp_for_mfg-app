@@ -12,6 +12,19 @@ import { loadMdfExecutionDetails } from './mdf-execution-snapshot';
 
 const scopes = new WeakMap<TransactionClient, readonly number[]>();
 const created = new WeakMap<TransactionClient, Set<string>>();
+interface TelegramHandoff { itemId:string; userId:string; sourceDigest:string; duplicate:boolean }
+const telegramImports = new WeakMap<TransactionClient, TelegramHandoff>();
+/** Internal, transaction-local capability. An HTTP duplicatePolicy is not an authorization. */
+export function authorizeMdfTelegramSvg(tx:TransactionClient, input:TelegramHandoff):void {
+  telegramImports.set(tx,{...input});
+}
+export function assertMdfTelegramSvg(tx:TransactionClient,itemId:string,userId:string):void {
+  const handoff=telegramImports.get(tx);
+  if (!handoff || handoff.itemId!==itemId || handoff.userId!==userId) {
+    throw new ApiError(409,'CNC_TELEGRAM_DUPLICATE_APPROVAL_INVALID','Требуется проверенная команда импорта Telegram');
+  }
+}
+export function hasMdfTelegramDuplicate(tx:TransactionClient):boolean { return telegramImports.get(tx)?.duplicate===true; }
 const positive = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 
 /** Before SVG, packet or idempotency locks. Never authorize a historical replay
@@ -138,9 +151,10 @@ export async function captureNewMdfManualSvgSource(tx: TransactionClient, input:
   const rules=(await tx.query<{ ruleId:number; version:number }>(`SELECT id::float8 "ruleId",version
     FROM status_automation_rules WHERE is_enabled ORDER BY id`)).rows;
   const revisionKey=`manual-svg-created:${input.packetId}`;
+  const imported=telegramImports.get(tx);
   const result=await recordMdfReceipt(tx,{ sourceKind:'packet',sourceId:input.packetId,revisionKey,origin:'derived',
-    actorUserId:Number(input.user.id),requestId:input.requestId,causeKey:revisionKey,expectedFence:null,accept:complete,rules,
-    sourceDigest:createHash('sha256').update(JSON.stringify([header.payloadHash,header.resultDigest])).digest('hex'),
+    actorUserId:Number(input.user.id),requestId:input.requestId,causeKey:revisionKey,expectedFence:null,accept:complete && !imported?.duplicate,rules,
+    sourceDigest:createHash('sha256').update(JSON.stringify([header.payloadHash,header.resultDigest,imported ?? null])).digest('hex'),
     lines:[...members.values()].map(m=>({...m,stageCode:'membership',evidenceKind:'derived' as const,rework:header.rework})),
     executionContext:{ sourceCreatedAt:header.createdAt,displayName:header.name,priorColumn:'parsed',manualPlacementColumn:null,
       compositionComplete:complete,demand } });

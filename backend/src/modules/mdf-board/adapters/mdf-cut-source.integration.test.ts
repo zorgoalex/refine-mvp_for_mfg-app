@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { ConfigService } from '@nestjs/config';
 import { Client } from 'pg';
@@ -65,6 +65,9 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
     tables.push('cnc_telegram_packet_evidence_set','cnc_telegram_packet_item_evidence','cnc_telegram_label_sheet_map',
       'cnc_telegram_label_placement','cnc_manual_svg_upload_files','cnc_manual_svg_upload_file_orders',
       'cnc_manual_svg_telegram_send_requests','cnc_manual_svg_telegram_send_request_files');
+    tables.push('roles','permissions_catalog','role_permissions','role_policy_scopes','permissions_state',
+      'cnc_telegram_worker_session_leases','cnc_telegram_import_scans','cnc_telegram_import_candidates',
+      'cnc_telegram_import_candidate_matches','cnc_telegram_import_requests','cnc_telegram_import_items');
     let serial = 0;
     for (const table of tables) {
       await db.query(`CREATE TABLE ${table} AS TABLE public.${table} WITH NO DATA`);
@@ -101,6 +104,12 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
       CREATE TRIGGER e2e_project_board AFTER INSERT ON cut_result FOR EACH ROW EXECUTE FUNCTION project_new_cut_result_board_metadata();
       UPDATE mdf_engine_state SET mode='active';
       INSERT INTO users(user_id,username,role_id,is_active) VALUES(1,'E2E bath source',1,true);
+      INSERT INTO roles(role_id,role_code,role_name,is_active) VALUES(1,'admin','E2E admin',true);
+      INSERT INTO permissions_state(id,version) VALUES(true,1);
+      INSERT INTO permissions_catalog(permission_name,domain,label,is_active)
+        VALUES('cut.manage','cut','E2E cut',true),('orders.view','orders','E2E orders',true);
+      INSERT INTO role_permissions(role_id,permission_name,is_enabled) VALUES(1,'cut.manage',true),(1,'orders.view',true);
+      INSERT INTO role_policy_scopes(role_id,scope_key,scope_value) VALUES(1,'orders.view','all');
       INSERT INTO projects(project_id,code) VALUES(1,'E2E');
       INSERT INTO sheet_material_types(sheet_material_type_id,name,thickness_mm,width_mm,height_mm,is_cuttable,is_active)
         VALUES(1,'МДФ 10 мм',10,2800,2070,true,true),(2,'MDF 18 mm',18,2800,2070,true,true),
@@ -286,11 +295,161 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
     await expect(new PgCncTelegramRepository(database).manualSvgUpload(f.command)).rejects.toMatchObject({code:'PERMISSION_DENIED'});
     expect(await counts()).toEqual(before);
   });
-  it('explicit Telegram import remains fenced before lease or source mutations in active mode',async()=>{
-    const before=await counts();
-    const importer=new PgCncTelegramImportRepository(database,new PgCncTelegramRepository(database));
-    await expect(importer.completeImport({currentUser:user} as never)).rejects.toMatchObject({code:'MDF_WRITER_NOT_CONNECTED'});
-    expect(await counts()).toEqual(before);
+  async function telegramFixture() {
+    const f=await svgFixture(),itemId=randomUUID(),requestId=randomUUID(),candidateId=randomUUID(),scanId=randomUUID();
+    const chat=`E2E-${itemId}`,worker=randomUUID(),token=randomUUID(),sourceMessageId=String(f.orderId);
+    const raw=Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="2800" height="2070"><!-- ${itemId} --></svg>`);
+    const sha=createHash('sha256').update(raw).digest('hex'),fileName=`MDF-${f.orderId}.svg`;
+    await db.query(`INSERT INTO cnc_telegram_worker_session_leases(source_chat_id,lease_token,lease_generation,worker_instance_id,worker_image_revision,expires_at)
+      VALUES($1,$2,1,$3,'abcdef1',now()+interval '1 hour')`,[chat,token,worker]);
+    await db.query(`INSERT INTO cnc_telegram_import_requests(import_request_id,scan_id,requested_by,status,selected_count)
+      VALUES($1,$2,1,'processing',1)`,[requestId,scanId]);
+    await db.query(`INSERT INTO cnc_telegram_import_candidates(candidate_id,scan_id,source_chat_id,source_message_id,svg_message_id,
+      svg_file_name,svg_content_sha256,source_set_fingerprint,parser_version,cut_layout_json,workday)
+      VALUES($1,$2,$3,$4,$4,$5,$6,$6,'E2E',$7::jsonb,'2026-09-22')`,
+      [candidateId,scanId,chat,sourceMessageId,fileName,sha,JSON.stringify(f.command.dto.cutLayout)]);
+    await db.query(`INSERT INTO cnc_telegram_import_items(import_item_id,import_request_id,candidate_id,status,duplicate_match_version,
+      lease_token,lease_generation,lease_worker_instance_id,lease_expires_at,source_set_fingerprint)
+      VALUES($1,$2,$3,'processing',1,$4,1,$5,now()+interval '1 hour',$6)`,[itemId,requestId,candidateId,token,worker,sha]);
+    const input={currentUser:{...user,username:'E2E technical worker'},importItemId:itemId,requestId:'E2E Telegram complete',
+      lease:{sourceChatId:chat,leaseToken:token,leaseGeneration:1,workerInstanceId:worker},
+      completion:{itemLeaseToken:token,itemLeaseGeneration:1,itemLeaseOwner:worker,sourceSetFingerprint:sha,
+        source:{sourceChatId:chat,sourceMessageId,svgMessageId:sourceMessageId,svgFileName:fileName,svgContentSha256:sha},
+        sourceFiles:[{kind:'svg' as const,fileName,contentType:'image/svg+xml',sizeBytes:raw.length,sha256:sha,base64Content:raw.toString('base64')}]}};
+    return {...f,input,candidateId,itemId,importer:new PgCncTelegramImportRepository(database,new PgCncTelegramRepository(database))};
+  }
+  it('actual Telegram completion queues membership once under the requester, never machine completion',async()=>{
+    const f=await telegramFixture(),result=await f.importer.completeImport(f.input);
+    expect(result.status).toBe('imported');const id=result.packetId!;
+    expect((await db.query('SELECT stage_code,quantity FROM mdf_evidence_lines WHERE source_id=$1',[id])).rows)
+      .toEqual([{stage_code:'membership',quantity:'2'}]);
+    expect((await db.query(`SELECT user_id,metadata_json->>'mdfJobId' job FROM audit_log
+      WHERE event='cnc.telegram_import.item_imported' AND entity_id=$1`,[f.itemId])).rows[0])
+      .toMatchObject({user_id:'1',job:expect.any(String)});
+    expect((await db.query(`SELECT payload_json->>'mdfJobId' job FROM outbox_events
+      WHERE event_type='cnc.telegram_import.item_imported' AND aggregate_id=$1`,[f.itemId])).rows[0].job).toEqual(expect.any(String));
+    const before=await counts();await f.importer.completeImport(f.input);expect(await counts()).toEqual(before);
+    expect(await runner().processOne()).toMatchObject({status:'done'});
+    expect((await db.query('SELECT credited_cut,remaining FROM mdf_published_positions WHERE detail_id=$1',[f.detailId])).rows[0])
+      .toEqual({credited_cut:'0',remaining:'2'});
+  });
+  it.each(['disabled_user','disabled_role','revoked_permission','inactive_permission','restricted_owner','none_scope',
+    'session_lease','item_lease','source_hash','file_hash','frozen_source','read_only'] as const)('Telegram %s rejects without source or queue writes',async(kind)=>{
+    const f=await telegramFixture(),before=await counts();let undo=async()=>{};
+    const change=async(sql:string,restore:string)=>{await db.query(sql);undo=async()=>{await db.query(restore);};};
+    if(kind==='disabled_user') await change('UPDATE users SET is_active=false WHERE user_id=1','UPDATE users SET is_active=true WHERE user_id=1');
+    if(kind==='disabled_role') await change('UPDATE roles SET is_active=false WHERE role_id=1','UPDATE roles SET is_active=true WHERE role_id=1');
+    if(kind==='revoked_permission') await change("UPDATE role_permissions SET is_enabled=false WHERE permission_name='cut.manage'","UPDATE role_permissions SET is_enabled=true WHERE permission_name='cut.manage'");
+    if(kind==='inactive_permission') await change("UPDATE permissions_catalog SET is_active=false WHERE permission_name='orders.view'","UPDATE permissions_catalog SET is_active=true WHERE permission_name='orders.view'");
+    if(kind==='restricted_owner' || kind==='none_scope') {
+      await db.query('UPDATE orders SET created_by=999 WHERE order_id=$1',[f.orderId]);
+      await change(`UPDATE role_policy_scopes SET scope_value='${kind==='none_scope'?'none':'own'}'`,"UPDATE role_policy_scopes SET scope_value='all'");
+    }
+    if(kind==='session_lease') f.input.lease.leaseToken=randomUUID();
+    if(kind==='item_lease') f.input.completion.itemLeaseToken=randomUUID();
+    if(kind==='source_hash') f.input.completion.source.svgContentSha256='a'.repeat(64);
+    if(kind==='file_hash') f.input.completion.sourceFiles[0].base64Content=Buffer.from('bad bytes').toString('base64');
+    if(kind==='frozen_source') await db.query("UPDATE cnc_telegram_import_items SET source_set_fingerprint='old' WHERE import_item_id=$1",[f.itemId]);
+    if(kind==='read_only') await change("UPDATE mdf_engine_state SET mode='read_only'","UPDATE mdf_engine_state SET mode='active'");
+    try {
+      await expect(f.importer.completeImport(f.input)).rejects.toBeInstanceOf(ApiError);expect(await counts()).toEqual(before);
+      expect((await db.query('SELECT status,packet_id FROM cnc_telegram_import_items WHERE import_item_id=$1',[f.itemId])).rows[0])
+        .toEqual({status:'processing',packet_id:null});
+    } finally {await undo();}
+  });
+  it('Telegram terminal replay reauthorizes frozen membership even when current source owners disappear',async()=>{
+    const f=await telegramFixture();await f.importer.completeImport(f.input);const before=await counts();
+    await db.query('UPDATE orders SET order_name=$2,created_by=999 WHERE order_id=$1',[f.orderId,`renamed-${f.orderId}`]);
+    await db.query("UPDATE role_policy_scopes SET scope_value='own'");
+    try {await expect(f.importer.completeImport(f.input)).rejects.toMatchObject({code:'PERMISSION_DENIED'});expect(await counts()).toEqual(before);}
+    finally {await db.query("UPDATE role_policy_scopes SET scope_value='all'");}
+    await runner().processOne();
+  });
+  it.each(['unknown_order','missing_position'] as const)('Telegram %s preserves known own members but publishes no confirmed quantity',async(kind)=>{
+    const f=await telegramFixture(),layout=f.command.dto.cutLayout;
+    layout.items.push({...layout.items[0],sourceElementId:'unknown',orderName:kind==='unknown_order'?'unknown-order':'',detailNumber:0});
+    await db.query('UPDATE cnc_telegram_import_candidates SET cut_layout_json=$2::jsonb WHERE candidate_id=$1',[f.candidateId,JSON.stringify(layout)]);
+    const result=await f.importer.completeImport(f.input),id=result.packetId!;
+    expect((await db.query('SELECT accepted_revision_key FROM mdf_source_heads WHERE source_id=$1',[id])).rows[0].accepted_revision_key).toBeNull();
+    expect((await db.query('SELECT detail_id,quantity FROM mdf_evidence_lines WHERE source_id=$1',[id])).rows)
+      .toEqual([{detail_id:String(f.detailId),quantity:'2'}]);
+    await runner().processOne();
+    const board=await readMdfPublishedSnapshot(database,user,{focus:{kind:'packet',id}});
+    expect(board.cards.some(c=>c.kind==='packet' && c.id===id)).toBe(true);
+  });
+  it('a forged direct intentional-copy policy cannot bypass the verified Telegram transaction',async()=>{
+    const f=await svgFixture();f.command.dto.duplicatePolicy={kind:'intentional_copy',approvedByImportItemId:randomUUID()};
+    const before=await counts();await expect(new PgCncTelegramRepository(database).manualSvgUpload(f.command))
+      .rejects.toMatchObject({code:'CNC_TELEGRAM_DUPLICATE_APPROVAL_INVALID'});expect(await counts()).toEqual(before);
+  });
+  it('Telegram duplicate drift requires reconfirmation; acknowledged copy stays unaccepted',async()=>{
+    const a=await telegramFixture(),original=await a.importer.completeImport(a.input);await runner().processOne();
+    const b=await telegramFixture();
+    await db.query(`UPDATE cnc_telegram_import_candidates c SET svg_content_sha256=s.svg_content_sha256,
+      svg_file_name=s.svg_file_name,cut_layout_json=s.cut_layout_json,source_set_fingerprint=s.source_set_fingerprint
+      FROM cnc_telegram_import_candidates s WHERE c.candidate_id=$1 AND s.candidate_id=$2`,[b.candidateId,a.candidateId]);
+    b.input.completion.source.svgContentSha256=a.input.completion.source.svgContentSha256;
+    b.input.completion.source.svgFileName=a.input.completion.source.svgFileName;
+    b.input.completion.sourceSetFingerprint=a.input.completion.sourceSetFingerprint;
+    b.input.completion.sourceFiles=a.input.completion.sourceFiles;
+    await db.query('UPDATE cnc_telegram_import_items SET source_set_fingerprint=$2 WHERE import_item_id=$1',
+      [b.itemId,a.input.completion.sourceSetFingerprint]);
+    const before=await counts();expect(await b.importer.completeImport(b.input)).toMatchObject({status:'confirmation_required'});
+    expect((await counts()).receipts).toBe(before.receipts);
+    await db.query(`UPDATE cnc_telegram_import_items SET duplicate_acknowledged=true,status='processing',
+      lease_token=$2,lease_worker_instance_id=$3,lease_expires_at=now()+interval '1 hour' WHERE import_item_id=$1`,
+      [b.itemId,b.input.completion.itemLeaseToken,b.input.completion.itemLeaseOwner]);
+    const copy=await b.importer.completeImport(b.input),id=copy.packetId!;
+    expect(id).not.toBe(original.packetId);
+    expect((await db.query('SELECT accepted_revision_key FROM mdf_source_heads WHERE source_id=$1',[id])).rows[0].accepted_revision_key).toBeNull();
+    expect((await db.query('SELECT rework FROM cnc_telegram_packets WHERE packet_id=$1',[id])).rows[0].rework).toBe(false);
+    await runner().processOne();
+    const board=await readMdfPublishedSnapshot(database,user,{focus:{kind:'packet',id}});
+    expect(board.cards.find(c=>c.kind==='packet' && c.id===id)?.issues.length).toBeGreaterThan(0);
+  });
+  it.each(['layout','owner'] as const)('Telegram %s drift while waiting for domain lock rejects the stale preflight',async(kind)=>{
+    const f=await telegramFixture(),before=await counts();
+    await db.query('BEGIN');await db.query('SELECT order_id FROM orders WHERE order_id=$1 FOR UPDATE',[f.orderId]);
+    let observed!:()=>void;const waiting=new Promise<void>(resolve=>{observed=resolve;});
+    onQuery=sql=>{if(sql.includes('SELECT o.order_id FROM orders o') && sql.includes('FOR UPDATE')) observed();};
+    const pending=f.importer.completeImport(f.input);const assertion=expect(pending).rejects.toMatchObject({code:'CNC_TELEGRAM_SOURCE_CHANGED'});
+    try {
+      await waiting;
+      if(kind==='layout') await db.query(`UPDATE cnc_telegram_import_candidates SET cut_layout_json=jsonb_set(cut_layout_json,'{items,0,widthMm}','111') WHERE candidate_id=$1`,[f.candidateId]);
+      else await db.query('UPDATE orders SET order_name=$2 WHERE order_id=$1',[f.orderId,`changed-${f.orderId}`]);
+      await db.query('COMMIT');await assertion;expect(await counts()).toEqual(before);
+    } finally {onQuery=undefined;await db.query('ROLLBACK');}
+  });
+  it.each(['filename','HDF'] as const)('Telegram %s is imported without MDF credit',async(kind)=>{
+    const f=await telegramFixture(),before=await counts();
+    if(kind==='filename') {
+      const name=`fanera-${f.orderId}.svg`;f.input.completion.source.svgFileName=name;f.input.completion.sourceFiles[0].fileName=name;
+      await db.query('UPDATE cnc_telegram_import_candidates SET svg_file_name=$2 WHERE candidate_id=$1',[f.candidateId,name]);
+    } else await db.query('UPDATE order_details SET sheet_material_type_id=3 WHERE detail_id=$1',[f.detailId]);
+    expect(await f.importer.completeImport(f.input)).toMatchObject({status:'imported'});
+    expect((await counts()).receipts).toBe(before.receipts);expect((await counts()).jobs).toBe(before.jobs);
+  });
+  it('Telegram queued rule failure preserves the completed import; retry advances only its own detail once',async()=>{
+    const f=await telegramFixture();
+    await db.query(`INSERT INTO status_automation_rules(id,name,event_type,action_type,target_status_id,conditions_json,priority,is_enabled,version,action_config_json)
+      VALUES(19,'E2E Telegram present','mdf.order_machine_files_present','change_details_production_status',2,'{}',100,true,1,'{}')`);
+    const result=await f.importer.completeImport(f.input),id=result.packetId!;
+    await db.query(`CREATE FUNCTION e2e_telegram_fail_rule() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'E2E Telegram rule failure'; END $$;
+      CREATE TRIGGER e2e_telegram_fail_rule BEFORE UPDATE ON order_details FOR EACH ROW EXECUTE FUNCTION e2e_telegram_fail_rule()`);
+    try {
+      expect(await runner().processOne()).toMatchObject({status:'retry'});
+      expect((await db.query('SELECT status,packet_id FROM cnc_telegram_import_items WHERE import_item_id=$1',[f.itemId])).rows[0])
+        .toEqual({status:'imported',packet_id:id});
+      expect((await db.query('SELECT production_status_id FROM order_details WHERE order_id=$1 ORDER BY detail_id',[f.orderId])).rows)
+        .toEqual([{production_status_id:1},{production_status_id:1}]);
+    } finally {await db.query('DROP TRIGGER e2e_telegram_fail_rule ON order_details; DROP FUNCTION e2e_telegram_fail_rule()');}
+    try {
+      await db.query('UPDATE mdf_recalculation_jobs SET next_attempt_at=now() WHERE source_id=$1',[id]);
+      expect(await runner().processOne()).toMatchObject({status:'done'});
+      expect((await db.query('SELECT production_status_id FROM order_details WHERE order_id=$1 ORDER BY detail_id',[f.orderId])).rows)
+        .toEqual([{production_status_id:2},{production_status_id:1}]);
+      const before=await counts();await f.importer.completeImport(f.input);expect(await counts()).toEqual(before);
+    } finally {await db.query('DELETE FROM status_automation_rules WHERE id=19');}
   });
   it('failed SVG queued rule preserves intake; retry applies once',async()=>{
     const f=await svgFixture();

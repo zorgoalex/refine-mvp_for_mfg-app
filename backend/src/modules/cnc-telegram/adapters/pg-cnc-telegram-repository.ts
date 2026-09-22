@@ -14,7 +14,7 @@ import { mdfCutReadinessCtes } from '../../../shared/cnc-material/cut-readiness-
 import { productionBoardReadScopeSql } from '../../orders/adapters/pg-order-status-board-repository';
 import { requireMdfCommandBoundary } from '../../mdf-board/application/mdf-command-boundary';
 import { assertMdfManualSvgMatchScope, assertMdfManualSvgReplayScope, captureNewMdfManualSvgSource, lockMdfManualSvgOwners,
-  registerNewMdfManualSvgSource } from '../../mdf-board/adapters/mdf-manual-svg-source';
+  registerNewMdfManualSvgSource, assertMdfTelegramSvg, hasMdfTelegramDuplicate } from '../../mdf-board/adapters/mdf-manual-svg-source';
 import {
   CUT_RENDER_STYLES_SETTING_KEY,
   CUT_RENDER_STYLE_TELEGRAM_PHOTO,
@@ -873,7 +873,7 @@ export class PgCncTelegramRepository
       const boundary=await requireMdfCommandBoundary(tx,{ writer:'cnc.manual_svg_upload',capability:'queued' });
       await lockMdfManualSvgOwners(tx,command.currentUser,command.dto.selectedOrderIds);
       if (boundary.queued && command.dto.duplicatePolicy?.kind==='intentional_copy') {
-        throw new ApiError(503,'MDF_WRITER_NOT_CONNECTED','Импорт подтверждённой копии ещё не подключён к производственному учёту');
+        assertMdfTelegramSvg(tx,command.dto.duplicatePolicy.approvedByImportItemId,command.currentUser.id);
       }
       await setSessionUser(tx, command.currentUser.id);
       if (command.dto.duplicatePolicy?.kind === 'intentional_copy') {
@@ -919,7 +919,7 @@ export class PgCncTelegramRepository
 
       // New command for an old source is NOT fresh membership. Restoration and
       // source-file promotion need their own correction protocol before cutover.
-      if (boundary.queued && (existing || await findExistingSvgCutJobForSourceFile(tx,dto,null))) {
+      if (boundary.queued && (existing || (!hasMdfTelegramDuplicate(tx) && await findExistingSvgCutJobForSourceFile(tx,dto,null)))) {
         throw new ApiError(409,'MDF_SVG_EXISTING_SOURCE_REQUIRES_REVIEW','Для существующего SVG-файла требуется проверка производственной истории');
       }
 
@@ -1025,7 +1025,7 @@ export class PgCncTelegramRepository
         return response;
       }
 
-      if (!existing) {
+      if (!existing && !(boundary.queued && hasMdfTelegramDuplicate(tx))) {
         const reusedSourceFile = await reuseExistingManualSvgSourceFile(tx, {
           command,
           dto,

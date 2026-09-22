@@ -450,7 +450,7 @@ the full order demand stays frozen in execution context. Recalculation records
 new membership as unaccepted, preserves earlier evidence and requires review.
 No timestamp or missing ledger row grants historical trust.
 
-Historical/Telegram SVG imports, result lifecycle and manual-layout replacement remain unconnected;
+Historical reconciliation, result lifecycle and manual-layout replacement remain unconnected;
 manual-layout writes reject in active mode. Typed HDF is excluded from MDF
 membership even if its material name contains MDF. Migration177 aligns immutable
 snapshot validation and label-map projection with typed `hdf-*` identities.
@@ -488,7 +488,35 @@ created outbox event contain `mdfJobId` and `mdfEvidence: membership_only`.
 
 In active mode, a new command for an existing packet/source file is rejected
 before restoration or metadata promotion; these operations still need correction
-adapters. Explicit Telegram import completion is entrance-fenced as legacy-only.
+adapters. Explicit Telegram import completion uses the bounded producer below.
 The intentionally disabled background CNC endpoint is not re-enabled. Legacy
 and shadow uploads retain their current behavior. These remaining gates prohibit
 activation; public engine stays legacy and worker/read flags stay off.
+
+### Explicit Telegram import through the queue (activation still gated)
+
+`completeImport` is a queued command in active mode. It loads the requester's
+current active user/role, enabled catalog permissions and orders.view scope.
+The worker's permissions never replace the requester's. Authorization, sorted
+order/detail locks precede worker-session, item and SVG-source locks. Persisted
+source identity, requester, inferred owners and layout are rechecked after waits;
+drift rejects the transaction. Item and session lease checks remain mandatory.
+The uploaded file names/hashes must match the confirmed Telegram source set;
+decoded bytes are independently verified by the normal SVG persistence path.
+
+Only an internal transaction-local handoff permits active intentional-copy
+import. Duplicate detection is refreshed under the source lock; changed matches
+require reconfirmation. Acknowledging a duplicate permits a separate visible
+card, but does not certify another physical run or mark it as rework. Its
+membership stays unaccepted, contributing no confirmed quantities. Incomplete
+identity also stays unaccepted while retaining uniquely resolved own members.
+MDF eligibility, HDF exclusion, exact result projection checks and membership-only
+receipts reuse the direct SVG path. Import success never means machine completion.
+
+Import status, packet/result, receipt/job, audit and outbox commit together;
+the import audit/outbox include `mdfJobId` and retain requester/worker attribution.
+Terminal replay reauthorizes current and frozen owners, verifies the original
+item lease/source and creates no new receipt or job. A failed queued rule leaves
+the completed import intact and can be retried without applying other positions.
+Legacy/shadow behavior and disabled background ingest remain unchanged.
+This connects one producer, not the remaining correction/UI/history gates.

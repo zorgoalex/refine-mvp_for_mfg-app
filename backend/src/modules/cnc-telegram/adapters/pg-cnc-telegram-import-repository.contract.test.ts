@@ -12,6 +12,7 @@ import {
   telegramImportItemsFromLayout,
 } from './pg-cnc-telegram-import-repository';
 import { parseImportComplete } from '../dto/cnc-telegram-import.dto';
+import { enterMdfCommand } from '../../mdf-board/application/mdf-command-boundary';
 
 const source = readFileSync(new URL('./pg-cnc-telegram-import-repository.ts', import.meta.url), 'utf8');
 const svgRepositorySource = readFileSync(new URL('../adapters/pg-cnc-telegram-repository.ts', import.meta.url), 'utf8');
@@ -252,6 +253,7 @@ describe('explicit Telegram import backend contracts', () => {
     const queries: string[] = [];
     const tx = { query: vi.fn(async (sql: string) => {
       queries.push(sql);
+      if (sql.includes('FROM mdf_engine_state')) return {rows:[{mode:'legacy',revision:0}],rowCount:1};
       if (sql.includes('FROM cnc_telegram_worker_session_leases')) return { rows: [{ lease_token: 's' }], rowCount: 1 };
       if (sql.includes('FROM cnc_telegram_import_items i JOIN cnc_telegram_import_requests')) return { rows: [candidate], rowCount: 1 };
       if (sql.includes('WHERE i.import_item_id=$1 AND c.source_chat_id')) return { rows: [candidate], rowCount: 1 };
@@ -263,7 +265,9 @@ describe('explicit Telegram import backend contracts', () => {
       return { rows: [], rowCount: 0 };
     }) };
     const importer = { manualSvgUploadInTransaction: vi.fn().mockResolvedValue({ packet: { packetId: 'packet-1' }, cutJobId: 800, cutResultId: null }) };
-    const database = { transaction: async <T>(handler: (client: typeof tx) => Promise<T>): Promise<T> => handler(tx) } as unknown as DatabaseService;
+    const database = { transaction: async <T>(handler: (client: typeof tx) => Promise<T>): Promise<T> => {
+      await enterMdfCommand(tx as never,{writer:'cnc.telegram_import.complete',capability:'queued'});return handler(tx);
+    } } as unknown as DatabaseService;
     const repository = new PgCncTelegramImportRepository(database, importer as never);
 
     await repository.completeImport({
