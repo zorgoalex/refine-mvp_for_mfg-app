@@ -1565,7 +1565,7 @@ function confirmSvgMatchWarnings(problems: SvgMatchProblem[]): Promise<boolean> 
   });
 }
 
-function buildSvgMatchProblems(
+export function buildSvgMatchProblems(
   items: ParsedSvgUpload['cutLayout']['items'],
   details: EligibleDetailDto[],
 ): SvgMatchProblem[] {
@@ -1623,7 +1623,8 @@ function buildSvgMatchProblems(
       continue;
     }
 
-    const placedJobs = sameSize.flatMap((detail) => detail.activeJobs ?? []);
+    const placedJobs = sameSize.flatMap((detail) => detail.activeJobs ?? [])
+      .filter((job) => job.profileLayoutMode !== 'vacuum_table');
     if (placedJobs.length > 0) {
       problems.push({
         severity: 'warning',
