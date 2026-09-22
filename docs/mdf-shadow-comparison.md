@@ -426,3 +426,34 @@ they retain existing behavior in legacy/shadow and reject before business writes
 in active/read_only until correction adapters are connected. This is a safety
 gate, not completed writer coverage. Keep the worker/read flags off and do not
 switch modes until all producer, correction, UI and baseline gates are complete.
+
+### Normal vacuum calculations through the queue (activation still gated)
+
+In active mode the normal calculation command captures each new vacuum result
+as `bath / cut-result:<id>`. Membership comes from digest-matched normalized
+result projections and the locked typed basket, not an archive JSON read by the
+MDF adapter. Result, membership receipt, pending job, audit and outbox commit
+together. The optional legacy synthetic packet is not created in this path.
+Creation proves membership only: it never proves cutting or lamination.
+
+Both calculation transactions acquire the cutover fence before sorted owner
+and detail locks. Current permissions cover every owner; a completed replay
+also reauthorizes the frozen result owners. No transaction spans the optimizer
+call. A changed composition or mode rejects persistence. A private-owner-token
+settlement closes only that attempt, returns its job to draft and emits
+`cut_job.calculate_rejected`; it cannot modify details, groups or MDF evidence.
+This narrowly scoped settlement remains available in read-only mode.
+
+First results may accept verified membership. A partial position is valid:
+two placed pieces of an order position requiring four remain two pieces, while
+the full order demand stays frozen in execution context. Recalculation records
+new membership as unaccepted, preserves earlier evidence and requires review.
+No timestamp or missing ledger row grants historical trust.
+
+SVG imports, result lifecycle and manual-layout replacement remain unconnected;
+manual-layout writes reject in active mode. Typed HDF is excluded from MDF
+membership even if its material name contains MDF. The existing result-label
+projector still rejects typed `hdf-*` item IDs before MDF capture; this separate
+cutting-projector gap is reproducible in legacy and active modes and remains an
+open activation check. No projection bypass or historical acceptance is added.
+Keep engine activation and worker/read flags gated until the full chain is ready.

@@ -1,0 +1,329 @@
+import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { ConfigService } from '@nestjs/config';
+import { Client } from 'pg';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { BackendEnv } from '../../../config/env.validation';
+import { DatabaseService } from '../../../database/database.service';
+import { ApiError } from '../../../common/errors/api-error';
+import type { PerformanceQueryTelemetryService } from '../../../performance/performance-query-telemetry.service';
+import type { CurrentUser } from '../../../permissions/current-user';
+import { rolePolicyForUser } from '../../../permissions/policies/scope';
+import { PgCutRepository } from '../../cut/adapters/pg-cut-repository';
+import { PgBazisCutRepository } from '../../bazis-cut/adapters/pg-bazis-cut-repository';
+import { PgMdfBoardManualMoveRepository } from '../../orders/adapters/pg-mdf-board-manual-move-repository';
+import { StaticCutConfig } from '../../cut/application/cut-config';
+import type { OptimizeRequest, FreecutOptimizeResponse } from '../../cut/application/cut-freecut-mapping';
+import { MdfJobRunner } from '../application/mdf-job-runner';
+import { executeMdfAcceptedJob } from '../application/mdf-accepted-job';
+import { readMdfPublishedSnapshot } from './mdf-published-snapshot';
+
+describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calculation → MDF receipt → queue → publication', () => {
+  const schema = `e2e_mdf_cut_${randomUUID().replaceAll('-','')}`;
+  const connection = { host: process.env.PG_TAILSCALE_BIND_IP || process.env.PG_BIND_IP || '127.0.0.1',
+    database: process.env.PG_DB,user: process.env.PG_USER,password: process.env.PG_PASSWORD,connectionTimeoutMillis: 5000,
+    options: '-c statement_timeout=15000 -c lock_timeout=3000 -c max_parallel_workers_per_gather=0 -c jit=off' };
+  const db = new Client(connection);
+  let database: DatabaseService,repository: PgCutRepository,sequence = 0;
+  let duringOptimize: (() => Promise<void>) | undefined;
+  let onQuery: ((sql: string) => void) | undefined;
+  const user: CurrentUser = { id: '1',username: 'E2E bath source',role: 'admin',roleId: 1,
+    permissions: ['cut.view','cut.manage','orders.view'] };
+  const config = new StaticCutConfig();
+  const freecut = { optimize: async (request: OptimizeRequest): Promise<FreecutOptimizeResponse> => {
+    await duringOptimize?.();
+    let x = 0;
+    return { status: 'ok',summary: { used_stock_count: 1,waste_percent: 10 },solutions: [{
+      stock_id: request.stock[0].id,index: 0,width_mm: request.stock[0].width_mm,height_mm: request.stock[0].height_mm,
+      trim_mm: request.params.trim_mm,placements: request.items.flatMap(item => Array.from({ length: item.qty },(_,i) => {
+        const placement = { item_id: item.id,instance: i+1,x_mm: x,y_mm: 0,width_mm: item.width_mm,height_mm: item.height_mm,rotated: false };
+        x += item.width_mm + request.params.spacing_mm + request.params.kerf_mm + 10; return placement;
+      })) }] };
+  } };
+  const runner = () => new MdfJobRunner(database,executeMdfAcceptedJob);
+  beforeAll(async () => {
+    vi.stubEnv('BACKEND_STATUS_AUTOMATION','true'); vi.stubEnv('BACKEND_ENABLE_NOTIFICATION_ENGINE','false');
+    vi.stubEnv('BACKEND_MDF_SHADOW_INTAKE','true'); vi.stubEnv('BACKEND_MDF_PINNED_DISPATCH','true');
+    await db.connect(); await db.query(`CREATE SCHEMA ${schema}; SET search_path=${schema},public`);
+    for (const file of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql','174_mdf_execution_context.sql','175_mdf_command_placement.sql']) {
+      await db.query(readFileSync(new URL(`../../../../db/migrations/${file}`,import.meta.url),'utf8'));
+    }
+    // Structural clones only. Every sequence/default is local; tests cannot
+    // consume public IDs or write public data through inherited triggers.
+    const tables = ['orders','order_details','production_statuses','order_statuses','materials','sheet_material_types',
+      'users','status_automation_rules','outbox_events','audit_log','audit_log_related_entity','app_settings','order_workshops',
+      'bazis_cut_sets','bazis_cut_set_details','projects','clients','milling_types','films','edge_types','employees',
+      'cut_job_item','cut_job','cut_group','cut_group_sheet','cut_group_manual_layout','cut_result','cut_result_command',
+      'cut_result_archive_state','cut_param_profiles','cut_pdf_templates','order_doweling_links','doweling_orders',
+      'order_hdf_details','hdf_calculation_config_state','mdf_board_manual_moves','cnc_telegram_packets',
+      'cnc_telegram_packet_items','cnc_telegram_packet_whole_order_keys','cut_result_board_projection',
+      'cut_result_placement','cut_result_sheet_map','cut_result_label_map_projection','command_idempotency_keys',
+      'bazis_node_order_detail_map','bazis_nodes','bazis_project_revisions','bazis_order_links','order_import_entity_map'];
+    let serial = 0;
+    for (const table of tables) {
+      await db.query(`CREATE TABLE ${table} AS TABLE public.${table} WITH NO DATA`);
+      const defaults = (await db.query<{ name: string; expression: string | null; identity: string }>(`SELECT a.attname name,
+        pg_get_expr(d.adbin,d.adrelid) expression,a.attidentity identity FROM pg_attribute a
+        LEFT JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum
+        WHERE a.attrelid=$1::regclass AND a.attnum>0 AND NOT a.attisdropped AND a.attgenerated=''
+          AND (d.oid IS NOT NULL OR a.attidentity<>'')`,[`public.${table}`])).rows;
+      for (const d of defaults) {
+        if (d.identity || d.expression?.includes('nextval(')) {
+          const seq = `e2e_seq_${++serial}`;
+          await db.query(`CREATE SEQUENCE ${seq}; ALTER TABLE ${table} ALTER COLUMN ${d.name} SET DEFAULT nextval('${seq}')`);
+        } else if (d.expression) await db.query(`ALTER TABLE ${table} ALTER COLUMN ${d.name} SET DEFAULT ${d.expression}`);
+      }
+      const indexes = (await db.query<{ definition: string }>(`SELECT pg_get_indexdef(indexrelid) definition FROM pg_index
+        WHERE indrelid=$1::regclass AND indisunique`,[`public.${table}`])).rows;
+      for (const i of indexes) await db.query(i.definition.replace(`ON public.${table}`,`ON ${schema}.${table}`));
+    }
+    await db.query(`ALTER TABLE cut_group_sheet ADD FOREIGN KEY(cut_group_id) REFERENCES cut_group(cut_group_id) ON DELETE CASCADE`);
+    for (const name of ['set_session_user','order_production_summary','recalc_order_production_status',
+      'cut_result_snapshot_digest','cut_result_snapshot_is_complete','cut_result_snapshot_is_vacuum',
+      'cut_result_label_map_expected_counts','project_cut_result_label_maps','project_new_cut_result_label_maps',
+      'project_cut_result_board_metadata','project_new_cut_result_board_metadata']) {
+      const definitions = (await db.query<{ definition: string }>(`SELECT pg_get_functiondef(p.oid) definition
+        FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname=$1`,[name])).rows;
+      expect(definitions.length).toBeGreaterThan(0);
+      for (const { definition } of definitions) {
+        expect(definition).not.toMatch(/(?:FROM|UPDATE|JOIN|INTO)\s+public\./i);
+        await db.query(definition.replace('FUNCTION public.',`FUNCTION ${schema}.`));
+      }
+    }
+    await db.query(`CREATE TRIGGER e2e_project_maps AFTER INSERT ON cut_result FOR EACH ROW EXECUTE FUNCTION project_new_cut_result_label_maps();
+      CREATE TRIGGER e2e_project_board AFTER INSERT ON cut_result FOR EACH ROW EXECUTE FUNCTION project_new_cut_result_board_metadata();
+      UPDATE mdf_engine_state SET mode='active';
+      INSERT INTO users(user_id,username,role_id,is_active) VALUES(1,'E2E bath source',1,true);
+      INSERT INTO projects(project_id,code) VALUES(1,'E2E');
+      INSERT INTO sheet_material_types(sheet_material_type_id,name,thickness_mm,width_mm,height_mm,is_cuttable,is_active)
+        VALUES(1,'МДФ 10 мм',10,2800,2070,true,true),(2,'MDF 18 mm',18,2800,2070,true,true),
+          (3,'ХДФ',3,2800,2070,true,true),(4,'fanera',10,2800,2070,true,true);
+      INSERT INTO production_statuses(production_status_id,production_status_code,production_status_name,sort_order,is_active)
+        VALUES(1,'new','E2E new',1,true),(2,'drawn','Отрисован',10,true),(3,'cut','Распилен',20,true),
+          (4,'laminated','Закатан',30,true),(5,'packed','Упакован',40,true),(6,'issued','Выдан',50,true);
+      INSERT INTO status_automation_rules(id,name,event_type,action_type,target_status_id,conditions_json,priority,is_enabled,version,action_config_json)
+        VALUES(18,'E2E own rolled','mdf.board.baths_laminated','change_details_production_status',4,'{}',100,true,1,'{}');
+      INSERT INTO hdf_calculation_config_state(id,revision) VALUES(1,1)`);
+    const url = new URL('postgresql://localhost'); url.hostname=connection.host; url.pathname=`/${connection.database}`;
+    url.username=connection.user ?? ''; url.password=connection.password ?? '';
+    url.searchParams.set('options',`-c search_path=${schema},public -c lock_timeout=3000 -c jit=off -c max_parallel_workers_per_gather=0`);
+    const values: Partial<BackendEnv> = { DATABASE_URL: url.toString(),DATABASE_QUERY_TIMEOUT_MS: 15000,DATABASE_POOL_MIN: 0,DATABASE_POOL_MAX: 2,DATABASE_SSL: false };
+    database = new DatabaseService({ get: (key: keyof BackendEnv) => values[key] } as ConfigService<BackendEnv,true>,
+      { measure: <T>(sql: string, operation: () => Promise<T>) => { onQuery?.(sql); return operation(); } } as PerformanceQueryTelemetryService);
+    repository = new PgCutRepository(database,freecut,config);
+  },30000);
+  afterAll(async () => {
+    vi.unstubAllEnvs(); await database?.onModuleDestroy();
+    try { await db.query(`SET search_path=public; DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      expect((await db.query('SELECT 1 FROM pg_namespace WHERE nspname=$1',[schema])).rows).toHaveLength(0);
+    } finally { await db.end(); }
+  });
+  async function fixture(material=1, vacuum=true) {
+    const orderId=++sequence,detailId=orderId*10,cutJobId=orderId;
+    await db.query(`INSERT INTO orders(order_id,order_name,project_id,order_date,order_kind,delete_flag,version,order_status_id,payment_status_id,created_by)
+      VALUES($1,$2,1,'2026-09-22','production_order',false,1,4,1,1)`,[orderId,`E2E bath ${orderId}`]);
+    await db.query(`INSERT INTO order_details(detail_id,order_id,detail_number,detail_name,quantity,height,width,production_status_id,
+      delete_flag,sheet_material_type_id,version,updated_at) VALUES($1,$2,1,'E2E own',2,200,100,1,false,$4,1,now()),
+      ($3,$2,2,'E2E outside bath',1,200,100,1,false,1,1,now())`,[detailId,orderId,detailId+1,material]);
+    const params={ ...await config.getDefaultParams(),layout_mode: vacuum ? 'vacuum_table' : 'guillotine' };
+    await db.query(`INSERT INTO cut_job(cut_job_id,name,status,version,source,params,rotation_allowed,combine_films,split_by_material)
+      VALUES($1,$2,'draft',1,'manual',$3::jsonb,true,false,true)`,[cutJobId,`E2E bath ${cutJobId}`,JSON.stringify(params)]);
+    await db.query(`INSERT INTO cut_job_item(cut_job_id,source_type,order_id,order_detail_id,freecut_item_id,qty,is_active)
+      VALUES($1,'order_detail',$2,$3,$4,2,true)`,[cutJobId,orderId,detailId,`det-${detailId}`]);
+    const command=()=>({ currentUser: user,cutJobId,version: 1,commandId: randomUUID(),requestId: 'E2E bath calculate' });
+    return { orderId,detailId,cutJobId,command };
+  }
+  const counts=async()=> (await db.query(`SELECT (SELECT count(*) FROM cut_result) results,
+    (SELECT count(*) FROM mdf_evidence_revisions) receipts,(SELECT count(*) FROM mdf_recalculation_jobs) jobs,
+    (SELECT count(*) FROM audit_log) audits,(SELECT count(*) FROM outbox_events) outbox`)).rows[0];
+  const resultId=async(job:number)=>Number((await db.query('SELECT current_cut_result_id FROM cut_job WHERE cut_job_id=$1',[job])).rows[0].current_cut_result_id);
+  async function assertSettled(job:number,commandId:string,code:string,before:Awaited<ReturnType<typeof counts>>) {
+    const after=await counts(); expect(after).toMatchObject({ results:before.results,receipts:before.receipts,jobs:before.jobs });
+    expect(Number(after.audits)).toBe(Number(before.audits)+1); expect(Number(after.outbox)).toBe(Number(before.outbox)+1);
+    expect((await db.query('SELECT status FROM cut_job WHERE cut_job_id=$1',[job])).rows[0].status).toBe('draft');
+    expect((await db.query('SELECT status,owner_token,failure_code FROM cut_result_command WHERE cut_job_id=$1 AND command_id=$2',[job,commandId])).rows[0])
+      .toEqual({ status:'failed',owner_token:null,failure_code:code });
+    expect((await db.query('SELECT event,metadata_json FROM audit_log WHERE entity_type=$1 AND entity_id=$2',['cut_job',String(job)])).rows[0])
+      .toMatchObject({ event:'cut_job.calculate_rejected',metadata_json:{ code,commandId } });
+  }
+
+  it.each([1,2])('actual calculation material %s commits membership, audit and outbox once; worker publishes without physical credit',async material=>{
+    const f=await fixture(material),command=f.command();
+    await repository.calculate(command);
+    const id=await resultId(f.cutJobId),sourceId=`cut-result:${id}`,before=await counts();
+    await repository.calculate(command); expect(await counts()).toEqual(before);
+    expect((await db.query('SELECT stage_code,evidence_kind,quantity FROM mdf_evidence_lines WHERE source_id=$1',[sourceId])).rows)
+      .toEqual([{ stage_code: 'membership',evidence_kind: 'derived',quantity: '2' }]);
+    expect((await db.query("SELECT metadata_json->>'mdfJobId' job FROM audit_log WHERE event='cut_job.calculated' AND entity_id=$1",[String(f.cutJobId)])).rows[0]?.job)
+      .toEqual(expect.any(String));
+    expect(await runner().processOne()).toMatchObject({ status: 'done' });
+    const board=await readMdfPublishedSnapshot(database,user,{ focus: { kind: 'bath',id: sourceId } });
+    expect(board.cards.find(c=>c.kind==='bath' && c.id===sourceId)).toMatchObject({ column: 'baths',issues: [],acceptedRevision: `bath-created:${id}` });
+    expect((await db.query('SELECT credited_cut,credited_rolled FROM mdf_published_positions WHERE detail_id=$1',[f.detailId])).rows[0])
+      .toEqual({ credited_cut: '0',credited_rolled: '0' });
+    expect((await db.query('SELECT production_status_id FROM order_details WHERE order_id=$1 ORDER BY detail_id',[f.orderId])).rows)
+      .toEqual([{ production_status_id: 1 },{ production_status_id: 1 }]);
+    expect((await db.query('SELECT count(*) FROM cnc_telegram_packets WHERE svg_cut_result_id=$1',[id])).rows[0].count).toBe('0');
+  });
+  it.each([3,4])('non-MDF material %s keeps the calculated result but creates no MDF receipt',async material=>{
+    const f=await fixture(material),before=await counts(); await repository.calculate(f.command());
+    expect((await counts()).receipts).toBe(before.receipts);
+  });
+  it('ordinary non-vacuum calculation creates no bath',async()=>{
+    const f=await fixture(1,false),before=await counts(); await repository.calculate(f.command()); expect((await counts()).receipts).toBe(before.receipts);
+  });
+  it('recalculation quarantines new membership and preserves the old accepted source',async()=>{
+    const f=await fixture(),command=f.command(); await repository.calculate(command); await runner().processOne();
+    const old=await resultId(f.cutJobId);
+    const version=Number((await db.query('SELECT version FROM cut_job WHERE cut_job_id=$1',[f.cutJobId])).rows[0].version);
+    await repository.calculate({ ...command,commandId: randomUUID(),version });
+    const id=await resultId(f.cutJobId); expect(id).not.toBe(old);
+    expect((await db.query("SELECT accepted_revision_key FROM mdf_source_heads WHERE source_kind='bath' AND source_id=$1",[`cut-result:${id}`])).rows[0].accepted_revision_key).toBeNull();
+    expect((await db.query("SELECT accepted_revision_key FROM mdf_source_heads WHERE source_kind='bath' AND source_id=$1",[`cut-result:${old}`])).rows[0].accepted_revision_key).toBe(`bath-created:${old}`);
+    expect(await runner().processOne()).toMatchObject({ status: 'done' });
+    const board=await readMdfPublishedSnapshot(database,user,{ focus: { kind: 'bath',id: `cut-result:${id}` } });
+    expect(board.cards.find(c=>c.id===`cut-result:${id}`)?.issues.length).toBeGreaterThan(0);
+  });
+  it('replay reauthorizes frozen result owners after the current basket is empty',async()=>{
+    const f=await fixture(),command=f.command(); await repository.calculate(command); await runner().processOne();
+    await db.query('UPDATE cut_job_item SET is_active=false WHERE cut_job_id=$1',[f.cutJobId]);
+    await db.query('UPDATE orders SET created_by=999 WHERE order_id=$1',[f.orderId]);
+    const base=rolePolicyForUser(user),restricted={ ...user,policyScopes: { ...base,orders: { ...base.orders,view: 'own' as const } } };
+    const before=await counts(); await expect(repository.calculate({ ...command,currentUser: restricted })).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    expect(await counts()).toEqual(before);
+  });
+  it('detail changes during freecut reject persistence without a failed-job mutation or receipt',async()=>{
+    const f=await fixture(),before=await counts(),command=f.command();
+    duringOptimize=async()=>{ await db.query('UPDATE order_details SET quantity=7 WHERE detail_id=$1',[f.detailId]); };
+    try { await expect(repository.calculate(command)).rejects.toMatchObject({ code: 'MDF_CUT_SCOPE_CHANGED' }); }
+    finally { duringOptimize=undefined; }
+    await assertSettled(f.cutJobId,command.commandId,'MDF_CUT_SCOPE_CHANGED',before);
+  });
+  it('read-only rejection precedes every domain write and never marks calculation failed',async()=>{
+    const f=await fixture(),before=await counts(); await db.query("UPDATE mdf_engine_state SET mode='read_only'");
+    try { await expect(repository.calculate(f.command())).rejects.toMatchObject({ code: 'MDF_ENGINE_READ_ONLY' }); }
+    finally { await db.query("UPDATE mdf_engine_state SET mode='active'"); }
+    expect(await counts()).toEqual(before);
+    expect((await db.query('SELECT status FROM cut_job WHERE cut_job_id=$1',[f.cutJobId])).rows[0].status).toBe('draft');
+  });
+  it('real BASIS cut supply readies the new bath; lamination updates only its own position',async()=>{
+    const f=await fixture(); await repository.calculate(f.command()); await runner().processOne();
+    const bathId=`cut-result:${await resultId(f.cutJobId)}`;
+    const set=await new PgBazisCutRepository(database).create({ currentUser:user,orderId:f.orderId,detailIds:[f.detailId],
+      idempotencyKey:`E2E-${randomUUID()}`,requestId:'E2E real cutting supply' });
+    await runner().processOne();
+    const mover=new PgMdfBoardManualMoveRepository(database);
+    const actor={ ...user,permissions:[...user.permissions,'orders.update','production.tasks.update','orders.change_production_status'] } as CurrentUser;
+    const setId=String(set.set.bazisCutSetId);
+    const setBoard=await readMdfPublishedSnapshot(database,user,{ focus:{ kind:'bazisCutSet',id:setId } });
+    await mover.upsert({ currentUser:actor,cardKind:'bazisCutSet',cardId:setId,targetColumn:'completed',
+      sourceToken:setBoard.cards.find(c=>c.kind==='bazisCutSet' && c.id===setId)!.commandToken!,idempotencyKey:`E2E-${randomUUID()}`,requestId:'E2E cut supply' });
+    expect(await runner().processOne()).toMatchObject({ status:'done' });
+    const board=await readMdfPublishedSnapshot(database,user,{ focus:{ kind:'bath',id:bathId } });
+    const bath=board.cards.find(c=>c.kind==='bath' && c.id===bathId)!; expect(bath.column).toBe('baths_ready');
+    await mover.upsert({ currentUser:actor,cardKind:'bath',cardId:bathId,targetColumn:'baths_laminated',sourceToken:bath.commandToken!,
+      idempotencyKey:`E2E-${randomUUID()}`,requestId:'E2E own bath lamination' });
+    expect(await runner().processOne()).toMatchObject({ status:'done' });
+    expect((await db.query('SELECT production_status_id FROM order_details WHERE order_id=$1 ORDER BY detail_id',[f.orderId])).rows)
+      .toEqual([{ production_status_id:4 },{ production_status_id:1 }]);
+    expect((await db.query('SELECT credited_cut,credited_rolled FROM mdf_published_positions WHERE detail_id=$1',[f.detailId])).rows[0])
+      .toEqual({ credited_cut:'0',credited_rolled:'2' }); // Exclusive stage counters: rolled leaves the cut-only bucket.
+  });
+  it.each(['legacy','active'])('existing typed-HDF projection rejection in %s never creates MDF evidence',async mode=>{
+    const f=await fixture();
+    await db.query(`INSERT INTO order_hdf_details(order_hdf_detail_id,order_id,hdf_sheet_material_name,hdf_sheet_material_type_id,
+      source_detail_number,source_detail_name,hdf_height_mm,hdf_width_mm,quantity,delete_flag,status,config_revision)
+      VALUES($1,$1,'MDF 10 mm',1,1,'E2E typed HDF',200,100,2,false,'ok',1)`,[f.orderId]);
+    await db.query(`UPDATE cut_job_item SET source_type='order_hdf_detail',order_hdf_detail_id=$2,order_detail_id=NULL,
+      freecut_item_id=$3 WHERE cut_job_id=$1`,[f.cutJobId,f.orderId,`hdf-${f.orderId}`]);
+    const before=await counts(); await db.query('UPDATE mdf_engine_state SET mode=$1',[mode]);
+    // Existing projector153 only recognizes det-* identities. Preserve this
+    // fail-closed baseline; do not bypass it to manufacture a green HDF test.
+    try { await expect(repository.calculate(f.command())).rejects.toMatchObject({ code:'CUT_CALCULATE_FAILED' }); }
+    finally { await db.query("UPDATE mdf_engine_state SET mode='active'"); }
+    const diagnostic=(await db.query('SELECT metadata_json FROM audit_log WHERE entity_type=$1 AND entity_id=$2',['cut_job',String(f.cutJobId)])).rows;
+    expect(diagnostic[0].metadata_json.error).toContain(`unknown item hdf-${f.orderId}`);
+    expect((await counts()).receipts).toBe(before.receipts);
+  });
+  it('a position split across baths is valid membership, never full-order readiness',async()=>{
+    const f=await fixture(); await db.query('UPDATE order_details SET quantity=4 WHERE detail_id=$1',[f.detailId]);
+    await repository.calculate(f.command()); expect(await runner().processOne()).toMatchObject({ status:'done' });
+    const id=await resultId(f.cutJobId),sourceId=`cut-result:${id}`;
+    expect((await db.query('SELECT quantity FROM mdf_evidence_lines WHERE source_id=$1',[sourceId])).rows).toEqual([{ quantity:'2' }]);
+    expect((await db.query('SELECT quantity FROM mdf_revision_demand WHERE source_id=$1 AND detail_id=$2',[sourceId,f.detailId])).rows).toEqual([{ quantity:'4' }]);
+    expect((await db.query('SELECT credited_cut,credited_rolled,remaining FROM mdf_published_positions WHERE detail_id=$1',[f.detailId])).rows[0])
+      .toEqual({ credited_cut:'0',credited_rolled:'0',remaining:'4' });
+  });
+  it('mixed-owner denial is atomic and happens before external calculation',async()=>{
+    const a=await fixture(),b=await fixture();
+    await db.query(`UPDATE cut_job_item SET cut_job_id=$1 WHERE cut_job_id=$2`,[a.cutJobId,b.cutJobId]);
+    await db.query('UPDATE orders SET created_by=999 WHERE order_id=$1',[b.orderId]);
+    const base=rolePolicyForUser(user),restricted={ ...user,policyScopes:{ ...base,orders:{ ...base.orders,view:'own' as const } } };
+    const before=await counts(); duringOptimize=async()=>{ throw new Error('Must not call Freecut'); };
+    try { await expect(repository.calculate({ ...a.command(),currentUser:restricted })).rejects.toMatchObject({ code:'PERMISSION_DENIED' }); }
+    finally { duringOptimize=undefined; }
+    expect(await counts()).toEqual(before);
+    expect((await db.query('SELECT status FROM cut_job WHERE cut_job_id=$1',[a.cutJobId])).rows[0].status).toBe('draft');
+  });
+  it('receipt storage failure rolls back result, successful audit, outbox and job',async()=>{
+    const f=await fixture(),before=await counts();
+    await db.query(`CREATE FUNCTION e2e_reject_receipt() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'E2E receipt failure'; END $$;
+      CREATE TRIGGER e2e_reject_receipt BEFORE INSERT ON mdf_evidence_revisions FOR EACH ROW EXECUTE FUNCTION e2e_reject_receipt()`);
+    try { await expect(repository.calculate(f.command())).rejects.toMatchObject({ code:'CUT_CALCULATE_FAILED' }); }
+    finally { await db.query('DROP TRIGGER e2e_reject_receipt ON mdf_evidence_revisions'); }
+    const after=await counts(); expect(after).toMatchObject({ results:before.results,receipts:before.receipts,jobs:before.jobs,outbox:before.outbox });
+    expect((await db.query('SELECT event FROM audit_log WHERE entity_type=$1 AND entity_id=$2',['cut_job',String(f.cutJobId)])).rows)
+      .toEqual([{ event:'cut_job.calculate_failed' }]);
+  });
+  it('incomplete projection rejects the result atomically without marking the job failed',async()=>{
+    const f=await fixture(),before=await counts(),command=f.command();
+    await db.query(`CREATE FUNCTION e2e_incomplete_projection() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      UPDATE cut_result_label_map_projection SET placement_count=placement_count+1 WHERE cut_result_id=NEW.cut_result_id; RETURN NEW; END $$;
+      CREATE TRIGGER z_e2e_incomplete_projection AFTER INSERT ON cut_result FOR EACH ROW EXECUTE FUNCTION e2e_incomplete_projection()`);
+    try { await expect(repository.calculate(command)).rejects.toMatchObject({ code:'MDF_CUT_SOURCE_INVALID' }); }
+    finally { await db.query('DROP TRIGGER z_e2e_incomplete_projection ON cut_result'); }
+    await assertSettled(f.cutJobId,command.commandId,'MDF_CUT_SOURCE_INVALID',before);
+  });
+  it.each([false,true])('read_only during external calculation settles only the owned lease, optimizer failure=%s',async optimizerFails=>{
+    const f=await fixture(),command=f.command(),before=await counts();
+    duringOptimize=async()=>{
+      await db.query(`BEGIN; SELECT pg_advisory_xact_lock(hashtextextended('mdf-engine-cutover',0));
+        UPDATE mdf_engine_state SET mode='read_only'; COMMIT`);
+      if(optimizerFails) throw new ApiError(504,'FREECUT_TIMEOUT','E2E original timeout');
+    };
+    const code=optimizerFails?'FREECUT_TIMEOUT':'MDF_ENGINE_READ_ONLY';
+    try { await expect(repository.calculate(command)).rejects.toMatchObject({ code }); }
+    finally { duringOptimize=undefined; await db.query("UPDATE mdf_engine_state SET mode='active'"); }
+    await assertSettled(f.cutJobId,command.commandId,code,before);
+    expect((await db.query('SELECT count(*) FROM cut_group WHERE cut_job_id=$1',[f.cutJobId])).rows[0].count).toBe('0');
+  });
+  it('settlement cannot close another executor owner token',async()=>{
+    const f=await fixture(),command=f.command(),before=await counts(),otherToken=randomUUID();
+    duringOptimize=async()=>{ await db.query('UPDATE cut_result_command SET owner_token=$2 WHERE cut_job_id=$1',[f.cutJobId,otherToken]); };
+    try { await expect(repository.calculate(command)).rejects.toMatchObject({ code:'CUT_RESULT_COMMAND_ABANDONED' }); }
+    finally { duringOptimize=undefined; }
+    expect(await counts()).toEqual(before);
+    expect((await db.query('SELECT owner_token,status FROM cut_result_command WHERE cut_job_id=$1',[f.cutJobId])).rows[0])
+      .toEqual({ owner_token:otherToken,status:'in_progress' });
+  });
+  it('detail writer racing owner acquisition causes a Phase 1 rejection, not a manufactured failure',async()=>{
+    const f=await fixture(),before=await counts(); await db.query('BEGIN');
+    await db.query('UPDATE order_details SET quantity=5 WHERE detail_id=$1',[f.detailId]);
+    let timer:ReturnType<typeof setTimeout>|undefined;
+    const reached=new Promise<void>((resolve,reject)=>{ timer=setTimeout(()=>reject(new Error('E2E detail lock not reached')),2500);
+      onQuery=sql=>{ if(sql.includes('SELECT detail_id FROM order_details') && sql.includes('FOR UPDATE')) resolve(); }; });
+    const pending=repository.calculate(f.command()); const assertion=expect(pending).rejects.toMatchObject({ code:'MDF_CUT_SCOPE_CHANGED' });
+    try { await reached; await db.query('COMMIT'); await assertion; }
+    finally { clearTimeout(timer); onQuery=undefined; await db.query('ROLLBACK'); await pending.catch(()=>undefined); }
+    expect(await counts()).toEqual(before);
+    expect((await db.query('SELECT status FROM cut_job WHERE cut_job_id=$1',[f.cutJobId])).rows[0].status).toBe('draft');
+  });
+  it('worker failure cannot erase the committed calculated result; retry publishes it',async()=>{
+    const f=await fixture(); await repository.calculate(f.command()); const id=await resultId(f.cutJobId);
+    const failed=new MdfJobRunner(database,async()=>{ throw new Error('E2E executor unavailable'); });
+    expect(await failed.processOne()).toMatchObject({ status:'retry' });
+    expect(await resultId(f.cutJobId)).toBe(id);
+    await db.query("UPDATE mdf_recalculation_jobs SET next_attempt_at=now() WHERE source_kind='bath' AND source_id=$1",[`cut-result:${id}`]);
+    expect(await runner().processOne()).toMatchObject({ status:'done' });
+  });
+});

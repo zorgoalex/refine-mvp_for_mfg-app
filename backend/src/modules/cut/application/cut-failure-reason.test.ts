@@ -85,6 +85,11 @@ describe('describeCutFailure', () => {
 });
 
 describe('shouldMarkCutFailed', () => {
+  it.each(['MDF_ENGINE_READ_ONLY', 'MDF_WRITER_NOT_CONNECTED', 'MDF_ENGINE_STATE_UNAVAILABLE',
+    'MDF_COMMAND_BOUNDARY_REQUIRED', 'MDF_CUT_SCOPE_CHANGED', 'MDF_CUT_SOURCE_INVALID'])
+  ('does not mutate a cut job after MDF precondition rejection: %s', code => {
+    expect(shouldMarkCutFailed(new ApiError(409, code, 'E2E rejection'))).toBe(false);
+  });
   it('returns false for precondition/concurrency codes (do not mark failed)', () => {
     for (const code of [
       'CUT_STALE_VERSION',

@@ -51,6 +51,14 @@ describe('MDF command transaction boundary', () => {
       .toEqual({ mode: 'read_only', queued: true });
   });
 
+  it('allows only the dedicated private cut-lease settlement in read_only',async()=>{
+    const f=transaction('read_only');
+    expect(await enterMdfCommand(f.tx,{ writer:'cut.calculate.settlement',capability:'cut-settlement' }))
+      .toEqual({ mode:'read_only',queued:true });
+    await expect(enterMdfCommand(f.tx,{ writer:'manual-move',capability:'cut-settlement' })).rejects.toMatchObject({ code:'MDF_WRITER_NOT_CONNECTED' });
+    await expect(enterMdfCommand(f.tx,{ writer:'manual-move',capability:'queued' })).rejects.toMatchObject({ code:'MDF_ENGINE_READ_ONLY' });
+  });
+
   it('shares one fence and mode snapshot across concurrent nested entry calls', async () => {
     const f = transaction('active');
     await Promise.all(Array.from({ length: 5 }, () => enterMdfCommand(f.tx,

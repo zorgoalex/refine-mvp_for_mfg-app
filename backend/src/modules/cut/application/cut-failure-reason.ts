@@ -53,6 +53,12 @@ const PASSTHROUGH_CODES = new Set<string>([
   'CUT_SHEET_MATERIAL_NOT_CUTTABLE',
   'PERMISSION_DENIED',
   'AUTH_REQUIRED',
+  'MDF_ENGINE_READ_ONLY',
+  'MDF_WRITER_NOT_CONNECTED',
+  'MDF_ENGINE_STATE_UNAVAILABLE',
+  'MDF_COMMAND_BOUNDARY_REQUIRED',
+  'MDF_CUT_SCOPE_CHANGED',
+  'MDF_CUT_SOURCE_INVALID',
 ]);
 
 /** Known freecut + cut-domain validation codes → operator reasons. */
@@ -118,7 +124,7 @@ export function extractCutFailureStatus(error: unknown): number {
  */
 export function shouldMarkCutFailed(error: unknown): boolean {
   const code = extractCode(error);
-  return code === null || !PASSTHROUGH_CODES.has(code);
+  return code === null || (!code.startsWith('MDF_') && !PASSTHROUGH_CODES.has(code));
 }
 
 /**

@@ -24,6 +24,7 @@ export const CUT_AUDIT_EVENTS = {
   resultUnarchived: 'cut_job.result_unarchived',
   currentResultChanged: 'cut_job.current_result_changed',
   calculateFailed: 'cut_job.calculate_failed',
+  calculateRejected: 'cut_job.calculate_rejected',
   permissionDenied: 'cut_job.permission_denied',
   profileChanged: 'cut_job.profile_changed',
   sheetMaterialChanged: 'cut_job.sheet_material_changed',

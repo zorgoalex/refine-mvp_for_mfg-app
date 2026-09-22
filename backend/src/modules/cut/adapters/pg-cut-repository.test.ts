@@ -19,6 +19,20 @@ import {
 
 const repositorySource = readFileSync(new URL('./pg-cut-repository.ts', import.meta.url), 'utf8');
 
+vi.mock('../../mdf-board/application/mdf-command-boundary', () => ({
+  requireMdfCommandBoundary: vi.fn().mockResolvedValue({ mode: 'legacy', queued: false }),
+}));
+
+describe('MDF calculation producer ownership', () => {
+  it('fences both calculation phases and captures membership in the actual result transaction', () => {
+    expect(repositorySource).toContain("writer: 'cut.calculate.prepare', capability: 'queued'");
+    expect(repositorySource).toContain("writer: 'cut.calculate.persist', capability: 'queued'");
+    expect(repositorySource).toContain('await captureNewMdfBathResult(tx,');
+    expect(repositorySource).toContain('registerNewMdfBathResult(tx,');
+    expect(repositorySource).toContain('await lockMdfCutOwners(tx,');
+  });
+});
+
 describe('vacuum MDF bath-card lifecycle', () => {
   it('offers delete for a visible bath and create for a hidden bath', () => {
     const common = {

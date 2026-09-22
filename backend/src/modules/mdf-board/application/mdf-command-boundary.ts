@@ -5,7 +5,7 @@ export type MdfEngineMode = 'legacy' | 'shadow' | 'active' | 'read_only';
 export interface MdfCommandWriter {
   /** Server-defined owner, never an HTTP parameter or inferred SQL classification. */
   writer: string;
-  capability: 'legacy-only' | 'queued' | 'cnc-receipt';
+  capability: 'legacy-only' | 'queued' | 'cnc-receipt' | 'cut-settlement';
 }
 const modes = new WeakMap<TransactionClient, Promise<MdfEngineMode>>();
 
@@ -39,7 +39,13 @@ export async function requireMdfCommandBoundary(tx: TransactionClient, input: Md
 export function discardMdfCommandBoundary(tx: TransactionClient): void { modes.delete(tx); }
 
 function checkCapability(mode: MdfEngineMode, input: MdfCommandWriter) {
-  if (mode === 'read_only' && input.capability !== 'cnc-receipt') {
+  // Only closes an already-owned external calculation attempt. This protocol
+  // cannot create production evidence, mutate details or dispatch board rules.
+  const settlement = input.capability === 'cut-settlement' && input.writer === 'cut.calculate.settlement';
+  if (input.capability === 'cut-settlement' && !settlement) {
+    throw new ApiError(503,'MDF_WRITER_NOT_CONNECTED','Недопустимый обработчик завершения расчёта');
+  }
+  if (mode === 'read_only' && input.capability !== 'cnc-receipt' && !settlement) {
     throw new ApiError(409, 'MDF_ENGINE_READ_ONLY', 'Производственный учёт временно доступен только для чтения');
   }
   if (mode === 'active' && input.capability === 'legacy-only') {

@@ -171,6 +171,8 @@ import {
 } from '../errors/cut.errors';
 import type { LabelCustomExpressionScalar } from '../../labels/application/label-custom-field-expression';
 import { dispatchMdfBoardEvent, evaluateMdfOrderMachineFilesPresentAutomation } from '../../status-automation/application/status-automation-runtime';
+import { requireMdfCommandBoundary } from '../../mdf-board/application/mdf-command-boundary';
+import { captureNewMdfBathResult, lockMdfCutOwners, recheckMdfCutOwners, registerNewMdfBathResult } from '../../mdf-board/adapters/mdf-cut-source';
 
 const AUDIT_SOURCE = 'backend-cut-command';
 const MANUAL_SVG_CHAT_ID = 'erp-manual-svg-upload';
@@ -971,7 +973,9 @@ export class PgCutRepository implements CutRepositoryPort {
     const prep = await this.database
       .transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
+      const mdfScope = await lockMdfCutOwners(tx, { cutJobId: command.cutJobId,commandId: command.commandId,user: command.currentUser });
       const job = await loadJobForUpdate(tx, command.cutJobId);
+      await recheckMdfCutOwners(tx,command);
 
       const priorCommand = await tx.query<{
         command_type: string;
@@ -995,7 +999,7 @@ export class PgCutRepository implements CutRepositoryPort {
           throw new ApiError(409, 'CUT_RESULT_COMMAND_CONFLICT', 'commandId уже использован с другим запросом');
         }
         if (prior.status === 'completed' && prior.cut_result_id !== null) {
-          return { kind: 'completed' as const, cutResultId: toNum(prior.cut_result_id) };
+          return { kind: 'completed' as const, cutResultId: toNum(prior.cut_result_id),mdfQueued: mdfScope !== undefined };
         }
         if (prior.status === 'failed') {
           throw new ApiError(409, 'CUT_RESULT_COMMAND_FAILED', 'Команда раскроя уже завершилась ошибкой', {
@@ -1208,8 +1212,8 @@ export class PgCutRepository implements CutRepositoryPort {
         sheetTypes: basisSheetTypes,
       });
 
-      return { kind: 'new' as const, groupPreps, params, expectedVersion: job.version + 1, calcBasis, calcParams: params };
-      })
+      return { kind: 'new' as const, groupPreps, params, expectedVersion: job.version + 1, calcBasis, calcParams: params,mdfScope };
+      },{ mdf: { writer: 'cut.calculate.prepare', capability: 'queued' } })
       // A Phase 1 validation failure (no items / no sheet spec / instance|body
       // limit) is a calculation outcome: persist a matching reason. Guard on the
       // version the calc STARTED with (prep rolled back, so it is unchanged) — if a
@@ -1219,7 +1223,7 @@ export class PgCutRepository implements CutRepositoryPort {
       .catch((error) => this.markCalcFailed(error, command, phase1Related, command.version));
 
     if (prep.kind === 'completed') {
-      await this.ensureAutoBathCard(command, prep.cutResultId);
+      if (!prep.mdfQueued) await this.ensureAutoBathCard(command, prep.cutResultId);
       return this.getJob({
         currentUser: command.currentUser,
         cutJobId: command.cutJobId,
@@ -1281,11 +1285,12 @@ export class PgCutRepository implements CutRepositoryPort {
       // A freecut failure fails the WHOLE job. Guard the status write on THIS
       // calculation's version so a newer calculate/mutation in flight is not
       // clobbered (supersede-safe).
-      await this.markCalcFailed(
+      await this.finishCalcAfterError(
         error,
         command,
         { orderIds: allOrderIds, sheetMaterialTypeIds: allSheetMaterialTypeIds },
         prep.expectedVersion,
+        ownerToken,
       );
     }
 
@@ -1294,7 +1299,9 @@ export class PgCutRepository implements CutRepositoryPort {
     try {
       persistedResult = await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
+      await lockMdfCutOwners(tx, { cutJobId: command.cutJobId,commandId: command.commandId,user: command.currentUser });
       const job = await loadJobForUpdate(tx, command.cutJobId);
+      await recheckMdfCutOwners(tx,{ ...command,expectedSignature: prep.mdfScope ?? '' });
       assertVersion(job, prep.expectedVersion);
       const ownership = await tx.query(
         `SELECT 1 FROM cut_result_command
@@ -1443,6 +1450,9 @@ export class PgCutRepository implements CutRepositoryPort {
         ),
       });
 
+      const mdfJobId = await captureNewMdfBathResult(tx,{ cutJobId: command.cutJobId,cutResultId: cutResult.cutResultId,
+        user: command.currentUser,requestId: command.requestId ?? command.commandId });
+
       await this.audit(tx, command.currentUser, {
         event: CUT_AUDIT_EVENTS.calculated,
         cutJobId: command.cutJobId,
@@ -1467,6 +1477,7 @@ export class PgCutRepository implements CutRepositoryPort {
           cutNumber: cutResult.cutNumber,
           resultKind: cutResult.resultKind,
           basedOnResultId: cutResult.basedOnResultId,
+          ...(mdfJobId ? { mdfJobId } : {}),
         },
       });
 
@@ -1491,6 +1502,7 @@ export class PgCutRepository implements CutRepositoryPort {
             cutResultId: cutResult.cutResultId,
             resultNo: cutResult.resultNo,
             cutNumber: cutResult.cutNumber,
+            ...(mdfJobId ? { mdfJobId } : {}),
           }),
           // Scope the outbox idempotency key to the JOB: after migration 031 two
           // DIFFERENT jobs can legitimately share an identical detail set / params
@@ -1500,17 +1512,18 @@ export class PgCutRepository implements CutRepositoryPort {
         ],
       );
       return cutResult;
-      });
+      },{ mdf: { writer: 'cut.calculate.persist', capability: 'queued' } });
     } catch (error) {
-      await this.markCalcFailed(
+      await this.finishCalcAfterError(
         error,
         command,
         { orderIds: allOrderIds, sheetMaterialTypeIds: allSheetMaterialTypeIds },
         prep.expectedVersion,
+        ownerToken,
       );
     }
 
-    if (persistedResult && prep.calcParams.layout_mode === 'vacuum_table') {
+    if (persistedResult && prep.mdfScope === undefined && prep.calcParams.layout_mode === 'vacuum_table') {
       await this.ensureAutoBathCard(command, persistedResult.cutResultId);
     }
 
@@ -1525,6 +1538,8 @@ export class PgCutRepository implements CutRepositoryPort {
   private async ensureAutoBathCard(command: CalculateCutJobCommand, cutResultId: number): Promise<void> {
     try {
       await this.database.transaction(async (tx) => {
+        const boundary = await requireMdfCommandBoundary(tx,{ writer: 'cut.calculate.auto-card',capability: 'queued' });
+        if (boundary.queued) return; // Result transaction already queued the bath; no synthetic packet needed.
         await setSessionUser(tx, command.currentUser.id);
         const current = await loadCurrentMdfResultForUpdate(tx, command.cutJobId);
         if (numOrNull(current.current_cut_result_id) !== cutResultId) return;
@@ -1542,7 +1557,7 @@ export class PgCutRepository implements CutRepositoryPort {
           requestId: command.requestId ?? 'cut-job-mdf-bath-card-auto-create',
           currentUser: command.currentUser,
         });
-      });
+      },{ mdf: { writer: 'cut.calculate.auto-card',capability: 'queued' } });
     } catch (error) {
       // Card creation is deliberately non-atomic with calculation. The ready
       // result stays usable and the operator can retry through «Создать карточку».
@@ -1566,6 +1581,45 @@ export class PgCutRepository implements CutRepositoryPort {
         // The calculation response must remain successful even if diagnostic
         // persistence is temporarily unavailable.
       }
+    }
+  }
+
+  /** Phase 1 has committed a lease, but Freecut runs outside a transaction.
+   * A subsequent scope/mode rejection is not a failed manufacturing fact. Close
+   * only OUR exact attempt so the UI can retry with a fresh command/version.
+   * No permission to change details, groups, source heads or physical evidence.
+   */
+  private async finishCalcAfterError(error: unknown,command: CalculateCutJobCommand,
+    related: CalcRelatedDimensions,guardVersion: number,ownerToken: string): Promise<never> {
+    try { return await this.markCalcFailed(error,command,related,guardVersion); }
+    catch (failure) {
+      if (shouldMarkCutFailed(error) && shouldMarkCutFailed(failure)) throw failure;
+      const code = error instanceof ApiError ? error.code : 'CUT_CALCULATION_REJECTED';
+      await this.database.transaction(async tx => {
+        await setSessionUser(tx,command.currentUser.id);
+        // Job before command, matching calculate(). Do not lock unrelated
+        // domain objects: this is a server-owned private-lease settlement.
+        const job = await tx.query(`SELECT 1 FROM cut_job WHERE cut_job_id=$1 AND version=$2
+          AND status='calculating' FOR UPDATE`,[command.cutJobId,guardVersion]);
+        if (!job.rows.length) return;
+        const owned = await tx.query(`UPDATE cut_result_command SET status='failed',failure_code=$5,
+          owner_token=NULL,lease_expires_at=NULL,heartbeat_at=now(),completed_at=now()
+          WHERE cut_job_id=$1 AND command_id=$2::uuid AND owner_token=$3::uuid
+            AND status='in_progress' AND claimed_job_version=$4 RETURNING command_id`,
+        [command.cutJobId,command.commandId,ownerToken,guardVersion,code]);
+        if (!owned.rows.length) return;
+        await tx.query(`UPDATE cut_job SET status='draft',version=version+1,updated_at=now()
+          WHERE cut_job_id=$1 AND version=$2 AND status='calculating'`,[command.cutJobId,guardVersion]);
+        await this.audit(tx,command.currentUser,{ event:CUT_AUDIT_EVENTS.calculateRejected,cutJobId:command.cutJobId,
+          requestId:command.requestId,related,before:{ status:'calculating',version:guardVersion },
+          after:{ status:'draft',version:guardVersion+1 },metadata:{ code,commandId:command.commandId } });
+        await tx.query(`INSERT INTO outbox_events(event_type,aggregate_type,aggregate_id,payload_json,idempotency_key)
+          VALUES($1,'cut_job',$2,$3::jsonb,$4) ON CONFLICT(idempotency_key) DO NOTHING`,
+        [CUT_AUDIT_EVENTS.calculateRejected,String(command.cutJobId),JSON.stringify({ cutJobId:command.cutJobId,
+          commandId:command.commandId,code,actorUserId:command.currentUser.id,requestId:command.requestId ?? command.commandId,
+          orderIds:related.orderIds,status:'draft' }),`${CUT_AUDIT_EVENTS.calculateRejected}:${command.cutJobId}:${command.commandId}`]);
+      },{ mdf:{ writer:'cut.calculate.settlement',capability:'cut-settlement' } });
+      throw error;
     }
   }
 
@@ -1596,6 +1650,9 @@ export class PgCutRepository implements CutRepositoryPort {
     const originalCode = (error as { code?: unknown })?.code;
     await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
+      await lockMdfCutOwners(tx,{ cutJobId: command.cutJobId,commandId: command.commandId,user: command.currentUser });
+      await loadJobForUpdate(tx,command.cutJobId);
+      await recheckMdfCutOwners(tx,command);
       const failed = await tx.query(
         `UPDATE cut_job
          SET status = 'failed', failure_code = $3, failure_reason = $4,
@@ -1648,7 +1705,7 @@ export class PgCutRepository implements CutRepositoryPort {
           failureReason: failure.reason,
         },
       });
-    });
+    },{ mdf: { writer: 'cut.calculate.failed',capability: 'queued' } });
     // Surface the friendly reason; preserve the original HTTP status (422/413/504/
     // ...) when the error carried one (duck-typed), else 500.
     throw new ApiError(extractCutFailureStatus(error), failure.code, failure.reason, {
@@ -2720,6 +2777,7 @@ export class PgCutRepository implements CutRepositoryPort {
     );
     const resultRow = inserted.rows[0];
     const cutResultId = toNum(resultRow.cut_result_id);
+    registerNewMdfBathResult(tx,cutResultId);
 
     const verified = await tx.query<{ snapshot_job: CutJobDto; snapshot_manifest: Record<string, unknown>; snapshot_digest: string; computed_digest: string }>(
       `SELECT snapshot_job, snapshot_manifest, snapshot_digest,
@@ -5425,7 +5483,7 @@ export class PgCutRepository implements CutRepositoryPort {
         ],
       );
       return { kind: 'saved' as const };
-    });
+    },{ mdf: { writer: 'cut.manual-layout',capability: 'legacy-only' } });
 
     // Return the fully enriched job (with manualLayout, editorParams, requiresRecalc)
     // read after the transaction commits. Uses this.getJob which queries this.database.
