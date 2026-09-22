@@ -2134,6 +2134,15 @@ probe_file() {
                      "$(q_con_on mdf_shadow_commands mdf_shadow_commands_check1)" \
                      "$(q_idx idx_mdf_shadow_commands_source)" \
                      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.mdf_shadow_commands') AND tgname='mdf_shadow_commands_immutable' AND tgenabled='O' AND tgfoid=to_regprocedure('public.mdf_reject_evidence_change()'));" ;;
+    177_cut_result_typed_hdf*) probe_all \
+      "SELECT count(*)=2 FROM pg_attribute WHERE attrelid=to_regclass('public.cut_result_placement') AND attname IN ('order_detail_id','order_hdf_detail_id') AND atttypid='bigint'::regtype AND NOT attnotnull AND NOT attisdropped;" \
+      "$(q_con_hash_on chk_cut_result_placement_source_only_order cut_result_placement 62ea16377e0581db7bf34d6683754b9a)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.cut_result_placement') AND conname='chk_cut_result_placement_source_only_order' AND convalidated);" \
+      "$(q_idx_hash idx_cut_result_placement_hdf_candidates 480f25e0d125edc44147aa80299043fd)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('public.idx_cut_result_placement_hdf_candidates') AND indisvalid AND indisready);" \
+      "$(q_fun_hash 'public.cut_result_item_identity(jsonb)' fb5fb2b3032389fe823e46e736796730)" \
+      "$(q_fun_hash 'public.cut_result_snapshot_is_complete(jsonb,jsonb,text)' bca526581a7bed1c793800f93e3e0db7)" \
+      "$(q_fun_hash 'public.project_cut_result_label_maps(bigint)' 5c498726a7bad70cb21c0c3f39c26cfd)" ;;
     176_whatsapp_reply_templates*) probe_all \
                      "$(q_col whatsapp_message_templates body_mode)" \
                      "$(q_col whatsapp_keyword_rules reply_mode)" \
@@ -2200,6 +2209,9 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
+    177_cut_result_typed_hdf*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
     175_mdf_command_placement*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;

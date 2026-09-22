@@ -28,6 +28,7 @@ const memberships = `members AS (
   UNION SELECT 'bath','cut-result:'||p.cut_result_id::text,p.order_id
     FROM cut_result_placement p JOIN cut_result_sheet_map s ON s.cut_result_sheet_map_id=p.cut_result_sheet_map_id AND s.is_effective
     JOIN cut_result_board_projection b ON b.cut_result_id=p.cut_result_id AND b.is_vacuum
+    WHERE p.order_hdf_detail_id IS NULL
   UNION SELECT l.source_kind,l.source_id,l.order_id FROM mdf_evidence_lines l
     JOIN mdf_shadow_commands c USING(source_kind,source_id,revision_key)
     WHERE l.stage_code='membership'

@@ -46,7 +46,8 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF actual event �
       'order_workshops','users','audit_log']) {
       await client.query(`CREATE TABLE ${schema}.${table} AS SELECT * FROM public.${table} WITH NO DATA`);
     }
-    await client.query(`INSERT INTO orders(order_id,order_name,delete_flag,order_kind,version) VALUES(1,'E2E-shadow-order',false,'production_order',1);
+    await client.query(`ALTER TABLE cut_result_placement ADD COLUMN IF NOT EXISTS order_hdf_detail_id bigint;
+      INSERT INTO orders(order_id,order_name,delete_flag,order_kind,version) VALUES(1,'E2E-shadow-order',false,'production_order',1);
       INSERT INTO production_statuses(production_status_id,production_status_code,production_status_name,sort_order)
         VALUES(2,'cut','Распилен',2),(3,'laminated','Закатан',3),(4,'packed','Упакован',4),(5,'issued','Выдан',5);
       INSERT INTO sheet_material_types(sheet_material_type_id,name) VALUES(1,'МДФ 10мм');

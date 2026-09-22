@@ -452,8 +452,14 @@ No timestamp or missing ledger row grants historical trust.
 
 SVG imports, result lifecycle and manual-layout replacement remain unconnected;
 manual-layout writes reject in active mode. Typed HDF is excluded from MDF
-membership even if its material name contains MDF. The existing result-label
-projector still rejects typed `hdf-*` item IDs before MDF capture; this separate
-cutting-projector gap is reproducible in legacy and active modes and remains an
-open activation check. No projection bypass or historical acceptance is added.
+membership even if its material name contains MDF. Migration177 aligns immutable
+snapshot validation and label-map projection with typed `hdf-*` identities.
+HDF placements retain a separate `order_hdf_detail_id`; their `order_detail_id`
+is null, including when both source tables use the same numeric ID. Existing
+snapshots are not rewritten, and HDF supplies no MDF membership or quantity.
+Legacy bath readiness/visibility and shadow comparison scope also exclude typed
+HDF placements; unknown non-HDF placements still block complete composition.
+Apply migration177 before deploying these readers or relying on mixed/HDF
+calculation in either mode.
+No projection bypass or historical acceptance is added.
 Keep engine activation and worker/read flags gated until the full chain is ready.

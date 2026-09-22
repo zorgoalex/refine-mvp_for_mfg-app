@@ -90,6 +90,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
         await db.query(definition.replace('FUNCTION public.',`FUNCTION ${schema}.`));
       }
     }
+    await db.query(readFileSync(new URL('../../../../db/migrations/177_cut_result_typed_hdf.sql',import.meta.url),'utf8'));
     await db.query(`CREATE TRIGGER e2e_project_maps AFTER INSERT ON cut_result FOR EACH ROW EXECUTE FUNCTION project_new_cut_result_label_maps();
       CREATE TRIGGER e2e_project_board AFTER INSERT ON cut_result FOR EACH ROW EXECUTE FUNCTION project_new_cut_result_board_metadata();
       UPDATE mdf_engine_state SET mode='active';
@@ -229,7 +230,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
     expect((await db.query('SELECT credited_cut,credited_rolled FROM mdf_published_positions WHERE detail_id=$1',[f.detailId])).rows[0])
       .toEqual({ credited_cut:'0',credited_rolled:'2' }); // Exclusive stage counters: rolled leaves the cut-only bucket.
   });
-  it.each(['legacy','active'])('existing typed-HDF projection rejection in %s never creates MDF evidence',async mode=>{
+  it.each(['legacy','active'])('typed-HDF calculation in %s saves exact projection without MDF evidence',async mode=>{
     const f=await fixture();
     await db.query(`INSERT INTO order_hdf_details(order_hdf_detail_id,order_id,hdf_sheet_material_name,hdf_sheet_material_type_id,
       source_detail_number,source_detail_name,hdf_height_mm,hdf_width_mm,quantity,delete_flag,status,config_revision)
@@ -237,13 +238,30 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
     await db.query(`UPDATE cut_job_item SET source_type='order_hdf_detail',order_hdf_detail_id=$2,order_detail_id=NULL,
       freecut_item_id=$3 WHERE cut_job_id=$1`,[f.cutJobId,f.orderId,`hdf-${f.orderId}`]);
     const before=await counts(); await db.query('UPDATE mdf_engine_state SET mode=$1',[mode]);
-    // Existing projector153 only recognizes det-* identities. Preserve this
-    // fail-closed baseline; do not bypass it to manufacture a green HDF test.
-    try { await expect(repository.calculate(f.command())).rejects.toMatchObject({ code:'CUT_CALCULATE_FAILED' }); }
+    try { await repository.calculate(f.command()); }
     finally { await db.query("UPDATE mdf_engine_state SET mode='active'"); }
-    const diagnostic=(await db.query('SELECT metadata_json FROM audit_log WHERE entity_type=$1 AND entity_id=$2',['cut_job',String(f.cutJobId)])).rows;
-    expect(diagnostic[0].metadata_json.error).toContain(`unknown item hdf-${f.orderId}`);
+    const id=await resultId(f.cutJobId);
+    expect((await db.query('SELECT item_id,order_detail_id,order_hdf_detail_id FROM cut_result_placement WHERE cut_result_id=$1',[id])).rows)
+      .toEqual(Array.from({length:2},()=>({item_id:`hdf-${f.orderId}`,order_detail_id:null,order_hdf_detail_id:String(f.orderId)})));
+    expect((await db.query('SELECT cut_result_snapshot_is_complete(snapshot_job,snapshot_manifest,snapshot_digest) valid FROM cut_result WHERE cut_result_id=$1',[id])).rows[0].valid).toBe(true);
     expect((await counts()).receipts).toBe(before.receipts);
+  });
+  it('mixed MDF/HDF with the same numeric ID publishes only ordinary MDF membership',async()=>{
+    const f=await fixture();
+    await db.query(`INSERT INTO order_hdf_details(order_hdf_detail_id,order_id,hdf_sheet_material_name,hdf_sheet_material_type_id,
+      source_detail_number,source_detail_name,hdf_height_mm,hdf_width_mm,quantity,delete_flag,status,config_revision)
+      VALUES($1,$2,'MDF 10 mm',1,1,'E2E typed HDF collision',200,100,2,false,'ok',1)`,[f.detailId,f.orderId]);
+    await db.query(`INSERT INTO cut_job_item(cut_job_id,source_type,order_id,order_hdf_detail_id,freecut_item_id,qty,is_active)
+      VALUES($1,'order_hdf_detail',$2,$3,$4,2,true)`,[f.cutJobId,f.orderId,f.detailId,`hdf-${f.detailId}`]);
+    await repository.calculate(f.command());const id=await resultId(f.cutJobId),sourceId=`cut-result:${id}`;
+    expect((await db.query('SELECT item_id,order_detail_id,order_hdf_detail_id FROM cut_result_placement WHERE cut_result_id=$1 ORDER BY item_id,instance',[id])).rows)
+      .toEqual([...Array.from({length:2},()=>({item_id:`det-${f.detailId}`,order_detail_id:String(f.detailId),order_hdf_detail_id:null})),
+        ...Array.from({length:2},()=>({item_id:`hdf-${f.detailId}`,order_detail_id:null,order_hdf_detail_id:String(f.detailId)}))]);
+    expect((await db.query('SELECT line_key,detail_id,quantity FROM mdf_evidence_lines WHERE source_id=$1',[sourceId])).rows)
+      .toEqual([{line_key:`det-${f.detailId}`,detail_id:String(f.detailId),quantity:'2'}]);
+    expect(await runner().processOne()).toMatchObject({status:'done'});
+    expect((await db.query('SELECT credited_cut,credited_rolled,remaining FROM mdf_published_positions WHERE detail_id=$1',[f.detailId])).rows[0])
+      .toEqual({credited_cut:'0',credited_rolled:'0',remaining:'2'});
   });
   it('a position split across baths is valid membership, never full-order readiness',async()=>{
     const f=await fixture(); await db.query('UPDATE order_details SET quantity=4 WHERE detail_id=$1',[f.detailId]);

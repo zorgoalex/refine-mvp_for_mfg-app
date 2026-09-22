@@ -29,6 +29,11 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-09-22", title: "Раскрой: сохранение результатов с ХДФ",
+    services: ["ERP", "Cutting"], repositories: ["repo_erp"],
+    fixed: ["Исправлено сохранение раскроев с позициями ХДФ. МДФ и ХДФ сохраняются раздельно даже при совпадении номеров внутренних записей; ХДФ не участвует в количествах МДФ-доски. История раскроев не переписывается."],
+  },
+  {
     version: APP_VERSION, date: "2026-09-22", title: "МДФ: подключение результатов расчёта ванн",
     services: ["ERP", "Cutting"], repositories: ["repo_erp"],
     added: ["Подготовлена передача новых расчётов ванн в очередь: фиксируется точный состав без автоматического зачёта распила или закатки. Пересчёты требуют проверки, повторы команд не создают дубли."],

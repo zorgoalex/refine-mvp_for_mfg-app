@@ -60,6 +60,7 @@ export async function loadMdfShadowSource(tx: DatabaseClient, source: MdfBoardSo
     LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id=d.sheet_material_type_id
     LEFT JOIN materials m ON m.material_id=d.material_id
     WHERE r.cut_result_id=split_part($2,':',2)::bigint
+      AND p.order_hdf_detail_id IS NULL
     GROUP BY p.order_id,p.order_detail_id,d.order_id,d.detail_id,o.order_id,b.cut_result_id,b.is_vacuum,
       smt.name,m.material_name,r.snapshot_digest,move.move_id,move.version,move.updated_at,move.target_column
     ORDER BY p.order_id,p.order_detail_id
