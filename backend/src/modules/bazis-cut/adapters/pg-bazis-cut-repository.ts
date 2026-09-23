@@ -9,6 +9,7 @@ import { rolePolicyForUser } from '../../../permissions/policies/scope';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { requireMdfCommandBoundary } from '../../mdf-board/application/mdf-command-boundary';
 import { captureNewMdfBazisSource, registerNewMdfBazisSource } from '../../mdf-board/adapters/mdf-bazis-source';
+import { executeMdfBazisRename } from '../../mdf-board/adapters/mdf-bazis-rename';
 import { evaluateMdfOrderMachineFilesPresentAutomation } from '../../status-automation/application/status-automation-runtime';
 import { buildBazisCutXls, buildBazisCutXlsFromTemplate } from '../application/bazis-xls-writer';
 import { ExportTemplatesService } from '../../export-templates/application/export-templates.service';
@@ -362,16 +363,29 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
 
   async rename(command: RenameBazisCutSetCommand): Promise<BazisCutMutationResultDto> {
     return this.database.transaction(async (tx) => {
+      const boundary = await requireMdfCommandBoundary(tx,{ writer: 'bazis.rename',capability: 'queued' });
+      if (boundary.mode === 'read_only') {
+        throw new ApiError(409, 'MDF_ENGINE_READ_ONLY', 'Производственный учёт временно доступен только для чтения');
+      }
       await setSessionUser(tx, command.currentUser);
       const name = command.name.trim();
       const requestHash = hashRequest('bazis_cut_set.rename', command.currentUser,
         { setId: command.setId, expectedVersion: command.expectedVersion, name });
       const replay = await claimIdempotency<BazisCutMutationResultDto>(tx, command.idempotencyKey,
         'bazis_cut_set.rename', actorId(command.currentUser), 'bazis_cut_set', String(command.setId), requestHash);
-      if (replay) return replay;
-      const before = await lockSet(tx, command.setId, command.expectedVersion);
+      if (replay) {
+        if (boundary.mode === 'active') await authorizeRenameReplay(tx, command.currentUser, replay);
+        return replay;
+      }
+      const activeRename = boundary.mode === 'active'
+        ? await executeMdfBazisRename(tx, { setId: command.setId, expectedVersion: command.expectedVersion,
+          name, user: command.currentUser, requestId: command.requestId ?? `bazis-rename-${command.setId}` })
+        : null;
+      const before = activeRename
+        ? { name: activeRename.beforeName, version: activeRename.beforeVersion }
+        : await lockSet(tx, command.setId, command.expectedVersion);
 
-      if (before.name === name) {
+      if (activeRename ? !activeRename.changed : before.name === name) {
         const result = { set: await loadSet(tx, command.setId) };
         await completeIdempotency(tx, command.idempotencyKey, result);
         return result;
@@ -382,12 +396,17 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
         [command.setId, name, actorId(command.currentUser)],
       );
       const set = await loadSet(tx, command.setId);
-      const result = { set };
-      await recordMutation(tx, command.currentUser, command.requestId, 'bazis_cut_set.renamed', command.setId,
-        command.idempotencyKey, { name: before.name, version: before.version }, summaryAudit(set), set, set.details);
+      const mdfJobId = activeRename?.mdfJobId;
+      const result = { set, ...(mdfJobId ? { mdfJobId } : {}) };
+      const auditId = await recordMutation(tx, command.currentUser, command.requestId, 'bazis_cut_set.renamed', command.setId,
+        command.idempotencyKey, { name: before.name, version: before.version }, summaryAudit(set), set, set.details,
+        { ...(mdfJobId ? { mdfJobId, mdfEvidence: 'metadata_only' } : {}) });
+      if (boundary.mode === 'active' && !auditId) {
+        throw new ApiError(500, 'BAZIS_CUT_AUDIT_REQUIRED', 'Не удалось сохранить журнал переименования');
+      }
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
-    },{ mdf: { writer: 'bazis.rename',capability: 'legacy-only' } });
+    },{ mdf: { writer: 'bazis.rename',capability: 'queued' } });
   }
 
   async addDetails(command: AddBazisCutDetailsCommand): Promise<BazisCutMutationResultDto> {
@@ -1066,7 +1085,7 @@ async function nextSortOrder(client: DatabaseClient, setId: number): Promise<num
 async function recordMutation(client: DatabaseClient, user: CurrentUser, requestId: string | undefined,
   event: string, setId: number, idempotencyKey: string, before: Record<string, unknown> | null,
   after: Record<string, unknown> | null, set: BazisCutSetDto,
-  details: readonly BazisCutSetDetailDto[], metadata: Record<string, unknown> = {}): Promise<void> {
+  details: readonly BazisCutSetDetailDto[], metadata: Record<string, unknown> = {}): Promise<string> {
   const dimensions = relatedDimensions(details);
   const canonicalMetadata = {
     actorUserId: actorId(user), requestId: requestId ?? null, setVersion: set.version,
@@ -1074,7 +1093,7 @@ async function recordMutation(client: DatabaseClient, user: CurrentUser, request
     physicalQuantity: details.reduce((sum, detail) => sum + detail.quantity, 0),
     ...dimensions, ...metadata,
   };
-  await auditService.record(client, {
+  const auditId = await auditService.record(client, {
     event, entityType: 'bazis_cut_set', entityId: setId, actorUserId: actorId(user),
     actorUsername: user.username, actorRole: user.role, requestId: requestId ?? `${event}-${setId}`, source: AUDIT_SOURCE,
     relatedOrderId: dimensions.orderIds[0] ?? null, before, after, diff: after ?? {},
@@ -1092,6 +1111,7 @@ async function recordMutation(client: DatabaseClient, user: CurrentUser, request
     [event, String(setId), JSON.stringify(payload),
       `${event}:${setId}:${idempotencyKey}`],
   );
+  return auditId;
 }
 
 function relatedDimensions(details: readonly BazisCutSetDetailDto[]) {
@@ -1274,6 +1294,22 @@ async function authorizeCreationReplay(tx: TransactionClient, user: CurrentUser,
   const ids = response.set.details.map(d => d.sourceOrderId);
   if (!ids.length || ids.some(id => id === null || !Number.isSafeInteger(id) || id <= 0)) throw pickerSelectionStale();
   await lockPickerOrders(tx,user,uniqueNullable(ids),true);
+}
+
+async function authorizeRenameReplay(tx: TransactionClient, user: CurrentUser, response: BazisCutMutationResultDto): Promise<void> {
+  const rawIds = response.set.details.map(detail => detail.sourceOrderId);
+  if (rawIds.some(id => id === null || !Number.isSafeInteger(id) || id <= 0)) {
+    throw new ApiError(409, 'BAZIS_CUT_SET_REPLAY_SCOPE_INVALID', 'Состав набора требует повторной проверки доступа');
+  }
+  const ids = [...new Set(rawIds as number[])].sort((a,b) => a-b);
+  await lockPickerOrders(tx, user, ids, true);
+  if (ids.length) {
+    const production = (await tx.query<{ order_id: number }>(`SELECT order_id::float8 FROM orders
+      WHERE order_id=ANY($1::bigint[]) AND NOT delete_flag AND order_kind='production_order'`, [ids])).rows;
+    if (production.length !== ids.length) {
+      throw new ApiError(409, 'BAZIS_CUT_SET_REPLAY_SCOPE_INVALID', 'Заказ набора больше недоступен');
+    }
+  }
 }
 
 async function lockCreationDetails(tx: TransactionClient, orderId: number, detailIds: number[], hdfDetailIds: number[]): Promise<void> {

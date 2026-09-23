@@ -132,6 +132,24 @@ fully satisfiable baths and never partially reserves an unsatisfiable new bath.
 It cannot persist its own output: the command executor must lock and revalidate
 the complete affected set. Manual bath readiness is not synthetic physical supply.
 
+## BASIS name changes
+
+The active `bazis.rename` command changes metadata, not production evidence.
+For a tracked source it requires verified unchanged membership/demand, a settled
+current source job and a matching clean published card. It copies the exact
+evidence into a new metadata revision with no pinned status rules. A pending
+production job cannot be replaced by a rename and silently lose its effects.
+The normal queued accounting pass preserves reserved/consumed bath quantities
+and may allocate already verified eligible stock; a name change never proves
+additional cut or lamination. Set update, receipt, audit, outbox and replay result
+commit together. Replays recheck owner access.
+
+Resolved non-MDF/HDF-only or empty sets without an MDF source need no MDF receipt.
+Historical MDF without accepted evidence and unresolved sources require separate
+reconciliation; renaming cannot establish a baseline. Other BASIS composition
+mutations remain outside this connected path. Legacy/shadow behavior and all
+activation flags stay unchanged.
+
 ## Storage
 
 - Revisions and lines are append-only; a seal permanently closes membership.

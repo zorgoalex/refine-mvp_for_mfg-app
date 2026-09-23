@@ -35,7 +35,8 @@ describe('PgBazisCutRepository security and event contract', () => {
   it('classifies every mutation at transaction entry; unresolved editors cannot bypass active queue ownership', () => {
     for (const writer of ['create','create-picker']) expect(repositorySource)
       .toContain(`{ mdf: { writer: 'bazis.${writer}',capability: 'queued' } }`);
-    for (const writer of ['rename','add-details','update-detail','delete-detail','delete-empty']) expect(repositorySource)
+    expect(repositorySource).toContain(`{ mdf: { writer: 'bazis.rename',capability: 'queued' } }`);
+    for (const writer of ['add-details','update-detail','delete-detail','delete-empty']) expect(repositorySource)
       .toContain(`{ mdf: { writer: 'bazis.${writer}',capability: 'legacy-only' } }`);
     expect(repositorySource).toContain('if (!boundary.queued) await evaluateBazisCutSetMachineFilesPresentAutomation');
   });

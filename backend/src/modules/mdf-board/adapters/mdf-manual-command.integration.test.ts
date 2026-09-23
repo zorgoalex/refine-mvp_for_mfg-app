@@ -25,6 +25,14 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real MDF manual com
   const admin: CurrentUser = { id: '1',username: 'E2E MDF manual',role: 'admin',roleId: 1,
     permissions: ['orders.view','orders.update','production.tasks.update','orders.change_production_status'] };
   const runner = () => new MdfJobRunner(database,executeMdfAcceptedJob);
+  async function runJob(jobId: string) {
+    for (let i=0;i<10;i++) {
+      const result = await runner().processOne();
+      if (result.jobId === jobId) { expect(result.status).toBe('done'); return result; }
+      expect(result.status).not.toBe('idle');
+    }
+    throw new Error('E2E_EXPECTED_JOB_NOT_PROCESSED');
+  }
   beforeAll(async () => {
     vi.stubEnv('BACKEND_STATUS_AUTOMATION','true');
     vi.stubEnv('BACKEND_ENABLE_NOTIFICATION_ENGINE','false');
@@ -123,6 +131,46 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real MDF manual com
     WHERE l.source_kind=$1 AND l.source_id=$2 ORDER BY l.stage_code,l.line_key`,[source.kind,source.id])).rows;
   const audits = async (id: string) => (await db.query("SELECT * FROM audit_log WHERE entity_id=$1 AND event LIKE 'mdf_board.manual_move.%'",[id])).rows;
 
+  async function addBathForPin(f: Awaited<ReturnType<typeof fixture>>, laminated: boolean,
+    detailId = f.detailId,quantity = 4,suffix = 0) {
+    const bathNumericId = 100000 + f.orderId + suffix, bathId = `cut-result:${bathNumericId}`;
+    await db.query(`INSERT INTO cut_result(cut_result_id,created_at,snapshot_digest)
+      VALUES($1,now(),repeat('b',64))`,[bathNumericId]);
+    await db.query(`INSERT INTO cut_result_board_projection(cut_result_id,snapshot_digest,is_vacuum)
+      VALUES($1,repeat('b',64),true)`,[bathNumericId]);
+    await db.query(`INSERT INTO cut_result_sheet_map(cut_result_sheet_map_id,cut_result_id,is_effective)
+      VALUES($1,$1,true)`,[bathNumericId]);
+    await db.query(`INSERT INTO cut_result_placement(cut_result_sheet_map_id,cut_result_id,order_id,order_detail_id)
+      SELECT $1,$1,$2,$3 FROM generate_series(1,$4)`,[bathNumericId,f.orderId,detailId,quantity]);
+    const saved = await database.transaction(tx => recordMdfReceipt(tx,{ sourceKind: 'bath',sourceId: bathId,revisionKey: 'pin-bath',
+      origin: 'manual',actorUserId: 1,requestId: `E2E-pin-bath-${f.orderId}`,causeKey: `pin-bath-${f.orderId}`,
+      expectedFence: null,accept: true,rules: [],lines: [
+        { lineKey: 'own-part',orderId: f.orderId,detailId,quantity,
+          stageCode: 'membership',evidenceKind: 'derived',rework: false },
+        ...(laminated ? [{ lineKey: 'laminated',orderId: f.orderId,detailId,quantity,
+          stageCode: 'laminated',evidenceKind: 'physical' as const,rework: false }] : []),
+      ],executionContext: { sourceCreatedAt: '2026-09-21T00:00:00Z',displayName: 'pin bath',priorColumn: laminated ? 'baths_laminated' : 'baths',
+        compositionComplete: true,demand: [{ orderId: f.orderId,detailId: f.detailId,quantity: 4 },
+          { orderId: f.orderId,detailId: f.detailId+1,quantity: 1 }] } }));
+    await runJob(saved.jobId);
+    return bathId;
+  }
+
+  async function addPartialPhysicalProof(f: Awaited<ReturnType<typeof fixture>>) {
+    const saved = await database.transaction(tx => recordMdfReceipt(tx,{ sourceKind: f.source.kind as 'packet'|'bazisCutSet',
+      sourceId: f.source.id,revisionKey: 'pin-physical',origin: 'derived',actorUserId: 1,
+      requestId: `E2E-pin-physical-${f.orderId}`,causeKey: `pin-physical-${f.orderId}`,
+      expectedFence: { version: '1',correctionEpoch: '0' },accept: true,rules: [],lines: [
+        { lineKey: 'own-part',orderId: f.orderId,detailId: f.detailId,quantity: 4,
+          stageCode: 'membership',evidenceKind: 'derived',rework: false },
+        { lineKey: 'physical-proof',orderId: f.orderId,detailId: f.detailId,quantity: 2,
+          stageCode: 'cut',evidenceKind: 'physical',rework: false },
+      ],executionContext: { sourceCreatedAt: '2026-09-21T00:00:00Z',displayName: `E2E ${f.source.kind}`,
+        priorColumn: 'parsed',compositionComplete: true,demand: [{ orderId: f.orderId,detailId: f.detailId,quantity: 4 },
+          { orderId: f.orderId,detailId: f.detailId+1,quantity: 1 }] } }));
+    await runJob(saved.jobId);
+  }
+
   it.each(['packet','bazisCutSet'] as const)('moves real %s through queue; only its own detail changes', async kind => {
     const f = await fixture(kind);
     const result = await repo.upsert({ ...await f.command(),targetColumn: 'completed' });
@@ -136,13 +184,40 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real MDF manual com
     const board = await readMdfPublishedSnapshot(database,admin,{ dateTo: '2026-09-21' });
     expect(board.cards.find(c => c.kind === kind && c.id === f.source.id)?.commandToken).toBe(await f.token());
   });
-  it('clear keeps confirmed quantity and never calls legacy automation', async () => {
-    const f = await fixture(); await repo.upsert({ ...await f.command(),targetColumn: 'completed' }); await runner().processOne();
+  it('clear keeps confirmed quantity and consumed pins across another real forward advance', async () => {
+    const f = await fixture(); await addBathForPin(f,true); await addPartialPhysicalProof(f);
+    const completed = { ...await f.command(),targetColumn: 'completed' as const };
+    const completedResult = await repo.upsert(completed); await runJob(completedResult.jobId!);
     const before = await ledger(f.source);
+    const beforeHead = (await db.query(`SELECT accepted_revision_key FROM mdf_source_heads
+      WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0].accepted_revision_key;
+    const beforePins = (await db.query<{ allocation_id:string;state:string;quantity:string;revision_key:string;line_key:string }>(
+      `SELECT a.allocation_id::text allocation_id,a.state,a.quantity::text quantity,
+        e.revision_key,e.line_key FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+      WHERE e.source_kind=$1 AND e.source_id=$2 AND a.state<>'released' ORDER BY e.line_key,a.allocation_id`,
+      [f.source.kind,f.source.id])).rows;
+    expect(beforePins).toHaveLength(2);
+    expect(beforePins.every(row => row.state === 'consumed')).toBe(true);
+    const publicationBeforeClear = (await db.query(`SELECT cut_quantity::text cut_quantity,rolled_quantity::text rolled_quantity,
+        credited_cut::text credited_cut,credited_rolled::text credited_rolled,remaining::text remaining
+      FROM mdf_published_positions WHERE detail_id=$1`,[f.detailId])).rows[0];
+    expect(publicationBeforeClear).toEqual({ cut_quantity: '0',rolled_quantity: '4',credited_cut: '0',credited_rolled: '4',remaining: '0' });
     const cleared = await repo.delete(await f.command());
-    expect(cleared.deleted).toBe(true); expect(await runner().processOne()).toMatchObject({ status: 'done' });
+    expect(cleared.deleted).toBe(true); expect(cleared.jobId).toBeTruthy(); await runJob(cleared.jobId!);
     expect(await ledger(f.source)).toEqual(before);
-    expect((await db.query('SELECT credited_cut FROM mdf_published_positions WHERE detail_id=$1',[f.detailId])).rows[0].credited_cut).toBe('4');
+    const afterHead = (await db.query(`SELECT accepted_revision_key FROM mdf_source_heads
+      WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0].accepted_revision_key;
+    expect(afterHead).not.toBe(beforeHead);
+    const afterPins = (await db.query<{ state:string;quantity:string;revision_key:string;line_key:string }>(
+      `SELECT a.state,a.quantity::text quantity,e.revision_key,e.line_key
+      FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+      WHERE e.source_kind=$1 AND e.source_id=$2 AND a.state<>'released' ORDER BY e.line_key,a.allocation_id`,
+      [f.source.kind,f.source.id])).rows;
+    expect(afterPins).toEqual(beforePins.map(row => ({ state: 'consumed',quantity: row.quantity,
+      revision_key: afterHead,line_key: row.line_key })));
+    expect((await db.query(`SELECT cut_quantity::text cut_quantity,rolled_quantity::text rolled_quantity,
+      credited_cut::text credited_cut,credited_rolled::text credited_rolled,remaining::text remaining
+      FROM mdf_published_positions WHERE detail_id=$1`,[f.detailId])).rows[0]).toEqual(publicationBeforeClear);
   });
   it('explicit bath lamination consumes verified cut supply and changes only its own detail', async () => {
     const f = await fixture('bath');
@@ -153,18 +228,161 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real MDF manual com
       executionContext: { sourceCreatedAt: '2026-09-21T00:00:00Z',displayName: 'physical supply',priorColumn: 'parsed',compositionComplete: true,
         demand: [{ orderId: f.orderId,detailId: f.detailId,quantity: 4 },{ orderId: f.orderId,detailId: f.detailId+1,quantity: 1 }] } }));
     expect(await runner().processOne()).toMatchObject({ status: 'done' });
-    await repo.upsert({ ...await f.command(),targetColumn: 'baths_laminated' });
-    expect(await runner().processOne()).toMatchObject({ status: 'done' });
+    const beforeHead = (await db.query(`SELECT accepted_revision_key FROM mdf_source_heads
+      WHERE source_kind='bath' AND source_id=$1`,[f.source.id])).rows[0].accepted_revision_key;
+    const beforePins = (await db.query<{ allocation_id:string;state:string;quantity:string;bath_revision:string;
+      source_kind:string;source_id:string;revision_key:string;line_key:string }>(`SELECT a.allocation_id::text allocation_id,a.state,a.quantity::text quantity,a.bath_revision,
+        e.source_kind,e.source_id,e.revision_key,e.line_key
+      FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+      WHERE a.bath_id=$1 AND a.state<>'released' ORDER BY allocation_id`,[f.source.id])).rows;
+    expect(beforePins).toHaveLength(1);
+    expect(beforePins[0]).toMatchObject({ state: 'reserved',quantity: '4',bath_revision: beforeHead,source_kind: 'packet' });
+    const lamination = await repo.upsert({ ...await f.command(),targetColumn: 'baths_laminated' });
+    await runJob(lamination.jobId!);
+    const laminatedHead = (await db.query(`SELECT accepted_revision_key FROM mdf_source_heads
+      WHERE source_kind='bath' AND source_id=$1`,[f.source.id])).rows[0].accepted_revision_key;
+    expect(laminatedHead).not.toBe(beforeHead);
     expect((await db.query('SELECT production_status_id FROM order_details WHERE order_id=$1 ORDER BY detail_id',[f.orderId])).rows)
       .toEqual([{ production_status_id: 3 },{ production_status_id: 1 }]);
     expect((await db.query("SELECT state,quantity FROM mdf_bath_allocations WHERE bath_id=$1 AND state<>'released'",[f.source.id])).rows)
       .toEqual([{ state: 'consumed',quantity: '4' }]);
+    const pinHistory = (await db.query<{ allocation_id:string;state:string;quantity:string;bath_revision:string;
+      source_kind:string;source_id:string;revision_key:string;line_key:string }>(`SELECT a.allocation_id::text allocation_id,a.state,a.quantity::text quantity,a.bath_revision,
+        e.source_kind,e.source_id,e.revision_key,e.line_key
+      FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+      WHERE a.bath_id=$1 ORDER BY allocation_id`,[f.source.id])).rows;
+    expect(pinHistory).toHaveLength(2);
+    expect(pinHistory.find(row => row.allocation_id === beforePins[0].allocation_id)).toMatchObject({ state: 'released',
+      quantity: '4',bath_revision: beforeHead,source_kind: 'packet' });
+    expect(pinHistory.find(row => row.state === 'consumed')).toMatchObject({ quantity: '4',bath_revision: laminatedHead,
+      source_kind: 'packet',source_id: beforePins[0].source_id,line_key: beforePins[0].line_key });
     expect((await db.query('SELECT credited_rolled FROM mdf_published_positions WHERE detail_id=$1',[f.detailId])).rows[0].credited_rolled).toBe('4');
+    const clear = await repo.delete(await f.command());
+    expect(clear.deleted).toBe(true);
+    expect(clear.jobId).toBeTruthy(); await runJob(clear.jobId!);
+    const clearedHead = (await db.query(`SELECT accepted_revision_key FROM mdf_source_heads
+      WHERE source_kind='bath' AND source_id=$1`,[f.source.id])).rows[0].accepted_revision_key;
+    expect(clearedHead).not.toBe(laminatedHead);
+    expect((await db.query(`SELECT a.state,a.quantity::text quantity,a.bath_revision,e.revision_key,e.line_key
+      FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+      WHERE a.bath_id=$1 AND a.state<>'released'`,[f.source.id])).rows).toEqual([
+        { state: 'consumed',quantity: '4',bath_revision: clearedHead,revision_key: beforePins[0].revision_key,
+          line_key: beforePins[0].line_key },
+      ]);
+    expect((await db.query('SELECT credited_rolled FROM mdf_published_positions WHERE detail_id=$1',[f.detailId])).rows[0].credited_rolled)
+      .toBe('4');
+  });
+
+  it.each(['packet','bazisCutSet'] as const)(
+    'actual %s manual forward command preserves/rebases reserved and consumed physical pins, exact replay adds none', async kind => {
+      for (const laminated of [false,true]) {
+        const f = await fixture(kind);
+        const bathId = await addBathForPin(f,laminated,f.detailId,2);
+        await addPartialPhysicalProof(f);
+        const beforeHead = (await db.query(`SELECT accepted_revision_key FROM mdf_source_heads
+          WHERE source_kind=$1 AND source_id=$2`,[kind,f.source.id])).rows[0].accepted_revision_key;
+        const beforePins = (await db.query<{ allocation_id:string;state:string;quantity:string;bath_revision:string;
+          revision_key:string;line_key:string;source_kind:string;source_id:string }>(`SELECT a.allocation_id::text allocation_id,a.state,a.quantity::text quantity,
+            a.bath_revision,e.revision_key,e.line_key,e.source_kind,e.source_id
+          FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+          WHERE e.source_kind=$1 AND e.source_id=$2 AND e.line_key='physical-proof' AND a.state<>'released'
+          ORDER BY a.allocation_id`,[kind,f.source.id])).rows;
+        expect(beforePins).toHaveLength(1);
+        expect(beforePins[0]).toMatchObject({ state: laminated ? 'consumed' : 'reserved',quantity: '2',
+          bath_revision: 'pin-bath',revision_key: 'pin-physical',line_key: 'physical-proof' });
+
+        const command = { ...await f.command(),targetColumn: 'completed' as const };
+        const saved = await repo.upsert(command);
+        expect(saved).toMatchObject({ changed: true,jobId: expect.any(String) });
+        expect(await runner().processOne()).toMatchObject({ status: 'done',jobId: saved.jobId });
+        const afterHead = (await db.query(`SELECT accepted_revision_key,received_revision_key FROM mdf_source_heads
+          WHERE source_kind=$1 AND source_id=$2`,[kind,f.source.id])).rows[0];
+        expect(afterHead.accepted_revision_key).not.toBe(beforeHead);
+        expect(afterHead.accepted_revision_key).toBe(afterHead.received_revision_key);
+        const pinHistory = (await db.query<{ allocation_id:string;state:string;quantity:string;bath_id:string;order_id:number;
+          detail_id:number;bath_revision:string;revision_key:string;line_key:string;source_kind:string;source_id:string }>(
+          `SELECT a.allocation_id::text allocation_id,a.state,a.quantity::text quantity,
+            a.bath_id,a.order_id::float8 order_id,a.detail_id::float8 detail_id,a.bath_revision,
+            e.revision_key,e.line_key,e.source_kind,e.source_id
+          FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+          WHERE e.source_kind=$1 AND e.source_id=$2 ORDER BY a.allocation_id`,[kind,f.source.id])).rows;
+        expect(pinHistory).toHaveLength(2);
+        expect(pinHistory.find(row => row.allocation_id === beforePins[0].allocation_id)).toMatchObject({
+          state: 'released',quantity: '2',revision_key: 'pin-physical',line_key: 'physical-proof' });
+        const activePin = pinHistory.filter(row => row.state !== 'released');
+        expect(activePin).toHaveLength(1);
+        expect(activePin[0]).toMatchObject({ state: laminated ? 'consumed' : 'reserved',quantity: '2',
+          bath_id: bathId,order_id: f.orderId,detail_id: f.detailId,bath_revision: 'pin-bath',
+          revision_key: afterHead.accepted_revision_key,line_key: 'physical-proof',source_kind: kind,source_id: f.source.id });
+        expect((await db.query(`SELECT count(*)::int count,sum(a.quantity)::text quantity FROM mdf_bath_allocations a
+          JOIN mdf_evidence_lines e USING(evidence_line_id) WHERE e.source_kind=$1 AND e.source_id=$2 AND a.state<>'released'`,
+          [kind,f.source.id])).rows[0]).toEqual({ count: 1,quantity: '2' });
+        const publicationRevision = (await db.query('SELECT published_revision FROM mdf_engine_state WHERE singleton=true')).rows[0].published_revision;
+        expect(await repo.upsert(command)).toEqual(saved);
+        expect(await runner().processOne()).toMatchObject({ status: 'idle' });
+        expect((await db.query('SELECT published_revision FROM mdf_engine_state WHERE singleton=true')).rows[0].published_revision)
+          .toBe(publicationRevision);
+        expect((await db.query(`SELECT count(*)::int count FROM audit_log WHERE event='mdf_board.forward_revision_accepted'
+          AND entity_id=$1`,[`${kind}:${f.source.id}`])).rows[0].count).toBe(1);
+      }
+    });
+
+  it('publication failure rolls compatible advance and pin replacement back, then retry accepts the settled command once', async () => {
+    const f = await fixture('packet');
+    await addBathForPin(f,false,f.detailId,2);
+    await addPartialPhysicalProof(f);
+    const beforeHead = (await db.query(`SELECT accepted_revision_key,received_revision_key FROM mdf_source_heads
+      WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0];
+    const beforePins = (await db.query(`SELECT a.allocation_id::text allocation_id,a.state,a.quantity::text quantity,
+        a.bath_revision,e.revision_key,e.line_key
+      FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+      WHERE e.source_kind=$1 AND e.source_id=$2 ORDER BY a.allocation_id`,[f.source.kind,f.source.id])).rows;
+    const command = { ...await f.command(),targetColumn: 'completed' as const };
+    const saved = await repo.upsert(command);
+    const settledRevision = (await db.query('SELECT received_revision_key FROM mdf_source_heads WHERE source_kind=$1 AND source_id=$2',
+      [f.source.kind,f.source.id])).rows[0].received_revision_key;
+    const publishedBefore = (await db.query('SELECT published_revision FROM mdf_engine_state WHERE singleton=true')).rows[0].published_revision;
+    await db.query(`ALTER TABLE mdf_published_positions ADD CONSTRAINT e2e_manual_publish_failure CHECK(detail_id<>${f.detailId}) NOT VALID`);
+    let retry;
+    try {
+      retry = await runner().processOne();
+      expect(retry).toMatchObject({ status: 'retry',jobId: saved.jobId });
+    } finally {
+      await db.query('ALTER TABLE mdf_published_positions DROP CONSTRAINT e2e_manual_publish_failure');
+    }
+    const rolledBackHead = (await db.query(`SELECT accepted_revision_key,received_revision_key FROM mdf_source_heads
+      WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0];
+    expect(rolledBackHead).toEqual({ accepted_revision_key: beforeHead.accepted_revision_key,
+      received_revision_key: settledRevision });
+    expect((await db.query(`SELECT a.allocation_id::text allocation_id,a.state,a.quantity::text quantity,
+        a.bath_revision,e.revision_key,e.line_key
+      FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+      WHERE e.source_kind=$1 AND e.source_id=$2 ORDER BY a.allocation_id`,[f.source.kind,f.source.id])).rows).toEqual(beforePins);
+    expect((await db.query('SELECT 1 FROM mdf_evidence_revisions WHERE source_kind=$1 AND source_id=$2 AND revision_key=$3',
+      [f.source.kind,f.source.id,settledRevision])).rows).toHaveLength(1);
+    expect((await db.query(`SELECT 1 FROM audit_log WHERE event='mdf_board.forward_revision_accepted' AND entity_id=$1`,
+      [`${f.source.kind}:${f.source.id}`])).rows).toHaveLength(0);
+    expect((await db.query('SELECT published_revision FROM mdf_engine_state WHERE singleton=true')).rows[0].published_revision)
+      .toBe(publishedBefore);
+    expect((await db.query('SELECT status,error_code FROM mdf_recalculation_jobs WHERE job_id=$1',[saved.jobId])).rows[0])
+      .toMatchObject({ status: 'pending',error_code: 'MDF_PROCESSING_FAILED' });
+
+    await db.query('UPDATE mdf_recalculation_jobs SET next_attempt_at=now() WHERE job_id=$1',[saved.jobId]);
+    await runJob(saved.jobId!);
+    const accepted = (await db.query(`SELECT accepted_revision_key FROM mdf_source_heads WHERE source_kind=$1 AND source_id=$2`,
+      [f.source.kind,f.source.id])).rows[0].accepted_revision_key;
+    expect(accepted).toBe(settledRevision);
+    expect((await db.query(`SELECT count(*)::int count FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+      WHERE e.source_kind=$1 AND e.source_id=$2 AND a.state<>'released'`,[f.source.kind,f.source.id])).rows[0].count).toBe(1);
+    expect((await db.query(`SELECT count(*)::int count FROM audit_log WHERE event='mdf_board.forward_revision_accepted'
+      AND entity_id=$1`,[`${f.source.kind}:${f.source.id}`])).rows[0].count).toBe(1);
+    expect(await repo.upsert(command)).toEqual(saved);
+    expect(await runner().processOne()).toMatchObject({ status: 'idle' });
   });
   it.each(['packet','bazisCutSet','bath'] as const)('terminal placement for %s creates no physical proof', async kind => {
     const f = await fixture(kind);
-    await repo.upsert({ ...await f.command(),targetColumn: kind === 'bath' ? 'completed_baths' : 'completed_laminated' });
-    expect(await runner().processOne()).toMatchObject({ status: 'done' });
+    const result = await repo.upsert({ ...await f.command(),targetColumn: kind === 'bath' ? 'completed_baths' : 'completed_laminated' });
+    await runJob(result.jobId!);
     expect(await ledger(f.source)).toEqual([{ stage_code: 'membership',quantity: '4' }]);
     expect((await db.query('SELECT credited_cut,credited_rolled FROM mdf_published_positions WHERE detail_id=$1',[f.detailId])).rows[0])
       .toEqual({ credited_cut: '0',credited_rolled: '0' });
@@ -230,16 +448,37 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real MDF manual com
   });
   it('unverified unrelated source on the same order does not block this confirmed composition', async () => {
     const f = await fixture();
-    await database.transaction(tx => recordMdfReceipt(tx,{ sourceKind: 'packet',sourceId: randomUUID(),revisionKey: 'unknown',
+    const unknown = await database.transaction(tx => recordMdfReceipt(tx,{ sourceKind: 'packet',sourceId: randomUUID(),revisionKey: 'unknown',
       origin: 'legacy',actorUserId: 1,requestId: 'E2E unknown',causeKey: 'E2E unknown',expectedFence: null,
       accept: false,rules: [],lines: [{ lineKey: 'unknown',orderId: f.orderId,detailId: f.detailId+1,
         quantity: 1,stageCode: 'membership',evidenceKind: 'derived',rework: false }],
       executionContext: { sourceCreatedAt: '2026-09-21T00:00:00Z',displayName: 'requires verification',priorColumn: 'parsed',
         compositionComplete: false,demand: [{ orderId: f.orderId,detailId: f.detailId,quantity: 4 },
           { orderId: f.orderId,detailId: f.detailId+1,quantity: 1 }] } }));
+    const independentPacket = randomUUID();
+    await addBathForPin(f,false,f.detailId+1,1,500000);
+    const independent = await database.transaction(tx => recordMdfReceipt(tx,{ sourceKind: 'packet',sourceId: independentPacket,
+      revisionKey: 'independent-physical',origin: 'cnc',actorUserId: 1,requestId: 'E2E independent pin',
+      causeKey: 'E2E independent pin',expectedFence: null,accept: true,rules: [],lines: [
+        { lineKey: 'independent-part',orderId: f.orderId,detailId: f.detailId+1,quantity: 1,
+          stageCode: 'membership',evidenceKind: 'derived',rework: false },
+        { lineKey: 'independent-physical',orderId: f.orderId,detailId: f.detailId+1,quantity: 1,
+          stageCode: 'cut',evidenceKind: 'physical',rework: false },
+      ],executionContext: { sourceCreatedAt: '2026-09-21T00:00:00Z',displayName: 'independent physical',priorColumn: 'parsed',
+        compositionComplete: true,demand: [{ orderId: f.orderId,detailId: f.detailId,quantity: 4 },
+          { orderId: f.orderId,detailId: f.detailId+1,quantity: 1 }] } }));
+    // The unsupported job precedes the independent bath and packet job; each source job is awaited by id.
+    await runJob(independent.jobId);
+    const independentPin = (await db.query(`SELECT a.allocation_id::text allocation_id,a.state,a.quantity::text quantity,
+        a.bath_revision,e.revision_key,e.line_key FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+      WHERE e.source_kind='packet' AND e.source_id=$1 AND a.state<>'released'`,[independentPacket])).rows;
+    expect(independentPin).toHaveLength(1);
     const result = await repo.upsert({ ...await f.command(),targetColumn: 'completed' });
     expect(result.changed).toBe(true);
-    await runner().processOne(); await runner().processOne();
+    await runJob(result.jobId!);
+    expect((await db.query(`SELECT a.allocation_id::text allocation_id,a.state,a.quantity::text quantity,a.bath_revision,
+        e.revision_key,e.line_key FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+      WHERE e.source_kind='packet' AND e.source_id=$1 AND a.state<>'released'`,[independentPacket])).rows).toEqual(independentPin);
     expect((await db.query('SELECT credited_cut FROM mdf_published_positions WHERE detail_id=$1',[f.detailId])).rows[0].credited_cut).toBe('4');
   });
   it('receipt failure rolls back earlier audit and leaves no job or placement', async () => {
