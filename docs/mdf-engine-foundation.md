@@ -174,6 +174,28 @@ trigger vacuous readiness. Existing strict runtime checks remain unchanged.
 
 ## Storage
 
+### Physical origin contract (not connected to producers)
+
+The internal lineage receipt path separates fresh production from carrying an
+existing physical fact into a new assignment revision. A carry preserves the
+same detail, stage, rework class, quantity and canonical origin. Partial and full
+removal require an explicit correction manifest; a missing line is not a return.
+New production is bounded per position/rework class by the current assignment
+minus retained work. Retaining 10 against assignment 8 must not prevent fresh
+production for a different position, or create a second copy of the same fact.
+
+The contract and transitions are immutable and sealed with the receipt. Parent
+links refer only to the immediate accepted predecessor. Once a source receives
+a lineage revision, legacy writers cannot overwrite it; pending acceptance must
+settle before the next revision. Old physical history without verified origins
+is not automatically promoted. Legacy receipt digest/replay remains compatible.
+
+This storage contract alone does not enable assignment edits. Live production,
+rename, correction, allocation and publication paths still need coordinated
+integration; no historical backfill or activation follows from this migration.
+
+### Existing receipt and allocation boundaries
+
 - Revisions and lines are append-only; a seal permanently closes membership.
   Source heads and jobs can refer only to sealed revisions.
 - Received and accepted versions are separate. Historical source/order/user IDs

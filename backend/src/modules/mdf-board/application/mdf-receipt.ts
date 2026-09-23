@@ -5,6 +5,8 @@ import { mdfPositionKey, mdfQuantity } from '../domain/mdf-quantities';
 import type { MdfJobEffectPolicy, MdfSourceKind } from './mdf-job-runner';
 import { mdfDemandDigest, snapshotMdfExecutionContext, type MdfExecutionContext } from '../domain/mdf-execution-context';
 import { isMdfEvidenceContract } from '../domain/mdf-evidence-contract';
+import { mdfPhysicalLineageDigest, persistMdfPhysicalLineage, snapshotMdfPhysicalLineage,
+  verifyMdfPhysicalLineageReplay, type MdfPhysicalLineageManifest } from './mdf-physical-lineage';
 
 export interface MdfReceiptLine {
   lineKey: string; orderId: number; detailId: number; quantity: number;
@@ -29,6 +31,11 @@ export interface MdfReceiptInput {
   lines: readonly MdfReceiptLine[];
   rules: readonly { ruleId: number; version: number }[];
 }
+/** Internal v2 receipt path. Callers cannot select correction independently of
+ * the immutable transition manifest, and cannot supply canonical origin IDs. */
+export type MdfLineageReceiptInput = Omit<MdfReceiptInput, 'correction'> & {
+  lineage: MdfPhysicalLineageManifest;
+};
 export interface MdfReceiptResult extends MdfReceiptFence {
   replay: boolean; accepted: boolean; jobId: string;
 }
@@ -36,7 +43,8 @@ interface HeadRow extends QueryResultRow {
   version: string; correction_epoch: string; accepted_revision_key: string | null; received_revision_key: string;
 }
 export class MdfReceiptError extends Error {
-  constructor(readonly code: 'MDF_RECEIPT_INVALID' | 'MDF_RECEIPT_CONFLICT' | 'MDF_SOURCE_STALE' | 'MDF_RECEIPT_INCOMPLETE') {
+  constructor(readonly code: 'MDF_RECEIPT_INVALID' | 'MDF_RECEIPT_CONFLICT' | 'MDF_SOURCE_STALE'
+    | 'MDF_RECEIPT_INCOMPLETE' | 'MDF_LINEAGE_INVALID' | 'MDF_LINEAGE_REQUIRED') {
     super(code);
   }
 }
@@ -57,11 +65,50 @@ function positive(value: number): number {
  * Business processing is separate; it must never run inside this function.
  */
 export async function recordMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput): Promise<MdfReceiptResult> {
+  return persistMdfReceipt(tx,input);
+}
+
+/** Server-internal v2 path. Existing producers deliberately remain on the
+ * byte-compatible v1 function until each proof writer is reviewed and wired. */
+export async function recordMdfLineageReceipt(tx: DatabaseClient,
+  input: MdfLineageReceiptInput): Promise<MdfReceiptResult> {
+  if ('correction' in input) throw new MdfReceiptError('MDF_LINEAGE_INVALID');
+  const { lineage: manifest, ...receiptInput } = input;
+  let lineage: MdfPhysicalLineageManifest;
+  try {
+    lineage=snapshotMdfPhysicalLineage(manifest,input.lines);
+  } catch (error) {
+    if (error instanceof Error && error.message==='MDF_LINEAGE_INVALID') throw new MdfReceiptError('MDF_LINEAGE_INVALID');
+    throw error;
+  }
+  if (!input.accept || !input.executionContext || !input.executionContext.compositionComplete
+    || !['packet','bazisCutSet','bath'].includes(input.sourceKind)
+    || (lineage.operation==='production' && (
+      (lineage.authority==='manual_production' && input.origin!=='manual')
+      || (lineage.authority==='cnc_observation' && (input.origin!=='cnc' || input.sourceKind!=='packet'))))
+    || (lineage.operation==='carry' && input.origin!=='manual')
+    || (lineage.operation==='correction' && input.origin!=='manual')) {
+    throw new MdfReceiptError('MDF_LINEAGE_INVALID');
+  }
+  const correction = lineage.operation==='correction' ? true : undefined;
+  return persistMdfReceipt(tx,{ ...receiptInput, ...(correction ? { correction } : {}) },lineage);
+}
+
+async function persistMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput,
+  requestedLineage?: MdfPhysicalLineageManifest): Promise<MdfReceiptResult> {
   // Capture before the first await. Neither caller mutation nor retry can replace
   // a receipt's demand, actor or rule versions halfway through its transaction.
   input = { ...input, expectedFence: input.expectedFence ? { ...input.expectedFence } : null,
     lines: input.lines.map(line => ({ ...line })), rules: input.rules.map(rule => ({ ...rule })),
     executionContext: input.executionContext ? snapshotMdfExecutionContext(input.executionContext) : undefined };
+  let lineage: MdfPhysicalLineageManifest | undefined;
+  try {
+    lineage=requestedLineage ? snapshotMdfPhysicalLineage(requestedLineage,input.lines) : undefined;
+  } catch (error) {
+    if (error instanceof Error && error.message==='MDF_LINEAGE_INVALID') throw new MdfReceiptError('MDF_LINEAGE_INVALID');
+    throw error;
+  }
+  const lineageDigest = lineage ? mdfPhysicalLineageDigest(lineage) : null;
   if (!['packet', 'bazisCutSet', 'bath', 'order', 'orderDetail'].includes(input.sourceKind)
     || !['cnc', 'manual', 'order_cascade', 'legacy', 'derived'].includes(input.origin)
     || typeof input.accept !== 'boolean' || (input.correction !== undefined && input.correction !== true)) invalid();
@@ -98,26 +145,43 @@ export async function recordMdfReceipt(tx: DatabaseClient, input: MdfReceiptInpu
   if (context && input.accept && (!context.compositionComplete || input.lines.some(line =>
     !context.demand.some(d => d.orderId === line.orderId && d.detailId === line.detailId)))) invalid();
   if (isCorrection && (!input.accept || !context || !context.compositionComplete)) invalid();
+  if (lineage && (!input.accept || !context || !context.compositionComplete)) {
+    throw new MdfReceiptError('MDF_LINEAGE_INVALID');
+  }
   // Preserve v1 digests for receipts recorded before execution context existed.
   const digestInput: unknown[] = [input.origin, lines, input.sourceDigest ?? null];
   if (context) digestInput.push(context,input.accept);
+  if (lineage) digestInput.push({ physicalLineageVersion:2,manifest:lineage });
   const digest = createHash('sha256').update(JSON.stringify(digestInput)).digest('hex');
   const source = [input.sourceKind, input.sourceId];
   await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`mdf-source:${JSON.stringify(source)}`]);
   const head = (await tx.query<HeadRow>(`SELECT version,correction_epoch,accepted_revision_key,received_revision_key
     FROM mdf_source_heads WHERE source_kind=$1 AND source_id=$2 FOR UPDATE`, source)).rows[0];
-  const existing = (await tx.query<{ payload_digest: string; job_id: string | null }>(`
+  const existing = (await tx.query<{ payload_digest: string; job_id: string | null; manifest_digest?: string | null }>(lineage ? `
+    SELECT r.payload_digest,j.job_id,c.manifest_digest FROM mdf_evidence_revisions r
+    LEFT JOIN mdf_recalculation_jobs j USING(source_kind,source_id,revision_key)
+    LEFT JOIN mdf_physical_lineage_contracts c USING(source_kind,source_id,revision_key)
+    WHERE r.source_kind=$1 AND r.source_id=$2 AND r.revision_key=$3` : `
     SELECT r.payload_digest,j.job_id FROM mdf_evidence_revisions r
     LEFT JOIN mdf_recalculation_jobs j USING(source_kind,source_id,revision_key)
     WHERE r.source_kind=$1 AND r.source_id=$2 AND r.revision_key=$3`, [...source, input.revisionKey])).rows[0];
   if (existing) {
-    if (existing.payload_digest !== digest) throw new MdfReceiptError('MDF_RECEIPT_CONFLICT');
+    if (lineage) {
+      if (existing.payload_digest !== digest || existing.manifest_digest !== lineageDigest
+        || !await verifyMdfPhysicalLineageReplay(tx,{ sourceKind:input.sourceKind,sourceId:input.sourceId,
+          revisionKey:input.revisionKey,manifest:lineage })) throw new MdfReceiptError('MDF_RECEIPT_CONFLICT');
+    } else {
+      if (existing.payload_digest !== digest) throw new MdfReceiptError('MDF_RECEIPT_CONFLICT');
+    }
     if (!head || !existing.job_id) throw new MdfReceiptError('MDF_RECEIPT_INCOMPLETE');
     return { replay: true, accepted: head.accepted_revision_key === input.revisionKey,
       version: head.version, correctionEpoch: head.correction_epoch, jobId: existing.job_id };
   }
   if (head ? !input.expectedFence || head.version !== input.expectedFence.version
     || head.correction_epoch !== input.expectedFence.correctionEpoch : input.expectedFence !== null) {
+    throw new MdfReceiptError('MDF_SOURCE_STALE');
+  }
+  if (lineage && head && head.accepted_revision_key !== head.received_revision_key) {
     throw new MdfReceiptError('MDF_SOURCE_STALE');
   }
   if (isCorrection && (!head || head.accepted_revision_key !== head.received_revision_key)) invalid();
@@ -157,6 +221,16 @@ export async function recordMdfReceipt(tx: DatabaseClient, input: MdfReceiptInpu
     await tx.query(`INSERT INTO mdf_revision_demand(source_kind,source_id,revision_key,order_id,detail_id,quantity)
       SELECT $1,$2,$3,(d->>'orderId')::bigint,(d->>'detailId')::bigint,(d->>'quantity')::bigint
       FROM jsonb_array_elements($4::jsonb) d`, [...source, input.revisionKey, JSON.stringify(context.demand)]);
+  }
+  if (lineage && lineageDigest) {
+    try {
+      await persistMdfPhysicalLineage(tx,{ sourceKind:input.sourceKind,sourceId:input.sourceId,
+        revisionKey:input.revisionKey,predecessorAcceptedRevisionKey:head?.accepted_revision_key ?? null,
+        manifestDigest:lineageDigest,manifest:lineage });
+    } catch (error) {
+      if (error instanceof Error && error.message==='MDF_LINEAGE_INVALID') throw new MdfReceiptError('MDF_LINEAGE_INVALID');
+      throw error;
+    }
   }
   await tx.query(`INSERT INTO mdf_revision_seals(source_kind,source_id,revision_key) VALUES($1,$2,$3)`, [...source, input.revisionKey]);
   const saved = (await tx.query<HeadRow>(head

@@ -199,6 +199,43 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(verification).toMatch(/181_cnc_manual_send_observation\*\)\s+probe_file "\$f" \|\| die/);
   });
 
+  it('probes physical-lineage contracts and verifies migration182 before ledgering it', () => {
+    const start = probeFn.indexOf('182_mdf_physical_lineage*)');
+    const end = probeFn.indexOf('*) return 2', start);
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, end);
+    for (const marker of [
+      'mdf_physical_lineage_contracts', 'mdf_physical_lineage_transitions',
+      'mdf_revision_context', 'mdf_revision_demand', 'mdf_revision_seals', 'mdf_source_heads', 'mdf_evidence_lines',
+      '5138882885769bc7fa70ca08c9f31850', 'a1c435fd8e1718dfa27fc51b6e97a5b1',
+      'd86e35e02578b17a844033efe13a00ce', '75284260f5fbdf3850fce32f3c4ec0dd',
+      'e8ffa2aa2aeba0b52cc70a1c10c47509', '9953302b7dd61a70a78069d48d67bff5',
+      "q_fun_hash 'public.mdf_guard_physical_lineage_insert()' 5f33a57477dcf2397fa18783d9b7ecae",
+      "q_fun_hash 'public.mdf_guard_physical_lineage_immutable()' 39d2c9d9500956c4bca2546c68d8cc15",
+      "q_fun_hash 'public.mdf_validate_physical_lineage_seal()' 3067d8c18cdc8b1603397ce68a56824b",
+      "q_fun_hash 'public.mdf_guard_physical_lineage_source_head()' d2ab89206c2d81b774c16779d302d789",
+      "q_fun_hash 'public.mdf_guard_source_fence()' 5865eedf3ea4c2cf2b715b6ac210d49a",
+      "q_fun_hash 'public.mdf_reject_evidence_change()' a51e1b51d407124a856f1993d9c54fe8",
+      "q_fun_hash 'public.mdf_guard_accepted_revision()' 945aada9b298e291ecda1442e6391f6d",
+      "q_fun_hash 'public.mdf_guard_job_effect_policy_binding()' 45e1620014c367515f61c170f2bcf0f5",
+      'mdf_physical_lineage_contract_insert_guard', 'mdf_physical_lineage_contract_immutable',
+      'mdf_physical_lineage_transition_insert_guard', 'mdf_physical_lineage_transition_immutable',
+      'mdf_physical_lineage_seal_guard', 'mdf_physical_lineage_source_head_guard',
+      'mdf_source_fence_guard', 'mdf_context_immutable', 'mdf_demand_immutable',
+      'mdf_job_effect_policy_binding', 'mdf_accepted_revision_guard',
+      't.tgfoid=to_regprocedure(\'public.mdf_guard_source_fence()\')', 't.tgtype=27',
+      't.tgfoid=to_regprocedure(\'public.mdf_reject_evidence_change()\')',
+      't.tgfoid=to_regprocedure(\'public.mdf_guard_job_effect_policy_binding()\')', 't.tgtype=23',
+      't.tgfoid=to_regprocedure(\'public.mdf_guard_accepted_revision()\')', 't.tgtype=19',
+      "t.tgenabled='O'", 'NOT convalidated', 'NOT indisvalid OR NOT indisready',
+    ]) expect(arm).toContain(marker);
+    expect(arm).toContain('(SELECT count(*)=2 FROM pg_constraint WHERE conrelid=to_regclass(\'public.mdf_physical_lineage_contracts\') AND contype=\'f\')');
+    expect(arm).toContain('(SELECT count(*)=4 FROM pg_constraint WHERE conrelid=to_regclass(\'public.mdf_physical_lineage_transitions\') AND contype=\'f\')');
+    expect(arm).toContain("remote_ns.nspname='public'");
+    const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verification).toMatch(/182_mdf_physical_lineage\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
   it('verifies migrations 164-169 before recording their ledger entries', () => {
     const verify = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
     expect(verify).toContain('164_*|165_*|166_*|167_*|168_*|169_*)');
@@ -272,7 +309,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText).not.toMatch(/q_fun_hash\(\).*md5\(prosrc\)/);
     expect(probeFn).toContain("q_fun_hash 'cnc_telegram_worker_reason_code_valid(text)'");
     expect(probeFn.match(/q_fun_hash '[^']+' [a-f0-9]{32}/g)).toHaveLength(
-      requiredFunctions.length + 2 + 9 + 1 + 1 + 7 + 4, // 164-169,174/175,177-181 guard functions
+      requiredFunctions.length + 2 + 9 + 1 + 1 + 7 + 4 + 8, // prior probes plus 182 lineage and inherited-guard hashes
     );
   });
 

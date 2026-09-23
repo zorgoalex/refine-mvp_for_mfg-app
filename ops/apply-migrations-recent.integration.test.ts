@@ -15,7 +15,7 @@ const dir = resolve(__dirname, '../backend/db/migrations');
 const files = readdirSync(dir).filter((f) => /^16[4-9]_.*\.sql$/.test(f)
   || ['174_mdf_execution_context.sql','175_mdf_command_placement.sql','177_cut_result_typed_hdf.sql',
     '178_mdf_correction_receipts.sql','179_mdf_active_return.sql','180_mdf_cnc_observations.sql',
-    '181_cnc_manual_send_observation.sql'].includes(f)).sort();
+    '181_cnc_manual_send_observation.sql','182_mdf_physical_lineage.sql'].includes(f)).sort();
 const helpers = source.slice(source.indexOf('q_col()'), source.indexOf('# These migrations contain conditional'));
 const queries = (file: string) => execFileSync('bash', ['-s', '--', file], {
   input: `${helpers}\nprobe_all() { printf '%s\\n' "$@"; }\nprobe_file "$1"`, encoding: 'utf8',
@@ -33,7 +33,7 @@ const present = (file: string, mutation = '') => {
 };
 const fileFor = (version: number) => files.find((f) => f.startsWith(`${version}_`))!;
 
-describe.skipIf(!enabled)('migration 164-169, 174-175 and 177-181 probes against actual SQL on PostgreSQL', () => {
+describe.skipIf(!enabled)('migration 164-169, 174-175 and 177-182 probes against actual SQL on PostgreSQL', () => {
   let created = false;
   beforeAll(() => {
     sql(`CREATE DATABASE ${db} TEMPLATE template0;`, 'postgres');
@@ -170,6 +170,12 @@ describe.skipIf(!enabled)('migration 164-169, 174-175 and 177-181 probes against
     [181, 'ALTER TABLE mdf_cnc_observation_targets DISABLE TRIGGER mdf_cnc_observation_target_guard;'],
     [181, 'ALTER TABLE mdf_cnc_observation_targets DROP CONSTRAINT chk_mdf_cnc_observation_target_registration_kind; ALTER TABLE mdf_cnc_observation_targets ADD CONSTRAINT chk_mdf_cnc_observation_target_registration_kind CHECK(true);'],
     [181, 'ALTER TABLE cnc_manual_svg_observation_registration_work ADD CONSTRAINT e2e_job_fk FOREIGN KEY(send_request_id) REFERENCES mdf_recalculation_jobs(job_id);'],
+    [182, 'ALTER TABLE mdf_physical_lineage_contracts DISABLE TRIGGER mdf_physical_lineage_contract_insert_guard;'],
+    [182, 'ALTER TABLE mdf_physical_lineage_transitions DROP CONSTRAINT mdf_physical_lineage_transitions_action_check;'],
+    [182, 'ALTER TABLE mdf_physical_lineage_transitions ADD CONSTRAINT e2e_job_fk FOREIGN KEY(evidence_line_id) REFERENCES mdf_recalculation_jobs(job_id);'],
+    [182, 'CREATE OR REPLACE FUNCTION mdf_guard_physical_lineage_insert() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;'],
+    [182, 'CREATE OR REPLACE FUNCTION mdf_guard_accepted_revision() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;'],
+    [182, 'CREATE OR REPLACE FUNCTION mdf_guard_source_fence() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;'],
   ] as const)('%s: rejects drift %s', (version, mutation) => {
     expect(present(fileFor(version), mutation)).toBe(false);
     expect(present(fileFor(version))).toBe(true); // rollback restored fixture
