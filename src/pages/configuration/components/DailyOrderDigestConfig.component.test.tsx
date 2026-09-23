@@ -21,6 +21,14 @@ const mockForm = {
 vi.mock('../../../api/dailyOrderDigestApi', () => ({ dailyOrderDigestApi: mockApi }));
 vi.mock('../../../config/featureFlags', () => ({ featureFlags: { useBackendWhatsApp: true } }));
 vi.mock('@ant-design/icons', () => ({ ReloadOutlined: () => null, SendOutlined: () => null }));
+vi.mock('../../../ui/tooltipDelay', () => ({
+  Table: (props: Record<string, any>) => {
+    const rows = ((props.dataSource ?? []) as Record<string, unknown>[]).map((row, rowIndex) => React.createElement('div', { key: rowIndex },
+      ...(props.columns as Array<Record<string, any>>).map((column, columnIndex) => React.createElement('span', { key: columnIndex },
+        column.render ? column.render(row[column.dataIndex as string], row, rowIndex) : String(row[column.dataIndex as string] ?? '')))));
+    return React.createElement('div', null, ...rows);
+  },
+}));
 vi.mock('antd', () => {
   const primitive = (tag: string) => (props: Record<string, unknown>) => React.createElement(tag, props, props.children as React.ReactNode);
   const Form = Object.assign(({ children }: { children?: React.ReactNode }) => React.createElement('form', null, children), {
@@ -33,10 +41,6 @@ vi.mock('antd', () => {
     Form, Input: primitive('input'), InputNumber: primitive('input'), Select: primitive('select'),
     Space: primitive('div'), Spin: primitive('span'), Switch: primitive('button'),
     Tag: primitive('span'), TimePicker: primitive('input'),
-    Table: (props: Record<string, any>) => React.createElement('div', null,
-      ...(props.dataSource as Record<string, unknown>[]).map((row, rowIndex) => React.createElement('div', { key: rowIndex },
-        ...(props.columns as Array<Record<string, any>>).map((column, columnIndex) => React.createElement('span', { key: columnIndex },
-          column.render ? column.render(row[column.dataIndex as string], row, rowIndex) : String(row[column.dataIndex as string] ?? '')))))),
     Typography: { Paragraph: primitive('p'), Text: primitive('span'), Title: primitive('h4') },
     Modal: (props: Record<string, any>) => props.open
       ? React.createElement('div', { 'data-testid': 'modal' },

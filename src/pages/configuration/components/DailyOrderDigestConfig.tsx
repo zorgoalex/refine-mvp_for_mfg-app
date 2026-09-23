@@ -12,7 +12,6 @@ import {
   Space,
   Spin,
   Switch,
-  Table,
   Tag,
   TimePicker,
   Typography,
@@ -35,6 +34,7 @@ import type {
 import { authSession } from '../../../api/authSession';
 import { getUserAuthorizationScopeKey } from '../../../api/authScopeIdentity';
 import { featureFlags } from '../../../config/featureFlags';
+import { Table } from '../../../ui/tooltipDelay';
 
 const { Paragraph, Text, Title } = Typography;
 export const DAILY_DIGEST_REQUIRED_PERMISSIONS = [
