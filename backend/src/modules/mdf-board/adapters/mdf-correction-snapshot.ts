@@ -4,6 +4,7 @@ import { MdfNeedsAttention, type MdfSourceKind } from '../application/mdf-job-ru
 import type { MdfCorrectionAllocation, MdfCorrectionSource, MdfCorrectionSourceLine } from '../domain/mdf-correction-plan';
 import { mdfSum } from '../domain/mdf-quantities';
 import { loadMdfExecutionSnapshot, mdfSourceKey, type MdfExecutionHead, type MdfExecutionMetadata } from './mdf-execution-snapshot';
+import { mdfLineageRevisionKey, type MdfValidatedPhysicalLineage } from '../domain/mdf-physical-lineage';
 import type { MdfReturnKind } from '../../orders/domain/mdf-production-return';
 import type { MdfShadowRow } from './mdf-shadow-source';
 import { loadMdfShadowSource } from './mdf-shadow-source';
@@ -43,6 +44,8 @@ export interface MdfCorrectionSnapshot {
   owners: MdfCorrectionOwner[];
   details: MdfCorrectionDetailRow[];
   metadata: Map<string, MdfExecutionMetadata>;
+  lineage: Map<string, MdfValidatedPhysicalLineage>;
+  lineageIssues: Map<string, string[]>;
   frozenDemand: Map<string, Array<{ orderId: number; detailId: number; quantity: number }>>;
   sourceIssues: Map<string, string[]>;
   published: Map<string, { column: string | null; accepted: string | null; received: string; issues: string[] }>;
@@ -160,8 +163,13 @@ export async function loadMdfCorrectionSnapshot(tx: TransactionClient, target: M
     const head = sourceKeys.get(key(source));
     if (!head) throw new MdfNeedsAttention('MDF_CORRECTION_HEAD_MISSING');
     const issue = execution.issues.get(key(source)) ?? ['MDF_CONTEXT_REQUIRED'];
+    const revision = head.accepted;
+    const lineageKey = revision ? mdfLineageRevisionKey(source,revision) : null;
+    const lineageIssue = lineageKey ? execution.lineageIssues.get(lineageKey)?.[0] : undefined;
     return { kind: source.kind,id: source.id,acceptedRevision: head.accepted,receivedRevision: head.received,
       verified: issue.length===0 && Boolean(head.accepted) && head.accepted===head.received,
+      lineage: lineageKey ? execution.lineage.get(lineageKey) : undefined,
+      lineageIssue,
       lines: lineRows.filter(l => key(l)===key(source)).map(line => ({ ...line })) as MdfCorrectionSourceLine[] };
   });
   const publishedRows = (await tx.query<{kind:MdfSourceKind;id:string;column:string|null;accepted:string|null;received:string;issues:string[]}>(`SELECT
@@ -173,6 +181,7 @@ export async function loadMdfCorrectionSnapshot(tx: TransactionClient, target: M
   const rawTarget = await loadRawTarget(tx,target);
   return { ...closure, heads,lines:lineRows,plannerSources,allocations:allocationRows,owners,details,
     metadata:execution.metadata,frozenDemand:new Map([...execution.frozenDemand].map(([k,demand])=>[k,[...demand]])),
+    lineage:execution.lineage,lineageIssues:execution.lineageIssues,
     sourceIssues:execution.issues,published,rawTarget };
 }
 

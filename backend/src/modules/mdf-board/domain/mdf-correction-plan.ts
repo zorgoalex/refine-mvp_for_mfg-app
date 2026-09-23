@@ -1,6 +1,7 @@
 import { calculateMdfQuantities, mdfPositionKey, mdfQuantity, mdfSum,
   type MdfPositionResult, type MdfQuantityEvidence, type MdfQuantityResult } from './mdf-quantities.js';
 import { isMdfEvidenceContract } from './mdf-evidence-contract.js';
+import { matchesMdfValidatedPhysicalLineage, type MdfValidatedPhysicalLineage } from './mdf-physical-lineage.js';
 
 export type MdfCorrectionSourceKind = 'packet' | 'bazisCutSet' | 'bath' | 'order' | 'orderDetail';
 export interface MdfCorrectionSource {
@@ -9,6 +10,10 @@ export interface MdfCorrectionSource {
   acceptedRevision: string | null;
   receivedRevision: string;
   verified: boolean;
+  /** Present only when the snapshot loader authenticated the sealed v2 lineage. */
+  lineage?: MdfValidatedPhysicalLineage;
+  /** A failed v2 load must never fall back to the v1 membership cap. */
+  lineageIssue?: string;
   lines: MdfCorrectionSourceLine[];
 }
 export interface MdfCorrectionSourceLine {
@@ -58,9 +63,22 @@ export type MdfCorrectionPlan =
 const cmp = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
 const sourceKey = (kind: string, id: string) => JSON.stringify([kind, id]);
 const proofStage = (s: MdfCorrectionSource) => s.kind === 'bath' ? 'laminated' : 'cut';
+const positionReworkKey = (line: MdfCorrectionSourceLine) => JSON.stringify([mdfPositionKey(line),line.rework]);
 const lineOut = (l: MdfCorrectionSourceLine) => ({ orderId:l.orderId,detailId:l.detailId,quantity:l.quantity,
   lineKey:l.lineKey,stage:l.stage,evidence:l.evidence,rework:l.rework });
 const blocked = (codes: MdfCorrectionBlocker[]): MdfCorrectionPlan => ({ status:'blocked', blockers:codes.sort((a,b)=>cmp(JSON.stringify(a),JSON.stringify(b))) });
+
+function hasValidCurrentLineage(source: MdfCorrectionSource): boolean {
+  if (source.lineage === undefined || !source.lineage || source.lineageIssue !== undefined
+    || !source.acceptedRevision || source.acceptedRevision !== source.receivedRevision
+    || !['packet','bazisCutSet','bath'].includes(source.kind)) return false;
+  try {
+    return matchesMdfValidatedPhysicalLineage({sourceKind:source.kind as 'packet'|'bazisCutSet'|'bath',
+      sourceId:source.id,revisionKey:source.acceptedRevision,lines:source.lines,lineage:source.lineage});
+  } catch {
+    return false;
+  }
+}
 
 /** Build a deterministic, write-free consequence plan for one accepted-source correction.
  * Replacement proof is copied only from the accepted immutable revision; this function never invents evidence. */
@@ -99,6 +117,8 @@ export function planMdfCorrection(input: MdfCorrectionInput): MdfCorrectionPlan 
         JSON.stringify([b.stage==='membership'?1:0,b.lineKey,b.orderId,b.detailId,b.evidenceLineId])));
     const completeSource=(s:MdfCorrectionSource):boolean=>{
       if (!s.verified||!s.acceptedRevision||s.acceptedRevision!==s.receivedRevision) return false;
+      if (s.lineageIssue !== undefined || (s.lineage !== undefined && !hasValidCurrentLineage(s))) return false;
+      if ((s.kind==='order'||s.kind==='orderDetail') && s.lineage !== undefined) return false;
       const own=acceptedLines(s), members=new Map<string,number>(), proofs=new Map<string,number>(), keys=new Set<string>();
       for (const l of own) {
         if (mdfQuantity(l.quantity)===0||!isMdfEvidenceContract(s.kind,l.stage,l.evidence)||keys.has(l.lineKey)) return false;
@@ -111,12 +131,29 @@ export function planMdfCorrection(input: MdfCorrectionInput): MdfCorrectionPlan 
         return !!detail&&l.quantity<=detail.quantity;
       });
       if (!members.size) return false;
+      const hasLineage = hasValidCurrentLineage(s);
+      const lineageMayCarry = hasLineage && (s.kind==='packet'||s.kind==='bazisCutSet');
+      const membersByPartition=new Map<string,number>();
+      for (const l of own) if (l.stage==='membership') {
+        const key=positionReworkKey(l);
+        membersByPartition.set(key,mdfSum(membersByPartition.get(key)??0,l.quantity));
+      }
+      const declarationsByPartition=new Map<string,number>();
       for (const l of own) if (l.stage!=='membership') {
         const key=mdfPositionKey(l), member=members.get(key);
-        if (member===undefined||l.quantity>member) return false;
-        if (l.evidence==='physical') proofs.set(key,mdfSum(proofs.get(key)??0,l.quantity));
+        if (l.evidence==='physical') {
+          if (member===undefined && !lineageMayCarry) return false;
+          proofs.set(key,mdfSum(proofs.get(key)??0,l.quantity));
+        } else {
+          if (member===undefined||l.quantity>member) return false;
+          if (lineageMayCarry) {
+            const partition=positionReworkKey(l);
+            declarationsByPartition.set(partition,mdfSum(declarationsByPartition.get(partition)??0,l.quantity));
+          }
+        }
       }
-      return [...proofs].every(([key,q])=>q<=(members.get(key)??0));
+      if (lineageMayCarry && [...declarationsByPartition].some(([key,q])=>q>(membersByPartition.get(key)??0))) return false;
+      return lineageMayCarry || [...proofs].every(([key,q])=>q<=(members.get(key)??0));
     };
     if (!completeSource(target!)) add('TARGET_SOURCE_UNAVAILABLE',{sourceId:target!.id});
     const targetProof=acceptedLines(target!).filter(l=>l.stage===proofStage(target!) && l.evidence!=='derived');
@@ -266,7 +303,9 @@ export function planMdfCorrection(input: MdfCorrectionInput): MdfCorrectionPlan 
     const before=calculateMdfQuantities({demand,evidence:beforeEvidence});
     const after=calculateMdfQuantities({demand,evidence});
     const targetMembers=acceptedLines(target!).filter(l=>l.stage==='membership'&&l.evidence==='derived');
-    const affectedKeys=[...new Set(targetMembers.map(mdfPositionKey))].sort(cmp);
+    const targetPhysical=hasValidCurrentLineage(target!)&&(target!.kind==='packet'||target!.kind==='bazisCutSet')
+      ? acceptedLines(target!).filter(l=>l.evidence==='physical'&&(l.stage==='cut'||l.stage==='laminated')) : [];
+    const affectedKeys=[...new Set([...targetMembers,...targetPhysical].map(mdfPositionKey))].sort(cmp);
     const detailMap=new Map(input.details.map(d=>[mdfPositionKey(d),d]));
     const affectedDetails:MdfCorrectionDetail[]=[];
     for (const key of affectedKeys) {

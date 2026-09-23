@@ -4,6 +4,17 @@ import type { DatabaseClient } from '../../../database/database.types';
 import { mdfSum } from '../domain/mdf-quantities';
 import type { MdfSourceKind } from './mdf-job-runner';
 
+export {
+  isIssuedMdfPhysicalLineage,
+  matchesMdfValidatedPhysicalLineage,
+  mdfLineageRevisionKey,
+  type MdfLineageAction,
+  type MdfLineageOperation,
+  type MdfLineageSourceKind,
+  type MdfValidatedPhysicalLine,
+  type MdfValidatedPhysicalLineage,
+} from '../domain/mdf-physical-lineage';
+
 export type MdfPhysicalLineageAction =
   | { lineKey: string; action: 'root' }
   | { lineKey: string; action: 'carry' | 'reduce'; predecessorEvidenceLineId: string };

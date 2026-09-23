@@ -166,15 +166,26 @@ cancel bath work, write detail statuses or authenticate historical evidence.
 Its input must come from an authoritative, complete, locked accepted snapshot.
 Immediate predecessor references are not proof of verified historical origin.
 
-Active composition edits remain fenced. Before connecting the helper, persistent
-lineage, snapshot validation, quantity/allocation readers, current-member event
-scope, manual proof and explicit returns must all support retained facts beyond
-the current assignment. An empty assignment must not erase retained work or
-trigger vacuous readiness. Existing strict runtime checks remain unchanged.
+Some lineage consumption is now connected for immutable, accepted source
+revisions: execution and correction snapshots validate the sealed v2 manifest
+against the exact physical rows, and allocation quarantine/correction planning
+can preserve authenticated packet/BASIS physical facts beyond current
+membership. Only exact source/revision/evidence identities count; v1 evidence
+keeps its original membership cap, pending revisions receive no lineage credit,
+and baths remain strict (no physical overhang). Current membership must still
+be nonempty. Current-member events continue to be derived from current
+membership, not from retained proof at a removed position.
 
-## Storage
+The pure composition helper is still not connected to an assignment-edit
+command. Manual/BASIS production-root writers have not opted into v2, so no
+composition mutation can create, carry, reduce or drop physical facts through
+that helper. There is no historical backfill or automatic promotion of legacy
+evidence, and the active engine/runtime flags remain unchanged. Empty
+assignments and bath overhang are not supported by this increment.
 
-### Physical origin contract (not connected to producers)
+## Storage and bounded lineage consumers
+
+### Physical origin contract
 
 The internal lineage receipt path separates fresh production from carrying an
 existing physical fact into a new assignment revision. A carry preserves the
@@ -190,9 +201,10 @@ a lineage revision, legacy writers cannot overwrite it; pending acceptance must
 settle before the next revision. Old physical history without verified origins
 is not automatically promoted. Legacy receipt digest/replay remains compatible.
 
-This storage contract alone does not enable assignment edits. Live production,
-rename, correction, allocation and publication paths still need coordinated
-integration; no historical backfill or activation follows from this migration.
+The bounded snapshot, allocation-quarantine, and active correction paths now
+consume this contract for accepted v2 revisions. The ordinary manual/BASIS
+physical-production and assignment-edit producers are still fenced; no
+historical backfill or activation follows from this consumer integration.
 
 ### Existing receipt and allocation boundaries
 

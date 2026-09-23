@@ -50,9 +50,19 @@ describe.skipIf(!enabled)('MDF CNC observations, isolated PostgreSQL schema', ()
       CREATE UNIQUE INDEX e2e_obs_outbox ON ${fixture.schema}.outbox_events(idempotency_key)`);
     for (const migration of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql',
       '174_mdf_execution_context.sql','175_mdf_command_placement.sql','178_mdf_correction_receipts.sql',
-      '179_mdf_active_return.sql','180_mdf_cnc_observations.sql','181_cnc_manual_send_observation.sql']) {
+      '179_mdf_active_return.sql','180_mdf_cnc_observations.sql','181_cnc_manual_send_observation.sql',
+      '182_mdf_physical_lineage.sql']) {
       await fixture.applyMigrations([migration]);
     }
+    const localLineageRelations=(await fixture.client.query<{ relname:string; schema_name:string|null }>(`WITH wanted(relname) AS (
+        VALUES ('mdf_physical_lineage_contracts'),('mdf_physical_lineage_transitions'))
+      SELECT w.relname,n.nspname schema_name FROM wanted w
+      LEFT JOIN pg_class c ON c.oid=to_regclass(w.relname)
+      LEFT JOIN pg_namespace n ON n.oid=c.relnamespace ORDER BY w.relname`)).rows;
+    expect(localLineageRelations).toEqual([
+      {relname:'mdf_physical_lineage_contracts',schema_name:fixture.schema},
+      {relname:'mdf_physical_lineage_transitions',schema_name:fixture.schema},
+    ]);
     await fixture.client.query(`UPDATE ${fixture.schema}.mdf_engine_state SET mode='active';
       INSERT INTO ${fixture.schema}.users(user_id,username,role_id,is_active)
         VALUES(1,'E2E CNC observer',1,true);

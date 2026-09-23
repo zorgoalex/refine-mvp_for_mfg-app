@@ -4,6 +4,7 @@ import { MdfNeedsAttention, type MdfJob, type MdfSourceKind } from '../applicati
 import type { MdfEvidenceAllocation, MdfEvidenceReservation } from '../domain/mdf-evidence-allocation';
 import { planMdfQuarantinedAllocations } from '../domain/mdf-allocation-quarantine';
 import type { MdfPositionQuantity } from '../domain/mdf-quantities';
+import { mdfLineageRevisionKey } from '../domain/mdf-physical-lineage';
 import { loadMdfExecutionSnapshot, mdfSourceKey } from './mdf-execution-snapshot';
 import { advanceCompatibleMdfRevision } from './mdf-compatible-advance';
 
@@ -107,7 +108,7 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
   [heads.map(h => h.kind), heads.map(h => h.id), heads.map(h => h.accepted), heads.map(h => h.received), MAX_ROWS + 1])).rows;
   if (lines.length > MAX_ROWS) attention('ROW_LIMIT');
   for (const l of lines) if (![l.orderId,l.detailId,l.quantity].every(n => Number.isSafeInteger(n) && n > 0)) attention('INVALID_EVIDENCE');
-  const executionSnapshot = options.requireExecutionContext ? await loadMdfExecutionSnapshot(tx,heads,scope.orders) : null;
+  let executionSnapshot = options.requireExecutionContext ? await loadMdfExecutionSnapshot(tx,heads,scope.orders) : null;
   let allocations = (await tx.query<MdfEvidenceAllocation>(`SELECT a.allocation_id "allocationId",a.evidence_line_id "evidenceLineId",
     a.bath_id "bathId",a.bath_revision "bathRevision",a.order_id::float8 "orderId",a.detail_id::float8 "detailId",
     a.quantity::float8 quantity,a.state FROM mdf_bath_allocations a
@@ -120,7 +121,13 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
     const advanced=await advanceCompatibleMdfRevision(tx,{ job,head: trigger,
       contextValid: executionSnapshot.issues.get(mdfSourceKey(trigger))?.length===0,
       lines: lines.filter(l => key(l)===key(trigger)),allocations });
-    if (advanced) allocations=advanced;
+    if (advanced) {
+      allocations=advanced;
+      // Compatible advancement changes the accepted head inside this
+      // transaction. Re-authorize the exact newly accepted revision rather
+      // than carrying a descriptor/context loaded before that transition.
+      executionSnapshot=await loadMdfExecutionSnapshot(tx,heads,scope.orders);
+    }
   }
   const bathHeads = heads.filter(h => h.kind === 'bath');
   const dates = (await tx.query<{ id: string; createdAt: string }>(`SELECT 'cut-result:'||cut_result_id::text id,created_at::text "createdAt"
@@ -132,6 +139,12 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
     // Invalid context quarantines THIS source. It never blesses legacy shadow
     // quantities, nor freezes independent same-order sources wholesale.
     accepted: executionSnapshot?.issues.get(mdfSourceKey(h))?.length ? null : h.accepted,
+    lineage: executionSnapshot && h.accepted && h.accepted===h.received
+      ? executionSnapshot.lineage.get(mdfLineageRevisionKey(h,h.accepted)) : undefined,
+    lineageIssue: executionSnapshot && h.accepted && h.accepted===h.received
+      ? executionSnapshot.lineageIssues.get(mdfLineageRevisionKey(h,h.accepted))?.[0]
+        ?? executionSnapshot.issues.get(mdfSourceKey(h))?.find(issue=>issue.startsWith('MDF_LINEAGE_'))
+      : undefined,
     uncertainOrderIds: executionSnapshot ? [...new Set(executionSnapshot.frozenDemand.get(mdfSourceKey(h))?.map(d => d.orderId))] : undefined,
     lines: bySource.get(key(h)) ?? [], createdAt: executionSnapshot
       ? executionSnapshot.metadata.get(mdfSourceKey(h))?.sourceCreatedAt : dates.find(d => d.id === h.id)?.createdAt })),

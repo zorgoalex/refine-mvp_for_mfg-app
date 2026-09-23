@@ -3,6 +3,8 @@ import { CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE as MDF, CNC_OTHER_MATERIAL_MARKE
 import { MdfNeedsAttention, type MdfSourceKind } from '../application/mdf-job-runner';
 import { mdfDemandDigest, type MdfExecutionContext } from '../domain/mdf-execution-context';
 import type { MdfPositionQuantity } from '../domain/mdf-quantities';
+import { mdfLineageRevisionKey } from '../domain/mdf-physical-lineage';
+import { loadMdfPhysicalLineageSnapshot } from './mdf-physical-lineage-snapshot';
 
 export interface MdfExecutionHead {
   kind: MdfSourceKind; id: string; received: string; accepted: string | null; epoch: string;
@@ -55,6 +57,7 @@ export async function loadMdfExecutionSnapshot(tx: DatabaseClient, heads: readon
     ORDER BY d.source_kind,d.source_id,d.order_id,d.detail_id LIMIT 50001`,args)).rows;
   if (demand.length>50000) throw new MdfNeedsAttention('MDF_CONTEXT_LIMIT');
   const details = await loadMdfExecutionDetails(tx,orderIds);
+  const physicalLineage = await loadMdfPhysicalLineageSnapshot(tx,heads);
   const metadata = new Map(contexts.map(c => [mdfSourceKey(c),c]));
   const issues = new Map<string,string[]>(), frozenDemand = new Map<string,MdfExecutionContext['demand']>();
   for (const h of heads) {
@@ -69,7 +72,14 @@ export async function loadMdfExecutionSnapshot(tx: DatabaseClient, heads: readon
     else if (mdfDemandDigest(rows)!==c.demandDigest) own.push('MDF_CONTEXT_INVALID');
     else if ([...owners].some(id => !orderIds.includes(id))
       || mdfDemandDigest(details.filter(d => owners.has(d.orderId)))!==c.demandDigest) own.push('MDF_DEMAND_CHANGED');
+    // Only the currently visible RECEIVED revision controls source-local
+    // lineage quarantine. An old accepted revision cannot bless a malformed
+    // pending revision, and a malformed v2 seal is never silently treated as
+    // legacy v1 evidence.
+    const lineageIssue = physicalLineage.lineageIssues.get(mdfLineageRevisionKey(h,h.received));
+    if (lineageIssue) own.push(...lineageIssue);
     issues.set(key,own);
   }
-  return { details, metadata, issues, frozenDemand };
+  return { details, metadata, issues, frozenDemand,
+    lineage: physicalLineage.lineage, lineageIssues: physicalLineage.lineageIssues };
 }

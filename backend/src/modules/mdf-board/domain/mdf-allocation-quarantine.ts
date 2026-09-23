@@ -2,13 +2,18 @@ import { planMdfEvidenceAllocations, type MdfEvidenceAllocation, type MdfSupplyL
 import type { MdfBathDemand } from './mdf-allocation';
 import { mdfPositionKey, mdfQuantity, mdfSum, type MdfPositionQuantity } from './mdf-quantities';
 import { isMdfEvidenceContract } from './mdf-evidence-contract';
+import { matchesMdfValidatedPhysicalLineage, type MdfValidatedPhysicalLineage } from './mdf-physical-lineage';
 
 export interface MdfAllocationSource {
   kind: 'packet' | 'bazisCutSet' | 'bath' | 'order' | 'orderDetail';
   id: string; accepted: string | null; received: string; createdAt?: string;
+  /** Issued only by the server-side sealed-lineage snapshot loader. */
+  lineage?: MdfValidatedPhysicalLineage;
+  /** A present lineage failure is never treated as an unlineaged v1 source. */
+  lineageIssue?: string;
   /** Frozen known ownership when exact membership is unresolved. */
   uncertainOrderIds?: readonly number[];
-  lines: (MdfPositionQuantity & { evidenceLineId: string; revision: string;
+  lines: (MdfPositionQuantity & { evidenceLineId: string; lineKey?: string; revision: string;
     stage: string; evidence: string; rework: boolean })[];
 }
 export interface MdfAllocationQuarantine {
@@ -27,6 +32,29 @@ function quantities(lines: readonly MdfPositionQuantity[]) {
     result.set(key, { orderId: l.orderId, detailId: l.detailId, quantity: mdfSum(result.get(key)?.quantity ?? 0, l.quantity) });
   }
   return result;
+}
+const positionReworkKey = (row: MdfPositionQuantity & { rework: boolean }) => JSON.stringify([mdfPositionKey(row),row.rework]);
+
+function positionReworkQuantities(lines: readonly (MdfPositionQuantity & { rework: boolean })[]) {
+  const result = new Map<string,number>();
+  for (const line of lines) {
+    const key = positionReworkKey(line);
+    result.set(key,mdfSum(result.get(key) ?? 0,line.quantity));
+  }
+  return result;
+}
+function hasValidCurrentLineage(source: MdfAllocationSource, acceptedLines: MdfAllocationSource['lines']): boolean {
+  if (source.lineage === undefined) return false;
+  if (!source.lineage) return false;
+  if (source.lineageIssue !== undefined || !source.accepted || source.accepted !== source.received
+    || (source.kind !== 'packet' && source.kind !== 'bazisCutSet' && source.kind !== 'bath')) return false;
+  try {
+    if (acceptedLines.some(line => line.revision === source.accepted && line.evidence === 'physical' && !line.lineKey)) return false;
+    return matchesMdfValidatedPhysicalLineage({ sourceKind: source.kind,sourceId: source.id,
+      revisionKey: source.accepted,lines: acceptedLines.map(line => ({ ...line, lineKey: line.lineKey ?? '' })),lineage: source.lineage });
+  } catch {
+    return false;
+  }
 }
 
 /** Local uncertainty, NOT proof of a complete historical baseline. Caller must
@@ -58,20 +86,39 @@ export function planMdfQuarantinedAllocations(input: {
       if (!mdfQuantity(l.quantity) || !l.evidenceLineId || seenLines.has(l.evidenceLineId)) throw new Error('MDF_ALLOCATION_INVALID_LINE');
       seenLines.add(l.evidenceLineId);
     }
-    if (s.kind === 'order' || s.kind === 'orderDetail') continue;
+    if (s.kind === 'order' || s.kind === 'orderDetail') {
+      if (s.lineageIssue !== undefined || s.lineage !== undefined) {
+        reject(s,s.lineageIssue || 'LINEAGE_INVALID',s.lines);
+      }
+      continue;
+    }
     const own = s.lines.filter(l => l.revision === s.accepted);
     const members = quantities(own.filter(l => l.stage === 'membership' && l.evidence === 'derived'));
+    const hasLineage = hasValidCurrentLineage(s,s.lines);
     const scope = [...s.lines, ...ownAllocations(s.id)];
     const missingMembership = [...new Set([s.accepted, s.received].filter(r => r !== null))]
       .some(r => !s.lines.some(l => l.revision === r && l.stage === 'membership' && l.evidence === 'derived'));
     let reason: string | undefined;
-    if (!s.accepted || s.accepted !== s.received) reason = 'ACCEPTANCE_PENDING';
+    if (s.lineageIssue !== undefined || (s.lineage !== undefined && !hasLineage)) reason = s.lineageIssue || 'LINEAGE_INVALID';
+    else if (!s.accepted || s.accepted !== s.received) reason = 'ACCEPTANCE_PENDING';
     else if (!members.size) reason = 'MEMBERSHIP_MISSING';
     else if (own.some(l => !isMdfEvidenceContract(s.kind,l.stage,l.evidence))) reason = 'INVALID_EVIDENCE';
-    else if (['cut','laminated'].some(stage => [...quantities(own.filter(l => l.stage === stage && l.evidence === 'physical'))]
-      .some(([key,row]) => row.quantity > (members.get(key)?.quantity ?? 0)))) reason = 'MEMBERSHIP_MISMATCH';
-    else if (s.kind === 'bath' && (!s.createdAt || !Number.isFinite(Date.parse(s.createdAt)))) reason = 'BATH_METADATA_MISSING';
-    else if (s.kind === 'bath' && own.some(l => l.rework)) reason = 'REWORK_BATH_UNSUPPORTED';
+    else {
+      const lineageMayCarry = hasLineage && (s.kind === 'packet' || s.kind === 'bazisCutSet');
+      // Preserve the v1 stage/position aggregate cap exactly. V2 packet/BASIS
+      // physical rows are independently authenticated by the sealed lineage.
+      const memberByPartition = positionReworkQuantities(own.filter(l => l.stage === 'membership' && l.evidence === 'derived'));
+      const declarationByPartition = positionReworkQuantities(own.filter(l => l.stage === 'declaration'
+        && l.evidence === 'declaration'));
+      const hasUnsupportedOverhang = !lineageMayCarry && ['cut','laminated'].some(stage =>
+        [...quantities(own.filter(l => l.stage === stage && l.evidence === 'physical'))]
+          .some(([key,row]) => row.quantity > (members.get(key)?.quantity ?? 0)))
+        || (lineageMayCarry && [...declarationByPartition].some(([key,quantity]) =>
+          quantity > (memberByPartition.get(key) ?? 0)));
+      if (hasUnsupportedOverhang) reason = 'MEMBERSHIP_MISMATCH';
+    }
+    if (!reason && s.kind === 'bath' && (!s.createdAt || !Number.isFinite(Date.parse(s.createdAt)))) reason = 'BATH_METADATA_MISSING';
+    if (!reason && s.kind === 'bath' && own.some(l => l.rework)) reason = 'REWORK_BATH_UNSUPPORTED';
     if (reason) {
       reject(s, reason, s.kind === 'bath' ? scope : [], s.kind === 'bath' && missingMembership);
       continue;

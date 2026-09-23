@@ -51,6 +51,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real MDF manual com
     }
     await db.query('ALTER TABLE cnc_telegram_packets ADD PRIMARY KEY(packet_id)');
     await db.query(readFileSync(new URL('../../../../db/migrations/179_mdf_active_return.sql',import.meta.url),'utf8'));
+    await db.query(readFileSync(new URL('../../../../db/migrations/182_mdf_physical_lineage.sql',import.meta.url),'utf8'));
     await db.query('CREATE TABLE mdf_cnc_observation_job_authorities(job_id uuid PRIMARY KEY,authority text NOT NULL)');
     await db.query(`ALTER TABLE cut_result_placement ADD COLUMN IF NOT EXISTS order_hdf_detail_id bigint;
       ALTER TABLE audit_log ALTER COLUMN audit_id SET DEFAULT gen_random_uuid();

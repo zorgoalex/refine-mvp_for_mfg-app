@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { mdfPhysicalLineageDigest, snapshotMdfPhysicalLineage,
   type MdfPhysicalLineageManifest, type MdfPhysicalLineageManifestLine } from './mdf-physical-lineage';
+import { issueMdfValidatedPhysicalLineage, matchesMdfValidatedPhysicalLineage } from '../domain/mdf-physical-lineage';
 
 const physical = (lineKey:string):MdfPhysicalLineageManifestLine => ({ lineKey,evidenceKind:'physical' });
 const membership = (lineKey:string):MdfPhysicalLineageManifestLine => ({ lineKey,evidenceKind:'derived' });
@@ -84,5 +85,36 @@ describe('MDF physical-lineage manifest normalization', () => {
       droppedPredecessorEvidenceLineIds:[]},[physical('cut-A')])).toThrow('MDF_LINEAGE_INVALID');
     expect(()=>snapshotMdfPhysicalLineage({operation:'correction',actions:[],
       droppedPredecessorEvidenceLineIds:[parentA,parentA]},[])).toThrow('MDF_LINEAGE_INVALID');
+  });
+
+  it('treats validated physical lineage as an issued, exact-revision and exact-row descriptor', () => {
+    const evidenceLineId = '11111111-1111-4111-8111-111111111111';
+    const canonicalOriginEvidenceLineId = evidenceLineId;
+    const row = {
+      evidenceLineId, lineKey:'cut-a', orderId:1, detailId:11, quantity:10,
+      stageCode:'cut' as const, evidenceKind:'physical' as const, rework:false,
+      action:'root' as const, predecessorEvidenceLineId:null, canonicalOriginEvidenceLineId,
+    };
+    const manifest = snapshotMdfPhysicalLineage({ operation:'production', authority:'manual_production',
+      actions:[{ lineKey:'cut-a', action:'root' }], droppedPredecessorEvidenceLineIds:[] },
+    [{ lineKey:'cut-a', evidenceKind:'physical' }]);
+    const descriptor = issueMdfValidatedPhysicalLineage({
+      sourceKind:'bazisCutSet', sourceId:'basis-1', revisionKey:'2', operation:manifest.operation,
+      productionAuthority:'manual_production', predecessorAcceptedRevisionKey:null,
+      manifestDigest:mdfPhysicalLineageDigest(manifest), droppedPredecessorEvidenceLineIds:[], lines:[row],
+    });
+    const physicalRows = [{ ...row, revision:'2', stage:'cut', evidence:'physical' }];
+
+    expect(matchesMdfValidatedPhysicalLineage({ sourceKind:'bazisCutSet', sourceId:'basis-1',
+      revisionKey:'2', lines:physicalRows, lineage:descriptor })).toBe(true);
+    expect(matchesMdfValidatedPhysicalLineage({ sourceKind:'packet', sourceId:'basis-1',
+      revisionKey:'2', lines:physicalRows, lineage:descriptor })).toBe(false);
+    expect(matchesMdfValidatedPhysicalLineage({ sourceKind:'bazisCutSet', sourceId:'basis-1',
+      revisionKey:'3', lines:physicalRows, lineage:descriptor })).toBe(false);
+    expect(matchesMdfValidatedPhysicalLineage({ sourceKind:'bazisCutSet', sourceId:'basis-1',
+      revisionKey:'2', lines:[{ ...physicalRows[0], quantity:9 }], lineage:descriptor })).toBe(false);
+    // A structurally identical caller-made copy has no server-issued capability.
+    expect(matchesMdfValidatedPhysicalLineage({ sourceKind:'bazisCutSet', sourceId:'basis-1',
+      revisionKey:'2', lines:physicalRows, lineage:{ ...descriptor } })).toBe(false);
   });
 });

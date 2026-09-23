@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import { planMdfCorrection, type MdfCorrectionAllocation, type MdfCorrectionSource } from './mdf-correction-plan.js';
+import { issueMdfValidatedPhysicalLineage, type MdfValidatedPhysicalLine } from './mdf-physical-lineage.js';
 
 type Kind = MdfCorrectionSource['kind'];
 type Proof = { lineKey: string; quantity: number; stage: 'cut'|'laminated'; evidence?: 'physical'|'declaration'; rework?: boolean };
@@ -24,6 +26,24 @@ const request = (sources: MdfCorrectionSource[], allocations: MdfCorrectionAlloc
   target: { kind: targetKind, id: targetId }, targetRank, cutRank: 5, laminatedRank: 8,
   sources, allocations, details: [detail()],
 });
+function issueCarriedLineage(sourceRow: MdfCorrectionSource, proofLineKey: string, predecessorId: string) {
+  const manifest = { operation: 'carry' as const, actions: [{
+    lineKey: proofLineKey, action: 'carry' as const, predecessorEvidenceLineId: predecessorId,
+  }], droppedPredecessorEvidenceLineIds: [] as const };
+  const manifestDigest = createHash('sha256').update(JSON.stringify(['mdf-physical-lineage-v2', manifest])).digest('hex');
+  const physical = sourceRow.lines.filter(line => line.evidence === 'physical').map(line => ({
+    evidenceLineId: line.evidenceLineId, lineKey: line.lineKey, orderId: line.orderId, detailId: line.detailId,
+    quantity: line.quantity, stageCode: line.stage as 'cut' | 'laminated', evidenceKind: 'physical' as const,
+    rework: line.rework, action: 'carry' as const, predecessorEvidenceLineId: predecessorId,
+    canonicalOriginEvidenceLineId: predecessorId,
+  } satisfies MdfValidatedPhysicalLine));
+  sourceRow.lineage = issueMdfValidatedPhysicalLineage({
+    sourceKind: sourceRow.kind as 'packet' | 'bazisCutSet' | 'bath', sourceId: sourceRow.id,
+    revisionKey: sourceRow.acceptedRevision!, operation: 'carry', productionAuthority: null,
+    predecessorAcceptedRevisionKey: 'rev-0', manifestDigest, droppedPredecessorEvidenceLineIds: [], lines: physical,
+  });
+  return sourceRow;
+}
 function splitFixture() {
   const cnc=source('packet','cnc',[{ orderId:1,detailId:11,quantity:10 }],[{ lineKey:'cut',quantity:4,stage:'cut' }]);
   const basis=source('bazisCutSet','basis',[{ orderId:1,detailId:11,quantity:6 }],[{ lineKey:'cut',quantity:6,stage:'cut' }]);
@@ -99,6 +119,59 @@ describe('pure MDF source correction planner', () => {
     if (plan.status==='ready') {
       expect(plan.affectedDetails[0]).toMatchObject({laminatedCoverage:10,independentFloorRank:8,after:{creditedRolled:10,remaining:0}});
     }
+  });
+
+  it('includes a carried physical-only position in the correction owner scope after assignment removal', () => {
+    const target = source('packet', 'target', [{ orderId: 1, detailId: 11, quantity: 8 }], [
+      { lineKey: 'carried-b-cut', quantity: 10, stage: 'cut' },
+    ]);
+    target.lines.find(line => line.evidence === 'physical')!.orderId = 2;
+    target.lines.find(line => line.evidence === 'physical')!.detailId = 22;
+    issueCarriedLineage(target, 'carried-b-cut', '33333333-3333-4333-8333-333333333333');
+    const input = request([target], [], 'packet', 'target', 2);
+    input.details.push(detail(2, 22, 10, 10));
+
+    const plan = planMdfCorrection(input);
+
+    expect(plan.status).toBe('ready');
+    if (plan.status !== 'ready') return;
+    expect(plan.sourceReplacement.lines.some(line => line.lineKey === 'carried-b-cut')).toBe(false);
+    expect(plan.affectedDetails.map(row => [row.orderId, row.detailId])).toEqual([[1, 11], [2, 22]]);
+    expect(plan.affectedDetails.find(row => row.orderId === 2 && row.detailId === 22)).toMatchObject({
+      cutCoverage: 0, laminatedCoverage: 0, independentFloorRank: null, afterRank: 2,
+      after: { rawCut: 0, creditedCut: 0, remaining: 10 },
+    });
+    expect(plan.before.positions.find(row => row.orderId === 2 && row.detailId === 22)).toMatchObject({
+      rawCut: 10, creditedCut: 10, remaining: 0,
+    });
+  });
+
+  it('keeps v1 physical proof strictly bounded by current membership', () => {
+    const legacy = source('packet', 'legacy', [{ orderId: 1, detailId: 11, quantity: 8 }], [
+      { lineKey: 'legacy-cut', quantity: 10, stage: 'cut' },
+    ]);
+    expect(planMdfCorrection(request([legacy], [], 'packet', 'legacy', 2))).toMatchObject({
+      status: 'blocked', blockers: [expect.objectContaining({ code: 'TARGET_SOURCE_UNAVAILABLE' })],
+    });
+  });
+
+  it('does not remap a stale canonical-root debit to the current carried line', () => {
+    const rootId = '44444444-4444-4444-8444-444444444444';
+    const target = source('packet', 'target', [{ orderId: 1, detailId: 11, quantity: 8 }], [
+      { lineKey: 'carried-b-cut', quantity: 10, stage: 'cut' },
+    ]);
+    target.lines.find(line => line.evidence === 'physical')!.orderId = 2;
+    target.lines.find(line => line.evidence === 'physical')!.detailId = 22;
+    issueCarriedLineage(target, 'carried-b-cut', rootId);
+    const bath = source('bath', 'bath-b', [{ orderId: 2, detailId: 22, quantity: 10 }]);
+    const stale: MdfCorrectionAllocation = {
+      allocationId: 'stale-canonical-pin', evidenceLineId: rootId,
+      evidenceSourceKind: 'packet', evidenceSourceId: 'target', evidenceRevision: 'rev-1',
+      bathId: 'bath-b', bathRevision: 'rev-1', orderId: 2, detailId: 22, quantity: 10, state: 'reserved',
+    };
+    expect(planMdfCorrection(request([target, bath], [stale], 'packet', 'target', 2))).toMatchObject({
+      status: 'blocked', blockers: [expect.objectContaining({ code: 'ALLOCATION_EVIDENCE_UNVERIFIED' })],
+    });
   });
 
   it('attributes partial lamination exactly to consumed debits and handles full queued lamination reservations', () => {

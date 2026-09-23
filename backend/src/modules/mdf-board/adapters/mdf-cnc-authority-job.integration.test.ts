@@ -48,7 +48,7 @@ describe.skipIf(!enabled)('MDF CNC authority accepted-job executor, isolated Pos
     for (const migration of ['155_order_production_composition.sql','165_mdf_engine_foundation.sql',
       '166_mdf_engine_fences.sql','174_mdf_execution_context.sql','175_mdf_command_placement.sql',
       '178_mdf_correction_receipts.sql','179_mdf_active_return.sql','180_mdf_cnc_observations.sql',
-      '181_cnc_manual_send_observation.sql']) {
+      '181_cnc_manual_send_observation.sql','182_mdf_physical_lineage.sql']) {
       await fixture.applyMigrations([migration]);
     }
     await fixture.assertLocalRelations(['orders','order_details','production_statuses','mdf_cnc_observation_targets',

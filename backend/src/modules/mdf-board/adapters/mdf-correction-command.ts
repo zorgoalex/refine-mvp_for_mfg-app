@@ -8,14 +8,16 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import { allowsScope, rolePolicyForUser } from '../../../permissions/policies/scope';
 import { requireMdfCommandBoundary } from '../application/mdf-command-boundary';
-import { recordMdfReceipt, type MdfReceiptLine } from '../application/mdf-receipt';
+import { recordMdfLineageReceipt, recordMdfReceipt, type MdfReceiptInput, type MdfReceiptLine } from '../application/mdf-receipt';
+import type { MdfPhysicalLineageAction, MdfPhysicalLineageManifest } from '../application/mdf-physical-lineage';
+import { matchesMdfValidatedPhysicalLineage } from '../domain/mdf-physical-lineage';
 import { MdfNeedsAttention, type MdfSourceKind } from '../application/mdf-job-runner';
 import { mdfCorrectionComposition, discoverMdfCorrectionClosure, loadMdfCorrectionSnapshot,
   MAX_MDF_CORRECTION_ORDERS, type MdfCorrectionOwner, type MdfCorrectionSnapshot } from './mdf-correction-snapshot';
 import { mdfSourceKey } from './mdf-execution-snapshot';
 import { mdfSourceCommandToken } from '../domain/mdf-manual-proof';
 import { planMdfCorrection, type MdfCorrectionDetail, type MdfCorrectionInput, type MdfCorrectionPlan,
-  type MdfCorrectionSourceReplacement } from '../domain/mdf-correction-plan';
+  type MdfCorrectionSource, type MdfCorrectionSourceLine, type MdfCorrectionSourceReplacement } from '../domain/mdf-correction-plan';
 import { mdfPositionKey, mdfSum } from '../domain/mdf-quantities';
 import { returnStageOptions, type MdfReturnColumn, type MdfReturnKind, type MdfReturnStage } from '../../orders/domain/mdf-production-return';
 import type { MdfCorrectionBathEffect, MdfCorrectionConfirmBody, MdfCorrectionConfirmResponse,
@@ -231,14 +233,21 @@ export class PgMdfCorrectionCommand {
       const isDirectTarget=sourceKey(ref)===sourceKey(source);
       const receiptLines: MdfReceiptLine[]=replacement.lines.map(line=>({lineKey:line.lineKey,orderId:line.orderId,
         detailId:line.detailId,quantity:line.quantity,stageCode:line.stage,evidenceKind:line.evidence,rework:line.rework}));
-      const saved=await recordMdfReceipt(tx,{sourceKind:replacement.sourceKind,sourceId:replacement.sourceId,revisionKey,
-        origin:'manual',actorUserId:actorId,requestId,causeKey,
+      const sourceSnapshot=prepared.snapshot.plannerSources.find(candidate=>sourceKey(candidate)===sourceKey(ref));
+      const lineageManifest=sourceSnapshot?.lineage
+        ? correctionLineageManifest(sourceSnapshot,previous.accepted!,replacement.lines)
+        : undefined;
+      const receiptInput:Omit<MdfReceiptInput,'correction'>={sourceKind:replacement.sourceKind,sourceId:replacement.sourceId,revisionKey,
+        origin:'manual' as const,actorUserId:actorId,requestId,causeKey,
         expectedFence:{version:previous.version,correctionEpoch:previous.epoch},sourceDigest:hash({
           previousRevision:replacement.previousRevision,lines:replacement.lines,raw:sourceKey(ref)===sourceKey(source)?prepared.snapshot.rawTarget.stamp:null}),
         executionContext:{sourceCreatedAt:metadata.sourceCreatedAt,displayName:metadata.displayName,
           priorColumn:prepared.snapshot.published.get(sourceKey(ref))?.column??metadata.priorColumn,
           manualPlacementColumn:isDirectTarget?request.targetColumn:null,compositionComplete:true,demand},
-        accept:true,correction:true,lines:receiptLines,rules});
+        accept:true as const,lines:receiptLines,rules};
+      const saved=lineageManifest
+        ? await recordMdfLineageReceipt(tx,{...receiptInput,lineage:lineageManifest})
+        : await recordMdfReceipt(tx,{...receiptInput,correction:true});
       if (!saved.accepted||saved.replay||saved.correctionEpoch!==(BigInt(previous.epoch)+1n).toString())
         fail(409,'MDF_CORRECTION_STALE','Подтверждённая версия карточки изменилась. Повторите предпросмотр.');
       if (isDirectTarget && source.kind==='packet' && prepared.response.cncFreshnessBaseline) {
@@ -420,10 +429,11 @@ function findAffectedOrders(snapshot:MdfCorrectionSnapshot,plan:Extract<MdfCorre
       &&line.stage==='membership'&&line.evidence==='derived').forEach(line=>affected.add(line.orderId));
   addMembers(plan.sourceReplacement.sourceKind,plan.sourceReplacement.sourceId);
   for (const bath of plan.bathReplacements) addMembers(bath.sourceKind,bath.sourceId);
-  for (const detail of plan.affectedDetails) {
-    const original=snapshot.details.find(row=>row.orderId===detail.orderId&&row.detailId===detail.detailId);
-    if (detail.afterRank!==original?.currentRank) affected.add(detail.orderId);
-  }
+  // Include every affected validated proof position, even if its status rank
+  // is unchanged. A retained physical fact may outlive current membership and
+  // still needs the same owner authorization, closure, audit, and suppression
+  // scope as ordinary current members.
+  for (const detail of plan.affectedDetails) affected.add(detail.orderId);
   return sorted(affected);
 }
 
@@ -535,10 +545,58 @@ function correctionDigest(user:CurrentUser,source:Source,request:MdfCorrectionPr
   return hash({actor:{id:user.id,role:user.role,permissions:[...user.permissions].sort(),scopes:rolePolicyForUser(user)},source,
     intent:{sourceToken:request.sourceToken,targetColumn:request.targetColumn,productionStatusId:request.productionStatusId??null},
     heads:snapshot.heads,lines:snapshot.lines,demands:[...snapshot.frozenDemand].sort(([a],[b])=>a.localeCompare(b)),
-    issues:[...snapshot.sourceIssues].sort(([a],[b])=>a<b?-1:a>b?1:0),raw:{stamp:snapshot.rawTarget.stamp,
+    issues:[...snapshot.sourceIssues].sort(([a],[b])=>a<b?-1:a>b?1:0),
+    lineages:[...snapshot.lineage].sort(([a],[b])=>a<b?-1:a>b?1:0).map(([revisionKey,lineage])=>({revisionKey,
+      sourceKind:lineage.sourceKind,sourceId:lineage.sourceId,revision:lineage.revisionKey,operation:lineage.operation,
+      productionAuthority:lineage.productionAuthority,predecessorAcceptedRevisionKey:lineage.predecessorAcceptedRevisionKey,
+      droppedPredecessorEvidenceLineIds:[...lineage.droppedPredecessorEvidenceLineIds],manifestDigest:lineage.manifestDigest,
+      physicalSnapshotDigest:lineage.physicalSnapshotDigest,
+      lines:[...lineage.lines].sort((a,b)=>a.evidenceLineId<b.evidenceLineId?-1:a.evidenceLineId>b.evidenceLineId?1:0)
+        .map(line=>({evidenceLineId:line.evidenceLineId,lineKey:line.lineKey,orderId:line.orderId,detailId:line.detailId,
+          quantity:line.quantity,stageCode:line.stageCode,evidenceKind:line.evidenceKind,rework:line.rework,
+          action:line.action,predecessorEvidenceLineId:line.predecessorEvidenceLineId,
+          canonicalOriginEvidenceLineId:line.canonicalOriginEvidenceLineId}))})),
+    lineageIssues:[...snapshot.lineageIssues].sort(([a],[b])=>a<b?-1:a>b?1:0),
+    raw:{stamp:snapshot.rawTarget.stamp,
       sourceVersion:snapshot.rawTarget.sourceVersion,observationBaseline:snapshot.rawTarget.observationBaseline},
     allocations:snapshot.allocations,details:snapshot.details,owners:snapshot.owners.map(owner=>({...owner,assigned:[...owner.assigned].sort()})),
     metadata:[...snapshot.metadata].sort(([a],[b])=>a<b?-1:a>b?1:0),
     published:[...snapshot.published].sort(([a],[b])=>a.localeCompare(b)),stages,targetStage,plan,affectedOrderIds,candidateJobs,deferredJobs,
     effects:{baths:response.affectedBaths,details:response.details}});
+}
+
+/** Turn only an authenticated v2 predecessor into a return manifest. A return
+ * may carry/reduce an existing physical fact or explicitly drop it; it cannot
+ * create a new physical root or remap proof by canonical origin. */
+function correctionLineageManifest(source:MdfCorrectionSource,predecessorRevision:string,
+  nextLines:readonly Omit<MdfCorrectionSourceLine,'evidenceLineId'|'revision'>[]):MdfPhysicalLineageManifest {
+  const lineage=source.lineage;
+  if (!lineage||source.lineageIssue!==undefined||source.acceptedRevision!==predecessorRevision
+    ||source.receivedRevision!==predecessorRevision||source.kind!==lineage.sourceKind
+    ||source.id!==lineage.sourceId||!matchesMdfValidatedPhysicalLineage({sourceKind:lineage.sourceKind,
+      sourceId:lineage.sourceId,revisionKey:predecessorRevision,lines:source.lines,lineage})) {
+    throw new MdfCorrectionScopeChanged();
+  }
+  const previousByKey=new Map<string,typeof lineage.lines[number]>();
+  for (const line of lineage.lines) {
+    if (previousByKey.has(line.lineKey)) throw new MdfCorrectionScopeChanged();
+    previousByKey.set(line.lineKey,line);
+  }
+  const retained=new Set<string>();
+  const actions:MdfPhysicalLineageAction[]=[];
+  for (const line of nextLines) {
+    if (line.evidence!=='physical') continue;
+    const previous=previousByKey.get(line.lineKey);
+    if (!previous||previous.orderId!==line.orderId||previous.detailId!==line.detailId
+      ||previous.stageCode!==line.stage||previous.rework!==line.rework
+      ||line.quantity>previous.quantity) throw new MdfCorrectionScopeChanged();
+    retained.add(previous.evidenceLineId);
+    actions.push(line.quantity===previous.quantity
+      ? {lineKey:line.lineKey,action:'carry',predecessorEvidenceLineId:previous.evidenceLineId}
+      : {lineKey:line.lineKey,action:'reduce',predecessorEvidenceLineId:previous.evidenceLineId});
+  }
+  actions.sort((a,b)=>a.lineKey<b.lineKey?-1:a.lineKey>b.lineKey?1:0);
+  const droppedPredecessorEvidenceLineIds=lineage.lines.filter(line=>!retained.has(line.evidenceLineId))
+    .map(line=>line.evidenceLineId).sort((a,b)=>a<b?-1:a>b?1:0);
+  return {operation:'correction',actions,droppedPredecessorEvidenceLineIds};
 }

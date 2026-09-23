@@ -4,7 +4,7 @@ import { Client } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { TransactionClient } from '../../../database/database.types';
 import { beginTransactionHooks, discardTransactionHooks, flushTransactionHooks } from '../../../database/transaction-hooks';
-import { recordMdfReceipt, type MdfReceiptInput } from '../application/mdf-receipt';
+import { recordMdfReceipt, recordMdfLineageReceipt, type MdfLineageReceiptInput, type MdfReceiptInput } from '../application/mdf-receipt';
 import { MdfJobRunner } from '../application/mdf-job-runner';
 import { executeMdfAcceptedJob } from '../application/mdf-accepted-job';
 import { readMdfPublishedSnapshot } from './mdf-published-snapshot';
@@ -45,6 +45,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
       ALTER TABLE cnc_telegram_import_items ADD PRIMARY KEY(import_item_id)`);
     await db.query(readFileSync(new URL('../../../../db/migrations/179_mdf_active_return.sql',import.meta.url),'utf8'));
     await db.query(readFileSync(new URL('../../../../db/migrations/180_mdf_cnc_observations.sql',import.meta.url),'utf8'));
+    await db.query(readFileSync(new URL('../../../../db/migrations/182_mdf_physical_lineage.sql',import.meta.url),'utf8'));
     await db.query(`ALTER TABLE audit_log ALTER COLUMN audit_id SET DEFAULT gen_random_uuid();
       CREATE UNIQUE INDEX e2e_audit_related ON audit_log_related_entity(audit_id,entity_type,entity_id);
       CREATE UNIQUE INDEX e2e_outbox ON outbox_events(idempotency_key);
@@ -398,6 +399,93 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     expect((await db.query('SELECT count(*) n FROM mdf_bath_allocations WHERE order_id=$1 AND state<>\'released\'',[f.orderId])).rows[0].n).toBe('2');
     expect((await db.query('SELECT issues FROM mdf_published_sources WHERE source_kind=$1 AND source_id=$2',
       ['packet',f.receipts[0].sourceId])).rows[0].issues).toContain('ACCEPTANCE_PENDING');
+  });
+  it('keeps legacy v1 aggregate physical proof bounded across multiple lines', async () => {
+    const f = await fixture();
+    await db.query("UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now() WHERE status='pending'");
+    const prior = f.receipts[0];
+    const receipt = {
+      ...prior, revisionKey:'2', requestId:'E2E v1 split aggregate proof', causeKey:'E2E v1 split aggregate proof',
+      expectedFence:{version:'1',correctionEpoch:'0'},
+      lines:[
+        { ...prior.lines[0], lineKey:'member-v2', quantity:10 },
+        { ...prior.lines[1], lineKey:'physical-a', quantity:6 },
+        { ...prior.lines[1], lineKey:'physical-b', quantity:6 },
+      ],
+    };
+    const saved=await database().transaction(tx=>recordMdfReceipt(tx,receipt));
+    expect(saved.accepted).toBe(true);
+    expect(await runner().processOne()).toMatchObject({status:'done',jobId:saved.jobId});
+    const source=(await db.query(`SELECT issues FROM mdf_published_sources
+      WHERE source_kind='packet' AND source_id=$1`,[prior.sourceId])).rows[0];
+    expect(source.issues).toContain('MEMBERSHIP_MISMATCH');
+    expect((await db.query(`SELECT count(*)::int n FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+      WHERE e.source_kind='packet' AND e.source_id=$1 AND e.revision_key='2' AND a.state<>'released'`,[prior.sourceId])).rows[0].n)
+      .toBe(0);
+  });
+  it('credits authenticated v2 BASIS carried proof beyond its reduced membership, capped by live order demand', async () => {
+    const orderId=++sequence, detailId=orderId*10, sourceId=String(orderId);
+    await db.query(`INSERT INTO orders(order_id,order_name,order_kind,delete_flag,version,order_status_id,payment_status_id)
+      VALUES($1,$2,'production_order',false,1,4,1)`,[orderId,`E2E lineage BASIS ${orderId}`]);
+    await db.query(`INSERT INTO order_details(detail_id,order_id,detail_number,quantity,production_status_id,delete_flag,material_id)
+      VALUES($1,$2,1,10,1,false,1)`,[detailId,orderId]);
+    const demand=[{orderId,detailId,quantity:10}];
+    const legacy:MdfReceiptInput={sourceKind:'bazisCutSet',sourceId,revisionKey:'legacy',origin:'manual',
+      actorUserId:1,requestId:`E2E lineage BASIS ${orderId} legacy`,causeKey:`E2E lineage BASIS ${orderId} legacy`,
+      expectedFence:null,accept:true,rules:[],executionContext:{sourceCreatedAt:'2026-09-01T00:00:00Z',
+        displayName:'E2E lineage BASIS',priorColumn:'parsed',compositionComplete:true,demand},
+      lines:[{lineKey:'member-legacy',orderId,detailId,quantity:10,stageCode:'membership',evidenceKind:'derived',rework:false}]};
+    const legacySaved=await database().transaction(tx=>recordMdfReceipt(tx,legacy));
+    const v2Input=(revisionKey:string,memberQuantity:number,lineKey:string,
+      expectedFence:MdfLineageReceiptInput['expectedFence'],predecessorEvidenceLineId:string|null):MdfLineageReceiptInput=>({
+      sourceKind:'bazisCutSet',sourceId,revisionKey,origin:'manual',actorUserId:1,
+      requestId:`E2E lineage BASIS ${orderId} ${revisionKey}`,causeKey:`E2E lineage BASIS ${orderId} ${revisionKey}`,
+      expectedFence,accept:true,rules:[],executionContext:{sourceCreatedAt:'2026-09-01T00:00:00Z',
+        displayName:'E2E lineage BASIS',priorColumn:'parsed',compositionComplete:true,demand},
+      lines:[
+        {lineKey:`member-${revisionKey}`,orderId,detailId,quantity:memberQuantity,stageCode:'membership',evidenceKind:'derived',rework:false},
+        {lineKey,orderId,detailId,quantity:10,stageCode:'cut',evidenceKind:'physical',rework:false},
+      ],
+      lineage:predecessorEvidenceLineId===null
+        ? {operation:'production',authority:'manual_production',actions:[{lineKey,action:'root'}],droppedPredecessorEvidenceLineIds:[]}
+        : {operation:'carry',actions:[{lineKey,action:'carry',predecessorEvidenceLineId}],droppedPredecessorEvidenceLineIds:[]},
+    });
+    const rooted=await database().transaction(tx=>recordMdfLineageReceipt(tx,v2Input('root',10,'root-cut',
+      {version:legacySaved.version,correctionEpoch:legacySaved.correctionEpoch},null)));
+    const rootLineId=(await db.query<{evidence_line_id:string}>(`SELECT evidence_line_id::text FROM mdf_evidence_lines
+      WHERE source_kind='bazisCutSet' AND source_id=$1 AND revision_key='root' AND line_key='root-cut'`,[sourceId])).rows[0].evidence_line_id;
+    const carried=await database().transaction(tx=>recordMdfLineageReceipt(tx,v2Input('carry',8,'carried-cut',
+      {version:rooted.version,correctionEpoch:rooted.correctionEpoch},rootLineId)));
+    expect(carried.accepted).toBe(true);
+    await db.query("UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now() WHERE job_id<>$1 AND status='pending'",
+      [carried.jobId]);
+
+    const executionFailure:string[]=[];
+    const diagnosticRunner=new MdfJobRunner(database(),async (tx,job,rules)=>{
+      try { return await executeMdfAcceptedJob(tx,job,rules); }
+      catch (error) {
+        const code=typeof error==='object'&&error!==null&&'code' in error&&typeof error.code==='string'?error.code:'';
+        const message=error instanceof Error?error.message:'';
+        executionFailure.push(`${error instanceof Error?error.name:'non_error'}:${code}:${/^[A-Z0-9_:-]{1,120}$/.test(message)?message:'OTHER'}`);
+        throw error;
+      }
+    });
+    const execution=await diagnosticRunner.processOne();
+    const persistedJob=(await db.query('SELECT status,error_code FROM mdf_recalculation_jobs WHERE job_id=$1',[carried.jobId])).rows[0];
+    expect({execution,persistedJob,executionFailure}).toMatchObject({execution:{status:'done',jobId:carried.jobId},
+      executionFailure:[],
+      persistedJob:{status:'done',error_code:null}});
+    expect((await db.query(`SELECT accepted_revision_key,received_revision_key FROM mdf_source_heads
+      WHERE source_kind='bazisCutSet' AND source_id=$1`,[sourceId])).rows[0])
+      .toEqual({accepted_revision_key:'carry',received_revision_key:'carry'});
+    expect((await db.query(`SELECT detail_id,quantity FROM mdf_published_source_members
+      WHERE source_kind='bazisCutSet' AND source_id=$1`,[sourceId])).rows)
+      .toEqual([{detail_id:String(detailId),quantity:'8'}]);
+    expect((await positions(orderId))[0]).toMatchObject({cut_quantity:'10',credited_cut:'10',remaining:'0'});
+    const published=(await db.query(`SELECT issues FROM mdf_published_sources
+      WHERE source_kind='bazisCutSet' AND source_id=$1`,[sourceId])).rows[0];
+    expect(published.issues).not.toContain('MDF_ALLOCATION_UNVERIFIED');
+    expect(published.issues).not.toContain('MDF_LINEAGE_INVALID');
   });
   it('unaccepted received revision publishes its new membership/metadata, never labels rev1 as rev2', async () => {
     const f = await fixture(); await runner().processOne();

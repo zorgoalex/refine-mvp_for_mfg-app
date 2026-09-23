@@ -117,6 +117,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
       ALTER TABLE cnc_manual_svg_telegram_send_request_files ADD PRIMARY KEY(request_id,file_id);
       CREATE UNIQUE INDEX e2e_manual_send_order ON cnc_manual_svg_telegram_send_request_files(request_id,send_order)`);
     await db.query(readFileSync(new URL('../../../../db/migrations/181_cnc_manual_send_observation.sql',import.meta.url),'utf8'));
+    await db.query(readFileSync(new URL('../../../../db/migrations/182_mdf_physical_lineage.sql',import.meta.url),'utf8'));
     await db.query(`ALTER TABLE cut_group_sheet ADD FOREIGN KEY(cut_group_id) REFERENCES cut_group(cut_group_id) ON DELETE CASCADE`);
     for (const name of ['set_session_user','order_production_summary','recalc_order_production_status',
       'cut_result_snapshot_digest','cut_result_snapshot_is_complete','cut_result_snapshot_is_vacuum',
