@@ -40,6 +40,7 @@ import { OrderHdfSettingsService } from './application/order-hdf-settings.servic
 import { OrderResourceDemandService } from './application/order-resource-demand.service';
 import { OrderStatusBoardService } from './application/order-status-board.service';
 import { MdfBoardManualMoveService } from './application/mdf-board-manual-move.service';
+import { MdfActiveProductionReturnService } from './application/mdf-active-production-return.service';
 import { RateLimitService } from '../../rate-limit/rate-limit.service';
 import { UnavailableOrderTransactionManager } from './adapters/unavailable-order-transaction-manager';
 import { SharedOrderExportRateLimiter } from './application/order-export-rate-limiter';
@@ -47,6 +48,7 @@ import { OrderExportController } from './http/order-export.controller';
 import { OrderGroupLinksController } from './http/order-group-links.controller';
 import { MdfBoardManualMoveController } from './http/mdf-board-manual-move.controller';
 import { MdfProductionReturnController } from './http/mdf-production-return.controller';
+import { MdfActiveProductionReturnController } from './http/mdf-active-production-return.controller';
 import { OrderResourceDemandController } from './http/order-resource-demand.controller';
 import { OrderSnapshotController } from './http/order-snapshot.controller';
 import { OrdersController } from './http/orders.controller';
@@ -73,6 +75,7 @@ export function shouldEnableOrderDeadlineSync(input: {
   controllers: [
     // Register static `/orders/*` routes before the generic `/orders/:orderId`.
     MdfBoardManualMoveController,
+    MdfActiveProductionReturnController,
     MdfProductionReturnController,
     OrderStatusBoardController,
     OrderExportController,
@@ -218,6 +221,11 @@ export function shouldEnableOrderDeadlineSync(input: {
             ? new PgMdfBoardManualMoveRepository(database)
             : new UnavailableMdfBoardManualMoveRepository(),
         }),
+      inject: [DatabaseService],
+    },
+    {
+      provide: MdfActiveProductionReturnService,
+      useFactory: (database: DatabaseService) => new MdfActiveProductionReturnService(database),
       inject: [DatabaseService],
     },
     {

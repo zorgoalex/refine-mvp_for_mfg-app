@@ -41,6 +41,8 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real MDF manual com
       'cut_result','cut_result_board_projection','cut_result_placement','cut_result_sheet_map']) {
       await db.query(`CREATE TABLE ${table} AS TABLE public.${table} WITH NO DATA`);
     }
+    await db.query('ALTER TABLE cnc_telegram_packets ADD PRIMARY KEY(packet_id)');
+    await db.query(readFileSync(new URL('../../../../db/migrations/179_mdf_active_return.sql',import.meta.url),'utf8'));
     await db.query(`ALTER TABLE cut_result_placement ADD COLUMN IF NOT EXISTS order_hdf_detail_id bigint;
       ALTER TABLE audit_log ALTER COLUMN audit_id SET DEFAULT gen_random_uuid();
       CREATE UNIQUE INDEX e2e_related ON audit_log_related_entity(audit_id,entity_type,entity_id);

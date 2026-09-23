@@ -2209,6 +2209,24 @@ probe_file() {
       "$(q_fun_hash 'public.mdf_reject_evidence_change()' a51e1b51d407124a856f1993d9c54fe8)" \
       "SELECT count(*)=1 FROM pg_trigger t WHERE t.tgrelid=to_regclass('public.mdf_revision_context') AND t.tgname='mdf_context_immutable' AND t.tgfoid=to_regprocedure('public.mdf_reject_evidence_change()') AND t.tgtype=27 AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgattr=''::int2vector;" \
       "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=ANY(ARRAY[to_regclass('public.mdf_revision_context'),to_regclass('public.mdf_recalculation_jobs')]) AND NOT convalidated);" ;;
+    179_mdf_active_return*) probe_all \
+      "$(q_colset_hash mdf_correction_command_results actor_user_id,command_key,request_digest,source_kind,source_id,order_ids,response,created_at 472e096aaefa864ed4b6e46f3626351d)" \
+      "$(q_conset_hash mdf_correction_command_results mdf_correction_command_results_actor_user_id_check,mdf_correction_command_results_command_key_check,mdf_correction_command_results_order_ids_check,mdf_correction_command_results_pkey,mdf_correction_command_results_request_digest_check,mdf_correction_command_results_response_check,mdf_correction_command_results_source_id_check,mdf_correction_command_results_source_kind_check 12852bdfb98b41e1bc7b8525cfb57ca4)" \
+      "$(q_idxset_hash mdf_correction_command_results mdf_correction_command_results_pkey 8904331b527955cd6afb69762cb245f8)" \
+      "SELECT count(*)=1 FROM pg_trigger t WHERE t.tgrelid=to_regclass('public.mdf_correction_command_results') AND t.tgname='mdf_correction_command_result_immutable' AND t.tgfoid=to_regprocedure('public.mdf_reject_evidence_change()') AND t.tgtype=27 AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgattr=''::int2vector;" \
+      "$(q_colset_hash mdf_correction_job_effect_suppressions job_id,affected_order_id,correction_source_kind,correction_source_id,correction_epoch,command_key,created_at 277b3a158b9ae318826ac38d3dc335c2)" \
+      "$(q_conset_hash mdf_correction_job_effect_suppressions mdf_correction_job_effect_suppressions_affected_order_id_check,mdf_correction_job_effect_suppressions_command_key_check,mdf_correction_job_effect_suppressions_correction_epoch_check,mdf_correction_job_effect_suppressio_correction_source_id_check,mdf_correction_job_effect_suppress_correction_source_kind_check,mdf_correction_job_effect_suppressions_pkey cebc56e18c6d83644a0a0db1784b530e)" \
+      "$(q_idxset_hash mdf_correction_job_effect_suppressions idx_mdf_correction_job_effect_suppressions_order,mdf_correction_job_effect_suppressions_pkey 9027e841e29fbf97366380dfc9283c10)" \
+      "SELECT count(*)=1 FROM pg_trigger t WHERE t.tgrelid=to_regclass('public.mdf_correction_job_effect_suppressions') AND t.tgname='mdf_correction_job_effect_suppression_immutable' AND t.tgfoid=to_regprocedure('public.mdf_reject_evidence_change()') AND t.tgtype=27 AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgattr=''::int2vector;" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conrelid=to_regclass('public.mdf_correction_job_effect_suppressions') AND c.contype='f' AND c.confrelid=to_regclass('public.mdf_recalculation_jobs'));" \
+      "$(q_colset_hash mdf_cnc_return_fences packet_id,correction_epoch,baseline_source_version,pending_source_version,completion_source_version,state,created_at,updated_at 9e3d189a5bb7f2694778eb04c97b9fb4)" \
+      "$(q_conset_hash mdf_cnc_return_fences mdf_cnc_return_fences_baseline_source_version_check,mdf_cnc_return_fences_correction_epoch_check,mdf_cnc_return_fences_packet_id_fkey,mdf_cnc_return_fences_pkey,mdf_cnc_return_fences_state_check 8d0c64ba064394cb48bd7ac95d7d811f)" \
+      "$(q_idxset_hash mdf_cnc_return_fences mdf_cnc_return_fences_pkey fa6c7fddbb7d49d529ce84a8d4b4b37b)" \
+      "$(q_fun_hash 'public.mdf_guard_cnc_return_fence()' d026131d8311f356670a7d23d54d73aa)" \
+      "$(q_fun_hash 'public.mdf_reject_evidence_change()' a51e1b51d407124a856f1993d9c54fe8)" \
+      "SELECT count(*)=1 FROM pg_trigger t WHERE t.tgrelid=to_regclass('public.mdf_cnc_return_fences') AND t.tgname='mdf_cnc_return_fence_guard' AND t.tgfoid=to_regprocedure('public.mdf_guard_cnc_return_fence()') AND t.tgtype=31 AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgattr=''::int2vector;" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=ANY(ARRAY[to_regclass('public.mdf_correction_command_results'),to_regclass('public.mdf_correction_job_effect_suppressions'),to_regclass('public.mdf_cnc_return_fences')]) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=ANY(ARRAY[to_regclass('public.mdf_correction_command_results'),to_regclass('public.mdf_correction_job_effect_suppressions'),to_regclass('public.mdf_cnc_return_fences')]) AND (NOT indisvalid OR NOT indisready));" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -2229,6 +2247,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     178_mdf_correction_receipts*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    179_mdf_active_return*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     173_inbound_signals*)

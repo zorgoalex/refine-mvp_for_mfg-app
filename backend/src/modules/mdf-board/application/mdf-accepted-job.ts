@@ -6,6 +6,7 @@ import { loadMdfExecutionDetails, mdfSourceKey } from '../adapters/mdf-execution
 import { publishMdfState } from '../adapters/mdf-publication';
 import { projectMdfAcceptedState, type MdfAcceptedSource, type MdfAcceptedLine } from '../domain/mdf-accepted-projection';
 import type { MdfQuantityEvidence } from '../domain/mdf-quantities';
+import { mdfPositionKey } from '../domain/mdf-quantities';
 import { MdfNeedsAttention, type MdfJob, type MdfPinnedRule } from './mdf-job-runner';
 
 /** Complete transactional effect handler, invoked by MdfJobRunner after its
@@ -68,19 +69,40 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
   const input = { trigger, sources, declarations, positionWarnings, details: snapshot.details, thresholds,
     readyBathIds: allocation.readyBathIds, blockedPositionKeys: allocation.blockedPositionKeys };
   const resolved = projectMdfAcceptedState(input);
+  // A correction records per-job/per-order fences without locking or changing
+  // old job rows (the worker lock order is job -> owners). Read them only after
+  // executeMdfAllocation has acquired the complete sorted owner closure. The
+  // job still publishes/accounting-projects all accepted facts; only pinned
+  // forward effects for corrected orders are suppressed.
+  const fenced = (await tx.query<{ affected_order_id: string }>(`SELECT affected_order_id::text
+    FROM mdf_correction_job_effect_suppressions WHERE job_id=$1 ORDER BY affected_order_id`,[job.job_id])).rows;
+  const suppressedOrderIds = new Set(fenced.map(row => {
+    const id = Number(row.affected_order_id);
+    if (!Number.isSafeInteger(id) || id <= 0) throw new MdfNeedsAttention('MDF_JOB_EFFECT_FENCE_INVALID');
+    return id;
+  }));
+  const ruleEvents = resolved.events.filter(event => !suppressedOrderIds.has(event.orderId));
   // Accepted business facts outlive actor accounts. A missing actor never gets
   // fabricated admin authority; retain accounting, omit rule effects, expose why.
   const user = job.actor_user_id ? (await tx.query<{ user_id: string; username: string; role_id: number }>(
     'SELECT user_id,username,role_id FROM users WHERE user_id=$1 AND is_active',[job.actor_user_id])).rows[0] : null;
   const actor = user ? mapUserRow(user) : null;
-  if (actor && effectPolicy === 'forward') await executePinnedMdfAutomation(tx,{ actor, requestId: job.request_id, sourceIdempotencyKey: job.event_key,
-    pins: rules.map(r => ({ ruleId: Number(r.rule_id), version: Number(r.rule_version) })), events: resolved.events });
+  if (actor && effectPolicy === 'forward' && ruleEvents.length) await executePinnedMdfAutomation(tx,{ actor, requestId: job.request_id, sourceIdempotencyKey: job.event_key,
+    pins: rules.map(r => ({ ruleId: Number(r.rule_id), version: Number(r.rule_version) })), events: ruleEvents });
   // Actions can change ranks; republish placement from the SAME locked evidence
   // and post-action detail snapshot. They cannot create new physical quantities.
   const final = projectMdfAcceptedState({ ...input, details: await loadMdfExecutionDetails(tx,allocation.orderIds) });
-  if (!actor && rules.length && effectPolicy === 'forward') {
-    for (const card of final.cards) card.issues.push('MDF_ACTOR_UNAVAILABLE');
-    for (const issues of final.positionIssues.values()) issues.push('MDF_ACTOR_UNAVAILABLE');
+  if (!actor && rules.length && effectPolicy === 'forward' && ruleEvents.length) {
+    const eligibleOrders = new Set(ruleEvents.map(event => event.orderId));
+    for (const card of final.cards) if (card.orderIds.some(id => eligibleOrders.has(id))) card.issues.push('MDF_ACTOR_UNAVAILABLE');
+    const eligiblePositions = new Set(snapshot.details.filter(d => eligibleOrders.has(d.orderId)).map(mdfPositionKey));
+    // The warning is appended after projection (and therefore after the
+    // card-to-position issue fanout); attach it only to eligible positions.
+    for (const position of eligiblePositions) {
+      if (!final.positionIssues.has(position)) continue;
+      final.positionIssues.set(position,[...new Set([...final.positionIssues.get(position)!,
+        'MDF_ACTOR_UNAVAILABLE'])].sort());
+    }
   }
   await publishMdfState(tx,{ job, orderIds: allocation.orderIds, sources, metadata: snapshot.metadata, state: final });
   return 'done';

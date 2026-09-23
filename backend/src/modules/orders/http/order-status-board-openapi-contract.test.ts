@@ -77,6 +77,39 @@ describe('order status board OpenAPI contract', () => {
     expect(publication).toContain("pattern: '^[a-f0-9]{64}$'");
   });
 
+  it('documents active evidence correction as a separate token-bound preview/confirm protocol', () => {
+    const preview = sectionBetween(
+      contract,
+      '  /api/v1/orders/status-board/mdf-corrections/{cardKind}/{cardId}/preview:',
+      '  /api/v1/orders/status-board/mdf-corrections/{cardKind}/{cardId}/confirm:',
+    );
+    const confirm = sectionBetween(
+      contract,
+      '  /api/v1/orders/status-board/mdf-corrections/{cardKind}/{cardId}/confirm:',
+      '  /api/v1/orders/status-board/mdf-manual-moves:',
+    );
+    expect(preview).toContain('operationId: previewMdfActiveProductionReturn');
+    expect(preview).toContain('MdfActiveProductionReturnPreviewRequest');
+    expect(preview).toContain("'409':");
+    expect(confirm).toContain('operationId: confirmMdfActiveProductionReturn');
+    expect(confirm).toContain('MdfActiveProductionReturnConfirmRequest');
+    expect(confirm).toContain('Тот же actor/key');
+    expect(confirm).toContain('MdfActiveProductionReturnConfirmResponse');
+
+    const schemas = sectionBetween(contract, '    MdfActiveProductionReturnPreviewRequest:', '    MdfCorrectionSource:');
+    expect(schemas).toContain('additionalProperties: false');
+    expect(schemas).toContain('required: [sourceToken, targetColumn, expectedDigest, idempotencyKey]');
+    expect(schemas).toContain("pattern: '^[A-Za-z0-9._:-]{1,128}$'");
+    expect(schemas).toContain('deferredPriorAutomation:');
+    expect(schemas).toContain('cncFreshnessBaseline:');
+    expect(schemas).toContain('manualPlacementColumnBefore');
+    expect(schemas).toContain('manualPlacementColumnAfter');
+    expect(schemas).toContain('clearsManualPlacementOverride');
+    expect(schemas).not.toContain('afterColumn');
+    expect(schemas).not.toContain('replayed:');
+    expect(contract).toContain('  /api/v1/orders/status-board/mdf-return/{cardKind}/{cardId}/preview:');
+  });
+
   it('keeps pagination, capabilities and nullable financials explicit', () => {
     const response = sectionBetween(
       contract,

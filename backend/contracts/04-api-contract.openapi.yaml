@@ -3256,6 +3256,66 @@ paths:
         '409': { description: Устаревший digest, конфликт ключа либо параллельное изменение }
         '422': { description: Возврат заблокирован условиями карточки }
         '503': { description: Изменения заказов отключены }
+  /api/v1/orders/status-board/mdf-corrections/{cardKind}/{cardId}/preview:
+    parameters:
+      - { name: cardKind, in: path, required: true, schema: { type: string, enum: [packet, bath, bazisCutSet] } }
+      - { name: cardId, in: path, required: true, description: Lowercase packet UUID, safe positive integer Bazis ID, or cut-result:<safe positive integer>, schema: { type: string, maxLength: 100 } }
+    post:
+      tags: [Orders]
+      operationId: previewMdfActiveProductionReturn
+      summary: Предпросмотр исправления принятого свидетельства MDF
+      description: >-
+        Отдельный active-протокол. Сервер проверяет зафиксированный режим MDF;
+        предпросмотр не меняет учётные данные. Показывает связанные ванны,
+        количества и независимые floors. HDF не включается.
+      security: [{ bearerAuth: [] }]
+      x-permissions: [orders.view, production.tasks.update, orders.change_production_status]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MdfActiveProductionReturnPreviewRequest' }
+      responses:
+        '200':
+          description: Consequences and digest for explicit confirmation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MdfActiveProductionReturnPreview' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/v1/orders/status-board/mdf-corrections/{cardKind}/{cardId}/confirm:
+    parameters:
+      - { name: cardKind, in: path, required: true, schema: { type: string, enum: [packet, bath, bazisCutSet] } }
+      - { name: cardId, in: path, required: true, description: Lowercase packet UUID, safe positive integer Bazis ID, or cut-result:<safe positive integer>, schema: { type: string, maxLength: 100 } }
+    post:
+      tags: [Orders]
+      operationId: confirmMdfActiveProductionReturn
+      summary: Подтвердить исправление принятого свидетельства MDF
+      description: >-
+        Атомарно исправляет источник, связанные доказательства ванн, распределения,
+        затронутые статусы, аудит, очередь и ключ повтора. Тот же actor/key
+        возвращает ранее сохранённый ответ без повторных эффектов.
+      security: [{ bearerAuth: [] }]
+      x-permissions: [orders.view, production.tasks.update, orders.change_production_status]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MdfActiveProductionReturnConfirmRequest' }
+      responses:
+        '200':
+          description: Persisted correction response and queued publication jobs
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MdfActiveProductionReturnConfirmResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/v1/orders/status-board/mdf-manual-moves:
     get:
       tags:
@@ -19792,6 +19852,176 @@ components:
               label: { type: string }
               before: { type: string }
               after: { type: string }
+    MdfActiveProductionReturnPreviewRequest:
+      type: object
+      additionalProperties: false
+      required: [sourceToken, targetColumn]
+      properties:
+        sourceToken: { type: string, pattern: '^[a-f0-9]{64}$' }
+        targetColumn: { type: string, enum: [parsed, completed, baths, baths_ready, baths_laminated] }
+        productionStatusId: { type: integer, minimum: 1, maximum: 9007199254740991 }
+    MdfActiveProductionReturnConfirmRequest:
+      type: object
+      additionalProperties: false
+      required: [sourceToken, targetColumn, expectedDigest, idempotencyKey]
+      properties:
+        sourceToken: { type: string, pattern: '^[a-f0-9]{64}$' }
+        targetColumn: { type: string, enum: [parsed, completed, baths, baths_ready, baths_laminated] }
+        productionStatusId: { type: integer, minimum: 1, maximum: 9007199254740991 }
+        expectedDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+        idempotencyKey: { type: string, pattern: '^[A-Za-z0-9._:-]{1,128}$', maxLength: 128 }
+    MdfActiveProductionReturnPreview:
+      type: object
+      required: [protocol, status, source, targetColumn, targetStage, stages, sourceToken, headFence, digest, affectedOrderIds, details, affectedBaths, allocationReleases, allocationReplacements, deferredPriorAutomation, cncFreshnessBaseline, blockers, warnings]
+      properties:
+        protocol: { type: string, enum: [mdf-correction-v1] }
+        status: { type: string, enum: [ready, blocked] }
+        source:
+          type: object
+          required: [kind, id, label]
+          properties:
+            kind: { type: string, enum: [packet, bath, bazisCutSet] }
+            id: { type: string }
+            label: { type: string }
+        targetColumn: { type: string, enum: [parsed, completed, baths, baths_ready, baths_laminated] }
+        targetStage: { $ref: '#/components/schemas/MdfProductionReturnStage' }
+        stages: { type: array, items: { $ref: '#/components/schemas/MdfProductionReturnStage' } }
+        sourceToken: { type: string, pattern: '^[a-f0-9]{64}$' }
+        headFence:
+          type: object
+          required: [version, correctionEpoch]
+          properties:
+            version: { type: string, pattern: '^[1-9][0-9]*$' }
+            correctionEpoch: { type: string, pattern: '^(0|[1-9][0-9]*)$' }
+        digest: { type: string, nullable: true, pattern: '^[a-f0-9]{64}$' }
+        affectedOrderIds: { type: array, items: { type: integer, minimum: 1 } }
+        details:
+          type: array
+          items:
+            type: object
+            required: [orderId, detailId, cutCoverage, laminatedCoverage, independentFloorRank, afterRank, after, orderName, detailNumber, beforeStatus, afterStatus]
+            properties:
+              orderId: { type: integer, minimum: 1 }
+              detailId: { type: integer, minimum: 1 }
+              cutCoverage: { type: integer, minimum: 0 }
+              laminatedCoverage: { type: integer, minimum: 0 }
+              independentFloorRank: { type: integer, nullable: true }
+              afterRank: { type: integer, nullable: true }
+              after: { $ref: '#/components/schemas/MdfCorrectionPositionQuantity' }
+              orderName: { type: string }
+              detailNumber: { type: integer, nullable: true }
+              beforeStatus: { type: string, nullable: true }
+              afterStatus: { type: string, nullable: true }
+        affectedBaths:
+          type: array
+          items:
+            type: object
+            required: [source, previousRevision, cancelledLaminationQuantity, beforeColumn, manualPlacementColumnBefore, manualPlacementColumnAfter, clearsManualPlacementOverride]
+            properties:
+              source: { $ref: '#/components/schemas/MdfCorrectionSource' }
+              previousRevision: { type: string }
+              cancelledLaminationQuantity: { type: integer, minimum: 0 }
+              beforeColumn: { type: string, nullable: true }
+              manualPlacementColumnBefore: { type: string, nullable: true }
+              manualPlacementColumnAfter: { type: string, nullable: true }
+              clearsManualPlacementOverride: { type: boolean }
+        allocationReleases: { type: array, items: { type: string, format: uuid } }
+        allocationReplacements: { type: array, items: { $ref: '#/components/schemas/MdfCorrectionAllocationReplacement' } }
+        deferredPriorAutomation: { type: array, items: { $ref: '#/components/schemas/MdfCorrectionDeferredJobEffect' } }
+        cncFreshnessBaseline:
+          allOf:
+            - { $ref: '#/components/schemas/MdfCncFreshnessBaseline' }
+          nullable: true
+        blockers: { type: array, items: { $ref: '#/components/schemas/MdfCorrectionBlocker' } }
+        warnings: { type: array, items: { type: string } }
+    MdfActiveProductionReturnConfirmResponse:
+      type: object
+      required: [preview, auditId, outboxId, requestId, jobIds]
+      properties:
+        preview: { $ref: '#/components/schemas/MdfActiveProductionReturnPreview' }
+        auditId: { type: string, format: uuid }
+        outboxId: { type: string, format: uuid }
+        requestId: { type: string }
+        jobIds: { type: array, items: { type: string, format: uuid } }
+    MdfCorrectionSource:
+      type: object
+      required: [kind, id]
+      properties:
+        kind: { type: string, enum: [packet, bazisCutSet, bath, order, orderDetail] }
+        id: { type: string }
+    MdfCorrectionPositionQuantity:
+      type: object
+      required: [orderId, detailId, quantity, rawCut, rawRolled, cut, rolled, creditedCut, creditedRolled, remaining]
+      properties:
+        orderId: { type: integer, minimum: 1 }
+        detailId: { type: integer, minimum: 1 }
+        quantity: { type: integer, minimum: 0 }
+        rawCut: { type: integer, minimum: 0 }
+        rawRolled: { type: integer, minimum: 0 }
+        cut: { type: integer, minimum: 0 }
+        rolled: { type: integer, minimum: 0 }
+        creditedCut: { type: integer, minimum: 0 }
+        creditedRolled: { type: integer, minimum: 0 }
+        remaining: { type: integer, minimum: 0 }
+    MdfCorrectionAllocationReplacement:
+      type: object
+      required: [oldAllocationId, evidenceLine, bathRevision, orderId, detailId, quantity, state]
+      properties:
+        oldAllocationId: { type: string, format: uuid }
+        evidenceLine:
+          oneOf:
+            - type: object
+              required: [kind, evidenceLineId]
+              properties:
+                kind: { type: string, enum: [existing] }
+                evidenceLineId: { type: string, format: uuid }
+            - type: object
+              required: [kind, sourceKind, sourceId, lineKey]
+              properties:
+                kind: { type: string, enum: [replacement] }
+                sourceKind: { type: string, enum: [packet, bazisCutSet, bath, order, orderDetail] }
+                sourceId: { type: string }
+                lineKey: { type: string }
+        bathRevision:
+          oneOf:
+            - type: object
+              required: [kind, revision]
+              properties:
+                kind: { type: string, enum: [existing] }
+                revision: { type: string }
+            - type: object
+              required: [kind, sourceId]
+              properties:
+                kind: { type: string, enum: [replacement] }
+                sourceId: { type: string }
+        orderId: { type: integer, minimum: 1 }
+        detailId: { type: integer, minimum: 1 }
+        quantity: { type: integer, minimum: 1 }
+        state: { type: string, enum: [reserved, consumed] }
+    MdfCorrectionDeferredJobEffect:
+      type: object
+      required: [jobId, source, status, affectedOrderIds]
+      properties:
+        jobId: { type: string, format: uuid }
+        source: { $ref: '#/components/schemas/MdfCorrectionSource' }
+        status: { type: string, enum: [pending, needs_attention] }
+        affectedOrderIds: { type: array, items: { type: integer, minimum: 1 } }
+    MdfCncFreshnessBaseline:
+      type: object
+      required: [packetId, sourceVersion, correctionEpoch, state]
+      properties:
+        packetId: { type: string, format: uuid }
+        sourceVersion: { type: string, pattern: '^(0|[1-9][0-9]*)$' }
+        correctionEpoch: { type: string, pattern: '^(0|[1-9][0-9]*)$' }
+        state: { type: string, enum: [waiting_pending] }
+    MdfCorrectionBlocker:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+        sourceId: { type: string }
+        allocationId: { type: string, format: uuid }
+        position: { type: string }
     MdfBoardManualMoveTargetColumn:
       type: string
       enum:

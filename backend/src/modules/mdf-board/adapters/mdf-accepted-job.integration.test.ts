@@ -35,10 +35,12 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     }
     // Own schema only, no public business mutations or hard-coded production ids.
     for (const table of ['orders','order_details','production_statuses','order_statuses','materials','sheet_material_types',
-      'users','cut_result','status_automation_rules','outbox_events','audit_log','audit_log_related_entity',
+      'users','cut_result','cnc_telegram_packets','status_automation_rules','outbox_events','audit_log','audit_log_related_entity',
       'app_settings','bazis_order_links','order_import_entity_map','order_workshops']) {
       await db.query(`CREATE TABLE ${table} AS TABLE public.${table} WITH NO DATA`);
     }
+    await db.query('ALTER TABLE cnc_telegram_packets ADD PRIMARY KEY(packet_id)');
+    await db.query(readFileSync(new URL('../../../../db/migrations/179_mdf_active_return.sql',import.meta.url),'utf8'));
     await db.query(`ALTER TABLE audit_log ALTER COLUMN audit_id SET DEFAULT gen_random_uuid();
       CREATE UNIQUE INDEX e2e_audit_related ON audit_log_related_entity(audit_id,entity_type,entity_id);
       CREATE UNIQUE INDEX e2e_outbox ON outbox_events(idempotency_key);
@@ -207,6 +209,107 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     expect(await runner().processOne()).toMatchObject({ status: 'done',jobId: saved.jobId });
     expect((await db.query(`SELECT issues FROM mdf_published_sources WHERE source_kind='packet' AND source_id=$1`,[original.sourceId])).rows[0].issues)
       .not.toContain('MDF_ACTOR_UNAVAILABLE');
+  });
+  it('old forward job waits on owner lock, then fences only corrected-order effects and keeps mixed publication', async () => {
+    await db.query("UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now() WHERE status='pending'");
+    const orders=[++sequence,++sequence], detailIds=orders.map(id=>id*10), sourceId=randomUUID();
+    for (let i=0;i<orders.length;i++) {
+      await db.query(`INSERT INTO orders(order_id,order_name,order_kind,delete_flag,version,order_status_id,payment_status_id)
+        VALUES($1,$2,'production_order',false,1,4,1)`,[orders[i],`E2E fence ${orders[i]}`]);
+      await db.query(`INSERT INTO order_details(detail_id,order_id,detail_number,quantity,production_status_id,delete_flag,material_id)
+        VALUES($1,$2,1,10,1,false,1),($3,$2,2,1,1,false,1)`,[detailIds[i],orders[i],detailIds[i]+1]);
+    }
+    const demand=orders.flatMap((orderId,i)=>[{orderId,detailId:detailIds[i],quantity:10},{orderId,detailId:detailIds[i]+1,quantity:1}]);
+    const receipt:MdfReceiptInput={sourceKind:'packet',sourceId,revisionKey:'1',origin:'cnc',actorUserId:1,
+      requestId:'E2E mixed suppression',causeKey:`E2E mixed ${sourceId}`,expectedFence:null,accept:true,
+      rules:[{ruleId:17,version:1}],executionContext:{sourceCreatedAt:'2026-09-01T00:00:00Z',displayName:'E2E mixed MDF',
+        priorColumn:'parsed',compositionComplete:true,demand},
+      lines:orders.flatMap((orderId,i)=>[
+        {lineKey:`member-${orderId}`,orderId,detailId:detailIds[i],quantity:10,stageCode:'membership',evidenceKind:'derived',rework:false},
+        {lineKey:`proof-${orderId}`,orderId,detailId:detailIds[i],quantity:10,stageCode:'cut',evidenceKind:'physical',rework:false},
+      ])};
+    const saved=await database().transaction(tx=>recordMdfReceipt(tx,receipt));
+    const worker=new Client({...config,application_name:'e2e_mdf_effect_fence_waiter'});
+    await worker.connect(); await worker.query(`SET search_path=${schema},public`);
+    const workerPid=(await worker.query<{pid:number}>('SELECT pg_backend_pid() pid')).rows[0].pid;
+    let open=false, workerPromise:Promise<unknown>|undefined;
+    try {
+      await db.query('BEGIN'); open=true;
+      await db.query('SELECT order_id FROM orders WHERE order_id=$1 FOR UPDATE',[orders[0]]);
+      workerPromise=new MdfJobRunner(database(worker),executeMdfAcceptedJob).processOne();
+      let waiting=false;
+      for (let attempt=0;attempt<80&&!waiting;attempt++) {
+        const activity=(await db.query<{waiting:boolean}>(`SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+          WHERE pid=$1 AND wait_event_type='Lock') waiting`,[workerPid])).rows[0];
+        waiting=activity.waiting;
+        if (!waiting) await new Promise(resolve=>setTimeout(resolve,20));
+      }
+      expect(waiting).toBe(true); // The worker claimed the job, then waited for this order.
+      await db.query(`INSERT INTO mdf_correction_job_effect_suppressions
+        (job_id,affected_order_id,correction_source_kind,correction_source_id,correction_epoch,command_key)
+        VALUES($1,$2,'packet',$3,1,'E2E-return')`,[saved.jobId,orders[0],sourceId]);
+      await db.query('COMMIT'); open=false;
+      expect(await workerPromise).toMatchObject({status:'done',jobId:saved.jobId});
+    } finally {
+      if (open) await db.query('ROLLBACK');
+      if (workerPromise) await workerPromise.catch(()=>undefined);
+      await worker.end();
+    }
+    const published=(await db.query(`SELECT order_id::float8 order_id,credited_cut,issues FROM mdf_published_positions
+      WHERE detail_id=ANY($1::bigint[]) ORDER BY order_id`,[detailIds])).rows;
+    expect(published).toHaveLength(2);
+    expect(published[0]).toMatchObject({order_id:orders[0],credited_cut:'10'});
+    expect(published[0].issues).not.toContain('MDF_ACTOR_UNAVAILABLE');
+    expect(published[1]).toMatchObject({order_id:orders[1],credited_cut:'10'});
+    expect(published[1].issues).not.toContain('MDF_ACTOR_UNAVAILABLE');
+    expect((await db.query(`SELECT count(*) n FROM mdf_published_sources
+      WHERE source_kind='packet' AND source_id=$1 AND received_revision_key='1'`,[sourceId])).rows[0].n).toBe('1');
+    const detailStatus=(await db.query('SELECT order_id::float8 order_id,production_status_id FROM order_details WHERE order_id=ANY($1::bigint[]) ORDER BY order_id,detail_id',[orders])).rows;
+    expect(detailStatus).toEqual([{order_id:orders[0],production_status_id:1},{order_id:orders[0],production_status_id:1},
+      {order_id:orders[1],production_status_id:2},{order_id:orders[1],production_status_id:1}]);
+  });
+  it('fully fenced missing-actor forward effects are intentionally quiet but still publish proof', async () => {
+    const f=await fixture();
+    await db.query('UPDATE mdf_recalculation_jobs SET actor_user_id=NULL WHERE job_id=$1',[f.jobs[0].jobId]);
+    await db.query(`INSERT INTO mdf_correction_job_effect_suppressions
+      (job_id,affected_order_id,correction_source_kind,correction_source_id,correction_epoch,command_key)
+      VALUES($1,$2,'packet',$3,1,'E2E-return-all')`,[f.jobs[0].jobId,f.orderId,f.receipts[0].sourceId]);
+    expect(await runner().processOne()).toMatchObject({status:'done',jobId:f.jobs[0].jobId});
+    expect((await positions(f.orderId))[0]).toMatchObject({credited_cut:'10',remaining:'0'});
+    expect((await db.query('SELECT issues FROM mdf_published_positions WHERE order_id=$1 AND detail_id=$2',[f.orderId,f.detailId])).rows[0].issues)
+      .not.toContain('MDF_ACTOR_UNAVAILABLE');
+    expect((await db.query(`SELECT issues FROM mdf_published_sources WHERE source_kind='packet' AND source_id=$1`,
+      [f.receipts[0].sourceId])).rows[0].issues).not.toContain('MDF_ACTOR_UNAVAILABLE');
+  });
+  it('missing-actor warning remains only on an unfenced order in a mixed job', async () => {
+    await db.query("UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now() WHERE status='pending'");
+    const orders=[++sequence,++sequence],detailIds=orders.map(id=>id*10),sourceId=randomUUID();
+    for (let i=0;i<orders.length;i++) {
+      await db.query(`INSERT INTO orders(order_id,order_name,order_kind,delete_flag,version,order_status_id,payment_status_id)
+        VALUES($1,$2,'production_order',false,1,4,1)`,[orders[i],`E2E actor fence ${orders[i]}`]);
+      await db.query(`INSERT INTO order_details(detail_id,order_id,detail_number,quantity,production_status_id,delete_flag,material_id)
+        VALUES($1,$2,1,10,1,false,1),($3,$2,2,1,1,false,1)`,[detailIds[i],orders[i],detailIds[i]+1]);
+    }
+    const demand=orders.flatMap((orderId,i)=>[{orderId,detailId:detailIds[i],quantity:10},{orderId,detailId:detailIds[i]+1,quantity:1}]);
+    const receipt:MdfReceiptInput={sourceKind:'packet',sourceId,revisionKey:'1',origin:'cnc',actorUserId:null,
+      requestId:'E2E actor fence',causeKey:`E2E actor ${sourceId}`,expectedFence:null,accept:true,rules:[{ruleId:17,version:1}],
+      executionContext:{sourceCreatedAt:'2026-09-01T00:00:00Z',displayName:'E2E actor fence MDF',priorColumn:'parsed',
+        compositionComplete:true,demand},lines:orders.flatMap((orderId,i)=>[
+        {lineKey:`member-${orderId}`,orderId,detailId:detailIds[i],quantity:10,stageCode:'membership',evidenceKind:'derived',rework:false},
+        {lineKey:`proof-${orderId}`,orderId,detailId:detailIds[i],quantity:10,stageCode:'cut',evidenceKind:'physical',rework:false},
+      ])};
+    const saved=await database().transaction(tx=>recordMdfReceipt(tx,receipt));
+    await db.query(`INSERT INTO mdf_correction_job_effect_suppressions
+      (job_id,affected_order_id,correction_source_kind,correction_source_id,correction_epoch,command_key)
+      VALUES($1,$2,'packet',$3,1,'E2E-actor-return')`,[saved.jobId,orders[0],sourceId]);
+    expect(await runner().processOne()).toMatchObject({status:'done',jobId:saved.jobId});
+    const rows=(await db.query(`SELECT order_id::float8 order_id,issues FROM mdf_published_positions
+      WHERE detail_id=ANY($1::bigint[]) ORDER BY order_id`,[detailIds])).rows;
+    expect(rows).toHaveLength(2);
+    expect(rows[0].issues).not.toContain('MDF_ACTOR_UNAVAILABLE');
+    expect(rows[1].issues).toContain('MDF_ACTOR_UNAVAILABLE');
+    expect((await positions(orders[0]))[0].credited_cut).toBe('10');
+    expect((await positions(orders[1]))[0].credited_cut).toBe('10');
   });
   it('accepted bath lamination consumes reservations and advances only own position', async () => {
     const f = await fixture({ rolled: true });

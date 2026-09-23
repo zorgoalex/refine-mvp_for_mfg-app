@@ -44,6 +44,8 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real BASIS creation
       'cut_result_board_projection','cut_result_placement','cut_result_sheet_map']) {
       await db.query(`CREATE TABLE ${table} AS TABLE public.${table} WITH NO DATA`);
     }
+    await db.query('ALTER TABLE cnc_telegram_packets ADD PRIMARY KEY(packet_id)');
+    await db.query(readFileSync(new URL('../../../../db/migrations/179_mdf_active_return.sql',import.meta.url),'utf8'));
     await db.query(`CREATE SEQUENCE e2e_set_seq OWNED BY bazis_cut_sets.bazis_cut_set_id;
       ALTER TABLE bazis_cut_sets ALTER COLUMN bazis_cut_set_id SET DEFAULT nextval('e2e_set_seq');
       ALTER TABLE bazis_cut_sets ALTER COLUMN version SET DEFAULT 0;

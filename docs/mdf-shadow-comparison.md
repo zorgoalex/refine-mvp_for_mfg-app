@@ -391,6 +391,53 @@ allocation replacements, detail changes, audit/outbox, idempotency and the real 
 fresh-signal fence. No public return API is connected by migration178; the legacy
 return remains fenced in active/read-only mode. Keep activation flags off.
 
+### Accepted correction API (activation still gated)
+
+Migration `179_mdf_active_return.sql` adds actor-scoped immutable command results,
+per-job/per-order forward-effect fences and CNC correction-time version baselines.
+Apply it before deploying the new worker or correction API. It does not enable
+the engine, worker, published reader or CNC producer.
+
+The separate endpoints are
+`POST /api/v1/orders/status-board/mdf-corrections/:cardKind/:cardId/preview` and
+`POST /api/v1/orders/status-board/mdf-corrections/:cardKind/:cardId/confirm`.
+The legacy `mdf-return` endpoints retain their separate SERIALIZABLE protocol.
+New requests require `sourceToken`, `targetColumn` and optionally
+`productionStatusId`. The server resolves stages from the active catalogue;
+clients cannot submit ranks, identities, permissions or effect policies. No reason
+is required. Confirm also requires `expectedDigest` and an actor-scoped
+`idempotencyKey` matching `[A-Za-z0-9._:-]{1,128}`.
+
+Each new command owns a READ COMMITTED transaction and checks locked active mode.
+Preview makes no business writes. It shows exact affected quantities, independent
+coverage floors, linked bath cancellations, manual-placement effects and old
+automation effects to suppress. Unknown provenance blocks confirmation rather
+than guessing. Access to every owner in the bounded dependency closure is checked;
+changed closure requires a fresh transaction. The digest covers current evidence,
+demand, statuses, allocations and prior-job effects, not the visible board period.
+
+Confirm releases exact old allocations, appends corrected immutable receipts and
+inserts replacement allocations. Detail changes, order summaries, audit, outbox,
+new jobs and the exact replay response commit together. Replaying the same command
+checks current access to its original owners and returns the stored response.
+Dependent bath manual overrides are cleared; the selected source receives the
+requested placement. Independent accepted work is not removed.
+
+A pre-existing forward job may otherwise undo a return through another bath in
+its component. Correction therefore records immutable fences for that job and
+the affected orders, without locking or modifying its job row. The worker checks
+these fences after owner locks: it still accounts and publishes all data, but
+skips old forward effects for fenced orders. Other orders and later new jobs are
+not suppressed. New correction jobs remain `publish_only`.
+
+This API is not connected to the page yet. Completed affected orders are protected.
+Ready/issued orders currently require a separate status transition: coordinated
+header/declaration correction remains an explicit cutover gate, not a new final
+business rule. CNC version baselines are persisted, but the real producer still
+needs fresh-pending then strictly newer completion enforcement. Merely creating
+a baseline does not prove that stale CNC signals are rejected. UI, remaining
+writers and historical reconciliation must be completed before activation.
+
 ### Manual commands through the queue (activation still gated)
 
 Migration `175_mdf_command_placement.sql` adds sealed manual placement and an

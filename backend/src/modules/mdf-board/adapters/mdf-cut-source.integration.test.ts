@@ -84,8 +84,13 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
       }
       const indexes = (await db.query<{ definition: string }>(`SELECT pg_get_indexdef(indexrelid) definition FROM pg_index
         WHERE indrelid=$1::regclass AND indisunique`,[`public.${table}`])).rows;
-      for (const i of indexes) await db.query(i.definition.replace(`ON public.${table}`,`ON ${schema}.${table}`));
+      for (const i of indexes) {
+        if (table==='cnc_telegram_packets'&&i.definition.includes('cnc_telegram_packets_pkey')) continue;
+        await db.query(i.definition.replace(`ON public.${table}`,`ON ${schema}.${table}`));
+      }
     }
+    await db.query('ALTER TABLE cnc_telegram_packets ADD PRIMARY KEY(packet_id)');
+    await db.query(readFileSync(new URL('../../../../db/migrations/179_mdf_active_return.sql',import.meta.url),'utf8'));
     await db.query(`ALTER TABLE cut_group_sheet ADD FOREIGN KEY(cut_group_id) REFERENCES cut_group(cut_group_id) ON DELETE CASCADE`);
     for (const name of ['set_session_user','order_production_summary','recalc_order_production_status',
       'cut_result_snapshot_digest','cut_result_snapshot_is_complete','cut_result_snapshot_is_vacuum',
