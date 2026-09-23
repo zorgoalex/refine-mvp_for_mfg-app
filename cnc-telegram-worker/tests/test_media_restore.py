@@ -13,8 +13,9 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
+import httpx
 from PIL import Image
 
 telethon_stub = types.ModuleType("telethon")
@@ -24,6 +25,8 @@ sys.modules.setdefault("telethon", telethon_stub)
 
 from cnc_telegram_worker.cleanup import cleanup_temp_dir
 from cnc_telegram_worker.audit import AuditSpool
+from cnc_telegram_worker.erp_client import ErpResponseError, SessionLeaseLost
+from cnc_telegram_worker.manual_send_observation import ManualSendBindingError, bind_manual_svg_sent_files
 from cnc_telegram_worker.worker import (
     CncTelegramWorker,
     SHEET_PREVIEW_DIRECTORY,
@@ -86,6 +89,91 @@ class ManualSvgSendClient:
             raw_text=message,
             out=True,
         )
+
+
+class BoundMessage:
+    def __init__(self, message_id: int | None, body: bytes, file_name: str, chat_id: int, *, photo: bool) -> None:
+        self.id = message_id
+        self.body = body
+        self.chat_id = chat_id
+        self.file = SimpleNamespace(
+            name=file_name,
+            mime_type=mimetypes.guess_type(file_name)[0],
+            size=len(body),
+        )
+        self.photo = object() if photo else None
+        self.out = True
+
+    async def download_media(self, *, file: object) -> object:
+        file.write(self.body)  # type: ignore[attr-defined]
+        return file
+
+
+class BoundManualSvgSendClient(ManualSvgSendClient):
+    def __init__(
+        self,
+        *,
+        transform_photo: bool = True,
+        fail_send_number: int | None = None,
+        returned_chat_id: int = -100,
+        message_ids: list[int | None] | None = None,
+        returned_file_name: str | None = None,
+        declared_media_size: int | None = None,
+    ) -> None:
+        super().__init__()
+        self.messages_by_id: dict[int, BoundMessage] = {}
+        self.refetch_calls: list[list[int]] = []
+        self.transform_photo = transform_photo
+        self.fail_send_number = fail_send_number
+        self.returned_chat_id = returned_chat_id
+        self.message_ids = message_ids
+        self.returned_file_name = returned_file_name
+        self.declared_media_size = declared_media_size
+
+    async def send_file(self, _entity: object, files: list[str] | str, *, caption: str | None = None, force_document: bool = False):
+        file_list = files if isinstance(files, list) else [files]
+        self.sent_files.extend(file_list)
+        self.calls.append({
+            "files": file_list,
+            "isBatch": isinstance(files, list),
+            "caption": caption,
+            "forceDocument": force_document,
+        })
+        if self.fail_send_number == len(self.calls):
+            raise TimeoutError("simulated ambiguous Telegram send timeout")
+        path = Path(file_list[0])
+        source_body = path.read_bytes()
+        body = b"transformed-telegram-photo" if not force_document and self.transform_photo else source_body
+        message_id = (
+            self.message_ids[len(self.calls) - 1]
+            if self.message_ids is not None and len(self.message_ids) >= len(self.calls)
+            else 8100 + len(self.calls)
+        )
+        message = BoundMessage(
+            message_id, body, self.returned_file_name or path.name,
+            self.returned_chat_id, photo=not force_document,
+        )
+        if self.declared_media_size is not None:
+            message.file.size = self.declared_media_size
+        if message.id is not None:
+            self.messages_by_id[message.id] = message
+        return message
+
+    async def send_message(self, _entity: object, message: str):
+        self.messages.append(message)
+        sent = SimpleNamespace(
+            id=9100 + len(self.messages),
+            date=datetime(2026, 8, 14, 6, len(self.messages), tzinfo=timezone.utc),
+            raw_text=message,
+            chat_id=-100,
+            out=True,
+        )
+        self.messages_by_id[sent.id] = sent  # Comments are never requested for media hashing.
+        return sent
+
+    async def get_messages(self, _entity: object, *, ids: list[int]):
+        self.refetch_calls.append(list(ids))
+        return [self.messages_by_id[message_id] for message_id in ids if message_id in self.messages_by_id]
 
 
 class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
@@ -283,6 +371,331 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
                 "CNC#2_2769-HDF.png",
             ])
             self.assertEqual(client.messages, ["Задание №102\nЧерновой"])
+
+    async def test_binding_capability_maps_actual_file_ids_and_hashes_transformed_photo(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            worker = object.__new__(CncTelegramWorker)
+            worker.config = SimpleNamespace(temp_dir=Path(root, "tmp"), media_dir=Path(root, "media"))
+            svg = manual_svg_send_file("svg", "cut.svg", b"<svg></svg>")
+            svg["fileId"] = "00000000-0000-4000-8000-000000000101"
+            screenshot = manual_svg_send_file("screenshot", "cut.png", png_bytes())
+            screenshot["fileId"] = "00000000-0000-4000-8000-000000000102"
+            gcode = manual_svg_send_file("gcode", "cut.nc", b"G01 X1")
+            gcode["fileId"] = "00000000-0000-4000-8000-000000000103"
+            worker.erp = SimpleNamespace(
+                claim_manual_svg_telegram_sends=AsyncMock(return_value={
+                    "capability": "cnc_manual_svg_telegram_send_v1",
+                    "tasks": [{
+                        "requestId": "00000000-0000-4000-8000-000000000021",
+                        "destinationChatId": "-100",
+                        "cutJobDisplayNumber": "104",
+                        "messageText": "Files",
+                        "observationBindingVersion": 1,
+                        **item_lease_fields(),
+                        # Server/file order differs from the worker dispatch order.
+                        "files": [svg, screenshot, gcode],
+                    }],
+                }),
+                complete_manual_svg_telegram_send=AsyncMock(return_value={}),
+                fail_manual_svg_telegram_send=AsyncMock(return_value={}),
+            )
+            client = BoundManualSvgSendClient(transform_photo=True)
+
+            await worker.process_manual_svg_telegram_send_requests(client, object(), "-100")
+
+            completion = worker.erp.complete_manual_svg_telegram_send.await_args.args[1]
+            self.assertEqual(completion["sentMessageIds"], ["8101", "8102", "8103", "9101"])
+            self.assertEqual(client.refetch_calls, [[8101, 8102, 8103]])
+            self.assertEqual(
+                {row["fileId"]: row["messageId"] for row in completion["sentFiles"]},
+                {
+                    "00000000-0000-4000-8000-000000000101": "8102",
+                    "00000000-0000-4000-8000-000000000102": "8103",
+                    "00000000-0000-4000-8000-000000000103": "8101",
+                },
+            )
+            photo_binding = next(row for row in completion["sentFiles"] if row["fileId"] == screenshot["fileId"])
+            self.assertEqual(photo_binding["sourceSha256"], screenshot["sha256"])
+            self.assertNotEqual(photo_binding["mediaSha256"], screenshot["sha256"])
+            self.assertEqual(
+                next(row for row in completion["sentFiles"] if row["fileId"] == svg["fileId"])["mediaSha256"],
+                svg["sha256"],
+            )
+            self.assertEqual([call["forceDocument"] for call in client.calls], [True, True, False])
+            self.assertEqual(len(client.calls), 3)
+            worker.erp.fail_manual_svg_telegram_send.assert_not_awaited()
+
+    async def test_binding_refetch_failure_settles_sent_with_registration_block(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            worker = object.__new__(CncTelegramWorker)
+            worker.config = SimpleNamespace(temp_dir=Path(root, "tmp"), media_dir=Path(root, "media"))
+            svg = manual_svg_send_file("svg", "cut.svg", b"<svg></svg>")
+            svg["fileId"] = "00000000-0000-4000-8000-000000000111"
+            worker.erp = SimpleNamespace(
+                claim_manual_svg_telegram_sends=AsyncMock(return_value={
+                    "capability": "cnc_manual_svg_telegram_send_v1",
+                    "tasks": [{
+                        "requestId": "00000000-0000-4000-8000-000000000022",
+                        "destinationChatId": "-100",
+                        "cutJobDisplayNumber": "105",
+                        "messageText": "Files",
+                        "observationBindingVersion": 1,
+                        **item_lease_fields(),
+                        "files": [svg],
+                    }],
+                }),
+                complete_manual_svg_telegram_send=AsyncMock(return_value={}),
+                fail_manual_svg_telegram_send=AsyncMock(return_value={}),
+            )
+            client = BoundManualSvgSendClient()
+            client.get_messages = AsyncMock(side_effect=TimeoutError("refetch unavailable"))
+
+            await worker.process_manual_svg_telegram_send_requests(client, object(), "-100")
+
+            completion = worker.erp.complete_manual_svg_telegram_send.await_args.args[1]
+            self.assertEqual(completion["observationBindingError"], "MEDIA_VERIFICATION_FAILED")
+            self.assertNotIn("sentFiles", completion)
+            self.assertEqual(completion["sentMessageIds"], ["8101", "9101"])
+            worker.erp.fail_manual_svg_telegram_send.assert_not_awaited()
+
+    async def test_post_send_chat_role_and_size_mismatches_settle_blocked(self) -> None:
+        cases = (
+            ("chat", {"returned_chat_id": -200}),
+            ("role", {"returned_file_name": "cut.bin"}),
+            ("size", {"declared_media_size": 15 * 1024 * 1024 + 1}),
+        )
+        for index, (reason, client_kwargs) in enumerate(cases, start=1):
+            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as root:
+                worker = object.__new__(CncTelegramWorker)
+                worker.config = SimpleNamespace(temp_dir=Path(root, "tmp"), media_dir=Path(root, "media"))
+                svg = manual_svg_send_file("svg", "cut.svg", b"<svg></svg>")
+                svg["fileId"] = f"00000000-0000-4000-8000-0000000002{index:02d}"
+                worker.erp = SimpleNamespace(
+                    claim_manual_svg_telegram_sends=AsyncMock(return_value={
+                        "capability": "cnc_manual_svg_telegram_send_v1",
+                        "tasks": [{
+                            "requestId": f"00000000-0000-4000-8000-0000000003{index:02d}",
+                            "destinationChatId": "-100",
+                            "cutJobDisplayNumber": "108",
+                            "messageText": "Files",
+                            "observationBindingVersion": 1,
+                            **item_lease_fields(),
+                            "files": [svg],
+                        }],
+                    }),
+                    complete_manual_svg_telegram_send=AsyncMock(return_value={}),
+                    fail_manual_svg_telegram_send=AsyncMock(return_value={}),
+                )
+                client = BoundManualSvgSendClient(**client_kwargs)
+
+                await worker.process_manual_svg_telegram_send_requests(client, object(), "-100")
+
+                completion = worker.erp.complete_manual_svg_telegram_send.await_args.args[1]
+                self.assertEqual(completion["observationBindingError"], "MEDIA_VERIFICATION_FAILED")
+                self.assertNotIn("sentFiles", completion)
+                self.assertEqual(len(client.calls), 1)
+                worker.erp.fail_manual_svg_telegram_send.assert_not_awaited()
+
+    async def test_ambiguous_missing_duplicate_or_oversized_dispatch_ids_are_not_settled(self) -> None:
+        scenarios = (
+            (["svg"], [None]),
+            (["gcode", "svg"], [8101, 8101]),
+            (["svg"], [2_147_483_648]),
+        )
+        for index, (kinds, returned_ids) in enumerate(scenarios, start=1):
+            with self.subTest(returned_ids=returned_ids), tempfile.TemporaryDirectory() as root:
+                worker = object.__new__(CncTelegramWorker)
+                worker.config = SimpleNamespace(temp_dir=Path(root, "tmp"), media_dir=Path(root, "media"))
+                files = [
+                    manual_svg_send_file(
+                        kind,
+                        "cut.nc" if kind == "gcode" else "cut.svg",
+                        b"G01 X1" if kind == "gcode" else b"<svg></svg>",
+                    )
+                    for kind in kinds
+                ]
+                for file_index, file_item in enumerate(files, start=1):
+                    file_item["fileId"] = f"00000000-0000-4000-8000-0000000004{index}{file_index}"
+                worker.erp = SimpleNamespace(
+                    claim_manual_svg_telegram_sends=AsyncMock(return_value={
+                        "capability": "cnc_manual_svg_telegram_send_v1",
+                        "tasks": [{
+                            "requestId": f"00000000-0000-4000-8000-0000000005{index:02d}",
+                            "destinationChatId": "-100",
+                            "cutJobDisplayNumber": "109",
+                            "messageText": "Files",
+                            "observationBindingVersion": 1,
+                            **item_lease_fields(),
+                            "files": files,
+                        }],
+                    }),
+                    complete_manual_svg_telegram_send=AsyncMock(return_value={}),
+                    fail_manual_svg_telegram_send=AsyncMock(return_value={}),
+                )
+                client = BoundManualSvgSendClient(message_ids=returned_ids)
+
+                await worker.process_manual_svg_telegram_send_requests(client, object(), "-100")
+
+                self.assertEqual(len(client.calls), len(kinds))
+                worker.erp.complete_manual_svg_telegram_send.assert_not_awaited()
+                worker.erp.fail_manual_svg_telegram_send.assert_not_awaited()
+
+    async def test_binding_helper_enforces_file_count_and_svg_source_hash(self) -> None:
+        client = SimpleNamespace(get_messages=AsyncMock(return_value=[]))
+        too_many_files = [
+            {"fileId": f"file-{index}", "kind": "svg", "sha256": "a" * 64}
+            for index in range(4)
+        ]
+        with self.assertRaises(ManualSendBindingError):
+            await bind_manual_svg_sent_files(client, object(), "-100", too_many_files, [])
+        client.get_messages.assert_not_awaited()
+
+        body = b"<svg>physical source</svg>"
+        message = BoundMessage(8201, body, "cut.svg", -100, photo=False)
+        client.get_messages = AsyncMock(return_value=[message])
+        requested = [{
+            "fileId": "00000000-0000-4000-8000-000000000801",
+            "kind": "svg",
+            "sha256": "0" * 64,
+        }]
+        sent = [SimpleNamespace(
+            file_id=requested[0]["fileId"],
+            source_sha256=hashlib.sha256(body).hexdigest(),
+            message=message,
+        )]
+        with self.assertRaises(ManualSendBindingError):
+            await bind_manual_svg_sent_files(client, object(), "-100", requested, sent)
+
+    async def test_binding_helper_enforces_aggregate_download_bytes_and_deadline(self) -> None:
+        body = b"x" * (13 * 1024 * 1024)
+        digest = hashlib.sha256(body).hexdigest()
+        kinds = (("svg", "a.svg"), ("gcode", "a.nc"), ("screenshot", "a.png"))
+        requested: list[dict[str, str]] = []
+        sent: list[SimpleNamespace] = []
+        messages: list[BoundMessage] = []
+        for index, (kind, file_name) in enumerate(kinds, start=1):
+            file_id = f"00000000-0000-4000-8000-00000000081{index}"
+            requested.append({"fileId": file_id, "kind": kind, "sha256": digest})
+            message = BoundMessage(8200 + index, body, file_name, -100, photo=kind == "screenshot")
+            messages.append(message)
+            sent.append(SimpleNamespace(file_id=file_id, source_sha256=digest, message=message))
+        client = SimpleNamespace(get_messages=AsyncMock(return_value=messages))
+        with self.assertRaises(ManualSendBindingError):
+            await bind_manual_svg_sent_files(client, object(), "-100", requested, sent)
+
+        async def slow_fetch(_entity: object, *, ids: list[int]) -> list[BoundMessage]:
+            await asyncio.sleep(0.02)
+            return messages
+
+        client.get_messages = AsyncMock(side_effect=slow_fetch)
+        with patch("cnc_telegram_worker.manual_send_observation.MANUAL_SEND_OBSERVATION_TIMEOUT_SECONDS", 0.001):
+            with self.assertRaises(ManualSendBindingError):
+                await bind_manual_svg_sent_files(client, object(), "-100", requested[:1], sent[:1])
+
+    async def test_after_dispatch_send_error_is_not_reported_failed_or_resent(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            worker = object.__new__(CncTelegramWorker)
+            worker.config = SimpleNamespace(temp_dir=Path(root, "tmp"), media_dir=Path(root, "media"))
+            svg = manual_svg_send_file("svg", "cut.svg", b"<svg></svg>")
+            svg["fileId"] = "00000000-0000-4000-8000-000000000121"
+            gcode = manual_svg_send_file("gcode", "cut.nc", b"G01 X1")
+            gcode["fileId"] = "00000000-0000-4000-8000-000000000122"
+            worker.erp = SimpleNamespace(
+                claim_manual_svg_telegram_sends=AsyncMock(return_value={
+                    "capability": "cnc_manual_svg_telegram_send_v1",
+                    "tasks": [{
+                        "requestId": "00000000-0000-4000-8000-000000000023",
+                        "destinationChatId": "-100",
+                        "cutJobDisplayNumber": "106",
+                        "messageText": "Files",
+                        "observationBindingVersion": 1,
+                        **item_lease_fields(),
+                        "files": [svg, gcode],
+                    }],
+                }),
+                complete_manual_svg_telegram_send=AsyncMock(return_value={}),
+                fail_manual_svg_telegram_send=AsyncMock(return_value={}),
+            )
+            client = BoundManualSvgSendClient(fail_send_number=2)
+
+            await worker.process_manual_svg_telegram_send_requests(client, object(), "-100")
+
+            self.assertEqual(len(client.calls), 2)
+            worker.erp.complete_manual_svg_telegram_send.assert_not_awaited()
+            worker.erp.fail_manual_svg_telegram_send.assert_not_awaited()
+
+    async def test_completion_retries_same_payload_without_resending(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            worker = object.__new__(CncTelegramWorker)
+            worker.config = SimpleNamespace(temp_dir=Path(root, "tmp"), media_dir=Path(root, "media"))
+            svg = manual_svg_send_file("svg", "cut.svg", b"<svg></svg>")
+            svg["fileId"] = "00000000-0000-4000-8000-000000000131"
+            error = ErpResponseError(httpx.Response(503, request=httpx.Request("POST", "https://erp.test")), "complete")
+            complete = AsyncMock(side_effect=[error, {}])
+            worker.erp = SimpleNamespace(
+                claim_manual_svg_telegram_sends=AsyncMock(return_value={
+                    "capability": "cnc_manual_svg_telegram_send_v1",
+                    "tasks": [{
+                        "requestId": "00000000-0000-4000-8000-000000000024",
+                        "destinationChatId": "-100",
+                        "cutJobDisplayNumber": "107",
+                        "messageText": "Files",
+                        "observationBindingVersion": 1,
+                        **item_lease_fields(),
+                        "files": [svg],
+                    }],
+                }),
+                complete_manual_svg_telegram_send=complete,
+                fail_manual_svg_telegram_send=AsyncMock(return_value={}),
+            )
+            client = BoundManualSvgSendClient()
+
+            await worker.process_manual_svg_telegram_send_requests(client, object(), "-100")
+
+            self.assertEqual(complete.await_count, 2)
+            self.assertEqual(complete.await_args_list[0].args, complete.await_args_list[1].args)
+            self.assertEqual(len(client.calls), 1)
+            worker.erp.fail_manual_svg_telegram_send.assert_not_awaited()
+
+    async def test_completion_409_and_session_revocation_stop_retry(self) -> None:
+        errors = (
+            ErpResponseError(httpx.Response(409, request=httpx.Request("POST", "https://erp.test")), "complete"),
+            SessionLeaseLost("session revoked"),
+        )
+        for index, error in enumerate(errors, start=1):
+            with self.subTest(error=type(error).__name__), tempfile.TemporaryDirectory() as root:
+                worker = object.__new__(CncTelegramWorker)
+                worker.config = SimpleNamespace(temp_dir=Path(root, "tmp"), media_dir=Path(root, "media"))
+                svg = manual_svg_send_file("svg", "cut.svg", b"<svg></svg>")
+                svg["fileId"] = f"00000000-0000-4000-8000-0000000006{index:02d}"
+                complete = AsyncMock(side_effect=error)
+                worker.erp = SimpleNamespace(
+                    claim_manual_svg_telegram_sends=AsyncMock(return_value={
+                        "capability": "cnc_manual_svg_telegram_send_v1",
+                        "tasks": [{
+                            "requestId": f"00000000-0000-4000-8000-0000000007{index:02d}",
+                            "destinationChatId": "-100",
+                            "cutJobDisplayNumber": "110",
+                            "messageText": "Files",
+                            "observationBindingVersion": 1,
+                            **item_lease_fields(),
+                            "files": [svg],
+                        }],
+                    }),
+                    complete_manual_svg_telegram_send=complete,
+                    fail_manual_svg_telegram_send=AsyncMock(return_value={}),
+                )
+                client = BoundManualSvgSendClient()
+
+                if isinstance(error, SessionLeaseLost):
+                    with self.assertRaises(SessionLeaseLost):
+                        await worker.process_manual_svg_telegram_send_requests(client, object(), "-100")
+                else:
+                    await worker.process_manual_svg_telegram_send_requests(client, object(), "-100")
+
+                self.assertEqual(complete.await_count, 1)
+                self.assertEqual(len(client.calls), 1)
+                worker.erp.fail_manual_svg_telegram_send.assert_not_awaited()
 
     async def test_worker_records_manual_svg_outgoing_messages_in_audit(self) -> None:
         with tempfile.TemporaryDirectory() as root:

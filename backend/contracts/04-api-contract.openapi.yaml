@@ -13774,6 +13774,9 @@ paths:
       tags: [CncTelegramMedia]
       operationId: claimManualSvgTelegramSends
       summary: Claim queued manual SVG files for Telegram sending
+      description: >-
+        Capable tasks may include observationBindingVersion: 1 when an immutable
+        bounded source snapshot was captured. Older workers can ignore the optional field.
       security: [{ bearerAuth: [] }]
       x-permission: cut.manage
       responses:
@@ -13787,6 +13790,12 @@ paths:
       tags: [CncTelegramMedia]
       operationId: completeManualSvgTelegramSend
       summary: Complete one manual SVG Telegram send request
+      description: >-
+        Successful capable sends may include explicit per-file sentFiles bindings
+        (fileId, messageId, sourceSha256, mediaSha256) or
+        observationBindingError: MEDIA_VERIFICATION_FAILED. Older completions
+        without either field remain supported but do not register an observation
+        target. A conflicting replay or stale lease returns 409.
       security: [{ bearerAuth: [] }]
       x-permission: cut.manage
       parameters:
@@ -13800,6 +13809,7 @@ paths:
         '200': { description: OK }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/ValidationError' }
         '503': { $ref: '#/components/responses/FeatureDisabled' }
 

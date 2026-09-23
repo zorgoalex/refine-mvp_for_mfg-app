@@ -101,14 +101,19 @@ continues to fail closed with 503 (`CNC_TELEGRAM_BACKGROUND_INGEST_DISABLED` or
 `CNC_TELEGRAM_BACKGROUND_INGEST_APPROVAL_REQUIRED`); it is not enabled by the
 observation API.
 
+Future manual-SVG sends additionally preserve claim-time file/source identity and
+explicit sent-message bindings. A separate registrar checks those facts before
+creating an observation target; sending alone is never physical cut evidence.
+See [manual-send registration and settlement](cnc-telegram-bounded-observations.md#future-manual-sends).
+
 This bounded CNC continuity path does not deliver complete allocation-pin reconciliation across
-all active producers, historical or manual-send source backfill, UI workflow, or
+all active producers, historical source backfill, UI workflow, or
 full engine cutover. Keep engine mode and worker/API feature flags unchanged
 unless a separately approved rollout covers those remaining gates.
 
 Still required before a broader cutover: validation of the whole live source
 chain, complete allocation-pin reconciliation across active producers,
-historical/manual-send source handling if those are brought into scope, and the
+historical source handling if brought into scope, and the
 UI workflow. The bounded observation API and CNC-priority executor do not by
 themselves complete those separate rollout steps. Keep
 `BACKEND_MDF_JOB_WORKER=false`, `BACKEND_MDF_PUBLISHED_READS=false`, and

@@ -45,7 +45,8 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
       'cnc_telegram_packet_whole_order_keys','mdf_board_manual_moves','cut_result','cut_result_board_projection',
       'cut_result_placement','cut_result_sheet_map','bazis_cut_sets','bazis_cut_set_details',
       'status_automation_rules','app_settings','outbox_events',
-      'audit_log','audit_log_related_entity'];
+      'audit_log','audit_log_related_entity','cnc_manual_svg_upload_files',
+      'cnc_manual_svg_telegram_send_requests','cnc_manual_svg_telegram_send_request_files'];
     tables.push('cnc_telegram_import_candidates','cnc_telegram_import_items','cnc_telegram_worker_session_leases');
     await fixture.clonePublicTables(tables);
     await fixture.client.query(`ALTER TABLE ${fixture.schema}.cnc_telegram_packets
@@ -53,6 +54,7 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
       ALTER TABLE ${fixture.schema}.cnc_telegram_packets ADD PRIMARY KEY(packet_id);
       ALTER TABLE ${fixture.schema}.cnc_telegram_import_candidates ADD PRIMARY KEY(candidate_id);
       ALTER TABLE ${fixture.schema}.cnc_telegram_import_items ADD PRIMARY KEY(import_item_id);
+      ALTER TABLE ${fixture.schema}.cnc_manual_svg_telegram_send_requests ADD PRIMARY KEY(request_id);
       ALTER TABLE ${fixture.schema}.audit_log ALTER COLUMN audit_id SET DEFAULT gen_random_uuid();
       ALTER TABLE ${fixture.schema}.outbox_events ALTER COLUMN outbox_event_id SET DEFAULT gen_random_uuid();
       CREATE UNIQUE INDEX e2e_correction_audit_related ON ${fixture.schema}.audit_log_related_entity(audit_id,entity_type,entity_id);
@@ -61,6 +63,7 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
       '175_mdf_command_placement.sql','178_mdf_correction_receipts.sql']) await fixture.applyMigrations([file]);
     await fixture.applyMigrations(['179_mdf_active_return.sql']);
     await fixture.applyMigrations(['180_mdf_cnc_observations.sql']);
+    await fixture.applyMigrations(['181_cnc_manual_send_observation.sql']);
     await fixture.client.query(`UPDATE ${fixture.schema}.mdf_engine_state SET mode='active';
       INSERT INTO ${fixture.schema}.users(user_id,username,role_id,is_active) VALUES(1,'E2E active MDF correction',1,true);
       INSERT INTO ${fixture.schema}.order_statuses(order_status_id,order_status_name,sort_order,is_active)

@@ -104,6 +104,8 @@ export interface CncTelegramManualSvgTelegramSendTaskDto {
   messageText: string;
   attempt: number;
   files: CncTelegramManualSvgTelegramFileTaskDto[];
+  /** Present only when this exact task has a durable immutable observer snapshot. */
+  observationBindingVersion?: 1;
   itemLeaseToken: string;
   itemLeaseGeneration: number;
   itemLeaseOwner: string;
@@ -128,9 +130,18 @@ export interface CncTelegramManualSvgTelegramSendResponseDto {
 export interface CncTelegramManualSvgTelegramSendCompleteDto {
   sentChatId: string;
   sentMessageIds: string[];
+  sentFiles?: CncTelegramManualSvgTelegramSentFileDto[];
+  observationBindingError?: 'MEDIA_VERIFICATION_FAILED';
   itemLeaseToken: string;
   itemLeaseGeneration: number;
   itemLeaseOwner: string;
+}
+
+export interface CncTelegramManualSvgTelegramSentFileDto {
+  fileId: string;
+  messageId: string;
+  sourceSha256: string;
+  mediaSha256: string;
 }
 
 export interface CncTelegramMediaRestoreCompleteDto {
@@ -182,10 +193,31 @@ const failSchema = z.object({
 const telegramSendCompleteSchema = z.object({
   sentChatId: z.string().trim().min(1).max(120),
   sentMessageIds: z.array(z.string().trim().min(1).max(80)).min(1).max(10),
+  sentFiles: z.array(z.object({
+    fileId: z.string().uuid(),
+    messageId: z.string().regex(/^[1-9]\d{0,9}$/).refine((value) =>
+      value.length < 10 || (value.length === 10 && value <= '2147483647')),
+    sourceSha256: z.string().regex(/^[a-f0-9]{64}$/i).transform((value) => value.toLowerCase()),
+    mediaSha256: z.string().regex(/^[a-f0-9]{64}$/i).transform((value) => value.toLowerCase()),
+  }).strict()).min(1).max(3).optional(),
+  observationBindingError: z.literal('MEDIA_VERIFICATION_FAILED').optional(),
   itemLeaseToken: z.string().trim().min(32).max(240),
   itemLeaseGeneration: z.number().int().positive(),
   itemLeaseOwner: z.string().uuid(),
-}).strict();
+}).strict().superRefine((value, context) => {
+  if (value.sentFiles && value.observationBindingError) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['sentFiles'], message: 'sentFiles and observationBindingError are mutually exclusive' });
+  }
+  const fileIds = new Set<string>();
+  const messageIds = new Set<string>();
+  for (const [index, file] of (value.sentFiles ?? []).entries()) {
+    if (fileIds.has(file.fileId)) context.addIssue({ code: z.ZodIssueCode.custom, path: ['sentFiles', index, 'fileId'], message: 'Duplicate fileId' });
+    if (messageIds.has(file.messageId)) context.addIssue({ code: z.ZodIssueCode.custom, path: ['sentFiles', index, 'messageId'], message: 'Duplicate messageId' });
+    if (!value.sentMessageIds.includes(file.messageId)) context.addIssue({ code: z.ZodIssueCode.custom, path: ['sentFiles', index, 'messageId'], message: 'messageId must be included in sentMessageIds' });
+    fileIds.add(file.fileId);
+    messageIds.add(file.messageId);
+  }
+});
 
 const uuidSchema = z.string().trim().uuid();
 

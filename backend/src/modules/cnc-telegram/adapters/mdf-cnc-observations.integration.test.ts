@@ -27,7 +27,8 @@ describe.skipIf(!enabled)('MDF CNC observations, isolated PostgreSQL schema', ()
     'cnc_telegram_packet_whole_order_keys','mdf_board_manual_moves','cut_result','cut_result_board_projection',
     'cut_result_placement','cut_result_sheet_map','bazis_cut_sets','bazis_cut_set_details','status_automation_rules',
     'app_settings','outbox_events','audit_log','audit_log_related_entity','cnc_telegram_import_candidates',
-    'cnc_telegram_import_items','cnc_telegram_worker_session_leases',
+    'cnc_telegram_import_items','cnc_telegram_worker_session_leases','cnc_manual_svg_upload_files',
+    'cnc_manual_svg_telegram_send_requests','cnc_manual_svg_telegram_send_request_files',
   ];
 
   beforeAll(async () => {
@@ -42,13 +43,14 @@ describe.skipIf(!enabled)('MDF CNC observations, isolated PostgreSQL schema', ()
       ALTER TABLE ${fixture.schema}.cnc_telegram_packets ADD PRIMARY KEY(packet_id);
       ALTER TABLE ${fixture.schema}.cnc_telegram_import_candidates ADD PRIMARY KEY(candidate_id);
       ALTER TABLE ${fixture.schema}.cnc_telegram_import_items ADD PRIMARY KEY(import_item_id);
+      ALTER TABLE ${fixture.schema}.cnc_manual_svg_telegram_send_requests ADD PRIMARY KEY(request_id);
       ALTER TABLE ${fixture.schema}.audit_log ALTER COLUMN audit_id SET DEFAULT gen_random_uuid();
       ALTER TABLE ${fixture.schema}.outbox_events ALTER COLUMN outbox_event_id SET DEFAULT gen_random_uuid();
       CREATE UNIQUE INDEX e2e_obs_audit_related ON ${fixture.schema}.audit_log_related_entity(audit_id,entity_type,entity_id);
       CREATE UNIQUE INDEX e2e_obs_outbox ON ${fixture.schema}.outbox_events(idempotency_key)`);
     for (const migration of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql',
       '174_mdf_execution_context.sql','175_mdf_command_placement.sql','178_mdf_correction_receipts.sql',
-      '179_mdf_active_return.sql','180_mdf_cnc_observations.sql']) {
+      '179_mdf_active_return.sql','180_mdf_cnc_observations.sql','181_cnc_manual_send_observation.sql']) {
       await fixture.applyMigrations([migration]);
     }
     await fixture.client.query(`UPDATE ${fixture.schema}.mdf_engine_state SET mode='active';

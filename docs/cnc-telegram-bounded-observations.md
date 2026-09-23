@@ -1,16 +1,68 @@
 # Bounded CNC Telegram observations
 
-Status: **prepared, not activated**. This describes the explicit-import
-observation and CNC-priority execution path. It does not enable polling, the MDF
+Status: **prepared, not activated**. This describes explicit-import and future
+manual-send observation registration and CNC-priority execution. It does not enable polling, the MDF
 job scheduler, the published board, or a general CNC ingest path.
 
 ## Scope and trust boundary
 
-An observation target is registered only in the successful transaction for an
-eligible explicit Telegram import. It stores the original Telegram chat, source
-group, and a bounded set of exact SVG/G-code/image message IDs and content hashes.
-It does not backfill older imports, manual-send sources, or historical Telegram
-messages. An import establishes source membership, not physical completion.
+An observation target comes from an eligible explicit Telegram import or a
+verified new ERP manual-SVG send. It stores the real Telegram chat, a message
+anchor, and a bounded set of exact SVG/G-code/image message IDs and content
+hashes. Neither path backfills older imports, old manual sends or Telegram
+history. Import, upload and successful send establish no physical completion.
+
+## Future manual sends
+
+Send-task claim freezes its exact file IDs, kinds, source hashes and MDF source
+revision/version/epoch. Upload file rows may later be overwritten; registration
+must never infer old sent content from their current values. An incomplete or
+unaccepted source does not become eligible merely because sending succeeded.
+
+Capable tasks advertise `observationBindingVersion: 1`. The updated worker
+reports `sentFiles` with explicit `fileId`, `messageId`, `sourceSha256` and
+`mediaSha256`. Do not zip files and message IDs: the worker's send order differs
+from backend storage order, and `sentMessageIds` also includes any comment.
+File roles are derived from the frozen server snapshot, not supplied as authority
+by the worker. A full group includes SVG and every sent file, with at most three
+unique file/message bindings; comment messages are not observation targets.
+
+The worker refetches exact sent messages under count/size/time bounds. SVG and
+G-code media must retain their source hash. Screenshot remains a photo: its
+Telegram representation may differ, so the original source hash and actual
+fetched-media hash remain separate. Subsequent observation verifies the latter;
+image 👍 remains supported. Verification failure reports
+`observationBindingError: "MEDIA_VERIFICATION_FAILED"` instead of a partial group.
+Old workers may settle a send without bindings, but those data cannot authorize
+an observation target.
+
+Transport completion stores the sent result and immutable binding receipt before
+registration. A pending registrar runs in a separate transaction before ordinary
+observation claim, locks owners before sources, and revalidates the claim-time
+source fences and complete accepted composition. Registration creates no cut
+proof and changes no production status. Stale/ineligible facts are retained with
+a blocking reason; transient registration failure leaves work retryable. Exact
+replay is effect-free; a conflicting completion is rejected. Existing packet
+targets are never rebound to another send; such a registration requires review.
+Transient database failures defer this registration with a 2–300 second backoff
+and let ordinary observation claiming continue. After ten failed attempts the
+work requires reconciliation. Session and cutover errors are not bypassed.
+For manual origin the message anchor is the SVG message ID.
+An already committed send receipt survives a worker restart: the registrar uses
+the currently authorized session for the same chat, not the original sender's
+expired session. This does not relax authentication of the original completion.
+
+Once a remote send has started, later errors must not call send-failure or cause
+an automatic resend: even a timeout can conceal successful remote delivery.
+When all sends returned known IDs, media-verification failure still settles
+`sent`, but blocks registration. Completion retries use the exact same payload.
+Partial or unresolved delivery remains unknown. For newly snapshotted claims,
+late completion is allowed only for the same token, item generation, worker and
+still-current session generation; a newer identity, failed request or unrelated
+unknown request cannot be overwritten. Older unsnapshotted tasks retain their
+existing lease checks.
+
+## Observation protocol
 
 The worker claims at most one due target through the worker-session API, fetches
 the exact bound messages after the claim, and reports each message's presence,
@@ -118,13 +170,13 @@ automation failure.
 
 ## Activation remains gated
 
-Applying migrations `165` through `180`, deploying endpoints, or registering an
+Applying MDF migrations, deploying endpoints, or registering an
 observation target does not enable production behavior. Keep the database MDF
 engine in `legacy`; do not enable the accepted-job scheduler or published MDF
 reads; keep `CNC_TELEGRAM_MDF_OBSERVATIONS_ENABLED=false`. Do not start or restart
 the currently stopped CNC worker without a separate approved rollout. The
 generic background ingest remains fail-closed. This increment does not connect
-the UI, historical/manual-send registration, every CNC producer, or the full MDF
+the UI, historical registration, every CNC producer, or the full MDF
 cutover chain.
 
 The generic `/cnc-telegram/ingest` route remains fail-closed even if its legacy

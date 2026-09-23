@@ -6,6 +6,7 @@ import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { assertCurrentWorkerSessionInTransaction } from './cnc-telegram-worker-session-fencing';
+import { PgCncManualSendObservationRegistration } from './pg-cnc-manual-send-observation-registration';
 import { requireMdfCommandBoundary } from '../../mdf-board/application/mdf-command-boundary';
 import { recordMdfReceipt, type MdfReceiptLine } from '../../mdf-board/application/mdf-receipt';
 import { loadMdfExecutionSnapshot, mdfSourceKey } from '../../mdf-board/adapters/mdf-execution-snapshot';
@@ -106,7 +107,7 @@ function requireWorker(user: CurrentUser, lease: CncTelegramWorkerSessionLeaseCo
 }
 
 interface TargetRow extends Row {
-  packet_id: string; import_item_id: string; candidate_id: string; source_chat_id: string;
+  packet_id: string; import_item_id: string | null; candidate_id: string | null; source_chat_id: string;
   source_group_message_id: string; message_bindings: unknown; registered_revision_key: string;
   registered_membership_digest: string; accepted_revision_key: string; last_observation_version: string; work_state: string;
   next_due_at: string; claim_id: string | null; claim_token_hash: string | null;
@@ -141,6 +142,13 @@ export class PgCncTelegramMdfObservationRepository implements CncTelegramMdfObse
 
   async claim(input: { currentUser: CurrentUser; lease: CncTelegramWorkerSessionLeaseContext }): Promise<MdfCncObservationClaimDto | null> {
     requireWorker(input.currentUser, input.lease);
+    // The registrar has its own READ COMMITTED boundary and releases owner/source
+    // locks before the normal claim begins, preserving the shared lock order.
+    await new PgCncManualSendObservationRegistration(this.database).registerOne({
+      currentUser: input.currentUser,
+      requestTraceId: `mdf-manual-send-register:${input.lease.workerInstanceId}:${input.lease.leaseGeneration}`,
+      sessionLease: input.lease,
+    });
     return this.database.transaction(async tx => {
       const boundary = await requireMdfCommandBoundary(tx, { writer: 'cnc.mdf_observation.claim', capability: 'cnc-receipt' });
       if (!boundary.queued) return null;

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { extname } from 'node:path';
 import type { QueryResultRow } from 'pg';
 import { auditService } from '../../../common/audit/audit.service';
@@ -115,6 +116,17 @@ interface ManualSvgTelegramSendTaskRow extends QueryResultRow {
   message_text: string;
   attempt_count: string | number;
   files_json: unknown;
+  requested_file_count: string | number;
+  packet_source_version: string | null;
+  accepted_revision_key: string | null;
+  received_revision_key: string | null;
+  source_head_version: string | null;
+  source_correction_epoch: string | null;
+  source_context_sealed: boolean;
+  source_composition_complete: boolean;
+  membership_json: unknown;
+  demand_json: unknown;
+  observation_binding_version?: 1;
   lease_token: string;
   lease_generation: string | number;
   lease_worker_instance_id: string;
@@ -123,6 +135,7 @@ interface ManualSvgTelegramSendTaskRow extends QueryResultRow {
 interface ManualSvgTelegramSendRow extends QueryResultRow {
   request_id: string;
   packet_id: string;
+  destination_chat_id?: string;
   status: 'pending' | 'processing' | 'sent' | 'failed' | 'unknown';
   requested_at: string | Date;
   finished_at: string | Date | null;
@@ -134,6 +147,13 @@ interface ManualSvgTelegramSendRow extends QueryResultRow {
   lease_worker_instance_id?: string | null;
   lease_expires_at?: string | Date | null;
   lease_valid?: boolean;
+}
+
+interface ManualSvgObservationClaimSnapshotRow extends QueryResultRow {
+  send_request_id: string; lease_generation: string; worker_instance_id: string; session_generation: string;
+  lease_token_hash: string; packet_id: string; destination_chat_id: string; requested_file_count: number;
+  files_qualified: boolean; files_snapshot: unknown; source_eligible: boolean; source_fence: unknown;
+  ineligible_reason: string | null;
 }
 
 interface ManualSvgTelegramSendUnknownRow extends QueryResultRow {
@@ -433,35 +453,74 @@ export class PgCncTelegramMediaRepository {
                 claimed.destination_chat_id, packet.source_chat_id AS packet_source_chat_id,
                 packet.svg_cut_job_id AS cut_job_id,
                 svg_job.source_display_number AS cut_job_display_number,
+                packet.source_version::text AS packet_source_version,
+                head.received_revision_key AS received_revision_key,
+                head.accepted_revision_key AS accepted_revision_key,
+                head.version::text AS source_head_version,
+                head.correction_epoch::text AS source_correction_epoch,
+                COALESCE(context.source_context_sealed,false) AS source_context_sealed,
+                COALESCE(context.source_composition_complete,false) AS source_composition_complete,
+                files.requested_file_count,
+                files.files_json,
+                COALESCE(membership.membership_json,'[]'::jsonb) AS membership_json,
+                COALESCE(demand.demand_json,'[]'::jsonb) AS demand_json,
                 claimed.message_text, claimed.attempt_count,
-                claimed.lease_token, claimed.lease_generation, claimed.lease_worker_instance_id,
-                COALESCE(jsonb_agg(
-                  jsonb_build_object(
-                    'fileId', file.file_id,
-                    'kind', file.file_kind,
-                    'fileName', file.original_file_name,
-                    'contentType', file.content_type,
-                    'sizeBytes', file.size_bytes,
-                    'sha256', file.content_sha256,
-                    'base64Content', encode(file.content_bytes, 'base64')
-                  )
-                 ORDER BY request_file.send_order
-                ) FILTER (WHERE file.file_id IS NOT NULL), '[]'::jsonb) AS files_json
+                claimed.lease_token, claimed.lease_generation, claimed.lease_worker_instance_id
          FROM claimed
          JOIN cnc_telegram_packets packet ON packet.packet_id=claimed.packet_id
          JOIN cut_job svg_job ON svg_job.cut_job_id=packet.svg_cut_job_id
-         JOIN cnc_manual_svg_telegram_send_request_files request_file ON request_file.request_id=claimed.request_id
-         JOIN cnc_manual_svg_upload_files file ON file.file_id=request_file.file_id
-          AND file.expires_at > now()
-         GROUP BY claimed.request_id, claimed.packet_id, claimed.destination_chat_id,
-                  packet.source_chat_id, packet.svg_cut_job_id,
-                  svg_job.source_display_number, claimed.message_text, claimed.attempt_count,
-                  claimed.lease_token, claimed.lease_generation, claimed.lease_worker_instance_id
+         LEFT JOIN mdf_source_heads head ON head.source_kind='packet' AND head.source_id=claimed.packet_id::text
+         LEFT JOIN LATERAL (
+           SELECT context.composition_complete AS source_composition_complete,true AS source_context_sealed
+           FROM mdf_revision_context context JOIN mdf_revision_seals seal USING(source_kind,source_id,revision_key)
+           WHERE context.source_kind='packet' AND context.source_id=claimed.packet_id::text
+             AND context.revision_key=head.accepted_revision_key LIMIT 1
+         ) context ON true
+         LEFT JOIN LATERAL (
+           SELECT count(*)::integer requested_file_count,
+             COALESCE(jsonb_agg(jsonb_build_object('fileId',file.file_id,'kind',file.file_kind,
+               'fileName',file.original_file_name,'contentType',file.content_type,'sizeBytes',file.size_bytes,
+               'sha256',file.content_sha256,'base64Content',encode(file.content_bytes,'base64'),
+               'sendOrder',request_file.send_order)
+               ORDER BY request_file.send_order) FILTER (WHERE file.file_id IS NOT NULL AND file.expires_at>now()),
+               '[]'::jsonb) files_json
+           FROM cnc_manual_svg_telegram_send_request_files request_file
+           LEFT JOIN cnc_manual_svg_upload_files file ON file.file_id=request_file.file_id
+           WHERE request_file.request_id=claimed.request_id
+         ) files ON true
+         LEFT JOIN LATERAL (
+           SELECT jsonb_agg(jsonb_build_array(line.line_key,line.order_id::text,line.detail_id::text,
+             line.quantity::text,line.rework) ORDER BY line.line_key,line.order_id,line.detail_id,line.rework) membership_json
+           FROM (SELECT line_key,order_id,detail_id,quantity,rework FROM mdf_evidence_lines
+             WHERE source_kind='packet' AND source_id=claimed.packet_id::text
+               AND revision_key=head.accepted_revision_key AND stage_code='membership' AND evidence_kind='derived'
+             ORDER BY line_key,order_id,detail_id,rework LIMIT 5001) line
+         ) membership ON true
+         LEFT JOIN LATERAL (
+           SELECT jsonb_agg(jsonb_build_array(demand.order_id::text,demand.detail_id::text,demand.quantity::text)
+             ORDER BY demand.order_id,demand.detail_id) demand_json
+           FROM (SELECT order_id,detail_id,quantity FROM mdf_revision_demand
+             WHERE source_kind='packet' AND source_id=claimed.packet_id::text
+               AND revision_key=head.accepted_revision_key
+             ORDER BY order_id,detail_id LIMIT 5001) demand
+         ) demand ON true
          ORDER BY claimed.request_id`,
         [input.limit, input.sessionLease.sourceChatId, input.sessionLease.workerInstanceId],
       );
       for (const row of claimed.rows) {
-        await auditService.record(tx, {
+        const snapshot = buildManualSvgObservationClaimSnapshot(row);
+        await tx.query(`INSERT INTO cnc_manual_svg_observation_claim_snapshots(
+          send_request_id,lease_generation,worker_instance_id,session_generation,lease_token_hash,
+          packet_id,destination_chat_id,requested_file_count,files_qualified,files_snapshot,
+          source_eligible,source_fence,ineligible_reason)
+          VALUES($1::uuid,$2::bigint,$3::uuid,$4::bigint,$5,$6::uuid,$7,$8::integer,$9,$10::jsonb,$11,$12::jsonb,$13)
+          ON CONFLICT(send_request_id,lease_generation) DO NOTHING`, [row.request_id,row.lease_generation,
+          input.sessionLease.workerInstanceId,input.sessionLease.leaseGeneration,
+          createHash('sha256').update(row.lease_token).digest('hex'),row.packet_id,row.destination_chat_id,
+          snapshot.requestedFileCount,snapshot.filesQualified,JSON.stringify(snapshot.filesSnapshot),
+          snapshot.sourceEligible,JSON.stringify(snapshot.sourceFence),snapshot.ineligibleReason]);
+        row.observation_binding_version = snapshot.filesQualified ? 1 : undefined;
+        const auditId = await auditService.record(tx, {
           event: 'cnc.manual_svg_upload.telegram_send_claimed',
           entityType: 'cnc_manual_svg_telegram_send_request',
           entityId: row.request_id,
@@ -480,8 +539,11 @@ export class PgCncTelegramMediaRepository {
             workerInstanceId: input.sessionLease.workerInstanceId,
             attemptCount: Number(row.attempt_count),
             fileCount: Array.isArray(row.files_json) ? row.files_json.length : 0,
+            observationBindingVersion: snapshot.filesQualified ? 1 : null,
+            observerSourceEligible: snapshot.sourceEligible,
           },
         });
+        if (!auditId) throw new Error('CNC_MANUAL_SVG_SEND_CLAIM_AUDIT_REQUIRED');
       }
       return claimed;
     });
@@ -498,18 +560,50 @@ export class PgCncTelegramMediaRepository {
     return this.database.transaction(async (tx) => {
       await assertCurrentWorkerSessionInTransaction(tx, input.sessionLease);
       const current = await lockManualSvgTelegramSend(tx, input.requestId, input.sessionLease.sourceChatId);
-      assertItemLeaseIdentity(
-        current,
-        input.completion.itemLeaseToken,
-        input.completion.itemLeaseGeneration,
-        input.completion.itemLeaseOwner,
-        input.sessionLease.workerInstanceId,
-        current.status === 'processing',
-      );
-      if (current.status === 'sent') return mapManualSvgTelegramSendResponse(current);
-      if (current.status !== 'processing') {
+      const snapshot = await readManualSvgObservationClaimSnapshot(tx, input.requestId, input.completion.itemLeaseGeneration);
+      const lateSettlement = current.status === 'unknown' || (current.status === 'processing' && current.lease_valid !== true);
+      assertItemLeaseIdentity(current, input.completion.itemLeaseToken, input.completion.itemLeaseGeneration,
+        input.completion.itemLeaseOwner, input.sessionLease.workerInstanceId, !lateSettlement && current.status === 'processing');
+      if (current.destination_chat_id !== input.completion.sentChatId
+        || input.completion.sentChatId !== input.sessionLease.sourceChatId) {
+        throw new ApiError(409, 'CNC_TELEGRAM_ITEM_LEASE_STALE', 'Manual-send completion chat does not match the claimed destination');
+      }
+      if (snapshot && (snapshot.packet_id !== current.packet_id
+        || Number(snapshot.lease_generation) !== input.completion.itemLeaseGeneration
+        || snapshot.worker_instance_id !== input.sessionLease.workerInstanceId
+        || Number(snapshot.session_generation) !== input.sessionLease.leaseGeneration
+        || createHash('sha256').update(input.completion.itemLeaseToken).digest('hex') !== snapshot.lease_token_hash)) {
+        throw new ApiError(409,'CNC_TELEGRAM_ITEM_LEASE_STALE','Manual-send claim snapshot no longer matches this worker session');
+      }
+      if (current.status === 'sent') {
+        const replayDigest = manualSvgSendCompletionDigest(input.completion);
+        const prior = (await tx.query<{ completion_digest: string }>(`SELECT completion_digest
+          FROM cnc_manual_svg_observation_send_bindings
+          WHERE send_request_id=$1::uuid AND lease_generation=$2::bigint`,
+        [input.requestId,input.completion.itemLeaseGeneration])).rows[0];
+        const exactTransport = current.sent_chat_id === input.completion.sentChatId
+          && JSON.stringify(stringArray(current.sent_message_ids_json)) === JSON.stringify(input.completion.sentMessageIds);
+        if (!exactTransport || (prior ? prior.completion_digest !== replayDigest
+          : Boolean(input.completion.sentFiles || input.completion.observationBindingError))) {
+          throw new ApiError(409,'CNC_TELEGRAM_SEND_COMPLETION_CONFLICT','Результат отправки уже сохранён с другими сообщениями');
+        }
+        return mapManualSvgTelegramSendResponse(current);
+      }
+      if (current.status !== 'processing' && !(current.status === 'unknown' && snapshot)) {
         throw new ApiError(409, 'CONFLICT', 'Запрос отправки SVG-файлов не находится в обработке');
       }
+      if (lateSettlement) {
+        if (!snapshot || snapshot.packet_id !== current.packet_id
+          || snapshot.worker_instance_id !== input.sessionLease.workerInstanceId
+          || Number(snapshot.session_generation) !== input.sessionLease.leaseGeneration
+          || Number(snapshot.lease_generation) !== input.completion.itemLeaseGeneration
+          || snapshot.destination_chat_id !== input.sessionLease.sourceChatId
+          || createHash('sha256').update(input.completion.itemLeaseToken).digest('hex') !== snapshot.lease_token_hash) {
+          throw new ApiError(409,'CNC_TELEGRAM_ITEM_LEASE_STALE','Expired manual-send claim cannot be settled by this worker session');
+        }
+      }
+      const completionDigest = manualSvgSendCompletionDigest(input.completion);
+      const bindingStatus = snapshot ? classifyManualSvgSentBindings(snapshot,input.completion) : null;
       const completed = await tx.query<ManualSvgTelegramSendRow>(
         `UPDATE cnc_manual_svg_telegram_send_requests
          SET status='sent',
@@ -525,7 +619,25 @@ export class PgCncTelegramMediaRepository {
       );
       const row = completed.rows[0];
       if (!row) throw new Error('manual SVG Telegram send completion returned no row');
-      await auditService.record(tx, {
+      if (snapshot) {
+        const storedFiles = bindingStatus?.valid ? bindingStatus.sentFiles : null;
+        const bindingError = input.completion.observationBindingError
+          ?? (input.completion.sentFiles && !bindingStatus?.valid ? 'MEDIA_VERIFICATION_FAILED' : null);
+        await tx.query(`INSERT INTO cnc_manual_svg_observation_send_bindings(
+          send_request_id,lease_generation,sent_chat_id,transport_message_ids,sent_files,binding_error,completion_digest)
+          VALUES($1::uuid,$2::bigint,$3,$4::jsonb,$5::jsonb,$6,$7)`, [input.requestId,
+          input.completion.itemLeaseGeneration,input.completion.sentChatId,
+          JSON.stringify(input.completion.sentMessageIds),storedFiles ? JSON.stringify(storedFiles) : null,
+          bindingError,completionDigest]);
+        const workState = bindingStatus?.valid && snapshot.files_qualified && snapshot.source_eligible
+          && !bindingError ? 'pending' : 'ineligible';
+        const reason = workState === 'pending' ? null
+          : snapshot.ineligible_reason ?? bindingStatus?.reason ?? (bindingError ? 'MEDIA_VERIFICATION_FAILED' : 'SENT_BINDING_MISSING');
+        await tx.query(`INSERT INTO cnc_manual_svg_observation_registration_work(
+          send_request_id,lease_generation,work_state,reason)
+          VALUES($1::uuid,$2::bigint,$3,$4)`, [input.requestId,input.completion.itemLeaseGeneration,workState,reason]);
+      }
+      const auditId = await auditService.record(tx, {
         event: 'cnc.manual_svg_upload.telegram_send_completed',
         entityType: 'cnc_manual_svg_telegram_send_request',
         entityId: input.requestId,
@@ -534,14 +646,18 @@ export class PgCncTelegramMediaRepository {
         actorRole: input.currentUser.role ?? null,
         requestId: input.requestTraceId,
         source: SOURCE,
-        before: { status: 'processing' },
+        before: { status: current.status },
         after: { status: 'sent', sentChatId: input.completion.sentChatId },
-        diff: { status: { from: 'processing', to: 'sent' } },
+        diff: { status: { from: current.status, to: 'sent' } },
         metadata: {
           packetId: row.packet_id,
           sentMessageIds: input.completion.sentMessageIds,
+          observationRegistration: snapshot ? (bindingStatus?.valid ? (snapshot.source_eligible ? 'pending' : 'ineligible') : 'ineligible') : 'legacy_unbound',
+          observationRegistrationReason: snapshot
+            ? (snapshot.ineligible_reason ?? bindingStatus?.reason ?? input.completion.observationBindingError ?? null) : null,
         },
       });
+      if (!auditId) throw new Error('CNC_MANUAL_SVG_SEND_COMPLETION_AUDIT_REQUIRED');
       return mapManualSvgTelegramSendResponse(row);
     });
   }
@@ -864,7 +980,7 @@ async function lockManualSvgTelegramSend(
   destinationChatId: string,
 ): Promise<ManualSvgTelegramSendRow> {
   const result = await tx.query<ManualSvgTelegramSendRow>(
-    `SELECT request.request_id, request.packet_id, request.status, request.requested_at, request.finished_at,
+    `SELECT request.request_id, request.packet_id, request.destination_chat_id, request.status, request.requested_at, request.finished_at,
             request.sent_chat_id, request.sent_message_ids_json, request.last_error,
             request.lease_token, request.lease_generation, request.lease_worker_instance_id,
             request.lease_expires_at, (request.lease_expires_at > now()) AS lease_valid
@@ -1070,8 +1186,110 @@ function mapManualSvgTelegramSendTaskRow(
     itemLeaseGeneration: Number(row.lease_generation),
     itemLeaseOwner: row.lease_worker_instance_id,
     files: parseManualSvgTelegramSendFiles(row.files_json),
+    ...(row.observation_binding_version === 1 ? { observationBindingVersion: 1 as const } : {}),
   };
 }
+
+interface ManualSvgObservationClaimSnapshot {
+  requestedFileCount: number;
+  filesQualified: boolean;
+  filesSnapshot: Array<{ fileId: string; kind: 'svg'|'gcode'|'screenshot'; sha256: string;
+    sizeBytes: number; contentType: string; sendOrder: number }>;
+  sourceEligible: boolean;
+  sourceFence: Record<string, unknown>;
+  ineligibleReason: 'FILES_INCOMPLETE'|'SOURCE_UNACCEPTED'|'SOURCE_CONTEXT_INVALID'|'SOURCE_NOT_MDF'|null;
+}
+
+function buildManualSvgObservationClaimSnapshot(
+  row: ManualSvgTelegramSendTaskRow,
+): ManualSvgObservationClaimSnapshot {
+  const requestedFileCount = Number(row.requested_file_count);
+  const rawFiles = Array.isArray(row.files_json) ? row.files_json : [];
+  const filesSnapshot: ManualSvgObservationClaimSnapshot['filesSnapshot'] = [];
+  for (const item of rawFiles) {
+    if (!item || typeof item !== 'object') continue;
+    const file = item as Record<string, unknown>;
+    const fileId = typeof file.fileId === 'string' ? file.fileId : '';
+    const kind = file.kind;
+    const sha256 = typeof file.sha256 === 'string' ? file.sha256.toLowerCase() : '';
+    const sizeBytes = Number(file.sizeBytes);
+    const contentType = typeof file.contentType === 'string' ? file.contentType : '';
+    const sendOrder = Number(file.sendOrder);
+    if (!fileId || (kind !== 'svg' && kind !== 'gcode' && kind !== 'screenshot')
+      || !/^[a-f0-9]{64}$/.test(sha256) || !Number.isSafeInteger(sizeBytes) || sizeBytes <= 0 || sizeBytes > 15728640
+      || !contentType || !Number.isSafeInteger(sendOrder) || sendOrder < 1 || sendOrder > 10) continue;
+    filesSnapshot.push({ fileId, kind, sha256, sizeBytes, contentType, sendOrder });
+  }
+  filesSnapshot.sort((a,b) => a.sendOrder-b.sendOrder || a.fileId.localeCompare(b.fileId));
+  const rawFileIds = rawFiles.map(item => item && typeof item === 'object' ? (item as Record<string,unknown>).fileId : null);
+  const kinds = filesSnapshot.map(file=>file.kind);
+  const orders = filesSnapshot.map(file=>file.sendOrder);
+  const filesQualified = Number.isSafeInteger(requestedFileCount) && requestedFileCount >= 1 && requestedFileCount <= 3
+    && rawFiles.length === requestedFileCount && filesSnapshot.length === requestedFileCount
+    && new Set(rawFileIds).size === requestedFileCount && new Set(kinds).size === requestedFileCount
+    && new Set(orders).size === requestedFileCount && kinds.includes('svg');
+
+  const membership = parseSnapshotRows(row.membership_json);
+  const demand = parseSnapshotRows(row.demand_json);
+  const receivedRevisionKey = nullableSnapshotString(row.received_revision_key);
+  const acceptedRevisionKey = nullableSnapshotString(row.accepted_revision_key);
+  const packetSourceVersion = nullableSnapshotString(row.packet_source_version);
+  const sourceHeadVersion = nullableSnapshotString(row.source_head_version);
+  const sourceCorrectionEpoch = nullableSnapshotString(row.source_correction_epoch);
+  const membershipDigest = membership.length ? hashJson(membership) : null;
+  const demandDigest = demand.length ? hashJson(demand) : null;
+  const sourceFence = {
+    packetSourceVersion,
+    receivedRevisionKey,
+    acceptedRevisionKey,
+    headVersion: sourceHeadVersion,
+    correctionEpoch: sourceCorrectionEpoch,
+    membershipDigest,
+    demandDigest,
+    compositionComplete: row.source_composition_complete === true,
+    sealed: row.source_context_sealed === true,
+  };
+  const acceptedHeadValid = Boolean(acceptedRevisionKey && acceptedRevisionKey === receivedRevisionKey
+    && isPositiveDecimal(packetSourceVersion) && isPositiveDecimal(sourceHeadVersion)
+    && isDecimal(sourceCorrectionEpoch));
+  const sourceEligible = row.packet_source_chat_id === 'erp-manual-svg-upload' && acceptedHeadValid
+    && row.source_context_sealed === true && row.source_composition_complete === true
+    && membership.length > 0 && membership.length <= 5000 && demand.length > 0 && demand.length <= 5000;
+  const ineligibleReason = !filesQualified ? 'FILES_INCOMPLETE'
+    : row.packet_source_chat_id !== 'erp-manual-svg-upload' ? 'SOURCE_NOT_MDF'
+      : !acceptedHeadValid ? 'SOURCE_UNACCEPTED'
+        : !sourceEligible ? 'SOURCE_CONTEXT_INVALID' : null;
+  return { requestedFileCount: Number.isSafeInteger(requestedFileCount) ? requestedFileCount : 0,
+    filesQualified, filesSnapshot, sourceEligible, sourceFence, ineligibleReason };
+}
+
+function parseSnapshotRows(value: unknown): unknown[][] {
+  let parsed = value;
+  if (typeof parsed === 'string') {
+    try { parsed = JSON.parse(parsed); } catch { return []; }
+  }
+  return Array.isArray(parsed) && parsed.every(Array.isArray) ? parsed as unknown[][] : [];
+}
+
+function parseSnapshotObjects(value: unknown): Record<string, unknown>[] {
+  let parsed = value;
+  if (typeof parsed === 'string') {
+    try { parsed = JSON.parse(parsed); } catch { return []; }
+  }
+  return Array.isArray(parsed) && parsed.every(item => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+    ? parsed as Record<string, unknown>[] : [];
+}
+
+function nullableSnapshotString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function hashJson(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+function isPositiveDecimal(value: string | null): boolean { return Boolean(value && /^[1-9]\d*$/.test(value)); }
+function isDecimal(value: string | null): boolean { return Boolean(value && /^(0|[1-9]\d*)$/.test(value)); }
 
 function parseManualSvgTelegramSendFiles(value: unknown): CncTelegramManualSvgTelegramSendClaimResponseDto['tasks'][number]['files'] {
   if (!Array.isArray(value)) return [];
@@ -1112,6 +1330,60 @@ function mapManualSvgTelegramSendResponse(
     sentMessageIds: stringArray(row.sent_message_ids_json),
     error: row.last_error,
   };
+}
+
+async function readManualSvgObservationClaimSnapshot(
+  tx: TransactionClient,
+  requestId: string,
+  leaseGeneration: number,
+): Promise<ManualSvgObservationClaimSnapshotRow | null> {
+  return (await tx.query<ManualSvgObservationClaimSnapshotRow>(`SELECT send_request_id::text send_request_id,
+    lease_generation::text lease_generation,worker_instance_id::text worker_instance_id,
+    session_generation::text session_generation,lease_token_hash,packet_id::text packet_id,
+    destination_chat_id,requested_file_count,files_qualified,files_snapshot,source_eligible,source_fence,ineligible_reason
+    FROM cnc_manual_svg_observation_claim_snapshots WHERE send_request_id=$1::uuid AND lease_generation=$2::bigint`,
+  [requestId,leaseGeneration])).rows[0] ?? null;
+}
+
+function manualSvgSendCompletionDigest(completion: CncTelegramManualSvgTelegramSendCompleteDto): string {
+  const sentFiles = completion.sentFiles?.map(file => ({ ...file,
+    sourceSha256: file.sourceSha256.toLowerCase(),mediaSha256:file.mediaSha256.toLowerCase() })) ?? null;
+  return createHash('sha256').update(JSON.stringify({ sentChatId: completion.sentChatId,
+    sentMessageIds: completion.sentMessageIds,sentFiles,observationBindingError:completion.observationBindingError ?? null })).digest('hex');
+}
+
+function classifyManualSvgSentBindings(
+  snapshot: ManualSvgObservationClaimSnapshotRow,
+  completion: CncTelegramManualSvgTelegramSendCompleteDto,
+): { valid: boolean; reason: string | null; sentFiles: CncTelegramManualSvgTelegramSendCompleteDto['sentFiles'] } {
+  if (completion.observationBindingError) return { valid:false,reason:'MEDIA_VERIFICATION_FAILED',sentFiles:undefined };
+  if (!completion.sentFiles) return { valid:false,reason:'SENT_BINDING_MISSING',sentFiles:undefined };
+  if (snapshot.destination_chat_id !== completion.sentChatId) return { valid:false,reason:'SENT_BINDING_INVALID',sentFiles:undefined };
+  const files = parseSnapshotObjects(snapshot.files_snapshot);
+  const expected: Array<{fileId:string;kind:string;sha256:string;sendOrder:number}> = [];
+  for (const item of files) {
+    const row=item;
+    if (typeof row.fileId==='string' && typeof row.kind==='string' && typeof row.sha256==='string'
+      && Number.isSafeInteger(Number(row.sendOrder))) expected.push({fileId:row.fileId,kind:row.kind,
+        sha256:row.sha256.toLowerCase(),sendOrder:Number(row.sendOrder)});
+  }
+  if (!snapshot.files_qualified || expected.length !== Number(snapshot.requested_file_count)
+    || completion.sentFiles.length !== expected.length || !expected.some(file=>file.kind==='svg')) {
+    return { valid:false,reason:'FILES_INCOMPLETE',sentFiles:undefined };
+  }
+  const sentById=new Map(completion.sentFiles.map(file=>[file.fileId,file]));
+  if (sentById.size!==expected.length || expected.some(file=>!sentById.has(file.fileId))) {
+    return { valid:false,reason:'SENT_BINDING_INVALID',sentFiles:undefined };
+  }
+  for (const file of expected) {
+    const sent=sentById.get(file.fileId)!;
+    if (sent.sourceSha256.toLowerCase()!==file.sha256 || !completion.sentMessageIds.includes(sent.messageId)
+      || (file.kind!=='screenshot' && sent.mediaSha256.toLowerCase()!==file.sha256)) {
+      return { valid:false,reason:'SENT_BINDING_INVALID',sentFiles:undefined };
+    }
+  }
+  const sorted=expected.sort((a,b)=>a.sendOrder-b.sendOrder).map(file=>sentById.get(file.fileId)!);
+  return { valid:true,reason:null,sentFiles:sorted };
 }
 
 function mapRestoreResponse(row: RestoreRow): CncTelegramMediaRestoreResponseDto {

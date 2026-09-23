@@ -150,7 +150,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       'a11437465812fd395e0de3193864263d', 'aafc76b66f97eccf6e9769810c00a936',
       '6a9edc964e9da23dd9ca659d7a27297c', '8e5c2533815f1dd0184e7851c9e60b94',
       '7cdb1d017c3efa3cb34ea09c72bf89d0',
-      "q_fun_hash 'public.mdf_guard_cnc_observation_target()' 518942b013d23e6160eb47e06237a0d2",
+      'q_colset_fun_hash_pair', '518942b013d23e6160eb47e06237a0d2', 'd241972faa5d662ff436a873690ff619',
       "q_fun_hash 'public.mdf_reject_evidence_change()' a51e1b51d407124a856f1993d9c54fe8",
       'mdf_guard_cnc_observation_target', 'mdf_reject_evidence_change()',
       'mdf_cnc_observation_target_guard', 'mdf_cnc_observation_receipt_immutable',
@@ -159,6 +159,44 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     ]) expect(arm).toContain(marker);
     const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
     expect(verification).toMatch(/180_mdf_cnc_observations\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
+  it('keeps migration180 compatible with only the exact migration181 target successor', () => {
+    const start = probeFn.indexOf('180_mdf_cnc_observations*)');
+    const end = probeFn.indexOf('181_cnc_manual_send_observation*)', start);
+    const arm = probeFn.slice(start, end);
+    expect(arm).toContain('48bbfe7c44d81a3641ca98da18e89227');
+    expect(arm).toContain('d241972faa5d662ff436a873690ff619');
+    expect(arm).toContain('518942b013d23e6160eb47e06237a0d2');
+    expect(arm).toContain('mdf_cnc_observation_targets');
+  });
+
+  it('probes immutable manual-send observation snapshots and verifies migration181 before ledgering it', () => {
+    const start = probeFn.indexOf('181_cnc_manual_send_observation*)');
+    const end = probeFn.indexOf('*) return 2', start);
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, end);
+    for (const marker of [
+      'cnc_manual_svg_observation_claim_snapshots', 'cnc_manual_svg_observation_send_bindings',
+      'cnc_manual_svg_observation_registration_work', 'mdf_cnc_observation_targets',
+      'files_snapshot', 'source_fence', 'sent_files', 'completion_digest', 'next_attempt_at',
+      'eca628417e7d71f4f05e9bd1d1e3729c', '0ea7fefef06e9a2981bb9e939b2181ce',
+      'f473e0973769cfbcb60aa715664b5d30', '48bbfe7c44d81a3641ca98da18e89227',
+      'cb172fa1f14d23161886f580e7b8be3e', '3b2f3cf98c8132022bd8cfe45f620967',
+      '7f7dba43c6b43af86ce34657040e7770', '02fad0863784f5bf8c13310d873be105',
+      'c246869b70663118d9fce67e3a34acf6', '73f6d4083eec681244cc51c8a5b6e39d',
+      '3f83026700f84394068c1c6b624b0cd5', 'ac9e56036817b6c6baeb29ac2112d261',
+      'mdf_guard_cnc_manual_svg_observation_append_only()', 'mdf_guard_cnc_manual_svg_observation_work()',
+      'mdf_guard_cnc_observation_target()', 'cnc_manual_svg_observation_claim_immutable',
+      'cnc_manual_svg_observation_binding_immutable', 'cnc_manual_svg_observation_work_guard',
+      'b2f7ad914fece1fa6e50a291108a884f', '6fb75265fe9bab58adda8bb558593ff7',
+      'd241972faa5d662ff436a873690ff619',
+      'uq_mdf_cnc_observation_manual_send', 'chk_mdf_cnc_observation_target_registration_kind',
+      't.tgenabled=\'O\'', 'NOT convalidated', 'NOT indisvalid OR NOT indisready',
+      'mdf_recalculation_jobs', 'confrelid',
+    ]) expect(arm).toContain(marker);
+    const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verification).toMatch(/181_cnc_manual_send_observation\*\)\s+probe_file "\$f" \|\| die/);
   });
 
   it('verifies migrations 164-169 before recording their ledger entries', () => {
@@ -234,7 +272,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText).not.toMatch(/q_fun_hash\(\).*md5\(prosrc\)/);
     expect(probeFn).toContain("q_fun_hash 'cnc_telegram_worker_reason_code_valid(text)'");
     expect(probeFn.match(/q_fun_hash '[^']+' [a-f0-9]{32}/g)).toHaveLength(
-      requiredFunctions.length + 2 + 9 + 1 + 1 + 7 + 2, // 164-169,174/175,177-180 guard functions
+      requiredFunctions.length + 2 + 9 + 1 + 1 + 7 + 4, // 164-169,174/175,177-181 guard functions
     );
   });
 

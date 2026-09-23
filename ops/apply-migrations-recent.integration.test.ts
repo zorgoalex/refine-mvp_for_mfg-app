@@ -14,7 +14,8 @@ const source = readFileSync(script, 'utf8');
 const dir = resolve(__dirname, '../backend/db/migrations');
 const files = readdirSync(dir).filter((f) => /^16[4-9]_.*\.sql$/.test(f)
   || ['174_mdf_execution_context.sql','175_mdf_command_placement.sql','177_cut_result_typed_hdf.sql',
-    '178_mdf_correction_receipts.sql','179_mdf_active_return.sql','180_mdf_cnc_observations.sql'].includes(f)).sort();
+    '178_mdf_correction_receipts.sql','179_mdf_active_return.sql','180_mdf_cnc_observations.sql',
+    '181_cnc_manual_send_observation.sql'].includes(f)).sort();
 const helpers = source.slice(source.indexOf('q_col()'), source.indexOf('# These migrations contain conditional'));
 const queries = (file: string) => execFileSync('bash', ['-s', '--', file], {
   input: `${helpers}\nprobe_all() { printf '%s\\n' "$@"; }\nprobe_file "$1"`, encoding: 'utf8',
@@ -32,7 +33,7 @@ const present = (file: string, mutation = '') => {
 };
 const fileFor = (version: number) => files.find((f) => f.startsWith(`${version}_`))!;
 
-describe.skipIf(!enabled)('migration 164-169, 174-175 and 177-180 probes against actual SQL on PostgreSQL', () => {
+describe.skipIf(!enabled)('migration 164-169, 174-175 and 177-181 probes against actual SQL on PostgreSQL', () => {
   let created = false;
   beforeAll(() => {
     sql(`CREATE DATABASE ${db} TEMPLATE template0;`, 'postgres');
@@ -45,6 +46,9 @@ describe.skipIf(!enabled)('migration 164-169, 174-175 and 177-180 probes against
       CREATE TABLE cnc_telegram_packets(packet_id uuid PRIMARY KEY);
       CREATE TABLE cnc_telegram_import_candidates(candidate_id uuid PRIMARY KEY);
       CREATE TABLE cnc_telegram_import_items(import_item_id uuid PRIMARY KEY);
+      CREATE TABLE cnc_manual_svg_telegram_send_requests(request_id uuid PRIMARY KEY);
+      CREATE TABLE cnc_manual_svg_telegram_send_request_files(request_id uuid NOT NULL,file_id uuid NOT NULL,send_order integer NOT NULL,PRIMARY KEY(request_id,file_id));
+      CREATE TABLE cnc_manual_svg_upload_files(file_id uuid PRIMARY KEY);
       CREATE TABLE users(user_id bigint PRIMARY KEY);
       CREATE TABLE order_statuses(order_status_id smallint PRIMARY KEY);
       CREATE TABLE bitrix24_app_installation(member_id text PRIMARY KEY);
@@ -56,13 +60,29 @@ describe.skipIf(!enabled)('migration 164-169, 174-175 and 177-180 probes against
     for(const f of ['079_cut_result_history_expand.sql','080_cut_result_history_finalize.sql','081_label_cut_maps.sql',
       '085_cut_result_manual_revisions.sql','121_cut_result_informational_snapshots.sql','122_cut_result_informational_label_maps.sql',
       '153_svg_partial_label_maps.sql','154_svg_source_instance_sequences.sql']) sql(readFileSync(resolve(dir,f),'utf8'));
-    for (const f of files) sql(readFileSync(resolve(dir, f), 'utf8'));
+    for (const f of files) {
+      if (f === '181_cnc_manual_send_observation.sql') {
+        // Migration 181 extends (rather than invalidates) the 180 CNC probe.
+        // Assert that the actual 180 end-state remains recognized before applying
+        // the successor, then the ordinary per-file tests cover it afterwards.
+        const before181 = sql(queries('180_mdf_cnc_observations.sql'));
+        expect(before181.trim().split('\n').every((value) => value === 't')).toBe(true);
+      }
+      sql(readFileSync(resolve(dir, f), 'utf8'));
+    }
   }, 60000);
   afterAll(() => {
     if (created) sql(`DROP DATABASE ${db};`, 'postgres');
   });
 
-  it.each(files)('%s: complete effect is PRESENT', (f) => expect(present(f)).toBe(true));
+  it.each(files)('%s: complete effect is PRESENT', (f) => {
+    const probeSql = queries(f).trim().split('\n');
+    const out = sql(`BEGIN; SET LOCAL statement_timeout='10s'; SET LOCAL lock_timeout='1s'; ${probeSql.join(';\n')}; ROLLBACK;`);
+    const values = out.trim().split('\n');
+    const falseChecks = values.flatMap((value, index) => value === 't' ? [] : [`${index + 1}: ${probeSql[index]}`]);
+    const indexFacts = f.startsWith('181_') && falseChecks.length ? sql(`SELECT tablename||' '||md5(string_agg(indexname||'|'||indexdef, ', ' ORDER BY indexname))||E'\\n'||string_agg(indexname||'|'||indexdef,E'\\n' ORDER BY indexname) FROM pg_indexes WHERE schemaname='public' AND tablename IN ('cnc_manual_svg_observation_claim_snapshots','cnc_manual_svg_observation_send_bindings','cnc_manual_svg_observation_registration_work','mdf_cnc_observation_targets') GROUP BY tablename ORDER BY tablename;`) : '';
+    expect(falseChecks, `failed end-state checks for ${f}${indexFacts ? `\nactual index facts:\n${indexFacts}` : ''}`).toEqual([]);
+  });
 
   it.each(files)('%s: real runner probe uses the same read-only checks', (f) => {
     const out = execFileSync('bash', [script, 'probe', f, '--container', container, '--db', db],
@@ -139,9 +159,26 @@ describe.skipIf(!enabled)('migration 164-169, 174-175 and 177-180 probes against
     [180, 'ALTER TABLE mdf_cnc_observation_job_authorities DISABLE TRIGGER mdf_cnc_observation_job_authority_immutable;'],
     [180, 'DROP INDEX idx_mdf_cnc_observation_due;'],
     [180, 'CREATE OR REPLACE FUNCTION mdf_guard_cnc_observation_target() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;'],
+    [181, 'ALTER TABLE cnc_manual_svg_observation_claim_snapshots ALTER COLUMN files_qualified DROP NOT NULL;'],
+    [181, 'ALTER TABLE cnc_manual_svg_observation_send_bindings DROP CONSTRAINT chk_cnc_manual_svg_observation_binding_choice; ALTER TABLE cnc_manual_svg_observation_send_bindings ADD CONSTRAINT chk_cnc_manual_svg_observation_binding_choice CHECK(true);'],
+    [181, 'ALTER TABLE cnc_manual_svg_observation_registration_work DISABLE TRIGGER cnc_manual_svg_observation_work_guard;'],
+    [181, 'CREATE OR REPLACE FUNCTION mdf_guard_cnc_manual_svg_observation_append_only() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;'],
+    [181, 'CREATE OR REPLACE FUNCTION mdf_guard_cnc_manual_svg_observation_work() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;'],
+    [181, 'CREATE OR REPLACE FUNCTION mdf_guard_cnc_observation_target() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;'],
+    [181, 'DROP INDEX idx_cnc_manual_svg_observation_registration_due;'],
+    [181, 'DROP INDEX uq_mdf_cnc_observation_manual_send;'],
+    [181, 'ALTER TABLE mdf_cnc_observation_targets DISABLE TRIGGER mdf_cnc_observation_target_guard;'],
+    [181, 'ALTER TABLE mdf_cnc_observation_targets DROP CONSTRAINT chk_mdf_cnc_observation_target_registration_kind; ALTER TABLE mdf_cnc_observation_targets ADD CONSTRAINT chk_mdf_cnc_observation_target_registration_kind CHECK(true);'],
+    [181, 'ALTER TABLE cnc_manual_svg_observation_registration_work ADD CONSTRAINT e2e_job_fk FOREIGN KEY(send_request_id) REFERENCES mdf_recalculation_jobs(job_id);'],
   ] as const)('%s: rejects drift %s', (version, mutation) => {
     expect(present(fileFor(version), mutation)).toBe(false);
     expect(present(fileFor(version))).toBe(true); // rollback restored fixture
+  });
+
+  it('migration 180 remains PRESENT after 181 but rejects corruption of its 181 successor guard', () => {
+    expect(present(fileFor(180))).toBe(true);
+    expect(present(fileFor(180), 'ALTER TABLE mdf_cnc_observation_targets DISABLE TRIGGER mdf_cnc_observation_target_guard;')).toBe(false);
+    expect(present(fileFor(180))).toBe(true); // rollback restored fixture
   });
 
   it('does not confuse legitimate runtime settings with a missing migration', () => {

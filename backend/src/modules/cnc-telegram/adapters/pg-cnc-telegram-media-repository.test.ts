@@ -192,11 +192,16 @@ describe('PgCncTelegramMediaRepository', () => {
             packet_id: packetId(),
             destination_chat_id: '-100',
             packet_source_chat_id: 'erp-manual-svg-upload',
+            packet_source_version: '1', received_revision_key: 'r1', accepted_revision_key: 'r1',
+            source_head_version: '1', source_correction_epoch: '0',
+            source_context_sealed: true, source_composition_complete: true,
+            requested_file_count: 1,
+            membership_json: [['line-1','1','2','1',false]], demand_json: [['1','2','1']],
             cut_job_id: 212,
             cut_job_display_number: '67',
             message_text: 'Фрезы для ХДФ: 8',
             attempt_count: 1,
-            files_json: [manualSvgClaimFile()],
+            files_json: [{ ...manualSvgClaimFile(), sendOrder: 1 }],
             lease_token: 'item-token', lease_generation: 1,
             lease_worker_instance_id: sessionLease.workerInstanceId,
           }] };
@@ -219,7 +224,7 @@ describe('PgCncTelegramMediaRepository', () => {
       cutJobId: 212,
       cutJobDisplayNumber: '67',
       messageText: 'Фрезы для ХДФ: 8',
-      attempt: 1,
+      attempt: 1, observationBindingVersion: 1,
       files: [manualSvgClaimFile()], itemLeaseToken: 'item-token', itemLeaseGeneration: 1,
       itemLeaseOwner: sessionLease.workerInstanceId,
     }]);
@@ -244,7 +249,7 @@ describe('PgCncTelegramMediaRepository', () => {
     expect(claimQuery?.text).toContain("NULLIF(trim(svg_job.source_display_number::text), '') IS NOT NULL");
     expect(claimQuery?.text).toContain("':mdf-card-created'");
     expect(claimQuery?.text).toContain('FOR UPDATE OF request SKIP LOCKED');
-    expect(claimQuery?.text).toContain("encode(file.content_bytes, 'base64')");
+    expect(claimQuery?.text).toContain("encode(file.content_bytes,'base64')");
     expect(staleQuery?.params).toEqual(['-100']);
     expect(staleQuery?.text).toContain('request.destination_chat_id=$1');
     expect(reconcileQuery?.params).toEqual(['-100']);
@@ -421,6 +426,7 @@ function manualSendState(overrides: Record<string, unknown> = {}) {
   return {
     request_id: manualSvgSendRequestId(),
     packet_id: packetId(),
+    destination_chat_id: '-100',
     status: 'processing',
     requested_at: '2026-08-18T10:00:00.000Z',
     finished_at: '2026-08-18T10:01:00.000Z',

@@ -13,13 +13,17 @@ import { PgCutRepository } from '../../cut/adapters/pg-cut-repository';
 import { PgBazisCutRepository } from '../../bazis-cut/adapters/pg-bazis-cut-repository';
 import { PgCncTelegramRepository } from '../../cnc-telegram/adapters/pg-cnc-telegram-repository';
 import { PgCncTelegramImportRepository } from '../../cnc-telegram/adapters/pg-cnc-telegram-import-repository';
+import { PgCncTelegramMediaRepository } from '../../cnc-telegram/adapters/pg-cnc-telegram-media-repository';
 import { PgCncTelegramMdfObservationRepository } from '../../cnc-telegram/adapters/pg-cnc-telegram-mdf-observation-repository';
+import { PgCncManualSendObservationRegistration } from '../../cnc-telegram/adapters/pg-cnc-manual-send-observation-registration';
 import type { ManualSvgUploadCommand } from '../../cnc-telegram/application/cnc-telegram.types';
 import { PgMdfBoardManualMoveRepository } from '../../orders/adapters/pg-mdf-board-manual-move-repository';
 import { StaticCutConfig } from '../../cut/application/cut-config';
 import type { OptimizeRequest, FreecutOptimizeResponse } from '../../cut/application/cut-freecut-mapping';
 import { MdfJobRunner } from '../application/mdf-job-runner';
 import { executeMdfAcceptedJob } from '../application/mdf-accepted-job';
+import { recordMdfReceipt } from '../application/mdf-receipt';
+import type { MdfExecutionContext } from '../domain/mdf-execution-context';
 import { readMdfPublishedSnapshot } from './mdf-published-snapshot';
 
 describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calculation → MDF receipt → queue → publication', () => {
@@ -45,6 +49,18 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
       })) }] };
   } };
   const runner = () => new MdfJobRunner(database,executeMdfAcceptedJob);
+  const databaseWithQueryHook=(hook:(sql:string)=>Promise<void>|void)=>({
+    transaction:(work:any,options:any)=>database.transaction(async tx=>{
+      const original=tx.query.bind(tx);
+      tx.query=async(...args:any[])=>{
+        const sql=typeof args[0]==='string'?args[0]:String(args[0]?.text??'');
+        await hook(sql);
+        return original(args[0],args[1],args[2]);
+      };
+      try { return await work(tx); }
+      finally { tx.query=original; }
+    },options),
+  }) as any;
   beforeAll(async () => {
     vi.stubEnv('BACKEND_STATUS_AUTOMATION','true'); vi.stubEnv('BACKEND_ENABLE_NOTIFICATION_ENGINE','false');
     vi.stubEnv('BACKEND_MDF_SHADOW_INTAKE','true'); vi.stubEnv('BACKEND_MDF_PINNED_DISPATCH','true');
@@ -93,6 +109,14 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
     await db.query('ALTER TABLE cnc_telegram_packets ADD PRIMARY KEY(packet_id)');
     await db.query(readFileSync(new URL('../../../../db/migrations/179_mdf_active_return.sql',import.meta.url),'utf8'));
     await db.query(readFileSync(new URL('../../../../db/migrations/180_mdf_cnc_observations.sql',import.meta.url),'utf8'));
+    await db.query(`ALTER TABLE cnc_manual_svg_telegram_send_requests ADD PRIMARY KEY(request_id);
+      CREATE UNIQUE INDEX e2e_manual_upload_kind ON cnc_manual_svg_upload_files(packet_id,file_kind);
+      CREATE UNIQUE INDEX e2e_manual_send_key ON cnc_manual_svg_telegram_send_requests(send_idempotency_key);
+      CREATE UNIQUE INDEX e2e_manual_send_active ON cnc_manual_svg_telegram_send_requests(packet_id)
+        WHERE status IN ('pending','processing');
+      ALTER TABLE cnc_manual_svg_telegram_send_request_files ADD PRIMARY KEY(request_id,file_id);
+      CREATE UNIQUE INDEX e2e_manual_send_order ON cnc_manual_svg_telegram_send_request_files(request_id,send_order)`);
+    await db.query(readFileSync(new URL('../../../../db/migrations/181_cnc_manual_send_observation.sql',import.meta.url),'utf8'));
     await db.query(`ALTER TABLE cut_group_sheet ADD FOREIGN KEY(cut_group_id) REFERENCES cut_group(cut_group_id) ON DELETE CASCADE`);
     for (const name of ['set_session_user','order_production_summary','recalc_order_production_status',
       'cut_result_snapshot_digest','cut_result_snapshot_is_complete','cut_result_snapshot_is_vacuum',
@@ -175,8 +199,47 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
       programName:`E2E-SVG-${orderId}.svg`,materialName:'МДФ 10 мм',workday:'2026-09-22',
       comments:[`E2E-SVG-${orderId} — весь заказ`],items:[item],cutLayout:{ status:'valid',reasons:[],
         sheet:{widthMm:2800,heightMm:2070},rawCommentCount:1,partContourCount:quantity,acceptedItemCount:quantity,
-        items:Array.from({length:quantity},(_,i)=>({...item,quantity:1,sourceElementId:`part-${i}`,
+      items:Array.from({length:quantity},(_,i)=>({...item,quantity:1,sourceElementId:`part-${i}`,
           xMm:10+i*150,yMm:10,placedWidthMm:100,placedHeightMm:200,rotated:false})) } } } };
+  }
+  async function manualSvgSendFixture(quantity=2) {
+    const f=await svgFixture(quantity),svg=Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg"><!-- e2e-${f.orderId} --></svg>`),
+      gcode=Buffer.from(`G0 X${f.orderId} Y0\n`),
+      image=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/aekAAAAASUVORK5CYII=','base64');
+    const file=(kind:'svg'|'gcode'|'screenshot',fileName:string,contentType:string,bytes:Buffer)=>({
+      kind,fileName,contentType,sizeBytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),
+      base64Content:bytes.toString('base64'),
+    });
+    f.command.dto.svgContentHash=createHash('sha256').update(svg).digest('hex');
+    f.command.dto.requestedCutJobId=30000+f.orderId;
+    f.command.dto.telegramSend={enabled:true,message:`E2E send ${f.orderId}`};
+    f.command.dto.sourceFiles=[file('svg',`E2E-${f.orderId}.svg`,'image/svg+xml',svg),
+      file('gcode',`E2E-${f.orderId}.nc`,'text/plain',gcode),file('screenshot',`E2E-${f.orderId}.png`,'image/png',image)];
+    f.command.telegramDestinationChatId=`-100${30000+f.orderId}`;
+    const worker=randomUUID(),leaseToken=`session-${randomUUID()}-${randomUUID()}`;
+    await db.query(`INSERT INTO cnc_telegram_worker_session_leases(source_chat_id,lease_token,lease_generation,
+      worker_instance_id,worker_image_revision,expires_at) VALUES($1,$2,1,$3,'abcdef1',now()+interval '1 hour')`,
+      [f.command.telegramDestinationChatId,leaseToken,worker]);
+    return {...f,worker,sessionLease:{sourceChatId:f.command.telegramDestinationChatId,leaseToken,leaseGeneration:1,workerInstanceId:worker}};
+  }
+  async function claimManualSvgSend() {
+    const f=await manualSvgSendFixture(),uploaded=await new PgCncTelegramRepository(database).manualSvgUpload(f.command);
+    if (!uploaded.telegramSendRequestId) throw new Error('E2E_MANUAL_SEND_REQUEST_MISSING');
+    expect(uploaded.telegramSendStatus).toBe('pending');
+    expect(await runner().processOne()).toMatchObject({status:'done'});
+    const media=new PgCncTelegramMediaRepository(database);
+    const [task]=await media.claimManualSvgTelegramSends({currentUser:user,limit:1,requestTraceId:'E2E manual send claim',sessionLease:f.sessionLease});
+    if (!task) throw new Error('E2E_MANUAL_SEND_TASK_MISSING');
+    return {f,uploaded,media,task};
+  }
+  function manualSendCompletion(task:any, mediaSha256?:(kind:string)=>string) {
+    const idsByKind:Record<string,string>={svg:'7002',gcode:'7001',screenshot:'7003'};
+    const sentFiles=[...task.files].reverse().map((file:any)=>({fileId:file.fileId,messageId:idsByKind[file.kind],
+        sourceSha256:file.sha256,mediaSha256:mediaSha256?.(file.kind)??file.sha256})),
+      sentMessageIds=[...new Set([...sentFiles.map((file:any)=>file.messageId),'7999'])].sort((a,b)=>Number(a)-Number(b));
+    return {sentChatId:task.destinationChatId,sentMessageIds,
+      sentFiles,
+      itemLeaseToken:task.itemLeaseToken,itemLeaseGeneration:task.itemLeaseGeneration,itemLeaseOwner:task.itemLeaseOwner};
   }
   it('actual SVG upload commits membership only; own-detail rules execute in the queue, not intake',async()=>{
     const f=await svgFixture();
@@ -198,6 +261,518 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
       expect((await db.query('SELECT credited_cut,credited_rolled,remaining FROM mdf_published_positions WHERE detail_id=$1',[f.detailId])).rows[0])
         .toEqual({credited_cut:'0',credited_rolled:'0',remaining:'2'});
     } finally { await db.query('DELETE FROM status_automation_rules WHERE id=19'); }
+  });
+  it('manual SVG send freezes exact requested files and settles explicit non-positional media bindings',async()=>{
+    const {f,uploaded,media,task}=await claimManualSvgSend();
+    expect(task).toMatchObject({requestId:uploaded.telegramSendRequestId,observationBindingVersion:1,
+      destinationChatId:f.command.telegramDestinationChatId,files:[
+        expect.objectContaining({kind:'svg'}),expect.objectContaining({kind:'gcode'}),expect.objectContaining({kind:'screenshot'}),
+      ]});
+    const expectedByKind=Object.fromEntries(task.files.map(file=>[file.kind,file]));
+    const completion=manualSendCompletion(task,kind=>kind==='screenshot'?'f'.repeat(64):
+      task.files.find(file=>file.kind===kind)!.sha256);
+    await media.completeManualSvgTelegramSend({requestId:task.requestId,currentUser:user,completion,
+      requestTraceId:'E2E manual send complete',sessionLease:f.sessionLease});
+    const saved=(await db.query(`SELECT s.files_qualified,s.source_eligible,s.files_snapshot,w.work_state,w.reason,
+      b.sent_chat_id,b.transport_message_ids,b.sent_files,b.binding_error
+      FROM cnc_manual_svg_observation_claim_snapshots s
+      JOIN cnc_manual_svg_observation_send_bindings b USING(send_request_id,lease_generation)
+      JOIN cnc_manual_svg_observation_registration_work w USING(send_request_id,lease_generation)
+      WHERE s.send_request_id=$1 AND s.lease_generation=$2`,[task.requestId,task.itemLeaseGeneration])).rows[0];
+    expect(saved).toMatchObject({files_qualified:true,source_eligible:true,work_state:'pending',reason:null,
+      sent_chat_id:f.command.telegramDestinationChatId,binding_error:null});
+    expect(saved.transport_message_ids).toEqual(completion.sentMessageIds);
+    expect(saved.files_snapshot).toHaveLength(3);
+    expect(saved.files_snapshot.map((file:any)=>file.kind)).toEqual(['svg','gcode','screenshot']);
+    expect(saved.files_snapshot.map((file:any)=>file.fileId)).toEqual(task.files.map(file=>file.fileId));
+    expect(saved.sent_files.map((file:any)=>file.fileId)).toEqual(task.files.map(file=>file.fileId));
+    expect(saved.sent_files.map((file:any)=>file.messageId)).toEqual(['7002','7001','7003']);
+    expect(saved.sent_files.find((file:any)=>file.fileId===expectedByKind.screenshot.fileId))
+      .toMatchObject({sourceSha256:expectedByKind.screenshot.sha256,mediaSha256:'f'.repeat(64)});
+    const completedAuditCount=Number((await db.query(`SELECT count(*)::text count FROM audit_log
+      WHERE event='cnc.manual_svg_upload.telegram_send_completed' AND entity_id=$1`,[task.requestId])).rows[0].count);
+    expect(completedAuditCount).toBe(1);
+    await expect(media.completeManualSvgTelegramSend({requestId:task.requestId,currentUser:user,completion,
+      requestTraceId:'E2E exact send replay',sessionLease:f.sessionLease})).resolves.toMatchObject({status:'sent'});
+    expect(Number((await db.query(`SELECT count(*)::text count FROM audit_log
+      WHERE event='cnc.manual_svg_upload.telegram_send_completed' AND entity_id=$1`,[task.requestId])).rows[0].count))
+      .toBe(completedAuditCount);
+    await expect(media.completeManualSvgTelegramSend({requestId:task.requestId,currentUser:user,
+      completion:{...completion,sentFiles:completion.sentFiles.map((file,index)=>index===0?{...file,sourceSha256:'a'.repeat(64)}:file)},
+      requestTraceId:'E2E conflicting send replay',sessionLease:f.sessionLease}))
+      .rejects.toMatchObject({code:'CNC_TELEGRAM_SEND_COMPLETION_CONFLICT'});
+
+    // The upload row is mutable/reusable; neither frozen claim data nor actual
+    // transport bindings may be reconstructed from this later state.
+    const overwritten=await db.query(`UPDATE cnc_manual_svg_upload_files SET content_sha256=$2,size_bytes=1,content_bytes=decode($3,'hex')
+      WHERE packet_id=$1`,[uploaded.packet.packetId,'e'.repeat(64),'00']);
+    expect(overwritten.rowCount).toBe(3);
+    expect((await db.query('SELECT count(*)::int count FROM cnc_manual_svg_upload_files WHERE packet_id=$1 AND content_sha256=$2',
+      [uploaded.packet.packetId,'e'.repeat(64)])).rows[0].count).toBe(3);
+    const afterOverwrite=(await db.query(`SELECT s.files_snapshot,b.sent_files
+      FROM cnc_manual_svg_observation_claim_snapshots s JOIN cnc_manual_svg_observation_send_bindings b
+      USING(send_request_id,lease_generation) WHERE s.send_request_id=$1 AND s.lease_generation=$2`,
+      [task.requestId,task.itemLeaseGeneration])).rows[0];
+    expect(afterOverwrite.files_snapshot).toEqual(saved.files_snapshot);
+    expect(afterOverwrite.sent_files).toEqual(saved.sent_files);
+  });
+  it('registers a durable settled snapshot after worker restart before the independent CNC observation claim',async()=>{
+    const {f,uploaded,media,task}=await claimManualSvgSend();
+    const completion=manualSendCompletion(task,kind=>kind==='screenshot'?'f'.repeat(64):
+      task.files.find(file=>file.kind===kind)!.sha256);
+    await media.completeManualSvgTelegramSend({requestId:task.requestId,currentUser:user,completion,
+      requestTraceId:'E2E manual send before observer',sessionLease:f.sessionLease});
+    expect((await db.query(`SELECT count(*)::int count FROM mdf_cnc_observation_targets WHERE packet_id=$1`,
+      [uploaded.packet.packetId])).rows[0].count).toBe(0);
+
+    const newWorker=randomUUID(),newToken=`session-${randomUUID()}-${randomUUID()}`;
+    await db.query(`UPDATE cnc_telegram_worker_session_leases SET lease_token=$2,lease_generation=2,
+      worker_instance_id=$3,claimed_at=now(),heartbeat_at=now(),expires_at=now()+interval '1 hour'
+      WHERE source_chat_id=$1`,[f.sessionLease.sourceChatId,newToken,newWorker]);
+    const activeLease={...f.sessionLease,leaseToken:newToken,leaseGeneration:2,workerInstanceId:newWorker};
+    const observations=new PgCncTelegramMdfObservationRepository(database);
+    const claim=await observations.claim({currentUser:user,lease:activeLease});
+    expect(claim?.packetId).toBe(uploaded.packet.packetId);
+    const registered=(await db.query(`SELECT t.registration_kind,t.manual_send_request_id::text,
+      t.source_chat_id,t.source_group_message_id::text,t.message_bindings,w.work_state,w.reason
+      FROM mdf_cnc_observation_targets t JOIN cnc_manual_svg_observation_registration_work w
+        ON w.send_request_id=t.manual_send_request_id
+      WHERE t.packet_id=$1`,[uploaded.packet.packetId])).rows[0];
+    expect(registered).toMatchObject({registration_kind:'manual_send',manual_send_request_id:task.requestId,
+      source_chat_id:f.command.telegramDestinationChatId,source_group_message_id:'7002',work_state:'registered',reason:null});
+    expect(registered.message_bindings).toEqual([
+      expect.objectContaining({messageId:'7002',role:'svg',sha256:task.files.find(file=>file.kind==='svg')!.sha256}),
+      expect.objectContaining({messageId:'7001',role:'gcode',sha256:task.files.find(file=>file.kind==='gcode')!.sha256}),
+      expect.objectContaining({messageId:'7003',role:'image',sha256:'f'.repeat(64)}),
+    ]);
+    expect(claim?.messages).toEqual([
+      {messageId:7001,role:'gcode',sha256:task.files.find(file=>file.kind==='gcode')!.sha256},
+      {messageId:7002,role:'svg',sha256:task.files.find(file=>file.kind==='svg')!.sha256},
+      {messageId:7003,role:'image',sha256:'f'.repeat(64)},
+    ]);
+    const result=await observations.complete({currentUser:user,lease:activeLease,requestId:'E2E bound manual observer',report:{
+      claimId:claim!.claimId,claimToken:claim!.claimToken,claimGeneration:claim!.claimGeneration,
+      messages:claim!.messages.map(message=>({messageId:message.messageId,chatId:claim!.sourceChatId,
+        role:message.role,sha256:message.sha256,present:true,thumbsUp:true})),
+    }});
+    expect(result).toMatchObject({status:'recorded',jobId:expect.any(String)});
+    expect(await runner().processOne()).toMatchObject({status:'done',jobId:result.jobId});
+    expect((await db.query(`SELECT stage_code,evidence_kind,sum(quantity)::text quantity FROM mdf_evidence_lines
+      WHERE source_kind='packet' AND source_id=$1 AND revision_key=(SELECT accepted_revision_key FROM mdf_source_heads
+        WHERE source_kind='packet' AND source_id=$1) AND stage_code='cut' AND evidence_kind='physical'
+      GROUP BY stage_code,evidence_kind`,[uploaded.packet.packetId])).rows)
+      .toEqual([{stage_code:'cut',evidence_kind:'physical',quantity:'2'}]);
+  });
+  it.each(['registration_audit','registration_outbox'] as const)(
+    'rolls manual-send registration back after %s failure and retries from bounded durable work',async failurePoint=>{
+      const {f,uploaded,media,task}=await claimManualSvgSend(),completion=manualSendCompletion(task);
+      await media.completeManualSvgTelegramSend({requestId:task.requestId,currentUser:user,completion,
+        requestTraceId:`E2E ${failurePoint} send`,sessionLease:f.sessionLease});
+      if(failurePoint==='registration_audit') {
+        await db.query(`CREATE FUNCTION e2e_fail_manual_send_registration_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN IF NEW.event='cnc.mdf_observation.manual_send_registered' AND NEW.entity_id='${uploaded.packet.packetId}' THEN
+            RAISE EXCEPTION 'E2E_REGISTRATION_AUDIT_FAILURE' USING ERRCODE='P0001'; END IF; RETURN NEW; END $$;
+          CREATE TRIGGER e2e_fail_manual_send_registration_audit BEFORE INSERT ON audit_log
+            FOR EACH ROW EXECUTE FUNCTION e2e_fail_manual_send_registration_audit()`);
+      } else {
+        await db.query(`CREATE FUNCTION e2e_fail_manual_send_registration_outbox() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN IF NEW.event_type='cnc.mdf_observation.manual_send_registered' AND NEW.aggregate_id='${uploaded.packet.packetId}' THEN
+            RAISE EXCEPTION 'E2E_REGISTRATION_OUTBOX_FAILURE' USING ERRCODE='P0001'; END IF; RETURN NEW; END $$;
+          CREATE TRIGGER e2e_fail_manual_send_registration_outbox BEFORE INSERT ON outbox_events
+            FOR EACH ROW EXECUTE FUNCTION e2e_fail_manual_send_registration_outbox()`);
+      }
+      try {
+        const observations=new PgCncTelegramMdfObservationRepository(database);
+        expect(await observations.claim({currentUser:user,lease:f.sessionLease})).toBeNull();
+        expect((await db.query(`SELECT count(*)::int count FROM mdf_cnc_observation_targets WHERE packet_id=$1`,
+          [uploaded.packet.packetId])).rows[0].count).toBe(0);
+        const work=(await db.query(`SELECT work_state,reason,attempt_count,next_attempt_at>now() backoff
+          FROM cnc_manual_svg_observation_registration_work WHERE send_request_id=$1`,[task.requestId])).rows[0];
+        expect(work).toMatchObject({work_state:'pending',reason:null,attempt_count:1,backoff:true});
+        expect((await db.query(`SELECT count(*)::int count FROM audit_log
+          WHERE event='cnc.mdf_observation.manual_send_registered' AND entity_id=$1`,[uploaded.packet.packetId])).rows[0].count).toBe(0);
+        expect((await db.query(`SELECT count(*)::int count FROM outbox_events
+          WHERE event_type='cnc.mdf_observation.manual_send_registered' AND aggregate_id=$1`,[uploaded.packet.packetId])).rows[0].count).toBe(0);
+        expect((await db.query(`SELECT status FROM cnc_manual_svg_telegram_send_requests WHERE request_id=$1`,
+          [task.requestId])).rows[0].status).toBe('sent');
+        expect((await db.query(`SELECT count(*)::int count FROM cnc_manual_svg_observation_send_bindings
+          WHERE send_request_id=$1 AND lease_generation=$2`,[task.requestId,task.itemLeaseGeneration])).rows[0].count).toBe(1);
+      } finally {
+        const suffix=failurePoint==='registration_audit'?'audit':'outbox';
+        await db.query(`DROP TRIGGER IF EXISTS e2e_fail_manual_send_registration_${suffix} ON ${failurePoint==='registration_audit'?'audit_log':'outbox_events'};
+          DROP FUNCTION IF EXISTS e2e_fail_manual_send_registration_${suffix}()`);
+      }
+      await db.query(`UPDATE cnc_manual_svg_observation_registration_work SET next_attempt_at=now()
+        WHERE send_request_id=$1 AND work_state='pending'`,[task.requestId]);
+      const observations=new PgCncTelegramMdfObservationRepository(database);
+      const claim=await observations.claim({currentUser:user,lease:f.sessionLease});
+      expect(claim?.packetId).toBe(uploaded.packet.packetId);
+      expect((await db.query(`SELECT work_state,reason,attempt_count FROM cnc_manual_svg_observation_registration_work
+        WHERE send_request_id=$1`,[task.requestId])).rows[0]).toEqual({work_state:'registered',reason:null,attempt_count:2});
+      expect((await db.query(`SELECT source_group_message_id::text message_id FROM mdf_cnc_observation_targets WHERE packet_id=$1`,
+        [uploaded.packet.packetId])).rows[0].message_id).toBe('7002');
+    });
+  it('does not rebind a packet that already has an observation target',async()=>{
+    const {f,uploaded,media,task}=await claimManualSvgSend(),completion=manualSendCompletion(task);
+    await media.completeManualSvgTelegramSend({requestId:task.requestId,currentUser:user,completion,
+      requestTraceId:'E2E preexisting target send',sessionLease:f.sessionLease});
+    const fence=(await db.query(`SELECT source_fence FROM cnc_manual_svg_observation_claim_snapshots
+      WHERE send_request_id=$1 AND lease_generation=$2`,[task.requestId,task.itemLeaseGeneration])).rows[0].source_fence;
+    await db.query(`INSERT INTO mdf_cnc_observation_targets(packet_id,source_chat_id,source_group_message_id,
+      message_bindings,registered_revision_key,registered_membership_digest,accepted_revision_key,
+      last_observation_version,registration_kind,manual_send_request_id)
+      VALUES($1,$2,8999,$3::jsonb,$4,$5,$4,$6,'manual_send',$7)`,[uploaded.packet.packetId,
+      f.command.telegramDestinationChatId,JSON.stringify([{messageId:'8999',role:'svg',sha256:'a'.repeat(64)}]),
+      fence.acceptedRevisionKey,fence.membershipDigest,fence.packetSourceVersion,task.requestId]);
+    const result=await new PgCncManualSendObservationRegistration(database).registerOne({currentUser:user,
+      requestTraceId:'E2E existing target registration',sessionLease:f.sessionLease});
+    expect(result).toMatchObject({status:'parked',packetId:uploaded.packet.packetId,reason:'TARGET_ALREADY_BOUND'});
+    expect((await db.query(`SELECT source_group_message_id::text,message_bindings FROM mdf_cnc_observation_targets
+      WHERE packet_id=$1`,[uploaded.packet.packetId])).rows[0]).toEqual({source_group_message_id:'8999',
+        message_bindings:[{messageId:'8999',role:'svg',sha256:'a'.repeat(64)}]});
+    expect((await db.query(`SELECT work_state,reason FROM cnc_manual_svg_observation_registration_work WHERE send_request_id=$1`,
+      [task.requestId])).rows[0]).toEqual({work_state:'ineligible',reason:'TARGET_ALREADY_BOUND'});
+  });
+  it('parks a settled binding as SOURCE_STALE when an accepted correction advances the source epoch',async()=>{
+    const {f,uploaded,media,task}=await claimManualSvgSend();
+    await media.completeManualSvgTelegramSend({requestId:task.requestId,currentUser:user,completion:manualSendCompletion(task),
+      requestTraceId:'E2E stale correction send',sessionLease:f.sessionLease});
+    const packetId=uploaded.packet.packetId;
+    const frozen=(await db.query<{source_fence:any}>(`SELECT source_fence FROM cnc_manual_svg_observation_claim_snapshots
+      WHERE send_request_id=$1 AND lease_generation=$2`,[task.requestId,task.itemLeaseGeneration])).rows[0].source_fence;
+    const head=(await db.query<{accepted_revision_key:string;received_revision_key:string;version:string;correction_epoch:string}>(`
+      SELECT accepted_revision_key,received_revision_key,version::text,correction_epoch::text
+      FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`,[packetId])).rows[0];
+    expect(frozen).toMatchObject({acceptedRevisionKey:head.accepted_revision_key,receivedRevisionKey:head.received_revision_key,
+      headVersion:head.version,correctionEpoch:head.correction_epoch});
+    const storedContext=(await db.query<{source_created_at:string;display_name:string;prior_column:string|null;composition_complete:boolean}>(`
+      SELECT source_created_at::text,display_name,prior_column,composition_complete FROM mdf_revision_context
+      WHERE source_kind='packet' AND source_id=$1 AND revision_key=$2`,[packetId,head.accepted_revision_key])).rows[0];
+    const demand=(await db.query<{orderId:number;detailId:number;quantity:number}>(`SELECT order_id::int "orderId",
+      detail_id::int "detailId",quantity::int quantity FROM mdf_revision_demand
+      WHERE source_kind='packet' AND source_id=$1 AND revision_key=$2 ORDER BY order_id,detail_id`,
+    [packetId,head.accepted_revision_key])).rows;
+    const lines=(await db.query<{lineKey:string;orderId:number;detailId:number;quantity:number;stageCode:string;
+      evidenceKind:'physical'|'declaration'|'derived';rework:boolean}>(`SELECT line_key "lineKey",order_id::int "orderId",
+      detail_id::int "detailId",quantity::int quantity,stage_code "stageCode",evidence_kind "evidenceKind",rework
+      FROM mdf_evidence_lines WHERE source_kind='packet' AND source_id=$1 AND revision_key=$2 ORDER BY line_key`,
+    [packetId,head.accepted_revision_key])).rows;
+    const executionContext:MdfExecutionContext={sourceCreatedAt:storedContext.source_created_at,
+      displayName:storedContext.display_name,priorColumn:storedContext.prior_column as MdfExecutionContext['priorColumn'],
+      compositionComplete:storedContext.composition_complete,demand};
+    const receipt=await database.transaction(tx=>recordMdfReceipt(tx,{sourceKind:'packet',sourceId:packetId,
+      revisionKey:`E2E-correction-${randomUUID()}`,origin:'manual',actorUserId:Number(user.id),requestId:'E2E source epoch bump',
+      causeKey:`E2E source epoch bump:${task.requestId}`,expectedFence:{version:head.version,correctionEpoch:head.correction_epoch},
+      accept:true,correction:true,rules:[],executionContext,lines}),
+      {mdf:{writer:'test.cnc_manual_send_stale_fence',capability:'queued'}});
+    expect(receipt.accepted).toBe(true);
+    expect(receipt.correctionEpoch).toBe(String(BigInt(head.correction_epoch)+1n));
+    expect(receipt.version).toBe(String(BigInt(head.version)+1n));
+    try {
+      expect(await new PgCncTelegramMdfObservationRepository(database).claim({currentUser:user,lease:f.sessionLease})).toBeNull();
+      expect((await db.query(`SELECT work_state,reason FROM cnc_manual_svg_observation_registration_work
+        WHERE send_request_id=$1 AND lease_generation=$2`,[task.requestId,task.itemLeaseGeneration])).rows[0])
+        .toEqual({work_state:'needs_reconciliation',reason:'SOURCE_STALE'});
+      expect((await db.query('SELECT count(*)::int count FROM mdf_cnc_observation_targets WHERE packet_id=$1',[packetId])).rows[0].count)
+        .toBe(0);
+      expect(await runner().processOne()).toMatchObject({status:'done',jobId:receipt.jobId});
+    } finally {
+      await db.query(`UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now(),error_code='E2E_TEST_CLEANUP'
+        WHERE job_id=$1 AND status='pending'`,[receipt.jobId]);
+    }
+  });
+  it('backs off transient DATABASE_TIMEOUT from registration and continues the ordinary observer claim path',async()=>{
+    const {f,uploaded,media,task}=await claimManualSvgSend();
+    await media.completeManualSvgTelegramSend({requestId:task.requestId,currentUser:user,completion:manualSendCompletion(task),
+      requestTraceId:'E2E transient registration timeout send',sessionLease:f.sessionLease});
+    let injected=false,ordinaryClaimQueried=false;
+    const timeoutDatabase=databaseWithQueryHook(sql=>{
+      if(!injected&&sql.includes('SELECT order_id::text id FROM orders')) {
+        injected=true;throw new ApiError(503,'DATABASE_TIMEOUT','synthetic registrar timeout');
+      }
+      if(sql.includes('SELECT t.packet_id::text packet_id,t.accepted_revision_key')
+        &&sql.includes('FROM mdf_cnc_observation_targets t')) ordinaryClaimQueried=true;
+    });
+    const observations=new PgCncTelegramMdfObservationRepository(timeoutDatabase);
+    expect(await observations.claim({currentUser:user,lease:f.sessionLease})).toBeNull();
+    expect(injected).toBe(true);
+    expect(ordinaryClaimQueried).toBe(true);
+    expect((await db.query(`SELECT work_state,attempt_count,next_attempt_at>now() backoff
+      FROM cnc_manual_svg_observation_registration_work WHERE send_request_id=$1`,[task.requestId])).rows[0])
+      .toEqual({work_state:'pending',attempt_count:1,backoff:true});
+    expect((await db.query('SELECT count(*)::int count FROM mdf_cnc_observation_targets WHERE packet_id=$1',
+      [uploaded.packet.packetId])).rows[0].count).toBe(0);
+  });
+  it('does not let an already-selected concurrent registrar bypass a newly scheduled retry delay',async()=>{
+    const {f,uploaded,media,task}=await claimManualSvgSend();
+    await media.completeManualSvgTelegramSend({requestId:task.requestId,currentUser:user,completion:manualSendCompletion(task),
+      requestTraceId:'E2E due-race send',sessionLease:f.sessionLease});
+    let markCandidateWait!:()=>void,releaseCandidate!:()=>void;
+    const candidateWait=new Promise<void>(resolve=>{markCandidateWait=resolve;});
+    const holdCandidate=new Promise<void>(resolve=>{releaseCandidate=resolve;});
+    let failedOnce=false,releaseTimer:ReturnType<typeof setTimeout>|undefined;
+    const failingDb=databaseWithQueryHook(sql=>{
+      if(!failedOnce&&sql.includes('SELECT order_id::text id FROM orders')){
+        failedOnce=true;throw new ApiError(503,'DATABASE_TIMEOUT','synthetic first registrar timeout');
+      }
+    });
+    const delayedDb=databaseWithQueryHook(async sql=>{
+      if(sql.includes('SELECT order_id::text id FROM orders')){markCandidateWait();await holdCandidate;}
+    });
+    let firstRegistration:Promise<unknown>|undefined,secondRegistration:Promise<unknown>|undefined;
+    try {
+      secondRegistration=new PgCncManualSendObservationRegistration(delayedDb)
+        .registerOne({currentUser:user,requestTraceId:'E2E stale candidate registrar',sessionLease:f.sessionLease});
+      void secondRegistration.catch(()=>undefined);
+      await Promise.race([candidateWait,new Promise<never>((_,reject)=>{
+        releaseTimer=setTimeout(()=>reject(new Error('E2E_CANDIDATE_WAIT_TIMEOUT')),3000);
+      })]);
+      firstRegistration=new PgCncManualSendObservationRegistration(failingDb)
+        .registerOne({currentUser:user,requestTraceId:'E2E first registrar attempt',sessionLease:f.sessionLease});
+      void firstRegistration.catch(()=>undefined);
+      await expect(firstRegistration).resolves.toMatchObject({status:'idle'});
+      const afterFirst=(await db.query(`SELECT work_state,reason,attempt_count,next_attempt_at::text retry_at,next_attempt_at>now() backoff
+        FROM cnc_manual_svg_observation_registration_work WHERE send_request_id=$1 AND lease_generation=$2`,
+      [task.requestId,task.itemLeaseGeneration])).rows[0];
+      expect(afterFirst).toMatchObject({work_state:'pending',reason:null,attempt_count:1,backoff:true});
+      releaseCandidate();
+      await expect(secondRegistration).resolves.toMatchObject({status:'idle'});
+      const afterSecond=(await db.query(`SELECT work_state,reason,attempt_count,next_attempt_at::text retry_at
+        FROM cnc_manual_svg_observation_registration_work WHERE send_request_id=$1 AND lease_generation=$2`,
+      [task.requestId,task.itemLeaseGeneration])).rows[0];
+      expect(afterSecond).toEqual({work_state:afterFirst.work_state,reason:afterFirst.reason,
+        attempt_count:afterFirst.attempt_count,retry_at:afterFirst.retry_at});
+      expect((await db.query('SELECT count(*)::int count FROM mdf_cnc_observation_targets WHERE packet_id=$1',
+        [uploaded.packet.packetId])).rows[0].count).toBe(0);
+    } finally {
+      if(releaseTimer)clearTimeout(releaseTimer);
+      releaseCandidate();
+      if(secondRegistration)await secondRegistration.catch(()=>undefined);
+      if(firstRegistration)await firstRegistration.catch(()=>undefined);
+    }
+  });
+  it('locks owners before worker-session revalidation so a session renewal is not held behind an owner waiter',async()=>{
+    const {f,uploaded,media,task}=await claimManualSvgSend();
+    await media.completeManualSvgTelegramSend({requestId:task.requestId,currentUser:user,completion:manualSendCompletion(task),
+      requestTraceId:'E2E owner-first registrar send',sessionLease:f.sessionLease});
+    const holder=new Client(connection);await holder.connect();
+    let markOwnerWait!:()=>void;const ownerWait=new Promise<void>(resolve=>{markOwnerWait=resolve;});
+    const raceDatabase=databaseWithQueryHook(sql=>{
+      if(sql.includes('SELECT order_id::text id FROM orders')) markOwnerWait();
+    });
+    let claim:Promise<unknown>|undefined;
+    let timer:ReturnType<typeof setTimeout>|undefined;
+    try {
+      await holder.query(`SET search_path=${schema},public`);
+      await holder.query('BEGIN');
+      const lockedOwner=await holder.query('SELECT order_id FROM orders WHERE order_id=$1 FOR UPDATE',[f.orderId]);
+      expect(lockedOwner.rowCount).toBe(1);
+      claim=new PgCncTelegramMdfObservationRepository(raceDatabase).claim({currentUser:user,lease:f.sessionLease});
+      void claim.catch(()=>undefined);
+      await Promise.race([ownerWait,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('E2E_OWNER_WAIT_TIMEOUT')),3000);})]);
+      const renewedToken=`session-${randomUUID()}-${randomUUID()}`,renewedWorker=randomUUID();
+      await db.query(`UPDATE cnc_telegram_worker_session_leases SET lease_token=$2,lease_generation=2,
+        worker_instance_id=$3,claimed_at=now(),heartbeat_at=now(),expires_at=now()+interval '1 hour'
+        WHERE source_chat_id=$1`,[f.sessionLease.sourceChatId,renewedToken,renewedWorker]);
+      await holder.query('COMMIT');
+      await expect(claim).rejects.toMatchObject({code:'CNC_TELEGRAM_SESSION_LEASE_STALE'});
+      expect((await db.query(`SELECT work_state,attempt_count FROM cnc_manual_svg_observation_registration_work
+        WHERE send_request_id=$1`,[task.requestId])).rows[0]).toEqual({work_state:'pending',attempt_count:0});
+      expect((await db.query('SELECT count(*)::int count FROM mdf_cnc_observation_targets WHERE packet_id=$1',
+        [uploaded.packet.packetId])).rows[0].count).toBe(0);
+    } finally {
+      if(timer)clearTimeout(timer);
+      await holder.query('ROLLBACK').catch(()=>undefined);
+      await holder.end();
+      if(claim) await claim.catch(()=>undefined);
+    }
+  });
+  it('settles legitimate pre-181 in-flight sends without fabricating observation bindings and rejects an expired old lease',async()=>{
+    for (const expired of [false,true]) {
+      const f=await manualSvgSendFixture(),uploaded=await new PgCncTelegramRepository(database).manualSvgUpload(f.command);
+      expect(await runner().processOne()).toMatchObject({status:'done'});
+      const itemToken=`old-worker-${randomUUID()}-${randomUUID()}`;
+      await db.query(`UPDATE cnc_manual_svg_telegram_send_requests SET status='processing',attempt_count=1,
+        claimed_at=now(),lease_token=$2,lease_generation=1,lease_worker_instance_id=$3,
+        lease_expires_at=CASE WHEN $4 THEN now()-interval '1 second' ELSE now()+interval '1 minute' END
+        WHERE request_id=$1`,[uploaded.telegramSendRequestId,itemToken,f.worker,expired]);
+      const completion={sentChatId:f.command.telegramDestinationChatId,sentMessageIds:['8101','8102','8103'],
+        itemLeaseToken:itemToken,itemLeaseGeneration:1,itemLeaseOwner:f.worker};
+      const media=new PgCncTelegramMediaRepository(database);
+      if (expired) {
+        await expect(media.completeManualSvgTelegramSend({requestId:uploaded.telegramSendRequestId,currentUser:user,
+          completion,requestTraceId:'E2E expired pre-181 send',sessionLease:f.sessionLease}))
+          .rejects.toMatchObject({code:'CNC_TELEGRAM_ITEM_LEASE_STALE'});
+        expect((await db.query('SELECT status FROM cnc_manual_svg_telegram_send_requests WHERE request_id=$1',
+          [uploaded.telegramSendRequestId])).rows[0].status).toBe('processing');
+      } else {
+        await expect(media.completeManualSvgTelegramSend({requestId:uploaded.telegramSendRequestId,currentUser:user,
+          completion,requestTraceId:'E2E legacy in-flight send',sessionLease:f.sessionLease}))
+          .resolves.toMatchObject({status:'sent'});
+        expect((await db.query(`SELECT count(*)::int count FROM cnc_manual_svg_observation_claim_snapshots
+          WHERE send_request_id=$1`,[uploaded.telegramSendRequestId])).rows[0].count).toBe(0);
+        expect((await db.query(`SELECT count(*)::int count FROM cnc_manual_svg_observation_send_bindings
+          WHERE send_request_id=$1`,[uploaded.telegramSendRequestId])).rows[0].count).toBe(0);
+        expect((await db.query(`SELECT count(*)::int count FROM cnc_manual_svg_observation_registration_work
+          WHERE send_request_id=$1`,[uploaded.telegramSendRequestId])).rows[0].count).toBe(0);
+      }
+    }
+  });
+  it('settles legacy-unbound and post-send media-verification failures without creating observation eligibility',async()=>{
+    for (const mode of ['legacy','verification_error'] as const) {
+      const {f,uploaded,media,task}=await claimManualSvgSend();
+      const completion=mode==='legacy'
+        ? {sentChatId:task.destinationChatId,sentMessageIds:['7101','7102','7199'],itemLeaseToken:task.itemLeaseToken,
+          itemLeaseGeneration:task.itemLeaseGeneration,itemLeaseOwner:task.itemLeaseOwner}
+        : {sentChatId:task.destinationChatId,sentMessageIds:['7101','7102','7199'],observationBindingError:'MEDIA_VERIFICATION_FAILED' as const,
+          itemLeaseToken:task.itemLeaseToken,itemLeaseGeneration:task.itemLeaseGeneration,itemLeaseOwner:task.itemLeaseOwner};
+      await media.completeManualSvgTelegramSend({requestId:task.requestId,currentUser:user,completion,
+        requestTraceId:`E2E unbound ${mode}`,sessionLease:f.sessionLease});
+      const rows=(await db.query(`SELECT r.status,b.sent_files,b.binding_error,w.work_state,w.reason
+        FROM cnc_manual_svg_telegram_send_requests r
+        JOIN cnc_manual_svg_observation_send_bindings b ON b.send_request_id=r.request_id
+        JOIN cnc_manual_svg_observation_registration_work w USING(send_request_id)
+        WHERE r.request_id=$1`,[uploaded.telegramSendRequestId])).rows;
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({status:'sent',sent_files:null,work_state:'ineligible',
+        reason:mode==='legacy'?'SENT_BINDING_MISSING':'MEDIA_VERIFICATION_FAILED',
+        binding_error:mode==='legacy'?null:'MEDIA_VERIFICATION_FAILED'});
+      expect((await db.query('SELECT count(*)::int count FROM mdf_cnc_observation_targets WHERE packet_id=$1',
+        [uploaded.packet.packetId])).rows[0].count).toBe(0);
+    }
+  });
+  it('parks an incomplete requested file set instead of promoting the surviving SVG/G-code subset',async()=>{
+    const f=await manualSvgSendFixture(),uploaded=await new PgCncTelegramRepository(database).manualSvgUpload(f.command);
+    expect(await runner().processOne()).toMatchObject({status:'done'});
+    await db.query(`UPDATE cnc_manual_svg_upload_files SET expires_at=now()-interval '1 second'
+      WHERE packet_id=$1 AND file_kind='screenshot'`,[uploaded.packet.packetId]);
+    const media=new PgCncTelegramMediaRepository(database);
+    const [task]=await media.claimManualSvgTelegramSends({currentUser:user,limit:1,requestTraceId:'E2E incomplete claim',sessionLease:f.sessionLease});
+    expect(task?.files.map(file=>file.kind)).toEqual(['svg','gcode']);
+    expect(task?.observationBindingVersion).toBeUndefined();
+    const completion=manualSendCompletion(task);
+    await media.completeManualSvgTelegramSend({requestId:task.requestId,currentUser:user,completion,
+      requestTraceId:'E2E incomplete completion',sessionLease:f.sessionLease});
+    expect((await db.query(`SELECT s.requested_file_count,s.files_qualified,s.ineligible_reason,w.work_state,w.reason
+      FROM cnc_manual_svg_observation_claim_snapshots s JOIN cnc_manual_svg_observation_registration_work w
+      USING(send_request_id,lease_generation) WHERE s.send_request_id=$1`,[task.requestId])).rows[0])
+      .toMatchObject({requested_file_count:3,files_qualified:false,ineligible_reason:'FILES_INCOMPLETE',
+        work_state:'ineligible',reason:'FILES_INCOMPLETE'});
+    expect((await db.query('SELECT count(*)::int count FROM mdf_cnc_observation_targets WHERE packet_id=$1',
+      [uploaded.packet.packetId])).rows[0].count).toBe(0);
+  });
+  it('settles a valid send but parks it when the claim-time MDF source is not yet accepted',async()=>{
+    const f=await manualSvgSendFixture(1);
+    f.command.dto.validationMode='lenient';f.command.dto.items[0].quantity=2;
+    const uploaded=await new PgCncTelegramRepository(database).manualSvgUpload(f.command);
+    expect((await db.query(`SELECT accepted_revision_key FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`,
+      [uploaded.packet.packetId])).rows[0].accepted_revision_key).toBeNull();
+    try {
+      const media=new PgCncTelegramMediaRepository(database);
+      const [task]=await media.claimManualSvgTelegramSends({currentUser:user,limit:1,requestTraceId:'E2E unaccepted source claim',
+        sessionLease:f.sessionLease});
+      expect(task?.requestId).toBe(uploaded.telegramSendRequestId);
+      expect(task?.observationBindingVersion).toBe(1);
+      const sourceSnapshot=(await db.query(`SELECT source_eligible,ineligible_reason,source_fence
+        FROM cnc_manual_svg_observation_claim_snapshots WHERE send_request_id=$1 AND lease_generation=$2`,
+        [task.requestId,task.itemLeaseGeneration])).rows[0];
+      expect(sourceSnapshot).toMatchObject({source_eligible:false,ineligible_reason:'SOURCE_UNACCEPTED'});
+      await media.completeManualSvgTelegramSend({requestId:task.requestId,currentUser:user,
+        completion:manualSendCompletion(task),requestTraceId:'E2E unaccepted source sent',sessionLease:f.sessionLease});
+      expect((await db.query(`SELECT work_state,reason FROM cnc_manual_svg_observation_registration_work
+        WHERE send_request_id=$1`,[task.requestId])).rows[0])
+        .toEqual({work_state:'ineligible',reason:'SOURCE_UNACCEPTED'});
+      expect((await db.query('SELECT count(*)::int count FROM mdf_cnc_observation_targets WHERE packet_id=$1',
+        [uploaded.packet.packetId])).rows[0].count).toBe(0);
+    } finally {
+      await db.query(`UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now(),error_code='E2E_TEST_CLEANUP'
+        WHERE source_kind='packet' AND source_id=$1 AND status='pending'`,[uploaded.packet.packetId]);
+    }
+  });
+  it('allows same-session late settlement after processing is reaped to unknown, but rejects an older item generation',async()=>{
+    const {f,uploaded,media,task}=await claimManualSvgSend();
+    await db.query(`UPDATE cnc_manual_svg_telegram_send_requests SET claimed_at=now()-interval '16 minutes',
+      lease_expires_at=now()-interval '1 second' WHERE request_id=$1`,[task.requestId]);
+    expect(await media.claimManualSvgTelegramSends({currentUser:user,limit:1,requestTraceId:'E2E reaper unknown settlement',
+      sessionLease:f.sessionLease})).toEqual([]);
+    expect((await db.query('SELECT status FROM cnc_manual_svg_telegram_send_requests WHERE request_id=$1',
+      [task.requestId])).rows[0].status).toBe('unknown');
+    const lateCompletion=manualSendCompletion(task);
+    await expect(media.completeManualSvgTelegramSend({requestId:task.requestId,currentUser:user,completion:lateCompletion,
+      requestTraceId:'E2E late settlement',sessionLease:f.sessionLease})).resolves.toMatchObject({status:'sent'});
+    expect((await db.query(`SELECT work_state FROM cnc_manual_svg_observation_registration_work WHERE send_request_id=$1`,
+      [uploaded.telegramSendRequestId])).rows[0].work_state).toBe('pending');
+
+    const second=await claimManualSvgSend();
+    await db.query(`UPDATE cnc_manual_svg_telegram_send_requests SET status='pending',claimed_at=NULL,finished_at=NULL,
+      sent_chat_id=NULL,sent_message_ids_json='[]'::jsonb,last_error=NULL,lease_token=NULL,lease_worker_instance_id=NULL,
+      lease_expires_at=NULL WHERE request_id=$1`,[second.task.requestId]);
+    const [newTask]=await second.media.claimManualSvgTelegramSends({currentUser:user,limit:1,requestTraceId:'E2E new item generation',
+      sessionLease:second.f.sessionLease});
+    expect(newTask.itemLeaseGeneration).toBe(second.task.itemLeaseGeneration+1);
+    await expect(second.media.completeManualSvgTelegramSend({requestId:newTask.requestId,currentUser:user,
+      completion:manualSendCompletion(second.task),requestTraceId:'E2E stale old generation',sessionLease:second.f.sessionLease}))
+      .rejects.toMatchObject({code:'CNC_TELEGRAM_ITEM_LEASE_STALE'});
+    expect((await db.query(`SELECT status FROM cnc_manual_svg_telegram_send_requests WHERE request_id=$1`,[newTask.requestId])).rows[0].status)
+      .toBe('processing');
+    const renewedToken=`session-${randomUUID()}-${randomUUID()}`;
+    await db.query(`UPDATE cnc_telegram_worker_session_leases SET lease_token=$2,lease_generation=2,
+      expires_at=now()+interval '1 hour' WHERE source_chat_id=$1`,[second.f.sessionLease.sourceChatId,renewedToken]);
+    await expect(second.media.completeManualSvgTelegramSend({requestId:newTask.requestId,currentUser:user,
+      completion:manualSendCompletion(newTask),requestTraceId:'E2E revoked global session',sessionLease:second.f.sessionLease}))
+      .rejects.toMatchObject({code:'CNC_TELEGRAM_SESSION_LEASE_STALE'});
+    await expect(second.media.completeManualSvgTelegramSend({requestId:newTask.requestId,currentUser:user,
+      completion:manualSendCompletion(newTask),requestTraceId:'E2E newer global session',
+      sessionLease:{...second.f.sessionLease,leaseToken:renewedToken,leaseGeneration:2}}))
+      .rejects.toMatchObject({code:'CNC_TELEGRAM_ITEM_LEASE_STALE'});
+    expect((await db.query('SELECT status FROM cnc_manual_svg_telegram_send_requests WHERE request_id=$1',
+      [newTask.requestId])).rows[0].status).toBe('processing');
+  });
+  it('rolls completion receipt and work back with the request update if audit fails, then accepts an exact retry',async()=>{
+    const {f,uploaded,media,task}=await claimManualSvgSend(),completion=manualSendCompletion(task);
+    await db.query(`CREATE FUNCTION e2e_fail_manual_send_completion_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN IF NEW.event='cnc.manual_svg_upload.telegram_send_completed' AND NEW.entity_id='${task.requestId}' THEN
+        RAISE EXCEPTION 'E2E_COMPLETION_AUDIT_FAILURE' USING ERRCODE='P0001'; END IF; RETURN NEW; END $$;
+      CREATE TRIGGER e2e_fail_manual_send_completion_audit BEFORE INSERT ON audit_log
+        FOR EACH ROW EXECUTE FUNCTION e2e_fail_manual_send_completion_audit()`);
+    try {
+      await expect(media.completeManualSvgTelegramSend({requestId:task.requestId,currentUser:user,completion,
+        requestTraceId:'E2E fail manual settlement audit',sessionLease:f.sessionLease})).rejects.toMatchObject({code:'P0001'});
+      expect((await db.query('SELECT status FROM cnc_manual_svg_telegram_send_requests WHERE request_id=$1',
+        [task.requestId])).rows[0].status).toBe('processing');
+      expect((await db.query('SELECT count(*)::int count FROM cnc_manual_svg_observation_send_bindings WHERE send_request_id=$1',
+        [task.requestId])).rows[0].count).toBe(0);
+      expect((await db.query('SELECT count(*)::int count FROM cnc_manual_svg_observation_registration_work WHERE send_request_id=$1',
+        [task.requestId])).rows[0].count).toBe(0);
+      expect((await db.query(`SELECT count(*)::int count FROM audit_log WHERE event='cnc.manual_svg_upload.telegram_send_completed'
+        AND entity_id=$1`,[task.requestId])).rows[0].count).toBe(0);
+    } finally {
+      await db.query('DROP TRIGGER IF EXISTS e2e_fail_manual_send_completion_audit ON audit_log; DROP FUNCTION IF EXISTS e2e_fail_manual_send_completion_audit()');
+    }
+    await db.query(`CREATE FUNCTION e2e_suppress_manual_send_completion_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN IF NEW.event='cnc.manual_svg_upload.telegram_send_completed' AND NEW.entity_id='${task.requestId}' THEN
+        RETURN NULL; END IF; RETURN NEW; END $$;
+      CREATE TRIGGER e2e_suppress_manual_send_completion_audit BEFORE INSERT ON audit_log
+        FOR EACH ROW EXECUTE FUNCTION e2e_suppress_manual_send_completion_audit()`);
+    try {
+      await expect(media.completeManualSvgTelegramSend({requestId:task.requestId,currentUser:user,completion,
+        requestTraceId:'E2E suppressed manual settlement audit',sessionLease:f.sessionLease}))
+        .rejects.toThrow('CNC_MANUAL_SVG_SEND_COMPLETION_AUDIT_REQUIRED');
+      expect((await db.query('SELECT status FROM cnc_manual_svg_telegram_send_requests WHERE request_id=$1',
+        [task.requestId])).rows[0].status).toBe('processing');
+      expect((await db.query('SELECT count(*)::int count FROM cnc_manual_svg_observation_send_bindings WHERE send_request_id=$1',
+        [task.requestId])).rows[0].count).toBe(0);
+      expect((await db.query('SELECT count(*)::int count FROM cnc_manual_svg_observation_registration_work WHERE send_request_id=$1',
+        [task.requestId])).rows[0].count).toBe(0);
+      expect((await db.query(`SELECT count(*)::int count FROM audit_log WHERE event='cnc.manual_svg_upload.telegram_send_completed'
+        AND entity_id=$1`,[task.requestId])).rows[0].count).toBe(0);
+    } finally {
+      await db.query('DROP TRIGGER IF EXISTS e2e_suppress_manual_send_completion_audit ON audit_log; DROP FUNCTION IF EXISTS e2e_suppress_manual_send_completion_audit()');
+    }
+    await expect(media.completeManualSvgTelegramSend({requestId:task.requestId,currentUser:user,completion,
+      requestTraceId:'E2E retry manual settlement',sessionLease:f.sessionLease})).resolves.toMatchObject({status:'sent'});
+    expect((await db.query(`SELECT work_state,reason FROM cnc_manual_svg_observation_registration_work WHERE send_request_id=$1`,
+      [uploaded.telegramSendRequestId])).rows[0]).toEqual({work_state:'pending',reason:null});
   });
   it('SVG partial position preserves its own quantity and complete order demand',async()=>{
     const f=await svgFixture(1),result=await new PgCncTelegramRepository(database).manualSvgUpload(f.command),id=result.packet.packetId;
