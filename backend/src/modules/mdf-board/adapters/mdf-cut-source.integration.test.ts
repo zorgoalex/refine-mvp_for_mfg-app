@@ -368,6 +368,12 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
       p.source_version::text source_version FROM mdf_source_heads h JOIN cnc_telegram_packets p ON p.packet_id=h.source_id::uuid
       WHERE h.source_kind='packet' AND h.source_id=$1`,[packetId])).rows[0];
     expect(before.physical_cut).toBe('2');
+    const priorCncSetting=(await db.query(`SELECT is_active,value_json FROM app_settings
+      WHERE setting_key='status_automation.cnc_mark_cut_details'`)).rows[0];
+    await db.query(`INSERT INTO app_settings(setting_key,is_active,value_json)
+      VALUES('status_automation.cnc_mark_cut_details',true,'{"value":true}'::jsonb)
+      ON CONFLICT(setting_key) DO UPDATE SET is_active=true,value_json='{"value":true}'::jsonb`);
+    try {
     const observations=new PgCncTelegramMdfObservationRepository(database),lease=f.input.lease;
     const claim=await observations.claim({currentUser:user,lease});
     const result=await observations.complete({currentUser:user,lease,requestId:'E2E CNC after manual complete',report:{
@@ -381,8 +387,8 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
       ? (await db.query('SELECT error_code FROM mdf_recalculation_jobs WHERE job_id=$1',[publication.jobId])).rows[0]?.error_code
       : null;
     expect(publication,`CNC authority job ${publication.jobId ?? 'none'} ended ${publication.status}; error=${publicationError ?? 'none'}`)
-      .toMatchObject({status:'needs_attention',jobId:result.jobId});
-    expect(publicationError).toBe('MDF_CNC_AUTHORITY_EXECUTOR_REQUIRED');
+      .toMatchObject({status:'done',jobId:result.jobId});
+    expect(publicationError).toBeNull();
     const after=(await db.query(`SELECT h.accepted_revision_key,
       (SELECT sum(quantity)::text FROM mdf_evidence_lines WHERE source_kind='packet' AND source_id=$1
         AND revision_key=h.accepted_revision_key AND stage_code='cut' AND evidence_kind='physical') physical_cut,
@@ -391,10 +397,106 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
     expect(after.accepted_revision_key).not.toBe(before.accepted_revision_key);
     expect(after.physical_cut).toBe(before.physical_cut);
     expect(after.source_version).toBe(before.source_version);
+    expect((await db.query('SELECT production_status_id FROM order_details WHERE detail_id=$1',[f.detailId])).rows[0].production_status_id)
+      .toBe(3);
+    expect((await db.query('SELECT order_status_id FROM orders WHERE order_id=$1',[f.orderId])).rows[0].order_status_id)
+      .toBe(4);
     expect((await db.query(`SELECT a.authority,a.claim_id,r.result->>'jobId' job
       FROM mdf_cnc_observation_job_authorities a JOIN mdf_cnc_observation_receipts r USING(claim_id)
       WHERE a.packet_id=$1 AND a.job_id=$2`,[packetId,result.jobId])).rows)
       .toEqual([{authority:'cnc_autocut',claim_id:claim!.claimId,job:result.jobId}]);
+    } finally {
+      if (priorCncSetting) {
+        await db.query(`UPDATE app_settings SET is_active=$1,value_json=$2::jsonb
+          WHERE setting_key='status_automation.cnc_mark_cut_details'`,[priorCncSetting.is_active,JSON.stringify(priorCncSetting.value_json)]);
+      } else {
+        await db.query(`DELETE FROM app_settings WHERE setting_key='status_automation.cnc_mark_cut_details'`);
+      }
+    }
+  });
+  it('executes a CNC authority job when a live bath allocation pins its current accepted revision',async()=>{
+    const f=await telegramFixture(),imported=await f.importer.completeImport(f.input),packetId=imported.packetId!;
+    expect(imported.status).toBe('imported');
+    expect(await runner().processOne()).toMatchObject({status:'done'});
+    const mover=new PgMdfBoardManualMoveRepository(database);
+    const actor={...user,permissions:[...user.permissions,'orders.update','production.tasks.update','orders.change_production_status']} as CurrentUser;
+    const initialBoard=await readMdfPublishedSnapshot(database,user,{focus:{kind:'packet',id:packetId}});
+    const initialCard=initialBoard.cards.find(value=>value.kind==='packet'&&value.id===packetId)!;
+    const manual=await mover.upsert({currentUser:actor,cardKind:'packet',cardId:packetId,targetColumn:'completed',
+      sourceToken:initialCard.commandToken!,idempotencyKey:`E2E-${randomUUID()}`,requestId:'E2E current revision allocation manual proof'});
+    expect(manual.jobId).toBeTruthy();
+    expect(await runner().processOne()).toMatchObject({status:'done',jobId:manual.jobId});
+
+    const observations=new PgCncTelegramMdfObservationRepository(database),lease=f.input.lease;
+    const claim=await observations.claim({currentUser:user,lease});
+    expect(claim?.packetId).toBe(packetId);
+    const observation=await observations.complete({currentUser:user,lease,requestId:'E2E allocation after current CNC receipt',report:{
+      claimId:claim!.claimId,claimToken:claim!.claimToken,claimGeneration:claim!.claimGeneration,
+      messages:claim!.messages.map(message=>({messageId:message.messageId,chatId:claim!.sourceChatId,
+        role:message.role,sha256:message.sha256,present:true,thumbsUp:true})),
+    }});
+    expect(observation.status).toBe('recorded');
+
+    // Run a real cut-result bath before the observer job. Its allocator must
+    // reserve packet evidence from the observer's exact accepted revision.
+    await db.query(`UPDATE mdf_recalculation_jobs SET next_attempt_at=now()+interval '1 hour' WHERE job_id=$1`,[observation.jobId]);
+    let bathId='';
+    let bathJobId:string|null=null;
+    let pinned:Array<{revision:string;accepted:string;state:string;quantity:string}> = [];
+    try {
+      const cutJobId=2_000_000+f.orderId;
+      const params={...await config.getDefaultParams(),layout_mode:'vacuum_table'};
+      await db.query(`INSERT INTO cut_job(cut_job_id,name,status,version,source,params,rotation_allowed,combine_films,split_by_material)
+        VALUES($1,$2,'draft',1,'manual',$3::jsonb,true,false,true)`,
+      [cutJobId,`E2E current pin ${f.orderId}`,JSON.stringify(params)]);
+      await db.query(`INSERT INTO cut_job_item(cut_job_id,source_type,order_id,order_detail_id,freecut_item_id,qty,is_active)
+        VALUES($1,'order_detail',$2,$3,$4,2,true)`,[cutJobId,f.orderId,f.detailId,`det-${f.detailId}`]);
+      await repository.calculate({currentUser:user,cutJobId,version:1,commandId:randomUUID(),requestId:'E2E current revision bath calculation'});
+      bathId=`cut-result:${await resultId(cutJobId)}`;
+      const bathJob=(await db.query<{job_id:string}>(`SELECT job_id FROM mdf_recalculation_jobs
+        WHERE source_kind='bath' AND source_id=$1 AND status='pending' ORDER BY created_at DESC LIMIT 1`,[bathId])).rows[0];
+      expect(bathJob).toBeDefined();
+      bathJobId=bathJob.job_id;
+      expect(await runner().processOne()).toMatchObject({status:'done',jobId:bathJob.job_id});
+      pinned=(await db.query<{revision:string;accepted:string;state:string;quantity:string}>(`SELECT e.revision_key revision,
+        h.accepted_revision_key accepted,a.state,a.quantity::text quantity FROM mdf_bath_allocations a
+        JOIN mdf_evidence_lines e USING(evidence_line_id)
+        JOIN mdf_source_heads h ON h.source_kind=e.source_kind AND h.source_id=e.source_id
+        WHERE a.bath_id=$1 AND a.state<>'released' AND e.source_kind='packet' AND e.source_id=$2
+        ORDER BY e.revision_key`,[bathId,packetId])).rows;
+      expect(pinned.length).toBeGreaterThan(0);
+      expect(pinned.every(row=>row.revision===row.accepted)).toBe(true);
+      await db.query('UPDATE mdf_recalculation_jobs SET next_attempt_at=now() WHERE job_id=$1',[observation.jobId]);
+      const priorCncSetting=(await db.query(`SELECT is_active,value_json FROM app_settings
+        WHERE setting_key='status_automation.cnc_mark_cut_details'`)).rows[0];
+      await db.query(`INSERT INTO app_settings(setting_key,is_active,value_json)
+        VALUES('status_automation.cnc_mark_cut_details',true,'{"value":true}'::jsonb)
+        ON CONFLICT(setting_key) DO UPDATE SET is_active=true,value_json='{"value":true}'::jsonb`);
+      try {
+        expect((await db.query('SELECT production_status_id FROM order_details WHERE detail_id=$1',[f.detailId])).rows[0]
+          .production_status_id).toBe(1);
+        expect(await runner().processOne()).toMatchObject({status:'done',jobId:observation.jobId});
+        expect((await db.query('SELECT production_status_id FROM order_details WHERE detail_id=$1',[f.detailId])).rows[0]
+          .production_status_id).toBe(3);
+        expect((await db.query(`SELECT count(*)::int count FROM audit_log WHERE event='cnc.mdf_observation.auto_cut_status_applied'
+          AND entity_id=$1`,[packetId])).rows[0].count).toBe(1);
+      } finally {
+        if (priorCncSetting) {
+          await db.query(`UPDATE app_settings SET is_active=$1,value_json=$2::jsonb
+            WHERE setting_key='status_automation.cnc_mark_cut_details'`,[priorCncSetting.is_active,JSON.stringify(priorCncSetting.value_json)]);
+        } else {
+          await db.query(`DELETE FROM app_settings WHERE setting_key='status_automation.cnc_mark_cut_details'`);
+        }
+      }
+    } finally {
+      await db.query(`UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now(),error_code='E2E_TEST_CLEANUP'
+        WHERE job_id=ANY($1::uuid[]) AND status='pending'`,[[observation.jobId,...(bathJobId?[bathJobId]:[])]]);
+    }
+    expect((await db.query(`SELECT count(*)::int count FROM mdf_bath_allocations a
+      JOIN mdf_evidence_lines e USING(evidence_line_id) JOIN mdf_source_heads h
+        ON h.source_kind=e.source_kind AND h.source_id=e.source_id
+      WHERE a.bath_id=$1 AND a.state<>'released' AND e.source_kind='packet' AND e.source_id=$2
+        AND e.revision_key=h.accepted_revision_key`,[bathId,packetId])).rows[0].count).toBe(pinned.length);
   });
   it('no-fence pending observation returns the durable advanced server version after clearing raw completion',async()=>{
     const f=await telegramFixture(), imported=await f.importer.completeImport(f.input), packetId=imported.packetId!;

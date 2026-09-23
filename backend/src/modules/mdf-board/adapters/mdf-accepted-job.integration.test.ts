@@ -118,7 +118,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     expect(BigInt((await db.query('SELECT published_revision FROM mdf_engine_state')).rows[0].published_revision)).toBe(BigInt(revision)+2n);
   });
 
-  it('durably quarantines a CNC-authority job before allocation or publication effects', async () => {
+  it('fails closed on a CNC-authority marker without a matching completed observer receipt', async () => {
     const f = await fixture();
     const packetId = f.receipts[0].sourceId;
     const claimId = randomUUID();
@@ -148,7 +148,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     };
     expect(await runner().processOne()).toMatchObject({ status: 'needs_attention', jobId: f.jobs[0].jobId });
     expect((await db.query('SELECT status,error_code FROM mdf_recalculation_jobs WHERE job_id=$1', [f.jobs[0].jobId])).rows[0])
-      .toEqual({ status: 'needs_attention', error_code: 'MDF_CNC_AUTHORITY_EXECUTOR_REQUIRED' });
+      .toEqual({ status: 'needs_attention', error_code: 'MDF_CNC_AUTHORITY_MARKER_INVALID' });
     expect({
       statuses: await statuses(f.orderId),
       allocations: (await db.query('SELECT count(*)::text count FROM mdf_bath_allocations WHERE order_id=$1', [f.orderId])).rows[0].count,

@@ -8,18 +8,19 @@ import { projectMdfAcceptedState, type MdfAcceptedSource, type MdfAcceptedLine }
 import type { MdfQuantityEvidence } from '../domain/mdf-quantities';
 import { mdfPositionKey } from '../domain/mdf-quantities';
 import { MdfNeedsAttention, type MdfJob, type MdfPinnedRule } from './mdf-job-runner';
+import { applyMdfCncAuthorityEffects, loadMdfCncAuthority, lockAndReadMdfCncAutoCut } from './mdf-cnc-authority-job';
 
 /** Complete transactional effect handler, invoked by MdfJobRunner after its
  * claim/savepoint. The registered scheduler remains off until producers, reader
  * and cutover coverage are complete. No raw-source/legacy readiness fallback. */
 export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
   rules: readonly MdfPinnedRule[]): Promise<'done'|'superseded'> {
-  // New CNC observation receipts carry a durable distinct AutoCut authority
-  // marker. Until that executor is connected, quarantine them before even
-  // allocating/publishing; the general rule17 path is not a substitute.
-  const cncAuthority=(await tx.query<{authority:string}>(`SELECT authority
-    FROM mdf_cnc_observation_job_authorities WHERE job_id=$1::uuid`,[job.job_id])).rows[0];
-  if (cncAuthority) throw new MdfNeedsAttention('MDF_CNC_AUTHORITY_EXECUTOR_REQUIRED');
+  // Classify and validate provenance before allocation. Observation revisions
+  // with a missing marker fail closed; origin=cnc alone is not authority.
+  const cncAuthority = await loadMdfCncAuthority(tx, job);
+  // Match the legacy AutoCut-setting lock order: setting/catalogue first,
+  // before allocation discovers and locks owners and source heads.
+  const cncAutoCutEnabled = cncAuthority ? await lockAndReadMdfCncAutoCut(tx) : false;
   const allocation = await executeMdfAllocation(tx,job.job_id,{ requireExecutionContext: true });
   if (allocation.status==='superseded') return 'superseded';
   const snapshot = allocation.executionSnapshot;
@@ -87,19 +88,40 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
     if (!Number.isSafeInteger(id) || id <= 0) throw new MdfNeedsAttention('MDF_JOB_EFFECT_FENCE_INVALID');
     return id;
   }));
-  const ruleEvents = resolved.events.filter(event => !suppressedOrderIds.has(event.orderId));
+  let ruleEvents = resolved.events.filter(event => !suppressedOrderIds.has(event.orderId));
+  let changedCompositionOrderIds: number[] = [];
+  if (cncAuthority) {
+    const verifiedSourceKeys = new Set(resolved.cards.filter(card => card.verified)
+      .map(card => mdfSourceKey({ kind: card.kind, id: card.id })));
+    const cncEffects = await applyMdfCncAuthorityEffects(tx, { job, authority: cncAuthority,
+      heads: allocation.sourceHeads, sources, details: snapshot.details, orderIds: allocation.orderIds, verifiedSourceKeys,
+      suppressedOrderIds, enabled: cncAutoCutEnabled });
+    const completed = new Set(cncEffects.completedOrderIds);
+    // Completed business headers are protected from every ordinary event for
+    // this CNC job. When direct AutoCut is enabled, the packet's completion is
+    // represented by the dedicated effect rather than a duplicate rule-17 pass.
+    ruleEvents = ruleEvents.filter(event => !completed.has(event.orderId)
+      && !(cncAutoCutEnabled && event.eventType === 'mdf.board.completed'
+        && event.scope.source.kind === 'packet' && event.scope.source.id === cncAuthority.packetId));
+    changedCompositionOrderIds = cncEffects.changedOrderIds
+      .filter(orderId => !completed.has(orderId) && !suppressedOrderIds.has(orderId));
+  }
   // Accepted business facts outlive actor accounts. A missing actor never gets
   // fabricated admin authority; retain accounting, omit rule effects, expose why.
   const user = job.actor_user_id ? (await tx.query<{ user_id: string; username: string; role_id: number }>(
     'SELECT user_id,username,role_id FROM users WHERE user_id=$1 AND is_active',[job.actor_user_id])).rows[0] : null;
   const actor = user ? mapUserRow(user) : null;
-  if (actor && effectPolicy === 'forward' && ruleEvents.length) await executePinnedMdfAutomation(tx,{ actor, requestId: job.request_id, sourceIdempotencyKey: job.event_key,
-    pins: rules.map(r => ({ ruleId: Number(r.rule_id), version: Number(r.rule_version) })), events: ruleEvents });
+  if (actor && effectPolicy === 'forward' && (ruleEvents.length || changedCompositionOrderIds.length)) {
+    await executePinnedMdfAutomation(tx,{ actor, requestId: job.request_id, sourceIdempotencyKey: job.event_key,
+      pins: rules.map(r => ({ ruleId: Number(r.rule_id), version: Number(r.rule_version) })), events: ruleEvents,
+      ...(changedCompositionOrderIds.length ? { productionCompositionOrderIds: changedCompositionOrderIds } : {}) });
+  }
   // Actions can change ranks; republish placement from the SAME locked evidence
   // and post-action detail snapshot. They cannot create new physical quantities.
   const final = projectMdfAcceptedState({ ...input, details: await loadMdfExecutionDetails(tx,allocation.orderIds) });
-  if (!actor && rules.length && effectPolicy === 'forward' && ruleEvents.length) {
+  if (!actor && rules.length && effectPolicy === 'forward' && (ruleEvents.length || changedCompositionOrderIds.length)) {
     const eligibleOrders = new Set(ruleEvents.map(event => event.orderId));
+    for (const orderId of changedCompositionOrderIds) eligibleOrders.add(orderId);
     for (const card of final.cards) if (card.orderIds.some(id => eligibleOrders.has(id))) card.issues.push('MDF_ACTOR_UNAVAILABLE');
     const eligiblePositions = new Set(snapshot.details.filter(d => eligibleOrders.has(d.orderId)).map(mdfPositionKey));
     // The warning is appended after projection (and therefore after the

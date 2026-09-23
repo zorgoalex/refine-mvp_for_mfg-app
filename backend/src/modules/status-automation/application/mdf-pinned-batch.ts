@@ -8,6 +8,8 @@ export interface PinnedMdfAutomationInput {
   sourceIdempotencyKey: string;
   pins: readonly MdfAutomationRulePin[];
   events: readonly MdfBoardResolvedEvent[];
+  /** Private accepted-job follow-up. Re-evaluated using this same batch's pins. */
+  productionCompositionOrderIds?: readonly number[];
 }
 
 /** Shape validation is NOT evidence verification. The accepted-job caller must
@@ -16,7 +18,8 @@ export interface PinnedMdfAutomationInput {
  * events and transaction-local pins; this does NOT promote them to evidence.
  * Snapshot synchronously so an awaited query cannot change this batch's intent.
  */
-export function snapshotPinnedMdfBatch(input: PinnedMdfAutomationInput, allowSystemActor = false): PinnedMdfAutomationInput {
+export function snapshotPinnedMdfBatch(input: PinnedMdfAutomationInput, allowSystemActor = false,
+  allowProductionCompositionFollowup = false): PinnedMdfAutomationInput {
   const positive = (n: number) => Number.isSafeInteger(n) && n > 0;
   const text = (value: string) => typeof value === 'string' && value.trim().length > 0 && value.length <= 512;
   const invalid = () => { throw new Error('MDF_INVALID_PINNED_BATCH'); };
@@ -25,7 +28,10 @@ export function snapshotPinnedMdfBatch(input: PinnedMdfAutomationInput, allowSys
       || allowSystemActor && input.actor.id === null && input.actor.role === null)
     || !text(input.actor.username)
     || !Array.isArray(input.pins) || input.pins.length > 1000
-    || !Array.isArray(input.events) || input.events.length > 5000) invalid();
+    || !Array.isArray(input.events) || input.events.length > 5000
+    || (input.productionCompositionOrderIds !== undefined
+      && (!allowProductionCompositionFollowup || !Array.isArray(input.productionCompositionOrderIds)
+        || input.productionCompositionOrderIds.length > 100))) invalid();
   const pinIds = new Set<number>();
   const pins = input.pins.map(pin => {
     if (!positive(pin.ruleId) || !positive(pin.version) || pinIds.has(pin.ruleId)) invalid();
@@ -33,6 +39,12 @@ export function snapshotPinnedMdfBatch(input: PinnedMdfAutomationInput, allowSys
     return { ruleId: pin.ruleId, version: pin.version };
   });
   const orders = new Set<number>();
+  const compositionOrders = new Set<number>();
+  for (const orderId of input.productionCompositionOrderIds ?? []) {
+    if (!positive(orderId) || compositionOrders.has(orderId)) invalid();
+    compositionOrders.add(orderId);
+    orders.add(orderId);
+  }
   const sources = new Map<string, string>();
   const entries = new Set<string>();
   const positions = new Map<number, { orderId: number; requiredQuantity: number }>();
@@ -70,5 +82,6 @@ export function snapshotPinnedMdfBatch(input: PinnedMdfAutomationInput, allowSys
   });
   if (orders.size > 100 || sources.size > 250) invalid();
   return { actor: { ...input.actor }, requestId: input.requestId,
-    sourceIdempotencyKey: input.sourceIdempotencyKey, pins, events };
+    sourceIdempotencyKey: input.sourceIdempotencyKey, pins, events,
+    ...(compositionOrders.size ? { productionCompositionOrderIds: [...compositionOrders].sort((a,b)=>a-b) } : {}) };
 }
