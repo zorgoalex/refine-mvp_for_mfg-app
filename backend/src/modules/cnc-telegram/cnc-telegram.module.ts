@@ -22,6 +22,9 @@ import { CncTelegramImportService } from './application/cnc-telegram-import.serv
 import { CncTelegramImportController } from './http/cnc-telegram-import.controller';
 import { MdfBoardHistoryService } from './application/mdf-board-history.service';
 import { PgMdfBoardHistoryRepository } from './adapters/pg-mdf-board-history-repository';
+import { PgCncTelegramMdfObservationRepository } from './adapters/pg-cnc-telegram-mdf-observation-repository';
+import { CncTelegramMdfObservationService } from './application/mdf-cnc-observations.service';
+import { CncTelegramObservationWorkerController } from './http/cnc-telegram-observation-worker.controller';
 
 @Module({
   imports: [DatabaseModule],
@@ -31,6 +34,7 @@ import { PgMdfBoardHistoryRepository } from './adapters/pg-mdf-board-history-rep
     CncTelegramMediaController,
     CncTelegramWorkerSessionController,
     CncTelegramImportController,
+    CncTelegramObservationWorkerController,
   ],
   providers: [
     CncTelegramRuntimeConfigService,
@@ -107,6 +111,19 @@ import { PgMdfBoardHistoryRepository } from './adapters/pg-mdf-board-history-rep
         return new CncTelegramImportService(new PgCncTelegramImportRepository(database, packetRepository), config, session);
       },
       inject: [DatabaseService, ConfigService, CncTelegramWorkerSessionService],
+    },
+    {
+      provide: PgCncTelegramMdfObservationRepository,
+      useFactory: (database: DatabaseService) => new PgCncTelegramMdfObservationRepository(database),
+      inject: [DatabaseService],
+    },
+    {
+      provide: CncTelegramMdfObservationService,
+      useFactory: (
+        repository: PgCncTelegramMdfObservationRepository,
+        session: CncTelegramWorkerSessionService,
+      ) => new CncTelegramMdfObservationService(repository, session),
+      inject: [PgCncTelegramMdfObservationRepository, CncTelegramWorkerSessionService],
     },
   ],
 })

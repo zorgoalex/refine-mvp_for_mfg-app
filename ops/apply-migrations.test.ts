@@ -136,6 +136,31 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(verification).toMatch(/179_mdf_active_return\*\)\s+probe_file "\$f" \|\| die/);
   });
 
+  it('probes bounded CNC observation state and verifies migration180 before ledgering it', () => {
+    const start = probeFn.indexOf('180_mdf_cnc_observations*)');
+    const end = probeFn.indexOf('*) return 2', start);
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, end);
+    for (const marker of [
+      'mdf_cnc_observation_targets', 'mdf_cnc_observation_receipts', 'mdf_cnc_observation_job_authorities',
+      'cnc_telegram_packets', 'cnc_telegram_import_candidates', 'cnc_telegram_import_items',
+      'mdf_cnc_return_fences', 'last_observation_version', 'claim_token_hash',
+      '58c9e312f16b38ba45c5534146e41ace', '14d491731eb52f0a2c23e87fdb8129df',
+      '7821d51124214275c01987dacf631670', 'b9f99f4745220b221cbf5884e57ff0ed',
+      'a11437465812fd395e0de3193864263d', 'aafc76b66f97eccf6e9769810c00a936',
+      '6a9edc964e9da23dd9ca659d7a27297c', '8e5c2533815f1dd0184e7851c9e60b94',
+      '7cdb1d017c3efa3cb34ea09c72bf89d0',
+      "q_fun_hash 'public.mdf_guard_cnc_observation_target()' 518942b013d23e6160eb47e06237a0d2",
+      "q_fun_hash 'public.mdf_reject_evidence_change()' a51e1b51d407124a856f1993d9c54fe8",
+      'mdf_guard_cnc_observation_target', 'mdf_reject_evidence_change()',
+      'mdf_cnc_observation_target_guard', 'mdf_cnc_observation_receipt_immutable',
+      'mdf_cnc_observation_job_authority_immutable', 't.tgtype=kind', ',31)', ',27)', "t.tgenabled='O'",
+      'NOT convalidated', 'NOT indisvalid OR NOT indisready',
+    ]) expect(arm).toContain(marker);
+    const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verification).toMatch(/180_mdf_cnc_observations\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
   it('verifies migrations 164-169 before recording their ledger entries', () => {
     const verify = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
     expect(verify).toContain('164_*|165_*|166_*|167_*|168_*|169_*)');
@@ -209,7 +234,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText).not.toMatch(/q_fun_hash\(\).*md5\(prosrc\)/);
     expect(probeFn).toContain("q_fun_hash 'cnc_telegram_worker_reason_code_valid(text)'");
     expect(probeFn.match(/q_fun_hash '[^']+' [a-f0-9]{32}/g)).toHaveLength(
-      requiredFunctions.length + 2 + 9 + 1 + 1 + 7, // 164-169,174/175,177,178 and 179 guards
+      requiredFunctions.length + 2 + 9 + 1 + 1 + 7 + 2, // 164-169,174/175,177-180 guard functions
     );
   });
 

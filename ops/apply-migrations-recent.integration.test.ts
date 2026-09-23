@@ -14,7 +14,7 @@ const source = readFileSync(script, 'utf8');
 const dir = resolve(__dirname, '../backend/db/migrations');
 const files = readdirSync(dir).filter((f) => /^16[4-9]_.*\.sql$/.test(f)
   || ['174_mdf_execution_context.sql','175_mdf_command_placement.sql','177_cut_result_typed_hdf.sql',
-    '178_mdf_correction_receipts.sql','179_mdf_active_return.sql'].includes(f)).sort();
+    '178_mdf_correction_receipts.sql','179_mdf_active_return.sql','180_mdf_cnc_observations.sql'].includes(f)).sort();
 const helpers = source.slice(source.indexOf('q_col()'), source.indexOf('# These migrations contain conditional'));
 const queries = (file: string) => execFileSync('bash', ['-s', '--', file], {
   input: `${helpers}\nprobe_all() { printf '%s\\n' "$@"; }\nprobe_file "$1"`, encoding: 'utf8',
@@ -32,7 +32,7 @@ const present = (file: string, mutation = '') => {
 };
 const fileFor = (version: number) => files.find((f) => f.startsWith(`${version}_`))!;
 
-describe.skipIf(!enabled)('migration 164-169, 174-175 and 177-179 probes against actual SQL on PostgreSQL', () => {
+describe.skipIf(!enabled)('migration 164-169, 174-175 and 177-180 probes against actual SQL on PostgreSQL', () => {
   let created = false;
   beforeAll(() => {
     sql(`CREATE DATABASE ${db} TEMPLATE template0;`, 'postgres');
@@ -43,6 +43,8 @@ describe.skipIf(!enabled)('migration 164-169, 174-175 and 177-179 probes against
       CREATE TABLE group_groups(code text);
       CREATE TABLE cnc_telegram_packet_whole_order_keys(order_key text);
       CREATE TABLE cnc_telegram_packets(packet_id uuid PRIMARY KEY);
+      CREATE TABLE cnc_telegram_import_candidates(candidate_id uuid PRIMARY KEY);
+      CREATE TABLE cnc_telegram_import_items(import_item_id uuid PRIMARY KEY);
       CREATE TABLE users(user_id bigint PRIMARY KEY);
       CREATE TABLE order_statuses(order_status_id smallint PRIMARY KEY);
       CREATE TABLE bitrix24_app_installation(member_id text PRIMARY KEY);
@@ -132,6 +134,11 @@ describe.skipIf(!enabled)('migration 164-169, 174-175 and 177-179 probes against
     [179, 'ALTER TABLE mdf_cnc_return_fences DISABLE TRIGGER mdf_cnc_return_fence_guard;'],
     [179, "ALTER TABLE mdf_cnc_return_fences DROP CONSTRAINT mdf_cnc_return_fences_state_check; ALTER TABLE mdf_cnc_return_fences ADD CONSTRAINT mdf_cnc_return_fences_state_check CHECK(true);"],
     [179, 'CREATE OR REPLACE FUNCTION mdf_guard_cnc_return_fence() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;'],
+    [180, 'ALTER TABLE mdf_cnc_observation_targets ALTER COLUMN accepted_revision_key DROP NOT NULL;'],
+    [180, 'ALTER TABLE mdf_cnc_observation_receipts DISABLE TRIGGER mdf_cnc_observation_receipt_immutable;'],
+    [180, 'ALTER TABLE mdf_cnc_observation_job_authorities DISABLE TRIGGER mdf_cnc_observation_job_authority_immutable;'],
+    [180, 'DROP INDEX idx_mdf_cnc_observation_due;'],
+    [180, 'CREATE OR REPLACE FUNCTION mdf_guard_cnc_observation_target() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;'],
   ] as const)('%s: rejects drift %s', (version, mutation) => {
     expect(present(fileFor(version), mutation)).toBe(false);
     expect(present(fileFor(version))).toBe(true); // rollback restored fixture

@@ -35,12 +35,16 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     }
     // Own schema only, no public business mutations or hard-coded production ids.
     for (const table of ['orders','order_details','production_statuses','order_statuses','materials','sheet_material_types',
-      'users','cut_result','cnc_telegram_packets','status_automation_rules','outbox_events','audit_log','audit_log_related_entity',
+      'users','cut_result','cnc_telegram_packets','cnc_telegram_import_candidates','cnc_telegram_import_items',
+      'status_automation_rules','outbox_events','audit_log','audit_log_related_entity',
       'app_settings','bazis_order_links','order_import_entity_map','order_workshops']) {
       await db.query(`CREATE TABLE ${table} AS TABLE public.${table} WITH NO DATA`);
     }
-    await db.query('ALTER TABLE cnc_telegram_packets ADD PRIMARY KEY(packet_id)');
+    await db.query(`ALTER TABLE cnc_telegram_packets ADD PRIMARY KEY(packet_id);
+      ALTER TABLE cnc_telegram_import_candidates ADD PRIMARY KEY(candidate_id);
+      ALTER TABLE cnc_telegram_import_items ADD PRIMARY KEY(import_item_id)`);
     await db.query(readFileSync(new URL('../../../../db/migrations/179_mdf_active_return.sql',import.meta.url),'utf8'));
+    await db.query(readFileSync(new URL('../../../../db/migrations/180_mdf_cnc_observations.sql',import.meta.url),'utf8'));
     await db.query(`ALTER TABLE audit_log ALTER COLUMN audit_id SET DEFAULT gen_random_uuid();
       CREATE UNIQUE INDEX e2e_audit_related ON audit_log_related_entity(audit_id,entity_type,entity_id);
       CREATE UNIQUE INDEX e2e_outbox ON outbox_events(idempotency_key);
@@ -112,6 +116,44 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     expect(await runner().processOne()).toEqual({ status: 'idle' });
     expect((await db.query('SELECT count(*) n FROM outbox_events WHERE aggregate_id=$1',[String(f.orderId)])).rows[0].n).toBe('1');
     expect(BigInt((await db.query('SELECT published_revision FROM mdf_engine_state')).rows[0].published_revision)).toBe(BigInt(revision)+2n);
+  });
+
+  it('durably quarantines a CNC-authority job before allocation or publication effects', async () => {
+    const f = await fixture();
+    const packetId = f.receipts[0].sourceId;
+    const claimId = randomUUID();
+    const candidateId = randomUUID();
+    const itemId = randomUUID();
+    await db.query('INSERT INTO cnc_telegram_packets(packet_id,source_version) VALUES($1,1)', [packetId]);
+    await db.query('INSERT INTO cnc_telegram_import_candidates(candidate_id) VALUES($1)', [candidateId]);
+    await db.query('INSERT INTO cnc_telegram_import_items(import_item_id) VALUES($1)', [itemId]);
+    await db.query(`INSERT INTO mdf_cnc_observation_targets
+      (packet_id,import_item_id,candidate_id,source_chat_id,source_group_message_id,message_bindings,
+       registered_revision_key,registered_membership_digest,accepted_revision_key,last_observation_version)
+      VALUES($1,$2,$3,'-100123',101,$4::jsonb,$5,$6,$5,1)`,
+    [packetId, itemId, candidateId, JSON.stringify([{ messageId: '101', role: 'svg', sha256: 'a'.repeat(64) }]),
+      f.receipts[0].revisionKey, 'd'.repeat(64)]);
+    await db.query(`INSERT INTO mdf_cnc_observation_receipts
+      (claim_id,packet_id,claim_generation,claim_token_hash,worker_instance_id,session_generation,
+       head_version,correction_epoch,raw_source_version,observation_version,report_state,report_digest,report,result)
+      VALUES($1,$2,1,$3,$4,1,1,0,1,1,'completed',$5,'[]','{}')`,
+    [claimId, packetId, 'b'.repeat(64), randomUUID(), 'c'.repeat(64)]);
+    await db.query(`INSERT INTO mdf_cnc_observation_job_authorities(job_id,packet_id,claim_id,authority)
+      VALUES($1,$2,$3,'cnc_autocut')`, [f.jobs[0].jobId, packetId, claimId]);
+
+    const before = {
+      statuses: await statuses(f.orderId),
+      allocations: (await db.query('SELECT count(*)::text count FROM mdf_bath_allocations WHERE order_id=$1', [f.orderId])).rows[0].count,
+      published: (await db.query('SELECT count(*)::text count FROM mdf_published_positions WHERE order_id=$1', [f.orderId])).rows[0].count,
+    };
+    expect(await runner().processOne()).toMatchObject({ status: 'needs_attention', jobId: f.jobs[0].jobId });
+    expect((await db.query('SELECT status,error_code FROM mdf_recalculation_jobs WHERE job_id=$1', [f.jobs[0].jobId])).rows[0])
+      .toEqual({ status: 'needs_attention', error_code: 'MDF_CNC_AUTHORITY_EXECUTOR_REQUIRED' });
+    expect({
+      statuses: await statuses(f.orderId),
+      allocations: (await db.query('SELECT count(*)::text count FROM mdf_bath_allocations WHERE order_id=$1', [f.orderId])).rows[0].count,
+      published: (await db.query('SELECT count(*)::text count FROM mdf_published_positions WHERE order_id=$1', [f.orderId])).rows[0].count,
+    }).toEqual(before);
   });
   it('failed final publication rolls back allocation, rules, audit and revision; durable receipt retries', async () => {
     const f = await fixture();

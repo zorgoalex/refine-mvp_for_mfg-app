@@ -189,10 +189,17 @@ export class PgMdfCorrectionCommand {
       JSON.stringify(prepared.deferredJobs.flatMap(job=>job.affectedOrderIds.map(orderId=>({job_id:job.jobId,order_id:String(orderId)})))),
       source.kind,source.id,newEpoch,request.idempotencyKey]);
 
-    // The CNC ingress consumer is intentionally not connected. Persist its
-    // freshness baseline atomically before appending the correction receipt.
+    // Persist the bounded observer's freshness baseline atomically before
+    // appending the correction receipt; no legacy ingest path is enabled.
     if (prepared.response.cncFreshnessBaseline) {
       const barrier=prepared.response.cncFreshnessBaseline;
+      // Invalidate any observation fetched before this return. The target's
+      // independent sequence is retained and included in the next baseline.
+      await tx.query(`UPDATE mdf_cnc_observation_targets SET work_state='active',next_due_at=now(),
+        claim_id=NULL,claim_token_hash=NULL,claim_worker_instance_id=NULL,claim_session_generation=NULL,
+        claim_expires_at=NULL,claim_head_version=NULL,claim_correction_epoch=NULL,
+        claim_raw_source_version=NULL,claim_observation_version=NULL,
+        claim_generation=claim_generation+1,updated_at=now() WHERE packet_id=$1::uuid`,[barrier.packetId]);
       await tx.query(`INSERT INTO mdf_cnc_return_fences(packet_id,correction_epoch,baseline_source_version,state)
         VALUES($1::uuid,$2::bigint,$3::bigint,'waiting_pending')
         ON CONFLICT(packet_id) DO UPDATE SET correction_epoch=EXCLUDED.correction_epoch,
@@ -234,6 +241,16 @@ export class PgMdfCorrectionCommand {
         accept:true,correction:true,lines:receiptLines,rules});
       if (!saved.accepted||saved.replay||saved.correctionEpoch!==(BigInt(previous.epoch)+1n).toString())
         fail(409,'MDF_CORRECTION_STALE','Подтверждённая версия карточки изменилась. Повторите предпросмотр.');
+      if (isDirectTarget && source.kind==='packet' && prepared.response.cncFreshnessBaseline) {
+        await tx.query(`UPDATE mdf_cnc_observation_targets SET accepted_revision_key=$2,updated_at=now()
+          WHERE packet_id=$1::uuid AND registered_revision_key IS NOT NULL`,[source.id,revisionKey]);
+        // Keep legacy/raw CNC readers behind the same return fence as the
+        // accepted MDF receipt. Do not bump source_version: labels and
+        // evidence projections are keyed to that content version.
+        await tx.query(`UPDATE cnc_telegram_packets SET completion_status='pending',thumbs_up=false,
+          completed_at=NULL,mdf_completion_returned=true,updated_at=now(),updated_by=$2
+          WHERE packet_id=$1::uuid`,[source.id,actorId]);
+      }
       const lineIds=(await tx.query<{lineKey:string;id:string}>(`SELECT line_key "lineKey",evidence_line_id::text id FROM mdf_evidence_lines
         WHERE source_kind=$1 AND source_id=$2 AND revision_key=$3 ORDER BY line_key`,[ref.kind,ref.id,revisionKey])).rows;
       if (lineIds.length!==receiptLines.length) throw new Error('MDF_CORRECTION_RECEIPT_LINES_INCOMPLETE');
@@ -496,7 +513,7 @@ function makePreview(source:Source,request:MdfCorrectionPreviewBody,snapshot:Mdf
   }
   const baseline=head&&source.kind==='packet'&&plan.status==='ready'
     && targetStage.rank < (stages.find(s=>s.code==='cut')?.rank??Number.MIN_SAFE_INTEGER)
-    ? {packetId:source.id,sourceVersion:snapshot.rawTarget.sourceVersion!,correctionEpoch:(BigInt(head.epoch)+1n).toString(),state:'waiting_pending' as const}:null;
+    ? {packetId:source.id,sourceVersion:snapshot.rawTarget.observationBaseline!,correctionEpoch:(BigInt(head.epoch)+1n).toString(),state:'waiting_pending' as const}:null;
   const blockers=plan.status==='blocked'?plan.blockers:[];
   const response:MdfCorrectionPreviewResponse={protocol:'mdf-correction-v1',status:plan.status==='ready'?'ready':'blocked',
     source:{...source,label:sourceLabel},targetColumn:request.targetColumn,targetStage,stages:returnStages,
@@ -504,7 +521,7 @@ function makePreview(source:Source,request:MdfCorrectionPreviewBody,snapshot:Mdf
     details,affectedBaths:baths,allocationReleases:plan.status==='ready'?plan.allocationReleaseIds:[],
     allocationReplacements:plan.status==='ready'?plan.allocationReplacements:[],deferredPriorAutomation:deferredJobs,
     cncFreshnessBaseline:baseline,blockers,warnings:[]};
-  if (baseline) response.warnings.push('Для повторного подтверждения реза потребуется новое pending-событие и затем более новая completion-отметка; обработчик CNC пока не подключён.');
+  if (baseline) response.warnings.push('Для повторного подтверждения реза потребуется новое pending-событие и затем более новая completion-отметка; наблюдатель CNC пока не активирован.');
   if (plan.status==='ready'&&plan.affectedDetails.some(effect=>effect.afterRank!==snapshot.details.find(d=>d.orderId===effect.orderId&&d.detailId===effect.detailId)?.currentRank))
     response.warnings.push('Статус изменится для всей затронутой позиции, даже если возвращено только её количество в этой карточке.');
   for (const effect of baths) if (effect.clearsManualPlacementOverride) response.warnings.push(`Для ванны ${effect.source.id} будет снято ручное размещение; позиция пересчитается по подтверждённым фактам.`);
@@ -518,7 +535,8 @@ function correctionDigest(user:CurrentUser,source:Source,request:MdfCorrectionPr
   return hash({actor:{id:user.id,role:user.role,permissions:[...user.permissions].sort(),scopes:rolePolicyForUser(user)},source,
     intent:{sourceToken:request.sourceToken,targetColumn:request.targetColumn,productionStatusId:request.productionStatusId??null},
     heads:snapshot.heads,lines:snapshot.lines,demands:[...snapshot.frozenDemand].sort(([a],[b])=>a.localeCompare(b)),
-    issues:[...snapshot.sourceIssues].sort(([a],[b])=>a<b?-1:a>b?1:0),raw:{stamp:snapshot.rawTarget.stamp,sourceVersion:snapshot.rawTarget.sourceVersion},
+    issues:[...snapshot.sourceIssues].sort(([a],[b])=>a<b?-1:a>b?1:0),raw:{stamp:snapshot.rawTarget.stamp,
+      sourceVersion:snapshot.rawTarget.sourceVersion,observationBaseline:snapshot.rawTarget.observationBaseline},
     allocations:snapshot.allocations,details:snapshot.details,owners:snapshot.owners.map(owner=>({...owner,assigned:[...owner.assigned].sort()})),
     metadata:[...snapshot.metadata].sort(([a],[b])=>a<b?-1:a>b?1:0),
     published:[...snapshot.published].sort(([a],[b])=>a.localeCompare(b)),stages,targetStage,plan,affectedOrderIds,candidateJobs,deferredJobs,

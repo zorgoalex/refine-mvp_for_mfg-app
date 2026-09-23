@@ -8,6 +8,7 @@ import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole, mapRoleIdToRole, type UserRole } from '../../../permissions/permissions';
 import { assertCurrentWorkerSessionInTransaction } from './cnc-telegram-worker-session-fencing';
+import { registerExplicitImportObservationTarget } from './pg-cnc-telegram-mdf-observation-repository';
 import type { CncTelegramWorkerSessionLeaseContext } from '../application/cnc-telegram-worker-session.types';
 import type { CncTelegramImportRepositoryPort } from '../application/cnc-telegram-import.types';
 import type {
@@ -434,9 +435,12 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
       const mdfJobId=boundary.queued ? (await tx.query<{job_id:string}>(`SELECT job_id FROM mdf_recalculation_jobs
         WHERE source_kind='packet' AND source_id=$1 ORDER BY created_at DESC LIMIT 1`,[response.packet.packetId])).rows[0]?.job_id : undefined;
       const updated = await tx.query<Row>(`UPDATE cnc_telegram_import_items SET status='imported', packet_id=$2, cut_job_id=$3, cut_result_id=$4, updated_at=now() WHERE import_item_id=$1 RETURNING *`, [text(item, 'import_item_id'), response.packet.packetId, response.cutJobId, response.cutResultId]);
+      const observationRegistered=boundary.queued && currentMatches.length===0
+        ? await registerExplicitImportObservationTarget(tx,{importItemId:text(item,'import_item_id'),
+          packetId:response.packet.packetId,completion:input.completion}) : false;
       await updateRequestCounts(tx, text(item, 'import_request_id'));
-      await auditService.record(tx, { event: 'cnc.telegram_import.item_imported', actorUserId: requester.id, actorUsername: requester.username, actorRole: requester.role, entityType: 'cnc_telegram_import_item', entityId: text(item, 'import_item_id'), source: 'cnc_telegram_import', requestId: input.requestId, metadata: { technicalWorker: input.currentUser.username, packetId: response.packet.packetId, cutJobId: response.cutJobId, requestedCutJobId: dto.requestedCutJobId,mdfJobId } });
-      await enqueueImportOutbox(tx, 'cnc.telegram_import.item_imported', text(item, 'import_item_id'), input.requestId, { actorUserId: requester.id, technicalWorkerUserId: input.currentUser.id, packetId: response.packet.packetId, cutJobId: response.cutJobId, requestedCutJobId: dto.requestedCutJobId,mdfJobId });
+      await auditService.record(tx, { event: 'cnc.telegram_import.item_imported', actorUserId: requester.id, actorUsername: requester.username, actorRole: requester.role, entityType: 'cnc_telegram_import_item', entityId: text(item, 'import_item_id'), source: 'cnc_telegram_import', requestId: input.requestId, metadata: { technicalWorker: input.currentUser.username, packetId: response.packet.packetId, cutJobId: response.cutJobId, requestedCutJobId: dto.requestedCutJobId,mdfJobId,observationRegistered } });
+      await enqueueImportOutbox(tx, 'cnc.telegram_import.item_imported', text(item, 'import_item_id'), input.requestId, { actorUserId: requester.id, technicalWorkerUserId: input.currentUser.id, packetId: response.packet.packetId, cutJobId: response.cutJobId, requestedCutJobId: dto.requestedCutJobId,mdfJobId,observationRegistered });
       return itemDto(requiredRow(updated.rows[0], 'import completion'));
     }, { mdf:{ writer:'cnc.telegram_import.complete',capability:'queued' } });
   }

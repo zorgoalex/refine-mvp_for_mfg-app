@@ -28,6 +28,19 @@ and polls manual outbound sends and media restores. With
 confirmed-import queues. It never scans Telegram history without such a claim.
 The deprecated `daemon` command is fail-closed.
 
+The bounded MDF reaction-observation lane is a separate opt-in and remains off
+by default. `CNC_TELEGRAM_MDF_OBSERVATIONS_ENABLED=false` makes `serve` skip its
+claim endpoint entirely. When enabled against a backend that supports the
+observation-worker endpoints, it claims one registered source at a time and
+fetches only the exact claimed SVG/G-code/image messages in one current Telegram
+snapshot. It does not scan history, reuse local spool/state, parse files, or send
+chat messages. After a successful claim it pauses at most five seconds before
+asking for another due source; the backend controls per-source due/backoff and
+stops polling a completed source until a new correction epoch. This observation
+protocol orders server-side fetches, not the time at which a shop user reacted.
+Keep the flag `false` unless the backend and this worker image are deliberately
+being exercised together.
+
 The legacy `once`, `daemon`, and `svg-refresh-backfill` commands are fail-closed.
 They remain named only to produce an explicit migration error; no arbitrary
 request id or history range is accepted before the Phase B persisted scan/import
@@ -45,6 +58,8 @@ ERP_WORKER_LOGIN=cnc-worker
 ERP_WORKER_PASSWORD=...
 CNC_AUDIT_SPOOL_PATH=/data/cnc-telegram-audit.sqlite3
 CNC_TELEGRAM_MANUAL_IMPORT_ENABLED=false
+CNC_TELEGRAM_MDF_OBSERVATIONS_ENABLED=false
+CNC_TELEGRAM_MDF_OBSERVATION_POLL_INTERVAL_SECONDS=60
 ```
 
 `ERP_BEARER_TOKEN` can replace `ERP_WORKER_LOGIN/PASSWORD`.

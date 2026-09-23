@@ -34,6 +34,7 @@ from .config import WorkerConfig
 from .erp_client import BackendAuth, ErpClient, ErpResponseError, SessionLeaseLost, WorkerItemLease, parse_item_lease
 from .gcode import extract_order_names, parse_gcode_text
 from .ocr import OcrResult, run_ocr_command
+from .observation import ObservationReadError, fetch_observation_facts, validate_observation_claim
 from .packet import (
     GcodeMeta,
     ImageMeta,
@@ -111,7 +112,7 @@ class ManualSvgSentItem:
 class WeightedQueueScheduler:
     """Small deterministic weighted round-robin dispatcher for queue fairness."""
 
-    weights = {"manual": 4, "import": 2, "restore": 1, "discovery": 1}
+    weights = {"manual": 4, "import": 2, "restore": 1, "discovery": 1, "observation": 1}
 
     def __init__(self, *, aging_seconds: float = 60.0) -> None:
         self.aging_seconds = aging_seconds
@@ -439,7 +440,9 @@ class CncTelegramWorker:
                 self._heartbeat_session(stop_event, lease_lost_event),
                 name="cnc-telegram-session-heartbeat",
             )
-            import_scheduler_enabled = bool(getattr(self.config, "manual_import_enabled", False))
+            manual_import_scheduler_enabled = bool(getattr(self.config, "manual_import_enabled", False))
+            observation_scheduler_enabled = bool(getattr(self.config, "mdf_observations_enabled", False))
+            queue_scheduler_enabled = manual_import_scheduler_enabled or observation_scheduler_enabled
             await self.process_media_restore_requests(client, entity, chat_id)
             self._raise_if_technical_lease_lost(technical_lease_lost_event)
             if self.config.can_send_manual_svg_uploads:
@@ -452,7 +455,7 @@ class CncTelegramWorker:
                     audit_flush_lock=audit_flush_lock,
                 )
                 self._raise_if_technical_lease_lost(technical_lease_lost_event)
-            if self.config.can_send_manual_svg_uploads and not import_scheduler_enabled:
+            if self.config.can_send_manual_svg_uploads and not queue_scheduler_enabled:
                 queue_tasks.append(asyncio.create_task(
                     self.poll_manual_svg_telegram_send_requests(
                         client,
@@ -466,7 +469,7 @@ class CncTelegramWorker:
                     ),
                     name="cnc-telegram-manual-send-poll",
                 ))
-            if import_scheduler_enabled:
+            if queue_scheduler_enabled:
                 queue_tasks.append(asyncio.create_task(
                     self.poll_queue_scheduler(
                         client,
@@ -480,7 +483,7 @@ class CncTelegramWorker:
                     ),
                     name="cnc-telegram-import-queue-scheduler",
                 ))
-            else:
+            if not manual_import_scheduler_enabled:
                 queue_tasks.append(asyncio.create_task(
                     self.poll_media_restore_requests(
                         client,
@@ -797,19 +800,22 @@ class CncTelegramWorker:
         ready_since: dict[str, float] = {}
         next_probe_at: dict[str, float] = {}
         import_poll_interval = getattr(self.config, "import_queue_poll_interval_seconds", 5)
+        observation_poll_interval = getattr(self.config, "mdf_observation_poll_interval_seconds", 60)
         poll_intervals = {
             "manual": self.config.poll_interval_seconds,
             "import": import_poll_interval,
             "restore": self.config.poll_interval_seconds,
             "discovery": import_poll_interval,
+            "observation": observation_poll_interval,
         }
         while not stop_event.is_set():
             now = time.monotonic()
             enabled = {
                 "manual": self.config.can_send_manual_svg_uploads,
-                "import": True,
-                "restore": True,
-                "discovery": True,
+                "import": bool(getattr(self.config, "manual_import_enabled", False)),
+                "restore": bool(getattr(self.config, "manual_import_enabled", False)),
+                "discovery": bool(getattr(self.config, "manual_import_enabled", False)),
+                "observation": bool(getattr(self.config, "mdf_observations_enabled", False)),
             }
             ready: dict[str, bool] = {}
             for name, is_enabled in enabled.items():
@@ -872,6 +878,8 @@ class CncTelegramWorker:
                             else asyncio.sleep(0)
                         ),
                     )
+                elif queue_name == "observation":
+                    processed = await self.process_mdf_cnc_observation_queue(client, entity, chat_id)
                 else:
                     processed = await self.process_import_item_queue(client, entity, chat_id)
             except SessionLeaseLost:
@@ -890,8 +898,62 @@ class CncTelegramWorker:
                 next_probe_at[queue_name] = time.monotonic() + poll_intervals[queue_name]
                 await asyncio.sleep(0)
             else:
-                next_probe_at.pop(queue_name, None)
+                if queue_name == "observation":
+                    # The API applies per-target due/backoff. A short global
+                    # pause bounds retries while allowing a due queue of many
+                    # registered sources to drain without one full poll interval
+                    # per source.
+                    ready_since.pop(queue_name, None)
+                    next_probe_at[queue_name] = time.monotonic() + min(poll_intervals[queue_name], 5)
+                else:
+                    next_probe_at.pop(queue_name, None)
                 await asyncio.sleep(0)
+
+    async def process_mdf_cnc_observation_queue(self, client: Any, entity: Any, chat_id: str) -> int:
+        if not bool(getattr(self.config, "mdf_observations_enabled", False)):
+            return 0
+        response = await self.erp.claim_mdf_cnc_observation()
+        if not isinstance(response, dict):
+            raise RuntimeError("MDF CNC observation claim response is invalid")
+        claim = response.get("claim")
+        if claim is None:
+            return 0
+        # Invalid server work is never fetched. It will expire and be reclaimed
+        # after backend repair rather than widening the target from client input.
+        claim = validate_observation_claim(claim, chat_id)
+        claim_id = claim["claimId"]
+        claim_token = claim["claimToken"]
+        claim_generation = claim["claimGeneration"]
+        try:
+            facts = await fetch_observation_facts(client, entity, claim, chat_id)
+        except SessionLeaseLost:
+            raise
+        except ObservationReadError as exc:
+            await self.erp.fail_mdf_cnc_observation(
+                claim_id,
+                claim_token,
+                claim_generation,
+                exc.reason,
+            )
+            print(f"MDF CNC observation {claim_id} failed: {exc.reason}", flush=True)
+            return 1
+        except Exception:
+            await self.erp.fail_mdf_cnc_observation(
+                claim_id,
+                claim_token,
+                claim_generation,
+                "FETCH_FAILED",
+            )
+            print(f"MDF CNC observation {claim_id} failed: FETCH_FAILED", flush=True)
+            return 1
+        report = {
+            "claimId": claim_id,
+            "claimToken": claim_token,
+            "claimGeneration": claim_generation,
+            "messages": facts,
+        }
+        await self.erp.complete_mdf_cnc_observation(claim_id, report)
+        return 1
 
     async def process_import_scan_queue(
         self,

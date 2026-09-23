@@ -14,6 +14,12 @@ import { MdfNeedsAttention, type MdfJob, type MdfPinnedRule } from './mdf-job-ru
  * and cutover coverage are complete. No raw-source/legacy readiness fallback. */
 export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
   rules: readonly MdfPinnedRule[]): Promise<'done'|'superseded'> {
+  // New CNC observation receipts carry a durable distinct AutoCut authority
+  // marker. Until that executor is connected, quarantine them before even
+  // allocating/publishing; the general rule17 path is not a substitute.
+  const cncAuthority=(await tx.query<{authority:string}>(`SELECT authority
+    FROM mdf_cnc_observation_job_authorities WHERE job_id=$1::uuid`,[job.job_id])).rows[0];
+  if (cncAuthority) throw new MdfNeedsAttention('MDF_CNC_AUTHORITY_EXECUTOR_REQUIRED');
   const allocation = await executeMdfAllocation(tx,job.job_id,{ requireExecutionContext: true });
   if (allocation.status==='superseded') return 'superseded';
   const snapshot = allocation.executionSnapshot;

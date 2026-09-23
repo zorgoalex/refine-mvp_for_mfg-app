@@ -374,6 +374,42 @@ class ErpClient:
     async def claim_import_items(self) -> dict[str, Any]:
         return await self._authorized_post("/cnc-telegram/import-worker/imports/claim")
 
+    async def claim_mdf_cnc_observation(self) -> dict[str, Any]:
+        return await self._authorized_post("/cnc-telegram/observation-worker/claim")
+
+    async def complete_mdf_cnc_observation(self, claim_id: str, report: dict[str, Any]) -> dict[str, Any]:
+        if not claim_id:
+            raise RuntimeError("MDF CNC observation claim id is missing")
+        return await self._authorized_post(
+            f"/cnc-telegram/observation-worker/claims/{claim_id}/complete",
+            payload=report,
+        )
+
+    async def fail_mdf_cnc_observation(
+        self,
+        claim_id: str,
+        claim_token: str,
+        claim_generation: int,
+        reason: str,
+    ) -> dict[str, Any]:
+        if not claim_id or not claim_token or claim_generation <= 0:
+            raise RuntimeError("MDF CNC observation claim fence is missing")
+        if reason not in {
+            "FETCH_FAILED",
+            "MESSAGE_MISSING",
+            "MESSAGE_MEDIA_MISMATCH",
+            "MESSAGE_GROUP_INCOMPLETE",
+        }:
+            raise RuntimeError("MDF CNC observation failure reason is invalid")
+        return await self._authorized_post(
+            f"/cnc-telegram/observation-worker/claims/{claim_id}/fail",
+            payload={
+                "claimToken": claim_token,
+                "claimGeneration": claim_generation,
+                "reason": reason,
+            },
+        )
+
     async def complete_import_item(
         self,
         item_id: str,

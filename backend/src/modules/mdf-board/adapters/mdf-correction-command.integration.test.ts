@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
@@ -6,6 +6,7 @@ import { getPermissionsForRole } from '../../../permissions/permissions';
 import { recordMdfReceipt } from '../application/mdf-receipt';
 import { MdfJobRunner } from '../application/mdf-job-runner';
 import { executeMdfAcceptedJob } from '../application/mdf-accepted-job';
+import { PgCncTelegramMdfObservationRepository } from '../../cnc-telegram/adapters/pg-cnc-telegram-mdf-observation-repository';
 import type { DatabaseTransactionOptions } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import { mdfSourceCommandToken } from '../domain/mdf-manual-proof';
@@ -45,10 +46,13 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
       'cut_result_placement','cut_result_sheet_map','bazis_cut_sets','bazis_cut_set_details',
       'status_automation_rules','app_settings','outbox_events',
       'audit_log','audit_log_related_entity'];
+    tables.push('cnc_telegram_import_candidates','cnc_telegram_import_items','cnc_telegram_worker_session_leases');
     await fixture.clonePublicTables(tables);
     await fixture.client.query(`ALTER TABLE ${fixture.schema}.cnc_telegram_packets
       ADD COLUMN IF NOT EXISTS mdf_completion_returned boolean NOT NULL DEFAULT false;
       ALTER TABLE ${fixture.schema}.cnc_telegram_packets ADD PRIMARY KEY(packet_id);
+      ALTER TABLE ${fixture.schema}.cnc_telegram_import_candidates ADD PRIMARY KEY(candidate_id);
+      ALTER TABLE ${fixture.schema}.cnc_telegram_import_items ADD PRIMARY KEY(import_item_id);
       ALTER TABLE ${fixture.schema}.audit_log ALTER COLUMN audit_id SET DEFAULT gen_random_uuid();
       ALTER TABLE ${fixture.schema}.outbox_events ALTER COLUMN outbox_event_id SET DEFAULT gen_random_uuid();
       CREATE UNIQUE INDEX e2e_correction_audit_related ON ${fixture.schema}.audit_log_related_entity(audit_id,entity_type,entity_id);
@@ -56,6 +60,7 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
     for (const file of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql','174_mdf_execution_context.sql',
       '175_mdf_command_placement.sql','178_mdf_correction_receipts.sql']) await fixture.applyMigrations([file]);
     await fixture.applyMigrations(['179_mdf_active_return.sql']);
+    await fixture.applyMigrations(['180_mdf_cnc_observations.sql']);
     await fixture.client.query(`UPDATE ${fixture.schema}.mdf_engine_state SET mode='active';
       INSERT INTO ${fixture.schema}.users(user_id,username,role_id,is_active) VALUES(1,'E2E active MDF correction',1,true);
       INSERT INTO ${fixture.schema}.order_statuses(order_status_id,order_status_name,sort_order,is_active)
@@ -190,12 +195,50 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
       bathToken: mdfSourceCommandToken({ kind: 'bath', id: `cut-result:${orderId}` }, bathHead), allocations };
   }
 
+  async function registerObservationTarget(packetId:string,orderId:number) {
+    const itemId=randomUUID(),candidateId=randomUUID(),workerId=randomUUID(),leaseToken=randomUUID()+randomUUID();
+    const chatId=`E2E-observation-${orderId}`;
+    const head=(await fixture.client.query<{accepted:string}>(`SELECT accepted_revision_key accepted FROM mdf_source_heads
+      WHERE source_kind='packet' AND source_id=$1`,[packetId])).rows[0];
+    const members=(await fixture.client.query<{lineKey:string;orderId:string;detailId:string;quantity:string;rework:boolean}>(`SELECT
+      line_key "lineKey",order_id::text "orderId",detail_id::text "detailId",quantity::text quantity,rework
+      FROM mdf_evidence_lines WHERE source_kind='packet' AND source_id=$1 AND revision_key=$2
+      AND stage_code='membership' AND evidence_kind='derived' ORDER BY line_key,order_id,detail_id,rework`,[packetId,head.accepted])).rows;
+    const memberDigest=createHash('sha256').update(JSON.stringify(members.map(row=>
+      [row.lineKey,row.orderId,row.detailId,row.quantity,row.rework]))).digest('hex');
+    const binding={messageId:'1',role:'svg',sha256:'d'.repeat(64)};
+    await fixture.client.query('INSERT INTO cnc_telegram_import_candidates(candidate_id) VALUES($1::uuid)',[candidateId]);
+    await fixture.client.query('INSERT INTO cnc_telegram_import_items(import_item_id) VALUES($1::uuid)',[itemId]);
+    await fixture.client.query(`UPDATE cnc_telegram_packets SET source_chat_id=$2 WHERE packet_id=$1`,[packetId,chatId]);
+    await fixture.client.query(`INSERT INTO cnc_telegram_worker_session_leases
+      (source_chat_id,lease_token,lease_generation,worker_instance_id,worker_image_revision,expires_at)
+      VALUES($1,$2,1,$3::uuid,'abcdef1',now()+interval '1 hour')`,[chatId,leaseToken,workerId]);
+    await fixture.client.query(`INSERT INTO mdf_cnc_observation_targets(packet_id,import_item_id,candidate_id,source_chat_id,
+      source_group_message_id,message_bindings,registered_revision_key,registered_membership_digest,accepted_revision_key,
+      last_observation_version) VALUES($1::uuid,$2::uuid,$3::uuid,$4,1,$5::jsonb,$6,$7,$6,1)`,
+    [packetId,itemId,candidateId,chatId,JSON.stringify([binding]),head.accepted,memberDigest]);
+    return {sourceChatId:chatId,leaseToken,leaseGeneration:1,workerInstanceId:workerId};
+  }
+
+  async function nextObservationClaim(observations:PgCncTelegramMdfObservationRepository,
+    lease:{sourceChatId:string;leaseToken:string;leaseGeneration:number;workerInstanceId:string},packetId:string) {
+    await fixture.client.query(`UPDATE mdf_cnc_observation_targets SET next_due_at=now()-interval '1 second' WHERE packet_id=$1`,[packetId]);
+    return observations.claim({currentUser:admin,lease});
+  }
+
+  function reportFor(claim:NonNullable<Awaited<ReturnType<PgCncTelegramMdfObservationRepository['claim']>>>,thumbsUp:boolean) {
+    return {claimId:claim.claimId,claimToken:claim.claimToken,claimGeneration:claim.claimGeneration,
+      messages:claim.messages.map(message=>({messageId:message.messageId,chatId:claim.sourceChatId,
+        role:message.role,sha256:message.sha256,present:true as const,thumbsUp}))};
+  }
+
   const bodyFor = (f: Awaited<ReturnType<typeof acceptedPacket>>) => ({ sourceToken: f.token, targetColumn: 'parsed' as const });
   const facts = async (orderId: number, packetId: string) => fixture.snapshot([
     'orders','order_details','cnc_telegram_packets','cnc_telegram_packet_items','mdf_evidence_revisions','mdf_evidence_lines',
     'mdf_revision_context','mdf_revision_demand','mdf_revision_seals','mdf_source_heads','mdf_recalculation_jobs',
     'mdf_published_sources','mdf_published_source_members','mdf_published_positions','mdf_bath_allocations',
     'mdf_correction_command_results','mdf_correction_job_effect_suppressions','mdf_cnc_return_fences',
+    'mdf_cnc_observation_targets','mdf_cnc_observation_receipts','mdf_cnc_observation_job_authorities',
     'audit_log','audit_log_related_entity','outbox_events',
   ]).then(rows => ({
     order: rows.orders.filter((row: any) => row.order_id === orderId),
@@ -215,6 +258,9 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
     commandRows: rows.mdf_correction_command_results,
     suppressions: rows.mdf_correction_job_effect_suppressions,
     cncFences: rows.mdf_cnc_return_fences,
+    observationTargets: rows.mdf_cnc_observation_targets,
+    observationReceipts: rows.mdf_cnc_observation_receipts,
+    observationAuthorities: rows.mdf_cnc_observation_job_authorities,
     audit: rows.audit_log.filter((row: any) => row.entity_id === `packet:${packetId}`
       && row.event === 'mdf_board.production_returned'),
     auditRelations: rows.audit_log_related_entity,
@@ -283,6 +329,9 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
       [result.jobIds[0]])).rows[0]).toEqual({ status: 'pending', effect_policy: 'publish_only' });
     expect(await fixture.client.query(`SELECT 1 FROM mdf_cnc_return_fences WHERE packet_id=$1 AND correction_epoch=1
       AND baseline_source_version=1 AND state='waiting_pending'`, [f.source.id]).then(q => q.rows)).toHaveLength(1);
+    expect((await fixture.client.query(`SELECT completion_status,thumbs_up,completed_at,mdf_completion_returned,
+      source_version::text source_version FROM cnc_telegram_packets WHERE packet_id=$1`,[f.source.id])).rows[0])
+      .toEqual({completion_status:'pending',thumbs_up:false,completed_at:null,mdf_completion_returned:true,source_version:'1'});
     expect((await fixture.client.query('SELECT production_status_id FROM order_details WHERE detail_id=$1', [f.detailId])).rows[0])
       .toEqual({ production_status_id: 1 });
 
@@ -305,6 +354,61 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
       AND entity_id=$1`, [`packet:${f.source.id}`])).rows[0].count).toBe(1);
     expect((await fixture.client.query(`SELECT count(*)::int count FROM outbox_events
       WHERE event_type='mdf_board.production_returned' AND aggregate_id=$1`, [`packet:${f.source.id}`])).rows[0].count).toBe(1);
+  });
+
+  it('requires fresh pending then a distinct fresh like before clearing the return flag or recording CNC proof', async () => {
+    const f=await acceptedPacket();
+    const lease=await registerObservationTarget(f.source.id,f.orderId);
+    const preview=await command.preview(admin,f.source,bodyFor(f),'E2E-freshness-preview');
+    const observations=new PgCncTelegramMdfObservationRepository(database);
+    const inFlightBeforeReturn=await observations.claim({currentUser:admin,lease});
+    expect(inFlightBeforeReturn?.packetId).toBe(f.source.id);
+    const result=await command.confirm(admin,f.source,{...bodyFor(f),expectedDigest:preview.digest!,
+      idempotencyKey:`freshness-${f.orderId}`},'E2E-freshness-confirm');
+    expect(result.jobIds).toHaveLength(1);
+    await expect(observations.complete({currentUser:admin,lease,requestId:'E2E-inflight-complete-after-return',
+      report:reportFor(inFlightBeforeReturn!,true)})).rejects.toMatchObject({code:'MDF_CNC_OBSERVATION_STALE',statusCode:409});
+    await expect(observations.fail({currentUser:admin,lease,claimId:inFlightBeforeReturn!.claimId,
+      claimToken:inFlightBeforeReturn!.claimToken,claimGeneration:inFlightBeforeReturn!.claimGeneration,
+      reason:'FETCH_FAILED',requestId:'E2E-inflight-fail-after-return'}))
+      .rejects.toMatchObject({code:'MDF_CNC_OBSERVATION_STALE',statusCode:409});
+    expect((await fixture.client.query('SELECT 1 FROM mdf_cnc_observation_receipts WHERE claim_id=$1',
+      [inFlightBeforeReturn!.claimId])).rows).toHaveLength(0);
+    const blocked=await observations.claim({currentUser:admin,lease});
+    expect(blocked).toMatchObject({packetId:f.source.id,acceptedRevisionKey:expect.not.stringMatching(/^r1$/),
+      rawSourceVersion:'1'});
+    const noTransition=await observations.complete({currentUser:admin,lease,requestId:'E2E-old-like-after-return',
+      report:reportFor(blocked!,true)});
+    expect(noTransition).toMatchObject({status:'recorded',fenceState:'waiting_pending',jobId:null});
+    expect((await fixture.client.query(`SELECT completion_status,thumbs_up,mdf_completion_returned,source_version::text source_version
+      FROM cnc_telegram_packets WHERE packet_id=$1`,[f.source.id])).rows[0])
+      .toEqual({completion_status:'pending',thumbs_up:false,mdf_completion_returned:true,source_version:'1'});
+    expect((await fixture.client.query(`SELECT accepted_revision_key,version::text version FROM mdf_source_heads
+      WHERE source_kind='packet' AND source_id=$1`,[f.source.id])).rows[0]).toMatchObject({version:'2'});
+    expect((await fixture.client.query(`SELECT state,pending_source_version::text pending FROM mdf_cnc_return_fences
+      WHERE packet_id=$1`,[f.source.id])).rows[0]).toEqual({state:'waiting_pending',pending:null});
+
+    const freshPending=await nextObservationClaim(observations,lease,f.source.id);
+    const pending=await observations.complete({currentUser:admin,lease,requestId:'E2E-fresh-pending',report:reportFor(freshPending!,false)});
+    expect(pending).toMatchObject({status:'recorded',fenceState:'waiting_completion',observationVersion:expect.any(String),jobId:null});
+    expect((await fixture.client.query(`SELECT state,pending_source_version::text pending FROM mdf_cnc_return_fences
+      WHERE packet_id=$1`,[f.source.id])).rows[0]).toMatchObject({state:'waiting_completion',pending:expect.any(String)});
+    expect((await fixture.client.query(`SELECT mdf_completion_returned,source_version::text source_version
+      FROM cnc_telegram_packets WHERE packet_id=$1`,[f.source.id])).rows[0])
+      .toEqual({mdf_completion_returned:true,source_version:'1'});
+
+    const freshCompleted=await nextObservationClaim(observations,lease,f.source.id);
+    const completed=await observations.complete({currentUser:admin,lease,requestId:'E2E-fresh-like',report:reportFor(freshCompleted!,true)});
+    expect(completed).toMatchObject({status:'recorded',fenceState:'satisfied',observationVersion:expect.any(String),jobId:expect.any(String)});
+    expect((await fixture.client.query(`SELECT state,pending_source_version::text pending,
+      completion_source_version::text completion FROM mdf_cnc_return_fences WHERE packet_id=$1`,[f.source.id])).rows[0])
+      .toMatchObject({state:'satisfied',pending:expect.any(String),completion:expect.any(String)});
+    expect((await fixture.client.query(`SELECT completion_status,thumbs_up,mdf_completion_returned,source_version::text source_version
+      FROM cnc_telegram_packets WHERE packet_id=$1`,[f.source.id])).rows[0])
+      .toEqual({completion_status:'completed',thumbs_up:true,mdf_completion_returned:false,source_version:'1'});
+    expect((await fixture.client.query(`SELECT manual_placement_column FROM mdf_revision_context c
+      JOIN mdf_source_heads h USING(source_kind,source_id) WHERE c.source_kind='packet' AND c.source_id=$1
+      AND c.revision_key=h.accepted_revision_key`,[f.source.id])).rows[0].manual_placement_column).toBeNull();
   });
 
   it('returns only CNC 4/10, cancels its dependent lamination, and rebases the independent consumed BASIS 6/10 debit', async () => {

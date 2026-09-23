@@ -25,7 +25,14 @@ export interface MdfCorrectionLine extends QueryResultRow {
   evidence: 'derived' | 'physical' | 'declaration'; rework: boolean;
 }
 export interface MdfCorrectionAllocationRow extends QueryResultRow, MdfCorrectionAllocation {}
-export interface MdfCorrectionRawSource { rows: MdfShadowRow[]; stamp: string; sourceVersion: string | null }
+export interface MdfCorrectionRawSource {
+  rows: MdfShadowRow[];
+  stamp: string;
+  /** Raw content version; never conflated with server observation sequencing. */
+  sourceVersion: string | null;
+  /** Fence baseline domain: max(raw version, observation sequence, prior fence sequence). */
+  observationBaseline: string | null;
+}
 export interface MdfCorrectionSnapshot {
   orders: number[];
   sources: Array<{ kind: MdfSourceKind; id: string }>;
@@ -179,14 +186,27 @@ async function loadRawTarget(tx: TransactionClient, target: MdfCorrectionSourceR
     return left<right?-1:left>right?1:0;
   });
   let sourceVersion: string | null = null;
+  let observationBaseline: string | null = null;
   if (target.kind==='packet') {
     const packet = (await tx.query<{sourceVersion:string;stamp:string}>(`SELECT source_version::text "sourceVersion",
       concat_ws(':',source_version,updated_at) stamp FROM cnc_telegram_packets WHERE packet_id=$1::uuid`,[target.id])).rows[0];
     if (!packet || !/^[1-9]\d*$/.test(packet.sourceVersion)) throw new MdfNeedsAttention('MDF_CORRECTION_SOURCE_UNAVAILABLE');
     sourceVersion=packet.sourceVersion;
-    return { rows,stamp:createHash('sha256').update(JSON.stringify([rows.map(rowShape),packet.stamp])).digest('hex'),sourceVersion };
+    // The packet row has already been locked by loadMdfCorrectionSnapshot.
+    // Lock observation/fence state only after it, matching the observer suffix.
+    const targetVersion=(await tx.query<{version:string}>(`SELECT last_observation_version::text version
+      FROM mdf_cnc_observation_targets WHERE packet_id=$1::uuid FOR UPDATE`,[target.id])).rows[0]?.version;
+    const fence=(await tx.query<{baseline:string;pending:string|null;completion:string|null}>(`SELECT
+      baseline_source_version::text baseline,pending_source_version::text pending,
+      completion_source_version::text completion FROM mdf_cnc_return_fences WHERE packet_id=$1::uuid FOR UPDATE`,[target.id])).rows[0];
+    const versions=[sourceVersion,targetVersion,fence?.baseline,fence?.pending,fence?.completion]
+      .filter((value): value is string => Boolean(value));
+    if (versions.some(value=>!/^[1-9]\d*$/.test(value))) throw new MdfNeedsAttention('MDF_CORRECTION_SOURCE_UNAVAILABLE');
+    observationBaseline=versions.reduce((max,value)=>BigInt(value)>BigInt(max)?value:max);
+    return { rows,stamp:createHash('sha256').update(JSON.stringify([rows.map(rowShape),packet.stamp])).digest('hex'),
+      sourceVersion,observationBaseline };
   }
-  return { rows,stamp:createHash('sha256').update(JSON.stringify(rows.map(rowShape))).digest('hex'),sourceVersion };
+  return { rows,stamp:createHash('sha256').update(JSON.stringify(rows.map(rowShape))).digest('hex'),sourceVersion,observationBaseline };
 }
 
 export function mdfCorrectionComposition(rows: readonly {orderId:number;detailId:number;quantity:number;rework:boolean}[]): string {

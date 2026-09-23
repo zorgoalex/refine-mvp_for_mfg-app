@@ -13,6 +13,7 @@ import { PgCutRepository } from '../../cut/adapters/pg-cut-repository';
 import { PgBazisCutRepository } from '../../bazis-cut/adapters/pg-bazis-cut-repository';
 import { PgCncTelegramRepository } from '../../cnc-telegram/adapters/pg-cnc-telegram-repository';
 import { PgCncTelegramImportRepository } from '../../cnc-telegram/adapters/pg-cnc-telegram-import-repository';
+import { PgCncTelegramMdfObservationRepository } from '../../cnc-telegram/adapters/pg-cnc-telegram-mdf-observation-repository';
 import type { ManualSvgUploadCommand } from '../../cnc-telegram/application/cnc-telegram.types';
 import { PgMdfBoardManualMoveRepository } from '../../orders/adapters/pg-mdf-board-manual-move-repository';
 import { StaticCutConfig } from '../../cut/application/cut-config';
@@ -91,6 +92,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
     }
     await db.query('ALTER TABLE cnc_telegram_packets ADD PRIMARY KEY(packet_id)');
     await db.query(readFileSync(new URL('../../../../db/migrations/179_mdf_active_return.sql',import.meta.url),'utf8'));
+    await db.query(readFileSync(new URL('../../../../db/migrations/180_mdf_cnc_observations.sql',import.meta.url),'utf8'));
     await db.query(`ALTER TABLE cut_group_sheet ADD FOREIGN KEY(cut_group_id) REFERENCES cut_group(cut_group_id) ON DELETE CASCADE`);
     for (const name of ['set_session_user','order_production_summary','recalc_order_production_status',
       'cut_result_snapshot_digest','cut_result_snapshot_is_complete','cut_result_snapshot_is_vacuum',
@@ -333,10 +335,133 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
       .toMatchObject({user_id:'1',job:expect.any(String)});
     expect((await db.query(`SELECT payload_json->>'mdfJobId' job FROM outbox_events
       WHERE event_type='cnc.telegram_import.item_imported' AND aggregate_id=$1`,[f.itemId])).rows[0].job).toEqual(expect.any(String));
+    const observationTarget = (await db.query(`SELECT t.source_chat_id,t.source_group_message_id::text group_message_id,
+      t.message_bindings,t.registered_revision_key,t.accepted_revision_key,p.source_version::text raw_version,
+      h.received_revision_key,h.accepted_revision_key head_accepted
+      FROM mdf_cnc_observation_targets t JOIN cnc_telegram_packets p USING(packet_id)
+      JOIN mdf_source_heads h ON h.source_kind='packet' AND h.source_id=t.packet_id::text WHERE t.packet_id=$1`,[id])).rows[0];
+    expect(observationTarget).toMatchObject({ source_chat_id:f.input.completion.source.sourceChatId,
+      group_message_id:f.input.completion.source.sourceMessageId, registered_revision_key:observationTarget.head_accepted,
+      accepted_revision_key:observationTarget.head_accepted,received_revision_key:observationTarget.head_accepted,
+      head_accepted:expect.any(String),raw_version:'1' });
+    expect(observationTarget.message_bindings).toEqual([{ messageId:f.input.completion.source.svgMessageId,
+      role:'svg',sha256:f.input.completion.source.svgContentSha256 }]);
     const before=await counts();await f.importer.completeImport(f.input);expect(await counts()).toEqual(before);
     expect(await runner().processOne()).toMatchObject({status:'done'});
     expect((await db.query('SELECT credited_cut,remaining FROM mdf_published_positions WHERE detail_id=$1',[f.detailId])).rows[0])
       .toEqual({credited_cut:'0',remaining:'2'});
+  });
+  it('fresh CNC completion after real manual completed proof creates an authority receipt without double counting',async()=>{
+    const f=await telegramFixture(), imported=await f.importer.completeImport(f.input), packetId=imported.packetId!;
+    expect(imported.status).toBe('imported');
+    expect(await runner().processOne()).toMatchObject({status:'done'});
+    const mover=new PgMdfBoardManualMoveRepository(database);
+    const actor={...user,permissions:[...user.permissions,'orders.update','production.tasks.update','orders.change_production_status']} as CurrentUser;
+    const board=await readMdfPublishedSnapshot(database,user,{focus:{kind:'packet',id:packetId}});
+    const card=board.cards.find(value=>value.kind==='packet'&&value.id===packetId)!;
+    await mover.upsert({currentUser:actor,cardKind:'packet',cardId:packetId,targetColumn:'completed',
+      sourceToken:card.commandToken!,idempotencyKey:`E2E-${randomUUID()}`,requestId:'E2E manual completed before CNC'});
+    expect(await runner().processOne()).toMatchObject({status:'done'});
+    const before=(await db.query(`SELECT h.accepted_revision_key,
+      (SELECT sum(quantity)::text FROM mdf_evidence_lines WHERE source_kind='packet' AND source_id=$1
+        AND revision_key=h.accepted_revision_key AND stage_code='cut' AND evidence_kind='physical') physical_cut,
+      p.source_version::text source_version FROM mdf_source_heads h JOIN cnc_telegram_packets p ON p.packet_id=h.source_id::uuid
+      WHERE h.source_kind='packet' AND h.source_id=$1`,[packetId])).rows[0];
+    expect(before.physical_cut).toBe('2');
+    const observations=new PgCncTelegramMdfObservationRepository(database),lease=f.input.lease;
+    const claim=await observations.claim({currentUser:user,lease});
+    const result=await observations.complete({currentUser:user,lease,requestId:'E2E CNC after manual complete',report:{
+      claimId:claim!.claimId,claimToken:claim!.claimToken,claimGeneration:claim!.claimGeneration,
+      messages:claim!.messages.map(message=>({messageId:message.messageId,chatId:claim!.sourceChatId,
+        role:message.role,sha256:message.sha256,present:true,thumbsUp:true})),
+    }});
+    expect(result).toMatchObject({status:'recorded',jobId:expect.any(String)});
+    const publication=await runner().processOne();
+    const publicationError=publication.jobId
+      ? (await db.query('SELECT error_code FROM mdf_recalculation_jobs WHERE job_id=$1',[publication.jobId])).rows[0]?.error_code
+      : null;
+    expect(publication,`CNC authority job ${publication.jobId ?? 'none'} ended ${publication.status}; error=${publicationError ?? 'none'}`)
+      .toMatchObject({status:'needs_attention',jobId:result.jobId});
+    expect(publicationError).toBe('MDF_CNC_AUTHORITY_EXECUTOR_REQUIRED');
+    const after=(await db.query(`SELECT h.accepted_revision_key,
+      (SELECT sum(quantity)::text FROM mdf_evidence_lines WHERE source_kind='packet' AND source_id=$1
+        AND revision_key=h.accepted_revision_key AND stage_code='cut' AND evidence_kind='physical') physical_cut,
+      p.source_version::text source_version FROM mdf_source_heads h JOIN cnc_telegram_packets p ON p.packet_id=h.source_id::uuid
+      WHERE h.source_kind='packet' AND h.source_id=$1`,[packetId])).rows[0];
+    expect(after.accepted_revision_key).not.toBe(before.accepted_revision_key);
+    expect(after.physical_cut).toBe(before.physical_cut);
+    expect(after.source_version).toBe(before.source_version);
+    expect((await db.query(`SELECT a.authority,a.claim_id,r.result->>'jobId' job
+      FROM mdf_cnc_observation_job_authorities a JOIN mdf_cnc_observation_receipts r USING(claim_id)
+      WHERE a.packet_id=$1 AND a.job_id=$2`,[packetId,result.jobId])).rows)
+      .toEqual([{authority:'cnc_autocut',claim_id:claim!.claimId,job:result.jobId}]);
+  });
+  it('no-fence pending observation returns the durable advanced server version after clearing raw completion',async()=>{
+    const f=await telegramFixture(), imported=await f.importer.completeImport(f.input), packetId=imported.packetId!;
+    expect(imported.status).toBe('imported');
+    const ownJob=(await db.query(`SELECT job_id FROM mdf_recalculation_jobs WHERE source_kind='packet' AND source_id=$1
+      AND status='pending' ORDER BY created_at,job_id LIMIT 1`,[packetId])).rows[0];
+    expect(ownJob).toBeDefined();
+    const processed=await runner().processOne();
+    const errorCode=processed.jobId ? (await db.query('SELECT error_code FROM mdf_recalculation_jobs WHERE job_id=$1',[processed.jobId])).rows[0]?.error_code : null;
+    expect(processed,`worker job ${processed.jobId ?? 'none'} (expected ${ownJob.job_id}) ended ${processed.status}; error=${errorCode ?? 'none'}`)
+      .toMatchObject({status:'done',jobId:ownJob.job_id});
+    await db.query(`UPDATE cnc_telegram_packets SET completion_status='completed',thumbs_up=true,completed_at=now()
+      WHERE packet_id=$1`,[packetId]);
+    const observations=new PgCncTelegramMdfObservationRepository(database),lease=f.input.lease;
+    const claim=await observations.claim({currentUser:user,lease});
+    const previous=claim!.observationVersion;
+    const result=await observations.complete({currentUser:user,lease,requestId:'E2E no-fence pending',report:{
+      claimId:claim!.claimId,claimToken:claim!.claimToken,claimGeneration:claim!.claimGeneration,
+      messages:claim!.messages.map(message=>({messageId:message.messageId,chatId:claim!.sourceChatId,
+        role:message.role,sha256:message.sha256,present:true,thumbsUp:false})),
+    }});
+    expect(BigInt(result.observationVersion!)).toBeGreaterThan(BigInt(previous));
+    const saved=(await db.query(`SELECT r.observation_version::text version,t.last_observation_version::text target_version,
+      a.metadata_json->>'observationVersion' audit_version,p.completion_status,p.thumbs_up
+      FROM mdf_cnc_observation_receipts r JOIN mdf_cnc_observation_targets t USING(packet_id)
+      JOIN audit_log a ON a.entity_type='cnc_telegram_packet' AND a.entity_id=r.packet_id::text
+        AND a.event='cnc.mdf_observation.completed' AND a.request_id=$2
+      JOIN cnc_telegram_packets p USING(packet_id) WHERE r.claim_id=$1`,[claim!.claimId,'E2E no-fence pending'])).rows[0];
+    expect(saved).toEqual({version:result.observationVersion,target_version:result.observationVersion,
+      audit_version:result.observationVersion,completion_status:'pending',thumbs_up:false});
+  });
+  it('manual command after an observation claim makes that report stale and forces a fresh fetch',async()=>{
+    const f=await telegramFixture(), imported=await f.importer.completeImport(f.input), packetId=imported.packetId!;
+    expect(imported.status).toBe('imported');
+    expect(await runner().processOne()).toMatchObject({status:'done'});
+    const observations=new PgCncTelegramMdfObservationRepository(database),lease=f.input.lease;
+    const claim=await observations.claim({currentUser:user,lease});
+    expect(claim?.packetId).toBe(packetId);
+    const before=(await db.query(`SELECT accepted_revision_key,version::text version FROM mdf_source_heads
+      WHERE source_kind='packet' AND source_id=$1`,[packetId])).rows[0];
+    const mover=new PgMdfBoardManualMoveRepository(database);
+    const actor={...user,permissions:[...user.permissions,'orders.update','production.tasks.update','orders.change_production_status']} as CurrentUser;
+    const board=await readMdfPublishedSnapshot(database,user,{focus:{kind:'packet',id:packetId}});
+    const card=board.cards.find(value=>value.kind==='packet'&&value.id===packetId)!;
+    const manual=await mover.upsert({currentUser:actor,cardKind:'packet',cardId:packetId,targetColumn:'completed',
+      sourceToken:card.commandToken!,idempotencyKey:`E2E-${randomUUID()}`,requestId:'E2E CNC command after claim'});
+    expect(manual.changed).toBe(true);
+    const after=(await db.query(`SELECT accepted_revision_key,version::text version FROM mdf_source_heads
+      WHERE source_kind='packet' AND source_id=$1`,[packetId])).rows[0];
+    expect(after.version).not.toBe(before.version);
+    expect(after.accepted_revision_key).not.toBe(before.accepted_revision_key);
+    await expect(observations.complete({currentUser:user,lease,requestId:'E2E stale CNC report',report:{
+      claimId:claim!.claimId,claimToken:claim!.claimToken,claimGeneration:claim!.claimGeneration,
+      messages:claim!.messages.map(message=>({messageId:message.messageId,chatId:claim!.sourceChatId,
+        role:message.role,sha256:message.sha256,present:true,thumbsUp:true})),
+    }})).rejects.toMatchObject({code:'MDF_CNC_OBSERVATION_STALE',statusCode:409});
+    expect((await db.query('SELECT 1 FROM mdf_cnc_observation_receipts WHERE claim_id=$1',[claim!.claimId])).rows).toHaveLength(0);
+    // Simulate expiry of the now-stale lease, then prove a new claim binds the
+    // real current accepted revision instead of reusing cached report facts.
+    await db.query('UPDATE mdf_cnc_observation_targets SET claim_expires_at=now()-interval \'1 second\' WHERE packet_id=$1',[packetId]);
+    const fresh=await observations.claim({currentUser:user,lease});
+    expect(fresh).toMatchObject({packetId,acceptedRevisionKey:after.accepted_revision_key,headVersion:after.version});
+    expect(fresh!.claimId).not.toBe(claim!.claimId);
+    const pendingManualJob=(await db.query(`SELECT job_id FROM mdf_recalculation_jobs WHERE source_kind='packet' AND source_id=$1
+      AND status='pending' ORDER BY created_at,job_id LIMIT 1`,[packetId])).rows[0];
+    expect(pendingManualJob).toBeDefined();
+    expect(await runner().processOne()).toMatchObject({jobId:pendingManualJob.job_id});
   });
   it.each(['disabled_user','disabled_role','revoked_permission','inactive_permission','restricted_owner','none_scope',
     'session_lease','item_lease','source_hash','file_hash','frozen_source','read_only'] as const)('Telegram %s rejects without source or queue writes',async(kind)=>{

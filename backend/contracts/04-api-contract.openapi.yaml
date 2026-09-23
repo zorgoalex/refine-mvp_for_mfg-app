@@ -13262,6 +13262,150 @@ paths:
         '201': { description: Import item failure recorded }
         '409': { $ref: '#/components/responses/Conflict' }
 
+  /api/v1/cnc-telegram/observation-worker/claim:
+    post:
+      tags: [CncTelegramObservationWorker]
+      operationId: claimCncTelegramMdfObservation
+      summary: Claim one server-selected source for a bounded fresh CNC observation
+      description: >-
+        No source, packet, detail, rank, or version is accepted from the caller. The claim binds the registered
+        exact Telegram group and current MDF head/epoch; the worker must refetch those exact messages after claim.
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - {name: X-CNC-Telegram-Session-Token, in: header, required: true, schema: {type: string, minLength: 32, maxLength: 240}}
+        - {name: X-CNC-Telegram-Session-Generation, in: header, required: true, schema: {type: integer, minimum: 1}}
+        - {name: X-CNC-Telegram-Chat-Id, in: header, required: false, schema: {type: string, maxLength: 120}}
+        - {name: X-CNC-Telegram-Worker-Instance, in: header, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: A bounded claim or null when no source is due
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [claim]
+                properties:
+                  claim:
+                    type: object
+                    nullable: true
+                    additionalProperties: false
+                    required: [claimId, claimToken, claimGeneration, expiresAt, packetId, sourceChatId, messages, acceptedRevisionKey, headVersion, correctionEpoch, rawSourceVersion, observationVersion]
+                    properties:
+                      claimId: {type: string, format: uuid}
+                      claimToken: {type: string, minLength: 32, maxLength: 240}
+                      claimGeneration: {type: integer, minimum: 1}
+                      expiresAt: {type: string, format: date-time}
+                      packetId: {type: string, format: uuid}
+                      sourceChatId: {type: string, minLength: 1, maxLength: 120}
+                      messages:
+                        type: array
+                        minItems: 1
+                        maxItems: 3
+                        items:
+                          type: object
+                          additionalProperties: false
+                          required: [messageId, role, sha256]
+                          properties:
+                            messageId: {type: integer, minimum: 1}
+                            role: {type: string, enum: [svg, gcode, image]}
+                            sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+                      acceptedRevisionKey: {type: string}
+                      headVersion: {type: string, pattern: '^[0-9]+$'}
+                      correctionEpoch: {type: string, pattern: '^[0-9]+$'}
+                      rawSourceVersion: {type: string, pattern: '^[0-9]+$'}
+                      observationVersion: {type: string, pattern: '^[0-9]+$'}
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/cnc-telegram/observation-worker/claims/{claimId}/complete:
+    post:
+      tags: [CncTelegramObservationWorker]
+      operationId: completeCncTelegramMdfObservation
+      summary: Complete a claim with post-claim facts for its exact message group
+      description: >-
+        Client-supplied packet targets, source versions, timestamps, and completion classifications are rejected.
+        Every registered message must be present and identity/hash verified; fetch failures use the fail endpoint.
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - {name: claimId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: X-CNC-Telegram-Session-Token, in: header, required: true, schema: {type: string, minLength: 32, maxLength: 240}}
+        - {name: X-CNC-Telegram-Session-Generation, in: header, required: true, schema: {type: integer, minimum: 1}}
+        - {name: X-CNC-Telegram-Chat-Id, in: header, required: false, schema: {type: string, maxLength: 120}}
+        - {name: X-CNC-Telegram-Worker-Instance, in: header, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [claimId, claimToken, claimGeneration, messages]
+              properties:
+                claimId: {type: string, format: uuid}
+                claimToken: {type: string, minLength: 32, maxLength: 240}
+                claimGeneration: {type: integer, minimum: 1}
+                messages:
+                  type: array
+                  minItems: 1
+                  maxItems: 3
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [messageId, chatId, role, sha256, present, thumbsUp]
+                    properties:
+                      messageId: {type: integer, minimum: 1}
+                      chatId: {type: string, minLength: 1, maxLength: 120}
+                      role: {type: string, enum: [svg, gcode, image]}
+                      sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+                      present: {type: boolean, enum: [true]}
+                      thumbsUp: {type: boolean}
+      responses:
+        '200': { description: Immutable observation result or exact replay }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/cnc-telegram/observation-worker/claims/{claimId}/fail:
+    post:
+      tags: [CncTelegramObservationWorker]
+      operationId: failCncTelegramMdfObservation
+      summary: Fail a bounded claim when exact-message refetch or validation fails
+      description: No failure request can select a source, set completion state, or provide a client source version.
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - {name: claimId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: X-CNC-Telegram-Session-Token, in: header, required: true, schema: {type: string, minLength: 32, maxLength: 240}}
+        - {name: X-CNC-Telegram-Session-Generation, in: header, required: true, schema: {type: integer, minimum: 1}}
+        - {name: X-CNC-Telegram-Chat-Id, in: header, required: false, schema: {type: string, maxLength: 120}}
+        - {name: X-CNC-Telegram-Worker-Instance, in: header, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [claimToken, claimGeneration, reason]
+              properties:
+                claimToken: {type: string, minLength: 32, maxLength: 240}
+                claimGeneration: {type: integer, minimum: 1}
+                reason: {type: string, enum: [FETCH_FAILED, MESSAGE_MISSING, MESSAGE_MEDIA_MISMATCH, MESSAGE_GROUP_INCOMPLETE]}
+      responses:
+        '200': { description: Claim failure accepted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
   /api/v1/cnc-telegram/today:
     get:
       tags:

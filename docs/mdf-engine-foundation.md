@@ -1,15 +1,17 @@
 # MDF engine foundation
 
-Status: **optional shadow intake**, not the active board calculation.
-Applying migration `165_mdf_engine_foundation.sql` does not enable automation,
-modify existing production statuses, or change current board APIs.
+Status: **active receipt/correction foundation with bounded CNC observation
+support, still opt-in**. Applying migrations 165–180 does not enable automation,
+modify existing production statuses, or turn on the CNC worker lane.
 
 ## Boundaries
 
-`backend/src/modules/mdf-board` contains pure per-position quantity arithmetic,
-a deterministic bath allocation planner and a transactional job runner primitive.
-No scheduler, HTTP command or replacement board reader is registered yet.
-Do not enable the engine by manually changing its mode.
+`backend/src/modules/mdf-board` contains per-position quantity arithmetic,
+deterministic bath allocation, active transactional command/correction adapters,
+and the accepted-job runner. CNC observation HTTP endpoints are separately
+available for bounded worker claims. Neither migration application nor endpoint
+registration enables the engine or starts the worker. Do not enable the engine
+by manually changing its mode.
 
 `BACKEND_MDF_SHADOW_INTAKE=true` connects the existing MDF event dispatch to a
 transaction-finalization capture. The default is false. It works in `legacy` or
@@ -32,11 +34,55 @@ existing owning-command audit remains unchanged. No extra notification is sent
 for a diagnostic observation. Disable the flag to stop intake without deleting
 history. Applied migrations165–167 are additive.
 
-Still required before active cutover: producers that bypass dispatch, frozen
-whole-order declarations, demand preflight, correction adapters, common resolver,
-allocation executor/worker, baseline and full-board shadow comparison. Legacy CNC
-processing is still inside its owning transaction: this increment does not yet
-make intake survive failure of that legacy processing.
+## Bounded CNC observation lane
+
+Migration `180_mdf_cnc_observations.sql` adds immutable observation targets,
+receipts, and CNC-authority markers. Successful explicit Telegram import is the
+only registration path; older and manual-send sources are not backfilled. The
+worker flag `CNC_TELEGRAM_MDF_OBSERVATIONS_ENABLED` defaults to `false`, so the
+new endpoints do not cause polling unless the worker is deliberately enabled.
+Apply migrations 165–180 before deploying this backend version; this preserves
+the accepted-job authority lookup even while the worker lane is disabled. Keep
+the flags below off until separately approved. The API also
+requires `BACKEND_ENABLE_CNC_TELEGRAM=true`; when that flag is off its routes
+return 503. In `legacy` or `shadow`, claim returns `{claim:null}` and
+complete/fail return 503 `MDF_CNC_OBSERVATION_MODE_DISABLED`. In `read_only`,
+the observer may acquire and persist CNC observation facts, but the accepted-job
+runner remains inactive and no production-status automation runs. An active or
+read-only claim with no eligible source also returns `{claim:null}`.
+
+The server issues each claim with the accepted MDF head, correction epoch,
+unchanged raw packet `source_version`, independent observation version, and the
+exact bounded Telegram message IDs/roles/hashes. The worker refetches only that
+group and submits its presence/thumbs-up observations; it cannot choose a
+packet, source version, or completion state. Failure to fetch or validate any
+group member uses the failure endpoint, never a partial pending report. No
+history scan, local cache reuse, file parsing, or generic ingest is part of this
+lane. Preserving raw `source_version` keeps existing packet label-map and
+evidence projections valid.
+
+After a correction, an old in-flight claim becomes stale. The return fence needs
+a fresh no-like observation followed by a separate later fresh like before the
+return marker can clear. CNC-authority receipts are durable, but the general MDF
+accepted-job executor quarantines those physical jobs with
+`MDF_CNC_AUTHORITY_EXECUTOR_REQUIRED`; this increment does not claim that CNC
+completion automatically advances production status. The existing worker
+service remains behind its existing gates. Generic `/cnc-telegram/ingest`
+continues to fail closed with 503 (`CNC_TELEGRAM_BACKGROUND_INGEST_DISABLED`
+or `CNC_TELEGRAM_BACKGROUND_INGEST_APPROVAL_REQUIRED`); it is not enabled by
+the observation API.
+
+Not delivered by this increment: a dedicated CNC physical-priority executor,
+complete allocation-pin reconciliation across active producers, historical or
+manual-send source backfill, UI workflow, or full engine cutover. Keep engine
+mode and worker/API feature flags unchanged unless a separately approved rollout
+covers those remaining gates.
+
+Still required before a broader cutover: the dedicated CNC physical-priority
+executor, complete allocation-pin reconciliation across active producers,
+historical/manual-send source handling if those are brought into scope, and the
+UI workflow. The bounded observation API and current server claim protocol do not
+complete those separate rollout steps.
 
 Physical production, whole-position declarations, derived card states and
 visibility are separate. Rework is included in raw statistics, excluded from
