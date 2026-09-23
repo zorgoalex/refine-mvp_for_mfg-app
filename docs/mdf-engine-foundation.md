@@ -150,6 +150,28 @@ reconciliation; renaming cannot establish a baseline. Other BASIS composition
 mutations remain outside this connected path. Legacy/shadow behavior and all
 activation flags stay unchanged.
 
+## BASIS assignment changes and performed work
+
+Assignment quantity, order demand and performed quantity are separate. Editing
+a BASIS assignment from 10 to 8 must retain the confirmed cut of 10 and its bath
+reservations/consumption. Increasing an assignment to 12 does not prove the extra
+two were cut. Removing an assigned position does not erase its physical history.
+Only an explicit production return may retract an erroneous physical fact and
+its attributable dependent lamination.
+
+`planMdfBazisComposition` is a pure transition helper, not a connected command.
+It replaces current membership, copies accepted cut facts unchanged and plans
+one-for-one allocation reference replacements. It does not change order demand,
+cancel bath work, write detail statuses or authenticate historical evidence.
+Its input must come from an authoritative, complete, locked accepted snapshot.
+Immediate predecessor references are not proof of verified historical origin.
+
+Active composition edits remain fenced. Before connecting the helper, persistent
+lineage, snapshot validation, quantity/allocation readers, current-member event
+scope, manual proof and explicit returns must all support retained facts beyond
+the current assignment. An empty assignment must not erase retained work or
+trigger vacuous readiness. Existing strict runtime checks remain unchanged.
+
 ## Storage
 
 - Revisions and lines are append-only; a seal permanently closes membership.
