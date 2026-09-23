@@ -74,7 +74,8 @@ describe.skipIf(!enabled)('MDF CNC observations, isolated PostgreSQL schema', ()
     await fixture.drop();
   });
 
-  async function acceptedPacket(options: { initialPhysical?: boolean; rawCompleted?: boolean } = {}) {
+  async function acceptedPacket(options: { initialPhysical?: boolean; initialPhysicalQuantity?: number;
+    declarationQuantity?: number; rawCompleted?: boolean } = {}) {
     await fixture.client.query("UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now() WHERE status='pending'");
     const orderId = ++sequence, detailId = orderId * 10, packetId = randomUUID();
     await fixture.client.query(`INSERT INTO orders(order_id,order_name,order_kind,delete_flag,version,order_status_id,
@@ -92,8 +93,13 @@ describe.skipIf(!enabled)('MDF CNC observations, isolated PostgreSQL schema', ()
       match_detail_id,match_status,quantity,order_name,detail_number,width_mm,height_mm,source)
       VALUES($1,$2,'part-1',$3,$4,$5,10,$6,1,100,200,'manual')`,
     [randomUUID(),packetId,orderId,detailId,'matched',`E2E CNC observation ${orderId}`]);
+    const physicalQuantity = options.initialPhysicalQuantity ?? (options.initialPhysical ? 10 : 0);
+    const declarationQuantity = options.declarationQuantity ?? 0;
+    if (physicalQuantity + declarationQuantity > 10) throw new Error('MDF_TEST_PACKET_PROOF_EXCEEDS_MEMBER');
     const lines = [{ lineKey:'member',orderId,detailId,quantity:10,stageCode:'membership',evidenceKind:'derived' as const,rework:false }];
-    if (options.initialPhysical) lines.push({ lineKey:'cut-existing',orderId,detailId,quantity:10,stageCode:'cut',evidenceKind:'physical' as const,rework:false });
+    if (physicalQuantity) lines.push({ lineKey:'cut-existing',orderId,detailId,quantity:physicalQuantity,stageCode:'cut',evidenceKind:'physical' as const,rework:false });
+    if (declarationQuantity) lines.push({ lineKey:'cut-manual-declaration',orderId,detailId,quantity:declarationQuantity,
+      stageCode:'cut',evidenceKind:'declaration' as const,rework:false });
     const saved = await database.transaction(tx => recordMdfReceipt(tx, {
       sourceKind:'packet',sourceId:packetId,revisionKey:'r1',origin:'cnc',actorUserId:1,
       requestId:`E2E CNC observation ${orderId}`,causeKey:`E2E CNC observation ${orderId}`,
@@ -103,6 +109,45 @@ describe.skipIf(!enabled)('MDF CNC observations, isolated PostgreSQL schema', ()
     }));
     expect(await runner.processOne()).toMatchObject({status:'done',jobId:saved.jobId});
     return { packetId,orderId,detailId };
+  }
+
+  async function acceptedMdfSource(input: { kind:'bazisCutSet'|'bath'; id:string; revision:string;
+    orderId:number; detailId:number; demand:number; member:number; membershipQuantities?:readonly number[];
+    includeMembership?:boolean; proof:number; proofRework?:boolean; stage:'cut'|'laminated' }) {
+    const membershipQuantities=input.includeMembership===false?[]:input.membershipQuantities??[input.member];
+    if (membershipQuantities.reduce((sum,quantity)=>sum+quantity,0)!==input.member)
+      throw new Error('MDF_TEST_MEMBERSHIP_QUANTITIES_MISMATCH');
+    const lines: MdfReceiptLine[] = membershipQuantities.map((quantity,index):MdfReceiptLine=>({
+      lineKey:membershipQuantities.length===1?'member':`member-${index+1}`,orderId:input.orderId,detailId:input.detailId,
+      quantity,stageCode:'membership',evidenceKind:'derived',rework:false,
+    }));
+    if (input.proof>0) lines.push({ lineKey:`${input.stage}-physical`,orderId:input.orderId,detailId:input.detailId,
+      quantity:input.proof,stageCode:input.stage,evidenceKind:'physical',rework:input.proofRework??false });
+    const saved=await database.transaction(tx=>recordMdfReceipt(tx,{sourceKind:input.kind,sourceId:input.id,
+      revisionKey:input.revision,origin:'manual',actorUserId:1,requestId:`E2E ${input.kind} ${input.id}`,
+      causeKey:`E2E ${input.kind} ${input.id}`,expectedFence:null,accept:true,rules:[],
+      executionContext:{sourceCreatedAt:'2026-09-20T00:00:00Z',displayName:`E2E ${input.kind} ${input.id}`,
+        priorColumn:null,compositionComplete:true,demand:[{orderId:input.orderId,detailId:input.detailId,quantity:input.demand}]},lines}));
+    expect(saved).toMatchObject({accepted:true,replay:false});
+    return saved;
+  }
+
+  async function insertEvidencePin(input: { sourceKind:'packet'|'bazisCutSet'; sourceId:string; revision:string;
+    lineKey:string; bathId:string; bathRevision:string; orderId:number; detailId:number; quantity:number;
+    state:'reserved'|'consumed'; cause:string }) {
+    const line=(await fixture.client.query<{id:string}>(`SELECT evidence_line_id::text id FROM mdf_evidence_lines
+      WHERE source_kind=$1 AND source_id=$2 AND revision_key=$3 AND line_key=$4`,
+    [input.sourceKind,input.sourceId,input.revision,input.lineKey])).rows[0];
+    if (!line) throw new Error('MDF_TEST_PIN_SOURCE_LINE_MISSING');
+    await fixture.client.query(`INSERT INTO mdf_bath_allocations(evidence_line_id,bath_id,bath_revision,order_id,detail_id,
+      quantity,state,cause_key) VALUES($1::uuid,$2,$3,$4,$5,$6,$7,$8)`,
+    [line.id,input.bathId,input.bathRevision,input.orderId,input.detailId,input.quantity,input.state,input.cause]);
+    return line.id;
+  }
+
+  async function insertPacketPin(input: { packetId:string; lineKey:string; bathId:string; bathRevision:string;
+    orderId:number; detailId:number; quantity:number; state:'reserved'|'consumed'; cause:string }) {
+    return insertEvidencePin({sourceKind:'packet',sourceId:input.packetId,revision:'r1',...input});
   }
 
   async function registerTarget(packetId: string, orderId: number, chatId: string, messageId: number) {
@@ -161,6 +206,20 @@ describe.skipIf(!enabled)('MDF CNC observations, isolated PostgreSQL schema', ()
         return handler(tx);
       },options)} as Pick<DatabaseService,'transaction'>;
     return new PgCncTelegramMdfObservationRepository(wrapped);
+  }
+
+  async function processOneWithSafeHandlerCode() {
+    let handlerCode='none';
+    const diagnosticRunner=new MdfJobRunner(database,async(tx,job,rules)=>{
+      try { return await executeMdfAcceptedJob(tx,job,rules); }
+      catch(error) {
+        const message=error instanceof Error?error.message:'';
+        const code=error&&typeof error==='object'&&'code' in error&&typeof error.code==='string'?error.code:message;
+        handlerCode=/^MDF_[A-Z0-9_]{1,80}$/.test(code)?code:'UNCLASSIFIED';
+        throw error;
+      }
+    });
+    return {outcome:await diagnosticRunner.processOne(),handlerCode};
   }
 
   function reportFor(claim: NonNullable<Awaited<ReturnType<typeof claimFor>>>, thumbsUp: boolean) {
@@ -441,6 +500,514 @@ describe.skipIf(!enabled)('MDF CNC observations, isolated PostgreSQL schema', ()
     expect(afterPinned).toMatchObject({...beforePinned,workState:'needs_reconciliation'});
     expect((await fixture.client.query<{count:number}>(`SELECT count(*)::int count FROM mdf_cnc_observation_job_authorities a
       JOIN mdf_recalculation_jobs j USING(job_id) WHERE j.source_id=$1`,[pinned.packetId])).rows[0].count).toBe(0);
+  },30000);
+
+  it('rebases split reserved/consumed packet pins by exact physical line and leaves independent BASIS debits untouched', async () => {
+    const f=await acceptedPacket({initialPhysicalQuantity:4,declarationQuantity:6,rawCompleted:false});
+    const bathId=`cut-result:${1_100_000_000+f.orderId}`,basisId=String(2_100_000_000+f.orderId);
+    const bath=await acceptedMdfSource({kind:'bath',id:bathId,revision:'bath-r1',orderId:f.orderId,detailId:f.detailId,
+      demand:10,member:10,proof:10,stage:'laminated'});
+    const basis=await acceptedMdfSource({kind:'bazisCutSet',id:basisId,revision:'basis-r1',orderId:f.orderId,detailId:f.detailId,
+      demand:10,member:10,proof:6,stage:'cut'});
+    // These are setup-only accepted sources; keep the queue focused on the real CNC receipt job.
+    await fixture.client.query(`UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now()
+      WHERE job_id=ANY($1::uuid[]) AND status='pending'`,[[bath.jobId,basis.jobId]]);
+    const oldPacketLine=(await fixture.client.query<{id:string}>(`SELECT evidence_line_id::text id FROM mdf_evidence_lines
+      WHERE source_kind='packet' AND source_id=$1 AND revision_key='r1' AND line_key='cut-existing'`,[f.packetId])).rows[0];
+    const basisLine=(await fixture.client.query<{id:string}>(`SELECT evidence_line_id::text id FROM mdf_evidence_lines
+      WHERE source_kind='bazisCutSet' AND source_id=$1 AND revision_key='basis-r1' AND line_key='cut-physical'`,[basisId])).rows[0];
+    expect(oldPacketLine).toBeDefined();
+    expect(basisLine).toBeDefined();
+    await fixture.client.query(`INSERT INTO mdf_bath_allocations(evidence_line_id,bath_id,bath_revision,order_id,detail_id,
+      quantity,state,cause_key) VALUES
+      ($1::uuid,$2,'bath-r1',$3,$4,2,'reserved',$5),
+      ($1::uuid,$2,'bath-r1',$3,$4,2,'consumed',$6),
+      ($7::uuid,$2,'bath-r1',$3,$4,6,'consumed',$8)`,
+    [oldPacketLine.id,bathId,f.orderId,f.detailId,`E2E-pin-reserved-${f.orderId}`,`E2E-pin-consumed-${f.orderId}`,
+      basisLine.id,`E2E-pin-basis-${f.orderId}`]);
+    const beforeHead=(await fixture.client.query<{version:string;accepted:string;received:string;epoch:string}>(`SELECT
+      version::text,accepted_revision_key accepted,received_revision_key received,correction_epoch::text epoch
+      FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`,[f.packetId])).rows[0];
+    const beforeAllocations=(await fixture.client.query(`SELECT a.allocation_id::text id,a.evidence_line_id::text "evidenceLineId",
+      a.bath_id "bathId",
+      e.source_kind kind,e.source_id "sourceId",
+      e.revision_key revision,e.line_key "lineKey",a.bath_revision "bathRevision",a.quantity::text quantity,a.state,a.cause_key cause
+      FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+      WHERE a.bath_id=$1 ORDER BY a.allocation_id`,[bathId])).rows;
+    expect(beforeAllocations).toHaveLength(3);
+    const lease=await registerTarget(f.packetId,f.orderId,`E2E-pin-rebase-${f.orderId}`,11000+f.orderId);
+    const repository=new PgCncTelegramMdfObservationRepository(database);
+    const claim=await claimFor(repository,lease);
+    expect(claim).not.toBeNull();
+    const report=reportFor(claim!,true);
+    const result=await repository.complete({currentUser:actor,lease,report,requestId:`pin-rebase-${claim!.claimId}`});
+    expect(result).toMatchObject({status:'recorded',fenceState:'none',jobId:expect.any(String)});
+
+    const afterHead=(await fixture.client.query<{version:string;accepted:string;received:string;epoch:string}>(`SELECT
+      version::text,accepted_revision_key accepted,received_revision_key received,correction_epoch::text epoch
+      FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`,[f.packetId])).rows[0];
+    expect(afterHead).toMatchObject({accepted:`cnc-observation:${claim!.claimId}`,
+      received:`cnc-observation:${claim!.claimId}`,epoch:beforeHead.epoch});
+    expect(BigInt(afterHead.version)).toBe(BigInt(beforeHead.version)+1n);
+    const freshLine=(await fixture.client.query<{id:string;quantity:string}>(`SELECT evidence_line_id::text id,quantity::text quantity
+      FROM mdf_evidence_lines WHERE source_kind='packet' AND source_id=$1 AND revision_key=$2 AND line_key='cut-existing'`,
+    [f.packetId,afterHead.accepted])).rows[0];
+    expect(freshLine).toMatchObject({quantity:'4'});
+    expect(freshLine.id).not.toBe(oldPacketLine.id);
+    expect((await fixture.client.query(`SELECT 1 FROM mdf_evidence_lines WHERE source_kind='packet' AND source_id=$1
+      AND revision_key=$2 AND line_key='cut-manual-declaration'`,[f.packetId,afterHead.accepted])).rows).toHaveLength(0);
+    expect((await fixture.client.query(`SELECT quantity::text FROM mdf_evidence_lines WHERE source_kind='packet' AND source_id=$1
+      AND revision_key=$2 AND stage_code='cut' AND evidence_kind='physical' ORDER BY line_key`,
+    [f.packetId,afterHead.accepted])).rows.map(row=>row.quantity).sort()).toEqual(['4','6']);
+
+    const afterAllocations=(await fixture.client.query(`SELECT a.allocation_id::text id,a.evidence_line_id::text "evidenceLineId",
+      a.bath_id "bathId",
+      e.source_kind kind,e.source_id "sourceId",e.revision_key revision,e.line_key "lineKey",a.bath_revision "bathRevision",
+      a.quantity::text quantity,a.state,a.cause_key cause FROM mdf_bath_allocations a
+      JOIN mdf_evidence_lines e USING(evidence_line_id) WHERE a.bath_id=$1 ORDER BY a.allocation_id`,[bathId])).rows;
+    const packetOld=beforeAllocations.filter(row=>row.kind==='packet');
+    const basisOld=beforeAllocations.find(row=>row.kind==='bazisCutSet')!;
+    const packetHistory=afterAllocations.filter(row=>row.kind==='packet');
+    expect(packetHistory.filter(row=>packetOld.some(old=>old.id===row.id)).map(row=>row.state).sort())
+      .toEqual(['released','released']);
+    const rebased=packetHistory.filter(row=>row.cause.startsWith(`cnc-observation-pin-rebase:${claim!.claimId}:`));
+    expect(rebased).toHaveLength(2);
+    expect(rebased.map(row=>({lineKey:row.lineKey,bathRevision:row.bathRevision,quantity:row.quantity,state:row.state}))
+      .sort((a,b)=>a.state.localeCompare(b.state))).toEqual([
+        {lineKey:'cut-existing',bathRevision:'bath-r1',quantity:'2',state:'consumed'},
+        {lineKey:'cut-existing',bathRevision:'bath-r1',quantity:'2',state:'reserved'},
+      ]);
+    expect(rebased.every(row=>row.evidenceLineId===freshLine.id)).toBe(true);
+    expect(afterAllocations.find(row=>row.id===basisOld.id)).toEqual(basisOld);
+    expect((await fixture.client.query<{allocated:string;capacity:string}>(`SELECT
+      COALESCE(sum(a.quantity),0)::text allocated,e.quantity::text capacity FROM mdf_bath_allocations a
+      JOIN mdf_evidence_lines e USING(evidence_line_id) WHERE a.evidence_line_id=$1::uuid AND a.state<>'released'
+      GROUP BY e.quantity`,[freshLine.id])).rows[0]).toEqual({allocated:'4',capacity:'4'});
+    const rebaseAudit=(await fixture.client.query<{auditId:string;before:Record<string,unknown>;
+      after:Record<string,unknown>;metadata:Record<string,unknown>}>(`SELECT audit_id::text "auditId",before_json "before",
+      after_json "after",metadata_json metadata FROM audit_log
+      WHERE event='cnc.mdf_observation.allocations_rebased' AND entity_id=$1`,[f.packetId])).rows;
+    expect(rebaseAudit).toHaveLength(1);
+    expect(rebaseAudit[0].before).toMatchObject({acceptedRevision:'r1'});
+    expect((rebaseAudit[0].before.allocations as Array<Record<string,unknown>>).map(row=>({
+      allocationId:row.allocationId,bathId:row.bathId,bathRevision:row.bathRevision,quantity:row.quantity,state:row.state,
+    })).sort((a,b)=>`${a.bathId}:${a.allocationId}`.localeCompare(`${b.bathId}:${b.allocationId}`))).toEqual(packetOld.map(row=>({
+      allocationId:row.id,bathId:row.bathId,bathRevision:row.bathRevision,quantity:Number(row.quantity),state:row.state,
+    })).sort((a,b)=>`${a.bathId}:${a.allocationId}`.localeCompare(`${b.bathId}:${b.allocationId}`)));
+    expect(rebaseAudit[0].after).toMatchObject({acceptedRevision:`cnc-observation:${claim!.claimId}`});
+    expect((rebaseAudit[0].after.allocations as Array<Record<string,unknown>>).map(row=>({
+      bathId:row.bathId,bathRevision:row.bathRevision,quantity:row.quantity,state:row.state,
+      replacesAllocationId:row.replacesAllocationId,
+    })).sort((a,b)=>`${a.bathId}:${a.replacesAllocationId}`.localeCompare(`${b.bathId}:${b.replacesAllocationId}`))).toEqual(rebased.map(row=>({
+      bathId:row.bathId,bathRevision:row.bathRevision,quantity:Number(row.quantity),state:row.state,
+      replacesAllocationId:packetOld.find(old=>old.cause===`E2E-pin-${row.state}-${f.orderId}`)?.id,
+    })).sort((a,b)=>`${a.bathId}:${a.replacesAllocationId}`.localeCompare(`${b.bathId}:${b.replacesAllocationId}`)));
+    expect(rebaseAudit[0].metadata).toMatchObject({claimId:claim!.claimId,jobId:result.jobId,
+      causeKey:`cnc-observation-pin-rebase:${claim!.claimId}`,touchedBathIds:[bathId]});
+    const rebaseRelated=(await fixture.client.query<{entityType:string;entityId:string}>(`SELECT entity_type "entityType",
+      entity_id "entityId" FROM audit_log_related_entity WHERE audit_id=$1::uuid`,[rebaseAudit[0].auditId])).rows;
+    expect(rebaseRelated.sort((a,b)=>`${a.entityType}:${a.entityId}`.localeCompare(`${b.entityType}:${b.entityId}`))).toEqual([
+      {entityType:'order',entityId:String(f.orderId)},
+      {entityType:'order_detail',entityId:String(f.detailId)},
+    ].sort((a,b)=>`${a.entityType}:${a.entityId}`.localeCompare(`${b.entityType}:${b.entityId}`)));
+    const bathAudit=(await fixture.client.query<{auditId:string;entityType:string;entityId:string;
+      before:Record<string,unknown>;after:Record<string,unknown>;metadata:Record<string,unknown>}>(`SELECT audit_id::text "auditId",
+      entity_type "entityType",entity_id "entityId",before_json "before",after_json "after",metadata_json metadata
+      FROM audit_log WHERE event='mdf_board.bath_supply_rebased' AND entity_id=$1`,[bathId])).rows;
+    expect(bathAudit).toHaveLength(1);
+    expect(bathAudit[0]).toMatchObject({entityType:'mdf_bath',entityId:bathId});
+    expect(bathAudit[0].before).toMatchObject({packetId:f.packetId,acceptedRevision:'r1',allocations:expect.arrayContaining([
+      expect.objectContaining({bathId,bathRevision:'bath-r1',quantity:2,state:'reserved'}),
+      expect.objectContaining({bathId,bathRevision:'bath-r1',quantity:2,state:'consumed'}),
+    ])});
+    expect(bathAudit[0].after).toMatchObject({packetId:f.packetId,acceptedRevision:`cnc-observation:${claim!.claimId}`,
+      allocations:expect.arrayContaining([
+        expect.objectContaining({bathId,bathRevision:'bath-r1',quantity:2,state:'reserved'}),
+        expect.objectContaining({bathId,bathRevision:'bath-r1',quantity:2,state:'consumed'}),
+      ])});
+    expect(bathAudit[0].metadata).toMatchObject({claimId:claim!.claimId,jobId:result.jobId,packetAuditId:rebaseAudit[0].auditId,
+      causeKey:`cnc-observation-pin-rebase:${claim!.claimId}`});
+    const bathRelated=(await fixture.client.query<{entityType:string;entityId:string}>(`SELECT entity_type "entityType",
+      entity_id "entityId" FROM audit_log_related_entity WHERE audit_id=$1::uuid`,[bathAudit[0].auditId])).rows;
+    expect(bathRelated.sort((a,b)=>`${a.entityType}:${a.entityId}`.localeCompare(`${b.entityType}:${b.entityId}`))).toEqual([
+      {entityType:'order',entityId:String(f.orderId)},{entityType:'order_detail',entityId:String(f.detailId)},
+    ].sort((a,b)=>`${a.entityType}:${a.entityId}`.localeCompare(`${b.entityType}:${b.entityId}`)));
+
+    const replaySnapshot=await fixture.snapshot(['cnc_telegram_packets','mdf_source_heads','mdf_evidence_revisions','mdf_evidence_lines',
+      'mdf_revision_context','mdf_revision_demand','mdf_revision_seals','mdf_published_sources','mdf_recalculation_job_rules',
+      'mdf_bath_allocations','mdf_recalculation_jobs','mdf_cnc_observation_targets','mdf_cnc_observation_receipts',
+      'mdf_cnc_observation_job_authorities','mdf_cnc_return_fences','audit_log','audit_log_related_entity','outbox_events']);
+    expect(await repository.complete({currentUser:actor,lease,report,requestId:`pin-rebase-${claim!.claimId}`})).toEqual(result);
+    expect(await fixture.snapshot(Object.keys(replaySnapshot))).toEqual(replaySnapshot);
+    const published=await processOneWithSafeHandlerCode();
+    const publishState=(await fixture.client.query<{status:string;errorCode:string|null}>(`SELECT status,error_code "errorCode"
+      FROM mdf_recalculation_jobs WHERE job_id=$1::uuid`,[result.jobId])).rows[0];
+    expect(published.outcome,`CNC job publish state=${publishState?.status ?? 'missing'} error_code=${publishState?.errorCode ?? 'none'} handler_code=${published.handlerCode}`)
+      .toMatchObject({status:'done',jobId:result.jobId});
+  },30000);
+
+  it('keeps same-position bath capacities separate, sums membership lines, and rebases a reserved debit in an unlaminated bath', async () => {
+    const f=await acceptedPacket({initialPhysicalQuantity:6,rawCompleted:false});
+    const unlaminatedBathId=`cut-result:${1_200_000_000+f.orderId}`;
+    const laminatedBathId=`cut-result:${1_300_000_000+f.orderId}`;
+    const unlaminated=await acceptedMdfSource({kind:'bath',id:unlaminatedBathId,revision:'unlaminated-r1',
+      orderId:f.orderId,detailId:f.detailId,demand:10,member:2,membershipQuantities:[1,1],proof:0,stage:'laminated'});
+    const laminated=await acceptedMdfSource({kind:'bath',id:laminatedBathId,revision:'laminated-r1',
+      orderId:f.orderId,detailId:f.detailId,demand:10,member:6,membershipQuantities:[3,3],proof:6,stage:'laminated'});
+    await fixture.client.query(`UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now()
+      WHERE job_id=ANY($1::uuid[]) AND status='pending'`,[[unlaminated.jobId,laminated.jobId]]);
+    const oldLine=(await fixture.client.query<{id:string}>(`SELECT evidence_line_id::text id FROM mdf_evidence_lines
+      WHERE source_kind='packet' AND source_id=$1 AND revision_key='r1' AND line_key='cut-existing'`,[f.packetId])).rows[0];
+    expect(oldLine).toBeDefined();
+    await fixture.client.query(`INSERT INTO mdf_bath_allocations(evidence_line_id,bath_id,bath_revision,order_id,detail_id,
+      quantity,state,cause_key) VALUES
+      ($1::uuid,$2,'unlaminated-r1',$4,$5,2,'reserved',$6),
+      ($1::uuid,$3,'laminated-r1',$4,$5,4,'consumed',$7)`,
+    [oldLine.id,unlaminatedBathId,laminatedBathId,f.orderId,f.detailId,
+      `E2E-unlaminated-pin-${f.orderId}`,`E2E-laminated-pin-${f.orderId}`]);
+    const before=(await fixture.client.query<{id:string;bathId:string;quantity:string;state:string}>(`SELECT
+      allocation_id::text id,bath_id "bathId",quantity::text quantity,state FROM mdf_bath_allocations
+      WHERE evidence_line_id=$1::uuid ORDER BY bath_id`,[oldLine.id])).rows;
+    expect(before.map(row=>({bathId:row.bathId,quantity:row.quantity,state:row.state}))
+      .sort((a,b)=>a.bathId.localeCompare(b.bathId))).toEqual([
+      {bathId:unlaminatedBathId,quantity:'2',state:'reserved'},
+      {bathId:laminatedBathId,quantity:'4',state:'consumed'},
+    ].sort((a,b)=>a.bathId.localeCompare(b.bathId)));
+
+    const lease=await registerTarget(f.packetId,f.orderId,`E2E-pin-bath-capacity-${f.orderId}`,15000+f.orderId);
+    const repository=new PgCncTelegramMdfObservationRepository(database);
+    const claim=await claimFor(repository,lease);
+    expect(claim).not.toBeNull();
+    const result=await repository.complete({currentUser:actor,lease,report:reportFor(claim!,true),
+      requestId:`pin-bath-capacity-${claim!.claimId}`});
+    expect(result).toMatchObject({status:'recorded',jobId:expect.any(String)});
+    const active=(await fixture.client.query<{bathId:string;bathRevision:string;kind:string;revision:string;lineKey:string;
+      evidenceQuantity:string;quantity:string;state:string}>(`SELECT a.bath_id "bathId",a.bath_revision "bathRevision",
+      e.source_kind kind,e.revision_key revision,e.line_key "lineKey",e.quantity::text "evidenceQuantity",
+      a.quantity::text quantity,a.state FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+      WHERE a.bath_id=ANY($1::text[]) AND a.state<>'released' ORDER BY a.bath_id`,
+    [[unlaminatedBathId,laminatedBathId]])).rows;
+    expect(active).toEqual([
+      {bathId:unlaminatedBathId,bathRevision:'unlaminated-r1',kind:'packet',revision:`cnc-observation:${claim!.claimId}`,
+        lineKey:'cut-existing',evidenceQuantity:'6',quantity:'2',state:'reserved'},
+      {bathId:laminatedBathId,bathRevision:'laminated-r1',kind:'packet',revision:`cnc-observation:${claim!.claimId}`,
+        lineKey:'cut-existing',evidenceQuantity:'6',quantity:'4',state:'consumed'},
+    ].sort((a,b)=>a.bathId.localeCompare(b.bathId)));
+    expect((await fixture.client.query(`SELECT 1 FROM mdf_bath_allocations WHERE allocation_id=ANY($1::uuid[])
+      AND state<>'released'`,[before.map(row=>row.id)])).rows).toHaveLength(0);
+    expect((await fixture.client.query<{membership:string}>(`SELECT coalesce(sum(quantity),0)::text membership
+      FROM mdf_evidence_lines WHERE source_kind='bath' AND source_id=$1 AND revision_key='unlaminated-r1'
+      AND stage_code='membership' AND evidence_kind='derived'`,[unlaminatedBathId])).rows[0].membership).toBe('2');
+    expect((await fixture.client.query<{membership:string}>(`SELECT coalesce(sum(quantity),0)::text membership
+      FROM mdf_evidence_lines WHERE source_kind='bath' AND source_id=$1 AND revision_key='laminated-r1'
+      AND stage_code='membership' AND evidence_kind='derived'`,[laminatedBathId])).rows[0].membership).toBe('6');
+    const bathAudits=(await fixture.client.query<{entityType:string;entityId:string;before:Record<string,unknown>;after:Record<string,unknown>}>(
+      `SELECT entity_type "entityType",entity_id "entityId",before_json "before",after_json "after" FROM audit_log
+       WHERE event='mdf_board.bath_supply_rebased' AND entity_id=ANY($1::text[])`,[[unlaminatedBathId,laminatedBathId]])).rows;
+    expect(bathAudits.map(row=>row.entityId).sort()).toEqual([unlaminatedBathId,laminatedBathId].sort());
+    expect(bathAudits.every(row=>row.entityType==='mdf_bath')).toBe(true);
+    expect(bathAudits.find(row=>row.entityId===unlaminatedBathId)?.before.allocations).toEqual(
+      expect.arrayContaining([expect.objectContaining({bathId:unlaminatedBathId,bathRevision:'unlaminated-r1',quantity:2,state:'reserved'})]));
+    expect(bathAudits.find(row=>row.entityId===laminatedBathId)?.before.allocations).toEqual(
+      expect.arrayContaining([expect.objectContaining({bathId:laminatedBathId,bathRevision:'laminated-r1',quantity:4,state:'consumed'})]));
+  },30000);
+
+  it.each(['basis-without-membership','bath-over-capacity','bath-rework'] as const)(
+    'parks reconciliation without changing packet head or pins when a touched dependency is malformed: %s', async defect => {
+      const f=await acceptedPacket({initialPhysicalQuantity:4,rawCompleted:false});
+      const bathId=`cut-result:${1_700_000_000+f.orderId}`;
+      const bath=await acceptedMdfSource({kind:'bath',id:bathId,revision:'bath-r1',orderId:f.orderId,detailId:f.detailId,
+        demand:10,member:10,proof:defect==='bath-over-capacity'?12:10,proofRework:defect==='bath-rework',stage:'laminated'});
+      const setupJobs=[bath.jobId];
+      let dependencySource:{kind:'basis';id:string;revision:string}|null=null;
+      if (defect==='basis-without-membership') {
+        const basisId=String(2_200_000_000+f.orderId);
+        const basis=await acceptedMdfSource({kind:'bazisCutSet',id:basisId,revision:'basis-r1',orderId:f.orderId,
+          detailId:f.detailId,demand:10,member:0,includeMembership:false,proof:6,stage:'cut'});
+        setupJobs.push(basis.jobId);
+        dependencySource={kind:'basis',id:basisId,revision:'basis-r1'};
+      }
+      await fixture.client.query(`UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now()
+        WHERE job_id=ANY($1::uuid[]) AND status='pending'`,[setupJobs]);
+      await insertPacketPin({packetId:f.packetId,lineKey:'cut-existing',bathId,bathRevision:'bath-r1',
+        orderId:f.orderId,detailId:f.detailId,quantity:2,state:'reserved',cause:`E2E-malformed-pin-${defect}-${f.orderId}`});
+      if (dependencySource) await insertEvidencePin({sourceKind:'bazisCutSet',sourceId:dependencySource.id,
+        revision:dependencySource.revision,lineKey:'cut-physical',bathId,bathRevision:'bath-r1',orderId:f.orderId,
+        detailId:f.detailId,quantity:1,state:'reserved',cause:`E2E-malformed-basis-pin-${f.orderId}`});
+
+      const lease=await registerTarget(f.packetId,f.orderId,`E2E-malformed-pin-${defect}-${f.orderId}`,16000+f.orderId);
+      const repository=new PgCncTelegramMdfObservationRepository(database);
+      const claim=await claimFor(repository,lease);
+      expect(claim).not.toBeNull();
+      const sourceBefore=(await fixture.client.query(`SELECT h.version::text version,h.accepted_revision_key accepted,
+        h.received_revision_key received,h.correction_epoch::text epoch,p.completion_status,p.thumbs_up,
+        p.mdf_completion_returned,p.source_version::text source_version,p.updated_at::text updated_at
+        FROM mdf_source_heads h JOIN cnc_telegram_packets p ON p.packet_id::text=h.source_id
+        WHERE h.source_kind='packet' AND h.source_id=$1`,[f.packetId])).rows[0];
+      const allocationsBefore=await fixture.snapshot(['mdf_bath_allocations']);
+      const result=await repository.complete({currentUser:actor,lease,report:reportFor(claim!,true),
+        requestId:`malformed-pin-${defect}-${claim!.claimId}`});
+      expect(result).toMatchObject({status:'needs_reconciliation',fenceState:'none',jobId:null});
+      const sourceAfter=(await fixture.client.query(`SELECT h.version::text version,h.accepted_revision_key accepted,
+        h.received_revision_key received,h.correction_epoch::text epoch,p.completion_status,p.thumbs_up,
+        p.mdf_completion_returned,p.source_version::text source_version,p.updated_at::text updated_at
+        FROM mdf_source_heads h JOIN cnc_telegram_packets p ON p.packet_id::text=h.source_id
+        WHERE h.source_kind='packet' AND h.source_id=$1`,[f.packetId])).rows[0];
+      expect(sourceAfter).toEqual(sourceBefore);
+      expect(await fixture.snapshot(['mdf_bath_allocations'])).toEqual(allocationsBefore);
+      expect((await fixture.client.query(`SELECT 1 FROM mdf_evidence_revisions WHERE source_kind='packet' AND source_id=$1
+        AND revision_key LIKE 'cnc-observation:%'`,[f.packetId])).rows).toHaveLength(0);
+      expect((await fixture.client.query(`SELECT 1 FROM mdf_cnc_return_fences WHERE packet_id=$1 AND state='satisfied'`,
+        [f.packetId])).rows).toHaveLength(0);
+    },30000);
+
+  it('does not let an unrelated dangling bath allocation on the same order block packet-pin reconciliation', async () => {
+    const f=await acceptedPacket({initialPhysicalQuantity:4,rawCompleted:false});
+    const bathId=`cut-result:${1_800_000_000+f.orderId}`,danglingBathId=`cut-result:${1_900_000_000+f.orderId}`;
+    const bath=await acceptedMdfSource({kind:'bath',id:bathId,revision:'bath-r1',orderId:f.orderId,detailId:f.detailId,
+      demand:10,member:10,proof:10,stage:'laminated'});
+    const basisId=String(2_300_000_000+f.orderId);
+    const basis=await acceptedMdfSource({kind:'bazisCutSet',id:basisId,revision:'basis-r1',orderId:f.orderId,
+      detailId:f.detailId,demand:10,member:10,proof:6,stage:'cut'});
+    await fixture.client.query(`UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now()
+      WHERE job_id=ANY($1::uuid[]) AND status='pending'`,[[bath.jobId,basis.jobId]]);
+    await insertPacketPin({packetId:f.packetId,lineKey:'cut-existing',bathId,bathRevision:'bath-r1',
+      orderId:f.orderId,detailId:f.detailId,quantity:2,state:'reserved',cause:`E2E-target-pin-${f.orderId}`});
+    await insertEvidencePin({sourceKind:'bazisCutSet',sourceId:basisId,revision:'basis-r1',lineKey:'cut-physical',
+      bathId:danglingBathId,bathRevision:'missing-bath-r1',orderId:f.orderId,detailId:f.detailId,
+      quantity:1,state:'reserved',cause:`E2E-unrelated-dangling-pin-${f.orderId}`});
+    expect((await fixture.client.query(`SELECT 1 FROM mdf_source_heads WHERE source_kind='bath' AND source_id=$1`,
+      [danglingBathId])).rows).toHaveLength(0);
+    const unrelatedBefore=(await fixture.client.query(`SELECT allocation_id::text id,evidence_line_id::text "evidenceLineId",
+      bath_id "bathId",bath_revision "bathRevision",quantity::text quantity,state,cause_key cause
+      FROM mdf_bath_allocations WHERE cause_key=$1`,[`E2E-unrelated-dangling-pin-${f.orderId}`])).rows[0];
+    const lease=await registerTarget(f.packetId,f.orderId,`E2E-unrelated-dangling-${f.orderId}`,17000+f.orderId);
+    const repository=new PgCncTelegramMdfObservationRepository(database);
+    const claim=await claimFor(repository,lease);
+    expect(claim).not.toBeNull();
+    const result=await repository.complete({currentUser:actor,lease,report:reportFor(claim!,true),
+      requestId:`unrelated-dangling-${claim!.claimId}`});
+    expect(result).toMatchObject({status:'recorded',jobId:expect.any(String)});
+    expect((await fixture.client.query(`SELECT allocation_id::text id,evidence_line_id::text "evidenceLineId",
+      bath_id "bathId",bath_revision "bathRevision",quantity::text quantity,state,cause_key cause
+      FROM mdf_bath_allocations WHERE allocation_id=$1::uuid`,[unrelatedBefore.id])).rows[0]).toEqual(unrelatedBefore);
+    expect((await fixture.client.query(`SELECT accepted_revision_key FROM mdf_source_heads
+      WHERE source_kind='packet' AND source_id=$1`,[f.packetId])).rows[0].accepted_revision_key)
+      .toBe(`cnc-observation:${claim!.claimId}`);
+  },30000);
+
+  it('refuses to create a missing BASIS-head state for a debit in the touched bath', async () => {
+    const f=await acceptedPacket({initialPhysicalQuantity:4,rawCompleted:false});
+    const bathId=`cut-result:${2_000_000_000+f.orderId}`,basisId=String(2_400_000_000+f.orderId);
+    const bath=await acceptedMdfSource({kind:'bath',id:bathId,revision:'bath-r1',orderId:f.orderId,detailId:f.detailId,
+      demand:10,member:10,proof:10,stage:'laminated'});
+    const basis=await acceptedMdfSource({kind:'bazisCutSet',id:basisId,revision:'basis-r1',orderId:f.orderId,
+      detailId:f.detailId,demand:10,member:10,proof:6,stage:'cut'});
+    await fixture.client.query(`UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now()
+      WHERE job_id=ANY($1::uuid[]) AND status='pending'`,[[bath.jobId,basis.jobId]]);
+    await insertPacketPin({packetId:f.packetId,lineKey:'cut-existing',bathId,bathRevision:'bath-r1',
+      orderId:f.orderId,detailId:f.detailId,quantity:2,state:'reserved',cause:`E2E-target-pin-with-basis-${f.orderId}`});
+    await insertEvidencePin({sourceKind:'bazisCutSet',sourceId:basisId,revision:'basis-r1',lineKey:'cut-physical',
+      bathId,bathRevision:'bath-r1',orderId:f.orderId,detailId:f.detailId,quantity:1,state:'reserved',
+      cause:`E2E-missing-basis-head-${f.orderId}`});
+    const basisAllocation=(await fixture.client.query<{id:string}>(`SELECT allocation_id::text id FROM mdf_bath_allocations
+      WHERE cause_key=$1 AND state<>'released'`,[`E2E-missing-basis-head-${f.orderId}`])).rows[0];
+    expect(basisAllocation).toBeDefined();
+    const beforeDelete=await fixture.snapshot(['mdf_source_heads','mdf_bath_allocations']);
+    await expect(fixture.client.query(`DELETE FROM mdf_source_heads WHERE source_kind='bazisCutSet' AND source_id=$1`,
+      [basisId])).rejects.toMatchObject({code:'55000',message:'MDF source fence cannot be deleted'});
+    expect(await fixture.snapshot(Object.keys(beforeDelete))).toEqual(beforeDelete);
+    const lease=await registerTarget(f.packetId,f.orderId,`E2E-basis-head-guard-${f.orderId}`,18000+f.orderId);
+    const repository=new PgCncTelegramMdfObservationRepository(database);
+    const claim=await claimFor(repository,lease);
+    expect(claim).not.toBeNull();
+    const result=await repository.complete({currentUser:actor,lease,report:reportFor(claim!,true),
+      requestId:`basis-head-guard-${claim!.claimId}`});
+    expect(result).toMatchObject({status:'recorded',jobId:expect.any(String)});
+    expect((await fixture.client.query(`SELECT accepted_revision_key FROM mdf_source_heads
+      WHERE source_kind='packet' AND source_id=$1`,[f.packetId])).rows[0].accepted_revision_key)
+      .toBe(`cnc-observation:${claim!.claimId}`);
+    expect((await fixture.client.query(`SELECT 1 FROM mdf_bath_allocations WHERE allocation_id=$1::uuid
+      AND state='reserved' AND bath_id=$2 AND bath_revision='bath-r1' AND quantity=1`,
+    [basisAllocation.id,bathId])).rows).toHaveLength(1);
+  },30000);
+
+  it('parks pin reconciliation when a linked bath revision is stale or not fully accepted', async () => {
+    for (const stale of ['bath-revision','bath-head'] as const) {
+      const f=await acceptedPacket({initialPhysical:true,rawCompleted:false});
+      const bathId=`cut-result:${1_400_000_000+f.orderId}`;
+      const bath=await acceptedMdfSource({kind:'bath',id:bathId,revision:'bath-r1',orderId:f.orderId,detailId:f.detailId,
+        demand:10,member:10,proof:10,stage:'laminated'});
+      await fixture.client.query(`UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now()
+        WHERE job_id=$1::uuid AND status='pending'`,[bath.jobId]);
+      await insertPacketPin({packetId:f.packetId,lineKey:'cut-existing',bathId,
+        bathRevision:stale==='bath-revision'?'obsolete-bath-r0':'bath-r1',orderId:f.orderId,detailId:f.detailId,
+        quantity:4,state:'reserved',cause:`E2E-stale-pin-${stale}-${f.orderId}`});
+      if (stale==='bath-head') {
+        const head=(await fixture.client.query<{version:string;epoch:string}>(`SELECT version::text,correction_epoch::text epoch
+          FROM mdf_source_heads WHERE source_kind='bath' AND source_id=$1`,[bathId])).rows[0];
+        const lines=await fixture.client.query<MdfReceiptLine>(`SELECT line_key "lineKey",order_id::float8 "orderId",
+          detail_id::float8 "detailId",quantity::float8,stage_code "stageCode",evidence_kind "evidenceKind",rework
+          FROM mdf_evidence_lines WHERE source_kind='bath' AND source_id=$1 AND revision_key='bath-r1' ORDER BY line_key`,[bathId]);
+        const pending=await database.transaction(tx=>recordMdfReceipt(tx,{sourceKind:'bath',sourceId:bathId,
+          revisionKey:'bath-r2',origin:'manual',actorUserId:1,requestId:`E2E stale bath head ${bathId}`,
+          causeKey:`E2E stale bath head ${bathId}`,expectedFence:{version:head.version,correctionEpoch:head.epoch},
+          accept:true,rules:[],executionContext:{sourceCreatedAt:'2026-09-20T00:00:00Z',displayName:`E2E stale bath ${bathId}`,
+            priorColumn:null,compositionComplete:true,demand:[{orderId:f.orderId,detailId:f.detailId,quantity:10}]},lines:lines.rows}));
+        expect(pending.accepted).toBe(false);
+      }
+      const lease=await registerTarget(f.packetId,f.orderId,`E2E-stale-pin-${stale}-${f.orderId}`,12000+f.orderId);
+      const repository=new PgCncTelegramMdfObservationRepository(database);
+      const claim=await claimFor(repository,lease);
+      expect(claim).not.toBeNull();
+      const sourceBefore=(await fixture.client.query(`SELECT h.version::text version,h.accepted_revision_key accepted,
+        h.received_revision_key received,h.correction_epoch::text epoch,p.completion_status,p.thumbs_up,
+        p.mdf_completion_returned,p.source_version::text source_version,p.updated_at::text updated_at
+        FROM mdf_source_heads h JOIN cnc_telegram_packets p ON p.packet_id::text=h.source_id
+        WHERE h.source_kind='packet' AND h.source_id=$1`,[f.packetId])).rows[0];
+      const allocationsBefore=await fixture.snapshot(['mdf_bath_allocations']);
+      const result=await repository.complete({currentUser:actor,lease,report:reportFor(claim!,true),
+        requestId:`stale-pin-${stale}-${claim!.claimId}`});
+      expect(result).toMatchObject({status:'needs_reconciliation',fenceState:'none',jobId:null});
+      const sourceAfter=(await fixture.client.query(`SELECT h.version::text version,h.accepted_revision_key accepted,
+        h.received_revision_key received,h.correction_epoch::text epoch,p.completion_status,p.thumbs_up,
+        p.mdf_completion_returned,p.source_version::text source_version,p.updated_at::text updated_at
+        FROM mdf_source_heads h JOIN cnc_telegram_packets p ON p.packet_id::text=h.source_id
+        WHERE h.source_kind='packet' AND h.source_id=$1`,[f.packetId])).rows[0];
+      expect(sourceAfter).toEqual(sourceBefore);
+      expect(await fixture.snapshot(['mdf_bath_allocations'])).toEqual(allocationsBefore);
+      expect((await fixture.client.query<{state:string}>(`SELECT work_state state FROM mdf_cnc_observation_targets
+        WHERE packet_id=$1`,[f.packetId])).rows[0].state).toBe('needs_reconciliation');
+      expect((await fixture.client.query(`SELECT 1 FROM mdf_evidence_revisions WHERE source_kind='packet' AND source_id=$1
+        AND revision_key LIKE 'cnc-observation:%'`,[f.packetId])).rows).toHaveLength(0);
+      expect((await fixture.client.query(`SELECT 1 FROM mdf_cnc_observation_job_authorities WHERE packet_id=$1`,[f.packetId])).rows)
+        .toHaveLength(0);
+      expect((await fixture.client.query<{count:number}>(`SELECT count(*)::int count FROM mdf_cnc_return_fences
+        WHERE packet_id=$1 AND state='satisfied'`,[f.packetId])).rows[0].count).toBe(0);
+    }
+  },30000);
+
+  it.each(['after-release','after-head-acceptance','after-replacement-insert','after-rebase-audit','after-bath-audit','after-outbox'] as const)(
+    'rolls back packet pins and observer receipt atomically when reconciliation fails %s', async failurePoint => {
+      const f=await acceptedPacket({initialPhysical:true,rawCompleted:false});
+      const bathId=`cut-result:${1_500_000_000+f.orderId}`;
+      const bath=await acceptedMdfSource({kind:'bath',id:bathId,revision:'bath-r1',orderId:f.orderId,detailId:f.detailId,
+        demand:10,member:10,proof:10,stage:'laminated'});
+      await fixture.client.query(`UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now()
+        WHERE job_id=$1::uuid AND status='pending'`,[bath.jobId]);
+      await insertPacketPin({packetId:f.packetId,lineKey:'cut-existing',bathId,bathRevision:'bath-r1',
+        orderId:f.orderId,detailId:f.detailId,quantity:4,state:'reserved',cause:`E2E-pin-rollback-${f.orderId}`});
+      const lease=await registerTarget(f.packetId,f.orderId,`E2E-pin-rollback-${failurePoint}-${f.orderId}`,13000+f.orderId);
+      const repository=new PgCncTelegramMdfObservationRepository(database);
+      const claim=await claimFor(repository,lease);
+      expect(claim).not.toBeNull();
+      const originalAllocation=(await fixture.client.query<{id:string}>(`SELECT allocation_id::text id
+        FROM mdf_bath_allocations WHERE cause_key=$1 AND state<>'released'`,[`E2E-pin-rollback-${f.orderId}`])).rows[0];
+      expect(originalAllocation).toBeDefined();
+      const before=await fixture.snapshot(['cnc_telegram_packets','mdf_source_heads','mdf_evidence_revisions','mdf_evidence_lines',
+        'mdf_revision_context','mdf_revision_demand','mdf_revision_seals','mdf_published_sources','mdf_recalculation_job_rules',
+        'mdf_bath_allocations','mdf_recalculation_jobs','mdf_cnc_observation_targets','mdf_cnc_observation_receipts',
+        'mdf_cnc_observation_job_authorities','mdf_cnc_return_fences','audit_log','audit_log_related_entity','outbox_events']);
+      let injected=false;
+      const failing=repositoryWithQueryHook(async (sql,params) => {
+        if (injected) return;
+        const firstParam=params?.[0];
+        const allocationIds=Array.isArray(firstParam)?firstParam.map(String):[];
+        const jsonPayload=typeof firstParam==='string'?firstParam:'';
+        const matches=failurePoint==='after-release'
+          ? /UPDATE\s+mdf_bath_allocations\s+SET\s+state='released'/i.test(sql) && allocationIds.includes(originalAllocation.id)
+          : failurePoint==='after-head-acceptance'
+            ? /UPDATE\s+mdf_source_heads\s+SET\s+received_revision_key/i.test(sql) && params?.[1]===f.packetId
+            : failurePoint==='after-replacement-insert'
+              ? /INSERT\s+INTO\s+mdf_bath_allocations/i.test(sql)
+                && jsonPayload.includes(`cnc-observation-pin-rebase:${claim!.claimId}:${originalAllocation.id}`)
+              : failurePoint==='after-rebase-audit'
+                ? /INSERT\s+INTO\s+audit_log/i.test(sql) && firstParam==='cnc.mdf_observation.allocations_rebased'
+                  && params?.[2]===f.packetId
+                : failurePoint==='after-bath-audit'
+                  ? /INSERT\s+INTO\s+audit_log/i.test(sql) && firstParam==='mdf_board.bath_supply_rebased'
+                    && params?.[2]===bathId
+                : /INSERT\s+INTO\s+outbox_events/i.test(sql) && sql.includes('cnc.mdf_observation.recorded')
+                  && params?.[0]===f.packetId && params?.[2]===`cnc.mdf_observation:${claim!.claimId}`;
+        if (matches) {
+          injected=true;
+          throw new Error(`E2E_INJECTED_${failurePoint}`);
+        }
+      });
+      await expect(failing.complete({currentUser:actor,lease,report:reportFor(claim!,true),
+        requestId:`pin-rollback-${failurePoint}-${claim!.claimId}`})).rejects.toThrow(`E2E_INJECTED_${failurePoint}`);
+      expect(injected).toBe(true);
+      expect(await fixture.snapshot(Object.keys(before))).toEqual(before);
+    },30000);
+
+  it('does not invert an old job-row lock against the owner-first CNC pin rebase', async () => {
+    const f=await acceptedPacket({initialPhysical:true,rawCompleted:false});
+    const bathId=`cut-result:${1_600_000_000+f.orderId}`;
+    const bath=await acceptedMdfSource({kind:'bath',id:bathId,revision:'bath-r1',orderId:f.orderId,detailId:f.detailId,
+      demand:10,member:10,proof:10,stage:'laminated'});
+    await fixture.client.query(`UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now()
+      WHERE job_id=$1::uuid AND status='pending'`,[bath.jobId]);
+    await insertPacketPin({packetId:f.packetId,lineKey:'cut-existing',bathId,bathRevision:'bath-r1',
+      orderId:f.orderId,detailId:f.detailId,quantity:4,state:'reserved',cause:`E2E-pin-lock-${f.orderId}`});
+    const oldJob=(await fixture.client.query<{jobId:string}>(`INSERT INTO mdf_recalculation_jobs
+      (event_key,source_kind,source_id,revision_key,correction_epoch,actor_user_id,request_id,status,effect_policy)
+      SELECT $1,'packet',$2,'r1',correction_epoch,1,$3,'pending','forward' FROM mdf_source_heads
+      WHERE source_kind='packet' AND source_id=$2 RETURNING job_id::text "jobId"`,
+    [`E2E-old-pin-job-${f.orderId}`,f.packetId,`E2E old pin job ${f.orderId}`])).rows[0];
+    expect(oldJob).toBeDefined();
+    const lease=await registerTarget(f.packetId,f.orderId,`E2E-pin-lock-${f.orderId}`,14000+f.orderId);
+    const claim=await claimFor(new PgCncTelegramMdfObservationRepository(database),lease);
+    expect(claim).not.toBeNull();
+
+    let signalOwnerLocked!:()=>void, resumeObserver!:()=>void;
+    const ownerLocked=new Promise<void>(resolve=>{signalOwnerLocked=resolve;});
+    const holdObserver=new Promise<void>(resolve=>{resumeObserver=resolve;});
+    let ownerLockHooked=false;
+    const pausedObserver=repositoryWithQueryHook(async sql=>{
+      if (!ownerLockHooked && /SELECT\s+order_id::float8\s+order_id[\s\S]*FROM\s+orders[\s\S]*FOR\s+UPDATE/i.test(sql)) {
+        ownerLockHooked=true;
+        signalOwnerLocked();
+        await Promise.race([holdObserver,new Promise<void>((_,reject)=>setTimeout(()=>reject(new Error('MDF_TEST_OWNER_LOCK_BARRIER_TIMEOUT')),10000))]);
+      }
+    });
+    const report=reportFor(claim!,true);
+    const observation=pausedObserver.complete({currentUser:actor,lease,report,
+      requestId:`pin-lock-${claim!.claimId}`});
+    let oldPid:number|null=null;
+    let oldWorker!:Promise<{version:string;accepted:string|null;received:string}>;
+    try {
+      await Promise.race([ownerLocked,new Promise<void>((_,reject)=>setTimeout(()=>reject(new Error('MDF_TEST_OWNER_LOCK_NOT_REACHED')),10000))]);
+      oldWorker=database.transaction(async tx=>{
+        oldPid=(await tx.query<{pid:number}>('SELECT pg_backend_pid()::int pid')).rows[0].pid;
+        await tx.query('SELECT job_id FROM mdf_recalculation_jobs WHERE job_id=$1::uuid FOR UPDATE',[oldJob.jobId]);
+        await tx.query('SELECT order_id FROM orders WHERE order_id=$1 FOR UPDATE',[f.orderId]);
+        return (await tx.query<{version:string;accepted:string|null;received:string}>(`SELECT version::text,accepted_revision_key accepted,
+          received_revision_key received FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`,[f.packetId])).rows[0];
+      });
+      for (let attempt=0; attempt<100; attempt++) {
+        const waiting=(await fixture.client.query<{waiting:boolean;query:string}>(`SELECT wait_event_type='Lock' waiting,query
+          FROM pg_stat_activity WHERE pid=$1`,[oldPid])).rows[0];
+        if (waiting?.waiting && waiting.query.includes('FROM orders')) break;
+        if (attempt===99) throw new Error('MDF_TEST_OLD_JOB_NOT_WAITING_ON_OWNER');
+        await new Promise(resolve=>setTimeout(resolve,10));
+      }
+      resumeObserver();
+      const result=await observation;
+      expect(result).toMatchObject({status:'recorded',jobId:expect.any(String)});
+      const seen=await oldWorker;
+      expect(seen.accepted).toBe(`cnc-observation:${claim!.claimId}`);
+      expect(seen.received).toBe(`cnc-observation:${claim!.claimId}`);
+      expect(await runner.processOne()).toMatchObject({status:'superseded',jobId:oldJob.jobId});
+      const published=await processOneWithSafeHandlerCode();
+      const publishState=(await fixture.client.query<{status:string;errorCode:string|null}>(`SELECT status,error_code "errorCode"
+        FROM mdf_recalculation_jobs WHERE job_id=$1::uuid`,[result.jobId])).rows[0];
+      expect(published.outcome,`CNC job publish state=${publishState?.status ?? 'missing'} error_code=${publishState?.errorCode ?? 'none'} handler_code=${published.handlerCode}`)
+        .toMatchObject({status:'done',jobId:result.jobId});
+    } finally {
+      resumeObserver();
+      await observation.catch(()=>undefined);
+      if (oldWorker) await oldWorker.catch(()=>undefined);
+    }
   },30000);
 
   it('records read-only-mode CNC receipts without changing scalar production state or running queued jobs', async () => {

@@ -9,6 +9,12 @@ import { assertCurrentWorkerSessionInTransaction } from './cnc-telegram-worker-s
 import { requireMdfCommandBoundary } from '../../mdf-board/application/mdf-command-boundary';
 import { recordMdfReceipt, type MdfReceiptLine } from '../../mdf-board/application/mdf-receipt';
 import { loadMdfExecutionSnapshot, mdfSourceKey } from '../../mdf-board/adapters/mdf-execution-snapshot';
+import { discoverMdfCorrectionClosure, MAX_MDF_CORRECTION_ROWS } from '../../mdf-board/adapters/mdf-correction-snapshot';
+import { planMdfCncObservationPinReconciliation } from '../../mdf-board/adapters/mdf-cnc-pin-reconciliation';
+import type { MdfExecutionHead } from '../../mdf-board/adapters/mdf-execution-snapshot';
+import type { MdfEvidenceAllocation } from '../../mdf-board/domain/mdf-evidence-allocation';
+import { isMdfEvidenceContract } from '../../mdf-board/domain/mdf-evidence-contract';
+import { MdfNeedsAttention, type MdfSourceKind } from '../../mdf-board/application/mdf-job-runner';
 import type { MdfExecutionContext } from '../../mdf-board/domain/mdf-execution-context';
 import { mdfSum } from '../../mdf-board/domain/mdf-quantities';
 import type { CncTelegramWorkerSessionLeaseContext } from '../application/cnc-telegram-worker-session.types';
@@ -34,6 +40,37 @@ const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(va
 function fail(status: number, code: string, message: string): never { throw new ApiError(status, code, message); }
 function validBigint(value: unknown, positive = true): value is string {
   return typeof value === 'string' && (positive ? /^[1-9]\d*$/.test(value) : /^(0|[1-9]\d*)$/.test(value));
+}
+function safeMdfTotal(values: readonly number[]): number | null {
+  try { return values.reduce((sum, value) => mdfSum(sum, value), 0); }
+  catch { return null; }
+}
+function validAcceptedProof(kind: MdfSourceKind, lines: readonly StoredReceiptLine[]): boolean {
+  try {
+    if (!lines.length) return false;
+    const evidenceIds = new Set<string>(), lineKeys = new Set<string>();
+    const membership = new Map<string, number>(), physical = new Map<string, number>();
+    const position = (line: StoredReceiptLine) => JSON.stringify([line.orderId, line.detailId, line.rework]);
+    for (const line of lines) {
+      if (!line.evidenceLineId || !line.lineKey || evidenceIds.has(line.evidenceLineId) || lineKeys.has(line.lineKey)
+        || !isMdfEvidenceContract(kind, line.stageCode, line.evidenceKind)
+        || ![line.orderId, line.detailId, line.quantity].every(Number.isSafeInteger)
+        || line.orderId <= 0 || line.detailId <= 0 || line.quantity <= 0 || typeof line.rework !== 'boolean'
+        || (kind === 'bath' && line.rework)) return false;
+      evidenceIds.add(line.evidenceLineId); lineKeys.add(line.lineKey);
+      const key = position(line);
+      if (line.stageCode === 'membership' && line.evidenceKind === 'derived') {
+        membership.set(key, mdfSum(membership.get(key) ?? 0, line.quantity));
+      }
+      const proofStage = kind === 'bath' ? 'laminated' : 'cut';
+      if (line.stageCode === proofStage && line.evidenceKind === 'physical') {
+        physical.set(key, mdfSum(physical.get(key) ?? 0, line.quantity));
+      }
+    }
+    if (!membership.size) return false;
+    for (const [key, quantity] of physical) if (quantity > (membership.get(key) ?? 0)) return false;
+    return true;
+  } catch { return false; }
 }
 function safeId(value: unknown): number {
   const id = Number(value);
@@ -81,6 +118,22 @@ interface TargetRow extends Row {
 interface HeadRow extends Row { received_revision_key: string; accepted_revision_key: string | null; version: string; correction_epoch: string }
 interface FenceRow extends Row { correction_epoch: string; baseline_source_version: string; pending_source_version: string | null; completion_source_version: string | null; state: string }
 interface Binding { messageId: string; role: MdfCncObservationMessageRole; sha256: string }
+type PinClosure = Awaited<ReturnType<typeof discoverMdfCorrectionClosure>>;
+interface LockedAllocation extends MdfEvidenceAllocation, Row {
+  allocationId: string; evidenceLineId: string; evidenceSourceKind: MdfSourceKind; evidenceSourceId: string;
+  evidenceRevision: string; evidenceStage: string; evidenceKind: string; evidenceRework: boolean;
+  evidenceOrderId: number; evidenceDetailId: number; evidenceQuantity: number;
+  sourceAcceptedRevision: string | null; sourceReceivedRevision: string | null;
+  bathAcceptedRevision: string | null; bathReceivedRevision: string | null;
+}
+interface StoredReceiptLine extends MdfReceiptLine { evidenceLineId: string; revision: string; kind: MdfSourceKind; id: string }
+interface LockedPinContext {
+  closure: PinClosure;
+  heads: MdfExecutionHead[];
+  allocations: LockedAllocation[];
+  lines: StoredReceiptLine[];
+  execution: Awaited<ReturnType<typeof loadMdfExecutionSnapshot>>;
+}
 
 /** Durable bounded exact-message observer. Every public method owns its RC transaction. */
 export class PgCncTelegramMdfObservationRepository implements CncTelegramMdfObservationRepositoryPort {
@@ -200,9 +253,49 @@ export class PgCncTelegramMdfObservationRepository implements CncTelegramMdfObse
         return replayResult(priorReceipt, input.lease, report, reportDigest);
       }
       const owners = await this.ownerIds(tx, preflight.packet_id, preflight.accepted_revision_key);
-      const ownerLocksValid=await this.lockOwnersAndDetails(tx, owners);
+      const completedReport = report.messages.some(message => message.thumbsUp);
+      const preflightFenceState = (await tx.query<{ state: string }>(`SELECT state FROM mdf_cnc_return_fences
+        WHERE packet_id=$1::uuid`, [preflight.packet_id])).rows[0]?.state ?? null;
+      const willRecordPhysical = completedReport && (!preflightFenceState || preflightFenceState === 'waiting_completion');
+      let pinClosure: PinClosure | null = null;
+      let lockOwners = owners;
+      if (willRecordPhysical) {
+        try {
+          pinClosure = await discoverMdfCorrectionClosure(tx, { kind: 'packet', id: preflight.packet_id });
+        } catch (error) {
+          if (error instanceof MdfNeedsAttention) fail(409, 'MDF_CNC_OBSERVATION_SCOPE_UNAVAILABLE', 'Связанная область распределения CNC превышает безопасный предел');
+          throw error;
+        }
+        if (owners.some(id => !pinClosure!.orders.includes(id))) {
+          fail(409, 'MDF_CNC_OBSERVATION_SCOPE_UNAVAILABLE', 'Связанная область распределения CNC изменилась');
+        }
+        lockOwners = pinClosure.orders;
+      }
+      const ownerLocksValid=await this.lockOwnersAndDetails(tx, lockOwners);
       await assertCurrentWorkerSessionInTransaction(tx, input.lease);
-      await this.lockSourceSuffix(tx, preflight.packet_id);
+      if (willRecordPhysical && pinClosure) {
+        let currentClosure: PinClosure;
+        try { currentClosure = await discoverMdfCorrectionClosure(tx, { kind: 'packet', id: preflight.packet_id }); }
+        catch (error) {
+          if (error instanceof MdfNeedsAttention) fail(409, 'MDF_CNC_OBSERVATION_SCOPE_UNAVAILABLE', 'Связанная область распределения CNC превышает безопасный предел');
+          throw error;
+        }
+        if (JSON.stringify(currentClosure) !== JSON.stringify(pinClosure)) {
+          fail(409, 'MDF_CNC_OBSERVATION_SCOPE_UNAVAILABLE', 'Связанная область распределения CNC изменилась; запросите сообщения заново');
+        }
+        await this.lockClosureSourceSuffix(tx, pinClosure);
+        let lockedClosure: PinClosure;
+        try { lockedClosure = await discoverMdfCorrectionClosure(tx, { kind: 'packet', id: preflight.packet_id }); }
+        catch (error) {
+          if (error instanceof MdfNeedsAttention) fail(409, 'MDF_CNC_OBSERVATION_SCOPE_UNAVAILABLE', 'Связанная область распределения CNC превышает безопасный предел');
+          throw error;
+        }
+        if (JSON.stringify(lockedClosure) !== JSON.stringify(pinClosure)) {
+          fail(409, 'MDF_CNC_OBSERVATION_SCOPE_UNAVAILABLE', 'Связанная область распределения CNC изменилась после блокировки');
+        }
+      } else {
+        await this.lockSourceSuffix(tx, preflight.packet_id);
+      }
       const { target, head, packet, fence } = await this.lockCurrent(tx, preflight.packet_id);
       const racedReceipt = await this.readReceipt(tx, report.claimId);
       if (racedReceipt) return replayResult(racedReceipt, input.lease, report, reportDigest);
@@ -225,11 +318,17 @@ export class PgCncTelegramMdfObservationRepository implements CncTelegramMdfObse
         fail(409, 'MDF_CNC_OBSERVATION_STALE', 'Сигнал возврата CNC изменился; загрузите сообщения заново');
       }
       const completed = report.messages.some(message => message.thumbsUp);
+      let pinContext: LockedPinContext | null = null;
+      if (completed && (!fence || fence.state === 'waiting_completion')) {
+        if (!pinClosure) fail(409, 'MDF_CNC_OBSERVATION_SCOPE_UNAVAILABLE', 'Связанная область распределения CNC не заблокирована');
+        pinContext = await this.lockPinContext(tx, pinClosure, packet.packet_id, head);
+      }
       const nextObservationVersion = nextVersion(target.last_observation_version, packet.source_version, fence);
       let result: MdfCncObservationResult = { status: 'recorded', observationVersion: target.last_observation_version,
         fenceState: (fence?.state as MdfCncObservationResult['fenceState'] | undefined) ?? 'none', jobId: null };
       let sequenceAdvanced = false;
       let authorityJob: string | null = null;
+      let pinRebaseAuditId: string | null = null;
 
       if (fence?.state === 'waiting_pending') {
         if (!completed) {
@@ -249,7 +348,7 @@ export class PgCncTelegramMdfObservationRepository implements CncTelegramMdfObse
       } else if (fence?.state === 'waiting_completion') {
         if (completed) {
           const proof = await this.recordPhysicalCut(tx, input.currentUser, input.lease, target, head,
-            report, reportDigest, nextObservationVersion, input.requestId);
+            report, reportDigest, nextObservationVersion, input.requestId, pinContext);
           if (proof.kind === 'needs_reconciliation') {
             await tx.query(`UPDATE mdf_cnc_observation_targets SET work_state='needs_reconciliation',
               last_observation_version=$2::bigint,claim_id=NULL,claim_token_hash=NULL,claim_worker_instance_id=NULL,
@@ -265,6 +364,7 @@ export class PgCncTelegramMdfObservationRepository implements CncTelegramMdfObse
             sequenceAdvanced = true;
             await this.updateRawStatus(tx, packet.packet_id, true, true, true);
             authorityJob = proof.jobId;
+            pinRebaseAuditId = proof.pinRebaseAuditId;
             result = { status: 'recorded', observationVersion: nextObservationVersion,
               fenceState: 'satisfied', jobId: proof.jobId };
             await this.finishTarget(tx, target, nextObservationVersion, proof.revisionKey);
@@ -275,7 +375,7 @@ export class PgCncTelegramMdfObservationRepository implements CncTelegramMdfObse
         }
       } else if (!fence && completed) {
         const proof = await this.recordPhysicalCut(tx, input.currentUser, input.lease, target, head,
-          report, reportDigest, nextObservationVersion, input.requestId);
+          report, reportDigest, nextObservationVersion, input.requestId, pinContext);
         if (proof.kind === 'needs_reconciliation') {
           await tx.query(`UPDATE mdf_cnc_observation_targets SET work_state='needs_reconciliation',
             last_observation_version=$2::bigint,claim_id=NULL,claim_token_hash=NULL,claim_worker_instance_id=NULL,
@@ -291,6 +391,7 @@ export class PgCncTelegramMdfObservationRepository implements CncTelegramMdfObse
           result = { status: 'recorded', observationVersion: nextObservationVersion,
             fenceState: 'none', jobId: proof.jobId };
           authorityJob = proof.jobId;
+          pinRebaseAuditId = proof.pinRebaseAuditId;
           await this.finishTarget(tx, target, nextObservationVersion, proof.revisionKey);
         }
       } else {
@@ -316,7 +417,8 @@ export class PgCncTelegramMdfObservationRepository implements CncTelegramMdfObse
         actorUsername: input.currentUser.username, actorRole: input.currentUser.role,
         entityType: 'cnc_telegram_packet', entityId: packet.packet_id, source: 'cnc_mdf_observation_worker',
         requestId: input.requestId, metadata: { claimId: report.claimId, observationVersion: committedVersion,
-          reportState: completed ? 'completed' : 'pending', fenceState: result.fenceState, jobId: result.jobId },
+          reportState: completed ? 'completed' : 'pending', fenceState: result.fenceState, jobId: result.jobId,
+          pinRebaseAuditId, pinRebaseOutboxDecision: pinRebaseAuditId ? 'included_in_observation_outbox_no_separate_production_event' : null },
         relatedEntities: owners.map(entityId=>({entityType:'order',entityId})) });
       if (!auditId) throw new Error('MDF_CNC_OBSERVATION_AUDIT_REQUIRED');
       await this.enqueueOutbox(tx, packet.packet_id, report.claimId, result, { actorUserId: input.currentUser.id,
@@ -450,6 +552,143 @@ export class PgCncTelegramMdfObservationRepository implements CncTelegramMdfObse
     await tx.query(`SELECT 1 FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1 FOR UPDATE`, [packetId]);
   }
 
+  private async lockClosureSourceSuffix(tx: TransactionClient, closure: PinClosure): Promise<void> {
+    for (const sourceRef of closure.sources) {
+      await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',
+        [`mdf-source:${JSON.stringify([sourceRef.kind, sourceRef.id])}`]);
+    }
+    const heads = (await tx.query<MdfExecutionHead>(`SELECT h.source_kind kind,h.source_id id,
+      h.received_revision_key received,h.accepted_revision_key accepted,h.correction_epoch::text epoch
+      FROM mdf_source_heads h JOIN unnest($1::text[],$2::text[]) s(kind,id)
+        ON h.source_kind=s.kind AND h.source_id=s.id
+      ORDER BY h.source_kind,h.source_id FOR UPDATE OF h`,
+    [closure.sources.map(s => s.kind), closure.sources.map(s => s.id)])).rows;
+    // A missing dependency head is an unverified local proof condition. Keep
+    // the target head lock, but let the completion path park this report rather
+    // than retrying the same dangling dependency forever.
+  }
+
+  private async lockPinContext(tx: TransactionClient, closure: PinClosure, packetId: string,
+    packetHead: HeadRow): Promise<LockedPinContext | null> {
+    const heads = (await tx.query<MdfExecutionHead>(`SELECT h.source_kind kind,h.source_id id,
+      h.received_revision_key received,h.accepted_revision_key accepted,h.correction_epoch::text epoch
+      FROM mdf_source_heads h JOIN unnest($1::text[],$2::text[]) s(kind,id)
+        ON h.source_kind=s.kind AND h.source_id=s.id ORDER BY h.source_kind,h.source_id`,
+    [closure.sources.map(s => s.kind), closure.sources.map(s => s.id)])).rows;
+    const allocations = (await tx.query<LockedAllocation>(`SELECT a.allocation_id::text "allocationId",
+      a.evidence_line_id::text "evidenceLineId",a.bath_id "bathId",a.bath_revision "bathRevision",
+      a.order_id::float8 "orderId",a.detail_id::float8 "detailId",a.quantity::float8 quantity,a.state,
+      e.source_kind "evidenceSourceKind",e.source_id "evidenceSourceId",e.revision_key "evidenceRevision",
+      e.stage_code "evidenceStage",e.evidence_kind "evidenceKind",e.rework "evidenceRework",
+      e.order_id::float8 "evidenceOrderId",e.detail_id::float8 "evidenceDetailId",e.quantity::float8 "evidenceQuantity",
+      sh.accepted_revision_key "sourceAcceptedRevision",sh.received_revision_key "sourceReceivedRevision",
+      bh.accepted_revision_key "bathAcceptedRevision",bh.received_revision_key "bathReceivedRevision"
+      FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+      LEFT JOIN mdf_source_heads sh ON sh.source_kind=e.source_kind AND sh.source_id=e.source_id
+      LEFT JOIN mdf_source_heads bh ON bh.source_kind='bath' AND bh.source_id=a.bath_id
+      WHERE a.order_id=ANY($1::bigint[]) AND a.state<>'released'
+      ORDER BY a.allocation_id LIMIT $2 FOR UPDATE OF a`, [closure.orders, MAX_MDF_CORRECTION_ROWS + 1])).rows;
+    if (allocations.length > MAX_MDF_CORRECTION_ROWS) return null;
+    let lines: StoredReceiptLine[];
+    let execution: Awaited<ReturnType<typeof loadMdfExecutionSnapshot>>;
+    try {
+      lines = (await tx.query<StoredReceiptLine>(`SELECT l.evidence_line_id::text "evidenceLineId",
+        l.source_kind kind,l.source_id id,l.revision_key revision,l.line_key "lineKey",l.order_id::float8 "orderId",l.detail_id::float8 "detailId",
+        l.quantity::float8 quantity,l.stage_code "stageCode",l.evidence_kind "evidenceKind",l.rework
+        FROM unnest($1::text[],$2::text[],$3::text[]) h(kind,id,accepted)
+        JOIN mdf_evidence_lines l ON l.source_kind=h.kind AND l.source_id=h.id AND l.revision_key=h.accepted
+        ORDER BY l.source_kind,l.source_id,l.line_key,l.evidence_line_id LIMIT $4`,
+      [heads.map(h => h.kind), heads.map(h => h.id), heads.map(h => h.accepted), MAX_MDF_CORRECTION_ROWS + 1])).rows;
+      if (lines.length > MAX_MDF_CORRECTION_ROWS) return null;
+      execution = await loadMdfExecutionSnapshot(tx, heads, closure.orders);
+    } catch (error) {
+      if (error instanceof MdfNeedsAttention) return null;
+      throw error;
+    }
+    const headByKey = new Map(heads.map(h => [mdfSourceKey(h), h]));
+    const lineById = new Map(lines.map(line => [line.evidenceLineId, line]));
+    const targetKey = mdfSourceKey({ kind: 'packet', id: packetId });
+    const targetHead = headByKey.get(targetKey);
+    if (!targetHead || targetHead.accepted !== packetHead.accepted_revision_key
+      || targetHead.received !== packetHead.received_revision_key
+      || targetHead.accepted !== targetHead.received || !targetHead.accepted
+      || execution.issues.get(targetKey)?.length) return null;
+
+    const packetAllocations = allocations.filter(a => a.evidenceSourceKind === 'packet' && a.evidenceSourceId === packetId);
+    const touchedBaths = new Set(packetAllocations.map(a => a.bathId));
+    for (const allocation of packetAllocations) {
+      const sourceHead = headByKey.get(mdfSourceKey({ kind: allocation.evidenceSourceKind, id: allocation.evidenceSourceId }));
+      const line = lineById.get(allocation.evidenceLineId);
+      if (!sourceHead || sourceHead.accepted !== sourceHead.received || sourceHead.accepted !== allocation.evidenceRevision
+        || execution.issues.get(mdfSourceKey(sourceHead))?.length || !line || line.revision !== allocation.evidenceRevision
+        || line.stageCode !== 'cut' || line.evidenceKind !== 'physical' || line.rework
+        || line.orderId !== allocation.orderId || line.detailId !== allocation.detailId) return null;
+    }
+
+    const relevant = allocations.filter(a => touchedBaths.has(a.bathId));
+    const touchedSources = new Map<string, { kind: MdfSourceKind; id: string }>();
+    touchedSources.set(targetKey, { kind: 'packet', id: packetId });
+    for (const allocation of relevant) {
+      touchedSources.set(mdfSourceKey({ kind: allocation.evidenceSourceKind, id: allocation.evidenceSourceId }),
+        { kind: allocation.evidenceSourceKind, id: allocation.evidenceSourceId });
+      touchedSources.set(mdfSourceKey({ kind: 'bath', id: allocation.bathId }), { kind: 'bath', id: allocation.bathId });
+    }
+    for (const touched of touchedSources.values()) {
+      const sourceHead = headByKey.get(mdfSourceKey(touched));
+      const sourceLines = lines.filter(line => line.kind === touched.kind && line.id === touched.id
+        && line.revision === sourceHead?.accepted);
+      if (!sourceHead || !sourceHead.accepted || sourceHead.accepted !== sourceHead.received
+        || execution.issues.get(mdfSourceKey(sourceHead))?.length || !validAcceptedProof(touched.kind, sourceLines)) return null;
+    }
+    const touchedLines = new Set<string>();
+    const allocatedByLine = new Map<string, number>();
+    const allocatedByBathPosition = new Map<string, number>();
+    for (const allocation of relevant) {
+      const sourceHead = headByKey.get(mdfSourceKey({ kind: allocation.evidenceSourceKind, id: allocation.evidenceSourceId }));
+      const bathHead = headByKey.get(mdfSourceKey({ kind: 'bath', id: allocation.bathId }));
+      const line = lineById.get(allocation.evidenceLineId);
+      if (!sourceHead || !bathHead || sourceHead.accepted !== sourceHead.received || !sourceHead.accepted
+        || sourceHead.accepted !== allocation.evidenceRevision || bathHead.accepted !== bathHead.received
+        || !bathHead.accepted || bathHead.accepted !== allocation.bathRevision
+        || execution.issues.get(mdfSourceKey(sourceHead))?.length || execution.issues.get(mdfSourceKey(bathHead))?.length
+        || !line || line.revision !== allocation.evidenceRevision || line.stageCode !== 'cut'
+        || line.evidenceKind !== 'physical' || line.rework || line.orderId !== allocation.orderId
+        || line.detailId !== allocation.detailId || !Number.isSafeInteger(allocation.quantity) || allocation.quantity <= 0) return null;
+      touchedLines.add(allocation.evidenceLineId);
+      let lineTotal: number;
+      try { lineTotal = mdfSum(allocatedByLine.get(allocation.evidenceLineId) ?? 0, allocation.quantity); }
+      catch { return null; }
+      if (lineTotal > line.quantity) return null;
+      allocatedByLine.set(allocation.evidenceLineId, lineTotal);
+      const position = JSON.stringify([allocation.bathId, allocation.orderId, allocation.detailId]);
+      try { allocatedByBathPosition.set(position, mdfSum(allocatedByBathPosition.get(position) ?? 0, allocation.quantity)); }
+      catch { return null; }
+    }
+    // Capacity checks include every active debit sharing a touched line, not
+    // merely the packet's own reservations.
+    for (const lineId of touchedLines) {
+      const line = lineById.get(lineId);
+      const total = safeMdfTotal(allocations.filter(a => a.evidenceLineId === lineId).map(a => a.quantity));
+      if (!line || total === null || total > line.quantity) return null;
+    }
+    for (const [position, quantity] of allocatedByBathPosition) {
+      const [bathId, orderId, detailId] = JSON.parse(position) as [string, number, number];
+      const bathHead = headByKey.get(mdfSourceKey({ kind: 'bath', id: bathId }));
+      const bathLines = lines.filter(line => line.kind === 'bath' && line.id === bathId
+        && line.orderId === orderId && line.detailId === detailId && line.revision === bathHead?.accepted
+        && !line.rework);
+      const bathMembership = safeMdfTotal(bathLines.filter(line => line.stageCode === 'membership' && line.evidenceKind === 'derived')
+        .map(line => line.quantity));
+      const bathPhysical = safeMdfTotal(bathLines.filter(line => line.stageCode === 'laminated' && line.evidenceKind === 'physical')
+        .map(line => line.quantity));
+      const consumed = safeMdfTotal(relevant.filter(a => a.bathId === bathId && a.orderId === orderId && a.detailId === detailId
+        && a.state === 'consumed').map(a => a.quantity));
+      if (!bathHead || bathMembership === null || bathPhysical === null || consumed === null
+        || !bathMembership || quantity > bathMembership || consumed > bathPhysical) return null;
+    }
+    return { closure, heads, allocations, lines, execution };
+  }
+
   private async lockCurrent(tx: TransactionClient, packetId: string) {
     const head = await this.readHead(tx, packetId, true);
     const packet = (await tx.query<{ packet_id: string; source_chat_id: string; source_version: string;
@@ -576,17 +815,12 @@ export class PgCncTelegramMdfObservationRepository implements CncTelegramMdfObse
 
   private async recordPhysicalCut(tx: TransactionClient, user: CurrentUser, lease: CncTelegramWorkerSessionLeaseContext,
     target: TargetRow, head: HeadRow, report: MdfCncObservationReport, reportDigest: string, observationVersion: string,
-    requestId: string): Promise<{ kind: 'recorded'; jobId: string; revisionKey: string } | { kind: 'needs_reconciliation' }> {
-    const allocated = (await tx.query<{ allocated: boolean }>(`SELECT EXISTS (
-      SELECT 1 FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
-      WHERE a.state<>'released' AND e.source_kind='packet' AND e.source_id=$1 AND e.revision_key=$2
-    ) allocated`, [target.packet_id, head.accepted_revision_key])).rows[0]?.allocated;
-    if (allocated) return { kind: 'needs_reconciliation' };
+    requestId: string, pinContext: LockedPinContext | null): Promise<{ kind: 'recorded'; jobId: string; revisionKey: string;
+      pinRebaseAuditId: string | null } | { kind: 'needs_reconciliation' }> {
+    if (!pinContext) return { kind: 'needs_reconciliation' };
     const revision = head.accepted_revision_key!;
-    const base = (await tx.query<MdfReceiptLine>(`SELECT line_key "lineKey",order_id::float8 "orderId",
-      detail_id::float8 "detailId",quantity::float8,stage_code "stageCode",evidence_kind "evidenceKind",rework
-      FROM mdf_evidence_lines WHERE source_kind='packet' AND source_id=$1 AND revision_key=$2
-      ORDER BY line_key`, [target.packet_id, revision])).rows;
+    const base = pinContext.lines.filter(line => line.kind === 'packet' && line.id === target.packet_id && line.revision === revision);
+    if (!base.length) return { kind: 'needs_reconciliation' };
     const membership = base.filter(line => line.stageCode === 'membership' && line.evidenceKind === 'derived');
     if (!membership.length) return { kind: 'needs_reconciliation' };
     const positions = new Map<string, { orderId: number; detailId: number; rework: boolean; member: number;
@@ -619,6 +853,20 @@ export class PgCncTelegramMdfObservationRepository implements CncTelegramMdfObse
         orderId: position.orderId, detailId: position.detailId, quantity, stageCode: 'cut',
         evidenceKind: 'physical', rework: position.rework });
     }
+    const targetAllocations = pinContext.allocations.filter(allocation => allocation.evidenceSourceKind === 'packet'
+      && allocation.evidenceSourceId === target.packet_id);
+    const candidateLines = [...preserved, ...cuts];
+    const rebase = planMdfCncObservationPinReconciliation({
+      previousLines: base.map(line => ({ evidenceLineId: line.evidenceLineId, lineKey: line.lineKey,
+        orderId: line.orderId, detailId: line.detailId, quantity: line.quantity, stage: line.stageCode,
+        evidence: line.evidenceKind, rework: line.rework, revision: line.revision })),
+      nextLines: candidateLines.map(line => ({ lineKey: line.lineKey, orderId: line.orderId, detailId: line.detailId,
+        quantity: line.quantity, stage: line.stageCode, evidence: line.evidenceKind, rework: line.rework })),
+      allocations: targetAllocations.map(allocation => ({ allocationId: allocation.allocationId,
+        evidenceLineId: allocation.evidenceLineId, bathId: allocation.bathId, bathRevision: allocation.bathRevision,
+        orderId: allocation.orderId, detailId: allocation.detailId, quantity: allocation.quantity, state: allocation.state })),
+    });
+    if (!rebase) return { kind: 'needs_reconciliation' };
     const contextRow = (await tx.query<Row>(`SELECT c.source_created_at::text source_created_at,c.display_name,
       c.prior_column,c.manual_placement_column,c.composition_complete
       FROM mdf_revision_context c JOIN mdf_revision_seals z USING(source_kind,source_id,revision_key)
@@ -638,14 +886,80 @@ export class PgCncTelegramMdfObservationRepository implements CncTelegramMdfObse
     const rules = (await tx.query<{ ruleId: number; version: number }>(`SELECT id::float8 "ruleId",version::integer version
       FROM status_automation_rules WHERE is_enabled ORDER BY id`)).rows;
     const revisionKey = `cnc-observation:${report.claimId}`;
+    // Only exact compatible physical pins are released. Any later failure is
+    // thrown so the receipt, one head bump, release, and replacement roll back.
+    let released: string[] = [];
+    if (rebase.length) {
+      released = (await tx.query<{ allocationId: string }>(`UPDATE mdf_bath_allocations SET state='released',updated_at=now()
+        WHERE allocation_id=ANY($1::uuid[]) AND state<>'released' RETURNING allocation_id::text "allocationId"`,
+      [rebase.map(row => row.old.allocationId)])).rows.map(row => row.allocationId);
+      if (released.length !== rebase.length) throw new Error('MDF_CNC_PIN_RELEASE_INCOMPLETE');
+    }
     const saved = await recordMdfReceipt(tx, { sourceKind: 'packet', sourceId: target.packet_id,
       revisionKey, origin: 'cnc', actorUserId: Number(user.id), requestId,
       causeKey: `cnc-observation:${report.claimId}`, expectedFence: { version: head.version, correctionEpoch: head.correction_epoch },
       sourceDigest: digest([revision, reportDigest, lease.workerInstanceId, observationVersion]),
       executionContext: context, accept: true,
       lines: [...preserved, ...cuts], rules });
-    if (!saved.accepted || saved.replay) return { kind: 'needs_reconciliation' };
-    return { kind: 'recorded', jobId: saved.jobId, revisionKey };
+    if (!saved.accepted || saved.replay) throw new Error('MDF_CNC_RECEIPT_ACCEPTANCE_REQUIRED');
+    if (rebase.length) {
+      const lineKeys = [...new Set(rebase.map(row => row.lineKey))];
+      const savedLines = (await tx.query<{ evidenceLineId: string; lineKey: string }>(`SELECT evidence_line_id::text "evidenceLineId",line_key "lineKey"
+        FROM mdf_evidence_lines WHERE source_kind='packet' AND source_id=$1 AND revision_key=$2 AND line_key=ANY($3::text[])`,
+      [target.packet_id, revisionKey, lineKeys])).rows;
+      const lineByKey = new Map(savedLines.map(line => [line.lineKey, line.evidenceLineId]));
+      if (lineByKey.size !== lineKeys.length) throw new Error('MDF_CNC_PIN_REPLACEMENT_LINE_MISSING');
+      const replacements = rebase.map(row => ({ evidenceLineId: lineByKey.get(row.lineKey)!, bathId: row.old.bathId,
+        bathRevision: row.bathRevision, orderId: row.old.orderId, detailId: row.old.detailId,
+        quantity: row.old.quantity, state: row.old.state,
+        causeKey: `cnc-observation-pin-rebase:${report.claimId}:${row.old.allocationId}` }));
+      const inserted = (await tx.query<{ allocationId: string; evidenceLineId: string; bathId: string; bathRevision: string;
+        orderId: number; detailId: number; quantity: number; state: string; causeKey: string }>(`INSERT INTO mdf_bath_allocations
+        (evidence_line_id,bath_id,bath_revision,order_id,detail_id,quantity,state,cause_key)
+        SELECT x."evidenceLineId"::uuid,x."bathId",x."bathRevision",x."orderId",x."detailId",x.quantity,x.state,x."causeKey"
+        FROM jsonb_to_recordset($1::jsonb) x("evidenceLineId" text,"bathId" text,"bathRevision" text,
+          "orderId" bigint,"detailId" bigint,quantity bigint,state text,"causeKey" text)
+        RETURNING allocation_id::text "allocationId",evidence_line_id::text "evidenceLineId",bath_id "bathId",
+          bath_revision "bathRevision",order_id::float8 "orderId",detail_id::float8 "detailId",quantity::float8 quantity,state,cause_key "causeKey"`,
+      [JSON.stringify(replacements)])).rows;
+      if (inserted.length !== rebase.length) throw new Error('MDF_CNC_PIN_REPLACEMENT_INCOMPLETE');
+      const orders = [...new Set(rebase.map(row => row.old.orderId))].sort((a,b)=>a-b);
+      const details = [...new Set(rebase.map(row => row.old.detailId))].sort((a,b)=>a-b);
+      const oldByCause = new Map(rebase.map(row => [`cnc-observation-pin-rebase:${report.claimId}:${row.old.allocationId}`, row.old]));
+      const afterAllocations = inserted.map(row => ({ ...row, replacesAllocationId: oldByCause.get(row.causeKey)?.allocationId ?? null }));
+      if (afterAllocations.some(row => !row.replacesAllocationId)) throw new Error('MDF_CNC_PIN_REPLACEMENT_BINDING_MISSING');
+      const bathIds = [...new Set(inserted.map(row => row.bathId))].sort();
+      const auditId = await auditService.record(tx, { event: 'cnc.mdf_observation.allocations_rebased', actorUserId: user.id,
+        actorUsername: user.username, actorRole: user.role, entityType: 'cnc_telegram_packet', entityId: target.packet_id,
+        source: 'cnc_mdf_observation_worker', requestId,
+        before: { acceptedRevision: revision, allocations: rebase.map(row => ({ ...row.old })) },
+        after: { acceptedRevision: revisionKey, allocations: afterAllocations },
+        metadata: { claimId: report.claimId, jobId: saved.jobId, touchedBathIds: bathIds,
+          causeKey: `cnc-observation-pin-rebase:${report.claimId}`,
+          notificationEventDecision: 'proof_continuity_only_completed_observation_outbox' },
+        relatedEntities: [...orders.map(entityId => ({ entityType: 'order', entityId })),
+          ...details.map(entityId => ({ entityType: 'order_detail', entityId }))] });
+      if (!auditId) throw new Error('MDF_CNC_PIN_REBASE_AUDIT_REQUIRED');
+      for (const bathId of bathIds) {
+        const oldRows = rebase.filter(row => row.old.bathId === bathId).map(row => ({ ...row.old }));
+        const newRows = afterAllocations.filter(row => row.bathId === bathId);
+        const bathOrders = [...new Set(oldRows.map(row => row.orderId))].sort((a,b)=>a-b);
+        const bathDetails = [...new Set(oldRows.map(row => row.detailId))].sort((a,b)=>a-b);
+        const bathAuditId = await auditService.record(tx, { event: 'mdf_board.bath_supply_rebased',
+          entityType: 'mdf_bath', entityId: bathId, actorUserId: user.id, actorUsername: user.username,
+          actorRole: user.role, source: 'cnc_mdf_observation_worker', requestId,
+          before: { packetId: target.packet_id, acceptedRevision: revision, allocations: oldRows },
+          after: { packetId: target.packet_id, acceptedRevision: revisionKey, allocations: newRows },
+          metadata: { claimId: report.claimId, jobId: saved.jobId, packetAuditId: auditId,
+            causeKey: `cnc-observation-pin-rebase:${report.claimId}`,
+            notificationEventDecision: 'proof_continuity_only_completed_observation_outbox' },
+          relatedEntities: [...bathOrders.map(entityId => ({ entityType: 'order', entityId })),
+            ...bathDetails.map(entityId => ({ entityType: 'order_detail', entityId }))] });
+        if (!bathAuditId) throw new Error('MDF_CNC_PIN_REBASE_BATH_AUDIT_REQUIRED');
+      }
+      return { kind: 'recorded', jobId: saved.jobId, revisionKey, pinRebaseAuditId: auditId };
+    }
+    return { kind: 'recorded', jobId: saved.jobId, revisionKey, pinRebaseAuditId: null };
   }
 
   private async insertAuthority(tx: TransactionClient, jobId: string, packetId: string, claimId: string): Promise<void> {

@@ -66,8 +66,8 @@ accepted completion stops polling until a later correction creates a new epoch.
 ## CNC physical authority
 
 An eligible fresh completion creates an immutable physical receipt and a job
-carrying a distinct `cnc_autocut` authority marker. Active allocation pins on the
-prior packet revision or unresolved context can instead record
+carrying a distinct `cnc_autocut` authority marker. Incompatible allocation pins
+on the prior packet revision or unresolved context can instead record
 `needs_reconciliation` without accepting replacement evidence. The marker is
 checked against its exact claim, completed observation receipt, result
 job/revision, current accepted head, epoch, and freshness state before the
@@ -82,10 +82,20 @@ to the active cut status only when verified accepted packet and BASIS evidence
 for that same detail covers its full live quantity. Physical contributions add;
 declarations retain their existing maximum-floor meaning. No quantity crosses
 detail boundaries, and rework-only membership does not advance a normal detail.
-At receipt intake, active allocations against the prior accepted packet revision
-or unresolved membership/context put the observation into `needs_reconciliation`.
-That path does not create a replacement CNC physical receipt or change accepted
-head/allocation state; existing accepted evidence and allocations remain intact.
+At receipt intake, exact normal physical-cut allocations may follow an unchanged
+proof line into the new packet revision. The transaction locks the complete
+bounded source/owner component, verifies the affected baths and their debits,
+releases old allocation rows, accepts the receipt once, and appends replacement
+rows preserving quantity, reserved/consumed state, bath ID and bath revision.
+Old rows remain as history. A declaration cannot become physical allocation
+evidence merely because its position or quantity matches.
+
+Incompatible pins or unresolved membership/context put the observation into
+`needs_reconciliation` without changing the accepted head, allocations, raw
+completion or return-fence credit. A write failure rolls back the whole receipt
+transaction. A fresh completion is not a cancellation command: linked lamination
+is cancelled only through the separately confirmed return workflow. Source/owner
+scope limits and races fail closed before unsafe writes.
 After a valid receipt is accepted, its job uses the common allocation executor
 and current accepted graph rather than rejecting unrelated allocations broadly.
 

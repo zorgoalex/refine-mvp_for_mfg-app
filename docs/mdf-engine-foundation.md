@@ -75,10 +75,15 @@ The CNC executor selects only normal details in that packet's sealed membership
 and requires the packet's own complete physical cut receipt. A selected detail
 advances only when verified accepted packet/BASIS evidence covers its full live
 quantity; quantities never move between details, and rework-only membership does
-not advance a normal detail. At observation-receipt intake, active allocations
-against the prior accepted packet revision or unresolved membership/context put
-the observation into reconciliation without replacing accepted evidence or
-changing allocation state. A valid accepted revision uses the common allocation
+not advance a normal detail. At observation-receipt intake, exact unchanged normal
+physical cut pins can be released and replaced against the new packet revision
+in the same transaction, preserving quantities, bath revisions and reserved/
+consumed states. The full bounded owner/source component is locked before
+acceptance; affected bath context and debits must remain valid. There is one
+accepted-head increment, no declaration-to-physical debit conversion and no
+automatic linked-roll cancellation. Incompatible pins or unresolved context
+remain in reconciliation without changing the accepted head/allocation state.
+Write failures roll back the entire transaction. A valid accepted revision uses the common allocation
 executor and current accepted graph; unrelated active allocations are not a
 blanket blocker. Direct CNC detail marking remains controlled by
 `status_automation.cnc_mark_cut_details`; with it enabled, the executor advances
@@ -96,7 +101,7 @@ continues to fail closed with 503 (`CNC_TELEGRAM_BACKGROUND_INGEST_DISABLED` or
 `CNC_TELEGRAM_BACKGROUND_INGEST_APPROVAL_REQUIRED`); it is not enabled by the
 observation API.
 
-Not delivered by this increment: complete allocation-pin reconciliation across
+This bounded CNC continuity path does not deliver complete allocation-pin reconciliation across
 all active producers, historical or manual-send source backfill, UI workflow, or
 full engine cutover. Keep engine mode and worker/API feature flags unchanged
 unless a separately approved rollout covers those remaining gates.
