@@ -77,6 +77,20 @@ export class WahaClient {
     };
   }
 
+  async sendImage(chatId: string, png: Buffer, filename: string, caption: string): Promise<{ messageId?: string }> {
+    const value = await this.request('/api/sendImage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session: this.sessionName(), chatId,
+        file: { mimetype: 'image/png', filename, data: png.toString('base64') },
+        caption,
+      }),
+    });
+    const record = asRecord(value);
+    return { messageId: typeof record?.id === 'string' && record.id.length > 0 ? record.id : undefined };
+  }
+
   private sessionPath(): string {
     return encodeURIComponent(this.sessionName());
   }

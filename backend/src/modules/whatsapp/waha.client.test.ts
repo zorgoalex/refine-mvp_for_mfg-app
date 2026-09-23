@@ -44,6 +44,21 @@ describe("WahaClient", () => {
     }));
   });
 
+  it('sends a PNG image using WAHA file data and returns its provider id', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 'image-1' }), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new WahaClient({ getConfig: () => config } as WhatsAppRuntimeConfigService);
+    const png = Buffer.from([0x89,0x50,0x4e,0x47]);
+    await expect(client.sendImage('123456-789012@g.us', png, 'daily-1.png', 'Заказы на сегодня'))
+      .resolves.toEqual({ messageId: 'image-1' });
+    const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(fetchMock.mock.calls[0][0]).toBe('http://waha:3000/api/sendImage');
+    expect(sent).toEqual({ session: 'erp', chatId: '123456-789012@g.us',
+      file: { mimetype: 'image/png', filename: 'daily-1.png', data: png.toString('base64') }, caption: 'Заказы на сегодня' });
+  });
+
   it("uses the WAHA 2026 session routes for capping and timelock", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("{}", {
       status: 200,

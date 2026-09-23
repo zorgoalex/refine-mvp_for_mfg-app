@@ -52,6 +52,37 @@ describe('OpenAPI document structure', () => {
     expect(schemas.WhatsAppRuleUpdate.properties.replyMode).not.toHaveProperty('default');
   });
 
+  it('documents daily WhatsApp digest routes with the full permission gate and private image retention', () => {
+    const requiredPermissions = ['whatsapp.manage', 'calendar.view', 'orders.view', 'orders.view_financials'];
+    const dailyPaths = [
+      ['/api/v1/whatsapp/daily-digest/settings', 'get'],
+      ['/api/v1/whatsapp/daily-digest/settings', 'put'],
+      ['/api/v1/whatsapp/daily-digest/preview', 'post'],
+      ['/api/v1/whatsapp/daily-digest/runs', 'get'],
+      ['/api/v1/whatsapp/daily-digest/runs', 'post'],
+      ['/api/v1/whatsapp/daily-digest/runs/{id}', 'get'],
+      ['/api/v1/whatsapp/daily-digest/runs/{id}/pages/{index}/image', 'get'],
+      ['/api/v1/whatsapp/daily-digest/runs/{id}/retry', 'post'],
+    ] as const;
+
+    for (const [path, method] of dailyPaths) {
+      const operation = contract.paths[path]?.[method];
+      expect(operation, `${method.toUpperCase()} ${path}`).toBeDefined();
+      expect(operation.security).toEqual([{ bearerAuth: [] }]);
+      expect(operation['x-permissions']).toEqual(requiredPermissions);
+    }
+
+    expect(contract.paths['/api/v1/whatsapp/daily-digest/preview'].post.responses['200'].headers['Cache-Control'].schema.enum).toEqual(['private, no-store']);
+    expect(contract.paths['/api/v1/whatsapp/daily-digest/runs/{id}/pages/{index}/image'].get.responses['200'].content['image/png']).toBeDefined();
+    expect(contract.paths['/api/v1/whatsapp/daily-digest/runs/{id}/pages/{index}/image'].get.responses).toHaveProperty('410');
+    expect(contract.paths['/api/v1/whatsapp/daily-digest/runs/{id}/retry'].post.requestBody.content['application/json'].schema.$ref).toBe('#/components/schemas/WhatsAppDailyDigestRetryRequest');
+    expect(contract.components.schemas.WhatsAppDailyDigestSettings.properties.enabled.default).toBe(false);
+    expect(contract.components.schemas.WhatsAppDailyDigestSettings.properties.timeZone.enum).toEqual(['Asia/Almaty']);
+    expect(contract.components.schemas.WhatsAppDailyDigestSettingsUpdate.properties).not.toHaveProperty('timeZone');
+    expect(contract.components.schemas.WhatsAppDailyDigestRun.properties.state.enum).toContain('unknown');
+    expect(contract.components.schemas.WhatsAppDailyDigestPage.properties.imageAvailable.type).toBe('boolean');
+  });
+
   it('has unique operation IDs and resolves every local reference and security scheme', () => {
     expect(contract.openapi).toBe('3.0.3');
     expect(operations.length).toBeGreaterThan(0);

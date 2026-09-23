@@ -778,6 +778,146 @@ paths:
       x-permission: whatsapp.view
       responses:
         '200': {description: Get WhatsApp session status}
+  /api/v1/whatsapp/daily-digest/settings:
+    get:
+      tags: [WhatsApp]
+      operationId: getWhatsAppDailyDigestSettings
+      summary: Get daily order digest settings and WhatsApp runtime availability
+      description: Settings default to disabled at 08:45 Asia/Almaty. The chat JID is returned only by this protected settings endpoint.
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      responses:
+        '200': {description: Settings and runtime readiness, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppDailyDigestSettingsResponse'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '503': {description: 'WHATSAPP_DAILY_DIGEST_NOT_MIGRATED'}
+    put:
+      tags: [WhatsApp]
+      operationId: updateWhatsAppDailyDigestSettings
+      summary: Update daily order digest settings
+      description: Strict versioned update. Asia/Almaty is fixed and omitted from the request. repeat_all requires explicit duplicate-risk confirmation.
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppDailyDigestSettingsUpdate'}}}
+      responses:
+        '200': {description: Updated settings and runtime availability, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppDailyDigestSettingsResponse'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {description: 'WHATSAPP_DAILY_DIGEST_VERSION_CONFLICT or WHATSAPP_DAILY_DIGEST_DUPLICATE_CONFIRMATION_REQUIRED'}
+        '422': {description: Invalid or inconsistent settings}
+        '503': {description: 'WHATSAPP_DAILY_DIGEST_NOT_MIGRATED'}
+  /api/v1/whatsapp/daily-digest/preview:
+    post:
+      tags: [WhatsApp]
+      operationId: previewWhatsAppDailyDigest
+      summary: Render a private, in-memory preview of today's orders
+      description: Preview uses current production orders and does not require automation or relay availability. Images are returned only in this response and are not stored.
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      responses:
+        '200':
+          description: Preview pages or an empty-day result
+          headers:
+            Cache-Control: {schema: {type: string, enum: ['private, no-store']}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppDailyDigestPreview'}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '413': {description: 'WHATSAPP_DAILY_DIGEST_IMAGE_LIMIT or order-count limit exceeded'}
+        '422': {description: Invalid or unrenderable order data}
+        '503': {description: Required database or render lease unavailable}
+  /api/v1/whatsapp/daily-digest/runs:
+    get:
+      tags: [WhatsApp]
+      operationId: listWhatsAppDailyDigestRuns
+      summary: List the latest daily digest run history
+      description: Returns at most 50 metadata-only records. Chat IDs are masked; card snapshots and image data are excluded.
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      responses:
+        '200': {description: Latest runs, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppDailyDigestRunList'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '503': {description: 'WHATSAPP_DAILY_DIGEST_NOT_MIGRATED'}
+    post:
+      tags: [WhatsApp]
+      operationId: createWhatsAppDailyDigestRun
+      summary: Queue a confirmed manual digest for today's orders
+      description: Manual runs work while scheduled automation is disabled, but require the existing WhatsApp runtime and relay owner. Request confirmation acknowledges current preview information may have changed. Empty days are recorded without sending.
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppDailyDigestRunRequest'}}}
+      responses:
+        '202': {description: Run queued or recorded as empty, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppDailyDigestRunResponse'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {description: 'WHATSAPP_DAILY_DIGEST_VERSION_CONFLICT, WHATSAPP_DAILY_DIGEST_DESTINATION_REQUIRED, or idempotency conflict'}
+        '422': {description: Invalid command body}
+        '503': {description: Runtime/relay unavailable or private image store unavailable}
+  /api/v1/whatsapp/daily-digest/runs/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      tags: [WhatsApp]
+      operationId: getWhatsAppDailyDigestRun
+      summary: Get one digest run and per-page delivery states
+      description: Returns masked destination and page metadata only, never card content or image bytes.
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      responses:
+        '200': {description: Run detail, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppDailyDigestRunDetail'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: Run not found}
+        '422': {description: Invalid run ID}
+  /api/v1/whatsapp/daily-digest/runs/{id}/pages/{index}/image:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: index, in: path, required: true, schema: {type: integer, minimum: 1, maximum: 500}}
+    get:
+      tags: [WhatsApp]
+      operationId: getWhatsAppDailyDigestRunPageImage
+      summary: Download an unexpired private PNG page
+      description: Protected image bytes are served directly with no-store caching. Files expire within 24 hours; metadata history remains after physical deletion.
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      responses:
+        '200':
+          description: PNG image bytes
+          headers:
+            Cache-Control: {schema: {type: string, enum: ['private, no-store']}}
+          content: {image/png: {schema: {type: string, format: binary}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'WHATSAPP_DAILY_DIGEST_PAGE_NOT_FOUND or WHATSAPP_DAILY_DIGEST_IMAGE_MISSING'}
+        '410': {description: 'WHATSAPP_DAILY_DIGEST_IMAGE_EXPIRED; image bytes have passed their retention limit'}
+        '422': {description: Invalid run ID or page index}
+        '503': {description: Private image store unavailable}
+  /api/v1/whatsapp/daily-digest/runs/{id}/retry:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      tags: [WhatsApp]
+      operationId: retryWhatsAppDailyDigestRun
+      summary: Queue an explicitly confirmed retry of a digest
+      description: Retry uses the existing immutable run snapshot and cannot regenerate an expired image. After expiry, create a new manual run to capture today's orders. Retrying all pages requires duplicate-risk confirmation; an unknown provider outcome may duplicate a delivered message.
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppDailyDigestRetryRequest'}}}
+      responses:
+        '202': {description: Retry run queued, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppDailyDigestRunResponse'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: Run not found}
+        '409': {description: Retry not available, limit reached, active retry, idempotency conflict, or duplicate confirmation required}
+        '410': {description: Retry cannot run because source images expired}
+        '422': {description: Invalid retry body or run ID}
+        '503': {description: WhatsApp runtime or relay unavailable}
   /api/v1/whatsapp/qr:
     get:
       tags:
@@ -25784,3 +25924,154 @@ components:
         message:
           type: string
           nullable: true
+
+    WhatsAppDailyDigestSettingsResponse:
+      type: object
+      additionalProperties: false
+      required: [settings, runtime]
+      properties:
+        settings: {$ref: '#/components/schemas/WhatsAppDailyDigestSettings'}
+        runtime: {$ref: '#/components/schemas/WhatsAppDailyDigestRuntime'}
+
+    WhatsAppDailyDigestSettings:
+      type: object
+      additionalProperties: false
+      required: [version, enabled, groupChatId, sendTime, timeZone, cardsPerMessage, catchUpPolicy, catchUpDeadline, partialPolicy]
+      properties:
+        version: {type: integer, minimum: 1}
+        enabled: {type: boolean, default: false}
+        groupChatId: {type: string, nullable: true, maxLength: 120, pattern: '^[0-9]{5,24}(-[0-9]{5,24})?@g\.us$'}
+        sendTime: {type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$', default: '08:45'}
+        timeZone: {type: string, enum: [Asia/Almaty]}
+        cardsPerMessage: {type: integer, enum: [1, 2], default: 2, description: Maximum order cards per WhatsApp message page.}
+        catchUpPolicy: {type: string, enum: [skip, until_deadline, end_of_day], default: until_deadline}
+        catchUpDeadline: {type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$', default: '10:00'}
+        partialPolicy: {type: string, enum: [remaining, repeat_all, manual], default: remaining}
+
+    WhatsAppDailyDigestRuntime:
+      type: object
+      additionalProperties: false
+      required: [enabled, relayAvailable, unavailableReason]
+      properties:
+        enabled: {type: boolean}
+        relayAvailable: {type: boolean}
+        unavailableReason: {type: string, nullable: true, enum: [whatsapp_disabled, relay_unavailable, relay_owner_mismatch]}
+
+    WhatsAppDailyDigestSettingsUpdate:
+      type: object
+      additionalProperties: false
+      required: [version, enabled, groupChatId, sendTime, cardsPerMessage, catchUpPolicy, catchUpDeadline, partialPolicy]
+      properties:
+        version: {type: integer, minimum: 1}
+        enabled: {type: boolean}
+        groupChatId: {type: string, nullable: true, minLength: 1, maxLength: 120, pattern: '^[0-9]{5,24}(-[0-9]{5,24})?@g\.us$'}
+        sendTime: {type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
+        cardsPerMessage: {type: integer, enum: [1, 2], default: 2, description: Maximum order cards per WhatsApp message page.}
+        catchUpPolicy: {type: string, enum: [skip, until_deadline, end_of_day]}
+        catchUpDeadline: {type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
+        partialPolicy: {type: string, enum: [remaining, repeat_all, manual]}
+        duplicateRiskConfirmed: {type: boolean, default: false}
+
+    WhatsAppDailyDigestPreview:
+      type: object
+      additionalProperties: false
+      required: [businessDate, orderCount, totalArea, pages, empty]
+      properties:
+        businessDate: {type: string, format: date}
+        orderCount: {type: integer, minimum: 0, maximum: 500}
+        totalArea: {type: number, minimum: 0}
+        pages:
+          type: array
+          maxItems: 500
+          items: {$ref: '#/components/schemas/WhatsAppDailyDigestPreviewPage'}
+        empty: {type: boolean}
+
+    WhatsAppDailyDigestPreviewPage:
+      type: object
+      additionalProperties: false
+      required: [pageIndex, imageDataUrl, orderIds]
+      properties:
+        pageIndex: {type: integer, minimum: 1, maximum: 500}
+        imageDataUrl: {type: string, pattern: '^data:image/png;base64,'}
+        orderIds: {type: array, minItems: 1, maxItems: 2, items: {type: integer, minimum: 1}}
+
+    WhatsAppDailyDigestRunRequest:
+      type: object
+      additionalProperties: false
+      required: [settingsVersion, idempotencyKey, confirmed]
+      properties:
+        settingsVersion: {type: integer, minimum: 1}
+        idempotencyKey: {type: string, format: uuid}
+        confirmed: {type: boolean, enum: [true]}
+
+    WhatsAppDailyDigestRetryRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, idempotencyKey]
+      properties:
+        mode: {type: string, enum: [remaining, all]}
+        idempotencyKey: {type: string, format: uuid}
+        duplicateRiskConfirmed: {type: boolean, default: false}
+
+    WhatsAppDailyDigestRunList:
+      type: object
+      additionalProperties: false
+      required: [runs]
+      properties:
+        runs:
+          type: array
+          maxItems: 50
+          items: {$ref: '#/components/schemas/WhatsAppDailyDigestRun'}
+
+    WhatsAppDailyDigestRunResponse:
+      type: object
+      additionalProperties: false
+      required: [run]
+      properties:
+        run: {$ref: '#/components/schemas/WhatsAppDailyDigestRun'}
+
+    WhatsAppDailyDigestRunDetail:
+      type: object
+      additionalProperties: false
+      required: [run, pages]
+      properties:
+        run: {$ref: '#/components/schemas/WhatsAppDailyDigestRun'}
+        pages:
+          type: array
+          maxItems: 500
+          items: {$ref: '#/components/schemas/WhatsAppDailyDigestPage'}
+
+    WhatsAppDailyDigestRun:
+      type: object
+      additionalProperties: false
+      required: [id, businessDate, kind, parentRunId, state, reason, orderCount, totalArea, pageCount, sentPageCount, destinationMasked, createdAt, updatedAt, expiresAt]
+      properties:
+        id: {type: string, format: uuid}
+        businessDate: {type: string, format: date}
+        kind: {type: string, enum: [auto, manual, retry]}
+        parentRunId: {type: string, format: uuid, nullable: true}
+        state: {type: string, enum: [queued, sending, sent, partial, failed, unknown, cancelled, expired, empty, skipped]}
+        reason: {type: string, nullable: true, pattern: '^[A-Z0-9_]{1,64}$'}
+        orderCount: {type: integer, minimum: 0, maximum: 500}
+        totalArea: {type: number, minimum: 0}
+        pageCount: {type: integer, minimum: 0, maximum: 500}
+        sentPageCount: {type: integer, minimum: 0, maximum: 500}
+        destinationMasked: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time, nullable: true}
+
+    WhatsAppDailyDigestPage:
+      type: object
+      additionalProperties: false
+      required: [pageIndex, orderIds, state, attemptCount, providerMessageId, errorCode, sentAt, imageAvailable, expiresAt]
+      properties:
+        pageIndex: {type: integer, minimum: 1, maximum: 500}
+        orderIds: {type: array, minItems: 1, maxItems: 2, items: {type: integer, minimum: 1}}
+        state: {type: string, enum: [pending, sending, sent, failed, unknown, cancelled, expired]}
+        attemptCount: {type: integer, minimum: 0, maximum: 4}
+        providerMessageId: {type: string, nullable: true}
+        errorCode: {type: string, nullable: true, pattern: '^[A-Z0-9_]{1,64}$'}
+        sentAt: {type: string, format: date-time, nullable: true}
+        imageAvailable: {type: boolean}
+        expiresAt: {type: string, format: date-time}
