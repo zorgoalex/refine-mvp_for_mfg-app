@@ -2199,6 +2199,25 @@ probe_file() {
       "SELECT count(*)=4 FROM (VALUES ('mdf_revision_context','mdf_context_insert_guard','mdf_guard_execution_context_insert()',7),('mdf_revision_demand','mdf_demand_insert_guard','mdf_guard_execution_context_insert()',7),('mdf_revision_context','mdf_context_immutable','mdf_reject_evidence_change()',27),('mdf_revision_demand','mdf_demand_immutable','mdf_reject_evidence_change()',27)) expected(tbl,trg,fun,kind) JOIN pg_trigger t ON t.tgrelid=to_regclass('public.'||tbl) AND t.tgname=trg AND t.tgfoid=to_regprocedure('public.'||fun) AND t.tgtype=kind AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgattr=''::int2vector;" \
       "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=ANY(ARRAY[to_regclass('public.mdf_revision_context'),to_regclass('public.mdf_revision_demand'),to_regclass('public.mdf_published_sources'),to_regclass('public.mdf_published_source_members'),to_regclass('public.mdf_published_positions')]) AND NOT convalidated);" \
       "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=ANY(ARRAY[to_regclass('public.mdf_revision_context'),to_regclass('public.mdf_revision_demand'),to_regclass('public.mdf_published_sources'),to_regclass('public.mdf_published_source_members'),to_regclass('public.mdf_published_positions')]) AND (NOT indisvalid OR NOT indisready));" ;;
+    183_whatsapp_daily_digest*) probe_all \
+      "$(q_tbl whatsapp_daily_digest_settings)" \
+      "$(q_tbl whatsapp_daily_digest_runs)" \
+      "$(q_tbl whatsapp_daily_digest_pages)" \
+      "SELECT count(*)=3 FROM pg_class WHERE oid=ANY(ARRAY[to_regclass('public.idx_whatsapp_daily_digest_auto_date'),to_regclass('public.idx_whatsapp_daily_digest_manual_idempotency'),to_regclass('public.idx_whatsapp_daily_digest_pages_file')]) AND relkind='i';" \
+      "SELECT count(*)=1 FROM whatsapp_daily_digest_settings WHERE singleton_id=1;" \
+      "SELECT count(*)=8 FROM information_schema.columns WHERE table_schema='public' AND table_name='whatsapp_daily_digest_settings' AND is_nullable='NO' AND ((column_name='version' AND column_default='1') OR (column_name='enabled' AND column_default='false') OR (column_name='send_time' AND column_default LIKE '%08:45%') OR (column_name='time_zone' AND column_default LIKE '%Asia/Almaty%') OR (column_name='catch_up_policy' AND column_default LIKE '%until_deadline%') OR (column_name='catch_up_deadline' AND column_default LIKE '%10:00%') OR (column_name='partial_policy' AND column_default LIKE '%remaining%') OR (column_name='cards_per_message' AND column_default='2'));" \
+      "SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_settings'::regclass AND conname='chk_whatsapp_daily_digest_cards_per_message' AND contype='c' AND convalidated AND pg_get_constraintdef(oid) LIKE '%cards_per_message%' AND pg_get_constraintdef(oid) LIKE '%ARRAY[1, 2]%');" \
+      "SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_pages'::regclass AND conname='chk_whatsapp_daily_digest_page_index' AND contype='c' AND convalidated AND pg_get_constraintdef(oid) LIKE '%page_index%' AND pg_get_constraintdef(oid) LIKE '%500%');" ;;
+    184_whatsapp_daily_digest_schedule*) probe_all \
+      "$(q_tbl whatsapp_daily_digest_schedules)" \
+      "SELECT COALESCE((SELECT data_type='integer' AND is_nullable='NO' AND column_default='0' FROM information_schema.columns WHERE table_schema='public' AND table_name='whatsapp_daily_digest_settings' AND column_name='send_window_minutes'),false);" \
+      "SELECT count(*)=3 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_settings'::regclass AND contype='c' AND convalidated AND conname IN ('chk_whatsapp_daily_digest_window_minutes_range','chk_whatsapp_daily_digest_window_same_day','chk_whatsapp_daily_digest_deadline_after_window');" \
+      "SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_settings'::regclass AND contype='c' AND convalidated AND pg_get_constraintdef(oid) LIKE '%catch_up_deadline >= send_time%');" \
+      "SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_schedules'::regclass AND contype='p' AND pg_get_constraintdef(oid) LIKE '%business_date%');" \
+      "SELECT count(*)=8 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_schedules'::regclass AND contype='c' AND convalidated;" \
+      "SELECT count(*)=2 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_schedules'::regclass AND contype='c' AND convalidated AND pg_get_constraintdef(oid) LIKE '%AT TIME ZONE%';" \
+      "SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_schedules'::regclass AND contype='c' AND convalidated AND pg_get_constraintdef(oid) LIKE '%date_trunc%');" \
+      "SELECT NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_settings'::regclass AND NOT convalidated);" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -2216,6 +2235,12 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     174_mdf_execution_context*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    183_whatsapp_daily_digest*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    184_whatsapp_daily_digest_schedule*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     173_inbound_signals*)

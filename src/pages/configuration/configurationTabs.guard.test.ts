@@ -142,6 +142,21 @@ describe('configuration tabs layout', () => {
     ]);
   });
 
+  it('keeps the financial daily digest separate from broad WhatsApp access', () => {
+    const items = [
+      { key: 'whatsapp-automation' },
+      { key: 'daily-order-digest' },
+      { key: 'orders' },
+    ];
+    expect(filterConfigurationTabItems(items, false, false, true, false)).toEqual([
+      { key: 'whatsapp-automation' },
+    ]);
+    expect(filterConfigurationTabItems(items, false, false, true, false, true)).toEqual([
+      { key: 'whatsapp-automation' },
+      { key: 'daily-order-digest' },
+    ]);
+  });
+
   it('restores the last active configuration tab when it is still available', () => {
     expect(CONFIGURATION_ACTIVE_TAB_STORAGE_KEY).toBe('configuration:activeTab');
     expect(resolveConfigurationActiveTab('cut', ['orders', 'cut', 'labels'])).toBe('cut');

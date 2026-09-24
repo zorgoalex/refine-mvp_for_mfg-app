@@ -38,3 +38,4 @@ Ant Design; command API — на NestJS; read/report/reference слой — Hasu
 - [VLM cutover](docs/vlm-cutover-readiness.md)
 - [Deadline status-transition rules](docs/deadline-status-transition-rules-runbook.md)
 - [Канал уведомлений Telegram: настройка бота и эксплуатация](../spec_erp/plans/telegram-notification-channel.md)
+- [Ежедневные карточки заказов WhatsApp: настройка, повторы и хранение изображений](backend/docs/whatsapp-daily-digest.md)
