@@ -1,6 +1,7 @@
-import { Body, Controller, Delete, Get, Inject, Param, Put, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, Inject, Param, Put, Req } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiHeader,
   ApiOperation,
   ApiResponse,
   ApiTags,
@@ -71,6 +72,9 @@ export class MdfBoardManualMoveController {
     summary: 'Create or update a shared manual MDF board card placement',
   })
   @ApiResponse({ status: 200, description: 'Manual move saved' })
+  @ApiHeader({ name: 'X-Mdf-Source-Token', required: false, description: 'Required in active mode: current published card commandToken' })
+  @ApiHeader({ name: 'Idempotency-Key', required: false, description: 'Required in active mode: reuse only for an exact retry of this command' })
+  @ApiResponse({ status: 409, description: 'Stale source, engine paused, idempotency conflict, or return confirmation required' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @ApiResponse({ status: 422, description: 'Invalid card kind, card id, or target column' })
@@ -81,6 +85,8 @@ export class MdfBoardManualMoveController {
     @Param('cardKind') rawKind: string,
     @Param('cardId') rawCardId: string,
     @Body() body: unknown,
+    @Headers('x-mdf-source-token') sourceToken?: string,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ): Promise<MdfBoardManualMoveUpsertResponseDto> {
     this.assertEnabled();
     const currentUser = requireCurrentUser(request);
@@ -93,6 +99,8 @@ export class MdfBoardManualMoveController {
       cardKind,
       cardId,
       targetColumn,
+      ...(sourceToken === undefined ? {} : { sourceToken }),
+      ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
       requestId: request.requestId,
     });
   }
@@ -102,6 +110,9 @@ export class MdfBoardManualMoveController {
     summary: 'Clear a shared manual MDF board card placement',
   })
   @ApiResponse({ status: 200, description: 'Manual move cleared or already absent' })
+  @ApiHeader({ name: 'X-Mdf-Source-Token', required: false, description: 'Required in active mode: current published card commandToken' })
+  @ApiHeader({ name: 'Idempotency-Key', required: false, description: 'Required in active mode: reuse only for an exact retry of this command' })
+  @ApiResponse({ status: 409, description: 'Stale source, engine paused, or idempotency conflict' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @ApiResponse({ status: 422, description: 'Invalid card kind or card id' })
@@ -111,6 +122,8 @@ export class MdfBoardManualMoveController {
     @Req() request: RequestWithCurrentUser,
     @Param('cardKind') rawKind: string,
     @Param('cardId') rawCardId: string,
+    @Headers('x-mdf-source-token') sourceToken?: string,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ): Promise<MdfBoardManualMoveDeleteResponseDto> {
     this.assertEnabled();
     const currentUser = requireCurrentUser(request);
@@ -118,6 +131,8 @@ export class MdfBoardManualMoveController {
       currentUser,
       cardKind: parseMdfManualCardKind(rawKind),
       cardId: parseMdfManualCardId(rawCardId),
+      ...(sourceToken === undefined ? {} : { sourceToken }),
+      ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
       requestId: request.requestId,
     });
   }

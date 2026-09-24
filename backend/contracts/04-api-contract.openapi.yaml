@@ -3131,6 +3131,43 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/orders/status-board/mdf:
+    get:
+      operationId: getPublishedMdfBoard
+      tags: [Orders]
+      summary: Согласованный опубликованный расчёт МДФ и состояние очереди
+      description: >-
+        Только чтение одной MVCC-версии. Включается отдельно при переходе на новый механизм.
+        Период карточек — два календарных месяца до dateTo; он не ограничивает учёт подтверждений.
+        orderIds запрашивает расчёт выбранных заказов, в том числе без видимых файлов.
+        focus открывает конкретную старую карточку, не расширяя остальную выборку.
+        jobIds отслеживает точные задания независимо от периода и текущей версии источника.
+        Недоступные и неизвестные задания не возвращаются; отсутствие не означает выполнение.
+        Права проверяются до 304. Частично недоступная смешанная карточка скрывается целиком.
+        Не создаёт подтверждений, резервов и действий автостатусов.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: dateTo, in: query, schema: { type: string, format: date } }
+        - { name: orderIds, in: query, description: До 100 положительных safe-integer ID через запятую, schema: { type: string } }
+        - { name: jobIds, in: query, description: До 20 UUID через запятую; все владельцы зафиксированного состава и потребности должны быть доступны, schema: { type: string } }
+        - { name: focusKind, in: query, schema: { type: string, enum: [packet, bazisCutSet, bath] } }
+        - { name: focusId, in: query, description: Обязателен вместе с focusKind; UUID файла, ID БАЗИС либо cut-result:ID, schema: { type: string } }
+        - { name: If-None-Match, in: header, schema: { type: string } }
+      responses:
+        '200':
+          description: Опубликованные карточки, позиции и ещё не обработанные подтверждения
+          headers:
+            ETag: { schema: { type: string }, description: Включает очередь, фильтры и текущие права }
+            Cache-Control: { schema: { type: string }, description: 'private, no-cache' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MdfPublishedSnapshot' }
+        '304': { description: Авторизованный снимок не изменился }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
   /api/v1/orders/status-board/mdf-return/{cardKind}/{cardId}/preview:
     parameters:
       - { name: cardKind, in: path, required: true, schema: { type: string, enum: [packet, bath, bazisCutSet] } }
@@ -3224,10 +3261,19 @@ paths:
         - Orders
       operationId: upsertMdfBoardManualMove
       summary: Сохранить ручное перемещение карточки МДФ-доски
+      description: >-
+        В active обязательны X-Mdf-Source-Token из опубликованной карточки и
+        Idempotency-Key. Команда сохраняется атомарно с заданием очереди;
+        jobId не означает завершение пересчёта. Повтор с тем же ключом и
+        телом возвращает сохранённый ответ после повторной проверки доступа.
+        Возврат этапа требует отдельного preview/confirm, очистка ручной
+        колонки не отменяет подтверждённое производство. В legacy заголовки необязательны.
       security:
         - bearerAuth: []
       x-permission: production.tasks.update
       parameters:
+        - $ref: '#/components/parameters/MdfSourceToken'
+        - $ref: '#/components/parameters/MdfCommandIdempotencyKey'
         - name: cardKind
           in: path
           required: true
@@ -3268,6 +3314,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '500':
@@ -3279,10 +3327,18 @@ paths:
         - Orders
       operationId: deleteMdfBoardManualMove
       summary: Очистить ручное перемещение карточки МДФ-доски
+      description: >-
+        В active обязательны X-Mdf-Source-Token и Idempotency-Key.
+        Очистка снимает только ручную колонку, сохраняя подтверждённые количества.
+        Пересчёт асинхронный (jobId). Повтор с тем же ключом и параметрами
+        возвращает сохранённый ответ после повторной проверки доступа.
+        В legacy заголовки необязательны.
       security:
         - bearerAuth: []
       x-permission: production.tasks.update
       parameters:
+        - $ref: '#/components/parameters/MdfSourceToken'
+        - $ref: '#/components/parameters/MdfCommandIdempotencyKey'
         - name: cardKind
           in: path
           required: true
@@ -3311,6 +3367,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '500':
@@ -15758,6 +15816,24 @@ components:
         example: req_01HZX8K5T3M2F5F7K9A2S1QW3E
 
   parameters:
+    MdfSourceToken:
+      name: X-Mdf-Source-Token
+      in: header
+      required: false
+      description: Обязателен в active; commandToken текущей опубликованной карточки. При 409 обновить снимок, не повторять вслепую.
+      schema:
+        type: string
+        pattern: '^[a-f0-9]{64}$'
+    MdfCommandIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: Обязателен в active; уникальный ключ действия пользователя. Сохранять при сетевом повторе той же команды, менять при новом действии.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+        pattern: '^[A-Za-z0-9._:-]{1,128}$'
     CatalogCommandKey:
       name: Idempotency-Key
       in: header
@@ -16294,6 +16370,100 @@ components:
               matchMode: { type: string, enum: [phrase, contains, exact] }
               enabled: { type: boolean }
               priority: { type: integer, minimum: 0, maximum: 10000 }
+    MdfPublishedSnapshot:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, mode, revision, generatedAt, dateFrom, dateTo, cards, members, positions, pendingJobs, trackedJobs, issues]
+      properties:
+        schemaVersion: { type: integer, enum: [1] }
+        mode: { type: string, enum: [legacy, shadow, active, read_only] }
+        revision: { type: string, pattern: '^[0-9]+$' }
+        generatedAt: { type: string }
+        dateFrom: { type: string, format: date }
+        dateTo: { type: string, format: date }
+        issues: { type: array, items: { type: string } }
+        cards:
+          type: array
+          maxItems: 1000
+          items:
+            type: object
+            additionalProperties: false
+            required: [kind, id, displayName, column, sourceCreatedAt, acceptedRevision, receivedRevision, issues]
+            properties:
+              kind: { type: string, enum: [packet, bazisCutSet, bath] }
+              id: { type: string }
+              displayName: { type: string }
+              column: { type: string, nullable: true, enum: [parsed, completed, completed_laminated, baths, baths_ready, baths_laminated, completed_baths, null] }
+              sourceCreatedAt: { type: string }
+              acceptedRevision: { type: string, nullable: true }
+              receivedRevision: { type: string }
+              commandToken:
+                type: string
+                nullable: true
+                pattern: '^[a-f0-9]{64}$'
+                description: Версия источника для команды. null при неопубликованном изменении или непроверенном составе; не заменяет проверку доступа.
+              issues: { type: array, items: { type: string } }
+        members:
+          type: array
+          maxItems: 10000
+          items:
+            type: object
+            additionalProperties: false
+            required: [kind, id, orderId, detailId, quantity]
+            properties:
+              kind: { type: string, enum: [packet, bazisCutSet, bath] }
+              id: { type: string }
+              orderId: { type: integer, minimum: 1 }
+              detailId: { type: integer, minimum: 1 }
+              quantity: { type: integer, minimum: 1 }
+        positions:
+          type: array
+          maxItems: 10000
+          items:
+            type: object
+            additionalProperties: false
+            required: [orderId, detailId, required, cut, rolled, creditedCut, creditedRolled, remaining, issues]
+            properties:
+              orderId: { type: integer, minimum: 1 }
+              detailId: { type: integer, minimum: 1 }
+              required: { type: integer, minimum: 0 }
+              cut: { type: integer, minimum: 0, description: Физический распил за вычетом закатки той же позиции; переделки включены }
+              rolled: { type: integer, minimum: 0, description: Физическая закатка; переделки включены }
+              creditedCut: { type: integer, minimum: 0 }
+              creditedRolled: { type: integer, minimum: 0 }
+              remaining: { type: integer, minimum: 0 }
+              issues: { type: array, items: { type: string } }
+        trackedJobs:
+          type: array
+          maxItems: 20
+          description: Точные запрошенные задания, включая терминальные. Только явный done означает выполнение этого задания.
+          items:
+            type: object
+            additionalProperties: false
+            required: [jobId, kind, id, status, code, attempts, orderIds]
+            properties:
+              jobId: { type: string, format: uuid }
+              kind: { type: string, enum: [packet, bazisCutSet, bath, order, orderDetail] }
+              id: { type: string }
+              status: { type: string, enum: [pending, done, superseded, needs_attention] }
+              code: { type: string, nullable: true }
+              attempts: { type: integer, minimum: 0 }
+              orderIds: { type: array, items: { type: integer, minimum: 1 } }
+        pendingJobs:
+          type: array
+          maxItems: 1000
+          items:
+            type: object
+            additionalProperties: false
+            required: [jobId, kind, id, status, code, attempts, orderIds]
+            properties:
+              jobId: { type: string, format: uuid }
+              kind: { type: string, enum: [packet, bazisCutSet, bath, order, orderDetail] }
+              id: { type: string }
+              status: { type: string, enum: [pending, needs_attention] }
+              code: { type: string, nullable: true }
+              attempts: { type: integer, minimum: 0 }
+              orderIds: { type: array, items: { type: integer, minimum: 1 } }
     StageSettings:
       type: object
       additionalProperties: false
@@ -17222,6 +17392,7 @@ components:
       properties:
         set: { $ref: '#/components/schemas/BazisCutSet' }
         addedCount: { type: integer, minimum: 0 }
+        mdfJobId: { type: string, format: uuid, description: 'Active MDF mode: queued calculation, not yet applied rules' }
     BazisCutDeleteSetResult:
       type: object
       required: [deleted, set]
@@ -19614,6 +19785,9 @@ components:
           $ref: '#/components/schemas/MdfBoardManualMove'
         auditId:
           type: string
+        jobId:
+          type: string
+          description: Задание пересчёта active-движка; результат появится в опубликованном снимке.
 
     MdfBoardManualMoveDeleteResponse:
       type: object
@@ -19638,6 +19812,9 @@ components:
           type: boolean
         auditId:
           type: string
+        jobId:
+          type: string
+          description: Задание пересчёта active-движка; очистка не отзывает физические факты.
 
     OrderStatusBoardResponse:
       type: object

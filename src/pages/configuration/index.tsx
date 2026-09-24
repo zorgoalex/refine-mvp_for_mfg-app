@@ -1,3 +1,4 @@
+import { useConfigurationStickyTabs } from './useConfigurationStickyTabs';
 import { Tooltip, Table } from '../../ui/tooltipDelay';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
@@ -576,6 +577,7 @@ const TableVisibilityByRoleTab: React.FC = () => {
 // ============================================================================
 export const ConfigurationPage: React.FC = () => {
   const isOperational = useOperationalUi();
+  const stickyTabsRef = useConfigurationStickyTabs();
   const [activeTab, setActiveTab] = useState(() => readStoredConfigurationActiveTab() ?? 'orders');
   const statusAutomationVisible =
     featureFlags.statusAutomation &&
@@ -812,29 +814,33 @@ export const ConfigurationPage: React.FC = () => {
     />
   );
 
-  return isOperational ? (
-    <div className="configuration-operational">
-      <OperationalPageHeader
-        compact
-        breadcrumbs="Администрирование / Конфигурация"
-        title="Конфигурация"
-        description="Рабочие параметры заказов, производства, уведомлений и системных модулей."
-      />
-      <section className="operational-panel configuration-operational__panel">
-        {configurationTabs}
-      </section>
+  return (
+    <div className="configuration-page" ref={stickyTabsRef}>
+      {isOperational ? (
+        <div className="configuration-operational">
+          <OperationalPageHeader
+            compact
+            breadcrumbs="Администрирование / Конфигурация"
+            title="Конфигурация"
+            description="Рабочие параметры заказов, производства, уведомлений и системных модулей."
+          />
+          <section className="operational-panel configuration-operational__panel">
+            {configurationTabs}
+          </section>
+        </div>
+      ) : (
+        <Card
+          title={
+            <Space>
+              <SettingOutlined />
+              <span>Конфигурация</span>
+            </Space>
+          }
+        >
+          {configurationTabs}
+        </Card>
+      )}
     </div>
-  ) : (
-    <Card
-      title={
-        <Space>
-          <SettingOutlined />
-          <span>Конфигурация</span>
-        </Space>
-      }
-    >
-      {configurationTabs}
-    </Card>
   );
 };
 

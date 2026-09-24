@@ -26,7 +26,7 @@ import {
 } from '@ant-design/icons';
 import { useNavigation } from '@refinedev/core';
 import dayjs, { type Dayjs } from 'dayjs';
-import { CUT_RENDER_STYLE_MDF_BOARD_PREVIEW } from '@shared/cut-render-style';
+import { CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, CUT_RENDER_STYLE_VACUUM_TASK_PREVIEW } from '@shared/cut-render-style';
 import { cutApi } from '../../api/cutApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
 import { subscribeCutPdfTemplatesChanged } from '../../api/cutPdfTemplateEvents';
@@ -1058,6 +1058,11 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const jobCalculatedEngine = typeof rawJobCalculatedEngine === 'string'
     ? rawJobCalculatedEngine
     : undefined;
+  const taskPreviewStyle = !isEmbeddedOrder && resolveCutJobLayoutKind(
+    job?.paramProfileId ?? null, profiles, jobCalculatedEngine, isHistoricalResult,
+  ) === 'vacuum'
+    ? CUT_RENDER_STYLE_VACUUM_TASK_PREVIEW
+    : CUT_TASK_SHEET_RENDER_STYLE;
   const jobDisplayNumber = job ? formatCutJobDisplayNumber(job, profiles) : null;
   // Per-user, per-job sheet preview orientation, persisted in localStorage.
   // Vacuum-table jobs default to landscape; other profiles default to portrait.
@@ -2608,7 +2613,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       // in the FETCH to bust the SERVER render cache.
       const sheet = selectVariantSheets(group, variant).find((candidate) => candidate.sheetIndex === sheetIndex);
       const labelsInImage = sheetUsesSourceSvgRendering(sheet?.placements);
-      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}:${sheetAxisOrigin}:${labelsInImage ? 'svg' : 'overlay'}`;
+      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}:${sheetAxisOrigin}:${labelsInImage ? 'svg' : 'overlay'}:${taskPreviewStyle}`;
       const rotate90 = sheet
         ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
         : sheetPortrait;
@@ -2628,7 +2633,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           isHistoricalResult ? selectedResult?.resultNo : undefined,
           false,
           labelsInImage,
-          CUT_TASK_SHEET_RENDER_STYLE,
+          taskPreviewStyle,
         );
         // Discard a completion that lands after a job switch/reset (stale blob).
         if (viewEpochRef.current !== epoch || !canPublishCutWrite(token, targetJobId)) return;
@@ -2640,7 +2645,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         if (canPublishCutWrite(token, targetJobId)) handleError(error, 'Не удалось загрузить лист раскроя');
       }
     },
-    [handleError, isHistoricalResult, job, preset, selectedResult?.resultNo, sheetAxisOrigin, sheetOriginTopLeft, sheetPortrait],
+    [handleError, isHistoricalResult, job, preset, selectedResult?.resultNo, sheetAxisOrigin, sheetOriginTopLeft, sheetPortrait, taskPreviewStyle],
   );
 
   // Small layout preview for a ready job's sheet, fetched once with the light
@@ -2660,7 +2665,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       // dedupe to a TL thumb; Codex code-review R1 [REGRESSION-DEBT]).
       const sheet = selectVariantSheets(group, variant).find((candidate) => candidate.sheetIndex === sheetIndex);
       const labelsInImage = sheetUsesSourceSvgRendering(sheet?.placements);
-      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}:${sheetAxisOrigin}:${labelsInImage ? 'svg' : 'overlay'}`;
+      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}:${sheetAxisOrigin}:${labelsInImage ? 'svg' : 'overlay'}:${taskPreviewStyle}`;
       const reqKey = `${cutJobId}:${key}`;
       if (thumbReqRef.current.has(reqKey)) return;
       thumbReqRef.current.add(reqKey);
@@ -2683,7 +2688,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           isHistoricalResult ? selectedResult?.resultNo : undefined,
           false,
           labelsInImage,
-          CUT_TASK_SHEET_RENDER_STYLE,
+          taskPreviewStyle,
         );
         // Discard a completion that lands after a job switch/reset (stale blob).
         if (
@@ -2702,7 +2707,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         }
       }
     },
-    [isHistoricalResult, selectedResult?.resultNo, sheetAxisOrigin, sheetOriginTopLeft, sheetPortrait],
+    [isHistoricalResult, selectedResult?.resultNo, sheetAxisOrigin, sheetOriginTopLeft, sheetPortrait, taskPreviewStyle],
   );
 
   // Auto-load per-sheet previews when a ready job's layout is present, so an
@@ -5355,7 +5360,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   // switch may rehydrate a different saved orientation/origin); renderVersion
                   // stays only in the fetch (server bust). Keeps the cached preview stable
                   // across no-recalc version bumps.
-                  const key = `${group.cutGroupId}:${sheet.sheetIndex}:${displayVariant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}:${sheetAxisOrigin}:${sheetUsesSourceSvgRendering(sheet.placements) ? 'svg' : 'overlay'}`;
+                  const key = `${group.cutGroupId}:${sheet.sheetIndex}:${displayVariant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}:${sheetAxisOrigin}:${sheetUsesSourceSvgRendering(sheet.placements) ? 'svg' : 'overlay'}:${taskPreviewStyle}`;
                   // Stable React element identity per (group, sheet) — deliberately NOT
                   // the cache key. A renderVersion bump (e.g. changing profile/material,
                   // which only marks the job stale) then refreshes the image in place

@@ -8,6 +8,8 @@ import type { TransactionClient } from "../../../database/database.types";
 import { getPermissionsForRole } from "../../../permissions/permissions";
 import { mdfCompletionUpdateSql } from "../../cnc-telegram/adapters/pg-cnc-telegram-repository";
 import { PgMdfBoardManualMoveRepository } from "./pg-mdf-board-manual-move-repository";
+import type { DatabaseTransactionOptions } from '../../../database/database.service';
+import { enterMdfCommand,discardMdfCommandBoundary } from '../../mdf-board/application/mdf-command-boundary';
 import { beginTransactionHooks, flushTransactionHooks, discardTransactionHooks } from '../../../database/transaction-hooks';
 import { loadMdfShadowProofs } from '../../mdf-board/adapters/mdf-shadow-proof-loader';
 import { loadMdfShadowSource } from '../../mdf-board/adapters/mdf-shadow-source';
@@ -79,11 +81,12 @@ describe.skipIf(!enabled)(
     };
     const database = {
       transaction: async <T>(
-        handler: (tx: TransactionClient) => Promise<T>
+        handler: (tx: TransactionClient) => Promise<T>,options: DatabaseTransactionOptions = {}
       ) => {
         await client.query("BEGIN");
         beginTransactionHooks(tx);
         try {
+          if (options.mdf) await enterMdfCommand(tx,options.mdf);
           const result = await handler(tx);
           await flushTransactionHooks(tx);
           await client.query("COMMIT");
@@ -93,6 +96,7 @@ describe.skipIf(!enabled)(
           throw e;
         } finally {
           discardTransactionHooks(tx);
+          discardMdfCommandBoundary(tx);
         }
       },
     };

@@ -20,6 +20,7 @@ export interface WhatsAppTemplateDto {
   code: string;
   name: string;
   body: string;
+  bodyMode?: 'text' | 'template';
   enabled: boolean;
   version: number;
   createdAt: string;
@@ -30,7 +31,8 @@ export interface WhatsAppRuleDto {
   id: number;
   code: string;
   name: string;
-  matchMode: "contains_any" | "exact_any";
+  matchMode: "contains_any" | "exact_any" | 'pattern_exact' | 'pattern_contains';
+  replyMode?: 'plain' | 'quote';
   keywords: string[];
   templateId: number;
   templateName: string | null;
@@ -103,15 +105,25 @@ export interface WhatsAppTemplateInput {
   code: string;
   name: string;
   body: string;
+  bodyMode?: 'text' | 'template';
   enabled: boolean;
 }
 
 export interface WhatsAppRuleInput {
   code: string;
   name: string;
-  matchMode: "contains_any" | "exact_any";
+  matchMode: "contains_any" | "exact_any" | 'pattern_exact' | 'pattern_contains';
+  replyMode?: 'plain' | 'quote';
   keywords: string[];
   templateId: number;
   priority: number;
   enabled: boolean;
+}
+
+export interface WhatsAppReplyPreview {
+  matched: boolean;
+  captures: Record<string, string> | null;
+  body: string | null;
+  counterIsExample: boolean;
+  timeZone: string;
 }

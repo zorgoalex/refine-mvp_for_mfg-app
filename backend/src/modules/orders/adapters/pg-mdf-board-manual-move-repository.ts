@@ -6,6 +6,8 @@ import type { AuditRelatedEntity } from '../../../common/audit/audit-event.types
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import { observeMdfShadowCommand } from '../../mdf-board/application/mdf-shadow';
+import { requireMdfCommandBoundary } from '../../mdf-board/application/mdf-command-boundary';
+import { executeMdfManualCommand } from '../../mdf-board/adapters/mdf-manual-command';
 import type { MdfBoardEventInput } from '../../status-automation/application/mdf-board-event.types';
 import {
   dispatchMdfBoardEvent,
@@ -63,7 +65,9 @@ export class PgMdfBoardManualMoveRepository implements MdfBoardManualMoveReposit
   }
 
   async upsert(command: UpsertMdfBoardManualMoveCommand): Promise<MdfBoardManualMoveUpsertResponseDto> {
+    const mdf = { writer: 'mdf.manual.upsert',capability: command.cardKind === 'order' ? 'legacy-only' : 'queued' } as const;
     return this.database.transaction(async (tx) => {
+      if ((await requireMdfCommandBoundary(tx,mdf)).queued) return executeMdfManualCommand(tx,command);
       await setSessionUser(tx, command.currentUser.id);
       if (command.cardKind !== 'order') {
         await tx.query('SET LOCAL jit=off');
@@ -160,11 +164,13 @@ export class PgMdfBoardManualMoveRepository implements MdfBoardManualMoveReposit
         move: saved,
         auditId,
       };
-    });
+    }, { mdf });
   }
 
   async delete(command: DeleteMdfBoardManualMoveCommand): Promise<MdfBoardManualMoveDeleteResponseDto> {
+    const mdf = { writer: 'mdf.manual.clear',capability: command.cardKind === 'order' ? 'legacy-only' : 'queued' } as const;
     return this.database.transaction(async (tx) => {
+      if ((await requireMdfCommandBoundary(tx,mdf)).queued) return executeMdfManualCommand(tx,command);
       await setSessionUser(tx, command.currentUser.id);
       const current = await loadMoveForUpdate(tx, command.cardKind, command.cardId);
       if (!current) {
@@ -227,7 +233,7 @@ export class PgMdfBoardManualMoveRepository implements MdfBoardManualMoveReposit
         deleted: true,
         auditId,
       };
-    });
+    }, { mdf });
   }
 }
 

@@ -1,10 +1,13 @@
 import { planMdfEvidenceAllocations, type MdfEvidenceAllocation, type MdfSupplyLine } from './mdf-evidence-allocation';
 import type { MdfBathDemand } from './mdf-allocation';
 import { mdfPositionKey, mdfQuantity, mdfSum, type MdfPositionQuantity } from './mdf-quantities';
+import { isMdfEvidenceContract } from './mdf-evidence-contract';
 
 export interface MdfAllocationSource {
   kind: 'packet' | 'bazisCutSet' | 'bath' | 'order' | 'orderDetail';
   id: string; accepted: string | null; received: string; createdAt?: string;
+  /** Frozen known ownership when exact membership is unresolved. */
+  uncertainOrderIds?: readonly number[];
   lines: (MdfPositionQuantity & { evidenceLineId: string; revision: string;
     stage: string; evidence: string; rework: boolean })[];
 }
@@ -38,7 +41,7 @@ export function planMdfQuarantinedAllocations(input: {
   const ownAllocations = (id: string) => liveAllocations.filter(a => a.bathId === id);
   const reject = (s: MdfAllocationSource, code: string, rows: readonly MdfPositionQuantity[] = [], widen = false) => {
     const positionKeys = [...new Set(rows.map(mdfPositionKey))].sort(compare);
-    const owners = [...new Set(rows.map(l => l.orderId))];
+    const owners = [...new Set([...rows.map(l => l.orderId),...(s.uncertainOrderIds ?? [])])];
     const orderIds = widen ? (owners.length ? owners : [...input.orderIds]).sort((a,b) => a-b) : [];
     for (const k of positionKeys) blocked.add(k);
     for (const id of orderIds) blockedOrders.add(id);
@@ -64,8 +67,7 @@ export function planMdfQuarantinedAllocations(input: {
     let reason: string | undefined;
     if (!s.accepted || s.accepted !== s.received) reason = 'ACCEPTANCE_PENDING';
     else if (!members.size) reason = 'MEMBERSHIP_MISSING';
-    else if (own.some(l => !['membership','cut','laminated'].includes(l.stage)
-      || (l.stage === 'membership' && l.evidence !== 'derived'))) reason = 'INVALID_EVIDENCE';
+    else if (own.some(l => !isMdfEvidenceContract(s.kind,l.stage,l.evidence))) reason = 'INVALID_EVIDENCE';
     else if (['cut','laminated'].some(stage => [...quantities(own.filter(l => l.stage === stage && l.evidence === 'physical'))]
       .some(([key,row]) => row.quantity > (members.get(key)?.quantity ?? 0)))) reason = 'MEMBERSHIP_MISMATCH';
     else if (s.kind === 'bath' && (!s.createdAt || !Number.isFinite(Date.parse(s.createdAt)))) reason = 'BATH_METADATA_MISSING';

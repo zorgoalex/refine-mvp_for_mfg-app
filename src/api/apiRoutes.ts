@@ -62,6 +62,7 @@ export const apiRoutes = {
     nameSuggestion: backendApiPath('/orders/name-suggestion'),
     statusBoard: backendApiPath('/orders/status-board'),
     statusBoardMdfManualMoves: backendApiPath('/orders/status-board/mdf-manual-moves'),
+    statusBoardMdfPublished: backendApiPath('/orders/status-board/mdf'),
     statusBoardMdfManualMove: (cardKind: string, cardId: string) =>
       backendApiPath(`/orders/status-board/mdf-manual-moves/${encodeURIComponent(cardKind)}/${encodeURIComponent(cardId)}`),
     byId: (orderId: number) => backendApiPath(`/orders/${orderId}`),
@@ -352,6 +353,7 @@ export const apiRoutes = {
     test: backendApiPath('/message-processing/test'),
   },
   whatsapp: {
+    preview: backendApiPath('/whatsapp/rules/preview'),
     status: backendApiPath('/whatsapp/status'),
     qr: backendApiPath('/whatsapp/qr'),
     restart: backendApiPath('/whatsapp/restart'),

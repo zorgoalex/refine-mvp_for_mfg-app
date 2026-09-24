@@ -16,6 +16,8 @@ import { WhatsAppRepository } from "./whatsapp.repository";
 import { WhatsAppRuntimeConfigService } from "./whatsapp-runtime-config.service";
 import type { WhatsAppTechnicalLogQuery } from "./whatsapp-technical-log.dto";
 import { WhatsAppTechnicalLogService } from "./whatsapp-technical-log.service";
+import { parseReplyPreview } from './whatsapp.dto';
+import { matchReply, renderReply, validateReply } from './whatsapp-template';
 
 @Injectable()
 export class WhatsAppService {
@@ -100,6 +102,14 @@ export class WhatsAppService {
   qr() {
     this.requireEnabled();
     return this.client.qr();
+  }
+  previewReply(body: unknown) {
+    this.requireEnabled();
+    const input = parseReplyPreview(body);
+    validateReply(input, input.body, input.bodyMode);
+    const captures = matchReply(input, input.text);
+    return { matched: captures !== null, captures, body: captures === null ? null : renderReply(input.body, input.bodyMode, captures, new Date(), '1'),
+      counterIsExample: true, timeZone: 'Asia/Almaty' };
   }
   listTemplates() {
     this.requireEnabled();
@@ -304,12 +314,13 @@ export class WhatsAppService {
     }
     const safeMessage = {
       ...parsed.message,
+      providerMessageId: parsed.message.externalEventId,
       externalEventId: privateIdentifier(config.webhookSecret, parsed.message.externalEventId),
     };
     const result = await this.repository.acceptInbound(safeMessage);
     await this.technicalLog.record({
-      component: "webhook", level: "info", eventCode: "whatsapp.webhook.processed",
-      outcome: "succeeded", operation: "webhook.receive", requestId,
+      component: "webhook", level: result.result === 'failed' ? 'error' : 'info', eventCode: "whatsapp.webhook.processed",
+      outcome: result.result === 'failed' ? 'failed' : 'succeeded', operation: "webhook.receive", requestId,
       details: { result: result.result, duplicate: result.duplicate },
     });
     if (result.duplicate)
@@ -337,7 +348,7 @@ export class WhatsAppService {
     for (const job of jobs) {
       const id = Number(job.delivery_job_id);
       const token = String(job.lock_token ?? "");
-      if (!job.destination || !job.body || !token) {
+      if (!job.destination || !job.body || !token || (job.reply_mode === 'quote' && !job.reply_to)) {
         if (token)
           await this.repository.finishJob(
             id,
@@ -352,7 +363,7 @@ export class WhatsAppService {
       const owned = await this.repository.markSendStarted(id, token);
       if (!owned) continue;
       try {
-        const result = await this.client.sendText(job.destination, job.body);
+        const result = await this.client.sendText(job.destination, job.body, job.reply_mode === 'quote' ? job.reply_to ?? undefined : undefined);
         await this.repository.finishJob(
           id,
           token,

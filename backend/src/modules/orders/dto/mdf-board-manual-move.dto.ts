@@ -29,6 +29,7 @@ export interface MdfBoardManualMovesResponseDto {
 }
 
 export interface MdfBoardManualMoveUpsertResponseDto {
+  jobId?: string;
   generatedAt: string;
   changed: boolean;
   move: MdfBoardManualMoveDto;
@@ -36,6 +37,7 @@ export interface MdfBoardManualMoveUpsertResponseDto {
 }
 
 export interface MdfBoardManualMoveDeleteResponseDto {
+  jobId?: string;
   generatedAt: string;
   cardKind: MdfBoardManualCardKind;
   cardId: string;

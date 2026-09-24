@@ -668,6 +668,39 @@ test.describe('MDF background refresh', () => {
         await expect(target).toHaveClass(/cnc-board-card-shell--deep-linked/);
         await expect(target).toBeFocused();
         await expect(page).toHaveURL(/date=2026-08-05/);
+        // Exercise the cleanup/re-run boundary. Initial focus alone can pass
+        // before an auxiliary request removes the imperative highlight.
+        const refresh = page.getByRole('button', { name: 'Обновить доску', exact: true });
+        await refresh.click();
+        await expect(page.locator('#status-board-viewport')).toHaveAttribute('aria-busy', 'false');
+        await expect(target).toHaveClass(/cnc-board-card-shell--deep-linked/);
+        await expect(target).not.toBeFocused();
+        await expect(page.getByRole('textbox', { name: 'Дата CNC-работ' })).toHaveValue('05.08.2026');
+    });
+
+    test('does not announce or retain an applied move from an MDF queue receipt', async ({ page }) => {
+        const db = createWorkflowMockDb();
+        seedTabletData(db);
+        await setupBoardTabletMocks(page, db);
+        await setupMdfOverflowPreviewMocks(page, true);
+        let writes = 0;
+        await page.route(/\/api\/v1\/orders\/status-board\/mdf-manual-moves\/packet\/e2e-overflow-packet-0$/, async (route) => {
+            expect(route.request().method()).toBe('PUT');
+            expect(route.request().postDataJSON()).toEqual({ targetColumn: 'completed' });
+            writes += 1;
+            await route.fulfill({ json: { jobId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' } });
+        });
+        await page.goto('/mdf-work-board?date=2026-08-05');
+        await expect(page.locator('#status-board-viewport')).toHaveAttribute('aria-busy', 'false', { timeout: 60_000 });
+        await expect(page.locator('[data-status-board-column-key="parsed"] .cnc-deferred-card')).toHaveCount(30);
+        const target = page.locator('[data-cnc-card-kind="packet"][data-cnc-card-id="e2e-overflow-packet-0"]');
+        await target.click({ button: 'right', position: { x: 20, y: 20 } });
+        await page.getByRole('menuitem', { name: /^Переместить/ }).hover();
+        await page.getByRole('menuitem', { name: 'Распилено', exact: true }).click();
+        await expect(page.getByText('Перемещение принято в очередь. Ожидается пересчёт доски.', { exact: true })).toBeVisible();
+        await expect(page.getByText('Карточка перемещена', { exact: false })).toHaveCount(0);
+        await expect(page.locator('[data-status-board-column-key="parsed"]').locator(target)).toHaveCount(1);
+        expect(writes).toBe(1);
     });
 
     test('opens MDF machine-file preview without truncating after display-mode changes', async ({ page }) => {

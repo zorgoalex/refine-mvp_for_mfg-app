@@ -1648,7 +1648,6 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     }
     if (loading) return undefined;
     const key = `${kind}:${cardId}`;
-    if (deepLinkFocusAppliedRef.current === key) return undefined;
     const root = boardViewportRef.current;
     const target = root
       ? Array.from(root.querySelectorAll<HTMLElement>('[data-cnc-card-id]')).find(
@@ -1663,14 +1662,16 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       return undefined;
     }
     deepLinkWarningRef.current = null;
-    deepLinkFocusAppliedRef.current = key;
+    // Cleanup on a data refresh removes the old highlight. Always reattach it,
+    // but do not steal focus or scroll again after the first completed frame.
     target.classList.add('cnc-board-card-shell--deep-linked');
-    const frame = window.requestAnimationFrame(() => {
+    const frame = deepLinkFocusAppliedRef.current === key ? null : window.requestAnimationFrame(() => {
       target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
       target.focus({ preventScroll: true });
+      deepLinkFocusAppliedRef.current = key;
     });
     return () => {
-      window.cancelAnimationFrame(frame);
+      if (frame !== null) window.cancelAnimationFrame(frame);
       target.classList.remove('cnc-board-card-shell--deep-linked');
     };
   }, [cncShownDataColumns, isCncToday, loading, viewState.cncCardId, viewState.cncCardKind]);
@@ -2115,6 +2116,22 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     )
       .then((response) => {
         if (cncManualMoveRequestSeqRef.current[key] !== requestSeq) return;
+        if (response.jobId) {
+          // A queue receipt is not an applied move. Do not retain the legacy
+          // optimistic placement while the owning publication is still pending.
+          if (!cncStrongRefreshInFlightRef.current && cncAuxiliaryRefreshRevisionRef.current === moveRefreshRevision) {
+            setCncManualMoves((current) => {
+              const next = { ...current };
+              if (previousTarget) next[key] = previousTarget;
+              else delete next[key];
+              cncManualMovesRef.current = next;
+              return next;
+            });
+          }
+          message.info('Перемещение принято в очередь. Ожидается пересчёт доски.');
+          void fetchInitial({ mutationRefetch: true, preserveLoading: true });
+          return;
+        }
         setCncManualMoves((current) => {
           const next = {
             ...current,

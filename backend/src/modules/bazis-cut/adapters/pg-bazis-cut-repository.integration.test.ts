@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { Pool, type PoolClient, type QueryResultRow } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { DatabaseService } from '../../../database/database.service';
+import type { DatabaseService, DatabaseTransactionOptions } from '../../../database/database.service';
+import { enterMdfCommand, discardMdfCommandBoundary } from '../../mdf-board/application/mdf-command-boundary';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { BazisCutDetailFields } from '../dto/bazis-cut.dto';
@@ -178,12 +179,16 @@ function fields(overrides: Partial<BazisCutDetailFields> = {}): BazisCutDetailFi
 function databaseFromPool(pool: Pool): DatabaseService {
   return {
     query: <T extends QueryResultRow>(sql: string, params: readonly unknown[] = []) => pool.query<T>(sql, [...params]),
-    transaction: async <T>(handler: (client: TransactionClient) => Promise<T>) => {
+    transaction: async <T>(handler: (client: TransactionClient) => Promise<T>, options: DatabaseTransactionOptions = {}) => {
       const raw = await pool.connect();
       const client = transactionClient(raw);
-      try { await raw.query('BEGIN'); const value = await handler(client); await raw.query('COMMIT'); return value; }
+      try {
+        await raw.query('BEGIN');
+        if (options.mdf) { await raw.query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED'); await enterMdfCommand(client,options.mdf); }
+        const value = await handler(client); await raw.query('COMMIT'); return value;
+      }
       catch (error) { await raw.query('ROLLBACK'); throw error; }
-      finally { raw.release(); }
+      finally { discardMdfCommandBoundary(client); raw.release(); }
     },
   } as unknown as DatabaseService;
 }

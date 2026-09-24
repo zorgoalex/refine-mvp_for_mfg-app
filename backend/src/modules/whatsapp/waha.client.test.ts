@@ -19,6 +19,14 @@ const config = {
 };
 
 describe("WahaClient", () => {
+  it('passes the exact original message ID and never falls back after a quote failure', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 422 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new WahaClient({ getConfig: () => config } as WhatsAppRuntimeConfigService);
+    await expect(client.sendText('123@lid', 'Тест', 'false_123@lid_ABC')).rejects.toMatchObject({ code: 'WAHA_PROVIDER_ERROR' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ session: 'erp', chatId: '123@lid', text: 'Тест', reply_to: 'false_123@lid_ABC' });
+  });
   afterEach(() => vi.unstubAllGlobals());
 
   it("sends only allowlisted text fields with the API key", async () => {

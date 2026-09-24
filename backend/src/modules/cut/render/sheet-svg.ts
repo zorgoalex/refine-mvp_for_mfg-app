@@ -13,6 +13,7 @@ import {
 } from '../../../shared/cut-geometry';
 import {
   CUT_RENDER_STYLE_DEFAULT,
+  CUT_RENDER_STYLE_VACUUM_TASK_PREVIEW,
   cutRenderLabelFontWeight,
   cutRenderLabelLetterSpacingRatio,
   cutRenderLabelFillForBackground,
@@ -583,14 +584,35 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
     ? bathMeterGuideViewBox(sheet, rotate90, guideLabelFontMm)
     : `0 0 ${num(vbW)} ${num(vbH)}`;
 
+  // The bath task sheet boundary is independent of the thinner piece contours.
+  // Draw it last so hatching and pieces touching the sheet edge cannot cover it.
+  const taskSheetOutline = renderStyle.id === CUT_RENDER_STYLE_VACUUM_TASK_PREVIEW
+    ? `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="none" stroke="#000000" stroke-width="14"/>`
+    : '';
+
+  // Fill the guide gutters too; transparent margins otherwise inherit the UI surface.
+  const [backgroundX, backgroundY, backgroundWidth, backgroundHeight] = viewBox.split(' ');
+  const taskBackground = renderStyle.id === CUT_RENDER_STYLE_VACUUM_TASK_PREVIEW
+    ? `<rect x="${backgroundX}" y="${backgroundY}" width="${backgroundWidth}" height="${backgroundHeight}" fill="#ffffff"/>`
+    : '';
+  // Only unused sheet area is hatched: opaque white piece geometry paints over it.
+  const taskHatching = renderStyle.id === CUT_RENDER_STYLE_VACUUM_TASK_PREVIEW
+    ? '<defs><pattern id="vacuum-task-hatch" patternUnits="userSpaceOnUse" width="80" height="80">'
+      + '<path d="M-20 20L20-20M0 80L80 0M60 100L100 60" fill="none" stroke="#dce3eb" stroke-width="4"/></pattern></defs>'
+      + `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="url(#vacuum-task-hatch)"/>`
+    : '';
+
   return [
     // viewBox only (no width/height attrs): the px size is chosen at raster time
     // via resvg fitTo; explicit width/height would make resvg ignore fitTo.
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" data-cut-order-label-font-mm="${num(orderLabelFontMm)}">`,
+    taskBackground,
     `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="${escapeXml(renderStyle.piece.defaultFill)}" stroke="${escapeXml(renderStyle.piece.stroke)}" stroke-width="${num(renderStyle.piece.strokeWidthMm)}"/>`,
+    taskHatching,
     `<g class="cut-sheet-piece-geometry-layer">${pieces}</g>`,
     showLabels ? `<g class="cut-sheet-piece-label-layer">${labels}</g>` : '',
     bathMeterGuides,
+    taskSheetOutline,
     `</svg>`,
   ].join('');
 }

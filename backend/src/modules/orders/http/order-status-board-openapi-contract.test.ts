@@ -56,6 +56,10 @@ describe('order status board OpenAPI contract', () => {
     expect(writeRoute).toContain('x-permission: production.tasks.update');
     expect(writeRoute).toContain('enum: [packet, bazisCutSet, bath, order]');
     expect(writeRoute).toContain("pattern: '^[A-Za-z0-9._:-]+$'");
+    expect(writeRoute.match(/parameters\/MdfSourceToken/g)).toHaveLength(2);
+    expect(writeRoute.match(/parameters\/MdfCommandIdempotencyKey/g)).toHaveLength(2);
+    expect(writeRoute.match(/'409':/g)).toHaveLength(2);
+    expect(writeRoute).toContain('jobId не означает завершение пересчёта');
 
     const schemas = sectionBetween(
       contract,
@@ -67,6 +71,10 @@ describe('order status board OpenAPI contract', () => {
     expect(schemas).toContain('    MdfBoardManualMoveDeleteResponse:');
     expect(schemas).toContain('- completed_baths');
     expect(schemas).toContain('- orders_issued');
+    expect(schemas.match(/        jobId:/g)).toHaveLength(2);
+    const publication = sectionBetween(contract, '    MdfPublishedSnapshot:', '    StageSettings:');
+    expect(publication).toContain('              commandToken:');
+    expect(publication).toContain("pattern: '^[a-f0-9]{64}$'");
   });
 
   it('keeps pagination, capabilities and nullable financials explicit', () => {

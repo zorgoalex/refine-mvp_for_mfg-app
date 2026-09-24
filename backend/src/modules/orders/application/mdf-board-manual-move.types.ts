@@ -13,6 +13,8 @@ export interface ListMdfBoardManualMovesCommand {
 }
 
 export interface UpsertMdfBoardManualMoveCommand {
+  sourceToken?: string;
+  idempotencyKey?: string;
   currentUser: CurrentUser;
   cardKind: MdfBoardManualCardKind;
   cardId: string;
@@ -21,6 +23,8 @@ export interface UpsertMdfBoardManualMoveCommand {
 }
 
 export interface DeleteMdfBoardManualMoveCommand {
+  sourceToken?: string;
+  idempotencyKey?: string;
   currentUser: CurrentUser;
   cardKind: MdfBoardManualCardKind;
   cardId: string;

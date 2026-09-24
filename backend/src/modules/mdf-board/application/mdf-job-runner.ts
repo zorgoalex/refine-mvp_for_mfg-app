@@ -8,8 +8,8 @@ export interface MdfJob extends QueryResultRow {
   request_id: string; attempts: number;
 }
 export interface MdfPinnedRule extends QueryResultRow { rule_id: string; rule_version: string }
-export interface MdfJobDatabase {
-  transaction<T>(handler: (client: DatabaseClient) => Promise<T>): Promise<T>;
+export interface MdfJobDatabase<Client extends DatabaseClient = DatabaseClient> {
+  transaction<T>(handler: (client: Client) => Promise<T>, options?: { isolation: 'read committed' }): Promise<T>;
 }
 export type MdfJobOutcome = 'disabled' | 'idle' | 'done' | 'superseded' | 'retry' | 'needs_attention';
 export class MdfNeedsAttention extends Error {
@@ -23,14 +23,15 @@ export function mdfRetrySeconds(attempts: number): number {
   return [5, 15, 60, 300][Math.min(attempts - 1, 3)];
 }
 
-/** Transactional execution primitive, deliberately not registered as a running
- * scheduler in the foundation increment. The handler owns domain auth, ordered
+/** Transactional execution primitive. The optional scheduler is default-off and
+ * additionally gated by active database mode. The handler owns ordered
  * owner locks, source fences/rule-version rechecks and audit/outbox writes.
- * Handler must have no non-transactional effects. No notification flag involved.
+ * Command producers own authorization; the handler must have no non-transactional
+ * effects. No notification flag involved.
  */
-export class MdfJobRunner {
-  constructor(private readonly database: MdfJobDatabase,
-    private readonly handle: (tx: DatabaseClient, job: MdfJob, rules: readonly MdfPinnedRule[])
+export class MdfJobRunner<Client extends DatabaseClient = DatabaseClient> {
+  constructor(private readonly database: MdfJobDatabase<Client>,
+    private readonly handle: (tx: Client, job: MdfJob, rules: readonly MdfPinnedRule[])
       => Promise<'done' | 'superseded'>) {}
 
   processOne(): Promise<{ status: MdfJobOutcome; jobId?: string }> {
@@ -72,6 +73,6 @@ export class MdfJobRunner {
           WHERE job_id=$1`, [job.job_id, status, code, mdfRetrySeconds(attempts)]);
         return { status: needsAttention ? 'needs_attention' : 'retry', jobId: job.job_id };
       }
-    });
+    }, { isolation: 'read committed' });
   }
 }

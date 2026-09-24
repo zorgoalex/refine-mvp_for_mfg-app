@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { ProductionActionStatusNotFoundError } from '../../production-actions/errors/production-action.errors';
@@ -48,13 +48,18 @@ import {
 describe('evaluateStatusAutomation', () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    process.env.BACKEND_STATUS_AUTOMATION = 'true';
+    vi.stubEnv('BACKEND_STATUS_AUTOMATION', 'true');
+    // These mocks cover the legacy action path. Pinned execution and shadow
+    // intake have separate integration suites; deployed env must not select them.
+    vi.stubEnv('BACKEND_MDF_PINNED_DISPATCH', 'false');
+    vi.stubEnv('BACKEND_MDF_SHADOW_INTAKE', 'false');
     mocks.record.mockResolvedValue('automation-audit-id');
     mocks.loadOrderAutomationState.mockResolvedValue(makeState());
     mocks.listEnabledRulesForManualRefresh.mockResolvedValue([]);
     mocks.loadMdfBoardEvents.mockResolvedValue([]);
     mocks.listEnabledRulesForEvent.mockResolvedValue([]);
   });
+  afterEach(() => vi.unstubAllEnvs());
 
   it('suppresses order-to-details echo for a composition-derived order transition', async () => {
     await evaluateStatusAutomation(tx(), event({ eventType: 'order.status_changed', origin: 'automation',

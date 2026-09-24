@@ -12,12 +12,14 @@ import type {
   TemplateUpdate,
 } from "./whatsapp.dto";
 import type { InboundMessage } from "./whatsapp.types";
+import { matchReply, renderReply, replyVariables, validateReply, type MatchMode, type BodyMode } from './whatsapp-template';
 
 interface TemplateRow extends QueryResultRow {
   template_id: string;
   code: string;
   name: string;
   body: string;
+  body_mode: BodyMode;
   enabled: boolean;
   version: number;
   created_at: Date;
@@ -27,7 +29,10 @@ interface RuleRow extends QueryResultRow {
   rule_id: string;
   code: string;
   name: string;
-  match_mode: "contains_any" | "exact_any";
+  match_mode: MatchMode;
+  reply_mode: 'plain' | 'quote';
+  counter_value: string;
+  body_mode?: BodyMode;
   keywords: string[];
   template_id: string;
   template_name?: string;
@@ -44,6 +49,8 @@ interface JobRow extends QueryResultRow {
   state: string;
   destination: string | null;
   body: string | null;
+  reply_mode: 'plain' | 'quote';
+  reply_to: string | null;
   attempt_count: number;
   error_code: string | null;
   error_message: string | null;
@@ -72,9 +79,11 @@ export class WhatsAppRepository {
     requestId: string
   ) {
     return this.database.transaction(async (tx) => {
+      await lockConfiguration(tx);
+      if (input.bodyMode === 'template') replyVariables(input.body);
       const result = await tx.query<TemplateRow>(
-        `INSERT INTO whatsapp_message_templates(code,name,body,enabled,created_by,updated_by) VALUES($1,$2,$3,$4,$5,$5) RETURNING *`,
-        [input.code, input.name, input.body, input.enabled, actor.id]
+        `INSERT INTO whatsapp_message_templates(code,name,body,enabled,created_by,updated_by,body_mode) VALUES($1,$2,$3,$4,$5,$5,$6) RETURNING *`,
+        [input.code, input.name, input.body, input.enabled, actor.id, input.bodyMode ?? 'text']
       );
       const row = requireRow(result.rows[0]);
       await auditService.record(
@@ -100,6 +109,7 @@ export class WhatsAppRepository {
     requestId: string
   ) {
     return this.database.transaction(async (tx) => {
+      await lockConfiguration(tx);
       const before = requireRow(
         (
           await tx.query<TemplateRow>(
@@ -114,14 +124,19 @@ export class WhatsAppRepository {
           "WHATSAPP_VERSION_CONFLICT",
           "Шаблон уже изменён"
         );
+      const body = input.body ?? before.body, bodyMode = input.bodyMode ?? before.body_mode;
+      if (bodyMode === 'template') replyVariables(body);
+      const linked = await tx.query<RuleRow>('SELECT * FROM whatsapp_keyword_rules WHERE template_id=$1', [id]);
+      for (const rule of linked.rows) validateReply({ matchMode: rule.match_mode, keywords: rule.keywords }, body, bodyMode);
       const result = await tx.query<TemplateRow>(
-        `UPDATE whatsapp_message_templates SET name=COALESCE($2,name),body=COALESCE($3,body),enabled=COALESCE($4,enabled),version=version+1,updated_by=$5,updated_at=now() WHERE template_id=$1 RETURNING *`,
+        `UPDATE whatsapp_message_templates SET name=COALESCE($2,name),body=COALESCE($3,body),enabled=COALESCE($4,enabled),version=version+1,updated_by=$5,updated_at=now(),body_mode=COALESCE($6,body_mode) WHERE template_id=$1 RETURNING *`,
         [
           id,
           input.name ?? null,
           input.body ?? null,
           input.enabled ?? null,
           actor.id,
+          input.bodyMode ?? null,
         ]
       );
       const row = requireRow(result.rows[0]);
@@ -152,9 +167,11 @@ export class WhatsAppRepository {
 
   async createRule(input: RuleInput, actor: CurrentUser, requestId: string) {
     return this.database.transaction(async (tx) => {
-      await ensureTemplate(tx, input.templateId);
+      await lockConfiguration(tx);
+      const template = await ensureTemplate(tx, input.templateId);
+      validateReply(input, template.body, template.body_mode);
       const result = await tx.query<RuleRow>(
-        `INSERT INTO whatsapp_keyword_rules(code,name,match_mode,keywords,template_id,priority,enabled,created_by,updated_by) VALUES($1,$2,$3,$4::jsonb,$5,$6,$7,$8,$8) RETURNING *`,
+        `INSERT INTO whatsapp_keyword_rules(code,name,match_mode,keywords,template_id,priority,enabled,created_by,updated_by,reply_mode) VALUES($1,$2,$3,$4::jsonb,$5,$6,$7,$8,$8,$9) RETURNING *`,
         [
           input.code,
           input.name,
@@ -164,6 +181,7 @@ export class WhatsAppRepository {
           input.priority,
           input.enabled,
           actor.id,
+          input.replyMode ?? 'plain',
         ]
       );
       const row = requireRow(result.rows[0]);
@@ -190,6 +208,7 @@ export class WhatsAppRepository {
     requestId: string
   ) {
     return this.database.transaction(async (tx) => {
+      await lockConfiguration(tx);
       const before = requireRow(
         (
           await tx.query<RuleRow>(
@@ -204,9 +223,10 @@ export class WhatsAppRepository {
           "WHATSAPP_VERSION_CONFLICT",
           "Правило уже изменено"
         );
-      if (input.templateId) await ensureTemplate(tx, input.templateId);
+      const template = await ensureTemplate(tx, input.templateId ?? Number(before.template_id));
+      validateReply({ matchMode: input.matchMode ?? before.match_mode, keywords: input.keywords ?? before.keywords }, template.body, template.body_mode);
       const result = await tx.query<RuleRow>(
-        `UPDATE whatsapp_keyword_rules SET name=COALESCE($2,name),match_mode=COALESCE($3,match_mode),keywords=COALESCE($4::jsonb,keywords),template_id=COALESCE($5,template_id),priority=COALESCE($6,priority),enabled=COALESCE($7,enabled),version=version+1,updated_by=$8,updated_at=now() WHERE rule_id=$1 RETURNING *`,
+        `UPDATE whatsapp_keyword_rules SET name=COALESCE($2,name),match_mode=COALESCE($3,match_mode),keywords=COALESCE($4::jsonb,keywords),template_id=COALESCE($5,template_id),priority=COALESCE($6,priority),enabled=COALESCE($7,enabled),version=version+1,updated_by=$8,updated_at=now(),reply_mode=COALESCE($9,reply_mode) WHERE rule_id=$1 RETURNING *`,
         [
           id,
           input.name ?? null,
@@ -216,6 +236,7 @@ export class WhatsAppRepository {
           input.priority ?? null,
           input.enabled ?? null,
           actor.id,
+          input.replyMode ?? null,
         ]
       );
       const row = requireRow(result.rows[0]);
@@ -237,6 +258,7 @@ export class WhatsAppRepository {
 
   async acceptInbound(message: InboundMessage) {
     return this.database.transaction(async (tx) => {
+      await lockConfiguration(tx);
       const inserted = await tx.query<
         QueryResultRow & { webhook_event_id: string }
       >(
@@ -251,16 +273,14 @@ export class WhatsAppRepository {
       const eventId = inserted.rows[0]?.webhook_event_id;
       if (!eventId) return { duplicate: true, result: "duplicate" as const };
       const rules = await tx.query<RuleRow>(
-        `SELECT r.*,t.body,t.version template_version FROM whatsapp_keyword_rules r JOIN whatsapp_message_templates t USING(template_id) WHERE r.enabled AND t.enabled ORDER BY r.priority,r.rule_id`
+        `SELECT r.*,t.body,t.body_mode,t.version template_version FROM whatsapp_keyword_rules r JOIN whatsapp_message_templates t USING(template_id) WHERE r.enabled AND t.enabled ORDER BY r.priority,r.rule_id`
       );
-      const normalized = message.text.trim().toLocaleLowerCase("ru-RU");
-      const matched = rules.rows.find((rule) =>
-        rule.keywords.some((keyword) =>
-          rule.match_mode === "exact_any"
-            ? normalized === keyword
-            : normalized.includes(keyword)
-        )
-      );
+      let captures: Record<string, string> | null = null;
+      let errorCode: string | null = null;
+      const matched = rules.rows.find(rule => {
+        try { captures = matchReply({ matchMode: rule.match_mode, keywords: rule.keywords }, message.text); return captures !== null; }
+        catch (error) { if (!(error instanceof ApiError)) throw error; errorCode = error.code; return true; }
+      });
       if (!matched) {
         await auditService.record(
           tx,
@@ -278,16 +298,38 @@ export class WhatsAppRepository {
         `UPDATE whatsapp_webhook_events SET matched_rule_id=$2,result_code='queued' WHERE webhook_event_id=$1`,
         [eventId, matched.rule_id]
       );
+      const at = new Date();
+      let body: string | null = null, counter: string | null = null;
+      const replyTo = matched.reply_mode === 'quote' ? message.providerMessageId ?? null : null;
+      if (!errorCode) {
+        try {
+          if (matched.reply_mode === 'quote' && (!replyTo || replyTo.length > 255))
+            throw new ApiError(422, 'WHATSAPP_REPLY_TARGET_MISSING', 'Исходное сообщение недоступно для цитирования');
+          const mode = matched.body_mode ?? 'text';
+          // Validate/render before allocating; all values stay in the same transaction.
+          const next = (BigInt(matched.counter_value ?? '0') + 1n).toString();
+          if (BigInt(next) > 9223372036854775807n) throw new ApiError(422, 'WHATSAPP_COUNTER_EXHAUSTED', 'Счётчик правила исчерпан');
+          body = renderReply(matched.body!, mode, captures ?? {}, at, next);
+          if (mode === 'template' && replyVariables(matched.body!).includes('counter')) {
+            const allocated = await tx.query<QueryResultRow & { counter_value: string }>(
+              'UPDATE whatsapp_keyword_rules SET counter_value=counter_value+1 WHERE rule_id=$1 RETURNING counter_value', [matched.rule_id]);
+            counter = allocated.rows[0].counter_value;
+          }
+        } catch (error) { if (!(error instanceof ApiError)) throw error; errorCode = error.code; }
+      }
+      if (errorCode) await tx.query("UPDATE whatsapp_webhook_events SET result_code='failed' WHERE webhook_event_id=$1", [eventId]);
       await tx.query(
-        `INSERT INTO whatsapp_delivery_jobs(idempotency_key,destination,body,source_event_id,source_rule_id,source_template_id,source_template_version) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(idempotency_key) DO NOTHING`,
+        `INSERT INTO whatsapp_delivery_jobs(idempotency_key,destination,body,source_event_id,source_rule_id,source_template_id,source_template_version,reply_mode,reply_to,rendered_at,counter_value,state,error_code,finished_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,CASE WHEN $13::text IS NOT NULL THEN now() END)`,
         [
           `${message.externalEventId}:${matched.rule_id}:${matched.template_version}`,
           message.chatId,
-          matched.body,
+          body,
           eventId,
           matched.rule_id,
           matched.template_id,
           matched.template_version,
+          matched.reply_mode, replyTo && replyTo.length <= 255 ? replyTo : null, at, counter,
+          errorCode ? 'failed' : 'pending', errorCode,
         ]
       );
       await auditService.record(
@@ -297,10 +339,10 @@ export class WhatsAppRepository {
           "whatsapp_webhook",
           message.externalEventId,
           message.requestId,
-          { result: "queued", ruleId: Number(matched.rule_id) }
+          { result: errorCode ? 'failed' : 'queued', ruleId: Number(matched.rule_id), replyMode: matched.reply_mode, errorCode, counter }
         )
       );
-      return { duplicate: false, result: "queued" as const };
+      return { duplicate: false, result: errorCode ? 'failed' as const : 'queued' as const };
     });
   }
 
@@ -314,7 +356,7 @@ export class WhatsAppRepository {
   async retryJob(id: number, actor: CurrentUser, requestId: string) {
     return this.database.transaction(async (tx) => {
       const result = await tx.query<JobRow>(
-        `UPDATE whatsapp_delivery_jobs SET state='pending',attempt_count=0,next_attempt_at=now(),error_code=NULL,error_message=NULL,finished_at=NULL,updated_at=now() WHERE delivery_job_id=$1 AND state='failed' RETURNING *`,
+        `UPDATE whatsapp_delivery_jobs SET state='pending',attempt_count=0,next_attempt_at=now(),error_code=NULL,error_message=NULL,finished_at=NULL,updated_at=now() WHERE delivery_job_id=$1 AND state='failed' AND body IS NOT NULL AND destination IS NOT NULL AND (reply_mode='plain' OR reply_to IS NOT NULL) RETURNING *`,
         [id]
       );
       if (!result.rows[0])
@@ -400,7 +442,7 @@ export class WhatsAppRepository {
         `UPDATE whatsapp_webhook_events SET message_text=NULL,chat_id=NULL WHERE text_expires_at<now() AND(message_text IS NOT NULL OR chat_id IS NOT NULL)`
       ),
       this.database.query(
-        `UPDATE whatsapp_delivery_jobs SET body=NULL,destination=NULL WHERE body_expires_at<now() AND state IN('sent','failed','unknown') AND(body IS NOT NULL OR destination IS NOT NULL)`
+        `UPDATE whatsapp_delivery_jobs SET body=NULL,destination=NULL,reply_to=NULL WHERE body_expires_at<now() AND state IN('sent','failed','unknown') AND(body IS NOT NULL OR destination IS NOT NULL OR reply_to IS NOT NULL)`
       ),
     ]);
     return { events: events.rowCount ?? 0, jobs: jobs.rowCount ?? 0 };
@@ -450,12 +492,16 @@ export class WhatsAppRepository {
 }
 
 async function ensureTemplate(tx: DatabaseClient, id: number) {
-  const result = await tx.query(
-    "SELECT template_id FROM whatsapp_message_templates WHERE template_id=$1",
+  const result = await tx.query<TemplateRow>(
+    "SELECT * FROM whatsapp_message_templates WHERE template_id=$1",
     [id]
   );
   if (!result.rows[0])
     throw new ApiError(422, "WHATSAPP_TEMPLATE_NOT_FOUND", "Шаблон не найден");
+  return result.rows[0];
+}
+async function lockConfiguration(tx: DatabaseClient) {
+  await tx.query('SELECT pg_advisory_xact_lock(176, 1)');
 }
 function requireRow<T>(row: T | undefined): T {
   if (!row)
@@ -468,6 +514,7 @@ function mapTemplate(row: TemplateRow) {
     code: row.code,
     name: row.name,
     body: row.body,
+    bodyMode: row.body_mode,
     enabled: row.enabled,
     version: row.version,
     createdAt: row.created_at.toISOString(),
@@ -480,6 +527,7 @@ function mapRule(row: RuleRow) {
     code: row.code,
     name: row.name,
     matchMode: row.match_mode,
+    replyMode: row.reply_mode,
     keywords: row.keywords,
     templateId: Number(row.template_id),
     templateName: row.template_name ?? null,
@@ -507,6 +555,7 @@ function mapJob(row: JobRow) {
 function publicTemplate(row: TemplateRow) {
   return {
     code: row.code,
+    bodyMode: row.body_mode,
     name: row.name,
     enabled: row.enabled,
     version: row.version,
@@ -515,6 +564,7 @@ function publicTemplate(row: TemplateRow) {
 function publicRule(row: RuleRow) {
   return {
     code: row.code,
+    replyMode: row.reply_mode,
     name: row.name,
     matchMode: row.match_mode,
     templateId: Number(row.template_id),
