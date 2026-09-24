@@ -101,6 +101,16 @@ describe('planMdfCncObservationPinReconciliation', () => {
     expect(plan({ nextLines: [candidateMember({ quantity: 9 }), candidate()] })).toBeNull();
   });
 
+  it('keeps the synthetic-ID CNC pin caller strict for unlineaged physical overhang', () => {
+    const previousMember=member({quantity:8});
+    const previousPhysical=line({quantity:10});
+    const nextMember=candidateMember({quantity:8});
+    const nextPhysical=candidate({quantity:10});
+
+    expect(plan({previousLines:[previousMember,previousPhysical],nextLines:[nextMember,nextPhysical],
+      allocations:[debit({evidenceLineId:previousPhysical.evidenceLineId,quantity:4})]})).toBeNull();
+  });
+
   it('rejects mixed prior revisions and duplicate old or candidate line identities', () => {
     expect(plan({ previousLines: [member(), line(), line({ lineKey: 'cut:two', evidenceLineId: 'evidence-old-2', revision: 'r2' })] })).toBeNull();
     expect(plan({ previousLines: [member(), line(), line({ lineKey: 'cut:two' })] })).toBeNull();

@@ -22,7 +22,8 @@ import { StaticCutConfig } from '../../cut/application/cut-config';
 import type { OptimizeRequest, FreecutOptimizeResponse } from '../../cut/application/cut-freecut-mapping';
 import { MdfJobRunner } from '../application/mdf-job-runner';
 import { executeMdfAcceptedJob } from '../application/mdf-accepted-job';
-import { recordMdfReceipt } from '../application/mdf-receipt';
+import { recordMdfLineageReceipt, recordMdfReceipt, type MdfReceiptLine } from '../application/mdf-receipt';
+import type { MdfPhysicalLineageManifest } from '../application/mdf-physical-lineage';
 import type { MdfExecutionContext } from '../domain/mdf-execution-context';
 import { readMdfPublishedSnapshot } from './mdf-published-snapshot';
 
@@ -49,6 +50,14 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
       })) }] };
   } };
   const runner = () => new MdfJobRunner(database,executeMdfAcceptedJob);
+  async function processJob(jobId: string) {
+    for (let attempt=0;attempt<10;attempt++) {
+      const result=await runner().processOne();
+      if (result.jobId===jobId) { expect(result).toMatchObject({status:'done'}); return result; }
+      expect(result.status).not.toBe('idle');
+    }
+    throw new Error('E2E_EXPECTED_MDF_JOB_NOT_PROCESSED');
+  }
   const databaseWithQueryHook=(hook:(sql:string)=>Promise<void>|void)=>({
     transaction:(work:any,options:any)=>database.transaction(async tx=>{
       const original=tx.query.bind(tx);
@@ -901,6 +910,69 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
         sourceFiles:[{kind:'svg' as const,fileName,contentType:'image/svg+xml',sizeBytes:raw.length,sha256:sha,base64Content:raw.toString('base64')}]}};
     return {...f,input,candidateId,itemId,importer:new PgCncTelegramImportRepository(database,new PgCncTelegramRepository(database))};
   }
+  async function addPartialV2ManualProof(packetId: string, f: Awaited<ReturnType<typeof telegramFixture>>) {
+    const head=(await db.query<{accepted:string;version:string;epoch:string}>(`SELECT accepted_revision_key accepted,
+      version::text,correction_epoch::text epoch FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`,[packetId])).rows[0];
+    const lines=(await db.query<{lineKey:string;orderId:number;detailId:number;quantity:number;stageCode:string;
+      evidenceKind:'physical'|'declaration'|'derived';rework:boolean}>(`SELECT line_key "lineKey",order_id::int "orderId",
+      detail_id::int "detailId",quantity::int quantity,stage_code "stageCode",evidence_kind "evidenceKind",rework
+      FROM mdf_evidence_lines WHERE source_kind='packet' AND source_id=$1 AND revision_key=$2 ORDER BY line_key`,
+    [packetId,head.accepted])).rows.map(line=>({...line,stageCode:line.stageCode as MdfReceiptLine['stageCode']}));
+    expect(lines).toEqual([{lineKey:expect.any(String),orderId:f.orderId,detailId:f.detailId,quantity:2,
+      stageCode:'membership',evidenceKind:'derived',rework:false}]);
+    const context=(await db.query<{sourceCreatedAt:string;displayName:string;priorColumn:string|null;compositionComplete:boolean}>(`
+      SELECT source_created_at::text "sourceCreatedAt",display_name "displayName",prior_column "priorColumn",composition_complete "compositionComplete"
+      FROM mdf_revision_context WHERE source_kind='packet' AND source_id=$1 AND revision_key=$2`,[packetId,head.accepted])).rows[0];
+    const demand=(await db.query<{orderId:number;detailId:number;quantity:number}>(`SELECT order_id::int "orderId",
+      detail_id::int "detailId",quantity::int quantity FROM mdf_revision_demand
+      WHERE source_kind='packet' AND source_id=$1 AND revision_key=$2 ORDER BY order_id,detail_id`,[packetId,head.accepted])).rows;
+    const physical: MdfReceiptLine={lineKey:'manual-partial-root',orderId:f.orderId,detailId:f.detailId,
+      quantity:1,stageCode:'cut',evidenceKind:'physical',rework:false};
+    const lineage:MdfPhysicalLineageManifest={operation:'production',authority:'manual_production',
+      actions:[{lineKey:physical.lineKey,action:'root'}],droppedPredecessorEvidenceLineIds:[]};
+    const saved=await database.transaction(tx=>recordMdfLineageReceipt(tx,{sourceKind:'packet',sourceId:packetId,
+      revisionKey:`E2E-partial-manual-${randomUUID()}`,origin:'manual',actorUserId:1,requestId:'E2E partial authenticated v2 root',
+      causeKey:`E2E partial authenticated v2 root ${packetId}`,expectedFence:{version:head.version,correctionEpoch:head.epoch},
+      accept:true,rules:[],lines:[...lines,physical],lineage,
+      executionContext:{sourceCreatedAt:context.sourceCreatedAt,displayName:context.displayName,priorColumn:context.priorColumn,
+        compositionComplete:context.compositionComplete,demand}}));
+    await processJob(saved.jobId);
+    const proof=(await db.query<{evidenceLineId:string;revisionKey:string}>(`SELECT evidence_line_id::text "evidenceLineId",
+      revision_key "revisionKey" FROM mdf_evidence_lines WHERE source_kind='packet' AND source_id=$1 AND revision_key=$2
+        AND line_key=$3 AND evidence_kind='physical'`,[packetId,(await db.query<{received:string}>(
+      `SELECT received_revision_key received FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`,[packetId])).rows[0].received,
+      physical.lineKey])).rows[0];
+    expect(proof).toBeDefined();
+    return {saved,proof};
+  }
+  async function addLaminatedBathPin(f: Awaited<ReturnType<typeof telegramFixture>>, laminated: boolean) {
+    const cutJobId=2_000_000+f.orderId;
+    const params={...await config.getDefaultParams(),layout_mode:'vacuum_table'};
+    await db.query(`INSERT INTO cut_job(cut_job_id,name,status,version,source,params,rotation_allowed,combine_films,split_by_material)
+      VALUES($1,$2,'draft',1,'manual',$3::jsonb,true,false,true)`,
+    [cutJobId,`E2E pre-observation pin ${f.orderId}`,JSON.stringify(params)]);
+    await db.query(`INSERT INTO cut_job_item(cut_job_id,source_type,order_id,order_detail_id,freecut_item_id,qty,is_active)
+      VALUES($1,'order_detail',$2,$3,$4,2,true)`,[cutJobId,f.orderId,f.detailId,`det-${f.detailId}`]);
+    await repository.calculate({currentUser:user,cutJobId,version:1,commandId:randomUUID(),requestId:'E2E pre-observation bath calculation'});
+    const bathId=`cut-result:${await resultId(cutJobId)}`;
+    const bathJob=(await db.query<{job_id:string}>(`SELECT job_id FROM mdf_recalculation_jobs
+      WHERE source_kind='bath' AND source_id=$1 AND status='pending' ORDER BY created_at DESC LIMIT 1`,[bathId])).rows[0];
+    expect(bathJob).toBeDefined();
+    await processJob(bathJob.job_id);
+    if (laminated) {
+      const mover=new PgMdfBoardManualMoveRepository(database);
+      const actor={...user,permissions:[...user.permissions,'orders.update','production.tasks.update','orders.change_production_status']} as CurrentUser;
+      const board=await readMdfPublishedSnapshot(database,user,{focus:{kind:'bath',id:bathId}});
+      const card=board.cards.find(value=>value.kind==='bath'&&value.id===bathId)!;
+      await mover.upsert({currentUser:actor,cardKind:'bath',cardId:bathId,targetColumn:'baths_laminated',
+        sourceToken:card.commandToken!,idempotencyKey:`E2E-${randomUUID()}`,requestId:'E2E CNC v2 pin lamination'});
+      const laminationJob=(await db.query<{job_id:string}>(`SELECT job_id FROM mdf_recalculation_jobs
+        WHERE source_kind='bath' AND source_id=$1 AND status='pending' ORDER BY created_at DESC LIMIT 1`,[bathId])).rows[0];
+      expect(laminationJob).toBeDefined();
+      await processJob(laminationJob.job_id);
+    }
+    return {bathId,bathJobId:bathJob.job_id};
+  }
   it('actual Telegram completion queues membership once under the requester, never machine completion',async()=>{
     const f=await telegramFixture(),result=await f.importer.completeImport(f.input);
     expect(result.status).toBe('imported');const id=result.packetId!;
@@ -944,6 +1016,14 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
       p.source_version::text source_version FROM mdf_source_heads h JOIN cnc_telegram_packets p ON p.packet_id=h.source_id::uuid
       WHERE h.source_kind='packet' AND h.source_id=$1`,[packetId])).rows[0];
     expect(before.physical_cut).toBe('2');
+    const priorPhysical=(await db.query<{evidenceLineId:string;action:string;origin:string;lineKey:string}>(`SELECT
+      l.evidence_line_id::text "evidenceLineId",t.action,t.canonical_origin_evidence_line_id::text origin,l.line_key "lineKey"
+      FROM mdf_evidence_lines l JOIN mdf_physical_lineage_transitions t USING(evidence_line_id)
+      WHERE l.source_kind='packet' AND l.source_id=$1 AND l.revision_key=$2 AND l.evidence_kind='physical'`,
+    [packetId,before.accepted_revision_key])).rows;
+    expect(priorPhysical).toHaveLength(1);
+    expect(priorPhysical[0].action).toBe('root');
+    expect(priorPhysical[0].origin).toBe(priorPhysical[0].evidenceLineId);
     const priorCncSetting=(await db.query(`SELECT is_active,value_json FROM app_settings
       WHERE setting_key='status_automation.cnc_mark_cut_details'`)).rows[0];
     await db.query(`INSERT INTO app_settings(setting_key,is_active,value_json)
@@ -952,11 +1032,12 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
     try {
     const observations=new PgCncTelegramMdfObservationRepository(database),lease=f.input.lease;
     const claim=await observations.claim({currentUser:user,lease});
-    const result=await observations.complete({currentUser:user,lease,requestId:'E2E CNC after manual complete',report:{
+    const report={
       claimId:claim!.claimId,claimToken:claim!.claimToken,claimGeneration:claim!.claimGeneration,
       messages:claim!.messages.map(message=>({messageId:message.messageId,chatId:claim!.sourceChatId,
         role:message.role,sha256:message.sha256,present:true,thumbsUp:true})),
-    }});
+    };
+    const result=await observations.complete({currentUser:user,lease,requestId:'E2E CNC after manual complete',report});
     expect(result).toMatchObject({status:'recorded',jobId:expect.any(String)});
     const publication=await runner().processOne();
     const publicationError=publication.jobId
@@ -973,6 +1054,16 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
     expect(after.accepted_revision_key).not.toBe(before.accepted_revision_key);
     expect(after.physical_cut).toBe(before.physical_cut);
     expect(after.source_version).toBe(before.source_version);
+    expect((await db.query(`SELECT operation,production_authority,predecessor_accepted_revision_key
+      FROM mdf_physical_lineage_contracts WHERE source_kind='packet' AND source_id=$1 AND revision_key=$2`,
+    [packetId,after.accepted_revision_key])).rows).toEqual([{operation:'production',
+      production_authority:'cnc_observation',predecessor_accepted_revision_key:before.accepted_revision_key}]);
+    expect((await db.query(`SELECT t.action,t.predecessor_evidence_line_id::text predecessor,
+      t.canonical_origin_evidence_line_id::text origin,l.evidence_line_id::text evidence_id,
+      l.quantity::text quantity FROM mdf_physical_lineage_transitions t JOIN mdf_evidence_lines l USING(evidence_line_id)
+      WHERE t.source_kind='packet' AND t.source_id=$1 AND t.revision_key=$2 AND l.evidence_kind='physical'`,
+    [packetId,after.accepted_revision_key])).rows).toEqual([{action:'carry',predecessor:priorPhysical[0].evidenceLineId,
+      origin:priorPhysical[0].origin,evidence_id:expect.any(String),quantity:'2'}]);
     expect((await db.query('SELECT production_status_id FROM order_details WHERE detail_id=$1',[f.detailId])).rows[0].production_status_id)
       .toBe(3);
     expect((await db.query('SELECT order_status_id FROM orders WHERE order_id=$1',[f.orderId])).rows[0].order_status_id)
@@ -981,6 +1072,13 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
       FROM mdf_cnc_observation_job_authorities a JOIN mdf_cnc_observation_receipts r USING(claim_id)
       WHERE a.packet_id=$1 AND a.job_id=$2`,[packetId,result.jobId])).rows)
       .toEqual([{authority:'cnc_autocut',claim_id:claim!.claimId,job:result.jobId}]);
+    const revisionCount=Number((await db.query(`SELECT count(*)::text count FROM mdf_evidence_revisions
+      WHERE source_kind='packet' AND source_id=$1`,[packetId])).rows[0].count);
+    expect(await observations.complete({currentUser:user,lease,requestId:'E2E CNC after manual complete',report})).toEqual(result);
+    expect(Number((await db.query(`SELECT count(*)::text count FROM mdf_evidence_revisions
+      WHERE source_kind='packet' AND source_id=$1`,[packetId])).rows[0].count)).toBe(revisionCount);
+    expect((await db.query(`SELECT count(*)::int count FROM mdf_cnc_observation_job_authorities
+      WHERE packet_id=$1 AND claim_id=$2`,[packetId,claim!.claimId])).rows[0].count).toBe(1);
     } finally {
       if (priorCncSetting) {
         await db.query(`UPDATE app_settings SET is_active=$1,value_json=$2::jsonb
@@ -989,6 +1087,61 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
         await db.query(`DELETE FROM app_settings WHERE setting_key='status_automation.cnc_mark_cut_details'`);
       }
     }
+  });
+  it('adds only the uncovered CNC quantity as a new root while carrying the authenticated partial v2 root',async()=>{
+    const f=await telegramFixture(),imported=await f.importer.completeImport(f.input),packetId=imported.packetId!;
+    expect(imported.status).toBe('imported');
+    const importJob=(await db.query<{job_id:string}>(`SELECT job_id FROM mdf_recalculation_jobs
+      WHERE source_kind='packet' AND source_id=$1 ORDER BY created_at LIMIT 1`,[packetId])).rows[0];
+    await processJob(importJob.job_id);
+    const partial=await addPartialV2ManualProof(packetId,f);
+    const before=(await db.query<{accepted:string;physical:string;membership:string}>(`SELECT h.accepted_revision_key accepted,
+      (SELECT sum(quantity)::text FROM mdf_evidence_lines WHERE source_kind='packet' AND source_id=$1
+        AND revision_key=h.accepted_revision_key AND stage_code='cut' AND evidence_kind='physical') physical,
+      (SELECT sum(quantity)::text FROM mdf_evidence_lines WHERE source_kind='packet' AND source_id=$1
+        AND revision_key=h.accepted_revision_key AND stage_code='membership' AND evidence_kind='derived') membership
+      FROM mdf_source_heads h WHERE h.source_kind='packet' AND h.source_id=$1`,[packetId])).rows[0];
+    expect(before).toMatchObject({accepted:partial.proof.revisionKey,physical:'1',membership:'2'});
+
+    const observations=new PgCncTelegramMdfObservationRepository(database),lease=f.input.lease;
+    const claim=await observations.claim({currentUser:user,lease});
+    expect(claim?.packetId).toBe(packetId);
+    const report={claimId:claim!.claimId,claimToken:claim!.claimToken,claimGeneration:claim!.claimGeneration,
+      messages:claim!.messages.map(message=>({messageId:message.messageId,chatId:claim!.sourceChatId,
+        role:message.role,sha256:message.sha256,present:true,thumbsUp:true}))};
+    const requestId='E2E CNC remaining v2 quantity';
+    const result=await observations.complete({currentUser:user,lease,requestId,report});
+    expect(result).toMatchObject({status:'recorded',jobId:expect.any(String)});
+    const after=(await db.query<{accepted:string;received:string;physical:string}>(`SELECT h.accepted_revision_key accepted,
+      h.received_revision_key received,(SELECT sum(quantity)::text FROM mdf_evidence_lines
+        WHERE source_kind='packet' AND source_id=$1 AND revision_key=h.accepted_revision_key
+          AND stage_code='cut' AND evidence_kind='physical') physical
+      FROM mdf_source_heads h WHERE h.source_kind='packet' AND h.source_id=$1`,[packetId])).rows[0];
+    expect(after).toEqual({accepted:after.received,received:after.received,physical:'2'});
+    expect((await db.query(`SELECT operation,production_authority,predecessor_accepted_revision_key
+      FROM mdf_physical_lineage_contracts WHERE source_kind='packet' AND source_id=$1 AND revision_key=$2`,
+    [packetId,after.accepted])).rows).toEqual([{operation:'production',production_authority:'cnc_observation',
+      predecessor_accepted_revision_key:before.accepted}]);
+    const transitions=(await db.query<{lineKey:string;action:string;predecessor:string|null;origin:string;evidenceId:string;quantity:string}>(`
+      SELECT l.line_key "lineKey",t.action,t.predecessor_evidence_line_id::text predecessor,
+        t.canonical_origin_evidence_line_id::text origin,l.evidence_line_id::text "evidenceId",l.quantity::text quantity
+      FROM mdf_physical_lineage_transitions t JOIN mdf_evidence_lines l USING(evidence_line_id)
+      WHERE t.source_kind='packet' AND t.source_id=$1 AND t.revision_key=$2 AND l.evidence_kind='physical'
+      ORDER BY t.action,l.line_key`,[packetId,after.accepted])).rows;
+    expect(transitions).toHaveLength(2);
+    expect(transitions[0]).toEqual({lineKey:'manual-partial-root',action:'carry',predecessor:partial.proof.evidenceLineId,
+      origin:partial.proof.evidenceLineId,evidenceId:expect.any(String),quantity:'1'});
+    expect(transitions[1]).toMatchObject({lineKey:`cnc-cut:${f.orderId}:${f.detailId}:0:${claim!.claimId}`,
+      action:'root',predecessor:null,origin:expect.any(String),evidenceId:expect.any(String),quantity:'1'});
+    expect(transitions[1].origin).toBe(transitions[1].evidenceId);
+    expect(await runner().processOne()).toMatchObject({status:'done',jobId:result.jobId});
+    const revisionCount=Number((await db.query(`SELECT count(*)::text count FROM mdf_evidence_revisions
+      WHERE source_kind='packet' AND source_id=$1`,[packetId])).rows[0].count);
+    expect(await observations.complete({currentUser:user,lease,requestId,report})).toEqual(result);
+    expect(Number((await db.query(`SELECT count(*)::text count FROM mdf_evidence_revisions
+      WHERE source_kind='packet' AND source_id=$1`,[packetId])).rows[0].count)).toBe(revisionCount);
+    expect((await db.query(`SELECT count(*)::int count FROM mdf_cnc_observation_job_authorities
+      WHERE packet_id=$1 AND claim_id=$2`,[packetId,claim!.claimId])).rows[0].count).toBe(1);
   });
   it('executes a CNC authority job when a live bath allocation pins its current accepted revision',async()=>{
     const f=await telegramFixture(),imported=await f.importer.completeImport(f.input),packetId=imported.packetId!;
@@ -1002,16 +1155,39 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
       sourceToken:initialCard.commandToken!,idempotencyKey:`E2E-${randomUUID()}`,requestId:'E2E current revision allocation manual proof'});
     expect(manual.jobId).toBeTruthy();
     expect(await runner().processOne()).toMatchObject({status:'done',jobId:manual.jobId});
+    const manualHead=(await db.query<{revision:string}>(`SELECT accepted_revision_key revision FROM mdf_source_heads
+      WHERE source_kind='packet' AND source_id=$1`,[packetId])).rows[0].revision;
+    const manualPhysical=(await db.query<{evidenceLineId:string;origin:string}>(`SELECT
+      l.evidence_line_id::text "evidenceLineId",t.canonical_origin_evidence_line_id::text origin
+      FROM mdf_evidence_lines l JOIN mdf_physical_lineage_transitions t USING(evidence_line_id)
+      WHERE l.source_kind='packet' AND l.source_id=$1 AND l.revision_key=$2 AND l.evidence_kind='physical'`,
+    [packetId,manualHead])).rows;
+    expect(manualPhysical).toHaveLength(1);
+    expect(manualPhysical[0].origin).toBe(manualPhysical[0].evidenceLineId);
 
     const observations=new PgCncTelegramMdfObservationRepository(database),lease=f.input.lease;
     const claim=await observations.claim({currentUser:user,lease});
     expect(claim?.packetId).toBe(packetId);
-    const observation=await observations.complete({currentUser:user,lease,requestId:'E2E allocation after current CNC receipt',report:{
+    const report={
       claimId:claim!.claimId,claimToken:claim!.claimToken,claimGeneration:claim!.claimGeneration,
       messages:claim!.messages.map(message=>({messageId:message.messageId,chatId:claim!.sourceChatId,
         role:message.role,sha256:message.sha256,present:true,thumbsUp:true})),
-    }});
+    };
+    const observation=await observations.complete({currentUser:user,lease,requestId:'E2E allocation after current CNC receipt',report});
     expect(observation.status).toBe('recorded');
+    const cncRevision=(await db.query<{revision:string}>(`SELECT accepted_revision_key revision FROM mdf_source_heads
+      WHERE source_kind='packet' AND source_id=$1`,[packetId])).rows[0].revision;
+    expect(cncRevision).not.toBe(manualHead);
+    expect((await db.query(`SELECT operation,production_authority,predecessor_accepted_revision_key
+      FROM mdf_physical_lineage_contracts WHERE source_kind='packet' AND source_id=$1 AND revision_key=$2`,
+    [packetId,cncRevision])).rows).toEqual([{operation:'production',production_authority:'cnc_observation',
+      predecessor_accepted_revision_key:manualHead}]);
+    expect((await db.query(`SELECT t.action,t.predecessor_evidence_line_id::text predecessor,
+      t.canonical_origin_evidence_line_id::text origin,l.evidence_line_id::text evidence_id,l.quantity::text quantity
+      FROM mdf_physical_lineage_transitions t JOIN mdf_evidence_lines l USING(evidence_line_id)
+      WHERE t.source_kind='packet' AND t.source_id=$1 AND t.revision_key=$2 AND l.evidence_kind='physical'`,
+    [packetId,cncRevision])).rows).toEqual([{action:'carry',predecessor:manualPhysical[0].evidenceLineId,
+      origin:manualPhysical[0].origin,evidence_id:expect.any(String),quantity:'2'}]);
 
     // Run a real cut-result bath before the observer job. Its allocator must
     // reserve packet evidence from the observer's exact accepted revision.
@@ -1054,7 +1230,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
         expect(await runner().processOne()).toMatchObject({status:'done',jobId:observation.jobId});
         expect((await db.query('SELECT production_status_id FROM order_details WHERE detail_id=$1',[f.detailId])).rows[0]
           .production_status_id).toBe(3);
-        expect((await db.query(`SELECT count(*)::int count FROM audit_log WHERE event='cnc.mdf_observation.auto_cut_status_applied'
+    expect((await db.query(`SELECT count(*)::int count FROM audit_log WHERE event='cnc.mdf_observation.auto_cut_status_applied'
           AND entity_id=$1`,[packetId])).rows[0].count).toBe(1);
       } finally {
         if (priorCncSetting) {
@@ -1073,6 +1249,139 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
         ON h.source_kind=e.source_kind AND h.source_id=e.source_id
       WHERE a.bath_id=$1 AND a.state<>'released' AND e.source_kind='packet' AND e.source_id=$2
         AND e.revision_key=h.accepted_revision_key`,[bathId,packetId])).rows[0].count).toBe(pinned.length);
+    expect(await observations.complete({currentUser:user,lease,requestId:'E2E allocation after current CNC receipt',report}))
+      .toEqual(observation);
+    expect((await db.query(`SELECT count(*)::int count FROM mdf_cnc_observation_job_authorities
+      WHERE packet_id=$1 AND claim_id=$2`,[packetId,claim!.claimId])).rows[0].count).toBe(1);
+  });
+  it.each([{laminated:false,state:'reserved'},{laminated:true,state:'consumed'}] as const)(
+  'rebases an existing $state v2 bath pin on a distinct no-delta CNC authority receipt',async({laminated,state})=>{
+    const f=await telegramFixture(),imported=await f.importer.completeImport(f.input),packetId=imported.packetId!;
+    expect(imported.status).toBe('imported');
+    const importJob=(await db.query<{job_id:string}>(`SELECT job_id FROM mdf_recalculation_jobs
+      WHERE source_kind='packet' AND source_id=$1 ORDER BY created_at LIMIT 1`,[packetId])).rows[0];
+    await processJob(importJob.job_id);
+
+    const mover=new PgMdfBoardManualMoveRepository(database);
+    const actor={...user,permissions:[...user.permissions,'orders.update','production.tasks.update','orders.change_production_status']} as CurrentUser;
+    const board=await readMdfPublishedSnapshot(database,user,{focus:{kind:'packet',id:packetId}});
+    const card=board.cards.find(value=>value.kind==='packet'&&value.id===packetId)!;
+    const manual=await mover.upsert({currentUser:actor,cardKind:'packet',cardId:packetId,targetColumn:'completed',
+      sourceToken:card.commandToken!,idempotencyKey:`E2E-${randomUUID()}`,requestId:'E2E pin before CNC observation'});
+    await processJob(manual.jobId!);
+    const manualHead=(await db.query<{revision:string}>(`SELECT accepted_revision_key revision FROM mdf_source_heads
+      WHERE source_kind='packet' AND source_id=$1`,[packetId])).rows[0].revision;
+    const parent=(await db.query<{evidenceLineId:string;origin:string;quantity:string}>(`SELECT
+      l.evidence_line_id::text "evidenceLineId",t.canonical_origin_evidence_line_id::text origin,l.quantity::text quantity
+      FROM mdf_evidence_lines l JOIN mdf_physical_lineage_transitions t USING(evidence_line_id)
+      WHERE l.source_kind='packet' AND l.source_id=$1 AND l.revision_key=$2 AND l.evidence_kind='physical'`,
+    [packetId,manualHead])).rows[0];
+    expect(parent).toMatchObject({evidenceLineId:expect.any(String),origin:expect.any(String),quantity:'2'});
+    const {bathId}=await addLaminatedBathPin(f,laminated);
+    const pinsBefore=(await db.query<{allocationId:string;state:string;quantity:string;bathRevision:string;
+      evidenceLineId:string;revision:string;orderId:number;detailId:number}>(`SELECT a.allocation_id::text "allocationId",a.state,
+        a.quantity::text quantity,a.bath_revision "bathRevision",a.evidence_line_id::text "evidenceLineId",
+        e.revision_key revision,a.order_id::int "orderId",a.detail_id::int "detailId"
+      FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+      WHERE a.bath_id=$1 AND a.state<>'released' AND e.source_kind='packet' AND e.source_id=$2`,[bathId,packetId])).rows;
+    expect(pinsBefore).toHaveLength(1);
+    expect(pinsBefore[0]).toMatchObject({state,quantity:'2',evidenceLineId:parent.evidenceLineId,
+      revision:manualHead,orderId:f.orderId,detailId:f.detailId});
+
+    const observations=new PgCncTelegramMdfObservationRepository(database),lease=f.input.lease;
+    const claim=await observations.claim({currentUser:user,lease});
+    expect(claim?.packetId).toBe(packetId);
+    const report={claimId:claim!.claimId,claimToken:claim!.claimToken,claimGeneration:claim!.claimGeneration,
+      messages:claim!.messages.map(message=>({messageId:message.messageId,chatId:claim!.sourceChatId,
+        role:message.role,sha256:message.sha256,present:true,thumbsUp:true}))};
+    const requestId='E2E CNC preserves v2 pin';
+    const headBefore=(await db.query(`SELECT version::text,correction_epoch::text,accepted_revision_key,received_revision_key
+      FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`,[packetId])).rows[0];
+    const revisionsBefore=Number((await db.query(`SELECT count(*)::text count FROM mdf_evidence_revisions
+      WHERE source_kind='packet' AND source_id=$1`,[packetId])).rows[0].count);
+    const pinHistoryBefore=(await db.query(`SELECT a.allocation_id::text "allocationId",a.state,a.quantity::text quantity,
+      a.bath_id "bathId",a.bath_revision "bathRevision",a.evidence_line_id::text "evidenceLineId",
+      e.revision_key revision,a.order_id::int "orderId",a.detail_id::int "detailId"
+      FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+      WHERE a.bath_id=$1 AND e.source_kind='packet' AND e.source_id=$2 ORDER BY a.allocation_id`,[bathId,packetId])).rows;
+    const lineageBefore=(await db.query(`SELECT c.revision_key,c.operation,c.production_authority,t.action,
+      t.evidence_line_id::text evidence_id,t.predecessor_evidence_line_id::text predecessor,
+      t.canonical_origin_evidence_line_id::text origin FROM mdf_physical_lineage_contracts c
+      JOIN mdf_physical_lineage_transitions t USING(source_kind,source_id,revision_key)
+      WHERE c.source_kind='packet' AND c.source_id=$1 ORDER BY c.revision_key,t.evidence_line_id`,[packetId])).rows;
+    const rollbackTables=['cnc_telegram_packets','mdf_source_heads','mdf_evidence_revisions','mdf_evidence_lines',
+      'mdf_revision_context','mdf_revision_demand','mdf_revision_seals','mdf_published_sources','mdf_recalculation_job_rules',
+      'mdf_physical_lineage_contracts','mdf_physical_lineage_transitions','mdf_bath_allocations','mdf_recalculation_jobs',
+      'mdf_cnc_observation_targets','mdf_cnc_observation_receipts','mdf_cnc_observation_job_authorities',
+      'audit_log','audit_log_related_entity','outbox_events'];
+    const snapshotRollback=async()=>Promise.all(rollbackTables.map(async table=>[table,
+      (await db.query<{row:string}>(`SELECT to_jsonb(t)::text row FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows.map(row=>row.row)]));
+    const rollbackBefore=await snapshotRollback();
+    await db.query(`ALTER TABLE mdf_cnc_observation_receipts ADD CONSTRAINT e2e_reject_cnc_v2_observation_receipt
+      CHECK(claim_id<>'${claim!.claimId}'::uuid)`);
+    try {
+      await expect(observations.complete({currentUser:user,lease,requestId,report})).rejects.toMatchObject({code:'23514'});
+    } finally {
+      await db.query('ALTER TABLE mdf_cnc_observation_receipts DROP CONSTRAINT e2e_reject_cnc_v2_observation_receipt');
+    }
+    expect((await db.query(`SELECT version::text,correction_epoch::text,accepted_revision_key,received_revision_key
+      FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`,[packetId])).rows[0]).toEqual(headBefore);
+    expect(Number((await db.query(`SELECT count(*)::text count FROM mdf_evidence_revisions
+      WHERE source_kind='packet' AND source_id=$1`,[packetId])).rows[0].count)).toBe(revisionsBefore);
+    expect((await db.query(`SELECT c.revision_key,c.operation,c.production_authority,t.action,
+      t.evidence_line_id::text evidence_id,t.predecessor_evidence_line_id::text predecessor,
+      t.canonical_origin_evidence_line_id::text origin FROM mdf_physical_lineage_contracts c
+      JOIN mdf_physical_lineage_transitions t USING(source_kind,source_id,revision_key)
+      WHERE c.source_kind='packet' AND c.source_id=$1 ORDER BY c.revision_key,t.evidence_line_id`,[packetId])).rows)
+      .toEqual(lineageBefore);
+    expect((await db.query(`SELECT a.allocation_id::text "allocationId",a.state,a.quantity::text quantity,
+      a.bath_id "bathId",a.bath_revision "bathRevision",a.evidence_line_id::text "evidenceLineId",
+      e.revision_key revision,a.order_id::int "orderId",a.detail_id::int "detailId"
+      FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+      WHERE a.bath_id=$1 AND e.source_kind='packet' AND e.source_id=$2 ORDER BY a.allocation_id`,[bathId,packetId])).rows)
+      .toEqual(pinHistoryBefore);
+    expect((await db.query('SELECT 1 FROM mdf_cnc_observation_receipts WHERE claim_id=$1',[claim!.claimId])).rows).toHaveLength(0);
+    expect(await snapshotRollback()).toEqual(rollbackBefore);
+    const result=await observations.complete({currentUser:user,lease,requestId,report});
+    expect(result).toMatchObject({status:'recorded',jobId:expect.any(String)});
+    await processJob(result.jobId);
+    const head=(await db.query<{accepted:string;received:string}>(`SELECT accepted_revision_key accepted,
+      received_revision_key received FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`,[packetId])).rows[0];
+    expect(head).toEqual({accepted:head.received,received:head.received});
+    expect((await db.query(`SELECT operation,production_authority,predecessor_accepted_revision_key
+      FROM mdf_physical_lineage_contracts WHERE source_kind='packet' AND source_id=$1 AND revision_key=$2`,
+    [packetId,head.accepted])).rows).toEqual([{operation:'production',production_authority:'cnc_observation',
+      predecessor_accepted_revision_key:manualHead}]);
+    const transition=(await db.query<{evidenceId:string;action:string;predecessor:string;origin:string;quantity:string}>(`
+      SELECT l.evidence_line_id::text "evidenceId",t.action,t.predecessor_evidence_line_id::text predecessor,
+        t.canonical_origin_evidence_line_id::text origin,l.quantity::text quantity
+      FROM mdf_physical_lineage_transitions t JOIN mdf_evidence_lines l USING(evidence_line_id)
+      WHERE t.source_kind='packet' AND t.source_id=$1 AND t.revision_key=$2 AND l.evidence_kind='physical'`,
+    [packetId,head.accepted])).rows;
+    expect(transition).toEqual([{evidenceId:expect.any(String),action:'carry',predecessor:parent.evidenceLineId,
+      origin:parent.origin,quantity:'2'}]);
+    const pinHistory=(await db.query(`SELECT a.allocation_id::text "allocationId",a.state,a.quantity::text quantity,
+      a.bath_id "bathId",a.bath_revision "bathRevision",a.evidence_line_id::text "evidenceLineId",
+      e.revision_key revision,a.order_id::int "orderId",a.detail_id::int "detailId"
+      FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+      WHERE a.bath_id=$1 AND e.source_kind='packet' AND e.source_id=$2 ORDER BY a.allocation_id`,[bathId,packetId])).rows;
+    expect(pinHistory).toHaveLength(pinHistoryBefore.length+1);
+    for (const previousPin of pinHistoryBefore) {
+      const expectedPrevious=previousPin.allocationId===pinsBefore[0].allocationId
+        ? {...previousPin,state:'released'} : previousPin;
+      expect(pinHistory.find(row=>row.allocationId===previousPin.allocationId)).toEqual(expectedPrevious);
+    }
+    const newPins=pinHistory.filter(row=>!pinHistoryBefore.some(previous=>previous.allocationId===row.allocationId));
+    expect(newPins).toEqual([expect.objectContaining({state,quantity:'2',
+      bathId,bathRevision:pinsBefore[0].bathRevision,evidenceLineId:transition[0].evidenceId,revision:head.accepted,
+      orderId:f.orderId,detailId:f.detailId})]);
+    const revisionCount=Number((await db.query(`SELECT count(*)::text count FROM mdf_evidence_revisions
+      WHERE source_kind='packet' AND source_id=$1`,[packetId])).rows[0].count);
+    expect(await observations.complete({currentUser:user,lease,requestId,report})).toEqual(result);
+    expect(Number((await db.query(`SELECT count(*)::text count FROM mdf_evidence_revisions
+      WHERE source_kind='packet' AND source_id=$1`,[packetId])).rows[0].count)).toBe(revisionCount);
+    expect((await db.query(`SELECT count(*)::int count FROM mdf_cnc_observation_job_authorities
+      WHERE packet_id=$1 AND claim_id=$2`,[packetId,claim!.claimId])).rows[0].count).toBe(1);
   });
   it('no-fence pending observation returns the durable advanced server version after clearing raw completion',async()=>{
     const f=await telegramFixture(), imported=await f.importer.completeImport(f.input), packetId=imported.packetId!;

@@ -1,9 +1,27 @@
 import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import { addMdfManualProof, mdfSourceCommandToken } from './mdf-manual-proof';
 import type { MdfReceiptLine } from '../application/mdf-receipt';
+import { issueMdfValidatedPhysicalLineage, type MdfValidatedPhysicalLine } from './mdf-physical-lineage';
 
 const member = (overrides: Partial<MdfReceiptLine> = {}): MdfReceiptLine => ({ lineKey: 'm',orderId: 1,
   detailId: 11,quantity: 4,stageCode: 'membership',evidenceKind: 'derived',rework: false,...overrides });
+
+function carryLineage(source: { kind: 'packet'|'bazisCutSet'|'bath'; id: string }, revisionKey: string,
+  rows: readonly (MdfReceiptLine & { evidenceLineId: string })[]) {
+  const rootId = '90000000-0000-4000-8000-000000000001';
+  const actions = rows.map(row => ({ lineKey: row.lineKey,action: 'carry' as const,
+    predecessorEvidenceLineId: rootId })).sort((a,b) => a.lineKey<b.lineKey?-1:a.lineKey>b.lineKey?1:0);
+  const manifest = { operation: 'carry' as const,actions,droppedPredecessorEvidenceLineIds: [] as const };
+  const lines: MdfValidatedPhysicalLine[] = rows.map(row => ({ evidenceLineId: row.evidenceLineId,
+    lineKey: row.lineKey,orderId: row.orderId,detailId: row.detailId,quantity: row.quantity,
+    stageCode: row.stageCode as 'cut'|'laminated',evidenceKind: 'physical',rework: row.rework,
+    action: 'carry',predecessorEvidenceLineId: rootId,canonicalOriginEvidenceLineId: rootId }));
+  return issueMdfValidatedPhysicalLineage({ sourceKind: source.kind,sourceId: source.id,revisionKey,
+    operation: 'carry',productionAuthority: null,predecessorAcceptedRevisionKey: 'root-revision',
+    manifestDigest: createHash('sha256').update(JSON.stringify(['mdf-physical-lineage-v2',manifest])).digest('hex'),
+    droppedPredecessorEvidenceLineIds: [],lines });
+}
 describe('explicit MDF manual proof', () => {
   it.each(['packet','bazisCutSet'] as const)('confirms only own %s parts, summing split rows', kind => {
     const lines = [member(),member({ lineKey: 'm2',quantity: 2 }),member({ lineKey: 'm3',detailId: 12,quantity: 3 })];
@@ -38,6 +56,42 @@ describe('explicit MDF manual proof', () => {
   it('rejects impossible prior proof instead of capping away corruption', () => {
     expect(() => addMdfManualProof({ kind: 'packet',id: '1' },[member(),member({ lineKey: 'cut',
       stageCode: 'cut',evidenceKind: 'physical',quantity: 5 })],'completed','1')).toThrow('MDF_MANUAL_EVIDENCE_INVALID');
+  });
+  it.each(['packet','bazisCutSet'] as const)('keeps authenticated v2 %s overhang and fills only the current member gap', kind => {
+    const source = { kind,id: '1' } as const;
+    const rows = [member({ quantity: 8 }),member({ lineKey: 'cut-retained',quantity: 10,
+      stageCode: 'cut',evidenceKind: 'physical' })];
+    const lineage = carryLineage(source,'accepted-v2',[{ ...rows[1],evidenceLineId: '20000000-0000-4000-8000-000000000001' }]);
+    const authorization = { revisionKey: 'accepted-v2',lineage };
+
+    expect(addMdfManualProof(source,rows,'completed','manual-forward',authorization)).toEqual({ lines: rows,added: [] });
+    expect(() => addMdfManualProof(source,rows,'completed','manual-untrusted')).toThrow('MDF_MANUAL_EVIDENCE_INVALID');
+    expect(() => addMdfManualProof(source,rows,'completed','manual-stale',
+      { ...authorization,revisionKey: 'stale' })).toThrow('MDF_MANUAL_EVIDENCE_INVALID');
+  });
+  it('carries physical-only removed positions but creates new proof only for current members', () => {
+    const source = { kind: 'packet' as const,id: 'removed-owner' };
+    const current = [member({ quantity: 8 }),member({ lineKey: 'cut-retained-B',detailId: 12,quantity: 10,
+      stageCode: 'cut',evidenceKind: 'physical' })];
+    const authorization = { revisionKey: 'v2-carry',lineage: carryLineage(source,'v2-carry',[
+      { ...current[1],evidenceLineId: '20000000-0000-4000-8000-000000000012' },
+    ]) };
+
+    const result = addMdfManualProof(source,current,'completed','forward-manual',authorization);
+    expect(result.lines.slice(0,current.length)).toEqual(current);
+    expect(result.added).toHaveLength(1);
+    expect(result.added[0]).toMatchObject({ detailId: 11,quantity: 8,stageCode: 'cut',evidenceKind: 'physical',rework: false });
+    expect(result.added.some(line => line.detailId === 12)).toBe(false);
+  });
+  it('does not relax bath bounds with a v2 descriptor', () => {
+    const source = { kind: 'bath' as const,id: 'cut-result:1' };
+    const rows = [member({ quantity: 8 }),member({ lineKey: 'laminated-overhang',quantity: 10,
+      stageCode: 'laminated',evidenceKind: 'physical' })];
+    const authorization = { revisionKey: 'bath-v2',lineage: carryLineage(source,'bath-v2',[
+      { ...rows[1],evidenceLineId: '20000000-0000-4000-8000-000000000021' },
+    ]) };
+    expect(() => addMdfManualProof(source,rows,'baths_laminated','manual-laminate',authorization))
+      .toThrow('MDF_MANUAL_EVIDENCE_INVALID');
   });
   it('binds token to source identity, received revision, version and epoch', () => {
     const source = { kind: 'packet' as const,id: '1' }, head = { received: 'r1',version: '1',epoch: '0' };

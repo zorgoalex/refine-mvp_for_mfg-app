@@ -118,9 +118,28 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
   if (executionSnapshot) {
     // Promote only THIS job's authorized forward revision; another source's
     // pending proof must wait for its own pinned job and original actor.
+    const previousLineageKey=trigger.accepted ? mdfLineageRevisionKey(trigger,trigger.accepted) : null;
+    const nextLineageKey=mdfLineageRevisionKey(trigger,trigger.received);
+    const previousLineage=previousLineageKey ? executionSnapshot.lineage.get(previousLineageKey) : undefined;
+    const nextLineage=executionSnapshot.lineage.get(nextLineageKey);
+    const previousLineageIssues=previousLineageKey ? executionSnapshot.lineageIssues.get(previousLineageKey) ?? [] : [];
+    const nextLineageIssues=executionSnapshot.lineageIssues.get(nextLineageKey) ?? [];
+    const previousPhysical=trigger.accepted
+      ? lines.filter(line => key(line)===key(trigger) && line.revision===trigger.accepted && line.evidence==='physical') : [];
+    // Once the source has any v2 contract, the snapshot loader marks an
+    // otherwise-valid old v1 predecessor MDF_LINEAGE_REQUIRED source-wide.
+    // Permit only this narrow first-v2 transition when that predecessor has no
+    // physical facts; malformed v2 descriptors are never ignored.
+    const firstV2WithoutPhysicalPredecessor=Boolean(trigger.accepted && !previousLineage && previousPhysical.length===0
+      && nextLineage?.operation==='production' && nextLineage.lines.some(line=>line.action==='root')
+      && previousLineageIssues.length===1 && previousLineageIssues[0]==='MDF_LINEAGE_REQUIRED');
+    const lineageInvalid=nextLineageIssues.length>0 || (previousLineageIssues.length>0 && !firstV2WithoutPhysicalPredecessor);
+    const contextIssues=executionSnapshot.issues.get(mdfSourceKey(trigger));
+    const lineageRequiredButMissing=Boolean(previousLineage && !nextLineage);
     const advanced=await advanceCompatibleMdfRevision(tx,{ job,head: trigger,
-      contextValid: executionSnapshot.issues.get(mdfSourceKey(trigger))?.length===0,
-      lines: lines.filter(l => key(l)===key(trigger)),allocations });
+      contextValid: contextIssues?.length===0 && !lineageInvalid && !lineageRequiredButMissing,
+      lines: lines.filter(l => key(l)===key(trigger)),allocations,
+      ...(nextLineage ? { lineage: previousLineage ? { previous: previousLineage,next: nextLineage } : { next: nextLineage } } : {}) });
     if (advanced) {
       allocations=advanced;
       // Compatible advancement changes the accepted head inside this

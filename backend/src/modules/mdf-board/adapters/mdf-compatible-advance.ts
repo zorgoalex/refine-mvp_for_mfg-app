@@ -3,6 +3,7 @@ import { auditService } from '../../../common/audit/audit.service';
 import type { MdfJob } from '../application/mdf-job-runner';
 import type { MdfEvidenceAllocation } from '../domain/mdf-evidence-allocation';
 import { planMdfCompatibleAdvance,type MdfAdvanceLine } from '../domain/mdf-compatible-advance';
+import type { MdfValidatedPhysicalLineage } from '../domain/mdf-physical-lineage';
 import type { MdfExecutionHead } from './mdf-execution-snapshot';
 
 /** Called only inside the claimed job/savepoint AFTER complete sorted owner and
@@ -12,6 +13,7 @@ export async function advanceCompatibleMdfRevision(tx: DatabaseClient,input: {
   job: MdfJob; head: MdfExecutionHead; contextValid: boolean;
   lines: readonly (MdfAdvanceLine & { revision: string })[];
   allocations: readonly MdfEvidenceAllocation[];
+  lineage?: { previous?: MdfValidatedPhysicalLineage; next: MdfValidatedPhysicalLineage };
 }): Promise<MdfEvidenceAllocation[]|null> {
   const { head:h }=input;
   if (!input.contextValid || !h.accepted || h.accepted===h.received) return null;
@@ -26,7 +28,7 @@ export async function advanceCompatibleMdfRevision(tx: DatabaseClient,input: {
   if (!valid) return null;
   const replacements=planMdfCompatibleAdvance({ kind: h.kind,id: h.id,previousRevision: h.accepted,nextRevision: h.received,
     previous: input.lines.filter(l => l.revision===h.accepted),next: input.lines.filter(l => l.revision===h.received),
-    allocations: input.allocations });
+    allocations: input.allocations,lineage: input.lineage });
   if (!replacements) return null;
   const oldIds=replacements.map(r => r.old.allocationId),previousRevision=h.accepted;
   await tx.query("UPDATE mdf_bath_allocations SET state='released',updated_at=now() WHERE allocation_id=ANY($1::uuid[])",[oldIds]);

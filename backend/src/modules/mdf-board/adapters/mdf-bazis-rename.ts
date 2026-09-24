@@ -5,7 +5,9 @@ import { buildOrderReadScopePredicate, normalizeActorUserId, orderAssignmentExis
 import { rolePolicyForUser } from '../../../permissions/policies/scope';
 import { CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE as MDF, CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE as OTHER } from '../../../shared/cnc-material';
 import { requireMdfCommandBoundary } from '../application/mdf-command-boundary';
-import { recordMdfReceipt, type MdfReceiptLine } from '../application/mdf-receipt';
+import { recordMdfLineageReceipt, recordMdfReceipt, type MdfReceiptLine } from '../application/mdf-receipt';
+import { buildMdfForwardLineageManifest } from '../application/mdf-forward-lineage';
+import { matchesMdfValidatedPhysicalLineage, mdfLineageRevisionKey } from '../domain/mdf-physical-lineage';
 import { loadMdfExecutionDetails, loadMdfExecutionSnapshot, mdfSourceKey } from './mdf-execution-snapshot';
 
 interface SetMember {
@@ -126,16 +128,22 @@ export async function executeMdfBazisRename(
   const issues = snapshot.issues.get(sourceKey) ?? ['MDF_CONTEXT_REQUIRED'];
   const frozenDemand = snapshot.frozenDemand.get(sourceKey) ?? [];
   if (!metadata || issues.length || frozenDemand.length === 0) reconcile();
-  const lines = (await tx.query<MdfReceiptLine>(`SELECT line_key "lineKey",order_id::float8 "orderId",
+  const lines = (await tx.query<MdfReceiptLine & { evidenceLineId: string; revision: string }>(`SELECT evidence_line_id::text "evidenceLineId",
+    revision_key revision,line_key "lineKey",order_id::float8 "orderId",
     detail_id::float8 "detailId",quantity::float8 quantity,stage_code "stageCode",
     evidence_kind "evidenceKind",rework FROM mdf_evidence_lines
     WHERE source_kind=$1 AND source_id=$2 AND revision_key=$3 ORDER BY line_key LIMIT 10001`,
   [...key, head.accepted])).rows;
   if (!selected.members.length || !lines.length || lines.length > 10000 || !sameMembership(selected.members, lines)) reconcile();
+  const lineageKey = mdfLineageRevisionKey(source,head.accepted);
+  const lineage = snapshot.lineage.get(lineageKey);
+  const lineageIssue = snapshot.lineageIssues.get(lineageKey)?.[0];
+  if (lineageIssue || (lineage && !matchesMdfValidatedPhysicalLineage({ sourceKind: source.kind,sourceId: source.id,
+    revisionKey: head.accepted,lines: lines.map(line => ({ ...line,stage: line.stageCode,evidence: line.evidenceKind })),lineage }))) reconcile();
 
   const nextName = input.name;
   const revisionKey = `bazis-rename:${input.setId}:v${Number(set.version) + 1}`;
-  const saved = await recordMdfReceipt(tx, {
+  const receiptInput = {
     sourceKind: source.kind, sourceId: source.id, revisionKey, origin: 'manual',
     actorUserId: Number(input.user.id), requestId: input.requestId, causeKey: revisionKey,
     expectedFence: { version: head.version, correctionEpoch: head.correctionEpoch },
@@ -145,7 +153,20 @@ export async function executeMdfBazisRename(
       priorColumn: metadata.priorColumn, manualPlacementColumn: metadata.manualPlacementColumn,
       compositionComplete: true, demand: frozenDemand,
     },
-  });
+  } as const;
+  const previousPhysicalRows = lines.filter(line => line.evidenceKind === 'physical');
+  let saved: Awaited<ReturnType<typeof recordMdfReceipt>>;
+  if (lineage) {
+    let manifest: ReturnType<typeof buildMdfForwardLineageManifest>;
+    try {
+      manifest = buildMdfForwardLineageManifest({ sourceKind: source.kind,sourceId: source.id,
+        predecessorRevisionKey: head.accepted,previousPhysicalRows,previousLineage: lineage,nextLines: lines,rootLineKeys: [] });
+    } catch (error) {
+      if (error instanceof Error && (error.message === 'MDF_LINEAGE_INVALID' || error.message === 'MDF_LINEAGE_REQUIRED')) reconcile();
+      throw error;
+    }
+    saved = await recordMdfLineageReceipt(tx,{ ...receiptInput,lineage: manifest });
+  } else saved = await recordMdfReceipt(tx,receiptInput);
   return { changed: true, beforeName: set.name, beforeVersion: Number(set.version), owners, mdfJobId: saved.jobId };
 }
 

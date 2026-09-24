@@ -195,6 +195,87 @@ describe('dependency-local MDF accounting quarantine', () => {
     expect(result.readyBathIds).toEqual(['safe-bath']);
     expect(result.reservations.map(row => row.evidenceLineId)).toEqual(['independent-v1-cut']);
   });
+  it('allows authenticated physical overhang while capping declarations at exact membership partitions', () => {
+    const authorized = source('lineage-declaration-bound', 'packet', 11, 8);
+    authorized.lines[1].quantity = 10;
+    authorized.lines[1].lineKey = 'cut-current';
+    attachIssuedLineage(authorized, {
+      action: 'carry', predecessorEvidenceLineId: '33333333-3333-4333-8333-333333333333',
+    });
+    const addDeclaration = (quantity: number, rework = false) => ({
+      evidenceLineId: `declaration-${quantity}-${rework}`,
+      lineKey: `cut-declaration-${quantity}-${rework}`,
+      revision: '1', orderId: 1, detailId: 11, quantity,
+      stage: 'cut', evidence: 'declaration', rework,
+    });
+    const bath = source('declaration-bound-bath', 'bath', 11, 10);
+
+    authorized.lines.push(addDeclaration(8));
+    const valid = plan([authorized, bath]);
+    expect(valid.quarantine).not.toContainEqual(expect.objectContaining({
+      sourceId: authorized.id, code: 'MEMBERSHIP_MISMATCH',
+    }));
+    expect(valid.reservations).toEqual([expect.objectContaining({
+      bathId: bath.id, evidenceLineId: 'lineage-declaration-bound-cut', quantity: 10,
+    })]);
+
+    const overDeclared = source('lineage-overdeclared', 'packet', 11, 8);
+    overDeclared.lines[1].quantity = 10;
+    overDeclared.lines[1].lineKey = 'cut-current';
+    overDeclared.lines.push(addDeclaration(12));
+    attachIssuedLineage(overDeclared, {
+      action: 'carry', predecessorEvidenceLineId: '44444444-4444-4444-8444-444444444444',
+    });
+    const invalid = plan([overDeclared, bath]);
+    expect(invalid.quarantine).toContainEqual(expect.objectContaining({
+      sourceId: overDeclared.id, code: 'MEMBERSHIP_MISMATCH',
+    }));
+    expect(invalid.reservations).toEqual([]);
+  });
+  it.each([
+    ['normal', false, 9],
+    ['rework', true, 3],
+  ] as const)('does not borrow %s member capacity for an over-limit declaration', (_partition, rework, declared) => {
+    const authorized = source('lineage-declaration-partition', 'packet', 11, 8);
+    authorized.lines[1].quantity = 10;
+    authorized.lines[1].lineKey = 'cut-current';
+    authorized.lines.push({ ...authorized.lines[0], evidenceLineId: 'member-rework', lineKey: 'member-rework',
+      quantity: 2, rework: true });
+    authorized.lines.push({
+      evidenceLineId: `declaration-${rework}`, lineKey: `cut-declaration-${rework}`, revision: '1',
+      orderId: 1, detailId: 11, quantity: declared, stage: 'cut', evidence: 'declaration', rework,
+    });
+    attachIssuedLineage(authorized, {
+      action: 'carry', predecessorEvidenceLineId: '55555555-5555-4555-8555-555555555555',
+    });
+
+    const result = plan([authorized, source('partition-bath', 'bath', 11, 10)]);
+    expect(result.quarantine).toContainEqual(expect.objectContaining({
+      sourceId: authorized.id, code: 'MEMBERSHIP_MISMATCH',
+    }));
+    expect(result.reservations).toEqual([]);
+  });
+  it('keeps bath declarations bounded by membership even with issued v2 lineage', () => {
+    const bathWithDeclaration = (id: string, declared: number) => {
+      const bath = source(id, 'bath', 11, 10);
+      bath.lines.push({ evidenceLineId: `${id}-rolled`, lineKey: `${id}-rolled`, revision: '1',
+        orderId: 1, detailId: 11, quantity: 8, stage: 'laminated', evidence: 'physical', rework: false });
+      bath.lines.push({ evidenceLineId: `${id}-declaration`, lineKey: `${id}-declaration`, revision: '1',
+        orderId: 1, detailId: 11, quantity: declared, stage: 'laminated', evidence: 'declaration', rework: false });
+      attachIssuedLineage(bath, { action: 'root', canonicalOriginEvidenceLineId: `${id}-rolled` });
+      return bath;
+    };
+    const withinCapacity = bathWithDeclaration('v2-bath-declaration-within', 9);
+    const overCapacity = bathWithDeclaration('v2-bath-declaration-over', 11);
+
+    const accepted = plan([withinCapacity]);
+    expect(accepted.quarantine).not.toContainEqual(expect.objectContaining({
+      sourceId: withinCapacity.id, code: 'MEMBERSHIP_MISMATCH',
+    }));
+    expect(plan([overCapacity]).quarantine).toContainEqual(expect.objectContaining({
+      sourceId: overCapacity.id, code: 'MEMBERSHIP_MISMATCH',
+    }));
+  });
   it('does not credit a pending source revision even if its prior accepted physical cut was over membership', () => {
     const pending = source('pending-lineage', 'packet', 11, 8);
     pending.lines[1].quantity = 10;

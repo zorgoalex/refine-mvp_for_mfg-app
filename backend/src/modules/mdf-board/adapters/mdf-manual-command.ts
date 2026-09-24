@@ -7,10 +7,12 @@ import { allowsScope, rolePolicyForUser } from '../../../permissions/policies/sc
 import type { DeleteMdfBoardManualMoveCommand, UpsertMdfBoardManualMoveCommand } from '../../orders/application/mdf-board-manual-move.types';
 import type { MdfBoardManualMoveDto, MdfBoardManualMoveUpsertResponseDto, MdfBoardManualMoveDeleteResponseDto } from '../../orders/dto/mdf-board-manual-move.dto';
 import { requireMdfCommandBoundary } from '../application/mdf-command-boundary';
-import { recordMdfReceipt, type MdfReceiptLine } from '../application/mdf-receipt';
+import { recordMdfLineageReceipt, recordMdfReceipt, type MdfReceiptLine } from '../application/mdf-receipt';
+import { buildMdfForwardLineageManifest } from '../application/mdf-forward-lineage';
 import { addMdfManualProof, mdfSourceCommandToken } from '../domain/mdf-manual-proof';
 import { mdfDemandDigest } from '../domain/mdf-execution-context';
 import { mdfSum } from '../domain/mdf-quantities';
+import { matchesMdfValidatedPhysicalLineage, mdfLineageRevisionKey } from '../domain/mdf-physical-lineage';
 import { loadMdfExecutionSnapshot } from './mdf-execution-snapshot';
 import { loadMdfShadowSource } from './mdf-shadow-source';
 
@@ -84,7 +86,8 @@ export async function executeMdfManualCommand(tx: TransactionClient,
   const snapshot = await loadMdfExecutionSnapshot(tx,[{ ...source,...head }],owners);
   const key = JSON.stringify(args), metadata = snapshot.metadata.get(key);
   if (!metadata || snapshot.issues.get(key)?.length) conflict('MDF_COMMAND_RECONCILIATION_REQUIRED','Состав или количество деталей изменились');
-  const lines = (await tx.query<MdfReceiptLine>(`SELECT line_key "lineKey",order_id::float8 "orderId",detail_id::float8 "detailId",
+  const lines = (await tx.query<MdfReceiptLine & { evidenceLineId: string; revision: string }>(`SELECT evidence_line_id::text "evidenceLineId",
+    revision_key revision,line_key "lineKey",order_id::float8 "orderId",detail_id::float8 "detailId",
     quantity::float8 quantity,stage_code "stageCode",evidence_kind "evidenceKind",rework FROM mdf_evidence_lines
     WHERE source_kind=$1 AND source_id=$2 AND revision_key=$3 ORDER BY line_key LIMIT 10001`,[...args,head.received])).rows;
   if (!lines.length || lines.length > 10000) conflict('MDF_COMMAND_RECONCILIATION_REQUIRED','Неполный состав карточки');
@@ -100,6 +103,13 @@ export async function executeMdfManualCommand(tx: TransactionClient,
   if (composition(normalized) !== composition(lines.filter(l => l.stageCode === 'membership'))) {
     conflict('MDF_COMMAND_RECONCILIATION_REQUIRED','Состав файла изменился после подтверждения');
   }
+  const lineageKey = mdfLineageRevisionKey(source,head.accepted);
+  const lineage = snapshot.lineage.get(lineageKey);
+  const lineageIssue = snapshot.lineageIssues.get(lineageKey)?.[0];
+  if (lineageIssue || (lineage && !matchesMdfValidatedPhysicalLineage({ sourceKind: source.kind,sourceId: source.id,
+    revisionKey: head.accepted,lines: lines.map(line => ({ ...line,stage: line.stageCode,evidence: line.evidenceKind })),lineage }))) {
+    conflict('MDF_COMMAND_RECONCILIATION_REQUIRED','Проверенная история производства карточки изменилась');
+  }
   const published = (await tx.query<{ column: string|null }>(`SELECT column_key "column" FROM mdf_published_sources
     WHERE source_kind=$1 AND source_id=$2 AND received_revision_key=$3 AND accepted_revision_key=$3
       AND cardinality(issues)=0`,[...args,head.received])).rows[0];
@@ -110,7 +120,15 @@ export async function executeMdfManualCommand(tx: TransactionClient,
     conflict('MDF_RETURN_CONFIRMATION_REQUIRED','Возврат требует предпросмотра последствий');
   }
   const causeKey = `mdf-manual:${randomUUID()}`, revisionKey = causeKey;
-  const proof = addMdfManualProof(source,lines,target,causeKey);
+  let proof: ReturnType<typeof addMdfManualProof>;
+  try {
+    proof = addMdfManualProof(source,lines,target,causeKey,lineage ? { revisionKey: head.accepted,lineage } : undefined);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'MDF_MANUAL_EVIDENCE_INVALID') {
+      conflict('MDF_COMMAND_RECONCILIATION_REQUIRED','Физические данные карточки требуют проверки');
+    }
+    throw error;
+  }
   const changed = metadata.manualPlacementColumn !== target || proof.added.length > 0;
   const now = new Date().toISOString();
   const move = (version: string): MdfBoardManualMoveDto => ({ cardKind: source.kind,cardId: source.id,
@@ -137,11 +155,16 @@ export async function executeMdfManualCommand(tx: TransactionClient,
       notificationEventDecision: 'queued_production_events',relatedOrderIds: owners },
     relatedEntities: owners.map(entityId => ({ entityType: 'order' as const,entityId })),
   });
-  const saved = await recordMdfReceipt(tx,{ sourceKind: source.kind,sourceId: source.id,revisionKey,origin: 'manual',
+  const previousPhysicalRows = lines.filter(line => line.evidenceKind === 'physical');
+  const useLineageReceipt = Boolean(lineage || (!previousPhysicalRows.length && proof.added.length));
+  const receiptInput = { sourceKind: source.kind,sourceId: source.id,revisionKey,origin: 'manual' as const,
     actorUserId: Number(user.id),requestId,causeKey,expectedFence: { version: head.version,correctionEpoch: head.epoch },
     accept: true,lines: proof.lines,rules,executionContext: { sourceCreatedAt: metadata.sourceCreatedAt,
       displayName: metadata.displayName,priorColumn: published.column!,manualPlacementColumn: target,
-      compositionComplete: true,demand } });
+      compositionComplete: true,demand } };
+  const saved = useLineageReceipt
+    ? await recordLineageReceipt()
+    : await recordMdfReceipt(tx,receiptInput);
   return remember(target === null ? { generatedAt: now,cardKind: source.kind,cardId: source.id,deleted: true,auditId,jobId: saved.jobId }
     : { generatedAt: now,changed: true,move: move(saved.version),auditId,jobId: saved.jobId });
 
@@ -149,6 +172,21 @@ export async function executeMdfManualCommand(tx: TransactionClient,
     await tx.query(`INSERT INTO mdf_manual_command_results(actor_user_id,command_key,request_digest,source_kind,source_id,order_ids,response)
       VALUES($1,$2,$3,$4,$5,$6::bigint[],$7::jsonb)`,[user.id,command.idempotencyKey,requestDigest,...args,owners,JSON.stringify(response)]);
     return response;
+  }
+
+  async function recordLineageReceipt() {
+    let manifest: ReturnType<typeof buildMdfForwardLineageManifest>;
+    try {
+      manifest = buildMdfForwardLineageManifest({ sourceKind: source.kind,sourceId: source.id,
+        predecessorRevisionKey: head.accepted,previousPhysicalRows,previousLineage: lineage,
+        nextLines: proof.lines,rootLineKeys: proof.added.map(line => line.lineKey) });
+    } catch (error) {
+      if (error instanceof Error && (error.message === 'MDF_LINEAGE_INVALID' || error.message === 'MDF_LINEAGE_REQUIRED')) {
+        conflict('MDF_COMMAND_RECONCILIATION_REQUIRED','Происхождение физических данных требует проверки');
+      }
+      throw error;
+    }
+    return recordMdfLineageReceipt(tx,{ ...receiptInput,lineage: manifest });
   }
 
   function assertToken(head: Head | undefined): asserts head is Head {

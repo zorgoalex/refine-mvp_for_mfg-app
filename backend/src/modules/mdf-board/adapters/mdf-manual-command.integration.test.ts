@@ -10,6 +10,8 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { rolePolicyForUser } from '../../../permissions/policies/scope';
 import { PgMdfBoardManualMoveRepository } from '../../orders/adapters/pg-mdf-board-manual-move-repository';
 import { recordMdfReceipt } from '../application/mdf-receipt';
+import { recordMdfLineageReceipt } from '../application/mdf-receipt';
+import type { MdfPhysicalLineageManifest } from '../application/mdf-physical-lineage';
 import { MdfJobRunner } from '../application/mdf-job-runner';
 import { executeMdfAcceptedJob } from '../application/mdf-accepted-job';
 import { mdfSourceCommandToken } from '../domain/mdf-manual-proof';
@@ -87,36 +89,37 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real MDF manual com
       expect((await db.query('SELECT 1 FROM pg_namespace WHERE nspname=$1',[schema])).rows).toHaveLength(0);
     } finally { await db.end(); }
   });
-  async function fixture(kind: 'packet'|'bazisCutSet'|'bath' = 'bazisCutSet') {
+  async function fixture(kind: 'packet'|'bazisCutSet'|'bath' = 'bazisCutSet', assignmentQuantity = 4,
+    orderQuantity = assignmentQuantity) {
     const orderId = ++sequence,detailId = orderId*10;
     const source = { kind,id: kind === 'packet' ? randomUUID() : kind === 'bath' ? `cut-result:${orderId}` : String(orderId) };
     await db.query(`INSERT INTO orders(order_id,order_name,order_kind,delete_flag,version,order_status_id,payment_status_id,created_by)
       VALUES($1,$2,'production_order',false,1,4,1,1)`,[orderId,`E2E manual ${orderId}`]);
     await db.query(`INSERT INTO order_details(detail_id,order_id,detail_number,quantity,production_status_id,delete_flag,material_id)
-      VALUES($1,$2,1,4,1,false,1),($3,$2,2,1,1,false,1)`,[detailId,orderId,detailId+1]);
+      VALUES($1,$2,1,$4,1,false,1),($3,$2,2,1,1,false,1)`,[detailId,orderId,detailId+1,orderQuantity]);
     if (kind === 'bazisCutSet') {
       await db.query(`INSERT INTO bazis_cut_sets(bazis_cut_set_id,name,version,created_at,updated_at) VALUES($1,'E2E source',1,now(),now())`,[orderId]);
       await db.query(`INSERT INTO bazis_cut_set_details(bazis_cut_set_detail_id,bazis_cut_set_id,source_order_id,source_order_detail_id,quantity,cut_enabled,material_name)
-        VALUES($1,$1,$1,$2,4,true,'MDF 10 mm')`,[orderId,detailId]);
+        VALUES($1,$1,$1,$2,$3,true,'MDF 10 mm')`,[orderId,detailId,assignmentQuantity]);
     } else if (kind === 'packet') {
       await db.query(`INSERT INTO cnc_telegram_packets(packet_id,material_name,comments_json,mdf_board_card_kind,rework,completion_status,thumbs_up)
         VALUES($1,'MDF 10 mm','[]','machine_file',false,'pending',false)`,[source.id]);
       await db.query(`INSERT INTO cnc_telegram_packet_items(packet_item_id,packet_id,source_item_key,match_order_id,match_detail_id,match_status,quantity)
-        VALUES($1,$2,'own-part',$3,$4,'matched',4)`,[randomUUID(),source.id,orderId,detailId]);
+        VALUES($1,$2,'own-part',$3,$4,'matched',$5)`,[randomUUID(),source.id,orderId,detailId,assignmentQuantity]);
     } else {
       await db.query(`INSERT INTO cut_result(cut_result_id,created_at,snapshot_digest) VALUES($1,now(),repeat('a',64))`,[orderId]);
       await db.query(`INSERT INTO cut_result_board_projection(cut_result_id,snapshot_digest,is_vacuum) VALUES($1,repeat('a',64),true)`,[orderId]);
       await db.query(`INSERT INTO cut_result_sheet_map(cut_result_sheet_map_id,cut_result_id,is_effective) VALUES($1,$1,true)`,[orderId]);
       await db.query(`INSERT INTO cut_result_placement(cut_result_sheet_map_id,cut_result_id,order_id,order_detail_id)
-        SELECT $1,$1,$1,$2 FROM generate_series(1,4)`,[orderId,detailId]);
+        SELECT $1,$1,$1,$2 FROM generate_series(1,$3)`,[orderId,detailId,assignmentQuantity]);
     }
     await database.transaction(tx => recordMdfReceipt(tx,{ sourceKind: kind,sourceId: source.id,revisionKey: 'baseline',
       origin: 'derived',actorUserId: 1,requestId: 'E2E-baseline',causeKey: `baseline-${orderId}`,expectedFence: null,
-      accept: true,rules: [],lines: [{ lineKey: 'own-part',orderId,detailId,quantity: 4,
+      accept: true,rules: [],lines: [{ lineKey: 'own-part',orderId,detailId,quantity: assignmentQuantity,
         stageCode: 'membership',evidenceKind: 'derived',rework: false }],
       executionContext: { sourceCreatedAt: '2026-09-21T00:00:00Z',displayName: `E2E ${kind}`,
         priorColumn: kind === 'bath' ? 'baths' : 'parsed',compositionComplete: true,
-        demand: [{ orderId,detailId,quantity: 4 },{ orderId,detailId: detailId+1,quantity: 1 }] } }));
+        demand: [{ orderId,detailId,quantity: orderQuantity },{ orderId,detailId: detailId+1,quantity: 1 }] } }));
     expect(await runner().processOne()).toMatchObject({ status: 'done' });
     const token = async () => {
       const head = (await db.query<{ received: string; version: string; epoch: string }>(`SELECT received_revision_key received,
@@ -125,7 +128,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real MDF manual com
     };
     const command = async () => ({ currentUser: admin,cardKind: kind,cardId: source.id,sourceToken: await token(),
       idempotencyKey: randomUUID(),requestId: `E2E-manual-${orderId}` });
-    return { source,orderId,detailId,token,command };
+    return { source,orderId,detailId,assignmentQuantity,orderQuantity,token,command };
   }
   const ledger = async (source: { kind: string; id: string }) => (await db.query(`SELECT l.stage_code,l.quantity FROM mdf_evidence_lines l
     JOIN mdf_source_heads h ON h.source_kind=l.source_kind AND h.source_id=l.source_id AND h.received_revision_key=l.revision_key
@@ -151,7 +154,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real MDF manual com
         ...(laminated ? [{ lineKey: 'laminated',orderId: f.orderId,detailId,quantity,
           stageCode: 'laminated',evidenceKind: 'physical' as const,rework: false }] : []),
       ],executionContext: { sourceCreatedAt: '2026-09-21T00:00:00Z',displayName: 'pin bath',priorColumn: laminated ? 'baths_laminated' : 'baths',
-        compositionComplete: true,demand: [{ orderId: f.orderId,detailId: f.detailId,quantity: 4 },
+        compositionComplete: true,demand: [{ orderId: f.orderId,detailId: f.detailId,quantity: f.orderQuantity },
           { orderId: f.orderId,detailId: f.detailId+1,quantity: 1 }] } }));
     await runJob(saved.jobId);
     return bathId;
@@ -172,6 +175,52 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real MDF manual com
     await runJob(saved.jobId);
   }
 
+  async function addLineageRevision(f: Awaited<ReturnType<typeof fixture>>, input: {
+    revisionKey: string; memberQuantity: number; physicalQuantity: number; operation: 'production'|'carry';
+  }) {
+    const head = (await db.query<{ accepted: string|null; version: string; epoch: string }>(`SELECT
+      accepted_revision_key accepted,version::text,correction_epoch::text epoch FROM mdf_source_heads
+      WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0];
+    const physicalLine = { lineKey: 'physical-proof',orderId: f.orderId,detailId: f.detailId,
+      quantity: input.physicalQuantity,stageCode: 'cut',evidenceKind: 'physical' as const,rework: false };
+    let lineage: MdfPhysicalLineageManifest;
+    if (input.operation === 'production') {
+      lineage = { operation: 'production',authority: 'manual_production',
+        actions: [{ lineKey: physicalLine.lineKey,action: 'root' }],droppedPredecessorEvidenceLineIds: [] };
+    } else {
+      const previous = (await db.query<{ evidenceLineId: string }>(`SELECT evidence_line_id::text "evidenceLineId"
+        FROM mdf_evidence_lines WHERE source_kind=$1 AND source_id=$2 AND revision_key=$3
+          AND line_key='physical-proof' AND evidence_kind='physical'`,[f.source.kind,f.source.id,head.accepted])).rows[0];
+      expect(previous).toBeDefined();
+      lineage = { operation: 'carry',actions: [{ lineKey: physicalLine.lineKey,action: 'carry',
+        predecessorEvidenceLineId: previous.evidenceLineId }],droppedPredecessorEvidenceLineIds: [] };
+    }
+    const saved = await database.transaction(tx => recordMdfLineageReceipt(tx,{ sourceKind: f.source.kind,
+      sourceId: f.source.id,revisionKey: input.revisionKey,origin: 'manual',actorUserId: 1,
+      requestId: `E2E-lineage-${input.revisionKey}`,causeKey: `lineage-${input.revisionKey}`,
+      expectedFence: { version: head.version,correctionEpoch: head.epoch },accept: true,rules: [],
+      lines: [{ lineKey: 'own-part',orderId: f.orderId,detailId: f.detailId,quantity: input.memberQuantity,
+        stageCode: 'membership',evidenceKind: 'derived',rework: false },physicalLine],
+      lineage,executionContext: { sourceCreatedAt: '2026-09-21T00:00:00Z',displayName: `E2E lineage ${f.source.kind}`,
+        priorColumn: 'parsed',compositionComplete: true,demand: [{ orderId: f.orderId,detailId: f.detailId,quantity: f.orderQuantity },
+          { orderId: f.orderId,detailId: f.detailId+1,quantity: 1 }] } }));
+    await runJob(saved.jobId);
+    const proof = (await db.query<{ evidenceLineId: string }>(`SELECT evidence_line_id::text "evidenceLineId"
+      FROM mdf_evidence_lines WHERE source_kind=$1 AND source_id=$2 AND revision_key=$3
+        AND line_key='physical-proof' AND evidence_kind='physical'`,[f.source.kind,f.source.id,input.revisionKey])).rows[0];
+    expect(proof).toBeDefined();
+    return { saved,proofId: proof.evidenceLineId };
+  }
+  async function setAssignmentQuantity(f: Awaited<ReturnType<typeof fixture>>, quantity: number) {
+    if (f.source.kind === 'bazisCutSet') {
+      await db.query('UPDATE bazis_cut_set_details SET quantity=$2 WHERE bazis_cut_set_id=$1', [f.orderId,quantity]);
+    } else if (f.source.kind === 'packet') {
+      await db.query('UPDATE cnc_telegram_packet_items SET quantity=$2 WHERE packet_id=$1', [f.source.id,quantity]);
+    } else {
+      throw new Error('E2E_ASSIGNMENT_UPDATE_UNSUPPORTED');
+    }
+  }
+
   it.each(['packet','bazisCutSet'] as const)('moves real %s through queue; only its own detail changes', async kind => {
     const f = await fixture(kind);
     const result = await repo.upsert({ ...await f.command(),targetColumn: 'completed' });
@@ -184,6 +233,340 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real MDF manual com
     expect((await db.query('SELECT 1 FROM mdf_board_manual_moves')).rows).toHaveLength(0);
     const board = await readMdfPublishedSnapshot(database,admin,{ dateTo: '2026-09-21' });
     expect(board.cards.find(c => c.kind === kind && c.id === f.source.id)?.commandToken).toBe(await f.token());
+  });
+
+  it('first manual production on a v1 membership-only source writes one v2 root and exact replay writes none', async () => {
+    const f = await fixture('bazisCutSet',8,8);
+    const command = { ...await f.command(),targetColumn: 'completed' as const };
+    const saved = await repo.upsert(command);
+    await runJob(saved.jobId!);
+    const head = (await db.query<{ accepted:string }>(`SELECT accepted_revision_key accepted FROM mdf_source_heads
+      WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0];
+    const contract = (await db.query(`SELECT operation,production_authority,predecessor_accepted_revision_key
+      FROM mdf_physical_lineage_contracts WHERE source_kind=$1 AND source_id=$2 AND revision_key=$3`,
+      [f.source.kind,f.source.id,head.accepted])).rows;
+    expect(contract).toEqual([{ operation:'production',production_authority:'manual_production',predecessor_accepted_revision_key:'baseline' }]);
+    const rootTransitions = (await db.query<{ evidenceLineId:string;action:string;predecessor:string|null;origin:string;quantity:string }>(
+      `SELECT t.evidence_line_id::text "evidenceLineId",t.action,t.predecessor_evidence_line_id::text predecessor,
+        t.canonical_origin_evidence_line_id::text origin,l.quantity::text quantity
+      FROM mdf_physical_lineage_transitions t JOIN mdf_evidence_lines l USING(evidence_line_id)
+      WHERE t.source_kind=$1 AND t.source_id=$2 AND t.revision_key=$3`,
+      [f.source.kind,f.source.id,head.accepted])).rows;
+    expect(rootTransitions).toHaveLength(1);
+    expect(rootTransitions[0]).toMatchObject({ action:'root',predecessor:null,quantity:'8' });
+    expect(rootTransitions[0].origin).toBe(rootTransitions[0].evidenceLineId);
+    const revisionsBefore = (await db.query(`SELECT count(*)::int count FROM mdf_evidence_revisions
+      WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0].count;
+    expect(await repo.upsert(command)).toEqual(saved);
+    expect(await runner().processOne()).toMatchObject({ status:'idle' });
+    expect((await db.query(`SELECT count(*)::int count FROM mdf_evidence_revisions
+      WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0].count).toBe(revisionsBefore);
+    expect((await db.query(`SELECT count(*)::int count FROM mdf_physical_lineage_transitions
+      WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0].count).toBe(1);
+  });
+
+  it('rolls back the v2 root receipt and command audit together when receipt persistence fails', async () => {
+    const f = await fixture('bazisCutSet',8,8);
+    const before = {
+      head: (await db.query(`SELECT version::text,accepted_revision_key,received_revision_key
+        FROM mdf_source_heads WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0],
+      revisions: (await db.query(`SELECT count(*)::int count FROM mdf_evidence_revisions
+        WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0].count,
+      lines: (await db.query(`SELECT count(*)::int count FROM mdf_evidence_lines
+        WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0].count,
+      lineage: (await db.query(`SELECT (SELECT count(*)::int FROM mdf_physical_lineage_contracts
+          WHERE source_kind=$1 AND source_id=$2) contracts,
+        (SELECT count(*)::int FROM mdf_physical_lineage_transitions
+          WHERE source_kind=$1 AND source_id=$2) transitions`,[f.source.kind,f.source.id])).rows[0],
+      jobs: (await db.query(`SELECT count(*)::int count FROM mdf_recalculation_jobs
+        WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0].count,
+      audits: (await audits(`${f.source.kind}:${f.source.id}`)).length,
+    };
+    const command = { ...await f.command(),targetColumn:'completed' as const,
+      idempotencyKey:'e2e-v2-root-command-failure',requestId:'E2E-lineage-reject-root' };
+    await db.query("ALTER TABLE mdf_manual_command_results ADD CONSTRAINT e2e_v2_root_result_failure CHECK(command_key<>'e2e-v2-root-command-failure')");
+    try {
+      await expect(repo.upsert(command)).rejects.toMatchObject({ code:'23514' });
+    } finally {
+      await db.query('ALTER TABLE mdf_manual_command_results DROP CONSTRAINT e2e_v2_root_result_failure');
+    }
+    expect((await db.query(`SELECT version::text,accepted_revision_key,received_revision_key
+      FROM mdf_source_heads WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0]).toEqual(before.head);
+    expect((await db.query(`SELECT count(*)::int count FROM mdf_evidence_revisions
+      WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0].count).toBe(before.revisions);
+    expect((await db.query(`SELECT count(*)::int count FROM mdf_evidence_lines
+      WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0].count).toBe(before.lines);
+    expect((await db.query(`SELECT (SELECT count(*)::int FROM mdf_physical_lineage_contracts
+        WHERE source_kind=$1 AND source_id=$2) contracts,
+      (SELECT count(*)::int FROM mdf_physical_lineage_transitions
+        WHERE source_kind=$1 AND source_id=$2) transitions`,[f.source.kind,f.source.id])).rows[0]).toEqual(before.lineage);
+    expect((await db.query(`SELECT count(*)::int count FROM mdf_recalculation_jobs
+      WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0].count).toBe(before.jobs);
+    expect(await audits(`${f.source.kind}:${f.source.id}`)).toHaveLength(before.audits);
+    expect((await db.query('SELECT 1 FROM mdf_board_manual_moves WHERE card_kind=$1 AND card_id=$2',
+      [f.source.kind,f.source.id])).rows).toHaveLength(0);
+    const saved = await repo.upsert(command);
+    await runJob(saved.jobId!);
+    const accepted = (await db.query(`SELECT accepted_revision_key FROM mdf_source_heads
+      WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0].accepted_revision_key;
+    expect((await db.query(`SELECT operation FROM mdf_physical_lineage_contracts
+      WHERE source_kind=$1 AND source_id=$2 AND revision_key=$3`,[f.source.kind,f.source.id,accepted])).rows)
+      .toEqual([{ operation:'production' }]);
+    expect(await repo.upsert(command)).toEqual(saved);
+    expect((await db.query(`SELECT count(*)::int count FROM mdf_physical_lineage_contracts
+      WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0].count).toBe(1);
+  });
+
+  it('manual v2 carry preserves overhang and replays consumed plus reserved bath pins one-to-one', async () => {
+    const f = await fixture('bazisCutSet',10,10);
+    const root = await addLineageRevision(f,{ revisionKey:'v2-root-10',memberQuantity:10,physicalQuantity:10,operation:'production' });
+    await setAssignmentQuantity(f,8);
+    const carried = await addLineageRevision(f,{ revisionKey:'v2-carry-8',memberQuantity:8,physicalQuantity:10,operation:'carry' });
+    expect(root.proofId).not.toBe(carried.proofId);
+
+    const consumedBath = await addBathForPin(f,true,f.detailId,4);
+    const reservedBath = await addBathForPin(f,false,f.detailId,6,500000);
+    const beforeRevision = (await db.query<{ revision:string }>(`SELECT accepted_revision_key revision FROM mdf_source_heads
+      WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0].revision;
+    const beforePins = (await db.query<{ state:string;quantity:string;bath_id:string;bath_revision:string;evidence_line_id:string }>(
+      `SELECT a.state,a.quantity::text quantity,a.bath_id,a.bath_revision,a.evidence_line_id::text evidence_line_id
+      FROM mdf_bath_allocations a WHERE a.state<>'released' AND a.evidence_line_id=$1 ORDER BY a.bath_id`,[carried.proofId])).rows;
+    expect(beforePins).toEqual([
+      { state:'consumed',quantity:'4',bath_id:consumedBath,bath_revision:'pin-bath',evidence_line_id:carried.proofId },
+      { state:'reserved',quantity:'6',bath_id:reservedBath,bath_revision:'pin-bath',evidence_line_id:carried.proofId },
+    ]);
+
+    const command = { ...await f.command(),targetColumn:'completed' as const };
+    const saved = await repo.upsert(command);
+    await runJob(saved.jobId!);
+    const current = (await db.query<{ revision:string }>(`SELECT accepted_revision_key revision FROM mdf_source_heads
+      WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0].revision;
+    expect(current).not.toBe(beforeRevision);
+    expect(await ledger(f.source)).toEqual([
+      { stage_code:'cut',quantity:'10' },{ stage_code:'membership',quantity:'8' },
+    ]);
+    const transition = (await db.query<{ evidenceLineId:string;action:string;predecessor:string;origin:string;quantity:string }>(
+      `SELECT t.evidence_line_id::text "evidenceLineId",t.action,t.predecessor_evidence_line_id::text predecessor,
+        t.canonical_origin_evidence_line_id::text origin,l.quantity::text quantity
+      FROM mdf_physical_lineage_transitions t JOIN mdf_evidence_lines l USING(evidence_line_id)
+      WHERE t.source_kind=$1 AND t.source_id=$2 AND t.revision_key=$3`,
+      [f.source.kind,f.source.id,current])).rows;
+    expect(transition).toEqual([{ evidenceLineId:expect.any(String),action:'carry',predecessor:carried.proofId,
+      origin:root.proofId,quantity:'10' }]);
+    const pinHistory = (await db.query<{ state:string;quantity:string;bath_id:string;bath_revision:string;
+      evidence_line_id:string;revision_key:string }>(`SELECT a.state,a.quantity::text quantity,a.bath_id,a.bath_revision,
+        a.evidence_line_id::text evidence_line_id,e.revision_key FROM mdf_bath_allocations a
+      JOIN mdf_evidence_lines e USING(evidence_line_id) WHERE e.source_kind=$1 AND e.source_id=$2
+      ORDER BY a.bath_id,a.allocation_id`,[f.source.kind,f.source.id])).rows;
+    expect(pinHistory).toHaveLength(4);
+    expect(pinHistory.filter(row => row.state==='released').map(row => [row.quantity,row.bath_id,row.evidence_line_id]))
+      .toEqual([['4',consumedBath,carried.proofId],['6',reservedBath,carried.proofId]]);
+    expect(pinHistory.filter(row => row.state!=='released').map(row => [row.state,row.quantity,row.bath_id,
+      row.bath_revision,row.evidence_line_id,row.revision_key])).toEqual([
+      ['consumed','4',consumedBath,'pin-bath',transition[0].evidenceLineId,current],
+      ['reserved','6',reservedBath,'pin-bath',transition[0].evidenceLineId,current],
+    ]);
+    const revisionsBeforeReplay = (await db.query(`SELECT count(*)::int count FROM mdf_evidence_revisions
+      WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0].count;
+    const publishedRevision = (await db.query('SELECT published_revision FROM mdf_engine_state WHERE singleton=true')).rows[0].published_revision;
+    expect(await repo.upsert(command)).toEqual(saved);
+    expect(await runner().processOne()).toMatchObject({ status:'idle' });
+    expect((await db.query(`SELECT count(*)::int count FROM mdf_evidence_revisions
+      WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0].count).toBe(revisionsBeforeReplay);
+    expect((await db.query('SELECT published_revision FROM mdf_engine_state WHERE singleton=true')).rows[0].published_revision)
+      .toBe(publishedRevision);
+    const noOp = await repo.upsert({ ...await f.command(),targetColumn:'completed' });
+    expect(noOp).toMatchObject({ changed:false });
+    expect((await db.query(`SELECT accepted_revision_key FROM mdf_source_heads WHERE source_kind=$1 AND source_id=$2`,
+      [f.source.kind,f.source.id])).rows[0].accepted_revision_key).toBe(current);
+  });
+
+  it('v2 carry receipt survives worker rollback intact and retries publication exactly once', async () => {
+    const f = await fixture('bazisCutSet',10,10);
+    const root = await addLineageRevision(f,{ revisionKey:'rollback-v2-root',memberQuantity:10,
+      physicalQuantity:10,operation:'production' });
+    await setAssignmentQuantity(f,8);
+    const predecessor = await addLineageRevision(f,{ revisionKey:'rollback-v2-carry',memberQuantity:8,
+      physicalQuantity:10,operation:'carry' });
+    await addBathForPin(f,true,f.detailId,4);
+    const acceptedBefore = (await db.query<{ accepted:string }>(`SELECT accepted_revision_key accepted FROM mdf_source_heads
+      WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0].accepted;
+    const publicationBefore = (await db.query('SELECT published_revision FROM mdf_engine_state WHERE singleton=true')).rows[0].published_revision;
+    const lineageRows = (await db.query<{ revision_key:string; operation:string; action:string;
+      predecessor:string|null; origin:string }>(`SELECT c.revision_key,c.operation,t.action,t.predecessor_evidence_line_id::text predecessor,
+        t.canonical_origin_evidence_line_id::text origin FROM mdf_physical_lineage_contracts c
+      JOIN mdf_physical_lineage_transitions t USING(source_kind,source_id,revision_key)
+      WHERE c.source_kind=$1 AND c.source_id=$2 ORDER BY c.revision_key`,[f.source.kind,f.source.id])).rows;
+    const lineagesBefore = lineageRows;
+    expect(lineagesBefore).toHaveLength(2);
+    const allocationsBefore = (await db.query(`SELECT allocation_id::text allocation_id,state,quantity::text quantity,
+      bath_revision,evidence_line_id::text evidence_line_id FROM mdf_bath_allocations WHERE state<>'released'
+      AND evidence_line_id=$1`,[predecessor.proofId])).rows;
+    expect(allocationsBefore).toHaveLength(1);
+
+    const command = { ...await f.command(),targetColumn:'completed' as const };
+    const saved = await repo.upsert(command);
+    const settled = (await db.query<{ received:string;accepted:string }>(`SELECT received_revision_key received,
+      accepted_revision_key accepted FROM mdf_source_heads WHERE source_kind=$1 AND source_id=$2`,
+      [f.source.kind,f.source.id])).rows[0];
+    expect(settled.accepted).toBe(acceptedBefore);
+    expect(settled.received).not.toBe(acceptedBefore);
+    const lineageAtSettlement = (await db.query<{ operation:string;action:string;predecessor:string;origin:string }>(
+      `SELECT c.operation,t.action,t.predecessor_evidence_line_id::text predecessor,
+        t.canonical_origin_evidence_line_id::text origin
+      FROM mdf_physical_lineage_contracts c JOIN mdf_physical_lineage_transitions t USING(source_kind,source_id,revision_key)
+      WHERE c.source_kind=$1 AND c.source_id=$2 AND c.revision_key=$3`,
+      [f.source.kind,f.source.id,settled.received])).rows;
+    expect(lineageAtSettlement).toEqual([{ operation:'carry',action:'carry',predecessor:predecessor.proofId,origin:root.proofId }]);
+
+    await db.query(`ALTER TABLE mdf_published_positions ADD CONSTRAINT e2e_v2_manual_publish_failure
+      CHECK(detail_id<>${f.detailId}) NOT VALID`);
+    try {
+      expect(await runner().processOne()).toMatchObject({ status:'retry',jobId:saved.jobId });
+    } finally {
+      await db.query('ALTER TABLE mdf_published_positions DROP CONSTRAINT e2e_v2_manual_publish_failure');
+    }
+    const afterFailure = (await db.query<{ received:string;accepted:string }>(`SELECT received_revision_key received,
+      accepted_revision_key accepted FROM mdf_source_heads WHERE source_kind=$1 AND source_id=$2`,
+      [f.source.kind,f.source.id])).rows[0];
+    expect(afterFailure).toEqual(settled);
+    const lineagesAfterSettlement = (await db.query<typeof lineageRows[number]>(`SELECT c.revision_key,c.operation,t.action,t.predecessor_evidence_line_id::text predecessor,
+        t.canonical_origin_evidence_line_id::text origin FROM mdf_physical_lineage_contracts c
+      JOIN mdf_physical_lineage_transitions t USING(source_kind,source_id,revision_key)
+      WHERE c.source_kind=$1 AND c.source_id=$2 ORDER BY c.revision_key`,[f.source.kind,f.source.id])).rows;
+    const expectedLineages = [...lineagesBefore,{ revision_key:settled.received,operation:'carry',action:'carry',
+      predecessor:predecessor.proofId,origin:root.proofId }].sort((left,right) =>
+      String(left.revision_key).localeCompare(String(right.revision_key)));
+    expect(lineagesAfterSettlement).toEqual(expectedLineages);
+    expect((await db.query('SELECT status,error_code FROM mdf_recalculation_jobs WHERE job_id=$1',[saved.jobId])).rows[0])
+      .toMatchObject({ status:'pending',error_code:'MDF_PROCESSING_FAILED' });
+    expect((await db.query('SELECT published_revision FROM mdf_engine_state WHERE singleton=true')).rows[0].published_revision)
+      .toBe(publicationBefore);
+    expect((await db.query(`SELECT count(*)::int count FROM audit_log WHERE event='mdf_board.forward_revision_accepted'
+      AND entity_id=$1`,[`${f.source.kind}:${f.source.id}`])).rows[0].count).toBe(0);
+    expect((await db.query(`SELECT allocation_id::text allocation_id,state,quantity::text quantity,
+      bath_revision,evidence_line_id::text evidence_line_id FROM mdf_bath_allocations WHERE state<>'released'
+      AND evidence_line_id=$1`,[predecessor.proofId])).rows).toEqual(allocationsBefore);
+
+    await db.query('UPDATE mdf_recalculation_jobs SET next_attempt_at=now() WHERE job_id=$1',[saved.jobId]);
+    await runJob(saved.jobId!);
+    expect((await db.query(`SELECT accepted_revision_key FROM mdf_source_heads WHERE source_kind=$1 AND source_id=$2`,
+      [f.source.kind,f.source.id])).rows[0].accepted_revision_key).toBe(settled.received);
+    expect((await db.query(`SELECT count(*)::int count FROM audit_log WHERE event='mdf_board.forward_revision_accepted'
+      AND entity_id=$1`,[`${f.source.kind}:${f.source.id}`])).rows[0].count).toBe(1);
+    expect(await repo.upsert(command)).toEqual(saved);
+    expect(await runner().processOne()).toMatchObject({ status:'idle' });
+  });
+
+  it('keeps existing v1 physical facts on the v1 writer instead of promoting them without lineage', async () => {
+    const f = await fixture('bazisCutSet');
+    await addPartialPhysicalProof(f);
+    const command = { ...await f.command(),targetColumn:'completed' as const };
+    const result = await repo.upsert(command);
+    await runJob(result.jobId!);
+    expect(await ledger(f.source)).toEqual([
+      { stage_code:'cut',quantity:'2' },{ stage_code:'cut',quantity:'2' },{ stage_code:'membership',quantity:'4' },
+    ]);
+    expect((await db.query(`SELECT count(*)::int count FROM mdf_physical_lineage_contracts
+      WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0].count).toBe(0);
+  });
+
+  it('carries authenticated physical-only owner B without treating it as a current-member status event', async () => {
+    const f = await fixture('bazisCutSet',8,8);
+    const orderB=f.orderId+10000, detailB=orderB*10, sourceDetailB=f.orderId+100000;
+    await db.query(`INSERT INTO orders(order_id,order_name,order_kind,delete_flag,version,order_status_id,payment_status_id,created_by)
+      VALUES($1,$2,'production_order',false,1,4,1,1)`,[orderB,`E2E retained owner ${orderB}`]);
+    await db.query(`INSERT INTO order_details(detail_id,order_id,detail_number,quantity,production_status_id,delete_flag,material_id)
+      VALUES($1,$2,1,4,1,false,1)`,[detailB,orderB]);
+    await db.query('UPDATE orders SET created_by=999 WHERE order_id=$1',[f.orderId]);
+    await db.query(`INSERT INTO bazis_cut_set_details(bazis_cut_set_detail_id,bazis_cut_set_id,source_order_id,
+      source_order_detail_id,quantity,cut_enabled,material_name) VALUES($1,$2,$3,$4,4,true,'MDF 10 mm')`,
+      [sourceDetailB,f.orderId,orderB,detailB]);
+    const fence = async () => (await db.query<{ accepted:string|null;version:string;epoch:string }>(`SELECT
+      accepted_revision_key accepted,version::text,correction_epoch::text epoch FROM mdf_source_heads
+      WHERE source_kind=$1 AND source_id=$2`,[f.source.kind,f.source.id])).rows[0];
+    const demand = [{orderId:f.orderId,detailId:f.detailId,quantity:8},
+      {orderId:orderB,detailId:detailB,quantity:4},{orderId:f.orderId,detailId:f.detailId+1,quantity:1}];
+
+    const oldFence=await fence();
+    const acceptedV1=await database.transaction(tx=>recordMdfReceipt(tx,{sourceKind:'bazisCutSet',sourceId:f.source.id,
+      revisionKey:'retained-owner-v1',origin:'derived',actorUserId:1,requestId:'retained-owner-v1',
+      causeKey:'retained-owner-v1',expectedFence:{version:oldFence.version,correctionEpoch:oldFence.epoch},accept:true,rules:[],
+      lines:[
+        {lineKey:'owner-a',orderId:f.orderId,detailId:f.detailId,quantity:8,stageCode:'membership',evidenceKind:'derived',rework:false},
+        {lineKey:'owner-b',orderId:orderB,detailId:detailB,quantity:4,stageCode:'membership',evidenceKind:'derived',rework:false},
+      ],executionContext:{sourceCreatedAt:'2026-09-21T00:00:00Z',displayName:'retained owner fixture',
+        priorColumn:'parsed',compositionComplete:true,demand}}));
+    await runJob(acceptedV1.jobId);
+
+    const v1Fence=await fence();
+    const rootRevision='retained-owner-root-v2';
+    const rootRows=[
+      {lineKey:'owner-a-cut',orderId:f.orderId,detailId:f.detailId,quantity:8,stageCode:'cut',evidenceKind:'physical' as const,rework:false},
+      {lineKey:'owner-b-cut',orderId:orderB,detailId:detailB,quantity:4,stageCode:'cut',evidenceKind:'physical' as const,rework:false},
+    ];
+    const rooted=await database.transaction(tx=>recordMdfLineageReceipt(tx,{sourceKind:'bazisCutSet',sourceId:f.source.id,
+      revisionKey:rootRevision,origin:'manual',actorUserId:1,requestId:rootRevision,causeKey:rootRevision,
+      expectedFence:{version:v1Fence.version,correctionEpoch:v1Fence.epoch},accept:true,rules:[],
+      lines:[
+        {lineKey:'owner-a',orderId:f.orderId,detailId:f.detailId,quantity:8,stageCode:'membership',evidenceKind:'derived',rework:false},
+        {lineKey:'owner-b',orderId:orderB,detailId:detailB,quantity:4,stageCode:'membership',evidenceKind:'derived',rework:false},
+        ...rootRows,
+      ],lineage:{operation:'production',authority:'manual_production',actions:rootRows.map(line=>({lineKey:line.lineKey,action:'root' as const})),
+        droppedPredecessorEvidenceLineIds:[]},executionContext:{sourceCreatedAt:'2026-09-21T00:00:00Z',
+        displayName:'retained owner v2 root',priorColumn:'parsed',compositionComplete:true,demand}}));
+    await runJob(rooted.jobId);
+    await db.query('UPDATE bazis_cut_set_details SET cut_enabled=false WHERE bazis_cut_set_detail_id=$1',[sourceDetailB]);
+
+    const rootIds=(await db.query<{lineKey:string;evidenceLineId:string}>(`SELECT line_key "lineKey",
+      evidence_line_id::text "evidenceLineId" FROM mdf_evidence_lines WHERE source_kind='bazisCutSet'
+      AND source_id=$1 AND revision_key=$2 AND evidence_kind='physical' ORDER BY line_key`,
+      [f.source.id,rootRevision])).rows;
+    const carryFence=await fence();
+    const carryRevision='retained-owner-carry-v2';
+    const carry=await database.transaction(tx=>recordMdfLineageReceipt(tx,{sourceKind:'bazisCutSet',sourceId:f.source.id,
+      revisionKey:carryRevision,origin:'manual',actorUserId:1,requestId:carryRevision,causeKey:carryRevision,
+      expectedFence:{version:carryFence.version,correctionEpoch:carryFence.epoch},accept:true,rules:[],
+      lines:[
+        {lineKey:'owner-a',orderId:f.orderId,detailId:f.detailId,quantity:8,stageCode:'membership',evidenceKind:'derived',rework:false},
+        ...rootRows,
+      ],lineage:{operation:'carry',actions:rootIds.map(row=>({lineKey:row.lineKey,action:'carry' as const,
+        predecessorEvidenceLineId:row.evidenceLineId})),droppedPredecessorEvidenceLineIds:[]},
+      executionContext:{sourceCreatedAt:'2026-09-21T00:00:00Z',displayName:'retained owner carry',
+        priorColumn:'parsed',compositionComplete:true,demand}}));
+    await runJob(carry.jobId);
+
+    expect((await db.query(`SELECT production_status_id FROM order_details WHERE detail_id=$1`,[detailB])).rows[0].production_status_id)
+      .toBe(1);
+    const base = rolePolicyForUser(admin);
+    const restricted: CurrentUser = { ...admin,id:'999',role:'manager',roleId:2,policyScopes:{ ...base,
+      orders:{ ...base.orders,view:'own',update:'own' },
+      productionTasks:{ ...base.productionTasks,update:'own' } } };
+    const beforeDenied = (await db.query(`SELECT version::text,accepted_revision_key,received_revision_key
+      FROM mdf_source_heads WHERE source_kind='bazisCutSet' AND source_id=$1`,[f.source.id])).rows[0];
+    await expect(repo.upsert({ ...await f.command(),currentUser:restricted,targetColumn:'completed' as const }))
+      .rejects.toMatchObject({ code:'PERMISSION_DENIED' });
+    expect((await db.query(`SELECT version::text,accepted_revision_key,received_revision_key
+      FROM mdf_source_heads WHERE source_kind='bazisCutSet' AND source_id=$1`,[f.source.id])).rows[0]).toEqual(beforeDenied);
+    expect(await audits(`bazisCutSet:${f.source.id}`)).toHaveLength(0);
+    const command={...await f.command(),targetColumn:'completed' as const};
+    const saved=await repo.upsert(command);
+    await runJob(saved.jobId!);
+    expect((await db.query('SELECT production_status_id FROM order_details WHERE detail_id=$1',[f.detailId])).rows[0].production_status_id)
+      .toBe(2);
+    expect((await db.query('SELECT production_status_id FROM order_details WHERE detail_id=$1',[detailB])).rows[0].production_status_id)
+      .toBe(1);
+    expect((await db.query(`SELECT count(*)::int count FROM audit_log
+      WHERE event='status_automation.rule_applied' AND related_order_id=$1
+        AND metadata_json->>'eventType'='mdf.board.completed' AND request_id=$2`,
+      [orderB,command.requestId])).rows[0].count).toBe(0);
+    const accepted=(await db.query<{revision:string}>(`SELECT accepted_revision_key revision FROM mdf_source_heads
+      WHERE source_kind='bazisCutSet' AND source_id=$1`,[f.source.id])).rows[0].revision;
+    expect((await db.query(`SELECT count(*)::int count FROM mdf_evidence_lines WHERE source_kind='bazisCutSet'
+      AND source_id=$1 AND revision_key=$2 AND stage_code='membership'`,[f.source.id,accepted])).rows[0].count).toBe(1);
+    expect((await db.query(`SELECT action,count(*)::int count FROM mdf_physical_lineage_transitions
+      WHERE source_kind='bazisCutSet' AND source_id=$1 AND revision_key=$2 GROUP BY action`,
+      [f.source.id,accepted])).rows).toEqual([{action:'carry',count:2}]);
   });
   it('clear keeps confirmed quantity and consumed pins across another real forward advance', async () => {
     const f = await fixture(); await addBathForPin(f,true); await addPartialPhysicalProof(f);
@@ -243,6 +626,17 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real MDF manual com
     const laminatedHead = (await db.query(`SELECT accepted_revision_key FROM mdf_source_heads
       WHERE source_kind='bath' AND source_id=$1`,[f.source.id])).rows[0].accepted_revision_key;
     expect(laminatedHead).not.toBe(beforeHead);
+    expect((await db.query(`SELECT operation,production_authority,predecessor_accepted_revision_key
+      FROM mdf_physical_lineage_contracts WHERE source_kind='bath' AND source_id=$1 AND revision_key=$2`,
+      [f.source.id,laminatedHead])).rows).toEqual([{ operation:'production',production_authority:'manual_production',
+        predecessor_accepted_revision_key:beforeHead }]);
+    expect((await db.query(`SELECT t.action,t.predecessor_evidence_line_id::text predecessor,
+        t.canonical_origin_evidence_line_id::text origin,l.quantity::text quantity
+      FROM mdf_physical_lineage_transitions t JOIN mdf_evidence_lines l USING(evidence_line_id)
+      WHERE t.source_kind='bath' AND t.source_id=$1 AND t.revision_key=$2`,[f.source.id,laminatedHead])).rows)
+      .toEqual([{ action:'root',predecessor:null,origin:(await db.query<{id:string}>(`SELECT evidence_line_id::text id
+        FROM mdf_physical_lineage_transitions WHERE source_kind='bath' AND source_id=$1 AND revision_key=$2`,
+        [f.source.id,laminatedHead])).rows[0].id,quantity:'4' }]);
     expect((await db.query('SELECT production_status_id FROM order_details WHERE order_id=$1 ORDER BY detail_id',[f.orderId])).rows)
       .toEqual([{ production_status_id: 3 },{ production_status_id: 1 }]);
     expect((await db.query("SELECT state,quantity FROM mdf_bath_allocations WHERE bath_id=$1 AND state<>'released'",[f.source.id])).rows)

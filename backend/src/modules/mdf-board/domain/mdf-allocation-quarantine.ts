@@ -108,12 +108,12 @@ export function planMdfQuarantinedAllocations(input: {
       // Preserve the v1 stage/position aggregate cap exactly. V2 packet/BASIS
       // physical rows are independently authenticated by the sealed lineage.
       const memberByPartition = positionReworkQuantities(own.filter(l => l.stage === 'membership' && l.evidence === 'derived'));
-      const declarationByPartition = positionReworkQuantities(own.filter(l => l.stage === 'declaration'
+      const declarationByPartition = positionReworkQuantities(own.filter(l => (l.stage === 'cut' || l.stage === 'laminated')
         && l.evidence === 'declaration'));
       const hasUnsupportedOverhang = !lineageMayCarry && ['cut','laminated'].some(stage =>
         [...quantities(own.filter(l => l.stage === stage && l.evidence === 'physical'))]
           .some(([key,row]) => row.quantity > (members.get(key)?.quantity ?? 0)))
-        || (lineageMayCarry && [...declarationByPartition].some(([key,quantity]) =>
+        || (hasLineage && [...declarationByPartition].some(([key,quantity]) =>
           quantity > (memberByPartition.get(key) ?? 0)));
       if (hasUnsupportedOverhang) reason = 'MEMBERSHIP_MISMATCH';
     }

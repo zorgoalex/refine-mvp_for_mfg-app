@@ -8,7 +8,9 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { assertCurrentWorkerSessionInTransaction } from './cnc-telegram-worker-session-fencing';
 import { PgCncManualSendObservationRegistration } from './pg-cnc-manual-send-observation-registration';
 import { requireMdfCommandBoundary } from '../../mdf-board/application/mdf-command-boundary';
-import { recordMdfReceipt, type MdfReceiptLine } from '../../mdf-board/application/mdf-receipt';
+import { recordMdfLineageReceipt, recordMdfReceipt, type MdfReceiptLine } from '../../mdf-board/application/mdf-receipt';
+import { buildMdfForwardLineageManifest } from '../../mdf-board/application/mdf-forward-lineage';
+import type { MdfPhysicalLineageManifest } from '../../mdf-board/application/mdf-physical-lineage';
 import { loadMdfExecutionSnapshot, mdfSourceKey } from '../../mdf-board/adapters/mdf-execution-snapshot';
 import { discoverMdfCorrectionClosure, MAX_MDF_CORRECTION_ROWS } from '../../mdf-board/adapters/mdf-correction-snapshot';
 import { planMdfCncObservationPinReconciliation } from '../../mdf-board/adapters/mdf-cnc-pin-reconciliation';
@@ -18,6 +20,7 @@ import { isMdfEvidenceContract } from '../../mdf-board/domain/mdf-evidence-contr
 import { MdfNeedsAttention, type MdfSourceKind } from '../../mdf-board/application/mdf-job-runner';
 import type { MdfExecutionContext } from '../../mdf-board/domain/mdf-execution-context';
 import { mdfSum } from '../../mdf-board/domain/mdf-quantities';
+import { matchesMdfValidatedPhysicalLineage, mdfLineageRevisionKey } from '../../mdf-board/domain/mdf-physical-lineage';
 import type { CncTelegramWorkerSessionLeaseContext } from '../application/cnc-telegram-worker-session.types';
 import type { CncTelegramImportCompleteDto } from '../dto/cnc-telegram-import.dto';
 import type {
@@ -864,6 +867,41 @@ export class PgCncTelegramMdfObservationRepository implements CncTelegramMdfObse
     const targetAllocations = pinContext.allocations.filter(allocation => allocation.evidenceSourceKind === 'packet'
       && allocation.evidenceSourceId === target.packet_id);
     const candidateLines = [...preserved, ...cuts];
+    // Preserve the v1 producer byte-for-byte, including for legacy physical
+    // facts which cannot be retroactively authenticated. Once this accepted
+    // packet revision is v2, the next CNC receipt must also carry its exact
+    // sealed physical identities; migration 182 intentionally rejects v1
+    // writes against a lineage-enabled source.
+    const lineageKey = mdfLineageRevisionKey({ kind: 'packet', id: target.packet_id }, revision);
+    const previousLineage = pinContext.execution.lineage.get(lineageKey);
+    const previousLineageIssues = pinContext.execution.lineageIssues.get(lineageKey) ?? [];
+    let lineage: MdfPhysicalLineageManifest | undefined;
+    if (previousLineage || previousLineageIssues.length) {
+      // A damaged/missing v2 descriptor must never fall back to the legacy
+      // writer, which would either fail late at the DB guard or bless a v1
+      // interpretation of authenticated history.
+      if (!previousLineage || previousLineageIssues.length
+        || !matchesMdfValidatedPhysicalLineage({ sourceKind: 'packet', sourceId: target.packet_id, revisionKey: revision,
+          lines: base.map(line => ({ ...line, revision: line.revision, stage: line.stageCode, evidence: line.evidenceKind })),
+          lineage: previousLineage })) return { kind: 'needs_reconciliation' };
+      try {
+        const forward = buildMdfForwardLineageManifest({
+          sourceKind: 'packet', sourceId: target.packet_id, predecessorRevisionKey: revision,
+          previousPhysicalRows: base.filter(line => line.evidenceKind === 'physical'),
+          previousLineage, nextLines: candidateLines, rootLineKeys: cuts.map(line => line.lineKey),
+        });
+        // CNC authority is a distinct production event even when this receipt
+        // adds no quantity. In that zero-delta case every physical action is a
+        // carry; `operation:'carry'` is reserved to manual-origin receipts.
+        lineage = { operation: 'production', authority: 'cnc_observation',
+          actions: forward.actions, droppedPredecessorEvidenceLineIds: [] };
+      } catch (error) {
+        if (error instanceof Error && ['MDF_LINEAGE_INVALID', 'MDF_LINEAGE_REQUIRED'].includes(error.message)) {
+          return { kind: 'needs_reconciliation' };
+        }
+        throw error;
+      }
+    }
     const rebase = planMdfCncObservationPinReconciliation({
       previousLines: base.map(line => ({ evidenceLineId: line.evidenceLineId, lineKey: line.lineKey,
         orderId: line.orderId, detailId: line.detailId, quantity: line.quantity, stage: line.stageCode,
@@ -903,12 +941,15 @@ export class PgCncTelegramMdfObservationRepository implements CncTelegramMdfObse
       [rebase.map(row => row.old.allocationId)])).rows.map(row => row.allocationId);
       if (released.length !== rebase.length) throw new Error('MDF_CNC_PIN_RELEASE_INCOMPLETE');
     }
-    const saved = await recordMdfReceipt(tx, { sourceKind: 'packet', sourceId: target.packet_id,
-      revisionKey, origin: 'cnc', actorUserId: Number(user.id), requestId,
+    const receiptInput = { sourceKind: 'packet' as const, sourceId: target.packet_id,
+      revisionKey, origin: 'cnc' as const, actorUserId: Number(user.id), requestId,
       causeKey: `cnc-observation:${report.claimId}`, expectedFence: { version: head.version, correctionEpoch: head.correction_epoch },
       sourceDigest: digest([revision, reportDigest, lease.workerInstanceId, observationVersion]),
       executionContext: context, accept: true,
-      lines: [...preserved, ...cuts], rules });
+      lines: candidateLines, rules };
+    const saved = lineage
+      ? await recordMdfLineageReceipt(tx, { ...receiptInput, lineage })
+      : await recordMdfReceipt(tx, receiptInput);
     if (!saved.accepted || saved.replay) throw new Error('MDF_CNC_RECEIPT_ACCEPTANCE_REQUIRED');
     if (rebase.length) {
       const lineKeys = [...new Set(rebase.map(row => row.lineKey))];

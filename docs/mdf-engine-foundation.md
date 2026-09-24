@@ -177,11 +177,13 @@ be nonempty. Current-member events continue to be derived from current
 membership, not from retained proof at a removed position.
 
 The pure composition helper is still not connected to an assignment-edit
-command. Manual/BASIS production-root writers have not opted into v2, so no
-composition mutation can create, carry, reduce or drop physical facts through
-that helper. There is no historical backfill or automatic promotion of legacy
-evidence, and the active engine/runtime flags remain unchanged. Empty
-assignments and bath overhang are not supported by this increment.
+command. Reviewed manual production can create v2 roots only for genuinely new
+proof when a v1 predecessor has no physical evidence; manual/BASIS commands
+carry authenticated v2 proof, and same-membership queued acceptance preserves
+exact proof and pin lineage. Existing v1 physical evidence is never promoted.
+There is no historical backfill or automatic promotion of legacy evidence, and
+the active engine/runtime flags remain unchanged. Empty assignments and bath
+overhang are not supported by this increment.
 
 ## Storage and bounded lineage consumers
 
@@ -201,10 +203,15 @@ a lineage revision, legacy writers cannot overwrite it; pending acceptance must
 settle before the next revision. Old physical history without verified origins
 is not automatically promoted. Legacy receipt digest/replay remains compatible.
 
-The bounded snapshot, allocation-quarantine, and active correction paths now
-consume this contract for accepted v2 revisions. The ordinary manual/BASIS
-physical-production and assignment-edit producers are still fenced; no
-historical backfill or activation follows from this consumer integration.
+The bounded snapshot, allocation-quarantine, active correction, ordinary manual
+production, BASIS rename, same-membership compatible-advance, and bounded CNC
+observation paths consume this contract for accepted v2 revisions. A fresh CNC
+receipt carries exact accepted v2 physical identities and roots only the
+remaining quantity under the existing membership cap; zero-delta receipts still
+record CNC authority without duplicating proof. V1 receipts remain unchanged.
+CNC physical overhang, changed-membership assignment edits, historical
+backfill, and other unreviewed physical producers remain fenced; no activation
+follows from this integration.
 
 ### Existing receipt and allocation boundaries
 
