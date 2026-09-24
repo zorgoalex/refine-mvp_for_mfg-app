@@ -9,10 +9,15 @@ date, and combined area for all orders in the digest. A day with no matching
 orders is recorded as empty and does not send an empty message.
 
 The feature is opt-in at two separate levels. The stored automation setting is
-created `enabled = false`; the existing backend WhatsApp runtime flag also
-remains authoritative. Preview and manual-send controls can be used while the
-stored automation setting is off. Sending still requires the existing
-`BACKEND_ENABLE_WHATSAPP=true` runtime and an available configured relay owner.
+created `enabled = false`; the existing backend WhatsApp runtime flag remains
+authoritative for sending. The digest configuration tab is available to users
+with the complete permission bundle below, independently of the frontend
+WhatsApp feature flag. They can review settings and create previews while the
+backend WhatsApp runtime is disabled, but manual send and retry stay unavailable
+until the backend runtime and configured relay owner are available. Preview and
+manual-send controls can also be used while the stored automation setting is
+off. Sending still requires the existing `BACKEND_ENABLE_WHATSAPP=true` runtime
+and an available configured relay owner.
 Do not enable or replace an existing relay/cleanup owner as part of this feature
 without following the WhatsApp deployment runbook and preserving the current
 runtime flags.

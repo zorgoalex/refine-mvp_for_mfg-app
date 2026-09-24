@@ -8,6 +8,7 @@ const mockApi = vi.hoisted(() => ({
   settings: vi.fn(), saveSettings: vi.fn(), preview: vi.fn(), send: vi.fn(),
   runs: vi.fn(), run: vi.fn(), pageImage: vi.fn(), retry: vi.fn(),
 }));
+const mockFeatureFlags = vi.hoisted(() => ({ useBackendWhatsApp: true }));
 const pendingSessionStorage = new Map<string, string>();
 
 const mockForm = {
@@ -19,7 +20,7 @@ const mockForm = {
 };
 
 vi.mock('../../../api/dailyOrderDigestApi', () => ({ dailyOrderDigestApi: mockApi }));
-vi.mock('../../../config/featureFlags', () => ({ featureFlags: { useBackendWhatsApp: true } }));
+vi.mock('../../../config/featureFlags', () => ({ featureFlags: mockFeatureFlags }));
 vi.mock('@ant-design/icons', () => ({ ReloadOutlined: () => null, SendOutlined: () => null }));
 vi.mock('../../../ui/tooltipDelay', () => ({
   Table: (props: Record<string, any>) => {
@@ -79,6 +80,7 @@ async function settle() {
 
 beforeEach(() => {
   mockForm.resetFields();
+  mockFeatureFlags.useBackendWhatsApp = true;
   pendingSessionStorage.clear();
   vi.clearAllMocks();
   vi.stubGlobal('window', {
@@ -106,6 +108,47 @@ afterEach(() => {
 });
 
 describe('DailyOrderDigestConfig rendered flow', () => {
+  it('keeps settings and preview available with the frontend WhatsApp flag and backend runtime disabled', async () => {
+    mockFeatureFlags.useBackendWhatsApp = false;
+    mockApi.settings.mockResolvedValue({
+      ...settingsEnvelope,
+      runtime: { enabled: false, relayAvailable: false, unavailableReason: 'whatsapp_disabled' },
+    });
+    mockApi.preview.mockResolvedValue({
+      businessDate: '2026-09-24', orderCount: 1, totalArea: 2.5, empty: false,
+      pages: [{ pageIndex: 1, imageDataUrl: 'data:image/png;base64,offline-preview', orderIds: [41] }],
+    });
+    const historyRun = {
+      id: 'run-offline', businessDate: '2026-09-24', kind: 'manual', state: 'partial', orderCount: 1,
+      totalArea: 2.5, sentPageCount: 0, pageCount: 1, destinationMasked: '1234…@g.us',
+    };
+    mockApi.runs.mockResolvedValue({ runs: [historyRun] });
+    mockApi.run.mockResolvedValue({
+      run: historyRun,
+      pages: [{
+        pageIndex: 1, orderIds: [41], state: 'failed', attemptCount: 1, sentAt: null,
+        imageAvailable: true, expiresAt: '2099-09-24T00:00:00.000Z',
+      }],
+    });
+
+    await act(async () => { tree = create(<DailyOrderDigestConfig />); await settle(); });
+    expect(tree!.root.findAllByType('h4').some((node) => node.children.join('') === 'Рассылка заказов')).toBe(true);
+    expect(tree!.root.findAllByType('select').length).toBeGreaterThan(0);
+    expect(button('Предпросмотр')?.props.disabled).toBe(false);
+    expect(button('Отправить сейчас')?.props.disabled).toBe(true);
+    expect(tree!.root.findAllByType('aside').some((node) =>
+      String(node.props.description).includes('На сервере выключена отправка WhatsApp.'))).toBe(true);
+
+    await act(async () => { button('Предпросмотр')?.props.onClick(); await settle(); });
+    expect(tree!.root.findAllByType('img')[0]?.props.src).toBe('data:image/png;base64,offline-preview');
+    expect(button('Отправить сейчас')?.props.disabled).toBe(true);
+    await act(async () => { button('Подробности')?.props.onClick(); await settle(); });
+    expect(button('Повторить оставшиеся')?.props.disabled).toBe(true);
+    expect(button('Повторить всё')?.props.disabled).toBe(true);
+    expect(mockApi.send).not.toHaveBeenCalled();
+    expect(mockApi.retry).not.toHaveBeenCalled();
+  });
+
   it('keeps preview available while automation is off and reuses the send key after a network failure', async () => {
     mockApi.preview.mockResolvedValue({
       businessDate: '2026-09-23', orderCount: 3, totalArea: 8.25, empty: false,

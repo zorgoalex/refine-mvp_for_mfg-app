@@ -33,7 +33,6 @@ import type {
 } from '../../../api/dailyOrderDigestTypes';
 import { authSession } from '../../../api/authSession';
 import { getUserAuthorizationScopeKey } from '../../../api/authScopeIdentity';
-import { featureFlags } from '../../../config/featureFlags';
 import { Table } from '../../../ui/tooltipDelay';
 
 const { Paragraph, Text, Title } = Typography;
@@ -87,9 +86,8 @@ const PAGE_STATE_LABELS: Record<string, string> = {
 };
 
 export const dailyDigestTabVisible = (
-  featureEnabled: boolean,
   permissions: readonly string[] | null | undefined,
-): boolean => featureEnabled && DAILY_DIGEST_REQUIRED_PERMISSIONS.every((permission) => permissions?.includes(permission));
+): boolean => DAILY_DIGEST_REQUIRED_PERMISSIONS.every((permission) => permissions?.includes(permission));
 
 export const formatDigestArea = (area: number): string =>
   `${Number.isFinite(area) ? area.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0,00'} кв.м.`;
@@ -112,7 +110,7 @@ export const digestRuntimeReason = (reason: string | null): string => {
 export const DailyOrderDigestConfig: React.FC = () => {
   const authScopeKey = useSyncExternalStore(authSession.subscribe, getAuthScopeSnapshot, getAuthScopeSnapshot);
   const actorId = authSession.getUser()?.id ?? '';
-  const allowed = dailyDigestTabVisible(featureFlags.useBackendWhatsApp, authSession.getUser()?.permissions);
+  const allowed = dailyDigestTabVisible(authSession.getUser()?.permissions);
   const [form] = Form.useForm<SettingsFormValues>();
   const formValues = Form.useWatch([], form) as SettingsFormValues | undefined;
   const [envelope, setEnvelope] = useState<DailyDigestSettingsEnvelope | null>(null);

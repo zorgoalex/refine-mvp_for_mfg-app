@@ -9,13 +9,13 @@ import {
 import dayjs from 'dayjs';
 
 describe('daily order digest configuration helpers', () => {
-  it('requires both the WhatsApp feature flag and the complete permission bundle', () => {
+  it('shows the digest tab only with the complete permission bundle, independent of the WhatsApp runtime flag', () => {
     const all = ['whatsapp.manage', 'calendar.view', 'orders.view', 'orders.view_financials'];
-    expect(dailyDigestTabVisible(false, all)).toBe(false);
-    expect(dailyDigestTabVisible(true, [])).toBe(false);
-    expect(dailyDigestTabVisible(true, all)).toBe(true);
+    expect(dailyDigestTabVisible(all)).toBe(true);
+    expect(dailyDigestTabVisible([])).toBe(false);
+    expect(dailyDigestTabVisible(undefined)).toBe(false);
     for (const missing of all) {
-      expect(dailyDigestTabVisible(true, all.filter((permission) => permission !== missing))).toBe(false);
+      expect(dailyDigestTabVisible(all.filter((permission) => permission !== missing))).toBe(false);
     }
   });
 

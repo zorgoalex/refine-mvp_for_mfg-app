@@ -597,10 +597,7 @@ export const ConfigurationPage: React.FC = () => {
   const whatsappSettingsVisible =
     featureFlags.useBackendWhatsApp &&
     (!featureFlags.useBackendPermissions || can('whatsapp.view') || can('whatsapp.manage'));
-  const dailyDigestVisible = dailyDigestTabVisible(
-    featureFlags.useBackendWhatsApp,
-    authSession.getUser()?.permissions,
-  );
+  const dailyDigestVisible = dailyDigestTabVisible(authSession.getUser()?.permissions);
 
   const allTabItems = [
     ...(can('message_signals.manage_config') ? [{ key: 'message-processing', label: 'Обработка сообщений', children: <MessageProcessingConfig /> }] : []),
