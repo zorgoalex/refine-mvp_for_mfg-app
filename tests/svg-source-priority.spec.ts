@@ -6,6 +6,29 @@ import type { parseSvgCutUploadText } from '../src/pages/cut/svgCutUploadParser'
 
 declare global { interface Window { svgPriorityParser: { parseSvgCutUploadText: typeof parseSvgCutUploadText; buildStyledSvgUploadPreview: typeof buildStyledSvgUploadPreview; buildStyledCutLayoutPreview: typeof buildStyledCutLayoutPreview }; } }
 let bundle: string;
+for (const staleMetadata of [false, true]) test(`2950 keeps adjacent narrow strips and grooved parts with their visible positions (stale metadata: ${staleMetadata})`, async ({page}) => {
+  const svg = readFileSync('tests/fixtures/svg-source-priority/adjacent-2950.svg', 'utf8');
+  const source = staleMetadata ? svg.replace(/name="Comments" value="[^"]*"/g, 'name="Comments" value="9999#99#@900*800@"') : svg;
+  const parsed = await page.evaluate(svg => window.svgPriorityParser.parseSvgCutUploadText(svg, '2950.svg'), source);
+  const identities = Object.fromEntries(parsed.cutLayout.items.map(item => [item.sourceElementId, item.detailNumber]));
+  expect(identities).toEqual({
+    _2950_PartContour: 24, _2950_PartContour_1: 24, _2950_PartContour_4: 24, _2950_PartContour_7: 24,
+    _2950_PartContour_10: 14, _2950_PartContour_12: 14,
+    _2950_PartContour_15: 13, _2950_PartContour_17: 13, _2950_PartContour_20: 13,
+    _2950_PartContour_22: 15, _2950_PartContour_24: 15, _2950_PartContour_27: 15,
+    _2950_PartContour_29: 10, _2950_PartContour_30: 9,
+  });
+  expect(parsed.cutLayout.reasons).toEqual([]);
+  for (const [position, width, height, count] of [[9, 2700, 34, 1], [10, 2700, 34, 1], [13, 573, 181, 3], [14, 427, 172, 2], [15, 2727, 497, 3], [24, 604, 231, 4]]) {
+    const parts = parsed.cutLayout.items.filter(item => item.detailNumber === position);
+    expect(parts).toHaveLength(count);
+    for (const part of parts) {
+      expect(part.orderName).toBe('2950');
+      expect(part.widthMm).toBeCloseTo(width, 0);
+      expect(part.heightMm).toBeCloseTo(height, 0);
+    }
+  }
+});
 test.beforeAll(async () => {
   const result = await build({stdin: {contents: "export * from './src/pages/cut/svgCutUploadParser'; export * from './src/pages/cut/svgCutRenderPreview';", resolveDir: process.cwd()}, alias: {'@shared': './backend/src/shared'}, bundle: true, write: false, format: 'iife', globalName: 'svgPriorityParser'});
   bundle = result.outputFiles[0].text;

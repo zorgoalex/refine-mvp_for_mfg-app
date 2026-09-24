@@ -7594,6 +7594,7 @@ async function loadBathCards(
         )) AS physically_complete
       FROM latest_vacuum_results selected
       JOIN cut_result_placement placement ON placement.cut_result_id = selected.cut_result_id
+        AND placement.order_hdf_detail_id IS NULL
       JOIN cut_result_sheet_map sheet
         ON sheet.cut_result_sheet_map_id = placement.cut_result_sheet_map_id
        AND sheet.is_effective = true
@@ -7655,6 +7656,7 @@ async function loadBathCards(
     FROM ${options.bounded ? 'bounded_vacuum_results' : operational ? 'operational_vacuum_results' : 'latest_vacuum_results'} result
     JOIN cut_result_placement placement
       ON placement.cut_result_id = result.cut_result_id
+     AND placement.order_hdf_detail_id IS NULL
     JOIN cut_result_sheet_map sheet
       ON sheet.cut_result_sheet_map_id = placement.cut_result_sheet_map_id
      AND sheet.is_effective = true

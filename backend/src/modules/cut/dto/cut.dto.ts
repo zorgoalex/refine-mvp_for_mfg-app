@@ -326,6 +326,8 @@ export interface CutJobRefDto {
   paramProfileId: number | null;
   profileName: string | null;
   profileIsActive: boolean | null;
+  /** Effective layout mode (last calculation, profile, job); used by SVG warnings. */
+  profileLayoutMode?: string | null;
 }
 
 export interface EligibleDetailDto {

@@ -41,6 +41,7 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
       await client.query(`CREATE TEMP TABLE ${table} AS TABLE public.${table} WITH NO DATA`);
     }
     await client.query(`
+      ALTER TABLE pg_temp.cut_result_placement ADD COLUMN IF NOT EXISTS order_hdf_detail_id bigint;
       ALTER TABLE pg_temp.audit_log ALTER COLUMN audit_id SET DEFAULT gen_random_uuid();
       CREATE UNIQUE INDEX test_mdf_outbox_key ON pg_temp.outbox_events(idempotency_key);
       ALTER TABLE pg_temp.cut_result_board_projection ADD PRIMARY KEY(cut_result_id);
@@ -288,6 +289,29 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
     const { response } = await boundedLoad(undefined, undefined, { id: '158', role: 'packer', permissions: [] });
     expect(response.historicalReadinessSources?.find(source => source.cardId === packetId)?.linkedOrders)
       .toEqual([{ orderId: 1, orderStatusId: null, orderStatusName: null, orderStatusIssuedOrLater: false }]);
+  });
+
+  it('excludes typed HDF from mixed bath completeness and HDF-only bath visibility', async () => {
+    await seed(10, [1, null], '2026-09-06T12:00:00+05');
+    await seed(11, [null], '2026-09-06T12:00:00+05');
+    await client.query('UPDATE pg_temp.cut_result_placement SET order_hdf_detail_id=1 WHERE order_detail_id IS NULL');
+    const baths = (await boundedLoad()).response.columns.flatMap(column => column.baths);
+    expect(baths).toHaveLength(1);
+    expect(baths[0]).toMatchObject({ cutResultId: 10, compositionComplete: true });
+    expect(baths[0].items).toHaveLength(1);
+    expect(baths[0].items[0]).toMatchObject({ detailId: 1, quantity: 1 });
+    const events = await loadMdfBoardEvents(client as unknown as TransactionClient, { kind: 'bath', id: 'cut-result:10' });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ eventType: 'mdf.board.baths_laminated', orderId: 1,
+      scope: { details: [{ detailId: 1, eligibleQuantity: 1 }] } });
+    expect(await loadMdfBoardEvents(client as unknown as TransactionClient, { kind: 'bath', id: 'cut-result:11' })).toEqual([]);
+    expect(ids(await load())).toEqual([10]);
+    await seed(12, [1, null]);
+    await seed(13, [null]);
+    await client.query('UPDATE pg_temp.cut_result_placement SET order_hdf_detail_id=1 WHERE order_detail_id IS NULL');
+    const old = await load();
+    expect(ids(old)).toEqual([10]);
+    expect(old.historicalBathReadiness?.map(bath => bath.bathCardId)).toEqual(['cut-result:12']);
   });
 
   it('focus cannot escape two months and invalid bath membership cannot complete automatically', async () => {

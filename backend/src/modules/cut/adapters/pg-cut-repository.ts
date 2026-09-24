@@ -3207,10 +3207,16 @@ export class PgCutRepository implements CutRepositoryPort {
       param_profile_id: string | number | null;
       profile_name: string | null;
       profile_is_active: boolean | null;
+      profile_layout_mode: string | null;
     }>(
       `
       SELECT cji.order_detail_id, cj.cut_job_id, cj.name, cj.status, cji.is_active,
-             cj.param_profile_id, cpp.name AS profile_name, cpp.is_active AS profile_is_active
+             cj.param_profile_id, cpp.name AS profile_name, cpp.is_active AS profile_is_active,
+             COALESCE(
+               cj.last_calc_params->>'layout_mode',
+               cpp.params->>'layout_mode',
+               cj.params->>'layout_mode'
+             ) AS profile_layout_mode
       FROM cut_job_item cji
       JOIN cut_job cj ON cj.cut_job_id = cji.cut_job_id
       LEFT JOIN cut_param_profiles cpp ON cpp.cut_param_profile_id = cj.param_profile_id
@@ -3229,6 +3235,7 @@ export class PgCutRepository implements CutRepositoryPort {
         paramProfileId: row.param_profile_id === null ? null : toNum(row.param_profile_id),
         profileName: row.profile_name ?? null,
         profileIsActive: row.profile_is_active ?? null,
+        profileLayoutMode: row.profile_layout_mode ?? null,
       };
       if (isArchived) {
         entry.inArchivedJob = true;

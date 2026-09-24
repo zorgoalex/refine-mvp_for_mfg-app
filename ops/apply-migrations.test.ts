@@ -67,6 +67,15 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText).toMatch(/--run-041-reset/);
     expect(scriptText).toMatch(/--skip-041/);
   });
+  it('verifies typed HDF projection functions and structure before recording177',()=>{
+    const arm=probeFn.slice(probeFn.indexOf('177_cut_result_typed_hdf*)'),probeFn.indexOf('176_whatsapp_reply_templates*)'));
+    for(const marker of ['order_hdf_detail_id','NOT attnotnull','convalidated','indisvalid AND indisready',
+      'q_con_hash_on chk_cut_result_placement_source_only_order','q_idx_hash idx_cut_result_placement_hdf_candidates',
+      "q_fun_hash 'public.cut_result_item_identity(jsonb)'","q_fun_hash 'public.cut_result_snapshot_is_complete(jsonb,jsonb,text)'",
+      "q_fun_hash 'public.project_cut_result_label_maps(bigint)'"]) expect(arm).toContain(marker);
+    expect(scriptText.slice(scriptText.indexOf('verify_applied_effect() {')))
+      .toMatch(/177_cut_result_typed_hdf\*\)\s+probe_file "\$f" \|\| die/);
+  });
 
   it('checks MDF execution context integrity before recording migration174', () => {
     const arm = probeFn.slice(probeFn.indexOf('174_mdf_execution_context*)'), probeFn.indexOf('*) return 2'));
@@ -156,7 +165,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText).not.toMatch(/q_fun_hash\(\).*md5\(prosrc\)/);
     expect(probeFn).toContain("q_fun_hash 'cnc_telegram_worker_reason_code_valid(text)'");
     expect(probeFn.match(/q_fun_hash '[^']+' [a-f0-9]{32}/g)).toHaveLength(
-      requiredFunctions.length + 2 + 9 + 1 + 1, // 164-169, 174 context seal, 175 immutable command results
+      requiredFunctions.length + 2 + 9 + 1 + 1 + 3, // 164-169,174/175 guards,177 typed snapshot/projector
     );
   });
 

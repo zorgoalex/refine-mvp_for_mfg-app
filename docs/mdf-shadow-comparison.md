@@ -426,3 +426,15 @@ they retain existing behavior in legacy/shadow and reject before business writes
 in active/read_only until correction adapters are connected. This is a safety
 gate, not completed writer coverage. Keep the worker/read flags off and do not
 switch modes until all producer, correction, UI and baseline gates are complete.
+
+## Typed HDF result identities (migration 177)
+
+Migration 177 aligns immutable snapshot validation and label-map projection
+with typed `hdf-*` identities. HDF placements retain a separate
+`order_hdf_detail_id`; their `order_detail_id` is null, including when both
+source tables use the same numeric ID. Typed HDF is excluded from MDF
+membership and quantities even when a material name contains MDF; existing
+snapshots are not rewritten. Legacy bath readiness/visibility and the shadow
+comparison scope exclude typed HDF placements; unknown non-HDF placements
+still block complete composition. Apply migration 177 before deploying
+backend readers or relying on mixed/HDF calculation data.
