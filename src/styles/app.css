@@ -2016,3 +2016,58 @@ html {
   .order-telegram-viewer__actions { width: 100%; overflow-x: auto; }
   .order-telegram-viewer__title strong { white-space: normal; }
 }
+
+/* Only configuration: remove clipping ancestors that trap sticky navigation. */
+.configuration-page .configuration-operational__panel,
+.configuration-page .configuration-tabs-wrap,
+.configuration-page .status-automation-tabs {
+  overflow: visible;
+}
+
+.configuration-page .configuration-tabs-wrap > .ant-tabs-nav {
+  position: sticky;
+  top: var(--configuration-sticky-top, 0px);
+  z-index: 22;
+  background: var(--app-surface, #fff);
+}
+
+.configuration-page .status-automation-tabs > .ant-tabs-nav {
+  position: sticky;
+  top: calc(var(--configuration-sticky-top, 0px) + var(--configuration-tabs-height, 0px));
+  z-index: 21;
+  margin-bottom: 16px;
+  background: var(--app-surface, #fff);
+}
+
+.configuration-page .status-automation-tabs > .ant-tabs-nav .ant-tabs-nav-wrap {
+  overflow: visible;
+  white-space: normal;
+}
+
+.configuration-page .status-automation-tabs > .ant-tabs-nav .ant-tabs-nav-list {
+  width: 100%;
+  flex-wrap: wrap;
+  transform: none !important;
+}
+
+.configuration-page .status-automation-tabs > .ant-tabs-nav .ant-tabs-nav-operations {
+  display: none;
+}
+
+/* AntD's single ink bar sits below the last wrapped row. Mark the active tab
+   itself so selection stays aligned when either navigation wraps. */
+.configuration-page .configuration-tabs-wrap > .ant-tabs-nav .ant-tabs-ink-bar,
+.configuration-page .status-automation-tabs > .ant-tabs-nav .ant-tabs-ink-bar {
+  display: none;
+}
+
+.configuration-page .configuration-tabs-wrap.ant-tabs-line > .ant-tabs-nav .ant-tabs-tab-active::after,
+.configuration-page .status-automation-tabs > .ant-tabs-nav .ant-tabs-tab-active::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--evo-primary, #1677ff);
+  content: '';
+}

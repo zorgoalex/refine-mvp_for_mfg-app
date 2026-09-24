@@ -2908,18 +2908,17 @@
 
 :root:where([data-ui-variant="line"], [data-ui-variant="air"]) .configuration-operational__panel > .ant-tabs > .ant-tabs-nav {
   position: sticky;
-  top: 0;
-  z-index: 3;
-  overflow: hidden;
+  top: var(--configuration-sticky-top, 0px);
+  z-index: 22;
   background: var(--operational-surface);
 }
 
-:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .configuration-operational__panel .ant-tabs-nav-wrap {
+:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .configuration-operational__panel > .ant-tabs > .ant-tabs-nav .ant-tabs-nav-wrap {
   overflow: auto;
 }
 
-:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .configuration-operational__panel .ant-tabs-nav-list {
-  flex-wrap: nowrap;
+:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .configuration-operational__panel > .ant-tabs > .ant-tabs-nav .ant-tabs-nav-list {
+  flex-wrap: wrap;
 }
 
 :root:where([data-ui-variant="line"], [data-ui-variant="air"]) .configuration-operational__panel .ant-tabs-content-holder {

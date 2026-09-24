@@ -28,6 +28,8 @@ export interface Bitrix24IncomingRequestListItem {
   projectCode: string | null;
   fullNumber: string | null;
   syncStatus: 'ok' | 'blocked';
+  autoConversionStatus?: 'idle' | 'waiting' | 'converted';
+  autoConversionReason?: string | null;
   syncErrorCode: string | null;
   detailCount: number;
   erpFinalAmount?: number | null;

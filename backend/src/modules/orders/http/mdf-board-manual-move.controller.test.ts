@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../../common/errors/api-error';
 import {
+  MdfBoardManualMoveController,
   assertMdfManualMoveAllowed,
   parseMdfManualCardId,
   parseMdfManualCardKind,
@@ -12,6 +13,7 @@ vi.mock('@nestjs/common', () => ({
   Controller: () => () => undefined,
   Delete: () => () => undefined,
   Get: () => () => undefined,
+  Headers: () => () => undefined,
   Inject: () => () => undefined,
   Injectable: () => () => undefined,
   Optional: () => () => undefined,
@@ -23,6 +25,7 @@ vi.mock('@nestjs/common', () => ({
 vi.mock('@nestjs/swagger', () => ({
   ApiBearerAuth: () => () => undefined,
   ApiOperation: () => () => undefined,
+  ApiHeader: () => () => undefined,
   ApiResponse: () => () => undefined,
   ApiTags: () => () => undefined,
 }));
@@ -32,6 +35,17 @@ vi.mock('@nestjs/config', () => ({
 }));
 
 describe('MdfBoardManualMoveController parsing', () => {
+  it('passes the active source token and idempotency key for both move and clear', async () => {
+    const service = { upsert: vi.fn(),delete: vi.fn() };
+    const controller = new MdfBoardManualMoveController(
+      service as unknown as ConstructorParameters<typeof MdfBoardManualMoveController>[0],
+      { getFeatureFlags: () => ({ ordersEnabled: true }) } as ConstructorParameters<typeof MdfBoardManualMoveController>[1]);
+    const request = { user: { id: '1',username: 'test',role: 'admin',permissions: [] },requestId: 'request' } as Parameters<typeof controller.upsert>[0];
+    await controller.upsert(request,'packet','packet-1',{ targetColumn: 'completed' },'token','move-key');
+    expect(service.upsert).toHaveBeenCalledWith(expect.objectContaining({ sourceToken: 'token',idempotencyKey: 'move-key' }));
+    await controller.delete(request,'packet','packet-1','token','clear-key');
+    expect(service.delete).toHaveBeenCalledWith(expect.objectContaining({ sourceToken: 'token',idempotencyKey: 'clear-key' }));
+  });
   it('accepts safe card identities and strict move bodies', () => {
     expect(parseMdfManualCardKind('packet')).toBe('packet');
     expect(parseMdfManualCardKind('bazisCutSet')).toBe('bazisCutSet');

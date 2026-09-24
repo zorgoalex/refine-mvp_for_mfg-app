@@ -174,7 +174,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF allocation exec
     await tx(c => recordMdfReceipt(c, { ...f.receipts[0], sourceKind: 'bath', sourceId: f.bathIds[0],
       revisionKey: '2', expectedFence: { version: '1', correctionEpoch: '0' }, lines: [f.receipts[0].lines[0]] }));
     expect(await tx(c => executeMdfAllocation(c, f.jobId))).toMatchObject({ readyBathIds: [], reservedCount: 0,
-      quarantine: [expect.objectContaining({ code: 'COMPOSITION_CHANGED' })] });
+      quarantine: [expect.objectContaining({ code: 'ACCEPTANCE_PENDING' })] });
     expect((await db.query('SELECT bath_revision FROM mdf_bath_allocations WHERE order_id=$1', [f.orderId])).rows)
       .toEqual([{ bath_revision: '1' }]);
   });

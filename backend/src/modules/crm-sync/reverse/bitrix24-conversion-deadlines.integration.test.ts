@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { normalizeBitrixDeal } from './bitrix24-reverse-normalizer';
 import { PgOrderReadRepository } from '../../orders/adapters/pg-order-read-repository';
@@ -12,6 +13,7 @@ import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import { PgOrderDeadlineSync } from '../../deadlines/adapters/pg-order-deadline-sync';
 import { PgBitrix24ReverseRepository, type ReversePaymentSnapshot } from './pg-bitrix24-reverse-repository';
+import { Bitrix24PaymentWidgetRepository } from '../widget/bitrix24-payment-widget.repository';
 
 // Explicit test-only target. All fixture writes remain inside an outer ROLLBACK;
 // conversion uses real SQL/savepoints, including real constraints/audit/outbox.
@@ -68,6 +70,9 @@ describe.skipIf(!url)('CRM conversion deadlines on real PostgreSQL (rollback-onl
     await client.query(authorshipMigration);
     await client.query(authorshipMigration); // additive/idempotent, rolled back with fixture
     await client.query(readFileSync(new URL('../../../../db/migrations/162_order_catalog_lines.sql', import.meta.url), 'utf8'));
+    const autoMigration = readFileSync(new URL('../../../../db/migrations/172_bitrix_paid_request_conversion.sql', import.meta.url), 'utf8');
+    await client.query(autoMigration);
+    await client.query(autoMigration);
     db = new FixtureDatabase(client);
     repository = new Repository(db, new AuditService());
     const name = 'E2E-conversion-' + randomUUID();
@@ -128,6 +133,155 @@ describe.skipIf(!url)('CRM conversion deadlines on real PostgreSQL (rollback-onl
     return repository.materializeMappedOrderPayments({ orderId, bitrixPaymentIds: [paymentId], expectedOrderVersion: version,
       actorUserId: String(actorId), auditRequestId: input.requestId, scope: { mode: 'all' } });
   }
+
+  async function autoInput(dealId: string) {
+    const service = (await client.query(`INSERT INTO users(username,email,password_hash,role_id,is_service_account)
+      SELECT $1::text,$1::text || '@example.invalid','E2E-NO-LOGIN',role_id,true FROM roles WHERE role_code='integration_service' RETURNING user_id`,
+    ['E2E-auto-service-' + randomUUID()])).rows[0];
+    return { dealId, actorUserId: Number(service.user_id), requestId: input.requestId,
+      initialOrderStatusCode: input.initialOrderStatusCode, initialProductionStatusCode: input.initialProductionStatusCode };
+  }
+
+  it('automatically converts a paid CRM request and imports its partial prepayment exactly once', async () => {
+    const { payment, dealId } = await seedPayment();
+    await client.query("UPDATE bitrix24_incoming_request_payment SET paid_by_id='17',paid_by_name='E2E-cashier' WHERE bitrix_payment_id=$1", [payment.bitrixPaymentId]);
+    const auto = await autoInput(dealId);
+    const result = await repository.autoConvertPaidCrmRequest(auto);
+    expect(result.status).toBe('converted');
+    expect((await conversionState()).order_kind).toBe('production_order');
+    expect((await client.query('SELECT amount,created_by FROM payments WHERE order_id=$1', [orderId])).rows)
+      .toEqual([{ amount: '500.00', created_by: String(auto.actorUserId) }]);
+    const after = await conversionState();
+    expect(await repository.autoConvertPaidCrmRequest(auto)).toMatchObject({ status: 'unchanged' });
+    expect(await conversionState()).toEqual(after);
+    expect((await client.query('SELECT erp_payment_id FROM bitrix24_incoming_request_payment WHERE bitrix_payment_id=$1', [payment.bitrixPaymentId])).rows[0].erp_payment_id).not.toBeNull();
+    const transition = (await client.query("SELECT payload_json FROM outbox_events WHERE event_type='bitrix24.request_auto_conversion.completed' AND aggregate_id=$1", [String(orderId)])).rows;
+    expect(transition).toHaveLength(1);
+    expect(transition[0].payload_json).toMatchObject({ orderId, paidByBitrix: { bitrixUserId: '17', displayName: 'E2E-cashier' } });
+    expect(transition[0].payload_json.paymentId).toBeGreaterThan(0);
+  });
+
+  it('runs migration end-state probes on real PostgreSQL and detects a disabled retry trigger', async () => {
+    const source = readFileSync(new URL('../../../../../ops/apply-migrations.sh', import.meta.url), 'utf8');
+    const helpers = source.slice(source.indexOf('q_col()'), source.indexOf('# These migrations contain conditional'));
+    const queries = execFileSync('bash', ['-s'], { input: helpers + '\nprobe_all() { printf "%s\\n" "$@"; }\nprobe_file 172_bitrix_paid_request_conversion.sql', encoding: 'utf8' }).trim().split('\n');
+    const present = async () => { const checks = []; for (const sql of queries) checks.push(Object.values((await client.query(sql)).rows[0])[0]); return checks.every(v => v === true); };
+    expect(await present()).toBe(true);
+    await client.query('ALTER TABLE orders DISABLE TRIGGER bitrix_paid_request_recheck');
+    expect(await present()).toBe(false);
+    await client.query('ALTER TABLE orders ENABLE TRIGGER bitrix_paid_request_recheck');
+  });
+
+  it('waits without positions, records the reason once, and retries after positions return', async () => {
+    const { dealId } = await seedPayment();
+    const auto = await autoInput(dealId);
+    await client.query('UPDATE order_details SET delete_flag=true WHERE order_id=$1', [orderId]);
+    expect(await repository.autoConvertPaidCrmRequest(auto)).toMatchObject({ status: 'waiting', reason: 'POSITIONS_REQUIRED' });
+    const state = await conversionState();
+    expect(state.order_kind).toBe('crm_request');
+    expect(state.commands).toBe(0);
+    await repository.autoConvertPaidCrmRequest(auto);
+    expect(await conversionState()).toEqual(state);
+    await client.query('UPDATE order_details SET delete_flag=false WHERE order_id=$1', [orderId]);
+    expect(await repository.autoConvertPaidCrmRequest(auto)).toMatchObject({ status: 'converted' });
+  });
+
+  it('clears obsolete automatic waiting state when a human converts the request', async () => {
+    await client.query("UPDATE bitrix24_incoming_request SET auto_conversion_status='waiting',auto_conversion_reason='CONVERSION_BLOCKED' WHERE linked_order_id=$1", [orderId]);
+    // Waiting was committed by an earlier command in production. Flush its
+    // deferred link constraint before simulating the next command in this fixture.
+    await client.query('SET CONSTRAINTS ALL IMMEDIATE');
+    await client.query('SET CONSTRAINTS ALL DEFERRED');
+    await repository.convertCrmRequestToProduction(input);
+    expect((await client.query('SELECT auto_conversion_status,auto_conversion_reason FROM bitrix24_incoming_request WHERE linked_order_id=$1', [orderId])).rows[0])
+      .toEqual({ auto_conversion_status: 'idle', auto_conversion_reason: null });
+  });
+
+  it.each(['unpaid', 'zero', 'currency', 'mapping', 'actor', 'sync', 'foreign-map'])('does not convert invalid input: %s', async (reason) => {
+    const { dealId, payment } = await seedPayment();
+    const auto = await autoInput(dealId);
+    if (reason === 'unpaid') await client.query('UPDATE bitrix24_incoming_request_payment SET paid=false WHERE bitrix_payment_id=$1', [payment.bitrixPaymentId]);
+    if (reason === 'zero') await client.query('UPDATE bitrix24_incoming_request_payment SET amount=0 WHERE bitrix_payment_id=$1', [payment.bitrixPaymentId]);
+    if (reason === 'currency') await client.query("UPDATE bitrix24_incoming_request_payment SET currency_id='USD' WHERE bitrix_payment_id=$1", [payment.bitrixPaymentId]);
+    if (reason === 'mapping') await client.query('UPDATE bitrix24_payment_type_mapping SET active=false WHERE pay_system_id=$1', [payment.paySystemId]);
+    if (reason === 'actor') await client.query('UPDATE users SET is_active=false WHERE user_id=$1', [auto.actorUserId]);
+    if (reason === 'sync') await client.query("UPDATE bitrix24_incoming_request SET sync_status='blocked' WHERE bitrix_deal_id=$1", [dealId]);
+    if (reason === 'foreign-map') await client.query("UPDATE crm_sync_mapping SET bitrix_id=(bitrix_id::bigint+1)::text WHERE entity_type='order' AND erp_id=$1", [String(orderId)]);
+    expect((await repository.autoConvertPaidCrmRequest(auto)).status).not.toBe('converted');
+    expect((await conversionState()).order_kind).toBe('crm_request');
+    expect((await client.query('SELECT count(*)::int AS n FROM payments WHERE order_id=$1', [orderId])).rows[0].n).toBe(0);
+  });
+
+  it('rolls automatic project, conversion and money back on SQL failure; later retry succeeds', async () => {
+    const { dealId } = await seedPayment();
+    const auto = await autoInput(dealId);
+    const before = await conversionState();
+    db.failDeadline = true;
+    await expect(repository.autoConvertPaidCrmRequest(auto)).rejects.toThrow();
+    expect(await conversionState()).toEqual(before);
+    db.failDeadline = false;
+    expect((await repository.autoConvertPaidCrmRequest(auto)).status).toBe('converted');
+  });
+
+  async function widgetAutoInput() {
+    const { dealId, requestId, payment } = await seedPayment();
+    const auto = await autoInput(dealId);
+    const member = 'E2E-' + randomUUID();
+    await client.query(`INSERT INTO bitrix24_app_installation(member_id,domain,access_token_ciphertext,refresh_token_ciphertext,access_token_expires_at,application_token_hash)
+      VALUES ($1,'example.invalid','E2E-not-a-token','E2E-not-a-token',now(),repeat('a',64))`, [member]);
+    await client.query(`INSERT INTO bitrix24_user_mapping(bitrix_user_id,erp_user_id,is_active) VALUES ($1,$2,true)`, [String(actorId + 900000000), actorId]);
+    const commandId = randomUUID(), leaseToken = randomUUID();
+    await client.query(`INSERT INTO bitrix24_manual_payment_command(command_id,idempotency_key,request_hash,member_id,domain,bitrix_deal_id,
+      bitrix_actor_user_id,erp_actor_user_id,bitrix_executor_user_id,originating_request_id,request_id,erp_order_id,bitrix_payment_id,
+      amount,currency_id,payment_date,pay_system_id,type_paid_id,status,lease_token,lease_expires_at)
+      SELECT $1,$1,repeat('a',64),$2,'example.invalid',$3,$4,$5,'1',$6,$7,$8,$9,500,'KZT','2026-09-09',$10,type_paid_id,'snapshot_saved',$11,now()+interval '3 minutes'
+      FROM bitrix24_payment_type_mapping WHERE pay_system_id=$10`, [commandId,member,dealId,String(actorId+900000000),actorId,input.requestId,requestId,orderId,payment.bitrixPaymentId,payment.paySystemId,leaseToken]);
+    await client.query('UPDATE bitrix24_payment_type_mapping SET widget_enabled=true WHERE pay_system_id=$1', [payment.paySystemId]);
+    await client.query('UPDATE bitrix24_incoming_request_payment SET manual_command_id=$2 WHERE bitrix_payment_id=$1', [payment.bitrixPaymentId,commandId]);
+    const widgetRepo = new Bitrix24PaymentWidgetRepository(db, new AuditService());
+    return { ...auto, widget: { commandId,leaseToken,materialize: widgetRepo.materializeCommandInTransaction.bind(widgetRepo),
+      awaitConfirmation: widgetRepo.awaitOverpaymentConfirmationInTransaction.bind(widgetRepo) } };
+  }
+
+  it('converts widget payment atomically using its original human actor, not the service executor', async () => {
+    const auto = await widgetAutoInput();
+    expect(await repository.autoConvertPaidCrmRequest(auto)).toMatchObject({ status: 'converted' });
+    expect((await client.query('SELECT created_by FROM payments WHERE order_id=$1', [orderId])).rows).toEqual([{ created_by: String(actorId) }]);
+    expect((await client.query('SELECT status FROM bitrix24_manual_payment_command WHERE command_id=$1', [auto.widget.commandId])).rows[0].status).toBe('completed');
+  });
+
+  it('never bypasses widget ownership or revoked human permission', async () => {
+    const auto = await widgetAutoInput();
+    expect(await repository.autoConvertPaidCrmRequest({ ...auto, widget: undefined })).toMatchObject({ status: 'waiting', reason: 'WIDGET_PENDING' });
+    expect(await repository.autoConvertPaidCrmRequest({ ...auto, widget: { ...auto.widget, leaseToken: randomUUID() } })).toMatchObject({ status: 'unchanged' });
+    await client.query('UPDATE bitrix24_user_mapping SET is_active=false WHERE erp_user_id=$1', [actorId]);
+    expect(await repository.autoConvertPaidCrmRequest(auto)).toMatchObject({ status: 'waiting', reason: 'PAYMENT_PERMISSION_REQUIRED' });
+    expect((await conversionState()).order_kind).toBe('crm_request');
+    expect((await conversionState()).commands).toBe(0);
+  });
+
+  it('keeps overpayment confirmation visible without half-converting, then converts after confirmation', async () => {
+    const auto = await widgetAutoInput();
+    await client.query('UPDATE order_details SET detail_cost=100 WHERE order_id=$1', [orderId]);
+    expect(await repository.autoConvertPaidCrmRequest(auto)).toMatchObject({ status: 'waiting', reason: 'PAYMENT_REQUIRES_CONFIRMATION' });
+    expect((await conversionState()).order_kind).toBe('crm_request');
+    const widgetRepo = new Bitrix24PaymentWidgetRepository(db, new AuditService());
+    expect((await widgetRepo.getCommand(auto.widget.commandId))?.status).toBe('awaiting_overpayment_confirmation');
+    await widgetRepo.confirmOverpayment({ commandId: auto.widget.commandId, actorUserId: actorId });
+    expect(await repository.autoConvertPaidCrmRequest(auto)).toMatchObject({ status: 'converted' });
+  });
+
+  it('enqueues one targeted retry when a waiting paid request is edited; financial reasons stay private', async () => {
+    const auto = await widgetAutoInput();
+    await client.query('UPDATE order_details SET delete_flag=true WHERE order_id=$1', [orderId]);
+    await repository.autoConvertPaidCrmRequest(auto);
+    await client.query('UPDATE orders SET version=version+1 WHERE order_id=$1', [orderId]);
+    await client.query('UPDATE orders SET version=version+1 WHERE order_id=$1', [orderId]);
+    expect((await client.query("SELECT count(*)::int AS n FROM bitrix24_inbound_event WHERE bitrix_id=$1 AND fingerprint LIKE 'paid-request-edit:%'", [auto.dealId])).rows[0].n).toBe(1);
+    const id = Number((await client.query('SELECT request_id FROM bitrix24_incoming_request WHERE linked_order_id=$1', [orderId])).rows[0].request_id);
+    expect(await repository.getIncomingRequest(id, { mode: 'all' }, false)).not.toHaveProperty('autoConversionReason');
+    expect(await repository.getIncomingRequest(id, { mode: 'all' }, true)).toHaveProperty('autoConversionReason', 'POSITIONS_REQUIRED');
+  });
 
   it('refreshes a converted request payment through order finances without changing ownership', async () => {
     const { payment, requestId, dealId } = await seedPayment();
@@ -313,18 +467,19 @@ describe.skipIf(!url)('CRM conversion deadlines on real PostgreSQL (rollback-onl
     await expect(repository.convertCrmRequestToProduction(input)).rejects.toMatchObject({ code: 'ORDER_POSITIONS_REQUIRED' });
   });
 
-  it('converts a goods-only request and materializes its payment without manufacturing details', async () => {
+  it.each([false, true])('converts a goods-only request and materializes its payment without manufacturing details; automatic=%s', async (automatic) => {
     await client.query('DELETE FROM order_details WHERE order_id=$1', [orderId]);
     const unit = (await client.query('SELECT min(unit_id) AS id FROM units')).rows[0].id;
     const catalogId = (await client.query(`INSERT INTO catalog_items(name,kind,unit_id,base_price,created_by,edited_by) VALUES($1,'service',$2,1000,$3,$3) RETURNING id`, [input.orderName, unit, actorId])).rows[0].id;
     await client.query(`INSERT INTO order_catalog_lines(order_id,catalog_item_id,line_number,name,kind,unit_id,unit_name,catalog_version,quantity,unit_price,created_by,edited_by)
       VALUES($1,$2,1,'E2E-service','service',$3,'unit',1,2,1000,$4,$4)`, [orderId, catalogId, unit, actorId]);
     input.expectedVersion = Number((await client.query('SELECT version FROM orders WHERE order_id=$1', [orderId])).rows[0].version);
-    const { payment } = await seedPayment();
-    await repository.convertCrmRequestToProduction(input);
+    const { payment, dealId } = await seedPayment();
+    if (automatic) expect((await repository.autoConvertPaidCrmRequest(await autoInput(dealId))).status).toBe('converted');
+    else await repository.convertCrmRequestToProduction(input);
     expect(await conversionState()).toMatchObject({ order_kind: 'production_order', request_state: 'converted', deadlines: 1, detail_statuses: null, production_events: 0 });
     expect((await client.query('SELECT total_amount,parts_count,production_status_id FROM orders WHERE order_id=$1', [orderId])).rows[0]).toMatchObject({ total_amount: '2000.00', parts_count: 0, production_status_id: null });
-    expect(await importPayment(payment.bitrixPaymentId)).toMatchObject({ changedPaymentCount: 1 });
+    expect(await importPayment(payment.bitrixPaymentId)).toMatchObject({ changedPaymentCount: automatic ? 0 : 1 });
   });
   it('retains stage deadline registration via the existing sync after stages exist', async () => {
     await repository.convertCrmRequestToProduction(input);

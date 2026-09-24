@@ -98,6 +98,7 @@ const setResponseSchema: SchemaObject = { type: 'object', additionalProperties: 
   } };
 const mutationResponseSchema: SchemaObject = { type: 'object', required: ['set'], properties: {
   set: setResponseSchema, addedCount: { type: 'integer', minimum: 0 },
+  mdfJobId: { type: 'string',format: 'uuid',description: 'Active MDF mode: queued calculation, not yet applied rules' },
 } };
 const deleteSetResponseSchema: SchemaObject = { type: 'object', required: ['deleted', 'set'], properties: {
   deleted: { type: 'boolean', enum: [true] },

@@ -21,6 +21,24 @@ interface StatusBoardPrefetch {
 const STATUS_BOARD_PREFETCH_MAX_AGE_MS = 20_000;
 const statusBoardPrefetches = new Map<string, StatusBoardPrefetch>();
 
+export interface MdfManualCommandHeaders {
+  sourceToken: string;
+  idempotencyKey: string;
+  signal?: AbortSignal;
+}
+
+function manualCommandOptions(command?: MdfManualCommandHeaders): RequestOptions | undefined {
+  if (command===undefined) return undefined;
+  if (typeof command.sourceToken!=='string' || !/^[a-f0-9]{64}$/.test(command.sourceToken)
+    || typeof command.idempotencyKey!=='string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(command.idempotencyKey)) {
+    throw new Error('Invalid MDF command proof or idempotency key');
+  }
+  // Active writes must never be replayed by auth refresh under another actor.
+  // Session-bound orchestration owns explicit retries of this exact command.
+  return { skipAuthRefresh: true,signal: command.signal,
+    headers: { 'X-Mdf-Source-Token': command.sourceToken,'Idempotency-Key': command.idempotencyKey } };
+}
+
 function statusBoardQueryKey(query: OrderStatusBoardQuery): string {
   return withQuery(apiRoutes.orders.statusBoard, query);
 }
@@ -93,20 +111,24 @@ export const orderStatusBoardApi = {
     cardKind: MdfBoardManualMoveCardKind,
     cardId: string,
     targetColumn: MdfBoardManualMoveTargetColumn,
+    command?: MdfManualCommandHeaders,
   ): Promise<MdfBoardManualMoveUpsertResponse> {
     const normalizedCardId = assertMdfManualMoveIdentity(cardKind, cardId);
     return httpClient.put<MdfBoardManualMoveUpsertResponse>(
       apiRoutes.orders.statusBoardMdfManualMove(cardKind, normalizedCardId),
       { targetColumn },
+      manualCommandOptions(command),
     );
   },
   deleteMdfManualMove(
     cardKind: MdfBoardManualMoveCardKind,
     cardId: string,
+    command?: MdfManualCommandHeaders,
   ): Promise<MdfBoardManualMoveDeleteResponse> {
     const normalizedCardId = assertMdfManualMoveIdentity(cardKind, cardId);
     return httpClient.delete<MdfBoardManualMoveDeleteResponse>(
       apiRoutes.orders.statusBoardMdfManualMove(cardKind, normalizedCardId),
+      manualCommandOptions(command),
     );
   },
 };

@@ -250,6 +250,8 @@ export const envSchema = z
     BACKEND_MDF_SHADOW_INTAKE: booleanFromEnv.default(false),
     BACKEND_MDF_SHADOW_COMPARE: booleanFromEnv.default(false),
     BACKEND_MDF_PINNED_DISPATCH: booleanFromEnv.default(false),
+    BACKEND_MDF_JOB_WORKER: booleanFromEnv.default(false),
+    BACKEND_MDF_PUBLISHED_READS: booleanFromEnv.default(false),
     // Phase A safety gate: legacy background Telegram ingest is fail-closed.
     // The break-glass path remains unavailable until Phase B persists an
     // approved bounded scan artifact.
@@ -471,6 +473,7 @@ export const envSchema = z
       .union([emptyTrimmedStringFromEnv, z.coerce.number().int().positive()])
       .optional(),
     BACKEND_ENABLE_BITRIX24_REVERSE_SYNC: booleanFromEnv.default(false),
+    BACKEND_BITRIX24_AUTO_CONVERT_PAID_REQUESTS: booleanFromEnv.default(false),
     BACKEND_BITRIX24_REVERSE_SYNC_RELAY_OWNER: z
       .enum(['none', 'in_process', 'external'])
       .default('none'),

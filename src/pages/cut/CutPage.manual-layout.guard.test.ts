@@ -47,7 +47,7 @@ describe('CutPage manual-layout guard', () => {
     // (profile/material change) re-uses the cached preview instead of
     // re-fetching/flickering; orientation AND origin are in the key so a job-switch
     // orientation/origin rehydrate re-fetches (no stale-pref dedupe).
-    expect(src).toMatch(/`\$\{group\.cutGroupId\}:\$\{sheetIndex\}:\$\{variant\}:\$\{sheetPortrait \? 'P' : 'L'\}:\$\{sheetOriginTopLeft \? 'tl' : 'raw'\}:\$\{sheetAxisOrigin\}:\$\{labelsInImage \? 'svg' : 'overlay'\}`/);
+    expect(src).toMatch(/`\$\{group\.cutGroupId\}:\$\{sheetIndex\}:\$\{variant\}:\$\{sheetPortrait \? 'P' : 'L'\}:\$\{sheetOriginTopLeft \? 'tl' : 'raw'\}:\$\{sheetAxisOrigin\}:\$\{labelsInImage \? 'svg' : 'overlay'\}:\$\{taskPreviewStyle\}`/);
     // resetSheetViews clears blobs + the dedup set + bumps the epoch.
     expect(src).toContain('thumbReqRef.current = new Set()');
     expect(src).toMatch(/viewEpochRef\.current \+= 1/);

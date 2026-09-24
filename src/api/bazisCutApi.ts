@@ -104,6 +104,8 @@ export interface BazisCutMutationResultDto {
   set: BazisCutSetCardDto;
   /** Present on create/add responses; duplicate-only add returns zero. */
   addedCount?: number;
+  /** Active MDF mode: durable calculation job, not yet applied rules. */
+  mdfJobId?: string;
 }
 
 export interface BazisCutDeleteSetResultDto {

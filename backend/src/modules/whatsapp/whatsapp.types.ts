@@ -24,6 +24,7 @@ export interface WhatsAppConfig {
 
 export interface InboundMessage {
   externalEventId: string;
+  providerMessageId?: string;
   sessionName: string;
   chatId: string;
   text: string;

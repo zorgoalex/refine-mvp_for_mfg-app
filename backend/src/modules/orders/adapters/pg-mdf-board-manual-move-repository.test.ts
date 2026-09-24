@@ -9,6 +9,9 @@ const runtimeMocks = vi.hoisted(() => ({
   observe: vi.fn(async () => undefined),
 }));
 vi.mock('../../mdf-board/application/mdf-shadow', () => ({ observeMdfShadowCommand: runtimeMocks.observe }));
+vi.mock('../../mdf-board/application/mdf-command-boundary', () => ({
+  requireMdfCommandBoundary: vi.fn(async () => ({ mode: 'legacy',queued: false })),
+}));
 vi.mock('./mdf-return-snapshot', () => ({
   returnSourceOwners: vi.fn(async () => [1001]),
   loadReturnSnapshot: runtimeMocks.snapshot,

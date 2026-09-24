@@ -102,6 +102,13 @@ export class WhatsAppController {
       requestId(request)
     );
   }
+  @ApiOperation({ summary: 'Preview a WhatsApp reply without sending or allocating a counter' })
+  @Post('rules/preview') @HttpCode(200)
+  @ApiBearerAuth('bearerAuth') @RequirePermissions('whatsapp.manage')
+  preview(@Body() body: unknown, @Res({ passthrough: true }) response: Response) {
+    response.setHeader('Cache-Control', 'private, no-store');
+    return this.service.previewReply(body);
+  }
   @ApiOperation({ summary: 'List WhatsApp reply rules' })
   @Get("rules") @ApiBearerAuth('bearerAuth') @RequirePermissions("whatsapp.view") rules() {
     return this.service.listRules();

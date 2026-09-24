@@ -39,6 +39,7 @@ interface VisualTextLine {
   text: string;
   xMm: number;
   yMm: number;
+  group?: Element | null;
 }
 
 export interface VisualDetailLabel {
@@ -565,13 +566,57 @@ function textElementLines(
   return rawLines.flatMap((line) => {
     const normalized = normalizeVisualText(line.text);
     if (!normalized) return [];
-    const point = applyMatrix([line.x, line.y], matrix);
+    const point = applyMatrix([line.x + embeddedTextCenterOffset(element, line.text), line.y], matrix);
     return [{
       text: normalized,
+      group: element.parentElement,
       xMm: round2((point[0] - vbMinX) / scaleX),
       yMm: round2((point[1] - vbMinY) / scaleY),
     }];
   });
+}
+
+/** Corel stores text x at the left edge, often outside a narrow part. Use the
+ * embedded font's advances to locate the visible centre before transforming. */
+function embeddedTextCenterOffset(element: Element, text: string): number {
+  const root = element.ownerDocument.documentElement;
+  const rules = Array.from(root.querySelectorAll('style')).flatMap(style =>
+    Array.from((style.textContent ?? '').matchAll(/([^{}]+)\{([^{}]+)\}/g)));
+  const property = (name: string): string | null => {
+    for (let node: Element | null = element; node; node = node.parentElement) {
+      let value = node.getAttribute(name);
+      const read = (declarations: string) => {
+        for (const declaration of declarations.split(';')) {
+          const colon = declaration.indexOf(':');
+          if (declaration.slice(0, colon).trim() === name) value = declaration.slice(colon + 1).trim();
+        }
+      };
+      for (const rule of rules) {
+        try { if (node.matches(rule[1].trim())) read(rule[2]); } catch { /* Unsupported selector. */ }
+      }
+      read(node.getAttribute('style') ?? '');
+      if (value) return value;
+    }
+    return null;
+  };
+  const sizeValue = property('font-size');
+  if (!sizeValue || !/^\d+(?:\.\d+)?(?:px)?$/.test(sizeValue)) return 0;
+  const size = Number.parseFloat(sizeValue);
+  const family = property('font-family')?.replace(/["']/g, '').trim();
+  const face = Array.from(root.querySelectorAll('font-face')).find(face => face.getAttribute('font-family') === family);
+  const font = face?.parentElement;
+  if (!font) return 0;
+  const units = positiveFloat(face?.getAttribute('units-per-em') ?? undefined) ?? 1000;
+  let advance = 0;
+  for (const character of text) {
+    const glyph = Array.from(font.querySelectorAll('glyph')).find(glyph => glyph.getAttribute('unicode') === character);
+    const metric = glyph ?? font.querySelector('missing-glyph');
+    const width = Number(metric?.getAttribute('horiz-adv-x') ?? font.getAttribute('horiz-adv-x'));
+    if (!Number.isFinite(width) || width <= 0) return 0;
+    advance += width;
+  }
+  const anchor = property('text-anchor') ?? 'start';
+  return advance * size / units * (anchor === 'middle' ? 0 : anchor === 'end' ? -0.5 : 0.5);
 }
 
 function splitTextElementLines(element: Element): Array<{ text: string; x: number; y: number }> {
@@ -617,13 +662,21 @@ function splitTextElementLines(element: Element): Array<{ text: string; x: numbe
 function groupVisualDetailLabels(lines: VisualTextLine[]): VisualDetailLabel[] {
   const sorted = [...lines].sort((left, right) => left.yMm - right.yMm || left.xMm - right.xMm);
   const labels: VisualDetailLabel[] = [];
+  // Dedicated SVG label groups are stronger evidence than proximity to a
+  // neighbouring order line. Shared layers still use the spatial fallback.
+  const candidatesFor = (line: VisualTextLine): VisualTextLine[] => {
+    const siblings = line.group ? sorted.filter(candidate => candidate.group === line.group) : [];
+    return siblings.filter(candidate => parseVisualOrderLine(candidate.text) !== null).length === 1
+      && siblings.filter(candidate => parseVisualDetailLine(candidate.text) !== null).length === 1
+      ? siblings : sorted;
+  };
 
   for (const sizeLine of sorted) {
     const size = parseVisualSizeLine(sizeLine.text);
     if (!size) continue;
     const maxXDelta = Math.max(35, Math.min(180, Math.max(size.widthMm, size.heightMm) * 0.35));
     const maxYDelta = Math.max(20, Math.min(220, Math.max(size.widthMm, size.heightMm) * 0.35));
-    const upper = sorted
+    const upper = candidatesFor(sizeLine)
       .filter((line) =>
         line.yMm < sizeLine.yMm &&
         sizeLine.yMm - line.yMm <= maxYDelta &&
@@ -661,7 +714,7 @@ function groupVisualDetailLabels(lines: VisualTextLine[]): VisualDetailLabel[] {
   for (const detailLine of sorted) {
     const detailNumber = parseVisualDetailLine(detailLine.text);
     if (detailNumber === null) continue;
-    const orderLine = findVisualOrderLineForDetail(sorted, detailLine);
+    const orderLine = findVisualOrderLineForDetail(candidatesFor(detailLine), detailLine);
     if (!orderLine) continue;
     const orderName = parseVisualOrderLine(orderLine.text);
     if (!orderName) continue;

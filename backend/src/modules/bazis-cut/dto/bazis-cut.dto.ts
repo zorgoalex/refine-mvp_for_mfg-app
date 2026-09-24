@@ -217,6 +217,8 @@ export interface BazisCutSetListDto {
 export interface BazisCutMutationResultDto {
   set: BazisCutSetDto;
   addedCount?: number;
+  /** Active MDF mode: durable queue job, not a claim that its rules have run. */
+  mdfJobId?: string;
 }
 
 export interface BazisCutDeleteSetResultDto {

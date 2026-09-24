@@ -322,3 +322,119 @@ shadow comparator above retains its own conservative comparability rules; the
 live legacy handlers and UI are unchanged. Historical sources absent from the
 receipt graph still require baseline discovery. Neither quarantine nor these
 tests permit activation before producer coverage, baseline and cutover are ready.
+
+### Accepted-job execution and compact reader (disabled by default)
+
+Migration `174_mdf_execution_context.sql` adds sealed command-time context and
+owning MDF demand, plus compact source/member/position publication tables. It does
+not activate the engine or backfill historical evidence. Apply after migrations
+165 and 166; existing applied migrations must not be rewritten.
+
+`executeMdfAcceptedJob` combines strict allocation, pinned scoped rules and
+publication in the durable job transaction. Failures roll back effects while
+retaining the receipt for retry. Compatible forward revisions retain exact stock
+allocations; changed composition, quantities or missing proof require correction.
+
+`BACKEND_MDF_JOB_WORKER=false` controls the registered scheduler independently of
+notifications. It processes at most ten jobs sequentially per tick; active engine
+mode is a second mandatory gate. `BACKEND_MDF_PUBLISHED_READS=false` controls
+`GET /api/v1/orders/status-board/mdf`. Disabled reads return 503. Enabled reads
+use an authorized, read-only repeatable-read snapshot and do not enqueue work.
+The two-calendar-month period filters visibility, not accepted accounting history;
+an exact source focus can retrieve older cards. Unaccepted cards retain visibility
+with issues but provide no unverified production credit.
+
+Keep both flags false until live producers, corrections, frontend, verified
+historical baseline and the cutover procedure are connected and checked together.
+The current shadow producer does not supply execution context. Setting the engine
+to active directly is not a supported activation procedure.
+
+### Manual commands through the queue (activation still gated)
+
+Migration `175_mdf_command_placement.sql` adds sealed manual placement and an
+immutable actor-scoped command-result journal. Production-card PUT/DELETE can
+route to accepted accounting in active mode; legacy/shadow keep the existing
+command path. This does not complete producer/return/UI/baseline coverage or
+authorize enabling the engine.
+
+Active clients send `X-Mdf-Source-Token` from `cards[].commandToken` and a unique
+`Idempotency-Key`. Reuse both for an identical network retry. Token is null while
+the card is unverified or its head is newer than the publication. A 409 requires
+refresh/reconciliation, not a blind retry with changed parameters. Authorization
+is checked for every owning order, including on a saved-response replay.
+
+- `completed` for a file/BASIS records only the missing own cut quantity.
+- `baths_laminated` records only the missing own lamination quantity.
+- Terminal visual placement creates no physical proof; DELETE removes only
+  manual placement and preserves confirmed work.
+- Backward movement requires the separate production-correction workflow.
+  Unsupported history is never implicitly accepted from its old visual column.
+- Response `jobId` means durable queued work, not finished status changes.
+  Audit, receipt, rule pins and replay response commit or roll back together.
+
+Tagged command transactions acquire the shared cutover fence before business
+effects and explicitly use READ COMMITTED. Stricter isolation is rejected before
+starting: an advisory-lock wait under a repeatable snapshot could otherwise read
+the pre-cutover mode. This boundary must cover the remaining writers before any
+activation. Ordinary unsupported writers and serializable returns are not yet
+connected by this increment.
+
+### Browser command protocol and exact progress
+
+The typed publication client reads one uncached snapshot. It retains the auth
+generation from the start of the read; late responses from a replaced session
+cannot become command inputs. `prepareMdfPublishedCommand` freezes the displayed
+source identity, target, source token, idempotency key and session generation.
+Explicit retry reuses this command, never a newly fetched token. Concurrent
+clicks share the in-flight request. Active writes disable automatic auth replay;
+logout/identity changes abort the request and quarantine late responses. An
+abort does not prove server rollback: resolve uncertain outcomes by replaying
+the original command in the same session, or reconciliation after login.
+
+`GET /api/v1/orders/status-board/mdf?jobIds=<UUID,...>` accepts up to 20 IDs.
+`trackedJobs` returns their exact statuses independently of the visible period
+and current source head. Both pending and tracked jobs require current access to
+every owner in frozen evidence **and** frozen demand. Unknown/inaccessible jobs
+are omitted. Missing, pending, needs_attention and superseded are not done.
+Only explicit `done` for the requested job/source proves that job finished; it
+does not prove that a later independent command has not superseded its effect.
+Tracking results participate in ETag under the same read-only MVCC snapshot.
+
+The protocol is not attached to legacy-calculated cards. The full-page coherent
+reader, remaining writers/corrections and historical reconciliation still gate
+activation. The existing page distinguishes a queue receipt from an applied move
+and preserves a historical link's highlight across refresh without refocusing it.
+
+### New BASIS sources through the queue (activation still gated)
+
+In active mode, both BASIS creation commands (single order and multi-order
+picker) capture the saved MDF membership and complete owning-order demand in
+the same transaction as the set, audit, outbox and idempotent response. Selected
+details are locked before snapshotting. Only a source inserted in that exact
+transaction can use this path; existing sets require historical reconciliation.
+HDF sources and non-MDF materials are excluded. Creation supplies no physical cut
+quantity, even when a detail already has a later production status.
+
+Optional response `mdfJobId` identifies durable pending work. Once processed,
+the machine-files-present rule sees only positions belonging to that set. The
+published card can then use the separate manual confirmation command. Network
+replays return the same job, after rechecking access to every original owner.
+Active source IDs cannot reuse numbers retained in immutable production history.
+
+The remaining BASIS edits/deletions are explicitly classified as legacy-only:
+they retain existing behavior in legacy/shadow and reject before business writes
+in active/read_only until correction adapters are connected. This is a safety
+gate, not completed writer coverage. Keep the worker/read flags off and do not
+switch modes until all producer, correction, UI and baseline gates are complete.
+
+## Typed HDF result identities (migration 177)
+
+Migration 177 aligns immutable snapshot validation and label-map projection
+with typed `hdf-*` identities. HDF placements retain a separate
+`order_hdf_detail_id`; their `order_detail_id` is null, including when both
+source tables use the same numeric ID. Typed HDF is excluded from MDF
+membership and quantities even when a material name contains MDF; existing
+snapshots are not rewritten. Legacy bath readiness/visibility and the shadow
+comparison scope exclude typed HDF placements; unknown non-HDF placements
+still block complete composition. Apply migration 177 before deploying
+backend readers or relying on mixed/HDF calculation data.

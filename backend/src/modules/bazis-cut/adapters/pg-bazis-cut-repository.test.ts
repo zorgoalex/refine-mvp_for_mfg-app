@@ -17,6 +17,12 @@ import {
 } from './pg-bazis-cut-picker';
 import type { BazisCutPickerCriteria } from '../dto/bazis-cut.dto';
 
+// This suite exercises the legacy repository contract. Active ownership and
+// boundary ordering are covered with the real DatabaseService/PG queue suite.
+vi.mock('../../mdf-board/application/mdf-command-boundary', () => ({
+  requireMdfCommandBoundary: vi.fn().mockResolvedValue({ mode: 'legacy',queued: false }),
+}));
+
 const user: CurrentUser = {
   id: '7', username: 'manager', role: 'manager', roleId: 3,
   permissions: ['cut.view', 'cut.manage', 'orders.view'],
@@ -26,6 +32,13 @@ afterEach(() => vi.restoreAllMocks());
 const repositorySource = readFileSync(new URL('./pg-bazis-cut-repository.ts', import.meta.url), 'utf8');
 
 describe('PgBazisCutRepository security and event contract', () => {
+  it('classifies every mutation at transaction entry; unresolved editors cannot bypass active queue ownership', () => {
+    for (const writer of ['create','create-picker']) expect(repositorySource)
+      .toContain(`{ mdf: { writer: 'bazis.${writer}',capability: 'queued' } }`);
+    for (const writer of ['rename','add-details','update-detail','delete-detail','delete-empty']) expect(repositorySource)
+      .toContain(`{ mdf: { writer: 'bazis.${writer}',capability: 'legacy-only' } }`);
+    expect(repositorySource).toContain('if (!boundary.queued) await evaluateBazisCutSetMachineFilesPresentAutomation');
+  });
   it('builds the backend-owned set name from its generated id', () => {
     expect(buildBazisCutSetName(42)).toBe('БР-42');
   });

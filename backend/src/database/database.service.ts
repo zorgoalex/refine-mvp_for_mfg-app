@@ -6,6 +6,12 @@ import type { BackendEnv } from '../config/env.validation';
 import type { DatabaseClient, DatabaseQueryOptions, TransactionClient } from './database.types';
 import { PerformanceQueryTelemetryService } from '../performance/performance-query-telemetry.service';
 import { beginTransactionHooks, flushTransactionHooks, discardTransactionHooks } from './transaction-hooks';
+import { enterMdfCommand, discardMdfCommandBoundary, type MdfCommandWriter } from '../modules/mdf-board/application/mdf-command-boundary';
+
+export interface DatabaseTransactionOptions {
+  isolation?: 'read committed' | 'repeatable read' | 'serializable';
+  mdf?: MdfCommandWriter;
+}
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
@@ -97,13 +103,25 @@ export class DatabaseService implements OnModuleDestroy, DatabaseClient {
     );
   }
 
-  async transaction<T>(handler: (client: TransactionClient) => Promise<T>): Promise<T> {
+  async transaction<T>(handler: (client: TransactionClient) => Promise<T>, options: DatabaseTransactionOptions = {}): Promise<T> {
+    // The lock SELECT may wait behind cutover. Its snapshot must not be reused
+    // by the following mode SELECT. This is unsafe under RR/serializable.
+    if (options.mdf && options.isolation && options.isolation !== 'read committed') {
+      throw new ApiError(503, 'MDF_COMMAND_ISOLATION_UNSUPPORTED', 'Команда требует отдельного протокола производственной транзакции');
+    }
+    const isolation = options.mdf ? 'read committed' : options.isolation;
+    if (isolation && !['read committed', 'repeatable read', 'serializable'].includes(isolation)) {
+      throw new Error('INVALID_TRANSACTION_ISOLATION');
+    }
     const pool = this.requirePool();
     const rawClient = await withTimeout(pool.connect(), this.queryTimeoutMs, 'Database connect');
     const client = new PgTransactionClient(rawClient, this.queryTimeoutMs, this.telemetry);
 
     try {
       await client.query('BEGIN');
+      // Explicit RC also protects against a stricter server/pool default.
+      if (isolation) await client.query(`SET TRANSACTION ISOLATION LEVEL ${isolation.toUpperCase()}`);
+      if (options.mdf) await enterMdfCommand(client, options.mdf);
       beginTransactionHooks(client);
       const result = await handler(client);
       await flushTransactionHooks(client);
@@ -118,6 +136,7 @@ export class DatabaseService implements OnModuleDestroy, DatabaseClient {
       throw error;
     } finally {
       discardTransactionHooks(client);
+      discardMdfCommandBoundary(client);
       rawClient.release();
     }
   }

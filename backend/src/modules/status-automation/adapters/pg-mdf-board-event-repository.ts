@@ -91,6 +91,7 @@ export async function loadMdfBoardEvents(
           OR allocated.quantity > 0)
           AND COALESCE(smt.name, material.material_name, '') !~* '${CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE}', false) AS mdf_relevant
       FROM latest_baths b JOIN cut_result_placement p ON p.cut_result_id = b.cut_result_id
+        AND p.order_hdf_detail_id IS NULL
       JOIN cut_result_sheet_map sheet ON sheet.cut_result_sheet_map_id = p.cut_result_sheet_map_id
         AND sheet.is_effective = true
       LEFT JOIN order_details d ON d.detail_id = p.order_detail_id AND d.order_id = p.order_id AND d.delete_flag = false

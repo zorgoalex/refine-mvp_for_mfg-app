@@ -12,6 +12,9 @@ import type { MdfShadowCommand } from '../application/mdf-shadow-command';
 import type { PerformanceQueryTelemetryService } from '../../../performance/performance-query-telemetry.service';
 import { dispatchMdfBoardEvent } from '../../status-automation/application/status-automation-runtime';
 import type { MdfBoardEventInput, MdfBoardSource } from '../../status-automation/application/mdf-board-event.types';
+import { loadMdfShadowSource } from './mdf-shadow-source';
+import { prepareMdfShadow } from '../application/mdf-shadow';
+import { discoverMdfComparisonScope } from './mdf-comparison-snapshot';
 
 describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF shadow through real DatabaseService and event dispatch', () => {
   const schema = `e2e_mdf_shadow_${randomUUID().replaceAll('-', '')}`;
@@ -60,7 +63,8 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF shadow through 
       'cut_result_placement', 'cut_result_sheet_map', 'sheet_material_types', 'materials', 'audit_log']) {
       await client.query(`CREATE TABLE ${schema}.${table} AS SELECT * FROM public.${table} WITH NO DATA`);
     }
-    await client.query(`CREATE UNIQUE INDEX shadow_audit_id ON audit_log(audit_id);
+    await client.query(`ALTER TABLE cut_result_placement ADD COLUMN IF NOT EXISTS order_hdf_detail_id bigint;
+      CREATE UNIQUE INDEX shadow_audit_id ON audit_log(audit_id);
       INSERT INTO orders(order_id,delete_flag) VALUES(1,false),(2,false);
       INSERT INTO sheet_material_types(sheet_material_type_id,name) VALUES(1,'МДФ 10мм');
       INSERT INTO order_details(detail_id,order_id,quantity,delete_flag,sheet_material_type_id)
@@ -156,6 +160,31 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF shadow through 
     await send('bath-laminated', bath);
     expect((await observation('bath-laminated'))[0].candidate_quantities).toMatchObject({ required: 2, cut: 0, rolled: 2 });
   });
+  it('typed HDF neither taints shadow membership nor expands comparison owner closure', async () => {
+    await client.query(`INSERT INTO cut_result(cut_result_id,snapshot_digest) VALUES(90,'typed-mixed'),(91,'typed-hdf');
+      INSERT INTO cut_result_board_projection(cut_result_id,snapshot_digest,is_vacuum)
+        VALUES(90,'typed-mixed',true),(91,'typed-hdf',true);
+      INSERT INTO cut_result_sheet_map(cut_result_sheet_map_id,is_effective) VALUES(90,true);
+      INSERT INTO cut_result_placement(cut_result_id,cut_result_sheet_map_id,order_id,order_detail_id,order_hdf_detail_id)
+        VALUES(90,90,1,11,NULL),(90,90,2,NULL,11),(91,90,1,NULL,11);`);
+    const mixed = { kind: 'bath' as const, id: 'cut-result:90' };
+    const hdf = { kind: 'bath' as const, id: 'cut-result:91' };
+    const rows = await loadMdfShadowSource(client, mixed);
+    expect(rows).toHaveLength(1);
+    const prepared = prepareMdfShadow(rows);
+    expect(prepared.issues).not.toContain('UNRESOLVED_MEMBERSHIP');
+    expect(prepared.issues).not.toContain('MATERIAL_OR_SOURCE_EXCLUDED');
+    expect(prepared.candidateQuantities).toMatchObject({ required: 1, cut: 0, rolled: 0 });
+    expect(await loadMdfShadowSource(client, hdf)).toEqual([]);
+    expect(prepareMdfShadow(await loadMdfShadowSource(client, hdf)).issues).not.toContain('UNRESOLVED_MEMBERSHIP');
+    const scope = await discoverMdfComparisonScope(client, mixed);
+    expect(scope.sources).not.toContainEqual(hdf);
+    await expect(discoverMdfComparisonScope(client, hdf)).rejects.toThrow('UNRESOLVED_OWNERS');
+    await client.query(`INSERT INTO cut_result_placement(cut_result_id,cut_result_sheet_map_id,order_id,order_detail_id)
+      VALUES(90,90,1,NULL)`);
+    expect(prepareMdfShadow(await loadMdfShadowSource(client, mixed)).issues).toContain('UNRESOLVED_MEMBERSHIP');
+  });
+
   it('freezes explicit membership before later writes and generic dispatch, all commands survive in order', async () => {
     const confirmAudit = randomUUID(), clearAudit = randomUUID();
     await database.transaction(async tx => {

@@ -1650,6 +1650,7 @@ describe('PgCutRepository', () => {
           param_profile_id: 7,
           profile_name: 'Вакуум Авто',
           profile_is_active: true,
+          profile_layout_mode: 'vacuum_table',
         },
         {
           order_detail_id: 5,
@@ -1669,12 +1670,16 @@ describe('PgCutRepository', () => {
     const detail = result.details.find((d) => d.orderDetailId === 5);
 
     expect(detail?.activeJobs).toEqual([
-      { cutJobId: 42, name: 'Раскрой 42', paramProfileId: 7, profileName: 'Вакуум Авто', profileIsActive: true },
+      { cutJobId: 42, name: 'Раскрой 42', paramProfileId: 7, profileName: 'Вакуум Авто', profileIsActive: true, profileLayoutMode: 'vacuum_table' },
     ]);
     expect(detail?.archivedJobs).toEqual([
-      { cutJobId: 41, name: 'Старый раскрой', paramProfileId: null, profileName: null, profileIsActive: null },
+      { cutJobId: 41, name: 'Старый раскрой', paramProfileId: null, profileName: null, profileIsActive: null, profileLayoutMode: null },
     ]);
     expect(detail?.inArchivedJob).toBe(true);
+    const placementQuery = db.queries.find(q => normalize(q.text).includes('FROM cut_job_item cji'));
+    expect(normalize(placementQuery?.text ?? '')).toContain(
+      "COALESCE( cj.last_calc_params->>'layout_mode', cpp.params->>'layout_mode', cj.params->>'layout_mode' ) AS profile_layout_mode",
+    );
   });
 
   it('Variant B: filters eligible details by sheetMaterialTypeIds (replaces materialIds filter)', async () => {
