@@ -367,6 +367,17 @@ export const apiRoutes = {
     audit: backendApiPath('/whatsapp/audit'),
     technicalLogs: backendApiPath('/whatsapp/technical-logs'),
     technicalLogsExport: backendApiPath('/whatsapp/technical-logs/export'),
+    dailyDigest: {
+      settings: backendApiPath('/whatsapp/daily-digest/settings'),
+      preview: backendApiPath('/whatsapp/daily-digest/preview'),
+      runs: backendApiPath('/whatsapp/daily-digest/runs'),
+      runById: (runId: string) =>
+        backendApiPath(`/whatsapp/daily-digest/runs/${encodeURIComponent(runId)}`),
+      pageImage: (runId: string, pageIndex: number) =>
+        backendApiPath(`/whatsapp/daily-digest/runs/${encodeURIComponent(runId)}/pages/${pageIndex}/image`),
+      retry: (runId: string) =>
+        backendApiPath(`/whatsapp/daily-digest/runs/${encodeURIComponent(runId)}/retry`),
+    },
   },
   groups: groupsRoutes,
   projects: {

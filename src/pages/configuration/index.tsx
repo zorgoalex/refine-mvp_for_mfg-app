@@ -57,6 +57,8 @@ import {
   WhatsAppTechnicalLogsConfig,
 } from './components/WhatsAppConfigTabs';
 import { can } from '../../utils/permissions';
+import { DailyOrderDigestConfig, dailyDigestTabVisible } from './components/DailyOrderDigestConfig';
+import { authSession } from '../../api/authSession';
 import {
   buildInitialResourceVisibility,
   getMenuResources,
@@ -89,9 +91,11 @@ export const filterConfigurationTabItems = <T extends { key: string }>(
   deadlineSettingsVisible: boolean,
   whatsappSettingsVisible = false,
   messageProcessingVisible = false,
+  dailyDigestVisible = false,
 ): T[] =>
   items.filter((item) => {
     if (item.key === 'message-processing') return messageProcessingVisible;
+    if (item.key === 'daily-order-digest') return dailyDigestVisible;
     if (item.key === 'whatsapp-connection' || item.key === 'whatsapp-automation' || item.key === 'whatsapp-technical-logs') {
       return whatsappSettingsVisible;
     }
@@ -593,6 +597,7 @@ export const ConfigurationPage: React.FC = () => {
   const whatsappSettingsVisible =
     featureFlags.useBackendWhatsApp &&
     (!featureFlags.useBackendPermissions || can('whatsapp.view') || can('whatsapp.manage'));
+  const dailyDigestVisible = dailyDigestTabVisible(authSession.getUser()?.permissions);
 
   const allTabItems = [
     ...(can('message_signals.manage_config') ? [{ key: 'message-processing', label: 'Обработка сообщений', children: <MessageProcessingConfig /> }] : []),
@@ -626,6 +631,17 @@ export const ConfigurationPage: React.FC = () => {
             children: <WhatsAppTechnicalLogsConfig />,
           },
         ]
+      : []),
+    ...(dailyDigestVisible
+      ? [{
+          key: 'daily-order-digest',
+          label: (
+            <span>
+              <BellOutlined /> Рассылка сообщений
+            </span>
+          ),
+          children: <DailyOrderDigestConfig />,
+        }]
       : []),
     {
       key: 'orders',
@@ -786,6 +802,7 @@ export const ConfigurationPage: React.FC = () => {
     deadlineSettingsVisible,
     whatsappSettingsVisible,
     can('message_signals.manage_config'),
+    dailyDigestVisible,
   );
 
   const availableTabKeys = tabItems.map((item) => item.key);

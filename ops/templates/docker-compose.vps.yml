@@ -244,6 +244,7 @@ services:
       CNC_TELEGRAM_BACKGROUND_INGEST_ENABLED: ${CNC_TELEGRAM_BACKGROUND_INGEST_ENABLED:-false}
       CNC_TELEGRAM_MANUAL_IMPORT_ENABLED: ${CNC_TELEGRAM_MANUAL_IMPORT_ENABLED:-false}
       CNC_TELEGRAM_MEDIA_DIR: ${CNC_TELEGRAM_MEDIA_DIR:-/data/cnc-telegram-media}
+      WHATSAPP_DAILY_DIGEST_DIR: /data/whatsapp-daily-digest
       BACKEND_ENABLE_DOWELING_COMMANDS: ${BACKEND_ENABLE_DOWELING_COMMANDS:-false}
       BACKEND_ENABLE_LABELS: ${BACKEND_ENABLE_LABELS:-false}
       LABEL_TELEGRAM_CUT_MAP_FALLBACK_ENABLED: ${LABEL_TELEGRAM_CUT_MAP_FALLBACK_ENABLED:-false}
@@ -346,6 +347,7 @@ services:
       - traefik.http.services.backend.loadbalancer.server.port=3000
     volumes:
       - cnc-telegram-media:/data/cnc-telegram-media
+      - whatsapp-daily-digest:/data/whatsapp-daily-digest
     networks:
       - back
       - edge
@@ -714,5 +716,6 @@ volumes:
   cad-generated:
   cnc-telegram-worker-data:
   cnc-telegram-media:
+  whatsapp-daily-digest:
   glm-ocr-model-cache:
   waha-sessions:

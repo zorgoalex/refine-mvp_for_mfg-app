@@ -258,6 +258,7 @@ export const envSchema = z
     CNC_TELEGRAM_BACKGROUND_INGEST_ENABLED: booleanFromEnv.default(false),
     CNC_TELEGRAM_MANUAL_IMPORT_ENABLED: booleanFromEnv.default(false),
     CNC_TELEGRAM_MEDIA_DIR: z.string().trim().min(1).default('/data/cnc-telegram-media'),
+    WHATSAPP_DAILY_DIGEST_DIR: z.string().trim().min(1).default('/data/whatsapp-daily-digest'),
     CNC_TELEGRAM_WORKER_USERNAME: optionalTrimmedStringFromEnv,
     CNC_TELEGRAM_ALLOWED_CHAT_IDS: optionalTrimmedStringFromEnv,
     // Independent production workflow for persistent Basis-cut XLS export sets.
