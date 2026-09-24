@@ -6,18 +6,23 @@ import { ApiError } from '../../common/errors/api-error';
 import { DatabaseService } from '../../database/database.service';
 import type { TransactionClient } from '../../database/database.types';
 import type { CurrentUser } from '../../permissions/current-user';
-import type { DailyDigestStoredPage, DailyDigestSettingsInput, DailyDigestRun, DailyDigestPage, DailyDigestRunDetail, DailyDigestRunKind, DailyDigestRunState } from './daily-digest.types';
+import type { DailyDigestSchedule, DailyDigestStoredPage, DailyDigestSettingsInput, DailyDigestRun, DailyDigestPage, DailyDigestRunDetail, DailyDigestRunKind, DailyDigestRunState } from './daily-digest.types';
 import type { DailyDigestSnapshot } from './daily-digest-snapshot.types';
 
 interface SettingsRow extends QueryResultRow {
   version: number; enabled: boolean; group_chat_id: string | null; send_time: string;
-  time_zone: string; catch_up_policy: string; catch_up_deadline: string; partial_policy: string; cards_per_message: number;
+  send_window_minutes: number | string | null; time_zone: string; catch_up_policy: string; catch_up_deadline: string; partial_policy: string; cards_per_message: number;
+}
+interface ScheduleRow extends QueryResultRow {
+  business_date: string | Date; scheduled_at: Date; window_start: string; window_end: string;
+  send_window_minutes: number; catch_up_policy: string; catch_up_deadline: string;
+  settings_version: number; created_at: Date;
 }
 interface RunRow extends QueryResultRow {
   run_id: string; business_date: string | Date; kind: DailyDigestRunKind; parent_run_id: string | null;
   state: DailyDigestRunState; reason: string | null; order_count: number; total_area: string | number;
   page_count?: number; sent_page_count?: number; destination_chat_id: string;
-  created_at: Date; updated_at: Date; image_expires_at: Date | null;
+  created_at: Date; updated_at: Date; image_expires_at: Date | null; scheduled_at: Date | null;
 }
 interface PageRow extends QueryResultRow {
   page_index: number; order_ids: number[]; state: DailyDigestPage['state']; attempt_count: number;
@@ -40,11 +45,20 @@ export class DailyDigestRepository {
       const row = (await tx.query<SettingsRow>('SELECT * FROM whatsapp_daily_digest_settings WHERE singleton_id=1 FOR UPDATE')).rows[0];
       if (!row) throw new ApiError(503, 'WHATSAPP_DAILY_DIGEST_NOT_MIGRATED', 'Ежедневная рассылка не настроена');
       if (row.version !== input.version) throw new ApiError(409, 'WHATSAPP_DAILY_DIGEST_VERSION_CONFLICT', 'Настройки рассылки уже изменены');
+      // The stored duration applies when an older client omits the new input;
+      // validate the effective window coherently under the same lock.
+      const sendWindowMinutes = input.sendWindowMinutes ?? Number(row.send_window_minutes ?? 0);
+      const windowEndMinutes = clockMinutes(input.sendTime) + sendWindowMinutes;
+      if (!Number.isInteger(sendWindowMinutes) || sendWindowMinutes < 0 || sendWindowMinutes > 1439 || windowEndMinutes > 1439
+        || (input.catchUpPolicy === 'until_deadline' && clockMinutes(input.catchUpDeadline) < windowEndMinutes)) {
+        throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректные настройки ежедневной рассылки');
+      }
       const next = (await tx.query<SettingsRow>(`
         UPDATE whatsapp_daily_digest_settings SET version=version+1,enabled=$2,group_chat_id=$3,
           send_time=$4::time,catch_up_policy=$5,catch_up_deadline=$6::time,partial_policy=$7,cards_per_message=$8,
+          send_window_minutes=COALESCE($10::integer,send_window_minutes),
           updated_by=$9,updated_at=now() WHERE singleton_id=1 AND version=$1 RETURNING *`,
-        [input.version, input.enabled, input.groupChatId, input.sendTime, input.catchUpPolicy, input.catchUpDeadline, input.partialPolicy, input.cardsPerMessage, actor.id])).rows[0];
+        [input.version, input.enabled, input.groupChatId, input.sendTime, input.catchUpPolicy, input.catchUpDeadline, input.partialPolicy, input.cardsPerMessage, actor.id, input.sendWindowMinutes ?? null])).rows[0];
       if (!input.enabled) {
         await tx.query(`UPDATE whatsapp_daily_digest_pages p SET state='cancelled',error_code='DISABLED',updated_at=now()
           FROM whatsapp_daily_digest_runs r WHERE p.run_id=r.run_id AND (r.kind='auto' OR r.auto_origin) AND r.state IN ('queued','sending') AND p.state='pending'`);
@@ -59,10 +73,46 @@ export class DailyDigestRepository {
       }
       await this.audit(tx, actor, requestId, 'settings.updated', null, {
         version: next.version,
-        before: { enabled: row.enabled, groupChatId: maskDestination(row.group_chat_id ?? ''), sendTime: String(row.send_time).slice(0, 5), catchUpPolicy: row.catch_up_policy, catchUpDeadline: String(row.catch_up_deadline).slice(0, 5), partialPolicy: row.partial_policy, cardsPerMessage: Number(row.cards_per_message) },
-        after: { enabled: next.enabled, groupChatId: maskDestination(next.group_chat_id ?? ''), sendTime: String(next.send_time).slice(0, 5), catchUpPolicy: next.catch_up_policy, catchUpDeadline: String(next.catch_up_deadline).slice(0, 5), partialPolicy: next.partial_policy, cardsPerMessage: Number(next.cards_per_message) },
+        before: { enabled: row.enabled, groupChatId: maskDestination(row.group_chat_id ?? ''), sendTime: String(row.send_time).slice(0, 5), sendWindowMinutes: Number(row.send_window_minutes ?? 0), catchUpPolicy: row.catch_up_policy, catchUpDeadline: String(row.catch_up_deadline).slice(0, 5), partialPolicy: row.partial_policy, cardsPerMessage: Number(row.cards_per_message) },
+        after: { enabled: next.enabled, groupChatId: maskDestination(next.group_chat_id ?? ''), sendTime: String(next.send_time).slice(0, 5), sendWindowMinutes: Number(next.send_window_minutes ?? 0), catchUpPolicy: next.catch_up_policy, catchUpDeadline: String(next.catch_up_deadline).slice(0, 5), partialPolicy: next.partial_policy, cardsPerMessage: Number(next.cards_per_message) },
       });
       return mapSettings(next);
+    });
+  }
+
+  /** Read the durable chosen dispatch minute for one business date, if planned. */
+  async getSchedule(businessDate: string): Promise<DailyDigestSchedule | null> {
+    const row = (await this.database.query<ScheduleRow>('SELECT * FROM whatsapp_daily_digest_schedules WHERE business_date=$1::date',[businessDate])).rows[0];
+    return row ? mapSchedule(row) : null;
+  }
+
+  /**
+   * Return the durable schedule for a business date, planning it exactly once.
+   * Holds the settings row lock (the same lock createRun/updateSettings take),
+   * re-reads current settings under it, and resolves concurrent planners by
+   * insert-on-conflict plus a re-read of the winner — never a redraw. Returns
+   * null when automation is disabled/unconfigured or a committed automatic run
+   * already owns the date (e.g. one recorded before schedules existed).
+   */
+  async getOrCreateSchedule(businessDate: string, drawOffsetMinutes: (durationMinutes: number) => number): Promise<DailyDigestSchedule | null> {
+    return this.database.transaction(async tx => {
+      const settings = (await tx.query<SettingsRow>('SELECT * FROM whatsapp_daily_digest_settings WHERE singleton_id=1 FOR UPDATE')).rows[0];
+      if (!settings) throw new ApiError(503, 'WHATSAPP_DAILY_DIGEST_NOT_MIGRATED', 'Ежедневная рассылка не настроена');
+      const existing = (await tx.query<ScheduleRow>('SELECT * FROM whatsapp_daily_digest_schedules WHERE business_date=$1::date',[businessDate])).rows[0];
+      if (existing) return mapSchedule(existing);
+      const autoRun = (await tx.query('SELECT 1 FROM whatsapp_daily_digest_runs WHERE kind=\'auto\' AND business_date=$1::date LIMIT 1',[businessDate])).rows[0];
+      if (autoRun || !settings.enabled || !settings.group_chat_id) return null;
+      const duration = Number(settings.send_window_minutes ?? 0);
+      const offset = duration > 0 ? drawOffsetMinutes(duration) : 0;
+      if (!Number.isInteger(duration) || duration < 0 || duration > 1439 || !Number.isInteger(offset) || offset < 0 || offset >= Math.max(duration, 1)) {
+        throw new ApiError(500, 'INTERNAL_ERROR', 'Некорректное время рассылки');
+      }
+      const startMinutes = clockMinutes(String(settings.send_time));
+      await tx.query(`INSERT INTO whatsapp_daily_digest_schedules(business_date,scheduled_at,window_start,window_end,send_window_minutes,catch_up_policy,catch_up_deadline,settings_version)
+        VALUES($1::date,$2,$3::time,$4::time,$5,$6,$7::time,$8) ON CONFLICT (business_date) DO NOTHING`,
+        [businessDate,zonedMinute(businessDate,startMinutes+offset),minutesToClock(startMinutes),minutesToClock(startMinutes+duration),duration,settings.catch_up_policy,settings.catch_up_deadline,Number(settings.version)]);
+      const winner = (await tx.query<ScheduleRow>('SELECT * FROM whatsapp_daily_digest_schedules WHERE business_date=$1::date',[businessDate])).rows[0];
+      return winner ? mapSchedule(winner) : null;
     });
   }
 
@@ -222,6 +272,10 @@ export class DailyDigestRepository {
         await tx.query('DELETE FROM whatsapp_daily_digest_pages WHERE run_id=ANY($1::uuid[])',[pruneIds]);
         await tx.query('DELETE FROM whatsapp_daily_digest_runs WHERE run_id=ANY($1::uuid[])',[pruneIds]);
       }
+      // Durable schedules share the terminal-run 90-day retention floor and
+      // the current Almaty business date is never pruned.
+      await tx.query(`DELETE FROM whatsapp_daily_digest_schedules
+        WHERE business_date < (($1::timestamptz AT TIME ZONE 'Asia/Almaty')::date - 90)`,[now]);
       const [refs, expired] = await Promise.all([
         tx.query<{file_key:string;expires_at:Date}>('SELECT file_key,expires_at FROM whatsapp_daily_digest_pages WHERE expires_at>$1 AND state NOT IN (\'expired\',\'cancelled\')',[now]),
         tx.query<{file_key:string}>('SELECT file_key FROM whatsapp_daily_digest_pages WHERE expires_at<=$1',[now]),
@@ -399,20 +453,32 @@ export class DailyDigestRepository {
   }
 }
 
-function runSelect() { return `SELECT r.run_id,r.business_date,r.kind,r.parent_run_id,r.state,r.reason,r.order_count,r.total_area,r.destination_chat_id,r.created_at,r.updated_at,r.image_expires_at,
+// The schedule LEFT JOIN is a metadata-only read (one row per business_date);
+// it takes no locks and is null-safe for manual/retry runs and for automatic
+// runs whose date predates durable schedules.
+function runSelect() { return `SELECT r.run_id,r.business_date,r.kind,r.parent_run_id,r.state,r.reason,r.order_count,r.total_area,r.destination_chat_id,r.created_at,r.updated_at,r.image_expires_at,s.scheduled_at,
   (SELECT count(*)::int FROM whatsapp_daily_digest_pages p WHERE p.run_id=r.run_id) page_count,
   (SELECT count(*)::int FROM whatsapp_daily_digest_pages p WHERE p.run_id=r.run_id AND p.state='sent') sent_page_count
-  FROM whatsapp_daily_digest_runs r`; }
+  FROM whatsapp_daily_digest_runs r
+  LEFT JOIN whatsapp_daily_digest_schedules s ON s.business_date=r.business_date AND r.kind='auto'`; }
 function mapSettings(row: SettingsRow) {
   return {version:Number(row.version),enabled:row.enabled,groupChatId:row.group_chat_id,sendTime:String(row.send_time).slice(0,5),timeZone:'Asia/Almaty' as const,
+    sendWindowMinutes:Number(row.send_window_minutes ?? 0),
     cardsPerMessage:Number(row.cards_per_message) as 1|2,
     catchUpPolicy:row.catch_up_policy as DailyDigestSettingsInput['catchUpPolicy'],catchUpDeadline:String(row.catch_up_deadline).slice(0,5),partialPolicy:row.partial_policy as DailyDigestSettingsInput['partialPolicy']};
+}
+function mapSchedule(row: ScheduleRow): DailyDigestSchedule {
+  const date = row.business_date instanceof Date ? row.business_date.toISOString().slice(0,10) : String(row.business_date).slice(0,10);
+  return {businessDate:date,scheduledAt:row.scheduled_at.toISOString(),windowStart:String(row.window_start).slice(0,5),windowEnd:String(row.window_end).slice(0,5),
+    sendWindowMinutes:Number(row.send_window_minutes),catchUpPolicy:row.catch_up_policy as DailyDigestSchedule['catchUpPolicy'],catchUpDeadline:String(row.catch_up_deadline).slice(0,5),
+    settingsVersion:Number(row.settings_version),createdAt:row.created_at.toISOString()};
 }
 function mapRun(row: RunRow): DailyDigestRun {
   const date = row.business_date instanceof Date ? row.business_date.toISOString().slice(0,10) : String(row.business_date).slice(0,10);
   return {id:row.run_id,businessDate:date,kind:row.kind,parentRunId:row.parent_run_id,state:row.state,reason:row.reason,
     orderCount:Number(row.order_count),totalArea:Number(row.total_area),pageCount:Number(row.page_count ?? 0),sentPageCount:Number(row.sent_page_count ?? 0),
-    destinationMasked:maskDestination(row.destination_chat_id),createdAt:row.created_at.toISOString(),updatedAt:row.updated_at.toISOString(),expiresAt:row.image_expires_at?.toISOString() ?? null};
+    destinationMasked:maskDestination(row.destination_chat_id),createdAt:row.created_at.toISOString(),updatedAt:row.updated_at.toISOString(),expiresAt:row.image_expires_at?.toISOString() ?? null,
+    scheduledAt:row.scheduled_at?.toISOString() ?? null};
 }
 function mapPage(row: PageRow): DailyDigestPage {
   return {pageIndex:Number(row.page_index),orderIds:Array.isArray(row.order_ids)?row.order_ids:[],state:row.state,attemptCount:Number(row.attempt_count),providerMessageId:row.provider_message_id,
@@ -422,4 +488,11 @@ function maskDestination(value: string) { return value.replace(/^(\d{2})[\d-]+(@
 function isUniqueViolation(error: unknown) { return Boolean(error && typeof error === 'object' && 'code' in error && (error as {code:string}).code === '23505'); }
 function cryptoUuid() { return require('node:crypto').randomUUID() as string; }
 function digest(value: unknown) { return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
+function clockMinutes(time: string) { return Number(time.slice(0,2))*60+Number(time.slice(3,5)); }
+function minutesToClock(minutes: number) { return `${String(Math.floor(minutes/60)).padStart(2,'0')}:${String(minutes%60).padStart(2,'0')}`; }
+// Chosen dispatch minute is stored at second/millisecond zero in the fixed
+// Asia/Almaty offset; legacy :59.999 deadline helpers stay on their own path.
+function zonedMinute(date: string, minutes: number) {
+  return `${date}T${minutesToClock(minutes)}:00.000+05:00`;
+}
 export function dailyDigestRequestDigest(value: unknown) { return digest(value); }

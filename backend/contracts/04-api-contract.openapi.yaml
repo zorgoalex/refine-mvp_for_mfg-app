@@ -783,7 +783,7 @@ paths:
       tags: [WhatsApp]
       operationId: getWhatsAppDailyDigestSettings
       summary: Get daily order digest settings and WhatsApp runtime availability
-      description: Settings default to disabled at 08:45 Asia/Almaty. The chat JID is returned only by this protected settings endpoint.
+      description: Settings default to disabled at 08:45 Asia/Almaty. The chat JID is returned only by this protected settings endpoint. todaySchedule exposes today's durable chosen dispatch minute once planned (null until then); this read never writes to the database.
       security: [{bearerAuth: []}]
       x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
       responses:
@@ -795,7 +795,7 @@ paths:
       tags: [WhatsApp]
       operationId: updateWhatsAppDailyDigestSettings
       summary: Update daily order digest settings
-      description: Strict versioned update. Asia/Almaty is fixed and omitted from the request. repeat_all requires explicit duplicate-risk confirmation.
+      description: Strict versioned update. Asia/Almaty is fixed and omitted from the request. repeat_all requires explicit duplicate-risk confirmation. sendWindowMinutes is optional for older clients; omitting it preserves the stored window duration. Once today's schedule exists, send time, window, and catch-up changes apply from the next business date.
       security: [{bearerAuth: []}]
       x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
       requestBody:
@@ -25928,24 +25928,43 @@ components:
     WhatsAppDailyDigestSettingsResponse:
       type: object
       additionalProperties: false
-      required: [settings, runtime]
+      required: [settings, runtime, todaySchedule]
       properties:
         settings: {$ref: '#/components/schemas/WhatsAppDailyDigestSettings'}
         runtime: {$ref: '#/components/schemas/WhatsAppDailyDigestRuntime'}
+        todaySchedule: {$ref: '#/components/schemas/WhatsAppDailyDigestSchedule'}
+
+    WhatsAppDailyDigestSchedule:
+      type: object
+      additionalProperties: false
+      nullable: true
+      required: [businessDate, scheduledAt, windowStart, windowEnd, sendWindowMinutes, catchUpPolicy, catchUpDeadline, settingsVersion, createdAt]
+      description: Durable once-per-day chosen dispatch minute for one Almaty business date. Null until the scheduler plans today's schedule. Timing and catch-up changes apply to the next business date once a schedule exists.
+      properties:
+        businessDate: {type: string, format: date}
+        scheduledAt: {type: string, format: date-time, description: Chosen dispatch minute, stored at second/millisecond zero.}
+        windowStart: {type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
+        windowEnd: {type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
+        sendWindowMinutes: {type: integer, minimum: 0, maximum: 1439}
+        catchUpPolicy: {type: string, enum: [skip, until_deadline, end_of_day]}
+        catchUpDeadline: {type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
+        settingsVersion: {type: integer, minimum: 1}
+        createdAt: {type: string, format: date-time}
 
     WhatsAppDailyDigestSettings:
       type: object
       additionalProperties: false
-      required: [version, enabled, groupChatId, sendTime, timeZone, cardsPerMessage, catchUpPolicy, catchUpDeadline, partialPolicy]
+      required: [version, enabled, groupChatId, sendTime, sendWindowMinutes, timeZone, cardsPerMessage, catchUpPolicy, catchUpDeadline, partialPolicy]
       properties:
         version: {type: integer, minimum: 1}
         enabled: {type: boolean, default: false}
         groupChatId: {type: string, nullable: true, maxLength: 120, pattern: '^[0-9]{5,24}(-[0-9]{5,24})?@g\.us$'}
-        sendTime: {type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$', default: '08:45'}
+        sendTime: {type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$', default: '08:45', description: Dispatch window start in Asia/Almaty.}
+        sendWindowMinutes: {type: integer, minimum: 0, maximum: 1439, default: 0, description: "Random dispatch window duration. 0 sends exactly at sendTime; larger values pick one durable random minute in [sendTime, sendTime+duration) each business day. The window must end before local midnight."}
         timeZone: {type: string, enum: [Asia/Almaty]}
         cardsPerMessage: {type: integer, enum: [1, 2], default: 2, description: Maximum order cards per WhatsApp message page.}
         catchUpPolicy: {type: string, enum: [skip, until_deadline, end_of_day], default: until_deadline}
-        catchUpDeadline: {type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$', default: '10:00'}
+        catchUpDeadline: {type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$', default: '10:00', description: "Must not precede the dispatch window end when catchUpPolicy is until_deadline."}
         partialPolicy: {type: string, enum: [remaining, repeat_all, manual], default: remaining}
 
     WhatsAppDailyDigestRuntime:
@@ -25966,6 +25985,7 @@ components:
         enabled: {type: boolean}
         groupChatId: {type: string, nullable: true, minLength: 1, maxLength: 120, pattern: '^[0-9]{5,24}(-[0-9]{5,24})?@g\.us$'}
         sendTime: {type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
+        sendWindowMinutes: {type: integer, minimum: 0, maximum: 1439, description: "Optional for older clients: omission preserves the stored window duration. The window must end before local midnight and the catch-up deadline must not precede the window end."}
         cardsPerMessage: {type: integer, enum: [1, 2], default: 2, description: Maximum order cards per WhatsApp message page.}
         catchUpPolicy: {type: string, enum: [skip, until_deadline, end_of_day]}
         catchUpDeadline: {type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
@@ -26044,7 +26064,7 @@ components:
     WhatsAppDailyDigestRun:
       type: object
       additionalProperties: false
-      required: [id, businessDate, kind, parentRunId, state, reason, orderCount, totalArea, pageCount, sentPageCount, destinationMasked, createdAt, updatedAt, expiresAt]
+      required: [id, businessDate, kind, parentRunId, state, reason, orderCount, totalArea, pageCount, sentPageCount, destinationMasked, createdAt, updatedAt, expiresAt, scheduledAt]
       properties:
         id: {type: string, format: uuid}
         businessDate: {type: string, format: date}
@@ -26060,6 +26080,7 @@ components:
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
         expiresAt: {type: string, format: date-time, nullable: true}
+        scheduledAt: {type: string, format: date-time, nullable: true, description: "Frozen planned dispatch minute for automatic runs; not an actual send timestamp. Null for manual/retry runs and automatic runs dated before schedules existed."}
 
     WhatsAppDailyDigestPage:
       type: object

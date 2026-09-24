@@ -20,6 +20,7 @@ export interface DailyDigestSettings {
   enabled: boolean;
   groupChatId: string | null;
   sendTime: string;
+  sendWindowMinutes: number;
   timeZone: 'Asia/Almaty';
   cardsPerMessage: 1 | 2;
   catchUpPolicy: DailyDigestCatchUpPolicy;
@@ -27,8 +28,23 @@ export interface DailyDigestSettings {
   partialPolicy: DailyDigestPartialPolicy;
 }
 
-export interface DailyDigestSettingsInput extends Omit<DailyDigestSettings, 'timeZone'> {
+export interface DailyDigestSettingsInput extends Omit<DailyDigestSettings, 'timeZone' | 'sendWindowMinutes'> {
+  // Optional for older clients: omission preserves the stored window duration.
+  sendWindowMinutes?: number;
   duplicateRiskConfirmed: boolean;
+}
+
+// Durable once-per-day chosen dispatch minute for one Almaty business date.
+export interface DailyDigestSchedule {
+  businessDate: string;
+  scheduledAt: string;
+  windowStart: string;
+  windowEnd: string;
+  sendWindowMinutes: number;
+  catchUpPolicy: DailyDigestCatchUpPolicy;
+  catchUpDeadline: string;
+  settingsVersion: number;
+  createdAt: string;
 }
 
 export interface DailyDigestRuntime {
@@ -40,6 +56,7 @@ export interface DailyDigestRuntime {
 export interface DailyDigestSettingsEnvelope {
   settings: DailyDigestSettings;
   runtime: DailyDigestRuntime;
+  todaySchedule: DailyDigestSchedule | null;
 }
 
 export interface DailyDigestRun {
@@ -57,6 +74,9 @@ export interface DailyDigestRun {
   createdAt: string;
   updatedAt: string;
   expiresAt: string | null;
+  // Frozen planned dispatch minute for automatic runs (planned time, never an
+  // actual send timestamp); null for manual/retry runs and pre-schedule dates.
+  scheduledAt: string | null;
 }
 
 export interface DailyDigestPage {

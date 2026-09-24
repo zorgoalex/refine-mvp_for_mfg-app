@@ -24,7 +24,8 @@ runtime flags.
 
 ## Access and configuration
 
-The configuration page has a separate **Рассылка заказов** tab. Every daily
+The configuration page has a separate **Рассылка сообщений** tab (the page
+title inside remains **Рассылка заказов**). Every daily
 digest API operation requires all of these permissions:
 
 - `whatsapp.manage`
@@ -38,10 +39,11 @@ not accepted. The stored defaults are:
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | Automatic sending | Off | Preview and manual actions remain available while off. |
-| Send time | 08:45 | Local time in the fixed `Asia/Almaty` timezone. |
+| Send time | 08:45 | Local dispatch window start in the fixed `Asia/Almaty` timezone. |
+| Send window minutes | 0 | Random dispatch window in minutes. `0` sends exactly at send time; larger values make the scheduler draw one durable random minute inside `[sendTime, sendTime+duration)` each business day. The window must end before local midnight. |
 | Cards per message | 2 | Choose `1` or `2`; `1` creates one order card per WhatsApp image. |
 | Missed-run policy | Until deadline | Catch up after 08:45 only until 10:00. |
-| Catch-up deadline | 10:00 | Applies when the policy is `until_deadline`; must not precede send time. |
+| Catch-up deadline | 10:00 | Applies when the policy is `until_deadline`; must not precede the dispatch window end. |
 | Partial delivery | Remaining pages | Retry only pages not confirmed sent. |
 
 The other catch-up choices are `skip` (do not catch up after the scheduled
@@ -58,8 +60,22 @@ with automation off, but not when the WhatsApp runtime/relay is unavailable.
 
 ## Missed sends, partial runs, and uncertainty
 
+Each business date gets one durable dispatch minute stored in
+`whatsapp_daily_digest_schedules`. The first scheduler tick of the enabled,
+configured automation plans it in the database — independently of provider or
+image-store availability — with a cryptographic random minute offset in
+`[0, sendWindowMinutes)` (`0` keeps the exact send time). Restarts and
+concurrent schedulers reuse the stored winner; the time is never redrawn.
+Sending may begin on the first tick at or after the chosen minute, so the
+stored minute is a dispatch floor, not an exact-second promise. Once the day's
+schedule exists, send time, window, and catch-up changes apply to the next
+business date; the settings response exposes today's frozen schedule as
+`todaySchedule` (read-only, `null` until planned). A day with a committed
+automatic run that predates schedules keeps that run final and gains no
+schedule row.
+
 The scheduler evaluates the Almaty business date and can catch up according to
-the saved policy. It never sends a second automatic run for the same business
+the frozen policy. It never sends a second automatic run for the same business
 date. Empty and intentionally skipped days remain visible in run history.
 
 Run and per-page states distinguish queued/sending, sent, partial, failed,
@@ -103,7 +119,8 @@ during the 30-day window, but never PNG image bytes.
 
 ## Deployment notes
 
-Apply migration `183_whatsapp_daily_digest.sql` before using the settings or
+Apply migrations `183_whatsapp_daily_digest.sql` and
+`184_whatsapp_daily_digest_schedule.sql` before using the settings or
 history API. The backend Compose service needs the explicit named-volume mount
 at `/data/whatsapp-daily-digest`; the checked-in VPS template declares both the
 mount and volume. Verify deployment configuration preserves all existing

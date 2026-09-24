@@ -6,11 +6,25 @@ export interface DailyDigestSettings {
   enabled: boolean;
   groupChatId: string | null;
   sendTime: string;
+  sendWindowMinutes: number;
   timeZone: 'Asia/Almaty';
   catchUpPolicy: DailyDigestCatchUpPolicy;
   catchUpDeadline: string;
   cardsPerMessage: 1 | 2;
   partialPolicy: DailyDigestPartialPolicy;
+}
+
+// Durable once-per-day chosen dispatch minute for one Almaty business date.
+export interface DailyDigestSchedule {
+  businessDate: string;
+  scheduledAt: string;
+  windowStart: string;
+  windowEnd: string;
+  sendWindowMinutes: number;
+  catchUpPolicy: DailyDigestCatchUpPolicy;
+  catchUpDeadline: string;
+  settingsVersion: number;
+  createdAt: string;
 }
 
 export interface DailyDigestSettingsEnvelope {
@@ -20,6 +34,7 @@ export interface DailyDigestSettingsEnvelope {
     relayAvailable: boolean;
     unavailableReason: string | null;
   };
+  todaySchedule: DailyDigestSchedule | null;
 }
 
 export type DailyDigestSettingsInput = Omit<DailyDigestSettings, 'timeZone'> & {
@@ -68,6 +83,9 @@ export interface DailyDigestRun {
   createdAt: string;
   updatedAt: string;
   expiresAt: string | null;
+  // Frozen planned dispatch minute for automatic runs; null for manual/retry
+  // runs and for dates whose automatic run predates durable schedules.
+  scheduledAt: string | null;
 }
 
 export type DailyDigestPageState =

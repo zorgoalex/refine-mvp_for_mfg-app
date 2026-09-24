@@ -10,6 +10,7 @@ const settingsInput = z.object({
   enabled: z.boolean(),
   groupChatId: z.string().trim().min(1).max(120).nullable(),
   sendTime: time,
+  sendWindowMinutes: z.number().int().min(0).max(1439).optional(),
   cardsPerMessage: z.union([z.literal(1), z.literal(2)]),
   catchUpPolicy: z.enum(['skip', 'until_deadline', 'end_of_day']),
   catchUpDeadline: time,
@@ -36,7 +37,12 @@ export function parseDailyDigestSettingsInput(value: unknown): DailyDigestSettin
   if (input.partialPolicy === 'repeat_all' && !input.duplicateRiskConfirmed) {
     throw new ApiError(409, 'WHATSAPP_DAILY_DIGEST_DUPLICATE_CONFIRMATION_REQUIRED', 'Повторная отправка может создать дубликаты; подтвердите риск');
   }
-  if (input.catchUpPolicy === 'until_deadline' && input.catchUpDeadline < input.sendTime) invalid();
+  // A send window may never end at or beyond local midnight. When the client
+  // omits sendWindowMinutes the stored value applies and is revalidated under
+  // the settings lock in the repository; the window end is at least sendTime.
+  const windowEnd = timeMinutes(input.sendTime) + (input.sendWindowMinutes ?? 0);
+  if (windowEnd >= 1440) invalid();
+  if (input.catchUpPolicy === 'until_deadline' && timeMinutes(input.catchUpDeadline) < windowEnd) invalid();
   return input;
 }
 
@@ -51,4 +57,8 @@ function parse<T>(schema: z.ZodType<T>, value: unknown): T {
 
 function invalid(): never {
   throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректные настройки ежедневной рассылки');
+}
+
+function timeMinutes(value: string): number {
+  return Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5));
 }

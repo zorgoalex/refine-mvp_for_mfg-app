@@ -56,10 +56,11 @@ vi.mock('antd', () => {
 let tree: ReactTestRenderer | undefined;
 const settingsEnvelope = {
   settings: {
-    version: 4, enabled: false, groupChatId: '123456789@g.us', sendTime: '08:45', timeZone: 'Asia/Almaty' as const,
+    version: 4, enabled: false, groupChatId: '123456789@g.us', sendTime: '08:45', sendWindowMinutes: 0, timeZone: 'Asia/Almaty' as const,
     catchUpPolicy: 'until_deadline' as const, catchUpDeadline: '10:00', cardsPerMessage: 2 as const, partialPolicy: 'remaining' as const,
   },
   runtime: { enabled: true, relayAvailable: true, unavailableReason: null },
+  todaySchedule: null,
 };
 
 function user(id: string) {
@@ -266,6 +267,49 @@ describe('DailyOrderDigestConfig rendered flow', () => {
     expect(mockApi.send).toHaveBeenCalledTimes(3);
     expect(mockApi.send.mock.calls[2][0]).toEqual(actorARequest);
     expect(pendingSessionStorage.has(actorAStorageKey)).toBe(false);
+  });
+
+  it('renders the window-start label, duration input, and explains the frozen daily schedule', async () => {
+    mockApi.settings.mockResolvedValue({
+      ...settingsEnvelope,
+      settings: { ...settingsEnvelope.settings, enabled: true, sendWindowMinutes: 30 },
+      todaySchedule: {
+        businessDate: '2026-09-24', scheduledAt: '2026-09-24T03:52:00.000Z', windowStart: '08:45', windowEnd: '09:15',
+        sendWindowMinutes: 30, catchUpPolicy: 'until_deadline', catchUpDeadline: '10:00', settingsVersion: 4, createdAt: '2026-09-24T00:00:00.000Z',
+      },
+    });
+    mockApi.runs.mockResolvedValue({ runs: [{
+      id: 'run-auto', businessDate: '2026-09-24', kind: 'auto', state: 'queued', orderCount: 2,
+      totalArea: 5, sentPageCount: 0, pageCount: 1, destinationMasked: '1234…@g.us',
+      scheduledAt: '2026-09-24T04:10:00.000Z',
+    }] });
+    await act(async () => { tree = create(<DailyOrderDigestConfig />); await settle(); });
+    const labels = tree!.root.findAllByType('div').map((node) => String(node.props.label ?? ''));
+    expect(labels).toContain('Начало окна отправки');
+    expect(labels).toContain('Случайное окно отправки, минут');
+    const frozen = tree!.root.findAllByType('aside').find((node) => String(node.props.message).includes('запланирована на'));
+    expect(frozen).toBeDefined();
+    expect(String(frozen!.props.message)).toContain('08:52');
+    expect(String(frozen!.props.description)).toContain('08:45–09:15');
+    expect(String(frozen!.props.description)).toContain('завтрашнему');
+    // History shows the frozen planned minute separately from actual send data.
+    expect(tree!.root.findAllByType('span').some((node) => node.children.join('') === '09:10')).toBe(true);
+  });
+
+  it('explains a fixed zero-minute schedule without claiming a random draw', async () => {
+    mockApi.settings.mockResolvedValue({
+      ...settingsEnvelope,
+      settings: { ...settingsEnvelope.settings, enabled: true, sendWindowMinutes: 0 },
+      todaySchedule: {
+        businessDate: '2026-09-24', scheduledAt: '2026-09-24T03:45:00.000Z', windowStart: '08:45', windowEnd: '08:45',
+        sendWindowMinutes: 0, catchUpPolicy: 'skip', catchUpDeadline: '10:00', settingsVersion: 4, createdAt: '2026-09-24T00:00:00.000Z',
+      },
+    });
+    await act(async () => { tree = create(<DailyOrderDigestConfig />); await settle(); });
+    const frozen = tree!.root.findAllByType('aside').find((node) => String(node.props.message).includes('запланирована на'));
+    expect(frozen).toBeDefined();
+    expect(String(frozen!.props.description)).not.toContain('случайно');
+    expect(String(frozen!.props.description)).toContain('зафиксировано');
   });
 
   it('does not offer manual send for an empty preview', async () => {

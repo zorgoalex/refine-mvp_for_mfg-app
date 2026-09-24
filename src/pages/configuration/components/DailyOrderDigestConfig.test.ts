@@ -33,7 +33,7 @@ describe('daily order digest configuration helpers', () => {
 
   it('treats hydrated settings as clean even if Ant Design records touched fields', () => {
     const settings = {
-      version: 2, enabled: false, groupChatId: '123456789@g.us', sendTime: '08:45',
+      version: 2, enabled: false, groupChatId: '123456789@g.us', sendTime: '08:45', sendWindowMinutes: 30,
       timeZone: 'Asia/Almaty' as const, catchUpPolicy: 'until_deadline' as const,
       catchUpDeadline: '10:00', cardsPerMessage: 2 as const, partialPolicy: 'remaining' as const,
     };
@@ -45,5 +45,6 @@ describe('daily order digest configuration helpers', () => {
     expect(settingsDraftMatchesSaved(draft, settings)).toBe(true);
     expect(settingsDraftMatchesSaved({ ...draft, enabled: true }, settings)).toBe(false);
     expect(settingsDraftMatchesSaved({ ...draft, cardsPerMessage: 1 }, settings)).toBe(false);
+    expect(settingsDraftMatchesSaved({ ...draft, sendWindowMinutes: 0 }, settings)).toBe(false);
   });
 });

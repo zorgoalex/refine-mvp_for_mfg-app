@@ -1,9 +1,9 @@
 import { Inject, Injectable, OnModuleInit, Optional } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import { ApiError } from '../../common/errors/api-error';
 import { DatabaseService } from '../../database/database.service';
 import type { CurrentUser } from '../../permissions/current-user';
-import { DAILY_DIGEST_ORDER_READER, DAILY_DIGEST_RENDERER, type DailyDigestOrderReader, type DailyDigestRenderer, type DailyDigestRuntime, type DailyDigestSettingsEnvelope, type DailyDigestSettingsInput, type DailyDigestPreview, type DailyDigestRunDetail, type DailyDigestRunState } from './daily-digest.types';
+import { DAILY_DIGEST_ORDER_READER, DAILY_DIGEST_RENDERER, type DailyDigestOrderReader, type DailyDigestRenderer, type DailyDigestRuntime, type DailyDigestSchedule, type DailyDigestSettings, type DailyDigestSettingsEnvelope, type DailyDigestSettingsInput, type DailyDigestPreview, type DailyDigestRunDetail, type DailyDigestRunState } from './daily-digest.types';
 import type { DailyDigestSnapshot, DailyDigestRenderedPage } from './daily-digest-snapshot.types';
 import { DailyDigestFileStore } from './daily-digest-file-store';
 import { DailyDigestRepository, dailyDigestRequestDigest } from './daily-digest.repository';
@@ -41,12 +41,21 @@ export class DailyDigestService implements OnModuleInit {
   }
 
   async settings(): Promise<DailyDigestSettingsEnvelope> {
-    return { settings: await this.repository.getSettings(), runtime: this.runtime() };
+    return this.envelope(await this.repository.getSettings());
   }
 
   async updateSettings(input: DailyDigestSettingsInput, actor: CurrentUser, requestId: string) {
-    const settings = await this.repository.updateSettings(input, actor, requestId);
-    return { settings, runtime: this.runtime() };
+    return this.envelope(await this.repository.updateSettings(input, actor, requestId));
+  }
+
+  private async envelope(settings: DailyDigestSettings): Promise<DailyDigestSettingsEnvelope> {
+    // Read-only: a saved response may explain the frozen schedule, but never
+    // plans one. A pre-184 schema degrades to null while real failures surface.
+    const todaySchedule = await this.repository.getSchedule(businessDate()).catch((error: unknown) => {
+      if (error && typeof error === 'object' && 'code' in error && (error as {code:string}).code === '42P01') return null;
+      throw error;
+    });
+    return { settings, runtime: this.runtime(), todaySchedule };
   }
 
   async preview(): Promise<DailyDigestPreview> {
@@ -131,6 +140,15 @@ export class DailyDigestService implements OnModuleInit {
   }
 
   async tick(now = new Date()) {
+    // Planning is a pure-DB step that runs before the provider/store gates so
+    // a relay or filesystem outage cannot postpone (and later redraw) the daily
+    // chosen minute. Today's frozen schedule also drives any timing/catch-up
+    // interpretation below; next-day changes apply to tomorrow's schedule.
+    try {
+      await this.planToday(now);
+    } catch (error) {
+      await this.logError('whatsapp.daily_digest.schedule','schedule.plan',error);
+    }
     if (!this.cleanupReady || !this.runtime().relayAvailable) return;
     try {
       const settings = await this.repository.getSettings();
@@ -143,21 +161,32 @@ export class DailyDigestService implements OnModuleInit {
     catch (error) { await this.logError('whatsapp.daily_digest.process','delivery.tick',error); }
   }
 
+  private async planToday(now: Date) {
+    const settings = await this.repository.getSettings();
+    if (!settings.enabled || !settings.groupChatId) return;
+    await this.repository.getOrCreateSchedule(businessDate(now), drawScheduleOffset);
+  }
+
   private async scheduleIfDue(settings: Awaited<ReturnType<DailyDigestRepository['getSettings']>>, now: Date) {
     const date = businessDate(now);
     if (!settings.groupChatId) return;
-    const windowState = automaticWindowState(settings, now);
+    const schedule = await this.repository.getOrCreateSchedule(date, drawScheduleOffset);
+    // A committed automatic run (e.g. recorded before schedules existed) owns
+    // the date; never plan or send a second one behind it.
+    if (!schedule) return;
+    const timing = scheduleTiming(schedule);
+    const windowState = automaticWindowState(timing, now);
     if (windowState === 'before') return;
     if (windowState === 'missed') {
-      await this.recordAutomaticWithoutImages(date, settings, 'skipped', 'MISSED_WINDOW', now);
+      await this.recordAutomaticWithoutImages(date, { ...settings, catchUpPolicy: schedule.catchUpPolicy }, 'skipped', 'MISSED_WINDOW', now);
       return;
     }
     if (await this.repository.hasAutomaticRun(date)) return;
-    const dateDeadline = automaticDeadline(settings, date);
+    const dateDeadline = automaticDeadline(timing, date);
     await this.withRenderLease(async assertRenderOwned => {
       const snapshot = { ...(await this.readSnapshot(date)), cardsPerMessage: settings.cardsPerMessage };
       if (!snapshot.orders.length) {
-        await this.recordAutomaticWithoutImages(date,settings,'empty','NO_ORDERS',now,snapshot);
+        await this.recordAutomaticWithoutImages(date,{ ...settings, catchUpPolicy: schedule.catchUpPolicy },'empty','NO_ORDERS',now,snapshot);
         return;
       }
       const renderedAt = Date.now();
@@ -174,7 +203,7 @@ export class DailyDigestService implements OnModuleInit {
           await assertStoreOwned();
           persistenceAttempted = true;
           const run = await this.repository.createRun({runId,businessDate:date,kind:'auto',idempotencyKey:key,settingsVersion:settings.version,
-            destinationChatId:settings.groupChatId!,catchUpPolicy:settings.catchUpPolicy,deadlineAt:dateDeadline,partialPolicy:settings.partialPolicy,
+            destinationChatId:settings.groupChatId!,catchUpPolicy:schedule.catchUpPolicy,deadlineAt:dateDeadline,partialPolicy:settings.partialPolicy,
             snapshot,orderCount:snapshot.orders.length,totalArea:snapshot.totalArea,state:'queued',imageExpiresAt:expiresAt},pages,assertStoreOwned);
           await assertStoreOwned();
           return run;
@@ -336,6 +365,14 @@ export function automaticDeadline(settings: Pick<Awaited<ReturnType<DailyDigestR
   const time = settings.catchUpPolicy === 'end_of_day' ? '23:59:59'
     : settings.catchUpPolicy === 'until_deadline' ? `${settings.catchUpDeadline}:59` : `${settings.sendTime}:59`;
   return zonedDateTime(date,time);
+}
+// The frozen schedule replaces configured timing with the day's chosen minute
+// while keeping the stored catch-up policy; everything else stays current.
+export function scheduleTiming(schedule: Pick<DailyDigestSchedule,'scheduledAt'|'catchUpPolicy'|'catchUpDeadline'>): Pick<DailyDigestSettings,'sendTime'|'catchUpPolicy'|'catchUpDeadline'> {
+  return {sendTime:businessTime(new Date(schedule.scheduledAt)),catchUpPolicy:schedule.catchUpPolicy,catchUpDeadline:schedule.catchUpDeadline};
+}
+function drawScheduleOffset(durationMinutes: number): number {
+  return randomInt(durationMinutes);
 }
 function zonedDateTime(date: string,time: string) {
   const [hour,minute,second='0'] = time.split(':');

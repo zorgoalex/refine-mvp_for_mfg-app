@@ -1,12 +1,21 @@
+import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../common/errors/api-error';
-import { DailyDigestService, automaticDeadline, automaticWindowState, businessDate } from './daily-digest.service';
-import type { DailyDigestSettings } from './daily-digest.types';
+import { DailyDigestService, automaticDeadline, automaticWindowState, businessDate, businessTime, scheduleTiming } from './daily-digest.service';
+import type { DailyDigestSchedule, DailyDigestSettings } from './daily-digest.types';
 
 const settings: DailyDigestSettings = {
-  version: 1, enabled: true, groupChatId: 'example@g.us', sendTime: '08:45', timeZone: 'Asia/Almaty', cardsPerMessage: 2,
+  version: 1, enabled: true, groupChatId: 'example@g.us', sendTime: '08:45', sendWindowMinutes: 0, timeZone: 'Asia/Almaty', cardsPerMessage: 2,
   catchUpPolicy: 'skip', catchUpDeadline: '10:00', partialPolicy: 'remaining',
 };
+
+const scheduleFor = (date: string, chosenAlmatyTime: string, overrides: Partial<DailyDigestSchedule> = {}): DailyDigestSchedule => ({
+  businessDate: date,
+  scheduledAt: new Date(`${date}T${chosenAlmatyTime}:00.000+05:00`).toISOString(),
+  windowStart: '08:45', windowEnd: '08:45', sendWindowMinutes: 0,
+  catchUpPolicy: 'skip', catchUpDeadline: '10:00', settingsVersion: 1,
+  createdAt: `${date}T00:00:00.000Z`, ...overrides,
+});
 
 describe('daily digest scheduling boundaries', () => {
   it('includes all seconds in the scheduled minute and closes immediately after it', () => {
@@ -28,7 +37,7 @@ describe('daily digest scheduling boundaries', () => {
 
 describe('daily digest private image startup gate', () => {
   function makeService(options: { lockResult?: null | undefined } = {}) {
-    const repository = { expireImagesAndPruneSnapshots: vi.fn().mockResolvedValue({ referenced: new Map(), expiredKeys: [] }), getPageImageMetadata: vi.fn(), getSettings: vi.fn().mockResolvedValue({ ...settings }) };
+    const repository = { expireImagesAndPruneSnapshots: vi.fn().mockResolvedValue({ referenced: new Map(), expiredKeys: [] }), getPageImageMetadata: vi.fn(), getSettings: vi.fn().mockResolvedValue({ ...settings }), getOrCreateSchedule: vi.fn().mockResolvedValue(null), createRun: vi.fn() };
     const store = {
       withStoreLock: vi.fn(async (handler: (assertOwned: () => Promise<void>) => Promise<unknown>) => {
         if (options.lockResult === null) return null;
@@ -70,7 +79,9 @@ describe('daily digest private image startup gate', () => {
     const { service, repository, reader, renderer } = makeService({ lockResult: null });
     await service.onModuleInit();
     await service.tick();
-    expect(repository.getSettings).not.toHaveBeenCalled();
+    // Planning is intentionally DB-only; send-path work stays gated on the store.
+    expect(repository.getOrCreateSchedule).toHaveBeenCalledOnce();
+    expect(reader.read).not.toHaveBeenCalled();
     await expect(service.preview()).resolves.toMatchObject({ empty: true, pages: [] });
     expect(reader.read).toHaveBeenCalledOnce();
     expect(renderer.render).not.toHaveBeenCalled();
@@ -182,6 +193,7 @@ describe('daily digest ambiguous persistence cleanup', () => {
     const repository = {
       getSettings: vi.fn().mockResolvedValue({ ...settings, cardsPerMessage: 1 }),
       expireImagesAndPruneSnapshots: vi.fn().mockResolvedValue({ referenced: new Map(), expiredKeys: [] }),
+      getOrCreateSchedule: vi.fn().mockResolvedValue(scheduleFor(date, '08:45')),
       hasAutomaticRun: vi.fn().mockImplementation(async () => commitMayHaveSucceeded),
       createRun: vi.fn().mockImplementation(async () => {
         commitMayHaveSucceeded = true;
@@ -221,6 +233,8 @@ describe('daily digest delivery ordering', () => {
     const repository = {
       expireImagesAndPruneSnapshots: vi.fn().mockResolvedValue({ referenced: new Map(), expiredKeys: [] }),
       getSettings: vi.fn().mockResolvedValue({ ...settings, enabled: false }),
+      getOrCreateSchedule: vi.fn().mockResolvedValue(scheduleFor('2026-09-23', '08:45')),
+      getSchedule: vi.fn().mockResolvedValue(null),
       hasAutomaticRun: vi.fn().mockResolvedValue(true),
       listRuns: vi.fn(),
       markStaleIntentsUnknown: vi.fn().mockResolvedValue(undefined),
@@ -278,5 +292,122 @@ describe('daily digest delivery ordering', () => {
     await service.onModuleInit();
     await service.tick();
     expect(waha.sendImage).toHaveBeenCalledOnce();
+  });
+});
+
+describe('daily digest random dispatch window', () => {
+  function makeAutoService(options: { relayAvailable?: boolean; schedule?: DailyDigestSchedule | null; settingsOverride?: Partial<DailyDigestSettings>; orders?: Array<{ orderId: number }> } = {}) {
+    const emptySnapshot = {
+      businessDate: '2026-09-23', rendererVersion: 'test-v1', cardsPerMessage: 2, totalArea: 0,
+      orders: options.orders ?? [], workflowDisplay: { displayOrderCodes: [], codeToLetter: {}, codeToName: {} },
+    };
+    const repository = {
+      expireImagesAndPruneSnapshots: vi.fn().mockResolvedValue({ referenced: new Map(), expiredKeys: [] }),
+      getSettings: vi.fn().mockResolvedValue({ ...settings, ...(options.settingsOverride ?? {}) }),
+      updateSettings: vi.fn().mockImplementation(async () => ({ ...settings, ...(options.settingsOverride ?? {}), version: 9 })),
+      getOrCreateSchedule: vi.fn().mockResolvedValue(options.schedule === undefined ? scheduleFor('2026-09-23', '08:45') : options.schedule),
+      getSchedule: vi.fn().mockResolvedValue(options.schedule ?? null),
+      hasAutomaticRun: vi.fn().mockResolvedValue(false),
+      createRun: vi.fn().mockResolvedValue({ run: { id: 'run-auto' }, pages: [] }),
+      markStaleIntentsUnknown: vi.fn().mockResolvedValue(undefined),
+      listQueuedRunIds: vi.fn().mockResolvedValue([]),
+    };
+    const store = {
+      withStoreLock: vi.fn(async (handler: (assertOwned: () => Promise<void>) => Promise<unknown>) => handler(async () => undefined)),
+      writePages: vi.fn().mockImplementation(async (pages: Array<{ pageIndex: number }>) => pages.map(() => ({ fileKey: `${randomUUID()}-p.png`, sha256: 'a'.repeat(64), sizeBytes: 128, expiresAt: new Date(Date.now() + 86_400_000) }))), remove: vi.fn(),
+      sweep: vi.fn().mockResolvedValue({ expired: [], orphaned: [] }), readImage: vi.fn(),
+    };
+    const database = { withAdvisoryLock: vi.fn(async (_name: string, handler: (assertOwned: () => Promise<void>) => Promise<unknown>) => handler(async () => undefined)) };
+    const reader = { read: vi.fn().mockResolvedValue(emptySnapshot) };
+    const renderer = { render: vi.fn().mockImplementation(async (snap: { orders: Array<{ orderId: number }> }) => snap.orders.map((order, index) => ({ pageIndex: index + 1, orderIds: [order.orderId], png: Buffer.from('png') }))) };
+    const runtime = { getConfig: () => options.relayAvailable === false ? { enabled: false, relayOwner: 'external' } : { enabled: true, relayOwner: 'in_process', relayStaleLockMs: 60_000 } };
+    const service = new DailyDigestService(repository as never, store as never, database as never, runtime as never, {} as never, reader as never, renderer as never);
+    return { service, repository, store, reader, renderer };
+  }
+
+  it('derives the effective timing from the frozen chosen minute', () => {
+    const schedule = scheduleFor('2026-09-23', '08:52', { sendWindowMinutes: 30, windowEnd: '09:15', catchUpPolicy: 'until_deadline', catchUpDeadline: '10:00' });
+    expect(businessTime(new Date(schedule.scheduledAt))).toBe('08:52');
+    expect(scheduleTiming(schedule)).toEqual({ sendTime: '08:52', catchUpPolicy: 'until_deadline', catchUpDeadline: '10:00' });
+  });
+
+  it('plans the daily schedule before the provider gate without reading orders or images', async () => {
+    const { service, repository, store, reader, renderer } = makeAutoService({ relayAvailable: false });
+    await service.onModuleInit();
+    await service.tick(new Date('2026-09-23T03:50:00.000Z'));
+    expect(repository.getOrCreateSchedule).toHaveBeenCalledWith('2026-09-23', expect.any(Function));
+    expect(reader.read).not.toHaveBeenCalled();
+    expect(renderer.render).not.toHaveBeenCalled();
+    expect(repository.createRun).not.toHaveBeenCalled();
+    expect(store.writePages).not.toHaveBeenCalled();
+  });
+
+  it('draws the offset as an integer inside [0, duration)', async () => {
+    const { service, repository } = makeAutoService({ relayAvailable: false });
+    await service.onModuleInit();
+    await service.tick(new Date('2026-09-23T03:50:00.000Z'));
+    const draw = repository.getOrCreateSchedule.mock.calls[0][1] as (duration: number) => number;
+    for (let i = 0; i < 300; i += 1) {
+      const value = draw(30);
+      expect(Number.isInteger(value)).toBe(true);
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThan(30);
+    }
+    expect(draw(1)).toBe(0);
+  });
+
+  it('does not read orders or render before the frozen chosen minute, then uses the frozen catch-up policy', async () => {
+    const schedule = scheduleFor('2026-09-23', '08:52', { sendWindowMinutes: 30, windowEnd: '09:15', catchUpPolicy: 'until_deadline', catchUpDeadline: '10:00' });
+    const { service, repository, reader, renderer } = makeAutoService({ schedule });
+    await service.onModuleInit();
+    await service.tick(new Date('2026-09-23T03:51:59.999Z'));
+    expect(reader.read).not.toHaveBeenCalled();
+    expect(renderer.render).not.toHaveBeenCalled();
+    expect(repository.createRun).not.toHaveBeenCalled();
+
+    await service.tick(new Date('2026-09-23T03:52:30.000Z'));
+    expect(repository.createRun).toHaveBeenCalledOnce();
+    const runInput = repository.createRun.mock.calls[0][0];
+    expect(runInput.state).toBe('empty');
+    // Settings still carry 'skip'; the recorded run uses the frozen policy.
+    expect(runInput.catchUpPolicy).toBe('until_deadline');
+  });
+
+  it('records a missed-window skip with the frozen policy when settings changed after planning', async () => {
+    const schedule = scheduleFor('2026-09-23', '08:45', { catchUpPolicy: 'skip' });
+    const { service, repository } = makeAutoService({ schedule, settingsOverride: { catchUpPolicy: 'until_deadline', catchUpDeadline: '23:00' } });
+    await service.onModuleInit();
+    await service.tick(new Date('2026-09-23T03:46:00.000Z'));
+    expect(repository.createRun).toHaveBeenCalledOnce();
+    expect(repository.createRun.mock.calls[0][0]).toMatchObject({ state: 'skipped', reason: 'MISSED_WINDOW', catchUpPolicy: 'skip' });
+  });
+
+  it('keeps the until_deadline cutoff anchored to the frozen deadline, not the chosen minute', async () => {
+    const schedule = scheduleFor('2026-09-23', '09:10', { sendWindowMinutes: 30, windowEnd: '09:15', catchUpPolicy: 'until_deadline', catchUpDeadline: '10:00' });
+    const { service, repository } = makeAutoService({ schedule, orders: [{ orderId: 71 }] });
+    await service.onModuleInit();
+    await service.tick(new Date('2026-09-23T04:59:30.000Z'));
+    expect(repository.createRun).toHaveBeenCalledOnce();
+    expect(repository.createRun.mock.calls[0][0]).toMatchObject({ state: 'queued', catchUpPolicy: 'until_deadline' });
+    expect(repository.createRun.mock.calls[0][0].deadlineAt.toISOString()).toBe('2026-09-23T05:00:59.999Z');
+  });
+
+  it('does not plan a schedule while automation is disabled', async () => {
+    const { service, repository } = makeAutoService({ settingsOverride: { enabled: false } });
+    await service.onModuleInit();
+    await service.tick(new Date('2026-09-23T03:50:00.000Z'));
+    expect(repository.getOrCreateSchedule).not.toHaveBeenCalled();
+  });
+
+  it('exposes the frozen schedule on settings and save envelopes, tolerating a pre-window schema', async () => {
+    const schedule = scheduleFor('2026-09-23', '08:52', { sendWindowMinutes: 30, windowEnd: '09:15' });
+    const { service, repository } = makeAutoService({ schedule });
+    await expect(service.settings()).resolves.toMatchObject({ todaySchedule: schedule });
+    await expect(service.updateSettings({ ...settings, duplicateRiskConfirmed: false }, { id: 'actor-1' } as never, 'req-1'))
+      .resolves.toMatchObject({ todaySchedule: schedule });
+    repository.getSchedule.mockRejectedValueOnce(Object.assign(new Error('relation does not exist'), { code: '42P01' }));
+    await expect(service.settings()).resolves.toMatchObject({ todaySchedule: null });
+    repository.getSchedule.mockRejectedValueOnce(new Error('connection reset'));
+    await expect(service.settings()).rejects.toThrow('connection reset');
   });
 });

@@ -53,6 +53,7 @@ const DEFAULT_SETTINGS: SettingsFormValues = {
   enabled: false,
   groupChatId: null,
   sendTime: dayjs().hour(8).minute(45).second(0).millisecond(0),
+  sendWindowMinutes: 0,
   timeZone: 'Asia/Almaty',
   catchUpPolicy: 'until_deadline',
   catchUpDeadline: dayjs().hour(10).minute(0).second(0).millisecond(0),
@@ -268,6 +269,7 @@ export const DailyOrderDigestConfig: React.FC = () => {
         enabled: values.enabled,
         groupChatId: values.groupChatId?.trim() || null,
         sendTime: values.sendTime.format('HH:mm'),
+        sendWindowMinutes: values.sendWindowMinutes,
         catchUpPolicy: values.catchUpPolicy,
         catchUpDeadline: values.catchUpDeadline.format('HH:mm'),
         cardsPerMessage: values.cardsPerMessage,
@@ -430,6 +432,7 @@ export const DailyOrderDigestConfig: React.FC = () => {
   const historyColumns = useMemo(() => [
     { title: 'Дата', dataIndex: 'businessDate', width: 110 },
     { title: 'Тип', dataIndex: 'kind', width: 100, render: (kind: DailyDigestRun['kind']) => ({ auto: 'Авто', manual: 'Вручную', retry: 'Повтор' }[kind]) },
+    { title: 'Плановое время', width: 120, render: (_: unknown, run: DailyDigestRun) => run.scheduledAt ? formatScheduleTime(run.scheduledAt) : '—' },
     { title: 'Статус', dataIndex: 'state', width: 160, render: (state: DailyDigestRunState) => <Tag color={runStateColor(state)}>{RUN_STATE_LABELS[state]}</Tag> },
     { title: 'Заказы', dataIndex: 'orderCount', width: 85 },
     { title: 'Площадь', dataIndex: 'totalArea', width: 115, render: (area: number) => formatDigestArea(area) },
@@ -469,9 +472,20 @@ export const DailyOrderDigestConfig: React.FC = () => {
         ]} extra="ID группы хранится в защищённых настройках. В истории показывается только маска.">
           <Input placeholder="120…@g.us" autoComplete="off" />
         </Form.Item>
-        <Form.Item name="sendTime" label="Время ежедневной отправки" rules={[{ required: true, message: 'Укажите время отправки.' }]}>
+        <Form.Item name="sendTime" label="Начало окна отправки" rules={[{ required: true, message: 'Укажите время отправки.' }]}>
           <TimePicker format="HH:mm" minuteStep={5} style={{ width: 160 }} />
         </Form.Item>
+        <Form.Item name="sendWindowMinutes" label="Случайное окно отправки, минут" dependencies={['sendTime']} rules={[{ required: true, message: 'Укажите длительность окна.' }, { validator: async (_, duration: number | undefined) => {
+          const sendTime = form.getFieldValue('sendTime') as Dayjs | undefined;
+          if (duration === undefined || !sendTime) return;
+          if (!Number.isInteger(duration) || duration < 0 || duration > 1439) throw new Error('Длительность окна — от 0 до 1439 минут.');
+          if (sendTime.hour() * 60 + sendTime.minute() + duration > 1439) throw new Error('Окно должно заканчиваться до полуночи.');
+        } }]} extra="0 — отправка точно в указанное время. Больше 0 — сервер один раз в день случайно выбирает минуту внутри окна и фиксирует её до конца дня.">
+          <InputNumber min={0} max={1439} step={5} style={{ width: 160 }} />
+        </Form.Item>
+        {envelope?.todaySchedule ? <Alert type="info" showIcon message={`Сегодня отправка запланирована на ${formatScheduleTime(envelope.todaySchedule.scheduledAt)}`}
+          description={`${envelope.todaySchedule.sendWindowMinutes > 0 ? `Время выбрано случайно в окне ${envelope.todaySchedule.windowStart}–${envelope.todaySchedule.windowEnd} и зафиксировано до конца дня. ` : 'Время зафиксировано до конца дня. '}Изменения времени, окна и правил догона применятся к завтрашнему расписанию. Отправка начнётся при первом проходе планировщика после выбранной минуты.`} />
+          : settings?.enabled ? <Paragraph type="secondary">Время отправки на сегодня ещё не выбрано — планировщик зафиксирует его при следующем проходе.</Paragraph> : null}
         <Form.Item name="catchUpPolicy" label="Если сервер пропустил время отправки" rules={[{ required: true }]}>
           <Select options={[
             { value: 'skip', label: 'Пропустить сводку за сегодня' },
@@ -479,9 +493,10 @@ export const DailyOrderDigestConfig: React.FC = () => {
             { value: 'end_of_day', label: 'Отправить до конца дня' },
           ]} />
         </Form.Item>
-        {catchUpPolicy === 'until_deadline' && <Form.Item name="catchUpDeadline" label="Контрольное время" dependencies={['sendTime']} rules={[{ required: true, message: 'Укажите контрольное время.' }, { validator: async (_, deadline: Dayjs | undefined) => {
+        {catchUpPolicy === 'until_deadline' && <Form.Item name="catchUpDeadline" label="Контрольное время" dependencies={['sendTime', 'sendWindowMinutes']} rules={[{ required: true, message: 'Укажите контрольное время.' }, { validator: async (_, deadline: Dayjs | undefined) => {
           const sendTime = form.getFieldValue('sendTime') as Dayjs | undefined;
-          if (deadline && sendTime && deadline.format('HH:mm') < sendTime.format('HH:mm')) throw new Error('Контрольное время должно быть не раньше времени отправки.');
+          const windowMinutes = Number(form.getFieldValue('sendWindowMinutes') ?? 0);
+          if (deadline && sendTime && deadline.hour() * 60 + deadline.minute() < sendTime.hour() * 60 + sendTime.minute() + windowMinutes) throw new Error('Контрольное время должно быть не раньше конца окна отправки.');
         } }]}>
           <TimePicker format="HH:mm" minuteStep={5} style={{ width: 160 }} />
         </Form.Item>}
@@ -533,6 +548,7 @@ export const DailyOrderDigestConfig: React.FC = () => {
           <Tag color={runStateColor(detail.run.state)}>{RUN_STATE_LABELS[detail.run.state]}</Tag>
           <Text>{detail.run.orderCount} заказов · {formatDigestArea(detail.run.totalArea)}</Text>
           <Text type="secondary">Группа {detail.run.destinationMasked}</Text>
+          {detail.run.scheduledAt && <Text type="secondary">Плановое время {formatScheduleTime(detail.run.scheduledAt)}</Text>}
         </Space>
         {detail.run.reason && <Paragraph type="secondary">{runReasonText(detail.run.reason)}</Paragraph>}
         <div className="daily-digest-history-pages">
@@ -591,6 +607,7 @@ export function settingsDraftMatchesSaved(values: SettingsFormValues, settings: 
     && values.enabled === settings.enabled
     && (values.groupChatId?.trim() || null) === settings.groupChatId
     && values.sendTime?.format('HH:mm') === settings.sendTime
+    && values.sendWindowMinutes === settings.sendWindowMinutes
     && values.catchUpPolicy === settings.catchUpPolicy
     && values.catchUpDeadline?.format('HH:mm') === settings.catchUpDeadline
     && values.cardsPerMessage === settings.cardsPerMessage
@@ -606,6 +623,11 @@ function weekdayDate(date: string): string {
 function formatTimestamp(value: string): string {
   const timestamp = Date.parse(value);
   return Number.isFinite(timestamp) ? new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Almaty' }).format(timestamp) : value;
+}
+
+function formatScheduleTime(value: string): string {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Almaty' }).format(timestamp) : value;
 }
 
 function runStateColor(state: DailyDigestRunState): string {

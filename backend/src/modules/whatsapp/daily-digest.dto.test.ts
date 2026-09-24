@@ -26,6 +26,26 @@ describe('daily digest settings DTO',()=>{
     expect(()=>parseDailyDigestSettingsInput({...valid,sendTime:'10:00',catchUpDeadline:'09:59'})).toThrow();
   });
 
+  it('accepts a bounded send window and treats omission as preserve-stored',()=>{
+    expect(parseDailyDigestSettingsInput({...valid,sendWindowMinutes:0}).sendWindowMinutes).toBe(0);
+    expect(parseDailyDigestSettingsInput({...valid,sendWindowMinutes:30,catchUpDeadline:'10:00'}).sendWindowMinutes).toBe(30);
+    expect(parseDailyDigestSettingsInput(valid).sendWindowMinutes).toBeUndefined();
+    expect(()=>parseDailyDigestSettingsInput({...valid,sendWindowMinutes:-1})).toThrow();
+    expect(()=>parseDailyDigestSettingsInput({...valid,sendWindowMinutes:1440})).toThrow();
+    expect(()=>parseDailyDigestSettingsInput({...valid,sendWindowMinutes:1.5})).toThrow();
+  });
+
+  it('rejects a window ending at or beyond local midnight',()=>{
+    expect(()=>parseDailyDigestSettingsInput({...valid,sendTime:'23:50',sendWindowMinutes:10,catchUpPolicy:'end_of_day'})).toThrow();
+    expect(parseDailyDigestSettingsInput({...valid,sendTime:'23:50',sendWindowMinutes:9,catchUpPolicy:'end_of_day'}).sendWindowMinutes).toBe(9);
+    expect(parseDailyDigestSettingsInput({...valid,sendTime:'23:59',sendWindowMinutes:0,catchUpPolicy:'end_of_day'}).sendWindowMinutes).toBe(0);
+  });
+
+  it('requires the catch-up deadline to cover the whole window end',()=>{
+    expect(()=>parseDailyDigestSettingsInput({...valid,sendWindowMinutes:30,catchUpDeadline:'09:14'})).toThrow();
+    expect(parseDailyDigestSettingsInput({...valid,sendWindowMinutes:30,catchUpDeadline:'09:15'}).catchUpDeadline).toBe('09:15');
+  });
+
   it('accepts only one or two cards per message and requires the field',()=>{
     expect(parseDailyDigestSettingsInput({...valid,cardsPerMessage:1}).cardsPerMessage).toBe(1);
     expect(parseDailyDigestSettingsInput({...valid,cardsPerMessage:2}).cardsPerMessage).toBe(2);

@@ -34,8 +34,10 @@ describe.skipIf(!enabled)('DailyDigestRepository PostgreSQL transitions (isolate
       status_field text,status_id bigint,status_name text,status_code text,stage_code text,before_json jsonb,after_json jsonb,
       diff_json jsonb,metadata_json jsonb,created_at timestamptz DEFAULT now());
       CREATE TABLE audit_log_related_entity(audit_id uuid NOT NULL,entity_type text NOT NULL,entity_id bigint NOT NULL,PRIMARY KEY(audit_id,entity_type,entity_id));`);
-    const sql=await readFile(new URL('../../../db/migrations/183_whatsapp_daily_digest.sql',import.meta.url),'utf8');
-    await client.query(sql);
+    for (const file of ['183_whatsapp_daily_digest.sql','184_whatsapp_daily_digest_schedule.sql']) {
+      const sql=await readFile(new URL(`../../../db/migrations/${file}`,import.meta.url),'utf8');
+      await client.query(sql);
+    }
     const db={
       query:<T extends QueryResultRow=QueryResultRow>(text:string,params:readonly unknown[]=[])=>client.query<T>(text,[...params]),
       transaction:async<T>(handler:(tx:{query:<R extends QueryResultRow=QueryResultRow>(text:string,params?:readonly unknown[])=>Promise<unknown>})=>Promise<T>)=>{
@@ -216,5 +218,121 @@ describe.skipIf(!enabled)('DailyDigestRepository PostgreSQL transitions (isolate
     const manualChild=await repository.createRetry(unknownAutoId,{idempotencyKey:randomUUID(),mode:'remaining',duplicateRiskConfirmed:true,actor,requestId:'manual-retry-while-disabled',runId:randomUUID()});
     expect((await client.query('SELECT auto_origin FROM whatsapp_daily_digest_runs WHERE run_id=$1',[manualChild.run.id])).rows[0].auto_origin).toBe(false);
     expect(await repository.createSendIntent(manualChild.run.id,1,true)).not.toBeNull();
+  });
+
+  it('preserves the stored send window on omitted input and rejects incoherent windows',async()=>{
+    let settings=await repository.getSettings();
+    expect(settings.sendWindowMinutes).toBe(0);
+    settings=await repository.updateSettings({...settings,sendWindowMinutes:45,sendTime:'08:45',catchUpDeadline:'10:00',duplicateRiskConfirmed:false},actor,'set-window');
+    expect(settings.sendWindowMinutes).toBe(45);
+    const {sendWindowMinutes:_dropped,...withoutWindow}=settings;
+    const omitted=await repository.updateSettings({...withoutWindow,duplicateRiskConfirmed:false},actor,'omitted-window');
+    expect(omitted.sendWindowMinutes).toBe(45);
+    // Omission keeps validating changed timing against the stored duration:
+    // 08:50 + stored 45 ends at 09:35, which a 09:20 deadline cannot precede.
+    await expect(repository.updateSettings({...withoutWindow,version:omitted.version,sendTime:'08:50',catchUpDeadline:'09:20',duplicateRiskConfirmed:false},actor,'omitted-still-validates'))
+      .rejects.toMatchObject({code:'VALIDATION_ERROR'});
+    await expect(repository.updateSettings({...omitted,sendWindowMinutes:30,sendTime:'23:50',catchUpPolicy:'end_of_day',duplicateRiskConfirmed:false},actor,'cross-midnight'))
+      .rejects.toMatchObject({code:'VALIDATION_ERROR'});
+    await expect(repository.updateSettings({...omitted,sendWindowMinutes:30,catchUpDeadline:'09:00',duplicateRiskConfirmed:false},actor,'deadline-inside-window'))
+      .rejects.toMatchObject({code:'VALIDATION_ERROR'});
+    const audit=(await client.query(`SELECT metadata_json FROM audit_log WHERE event='whatsapp.daily_digest.settings.updated' AND request_id='set-window'`)).rows[0];
+    expect(audit.metadata_json).toMatchObject({after:{sendWindowMinutes:45}});
+    expect(JSON.stringify(audit)).not.toContain('1234567890-1234567890');
+  });
+
+  it('plans the daily schedule once, freezes it for the date, and snapshots the planning version',async()=>{
+    let settings=await repository.getSettings();
+    settings=await repository.updateSettings({...settings,enabled:true,sendWindowMinutes:30,sendTime:'08:45',catchUpPolicy:'until_deadline',catchUpDeadline:'10:00',duplicateRiskConfirmed:false},actor,'enable-schedule');
+    const first=await repository.getOrCreateSchedule('2026-10-05',()=>7);
+    expect(first).toMatchObject({businessDate:'2026-10-05',windowStart:'08:45',windowEnd:'09:15',sendWindowMinutes:30,
+      catchUpPolicy:'until_deadline',catchUpDeadline:'10:00',settingsVersion:settings.version});
+    expect(first!.scheduledAt).toBe('2026-10-05T03:52:00.000Z');
+    const second=await repository.getOrCreateSchedule('2026-10-05',()=>29);
+    expect(second!.scheduledAt).toBe(first!.scheduledAt);
+
+    await repository.updateSettings({...(await repository.getSettings()),sendWindowMinutes:0,sendTime:'07:00',duplicateRiskConfirmed:false},actor,'timing-applies-tomorrow');
+    const frozen=await repository.getOrCreateSchedule('2026-10-05',()=>0);
+    expect(frozen!.scheduledAt).toBe(first!.scheduledAt);
+    expect(frozen!.windowStart).toBe('08:45');
+    expect(frozen!.settingsVersion).toBe(settings.version);
+    expect(await repository.getSchedule('2026-10-05')).toMatchObject({scheduledAt:first!.scheduledAt});
+
+    const tomorrow=await repository.getOrCreateSchedule('2026-10-06',()=>0);
+    expect(tomorrow).toMatchObject({sendWindowMinutes:0,windowStart:'07:00',windowEnd:'07:00',scheduledAt:'2026-10-06T02:00:00.000Z'});
+
+    // The frozen minute is visible on the automatic run for that date only.
+    const current=await repository.getSettings();
+    await repository.createRun({runId:randomUUID(),businessDate:'2026-10-05',kind:'auto',idempotencyKey:randomUUID(),requestDigest:'8'.repeat(64),settingsVersion:current.version,
+      destinationChatId:'1234567890-1234567890@g.us',catchUpPolicy:'until_deadline',deadlineAt:new Date('2026-10-05T05:00:59.999Z'),partialPolicy:'remaining',snapshot:null,state:'empty',reason:'NO_ORDERS',orderCount:0,totalArea:0,actor,requestId:'scheduled-auto'});
+    const autoRuns=(await repository.listRuns()).runs.filter(run=>run.businessDate==='2026-10-05');
+    expect(autoRuns[0]?.scheduledAt).toBe('2026-10-05T03:52:00.000Z');
+    const manual=await repository.createRun({runId:randomUUID(),businessDate:'2026-10-05',kind:'manual',idempotencyKey:randomUUID(),requestDigest:'7'.repeat(64),settingsVersion:current.version,
+      destinationChatId:'1234567890-1234567890@g.us',catchUpPolicy:'until_deadline',deadlineAt:null,partialPolicy:'remaining',snapshot:null,state:'empty',reason:'NO_ORDERS',orderCount:0,totalArea:0,actor,requestId:'scheduled-manual'});
+    expect(manual.run.scheduledAt).toBeNull();
+    expect((await repository.getRun(autoRuns[0]!.id)).run.scheduledAt).toBe('2026-10-05T03:52:00.000Z');
+  });
+
+  it('serializes concurrent planners on the settings lock and keeps one winner',async()=>{
+    await repository.updateSettings({...(await repository.getSettings()),enabled:true,sendTime:'08:45',sendWindowMinutes:30,catchUpPolicy:'until_deadline',catchUpDeadline:'10:00',duplicateRiskConfirmed:false},actor,'concurrent-window');
+    const pool2=new Pool({connectionString:databaseUrl,max:2});
+    const wrap=(c:PoolClient)=>({
+      query:<T extends QueryResultRow=QueryResultRow>(text:string,params:readonly unknown[]=[])=>c.query<T>(text,[...params]),
+      transaction:async<T>(handler:(tx:{query:<R extends QueryResultRow=QueryResultRow>(text:string,params?:readonly unknown[])=>Promise<unknown>})=>Promise<T>)=>{
+        await c.query('BEGIN');
+        try { const value=await handler({query:<R extends QueryResultRow=QueryResultRow>(text:string,params:readonly unknown[]=[])=>(c.query<R>(text,[...params]) as Promise<unknown>)}); await c.query('COMMIT'); return value; }
+        catch(error) { await c.query('ROLLBACK'); throw error; }
+      },
+    });
+    try {
+      const [clientA,clientB]=await Promise.all([pool2.connect(),pool2.connect()]);
+      try {
+        await clientA.query(`SET search_path="${schema}",public`);
+        await clientB.query(`SET search_path="${schema}",public`);
+        const pidA=(await clientA.query<{pid:number}>('SELECT pg_backend_pid() pid')).rows[0].pid;
+        const pidB=(await clientB.query<{pid:number}>('SELECT pg_backend_pid() pid')).rows[0].pid;
+        expect(pidA).not.toBe(pidB);
+        const repoA=new DailyDigestRepository(wrap(clientA) as unknown as DatabaseService);
+        const repoB=new DailyDigestRepository(wrap(clientB) as unknown as DatabaseService);
+        const [a,b]=await Promise.all([
+          repoA.getOrCreateSchedule('2026-10-07',()=>3),
+          repoB.getOrCreateSchedule('2026-10-07',()=>20),
+        ]);
+        expect(a!.scheduledAt).toBe(b!.scheduledAt);
+        expect(['2026-10-07T03:48:00.000Z','2026-10-07T04:05:00.000Z']).toContain(a!.scheduledAt);
+        expect((await client.query('SELECT count(*)::int n FROM whatsapp_daily_digest_schedules WHERE business_date=$1',['2026-10-07'])).rows[0].n).toBe(1);
+      } finally {
+        clientA.release();
+        clientB.release();
+      }
+    } finally { await pool2.end(); }
+  });
+
+  it('skips planning on dates already owned by an automatic run and while automation is disabled',async()=>{
+    const settings=await repository.getSettings();
+    await repository.createRun({runId:randomUUID(),businessDate:'2026-10-08',kind:'auto',idempotencyKey:randomUUID(),requestDigest:'9'.repeat(64),settingsVersion:settings.version,
+      destinationChatId:'1234567890-1234567890@g.us',catchUpPolicy:'skip',deadlineAt:null,partialPolicy:'remaining',snapshot:null,state:'skipped',reason:'MISSED_WINDOW',orderCount:0,totalArea:0,actor,requestId:'preexisting-auto'});
+    expect(await repository.getOrCreateSchedule('2026-10-08',()=>5)).toBeNull();
+    expect((await client.query('SELECT count(*)::int n FROM whatsapp_daily_digest_schedules WHERE business_date=$1',['2026-10-08'])).rows[0].n).toBe(0);
+
+    await repository.updateSettings({...(await repository.getSettings()),enabled:false,duplicateRiskConfirmed:false},actor,'disable-schedule');
+    expect(await repository.getOrCreateSchedule('2026-10-09',()=>1)).toBeNull();
+    await repository.updateSettings({...(await repository.getSettings()),enabled:true,duplicateRiskConfirmed:false},actor,'re-enable-schedule');
+  });
+
+  it('prunes schedules past terminal-run retention and never the current business date',async()=>{
+    const todayAlmaty=(await client.query(`SELECT (now() AT TIME ZONE 'Asia/Almaty')::date::text d`)).rows[0].d as string;
+    const oldAlmaty=(await client.query(`SELECT ((now() AT TIME ZONE 'Asia/Almaty')::date - 100)::text d`)).rows[0].d as string;
+    const recentAlmaty=(await client.query(`SELECT ((now() AT TIME ZONE 'Asia/Almaty')::date - 10)::text d`)).rows[0].d as string;
+    await client.query(`INSERT INTO whatsapp_daily_digest_schedules(business_date,scheduled_at,window_start,window_end,send_window_minutes,catch_up_policy,catch_up_deadline,settings_version)
+      VALUES($1,$2,'08:45','09:15',30,'skip','10:00',1) ON CONFLICT (business_date) DO NOTHING`,[todayAlmaty,new Date(`${todayAlmaty}T08:52:00.000+05:00`)]);
+    await client.query(`INSERT INTO whatsapp_daily_digest_schedules(business_date,scheduled_at,window_start,window_end,send_window_minutes,catch_up_policy,catch_up_deadline,settings_version)
+      VALUES($1,$2,'08:45','09:15',30,'skip','10:00',1)`,[oldAlmaty,new Date(`${oldAlmaty}T08:52:00.000+05:00`)]);
+    await client.query(`INSERT INTO whatsapp_daily_digest_schedules(business_date,scheduled_at,window_start,window_end,send_window_minutes,catch_up_policy,catch_up_deadline,settings_version)
+      VALUES($1,$2,'08:45','09:15',30,'skip','10:00',1)`,[recentAlmaty,new Date(`${recentAlmaty}T08:52:00.000+05:00`)]);
+    await repository.expireImagesAndPruneSnapshots();
+    expect((await client.query('SELECT count(*)::int n FROM whatsapp_daily_digest_schedules WHERE business_date=$1',[oldAlmaty])).rows[0].n).toBe(0);
+    expect((await client.query('SELECT count(*)::int n FROM whatsapp_daily_digest_schedules WHERE business_date=$1',[todayAlmaty])).rows[0].n).toBe(1);
+    expect((await client.query('SELECT count(*)::int n FROM whatsapp_daily_digest_schedules WHERE business_date=$1',[recentAlmaty])).rows[0].n).toBe(1);
   });
 });

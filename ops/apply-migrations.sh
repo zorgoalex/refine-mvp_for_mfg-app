@@ -2277,6 +2277,16 @@ probe_file() {
       "SELECT count(*)=8 FROM information_schema.columns WHERE table_schema='public' AND table_name='whatsapp_daily_digest_settings' AND is_nullable='NO' AND ((column_name='version' AND column_default='1') OR (column_name='enabled' AND column_default='false') OR (column_name='send_time' AND column_default LIKE '%08:45%') OR (column_name='time_zone' AND column_default LIKE '%Asia/Almaty%') OR (column_name='catch_up_policy' AND column_default LIKE '%until_deadline%') OR (column_name='catch_up_deadline' AND column_default LIKE '%10:00%') OR (column_name='partial_policy' AND column_default LIKE '%remaining%') OR (column_name='cards_per_message' AND column_default='2'));" \
       "SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_settings'::regclass AND conname='chk_whatsapp_daily_digest_cards_per_message' AND contype='c' AND convalidated AND pg_get_constraintdef(oid) LIKE '%cards_per_message%' AND pg_get_constraintdef(oid) LIKE '%ARRAY[1, 2]%');" \
       "SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_pages'::regclass AND conname='chk_whatsapp_daily_digest_page_index' AND contype='c' AND convalidated AND pg_get_constraintdef(oid) LIKE '%page_index%' AND pg_get_constraintdef(oid) LIKE '%500%');" ;;
+    184_whatsapp_daily_digest_schedule*) probe_all \
+      "$(q_tbl whatsapp_daily_digest_schedules)" \
+      "SELECT COALESCE((SELECT data_type='integer' AND is_nullable='NO' AND column_default='0' FROM information_schema.columns WHERE table_schema='public' AND table_name='whatsapp_daily_digest_settings' AND column_name='send_window_minutes'),false);" \
+      "SELECT count(*)=3 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_settings'::regclass AND contype='c' AND convalidated AND conname IN ('chk_whatsapp_daily_digest_window_minutes_range','chk_whatsapp_daily_digest_window_same_day','chk_whatsapp_daily_digest_deadline_after_window');" \
+      "SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_settings'::regclass AND contype='c' AND convalidated AND pg_get_constraintdef(oid) LIKE '%catch_up_deadline >= send_time%');" \
+      "SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_schedules'::regclass AND contype='p' AND pg_get_constraintdef(oid) LIKE '%business_date%');" \
+      "SELECT count(*)=8 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_schedules'::regclass AND contype='c' AND convalidated;" \
+      "SELECT count(*)=2 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_schedules'::regclass AND contype='c' AND convalidated AND pg_get_constraintdef(oid) LIKE '%AT TIME ZONE%';" \
+      "SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_schedules'::regclass AND contype='c' AND convalidated AND pg_get_constraintdef(oid) LIKE '%date_trunc%');" \
+      "SELECT NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_settings'::regclass AND NOT convalidated);" ;;
     182_mdf_physical_lineage*) probe_all \
       "$(q_tbl mdf_evidence_revisions)" "$(q_tbl mdf_revision_context)" "$(q_tbl mdf_revision_demand)" \
       "$(q_tbl mdf_revision_seals)" "$(q_tbl mdf_source_heads)" "$(q_tbl mdf_evidence_lines)" \
@@ -2334,6 +2344,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     183_whatsapp_daily_digest*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    184_whatsapp_daily_digest_schedule*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     182_mdf_physical_lineage*)

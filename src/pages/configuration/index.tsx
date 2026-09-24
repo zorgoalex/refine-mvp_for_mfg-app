@@ -637,7 +637,7 @@ export const ConfigurationPage: React.FC = () => {
           key: 'daily-order-digest',
           label: (
             <span>
-              <BellOutlined /> Рассылка заказов
+              <BellOutlined /> Рассылка сообщений
             </span>
           ),
           children: <DailyOrderDigestConfig />,
