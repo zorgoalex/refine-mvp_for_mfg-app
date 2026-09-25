@@ -13,6 +13,9 @@ import { mdfSourceCommandToken } from '../domain/mdf-manual-proof';
 import { PgMdfBazisCompositionCommand } from './mdf-bazis-composition-command';
 import { PgMdfCorrectionCommand } from './mdf-correction-command';
 import { readMdfPublishedSnapshot } from './mdf-published-snapshot';
+import { PgMdfBoardManualMoveRepository } from '../../orders/adapters/pg-mdf-board-manual-move-repository';
+import { PgBazisCutRepository } from '../../bazis-cut/adapters/pg-bazis-cut-repository';
+import { loadMdfBazisCompositionReadiness } from './mdf-bazis-composition-readiness';
 
 const enabled = process.env.MDF_ENGINE_INTEGRATION === '1';
 
@@ -52,9 +55,11 @@ describe.skipIf(!enabled)('BASIS composition command, isolated PostgreSQL schema
       'cut_result', 'cut_result_board_projection', 'cut_result_placement', 'cut_result_sheet_map',
       'cnc_telegram_packets', // migration 179 guards this local table and FK-references its packet_id
       'mdf_board_manual_moves', // correction raw-source loader LEFT JOINs it; a public fallback is forbidden
+      'command_idempotency_keys', // BASIS repository commands (rename) must never replay from public
     ]);
     // CTAS clones drop constraints; the 179 FK needs a real local primary key on packet_id.
     await fixture.client.query('ALTER TABLE cnc_telegram_packets ADD PRIMARY KEY(packet_id)');
+    await fixture.client.query('CREATE UNIQUE INDEX ON command_idempotency_keys(idempotency_key)');
     await fixture.applyMigrations([
       '165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql',
       '174_mdf_execution_context.sql', '175_mdf_command_placement.sql',
@@ -66,7 +71,7 @@ describe.skipIf(!enabled)('BASIS composition command, isolated PostgreSQL schema
       'mdf_revision_seals', 'mdf_evidence_lines', 'mdf_physical_lineage_contracts',
       'mdf_physical_lineage_transitions', 'mdf_bazis_composition_intents', 'mdf_bazis_assignment_states',
       'mdf_manual_command_results', 'mdf_recalculation_jobs', 'mdf_bath_allocations', 'mdf_published_sources',
-      'order_hdf_details', 'cnc_telegram_packets', 'mdf_board_manual_moves',
+      'order_hdf_details', 'cnc_telegram_packets', 'mdf_board_manual_moves', 'command_idempotency_keys',
       'mdf_correction_command_results', 'mdf_correction_job_effect_suppressions',
     ]);
     await fixture.client.query(`
@@ -229,6 +234,18 @@ describe.skipIf(!enabled)('BASIS composition command, isolated PostgreSQL schema
     return { jobId: queued.jobId, revision: head.received };
   }
 
+  /** Real public entry points for an intentionally-empty card (§5.2a). */
+  async function manualMove(f: SourceFixture, targetColumn: 'parsed' | 'completed' | 'completed_laminated', key: string,
+    token?: string) {
+    return new PgMdfBoardManualMoveRepository(database! as never).upsert({ currentUser: user, cardKind: 'bazisCutSet',
+      cardId: f.sourceId, targetColumn, sourceToken: token ?? await sourceToken(f), idempotencyKey: key, requestId: `${key}-request` });
+  }
+  async function renameSet(f: SourceFixture, name: string, key: string) {
+    const version = Number((await fixture.client.query<{ version: string }>(
+      'SELECT version::text FROM bazis_cut_sets WHERE bazis_cut_set_id=$1', [f.setId])).rows[0].version);
+    return new PgBazisCutRepository(database! as never, {} as never).rename({ currentUser: user,
+      requestId: `${key}-request`, setId: f.setId, expectedVersion: version, name, idempotencyKey: key });
+  }
   it('queues an authenticated empty assignment without releasing pinned stock, then allocates only the verified remainder', async () => {
     const count = async (sql: string, params?: unknown[]) =>
       (await fixture.client.query<{ count: string }>(sql, params)).rows[0].count;
@@ -1143,6 +1160,20 @@ describe.skipIf(!enabled)('BASIS composition command, isolated PostgreSQL schema
       WHERE actor_user_id=$1 AND command_key=$2`, [Number(user.id), body.idempotencyKey])).toBe('1');
     expect(await activeAllocations(f)).toEqual([]);
     expect(await runner().processOne()).toMatchObject({ status: 'idle' });
+    // After the return the empty card has zero evidence lines but a valid marker: rename and
+    // manual move still work carry-only through job completion and publication.
+    const renamedAfterReturn = await renameSet(f, `E2E-Тест после возврата ${f.setId}`, `after-return-rename-${f.setId}`);
+    expect(renamedAfterReturn.mdfJobId).toEqual(expect.any(String));
+    expect(await processJob(renamedAfterReturn.mdfJobId!)).toMatchObject({ status: 'done' });
+    const movedAfterReturn = await manualMove(f, 'completed', `after-return-move-${f.setId}`);
+    expect(movedAfterReturn).toMatchObject({ changed: true });
+    expect(await processJob((movedAfterReturn as { jobId: string }).jobId)).toMatchObject({ status: 'done' });
+    expect((await fixture.client.query(`SELECT display_name,issues FROM mdf_published_sources
+      WHERE source_kind='bazisCutSet' AND source_id=$1`, [f.sourceId])).rows[0])
+      .toMatchObject({ display_name: `E2E-Тест после возврата ${f.setId}`, issues: [] });
+    expect(await count(`SELECT count(*)::text count FROM mdf_evidence_lines e JOIN mdf_source_heads h
+      ON h.source_kind=e.source_kind AND h.source_id=e.source_id AND h.accepted_revision_key=e.revision_key
+      WHERE e.source_kind='bazisCutSet' AND e.source_id=$1 AND e.stage_code<>'membership'`, [f.sourceId])).toBe('0');
   }, 60000);
 
   it('rejects the return confirm when the emptied raw set header changed after preview', async () => {
@@ -1289,4 +1320,141 @@ describe.skipIf(!enabled)('BASIS composition command, isolated PostgreSQL schema
           ? 'MDF_CORRECTION_RECONCILIATION_REQUIRED' : 'MDF_CORRECTION_STALE' });
       expect(await facts()).toEqual(before);
     }, 60000);
+  it('moves and renames an authentic intentional-empty card carry-only: no automation, one placement event, owners kept', async () => {
+    const count = async (sql: string, params?: unknown[]) =>
+      (await fixture.client.query<{ count: string }>(sql, params)).rows[0].count;
+    const f = await makeV2Source(10);
+    await addBath(f, 4, true);
+    // Enabled rules that WOULD fire on board events/production changes must stay silent.
+    await fixture.client.query(`INSERT INTO status_automation_rules(id,name,event_type,action_type,target_status_id,
+      conditions_json,action_config_json,priority,is_enabled,version,created_at,updated_at)
+      VALUES(9501,'E2E-Тест empty board rule','mdf.board.completed','change_details_production_status',3,'{}','{}',1,true,1,now(),now())
+      ON CONFLICT DO NOTHING`);
+    try {
+      await emptyViaComposition(f, `carry-empty-${f.setId}`);
+      const statuses0 = (await fixture.client.query(`SELECT detail_id,production_status_id FROM order_details
+        WHERE order_id=$1 ORDER BY detail_id`, [f.orderId])).rows;
+      const automation0 = await count(`SELECT count(*)::text count FROM audit_log WHERE event LIKE 'status_automation.%'`);
+      const key = `carry-empty-move-${f.setId}`;
+      const moveToken = await sourceToken(f);
+      const moved = await manualMove(f, 'completed_laminated', key, moveToken);
+      expect(moved).toMatchObject({ changed: true, jobId: expect.any(String) });
+      const jobId = (moved as { jobId: string }).jobId;
+      expect(await processJob(jobId)).toMatchObject({ status: 'done', jobId });
+      expect((await fixture.client.query(`SELECT column_key,issues FROM mdf_published_sources
+        WHERE source_kind='bazisCutSet' AND source_id=$1`, [f.sourceId])).rows[0]).toMatchObject({ issues: [] });
+      expect(await count(`SELECT count(*)::text count FROM mdf_published_source_members
+        WHERE source_kind='bazisCutSet' AND source_id=$1`, [f.sourceId])).toBe('0');
+      // Retained physical cut stays exactly (no new proof, no loss).
+      expect(await count(`SELECT count(*)::text count FROM mdf_evidence_lines e JOIN mdf_source_heads h
+        ON h.source_kind=e.source_kind AND h.source_id=e.source_id AND h.accepted_revision_key=e.revision_key
+        WHERE e.source_kind='bazisCutSet' AND e.source_id=$1 AND e.stage_code='cut' AND e.quantity=10`, [f.sourceId])).toBe('1');
+      expect((await fixture.client.query(`SELECT detail_id,production_status_id FROM order_details
+        WHERE order_id=$1 ORDER BY detail_id`, [f.orderId])).rows).toEqual(statuses0);
+      expect(await count(`SELECT count(*)::text count FROM audit_log WHERE event LIKE 'status_automation.%'`)).toBe(automation0);
+      const placed = `SELECT count(*)::text count FROM outbox_events WHERE event_type='mdf_board.card_placed' AND aggregate_id=$1`;
+      expect(await count(placed, [`bazisCutSet:${f.setId}`])).toBe('1');
+      const event = (await fixture.client.query(`SELECT payload_json FROM outbox_events
+        WHERE event_type='mdf_board.card_placed' AND aggregate_id=$1`, [`bazisCutSet:${f.setId}`])).rows[0].payload_json;
+      expect(event).toMatchObject({ actorUserId: Number(user.id), requestId: `${key}-request`, orderIds: [f.orderId],
+        targetColumn: 'completed_laminated', intentionalEmpty: true });
+      // Exact replay (same payload incl. the original token): stored response, no new effects.
+      const effects = async () => [await count(placed, [`bazisCutSet:${f.setId}`]),
+        await count(`SELECT count(*)::text count FROM audit_log WHERE event LIKE 'mdf_board.manual_move.%'
+          AND entity_id=$1`, [`bazisCutSet:${f.setId}`]),
+        await count(`SELECT count(*)::text count FROM mdf_recalculation_jobs WHERE source_kind='bazisCutSet' AND source_id=$1`, [f.sourceId])];
+      const before = await effects();
+      expect(await manualMove(f, 'completed_laminated', key, moveToken)).toEqual(moved);
+      expect(await effects()).toEqual(before);
+      expect(before[0]).toBe('1');
+      // Rename of the empty set keeps its owners in normalized audit and outbox dimensions.
+      const renamedResult = await renameSet(f, `E2E-Тест пустой ${f.setId}`, `carry-empty-rename-${f.setId}`);
+      expect(renamedResult.mdfJobId).toEqual(expect.any(String));
+      expect(await processJob(renamedResult.mdfJobId!)).toMatchObject({ status: 'done' });
+      const audit = (await fixture.client.query(`SELECT audit_id::text,related_order_id::text FROM audit_log
+        WHERE event='bazis_cut_set.renamed' AND entity_id=$1 ORDER BY created_at DESC LIMIT 1`, [String(f.setId)])).rows[0];
+      expect(audit.related_order_id).toBe(String(f.orderId));
+      expect(await count(`SELECT count(*)::text count FROM audit_log_related_entity
+        WHERE audit_id=$1::uuid AND entity_type='order' AND entity_id=$2`, [audit.audit_id, String(f.orderId)])).toBe('1');
+      const renamed = (await fixture.client.query(`SELECT payload_json FROM outbox_events
+        WHERE event_type='bazis_cut_set.renamed' AND aggregate_id=$1 ORDER BY created_at DESC LIMIT 1`, [String(f.setId)])).rows[0].payload_json;
+      expect(renamed.related.orderIds).toEqual([f.orderId]);
+      expect((await fixture.client.query(`SELECT display_name FROM mdf_published_sources
+        WHERE source_kind='bazisCutSet' AND source_id=$1`, [f.sourceId])).rows[0].display_name).toBe(`E2E-Тест пустой ${f.setId}`);
+    } finally {
+      await fixture.client.query('DELETE FROM status_automation_rules WHERE id=9501');
+    }
+  }, 60000);
+
+  it('rejects manual move and rename of an UNMARKED empty set (no generic empty bypass)', async () => {
+    const f = await makeV2Source(5);
+    // Raw rows removed outside the composition command: no intentional-empty marker exists.
+    await fixture.client.query('DELETE FROM bazis_cut_set_details WHERE bazis_cut_set_id=$1', [f.setId]);
+    await expect(manualMove(f, 'completed_laminated', `unmarked-move-${f.setId}`))
+      .rejects.toMatchObject({ code: 'MDF_COMMAND_RECONCILIATION_REQUIRED' });
+    await expect(renameSet(f, `E2E-Тест unmarked ${f.setId}`, `unmarked-rename-${f.setId}`))
+      .rejects.toMatchObject({ code: expect.stringMatching(/^MDF_/) });
+  }, 60000);
+
+  it('issues a composition token only for active, fresh, fully authorized sets (mode/access/pending matrix)', async () => {
+    const f = await makeV2Source(6);
+    // Mixed set: an extra non-MDF row is preserved raw and is never eligible for composition.
+    await fixture.client.query(`INSERT INTO bazis_cut_set_details SELECT (jsonb_populate_record(NULL::bazis_cut_set_details,
+      to_jsonb(d) || jsonb_build_object('bazis_cut_set_detail_id',$2::bigint,'material_name','ЛДСП 16 мм','sort_order',99))).*
+      FROM bazis_cut_set_details d WHERE d.bazis_cut_set_detail_id=$1`, [f.rowId, f.rowId + 500]);
+    const ready = await loadMdfBazisCompositionReadiness(database! as never, user, f.setId);
+    expect(ready).toEqual({ available: true, reason: null, sourceToken: await sourceToken(f),
+      eligibleRowIds: [String(f.rowId)] });
+    const mixedPreview = await command().preview(user, f.setId, { expectedVersion: '1', sourceToken: ready!.sourceToken!,
+      desiredRows: [{ rowId: String(f.rowId), quantity: 5 }] }, `mixed-preview-${f.setId}`);
+    expect(mixedPreview.status).toBe('ready');
+    const manager: CurrentUser = { ...user, id: '42', role: 'manager', roleId: 4 };
+    expect(await loadMdfBazisCompositionReadiness(database! as never, manager, f.setId))
+      .toEqual({ available: false, sourceToken: null, reason: 'MDF_PARTIAL_ACCESS', eligibleRowIds: [] });
+    await fixture.client.query('UPDATE orders SET manager_id=42 WHERE order_id=$1', [f.orderId]);
+    try {
+      expect((await loadMdfBazisCompositionReadiness(database! as never, manager, f.setId)).available).toBe(true);
+    } finally { await fixture.client.query('UPDATE orders SET manager_id=NULL WHERE order_id=$1', [f.orderId]); }
+    expect(await loadMdfBazisCompositionReadiness(database! as never, user, 987654321))
+      .toEqual({ available: false, sourceToken: null, reason: 'MDF_SOURCE_NOT_REGISTERED', eligibleRowIds: [] });
+    // A queued (not yet accepted) composition makes the publication pending.
+    const request = { expectedVersion: '1', sourceToken: await sourceToken(f), desiredRows: [] };
+    const preview = await command().preview(user, f.setId, request, `readiness-preview-${f.setId}`);
+    const queued = await command().confirm(user, f.setId, { ...request, expectedDigest: preview.previewDigest!,
+      idempotencyKey: `readiness-key-${f.setId}` }, `readiness-confirm-${f.setId}`);
+    expect((await loadMdfBazisCompositionReadiness(database! as never, user, f.setId)).reason).toBe('MDF_PUBLICATION_PENDING');
+    expect(await processJob((queued as { jobId: string }).jobId)).toMatchObject({ status: 'done' });
+    expect((await loadMdfBazisCompositionReadiness(database! as never, user, f.setId)).available).toBe(true);
+    for (const [mode, expected] of [
+      ['read_only', { available: false, sourceToken: null, reason: 'MDF_ENGINE_READ_ONLY', eligibleRowIds: [] }],
+      // Legacy/shadow: no composition readiness at all, so the legacy editor stays unchanged.
+      ['legacy', null], ['shadow', null],
+    ] as const) {
+      await fixture.client.query('UPDATE mdf_engine_state SET mode=$1', [mode]);
+      try {
+        expect(await loadMdfBazisCompositionReadiness(database! as never, user, f.setId)).toEqual(expected);
+      } finally { await fixture.client.query("UPDATE mdf_engine_state SET mode='active'"); }
+    }
+  }, 60000);
+
+  it('legacy BASIS edit entry points answer explicit codes in the active engine and keep history-bearing sets', async () => {
+    const f = await makeV2Source(4);
+    const repository = new PgBazisCutRepository(database! as never, {} as never);
+    const base = { currentUser: user, requestId: `legacy-${f.setId}`, setId: f.setId, expectedVersion: 1 };
+    await expect(repository.updateDetail({ ...base, detailId: f.rowId, fields: {} as never,
+      idempotencyKey: `legacy-update-${f.setId}` })).rejects.toMatchObject({ code: 'MDF_COMPOSITION_REQUIRED', statusCode: 409 });
+    await expect(repository.deleteDetail({ ...base, detailId: f.rowId, idempotencyKey: `legacy-delete-${f.setId}` }))
+      .rejects.toMatchObject({ code: 'MDF_COMPOSITION_REQUIRED' });
+    await expect(repository.addDetails({ ...base, orderId: f.orderId, detailIds: [f.detailId + 1],
+      idempotencyKey: `legacy-add-${f.setId}` })).rejects.toMatchObject({ code: 'MDF_SET_REFILL_NOT_CONNECTED' });
+    await emptyViaComposition(f, `legacy-empty-${f.setId}`);
+    const version = Number((await fixture.client.query<{ version: string }>(
+      'SELECT version::text FROM bazis_cut_sets WHERE bazis_cut_set_id=$1', [f.setId])).rows[0].version);
+    await expect(repository.deleteEmptySet({ ...base, expectedVersion: version, idempotencyKey: `legacy-drop-${f.setId}` }))
+      .rejects.toMatchObject({ code: 'MDF_SET_HAS_PRODUCTION_HISTORY' });
+    expect((await fixture.client.query('SELECT 1 FROM bazis_cut_sets WHERE bazis_cut_set_id=$1', [f.setId])).rows).toHaveLength(1);
+    expect((await fixture.client.query(`SELECT count(*)::int n FROM mdf_evidence_lines
+      WHERE source_kind='bazisCutSet' AND source_id=$1 AND stage_code='cut'`, [f.sourceId])).rows[0].n).toBeGreaterThan(0);
+  }, 60000);
+
 });

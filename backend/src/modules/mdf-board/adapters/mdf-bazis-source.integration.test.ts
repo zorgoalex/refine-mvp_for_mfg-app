@@ -473,7 +473,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real BASIS creation
     const setBefore = await db.query('SELECT name,version FROM bazis_cut_sets WHERE bazis_cut_set_id=$1',[created.set.bazisCutSetId]);
     await expect(repository.addDetails({ currentUser: user,setId: created.set.bazisCutSetId,orderId: f.orderId,
       detailIds: [f.detailId+1],expectedVersion: created.set.version,idempotencyKey: `E2E-${randomUUID()}` }))
-      .rejects.toMatchObject({ code: 'MDF_WRITER_NOT_CONNECTED' });
+      .rejects.toMatchObject({ code: 'MDF_SET_REFILL_NOT_CONNECTED',statusCode: 409 });
     expect((await db.query('SELECT name,version FROM bazis_cut_sets WHERE bazis_cut_set_id=$1',[created.set.bazisCutSetId])).rows)
       .toEqual(setBefore.rows);
     expect(await counts()).toEqual(beforeUnsupportedEdit);

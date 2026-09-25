@@ -36,8 +36,14 @@ describe('PgBazisCutRepository security and event contract', () => {
     for (const writer of ['create','create-picker']) expect(repositorySource)
       .toContain(`{ mdf: { writer: 'bazis.${writer}',capability: 'queued' } }`);
     expect(repositorySource).toContain(`{ mdf: { writer: 'bazis.rename',capability: 'queued' } }`);
+    // Legacy editors enter as queued so the active engine answers an explicit code instead of
+    // silently bypassing production accounting.
     for (const writer of ['add-details','update-detail','delete-detail','delete-empty']) expect(repositorySource)
-      .toContain(`{ mdf: { writer: 'bazis.${writer}',capability: 'legacy-only' } }`);
+      .toContain(`{ mdf: { writer: 'bazis.${writer}',capability: 'queued' } }`);
+    expect(repositorySource.match(/'MDF_COMPOSITION_REQUIRED'/g)).toHaveLength(2);
+    expect(repositorySource).toContain("'MDF_SET_REFILL_NOT_CONNECTED'");
+    expect(repositorySource).toContain("'MDF_SET_HAS_PRODUCTION_HISTORY'");
+    expect(repositorySource).not.toContain("capability: 'legacy-only'");
     expect(repositorySource).toContain('if (!boundary.queued) await evaluateBazisCutSetMachineFilesPresentAutomation');
   });
   it('builds the backend-owned set name from its generated id', () => {

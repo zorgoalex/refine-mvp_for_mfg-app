@@ -185,7 +185,14 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
     const lineageInvalid=nextLineageIssues.length>0 || (previousLineageIssues.length>0 && !firstV2WithoutPhysicalPredecessor);
     const contextIssues=executionSnapshot.issues.get(mdfSourceKey(trigger));
     const lineageRequiredButMissing=Boolean(previousLineage && !nextLineage);
-    const advanced=await advanceCompatibleMdfRevision(tx,{ job,head: trigger,
+    // Empty carry only for an issued intentional-empty assignment state on BOTH revisions.
+    const previousState=trigger.kind==='bazisCutSet' && trigger.accepted
+      ? executionSnapshot.assignmentStates.get(mdfLineageRevisionKey(trigger,trigger.accepted)) : undefined;
+    const nextState=trigger.kind==='bazisCutSet'
+      ? executionSnapshot.assignmentStates.get(mdfLineageRevisionKey(trigger,trigger.received)) : undefined;
+    const intentionalEmpty=previousState?.intentionalEmpty===true && nextState?.intentionalEmpty===true
+      && !executionSnapshot.assignmentStateIssues.get(mdfSourceKey(trigger))?.length && Boolean(previousLineage && nextLineage);
+    const advanced=await advanceCompatibleMdfRevision(tx,{ job,head: trigger,intentionalEmpty,
       contextValid: contextIssues?.length===0 && !lineageInvalid && !lineageRequiredButMissing,
       lines: lines.filter(l => key(l)===key(trigger)),allocations,
       ...(nextLineage ? { lineage: previousLineage ? { previous: previousLineage,next: nextLineage } : { next: nextLineage } } : {}) });

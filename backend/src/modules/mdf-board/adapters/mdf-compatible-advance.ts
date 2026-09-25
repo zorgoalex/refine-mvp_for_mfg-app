@@ -14,6 +14,7 @@ export async function advanceCompatibleMdfRevision(tx: DatabaseClient,input: {
   lines: readonly (MdfAdvanceLine & { revision: string })[];
   allocations: readonly MdfEvidenceAllocation[];
   lineage?: { previous?: MdfValidatedPhysicalLineage; next: MdfValidatedPhysicalLineage };
+  intentionalEmpty?: boolean;
 }): Promise<MdfEvidenceAllocation[]|null> {
   const { head:h }=input;
   if (!input.contextValid || !h.accepted || h.accepted===h.received) return null;
@@ -28,7 +29,7 @@ export async function advanceCompatibleMdfRevision(tx: DatabaseClient,input: {
   if (!valid) return null;
   const replacements=planMdfCompatibleAdvance({ kind: h.kind,id: h.id,previousRevision: h.accepted,nextRevision: h.received,
     previous: input.lines.filter(l => l.revision===h.accepted),next: input.lines.filter(l => l.revision===h.received),
-    allocations: input.allocations,lineage: input.lineage });
+    allocations: input.allocations,lineage: input.lineage,intentionalEmpty: input.intentionalEmpty });
   if (!replacements) return null;
   const oldIds=replacements.map(r => r.old.allocationId),previousRevision=h.accepted;
   await tx.query("UPDATE mdf_bath_allocations SET state='released',updated_at=now() WHERE allocation_id=ANY($1::uuid[])",[oldIds]);

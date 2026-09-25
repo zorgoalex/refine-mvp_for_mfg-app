@@ -204,6 +204,66 @@ describe('bazisCutApi', () => {
     ).toThrow('Invalid idempotencyKey');
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('drives composition preview and confirm, putting the idempotency key on confirm only', async () => {
+    const previewResponse = {
+      status: 'ready', beforeVersion: '3', previewDigest: 'd'.repeat(64),
+      assignmentChanges: [{ rowId: '7', orderId: '9', detailId: '101', before: 2, after: 1 }],
+      retainedPhysical: [], preservedAllocations: [], blockers: [],
+    };
+    const confirmResponse = {
+      status: 'queued', jobId: 'job-1', intentId: 'intent-1', assignmentStateId: 'state-1',
+      auditId: 'audit-1', outboxId: 'outbox-1', version: '4', replay: false,
+    };
+    const fetchMock = mockFetch(jsonResponse(previewResponse), jsonResponse(confirmResponse));
+
+    const previewRequest = {
+      expectedVersion: '3',
+      sourceToken: 'a'.repeat(64),
+      desiredRows: [{ rowId: '7', quantity: 1 }],
+    };
+    const preview = await bazisCutApi.previewComposition(42, previewRequest);
+    expect(preview).toEqual(previewResponse);
+    const confirm = await bazisCutApi.confirmComposition(
+      42,
+      { ...previewRequest, expectedDigest: 'd'.repeat(64) },
+      'bazis-composition:11111111-1111-1111-1111-111111111111',
+    );
+    expect(confirm).toEqual(confirmResponse);
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/v1/bazis-cut-sets/42/composition/preview',
+      '/api/v1/bazis-cut-sets/42/composition/confirm',
+    ]);
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(['POST', 'POST']);
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Idempotency-Key')).toBeNull();
+    expect(new Headers(fetchMock.mock.calls[1][1]?.headers).get('Idempotency-Key'))
+      .toBe('bazis-composition:11111111-1111-1111-1111-111111111111');
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toMatchObject({ expectedDigest: 'd'.repeat(64) });
+  });
+
+  it('rejects invalid composition preview/confirm payloads before fetch', () => {
+    const fetchMock = vi.mocked(fetch);
+    const validRequest = { expectedVersion: '3', sourceToken: 'a'.repeat(64), desiredRows: [{ rowId: '7', quantity: 1 }] };
+
+    expect(() => bazisCutApi.previewComposition(42, { ...validRequest, expectedVersion: '0' }))
+      .toThrow('Invalid expectedVersion');
+    expect(() => bazisCutApi.previewComposition(42, { ...validRequest, sourceToken: 'not-hex' }))
+      .toThrow('Invalid sourceToken');
+    expect(() => bazisCutApi.previewComposition(42, { ...validRequest, desiredRows: [{ rowId: '7', quantity: 0 }] }))
+      .toThrow('Invalid desiredRows');
+    expect(() => bazisCutApi.previewComposition(42, { ...validRequest, desiredRows: [{ rowId: 'abc', quantity: 1 }] }))
+      .toThrow('Invalid desiredRows');
+
+    expect(() => bazisCutApi.confirmComposition(42, { ...validRequest, expectedDigest: 'not-hex' }, 'bazis-composition:abc12345'))
+      .toThrow('Invalid expectedDigest');
+    expect(() => bazisCutApi.confirmComposition(42, { ...validRequest, expectedDigest: 'd'.repeat(64) }, 'short'))
+      .toThrow('Invalid idempotencyKey');
+    expect(() => bazisCutApi.confirmComposition(42, { ...validRequest, expectedDigest: 'd'.repeat(64) }, 'has spaces not allowed'))
+      .toThrow('Invalid idempotencyKey');
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 function mockFetch(...responses: Response[]) {

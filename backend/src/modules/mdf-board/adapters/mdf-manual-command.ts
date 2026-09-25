@@ -90,12 +90,19 @@ export async function executeMdfManualCommand(tx: TransactionClient,
     revision_key revision,line_key "lineKey",order_id::float8 "orderId",detail_id::float8 "detailId",
     quantity::float8 quantity,stage_code "stageCode",evidence_kind "evidenceKind",rework FROM mdf_evidence_lines
     WHERE source_kind=$1 AND source_id=$2 AND revision_key=$3 ORDER BY line_key LIMIT 10001`,[...args,head.received])).rows;
-  if (!lines.length || lines.length > 10000) conflict('MDF_COMMAND_RECONCILIATION_REQUIRED','Неполный состав карточки');
+  // Only an authentic intentional-empty BASIS (issued assignment state for the accepted revision,
+  // no state issues, validated physical lineage) may have zero membership/evidence.
+  const acceptedState = source.kind === 'bazisCutSet'
+    ? snapshot.assignmentStates.get(JSON.stringify([source.kind,source.id,head.accepted])) : undefined;
+  const acceptedLineage = snapshot.lineage.get(mdfLineageRevisionKey(source,head.accepted));
+  const validatedEmpty = acceptedState?.intentionalEmpty === true && acceptedLineage !== undefined
+    && !snapshot.assignmentStateIssues.get(key)?.length;
+  if ((!lines.length && !validatedEmpty) || lines.length > 10000) conflict('MDF_COMMAND_RECONCILIATION_REQUIRED','Неполный состав карточки');
   // Diagnostic loader is used solely as a negative live-membership check. Its
   // cut/laminated/manual/whole-order fields NEVER enter accepted evidence.
   const raw = await loadMdfShadowSource(tx,source,5001);
   const members = raw.filter(r => r.relevant);
-  if (raw.length > 5000 || !members.length || members.some(r => r.unresolved || !r.line_key
+  if (raw.length > 5000 || (!members.length && !validatedEmpty) || members.some(r => r.unresolved || !r.line_key
     || ![r.order_id,r.detail_id,r.quantity].every(n => Number.isSafeInteger(Number(n)) && Number(n)>0))) {
     conflict('MDF_COMMAND_RECONCILIATION_REQUIRED','Не все детали карточки сопоставлены');
   }
@@ -122,7 +129,8 @@ export async function executeMdfManualCommand(tx: TransactionClient,
   const causeKey = `mdf-manual:${randomUUID()}`, revisionKey = causeKey;
   let proof: ReturnType<typeof addMdfManualProof>;
   try {
-    proof = addMdfManualProof(source,lines,target,causeKey,lineage ? { revisionKey: head.accepted,lineage } : undefined);
+    proof = addMdfManualProof(source,lines,target,causeKey,
+      lineage ? { revisionKey: head.accepted,lineage,intentionalEmpty: validatedEmpty } : undefined);
   } catch (error) {
     if (error instanceof Error && error.message === 'MDF_MANUAL_EVIDENCE_INVALID') {
       conflict('MDF_COMMAND_RECONCILIATION_REQUIRED','Физические данные карточки требуют проверки');
@@ -138,7 +146,9 @@ export async function executeMdfManualCommand(tx: TransactionClient,
     : { generatedAt: now,changed: false,move: move(head.version) });
   const requestId = command.requestId ?? 'mdf-board-manual-move';
   await tx.query("SELECT set_config('erp.current_user_id',$1,true)",[user.id]);
-  const rules = (await tx.query<{ id: string; version: number }>(`SELECT id,version FROM status_automation_rules
+  // An empty card has no own proof: pin an empty rule set so its job can dispatch no production
+  // events, not even for verified baths in its allocation closure.
+  const rules = validatedEmpty ? [] : (await tx.query<{ id: string; version: number }>(`SELECT id,version FROM status_automation_rules
     WHERE is_enabled ORDER BY id`)).rows.map(r => ({ ruleId: Number(r.id),version: Number(r.version) }));
   const demand = snapshot.frozenDemand.get(key)!;
   const auditId = await auditService.record(tx,{
@@ -151,8 +161,9 @@ export async function executeMdfManualCommand(tx: TransactionClient,
     metadata: { engineMode: 'active',sourceKind: source.kind,sourceId: source.id,sourceToken: command.sourceToken,
       receivedRevision: head.received,correctionEpoch: head.epoch,headVersion: head.version,
       demandDigest: mdfDemandDigest(demand),receiptRevision: revisionKey,causeKey,
-      physicalProofEmitted: proof.added.length > 0,notificationEventEmitted: false,
-      notificationEventDecision: 'queued_production_events',relatedOrderIds: owners },
+      physicalProofEmitted: proof.added.length > 0,notificationEventEmitted: validatedEmpty,
+      notificationEventDecision: validatedEmpty ? 'card_placed_outbox' : 'queued_production_events',
+      intentionalEmpty: validatedEmpty,relatedOrderIds: owners },
     relatedEntities: owners.map(entityId => ({ entityType: 'order' as const,entityId })),
   });
   const previousPhysicalRows = lines.filter(line => line.evidenceKind === 'physical');
@@ -165,6 +176,15 @@ export async function executeMdfManualCommand(tx: TransactionClient,
   const saved = useLineageReceipt
     ? await recordLineageReceipt()
     : await recordMdfReceipt(tx,receiptInput);
+  if (validatedEmpty) {
+    // No production events exist for an empty card, so its placement gets its own idempotent
+    // domain event (normalized owner dimensions; no quantities).
+    await tx.query(`INSERT INTO outbox_events(event_type,aggregate_type,aggregate_id,payload_json,idempotency_key)
+      VALUES ('mdf_board.card_placed','mdf_board_card',$1,$2::jsonb,$3) ON CONFLICT (idempotency_key) DO NOTHING`,
+    [`${source.kind}:${source.id}`,JSON.stringify({ actorUserId: Number(user.id),requestId,auditId,
+      sourceKind: source.kind,sourceId: source.id,targetColumn: target,orderIds: owners,intentionalEmpty: true }),
+    `mdf-manual:${user.id}:${command.idempotencyKey}:placed`]);
+  }
   return remember(target === null ? { generatedAt: now,cardKind: source.kind,cardId: source.id,deleted: true,auditId,jobId: saved.jobId }
     : { generatedAt: now,changed: true,move: move(saved.version),auditId,jobId: saved.jobId });
 

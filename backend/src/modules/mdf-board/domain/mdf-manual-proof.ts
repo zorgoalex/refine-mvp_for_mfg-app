@@ -14,6 +14,8 @@ const position = (l: MdfReceiptLine) => JSON.stringify([l.orderId,l.detailId,l.r
 export function addMdfManualProof(source: MdfBoardSource, previous: readonly MdfReceiptLine[],
   target: string | null, causeKey: string, authorization?: {
     revisionKey: string; lineage: MdfValidatedPhysicalLineage;
+    /** Caller verified an issued intentional-empty BASIS assignment state for this exact revision. */
+    intentionalEmpty?: boolean;
   }): { lines: MdfReceiptLine[]; added: MdfReceiptLine[] } {
   const columns = source.kind === 'bath' ? ['baths','baths_ready','baths_laminated','completed_baths']
     : ['parsed','completed','completed_laminated'];
@@ -48,6 +50,11 @@ export function addMdfManualProof(source: MdfBoardSource, previous: readonly Mdf
         && line.quantity === claim.quantity && line.stageCode === claim.stageCode
         && line.evidenceKind === claim.evidenceKind && line.rework === claim.rework);
     }));
+  // An authentic intentional-empty BASIS moves carry-only: retained physical lines stay exact,
+  // nothing is added (no members to prove), and the lineage must still match line-for-line.
+  if (!members.size && source.kind === 'bazisCutSet' && authorization?.intentionalEmpty === true && lineageMatches) {
+    return { lines, added: [] };
+  }
   if (!members.size || (authorization !== undefined && !lineageMatches)
     || [...proof].some(([key,q]) => q > (members.get(key)?.quantity ?? 0)
       && (!(source.kind === 'packet' || source.kind === 'bazisCutSet') || !lineageMatches))) {

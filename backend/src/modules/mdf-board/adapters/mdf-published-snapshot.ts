@@ -41,23 +41,11 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
     if (state.mode!=='active' && state.mode!=='read_only') return { schemaVersion: 1 as const, ...state,
       cards: [],positions: [],members: [],pendingJobs: [],trackedJobs: [],issues: ['MDF_PUBLICATION_NOT_ACTIVE'] };
     const scope = rolePolicyForUser(user).orders.view;
-    const allowed = scope==='all' ? 'TRUE' : scope==='own' ? '(o.created_by=$1::bigint OR o.manager_id=$1::bigint)'
-      : scope==='assigned' ? `EXISTS(SELECT 1 FROM order_workshops w JOIN users u
-        ON u.employee_id=w.responsible_employee_id WHERE w.order_id=o.order_id AND NOT w.delete_flag
-        AND u.is_active AND u.user_id=$1::bigint)` : 'FALSE';
-    const owners = `SELECT o.order_id FROM orders o WHERE $1::bigint IS NOT NULL
-      AND NOT o.delete_flag AND o.order_kind='production_order' AND ${allowed}`;
+    const owners = mdfAllowedOrdersSql(user);
     // Card owners = current published members ∪ demand/evidence owners of the exact
     // published accepted AND received revisions (retained physical proof survives a
     // composition edit). Never today's head, never caller-provided owners or markers.
-    const cardOwners = (alias: string) => `SELECT m.order_id FROM mdf_published_source_members m
-        WHERE m.source_kind=${alias}.source_kind AND m.source_id=${alias}.source_id
-      UNION SELECT d.order_id FROM mdf_revision_demand d
-        WHERE d.source_kind=${alias}.source_kind AND d.source_id=${alias}.source_id
-          AND d.revision_key IN (${alias}.accepted_revision_key,${alias}.received_revision_key)
-      UNION SELECT e.order_id FROM mdf_evidence_lines e
-        WHERE e.source_kind=${alias}.source_kind AND e.source_id=${alias}.source_id
-          AND e.revision_key IN (${alias}.accepted_revision_key,${alias}.received_revision_key)`;
+    const cardOwners = mdfPublishedCardOwnersSql;
     // Visibility (at least one allowed owner) is decided BEFORE the page limit, so newer
     // denied cards can never push an older authorized/focused card out of the page.
     const cardRows = (await tx.query<PublishedCard & { headVersion: string; headEpoch: string; headReceived: string;
@@ -115,6 +103,30 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
     return { schemaVersion: 1 as const, ...state, cards,positions,members,pendingJobs,trackedJobs,
       issues: state.mode==='read_only' ? ['MDF_READ_ONLY'] : [] };
   });
+}
+
+/** Orders the user may view under the current server scope ($1 = user id). */
+export function mdfAllowedOrdersSql(user: CurrentUser): string {
+  const scope = rolePolicyForUser(user).orders.view;
+  const allowed = scope==='all' ? 'TRUE' : scope==='own' ? '(o.created_by=$1::bigint OR o.manager_id=$1::bigint)'
+    : scope==='assigned' ? `EXISTS(SELECT 1 FROM order_workshops w JOIN users u
+      ON u.employee_id=w.responsible_employee_id WHERE w.order_id=o.order_id AND NOT w.delete_flag
+      AND u.is_active AND u.user_id=$1::bigint)` : 'FALSE';
+  return `SELECT o.order_id FROM orders o WHERE $1::bigint IS NOT NULL
+    AND NOT o.delete_flag AND o.order_kind='production_order' AND ${allowed}`;
+}
+
+/** Card owners = current published members ∪ demand/evidence owners of the exact published
+ * accepted AND received revisions of the `mdf_published_sources` row aliased as `alias`. */
+export function mdfPublishedCardOwnersSql(alias: string): string {
+  return `SELECT m.order_id FROM mdf_published_source_members m
+        WHERE m.source_kind=${alias}.source_kind AND m.source_id=${alias}.source_id
+      UNION SELECT d.order_id FROM mdf_revision_demand d
+        WHERE d.source_kind=${alias}.source_kind AND d.source_id=${alias}.source_id
+          AND d.revision_key IN (${alias}.accepted_revision_key,${alias}.received_revision_key)
+      UNION SELECT e.order_id FROM mdf_evidence_lines e
+        WHERE e.source_kind=${alias}.source_kind AND e.source_id=${alias}.source_id
+          AND e.revision_key IN (${alias}.accepted_revision_key,${alias}.received_revision_key)`;
 }
 
 async function loadTracked(tx: DatabaseClient,owners: string,userId: string,jobIds: readonly string[],allowUnlinked: boolean) {

@@ -23,6 +23,7 @@ import {
   updateBazisCutSetDetailSchema,
 } from '../dto/bazis-cut.dto';
 import { BazisCutRuntimeConfigService } from './bazis-cut-runtime-config.service';
+import { PgMdfBazisCompositionCommand } from '../../mdf-board/adapters/mdf-bazis-composition-command';
 
 const positiveId = z.coerce.number().int().positive();
 const idParameter = { name: 'setId', type: Number, required: true } as const;
@@ -55,6 +56,23 @@ const detailProperties: NonNullable<SchemaObject['properties']> = {
 const updateDetailSchema: SchemaObject = { type: 'object', additionalProperties: false,
   required: [...detailFieldNames, 'expectedVersion'],
   properties: { ...detailProperties, expectedVersion: { type: 'integer', minimum: 0 } } };
+const compositionBodySchema = z.object({
+  expectedVersion: z.string().regex(/^[1-9][0-9]{0,18}$/),
+  sourceToken: z.string().regex(/^[a-f0-9]{64}$/),
+  desiredRows: z.array(z.object({ rowId: z.string().regex(/^[1-9][0-9]{0,18}$/),
+    quantity: z.number().int().min(1).max(1_000_000) }).strict()).max(5000),
+}).strict();
+const compositionConfirmBodySchema = compositionBodySchema.extend({
+  expectedDigest: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+const compositionRequestSchema: SchemaObject = { type: 'object', additionalProperties: false,
+  required: ['expectedVersion', 'sourceToken', 'desiredRows'], properties: {
+    expectedVersion: { type: 'string', pattern: '^[1-9][0-9]{0,18}$' },
+    sourceToken: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    desiredRows: { type: 'array', maxItems: 5000, items: { type: 'object', additionalProperties: false,
+      required: ['rowId', 'quantity'], properties: { rowId: { type: 'string', pattern: '^[1-9][0-9]{0,18}$' },
+        quantity: { type: 'integer', minimum: 1, maximum: 1_000_000 } } } },
+  } };
 const sourceRefSchema: SchemaObject = { type: 'object', required: ['id', 'label'], properties: {
   id: { type: 'integer', format: 'int64' }, label: { type: 'string' },
   deleted: { type: 'boolean' },
@@ -95,6 +113,13 @@ const setResponseSchema: SchemaObject = { type: 'object', additionalProperties: 
     createdBy: { type: 'integer', format: 'int64', nullable: true },
     updatedBy: { type: 'integer', format: 'int64', nullable: true },
     details: { type: 'array', items: detailResponseSchema },
+    mdfComposition: { type: 'object', additionalProperties: false, required: ['available', 'sourceToken', 'reason', 'eligibleRowIds'],
+      description: 'Readiness for the production-safe composition command (new MDF engine); GET only',
+      properties: { available: { type: 'boolean' },
+        sourceToken: { type: 'string', pattern: '^[a-f0-9]{64}$', nullable: true },
+        eligibleRowIds: { type: 'array', items: { type: 'string', pattern: '^[1-9][0-9]{0,18}$' } },
+        reason: { type: 'string', nullable: true, enum: ['MDF_ENGINE_READ_ONLY',
+          'MDF_SOURCE_NOT_REGISTERED', 'MDF_PUBLICATION_PENDING', 'MDF_SOURCE_ISSUES', 'MDF_PARTIAL_ACCESS', null] } } },
   } };
 const mutationResponseSchema: SchemaObject = { type: 'object', required: ['set'], properties: {
   set: setResponseSchema, addedCount: { type: 'integer', minimum: 0 },
@@ -112,6 +137,7 @@ export class BazisCutSetsController {
   constructor(
     @Inject(BazisCutService) private readonly service: BazisCutService,
     @Inject(BazisCutRuntimeConfigService) private readonly runtime: BazisCutRuntimeConfigService,
+    @Inject(PgMdfBazisCompositionCommand) private readonly composition: PgMdfBazisCompositionCommand,
   ) {}
 
   @ApiOperation({ operationId: 'listBazisCutSets', summary: 'List persistent Basis-cut export sets' })
@@ -278,6 +304,38 @@ export class BazisCutSetsController {
       setId: parseId(setId), idempotencyKey: parseIdempotencyKey(key), ...parsed });
   }
 
+  @ApiOperation({ operationId: 'previewBazisCutSetComposition',
+    summary: 'Preview a production-safe change of a Basis-cut set composition (new MDF engine)' })
+  @ApiParam(idParameter)
+  @ApiBody({ schema: compositionRequestSchema })
+  @ApiResponse({ status: 200, description: 'Consequences: assignment changes, retained physical cut, preserved bath pins' })
+  @ApiResponse({ status: 409, description: 'Engine not active, stale version/token or blocked composition' })
+  @HttpCode(200)
+  @Post(':setId/composition/preview')
+  previewComposition(@Req() request: RequestWithCurrentUser, @Param('setId') setId: string, @Body() body: unknown) {
+    this.assertEnabled();
+    return this.composition.preview(requireUser(request), parseId(setId), parse(compositionBodySchema, body),
+      requireRequestId(request));
+  }
+
+  @ApiOperation({ operationId: 'confirmBazisCutSetComposition',
+    summary: 'Confirm a previewed Basis-cut set composition change; queued for production accounting' })
+  @ApiParam(idParameter)
+  @ApiHeader(commandHeader)
+  @ApiBody({ schema: { ...compositionRequestSchema, required: [...compositionRequestSchema.required!, 'expectedDigest'],
+    properties: { ...compositionRequestSchema.properties, expectedDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' } } } })
+  @ApiResponse({ status: 200, description: 'Queued (or unchanged/replayed) composition command' })
+  @ApiResponse({ status: 409, description: 'Stale preview, engine not active or idempotency conflict' })
+  @HttpCode(200)
+  @Post(':setId/composition/confirm')
+  confirmComposition(@Req() request: RequestWithCurrentUser, @Param('setId') setId: string,
+    @Headers('idempotency-key') key: string | string[] | undefined, @Body() body: unknown) {
+    this.assertEnabled();
+    const parsed = parse(compositionConfirmBodySchema, body);
+    return this.composition.confirm(requireUser(request), parseId(setId),
+      { ...parsed, idempotencyKey: parseIdempotencyKey(key) }, requireRequestId(request));
+  }
+
   @ApiOperation({ operationId: 'addBazisCutSetDetails', summary: 'Add order details to a Basis-cut set' })
   @ApiParam(idParameter)
   @ApiHeader(commandHeader)
@@ -372,6 +430,12 @@ function requireUser(request: RequestWithCurrentUser) {
 }
 
 function parseId(value: string): number { return parse(positiveId, value); }
+
+/** The request-context middleware always assigns an id; commands must not run without one. */
+function requireRequestId(request: RequestWithCurrentUser): string {
+  if (!request.requestId) throw new ApiError(400, 'REQUEST_ID_REQUIRED', 'Request id is missing');
+  return request.requestId;
+}
 
 function parseIdempotencyKey(value: string | string[] | undefined): string {
   const key = (Array.isArray(value) ? value[0] : value)?.trim() ?? '';

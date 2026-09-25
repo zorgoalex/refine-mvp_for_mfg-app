@@ -16031,6 +16031,58 @@ paths:
         '422': { $ref: '#/components/responses/ValidationError' }
         '503': { $ref: '#/components/responses/FeatureDisabled' }
 
+  /api/v1/bazis-cut-sets/{setId}/composition/preview:
+    parameters:
+      - { $ref: '#/components/parameters/BazisCutSetId' }
+    post:
+      tags: [BazisCutSets]
+      operationId: previewBazisCutSetComposition
+      summary: Preview a production-safe composition change of a Basis-cut set (new MDF engine)
+      description: >-
+        Active MDF engine only. desiredRows is the complete list of rows that stay; an omitted row is
+        deleted, an empty list empties the set. Physical cut and bath reservations are retained;
+        detail production statuses do not change.
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/BazisCutCompositionRequest' } } }
+      responses:
+        '200':
+          description: Consequences of the composition change
+          content: { application/json: { schema: { $ref: '#/components/schemas/BazisCutCompositionPreview' } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/bazis-cut-sets/{setId}/composition/confirm:
+    parameters:
+      - { $ref: '#/components/parameters/BazisCutSetId' }
+    post:
+      tags: [BazisCutSets]
+      operationId: confirmBazisCutSetComposition
+      summary: Confirm a previewed composition change; queued for production accounting
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/BazisCutCompositionConfirmRequest' } } }
+      responses:
+        '200':
+          description: Queued, unchanged or replayed composition command
+          content: { application/json: { schema: { $ref: '#/components/schemas/BazisCutCompositionConfirmResult' } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
   /api/v1/bazis-cut-sets/{setId}/details/{detailId}:
     parameters:
       - { $ref: '#/components/parameters/BazisCutSetId' }
@@ -17926,6 +17978,73 @@ components:
             createdBy: { type: integer, format: int64, nullable: true }
             updatedBy: { type: integer, format: int64, nullable: true }
             details: { type: array, items: { $ref: '#/components/schemas/BazisCutSetDetail' } }
+            mdfComposition: { $ref: '#/components/schemas/BazisCutCompositionReadiness' }
+    BazisCutCompositionReadiness:
+      type: object
+      description: GET only, active/read_only MDF engine; absent in legacy/shadow (legacy editor applies).
+      additionalProperties: false
+      required: [available, sourceToken, reason, eligibleRowIds]
+      properties:
+        available: { type: boolean }
+        sourceToken: { type: string, pattern: '^[a-f0-9]{64}$', nullable: true }
+        eligibleRowIds:
+          type: array
+          description: Server-resolved ordinary MDF rows the composition may keep or change; other rows are preserved raw.
+          items: { type: string, pattern: '^[1-9][0-9]{0,18}$' }
+        reason:
+          type: string
+          nullable: true
+          enum: [MDF_ENGINE_READ_ONLY, MDF_SOURCE_NOT_REGISTERED, MDF_PUBLICATION_PENDING, MDF_SOURCE_ISSUES, MDF_PARTIAL_ACCESS, null]
+    BazisCutCompositionRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion, sourceToken, desiredRows]
+      properties:
+        expectedVersion: { type: string, pattern: '^[1-9][0-9]{0,18}$' }
+        sourceToken: { type: string, pattern: '^[a-f0-9]{64}$' }
+        desiredRows:
+          type: array
+          maxItems: 5000
+          items:
+            type: object
+            additionalProperties: false
+            required: [rowId, quantity]
+            properties:
+              rowId: { type: string, pattern: '^[1-9][0-9]{0,18}$' }
+              quantity: { type: integer, minimum: 1, maximum: 1000000 }
+    BazisCutCompositionConfirmRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion, sourceToken, desiredRows, expectedDigest]
+      properties:
+        expectedVersion: { type: string, pattern: '^[1-9][0-9]{0,18}$' }
+        sourceToken: { type: string, pattern: '^[a-f0-9]{64}$' }
+        desiredRows: { $ref: '#/components/schemas/BazisCutCompositionRequest/properties/desiredRows' }
+        expectedDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+    BazisCutCompositionPreview:
+      type: object
+      required: [status, beforeVersion, previewDigest, assignmentChanges, retainedPhysical, preservedAllocations, blockers]
+      properties:
+        status: { type: string, enum: [ready, unchanged, blocked] }
+        beforeVersion: { type: string }
+        previewDigest: { type: string, nullable: true }
+        assignmentChanges: { type: array, items: { type: object } }
+        retainedPhysical: { type: array, items: { type: object } }
+        preservedAllocations: { type: array, items: { type: object } }
+        blockers: { type: array, items: { type: object } }
+    BazisCutCompositionConfirmResult:
+      type: object
+      required: [status, replay]
+      properties:
+        status: { type: string, enum: [queued, unchanged] }
+        jobId: { type: string, format: uuid }
+        intentId: { type: string, format: uuid }
+        assignmentStateId: { type: string, format: uuid }
+        auditId: { type: string }
+        outboxId: { type: string }
+        version: { type: string }
+        beforeVersion: { type: string }
+        replay: { type: boolean }
     BazisCutMutationResult:
       type: object
       required: [set]

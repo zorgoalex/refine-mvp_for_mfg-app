@@ -1,3 +1,4 @@
+import type { MdfBazisCompositionReadiness } from '../../mdf-board/adapters/mdf-bazis-composition-readiness';
 import { humanName } from '../../../shared/human-name-schema';
 import { z } from 'zod';
 
@@ -205,6 +206,8 @@ export interface BazisCutSetDto extends BazisCutSetSummaryDto {
   createdBy: number | null;
   updatedBy: number | null;
   details: BazisCutSetDetailDto[];
+  /** Present on GET: readiness for the production-safe composition command (new MDF engine). */
+  mdfComposition?: MdfBazisCompositionReadiness;
 }
 
 export interface BazisCutSetListDto {

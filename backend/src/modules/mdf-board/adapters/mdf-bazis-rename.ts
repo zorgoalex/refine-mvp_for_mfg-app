@@ -134,9 +134,15 @@ export async function executeMdfBazisRename(
     evidence_kind "evidenceKind",rework FROM mdf_evidence_lines
     WHERE source_kind=$1 AND source_id=$2 AND revision_key=$3 ORDER BY line_key LIMIT 10001`,
   [...key, head.accepted])).rows;
-  if (!selected.members.length || !lines.length || lines.length > 10000 || !sameMembership(selected.members, lines)) reconcile();
   const lineageKey = mdfLineageRevisionKey(source,head.accepted);
   const lineage = snapshot.lineage.get(lineageKey);
+  // Only an authentic intentional-empty BASIS (issued assignment state for the accepted revision,
+  // no state issues, validated lineage) may be renamed with zero membership/evidence.
+  const acceptedState = snapshot.assignmentStates.get(JSON.stringify([source.kind,source.id,head.accepted]));
+  const validatedEmpty = acceptedState?.intentionalEmpty === true && lineage !== undefined
+    && !snapshot.assignmentStateIssues.get(sourceKey)?.length;
+  if (((!selected.members.length || !lines.length) && !validatedEmpty) || lines.length > 10000
+    || !sameMembership(selected.members, lines)) reconcile();
   const lineageIssue = snapshot.lineageIssues.get(lineageKey)?.[0];
   if (lineageIssue || (lineage && !matchesMdfValidatedPhysicalLineage({ sourceKind: source.kind,sourceId: source.id,
     revisionKey: head.accepted,lines: lines.map(line => ({ ...line,stage: line.stageCode,evidence: line.evidenceKind })),lineage }))) reconcile();

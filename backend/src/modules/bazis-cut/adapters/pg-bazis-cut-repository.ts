@@ -10,6 +10,7 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { requireMdfCommandBoundary } from '../../mdf-board/application/mdf-command-boundary';
 import { captureNewMdfBazisSource, registerNewMdfBazisSource } from '../../mdf-board/adapters/mdf-bazis-source';
 import { executeMdfBazisRename } from '../../mdf-board/adapters/mdf-bazis-rename';
+import { loadMdfBazisCompositionReadiness } from '../../mdf-board/adapters/mdf-bazis-composition-readiness';
 import { evaluateMdfOrderMachineFilesPresentAutomation } from '../../status-automation/application/status-automation-runtime';
 import { buildBazisCutXls, buildBazisCutXlsFromTemplate } from '../application/bazis-xls-writer';
 import { ExportTemplatesService } from '../../export-templates/application/export-templates.service';
@@ -207,7 +208,9 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
   }
 
   async get(input: Parameters<BazisCutRepositoryPort['get']>[0]): Promise<BazisCutSetDto> {
-    return loadSet(this.database, input.setId);
+    const set = await loadSet(this.database, input.setId);
+    const mdfComposition = await loadMdfBazisCompositionReadiness(this.database, input.currentUser, input.setId);
+    return mdfComposition ? { ...set, mdfComposition } : set;
   }
 
   async pickerFacets(
@@ -400,7 +403,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       const result = { set, ...(mdfJobId ? { mdfJobId } : {}) };
       const auditId = await recordMutation(tx, command.currentUser, command.requestId, 'bazis_cut_set.renamed', command.setId,
         command.idempotencyKey, { name: before.name, version: before.version }, summaryAudit(set), set, set.details,
-        { ...(mdfJobId ? { mdfJobId, mdfEvidence: 'metadata_only' } : {}) });
+        { ...(mdfJobId ? { mdfJobId, mdfEvidence: 'metadata_only' } : {}) }, activeRename?.owners ?? []);
       if (boundary.mode === 'active' && !auditId) {
         throw new ApiError(500, 'BAZIS_CUT_AUDIT_REQUIRED', 'Не удалось сохранить журнал переименования');
       }
@@ -413,6 +416,10 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
     await this.assertOrderReadable(this.database, command.currentUser, command.orderId, command.requestId, command.setId);
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser);
+      // In the new MDF engine this legacy edit would bypass production accounting.
+      if ((await requireMdfCommandBoundary(tx,{ writer: 'bazis.add-details',capability: 'queued' })).queued) {
+        throw new ApiError(409, 'MDF_SET_REFILL_NOT_CONNECTED', 'Добавление деталей в существующий набор пока недоступно в новом производственном учёте — создайте новый набор');
+      }
       const detailIds = uniqueIds(command.detailIds);
       const hdfDetailIds = uniqueIds(command.hdfDetailIds ?? []);
       const requestHash = hashRequest('bazis_cut_set.details.add', command.currentUser,
@@ -465,12 +472,16 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       await evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'details-added');
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
-    },{ mdf: { writer: 'bazis.add-details',capability: 'legacy-only' } });
+    },{ mdf: { writer: 'bazis.add-details',capability: 'queued' } });
   }
 
   async updateDetail(command: UpdateBazisCutDetailCommand): Promise<BazisCutMutationResultDto> {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser);
+      // In the new MDF engine this legacy edit would bypass production accounting.
+      if ((await requireMdfCommandBoundary(tx,{ writer: 'bazis.update-detail',capability: 'queued' })).queued) {
+        throw new ApiError(409, 'MDF_COMPOSITION_REQUIRED', 'В новом производственном учёте количество меняется через изменение состава набора', { compositionRoute: `/api/v1/bazis-cut-sets/${command.setId}/composition/preview` });
+      }
       const requestHash = hashRequest('bazis_cut_set.detail.update', command.currentUser,
         { setId: command.setId, detailId: command.detailId, expectedVersion: command.expectedVersion, fields: command.fields });
       const replay = await claimIdempotency<BazisCutMutationResultDto>(tx, command.idempotencyKey,
@@ -506,12 +517,16 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       await evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'detail-updated');
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
-    },{ mdf: { writer: 'bazis.update-detail',capability: 'legacy-only' } });
+    },{ mdf: { writer: 'bazis.update-detail',capability: 'queued' } });
   }
 
   async deleteDetail(command: DeleteBazisCutDetailCommand): Promise<BazisCutMutationResultDto> {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser);
+      // In the new MDF engine this legacy edit would bypass production accounting.
+      if ((await requireMdfCommandBoundary(tx,{ writer: 'bazis.delete-detail',capability: 'queued' })).queued) {
+        throw new ApiError(409, 'MDF_COMPOSITION_REQUIRED', 'В новом производственном учёте позиции удаляются через изменение состава набора', { compositionRoute: `/api/v1/bazis-cut-sets/${command.setId}/composition/preview` });
+      }
       const requestHash = hashRequest('bazis_cut_set.detail.delete', command.currentUser,
         { setId: command.setId, detailId: command.detailId, expectedVersion: command.expectedVersion });
       const replay = await claimIdempotency<BazisCutMutationResultDto>(tx, command.idempotencyKey,
@@ -535,12 +550,19 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       await evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'detail-removed');
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
-    },{ mdf: { writer: 'bazis.delete-detail',capability: 'legacy-only' } });
+    },{ mdf: { writer: 'bazis.delete-detail',capability: 'queued' } });
   }
 
   async deleteEmptySet(command: DeleteBazisCutSetCommand): Promise<BazisCutDeleteSetResultDto> {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser);
+      const boundary = await requireMdfCommandBoundary(tx,{ writer: 'bazis.delete-empty',capability: 'queued' });
+      // A set with production history keeps its retained physical facts: never delete it.
+      if (boundary.queued && (await tx.query(`SELECT 1 FROM mdf_source_heads
+        WHERE source_kind='bazisCutSet' AND source_id=$1::text`, [command.setId])).rows.length) {
+        throw new ApiError(409, 'MDF_SET_HAS_PRODUCTION_HISTORY',
+          'У набора есть история в производственном учёте — его нельзя удалить', { setId: command.setId });
+      }
       const requestHash = hashRequest('bazis_cut_set.delete_empty', command.currentUser,
         { setId: command.setId, expectedVersion: command.expectedVersion });
       const replay = await claimIdempotency<BazisCutDeleteSetResultDto>(tx, command.idempotencyKey,
@@ -561,7 +583,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       await tx.query(`DELETE FROM bazis_cut_sets WHERE bazis_cut_set_id=$1`, [command.setId]);
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
-    },{ mdf: { writer: 'bazis.delete-empty',capability: 'legacy-only' } });
+    },{ mdf: { writer: 'bazis.delete-empty',capability: 'queued' } });
   }
 
   async export(input: Parameters<BazisCutRepositoryPort['export']>[0]): Promise<{ set: BazisCutSetDto; bytes: Buffer }> {
@@ -1085,8 +1107,10 @@ async function nextSortOrder(client: DatabaseClient, setId: number): Promise<num
 async function recordMutation(client: DatabaseClient, user: CurrentUser, requestId: string | undefined,
   event: string, setId: number, idempotencyKey: string, before: Record<string, unknown> | null,
   after: Record<string, unknown> | null, set: BazisCutSetDto,
-  details: readonly BazisCutSetDetailDto[], metadata: Record<string, unknown> = {}): Promise<string> {
-  const dimensions = relatedDimensions(details);
+  details: readonly BazisCutSetDetailDto[], metadata: Record<string, unknown> = {},
+  retainedOwnerIds: readonly number[] = []): Promise<string> {
+  // Owners of retained production facts stay related even when the set has no rows left.
+  const dimensions = relatedDimensions(details, retainedOwnerIds);
   const canonicalMetadata = {
     actorUserId: actorId(user), requestId: requestId ?? null, setVersion: set.version,
     positionCount: set.positionCount,
@@ -1098,7 +1122,7 @@ async function recordMutation(client: DatabaseClient, user: CurrentUser, request
     actorUsername: user.username, actorRole: user.role, requestId: requestId ?? `${event}-${setId}`, source: AUDIT_SOURCE,
     relatedOrderId: dimensions.orderIds[0] ?? null, before, after, diff: after ?? {},
     metadata: { idempotencyKey, ...canonicalMetadata },
-    relatedEntities: auditRelatedEntities(setId, details),
+    relatedEntities: auditRelatedEntities(setId, details, retainedOwnerIds),
   });
   const payload = {
     actorUserId: actorId(user), requestId: requestId ?? null,
@@ -1114,9 +1138,9 @@ async function recordMutation(client: DatabaseClient, user: CurrentUser, request
   return auditId;
 }
 
-function relatedDimensions(details: readonly BazisCutSetDetailDto[]) {
+function relatedDimensions(details: readonly BazisCutSetDetailDto[], retainedOwnerIds: readonly number[] = []) {
   return {
-    orderIds: uniqueNullable(details.map((detail) => detail.sourceOrderId)),
+    orderIds: uniqueNullable([...details.map((detail) => detail.sourceOrderId), ...retainedOwnerIds]),
     orderDetailIds: uniqueNullable(details.map((detail) => detail.sourceOrderDetailId)),
     projectIds: uniqueNullable(details.map((detail) => detail.sourceProjectId)),
     bazisProjectIds: uniqueNullable(details.map((detail) => detail.sourceBazisProjectId)),
@@ -1124,8 +1148,9 @@ function relatedDimensions(details: readonly BazisCutSetDetailDto[]) {
   };
 }
 
-function auditRelatedEntities(setId: number, details: readonly BazisCutSetDetailDto[]) {
-  const dimensions = relatedDimensions(details);
+function auditRelatedEntities(setId: number, details: readonly BazisCutSetDetailDto[],
+  retainedOwnerIds: readonly number[] = []) {
+  const dimensions = relatedDimensions(details, retainedOwnerIds);
   return [
     { entityType: 'bazis_cut_set', entityId: setId },
     ...dimensions.orderIds.map((entityId) => ({ entityType: 'order', entityId })),

@@ -21,11 +21,15 @@ export function planMdfCompatibleAdvance(input: {
   allocations: readonly MdfEvidenceAllocation[];
   /** Optional only for reviewed v2 producers. Omission preserves legacy v1/CNC strictness. */
   lineage?: { previous?: MdfValidatedPhysicalLineage; next: MdfValidatedPhysicalLineage };
+  /** Caller validated an issued intentional-empty BASIS assignment state for BOTH revisions;
+   * only then may an empty (identical) membership carry retained physical facts forward. */
+  intentionalEmpty?: boolean;
 }) {
   if (input.lineage && input.kind!=='packet' && input.kind!=='bazisCutSet' && input.kind!=='bath') return null;
   const oldMembers=input.previous.filter(l => l.stage==='membership').map(signature).sort();
   const newMembers=input.next.filter(l => l.stage==='membership').map(signature).sort();
-  if (!oldMembers.length || JSON.stringify(oldMembers)!==JSON.stringify(newMembers)) return null;
+  const emptyCarry=input.intentionalEmpty===true && input.kind==='bazisCutSet' && Boolean(input.lineage?.previous);
+  if ((!oldMembers.length && !emptyCarry) || JSON.stringify(oldMembers)!==JSON.stringify(newMembers)) return null;
   if ([...input.previous,...input.next].some(l => !isMdfEvidenceContract(input.kind,l.stage,l.evidence)
     || !Number.isSafeInteger(l.quantity) || l.quantity<=0 || !l.lineKey || !l.evidenceLineId)) return null;
   if (new Set(input.next.map(l => l.lineKey)).size!==input.next.length) return null;

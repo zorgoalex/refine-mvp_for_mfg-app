@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Modal, Radio, Select, Space, message } from 'antd';
 import { useNavigate } from 'react-router-dom';
+import { isApiError } from '../../api/apiError';
 import { bazisCutApi, type BazisCutSetListItemDto } from '../../api/bazisCutApi';
 import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
 import {
@@ -27,12 +28,18 @@ export const AddToBazisCutModal: React.FC<Props> = ({ open, orderId, detailIds =
   const [setId, setSetId] = useState<number>();
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [refillNotConnected, setRefillNotConnected] = useState(false);
   const selectedCount = detailIds.length + hdfDetailIds.length;
 
   useEffect(() => {
     if (!open) return;
-    setMode('new'); setSetId(undefined); setSearch('');
+    setMode('new'); setSetId(undefined); setSearch(''); setRefillNotConnected(false);
   }, [open]);
+
+  const changeMode = useCallback((next: 'new' | 'existing') => {
+    setMode(next);
+    setRefillNotConnected(false);
+  }, []);
 
   useEffect(() => {
     if (!open || mode !== 'existing') return;
@@ -72,6 +79,11 @@ export const AddToBazisCutModal: React.FC<Props> = ({ open, orderId, detailIds =
       });
     } catch (error) {
       if (isWorkspaceOperationOwnershipLost(error)) return;
+      if (isApiError(error, 'MDF_SET_REFILL_NOT_CONNECTED')) {
+        setRefillNotConnected(true);
+        setMode('new');
+        return;
+      }
       message.error(error instanceof Error ? error.message : 'Не удалось добавить детали');
     } finally { setSubmitting(false); }
   }, [detailIds, hdfDetailIds, mode, onClose, onDone, orderId, navigate, selectedCount, setId, tabKey]);
@@ -82,7 +94,11 @@ export const AddToBazisCutModal: React.FC<Props> = ({ open, orderId, detailIds =
       okText="Добавить" cancelText="Отмена"
       okButtonProps={{ disabled: selectedCount === 0 || (mode === 'existing' && !setId) }}>
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-        <Radio.Group value={mode} onChange={(event) => setMode(event.target.value)}>
+        {refillNotConnected && (
+          <Alert showIcon type="warning"
+            message="Добавление деталей в существующий набор пока недоступно в новом производственном учёте — создайте новый набор" />
+        )}
+        <Radio.Group value={mode} onChange={(event) => changeMode(event.target.value)}>
           <Radio value="new">Новый набор</Radio>
           <Radio value="existing">Существующий набор</Radio>
         </Radio.Group>

@@ -89,7 +89,7 @@ describe('Basis-cut UI integration guards', () => {
     expect(card).toContain('aria-label="Выделить все отфильтрованные детали набора"');
     expect(card).toContain('columnWidth: DETAIL_SELECTION_COLUMN_WIDTH');
     expect(card).toContain('fixed: true');
-    expect(card).toContain('setSelectedDetailIds(event.target.checked ? filteredDetailIds : [])');
+    expect(card).toContain('setSelectedDetailIds(event.target.checked ? selectableDetailIds : [])');
     expect(card).toContain('Удалить выделенные');
     expect(card).toContain('removeSelectedDetails');
     expect(card).toContain('Будет удалено строк деталей');

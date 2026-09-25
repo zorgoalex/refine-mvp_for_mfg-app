@@ -1,9 +1,10 @@
 import { Table } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Col, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Typography, message } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { DeleteOutlined, DownloadOutlined, EditOutlined, FilterOutlined, SaveOutlined } from '@ant-design/icons';
 import { Link, useParams } from 'react-router-dom';
+import { isApiError } from '../../api/apiError';
 import {
   bazisCutApi, type BazisCutDetailFields, type BazisCutSetCardDto, type BazisCutSetDetailDto,
 } from '../../api/bazisCutApi';
@@ -11,6 +12,13 @@ import { OrderDeletedTag, orderDeletedReferenceClassName } from '../../component
 import { ExportTemplateSelect } from '../../components/ExportTemplateSelect';
 import { useTabStore } from '../../stores/tabStore';
 import { can } from '../../utils/permissions';
+import { BazisCutCompositionModal, type BazisCutCompositionRequest } from './BazisCutCompositionModal';
+import {
+  COMPOSITION_INELIGIBLE_TOOLTIP,
+  compositionUnavailableText,
+  mergeSetAfterMutation,
+  needsCompositionReload,
+} from './bazisCutComposition';
 import {
   buildBazisCutCardPosition,
   buildBazisCutQrCode,
@@ -101,7 +109,10 @@ export const BazisCutSetPage: React.FC = () => {
   const [detailFiltersOpen, setDetailFiltersOpen] = useState(false);
   const [selectedDetailIds, setSelectedDetailIds] = useState<number[]>([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [quantityEditing, setQuantityEditing] = useState<BazisCutSetDetailDto | null>(null);
+  const [compositionRequest, setCompositionRequest] = useState<BazisCutCompositionRequest | null>(null);
   const [nameForm] = Form.useForm<{ name: string }>(); const [detailForm] = Form.useForm<BazisCutDetailFields>();
+  const [quantityForm] = Form.useForm<{ quantity: number }>();
   const canManage = can('cut.manage');
   const setTabTitle = useTabStore((state) => state.setTabTitle);
   const tableHeaderOffset = useWorkspaceTabsHeight();
@@ -118,28 +129,115 @@ export const BazisCutSetPage: React.FC = () => {
   }, [nameForm, setId, valid]);
   useEffect(() => { void load(); }, [load]);
 
+  /** Re-fetches the set without the page-level loading spinner; used by the composition
+   * modal (preview retry after a stale response, post-confirm reload) and by the legacy
+   * detail edit/delete handlers when the backend reports the set switched to the new MDF
+   * engine (MDF_COMPOSITION_REQUIRED). */
+  const refreshSet = useCallback(async (): Promise<BazisCutSetCardDto | null> => {
+    try {
+      const response = await bazisCutApi.get(setId);
+      setSet(response);
+      nameForm.setFieldsValue({ name: response.name });
+      return response;
+    } catch (error) {
+      message.error(errorMessage(error, 'Не удалось обновить набор'));
+      return null;
+    }
+  }, [nameForm, setId]);
+
+  const compositionInfo = set?.mdfComposition ?? null;
+  const compositionMode = compositionInfo !== null;
+  const compositionAvailable = compositionInfo?.available === true;
+  const compositionUnavailableTooltip = useMemo(
+    () => compositionUnavailableText(compositionInfo?.reason ?? null),
+    [compositionInfo?.reason],
+  );
+  const eligibleRowIdSet = useMemo(
+    () => new Set(compositionInfo?.eligibleRowIds ?? []),
+    [compositionInfo?.eligibleRowIds],
+  );
+
+  /** Applies a mutation response (rename/updateDetail/removeDetail/…) to page state, working
+   * around the backend returning `mdfComposition` on GET responses ONLY (see
+   * mergeSetAfterMutation): if composition mode was active before the mutation but the
+   * response omitted mdfComposition, this keeps composition-mode controls ACTIVE-but-disabled
+   * (never flashing legacy edit/delete controls back) and awaits a GET reload to restore the
+   * real, current readiness/eligibility. */
+  const applySetMutation = useCallback(async (previous: BazisCutSetCardDto, mutated: BazisCutSetCardDto): Promise<void> => {
+    setSet(mergeSetAfterMutation(previous, mutated));
+    if (needsCompositionReload(previous, mutated)) await refreshSet();
+  }, [refreshSet]);
+
   const saveName = useCallback(async () => {
     if (!set) return; const { name } = await nameForm.validateFields(); setSaving(true);
-    try { const result = await bazisCutApi.rename(setId, { name: name.trim(), expectedVersion: set.version }, { idempotencyKey: commandKey('bazis-cut-rename') }); setSet(result.set); message.success('Название сохранено'); }
+    try {
+      const result = await bazisCutApi.rename(setId, { name: name.trim(), expectedVersion: set.version }, { idempotencyKey: commandKey('bazis-cut-rename') });
+      await applySetMutation(set, result.set);
+      message.success('Название сохранено');
+    }
     catch (error) { message.error(error instanceof Error ? error.message : 'Не удалось сохранить название'); }
     finally { setSaving(false); }
-  }, [nameForm, set, setId]);
+  }, [applySetMutation, nameForm, set, setId]);
 
   const startEdit = useCallback((detail: BazisCutSetDetailDto) => { setEditing(detail); detailForm.setFieldsValue(fieldsOf(detail)); }, [detailForm]);
   const saveDetail = useCallback(async () => {
     if (!set || !editing) return; const fields = await detailForm.validateFields(); setSaving(true);
     try { const result = await bazisCutApi.updateDetail(setId, editing.bazisCutSetDetailId,
       { ...fields, priority: fields.priority ?? null, expectedVersion: set.version }, { idempotencyKey: commandKey('bazis-cut-detail') });
-      setSet(result.set); setEditing(null); message.success('Строка сохранена'); }
-    catch (error) { message.error(error instanceof Error ? error.message : 'Не удалось сохранить строку'); }
+      await applySetMutation(set, result.set); setEditing(null); message.success('Строка сохранена'); }
+    catch (error) {
+      if (isApiError(error, 'MDF_COMPOSITION_REQUIRED')) {
+        setEditing(null);
+        await refreshSet();
+        message.info('Набор перешёл на новый производственный учёт — изменяйте количество и удаляйте детали через предпросмотр состава');
+      } else {
+        message.error(errorMessage(error, 'Не удалось сохранить строку'));
+      }
+    }
     finally { setSaving(false); }
-  }, [detailForm, editing, set, setId]);
+  }, [applySetMutation, detailForm, editing, refreshSet, set, setId]);
 
   const remove = useCallback(async (detailId: number) => {
     if (!set) return;
-    try { const result = await bazisCutApi.removeDetail(setId, detailId, { expectedVersion: set.version }, { idempotencyKey: commandKey('bazis-cut-delete') }); setSet(result.set); setSelectedDetailIds((current) => current.filter((id) => id !== detailId)); message.success('Деталь удалена'); }
-    catch (error) { message.error(error instanceof Error ? error.message : 'Не удалось удалить деталь'); }
-  }, [set, setId]);
+    try {
+      const result = await bazisCutApi.removeDetail(setId, detailId, { expectedVersion: set.version }, { idempotencyKey: commandKey('bazis-cut-delete') });
+      await applySetMutation(set, result.set);
+      setSelectedDetailIds((current) => current.filter((id) => id !== detailId));
+      message.success('Деталь удалена');
+    }
+    catch (error) {
+      if (isApiError(error, 'MDF_COMPOSITION_REQUIRED')) {
+        await refreshSet();
+        message.info('Набор перешёл на новый производственный учёт — удаляйте детали через предпросмотр состава');
+      } else {
+        message.error(errorMessage(error, 'Не удалось удалить деталь'));
+      }
+    }
+  }, [applySetMutation, refreshSet, set, setId]);
+
+  const startEditQuantity = useCallback((detail: BazisCutSetDetailDto) => {
+    setQuantityEditing(detail);
+    quantityForm.setFieldsValue({ quantity: detail.quantity });
+  }, [quantityForm]);
+
+  const submitQuantityEdit = useCallback(async () => {
+    if (!quantityEditing) return;
+    const { quantity } = await quantityForm.validateFields();
+    const detail = quantityEditing;
+    setQuantityEditing(null);
+    if (quantity === detail.quantity) return;
+    setCompositionRequest({
+      edit: { kind: 'quantity', detailId: detail.bazisCutSetDetailId, quantity },
+      summary: `Количество (${buildBazisCutCardPosition(detail) || detail.partName}): ${detail.quantity} → ${quantity}`,
+    });
+  }, [quantityEditing, quantityForm]);
+
+  const deleteViaComposition = useCallback((detail: BazisCutSetDetailDto) => {
+    setCompositionRequest({
+      edit: { kind: 'delete', detailId: detail.bazisCutSetDetailId },
+      summary: `Удаление: ${buildBazisCutCardPosition(detail) || detail.partName}`,
+    });
+  }, []);
 
   const exportXls = useCallback(async () => {
     if (!set) return;
@@ -160,9 +258,18 @@ export const BazisCutSetPage: React.FC = () => {
   const detailFilterOptionsByKey = useMemo(() => buildDetailFilterOptions(details), [details]);
   const filteredDetails = useMemo(() => details.filter((detail) => matchesDetailFilters(detail, detailFilters)), [detailFilters, details]);
   const filteredDetailIds = useMemo(() => filteredDetails.map((detail) => detail.bazisCutSetDetailId), [filteredDetails]);
+  /** Filtered ids that may actually be selected for bulk delete: in composition mode, a row
+   * not in eligibleRowIds (HDF, non-MDF material, cut-disabled) is never selectable, since
+   * the composition command can only ever act on eligible rows. */
+  const selectableDetailIds = useMemo(
+    () => compositionMode
+      ? filteredDetailIds.filter((id) => eligibleRowIdSet.has(String(id)))
+      : filteredDetailIds,
+    [compositionMode, eligibleRowIdSet, filteredDetailIds],
+  );
   const selectedDetailIdSet = useMemo(() => new Set(selectedDetailIds), [selectedDetailIds]);
-  const allFilteredSelected = filteredDetailIds.length > 0 && filteredDetailIds.every((id) => selectedDetailIdSet.has(id));
-  const someFilteredSelected = filteredDetailIds.some((id) => selectedDetailIdSet.has(id));
+  const allFilteredSelected = selectableDetailIds.length > 0 && selectableDetailIds.every((id) => selectedDetailIdSet.has(id));
+  const someFilteredSelected = selectableDetailIds.some((id) => selectedDetailIdSet.has(id));
   const detailsById = useMemo(() => new Map(details.map((detail) => [detail.bazisCutSetDetailId, detail])), [details]);
   const selectedDetails = useMemo(() => selectedDetailIds
     .map((id) => detailsById.get(id))
@@ -190,12 +297,12 @@ export const BazisCutSetPage: React.FC = () => {
   }, [detailFilterOptionsByKey]);
 
   useEffect(() => {
-    const visibleIds = new Set(filteredDetailIds);
+    const visibleIds = new Set(selectableDetailIds);
     setSelectedDetailIds((current) => {
       const next = current.filter((id) => visibleIds.has(id));
       return next.length === current.length ? current : next;
     });
-  }, [filteredDetailIds]);
+  }, [selectableDetailIds]);
 
   const setDetailFilter = useCallback((key: DetailFilterKey, value: string[]) => {
     setDetailFilters((current) => ({ ...current, [key]: value }));
@@ -207,19 +314,29 @@ export const BazisCutSetPage: React.FC = () => {
     let currentSet = set;
     let deleted = 0;
     const failures: string[] = [];
+    let compositionRequired = false;
     try {
       for (const row of rows) {
+        if (compositionRequired) break;
         try {
           const result = await bazisCutApi.removeDetail(setId, row.bazisCutSetDetailId, { expectedVersion: currentSet.version }, {
             idempotencyKey: commandKey(`bazis-cut-detail-bulk-delete-${row.bazisCutSetDetailId}`),
           });
-          currentSet = result.set;
+          currentSet = mergeSetAfterMutation(currentSet, result.set);
           deleted += 1;
         } catch (error) {
+          if (isApiError(error, 'MDF_COMPOSITION_REQUIRED')) { compositionRequired = true; break; }
           failures.push(`${buildBazisCutCardPosition(row) || row.partName}: ${errorMessage(error, 'не удалось удалить')}`);
         }
       }
+      if (compositionRequired) {
+        await refreshSet();
+        setSelectedDetailIds((current) => current.filter((id) => !rows.some((row) => row.bazisCutSetDetailId === id)));
+        message.info('Набор перешёл на новый производственный учёт — удаляйте детали через предпросмотр состава');
+        return;
+      }
       setSet(currentSet);
+      if (needsCompositionReload(set, currentSet)) await refreshSet();
       setSelectedDetailIds((current) => current.filter((id) => !rows.some((row) => row.bazisCutSetDetailId === id)));
       if (deleted > 0) message.success(`Удалено деталей: ${deleted}`);
       if (failures.length > 0) {
@@ -234,7 +351,7 @@ export const BazisCutSetPage: React.FC = () => {
     } finally {
       setBulkDeleting(false);
     }
-  }, [set, setId]);
+  }, [refreshSet, set, setId]);
 
   const confirmRemoveSelectedDetails = useCallback(() => {
     if (selectedDetails.length === 0) return;
@@ -248,6 +365,21 @@ export const BazisCutSetPage: React.FC = () => {
     });
   }, [removeSelectedDetails, selectedDetails]);
 
+  const bulkDeleteViaComposition = useCallback(() => {
+    if (selectedDetails.length === 0) return;
+    setCompositionRequest({
+      edit: { kind: 'deleteMany', detailIds: selectedDetails.map((detail) => detail.bazisCutSetDetailId) },
+      summary: `Удаление выделенных деталей: ${selectedDetails.length}`,
+    });
+  }, [selectedDetails]);
+
+  const closeCompositionModal = useCallback(() => setCompositionRequest(null), []);
+  const onCompositionQueued = useCallback((updatedSet: BazisCutSetCardDto) => {
+    setSet(updatedSet);
+    const remainingIds = new Set(updatedSet.details.map((detail) => detail.bazisCutSetDetailId));
+    setSelectedDetailIds((current) => current.filter((id) => remainingIds.has(id)));
+  }, []);
+
   const rowSelection = useMemo(() => canManage ? {
     selectedRowKeys: selectedDetailIds,
     columnWidth: DETAIL_SELECTION_COLUMN_WIDTH,
@@ -255,17 +387,23 @@ export const BazisCutSetPage: React.FC = () => {
     columnTitle: <Checkbox aria-label="Выделить все отфильтрованные детали набора"
       checked={allFilteredSelected}
       indeterminate={!allFilteredSelected && someFilteredSelected}
-      disabled={bulkDeleting || filteredDetailIds.length === 0}
-      onChange={(event) => setSelectedDetailIds(event.target.checked ? filteredDetailIds : [])} />,
-    getCheckboxProps: () => ({
-      disabled: bulkDeleting,
-      title: 'Выделить деталь',
-    }),
+      disabled={bulkDeleting || selectableDetailIds.length === 0}
+      onChange={(event) => setSelectedDetailIds(event.target.checked ? selectableDetailIds : [])} />,
+    getCheckboxProps: (row: BazisCutSetDetailDto) => {
+      const eligible = !compositionMode || eligibleRowIdSet.has(String(row.bazisCutSetDetailId));
+      return {
+        disabled: bulkDeleting || !eligible,
+        title: eligible ? 'Выделить деталь' : COMPOSITION_INELIGIBLE_TOOLTIP,
+      };
+    },
     onChange: (keys: React.Key[]) => setSelectedDetailIds(keys.filter((key): key is number => typeof key === 'number')),
-  } : undefined, [allFilteredSelected, bulkDeleting, canManage, filteredDetailIds, selectedDetailIds, someFilteredSelected]);
+  } : undefined, [allFilteredSelected, bulkDeleting, canManage, compositionMode, eligibleRowIdSet, selectableDetailIds, selectedDetailIds, someFilteredSelected]);
   const qrCodeStickyLeftPx = QR_CODE_STICKY_LEFT_PX + (rowSelection ? DETAIL_SELECTION_COLUMN_WIDTH : 0);
 
-  const columns = useMemo<ColumnsType<BazisCutSetDetailDto>>(() => buildColumns(canManage, startEdit, remove), [canManage, remove, startEdit]);
+  const columns = useMemo<ColumnsType<BazisCutSetDetailDto>>(() => buildColumns({
+    canManage, compositionMode, compositionAvailable, compositionUnavailableTooltip, eligibleRowIds: eligibleRowIdSet,
+    editFields: startEdit, editQuantity: startEditQuantity, removeLegacy: remove, removeComposition: deleteViaComposition,
+  }), [canManage, compositionAvailable, compositionMode, compositionUnavailableTooltip, deleteViaComposition, eligibleRowIdSet, remove, startEdit, startEditQuantity]);
   const setTotals = useMemo(() => summarizeBazisCutDetails(details), [details]);
   if (!valid) return <div className="bazis-cut-set-modern"><Alert type="error" showIcon message="Некорректный номер набора" /></div>;
   return <div className="bazis-cut-set-modern"><Space direction="vertical" size="middle" style={{ width: '100%' }}>
@@ -291,10 +429,17 @@ export const BazisCutSetPage: React.FC = () => {
       <Button icon={<FilterOutlined />} type={detailFiltersOpen || detailFiltersActive ? 'primary' : 'default'}
         aria-expanded={detailFiltersOpen} aria-controls="bazis-cut-detail-filters"
         onClick={() => setDetailFiltersOpen((open) => !open)}>Фильтры</Button>
-      {canManage && <Button danger icon={<DeleteOutlined />}
-        disabled={selectedDetailIds.length === 0 || bulkDeleting}
-        loading={bulkDeleting}
-        onClick={confirmRemoveSelectedDetails}>Удалить выделенные</Button>}
+      {canManage && (compositionMode
+        ? (compositionAvailable
+          ? <Button danger icon={<DeleteOutlined />} disabled={selectedDetailIds.length === 0}
+              onClick={bulkDeleteViaComposition}>Удалить выделенные</Button>
+          : <Tooltip title={compositionUnavailableTooltip}><span>
+              <Button danger icon={<DeleteOutlined />} disabled>Удалить выделенные</Button>
+            </span></Tooltip>)
+        : <Button danger icon={<DeleteOutlined />}
+            disabled={selectedDetailIds.length === 0 || bulkDeleting}
+            loading={bulkDeleting}
+            onClick={confirmRemoveSelectedDetails}>Удалить выделенные</Button>)}
     </Space>}><Space direction="vertical" size="small" style={{ width: '100%' }}>
       {detailFiltersOpen && <Space id="bazis-cut-detail-filters" wrap>
           {DETAIL_FILTERS.map((filter) => <Select<string[]> key={filter.key} mode="multiple" allowClear showSearch
@@ -326,7 +471,20 @@ export const BazisCutSetPage: React.FC = () => {
     <Form form={detailForm} layout="vertical">{FIELD_GROUPS.map((group) => <Card key={group} size="small" title={group} style={{ marginBottom: 12 }}><Row gutter={12}>
       {FIELDS.filter((field) => field.group === group).map((field) => <Col xs={24} md={field.kind === 'long' ? 24 : 8} key={field.key}><FieldInput field={field} /></Col>)}
     </Row></Card>)}</Form>
-  </Modal></div>;
+  </Modal>
+  <Modal title={`Изменение количества: ${quantityEditing ? (buildBazisCutCardPosition(quantityEditing) || quantityEditing.partName) : ''}`}
+    open={quantityEditing !== null} onCancel={() => setQuantityEditing(null)} onOk={() => void submitQuantityEdit()}
+    okText="Далее: предпросмотр" cancelText="Отмена" destroyOnClose>
+    <Form form={quantityForm} layout="vertical">
+      <Form.Item name="quantity" label="Кол-во" rules={[{ required: true, message: 'Обязательное поле' }]}
+        extra="0 удалит деталь из набора (после предпросмотра последствий).">
+        <InputNumber style={{ width: '100%' }} min={0} precision={0} />
+      </Form.Item>
+    </Form>
+  </Modal>
+  <BazisCutCompositionModal open={compositionRequest !== null} set={set} request={compositionRequest}
+    onClose={closeCompositionModal} reload={refreshSet} onQueued={onCompositionQueued} />
+  </div>;
 };
 
 const FieldInput: React.FC<{ field: FieldDefinition }> = ({ field }) => {
@@ -338,7 +496,23 @@ const FieldInput: React.FC<{ field: FieldDefinition }> = ({ field }) => {
   return <Form.Item name={field.key} label={field.label} rules={rules}>{field.kind === 'long' ? <Input.TextArea rows={2} /> : <Input />}</Form.Item>;
 };
 
-function buildColumns(canManage: boolean, edit: (detail: BazisCutSetDetailDto) => void, remove: (id: number) => void): ColumnsType<BazisCutSetDetailDto> {
+interface RowActionsConfig {
+  canManage: boolean;
+  compositionMode: boolean;
+  compositionAvailable: boolean;
+  compositionUnavailableTooltip: string;
+  /** Rows (by String(bazisCutSetDetailId)) eligible for the composition command; a row NOT
+   * in this set (HDF, non-MDF material, cut-disabled) can never be edited/deleted through
+   * composition mode, regardless of compositionAvailable. */
+  eligibleRowIds: ReadonlySet<string>;
+  editFields: (detail: BazisCutSetDetailDto) => void;
+  editQuantity: (detail: BazisCutSetDetailDto) => void;
+  removeLegacy: (id: number) => void;
+  removeComposition: (detail: BazisCutSetDetailDto) => void;
+}
+function buildColumns(config: RowActionsConfig): ColumnsType<BazisCutSetDetailDto> {
+  const { canManage, compositionMode, compositionAvailable, compositionUnavailableTooltip, eligibleRowIds,
+    editFields, editQuantity, removeLegacy, removeComposition } = config;
   const valueColumn = (field: FieldDefinition) => ({ title: field.label, dataIndex: field.key, key: field.key, width: field.kind === 'long' ? 220 : 140,
     align: field.kind === 'number' || field.kind === 'integer' ? 'right' as const : undefined,
     render: (value: unknown) => field.kind === 'boolean' ? (value ? 'Да' : 'Нет') : value == null || value === '' ? <Text type="secondary">—</Text> : <span style={{ fontVariantNumeric: field.kind === 'number' || field.kind === 'integer' ? 'tabular-nums' : undefined }}>{String(value)}</span> });
@@ -379,8 +553,24 @@ function buildColumns(canManage: boolean, edit: (detail: BazisCutSetDetailDto) =
     { title: 'Наименование', dataIndex: 'partName', key: 'partName', width: 200 },
     ...grouped,
     ...(canManage ? [{ title: 'Действия', key: 'actions', fixed: 'right' as const, width: 110,
-      render: (_: unknown, row: BazisCutSetDetailDto) => <Space><Button aria-label="Редактировать" icon={<EditOutlined />} onClick={() => edit(row)} />
-        <Popconfirm title="Удалить деталь из набора?" onConfirm={() => void remove(row.bazisCutSetDetailId)} okText="Удалить" cancelText="Отмена"><Button danger aria-label="Удалить" icon={<DeleteOutlined />} /></Popconfirm></Space> }] : []),
+      render: (_: unknown, row: BazisCutSetDetailDto) => {
+        if (!compositionMode) {
+          return <Space><Button aria-label="Редактировать" icon={<EditOutlined />} onClick={() => editFields(row)} />
+            <Popconfirm title="Удалить деталь из набора?" onConfirm={() => void removeLegacy(row.bazisCutSetDetailId)} okText="Удалить" cancelText="Отмена">
+              <Button danger aria-label="Удалить" icon={<DeleteOutlined />} />
+            </Popconfirm></Space>;
+        }
+        const eligible = eligibleRowIds.has(String(row.bazisCutSetDetailId));
+        const disabled = !compositionAvailable || !eligible;
+        const tooltip = !eligible ? COMPOSITION_INELIGIBLE_TOOLTIP : compositionUnavailableTooltip;
+        const buttons = <Space>
+          <Button aria-label="Изменить количество" icon={<EditOutlined />} disabled={disabled} onClick={() => editQuantity(row)} />
+          <Button danger aria-label="Удалить" icon={<DeleteOutlined />} disabled={disabled} onClick={() => removeComposition(row)} />
+        </Space>;
+        return disabled
+          ? <Tooltip title={tooltip}><span>{buttons}</span></Tooltip>
+          : buttons;
+      } }] : []),
   ];
 }
 
