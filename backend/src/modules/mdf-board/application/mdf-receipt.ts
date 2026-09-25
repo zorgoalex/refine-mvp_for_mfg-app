@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { MDF_BAZIS_RAW_ROW_DIGEST_SQL } from '../adapters/mdf-bazis-composition-snapshot';
 import type { QueryResultRow } from 'pg';
 import type { DatabaseClient } from '../../../database/database.types';
 import { mdfPositionKey, mdfQuantity } from '../domain/mdf-quantities';
@@ -44,6 +45,8 @@ export interface MdfBazisCompositionReceiptInput extends MdfLineageReceiptInput 
     setId: number; setVersion: number; rawSnapshotDigest: string; membershipDigest: string;
     intentionalEmpty: boolean; ownerIds: readonly number[]; allocationSnapshotDigest: string;
     previewDigest: string; commandKey: string;
+    /** Refill (§5.2b): raw rows INSERTed by this transaction; provenance is sealed with the intent. */
+    newRowIds?: readonly string[];
   };
 }
 export interface MdfReceiptResult extends MdfReceiptFence {
@@ -396,6 +399,13 @@ async function persistMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput,
       composition.assignmentStateId,composition.setId,composition.setVersion,composition.rawSnapshotDigest,
       composition.membershipDigest,composition.intentionalEmpty,ownerIds,composition.allocationSnapshotDigest,
       composition.previewDigest,input.actorUserId,input.requestId,composition.commandKey]);
+    for (const rowId of [...(composition.newRowIds ?? [])].sort((a, b) => Number(a) - Number(b))) {
+      const inserted = await tx.query(`INSERT INTO mdf_bazis_composition_new_rows(intent_id,row_id,order_id,detail_id,quantity,snapshot_digest)
+        SELECT $1::uuid,d.bazis_cut_set_detail_id,d.source_order_id,d.source_order_detail_id,d.quantity,${MDF_BAZIS_RAW_ROW_DIGEST_SQL}
+        FROM bazis_cut_set_details d WHERE d.bazis_cut_set_detail_id=$2::bigint AND d.bazis_cut_set_id=$3`,
+      [composition.intentId,rowId,composition.setId]);
+      if (inserted.rowCount !== 1) throw new MdfReceiptError('MDF_RECEIPT_CONFLICT');
+    }
     await tx.query(`INSERT INTO mdf_bazis_assignment_states
       (source_kind,source_id,revision_key,assignment_state_id,root_intent_id,membership_digest,intentional_empty)
       VALUES('bazisCutSet',$1,$2,$3,$4,$5,$6)`,[input.sourceId,input.revisionKey,composition.assignmentStateId,

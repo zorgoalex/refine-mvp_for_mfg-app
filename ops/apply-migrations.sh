@@ -2310,6 +2310,15 @@ probe_file() {
       "SELECT (SELECT count(*)=10 FROM pg_constraint WHERE conrelid=to_regclass('public.mdf_bazis_assignment_states')) AND (SELECT count(*)=24 FROM pg_constraint WHERE conrelid=to_regclass('public.mdf_bazis_composition_intents'));" \
       "SELECT (SELECT count(*)=3 FROM pg_indexes WHERE schemaname='public' AND tablename='mdf_bazis_assignment_states') AND (SELECT count(*)=5 FROM pg_indexes WHERE schemaname='public' AND tablename='mdf_bazis_composition_intents');" \
       "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=ANY(ARRAY[to_regclass('public.mdf_bazis_assignment_states'),to_regclass('public.mdf_bazis_composition_intents')]) AND (NOT indisvalid OR NOT indisready));" ;;
+    187_mdf_bazis_refill_rows*) probe_all \
+      "$(q_tbl mdf_bazis_raw_row_creations)" "$(q_tbl mdf_bazis_composition_new_rows)" \
+      "SELECT count(*)=4 FROM information_schema.columns WHERE table_schema='public' AND table_name='mdf_bazis_raw_row_creations' AND column_name=ANY(ARRAY['row_id','set_id','created_txid','created_at']);" \
+      "SELECT count(*)=7 FROM information_schema.columns WHERE table_schema='public' AND table_name='mdf_bazis_composition_new_rows';" \
+      "SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.mdf_bazis_composition_new_rows'::regclass AND contype='p' AND convalidated AND pg_get_constraintdef(oid) LIKE '%intent_id, row_id%');" \
+      "SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.mdf_bazis_raw_row_creations'::regclass AND contype='p' AND convalidated AND pg_get_constraintdef(oid) LIKE '%row_id, created_txid%');" \
+      "SELECT count(*)=1 FROM pg_constraint WHERE conrelid='public.mdf_bazis_composition_new_rows'::regclass AND contype='f' AND convalidated AND confdeltype='r' AND confrelid=to_regclass('public.mdf_bazis_composition_intents');" \
+      "SELECT count(*)=4 FROM (VALUES ('bazis_cut_set_details','mdf_bazis_raw_row_creation_log','mdf_log_bazis_raw_row_creation()',5),('mdf_bazis_raw_row_creations','mdf_bazis_raw_row_creation_immutable','mdf_reject_bazis_refill_log_change()',27),('mdf_bazis_composition_new_rows','mdf_bazis_composition_new_row_insert_guard','mdf_guard_bazis_composition_new_row_insert()',7),('mdf_bazis_composition_new_rows','mdf_bazis_composition_new_row_immutable','mdf_reject_bazis_refill_log_change()',27)) expected(tbl,trg,fun,kind) JOIN pg_trigger t ON t.tgrelid=to_regclass('public.'||tbl) AND t.tgname=trg AND t.tgfoid=to_regprocedure('public.'||fun) AND t.tgtype=kind AND t.tgenabled='O' AND NOT t.tgisinternal;" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=ANY(ARRAY[to_regclass('public.mdf_bazis_raw_row_creations'),to_regclass('public.mdf_bazis_composition_new_rows')]) AND NOT convalidated);" ;;
     186_bitrix24_product_import*) probe_all \
       "$(q_tbl bitrix24_product_mapping)" \
       "SELECT count(*)=8 FROM information_schema.columns WHERE table_schema='public' AND table_name='bitrix24_product_mapping';" \
@@ -2410,6 +2419,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     185_mdf_bazis_composition*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    187_mdf_bazis_refill_rows*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     186_bitrix24_product_import*)

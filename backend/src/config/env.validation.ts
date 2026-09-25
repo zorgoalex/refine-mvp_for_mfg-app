@@ -252,6 +252,8 @@ export const envSchema = z
     BACKEND_MDF_PINNED_DISPATCH: booleanFromEnv.default(false),
     BACKEND_MDF_JOB_WORKER: booleanFromEnv.default(false),
     BACKEND_MDF_PUBLISHED_READS: booleanFromEnv.default(false),
+    // §5.2b BASIS refill producer (composition new rows); enable only after the compatible worker is live.
+    BACKEND_MDF_BAZIS_REFILL: booleanFromEnv.default(false),
     // Phase A safety gate: legacy background Telegram ingest is fail-closed.
     // The break-glass path remains unavailable until Phase B persists an
     // approved bounded scan artifact.

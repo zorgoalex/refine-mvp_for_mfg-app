@@ -176,14 +176,47 @@ and baths remain strict (no physical overhang). Current membership must still
 be nonempty. Current-member events continue to be derived from current
 membership, not from retained proof at a removed position.
 
-The pure composition helper is still not connected to an assignment-edit
-command. Reviewed manual production can create v2 roots only for genuinely new
-proof when a v1 predecessor has no physical evidence; manual/BASIS commands
-carry authenticated v2 proof, and same-membership queued acceptance preserves
-exact proof and pin lineage. Existing v1 physical evidence is never promoted.
-There is no historical backfill or automatic promotion of legacy evidence, and
-the active engine/runtime flags remain unchanged. Empty assignments and bath
-overhang are not supported by this increment.
+Assignment edits are connected through the BASIS composition command
+(`POST /api/v1/bazis-cut-sets/{setId}/composition/preview|confirm`, active engine
+only). `GET /api/v1/bazis-cut-sets/{setId}` reports `mdfComposition`
+(availability, concurrency token, eligible row ids) only in the active or
+read-only engine, so the legacy editor is unchanged in legacy/shadow mode. In
+the active engine the legacy detail edit/delete/add endpoints answer 409
+(`MDF_COMPOSITION_REQUIRED`, `MDF_SET_REFILL_NOT_CONNECTED`) and a set with
+production history cannot be deleted (`MDF_SET_HAS_PRODUCTION_HISTORY`).
+
+An intentionally-empty assignment is supported only with its authentic sealed
+marker: the card keeps retained physical proof, can be moved and renamed
+carry-only (no rules, one `mdf_board.card_placed` event for a move), may advance
+with its bath reservations, and stays valid after an explicit return removes the
+retained proof. Unmarked emptiness is still rejected.
+
+Refill (new rows) is limited to ordinary MDF details of the set's current owner
+orders and is gated by `BACKEND_MDF_BAZIS_REFILL` (default off; requests with
+`newDetailId` answer 409 `MDF_BAZIS_REFILL_DISABLED`). Rows are built
+server-side; migration 187 records every raw row INSERT in a trigger-only
+creation log and each added row's provenance for its intent, and the worker
+accepts a membership row without a predecessor only when that provenance, the
+same-transaction creation record and the unchanged raw content all match.
+
+Refill rollout and rollback: deploy the compatible backend and migration 187
+with the flag off, then enable the flag. Before any backend downgrade below this
+version, turn the flag off and make sure no refill job is unresolved — pending,
+retry and `needs_attention` all block the downgrade:
+
+```sql
+SELECT j.job_id, j.status, i.source_id
+FROM mdf_bazis_composition_intents i
+JOIN mdf_recalculation_jobs j ON j.job_id = i.job_id
+WHERE EXISTS (SELECT 1 FROM mdf_bazis_composition_new_rows n WHERE n.intent_id = i.intent_id)
+  AND j.status NOT IN ('done', 'superseded');
+```
+
+Resolve every returned job on the compatible backend first (retry to done, or
+an explicit correction/return), then verify the source's accepted head equals
+its received head and its publication has no issues. Existing v1 physical
+evidence is never promoted, and the engine mode and runtime flags are unchanged
+by these commands.
 
 ## Storage and bounded lineage consumers
 

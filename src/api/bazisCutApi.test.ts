@@ -264,6 +264,72 @@ describe('bazisCutApi', () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('drives a REFILL composition preview/confirm with a desiredRows mix of existing rowId and new newDetailId entries', async () => {
+    const previewResponse = {
+      status: 'ready', beforeVersion: '3', previewDigest: 'd'.repeat(64),
+      assignmentChanges: [
+        { rowId: '7', orderId: '9', detailId: '101', before: 2, after: 2 },
+        { rowId: 'new:404', orderId: '9', detailId: '404', before: 0, after: 3, newDetailId: '404' },
+      ],
+      retainedPhysical: [], preservedAllocations: [], blockers: [],
+    };
+    const confirmResponse = {
+      status: 'queued', jobId: 'job-2', intentId: 'intent-2', assignmentStateId: 'state-2',
+      auditId: 'audit-2', outboxId: 'outbox-2', version: '4', replay: false,
+    };
+    const fetchMock = mockFetch(jsonResponse(previewResponse), jsonResponse(confirmResponse));
+
+    const previewRequest = {
+      expectedVersion: '3',
+      sourceToken: 'a'.repeat(64),
+      desiredRows: [
+        { rowId: '7', quantity: 2 },
+        { newDetailId: 404, quantity: 3 },
+      ],
+    };
+    const preview = await bazisCutApi.previewComposition(42, previewRequest);
+    expect(preview).toEqual(previewResponse);
+
+    // Same idempotency-key-reuse rule as a plain edit: absent on preview, required + carried
+    // through unchanged on confirm — refill does not change how the key is handled.
+    const confirm = await bazisCutApi.confirmComposition(
+      42,
+      { ...previewRequest, expectedDigest: 'd'.repeat(64) },
+      'bazis-composition:22222222-2222-2222-2222-222222222222',
+    );
+    expect(confirm).toEqual(confirmResponse);
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Idempotency-Key')).toBeNull();
+    expect(new Headers(fetchMock.mock.calls[1][1]?.headers).get('Idempotency-Key'))
+      .toBe('bazis-composition:22222222-2222-2222-2222-222222222222');
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toMatchObject({
+      desiredRows: [{ rowId: '7', quantity: 2 }, { newDetailId: 404, quantity: 3 }],
+    });
+  });
+
+  it('rejects a desiredRows entry mixing rowId and newDetailId, and one with neither', () => {
+    const fetchMock = vi.mocked(fetch);
+    const validRequest = { expectedVersion: '3', sourceToken: 'a'.repeat(64), desiredRows: [{ rowId: '7', quantity: 1 }] };
+
+    expect(() => bazisCutApi.previewComposition(42, {
+      ...validRequest,
+      desiredRows: [{ rowId: '7', newDetailId: 8, quantity: 1 } as never],
+    })).toThrow('Invalid desiredRows');
+    expect(() => bazisCutApi.previewComposition(42, {
+      ...validRequest,
+      desiredRows: [{ quantity: 1 } as never],
+    })).toThrow('Invalid desiredRows');
+    expect(() => bazisCutApi.previewComposition(42, {
+      ...validRequest,
+      desiredRows: [{ newDetailId: 0, quantity: 1 }],
+    })).toThrow('Invalid desiredRows');
+    expect(() => bazisCutApi.previewComposition(42, {
+      ...validRequest,
+      desiredRows: [{ newDetailId: 1.5, quantity: 1 }],
+    })).toThrow('Invalid desiredRows');
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 function mockFetch(...responses: Response[]) {

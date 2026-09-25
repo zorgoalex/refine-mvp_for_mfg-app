@@ -1584,6 +1584,18 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const [cutSelectedDetailIds, setCutSelectedDetailIds] = useState<number[]>(() => (
     readPositiveIntegerArray(restoredShowCheckpoint?.cutSelectedDetailIds)
   ));
+  /** order_details.quantity per selected detail, for the AddToBazisCutModal refill path
+   * (adding into an existing set on the new MDF engine) — that command needs each added
+   * detail's ACTUAL quantity and must never default a missing one to 1. */
+  const cutSelectedDetailQuantities = useMemo(() => {
+    const map: Record<number, number> = {};
+    for (const detail of details as any[]) {
+      if (typeof detail.detail_id === 'number' && Number.isInteger(detail.quantity)) {
+        map[detail.detail_id] = detail.quantity;
+      }
+    }
+    return map;
+  }, [details]);
   const [cutModalOpen, setCutModalOpen] = useState(
     () => restoredShowCheckpoint?.cutModalOpen === true,
   );
@@ -4036,6 +4048,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 open={bazisCutModalOpen}
                 orderId={record.order_id}
                 detailIds={cutSelectedDetailIds}
+                detailQuantities={cutSelectedDetailQuantities}
                 onClose={() => setBazisCutModalOpen(false)}
                 onDone={() => {
                   setBazisCutModalOpen(false);

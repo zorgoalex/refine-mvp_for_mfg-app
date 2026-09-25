@@ -59,8 +59,11 @@ const updateDetailSchema: SchemaObject = { type: 'object', additionalProperties:
 const compositionBodySchema = z.object({
   expectedVersion: z.string().regex(/^[1-9][0-9]{0,18}$/),
   sourceToken: z.string().regex(/^[a-f0-9]{64}$/),
-  desiredRows: z.array(z.object({ rowId: z.string().regex(/^[1-9][0-9]{0,18}$/),
-    quantity: z.number().int().min(1).max(1_000_000) }).strict()).max(5000),
+  desiredRows: z.array(z.union([
+    z.object({ rowId: z.string().regex(/^[1-9][0-9]{0,18}$/), quantity: z.number().int().min(1).max(1_000_000) }).strict(),
+    // Refill (§5.2b): a new row built server-side from an ordinary MDF detail of a current owner order.
+    z.object({ newDetailId: z.number().int().positive(), quantity: z.number().int().min(1).max(1_000_000) }).strict(),
+  ])).max(5000),
 }).strict();
 const compositionConfirmBodySchema = compositionBodySchema.extend({
   expectedDigest: z.string().regex(/^[a-f0-9]{64}$/),
@@ -69,9 +72,12 @@ const compositionRequestSchema: SchemaObject = { type: 'object', additionalPrope
   required: ['expectedVersion', 'sourceToken', 'desiredRows'], properties: {
     expectedVersion: { type: 'string', pattern: '^[1-9][0-9]{0,18}$' },
     sourceToken: { type: 'string', pattern: '^[a-f0-9]{64}$' },
-    desiredRows: { type: 'array', maxItems: 5000, items: { type: 'object', additionalProperties: false,
-      required: ['rowId', 'quantity'], properties: { rowId: { type: 'string', pattern: '^[1-9][0-9]{0,18}$' },
-        quantity: { type: 'integer', minimum: 1, maximum: 1_000_000 } } } },
+    desiredRows: { type: 'array', maxItems: 5000, items: { oneOf: [
+      { type: 'object', additionalProperties: false, required: ['rowId', 'quantity'], properties: {
+        rowId: { type: 'string', pattern: '^[1-9][0-9]{0,18}$' }, quantity: { type: 'integer', minimum: 1, maximum: 1_000_000 } } },
+      { type: 'object', additionalProperties: false, required: ['newDetailId', 'quantity'], properties: {
+        newDetailId: { type: 'integer', minimum: 1 }, quantity: { type: 'integer', minimum: 1, maximum: 1_000_000 } } },
+    ] } },
   } };
 const sourceRefSchema: SchemaObject = { type: 'object', required: ['id', 'label'], properties: {
   id: { type: 'integer', format: 'int64' }, label: { type: 'string' },

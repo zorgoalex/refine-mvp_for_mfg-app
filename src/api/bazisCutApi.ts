@@ -255,11 +255,13 @@ export interface BazisCutCommandOptions {
 }
 
 /** Complete desired eligible-row list for a composition change; an omitted row is deleted,
- * an empty array empties the set. rowId is bazisCutSetDetailId as a decimal string. */
-export interface BazisCutCompositionDesiredRow {
-  rowId: string;
-  quantity: number;
-}
+ * an empty array empties the set. Each entry is EITHER an existing eligible row (rowId =
+ * bazisCutSetDetailId as a decimal string) OR a REFILL row: a NEW row the backend builds
+ * server-side from an order detail (newDetailId) belonging to one of the set's current
+ * owner orders. The two shapes are mutually exclusive (never both keys on one entry). */
+export type BazisCutCompositionDesiredRow =
+  | { rowId: string; quantity: number }
+  | { newDetailId: number; quantity: number };
 
 export interface BazisCutCompositionPreviewRequest {
   /** Canonical positive decimal bazis_cut_sets.version observed by the caller. */
@@ -278,6 +280,9 @@ export interface BazisCutCompositionAssignmentChange {
   detailId: string;
   before: number;
   after: number;
+  /** Present only for a REFILL row (a new row built from this order detail); rowId for such
+   * a row is a synthetic `new:<detailId>` key, not a bazisCutSetDetailId. */
+  newDetailId?: string;
 }
 
 export interface BazisCutCompositionRetainedPhysical {
@@ -598,11 +603,18 @@ function validateCompositionPreviewRequest(request: BazisCutCompositionPreviewRe
     throw new Error('Invalid sourceToken');
   }
   if (!Array.isArray(request.desiredRows) || request.desiredRows.length > 5000
-    || request.desiredRows.some((row) => !row || typeof row.rowId !== 'string'
-      || !/^[1-9][0-9]{0,18}$/.test(row.rowId)
-      || !Number.isInteger(row.quantity) || row.quantity < 1 || row.quantity > 1_000_000)) {
+    || request.desiredRows.some((row) => !isValidDesiredRow(row))) {
     throw new Error('Invalid desiredRows');
   }
+}
+
+function isValidDesiredRow(row: BazisCutCompositionDesiredRow): boolean {
+  if (!row || !Number.isInteger(row.quantity) || row.quantity < 1 || row.quantity > 1_000_000) return false;
+  const hasRowId = 'rowId' in row;
+  const hasNewDetailId = 'newDetailId' in row;
+  if (hasRowId === hasNewDetailId) return false; // exactly one of the two shapes, never both/neither
+  if (hasRowId) return typeof row.rowId === 'string' && /^[1-9][0-9]{0,18}$/.test(row.rowId);
+  return Number.isInteger(row.newDetailId) && row.newDetailId > 0;
 }
 
 function validatePageValue(value: number, field: string): number {

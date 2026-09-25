@@ -12,17 +12,47 @@ import type {
 } from '../../api/bazisCutApi';
 
 /** One row-composition edit, applied against the set's CURRENT details to build the
- * complete desiredRows list the backend expects (an omitted row is deleted). */
+ * complete desiredRows list the backend expects (an omitted row is deleted). `refill` adds
+ * NEW rows built server-side from order details of the set's current owner orders, while
+ * every current eligible row keeps its unchanged quantity (see buildRefillRows). */
 export type CompositionRowEdit =
   | { kind: 'quantity'; detailId: number; quantity: number }
   | { kind: 'delete'; detailId: number }
-  | { kind: 'deleteMany'; detailIds: number[] };
+  | { kind: 'deleteMany'; detailIds: number[] }
+  | { kind: 'refill'; addedDetails: readonly RefillDetailInput[] };
 
 /** Narrow, structural view of a set detail sufficient to build desiredRows;
  * BazisCutSetDetailDto satisfies this. */
 export interface CompositionRowSource {
   bazisCutSetDetailId: number;
   quantity: number;
+}
+
+/** Narrow, structural view of a set detail sufficient to build REFILL desiredRows (needs the
+ * underlying order-detail id to detect "already in set"); BazisCutSetDetailDto satisfies this. */
+export interface RefillRowSource extends CompositionRowSource {
+  sourceOrderDetailId: number | null;
+}
+
+/** One order detail the caller wants added to an existing set via refill. */
+export interface RefillDetailInput {
+  detailId: number;
+  /** The order detail's own ACTUAL quantity (order_details.quantity). REQUIRED — there is no
+   * default: a refill must carry the exact piece count of the order detail being added, since
+   * silently defaulting to 1 would under-add a detail with quantity > 1 into the set. */
+  quantity: number;
+}
+
+export interface BuildRefillRowsResult {
+  rows: BazisCutCompositionDesiredRow[];
+  /** detailId of every entry in `addedDetails` that is already present in the set (matched by
+   * sourceOrderDetailId) and was therefore excluded from `rows` — the caller should show an
+   * info message for these, not an error. */
+  alreadyInSet: number[];
+  /** detailId of every entry in `addedDetails` whose `quantity` is missing/invalid (not a
+   * positive integer) and was therefore excluded from `rows` — never defaulted to 1. The
+   * caller must treat these as not addable and show an error, not submit the refill. */
+  invalidQuantity: number[];
 }
 
 /** Narrow, structural view used to enrich an assignment-change line with names;
@@ -66,6 +96,68 @@ export function buildCompositionRows(
     rows.push({ rowId, quantity });
   }
   return rows;
+}
+
+/** Builds the COMPLETE desired-rows list for a REFILL preview/confirm request: every current
+ * ELIGIBLE row keeps its CURRENT, unchanged quantity (no edit is applied to existing rows —
+ * refill only adds), plus one `{ newDetailId, quantity }` entry per detail in `addedDetails`
+ * that is not already present in the set. `eligibleRowIds` gates existing rows exactly like
+ * buildCompositionRows (HDF rows, non-MDF materials and cut-disabled rows are never
+ * included). A detail already present in the set (matched by sourceOrderDetailId) is
+ * excluded from `rows` and reported in `alreadyInSet` instead — the backend would otherwise
+ * reject it as REFILL_DETAIL_DUPLICATE. Eligibility of a NEW detail (cut-enabled, MDF
+ * material, exportable, …) cannot be checked client-side (there is no eligibleRowIds entry
+ * for a row that does not exist yet); the backend reports that as a REFILL_DETAIL_NOT_ELIGIBLE
+ * blocker on preview instead. Duplicate ids within `addedDetails` itself are deduplicated
+ * (keeping the first occurrence). An added detail with a missing/invalid (non-positive-integer)
+ * quantity is NEVER defaulted to 1 — it is excluded from `rows` and reported in
+ * `invalidQuantity` instead, since silently defaulting would under-add a detail whose real
+ * quantity is greater than 1. */
+export function buildRefillRows(
+  details: readonly RefillRowSource[],
+  eligibleRowIds: readonly string[],
+  addedDetails: readonly RefillDetailInput[],
+): BuildRefillRowsResult {
+  const eligibleIds = new Set(eligibleRowIds);
+  const rows: BazisCutCompositionDesiredRow[] = [];
+  const existingOrderDetailIds = new Set<number>();
+  for (const detail of details) {
+    if (detail.sourceOrderDetailId !== null) existingOrderDetailIds.add(detail.sourceOrderDetailId);
+    const rowId = String(detail.bazisCutSetDetailId);
+    if (!eligibleIds.has(rowId)) continue;
+    rows.push({ rowId, quantity: detail.quantity });
+  }
+  const alreadyInSet: number[] = [];
+  const invalidQuantity: number[] = [];
+  const seen = new Set<number>();
+  for (const added of addedDetails) {
+    if (seen.has(added.detailId)) continue;
+    seen.add(added.detailId);
+    if (existingOrderDetailIds.has(added.detailId)) {
+      alreadyInSet.push(added.detailId);
+      continue;
+    }
+    if (!Number.isInteger(added.quantity) || added.quantity < 1) {
+      invalidQuantity.push(added.detailId);
+      continue;
+    }
+    rows.push({ newDetailId: added.detailId, quantity: added.quantity });
+  }
+  return { rows, alreadyInSet, invalidQuantity };
+}
+
+/** Builds the complete desiredRows list for any CompositionRowEdit (edit of existing rows, or
+ * a refill of new ones) against the set's CURRENT details — the single entry point the
+ * composition modal uses regardless of which kind of change is requested. */
+export function buildDesiredRowsForEdit(
+  details: readonly RefillRowSource[],
+  edit: CompositionRowEdit,
+  eligibleRowIds: readonly string[],
+): BazisCutCompositionDesiredRow[] {
+  if (edit.kind === 'refill') {
+    return buildRefillRows(details, eligibleRowIds, edit.addedDetails).rows;
+  }
+  return buildCompositionRows(details, edit, eligibleRowIds);
 }
 
 /** Whether a set detail (by its bazisCutSetDetailId) is eligible for the composition
@@ -147,6 +239,10 @@ function describeAssignmentChange(
 ): string {
   const detail = detailsByRowId.get(change.rowId);
   const orderLabel = detail?.sourceOrderName || detail?.sourceOrderFullNumber || `№${change.orderId}`;
+  if (change.newDetailId) {
+    const partLabel = detail?.partName ? `деталь ${detail.partName}` : `деталь №${change.detailId}`;
+    return `Добавляется: заказ ${orderLabel}, ${partLabel} — ${change.after} шт.`;
+  }
   const partLabel = detail?.partName || `деталь №${change.detailId}`;
   return `Заказ ${orderLabel}, ${partLabel}: ${change.before} → ${change.after}`;
 }
@@ -162,7 +258,18 @@ function describePreservedAllocation(item: BazisCutCompositionPreservedAllocatio
   return `Ванна №${item.bathId}: ${item.quantity} шт. ${stateLabel}`;
 }
 
+/** Russian text for a refill-specific blocker code (REFILL_DETAIL_*); these have no useful
+ * per-row location (the backend reports them against the set, not the offending detail), so
+ * unlike describeCompositionBlocker's generic fallback they render WITHOUT a location suffix. */
+const REFILL_BLOCKER_MESSAGES: Record<string, string> = {
+  REFILL_DETAIL_OTHER_ORDER: 'Деталь из другого заказа — создайте новый набор',
+  REFILL_DETAIL_DUPLICATE: 'Деталь уже есть в наборе',
+  REFILL_DETAIL_NOT_ELIGIBLE: 'Деталь нельзя добавить в МДФ-учёт (ХДФ, другой материал или неполные данные)',
+};
+
 function describeCompositionBlocker(blocker: BazisCutCompositionBlocker): string {
+  const refillMessage = REFILL_BLOCKER_MESSAGES[blocker.code];
+  if (refillMessage) return refillMessage;
   const location = blocker.position
     ? ` (позиция ${blocker.position})`
     : blocker.sourceId

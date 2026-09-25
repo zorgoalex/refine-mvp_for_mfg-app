@@ -3,7 +3,7 @@ import { Alert, Button, Card, Modal, Space, Spin, Typography, message } from 'an
 import { isApiError } from '../../api/apiError';
 import { bazisCutApi, type BazisCutSetCardDto } from '../../api/bazisCutApi';
 import {
-  buildCompositionRows,
+  buildDesiredRowsForEdit,
   describeCompositionPreview,
   CompositionCommandBuilder,
   type CompositionPreviewDisplay,
@@ -16,6 +16,9 @@ export interface BazisCutCompositionRequest {
   edit: CompositionRowEdit;
   /** Human label shown above the preview, e.g. "Количество: 10 → 8" or "Удаление 1 детали". */
   summary: string;
+  /** Message shown on a successful (queued) confirm; defaults to the generic composition-change
+   * message. AddToBazisCutModal's refill flow uses this for its own "added" wording. */
+  successMessage?: string;
 }
 
 interface Props {
@@ -27,6 +30,11 @@ interface Props {
    * fresh card, or null on failure. */
   reload: () => Promise<BazisCutSetCardDto | null>;
   onQueued: (updatedSet: BazisCutSetCardDto) => void;
+  /** Called instead of the generic error display when the backend rejects the request with
+   * 409 MDF_BAZIS_REFILL_DISABLED (the refill producer flag is off) — the composition-add
+   * feature is unavailable, not the set/version being stale. The caller (AddToBazisCutModal)
+   * uses this to show its own guidance and fall back to "new set" while keeping the selection. */
+  onRefillDisabled?: () => void;
 }
 
 type Phase = 'loading' | 'ready' | 'error';
@@ -42,7 +50,9 @@ type Phase = 'loading' | 'ready' | 'error';
  * closing this one) bumps the generation, so a late response from a superseded attempt
  * (e.g. open deletion A, cancel, open deletion B before A resolves) is ignored instead of
  * overwriting the builder/UI state for the request currently shown. */
-export const BazisCutCompositionModal: React.FC<Props> = ({ open, set, request, onClose, reload, onQueued }) => {
+export const BazisCutCompositionModal: React.FC<Props> = ({
+  open, set, request, onClose, reload, onQueued, onRefillDisabled,
+}) => {
   const [phase, setPhase] = useState<Phase>('loading');
   const [display, setDisplay] = useState<CompositionPreviewDisplay | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -50,6 +60,10 @@ export const BazisCutCompositionModal: React.FC<Props> = ({ open, set, request, 
   const builderRef = useRef(new CompositionCommandBuilder());
 
   const handleFailure = useCallback((error: unknown, action: string) => {
+    if (isApiError(error, 'MDF_BAZIS_REFILL_DISABLED')) {
+      onRefillDisabled?.();
+      return;
+    }
     if (isApiError(error) && error.status === 409) {
       setPhase('error');
       setErrorText('Набор изменился — обновите предпросмотр');
@@ -58,7 +72,7 @@ export const BazisCutCompositionModal: React.FC<Props> = ({ open, set, request, 
     }
     setPhase('error');
     setErrorText(error instanceof Error ? error.message : `Не удалось выполнить: ${action}`);
-  }, []);
+  }, [onRefillDisabled]);
 
   const runPreview = useCallback(async (current: BazisCutSetCardDto, generation: number) => {
     if (!request) return;
@@ -73,7 +87,7 @@ export const BazisCutCompositionModal: React.FC<Props> = ({ open, set, request, 
     setErrorText(null);
     try {
       const eligibleRowIds = current.mdfComposition.eligibleRowIds ?? [];
-      const desiredRows = buildCompositionRows(current.details, request.edit, eligibleRowIds);
+      const desiredRows = buildDesiredRowsForEdit(current.details, request.edit, eligibleRowIds);
       const previewRequest = builderRef.current.buildPreviewRequest(String(current.version), sourceToken, desiredRows);
       const response = await bazisCutApi.previewComposition(current.bazisCutSetId, previewRequest);
       if (!builderRef.current.registerPreview(generation, previewRequest, response)) return; // superseded, ignore
@@ -124,7 +138,7 @@ export const BazisCutCompositionModal: React.FC<Props> = ({ open, set, request, 
       if (response.status === 'unchanged') {
         message.info('Изменений нет — состав уже соответствует запросу');
       } else {
-        message.success('Изменение состава поставлено в обработку');
+        message.success(request?.successMessage ?? 'Изменение состава поставлено в обработку');
       }
       const refreshed = await reload();
       if (!builderRef.current.isCurrentAttempt(generation)) return; // superseded, ignore
@@ -137,14 +151,16 @@ export const BazisCutCompositionModal: React.FC<Props> = ({ open, set, request, 
     } finally {
       setConfirming(false);
     }
-  }, [handleFailure, onClose, onQueued, reload, set]);
+  }, [handleFailure, onClose, onQueued, reload, request, set]);
 
   const blocked = display?.status === 'blocked';
   const canConfirm = phase === 'ready' && display !== null && !blocked;
 
+  const title = request?.edit.kind === 'refill' ? 'Добавление деталей в набор' : 'Изменение состава набора';
+
   return (
     <Modal
-      title="Изменение состава набора"
+      title={title}
       open={open}
       onCancel={onClose}
       destroyOnClose

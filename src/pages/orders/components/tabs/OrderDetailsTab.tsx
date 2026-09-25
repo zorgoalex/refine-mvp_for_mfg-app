@@ -246,6 +246,18 @@ export const OrderDetailsTab = forwardRef<
     [details, selectedRowKeys],
   );
   const bazisCutDetailIds = selectedPersistedDetailIds;
+  /** order_details.quantity per selected detail, for the AddToBazisCutModal refill path
+   * (adding into an existing set on the new MDF engine) — that command needs each added
+   * detail's ACTUAL quantity and must never default a missing one to 1. */
+  const bazisCutDetailQuantities = useMemo(() => {
+    const map: Record<number, number> = {};
+    for (const detail of details) {
+      if (typeof detail.detail_id === 'number' && Number.isInteger(detail.quantity)) {
+        map[detail.detail_id] = detail.quantity;
+      }
+    }
+    return map;
+  }, [details]);
   const eligibleCutDetailIds = useMemo(
     () => (cutEnabled ? selectedPersistedDetailIds : []),
     [cutEnabled, selectedPersistedDetailIds],
@@ -1107,6 +1119,7 @@ export const OrderDetailsTab = forwardRef<
               open={addToBazisCutOpen}
               orderId={header.order_id}
               detailIds={bazisCutDetailIds}
+              detailQuantities={bazisCutDetailQuantities}
               onClose={() => setAddToBazisCutOpen(false)}
               onDone={() => handleSelectChange([])}
             />

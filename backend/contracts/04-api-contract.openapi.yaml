@@ -18005,13 +18005,23 @@ components:
         desiredRows:
           type: array
           maxItems: 5000
+          description: >-
+            Complete desired list. Existing eligible rows by rowId; refill rows (flag BACKEND_MDF_BAZIS_REFILL)
+            by newDetailId of an ordinary MDF detail of a current owner order, built server-side.
           items:
-            type: object
-            additionalProperties: false
-            required: [rowId, quantity]
-            properties:
-              rowId: { type: string, pattern: '^[1-9][0-9]{0,18}$' }
-              quantity: { type: integer, minimum: 1, maximum: 1000000 }
+            oneOf:
+              - type: object
+                additionalProperties: false
+                required: [rowId, quantity]
+                properties:
+                  rowId: { type: string, pattern: '^[1-9][0-9]{0,18}$' }
+                  quantity: { type: integer, minimum: 1, maximum: 1000000 }
+              - type: object
+                additionalProperties: false
+                required: [newDetailId, quantity]
+                properties:
+                  newDetailId: { type: integer, minimum: 1 }
+                  quantity: { type: integer, minimum: 1, maximum: 1000000 }
     BazisCutCompositionConfirmRequest:
       type: object
       additionalProperties: false

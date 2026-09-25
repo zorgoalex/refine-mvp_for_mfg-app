@@ -16,7 +16,7 @@ const files = readdirSync(dir).filter((f) => /^16[4-9]_.*\.sql$/.test(f)
   || ['174_mdf_execution_context.sql','175_mdf_command_placement.sql','177_cut_result_typed_hdf.sql',
     '178_mdf_correction_receipts.sql','179_mdf_active_return.sql','180_mdf_cnc_observations.sql',
     '181_cnc_manual_send_observation.sql','182_mdf_physical_lineage.sql',
-    '185_mdf_bazis_composition.sql'].includes(f)).sort();
+    '185_mdf_bazis_composition.sql','187_mdf_bazis_refill_rows.sql'].includes(f)).sort();
 const helpers = source.slice(source.indexOf('q_col()'), source.indexOf('# These migrations contain conditional'));
 const queries = (file: string) => execFileSync('bash', ['-s', '--', file], {
   input: `${helpers}\nprobe_all() { printf '%s\\n' "$@"; }\nprobe_file "$1"`, encoding: 'utf8',

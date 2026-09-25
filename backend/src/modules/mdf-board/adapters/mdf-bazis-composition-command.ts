@@ -21,13 +21,13 @@ import { planMdfBazisComposition, type MdfBazisCompositionMembership, type MdfBa
   type MdfBazisCompositionSnapshot } from '../domain/mdf-bazis-composition';
 import type { MdfCorrectionBlocker, MdfCorrectionSourceLine } from '../domain/mdf-correction-plan';
 import { loadMdfBazisAssignmentStateSnapshot } from './mdf-bazis-assignment-state-snapshot';
-import { deriveMdfBazisRowChanges, extractMdfBazisAssignmentRows, loadMdfBazisCompositionRawSnapshot,
-  mdfBazisAllocationPinDigest, mdfBazisEligibleRowIdsFromRaw, normalizeMdfBazisDesiredRows,
-  type MdfBazisAssignmentRow, type MdfBazisBathHeadPin, type MdfBazisRawSnapshot, type MdfBazisRowChange } from './mdf-bazis-composition-snapshot';
+import { deriveMdfBazisRowChanges, extractMdfBazisAssignmentRows, loadMdfBazisCompositionRawSnapshot, mdfBazisAllocationPinDigest, mdfBazisEligibleRowIdsFromRaw, normalizeMdfBazisDesiredRows, type MdfBazisAssignmentRow, type MdfBazisBathHeadPin, type MdfBazisRawSnapshot, type MdfBazisRowChange, isMdfBazisEligibleRawRow } from './mdf-bazis-composition-snapshot';
 import { discoverMdfCorrectionClosure, loadMdfCorrectionSnapshot, MAX_MDF_CORRECTION_ORDERS,
   MAX_MDF_CORRECTION_ROWS,
   type MdfCorrectionSourceRef } from './mdf-correction-snapshot';
 import { mdfSourceKey, type MdfExecutionMetadata } from './mdf-execution-snapshot';
+import { insertBazisDetailSnapshots, loadBazisDetailSnapshots, nextBazisSortOrder,
+  type BazisDetailSnapshot } from '../../bazis-cut/adapters/pg-bazis-cut-repository';
 
 /** Internal dormant BASIS composition preview/confirm adapter (command-only).
  *
@@ -56,7 +56,10 @@ import { mdfSourceKey, type MdfExecutionMetadata } from './mdf-execution-snapsho
  * sha256(['mdf.bazis_composition',actor,idempotencyKey]) while the result
  * table and advisory lock keep the raw provided key. */
 
-export interface MdfBazisCompositionDesiredRow { readonly rowId: string; readonly quantity: number }
+export interface MdfBazisCompositionExistingRow { readonly rowId: string; readonly quantity: number }
+/** Refill (§5.2b): a new row built server-side from an ordinary MDF order detail of a current owner. */
+export interface MdfBazisCompositionNewRow { readonly newDetailId: number; readonly quantity: number }
+export type MdfBazisCompositionDesiredRow = MdfBazisCompositionExistingRow | MdfBazisCompositionNewRow;
 export interface MdfBazisCompositionPreviewRequest {
   /** Canonical positive decimal bazis_cut_sets.version observed by the caller. */
   readonly expectedVersion: string;
@@ -70,7 +73,8 @@ export interface MdfBazisCompositionConfirmRequest extends MdfBazisCompositionPr
   readonly idempotencyKey: string;
 }
 export interface MdfBazisCompositionAssignmentChange {
-  rowId: string; orderId: string; detailId: string; before: number; after: number;
+  /** Existing row id, or `new:<detailId>` for a refill row (real id assigned on confirm). */
+  rowId: string; orderId: string; detailId: string; before: number; after: number; newDetailId?: string;
 }
 export interface MdfBazisCompositionRetainedPhysical {
   orderId: number; detailId: number; quantity: number; stage: 'cut' | 'laminated'; rework: boolean;
@@ -95,6 +99,11 @@ export type MdfBazisCompositionConfirmResponse =
 interface CompositionHead {
   kind: string; id: string; received: string; accepted: string | null; epoch: string; version: string;
 }
+interface RefillRow {
+  detailId: number; orderId: number; quantity: number;
+  snapshot: BazisDetailSnapshot; snapshotDigest: string;
+}
+
 interface Prepared {
   response: MdfBazisCompositionPreviewResponse;
   previewDigest: string | null;
@@ -111,6 +120,7 @@ interface Prepared {
    * apply re-validates these instead of relying on forced casts. */
   changes?: MdfBazisRowChange[];
   pinDigest?: string;
+  refill?: RefillRow[];
   metadata?: MdfExecutionMetadata;
 }
 class CompositionScopeChanged extends Error {}
@@ -169,9 +179,11 @@ export class PgMdfBazisCompositionCommand {
   private async confirmInTransaction(tx: TransactionClient, user: CurrentUser, setId: number,
     request: MdfBazisCompositionConfirmRequest, requestId: string): Promise<MdfBazisCompositionConfirmResponse> {
     assertPermissions(user);
-    const normalized = canonicalDesiredRows(request.desiredRows);
+    const { existing: normalized, added } = splitDesiredRows(request.desiredRows);
+    // Both union branches fingerprint the replay key; without refill rows the digest input is unchanged.
     const requestDigest = hash(['mdf.bazis_composition', setId,
-      { expectedVersion: request.expectedVersion, sourceToken: request.sourceToken, desiredRows: normalized },
+      { expectedVersion: request.expectedVersion, sourceToken: request.sourceToken, desiredRows: normalized,
+        ...(added.length ? { addedRows: added } : {}) },
       request.expectedDigest]);
     // Same shared-key lock as the manual command: one actor+key serializes
     // across every manual board operation and can never race the PK insert.
@@ -305,6 +317,42 @@ export class PgMdfBazisCompositionCommand {
       if (!marked || !state?.intentionalEmpty) blockers.push({ code: 'ASSIGNMENT_MARKER_MISSING', sourceId: target.id });
     }
     const desired = normalizeMdfBazisDesiredRows({ eligibility, desired: canonicalDesiredRows(request.desiredRows) });
+    // Refill (§5.2b): new rows are built server-side from ordinary MDF details of the CURRENT owners
+    // only (their frozen demand already covers them; other orders would change owners/demand).
+    const added = splitDesiredRows(request.desiredRows).added;
+    const refill: RefillRow[] = [];
+    if (added.length) {
+      const inSet = new Set(raw.rows.map(row => row.detailId).filter((id): id is number => id !== null));
+      // Owner check first (no snapshot of another order's detail is ever built), then one bounded
+      // snapshot per candidate so a non-exportable detail becomes a blocker, not a failed command.
+      const located = new Map((await tx.query<{ detailId: number; orderId: number }>(`SELECT detail_id::float8 "detailId",
+          order_id::float8 "orderId" FROM order_details WHERE detail_id=ANY($1::bigint[]) AND delete_flag=false`,
+      [added.map(row => row.newDetailId)])).rows.map(row => [row.detailId, row.orderId]));
+      for (const row of added) {
+        const located0 = located.get(row.newDetailId);
+        if (located0 === undefined) { blockers.push({ code: 'REFILL_DETAIL_NOT_ELIGIBLE', sourceId: target.id }); continue; }
+        if (!owners.includes(located0)) { blockers.push({ code: 'REFILL_DETAIL_OTHER_ORDER', sourceId: target.id }); continue; }
+        let snapshot: BazisDetailSnapshot | undefined;
+        try { [snapshot] = await loadBazisDetailSnapshots(tx, [row.newDetailId]); }
+        catch (error) {
+          if ((error as { code?: string }).code !== 'BAZIS_CUT_DETAIL_NOT_EXPORTABLE') throw error;
+        }
+        if (!snapshot || snapshot.provenance.sourceType !== 'order_detail') {
+          blockers.push({ code: 'REFILL_DETAIL_NOT_ELIGIBLE', sourceId: target.id }); continue;
+        }
+        const orderId = snapshot.provenance.sourceOrderId;
+        if (orderId !== located0) throw new CompositionScopeChanged();
+        if (inSet.has(row.newDetailId)) { blockers.push({ code: 'REFILL_DETAIL_DUPLICATE', sourceId: target.id }); continue; }
+        if (!isMdfBazisEligibleRawRow({ cut_enabled: snapshot.fields.cutEnabled, source_type: 'order_detail',
+          source_order_hdf_detail_id: null, material_name: snapshot.fields.materialName }, orderId, row.newDetailId)
+          || !demand.some(item => item.orderId === orderId && item.detailId === row.newDetailId)) {
+          blockers.push({ code: 'REFILL_DETAIL_NOT_ELIGIBLE', sourceId: target.id }); continue;
+        }
+        const fields = { ...snapshot.fields, quantity: row.quantity };
+        refill.push({ detailId: row.newDetailId, orderId, quantity: row.quantity,
+          snapshot: { ...snapshot, fields }, snapshotDigest: hash({ provenance: snapshot.provenance, fields }) });
+      }
+    }
 
     // Declaration capacity: only the target's own accepted declarations are
     // aggregated per position/rework; another bath's declarations/lamination
@@ -315,6 +363,10 @@ export class PgMdfBazisCompositionCommand {
       const line = membershipByLineKey.get(row.rowId);
       if (!line) continue;
       const key = JSON.stringify([position.orderId, position.detailId, line.rework]);
+      memberPartitions.set(key, (memberPartitions.get(key) ?? 0) + row.quantity);
+    }
+    for (const row of refill) {
+      const key = JSON.stringify([row.orderId, row.detailId, false]);
       memberPartitions.set(key, (memberPartitions.get(key) ?? 0) + row.quantity);
     }
     for (const [key, declared] of [...declarationTotals(acceptedLines)]
@@ -328,7 +380,8 @@ export class PgMdfBazisCompositionCommand {
       const line = membershipByLineKey.get(row.rowId);
       return { orderId: position.orderId, detailId: position.detailId, quantity: row.quantity,
         lineKey: row.rowId, rework: line?.rework ?? false };
-    });
+    }).concat(refill.map(row => ({ orderId: row.orderId, detailId: row.detailId, quantity: row.quantity,
+      lineKey: newRowKey(row.detailId), rework: false })));
     const plannerCurrent: MdfBazisCompositionSnapshot = { kind: 'bazisCutSet', id: target.id,
       acceptedRevision: accepted, receivedRevision: head.received, lines: acceptedLines };
     const targetAllocations = snapshot.allocations.filter(row => row.evidenceSourceKind === 'bazisCutSet'
@@ -404,14 +457,15 @@ export class PgMdfBazisCompositionCommand {
       return { response: { status: 'blocked', beforeVersion: String(setVersion), previewDigest: null,
         assignmentChanges: [], retainedPhysical: [], preservedAllocations: [], blockers },
       previewDigest: null, noop: false, plan: null, owners, setVersion, head, desired, changes: [],
-        rowById, rawDigest: raw.rawSnapshotDigest, demand };
+        rowById, rawDigest: raw.rawSnapshotDigest, demand, refill };
     }
     const pinDigest = mdfBazisAllocationPinDigest({ allocations: targetAllocations, bathHeads });
     const assignmentChanges: MdfBazisCompositionAssignmentChange[] = derived.changes.map(change => {
       const position = rowById.get(change.rowId)!;
       return { rowId: change.rowId, orderId: String(position.orderId), detailId: String(position.detailId),
         before: change.before, after: change.after };
-    });
+    }).concat(refill.map(row => ({ rowId: newRowKey(row.detailId), orderId: String(row.orderId),
+      detailId: String(row.detailId), before: 0, after: row.quantity, newDetailId: String(row.detailId) })));
     const retainedPhysical: MdfBazisCompositionRetainedPhysical[] = acceptedLines
       .filter(line => line.stage !== 'membership' && line.evidence === 'physical')
       .flatMap(line => line.stage === 'cut' || line.stage === 'laminated'
@@ -430,12 +484,13 @@ export class PgMdfBazisCompositionCommand {
         row.orderId, row.detailId, row.quantity, row.state]),
       bathHeadPins: bathHeads.map(pin => [pin.id, pin.accepted, pin.received, pin.epoch]),
       plan, memberPartitions: [...memberPartitions].sort((a, b) => cmpText(a[0], b[0])),
+      refill: refill.map(row => [row.detailId, row.orderId, row.quantity, row.snapshotDigest]),
       consequences: { assignmentChanges, retainedPhysical, preservedAllocations } });
-    const status = derived.noop ? 'unchanged' as const : 'ready' as const;
+    const status = derived.noop && !refill.length ? 'unchanged' as const : 'ready' as const;
     return { response: { status, beforeVersion: String(setVersion), previewDigest,
       assignmentChanges, retainedPhysical, preservedAllocations, blockers: [] },
-    previewDigest, noop: derived.noop, plan, owners, setVersion, head, desired,
-      changes: derived.changes, rowById, pinDigest, rawDigest: raw.rawSnapshotDigest, metadata, demand };
+    previewDigest, noop: derived.noop && !refill.length, plan, owners, setVersion, head, desired,
+      changes: derived.changes, rowById, pinDigest, rawDigest: raw.rawSnapshotDigest, metadata, demand, refill };
   }
 
   private async apply(tx: TransactionClient, user: CurrentUser, setId: number,
@@ -464,6 +519,21 @@ export class PgMdfBazisCompositionCommand {
         if (updated.length !== 1 || Number(updated[0].quantity) !== change.after) throw new CompositionScopeChanged();
       }
     }
+    // Refill: insert server-built rows (fresh ids); the creation-log trigger records this transaction.
+    const refill = prepared.refill ?? [];
+    const newRowIds = new Map<number, string>();
+    if (refill.length) {
+      await insertBazisDetailSnapshots(tx, setId, refill.map(row => row.snapshot), await nextBazisSortOrder(tx, setId), actorId);
+      const inserted = (await tx.query<{ rowId: string; detailId: string; quantity: string }>(`SELECT
+          bazis_cut_set_detail_id::text "rowId",source_order_detail_id::text "detailId",quantity::text quantity
+        FROM bazis_cut_set_details WHERE bazis_cut_set_id=$1 AND source_order_detail_id=ANY($2::bigint[])`,
+      [setId, refill.map(row => row.detailId)])).rows;
+      for (const row of refill) {
+        const match = inserted.find(item => Number(item.detailId) === row.detailId);
+        if (!match || Number(match.quantity) !== row.quantity) throw new CompositionScopeChanged();
+        newRowIds.set(row.detailId, match.rowId);
+      }
+    }
     const bumped = (await tx.query(`UPDATE bazis_cut_sets SET version=version+1,updated_at=now()
       WHERE bazis_cut_set_id=$1 AND version=$2 RETURNING version::float8`, [setId, prepared.setVersion])).rows;
     if (bumped.length !== 1) throw new CompositionScopeChanged();
@@ -472,11 +542,15 @@ export class PgMdfBazisCompositionCommand {
     const post = await loadMdfBazisCompositionRawSnapshot(tx, { setId, lockRowsAfterOwnerLocks: true });
     const postRows = extractMdfBazisAssignmentRows(post, mdfBazisEligibleRowIdsFromRaw(post));
     const setVersion = Number(post.header.version);
-    if (setVersion !== prepared.setVersion + 1 || JSON.stringify(postRows) !== JSON.stringify(prepared.desired)) {
+    const expectedPost = [...prepared.desired, ...refill.map(row => ({ rowId: newRowIds.get(row.detailId)!, quantity: row.quantity }))]
+      .sort((a, b) => Number(a.rowId) - Number(b.rowId));
+    if (setVersion !== prepared.setVersion + 1 || JSON.stringify(postRows) !== JSON.stringify(expectedPost)) {
       throw new CompositionScopeChanged();
     }
     const revisionKey = `mdf-bazis-composition:${randomUUID()}`;
-    const receiptLines: MdfReceiptLine[] = plan.sourceReplacement.lines.map(line => ({ lineKey: line.lineKey,
+    const realLineKey = (lineKey: string) => lineKey.startsWith('new:')
+      ? newRowIds.get(Number(lineKey.slice(4))) ?? (() => { throw new CompositionScopeChanged(); })() : lineKey;
+    const receiptLines: MdfReceiptLine[] = plan.sourceReplacement.lines.map(line => ({ lineKey: realLineKey(line.lineKey),
       orderId: line.orderId, detailId: line.detailId, quantity: line.quantity, stageCode: line.stage,
       evidenceKind: line.evidence, rework: line.rework }));
     const membershipDigest = mdfBazisMembershipDigest(receiptLines);
@@ -501,7 +575,7 @@ export class PgMdfBazisCompositionCommand {
       composition: { intentId, assignmentStateId, jobId, setId, setVersion,
         rawSnapshotDigest: post.rawSnapshotDigest, membershipDigest, intentionalEmpty,
         ownerIds: prepared.owners, allocationSnapshotDigest: pinDigest,
-        previewDigest,
+        previewDigest, newRowIds: refill.map(row => newRowIds.get(row.detailId)!),
         commandKey: hash(['mdf.bazis_composition', user.id, request.idempotencyKey]) } });
     const nextHeadVersion = (BigInt(prepared.head.version) + 1n).toString();
     if (saved.replay || saved.accepted || saved.version !== nextHeadVersion || saved.correctionEpoch !== prepared.head.epoch) {
@@ -510,6 +584,7 @@ export class PgMdfBazisCompositionCommand {
     const detailIds = new Set<number>();
     for (const position of plan.currentActionPositions) detailIds.add(position.detailId);
     for (const position of plan.retainedEvidencePositions) detailIds.add(position.detailId);
+    for (const row of refill) detailIds.add(row.detailId);
     const auditId = await auditService.record(tx, { event: 'mdf_board.bazis_composition_requested',
       entityType: 'mdf_board_card', entityId: `bazisCutSet:${setId}`, actorUserId: actorId,
       actorUsername: user.username, actorRole: user.role, requestId, source: 'mdf-active-bazis-composition-command',
@@ -554,27 +629,50 @@ function validatePreviewRequest(setId: number, request: MdfBazisCompositionPrevi
   if (typeof request.sourceToken !== 'string' || !/^[a-f0-9]{64}$/.test(request.sourceToken)) {
     fail(400, 'MDF_BAZIS_COMPOSITION_INVALID', 'Обновите карточку перед предпросмотром состава');
   }
-  canonicalDesiredRows(request.desiredRows);
+  if (splitDesiredRows(request.desiredRows).added.length && !refillEnabled()) {
+    fail(409, 'MDF_BAZIS_REFILL_DISABLED', 'Добавление деталей в существующий набор пока недоступно — создайте новый набор');
+  }
 }
 function validateRequestId(requestId: string) {
   if (typeof requestId !== 'string' || !requestId.trim() || requestId.length > 2000 || requestId.includes('\0')) {
     fail(400, 'MDF_BAZIS_COMPOSITION_INVALID', 'Некорректный идентификатор запроса');
   }
 }
-function canonicalDesiredRows(rows: readonly MdfBazisCompositionDesiredRow[]): MdfBazisCompositionDesiredRow[] {
+function canonicalDesiredRows(rows: readonly MdfBazisCompositionDesiredRow[]): MdfBazisCompositionExistingRow[] {
+  return splitDesiredRows(rows).existing;
+}
+
+/** Existing rows (sorted by rowId) and refill rows (sorted by detail id); duplicates rejected. */
+function splitDesiredRows(rows: readonly MdfBazisCompositionDesiredRow[]): {
+  existing: MdfBazisCompositionExistingRow[]; added: MdfBazisCompositionNewRow[];
+} {
   if (!Array.isArray(rows) || rows.length > 5000) fail(400, 'MDF_BAZIS_COMPOSITION_INVALID', 'Некорректный состав строк');
-  const seen = new Set<string>();
-  const normalized: MdfBazisCompositionDesiredRow[] = [];
+  const seen = new Set<string>(), seenNew = new Set<number>();
+  const existing: MdfBazisCompositionExistingRow[] = [], added: MdfBazisCompositionNewRow[] = [];
   for (const row of rows) {
-    if (!row || typeof row !== 'object' || typeof row.rowId !== 'string' || !/^[1-9][0-9]*$/.test(row.rowId)
-      || !Number.isSafeInteger(row.quantity) || row.quantity <= 0 || seen.has(row.rowId)) {
+    if (!row || typeof row !== 'object' || !Number.isSafeInteger(row.quantity) || row.quantity <= 0) {
+      fail(400, 'MDF_BAZIS_COMPOSITION_INVALID', 'Некорректная строка состава');
+    }
+    if ('newDetailId' in row) {
+      if ('rowId' in row || !Number.isSafeInteger(row.newDetailId) || row.newDetailId <= 0 || seenNew.has(row.newDetailId)) {
+        fail(400, 'MDF_BAZIS_COMPOSITION_INVALID', 'Некорректная новая строка состава');
+      }
+      seenNew.add(row.newDetailId);
+      added.push({ newDetailId: row.newDetailId, quantity: row.quantity });
+      continue;
+    }
+    if (typeof row.rowId !== 'string' || !/^[1-9][0-9]*$/.test(row.rowId) || seen.has(row.rowId)) {
       fail(400, 'MDF_BAZIS_COMPOSITION_INVALID', 'Некорректная строка состава');
     }
     seen.add(row.rowId);
-    normalized.push({ rowId: row.rowId, quantity: row.quantity });
+    existing.push({ rowId: row.rowId, quantity: row.quantity });
   }
-  return normalized.sort((a, b) => Number(a.rowId) - Number(b.rowId));
+  return { existing: existing.sort((a, b) => Number(a.rowId) - Number(b.rowId)),
+    added: added.sort((a, b) => a.newDetailId - b.newDetailId) };
 }
+
+const newRowKey = (detailId: number) => `new:${detailId}`;
+const refillEnabled = () => process.env.BACKEND_MDF_BAZIS_REFILL === 'true';
 
 function assertPermissions(user: CurrentUser) {
   for (const permission of ['cut.manage', 'orders.view'] as const) {

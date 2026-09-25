@@ -1098,6 +1098,12 @@ async function countSetDetails(client: DatabaseClient, setId: number): Promise<n
   return Number(result.rows[0]?.count ?? 0);
 }
 
+/** Server-side BASIS row builders shared with the MDF composition refill (no client fields). */
+export type BazisDetailSnapshot = Snapshot;
+export const loadBazisDetailSnapshots = (client: DatabaseClient, detailIds: number[]) => loadSnapshots(client, null, detailIds);
+export const insertBazisDetailSnapshots = insertSnapshots;
+export const nextBazisSortOrder = (client: DatabaseClient, setId: number) => nextSortOrder(client, setId);
+
 async function nextSortOrder(client: DatabaseClient, setId: number): Promise<number> {
   const result = await client.query<{ next_sort: number }>(
     `SELECT COALESCE(MAX(sort_order)+1,0)::integer AS next_sort FROM bazis_cut_set_details WHERE bazis_cut_set_id=$1`, [setId]);

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildCompositionRows,
+  buildDesiredRowsForEdit,
+  buildRefillRows,
   CompositionCommandBuilder,
   compositionUnavailableText,
   describeCompositionPreview,
@@ -9,6 +11,7 @@ import {
   mergeSetAfterMutation,
   needsCompositionReload,
   type CompositionDetailLookup,
+  type RefillRowSource,
 } from './bazisCutComposition';
 import type {
   BazisCutCompositionPreviewResponse,
@@ -107,6 +110,154 @@ describe('buildCompositionRows', () => {
     it('produces an empty list when nothing is eligible', () => {
       expect(buildCompositionRows(details, { kind: 'deleteMany', detailIds: [] }, [])).toEqual([]);
     });
+  });
+});
+
+describe('buildRefillRows', () => {
+  const setRows: RefillRowSource[] = [
+    { bazisCutSetDetailId: 1, quantity: 10, sourceOrderDetailId: 901 },
+    { bazisCutSetDetailId: 2, quantity: 4, sourceOrderDetailId: 902 },
+    { bazisCutSetDetailId: 3, quantity: 1, sourceOrderDetailId: null },
+  ];
+  const allEligible = ['1', '2', '3'];
+
+  it('preserves the CURRENT, unchanged quantities of every eligible existing row', () => {
+    const { rows } = buildRefillRows(setRows, allEligible, []);
+    expect(rows).toEqual([
+      { rowId: '1', quantity: 10 },
+      { rowId: '2', quantity: 4 },
+      { rowId: '3', quantity: 1 },
+    ]);
+  });
+
+  it('excludes non-eligible existing rows (HDF/other-material/cut-disabled), even with nothing added', () => {
+    const { rows, alreadyInSet } = buildRefillRows(setRows, ['1', '3'], []);
+    expect(rows).toEqual([
+      { rowId: '1', quantity: 10 },
+      { rowId: '3', quantity: 1 },
+    ]);
+    expect(alreadyInSet).toEqual([]);
+  });
+
+  it('appends a newDetailId row carrying the added detail\'s ACTUAL quantity (e.g. 10), not a default', () => {
+    const { rows, alreadyInSet, invalidQuantity } = buildRefillRows(setRows, allEligible, [{ detailId: 950, quantity: 10 }]);
+    expect(rows).toEqual([
+      { rowId: '1', quantity: 10 },
+      { rowId: '2', quantity: 4 },
+      { rowId: '3', quantity: 1 },
+      { newDetailId: 950, quantity: 10 },
+    ]);
+    expect(alreadyInSet).toEqual([]);
+    expect(invalidQuantity).toEqual([]);
+  });
+
+  it('uses the supplied quantity for an added detail when given', () => {
+    const { rows } = buildRefillRows(setRows, allEligible, [{ detailId: 950, quantity: 7 }]);
+    expect(rows).toContainEqual({ newDetailId: 950, quantity: 7 });
+  });
+
+  it('rejects (never defaults) a missing/invalid supplied quantity: excludes from rows and reports invalidQuantity', () => {
+    const missing = buildRefillRows(setRows, allEligible, [{ detailId: 950 } as never]);
+    expect(missing.rows.some((row) => 'newDetailId' in row && row.newDetailId === 950)).toBe(false);
+    expect(missing.invalidQuantity).toEqual([950]);
+
+    const zero = buildRefillRows(setRows, allEligible, [{ detailId: 950, quantity: 0 }]);
+    expect(zero.rows.some((row) => 'newDetailId' in row && row.newDetailId === 950)).toBe(false);
+    expect(zero.invalidQuantity).toEqual([950]);
+
+    const fractional = buildRefillRows(setRows, allEligible, [{ detailId: 951, quantity: 1.5 }]);
+    expect(fractional.rows.some((row) => 'newDetailId' in row && row.newDetailId === 951)).toBe(false);
+    expect(fractional.invalidQuantity).toEqual([951]);
+
+    const negative = buildRefillRows(setRows, allEligible, [{ detailId: 952, quantity: -1 }]);
+    expect(negative.invalidQuantity).toEqual([952]);
+  });
+
+  it('leaves the existing eligible rows unchanged when the added detail has an invalid quantity', () => {
+    const { rows } = buildRefillRows(setRows, allEligible, [{ detailId: 950, quantity: 0 }]);
+    expect(rows).toEqual([
+      { rowId: '1', quantity: 10 },
+      { rowId: '2', quantity: 4 },
+      { rowId: '3', quantity: 1 },
+    ]);
+  });
+
+  it('reports (and excludes from rows) an added detail already present in the set by sourceOrderDetailId', () => {
+    const { rows, alreadyInSet } = buildRefillRows(setRows, allEligible, [{ detailId: 901, quantity: 5 }, { detailId: 950, quantity: 10 }]);
+    expect(alreadyInSet).toEqual([901]);
+    expect(rows).toEqual([
+      { rowId: '1', quantity: 10 },
+      { rowId: '2', quantity: 4 },
+      { rowId: '3', quantity: 1 },
+      { newDetailId: 950, quantity: 10 },
+    ]);
+  });
+
+  it('reports every duplicate-in-set id, not just the first', () => {
+    const { alreadyInSet } = buildRefillRows(setRows, allEligible, [{ detailId: 901, quantity: 5 }, { detailId: 902, quantity: 5 }, { detailId: 950, quantity: 10 }]);
+    expect(alreadyInSet).toEqual([901, 902]);
+  });
+
+  it('de-duplicates repeated ids within addedDetails itself, keeping only the first', () => {
+    const { rows } = buildRefillRows(setRows, allEligible, [{ detailId: 950, quantity: 3 }, { detailId: 950, quantity: 9 }]);
+    const newRows = rows.filter((row): row is { newDetailId: number; quantity: number } => 'newDetailId' in row);
+    expect(newRows).toEqual([{ newDetailId: 950, quantity: 3 }]);
+  });
+
+  it('never includes a non-eligible existing row even when it is untouched by the refill', () => {
+    const { rows } = buildRefillRows(setRows, [], [{ detailId: 950, quantity: 2 }]);
+    expect(rows).toEqual([{ newDetailId: 950, quantity: 2 }]);
+  });
+
+  it('refills an empty set with only the added details', () => {
+    const { rows, alreadyInSet } = buildRefillRows([], [], [{ detailId: 950, quantity: 6 }, { detailId: 951, quantity: 2 }]);
+    expect(rows).toEqual([
+      { newDetailId: 950, quantity: 6 },
+      { newDetailId: 951, quantity: 2 },
+    ]);
+    expect(alreadyInSet).toEqual([]);
+  });
+
+  it('is a no-op on an empty set with nothing added', () => {
+    expect(buildRefillRows([], [], [])).toEqual({ rows: [], alreadyInSet: [], invalidQuantity: [] });
+  });
+});
+
+describe('buildDesiredRowsForEdit', () => {
+  const setRows: RefillRowSource[] = [
+    { bazisCutSetDetailId: 1, quantity: 10, sourceOrderDetailId: 901 },
+    { bazisCutSetDetailId: 2, quantity: 4, sourceOrderDetailId: 902 },
+  ];
+  const allEligible = ['1', '2'];
+
+  it('delegates non-refill edits to buildCompositionRows', () => {
+    expect(buildDesiredRowsForEdit(setRows, { kind: 'quantity', detailId: 1, quantity: 5 }, allEligible)).toEqual([
+      { rowId: '1', quantity: 5 },
+      { rowId: '2', quantity: 4 },
+    ]);
+  });
+
+  it('delegates a refill edit to buildRefillRows, dropping the alreadyInSet detail', () => {
+    expect(buildDesiredRowsForEdit(
+      setRows,
+      { kind: 'refill', addedDetails: [{ detailId: 901, quantity: 5 }, { detailId: 950, quantity: 3 }] },
+      allEligible,
+    )).toEqual([
+      { rowId: '1', quantity: 10 },
+      { rowId: '2', quantity: 4 },
+      { newDetailId: 950, quantity: 3 },
+    ]);
+  });
+
+  it('delegates a refill edit to buildRefillRows, dropping an added detail with an invalid quantity', () => {
+    expect(buildDesiredRowsForEdit(
+      setRows,
+      { kind: 'refill', addedDetails: [{ detailId: 950, quantity: 0 }] },
+      allEligible,
+    )).toEqual([
+      { rowId: '1', quantity: 10 },
+      { rowId: '2', quantity: 4 },
+    ]);
   });
 });
 
@@ -227,6 +378,59 @@ describe('describeCompositionPreview', () => {
     const display = describeCompositionPreview(preview);
     expect(display.assignmentLines[0]).toContain('№55');
     expect(display.assignmentLines[0]).toContain('№606');
+  });
+
+  it('renders a REFILL (new) row as "Добавляется: заказ …, деталь … — N шт.", falling back to bare ids', () => {
+    const preview: BazisCutCompositionPreviewResponse = {
+      status: 'ready', beforeVersion: '3', previewDigest: 'e'.repeat(64),
+      assignmentChanges: [
+        { rowId: 'new:950', orderId: '77', detailId: '950', before: 0, after: 5, newDetailId: '950' },
+        { rowId: 'new:960', orderId: '80', detailId: '960', before: 0, after: 2, newDetailId: '960' },
+      ],
+      retainedPhysical: [], preservedAllocations: [], blockers: [],
+    };
+    const display = describeCompositionPreview(preview, detailsBefore);
+    expect(display.assignmentLines).toHaveLength(2);
+    expect(display.assignmentLines[0]).toContain('Добавляется:');
+    expect(display.assignmentLines[0]).toContain('заказ');
+    expect(display.assignmentLines[0]).toContain('деталь');
+    expect(display.assignmentLines[0]).toContain('№77');
+    expect(display.assignmentLines[0]).toContain('№950');
+    expect(display.assignmentLines[0]).toContain('5 шт.');
+    // A regular (non-refill) row must keep its original "before → after" format.
+    const mixed = describeCompositionPreview({
+      status: 'ready', beforeVersion: '3', previewDigest: 'f'.repeat(64),
+      assignmentChanges: [
+        { rowId: '1', orderId: '77', detailId: '901', before: 10, after: 8 },
+        { rowId: 'new:950', orderId: '77', detailId: '950', before: 0, after: 5, newDetailId: '950' },
+      ],
+      retainedPhysical: [], preservedAllocations: [], blockers: [],
+    }, detailsBefore);
+    expect(mixed.assignmentLines[0]).toContain('10 → 8');
+    expect(mixed.assignmentLines[0]).not.toContain('Добавляется:');
+    expect(mixed.assignmentLines[1]).toContain('Добавляется:');
+  });
+
+  it('renders the three refill blocker codes in Russian, without a generic (code) suffix', () => {
+    const preview: BazisCutCompositionPreviewResponse = {
+      status: 'blocked', beforeVersion: '3', previewDigest: null,
+      assignmentChanges: [], retainedPhysical: [], preservedAllocations: [],
+      blockers: [
+        { code: 'REFILL_DETAIL_OTHER_ORDER', sourceId: '42' },
+        { code: 'REFILL_DETAIL_DUPLICATE', sourceId: '42' },
+        { code: 'REFILL_DETAIL_NOT_ELIGIBLE', sourceId: '42' },
+      ],
+    };
+    const display = describeCompositionPreview(preview);
+    expect(display.blockerLines).toEqual([
+      'Деталь из другого заказа — создайте новый набор',
+      'Деталь уже есть в наборе',
+      'Деталь нельзя добавить в МДФ-учёт (ХДФ, другой материал или неполные данные)',
+    ]);
+    display.blockerLines.forEach((line) => {
+      expect(line).not.toContain('REFILL_DETAIL');
+      expect(line).not.toContain('42');
+    });
   });
 });
 

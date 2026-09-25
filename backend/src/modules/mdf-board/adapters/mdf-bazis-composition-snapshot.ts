@@ -139,15 +139,25 @@ const otherMarker = new RegExp(OTHER, 'iu');
  * and unrelated rows stay preserved raw but are never eligible), MDF material
  * marker with no other-material marker, and a complete ordinary position
  * identity. No heuristic identity mapping is invented here. */
+/** Canonical digest of a stored raw BASIS row (alias `d`; identity/ordering/audit columns excluded).
+ * Refill provenance stores it at confirm; the composition worker recomputes it from the same row. */
+export const MDF_BAZIS_RAW_ROW_DIGEST_SQL = `encode(sha256(convert_to((to_jsonb(d) - ARRAY['bazis_cut_set_detail_id',
+  'sort_order','created_at','updated_at','created_by','updated_by'])::text,'UTF8')),'hex')`;
+
+/** The single eligibility predicate for a raw BASIS row (existing or a refill candidate). */
+export function isMdfBazisEligibleRawRow(raw: {
+  cut_enabled?: unknown; source_type?: unknown; source_order_hdf_detail_id?: unknown; material_name?: unknown;
+}, orderId: number | null, detailId: number | null): boolean {
+  const material = typeof raw.material_name === 'string' ? raw.material_name : '';
+  return raw.cut_enabled === true && raw.source_type === 'order_detail'
+    && (raw.source_order_hdf_detail_id ?? null) === null
+    && orderId !== null && detailId !== null
+    && mdfMarker.test(material) && !otherMarker.test(material);
+}
+
 export function mdfBazisEligibleRowIdsFromRaw(snapshot: MdfBazisRawSnapshot): MdfBazisEligibilitySet {
-  const rowIds = snapshot.rows.filter((row) => {
-    const raw = row.raw;
-    const material = typeof raw.material_name === 'string' ? raw.material_name : '';
-    return raw.cut_enabled === true && raw.source_type === 'order_detail'
-      && (raw.source_order_hdf_detail_id ?? null) === null
-      && row.orderId !== null && row.detailId !== null
-      && mdfMarker.test(material) && !otherMarker.test(material);
-  }).map((row) => row.rowId);
+  const rowIds = snapshot.rows.filter((row) => isMdfBazisEligibleRawRow(row.raw, row.orderId, row.detailId))
+    .map((row) => row.rowId);
   return { kind: 'serverResolvedEligibleRowIds', rowIds };
 }
 

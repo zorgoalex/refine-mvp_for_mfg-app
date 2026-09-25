@@ -8,8 +8,7 @@ import type { MdfEvidenceAllocation } from '../domain/mdf-evidence-allocation';
 import { mdfLineageRevisionKey, matchesMdfValidatedPhysicalLineage } from '../domain/mdf-physical-lineage';
 import { mdfPositionKey, mdfSum } from '../domain/mdf-quantities';
 import type { MdfBazisCompositionJobIntent } from './mdf-bazis-composition-job';
-import { extractMdfBazisAssignmentRows, mdfBazisAllocationPinDigest, mdfBazisEligibleRowIdsFromRaw,
-  type MdfBazisBathHeadPin, type MdfBazisRawSnapshot } from './mdf-bazis-composition-snapshot';
+import { extractMdfBazisAssignmentRows, mdfBazisAllocationPinDigest, mdfBazisEligibleRowIdsFromRaw, type MdfBazisBathHeadPin, type MdfBazisRawSnapshot, MDF_BAZIS_RAW_ROW_DIGEST_SQL } from './mdf-bazis-composition-snapshot';
 import { loadMdfExecutionSnapshot, mdfSourceKey, type MdfExecutionHead } from './mdf-execution-snapshot';
 
 /** Read-only authoritative acceptance validator for one claimed BASIS composition job.
@@ -132,8 +131,25 @@ function membershipIndex(lines: readonly MdfCorrectionSourceLine[]): Map<string,
  * context/demand/lineage/assignment, never a derived publication card), the assignment
  * state must be DB-issued and match the immutable intent exactly, and eligible raw rows
  * must biject with received membership rows preserving position and rework identity. */
+interface RefillProvenance {
+  rowId: string; orderId: number; detailId: number; quantity: number; snapshotDigest: string;
+  createdInSet: boolean; currentDigest: string | null;
+}
+
+/** Refill provenance of THIS intent: immutable rows joined with the trigger-only creation log
+ * and the current raw row digest (bounded; one query). */
+async function loadRefillProvenance(tx: DatabaseClient, intent: MdfBazisCompositionJobIntent): Promise<RefillProvenance[]> {
+  return (await tx.query<RefillProvenance>(`SELECT n.row_id::text "rowId",n.order_id::float8 "orderId",
+      n.detail_id::float8 "detailId",n.quantity::float8 quantity,n.snapshot_digest "snapshotDigest",
+      EXISTS(SELECT 1 FROM mdf_bazis_raw_row_creations c WHERE c.row_id=n.row_id AND c.set_id=$2) "createdInSet",
+      (SELECT ${MDF_BAZIS_RAW_ROW_DIGEST_SQL} FROM bazis_cut_set_details d
+        WHERE d.bazis_cut_set_detail_id=n.row_id) "currentDigest"
+    FROM mdf_bazis_composition_new_rows n
+    WHERE n.intent_id=$1::uuid ORDER BY n.row_id LIMIT 5001`, [intent.intentId, intent.setId])).rows;
+}
+
 function gateAssignment(input: MdfBazisCompositionValidationInput, previousMembership: ReadonlyMap<string, MdfCorrectionSourceLine>,
-  received: readonly MdfCorrectionSourceLine[]): Map<string, MdfCorrectionSourceLine> {
+  received: readonly MdfCorrectionSourceLine[], refill: readonly RefillProvenance[] = []): Map<string, MdfCorrectionSourceLine> {
   const { intent, head, snapshot, raw } = input;
   const issues = snapshot.issues.get(mdfSourceKey(head));
   if (!issues || issues.length) attention('MDF_COMPOSITION_TARGET_ISSUES');
@@ -155,14 +171,29 @@ function gateAssignment(input: MdfBazisCompositionValidationInput, previousMembe
     eligible = extractMdfBazisAssignmentRows(raw, mdfBazisEligibleRowIdsFromRaw(raw));
   } catch { attention('MDF_COMPOSITION_RAW_STALE'); }
   if (eligible.length !== membership.size) attention('MDF_COMPOSITION_MEMBERSHIP_DRIFT');
+  const provenance = new Map(refill.map(row => [row.rowId, row]));
+  if (provenance.size !== refill.length) attention('MDF_COMPOSITION_MEMBERSHIP_DRIFT');
+  const used = new Set<string>();
   for (const row of eligible) {
     const line = membership.get(row.rowId);
     const rawRow = raw.rows.find(candidate => candidate.rowId === row.rowId);
     const prior = previousMembership.get(row.rowId);
-    if (!line || !rawRow || !prior || rawRow.orderId !== line.orderId || rawRow.detailId !== line.detailId
-      || line.quantity !== row.quantity || prior.orderId !== line.orderId || prior.detailId !== line.detailId
-      || prior.rework !== line.rework) attention('MDF_COMPOSITION_MEMBERSHIP_DRIFT');
+    if (!line || !rawRow || rawRow.orderId !== line.orderId || rawRow.detailId !== line.detailId
+      || line.quantity !== row.quantity) attention('MDF_COMPOSITION_MEMBERSHIP_DRIFT');
+    if (prior) {
+      if (prior.orderId !== line.orderId || prior.detailId !== line.detailId || prior.rework !== line.rework
+        || provenance.has(row.rowId)) attention('MDF_COMPOSITION_MEMBERSHIP_DRIFT');
+      continue;
+    }
+    // Refill row (§5.2b): only a row INSERTed by this intent's own confirm transaction (trigger-only
+    // creation log in the same set), with unchanged raw content, ordinary (non-rework) membership.
+    const added = provenance.get(row.rowId);
+    if (!added || !added.createdInSet || added.currentDigest !== added.snapshotDigest
+      || added.orderId !== line.orderId || added.detailId !== line.detailId || added.quantity !== line.quantity
+      || line.rework || !input.orderIds.includes(line.orderId)) attention('MDF_COMPOSITION_MEMBERSHIP_DRIFT');
+    used.add(row.rowId);
   }
+  if (used.size !== provenance.size) attention('MDF_COMPOSITION_MEMBERSHIP_DRIFT');
   return membership;
 }
 
@@ -374,7 +405,8 @@ export async function validateMdfBazisCompositionAdvance(tx: DatabaseClient,
   const received = targetLines(input, input.intent.revision);
   if (!previous.length) attention('MDF_COMPOSITION_PREVIOUS_STALE');
   await gatePrevious(tx, input);
-  const membership = gateAssignment(input, membershipIndex(previous), received);
+  const membership = gateAssignment(input, membershipIndex(previous), received,
+    await loadRefillProvenance(tx, input.intent));
   gateLineage(input, previous, received);
   gateDeclarations(previous, membership);
   const pins = await gatePins(tx, input);
