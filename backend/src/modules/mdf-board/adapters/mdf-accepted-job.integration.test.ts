@@ -724,22 +724,131 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     await db.query('UPDATE orders SET delete_flag=true WHERE order_id=$1',[f.orderId]);
     expect((await readMdfPublishedSnapshot(database(),manager,query)).trackedJobs).toEqual([]);
   });
-  it('own scope cannot read other owners via explicit IDs or mixed-card focus', async () => {
+  it('own scope: a mixed card is shown with only the viewer\'s orders, never the other owner\'s data or a token', async () => {
     const f = await fixture(); await runner().processOne();
     const manager: CurrentUser = { ...admin,id: '42',role: 'manager',roleId: 4 };
     await db.query('UPDATE orders SET manager_id=42 WHERE order_id=$1',[f.orderId]);
     const allowed = await readMdfPublishedSnapshot(database(),manager,{ dateTo: '2026-09-21',orderIds: [f.orderId] });
     expect(allowed.cards).toHaveLength(3);
     const another = await fixture();
-    // Simulate a published mixed card without granting ownership of its other order.
+    // A published mixed card: the viewer may see only its own order of the two.
     await db.query(`INSERT INTO mdf_published_source_members(source_kind,source_id,order_id,detail_id,quantity)
       VALUES('packet',$1,$2,$3,1)`,[f.receipts[0].sourceId,another.orderId,another.detailId]);
     const restricted = await readMdfPublishedSnapshot(database(),manager,{ dateTo: '2026-09-21',
       focus: { kind: 'packet',id: f.receipts[0].sourceId },orderIds: [f.orderId,another.orderId] });
-    expect(restricted.cards.some(c => c.id===f.receipts[0].sourceId)).toBe(false);
+    expect(restricted.cards.find(c => c.id===f.receipts[0].sourceId)).toMatchObject({
+      issues: expect.arrayContaining(['MDF_PARTIAL_ACCESS']),commandToken: null });
+    expect(restricted.positions.length).toBeGreaterThan(0);
     expect(restricted.positions.every(p => p.orderId===f.orderId)).toBe(true);
     expect(restricted.pendingJobs.some(j => j.orderIds.includes(another.orderId))).toBe(false);
     expect(restricted.members.some(m => m.orderId===another.orderId)).toBe(false);
+    expect(restricted.members.some(m => m.id===f.receipts[0].sourceId && m.orderId===f.orderId)).toBe(true);
+    // The other owner's viewer sees the same card with only its own order.
+    await db.query('UPDATE orders SET manager_id=43 WHERE order_id=$1',[another.orderId]);
+    const other: CurrentUser = { ...admin,id: '43',role: 'manager',roleId: 4 };
+    const otherView = await readMdfPublishedSnapshot(database(),other,{ dateTo: '2026-09-21',
+      focus: { kind: 'packet',id: f.receipts[0].sourceId } });
+    expect(otherView.cards.find(c => c.id===f.receipts[0].sourceId)).toMatchObject({ commandToken: null,
+      issues: expect.arrayContaining(['MDF_PARTIAL_ACCESS']) });
+    expect(otherView.members.every(m => m.orderId===another.orderId)).toBe(true);
+    expect(otherView.positions.every(p => p.orderId===another.orderId)).toBe(true);
+    // A caller cannot widen visibility with explicit order IDs of a denied order.
+    const probe = await readMdfPublishedSnapshot(database(),other,{ dateTo: '2026-09-21',orderIds: [f.orderId] });
+    expect(probe.positions.some(p => p.orderId===f.orderId)).toBe(false);
+    // A deleted owner is never allowed: no token even for full scope, card stays visible.
+    await db.query('UPDATE orders SET delete_flag=true WHERE order_id=$1',[another.orderId]);
+    const full = await readMdfPublishedSnapshot(database(),admin,{ dateTo: '2026-09-21',focus: { kind: 'packet',id: f.receipts[0].sourceId } });
+    expect(full.cards.find(c => c.id===f.receipts[0].sourceId)?.commandToken).toBeNull();
+  });
+  it('assigned scope: workshop-assigned worker sees a mixed card only with its assigned order', async () => {
+    const f = await fixture(); await runner().processOne();
+    const another = await fixture();
+    await db.query(`INSERT INTO mdf_published_source_members(source_kind,source_id,order_id,detail_id,quantity)
+      VALUES('packet',$1,$2,$3,1)`,[f.receipts[0].sourceId,another.orderId,another.detailId]);
+    await db.query(`INSERT INTO users(user_id,username,is_active,employee_id) VALUES(77,'E2E-Тест worker',true,9077)
+      ON CONFLICT DO NOTHING`);
+    const worker: CurrentUser = { ...admin,id: '77',role: 'worker',roleId: 20 };
+    const focus = { dateTo: '2026-09-21',focus: { kind: 'packet' as const,id: f.receipts[0].sourceId } };
+    expect((await readMdfPublishedSnapshot(database(),worker,focus)).cards.some(c => c.id===f.receipts[0].sourceId)).toBe(false);
+    await db.query(`INSERT INTO order_workshops(order_workshop_id,order_id,responsible_employee_id,delete_flag)
+      VALUES(900077,$1,9077,false)`,[f.orderId]);
+    try {
+      const view = await readMdfPublishedSnapshot(database(),worker,focus);
+      expect(view.cards.find(c => c.id===f.receipts[0].sourceId)).toMatchObject({ commandToken: null,
+        issues: expect.arrayContaining(['MDF_PARTIAL_ACCESS']) });
+      expect(view.members.every(m => m.orderId===f.orderId)).toBe(true);
+      expect(view.positions.length).toBeGreaterThan(0);
+      expect(view.positions.every(p => p.orderId===f.orderId)).toBe(true);
+      // A deleted assignment revokes access again.
+      await db.query('UPDATE order_workshops SET delete_flag=true WHERE order_workshop_id=900077');
+      expect((await readMdfPublishedSnapshot(database(),worker,focus)).cards.some(c => c.id===f.receipts[0].sourceId)).toBe(false);
+    } finally {
+      await db.query('DELETE FROM order_workshops WHERE order_workshop_id=900077');
+      await db.query('DELETE FROM users WHERE user_id=77');
+    }
+  });
+  it('retained demand owner outside membership authorizes visibility and selects its positions, token needs all owners', async () => {
+    const f=await fixture(),other=await fixture();
+    await db.query("UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now() WHERE status='pending'");
+    const sourceId=randomUUID();
+    const receipt={ ...f.receipts[0],sourceId,causeKey: randomUUID(),executionContext: {
+      ...f.receipts[0].executionContext!,demand: [...f.receipts[0].executionContext!.demand,
+        { orderId: other.orderId,detailId: other.detailId,quantity: 10 }] } };
+    const saved=await database().transaction(tx => recordMdfReceipt(tx,receipt));
+    expect(await runner().processOne()).toMatchObject({ jobId: saved.jobId });
+    const members=(await db.query('SELECT order_id::float8 o FROM mdf_published_source_members WHERE source_id=$1',[sourceId])).rows.map(r => r.o);
+    expect(members).not.toContain(other.orderId); // owner only through the frozen revision demand
+    await db.query('UPDATE orders SET manager_id=43 WHERE order_id=$1',[other.orderId]);
+    const onlyOther: CurrentUser={ ...admin,id: '43',role: 'manager',roleId: 4 };
+    const view=await readMdfPublishedSnapshot(database(),onlyOther,{ dateTo: '2026-09-22' });
+    expect(view.cards.find(c => c.id===sourceId)).toMatchObject({ commandToken: null,
+      issues: expect.arrayContaining(['MDF_PARTIAL_ACCESS']) });
+    expect(view.members.some(m => m.id===sourceId)).toBe(false);
+    expect(view.positions.some(p => p.orderId===other.orderId)).toBe(true);
+    expect(view.positions.some(p => p.orderId===f.orderId)).toBe(false);
+    const adminView=await readMdfPublishedSnapshot(database(),admin,{ dateTo: '2026-09-22' });
+    expect(adminView.cards.find(c => c.id===sourceId)?.issues).not.toContain('MDF_PARTIAL_ACCESS');
+    // Without any allowed owner the card stays hidden.
+    const stranger: CurrentUser={ ...admin,id: '44',role: 'manager',roleId: 4 };
+    expect((await readMdfPublishedSnapshot(database(),stranger,{ dateTo: '2026-09-22',
+      focus: { kind: 'packet',id: sourceId } })).cards.some(c => c.id===sourceId)).toBe(false);
+  });
+  it('visibility is decided before the page limit: 1001 newer denied cards cannot hide an authorized one', async () => {
+    const f = await fixture(); await runner().processOne();
+    const denied = await fixture();
+    await db.query('UPDATE orders SET manager_id=42 WHERE order_id=$1',[f.orderId]);
+    const manager: CurrentUser = { ...admin,id: '42',role: 'manager',roleId: 4 };
+    // Synthetic publication rows only (test schema): bypass lineage guards/FKs for bulk setup.
+    await db.query('SET session_replication_role=replica');
+    try {
+      await db.query(`INSERT INTO mdf_source_heads(source_kind,source_id,received_revision_key,accepted_revision_key,correction_epoch,version,updated_at)
+        SELECT 'packet','E2E-denied-'||g,'1','1',0,1,now() FROM generate_series(1,1001) g`);
+      await db.query(`INSERT INTO mdf_published_sources(source_kind,source_id,received_revision_key,accepted_revision_key,
+          source_created_at,display_name,column_key,reason,issues,published_revision)
+        SELECT 'packet','E2E-denied-'||g,'1','1','2026-09-21T12:00:00Z'::timestamptz,'E2E-Тест denied '||g,'parsed',
+          'awaiting_cut','{}'::text[],(SELECT published_revision FROM mdf_engine_state) FROM generate_series(1,1001) g`);
+      await db.query(`INSERT INTO mdf_published_source_members(source_kind,source_id,order_id,detail_id,quantity)
+        SELECT 'packet','E2E-denied-'||g,$1,$2,1 FROM generate_series(1,1001) g`,[denied.orderId,denied.detailId]);
+    } finally { await db.query('SET session_replication_role=origin'); }
+    try {
+    const view = await readMdfPublishedSnapshot(database(),manager,{ dateTo: '2026-09-21' });
+    expect(view.cards.some(c => c.id===f.receipts[0].sourceId)).toBe(true);
+    expect(view.cards.some(c => c.id.startsWith('E2E-denied-'))).toBe(false);
+    const focused = await readMdfPublishedSnapshot(database(),manager,{ dateTo: '2026-09-21',
+      focus: { kind: 'packet',id: f.receipts[0].sourceId } });
+    expect(focused.cards.some(c => c.id===f.receipts[0].sourceId)).toBe(true);
+    // Full scope really has >1000 visible cards: existing overflow guard still applies.
+    await expect(readMdfPublishedSnapshot(database(),admin,{ dateTo: '2026-09-21' }))
+      .rejects.toMatchObject({ code: 'MDF_PUBLICATION_SCOPE_LIMIT' });
+    } finally {
+      // Remove own synthetic rows: later tests share this schema.
+      await db.query('SET session_replication_role=replica');
+      try {
+        for (const table of ['mdf_published_source_members','mdf_published_sources','mdf_source_heads'])
+          await db.query(`DELETE FROM ${table} WHERE source_kind='packet' AND source_id LIKE 'E2E-denied-%'`);
+      } finally { await db.query('SET session_replication_role=origin'); }
+      expect((await db.query("SELECT count(*)::int n FROM mdf_source_heads WHERE source_id LIKE 'E2E-denied-%'")).rows[0].n).toBe(0);
+    }
   });
   it('read-only MVCC snapshot cannot mix revisions when publication commits halfway through GET', async () => {
     const f = await fixture(); await runner().processOne();

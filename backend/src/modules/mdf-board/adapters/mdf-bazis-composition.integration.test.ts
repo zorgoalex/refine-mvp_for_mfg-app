@@ -12,6 +12,7 @@ import * as mdfAutomationRuntime from '../../status-automation/application/statu
 import { mdfSourceCommandToken } from '../domain/mdf-manual-proof';
 import { PgMdfBazisCompositionCommand } from './mdf-bazis-composition-command';
 import { PgMdfCorrectionCommand } from './mdf-correction-command';
+import { readMdfPublishedSnapshot } from './mdf-published-snapshot';
 
 const enabled = process.env.MDF_ENGINE_INTEGRATION === '1';
 
@@ -410,6 +411,21 @@ describe.skipIf(!enabled)('BASIS composition command, isolated PostgreSQL schema
       FROM audit_log WHERE event='mdf_board.bazis_composition_accepted'`)).rows;
     expect(acceptedAudit).toHaveLength(1);
     expect(acceptedAudit[0]).toMatchObject({ entity_type: 'mdf_board_card', entity_id: `bazisCutSet:${f.setId}` });
+    // Reader (§5.1): the intentionally-empty card is authorized by the retained
+    // physical owner of its published revision, not by (empty) membership.
+    await fixture.client.query('UPDATE orders SET manager_id=42 WHERE order_id=$1', [f.orderId]);
+    const ownerView = await readMdfPublishedSnapshot(database!, { ...user, id: '42', role: 'manager', roleId: 4 },
+      { focus: { kind: 'bazisCutSet', id: String(f.setId) }, dateTo: '2099-01-01' });
+    const emptyCard = ownerView.cards.find(c => c.kind === 'bazisCutSet' && c.id === String(f.setId));
+    expect(emptyCard).toBeDefined();
+    expect(emptyCard?.issues).not.toContain('MDF_PARTIAL_ACCESS');
+    expect(ownerView.members.some(m => m.id === String(f.setId))).toBe(false);
+    expect(ownerView.positions).toEqual(expect.arrayContaining([expect.objectContaining({ orderId: f.orderId, detailId: f.detailId })]));
+    const strangerView = await readMdfPublishedSnapshot(database!, { ...user, id: '43', role: 'manager', roleId: 4 },
+      { focus: { kind: 'bazisCutSet', id: String(f.setId) }, dateTo: '2099-01-01' });
+    expect(strangerView.cards.some(c => c.kind === 'bazisCutSet' && c.id === String(f.setId))).toBe(false);
+    expect(strangerView.positions.some(p => p.orderId === f.orderId)).toBe(false);
+    await fixture.client.query('UPDATE orders SET manager_id=NULL WHERE order_id=$1', [f.orderId]);
     expect(await count(`SELECT count(*)::text count FROM outbox_events
       WHERE event_type='mdf.bazis_composition_accepted'`)).toBe('1');
     expect((await fixture.client.query(`SELECT aggregate_type,aggregate_id,idempotency_key

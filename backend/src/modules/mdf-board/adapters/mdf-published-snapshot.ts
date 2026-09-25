@@ -47,33 +47,62 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
         AND u.is_active AND u.user_id=$1::bigint)` : 'FALSE';
     const owners = `SELECT o.order_id FROM orders o WHERE $1::bigint IS NOT NULL
       AND NOT o.delete_flag AND o.order_kind='production_order' AND ${allowed}`;
-    const cardRows = (await tx.query<PublishedCard & { headVersion: string; headEpoch: string; headReceived: string; headAccepted: string|null }>(`WITH allowed AS (${owners})
-      SELECT p.source_kind kind,p.source_id id,p.display_name "displayName",p.column_key "column",
-        p.source_created_at::text "sourceCreatedAt",p.accepted_revision_key "acceptedRevision",
-        p.received_revision_key "receivedRevision",p.issues,h.version::text "headVersion",h.correction_epoch::text "headEpoch",
-        h.received_revision_key "headReceived",h.accepted_revision_key "headAccepted"
+    // Card owners = current published members ∪ demand/evidence owners of the exact
+    // published accepted AND received revisions (retained physical proof survives a
+    // composition edit). Never today's head, never caller-provided owners or markers.
+    const cardOwners = (alias: string) => `SELECT m.order_id FROM mdf_published_source_members m
+        WHERE m.source_kind=${alias}.source_kind AND m.source_id=${alias}.source_id
+      UNION SELECT d.order_id FROM mdf_revision_demand d
+        WHERE d.source_kind=${alias}.source_kind AND d.source_id=${alias}.source_id
+          AND d.revision_key IN (${alias}.accepted_revision_key,${alias}.received_revision_key)
+      UNION SELECT e.order_id FROM mdf_evidence_lines e
+        WHERE e.source_kind=${alias}.source_kind AND e.source_id=${alias}.source_id
+          AND e.revision_key IN (${alias}.accepted_revision_key,${alias}.received_revision_key)`;
+    // Visibility (at least one allowed owner) is decided BEFORE the page limit, so newer
+    // denied cards can never push an older authorized/focused card out of the page.
+    const cardRows = (await tx.query<PublishedCard & { headVersion: string; headEpoch: string; headReceived: string;
+      headAccepted: string|null; ownerIds: number[]; allOwnersAllowed: boolean }>(`WITH allowed AS (${owners}), page AS (
+      SELECT p.source_kind,p.source_id,p.display_name,p.column_key,p.source_created_at,p.accepted_revision_key,
+        p.received_revision_key,p.issues,h.version,h.correction_epoch,h.received_revision_key head_received,
+        h.accepted_revision_key head_accepted
       FROM mdf_published_sources p
       JOIN mdf_source_heads h ON h.source_kind=p.source_kind AND h.source_id=p.source_id
       WHERE ((p.source_created_at >= $2::date AND p.source_created_at < $3::date+interval '1 day')
         OR (p.source_kind=$4 AND p.source_id=$5))
-        AND NOT EXISTS(SELECT 1 FROM mdf_published_source_members m WHERE m.source_kind=p.source_kind AND m.source_id=p.source_id
-          AND NOT EXISTS(SELECT 1 FROM allowed a WHERE a.order_id=m.order_id))
-        AND ($6::boolean OR EXISTS(SELECT 1 FROM mdf_published_source_members m
-          WHERE m.source_kind=p.source_kind AND m.source_id=p.source_id))
-      ORDER BY p.source_created_at DESC,p.source_kind,p.source_id LIMIT 1001`,
+        AND ($6::boolean OR EXISTS(SELECT 1 FROM allowed a WHERE a.order_id IN (${cardOwners('p')})))
+      ORDER BY p.source_created_at DESC,p.source_kind,p.source_id LIMIT 1001)
+      SELECT page.source_kind kind,page.source_id id,page.display_name "displayName",page.column_key "column",
+        page.source_created_at::text "sourceCreatedAt",page.accepted_revision_key "acceptedRevision",
+        page.received_revision_key "receivedRevision",page.issues,page.version::text "headVersion",
+        page.correction_epoch::text "headEpoch",page.head_received "headReceived",page.head_accepted "headAccepted",
+        o.owner_ids "ownerIds",o.all_allowed "allOwnersAllowed"
+      FROM page CROSS JOIN LATERAL (
+        SELECT COALESCE(array_agg(x.order_id::float8 ORDER BY x.order_id),'{}') owner_ids,
+          COALESCE(bool_and(EXISTS(SELECT 1 FROM allowed a WHERE a.order_id=x.order_id)),$6::boolean) all_allowed
+        FROM (${cardOwners('page')}) x(order_id)) o
+      ORDER BY page.source_created_at DESC,page.source_kind,page.source_id`,
     [user.id,state.dateFrom,state.dateTo,query.focus?.kind ?? null,query.focus?.id ?? null,scope==='all'])).rows;
     checkLimit(cardRows,1000);
-    const cards: PublishedCard[] = cardRows.map(({ headVersion,headEpoch,headReceived,headAccepted,...card }) => ({ ...card,
-      commandToken: headReceived === card.receivedRevision && headAccepted === headReceived && card.issues.length === 0
+    const cardOwnerIds = cardRows.flatMap(c => c.ownerIds);
+    // A partial viewer sees the card but only its allowed orders' data, and never a
+    // command token: a command would act on positions of orders it cannot see.
+    const cards: PublishedCard[] = cardRows.map(({ headVersion,headEpoch,headReceived,headAccepted,ownerIds: _ownerIds,
+      allOwnersAllowed,...card }) => ({ ...card,
+      issues: allOwnersAllowed ? card.issues : [...card.issues,'MDF_PARTIAL_ACCESS'],
+      commandToken: allOwnersAllowed && headReceived === card.receivedRevision && headAccepted === headReceived
+        && card.issues.length === 0
         ? mdfSourceCommandToken(card,{ received: headReceived,version: headVersion,epoch: headEpoch }) : null }));
-    const members = (await tx.query<PublishedMember>(`SELECT m.source_kind kind,m.source_id id,m.order_id::float8 "orderId",
+    const members = (await tx.query<PublishedMember>(`WITH allowed AS (${owners})
+      SELECT m.source_kind kind,m.source_id id,m.order_id::float8 "orderId",
       m.detail_id::float8 "detailId",m.quantity::float8 quantity FROM mdf_published_source_members m
-      JOIN unnest($1::text[],$2::text[]) s(kind,id) ON m.source_kind=s.kind AND m.source_id=s.id
-      ORDER BY m.source_kind,m.source_id,m.order_id,m.detail_id LIMIT 10001`,[cards.map(c => c.kind),cards.map(c => c.id)])).rows;
+      JOIN unnest($2::text[],$3::text[]) s(kind,id) ON m.source_kind=s.kind AND m.source_id=s.id
+      JOIN allowed a ON a.order_id=m.order_id
+      ORDER BY m.source_kind,m.source_id,m.order_id,m.detail_id LIMIT 10001`,
+    [user.id,cards.map(c => c.kind),cards.map(c => c.id)])).rows;
     checkLimit(members,10000);
     const pendingJobs = await loadPending(tx,owners,user.id,state,query,scope==='all');
     const trackedJobs = await loadTracked(tx,owners,user.id,query.jobIds ?? [],scope==='all');
-    const selectedOwners = [...new Set([...members.map(m => m.orderId),...(query.orderIds ?? []),
+    const selectedOwners = [...new Set([...members.map(m => m.orderId),...cardOwnerIds,...(query.orderIds ?? []),
       ...pendingJobs.flatMap(j => j.orderIds)])];
     const positions = (await tx.query<PublishedPosition>(`WITH allowed AS (${owners})
       SELECT p.order_id::float8 "orderId",p.detail_id::float8 "detailId",p.required_quantity::float8 required,
