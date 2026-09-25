@@ -71,6 +71,36 @@ export async function prepareOrderCatalogLines(db: TransactionClient, orderId: n
     else after.push(effective);
   }
   if (after.length > 1000) throw new ApiError(422, 'ORDER_CATALOG_LINES_LIMIT', 'В заказе допускается не более 1000 товаров/услуг');
+  // CRM-imported lines (snapshot.applied_state='active' on a live request) are
+  // owned by the Bitrix24 product import; local edits and deletions are
+  // rejected — only the product reconciler may change them. An unchanged
+  // roundtrip stays allowed.
+  if (orderId !== null && (writes.length || deletedIds.length)) {
+    const touchedIds = [
+      ...new Set([
+        ...deletedIds,
+        ...writes.map(row => row.id).filter((id): id is number => id !== undefined),
+      ]),
+    ];
+    if (touchedIds.length) {
+      const locked = await db.query(
+        `SELECT s.order_line_id
+           FROM bitrix24_product_row_snapshot s
+           JOIN bitrix24_incoming_request r ON r.request_id=s.request_id
+          WHERE s.order_line_id=ANY($1::bigint[])
+            AND s.applied_state='active'
+            AND r.state='active'`,
+        [touchedIds],
+      );
+      if (locked.rowCount) {
+        throw new ApiError(
+          409,
+          'BITRIX24_IMPORTED_LINE_READONLY',
+          'Позиции, импортированные из Bitrix24, нельзя изменять вручную; выполните сверку заявки',
+        );
+      }
+    }
+  }
   catalogSubtotal(after);
   const beforeAggregate = orderId === null ? null : (await db.query('SELECT version,total_amount,final_amount,paid_amount FROM orders WHERE order_id=$1::bigint', [orderId])).rows[0];
   return { before, after, writes, deletedIds, beforeAggregate };

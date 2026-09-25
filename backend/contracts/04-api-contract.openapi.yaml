@@ -1721,6 +1721,36 @@ paths:
         '422':
           $ref: '#/components/responses/ValidationError'
 
+  /api/v1/bitrix24/incoming-requests/{requestId}/reconcile:
+    post:
+      tags:
+        - Bitrix24
+      operationId: reconcileBitrix24IncomingRequest
+      summary: Reconcile one active Bitrix24 request — product rows and payments
+      security:
+        - bearerAuth: []
+      x-permission: bitrix24.requests.update
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Incoming request after product row and payment reconciliation
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/orders/{orderId}/convert-to-production:
     post:
       tags:
@@ -1808,6 +1838,69 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+
+  /api/v1/bitrix24/product-mappings:
+    get:
+      tags:
+        - Bitrix24
+      operationId: listBitrix24ProductMappings
+      summary: List explicit Bitrix24 product mappings and seen Bitrix products
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - bitrix24.integration.manage
+        - references.view
+      responses:
+        '200':
+          description: Product mappings with Bitrix product ids observed in inbound Deals
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/bitrix24/product-mappings/{bitrixProductId}:
+    put:
+      tags:
+        - Bitrix24
+      operationId: upsertBitrix24ProductMapping
+      summary: Create, remap, or deactivate an explicit Bitrix24 product mapping
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - bitrix24.integration.manage
+        - references.view
+      parameters:
+        - name: bitrixProductId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[1-9][0-9]{0,14}$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [catalogItemId, active, expectedVersion]
+              properties:
+                catalogItemId: {type: integer, minimum: 1}
+                active: {type: boolean}
+                expectedVersion: {type: integer, minimum: 0}
+              additionalProperties: false
+      responses:
+        '200':
+          description: Saved product mapping with its current version
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
 
   /api/v1/bitrix24/payment-type-mappings:
     get:

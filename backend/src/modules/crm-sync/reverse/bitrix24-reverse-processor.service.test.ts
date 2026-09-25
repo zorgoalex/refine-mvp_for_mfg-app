@@ -162,7 +162,8 @@ describe('Bitrix24ReverseProcessorService', () => {
       findMappingByBitrix: vi.fn().mockResolvedValue(null),
       upsertClient: vi.fn(),
       upsertDeal: vi.fn().mockResolvedValue({ requestId: 12, erpOrderId: null }),
-      replaceRequestPaymentSnapshots: vi.fn(),
+      getPaymentSyncFence: vi.fn().mockResolvedValue(0),
+      replaceRequestPaymentSnapshots: vi.fn().mockResolvedValue({ applied: true }),
       markEventProcessed: vi.fn().mockResolvedValue(true),
       markEventFailed: vi.fn(),
     };

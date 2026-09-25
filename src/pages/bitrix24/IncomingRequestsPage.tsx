@@ -6,6 +6,7 @@ import { orderCatalogLineAmount, orderCatalogLineInput, type OrderCatalogLine } 
 import { BitrixActorLabel, BitrixPaymentAuthorship } from '../../components/bitrix24/BitrixAuthorship';
 import {
   Alert,
+  AutoComplete,
   Button,
   DatePicker,
   Descriptions,
@@ -35,6 +36,7 @@ import type { Dayjs } from 'dayjs';
 import { useNavigate } from 'react-router-dom';
 import { Table } from '../../ui/tooltipDelay';
 import { authSession } from '../../api/authSession';
+import { catalogApi, type CatalogItem } from '../../api/catalogApi';
 import {
   bitrix24Api,
   type Bitrix24AmbiguousPaymentCommand,
@@ -43,6 +45,9 @@ import {
   type Bitrix24IncomingRequestDetailInput,
   type Bitrix24IncomingRequestListItem,
   type Bitrix24PaymentTypeMapping,
+  type Bitrix24ProductMapping,
+  type Bitrix24ProductRowSnapshot,
+  type Bitrix24SeenProduct,
   type Bitrix24RequestState,
   type Bitrix24SyncHealth,
   type Bitrix24UserMapping,
@@ -75,9 +80,91 @@ const emptyFilters = (): RequestFilters => ({
   updatedRange: null,
 });
 
+/**
+ * Catalog-item picker backed by the existing catalogApi search — there is no
+ * Hasura adapter for catalog_items. Remote search loads at most 100 matching
+ * items; the currently bound value stays visible with its known label even
+ * while options load or the item is inactive.
+ */
+function CatalogItemSelect(props: {
+  value?: number;
+  currentLabel?: string | null;
+  onChange: (id: number) => void;
+  placeholder?: string;
+  style?: React.CSSProperties;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [query, setQuery] = useState('');
+  const [items, setItems] = useState<CatalogItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(search), 250);
+    return () => clearTimeout(timer);
+  }, [search]);
+  useEffect(() => {
+    if (!open || props.disabled) return;
+    let current = true;
+    setLoading(true);
+    setError('');
+    catalogApi.list({ q: query, active: 'true', offset: 0, limit: 100 })
+      .then((result) => { if (current) setItems(result.items); })
+      .catch((reason) => {
+        if (current) {
+          setItems([]);
+          setError(reason instanceof Error ? reason.message : 'Не удалось загрузить справочник');
+        }
+      })
+      .finally(() => { if (current) setLoading(false); });
+    return () => { current = false; };
+  }, [open, props.disabled, query, retry]);
+  const options = items.map((item) => ({
+    value: item.id,
+    label: `${item.name}${item.sku ? ` · ${item.sku}` : ''} · #${item.id}`,
+  }));
+  if (props.value !== undefined && !options.some((option) => option.value === props.value)) {
+    options.unshift({
+      value: props.value,
+      label: `${props.currentLabel ?? 'Позиция справочника'} · #${props.value}`,
+    });
+  }
+  return (
+    <Select
+      showSearch
+      filterOption={false}
+      value={props.value}
+      options={options}
+      loading={loading}
+      placeholder={props.placeholder}
+      style={props.style}
+      disabled={props.disabled}
+      open={open}
+      onDropdownVisibleChange={setOpen}
+      onSearch={setSearch}
+      onChange={(id) => props.onChange(Number(id))}
+      notFoundContent={
+        error
+          ? <Button size="small" onClick={() => setRetry((count) => count + 1)}>{error}. Повторить</Button>
+          : undefined
+      }
+    />
+  );
+}
+
 export const Bitrix24IncomingRequestsPage: React.FC = () => {
   const navigate = useNavigate();
   const user = authSession.getUser();
+  const canConvert = can('bitrix24.requests.convert', user);
+  const canUpdate = can('bitrix24.requests.update', user);
+  const canViewFinancials = can('orders.view_financials', user);
+  const canMaterialize =
+    canViewFinancials && can('bitrix24.payments.materialize', user);
+  const canManage = can('bitrix24.integration.manage', user);
+  const canManageProducts =
+    canManage && (can('references.view', user) || can('references.manage', user));
   const [state, setState] = useState<Bitrix24RequestState>('active');
   const [rows, setRows] = useState<Bitrix24IncomingRequestListItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -103,6 +190,12 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [catalogRefreshing, setCatalogRefreshing] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
+  const [productMappings, setProductMappings] = useState<Bitrix24ProductMapping[]>([]);
+  const [seenProducts, setSeenProducts] = useState<Bitrix24SeenProduct[]>([]);
+  const [newProductId, setNewProductId] = useState('');
+  const [newCatalogItemId, setNewCatalogItemId] = useState<number | null>(null);
+  const [productDrafts, setProductDrafts] = useState<Record<string, number | null>>({});
   const [mappings, setMappings] = useState<Bitrix24PaymentTypeMapping[]>([]);
   const [userMappings, setUserMappings] = useState<Bitrix24UserMapping[]>([]);
   const [userMappingTargets, setUserMappingTargets] = useState<Bitrix24UserMappingTarget[]>([]);
@@ -158,7 +251,6 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     pagination: { pageSize: 1_000 },
   });
-
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -328,30 +420,51 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
 
   const materializePayments = async () => {
     if (!selected || selected.orderVersion === null) return;
+    // Selectable: new paid remote payments for materialization AND snapshots
+    // already linked to an ERP payment (explicit update/delete convergence).
     const bitrixPaymentIds = selectedPaymentIds.filter((id) =>
       selected.payments.some((payment) =>
-        payment.bitrixPaymentId === id && payment.paid && payment.state !== 'deleted'));
+        payment.bitrixPaymentId === id &&
+        ((payment.paid && payment.state !== 'deleted') || payment.erpPaymentId !== null)));
     if (bitrixPaymentIds.length === 0) {
-      notification.info({ message: 'Нет активных оплат для переноса' });
+      notification.info({ message: 'Нет оплат для переноса или сверки' });
       return;
     }
-    setMaterializing(true);
-    try {
-      const updated = await bitrix24Api.materializePayments(selected.requestId, {
-        bitrixPaymentIds,
-        expectedOrderVersion: selected.orderVersion,
+    const converging = selected.payments.filter((payment) =>
+      bitrixPaymentIds.includes(payment.bitrixPaymentId) &&
+      payment.erpPaymentId !== null && (!payment.paid || payment.state === 'deleted'));
+    const run = async () => {
+      setMaterializing(true);
+      try {
+        const updated = await bitrix24Api.materializePayments(selected.requestId, {
+          bitrixPaymentIds,
+          expectedOrderVersion: selected.orderVersion!,
+        });
+        setSelected(updated);
+        await load();
+        notification.success({ message: 'Платежи перенесены в ERP' });
+      } catch (error) {
+        notification.error({
+          message: 'Платежи не перенесены',
+          description: errorMessage(error),
+        });
+      } finally {
+        setMaterializing(false);
+      }
+    };
+    if (converging.length > 0) {
+      Modal.confirm({
+        title: 'Синхронизировать оплаты с ERP?',
+        content:
+          'Для выбранных оплат уже есть платёж в ERP. Если оплата удалена или отменена в Bitrix24, связанный платёж ERP будет удалён; при изменении суммы — обновлён. Продолжить?',
+        okText: 'Синхронизировать',
+        okButtonProps: { danger: true },
+        cancelText: 'Отмена',
+        onOk: () => void run(),
       });
-      setSelected(updated);
-      await load();
-      notification.success({ message: 'Платежи перенесены в ERP' });
-    } catch (error) {
-      notification.error({
-        message: 'Платежи не перенесены',
-        description: errorMessage(error),
-      });
-    } finally {
-      setMaterializing(false);
+      return;
     }
+    await run();
   };
 
   const archiveIncomingRequest = () => {
@@ -385,21 +498,86 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
     });
   };
 
+  const reconcileRequest = async () => {
+    if (!selected) return;
+    setReconciling(true);
+    try {
+      const updated = await bitrix24Api.reconcileIncomingRequest(selected.requestId);
+      setSelected(updated);
+      await load();
+      notification.success({ message: 'Заявка сверена с Bitrix24' });
+    } catch (error) {
+      notification.error({
+        message: 'Сверка не выполнена',
+        description: errorMessage(error),
+      });
+    } finally {
+      setReconciling(false);
+    }
+  };
+
+  const saveProductMapping = async (
+    bitrixProductId: string,
+    catalogItemId: number | null,
+    active: boolean,
+    expectedVersion: number,
+  ) => {
+    if (!catalogItemId) {
+      notification.warning({ message: 'Выберите позицию справочника' });
+      return;
+    }
+    setSettingsLoading(true);
+    try {
+      await bitrix24Api.updateProductMapping(bitrixProductId, {
+        catalogItemId,
+        active,
+        expectedVersion,
+      });
+      if (bitrixProductId === newProductId) {
+        setNewProductId('');
+        setNewCatalogItemId(null);
+      }
+      // Clear the row draft only on success — a version conflict reloads the
+      // list but keeps the operator's selection.
+      setProductDrafts((current) => {
+        const next = { ...current };
+        delete next[bitrixProductId];
+        return next;
+      });
+      notification.success({ message: 'Сопоставление товара сохранено' });
+      await loadSettings();
+    } catch (error) {
+      // Version conflicts reload the list; user input is preserved.
+      notification.error({
+        message: 'Не удалось сохранить сопоставление товара',
+        description: errorMessage(error),
+      });
+      await loadSettings();
+    }
+  };
+
   const loadSettings = useCallback(async () => {
     setSettingsLoading(true);
     try {
-      const [nextMappings, nextUserMappings, nextUserTargets, nextHealth, nextAmbiguous] = await Promise.all([
+      const [nextMappings, nextUserMappings, nextUserTargets, nextHealth, nextAmbiguous, nextProducts] = await Promise.all([
         bitrix24Api.listPaymentTypeMappings(),
         bitrix24Api.listUserMappings(),
         bitrix24Api.listUserMappingTargets(),
         bitrix24Api.getSyncHealth(),
         bitrix24Api.listAmbiguousPaymentCommands(),
+        // Product mappings also require catalog read — skip without failing
+        // the rest of the settings when the caller lacks it.
+        canManageProducts
+          ? bitrix24Api.listProductMappings()
+          : Promise.resolve({ mappings: [], seenProducts: [] }),
       ]);
       setMappings(nextMappings);
       setUserMappings(nextUserMappings);
       setUserMappingTargets(nextUserTargets);
       setHealth(nextHealth);
       setAmbiguousCommands(nextAmbiguous);
+      setProductMappings(nextProducts.mappings);
+      setSeenProducts(nextProducts.seenProducts);
     } catch (error) {
       notification.error({
         message: 'Не удалось загрузить настройки Bitrix',
@@ -525,13 +703,6 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
       setAmbiguityResolving(false);
     }
   };
-
-  const canConvert = can('bitrix24.requests.convert', user);
-  const canUpdate = can('bitrix24.requests.update', user);
-  const canViewFinancials = can('orders.view_financials', user);
-  const canMaterialize =
-    canViewFinancials && can('bitrix24.payments.materialize', user);
-  const canManage = can('bitrix24.integration.manage', user);
 
   const columns = useMemo(() => [
     {
@@ -798,6 +969,40 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
             {selected.syncStatus === 'blocked' && (
               <Alert type="error" showIcon message="Синхронизация заявки заблокирована" description={selected.syncErrorCode || undefined} />
             )}
+            {selected.state === 'active' && selected.productSync?.status === 'blocked' && (
+              <Alert
+                type="error"
+                showIcon
+                message="Позиции Bitrix заблокированы"
+                description={
+                  selected.productSync.errorCode === 'BITRIX24_PRODUCT_MAPPING_MISSING'
+                    ? `Не задано сопоставление для товаров: ${selected.productSync.blockedIds.join(', ')}. Администратор может настроить его в настройках синхронизации.`
+                    : selected.productSync.errorCode || 'Позиции Bitrix требуют сверки.'
+                }
+                action={
+                  canUpdate && (
+                    <Button size="small" loading={reconciling} onClick={() => void reconcileRequest()}>
+                      Сверить сейчас
+                    </Button>
+                  )
+                }
+              />
+            )}
+            {selected.state === 'active' && selected.productSync?.status === 'pending' && (
+              <Alert
+                type="warning"
+                showIcon
+                message="Позиции Bitrix ещё не сверены"
+                description="Оплата и преобразование недоступны до первой успешной сверки позиций и платежей."
+                action={
+                  canUpdate && (
+                    <Button size="small" loading={reconciling} onClick={() => void reconcileRequest()}>
+                      Сверить сейчас
+                    </Button>
+                  )
+                }
+              />
+            )}
             <BitrixPaidConversionNotice status={selected.autoConversionStatus} reason={selected.autoConversionReason} />
             <Space style={{ justifyContent: 'space-between', width: '100%' }}>
               <Typography.Title level={5} style={{ margin: 0 }}>
@@ -834,10 +1039,32 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
               ]}
             />
             <OrderCatalogLinesTable rows={selected.catalogLines ?? []} canViewFinancials={canViewFinancials} />
+            {(selected.productRows?.length ?? 0) > 0 && (
+              <Table
+                rowKey="bitrixRowId"
+                size="small"
+                pagination={false}
+                dataSource={selected.productRows}
+                scroll={{ x: 720 }}
+                columns={[
+                  { title: 'Строка Bitrix', dataIndex: 'bitrixRowId', width: 110 },
+                  { title: 'Товар', key: 'name', render: (_, row) => row.productName || `Товар #${row.bitrixProductId}` },
+                  { title: 'Позиция ERP', key: 'catalog', render: (_, row) =>
+                      row.catalogItemId === null ? '—' : `${row.catalogName ?? row.catalogItemId}${row.catalogActive === false ? ' (неактивна)' : ''}` },
+                  ...(canViewFinancials ? [
+                    { title: 'Кол-во', key: 'qty', align: 'right' as const, render: (_: unknown, row: Bitrix24ProductRowSnapshot) => row.quantity ?? '—' },
+                    { title: 'Сумма', key: 'total', align: 'right' as const, render: (_: unknown, row: Bitrix24ProductRowSnapshot) => row.lineTotal ?? '—' },
+                  ] : []),
+                  { title: 'Статус', key: 'state', width: 110, render: (_, row: Bitrix24ProductRowSnapshot) =>
+                      row.state === 'deleted' ? 'Удалена в Bitrix' : (row.orderLineId ? 'В заказе ERP' : 'Не импортирована') },
+                ]}
+              />
+            )}
             {selected.state === 'active' && canConvert && (
               <Button
                 type="primary"
-                disabled={(selected.detailCount === 0 && !selected.catalogLines?.length) || selected.syncStatus === 'blocked'}
+                disabled={(selected.detailCount === 0 && !selected.catalogLines?.length) || selected.syncStatus === 'blocked' ||
+                  (selected.productSync?.status ?? 'pending') !== 'ready'}
                 onClick={() => {
                   setConversionName(selected.title);
                   setConversionProjectId(null);
@@ -884,7 +1111,10 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
                 selectedRowKeys: selectedPaymentIds,
                 onChange: (keys) => setSelectedPaymentIds(keys.map(String)),
                 getCheckboxProps: (payment) => ({
-                  disabled: !payment.paid || payment.state === 'deleted',
+                  // New paid remote payments AND snapshots linked to an ERP
+                  // payment (explicit update/delete convergence target).
+                  disabled: !(payment.paid && payment.state !== 'deleted') &&
+                    payment.erpPaymentId === null,
                 }),
               } : undefined}
               columns={[
@@ -1291,6 +1521,145 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
               },
             ]}
           />
+
+          {canManageProducts && (
+          <>
+          <Typography.Title level={5} style={{ marginBottom: 0 }}>
+            Товары Bitrix → позиции справочника
+          </Typography.Title>
+          <Typography.Text type="secondary">
+            Явное сопоставление по ID товара Bitrix24 — без него заявка с этой
+            позицией блокируется. Сопоставление по названию не используется.
+          </Typography.Text>
+          {seenProducts.filter(
+            (seen) =>
+              !productMappings.some(
+                (mapping) => mapping.bitrixProductId === seen.bitrixProductId && mapping.active,
+              ),
+          ).length > 0 && (
+            <Alert
+              type="warning"
+              showIcon
+              message="Есть встреченные товары Bitrix без активного сопоставления"
+              description={seenProducts
+                .filter(
+                  (seen) =>
+                    !productMappings.some(
+                      (mapping) => mapping.bitrixProductId === seen.bitrixProductId && mapping.active,
+                    ),
+                )
+                .map((seen) => `${seen.bitrixProductId}${seen.productName ? ` (${seen.productName})` : ''}`)
+                .join(', ')}
+            />
+          )}
+          <Space wrap>
+            <AutoComplete
+              value={newProductId}
+              options={seenProducts.map((seen) => ({
+                value: seen.bitrixProductId,
+                label: `${seen.bitrixProductId} — ${seen.productName ?? 'товар Bitrix'}`,
+              }))}
+              onChange={(value) => setNewProductId(String(value).trim())}
+              placeholder="ID товара Bitrix (можно ввести вручную)"
+              style={{ width: 300 }}
+              filterOption={(input, option) =>
+                option?.value.toString().includes(input) ||
+                (option?.label ?? '').toString().toLowerCase().includes(input.toLowerCase())}
+            />
+            <CatalogItemSelect
+              value={newCatalogItemId ?? undefined}
+              onChange={setNewCatalogItemId}
+              placeholder="Позиция справочника ERP"
+              style={{ width: 360 }}
+            />
+            <Button
+              type="primary"
+              disabled={!/^[1-9][0-9]{0,14}$/.test(newProductId) || !newCatalogItemId}
+              loading={settingsLoading}
+              onClick={() =>
+                void saveProductMapping(newProductId, newCatalogItemId, true, 0)}
+            >
+              Сопоставить
+            </Button>
+          </Space>
+          <Table<Bitrix24ProductMapping>
+            rowKey="bitrixProductId"
+            loading={settingsLoading}
+            pagination={false}
+            dataSource={productMappings}
+            columns={[
+              { title: 'ID товара Bitrix', dataIndex: 'bitrixProductId', width: 130 },
+              {
+                title: 'Встречен как',
+                key: 'seen',
+                render: (_, mapping) => mapping.lastSeenName ?? '—',
+              },
+              {
+                title: 'Позиция справочника ERP',
+                key: 'catalogItem',
+                render: (_, mapping) => (
+                  <CatalogItemSelect
+                    value={
+                      productDrafts[mapping.bitrixProductId] ??
+                      mapping.catalogItemId ??
+                      undefined
+                    }
+                    currentLabel={mapping.catalogName}
+                    placeholder="Выберите позицию"
+                    style={{ width: '100%' }}
+                    onChange={(value) =>
+                      setProductDrafts((current) => ({
+                        ...current,
+                        [mapping.bitrixProductId]: value,
+                      }))}
+                  />
+                ),
+              },
+              {
+                title: 'Активно',
+                key: 'active',
+                width: 90,
+                render: (_, mapping) => (
+                  <Switch
+                    checked={mapping.active}
+                    disabled={mapping.catalogItemId === null && !productDrafts[mapping.bitrixProductId]}
+                    onChange={(active) =>
+                      void saveProductMapping(
+                        mapping.bitrixProductId,
+                        productDrafts[mapping.bitrixProductId] ?? mapping.catalogItemId,
+                        active,
+                        mapping.version,
+                      )}
+                  />
+                ),
+              },
+              {
+                title: '',
+                key: 'save',
+                width: 120,
+                render: (_, mapping) => (
+                  <Button
+                    size="small"
+                    disabled={
+                      !productDrafts[mapping.bitrixProductId] ||
+                      productDrafts[mapping.bitrixProductId] === mapping.catalogItemId
+                    }
+                    onClick={() =>
+                      void saveProductMapping(
+                        mapping.bitrixProductId,
+                        productDrafts[mapping.bitrixProductId] ?? mapping.catalogItemId,
+                        mapping.active,
+                        mapping.version,
+                      )}
+                  >
+                    Сохранить
+                  </Button>
+                ),
+              },
+            ]}
+          />
+          </>
+          )}
         </Space>
       </Drawer>
 
@@ -1310,9 +1679,51 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
             showIcon
             message="Сумма CRM хранится отдельно. Расчёт ERP формируется из деталей и товаров/услуг."
           />
-          <OrderCatalogLinesTable rows={catalogDrafts} canViewFinancials={canViewFinancials}
-            canSelect={can('references.view', user) || can('references.manage', user)}
-            onChange={canViewFinancials && !savingDetails ? (rows, ids = []) => { setCatalogDrafts(rows); setDeletedCatalogLineIds(current => [...new Set([...current, ...ids])]); } : undefined} />
+          {(() => {
+            // Importer-applied lines (appliedState='active' with a bound order
+            // line) are read-only in the local editor — they change only via
+            // reconcile. Remote-deleted snapshots keep appliedState so a
+            // blocked removal cannot become editable here.
+            const importedLineIds = new Set(
+              (selected?.productRows ?? [])
+                .filter((row) => row.orderLineId !== null && row.appliedState === 'active')
+                .map((row) => row.orderLineId as number),
+            );
+            const readonlyDrafts = catalogDrafts.filter(
+              (row) => row.id !== undefined && importedLineIds.has(row.id),
+            );
+            const editableDrafts = catalogDrafts.filter(
+              (row) => row.id === undefined || !importedLineIds.has(row.id),
+            );
+            return (
+              <>
+                {readonlyDrafts.length > 0 && (
+                  <>
+                    <Alert
+                      type="info"
+                      showIcon
+                      message="Импортированные из Bitrix24 позиции изменяются только сверкой заявки."
+                    />
+                    <OrderCatalogLinesTable
+                      rows={readonlyDrafts}
+                      canViewFinancials={canViewFinancials}
+                    />
+                  </>
+                )}
+                <OrderCatalogLinesTable
+                  rows={editableDrafts}
+                  canViewFinancials={canViewFinancials}
+                  canSelect={can('references.view', user) || can('references.manage', user)}
+                  onChange={canViewFinancials && !savingDetails
+                    ? (rows, ids = []) => {
+                        setCatalogDrafts([...rows, ...readonlyDrafts]);
+                        setDeletedCatalogLineIds(current => [...new Set([...current, ...ids])]);
+                      }
+                    : undefined}
+                />
+              </>
+            );
+          })()}
           <Button icon={<PlusOutlined />} onClick={addDetailDraft}>
             Добавить деталь
           </Button>

@@ -14,6 +14,7 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
+import { requireCatalogPermission } from '../../catalog/catalog.validation';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { PermissionsGuard } from '../../../permissions/permissions.guard';
 import { RequirePermissions } from '../../../permissions/require-permissions.decorator';
@@ -326,6 +327,75 @@ export class Bitrix24ReverseAdminController {
       actorUserId: actor.id,
       auditRequestId: requireRequestId(request),
     });
+  }
+
+  @ApiOperation({ summary: 'List Bitrix24 product mappings and seen Bitrix products' })
+  @Get('product-mappings')
+  @RequirePermissions('bitrix24.integration.manage')
+  listProductMappings(@Req() request: RequestWithCurrentUser) {
+    requireCatalogPermission(requireUser(request));
+    return this.repository.listProductMappings();
+  }
+
+  @ApiOperation({ summary: 'Create, remap, or deactivate an explicit Bitrix24 product mapping' })
+  @Put('product-mappings/:bitrixProductId')
+  @RequirePermissions('bitrix24.integration.manage')
+  updateProductMapping(
+    @Req() request: RequestWithCurrentUser,
+    @Param('bitrixProductId') bitrixProductId: string,
+    @Body() body: unknown,
+  ) {
+    const actor = requireCatalogPermission(requireUser(request));
+    // Bounded to bigint range — ordering/mapping SQL compares these as numbers.
+    const identity = z.string().regex(/^[1-9][0-9]{0,14}$/).safeParse(bitrixProductId);
+    const parsed = z.object({
+      catalogItemId: positiveId,
+      active: z.boolean(),
+      expectedVersion: z.coerce.number().int().min(0),
+    }).strict().safeParse(body);
+    if (!identity.success || !parsed.success) {
+      throw new ApiError(422, 'VALIDATION_ERROR', 'Bitrix24 product mapping is invalid');
+    }
+    return this.repository.upsertProductMapping({
+      bitrixProductId: identity.data,
+      catalogItemId: parsed.data.catalogItemId,
+      active: parsed.data.active,
+      expectedVersion: parsed.data.expectedVersion,
+      actorUserId: Number(actor.id),
+      actorUsername: actor.username,
+      actorRole: actor.role,
+      auditRequestId: requireRequestId(request),
+    });
+  }
+
+  @ApiOperation({ summary: 'Reconcile one incoming request: product rows and payments' })
+  @Post('incoming-requests/:requestId/reconcile')
+  @HttpCode(200)
+  @RequirePermissions('bitrix24.requests.update')
+  async reconcileIncomingRequest(
+    @Req() request: RequestWithCurrentUser,
+    @Param('requestId') requestIdValue: string,
+  ) {
+    const actor = requireUser(request);
+    const requestId = parseId(requestIdValue, 'requestId');
+    const scope = crmRequestScope(actor);
+    const canViewFinancials = actor.permissions.includes('orders.view_financials');
+    const current = await this.repository.getIncomingRequest(
+      requestId, scope, canViewFinancials,
+    );
+    if (current.state !== 'active') {
+      throw new ApiError(
+        409,
+        'BITRIX24_REQUEST_NOT_RECONCILABLE',
+        'Only an active Bitrix24 request can be reconciled',
+      );
+    }
+    await this.processor.reconcileIncomingRequestNow({
+      requestId,
+      dealId: String(current.bitrixDealId),
+      auditRequestId: requireRequestId(request),
+    });
+    return this.repository.getIncomingRequest(requestId, scope, canViewFinancials);
   }
 
   @ApiOperation({ summary: 'Get Bitrix24 reverse synchronization health' })

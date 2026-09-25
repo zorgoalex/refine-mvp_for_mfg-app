@@ -49,6 +49,9 @@ describe.skipIf(!url)('order catalogue / real PostgreSQL, rollback-only', () => 
     client = await pool.connect(); await client.query('BEGIN'); await client.query("SET LOCAL lock_timeout='3s'");
     const migration = readFileSync(new URL('../../../../db/migrations/162_order_catalog_lines.sql', import.meta.url), 'utf8');
     await client.query(migration); await client.query(migration);
+    // General order saves now enforce Bitrix-imported row ownership. Keep
+    // the fixture on the same additive schema as the released backend.
+    await client.query(readFileSync(new URL('../../../../db/migrations/186_bitrix24_product_import.sql', import.meta.url), 'utf8'));
     prefix = 'E2E-order-catalog-' + randomUUID();
     const actorId = (await client.query(`INSERT INTO users(username,email,password_hash,role_id) VALUES($1,$2,'E2E-NO-LOGIN',1) RETURNING user_id`, [prefix, prefix + '@example.invalid'])).rows[0].user_id;
     actor = { id: String(actorId), username: prefix, role: 'admin', roleId: 1, permissions: getPermissionsForRole('admin') };

@@ -300,10 +300,9 @@ describe('Bitrix24SyncConsumer', () => {
     expect(dealFields).not.toHaveProperty('currencyId');
     expect(dealFields).not.toHaveProperty('comments');
     expect(dealFields).not.toHaveProperty('assignedById');
-    expect(h.bitrix.setDealProductRows).toHaveBeenCalledWith(
-      '20',
-      [expect.objectContaining({ price: 90, quantity: 1 })],
-    );
+    // Bitrix-owned orders keep CRM-originated product rows authoritative;
+    // outbound sync must not overwrite them.
+    expect(h.bitrix.setDealProductRows).not.toHaveBeenCalled();
     expect(h.bitrix.findCrmItemByOrigin).not.toHaveBeenCalled();
     expect(h.bitrix.createCrmItem).not.toHaveBeenCalled();
   });

@@ -24,6 +24,7 @@ import { Bitrix24OrderConversionController } from './reverse/bitrix24-order-conv
 import { Bitrix24ReverseIngressService } from './reverse/bitrix24-reverse-ingress.service';
 import { Bitrix24ReverseProcessorService } from './reverse/bitrix24-reverse-processor.service';
 import { Bitrix24PaidConversionService } from './reverse/bitrix24-paid-conversion.service';
+import { Bitrix24ProductSyncService } from './reverse/bitrix24-product-sync.service';
 import { Bitrix24ReverseSchedulerService } from './reverse/bitrix24-reverse-scheduler.service';
 import { PgBitrix24ReverseRepository } from './reverse/pg-bitrix24-reverse-repository';
 import { Bitrix24ManualPaymentCommandService } from './widget/bitrix24-manual-payment-command.service';
@@ -224,18 +225,33 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
       inject: [CrmSyncRuntimeConfigService, Bitrix24OAuthTokenService, Bitrix24AdmissionState],
     },
     {
+      provide: Bitrix24ProductSyncService,
+      useFactory: (
+        repository: PgBitrix24ReverseRepository,
+        bitrix: Bitrix24ApiPort,
+        config: CrmSyncRuntimeConfigService,
+      ) => new Bitrix24ProductSyncService(repository, bitrix, config),
+      inject: [
+        PgBitrix24ReverseRepository,
+        BITRIX24_REVERSE_API_PORT,
+        CrmSyncRuntimeConfigService,
+      ],
+    },
+    {
       provide: Bitrix24ReverseProcessorService,
       useFactory: (
         repository: PgBitrix24ReverseRepository,
         bitrix: Bitrix24ApiPort,
         config: CrmSyncRuntimeConfigService,
         paidConversion: Bitrix24PaidConversionService,
-      ) => new Bitrix24ReverseProcessorService(repository, bitrix, config, paidConversion),
+        productSync: Bitrix24ProductSyncService,
+      ) => new Bitrix24ReverseProcessorService(repository, bitrix, config, paidConversion, productSync),
       inject: [
         PgBitrix24ReverseRepository,
         BITRIX24_REVERSE_API_PORT,
         CrmSyncRuntimeConfigService,
         Bitrix24PaidConversionService,
+        Bitrix24ProductSyncService,
       ],
     },
     {
@@ -253,6 +269,8 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
         config: CrmSyncRuntimeConfigService,
         catalog: Bitrix24PaymentSystemCatalogService,
         paidConversion: Bitrix24PaidConversionService,
+        productSync: Bitrix24ProductSyncService,
+        processor: Bitrix24ReverseProcessorService,
       ) => new Bitrix24ManualPaymentCommandService(
         repository,
         auth,
@@ -261,6 +279,8 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
         config,
         catalog,
         paidConversion,
+        productSync,
+        processor,
       ),
       inject: [
         Bitrix24PaymentWidgetRepository,
@@ -270,6 +290,8 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
         CrmSyncRuntimeConfigService,
         Bitrix24PaymentSystemCatalogService,
         Bitrix24PaidConversionService,
+        Bitrix24ProductSyncService,
+        Bitrix24ReverseProcessorService,
       ],
     },
     {

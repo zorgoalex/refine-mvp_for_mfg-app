@@ -13,6 +13,7 @@ import {
 import type { Bitrix24InboundEventRow } from './bitrix24-reverse.types';
 import { PgBitrix24ReverseRepository } from './pg-bitrix24-reverse-repository';
 import { Bitrix24PaidConversionService } from './bitrix24-paid-conversion.service';
+import { Bitrix24ProductSyncService } from './bitrix24-product-sync.service';
 
 export class Bitrix24ReverseProcessorService {
   constructor(
@@ -20,6 +21,7 @@ export class Bitrix24ReverseProcessorService {
     private readonly bitrix: Bitrix24ApiPort,
     private readonly config: CrmSyncRuntimeConfigService,
     private readonly paidConversion?: Bitrix24PaidConversionService,
+    private readonly productSync?: Bitrix24ProductSyncService,
   ) {}
 
   async assertReady(): Promise<void> {
@@ -114,7 +116,7 @@ export class Bitrix24ReverseProcessorService {
     dealId: string;
     orderId: number;
     auditRequestId: string;
-  }): Promise<void> {
+  }): Promise<{ applied: boolean }> {
     const flags = this.config.getReverseSync();
     if (!flags.enabled || flags.dryRun) {
       throw new ApiError(
@@ -124,7 +126,7 @@ export class Bitrix24ReverseProcessorService {
       );
     }
     await this.assertReady();
-    await this.reconcileMappedOrderPayments(
+    return this.reconcileMappedOrderPayments(
       input.dealId,
       input.orderId,
       input.auditRequestId,
@@ -266,6 +268,15 @@ export class Bitrix24ReverseProcessorService {
       { actorUserId: requireActorUserId(reverseConfig.actorUserId) },
     );
     if (result.requestId !== null) {
+      // Import the complete product-row list before payments/conversion so the
+      // ERP request carries real positions and totals. A malformed or partial
+      // remote read fails the event instead of degrading to an empty request.
+      await this.productSync?.syncDeal({
+        dealId: bitrixId,
+        auditRequestId: requestId,
+        eventId: requestId,
+        lockToken,
+      });
       await this.reconcileRequestPayments(
         bitrixId,
         result.requestId,
@@ -282,20 +293,77 @@ export class Bitrix24ReverseProcessorService {
     }
   }
 
+  /**
+   * Permissioned manual reconcile for one incoming request: refreshes the
+   * product-row snapshot/import and the payment snapshots. Both failures are
+   * propagated to the caller; a `blocked` product result is reported, not
+   * hidden.
+   */
+  async reconcileIncomingRequestNow(input: {
+    requestId: number;
+    dealId: string;
+    auditRequestId: string;
+  }): Promise<{
+    productStatus: string;
+    productReason: string | null;
+    productBlockedIds: string[];
+    paymentsApplied: boolean;
+  }> {
+    const flags = this.config.getReverseSync();
+    if (!flags.enabled || flags.dryRun) {
+      throw new ApiError(
+        503,
+        'BITRIX24_REVERSE_SYNC_DISABLED',
+        'Bitrix24 reverse synchronization is not active',
+      );
+    }
+    await this.assertReady();
+    if (!this.productSync) {
+      throw new ApiError(
+        503,
+        'BITRIX24_REVERSE_SYNC_DISABLED',
+        'Bitrix24 product synchronization is not configured',
+      );
+    }
+    const sync = await this.productSync.syncDeal({
+      dealId: input.dealId,
+      auditRequestId: input.auditRequestId,
+    });
+    const payments = await this.reconcileRequestPayments(
+      input.dealId,
+      input.requestId,
+      input.auditRequestId,
+      undefined,
+    );
+    return {
+      productStatus: sync.status,
+      productReason: sync.reason,
+      productBlockedIds: sync.blockedIds,
+      paymentsApplied: payments.applied,
+    };
+  }
+
   private async reconcileRequestPayments(
     dealId: string,
     requestId: number,
     auditRequestId: string,
-    lockToken: string,
-  ): Promise<void> {
+    lockToken?: string,
+  ): Promise<{ applied: boolean }> {
+    // Payment generation fence BEFORE the remote fetch: any snapshot mutation
+    // committed after this read invalidates the fetched payload at apply.
+    const fence = await this.repository.getPaymentSyncFence(dealId);
     const payments = await this.loadManualPayments(dealId);
-    await this.repository.replaceRequestPaymentSnapshots(
+    const result = await this.repository.replaceRequestPaymentSnapshots(
       requestId,
       payments,
       auditRequestId,
       lockToken,
+      fence,
     );
-    await this.paidConversion?.run({ dealId, requestId: auditRequestId, eventId: auditRequestId, lockToken });
+    if (result.applied) {
+      await this.paidConversion?.run({ dealId, requestId: auditRequestId, eventId: auditRequestId, lockToken });
+    }
+    return result;
   }
 
   private async reconcileMappedOrderPayments(
@@ -303,14 +371,16 @@ export class Bitrix24ReverseProcessorService {
     orderId: number,
     auditRequestId: string,
     lockToken?: string,
-  ): Promise<void> {
+  ): Promise<{ applied: boolean }> {
+    const fence = await this.repository.getPaymentSyncFence(dealId);
     const payments = await this.loadManualPayments(dealId);
-    await this.repository.replaceMappedOrderPaymentSnapshots(
+    return this.repository.replaceMappedOrderPaymentSnapshots(
       orderId,
       payments,
       auditRequestId,
       lockToken,
       dealId,
+      fence,
     );
   }
 

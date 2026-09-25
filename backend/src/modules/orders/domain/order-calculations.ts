@@ -147,12 +147,19 @@ export function sumMoney(values: number[]): number {
   return centsToMoney(values.reduce((sum, value) => sum + moneyToCents(value), 0));
 }
 
-function moneyToCents(value: number): number {
-  if (!Number.isFinite(value)) {
+/**
+ * Canonical money value → integer cents. Accepts the numeric text used by
+ * PG numeric columns; arithmetic on cents avoids binary-float residuals
+ * (e.g. 0.30 - 0.20 ≠ 0.10 in floats).
+ */
+export function moneyToCents(value: number | string | null | undefined): number {
+  if (value === null || value === undefined) return 0;
+  const parsed = typeof value === 'number' ? value : Number(String(value).trim());
+  if (!Number.isFinite(parsed)) {
     throw new Error('Money value must be finite');
   }
 
-  return Math.round((value + Number.EPSILON) * 100);
+  return Math.round((parsed + (parsed >= 0 ? Number.EPSILON : -Number.EPSILON)) * 100);
 }
 
 function centsToMoney(cents: number): number {

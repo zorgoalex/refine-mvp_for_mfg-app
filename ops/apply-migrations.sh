@@ -2287,6 +2287,43 @@ probe_file() {
       "SELECT count(*)=2 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_schedules'::regclass AND contype='c' AND convalidated AND pg_get_constraintdef(oid) LIKE '%AT TIME ZONE%';" \
       "SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_schedules'::regclass AND contype='c' AND convalidated AND pg_get_constraintdef(oid) LIKE '%date_trunc%');" \
       "SELECT NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_settings'::regclass AND NOT convalidated);" ;;
+    186_bitrix24_product_import*) probe_all \
+      "$(q_tbl bitrix24_product_mapping)" \
+      "SELECT count(*)=8 FROM information_schema.columns WHERE table_schema='public' AND table_name='bitrix24_product_mapping';" \
+      "SELECT count(*)=6 FROM information_schema.columns WHERE table_schema='public' AND table_name='bitrix24_product_mapping' AND is_nullable='NO' AND column_name=ANY(string_to_array('bitrix_product_id,catalog_item_id,active,version,created_at,updated_at',','));" \
+      "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='bitrix24_product_mapping' AND column_name='version' AND data_type='integer' AND column_default='1');" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.bitrix24_product_mapping'::regclass AND conname='bitrix24_product_mapping_pkey' AND contype='p' AND convalidated AND pg_get_constraintdef(oid) LIKE '%bitrix_product_id%');" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.bitrix24_product_mapping'::regclass AND conname='bitrix24_product_mapping_catalog_item_id_fkey' AND contype='f' AND convalidated AND confrelid='public.catalog_items'::regclass);" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.bitrix24_product_mapping'::regclass AND conname='bitrix24_product_mapping_bitrix_product_id_check' AND contype='c' AND convalidated);" \
+      "$(q_tbl bitrix24_product_row_snapshot)" \
+      "SELECT count(*)=26 FROM information_schema.columns WHERE table_schema='public' AND table_name='bitrix24_product_row_snapshot';" \
+      "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='bitrix24_product_row_snapshot' AND column_name='applied_state' AND is_nullable='NO' AND column_default='''pending''::text');" \
+      "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='bitrix24_product_row_snapshot' AND column_name='quantity' AND data_type='numeric' AND numeric_precision=14 AND numeric_scale=3 AND is_nullable='NO');" \
+      "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='bitrix24_product_row_snapshot' AND column_name='unit_price' AND data_type='numeric' AND numeric_precision=14 AND numeric_scale=2 AND is_nullable='NO');" \
+      "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='bitrix24_product_row_snapshot' AND column_name='raw_row' AND data_type='jsonb' AND is_nullable='NO');" \
+      "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='bitrix24_product_row_snapshot' AND column_name='state' AND is_nullable='NO' AND column_default='''active''::text');" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.bitrix24_product_row_snapshot'::regclass AND conname='bitrix24_product_row_snapshot_pkey' AND contype='p' AND convalidated AND pg_get_constraintdef(oid) LIKE '%request_id%bitrix_row_id%');" \
+      "SELECT count(*)=3 FROM pg_constraint WHERE conrelid='public.bitrix24_product_row_snapshot'::regclass AND contype='f' AND convalidated AND confrelid=ANY(ARRAY[to_regclass('public.bitrix24_incoming_request'),to_regclass('public.catalog_items'),to_regclass('public.order_catalog_lines')]);" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.bitrix24_product_row_snapshot'::regclass AND conname='bitrix24_product_row_snapshot_bitrix_product_id_check' AND contype='c' AND convalidated);" \
+      "$(q_col bitrix24_incoming_request product_sync_status)" \
+      "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='bitrix24_incoming_request' AND column_name='product_sync_status' AND is_nullable='NO' AND column_default='''pending''::text');" \
+      "$(q_col bitrix24_incoming_request product_sync_error_code)" \
+      "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='bitrix24_incoming_request' AND column_name='product_sync_blocked_ids' AND data_type='jsonb' AND is_nullable='NO' AND column_default LIKE '%[]%');" \
+      "$(q_col bitrix24_incoming_request product_rows_hash)" \
+      "$(q_col bitrix24_incoming_request product_rows_total)" \
+      "$(q_col bitrix24_incoming_request product_order_fingerprint)" \
+      "$(q_col bitrix24_incoming_request product_rows_synced_at)" \
+      "$(q_con_on bitrix24_incoming_request chk_bitrix24_request_product_sync)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='chk_bitrix24_request_product_sync' AND convalidated AND pg_get_constraintdef(oid) LIKE '%pending%ready%blocked%');" \
+      "$(q_idx idx_bitrix24_product_row_snapshot_product)" \
+      "$(q_idx uq_bitrix24_product_row_snapshot_line)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_index WHERE indexrelid='public.uq_bitrix24_product_row_snapshot_line'::regclass AND indisunique AND indisvalid AND indisready);" \
+      "$(q_tbl bitrix24_payment_sync_gen)" \
+      "SELECT count(*)=3 FROM information_schema.columns WHERE table_schema='public' AND table_name='bitrix24_payment_sync_gen';" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.bitrix24_payment_sync_gen'::regclass AND conname='bitrix24_payment_sync_gen_pkey' AND contype='p' AND convalidated);" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.bitrix24_payment_sync_gen'::regclass AND contype='c' AND convalidated AND pg_get_constraintdef(oid) LIKE '%gen >= 0%');" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=ANY(ARRAY[to_regclass('public.bitrix24_product_mapping'),to_regclass('public.bitrix24_product_row_snapshot')]) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=ANY(ARRAY[to_regclass('public.bitrix24_product_mapping'),to_regclass('public.bitrix24_product_row_snapshot')]) AND (NOT indisvalid OR NOT indisready));" ;;
     182_mdf_physical_lineage*) probe_all \
       "$(q_tbl mdf_evidence_revisions)" "$(q_tbl mdf_revision_context)" "$(q_tbl mdf_revision_demand)" \
       "$(q_tbl mdf_revision_seals)" "$(q_tbl mdf_source_heads)" "$(q_tbl mdf_evidence_lines)" \
@@ -2347,6 +2384,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     184_whatsapp_daily_digest_schedule*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    186_bitrix24_product_import*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     182_mdf_physical_lineage*)

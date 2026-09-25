@@ -24,6 +24,7 @@ export interface Bitrix24ApiPort {
   deleteCrmItem(entityTypeId: number, id: string): Promise<void>;
   getCrmItem(entityTypeId: number, id: string): Promise<Record<string, unknown>>;
   setDealProductRows(dealId: string, productRows: Array<Record<string, unknown>>): Promise<void>;
+  listDealProductRows(dealId: string): Promise<Array<Record<string, unknown>>>;
   findPaymentByXmlId(xmlId: string): Promise<string | null>;
   listDealPaymentIds(dealId: string): Promise<string[]>;
   getPayment(id: string): Promise<Record<string, unknown>>;
@@ -97,6 +98,7 @@ const NETWORK_RETRY_SAFE_METHODS = new Set([
   'crm.item.list',
   'crm.item.delete',
   'crm.item.productrow.set',
+  'crm.item.productrow.list',
   'sale.payment.list',
   'sale.payment.get',
   'sale.payment.update',
@@ -351,6 +353,99 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
     });
   }
 
+  /**
+   * Complete read of a Deal's product rows. Pages follow the top-level `next`
+   * cursor; a missing/malformed page, an unexpected owner, a duplicate row ID
+   * or a truncated multi-page answer is an error, never an empty list.
+   * The ERP catalogue line limit caps the read at 1000 rows (20 pages).
+   */
+  async listDealProductRows(dealId: string): Promise<Array<Record<string, unknown>>> {
+    if (!/^[1-9][0-9]{0,14}$/.test(dealId)) {
+      throw new Bitrix24ApiError('crm.item.productrow.list', 'INVALID_ARGUMENT', 400, 'Invalid Deal ID');
+    }
+    const ownerId = Number(dealId);
+    const rows: Array<Record<string, unknown>> = [];
+    const seen = new Set<string>();
+    let start = 0;
+    for (let page = 0; page < 20; page += 1) {
+      const { result, next, total } = await this.callPage<{
+        productRows?: unknown;
+      }>('crm.item.productrow.list', {
+        filter: { '=ownerType': 'D', '=ownerId': ownerId },
+        order: { id: 'asc' },
+        start,
+      });
+      const pageRows = result !== null && typeof result === 'object' && Array.isArray(result.productRows)
+        ? result.productRows
+        : null;
+      if (!pageRows) throw this.unexpected('crm.item.productrow.list', result);
+      if (pageRows.length > 50) {
+        throw this.unexpected('crm.item.productrow.list', { rows: pageRows.length, start });
+      }
+      // A complete empty first page is a legitimate zero-row result.
+      if (pageRows.length === 0) {
+        if (start === 0 && (next === undefined || next === null) &&
+            (total === undefined || total === null || total === 0)) {
+          return rows;
+        }
+        throw this.unexpected('crm.item.productrow.list', { rows: 0, start, next, total });
+      }
+      for (const row of pageRows) {
+        if (row === null || typeof row !== 'object' || Array.isArray(row)) {
+          throw this.unexpected('crm.item.productrow.list', row);
+        }
+        const record = row as Record<string, unknown>;
+        const rowId = String(record.id ?? '');
+        if (
+          String(record.ownerType ?? '') !== 'D' ||
+          String(record.ownerId ?? '') !== String(ownerId) ||
+          !/^[1-9][0-9]*$/.test(rowId) ||
+          seen.has(rowId)
+        ) {
+          throw this.unexpected('crm.item.productrow.list', row);
+        }
+        seen.add(rowId);
+        rows.push(record);
+      }
+      // `next`/`total` are validated only when present: a present but malformed
+      // value is an error, never a silent end-of-list.
+      if (total !== undefined && total !== null) {
+        if (!Number.isSafeInteger(total) || (total as number) < rows.length) {
+          throw this.unexpected('crm.item.productrow.list', { total, rows: rows.length });
+        }
+        if ((total as number) > 1000) {
+          throw new Bitrix24ApiError(
+            'crm.item.productrow.list',
+            'PRODUCT_ROWS_TOO_MANY',
+            200,
+            `Deal ${dealId} reports ${total} product rows; ERP supports at most 1000`,
+          );
+        }
+      }
+      if (next === undefined || next === null) {
+        if (total !== undefined && total !== null && total !== rows.length) {
+          throw this.unexpected('crm.item.productrow.list', { total, rows: rows.length });
+        }
+        return rows;
+      }
+      if (
+        typeof next !== 'number' ||
+        !Number.isSafeInteger(next) ||
+        next <= start ||
+        next !== start + pageRows.length
+      ) {
+        throw this.unexpected('crm.item.productrow.list', { next, start });
+      }
+      start = next;
+    }
+    throw new Bitrix24ApiError(
+      'crm.item.productrow.list',
+      'PRODUCT_ROWS_TOO_MANY',
+      200,
+      `Deal ${dealId} has more than ${rows.length} product rows; ERP supports at most 1000`,
+    );
+  }
+
   async findPaymentByXmlId(xmlId: string): Promise<string | null> {
     const result = await this.call<{
       payments?: Array<{ id?: number | string; xmlId?: string }>;
@@ -399,6 +494,14 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
   }
 
   private async call<T = unknown>(method: string, params: Record<string, unknown>, networkRetry = true): Promise<T> {
+    return (await this.callPage<T>(method, params, networkRetry)).result;
+  }
+
+  private async callPage<T = unknown>(
+    method: string,
+    params: Record<string, unknown>,
+    networkRetry = true,
+  ): Promise<{ result: T; next: unknown; total: unknown }> {
     let authRefreshAttempted = false;
     let limitAttempt = 0;
     let networkAttempt = 0;
@@ -479,7 +582,7 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
   private async callOnce<T>(
     method: string,
     params: Record<string, unknown>,
-  ): Promise<T> {
+  ): Promise<{ result: T; next: unknown; total: unknown }> {
     await this.awaitAdmission(method);
     // Keep the ownership proof adjacent to every actual external REST attempt,
     // including attempts made after a limiter or retry wait.
@@ -548,7 +651,15 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
     if (!Object.prototype.hasOwnProperty.call(envelope, 'result')) {
       throw this.unexpected(method, envelope);
     }
-    return envelope.result as T;
+    // Keep raw pagination metadata: callers that paginate must validate a
+    // PRESENT value themselves; silently normalizing a malformed `next`/`total`
+    // to null would turn a broken page into an accepted truncated list.
+    const paged = envelope as BitrixEnvelope<T> & { next?: unknown; total?: unknown };
+    return {
+      result: envelope.result as T,
+      next: paged.next,
+      total: paged.total,
+    };
   }
 
   private async awaitAdmission(method: string): Promise<void> {
@@ -739,6 +850,11 @@ export class NoopBitrix24ApiClient implements Bitrix24ApiPort {
     productRows: Array<Record<string, unknown>>,
   ): Promise<void> {
     this.log(`[dry-run] crm.item.productrow.set deal=${dealId} ${JSON.stringify(productRows)}`);
+  }
+
+  async listDealProductRows(dealId: string): Promise<Array<Record<string, unknown>>> {
+    this.log(`[dry-run] crm.item.productrow.list deal=${dealId}`);
+    return [];
   }
 
   async findPaymentByXmlId(_xmlId: string): Promise<string | null> {

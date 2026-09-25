@@ -24,6 +24,7 @@ export class FailingBitrix24ApiClient implements Bitrix24ApiPort {
   deleteCrmItem(): Promise<void> { return this.fail(); }
   getCrmItem(): Promise<Record<string, unknown>> { return this.fail(); }
   setDealProductRows(): Promise<void> { return this.fail(); }
+  listDealProductRows(): Promise<Array<Record<string, unknown>>> { return this.fail(); }
   findPaymentByXmlId(): Promise<string | null> { return this.fail(); }
   listDealPaymentIds(): Promise<string[]> { return this.fail(); }
   getPayment(): Promise<Record<string, unknown>> { return this.fail(); }

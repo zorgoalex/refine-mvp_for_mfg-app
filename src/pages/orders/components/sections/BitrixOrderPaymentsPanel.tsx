@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { BitrixActorLabel, BitrixPaymentAuthorship } from '../../../../components/bitrix24/BitrixAuthorship';
 import { useInvalidate } from '@refinedev/core';
-import { Alert, Button, Space, Tag, Typography, message } from 'antd';
+import { Alert, Button, Modal, Space, Tag, Typography, message } from 'antd';
 import { LinkOutlined, ReloadOutlined, WalletOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { Table } from '../../../../ui/tooltipDelay';
@@ -51,9 +51,14 @@ export const BitrixOrderPaymentsPanel: React.FC<BitrixOrderPaymentsPanelProps> =
     void load();
   }, [load]);
 
+  // New paid remote payments are selectable for materialization; snapshots
+  // already linked to an ERP payment stay selectable so an operator can
+  // explicitly converge a remote update/cancellation onto the ERP receipt.
   const selectableIds = useMemo(() => view?.linked
     ? view.payments
-        .filter((payment) => payment.paid && payment.state !== 'deleted' && payment.erpPaymentId === null)
+        .filter((payment) =>
+          (payment.paid && payment.state !== 'deleted' && payment.erpPaymentId === null)
+          || payment.erpPaymentId !== null)
         .map((payment) => payment.bitrixPaymentId)
     : [], [view]);
 
@@ -75,6 +80,30 @@ export const BitrixOrderPaymentsPanel: React.FC<BitrixOrderPaymentsPanelProps> =
   };
 
   const materialize = async () => {
+    if (!view?.linked || selectedIds.length === 0) return;
+    // Linked snapshots converge onto existing ERP payments: a remote update
+    // rewrites it, a remote deletion/cancellation deletes it. Require an
+    // explicit confirmation — nothing mutates automatically.
+    const convergence = selectedIds.filter((id) => {
+      const payment = view.payments.find((row) => row.bitrixPaymentId === id);
+      return payment !== undefined && payment.erpPaymentId !== null;
+    });
+    if (convergence.length > 0) {
+      Modal.confirm({
+        title: 'Синхронизировать оплаты с ERP?',
+        content:
+          'Для выбранных оплат уже есть платёж в ERP. Если оплата удалена или отменена в Bitrix24, связанный платёж ERP будет удалён; при изменении суммы — обновлён. Продолжить?',
+        okText: 'Синхронизировать',
+        okButtonProps: { danger: true },
+        cancelText: 'Отмена',
+        onOk: () => runMaterialize(),
+      });
+      return;
+    }
+    await runMaterialize();
+  };
+
+  const runMaterialize = async () => {
     if (!view?.linked || selectedIds.length === 0) return;
     setMaterializing(true);
     setError(null);

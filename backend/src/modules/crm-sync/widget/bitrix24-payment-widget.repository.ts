@@ -3,8 +3,13 @@ import type { QueryResultRow } from 'pg';
 import type { AuditService } from '../../../common/audit/audit.service';
 import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
-import type { TransactionClient } from '../../../database/database.types';
-import { calculatePaymentStatusId, roundMoney } from '../../orders/domain/order-calculations';
+import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
+import {
+  assertBitrix24RequestProductReady,
+  bumpPaymentSyncGen,
+  lockPaymentSyncGen,
+} from '../reverse/pg-bitrix24-reverse-repository';
+import { calculatePaymentStatusId, moneyToCents, roundMoney } from '../../orders/domain/order-calculations';
 import { USER_ROLES, type UserRole } from '../../../permissions/permissions';
 
 export type WidgetCommandStatus =
@@ -66,11 +71,19 @@ export interface WidgetDealContext {
   dealId: string;
   requestId: number | null;
   requestState: string | null;
+  /** `sync_status` of the linked active request — 'ok'|'blocked'|null. */
+  requestSyncStatus: string | null;
   orderId: number | null;
   orderKind: string | null;
   orderVersion: number | null;
   finalAmount: string | null;
   paidAmount: string | null;
+  /** Active paid KZT remote snapshots not yet materialized into ERP. */
+  snapshotPaidAmount: string | null;
+  /** In-flight widget command amounts not yet represented by a paid snapshot. */
+  commandReservedAmount: string | null;
+  /** A materialized remote snapshot diverged from the linked ERP payment. */
+  paymentOutOfSync: boolean;
   managerId: number | null;
   createdBy: number | null;
   hasActivePositions: boolean;
@@ -609,9 +622,24 @@ export class Bitrix24PaymentWidgetRepository {
   }
 
   async getDealContext(dealId: string): Promise<WidgetDealContext> {
-    const request = await this.db.query<{
+    return this.readDealContext(this.db, dealId);
+  }
+
+  /**
+   * Deal linkage + effective remaining-amount context. `snapshotPaidAmount`
+   * counts active paid KZT remote snapshots not yet materialized, and
+   * `commandReservedAmount` conservatively counts in-flight widget commands
+   * that have no paid snapshot yet — together they stop the fresh-order +
+   * zero-ERP-total double spend without trusting browser totals.
+   */
+  private async readDealContext(
+    client: DatabaseClient,
+    dealId: string,
+  ): Promise<WidgetDealContext> {
+    const request = await client.query<{
       request_id: string | number;
       state: string;
+      sync_status: string | null;
       linked_order_id: string | number | null;
       order_kind: string | null;
       version: string | number | null;
@@ -620,14 +648,65 @@ export class Bitrix24PaymentWidgetRepository {
       manager_id: string | number | null;
       created_by: string | number | null;
       has_positions: boolean;
+      snapshot_paid: string;
+      command_reserved: string;
+      payment_out_of_sync: boolean;
     }>(
-      `SELECT request.request_id, request.state, request.linked_order_id,
+      `SELECT request.request_id, request.state, request.sync_status,
+              request.linked_order_id,
               orders.order_kind, orders.version, orders.final_amount,
               orders.paid_amount, orders.manager_id, orders.created_by,
               (EXISTS (
                 SELECT 1 FROM order_details detail
                  WHERE detail.order_id=orders.order_id AND detail.delete_flag=false
-              ) OR EXISTS (SELECT 1 FROM order_catalog_lines line WHERE line.order_id=orders.order_id AND line.delete_flag=false)) AS has_positions
+              ) OR EXISTS (SELECT 1 FROM order_catalog_lines line WHERE line.order_id=orders.order_id AND line.delete_flag=false)) AS has_positions,
+              -- Snapshot-paid + command-reserved read in the SAME statement
+              -- as the order totals: one MVCC snapshot, no torn amounts.
+              COALESCE((SELECT SUM(p.amount)
+                  FROM bitrix24_incoming_request_payment p
+                 WHERE (p.request_id=request.request_id
+                     OR p.erp_order_id=orders.order_id)
+                   AND p.state='active' AND p.paid AND p.currency_id='KZT'
+                   AND p.erp_payment_id IS NULL),0)::text AS snapshot_paid,
+              COALESCE((SELECT SUM(c.amount)
+                  FROM bitrix24_manual_payment_command c
+                 WHERE c.bitrix_deal_id=$1
+                   AND c.status IN (
+                     'processing','pre_create_saved','remote_create_started',
+                     'remote_create_ambiguous','remote_created','snapshot_saved',
+                     'awaiting_order','awaiting_order_ready','awaiting_erp_retry',
+                     'awaiting_overpayment_confirmation','awaiting_actor_reauth')
+                   AND NOT EXISTS (
+                     SELECT 1 FROM bitrix24_incoming_request_payment s
+                      WHERE s.manual_command_id=c.command_id
+                        AND s.state IN ('active','materialized') AND s.paid)
+              ),0)::text AS command_reserved,
+              -- A remote receipt whose linked ERP payment diverged — missing/
+              -- deleted/different amount, remote unpaid, or remote-deleted
+              -- while the ERP receipt is still live — makes the local paid
+              -- total untrustworthy. Both-deleted is synchronized.
+              EXISTS (SELECT 1 FROM bitrix24_incoming_request_payment p
+                      LEFT JOIN payments ep ON ep.payment_id=p.erp_payment_id
+                      WHERE (p.request_id=request.request_id
+                          OR p.erp_order_id=orders.order_id)
+                        AND p.erp_payment_id IS NOT NULL
+                        AND (
+                          -- Remote live+paid requires a present, live ERP
+                          -- receipt on THIS order with the same amount.
+                          p.state<>'deleted' AND p.paid=true AND (
+                            ep.payment_id IS NULL OR ep.delete_flag=true
+                            OR ep.amount <> p.amount
+                            OR ep.order_id IS DISTINCT FROM orders.order_id
+                          )
+                          -- Remote unpaid/deleted converges only when the ERP
+                          -- receipt is gone too; a live one diverges.
+                          OR (p.state='deleted' OR p.paid=false)
+                             AND ep.payment_id IS NOT NULL
+                             AND ep.delete_flag=false
+                          -- Foreign currency must never be treated as KZT.
+                          OR p.currency_id <> 'KZT'
+                        )
+                     ) AS payment_out_of_sync
          FROM bitrix24_incoming_request request
          LEFT JOIN orders ON orders.order_id=request.linked_order_id
         WHERE request.bitrix_deal_id=$1
@@ -636,9 +715,13 @@ export class Bitrix24PaymentWidgetRepository {
     );
     const requestRow = request.rows[0];
     if (requestRow) {
-      return mapDealContext(dealId, requestRow, Number(requestRow.request_id));
+      return mapDealContext(
+        dealId,
+        requestRow,
+        Number(requestRow.request_id),
+      );
     }
-    const mapped = await this.db.query<{
+    const mapped = await client.query<{
       linked_order_id: string | number;
       order_kind: string;
       version: string | number;
@@ -647,6 +730,9 @@ export class Bitrix24PaymentWidgetRepository {
       manager_id: string | number | null;
       created_by: string | number | null;
       has_positions: boolean;
+      snapshot_paid: string;
+      command_reserved: string;
+      payment_out_of_sync: boolean;
     }>(
       `SELECT orders.order_id AS linked_order_id, orders.order_kind,
               orders.version, orders.final_amount, orders.paid_amount,
@@ -654,7 +740,41 @@ export class Bitrix24PaymentWidgetRepository {
               (EXISTS (
                 SELECT 1 FROM order_details detail
                  WHERE detail.order_id=orders.order_id AND detail.delete_flag=false
-              ) OR EXISTS (SELECT 1 FROM order_catalog_lines line WHERE line.order_id=orders.order_id AND line.delete_flag=false)) AS has_positions
+              ) OR EXISTS (SELECT 1 FROM order_catalog_lines line WHERE line.order_id=orders.order_id AND line.delete_flag=false)) AS has_positions,
+              COALESCE((SELECT SUM(p.amount)
+                  FROM bitrix24_incoming_request_payment p
+                 WHERE p.erp_order_id=orders.order_id
+                   AND p.state='active' AND p.paid AND p.currency_id='KZT'
+                   AND p.erp_payment_id IS NULL),0)::text AS snapshot_paid,
+              COALESCE((SELECT SUM(c.amount)
+                  FROM bitrix24_manual_payment_command c
+                 WHERE c.bitrix_deal_id=$1
+                   AND c.status IN (
+                     'processing','pre_create_saved','remote_create_started',
+                     'remote_create_ambiguous','remote_created','snapshot_saved',
+                     'awaiting_order','awaiting_order_ready','awaiting_erp_retry',
+                     'awaiting_overpayment_confirmation','awaiting_actor_reauth')
+                   AND NOT EXISTS (
+                     SELECT 1 FROM bitrix24_incoming_request_payment s
+                      WHERE s.manual_command_id=c.command_id
+                        AND s.state IN ('active','materialized') AND s.paid)
+              ),0)::text AS command_reserved,
+              EXISTS (SELECT 1 FROM bitrix24_incoming_request_payment p
+                      LEFT JOIN payments ep ON ep.payment_id=p.erp_payment_id
+                      WHERE p.erp_order_id=orders.order_id
+                        AND p.erp_payment_id IS NOT NULL
+                        AND (
+                          p.state<>'deleted' AND p.paid=true AND (
+                            ep.payment_id IS NULL OR ep.delete_flag=true
+                            OR ep.amount <> p.amount
+                            OR ep.order_id IS DISTINCT FROM orders.order_id
+                          )
+                          OR (p.state='deleted' OR p.paid=false)
+                             AND ep.payment_id IS NOT NULL
+                             AND ep.delete_flag=false
+                          OR p.currency_id <> 'KZT'
+                        )
+                     ) AS payment_out_of_sync
          FROM crm_sync_mapping mapping
          JOIN orders ON orders.order_id=mapping.erp_id::bigint
         WHERE mapping.entity_type='order'
@@ -671,17 +791,35 @@ export class Bitrix24PaymentWidgetRepository {
         dealId,
         requestId: null,
         requestState: null,
+        requestSyncStatus: null,
         orderId: null,
         orderKind: null,
         orderVersion: null,
         finalAmount: null,
         paidAmount: null,
+        snapshotPaidAmount: null,
+        commandReservedAmount: null,
+        paymentOutOfSync: false,
         managerId: null,
         createdBy: null,
         hasActivePositions: false,
       };
     }
     return mapDealContext(dealId, mappedRow, null);
+  }
+
+  /** Idempotent-replay lookup: find a command by its owner idempotency key. */
+  async findCommandByIdempotencyKey(
+    memberId: string,
+    bitrixUserId: string,
+    idempotencyKey: string,
+  ): Promise<ManualPaymentCommand | null> {
+    const result = await this.db.query<CommandRow>(
+      `SELECT * FROM bitrix24_manual_payment_command
+        WHERE member_id=$1 AND bitrix_actor_user_id=$2 AND idempotency_key=$3`,
+      [memberId, bitrixUserId, idempotencyKey],
+    );
+    return result.rows[0] ? mapCommand(result.rows[0]) : null;
   }
 
   async listWidgetPaymentSystems(forbiddenPaySystemId: number | null): Promise<WidgetPaymentSystem[]> {
@@ -792,6 +930,17 @@ export class Bitrix24PaymentWidgetRepository {
     originatingRequestId: string;
   }): Promise<{ command: ManualPaymentCommand; created: boolean }> {
     return this.db.transaction(async (tx) => {
+      // Same-key creators serialize on the command-key advisory lock BEFORE
+      // the command row lookup — command row first, then the Deal lock keeps
+      // the command→Deal order everywhere (an accepted command holder may
+      // wait on the Deal inside resume).
+      await tx.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
+        [
+          `bitrix24-payment-command:${input.session.memberId}:` +
+          `${input.session.bitrixUserId}:${input.idempotencyKey}`,
+        ],
+      );
       const existing = await tx.query<CommandRow>(
         `SELECT * FROM bitrix24_manual_payment_command
           WHERE member_id=$1 AND bitrix_actor_user_id=$2 AND idempotency_key=$3
@@ -799,10 +948,154 @@ export class Bitrix24PaymentWidgetRepository {
         [input.session.memberId, input.session.bitrixUserId, input.idempotencyKey],
       );
       if (existing.rows[0]) {
-        if (existing.rows[0].request_hash !== input.requestHash) {
+        if (
+          existing.rows[0].request_hash !== input.requestHash ||
+          existing.rows[0].bitrix_deal_id !== input.session.dealId
+        ) {
           throw conflict('IDEMPOTENCY_KEY_REUSED', 'Idempotency key was used with another request');
         }
         return { command: mapCommand(existing.rows[0]), created: false };
+      }
+      await tx.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
+        [`bitrix24-reverse:deal:${input.session.dealId}`],
+      );
+      const probe = await this.readDealContext(tx, input.session.dealId);
+      if (
+        probe.requestId !== input.deal.requestId ||
+        probe.orderId !== input.deal.orderId ||
+        probe.orderKind !== input.deal.orderKind ||
+        probe.requestState !== input.deal.requestState
+      ) {
+        throw conflict(
+          'BITRIX24_DEAL_CONTEXT_CHANGED',
+          'Bitrix24 deal linkage changed; refresh the widget and retry',
+        );
+      }
+      // An archived request rejects before any row lock — it can sit on a
+      // soft-deleted order under the still-active Deal mapping.
+      if (probe.requestId !== null && probe.requestState === 'archived') {
+        throw conflict(
+          'BITRIX24_REQUEST_NOT_ACTIVE',
+          'The linked Bitrix24 request is archived',
+        );
+      }
+      if (probe.orderId !== null) {
+        const orderLock = await tx.query(
+          `SELECT 1 FROM orders WHERE order_id=$1 AND delete_flag=false FOR UPDATE`,
+          [probe.orderId],
+        );
+        // An archived/soft-deleted order under an active Deal mapping must
+        // never accept a new payment.
+        if (orderLock.rowCount !== 1) {
+          throw conflict(
+            'BITRIX24_DEAL_CONTEXT_CHANGED',
+            'Bitrix24 deal linkage changed; refresh the widget and retry',
+          );
+        }
+        // The exact active order<->session-Deal mapping must be live and
+        // locked for EVERY linked order — a relinked/deactivated mapping on a
+        // converted request must not let the old Deal accept a new payment.
+        const mappingLock = await tx.query<{ source_system: string | null }>(
+          `SELECT source_system FROM crm_sync_mapping
+            WHERE entity_type='order' AND erp_id=$1
+              AND bitrix_object='deal' AND bitrix_id=$2
+              AND status='active'
+            FOR SHARE`,
+          [String(probe.orderId), input.session.dealId],
+        );
+        if (mappingLock.rowCount !== 1) {
+          throw conflict(
+            'BITRIX24_DEAL_CONTEXT_CHANGED',
+            'Bitrix24 deal linkage changed; refresh the widget and retry',
+          );
+        }
+        // Bitrix-owned CRM requests additionally require the bitrix24 source;
+        // ERP-origin production orders keep their own source system.
+        if (
+          probe.orderKind === 'crm_request' &&
+          mappingLock.rows[0].source_system !== 'bitrix24'
+        ) {
+          throw conflict(
+            'BITRIX24_DEAL_CONTEXT_CHANGED',
+            'Bitrix24 deal linkage changed; refresh the widget and retry',
+          );
+        }
+      }
+      // Authoritative totals are re-read under the locks: the pre-lock context
+      // may be stale after waiting on the order row.
+      const fresh = await this.readDealContext(tx, input.session.dealId);
+      if (
+        fresh.requestId !== probe.requestId ||
+        fresh.orderId !== probe.orderId ||
+        fresh.orderKind !== probe.orderKind ||
+        fresh.requestState !== probe.requestState
+      ) {
+        throw conflict(
+          'BITRIX24_DEAL_CONTEXT_CHANGED',
+          'Bitrix24 deal linkage changed; refresh the widget and retry',
+        );
+      }
+      // An archived request keeps its mapping but must not accept a new
+      // payment; a converted request resolves through its live production
+      // order below and remains payable.
+      if (fresh.requestId !== null && fresh.requestState === 'archived') {
+        throw conflict(
+          'BITRIX24_REQUEST_NOT_ACTIVE',
+          'The linked Bitrix24 request is archived',
+        );
+      }
+      if (fresh.requestId !== null && fresh.orderKind === 'crm_request') {
+        if (fresh.requestState !== 'active') {
+          throw conflict(
+            'BITRIX24_REQUEST_NOT_ACTIVE',
+            'The linked Bitrix24 request is no longer active',
+          );
+        }
+        if (fresh.requestSyncStatus !== 'ok') {
+          throw conflict(
+            'BITRIX24_REQUEST_SYNC_BLOCKED',
+            'The linked Bitrix24 request is not synchronized; reconcile it first',
+          );
+        }
+        await assertBitrix24RequestProductReady(tx, fresh.requestId);
+        if (fresh.finalAmount === null) {
+          throw conflict(
+            'BITRIX24_DEAL_TOTAL_UNKNOWN',
+            'ERP total for this request is unknown; reconcile the request first',
+          );
+        }
+      }
+      // A materialized remote payment that diverged from the linked ERP
+      // payment makes the local paid total untrustworthy — reconcile first.
+      if (fresh.paymentOutOfSync) {
+        throw conflict(
+          'BITRIX24_PAYMENT_OUT_OF_SYNC',
+          'A materialized Bitrix24 payment diverged from the ERP payment; reconcile the request',
+        );
+      }
+      // Locked financial gate for every NEW command — CRM request AND
+      // direct-mapped production order. Integer minor units only.
+      if (
+        fresh.orderId !== null &&
+        input.deal.orderVersion !== null &&
+        fresh.orderVersion !== null &&
+        fresh.orderVersion !== input.deal.orderVersion
+      ) {
+        throw conflict('ORDER_VERSION_CONFLICT', 'Order version conflict; refresh the widget');
+      }
+      if (fresh.orderId !== null && fresh.finalAmount !== null) {
+        const remainingCents =
+          moneyToCents(fresh.finalAmount) -
+          moneyToCents(fresh.paidAmount) -
+          moneyToCents(fresh.snapshotPaidAmount) -
+          moneyToCents(fresh.commandReservedAmount);
+        if (moneyToCents(input.amount) > remainingCents && !input.confirmOverpayment) {
+          throw conflict(
+            'PAYMENT_OVERPAYMENT',
+            'Payment exceeds the remaining amount for this request',
+          );
+        }
       }
       try {
         const inserted = await tx.query<CommandRow>(
@@ -1257,6 +1550,18 @@ export class Bitrix24PaymentWidgetRepository {
     }));
   }
 
+  /**
+   * Payment-snapshot generation fence for a Deal, captured BEFORE the remote
+   * payment verification read; missing rows mean generation 0.
+   */
+  async getPaymentSyncFence(dealId: string): Promise<number> {
+    const result = await this.db.query<{ gen: string | number }>(
+      `SELECT gen FROM bitrix24_payment_sync_gen WHERE scope=$1`,
+      [`deal:${dealId}`],
+    );
+    return result.rows[0] ? Number(result.rows[0].gen) : 0;
+  }
+
   async saveVerifiedSnapshot(input: {
     command: ManualPaymentCommand;
     paymentName: string | null;
@@ -1264,10 +1569,23 @@ export class Bitrix24PaymentWidgetRepository {
     normalizedHash: string;
     rawAmount: string;
     rawCurrency: string;
-  }): Promise<ManualPaymentCommand> {
+    /** Generation captured BEFORE the remote verification read. */
+    expectedGen: number;
+  }): Promise<{ applied: boolean; command: ManualPaymentCommand }> {
     return this.db.transaction(async (tx) => {
       const command = await lockCommand(tx, input.command.commandId);
       if (!command.bitrixPaymentId) throw conflict('BITRIX24_PAYMENT_ID_MISSING', 'Payment ID missing');
+      // Snapshot writes join the Deal serialization: command → Deal →
+      // generation → snapshot. A reverse reconcile or another snapshot write
+      // committed since the remote verification read makes this save stale.
+      await tx.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
+        [`bitrix24-reverse:deal:${command.bitrixDealId}`],
+      );
+      const gen = await lockPaymentSyncGen(tx, command.bitrixDealId);
+      if (gen !== input.expectedGen) {
+        return { applied: false, command };
+      }
       const owner = await tx.query<{
         request_id: string | number | null;
         erp_order_id: string | number | null;
@@ -1326,7 +1644,11 @@ export class Bitrix24PaymentWidgetRepository {
           RETURNING *`,
         [command.commandId],
       );
-      return updated.rows[0] ? mapCommand(updated.rows[0]) : command;
+      await bumpPaymentSyncGen(tx, command.bitrixDealId);
+      return {
+        applied: true,
+        command: updated.rows[0] ? mapCommand(updated.rows[0]) : command,
+      };
     });
   }
 
@@ -1346,6 +1668,9 @@ export class Bitrix24PaymentWidgetRepository {
         throw conflict('BITRIX24_PAYMENT_ID_MISSING', 'Verified payment ID missing');
       }
       await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`bitrix24-reverse:deal:${command.bitrixDealId}`]);
+      // Materialization mutates the snapshot — invalidate in-flight payment
+      // fetches before any order/request/snapshot lock is taken.
+      await bumpPaymentSyncGen(tx, command.bitrixDealId);
       const target = await resolveCommandOrder(tx, command);
       if (!target.orderId) {
         command = await setAwaiting(tx, this.audit, command, 'awaiting_order');
@@ -1946,6 +2271,10 @@ function mapDealContext(
     manager_id: string | number | null;
     created_by: string | number | null;
     has_positions: boolean;
+    sync_status?: string | null;
+    snapshot_paid?: string | number | null;
+    command_reserved?: string | number | null;
+    payment_out_of_sync?: boolean;
   },
   requestId: number | null,
 ): WidgetDealContext {
@@ -1953,11 +2282,15 @@ function mapDealContext(
     dealId,
     requestId,
     requestState: row.state ?? null,
+    requestSyncStatus: row.sync_status ?? null,
     orderId: nullableNumber(row.linked_order_id),
     orderKind: row.order_kind,
     orderVersion: nullableNumber(row.version),
     finalAmount: row.final_amount === null ? null : money(row.final_amount),
     paidAmount: row.paid_amount === null ? null : money(row.paid_amount),
+    snapshotPaidAmount: row.snapshot_paid == null ? null : money(row.snapshot_paid),
+    commandReservedAmount: row.command_reserved == null ? null : money(row.command_reserved),
+    paymentOutOfSync: Boolean(row.payment_out_of_sync),
     managerId: nullableNumber(row.manager_id),
     createdBy: nullableNumber(row.created_by),
     hasActivePositions: Boolean(row.has_positions),

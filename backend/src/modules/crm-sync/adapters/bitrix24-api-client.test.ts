@@ -848,3 +848,74 @@ describe('Bitrix24ApiClient', () => {
     expect(log).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('listDealProductRows pagination contract', () => {
+  const row = (id: number, ownerId = 8204) => ({
+    id, ownerType: 'D', ownerId: String(ownerId), productId: '10',
+    productName: 'P', quantity: '1', price: '100',
+  });
+  const page = (rows: unknown[], next: unknown, total: unknown) =>
+    jsonResponse({ result: { productRows: rows }, next, total });
+  const client = (fetchFn: FetchFn) =>
+    new Bitrix24ApiClient('https://portal/rest/1/synthetic', fetchFn, 30000, noWait);
+
+  it('reads every page in order and returns the complete list', async () => {
+    const first = Array.from({ length: 50 }, (_, i) => row(i + 1));
+    const second = Array.from({ length: 25 }, (_, i) => row(i + 51));
+    const fetchFn = vi.fn<FetchFn>()
+      .mockResolvedValueOnce(page(first, 50, 75))
+      .mockResolvedValueOnce(page(second, undefined, 75));
+    const result = await client(fetchFn).listDealProductRows('8204');
+    expect(result).toHaveLength(75);
+    expect(result[74].id).toBe(75);
+    const starts = fetchFn.mock.calls.map(
+      (c) => JSON.parse(String(c[1]?.body)).start,
+    );
+    expect(starts).toEqual([0, 50]);
+  });
+
+  it('returns an empty array for a legitimate empty first page', async () => {
+    const fetchFn = vi.fn<FetchFn>()
+      .mockResolvedValue(page([], null, 0));
+    await expect(client(fetchFn).listDealProductRows('8204')).resolves.toEqual([]);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an empty page that is not a complete empty result', async () => {
+    const fetchFn = vi.fn<FetchFn>().mockResolvedValue(page([], 50, 75));
+    await expect(client(fetchFn).listDealProductRows('8204')).rejects.toThrow();
+  });
+
+  it('rejects duplicate row ids and foreign-owner rows', async () => {
+    const dup = vi.fn<FetchFn>().mockResolvedValue(
+      page([row(1), row(1)], null, 2));
+    await expect(client(dup).listDealProductRows('8204')).rejects.toThrow();
+    const foreign = vi.fn<FetchFn>().mockResolvedValue(
+      page([row(1), row(2, 9999)], null, 2));
+    await expect(client(foreign).listDealProductRows('8204')).rejects.toThrow();
+  });
+
+  it('rejects a non-advancing or malformed next cursor', async () => {
+    const back = vi.fn<FetchFn>().mockResolvedValue(page([row(1)], 0, 5));
+    await expect(client(back).listDealProductRows('8204')).rejects.toThrow();
+    const malformed = vi.fn<FetchFn>().mockResolvedValue(page([row(1)], 'abc', 5));
+    await expect(client(malformed).listDealProductRows('8204')).rejects.toThrow();
+  });
+
+  it('rejects a reported total above the ERP cap before fetching 25k rows', async () => {
+    const fetchFn = vi.fn<FetchFn>().mockResolvedValue(page([row(1)], 1, 2000));
+    await expect(client(fetchFn).listDealProductRows('8204'))
+      .rejects.toMatchObject({ code: 'PRODUCT_ROWS_TOO_MANY' });
+  });
+
+  it('rejects a last page that disagrees with the reported total', async () => {
+    const fetchFn = vi.fn<FetchFn>().mockResolvedValue(page([row(1)], null, 5));
+    await expect(client(fetchFn).listDealProductRows('8204')).rejects.toThrow();
+  });
+
+  it('rejects a malformed productRows shape instead of treating it as empty', async () => {
+    const fetchFn = vi.fn<FetchFn>().mockResolvedValue(
+      jsonResponse({ result: { productRows: 'not-an-array' } }));
+    await expect(client(fetchFn).listDealProductRows('8204')).rejects.toThrow();
+  });
+});

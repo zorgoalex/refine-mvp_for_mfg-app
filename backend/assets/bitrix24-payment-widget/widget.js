@@ -69,6 +69,26 @@
     return result;
   };
 
+  const BLOCK_REASONS = {
+    BITRIX24_PRODUCTS_PENDING: 'Позиции сделки ещё не сверены с ERP. Обновите вкладку через минуту или попросите менеджера выполнить сверку заявки.',
+    BITRIX24_PRODUCTS_BLOCKED: 'Позиции сделки заблокированы: требуется сопоставление товаров Bitrix24 со справочником ERP.',
+    BITRIX24_PRODUCTS_STALE: 'Позиции или оплаты сделки изменились — выполните сверку заявки и повторите.',
+    BITRIX24_PRODUCT_SYNC_FAILED: 'Не удалось обновить позиции сделки. Повторите позже или откройте заявку в ERP для сверки.',
+    BITRIX24_PRODUCT_SYNC_INCOHERENT: 'Сделка менялась во время чтения позиций — повторите через минуту.',
+    BITRIX24_PAYMENT_SYNC_STALE: 'Оплаты сделки обновились параллельно — обновите вкладку и повторите.',
+    BITRIX24_PAYMENT_OUT_OF_SYNC: 'Оплата в Bitrix24 расходится с платежом в ERP — выполните сверку заявки в ERP.',
+    BITRIX24_REVERSE_SYNC_DISABLED: 'Синхронизация с ERP отключена администратором.',
+    BITRIX24_REQUEST_NOT_ACTIVE: 'Связанная заявка ERP уже преобразована или архивирована.',
+    BITRIX24_REQUEST_SYNC_BLOCKED: 'Синхронизация заявки ERP заблокирована — выполните сверку в ERP.',
+    BITRIX24_REQUEST_NOT_CONVERTED: 'Сначала преобразуйте заявку ERP в производственный заказ.',
+    BITRIX24_PAYMENT_SYSTEM_UNMAPPED: 'Платёжная система сделки не сопоставлена с типом оплаты ERP.',
+    BITRIX24_PAYMENT_SYSTEM_FORBIDDEN: 'Эта платёжная система недоступна в виджете.',
+    BITRIX24_PAYMENT_CURRENCY_MISMATCH: 'Валюта сделки отличается от валюты ERP.',
+    BITRIX24_DEAL_CONTEXT_CHANGED: 'Связь сделки с заказом ERP изменилась — обновите вкладку.',
+    BITRIX24_WIDGET_PERMISSION_DENIED: 'У текущего пользователя нет прав на добавление оплаты в ERP.',
+  };
+  const blockReasonText = (code) => BLOCK_REASONS[code] || code || 'недоступно';
+
   const validationMessage = (error) => {
     const messages = {
       amount: 'Сумма: проверьте положительное значение и не более двух дробных знаков.',
@@ -147,7 +167,7 @@
         form.hidden = false;
         setNotice('Готово к добавлению оплаты', 'success');
       } else {
-        setNotice(`Добавление заблокировано: ${context.blockReason}`, 'warning');
+        setNotice(`Добавление заблокировано: ${blockReasonText(context.blockReason)}`, 'warning');
       }
     } catch (error) {
       setNotice(

@@ -4,6 +4,12 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { readOrderCatalogLines, prepareOrderCatalogLines, persistOrderCatalogLines, recordOrderCatalogLinesChange } from '../../orders/adapters/pg-order-catalog-lines';
 import { assertOrderHasPositions, catalogSubtotal, type OrderCatalogPlan } from '../../orders/domain/order-catalog-lines';
 import { dealCreatorSql, PAYMENT_AUTHORSHIP_SQL, type BitrixActor } from './bitrix24-authorship';
+import {
+  importedLineFingerprint,
+  productOrderFingerprint,
+  type Bitrix24ProductRow,
+  type Bitrix24ProductRowInvalid,
+} from './bitrix24-product-rows';
 import type { AuditService } from '../../../common/audit/audit.service';
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
@@ -1521,12 +1527,26 @@ export class PgBitrix24ReverseRepository {
     });
   }
 
+  /**
+   * Payment-snapshot fetch fence for a Deal, read BEFORE the remote payment
+   * list is fetched. `bitrix24_payment_sync_gen` rows are created lazily; a
+   * missing row means generation 0.
+   */
+  async getPaymentSyncFence(dealId: string): Promise<number> {
+    const result = await this.db.query<{ gen: string | number }>(
+      `SELECT gen FROM bitrix24_payment_sync_gen WHERE scope=$1`,
+      [`deal:${dealId}`],
+    );
+    return result.rows[0] ? Number(result.rows[0].gen) : 0;
+  }
+
   async replaceRequestPaymentSnapshots(
     incomingRequestId: number,
     payments: ReversePaymentSnapshot[],
     auditRequestId: string,
-    lockToken?: string,
-  ): Promise<void> {
+    lockToken: string | undefined,
+    expectedGen: number,
+  ): Promise<{ applied: boolean }> {
     const owner = await this.db.query<{
       bitrix_deal_id: string;
       linked_order_id: string | number | null;
@@ -1540,9 +1560,14 @@ export class PgBitrix24ReverseRepository {
     if (!discovered) {
       throw notFound('BITRIX24_REQUEST_NOT_FOUND', 'Bitrix24 incoming request not found');
     }
-    await this.db.transaction(async (tx) => {
+    return this.db.transaction(async (tx) => {
       await assertInboundOwnership(tx, auditRequestId, lockToken);
       await lockAggregate(tx, `deal:${discovered.bitrix_deal_id}`);
+      // Generation fence under the Deal advisory + gen row lock, BEFORE any
+      // order/request/snapshot lock: a fetch taken before a newer snapshot
+      // mutation must never apply.
+      const gen = await lockPaymentSyncGen(tx, discovered.bitrix_deal_id);
+      if (gen !== expectedGen) return { applied: false };
       await setReverseOrigin(tx);
       if (discovered.linked_order_id !== null) {
         await tx.query('SELECT order_id FROM orders WHERE order_id=$1 FOR UPDATE', [
@@ -1632,6 +1657,8 @@ export class PgBitrix24ReverseRepository {
           activePaymentAmount: payments.reduce((sum, payment) => sum + payment.amount, 0),
         },
       });
+      await bumpPaymentSyncGen(tx, discovered.bitrix_deal_id);
+      return { applied: true };
     });
   }
 
@@ -1776,10 +1803,11 @@ export class PgBitrix24ReverseRepository {
     orderId: number,
     payments: ReversePaymentSnapshot[],
     auditRequestId: string,
-    lockToken?: string,
-    expectedDealId?: string,
-  ): Promise<void> {
-    await this.db.transaction(async (tx) => {
+    lockToken: string | undefined,
+    expectedDealId: string | undefined,
+    expectedGen: number,
+  ): Promise<{ applied: boolean }> {
+    return this.db.transaction(async (tx) => {
       await assertInboundOwnership(tx, auditRequestId, lockToken);
       const owner = await tx.query<{ bitrix_id: string }>(
         `SELECT bitrix_id
@@ -1797,6 +1825,8 @@ export class PgBitrix24ReverseRepository {
         throw conflict('BITRIX24_DEAL_MAPPING_CHANGED', 'Bitrix24 Deal mapping changed');
       }
       await lockAggregate(tx, `deal:${bitrixDealId}`);
+      const gen = await lockPaymentSyncGen(tx, bitrixDealId);
+      if (gen !== expectedGen) return { applied: false };
       await setReverseOrigin(tx);
       const lockedOrder = await tx.query(
         "SELECT order_id FROM orders WHERE order_id=$1 AND order_kind='production_order' AND delete_flag=false FOR UPDATE",
@@ -1887,6 +1917,8 @@ export class PgBitrix24ReverseRepository {
           activePaymentAmount: payments.reduce((sum, payment) => sum + payment.amount, 0),
         },
       });
+      await bumpPaymentSyncGen(tx, bitrixDealId);
+      return { applied: true };
     });
   }
 
@@ -2052,6 +2084,8 @@ export class PgBitrix24ReverseRepository {
       full_number: string | null;
       sync_status: string;
       sync_error_code: string | null;
+      product_sync_status: string;
+      product_sync_error_code: string | null;
       detail_count: string | number;
       erp_final_amount: string | number | null;
       order_version: number | null;
@@ -2070,6 +2104,7 @@ export class PgBitrix24ReverseRepository {
               CASE WHEN project.code IS NULL THEN NULL
                    ELSE project.code || '-' || linked_order.order_name END AS full_number,
               request.sync_status, request.sync_error_code,
+              request.product_sync_status, request.product_sync_error_code,
               (SELECT COUNT(*) FROM order_details detail
                 WHERE detail.order_id=linked_order.order_id AND detail.delete_flag=false) AS detail_count,
               linked_order.final_amount AS erp_final_amount,
@@ -2117,6 +2152,8 @@ export class PgBitrix24ReverseRepository {
         fullNumber: row.full_number,
         syncStatus: row.sync_status,
         syncErrorCode: row.sync_error_code,
+        productSyncStatus: row.product_sync_status,
+        productSyncErrorCode: row.product_sync_error_code,
         detailCount: Number(row.detail_count),
         ...(input.canViewFinancials ? {
           erpFinalAmount: row.erp_final_amount === null ? null : Number(row.erp_final_amount),
@@ -2170,6 +2207,9 @@ export class PgBitrix24ReverseRepository {
       full_number: string | null;
       sync_status: string;
       sync_error_code: string | null;
+      product_sync_status: string;
+      product_sync_error_code: string | null;
+      product_sync_blocked_ids: unknown;
       detail_count: string | number;
       erp_final_amount: string | number | null;
       order_version: number | null;
@@ -2263,6 +2303,14 @@ export class PgBitrix24ReverseRepository {
       fullNumber: row.full_number,
       syncStatus: row.sync_status,
       syncErrorCode: row.sync_error_code,
+      productSync: {
+        status: row.product_sync_status,
+        errorCode: row.product_sync_error_code,
+        blockedIds: Array.isArray(row.product_sync_blocked_ids)
+          ? row.product_sync_blocked_ids
+          : [],
+      },
+      productRows: await this.listRequestProductRows(requestId, canViewFinancials),
       detailCount: Number(row.detail_count),
       ...(canViewFinancials ? {
         erpFinalAmount: row.erp_final_amount === null ? null : Number(row.erp_final_amount),
@@ -2736,6 +2784,10 @@ export class PgBitrix24ReverseRepository {
       if (requestRow.sync_status !== 'ok') {
         throw conflict('BITRIX24_REQUEST_BLOCKED', 'Resolve the Bitrix24 synchronization conflict first');
       }
+      // Remote product rows must be freshly imported and fingerprint-stable:
+      // a missing/unmapped row, a mapping/catalog drift or a local financial
+      // edit blocks conversion instead of fabricating totals.
+      await assertBitrix24RequestProductReady(tx, Number(requestRow.request_id));
       if (orderRow.version !== input.expectedVersion) {
         throw conflict('VERSION_CONFLICT', 'Order version conflict');
       }
@@ -3037,6 +3089,11 @@ export class PgBitrix24ReverseRepository {
         FROM bitrix24_incoming_request r JOIN orders o ON o.order_id=r.linked_order_id
         WHERE r.bitrix_deal_id=$1 AND r.state='active' AND o.order_kind='crm_request' AND NOT o.delete_flag`, [input.dealId]);
       if (!discovery.rows[0]) return { status: 'unchanged' };
+      // Payment-snapshot mutation (native materialization below, or the
+      // nested widget command materialize) invalidates any payment-list
+      // fetch taken before this transaction — generation bump under the Deal
+      // advisory, before order/request/snapshot locks.
+      await bumpPaymentSyncGen(tx, input.dealId);
       const orderId = Number(discovery.rows[0].linked_order_id);
       if (discovery.rows[0].project_id) await tx.query('SELECT project_id FROM projects WHERE project_id=$1 FOR UPDATE', [discovery.rows[0].project_id]);
       const order = (await tx.query<{ version: number; project_id: string | null; source_system: string; client_id: string }>(
@@ -3108,6 +3165,9 @@ export class PgBitrix24ReverseRepository {
         }
         // Public reason codes only; never persist raw SQL or remote responses.
         return wait(error.code === 'ORDER_POSITIONS_REQUIRED' ? 'POSITIONS_REQUIRED' :
+          error.code === 'BITRIX24_PRODUCTS_PENDING' ? 'PRODUCTS_PENDING' :
+          error.code === 'BITRIX24_PRODUCTS_BLOCKED' ? 'PRODUCTS_BLOCKED' :
+          error.code === 'BITRIX24_PRODUCTS_STALE' ? 'PRODUCTS_STALE' :
           error.code === 'BITRIX24_WIDGET_PERMISSION_DENIED' ? 'PAYMENT_PERMISSION_REQUIRED' :
           error.code === 'PAYMENT_REQUIRES_CONFIRMATION' ? 'PAYMENT_REQUIRES_CONFIRMATION' : 'CONVERSION_BLOCKED');
       }
@@ -3187,6 +3247,9 @@ export class PgBitrix24ReverseRepository {
     await this.db.transaction(async (tx) => {
       await tx.query("SELECT set_config('app.user_id', $1, true)", [input.actorUserId]);
       await lockAggregate(tx, `deal:${discovered.bitrix_deal_id}`);
+      // Materialization mutates snapshot state — invalidate any payment-list
+      // fetch taken before this transaction.
+      await bumpPaymentSyncGen(tx, discovered.bitrix_deal_id);
       await setReverseOrigin(tx);
       const productionOrder = await tx.query<{ version: string | number }>(
         `SELECT version
@@ -3430,6 +3493,9 @@ export class PgBitrix24ReverseRepository {
     await this.db.transaction(async (tx) => {
       await tx.query("SELECT set_config('app.user_id', $1, true)", [input.actorUserId]);
       await lockAggregate(tx, `deal:${discovered.bitrix_deal_id}`);
+      // Materialization mutates snapshot state — invalidate any payment-list
+      // fetch taken before this transaction.
+      await bumpPaymentSyncGen(tx, discovered.bitrix_deal_id);
       await setReverseOrigin(tx);
       const lockedOrder = await tx.query(
         `SELECT 1
@@ -3879,6 +3945,1264 @@ export class PgBitrix24ReverseRepository {
       });
       return retried;
     });
+  }
+
+  /**
+   * Product mapping list for the admin UI: every configured mapping joined
+   * with its catalog item, plus every Bitrix product ID seen in request
+   * snapshots so an unmapped product can be mapped without guessing names.
+   */
+  async listProductMappings(): Promise<{
+    mappings: Array<Record<string, unknown>>;
+    seenProducts: Array<Record<string, unknown>>;
+  }> {
+    const mappings = await this.db.query<{
+      bitrix_product_id: string;
+      catalog_item_id: string | number;
+      catalog_name: string;
+      catalog_sku: string | null;
+      catalog_kind: string;
+      catalog_active: boolean;
+      catalog_version: number;
+      active: boolean;
+      version: number;
+      updated_at: Date | string;
+      updated_by: string | number | null;
+      updated_by_name: string | null;
+      last_seen_name: string | null;
+      last_seen_at: Date | string | null;
+      request_count: string | number;
+    }>(
+      `SELECT mapping.bitrix_product_id, mapping.catalog_item_id,
+              catalog.name AS catalog_name, catalog.sku AS catalog_sku,
+              catalog.kind AS catalog_kind, catalog.is_active AS catalog_active,
+              catalog.version AS catalog_version,
+              mapping.active, mapping.version, mapping.updated_at,
+              mapping.updated_by, editor.full_name AS updated_by_name,
+              seen.product_name AS last_seen_name, seen.last_seen_at,
+              COALESCE(seen.request_count, 0) AS request_count
+         FROM bitrix24_product_mapping mapping
+         JOIN catalog_items catalog ON catalog.id=mapping.catalog_item_id
+         LEFT JOIN users editor ON editor.user_id=mapping.updated_by
+         LEFT JOIN LATERAL (
+           SELECT MAX(snapshot.product_name) AS product_name,
+                  MAX(snapshot.last_seen_at) AS last_seen_at,
+                  COUNT(DISTINCT snapshot.request_id) AS request_count
+             FROM bitrix24_product_row_snapshot snapshot
+            WHERE snapshot.bitrix_product_id=mapping.bitrix_product_id
+         ) seen ON true
+        ORDER BY length(mapping.bitrix_product_id), mapping.bitrix_product_id`,
+    );
+    const seen = await this.db.query<{
+      bitrix_product_id: string;
+      product_name: string | null;
+      last_seen_at: Date | string;
+      request_count: string | number;
+      mapped: boolean;
+    }>(
+      `SELECT snapshot.bitrix_product_id,
+              MAX(snapshot.product_name) AS product_name,
+              MAX(snapshot.last_seen_at) AS last_seen_at,
+              COUNT(DISTINCT snapshot.request_id) AS request_count,
+              BOOL_OR(mapping.bitrix_product_id IS NOT NULL) AS mapped
+         FROM bitrix24_product_row_snapshot snapshot
+         LEFT JOIN bitrix24_product_mapping mapping
+           ON mapping.bitrix_product_id=snapshot.bitrix_product_id
+        GROUP BY snapshot.bitrix_product_id
+        ORDER BY length(snapshot.bitrix_product_id), snapshot.bitrix_product_id`,
+    );
+    return {
+      mappings: mappings.rows.map((row) => ({
+        bitrixProductId: row.bitrix_product_id,
+        catalogItemId: Number(row.catalog_item_id),
+        catalogName: row.catalog_name,
+        catalogSku: row.catalog_sku,
+        catalogKind: row.catalog_kind,
+        catalogActive: row.catalog_active,
+        catalogVersion: row.catalog_version,
+        active: row.active,
+        version: row.version,
+        updatedAt: toIso(row.updated_at),
+        updatedByName: row.updated_by_name,
+        lastSeenName: row.last_seen_name,
+        lastSeenAt: toIso(row.last_seen_at),
+        requestCount: Number(row.request_count),
+      })),
+      seenProducts: seen.rows.map((row) => ({
+        bitrixProductId: row.bitrix_product_id,
+        productName: row.product_name,
+        lastSeenAt: toIso(row.last_seen_at),
+        requestCount: Number(row.request_count),
+        mapped: row.mapped,
+      })),
+    };
+  }
+
+  /**
+   * Create/remap/deactivate one explicit product mapping. `expectedVersion`
+   * must match the current row (0 only while no row exists). Identical replay
+   * returns the current row without writes, audit or reconcile enqueues.
+   */
+  async upsertProductMapping(input: {
+    bitrixProductId: string;
+    catalogItemId: number;
+    active: boolean;
+    expectedVersion: number;
+    actorUserId: number;
+    actorUsername: string;
+    actorRole: UserRole;
+    auditRequestId: string;
+  }): Promise<Record<string, unknown>> {
+    // Direct repository callers must never persist an ID that ordering or
+    // mapping SQL cannot represent — bound it before any write.
+    if (!/^[1-9][0-9]{0,14}$/.test(input.bitrixProductId)) {
+      throw new ApiError(
+        422,
+        'VALIDATION_ERROR',
+        'Bitrix24 product id is invalid',
+      );
+    }
+    return this.db.transaction(async (tx) => {
+      // Serialize per Bitrix product: without this two concurrent creates could
+      // both observe an absent row and the second would silently overwrite the
+      // first despite expectedVersion=0.
+      await tx.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
+        [`bitrix24-mapping:${input.bitrixProductId}`],
+      );
+      const current = await tx.query<{
+        catalog_item_id: string | number;
+        active: boolean;
+        version: number;
+        catalog_name: string;
+        catalog_sku: string | null;
+        catalog_kind: string;
+        catalog_is_active: boolean;
+        catalog_version: number;
+      }>(
+        `SELECT mapping.catalog_item_id, mapping.active, mapping.version,
+                catalog.name AS catalog_name, catalog.sku AS catalog_sku,
+                catalog.kind AS catalog_kind,
+                catalog.is_active AS catalog_is_active,
+                catalog.version AS catalog_version
+           FROM bitrix24_product_mapping mapping
+           JOIN catalog_items catalog ON catalog.id=mapping.catalog_item_id
+          WHERE mapping.bitrix_product_id=$1
+          FOR UPDATE OF mapping`,
+        [input.bitrixProductId],
+      );
+      const existing = current.rows[0];
+      if (existing && Number(existing.version) !== input.expectedVersion) {
+        throw conflict(
+          'BITRIX24_PRODUCT_MAPPING_VERSION_CONFLICT',
+          'Product mapping was changed; reload and retry',
+        );
+      }
+      if (!existing && input.expectedVersion !== 0) {
+        throw conflict(
+          'BITRIX24_PRODUCT_MAPPING_VERSION_CONFLICT',
+          'Product mapping was changed; reload and retry',
+        );
+      }
+      if (
+        existing &&
+        Number(existing.catalog_item_id) === input.catalogItemId &&
+        existing.active === input.active
+      ) {
+        return {
+          bitrixProductId: input.bitrixProductId,
+          catalogItemId: Number(existing.catalog_item_id),
+          catalogName: existing.catalog_name,
+          catalogSku: existing.catalog_sku,
+          catalogKind: existing.catalog_kind,
+          catalogActive: existing.catalog_is_active,
+          catalogVersion: existing.catalog_version,
+          active: existing.active,
+          version: Number(existing.version),
+          changed: false,
+        };
+      }
+      const catalog = await tx.query<{
+        id: string | number;
+        name: string;
+        sku: string | null;
+        kind: string;
+        is_active: boolean;
+        version: number;
+      }>(
+        `SELECT id, name, sku, kind, is_active, version
+           FROM catalog_items WHERE id=$1 FOR SHARE`,
+        [input.catalogItemId],
+      );
+      const target = catalog.rows[0];
+      if (!target) {
+        throw notFound('CATALOG_ITEM_NOT_FOUND', 'Catalog item not found');
+      }
+      if (!target.is_active) {
+        throw conflict(
+          'BITRIX24_PRODUCT_CATALOG_INACTIVE',
+          'Catalog item is inactive; restore it or choose another item',
+        );
+      }
+      const saved = await tx.query<{ version: number }>(
+        `INSERT INTO bitrix24_product_mapping (
+           bitrix_product_id, catalog_item_id, active, version,
+           created_by, updated_by
+         ) VALUES ($1,$2,$3,1,$4,$4)
+         ON CONFLICT (bitrix_product_id) DO UPDATE SET
+           catalog_item_id=EXCLUDED.catalog_item_id,
+           active=EXCLUDED.active,
+           version=bitrix24_product_mapping.version+1,
+           updated_by=EXCLUDED.updated_by,
+           updated_at=now()
+         RETURNING version`,
+        [input.bitrixProductId, input.catalogItemId, input.active, input.actorUserId],
+      );
+      const version = Number(saved.rows[0].version);
+      await this.audit.record(tx, {
+        event: 'bitrix24.product_mapping_saved',
+        entityType: 'bitrix24_product_mapping',
+        entityId: input.bitrixProductId,
+        actorUserId: input.actorUserId,
+        actorUsername: input.actorUsername,
+        actorRole: input.actorRole,
+        requestId: input.auditRequestId,
+        source: 'erp',
+        before: existing
+          ? {
+              catalogItemId: Number(existing.catalog_item_id),
+              active: existing.active,
+              version: Number(existing.version),
+            }
+          : null,
+        after: {
+          catalogItemId: input.catalogItemId,
+          catalogName: target.name,
+          active: input.active,
+          version,
+        },
+        relatedEntities: [{ entityType: 'catalog_item', entityId: input.catalogItemId }],
+      });
+      await enqueueDomainEvent(tx, {
+        eventType: 'bitrix24.product_mapping_saved',
+        aggregateType: 'catalog_item',
+        aggregateId: String(input.catalogItemId),
+        idempotencyKey: `product-mapping:${input.bitrixProductId}:${version}`,
+        payload: {
+          eventVersion: 1,
+          eventName: 'bitrix24.product_mapping_saved',
+          bitrixProductId: input.bitrixProductId,
+          catalogItemId: input.catalogItemId,
+          active: input.active,
+          mappingVersion: version,
+          actorUserId: input.actorUserId,
+          requestId: input.auditRequestId,
+        },
+      });
+      // One mapping change enqueues a deduplicated reconcile for every active
+      // request whose snapshots reference this product; no direct remote writes.
+      await tx.query(
+        `INSERT INTO bitrix24_inbound_event (
+           member_id, event_name, object_type, bitrix_id, event_ts,
+           payload_json, fingerprint
+         )
+         SELECT installation.member_id, 'BITRIX24_RECONCILE_DEAL', 'deal',
+                request.bitrix_deal_id, now(),
+                jsonb_build_object('source','product-mapping','bitrixProductId',$1::text),
+                'product-mapping:' || $1 || ':request:' || request.request_id || ':v' || $2
+           FROM bitrix24_incoming_request request
+           JOIN bitrix24_product_row_snapshot snapshot
+             ON snapshot.request_id=request.request_id
+            AND snapshot.bitrix_product_id=$1
+           CROSS JOIN LATERAL (
+             SELECT member_id FROM bitrix24_app_installation
+              WHERE status <> 'revoked' ORDER BY updated_at DESC LIMIT 1
+           ) installation
+          WHERE request.state='active'
+            AND NOT EXISTS (
+              SELECT 1 FROM bitrix24_inbound_event existing
+               WHERE existing.member_id=installation.member_id
+                 AND existing.object_type='deal'
+                 AND existing.bitrix_id=request.bitrix_deal_id
+                 AND existing.status IN ('pending','failed')
+            )
+          GROUP BY installation.member_id, request.bitrix_deal_id, request.request_id
+         -- Untargeted DO NOTHING dedupes against BOTH the fingerprint unique
+         -- constraint and the partial open-object index (pending/failed); an
+         -- in-flight 'processing' event does not block this follow-up.
+         ON CONFLICT DO NOTHING`,
+        [input.bitrixProductId, version],
+      );
+      return {
+        bitrixProductId: input.bitrixProductId,
+        catalogItemId: input.catalogItemId,
+        catalogName: target.name,
+        catalogSku: target.sku,
+        catalogKind: target.kind,
+        catalogActive: target.is_active,
+        catalogVersion: target.version,
+        active: input.active,
+        version,
+        changed: true,
+      };
+    });
+  }
+
+  /**
+   * Local generation CAS read taken before the remote fetch; `null` means no
+   * request existed for the Deal at prefetch time. `applyDealProductSnapshot`
+   * refuses to apply a fetch whose fence no longer matches committed state.
+   */
+  async getProductSyncFence(
+    dealId: string,
+  ): Promise<{ syncVersion: string; syncedAt: string | null } | null> {
+    const result = await this.db.query<{
+      sync_version: string | number;
+      product_rows_synced_at: Date | string | null;
+    }>(
+      `SELECT sync_version, product_rows_synced_at
+         FROM bitrix24_incoming_request
+        WHERE bitrix_deal_id=$1`,
+      [dealId],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      syncVersion: String(row.sync_version),
+      syncedAt: row.product_rows_synced_at ? toIso(row.product_rows_synced_at) : null,
+    };
+  }
+
+  /**
+   * Scoped request link for an order — used by the conversion endpoint to
+   * authorize BEFORE any remote presync runs. Returns the request regardless
+   * of state so a completed-conversion replay can still be served.
+   */
+  async findRequestLinkByOrderId(
+    orderId: number,
+    scope: { mode: 'all' } | { mode: 'assigned'; userId: number },
+  ): Promise<{ requestId: number; dealId: string; state: string } | null> {
+    const result = await this.db.query<{
+      request_id: string | number;
+      bitrix_deal_id: string;
+      state: string;
+    }>(
+      `SELECT request.request_id, request.bitrix_deal_id, request.state
+         FROM bitrix24_incoming_request request
+         JOIN orders linked_order ON linked_order.order_id=request.linked_order_id
+        WHERE request.linked_order_id=$1
+          AND linked_order.delete_flag=false
+          AND ($2::boolean OR linked_order.manager_id=$3)`,
+      [orderId, scope.mode === 'all', scope.mode === 'assigned' ? scope.userId : null],
+    );
+    const row = result.rows[0];
+    return row
+      ? { requestId: Number(row.request_id), dealId: row.bitrix_deal_id, state: row.state }
+      : null;
+  }
+
+  /** Active request row for a linked order, used by conversion presync. */
+  async findActiveRequestByOrderId(
+    orderId: number,
+  ): Promise<{ requestId: number; dealId: string } | null> {
+    const result = await this.db.query<{
+      request_id: string | number;
+      bitrix_deal_id: string;
+    }>(
+      `SELECT request_id, bitrix_deal_id
+         FROM bitrix24_incoming_request
+        WHERE linked_order_id=$1 AND state='active'`,
+      [orderId],
+    );
+    const row = result.rows[0];
+    return row ? { requestId: Number(row.request_id), dealId: row.bitrix_deal_id } : null;
+  }
+
+  /**
+   * Transactional apply of a complete, already-fetched remote product-row
+   * list. Caller owns remote reads; this method owns the Deal advisory lock,
+   * the request/order row locks and every snapshot/line/total write.
+   * A blocked refresh persists the safe snapshot and a readable status while
+   * keeping previously imported lines untouched.
+   */
+  async applyDealProductSnapshot(input: {
+    dealId: string;
+    rows: Bitrix24ProductRow[];
+    invalid: Bitrix24ProductRowInvalid[];
+    rowsHash: string;
+    opportunity: string | null;
+    expectedCurrencyId: string;
+    currencyId: string | null;
+    auditRequestId: string;
+    eventId?: string;
+    lockToken?: string;
+    actorUserId: number;
+    /** Prefetched local generation CAS; null when no request was observed. */
+    fence: { syncVersion: string; syncedAt: string | null } | null;
+    /** `updated_at` of the fetched Deal item — fences stale remote reads. */
+    remoteUpdatedAt?: string | null;
+  }): Promise<{
+    status: 'ready' | 'blocked' | 'unchanged' | 'skipped';
+    requestId: number | null;
+    orderId: number | null;
+    reason: string | null;
+    blockedIds: string[];
+  }> {
+    return this.db.transaction(async (tx) => {
+      const skipped = {
+        status: 'skipped' as const,
+        reason: null,
+        blockedIds: [] as string[],
+      };
+      if (input.eventId) {
+        await assertInboundOwnership(tx, input.eventId, input.lockToken);
+      }
+      // Preserve the established lock order: Deal advisory, order, request.
+      await lockAggregate(tx, `deal:${input.dealId}`);
+      await setReverseOrigin(tx);
+      await tx.query("SELECT set_config('app.user_id',$1,true)", [String(input.actorUserId)]);
+
+      // Unlocked discovery read only locates the order; state is re-validated
+      // under locks below.
+      const discoveryRes = await tx.query<{
+        request_id: string | number;
+        linked_order_id: string | number | null;
+      }>(
+        `SELECT request_id, linked_order_id
+           FROM bitrix24_incoming_request
+          WHERE bitrix_deal_id=$1`,
+        [input.dealId],
+      );
+      const discovered = discoveryRes.rows[0];
+      if (!discovered || discovered.linked_order_id === null) {
+        return { ...skipped, requestId: discovered ? Number(discovered.request_id) : null, orderId: null };
+      }
+      const requestId = Number(discovered.request_id);
+      const orderId = Number(discovered.linked_order_id);
+
+      const orderRes = await tx.query<{
+        order_kind: string;
+        source_system: string | null;
+        delete_flag: boolean;
+        client_id: string | number | null;
+        discount: string | number;
+        surcharge: string | number;
+        total_amount: string | number;
+        final_amount: string | number;
+        version: number;
+      }>(
+        `SELECT order_kind, source_system, delete_flag, client_id,
+                discount, surcharge, total_amount, final_amount, version
+           FROM orders
+          WHERE order_id=$1
+          FOR UPDATE`,
+        [orderId],
+      );
+      const order = orderRes.rows[0];
+      if (
+        !order ||
+        order.delete_flag ||
+        order.order_kind !== 'crm_request' ||
+        order.source_system !== 'bitrix24'
+      ) {
+        return { ...skipped, requestId, orderId };
+      }
+      // Lock the exact active order<->Deal mapping row: a concurrent mapping
+      // change via the sync-mapping repository must not race this apply.
+      const mappingLock = await tx.query(
+        `SELECT 1
+           FROM crm_sync_mapping
+          WHERE entity_type='order' AND erp_id=$1
+            AND bitrix_object='deal' AND bitrix_id=$2
+            AND status='active' AND source_system='bitrix24'
+          FOR SHARE`,
+        [String(orderId), input.dealId],
+      );
+      if (mappingLock.rowCount !== 1) {
+        return { ...skipped, requestId, orderId };
+      }
+
+      const requestRes = await tx.query<{
+        request_id: string | number;
+        state: string;
+        sync_status: string;
+        bitrix_updated_at: Date | string | null;
+        sync_version: string | number;
+        product_sync_status: string;
+        product_sync_error_code: string | null;
+        product_sync_blocked_ids: unknown;
+        product_rows_hash: string | null;
+        product_rows_total: number | null;
+        product_order_fingerprint: string | null;
+        product_rows_synced_at: Date | string | null;
+      }>(
+        `SELECT request_id, state, sync_status, bitrix_updated_at, sync_version,
+                product_sync_status, product_sync_error_code,
+                product_sync_blocked_ids, product_rows_hash,
+                product_rows_total, product_order_fingerprint,
+                product_rows_synced_at
+           FROM bitrix24_incoming_request
+          WHERE request_id=$1
+          FOR UPDATE`,
+        [requestId],
+      );
+      const request = requestRes.rows[0];
+      // Converted/archived requests are post-import territory: never import or
+      // delete CRM-owned snapshots after conversion.
+      if (!request || request.state !== 'active' || request.sync_status !== 'ok') {
+        return { ...skipped, requestId, orderId };
+      }
+      // Stale-fetch fence: a slow older REST read must not overwrite a newer
+      // committed apply. Fails closed — a request that appeared since the
+      // prefetch but is already synced, or any committed generation drift,
+      // skips this apply entirely (the newer event owns the truth).
+      if (!input.fence) return { ...skipped, requestId, orderId };
+      {
+        const syncedAt = request.product_rows_synced_at
+          ? toIso(request.product_rows_synced_at)
+          : null;
+        if (
+          String(request.sync_version) !== input.fence.syncVersion ||
+          syncedAt !== input.fence.syncedAt
+        ) {
+          return { ...skipped, requestId, orderId };
+        }
+      }
+      if (
+        input.remoteUpdatedAt &&
+        request.bitrix_updated_at &&
+        new Date(request.bitrix_updated_at) > new Date(input.remoteUpdatedAt)
+      ) {
+        return { ...skipped, requestId, orderId };
+      }
+
+      const existingRes = await tx.query<{
+        bitrix_row_id: string;
+        bitrix_product_id: string;
+        state: string;
+        applied_state: string;
+        normalized_hash: string;
+        order_line_id: string | number | null;
+        imported_fingerprint: string | null;
+      }>(
+        `SELECT bitrix_row_id, bitrix_product_id, state, applied_state,
+                normalized_hash, order_line_id, imported_fingerprint
+           FROM bitrix24_product_row_snapshot
+          WHERE request_id=$1
+          FOR UPDATE`,
+        [requestId],
+      );
+      const existing = new Map(
+        existingRes.rows.map((row) => [row.bitrix_row_id, row]),
+      );
+
+      // Persist the raw snapshot for every well-formed remote row. Invalid rows
+      // cannot fill the typed money columns; they stay visible via blocked_ids
+      // and keep their previous snapshot row untouched.
+      const fetchedIds = [
+        ...input.rows.map((row) => row.rowId),
+        ...input.invalid
+          .map((row) => row.rowId)
+          .filter((rowId): rowId is string => rowId !== null),
+      ];
+      for (const row of input.rows) {
+        await tx.query(
+          `INSERT INTO bitrix24_product_row_snapshot (
+             request_id, bitrix_row_id, bitrix_product_id, product_name, sort,
+             quantity, unit_price, line_total, discount_type_id, discount_rate,
+             discount_sum, tax_rate, tax_included, measure_code, measure_name,
+             raw_row, normalized_hash, state
+           ) VALUES (
+             $1,$2,$3,$4,$5,$6::numeric,$7::numeric,$8::numeric,$9,$10::numeric,
+             $11::numeric,$12::numeric,$13,$14,$15,$16::jsonb,$17,'active'
+           )
+           ON CONFLICT (request_id, bitrix_row_id) DO UPDATE SET
+             bitrix_product_id=EXCLUDED.bitrix_product_id,
+             product_name=EXCLUDED.product_name,
+             sort=EXCLUDED.sort,
+             quantity=EXCLUDED.quantity,
+             unit_price=EXCLUDED.unit_price,
+             line_total=EXCLUDED.line_total,
+             discount_type_id=EXCLUDED.discount_type_id,
+             discount_rate=EXCLUDED.discount_rate,
+             discount_sum=EXCLUDED.discount_sum,
+             tax_rate=EXCLUDED.tax_rate,
+             tax_included=EXCLUDED.tax_included,
+             measure_code=EXCLUDED.measure_code,
+             measure_name=EXCLUDED.measure_name,
+             raw_row=EXCLUDED.raw_row,
+             normalized_hash=EXCLUDED.normalized_hash,
+             state='active',
+             last_seen_at=now(),
+             updated_at=now()
+           WHERE bitrix24_product_row_snapshot.normalized_hash
+                 IS DISTINCT FROM EXCLUDED.normalized_hash
+              OR bitrix24_product_row_snapshot.state<>'active'`,
+          [
+            requestId, row.rowId, row.productId, row.productName, row.sort,
+            row.quantity, row.unitPrice, row.lineTotal, row.discountTypeId,
+            row.discountRate, row.discountSum, row.taxRate, row.taxIncluded,
+            row.measureCode, row.measureName, JSON.stringify(row.raw),
+            row.normalizedHash,
+          ],
+        );
+      }
+      await tx.query(
+        `UPDATE bitrix24_product_row_snapshot
+            SET state='deleted', updated_at=now()
+          WHERE request_id=$1
+            AND state='active'
+            AND bitrix_row_id<>ALL($2::text[])`,
+        [requestId, fetchedIds],
+      );
+
+      // ---- blocking evaluation -------------------------------------------
+      let blockCode: string | null = null;
+      const blockedIds: string[] = [];
+      const block = (code: string, ids: string[]) => {
+        if (blockCode === null) blockCode = code;
+        blockedIds.push(...ids);
+      };
+      if (input.currencyId !== input.expectedCurrencyId) {
+        block('BITRIX24_PRODUCT_CURRENCY_MISMATCH', []);
+      }
+      if (input.invalid.length) {
+        block(
+          'BITRIX24_PRODUCT_ROW_INVALID',
+          input.invalid.map((row) => `row:${row.rowId ?? 'unknown'}`),
+        );
+      }
+
+      const productIds = [...new Set(input.rows.map((row) => row.productId))];
+      const mappingRes = productIds.length
+        ? await tx.query<{
+            bitrix_product_id: string;
+            mapping_active: boolean;
+            mapping_version: number;
+            catalog_item_id: string | number;
+            catalog_name: string;
+            catalog_sku: string | null;
+            catalog_kind: 'made_to_order' | 'stock_item' | 'service';
+            unit_id: string | number;
+            unit_name: string;
+            ref_key_1c: string | null;
+            catalog_version: number;
+            catalog_active: boolean;
+          }>(
+            `SELECT m.bitrix_product_id, m.active AS mapping_active,
+                    m.version AS mapping_version, m.catalog_item_id,
+                    c.name AS catalog_name, c.sku AS catalog_sku,
+                    c.kind AS catalog_kind, c.unit_id,
+                    COALESCE(u.unit_name, u.unit_code) AS unit_name,
+                    c.ref_key_1c, c.version AS catalog_version,
+                    c.is_active AS catalog_active
+               FROM bitrix24_product_mapping m
+               JOIN catalog_items c ON c.id=m.catalog_item_id
+               LEFT JOIN units u ON u.unit_id=c.unit_id
+              WHERE m.bitrix_product_id=ANY($1::text[])
+              ORDER BY length(m.bitrix_product_id), m.bitrix_product_id
+              FOR UPDATE OF m
+              FOR SHARE OF c`,
+            [productIds],
+          )
+        : { rows: [] };
+      const mappingByProduct = new Map(
+        mappingRes.rows.map((row) => [row.bitrix_product_id, row]),
+      );
+      if (blockCode === null) {
+        const missing = productIds.filter((id) => !mappingByProduct.has(id));
+        if (missing.length) block('BITRIX24_PRODUCT_MAPPING_MISSING', missing);
+        const inactiveMapping = productIds.filter(
+          (id) => mappingByProduct.has(id) && !mappingByProduct.get(id)!.mapping_active,
+        );
+        if (inactiveMapping.length) {
+          block('BITRIX24_PRODUCT_MAPPING_INACTIVE', inactiveMapping);
+        }
+        const inactiveCatalog = productIds.filter((id) => {
+          const mapping = mappingByProduct.get(id);
+          return mapping && mapping.mapping_active && !mapping.catalog_active;
+        });
+        if (inactiveCatalog.length) {
+          block('BITRIX24_PRODUCT_CATALOG_INACTIVE', inactiveCatalog);
+        }
+      }
+
+      // Lock every line currently owned by an imported remote row.
+      const linkedLineIds = [
+        ...new Set(
+          existingRes.rows
+            .map((row) => row.order_line_id)
+            .filter((id): id is string | number => id !== null)
+            .map(Number),
+        ),
+      ];
+      const lineRes = linkedLineIds.length
+        ? await tx.query<{
+            id: string | number;
+            catalog_item_id: string | number;
+            catalog_version: number;
+            quantity: string;
+            unit_price: string;
+            amount: string;
+            delete_flag: boolean;
+            line_number: number;
+            notes: string;
+          }>(
+            `SELECT id, catalog_item_id, catalog_version, quantity::text,
+                    unit_price::text, amount::text, delete_flag, line_number, notes
+               FROM order_catalog_lines
+              WHERE id=ANY($1::bigint[])
+              FOR UPDATE`,
+            [linkedLineIds],
+          )
+        : { rows: [] };
+      const lineById = new Map(lineRes.rows.map((row) => [Number(row.id), row]));
+
+      // Removals are derived from APPLIED ownership (applied_state='active'),
+      // not the observed remote state — a blocked refresh flips `state` to
+      // 'deleted' without touching lines, and a user-side deletion of an
+      // applied line must still be detected as a conflict.
+      const removedSnapshotRowIds = new Set(
+        existingRes.rows
+          .filter(
+            (row) =>
+              row.applied_state === 'active' &&
+              row.order_line_id !== null &&
+              !fetchedIds.includes(row.bitrix_row_id),
+          )
+          .map((row) => row.bitrix_row_id),
+      );
+
+      const remoteRowCount = input.rows.length + input.invalid.length;
+      if (blockCode === null) {
+        // A locally edited or removed imported line is a conflict; the import
+        // never silently overwrites ERP-owned edits.
+        const edited: string[] = [];
+        // Ownership rules per remote row:
+        //  - applied_state='active' + remote row present + line gone/edited/
+        //    locally deleted => local-edit conflict.
+        //  - applied_state='deleted' + remote row reappears => restore allowed
+        //    only when the stored line still matches the importer fingerprint;
+        //    a locally modified/missing line conflicts.
+        //  - applied_state='pending' + no linked line => first import.
+        for (const row of input.rows) {
+          const snapshot = existing.get(row.rowId);
+          if (
+            !snapshot ||
+            snapshot.order_line_id === null ||
+            snapshot.applied_state === 'pending'
+          ) {
+            continue;
+          }
+          const line = lineById.get(Number(snapshot.order_line_id));
+          const current = line
+            ? importedLineFingerprint({
+                orderLineId: Number(line.id),
+                bitrixRowId: row.rowId,
+                catalogItemId: Number(line.catalog_item_id),
+                catalogVersion: line.catalog_version,
+                quantity: line.quantity,
+                unitPrice: line.unit_price,
+                lineTotal: line.amount,
+              })
+            : null;
+          if (current === null || current !== snapshot.imported_fingerprint) {
+            edited.push(row.rowId);
+            continue;
+          }
+          // A locally deleted line while the remote row still exists is a
+          // conflict, not an importer deletion.
+          if (snapshot.applied_state === 'active' && line!.delete_flag) {
+            edited.push(row.rowId);
+          }
+        }
+        for (const snapshot of existingRes.rows) {
+          if (removedSnapshotRowIds.has(snapshot.bitrix_row_id)) {
+            const line = lineById.get(Number(snapshot.order_line_id));
+            const current = line && !line.delete_flag
+              ? importedLineFingerprint({
+                  orderLineId: Number(line.id),
+                  bitrixRowId: snapshot.bitrix_row_id,
+                  catalogItemId: Number(line.catalog_item_id),
+                  catalogVersion: line.catalog_version,
+                  quantity: line.quantity,
+                  unitPrice: line.unit_price,
+                  lineTotal: line.amount,
+                })
+              : null;
+            if (current === null || current !== snapshot.imported_fingerprint) {
+              edited.push(snapshot.bitrix_row_id);
+            }
+          }
+        }
+        if (edited.length) block('BITRIX24_PRODUCT_LINE_EDITED', edited.map((id) => `row:${id}`));
+      }
+
+      // Planned post-import catalog lines: untouched ERP-owned lines plus the
+      // imported set computed from remote rows.
+      const importedLineIds = new Set(
+        existingRes.rows
+          .map((row) => row.order_line_id)
+          .filter((id): id is string | number => id !== null)
+          .map(Number),
+      );
+      const currentLines = await tx.query<{ id: string | number; amount: string }>(
+        `SELECT id, amount::text AS amount
+           FROM order_catalog_lines
+          WHERE order_id=$1 AND delete_flag=false`,
+        [orderId],
+      );
+      let plannedCatalogCents = 0n;
+      let nonImportedActiveCount = 0;
+      for (const line of currentLines.rows) {
+        if (importedLineIds.has(Number(line.id))) continue;
+        nonImportedActiveCount += 1;
+        plannedCatalogCents += BigInt(Math.round(Number(line.amount) * 100));
+      }
+      // The ERP catalog-line cap applies to the aggregate of manual and
+      // imported active lines, not just the remote row count.
+      if (nonImportedActiveCount + input.rows.length > 1000) {
+        block('BITRIX24_PRODUCT_LINES_OVERFLOW', []);
+      }
+      for (const row of input.rows) {
+        plannedCatalogCents += BigInt(Math.round(Number(row.lineTotal) * 100));
+      }
+      const detailTotals = await tx.query<{ total: string | number }>(
+        `SELECT COALESCE(SUM(detail_cost),0) AS total
+           FROM order_details
+          WHERE order_id=$1 AND delete_flag=false`,
+        [orderId],
+      );
+      const plannedTotalCents =
+        BigInt(Math.round(Number(detailTotals.rows[0]?.total ?? 0) * 100)) +
+        plannedCatalogCents;
+      const plannedFinalCents =
+        plannedTotalCents -
+        BigInt(Math.round(Number(order.discount) * 100)) +
+        BigInt(Math.round(Number(order.surcharge) * 100));
+      const centsText = (cents: bigint) =>
+        `${cents < 0n ? '-' : ''}${(cents < 0n ? -cents : cents) / 100n}.${String((cents < 0n ? -cents : cents) % 100n).padStart(2, '0')}`;
+      const plannedFinal = centsText(plannedFinalCents);
+      if (plannedFinalCents < 0n) {
+        block('BITRIX24_PRODUCT_TOTAL_MISMATCH', []);
+      }
+      // Same aggregate cap as the manual order save path
+      // (orders total/final cannot exceed 9,999,999,999.99).
+      if (plannedTotalCents > 999_999_999_999n || plannedFinalCents > 999_999_999_999n) {
+        block('ORDER_AMOUNT_OVERFLOW', []);
+      }
+      if (blockCode === null && remoteRowCount > 0) {
+        if (input.opportunity === null) {
+          block('BITRIX24_PRODUCT_TOTAL_UNKNOWN', []);
+        } else {
+          const remoteTotal = centsText(
+            input.rows.reduce(
+              (total, row) => total + BigInt(Math.round(Number(row.lineTotal) * 100)),
+              0n,
+            ),
+          );
+          if (remoteTotal !== input.opportunity || plannedFinal !== input.opportunity) {
+            block('BITRIX24_PRODUCT_TOTAL_MISMATCH', []);
+          }
+        }
+      }
+
+      if (blockCode !== null) {
+        const changed =
+          request.product_sync_status !== 'blocked' ||
+          request.product_sync_error_code !== blockCode ||
+          JSON.stringify(request.product_sync_blocked_ids ?? []) !==
+            JSON.stringify(blockedIds) ||
+          request.product_rows_hash !== input.rowsHash ||
+          Number(request.product_rows_total ?? -1) !== remoteRowCount;
+        if (!changed) {
+          return {
+            status: 'blocked' as const,
+            requestId,
+            orderId,
+            reason: blockCode,
+            blockedIds,
+          };
+        }
+        const updated = await tx.query<{ sync_version: string | number }>(
+          `UPDATE bitrix24_incoming_request
+              SET product_sync_status='blocked',
+                  product_sync_error_code=$2,
+                  product_sync_blocked_ids=$3::jsonb,
+                  product_rows_hash=$4,
+                  product_rows_total=$5,
+                  product_order_fingerprint=NULL,
+                  product_rows_synced_at=now(),
+                  sync_version=sync_version+1,
+                  version=version+1,
+                  updated_at=now()
+            WHERE request_id=$1
+            RETURNING sync_version`,
+          [requestId, blockCode, JSON.stringify(blockedIds), input.rowsHash, remoteRowCount],
+        );
+        const syncVersion = String(updated.rows[0].sync_version);
+        await this.audit.record(tx, {
+          event: 'bitrix24.product_rows_blocked',
+          entityType: 'order',
+          entityId: orderId,
+          actorUserId: input.actorUserId,
+          requestId: input.auditRequestId,
+          source: 'bitrix24',
+          relatedOrderId: orderId,
+          relatedClientId: order.client_id === null ? null : Number(order.client_id),
+          before: {
+            productSyncStatus: request.product_sync_status,
+            productRowsHash: request.product_rows_hash,
+          },
+          after: {
+            productSyncStatus: 'blocked',
+            errorCode: blockCode,
+            blockedIds,
+            productRowsHash: input.rowsHash,
+          },
+          metadata: { bitrixDealId: input.dealId, incomingRequestId: requestId },
+        });
+        await enqueueDomainEvent(tx, {
+          eventType: 'bitrix24.product_rows_blocked',
+          aggregateType: 'order',
+          aggregateId: String(orderId),
+          idempotencyKey: `product-sync:${requestId}:${syncVersion}`,
+          payload: {
+            eventVersion: 1,
+            eventName: 'bitrix24.product_rows_blocked',
+            orderId,
+            incomingRequestId: requestId,
+            bitrixDealId: input.dealId,
+            errorCode: blockCode,
+            blockedIds,
+            actorUserId: input.actorUserId,
+            requestId: input.auditRequestId,
+          },
+        });
+        return {
+          status: 'blocked' as const,
+          requestId,
+          orderId,
+          reason: blockCode,
+          blockedIds,
+        };
+      }
+
+      // ---- ready: apply line writes --------------------------------------
+      const importedFingerprints: string[] = [];
+      let nextLineNumber = Number((
+        await tx.query<{ max_no: string | number }>(
+          `SELECT COALESCE(MAX(line_number),0) AS max_no
+             FROM order_catalog_lines WHERE order_id=$1`,
+          [orderId],
+        )
+      ).rows[0].max_no);
+      const unchanged =
+        request.product_sync_status === 'ready' &&
+        request.product_rows_hash === input.rowsHash &&
+        Number(request.product_rows_total ?? -1) === remoteRowCount;
+      let linesChanged = false;
+      for (const row of input.rows) {
+        const snapshot = existing.get(row.rowId);
+        const mapping = mappingByProduct.get(row.productId)!;
+        const linkedId = snapshot?.order_line_id === null || snapshot === undefined
+          ? null
+          : Number(snapshot.order_line_id);
+        if (linkedId === null) {
+          nextLineNumber += 1;
+          const inserted = await tx.query<{ id: string | number }>(
+            `INSERT INTO order_catalog_lines (
+               order_id, catalog_item_id, line_number, name, sku, kind,
+               unit_id, unit_name, catalog_version, ref_key_1c,
+               quantity, unit_price, notes, created_by, edited_by
+             ) VALUES (
+               $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::numeric,$12::numeric,'',$13,$13
+             ) RETURNING id`,
+            [
+              orderId,
+              Number(mapping.catalog_item_id),
+              nextLineNumber,
+              mapping.catalog_name,
+              mapping.catalog_sku,
+              mapping.catalog_kind,
+              Number(mapping.unit_id),
+              mapping.unit_name,
+              mapping.catalog_version,
+              mapping.ref_key_1c,
+              row.quantity,
+              row.unitPrice,
+              input.actorUserId,
+            ],
+          );
+          const lineId = Number(inserted.rows[0].id);
+          linesChanged = true;
+          const fingerprint = importedLineFingerprint({
+            orderLineId: lineId,
+            bitrixRowId: row.rowId,
+            catalogItemId: Number(mapping.catalog_item_id),
+            catalogVersion: mapping.catalog_version,
+            quantity: row.quantity,
+            unitPrice: row.unitPrice,
+            lineTotal: row.lineTotal,
+          });
+          importedFingerprints.push(fingerprint);
+          await tx.query(
+            `UPDATE bitrix24_product_row_snapshot
+                SET catalog_item_id=$3, catalog_version=$4, order_line_id=$5,
+                    imported_fingerprint=$6, applied_state='active',
+                    updated_at=now()
+              WHERE request_id=$1 AND bitrix_row_id=$2`,
+            [
+              requestId, row.rowId, Number(mapping.catalog_item_id),
+              mapping.catalog_version, lineId, fingerprint,
+            ],
+          );
+          continue;
+        }
+        const line = lineById.get(linkedId)!;
+        const fingerprint = importedLineFingerprint({
+          orderLineId: linkedId,
+          bitrixRowId: row.rowId,
+          catalogItemId: Number(mapping.catalog_item_id),
+          catalogVersion: mapping.catalog_version,
+          quantity: row.quantity,
+          unitPrice: row.unitPrice,
+          lineTotal: row.lineTotal,
+        });
+        importedFingerprints.push(fingerprint);
+        const lineUnchanged =
+          !line.delete_flag &&
+          snapshot?.applied_state === 'active' &&
+          Number(line.catalog_item_id) === Number(mapping.catalog_item_id) &&
+          line.catalog_version === mapping.catalog_version &&
+          line.quantity === row.quantity &&
+          line.unit_price === row.unitPrice &&
+          line.amount === row.lineTotal &&
+          fingerprint === snapshot?.imported_fingerprint;
+        if (!lineUnchanged) {
+          linesChanged = true;
+          // Restores importer-deleted lines too (delete_flag=false).
+          await tx.query(
+            `UPDATE order_catalog_lines
+                SET catalog_item_id=$3, name=$4, sku=$5, kind=$6, unit_id=$7,
+                    unit_name=$8, catalog_version=$9, ref_key_1c=$10,
+                    quantity=$11::numeric, unit_price=$12::numeric,
+                    edited_by=$13, updated_at=now(), delete_flag=false
+              WHERE id=$1 AND order_id=$2`,
+            [
+              linkedId, orderId, Number(mapping.catalog_item_id),
+              mapping.catalog_name, mapping.catalog_sku, mapping.catalog_kind,
+              Number(mapping.unit_id), mapping.unit_name,
+              mapping.catalog_version, mapping.ref_key_1c,
+              row.quantity, row.unitPrice, input.actorUserId,
+            ],
+          );
+          await tx.query(
+            `UPDATE bitrix24_product_row_snapshot
+                SET catalog_item_id=$3, catalog_version=$4,
+                    imported_fingerprint=$5, applied_state='active',
+                    updated_at=now()
+              WHERE request_id=$1 AND bitrix_row_id=$2`,
+            [
+              requestId, row.rowId, Number(mapping.catalog_item_id),
+              mapping.catalog_version, fingerprint,
+            ],
+          );
+        }
+      }
+      for (const snapshot of existingRes.rows) {
+        if (
+          removedSnapshotRowIds.has(snapshot.bitrix_row_id) &&
+          snapshot.order_line_id !== null
+        ) {
+          const line = lineById.get(Number(snapshot.order_line_id))!;
+          if (!line.delete_flag) {
+            linesChanged = true;
+            await tx.query(
+              `UPDATE order_catalog_lines
+                  SET delete_flag=true, edited_by=$3, updated_at=now()
+                WHERE id=$1 AND order_id=$2`,
+              [Number(snapshot.order_line_id), orderId, input.actorUserId],
+            );
+          }
+          await tx.query(
+            `UPDATE bitrix24_product_row_snapshot
+                SET applied_state='deleted', updated_at=now()
+              WHERE request_id=$1 AND bitrix_row_id=$2`,
+            [requestId, snapshot.bitrix_row_id],
+          );
+        }
+      }
+
+      const fingerprint = productOrderFingerprint({
+        rowsHash: input.rowsHash,
+        mappingVersions: productIds.map(
+          (id) => {
+            const mapping = mappingByProduct.get(id)!;
+            return `${id}:${mapping.mapping_version}:${mapping.catalog_item_id}`;
+          },
+        ),
+        importedLines: importedFingerprints,
+        orderFinancials: remoteRowCount > 0
+          ? {
+              totalAmount: centsText(plannedTotalCents),
+              discount: centsText(BigInt(Math.round(Number(order.discount) * 100))),
+              surcharge: centsText(BigInt(Math.round(Number(order.surcharge) * 100))),
+              finalAmount: plannedFinal,
+            }
+          : null,
+      });
+      if (
+        unchanged &&
+        !linesChanged &&
+        request.product_order_fingerprint === fingerprint
+      ) {
+        return {
+          status: 'unchanged' as const,
+          requestId,
+          orderId,
+          reason: null,
+          blockedIds: [] as string[],
+        };
+      }
+      if (linesChanged || Number(order.final_amount) !== Number(plannedFinal)) {
+        await tx.query(
+          `UPDATE orders
+              SET total_amount=$2::numeric, final_amount=$3::numeric,
+                  edited_by=$4, version=version+1, updated_at=now()
+            WHERE order_id=$1`,
+          [orderId, centsText(plannedTotalCents), plannedFinal, input.actorUserId],
+        );
+      }
+      const updatedRequest = await tx.query<{ sync_version: string | number }>(
+        `UPDATE bitrix24_incoming_request
+            SET product_sync_status='ready',
+                product_sync_error_code=NULL,
+                product_sync_blocked_ids='[]'::jsonb,
+                product_rows_hash=$2,
+                product_rows_total=$3,
+                product_order_fingerprint=$4,
+                product_rows_synced_at=now(),
+                sync_version=sync_version+1,
+                version=version+1,
+                updated_at=now()
+          WHERE request_id=$1
+          RETURNING sync_version`,
+        [requestId, input.rowsHash, remoteRowCount, fingerprint],
+      );
+      const syncVersion = String(updatedRequest.rows[0].sync_version);
+      await this.audit.record(tx, {
+        event: 'bitrix24.product_rows_synced',
+        entityType: 'order',
+        entityId: orderId,
+        actorUserId: input.actorUserId,
+        requestId: input.auditRequestId,
+        source: 'bitrix24',
+        relatedOrderId: orderId,
+        relatedClientId: order.client_id === null ? null : Number(order.client_id),
+        before: {
+          productSyncStatus: request.product_sync_status,
+          productRowsHash: request.product_rows_hash,
+        },
+        after: {
+          productSyncStatus: 'ready',
+          productRowsHash: input.rowsHash,
+          remoteRowCount,
+          finalAmount: plannedFinal,
+        },
+        metadata: { bitrixDealId: input.dealId, incomingRequestId: requestId },
+      });
+      await enqueueDomainEvent(tx, {
+        eventType: 'bitrix24.product_rows_synced',
+        aggregateType: 'order',
+        aggregateId: String(orderId),
+        idempotencyKey: `product-sync:${requestId}:${syncVersion}`,
+        payload: {
+          eventVersion: 1,
+          eventName: 'bitrix24.product_rows_synced',
+          orderId,
+          incomingRequestId: requestId,
+          bitrixDealId: input.dealId,
+          productRowsHash: input.rowsHash,
+          remoteRowCount,
+          finalAmount: plannedFinal,
+          actorUserId: input.actorUserId,
+          requestId: input.auditRequestId,
+        },
+      });
+      return {
+        status: 'ready' as const,
+        requestId,
+        orderId,
+        reason: null,
+        blockedIds: [] as string[],
+      };
+    });
+  }
+
+  /** Snapshot rows of one request for the incoming-request detail view. */
+  async listRequestProductRows(
+    requestId: number,
+    canViewFinancials: boolean,
+  ): Promise<Array<Record<string, unknown>>> {
+    const result = await this.db.query<{
+      bitrix_row_id: string;
+      bitrix_product_id: string;
+      product_name: string | null;
+      quantity: string;
+      unit_price: string;
+      line_total: string;
+      discount_rate: string | null;
+      discount_sum: string | null;
+      tax_rate: string | null;
+      measure_name: string | null;
+      state: string;
+      applied_state: string;
+      catalog_item_id: string | number | null;
+      catalog_name: string | null;
+      catalog_version: number | null;
+      catalog_active: boolean | null;
+      order_line_id: string | number | null;
+      mapping_active: boolean | null;
+    }>(
+      `SELECT snapshot.bitrix_row_id, snapshot.bitrix_product_id,
+              snapshot.product_name, snapshot.quantity::text,
+              snapshot.unit_price::text, snapshot.line_total::text,
+              snapshot.discount_rate::text, snapshot.discount_sum::text,
+              snapshot.tax_rate::text, snapshot.measure_name, snapshot.state,
+              snapshot.applied_state,
+              snapshot.catalog_item_id, snapshot.catalog_version,
+              snapshot.order_line_id,
+              catalog.name AS catalog_name, catalog.is_active AS catalog_active,
+              mapping.active AS mapping_active
+         FROM bitrix24_product_row_snapshot snapshot
+         LEFT JOIN catalog_items catalog ON catalog.id=snapshot.catalog_item_id
+         LEFT JOIN bitrix24_product_mapping mapping
+           ON mapping.bitrix_product_id=snapshot.bitrix_product_id
+        WHERE snapshot.request_id=$1
+        ORDER BY snapshot.sort NULLS LAST, snapshot.bitrix_row_id::bigint`,
+      [requestId],
+    );
+    return result.rows.map((row) => ({
+      bitrixRowId: row.bitrix_row_id,
+      bitrixProductId: row.bitrix_product_id,
+      productName: row.product_name,
+      quantity: canViewFinancials ? row.quantity : null,
+      unitPrice: canViewFinancials ? row.unit_price : null,
+      lineTotal: canViewFinancials ? row.line_total : null,
+      discountRate: canViewFinancials ? row.discount_rate : null,
+      discountSum: canViewFinancials ? row.discount_sum : null,
+      taxRate: canViewFinancials ? row.tax_rate : null,
+      measureName: row.measure_name,
+      state: row.state,
+      appliedState: row.applied_state,
+      catalogItemId: row.catalog_item_id === null ? null : Number(row.catalog_item_id),
+      catalogName: row.catalog_name,
+      catalogVersion: row.catalog_version,
+      catalogActive: row.catalog_active,
+      orderLineId: row.order_line_id === null ? null : Number(row.order_line_id),
+      mappingActive: row.mapping_active,
+    }));
   }
 
   private async readMapping(
@@ -4991,6 +6315,303 @@ async function assertIncomingDetailReferences(
       field: issue[0],
       ids: issue[1].map(Number),
     });
+  }
+}
+
+interface ProductReadinessRow {
+  request_id: string | number;
+  state: string;
+  linked_order_id: string | number | null;
+  product_sync_status: string;
+  product_sync_error_code: string | null;
+  product_rows_hash: string | null;
+  product_rows_total: number | null;
+  product_order_fingerprint: string | null;
+}
+
+/**
+ * Recompute the fingerprint stored on a request from live state: current
+ * imported line contents, current mapping versions, current catalog
+ * versions/activity and (when remote rows exist) current order financials.
+ * Returns a non-matching sentinel plus a machine-readable staleness reason
+ * whenever an input can no longer reproduce the stored fingerprint.
+ */
+async function computeRequestProductFingerprint(
+  tx: TransactionClient,
+  request: ProductReadinessRow,
+): Promise<{ fingerprint: string | null; stale: string | null }> {
+  if (request.product_rows_hash === null) {
+    return { fingerprint: null, stale: null };
+  }
+  const orderId = Number(request.linked_order_id);
+  const snapshots = await tx.query<{
+    bitrix_row_id: string;
+    bitrix_product_id: string;
+    applied_state: string;
+    order_line_id: string | number | null;
+    catalog_item_id: string | number | null;
+    catalog_version: number | null;
+    imported_fingerprint: string | null;
+    line_catalog_item_id: string | number | null;
+    line_catalog_version: number | null;
+    line_quantity: string | null;
+    line_unit_price: string | null;
+    line_amount: string | null;
+    line_deleted: boolean | null;
+  }>(
+    `SELECT s.bitrix_row_id, s.bitrix_product_id, s.applied_state,
+            s.order_line_id, s.catalog_item_id, s.catalog_version,
+            s.imported_fingerprint,
+            l.catalog_item_id AS line_catalog_item_id,
+            l.catalog_version AS line_catalog_version,
+            l.quantity::text AS line_quantity,
+            l.unit_price::text AS line_unit_price,
+            l.amount::text AS line_amount,
+            l.delete_flag AS line_deleted
+       FROM bitrix24_product_row_snapshot s
+       LEFT JOIN order_catalog_lines l ON l.id=s.order_line_id
+      WHERE s.request_id=$1 AND s.state='active'
+      ORDER BY s.bitrix_row_id`,
+    [request.request_id],
+  );
+  // Governing mapping/catalog rows are share-locked deterministically (sorted
+  // key order) so a concurrent remap or catalog edit cannot slip between the
+  // fingerprint check and the caller's commit.
+  const productIds = [...new Set(snapshots.rows.map((row) => row.bitrix_product_id))];
+  const mappings = productIds.length
+    ? await tx.query<{
+        bitrix_product_id: string;
+        version: number;
+        active: boolean;
+        catalog_item_id: string | number;
+      }>(
+        `SELECT bitrix_product_id, version, active, catalog_item_id
+           FROM bitrix24_product_mapping
+          WHERE bitrix_product_id=ANY($1::text[])
+          ORDER BY length(bitrix_product_id), bitrix_product_id
+          FOR SHARE`,
+        [productIds],
+      )
+    : { rows: [] };
+  const mappingByProduct = new Map(
+    mappings.rows.map((row) => [row.bitrix_product_id, row]),
+  );
+  const catalogIds = [
+    ...new Set(
+      snapshots.rows
+        .map((row) => row.catalog_item_id)
+        .filter((id): id is string | number => id !== null)
+        .map(Number),
+    ),
+  ];
+  const catalogs = catalogIds.length
+    ? await tx.query<{
+        id: string | number;
+        version: number;
+        is_active: boolean;
+      }>(
+        `SELECT id, version, is_active
+           FROM catalog_items
+          WHERE id=ANY($1::bigint[])
+          ORDER BY id
+          FOR SHARE`,
+        [catalogIds],
+      )
+    : { rows: [] };
+  const catalogById = new Map(catalogs.rows.map((row) => [Number(row.id), row]));
+  const lineFingerprints: string[] = [];
+  const mappingVersions: string[] = [];
+  const seenProducts = new Set<string>();
+  for (const row of snapshots.rows) {
+    if (
+      row.order_line_id === null ||
+      row.line_catalog_item_id === null ||
+      row.line_deleted === null ||
+      row.line_deleted ||
+      row.applied_state !== 'active'
+    ) {
+      return { fingerprint: null, stale: 'LINE_MISSING' };
+    }
+    const currentLine = importedLineFingerprint({
+      orderLineId: Number(row.order_line_id),
+      bitrixRowId: row.bitrix_row_id,
+      catalogItemId: Number(row.line_catalog_item_id),
+      catalogVersion: Number(row.line_catalog_version),
+      quantity: String(row.line_quantity),
+      unitPrice: String(row.line_unit_price),
+      lineTotal: String(row.line_amount),
+    });
+    if (currentLine !== row.imported_fingerprint) {
+      return { fingerprint: null, stale: 'LINE_EDITED' };
+    }
+    lineFingerprints.push(currentLine);
+    const mapping = mappingByProduct.get(row.bitrix_product_id);
+    if (
+      !mapping ||
+      !mapping.active ||
+      row.catalog_item_id === null ||
+      Number(mapping.catalog_item_id) !== Number(row.catalog_item_id)
+    ) {
+      return { fingerprint: null, stale: 'MAPPING_CHANGED' };
+    }
+    const catalog = catalogById.get(Number(row.catalog_item_id));
+    if (
+      !catalog ||
+      catalog.version !== row.catalog_version ||
+      !catalog.is_active
+    ) {
+      return { fingerprint: null, stale: 'CATALOG_CHANGED' };
+    }
+    if (!seenProducts.has(row.bitrix_product_id)) {
+      seenProducts.add(row.bitrix_product_id);
+      mappingVersions.push(
+        `${row.bitrix_product_id}:${mapping.version}:${mapping.catalog_item_id}`,
+      );
+    }
+  }
+  let orderFinancials: {
+    totalAmount: string;
+    discount: string;
+    surcharge: string;
+    finalAmount: string;
+  } | null = null;
+  if (Number(request.product_rows_total ?? 0) > 0) {
+    const order = await tx.query<{
+      total_amount: string;
+      discount: string;
+      surcharge: string;
+      final_amount: string;
+    }>(
+      `SELECT total_amount::text, discount::text, surcharge::text,
+              final_amount::text
+         FROM orders WHERE order_id=$1`,
+      [orderId],
+    );
+    const row = order.rows[0];
+    if (!row) return { fingerprint: null, stale: 'ORDER_MISSING' };
+    orderFinancials = {
+      totalAmount: row.total_amount,
+      discount: row.discount,
+      surcharge: row.surcharge,
+      finalAmount: row.final_amount,
+    };
+  }
+  return {
+    fingerprint: productOrderFingerprint({
+      rowsHash: request.product_rows_hash,
+      mappingVersions,
+      importedLines: lineFingerprints,
+      orderFinancials,
+    }),
+    stale: null,
+  };
+}
+
+/**
+ * Locked payment/conversion gate for an active CRM request: product sync must
+ * be `ready` and the stored fingerprint must still reproduce from live
+ * mappings, catalog versions and order financials. Throws 409 ApiError with a
+ * stable, actionable code. Non-active requests (converted/archived) are
+ * post-import territory and always pass.
+ */
+/**
+ * Deal-scoped payment generation row: created lazily, then locked FOR UPDATE.
+ * Callers must hold the `bitrix24-reverse:deal:{id}` advisory lock first so
+ * the lock order stays command → Deal → generation → order/request →
+ * snapshots; never take Deal/gen after snapshot locks.
+ */
+export async function lockPaymentSyncGen(
+  tx: TransactionClient,
+  dealId: string,
+): Promise<number> {
+  const scope = `deal:${dealId}`;
+  await tx.query(
+    `INSERT INTO bitrix24_payment_sync_gen(scope, gen)
+     VALUES ($1, 0) ON CONFLICT DO NOTHING`,
+    [scope],
+  );
+  const result = await tx.query<{ gen: string | number }>(
+    `SELECT gen FROM bitrix24_payment_sync_gen WHERE scope=$1 FOR UPDATE`,
+    [scope],
+  );
+  return Number(result.rows[0]?.gen ?? 0);
+}
+
+/** Advance the Deal-scoped payment generation — every snapshot mutation. */
+export async function bumpPaymentSyncGen(
+  tx: TransactionClient,
+  dealId: string,
+): Promise<void> {
+  await tx.query(
+    `INSERT INTO bitrix24_payment_sync_gen(scope, gen, updated_at)
+     VALUES ($1, 1, now())
+     ON CONFLICT (scope) DO UPDATE
+       SET gen=bitrix24_payment_sync_gen.gen+1, updated_at=now()`,
+    [`deal:${dealId}`],
+  );
+}
+
+export async function assertBitrix24RequestProductReady(
+  tx: TransactionClient,
+  requestId: number,
+): Promise<void> {
+  const result = await tx.query<ProductReadinessRow>(
+    `SELECT request_id, state, linked_order_id, product_sync_status,
+            product_sync_error_code, product_rows_hash, product_rows_total,
+            product_order_fingerprint
+       FROM bitrix24_incoming_request
+      WHERE request_id=$1
+      FOR UPDATE`,
+    [requestId],
+  );
+  const request = result.rows[0];
+  if (!request || request.state !== 'active') return;
+  // The exact active order<->Deal mapping must still exist and is locked
+  // against concurrent relink/deactivation for the remainder of this
+  // transaction — a stale ready certificate alone never authorizes money.
+  const mapping = await tx.query(
+    `SELECT 1
+       FROM bitrix24_incoming_request request
+       JOIN crm_sync_mapping mapping
+         ON mapping.entity_type='order'
+        AND mapping.erp_id=request.linked_order_id::text
+        AND mapping.bitrix_object='deal'
+        AND mapping.bitrix_id=request.bitrix_deal_id
+        AND mapping.status='active'
+        AND mapping.source_system='bitrix24'
+      WHERE request.request_id=$1
+        AND request.linked_order_id IS NOT NULL
+      FOR SHARE OF mapping`,
+    [requestId],
+  );
+  if (mapping.rowCount !== 1) {
+    throw conflict(
+      'BITRIX24_PRODUCTS_BLOCKED',
+      'The active order↔Deal mapping is missing or inactive; reconcile the request',
+    );
+  }
+  if (request.product_sync_status === 'pending') {
+    throw conflict(
+      'BITRIX24_PRODUCTS_PENDING',
+      'Bitrix24 product rows were never synchronized; reconcile the request first',
+    );
+  }
+  if (request.product_sync_status !== 'ready') {
+    throw conflict(
+      'BITRIX24_PRODUCTS_BLOCKED',
+      `Bitrix24 product rows are blocked: ${request.product_sync_error_code ?? 'unknown'}`,
+    );
+  }
+  const computed = await computeRequestProductFingerprint(tx, request);
+  if (
+    computed.stale !== null ||
+    computed.fingerprint === null ||
+    computed.fingerprint !== request.product_order_fingerprint
+  ) {
+    throw conflict(
+      'BITRIX24_PRODUCTS_STALE',
+      `Bitrix24 product rows are stale (${computed.stale ?? 'FINGERPRINT'}); reconcile the request`,
+    );
   }
 }
 

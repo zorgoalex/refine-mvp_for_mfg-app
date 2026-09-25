@@ -8,8 +8,11 @@ describe('Widget command author immutability', () => {
     const repository = new Bitrix24PaymentWidgetRepository({ transaction: (fn: (tx: unknown) => unknown) => fn({ query }) } as never, audit as never);
     const result = await repository.createCommand({ requestHash: 'a'.repeat(64), session: { memberId: 'test', bitrixUserId: '17' }, idempotencyKey: 'test-key', actorDisplayName: 'New name must not overwrite old evidence' } as never);
     expect(result).toMatchObject({ created: false, command: { bitrixActorUserId: '17', bitrixExecutorUserId: '1' } });
-    expect(query).toHaveBeenCalledTimes(1);
-    expect(query.mock.calls[0][0]).toContain('SELECT *');
+    // Same-key serialization takes the command-key advisory lock before the
+    // command lookup — replay still performs no business write.
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(query.mock.calls[0][0]).toContain('pg_advisory_xact_lock');
+    expect(query.mock.calls[1][0]).toContain('SELECT *');
     expect(audit.record).not.toHaveBeenCalled();
   });
 });

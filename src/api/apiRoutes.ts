@@ -123,6 +123,11 @@ export const apiRoutes = {
       backendApiPath(`/bitrix24/incoming-requests/${requestId}/archive`),
     materializePayments: (requestId: number) =>
       backendApiPath(`/bitrix24/incoming-requests/${requestId}/materialize-payments`),
+    reconcileIncomingRequest: (requestId: number) =>
+      backendApiPath(`/bitrix24/incoming-requests/${requestId}/reconcile`),
+    productMappings: backendApiPath('/bitrix24/product-mappings'),
+    productMapping: (bitrixProductId: string) =>
+      backendApiPath(`/bitrix24/product-mappings/${encodeURIComponent(bitrixProductId)}`),
     materializeMappedOrderPayments: (orderId: number) =>
       backendApiPath(`/bitrix24/mapped-orders/${orderId}/materialize-payments`),
     mappedOrderPayments: (orderId: number) =>

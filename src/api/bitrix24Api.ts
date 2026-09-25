@@ -31,6 +31,8 @@ export interface Bitrix24IncomingRequestListItem {
   autoConversionStatus?: 'idle' | 'waiting' | 'converted';
   autoConversionReason?: string | null;
   syncErrorCode: string | null;
+  productSyncStatus?: 'pending' | 'ready' | 'blocked';
+  productSyncErrorCode?: string | null;
   detailCount: number;
   erpFinalAmount?: number | null;
   orderVersion: number | null;
@@ -93,7 +95,34 @@ export type Bitrix24IncomingRequestDetailInput = Omit<
   'id' | 'detailNumber' | 'area'
 > & { id?: number };
 
+export interface Bitrix24ProductRowSnapshot {
+  bitrixRowId: string;
+  bitrixProductId: string;
+  productName: string | null;
+  quantity: string | null;
+  unitPrice: string | null;
+  lineTotal: string | null;
+  discountRate: string | null;
+  discountSum: string | null;
+  taxRate: string | null;
+  measureName: string | null;
+  state: 'active' | 'deleted';
+  appliedState: 'pending' | 'active' | 'deleted';
+  catalogItemId: number | null;
+  catalogName: string | null;
+  catalogVersion: number | null;
+  catalogActive: boolean | null;
+  orderLineId: number | null;
+  mappingActive: boolean | null;
+}
+
 export interface Bitrix24IncomingRequest extends Bitrix24IncomingRequestListItem {
+  productSync?: {
+    status: 'pending' | 'ready' | 'blocked';
+    errorCode: string | null;
+    blockedIds: string[];
+  };
+  productRows?: Bitrix24ProductRowSnapshot[];
   catalogLines?: import('../utils/orderCatalogLines').OrderCatalogLine[];
   createdByBitrix?: BitrixActor | null;
   stageName: string | null;
@@ -163,6 +192,36 @@ export interface Bitrix24SyncHealth {
     ambiguous: number;
   };
   paymentSystemCatalogLastFetchedAt: string | null;
+}
+
+export interface Bitrix24ProductMapping {
+  bitrixProductId: string;
+  catalogItemId: number;
+  catalogName: string;
+  catalogSku: string | null;
+  catalogKind: string;
+  catalogActive: boolean;
+  catalogVersion: number;
+  active: boolean;
+  version: number;
+  updatedAt: string | null;
+  updatedByName: string | null;
+  lastSeenName: string | null;
+  lastSeenAt: string | null;
+  requestCount: number;
+}
+
+export interface Bitrix24SeenProduct {
+  bitrixProductId: string;
+  productName: string | null;
+  lastSeenAt: string | null;
+  requestCount: number;
+  mapped: boolean;
+}
+
+export interface Bitrix24ProductMappingsResponse {
+  mappings: Bitrix24ProductMapping[];
+  seenProducts: Bitrix24SeenProduct[];
 }
 
 export interface Bitrix24AmbiguousPaymentCommand {
@@ -241,6 +300,27 @@ export const bitrix24Api = {
       apiRoutes.bitrix24.materializePayments(validId(requestId)),
       input,
     );
+  },
+
+  reconcileIncomingRequest(requestId: number): Promise<Bitrix24IncomingRequest> {
+    return httpClient.post(
+      apiRoutes.bitrix24.reconcileIncomingRequest(validId(requestId)),
+      {},
+    );
+  },
+
+  listProductMappings(): Promise<Bitrix24ProductMappingsResponse> {
+    return httpClient.get(apiRoutes.bitrix24.productMappings);
+  },
+
+  updateProductMapping(
+    bitrixProductId: string,
+    input: { catalogItemId: number; active: boolean; expectedVersion: number },
+  ): Promise<Bitrix24ProductMapping> {
+    if (!/^[1-9][0-9]*$/.test(bitrixProductId)) {
+      throw new Error('Invalid Bitrix24 product ID');
+    }
+    return httpClient.put(apiRoutes.bitrix24.productMapping(bitrixProductId), input);
   },
 
   archiveIncomingRequest(

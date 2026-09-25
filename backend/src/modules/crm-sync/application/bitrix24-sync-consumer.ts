@@ -333,7 +333,12 @@ export class Bitrix24SyncConsumer {
         usableId,
       );
     }
-    await this.deps.bitrix.setDealProductRows(dealId, payload.productRows);
+    // Bitrix-owned orders keep CRM-originated product rows authoritative:
+    // outbound sync must not overwrite rows the portal owns and the importer
+    // materialized locally. ERP-origin orders keep the full replacement.
+    if (!bitrixOwned) {
+      await this.deps.bitrix.setDealProductRows(dealId, payload.productRows);
+    }
     intents.push({
         mapping: {
           entityType: 'order',

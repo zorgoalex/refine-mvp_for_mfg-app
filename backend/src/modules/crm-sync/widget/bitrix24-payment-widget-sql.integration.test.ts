@@ -10,9 +10,30 @@ describe.skipIf(!container)('Bitrix payment INSERT on real PostgreSQL', () => {
     let insert = '';
     let params: unknown[] = [];
     const captured = new Error('captured before write');
+    // createCommand now probes the deal context and locks order+mapping
+    // before the INSERT; answer the reads with a matching mapped production
+    // order so the insert statement is reached.
+    const mappedRow = {
+      linked_order_id: '11634', order_kind: 'production_order', version: '12',
+      final_amount: '100000.00', paid_amount: '0.00',
+      manager_id: '2147483650', created_by: '2147483650',
+      has_positions: true, snapshot_paid: '0.00', command_reserved: '0.00',
+      payment_out_of_sync: false,
+    };
     const tx = { query: vi.fn(async (sql: string, values: unknown[]) => {
-      if (!sql.includes('INSERT INTO bitrix24_manual_payment_command')) return { rows: [] };
-      insert = sql; params = values; throw captured;
+      if (sql.includes('INSERT INTO bitrix24_manual_payment_command')) {
+        insert = sql; params = values; throw captured;
+      }
+      if (sql.includes('FROM crm_sync_mapping mapping') && sql.includes('JOIN orders')) {
+        return { rows: [mappedRow], rowCount: 1 };
+      }
+      if (sql.includes('FROM crm_sync_mapping') && sql.includes('FOR SHARE')) {
+        return { rows: [{ source_system: 'erp' }], rowCount: 1 };
+      }
+      if (sql.includes('FROM orders') && sql.includes('FOR UPDATE')) {
+        return { rows: [{ order_id: 11634 }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
     }) };
     const audit = { record: vi.fn() };
     const repository = new Bitrix24PaymentWidgetRepository({ transaction: (fn: (client: typeof tx) => unknown) => fn(tx) } as never, audit as never);
@@ -21,7 +42,7 @@ describe.skipIf(!container)('Bitrix payment INSERT on real PostgreSQL', () => {
       idempotencyKey: '11111111-1111-4111-8111-111111111111', requestHash: 'a'.repeat(64),
       session: { sessionId: 'test-session', memberId: 'test-member', domain: 'bitrix.example', dealId: '9860', bitrixUserId: '1', erpUserId: 2147483650, accessTokenCiphertext: 'synthetic', refreshTokenCiphertext: 'synthetic', accessTokenExpiresAt: new Date('2026-09-09T03:00:00Z') },
       installation: { memberId: 'test-member', domain: 'bitrix.example', applicationTokenHash: 'b'.repeat(64), executorBitrixUserId: '1', accessTokenCiphertext: 'synthetic', refreshTokenCiphertext: 'synthetic', accessTokenExpiresAt: new Date('2026-09-09T03:00:00Z') },
-      deal: { dealId: '9860', requestId: null, requestState: null, orderId: 11634, orderKind: 'production_order', orderVersion: 12, finalAmount: '0.00', paidAmount: '0.00', managerId: 2147483650, createdBy: 2147483650, hasActivePositions: true },
+      deal: { dealId: '9860', requestId: null, requestState: null, requestSyncStatus: null, orderId: 11634, orderKind: 'production_order', orderVersion: 12, finalAmount: '100000.00', paidAmount: '0.00', snapshotPaidAmount: '0.00', commandReservedAmount: '0.00', paymentOutOfSync: false, managerId: 2147483650, createdBy: 2147483650, hasActivePositions: true },
       amount: '5000.00', currencyId: 'KZT', paymentDate: '2026-09-09',
       paySystem: { paySystemId: 14, name: 'Тест наличные', typePaidId: 1, isDefault: true },
       comment: 'E2E-Test SQL typing', confirmOverpayment,

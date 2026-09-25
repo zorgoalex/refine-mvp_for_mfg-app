@@ -1,4 +1,5 @@
 import { ApiError } from '../../../common/errors/api-error';
+import { moneyToCents } from '../../orders/domain/order-calculations';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { CrmSyncRuntimeConfigService } from '../http/crm-sync-runtime-config.service';
 import { Bitrix24LocalAppClient } from '../reverse/bitrix24-local-app-client';
@@ -15,6 +16,7 @@ import {
   type ManualPaymentCommand,
   type WidgetCommandStatus,
   type WidgetDealContext,
+  type WidgetPaymentSystem,
 } from './bitrix24-payment-widget.repository';
 
 export interface WidgetContextResponse {
@@ -50,6 +52,8 @@ export interface WidgetCommandResponse {
 }
 
 import { Bitrix24PaidConversionService } from '../reverse/bitrix24-paid-conversion.service';
+import { Bitrix24ProductSyncService } from '../reverse/bitrix24-product-sync.service';
+import { Bitrix24ReverseProcessorService } from '../reverse/bitrix24-reverse-processor.service';
 
 export class Bitrix24ManualPaymentCommandService {
   constructor(
@@ -60,6 +64,8 @@ export class Bitrix24ManualPaymentCommandService {
     private readonly config: CrmSyncRuntimeConfigService,
     private readonly catalog: Bitrix24PaymentSystemCatalogService,
     private readonly paidConversion?: Bitrix24PaidConversionService,
+    private readonly productSync?: Bitrix24ProductSyncService,
+    private readonly processor?: Bitrix24ReverseProcessorService,
   ) {}
 
   async getContext(authenticated: AuthenticatedWidgetSession): Promise<WidgetContextResponse> {
@@ -68,12 +74,67 @@ export class Bitrix24ManualPaymentCommandService {
       accessToken: authenticated.accessToken,
       dealId: authenticated.session.dealId,
     });
-    const deal = await this.repository.getDealContext(authenticated.session.dealId);
+    let deal = await this.repository.getDealContext(authenticated.session.dealId);
     let blockReason: string | null = null;
     try {
       await this.auth.requireCreateAccess(authenticated, deal);
     } catch (error) {
       blockReason = error instanceof ApiError ? error.code : 'BITRIX24_WIDGET_PERMISSION_DENIED';
+    }
+    // An archived request keeps its mapping but must not accept new payments
+    // or trigger sync writes; converted requests stay payable through the
+    // linked production order.
+    if (blockReason === null && deal.requestId !== null && deal.requestState === 'archived') {
+      blockReason = 'BITRIX24_REQUEST_NOT_ACTIVE';
+    }
+    // A materialized remote payment that diverged from the linked ERP payment
+    // makes local totals untrustworthy — reconcile before new payments.
+    if (blockReason === null && deal.paymentOutOfSync) {
+      blockReason = 'BITRIX24_PAYMENT_OUT_OF_SYNC';
+    }
+    // Refresh/import the remote product rows before showing totals: the
+    // widget must never render a fake zero total or an unreviewed debt. Runs
+    // only after current ERP create access is confirmed — a revoked or
+    // reassigned session must not trigger durable sync writes.
+    if (blockReason === null && deal.requestId !== null && deal.requestState === 'active' &&
+        deal.orderKind === 'crm_request') {
+      if (!this.productSync) {
+        blockReason = 'BITRIX24_PRODUCT_SYNC_FAILED';
+      } else {
+        try {
+          const sync = await this.productSync.syncDeal({
+            dealId: authenticated.session.dealId,
+            auditRequestId: `widget-context:${authenticated.session.dealId}`,
+          });
+          deal = await this.repository.getDealContext(authenticated.session.dealId);
+          if (sync.status === 'blocked') {
+            blockReason = sync.reason ?? 'BITRIX24_PRODUCTS_BLOCKED';
+          } else if (
+            sync.status === 'skipped' &&
+            deal.requestId !== null &&
+            deal.orderKind === 'crm_request' &&
+            deal.requestState === 'active'
+          ) {
+            // The required refresh did not apply for a still-linked active
+            // request — never show stale totals as payable.
+            blockReason = 'BITRIX24_PRODUCT_SYNC_FAILED';
+          } else if (sync.status === 'skipped') {
+            // Concurrently converted/relinked — reauthorize on the fresh
+            // context before displaying anything.
+            try {
+              await this.auth.requireCreateAccess(authenticated, deal);
+            } catch (error) {
+              blockReason = error instanceof ApiError
+                ? error.code
+                : 'BITRIX24_WIDGET_PERMISSION_DENIED';
+            }
+          }
+        } catch (error) {
+          blockReason = error instanceof ApiError
+            ? error.code
+            : 'BITRIX24_PRODUCT_SYNC_FAILED';
+        }
+      }
     }
     const currencyId = text(dealItem.currencyId ?? dealItem.CURRENCY_ID);
     if (currencyId !== this.config.getBitrix24().currencyId) {
@@ -111,7 +172,11 @@ export class Bitrix24ManualPaymentCommandService {
         paidAmount: deal.paidAmount,
         debtAmount: finalAmount === null || paidAmount === null
           ? null
-          : Math.max(0, finalAmount - paidAmount).toFixed(2),
+          : (Math.max(0,
+              moneyToCents(deal.finalAmount) -
+              moneyToCents(deal.paidAmount) -
+              moneyToCents(deal.snapshotPaidAmount) -
+              moneyToCents(deal.commandReservedAmount)) / 100).toFixed(2),
       },
       paymentSystems: systems.map((system) => ({
         id: system.paySystemId,
@@ -138,35 +203,189 @@ export class Bitrix24ManualPaymentCommandService {
       accessToken: authenticated.accessToken,
       dealId: authenticated.session.dealId,
     });
-    this.assertCurrency(dealItem);
-    const deal = await this.repository.getDealContext(authenticated.session.dealId);
+    let deal = await this.repository.getDealContext(authenticated.session.dealId);
+    // Current ERP access precedes the replay decision: a revoked session must
+    // not resume a command either.
     await this.auth.requireCreateAccess(authenticated, deal);
-    this.assertVersion(body, deal);
-    await this.catalog.refreshIfStale();
-    const paySystem = (await this.repository.listWidgetPaymentSystems(
-      this.config.getBitrix24().paySystemId,
-    )).find((candidate) => candidate.paySystemId === body.paySystemId);
-    if (!paySystem) {
-      throw new ApiError(
-        409,
-        body.paySystemId === this.config.getBitrix24().paySystemId
-          ? 'BITRIX24_PAYMENT_SYSTEM_FORBIDDEN'
-          : 'BITRIX24_PAYMENT_SYSTEM_UNMAPPED',
-        'Bitrix24 payment system is not available in the ERP widget',
-      );
+    // Idempotent replay short-circuits BEFORE currency/financial/product
+    // gates: a saved command resolves to its own stored state even when the
+    // deal or mappings have since changed. The replay binds the exact Deal —
+    // the same key/body on another Deal never resumes.
+    const hashValue = requestHash(body);
+    const existing = await this.repository.findCommandByIdempotencyKey(
+      authenticated.session.memberId,
+      authenticated.session.bitrixUserId,
+      input.idempotencyKey,
+    );
+    if (existing) {
+      if (
+        existing.requestHash !== hashValue ||
+        existing.bitrixDealId !== authenticated.session.dealId
+      ) {
+        throw new ApiError(
+          409,
+          'IDEMPOTENCY_KEY_REUSED',
+          'Idempotency key was used with another request',
+        );
+      }
+      const replayed = await this.resume(existing, authenticated.accessToken);
+      return { response: responseFor(replayed), created: false };
     }
-    this.assertPreflightOverpayment(body, deal, authenticated.actor);
+    let resolvedPaySystem: WidgetPaymentSystem;
+    try {
+      this.assertCurrency(dealItem);
+      // Archived requests are post-payment territory even though the Deal
+      // mapping stays active.
+      if (deal.requestId !== null && deal.requestState === 'archived') {
+        throw new ApiError(
+          409,
+          'BITRIX24_REQUEST_NOT_ACTIVE',
+          'The linked Bitrix24 request is archived',
+        );
+      }
+      if (deal.paymentOutOfSync) {
+        throw new ApiError(
+          409,
+          'BITRIX24_PAYMENT_OUT_OF_SYNC',
+          'A materialized Bitrix24 payment diverged from the ERP payment; reconcile the request',
+        );
+      }
+      // Import/refresh remote product rows AND reconcile the current remote
+      // payments before the totals check: a native Bitrix payment since the
+      // last callback must shrink the remaining amount, and a fresh request
+      // must never look like a zero-total order.
+      if (deal.requestId !== null && deal.orderKind === 'crm_request') {
+      if (!this.processor) {
+        throw new ApiError(
+          503,
+          'BITRIX24_PRODUCT_SYNC_FAILED',
+          'Bitrix24 request reconciliation is not configured',
+        );
+      }
+      const result = await this.processor.reconcileIncomingRequestNow({
+        requestId: deal.requestId,
+        dealId: authenticated.session.dealId,
+        auditRequestId: input.requestId,
+      });
+      if (result.productStatus === 'blocked') {
+        throw new ApiError(
+          409,
+          result.productReason ?? 'BITRIX24_PRODUCTS_BLOCKED',
+          'Bitrix24 product rows are blocked; reconcile the request',
+        );
+      }
+      if (!result.paymentsApplied) {
+        // A newer payment-snapshot state committed between the remote fetch
+        // and the apply — retry so the remaining amount is computed from the
+        // newest truth, never a torn refresh.
+        throw new ApiError(
+          409,
+          'BITRIX24_PAYMENT_SYNC_STALE',
+          'Bitrix24 payment reconciliation raced a newer update; retry',
+        );
+      }
+      deal = await this.repository.getDealContext(authenticated.session.dealId);
+      if (deal.orderKind === 'crm_request' && deal.requestId !== null &&
+          deal.requestState === 'active' &&
+          result.productStatus !== 'ready' && result.productStatus !== 'unchanged') {
+        // The required refresh was skipped/failed for a still-linked active
+        // request — never accept a payment on stale totals.
+        throw new ApiError(
+          409,
+          'BITRIX24_PRODUCT_SYNC_FAILED',
+          'Bitrix24 product refresh did not apply; reconcile the request and retry',
+        );
+      }
+      // Revalidate access against the authoritative refreshed context (a
+      // concurrent conversion may have relinked the Deal).
+      await this.auth.requireCreateAccess(authenticated, deal);
+    }
+    // NEW payments on a production order (converted request or ERP-origin
+    // direct mapping) also need a fresh remote payment refresh: a native
+    // Bitrix payment recorded since the last callback must shrink the
+    // remaining amount before this command is admitted.
+    if (deal.orderKind === 'production_order' && deal.orderId !== null) {
+      if (!this.processor) {
+        throw new ApiError(
+          503,
+          'BITRIX24_PRODUCT_SYNC_FAILED',
+          'Bitrix24 payment reconciliation is not configured',
+        );
+      }
+      const reconciled = await this.processor.reconcileMappedOrderPaymentsNow({
+        dealId: authenticated.session.dealId,
+        orderId: deal.orderId,
+        auditRequestId: input.requestId,
+      });
+      if (!reconciled.applied) {
+        throw new ApiError(
+          409,
+          'BITRIX24_PAYMENT_SYNC_STALE',
+          'Bitrix24 payment reconciliation raced a newer update; retry',
+        );
+      }
+      deal = await this.repository.getDealContext(authenticated.session.dealId);
+      await this.auth.requireCreateAccess(authenticated, deal);
+    }
+    this.assertVersion(body, deal);
+      await this.catalog.refreshIfStale();
+      const paySystem = (await this.repository.listWidgetPaymentSystems(
+        this.config.getBitrix24().paySystemId,
+      )).find((candidate) => candidate.paySystemId === body.paySystemId);
+      if (!paySystem) {
+        throw new ApiError(
+          409,
+          body.paySystemId === this.config.getBitrix24().paySystemId
+            ? 'BITRIX24_PAYMENT_SYSTEM_FORBIDDEN'
+            : 'BITRIX24_PAYMENT_SYSTEM_UNMAPPED',
+          'Bitrix24 payment system is not available in the ERP widget',
+        );
+      }
+      this.assertPreflightOverpayment(body, deal, authenticated.actor);
+      resolvedPaySystem = paySystem;
+    } catch (error) {
+      // A same-key loser can arrive while the winner is still mid-flight: it
+      // observed no command, then failed a refresh/preflight gate (stale CAS,
+      // version, overpayment) against the winner's committed reservation.
+      // Under a fresh context read and CURRENT authorization, re-check the
+      // key: exact hash+Deal match resumes the stored command; a mismatched
+      // command is still IDEMPOTENCY_KEY_REUSED; nothing resumes when the
+      // caller's access was revoked in between — that failure must propagate.
+      if (!(error instanceof ApiError)) throw error;
+      const freshDeal = await this.repository.getDealContext(
+        authenticated.session.dealId,
+      );
+      await this.auth.requireCreateAccess(authenticated, freshDeal);
+      const nowExisting = await this.repository.findCommandByIdempotencyKey(
+        authenticated.session.memberId,
+        authenticated.session.bitrixUserId,
+        input.idempotencyKey,
+      );
+      if (!nowExisting) throw error;
+      if (
+        nowExisting.requestHash !== hashValue ||
+        nowExisting.bitrixDealId !== authenticated.session.dealId
+      ) {
+        throw new ApiError(
+          409,
+          'IDEMPOTENCY_KEY_REUSED',
+          'Idempotency key was used with another request',
+        );
+      }
+      const replayed = await this.resume(nowExisting, authenticated.accessToken);
+      return { response: responseFor(replayed), created: false };
+    }
     const commandCipher = new Bitrix24TokenCipher(this.requireWidgetConfig().commandTokenEncryptionKey);
     const result = await this.repository.createCommand({
       idempotencyKey: input.idempotencyKey,
-      requestHash: requestHash(body),
+      requestHash: hashValue,
       session: authenticated.session,
       installation: authenticated.installation,
       deal,
       amount: body.amount,
       currencyId: this.config.getBitrix24().currencyId,
       paymentDate: body.paymentDate,
-      paySystem,
+      paySystem: resolvedPaySystem,
       comment: body.comment,
       confirmOverpayment: body.confirmOverpayment,
       callerAccessTokenCiphertext: commandCipher.encrypt(authenticated.accessToken),
@@ -468,47 +687,61 @@ export class Bitrix24ManualPaymentCommandService {
         externalPayment: 'N',
       },
     });
-    const payment = await this.bitrix.getPayment({
-      domain: command.domain,
-      accessToken: executorToken,
-      paymentId: command.bitrixPaymentId,
-    });
-    const after = await this.bitrix.listDealPaymentIds({
-      domain: command.domain,
-      accessToken: actorToken,
-      dealId: command.bitrixDealId,
-    });
-    if (!after.includes(command.bitrixPaymentId)) {
-      throw new ApiError(
-        409,
-        'BITRIX24_PAYMENT_MEMBERSHIP_MISMATCH',
-        'Updated payment is not visible in the expected Deal',
-      );
+    // The snapshot generation fence is captured BEFORE each verification
+    // GET; a newer snapshot mutation committed between the read and the save
+    // makes the save stale — re-verify the SAME remote payment id, never
+    // create a remote payment again.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const fence = await this.repository.getPaymentSyncFence(command.bitrixDealId);
+      const payment = await this.bitrix.getPayment({
+        domain: command.domain,
+        accessToken: executorToken,
+        paymentId: command.bitrixPaymentId,
+      });
+      const after = await this.bitrix.listDealPaymentIds({
+        domain: command.domain,
+        accessToken: actorToken,
+        dealId: command.bitrixDealId,
+      });
+      if (!after.includes(command.bitrixPaymentId)) {
+        throw new ApiError(
+          409,
+          'BITRIX24_PAYMENT_MEMBERSHIP_MISMATCH',
+          'Updated payment is not visible in the expected Deal',
+        );
+      }
+      const normalized = normalizeBitrixPayment(command.bitrixPaymentId, payment);
+      if (
+        normalized.paySystemId !== command.paySystemId ||
+        normalized.amount.toFixed(2) !== command.amount ||
+        normalized.currencyId !== command.currencyId ||
+        !normalized.paid ||
+        text(payment.xmlId ?? payment.XML_ID) !== xmlId ||
+        !normalized.paymentDate ||
+        dateInPortalTimezone(normalized.paymentDate, this.config.getReverseSync().portalTimezone) !== command.paymentDate
+      ) {
+        throw new ApiError(
+          502,
+          'BITRIX24_PAYMENT_VERIFICATION_FAILED',
+          'Bitrix24 returned payment fields that differ from the command',
+        );
+      }
+      const saved = await this.repository.saveVerifiedSnapshot({
+        command,
+        paymentName: normalized.paySystemName,
+        paidAt: normalized.paymentDate,
+        normalizedHash: normalized.normalizedHash,
+        rawAmount: normalized.amount.toFixed(2),
+        rawCurrency: normalized.currencyId,
+        expectedGen: fence,
+      });
+      if (saved.applied) return saved.command;
     }
-    const normalized = normalizeBitrixPayment(command.bitrixPaymentId, payment);
-    if (
-      normalized.paySystemId !== command.paySystemId ||
-      normalized.amount.toFixed(2) !== command.amount ||
-      normalized.currencyId !== command.currencyId ||
-      !normalized.paid ||
-      text(payment.xmlId ?? payment.XML_ID) !== xmlId ||
-      !normalized.paymentDate ||
-      dateInPortalTimezone(normalized.paymentDate, this.config.getReverseSync().portalTimezone) !== command.paymentDate
-    ) {
-      throw new ApiError(
-        502,
-        'BITRIX24_PAYMENT_VERIFICATION_FAILED',
-        'Bitrix24 returned payment fields that differ from the command',
-      );
-    }
-    return this.repository.saveVerifiedSnapshot({
-      command,
-      paymentName: normalized.paySystemName,
-      paidAt: normalized.paymentDate,
-      normalizedHash: normalized.normalizedHash,
-      rawAmount: normalized.amount.toFixed(2),
-      rawCurrency: normalized.currencyId,
-    });
+    throw new ApiError(
+      409,
+      'BITRIX24_PAYMENT_SYNC_STALE',
+      'Bitrix24 payment state changed during verification; retry the command',
+    );
   }
 
   private async commandActorToken(command: ManualPaymentCommand): Promise<string> {
@@ -607,9 +840,31 @@ export class Bitrix24ManualPaymentCommandService {
     deal: WidgetDealContext,
     actor: CurrentUser,
   ): void {
+    // The overpayment-confirmation permission is enforced whenever the flag
+    // is sent — a caller must not smuggle a raw confirm flag that becomes
+    // effective only when a later locked check sees a real overpayment.
+    if (
+      body.confirmOverpayment &&
+      !actor.permissions.includes('bitrix24.payments.confirm_overpayment')
+    ) {
+      throw new ApiError(
+        403,
+        'BITRIX24_WIDGET_PERMISSION_DENIED',
+        'ERP user cannot confirm an overpayment',
+      );
+    }
     const total = numberOrNull(deal.finalAmount);
     const paid = numberOrNull(deal.paidAmount);
-    if (total === null || paid === null || paid + Number(body.amount) <= total) return;
+    // Remote paid snapshots not yet materialized and in-flight widget commands
+    // reduce the remaining amount exactly once each. Integer minor units —
+    // 0.30 - 0.20 must accept 0.10, not flag an overpayment.
+    if (total === null || paid === null) return;
+    const remainingCents =
+      moneyToCents(deal.finalAmount) -
+      moneyToCents(deal.paidAmount) -
+      moneyToCents(deal.snapshotPaidAmount) -
+      moneyToCents(deal.commandReservedAmount);
+    if (moneyToCents(body.amount) <= remainingCents) return;
     if (!body.confirmOverpayment) {
       throw new ApiError(
         409,
