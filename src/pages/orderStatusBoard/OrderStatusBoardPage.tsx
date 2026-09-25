@@ -1,5 +1,6 @@
 import { Popover, Tooltip } from '../../ui/tooltipDelay';
 import { MdfProductionReturnDialog, isMdfBackwardMove, type MdfReturnIntent } from './MdfProductionReturnDialog';
+import { toMdfReturnBoardWindow } from '../../api/mdfProductionReturnApi';
 import React, {
   lazy,
   memo,
@@ -2021,7 +2022,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   ) => {
     if (kind !== 'order' && isMdfBackwardMove(kind, sourceColumn, targetColumn)) {
       const state=viewStateRef.current;
-      const boardWindow=buildCncOrderSearchDateRange(state.cncWorkday ?? dayjs().format('YYYY-MM-DD'),state.cncOrderSearchPeriod);
+      const boardWindow=toMdfReturnBoardWindow(buildCncOrderSearchDateRange(state.cncWorkday ?? dayjs().format('YYYY-MM-DD'),state.cncOrderSearchPeriod));
       setMdfReturnIntent({ source: { kind, id: cardId }, targetColumn:targetColumn as MdfReturnIntent['targetColumn'], targetTitle, boardWindow });
       return;
     }

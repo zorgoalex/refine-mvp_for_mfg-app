@@ -21,9 +21,21 @@ const route = (source: MdfReturnSource) =>
       source.id
     )}`
   );
+export function toMdfReturnBoardWindow(
+  range: { dateFrom: string; dateTo: string } | undefined
+): MdfReturnRequest["boardWindow"] {
+  if (!range) return undefined;
+  return { dateFrom: range.dateFrom, dateTo: range.dateTo };
+}
 export const mdfProductionReturnApi = {
   preview: (source: MdfReturnSource, request: MdfReturnRequest) =>
-    httpClient.post<MdfReturnPreview>(`${route(source)}/preview`, request),
+    httpClient.post<MdfReturnPreview>(`${route(source)}/preview`, {
+      ...request,
+      boardWindow: toMdfReturnBoardWindow(request.boardWindow),
+    }),
   confirm: (source: MdfReturnSource, request: MdfReturnConfirmRequest) =>
-    httpClient.post<MdfReturnResult>(`${route(source)}/confirm`, request),
+    httpClient.post<MdfReturnResult>(`${route(source)}/confirm`, {
+      ...request,
+      boardWindow: toMdfReturnBoardWindow(request.boardWindow),
+    }),
 };
