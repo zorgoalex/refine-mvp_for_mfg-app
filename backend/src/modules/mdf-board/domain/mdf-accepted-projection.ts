@@ -1,10 +1,13 @@
 import type { MdfBoardResolvedEvent, MdfBoardSource } from '../../status-automation/application/mdf-board-event.types';
 import { calculateMdfQuantities, mdfPositionKey, mdfSum, type MdfPositionQuantity, type MdfQuantityEvidence } from './mdf-quantities';
-import { resolveMdfSourceColumn } from './mdf-source-column';
+import { isMdfSourceColumnAllowed, resolveMdfSourceColumn } from './mdf-source-column';
 import { isMdfEvidenceContract } from './mdf-evidence-contract';
+import { matchesMdfValidatedBazisAssignmentState, type MdfValidatedBazisAssignmentState } from '../application/mdf-bazis-assignment-state';
+import { matchesMdfValidatedPhysicalLineage, type MdfValidatedPhysicalLineage } from './mdf-physical-lineage';
 
 export interface MdfAcceptedLine extends MdfPositionQuantity {
   evidenceLineId: string;
+  lineKey?: string;
   stage: string;
   evidence: 'physical' | 'declaration' | 'derived';
   rework: boolean;
@@ -17,6 +20,9 @@ export interface MdfAcceptedSource extends MdfBoardSource {
   priorColumn: string | null;
   manualPlacementColumn?: string | null;
   issues: readonly string[];
+  /** Issued by the server snapshot loader after validating the immutable state. */
+  assignmentState?: MdfValidatedBazisAssignmentState;
+  lineage?: MdfValidatedPhysicalLineage;
   /** Exactly one accepted revision (or received membership for unverified cards). */
   lines: readonly MdfAcceptedLine[];
 }
@@ -63,15 +69,23 @@ export function projectMdfAcceptedState(input: MdfAcceptedStateInput) {
       if (l.stage === 'membership' && l.evidence === 'derived') members.set(position, { orderId: l.orderId,
         detailId: l.detailId, quantity: mdfSum(members.get(position)?.quantity ?? 0, l.quantity) });
     }
+    const assignmentStateValid = s.kind==='bazisCutSet' && s.accepted===s.received
+      && matchesMdfValidatedBazisAssignmentState({sourceKind:s.kind,sourceId:s.id,revisionKey:s.received,
+        lines:s.lines.map(l=>({...l,lineKey:l.lineKey??'',stageCode:l.stage,evidenceKind:l.evidence})),state:s.assignmentState});
     for (const position of members.keys()) {
       const own = s.lines.filter(l => mdfPositionKey(l)===position);
       cuts.set(position,stageCoverage(own.filter(l => l.stage==='cut')));
       rolled.set(position,stageCoverage(own.filter(l => l.stage==='laminated')));
     }
     const issues = new Set(s.issues);
+    const lineageValid = s.kind==='bazisCutSet' && s.assignmentState!==undefined
+      ? Boolean(s.lineage&&matchesMdfValidatedPhysicalLineage({sourceKind:s.kind,sourceId:s.id,revisionKey:s.received,
+        lines:s.lines.map(l=>({...l,lineKey:l.lineKey??'',revision:s.received,stage:l.stage,evidence:l.evidence})),lineage:s.lineage}))
+      : true;
+    if (s.assignmentState!==undefined && (!assignmentStateValid||!lineageValid)) issues.add('MDF_ASSIGNMENT_STATE_INVALID');
     if (s.lines.some(l => !isMdfEvidenceContract(s.kind,l.stage,l.evidence))) issues.add('INVALID_EVIDENCE');
     if (!s.accepted || s.accepted !== s.received) issues.add('ACCEPTANCE_PENDING');
-    if (!members.size) issues.add('MEMBERSHIP_MISSING');
+    if (!members.size && !(assignmentStateValid&&s.assignmentState?.intentionalEmpty)) issues.add('MEMBERSHIP_MISSING');
     if ([...members.keys()].some(k => !details.has(k))) issues.add('MEMBER_OUTSIDE_LIVE_MDF_DEMAND');
     const verified = s.verified && issues.size === 0;
     const normalMembers = new Map<string,MdfPositionQuantity>();
@@ -101,7 +115,15 @@ export function projectMdfAcceptedState(input: MdfAcceptedStateInput) {
         totals.set(position,q);
       }
     }
-    return { source: s, members, normal, verified, fullCut, fullRolled, balanceBlocked, issues };
+    // Only a fully authentic intentional-empty BASIS (issued assignment state,
+    // exact physical lineage, zero own membership) may bypass the generic
+    // nonempty resolver; retained physical evidence still counts toward
+    // positions/order. Unmarked/forged/copied state, wrong revision/membership,
+    // or missing/forged lineage must NOT bypass and keeps normal issue flow.
+    const intentionalEmpty = s.kind==='bazisCutSet' && verified && assignmentStateValid && lineageValid
+      && s.assignmentState?.intentionalEmpty === true && members.size === 0;
+    return { source: s, members, normal, verified, fullCut, fullRolled, balanceBlocked, issues,
+      assignmentStateValid,lineageValid,intentionalEmpty };
   });
   // Declarations from different cards overlap physical work; never add them as
   // independent shipments, irrespective of input order or source count.
@@ -121,18 +143,27 @@ export function projectMdfAcceptedState(input: MdfAcceptedStateInput) {
   const events: MdfBoardResolvedEvent[] = [];
   const cards = prepared.map(p => {
     const { source: s, members, verified, issues } = p;
-    const resolved = verified ? resolveMdfSourceColumn({ kind: s.kind,
+    // A genuine intentional-empty BASIS has no members; the generic resolver
+    // would block it with INCOMPLETE_COMPOSITION. Bypass only that exact case.
+    const resolved = verified && !p.intentionalEmpty ? resolveMdfSourceColumn({ kind: s.kind,
       memberRanks: [...members.keys()].map(k => details.get(k)?.rank ?? null), compositionComplete: true,
       cutConfirmed: p.fullCut, manual: s.manualPlacementColumn ?? null, thresholds: input.thresholds,
       bathReadiness: p.balanceBlocked ? 'unknown' : ready.has(s.id) ? 'ready' : 'not_ready',
     }) : null;
     for (const issue of resolved?.issues ?? []) issues.add(issue);
+    // An authenticated empty card has no members for the generic resolver; an
+    // explicit kind-valid manual placement (a correction's target column) is
+    // honored, an out-of-contract manual string is flagged and ignored.
+    const emptyManual = s.manualPlacementColumn ?? null;
+    const emptyManualAllowed = emptyManual !== null && isMdfSourceColumnAllowed(s.kind, emptyManual);
+    if (p.intentionalEmpty && emptyManual !== null && !emptyManualAllowed) issues.add('INVALID_MANUAL_COLUMN');
     // Every physical bath confirmation is explicit, unlike a mutable prior
     // visual override. Detail statuses need not have caught up with the queue.
-    const column = verified && s.kind === 'bath' && p.fullRolled && !p.balanceBlocked
+    const column = p.intentionalEmpty
+      ? (emptyManualAllowed ? emptyManual : s.priorColumn) : verified && s.kind === 'bath' && p.fullRolled && !p.balanceBlocked
       && resolved?.column !== 'completed_baths' ? 'baths_laminated' : resolved?.column ?? s.priorColumn;
     if (p.balanceBlocked) issues.add('ALLOCATION_BASELINE_UNKNOWN');
-    if (verified && !p.balanceBlocked && (s.kind === 'bath' || sourceKey(s) === sourceKey(input.trigger))) {
+    if (verified && !p.balanceBlocked && !p.intentionalEmpty && (s.kind === 'bath' || sourceKey(s) === sourceKey(input.trigger))) {
       const eventType = s.kind === 'bath' ? p.fullRolled ? 'mdf.board.baths_laminated'
         : ready.has(s.id) ? 'mdf.board.baths_ready' : 'mdf.board.baths'
         : p.fullCut ? 'mdf.board.completed' : 'mdf.order_machine_files_present';
@@ -150,8 +181,12 @@ export function projectMdfAcceptedState(input: MdfAcceptedStateInput) {
       for (const [orderId,rows] of [...byOrder].sort((a,b) => a[0]-b[0])) events.push({ eventType, orderId,
         scope: { source: { kind: s.kind, id: s.id }, details: rows.sort((a,b) => a.detailId-b.detailId) } });
     }
-    return { kind: s.kind, id: s.id, column, verified, reason: resolved?.reason ?? 'requires_verification',
-      issues: [...issues].sort(), orderIds: [...new Set([...members.values()].map(m => m.orderId))].sort((a,b) => a-b) };
+    const retainedOwners=p.assignmentStateValid&&p.lineageValid&&s.assignmentState
+      ? s.lines.filter(line=>line.evidence==='physical').map(line=>line.orderId) : [];
+    return { kind: s.kind, id: s.id, column, verified,
+      reason: p.intentionalEmpty
+        ? 'assignment_empty':resolved?.reason ?? 'requires_verification',
+      issues: [...issues].sort(), orderIds: [...new Set([...members.values()].map(m => m.orderId).concat(retainedOwners))].sort((a,b) => a-b) };
   });
   const positionIssues = new Map(input.details.map(d => [mdfPositionKey(d),
     blocked.has(mdfPositionKey(d)) ? ['MDF_ALLOCATION_UNVERIFIED'] : []]));

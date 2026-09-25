@@ -1,16 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { planMdfCorrection, type MdfCorrectionAllocation, type MdfCorrectionSource } from './mdf-correction-plan.js';
+import { planMdfCorrection, type MdfCorrectionAllocation, type MdfCorrectionSource,
+  type MdfCorrectionSourceLine } from './mdf-correction-plan.js';
 import { issueMdfValidatedPhysicalLineage, type MdfValidatedPhysicalLine } from './mdf-physical-lineage.js';
+import { issueMdfValidatedBazisAssignmentState, mdfBazisMembershipDigest } from '../application/mdf-bazis-assignment-state';
 
 type Kind = MdfCorrectionSource['kind'];
 type Proof = { lineKey: string; quantity: number; stage: 'cut'|'laminated'; evidence?: 'physical'|'declaration'; rework?: boolean };
 const source = (kind: Kind, id: string, members: { orderId: number; detailId: number; quantity: number }[], proofs: Proof[] = []): MdfCorrectionSource => ({
   kind, id, acceptedRevision: 'rev-1', receivedRevision: 'rev-1', verified: true,
   lines: [
-    ...members.map((m,i) => ({ ...m, evidenceLineId: `${kind}:${id}:member:${i}`, lineKey: `member:${i}`,
+    ...members.map<MdfCorrectionSourceLine>((m,i) => ({ ...m, evidenceLineId: `${kind}:${id}:member:${i}`, lineKey: `member:${i}`,
       revision: 'rev-1', stage: 'membership', evidence: 'derived', rework: false })),
-    ...proofs.map(p => ({ orderId: members[0].orderId, detailId: members[0].detailId,
+    ...proofs.map<MdfCorrectionSourceLine>(p => ({ orderId: members[0].orderId, detailId: members[0].detailId,
       quantity: p.quantity, evidenceLineId: `${kind}:${id}:${p.lineKey}`, lineKey: p.lineKey, revision: 'rev-1',
       stage: p.stage, evidence: p.evidence ?? 'physical', rework: p.rework ?? false })),
   ],
@@ -302,5 +304,103 @@ describe('pure MDF source correction planner', () => {
       expect(first.allocationReleaseIds).toEqual(['a-basis','a-cnc']);
     }
     expect(JSON.stringify(input)).toBe(before);
+  });
+
+  describe('authenticated intentional-empty BASIS correction', () => {
+    const issueEmptyAssignment=(id:string,revision='rev-1',intentionalEmpty=true,
+      membershipDigest=mdfBazisMembershipDigest([]))=>issueMdfValidatedBazisAssignmentState({
+        sourceKind:'bazisCutSet',sourceId:id,revisionKey:revision,
+        assignmentStateId:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        rootIntentId:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',membershipDigest,intentionalEmpty});
+    const emptyBasis=(id:string,quantity=10):MdfCorrectionSource=>{
+      const row:MdfCorrectionSource={kind:'bazisCutSet',id,acceptedRevision:'rev-1',receivedRevision:'rev-1',
+        verified:true,lines:[{orderId:1,detailId:11,quantity,evidenceLineId:`bazisCutSet:${id}:cut`,lineKey:'cut',
+          revision:'rev-1',stage:'cut',evidence:'physical',rework:false}]};
+      issueCarriedLineage(row,'cut','55555555-5555-4555-8555-555555555555');
+      row.assignmentState=issueEmptyAssignment(id);
+      return row;
+    };
+    const linkedBath=()=>source('bath','bath-a',[{orderId:1,detailId:11,quantity:10}],[{lineKey:'lam',quantity:10,stage:'laminated'}]);
+    const rejected=(bad:MdfCorrectionSource)=>planMdfCorrection(
+      request([bad,linkedBath()],[allocation(`a-${bad.id}`,bad,linkedBath(),10)],'bazisCutSet',bad.id,2));
+
+    it('returns a marked empty BASIS below cut: retained cut revoked, debits released, linked lamination cancelled',()=>{
+      const basis=emptyBasis('basis-empty'),bath=linkedBath();
+      const plan=planMdfCorrection(request([basis,bath],[allocation('a-basis',basis,bath,10)],'bazisCutSet','basis-empty',2));
+      expect(plan.status).toBe('ready');
+      if (plan.status!=='ready') return;
+      expect(plan.sourceReplacement.lines).toEqual([]);
+      expect(plan.bathReplacements).toEqual([expect.objectContaining({sourceId:'bath-a',cancelledLaminationQuantity:10})]);
+      expect(plan.bathReplacements[0].lines.some(l=>l.stage==='laminated')).toBe(false);
+      expect(plan.allocationReleaseIds).toEqual(['a-basis']);
+      expect(plan.allocationReplacements).toEqual([]);
+      expect(plan.affectedDetails[0]).toMatchObject({orderId:1,detailId:11,cutCoverage:0,laminatedCoverage:0,
+        independentFloorRank:null,afterRank:2});
+      expect(plan.before.positions[0]).toMatchObject({rawCut:10,rawRolled:10});
+      expect(plan.after.positions[0]).toMatchObject({rawCut:0,rawRolled:0,creditedCut:0,creditedRolled:0,remaining:10});
+    });
+
+    it('keeps retained cut on a marked empty BASIS when the return stays above the cut band',()=>{
+      const basis=emptyBasis('basis-mid'),bath=linkedBath();
+      const plan=planMdfCorrection(request([basis,bath],[allocation('a-basis',basis,bath,10)],'bazisCutSet','basis-mid',6));
+      expect(plan.status).toBe('ready');
+      if (plan.status!=='ready') return;
+      expect(plan.sourceReplacement.lines.some(l=>l.lineKey==='cut')).toBe(true);
+      expect(plan.bathReplacements[0].cancelledLaminationQuantity).toBe(10);
+      expect(plan.allocationReplacements).toEqual([expect.objectContaining({oldAllocationId:'a-basis',state:'reserved',
+        evidenceLine:{kind:'replacement',sourceKind:'bazisCutSet',sourceId:'basis-mid',lineKey:'cut'},
+        bathRevision:{kind:'replacement',sourceId:'bath-a'}})]);
+      expect(plan.affectedDetails[0]).toMatchObject({cutCoverage:10,independentFloorRank:5,afterRank:6});
+    });
+
+    it('keeps an independent emptied BASIS complete so its retained cut still floors the position',()=>{
+      const cnc=source('packet','cnc',[{orderId:1,detailId:11,quantity:10}],[{lineKey:'cut',quantity:10,stage:'cut'}]);
+      const basis=emptyBasis('basis-ind');
+      const plan=planMdfCorrection(request([cnc,basis],[],'packet','cnc',2));
+      expect(plan.status).toBe('ready');
+      if (plan.status!=='ready') return;
+      expect(plan.sourceReplacement.lines.some(l=>l.stage==='cut')).toBe(false);
+      expect(plan.affectedDetails[0]).toMatchObject({cutCoverage:10,laminatedCoverage:0,independentFloorRank:5,afterRank:5});
+      expect(plan.after.positions[0]).toMatchObject({rawCut:10,creditedCut:10,creditedRolled:0});
+      expect(plan.before.positions[0]).toMatchObject({rawCut:20});
+    });
+
+    it('rejects unmarked, copied, foreign, wrong-revision, false or membership-mismatched empty markers',()=>{
+      const missing=emptyBasis('b-missing'); delete missing.assignmentState;
+      const copied=emptyBasis('b-copied'); copied.assignmentState={...copied.assignmentState!};
+      const foreign=emptyBasis('b-foreign'); foreign.assignmentState=issueEmptyAssignment('other-source');
+      const wrongRev=emptyBasis('b-wrongrev'); wrongRev.assignmentState=issueEmptyAssignment('b-wrongrev','rev-0');
+      const falseMarker=emptyBasis('b-false'); falseMarker.assignmentState=issueEmptyAssignment('b-false','rev-1',false);
+      const mismatch=emptyBasis('b-digest'); mismatch.assignmentState=issueEmptyAssignment('b-digest','rev-1',true,
+        mdfBazisMembershipDigest([{lineKey:'member:0',orderId:1,detailId:11,quantity:5,rework:false,
+          stageCode:'membership',evidenceKind:'derived'}]));
+      for (const bad of [missing,copied,foreign,wrongRev,falseMarker,mismatch]) expect(rejected(bad))
+        .toMatchObject({status:'blocked',blockers:[expect.objectContaining({code:'TARGET_SOURCE_UNAVAILABLE'})]});
+    });
+
+    it('rejects an emptied BASIS without a live sealed lineage or with a stray declaration',()=>{
+      const noLineage=emptyBasis('b-nolineage'); delete noLineage.lineage;
+      const issue=emptyBasis('b-issue'); issue.lineageIssue='MDF_LINEAGE_REQUIRED';
+      const declaration=emptyBasis('b-decl');
+      declaration.lines.push({orderId:1,detailId:11,quantity:3,evidenceLineId:'bazisCutSet:b-decl:decl',
+        lineKey:'decl:0',revision:'rev-1',stage:'cut',evidence:'declaration',rework:false});
+      for (const bad of [noLineage,issue,declaration]) expect(rejected(bad))
+        .toMatchObject({status:'blocked',blockers:[expect.objectContaining({code:'TARGET_SOURCE_UNAVAILABLE'})]});
+    });
+
+    it('never applies the empty escape to a packet or bath target',()=>{
+      const packet:MdfCorrectionSource={kind:'packet',id:'empty-packet',acceptedRevision:'rev-1',receivedRevision:'rev-1',
+        verified:true,lines:[{orderId:1,detailId:11,quantity:10,evidenceLineId:'packet:empty-packet:cut',lineKey:'cut',
+          revision:'rev-1',stage:'cut',evidence:'physical',rework:false}]};
+      issueCarriedLineage(packet,'cut','66666666-6666-4666-8666-666666666666');
+      expect(planMdfCorrection(request([packet],[],'packet','empty-packet',2)))
+        .toMatchObject({status:'blocked',blockers:[expect.objectContaining({code:'TARGET_SOURCE_UNAVAILABLE'})]});
+      packet.assignmentState=issueEmptyAssignment('empty-packet');
+      expect(planMdfCorrection(request([packet],[],'packet','empty-packet',2)))
+        .toMatchObject({status:'blocked',blockers:[expect.objectContaining({code:'TARGET_SOURCE_UNAVAILABLE'})]});
+      const bath=source('bath','empty-bath',[]);
+      expect(planMdfCorrection(request([bath],[],'bath','empty-bath',2)))
+        .toMatchObject({status:'blocked',blockers:[expect.objectContaining({code:'TARGET_SOURCE_UNAVAILABLE'})]});
+    });
   });
 });

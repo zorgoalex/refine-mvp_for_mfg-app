@@ -5,6 +5,7 @@ import { mdfDemandDigest, type MdfExecutionContext } from '../domain/mdf-executi
 import type { MdfPositionQuantity } from '../domain/mdf-quantities';
 import { mdfLineageRevisionKey } from '../domain/mdf-physical-lineage';
 import { loadMdfPhysicalLineageSnapshot } from './mdf-physical-lineage-snapshot';
+import { loadMdfBazisAssignmentStateSnapshot } from './mdf-bazis-assignment-state-snapshot';
 
 export interface MdfExecutionHead {
   kind: MdfSourceKind; id: string; received: string; accepted: string | null; epoch: string;
@@ -39,7 +40,8 @@ export async function loadMdfExecutionDetails(tx: DatabaseClient, orderIds: read
 
 /** Batch-only loader: no source JSON, no per-card query. Missing frozen context
  * is LOCAL unverified data, never authorization to use a shadow snapshot. */
-export async function loadMdfExecutionSnapshot(tx: DatabaseClient, heads: readonly MdfExecutionHead[], orderIds: readonly number[]) {
+export async function loadMdfExecutionSnapshot(tx: DatabaseClient, heads: readonly MdfExecutionHead[], orderIds: readonly number[],
+  options:{allowPendingJobId?:string}={}) {
   // The compact card describes RECEIVED membership, including a pending change.
   // Credit still requires accepted==received; never label old context as rev2.
   const args = [heads.map(h => h.kind),heads.map(h => h.id),heads.map(h => h.received)];
@@ -57,7 +59,8 @@ export async function loadMdfExecutionSnapshot(tx: DatabaseClient, heads: readon
     ORDER BY d.source_kind,d.source_id,d.order_id,d.detail_id LIMIT 50001`,args)).rows;
   if (demand.length>50000) throw new MdfNeedsAttention('MDF_CONTEXT_LIMIT');
   const details = await loadMdfExecutionDetails(tx,orderIds);
-  const physicalLineage = await loadMdfPhysicalLineageSnapshot(tx,heads);
+  const assignmentState = await loadMdfBazisAssignmentStateSnapshot(tx,heads,options);
+  const physicalLineage = await loadMdfPhysicalLineageSnapshot(tx,heads,{assignmentStates:assignmentState.states});
   const metadata = new Map(contexts.map(c => [mdfSourceKey(c),c]));
   const issues = new Map<string,string[]>(), frozenDemand = new Map<string,MdfExecutionContext['demand']>();
   for (const h of heads) {
@@ -78,8 +81,11 @@ export async function loadMdfExecutionSnapshot(tx: DatabaseClient, heads: readon
     // legacy v1 evidence.
     const lineageIssue = physicalLineage.lineageIssues.get(mdfLineageRevisionKey(h,h.received));
     if (lineageIssue) own.push(...lineageIssue);
+    const assignmentIssue = assignmentState.issues.get(mdfSourceKey(h));
+    if (assignmentIssue) own.push(...assignmentIssue);
     issues.set(key,own);
   }
   return { details, metadata, issues, frozenDemand,
-    lineage: physicalLineage.lineage, lineageIssues: physicalLineage.lineageIssues };
+    lineage: physicalLineage.lineage, lineageIssues: physicalLineage.lineageIssues,
+    assignmentStates:assignmentState.states,assignmentStateIssues:assignmentState.issues };
 }

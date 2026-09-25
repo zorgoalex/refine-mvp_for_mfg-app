@@ -236,6 +236,36 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(verification).toMatch(/182_mdf_physical_lineage\*\)\s+probe_file "\$f" \|\| die/);
   });
 
+  it('probes sealed BASIS assignment and command intent effects before ledgering migration185', () => {
+    const start = probeFn.indexOf('185_mdf_bazis_composition*)');
+    const end = probeFn.indexOf('*) return 2', start);
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, end);
+    for (const marker of [
+      'mdf_evidence_revisions', 'mdf_revision_context', 'mdf_revision_demand', 'mdf_revision_seals',
+      'mdf_evidence_lines', 'mdf_source_heads', 'mdf_physical_lineage_contracts',
+      'mdf_physical_lineage_transitions', 'mdf_recalculation_jobs', 'mdf_bath_allocations',
+      'bazis_cut_sets', 'bazis_cut_set_details', 'mdf_bazis_assignment_states',
+      'mdf_bazis_composition_intents', 'idx_mdf_bazis_assignment_state_id',
+      'idx_mdf_bazis_composition_intent_job',
+      'mdf_guard_bazis_assignment_state_insert()', 'mdf_guard_bazis_composition_intent_insert()',
+      'mdf_guard_bazis_assignment_state_seal()', 'mdf_validate_bazis_composition_intent_job()',
+      'mdf_reject_bazis_composition_marker_change()', 'mdf_bazis_assignment_state_insert_guard',
+      'mdf_bazis_assignment_state_immutable', 'mdf_bazis_composition_intent_insert_guard',
+      'mdf_bazis_composition_intent_immutable', 'mdf_bazis_composition_intent_job_guard',
+      'mdf_bazis_assignment_state_seal_guard', 't.tgenabled=\'O\'',
+      'NOT convalidated', 'NOT indisvalid OR NOT indisready', 'remote_ns.nspname=\'public\'',
+      '7c8e35fd85174def4370da92813f0bda', '25d043103a689c70d3732e862a2a69e2',
+      '28027224d245e073777c3a83adadcb15', '25c766d22da2e71829e9945daf195c01',
+      '2ea244aca9759044c36943e27c621536', '2ea3abb5d89f4f8b489c53825b3e398a',
+      '2d6c181ca20df43da653d44409a9073a', 'aaa36c569106fe12b38a8d71ebb4f45f',
+      '8fe6e4df8cbeff3c28b44959da4e412b', '006a828cf13a2b5f9f116bab7813c115',
+      '93cbd0bde882a11eeecbb86623beb05a',
+    ]) expect(arm).toContain(marker);
+    const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verification).toMatch(/185_mdf_bazis_composition\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
   it('verifies migrations 164-169 before recording their ledger entries', () => {
     const verify = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
     expect(verify).toContain('164_*|165_*|166_*|167_*|168_*|169_*)');
@@ -309,7 +339,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText).not.toMatch(/q_fun_hash\(\).*md5\(prosrc\)/);
     expect(probeFn).toContain("q_fun_hash 'cnc_telegram_worker_reason_code_valid(text)'");
     expect(probeFn.match(/q_fun_hash '[^']+' [a-f0-9]{32}/g)).toHaveLength(
-      requiredFunctions.length + 2 + 9 + 1 + 1 + 7 + 4 + 8, // prior probes plus 182 lineage and inherited-guard hashes
+      requiredFunctions.length + 2 + 9 + 1 + 1 + 7 + 4 + 8 + 5, // prior probes plus 182 lineage and 185 assignment markers
     );
   });
 

@@ -5,6 +5,8 @@ import type { MdfCorrectionAllocation, MdfCorrectionSource, MdfCorrectionSourceL
 import { mdfSum } from '../domain/mdf-quantities';
 import { loadMdfExecutionSnapshot, mdfSourceKey, type MdfExecutionHead, type MdfExecutionMetadata } from './mdf-execution-snapshot';
 import { mdfLineageRevisionKey, type MdfValidatedPhysicalLineage } from '../domain/mdf-physical-lineage';
+import { loadMdfBazisCompositionRawSnapshot, type MdfBazisRawSnapshot } from './mdf-bazis-composition-snapshot';
+import type { MdfValidatedBazisAssignmentState } from '../application/mdf-bazis-assignment-state';
 import type { MdfReturnKind } from '../../orders/domain/mdf-production-return';
 import type { MdfShadowRow } from './mdf-shadow-source';
 import { loadMdfShadowSource } from './mdf-shadow-source';
@@ -46,6 +48,7 @@ export interface MdfCorrectionSnapshot {
   metadata: Map<string, MdfExecutionMetadata>;
   lineage: Map<string, MdfValidatedPhysicalLineage>;
   lineageIssues: Map<string, string[]>;
+  assignmentStates: Map<string, MdfValidatedBazisAssignmentState>;
   frozenDemand: Map<string, Array<{ orderId: number; detailId: number; quantity: number }>>;
   sourceIssues: Map<string, string[]>;
   published: Map<string, { column: string | null; accepted: string | null; received: string; issues: string[] }>;
@@ -127,6 +130,22 @@ export async function loadMdfCorrectionSnapshot(tx: TransactionClient, target: M
   [heads.map(h => h.kind),heads.map(h => h.id),heads.map(h => h.accepted),heads.map(h => h.received),MAX_MDF_CORRECTION_ROWS + 1])).rows;
   if (lineRows.length > MAX_MDF_CORRECTION_ROWS) throw new MdfNeedsAttention('MDF_CORRECTION_ROW_LIMIT');
   numeric(lineRows);
+  // Raw BASIS header/rows lock in the worker's canonical order: after owner,
+  // source and head locks, before bath allocation locks. For an emptied set
+  // the shadow join returns no relevant row, so this locked snapshot is also
+  // the proof that the actual set still exists.
+  let bazisRaw: MdfBazisRawSnapshot | null = null;
+  if (target.kind==='bazisCutSet') {
+    try {
+      bazisRaw = await loadMdfBazisCompositionRawSnapshot(tx,{setId:Number(target.id),lockRowsAfterOwnerLocks:true});
+    } catch (error) {
+      if (error instanceof Error && error.message==='MDF_BAZIS_SNAPSHOT_ROW_LIMIT')
+        throw new MdfNeedsAttention('MDF_CORRECTION_RAW_LIMIT');
+      if (error instanceof Error && ['MDF_BAZIS_SET_NOT_FOUND','MDF_BAZIS_SNAPSHOT_INVALID'].includes(error.message))
+        throw new MdfNeedsAttention('MDF_CORRECTION_SOURCE_UNAVAILABLE');
+      throw error;
+    }
+  }
   const allocationRows = (await tx.query<MdfCorrectionAllocationRow>(`SELECT a.allocation_id::text "allocationId",
     a.evidence_line_id::text "evidenceLineId",e.source_kind "evidenceSourceKind",e.source_id "evidenceSourceId",
     e.revision_key "evidenceRevision",a.bath_id "bathId",a.bath_revision "bathRevision",
@@ -170,6 +189,7 @@ export async function loadMdfCorrectionSnapshot(tx: TransactionClient, target: M
       verified: issue.length===0 && Boolean(head.accepted) && head.accepted===head.received,
       lineage: lineageKey ? execution.lineage.get(lineageKey) : undefined,
       lineageIssue,
+      assignmentState: revision ? execution.assignmentStates.get(mdfLineageRevisionKey(source,revision)) : undefined,
       lines: lineRows.filter(l => key(l)===key(source)).map(line => ({ ...line })) as MdfCorrectionSourceLine[] };
   });
   const publishedRows = (await tx.query<{kind:MdfSourceKind;id:string;column:string|null;accepted:string|null;received:string;issues:string[]}>(`SELECT
@@ -178,14 +198,15 @@ export async function loadMdfCorrectionSnapshot(tx: TransactionClient, target: M
   [closure.sources.map(s => s.kind),closure.sources.map(s => s.id)])).rows;
   const published = new Map(publishedRows.map(row => [key(row),{ column:row.column,accepted:row.accepted,received:row.received,issues:row.issues }]));
 
-  const rawTarget = await loadRawTarget(tx,target);
+  const rawTarget = await loadRawTarget(tx,target,bazisRaw);
   return { ...closure, heads,lines:lineRows,plannerSources,allocations:allocationRows,owners,details,
     metadata:execution.metadata,frozenDemand:new Map([...execution.frozenDemand].map(([k,demand])=>[k,[...demand]])),
-    lineage:execution.lineage,lineageIssues:execution.lineageIssues,
+    lineage:execution.lineage,lineageIssues:execution.lineageIssues,assignmentStates:execution.assignmentStates,
     sourceIssues:execution.issues,published,rawTarget };
 }
 
-async function loadRawTarget(tx: TransactionClient, target: MdfCorrectionSourceRef): Promise<MdfCorrectionRawSource> {
+async function loadRawTarget(tx: TransactionClient, target: MdfCorrectionSourceRef,
+  bazisRaw: MdfBazisRawSnapshot | null): Promise<MdfCorrectionRawSource> {
   const rows = await loadMdfShadowSource(tx,target,MAX_MDF_CORRECTION_ROWS + 1);
   if (rows.length > MAX_MDF_CORRECTION_ROWS) throw new MdfNeedsAttention('MDF_CORRECTION_RAW_LIMIT');
   const rowShape = (row:MdfShadowRow) => [row.line_key,row.order_id,row.detail_id,row.quantity,row.relevant,row.cut,
@@ -213,6 +234,11 @@ async function loadRawTarget(tx: TransactionClient, target: MdfCorrectionSourceR
     if (versions.some(value=>!/^[1-9]\d*$/.test(value))) throw new MdfNeedsAttention('MDF_CORRECTION_SOURCE_UNAVAILABLE');
     observationBaseline=versions.reduce((max,value)=>BigInt(value)>BigInt(max)?value:max);
     return { rows,stamp:createHash('sha256').update(JSON.stringify([rows.map(rowShape),packet.stamp])).digest('hex'),
+      sourceVersion,observationBaseline };
+  }
+  if (target.kind==='bazisCutSet') {
+    if (!bazisRaw) throw new MdfNeedsAttention('MDF_CORRECTION_SOURCE_UNAVAILABLE');
+    return { rows,stamp:createHash('sha256').update(JSON.stringify([rows.map(rowShape),bazisRaw.rawSnapshotDigest])).digest('hex'),
       sourceVersion,observationBaseline };
   }
   return { rows,stamp:createHash('sha256').update(JSON.stringify(rows.map(rowShape))).digest('hex'),sourceVersion,observationBaseline };

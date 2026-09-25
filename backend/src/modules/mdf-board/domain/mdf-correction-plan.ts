@@ -2,6 +2,8 @@ import { calculateMdfQuantities, mdfPositionKey, mdfQuantity, mdfSum,
   type MdfPositionResult, type MdfQuantityEvidence, type MdfQuantityResult } from './mdf-quantities.js';
 import { isMdfEvidenceContract } from './mdf-evidence-contract.js';
 import { matchesMdfValidatedPhysicalLineage, type MdfValidatedPhysicalLineage } from './mdf-physical-lineage.js';
+import { matchesMdfValidatedBazisAssignmentState,
+  type MdfValidatedBazisAssignmentState } from '../application/mdf-bazis-assignment-state.js';
 
 export type MdfCorrectionSourceKind = 'packet' | 'bazisCutSet' | 'bath' | 'order' | 'orderDetail';
 export interface MdfCorrectionSource {
@@ -14,6 +16,8 @@ export interface MdfCorrectionSource {
   lineage?: MdfValidatedPhysicalLineage;
   /** A failed v2 load must never fall back to the v1 membership cap. */
   lineageIssue?: string;
+  /** Issued only by the sealed-state snapshot loader; authenticates an intentional empty assignment. */
+  assignmentState?: MdfValidatedBazisAssignmentState;
   lines: MdfCorrectionSourceLine[];
 }
 export interface MdfCorrectionSourceLine {
@@ -80,6 +84,21 @@ function hasValidCurrentLineage(source: MdfCorrectionSource): boolean {
   }
 }
 
+/** The sole zero-membership escape: an issued intentional-empty BASIS marker
+ * that still matches this exact accepted revision's membership (zero members).
+ * The caller additionally requires sealed live lineage via lineageMayCarry. */
+function authenticatedEmptyAssignment(s: MdfCorrectionSource, own: readonly MdfCorrectionSourceLine[]): boolean {
+  if (s.kind!=='bazisCutSet'||!s.acceptedRevision||!s.assignmentState
+    ||s.assignmentState.intentionalEmpty!==true) return false;
+  try {
+    return matchesMdfValidatedBazisAssignmentState({sourceKind:'bazisCutSet',sourceId:s.id,revisionKey:s.acceptedRevision,
+      lines:own.map(l=>({lineKey:l.lineKey,orderId:l.orderId,detailId:l.detailId,quantity:l.quantity,rework:l.rework,
+        stageCode:l.stage,evidenceKind:l.evidence})),state:s.assignmentState});
+  } catch {
+    return false;
+  }
+}
+
 /** Build a deterministic, write-free consequence plan for one accepted-source correction.
  * Replacement proof is copied only from the accepted immutable revision; this function never invents evidence. */
 export function planMdfCorrection(input: MdfCorrectionInput): MdfCorrectionPlan {
@@ -130,9 +149,9 @@ export function planMdfCorrection(input: MdfCorrectionInput): MdfCorrectionPlan 
         const detail=input.details.find(d=>mdfPositionKey(d)===mdfPositionKey(l));
         return !!detail&&l.quantity<=detail.quantity;
       });
-      if (!members.size) return false;
       const hasLineage = hasValidCurrentLineage(s);
       const lineageMayCarry = hasLineage && (s.kind==='packet'||s.kind==='bazisCutSet');
+      if (!members.size && !(lineageMayCarry && authenticatedEmptyAssignment(s,own))) return false;
       const membersByPartition=new Map<string,number>();
       for (const l of own) if (l.stage==='membership') {
         const key=positionReworkKey(l);

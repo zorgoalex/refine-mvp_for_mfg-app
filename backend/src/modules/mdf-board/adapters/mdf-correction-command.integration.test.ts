@@ -65,6 +65,9 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
     await fixture.applyMigrations(['180_mdf_cnc_observations.sql']);
     await fixture.applyMigrations(['181_cnc_manual_send_observation.sql']);
     await fixture.applyMigrations(['182_mdf_physical_lineage.sql']);
+    await fixture.applyMigrations(['185_mdf_bazis_composition.sql']);
+    await fixture.assertLocalRelations(['bazis_cut_sets','bazis_cut_set_details',
+      'mdf_bazis_assignment_states','mdf_bazis_composition_intents']);
     await fixture.client.query(`UPDATE ${fixture.schema}.mdf_engine_state SET mode='active';
       INSERT INTO ${fixture.schema}.users(user_id,username,role_id,is_active) VALUES(1,'E2E active MDF correction',1,true);
       INSERT INTO ${fixture.schema}.order_statuses(order_status_id,order_status_name,sort_order,is_active)

@@ -3,12 +3,15 @@ import type { MdfBathDemand } from './mdf-allocation';
 import { mdfPositionKey, mdfQuantity, mdfSum, type MdfPositionQuantity } from './mdf-quantities';
 import { isMdfEvidenceContract } from './mdf-evidence-contract';
 import { matchesMdfValidatedPhysicalLineage, type MdfValidatedPhysicalLineage } from './mdf-physical-lineage';
+import { matchesMdfValidatedBazisAssignmentState, type MdfValidatedBazisAssignmentState } from '../application/mdf-bazis-assignment-state';
 
 export interface MdfAllocationSource {
   kind: 'packet' | 'bazisCutSet' | 'bath' | 'order' | 'orderDetail';
   id: string; accepted: string | null; received: string; createdAt?: string;
   /** Issued only by the server-side sealed-lineage snapshot loader. */
   lineage?: MdfValidatedPhysicalLineage;
+  /** Issued only for a sealed, validated BASIS assignment-state marker. */
+  assignmentState?: MdfValidatedBazisAssignmentState;
   /** A present lineage failure is never treated as an unlineaged v1 source. */
   lineageIssue?: string;
   /** Frozen known ownership when exact membership is unresolved. */
@@ -95,13 +98,17 @@ export function planMdfQuarantinedAllocations(input: {
     const own = s.lines.filter(l => l.revision === s.accepted);
     const members = quantities(own.filter(l => l.stage === 'membership' && l.evidence === 'derived'));
     const hasLineage = hasValidCurrentLineage(s,s.lines);
+    const hasAssignmentState = s.kind==='bazisCutSet' && s.accepted===s.received
+      && matchesMdfValidatedBazisAssignmentState({sourceKind:s.kind,sourceId:s.id,revisionKey:s.accepted??'',
+        lines:own.map(line=>({...line,lineKey:line.lineKey??'',stageCode:line.stage,evidenceKind:line.evidence})),
+        state:s.assignmentState});
     const scope = [...s.lines, ...ownAllocations(s.id)];
     const missingMembership = [...new Set([s.accepted, s.received].filter(r => r !== null))]
       .some(r => !s.lines.some(l => l.revision === r && l.stage === 'membership' && l.evidence === 'derived'));
     let reason: string | undefined;
     if (s.lineageIssue !== undefined || (s.lineage !== undefined && !hasLineage)) reason = s.lineageIssue || 'LINEAGE_INVALID';
     else if (!s.accepted || s.accepted !== s.received) reason = 'ACCEPTANCE_PENDING';
-    else if (!members.size) reason = 'MEMBERSHIP_MISSING';
+    else if (!members.size && !(hasAssignmentState&&s.assignmentState?.intentionalEmpty)) reason = 'MEMBERSHIP_MISSING';
     else if (own.some(l => !isMdfEvidenceContract(s.kind,l.stage,l.evidence))) reason = 'INVALID_EVIDENCE';
     else {
       const lineageMayCarry = hasLineage && (s.kind === 'packet' || s.kind === 'bazisCutSet');

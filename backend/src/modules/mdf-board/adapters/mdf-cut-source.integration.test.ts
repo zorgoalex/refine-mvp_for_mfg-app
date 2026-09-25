@@ -127,6 +127,11 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
       CREATE UNIQUE INDEX e2e_manual_send_order ON cnc_manual_svg_telegram_send_request_files(request_id,send_order)`);
     await db.query(readFileSync(new URL('../../../../db/migrations/181_cnc_manual_send_observation.sql',import.meta.url),'utf8'));
     await db.query(readFileSync(new URL('../../../../db/migrations/182_mdf_physical_lineage.sql',import.meta.url),'utf8'));
+    await db.query(readFileSync(new URL('../../../../db/migrations/185_mdf_bazis_composition.sql',import.meta.url),'utf8'));
+    const expectedLocal = ['bazis_cut_set_details','bazis_cut_sets','mdf_bazis_assignment_states','mdf_bazis_composition_intents'];
+    expect((await db.query<{relname:string}>(`SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname=$1 AND c.relkind='r' AND c.relname=ANY($2::text[]) ORDER BY c.relname`,[schema,expectedLocal]))
+      .rows.map(r=>r.relname)).toEqual(expectedLocal);
     await db.query(`ALTER TABLE cut_group_sheet ADD FOREIGN KEY(cut_group_id) REFERENCES cut_group(cut_group_id) ON DELETE CASCADE`);
     for (const name of ['set_session_user','order_production_summary','recalc_order_production_status',
       'cut_result_snapshot_digest','cut_result_snapshot_is_complete','cut_result_snapshot_is_vacuum',

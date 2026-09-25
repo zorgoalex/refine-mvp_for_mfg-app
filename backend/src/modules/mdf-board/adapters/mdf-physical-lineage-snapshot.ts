@@ -7,6 +7,8 @@ import {
 } from '../domain/mdf-physical-lineage';
 import { mdfPhysicalLineageDigest, type MdfPhysicalLineageAction, type MdfPhysicalLineageManifest } from '../application/mdf-physical-lineage';
 import type { MdfSourceKind } from '../application/mdf-job-runner';
+import { matchesMdfValidatedBazisAssignmentState, type MdfValidatedBazisAssignmentState }
+  from '../application/mdf-bazis-assignment-state';
 import { mdfPositionKey, mdfSum } from '../domain/mdf-quantities';
 import { isMdfEvidenceContract } from '../domain/mdf-evidence-contract';
 
@@ -62,9 +64,12 @@ export interface MdfPhysicalLineageSnapshot {
 /** Batch-load only accepted/received head revisions. Migration 182 is mandatory;
  * SQL errors are intentionally allowed to escape instead of treating missing
  * lineage tables as legacy v1. The immutable seal guard authenticates the
- * historical chain; this loader checks its immediate parent and exact children. */
+ * historical chain; this loader checks its immediate parent and exact children.
+ * An issued intentional-empty bazisCutSet assignment descriptor passed through
+ * options is the only substitute for nonempty membership evidence. */
 export async function loadMdfPhysicalLineageSnapshot(tx: DatabaseClient,
-  heads: readonly MdfLineageHead[]): Promise<MdfPhysicalLineageSnapshot> {
+  heads: readonly MdfLineageHead[],
+  options:{assignmentStates?:ReadonlyMap<string,MdfValidatedBazisAssignmentState>}={}): Promise<MdfPhysicalLineageSnapshot> {
   const requested = new Map<string,RequestedRevision>();
   for (const head of heads) {
     if (head.kind !== 'packet' && head.kind !== 'bazisCutSet' && head.kind !== 'bath') continue;
@@ -176,7 +181,7 @@ export async function loadMdfPhysicalLineageSnapshot(tx: DatabaseClient,
     }
     try {
       const descriptor=validateAndIssue(contract,currentLines.get(revisionKey)??[],transitionGroups.get(revisionKey)??[],
-        parentLineageById,parentIds,parentsByRevision);
+        parentLineageById,parentIds,parentsByRevision,options.assignmentStates?.get(revisionKey));
       result.lineage.set(revisionKey,descriptor);
     } catch {
       result.lineageIssues.set(revisionKey,['MDF_LINEAGE_INVALID']);
@@ -186,7 +191,8 @@ export async function loadMdfPhysicalLineageSnapshot(tx: DatabaseClient,
 }
 
 function validateAndIssue(contract: ContractRow,evidence: readonly EvidenceRow[],transitions: readonly TransitionRow[],
-  parents: ReadonlyMap<string,ParentRow>,parentIds: ReadonlySet<string>,parentsByRevision: ReadonlyMap<string,ParentRow[]>): MdfValidatedPhysicalLineage {
+  parents: ReadonlyMap<string,ParentRow>,parentIds: ReadonlySet<string>,parentsByRevision: ReadonlyMap<string,ParentRow[]>,
+  assignmentState?: MdfValidatedBazisAssignmentState): MdfValidatedPhysicalLineage {
   if (!contract.sealed||!contract.contextFound||!contract.acceptanceRequested||!contract.compositionComplete
     || contract.sourceKind!==contract.kind || !contract.origin || !contract.operation
     || !contract.manifestDigest || !/^[a-f0-9]{64}$/.test(contract.manifestDigest)
@@ -292,7 +298,9 @@ function validateAndIssue(contract: ContractRow,evidence: readonly EvidenceRow[]
     const id=JSON.stringify([mdfPositionKey(row),row.rework]);
     members.set(id,mdfSum(members.get(id)??0,row.quantity));
   }
-  if (!members.size) throw new Error('MDF_LINEAGE_INVALID');
+  if (!members.size && !(contract.kind==='bazisCutSet' && assignmentState?.intentionalEmpty===true
+    && matchesMdfValidatedBazisAssignmentState({sourceKind:contract.kind,sourceId:contract.id,
+      revisionKey:contract.revision,lines:evidence,state:assignmentState}))) throw new Error('MDF_LINEAGE_INVALID');
   for (const line of lines) {
     const id=JSON.stringify([mdfPositionKey(line),line.rework]);
     physicalTotals.set(id,mdfSum(physicalTotals.get(id)??0,line.quantity));

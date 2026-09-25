@@ -69,10 +69,21 @@ describe.skipIf(!enabled)('MDF persisted physical lineage, isolated PostgreSQL s
       '174_mdf_execution_context.sql', '175_mdf_command_placement.sql',
       '178_mdf_correction_receipts.sql', '182_mdf_physical_lineage.sql',
     ]);
+    await fixture.client.query(`CREATE TABLE bazis_cut_sets(
+        bazis_cut_set_id BIGINT PRIMARY KEY, name TEXT, version BIGINT NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
+    await fixture.client.query(`CREATE TABLE bazis_cut_set_details(
+        bazis_cut_set_detail_id BIGINT PRIMARY KEY, bazis_cut_set_id BIGINT NOT NULL,
+        source_order_id BIGINT, source_order_detail_id BIGINT, source_order_hdf_detail_id BIGINT,
+        quantity BIGINT NOT NULL DEFAULT 1, cut_enabled BOOLEAN NOT NULL DEFAULT true,
+        material_name TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
+    await fixture.applyMigrations(['185_mdf_bazis_composition.sql']);
     await fixture.assertLocalRelations([
       'mdf_evidence_revisions', 'mdf_revision_context', 'mdf_revision_seals', 'mdf_source_heads',
       'mdf_evidence_lines', 'mdf_recalculation_jobs', 'mdf_recalculation_job_rules',
       'mdf_physical_lineage_contracts', 'mdf_physical_lineage_transitions',
+      'bazis_cut_sets', 'bazis_cut_set_details',
+      'mdf_bazis_assignment_states', 'mdf_bazis_composition_intents',
     ]);
     databaseService = fixture.createDatabaseService();
   }, 30000);

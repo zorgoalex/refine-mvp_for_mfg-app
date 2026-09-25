@@ -11,6 +11,7 @@ import { requireMdfCommandBoundary } from '../application/mdf-command-boundary';
 import { recordMdfLineageReceipt, recordMdfReceipt, type MdfReceiptInput, type MdfReceiptLine } from '../application/mdf-receipt';
 import type { MdfPhysicalLineageAction, MdfPhysicalLineageManifest } from '../application/mdf-physical-lineage';
 import { matchesMdfValidatedPhysicalLineage } from '../domain/mdf-physical-lineage';
+import { matchesMdfValidatedBazisAssignmentState } from '../application/mdf-bazis-assignment-state';
 import { MdfNeedsAttention, type MdfSourceKind } from '../application/mdf-job-runner';
 import { mdfCorrectionComposition, discoverMdfCorrectionClosure, loadMdfCorrectionSnapshot,
   MAX_MDF_CORRECTION_ORDERS, type MdfCorrectionOwner, type MdfCorrectionSnapshot } from './mdf-correction-snapshot';
@@ -409,17 +410,41 @@ function validateTarget(snapshot:MdfCorrectionSnapshot,source:Source,request:Mdf
   if (sequence.indexOf(request.targetColumn)<0||sequence.indexOf(request.targetColumn)>=sequence.indexOf(card.column??''))
     fail(409,'MDF_RETURN_NOT_BACKWARD','Выберите предыдущую производственную колонку');
   const raw=snapshot.rawTarget.rows.filter(row=>row.relevant);
-  if (!raw.length||raw.some(row=>row.unresolved||!row.line_key||!row.order_id||!row.detail_id
+  if (raw.some(row=>row.unresolved||!row.line_key||!row.order_id||!row.detail_id
     ||![Number(row.order_id),Number(row.detail_id),Number(row.quantity)].every(n=>Number.isSafeInteger(n)&&n>0)))
     fail(422,'MDF_CORRECTION_BLOCKED','Не все позиции исходной карточки сопоставлены с действующими деталями');
   const current=snapshot.plannerSources.find(s=>sourceKey(s)===sourceKey(source));
   if (!current||!current.verified) fail(422,'MDF_CORRECTION_BLOCKED','Текущий состав карточки не подтверждён');
+  if (!raw.length&&!authenticatedEmptyCorrectionTarget(current))
+    fail(422,'MDF_CORRECTION_BLOCKED','Пустой состав карточки не является подтверждённым намеренным пустым набором BASIS');
   const accepted=current.lines.filter(line=>line.revision===current.acceptedRevision&&line.stage==='membership'&&line.evidence==='derived');
   const rawComposition=mdfCorrectionComposition(raw.map(row=>({orderId:Number(row.order_id),detailId:Number(row.detail_id),
     quantity:Number(row.quantity),rework:row.rework})));
   const acceptedComposition=mdfCorrectionComposition(accepted.map(line=>({orderId:line.orderId,detailId:line.detailId,
     quantity:line.quantity,rework:line.rework})));
   if (rawComposition!==acceptedComposition) fail(409,'MDF_CORRECTION_STALE','Состав исходного файла изменился после подтверждения');
+}
+
+/** The only admissible empty-raw target: a BASIS card whose accepted revision
+ * carries an issued intentional-empty assignment marker matching the exact
+ * accepted membership (zero derived members) and a verified sealed physical
+ * lineage. Raw set existence was already proved by the snapshot's row locks. */
+function authenticatedEmptyCorrectionTarget(current:MdfCorrectionSource):boolean {
+  if (current.kind!=='bazisCutSet'||!current.acceptedRevision||current.acceptedRevision!==current.receivedRevision
+    ||current.lineageIssue!==undefined||!current.lineage||!current.assignmentState
+    ||current.assignmentState.intentionalEmpty!==true) return false;
+  const accepted=current.lines.filter(line=>line.revision===current.acceptedRevision);
+  if (accepted.some(line=>line.stage==='membership'&&line.evidence==='derived')) return false;
+  try {
+    return matchesMdfValidatedBazisAssignmentState({sourceKind:'bazisCutSet',sourceId:current.id,
+      revisionKey:current.acceptedRevision,lines:accepted.map(line=>({lineKey:line.lineKey,orderId:line.orderId,
+        detailId:line.detailId,quantity:line.quantity,rework:line.rework,stageCode:line.stage,evidenceKind:line.evidence})),
+      state:current.assignmentState})
+      && matchesMdfValidatedPhysicalLineage({sourceKind:'bazisCutSet',sourceId:current.id,
+        revisionKey:current.acceptedRevision,lines:current.lines,lineage:current.lineage});
+  } catch {
+    return false;
+  }
 }
 
 function findAffectedOrders(snapshot:MdfCorrectionSnapshot,plan:Extract<MdfCorrectionPlan,{status:'ready'}>):number[] {
@@ -557,6 +582,9 @@ function correctionDigest(user:CurrentUser,source:Source,request:MdfCorrectionPr
           action:line.action,predecessorEvidenceLineId:line.predecessorEvidenceLineId,
           canonicalOriginEvidenceLineId:line.canonicalOriginEvidenceLineId}))})),
     lineageIssues:[...snapshot.lineageIssues].sort(([a],[b])=>a<b?-1:a>b?1:0),
+    assignmentStates:[...snapshot.assignmentStates].sort(([a],[b])=>a<b?-1:a>b?1:0).map(([key,state])=>({key,
+      revisionKey:state.revisionKey,assignmentStateId:state.assignmentStateId,rootIntentId:state.rootIntentId,
+      membershipDigest:state.membershipDigest,intentionalEmpty:state.intentionalEmpty})),
     raw:{stamp:snapshot.rawTarget.stamp,
       sourceVersion:snapshot.rawTarget.sourceVersion,observationBaseline:snapshot.rawTarget.observationBaseline},
     allocations:snapshot.allocations,details:snapshot.details,owners:snapshot.owners.map(owner=>({...owner,assigned:[...owner.assigned].sort()})),

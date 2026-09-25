@@ -7,6 +7,7 @@ import { publishMdfState } from '../adapters/mdf-publication';
 import { projectMdfAcceptedState, type MdfAcceptedSource, type MdfAcceptedLine } from '../domain/mdf-accepted-projection';
 import type { MdfQuantityEvidence } from '../domain/mdf-quantities';
 import { mdfPositionKey } from '../domain/mdf-quantities';
+import { mdfLineageRevisionKey } from '../domain/mdf-physical-lineage';
 import { MdfNeedsAttention, type MdfJob, type MdfPinnedRule } from './mdf-job-runner';
 import { applyMdfCncAuthorityEffects, loadMdfCncAuthority, lockAndReadMdfCncAutoCut } from './mdf-cnc-authority-job';
 
@@ -25,6 +26,11 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
   if (allocation.status==='superseded') return 'superseded';
   const snapshot = allocation.executionSnapshot;
   if (allocation.status!=='allocated' || !snapshot) throw new MdfNeedsAttention('MDF_JOB_CONTEXT_UNAVAILABLE');
+  // Assignment-only acceptance keeps accounting/publication, never production effects.
+  const composition = allocation.compositionAcceptance;
+  if (composition && (composition.jobId !== job.job_id || cncAuthority !== null || rules.length !== 0)) {
+    throw new MdfNeedsAttention('MDF_COMPOSITION_JOB_CONFLICT');
+  }
   const effectPolicy = job.effect_policy ?? 'forward';
   const contextPolicy = snapshot.metadata.get(mdfSourceKey({ kind: job.source_kind,id: job.source_id }))?.effectPolicy;
   if ((effectPolicy !== 'forward' && effectPolicy !== 'publish_only')
@@ -65,6 +71,10 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
     sources.push({ ...h, kind: h.kind, verified: issues.length===0,
       manualPlacementColumn: snapshot.metadata.get(mdfSourceKey(h))?.manualPlacementColumn ?? null,
       priorColumn: previousColumns.get(mdfSourceKey(h)) ?? snapshot.metadata.get(mdfSourceKey(h))?.priorColumn ?? null, issues,
+      assignmentState:h.kind==='bazisCutSet'&&h.accepted===h.received
+        ? snapshot.assignmentStates.get(mdfLineageRevisionKey(h,h.received)) : undefined,
+      lineage:h.kind==='bazisCutSet'&&h.accepted===h.received
+        ? snapshot.lineage.get(mdfLineageRevisionKey(h,h.received)) : undefined,
       lines });
   }
   const trigger = { kind: job.source_kind,id: job.source_id };
@@ -88,9 +98,9 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
     if (!Number.isSafeInteger(id) || id <= 0) throw new MdfNeedsAttention('MDF_JOB_EFFECT_FENCE_INVALID');
     return id;
   }));
-  let ruleEvents = resolved.events.filter(event => !suppressedOrderIds.has(event.orderId));
+  let ruleEvents = composition ? [] : resolved.events.filter(event => !suppressedOrderIds.has(event.orderId));
   let changedCompositionOrderIds: number[] = [];
-  if (cncAuthority) {
+  if (!composition && cncAuthority) {
     const verifiedSourceKeys = new Set(resolved.cards.filter(card => card.verified)
       .map(card => mdfSourceKey({ kind: card.kind, id: card.id })));
     const cncEffects = await applyMdfCncAuthorityEffects(tx, { job, authority: cncAuthority,
@@ -108,10 +118,10 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
   }
   // Accepted business facts outlive actor accounts. A missing actor never gets
   // fabricated admin authority; retain accounting, omit rule effects, expose why.
-  const user = job.actor_user_id ? (await tx.query<{ user_id: string; username: string; role_id: number }>(
+  const user = !composition && job.actor_user_id ? (await tx.query<{ user_id: string; username: string; role_id: number }>(
     'SELECT user_id,username,role_id FROM users WHERE user_id=$1 AND is_active',[job.actor_user_id])).rows[0] : null;
   const actor = user ? mapUserRow(user) : null;
-  if (actor && effectPolicy === 'forward' && (ruleEvents.length || changedCompositionOrderIds.length)) {
+  if (!composition && actor && effectPolicy === 'forward' && (ruleEvents.length || changedCompositionOrderIds.length)) {
     await executePinnedMdfAutomation(tx,{ actor, requestId: job.request_id, sourceIdempotencyKey: job.event_key,
       pins: rules.map(r => ({ ruleId: Number(r.rule_id), version: Number(r.rule_version) })), events: ruleEvents,
       ...(changedCompositionOrderIds.length ? { productionCompositionOrderIds: changedCompositionOrderIds } : {}) });
@@ -119,7 +129,7 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
   // Actions can change ranks; republish placement from the SAME locked evidence
   // and post-action detail snapshot. They cannot create new physical quantities.
   const final = projectMdfAcceptedState({ ...input, details: await loadMdfExecutionDetails(tx,allocation.orderIds) });
-  if (!actor && rules.length && effectPolicy === 'forward' && (ruleEvents.length || changedCompositionOrderIds.length)) {
+  if (!composition && !actor && rules.length && effectPolicy === 'forward' && (ruleEvents.length || changedCompositionOrderIds.length)) {
     const eligibleOrders = new Set(ruleEvents.map(event => event.orderId));
     for (const orderId of changedCompositionOrderIds) eligibleOrders.add(orderId);
     for (const card of final.cards) if (card.orderIds.some(id => eligibleOrders.has(id))) card.issues.push('MDF_ACTOR_UNAVAILABLE');

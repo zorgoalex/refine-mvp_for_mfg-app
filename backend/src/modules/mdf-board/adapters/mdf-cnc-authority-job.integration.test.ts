@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
 import { recordMdfReceipt, type MdfReceiptLine } from '../application/mdf-receipt';
@@ -16,7 +17,7 @@ const actor: CurrentUser = { id: '1', username: 'E2E CNC authority', role: 'admi
 describe.skipIf(!enabled)('MDF CNC authority accepted-job executor, isolated PostgreSQL schema', () => {
   const fixture = createMdfCorrectionPgFixture('e2e_cnc_authority');
   let database: ReturnType<typeof fixture.createDatabaseService>;
-  let runner: MdfJobRunner;
+  let runner: MdfJobRunner<TransactionClient>;
   let orderSequence = 0;
   const relations = [
     'orders','order_details','order_hdf_details','order_statuses','production_statuses','users','order_workshops',
@@ -48,11 +49,12 @@ describe.skipIf(!enabled)('MDF CNC authority accepted-job executor, isolated Pos
     for (const migration of ['155_order_production_composition.sql','165_mdf_engine_foundation.sql',
       '166_mdf_engine_fences.sql','174_mdf_execution_context.sql','175_mdf_command_placement.sql',
       '178_mdf_correction_receipts.sql','179_mdf_active_return.sql','180_mdf_cnc_observations.sql',
-      '181_cnc_manual_send_observation.sql','182_mdf_physical_lineage.sql']) {
+      '181_cnc_manual_send_observation.sql','182_mdf_physical_lineage.sql','185_mdf_bazis_composition.sql']) {
       await fixture.applyMigrations([migration]);
     }
     await fixture.assertLocalRelations(['orders','order_details','production_statuses','mdf_cnc_observation_targets',
-      'mdf_cnc_observation_receipts','mdf_cnc_observation_job_authorities','mdf_cnc_return_fences']);
+      'mdf_cnc_observation_receipts','mdf_cnc_observation_job_authorities','mdf_cnc_return_fences',
+      'bazis_cut_sets','bazis_cut_set_details','mdf_bazis_assignment_states','mdf_bazis_composition_intents']);
     const summaryTriggers = await fixture.client.query<{trigger:string;function_name:string;enabled:string}>(`SELECT
       t.tgname trigger,p.proname function_name,t.tgenabled enabled FROM pg_trigger t
       JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace

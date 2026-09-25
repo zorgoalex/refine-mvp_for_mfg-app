@@ -27,6 +27,23 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF allocation exec
       '174_mdf_execution_context.sql', '175_mdf_command_placement.sql', '178_mdf_correction_receipts.sql']) {
       await db.query(readFileSync(new URL(`../../../../db/migrations/${file}`, import.meta.url), 'utf8'));
     }
+    await db.query(`CREATE TABLE bazis_cut_sets(bazis_cut_set_id bigint PRIMARY KEY,name text,
+      version bigint NOT NULL DEFAULT 0,created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now());
+      CREATE TABLE bazis_cut_set_details(bazis_cut_set_detail_id bigint PRIMARY KEY,
+        bazis_cut_set_id bigint NOT NULL,source_order_id bigint,source_order_detail_id bigint,
+        source_order_hdf_detail_id bigint,quantity bigint NOT NULL DEFAULT 1,
+        cut_enabled boolean NOT NULL DEFAULT true,material_name text,
+        created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now())`);
+    for (const file of ['182_mdf_physical_lineage.sql', '185_mdf_bazis_composition.sql']) {
+      await db.query(readFileSync(new URL(`../../../../db/migrations/${file}`, import.meta.url), 'utf8'));
+    }
+    const expectedLocal = ['bazis_cut_set_details', 'bazis_cut_sets',
+      'mdf_bazis_assignment_states', 'mdf_bazis_composition_intents'];
+    expect((await db.query<{ relname: string }>(`SELECT c.relname FROM pg_class c
+      JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relkind='r'
+        AND c.relname=ANY($2::text[]) ORDER BY c.relname`, [schema, expectedLocal]))
+      .rows.map(r => r.relname)).toEqual(expectedLocal);
     await db.query(`CREATE TABLE orders(order_id bigint PRIMARY KEY,delete_flag boolean NOT NULL DEFAULT false);
       CREATE TABLE cut_result(cut_result_id bigint PRIMARY KEY,created_at timestamptz NOT NULL);
       CREATE TABLE audit_log (LIKE public.audit_log INCLUDING DEFAULTS INCLUDING GENERATED);

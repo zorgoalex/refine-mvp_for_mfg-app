@@ -3,6 +3,8 @@ import type { QueryResult, QueryResultRow } from 'pg';
 import { describe, expect, it } from 'vitest';
 import type { DatabaseClient } from '../../../database/database.types';
 import { mdfPhysicalLineageDigest, type MdfPhysicalLineageManifest } from '../application/mdf-physical-lineage';
+import { issueMdfValidatedBazisAssignmentState, mdfBazisMembershipDigest,
+  type MdfValidatedBazisAssignmentState } from '../application/mdf-bazis-assignment-state';
 import { loadMdfPhysicalLineageSnapshot } from './mdf-physical-lineage-snapshot';
 
 const sourceId = '00000000-0000-0000-0000-000000000501';
@@ -14,23 +16,25 @@ const evidenceId = (id: string, row: number) =>
 const rootEvidenceId = (id: string) => evidenceId(id, 2);
 const carriedEvidenceId = (id: string) => evidenceId(id, 3);
 
+type FixtureKind = 'packet' | 'bazisCutSet';
+
 interface ContractRow extends QueryResultRow {
-  kind: 'packet'; id: string; revision: string; contractFound: boolean; sourceHasContract: boolean;
-  sealed: boolean; contextFound: boolean; sourceKind: 'packet' | null; operation: string | null;
+  kind: FixtureKind; id: string; revision: string; contractFound: boolean; sourceHasContract: boolean;
+  sealed: boolean; contextFound: boolean; sourceKind: FixtureKind | null; operation: string | null;
   productionAuthority: string | null; predecessorRevision: string | null; manifestDigest: string | null;
   dropped: string[] | null; origin: string | null; acceptanceRequested: boolean | null;
   compositionComplete: boolean | null; effectPolicy: string | null;
   contextPredecessorAccepted: string | null; contextPredecessorReceived: string | null;
 }
 interface EvidenceRow extends QueryResultRow {
-  kind: 'packet'; id: string; revision: string; evidenceLineId: string; lineKey: string;
+  kind: FixtureKind; id: string; revision: string; evidenceLineId: string; lineKey: string;
   orderId: number; detailId: number; quantity: number; stageCode: string;
   evidenceKind: string; rework: boolean;
 }
 interface TransitionRow extends QueryResultRow {
-  kind: 'packet'; id: string; revision: string; evidenceLineId: string; action: string;
+  kind: FixtureKind; id: string; revision: string; evidenceLineId: string; action: string;
   predecessorEvidenceLineId: string | null; canonicalOriginEvidenceLineId: string;
-  childKind: 'packet' | null; childId: string | null; childRevision: string | null;
+  childKind: FixtureKind | null; childId: string | null; childRevision: string | null;
   childEvidenceKind: string | null; childLineKey: string | null; childOrderId: number | null;
   childDetailId: number | null; childQuantity: number | null; childStage: string | null; childRework: boolean | null;
   parentEvidenceLineId: string | null; parentKind: string | null; parentId: string | null;
@@ -40,7 +44,7 @@ interface TransitionRow extends QueryResultRow {
   parentLineageOperation: string | null;
 }
 interface ParentRow extends QueryResultRow {
-  kind: 'packet'; id: string; revision: string; evidenceLineId: string;
+  kind: FixtureKind; id: string; revision: string; evidenceLineId: string;
   canonicalOriginEvidenceLineId: string | null; lineageContractFound: boolean;
 }
 
@@ -113,6 +117,52 @@ function clientFor(data: Fixture, onQuery?: (sql: string, params: readonly unkno
 }
 
 const head = (id = sourceId, accepted = 'r1', received = accepted) => ({ kind: 'packet' as const, id, accepted, received });
+
+const bazisSourceId = '00000000-0000-0000-0000-000000000504';
+const bazisRevisionKey = (id: string, revision = 'r1') => JSON.stringify(['bazisCutSet', id, revision]);
+const bazisHead = (id = bazisSourceId, accepted = 'r1', received = accepted) =>
+  ({ kind: 'bazisCutSet' as const, id, accepted, received });
+
+/** Sealed bazis carry receipt whose only retained fact is the confirmed
+ * physical line; membership evidence is intentionally absent. */
+function emptyBazisFixture(id = bazisSourceId): Fixture {
+  const originId = rootEvidenceId(id);
+  const carriedId = carriedEvidenceId(id);
+  const manifest: MdfPhysicalLineageManifest = { operation: 'carry',
+    actions: [{ lineKey: 'physical', action: 'carry', predecessorEvidenceLineId: originId }],
+    droppedPredecessorEvidenceLineIds: [] };
+  return {
+    contracts: [{ kind: 'bazisCutSet', id, revision: 'r1', contractFound: true,
+      sourceHasContract: true, sealed: true, contextFound: true, sourceKind: 'bazisCutSet',
+      operation: 'carry', productionAuthority: null, predecessorRevision: 'r0',
+      manifestDigest: mdfPhysicalLineageDigest(manifest), dropped: [], origin: 'manual',
+      acceptanceRequested: true, compositionComplete: true, effectPolicy: 'forward',
+      contextPredecessorAccepted: 'r0', contextPredecessorReceived: 'r0' }],
+    evidence: [{ kind: 'bazisCutSet', id, revision: 'r1', evidenceLineId: carriedId,
+      lineKey: 'physical', orderId: 1, detailId: 101, quantity: 10, stageCode: 'cut',
+      evidenceKind: 'physical', rework: false }],
+    transitions: [{ kind: 'bazisCutSet', id, revision: 'r1', evidenceLineId: carriedId,
+      action: 'carry', predecessorEvidenceLineId: originId, canonicalOriginEvidenceLineId: originId,
+      childKind: 'bazisCutSet', childId: id, childRevision: 'r1', childEvidenceKind: 'physical',
+      childLineKey: 'physical', childOrderId: 1, childDetailId: 101, childQuantity: 10,
+      childStage: 'cut', childRework: false, parentEvidenceLineId: originId,
+      parentKind: 'bazisCutSet', parentId: id, parentRevision: 'r0', parentEvidenceKind: 'physical',
+      parentLineKey: 'physical-root', parentOrderId: 1, parentDetailId: 101, parentQuantity: 10,
+      parentStage: 'cut', parentRework: false, parentCanonicalOrigin: originId,
+      parentLineageOperation: 'production' }],
+    parents: [{ kind: 'bazisCutSet', id, revision: 'r0', evidenceLineId: originId,
+      canonicalOriginEvidenceLineId: originId, lineageContractFound: true }],
+  };
+}
+
+function emptyAssignmentMarker(data: Fixture, revision = 'r1',
+  intentionalEmpty = true): MdfValidatedBazisAssignmentState {
+  return issueMdfValidatedBazisAssignmentState({ sourceKind: 'bazisCutSet',
+    sourceId: data.contracts[0].id, revisionKey: revision,
+    assignmentStateId: '20000000-0000-4000-8000-000000000001',
+    rootIntentId: '20000000-0000-4000-8000-000000000002',
+    membershipDigest: mdfBazisMembershipDigest(data.evidence), intentionalEmpty });
+}
 
 describe('loadMdfPhysicalLineageSnapshot defensive checks', () => {
   it('issues exact sealed production roots and carried descriptors', async () => {
@@ -207,5 +257,53 @@ describe('loadMdfPhysicalLineageSnapshot defensive checks', () => {
     data.evidence = Array.from({ length: 50001 }, (_, index) => ({ ...data.evidence[0],
       evidenceLineId: createHash('sha1').update(String(index)).digest('hex').padEnd(36, '0').slice(0, 36) }));
     await expect(loadMdfPhysicalLineageSnapshot(clientFor(data), [head()])).rejects.toThrow('MDF_LINEAGE_LIMIT');
+  });
+
+  it('issues an authenticated intentional-empty bazis carry that retains the confirmed physical line', async () => {
+    const data = emptyBazisFixture();
+    const snapshot = await loadMdfPhysicalLineageSnapshot(clientFor(data), [bazisHead()],
+      { assignmentStates: new Map([[bazisRevisionKey(bazisSourceId), emptyAssignmentMarker(data)]]) });
+    expect(snapshot.lineage.get(bazisRevisionKey(bazisSourceId))).toMatchObject({ operation: 'carry',
+      predecessorAcceptedRevisionKey: 'r0', lines: [{ action: 'carry', quantity: 10,
+        predecessorEvidenceLineId: rootEvidenceId(bazisSourceId),
+        canonicalOriginEvidenceLineId: rootEvidenceId(bazisSourceId) }] });
+    expect(snapshot.lineageIssues.size).toBe(0);
+  });
+
+  const forgedMarkers: [string, (data: Fixture) => MdfValidatedBazisAssignmentState | undefined][] = [
+    ['no authenticated marker', () => undefined],
+    ['a JSON-cloned marker', data => JSON.parse(JSON.stringify(emptyAssignmentMarker(data))) as MdfValidatedBazisAssignmentState],
+    ['a wrong-revision marker', data => emptyAssignmentMarker(data, 'r0')],
+    ['a marker without intentional-empty', data => emptyAssignmentMarker(data, 'r1', false)],
+  ];
+  it.each(forgedMarkers)('quarantines an empty bazis carry with %s', async (_name, makeMarker) => {
+    const data = emptyBazisFixture();
+    const marker = makeMarker(data);
+    const snapshot = marker
+      ? await loadMdfPhysicalLineageSnapshot(clientFor(data), [bazisHead()],
+          { assignmentStates: new Map([[bazisRevisionKey(bazisSourceId), marker]]) })
+      : await loadMdfPhysicalLineageSnapshot(clientFor(data), [bazisHead()]);
+    expect(snapshot.lineage.has(bazisRevisionKey(bazisSourceId))).toBe(false);
+    expect(snapshot.lineageIssues.get(bazisRevisionKey(bazisSourceId))).toEqual(['MDF_LINEAGE_INVALID']);
+  });
+
+  it('still rejects a bazis production root without membership despite a valid empty marker', async () => {
+    const data = emptyBazisFixture();
+    const childId = data.evidence[0].evidenceLineId;
+    data.contracts[0] = { ...data.contracts[0], operation: 'production',
+      productionAuthority: 'manual_production', predecessorRevision: null,
+      manifestDigest: mdfPhysicalLineageDigest({ operation: 'production', authority: 'manual_production',
+        actions: [{ lineKey: 'physical', action: 'root' }], droppedPredecessorEvidenceLineIds: [] }),
+      contextPredecessorAccepted: null, contextPredecessorReceived: null };
+    data.transitions[0] = { ...data.transitions[0], action: 'root', predecessorEvidenceLineId: null,
+      canonicalOriginEvidenceLineId: childId, parentEvidenceLineId: null, parentKind: null,
+      parentId: null, parentRevision: null, parentEvidenceKind: null, parentLineKey: null,
+      parentOrderId: null, parentDetailId: null, parentQuantity: null, parentStage: null,
+      parentRework: null, parentCanonicalOrigin: null, parentLineageOperation: null };
+    data.parents = [];
+    const snapshot = await loadMdfPhysicalLineageSnapshot(clientFor(data), [bazisHead()],
+      { assignmentStates: new Map([[bazisRevisionKey(bazisSourceId), emptyAssignmentMarker(data)]]) });
+    expect(snapshot.lineage.has(bazisRevisionKey(bazisSourceId))).toBe(false);
+    expect(snapshot.lineageIssues.get(bazisRevisionKey(bazisSourceId))).toEqual(['MDF_LINEAGE_INVALID']);
   });
 });

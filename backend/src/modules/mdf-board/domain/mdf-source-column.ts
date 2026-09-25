@@ -24,6 +24,12 @@ const columns: Record<MdfSourceKind, readonly MdfSourceColumn[]> = {
   bath: ['baths', 'baths_ready', 'baths_laminated', 'completed_baths'],
 };
 
+/** The kind-scoped allowlist behind `manual`; shared with the intentional-empty
+ * projection bypass, which cannot run the full resolver (zero members). */
+export function isMdfSourceColumnAllowed(kind: MdfSourceKind, column: string): column is MdfSourceColumn {
+  return (columns[kind] as readonly string[]).includes(column);
+}
+
 /** Placement only: cannot manufacture quantities, accept evidence, allocate
  * supply or run rules. Shadow is the first consumer; legacy readers still own
  * production placement until the separate connection/cutover gates pass. */

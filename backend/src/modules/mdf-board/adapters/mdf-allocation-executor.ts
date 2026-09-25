@@ -7,9 +7,15 @@ import type { MdfPositionQuantity } from '../domain/mdf-quantities';
 import { mdfLineageRevisionKey } from '../domain/mdf-physical-lineage';
 import { loadMdfExecutionSnapshot, mdfSourceKey } from './mdf-execution-snapshot';
 import { advanceCompatibleMdfRevision } from './mdf-compatible-advance';
+import { loadMdfBazisCompositionJobIntent, mdfBazisCompositionOwnerScope,
+  lockMdfBazisCompositionDetails } from './mdf-bazis-composition-job';
+import { advanceMdfBazisCompositionRevision,
+  type MdfBazisCompositionAcceptance } from './mdf-bazis-composition-advance';
+import { loadMdfBazisCompositionRawSnapshot,
+  type MdfBazisRawSnapshot } from './mdf-bazis-composition-snapshot';
 
 type Source = { kind: MdfSourceKind; id: string };
-type Head = Source & { received: string; accepted: string | null; epoch: string };
+type Head = Source & { received: string; accepted: string | null; epoch: string; version: string };
 type Line = MdfPositionQuantity & { evidenceLineId: string; lineKey: string; kind: MdfSourceKind; id: string;
   revision: string; stage: string; evidence: string; rework: boolean };
 const MAX_ORDERS = 100, MAX_SOURCES = 250, MAX_ROWS = 5000;
@@ -19,7 +25,8 @@ const result = (status: 'disabled' | 'superseded' | 'allocated') => ({ status, r
   readyBathIds: [] as string[], blockers: [] as ReturnType<typeof planMdfQuarantinedAllocations>['blockers'],
   quarantine: [] as ReturnType<typeof planMdfQuarantinedAllocations>['quarantine'], blockedPositionKeys: [] as string[],
   orderIds: [] as number[], sourceHeads: [] as Head[], sourceLines: [] as Line[],
-  executionSnapshot: null as Awaited<ReturnType<typeof loadMdfExecutionSnapshot>> | null });
+  executionSnapshot: null as Awaited<ReturnType<typeof loadMdfExecutionSnapshot>> | null,
+  compositionAcceptance: null as MdfBazisCompositionAcceptance | null });
 
 // Pending membership and historic allocations are graph edges too: neither may
 // silently disappear from scope when a source changes, is hidden or is removed.
@@ -78,19 +85,42 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
   const job = (await tx.query<MdfJob & { status: string }>(`SELECT * FROM mdf_recalculation_jobs WHERE job_id=$1 FOR UPDATE`, [jobId])).rows[0];
   if (!job || job.status !== 'pending') attention('JOB_NOT_PENDING');
   const source = { kind: job.source_kind, id: job.source_id };
+  const intent = await loadMdfBazisCompositionJobIntent(tx, job);
+  if (intent && !options.requireExecutionContext) attention('COMPOSITION_REQUIRES_CONTEXT');
+  // Negative-only early gate: a stale received head or epoch supersedes before
+  // any owner/raw work; the locked recheck below stays authoritative.
+  if (intent) {
+    const early = (await tx.query<{ received: string | null; epoch: string | null }>(
+      `SELECT received_revision_key received,correction_epoch::text epoch
+       FROM mdf_source_heads WHERE source_kind=$1 AND source_id=$2`,
+    [job.source_kind, job.source_id])).rows[0];
+    if (!early) attention('HEAD_MISSING');
+    if (early.received !== job.revision_key || early.epoch !== job.correction_epoch) return result('superseded');
+  }
   const scope = await discover(tx, source,options.requireExecutionContext);
+  const lockedOwnerIds = intent ? mdfBazisCompositionOwnerScope(scope.orders, intent) : scope.orders;
+  let compositionAcceptance: MdfBazisCompositionAcceptance | null = null;
   const owners = (await tx.query<{ order_id: string }>(`SELECT order_id FROM orders WHERE order_id=ANY($1::bigint[])
-    ORDER BY order_id FOR UPDATE`, [scope.orders])).rows;
-  if (owners.length !== scope.orders.length) attention('OWNER_MISSING');
+    ORDER BY order_id FOR UPDATE`, [lockedOwnerIds])).rows;
+  if (owners.length !== lockedOwnerIds.length) attention('OWNER_MISSING');
+  if (intent) {
+    const live = (await tx.query<{ id: string }>(`SELECT order_id::text id FROM orders
+      WHERE order_id=ANY($1::bigint[]) AND NOT delete_flag AND order_kind='production_order'
+      ORDER BY order_id LIMIT $2`, [lockedOwnerIds, lockedOwnerIds.length])).rows;
+    if (live.length !== lockedOwnerIds.length) attention('OWNER_STALE');
+    await lockMdfBazisCompositionDetails(tx, intent, lockedOwnerIds);
+  }
   for (const s of scope.sources) {
     await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`mdf-source:${key(s)}`]);
   }
   const heads = (await tx.query<Head>(`SELECT h.source_kind kind,h.source_id id,h.received_revision_key received,
-    h.accepted_revision_key accepted,h.correction_epoch::text epoch FROM mdf_source_heads h
+    h.accepted_revision_key accepted,h.correction_epoch::text epoch,h.version::text version FROM mdf_source_heads h
     JOIN unnest($1::text[],$2::text[]) s(kind,id) ON h.source_kind=s.kind AND h.source_id=s.id
     ORDER BY h.source_kind,h.source_id FOR UPDATE OF h`, [scope.sources.map(s => s.kind), scope.sources.map(s => s.id)])).rows;
   // A waiter must not use a component discovered before somebody changed it.
-  if (JSON.stringify(await discover(tx, source,options.requireExecutionContext)) !== JSON.stringify(scope)) throw new Error('MDF_ALLOCATION_SCOPE_CHANGED');
+  const again = await discover(tx, source,options.requireExecutionContext);
+  if (JSON.stringify(again) !== JSON.stringify(scope)) throw new Error('MDF_ALLOCATION_SCOPE_CHANGED');
+  if (intent) mdfBazisCompositionOwnerScope(again.orders, intent);
   const trigger = heads.find(h => key(h) === key(source));
   if (!trigger || (!trigger.accepted && !options.requireExecutionContext)) attention('ACCEPTANCE_PENDING');
   // Strict jobs may publish an unaccepted RECEIVED revision's quarantine. They
@@ -108,14 +138,33 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
   [heads.map(h => h.kind), heads.map(h => h.id), heads.map(h => h.accepted), heads.map(h => h.received), MAX_ROWS + 1])).rows;
   if (lines.length > MAX_ROWS) attention('ROW_LIMIT');
   for (const l of lines) if (![l.orderId,l.detailId,l.quantity].every(n => Number.isSafeInteger(n) && n > 0)) attention('INVALID_EVIDENCE');
-  let executionSnapshot = options.requireExecutionContext ? await loadMdfExecutionSnapshot(tx,heads,scope.orders) : null;
+  let executionSnapshot = options.requireExecutionContext ? await loadMdfExecutionSnapshot(tx,heads,scope.orders,
+    {allowPendingJobId:jobId}) : null;
+  let raw: MdfBazisRawSnapshot | null = null;
+  if (intent) {
+    try {
+      raw = await loadMdfBazisCompositionRawSnapshot(tx, { setId: intent.setId, lockRowsAfterOwnerLocks: true });
+    } catch (error) {
+      if (error instanceof Error && ['MDF_BAZIS_SET_NOT_FOUND','MDF_BAZIS_SNAPSHOT_INVALID',
+        'MDF_BAZIS_SNAPSHOT_ROW_LIMIT'].includes(error.message)) throw new MdfNeedsAttention('MDF_COMPOSITION_RAW_STALE');
+      throw error;
+    }
+  }
   let allocations = (await tx.query<MdfEvidenceAllocation>(`SELECT a.allocation_id "allocationId",a.evidence_line_id "evidenceLineId",
     a.bath_id "bathId",a.bath_revision "bathRevision",a.order_id::float8 "orderId",a.detail_id::float8 "detailId",
     a.quantity::float8 quantity,a.state FROM mdf_bath_allocations a
     WHERE a.order_id=ANY($1::bigint[]) AND a.state<>'released' ORDER BY a.allocation_id LIMIT $2 FOR UPDATE`,
   [scope.orders, MAX_ROWS + 1])).rows;
   if (allocations.length > MAX_ROWS) attention('ROW_LIMIT');
-  if (executionSnapshot) {
+  if (intent) {
+    if (!executionSnapshot || !raw) throw new Error('MDF_COMPOSITION_CONTEXT_MISSING');
+    const advanced = await advanceMdfBazisCompositionRevision(tx, { job, intent, head: trigger, heads,
+      orderIds: lockedOwnerIds, lines, allocations, snapshot: executionSnapshot, raw });
+    allocations = [...advanced.allocations];
+    trigger.version = advanced.newHeadVersion;
+    compositionAcceptance = advanced.compositionAcceptance;
+    executionSnapshot = await loadMdfExecutionSnapshot(tx, heads, scope.orders, { allowPendingJobId: jobId });
+  } else if (executionSnapshot) {
     // Promote only THIS job's authorized forward revision; another source's
     // pending proof must wait for its own pinned job and original actor.
     const previousLineageKey=trigger.accepted ? mdfLineageRevisionKey(trigger,trigger.accepted) : null;
@@ -145,7 +194,7 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
       // Compatible advancement changes the accepted head inside this
       // transaction. Re-authorize the exact newly accepted revision rather
       // than carrying a descriptor/context loaded before that transition.
-      executionSnapshot=await loadMdfExecutionSnapshot(tx,heads,scope.orders);
+      executionSnapshot=await loadMdfExecutionSnapshot(tx,heads,scope.orders,{allowPendingJobId:jobId});
     }
   }
   const bathHeads = heads.filter(h => h.kind === 'bath');
@@ -164,6 +213,8 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
       ? executionSnapshot.lineageIssues.get(mdfLineageRevisionKey(h,h.accepted))?.[0]
         ?? executionSnapshot.issues.get(mdfSourceKey(h))?.find(issue=>issue.startsWith('MDF_LINEAGE_'))
       : undefined,
+    assignmentState: executionSnapshot && h.accepted && h.accepted===h.received
+      ? executionSnapshot.assignmentStates.get(mdfLineageRevisionKey(h,h.accepted)) : undefined,
     uncertainOrderIds: executionSnapshot ? [...new Set(executionSnapshot.frozenDemand.get(mdfSourceKey(h))?.map(d => d.orderId))] : undefined,
     lines: bySource.get(key(h)) ?? [], createdAt: executionSnapshot
       ? executionSnapshot.metadata.get(mdfSourceKey(h))?.sourceCreatedAt : dates.find(d => d.id === h.id)?.createdAt })),
@@ -188,7 +239,7 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
   return { ...result('allocated'), readyBathIds: plan.readyBathIds, blockers: plan.blockers,
     quarantine: plan.quarantine, blockedPositionKeys: plan.blockedPositionKeys,
     reservedCount: inserted.length, consumedCount: toConsume.length,
-    orderIds: scope.orders, sourceHeads: heads, sourceLines: lines, executionSnapshot };
+    orderIds: scope.orders, sourceHeads: heads, sourceLines: lines, executionSnapshot, compositionAcceptance };
 }
 
 async function auditChanges(tx: DatabaseClient, job: MdfJob, state: 'reserved' | 'consumed',

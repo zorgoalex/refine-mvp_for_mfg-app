@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto';
 import { planMdfQuarantinedAllocations, type MdfAllocationSource } from './mdf-allocation-quarantine';
 import type { MdfEvidenceAllocation } from './mdf-evidence-allocation';
 import { issueMdfValidatedPhysicalLineage, type MdfValidatedPhysicalLine } from './mdf-physical-lineage';
+import { issueMdfValidatedBazisAssignmentState, mdfBazisMembershipDigest,
+  type MdfValidatedBazisAssignmentState } from '../application/mdf-bazis-assignment-state';
 
 const source = (id: string, kind: MdfAllocationSource['kind'] = 'packet', detailId = 11,
   quantity = 10): MdfAllocationSource => ({ kind, id, accepted: '1', received: '1', createdAt: '2026-09-01',
@@ -63,6 +65,39 @@ function attachIssuedLineage(sourceRow: MdfAllocationSource, options: {
 }
 
 describe('dependency-local MDF accounting quarantine', () => {
+  it('does not treat an assignment-empty marker alone as physical supply authority', () => {
+    const empty = source('assignment-empty-without-lineage','bazisCutSet',11,10);
+    empty.lines = empty.lines.filter(line => line.evidence === 'physical');
+    empty.assignmentState = issueMdfValidatedBazisAssignmentState({ sourceKind: 'bazisCutSet', sourceId: empty.id,
+      revisionKey: '1', assignmentStateId: '11111111-1111-4111-8111-111111111111',
+      rootIntentId: '22222222-2222-4222-8222-222222222222', membershipDigest: mdfBazisMembershipDigest([]),
+      intentionalEmpty: true });
+
+    const result = plan([empty, source('assignment-empty-bath','bath',11,10)]);
+
+    expect(result.quarantine).toContainEqual(expect.objectContaining({
+      sourceId: empty.id, code: 'MEMBERSHIP_MISMATCH',
+    }));
+    expect(result.readyBathIds).toEqual([]);
+    expect(result.reservations).toEqual([]);
+  });
+  it('rejects a copied unissued intentional-empty marker rather than treating it as empty membership', () => {
+    const empty = source('forged-assignment-empty','bazisCutSet',11,10);
+    empty.lines = empty.lines.filter(line => line.evidence === 'physical');
+    const valid = issueMdfValidatedBazisAssignmentState({ sourceKind: 'bazisCutSet', sourceId: empty.id,
+      revisionKey: '1', assignmentStateId: '33333333-3333-4333-8333-333333333333',
+      rootIntentId: '44444444-4444-4444-8444-444444444444', membershipDigest: mdfBazisMembershipDigest([]),
+      intentionalEmpty: true });
+    empty.assignmentState = { ...valid, intentionalEmpty: true } as MdfValidatedBazisAssignmentState;
+
+    const result = plan([empty, source('forged-assignment-empty-bath','bath',11,10)]);
+
+    expect(result.quarantine).toContainEqual(expect.objectContaining({
+      sourceId: empty.id, code: 'MEMBERSHIP_MISSING',
+    }));
+    expect(result.readyBathIds).toEqual([]);
+    expect(result.reservations).toEqual([]);
+  });
   it('uses verified independent SAME-position supply despite an unaccepted packet', () => {
     const result = plan([{ ...source('unknown'), accepted: null }, source('basis', 'bazisCutSet'), source('bath', 'bath')]);
     expect(result.readyBathIds).toEqual(['bath']);

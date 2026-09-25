@@ -48,6 +48,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real BASIS creation
     await db.query('ALTER TABLE cnc_telegram_packets ADD PRIMARY KEY(packet_id)');
     await db.query(readFileSync(new URL('../../../../db/migrations/179_mdf_active_return.sql',import.meta.url),'utf8'));
     await db.query(readFileSync(new URL('../../../../db/migrations/182_mdf_physical_lineage.sql',import.meta.url),'utf8'));
+    await db.query(readFileSync(new URL('../../../../db/migrations/185_mdf_bazis_composition.sql',import.meta.url),'utf8'));
     await db.query('CREATE TABLE mdf_cnc_observation_job_authorities(job_id uuid PRIMARY KEY,authority text NOT NULL)');
     await db.query(`CREATE SEQUENCE e2e_set_seq OWNED BY bazis_cut_sets.bazis_cut_set_id;
       ALTER TABLE bazis_cut_sets ALTER COLUMN bazis_cut_set_id SET DEFAULT nextval('e2e_set_seq');

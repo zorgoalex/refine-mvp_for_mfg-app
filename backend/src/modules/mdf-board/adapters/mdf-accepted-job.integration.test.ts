@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { Client } from 'pg';
+import { Client, type QueryResultRow } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { TransactionClient } from '../../../database/database.types';
+import type { DatabaseQueryOptions, TransactionClient } from '../../../database/database.types';
 import { beginTransactionHooks, discardTransactionHooks, flushTransactionHooks } from '../../../database/transaction-hooks';
 import { recordMdfReceipt, recordMdfLineageReceipt, type MdfLineageReceiptInput, type MdfReceiptInput } from '../application/mdf-receipt';
 import { MdfJobRunner } from '../application/mdf-job-runner';
@@ -37,7 +37,8 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     for (const table of ['orders','order_details','production_statuses','order_statuses','materials','sheet_material_types',
       'users','cut_result','cnc_telegram_packets','cnc_telegram_import_candidates','cnc_telegram_import_items',
       'status_automation_rules','outbox_events','audit_log','audit_log_related_entity',
-      'app_settings','bazis_order_links','order_import_entity_map','order_workshops']) {
+      'app_settings','bazis_order_links','bazis_cut_sets','bazis_cut_set_details',
+      'order_import_entity_map','order_workshops']) {
       await db.query(`CREATE TABLE ${table} AS TABLE public.${table} WITH NO DATA`);
     }
     await db.query(`ALTER TABLE cnc_telegram_packets ADD PRIMARY KEY(packet_id);
@@ -46,6 +47,11 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     await db.query(readFileSync(new URL('../../../../db/migrations/179_mdf_active_return.sql',import.meta.url),'utf8'));
     await db.query(readFileSync(new URL('../../../../db/migrations/180_mdf_cnc_observations.sql',import.meta.url),'utf8'));
     await db.query(readFileSync(new URL('../../../../db/migrations/182_mdf_physical_lineage.sql',import.meta.url),'utf8'));
+    await db.query(readFileSync(new URL('../../../../db/migrations/185_mdf_bazis_composition.sql',import.meta.url),'utf8'));
+    const expectedLocal = ['bazis_cut_set_details','bazis_cut_sets','mdf_bazis_assignment_states','mdf_bazis_composition_intents'];
+    expect((await db.query<{relname:string}>(`SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname=$1 AND c.relkind='r' AND c.relname=ANY($2::text[]) ORDER BY c.relname`,[schema,expectedLocal]))
+      .rows.map(r=>r.relname)).toEqual(expectedLocal);
     await db.query(`ALTER TABLE audit_log ALTER COLUMN audit_id SET DEFAULT gen_random_uuid();
       CREATE UNIQUE INDEX e2e_audit_related ON audit_log_related_entity(audit_id,entity_type,entity_id);
       CREATE UNIQUE INDEX e2e_outbox ON outbox_events(idempotency_key);
@@ -743,8 +749,9 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
       const revision = (await db.query('SELECT published_revision FROM mdf_engine_state')).rows[0].published_revision;
       let changed = false;
       const intercepted = { transaction: async <T>(fn: (tx: TransactionClient) => Promise<T>) => database().transaction(tx => fn({
-        ...tx, query: async (sql,args) => {
-          const result = await tx.query(sql,args);
+        ...tx, query: async <R extends QueryResultRow = QueryResultRow>(sql: string,args?: readonly unknown[],
+            options?: DatabaseQueryOptions) => {
+          const result = await tx.query<R>(sql,args,options);
           if (!changed && sql.includes('transaction_timestamp()')) {
             changed=true;
             await other.query('BEGIN');
