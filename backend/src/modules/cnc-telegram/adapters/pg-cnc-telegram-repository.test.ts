@@ -1077,22 +1077,19 @@ describe('PgCncTelegramRepository', () => {
 
     expect(result.columns.find((column) => column.key === 'completed')?.packets.map((packet) => packet.packetId))
       .toContain('00000000-0000-0000-0000-000000000036');
+    // Issued details of a remake never imply cut: without its own chat signal
+    // (or an explicit manual move) the machine file stays on the machine.
+    expect(result.columns.find((column) => column.key === 'parsed')?.packets.map((packet) => packet.packetId))
+      .toEqual(expect.arrayContaining([
+        '00000000-0000-0000-0000-000000000035',
+        '00000000-0000-0000-0000-000000000037',
+      ]));
     expect(result.columns.find((column) => column.key === 'completed_laminated')?.packets)
       .toMatchObject([
         {
           packetId: '00000000-0000-0000-0000-000000000031',
           allLinkedOrderDetailsPackedOrLater: true,
           allLinkedOrderDetailsIssuedOrLater: false,
-        },
-        {
-          packetId: '00000000-0000-0000-0000-000000000035',
-          completionStatus: 'pending',
-          allLinkedOrderDetailsIssuedOrLater: true,
-        },
-        {
-          packetId: '00000000-0000-0000-0000-000000000037',
-          completionStatus: 'pending',
-          allLinkedOrderDetailsIssuedOrLater: true,
         },
         {
           packetId: '00000000-0000-0000-0000-000000000038',

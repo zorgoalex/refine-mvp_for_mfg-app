@@ -85,9 +85,9 @@ describe('MDF source-scope shadow comparison', () => {
     data.sources[0].members.push(member(2, 12));
     expect(compareMdfShadow(data).columns[0].candidate).toBe('completed');
   });
-  it('uses issued own composition even without CNC signal', () => {
+  it('keeps an issued-composition machine file on the machine without its CNC signal', () => {
     const data = input([source({ rawCut: false })]); data.details[0].rank = 5;
-    expect(compareMdfShadow(data).columns[0].candidate).toBe('completed_laminated');
+    expect(compareMdfShadow(data).columns[0].candidate).toBe('parsed');
     expect(compareMdfShadow(data).positions[0].candidate.cut).toBe(0);
   });
   it('does not spend one cut portion on two baths; old hidden bath participates', () => {

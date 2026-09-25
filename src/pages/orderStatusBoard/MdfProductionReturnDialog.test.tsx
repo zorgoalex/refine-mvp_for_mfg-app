@@ -83,7 +83,7 @@ describe("MDF return confirmation interaction", () => {
   it("shows consequences without a reason field; cancellation sends no mutation", async () => {
     const h = await mount();
     expect(
-      h.view.root.findByProps({ message: "Статус заказа тоже изменится" })
+      h.view.root.findByProps({ message: "По правилам автостатусов изменится статус заказа" })
     ).toBeTruthy();
     expect(h.view.root.findAllByType("textarea")).toHaveLength(0);
     await act(async () => h.modal().props.onCancel());

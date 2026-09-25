@@ -483,6 +483,33 @@ outbox (`order.deleted`, `order.restored`).
 `previousOrderStatusIn`, `paidShareGte`, источник заказа
 `manual|bazis|import`, `firstPaymentOnly`.
 
+Условия по производственным статусам деталей:
+
+- `currentProductionStatusIn` — все учитываемые детали в одном статусе из списка;
+- `currentProductionStatusNotIn` — ни одна учитываемая деталь не в статусах из списка;
+- `anyProductionStatusIn` — хотя бы одна учитываемая деталь в статусе из списка.
+  Подходит для частичной переделки. Правило `change_order_status` с этим
+  условием может сработать на событии `order.production_status_changed` и при
+  неоднородном составе деталей. Mapping-действиям однородность по-прежнему нужна.
+
+Пример: возврат карточки МДФ-доски в «Файлы на станке» меняет статусы только
+деталей, статус заказа доска не трогает. Переоткрыть выданный заказ может правило
+`order.production_status_changed` → `change_order_status` «В производстве» с
+условиями `currentOrderStatusIn` (Готов к выдаче, Выдан) и `anyProductionStatusIn`
+(этапы до распила).
+
+Откат backend. Версии до появления `anyProductionStatusIn` не знают это условие
+и молча его игнорируют. Правило из примера на старой версии станет
+«Готов к выдаче/Выдан → В производстве» и будет переоткрывать выданные заказы.
+Поэтому перед откатом backend на такую версию выключите правила с этим условием и
+включите их снова только после возврата на новую версию:
+
+```sql
+UPDATE status_automation_rules SET is_enabled=false, version=version+1, updated_at=now()
+WHERE is_enabled AND conditions_json ? 'anyProductionStatusIn'
+RETURNING id, name;
+```
+
 Действия:
 
 - `change_order_status`;
@@ -491,6 +518,11 @@ outbox (`order.deleted`, `order.restored`).
   `advance_only`;
 - `map_order_status_to_details_production_status` для события `order.status_changed`;
 - `map_production_status_to_order_status` для события `order.production_status_changed`.
+
+МДФ-доска сама статус заказа не меняет: при возврате карточки меняются только
+статусы её деталей, после чего в той же транзакции вычисляются правила
+`order.production_status_changed`. Предпросмотр возврата показывает итог правил,
+а подтверждение отклоняется как устаревшее, если этот итог изменился.
 
 Mapping-действия задают несколько исходных статусов для одного целевого.
 Например, несколько производственных статусов деталей могут соответствовать

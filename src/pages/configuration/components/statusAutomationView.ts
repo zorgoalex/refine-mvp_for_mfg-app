@@ -99,6 +99,7 @@ export interface StatusAutomationFormValues {
   currentPaymentStatusNotIn?: number[];
   currentProductionStatusIn?: number[];
   currentProductionStatusNotIn?: number[];
+  anyProductionStatusIn?: number[];
   paidShareGte?: number;
   orderSourceIn?: StatusAutomationOrderSource[];
   signalCodeIn?: string[];
@@ -116,6 +117,7 @@ export const STATUS_AUTOMATION_CONDITION_KEYS = [
   'currentPaymentStatusNotIn',
   'currentProductionStatusIn',
   'currentProductionStatusNotIn',
+  'anyProductionStatusIn',
   'paidShareGte',
   'orderSourceIn',
   'firstPaymentOnly',
@@ -220,6 +222,14 @@ export function describeConditions(
     parts.push(
       `Ни одна учитываемая деталь не имеет статус из списка: ${formatStatusIds(
         current.currentProductionStatusNotIn,
+        catalogs.productionStatusNames,
+      )}`,
+    );
+  }
+  if (current.anyProductionStatusIn?.length) {
+    parts.push(
+      `Хотя бы одна деталь в статусах: ${formatStatusIds(
+        current.anyProductionStatusIn,
         catalogs.productionStatusNames,
       )}`,
     );
@@ -380,6 +390,7 @@ function clearStatusAutomationCondition(
     case 'currentPaymentStatusNotIn': return { ...form, currentPaymentStatusNotIn: [] };
     case 'currentProductionStatusIn': return { ...form, currentProductionStatusIn: [] };
     case 'currentProductionStatusNotIn': return { ...form, currentProductionStatusNotIn: [] };
+    case 'anyProductionStatusIn': return { ...form, anyProductionStatusIn: [] };
     case 'paidShareGte': return { ...form, paidShareGte: undefined };
     case 'signalCodeIn': return { ...form, signalCodeIn: [] };
     case 'orderSourceIn': return { ...form, orderSourceIn: [] };
@@ -451,6 +462,9 @@ function buildConditions(form: StatusAutomationFormValues): StatusAutomationCond
   }
   if (form.currentProductionStatusNotIn?.length) {
     conditions.currentProductionStatusNotIn = [...form.currentProductionStatusNotIn];
+  }
+  if (form.anyProductionStatusIn?.length) {
+    conditions.anyProductionStatusIn = [...form.anyProductionStatusIn];
   }
   if (form.paidShareGte !== undefined) {
     conditions.paidShareGte = form.paidShareGte;
@@ -765,6 +779,7 @@ function parseImportedConditions(
     ['currentPaymentStatusNotIn', rawConditions.currentPaymentStatusNotIn],
     ['currentProductionStatusIn', rawConditions.currentProductionStatusIn],
     ['currentProductionStatusNotIn', rawConditions.currentProductionStatusNotIn],
+    ['anyProductionStatusIn', rawConditions.anyProductionStatusIn],
   ];
 
   for (const [key, value] of statusArrays) {
@@ -867,6 +882,7 @@ function validateImportedStatusAutomationRule(
   pushMissingStatusErrors(errors, conditions.currentPaymentStatusNotIn, statusCatalog.paymentStatusIds, 'исключающие статусы оплаты');
   pushMissingStatusErrors(errors, conditions.currentProductionStatusIn, statusCatalog.productionStatusIds, 'статусы производства');
   pushMissingStatusErrors(errors, conditions.currentProductionStatusNotIn, statusCatalog.productionStatusIds, 'исключающие статусы производства');
+  pushMissingStatusErrors(errors, conditions.anyProductionStatusIn, statusCatalog.productionStatusIds, 'статусы производства (хотя бы одна деталь)');
 
   return errors;
 }
@@ -895,6 +911,9 @@ function normalizeConditionsForExport(
   }
   if (conditions?.currentProductionStatusNotIn?.length) {
     normalized.currentProductionStatusNotIn = uniqueNumbers(conditions.currentProductionStatusNotIn);
+  }
+  if (conditions?.anyProductionStatusIn?.length) {
+    normalized.anyProductionStatusIn = uniqueNumbers(conditions.anyProductionStatusIn);
   }
   if (conditions?.paidShareGte !== undefined) {
     normalized.paidShareGte = conditions.paidShareGte;
@@ -947,6 +966,9 @@ function assignStatusArrayCondition(
       return;
     case 'currentProductionStatusNotIn':
       conditions.currentProductionStatusNotIn = value;
+      return;
+    case 'anyProductionStatusIn':
+      conditions.anyProductionStatusIn = value;
       return;
     default:
       return;

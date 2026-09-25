@@ -142,10 +142,10 @@ export function MdfProductionReturnDialog({
               {preview.source.label}. Изменится деталей-позиций:{" "}
               {preview.details.length}.
             </p>
-            <label htmlFor="mdf-return-stage">Вернуть детали на этап</label>
+            <label htmlFor="mdf-return-stage">В какой производственный статус перевести детали карточки?</label>
             <Select
               id="mdf-return-stage"
-              aria-label="Этап возврата деталей"
+              aria-label="Производственный статус деталей"
               value={preview.targetStage.id}
               options={preview.stages.map((s) => ({
                 value: s.id,
@@ -159,7 +159,7 @@ export function MdfProductionReturnDialog({
               <Alert
                 type="warning"
                 showIcon
-                message="Статус заказа тоже изменится"
+                message="По правилам автостатусов изменится статус заказа"
                 description={
                   <ul>
                     {orderChanges.map((o) => (
@@ -171,7 +171,7 @@ export function MdfProductionReturnDialog({
                 }
               />
             ) : (
-              <p>Статусы заказов не изменятся.</p>
+              <p>Статусы заказов не изменятся: доска сама их не меняет, подходящих правил автостатусов нет.</p>
             )}
             <details
               open={preview.details.length <= 8}

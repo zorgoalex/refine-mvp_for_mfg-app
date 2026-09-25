@@ -18,6 +18,7 @@ import {
   describeFormConditions,
   planStatusAutomationRulesImport,
   readStatusAutomationRulesImportSource,
+  removeStatusAutomationCondition,
   validateStatusAutomationRuleBuilder,
   type StatusAutomationFormValues,
   type StatusAutomationRuleBuilderState,
@@ -43,6 +44,7 @@ const baseForm: StatusAutomationFormValues = {
   currentPaymentStatusNotIn: [],
   currentProductionStatusIn: [],
   currentProductionStatusNotIn: [],
+  anyProductionStatusIn: [],
   paidShareGte: undefined,
   orderSourceIn: [],
   firstPaymentOnly: undefined,
@@ -60,6 +62,7 @@ const eventDescriptor = (overrides: Partial<StatusAutomationEventTypeDto> = {}):
     'currentPaymentStatusNotIn',
     'currentProductionStatusIn',
     'currentProductionStatusNotIn',
+    'anyProductionStatusIn',
     'paidShareGte',
     'orderSourceIn',
     'firstPaymentOnly',
@@ -164,6 +167,7 @@ describe('statusAutomationView', () => {
           currentPaymentStatusNotIn: [777],
           currentProductionStatusIn: [4, 998],
           currentProductionStatusNotIn: [4],
+          anyProductionStatusIn: [5, 997],
           paidShareGte: 50,
           orderSourceIn: ['bazis'],
           firstPaymentOnly: true,
@@ -171,7 +175,7 @@ describe('statusAutomationView', () => {
         catalogs,
       ),
     ).toBe(
-      'Статус заказа — один из: Новый, #999; Статус заказа — не входит в: Оплачен; Статус оплаты — один из: Частично оплачен; Статус оплаты — не входит в: #777; Все учитываемые детали имеют одинаковый статус — один из: В работе, #998; Ни одна учитываемая деталь не имеет статус из списка: В работе; Оплачено ≥ 50%; Источник: Базис; Только первый платёж',
+      'Статус заказа — один из: Новый, #999; Статус заказа — не входит в: Оплачен; Статус оплаты — один из: Частично оплачен; Статус оплаты — не входит в: #777; Все учитываемые детали имеют одинаковый статус — один из: В работе, #998; Ни одна учитываемая деталь не имеет статус из списка: В работе; Хотя бы одна деталь в статусах: Готово, #997; Оплачено ≥ 50%; Источник: Базис; Только первый платёж',
     );
   });
 
@@ -185,6 +189,7 @@ describe('statusAutomationView', () => {
           currentPaymentStatusNotIn: [],
           currentProductionStatusIn: [],
           currentProductionStatusNotIn: [],
+          anyProductionStatusIn: [],
           orderSourceIn: [],
           firstPaymentOnly: false,
         },
@@ -282,6 +287,7 @@ describe('statusAutomationView', () => {
       'currentPaymentStatusNotIn',
       'currentProductionStatusIn',
       'currentProductionStatusNotIn',
+      'anyProductionStatusIn',
       'paidShareGte',
       'orderSourceIn',
       'firstPaymentOnly',
@@ -370,6 +376,7 @@ describe('statusAutomationView', () => {
         currentPaymentStatusNotIn: [5],
         currentProductionStatusIn: [4],
         currentProductionStatusNotIn: [6],
+        anyProductionStatusIn: [7],
         paidShareGte: 50,
         orderSourceIn: ['manual', 'bazis', 'import'],
         firstPaymentOnly: true,
@@ -381,6 +388,7 @@ describe('statusAutomationView', () => {
       currentPaymentStatusNotIn: [5],
       currentProductionStatusIn: [4],
       currentProductionStatusNotIn: [6],
+      anyProductionStatusIn: [7],
       paidShareGte: 50,
       orderSourceIn: ['manual', 'bazis', 'import'],
       firstPaymentOnly: true,
@@ -529,5 +537,74 @@ describe('statusAutomationView', () => {
         statusMapping: { entries: [{ sourceStatusIds: [1, 2], targetStatusId: 5 }] },
       },
     });
+  });
+
+  it('round-trips anyProductionStatusIn through form and back into saved conditions unchanged', () => {
+    const form: StatusAutomationFormValues = {
+      ...baseForm,
+      anyProductionStatusIn: [16, 1, 9],
+    };
+
+    expect(buildCreatePayload(form).conditions).toEqual({
+      anyProductionStatusIn: [16, 1, 9],
+    });
+    expect(buildUpdatePayload(rule, form)).toMatchObject({
+      conditions: { anyProductionStatusIn: [16, 1, 9] },
+      version: 7,
+    });
+  });
+
+  it('normalizes duplicate anyProductionStatusIn ids when exporting rules', () => {
+    const ruleWithDuplicates: StatusAutomationRuleDto = {
+      ...rule,
+      conditions: { anyProductionStatusIn: [16, 1, 9, 1, 16] },
+    };
+
+    expect(buildStatusAutomationRulesExportFile([ruleWithDuplicates], '2026-08-12T00:00:00.000Z').rules[0].conditions).toEqual({
+      anyProductionStatusIn: [1, 9, 16],
+    });
+  });
+
+  it('reports an unknown anyProductionStatusIn status id as a missing-status validation error', () => {
+    const plan = planStatusAutomationRulesImport(
+      [
+        {
+          name: 'Хотя бы одна деталь',
+          eventType: 'payment.created',
+          actionType: 'change_order_status',
+          targetStatusId: 2,
+          conditions: { anyProductionStatusIn: [4, 777] },
+        },
+      ],
+      {
+        existingRules: [],
+        eventTypes: [eventDescriptor()],
+        statusCatalog: importStatusCatalog,
+      },
+    );
+
+    expect(plan.rulesToCreate).toEqual([]);
+    expect(plan.failedRules).toEqual([
+      {
+        index: 1,
+        name: 'Хотя бы одна деталь',
+        reasons: ['Отсутствуют статусы производства (хотя бы одна деталь): #777'],
+      },
+    ]);
+  });
+
+  it('removes anyProductionStatusIn from the saved conditions when the condition is cleared', () => {
+    let state: StatusAutomationRuleBuilderState = {
+      form: { ...baseForm, anyProductionStatusIn: [4] },
+      activeConditionKeys: ['anyProductionStatusIn'],
+    };
+
+    expect(buildCreatePayload(state.form).conditions).toEqual({ anyProductionStatusIn: [4] });
+
+    state = removeStatusAutomationCondition(state, 'anyProductionStatusIn');
+
+    expect(state.activeConditionKeys).toEqual([]);
+    expect(state.form.anyProductionStatusIn).toEqual([]);
+    expect(buildCreatePayload(state.form).conditions).toEqual({});
   });
 });

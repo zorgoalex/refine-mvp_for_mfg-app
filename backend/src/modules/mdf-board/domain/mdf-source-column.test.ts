@@ -10,7 +10,9 @@ describe('normalized MDF source-column resolver (no writes or quantities)', () =
   it.each([
     ['packet', [4, 4], false, 'parsed'],
     ['packet', [4, 4], true, 'completed_laminated'],
-    ['packet', [5, 6], false, 'completed_laminated'],
+    ['packet', [5, 6], false, 'parsed'],
+    ['packet', [5, 6], true, 'completed_laminated'],
+    ['bazisCutSet', [5, 6], false, 'completed_laminated'],
     ['packet', [5, null], true, 'completed'],
     ['bazisCutSet', [4, 4], false, 'completed_laminated'],
     ['bazisCutSet', [4, null], false, 'parsed'],

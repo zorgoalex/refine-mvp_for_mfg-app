@@ -52,7 +52,8 @@ export function resolveMdfSourceColumn(input: MdfSourceColumnInput): MdfSourceCo
       : { column: 'baths', reason: 'awaiting_cut', issues: [] };
   } else {
     const cut = input.cutConfirmed || manual === 'completed' || manual === 'completed_laminated';
-    if (allAt(issued)) result = { column: 'completed_laminated', reason: 'all_issued', issues: [] };
+    // A machine file needs its own cut signal; issued details of a remake never imply cut.
+    if (allAt(issued) && (cut || input.kind === 'bazisCutSet')) result = { column: 'completed_laminated', reason: 'all_issued', issues: [] };
     else if (allAt(packed) && (cut || input.kind === 'bazisCutSet')) result = {
       column: 'completed_laminated', reason: cut ? 'cut_and_all_packed' : 'all_packed', issues: [],
     };

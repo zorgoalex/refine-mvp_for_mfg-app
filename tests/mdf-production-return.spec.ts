@@ -19,7 +19,7 @@ test('real dialog shows consequences and cancels without sending confirm',async(
   let mutations=0;
   await page.route('**/orders/status-board/mdf-return/**/confirm',route=>{mutations++;return route.fulfill({json:{preview}});});
   await page.goto('/e2e-mdf-return');
-  await expect(page.getByText('Статус заказа тоже изменится')).toBeVisible({timeout:60000});
+  await expect(page.getByText('По правилам автостатусов изменится статус заказа')).toBeVisible({timeout:60000});
   await expect(page.getByText('E2E: Выдан → В производстве')).toBeVisible();
   await expect(page.locator('textarea')).toHaveCount(0);
   await page.getByRole('button',{name:'Отмена',exact:true}).click();

@@ -93,6 +93,35 @@ describe('evaluateRuleConditions', () => {
     });
   });
 
+  it('anyProductionStatusIn matches a partial remake: some details back before cut', () => {
+    const mixed = makeState({ productionSummary: { detailCount: 24, unassignedCount: 0, statusIds: [1, 8] } });
+    const rule = makeRule({ conditions: { currentOrderStatusIn: [1], anyProductionStatusIn: [16, 1, 9] } });
+    expect(evaluateRuleConditions(rule, mixed, makeEvent())).toEqual({ matched: true });
+    // The uniform-equality condition cannot express this case.
+    expect(evaluateRuleConditions(makeRule({ conditions: { currentProductionStatusIn: [16, 1, 9] } }), mixed, makeEvent()))
+      .toEqual({ matched: false, reason: 'production_status_not_in_list' });
+  });
+
+  it('production-event change_order_status: presence rule may act on a mixed order, plain rule may not', () => {
+    const mixed = makeState({ productionStatusId: null, productionSummary: { detailCount: 24, unassignedCount: 0, statusIds: [1, 8] } });
+    const event = makeEvent({ eventType: 'order.production_status_changed' });
+    expect(evaluateRuleConditions(makeRule({ actionType: 'change_order_status', conditions: { anyProductionStatusIn: [1] } }), mixed, event))
+      .toEqual({ matched: true });
+    expect(evaluateRuleConditions(makeRule({ actionType: 'change_order_status', conditions: {} }), mixed, event))
+      .toEqual({ matched: false, reason: 'production_composition_not_uniform' });
+    expect(evaluateRuleConditions(makeRule({ actionType: 'map_production_status_to_order_status', conditions: { anyProductionStatusIn: [1] } }), mixed, event))
+      .toEqual({ matched: false, reason: 'production_composition_not_uniform' });
+  });
+
+  it('anyProductionStatusIn fails when no counted detail has a listed status', () => {
+    const issued = makeState({ productionSummary: { detailCount: 24, unassignedCount: 0, statusIds: [8] } });
+    expect(evaluateRuleConditions(makeRule({ conditions: { anyProductionStatusIn: [16, 1, 9] } }), issued, makeEvent()))
+      .toEqual({ matched: false, reason: 'production_status_absent' });
+    expect(evaluateRuleConditions(makeRule({ conditions: { anyProductionStatusIn: [1] } }),
+      makeState({ productionSummary: null as never }), makeEvent()))
+      .toEqual({ matched: false, reason: 'production_status_absent' });
+  });
+
   it('does not match a production list when production status is null', () => {
     const result = evaluateRuleConditions(
       makeRule({ conditions: { currentProductionStatusIn: [4, 5] } }),

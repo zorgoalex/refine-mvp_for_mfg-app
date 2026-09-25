@@ -146,6 +146,7 @@ const MEANINGFUL_SKIP_REASONS = new Set([
   'mapping_source_status_missing',
   'production_status_not_in_list',
   'production_status_excluded',
+  'production_status_absent',
   'production_composition_not_uniform',
 ]);
 
@@ -170,6 +171,22 @@ export async function evaluateStatusAutomation(
   await evaluateEventRules(tx, event);
   if (event.eventType === 'order.created' || event.eventType === 'order.updated') {
     await evaluateProductionCompositionAutomation(tx, event);
+  }
+}
+
+/** Runs a rolled-back what-if (SAVEPOINT) without leaking its rule-visit guards
+ * into the same transaction's real command, which must evaluate rules afresh. */
+export async function withIsolatedStatusAutomationVisits<T>(
+  tx: TransactionClient,
+  run: () => Promise<T>,
+): Promise<T> {
+  const previous = executedRules.get(tx);
+  executedRules.set(tx, new Set(previous ?? []));
+  try {
+    return await run();
+  } finally {
+    if (previous) executedRules.set(tx, previous);
+    else executedRules.delete(tx);
   }
 }
 
@@ -648,7 +665,8 @@ function productionEvaluationAudit(event: StatusAutomationEvent, rule: StatusAut
       ? 'derived_from_production_composition' : null),
     productionSummary: evaluationStates.get(event)?.productionSummary ?? null,
     productionScope: mdfScopes.has(event) ? 'mdf_eligible_details' : 'ordinary_order_details',
-    productionConditionMode: rule.conditions.currentProductionStatusIn?.length
+    productionConditionMode: rule.conditions.anyProductionStatusIn?.length ? 'any_status_presence'
+      : rule.conditions.currentProductionStatusIn?.length
       || rule.actionType === 'map_production_status_to_order_status'
       || event.eventType === 'order.production_status_changed'
       ? 'uniform_equality' : rule.conditions.currentProductionStatusNotIn?.length ? 'forbidden_status_absence' : null,

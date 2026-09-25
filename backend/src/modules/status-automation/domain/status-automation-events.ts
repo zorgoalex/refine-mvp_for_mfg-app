@@ -20,6 +20,7 @@ const BASE_CONDITIONS: ReadonlyArray<keyof StatusAutomationConditions> = [
   'currentPaymentStatusNotIn',
   'currentProductionStatusIn',
   'currentProductionStatusNotIn',
+  'anyProductionStatusIn',
   'paidShareGte',
   'orderSourceIn',
 ];

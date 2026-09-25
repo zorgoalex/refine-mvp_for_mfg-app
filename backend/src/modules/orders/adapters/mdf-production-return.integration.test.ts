@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Client, type PoolClient } from "pg";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -84,20 +84,23 @@ describe.skipIf(!enabled)(
       transaction: async <T>(
         handler: (tx: TransactionClient) => Promise<T>,options: DatabaseTransactionOptions = {}
       ) => {
+        // Like production, every transaction gets its own client object: per-tx
+        // WeakMap state (e.g. automation rule-visit guards) must not leak.
+        const scoped: TransactionClient = { ...tx };
         await client.query("BEGIN");
-        beginTransactionHooks(tx);
+        beginTransactionHooks(scoped);
         try {
-          if (options.mdf) await enterMdfCommand(tx,options.mdf);
-          const result = await handler(tx);
-          await flushTransactionHooks(tx);
+          if (options.mdf) await enterMdfCommand(scoped,options.mdf);
+          const result = await handler(scoped);
+          await flushTransactionHooks(scoped);
           await client.query("COMMIT");
           return result;
         } catch (e) {
           await client.query("ROLLBACK");
           throw e;
         } finally {
-          discardTransactionHooks(tx);
-          discardMdfCommandBoundary(tx);
+          discardTransactionHooks(scoped);
+          discardMdfCommandBoundary(scoped);
         }
       },
     };
@@ -233,7 +236,56 @@ describe.skipIf(!enabled)(
       expect(statements).toEqual(entrance);
       expect(await facts()).toEqual(after);
     });
-    it.each(['legacy', 'shadow'] as const)('%s preview rolls back all facts; confirm changes only source position and explicitly reopens issued order', async mode => {
+    // Order status is owned by status automation only: the board never reopens.
+    const addReopenRule = async (orderStatusIds: number[], productionStatusIds: number[]) => {
+      process.env.BACKEND_STATUS_AUTOMATION = 'true';
+      await client.query(`INSERT INTO status_automation_rules(id,name,event_type,action_type,target_status_id,
+        conditions_json,action_config_json,priority,is_enabled,version,created_at,updated_at)
+        VALUES(901,'E2E-Тест возврат → В производстве','order.production_status_changed','change_order_status',1,
+        $1::jsonb,'{}'::jsonb,50,true,1,now(),now())`,
+        [JSON.stringify({ currentOrderStatusIn: orderStatusIds, anyProductionStatusIn: productionStatusIds })]);
+    };
+    afterEach(() => { delete process.env.BACKEND_STATUS_AUTOMATION; });
+
+    it('without a matching automation rule the return keeps the issued order status', async () => {
+      process.env.BACKEND_STATUS_AUTOMATION = 'true';
+      const p = await repository.preview(user, source, { targetColumn: 'parsed' });
+      expect(p.orders).toEqual([{ orderId: 1, orderName: 'E2E-Тест 1', before: 'Выдан', after: 'Выдан' }]);
+      expect(p.cards).toContainEqual(expect.objectContaining({ id: packetId, after: 'parsed' }));
+      await confirm(p, randomUUID());
+      expect((await client.query('SELECT order_status_id FROM orders WHERE order_id=1')).rows[0].order_status_id).toBe(3);
+      expect((await production()).find((d: { detail_id: string }) => d.detail_id === '11').production_status_id).toBe(1);
+    });
+
+    it('reopens only through an enabled rule; preview what-if does not consume the rule for confirm', async () => {
+      await addReopenRule([3], [1]);
+      const p = await repository.preview(user, source, { targetColumn: 'parsed' });
+      expect(p.orders).toEqual([{ orderId: 1, orderName: 'E2E-Тест 1', before: 'Выдан', after: 'В производстве' }]);
+      const ruleAudits = async () => (await client.query(
+        "SELECT count(*)::integer AS n FROM audit_log WHERE event='status_automation.rule_applied'")).rows[0].n;
+      expect(await ruleAudits()).toBe(0);
+      await confirm(p, randomUUID());
+      expect((await client.query('SELECT order_status_id FROM orders WHERE order_id=1')).rows[0].order_status_id).toBe(1);
+      expect(await ruleAudits()).toBe(1);
+    });
+
+    it.each([
+      ['target order status deactivated', async () => { await client.query('UPDATE order_statuses SET is_active=false WHERE order_status_id=1'); }],
+      ['status automation switched off', async () => { process.env.BACKEND_STATUS_AUTOMATION = 'false'; }],
+    ] as const)('stale when the previewed automation outcome changes: %s', async (_name, change) => {
+      await addReopenRule([3], [1]);
+      const p = await repository.preview(user, source, { targetColumn: 'parsed' });
+      expect(p.orders[0].after).toBe('В производстве');
+      const before = await production();
+      await change();
+      await expect(confirm(p, randomUUID())).rejects.toMatchObject({ code: 'MDF_RETURN_STALE' });
+      expect(await production()).toEqual(before);
+      expect((await client.query('SELECT order_status_id FROM orders WHERE order_id=1')).rows[0].order_status_id).toBe(3);
+      expect((await client.query("SELECT count(*)::integer AS n FROM audit_log WHERE event='mdf_board.production_returned'")).rows[0].n).toBe(0);
+    });
+
+    it.each(['legacy', 'shadow'] as const)('%s preview rolls back all facts; confirm changes only source position; rule reopens issued order', async mode => {
+      await addReopenRule([3], [1]);
       await client.query('UPDATE mdf_engine_state SET mode=$1', [mode]);
       const before = await production();
       const p = await repository.preview(user, source, {
@@ -339,7 +391,7 @@ describe.skipIf(!enabled)(
       });
       expect(await production()).toEqual(before);
     });
-    it("completed order blocks; missing reopen permission blocks; unresolved source blocks", async () => {
+    it("completed order blocks; no order-status permission is needed; unresolved source blocks", async () => {
       await client.query(
         "UPDATE orders SET order_status_id=4 WHERE order_id=1"
       );
@@ -349,6 +401,8 @@ describe.skipIf(!enabled)(
       await client.query(
         "UPDATE orders SET order_status_id=3 WHERE order_id=1"
       );
+      // The board no longer changes order statuses, so returning needs no
+      // order-status permission; rules run under their own automation policy.
       await expect(
         repository.preview(
           {
@@ -360,7 +414,7 @@ describe.skipIf(!enabled)(
           source,
           { targetColumn: "parsed" }
         )
-      ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+      ).resolves.toMatchObject({ targetColumn: "parsed" });
       await client.query(
         "UPDATE cnc_telegram_packet_items SET match_detail_id=NULL,detail_number=NULL"
       );
@@ -392,6 +446,7 @@ describe.skipIf(!enabled)(
       "returns %s and previews all shared cards, not unrelated order details",
       async (kind, id, targetColumn, statusId) => {
         await addProductionSources();
+        await addReopenRule([3], [1, 2, 4]);
         const own = { kind, id };
         const p = await repository.preview(user, own, { targetColumn });
         expect(p.details.map((d) => d.detailId)).toEqual([11]);
@@ -612,22 +667,25 @@ describe.skipIf(!enabled)(
       ).toEqual(before);
     });
 
-    it('preserves existing manual production mode when reopening alone', async()=>{
+    it('a position-only return keeps order status and manual production mode', async()=>{
       await client.query('UPDATE order_details SET production_status_id=1 WHERE detail_id=11');
       await client.query('UPDATE orders SET production_status_from_details_enabled=false WHERE order_id=1');
       const p=await repository.preview(user,source,{targetColumn:'parsed'});
       expect(p.details).toHaveLength(0);
       await confirm(p);
       expect((await client.query('SELECT order_status_id,production_status_id,production_status_from_details_enabled FROM orders WHERE order_id=1')).rows[0])
-        .toEqual({order_status_id:1,production_status_id:null,production_status_from_details_enabled:false});
+        .toEqual({order_status_id:3,production_status_id:null,production_status_from_details_enabled:false});
     });
 
     it('normalizes configured string order-status IDs like the visible board',async()=>{
       await addProductionSources();
-      await client.query('UPDATE order_details SET production_status_id=2 WHERE detail_id=11');
+      // The return must really change a detail stage: only then does the
+      // production event let the automation rule reopen the hidden order.
+      await client.query('UPDATE order_details SET production_status_id=6 WHERE detail_id=11');
       await client.query('UPDATE orders SET order_status_id=2 WHERE order_id=1');
       await client.query(`INSERT INTO app_settings(setting_key,value_json,is_active)
         VALUES('status_automation.mdf_board_hidden_production_statuses','{"cardRules":[{"cardKind":"bath","orderStatusIds":["2"]}]}',true)`);
+      await addReopenRule([2], [1, 2, 4]);
       const own={kind:'bath' as const,id:'cut-result:101'};
       const p=await repository.preview(user,own,{targetColumn:'baths_ready'});
       expect(p.cards).toContainEqual(expect.objectContaining({kind:'bath',before:'completed_baths',after:'baths_ready'}));

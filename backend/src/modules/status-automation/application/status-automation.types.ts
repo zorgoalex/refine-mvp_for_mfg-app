@@ -40,6 +40,8 @@ export interface StatusAutomationConditions {
   currentPaymentStatusNotIn?: number[];
   currentProductionStatusIn?: number[];
   currentProductionStatusNotIn?: number[];
+  /** At least one counted detail has a status from the list (partial remakes). */
+  anyProductionStatusIn?: number[];
   paidShareGte?: number; // 0..100
   orderSourceIn?: Array<'manual' | 'bazis' | 'import'>;
   firstPaymentOnly?: boolean; // только payment.created

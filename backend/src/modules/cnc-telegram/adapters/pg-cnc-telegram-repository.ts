@@ -8181,13 +8181,12 @@ function packetColumnKey(
   if (packet.completionStatus === 'completed' || packet.thumbsUp) {
     return packet.allLinkedOrderDetailsPackedOrLater ? 'completed_laminated' : 'completed';
   }
+  // A machine file stays on the machine until its own chat completion signal
+  // (or an explicit manual move): issued details of a remake never imply cut.
   const manualTarget = packetManualTargetColumns.get(packet);
-  const sourceColumn = manualTarget === 'completed' || manualTarget === 'completed_laminated'
+  return manualTarget === 'completed' || manualTarget === 'completed_laminated'
     ? manualTarget
     : 'parsed';
-  return sourceColumn === 'parsed' && packet.allLinkedOrderDetailsIssuedOrLater
-    ? 'completed_laminated'
-    : sourceColumn;
 }
 
 function mapOrderCuttingSequenceRow(row: OrderCuttingSequenceRow): CncTelegramOrderCuttingSequenceDto {

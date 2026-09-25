@@ -5,6 +5,11 @@ import type { DatabaseService } from "../../../database/database.service";
 import type { TransactionClient } from "../../../database/database.types";
 import { observeMdfShadowCommand } from "../../mdf-board/application/mdf-shadow";
 import { enterMdfSerializableLegacyCommand } from "../../mdf-board/application/mdf-command-boundary";
+import {
+  evaluateProductionCompositionAutomation,
+  isStatusAutomationEnabled,
+  withIsolatedStatusAutomationVisits,
+} from "../../status-automation/application/status-automation-runtime";
 import type { CurrentUser } from "../../../permissions/current-user";
 import { OrderAccessPolicy } from "../../../permissions/policies/order-access.policy";
 import {
@@ -129,13 +134,10 @@ export class PgMdfProductionReturn {
             "Данные изменились. Обновите предпросмотр возврата.",
             409
           );
-        await applyReturnFacts(
-          tx,
-          user,
-          source,
-          prepared.preview,
-          prepared.reopenStatusId
-        );
+        await applyReturnFacts(tx, user, source, prepared.preview, {
+          requestId,
+          sourceIdempotencyKey: `mdf-board:return:${source.kind}:${source.id}:${request.idempotencyKey}`,
+        });
         const after = await loadReturnSnapshot(
           tx,
           source,
@@ -396,38 +398,8 @@ export class PgMdfProductionReturn {
         );
       }
     }
-    const reopen = sourceOrders.filter((o) =>
-      ["готов к выдаче", "выдан"].includes(norm(o.status))
-    );
-    let reopenStatusId: number | null = null;
-    if (reopen.length) {
-      if (
-        !user.permissions.includes("orders.change_status") ||
-        reopen.some((o) => !new OrderAccessPolicy().canUpdate(user, subject(o)))
-      ) {
-        fail(
-          "PERMISSION_DENIED",
-          "Для возврата нужно право изменения статуса всех затронутых заказов",
-          403
-        );
-      }
-      // Packer permission is intentionally restricted to ready/issued, never reopening.
-      if (
-        user.role === "packer" ||
-        rolePolicyForUser(user).orders.update === "none"
-      )
-        fail("PERMISSION_DENIED", "Недостаточно прав для открытия заказа", 403);
-      const status = await tx.query<{
-        id: number;
-      }>(`SELECT order_status_id::integer AS id FROM order_statuses
-        WHERE is_active=true AND lower(trim(order_status_name))='в производстве'`);
-      if (status.rows.length !== 1)
-        fail(
-          "MDF_RETURN_ORDER_STATUS_UNAVAILABLE",
-          "Статус заказа «В производстве» не найден или неоднозначен"
-        );
-      reopenStatusId = status.rows[0].id;
-    }
+    // The board never changes order statuses itself: after the detail stages
+    // change, only enabled status-automation rules may move the order.
     const changed = new Set(
       correctionDetailIds(
         before.details.filter((d) => quantities.has(d.id)),
@@ -456,7 +428,7 @@ export class PgMdfProductionReturn {
         orderId: o.id,
         orderName: o.name,
         before: o.status,
-        after: reopen.includes(o) ? "В производстве" : o.status,
+        after: o.status,
       })),
       cards: [],
       resetsCompletion:
@@ -491,12 +463,16 @@ export class PgMdfProductionReturn {
       boardWindow: request.boardWindow,
       before,
       stages: stagesResult.rows,
-      reopenStatusId,
     });
     await tx.query("SAVEPOINT mdf_return_preview");
     let after: ReturnSnapshot;
     try {
-      await applyReturnFacts(tx, user, source, preview, reopenStatusId);
+      await withIsolatedStatusAutomationVisits(tx, () =>
+        applyReturnFacts(tx, user, source, preview, {
+          requestId: `mdf-return-preview:${source.kind}:${source.id}`,
+          sourceIdempotencyKey: `mdf-board:return-preview:${source.kind}:${source.id}:${preview.digest}`,
+        })
+      );
       after = await loadReturnSnapshot(tx, source, owners, request.boardWindow);
     } finally {
       await tx.query("ROLLBACK TO SAVEPOINT mdf_return_preview");
@@ -524,7 +500,23 @@ export class PgMdfProductionReturn {
           ]
         : [];
     });
-    return { preview, reopenStatusId, cardsDigest: hash(after.cards) };
+    const afterOrder = new Map(after.orders.map((o) => [o.id, o]));
+    preview.orders = preview.orders.map((o) => ({
+      ...o,
+      after: afterOrder.get(o.orderId)?.status ?? o.before,
+    }));
+    // The confirmation must reproduce exactly the previewed automation outcome:
+    // rule-driven order statuses (incl. target availability) and the runtime flag.
+    preview.digest = hash({
+      base: preview.digest,
+      automationEnabled: isStatusAutomationEnabled(),
+      orders: preview.orders.map((o) => ({
+        orderId: o.orderId,
+        after: o.after,
+        afterStatusId: afterOrder.get(o.orderId)?.statusId ?? null,
+      })),
+    });
+    return { preview, cardsDigest: hash(after.cards) };
   }
 }
 
@@ -569,23 +561,20 @@ async function applyReturnFacts(
   user: CurrentUser,
   source: Source,
   p: MdfReturnPreview,
-  reopenStatusId: number | null
+  automation: { requestId: string; sourceIdempotencyKey: string }
 ) {
   if (p.details.length)
     await tx.query(
       "UPDATE order_details SET production_status_id=$1 WHERE detail_id=ANY($2::bigint[])",
       [p.targetStage.id, p.details.map((d) => d.detailId)]
     );
-  for (const o of p.orders) {
-    if (o.before === o.after && !p.details.some((d) => d.orderId === o.orderId))
-      continue;
+  const changedOrderIds = [...new Set(p.details.map((d) => d.orderId))].sort((a, b) => a - b);
+  for (const orderId of changedOrderIds) {
     await tx.query(
-      `UPDATE orders SET order_status_id=CASE WHEN $2::bigint IS NULL THEN order_status_id ELSE $2 END,
-      version=version+1,updated_at=now(),edited_by=$3 WHERE order_id=$1`,
-      [o.orderId, o.before !== o.after ? reopenStatusId : null, Number(user.id)]
+      "UPDATE orders SET version=version+1,updated_at=now(),edited_by=$2 WHERE order_id=$1",
+      [orderId, Number(user.id)]
     );
-    if (p.details.some(d=>d.orderId===o.orderId))
-      await tx.query("SELECT recalc_order_production_status($1)", [o.orderId]);
+    await tx.query("SELECT recalc_order_production_status($1)", [orderId]);
   }
   if (p.resetsCompletion)
     await tx.query(
@@ -599,4 +588,12 @@ async function applyReturnFacts(
     updated_by_user_id=EXCLUDED.updated_by_user_id,updated_at=now(),version=mdf_board_manual_moves.version+1`,
     [source.kind, source.id, p.targetColumn, Number(user.id)]
   );
+  // Order status is owned by status automation only (never by the board).
+  for (const orderId of changedOrderIds)
+    await evaluateProductionCompositionAutomation(tx, {
+      orderId,
+      actor: user,
+      requestId: automation.requestId,
+      sourceIdempotencyKey: `${automation.sourceIdempotencyKey}:order-${orderId}`,
+    });
 }
