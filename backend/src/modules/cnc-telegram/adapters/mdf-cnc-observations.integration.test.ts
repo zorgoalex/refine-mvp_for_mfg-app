@@ -162,7 +162,8 @@ describe.skipIf(!enabled)('MDF CNC observations, isolated PostgreSQL schema', ()
     return insertEvidencePin({sourceKind:'packet',sourceId:input.packetId,revision:'r1',...input});
   }
 
-  async function registerTarget(packetId: string, orderId: number, chatId: string, messageId: number) {
+  async function registerTarget(packetId: string, orderId: number, chatId: string, messageId: number,
+    options: { membershipDigestOverride?: string } = {}) {
     const itemId=randomUUID(),candidateId=randomUUID(),workerInstanceId=randomUUID(),leaseToken=randomUUID()+randomUUID();
     const accepted=(await fixture.client.query<{revision:string;sourceVersion:string}>(`SELECT h.accepted_revision_key revision,
       p.source_version::text "sourceVersion" FROM mdf_source_heads h JOIN cnc_telegram_packets p ON p.packet_id::text=h.source_id
@@ -172,7 +173,10 @@ describe.skipIf(!enabled)('MDF CNC observations, isolated PostgreSQL schema', ()
       FROM mdf_evidence_lines WHERE source_kind='packet' AND source_id=$1 AND revision_key=$2
         AND stage_code='membership' AND evidence_kind='derived' ORDER BY line_key,order_id,detail_id,rework`,
     [packetId,accepted.revision])).rows;
-    const memberDigest=createHash('sha256').update(JSON.stringify(members.map(row=>
+    // registerExplicitImportObservationTarget always seals the digest actually observed at
+    // registration; the only test-legitimate way to reproduce a mismatch (membership is
+    // invariant through every current writer) is to seed a deliberately wrong value here.
+    const memberDigest=options.membershipDigestOverride ?? createHash('sha256').update(JSON.stringify(members.map(row=>
       [row.lineKey,row.orderId,row.detailId,row.quantity,row.rework]))).digest('hex');
     const binding={messageId:String(messageId),role:'svg',sha256:createHash('sha256').update(`svg-${messageId}`).digest('hex')};
     await fixture.client.query('INSERT INTO cnc_telegram_import_candidates(candidate_id) VALUES($1::uuid)',[candidateId]);
@@ -187,6 +191,20 @@ describe.skipIf(!enabled)('MDF CNC observations, isolated PostgreSQL schema', ()
       VALUES($1::uuid,$2::uuid,$3::uuid,$4,$5::bigint,$6::jsonb,$7,$8,$7,$9::bigint,now()-interval '1 second')`,
     [packetId,itemId,candidateId,chatId,messageId,JSON.stringify([binding]),accepted.revision,memberDigest,accepted.sourceVersion]);
     return { sourceChatId:chatId,leaseToken,leaseGeneration:1,workerInstanceId } satisfies CncTelegramWorkerSessionLeaseContext;
+  }
+
+  /** Tampers the immutable registered digest directly (bypassing the target-guard trigger)
+   * to reproduce an in-flight mismatch for a claim that was issued against the correct
+   * digest. This is a test-only escape hatch, scoped to a single statement and always
+   * restored, because no current production writer can ever change this column post-claim. */
+  async function tamperRegisteredMembershipDigest(packetId: string, digestOverride: string): Promise<void> {
+    await fixture.client.query('SET session_replication_role=replica');
+    try {
+      await fixture.client.query(`UPDATE mdf_cnc_observation_targets SET registered_membership_digest=$2
+        WHERE packet_id=$1::uuid`,[packetId,digestOverride]);
+    } finally {
+      await fixture.client.query('SET session_replication_role=origin');
+    }
   }
 
   async function appendCorrectedRevision(packetId: string, orderId: number, detailId: number,
@@ -1053,4 +1071,57 @@ describe.skipIf(!enabled)('MDF CNC observations, isolated PostgreSQL schema', ()
       await fixture.client.query(`UPDATE mdf_engine_state SET mode='active'`);
     }
   },30000);
+
+  it('quarantines the target for membership_changed and issues no claim when the registered digest does not match', async () => {
+    const f=await acceptedPacket();
+    const wrongDigest='f'.repeat(64);
+    const lease=await registerTarget(f.packetId,f.orderId,`E2E-membership-changed-claim-${f.orderId}`,19000+f.orderId,
+      {membershipDigestOverride:wrongDigest});
+    const target=(await fixture.client.query<{digest:string}>(`SELECT registered_membership_digest digest
+      FROM mdf_cnc_observation_targets WHERE packet_id=$1`,[f.packetId])).rows[0];
+    expect(target.digest).toBe(wrongDigest);
+    const repository=new PgCncTelegramMdfObservationRepository(database);
+    const before=await fixture.snapshot(['mdf_cnc_observation_receipts','mdf_cnc_observation_job_authorities',
+      'mdf_recalculation_jobs','outbox_events']);
+    const claim=await claimFor(repository,lease);
+    expect(claim).toBeNull();
+    expect(await fixture.snapshot(Object.keys(before))).toEqual(before);
+    const after=(await fixture.client.query<{state:string;claimId:string|null}>(`SELECT work_state state,
+      claim_id::text "claimId" FROM mdf_cnc_observation_targets WHERE packet_id=$1`,[f.packetId])).rows[0];
+    expect(after).toMatchObject({state:'needs_reconciliation',claimId:null});
+    const audit=(await fixture.client.query<{metadata:Record<string,unknown>}>(`SELECT metadata_json metadata
+      FROM audit_log WHERE event='cnc.mdf_observation.needs_reconciliation' AND entity_id=$1`,[f.packetId])).rows;
+    expect(audit).toHaveLength(1);
+    expect(audit[0].metadata).toMatchObject({reason:'membership_changed'});
+    const related=(await fixture.client.query<{entityType:string;entityId:string}>(`SELECT entity_type "entityType",
+      entity_id "entityId" FROM audit_log_related_entity WHERE audit_id=(SELECT audit_id FROM audit_log
+      WHERE event='cnc.mdf_observation.needs_reconciliation' AND entity_id=$1)`,[f.packetId])).rows;
+    expect(related).toEqual([{entityType:'order',entityId:String(f.orderId)}]);
+  },30000);
+
+  it.each(['complete','fail'] as const)(
+    'rejects %s as stale once the target registered membership digest no longer matches the in-flight claim, with no side effects', async kind => {
+      const f=await acceptedPacket();
+      const lease=await registerTarget(f.packetId,f.orderId,`E2E-membership-changed-${kind}-${f.orderId}`,19500+f.orderId);
+      const repository=new PgCncTelegramMdfObservationRepository(database);
+      const claim=await claimFor(repository,lease);
+      expect(claim).not.toBeNull();
+      // Membership is invariant through every real writer; only a direct, guard-bypassing
+      // tamper of the immutable column can reproduce a mismatch surfacing after the claim.
+      await tamperRegisteredMembershipDigest(f.packetId,'e'.repeat(64));
+      const before=await fixture.snapshot(['cnc_telegram_packets','mdf_source_heads','mdf_evidence_lines',
+        'mdf_recalculation_jobs','mdf_cnc_observation_receipts','mdf_cnc_observation_job_authorities',
+        'mdf_cnc_return_fences','audit_log','audit_log_related_entity','outbox_events']);
+      if (kind==='complete') {
+        await expect(repository.complete({currentUser:actor,lease,report:reportFor(claim!,true),
+          requestId:`membership-changed-complete-${claim!.claimId}`}))
+          .rejects.toMatchObject({code:'MDF_CNC_OBSERVATION_STALE'});
+      } else {
+        await expect(repository.fail({currentUser:actor,lease,claimId:claim!.claimId,claimToken:claim!.claimToken,
+          claimGeneration:claim!.claimGeneration,reason:'FETCH_FAILED',
+          requestId:`membership-changed-fail-${claim!.claimId}`}))
+          .rejects.toMatchObject({code:'MDF_CNC_OBSERVATION_STALE'});
+      }
+      expect(await fixture.snapshot(Object.keys(before))).toEqual(before);
+    },30000);
 });

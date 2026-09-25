@@ -227,6 +227,48 @@ describe('MDF CNC authority executor', () => {
     expect(query.mock.calls.some(([sql]) => /UPDATE\s+(order_details|orders|mdf_)/i.test(String(sql)))).toBe(false);
   });
 
+  it('fails closed with MEMBERSHIP_BINDING_INVALID and performs no writes when the registered CNC digest no longer matches the sealed revision', async () => {
+    // Membership is invariant through every real writer; this reproduces the only way the
+    // stored registered_membership_digest and the live sealed revision can disagree: the
+    // durable target row is tampered directly (as covered by a database-level guard test),
+    // never through this job's own inputs.
+    const registered = registeredRows();
+    const tamperedDigest = 'f'.repeat(64);
+    expect(tamperedDigest).not.toBe(registered.membershipDigest);
+    const packet: MdfAcceptedSource = {
+      kind: 'packet', id: packetId, accepted: revision, received: revision, verified: true,
+      priorColumn: 'parsed', manualPlacementColumn: null, issues: [],
+      lines: [
+        { evidenceLineId: 'membership:0', orderId: 10, detailId: 20, quantity: 10,
+          stage: 'membership', evidence: 'derived', rework: false },
+        { evidenceLineId: 'cut:full', orderId: 10, detailId: 20, quantity: 10,
+          stage: 'cut', evidence: 'physical', rework: false },
+      ],
+    };
+    const { tx, query } = txFor([
+      [{ target_state: 'completed', accepted_revision_key: revision, last_observation_version: '9', raw_source_version: '7' }],
+      [],
+      [{ version: '6', correction_epoch: '3' }],
+      [{ registered_membership_digest: tamperedDigest }],
+      registered.rows,
+    ]);
+    const inputs = {
+      job: job(), authority: authority(),
+      heads: [{ kind: 'packet', id: packetId, accepted: revision, received: revision, epoch: '3' }],
+      sources: [packet],
+      details: [{ orderId: 10, detailId: 20, quantity: 10, rank: 0 }],
+      orderIds: [10], verifiedSourceKeys: new Set([`["packet","${packetId}"]`]),
+      suppressedOrderIds: new Set<number>(), enabled: true,
+    };
+    await expect(applyMdfCncAuthorityEffects(tx, inputs)).rejects.toMatchObject({
+      code: 'MDF_CNC_AUTHORITY_MEMBERSHIP_BINDING_INVALID',
+    });
+    expect(query).toHaveBeenCalledTimes(5);
+    expect(query.mock.calls.some(([sql]) => /UPDATE\s+(order_details|orders|mdf_)/i.test(String(sql)))).toBe(false);
+    expect(query.mock.calls.some(([sql]) => /INSERT\s+INTO\s+audit_log/i.test(String(sql)))).toBe(false);
+    expect(query.mock.calls.some(([sql]) => /INSERT\s+INTO\s+outbox_events/i.test(String(sql)))).toBe(false);
+  });
+
   it('requires complete packet physical proof separately for rework membership', async () => {
     const membership = [['membership:rework', '10', '20', '5', true]];
     const membershipDigest = createHash('sha256').update(JSON.stringify(membership)).digest('hex');

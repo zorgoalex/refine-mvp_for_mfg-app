@@ -53,6 +53,19 @@ the observer may acquire and persist CNC observation facts, but the accepted-job
 runner remains inactive and no production-status automation runs. An active or
 read-only claim with no eligible source also returns `{claim:null}`.
 
+Packet membership is invariant: every current packet writer (manual/explicit
+import creation, CNC cut receipts, corrections/returns) carries the accepted
+membership unchanged, so the registered membership digest of an observation
+target is never re-baselined. A mismatch can therefore only mean drift or
+tampering and fails closed: `claim` quarantines the target (`membership_changed`,
+needs_reconciliation), `complete`/`fail` answer `MDF_CNC_OBSERVATION_STALE`, and
+an accepted CNC-authority job ends `needs_attention` with
+`MDF_CNC_AUTHORITY_MEMBERSHIP_BINDING_INVALID` without status writes. After an
+explicit return, an old thumbs-up cannot restore the reverted fact: the return
+fence requires a fresh not-completed observation before a new completion is
+credited. CNC never changes a completed order's header status and never lowers
+a detail status.
+
 The server issues each claim with the accepted MDF head, correction epoch,
 unchanged raw packet `source_version`, independent observation version, and the
 exact bounded Telegram message IDs/roles/hashes. The worker refetches only that
