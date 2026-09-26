@@ -65,9 +65,14 @@ export class PgMdfBoardManualMoveRepository implements MdfBoardManualMoveReposit
   }
 
   async upsert(command: UpsertMdfBoardManualMoveCommand): Promise<MdfBoardManualMoveUpsertResponseDto> {
-    const mdf = { writer: 'mdf.manual.upsert',capability: command.cardKind === 'order' ? 'legacy-only' : 'queued' } as const;
+    const mdf = { writer: 'mdf.manual.upsert',capability: 'queued' } as const;
     return this.database.transaction(async (tx) => {
-      if ((await requireMdfCommandBoundary(tx,mdf)).queued) return executeMdfManualCommand(tx,command);
+      if ((await requireMdfCommandBoundary(tx,mdf)).queued) {
+        // The new MDF board has no order cards (only packets, BASIS sets and baths): explicit refusal, not 503.
+        if (command.cardKind === 'order') throw new ApiError(409, 'MDF_ORDER_CARD_NOT_SUPPORTED',
+          'В новом производственном учёте заказ не является карточкой МДФ-доски — переносите файлы, наборы и ванны');
+        return executeMdfManualCommand(tx,command);
+      }
       await setSessionUser(tx, command.currentUser.id);
       if (command.cardKind !== 'order') {
         await tx.query('SET LOCAL jit=off');
@@ -168,9 +173,14 @@ export class PgMdfBoardManualMoveRepository implements MdfBoardManualMoveReposit
   }
 
   async delete(command: DeleteMdfBoardManualMoveCommand): Promise<MdfBoardManualMoveDeleteResponseDto> {
-    const mdf = { writer: 'mdf.manual.clear',capability: command.cardKind === 'order' ? 'legacy-only' : 'queued' } as const;
+    const mdf = { writer: 'mdf.manual.clear',capability: 'queued' } as const;
     return this.database.transaction(async (tx) => {
-      if ((await requireMdfCommandBoundary(tx,mdf)).queued) return executeMdfManualCommand(tx,command);
+      if ((await requireMdfCommandBoundary(tx,mdf)).queued) {
+        // The new MDF board has no order cards (only packets, BASIS sets and baths): explicit refusal, not 503.
+        if (command.cardKind === 'order') throw new ApiError(409, 'MDF_ORDER_CARD_NOT_SUPPORTED',
+          'В новом производственном учёте заказ не является карточкой МДФ-доски — переносите файлы, наборы и ванны');
+        return executeMdfManualCommand(tx,command);
+      }
       await setSessionUser(tx, command.currentUser.id);
       const current = await loadMoveForUpdate(tx, command.cardKind, command.cardId);
       if (!current) {

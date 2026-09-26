@@ -10,6 +10,7 @@ import { executeMdfAcceptedJob } from '../application/mdf-accepted-job';
 import type { MdfOrderWriter } from '../application/mdf-command-boundary';
 import { openMdfOrderCommand } from './mdf-order-cascade';
 import { readMdfPublishedSnapshot } from './mdf-published-snapshot';
+import { PgMdfBoardManualMoveRepository } from '../../orders/adapters/pg-mdf-board-manual-move-repository';
 
 const enabled = process.env.MDF_ENGINE_INTEGRATION === '1';
 
@@ -560,5 +561,15 @@ describe.skipIf(!enabled)('MDF order-demand cascade, isolated PostgreSQL schema'
       }
       expect((await card(s)).issues).toEqual([]);
     });
+  });
+  it('refuses manual moves of order cards explicitly in the active engine (§5.4c)', async () => {
+    const order = await makeOrder([{ quantity: 1 }]);
+    const repository = new PgMdfBoardManualMoveRepository(db() as never);
+    await expect(repository.upsert({ currentUser: user, cardKind: 'order', cardId: String(order.orderId),
+      targetColumn: 'completed', idempotencyKey: `order-card-${order.orderId}`, requestId: 'order-card-upsert' } as never))
+      .rejects.toMatchObject({ statusCode: 409, code: 'MDF_ORDER_CARD_NOT_SUPPORTED' });
+    await expect(repository.delete({ currentUser: user, cardKind: 'order', cardId: String(order.orderId),
+      idempotencyKey: `order-card-clear-${order.orderId}`, requestId: 'order-card-clear' } as never))
+      .rejects.toMatchObject({ statusCode: 409, code: 'MDF_ORDER_CARD_NOT_SUPPORTED' });
   });
 });

@@ -256,6 +256,9 @@ positions or statuses this command changed, is classified:
 - a completed demand quarantine healed by this change (same demand as frozen again) → a refresh
   receipt (identical lines and demand) republishes the card.
 
+The new board has no order cards: in `active` a manual move or clear of an `order` card answers 409
+`MDF_ORDER_CARD_NOT_SUPPORTED` (packets, BASIS sets and baths are moved as before).
+
 Detail status changes alone never touch MDF sources here: card placement follows the members' live
 production ranks (read-time placement, see the published board reader).
 
