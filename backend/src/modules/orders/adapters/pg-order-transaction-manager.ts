@@ -6,6 +6,8 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { auditService } from '../../../common/audit/audit.service';
 import { computeDiff } from '../../../common/audit/audit-diff';
 import { PgOrderReadRepository } from './pg-order-read-repository';
+import type { MdfOrderWriter } from '../../mdf-board/application/mdf-command-boundary';
+import { openMdfOrderCommand, type MdfOrderCommandHandle } from '../../mdf-board/adapters/mdf-order-cascade';
 import { prepareOrderCatalogLines, persistOrderCatalogLines, recordOrderCatalogLinesChange } from './pg-order-catalog-lines';
 import type { OrderCatalogPlan } from '../domain/order-catalog-lines';
 import type {
@@ -185,9 +187,11 @@ export class PgOrderTransactionManager implements OrderTransactionManagerPort {
     private readonly sheetOrdersReads: boolean = true,
   ) {}
 
-  runInTransaction<T>(handler: (unitOfWork: OrderWriteUnitOfWork) => Promise<T>): Promise<T> {
+  runInTransaction<T>(handler: (unitOfWork: OrderWriteUnitOfWork) => Promise<T>,
+    options: { mdfWriter?: MdfOrderWriter } = {}): Promise<T> {
     return this.database.transaction((tx) =>
       handler(new PgOrderWriteUnitOfWork(tx, this.database, this.sheetOrdersReads)),
+    options.mdfWriter ? { mdf: { writer: options.mdfWriter, capability: 'order-demand' } } : {},
     );
   }
 
@@ -219,6 +223,10 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
     private readonly database: DatabaseService,
     private readonly sheetOrdersReads: boolean = true,
   ) {}
+
+  openMdfOrderCommand(writer: MdfOrderWriter): Promise<MdfOrderCommandHandle> {
+    return openMdfOrderCommand(this.tx, writer);
+  }
 
   getTransactionClient(): TransactionClient {
     return this.tx;

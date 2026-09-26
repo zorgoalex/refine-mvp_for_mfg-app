@@ -196,6 +196,10 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
       contextValid: contextIssues?.length===0 && !lineageInvalid && !lineageRequiredButMissing,
       lines: lines.filter(l => key(l)===key(trigger)),allocations,
       ...(nextLineage ? { lineage: previousLineage ? { previous: previousLineage,next: nextLineage } : { next: nextLineage } } : {}) });
+    if (!advanced && (await tx.query(`SELECT 1 FROM mdf_order_cascade_intents WHERE job_id=$1`,[job.job_id])).rows.length) {
+      // An order-demand cascade is accepted by this job or not at all; never publish it as pending.
+      throw new MdfNeedsAttention('MDF_ORDER_CASCADE_INVALID');
+    }
     if (advanced) {
       allocations=advanced;
       // Compatible advancement changes the accepted head inside this

@@ -1,3 +1,5 @@
+import type { MdfOrderWriter } from '../../mdf-board/application/mdf-command-boundary';
+import type { MdfOrderCommandHandle } from '../../mdf-board/adapters/mdf-order-cascade';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName } from '../../../permissions/permissions';
 import type { TransactionClient } from '../../../database/database.types';
@@ -322,6 +324,8 @@ export interface OrderRestoreOutboxInput extends OrderRestoreAuditInput {
 
 export interface OrderWriteUnitOfWork {
   setSessionUser(userId: string): Promise<void>;
+  /** Optional in test doubles; the PostgreSQL unit of work always implements it. */
+  openMdfOrderCommand?(writer: MdfOrderWriter): Promise<MdfOrderCommandHandle>;
   getTransactionClient(): TransactionClient;
   prepareCatalogLines(orderId: number | null, input: unknown, deleted: unknown, user: CurrentUser): Promise<OrderCatalogPlan>;
   persistCatalogLines(orderId: number, plan: OrderCatalogPlan, user: CurrentUser, requestId: string): Promise<void>;
@@ -474,7 +478,10 @@ export interface OrderWriteUnitOfWork {
 }
 
 export interface OrderTransactionManagerPort {
-  runInTransaction<T>(handler: (unitOfWork: OrderWriteUnitOfWork) => Promise<T>): Promise<T>;
+  /** `mdfWriter` enters the MDF command boundary first (§5.4a); the command then calls
+   * `unitOfWork.openMdfOrderCommand` to capture/finish its MDF consequence. */
+  runInTransaction<T>(handler: (unitOfWork: OrderWriteUnitOfWork) => Promise<T>,
+    options?: { mdfWriter?: MdfOrderWriter }): Promise<T>;
   reserveOrderRestoreIdempotency(
     command: RestoreOrderCommand,
   ): Promise<OrderRestoreIdempotencyResult>;

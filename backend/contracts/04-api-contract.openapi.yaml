@@ -3907,7 +3907,7 @@ paths:
         '404':
           $ref: '#/components/responses/OrderNotFound'
         '409':
-          $ref: '#/components/responses/OrderVersionConflict'
+          $ref: '#/components/responses/OrderMdfConflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -3948,7 +3948,7 @@ paths:
         '404':
           $ref: '#/components/responses/OrderNotFound'
         '409':
-          description: Версия заказа устарела или idempotency key уже используется другим запросом
+          description: Версия заказа устарела, idempotency key уже используется другим запросом, или удаление затрагивает учтённое производство МДФ (коды MDF_ORDER_*, см. OrderMdfConflict)
           content:
             application/json:
               schema:
@@ -4045,6 +4045,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/OrderNotFound' }
+        '409': { $ref: '#/components/responses/OrderMdfConflict' }
         '503': { $ref: '#/components/responses/FeatureDisabled' }
         '500': { $ref: '#/components/responses/InternalError' }
 
@@ -4179,7 +4180,7 @@ paths:
         '404':
           $ref: '#/components/responses/OrderNotFound'
         '409':
-          description: ORDER_VERSION_CONFLICT, ORDER_NOT_DELETED, ORDER_NAME_DUPLICATE или ORDER_RESTORE_CONFLICT
+          description: ORDER_VERSION_CONFLICT, ORDER_NOT_DELETED, ORDER_NAME_DUPLICATE, ORDER_RESTORE_CONFLICT или MDF_ORDER_* (см. OrderMdfConflict)
           content:
             application/json:
               schema:
@@ -4319,7 +4320,7 @@ paths:
         '404':
           $ref: '#/components/responses/OrderNotFound'
         '409':
-          $ref: '#/components/responses/OrderVersionConflict'
+          $ref: '#/components/responses/OrderMdfConflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '503':
@@ -16619,6 +16620,33 @@ components:
                   details:
                     currentVersion: 8
                     clientVersion: 7
+                  requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+    OrderMdfConflict:
+      description: >-
+        Конфликт версии заказа (ORDER_VERSION_CONFLICT) или изменение затрагивает учтённое производство
+        МДФ-доски: MDF_ORDER_SOURCE_PENDING, MDF_ORDER_SOURCE_ATTENTION, MDF_ORDER_PHYSICAL_CONFLICT,
+        MDF_ORDER_ASSIGNMENT_CONFLICT, MDF_ORDER_DEMAND_EMPTY, MDF_ORDER_LOCK_CONTENTION (повторить),
+        MDF_ORDER_SCOPE_LIMIT, MDF_ENGINE_READ_ONLY. Команда целиком откатывается. details.cards —
+        карточки, отфильтрованные по области просмотра заказов (hiddenOwners без id/названий/количеств).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'
+          examples:
+            mdfPhysicalConflict:
+              value:
+                error:
+                  code: MDF_ORDER_PHYSICAL_CONFLICT
+                  message: Изменение затрагивает уже распиленные или зарезервированные позиции МДФ-доски — сначала оформите возврат
+                  details:
+                    cards:
+                      - reason: MDF_ORDER_PHYSICAL_CONFLICT
+                        sourceKind: bazisCutSet
+                        sourceId: '41'
+                        displayName: Набор 41
+                        orderIds: [9001]
+                        positions: [{ orderId: 9001, detailId: 900101, before: 10, after: 8 }]
+                        hiddenOwners: false
                   requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
     IdempotencyConflict:
       description: Конфликт idempotency key

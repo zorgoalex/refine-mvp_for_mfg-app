@@ -12,6 +12,7 @@ import { formatDate, formatDateTime } from '../../utils/dateFormat';
 import { formatNumber } from '../../utils/numberFormat';
 import { can } from '../../utils/permissions';
 import { makeRestoreHandler } from './orderRestoreAction';
+import { showMdfOrderConflictModal } from '../../utils/mdfOrderConflictModal';
 
 const { Search } = Input;
 const { Title } = Typography;
@@ -163,6 +164,9 @@ export const OrderTrash: React.FC = () => {
             },
             onStale: () => {
               void loadOrders();
+            },
+            onMdfConflict: (error) => {
+              showMdfOrderConflictModal(error);
             },
           });
 

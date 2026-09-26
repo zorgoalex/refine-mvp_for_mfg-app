@@ -231,6 +231,41 @@ its received head and its publication has no issues. Existing v1 physical
 evidence is never promoted, and the engine mode and runtime flags are unchanged
 by these commands.
 
+## Order edits and accounted production
+
+Order update/import, HDF recalculation, delete, restore and detail transfer enter the MDF command
+boundary with capability `order-demand` (writers `orders.update`, `orders.recalculate_hdf`,
+`orders.delete`, `orders.restore`, `orders.transfer_details`). In `legacy`/`shadow` nothing else
+happens. In `active`, the command's own orders are compared before and after its writes: when their
+MDF demand did not change, nothing else happens (no discovery, lock or card state can block it). Otherwise
+every source whose received revision has frozen demand or evidence on the touched orders, and whose own
+positions or statuses this command changed, is classified:
+
+- pending acceptance or a pending job → 409 `MDF_ORDER_SOURCE_PENDING`;
+- failed job, missing publication, an own issue other than `MDF_DEMAND_CHANGED` /
+  `MEMBER_OUTSIDE_LIVE_MDF_DEMAND`, or any published issue besides those and their quarantine
+  consequences (`LINEAGE_INVALID`, `ACCEPTANCE_PENDING`) → 409 `MDF_ORDER_SOURCE_ATTENTION`;
+- a position with membership/evidence (MDF-present) disappears or loses quantity → 409
+  `MDF_ORDER_PHYSICAL_CONFLICT` (cut/lamination/reservations) or `MDF_ORDER_ASSIGNMENT_CONFLICT`;
+  no remaining demand → `MDF_ORDER_DEMAND_EMPTY`;
+- only demand-only positions changed, or MDF-present positions grew → a cascade receipt carries the
+  predecessor lines verbatim with the new frozen demand. It is received but never accepted by the
+  command; migration 188 `mdf_order_cascade_intents` authenticates it and only the MDF worker accepts it
+  (`mdf_board.order_cascade_accepted`), replacing bath allocations one-for-one. Added quantity inherits
+  no completion; rules are never pinned;
+- a completed demand quarantine healed by this change (same demand as frozen again) → a refresh
+  receipt (identical lines and demand) republishes the card.
+
+Detail status changes alone never touch MDF sources here: card placement follows the members' live
+production ranks (read-time placement, see the published board reader).
+
+Every 409 rolls back the whole order command and lists the affected cards filtered by the actor's
+`orders.view` permission and scope (hidden owners give no ids, names or quantities). Owners of affected sources that
+sort below the command's own orders are locked with `NOWAIT`; contention answers retryable 409
+`MDF_ORDER_LOCK_CONTENTION`. In `read_only`, edits without MDF impact pass and any receipt-requiring
+change answers `MDF_ENGINE_READ_ONLY`. A confirmed correction of MDF-present positions from an order is
+not connected yet; creating an order never touches MDF sources.
+
 ## Storage and bounded lineage consumers
 
 ### Physical origin contract

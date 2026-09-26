@@ -9,6 +9,7 @@ import { executeMdfAcceptedJob } from '../application/mdf-accepted-job';
 import { PgCncTelegramMdfObservationRepository } from '../../cnc-telegram/adapters/pg-cnc-telegram-mdf-observation-repository';
 import type { CncTelegramWorkerSessionLeaseContext } from '../../cnc-telegram/application/cnc-telegram-worker-session.types';
 import { createMdfCorrectionPgFixture } from './mdf-correction-test-fixture.integration';
+import { openMdfOrderCommand } from './mdf-order-cascade';
 
 const enabled = process.env.MDF_ENGINE_INTEGRATION === '1';
 const actor: CurrentUser = { id: '1', username: 'E2E CNC authority', role: 'admin', roleId: 1,
@@ -49,7 +50,7 @@ describe.skipIf(!enabled)('MDF CNC authority accepted-job executor, isolated Pos
     for (const migration of ['155_order_production_composition.sql','165_mdf_engine_foundation.sql',
       '166_mdf_engine_fences.sql','174_mdf_execution_context.sql','175_mdf_command_placement.sql',
       '178_mdf_correction_receipts.sql','179_mdf_active_return.sql','180_mdf_cnc_observations.sql',
-      '181_cnc_manual_send_observation.sql','182_mdf_physical_lineage.sql','185_mdf_bazis_composition.sql']) {
+      '181_cnc_manual_send_observation.sql','182_mdf_physical_lineage.sql','185_mdf_bazis_composition.sql', '188_mdf_order_cascade_intents.sql']) {
       await fixture.applyMigrations([migration]);
     }
     await fixture.assertLocalRelations(['orders','order_details','production_statuses','mdf_cnc_observation_targets',
@@ -483,5 +484,40 @@ describe.skipIf(!enabled)('MDF CNC authority accepted-job executor, isolated Pos
     expect((await fixture.client.query('SELECT status,error_code FROM mdf_recalculation_jobs WHERE job_id=$1',[receipt.jobId])).rows[0])
       .toEqual({status:'needs_attention',error_code:'MDF_CNC_AUTHORITY_MARKER_MISSING'});
     expect((await fixture.client.query(`SELECT production_status_id FROM order_details WHERE detail_id=$1`,[f.detailIds[0]])).rows[0]).toEqual(before);
+  });
+  it('carries an accepted CNC packet through a demand-only order cascade accepted by the worker (§5.4a)', async () => {
+    const packet = await acceptedPacket([4], { detailQuantities: [4, 1] });
+    const packetHead = async () => (await fixture.client.query<{ received: string; accepted: string }>(`SELECT
+      received_revision_key received,accepted_revision_key accepted FROM mdf_source_heads
+      WHERE source_kind='packet' AND source_id=$1`, [packet.packetId])).rows[0];
+    const before = await packetHead();
+    expect(before.accepted).toBe(before.received);
+    await database!.transaction(async tx => {
+      await tx.query('SELECT order_id FROM orders WHERE order_id=$1 FOR UPDATE', [packet.orderId]);
+      const mdf = await openMdfOrderCommand(tx, 'orders.update');
+      await mdf.captureBefore([packet.orderId]);
+      await tx.query('UPDATE order_details SET quantity=3 WHERE detail_id=$1', [packet.detailIds[1]]);
+      await mdf.finish({ user: { id: '1', username: 'E2E CNC authority', role: 'admin', roleId: 1,
+        permissions: getPermissionsForRole('admin') }, requestId: 'e2e-packet-cascade', commandKey: 'e2e-packet-cascade',
+        orderIds: [packet.orderId] });
+    }, { mdf: { writer: 'orders.update', capability: 'order-demand' } });
+    const queued = await packetHead();
+    expect(queued.received).toMatch(/^order-cascade:/);
+    expect(queued.accepted).toBe(before.accepted);
+    const job = (await fixture.client.query<{ job_id: string }>(`SELECT job_id FROM mdf_recalculation_jobs
+      WHERE source_kind='packet' AND source_id=$1 AND revision_key=$2`, [packet.packetId, queued.received])).rows[0].job_id;
+    let result: Awaited<ReturnType<typeof runner.processOne>> | undefined;
+    for (let attempt = 0; attempt < 20 && result?.jobId !== job; attempt += 1) {
+      result = await runner.processOne();
+      if (result.status === 'idle') break;
+    }
+    expect(result).toMatchObject({ status: 'done', jobId: job });
+    expect((await packetHead()).accepted).toBe(queued.received);
+    const carried = (await fixture.client.query<{ n: number }>(`SELECT count(*)::int n FROM (
+      SELECT line_key,order_id,detail_id,quantity,stage_code,evidence_kind,rework FROM mdf_evidence_lines
+        WHERE source_kind='packet' AND source_id=$1 AND revision_key=$2
+      EXCEPT SELECT line_key,order_id,detail_id,quantity,stage_code,evidence_kind,rework FROM mdf_evidence_lines
+        WHERE source_kind='packet' AND source_id=$1 AND revision_key=$3) d`, [packet.packetId, queued.received, before.received])).rows[0].n;
+    expect(carried).toBe(0);
   });
 });

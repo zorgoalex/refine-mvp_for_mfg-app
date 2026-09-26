@@ -92,6 +92,7 @@ import type { DetailCardLookups } from './mobile/detailCardModel';
 import { makeOrderDeleteHandler } from './orderDeleteAction';
 import { canDeleteOrderForUser } from './orderDeleteVisibility';
 import { makeRestoreHandler } from './orderRestoreAction';
+import { showMdfOrderConflictModal } from '../../utils/mdfOrderConflictModal';
 import { DeletedOrderCard } from './DeletedOrderCard';
 import { buildDeletedOrderCardModel } from './deletedOrderCard';
 import type { OrderDto } from "../../api/types/orderApi.types";
@@ -2475,6 +2476,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             onOk: () => window.location.reload(),
           }),
         onError: (m) => message.error(m),
+        onMdfConflict: (error) => {
+          showMdfOrderConflictModal(error);
+        },
       }),
     });
   }, [
@@ -2852,6 +2856,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         },
         onStale: () => {
           void queryResult.refetch();
+        },
+        onMdfConflict: (error) => {
+          showMdfOrderConflictModal(error);
         },
       })
     : null;

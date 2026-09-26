@@ -57,7 +57,7 @@ describe.skipIf(!enabled)('MDF BASIS inherited assignment-state digest, isolated
     await fixture.applyMigrations([
       '165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql',
       '174_mdf_execution_context.sql', '175_mdf_command_placement.sql',
-      '178_mdf_correction_receipts.sql', '182_mdf_physical_lineage.sql',
+      '178_mdf_correction_receipts.sql', '182_mdf_physical_lineage.sql', '188_mdf_order_cascade_intents.sql',
     ]);
     await fixture.client.query(`CREATE TABLE bazis_cut_sets(
         bazis_cut_set_id BIGINT PRIMARY KEY, name TEXT, version BIGINT NOT NULL DEFAULT 0,

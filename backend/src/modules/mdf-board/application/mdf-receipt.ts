@@ -49,6 +49,15 @@ export interface MdfBazisCompositionReceiptInput extends MdfLineageReceiptInput 
     newRowIds?: readonly string[];
   };
 }
+/** Order-demand cascade (§5.4a): predecessor lines verbatim + new frozen demand. Internal only;
+ * never accepted at receipt time — the MDF worker alone may advance the accepted head. */
+export interface MdfOrderCascade {
+  intentId: string; jobId: string; predecessorRevisionKey: string;
+  previousDemandDigest: string; nextDemandDigest: string; orderIds: readonly number[]; commandKey: string;
+}
+export type MdfOrderCascadeReceiptInput = Omit<MdfReceiptInput, 'correction'> & {
+  lineage?: MdfPhysicalLineageManifest; cascade: MdfOrderCascade;
+};
 export interface MdfReceiptResult extends MdfReceiptFence {
   replay: boolean; accepted: boolean; jobId: string;
 }
@@ -117,6 +126,38 @@ export async function recordMdfLineageReceipt(tx: DatabaseClient,
   return persistMdfReceipt(tx,{ ...receiptInput, ...(correction ? { correction } : {}) },lineage);
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Order-demand cascade: carry-only, rules-free, manual origin (the order command's actor).
+ * Leaves the new revision received-but-unaccepted; see `advanceCompatibleMdfRevision`. */
+export async function recordMdfOrderCascadeReceipt(tx: DatabaseClient,
+  input: MdfOrderCascadeReceiptInput): Promise<MdfReceiptResult> {
+  const c = input.cascade;
+  if (('correction' in input) || !['packet','bazisCutSet','bath'].includes(input.sourceKind)
+    || input.origin!=='manual' || input.accept!==true || input.rules.length!==0
+    || !input.executionContext || !input.executionContext.compositionComplete
+    || !input.expectedFence || !c || !UUID_RE.test(c.intentId) || !UUID_RE.test(c.jobId)
+    || typeof c.predecessorRevisionKey!=='string' || !c.predecessorRevisionKey.trim()
+    || !/^[a-f0-9]{64}$/.test(c.previousDemandDigest) || !/^[a-f0-9]{64}$/.test(c.nextDemandDigest)
+    || c.previousDemandDigest===c.nextDemandDigest
+    || mdfDemandDigest(input.executionContext.demand)!==c.nextDemandDigest
+    || !Array.isArray(c.orderIds) || !c.orderIds.length || c.orderIds.length>100
+    || c.orderIds.some((id,i,all) => !Number.isSafeInteger(id)||id<=0||(i>0&&id<=all[i-1]))
+    || typeof c.commandKey!=='string' || !c.commandKey.trim() || c.commandKey.length>400) invalid();
+  if (input.lineage && (input.lineage.operation!=='carry' || input.lineage.actions.some(action => action.action!=='carry')
+    || input.lineage.droppedPredecessorEvidenceLineIds.length)) throw new MdfReceiptError('MDF_LINEAGE_INVALID');
+  const { lineage: manifest, cascade, ...receiptInput } = input;
+  let lineage: MdfPhysicalLineageManifest | undefined;
+  if (manifest) {
+    try {
+      lineage=snapshotMdfPhysicalLineage(manifest,input.lines);
+    } catch (error) {
+      if (error instanceof Error && error.message==='MDF_LINEAGE_INVALID') throw new MdfReceiptError('MDF_LINEAGE_INVALID');
+      throw error;
+    }
+  }
+  return persistMdfReceipt(tx,receiptInput,lineage,undefined,{ ...cascade,orderIds:[...cascade.orderIds] });
+}
+
 /** Composition alone may create a new sealed assignment authority. It always
  * leaves the new revision received-but-unaccepted for the normal worker. */
 export async function recordMdfBazisCompositionReceipt(tx: DatabaseClient,
@@ -154,7 +195,8 @@ export async function recordMdfBazisCompositionReceipt(tx: DatabaseClient,
 
 async function persistMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput,
   requestedLineage?: MdfPhysicalLineageManifest,
-  composition?: MdfBazisCompositionReceiptInput['composition']): Promise<MdfReceiptResult> {
+  composition?: MdfBazisCompositionReceiptInput['composition'],
+  cascade?: MdfOrderCascade): Promise<MdfReceiptResult> {
   // Capture before the first await. Neither caller mutation nor retry can replace
   // a receipt's demand, actor or rule versions halfway through its transaction.
   input = { ...input, expectedFence: input.expectedFence ? { ...input.expectedFence } : null,
@@ -222,6 +264,9 @@ async function persistMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput,
     membershipDigest:composition.membershipDigest,intentionalEmpty:composition.intentionalEmpty,
     ownerIds:composition.ownerIds,allocationSnapshotDigest:composition.allocationSnapshotDigest,
     previewDigest:composition.previewDigest,commandKey:composition.commandKey });
+  if (cascade) digestInput.push({ orderCascadeVersion:1,intentId:cascade.intentId,jobId:cascade.jobId,
+    predecessorRevisionKey:cascade.predecessorRevisionKey,previousDemandDigest:cascade.previousDemandDigest,
+    nextDemandDigest:cascade.nextDemandDigest,orderIds:cascade.orderIds,commandKey:cascade.commandKey });
   // Inherited assignment identity is only known after the source lock and revision state are
   // loaded, so hash only after replay reconstruction or initial-write authority validation
   // appended it. Unmarked v1/v2 and composition-root bytes are unchanged.
@@ -296,6 +341,8 @@ async function persistMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput,
   if (composition && (!head?.accepted_revision_key || head.accepted_revision_key!==head.received_revision_key)) {
     throw new MdfReceiptError('MDF_SOURCE_STALE');
   }
+  if (cascade && (!head?.accepted_revision_key || head.accepted_revision_key!==head.received_revision_key
+    || head.accepted_revision_key!==cascade.predecessorRevisionKey)) throw new MdfReceiptError('MDF_SOURCE_STALE');
   if (lineage && head && head.accepted_revision_key !== head.received_revision_key) {
     throw new MdfReceiptError('MDF_SOURCE_STALE');
   }
@@ -353,7 +400,7 @@ async function persistMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput,
     WHERE a.state<>'released' AND (e.source_kind=$1 AND e.source_id=$2 OR ($1='bath' AND a.bath_id=$2))
   ) AS allocated`, source)).rows[0].allocated : false;
   if (isCorrection && correctionAllocated) invalid();
-  const accept = input.accept && !allocated && !composition;
+  const accept = input.accept && !allocated && !composition && !cascade;
   await tx.query(`INSERT INTO mdf_evidence_revisions
     (source_kind,source_id,revision_key,payload_digest,origin,actor_user_id,request_id,cause_key)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, [...source, input.revisionKey, digest, input.origin,
@@ -418,6 +465,15 @@ async function persistMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput,
       inheritedAssignment.assignmentStateId,inheritedAssignment.rootIntentId,head.accepted_revision_key,
       inheritedAssignment.membershipDigest,inheritedAssignment.intentionalEmpty]);
   }
+  if (cascade) {
+    await tx.query(`INSERT INTO mdf_order_cascade_intents
+      (intent_id,job_id,source_kind,source_id,revision_key,predecessor_revision_key,previous_demand_digest,
+        next_demand_digest,order_ids,actor_user_id,request_id,command_key)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::bigint[],$10,$11,$12)`,
+    [cascade.intentId,cascade.jobId,...source,input.revisionKey,cascade.predecessorRevisionKey,
+      cascade.previousDemandDigest,cascade.nextDemandDigest,[...cascade.orderIds],input.actorUserId,
+      input.requestId,cascade.commandKey]);
+  }
   await tx.query(`INSERT INTO mdf_revision_seals(source_kind,source_id,revision_key) VALUES($1,$2,$3)`, [...source, input.revisionKey]);
   const saved = (await tx.query<HeadRow>(head
     ? `UPDATE mdf_source_heads SET received_revision_key=$3,
@@ -430,13 +486,14 @@ async function persistMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput,
   head ? [...source, input.revisionKey, accept, isCorrection] : [...source, input.revisionKey, accept])).rows[0];
   const eventKey = `mdf-receipt:${createHash('sha256').update(JSON.stringify([...source, input.revisionKey])).digest('hex')}`;
   const queuedStatus = accept || context ? 'pending' : 'needs_attention';
-  const queuedError = accept || composition ? null : 'MDF_ACCEPTANCE_REQUIRED';
-  const job = (await tx.query<{ job_id: string }>(composition ? `INSERT INTO mdf_recalculation_jobs
+  const queuedError = accept || composition || cascade ? null : 'MDF_ACCEPTANCE_REQUIRED';
+  const fixedJobId = composition?.jobId ?? cascade?.jobId;
+  const job = (await tx.query<{ job_id: string }>(fixedJobId ? `INSERT INTO mdf_recalculation_jobs
     (job_id,event_key,source_kind,source_id,revision_key,correction_epoch,actor_user_id,request_id,status,error_code,effect_policy)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING job_id` : `INSERT INTO mdf_recalculation_jobs
     (event_key,source_kind,source_id,revision_key,correction_epoch,actor_user_id,request_id,status,error_code,effect_policy)
-    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING job_id`, composition
-    ? [composition.jobId,eventKey,...source,input.revisionKey,saved.correction_epoch,input.actorUserId,input.requestId,
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING job_id`, fixedJobId
+    ? [fixedJobId,eventKey,...source,input.revisionKey,saved.correction_epoch,input.actorUserId,input.requestId,
       queuedStatus,queuedError,effectPolicy]
     : [eventKey,...source,input.revisionKey,saved.correction_epoch,input.actorUserId,input.requestId,
       queuedStatus,queuedError,effectPolicy])).rows[0];

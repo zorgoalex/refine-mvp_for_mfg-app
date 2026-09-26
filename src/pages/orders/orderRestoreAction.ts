@@ -1,5 +1,6 @@
 import { isApiError } from '../../api/apiError';
 import { createOrderRestoreIdempotencyKey } from '../../api/ordersApi';
+import { isMdfOrderConflictError } from '../../utils/mdfOrderConflict';
 
 export interface RestoreDeps {
   restoreFn: (req: {
@@ -15,6 +16,7 @@ export interface RestoreDeps {
   };
   onRestored: () => void;
   onStale: () => void;
+  onMdfConflict?: (error: unknown) => void;
 }
 
 export function makeRestoreHandler(deps: RestoreDeps): (version: number) => Promise<void> {
@@ -48,10 +50,18 @@ export function makeRestoreHandler(deps: RestoreDeps): (version: number) => Prom
           deps.notify.success(`Заказ восстановлен как ${suggested}`);
           deps.onRestored();
         } catch (retryErr) {
+          if (deps.onMdfConflict && isMdfOrderConflictError(retryErr)) {
+            deps.onMdfConflict(retryErr);
+            return;
+          }
           deps.notify.error(
             retryErr instanceof Error ? retryErr.message : 'Не удалось восстановить заказ',
           );
         }
+        return;
+      }
+      if (deps.onMdfConflict && isMdfOrderConflictError(err)) {
+        deps.onMdfConflict(err);
         return;
       }
       if (isApiError(err, 'ORDER_NOT_DELETED')) {

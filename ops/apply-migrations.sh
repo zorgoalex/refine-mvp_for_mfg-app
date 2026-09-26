@@ -2319,6 +2319,10 @@ probe_file() {
       "SELECT count(*)=1 FROM pg_constraint WHERE conrelid='public.mdf_bazis_composition_new_rows'::regclass AND contype='f' AND convalidated AND confdeltype='r' AND confrelid=to_regclass('public.mdf_bazis_composition_intents');" \
       "SELECT count(*)=4 FROM (VALUES ('bazis_cut_set_details','mdf_bazis_raw_row_creation_log','mdf_log_bazis_raw_row_creation()',5),('mdf_bazis_raw_row_creations','mdf_bazis_raw_row_creation_immutable','mdf_reject_bazis_refill_log_change()',27),('mdf_bazis_composition_new_rows','mdf_bazis_composition_new_row_insert_guard','mdf_guard_bazis_composition_new_row_insert()',7),('mdf_bazis_composition_new_rows','mdf_bazis_composition_new_row_immutable','mdf_reject_bazis_refill_log_change()',27)) expected(tbl,trg,fun,kind) JOIN pg_trigger t ON t.tgrelid=to_regclass('public.'||tbl) AND t.tgname=trg AND t.tgfoid=to_regprocedure('public.'||fun) AND t.tgtype=kind AND t.tgenabled='O' AND NOT t.tgisinternal;" \
       "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=ANY(ARRAY[to_regclass('public.mdf_bazis_raw_row_creations'),to_regclass('public.mdf_bazis_composition_new_rows')]) AND NOT convalidated);" ;;
+    188_mdf_order_cascade_intents*) probe_all \
+      "$(q_tbl mdf_order_cascade_intents)" \
+      "SELECT to_regprocedure('public.mdf_guard_order_cascade_intent_insert()') IS NOT NULL AND to_regprocedure('public.mdf_validate_order_cascade_intent_commit()') IS NOT NULL AND to_regprocedure('public.mdf_reject_order_cascade_intent_change()') IS NOT NULL;" \
+      "SELECT count(*)=3 FROM (VALUES ('mdf_order_cascade_intent_insert_guard','mdf_guard_order_cascade_intent_insert()'),('mdf_order_cascade_intent_immutable','mdf_reject_order_cascade_intent_change()'),('mdf_order_cascade_intent_commit_guard','mdf_validate_order_cascade_intent_commit()')) expected(trg,fun) JOIN pg_trigger t ON t.tgrelid=to_regclass('public.mdf_order_cascade_intents') AND t.tgname=trg AND t.tgfoid=to_regprocedure('public.'||fun) AND t.tgenabled='O' AND NOT t.tgisinternal;" ;;
     186_bitrix24_product_import*) probe_all \
       "$(q_tbl bitrix24_product_mapping)" \
       "SELECT count(*)=8 FROM information_schema.columns WHERE table_schema='public' AND table_name='bitrix24_product_mapping';" \
@@ -2422,6 +2426,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     187_mdf_bazis_refill_rows*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    188_mdf_order_cascade_intents*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     186_bitrix24_product_import*)

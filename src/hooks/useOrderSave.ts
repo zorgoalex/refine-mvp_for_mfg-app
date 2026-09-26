@@ -9,6 +9,7 @@ import { ordersApi } from '../api/ordersApi';
 import { OrderFormValues, type OrderDetail } from '../types/orders';
 import { peekOrderDraftStore, orderDraftStoreExists } from '../stores/orderFormStore';
 import { isApiError } from '../api/apiError';
+import { showMdfOrderConflictModal } from '../utils/mdfOrderConflictModal';
 import { mapOrderFormToSaveOrderDto } from '../api/mappers/orderMapper';
 import type { CreateOrderFromDraftNode } from '../api/types/bazisApi.types';
 import { featureFlags } from '../config/featureFlags';
@@ -967,6 +968,15 @@ export const useOrderSave = (
 
       if (bazisDraftSaveContext && !isApiError(err, 'BAZIS_IDEMPOTENCY_IN_PROGRESS')) {
         bazisDraftSaveContext.regenerateIdempotencyKey();
+      }
+
+      // ========== HANDLE MDF BOARD CONFLICT ==========
+      // Backend rejects the write when it touches production already accounted
+      // on the MDF board. Show the per-card breakdown and keep the form as-is
+      // (no reset) so the user can retry after resolving the board side.
+      if (showMdfOrderConflictModal(err)) {
+        setIsSaving(false);
+        return null;
       }
 
       // Backend order validators return precise field errors in details.errors.

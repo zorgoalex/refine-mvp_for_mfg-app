@@ -27,7 +27,7 @@ describe.skipIf(!enabled)('active MDF correction material scope, isolated Postgr
       ALTER TABLE ${fixture.schema}.cnc_telegram_packets ADD PRIMARY KEY(packet_id)`);
     await fixture.applyMigrations(['165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql',
       '174_mdf_execution_context.sql', '175_mdf_command_placement.sql', '178_mdf_correction_receipts.sql',
-      '179_mdf_active_return.sql', '182_mdf_physical_lineage.sql']);
+      '179_mdf_active_return.sql', '182_mdf_physical_lineage.sql', '188_mdf_order_cascade_intents.sql']);
     database = fixture.createDatabaseService();
     await fixture.client.query(`
       INSERT INTO users(user_id,username,role_id,is_active) VALUES(1,'E2E MDF material scope',1,true);

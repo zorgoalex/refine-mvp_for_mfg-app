@@ -5,8 +5,13 @@ export type MdfEngineMode = 'legacy' | 'shadow' | 'active' | 'read_only';
 export interface MdfCommandWriter {
   /** Server-defined owner, never an HTTP parameter or inferred SQL classification. */
   writer: string;
-  capability: 'legacy-only' | 'queued' | 'cnc-receipt' | 'cut-settlement';
+  capability: 'legacy-only' | 'queued' | 'cnc-receipt' | 'cut-settlement' | 'order-demand';
 }
+/** Ordinary order commands (§5.4a). Their MDF consequence is decided after their own writes by
+ * `openMdfOrderCommand`, so read_only admits them past the fence and rejects only an MDF impact. */
+export const MDF_ORDER_WRITERS = ['orders.update', 'orders.recalculate_hdf', 'orders.delete',
+  'orders.restore', 'orders.transfer_details'] as const;
+export type MdfOrderWriter = typeof MDF_ORDER_WRITERS[number];
 interface Boundary { protocol: 'read-committed' | 'serializable-legacy'; mode: Promise<MdfEngineMode> }
 const modes = new WeakMap<TransactionClient, Boundary>();
 
@@ -69,7 +74,12 @@ function checkCapability(mode: MdfEngineMode, input: MdfCommandWriter) {
   if (input.capability === 'cut-settlement' && !settlement) {
     throw new ApiError(503,'MDF_WRITER_NOT_CONNECTED','Недопустимый обработчик завершения расчёта');
   }
-  if (mode === 'read_only' && input.capability !== 'cnc-receipt' && !settlement) {
+  const orderDemand = input.capability === 'order-demand'
+    && (MDF_ORDER_WRITERS as readonly string[]).includes(input.writer);
+  if (input.capability === 'order-demand' && !orderDemand) {
+    throw new ApiError(503,'MDF_WRITER_NOT_CONNECTED','Недопустимый обработчик изменения заказа');
+  }
+  if (mode === 'read_only' && input.capability !== 'cnc-receipt' && !settlement && !orderDemand) {
     throw new ApiError(409, 'MDF_ENGINE_READ_ONLY', 'Производственный учёт временно доступен только для чтения');
   }
   if (mode === 'active' && input.capability === 'legacy-only') {

@@ -1,4 +1,5 @@
 import { isApiError } from '../../api/apiError';
+import { isMdfOrderConflictError } from '../../utils/mdfOrderConflict';
 
 export function makeOrderDeleteHandler(deps: {
   capturePublicationGuard: () => (() => boolean) | null;
@@ -6,6 +7,7 @@ export function makeOrderDeleteHandler(deps: {
   onSuccess: () => void;
   onVersionConflict: () => void;
   onError: (message: string) => void;
+  onMdfConflict?: (error: unknown) => void;
 }): () => Promise<void> {
   return async () => {
     const canPublish = deps.capturePublicationGuard();
@@ -18,6 +20,11 @@ export function makeOrderDeleteHandler(deps: {
       if (!canPublish()) return;
       if (isApiError(err, 'ORDER_VERSION_CONFLICT')) {
         deps.onVersionConflict();
+        return;
+      }
+
+      if (deps.onMdfConflict && isMdfOrderConflictError(err)) {
+        deps.onMdfConflict(err);
         return;
       }
 

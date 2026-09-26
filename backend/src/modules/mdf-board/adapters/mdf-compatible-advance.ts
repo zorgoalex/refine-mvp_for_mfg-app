@@ -22,10 +22,33 @@ export async function advanceCompatibleMdfRevision(tx: DatabaseClient,input: {
     ON p.source_kind=n.source_kind AND p.source_id=n.source_id AND p.revision_key=n.predecessor_accepted_revision_key
     WHERE n.source_kind=$1 AND n.source_id=$2 AND n.revision_key=$3 AND p.revision_key=$4
       AND n.acceptance_requested AND n.composition_complete AND p.composition_complete
-      AND n.demand_digest=p.demand_digest AND n.predecessor_received_revision_key=n.predecessor_accepted_revision_key
+      AND (n.demand_digest=p.demand_digest OR EXISTS(
+        -- §5.4a order-demand cascade: only this job's sealed intent may change the frozen demand,
+        -- with predecessor lines verbatim and no MDF-present position losing demand.
+        SELECT 1 FROM mdf_order_cascade_intents ci WHERE ci.job_id=$5 AND ci.source_kind=n.source_kind
+          AND ci.source_id=n.source_id AND ci.revision_key=n.revision_key AND ci.predecessor_revision_key=p.revision_key
+          AND ci.previous_demand_digest=p.demand_digest AND ci.next_demand_digest=n.demand_digest
+          AND NOT EXISTS(
+            (SELECT line_key,order_id,detail_id,quantity,stage_code,evidence_kind,rework FROM mdf_evidence_lines
+              WHERE source_kind=$1 AND source_id=$2 AND revision_key=$3
+             EXCEPT ALL SELECT line_key,order_id,detail_id,quantity,stage_code,evidence_kind,rework FROM mdf_evidence_lines
+              WHERE source_kind=$1 AND source_id=$2 AND revision_key=$4)
+            UNION ALL
+            (SELECT line_key,order_id,detail_id,quantity,stage_code,evidence_kind,rework FROM mdf_evidence_lines
+              WHERE source_kind=$1 AND source_id=$2 AND revision_key=$4
+             EXCEPT ALL SELECT line_key,order_id,detail_id,quantity,stage_code,evidence_kind,rework FROM mdf_evidence_lines
+              WHERE source_kind=$1 AND source_id=$2 AND revision_key=$3))
+          AND NOT EXISTS(SELECT 1 FROM mdf_evidence_lines e
+            JOIN mdf_revision_demand od ON od.source_kind=e.source_kind AND od.source_id=e.source_id
+              AND od.revision_key=$4 AND od.order_id=e.order_id AND od.detail_id=e.detail_id
+            LEFT JOIN mdf_revision_demand nd ON nd.source_kind=e.source_kind AND nd.source_id=e.source_id
+              AND nd.revision_key=$3 AND nd.order_id=e.order_id AND nd.detail_id=e.detail_id
+            WHERE e.source_kind=$1 AND e.source_id=$2 AND e.revision_key=$4
+              AND (nd.quantity IS NULL OR nd.quantity<od.quantity))))
+      AND n.predecessor_received_revision_key=n.predecessor_accepted_revision_key
       AND NOT EXISTS(SELECT 1 FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
         WHERE a.state<>'released' AND e.source_kind=$1 AND e.source_id=$2 AND e.revision_key<>$4)`,
-  [h.kind,h.id,h.received,h.accepted])).rows.length===1;
+  [h.kind,h.id,h.received,h.accepted,input.job.job_id])).rows.length===1;
   if (!valid) return null;
   const replacements=planMdfCompatibleAdvance({ kind: h.kind,id: h.id,previousRevision: h.accepted,nextRevision: h.received,
     previous: input.lines.filter(l => l.revision===h.accepted),next: input.lines.filter(l => l.revision===h.received),
@@ -44,7 +67,8 @@ export async function advanceCompatibleMdfRevision(tx: DatabaseClient,input: {
       order_id::float8 "orderId",detail_id::float8 "detailId",quantity::float8 quantity,state`,
   [JSON.stringify(replacements.map(r => ({ ...r.old,evidenceLineId: r.evidenceLineId,bathRevision: r.bathRevision,
     cause: `mdf-forward:${input.job.job_id}:${r.old.allocationId}` })))])).rows;
-  const auditId=await auditService.record(tx,{ event: 'mdf_board.forward_revision_accepted',entityType: 'mdf_source',
+  const cascade=(await tx.query(`SELECT 1 FROM mdf_order_cascade_intents WHERE job_id=$1`,[input.job.job_id])).rows.length>0;
+  const auditId=await auditService.record(tx,{ event: cascade ? 'mdf_board.order_cascade_accepted' : 'mdf_board.forward_revision_accepted',entityType: 'mdf_source',
     entityId: `${h.kind}:${h.id}`,actorUserId: input.job.actor_user_id,requestId: input.job.request_id,
     source: 'backend-mdf-job',before: { acceptedRevision: previousRevision,allocations: replacements.map(r => r.old) },
     after: { acceptedRevision: h.received,allocations: saved },

@@ -16,6 +16,7 @@ import { readMdfPublishedSnapshot } from './mdf-published-snapshot';
 import { PgMdfBoardManualMoveRepository } from '../../orders/adapters/pg-mdf-board-manual-move-repository';
 import { PgBazisCutRepository } from '../../bazis-cut/adapters/pg-bazis-cut-repository';
 import { loadMdfBazisCompositionReadiness } from './mdf-bazis-composition-readiness';
+import { openMdfOrderCommand } from './mdf-order-cascade';
 
 const enabled = process.env.MDF_ENGINE_INTEGRATION === '1';
 
@@ -75,7 +76,7 @@ describe.skipIf(!enabled)('BASIS composition command, isolated PostgreSQL schema
       '165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql',
       '174_mdf_execution_context.sql', '175_mdf_command_placement.sql',
       '178_mdf_correction_receipts.sql', '179_mdf_active_return.sql',
-      '182_mdf_physical_lineage.sql', '185_mdf_bazis_composition.sql', '187_mdf_bazis_refill_rows.sql',
+      '182_mdf_physical_lineage.sql', '185_mdf_bazis_composition.sql', '187_mdf_bazis_refill_rows.sql', '188_mdf_order_cascade_intents.sql',
     ]);
     await fixture.assertLocalRelations([
       'mdf_source_heads', 'mdf_evidence_revisions', 'mdf_revision_context', 'mdf_revision_demand',
@@ -1602,4 +1603,29 @@ describe.skipIf(!enabled)('BASIS composition command, isolated PostgreSQL schema
     } finally { vi.stubEnv('BACKEND_MDF_BAZIS_REFILL', 'false'); }
   }, 60000);
 
+  it('cascades a demand-only order edit of an intentionally-empty set and inherits its assignment state (§5.4a)', async () => {
+    const f = await makeV2Source(10);
+    const emptied = await emptyViaComposition(f, 'cascade-empty');
+    await database!.transaction(async tx => {
+      await tx.query('SELECT order_id FROM orders WHERE order_id=$1 FOR UPDATE', [f.orderId]);
+      const mdf = await openMdfOrderCommand(tx, 'orders.update');
+      await mdf.captureBefore([f.orderId]);
+      await tx.query('UPDATE order_details SET quantity=3 WHERE detail_id=$1', [f.detailId + 1]);
+      await mdf.finish({ user, requestId: 'cascade-empty-edit', commandKey: 'cascade-empty-edit', orderIds: [f.orderId] });
+    }, { mdf: { writer: 'orders.update', capability: 'order-demand' } });
+    const queued = (await fixture.client.query<{ received: string; accepted: string }>(`SELECT received_revision_key received,
+      accepted_revision_key accepted FROM mdf_source_heads WHERE source_kind='bazisCutSet' AND source_id=$1`, [f.sourceId])).rows[0];
+    expect(queued.received).toMatch(/^order-cascade:/);
+    expect(queued.accepted).toBe(emptied.revision);
+    const job = (await fixture.client.query<{ job_id: string }>(`SELECT job_id FROM mdf_recalculation_jobs
+      WHERE source_kind='bazisCutSet' AND source_id=$1 AND revision_key=$2`, [f.sourceId, queued.received])).rows[0].job_id;
+    expect(await processJob(job)).toMatchObject({ status: 'done' });
+    const state = (await fixture.client.query<{ intentional_empty: boolean; predecessor_revision_key: string }>(`SELECT
+      intentional_empty,predecessor_revision_key FROM mdf_bazis_assignment_states
+      WHERE source_kind='bazisCutSet' AND source_id=$1 AND revision_key=$2`, [f.sourceId, queued.received])).rows[0];
+    expect(state).toEqual({ intentional_empty: true, predecessor_revision_key: emptied.revision });
+    const published = (await fixture.client.query<{ accepted: string; issues: string[] }>(`SELECT accepted_revision_key accepted,
+      issues FROM mdf_published_sources WHERE source_kind='bazisCutSet' AND source_id=$1`, [f.sourceId])).rows[0];
+    expect(published).toEqual({ accepted: queued.received, issues: [] });
+  });
 });

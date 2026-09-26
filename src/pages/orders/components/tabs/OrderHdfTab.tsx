@@ -27,6 +27,7 @@ import {
   isWorkspaceOperationOwnershipLost,
   runPageOwnedWorkspaceOperation,
 } from '../../../../workspace/workspaceOperationPins';
+import { showMdfOrderConflictModal } from '../../../../utils/mdfOrderConflictModal';
 import './OrderHdfTab.css';
 
 const { Text } = Typography;
@@ -159,6 +160,7 @@ export function OrderHdfTab({ isSaving, onSave }: OrderHdfTabProps) {
       message.success('ХДФ пересчитан');
     } catch (error) {
       if (isWorkspaceOperationOwnershipLost(error)) return;
+      if (showMdfOrderConflictModal(error)) return;
       message.error(error instanceof Error ? error.message : 'Не удалось пересчитать ХДФ');
     } finally {
       setRecalculating(false);
