@@ -58,6 +58,22 @@ export interface MdfOrderCascade {
 export type MdfOrderCascadeReceiptInput = Omit<MdfReceiptInput, 'correction'> & {
   lineage?: MdfPhysicalLineageManifest; cascade: MdfOrderCascade;
 };
+/** §5.4b bath lifecycle transition participant (internal only). */
+export interface MdfBathTransitionRole {
+  role: 'retired' | 'successor'; transitionId: string; jobId: string; cutJobId: number;
+  retiredSourceId: string; retiredRevisionKey: string; retiredPredecessorRevisionKey: string;
+  successorSourceId: string | null; successorRevisionKey: string | null;
+  ownerIds: readonly number[]; commandKey: string;
+}
+export interface MdfBathTransitionInput {
+  transitionId: string; jobId: string; cutJobId: number;
+  retired: { sourceId: string; predecessorRevisionKey: string; revisionKey: string;
+    fence: MdfReceiptFence; sourceCreatedAt: string; displayName: string };
+  successor?: { sourceId: string; revisionKey: string; lines: readonly MdfReceiptLine[];
+    executionContext: MdfExecutionContext };
+  ownerIds: readonly number[]; actorUserId: number; requestId: string; commandKey: string;
+  rules: readonly { ruleId: number; version: number }[];
+}
 export interface MdfReceiptResult extends MdfReceiptFence {
   replay: boolean; accepted: boolean; jobId: string;
 }
@@ -158,6 +174,41 @@ export async function recordMdfOrderCascadeReceipt(tx: DatabaseClient,
   return persistMdfReceipt(tx,receiptInput,lineage,undefined,{ ...cascade,orderIds:[...cascade.orderIds] });
 }
 
+/** §5.4b: retire bath B (empty terminal revision) and capture successor N (membership only), both
+ * received-only and bound to one transition row; B's transition job alone accepts both. */
+export async function recordMdfBathTransition(tx: DatabaseClient, input: MdfBathTransitionInput): Promise<MdfReceiptResult> {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const sourceId = /^cut-result:[1-9][0-9]*$/;
+  if (!uuid.test(input.transitionId) || !uuid.test(input.jobId) || !Number.isSafeInteger(input.cutJobId) || input.cutJobId <= 0
+    || !sourceId.test(input.retired.sourceId) || (input.successor && (!sourceId.test(input.successor.sourceId)
+      || input.successor.sourceId === input.retired.sourceId || !input.successor.lines.length
+      || input.successor.lines.some(l => l.stageCode !== 'membership' || l.evidenceKind !== 'derived' || l.rework)))
+    || !input.ownerIds.length || input.ownerIds.length > 100
+    || input.ownerIds.some((id,i,all) => !Number.isSafeInteger(id)||id<=0||(i>0&&id<=all[i-1]))
+    || !Number.isSafeInteger(input.actorUserId) || input.actorUserId <= 0
+    || typeof input.commandKey !== 'string' || !input.commandKey.trim() || input.commandKey.length > 400) invalid();
+  const role = (kind: 'retired' | 'successor'): MdfBathTransitionRole => ({ role: kind, transitionId: input.transitionId,
+    jobId: input.jobId, cutJobId: input.cutJobId, retiredSourceId: input.retired.sourceId,
+    retiredRevisionKey: input.retired.revisionKey, retiredPredecessorRevisionKey: input.retired.predecessorRevisionKey,
+    successorSourceId: input.successor?.sourceId ?? null, successorRevisionKey: input.successor?.revisionKey ?? null,
+    ownerIds: [...input.ownerIds], commandKey: input.commandKey });
+  if (input.successor) {
+    await persistMdfReceipt(tx,{ sourceKind: 'bath', sourceId: input.successor.sourceId,
+      revisionKey: input.successor.revisionKey, origin: 'derived', actorUserId: input.actorUserId,
+      requestId: input.requestId, causeKey: input.successor.revisionKey, expectedFence: null, accept: true, rules: [],
+      lines: input.successor.lines, executionContext: input.successor.executionContext },
+    undefined,undefined,undefined,role('successor'));
+  }
+  return persistMdfReceipt(tx,{ sourceKind: 'bath', sourceId: input.retired.sourceId,
+    revisionKey: input.retired.revisionKey, origin: 'derived', actorUserId: input.actorUserId,
+    requestId: input.requestId, causeKey: input.retired.revisionKey, expectedFence: input.retired.fence,
+    // A retirement is not a composition: empty, incomplete context; only the transition job accepts it.
+    accept: false, rules: input.rules, lines: [],
+    executionContext: { sourceCreatedAt: input.retired.sourceCreatedAt, displayName: input.retired.displayName,
+      priorColumn: 'baths', manualPlacementColumn: null, compositionComplete: false, demand: [] } },
+  undefined,undefined,undefined,role('retired'));
+}
+
 /** Composition alone may create a new sealed assignment authority. It always
  * leaves the new revision received-but-unaccepted for the normal worker. */
 export async function recordMdfBazisCompositionReceipt(tx: DatabaseClient,
@@ -196,7 +247,7 @@ export async function recordMdfBazisCompositionReceipt(tx: DatabaseClient,
 async function persistMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput,
   requestedLineage?: MdfPhysicalLineageManifest,
   composition?: MdfBazisCompositionReceiptInput['composition'],
-  cascade?: MdfOrderCascade): Promise<MdfReceiptResult> {
+  cascade?: MdfOrderCascade, transition?: MdfBathTransitionRole): Promise<MdfReceiptResult> {
   // Capture before the first await. Neither caller mutation nor retry can replace
   // a receipt's demand, actor or rule versions halfway through its transaction.
   input = { ...input, expectedFence: input.expectedFence ? { ...input.expectedFence } : null,
@@ -264,6 +315,7 @@ async function persistMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput,
     membershipDigest:composition.membershipDigest,intentionalEmpty:composition.intentionalEmpty,
     ownerIds:composition.ownerIds,allocationSnapshotDigest:composition.allocationSnapshotDigest,
     previewDigest:composition.previewDigest,commandKey:composition.commandKey });
+  if (transition) digestInput.push({ bathTransitionVersion:1,...transition,ownerIds:[...transition.ownerIds] });
   if (cascade) digestInput.push({ orderCascadeVersion:1,intentId:cascade.intentId,jobId:cascade.jobId,
     predecessorRevisionKey:cascade.predecessorRevisionKey,previousDemandDigest:cascade.previousDemandDigest,
     nextDemandDigest:cascade.nextDemandDigest,orderIds:cascade.orderIds,commandKey:cascade.commandKey });
@@ -400,7 +452,11 @@ async function persistMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput,
     WHERE a.state<>'released' AND (e.source_kind=$1 AND e.source_id=$2 OR ($1='bath' AND a.bath_id=$2))
   ) AS allocated`, source)).rows[0].allocated : false;
   if (isCorrection && correctionAllocated) invalid();
-  const accept = input.accept && !allocated && !composition && !cascade;
+  if (transition && (input.sourceKind !== 'bath' || (transition.role === 'retired'
+    ? (!head?.accepted_revision_key || head.accepted_revision_key !== head.received_revision_key
+      || head.accepted_revision_key !== transition.retiredPredecessorRevisionKey || input.lines.length)
+    : head !== undefined))) throw new MdfReceiptError('MDF_SOURCE_STALE');
+  const accept = input.accept && !allocated && !composition && !cascade && !transition;
   await tx.query(`INSERT INTO mdf_evidence_revisions
     (source_kind,source_id,revision_key,payload_digest,origin,actor_user_id,request_id,cause_key)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, [...source, input.revisionKey, digest, input.origin,
@@ -465,6 +521,14 @@ async function persistMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput,
       inheritedAssignment.assignmentStateId,inheritedAssignment.rootIntentId,head.accepted_revision_key,
       inheritedAssignment.membershipDigest,inheritedAssignment.intentionalEmpty]);
   }
+  if (transition?.role === 'retired') {
+    await tx.query(`INSERT INTO mdf_bath_transitions(transition_id,job_id,cut_job_id,retired_source_id,retired_revision_key,
+      retired_predecessor_revision_key,successor_source_id,successor_revision_key,owner_ids,actor_user_id,request_id,command_key)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::bigint[],$10,$11,$12)`,
+    [transition.transitionId,transition.jobId,transition.cutJobId,transition.retiredSourceId,transition.retiredRevisionKey,
+      transition.retiredPredecessorRevisionKey,transition.successorSourceId,transition.successorRevisionKey,
+      [...transition.ownerIds],input.actorUserId,input.requestId,transition.commandKey]);
+  }
   if (cascade) {
     await tx.query(`INSERT INTO mdf_order_cascade_intents
       (intent_id,job_id,source_kind,source_id,revision_key,predecessor_revision_key,previous_demand_digest,
@@ -486,8 +550,13 @@ async function persistMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput,
   head ? [...source, input.revisionKey, accept, isCorrection] : [...source, input.revisionKey, accept])).rows[0];
   const eventKey = `mdf-receipt:${createHash('sha256').update(JSON.stringify([...source, input.revisionKey])).digest('hex')}`;
   const queuedStatus = accept || context ? 'pending' : 'needs_attention';
-  const queuedError = accept || composition || cascade ? null : 'MDF_ACCEPTANCE_REQUIRED';
-  const fixedJobId = composition?.jobId ?? cascade?.jobId;
+  const queuedError = accept || composition || cascade || transition ? null : 'MDF_ACCEPTANCE_REQUIRED';
+  // A transition successor is accepted by the retired bath's transition job, never by its own job.
+  if (transition?.role === 'successor') {
+    return { replay: false, accepted: false, version: saved.version, correctionEpoch: saved.correction_epoch,
+      jobId: transition.jobId };
+  }
+  const fixedJobId = composition?.jobId ?? cascade?.jobId ?? transition?.jobId;
   const job = (await tx.query<{ job_id: string }>(fixedJobId ? `INSERT INTO mdf_recalculation_jobs
     (job_id,event_key,source_kind,source_id,revision_key,correction_epoch,actor_user_id,request_id,status,error_code,effect_policy)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING job_id` : `INSERT INTO mdf_recalculation_jobs

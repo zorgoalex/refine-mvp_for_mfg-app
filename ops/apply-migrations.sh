@@ -2327,6 +2327,11 @@ probe_file() {
       "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='mdf_published_sources' AND column_name='placement_inputs' AND data_type='jsonb');" \
       "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='mdf_published_sources_placement_inputs_object' AND conrelid='public.mdf_published_sources'::regclass AND contype='c' AND convalidated);" \
       "SELECT to_regprocedure('public.mdf_placement_inputs_valid(jsonb,bigint)') IS NOT NULL;" ;;
+    190_mdf_bath_transitions*) probe_all \
+      "$(q_tbl mdf_bath_transitions)" \
+      "SELECT to_regprocedure('public.mdf_guard_bath_transition_insert()') IS NOT NULL AND to_regprocedure('public.mdf_validate_bath_transition_commit()') IS NOT NULL AND to_regprocedure('public.mdf_reject_bath_transition_change()') IS NOT NULL;" \
+      "SELECT count(*)=3 FROM (VALUES ('mdf_bath_transition_insert_guard','mdf_guard_bath_transition_insert()'),('mdf_bath_transition_immutable','mdf_reject_bath_transition_change()'),('mdf_bath_transition_commit_guard','mdf_validate_bath_transition_commit()')) expected(trg,fun) JOIN pg_trigger t ON t.tgrelid=to_regclass('public.mdf_bath_transitions') AND t.tgname=trg AND t.tgfoid=to_regprocedure('public.'||fun) AND t.tgenabled='O' AND NOT t.tgisinternal;" \
+      "SELECT to_regclass('public.mdf_revision_jobs') IS NOT NULL;" ;;
     186_bitrix24_product_import*) probe_all \
       "$(q_tbl bitrix24_product_mapping)" \
       "SELECT count(*)=8 FROM information_schema.columns WHERE table_schema='public' AND table_name='bitrix24_product_mapping';" \
@@ -2436,6 +2441,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     189_mdf_placement_inputs*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    190_mdf_bath_transitions*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     186_bitrix24_product_import*)

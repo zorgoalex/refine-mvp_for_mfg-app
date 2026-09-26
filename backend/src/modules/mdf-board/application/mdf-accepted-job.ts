@@ -47,6 +47,8 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
   const declarations: MdfQuantityEvidence[] = [];
   const positionWarnings: { orderId: number; detailId: number; issues: readonly string[] }[]=[];
   for (const h of allocation.sourceHeads) {
+    // §5.4b: a retired bath leaves the board (its history stays in audit/evidence).
+    if (snapshot.retired.has(mdfSourceKey(h))) continue;
     const issues = [...new Set([...(snapshot.issues.get(mdfSourceKey(h)) ?? ['MDF_CONTEXT_REQUIRED']),
       ...allocation.quarantine.filter(q => q.sourceKind===h.kind && q.sourceId===h.id).map(q => q.code)])].sort();
     const own = allocation.sourceLines.filter(l => l.kind===h.kind && l.id===h.id
@@ -142,6 +144,7 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
         'MDF_ACTOR_UNAVAILABLE'])].sort());
     }
   }
-  await publishMdfState(tx,{ job, orderIds: allocation.orderIds, sources, metadata: snapshot.metadata, state: final });
+  await publishMdfState(tx,{ job, orderIds: allocation.orderIds, sources, metadata: snapshot.metadata, state: final,
+    retired: allocation.sourceHeads.filter(h => snapshot.retired.has(mdfSourceKey(h))) });
   return 'done';
 }

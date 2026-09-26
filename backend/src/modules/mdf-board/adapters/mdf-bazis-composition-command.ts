@@ -440,7 +440,7 @@ export class PgMdfBazisCompositionCommand {
       const pairs = [...pinnedJobs].sort(cmpText).map(entry => entry.split('\u0000'));
       const jobRows = (await tx.query<{ source_id: string; revision_key: string; total: string; done: string }>(
         `SELECT source_id,revision_key,count(*) total,count(*) FILTER (WHERE status='done') done
-          FROM mdf_recalculation_jobs WHERE source_kind='bath'
+          FROM mdf_revision_jobs WHERE source_kind='bath'
             AND (source_id,revision_key) IN (SELECT * FROM unnest($1::text[],$2::text[]))
           GROUP BY source_id,revision_key`,
         [pairs.map(([bathId]) => bathId), pairs.map(([, revision]) => revision)])).rows;

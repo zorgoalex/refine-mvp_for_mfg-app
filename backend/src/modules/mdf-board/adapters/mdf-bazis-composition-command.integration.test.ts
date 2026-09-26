@@ -103,7 +103,7 @@ describe.skipIf(!enabled)('BASIS composition command preview/confirm, isolated P
       '165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql',
       '174_mdf_execution_context.sql', '175_mdf_command_placement.sql',
       '178_mdf_correction_receipts.sql', '179_mdf_active_return.sql',
-      '182_mdf_physical_lineage.sql', '185_mdf_bazis_composition.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql',
+      '182_mdf_physical_lineage.sql', '185_mdf_bazis_composition.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql',
     ]);
     await fixture.assertLocalRelations([
       'mdf_source_heads', 'mdf_evidence_revisions', 'mdf_revision_context', 'mdf_revision_demand',

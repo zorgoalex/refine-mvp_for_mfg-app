@@ -21,7 +21,7 @@ describe.skipIf(!enabled)('MDF lineage seal serializes with late evidence insert
     await fixture.applyMigrations([
       '165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql',
       '174_mdf_execution_context.sql','175_mdf_command_placement.sql',
-      '178_mdf_correction_receipts.sql','182_mdf_physical_lineage.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql',
+      '178_mdf_correction_receipts.sql','182_mdf_physical_lineage.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql',
     ]);
     await fixture.assertLocalRelations([
       'mdf_evidence_revisions','mdf_revision_context','mdf_revision_demand','mdf_revision_seals',

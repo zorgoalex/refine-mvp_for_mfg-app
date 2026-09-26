@@ -288,6 +288,33 @@ before switching to `active`; an older worker that republishes without inputs in
 the revision. The legacy CNC auto-cut backfill is `legacy-only` (503 in `active`); the CNC authority job owns
 automatic cut statuses there.
 
+## Bath lifecycle
+
+A cut job has at most one **active bath**: the captured source of its current, non-archived result of a
+non-archived job. Commands that change which result that is — recalculation, making another result current,
+saving a manual layout, archiving the job — authorize (`cut.manage` + `orders.view` with scope over every owner
+of the old and new bath) and lock those owners before the cut-job lock, then, after their writes, record one
+transition (migration 190 `mdf_bath_transitions`): the old bath B receives an empty terminal revision and the new
+result N a membership-only revision; only B's transition job accepts both, releases B's `reserved` allocations
+(history kept) and lets allocation plan N. A retired bath leaves the board (its published card is removed) and
+cannot be made current again (409 `MDF_BATH_RESULT_RETIRED`, recalculate instead).
+
+- A bath with lamination evidence or consumed allocations is never retired: 409 `MDF_BATH_HAS_PRODUCTION`
+  (a recalculation is refused before any write). Lamination that appears during the external calculation rejects
+  the persist with the same 409: nothing of the new calculation is kept, the old result stays current, and a replay
+  of the command answers `CUT_RESULT_COMMAND_FAILED` with the stored code.
+- While a transition of the job is unprocessed (including a retirement without successor), further lifecycle
+  changes and fresh calculations answer 409 `MDF_BATH_TRANSITION_PENDING` before any write.
+- Making a result current requires `If-Match` (job version) and `Idempotency-Key` when it changes the active
+  bath (428 `MDF_BATH_FENCE_REQUIRED`, 409 `CUT_JOB_STALE_VERSION`); job archive and manual layout use their
+  existing version/command fences. Archiving or unarchiving a result never changes the active bath (the current
+  result cannot be archived).
+- Audit `mdf.bath_transition.requested` (command) and `mdf_board.bath_retired` (worker); domain outbox
+  `mdf_board.bath_transition` once per command; no user notification. The transition job pins the enabled rules,
+  so baths that become ready through released supply fire their normal board events once.
+- Activation gate: no cut job may have more than one non-retired bath head. Rolling back to code without
+  migration 190 after the first transition requires `read_only`.
+
 ## Storage and bounded lineage consumers
 
 ### Physical origin contract

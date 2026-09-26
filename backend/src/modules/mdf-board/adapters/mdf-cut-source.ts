@@ -43,6 +43,13 @@ async function readScope(tx: TransactionClient, cutJobId: number, commandId: str
     UNION SELECT d.order_id FROM cut_result_command c JOIN mdf_revision_demand d
       ON d.source_kind='bath' AND d.source_id='cut-result:' || c.cut_result_id::text
       WHERE c.cut_job_id=$1 AND c.command_id=$2::uuid
+    -- §5.4b: owners of the job's active bath (current result) are locked in the same ascending pass,
+    -- because a recalculation retires that bath.
+    UNION SELECT d.order_id FROM cut_job j JOIN mdf_source_heads h ON h.source_kind='bath'
+      AND h.source_id='cut-result:' || j.current_cut_result_id::text
+      JOIN mdf_revision_demand d ON d.source_kind=h.source_kind AND d.source_id=h.source_id
+        AND d.revision_key IN (h.accepted_revision_key,h.received_revision_key)
+      WHERE j.cut_job_id=$1
     ) owners WHERE owner_id IS NOT NULL ORDER BY 1 LIMIT 101`,[cutJobId,commandId])).rows;
   const owners = [...new Set([...items.map(i => i.orderId),...replayOwners.map(r => r.orderId)])].sort((a,b) => a-b);
   if (items.length > 5000 || owners.length > 100 || owners.some(id => !positive(id))) invalid();
@@ -73,6 +80,11 @@ export async function lockMdfCutOwners(tx: TransactionClient, input: {
     ORDER BY order_id,order_hdf_detail_id FOR UPDATE`,[scope.owners]);
   scopes.set(tx,scope);
   return scope.signature;
+}
+
+/** Owners this transaction's calculation phase authorized and locked (basket ∪ replay ∪ active bath). */
+export function lockedMdfCutOwnerIds(tx: TransactionClient): readonly number[] {
+  return scopes.get(tx)?.owners ?? [];
 }
 
 export async function recheckMdfCutOwners(tx: TransactionClient, input: {

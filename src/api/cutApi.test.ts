@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildCutJobListQuery, buildEligibleQuery, cutApi, validateCutJobId } from './cutApi';
+import { buildCutJobListQuery, buildEligibleQuery, buildMakeCurrentHeaders, cutApi, validateCutJobId } from './cutApi';
 import { cutConfigApi } from './cutConfigApi';
 import type { CutJobDto } from './types/cutApi.types';
 
@@ -68,7 +68,7 @@ describe('cutApi', () => {
     await cutApi.archive(42, 2);
     await cutApi.createMdfBoardCard(42, 9);
     await cutApi.deleteMdfBoardCard(42, 9);
-    await cutApi.setCurrentResult(42, 2);
+    await cutApi.setCurrentResult(42, 2, 1, '22222222-2222-4222-8222-222222222222');
     await cutApi.archiveResult(42, 3);
     await cutApi.unarchiveResult(42, 3);
     await expect(cutApi.listEligibleDetails(42, { orderIds: [9] })).resolves.toMatchObject({ noSheetSpecCount: 2 });
@@ -87,6 +87,9 @@ describe('cutApi', () => {
     expect(fetchMock.mock.calls[5][1]?.body).toBe(JSON.stringify({ expectedCutResultId: 9 }));
     expect(fetchMock.mock.calls[6][0]).toBe('/api/v1/cut-jobs/42/results/2/current');
     expect(fetchMock.mock.calls[6][1]?.method).toBe('POST');
+    const makeCurrentHeaders = new Headers(fetchMock.mock.calls[6][1]?.headers);
+    expect(makeCurrentHeaders.get('If-Match')).toBe('1');
+    expect(makeCurrentHeaders.get('Idempotency-Key')).toBe('22222222-2222-4222-8222-222222222222');
     expect(fetchMock.mock.calls[7][0]).toBe('/api/v1/cut-jobs/42/results/3/archive');
     expect(fetchMock.mock.calls[7][1]?.method).toBe('POST');
     expect(fetchMock.mock.calls[8][0]).toBe('/api/v1/cut-jobs/42/results/3/archive');
@@ -307,6 +310,15 @@ describe('cutApi', () => {
     expect(fetchMock.mock.calls[0][0]).toContain('template=bath_profiles');
     expect(fetchMock.mock.calls[1][0]).toContain('/api/v1/cut-jobs/42/results/3/export.pdf');
     expect(fetchMock.mock.calls[1][0]).toContain('template=bath_profiles');
+  });
+
+  it('builds the make-current fence headers (If-Match + Idempotency-Key)', () => {
+    expect(buildMakeCurrentHeaders(7, 'abc-123')).toEqual({
+      'If-Match': '7',
+      'Idempotency-Key': 'abc-123',
+    });
+    // If-Match is the job version stringified, not passed through unchanged.
+    expect(buildMakeCurrentHeaders(0, 'x')).toEqual({ 'If-Match': '0', 'Idempotency-Key': 'x' });
   });
 
   it('validates cut job ids before fetch', async () => {

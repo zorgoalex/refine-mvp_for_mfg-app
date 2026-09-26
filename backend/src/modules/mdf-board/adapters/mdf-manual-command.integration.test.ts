@@ -41,7 +41,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real MDF manual com
     vi.stubEnv('BACKEND_MDF_SHADOW_INTAKE','true'); // Active route must not run legacy shadow finalizer.
     await db.connect(); await db.query(`CREATE SCHEMA ${schema}; SET search_path=${schema},public`);
     for (const file of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql',
-      '174_mdf_execution_context.sql','175_mdf_command_placement.sql','178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql']) {
+      '174_mdf_execution_context.sql','175_mdf_command_placement.sql','178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql']) {
       await db.query(readFileSync(new URL(`../../../../db/migrations/${file}`,import.meta.url),'utf8'));
     }
     for (const table of ['orders','order_details','production_statuses','order_statuses','materials','sheet_material_types',

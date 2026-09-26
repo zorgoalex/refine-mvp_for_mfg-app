@@ -12,6 +12,8 @@ export async function publishMdfState(tx: DatabaseClient, input: {
   job: MdfJob; orderIds: readonly number[]; sources: readonly MdfAcceptedSource[];
   metadata: ReadonlyMap<string,MdfExecutionMetadata>;
   state: ReturnType<typeof projectMdfAcceptedState>;
+  /** §5.4b retired baths: their published card is removed (history stays in audit/evidence). */
+  retired?: readonly { kind: string; id: string }[];
 }) {
   const row = (await tx.query<{ revision: string; published_at: string }>(`SELECT published_revision::text revision,
     transaction_timestamp()::text published_at FROM mdf_engine_state WHERE singleton FOR UPDATE`)).rows[0];
@@ -51,6 +53,13 @@ export async function publishMdfState(tx: DatabaseClient, input: {
   await tx.query(`INSERT INTO mdf_published_source_members(source_kind,source_id,order_id,detail_id,quantity)
     SELECT kind,id,"orderId","detailId",quantity FROM jsonb_to_recordset($1::jsonb)
       m(kind text,id text,"orderId" bigint,"detailId" bigint,quantity bigint)`,[JSON.stringify([...members.values()])]);
+  if (input.retired?.length) {
+    const retired = [input.retired.map(r => r.kind), input.retired.map(r => r.id)];
+    await tx.query(`DELETE FROM mdf_published_source_members p USING unnest($1::text[],$2::text[]) s(kind,id)
+      WHERE p.source_kind=s.kind AND p.source_id=s.id`, retired);
+    await tx.query(`DELETE FROM mdf_published_sources p USING unnest($1::text[],$2::text[]) s(kind,id)
+      WHERE p.source_kind=s.kind AND p.source_id=s.id`, retired);
+  }
   await tx.query('DELETE FROM mdf_published_positions WHERE order_id=ANY($1::bigint[])',[input.orderIds]);
   const positions = input.state.quantities.positions.map(p => ({ ...p, issues: input.state.positionIssues.get(mdfPositionKey(p)) ?? [] }));
   await tx.query(`INSERT INTO mdf_published_positions(order_id,detail_id,required_quantity,cut_quantity,rolled_quantity,

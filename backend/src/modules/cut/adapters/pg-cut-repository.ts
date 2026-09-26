@@ -172,7 +172,8 @@ import {
 import type { LabelCustomExpressionScalar } from '../../labels/application/label-custom-field-expression';
 import { dispatchMdfBoardEvent, evaluateMdfOrderMachineFilesPresentAutomation } from '../../status-automation/application/status-automation-runtime';
 import { requireMdfCommandBoundary } from '../../mdf-board/application/mdf-command-boundary';
-import { captureNewMdfBathResult, lockMdfCutOwners, recheckMdfCutOwners, registerNewMdfBathResult } from '../../mdf-board/adapters/mdf-cut-source';
+import { beginMdfBathLifecycle } from '../../mdf-board/adapters/mdf-bath-lifecycle';
+import { captureNewMdfBathResult, lockedMdfCutOwnerIds, lockMdfCutOwners, recheckMdfCutOwners, registerNewMdfBathResult } from '../../mdf-board/adapters/mdf-cut-source';
 
 const AUDIT_SOURCE = 'backend-cut-command';
 const MANUAL_SVG_CHAT_ID = 'erp-manual-svg-upload';
@@ -974,8 +975,12 @@ export class PgCutRepository implements CutRepositoryPort {
       .transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
       const mdfScope = await lockMdfCutOwners(tx, { cutJobId: command.cutJobId,commandId: command.commandId,user: command.currentUser });
+      // §5.4b: a recalculation retires the active bath — refuse BEFORE any write if it has production.
+      const bathLifecycle = await beginMdfBathLifecycle(tx, { writer: 'cut.calculate.prepare', capability: 'queued',
+        cutJobId: command.cutJobId, user: command.currentUser, ownerIds: lockedMdfCutOwnerIds(tx) });
       const job = await loadJobForUpdate(tx, command.cutJobId);
       await recheckMdfCutOwners(tx,command);
+      await bathLifecycle?.revalidate();
 
       const priorCommand = await tx.query<{
         command_type: string;
@@ -1033,6 +1038,8 @@ export class PgCutRepository implements CutRepositoryPort {
 
       assertVersion(job, command.version);
       assertMutable(job);
+      // §5.4b: only a FRESH calculation may retire the active bath (a completed replay was answered above).
+      await bathLifecycle?.assertRetargetAllowed();
 
       await tx.query(
         `INSERT INTO cut_result_command
@@ -1300,7 +1307,10 @@ export class PgCutRepository implements CutRepositoryPort {
       persistedResult = await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
       await lockMdfCutOwners(tx, { cutJobId: command.cutJobId,commandId: command.commandId,user: command.currentUser });
+      const bathLifecycle = await beginMdfBathLifecycle(tx, { writer: 'cut.calculate.persist', capability: 'queued',
+        cutJobId: command.cutJobId, user: command.currentUser, ownerIds: lockedMdfCutOwnerIds(tx) });
       const job = await loadJobForUpdate(tx, command.cutJobId);
+      await bathLifecycle?.revalidate();
       await recheckMdfCutOwners(tx,{ ...command,expectedSignature: prep.mdfScope ?? '' });
       assertVersion(job, prep.expectedVersion);
       const ownership = await tx.query(
@@ -1450,8 +1460,22 @@ export class PgCutRepository implements CutRepositoryPort {
         ),
       });
 
-      const mdfJobId = await captureNewMdfBathResult(tx,{ cutJobId: command.cutJobId,cutResultId: cutResult.cutResultId,
-        user: command.currentUser,requestId: command.requestId ?? command.commandId });
+      // §5.4b: with an active bath (or any prior result) the new result goes through the bath lifecycle.
+      // Production that appeared on the old bath during the external calculation rejects the persist with
+      // 409 MDF_BATH_HAS_PRODUCTION: the transaction rolls back, the old result stays current, the command
+      // ledger keeps the failure code for replay. The job's first result is captured as before.
+      let mdfJobId: string | undefined;
+      // The lifecycle owns every calculation except a job's very first result: with an active bath it
+      // retires it; after a retirement (e.g. a non-vacuum round trip) it recreates the bath as accepted.
+      const hasPriorResult = (await tx.query(`SELECT 1 FROM cut_result WHERE cut_job_id=$1 AND cut_result_id<>$2 LIMIT 1`,
+        [command.cutJobId, cutResult.cutResultId])).rows.length > 0;
+      if (bathLifecycle && (bathLifecycle.hasActiveBath || hasPriorResult)) {
+        await bathLifecycle.finish({ requestId: command.requestId ?? command.commandId,
+          commandKey: `cut.calculate:${command.commandId}`, fenced: true });
+      } else {
+        mdfJobId = await captureNewMdfBathResult(tx,{ cutJobId: command.cutJobId,cutResultId: cutResult.cutResultId,
+          user: command.currentUser,requestId: command.requestId ?? command.commandId });
+      }
 
       await this.audit(tx, command.currentUser, {
         event: CUT_AUDIT_EVENTS.calculated,
@@ -1912,7 +1936,11 @@ export class PgCutRepository implements CutRepositoryPort {
   archive(command: ArchiveCutJobCommand): Promise<CutJobDto> {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
+      // §5.4b: archiving the job retires its active MDF bath (owners locked before the job lock).
+      const lifecycle = await beginMdfBathLifecycle(tx, { writer: 'cut.archive', cutJobId: command.cutJobId,
+        user: command.currentUser, nextResultId: null });
       const job = await loadJobForUpdate(tx, command.cutJobId);
+      await lifecycle?.revalidate();
       assertVersion(job, command.version);
       if (job.status === 'archived') {
         throw new ApiError(409, 'CUT_JOB_ALREADY_DELETED', 'Задание уже удалено');
@@ -1986,9 +2014,11 @@ export class PgCutRepository implements CutRepositoryPort {
           deleteLinkedMdfPackets: command.deleteLinkedMdfPackets === true,
         },
       });
+      await lifecycle?.finish({ requestId: command.requestId ?? `cut-archive-${command.cutJobId}`,
+        commandKey: `cut.archive:${command.cutJobId}:v${command.version}`, fenced: true });
 
       return loadJob(tx, command.cutJobId);
-    });
+    }, { mdf: { writer: 'cut.archive', capability: 'bath-lifecycle' } });
   }
 
   async getJob(query: GetCutJobQuery): Promise<CutJobDto> {
@@ -2196,12 +2226,20 @@ export class PgCutRepository implements CutRepositoryPort {
   async setCurrentResult(command: CutResultStateCommand): Promise<CutJobDto> {
     await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
+      // §5.4b: the target result is known up front; the MDF bath lifecycle authorizes and locks every
+      // affected owner BEFORE the cut-job lock (owners → job → sources).
+      const target = (await tx.query<{ id: string }>(`SELECT cut_result_id::text id FROM cut_result
+        WHERE cut_job_id=$1 AND result_no=$2 ORDER BY revision_no DESC LIMIT 1`, [command.cutJobId, command.resultNo])).rows[0];
+      const lifecycle = await beginMdfBathLifecycle(tx, { writer: 'cut.set_current_result', cutJobId: command.cutJobId,
+        user: command.currentUser, nextResultId: target ? Number(target.id) : null });
+      if (await reserveCutStateCommand(tx, command, 'cut.set_current_result') === 'replay') return;
       const job = await tx.query<{
         current_cut_result_id: string | number | null;
         current_result_no: string | number | null;
         status: string;
+        version: string | number;
       }>(
-        `SELECT j.current_cut_result_id, current_result.result_no AS current_result_no, j.status
+        `SELECT j.current_cut_result_id, current_result.result_no AS current_result_no, j.status, j.version
          FROM cut_job j
          LEFT JOIN cut_result current_result
            ON current_result.cut_result_id = j.current_cut_result_id
@@ -2211,8 +2249,13 @@ export class PgCutRepository implements CutRepositoryPort {
       );
       const jobRow = job.rows[0];
       if (!jobRow) throw new CutJobNotFoundError(command.cutJobId);
+      await lifecycle?.revalidate();
       if (jobRow.status === 'archived') {
         throw new CutJobNotMutableError(command.cutJobId, jobRow.status);
+      }
+      if (command.expectedJobVersion !== undefined && toNum(jobRow.version) !== command.expectedJobVersion) {
+        throw new ApiError(409, 'CUT_JOB_STALE_VERSION', 'Задание раскроя изменилось — обновите страницу', {
+          expectedVersion: command.expectedJobVersion, actualVersion: toNum(jobRow.version) });
       }
       const result = await tx.query<{
         cut_result_id: string | number;
@@ -2237,7 +2280,10 @@ export class PgCutRepository implements CutRepositoryPort {
       }
       const nextCurrentResultId = toNum(resultRow.cut_result_id);
       const previousCurrentResultId = numOrNull(jobRow.current_cut_result_id);
-      if (previousCurrentResultId === nextCurrentResultId) return;
+      if (previousCurrentResultId === nextCurrentResultId) {
+        await completeCutStateCommand(tx, command);
+        return;
+      }
       await tx.query(
         `UPDATE cut_job
             SET current_cut_result_id = $2, version = version + 1, updated_at = now()
@@ -2253,7 +2299,11 @@ export class PgCutRepository implements CutRepositoryPort {
         after: { currentCutResultId: nextCurrentResultId, resultNo: command.resultNo },
         metadata: { resultNo: command.resultNo },
       });
-    });
+      await lifecycle?.finish({ requestId: command.requestId ?? `cut-current-${command.cutJobId}`,
+        commandKey: `cut.set_current_result:${command.idempotencyKey ?? ''}`,
+        fenced: command.expectedJobVersion !== undefined && command.idempotencyKey !== undefined });
+      await completeCutStateCommand(tx, command);
+    }, { mdf: { writer: 'cut.set_current_result', capability: 'bath-lifecycle' } });
     return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
   }
 
@@ -5118,6 +5168,12 @@ export class PgCutRepository implements CutRepositoryPort {
     });
     const outcome = await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
+      // §5.4b: a saved manual layout is a new current result ⇒ it retires the active MDF bath and captures
+      // the new one. Owners (same items as the current result) are locked before the job lock.
+      const hint = (await tx.query<{ current: string | null }>(`SELECT current_cut_result_id::text current FROM cut_job
+        WHERE cut_job_id=$1`, [command.cutJobId])).rows[0];
+      const lifecycle = await beginMdfBathLifecycle(tx, { writer: 'cut.manual_layout', cutJobId: command.cutJobId,
+        user: command.currentUser, ownerHintResultId: hint?.current ? Number(hint.current) : null });
 
       // ── 1. Load cut_job FOR UPDATE; version guard + recalc-basis guard ──────
       const jobRes = await tx.query<{
@@ -5133,6 +5189,7 @@ export class PgCutRepository implements CutRepositoryPort {
       );
       const jobRow = jobRes.rows[0];
       if (!jobRow) throw new CutJobNotFoundError(command.cutJobId);
+      await lifecycle?.revalidate();
 
       const priorCommand = await tx.query<{
         command_type: string;
@@ -5489,8 +5546,10 @@ export class PgCutRepository implements CutRepositoryPort {
           manualLayoutSavedOutboxKey(command.cutJobId, nextVersion),
         ],
       );
+      await lifecycle?.finish({ requestId: command.requestId ?? command.commandId,
+        commandKey: `cut.manual_layout:${command.commandId}`, fenced: true });
       return { kind: 'saved' as const };
-    },{ mdf: { writer: 'cut.manual-layout',capability: 'legacy-only' } });
+    },{ mdf: { writer: 'cut.manual_layout',capability: 'bath-lifecycle' } });
 
     // Return the fully enriched job (with manualLayout, editorParams, requiresRecalc)
     // read after the transaction commits. Uses this.getJob which queries this.database.
@@ -7826,4 +7885,27 @@ function dateOnly(value: string | Date | null | undefined): string | null {
   if (value instanceof Date) return value.toISOString().slice(0, 10);
   const text = String(value).trim();
   return text ? text.slice(0, 10) : null;
+}
+
+/** §5.4b idempotency for retirement-producing result state commands (generic command ledger). */
+async function reserveCutStateCommand(tx: TransactionClient, command: CutResultStateCommand, name: string): Promise<'fresh' | 'replay'> {
+  if (!command.idempotencyKey) return 'fresh';
+  const key = `cut-state:${command.currentUser.id}:${command.idempotencyKey}`;
+  const hash = createHash('sha256').update(JSON.stringify([name, command.cutJobId, command.resultNo,
+    command.expectedJobVersion ?? null])).digest('hex');
+  await tx.query(`INSERT INTO command_idempotency_keys(idempotency_key,command_name,actor_user_id,entity_type,entity_id,request_hash,status)
+    VALUES($1,$2,$3,'cut_job',$4,$5,'processing') ON CONFLICT (idempotency_key) DO NOTHING`,
+  [key, name, numOrNull(command.currentUser.id), String(command.cutJobId), hash]);
+  const row = (await tx.query<{ request_hash: string; status: string; command_name: string }>(`SELECT request_hash,status,command_name
+    FROM command_idempotency_keys WHERE idempotency_key=$1 FOR UPDATE`, [key])).rows[0];
+  if (!row || row.request_hash !== hash || row.command_name !== name) {
+    throw new ApiError(409, 'IDEMPOTENCY_CONFLICT', 'Ключ идемпотентности уже использован для другого запроса');
+  }
+  return row.status === 'completed' ? 'replay' : 'fresh';
+}
+
+async function completeCutStateCommand(tx: TransactionClient, command: CutResultStateCommand): Promise<void> {
+  if (!command.idempotencyKey) return;
+  await tx.query(`UPDATE command_idempotency_keys SET status='completed',response_json='{}'::jsonb,completed_at=now()
+    WHERE idempotency_key=$1`, [`cut-state:${command.currentUser.id}:${command.idempotencyKey}`]);
 }

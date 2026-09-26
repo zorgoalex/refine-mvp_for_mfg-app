@@ -34,7 +34,7 @@ describe('CutPage result history guard', () => {
   });
 
   it('wires archive and acting-result commands for completed result rows', () => {
-    expect(source).toContain('cutApi.setCurrentResult(job.cutJobId, result.resultNo)');
+    expect(source).toContain('cutApi.setCurrentResult(job.cutJobId, result.resultNo, job.version, commandId)');
     expect(source).toContain('cutApi.archiveResult(job.cutJobId, result.resultNo)');
     expect(source).toContain('cutApi.unarchiveResult(job.cutJobId, result.resultNo)');
     expect(source).toContain('emitCutJobUpdate(updated, job)');
@@ -50,7 +50,7 @@ describe('CutPage result history guard', () => {
   });
 
   it('keeps command ids stable until calculate/manual requests are confirmed', () => {
-    expect(source).toContain('calcCommandRef.current?.cutJobId !== job.cutJobId');
+    expect(source).toContain('calcCommandRef.current?.cutJobId !== commandJob.cutJobId');
     expect(source).toContain('manualCommandRef.current?.key !== commandKey');
     expect(source).toContain('cutApi.calculate(job.cutJobId, commandVersion, commandId)');
     expect(source).toContain('emitCutJobReady(calculated)');

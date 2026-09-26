@@ -356,7 +356,7 @@ async function gateDoneJobs(tx: DatabaseClient, intent: MdfBazisCompositionJobIn
   const rows = (await tx.query<QueryResultRow & { kind: string; id: string; revision: string; total: string; done: string }>(
     `SELECT j.source_kind kind,j.source_id id,j.revision_key revision,count(*) total,
       count(*) FILTER (WHERE j.status='done') done
-     FROM mdf_recalculation_jobs j JOIN unnest($1::text[],$2::text[],$3::text[]) w(kind,id,revision)
+     FROM mdf_revision_jobs j JOIN unnest($1::text[],$2::text[],$3::text[]) w(kind,id,revision)
        ON j.source_kind=w.kind AND j.source_id=w.id AND j.revision_key=w.revision
      GROUP BY j.source_kind,j.source_id,j.revision_key`, [kinds, ids, revisions])).rows;
   if (rows.length !== seen.size || rows.some(row => Number(row.total) !== 1 || Number(row.done) !== 1

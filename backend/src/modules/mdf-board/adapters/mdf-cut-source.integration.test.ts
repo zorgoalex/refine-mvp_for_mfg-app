@@ -22,6 +22,7 @@ import { StaticCutConfig } from '../../cut/application/cut-config';
 import type { OptimizeRequest, FreecutOptimizeResponse } from '../../cut/application/cut-freecut-mapping';
 import { MdfJobRunner } from '../application/mdf-job-runner';
 import { executeMdfAcceptedJob } from '../application/mdf-accepted-job';
+import { openMdfOrderCommand } from './mdf-order-cascade';
 import { recordMdfLineageReceipt, recordMdfReceipt, type MdfReceiptLine } from '../application/mdf-receipt';
 import type { MdfPhysicalLineageManifest } from '../application/mdf-physical-lineage';
 import type { MdfExecutionContext } from '../domain/mdf-execution-context';
@@ -74,7 +75,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
     vi.stubEnv('BACKEND_STATUS_AUTOMATION','true'); vi.stubEnv('BACKEND_ENABLE_NOTIFICATION_ENGINE','false');
     vi.stubEnv('BACKEND_MDF_SHADOW_INTAKE','true'); vi.stubEnv('BACKEND_MDF_PINNED_DISPATCH','true');
     await db.connect(); await db.query(`CREATE SCHEMA ${schema}; SET search_path=${schema},public`);
-    for (const file of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql','174_mdf_execution_context.sql','175_mdf_command_placement.sql','178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql']) {
+    for (const file of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql','174_mdf_execution_context.sql','175_mdf_command_placement.sql','178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql']) {
       await db.query(readFileSync(new URL(`../../../../db/migrations/${file}`,import.meta.url),'utf8'));
     }
     // Structural clones only. Every sequence/default is local; tests cannot
@@ -146,6 +147,8 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
       }
     }
     await db.query(readFileSync(new URL('../../../../db/migrations/177_cut_result_typed_hdf.sql',import.meta.url),'utf8'));
+    // Migration 190 also extends cut_result_command, which is cloned from public AFTER the migrations above.
+    await db.query(readFileSync(new URL('../../../../db/migrations/190_mdf_bath_transitions.sql',import.meta.url),'utf8'));
     await db.query(`CREATE TRIGGER e2e_project_maps AFTER INSERT ON cut_result FOR EACH ROW EXECUTE FUNCTION project_new_cut_result_label_maps();
       CREATE TRIGGER e2e_project_board AFTER INSERT ON cut_result FOR EACH ROW EXECUTE FUNCTION project_new_cut_result_board_metadata();
       UPDATE mdf_engine_state SET mode='active';
@@ -1625,17 +1628,306 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
   it('ordinary non-vacuum calculation creates no bath',async()=>{
     const f=await fixture(1,false),before=await counts(); await repository.calculate(f.command()); expect((await counts()).receipts).toBe(before.receipts);
   });
-  it('recalculation quarantines new membership and preserves the old accepted source',async()=>{
+  it('recalculation retires the old bath and the transition job accepts the new one (§5.4b)',async()=>{
     const f=await fixture(),command=f.command(); await repository.calculate(command); await runner().processOne();
     const old=await resultId(f.cutJobId);
     const version=Number((await db.query('SELECT version FROM cut_job WHERE cut_job_id=$1',[f.cutJobId])).rows[0].version);
     await repository.calculate({ ...command,commandId: randomUUID(),version });
     const id=await resultId(f.cutJobId); expect(id).not.toBe(old);
+    // Both revisions are received-only until the transition job runs.
     expect((await db.query("SELECT accepted_revision_key FROM mdf_source_heads WHERE source_kind='bath' AND source_id=$1",[`cut-result:${id}`])).rows[0].accepted_revision_key).toBeNull();
-    expect((await db.query("SELECT accepted_revision_key FROM mdf_source_heads WHERE source_kind='bath' AND source_id=$1",[`cut-result:${old}`])).rows[0].accepted_revision_key).toBe(`bath-created:${old}`);
-    expect(await runner().processOne()).toMatchObject({ status: 'done' });
+    const transition=(await db.query("SELECT job_id FROM mdf_bath_transitions WHERE retired_source_id=$1 AND successor_source_id=$2",
+      [`cut-result:${old}`,`cut-result:${id}`])).rows[0];
+    expect(transition).toBeDefined();
+    expect(await runner().processOne()).toMatchObject({ status: 'done', jobId: transition.job_id });
+    const heads=(await db.query(`SELECT source_id,accepted_revision_key=received_revision_key accepted FROM mdf_source_heads
+      WHERE source_kind='bath' AND source_id=ANY($1::text[]) ORDER BY source_id`,[[`cut-result:${old}`,`cut-result:${id}`]])).rows;
+    expect(heads.every(h=>h.accepted)).toBe(true);
     const board=await readMdfPublishedSnapshot(database,user,{ focus: { kind: 'bath',id: `cut-result:${id}` } });
-    expect(board.cards.find(c=>c.id===`cut-result:${id}`)?.issues.length).toBeGreaterThan(0);
+    expect(board.cards.find(c=>c.id===`cut-result:${id}`)).toBeDefined();
+    expect(board.cards.find(c=>c.id===`cut-result:${old}`)).toBeUndefined();
+    expect((await db.query("SELECT count(*)::int n FROM mdf_bath_allocations WHERE bath_id=$1 AND state<>'released'",[`cut-result:${old}`])).rows[0].n).toBe(0);
+  });
+  describe('bath lifecycle through cut commands (§5.4b)', () => {
+    /** Earlier tests may leave jobs pending: process the queue until idle instead of trusting FIFO order. */
+    const drain=async()=>{ for (let i=0;i<40;i+=1) if ((await runner().processOne()).status==='idle') return; };
+    const jobVersion=async(job:number)=>Number((await db.query('SELECT version FROM cut_job WHERE cut_job_id=$1',[job])).rows[0].version);
+    const resultNoOf=async(id:number)=>Number((await db.query('SELECT result_no FROM cut_result WHERE cut_result_id=$1',[id])).rows[0].result_no);
+    /** Calculates, supplies the bath from a real BASIS cut and optionally laminates it (physical facts). */
+    async function laminatedBath(laminate: boolean) {
+      const f=await fixture(); await repository.calculate(f.command()); await drain();
+      const bathId=`cut-result:${await resultId(f.cutJobId)}`;
+      const set=await new PgBazisCutRepository(database).create({ currentUser:user,orderId:f.orderId,detailIds:[f.detailId],
+        idempotencyKey:`E2E-${randomUUID()}`,requestId:'E2E lifecycle supply' });
+      await drain();
+      const mover=new PgMdfBoardManualMoveRepository(database);
+      const actor={ ...user,permissions:[...user.permissions,'orders.update','production.tasks.update','orders.change_production_status'] } as CurrentUser;
+      const setId=String(set.set.bazisCutSetId);
+      const setBoard=await readMdfPublishedSnapshot(database,user,{ focus:{ kind:'bazisCutSet',id:setId } });
+      await mover.upsert({ currentUser:actor,cardKind:'bazisCutSet',cardId:setId,targetColumn:'completed',
+        sourceToken:setBoard.cards.find(c=>c.kind==='bazisCutSet' && c.id===setId)!.commandToken!,idempotencyKey:`E2E-${randomUUID()}`,requestId:'E2E cut' });
+      await drain();
+      const laminateNow=async()=>{
+        const board=await readMdfPublishedSnapshot(database,user,{ focus:{ kind:'bath',id:bathId } });
+        const bath=board.cards.find(c=>c.kind==='bath' && c.id===bathId)!;
+        await mover.upsert({ currentUser:actor,cardKind:'bath',cardId:bathId,targetColumn:'baths_laminated',sourceToken:bath.commandToken!,
+          idempotencyKey:`E2E-${randomUUID()}`,requestId:'E2E laminate' });
+        await drain();
+      };
+      if (laminate) await laminateNow();
+      return { f,bathId,laminateNow };
+    }
+
+    it('refuses recalculation over a laminated bath before any write', async()=>{
+      const { f }=await laminatedBath(true);
+      const before=await counts(),version=await jobVersion(f.cutJobId);
+      const groups=(await db.query('SELECT count(*)::int n FROM cut_group WHERE cut_job_id=$1',[f.cutJobId])).rows[0].n;
+      await expect(repository.calculate({ ...f.command(),commandId:randomUUID(),version }))
+        .rejects.toMatchObject({ code:'MDF_BATH_HAS_PRODUCTION' });
+      expect(await counts()).toEqual(before);
+      expect(await jobVersion(f.cutJobId)).toBe(version);
+      expect((await db.query('SELECT count(*)::int n FROM cut_group WHERE cut_job_id=$1',[f.cutJobId])).rows[0].n).toBe(groups);
+    });
+
+    it('rejects the persist when lamination appears during the external calculation; the old result stays current', async()=>{
+      const { f,laminateNow }=await laminatedBath(false);
+      const old=await resultId(f.cutJobId),version=await jobVersion(f.cutJobId);
+      duringOptimize=laminateNow;
+      try {
+        await expect(repository.calculate({ ...f.command(),commandId:randomUUID(),version }))
+          .rejects.toMatchObject({ code:'MDF_BATH_HAS_PRODUCTION' });
+      } finally { duringOptimize=undefined; }
+      expect(await resultId(f.cutJobId)).toBe(old);
+      expect((await db.query('SELECT count(*)::int n FROM cut_result WHERE cut_job_id=$1',[f.cutJobId])).rows[0].n).toBe(1);
+      expect((await db.query('SELECT count(*)::int n FROM mdf_bath_transitions WHERE cut_job_id=$1',[f.cutJobId])).rows[0].n).toBe(0);
+    });
+
+    it('fences a switch back to a retired result and refuses it', async()=>{
+      const f=await fixture(),command=f.command(); await repository.calculate(command); await drain();
+      const first=await resultId(f.cutJobId);
+      await repository.calculate({ ...command,commandId:randomUUID(),version:await jobVersion(f.cutJobId) });
+      await drain();
+      const resultNo=await resultNoOf(first);
+      await expect(repository.setCurrentResult({ currentUser:user,cutJobId:f.cutJobId,resultNo }))
+        .rejects.toMatchObject({ statusCode:428,code:'MDF_BATH_FENCE_REQUIRED' });
+      await expect(repository.setCurrentResult({ currentUser:user,cutJobId:f.cutJobId,resultNo,
+        expectedJobVersion:await jobVersion(f.cutJobId),idempotencyKey:`E2E-${randomUUID()}` }))
+        .rejects.toMatchObject({ statusCode:409,code:'MDF_BATH_RESULT_RETIRED' });
+      await expect(repository.setCurrentResult({ currentUser:user,cutJobId:f.cutJobId,resultNo,
+        expectedJobVersion:1,idempotencyKey:`E2E-${randomUUID()}` })).rejects.toMatchObject({ code:'CUT_JOB_STALE_VERSION' });
+    });
+
+    const withMode=async(mode:string,body:()=>Promise<void>)=>{
+      await db.query('UPDATE mdf_engine_state SET mode=$1',[mode]);
+      try { await body(); } finally { await db.query("UPDATE mdf_engine_state SET mode='active'"); }
+    };
+    /** Two results calculated in legacy mode (no baths captured), then the engine is active again. */
+    async function legacyResults(f: Awaited<ReturnType<typeof fixture>>) {
+      await withMode('legacy', async()=>{
+        await repository.calculate(f.command());
+        await repository.calculate({ ...f.command(),version:await jobVersion(f.cutJobId) });
+      });
+      const results=(await db.query('SELECT cut_result_id::int id,result_no::int no FROM cut_result WHERE cut_job_id=$1 ORDER BY cut_result_id',
+        [f.cutJobId])).rows as { id:number; no:number }[];
+      return results;
+    }
+
+    it('re-checks the owner scope on locked rows (concurrent reassignment ⇒ 403)', async()=>{
+      const f=await fixture(); await repository.calculate(f.command()); await drain();
+      const base=rolePolicyForUser(user),own={ ...user,policyScopes:{ ...base,orders:{ ...base.orders,view:'own' as const } } };
+      const version=await jobVersion(f.cutJobId);
+      await db.query('BEGIN');
+      await db.query('SELECT order_id FROM orders WHERE order_id=$1 FOR UPDATE',[f.orderId]);
+      await db.query('UPDATE orders SET created_by=999 WHERE order_id=$1',[f.orderId]);
+      const archiving=repository.archive({ currentUser:own,cutJobId:f.cutJobId,version } as never);
+      await new Promise(resolve=>setTimeout(resolve,200));
+      await db.query('COMMIT');
+      await expect(archiving).rejects.toMatchObject({ code:'PERMISSION_DENIED' });
+      expect((await db.query('SELECT status FROM cut_job WHERE cut_job_id=$1',[f.cutJobId])).rows[0].status).not.toBe('archived');
+    });
+
+    it('revalidates the pre-read current result under the job lock (stale no-op ⇒ 409)', async()=>{
+      const f=await fixture(); const [first,second]=await legacyResults(f);
+      await db.query('BEGIN');
+      await db.query('SELECT 1 FROM cut_job WHERE cut_job_id=$1 FOR UPDATE',[f.cutJobId]);
+      await db.query('UPDATE cut_job SET current_cut_result_id=$2 WHERE cut_job_id=$1',[f.cutJobId,first.id]);
+      const selecting=repository.setCurrentResult({ currentUser:user,cutJobId:f.cutJobId,resultNo:second.no });
+      await new Promise(resolve=>setTimeout(resolve,200));
+      await db.query('COMMIT');
+      await expect(selecting).rejects.toMatchObject({ code:'MDF_BATH_LIFECYCLE_STALE' });
+    });
+
+    it('never turns a non-vacuum result into a bath', async()=>{
+      const f=await fixture(1,false); await repository.calculate(f.command());
+      await repository.calculate({ ...f.command(),version:await jobVersion(f.cutJobId) });
+      const first=(await db.query('SELECT result_no::int no FROM cut_result WHERE cut_job_id=$1 ORDER BY cut_result_id LIMIT 1',[f.cutJobId])).rows[0].no;
+      await repository.setCurrentResult({ currentUser:user,cutJobId:f.cutJobId,resultNo:first,
+        expectedJobVersion:await jobVersion(f.cutJobId),idempotencyKey:`E2E-${randomUUID()}` });
+      expect((await db.query(`SELECT count(*)::int n FROM mdf_source_heads WHERE source_kind='bath'
+        AND source_id IN (SELECT 'cut-result:'||cut_result_id FROM cut_result WHERE cut_job_id=$1)`,[f.cutJobId])).rows[0].n).toBe(0);
+    });
+
+    it('rejects a historical result whose member detail was deleted', async()=>{
+      const f=await fixture(); const [first]=await legacyResults(f);
+      await db.query('UPDATE order_details SET delete_flag=true WHERE detail_id=$1',[f.detailId]);
+      await expect(repository.setCurrentResult({ currentUser:user,cutJobId:f.cutJobId,resultNo:first.no,
+        expectedJobVersion:await jobVersion(f.cutJobId),idempotencyKey:`E2E-${randomUUID()}` }))
+        .rejects.toMatchObject({ code:'MDF_BATH_SUCCESSOR_INVALID' });
+      await db.query('UPDATE order_details SET delete_flag=false WHERE detail_id=$1',[f.detailId]);
+    });
+
+    it('recalculates a bath with an added order (complete owner scope shared with the lifecycle)', async()=>{
+      const f=await fixture(); await repository.calculate(f.command()); await drain();
+      const other=++sequence,otherDetail=other*10;
+      await db.query(`INSERT INTO orders(order_id,order_name,project_id,order_date,order_kind,delete_flag,version,order_status_id,payment_status_id,created_by)
+        VALUES($1,$2,1,'2026-09-22','production_order',false,1,4,1,1)`,[other,`E2E bath ${other}`]);
+      await db.query(`INSERT INTO order_details(detail_id,order_id,detail_number,detail_name,quantity,height,width,production_status_id,
+        delete_flag,sheet_material_type_id,version,updated_at) VALUES($1,$2,1,'E2E added',1,200,100,1,false,1,1,now())`,[otherDetail,other]);
+      await db.query(`INSERT INTO cut_job_item(cut_job_id,source_type,order_id,order_detail_id,freecut_item_id,qty,is_active)
+        VALUES($1,'order_detail',$2,$3,$4,1,true)`,[f.cutJobId,other,otherDetail,`det-${otherDetail}`]);
+      await repository.calculate({ ...f.command(),version:await jobVersion(f.cutJobId) });
+      const transition=(await db.query('SELECT job_id,owner_ids::int[] owners FROM mdf_bath_transitions WHERE cut_job_id=$1',[f.cutJobId])).rows[0];
+      expect(transition.owners).toEqual([f.orderId,other].sort((a,b)=>a-b));
+      await drain();
+      expect((await db.query('SELECT status FROM mdf_recalculation_jobs WHERE job_id=$1',[transition.job_id])).rows[0].status).toBe('done');
+      const related=(await db.query(`SELECT r.entity_type,count(*)::int n FROM audit_log a JOIN audit_log_related_entity r USING(audit_id)
+        WHERE a.event='mdf.bath_transition.requested' AND a.entity_id=$1 GROUP BY 1 ORDER BY 1`,[String(f.cutJobId)])).rows;
+      expect(related.map(r=>r.entity_type)).toEqual(['order','order_detail']);
+    });
+
+    it('replays a completed recalculation during a pending transition and a rejected one with its stored code', async()=>{
+      const f=await fixture(); const command=f.command(); await repository.calculate(command); await drain();
+      const recalc={ ...command,commandId:randomUUID(),version:await jobVersion(f.cutJobId) };
+      await repository.calculate(recalc);
+      await expect(repository.calculate(recalc)).resolves.toBeDefined();
+      await drain();
+      const { f:g,laminateNow }=await laminatedBath(false);
+      const rejected={ ...g.command(),commandId:randomUUID(),version:await jobVersion(g.cutJobId) };
+      duringOptimize=laminateNow;
+      try { await expect(repository.calculate(rejected)).rejects.toMatchObject({ code:'MDF_BATH_HAS_PRODUCTION' }); }
+      finally { duringOptimize=undefined; }
+      await expect(repository.calculate(rejected)).rejects.toMatchObject({ code:'CUT_RESULT_COMMAND_FAILED',
+        details:{ failureCode:'MDF_BATH_HAS_PRODUCTION' } });
+    });
+
+    it('refuses a fresh calculation before any write while a retirement is pending (no active bath)', async()=>{
+      const f=await fixture(); const command=f.command();
+      await withMode('legacy', async()=>{ await repository.calculate(command); });
+      const nonVacuum=await resultId(f.cutJobId);
+      await db.query('UPDATE cut_result_board_projection SET is_vacuum=false WHERE cut_result_id=$1',[nonVacuum]);
+      await repository.calculate({ ...command,commandId:randomUUID(),version:await jobVersion(f.cutJobId) });
+      await drain();
+      await repository.setCurrentResult({ currentUser:user,cutJobId:f.cutJobId,resultNo:await resultNoOf(nonVacuum),
+        expectedJobVersion:await jobVersion(f.cutJobId),idempotencyKey:`E2E-${randomUUID()}` });
+      const before=await counts(),version=await jobVersion(f.cutJobId);
+      const groups=(await db.query('SELECT count(*)::int n FROM cut_group WHERE cut_job_id=$1',[f.cutJobId])).rows[0].n;
+      let optimized=false;
+      duringOptimize=async()=>{ optimized=true; };
+      try {
+        await expect(repository.calculate({ ...command,commandId:randomUUID(),version }))
+          .rejects.toMatchObject({ code:'MDF_BATH_TRANSITION_PENDING' });
+      } finally { duringOptimize=undefined; }
+      expect(optimized).toBe(false);
+      expect(await counts()).toEqual(before);
+      expect(await jobVersion(f.cutJobId)).toBe(version);
+      expect((await db.query('SELECT count(*)::int n FROM cut_group WHERE cut_job_id=$1',[f.cutJobId])).rows[0].n).toBe(groups);
+      await drain();
+    });
+
+    it('lets an order demand edit cascade into an accepted successor bath', async()=>{
+      const f=await fixture(); const command=f.command(); await repository.calculate(command); await drain();
+      await repository.calculate({ ...command,commandId:randomUUID(),version:await jobVersion(f.cutJobId) });
+      await drain();
+      const successor=`cut-result:${await resultId(f.cutJobId)}`;
+      await database.transaction(async tx=>{
+        await tx.query('SELECT order_id FROM orders WHERE order_id=$1 FOR UPDATE',[f.orderId]);
+        const mdf=await openMdfOrderCommand(tx,'orders.update');
+        await mdf.captureBefore([f.orderId]);
+        await tx.query('UPDATE order_details SET quantity=3 WHERE detail_id=$1',[f.detailId+1]);
+        await mdf.finish({ user,requestId:'E2E successor cascade',commandKey:`successor-${f.orderId}`,orderIds:[f.orderId] });
+      },{ mdf:{ writer:'orders.update',capability:'order-demand' } });
+      expect((await db.query("SELECT received_revision_key r FROM mdf_source_heads WHERE source_kind='bath' AND source_id=$1",[successor])).rows[0].r)
+        .toMatch(/^order-cascade:/);
+    });
+
+    it('recreates a bath through the lifecycle after a non-vacuum round trip, then recalculates normally', async()=>{
+      const f=await fixture(); const command=f.command();
+      await withMode('legacy', async()=>{ await repository.calculate(command); });
+      const nonVacuum=await resultId(f.cutJobId);
+      // A non-vacuum historical result (the fake optimizer always lays out vacuum sheets).
+      await db.query('UPDATE cut_result_board_projection SET is_vacuum=false WHERE cut_result_id=$1',[nonVacuum]);
+      const accepted=async(id:string)=>(await db.query(`SELECT accepted_revision_key=received_revision_key ok FROM mdf_source_heads
+        WHERE source_kind='bath' AND source_id=$1`,[id])).rows[0]?.ok;
+      // Recalculation with prior results: the lifecycle captures an ACCEPTED bath (no «hasPrior» quarantine).
+      await repository.calculate({ ...command,commandId:randomUUID(),version:await jobVersion(f.cutJobId) });
+      await drain();
+      const first=`cut-result:${await resultId(f.cutJobId)}`;
+      expect(await accepted(first)).toBe(true);
+      // Back to the non-vacuum result: the bath retires without successor.
+      await repository.setCurrentResult({ currentUser:user,cutJobId:f.cutJobId,resultNo:await resultNoOf(nonVacuum),
+        expectedJobVersion:await jobVersion(f.cutJobId),idempotencyKey:`E2E-${randomUUID()}` });
+      expect((await db.query('SELECT successor_source_id FROM mdf_bath_transitions WHERE retired_source_id=$1',[first])).rows)
+        .toEqual([{ successor_source_id:null }]);
+      await drain();
+      // Recalculate again: the bath is recreated as accepted, and a further recalculation transitions normally.
+      await repository.calculate({ ...command,commandId:randomUUID(),version:await jobVersion(f.cutJobId) });
+      await drain();
+      const recreated=`cut-result:${await resultId(f.cutJobId)}`;
+      expect(await accepted(recreated)).toBe(true);
+      await repository.calculate({ ...command,commandId:randomUUID(),version:await jobVersion(f.cutJobId) });
+      await drain();
+      expect((await db.query(`SELECT count(*)::int n FROM mdf_bath_transitions t JOIN mdf_recalculation_jobs j USING(job_id)
+        WHERE t.cut_job_id=$1 AND j.status<>'done'`,[f.cutJobId])).rows[0].n).toBe(0);
+      expect((await db.query('SELECT retired_source_id FROM mdf_bath_transitions WHERE cut_job_id=$1 ORDER BY created_at DESC LIMIT 1',
+        [f.cutJobId])).rows[0].retired_source_id).toBe(recreated);
+    });
+
+    it('shows a pending retirement job to a scoped owner and hides it from others; worker audit links demand-only details', async()=>{
+      const f=await fixture(); const command=f.command(); await repository.calculate(command); await drain();
+      await repository.calculate({ ...command,commandId:randomUUID(),version:await jobVersion(f.cutJobId) });
+      const transition=(await db.query('SELECT job_id::text job FROM mdf_bath_transitions WHERE cut_job_id=$1',[f.cutJobId])).rows[0].job;
+      const base=rolePolicyForUser(user),own={ ...user,policyScopes:{ ...base,orders:{ ...base.orders,view:'own' as const } } };
+      const visible=await readMdfPublishedSnapshot(database,own,{ orderIds:[f.orderId],jobIds:[transition] });
+      expect(visible.pendingJobs.map((j:{ jobId:string })=>j.jobId)).toContain(transition);
+      expect(visible.trackedJobs.map((j:{ jobId:string })=>j.jobId)).toContain(transition);
+      await db.query('UPDATE orders SET created_by=999 WHERE order_id=$1',[f.orderId]);
+      const hidden=await readMdfPublishedSnapshot(database,own,{ orderIds:[f.orderId],jobIds:[transition] });
+      expect(hidden.pendingJobs.map((j:{ jobId:string })=>j.jobId)).not.toContain(transition);
+      expect(hidden.trackedJobs.map((j:{ jobId:string })=>j.jobId)).not.toContain(transition);
+      await db.query('UPDATE orders SET created_by=1 WHERE order_id=$1',[f.orderId]);
+      await drain();
+      const details=(await db.query(`SELECT r.entity_id::int id FROM audit_log a JOIN audit_log_related_entity r USING(audit_id)
+        WHERE a.event='mdf_board.bath_retired' AND a.metadata_json->>'jobId'=$1 AND r.entity_type='order_detail' ORDER BY 1`,[transition])).rows
+        .map(r=>r.id);
+      expect(details).toEqual(expect.arrayContaining([f.detailId,f.detailId+1]));
+    });
+
+    it('denies a lifecycle change when the actor cannot view every owner of the bath', async()=>{
+      const f=await fixture(); await repository.calculate(f.command()); await drain();
+      await db.query('UPDATE orders SET created_by=999 WHERE order_id=$1',[f.orderId]);
+      const base=rolePolicyForUser(user),restricted={ ...user,policyScopes:{ ...base,orders:{ ...base.orders,view:'own' as const } } };
+      const before=await counts(),version=await jobVersion(f.cutJobId);
+      await expect(repository.archive({ currentUser:restricted,cutJobId:f.cutJobId,version } as never))
+        .rejects.toMatchObject({ code:'PERMISSION_DENIED' });
+      expect(await counts()).toEqual(before);
+      expect((await db.query('SELECT status FROM cut_job WHERE cut_job_id=$1',[f.cutJobId])).rows[0].status).not.toBe('archived');
+    });
+
+    it('answers PENDING while a transition is unprocessed, then archives the job and retires its bath', async()=>{
+      const f=await fixture(),command=f.command(); await repository.calculate(command); await drain();
+      await repository.calculate({ ...command,commandId:randomUUID(),version:await jobVersion(f.cutJobId) });
+      const current=`cut-result:${await resultId(f.cutJobId)}`;
+      await expect(repository.archive({ currentUser:user,cutJobId:f.cutJobId,version:await jobVersion(f.cutJobId) } as never))
+        .rejects.toMatchObject({ code:'MDF_BATH_TRANSITION_PENDING' });
+      await drain();
+      await repository.archive({ currentUser:user,cutJobId:f.cutJobId,version:await jobVersion(f.cutJobId) } as never);
+      const job=(await db.query("SELECT t.job_id FROM mdf_bath_transitions t WHERE t.retired_source_id=$1",[current])).rows[0];
+      expect(job).toBeDefined();
+      await drain();
+      expect((await db.query('SELECT status FROM mdf_recalculation_jobs WHERE job_id=$1',[job.job_id])).rows[0].status).toBe('done');
+      expect((await readMdfPublishedSnapshot(database,user,{ focus:{ kind:'bath',id:current } })).cards
+        .find(c=>c.id===current)).toBeUndefined();
+    });
   });
   it('replay reauthorizes frozen result owners after the current basket is empty',async()=>{
     const f=await fixture(),command=f.command(); await repository.calculate(command); await runner().processOne();

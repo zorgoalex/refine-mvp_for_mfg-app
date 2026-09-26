@@ -44,10 +44,25 @@ export const cutApi = {
     );
   },
 
-  async setCurrentResult(cutJobId: number, resultNo: number): Promise<CutJobDto> {
+  /**
+   * Make a completed cut result the job's active/current one. The backend
+   * REQUIRES both fence headers whenever the change would move the job's
+   * active MDF bath (428 MDF_BATH_FENCE_REQUIRED otherwise; a mismatched
+   * jobVersion answers 409 CUT_JOB_STALE_VERSION) — so this call always
+   * sends them: jobVersion is the version of the job currently displayed,
+   * idempotencyKey a fresh UUID per user action (reuse on a same-action
+   * retry after a network error).
+   */
+  async setCurrentResult(
+    cutJobId: number,
+    resultNo: number,
+    jobVersion: number,
+    idempotencyKey: string,
+  ): Promise<CutJobDto> {
     return httpClient.post<CutJobDto>(
       apiRoutes.cutJobs.resultCurrent(validateCutJobId(cutJobId), validateCutJobId(resultNo)),
       {},
+      { headers: buildMakeCurrentHeaders(jobVersion, idempotencyKey) },
     );
   },
 
@@ -417,6 +432,18 @@ function appendText(params: URLSearchParams, key: string, value: string | undefi
   if (text) {
     params.append(key, text);
   }
+}
+
+/**
+ * Pure header-builder for the make-current fence (If-Match + Idempotency-Key).
+ * Kept separate from setCurrentResult so header shape is unit-testable
+ * without a network call.
+ */
+export function buildMakeCurrentHeaders(jobVersion: number, idempotencyKey: string): Record<string, string> {
+  return {
+    'If-Match': String(jobVersion),
+    'Idempotency-Key': idempotencyKey,
+  };
 }
 
 export function validateCutJobId(cutJobId: number): number {

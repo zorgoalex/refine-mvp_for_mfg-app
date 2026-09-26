@@ -14750,17 +14750,25 @@ paths:
       tags: [CutJobs]
       operationId: setCutResultCurrent
       summary: Mark a completed cut result as acting for a cut job
+      description: >-
+        In the active MDF engine a change of the job's current result retires its active bath and captures
+        the new one (bath lifecycle); then If-Match and Idempotency-Key are required (428 MDF_BATH_FENCE_REQUIRED).
+        409 codes: CUT_JOB_STALE_VERSION, MDF_BATH_HAS_PRODUCTION, MDF_BATH_TRANSITION_PENDING,
+        MDF_BATH_RESULT_RETIRED, MDF_BATH_LIFECYCLE_STALE, MDF_BATH_SUCCESSOR_INVALID, MDF_ENGINE_READ_ONLY.
       security: [{ bearerAuth: [] }]
       x-permission: cut.manage
       parameters:
         - { name: cutJobId, in: path, required: true, schema: { type: integer, minimum: 1 } }
         - { name: resultNo, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: If-Match, in: header, required: false, schema: { type: string }, description: Cut job version the operator saw }
+        - { name: Idempotency-Key, in: header, required: false, schema: { type: string, maxLength: 200 } }
       responses:
         '200': { description: OK }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '428': { description: 'MDF_BATH_FENCE_REQUIRED — If-Match and Idempotency-Key required for a bath-changing switch' }
         '503': { $ref: '#/components/responses/FeatureDisabled' }
         '500': { $ref: '#/components/responses/InternalError' }
 

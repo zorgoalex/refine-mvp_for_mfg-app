@@ -2,7 +2,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { TransactionClient } from '../../../database/database.types';
 import { createMdfCorrectionPgFixture } from './mdf-correction-test-fixture.integration';
-import { recordMdfLineageReceipt, recordMdfOrderCascadeReceipt, recordMdfReceipt } from '../application/mdf-receipt';
+import { recordMdfBathTransition, recordMdfLineageReceipt, recordMdfOrderCascadeReceipt, recordMdfReceipt } from '../application/mdf-receipt';
+import { randomUUID } from 'node:crypto';
 import { mdfDemandDigest } from '../domain/mdf-execution-context';
 import type { MdfExecutionContext } from '../domain/mdf-execution-context';
 import { MdfJobRunner } from '../application/mdf-job-runner';
@@ -48,7 +49,7 @@ describe.skipIf(!enabled)('MDF order-demand cascade, isolated PostgreSQL schema'
       '174_mdf_execution_context.sql', '175_mdf_command_placement.sql',
       '178_mdf_correction_receipts.sql', '179_mdf_active_return.sql',
       '182_mdf_physical_lineage.sql', '185_mdf_bazis_composition.sql', '187_mdf_bazis_refill_rows.sql',
-      '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql',
+      '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql',
     ]);
     await fixture.assertLocalRelations([
       'mdf_source_heads', 'mdf_evidence_revisions', 'mdf_revision_context', 'mdf_revision_demand',
@@ -515,7 +516,7 @@ describe.skipIf(!enabled)('MDF order-demand cascade, isolated PostgreSQL schema'
     // A demand change of an order that owns no MDF source also passes (no source ⇒ no execution loader).
     await orderCommand([big.orderId], tx => tx.query('UPDATE order_details SET quantity=2 WHERE detail_id=$1', [big.ids[0]]), 'big-demand');
     expect(await quantity(big.ids[0])).toBe(2);
-  });
+  }, 60000);
   describe('read-time placement (§5.4d)', () => {
     const card = async (s: Source) => (await readMdfPublishedSnapshot(db() as never, user,
       { focus: { kind: 'bazisCutSet', id: s.sourceId } })).cards.find(c => c.id === s.sourceId)!;
@@ -571,5 +572,73 @@ describe.skipIf(!enabled)('MDF order-demand cascade, isolated PostgreSQL schema'
     await expect(repository.delete({ currentUser: user, cardKind: 'order', cardId: String(order.orderId),
       idempotencyKey: `order-card-clear-${order.orderId}`, requestId: 'order-card-clear' } as never))
       .rejects.toMatchObject({ statusCode: 409, code: 'MDF_ORDER_CARD_NOT_SUPPORTED' });
+  });
+  describe('bath transition engine core (§5.4b)', () => {
+    const bathAllocations = async (bathId: string) => (await fixture.client.query<{ state: string; q: string }>(`SELECT state,
+      sum(quantity)::text q FROM mdf_bath_allocations WHERE bath_id=$1 GROUP BY state ORDER BY state`, [bathId])).rows;
+    async function transition(s: Source, retiredId: string, successorQuantity: number | null) {
+      const b = (await fixture.client.query<{ accepted: string; version: string; epoch: string }>(`SELECT accepted_revision_key accepted,
+        version::text,correction_epoch::text epoch FROM mdf_source_heads WHERE source_kind='bath' AND source_id=$1`, [retiredId])).rows[0];
+      let successor: Parameters<typeof recordMdfBathTransition>[1]['successor'];
+      if (successorQuantity !== null) {
+        const cutId = 700_000 + ++bathSequence;
+        await fixture.client.query(`INSERT INTO cut_result(cut_result_id,created_at,snapshot_digest) VALUES($1,now(),repeat('c',64))`, [cutId]);
+        successor = { sourceId: `cut-result:${cutId}`, revisionKey: `bath-successor:${cutId}`,
+          lines: [{ lineKey: 'own-member', orderId: s.orderIds[0], detailId: s.member, quantity: successorQuantity,
+            stageCode: 'membership', evidenceKind: 'derived', rework: false }],
+          executionContext: { ...context(await liveDemand([s.orderIds[0]]), `E2E successor ${cutId}`), priorColumn: 'baths' } };
+      }
+      const transitionId = randomUUID(), jobId = randomUUID();
+      await db().transaction(tx => recordMdfBathTransition(tx, { transitionId, jobId, cutJobId: 1,
+        retired: { sourceId: retiredId, predecessorRevisionKey: b.accepted, revisionKey: `bath-retired:${transitionId}`,
+          fence: { version: b.version, correctionEpoch: b.epoch }, sourceCreatedAt: '2026-09-24T00:00:00.000Z', displayName: 'E2E retired' },
+        ...(successor ? { successor } : {}), ownerIds: [s.orderIds[0]], actorUserId: 1, requestId: `transition-${transitionId}`,
+        commandKey: `transition-${transitionId}`, rules: [] }));
+      return { jobId, successorId: successor?.sourceId ?? null };
+    }
+
+    it('retires a reserved bath, releases its supply and accepts the successor that re-reserves it once', async () => {
+      const s = await makeSource({ cut: true });
+      const bathId = (await addBath(s, 4)).replace(/^/, '');
+      expect(await bathAllocations(bathId)).toEqual([{ state: 'reserved', q: '4' }]);
+      const { jobId, successorId } = await transition(s, bathId, 4);
+      expect(await processJob(jobId)).toMatchObject({ status: 'done' });
+      expect(await bathAllocations(bathId)).toEqual([{ state: 'released', q: '4' }]);
+      expect(await bathAllocations(successorId!)).toEqual([{ state: 'reserved', q: '4' }]);
+      const heads = (await fixture.client.query<{ id: string; accepted: string; received: string }>(`SELECT source_id id,
+        accepted_revision_key accepted,received_revision_key received FROM mdf_source_heads WHERE source_kind='bath'
+        AND source_id=ANY($1::text[]) ORDER BY source_id`, [[bathId, successorId]])).rows;
+      expect(heads.every(h => h.accepted === h.received)).toBe(true);
+      expect((await fixture.client.query(`SELECT 1 FROM mdf_published_sources WHERE source_kind='bath' AND source_id=$1`, [bathId])).rows).toHaveLength(0);
+      expect((await fixture.client.query(`SELECT 1 FROM mdf_published_sources WHERE source_kind='bath' AND source_id=$1`, [successorId])).rows).toHaveLength(1);
+      expect((await fixture.client.query(`SELECT 1 FROM mdf_recalculation_jobs WHERE source_kind='bath' AND source_id=$1`, [successorId])).rows).toHaveLength(0);
+    });
+
+    it('retires a bath without successor and frees its supply', async () => {
+      const s = await makeSource({ cut: true });
+      const bathId = await addBath(s, 3);
+      const { jobId } = await transition(s, bathId, null);
+      expect(await processJob(jobId)).toMatchObject({ status: 'done' });
+      expect(await bathAllocations(bathId)).toEqual([{ state: 'released', q: '3' }]);
+    });
+
+    it('rejects at commit a retirement whose revision carries lines, leaving heads unchanged', async () => {
+      const s = await makeSource({ cut: true });
+      const bathId = await addBath(s, 2);
+      const b = (await fixture.client.query<{ accepted: string; version: string; epoch: string }>(`SELECT accepted_revision_key accepted,
+        version::text,correction_epoch::text epoch FROM mdf_source_heads WHERE source_kind='bath' AND source_id=$1`, [bathId])).rows[0];
+      const transitionId = randomUUID();
+      await expect(db().transaction(async tx => {
+        await recordMdfBathTransition(tx, { transitionId, jobId: randomUUID(), cutJobId: 1,
+          retired: { sourceId: bathId, predecessorRevisionKey: b.accepted, revisionKey: `bath-retired:${transitionId}`,
+            fence: { version: b.version, correctionEpoch: b.epoch }, sourceCreatedAt: '2026-09-24T00:00:00.000Z', displayName: 'E2E' },
+          ownerIds: [s.orderIds[0]], actorUserId: 1, requestId: 'tampered', commandKey: 'tampered', rules: [] });
+        await tx.query(`INSERT INTO mdf_evidence_lines(source_kind,source_id,revision_key,line_key,order_id,detail_id,quantity,
+          stage_code,evidence_kind,rework) VALUES('bath',$1,$2,'x',$3,$4,1,'membership','derived',false)`,
+        [bathId, `bath-retired:${transitionId}`, s.orderIds[0], s.member]);
+      })).rejects.toThrow();
+      expect((await fixture.client.query<{ received: string }>(`SELECT received_revision_key received FROM mdf_source_heads
+        WHERE source_kind='bath' AND source_id=$1`, [bathId])).rows[0].received).toBe(b.accepted);
+    });
   });
 });

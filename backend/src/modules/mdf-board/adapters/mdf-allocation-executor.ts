@@ -7,6 +7,7 @@ import type { MdfPositionQuantity } from '../domain/mdf-quantities';
 import { mdfLineageRevisionKey } from '../domain/mdf-physical-lineage';
 import { loadMdfExecutionSnapshot, mdfSourceKey } from './mdf-execution-snapshot';
 import { advanceCompatibleMdfRevision } from './mdf-compatible-advance';
+import { advanceMdfBathTransition, loadMdfBathTransitionForJob } from './mdf-bath-transition';
 import { loadMdfBazisCompositionJobIntent, mdfBazisCompositionOwnerScope,
   lockMdfBazisCompositionDetails } from './mdf-bazis-composition-job';
 import { advanceMdfBazisCompositionRevision,
@@ -42,8 +43,8 @@ const edges = (withContext: boolean) => `edges AS (
     AND (d.revision_key=h.accepted_revision_key OR d.revision_key=h.received_revision_key)` : ''}
 )`;
 
-async function discover(tx: DatabaseClient, source: Source,allowEmptyScope = false) {
-  const sources = new Map<string, Source>([[key(source), source]]), orders = new Set<number>();
+async function discover(tx: DatabaseClient, source: Source,allowEmptyScope = false,seeds: readonly Source[] = []) {
+  const sources = new Map<string, Source>([[key(source), source],...seeds.map(s => [key(s), s] as const)]), orders = new Set<number>();
   for (let round = 0; round <= MAX_ORDERS; round++) {
     const previous = `${sources.size}:${orders.size}`, values = [...sources.values()];
     const owners = (await tx.query<{ id: string }>(`WITH ${edges(allowEmptyScope)}
@@ -86,6 +87,9 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
   if (!job || job.status !== 'pending') attention('JOB_NOT_PENDING');
   const source = { kind: job.source_kind, id: job.source_id };
   const intent = await loadMdfBazisCompositionJobIntent(tx, job);
+  // §5.4b: a bath transition job also owns its successor's acceptance; seed it into the scope.
+  const transition = await loadMdfBathTransitionForJob(tx, job);
+  const seeds = transition?.successorSourceId ? [{ kind: 'bath' as const, id: transition.successorSourceId }] : [];
   if (intent && !options.requireExecutionContext) attention('COMPOSITION_REQUIRES_CONTEXT');
   // Negative-only early gate: a stale received head or epoch supersedes before
   // any owner/raw work; the locked recheck below stays authoritative.
@@ -97,7 +101,7 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
     if (!early) attention('HEAD_MISSING');
     if (early.received !== job.revision_key || early.epoch !== job.correction_epoch) return result('superseded');
   }
-  const scope = await discover(tx, source,options.requireExecutionContext);
+  const scope = await discover(tx, source,options.requireExecutionContext,seeds);
   const lockedOwnerIds = intent ? mdfBazisCompositionOwnerScope(scope.orders, intent) : scope.orders;
   let compositionAcceptance: MdfBazisCompositionAcceptance | null = null;
   const owners = (await tx.query<{ order_id: string }>(`SELECT order_id FROM orders WHERE order_id=ANY($1::bigint[])
@@ -118,7 +122,7 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
     JOIN unnest($1::text[],$2::text[]) s(kind,id) ON h.source_kind=s.kind AND h.source_id=s.id
     ORDER BY h.source_kind,h.source_id FOR UPDATE OF h`, [scope.sources.map(s => s.kind), scope.sources.map(s => s.id)])).rows;
   // A waiter must not use a component discovered before somebody changed it.
-  const again = await discover(tx, source,options.requireExecutionContext);
+  const again = await discover(tx, source,options.requireExecutionContext,seeds);
   if (JSON.stringify(again) !== JSON.stringify(scope)) throw new Error('MDF_ALLOCATION_SCOPE_CHANGED');
   if (intent) mdfBazisCompositionOwnerScope(again.orders, intent);
   const trigger = heads.find(h => key(h) === key(source));
@@ -164,6 +168,10 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
     trigger.version = advanced.newHeadVersion;
     compositionAcceptance = advanced.compositionAcceptance;
     executionSnapshot = await loadMdfExecutionSnapshot(tx, heads, scope.orders, { allowPendingJobId: jobId });
+  } else if (transition) {
+    if (!executionSnapshot) throw new Error('MDF_BATH_TRANSITION_CONTEXT_MISSING');
+    allocations = await advanceMdfBathTransition(tx,{ job,transition,heads,lines,allocations });
+    executionSnapshot = await loadMdfExecutionSnapshot(tx,heads,scope.orders,{ allowPendingJobId: jobId });
   } else if (executionSnapshot) {
     // Promote only THIS job's authorized forward revision; another source's
     // pending proof must wait for its own pinned job and original actor.
@@ -214,7 +222,9 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
   const bySource = new Map<string, Line[]>();
   for (const line of lines) { const own = bySource.get(key(line)) ?? []; own.push(line); bySource.set(key(line), own); }
   let plan: ReturnType<typeof planMdfQuarantinedAllocations>;
-  try { plan = planMdfQuarantinedAllocations({ sources: heads.map(h => ({ ...h,
+  // A retired bath (terminal empty revision) takes no part in allocation.
+  const liveHeads = heads.filter(h => !executionSnapshot?.retired.has(mdfSourceKey(h)));
+  try { plan = planMdfQuarantinedAllocations({ sources: liveHeads.map(h => ({ ...h,
     // Invalid context quarantines THIS source. It never blesses legacy shadow
     // quantities, nor freezes independent same-order sources wholesale.
     accepted: executionSnapshot?.issues.get(mdfSourceKey(h))?.length ? null : h.accepted,

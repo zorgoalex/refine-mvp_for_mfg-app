@@ -34,6 +34,7 @@ import { ordersApi } from '../../api/ordersApi';
 import type { CutParamProfile, CutPdfTemplate, CutSettingRow } from '../../api/cutConfigApi';
 import { ApiError } from '../../api/httpClient';
 import type { OrderListItemDto } from '../../api/types/orderApi.types';
+import { buildMdfBathErrorView, createSingleFlight, isDefinitiveCalculationRejection } from './cutMdfBathErrors';
 import { resolveProfileLabel, formatArea, describeCutProfile } from './cutProfileHelpers';
 import { jobMaterialTypeIds, partitionSheetOptions, isMixedMaterialSelection, formatSheetOptionLabel } from './cutSheetSelectHelpers';
 import {
@@ -1048,7 +1049,13 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [selectedResult, setSelectedResult] = useState<CutResultSummary | null>(null);
   const [isFrozenResultSelection, setIsFrozenResultSelection] = useState(false);
   const calcCommandRef = useRef<{ cutJobId: number; version: number; commandId: string } | null>(null);
+  const calcRefreshRequiredRef = useRef<number | null>(null);
+  const calcFlightRef = useRef(createSingleFlight());
   const manualCommandRef = useRef<{ key: string; commandId: string } | null>(null);
+  // Idempotency-Key for setCurrentResult's MDF-bath fence, keyed on
+  // job+result+version so a same-action retry after a network error reuses
+  // it, while a version change (fresh job state) naturally mints a new one.
+  const makeCurrentCommandRef = useRef<{ key: string; commandId: string } | null>(null);
   const isHistoricalResult = selectedResult !== null && isFrozenResultSelection;
   const pdfTemplateIsRequestOnly = isHistoricalResult || job?.status === 'archived';
   const [profiles, setProfiles] = useState<CutParamProfile[]>([]);
@@ -2041,21 +2048,34 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       const writeToken = cutPageReadGuard.capture();
       if (!writeToken) return;
       const targetJobId = job.cutJobId;
+      const commandKey = `${job.cutJobId}:${result.resultNo}:${job.version}`;
+      if (makeCurrentCommandRef.current?.key !== commandKey) {
+        makeCurrentCommandRef.current = { key: commandKey, commandId: crypto.randomUUID() };
+      }
+      const { commandId } = makeCurrentCommandRef.current;
       setBusy(true);
       try {
-        const updated = await cutApi.setCurrentResult(job.cutJobId, result.resultNo);
+        const updated = await cutApi.setCurrentResult(job.cutJobId, result.resultNo, job.version, commandId);
         if (!canPublishCutWrite(writeToken, targetJobId)) return;
+        makeCurrentCommandRef.current = null;
         emitCutJobUpdate(updated, job);
         message.success(`Раскрой ${result.cutNumber} назначен действующим`);
         await refreshAfterResultStateChange();
         if (!canPublishCutWrite(writeToken, targetJobId)) return;
       } catch (error) {
-        if (canPublishCutWrite(writeToken, targetJobId)) handleError(error, 'Не удалось назначить действующий раскрой');
+        if (!canPublishCutWrite(writeToken, targetJobId)) return;
+        const bathError = buildMdfBathErrorView(error);
+        if (bathError) {
+          message.error(bathError.message);
+          if (bathError.reload) await openJob(targetJobId);
+        } else {
+          handleError(error, 'Не удалось назначить действующий раскрой');
+        }
       } finally {
         if (canPublishCutWrite(writeToken, targetJobId)) setBusy(false);
       }
     },
-    [emitCutJobUpdate, handleError, job, refreshAfterResultStateChange],
+    [emitCutJobUpdate, handleError, job, openJob, refreshAfterResultStateChange],
   );
 
   const archiveResult = useCallback(
@@ -2285,7 +2305,11 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         await loadJobs();
       } catch (error) {
         if (!canPublishDelete()) return;
-        if (error instanceof ApiError && error.code === 'CUT_JOB_LINKED_MDF_PACKETS') {
+        const bathError = buildMdfBathErrorView(error);
+        if (bathError) {
+          message.error(bathError.message);
+          if (bathError.reload) await openJob(target.cutJobId);
+        } else if (error instanceof ApiError && error.code === 'CUT_JOB_LINKED_MDF_PACKETS') {
           message.error('Есть связанные карточки файлов станка. Повторите удаление с подтверждением.');
         } else {
           handleError(error, 'Не удалось удалить задание');
@@ -2294,7 +2318,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         if (canPublishDelete()) setBusy(false);
       }
     },
-    [canPublishCutWrite, confirmDeleteJob, emitCutJobUpdate, loadJobs, handleError, resetSheetViews],
+    [canPublishCutWrite, confirmDeleteJob, emitCutJobUpdate, loadJobs, handleError, openJob, resetSheetViews],
   );
 
   const previewCreateJob = useCallback(async () => {
@@ -2520,16 +2544,43 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     if (!job) return;
     const writeToken = cutPageReadGuard.capture();
     if (!writeToken) return;
+    // Single-flight BEFORE any await (including the version refresh): overlapping clicks never mint a
+    // second calculation command.
+    await calcFlightRef.current(async () => {
+      setBusy(true);
+      try {
+        await runCalculation(writeToken);
+      } finally {
+        if (canPublishCutWrite(writeToken, job.cutJobId)) setBusy(false);
+      }
+    });
+  }, [applyPdfTemplateState, job, loadJobs, handleError, resetSheetViews]);
+
+  const runCalculation = async (writeToken: NonNullable<ReturnType<typeof cutPageReadGuard.capture>>) => {
+    if (!job) return;
     const targetJobId = job.cutJobId;
-    if (calcCommandRef.current?.cutJobId !== job.cutJobId) {
+    let commandJob = job;
+    // After a definitive rejection whose follow-up refresh failed, a replacement command must start from a
+    // freshly read job version (never the stale in-memory one, never the settled commandId).
+    if (calcRefreshRequiredRef.current === job.cutJobId) {
+      try {
+        commandJob = await cutApi.get(job.cutJobId);
+      } catch (error) {
+        if (canPublishCutWrite(writeToken, targetJobId)) handleError(error, 'Не удалось обновить задание раскроя');
+        return;
+      }
+      if (!canPublishCutWrite(writeToken, targetJobId)) return;
+      calcRefreshRequiredRef.current = null;
+      setJob(commandJob);
+    }
+    if (calcCommandRef.current?.cutJobId !== commandJob.cutJobId) {
       calcCommandRef.current = {
-        cutJobId: job.cutJobId,
-        version: job.version,
+        cutJobId: commandJob.cutJobId,
+        version: commandJob.version,
         commandId: crypto.randomUUID(),
       };
     }
     const { commandId, version: commandVersion } = calcCommandRef.current;
-    setBusy(true);
     try {
       const calculated = await cutApi.calculate(job.cutJobId, commandVersion, commandId);
       if (!canPublishCutWrite(writeToken, targetJobId)) return;
@@ -2548,6 +2599,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       await loadJobs();
     } catch (error) {
       if (!canPublishCutWrite(writeToken, targetJobId)) return;
+      // A definitive rejection settles the command BEFORE any refresh: never replay it, even if the
+      // refresh below fails; the next click first re-reads the job version.
+      if (isDefinitiveCalculationRejection(error)) {
+        calcCommandRef.current = null;
+        calcRefreshRequiredRef.current = targetJobId;
+      }
       // Reload so the now-failed job shows its persisted reason (Alert) and a
       // fresh version for an immediate retry — the failure bumped the version
       // server-side, so the stale in-memory job would otherwise 409 on retry.
@@ -2559,20 +2616,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           && fresh.currentCutResult !== null
           && fresh.currentCutResult !== undefined
           && fresh.currentCutResult.cutResultId !== job.currentCutResult?.cutResultId;
-        const commandCannotBeRetried = error instanceof ApiError && [
-          'CUT_STALE_VERSION',
-          'CUT_RESULT_COMMAND_CONFLICT',
-          'CUT_RESULT_COMMAND_FAILED',
-          'CUT_RESULT_COMMAND_ABANDONED',
-          'CUT_JOB_NOT_MUTABLE',
-        ].includes(error.code);
-        if (
-          responseWasLostAfterSuccess
-          || fresh.status === 'failed'
-          || commandCannotBeRetried
-        ) {
-          calcCommandRef.current = null;
-        }
+        if (responseWasLostAfterSuccess || fresh.status === 'failed') calcCommandRef.current = null;
+        // The fresh version is in hand: a replacement command can start from it directly.
+        if (calcRefreshRequiredRef.current === targetJobId) calcRefreshRequiredRef.current = null;
         setJob(fresh);
         setSelectedResult(fresh.currentCutResult ?? null);
         setIsFrozenResultSelection(false);
@@ -2591,10 +2637,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         // best-effort refresh; retain commandId so a transport retry dedupes
       }
       if (canPublishCutWrite(writeToken, targetJobId)) handleError(error, 'Не удалось рассчитать раскрой');
-    } finally {
-      if (canPublishCutWrite(writeToken, targetJobId)) setBusy(false);
     }
-  }, [applyPdfTemplateState, job, loadJobs, handleError, resetSheetViews]);
+  };
 
   const loadSheet = useCallback(
     async (group: CutGroupDto, sheetIndex: number, variant: 'auto' | 'manual' | 'active' = 'active', renderVersion?: string) => {
@@ -3056,14 +3100,19 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         setEditorHistory([]);
       } catch (error) {
         // Surface 422 violations + 409 recalc/stale with the backend message.
-        if (canPublishCutWrite(writeToken, targetJobId)) {
+        if (!canPublishCutWrite(writeToken, targetJobId)) return;
+        const bathError = buildMdfBathErrorView(error);
+        if (bathError) {
+          message.error(bathError.message);
+          if (bathError.reload) await openJob(targetJobId);
+        } else {
           handleError(error, 'Не удалось сохранить ручной раскрой');
         }
       } finally {
         if (canPublishCutWrite(writeToken, targetJobId)) setBusy(false);
       }
     },
-    [applyPdfTemplateState, editorSheetMirrors, editorSheetRotations, emitCutJobUpdate, job, workingSheets, loadJobs, handleError, resetSheetViews],
+    [applyPdfTemplateState, editorSheetMirrors, editorSheetRotations, emitCutJobUpdate, job, workingSheets, loadJobs, handleError, openJob, resetSheetViews],
   );
 
   const resetCutJobListFilters = useCallback(() => {

@@ -5,13 +5,17 @@ export type MdfEngineMode = 'legacy' | 'shadow' | 'active' | 'read_only';
 export interface MdfCommandWriter {
   /** Server-defined owner, never an HTTP parameter or inferred SQL classification. */
   writer: string;
-  capability: 'legacy-only' | 'queued' | 'cnc-receipt' | 'cut-settlement' | 'order-demand';
+  capability: 'legacy-only' | 'queued' | 'cnc-receipt' | 'cut-settlement' | 'order-demand' | 'bath-lifecycle';
 }
 /** Ordinary order commands (§5.4a). Their MDF consequence is decided after their own writes by
  * `openMdfOrderCommand`, so read_only admits them past the fence and rejects only an MDF impact. */
 export const MDF_ORDER_WRITERS = ['orders.update', 'orders.recalculate_hdf', 'orders.delete',
   'orders.restore', 'orders.transfer_details'] as const;
 export type MdfOrderWriter = typeof MDF_ORDER_WRITERS[number];
+/** Cut commands that may change a job's active bath (§5.4b); impact is decided after their locks. */
+export const MDF_BATH_LIFECYCLE_WRITERS = ['cut.set_current_result', 'cut.archive_result', 'cut.unarchive_result',
+  'cut.manual_layout', 'cut.archive'] as const;
+export type MdfBathLifecycleWriter = typeof MDF_BATH_LIFECYCLE_WRITERS[number];
 interface Boundary { protocol: 'read-committed' | 'serializable-legacy'; mode: Promise<MdfEngineMode> }
 const modes = new WeakMap<TransactionClient, Boundary>();
 
@@ -74,9 +78,10 @@ function checkCapability(mode: MdfEngineMode, input: MdfCommandWriter) {
   if (input.capability === 'cut-settlement' && !settlement) {
     throw new ApiError(503,'MDF_WRITER_NOT_CONNECTED','Недопустимый обработчик завершения расчёта');
   }
-  const orderDemand = input.capability === 'order-demand'
-    && (MDF_ORDER_WRITERS as readonly string[]).includes(input.writer);
-  if (input.capability === 'order-demand' && !orderDemand) {
+  const orderDemand = (input.capability === 'order-demand'
+    && (MDF_ORDER_WRITERS as readonly string[]).includes(input.writer))
+    || (input.capability === 'bath-lifecycle' && (MDF_BATH_LIFECYCLE_WRITERS as readonly string[]).includes(input.writer));
+  if ((input.capability === 'order-demand' || input.capability === 'bath-lifecycle') && !orderDemand) {
     throw new ApiError(503,'MDF_WRITER_NOT_CONNECTED','Недопустимый обработчик изменения заказа');
   }
   if (mode === 'read_only' && input.capability !== 'cnc-receipt' && !settlement && !orderDemand) {

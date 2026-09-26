@@ -154,6 +154,9 @@ async function loadTracked(tx: DatabaseClient,owners: string,userId: string,jobI
       UNION
       SELECT j.job_id,e.order_id FROM requested j JOIN mdf_evidence_lines e
         ON e.source_kind=j.source_kind AND e.source_id=j.source_id AND e.revision_key=j.revision_key
+      UNION
+      -- §5.4b: a retirement revision is empty; its transition row carries the immutable owners.
+      SELECT j.job_id,unnest(t.owner_ids) FROM requested j JOIN mdf_bath_transitions t ON t.job_id=j.job_id
     ) SELECT j.job_id "jobId",j.source_kind kind,j.source_id id,j.status,j.error_code code,j.attempts,
       ARRAY(SELECT f.order_id::float8 FROM frozen_owners f WHERE f.job_id=j.job_id ORDER BY f.order_id) "orderIds"
     FROM requested j
@@ -178,13 +181,17 @@ async function loadPending(tx: DatabaseClient,owners: string,userId: string,
         OR EXISTS(SELECT 1 FROM mdf_evidence_lines e WHERE e.source_kind=j.source_kind AND e.source_id=j.source_id
           AND e.revision_key=j.revision_key AND e.order_id=ANY($6::bigint[]))
         OR EXISTS(SELECT 1 FROM mdf_revision_demand d WHERE d.source_kind=j.source_kind AND d.source_id=j.source_id
-          AND d.revision_key=j.revision_key AND d.order_id=ANY($6::bigint[])))
+          AND d.revision_key=j.revision_key AND d.order_id=ANY($6::bigint[]))
+        OR EXISTS(SELECT 1 FROM mdf_bath_transitions t WHERE t.job_id=j.job_id AND t.owner_ids && $6::bigint[]))
     ), frozen_owners AS (
       SELECT j.job_id,d.order_id FROM current_jobs j JOIN mdf_revision_demand d
         ON d.source_kind=j.source_kind AND d.source_id=j.source_id AND d.revision_key=j.revision_key
       UNION
       SELECT j.job_id,e.order_id FROM current_jobs j JOIN mdf_evidence_lines e
         ON e.source_kind=j.source_kind AND e.source_id=j.source_id AND e.revision_key=j.revision_key
+      UNION
+      -- §5.4b: a retirement revision is empty; its transition row carries the immutable owners.
+      SELECT j.job_id,unnest(t.owner_ids) FROM current_jobs j JOIN mdf_bath_transitions t ON t.job_id=j.job_id
     ) SELECT
     j.job_id "jobId",j.source_kind kind,j.source_id id,j.status,j.error_code code,j.attempts,
     ARRAY(SELECT f.order_id::float8 FROM frozen_owners f WHERE f.job_id=j.job_id ORDER BY f.order_id) "orderIds"

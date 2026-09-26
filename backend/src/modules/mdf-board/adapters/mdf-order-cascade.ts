@@ -195,7 +195,7 @@ async function runCascade(tx: TransactionClient, input: { user: CurrentUser; req
       WHERE a.state<>'released' AND a.order_id=ANY($1::bigint[])`, [owners])).rows
     .map(r => `${mdfSourceKey(r)}|${r.orderId}:${r.detailId}`));
   const jobs = new Map((await tx.query<{ kind: string; id: string; status: string }>(`SELECT DISTINCT ON (j.source_kind,j.source_id,j.revision_key)
-      j.source_kind kind,j.source_id id,j.status FROM mdf_recalculation_jobs j
+      j.source_kind kind,j.source_id id,j.status FROM mdf_revision_jobs j
       JOIN unnest($1::text[],$2::text[],$3::text[]) h(kind,id,revision)
         ON j.source_kind=h.kind AND j.source_id=h.id AND j.revision_key=h.revision
       ORDER BY j.source_kind,j.source_id,j.revision_key,j.created_at DESC`,

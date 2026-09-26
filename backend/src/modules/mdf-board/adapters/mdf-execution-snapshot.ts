@@ -63,9 +63,16 @@ export async function loadMdfExecutionSnapshot(tx: DatabaseClient, heads: readon
   const physicalLineage = await loadMdfPhysicalLineageSnapshot(tx,heads,{assignmentStates:assignmentState.states});
   const metadata = new Map(contexts.map(c => [mdfSourceKey(c),c]));
   const issues = new Map<string,string[]>(), frozenDemand = new Map<string,MdfExecutionContext['demand']>();
+  // §5.4b: a bath whose RECEIVED revision is an authenticated retirement (transition row, empty sealed
+  // revision) is terminal: no demand/context issues; excluded from projection and allocation by callers.
+  const retiredRows = (await tx.query<{ id: string; revision: string }>(`SELECT t.retired_source_id id,t.retired_revision_key revision
+    FROM mdf_bath_transitions t JOIN unnest($1::text[],$2::text[],$3::text[]) h(kind,id,revision)
+      ON h.kind='bath' AND t.retired_source_id=h.id AND t.retired_revision_key=h.revision`,args)).rows;
+  const retired = new Set(retiredRows.map(r => mdfSourceKey({ kind: 'bath', id: r.id })));
   for (const h of heads) {
     const key = mdfSourceKey(h), c = metadata.get(key), rows = demand.filter(d => mdfSourceKey(d)===key);
     frozenDemand.set(key,rows);
+    if (retired.has(key)) { issues.set(key,[]); continue; }
     const owners = new Set(rows.map(d => d.orderId));
     const own: string[] = [];
     if (!c) own.push('MDF_CONTEXT_REQUIRED');
@@ -85,7 +92,7 @@ export async function loadMdfExecutionSnapshot(tx: DatabaseClient, heads: readon
     if (assignmentIssue) own.push(...assignmentIssue);
     issues.set(key,own);
   }
-  return { details, metadata, issues, frozenDemand,
+  return { details, metadata, issues, frozenDemand, retired,
     lineage: physicalLineage.lineage, lineageIssues: physicalLineage.lineageIssues,
     assignmentStates:assignmentState.states,assignmentStateIssues:assignmentState.issues };
 }

@@ -1,6 +1,6 @@
 import { humanNameError } from '../../../shared/human-name';
 import { humanName } from '../../../shared/human-name-schema';
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, Inject, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { z } from 'zod';
@@ -379,6 +379,8 @@ export class CutController {
     @Req() request: RequestWithCurrentUser,
     @Param('cutJobId') cutJobId: string,
     @Param('resultNo') resultNo: string,
+    @Headers('if-match') ifMatch?: string,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ): Promise<CutJobDto> {
     const currentUser = this.requireMutation(request);
     return this.cut.setCurrentResult({
@@ -386,6 +388,7 @@ export class CutController {
       cutJobId: parseCutJobId(cutJobId),
       resultNo: parseCutJobId(resultNo),
       requestId: request.requestId,
+      ...parseCutStateFence(ifMatch, idempotencyKey),
     });
   }
 
@@ -395,6 +398,8 @@ export class CutController {
     @Req() request: RequestWithCurrentUser,
     @Param('cutJobId') cutJobId: string,
     @Param('resultNo') resultNo: string,
+    @Headers('if-match') ifMatch?: string,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ): Promise<CutJobDto> {
     const currentUser = this.requireMutation(request);
     return this.cut.archiveResult({
@@ -402,6 +407,7 @@ export class CutController {
       cutJobId: parseCutJobId(cutJobId),
       resultNo: parseCutJobId(resultNo),
       requestId: request.requestId,
+      ...parseCutStateFence(ifMatch, idempotencyKey),
     });
   }
 
@@ -411,6 +417,8 @@ export class CutController {
     @Req() request: RequestWithCurrentUser,
     @Param('cutJobId') cutJobId: string,
     @Param('resultNo') resultNo: string,
+    @Headers('if-match') ifMatch?: string,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ): Promise<CutJobDto> {
     const currentUser = this.requireMutation(request);
     return this.cut.unarchiveResult({
@@ -418,6 +426,7 @@ export class CutController {
       cutJobId: parseCutJobId(cutJobId),
       resultNo: parseCutJobId(resultNo),
       requestId: request.requestId,
+      ...parseCutStateFence(ifMatch, idempotencyKey),
     });
   }
 
@@ -1012,6 +1021,24 @@ export class CutController {
     }
     return request.user;
   }
+}
+
+/** §5.4b stale-request fence for result state commands: optional in legacy, required when a command
+ * changes the job's active MDF bath (428 MDF_BATH_FENCE_REQUIRED otherwise). */
+export function parseCutStateFence(ifMatch?: string, idempotencyKey?: string): { expectedJobVersion?: number; idempotencyKey?: string } {
+  const out: { expectedJobVersion?: number; idempotencyKey?: string } = {};
+  if (ifMatch !== undefined && ifMatch !== '') {
+    const raw = ifMatch.trim().replace(/^W\//, '').replace(/^"|"$/g, '');
+    if (!/^[1-9][0-9]{0,9}$/.test(raw)) throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный If-Match', { field: 'If-Match' });
+    out.expectedJobVersion = Number(raw);
+  }
+  if (idempotencyKey !== undefined && idempotencyKey !== '') {
+    if (idempotencyKey.length > 200 || !/^[A-Za-z0-9_.:-]+$/.test(idempotencyKey)) {
+      throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный Idempotency-Key', { field: 'Idempotency-Key' });
+    }
+    out.idempotencyKey = idempotencyKey;
+  }
+  return out;
 }
 
 export function parseCutJobId(value: string): number {
