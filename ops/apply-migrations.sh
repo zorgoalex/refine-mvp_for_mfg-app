@@ -237,6 +237,8 @@ q_con_def_on_safe() { echo "SELECT COALESCE((SELECT pg_get_constraintdef(oid)=\$
 q_con_hash_on() { echo "SELECT COALESCE((SELECT md5(pg_get_constraintdef(oid))='$3' FROM pg_constraint WHERE conname='$1' AND conrelid='public.$2'::regclass), false);"; }
 q_idx_hash() { echo "SELECT COALESCE((SELECT md5(indexdef)='$2' FROM pg_indexes WHERE schemaname='public' AND indexname='$1'), false);"; }
 q_fun_hash() { echo "SELECT COALESCE((SELECT md5(pg_get_functiondef(oid))='$2' FROM pg_proc WHERE oid=to_regprocedure('$1')), false);"; }
+# A function legitimately redefined in place by a later migration: either the original or the later body.
+q_fun_hash_either() { echo "SELECT COALESCE((SELECT md5(pg_get_functiondef(oid)) IN ('$2','$3') FROM pg_proc WHERE oid=to_regprocedure('$1')), false);"; }
 q_colset_hash() { echo "SELECT COALESCE((SELECT md5(string_agg(format('%s|%s|%s|%s|%s',ordinal_position,column_name,data_type,is_nullable,COALESCE(column_default,'∅')), ', ' ORDER BY ordinal_position))='$3' FROM information_schema.columns WHERE table_schema='public' AND table_name='$1' AND column_name=ANY(string_to_array('$2',','))), false);"; }
 q_colset_fun_hash_pair() { echo "SELECT CASE WHEN (SELECT md5(pg_get_functiondef(oid))='$7' FROM pg_proc WHERE oid=to_regprocedure('$6')) THEN (SELECT COALESCE(md5(string_agg(format('%s|%s|%s|%s|%s',ordinal_position,column_name,data_type,is_nullable,COALESCE(column_default,'∅')), ', ' ORDER BY ordinal_position))='$3',false) FROM information_schema.columns WHERE table_schema='public' AND table_name='$1' AND column_name=ANY(string_to_array('$2',','))) WHEN (SELECT md5(pg_get_functiondef(oid))='$8' FROM pg_proc WHERE oid=to_regprocedure('$6')) THEN (SELECT COALESCE(md5(string_agg(format('%s|%s|%s|%s|%s',ordinal_position,column_name,data_type,is_nullable,COALESCE(column_default,'∅')), ', ' ORDER BY ordinal_position))='$5',false) FROM information_schema.columns WHERE table_schema='public' AND table_name='$1' AND column_name=ANY(string_to_array('$4',','))) ELSE false END;"; }
 q_conset_hash() { echo "SELECT COALESCE((SELECT md5(string_agg(conname||'|'||contype::text||'|'||confdeltype::text||'|'||pg_get_constraintdef(oid), ', ' ORDER BY conname))='$3' FROM pg_constraint WHERE connamespace='public'::regnamespace AND conrelid::regclass::text='$1' AND conname=ANY(string_to_array('$2',','))), false);"; }
@@ -2391,7 +2393,7 @@ probe_file() {
       "$(q_idxset_hash mdf_physical_lineage_transitions mdf_physical_lineage_transiti_source_kind_source_id_revisi_key1,mdf_physical_lineage_transiti_source_kind_source_id_revisio_key,mdf_physical_lineage_transitions_pkey 9953302b7dd61a70a78069d48d67bff5)" \
       "$(q_fun_hash 'public.mdf_guard_physical_lineage_insert()' 5f33a57477dcf2397fa18783d9b7ecae)" \
       "$(q_fun_hash 'public.mdf_guard_physical_lineage_immutable()' 39d2c9d9500956c4bca2546c68d8cc15)" \
-      "SELECT COALESCE((SELECT md5(pg_get_functiondef(oid)) FROM pg_proc WHERE oid=to_regprocedure('public.mdf_validate_physical_lineage_seal()')) IN ('3067d8c18cdc8b1603397ce68a56824b','f303a542a2e940954763bfa8a5d44bbe'), false);" \
+      "$(q_fun_hash_either 'public.mdf_validate_physical_lineage_seal()' 3067d8c18cdc8b1603397ce68a56824b f303a542a2e940954763bfa8a5d44bbe)" \
       "$(q_fun_hash 'public.mdf_guard_physical_lineage_source_head()' d2ab89206c2d81b774c16779d302d789)" \
       "$(q_fun_hash 'public.mdf_guard_source_fence()' 5865eedf3ea4c2cf2b715b6ac210d49a)" \
       "$(q_fun_hash 'public.mdf_reject_evidence_change()' a51e1b51d407124a856f1993d9c54fe8)" \

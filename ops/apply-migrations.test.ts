@@ -212,7 +212,8 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       'e8ffa2aa2aeba0b52cc70a1c10c47509', '9953302b7dd61a70a78069d48d67bff5',
       "q_fun_hash 'public.mdf_guard_physical_lineage_insert()' 5f33a57477dcf2397fa18783d9b7ecae",
       "q_fun_hash 'public.mdf_guard_physical_lineage_immutable()' 39d2c9d9500956c4bca2546c68d8cc15",
-      "q_fun_hash 'public.mdf_validate_physical_lineage_seal()' 3067d8c18cdc8b1603397ce68a56824b",
+      // 191 redefines the seal guard in place (detached-position exemption): either body is a valid 182 end-state.
+      "q_fun_hash_either 'public.mdf_validate_physical_lineage_seal()' 3067d8c18cdc8b1603397ce68a56824b f303a542a2e940954763bfa8a5d44bbe",
       "q_fun_hash 'public.mdf_guard_physical_lineage_source_head()' d2ab89206c2d81b774c16779d302d789",
       "q_fun_hash 'public.mdf_guard_source_fence()' 5865eedf3ea4c2cf2b715b6ac210d49a",
       "q_fun_hash 'public.mdf_reject_evidence_change()' a51e1b51d407124a856f1993d9c54fe8",
@@ -339,7 +340,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText).not.toMatch(/q_fun_hash\(\).*md5\(prosrc\)/);
     expect(probeFn).toContain("q_fun_hash 'cnc_telegram_worker_reason_code_valid(text)'");
     expect(probeFn.match(/q_fun_hash '[^']+' [a-f0-9]{32}/g)).toHaveLength(
-      requiredFunctions.length + 2 + 9 + 1 + 1 + 7 + 4 + 8 + 5, // prior probes plus 182 lineage and 185 assignment markers
+      requiredFunctions.length + 2 + 9 + 1 + 1 + 7 + 4 + 8 + 5 - 1, // prior probes plus 182 lineage and 185 assignment markers; 182 seal guard moved to q_fun_hash_either (191)
     );
   });
 
