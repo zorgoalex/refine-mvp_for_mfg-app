@@ -70,9 +70,11 @@ describe.skipIf(!enabled)('MDF order cascade through real order services (stage 
     expect((await client.query<{ db: string }>('SELECT current_database() db')).rows[0].db).toBe('erpdb');
     await client.query('BEGIN');
     await client.query("SET LOCAL lock_timeout='3s'");
-    const migration = readFileSync(new URL('../../../../db/migrations/188_mdf_order_cascade_intents.sql', import.meta.url), 'utf8')
-      .replace(/^BEGIN;$/m, '').replace(/^COMMIT;$/m, '');
-    await client.query(migration);
+    // Migrations run INSIDE the rolled-back outer transaction (their own BEGIN/COMMIT stripped).
+    for (const file of ['188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql']) {
+      await client.query(readFileSync(new URL(`../../../../db/migrations/${file}`, import.meta.url), 'utf8')
+        .replace(/^BEGIN;$/m, '').replace(/^COMMIT;$/m, ''));
+    }
     await client.query("UPDATE mdf_engine_state SET mode='active'");
     prefix = 'E2E-mdf-cascade-' + randomUUID();
     const actorId = (await client.query(`INSERT INTO users(username,email,password_hash,role_id) VALUES($1,$2,'E2E-NO-LOGIN',1)

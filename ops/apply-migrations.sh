@@ -2323,6 +2323,10 @@ probe_file() {
       "$(q_tbl mdf_order_cascade_intents)" \
       "SELECT to_regprocedure('public.mdf_guard_order_cascade_intent_insert()') IS NOT NULL AND to_regprocedure('public.mdf_validate_order_cascade_intent_commit()') IS NOT NULL AND to_regprocedure('public.mdf_reject_order_cascade_intent_change()') IS NOT NULL;" \
       "SELECT count(*)=3 FROM (VALUES ('mdf_order_cascade_intent_insert_guard','mdf_guard_order_cascade_intent_insert()'),('mdf_order_cascade_intent_immutable','mdf_reject_order_cascade_intent_change()'),('mdf_order_cascade_intent_commit_guard','mdf_validate_order_cascade_intent_commit()')) expected(trg,fun) JOIN pg_trigger t ON t.tgrelid=to_regclass('public.mdf_order_cascade_intents') AND t.tgname=trg AND t.tgfoid=to_regprocedure('public.'||fun) AND t.tgenabled='O' AND NOT t.tgisinternal;" ;;
+    189_mdf_placement_inputs*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='mdf_published_sources' AND column_name='placement_inputs' AND data_type='jsonb');" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='mdf_published_sources_placement_inputs_object' AND conrelid='public.mdf_published_sources'::regclass AND contype='c' AND convalidated);" \
+      "SELECT to_regprocedure('public.mdf_placement_inputs_valid(jsonb,bigint)') IS NOT NULL;" ;;
     186_bitrix24_product_import*) probe_all \
       "$(q_tbl bitrix24_product_mapping)" \
       "SELECT count(*)=8 FROM information_schema.columns WHERE table_schema='public' AND table_name='bitrix24_product_mapping';" \
@@ -2429,6 +2433,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     188_mdf_order_cascade_intents*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    189_mdf_placement_inputs*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     186_bitrix24_product_import*)

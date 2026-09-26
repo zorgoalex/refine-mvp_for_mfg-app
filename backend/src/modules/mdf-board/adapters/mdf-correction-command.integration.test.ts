@@ -60,7 +60,7 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
       CREATE UNIQUE INDEX e2e_correction_audit_related ON ${fixture.schema}.audit_log_related_entity(audit_id,entity_type,entity_id);
       CREATE UNIQUE INDEX e2e_correction_outbox ON ${fixture.schema}.outbox_events(idempotency_key)`);
     for (const file of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql','174_mdf_execution_context.sql',
-      '175_mdf_command_placement.sql','178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql']) await fixture.applyMigrations([file]);
+      '175_mdf_command_placement.sql','178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql']) await fixture.applyMigrations([file]);
     await fixture.applyMigrations(['179_mdf_active_return.sql']);
     await fixture.applyMigrations(['180_mdf_cnc_observations.sql']);
     await fixture.applyMigrations(['181_cnc_manual_send_observation.sql']);
@@ -1065,5 +1065,16 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
       AND entity_id=$1`, [`packet:${f.source.id}`])).rows[0].count).toBe(0);
     expect((await fixture.client.query(`SELECT count(*)::int count FROM outbox_events WHERE event_type='mdf_board.production_returned'
       AND aggregate_id=$1`, [`packet:${f.source.id}`])).rows[0].count).toBe(0);
+  });
+  it('makes a return preview stale when a member status changes the effective column before confirm (§5.4d)', async () => {
+    const f = await acceptedPacket();
+    const preview = await command.preview(admin, f.source, bodyFor(f), 'E2E-placement-preview');
+    expect(preview.status).toBe('ready');
+    const packed = (await fixture.client.query<{ id: string }>(`SELECT production_status_id::text id FROM production_statuses
+      WHERE production_status_code='packed' OR lower(trim(production_status_name))='упакован' ORDER BY sort_order LIMIT 1`)).rows[0].id;
+    await fixture.client.query('UPDATE order_details SET production_status_id=$2 WHERE detail_id=$1', [f.detailId, packed]);
+    await expect(command.confirm(admin, f.source, { ...bodyFor(f), expectedDigest: preview.digest!,
+      idempotencyKey: `placement-stale-${f.orderId}` }, 'E2E-placement-confirm'))
+      .rejects.toMatchObject({ code: 'MDF_CORRECTION_STALE' });
   });
 });

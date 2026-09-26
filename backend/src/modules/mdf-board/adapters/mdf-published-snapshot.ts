@@ -4,6 +4,8 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { rolePolicyForUser } from '../../../permissions/policies/scope';
 import type { MdfJobDatabase } from '../application/mdf-job-runner';
 import { mdfSourceCommandToken } from '../domain/mdf-manual-proof';
+import { loadMdfEffectivePlacement } from './mdf-effective-placement';
+import { mdfSourceKey } from './mdf-execution-snapshot';
 
 export interface MdfPublishedQuery {
   dateTo?: string;
@@ -72,6 +74,16 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
     [user.id,state.dateFrom,state.dateTo,query.focus?.kind ?? null,query.focus?.id ?? null,scope==='all'])).rows;
     checkLimit(cardRows,1000);
     const cardOwnerIds = cardRows.flatMap(c => c.ownerIds);
+    // §5.4d: placement follows the members' live ranks (one set-based read, no writes/automation).
+    // Unusable inputs keep the stored column and make the card non-movable.
+    const placements = await loadMdfEffectivePlacement(tx, cardRows);
+    for (const card of cardRows) {
+      const placement = placements.get(mdfSourceKey(card));
+      if (!placement) continue;
+      card.column = placement.column;
+      // Live placement issues (missing inputs, missing stage thresholds, …) block the command token.
+      if (placement.issues.length) card.issues = [...new Set([...card.issues, ...placement.issues])];
+    }
     // A partial viewer sees the card but only its allowed orders' data, and never a
     // command token: a command would act on positions of orders it cannot see.
     const cards: PublishedCard[] = cardRows.map(({ headVersion,headEpoch,headReceived,headAccepted,ownerIds: _ownerIds,

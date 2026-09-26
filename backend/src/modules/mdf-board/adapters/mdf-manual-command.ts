@@ -13,7 +13,8 @@ import { addMdfManualProof, mdfSourceCommandToken } from '../domain/mdf-manual-p
 import { mdfDemandDigest } from '../domain/mdf-execution-context';
 import { mdfSum } from '../domain/mdf-quantities';
 import { matchesMdfValidatedPhysicalLineage, mdfLineageRevisionKey } from '../domain/mdf-physical-lineage';
-import { loadMdfExecutionSnapshot } from './mdf-execution-snapshot';
+import { loadMdfExecutionSnapshot, mdfSourceKey } from './mdf-execution-snapshot';
+import { loadMdfEffectivePlacement } from './mdf-effective-placement';
 import { loadMdfShadowSource } from './mdf-shadow-source';
 
 interface Head { received: string; accepted: string|null; version: string; epoch: string }
@@ -117,10 +118,15 @@ export async function executeMdfManualCommand(tx: TransactionClient,
     revisionKey: head.accepted,lines: lines.map(line => ({ ...line,stage: line.stageCode,evidence: line.evidenceKind })),lineage }))) {
     conflict('MDF_COMMAND_RECONCILIATION_REQUIRED','Проверенная история производства карточки изменилась');
   }
-  const published = (await tx.query<{ column: string|null }>(`SELECT column_key "column" FROM mdf_published_sources
+  const current = (await tx.query(`SELECT 1 FROM mdf_published_sources
     WHERE source_kind=$1 AND source_id=$2 AND received_revision_key=$3 AND accepted_revision_key=$3
-      AND cardinality(issues)=0`,[...args,head.received])).rows[0];
-  if (!published?.column) conflict('MDF_COMMAND_PENDING','Дождитесь публикации карточки');
+      AND cardinality(issues)=0`,[...args,head.received])).rows.length === 1;
+  // §5.4d: decide forward/backward on the EFFECTIVE column (live member ranks, locked FOR SHARE to commit).
+  const effective = current
+    ? (await loadMdfEffectivePlacement(tx,[source],{ lock: true })).get(mdfSourceKey(source)) : undefined;
+  if (!effective?.valid || !effective.column) conflict('MDF_COMMAND_PENDING','Дождитесь публикации карточки');
+  if (effective!.issues.length) conflict('MDF_COMMAND_RECONCILIATION_REQUIRED','Положение карточки на доске требует проверки');
+  const published = { column: effective!.column };
   const sequence = source.kind === 'bath' ? ['baths','baths_ready','baths_laminated','completed_baths']
     : ['parsed','completed','completed_laminated'];
   if (target !== null && (!sequence.includes(target) || sequence.indexOf(target) < sequence.indexOf(published.column!))) {

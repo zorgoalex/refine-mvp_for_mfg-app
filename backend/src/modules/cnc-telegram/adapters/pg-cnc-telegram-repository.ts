@@ -1335,7 +1335,9 @@ export class PgCncTelegramRepository
       };
       await completeIdempotency(tx, command.idempotencyKey, response);
       return response;
-    });
+    // In the active MDF engine the CNC authority job owns automatic cut statuses: the legacy backfill
+    // (enable ⇒ apply to completed packets) is legacy-only (503 there); disabling stays available.
+    }, command.enabled ? { mdf: { writer: 'cnc.auto_cut_status.backfill', capability: 'legacy-only' } } : {});
   }
 
   async recordIngestDenied(command: RecordCncTelegramDeniedAuditCommand): Promise<void> {

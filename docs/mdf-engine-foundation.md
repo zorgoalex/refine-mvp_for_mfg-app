@@ -266,6 +266,25 @@ sort below the command's own orders are locked with `NOWAIT`; contention answers
 change answers `MDF_ENGINE_READ_ONLY`. A confirmed correction of MDF-present positions from an order is
 not connected yet; creating an order never touches MDF sources.
 
+## Read-time card placement
+
+A published card stores its rank-independent placement inputs (`mdf_published_sources.placement_inputs`,
+migration 189: kind, verified, intentional-empty, manual placement, full cut/rolled, bath readiness,
+balance blocking, prior column) bound to the row's `published_revision` and `schemaVersion: 1`. The board
+reader computes the column with `mdfPlacement` from these inputs and the members' **live** production ranks
+(one set-based read; no writes, no automation). Detail status changes by any writer therefore move cards
+immediately without a receipt or job. Manual moves and production returns decide on the same effective
+column, locking the member detail rows and the production status catalogue `FOR SHARE` to commit; a return
+preview binds the effective column and member ranks, so a status change before confirm makes it stale.
+
+Inputs are usable only when `mdf_placement_inputs_valid(inputs, published_revision)` holds (the same rule
+in SQL and in the TypeScript parser). Otherwise the stored column is shown with issue
+`MDF_PLACEMENT_INPUTS_MISSING` and the card is not movable. Activation gate: `SELECT count(*) FROM
+mdf_published_sources WHERE NOT mdf_placement_inputs_valid(placement_inputs, published_revision)` must be 0
+before switching to `active`; an older worker that republishes without inputs invalidates them by bumping
+the revision. The legacy CNC auto-cut backfill is `legacy-only` (503 in `active`); the CNC authority job owns
+automatic cut statuses there.
+
 ## Storage and bounded lineage consumers
 
 ### Physical origin contract

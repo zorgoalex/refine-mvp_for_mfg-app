@@ -1,6 +1,6 @@
 import type { MdfBoardResolvedEvent, MdfBoardSource } from '../../status-automation/application/mdf-board-event.types';
 import { calculateMdfQuantities, mdfPositionKey, mdfSum, type MdfPositionQuantity, type MdfQuantityEvidence } from './mdf-quantities';
-import { isMdfSourceColumnAllowed, resolveMdfSourceColumn } from './mdf-source-column';
+import { mdfPlacement } from './mdf-placement';
 import { isMdfEvidenceContract } from './mdf-evidence-contract';
 import { matchesMdfValidatedBazisAssignmentState, type MdfValidatedBazisAssignmentState } from '../application/mdf-bazis-assignment-state';
 import { matchesMdfValidatedPhysicalLineage, type MdfValidatedPhysicalLineage } from './mdf-physical-lineage';
@@ -143,25 +143,15 @@ export function projectMdfAcceptedState(input: MdfAcceptedStateInput) {
   const events: MdfBoardResolvedEvent[] = [];
   const cards = prepared.map(p => {
     const { source: s, members, verified, issues } = p;
-    // A genuine intentional-empty BASIS has no members; the generic resolver
-    // would block it with INCOMPLETE_COMPOSITION. Bypass only that exact case.
-    const resolved = verified && !p.intentionalEmpty ? resolveMdfSourceColumn({ kind: s.kind,
-      memberRanks: [...members.keys()].map(k => details.get(k)?.rank ?? null), compositionComplete: true,
-      cutConfirmed: p.fullCut, manual: s.manualPlacementColumn ?? null, thresholds: input.thresholds,
-      bathReadiness: p.balanceBlocked ? 'unknown' : ready.has(s.id) ? 'ready' : 'not_ready',
-    }) : null;
-    for (const issue of resolved?.issues ?? []) issues.add(issue);
-    // An authenticated empty card has no members for the generic resolver; an
-    // explicit kind-valid manual placement (a correction's target column) is
-    // honored, an out-of-contract manual string is flagged and ignored.
-    const emptyManual = s.manualPlacementColumn ?? null;
-    const emptyManualAllowed = emptyManual !== null && isMdfSourceColumnAllowed(s.kind, emptyManual);
-    if (p.intentionalEmpty && emptyManual !== null && !emptyManualAllowed) issues.add('INVALID_MANUAL_COLUMN');
-    // Every physical bath confirmation is explicit, unlike a mutable prior
-    // visual override. Detail statuses need not have caught up with the queue.
-    const column = p.intentionalEmpty
-      ? (emptyManualAllowed ? emptyManual : s.priorColumn) : verified && s.kind === 'bath' && p.fullRolled && !p.balanceBlocked
-      && resolved?.column !== 'completed_baths' ? 'baths_laminated' : resolved?.column ?? s.priorColumn;
+    // One placement rule for job, reader and commands (§5.4d): rank-independent inputs + member ranks.
+    const placementInputs = { kind: s.kind, verified, intentionalEmpty: p.intentionalEmpty,
+      manual: s.manualPlacementColumn ?? null, fullCut: p.fullCut, fullRolled: p.fullRolled,
+      balanceBlocked: p.balanceBlocked,
+      bathReadiness: p.balanceBlocked ? 'unknown' as const : ready.has(s.id) ? 'ready' as const : 'not_ready' as const,
+      priorColumn: s.priorColumn };
+    const placement = mdfPlacement(placementInputs, [...members.keys()].map(k => details.get(k)?.rank ?? null), input.thresholds);
+    for (const issue of placement.issues) issues.add(issue);
+    const column = placement.column;
     if (p.balanceBlocked) issues.add('ALLOCATION_BASELINE_UNKNOWN');
     if (verified && !p.balanceBlocked && !p.intentionalEmpty && (s.kind === 'bath' || sourceKey(s) === sourceKey(input.trigger))) {
       const eventType = s.kind === 'bath' ? p.fullRolled ? 'mdf.board.baths_laminated'
@@ -184,8 +174,7 @@ export function projectMdfAcceptedState(input: MdfAcceptedStateInput) {
     const retainedOwners=p.assignmentStateValid&&p.lineageValid&&s.assignmentState
       ? s.lines.filter(line=>line.evidence==='physical').map(line=>line.orderId) : [];
     return { kind: s.kind, id: s.id, column, verified,
-      reason: p.intentionalEmpty
-        ? 'assignment_empty':resolved?.reason ?? 'requires_verification',
+      reason: placement.reason, placementInputs,
       issues: [...issues].sort(), orderIds: [...new Set([...members.values()].map(m => m.orderId).concat(retainedOwners))].sort((a,b) => a-b) };
   });
   const positionIssues = new Map(input.details.map(d => [mdfPositionKey(d),

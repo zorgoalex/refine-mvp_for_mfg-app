@@ -1,4 +1,5 @@
 import type { QueryResultRow } from 'pg';
+import { loadMdfEffectivePlacement } from './mdf-effective-placement';
 import type { TransactionClient } from '../../../database/database.types';
 import { MdfNeedsAttention, type MdfSourceKind } from '../application/mdf-job-runner';
 import type { MdfCorrectionAllocation, MdfCorrectionSource, MdfCorrectionSourceLine } from '../domain/mdf-correction-plan';
@@ -51,7 +52,9 @@ export interface MdfCorrectionSnapshot {
   assignmentStates: Map<string, MdfValidatedBazisAssignmentState>;
   frozenDemand: Map<string, Array<{ orderId: number; detailId: number; quantity: number }>>;
   sourceIssues: Map<string, string[]>;
-  published: Map<string, { column: string | null; accepted: string | null; received: string; issues: string[] }>;
+  published: Map<string, { column: string | null; accepted: string | null; received: string; issues: string[];
+    /** Live member ranks the effective column was computed from (bound into the preview digest). */
+    memberRanks: (number | null)[] }>;
   rawTarget: MdfCorrectionRawSource;
 }
 
@@ -196,7 +199,15 @@ export async function loadMdfCorrectionSnapshot(tx: TransactionClient, target: M
     source_kind kind,source_id id,column_key "column",accepted_revision_key accepted,received_revision_key received,issues
     FROM mdf_published_sources WHERE (source_kind,source_id) IN (SELECT * FROM unnest($1::text[],$2::text[]))`,
   [closure.sources.map(s => s.kind),closure.sources.map(s => s.id)])).rows;
-  const published = new Map(publishedRows.map(row => [key(row),{ column:row.column,accepted:row.accepted,received:row.received,issues:row.issues }]));
+  // §5.4d: the correction validates and digests the EFFECTIVE column (live member ranks, locked FOR SHARE
+  // to commit); unusable placement inputs make the card unavailable for a return.
+  const placements = await loadMdfEffectivePlacement(tx,publishedRows,{ lock: true });
+  const published = new Map(publishedRows.map(row => {
+    const placement = placements.get(key(row));
+    return [key(row),{ column:placement?.column ?? row.column,accepted:row.accepted,received:row.received,
+      issues:placement?.issues.length ? [...new Set([...row.issues,...placement.issues])] : row.issues,
+      memberRanks:placement?.memberRanks ?? [] }];
+  }));
 
   const rawTarget = await loadRawTarget(tx,target,bazisRaw);
   return { ...closure, heads,lines:lineRows,plannerSources,allocations:allocationRows,owners,details,

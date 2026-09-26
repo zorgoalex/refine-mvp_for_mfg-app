@@ -9,6 +9,7 @@ import { MdfJobRunner } from '../application/mdf-job-runner';
 import { executeMdfAcceptedJob } from '../application/mdf-accepted-job';
 import type { MdfOrderWriter } from '../application/mdf-command-boundary';
 import { openMdfOrderCommand } from './mdf-order-cascade';
+import { readMdfPublishedSnapshot } from './mdf-published-snapshot';
 
 const enabled = process.env.MDF_ENGINE_INTEGRATION === '1';
 
@@ -21,7 +22,8 @@ describe.skipIf(!enabled)('MDF order-demand cascade, isolated PostgreSQL schema'
   let bathSequence = 0;
   const user: CurrentUser = {
     id: '1', username: 'E2E order cascade', role: 'admin', roleId: 1,
-    permissions: ['cut.manage', 'cut.view', 'orders.view', 'orders.update', 'orders.change_production_status'],
+    permissions: ['cut.manage', 'cut.view', 'orders.view', 'orders.update', 'orders.change_production_status',
+      'production.tasks.update'],
   };
   const db = () => { if (!database) throw new Error('MDF_TEST_DATABASE_NOT_READY'); return database; };
   const runner = () => new MdfJobRunner(db(), executeMdfAcceptedJob);
@@ -45,7 +47,7 @@ describe.skipIf(!enabled)('MDF order-demand cascade, isolated PostgreSQL schema'
       '174_mdf_execution_context.sql', '175_mdf_command_placement.sql',
       '178_mdf_correction_receipts.sql', '179_mdf_active_return.sql',
       '182_mdf_physical_lineage.sql', '185_mdf_bazis_composition.sql', '187_mdf_bazis_refill_rows.sql',
-      '188_mdf_order_cascade_intents.sql',
+      '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql',
     ]);
     await fixture.assertLocalRelations([
       'mdf_source_heads', 'mdf_evidence_revisions', 'mdf_revision_context', 'mdf_revision_demand',
@@ -512,5 +514,51 @@ describe.skipIf(!enabled)('MDF order-demand cascade, isolated PostgreSQL schema'
     // A demand change of an order that owns no MDF source also passes (no source ⇒ no execution loader).
     await orderCommand([big.orderId], tx => tx.query('UPDATE order_details SET quantity=2 WHERE detail_id=$1', [big.ids[0]]), 'big-demand');
     expect(await quantity(big.ids[0])).toBe(2);
+  });
+  describe('read-time placement (§5.4d)', () => {
+    const card = async (s: Source) => (await readMdfPublishedSnapshot(db() as never, user,
+      { focus: { kind: 'bazisCutSet', id: s.sourceId } })).cards.find(c => c.id === s.sourceId)!;
+    const stored = async (s: Source) => (await fixture.client.query<{ column_key: string; revision: string }>(`SELECT column_key,
+      published_revision::text revision FROM mdf_published_sources WHERE source_kind='bazisCutSet' AND source_id=$1`, [s.sourceId])).rows[0];
+    it('follows live member ranks without writing anything', async () => {
+      const s = await makeSource({ cut: true });
+      expect((await card(s)).column).toBe('completed');
+      const before = await stored(s);
+      const headBefore = await head(s);
+      await fixture.client.query('UPDATE order_details SET production_status_id=4 WHERE detail_id=$1', [s.member]);
+      const after = await card(s);
+      expect(after.column).toBe('completed_laminated');
+      expect(after.issues).toEqual([]);
+      expect(await stored(s)).toEqual(before);
+      expect(await head(s)).toEqual(headBefore);
+    });
+
+    it('falls back to the stored column, flags the card and withholds the token for missing or stale inputs', async () => {
+      const s = await makeSource({ cut: true });
+      await fixture.client.query('UPDATE order_details SET production_status_id=4 WHERE detail_id=$1', [s.member]);
+      await fixture.client.query(`UPDATE mdf_published_sources SET published_revision=published_revision+1
+        WHERE source_kind='bazisCutSet' AND source_id=$1`, [s.sourceId]);
+      const stale = await card(s);
+      expect(stale).toMatchObject({ column: 'completed', commandToken: null });
+      expect(stale.issues).toContain('MDF_PLACEMENT_INPUTS_MISSING');
+      await fixture.client.query(`UPDATE mdf_published_sources SET placement_inputs=NULL
+        WHERE source_kind='bazisCutSet' AND source_id=$1`, [s.sourceId]);
+      expect((await card(s)).issues).toContain('MDF_PLACEMENT_INPUTS_MISSING');
+    });
+
+    it('blocks the card when a stage threshold disappears after publication', async () => {
+      const s = await makeSource({ cut: true });
+      await fixture.client.query(`UPDATE production_statuses SET production_status_code='e2e-no-packed',
+        production_status_name='E2E no packed' WHERE production_status_id=4`);
+      try {
+        const blocked = await card(s);
+        expect(blocked.issues).toContain('STAGE_THRESHOLDS_MISSING');
+        expect(blocked.commandToken).toBeNull();
+      } finally {
+        await fixture.client.query(`UPDATE production_statuses SET production_status_code='packed',
+          production_status_name='E2E packed' WHERE production_status_id=4`);
+      }
+      expect((await card(s)).issues).toEqual([]);
+    });
   });
 });

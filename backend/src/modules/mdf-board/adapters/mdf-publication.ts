@@ -22,21 +22,24 @@ export async function publishMdfState(tx: DatabaseClient, input: {
     const meta = input.metadata.get(mdfSourceKey(card));
     return { kind: card.kind, id: card.id, received: source.received, accepted: source.accepted,
       createdAt: meta?.sourceCreatedAt ?? null, displayName: meta?.displayName ?? null,
-      column: card.column, reason: card.reason, issues: card.issues };
+      column: card.column, reason: card.reason, issues: card.issues,
+      // §5.4d: rank-independent placement inputs, bound to THIS publication revision (read-time placement).
+      placementInputs: { schemaVersion: 1, publishedRevision: revision, ...card.placementInputs } };
   });
   await tx.query(`INSERT INTO mdf_published_sources(source_kind,source_id,received_revision_key,accepted_revision_key,
-    source_created_at,display_name,column_key,reason,issues,published_revision)
+    source_created_at,display_name,column_key,reason,issues,published_revision,placement_inputs)
     SELECT c.kind,c.id,c.received,c.accepted,COALESCE(c."createdAt"::timestamptz,previous.source_created_at,r.created_at),
       COALESCE(c."displayName",previous.display_name,c.id),
-      c."column",c.reason,c.issues,$2::bigint
+      c."column",c.reason,c.issues,$2::bigint,c."placementInputs"
     FROM jsonb_to_recordset($1::jsonb) c(kind text,id text,received text,accepted text,"createdAt" text,
-      "displayName" text,"column" text,reason text,issues text[])
+      "displayName" text,"column" text,reason text,issues text[],"placementInputs" jsonb)
     JOIN mdf_evidence_revisions r ON r.source_kind=c.kind AND r.source_id=c.id AND r.revision_key=c.received
     LEFT JOIN mdf_published_sources previous ON previous.source_kind=c.kind AND previous.source_id=c.id
     ON CONFLICT(source_kind,source_id) DO UPDATE SET received_revision_key=EXCLUDED.received_revision_key,
       accepted_revision_key=EXCLUDED.accepted_revision_key,source_created_at=EXCLUDED.source_created_at,
       display_name=EXCLUDED.display_name,column_key=EXCLUDED.column_key,reason=EXCLUDED.reason,
-      issues=EXCLUDED.issues,published_revision=EXCLUDED.published_revision`,[JSON.stringify(cards),revision]);
+      issues=EXCLUDED.issues,published_revision=EXCLUDED.published_revision,
+      placement_inputs=EXCLUDED.placement_inputs`,[JSON.stringify(cards),revision]);
   const members = new Map<string,{ kind: string; id: string; orderId: number; detailId: number; quantity: number }>();
   for (const source of input.sources) for (const line of source.lines) if (line.stage==='membership') {
     const key = JSON.stringify([source.kind,source.id,line.orderId,line.detailId]);

@@ -76,7 +76,7 @@ describe.skipIf(!enabled)('BASIS composition command, isolated PostgreSQL schema
       '165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql',
       '174_mdf_execution_context.sql', '175_mdf_command_placement.sql',
       '178_mdf_correction_receipts.sql', '179_mdf_active_return.sql',
-      '182_mdf_physical_lineage.sql', '185_mdf_bazis_composition.sql', '187_mdf_bazis_refill_rows.sql', '188_mdf_order_cascade_intents.sql',
+      '182_mdf_physical_lineage.sql', '185_mdf_bazis_composition.sql', '187_mdf_bazis_refill_rows.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql',
     ]);
     await fixture.assertLocalRelations([
       'mdf_source_heads', 'mdf_evidence_revisions', 'mdf_revision_context', 'mdf_revision_demand',
@@ -1627,5 +1627,43 @@ describe.skipIf(!enabled)('BASIS composition command, isolated PostgreSQL schema
     const published = (await fixture.client.query<{ accepted: string; issues: string[] }>(`SELECT accepted_revision_key accepted,
       issues FROM mdf_published_sources WHERE source_kind='bazisCutSet' AND source_id=$1`, [f.sourceId])).rows[0];
     expect(published).toEqual({ accepted: queued.received, issues: [] });
+  });
+  it('validates manual moves against the read-time effective column and refuses stale placement inputs (§5.4d)', async () => {
+    const f = await makeV2Source(10);
+    await fixture.client.query('UPDATE order_details SET production_status_id=4 WHERE detail_id=$1', [f.detailId]);
+    // Effective column is completed_laminated now: moving back to «completed» is a return, not a move.
+    await expect(manualMove(f, 'completed', 'effective-back')).rejects.toMatchObject({ statusCode: 409,
+      code: 'MDF_RETURN_CONFIRMATION_REQUIRED' });
+    await fixture.client.query(`UPDATE mdf_published_sources SET published_revision=published_revision+1
+      WHERE source_kind='bazisCutSet' AND source_id=$1`, [f.sourceId]);
+    await expect(manualMove(f, 'completed_laminated', 'stale-inputs')).rejects.toMatchObject({ statusCode: 409,
+      code: 'MDF_COMMAND_PENDING' });
+  });
+  it('serializes a manual move with a concurrent status writer in both lock orders (§5.4d)', async () => {
+    // 1. Status writer first (uncommitted): the move waits on the member row, then sees «packed».
+    const f = await makeV2Source(10);
+    await fixture.client.query('BEGIN');
+    await fixture.client.query('UPDATE order_details SET production_status_id=4 WHERE detail_id=$1', [f.detailId]);
+    const waiting = manualMove(f, 'completed', 'concurrent-writer-first');
+    await new Promise(resolve => setTimeout(resolve, 200));
+    await fixture.client.query('COMMIT');
+    await expect(waiting).rejects.toMatchObject({ statusCode: 409, code: 'MDF_RETURN_CONFIRMATION_REQUIRED' });
+    // 2. Move first: while its transaction is open (before commit), a status write on a member cannot proceed.
+    const g = await makeV2Source(10);
+    let release!: () => void; let holding!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const held = new Promise<void>(resolve => { holding = resolve; });
+    const gated = Object.create(database!) as typeof database;
+    (gated as unknown as { transaction: unknown }).transaction = (fn: (tx: unknown) => Promise<unknown>, options?: unknown) =>
+      database!.transaction(async tx => { const result = await fn(tx); holding(); await gate; return result; }, options as never);
+    const token = await sourceToken(g);
+    const move = new PgMdfBoardManualMoveRepository(gated as never).upsert({ currentUser: user, cardKind: 'bazisCutSet',
+      cardId: g.sourceId, targetColumn: 'completed_laminated', sourceToken: token, idempotencyKey: 'concurrent-move-first',
+      requestId: 'concurrent-move-first-request' });
+    await held;
+    await expect(fixture.client.query('UPDATE order_details SET production_status_id=4 WHERE detail_id=$1', [g.detailId]))
+      .rejects.toMatchObject({ code: '55P03' });
+    release();
+    await move;
   });
 });
