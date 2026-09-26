@@ -76,7 +76,7 @@ describe.skipIf(!enabled)('BASIS composition command, isolated PostgreSQL schema
       '165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql',
       '174_mdf_execution_context.sql', '175_mdf_command_placement.sql',
       '178_mdf_correction_receipts.sql', '179_mdf_active_return.sql',
-      '182_mdf_physical_lineage.sql', '185_mdf_bazis_composition.sql', '187_mdf_bazis_refill_rows.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql',
+      '182_mdf_physical_lineage.sql', '185_mdf_bazis_composition.sql', '187_mdf_bazis_refill_rows.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql',
     ]);
     await fixture.assertLocalRelations([
       'mdf_source_heads', 'mdf_evidence_revisions', 'mdf_revision_context', 'mdf_revision_demand',
@@ -1539,6 +1539,14 @@ describe.skipIf(!enabled)('BASIS composition command, isolated PostgreSQL schema
       const duplicate = await command().preview(user, f.setId, { ...await base(),
         desiredRows: [{ rowId: String(f.rowId), quantity: 4 }, { newDetailId: f.detailId, quantity: 1 }] }, `refill-dup-${f.setId}`);
       expect(duplicate.blockers).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'REFILL_DETAIL_DUPLICATE' })]));
+      // §5.4e: a set holding a detached position (confirmed order correction) refuses composition changes,
+      // so a detached position can never be refilled (fail closed until the planner models detachments).
+      await fixture.client.query(`INSERT INTO mdf_position_detachments(source_kind,source_id,order_id,detail_id,correction_id,
+        request_id,actor_user_id) VALUES('bazisCutSet',$1,$2,$3,gen_random_uuid(),'e2e-detached-refill',1)`,
+      [f.sourceId, f.orderId, f.detailId + 1]);
+      await expect((async () => command().preview(user, f.setId, { ...await base(),
+        desiredRows: [{ rowId: String(f.rowId), quantity: 4 }, { newDetailId: f.detailId + 1, quantity: 1 }] },
+      `refill-detached-${f.setId}`))()).rejects.toMatchObject({ statusCode: 409, code: 'MDF_CORRECTION_DETACHED_UNSUPPORTED' });
     } finally { vi.stubEnv('BACKEND_MDF_BAZIS_REFILL', 'false'); }
     // DB-level creation authenticity is proven in migration 187's own test with a valid unsealed intent.
   }, 60000);

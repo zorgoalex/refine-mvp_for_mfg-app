@@ -32,19 +32,52 @@ export function renderMdfOrderConflictContent(vm: MdfOrderConflictViewModel): Re
   );
 }
 
+export interface ShowMdfOrderConflictModalOptions {
+  /**
+   * Called when the user confirms a confirmable conflict (vm.confirmationDigest
+   * is present). The caller must resend the identical request (same body, same
+   * If-Match/Idempotency-Key) with header X-MDF-Confirmation: <digest>. Return
+   * its promise so the AntD modal shows a loading state on the OK button while
+   * the resend is in flight.
+   */
+  onConfirm?: (digest: string) => void | Promise<void>;
+  /** Called when the user dismisses a confirmable dialog without confirming. */
+  onCancel?: () => void;
+}
+
 /**
  * Detects an MDF board order-conflict error and surfaces it to the user:
- * a plain "retry later" message for the two retryable codes, otherwise a
+ * a plain "retry later" message for the two retryable codes; a Modal.confirm
+ * offering to resend with the confirmation header when the conflict carries
+ * a confirmable digest and the caller passed onConfirm; otherwise a
  * Modal.error with the full per-card breakdown. Returns false (and does
  * nothing) when the error is not one of these codes, so callers can fall
  * back to their own generic error handling.
  */
-export function showMdfOrderConflictModal(error: unknown): boolean {
+export function showMdfOrderConflictModal(
+  error: unknown,
+  options?: ShowMdfOrderConflictModalOptions,
+): boolean {
   const vm = buildMdfOrderConflictViewModel(error);
   if (!vm) return false;
 
   if (vm.retryable) {
     message.warning(`${vm.message} Повторите позже.`);
+    return true;
+  }
+
+  if (vm.confirmationDigest && options?.onConfirm) {
+    const digest = vm.confirmationDigest;
+    const onConfirm = options.onConfirm;
+    Modal.confirm({
+      title: vm.title,
+      content: renderMdfOrderConflictContent(vm),
+      width: 560,
+      okText: 'Подтвердить',
+      cancelText: 'Отмена',
+      onOk: () => onConfirm(digest),
+      onCancel: () => options.onCancel?.(),
+    });
     return true;
   }
 

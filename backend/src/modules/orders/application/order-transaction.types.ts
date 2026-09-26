@@ -49,6 +49,8 @@ export interface UpdateOrderCommand {
   orderId: number;
   dto: SaveOrderDto;
   requestId?: string;
+  /** §5.4e `X-MDF-Confirmation`: digest of the MDF preview the user confirmed. */
+  mdfConfirmation?: { digest: string };
   prePersistHook?: (uow: OrderWriteUnitOfWork, locked: LockedOrderRow) => Promise<void>;
   postPersistHook?: (
     uow: OrderWriteUnitOfWork,
@@ -68,6 +70,8 @@ export interface DeleteOrderCommand {
   version: number;
   idempotencyKey: string;
   requestId?: string;
+  /** §5.4e `X-MDF-Confirmation`; never part of the idempotency request hash. */
+  mdfConfirmation?: { digest: string };
 }
 
 export interface RestoreOrderCommand {

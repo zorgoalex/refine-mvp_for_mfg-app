@@ -266,8 +266,51 @@ Every 409 rolls back the whole order command and lists the affected cards filter
 `orders.view` permission and scope (hidden owners give no ids, names or quantities). Owners of affected sources that
 sort below the command's own orders are locked with `NOWAIT`; contention answers retryable 409
 `MDF_ORDER_LOCK_CONTENTION`. In `read_only`, edits without MDF impact pass and any receipt-requiring
-change answers `MDF_ENGINE_READ_ONLY`. A confirmed correction of MDF-present positions from an order is
-not connected yet; creating an order never touches MDF sources.
+change answers `MDF_ENGINE_READ_ONLY`. Creating an order never touches MDF sources.
+
+### Confirmed corrections (reduction, detachment)
+
+With `BACKEND_MDF_ORDER_CORRECTIONS=true` (default `false`: the 409s above stay unchanged) a
+`MDF_ORDER_PHYSICAL_CONFLICT` / `MDF_ORDER_ASSIGNMENT_CONFLICT` for MDF-present positions becomes a preview:
+the 409 carries `details.mdfConfirmation.digest` and per position `before`, `after`, `cut`, `laminated`,
+`reserved` and `outcome` (`surplus` for a reduction, `detached` for a deleted or transferred position),
+redacted exactly like other MDF conflicts. PENDING/ATTENTION stay hard 409s. The client confirms by resending
+the identical request with header `X-MDF-Confirmation: <digest>` (update, delete, detail transfer); a
+different digest answers 409 `MDF_ORDER_CONFIRMATION_STALE` with a fresh preview. The digest binds the
+actor and the MDF consequences (affected source heads, their lines and active allocations, positions and
+outcomes); generated ids of new details or a new transfer target never enter it. A challenge rolls back
+the whole command, including delete/transfer idempotency reservations, so the confirmation reuses the same
+Idempotency-Key and a lost-success retry replays the stored response. Restore only adds demand and never
+needs a confirmation.
+
+A confirmed command writes, in the same transaction:
+
+- `mdf_position_detachments` rows (migration 191): a TERMINAL, immutable detachment of the position in
+  each source holding it (supplier packets/BASIS sets and consuming baths). Every line of that source at
+  that position — in any revision, including new production roots — is history only: it counts as surplus,
+  never as membership, supply, bath demand or credit (shared resolver `mdf-position-detachments.ts`, used by
+  receipt validation, the lineage seal guard, execution snapshot, allocation planner/quarantine and
+  projection). A restored or re-created detail never revives it; new work must come from another source;
+- per affected source either a confirmed cascade receipt (intent `confirmed=true`, `preview_digest`; the
+  worker then allows reductions and positions that left demand only when detached) or, when every line of
+  the source is detached, a refresh receipt: such a source is terminal like a retired bath (its card
+  leaves the board, history stays) and a fully detached CNC packet's observation target becomes
+  `needs_reconciliation`;
+- audit `mdf.order_correction.requested` (normalized orders/details, outcomes, digest) and outbox
+  `mdf_board.order_correction` (deduplicated by command key). The worker records
+  `mdf_board.order_correction_accepted`.
+
+The worker releases `reserved` allocations at a detached position (audit `mdf_board.bath_supply_released`,
+reason `position_detached`); a `consumed` debit whose supplier line and bath membership are both detached
+stays as authenticated history and is excluded from the planner. Detail transfer with history following the
+detail is a separate later stage: today a confirmed transfer detaches the old position and adds plain demand
+in the target order.
+
+Rollback boundary: code without these semantics may run the `active` engine only while
+`SELECT count(*) FROM mdf_order_cascade_intents WHERE confirmed` and `SELECT count(*) FROM mdf_position_detachments`
+are both 0. After the first confirmed correction receipt of any kind (a reduction creates no detachment, but an
+older worker would reject its reducing cascade), switch the engine to `read_only` before downgrading; committed,
+unprocessed confirmed jobs then wait and are processed after re-upgrading.
 
 ## Read-time card placement
 

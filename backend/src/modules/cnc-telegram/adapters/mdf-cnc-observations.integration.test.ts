@@ -10,6 +10,7 @@ import { executeMdfAcceptedJob } from '../../mdf-board/application/mdf-accepted-
 import { PgCncTelegramMdfObservationRepository } from './pg-cnc-telegram-mdf-observation-repository';
 import type { CncTelegramWorkerSessionLeaseContext } from '../application/cnc-telegram-worker-session.types';
 import { createMdfCorrectionPgFixture } from '../../mdf-board/adapters/mdf-correction-test-fixture.integration';
+import { openMdfOrderCommand } from '../../mdf-board/adapters/mdf-order-cascade';
 
 const enabled = process.env.MDF_ENGINE_INTEGRATION === '1';
 const actor: CurrentUser = { id: '1', username: 'E2E CNC observer', role: 'admin', roleId: 1,
@@ -51,7 +52,7 @@ describe.skipIf(!enabled)('MDF CNC observations, isolated PostgreSQL schema', ()
     for (const migration of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql',
       '174_mdf_execution_context.sql','175_mdf_command_placement.sql','178_mdf_correction_receipts.sql',
       '179_mdf_active_return.sql','180_mdf_cnc_observations.sql','181_cnc_manual_send_observation.sql',
-      '182_mdf_physical_lineage.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql']) {
+      '182_mdf_physical_lineage.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql']) {
       await fixture.applyMigrations([migration]);
     }
     const localLineageRelations=(await fixture.client.query<{ relname:string; schema_name:string|null }>(`WITH wanted(relname) AS (
@@ -87,7 +88,7 @@ describe.skipIf(!enabled)('MDF CNC observations, isolated PostgreSQL schema', ()
   });
 
   async function acceptedPacket(options: { initialPhysical?: boolean; initialPhysicalQuantity?: number;
-    declarationQuantity?: number; rawCompleted?: boolean } = {}) {
+    declarationQuantity?: number; rawCompleted?: boolean; secondDetail?: boolean } = {}) {
     await fixture.client.query("UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now() WHERE status='pending'");
     const orderId = ++sequence, detailId = orderId * 10, packetId = randomUUID();
     await fixture.client.query(`INSERT INTO orders(order_id,order_name,order_kind,delete_flag,version,order_status_id,
@@ -105,11 +106,21 @@ describe.skipIf(!enabled)('MDF CNC observations, isolated PostgreSQL schema', ()
       match_detail_id,match_status,quantity,order_name,detail_number,width_mm,height_mm,source)
       VALUES($1,$2,'part-1',$3,$4,$5,10,$6,1,100,200,'manual')`,
     [randomUUID(),packetId,orderId,detailId,'matched',`E2E CNC observation ${orderId}`]);
+    if (options.secondDetail) {
+      await fixture.client.query(`INSERT INTO order_details(detail_id,order_id,detail_number,quantity,production_status_id,
+        delete_flag,material_id) VALUES($1,$2,2,5,1,false,1)`, [detailId+1,orderId]);
+      await fixture.client.query(`INSERT INTO cnc_telegram_packet_items(packet_item_id,packet_id,source_item_key,match_order_id,
+        match_detail_id,match_status,quantity,order_name,detail_number,width_mm,height_mm,source)
+        VALUES($1,$2,'part-2',$3,$4,'matched',5,$5,2,100,200,'manual')`,
+      [randomUUID(),packetId,orderId,detailId+1,`E2E CNC observation ${orderId}`]);
+    }
     const physicalQuantity = options.initialPhysicalQuantity ?? (options.initialPhysical ? 10 : 0);
     const declarationQuantity = options.declarationQuantity ?? 0;
     if (physicalQuantity + declarationQuantity > 10) throw new Error('MDF_TEST_PACKET_PROOF_EXCEEDS_MEMBER');
     const lines = [{ lineKey:'member',orderId,detailId,quantity:10,stageCode:'membership',evidenceKind:'derived' as const,rework:false }];
     if (physicalQuantity) lines.push({ lineKey:'cut-existing',orderId,detailId,quantity:physicalQuantity,stageCode:'cut',evidenceKind:'physical' as const,rework:false });
+    if (options.secondDetail) lines.push({ lineKey:'member-2',orderId,detailId:detailId+1,quantity:5,stageCode:'membership',
+      evidenceKind:'derived' as const,rework:false });
     if (declarationQuantity) lines.push({ lineKey:'cut-manual-declaration',orderId,detailId,quantity:declarationQuantity,
       stageCode:'cut',evidenceKind:'declaration' as const,rework:false });
     const saved = await database.transaction(tx => recordMdfReceipt(tx, {
@@ -117,7 +128,8 @@ describe.skipIf(!enabled)('MDF CNC observations, isolated PostgreSQL schema', ()
       requestId:`E2E CNC observation ${orderId}`,causeKey:`E2E CNC observation ${orderId}`,
       expectedFence:null,accept:true,rules:[],
       executionContext:{sourceCreatedAt:'2026-09-20T00:00:00Z',displayName:`E2E CNC ${orderId}`,
-        priorColumn:null,compositionComplete:true,demand:[{orderId,detailId,quantity:10}]},lines,
+        priorColumn:null,compositionComplete:true,demand:[{orderId,detailId,quantity:10},
+          ...(options.secondDetail ? [{orderId,detailId:detailId+1,quantity:5}] : [])]},lines,
     }));
     expect(await runner.processOne()).toMatchObject({status:'done',jobId:saved.jobId});
     return { packetId,orderId,detailId };
@@ -1124,4 +1136,78 @@ describe.skipIf(!enabled)('MDF CNC observations, isolated PostgreSQL schema', ()
       }
       expect(await fixture.snapshot(Object.keys(before))).toEqual(before);
     },30000);
+
+  describe('confirmed order corrections (§5.4e)', () => {
+    /** Confirmed detail deletion through the real order-demand boundary (preview, then the same command with its digest). */
+    async function confirmedDelete(orderId: number, detailId: number, key: string) {
+      const run = (confirmation: { digest: string } | null) => database.transaction(async tx => {
+        await tx.query('SELECT order_id FROM orders WHERE order_id=$1 FOR UPDATE', [orderId]);
+        const mdf = await openMdfOrderCommand(tx, 'orders.update');
+        await mdf.captureBefore([orderId]);
+        await tx.query('UPDATE order_details SET delete_flag=true WHERE detail_id=$1', [detailId]);
+        await mdf.finish({ user: actor, requestId: `${key}-request`, commandKey: key, orderIds: [orderId], confirmation });
+      }, { mdf: { writer: 'orders.update', capability: 'order-demand' } });
+      let digest: string | undefined;
+      try { await run(null); } catch (error) {
+        digest = (error as { details?: { mdfConfirmation?: { digest?: string } } }).details?.mdfConfirmation?.digest;
+      }
+      expect(digest).toMatch(/^[a-f0-9]{64}$/);
+      await run({ digest: digest! });
+    }
+    async function drainJobs() {
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const outcome = await runner.processOne();
+        if (outcome.status === 'idle') return;
+        expect(outcome).toMatchObject({ status: 'done' });
+      }
+      throw new Error('E2E_CNC_CORRECTION_QUEUE_NOT_DRAINED');
+    }
+
+    it('stops observation of a fully detached machine file and issues no further claim', async () => {
+      vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'true');
+      try {
+        const f = await acceptedPacket();
+        const lease = await registerTarget(f.packetId, f.orderId, `E2E-detached-${f.orderId}`, 21000 + f.orderId);
+        await confirmedDelete(f.orderId, f.detailId, `cnc-full-detach-${f.orderId}`);
+        expect((await fixture.client.query<{ state: string; claimId: string | null }>(`SELECT work_state state,claim_id::text "claimId"
+          FROM mdf_cnc_observation_targets WHERE packet_id=$1`, [f.packetId])).rows[0]).toEqual({ state: 'needs_reconciliation', claimId: null });
+        await drainJobs();
+        expect(await claimFor(new PgCncTelegramMdfObservationRepository(database), lease)).toBeNull();
+        expect((await fixture.client.query(`SELECT 1 FROM mdf_published_sources WHERE source_kind='packet' AND source_id=$1`,
+          [f.packetId])).rows).toHaveLength(0);
+        const audit = (await fixture.client.query<{ after: { cncTargetsNeedingReconciliation: string[] } }>(`SELECT after_json after
+          FROM audit_log WHERE event='mdf.order_correction.requested' AND request_id=$1`, [`cnc-full-detach-${f.orderId}-request`])).rows;
+        expect(audit).toHaveLength(1);
+        expect(audit[0].after.cncTargetsNeedingReconciliation).toEqual([f.packetId]);
+      } finally { vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'false'); }
+    }, 30000);
+
+    it('keeps a partially detached machine file observed: completion credits the remaining position only', async () => {
+      vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'true');
+      try {
+        const f = await acceptedPacket({ secondDetail: true });
+        const lease = await registerTarget(f.packetId, f.orderId, `E2E-partial-${f.orderId}`, 22000 + f.orderId);
+        await confirmedDelete(f.orderId, f.detailId + 1, `cnc-partial-detach-${f.orderId}`);
+        await drainJobs();
+        expect((await fixture.client.query<{ state: string }>(`SELECT work_state state FROM mdf_cnc_observation_targets
+          WHERE packet_id=$1`, [f.packetId])).rows[0].state).toBe('active');
+        const repository = new PgCncTelegramMdfObservationRepository(database);
+        const claim = await claimFor(repository, lease);
+        expect(claim).not.toBeNull();
+        await repository.complete({ currentUser: actor, lease, report: reportFor(claim!, true), requestId: `E2E-partial-${claim!.claimId}` });
+        await drainJobs();
+        const published = (await fixture.client.query<{ issues: string[] }>(`SELECT issues FROM mdf_published_sources
+          WHERE source_kind='packet' AND source_id=$1`, [f.packetId])).rows[0];
+        expect(published.issues).toEqual([]);
+        const members = (await fixture.client.query<{ d: number }>(`SELECT detail_id::float8 d FROM mdf_published_source_members
+          WHERE source_kind='packet' AND source_id=$1 ORDER BY 1`, [f.packetId])).rows.map(r => r.d);
+        expect(members).toEqual([f.detailId]);
+        const cut = (await fixture.client.query<{ d: number; q: string }>(`SELECT e.detail_id::float8 d,sum(e.quantity)::text q
+          FROM mdf_evidence_lines e JOIN mdf_source_heads h ON h.source_kind=e.source_kind AND h.source_id=e.source_id
+            AND h.accepted_revision_key=e.revision_key
+          WHERE e.source_kind='packet' AND e.source_id=$1 AND e.stage_code='cut' GROUP BY 1 ORDER BY 1`, [f.packetId])).rows;
+        expect(cut.map(r => r.d)).toContain(f.detailId);
+      } finally { vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'false'); }
+    }, 30000);
+  });
 });

@@ -1,4 +1,5 @@
 import type { TransactionClient } from '../../../database/database.types';
+import { mdfAttachedLines } from '../adapters/mdf-position-detachments';
 import { mapUserRow } from '../../../permissions/visibility/order-visibility-filter';
 import { executePinnedMdfAutomation } from '../../status-automation/application/status-automation-runtime';
 import { executeMdfAllocation } from '../adapters/mdf-allocation-executor';
@@ -51,8 +52,10 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
     if (snapshot.retired.has(mdfSourceKey(h))) continue;
     const issues = [...new Set([...(snapshot.issues.get(mdfSourceKey(h)) ?? ['MDF_CONTEXT_REQUIRED']),
       ...allocation.quarantine.filter(q => q.sourceKind===h.kind && q.sourceId===h.id).map(q => q.code)])].sort();
-    const own = allocation.sourceLines.filter(l => l.kind===h.kind && l.id===h.id
-      && l.revision===h.received);
+    // §5.4e: lines at a position detached in this source are history only (surplus), never members/credit.
+    const attached = mdfAttachedLines(snapshot.detached,allocation.sourceLines.filter(l => l.kind===h.kind && l.id===h.id));
+    const own = (h.kind==='order' || h.kind==='orderDetail' ? attached : allocation.sourceLines)
+      .filter(l => l.kind===h.kind && l.id===h.id && l.revision===h.received);
     const lines = own.map((l): MdfAcceptedLine => {
       const evidence = l.evidence;
       if (evidence!=='physical' && evidence!=='declaration' && evidence!=='derived') throw new MdfNeedsAttention('MDF_INVALID_EVIDENCE');
@@ -60,7 +63,7 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
     });
     if (h.kind==='order' || h.kind==='orderDetail') {
       if (h.accepted!==h.received) issues.push('ACCEPTANCE_PENDING');
-      if (issues.length) for (const l of allocation.sourceLines.filter(l => l.kind===h.kind && l.id===h.id)) {
+      if (issues.length) for (const l of attached) {
         positionWarnings.push({ orderId: l.orderId,detailId: l.detailId,issues });
       }
       if (!issues.length && h.accepted===h.received) for (const l of lines) {
@@ -77,6 +80,7 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
         ? snapshot.assignmentStates.get(mdfLineageRevisionKey(h,h.received)) : undefined,
       lineage:h.kind==='bazisCutSet'&&h.accepted===h.received
         ? snapshot.lineage.get(mdfLineageRevisionKey(h,h.received)) : undefined,
+      detachedPositionKeys: snapshot.detached.get(mdfSourceKey(h)),
       lines });
   }
   const trigger = { kind: job.source_kind,id: job.source_id };

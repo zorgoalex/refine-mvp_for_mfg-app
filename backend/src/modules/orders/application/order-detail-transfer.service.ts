@@ -40,6 +40,8 @@ export interface TransferOrderDetailsCommand {
   idempotencyKey: string;
   dto: TransferOrderDetailsDto;
   requestId?: string;
+  /** §5.4e `X-MDF-Confirmation`; never part of the idempotency request hash. */
+  mdfConfirmation?: { digest: string };
 }
 
 export interface OrderTransferTargetDto {
@@ -521,7 +523,8 @@ export class OrderDetailTransferService {
       // MDF consequence of the final state of both orders; a moved member position rolls back the transfer.
       await mdf.finish({ user: command.currentUser, requestId,
         commandKey: `orders.transfer_details:${command.idempotencyKey}`,
-        orderIds: [command.sourceOrderId, targetOrderId].sort((a, b) => a - b) });
+        orderIds: [command.sourceOrderId, targetOrderId].sort((a, b) => a - b),
+        confirmation: command.mdfConfirmation ?? null });
       persistedSourceVersion = await readOrderVersion(tx, command.sourceOrderId);
       persistedTargetVersion = await readOrderVersion(tx, targetOrderId);
       sourceAfter = await loadOrderSnapshot(tx, command.sourceOrderId);

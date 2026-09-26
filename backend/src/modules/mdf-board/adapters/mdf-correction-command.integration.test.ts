@@ -60,7 +60,7 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
       CREATE UNIQUE INDEX e2e_correction_audit_related ON ${fixture.schema}.audit_log_related_entity(audit_id,entity_type,entity_id);
       CREATE UNIQUE INDEX e2e_correction_outbox ON ${fixture.schema}.outbox_events(idempotency_key)`);
     for (const file of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql','174_mdf_execution_context.sql',
-      '175_mdf_command_placement.sql','178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql']) await fixture.applyMigrations([file]);
+      '175_mdf_command_placement.sql','178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql']) await fixture.applyMigrations([file]);
     await fixture.applyMigrations(['179_mdf_active_return.sql']);
     await fixture.applyMigrations(['180_mdf_cnc_observations.sql']);
     await fixture.applyMigrations(['181_cnc_manual_send_observation.sql']);
@@ -431,6 +431,16 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
     expect(preview.details).toHaveLength(1);
     expect(preview.details[0]).toMatchObject({ orderId: f.orderId, detailId: f.detailId,
       beforeStatus: 'Распилен', afterStatus: 'Отрисован' });
+    expect(await facts(f.orderId, f.source.id)).toEqual(before);
+  });
+
+  it('fails closed for a card holding a detached order position (§5.4e) without changing anything', async () => {
+    const f = await acceptedPacket();
+    await fixture.client.query(`INSERT INTO mdf_position_detachments(source_kind,source_id,order_id,detail_id,correction_id,
+      request_id,actor_user_id) VALUES('packet',$1,$2,$3,gen_random_uuid(),'e2e-detached-return',1)`, [f.source.id, f.orderId, f.detailId]);
+    const before = await facts(f.orderId, f.source.id);
+    await expect(command.preview(admin, f.source, bodyFor(f), 'E2E-detached-return'))
+      .rejects.toMatchObject({ statusCode: 409, code: 'MDF_CORRECTION_DETACHED_UNSUPPORTED' });
     expect(await facts(f.orderId, f.source.id)).toEqual(before);
   });
 

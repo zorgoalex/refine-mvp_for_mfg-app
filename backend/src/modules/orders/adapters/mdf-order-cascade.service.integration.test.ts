@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { Pool, type PoolClient, type QueryResultRow } from 'pg';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BackendEnv } from '../../../config/env.validation';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
@@ -71,7 +71,7 @@ describe.skipIf(!enabled)('MDF order cascade through real order services (stage 
     await client.query('BEGIN');
     await client.query("SET LOCAL lock_timeout='3s'");
     // Migrations run INSIDE the rolled-back outer transaction (their own BEGIN/COMMIT stripped).
-    for (const file of ['188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql']) {
+    for (const file of ['188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql']) {
       await client.query(readFileSync(new URL(`../../../../db/migrations/${file}`, import.meta.url), 'utf8')
         .replace(/^BEGIN;$/m, '').replace(/^COMMIT;$/m, ''));
     }
@@ -230,5 +230,67 @@ describe.skipIf(!enabled)('MDF order cascade through real order services (stage 
     expect((await detailRow(member)).order_id).toBe(String(source.header.orderId));
     expect(await head(sourceId)).toEqual(before);
     expect(await auditCount('orders.detail_transfer', `${prefix}-transfer`)).toBe(0);
+  });
+
+  describe('confirmed corrections through real services (§5.4e)', () => {
+    beforeEach(() => { vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'true'); });
+    afterEach(() => { vi.unstubAllEnvs(); });
+    const digestOf = async (run: () => Promise<unknown>) => {
+      try { await run(); } catch (error) {
+        const digest = (error as { details?: { mdfConfirmation?: { digest?: string } } }).details?.mdfConfirmation?.digest;
+        if (digest) return digest;
+        throw error;
+      }
+      throw new Error('E2E_EXPECTED_MDF_PREVIEW');
+    };
+
+    it('delete: preview and confirm reuse one idempotency key; a lost-success retry replays', async () => {
+      const owner = await createOrder('cdel', [10]);
+      const sourceId = await makeSource([owner.header.orderId], [{ orderId: owner.header.orderId, detailId: owner.details[0].id!, quantity: 10 }]);
+      const key = randomUUID();
+      const command = (mdfConfirmation?: { digest: string }) => service.delete({ orderId: owner.header.orderId, version: owner.version,
+        idempotencyKey: key, currentUser: actor, requestId: `${prefix}-cdel`, ...(mdfConfirmation ? { mdfConfirmation } : {}) });
+      const digest = await digestOf(() => command());
+      expect(await read(owner.header.orderId)).toMatchObject({ delete_flag: false });
+      const done = await command({ digest });
+      expect(done).toMatchObject({ success: true, orderId: owner.header.orderId });
+      expect(await read(owner.header.orderId)).toMatchObject({ delete_flag: true });
+      expect(await command({ digest })).toEqual(done);
+      expect(await command()).toEqual(done);
+      expect((await client.query('SELECT 1 FROM mdf_position_detachments WHERE source_id=$1', [sourceId])).rows).toHaveLength(1);
+      expect(await auditCount('mdf.order_correction.requested', `${prefix}-cdel`)).toBe(1);
+    });
+
+    it('update: a member decrease is confirmed by resending the same save with the digest', async () => {
+      const owner = await createOrder('cupd', [10]);
+      const sourceId = await makeSource([owner.header.orderId], [{ orderId: owner.header.orderId, detailId: owner.details[0].id!, quantity: 10 }]);
+      const dto = dtoFrom(owner, detailsOf(owner).map(d => ({ ...d, quantity: 7, area: 0.15 * 7 })));
+      const digest = await digestOf(() => service.update({ orderId: owner.header.orderId, dto, currentUser: actor, requestId: `${prefix}-cupd` }));
+      await service.update({ orderId: owner.header.orderId, dto, currentUser: actor, requestId: `${prefix}-cupd`, mdfConfirmation: { digest } });
+      expect((await detailRow(owner.details[0].id!)).quantity).toBe(7);
+      const queued = await head(sourceId);
+      expect(queued.received).toMatch(/^order-cascade:/);
+      await processJob(await pendingJobId(sourceId, queued.received));
+      expect((await head(sourceId)).accepted).toBe(queued.received);
+    });
+
+    it('transfer to a NEW order: the preview digest is stable and the confirmed transfer detaches the member', async () => {
+      const source = await createOrder('ctr', [10, 1]);
+      const member = source.details[0].id!;
+      const sourceId = await makeSource([source.header.orderId], [{ orderId: source.header.orderId, detailId: member, quantity: 10 }]);
+      const transfer = new OrderDetailTransferService({ database, sheetOrdersReads: true });
+      const key = randomUUID();
+      const command = (mdfConfirmation?: { digest: string }) => transfer.transfer({ currentUser: actor,
+        sourceOrderId: source.header.orderId, sourceVersion: source.version, idempotencyKey: key, requestId: `${prefix}-ctr`,
+        dto: { detailIds: [member], target: { mode: 'new', orderName: `${prefix}-ctr-new` } } as never,
+        ...(mdfConfirmation ? { mdfConfirmation } : {}) });
+      const first = await digestOf(() => command());
+      expect(await digestOf(() => command())).toBe(first);
+      const done = await command({ digest: first });
+      expect(Number((await detailRow(member)).order_id)).not.toBe(source.header.orderId);
+      expect((await client.query<{ order_id: string }>('SELECT order_id::text FROM mdf_position_detachments WHERE source_id=$1',
+        [sourceId])).rows).toEqual([{ order_id: String(source.header.orderId) }]);
+      expect(await command({ digest: first })).toEqual(done);
+    });
   });
 });

@@ -3,6 +3,7 @@ import { auditService } from '../../../common/audit/audit.service';
 import type { MdfJob } from '../application/mdf-job-runner';
 import { mdfPositionKey, mdfSum } from '../domain/mdf-quantities';
 import type { projectMdfAcceptedState, MdfAcceptedSource } from '../domain/mdf-accepted-projection';
+import { mdfAttachedSourceLines } from '../domain/mdf-accepted-projection';
 import { mdfSourceKey, type MdfExecutionMetadata } from './mdf-execution-snapshot';
 
 /** Owning job transaction only; publication lock comes AFTER all domain locks.
@@ -43,7 +44,7 @@ export async function publishMdfState(tx: DatabaseClient, input: {
       issues=EXCLUDED.issues,published_revision=EXCLUDED.published_revision,
       placement_inputs=EXCLUDED.placement_inputs`,[JSON.stringify(cards),revision]);
   const members = new Map<string,{ kind: string; id: string; orderId: number; detailId: number; quantity: number }>();
-  for (const source of input.sources) for (const line of source.lines) if (line.stage==='membership') {
+  for (const source of input.sources) for (const line of mdfAttachedSourceLines(source)) if (line.stage==='membership') {
     const key = JSON.stringify([source.kind,source.id,line.orderId,line.detailId]);
     members.set(key,{ kind: source.kind,id: source.id,orderId: line.orderId,detailId: line.detailId,
       quantity: mdfSum(members.get(key)?.quantity ?? 0,line.quantity) });

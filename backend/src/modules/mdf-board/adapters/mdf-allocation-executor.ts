@@ -8,6 +8,7 @@ import { mdfLineageRevisionKey } from '../domain/mdf-physical-lineage';
 import { loadMdfExecutionSnapshot, mdfSourceKey } from './mdf-execution-snapshot';
 import { advanceCompatibleMdfRevision } from './mdf-compatible-advance';
 import { advanceMdfBathTransition, loadMdfBathTransitionForJob } from './mdf-bath-transition';
+import { isMdfLineDetached, loadMdfDetachedPositions } from './mdf-position-detachments';
 import { loadMdfBazisCompositionJobIntent, mdfBazisCompositionOwnerScope,
   lockMdfBazisCompositionDetails } from './mdf-bazis-composition-job';
 import { advanceMdfBazisCompositionRevision,
@@ -160,6 +161,29 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
     WHERE a.order_id=ANY($1::bigint[]) AND a.state<>'released' ORDER BY a.allocation_id LIMIT $2 FOR UPDATE`,
   [scope.orders, MAX_ROWS + 1])).rows;
   if (allocations.length > MAX_ROWS) attention('ROW_LIMIT');
+  // §5.4e: a reservation at a position detached in its supplier's or its bath's source is released
+  // (history kept); a consumed debit stays as authenticated history. Detached lines are neither
+  // supply nor bath demand below, so a released reservation is never recreated.
+  const detached = await loadMdfDetachedPositions(tx, heads);
+  const evidenceSource = new Map(lines.map(l => [l.evidenceLineId, l]));
+  const detachedDebit = (a: MdfEvidenceAllocation) => {
+    const supplier = evidenceSource.get(a.evidenceLineId);
+    const supplierDetached = supplier ? isMdfLineDetached(detached, supplier) : false;
+    const bathDetached = isMdfLineDetached(detached, { kind: 'bath', id: a.bathId, orderId: a.orderId, detailId: a.detailId });
+    return { supplierDetached, bathDetached };
+  };
+  const releasedDetached = allocations.filter(a => {
+    if (a.state !== 'reserved') return false;
+    const d = detachedDebit(a);
+    return d.supplierDetached || d.bathDetached;
+  });
+  if (releasedDetached.length) {
+    await tx.query(`UPDATE mdf_bath_allocations SET state='released',updated_at=now() WHERE allocation_id=ANY($1::uuid[])
+      AND state='reserved'`, [releasedDetached.map(a => a.allocationId)]);
+    await auditChanges(tx, job, 'released', releasedDetached);
+    const releasedIds = new Set(releasedDetached.map(a => a.allocationId));
+    allocations = allocations.filter(a => !releasedIds.has(a.allocationId));
+  }
   if (intent) {
     if (!executionSnapshot || !raw) throw new Error('MDF_COMPOSITION_CONTEXT_MISSING');
     const advanced = await advanceMdfBazisCompositionRevision(tx, { job, intent, head: trigger, heads,
@@ -237,9 +261,15 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
     assignmentState: executionSnapshot && h.accepted && h.accepted===h.received
       ? executionSnapshot.assignmentStates.get(mdfLineageRevisionKey(h,h.accepted)) : undefined,
     uncertainOrderIds: executionSnapshot ? [...new Set(executionSnapshot.frozenDemand.get(mdfSourceKey(h))?.map(d => d.orderId))] : undefined,
+    detachedPositionKeys: detached.get(key(h)),
     lines: bySource.get(key(h)) ?? [], createdAt: executionSnapshot
       ? executionSnapshot.metadata.get(mdfSourceKey(h))?.sourceCreatedAt : dates.find(d => d.id === h.id)?.createdAt })),
-  allocations, orderIds: scope.orders }); }
+  // A consumed debit whose supplier line AND bath membership are both detached is history only.
+  allocations: allocations.filter(a => {
+    if (a.state !== 'consumed') return true;
+    const d = detachedDebit(a);
+    return !(d.supplierDetached && d.bathDetached);
+  }), orderIds: scope.orders }); }
   catch { return attention('INVALID_BALANCE'); }
   let inserted: (MdfEvidenceReservation & { allocationId: string })[] = [];
   if (plan.reservations.length) {
@@ -263,7 +293,7 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
     orderIds: scope.orders, sourceHeads: heads, sourceLines: lines, executionSnapshot, compositionAcceptance };
 }
 
-async function auditChanges(tx: DatabaseClient, job: MdfJob, state: 'reserved' | 'consumed',
+async function auditChanges(tx: DatabaseClient, job: MdfJob, state: 'reserved' | 'consumed' | 'released',
   lines: readonly (MdfEvidenceReservation & { allocationId: string })[]) {
   const grouped = new Map<string, typeof lines[number][]>();
   for (const l of lines) { const own = grouped.get(l.bathId) ?? []; own.push(l); grouped.set(l.bathId, own); }
@@ -275,7 +305,8 @@ async function auditChanges(tx: DatabaseClient, job: MdfJob, state: 'reserved' |
       relatedOrderId: orderIds.length === 1 ? orderIds[0] : null, statusField: 'allocation_state', statusCode: state,
       before: { allocationState: state === 'reserved' ? 'unallocated' : 'reserved' },
       after: { allocationState: state, allocations: changes },
-      metadata: { jobId: job.job_id, causeKey: job.event_key, notificationEventDecision: 'owning_job_transition_outbox' } });
+      metadata: { jobId: job.job_id, causeKey: job.event_key, notificationEventDecision: 'owning_job_transition_outbox',
+        ...(state === 'released' ? { reason: 'position_detached' } : {}) } });
     if (!auditId) throw new Error('MDF_ALLOCATION_AUDIT_FAILED');
     await tx.query(`INSERT INTO audit_log_related_entity(audit_id,entity_type,entity_id)
       SELECT $1::uuid,'order',unnest($2::bigint[]) UNION ALL SELECT $1::uuid,'order_detail',unnest($3::bigint[])

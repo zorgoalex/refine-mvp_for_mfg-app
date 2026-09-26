@@ -1342,16 +1342,19 @@ export class OrdersController {
     @Req() request: RequestWithCurrentUser,
     @Param('orderId') orderIdParam: string,
     @Body() dto: SaveOrderDto,
+    @Headers('x-mdf-confirmation') mdfConfirmationHeader?: string | string[],
   ): Promise<SaveOrderResponseDto> {
     this.assertOrdersWriteEnabled();
 
     const currentUser = this.requireCurrentUser(request);
     const orderId = parseOrderId(orderIdParam);
+    const mdfConfirmation = parseMdfConfirmationHeader(mdfConfirmationHeader);
     const order = await this.orders.update({
       currentUser,
       orderId,
       dto,
       requestId: request.requestId,
+      ...(mdfConfirmation ? { mdfConfirmation } : {}),
     });
 
     return { order };
@@ -1388,11 +1391,14 @@ export class OrdersController {
     @Headers('if-match') ifMatchHeader: string | string[] | undefined,
     @Headers('idempotency-key') idempotencyKeyHeader: string | string[] | undefined,
     @Body() body: unknown,
+    @Headers('x-mdf-confirmation') mdfConfirmationHeader?: string | string[],
   ): Promise<TransferOrderDetailsResponseDto> {
     this.assertOrdersWriteEnabled();
 
     const currentUser = this.requireCurrentUser(request);
+    const mdfConfirmation = parseMdfConfirmationHeader(mdfConfirmationHeader);
     return this.detailTransfer.transfer({
+      ...(mdfConfirmation ? { mdfConfirmation } : {}),
       currentUser,
       sourceOrderId: parseOrderId(orderIdParam),
       sourceVersion: parseIfMatchVersion(ifMatchHeader),
@@ -1456,11 +1462,14 @@ export class OrdersController {
     @Param('orderId') orderIdParam: string,
     @Headers('if-match') ifMatchHeader: string | string[] | undefined,
     @Headers('idempotency-key') idempotencyKeyHeader: string | string[] | undefined,
+    @Headers('x-mdf-confirmation') mdfConfirmationHeader?: string | string[],
   ): Promise<DeleteOrderResponseDto> {
     this.assertOrdersWriteEnabled();
 
     const currentUser = this.requireCurrentUser(request);
+    const mdfConfirmation = parseMdfConfirmationHeader(mdfConfirmationHeader);
     return this.orders.delete({
+      ...(mdfConfirmation ? { mdfConfirmation } : {}),
       currentUser,
       orderId: parseOrderId(orderIdParam),
       version: parseIfMatchVersion(ifMatchHeader),
@@ -1695,6 +1704,16 @@ export function parseIfMatchVersion(value: string | string[] | undefined): numbe
   }
 
   return version;
+}
+
+/** §5.4e: digest of a confirmed MDF preview (409 `mdfConfirmation.digest`), 64 lowercase hex. */
+export function parseMdfConfirmationHeader(value: string | string[] | undefined): { digest: string } | undefined {
+  if (value === undefined) return undefined;
+  const digest = singleValue(value)?.trim();
+  if (!digest || !/^[a-f0-9]{64}$/.test(digest)) {
+    throw headerError('X-MDF-Confirmation', 'X-MDF-Confirmation must be a 64-character hex digest');
+  }
+  return { digest };
 }
 
 export function parseIdempotencyKeyHeader(value: string | string[] | undefined): string {

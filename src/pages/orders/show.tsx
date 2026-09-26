@@ -37,7 +37,7 @@ import { isApiError } from "../../api/apiError";
 import { shouldShowOrderLoading } from "./utils/orderShowLoading";
 import { getDowelingOrderShowPath } from "./utils/dowelingOrderPaths";
 import { resolveOrderExportClientName, toOrderExportClient } from "./utils/orderExportClient";
-import { ordersApi } from "../../api/ordersApi";
+import { ordersApi, createOrderDeleteIdempotencyKey } from "../../api/ordersApi";
 import { OrderDeadlinePanel } from "./deadlines/OrderDeadlinePanel";
 import { GroupLinksEditor } from "./components/groups/GroupLinksEditor";
 import { AddToCutModal } from "./components/AddToCutModal";
@@ -2446,6 +2446,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       return;
     }
 
+    // One Idempotency-Key for the whole attempt: the confirmation resend (if
+    // any) must reuse it so the backend sees it as the same delete request.
+    const deleteIdempotencyKey = createOrderDeleteIdempotencyKey();
+
     Modal.confirm({
       title: `Удалить заказ №${record.order_name}?`,
       content: 'Заказ попадёт в корзину, его можно будет восстановить.',
@@ -2457,12 +2461,17 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           const token = showAsyncReadGuard.capture();
           return token ? () => showAsyncReadGuard.isSameResource(token) : null;
         },
-        deleteFn: () => runPageOwnedWorkspaceOperation(
+        deleteFn: (confirmationDigest) => runPageOwnedWorkspaceOperation(
           tabKey,
           'order-delete',
-          () => ordersApi.delete(Number(record.order_id), {
-            version: Number(record.version ?? backendOrder?.version ?? 0),
-          }),
+          () => ordersApi.delete(
+            Number(record.order_id),
+            {
+              version: Number(record.version ?? backendOrder?.version ?? 0),
+              idempotencyKey: deleteIdempotencyKey,
+            },
+            confirmationDigest ? { confirmationDigest } : undefined,
+          ),
         ),
         onSuccess: () => {
           message.success('Заказ перемещён в корзину');
@@ -2476,8 +2485,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             onOk: () => window.location.reload(),
           }),
         onError: (m) => message.error(m),
-        onMdfConflict: (error) => {
-          showMdfOrderConflictModal(error);
+        onMdfConflict: (error, confirm) => {
+          showMdfOrderConflictModal(error, { onConfirm: confirm });
         },
       }),
     });

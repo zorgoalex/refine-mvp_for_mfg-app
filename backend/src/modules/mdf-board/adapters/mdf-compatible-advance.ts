@@ -44,7 +44,13 @@ export async function advanceCompatibleMdfRevision(tx: DatabaseClient,input: {
             LEFT JOIN mdf_revision_demand nd ON nd.source_kind=e.source_kind AND nd.source_id=e.source_id
               AND nd.revision_key=$3 AND nd.order_id=e.order_id AND nd.detail_id=e.detail_id
             WHERE e.source_kind=$1 AND e.source_id=$2 AND e.revision_key=$4
-              AND (nd.quantity IS NULL OR nd.quantity<od.quantity))))
+              -- §5.4e: lines at a position detached in this source (terminal, migration 191) are history,
+              -- never MDF-present: such a position may leave, shrink or return in demand freely. Otherwise
+              -- only a confirmed correction may reduce (excess = surplus); none may drop the position.
+              AND NOT EXISTS(SELECT 1 FROM mdf_position_detachments x
+                WHERE x.source_kind=e.source_kind AND x.source_id=e.source_id AND x.order_id=e.order_id
+                  AND x.detail_id=e.detail_id)
+              AND (nd.quantity IS NULL OR (nd.quantity<od.quantity AND NOT ci.confirmed)))))
       AND n.predecessor_received_revision_key=n.predecessor_accepted_revision_key
       AND NOT EXISTS(SELECT 1 FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
         WHERE a.state<>'released' AND e.source_kind=$1 AND e.source_id=$2 AND e.revision_key<>$4)`,
@@ -67,12 +73,15 @@ export async function advanceCompatibleMdfRevision(tx: DatabaseClient,input: {
       order_id::float8 "orderId",detail_id::float8 "detailId",quantity::float8 quantity,state`,
   [JSON.stringify(replacements.map(r => ({ ...r.old,evidenceLineId: r.evidenceLineId,bathRevision: r.bathRevision,
     cause: `mdf-forward:${input.job.job_id}:${r.old.allocationId}` })))])).rows;
-  const cascade=(await tx.query(`SELECT 1 FROM mdf_order_cascade_intents WHERE job_id=$1`,[input.job.job_id])).rows.length>0;
-  const auditId=await auditService.record(tx,{ event: cascade ? 'mdf_board.order_cascade_accepted' : 'mdf_board.forward_revision_accepted',entityType: 'mdf_source',
+  const intent=(await tx.query<{ confirmed: boolean; previewDigest: string | null }>(`SELECT confirmed,preview_digest "previewDigest"
+    FROM mdf_order_cascade_intents WHERE job_id=$1`,[input.job.job_id])).rows[0];
+  const auditId=await auditService.record(tx,{ event: intent?.confirmed ? 'mdf_board.order_correction_accepted'
+    : intent ? 'mdf_board.order_cascade_accepted' : 'mdf_board.forward_revision_accepted',entityType: 'mdf_source',
     entityId: `${h.kind}:${h.id}`,actorUserId: input.job.actor_user_id,requestId: input.job.request_id,
     source: 'backend-mdf-job',before: { acceptedRevision: previousRevision,allocations: replacements.map(r => r.old) },
     after: { acceptedRevision: h.received,allocations: saved },
     metadata: { causeKey: input.job.event_key,jobId: input.job.job_id,
+      ...(intent?.confirmed ? { previewDigest: intent.previewDigest } : {}),
       notificationEventDecision: 'proof_continuity_only_no_new_production_effect' } });
   if (!auditId) throw new Error('MDF_ADVANCE_AUDIT_FAILED');
   await tx.query(`INSERT INTO audit_log_related_entity(audit_id,entity_type,entity_id)

@@ -6,6 +6,7 @@ import type { MdfPositionQuantity } from '../domain/mdf-quantities';
 import { mdfLineageRevisionKey } from '../domain/mdf-physical-lineage';
 import { loadMdfPhysicalLineageSnapshot } from './mdf-physical-lineage-snapshot';
 import { loadMdfBazisAssignmentStateSnapshot } from './mdf-bazis-assignment-state-snapshot';
+import { loadMdfDetachedPositions } from './mdf-position-detachments';
 
 export interface MdfExecutionHead {
   kind: MdfSourceKind; id: string; received: string; accepted: string | null; epoch: string;
@@ -69,6 +70,17 @@ export async function loadMdfExecutionSnapshot(tx: DatabaseClient, heads: readon
     FROM mdf_bath_transitions t JOIN unnest($1::text[],$2::text[],$3::text[]) h(kind,id,revision)
       ON h.kind='bath' AND t.retired_source_id=h.id AND t.retired_revision_key=h.revision`,args)).rows;
   const retired = new Set(retiredRows.map(r => mdfSourceKey({ kind: 'bath', id: r.id })));
+  // §5.4e: a source whose every RECEIVED line sits at a position detached in that source (migration 191,
+  // terminal) is likewise terminal: history only, no demand/context checks, excluded like a retired bath.
+  const fullyDetached = (await tx.query<{ kind: string; id: string }>(`SELECT h.kind,h.id
+    FROM unnest($1::text[],$2::text[],$3::text[]) h(kind,id,revision)
+    WHERE EXISTS(SELECT 1 FROM mdf_evidence_lines l WHERE l.source_kind=h.kind AND l.source_id=h.id AND l.revision_key=h.revision)
+      AND NOT EXISTS(SELECT 1 FROM mdf_evidence_lines l WHERE l.source_kind=h.kind AND l.source_id=h.id
+        AND l.revision_key=h.revision AND NOT EXISTS(SELECT 1 FROM mdf_position_detachments x
+          WHERE x.source_kind=l.source_kind AND x.source_id=l.source_id AND x.order_id=l.order_id AND x.detail_id=l.detail_id))`,
+  args)).rows;
+  for (const row of fullyDetached) retired.add(mdfSourceKey(row));
+  const detached = await loadMdfDetachedPositions(tx,heads);
   for (const h of heads) {
     const key = mdfSourceKey(h), c = metadata.get(key), rows = demand.filter(d => mdfSourceKey(d)===key);
     frozenDemand.set(key,rows);
@@ -92,7 +104,7 @@ export async function loadMdfExecutionSnapshot(tx: DatabaseClient, heads: readon
     if (assignmentIssue) own.push(...assignmentIssue);
     issues.set(key,own);
   }
-  return { details, metadata, issues, frozenDemand, retired,
+  return { details, metadata, issues, frozenDemand, retired, detached,
     lineage: physicalLineage.lineage, lineageIssues: physicalLineage.lineageIssues,
     assignmentStates:assignmentState.states,assignmentStateIssues:assignmentState.issues };
 }

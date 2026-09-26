@@ -23,8 +23,16 @@ export interface MdfAcceptedSource extends MdfBoardSource {
   /** Issued by the server snapshot loader after validating the immutable state. */
   assignmentState?: MdfValidatedBazisAssignmentState;
   lineage?: MdfValidatedPhysicalLineage;
+  /** §5.4e positions detached in THIS source (terminal): their lines stay for validation/history only. */
+  detachedPositionKeys?: ReadonlySet<string>;
   /** Exactly one accepted revision (or received membership for unverified cards). */
   lines: readonly MdfAcceptedLine[];
+}
+/** §5.4e lines of a source that still count: not at a position detached in that source. */
+export function mdfAttachedSourceLines<T extends MdfPositionQuantity>(source: { lines: readonly T[];
+  detachedPositionKeys?: ReadonlySet<string> }): readonly T[] {
+  const keys = source.detachedPositionKeys;
+  return keys?.size ? source.lines.filter(l => !keys.has(mdfPositionKey(l))) : source.lines;
 }
 export interface MdfAcceptedStateInput {
   trigger: { kind: MdfBoardSource['kind'] | 'order' | 'orderDetail'; id: string };
@@ -65,6 +73,10 @@ export function projectMdfAcceptedState(input: MdfAcceptedStateInput) {
     for (const l of s.lines) {
       if (seenLines.has(l.evidenceLineId)) throw new Error('MDF_PROJECTION_DUPLICATE_LINE');
       seenLines.add(l.evidenceLineId);
+    }
+    // Seal/lineage/assignment checks use the full revision; members and credit only attached lines.
+    const attached = mdfAttachedSourceLines(s);
+    for (const l of attached) {
       const position = mdfPositionKey(l);
       if (l.stage === 'membership' && l.evidence === 'derived') members.set(position, { orderId: l.orderId,
         detailId: l.detailId, quantity: mdfSum(members.get(position)?.quantity ?? 0, l.quantity) });
@@ -73,7 +85,7 @@ export function projectMdfAcceptedState(input: MdfAcceptedStateInput) {
       && matchesMdfValidatedBazisAssignmentState({sourceKind:s.kind,sourceId:s.id,revisionKey:s.received,
         lines:s.lines.map(l=>({...l,lineKey:l.lineKey??'',stageCode:l.stage,evidenceKind:l.evidence})),state:s.assignmentState});
     for (const position of members.keys()) {
-      const own = s.lines.filter(l => mdfPositionKey(l)===position);
+      const own = attached.filter(l => mdfPositionKey(l)===position);
       cuts.set(position,stageCoverage(own.filter(l => l.stage==='cut')));
       rolled.set(position,stageCoverage(own.filter(l => l.stage==='laminated')));
     }
@@ -89,7 +101,7 @@ export function projectMdfAcceptedState(input: MdfAcceptedStateInput) {
     if ([...members.keys()].some(k => !details.has(k))) issues.add('MEMBER_OUTSIDE_LIVE_MDF_DEMAND');
     const verified = s.verified && issues.size === 0;
     const normalMembers = new Map<string,MdfPositionQuantity>();
-    for (const l of s.lines) if (l.stage==='membership' && l.evidence==='derived' && !l.rework) {
+    for (const l of attached) if (l.stage==='membership' && l.evidence==='derived' && !l.rework) {
       const position=mdfPositionKey(l);
       normalMembers.set(position,{ orderId: l.orderId,detailId: l.detailId,
         quantity: mdfSum(normalMembers.get(position)?.quantity ?? 0,l.quantity) });
@@ -101,7 +113,7 @@ export function projectMdfAcceptedState(input: MdfAcceptedStateInput) {
     // Keep the accepted source lines on the card for review, but do not count
     // this bath's proof while any of its positions has an unverified balance.
     if (verified && !balanceBlocked) {
-      for (const l of s.lines) if (l.stage === 'cut' || l.stage === 'laminated') {
+      for (const l of attached) if (l.stage === 'cut' || l.stage === 'laminated') {
         evidence.push({ ...l, source: key, line: l.evidenceLineId, stage: l.stage, kind: l.evidence });
       }
       for (const [position,m] of normal) {
@@ -122,7 +134,7 @@ export function projectMdfAcceptedState(input: MdfAcceptedStateInput) {
     // or missing/forged lineage must NOT bypass and keeps normal issue flow.
     const intentionalEmpty = s.kind==='bazisCutSet' && verified && assignmentStateValid && lineageValid
       && s.assignmentState?.intentionalEmpty === true && members.size === 0;
-    return { source: s, members, normal, verified, fullCut, fullRolled, balanceBlocked, issues,
+    return { source: s, attached, members, normal, verified, fullCut, fullRolled, balanceBlocked, issues,
       assignmentStateValid,lineageValid,intentionalEmpty };
   });
   // Declarations from different cards overlap physical work; never add them as
@@ -172,7 +184,7 @@ export function projectMdfAcceptedState(input: MdfAcceptedStateInput) {
         scope: { source: { kind: s.kind, id: s.id }, details: rows.sort((a,b) => a.detailId-b.detailId) } });
     }
     const retainedOwners=p.assignmentStateValid&&p.lineageValid&&s.assignmentState
-      ? s.lines.filter(line=>line.evidence==='physical').map(line=>line.orderId) : [];
+      ? p.attached.filter(line=>line.evidence==='physical').map(line=>line.orderId) : [];
     return { kind: s.kind, id: s.id, column, verified,
       reason: placement.reason, placementInputs,
       issues: [...issues].sort(), orderIds: [...new Set([...members.values()].map(m => m.orderId).concat(retainedOwners))].sort((a,b) => a-b) };

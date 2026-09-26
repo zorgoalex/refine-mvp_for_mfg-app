@@ -754,7 +754,8 @@ export class OrderTransactionService {
       }
       // Last write step: MDF consequence of the final detail state (incl. in-tx automation).
       await mdf?.finish({ user: command.currentUser, requestId: automationRequestId,
-        commandKey: `orders.update:${command.orderId}:v${version}`, orderIds: [command.orderId] });
+        commandKey: `orders.update:${command.orderId}:v${version}`, orderIds: [command.orderId],
+        confirmation: command.mdfConfirmation ?? null });
 
       return this.readAndAssertVersion(unitOfWork, command.orderId, version, command);
     }, { mdfWriter: 'orders.update' });
@@ -852,7 +853,8 @@ export class OrderTransactionService {
       });
 
       await mdf?.finish({ user: command.currentUser, requestId,
-        commandKey: `orders.delete:${command.orderId}:v${nextVersion}`, orderIds: [command.orderId] });
+        commandKey: `orders.delete:${command.orderId}:v${nextVersion}`, orderIds: [command.orderId],
+        confirmation: command.mdfConfirmation ?? null });
       const response: DeleteOrderResponseDto = {
         success: true,
         orderId: command.orderId,

@@ -46,22 +46,47 @@ const CONFLICT_MESSAGES: Record<MdfOrderConflictClass, string> = {
   ASSIGNMENT: 'Изменение затрагивает позиции, назначенные в карточки МДФ-доски — сначала измените состав карточки',
   EMPTY: 'После изменения у карточки МДФ-доски не останется позиций — сначала измените её состав',
 };
+/** §5.4e confirmable variants (producer enabled): the dialog offers «Подтвердить». */
+const CONFIRM_MESSAGES: Record<MdfOrderConflictClass, string> = {
+  ...CONFLICT_MESSAGES,
+  PHYSICAL: 'Изменение затрагивает уже распиленные или зарезервированные позиции МДФ-доски — подтвердите: лишнее станет излишком, удалённые позиции выбудут из учёта',
+  ASSIGNMENT: 'Изменение затрагивает позиции, назначенные в карточки МДФ-доски — подтвердите изменение состава карточек',
+  EMPTY: 'После изменения у карточки МДФ-доски не останется позиций — подтвердите: карточка уйдёт с доски, история сохранится',
+};
 const CONFLICT_ORDER: readonly MdfOrderConflictClass[] = ['PENDING', 'ATTENTION', 'PHYSICAL', 'ASSIGNMENT', 'EMPTY'];
 
 interface SourceRef { kind: 'packet' | 'bazisCutSet' | 'bath'; id: string }
 interface HeadRow extends SourceRef { received: string; accepted: string | null; epoch: string; version: string }
 interface EvidenceRow extends MdfReceiptLine { evidenceLineId: string; revision: string }
 interface DemandRow { orderId: number; detailId: number; quantity: number }
+interface ConflictPosition {
+  orderId: number; detailId: number; before: number | null; after: number | null;
+  /** §5.4e preview only (confirmable conflicts with the correction producer enabled). */
+  cut?: number; laminated?: number; reserved?: number; outcome?: 'surplus' | 'detached';
+}
 interface Conflict {
   cls: MdfOrderConflictClass; source: SourceRef; displayName: string | null; owners: number[];
-  positions: { orderId: number; detailId: number; before: number | null; after: number | null }[];
+  positions: ConflictPosition[];
 }
+/** §5.4e a confirmable change of MDF-present positions in one source. */
+interface Correction {
+  head: HeadRow; frozen: DemandRow[]; next: DemandRow[]; own: EvidenceRow[];
+  positions: ConflictPosition[]; detach: { orderId: number; detailId: number }[]; fullyDetached: boolean;
+  allocations: AllocationRow[];
+}
+interface AllocationRow { allocationId: string; kind: string; id: string; orderId: number; detailId: number;
+  quantity: number; state: string }
+export interface MdfOrderConfirmation { digest: string }
+/** Producer gate: with the flag off every MDF-present change answers today's 409 without a preview. */
+export const mdfOrderCorrectionsEnabled = () => process.env.BACKEND_MDF_ORDER_CORRECTIONS === 'true';
 
 export interface MdfOrderCommandHandle {
   /** Call after the command's order row locks, BEFORE its writes. */
   captureBefore(orderIds: readonly number[]): Promise<void>;
   /** Call after the writes, before commit. Throws 409 (whole command rolls back) on conflicts. */
-  finish(input: { user: CurrentUser; requestId: string; commandKey: string; orderIds: readonly number[] }): Promise<void>;
+  finish(input: { user: CurrentUser; requestId: string; commandKey: string; orderIds: readonly number[];
+    /** §5.4e digest of a previously answered preview; absent ⇒ a confirmable change answers 409 with a preview. */
+    confirmation?: MdfOrderConfirmation | null }): Promise<void>;
 }
 
 /** Nested port: the owning transaction must have entered the boundary with this writer. */
@@ -127,7 +152,7 @@ function contention(): never {
 }
 
 async function runCascade(tx: TransactionClient, input: { user: CurrentUser; requestId: string; commandKey: string;
-  orderIds: readonly number[]; readOnly: boolean; before: CommandBefore }) {
+  orderIds: readonly number[]; readOnly: boolean; before: CommandBefore; confirmation?: MdfOrderConfirmation | null }) {
   const touched = [...new Set(input.orderIds)].sort((a, b) => a - b);
   // Impact first: a command that did not change the MDF demand of its own orders has no MDF
   // consequence — before any discovery, scope limit or lock, whatever state the cards are in.
@@ -187,13 +212,16 @@ async function runCascade(tx: TransactionClient, input: { user: CurrentUser; req
       ON l.source_kind=h.kind AND l.source_id=h.id AND l.revision_key=h.revision ORDER BY l.line_key LIMIT $4`,
   [heads.map(h => h.kind), heads.map(h => h.id), heads.map(h => h.received), MAX_LINES + 1])).rows;
   if (lines.length > MAX_LINES) throw new ApiError(409, 'MDF_ORDER_SCOPE_LIMIT', 'Слишком много позиций затронуто изменением');
-  const allocated = new Set((await tx.query<{ kind: string; id: string; orderId: string; detailId: string }>(`
-    SELECT e.source_kind kind,e.source_id id,a.order_id::text "orderId",a.detail_id::text "detailId"
+  // Active allocations seen from both sides: the supplier's evidence source and the consuming bath.
+  const allocationRows = (await tx.query<AllocationRow>(`
+    SELECT a.allocation_id::text "allocationId",e.source_kind kind,e.source_id id,a.order_id::float8 "orderId",
+        a.detail_id::float8 "detailId",a.quantity::float8 quantity,a.state
       FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
       WHERE a.state<>'released' AND a.order_id=ANY($1::bigint[])
-    UNION SELECT 'bath',a.bath_id,a.order_id::text,a.detail_id::text FROM mdf_bath_allocations a
-      WHERE a.state<>'released' AND a.order_id=ANY($1::bigint[])`, [owners])).rows
-    .map(r => `${mdfSourceKey(r)}|${r.orderId}:${r.detailId}`));
+    UNION ALL SELECT a.allocation_id::text,'bath',a.bath_id,a.order_id::float8,a.detail_id::float8,a.quantity::float8,a.state
+      FROM mdf_bath_allocations a WHERE a.state<>'released' AND a.order_id=ANY($1::bigint[])
+    ORDER BY 1,2,3`, [owners])).rows;
+  const allocated = new Set(allocationRows.map(r => `${mdfSourceKey(r)}|${mdfPositionKey(r)}`));
   const jobs = new Map((await tx.query<{ kind: string; id: string; status: string }>(`SELECT DISTINCT ON (j.source_kind,j.source_id,j.revision_key)
       j.source_kind kind,j.source_id id,j.status FROM mdf_revision_jobs j
       JOIN unnest($1::text[],$2::text[],$3::text[]) h(kind,id,revision)
@@ -206,6 +234,7 @@ async function runCascade(tx: TransactionClient, input: { user: CurrentUser; req
   [heads.map(h => h.kind), heads.map(h => h.id)])).rows.map(r => [mdfSourceKey(r), r]));
 
   const conflicts: Conflict[] = [];
+  const corrections: Correction[] = [];
   const cascades: { head: HeadRow; frozen: DemandRow[]; next: DemandRow[]; own: EvidenceRow[] }[] = [];
   const refreshes: { head: HeadRow; frozen: DemandRow[]; own: EvidenceRow[]; reason: string }[] = [];
   for (const h of heads) {
@@ -222,6 +251,8 @@ async function runCascade(tx: TransactionClient, input: { user: CurrentUser; req
     const demandImpact = mdfDemandDigest(demandOf(input.before.demand, ownTouched))
       !== mdfDemandDigest(demandOf(afterDemand, ownTouched));
     if (!demandImpact) continue;
+    // §5.4e: a retired bath or a fully detached source is terminal history; an order edit never touches it.
+    if (snapshot.retired.has(key)) continue;
     // 1. PENDING: unfinished acceptance of the received revision.
     const job = jobs.get(key);
     if (!h.accepted || h.accepted !== h.received || job === 'pending') { conflict('PENDING'); continue; }
@@ -239,22 +270,43 @@ async function runCascade(tx: TransactionClient, input: { user: CurrentUser; req
       || ownIssues.length || !frozen.length) {
       conflict('ATTENTION'); continue;
     }
-    // 3–4. MDF-present positions may only stay or grow; everything else is demand-only.
+    // 3–4. MDF-present positions may only stay or grow; everything else is demand-only. Positions
+    // already detached in this source (§5.4e, terminal) are history only and never MDF-present.
+    const detachedHere = snapshot.detached.get(key);
+    const attached = detachedHere?.size ? own.filter(l => !detachedHere.has(mdfPositionKey(l))) : own;
     const frozenByPosition = new Map(frozen.map(d => [mdfPositionKey(d), d]));
-    const touchedPositions: Conflict['positions'] = [];
+    const touchedPositions: ConflictPosition[] = [];
+    const detach: Correction['detach'] = [];
     let physical = false;
-    for (const position of [...new Set(own.map(mdfPositionKey))].sort()) {
+    for (const position of [...new Set(attached.map(mdfPositionKey))].sort()) {
       const liveRow = liveByPosition.get(position), frozenRow = frozenByPosition.get(position);
       if (liveRow && frozenRow && liveRow.quantity >= frozenRow.quantity) continue;
-      const line = own.find(l => mdfPositionKey(l) === position)!;
-      touchedPositions.push({ orderId: line.orderId, detailId: line.detailId,
-        before: frozenRow?.quantity ?? null, after: liveRow?.quantity ?? null });
-      if (own.some(l => mdfPositionKey(l) === position && (l.stageCode === 'cut' || l.stageCode === 'laminated'))
-        || allocated.has(`${key}|${position}`)) physical = true;
+      const at = attached.filter(l => mdfPositionKey(l) === position);
+      const sum = (stage: string) => at.filter(l => l.stageCode === stage && l.evidenceKind === 'physical')
+        .reduce((total, l) => total + l.quantity, 0);
+      const reserved = allocationRows.filter(a => mdfSourceKey(a) === key && mdfPositionKey(a) === position
+        && a.state === 'reserved').reduce((total, a) => total + a.quantity, 0);
+      const { orderId, detailId } = at[0];
+      touchedPositions.push({ orderId, detailId, before: frozenRow?.quantity ?? null, after: liveRow?.quantity ?? null,
+        cut: sum('cut'), laminated: sum('laminated'), reserved, outcome: liveRow ? 'surplus' : 'detached' });
+      if (!liveRow) detach.push({ orderId, detailId });
+      if (at.some(l => l.stageCode === 'cut' || l.stageCode === 'laminated') || allocated.has(`${key}|${position}`)) physical = true;
     }
-    if (touchedPositions.length) { conflict(physical ? 'PHYSICAL' : 'ASSIGNMENT', touchedPositions); continue; }
     const next = live.filter(d => sourceOwners.includes(d.orderId))
       .map(d => ({ orderId: d.orderId, detailId: d.detailId, quantity: d.quantity }));
+    if (touchedPositions.length) {
+      const detachSet = new Set(detach.map(mdfPositionKey));
+      const fullyDetached = attached.every(l => detachSet.has(mdfPositionKey(l)));
+      const cls: MdfOrderConflictClass = physical ? 'PHYSICAL' : 'ASSIGNMENT';
+      const legacy = touchedPositions.map(({ orderId, detailId, before, after }) => ({ orderId, detailId, before, after }));
+      if (!mdfOrderCorrectionsEnabled()) { conflict(cls, legacy); continue; }
+      // Confirmable: a non-terminal remainder needs a non-empty frozen demand.
+      if (!fullyDetached && !next.length) { conflict('EMPTY', legacy); continue; }
+      corrections.push({ head: h, frozen, next, own, positions: touchedPositions, detach, fullyDetached,
+        allocations: allocationRows.filter(a => mdfSourceKey(a) === key) });
+      conflict(cls, touchedPositions);
+      continue;
+    }
     if (!next.length) { conflict('EMPTY'); continue; }
     if (mdfDemandDigest(next) !== mdfDemandDigest(frozen)) { cascades.push({ head: h, frozen, next, own }); continue; }
     // 5. Same demand: refresh only when placement inputs changed or a completed quarantine healed.
@@ -262,8 +314,18 @@ async function runCascade(tx: TransactionClient, input: { user: CurrentUser; req
     if (healed) refreshes.push({ head: h, frozen, own, reason: 'quarantine_healed' });
   }
 
-  if (conflicts.length) await rejectWithConflicts(tx, input.user, conflicts);
-  if (input.readOnly && (cascades.length || refreshes.length)) {
+  const correctionKeys = new Set(corrections.map(c => mdfSourceKey(c.head)));
+  const hard = conflicts.filter(c => !correctionKeys.has(mdfSourceKey(c.source)));
+  if (hard.length) await rejectWithConflicts(tx, input.user, conflicts);
+  let previewDigest: string | null = null;
+  if (corrections.length) {
+    previewDigest = mdfCorrectionPreviewDigest(input.user, corrections);
+    if (!input.confirmation) return rejectWithConflicts(tx, input.user, conflicts, previewDigest);
+    if (input.confirmation.digest !== previewDigest) {
+      await rejectWithConflicts(tx, input.user, conflicts, previewDigest, 'STALE');
+    }
+  }
+  if (input.readOnly && (cascades.length || refreshes.length || corrections.length)) {
     throw new ApiError(409, 'MDF_ENGINE_READ_ONLY', 'Производственный учёт временно доступен только для чтения');
   }
   for (const c of cascades) {
@@ -272,11 +334,91 @@ async function runCascade(tx: TransactionClient, input: { user: CurrentUser; req
   for (const r of refreshes) {
     await appendReceipt(tx, snapshot, input, r.head, r.own, { frozen: r.frozen, next: r.frozen, reason: r.reason });
   }
+  if (corrections.length && previewDigest) await applyCorrections(tx, snapshot, input, corrections, previewDigest);
+}
+
+/** Stable digest of what the user confirms: the MDF consequences of the command (existing positions,
+ * outcomes, quantities) bound to the exact source heads, their lines and active allocations. Generated
+ * ids of new details/orders never enter it, so a resend of the same intent yields the same digest. */
+function mdfCorrectionPreviewDigest(user: CurrentUser, corrections: readonly Correction[]): string {
+  const canonical = corrections.map(c => [c.head.kind, c.head.id, c.head.received, c.head.version, c.head.epoch,
+    c.fullyDetached, [...c.own].sort((a, b) => a.lineKey < b.lineKey ? -1 : a.lineKey > b.lineKey ? 1 : 0)
+      .map(l => [l.lineKey, l.orderId, l.detailId, l.quantity, l.stageCode, l.evidenceKind, l.rework]),
+    c.allocations.map(a => [a.allocationId, a.state, a.orderId, a.detailId, a.quantity]),
+    [...c.positions].sort((a, b) => a.orderId - b.orderId || a.detailId - b.detailId)
+      .map(p => [p.orderId, p.detailId, p.before, p.after, p.outcome, p.cut, p.laminated, p.reserved])])
+    .sort((a, b) => JSON.stringify(a.slice(0, 2)) < JSON.stringify(b.slice(0, 2)) ? -1 : 1);
+  return createHash('sha256').update(JSON.stringify(['mdf-order-correction-v1', Number(user.id), canonical])).digest('hex');
+}
+
+/** Confirmed: detach first (receipt validation reads the detachments), then per source either a
+ * confirmed cascade (remaining demand) or, when nothing of it counts any more, a refresh that lets
+ * its job retire the card. A fully detached CNC packet stops observation (needs_reconciliation). */
+async function applyCorrections(tx: TransactionClient, snapshot: Awaited<ReturnType<typeof loadMdfExecutionSnapshot>>,
+  input: { user: CurrentUser; requestId: string; commandKey: string }, corrections: readonly Correction[], previewDigest: string) {
+  const correctionId = randomUUID();
+  const rows = corrections.flatMap(c => c.detach.map(p => ({ kind: c.head.kind, id: c.head.id, ...p })));
+  if (rows.length) {
+    await tx.query(`INSERT INTO mdf_position_detachments(source_kind,source_id,order_id,detail_id,correction_id,request_id,actor_user_id)
+      SELECT x.kind,x.id,x."orderId",x."detailId",$2::uuid,$3,$4 FROM jsonb_to_recordset($1::jsonb)
+        x(kind text,id text,"orderId" bigint,"detailId" bigint)`,
+    [JSON.stringify(rows), correctionId, input.requestId, Number(input.user.id)]);
+  }
+  const reconciled: string[] = [];
+  for (const c of corrections) {
+    if (c.fullyDetached) {
+      await appendReceipt(tx, snapshot, input, c.head, c.own, { frozen: c.frozen, next: c.frozen, reason: 'fully_detached' });
+      if (c.head.kind === 'packet' && await stopCncObservation(tx, c.head.id)) reconciled.push(c.head.id);
+    } else {
+      await appendReceipt(tx, snapshot, input, c.head, c.own, { frozen: c.frozen, next: c.next, confirmed: { previewDigest } });
+    }
+  }
+  const orderIds = [...new Set(corrections.flatMap(c => c.frozen.concat(c.next).map(d => d.orderId)
+    .concat(c.positions.map(p => p.orderId))))].sort((a, b) => a - b);
+  const detailIds = [...new Set(corrections.flatMap(c => c.positions.map(p => p.detailId)))].sort((a, b) => a - b);
+  const outcomes = corrections.map(c => ({ source: `${c.head.kind}:${c.head.id}`, fullyDetached: c.fullyDetached,
+    positions: c.positions }));
+  const auditId = await auditService.record(tx, {
+    event: 'mdf.order_correction.requested', entityType: 'mdf_order_correction', entityId: correctionId,
+    actorUserId: input.user.id, requestId: input.requestId, source: 'backend-orders',
+    before: { sources: corrections.map(c => ({ source: `${c.head.kind}:${c.head.id}`, receivedRevision: c.head.received,
+      demandDigest: mdfDemandDigest(c.frozen) })) },
+    after: { outcomes, detached: rows, cncTargetsNeedingReconciliation: reconciled },
+    metadata: { commandKey: input.commandKey, previewDigest, correctionId,
+      notificationEventDecision: 'domain_outbox_only_no_user_notification' },
+    relatedEntities: [...orderIds.map(entityId => ({ entityType: 'order', entityId })),
+      ...detailIds.map(entityId => ({ entityType: 'order_detail', entityId }))],
+  });
+  if (!auditId) throw new Error('MDF_ORDER_CORRECTION_AUDIT_FAILED');
+  await tx.query(`INSERT INTO outbox_events(event_type,aggregate_type,aggregate_id,payload_json,idempotency_key)
+    VALUES ('mdf_board.order_correction','mdf_order_correction',$1,$2::jsonb,$3) ON CONFLICT (idempotency_key) DO NOTHING`,
+  [correctionId, JSON.stringify({ actorUserId: Number(input.user.id), requestId: input.requestId, auditId, correctionId,
+    orderIds, detailIds, outcomes }),
+  `mdf-order-correction:${createHash('sha256').update(input.commandKey).digest('hex')}`]);
+}
+
+/** Observation of a packet whose every position is detached can no longer complete anything. The CNC
+ * worker holds its target before sources, so we only try the row (NOWAIT) and answer a retryable 409. */
+async function stopCncObservation(tx: TransactionClient, packetId: string): Promise<boolean> {
+  if (!/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(packetId)) return false;
+  try {
+    const rows = (await tx.query(`UPDATE mdf_cnc_observation_targets t SET work_state='needs_reconciliation',claim_id=NULL,
+        claim_token_hash=NULL,claim_worker_instance_id=NULL,claim_session_generation=NULL,claim_expires_at=NULL,
+        claim_head_version=NULL,claim_correction_epoch=NULL,claim_raw_source_version=NULL,claim_observation_version=NULL,
+        updated_at=now()
+      WHERE t.packet_id IN (SELECT packet_id FROM mdf_cnc_observation_targets WHERE packet_id=$1::uuid
+        AND work_state='active' FOR UPDATE NOWAIT) RETURNING t.packet_id`, [packetId])).rows;
+    return rows.length > 0;
+  } catch (error) {
+    if ((error as { code?: string }).code === '55P03') contention();
+    throw error;
+  }
 }
 
 async function appendReceipt(tx: TransactionClient, snapshot: Awaited<ReturnType<typeof loadMdfExecutionSnapshot>>,
   input: { user: CurrentUser; requestId: string; commandKey: string },
-  head: HeadRow, own: EvidenceRow[], demand: { frozen: DemandRow[]; next: DemandRow[]; reason?: string }) {
+  head: HeadRow, own: EvidenceRow[],
+  demand: { frozen: DemandRow[]; next: DemandRow[]; reason?: string; confirmed?: { previewDigest: string } }) {
   const key = mdfSourceKey(head);
   const metadata = snapshot.metadata.get(key);
   if (!metadata || !head.accepted) throw new ApiError(409, 'MDF_ORDER_SOURCE_ATTENTION', CONFLICT_MESSAGES.ATTENTION);
@@ -307,15 +449,18 @@ async function appendReceipt(tx: TransactionClient, snapshot: Awaited<ReturnType
     ? await recordMdfOrderCascadeReceipt(tx, { ...base, ...(manifest ? { lineage: manifest } : {}), cascade: {
       intentId, jobId: randomUUID(), predecessorRevisionKey: head.accepted,
       previousDemandDigest: mdfDemandDigest(demand.frozen), nextDemandDigest: mdfDemandDigest(demand.next),
-      orderIds, commandKey: digest } })
+      orderIds, commandKey: digest, ...(demand.confirmed ? { confirmed: demand.confirmed } : {}) } })
     : manifest ? await recordMdfLineageReceipt(tx, { ...base, lineage: manifest }) : await recordMdfReceipt(tx, base);
   const auditId = await auditService.record(tx, {
-    event: cascade ? 'mdf.order_cascade.requested' : 'mdf.publication_refresh.requested',
+    event: demand.confirmed ? 'mdf.order_correction.cascade_requested'
+      : cascade ? 'mdf.order_cascade.requested' : 'mdf.publication_refresh.requested',
     entityType: 'mdf_source', entityId: `${head.kind}:${head.id}`, actorUserId: input.user.id,
     requestId: input.requestId, source: 'backend-orders',
     before: { receivedRevision: head.received, demandDigest: mdfDemandDigest(demand.frozen) },
     after: { receivedRevision: revisionKey, demandDigest: mdfDemandDigest(demand.next), jobId: saved.jobId },
-    metadata: { commandKey: input.commandKey, classification: cascade ? 'demand_only' : demand.reason,
+    metadata: { commandKey: input.commandKey,
+      classification: demand.confirmed ? 'confirmed_correction' : cascade ? 'demand_only' : demand.reason,
+      ...(demand.confirmed ? { previewDigest: demand.confirmed.previewDigest } : {}),
       ...(cascade ? { intentId } : {}), notificationEventDecision: 'accounting_continuity_only_no_notification' },
     relatedEntities: [...orderIds.map(entityId => ({ entityType: 'order', entityId })),
       ...[...new Set(lines.map(l => l.detailId))].map(entityId => ({ entityType: 'order_detail', entityId }))],
@@ -325,7 +470,8 @@ async function appendReceipt(tx: TransactionClient, snapshot: Awaited<ReturnType
 
 /** 409 body is filtered by the actor's orders.view scope (same predicate as the §5.1 reader):
  * owners outside it collapse into `hiddenOwners` with no ids, names, positions or quantities. */
-async function rejectWithConflicts(tx: TransactionClient, user: CurrentUser, conflicts: Conflict[]): Promise<never> {
+async function rejectWithConflicts(tx: TransactionClient, user: CurrentUser, conflicts: Conflict[],
+  previewDigest: string | null = null, mode: 'PREVIEW' | 'STALE' = 'PREVIEW'): Promise<never> {
   const ids = [...new Set(conflicts.flatMap(c => c.owners.concat(c.positions.map(p => p.orderId))))];
   // Literal permission AND scope, as OrderAccessPolicy.canView: without orders.view nothing is visible.
   const visible = !user.permissions.includes('orders.view') ? new Set<number>() : new Set((await tx.query<{ id: string }>(`SELECT a.order_id::text id FROM (${mdfAllowedOrdersSql(user)}) a
@@ -341,5 +487,11 @@ async function rejectWithConflicts(tx: TransactionClient, user: CurrentUser, con
       hiddenOwners: !allVisible,
     };
   });
-  throw new ApiError(409, CONFLICT_CODES[primary], CONFLICT_MESSAGES[primary], { cards });
+  if (previewDigest && mode === 'STALE') {
+    throw new ApiError(409, 'MDF_ORDER_CONFIRMATION_STALE',
+      'Состояние МДФ-доски изменилось после предпросмотра — проверьте изменения и подтвердите снова',
+      { cards, mdfConfirmation: { digest: previewDigest } });
+  }
+  throw new ApiError(409, CONFLICT_CODES[primary], previewDigest ? CONFIRM_MESSAGES[primary] : CONFLICT_MESSAGES[primary],
+    previewDigest ? { cards, mdfConfirmation: { digest: previewDigest } } : { cards });
 }

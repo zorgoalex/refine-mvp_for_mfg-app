@@ -14,6 +14,7 @@ export const MDF_ORDER_CONFLICT_CODES = [
   'MDF_ORDER_LOCK_CONTENTION',
   'MDF_ORDER_SCOPE_LIMIT',
   'MDF_ENGINE_READ_ONLY',
+  'MDF_ORDER_CONFIRMATION_STALE',
 ] as const;
 
 export type MdfOrderConflictCode = (typeof MDF_ORDER_CONFLICT_CODES)[number];
@@ -36,7 +37,11 @@ const MDF_ORDER_CONFLICT_TITLES: Record<MdfOrderConflictCode, string> = {
   MDF_ORDER_LOCK_CONTENTION: 'Карточка МДФ занята',
   MDF_ORDER_SCOPE_LIMIT: 'Слишком большая область изменения',
   MDF_ENGINE_READ_ONLY: 'Движок МДФ доступен только для чтения',
+  MDF_ORDER_CONFIRMATION_STALE: 'Состояние МДФ-доски изменилось',
 };
+
+// Digest identifying the confirmed preview: 64 lowercase-hex characters (sha256).
+const MDF_CONFIRMATION_DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 
 const MDF_ORDER_CONFLICT_SOURCE_KIND_LABELS: Record<string, string> = {
   packet: 'Файл станка',
@@ -47,11 +52,17 @@ const MDF_ORDER_CONFLICT_SOURCE_KIND_LABELS: Record<string, string> = {
 const HIDDEN_CARD_NAME = 'карточка другого заказа';
 const HIDDEN_OWNERS_NOTE = 'Есть карточки с заказами, которые вам не видны';
 
+export type MdfOrderConflictPositionOutcome = 'surplus' | 'detached';
+
 export interface MdfOrderConflictPositionView {
   orderId: number | null;
   detailId: number | null;
   before: number | null;
   after: number | null;
+  cut?: number;
+  laminated?: number;
+  reserved?: number;
+  outcome?: MdfOrderConflictPositionOutcome;
   line: string;
 }
 
@@ -73,6 +84,13 @@ export interface MdfOrderConflictViewModel {
   cards: MdfOrderConflictCardView[];
   hasHiddenOwners: boolean;
   hiddenOwnersNote: string | null;
+  /**
+   * 64-char lowercase-hex digest from details.mdfConfirmation.digest, when the
+   * backend attached a confirmable preview to this 409. Present it means the
+   * client may resend the identical request with header
+   * X-MDF-Confirmation: <digest> to proceed despite the conflict.
+   */
+  confirmationDigest: string | null;
 }
 
 export function isMdfOrderConflictCode(code: unknown): code is MdfOrderConflictCode {
@@ -109,7 +127,25 @@ export function buildMdfOrderConflictViewModel(error: unknown): MdfOrderConflict
     cards,
     hasHiddenOwners,
     hiddenOwnersNote: hasHiddenOwners ? HIDDEN_OWNERS_NOTE : null,
+    confirmationDigest: extractConfirmationDigest(error.details),
   };
+}
+
+/**
+ * Builds the one extra header the client must attach to resend the identical
+ * request (same body, same If-Match/Idempotency-Key) so the backend applies
+ * the previously previewed change instead of re-raising the same conflict.
+ */
+export function buildMdfConfirmationHeaders(digest: string): Record<string, string> {
+  return { 'X-MDF-Confirmation': digest };
+}
+
+function extractConfirmationDigest(details: unknown): string | null {
+  if (!details || typeof details !== 'object') return null;
+  const mdfConfirmation = (details as { mdfConfirmation?: unknown }).mdfConfirmation;
+  if (!mdfConfirmation || typeof mdfConfirmation !== 'object') return null;
+  const digest = (mdfConfirmation as { digest?: unknown }).digest;
+  return typeof digest === 'string' && MDF_CONFIRMATION_DIGEST_PATTERN.test(digest) ? digest : null;
 }
 
 function extractRawCards(details: unknown): unknown[] {
@@ -157,13 +193,23 @@ function buildPositionView(rawPosition: unknown): MdfOrderConflictPositionView {
   const detailId = typeof position.detailId === 'number' ? position.detailId : null;
   const before = typeof position.before === 'number' ? position.before : null;
   const after = typeof position.after === 'number' ? position.after : null;
+  const cut = typeof position.cut === 'number' ? position.cut : undefined;
+  const laminated = typeof position.laminated === 'number' ? position.laminated : undefined;
+  const reserved = typeof position.reserved === 'number' ? position.reserved : undefined;
+  const outcome = position.outcome === 'surplus' || position.outcome === 'detached'
+    ? position.outcome
+    : undefined;
 
   return {
     orderId,
     detailId,
     before,
     after,
-    line: formatPositionLine(detailId, before, after),
+    cut,
+    laminated,
+    reserved,
+    outcome,
+    line: formatPositionLine(detailId, before, after, cut, laminated, reserved, outcome),
   };
 }
 
@@ -171,9 +217,63 @@ function formatPositionLine(
   detailId: number | null,
   before: number | null,
   after: number | null,
+  cut?: number,
+  laminated?: number,
+  reserved?: number,
+  outcome?: MdfOrderConflictPositionOutcome,
 ): string {
   const detailLabel = detailId !== null ? `#${detailId}` : '#—';
   const beforeLabel = before !== null ? String(before) : '—';
   const afterLabel = after !== null ? String(after) : 'удалена';
-  return `деталь ${detailLabel}: было ${beforeLabel} → станет ${afterLabel}`;
+  let line = `деталь ${detailLabel}: было ${beforeLabel} → станет ${afterLabel}`;
+
+  const stats = formatPositionStats(cut, laminated, reserved);
+  if (stats) line += ` · ${stats}`;
+
+  const outcomeNote = formatPositionOutcome(outcome);
+  if (outcomeNote) line += ` — ${outcomeNote}`;
+
+  return line;
+}
+
+function formatPositionStats(cut?: number, laminated?: number, reserved?: number): string | null {
+  const parts: string[] = [];
+  if (typeof cut === 'number') parts.push(`распилено ${cut}`);
+  if (typeof laminated === 'number') parts.push(`закатано ${laminated}`);
+  if (typeof reserved === 'number') parts.push(`в резерве ${reserved}`);
+  return parts.length ? parts.join(', ') : null;
+}
+
+function formatPositionOutcome(outcome?: MdfOrderConflictPositionOutcome): string | null {
+  if (outcome === 'surplus') return 'лишнее станет излишком';
+  if (outcome === 'detached') return 'позиция выбудет из учёта (история сохранится)';
+  return null;
+}
+
+/**
+ * §5.4e keeps the caller's pending command open while the user decides on a
+ * confirmable MDF preview: `open` shows the dialog; confirm resolves with the
+ * identical command resent with the digest (its own result, including a
+ * repeated preview), cancel resolves null. The caller's normal completion path
+ * therefore runs exactly once, with the final outcome.
+ */
+export function awaitMdfConfirmation<T>(
+  open: (handlers: { onConfirm: (digest: string) => void; onCancel: () => void }) => void,
+  resend: (digest: string) => Promise<T>,
+): Promise<T | null> {
+  return new Promise<T | null>((resolve, reject) => {
+    let settled = false;
+    open({
+      onConfirm: (digest) => {
+        if (settled) return;
+        settled = true;
+        resend(digest).then(resolve, reject);
+      },
+      onCancel: () => {
+        if (settled) return;
+        settled = true;
+        resolve(null);
+      },
+    });
+  });
 }

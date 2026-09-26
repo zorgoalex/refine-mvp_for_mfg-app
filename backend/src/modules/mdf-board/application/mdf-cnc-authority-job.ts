@@ -4,6 +4,7 @@ import type { TransactionClient } from '../../../database/database.types';
 import type { MdfJob } from './mdf-job-runner';
 import { MdfNeedsAttention } from './mdf-job-runner';
 import type { MdfAcceptedLine, MdfAcceptedSource } from '../domain/mdf-accepted-projection';
+import { mdfAttachedSourceLines } from '../domain/mdf-accepted-projection';
 import { mdfPositionKey, mdfSum, type MdfPositionQuantity } from '../domain/mdf-quantities';
 
 const CNC_OBSERVATION_REVISION = /^cnc-observation:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
@@ -247,15 +248,17 @@ export async function applyMdfCncAuthorityEffects(tx: TransactionClient, input: 
   }
   await assertRegisteredMembershipDigest(tx, authority.packetId, job.revision_key);
 
-  const allMembers = sumLinesByRework(source.lines.filter(line => line.stage === 'membership'
+  // §5.4e: positions detached in this packet are history only — never members, cut coverage or AutoCut credit.
+  const attached = mdfAttachedSourceLines(source);
+  const allMembers = sumLinesByRework(attached.filter(line => line.stage === 'membership'
     && line.evidence === 'derived'));
   if (!allMembers.size) attention('PACKET_MEMBERSHIP_MISSING');
-  const allPhysicalCut = sumLinesByRework(source.lines.filter(line => line.stage === 'cut'
+  const allPhysicalCut = sumLinesByRework(attached.filter(line => line.stage === 'cut'
     && line.evidence === 'physical'));
   for (const [key, member] of allMembers) {
     if ((allPhysicalCut.get(key)?.quantity ?? 0) < member.quantity) attention('PACKET_CUT_INCOMPLETE');
   }
-  const ownMembers = sumLines(source.lines.filter(line => line.stage === 'membership'
+  const ownMembers = sumLines(attached.filter(line => line.stage === 'membership'
     && line.evidence === 'derived' && !line.rework));
 
   const liveOwners = await tx.query<{ order_id: string; order_status_name: string|null }>(`SELECT o.order_id::text order_id,
@@ -277,7 +280,7 @@ export async function applyMdfCncAuthorityEffects(tx: TransactionClient, input: 
     if (!accepted.verified || !input.verifiedSourceKeys.has(JSON.stringify([accepted.kind,accepted.id]))
       || accepted.accepted !== accepted.received
       || accepted.kind !== 'packet' && accepted.kind !== 'bazisCutSet') continue;
-    for (const line of accepted.lines) {
+    for (const line of mdfAttachedSourceLines(accepted)) {
       if (line.stage !== 'cut' || line.rework || line.evidence === 'derived') continue;
       const key = mdfPositionKey(line);
       const qty = aggregate.get(key) ?? { physical: 0, declared: 0 };

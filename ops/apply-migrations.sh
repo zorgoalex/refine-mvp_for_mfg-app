@@ -2332,6 +2332,12 @@ probe_file() {
       "SELECT to_regprocedure('public.mdf_guard_bath_transition_insert()') IS NOT NULL AND to_regprocedure('public.mdf_validate_bath_transition_commit()') IS NOT NULL AND to_regprocedure('public.mdf_reject_bath_transition_change()') IS NOT NULL;" \
       "SELECT count(*)=3 FROM (VALUES ('mdf_bath_transition_insert_guard','mdf_guard_bath_transition_insert()'),('mdf_bath_transition_immutable','mdf_reject_bath_transition_change()'),('mdf_bath_transition_commit_guard','mdf_validate_bath_transition_commit()')) expected(trg,fun) JOIN pg_trigger t ON t.tgrelid=to_regclass('public.mdf_bath_transitions') AND t.tgname=trg AND t.tgfoid=to_regprocedure('public.'||fun) AND t.tgenabled='O' AND NOT t.tgisinternal;" \
       "SELECT to_regclass('public.mdf_revision_jobs') IS NOT NULL;" ;;
+    191_mdf_order_corrections*) probe_all \
+      "$(q_tbl mdf_position_detachments)" \
+      "$(q_col mdf_order_cascade_intents confirmed)" \
+      "$(q_col mdf_order_cascade_intents preview_digest)" \
+      "SELECT count(*)=1 FROM pg_trigger t WHERE t.tgrelid=to_regclass('public.mdf_position_detachments') AND t.tgname='mdf_position_detachment_immutable' AND t.tgfoid=to_regprocedure('public.mdf_reject_position_detachment_change()') AND t.tgenabled='O' AND NOT t.tgisinternal;" \
+      "SELECT to_regclass('public.mdf_physical_lineage_contracts') IS NULL OR COALESCE((SELECT md5(pg_get_functiondef(oid)) FROM pg_proc WHERE oid=to_regprocedure('public.mdf_validate_physical_lineage_seal()'))='f303a542a2e940954763bfa8a5d44bbe', false);" ;;
     186_bitrix24_product_import*) probe_all \
       "$(q_tbl bitrix24_product_mapping)" \
       "SELECT count(*)=8 FROM information_schema.columns WHERE table_schema='public' AND table_name='bitrix24_product_mapping';" \
@@ -2369,6 +2375,11 @@ probe_file() {
       "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.bitrix24_payment_sync_gen'::regclass AND contype='c' AND convalidated AND pg_get_constraintdef(oid) LIKE '%gen >= 0%');" \
       "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=ANY(ARRAY[to_regclass('public.bitrix24_product_mapping'),to_regclass('public.bitrix24_product_row_snapshot')]) AND NOT convalidated);" \
       "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=ANY(ARRAY[to_regclass('public.bitrix24_product_mapping'),to_regclass('public.bitrix24_product_row_snapshot')]) AND (NOT indisvalid OR NOT indisready));" ;;
+    # mdf_validate_physical_lineage_seal's hash below accepts two bodies: 191 conditionally
+    # redefines it in place (adding the position-detachment exception) once
+    # mdf_order_cascade_intents/mdf_position_detachments exist, so both the pre-191 and
+    # post-191 definitions are a valid 182 end-state (same dual-state pattern as 180's
+    # q_colset_fun_hash_pair for its own later-extended function/columns).
     182_mdf_physical_lineage*) probe_all \
       "$(q_tbl mdf_evidence_revisions)" "$(q_tbl mdf_revision_context)" "$(q_tbl mdf_revision_demand)" \
       "$(q_tbl mdf_revision_seals)" "$(q_tbl mdf_source_heads)" "$(q_tbl mdf_evidence_lines)" \
@@ -2380,7 +2391,7 @@ probe_file() {
       "$(q_idxset_hash mdf_physical_lineage_transitions mdf_physical_lineage_transiti_source_kind_source_id_revisi_key1,mdf_physical_lineage_transiti_source_kind_source_id_revisio_key,mdf_physical_lineage_transitions_pkey 9953302b7dd61a70a78069d48d67bff5)" \
       "$(q_fun_hash 'public.mdf_guard_physical_lineage_insert()' 5f33a57477dcf2397fa18783d9b7ecae)" \
       "$(q_fun_hash 'public.mdf_guard_physical_lineage_immutable()' 39d2c9d9500956c4bca2546c68d8cc15)" \
-      "$(q_fun_hash 'public.mdf_validate_physical_lineage_seal()' 3067d8c18cdc8b1603397ce68a56824b)" \
+      "SELECT COALESCE((SELECT md5(pg_get_functiondef(oid)) FROM pg_proc WHERE oid=to_regprocedure('public.mdf_validate_physical_lineage_seal()')) IN ('3067d8c18cdc8b1603397ce68a56824b','f303a542a2e940954763bfa8a5d44bbe'), false);" \
       "$(q_fun_hash 'public.mdf_guard_physical_lineage_source_head()' d2ab89206c2d81b774c16779d302d789)" \
       "$(q_fun_hash 'public.mdf_guard_source_fence()' 5865eedf3ea4c2cf2b715b6ac210d49a)" \
       "$(q_fun_hash 'public.mdf_reject_evidence_change()' a51e1b51d407124a856f1993d9c54fe8)" \
@@ -2444,6 +2455,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     190_mdf_bath_transitions*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    191_mdf_order_corrections*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     186_bitrix24_product_import*)

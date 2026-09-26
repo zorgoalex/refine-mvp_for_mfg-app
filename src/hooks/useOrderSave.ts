@@ -10,6 +10,7 @@ import { OrderFormValues, type OrderDetail } from '../types/orders';
 import { peekOrderDraftStore, orderDraftStoreExists } from '../stores/orderFormStore';
 import { isApiError } from '../api/apiError';
 import { showMdfOrderConflictModal } from '../utils/mdfOrderConflictModal';
+import { awaitMdfConfirmation, buildMdfOrderConflictViewModel } from '../utils/mdfOrderConflict';
 import { mapOrderFormToSaveOrderDto } from '../api/mappers/orderMapper';
 import type { CreateOrderFromDraftNode } from '../api/types/bazisApi.types';
 import { featureFlags } from '../config/featureFlags';
@@ -150,7 +151,9 @@ export const useOrderSave = (
    */
   const saveOrder = async (
     values: OrderFormValues,
-    isEdit: boolean
+    isEdit: boolean,
+    /** §5.4e digest of a confirmed MDF preview: resend the identical save with X-MDF-Confirmation. */
+    confirmationDigest?: string,
   ): Promise<number | null> => {
     const saveOwnerNamespace = getWorkspaceStateNamespace();
     const assertSaveOwnerCurrent = () => {
@@ -220,6 +223,7 @@ export const useOrderSave = (
           invalidate,
           // peek (non-creating): a completion after discard must not resurrect the slice.
           getOrderStore: () => peekOrderDraftStore(orderKey)?.getState() ?? null,
+          ...(confirmationDigest ? { confirmationDigest } : {}),
         });
         assertSaveOwnerCurrent();
 
@@ -972,8 +976,22 @@ export const useOrderSave = (
 
       // ========== HANDLE MDF BOARD CONFLICT ==========
       // Backend rejects the write when it touches production already accounted
-      // on the MDF board. Show the per-card breakdown and keep the form as-is
-      // (no reset) so the user can retry after resolving the board side.
+      // on the MDF board. Show the per-card breakdown and keep the form as-is.
+      // A confirmable conflict (§5.4e digest) keeps THIS save pending: confirm
+      // resolves it with the identical save resent with X-MDF-Confirmation (a
+      // fresh STALE preview repeats the dialog), cancel resolves null — so the
+      // caller's normal completion path (onSaveSuccess, export) runs exactly once.
+      // Bazis-draft creation goes through a different backend command
+      // (bazis.create_order_from_draft), so it keeps the plain Modal.error.
+      const conflictView = buildMdfOrderConflictViewModel(err);
+      if (conflictView?.confirmationDigest && !bazisDraftSaveContext) {
+        setIsSaving(false);
+        return awaitMdfConfirmation<number | null>(
+          (handlers) => { showMdfOrderConflictModal(err, handlers); },
+          async (digest) => (getWorkspaceStateNamespace() !== saveOwnerNamespace
+            ? null : saveOrder(values, isEdit, digest)),
+        );
+      }
       if (showMdfOrderConflictModal(err)) {
         setIsSaving(false);
         return null;

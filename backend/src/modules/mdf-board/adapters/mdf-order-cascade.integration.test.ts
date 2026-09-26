@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { TransactionClient } from '../../../database/database.types';
 import { createMdfCorrectionPgFixture } from './mdf-correction-test-fixture.integration';
@@ -49,7 +49,7 @@ describe.skipIf(!enabled)('MDF order-demand cascade, isolated PostgreSQL schema'
       '174_mdf_execution_context.sql', '175_mdf_command_placement.sql',
       '178_mdf_correction_receipts.sql', '179_mdf_active_return.sql',
       '182_mdf_physical_lineage.sql', '185_mdf_bazis_composition.sql', '187_mdf_bazis_refill_rows.sql',
-      '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql',
+      '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql',
     ]);
     await fixture.assertLocalRelations([
       'mdf_source_heads', 'mdf_evidence_revisions', 'mdf_revision_context', 'mdf_revision_demand',
@@ -122,8 +122,9 @@ describe.skipIf(!enabled)('MDF order-demand cascade, isolated PostgreSQL schema'
       ORDER BY order_id,detail_id`, [orderIds])).rows;
   }
 
-  /** BASIS source: member = first detail of the first order (qty 10); optional physical cut 10 with v2 lineage. */
-  async function makeSource(options: { cut?: boolean; extraOwner?: boolean; createdBy?: number } = {}): Promise<Source> {
+  /** BASIS source: member = first detail of the first order (qty 10); optional physical cut 10 with v2 lineage;
+   * `extraMember` also makes the second detail (qty 1) a member. */
+  async function makeSource(options: { cut?: boolean; extraOwner?: boolean; createdBy?: number; extraMember?: boolean } = {}): Promise<Source> {
     const first = await makeOrder([{ quantity: 10 }, { quantity: 1 }], options.createdBy);
     const second = options.extraOwner ? await makeOrder([{ quantity: 2 }], 2) : null;
     const orderIds = [first.orderId, ...(second ? [second.orderId] : [])];
@@ -134,7 +135,9 @@ describe.skipIf(!enabled)('MDF order-demand cascade, isolated PostgreSQL schema'
     await fixture.client.query(`INSERT INTO bazis_cut_sets(bazis_cut_set_id,name,version,created_at,updated_at)
       VALUES($1,$2,1,now(),now())`, [setId, `E2E cascade set ${setId}`]);
     const lines = [{ lineKey: String(rowId), orderId: first.orderId, detailId: member, quantity: 10,
-      stageCode: 'membership', evidenceKind: 'derived' as const, rework: false }];
+      stageCode: 'membership', evidenceKind: 'derived' as const, rework: false },
+    ...(options.extraMember ? [{ lineKey: String(rowId + 1), orderId: first.orderId, detailId: first.ids[1], quantity: 1,
+      stageCode: 'membership', evidenceKind: 'derived' as const, rework: false }] : [])];
     const demand = await liveDemand(orderIds);
     const base = { sourceKind: 'bazisCutSet' as const, sourceId, revisionKey: `initial:${setId}`, origin: 'manual' as const,
       actorUserId: 1, requestId: `cascade-initial-${setId}`, causeKey: `cascade-initial-${setId}`, expectedFence: null,
@@ -173,7 +176,7 @@ describe.skipIf(!enabled)('MDF order-demand cascade, isolated PostgreSQL schema'
 
   /** A simulated order command: owning order locks → capture → writes → MDF finish, one transaction. */
   async function orderCommand(orderIds: number[], write: (tx: TransactionClient) => Promise<unknown>, key: string,
-    options: { writer?: MdfOrderWriter; actor?: CurrentUser } = {}) {
+    options: { writer?: MdfOrderWriter; actor?: CurrentUser; confirmation?: { digest: string } } = {}) {
     const writer = options.writer ?? 'orders.update';
     const sorted = [...orderIds].sort((a, b) => a - b);
     return db().transaction(async tx => {
@@ -181,7 +184,8 @@ describe.skipIf(!enabled)('MDF order-demand cascade, isolated PostgreSQL schema'
       const mdf = await openMdfOrderCommand(tx, writer);
       await mdf.captureBefore(sorted);
       await write(tx);
-      await mdf.finish({ user: options.actor ?? user, requestId: `${key}-request`, commandKey: key, orderIds: sorted });
+      await mdf.finish({ user: options.actor ?? user, requestId: `${key}-request`, commandKey: key, orderIds: sorted,
+        confirmation: options.confirmation ?? null });
     }, { mdf: { writer, capability: 'order-demand' } });
   }
   const head = async (s: Source) => (await fixture.client.query<{ received: string; accepted: string | null }>(`SELECT
@@ -572,6 +576,300 @@ describe.skipIf(!enabled)('MDF order-demand cascade, isolated PostgreSQL schema'
     await expect(repository.delete({ currentUser: user, cardKind: 'order', cardId: String(order.orderId),
       idempotencyKey: `order-card-clear-${order.orderId}`, requestId: 'order-card-clear' } as never))
       .rejects.toMatchObject({ statusCode: 409, code: 'MDF_ORDER_CARD_NOT_SUPPORTED' });
+  });
+  describe('confirmed order corrections (§5.4e)', () => {
+    beforeEach(() => { vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'true'); });
+    afterEach(() => { vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'false'); });
+    const challenge = async (run: () => Promise<unknown>) => {
+      try { await run(); } catch (error) { return error as { statusCode: number; code: string; details: {
+        cards: { positions: Record<string, unknown>[] }[]; mdfConfirmation?: { digest: string } } }; }
+      throw new Error('E2E_EXPECTED_MDF_CHALLENGE');
+    };
+    /** Run every pending job (any order) until the queue is idle. */
+    async function drain() {
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        const result = await runner().processOne();
+        if (result.status === 'idle') return;
+        expect(result.status).toBe('done');
+      }
+      throw new Error('E2E_CORRECTION_QUEUE_NOT_DRAINED');
+    }
+    const detachments = async (orderId: number) => (await fixture.client.query<{ kind: string; id: string; detail: string }>(`
+      SELECT source_kind kind,source_id id,detail_id::text detail FROM mdf_position_detachments WHERE order_id=$1
+      ORDER BY 1,2,3`, [orderId])).rows;
+    const bathStates = async (bathId: string) => (await fixture.client.query<{ state: string; q: string }>(`SELECT state,
+      sum(quantity)::text q FROM mdf_bath_allocations WHERE bath_id=$1 GROUP BY state ORDER BY state`, [bathId])).rows;
+    const isPublished = async (kind: string, id: string) => (await fixture.client.query(
+      'SELECT 1 FROM mdf_published_sources WHERE source_kind=$1 AND source_id=$2', [kind, id])).rows.length === 1;
+
+    it('keeps today\'s 409 without a preview while the producer flag is off', async () => {
+      vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'false');
+      const s = await makeSource({ cut: true });
+      const error = await challenge(() => orderCommand(s.orderIds, tx => tx.query('UPDATE order_details SET quantity=6 WHERE detail_id=$1',
+        [s.member]), 'flag-off-down', { confirmation: { digest: 'a'.repeat(64) } }));
+      expect(error).toMatchObject({ statusCode: 409, code: 'MDF_ORDER_PHYSICAL_CONFLICT' });
+      expect(error.details.mdfConfirmation).toBeUndefined();
+      expect(await quantity(s.member)).toBe(10);
+    });
+
+    it('previews a reduction below the cut with a stable digest, then accepts it as surplus once confirmed', async () => {
+      const s = await makeSource({ cut: true });
+      const reduce = (key: string, confirmation?: { digest: string }) => orderCommand(s.orderIds,
+        tx => tx.query('UPDATE order_details SET quantity=6 WHERE detail_id=$1', [s.member]), key, confirmation ? { confirmation } : {});
+      const first = await challenge(() => reduce('reduce-1'));
+      expect(first).toMatchObject({ statusCode: 409, code: 'MDF_ORDER_PHYSICAL_CONFLICT' });
+      expect(first.details.cards[0].positions).toEqual([{ orderId: s.orderIds[0], detailId: s.member, before: 10, after: 6,
+        cut: 10, laminated: 0, reserved: 0, outcome: 'surplus' }]);
+      const digest = first.details.mdfConfirmation!.digest;
+      expect(digest).toMatch(/^[a-f0-9]{64}$/);
+      expect((await challenge(() => reduce('reduce-2'))).details.mdfConfirmation!.digest).toBe(digest);
+      const stale = await challenge(() => reduce('reduce-3', { digest: 'f'.repeat(64) }));
+      expect(stale).toMatchObject({ statusCode: 409, code: 'MDF_ORDER_CONFIRMATION_STALE' });
+      expect(stale.details.mdfConfirmation!.digest).toBe(digest);
+      expect(await quantity(s.member)).toBe(10);
+      await reduce('reduce-confirmed', { digest });
+      expect(await quantity(s.member)).toBe(6);
+      const queued = await head(s);
+      const intent = (await fixture.client.query<{ confirmed: boolean; preview_digest: string }>(`SELECT confirmed,preview_digest
+        FROM mdf_order_cascade_intents WHERE source_id=$1 AND revision_key=$2`, [s.sourceId, queued.received])).rows[0];
+      expect(intent).toEqual({ confirmed: true, preview_digest: digest });
+      expect(await processJob((await pendingJob(s, queued.received)).job_id)).toMatchObject({ status: 'done' });
+      expect((await head(s)).accepted).toBe(queued.received);
+      expect((await published(s)).issues).toEqual([]);
+      const events = (await fixture.client.query<{ event: string }>(`SELECT event FROM audit_log WHERE request_id=$1
+        OR entity_id=$2 ORDER BY created_at`, ['reduce-confirmed-request', `bazisCutSet:${s.sourceId}`])).rows.map(r => r.event);
+      expect(events).toEqual(expect.arrayContaining(['mdf.order_correction.requested', 'mdf.order_correction.cascade_requested',
+        'mdf_board.order_correction_accepted']));
+      expect((await fixture.client.query(`SELECT 1 FROM outbox_events WHERE event_type='mdf_board.order_correction'
+        AND payload_json->>'requestId'='reduce-confirmed-request'`)).rows).toHaveLength(1);
+    });
+
+    it('refuses forged cascade receipts: dropped physical lines, a position missing without detachment', async () => {
+      const s = await makeSource({ cut: true, extraMember: true });
+      await fixture.client.query('UPDATE order_details SET quantity=6 WHERE detail_id=$1', [s.member]);
+      const h = (await fixture.client.query<{ accepted: string; version: string; epoch: string }>(`SELECT accepted_revision_key accepted,
+        version::text,correction_epoch::text epoch FROM mdf_source_heads WHERE source_kind='bazisCutSet' AND source_id=$1`, [s.sourceId])).rows[0];
+      const lines = (await fixture.client.query<{ lineKey: string; orderId: number; detailId: number; quantity: number;
+        stageCode: string; evidenceKind: 'derived' | 'physical'; rework: boolean }>(`SELECT line_key "lineKey",order_id::int "orderId",
+        detail_id::int "detailId",quantity::int quantity,stage_code "stageCode",evidence_kind "evidenceKind",rework FROM mdf_evidence_lines
+        WHERE source_kind='bazisCutSet' AND source_id=$1 AND revision_key=$2 AND evidence_kind='derived'`, [s.sourceId, h.accepted])).rows;
+      const previous = (await fixture.client.query<{ orderId: number; detailId: number; quantity: number }>(`SELECT order_id::int "orderId",
+        detail_id::int "detailId",quantity::int quantity FROM mdf_revision_demand WHERE source_kind='bazisCutSet' AND source_id=$1
+        AND revision_key=$2 ORDER BY 1,2`, [s.sourceId, h.accepted])).rows;
+      const next = await liveDemand(s.orderIds);
+      // Forged: an UNCONFIRMED intent that reduces a cut member. Lines are membership-only so no lineage manifest is needed.
+      const physical = (await fixture.client.query(`SELECT 1 FROM mdf_evidence_lines WHERE source_kind='bazisCutSet' AND source_id=$1
+        AND revision_key=$2 AND evidence_kind='physical'`, [s.sourceId, h.accepted])).rows.length;
+      expect(physical).toBe(1);
+      const jobId = randomUUID();
+      const forged = db().transaction(tx => recordMdfOrderCascadeReceipt(tx, { sourceKind: 'bazisCutSet', sourceId: s.sourceId,
+        revisionKey: `forged-reduce:${jobId}`, origin: 'manual', actorUserId: 1, requestId: 'forged-reduce', causeKey: `forged-reduce:${jobId}`,
+        expectedFence: { version: h.version, correctionEpoch: h.epoch }, accept: true, rules: [], lines,
+        executionContext: context(next, 'E2E forged'),
+        cascade: { intentId: randomUUID(), jobId, predecessorRevisionKey: h.accepted, previousDemandDigest: mdfDemandDigest(previous),
+          nextDemandDigest: mdfDemandDigest(next), orderIds: [s.orderIds[0]], commandKey: `forged-reduce:${jobId}` } }));
+      // Dropping the physical line is itself refused (lines must be carried verbatim) — never accepted.
+      await expect(forged).rejects.toThrow();
+      expect((await head(s)).received).toBe(h.accepted);
+      // Removing a position from demand without a detachment is refused by receipt validation.
+      await fixture.client.query('UPDATE order_details SET quantity=10 WHERE detail_id=$1', [s.member]);
+      const all = (await fixture.client.query<{ lineKey: string; orderId: number; detailId: number; quantity: number;
+        stageCode: string; evidenceKind: 'derived' | 'physical'; rework: boolean }>(`SELECT line_key "lineKey",order_id::int "orderId",
+        detail_id::int "detailId",quantity::int quantity,stage_code "stageCode",evidence_kind "evidenceKind",rework FROM mdf_evidence_lines
+        WHERE source_kind='bazisCutSet' AND source_id=$1 AND revision_key=$2`, [s.sourceId, h.accepted])).rows;
+      const withoutExtra = next.filter(d => d.detailId !== s.extra).map(d => d.detailId === s.member ? { ...d, quantity: 10 } : d);
+      await expect(db().transaction(tx => recordMdfOrderCascadeReceipt(tx, { sourceKind: 'bazisCutSet', sourceId: s.sourceId,
+        revisionKey: `forged-drop:${jobId}`, origin: 'manual', actorUserId: 1, requestId: 'forged-drop', causeKey: `forged-drop:${jobId}`,
+        expectedFence: { version: h.version, correctionEpoch: h.epoch }, accept: true, rules: [], lines: all,
+        executionContext: context(withoutExtra, 'E2E forged'),
+        cascade: { intentId: randomUUID(), jobId: randomUUID(), predecessorRevisionKey: h.accepted,
+          previousDemandDigest: mdfDemandDigest(previous), nextDemandDigest: mdfDemandDigest(withoutExtra), orderIds: [s.orderIds[0]],
+          commandKey: `forged-drop:${jobId}`, confirmed: { previewDigest: 'e'.repeat(64) } } }))).rejects.toThrow();
+      expect((await head(s)).received).toBe(h.accepted);
+    });
+
+    it('fails closed at the worker when an unconfirmed intent reduces a member', async () => {
+      const s = await makeSource({ extraMember: true });
+      const h = (await fixture.client.query<{ accepted: string; version: string; epoch: string }>(`SELECT accepted_revision_key accepted,
+        version::text,correction_epoch::text epoch FROM mdf_source_heads WHERE source_kind='bazisCutSet' AND source_id=$1`, [s.sourceId])).rows[0];
+      const previous = await liveDemand(s.orderIds);
+      await fixture.client.query('UPDATE order_details SET quantity=7 WHERE detail_id=$1', [s.member]);
+      const next = await liveDemand(s.orderIds);
+      const lines = (await fixture.client.query<{ lineKey: string; orderId: number; detailId: number; quantity: number;
+        stageCode: string; evidenceKind: 'derived' | 'physical'; rework: boolean }>(`SELECT line_key "lineKey",order_id::int "orderId",
+        detail_id::int "detailId",quantity::int quantity,stage_code "stageCode",evidence_kind "evidenceKind",rework FROM mdf_evidence_lines
+        WHERE source_kind='bazisCutSet' AND source_id=$1 AND revision_key=$2`, [s.sourceId, h.accepted])).rows;
+      const jobId = randomUUID();
+      await db().transaction(tx => recordMdfOrderCascadeReceipt(tx, { sourceKind: 'bazisCutSet', sourceId: s.sourceId,
+        revisionKey: `forged-unconfirmed:${jobId}`, origin: 'manual', actorUserId: 1, requestId: 'forged-unconfirmed',
+        causeKey: `forged-unconfirmed:${jobId}`, expectedFence: { version: h.version, correctionEpoch: h.epoch }, accept: true, rules: [],
+        lines, executionContext: context(next, 'E2E forged'),
+        cascade: { intentId: randomUUID(), jobId, predecessorRevisionKey: h.accepted, previousDemandDigest: mdfDemandDigest(previous),
+          nextDemandDigest: mdfDemandDigest(next), orderIds: [s.orderIds[0]], commandKey: `forged-unconfirmed:${jobId}` } }));
+      expect(await processJob(jobId)).toMatchObject({ status: 'needs_attention' });
+      expect((await head(s)).accepted).toBe(h.accepted);
+    });
+
+    it('detaches a deleted member in the card and its bath, releases the reservation and never recreates it', async () => {
+      const s = await makeSource({ cut: true });
+      const bathId = await addBath(s, 4);
+      expect(await bathStates(bathId)).toEqual([{ state: 'reserved', q: '4' }]);
+      const del = (key: string, confirmation?: { digest: string }) => orderCommand(s.orderIds,
+        tx => tx.query('UPDATE order_details SET delete_flag=true WHERE detail_id=$1', [s.member]), key, confirmation ? { confirmation } : {});
+      const preview = await challenge(() => del('detach-1'));
+      expect(preview).toMatchObject({ statusCode: 409, code: 'MDF_ORDER_PHYSICAL_CONFLICT' });
+      const outcomes = preview.details.cards.flatMap(c => c.positions.map(p => [p.outcome, p.after]));
+      expect(outcomes).toEqual([['detached', null], ['detached', null]]);
+      expect(preview.details.cards.flatMap(c => c.positions.map(p => p.reserved)).sort()).toEqual([4, 4]);
+      await del('detach-confirmed', { digest: preview.details.mdfConfirmation!.digest });
+      expect(await detachments(s.orderIds[0])).toEqual([
+        { kind: 'bath', id: bathId, detail: String(s.member) },
+        { kind: 'bazisCutSet', id: s.sourceId, detail: String(s.member) },
+      ]);
+      await drain();
+      expect(await bathStates(bathId)).toEqual([{ state: 'released', q: '4' }]);
+      expect(await isPublished('bazisCutSet', s.sourceId)).toBe(false);
+      expect(await isPublished('bath', bathId)).toBe(false);
+      // Restore: new demand only; terminal history is never revived and no reservation comes back.
+      await orderCommand(s.orderIds, tx => tx.query('UPDATE order_details SET delete_flag=false WHERE detail_id=$1', [s.member]),
+        'detach-restore', { writer: 'orders.restore' });
+      await drain();
+      expect(await bathStates(bathId)).toEqual([{ state: 'released', q: '4' }]);
+      expect(await isPublished('bazisCutSet', s.sourceId)).toBe(false);
+      // Detachment is terminal and immutable.
+      await expect(fixture.client.query('DELETE FROM mdf_position_detachments WHERE order_id=$1', [s.orderIds[0]])).rejects.toThrow();
+    });
+
+    it('detaches one member of a card through a confirmed cascade; the rest of the card stays verified', async () => {
+      const s = await makeSource({ cut: true, extraMember: true });
+      const del = (key: string, confirmation?: { digest: string }) => orderCommand(s.orderIds,
+        tx => tx.query('UPDATE order_details SET delete_flag=true WHERE detail_id=$1', [s.extra]), key, confirmation ? { confirmation } : {});
+      const preview = await challenge(() => del('partial-1'));
+      expect(preview).toMatchObject({ statusCode: 409, code: 'MDF_ORDER_ASSIGNMENT_CONFLICT' });
+      await del('partial-confirmed', { digest: preview.details.mdfConfirmation!.digest });
+      const queued = await head(s);
+      expect(queued.received).toMatch(/^order-cascade:/);
+      expect(await processJob((await pendingJob(s, queued.received)).job_id)).toMatchObject({ status: 'done' });
+      expect((await head(s)).accepted).toBe(queued.received);
+      expect((await published(s)).issues).toEqual([]);
+      // Later production at the detached position (a new root) is accepted and stays history only.
+      const accepted = (await fixture.client.query<{ version: string; epoch: string }>(`SELECT version::text,
+        correction_epoch::text epoch FROM mdf_source_heads WHERE source_kind='bazisCutSet' AND source_id=$1`, [s.sourceId])).rows[0];
+      const carriedRows = (await fixture.client.query<{ id: string; lineKey: string; orderId: number; detailId: number; quantity: number;
+        stageCode: string; evidenceKind: 'derived' | 'physical'; rework: boolean }>(`SELECT evidence_line_id::text id,line_key "lineKey",order_id::int "orderId",
+        detail_id::int "detailId",quantity::int quantity,stage_code "stageCode",evidence_kind "evidenceKind",rework FROM mdf_evidence_lines
+        WHERE source_kind='bazisCutSet' AND source_id=$1 AND revision_key=$2 ORDER BY line_key`, [s.sourceId, queued.received])).rows;
+      const carried = carriedRows.map(({ id: _id, ...line }) => line);
+      const frozen = (await fixture.client.query<{ orderId: number; detailId: number; quantity: number }>(`SELECT order_id::int "orderId",
+        detail_id::int "detailId",quantity::int quantity FROM mdf_revision_demand WHERE source_kind='bazisCutSet' AND source_id=$1
+        AND revision_key=$2 ORDER BY 1,2`, [s.sourceId, queued.received])).rows;
+      expect(frozen.map(d => d.detailId)).not.toContain(s.extra);
+      const later = await db().transaction(tx => recordMdfLineageReceipt(tx, { sourceKind: 'bazisCutSet', sourceId: s.sourceId,
+        revisionKey: `later-root:${s.setId}`, origin: 'manual', actorUserId: 1, requestId: 'later-root', causeKey: `later-root:${s.setId}`,
+        expectedFence: { version: accepted.version, correctionEpoch: accepted.epoch }, accept: true, rules: [],
+        lines: [...carried, { lineKey: `root-extra:${s.setId}`, orderId: s.orderIds[0], detailId: s.extra, quantity: 1,
+          stageCode: 'cut', evidenceKind: 'physical', rework: false }],
+        executionContext: context(frozen, `E2E cascade set ${s.setId}`),
+        lineage: { operation: 'production', authority: 'manual_production',
+          actions: [...carriedRows.filter(l => l.evidenceKind === 'physical').map(l => ({ lineKey: l.lineKey, action: 'carry' as const,
+            predecessorEvidenceLineId: l.id })), { lineKey: `root-extra:${s.setId}`, action: 'root' as const }]
+            .sort((x, y) => x.lineKey < y.lineKey ? -1 : 1), droppedPredecessorEvidenceLineIds: [] } }));
+      expect(await processJob(later.jobId)).toMatchObject({ status: 'done' });
+      expect((await head(s)).accepted).toBe(`later-root:${s.setId}`);
+      expect((await published(s)).issues).toEqual([]);
+      // Restore brings demand back through an ordinary cascade; the detached lines stay history.
+      await orderCommand(s.orderIds, tx => tx.query('UPDATE order_details SET delete_flag=false WHERE detail_id=$1', [s.extra]),
+        'partial-restore', { writer: 'orders.restore' });
+      const restored = await head(s);
+      expect(restored.received).toMatch(/^order-cascade:/);
+      expect(await processJob((await pendingJob(s, restored.received)).job_id)).toMatchObject({ status: 'done' });
+      expect((await published(s)).issues).toEqual([]);
+      // Grow then shrink the restored position: its old lines are history, so an ordinary (unconfirmed)
+      // cascade must be accepted by the worker in both directions, and nothing is credited to it.
+      for (const [quantity, key] of [[3, 'restored-up'], [2, 'restored-down']] as const) {
+        await orderCommand(s.orderIds, tx => tx.query('UPDATE order_details SET quantity=$2 WHERE detail_id=$1', [s.extra, quantity]), key);
+        const next = await head(s);
+        expect(next.received).toMatch(/^order-cascade:/);
+        const intent = (await fixture.client.query<{ confirmed: boolean }>(`SELECT confirmed FROM mdf_order_cascade_intents
+          WHERE source_id=$1 AND revision_key=$2`, [s.sourceId, next.received])).rows[0];
+        expect(intent.confirmed).toBe(false);
+        expect(await processJob((await pendingJob(s, next.received)).job_id)).toMatchObject({ status: 'done' });
+        expect((await head(s)).accepted).toBe(next.received);
+        expect((await published(s)).issues).toEqual([]);
+      }
+      const members = (await fixture.client.query<{ d: number }>(`SELECT detail_id::float8 d FROM mdf_published_source_members
+        WHERE source_kind='bazisCutSet' AND source_id=$1 ORDER BY 1`, [s.sourceId])).rows.map(r => r.d);
+      expect(members).toEqual([s.member]);
+    });
+
+    for (const bathFirst of [true, false]) {
+      it(`keeps a consumed debit as history when supplier and bath positions are both detached (${bathFirst ? 'bath' : 'card'} job first)`, async () => {
+        const s = await makeSource({ cut: true, extraMember: true });
+        const cutId = 700_000 + ++bathSequence;
+        const bathId = `cut-result:${cutId}`;
+        await fixture.client.query(`INSERT INTO cut_result(cut_result_id,created_at,snapshot_digest) VALUES($1,now(),repeat('c',64))`, [cutId]);
+        const bathDemand = await liveDemand([s.orderIds[0]]);
+        const laminated = await db().transaction(tx => recordMdfReceipt(tx, {
+          sourceKind: 'bath', sourceId: bathId, revisionKey: `bath:${cutId}`, origin: 'manual', actorUserId: 1,
+          requestId: `consumed-bath-${cutId}`, causeKey: `consumed-bath-${cutId}`, expectedFence: null, accept: true, rules: [],
+          lines: [{ lineKey: 'own-member', orderId: s.orderIds[0], detailId: s.member, quantity: 3, stageCode: 'membership',
+            evidenceKind: 'derived', rework: false },
+          { lineKey: 'rolled', orderId: s.orderIds[0], detailId: s.member, quantity: 3, stageCode: 'laminated',
+            evidenceKind: 'physical', rework: false }],
+          executionContext: { ...context(bathDemand, `E2E laminated ${cutId}`), priorColumn: 'baths' },
+        }));
+        expect(await processJob(laminated.jobId)).toMatchObject({ status: 'done' });
+        expect(await bathStates(bathId)).toEqual([{ state: 'consumed', q: '3' }]);
+        const del = (key: string, confirmation?: { digest: string }) => orderCommand(s.orderIds,
+          tx => tx.query('UPDATE order_details SET delete_flag=true WHERE detail_id=$1', [s.member]), key, confirmation ? { confirmation } : {});
+        const preview = await challenge(() => del(`consumed-${bathFirst}`));
+        await del(`consumed-confirmed-${bathFirst}`, { digest: preview.details.mdfConfirmation!.digest });
+        // Order the two jobs explicitly (the runner claims by next_attempt_at).
+        await fixture.client.query(`UPDATE mdf_recalculation_jobs SET next_attempt_at=now()-CASE WHEN source_kind=$1 THEN interval '2 hours'
+          ELSE interval '1 hour' END WHERE status='pending'`, [bathFirst ? 'bath' : 'bazisCutSet']);
+        await drain();
+        await drain();
+        // Forward acceptance releases and re-inserts the carried debit (history kept); exactly 3 stay consumed.
+        expect((await bathStates(bathId)).filter(r => r.state !== 'released')).toEqual([{ state: 'consumed', q: '3' }]);
+        expect(await isPublished('bath', bathId)).toBe(false);
+        expect((await published(s)).issues).toEqual([]);
+        expect((await fixture.client.query(`SELECT 1 FROM mdf_bath_allocations WHERE bath_id=$1 AND state='reserved'`, [bathId])).rows)
+          .toHaveLength(0);
+      });
+    }
+
+    it('transfers a cut member: detached in the old order, plain demand in the target', async () => {
+      const s = await makeSource({ cut: true });
+      const target = await makeOrder([{ quantity: 1 }]);
+      const move = (key: string, confirmation?: { digest: string }) => orderCommand([s.orderIds[0], target.orderId],
+        tx => tx.query('UPDATE order_details SET order_id=$2 WHERE detail_id=$1', [s.member, target.orderId]), key,
+        { writer: 'orders.transfer_details', ...(confirmation ? { confirmation } : {}) });
+      const preview = await challenge(() => move('transfer-1'));
+      await move('transfer-confirmed', { digest: preview.details.mdfConfirmation!.digest });
+      expect(await detachments(s.orderIds[0])).toEqual([{ kind: 'bazisCutSet', id: s.sourceId, detail: String(s.member) }]);
+      expect(await detachments(target.orderId)).toEqual([]);
+      await drain();
+      expect(await isPublished('bazisCutSet', s.sourceId)).toBe(false);
+    });
+
+    it('confirms deletion of the owning order and redacts the preview for an actor without orders.view', async () => {
+      const s = await makeSource({ cut: true });
+      const blind: CurrentUser = { ...user, id: '2', permissions: user.permissions.filter(p => p !== 'orders.view') };
+      const hidden = await challenge(() => orderCommand(s.orderIds, tx => tx.query('UPDATE orders SET delete_flag=true WHERE order_id=$1',
+        [s.orderIds[0]]), 'order-del-blind', { writer: 'orders.delete', actor: blind }));
+      expect(hidden.details.cards[0]).toMatchObject({ sourceId: null, displayName: null, positions: [], hiddenOwners: true });
+      const preview = await challenge(() => orderCommand(s.orderIds, tx => tx.query('UPDATE orders SET delete_flag=true WHERE order_id=$1',
+        [s.orderIds[0]]), 'order-del-1', { writer: 'orders.delete' }));
+      await withMode('read_only', async () => {
+        await expect(orderCommand(s.orderIds, tx => tx.query('UPDATE orders SET delete_flag=true WHERE order_id=$1', [s.orderIds[0]]),
+          'order-del-ro', { writer: 'orders.delete', confirmation: preview.details.mdfConfirmation! }))
+          .rejects.toMatchObject({ code: 'MDF_ENGINE_READ_ONLY' });
+      });
+      await orderCommand(s.orderIds, tx => tx.query('UPDATE orders SET delete_flag=true WHERE order_id=$1', [s.orderIds[0]]),
+        'order-del-confirmed', { writer: 'orders.delete', confirmation: preview.details.mdfConfirmation! });
+      await drain();
+      expect(await isPublished('bazisCutSet', s.sourceId)).toBe(false);
+    });
   });
   describe('bath transition engine core (§5.4b)', () => {
     const bathAllocations = async (bathId: string) => (await fixture.client.query<{ state: string; q: string }>(`SELECT state,

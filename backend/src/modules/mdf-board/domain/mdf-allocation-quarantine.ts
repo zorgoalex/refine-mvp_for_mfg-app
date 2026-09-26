@@ -16,6 +16,8 @@ export interface MdfAllocationSource {
   lineageIssue?: string;
   /** Frozen known ownership when exact membership is unresolved. */
   uncertainOrderIds?: readonly number[];
+  /** §5.4e positions detached in THIS source: lines stay for validation, never supply/membership. */
+  detachedPositionKeys?: ReadonlySet<string>;
   lines: (MdfPositionQuantity & { evidenceLineId: string; lineKey?: string; revision: string;
     stage: string; evidence: string; rework: boolean })[];
 }
@@ -95,21 +97,24 @@ export function planMdfQuarantinedAllocations(input: {
       }
       continue;
     }
-    const own = s.lines.filter(l => l.revision === s.accepted);
+    const ownAll = s.lines.filter(l => l.revision === s.accepted);
+    const detachedKeys = s.detachedPositionKeys;
+    const own = detachedKeys?.size ? ownAll.filter(l => !detachedKeys.has(mdfPositionKey(l))) : ownAll;
     const members = quantities(own.filter(l => l.stage === 'membership' && l.evidence === 'derived'));
     const hasLineage = hasValidCurrentLineage(s,s.lines);
     const hasAssignmentState = s.kind==='bazisCutSet' && s.accepted===s.received
       && matchesMdfValidatedBazisAssignmentState({sourceKind:s.kind,sourceId:s.id,revisionKey:s.accepted??'',
-        lines:own.map(line=>({...line,lineKey:line.lineKey??'',stageCode:line.stage,evidenceKind:line.evidence})),
+        lines:ownAll.map(line=>({...line,lineKey:line.lineKey??'',stageCode:line.stage,evidenceKind:line.evidence})),
         state:s.assignmentState});
-    const scope = [...s.lines, ...ownAllocations(s.id)];
+    const scope = [...(detachedKeys?.size ? s.lines.filter(l => !detachedKeys.has(mdfPositionKey(l))) : s.lines),
+      ...ownAllocations(s.id)];
     const missingMembership = [...new Set([s.accepted, s.received].filter(r => r !== null))]
       .some(r => !s.lines.some(l => l.revision === r && l.stage === 'membership' && l.evidence === 'derived'));
     let reason: string | undefined;
     if (s.lineageIssue !== undefined || (s.lineage !== undefined && !hasLineage)) reason = s.lineageIssue || 'LINEAGE_INVALID';
     else if (!s.accepted || s.accepted !== s.received) reason = 'ACCEPTANCE_PENDING';
     else if (!members.size && !(hasAssignmentState&&s.assignmentState?.intentionalEmpty)) reason = 'MEMBERSHIP_MISSING';
-    else if (own.some(l => !isMdfEvidenceContract(s.kind,l.stage,l.evidence))) reason = 'INVALID_EVIDENCE';
+    else if (ownAll.some(l => !isMdfEvidenceContract(s.kind,l.stage,l.evidence))) reason = 'INVALID_EVIDENCE';
     else {
       const lineageMayCarry = hasLineage && (s.kind === 'packet' || s.kind === 'bazisCutSet');
       // Preserve the v1 stage/position aggregate cap exactly. V2 packet/BASIS

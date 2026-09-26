@@ -2,7 +2,7 @@ import React from 'react';
 import { OrderProductionSummary } from '../../../components/OrderProductionSummary';
 import { Alert, Input, Modal, Radio, Select, Space, Spin, Typography, message } from 'antd';
 import { SwapOutlined } from '@ant-design/icons';
-import { ordersApi } from '../../../api/ordersApi';
+import { ordersApi, createOrderTransferIdempotencyKey } from '../../../api/ordersApi';
 import type {
   OrderTransferTarget,
   TransferOrderDetailsResponse,
@@ -128,31 +128,46 @@ export const OrderDetailTransferModal: React.FC<OrderDetailTransferModalProps> =
   const handleSubmit = async () => {
     if (!canSubmit) return;
     setSubmitting(true);
-    try {
-      const response = await runPageOwnedWorkspaceOperation(
-        workspaceKey,
-        'order-detail-transfer',
-        () => ordersApi.transferDetails(sourceOrderId, {
-          sourceVersion,
-          detailIds,
-          target:
-            mode === 'new'
-              ? { mode: 'new', orderName: orderName.trim() }
-              : {
-                  mode: 'existing',
-                  orderId: selectedTarget!.orderId,
-                  version: selectedTarget!.version,
-                },
-        }),
-      );
-      onDone(response);
-    } catch (error) {
-      if (isWorkspaceOperationOwnershipLost(error)) return;
-      if (showMdfOrderConflictModal(error)) return;
-      message.error(error instanceof Error ? error.message : 'Не удалось перенести детали');
-    } finally {
-      setSubmitting(false);
-    }
+
+    // One Idempotency-Key for the whole attempt: a confirmation resend must
+    // reuse it so the backend sees it as the same transfer request.
+    const transferIdempotencyKey = createOrderTransferIdempotencyKey();
+    const target =
+      mode === 'new'
+        ? { mode: 'new' as const, orderName: orderName.trim() }
+        : {
+            mode: 'existing' as const,
+            orderId: selectedTarget!.orderId,
+            version: selectedTarget!.version,
+          };
+
+    const attempt = async (confirmationDigest?: string): Promise<void> => {
+      try {
+        const response = await runPageOwnedWorkspaceOperation(
+          workspaceKey,
+          'order-detail-transfer',
+          () => ordersApi.transferDetails(
+            sourceOrderId,
+            {
+              sourceVersion,
+              detailIds,
+              target,
+              idempotencyKey: transferIdempotencyKey,
+            },
+            confirmationDigest ? { confirmationDigest } : undefined,
+          ),
+        );
+        onDone(response);
+      } catch (error) {
+        if (isWorkspaceOperationOwnershipLost(error)) return;
+        if (showMdfOrderConflictModal(error, { onConfirm: (digest) => attempt(digest) })) return;
+        message.error(error instanceof Error ? error.message : 'Не удалось перенести детали');
+      } finally {
+        setSubmitting(false);
+      }
+    };
+
+    await attempt();
   };
 
   return (

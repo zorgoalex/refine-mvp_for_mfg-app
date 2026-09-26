@@ -1,3 +1,4 @@
+import { ApiError } from '../../../common/errors/api-error';
 import type { QueryResultRow } from 'pg';
 import { loadMdfEffectivePlacement } from './mdf-effective-placement';
 import type { TransactionClient } from '../../../database/database.types';
@@ -118,6 +119,14 @@ export async function loadMdfCorrectionSnapshot(tx: TransactionClient, target: M
       ON h.source_kind=s.kind AND h.source_id=s.id ORDER BY h.source_kind,h.source_id FOR UPDATE OF h`,
   [closure.sources.map(s => s.kind),closure.sources.map(s => s.id)])).rows;
   if (heads.length !== closure.sources.length) throw new MdfNeedsAttention('MDF_CORRECTION_HEAD_MISSING');
+  // §5.4e: the correction planner (returns, BASIS composition) does not model detached positions yet; a closure
+  // containing any detachment fails closed instead of planning over history-only lines (to be lifted in §5.5).
+  if ((await tx.query(`SELECT 1 FROM mdf_position_detachments d JOIN unnest($1::text[],$2::text[]) s(kind,id)
+      ON d.source_kind=s.kind AND d.source_id=s.id LIMIT 1`,
+  [closure.sources.map(s => s.kind),closure.sources.map(s => s.id)])).rows.length) {
+    throw new ApiError(409,'MDF_CORRECTION_DETACHED_UNSUPPORTED',
+      'В карточке есть выбывшие позиции заказа — возврат и изменение состава для неё пока недоступны');
+  }
   if (target.kind==='packet') {
     const packet = (await tx.query<{sourceVersion:string}>(`SELECT source_version::text "sourceVersion"
       FROM cnc_telegram_packets WHERE packet_id=$1::uuid FOR UPDATE`,[target.id])).rows[0];

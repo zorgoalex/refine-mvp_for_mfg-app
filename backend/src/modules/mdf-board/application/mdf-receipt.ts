@@ -9,6 +9,7 @@ import { isMdfEvidenceContract } from '../domain/mdf-evidence-contract';
 import { mdfPhysicalLineageDigest, persistMdfPhysicalLineage, snapshotMdfPhysicalLineage,
   verifyMdfPhysicalLineageReplay, type MdfPhysicalLineageManifest } from './mdf-physical-lineage';
 import { mdfBazisMembershipDigest } from './mdf-bazis-assignment-state';
+import { loadMdfDetachedPositions } from '../adapters/mdf-position-detachments';
 
 export interface MdfReceiptLine {
   lineKey: string; orderId: number; detailId: number; quantity: number;
@@ -54,6 +55,8 @@ export interface MdfBazisCompositionReceiptInput extends MdfLineageReceiptInput 
 export interface MdfOrderCascade {
   intentId: string; jobId: string; predecessorRevisionKey: string;
   previousDemandDigest: string; nextDemandDigest: string; orderIds: readonly number[]; commandKey: string;
+  /** §5.4e confirmed correction: reductions and positions detached in this source are allowed. */
+  confirmed?: { previewDigest: string };
 }
 export type MdfOrderCascadeReceiptInput = Omit<MdfReceiptInput, 'correction'> & {
   lineage?: MdfPhysicalLineageManifest; cascade: MdfOrderCascade;
@@ -158,7 +161,8 @@ export async function recordMdfOrderCascadeReceipt(tx: DatabaseClient,
     || mdfDemandDigest(input.executionContext.demand)!==c.nextDemandDigest
     || !Array.isArray(c.orderIds) || !c.orderIds.length || c.orderIds.length>100
     || c.orderIds.some((id,i,all) => !Number.isSafeInteger(id)||id<=0||(i>0&&id<=all[i-1]))
-    || typeof c.commandKey!=='string' || !c.commandKey.trim() || c.commandKey.length>400) invalid();
+    || typeof c.commandKey!=='string' || !c.commandKey.trim() || c.commandKey.length>400
+    || (c.confirmed !== undefined && !/^[a-f0-9]{64}$/.test(c.confirmed.previewDigest))) invalid();
   if (input.lineage && (input.lineage.operation!=='carry' || input.lineage.actions.some(action => action.action!=='carry')
     || input.lineage.droppedPredecessorEvidenceLineIds.length)) throw new MdfReceiptError('MDF_LINEAGE_INVALID');
   const { lineage: manifest, cascade, ...receiptInput } = input;
@@ -299,8 +303,13 @@ async function persistMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput,
   if (placement != null && !(input.sourceKind === 'bath'
     ? ['baths','baths_ready','baths_laminated','completed_baths'].includes(placement)
     : ['packet','bazisCutSet'].includes(input.sourceKind) && ['parsed','completed','completed_laminated'].includes(placement))) invalid();
+  // §5.4e: lines at a position detached in THIS source are history only and may stay outside demand.
+  const detachedHere = context && input.accept
+    ? (await loadMdfDetachedPositions(tx,[{ kind: input.sourceKind, id: input.sourceId }]))
+      .get(JSON.stringify([input.sourceKind,input.sourceId])) : undefined;
   if (context && input.accept && (!context.compositionComplete || input.lines.some(line =>
-    !context.demand.some(d => d.orderId === line.orderId && d.detailId === line.detailId)))) invalid();
+    !context.demand.some(d => d.orderId === line.orderId && d.detailId === line.detailId)
+    && !detachedHere?.has(mdfPositionKey(line))))) invalid();
   if (isCorrection && (!input.accept || !context || !context.compositionComplete)) invalid();
   if (lineage && (!input.accept || !context || !context.compositionComplete)) {
     throw new MdfReceiptError('MDF_LINEAGE_INVALID');
@@ -532,11 +541,11 @@ async function persistMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput,
   if (cascade) {
     await tx.query(`INSERT INTO mdf_order_cascade_intents
       (intent_id,job_id,source_kind,source_id,revision_key,predecessor_revision_key,previous_demand_digest,
-        next_demand_digest,order_ids,actor_user_id,request_id,command_key)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::bigint[],$10,$11,$12)`,
+        next_demand_digest,order_ids,actor_user_id,request_id,command_key,confirmed,preview_digest)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::bigint[],$10,$11,$12,$13,$14)`,
     [cascade.intentId,cascade.jobId,...source,input.revisionKey,cascade.predecessorRevisionKey,
       cascade.previousDemandDigest,cascade.nextDemandDigest,[...cascade.orderIds],input.actorUserId,
-      input.requestId,cascade.commandKey]);
+      input.requestId,cascade.commandKey,cascade.confirmed !== undefined,cascade.confirmed?.previewDigest ?? null]);
   }
   await tx.query(`INSERT INTO mdf_revision_seals(source_kind,source_id,revision_key) VALUES($1,$2,$3)`, [...source, input.revisionKey]);
   const saved = (await tx.query<HeadRow>(head

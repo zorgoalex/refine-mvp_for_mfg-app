@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import { ApiError } from '../api/apiError';
 import {
+  awaitMdfConfirmation,
+  buildMdfConfirmationHeaders,
   buildMdfOrderConflictViewModel,
   isMdfOrderConflictError,
   isMdfOrderConflictRetryable,
@@ -10,6 +12,8 @@ import {
 function makeError(code: string, details?: unknown, message = 'Операция отклонена') {
   return new ApiError({ code, message, status: 409, details });
 }
+
+const VALID_DIGEST = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2';
 
 describe('isMdfOrderConflictError', () => {
   it('detects all known MDF board conflict codes', () => {
@@ -189,5 +193,205 @@ describe('buildMdfOrderConflictViewModel: cards', () => {
     });
     const vm = buildMdfOrderConflictViewModel(error);
     expect(vm?.cards[0].header).toBe('weird «X»');
+  });
+});
+
+describe('buildMdfOrderConflictViewModel: MDF_ORDER_CONFIRMATION_STALE', () => {
+  it('detects the code, is not retryable, and carries the fresh cards/title', () => {
+    const error = makeError('MDF_ORDER_CONFIRMATION_STALE', {
+      cards: [
+        { sourceKind: 'packet', displayName: 'ЧПУ-14', hiddenOwners: false, positions: [] },
+      ],
+      mdfConfirmation: { digest: VALID_DIGEST },
+    });
+
+    expect(isMdfOrderConflictError(error)).toBe(true);
+
+    const vm = buildMdfOrderConflictViewModel(error);
+    expect(vm?.code).toBe('MDF_ORDER_CONFIRMATION_STALE');
+    expect(vm?.title).toBe('Состояние МДФ-доски изменилось');
+    expect(vm?.retryable).toBe(false);
+    expect(vm?.cards).toHaveLength(1);
+    expect(vm?.confirmationDigest).toBe(VALID_DIGEST);
+  });
+});
+
+describe('buildMdfOrderConflictViewModel: confirmationDigest extraction', () => {
+  it('extracts a valid 64-char lowercase-hex digest from details.mdfConfirmation.digest', () => {
+    const vm = buildMdfOrderConflictViewModel(
+      makeError('MDF_ORDER_DEMAND_EMPTY', { mdfConfirmation: { digest: VALID_DIGEST } }),
+    );
+    expect(vm?.confirmationDigest).toBe(VALID_DIGEST);
+  });
+
+  it('returns null when mdfConfirmation is absent', () => {
+    expect(buildMdfOrderConflictViewModel(makeError('MDF_ORDER_DEMAND_EMPTY'))?.confirmationDigest).toBeNull();
+    expect(
+      buildMdfOrderConflictViewModel(makeError('MDF_ORDER_DEMAND_EMPTY', {}))?.confirmationDigest,
+    ).toBeNull();
+  });
+
+  it('returns null when the digest is malformed (wrong length, uppercase, non-hex, wrong type)', () => {
+    const casesDetails = [
+      { mdfConfirmation: { digest: 'abc' } },
+      { mdfConfirmation: { digest: VALID_DIGEST.toUpperCase() } },
+      { mdfConfirmation: { digest: `${VALID_DIGEST.slice(0, 63)}z` } },
+      { mdfConfirmation: { digest: 12345 } },
+      { mdfConfirmation: { digest: null } },
+      { mdfConfirmation: 'nope' },
+    ];
+    for (const details of casesDetails) {
+      expect(
+        buildMdfOrderConflictViewModel(makeError('MDF_ORDER_DEMAND_EMPTY', details))?.confirmationDigest,
+      ).toBeNull();
+    }
+  });
+
+  it('is null for codes that never carry a preview (e.g. LOCK_CONTENTION)', () => {
+    expect(
+      buildMdfOrderConflictViewModel(
+        makeError('MDF_ORDER_LOCK_CONTENTION', { mdfConfirmation: { digest: VALID_DIGEST } }),
+      )?.confirmationDigest,
+    ).toBe(VALID_DIGEST);
+  });
+});
+
+describe('buildMdfConfirmationHeaders', () => {
+  it('builds the single X-MDF-Confirmation header from the digest', () => {
+    expect(buildMdfConfirmationHeaders(VALID_DIGEST)).toEqual({
+      'X-MDF-Confirmation': VALID_DIGEST,
+    });
+  });
+});
+
+describe('buildMdfOrderConflictViewModel: position stats and outcome line text', () => {
+  it('keeps the plain before/after line unchanged when cut/laminated/reserved/outcome are absent', () => {
+    const error = makeError('MDF_ORDER_PHYSICAL_CONFLICT', {
+      cards: [
+        {
+          sourceKind: 'packet',
+          displayName: 'ЧПУ-14',
+          hiddenOwners: false,
+          positions: [{ orderId: 101, detailId: 12, before: 10, after: 6 }],
+        },
+      ],
+    });
+    const vm = buildMdfOrderConflictViewModel(error);
+    const position = vm!.cards[0].positions[0];
+    expect(position.line).toBe('деталь #12: было 10 → станет 6');
+    expect(position.cut).toBeUndefined();
+    expect(position.laminated).toBeUndefined();
+    expect(position.reserved).toBeUndefined();
+    expect(position.outcome).toBeUndefined();
+  });
+
+  it('renders cut/laminated/reserved plus the surplus outcome note', () => {
+    const error = makeError('MDF_ORDER_PHYSICAL_CONFLICT', {
+      cards: [
+        {
+          sourceKind: 'packet',
+          displayName: 'ЧПУ-14',
+          hiddenOwners: false,
+          positions: [
+            {
+              orderId: 101,
+              detailId: 12,
+              before: 10,
+              after: 6,
+              cut: 8,
+              laminated: 0,
+              reserved: 2,
+              outcome: 'surplus',
+            },
+          ],
+        },
+      ],
+    });
+    const vm = buildMdfOrderConflictViewModel(error);
+    const position = vm!.cards[0].positions[0];
+    expect(position.line).toBe(
+      'деталь #12: было 10 → станет 6 · распилено 8, закатано 0, в резерве 2 — лишнее станет излишком',
+    );
+    expect(position.cut).toBe(8);
+    expect(position.laminated).toBe(0);
+    expect(position.reserved).toBe(2);
+    expect(position.outcome).toBe('surplus');
+  });
+
+  it('renders only the cut count plus the detached outcome note when after is removed', () => {
+    const error = makeError('MDF_ORDER_ASSIGNMENT_CONFLICT', {
+      cards: [
+        {
+          sourceKind: 'packet',
+          displayName: 'ЧПУ-14',
+          hiddenOwners: false,
+          positions: [
+            {
+              orderId: 101,
+              detailId: 12,
+              before: 10,
+              after: null,
+              cut: 8,
+              outcome: 'detached',
+            },
+          ],
+        },
+      ],
+    });
+    const vm = buildMdfOrderConflictViewModel(error);
+    const position = vm!.cards[0].positions[0];
+    expect(position.line).toBe(
+      'деталь #12: было 10 → станет удалена · распилено 8 — позиция выбудет из учёта (история сохранится)',
+    );
+  });
+
+  it('ignores an unrecognized outcome value and a non-numeric stat field', () => {
+    const error = makeError('MDF_ORDER_PHYSICAL_CONFLICT', {
+      cards: [
+        {
+          sourceKind: 'packet',
+          displayName: 'ЧПУ-14',
+          hiddenOwners: false,
+          positions: [
+            { orderId: 101, detailId: 12, before: 10, after: 6, cut: '8', outcome: 'weird' },
+          ],
+        },
+      ],
+    });
+    const vm = buildMdfOrderConflictViewModel(error);
+    const position = vm!.cards[0].positions[0];
+    expect(position.line).toBe('деталь #12: было 10 → станет 6');
+    expect(position.cut).toBeUndefined();
+    expect(position.outcome).toBeUndefined();
+  });
+});
+
+describe('awaitMdfConfirmation (§5.4e pending save)', () => {
+  it('resolves with the resend result on confirm, passing the digest', async () => {
+    const digests: string[] = [];
+    const result = await awaitMdfConfirmation<number | null>(
+      ({ onConfirm }) => { onConfirm('a'.repeat(64)); },
+      async (digest) => { digests.push(digest); return 42; },
+    );
+    expect(result).toBe(42);
+    expect(digests).toEqual(['a'.repeat(64)]);
+  });
+
+  it('resolves null on cancel and never resends', async () => {
+    let resent = false;
+    const result = await awaitMdfConfirmation(({ onCancel }) => { onCancel(); }, async () => { resent = true; return 1; });
+    expect(result).toBeNull();
+    expect(resent).toBe(false);
+  });
+
+  it('settles once: a late cancel after confirm does not override the resend result', async () => {
+    const result = await awaitMdfConfirmation<number>(({ onConfirm, onCancel }) => { onConfirm('b'.repeat(64)); onCancel(); },
+      async () => 7);
+    expect(result).toBe(7);
+  });
+
+  it('propagates a resend rejection to the pending caller', async () => {
+    await expect(awaitMdfConfirmation(({ onConfirm }) => { onConfirm('c'.repeat(64)); },
+      async () => { throw new Error('boom'); })).rejects.toThrow('boom');
   });
 });
