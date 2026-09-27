@@ -10,6 +10,10 @@ const resourceDemandCardSource = readFileSync(new URL('./ResourceDemandCard.tsx'
 const materialRowsViewSource = readFileSync(new URL('./MaterialRowsView.tsx', dir), 'utf8');
 const splitPanelViewSource = readFileSync(new URL('./SplitPanelView.tsx', dir), 'utf8');
 const useStoredViewModeSource = readFileSync(new URL('./useStoredViewMode.ts', dir), 'utf8');
+const procurementPartsSource = readFileSync(new URL('./ProcurementParts.tsx', dir), 'utf8');
+const materialAggregateViewSource = readFileSync(new URL('./MaterialAggregateView.tsx', dir), 'utf8');
+const useResourceDemandCardSource = readFileSync(new URL('./useResourceDemandCard.ts', dir), 'utf8');
+const showSourceForBoundaryGuard = readFileSync(new URL('./show.tsx', dir), 'utf8');
 
 describe('order resource requirements — переключатель видов списка (Сводка/Материалы/Панель)', () => {
   it('содержит Segmented с тремя видами и ключом хранения', () => {
@@ -49,6 +53,10 @@ describe('order resource requirements — границы владения дан
     ['SplitPanelView.tsx', splitPanelViewSource],
     ['useStoredViewMode.ts', useStoredViewModeSource],
     ['list.tsx', listSource],
+    ['ProcurementParts.tsx', procurementPartsSource],
+    ['MaterialAggregateView.tsx', materialAggregateViewSource],
+    ['useResourceDemandCard.ts', useResourceDemandCardSource],
+    ['show.tsx', showSourceForBoundaryGuard],
   ];
 
   it.each(sourcesByFile)('%s не содержит graphql/hasura/dataProvider', (_name, source) => {
@@ -65,10 +73,19 @@ describe('order resource requirements — карточка ресурса, дв�
   });
 });
 
-describe('order resource requirements — устаревшие show/create/edit удалены', () => {
-  it('show.tsx / create.tsx / edit.tsx больше не существуют в папке экрана', () => {
-    expect(existsSync(new URL('./show.tsx', dir))).toBe(false);
+describe('order resource requirements — устаревшие create/edit удалены; show.tsx — реальная карточка (фаза 2)', () => {
+  it('create.tsx / edit.tsx больше не существуют в папке экрана', () => {
     expect(existsSync(new URL('./create.tsx', dir))).toBe(false);
     expect(existsSync(new URL('./edit.tsx', dir))).toBe(false);
+  });
+
+  it('show.tsx — не мёртвый scaffold: гейтит по capabilities.cardDetails и рендерит ResourceDemandCard', () => {
+    const showSource = readFileSync(new URL('./show.tsx', dir), 'utf8');
+    expect(showSource).toContain('capabilities.cardDetails');
+    expect(showSource).toContain('<ResourceDemandCard');
+    expect(showSource).toContain('getResourceDemandCard');
+    expect(showSource).not.toMatch(/graphql/i);
+    expect(showSource).not.toMatch(/hasura/i);
+    expect(showSource).not.toMatch(/dataProvider/i);
   });
 });

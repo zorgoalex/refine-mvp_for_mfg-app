@@ -20,6 +20,7 @@ import {
   subscribeOrderDataChanged,
 } from '../../api/ordersApi';
 import type {
+  OrderResourceByMaterialQuery,
   OrderResourceDemandQuery,
   OrderResourceDemandResponse,
 } from '../../api/types/orderApi.types';
@@ -35,9 +36,10 @@ import {
   type ResourceDemandReportMaterial,
 } from './resourceDemandReport';
 import { MaterialRowsView } from './MaterialRowsView';
+import { ProcurementCheckbox, ProcurementProgressTag, useProcurementPermission } from './ProcurementParts';
 import { RESOURCE_CARD_MODES, ResourceDemandCard, type ResourceCardMode } from './ResourceDemandCard';
 import { KindSummaryCell, ResourceDemandBreakdown } from './ResourceDemandParts';
-import { resourceDemandLines } from './resourceKinds';
+import { resolveResourceCapabilities, resourceDemandLines, type ResourceDemandLine } from './resourceKinds';
 import { SplitPanelView } from './SplitPanelView';
 import { useStoredViewMode } from './useStoredViewMode';
 
@@ -107,6 +109,8 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
   const [searchInput, setSearchInput] = useState('');
   const [dateRange, setDateRange] = useState<DateRange>(null);
   const [readyCutsOnly, setReadyCutsOnly] = useState(false);
+  const [unpurchasedOnly, setUnpurchasedOnly] = useState(false);
+  const { canManage, manageLoading } = useProcurementPermission();
   const [reportOpen, setReportOpen] = useState(false);
   const [reportRows, setReportRows] = useState<OrderResourceDemandRow[]>(EMPTY_RESOURCE_DEMAND_ROWS);
   const [reportSelectedOnly, setReportSelectedOnly] = useState(false);
@@ -142,9 +146,18 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
     ...(deferredSearch ? { search: deferredSearch } : {}),
     ...(dateRange?.[0] ? { dateFrom: dateRange[0].format('YYYY-MM-DD') } : {}),
     ...(dateRange?.[1] ? { dateTo: dateRange[1].format('YYYY-MM-DD') } : {}),
-  }), [dateRange, deferredSearch, page, pageSize]);
+    ...(unpurchasedOnly ? { unpurchasedOnly: true } : {}),
+  }), [dateRange, deferredSearch, page, pageSize, unpurchasedOnly]);
   const { response, loading, error } = useLiveOrderResourceDemands(query, refreshRevision);
   const rows = response?.data ?? EMPTY_RESOURCE_DEMAND_ROWS;
+  const capabilities = useMemo(() => resolveResourceCapabilities(response?.capabilities), [response]);
+  const triggerRefresh = useCallback(() => setRefreshRevision((value) => value + 1), []);
+  const byMaterialQuery = useMemo<OrderResourceByMaterialQuery>(() => ({
+    ...(deferredSearch ? { search: deferredSearch } : {}),
+    ...(dateRange?.[0] ? { dateFrom: dateRange[0].format('YYYY-MM-DD') } : {}),
+    ...(dateRange?.[1] ? { dateTo: dateRange[1].format('YYYY-MM-DD') } : {}),
+    ...(unpurchasedOnly ? { unpurchasedOnly: true } : {}),
+  }), [dateRange, deferredSearch, unpurchasedOnly]);
   const filterOptions = useMemo(() => buildResourceDemandFilterOptions(rows), [rows]);
   const tableRows = useMemo(
     () => sortResourceDemandRows(filterResourceDemandRows(rows, headerFilters, readyCutsOnly), sortState),
@@ -199,6 +212,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
     searchInput.trim().length > 0 ||
     hasDateRange ||
     hasActiveListFilters ||
+    unpurchasedOnly ||
     hasActiveSort ||
     page !== DEFAULT_PAGE;
 
@@ -239,6 +253,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
     setSearchInput('');
     setDateRange(null);
     setReadyCutsOnly(false);
+    setUnpurchasedOnly(false);
     setHeaderFilters(createDefaultHeaderFilters());
     setSortState(DEFAULT_SORT_STATE);
     setPage(DEFAULT_PAGE);
@@ -261,6 +276,11 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
       setSelectedRowKeys([]);
       setSelectedRowsByKey(new Map());
     }
+    setPage(DEFAULT_PAGE);
+  }, []);
+
+  const handleUnpurchasedOnlyChange = useCallback((checked: boolean) => {
+    setUnpurchasedOnly(checked);
     setPage(DEFAULT_PAGE);
   }, []);
 
@@ -379,6 +399,15 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
           >
             Готовые раскрои
           </Checkbox>
+          {capabilities.procurement && (
+            <Checkbox
+              checked={unpurchasedOnly}
+              style={{ whiteSpace: 'nowrap' }}
+              onChange={(event) => handleUnpurchasedOnlyChange(event.target.checked)}
+            >
+              Есть незакупленное
+            </Checkbox>
+          )}
           <Button icon={<FileTextOutlined />} onClick={openReportModal}>
             Отчёт
           </Button>
@@ -427,7 +456,18 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
               expandedRowKeys,
               onExpandedRowsChange: setExpandedRowKeys,
               expandedRowRender: (row: OrderResourceDemandRow) => (
-                <ResourceDemandBreakdown lines={resourceDemandLines(row)} />
+                <ResourceDemandBreakdown
+                  lines={resourceDemandLines(row)}
+                  renderProcurement={capabilities.procurement ? (line: ResourceDemandLine) => (
+                    <ProcurementCheckbox
+                      orderId={row.orderId}
+                      line={line}
+                      canManage={canManage}
+                      manageLoading={manageLoading}
+                      onChanged={triggerRefresh}
+                    />
+                  ) : undefined}
+                />
               ),
             }}
             locale={{ emptyText: EMPTY_LIST_TEXT }}
@@ -481,6 +521,14 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
                 <KindSummaryCell lines={resourceDemandLines(row)} kind="film" />
               )}
             />
+            {capabilities.procurement && (
+              <Table.Column
+                key="procurement"
+                title="Закуп"
+                width={140}
+                render={(_, row: OrderResourceDemandRow) => <ProcurementProgressTag summary={row.procurementSummary} />}
+              />
+            )}
           </Table>
         )}
         {viewMode === 'materials' && (
@@ -491,6 +539,10 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
             onOpenCard={openCard}
             collapsed={collapsedMaterialOrders}
             onToggleGroup={toggleMaterialOrder}
+            capabilities={capabilities}
+            canManage={canManage}
+            manageLoading={manageLoading}
+            onProcurementChanged={triggerRefresh}
           />
         )}
         {viewMode === 'panel' && (
@@ -504,6 +556,13 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
             onSelectionChange={handleRowSelectionChange}
             cardMode={cardMode}
             onCardModeChange={setCardMode}
+            capabilities={capabilities}
+            canManage={canManage}
+            manageLoading={manageLoading}
+            onProcurementChanged={triggerRefresh}
+            byMaterialQuery={byMaterialQuery}
+            clientFiltersActive={hasActiveListFilters}
+            refreshRevision={refreshRevision}
           />
         )}
         {viewMode !== 'summary' && (
@@ -519,7 +578,16 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
           destroyOnClose
         >
           {drawerRow && (
-            <ResourceDemandCard row={drawerRow} mode={cardMode} onModeChange={setCardMode} />
+            <ResourceDemandCard
+              row={drawerRow}
+              mode={cardMode}
+              onModeChange={setCardMode}
+              capabilities={capabilities}
+              canManage={canManage}
+              manageLoading={manageLoading}
+              onProcurementChanged={triggerRefresh}
+              showOpenInNewTabLink
+            />
           )}
         </Drawer>
         <ResourceDemandReportModal

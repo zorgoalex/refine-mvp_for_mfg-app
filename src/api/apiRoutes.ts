@@ -59,6 +59,11 @@ export const apiRoutes = {
     list: backendApiPath('/orders'),
     formData: backendApiPath('/orders/form-data'),
     resourceDemands: backendApiPath('/orders/resource-demands'),
+    resourceDemandsByMaterial: backendApiPath('/orders/resource-demands/by-material'),
+    resourceDemandCard: (orderId: number) => backendApiPath(`/orders/${orderId}/resource-demands`),
+    resourceProcurement: (orderId: number, resourceKey: string) =>
+      backendApiPath(`/orders/${orderId}/resource-procurement/${encodeURIComponent(resourceKey)}`),
+    resourceProcurementBulk: backendApiPath('/orders/resource-procurement/bulk'),
     nameSuggestion: backendApiPath('/orders/name-suggestion'),
     statusBoard: backendApiPath('/orders/status-board'),
     statusBoardMdfManualMoves: backendApiPath('/orders/status-board/mdf-manual-moves'),

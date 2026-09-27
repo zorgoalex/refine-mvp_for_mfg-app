@@ -55,4 +55,14 @@ describe('apiRoutes', () => {
     expect(apiRoutes.audit.orderOptions).toBe('/api/v1/audit/order-options');
     expect(apiRoutes.audit.participantOptions).toBe('/api/v1/audit/participant-options');
   });
+
+  it('order resource procurement routes URL-encode the resourceKey (":" → "%3A")', () => {
+    expect(apiRoutes.orders.resourceDemandsByMaterial).toBe('/api/v1/orders/resource-demands/by-material');
+    expect(apiRoutes.orders.resourceDemandCard(42)).toBe('/api/v1/orders/42/resource-demands');
+    expect(apiRoutes.orders.resourceProcurement(42, 'sheet_material:12')).toBe(
+      '/api/v1/orders/42/resource-procurement/sheet_material%3A12',
+    );
+    expect(apiRoutes.orders.resourceProcurement(42, 'film:7')).toBe('/api/v1/orders/42/resource-procurement/film%3A7');
+    expect(apiRoutes.orders.resourceProcurementBulk).toBe('/api/v1/orders/resource-procurement/bulk');
+  });
 });

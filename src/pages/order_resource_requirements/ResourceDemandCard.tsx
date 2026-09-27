@@ -1,8 +1,10 @@
-import { Space, Tabs, Typography, theme } from 'antd';
+import { Alert, Space, Spin, Tabs, Typography, theme } from 'antd';
 import { Link } from 'react-router-dom';
 
+import type { OrderResourceCapabilitiesDto } from '../../api/types/orderApi.types';
 import { Segmented } from '../../ui/Segmented';
 import { formatDate } from '../../utils/dateFormat';
+import { ProcurementCheckbox, ProcurementProgressTag } from './ProcurementParts';
 import {
   KindDot,
   KindTitle,
@@ -10,11 +12,14 @@ import {
   SourceTag,
   numericStyle,
   useResourceKindColor,
+  type RenderProcurement,
 } from './ResourceDemandParts';
 import {
   RESOURCE_KINDS,
   formatKindTotal,
   linesOfKind,
+  mapBackendResourceLine,
+  matchingCardData,
   orderDisplayName,
   positionsLabel,
   resourceDemandLines,
@@ -24,6 +29,7 @@ import {
   type ResourceKind,
   type ResourceSource,
 } from './resourceKinds';
+import { useResourceDemandCard, type ResourceDemandCardState } from './useResourceDemandCard';
 
 export type ResourceCardMode = 'tabs' | 'summary';
 export const RESOURCE_CARD_MODES: readonly ResourceCardMode[] = ['tabs', 'summary'];
@@ -32,22 +38,73 @@ const CARD_MODE_OPTIONS = [
   { value: 'summary', label: 'Сводка' },
 ];
 
+export interface ResourceDemandCardProps {
+  row: OrderResourceDemandRow;
+  mode: ResourceCardMode;
+  onModeChange?: (mode: ResourceCardMode) => void;
+  compact?: boolean;
+  capabilities: OrderResourceCapabilitiesDto;
+  canManage: boolean;
+  manageLoading: boolean;
+  /** Список (и, если есть, отдельно загруженную карточку) нужно перечитать после команды закупа. */
+  onProcurementChanged: () => void;
+  /** Drawer — да; встроенная карточка в «Панели» и полная страница — нет (у полной страницы это и есть отдельная вкладка). */
+  showOpenInNewTabLink?: boolean;
+  /**
+   * Уже загруженное состояние карточки (полная страница сама решает, грузить
+   * ли `capabilities.cardDetails`, до рендера). Когда не передано — компонент
+   * запрашивает карточку сам при наличии `capabilities.cardDetails`.
+   */
+  card?: ResourceDemandCardState;
+}
+
 /**
  * Потребности одного заказа в двух видах: «Вкладки» (по типу ресурса)
- * и «Сводка» (итоги по типам и разделы). Строится из строки списка.
+ * и «Сводка» (итоги по типам и разделы). Данные строки списка — сразу;
+ * при `capabilities.cardDetails` подгружает карточку с деталями материалов
+ * (раскрытие в «Сводке») и показывает спиннер, при ошибке — Alert и
+ * данные строки списка как запасной вариант.
  */
 export function ResourceDemandCard({
   row,
   mode,
   onModeChange,
   compact = false,
-}: {
-  row: OrderResourceDemandRow;
-  mode: ResourceCardMode;
-  onModeChange?: (mode: ResourceCardMode) => void;
-  compact?: boolean;
-}) {
-  const lines = resourceDemandLines(row);
+  capabilities,
+  canManage,
+  manageLoading,
+  onProcurementChanged,
+  showOpenInNewTabLink = false,
+  card: externalCard,
+}: ResourceDemandCardProps) {
+  const selfFetch = externalCard == null;
+  const internalCard = useResourceDemandCard(selfFetch ? row.orderId : null, selfFetch && capabilities.cardDetails);
+  const card = externalCard ?? internalCard;
+  // Карточка другого заказа (устаревший ответ после переключения) никогда не
+  // показывается и не даёт отметить закуп от имени текущего заказа.
+  const cardData = matchingCardData(card.data, row.orderId);
+  const cardLines = cardData ? cardData.lines.map(mapBackendResourceLine) : null;
+  const lines = cardLines ?? resourceDemandLines(row);
+  const procurementSummary = cardData?.procurementSummary ?? row.procurementSummary;
+  const detailsAvailable = cardLines != null;
+
+  const handleLineChanged = () => {
+    card.refresh();
+    onProcurementChanged();
+  };
+
+  const renderProcurement = capabilities.procurement
+    ? (line: ResourceDemandLine) => (
+      <ProcurementCheckbox
+        orderId={row.orderId}
+        line={line}
+        canManage={canManage}
+        manageLoading={manageLoading}
+        onChanged={handleLineChanged}
+      />
+    )
+    : undefined;
+
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -61,6 +118,10 @@ export function ResourceDemandCard({
               .join(' · ')}
           </Typography.Text>
         </Space>
+        {capabilities.procurement && (
+          <ProcurementProgressTag summary={procurementSummary} />
+        )}
+        {capabilities.cardDetails && card.loading && <Spin size="small" />}
         <span style={{ flex: 1 }} />
         {onModeChange && (
           <Segmented
@@ -70,28 +131,59 @@ export function ResourceDemandCard({
             onChange={(value) => onModeChange(value as ResourceCardMode)}
           />
         )}
+        {showOpenInNewTabLink && capabilities.cardDetails && (
+          <Link to={`/order-resource-requirements/show/${row.orderId}`}>Открыть на отдельной вкладке</Link>
+        )}
         <Link to={`/orders/show/${row.orderId}`}>Открыть заказ</Link>
       </div>
+      {card.error && (
+        <Alert
+          showIcon
+          type="warning"
+          message="Не удалось загрузить карточку с деталями"
+          description={`${card.error} Показаны данные из списка.`}
+        />
+      )}
       {lines.length === 0 ? (
         <Typography.Text type="secondary">
           Потребности не рассчитаны: у заказа нет деталей с материалом.
         </Typography.Text>
       ) : mode === 'tabs' ? (
-        <ResourceCardTabs lines={lines} />
+        <ResourceCardTabs lines={lines} renderProcurement={renderProcurement} expandableDetails={detailsAvailable} />
       ) : (
-        <ResourceCardSummary lines={lines} compact={compact} />
+        <ResourceCardSummary
+          lines={lines}
+          compact={compact}
+          renderProcurement={renderProcurement}
+          expandableDetails={detailsAvailable}
+        />
       )}
     </Space>
   );
 }
 
-function ResourceCardTabs({ lines }: { lines: ResourceDemandLine[] }) {
+function ResourceCardTabs({
+  lines,
+  renderProcurement,
+  expandableDetails,
+}: {
+  lines: ResourceDemandLine[];
+  renderProcurement?: RenderProcurement;
+  expandableDetails: boolean;
+}) {
   const colorOf = useResourceKindColor();
   const items = [
     {
       key: 'all',
       label: <TabLabel title="Все" count={lines.length} />,
-      children: <ResourceLinesTable lines={lines} showKind />,
+      children: (
+        <ResourceLinesTable
+          lines={lines}
+          showKind
+          renderProcurement={renderProcurement}
+          expandableDetails={expandableDetails}
+        />
+      ),
     },
     ...RESOURCE_KINDS.map((meta) => {
       const kindLines = linesOfKind(lines, meta.kind);
@@ -112,7 +204,12 @@ function ResourceCardTabs({ lines }: { lines: ResourceDemandLine[] }) {
                 </Typography.Text>
               )}
             </Typography.Text>
-            <ResourceLinesTable lines={kindLines} showKind={false} />
+            <ResourceLinesTable
+              lines={kindLines}
+              showKind={false}
+              renderProcurement={renderProcurement}
+              expandableDetails={expandableDetails}
+            />
           </Space>
         ),
       };
@@ -131,7 +228,17 @@ function TabLabel({ title, count, color }: { title: string; count: number; color
   );
 }
 
-function ResourceCardSummary({ lines, compact }: { lines: ResourceDemandLine[]; compact: boolean }) {
+function ResourceCardSummary({
+  lines,
+  compact,
+  renderProcurement,
+  expandableDetails,
+}: {
+  lines: ResourceDemandLine[];
+  compact: boolean;
+  renderProcurement?: RenderProcurement;
+  expandableDetails: boolean;
+}) {
   const colorOf = useResourceKindColor();
   const { token } = theme.useToken();
   const presentKinds = RESOURCE_KINDS.filter((meta) => linesOfKind(lines, meta.kind).length > 0);
@@ -184,7 +291,13 @@ function ResourceCardSummary({ lines, compact }: { lines: ResourceDemandLine[]; 
               {formatKindTotal(resourceKindTotal(lines, meta.kind), meta.kind)}
             </Typography.Text>
           </Space>
-          <ResourceLinesTable lines={linesOfKind(lines, meta.kind)} showKind={false} compact={compact} />
+          <ResourceLinesTable
+            lines={linesOfKind(lines, meta.kind)}
+            showKind={false}
+            compact={compact}
+            renderProcurement={renderProcurement}
+            expandableDetails={expandableDetails}
+          />
         </div>
       ))}
     </Space>

@@ -1,4 +1,10 @@
-import type { OrderResourceDemandResponse } from '../../api/types/orderApi.types';
+import type {
+  OrderResourceCapabilitiesDto,
+  OrderResourceCardLineDto,
+  OrderResourceDemandLineDto,
+  OrderResourceDemandResponse,
+  OrderResourceDetailRefDto,
+} from '../../api/types/orderApi.types';
 
 export type OrderResourceDemandRow = OrderResourceDemandResponse['data'][number];
 
@@ -6,6 +12,19 @@ export type ResourceKind = 'sheet_material' | 'film';
 export type ResourceUnit = 'm2' | 'lm';
 /** Откуда взято количество: готовый раскрой, площадь деталей или данных нет. */
 export type ResourceSource = 'cut' | 'area' | 'none';
+
+/** Состояние отметки «Закуплено» одной строки потребности (API v2). */
+export interface ResourceProcurementState {
+  purchased: boolean;
+  /** 0 — записи закупа ещё нет. */
+  version: number;
+  origin: 'manual' | 'onec' | null;
+  markedAt: string | null;
+  markedByName: string | null;
+  quantityAtMark: number | null;
+  /** Потребность изменилась после отметки. */
+  changedSinceMark: boolean;
+}
 
 export interface ResourceDemandLine {
   resourceKey: string;
@@ -19,6 +38,17 @@ export interface ResourceDemandLine {
   secondaryText: string | null;
   detailsCount: number;
   source: ResourceSource;
+  /**
+   * Отсутствует (undefined/null) у строк, полученных адаптером старого API —
+   * там нет отметки закупа. У строк API v2 — состояние закупа этой строки.
+   */
+  procurement?: ResourceProcurementState | null;
+  /** Хеш вычисленной потребности; нужен для команды отметки закупа. Только API v2. */
+  demandFingerprint?: string;
+  /** Отметка закупа есть, а материал заказу больше не нужен. Только API v2. */
+  orphan?: boolean;
+  /** Детали, из которых складывается потребность строки. Только карточка (capabilities.cardDetails). */
+  details?: OrderResourceDetailRefDto[];
 }
 
 export interface ResourceKindMeta {
@@ -83,8 +113,51 @@ export function formatArea(value: number): string {
   return `${areaFormatter.format(value)} м²`;
 }
 
-/** Адаптер текущего ответа API (`sheetMaterials`/`films`) в единые строки потребности. */
+/**
+ * Единые строки потребности заказа. При наличии `row.lines` (API v2, ответ с
+ * `capabilities`) использует их напрямую — с отметкой закупа, отпечатком
+ * потребности и признаком «осиротела». Иначе — адаптер старого API
+ * (`sheetMaterials`/`films`), совместимый со смешанным деплоем.
+ */
 export function resourceDemandLines(row: OrderResourceDemandRow): ResourceDemandLine[] {
+  if (row.lines) return row.lines.map(mapBackendResourceLine);
+  return legacyResourceDemandLines(row);
+}
+
+/** Строки из API v2 в единый вид, включая закуп/отпечаток/деталей (карточка). */
+export function mapBackendResourceLine(
+  line: OrderResourceDemandLineDto | OrderResourceCardLineDto,
+): ResourceDemandLine {
+  return {
+    resourceKey: line.resourceKey,
+    kind: line.kind,
+    refId: line.refId,
+    name: line.name,
+    supplierLabel: line.supplierName
+      ? `${line.kind === 'film' ? 'Производитель' : 'Поставщик'}: ${line.supplierName}`
+      : null,
+    quantity: line.quantity,
+    unit: line.unit,
+    secondaryText: line.kind === 'film' ? formatArea(line.areaM2) : null,
+    detailsCount: line.detailsCount,
+    source: line.source,
+    procurement: {
+      purchased: line.procurement.purchased,
+      version: line.procurement.version,
+      origin: line.procurement.origin,
+      markedAt: line.procurement.markedAt,
+      markedByName: line.procurement.markedBy?.name ?? null,
+      quantityAtMark: line.procurement.quantityAtMark,
+      changedSinceMark: line.procurement.changedSinceMark,
+    },
+    demandFingerprint: line.demandFingerprint,
+    orphan: line.orphan,
+    ...('details' in line ? { details: line.details } : {}),
+  };
+}
+
+/** Адаптер старого ответа API (`sheetMaterials`/`films`) в единые строки потребности. */
+function legacyResourceDemandLines(row: OrderResourceDemandRow): ResourceDemandLine[] {
   const sheetLines = row.sheetMaterials.map<ResourceDemandLine>((material) => ({
     resourceKey: `sheet_material:${material.sheetMaterialTypeId}`,
     kind: 'sheet_material',
@@ -154,4 +227,64 @@ export function positionsLabel(count: number): string {
 
 export function orderDisplayName(row: OrderResourceDemandRow): string {
   return row.orderName?.trim() || `#${row.orderId}`;
+}
+
+/** Возможности, которые показывает старый backend (без ключа `capabilities` в ответе): все выключены — фаза 1 as-is. */
+export const NO_RESOURCE_CAPABILITIES: OrderResourceCapabilitiesDto = {
+  procurement: false,
+  byMaterial: false,
+  cardDetails: false,
+  onecDocuments: false,
+};
+
+/** Старый backend без `capabilities` в ответе → все возможности выключены (фаза 1). */
+export function resolveResourceCapabilities(
+  capabilities: OrderResourceCapabilitiesDto | undefined | null,
+): OrderResourceCapabilitiesDto {
+  return capabilities ?? NO_RESOURCE_CAPABILITIES;
+}
+
+/** До 100 заказов — лимит групповой отметки закупа (см. backend RESOURCE_PROCUREMENT_BULK_LIMIT). */
+export const RESOURCE_PROCUREMENT_BULK_LIMIT = 100;
+
+export function canBulkMarkParticipants(participantsCount: number): boolean {
+  return participantsCount > 0 && participantsCount <= RESOURCE_PROCUREMENT_BULK_LIMIT;
+}
+
+/**
+ * Сохранённый выбор подрежима «По материалам» в «Панели» откатывается к
+ * «По заказам», если у текущего ответа backend нет соответствующей возможности
+ * (старый backend или выключенный флаг).
+ */
+export function resolvePanelSubMode<T extends 'orders' | 'materials'>(
+  stored: T,
+  byMaterialCapability: boolean,
+): 'orders' | 'materials' {
+  return byMaterialCapability ? stored : 'orders';
+}
+
+export function resourceKindLabel(kind: ResourceKind): string {
+  return RESOURCE_KIND_BY_KEY[kind].label;
+}
+
+export function procurementProgressText(summary: { total: number; purchased: number } | undefined | null): string {
+  if (!summary || summary.total === 0) return '—';
+  return `Закуплено ${summary.purchased} из ${summary.total}`;
+}
+
+/** Тултип чекбокса «Закуплено»: «Отметил <имя>, <дата>» — форматирование даты делает вызывающая сторона. */
+export function procurementMarkedTooltip(markedByName: string | null, formattedDate: string | null): string | null {
+  if (!markedByName && !formattedDate) return null;
+  const name = markedByName ?? 'неизвестный пользователь';
+  return formattedDate ? `Отметил ${name}, ${formattedDate}` : `Отметил ${name}`;
+}
+
+/** Данные карточки годятся только для того заказа, который сейчас показан. */
+export function matchingCardData<T extends { orderId: number }>(data: T | null | undefined, orderId: number): T | null {
+  return data && data.orderId === orderId ? data : null;
+}
+
+/** Сводка годится для групповой отметки, только если загружена для текущих фильтров и не грузится заново. */
+export function isAggregateCurrent(loading: boolean, dataKey: string | null, queryKey: string): boolean {
+  return !loading && dataKey !== null && dataKey === queryKey;
 }

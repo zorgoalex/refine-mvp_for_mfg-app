@@ -133,6 +133,16 @@ describe('VPS compose backend runtime flags', () => {
     expect(envExample).toContain('BACKEND_ENABLE_BAZIS_CUT=false');
   });
 
+  it('passes the resource procurement flag with a safe default', () => {
+    const compose = readTemplate('ops/templates/docker-compose.vps.yml');
+    const localCompose = readTemplate('backend/docker-compose.yml');
+    const envExample = readTemplate('ops/templates/env.vps.example');
+
+    expect(compose).toContain('BACKEND_RESOURCE_PROCUREMENT_ENABLED: ${BACKEND_RESOURCE_PROCUREMENT_ENABLED:-false}');
+    expect(localCompose).toContain('BACKEND_RESOURCE_PROCUREMENT_ENABLED: ${BACKEND_RESOURCE_PROCUREMENT_ENABLED:-false}');
+    expect(envExample).toContain('BACKEND_RESOURCE_PROCUREMENT_ENABLED=false');
+  });
+
   it('passes Groups feature flags to the backend container with safe defaults', () => {
     const compose = readTemplate('ops/templates/docker-compose.vps.yml');
 

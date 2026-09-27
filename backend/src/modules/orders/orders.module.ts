@@ -50,6 +50,8 @@ import { MdfBoardManualMoveController } from './http/mdf-board-manual-move.contr
 import { MdfProductionReturnController } from './http/mdf-production-return.controller';
 import { MdfActiveProductionReturnController, MdfEngineModeController } from './http/mdf-active-production-return.controller';
 import { OrderResourceDemandController } from './http/order-resource-demand.controller';
+import { OrderResourceProcurementController } from './http/order-resource-procurement.controller';
+import { PgOrderResourceProcurementRepository } from './adapters/pg-order-resource-procurement-repository';
 import { OrderSnapshotController } from './http/order-snapshot.controller';
 import { OrdersController } from './http/orders.controller';
 import { OrderHdfSettingsController } from './http/order-hdf-settings.controller';
@@ -83,6 +85,7 @@ export function shouldEnableOrderDeadlineSync(input: {
     OrderSnapshotController,
     OrderGroupLinksController,
     OrderResourceDemandController,
+    OrderResourceProcurementController,
     OrderHdfSettingsController,
     OrdersController,
   ],
@@ -201,6 +204,8 @@ export function shouldEnableOrderDeadlineSync(input: {
       useFactory: (database: DatabaseService) =>
         new OrderResourceDemandService({
           demands: new PgOrderResourceDemandRepository(database),
+          procurement: new PgOrderResourceProcurementRepository(database),
+          auditClient: database,
         }),
       inject: [DatabaseService],
     },

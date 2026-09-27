@@ -7,6 +7,8 @@ export interface OrdersHttpFeatureFlags {
   ordersReadOnly: boolean;
   orderExportEnabled?: boolean;
   exportDisabled?: boolean;
+  /** BACKEND_RESOURCE_PROCUREMENT_ENABLED: отметки «Закуплено» у материалов заказа. */
+  resourceProcurementEnabled?: boolean;
 }
 
 @Injectable()
@@ -19,6 +21,7 @@ export class OrdersRuntimeConfigService {
       ordersReadOnly: this.config.get('BACKEND_ORDERS_READ_ONLY', { infer: true }),
       orderExportEnabled: this.config.get('BACKEND_ENABLE_ORDER_EXPORT', { infer: true }),
       exportDisabled: this.config.get('BACKEND_EXPORT_DISABLED', { infer: true }),
+      resourceProcurementEnabled: this.config.get('BACKEND_RESOURCE_PROCUREMENT_ENABLED', { infer: true }),
     };
   }
 }

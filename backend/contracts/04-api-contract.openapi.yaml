@@ -3782,6 +3782,12 @@ paths:
           schema:
             type: integer
             minimum: 1
+        - name: unpurchasedOnly
+          in: query
+          required: false
+          description: Только заказы, у которых есть хотя бы один материал без отметки «Закуплено».
+          schema:
+            type: boolean
       responses:
         '200':
           description: Live order resource demand projection
@@ -3798,6 +3804,182 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/orders/resource-demands/by-material:
+    get:
+      tags:
+        - Orders
+      operationId: listOrderResourceDemandsByMaterial
+      summary: Потребность по материалам по всем отфильтрованным заказам
+      description: Сводит живую потребность по материалам для не более чем 500 заказов фильтра (иначе 422). Участники каждого материала несут версию закупа и отпечаток потребности для групповой отметки.
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      parameters:
+        - name: search
+          in: query
+          required: false
+          schema: { type: string, maxLength: 200 }
+        - name: dateFrom
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: dateTo
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: unpurchasedOnly
+          in: query
+          required: false
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Aggregated demand by material with participants
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/orders/{orderId}/resource-demands:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    get:
+      tags:
+        - Orders
+      operationId: getOrderResourceDemandCard
+      summary: Карточка потребностей заказа с деталями по каждому материалу
+      description: Заказ вне scope пользователя, удалённый или непроизводственный отвечает 404.
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      responses:
+        '200':
+          description: Order resource card
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/orders/{orderId}/resource-procurement/{resourceKey}:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+      - name: resourceKey
+        in: path
+        required: true
+        description: "`sheet_material:<id>` или `film:<id>`"
+        schema:
+          type: string
+          pattern: '^(sheet_material|film):[1-9][0-9]{0,17}$'
+    put:
+      tags:
+        - Orders
+      operationId: setOrderResourceProcurement
+      summary: Отметить материал заказа закупленным или снять отметку
+      description: >-
+        Повтор к текущему состоянию — 200 без изменений. Устаревшая версия — 409 PROCUREMENT_VERSION_CONFLICT,
+        изменившаяся потребность при постановке отметки — 409 PROCUREMENT_DEMAND_CHANGED (details.line — актуальная строка).
+        Требует BACKEND_RESOURCE_PROCUREMENT_ENABLED, иначе 503 PROCUREMENT_DISABLED.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [purchased, expectedVersion, expectedDemandFingerprint]
+              properties:
+                purchased: { type: boolean }
+                expectedVersion: { type: integer, minimum: 0 }
+                expectedDemandFingerprint: { type: string, pattern: '^[0-9a-f]{64}$' }
+      responses:
+        '200':
+          description: Purchase mark state after the command
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/orders/resource-procurement/bulk:
+    post:
+      tags:
+        - Orders
+      operationId: bulkSetOrderResourceProcurement
+      summary: Отметить один материал закупленным сразу в нескольких заказах
+      description: Всё или ничего; до 100 заказов. Любой заказ вне scope — 404 на весь запрос; конфликты — 409 PROCUREMENT_BULK_CONFLICT без записи.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [resourceKey, purchased, items]
+              properties:
+                resourceKey: { type: string }
+                purchased: { type: boolean }
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [orderId, expectedVersion, expectedDemandFingerprint]
+                    properties:
+                      orderId: { type: integer, minimum: 1 }
+                      expectedVersion: { type: integer, minimum: 0 }
+                      expectedDemandFingerprint: { type: string, pattern: '^[0-9a-f]{64}$' }
+      responses:
+        '200':
+          description: Per-order results
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /api/v1/orders/name-suggestion:
     get:
       tags:

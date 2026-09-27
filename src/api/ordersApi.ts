@@ -14,6 +14,13 @@ import type {
   OrderListResponse,
   OrderResourceDemandQuery,
   OrderResourceDemandResponse,
+  OrderResourceByMaterialQuery,
+  OrderResourceByMaterialResponse,
+  OrderResourceCardResponse,
+  SetOrderResourceProcurementRequest,
+  OrderResourceProcurementResultDto,
+  BulkOrderResourceProcurementRequest,
+  BulkOrderResourceProcurementResponse,
   OrderNameSuggestionResponse,
   OrderTransferTargetsResponse,
   OrderResponse,
@@ -59,6 +66,35 @@ export const ordersApi = {
 
   listResourceDemands(params: OrderResourceDemandQuery = {}): Promise<OrderResourceDemandResponse> {
     return httpClient.get<OrderResourceDemandResponse>(withQuery(apiRoutes.orders.resourceDemands, params));
+  },
+
+  listResourceDemandsByMaterial(params: OrderResourceByMaterialQuery = {}): Promise<OrderResourceByMaterialResponse> {
+    return httpClient.get<OrderResourceByMaterialResponse>(
+      withQuery(apiRoutes.orders.resourceDemandsByMaterial, params),
+    );
+  },
+
+  getResourceDemandCard(orderId: number): Promise<OrderResourceCardResponse> {
+    return httpClient.get<OrderResourceCardResponse>(
+      apiRoutes.orders.resourceDemandCard(validateOrderId(orderId)),
+    );
+  },
+
+  setResourceProcurement(
+    orderId: number,
+    resourceKey: string,
+    body: SetOrderResourceProcurementRequest,
+  ): Promise<OrderResourceProcurementResultDto> {
+    return httpClient.put<OrderResourceProcurementResultDto>(
+      apiRoutes.orders.resourceProcurement(validateOrderId(orderId), resourceKey),
+      body,
+    );
+  },
+
+  bulkSetResourceProcurement(
+    body: BulkOrderResourceProcurementRequest,
+  ): Promise<BulkOrderResourceProcurementResponse> {
+    return httpClient.post<BulkOrderResourceProcurementResponse>(apiRoutes.orders.resourceProcurementBulk, body);
   },
 
   getNextOrderName(): Promise<OrderNameSuggestionResponse> {

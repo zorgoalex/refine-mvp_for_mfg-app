@@ -1,6 +1,7 @@
 import { Space, Tag, Typography, theme } from 'antd';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
+import type { OrderResourceDetailRefDto } from '../../api/types/orderApi.types';
 import { Table } from '../../ui/tooltipDelay';
 import {
   RESOURCE_KIND_BY_KEY,
@@ -15,6 +16,8 @@ import {
   type ResourceKind,
   type ResourceSource,
 } from './resourceKinds';
+
+export type RenderProcurement = (line: ResourceDemandLine) => ReactNode;
 
 export const numericStyle = { fontVariantNumeric: 'tabular-nums' } as const;
 
@@ -107,9 +110,12 @@ export function KindSummaryCell({ lines, kind }: { lines: ResourceDemandLine[]; 
 export function ResourceDemandBreakdown({
   lines,
   kinds = RESOURCE_KINDS.map((meta) => meta.kind),
+  renderProcurement,
 }: {
   lines: ResourceDemandLine[];
   kinds?: ResourceKind[];
+  /** capabilities.procurement — чекбокс «Закуплено» под количеством строки. */
+  renderProcurement?: RenderProcurement;
 }) {
   const colorOf = useResourceKindColor();
   const { token } = theme.useToken();
@@ -140,7 +146,9 @@ export function ResourceDemandBreakdown({
                 Нет потребности
               </Typography.Text>
             ) : (
-              kindLines.map((line) => <ResourceLineRow key={line.resourceKey} line={line} />)
+              kindLines.map((line) => (
+                <ResourceLineRow key={line.resourceKey} line={line} renderProcurement={renderProcurement} />
+              ))
             )}
           </div>
         );
@@ -149,7 +157,7 @@ export function ResourceDemandBreakdown({
   );
 }
 
-function ResourceLineRow({ line }: { line: ResourceDemandLine }) {
+function ResourceLineRow({ line, renderProcurement }: { line: ResourceDemandLine; renderProcurement?: RenderProcurement }) {
   const { token } = theme.useToken();
   const secondary = [line.supplierLabel, line.secondaryText].filter(Boolean).join(' · ');
   return (
@@ -177,8 +185,45 @@ function ResourceLineRow({ line }: { line: ResourceDemandLine }) {
             Деталей: {line.detailsCount}
           </Typography.Text>
         </div>
+        {renderProcurement && (
+          <div style={{ marginTop: 4, display: 'flex', justifyContent: 'flex-end' }}>{renderProcurement(line)}</div>
+        )}
       </div>
     </div>
+  );
+}
+
+/** Строки-детали (№, название, размер мм, кол-во; ХДФ помечается тегом) — раскрытие материала в карточке «Сводка». */
+export function ResourceLineDetailsList({ details }: { details: OrderResourceDetailRefDto[] }) {
+  if (details.length === 0) {
+    return <Typography.Text type="secondary">Нет деталей</Typography.Text>;
+  }
+  return (
+    <Table<OrderResourceDetailRefDto>
+      rowKey={(detail) => `${detail.source}:${detail.id}`}
+      size="small"
+      dataSource={details}
+      pagination={false}
+    >
+      <Table.Column<OrderResourceDetailRefDto> key="number" title="№" width={70} render={(_, detail) => detail.detailNumber ?? '—'} />
+      <Table.Column<OrderResourceDetailRefDto>
+        key="name"
+        title="Название"
+        render={(_, detail) => (
+          <>
+            {detail.name ?? '—'}
+            {detail.source === 'hdf' && <Tag style={{ marginInlineStart: 6, marginInlineEnd: 0 }}>ХДФ</Tag>}
+          </>
+        )}
+      />
+      <Table.Column<OrderResourceDetailRefDto>
+        key="size"
+        title="Размер, мм"
+        align="right"
+        render={(_, detail) => (detail.heightMm != null && detail.widthMm != null ? `${detail.heightMm} × ${detail.widthMm}` : '—')}
+      />
+      <Table.Column<OrderResourceDetailRefDto> key="quantity" title="Кол-во" align="right" width={90} render={(_, detail) => detail.quantity ?? '—'} />
+    </Table>
   );
 }
 
@@ -187,10 +232,16 @@ export function ResourceLinesTable({
   lines,
   showKind,
   compact = false,
+  renderProcurement,
+  expandableDetails = false,
 }: {
   lines: ResourceDemandLine[];
   showKind: boolean;
   compact?: boolean;
+  /** capabilities.procurement — колонка «Закуп» с чекбоксом. */
+  renderProcurement?: RenderProcurement;
+  /** capabilities.cardDetails — строка раскрывается до списка деталей материала. */
+  expandableDetails?: boolean;
 }) {
   return (
     <Table<ResourceDemandLine>
@@ -199,6 +250,10 @@ export function ResourceLinesTable({
       dataSource={lines}
       pagination={false}
       locale={{ emptyText: 'Нет потребности' }}
+      expandable={expandableDetails ? {
+        rowExpandable: (line) => (line.details?.length ?? 0) > 0,
+        expandedRowRender: (line) => <ResourceLineDetailsList details={line.details ?? []} />,
+      } : undefined}
     >
       {showKind && (
         <Table.Column<ResourceDemandLine>
@@ -253,6 +308,14 @@ export function ResourceLinesTable({
         width={120}
         render={(_, line) => <SourceTag source={line.source} />}
       />
+      {renderProcurement && (
+        <Table.Column<ResourceDemandLine>
+          key="procurement"
+          title="Закуп"
+          width={160}
+          render={(_, line) => renderProcurement(line)}
+        />
+      )}
     </Table>
   );
 }

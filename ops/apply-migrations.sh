@@ -2345,6 +2345,20 @@ probe_file() {
     # exists) to resolve the §5.6 engine-history card subject; the guard below
     # requires the post-192 body only when that table (i.e. 141) is present —
     # same conditional-redefinition pattern as 191's seal-guard check above.
+    194_order_resource_procurement*) probe_all \
+      "$(q_tbl order_resource_procurement)" \
+      "SELECT count(*)=17 FROM information_schema.columns WHERE table_schema='public' AND table_name='order_resource_procurement';" \
+      "$(q_con_on order_resource_procurement chk_orp_resource_kind)" \
+      "$(q_con_on order_resource_procurement chk_orp_one_ref)" \
+      "$(q_con_on order_resource_procurement chk_orp_origin)" \
+      "$(q_con_on order_resource_procurement chk_orp_unit)" \
+      "$(q_con_on order_resource_procurement chk_orp_version)" \
+      "$(q_con_on order_resource_procurement chk_orp_fingerprint)" \
+      "$(q_con_on order_resource_procurement chk_orp_marked_snapshot)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.order_resource_procurement'::regclass AND contype='f' AND convalidated AND confrelid='public.orders'::regclass);" \
+      "$(q_idx uq_orp_order_sheet_material)" \
+      "$(q_idx uq_orp_order_film)" \
+      "$(q_idx idx_orp_order)" ;;
     192_mdf_board_presentation_history*) probe_all \
       "$(q_tbl mdf_revision_presentation)" \
       "$(q_con_on mdf_revision_presentation mdf_revision_presentation_pkey)" \
@@ -2497,6 +2511,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     191_mdf_order_corrections*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    194_order_resource_procurement*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     192_mdf_board_presentation_history*)

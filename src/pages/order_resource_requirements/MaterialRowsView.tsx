@@ -1,8 +1,10 @@
 import { Button, Space, Tag, Typography, theme } from 'antd';
 import { useMemo, useState } from 'react';
 
+import type { OrderResourceCapabilitiesDto } from '../../api/types/orderApi.types';
 import { Table } from '../../ui/tooltipDelay';
 import { formatDate } from '../../utils/dateFormat';
+import { ProcurementCheckbox, ProcurementProgressTag } from './ProcurementParts';
 import { KindDot, KindTitle, SourceTag, numericStyle, useResourceKindColor } from './ResourceDemandParts';
 import {
   RESOURCE_KINDS,
@@ -21,7 +23,7 @@ type MaterialRowsItem =
   | { key: string; type: 'group'; row: OrderResourceDemandRow; lines: ResourceDemandLine[] }
   | { key: string; type: 'line'; row: OrderResourceDemandRow; line: ResourceDemandLine };
 
-const COLUMN_COUNT = 6;
+const BASE_COLUMN_COUNT = 6;
 
 /** Вид «Материалы»: шапка группы — заказ с итогами, под ней строка на каждый материал. */
 export function MaterialRowsView({
@@ -31,6 +33,10 @@ export function MaterialRowsView({
   onOpenCard,
   collapsed,
   onToggleGroup,
+  capabilities,
+  canManage,
+  manageLoading,
+  onProcurementChanged,
 }: {
   rows: OrderResourceDemandRow[];
   loading: boolean;
@@ -39,6 +45,10 @@ export function MaterialRowsView({
   /** Заказы со свёрнутыми материалами; хранится в списке, чтобы работала кнопка «Свернуть все». */
   collapsed: ReadonlySet<number>;
   onToggleGroup: (orderId: number) => void;
+  capabilities: OrderResourceCapabilitiesDto;
+  canManage: boolean;
+  manageLoading: boolean;
+  onProcurementChanged: () => void;
 }) {
   const colorOf = useResourceKindColor();
   const { token } = theme.useToken();
@@ -47,6 +57,7 @@ export function MaterialRowsView({
   );
 
   const items = useMemo(() => buildMaterialRowsItems(rows, visibleKinds, collapsed), [collapsed, rows, visibleKinds]);
+  const columnCount = capabilities.procurement ? BASE_COLUMN_COUNT + 1 : BASE_COLUMN_COUNT;
 
   const toggleKind = (kind: ResourceKind) => {
     setVisibleKinds((current) => {
@@ -98,7 +109,7 @@ export function MaterialRowsView({
           key="kind"
           title="Тип"
           width={150}
-          onCell={(item) => (item.type === 'group' ? { colSpan: COLUMN_COUNT } : {})}
+          onCell={(item) => (item.type === 'group' ? { colSpan: columnCount } : {})}
           render={(_, item) => (item.type === 'group'
             ? (
               <MaterialGroupHeader
@@ -107,6 +118,7 @@ export function MaterialRowsView({
                 collapsed={collapsed.has(item.row.orderId)}
                 onToggle={() => onToggleGroup(item.row.orderId)}
                 onOpenCard={() => onOpenCard(item.row)}
+                showProcurement={capabilities.procurement}
               />
             )
             : <span style={{ paddingInlineStart: 24 }}><KindTitle kind={item.line.kind} short /></span>)}
@@ -156,6 +168,25 @@ export function MaterialRowsView({
           onCell={groupCell}
           render={(_, item) => (item.type === 'line' ? <SourceTag source={item.line.source} /> : null)}
         />
+        {capabilities.procurement && (
+          <Table.Column<MaterialRowsItem>
+            key="procurement"
+            title="Закуп"
+            width={160}
+            onCell={groupCell}
+            render={(_, item) => (item.type === 'line'
+              ? (
+                <ProcurementCheckbox
+                  orderId={item.row.orderId}
+                  line={item.line}
+                  canManage={canManage}
+                  manageLoading={manageLoading}
+                  onChanged={onProcurementChanged}
+                />
+              )
+              : null)}
+          />
+        )}
       </Table>
     </Space>
   );
@@ -167,12 +198,14 @@ function MaterialGroupHeader({
   collapsed,
   onToggle,
   onOpenCard,
+  showProcurement,
 }: {
   row: OrderResourceDemandRow;
   lines: ResourceDemandLine[];
   collapsed: boolean;
   onToggle: () => void;
   onOpenCard: () => void;
+  showProcurement: boolean;
 }) {
   const colorOf = useResourceKindColor();
   const presentKinds = RESOURCE_KINDS.filter((meta) => linesOfKind(lines, meta.kind).length > 0);
@@ -190,6 +223,7 @@ function MaterialGroupHeader({
       <Typography.Link strong onClick={onOpenCard}>{orderDisplayName(row)}</Typography.Link>
       <Typography.Text type="secondary">{row.clientName || 'Клиент не указан'}</Typography.Text>
       <Typography.Text type="secondary" style={numericStyle}>{row.orderDate ? formatDate(row.orderDate) : '—'}</Typography.Text>
+      {showProcurement && <ProcurementProgressTag summary={row.procurementSummary} />}
       <span style={{ flex: 1 }} />
       {presentKinds.length === 0 ? (
         <Tag>потребности не рассчитаны</Tag>

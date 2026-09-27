@@ -59,6 +59,57 @@ export interface OrderResourceDemandQuery {
   filmId?: number;
   supplierId?: number;
   vendorId?: number;
+  /** Только заказы, у которых есть хотя бы один незакупленный материал (капабилити procurement). */
+  unpurchasedOnly?: boolean;
+}
+
+export type OrderResourceKind = 'sheet_material' | 'film';
+export type OrderResourceUnit = 'm2' | 'lm';
+/** Откуда взято количество: готовый раскрой, площадь деталей или данных нет. */
+export type OrderResourceSource = 'cut' | 'area' | 'none';
+
+export interface OrderResourceProcurementDto {
+  purchased: boolean;
+  /** 0 — записи закупа ещё нет. */
+  version: number;
+  origin: 'manual' | 'onec' | null;
+  markedAt: IsoDateTimeString | null;
+  markedBy: { userId: number; name: string } | null;
+  quantityAtMark: number | null;
+  unitAtMark: OrderResourceUnit | null;
+  /** Потребность изменилась после отметки «Закуплено». */
+  changedSinceMark: boolean;
+}
+
+export interface OrderResourceDemandLineDto {
+  resourceKey: string;
+  kind: OrderResourceKind;
+  refId: number;
+  name: string;
+  supplierName: string | null;
+  /** null — количество не посчитано (нет готового раскроя у плёнки). */
+  quantity: number | null;
+  unit: OrderResourceUnit;
+  areaM2: number;
+  detailsCount: number;
+  source: OrderResourceSource;
+  demandFingerprint: string;
+  /** Отметка закупа есть, а материал заказу больше не нужен. */
+  orphan: boolean;
+  procurement: OrderResourceProcurementDto;
+}
+
+export interface OrderProcurementSummaryDto {
+  total: number;
+  purchased: number;
+  orphanPurchased: number;
+}
+
+export interface OrderResourceCapabilitiesDto {
+  procurement: boolean;
+  byMaterial: boolean;
+  cardDetails: boolean;
+  onecDocuments: boolean;
 }
 
 export interface OrderSheetMaterialDemandDto {
@@ -92,12 +143,107 @@ export interface OrderResourceDemandDto {
   updatedAt: IsoDateTimeString;
   sheetMaterials: OrderSheetMaterialDemandDto[];
   films: OrderFilmDemandDto[];
+  /** API v2 (capabilities-gated): единые строки потребности. Отсутствует у старого backend. */
+  lines?: OrderResourceDemandLineDto[];
+  procurementSummary?: OrderProcurementSummaryDto;
 }
 
 export interface OrderResourceDemandResponse {
   data: OrderResourceDemandDto[];
   pagination: Pagination;
   refreshedAt: IsoDateTimeString;
+  /** Отсутствует у старого backend (до фазы 2) — FE должен рендерить только фазу 1. */
+  capabilities?: OrderResourceCapabilitiesDto;
+}
+
+export interface OrderResourceDetailRefDto {
+  source: 'detail' | 'hdf';
+  id: number;
+  detailNumber: number | null;
+  name: string | null;
+  heightMm: number | null;
+  widthMm: number | null;
+  quantity: number | null;
+}
+
+export interface OrderResourceCardLineDto extends OrderResourceDemandLineDto {
+  details: OrderResourceDetailRefDto[];
+}
+
+export interface OrderResourceCardDto extends Omit<OrderResourceDemandDto, 'lines'> {
+  lines: OrderResourceCardLineDto[];
+}
+
+export interface OrderResourceCardResponse {
+  data: OrderResourceCardDto;
+  refreshedAt: IsoDateTimeString;
+  capabilities: OrderResourceCapabilitiesDto;
+}
+
+export interface OrderResourceMaterialParticipantDto {
+  orderId: number;
+  orderName: string;
+  purchased: boolean;
+  version: number;
+  demandFingerprint: string;
+}
+
+export interface OrderResourceMaterialAggregateDto {
+  resourceKey: string;
+  kind: OrderResourceKind;
+  refId: number;
+  name: string;
+  supplierName: string | null;
+  unit: OrderResourceUnit;
+  totalQuantity: number;
+  ordersCount: number;
+  detailsCount: number;
+  noDataOrders: number;
+  purchasedOrders: number;
+  participants: OrderResourceMaterialParticipantDto[];
+}
+
+export interface OrderResourceByMaterialQuery {
+  search?: string;
+  dateFrom?: DateOnlyString;
+  dateTo?: DateOnlyString;
+  unpurchasedOnly?: boolean;
+}
+
+export interface OrderResourceByMaterialResponse {
+  data: OrderResourceMaterialAggregateDto[];
+  ordersCount: number;
+  refreshedAt: IsoDateTimeString;
+  capabilities: OrderResourceCapabilitiesDto;
+}
+
+export interface SetOrderResourceProcurementRequest {
+  purchased: boolean;
+  expectedVersion: number;
+  expectedDemandFingerprint: string;
+}
+
+export interface OrderResourceProcurementResultDto {
+  orderId: number;
+  resourceKey: string;
+  changed: boolean;
+  line: OrderResourceDemandLineDto;
+}
+
+export interface BulkOrderResourceProcurementItemDto {
+  orderId: number;
+  expectedVersion: number;
+  expectedDemandFingerprint: string;
+}
+
+export interface BulkOrderResourceProcurementRequest {
+  resourceKey: string;
+  purchased: boolean;
+  items: BulkOrderResourceProcurementItemDto[];
+}
+
+export interface BulkOrderResourceProcurementResponse {
+  results: OrderResourceProcurementResultDto[];
 }
 
 export interface Pagination {

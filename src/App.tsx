@@ -204,6 +204,7 @@ const OrderWorkshopEdit = lazy(async () => ({ default: (await import("./pages/or
 const OrderWorkshopShow = lazy(async () => ({ default: (await import("./pages/order_workshops/show")).OrderWorkshopShow }));
 
 const OrderResourceRequirementList = lazy(async () => ({ default: (await import("./pages/order_resource_requirements/list")).OrderResourceRequirementList }));
+const OrderResourceRequirementShow = lazy(async () => ({ default: (await import("./pages/order_resource_requirements/show")).OrderResourceRequirementShow }));
 
 // clients_analytics and payments_analytics each export two named components from one module.
 const ClientsAnalyticsList = lazy(async () => ({ default: (await import("./pages/clients_analytics")).ClientsAnalyticsList }));
@@ -723,7 +724,8 @@ const ThemedApp = () => {
                 {
                   name: "order_resource_requirements",
                   list: "/order-resource-requirements",
-                  meta: { label: "Потребности заказов в ресурсах" },
+                  show: "/order-resource-requirements/show/:orderId",
+                  meta: { idColumnName: "orderId", label: "Потребности заказов в ресурсах" },
                 },
                 {
                   name: "order_doweling_links",
@@ -1066,6 +1068,7 @@ const ThemedApp = () => {
                   </Route>
                   <Route path="/order-resource-requirements" >
                     <Route index element={<OrderResourceRequirementList />} />
+                    <Route path="show/:orderId" element={<OrderResourceRequirementShow />} />
                   </Route>
                 </Route>
                 <Route
