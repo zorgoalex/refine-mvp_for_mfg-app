@@ -32,6 +32,8 @@ export interface MdfReconciliationSourceInput {
   /** MDF scope (material/card kind/vacuum bath/eligible BASIS rows). */
   mdf: boolean;
   createdAt: string | null;
+  /** Card name as the live source writers use it (program name / set name / cut job name). */
+  displayName?: string | null;
   items: MdfReconciliationItem[];
   /** Packet completion (completed or thumbs-up). */
   completed?: boolean; returned?: boolean; rework?: boolean;
@@ -53,7 +55,7 @@ export interface MdfReconciliationLine {
 export interface MdfReconciliationSource {
   kind: MdfReconciliationKind; id: string; disposition: MdfReconciliationDisposition;
   reason: string | null; warnings: MdfReconciliationWarning[];
-  owners: number[]; lines: MdfReconciliationLine[]; createdAt: string | null;
+  owners: number[]; lines: MdfReconciliationLine[]; createdAt: string | null; displayName: string | null;
   manualColumn: string | null; legacyColumn: string | null;
   /** Quantity asserted only by an unverified manual column (zero credit). */
   unverifiedQuantity: number;
@@ -64,7 +66,8 @@ const CUT_COLUMNS = new Set(['completed', 'completed_laminated']);
 const LAMINATED_COLUMNS = new Set(['baths_laminated', 'completed_baths']);
 
 export function classifyMdfReconciliationSource(input: MdfReconciliationSourceInput): MdfReconciliationSource {
-  const base = { kind: input.kind, id: input.id, createdAt: input.createdAt, manualColumn: input.manualColumn,
+  const base = { kind: input.kind, id: input.id, createdAt: input.createdAt, displayName: input.displayName ?? null,
+    manualColumn: input.manualColumn,
     legacyColumn: input.legacyColumn ?? null, warnings: [] as MdfReconciliationWarning[], owners: [] as number[],
     lines: [] as MdfReconciliationLine[], unverifiedQuantity: 0,
     unresolvedItems: input.items.filter(i => !i.resolved).map(i => ({ line: i.line, orderId: i.orderId, detailId: i.detailId,

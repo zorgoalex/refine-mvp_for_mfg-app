@@ -18,7 +18,7 @@ import { loadMdfShadowSource } from './mdf-shadow-source';
 export interface MdfReconciliationReference { kind: MdfReconciliationKind; id: string; origin: string }
 export interface MdfReconciliationOrder { id: number; name: string; status: string | null; deleted: boolean; kind: string;
   /** Order status at or after «Готов к выдаче» by the status catalogue order (includes «Выдан», «Завершен»). */
-  readyOrLater: boolean }
+  readyOrLater: boolean; createdAt: string | null }
 export interface MdfReconciliationDemandRow { orderId: number; detailId: number; quantity: number; rank: number | null }
 export interface MdfReconciliationInventory {
   inputs: MdfReconciliationSourceInput[];
@@ -40,7 +40,7 @@ const NON_SOURCE_ENTITIES = ['cnc_manual_svg_upload_file', 'cnc_manual_svg_teleg
 type ItemRow = { kind: MdfReconciliationKind; id: string; line: string | null; order_id: string | null; detail_id: string | null;
   quantity: string | null; relevant: boolean; state: MdfReconciliationItem['ownerState'] };
 type HeaderRow = { kind: MdfReconciliationKind; id: string; created_at: string; completed: boolean; returned: boolean;
-  rework: boolean; source_mdf: boolean };
+  rework: boolean; source_mdf: boolean; name: string | null };
 
 export async function loadMdfReconciliationInventory(db: DatabaseClient): Promise<MdfReconciliationInventory> {
   const refs = (await db.query<MdfReconciliationReference>(`
@@ -69,11 +69,12 @@ export async function loadMdfReconciliationInventory(db: DatabaseClient): Promis
     SELECT 'packet' kind,p.packet_id::text id,COALESCE(p.source_created_at,p.created_at)::text created_at,
       (p.completion_status='completed' OR COALESCE(p.thumbs_up,false)) completed,COALESCE(p.mdf_completion_returned,false) returned,
       COALESCE(p.rework,false) rework,
-      (${cncPacketCountsForMdfReadinessSql('p')} AND COALESCE(p.mdf_board_card_kind,'machine_file')='machine_file') source_mdf
+      (${cncPacketCountsForMdfReadinessSql('p')} AND COALESCE(p.mdf_board_card_kind,'machine_file')='machine_file') source_mdf,
+      COALESCE(p.program_name,p.external_packet_key) name
     FROM cnc_telegram_packets p
-    UNION ALL SELECT 'bazisCutSet',s.bazis_cut_set_id::text,s.created_at::text,false,false,false,true FROM bazis_cut_sets s
+    UNION ALL SELECT 'bazisCutSet',s.bazis_cut_set_id::text,s.created_at::text,false,false,false,true,s.name FROM bazis_cut_sets s
     UNION ALL SELECT 'bath','cut-result:'||r.cut_result_id,r.created_at::text,false,false,false,
-      COALESCE(b.is_vacuum,false) FROM cut_result r
+      COALESCE(b.is_vacuum,false),b.cut_job_name FROM cut_result r
       LEFT JOIN cut_result_board_projection b ON b.cut_result_id=r.cut_result_id AND b.snapshot_digest=r.snapshot_digest`))
     .rows.map(h => [`${h.kind}:${h.id}`, h]));
 
@@ -137,7 +138,7 @@ export async function loadMdfReconciliationInventory(db: DatabaseClient): Promis
         kind: ref.kind, id: ref.id, exists: header !== undefined,
         // Packet scope is file-level (material marker); BASIS/bath scope needs at least one MDF row.
         mdf: header !== undefined && header.source_mdf && (ref.kind === 'packet' || relevant.length > 0),
-        createdAt: header?.created_at ?? null,
+        createdAt: header?.created_at ?? null, displayName: header?.name?.trim() ? header.name.trim().slice(0, 2000) : null,
         items: relevant.map(i => ({ line: i.line!, orderId: i.order_id === null ? null : Number(i.order_id),
           detailId: i.detail_id === null ? null : Number(i.detail_id), quantity: Number(i.quantity ?? 0),
           resolved: i.state === 'live', ownerState: i.state })),
@@ -173,7 +174,7 @@ export async function loadMdfReconciliationInventory(db: DatabaseClient): Promis
   }
   const orderIds = [...new Set([...ownerIds, ...inputs.flatMap(i => i.items.flatMap(x => x.orderId === null ? [] : [x.orderId]))])];
   const orders = new Map((await db.query<MdfReconciliationOrder>(`SELECT o.order_id::integer id,o.order_name name,
-    s.order_status_name status,o.delete_flag deleted,o.order_kind kind,
+    s.order_status_name status,o.delete_flag deleted,o.order_kind kind,o.created_at::text "createdAt",
     COALESCE(s.sort_order >= (SELECT MIN(sort_order) FROM order_statuses
       WHERE lower(trim(order_status_name))='готов к выдаче'),false) "readyOrLater"
     FROM orders o LEFT JOIN order_statuses s ON s.order_status_id=o.order_status_id WHERE o.order_id=ANY($1::bigint[])`,

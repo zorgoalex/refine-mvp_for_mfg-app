@@ -22,7 +22,10 @@ export function mdfDemandDigest(rows: readonly MdfPositionQuantity[]): string {
     .map(d => [d.orderId,d.detailId,d.quantity]))).digest('hex');
 }
 
-export function snapshotMdfExecutionContext(input: MdfExecutionContext): MdfExecutionContext {
+/** `allowEmptyComplete`: only an order-level source may freeze an EMPTY complete demand (§5.7b terminal: the order has
+ * no MDF demand any more — deleted order, last MDF detail removed); card sources never may. */
+export function snapshotMdfExecutionContext(input: MdfExecutionContext,
+  options: { allowEmptyComplete?: boolean } = {}): MdfExecutionContext {
   const invalid = (): never => { throw new Error('MDF_EXECUTION_CONTEXT_INVALID'); };
   if (!input || typeof input.sourceCreatedAt !== 'string' || !Number.isFinite(Date.parse(input.sourceCreatedAt))
     || typeof input.displayName !== 'string' || !input.displayName.trim() || input.displayName.length > 2000
@@ -33,7 +36,8 @@ export function snapshotMdfExecutionContext(input: MdfExecutionContext): MdfExec
       && !['parsed', 'completed', 'completed_laminated', 'baths', 'baths_ready', 'baths_laminated', 'completed_baths']
         .includes(input.manualPlacementColumn))
     || (input.effectPolicy !== undefined && input.effectPolicy !== 'forward' && input.effectPolicy !== 'publish_only')
-    || !Array.isArray(input.demand) || (!input.demand.length && input.compositionComplete) || input.demand.length > 5000) invalid();
+    || !Array.isArray(input.demand) || (!input.demand.length && input.compositionComplete && !options.allowEmptyComplete)
+    || input.demand.length > 5000) invalid();
   const ids = new Set<number>(), orders = new Set<number>();
   const demand = input.demand.map(row => {
     try { mdfPositionKey(row); mdfQuantity(row.quantity); } catch { return invalid(); }

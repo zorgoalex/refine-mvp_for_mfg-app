@@ -25,13 +25,16 @@ export class MdfActiveProductionReturnService {
   }
 
   /** §5.5 authoritative engine mode for the board's return dialog (legacy dialog only in legacy/shadow). Read-only:
-   * the shared cutover lock orders it against a mode switch; nothing is written. */
+   * the shared cutover lock (try, fail fast) orders it against a mode switch; nothing is written. */
   async engineMode(currentUser: CurrentUser): Promise<MdfEngineModeDto> {
     if (!currentUser.permissions.includes('orders.view')) {
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав');
     }
     return this.database.transaction(async tx => {
-      await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended('mdf-engine-cutover',0))");
+      // §5.7b: never wait behind a cutover / baseline population; the dialog retries later.
+      const locked = (await tx.query<{ locked: boolean }>(
+        "SELECT pg_try_advisory_xact_lock_shared(hashtextextended('mdf-engine-cutover',0)) AS locked")).rows[0]?.locked;
+      if (locked !== true) throw new ApiError(409, 'MDF_CUTOVER_IN_PROGRESS', 'Идёт переключение производственного учёта, повторите позже');
       const rows = (await tx.query<{ mode: string }>('SELECT mode FROM mdf_engine_state WHERE singleton=true')).rows;
       const mode = rows[0]?.mode;
       if (rows.length !== 1 || !['legacy', 'shadow', 'active', 'read_only'].includes(mode ?? '')) {

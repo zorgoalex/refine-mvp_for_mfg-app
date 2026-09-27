@@ -3,12 +3,13 @@ import { auditService } from '../../../common/audit/audit.service';
 import { MdfNeedsAttention, type MdfJob, type MdfSourceKind } from '../application/mdf-job-runner';
 import type { MdfEvidenceAllocation, MdfEvidenceReservation } from '../domain/mdf-evidence-allocation';
 import { planMdfQuarantinedAllocations } from '../domain/mdf-allocation-quarantine';
-import type { MdfPositionQuantity } from '../domain/mdf-quantities';
+import { mdfPositionKey, type MdfPositionQuantity } from '../domain/mdf-quantities';
 import { mdfLineageRevisionKey } from '../domain/mdf-physical-lineage';
 import { loadMdfExecutionSnapshot, mdfSourceKey } from './mdf-execution-snapshot';
 import { advanceCompatibleMdfRevision } from './mdf-compatible-advance';
 import { advanceMdfBathTransition, loadMdfBathTransitionForJob } from './mdf-bath-transition';
 import { isMdfLineDetached, loadMdfDetachedPositions } from './mdf-position-detachments';
+import { loadMdfClosedOrders } from './mdf-closed-orders';
 import { loadMdfBazisCompositionJobIntent, mdfBazisCompositionOwnerScope,
   lockMdfBazisCompositionDetails } from './mdf-bazis-composition-job';
 import { advanceMdfBazisCompositionRevision,
@@ -26,7 +27,7 @@ function attention(code: string): never { throw new MdfNeedsAttention(`MDF_ALLOC
 const result = (status: 'disabled' | 'superseded' | 'allocated') => ({ status, reservedCount: 0, consumedCount: 0,
   readyBathIds: [] as string[], blockers: [] as ReturnType<typeof planMdfQuarantinedAllocations>['blockers'],
   quarantine: [] as ReturnType<typeof planMdfQuarantinedAllocations>['quarantine'], blockedPositionKeys: [] as string[],
-  orderIds: [] as number[], sourceHeads: [] as Head[], sourceLines: [] as Line[],
+  orderIds: [] as number[], closedOrderIds: [] as number[], sourceHeads: [] as Head[], sourceLines: [] as Line[],
   executionSnapshot: null as Awaited<ReturnType<typeof loadMdfExecutionSnapshot>> | null,
   compositionAcceptance: null as MdfBazisCompositionAcceptance | null });
 
@@ -44,8 +45,17 @@ const edges = (withContext: boolean) => `edges AS (
     AND (d.revision_key=h.accepted_revision_key OR d.revision_key=h.received_revision_key)` : ''}
 )`;
 
+/** §5.7b: discovery never expands THROUGH a closed order (`loadMdfClosedOrders`); a closed order's own `order:X`
+ * closure head is added by key so its declarations are validated and shown, without growing the component. */
 async function discover(tx: DatabaseClient, source: Source,allowEmptyScope = false,seeds: readonly Source[] = []) {
   const sources = new Map<string, Source>([[key(source), source],...seeds.map(s => [key(s), s] as const)]), orders = new Set<number>();
+  // §5.7b: an order-level source always owns its order — even with no evidence/demand edges (terminal empty demand) —
+  // so the order is locked and its current sources are discovered before its aggregates are replaced.
+  if (source.kind === 'order' || source.kind === 'orderDetail') {
+    const id = Number(source.kind === 'order' ? source.id : source.id.split(':')[0]);
+    if (Number.isSafeInteger(id) && id > 0) orders.add(id);
+  }
+  let closed = new Set<number>();
   for (let round = 0; round <= MAX_ORDERS; round++) {
     const previous = `${sources.size}:${orders.size}`, values = [...sources.values()];
     const owners = (await tx.query<{ id: string }>(`WITH ${edges(allowEmptyScope)}
@@ -57,13 +67,17 @@ async function discover(tx: DatabaseClient, source: Source,allowEmptyScope = fal
       orders.add(id);
     }
     if (orders.size > MAX_ORDERS) attention('SCOPE_LIMIT');
+    closed = await loadMdfClosedOrders(tx, [...orders]);
+    const open = [...orders].filter(id => !closed.has(id));
     const linked = (await tx.query<Source>(`WITH ${edges(allowEmptyScope)}
-      SELECT DISTINCT kind,id FROM edges WHERE order_id=ANY($1::bigint[]) LIMIT $2`, [[...orders], MAX_SOURCES + 1])).rows;
+      SELECT DISTINCT kind,id FROM edges WHERE order_id=ANY($1::bigint[]) LIMIT $2`, [open, MAX_SOURCES + 1])).rows;
     for (const s of linked) sources.set(key(s), s);
+    for (const id of closed) sources.set(key({ kind: 'order', id: String(id) }), { kind: 'order', id: String(id) });
     if (sources.size > MAX_SOURCES) attention('SCOPE_LIMIT');
     if (previous === `${sources.size}:${orders.size}`) {
       if (!orders.size && !allowEmptyScope) attention('EMPTY_SCOPE');
-      return { orders: [...orders].sort((a,b) => a-b), sources: [...sources.values()].sort((a,b) => key(a) < key(b) ? -1 : 1) };
+      return { orders: [...orders].sort((a,b) => a-b), closedOrders: [...closed].sort((a,b) => a-b),
+        sources: [...sources.values()].sort((a,b) => key(a) < key(b) ? -1 : 1) };
     }
   }
   return attention('SCOPE_LIMIT');
@@ -248,7 +262,23 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
   let plan: ReturnType<typeof planMdfQuarantinedAllocations>;
   // A retired bath (terminal empty revision) takes no part in allocation.
   const liveHeads = heads.filter(h => !executionSnapshot?.retired.has(mdfSourceKey(h)));
-  try { plan = planMdfQuarantinedAllocations({ sources: liveHeads.map(h => ({ ...h,
+  // §5.7b: positions of a closed order are covered by its closure and never planned (not supply, not bath demand).
+  // They are passed as positions detached for PLANNING (the planner's own mechanism): the full sealed lines stay for
+  // lineage/contract validation, only supply and bath membership ignore them. Projection is unaffected.
+  const closedOrders = new Set(scope.closedOrders);
+  const plannedLines = (h: Head) => (bySource.get(key(h)) ?? [])
+    .filter(l => h.kind === 'order' || h.kind === 'orderDetail' || !closedOrders.has(l.orderId));
+  // A card whose every position belongs to a closed order takes no part in planning at all (passing it with an empty
+  // membership would quarantine it as MEMBERSHIP_MISSING); it still publishes, placed from ranks/manual.
+  const planningDetached = (h: Head): ReadonlySet<string> | undefined => {
+    const own = detached.get(key(h));
+    if (h.kind === 'order' || h.kind === 'orderDetail' || !closedOrders.size) return own;
+    const closedKeys = (bySource.get(key(h)) ?? []).filter(l => closedOrders.has(l.orderId)).map(l => mdfPositionKey(l));
+    return closedKeys.length ? new Set([...(own ?? []), ...closedKeys]) : own;
+  };
+  const fullyClosed = (h: Head) => h.kind !== 'order' && h.kind !== 'orderDetail' && closedOrders.size > 0
+    && (bySource.get(key(h)) ?? []).length > 0 && plannedLines(h).length === 0;
+  try { plan = planMdfQuarantinedAllocations({ sources: liveHeads.filter(h => !fullyClosed(h)).map(h => ({ ...h,
     // Invalid context quarantines THIS source. It never blesses legacy shadow
     // quantities, nor freezes independent same-order sources wholesale.
     accepted: executionSnapshot?.issues.get(mdfSourceKey(h))?.length ? null : h.accepted,
@@ -261,15 +291,16 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
     assignmentState: executionSnapshot && h.accepted && h.accepted===h.received
       ? executionSnapshot.assignmentStates.get(mdfLineageRevisionKey(h,h.accepted)) : undefined,
     uncertainOrderIds: executionSnapshot ? [...new Set(executionSnapshot.frozenDemand.get(mdfSourceKey(h))?.map(d => d.orderId))] : undefined,
-    detachedPositionKeys: detached.get(key(h)),
+    detachedPositionKeys: planningDetached(h),
     lines: bySource.get(key(h)) ?? [], createdAt: executionSnapshot
       ? executionSnapshot.metadata.get(mdfSourceKey(h))?.sourceCreatedAt : dates.find(d => d.id === h.id)?.createdAt })),
   // A consumed debit whose supplier line AND bath membership are both detached is history only.
   allocations: allocations.filter(a => {
+    if (closedOrders.has(a.orderId)) return false;
     if (a.state !== 'consumed') return true;
     const d = detachedDebit(a);
     return !(d.supplierDetached && d.bathDetached);
-  }), orderIds: scope.orders }); }
+  }), orderIds: scope.orders.filter(id => !closedOrders.has(id)) }); }
   catch { return attention('INVALID_BALANCE'); }
   let inserted: (MdfEvidenceReservation & { allocationId: string })[] = [];
   if (plan.reservations.length) {
@@ -290,7 +321,8 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
   return { ...result('allocated'), readyBathIds: plan.readyBathIds, blockers: plan.blockers,
     quarantine: plan.quarantine, blockedPositionKeys: plan.blockedPositionKeys,
     reservedCount: inserted.length, consumedCount: toConsume.length,
-    orderIds: scope.orders, sourceHeads: heads, sourceLines: lines, executionSnapshot, compositionAcceptance };
+    orderIds: scope.orders, closedOrderIds: scope.closedOrders, sourceHeads: heads, sourceLines: lines, executionSnapshot,
+    compositionAcceptance };
 }
 
 async function auditChanges(tx: DatabaseClient, job: MdfJob, state: 'reserved' | 'consumed' | 'released',

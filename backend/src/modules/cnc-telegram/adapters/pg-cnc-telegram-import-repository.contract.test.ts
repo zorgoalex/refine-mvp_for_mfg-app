@@ -253,6 +253,8 @@ describe('explicit Telegram import backend contracts', () => {
     const queries: string[] = [];
     const tx = { query: vi.fn(async (sql: string) => {
       queries.push(sql);
+      if (sql.includes('pg_try_advisory_xact_lock_shared')) return { rows: [{ locked: true }], rowCount: 1 };
+      if (sql.includes('FROM mdf_freeze_guard')) return { rows: [{ freeze_run_id: null }], rowCount: 1 };
       if (sql.includes('FROM mdf_engine_state')) return {rows:[{mode:'legacy',revision:0}],rowCount:1};
       if (sql.includes('FROM cnc_telegram_worker_session_leases')) return { rows: [{ lease_token: 's' }], rowCount: 1 };
       if (sql.includes('FROM cnc_telegram_import_items i JOIN cnc_telegram_import_requests')) return { rows: [candidate], rowCount: 1 };

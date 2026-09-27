@@ -2,6 +2,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { QueryResultRow } from 'pg';
 import { loadMdfEffectivePlacement } from './mdf-effective-placement';
 import { loadMdfDetachedPositions } from './mdf-position-detachments';
+import { loadMdfClosedOrders } from './mdf-closed-orders';
 import type { TransactionClient } from '../../../database/database.types';
 import { MdfNeedsAttention, type MdfSourceKind } from '../application/mdf-job-runner';
 import type { MdfCorrectionAllocation, MdfCorrectionSource, MdfCorrectionSourceLine } from '../domain/mdf-correction-plan';
@@ -78,8 +79,18 @@ const graphEdges = `edges AS (
     AND (d.revision_key=h.accepted_revision_key OR d.revision_key=h.received_revision_key)
 )`;
 
-/** Same bounded connected source/order graph as the allocation worker. */
-export async function discoverMdfCorrectionClosure(tx: TransactionClient, target: MdfCorrectionSourceRef) {
+/** §5.7b: owners of the target card itself (its own graph edges), for the explicit reopen of closed orders. */
+export async function mdfCorrectionTargetOwners(tx: TransactionClient, target: MdfCorrectionSourceRef): Promise<number[]> {
+  return (await tx.query<{ id: string }>(`WITH ${graphEdges}
+    SELECT DISTINCT order_id::text id FROM edges WHERE kind=$1 AND id=$2 ORDER BY 1 LIMIT $3`,
+  [target.kind,target.id,MAX_MDF_CORRECTION_ORDERS + 1])).rows.map(r => Number(r.id)).sort((a,b) => a-b);
+}
+
+/** Same bounded connected source/order graph as the allocation worker, including its §5.7b closed-order boundary:
+ * never expand through a closed order, except the orders this command reopens (`reopen`: the post-reopen closure). */
+export async function discoverMdfCorrectionClosure(tx: TransactionClient, target: MdfCorrectionSourceRef,
+  options: { reopen?: readonly number[] } = {}) {
+  const reopen = new Set(options.reopen ?? []);
   const sources = new Map<string, { kind: MdfSourceKind; id: string }>([[key(target), target]]);
   const orders = new Set<number>();
   for (let round = 0; round <= MAX_MDF_CORRECTION_ORDERS; round++) {
@@ -94,8 +105,10 @@ export async function discoverMdfCorrectionClosure(tx: TransactionClient, target
       orders.add(id);
     }
     if (orders.size > MAX_MDF_CORRECTION_ORDERS) throw new MdfNeedsAttention('MDF_CORRECTION_SCOPE_LIMIT');
+    const closed = await loadMdfClosedOrders(tx,[...orders].filter(id => !reopen.has(id)));
     const linked = (await tx.query<{ kind: MdfSourceKind; id: string }>(`WITH ${graphEdges}
-      SELECT DISTINCT kind,id FROM edges WHERE order_id=ANY($1::bigint[]) LIMIT $2`,[[...orders],MAX_MDF_CORRECTION_SOURCES + 1])).rows;
+      SELECT DISTINCT kind,id FROM edges WHERE order_id=ANY($1::bigint[]) AND kind<>'order' LIMIT $2`,
+    [[...orders].filter(id => !closed.has(id)),MAX_MDF_CORRECTION_SOURCES + 1])).rows;
     for (const row of linked) sources.set(key(row),row);
     if (sources.size > MAX_MDF_CORRECTION_SOURCES) throw new MdfNeedsAttention('MDF_CORRECTION_SCOPE_LIMIT');
     if (previous === `${sources.size}:${orders.size}`) {

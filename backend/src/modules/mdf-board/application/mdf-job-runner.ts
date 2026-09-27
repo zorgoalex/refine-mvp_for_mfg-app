@@ -41,7 +41,10 @@ export class MdfJobRunner<Client extends DatabaseClient = DatabaseClient> {
     return this.database.transaction(async tx => {
       // Cutover must take the exclusive form of this same lock before changing
       // mode. It waits for old in-flight handlers; unrelated jobs run concurrently.
-      await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended('mdf-engine-cutover',0))");
+      // §5.7b: never wait for a population run holding it — report disabled and retry on the next tick.
+      const locked = (await tx.query<{ locked: boolean }>(
+        "SELECT pg_try_advisory_xact_lock_shared(hashtextextended('mdf-engine-cutover',0)) AS locked")).rows[0]?.locked;
+      if (locked !== true) return { status: 'disabled' };
       const state = await tx.query<{ mode: string }>('SELECT mode FROM mdf_engine_state WHERE singleton=true');
       if (state.rows[0]?.mode !== 'active') return { status: 'disabled' };
       const selected = await tx.query<MdfJob>(`SELECT job_id,event_key,source_kind,source_id,revision_key,

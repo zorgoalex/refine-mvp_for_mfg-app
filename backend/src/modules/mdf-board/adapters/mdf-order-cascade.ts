@@ -14,6 +14,7 @@ import { loadMdfExecutionDetails, loadMdfExecutionSnapshot, mdfSourceKey,
   type MdfExecutionHead } from './mdf-execution-snapshot';
 import { mdfAllowedOrdersSql } from './mdf-published-snapshot';
 import { MdfNeedsAttention } from '../application/mdf-job-runner';
+import { loadMdfStaleClosures, reopenMdfClosure } from './mdf-closed-orders';
 import { CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE as MDF, CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE as OTHER } from '../../../shared/cnc-material';
 
 /**
@@ -161,8 +162,25 @@ async function runCascade(tx: TransactionClient, input: { user: CurrentUser; req
   const afterDemand = await loadOrderMdfDemand(tx, touched);
   if (mdfDemandDigest(demandOf(input.before.demand, touchedSet))
     === mdfDemandDigest(demandOf(afterDemand, touchedSet))) return;
+  // §5.7b: a demand change on an order closed by historical status reopens it here (successor order:X keeping the
+  // closure's historical coverage for positions still in demand) — also when the order has no card sources at all.
+  const staleClosures = await loadMdfStaleClosures(tx, touched);
+  const closureSources = staleClosures.map(id => ({ kind: 'order', id: String(id) }));
+  const reopenClosures = async () => {
+    if (!staleClosures.length) return;
+    if (input.readOnly) throw new ApiError(409, 'MDF_ENGINE_READ_ONLY', 'Производственный учёт временно доступен только для чтения');
+    const actorUserId = Number(input.user.id);
+    for (const orderId of staleClosures) await reopenMdfClosure(tx, { orderId, carry: true, actorUserId,
+      requestId: input.requestId, causeKey: `mdf-closure-reopen:${randomUUID()}`, reason: 'demand_changed' });
+  };
   const discovered = await discoverSources(tx, touched);
-  if (!discovered.length) return;
+  if (!discovered.length) {
+    for (const s of closureSources) {
+      await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`mdf-source:${JSON.stringify([s.kind, s.id])}`]);
+    }
+    await reopenClosures();
+    return;
+  }
   // Lock protocol (cutover fence → name/project → orders ascending → sources): the command already
   // holds its own order rows. Missing owners above them are awaited in order; owners below them
   // would invert the order, so they are only tried (NOWAIT) and contention answers a retryable 409.
@@ -179,7 +197,9 @@ async function runCascade(tx: TransactionClient, input: { user: CurrentUser; req
     if ((error as { code?: string }).code === '55P03') contention();
     throw error;
   }
-  for (const s of discovered) {
+  // Global source lock order (sorted kind,id), including reopened closure sources.
+  for (const s of [...discovered, ...closureSources].sort((a, b) => a.kind < b.kind ? -1 : a.kind > b.kind ? 1
+    : a.id < b.id ? -1 : a.id > b.id ? 1 : 0)) {
     await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`mdf-source:${JSON.stringify([s.kind, s.id])}`]);
   }
   const heads = (await tx.query<HeadRow>(`SELECT h.source_kind kind,h.source_id id,h.received_revision_key received,
@@ -328,6 +348,7 @@ async function runCascade(tx: TransactionClient, input: { user: CurrentUser; req
   if (input.readOnly && (cascades.length || refreshes.length || corrections.length)) {
     throw new ApiError(409, 'MDF_ENGINE_READ_ONLY', 'Производственный учёт временно доступен только для чтения');
   }
+  await reopenClosures();
   for (const c of cascades) {
     await appendReceipt(tx, snapshot, input, c.head, c.own, { frozen: c.frozen, next: c.next });
   }

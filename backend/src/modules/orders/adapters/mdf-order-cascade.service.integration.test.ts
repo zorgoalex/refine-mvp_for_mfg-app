@@ -71,7 +71,7 @@ describe.skipIf(!enabled)('MDF order cascade through real order services (stage 
     await client.query('BEGIN');
     await client.query("SET LOCAL lock_timeout='3s'");
     // Migrations run INSIDE the rolled-back outer transaction (their own BEGIN/COMMIT stripped).
-    for (const file of ['188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql']) {
+    for (const file of ['188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql', '195_mdf_baseline_population.sql']) {
       await client.query(readFileSync(new URL(`../../../../db/migrations/${file}`, import.meta.url), 'utf8')
         .replace(/^BEGIN;$/m, '').replace(/^COMMIT;$/m, ''));
     }

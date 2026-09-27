@@ -6,13 +6,16 @@ import { DatabaseService } from './database.service';
 import { beforeTransactionCommit } from './transaction-hooks';
 import { requireMdfCommandBoundary } from '../modules/mdf-board/application/mdf-command-boundary';
 
-const state = vi.hoisted(() => ({ mode: 'legacy', calls: [] as string[], release: vi.fn() }));
+const state = vi.hoisted(() => ({ mode: 'legacy', locked: true, freezeRunId: null as string | null,
+  calls: [] as string[], release: vi.fn() }));
 vi.mock('pg', () => ({ Pool: class {
   async connect() { return {
     query: async (sql: string) => {
       state.calls.push(sql);
-      return { rows: sql.includes('SELECT mode FROM mdf_engine_state') ? [{ mode: state.mode }] : [],
-        rowCount: 0, fields: [], command: 'SELECT', oid: 0 };
+      const rows = sql.includes('pg_try_advisory_xact_lock_shared') ? [{ locked: state.locked }]
+        : sql.includes('SELECT mode FROM mdf_engine_state') ? [{ mode: state.mode }]
+        : sql.includes('FROM mdf_freeze_guard') ? [{ freeze_run_id: state.freezeRunId }] : [];
+      return { rows, rowCount: 0, fields: [], command: 'SELECT', oid: 0 };
     }, release: state.release,
   }; }
   async end() {}
@@ -26,7 +29,8 @@ function database() {
 const queued = { writer: 'manual-move', capability: 'queued' as const };
 
 describe('DatabaseService MDF command entry', () => {
-  beforeEach(() => { state.mode = 'legacy'; state.calls = []; state.release.mockClear(); });
+  beforeEach(() => { state.mode = 'legacy'; state.locked = true; state.freezeRunId = null;
+    state.calls = []; state.release.mockClear(); });
   it('enters before handler locks and flushes normal transaction hooks', async () => {
     const db = database();
     await db.transaction(async tx => {
@@ -36,9 +40,11 @@ describe('DatabaseService MDF command entry', () => {
     }, { mdf: queued });
     expect(state.calls[0]).toBe('BEGIN');
     expect(state.calls[1]).toBe('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
-    expect(state.calls[2]).toContain('pg_advisory_xact_lock_shared');
+    expect(state.calls[2]).toContain('pg_try_advisory_xact_lock_shared');
     expect(state.calls[3]).toContain('SELECT mode FROM mdf_engine_state');
-    expect(state.calls.slice(4)).toEqual(['SELECT e2e_domain_lock', 'SELECT e2e_finalizer', 'COMMIT']);
+    expect(state.calls[4]).toContain('FROM mdf_freeze_guard');
+    expect(state.calls[5]).toContain("set_config('mdf.command_writer'");
+    expect(state.calls.slice(6)).toEqual(['SELECT e2e_domain_lock', 'SELECT e2e_finalizer', 'COMMIT']);
     expect(state.release).toHaveBeenCalledOnce();
   });
   it.each(['serializable', 'repeatable read'] as const)('rejects stale-snapshot isolation %s before MDF effects', async isolation => {

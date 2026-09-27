@@ -40,6 +40,9 @@ export interface MdfCorrectionInput {
   sources: readonly MdfCorrectionSource[];
   allocations: readonly MdfCorrectionAllocation[];
   details: readonly { orderId: number; detailId: number; quantity: number; currentRank: number | null }[];
+  /** §5.7b positions of orders closed by historical status (or reopened by this return): covered by the closure,
+   * never allocated, so their lamination is revoked without an allocation-consistency check. */
+  closedPositionKeys?: ReadonlySet<string>;
 }
 export type MdfCorrectionLineRef =
   | { kind: 'existing'; evidenceLineId: string }
@@ -194,8 +197,9 @@ export function planMdfCorrection(input: MdfCorrectionInput): MdfCorrectionPlan 
       if (input.target.kind==='bath') {
         const p={source:target!,cancelByPosition:new Map<string,number>(),rows:activeAllocations.filter(a=>a.bathId===target!.id)};
         for (const l of targetProof) {
-          if (l.evidence==='declaration'||l.rework) add('DEPENDENT_BATH_ATTRIBUTION_UNRESOLVED',{sourceId:target!.id});
           const key=mdfPositionKey(l);
+          if (input.closedPositionKeys?.has(key)) continue;
+          if (l.evidence==='declaration'||l.rework) add('DEPENDENT_BATH_ATTRIBUTION_UNRESOLVED',{sourceId:target!.id});
           p.cancelByPosition.set(key,mdfSum(p.cancelByPosition.get(key)??0,l.quantity));
         }
         bathPlans.set(target!.id,p);

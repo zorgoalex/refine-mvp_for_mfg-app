@@ -75,7 +75,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
     vi.stubEnv('BACKEND_STATUS_AUTOMATION','true'); vi.stubEnv('BACKEND_ENABLE_NOTIFICATION_ENGINE','false');
     vi.stubEnv('BACKEND_MDF_SHADOW_INTAKE','true'); vi.stubEnv('BACKEND_MDF_PINNED_DISPATCH','true');
     await db.connect(); await db.query(`CREATE SCHEMA ${schema}; SET search_path=${schema},public`);
-    for (const file of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql','174_mdf_execution_context.sql','175_mdf_command_placement.sql','178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql']) {
+    for (const file of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql','174_mdf_execution_context.sql','175_mdf_command_placement.sql','178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql', '195_mdf_baseline_population.sql']) {
       await db.query(readFileSync(new URL(`../../../../db/migrations/${file}`,import.meta.url),'utf8'));
     }
     // Structural clones only. Every sequence/default is local; tests cannot
@@ -868,18 +868,21 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
       .rejects.toMatchObject({code:'MDF_COMMAND_BOUNDARY_REQUIRED'});
     expect(await counts()).toEqual(before);
   });
-  it('SVG cutover fence waits then observes the new mode before any business write',async()=>{
+  it('SVG cutover fence fails fast while held, then observes the new mode on retry, without any business write',async()=>{
+    // §5.7b: the fence never waits — while another session holds the exclusive
+    // form it fails immediately with MDF_CUTOVER_IN_PROGRESS and applies nothing.
     const f=await svgFixture(),before=await counts();
-    let entered!:()=>void;const waiting=new Promise<void>(resolve=>{entered=resolve;});
-    onQuery=sql=>{if(sql.includes("pg_advisory_xact_lock_shared(hashtextextended('mdf-engine-cutover'")) entered();};
     await db.query("BEGIN; SELECT pg_advisory_xact_lock(hashtextextended('mdf-engine-cutover',0))");
-    const upload=new PgCncTelegramRepository(database).manualSvgUpload(f.command).then(()=>null,error=>error);
     try {
-      await waiting;expect(await counts()).toEqual(before);
-      await db.query("UPDATE mdf_engine_state SET mode='read_only'; COMMIT");
-      expect(await upload).toMatchObject({code:'MDF_ENGINE_READ_ONLY'});
+      await expect(new PgCncTelegramRepository(database).manualSvgUpload(f.command))
+        .rejects.toMatchObject({code:'MDF_CUTOVER_IN_PROGRESS'});
       expect(await counts()).toEqual(before);
-    } finally { onQuery=undefined;await db.query("ROLLBACK; UPDATE mdf_engine_state SET mode='active'");await upload; }
+      await db.query("UPDATE mdf_engine_state SET mode='read_only'; COMMIT");
+      // After release, a retry gets past the fence and observes the newly committed mode.
+      await expect(new PgCncTelegramRepository(database).manualSvgUpload(f.command))
+        .rejects.toMatchObject({code:'MDF_ENGINE_READ_ONLY'});
+      expect(await counts()).toEqual(before);
+    } finally { await db.query("ROLLBACK; UPDATE mdf_engine_state SET mode='active'"); }
   });
   it('SVG selected mixed owners require access to each owner before creation',async()=>{
     const a=await svgFixture(),b=await svgFixture();a.command.dto.selectedOrderIds.push(b.orderId);

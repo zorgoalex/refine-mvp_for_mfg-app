@@ -104,13 +104,17 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
     if (!Number.isSafeInteger(id) || id <= 0) throw new MdfNeedsAttention('MDF_JOB_EFFECT_FENCE_INVALID');
     return id;
   }));
-  let ruleEvents = composition ? [] : resolved.events.filter(event => !suppressedOrderIds.has(event.orderId));
+  // §5.7b: a closed order (historical status closure) never receives rule effects; its status stays as it is.
+  const closedOrderIds = new Set(allocation.closedOrderIds);
+  const openOrderIds = allocation.orderIds.filter(id => !closedOrderIds.has(id));
+  let ruleEvents = composition ? [] : resolved.events.filter(event => !suppressedOrderIds.has(event.orderId)
+    && !closedOrderIds.has(event.orderId));
   let changedCompositionOrderIds: number[] = [];
   if (!composition && cncAuthority) {
     const verifiedSourceKeys = new Set(resolved.cards.filter(card => card.verified)
       .map(card => mdfSourceKey({ kind: card.kind, id: card.id })));
     const cncEffects = await applyMdfCncAuthorityEffects(tx, { job, authority: cncAuthority,
-      heads: allocation.sourceHeads, sources, details: snapshot.details, orderIds: allocation.orderIds, verifiedSourceKeys,
+      heads: allocation.sourceHeads, sources, details: snapshot.details, orderIds: openOrderIds, verifiedSourceKeys,
       suppressedOrderIds, enabled: cncAutoCutEnabled });
     const completed = new Set(cncEffects.completedOrderIds);
     // Completed business headers are protected from every ordinary event for
@@ -148,7 +152,12 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
         'MDF_ACTOR_UNAVAILABLE'])].sort());
     }
   }
-  await publishMdfState(tx,{ job, orderIds: allocation.orderIds, sources, metadata: snapshot.metadata, state: final,
+  // Order aggregates: open orders of the scope; a closed order only in its own closure job (never from a partial
+  // source snapshot).
+  // An order-level job always owns its order's aggregates (closure, carried coverage, or terminal empty demand ⇒ removal).
+  const closureTrigger = job.source_kind === 'order' && !openOrderIds.includes(Number(job.source_id)) ? [Number(job.source_id)] : [];
+  await publishMdfState(tx,{ job, orderIds: allocation.orderIds, positionOrderIds: [...openOrderIds, ...closureTrigger],
+    sources, metadata: snapshot.metadata, state: final,
     retired: allocation.sourceHeads.filter(h => snapshot.retired.has(mdfSourceKey(h))) });
   return 'done';
 }

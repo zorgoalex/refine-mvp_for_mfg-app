@@ -18,11 +18,16 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF command/cutover
   let database: DatabaseService;
   const writer = { writer: 'e2e-command', capability: 'queued' as const };
   const fence = "hashtextextended('mdf-engine-cutover',0)";
+  // §5.7b: lets a test pause the SUT transaction right after one of its queries resolves,
+  // by returning a promise from the hook that only settles when the test releases it.
+  let onQuery: ((sql: string) => Promise<void> | void) | undefined;
   beforeAll(async () => {
     await control.connect();
     await control.query(`CREATE SCHEMA ${schema}; SET search_path=${schema},public;
       CREATE TABLE mdf_engine_state(singleton boolean PRIMARY KEY,mode text NOT NULL);
       INSERT INTO mdf_engine_state VALUES(true,'legacy');
+      CREATE TABLE mdf_freeze_guard(singleton boolean PRIMARY KEY,freeze_run_id uuid);
+      INSERT INTO mdf_freeze_guard VALUES(true,NULL);
       CREATE TABLE command_effect(id int PRIMARY KEY)`);
     const url = new URL('postgresql://localhost');
     url.hostname = config.host; url.pathname = `/${config.database}`;
@@ -33,10 +38,16 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF command/cutover
     const values: Partial<BackendEnv> = { DATABASE_URL: url.toString(), DATABASE_QUERY_TIMEOUT_MS: 10000,
       DATABASE_SSL: false, DATABASE_POOL_MIN: 0, DATABASE_POOL_MAX: 1 };
     database = new DatabaseService({ get: (key: keyof BackendEnv) => values[key] } as ConfigService<BackendEnv, true>,
-      { measure: <T>(_sql: string, operation: () => Promise<T>) => operation() } as PerformanceQueryTelemetryService);
+      { measure: async <T>(sql: string, operation: () => Promise<T>) => {
+        const result = await operation();
+        await onQuery?.(sql);
+        return result;
+      } } as PerformanceQueryTelemetryService);
   });
   beforeEach(async () => {
-    await control.query("UPDATE mdf_engine_state SET mode='legacy'; DELETE FROM command_effect");
+    onQuery = undefined;
+    await control.query(`UPDATE mdf_engine_state SET mode='legacy';
+      UPDATE mdf_freeze_guard SET freeze_run_id=NULL; DELETE FROM command_effect`);
   });
   afterAll(async () => {
     await database?.onModuleDestroy();
@@ -46,29 +57,23 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF command/cutover
     } finally { await control.end(); }
   });
 
-  it('waits for cutover then sees committed active mode, despite serializable pool default', async () => {
+  it('fails fast while the cutover fence is held, then sees committed active mode on retry, despite serializable pool default', async () => {
     await control.query('BEGIN');
     await control.query(`SELECT pg_advisory_xact_lock(${fence})`);
     await control.query("UPDATE mdf_engine_state SET mode='active'");
     let entered = false;
-    const command = database.transaction(async tx => {
+    // §5.7b: never wait behind the exclusive fence — fail fast instead.
+    await expect(database.transaction(async tx => {
       entered = true;
+      return requireMdfCommandBoundary(tx, writer);
+    }, { mdf: writer })).rejects.toMatchObject({ code: 'MDF_CUTOVER_IN_PROGRESS' });
+    expect(entered).toBe(false);
+    await control.query('COMMIT');
+    const retry = await database.transaction(async tx => {
       expect((await tx.query('SHOW transaction_isolation')).rows[0].transaction_isolation).toBe('read committed');
       return requireMdfCommandBoundary(tx, writer);
     }, { mdf: writer });
-    // Attach a handler now, including failure paths during lock observation.
-    const outcome = command.then(value => ({ value }), error => ({ error }));
-    try {
-      await vi.waitFor(async () => {
-        await control.query('SELECT pg_stat_clear_snapshot()');
-        const waiting = await control.query(`SELECT 1 FROM pg_stat_activity
-          WHERE application_name=$1 AND wait_event='advisory'`, [name]);
-        expect(waiting.rows).toHaveLength(1);
-      }, { timeout: 2000, interval: 20 });
-      expect(entered).toBe(false);
-      await control.query('COMMIT');
-      expect(await outcome).toEqual({ value: { mode: 'active', queued: true } });
-    } finally { await control.query('ROLLBACK'); await outcome; }
+    expect(retry).toEqual({ mode: 'active', queued: true });
   });
 
   it('keeps the shared cutover lock until command commit and releases after rollback', async () => {
@@ -96,26 +101,31 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF command/cutover
   });
 
   it.each(['active', 'read_only'])('serializable legacy snapshot predating %s cutover fails stale before writes', async mode => {
-    await control.query('BEGIN');
-    await control.query(`SELECT pg_advisory_xact_lock(${fence})`);
-    await control.query('UPDATE mdf_engine_state SET mode=$1', [mode]);
+    // §5.7b: the try-lock no longer blocks, but it is still a real SELECT — the first one
+    // in the transaction — so it still fixes the serializable snapshot. Pause the SUT right
+    // after that SELECT resolves (lock free, snapshot now fixed), commit a cutover mode
+    // change with no lock contention at all, then resume: the FOR SHARE mode read must
+    // still detect the now-stale snapshot and fail closed, exactly as when the old blocking
+    // call used to provide this same window while waiting.
+    let releasePause: (() => void) | undefined;
+    const reached = new Promise<void>(resolveReached => {
+      onQuery = sql => {
+        if (!sql.includes('pg_try_advisory_xact_lock_shared')) return;
+        onQuery = undefined;
+        resolveReached();
+        return new Promise<void>(resolveResume => { releasePause = resolveResume; });
+      };
+    });
     const outcome = database.transaction(async tx => {
-      // Same old MVCC snapshot the advisory-lock SELECT can establish.
-      expect((await tx.query('SELECT mode FROM mdf_engine_state')).rows[0].mode).toBe('legacy');
       await enterMdfSerializableLegacyCommand(tx, 'mdf.production_return');
       await tx.query('INSERT INTO command_effect VALUES(1)');
     }, { isolation: 'serializable' }).then(value => ({ value }), error => ({ error }));
-    try {
-      await vi.waitFor(async () => {
-        await control.query('SELECT pg_stat_clear_snapshot()');
-        expect((await control.query(`SELECT 1 FROM pg_stat_activity
-          WHERE application_name=$1 AND wait_event='advisory'`, [name])).rows).toHaveLength(1);
-      }, { timeout: 2000, interval: 20 });
-      await control.query('COMMIT');
-      expect(await outcome).toMatchObject({ error: { code: '40001' } });
-      expect((await control.query('SELECT * FROM command_effect')).rows).toEqual([]);
-      expect((await control.query(`SELECT pg_try_advisory_xact_lock(${fence}) locked`)).rows[0].locked).toBe(true);
-    } finally { await control.query('ROLLBACK'); await outcome; }
+    await reached;
+    await control.query('UPDATE mdf_engine_state SET mode=$1', [mode]);
+    releasePause?.();
+    expect(await outcome).toMatchObject({ error: { code: '40001' } });
+    expect((await control.query('SELECT * FROM command_effect')).rows).toEqual([]);
+    expect((await control.query(`SELECT pg_try_advisory_xact_lock(${fence}) locked`)).rows[0].locked).toBe(true);
   });
 
   it('serializable legacy entrance holds cutover until commit and releases all locks on rollback', async () => {
@@ -133,23 +143,15 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF command/cutover
     await expect(command(false)).rejects.toMatchObject({ code: 'MDF_WRITER_NOT_CONNECTED' });
   });
 
-  it('queue also sees read_only after a waiting cutover, with a stricter pool default', async () => {
+  it('reports disabled immediately when the exclusive cutover fence is currently held, without reading mode', async () => {
+    // §5.7b: MdfJobRunner never waits behind a population run (or any cutover) holding
+    // the exclusive fence; it reports disabled right away so the caller retries on the next tick.
     await control.query("UPDATE mdf_engine_state SET mode='active'; BEGIN");
     await control.query(`SELECT pg_advisory_xact_lock(${fence})`);
-    await control.query("UPDATE mdf_engine_state SET mode='read_only'");
     const handler = vi.fn();
-    const outcome = new MdfJobRunner(database, handler).processOne()
-      .then(value => ({ value }), error => ({ error }));
-    try {
-      await vi.waitFor(async () => {
-        await control.query('SELECT pg_stat_clear_snapshot()');
-        expect((await control.query(`SELECT 1 FROM pg_stat_activity
-          WHERE application_name=$1 AND wait_event='advisory'`, [name])).rows).toHaveLength(1);
-      }, { timeout: 2000, interval: 20 });
-      await control.query('COMMIT');
-      // No job table in this fixture: any stale active read would also fail SQL.
-      expect(await outcome).toEqual({ value: { status: 'disabled' } });
-      expect(handler).not.toHaveBeenCalled();
-    } finally { await control.query('ROLLBACK'); await outcome; }
+    const outcome = await new MdfJobRunner(database, handler).processOne();
+    expect(outcome).toEqual({ status: 'disabled' });
+    expect(handler).not.toHaveBeenCalled();
+    await control.query('ROLLBACK');
   });
 });

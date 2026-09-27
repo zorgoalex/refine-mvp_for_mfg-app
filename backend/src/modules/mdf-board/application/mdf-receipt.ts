@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { MDF_BAZIS_RAW_ROW_DIGEST_SQL } from '../adapters/mdf-bazis-composition-snapshot';
 import type { QueryResultRow } from 'pg';
-import type { DatabaseClient } from '../../../database/database.types';
+import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import { mdfPositionKey, mdfQuantity } from '../domain/mdf-quantities';
 import type { MdfJobEffectPolicy, MdfSourceKind } from './mdf-job-runner';
 import { mdfDemandDigest, snapshotMdfExecutionContext, type MdfExecutionContext } from '../domain/mdf-execution-context';
@@ -10,6 +10,7 @@ import { mdfPhysicalLineageDigest, persistMdfPhysicalLineage, snapshotMdfPhysica
   verifyMdfPhysicalLineageReplay, type MdfPhysicalLineageManifest } from './mdf-physical-lineage';
 import { mdfBazisMembershipDigest } from './mdf-bazis-assignment-state';
 import { loadMdfDetachedPositions } from '../adapters/mdf-position-detachments';
+import { MDF_BASELINE_WRITER, requireMdfCommandBoundary } from './mdf-command-boundary';
 
 export interface MdfReceiptLine {
   lineKey: string; orderId: number; detailId: number; quantity: number;
@@ -149,6 +150,30 @@ export async function recordMdfLineageReceipt(tx: DatabaseClient,
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** §5.7b baseline marker, sealed into the context and the payload digest. */
+export interface MdfBaselineMarker { runId: string; closure: 'by_status' | null }
+/** §5.7b initial population: the ONLY path for accepted legacy-origin receipts. Internal (the baseline runner), inside
+ * the frozen run (capability `baseline`), publish_only derived from the marker, never user-selectable. The run item
+ * must already exist in `mdf_baseline_run_items` (DB guard on the accepted head). */
+export async function recordMdfBaselineReceipt(tx: TransactionClient, input: Omit<MdfReceiptInput, 'correction' | 'origin'
+  | 'accept' | 'rules'>, baseline: MdfBaselineMarker): Promise<MdfReceiptResult> {
+  if ('correction' in input || !UUID_RE.test(baseline.runId) || !input.executionContext
+    || !input.executionContext.compositionComplete
+    || (baseline.closure !== null && (baseline.closure !== 'by_status' || input.sourceKind !== 'order'))
+    || (input.sourceKind === 'order') !== (input.presentation === undefined)
+    || (input.sourceKind !== 'order' && input.presentation !== 'compute')
+    || !['packet','bazisCutSet','bath','order'].includes(input.sourceKind)) invalid();
+  await requireMdfCommandBoundary(tx,{ writer: MDF_BASELINE_WRITER, capability: 'baseline' });
+  return persistMdfReceipt(tx,{ ...input, origin: 'legacy', accept: true, rules: [] },undefined,undefined,undefined,
+    undefined,{ runId: baseline.runId, closure: baseline.closure });
+}
+/** §5.7b: successor of an order's historical coverage after a demand change, marked `closure='carried'` (DB guard:
+ * only over an accepted by_status/carried predecessor). Correction ⇒ publish_only. Internal only. */
+export async function recordMdfCarriedClosureReceipt(tx: DatabaseClient,
+  input: Omit<MdfReceiptInput, 'correction'>): Promise<MdfReceiptResult> {
+  if (input.sourceKind !== 'order' || input.origin !== 'manual' || !input.accept || input.rules.length) invalid();
+  return persistMdfReceipt(tx,{ ...input, correction: true },undefined,undefined,undefined,undefined,undefined,true);
+}
 /** Order-demand cascade: carry-only, rules-free, manual origin (the order command's actor).
  * Leaves the new revision received-but-unaccepted; see `advanceCompatibleMdfRevision`. */
 export async function recordMdfOrderCascadeReceipt(tx: DatabaseClient,
@@ -254,12 +279,14 @@ export async function recordMdfBazisCompositionReceipt(tx: DatabaseClient,
 async function persistMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput,
   requestedLineage?: MdfPhysicalLineageManifest,
   composition?: MdfBazisCompositionReceiptInput['composition'],
-  cascade?: MdfOrderCascade, transition?: MdfBathTransitionRole): Promise<MdfReceiptResult> {
+  cascade?: MdfOrderCascade, transition?: MdfBathTransitionRole, baseline?: MdfBaselineMarker,
+  carriedClosure?: true): Promise<MdfReceiptResult> {
   // Capture before the first await. Neither caller mutation nor retry can replace
   // a receipt's demand, actor or rule versions halfway through its transaction.
   input = { ...input, expectedFence: input.expectedFence ? { ...input.expectedFence } : null,
     lines: input.lines.map(line => ({ ...line })), rules: input.rules.map(rule => ({ ...rule })),
-    executionContext: input.executionContext ? snapshotMdfExecutionContext(input.executionContext) : undefined };
+    executionContext: input.executionContext ? snapshotMdfExecutionContext(input.executionContext,
+      { allowEmptyComplete: input.sourceKind === 'order' }) : undefined };
   composition=composition ? { ...composition,ownerIds:[...composition.ownerIds] } : undefined;
   let lineage: MdfPhysicalLineageManifest | undefined;
   try {
@@ -296,12 +323,17 @@ async function persistMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput,
     || lineage.operation!=='carry')) {
     throw new MdfReceiptError('MDF_LINEAGE_INVALID');
   }
-  const effectPolicy: MdfJobEffectPolicy = isCorrection ? 'publish_only' : 'forward';
+  // §5.7b: accepted legacy history exists only as a sealed baseline item (the DB guard enforces the run item).
+  if (input.origin === 'legacy' && input.accept && !baseline) invalid();
+  if (baseline && (input.origin !== 'legacy' || !input.accept || isCorrection || lineage || composition || cascade
+    || transition || input.rules.length)) invalid();
+  const effectPolicy: MdfJobEffectPolicy = isCorrection || baseline ? 'publish_only' : 'forward';
   // Only this internal bit may select publish_only. A caller-supplied context
   // marker cannot downgrade an ordinary forward receipt's effects.
   if (input.executionContext?.effectPolicy !== undefined) invalid();
-  const context = input.executionContext && isCorrection
-    ? snapshotMdfExecutionContext({ ...input.executionContext, effectPolicy }) : input.executionContext;
+  const context = input.executionContext && (isCorrection || baseline)
+    ? snapshotMdfExecutionContext({ ...input.executionContext, effectPolicy },
+      { allowEmptyComplete: input.sourceKind === 'order' }) : input.executionContext;
   const placement = context?.manualPlacementColumn;
   if (placement != null && !(input.sourceKind === 'bath'
     ? ['baths','baths_ready','baths_laminated','completed_baths'].includes(placement)
@@ -328,6 +360,11 @@ async function persistMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput,
     ownerIds:composition.ownerIds,allocationSnapshotDigest:composition.allocationSnapshotDigest,
     previewDigest:composition.previewDigest,commandKey:composition.commandKey });
   if (transition) digestInput.push({ bathTransitionVersion:1,...transition,ownerIds:[...transition.ownerIds] });
+  if (baseline) digestInput.push({ baselineVersion:1,runId:baseline.runId,closure:baseline.closure });
+  if (carriedClosure) {
+    if (input.sourceKind !== 'order' || !isCorrection || !input.accept || baseline) invalid();
+    digestInput.push({ carriedClosureVersion:1 });
+  }
   if (cascade) digestInput.push({ orderCascadeVersion:1,intentId:cascade.intentId,jobId:cascade.jobId,
     predecessorRevisionKey:cascade.predecessorRevisionKey,previousDemandDigest:cascade.previousDemandDigest,
     nextDemandDigest:cascade.nextDemandDigest,orderIds:cascade.orderIds,commandKey:cascade.commandKey });
@@ -493,13 +530,18 @@ async function persistMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput,
     const placementColumn = placement === undefined ? '' : ',manual_placement_column';
     const placementValue = placement === undefined ? '' : ',$12';
     const policyValue = placement === undefined ? '$12' : '$13';
+    // §5.7b markers only on baseline receipts (other receipts keep their pre-195 column set).
+    const marker = baseline || carriedClosure;
+    const baselineColumns = marker ? ',baseline_run_id,closure' : '';
+    const baselineValues = marker ? (placement === undefined ? ',$13,$14' : ',$14,$15') : '';
     await tx.query(`INSERT INTO mdf_revision_context
       (source_kind,source_id,revision_key,source_created_at,display_name,prior_column,composition_complete,demand_digest,
-        acceptance_requested,predecessor_accepted_revision_key,predecessor_received_revision_key${placementColumn},effect_policy)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11${placementValue},${policyValue})`, [...source, input.revisionKey, context.sourceCreatedAt,
+        acceptance_requested,predecessor_accepted_revision_key,predecessor_received_revision_key${placementColumn},effect_policy${baselineColumns})
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11${placementValue},${policyValue}${baselineValues})`, [...source, input.revisionKey, context.sourceCreatedAt,
       context.displayName, context.priorColumn, context.compositionComplete, mdfDemandDigest(context.demand),input.accept,
       head?.accepted_revision_key ?? null,head?.received_revision_key ?? null,
-      ...(placement === undefined ? [] : [placement]),effectPolicy]);
+      ...(placement === undefined ? [] : [placement]),effectPolicy,
+      ...(baseline ? [baseline.runId,baseline.closure] : carriedClosure ? [null,'carried'] : [])]);
     await tx.query(`INSERT INTO mdf_revision_demand(source_kind,source_id,revision_key,order_id,detail_id,quantity)
       SELECT $1,$2,$3,(d->>'orderId')::bigint,(d->>'detailId')::bigint,(d->>'quantity')::bigint
       FROM jsonb_array_elements($4::jsonb) d`, [...source, input.revisionKey, JSON.stringify(context.demand)]);

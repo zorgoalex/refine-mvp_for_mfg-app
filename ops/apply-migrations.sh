@@ -2391,6 +2391,34 @@ probe_file() {
       "$(q_idx onec_outbox_events_claim_idx)" \
       "SELECT count(*)=1 FROM pg_trigger t WHERE t.tgrelid=to_regclass('public.onec_agent_config_versions') AND t.tgname='onec_agent_config_version_immutable' AND t.tgfoid=to_regprocedure('public.onec_reject_config_version_change()') AND t.tgenabled='O' AND NOT t.tgisinternal;" \
       "SELECT count(*)=3 FROM permissions_catalog WHERE permission_name IN ('onec.view','onec.manage','onec.commands.send') AND is_active;" ;;
+    # §5.7b baseline population: run manifest + durable freeze guard + a cutover fence on every
+    # engine/inventory table (checked on a representative sample, not the whole ARRAY) + baseline
+    # markers on mdf_revision_context + the legacy-acceptance guard on mdf_source_heads.
+    195_mdf_baseline_population*) probe_all \
+      "$(q_tbl mdf_baseline_runs)" \
+      "$(q_tbl mdf_baseline_run_items)" \
+      "$(q_tbl mdf_baseline_run_preexisting)" \
+      "$(q_tbl mdf_freeze_guard)" \
+      "SELECT count(*)=1 FROM mdf_freeze_guard;" \
+      "SELECT to_regprocedure('public.mdf_baseline_owned()') IS NOT NULL;" \
+      "$(q_stmt_trg mdf_freeze_guard_row mdf_freeze_guard mdf_guard_freeze_guard 27 '' '')" \
+      "$(q_stmt_trg mdf_freeze_guard_truncate mdf_freeze_guard mdf_guard_freeze_guard 34 '' '')" \
+      "$(q_stmt_trg mdf_baseline_run_guard mdf_baseline_runs mdf_guard_baseline_run 31 '' '')" \
+      "$(q_stmt_trg mdf_baseline_item_guard mdf_baseline_run_items mdf_guard_baseline_append_only 31 '' '')" \
+      "$(q_stmt_trg mdf_baseline_preexisting_guard mdf_baseline_run_preexisting mdf_guard_baseline_append_only 31 '' '')" \
+      "$(q_col mdf_revision_context baseline_run_id)" \
+      "$(q_col mdf_revision_context closure)" \
+      "$(q_con_on mdf_revision_context mdf_context_baseline_check)" \
+      "$(q_stmt_trg mdf_legacy_acceptance_guard mdf_source_heads mdf_guard_legacy_acceptance 23 '' '')" \
+      "SELECT to_regclass('public.orders') IS NULL OR EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgname='mdf_cutover_fence' AND t.tgrelid=to_regclass('public.orders') AND t.tgfoid=to_regprocedure('public.mdf_cutover_fence()') AND t.tgtype=62 AND t.tgenabled='O' AND NOT t.tgisinternal);" \
+      "SELECT to_regclass('public.order_details') IS NULL OR EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgname='mdf_cutover_fence' AND t.tgrelid=to_regclass('public.order_details') AND t.tgfoid=to_regprocedure('public.mdf_cutover_fence()') AND t.tgtype=62 AND t.tgenabled='O' AND NOT t.tgisinternal);" \
+      "SELECT to_regclass('public.cnc_telegram_packets') IS NULL OR EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgname='mdf_cutover_fence' AND t.tgrelid=to_regclass('public.cnc_telegram_packets') AND t.tgfoid=to_regprocedure('public.mdf_cutover_fence()') AND t.tgtype=62 AND t.tgenabled='O' AND NOT t.tgisinternal);" \
+      "SELECT to_regclass('public.mdf_evidence_revisions') IS NULL OR EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgname='mdf_cutover_fence' AND t.tgrelid=to_regclass('public.mdf_evidence_revisions') AND t.tgfoid=to_regprocedure('public.mdf_cutover_fence()') AND t.tgtype=62 AND t.tgenabled='O' AND NOT t.tgisinternal);" \
+      "SELECT to_regclass('public.mdf_bazis_composition_intents') IS NULL OR EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgname='mdf_cutover_fence' AND t.tgrelid=to_regclass('public.mdf_bazis_composition_intents') AND t.tgfoid=to_regprocedure('public.mdf_cutover_fence()') AND t.tgtype=62 AND t.tgenabled='O' AND NOT t.tgisinternal);" \
+      "SELECT to_regprocedure('public.mdf_reset_delete_baseline_rows(uuid)') IS NOT NULL;" \
+      "SELECT to_regprocedure('public.mdf_reset_unactivated_baseline(uuid)') IS NOT NULL;" \
+      "SELECT NOT has_function_privilege('public','mdf_reset_delete_baseline_rows(uuid)','EXECUTE');" \
+      "SELECT NOT has_function_privilege('public','mdf_reset_unactivated_baseline(uuid)','EXECUTE');" ;;
     186_bitrix24_product_import*) probe_all \
       "$(q_tbl bitrix24_product_mapping)" \
       "SELECT count(*)=8 FROM information_schema.columns WHERE table_schema='public' AND table_name='bitrix24_product_mapping';" \
@@ -2520,6 +2548,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     193_onec_agent_foundation*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    195_mdf_baseline_population*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     186_bitrix24_product_import*)

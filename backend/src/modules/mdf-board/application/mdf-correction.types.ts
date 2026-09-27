@@ -101,6 +101,8 @@ export interface MdfCorrectionPreviewResponse {
     /** Remaining independent proof keeps the current status. */
     statusKept: boolean;
   }>;
+  /** §5.7b orders closed by historical status that this return reopens (their closure is removed first). */
+  reopenOrderIds?: number[];
   /** Resulting column of the returned card itself. */
   sourceAfter: { afterColumn: string | null; afterIssues: string[] };
   affectedBaths: MdfCorrectionBathEffect[];

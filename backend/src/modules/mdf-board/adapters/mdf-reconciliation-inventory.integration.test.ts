@@ -37,7 +37,7 @@ describe.skipIf(!enabled)('MDF legacy history reconciliation report, isolated Po
       '167_mdf_shadow_observations.sql', '171_mdf_shadow_commands.sql', '174_mdf_execution_context.sql',
       '175_mdf_command_placement.sql', '178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql',
       '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql',
-      '192_mdf_board_presentation_history.sql']) {
+      '192_mdf_board_presentation_history.sql', '195_mdf_baseline_population.sql']) {
       await fixture.applyMigrations([file]);
     }
     await fixture.clonePublicTables(TABLES);

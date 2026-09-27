@@ -262,6 +262,36 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(verification).toMatch(/192_mdf_board_presentation_history\*\)\s+probe_file "\$f" \|\| die/);
   });
 
+  it('probes the baseline population run manifest, durable freeze guard and cutover fence before ledgering migration193', () => {
+    const start = probeFn.indexOf('195_mdf_baseline_population*)');
+    const end = probeFn.indexOf('186_bitrix24_product_import*)', start);
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, end);
+    for (const marker of [
+      'mdf_baseline_runs', 'mdf_baseline_run_items', 'mdf_baseline_run_preexisting', 'mdf_freeze_guard',
+      "SELECT count(*)=1 FROM mdf_freeze_guard",
+      "to_regprocedure('public.mdf_baseline_owned()') IS NOT NULL",
+      'mdf_freeze_guard_row', 'mdf_freeze_guard_truncate', 'mdf_guard_freeze_guard',
+      'mdf_baseline_run_guard', 'mdf_guard_baseline_run',
+      'mdf_baseline_item_guard', 'mdf_baseline_preexisting_guard', 'mdf_guard_baseline_append_only',
+      'q_col mdf_revision_context baseline_run_id', 'q_col mdf_revision_context closure',
+      'q_con_on mdf_revision_context mdf_context_baseline_check',
+      'mdf_legacy_acceptance_guard', 'mdf_guard_legacy_acceptance',
+      "to_regclass('public.orders') IS NULL OR EXISTS",
+      "to_regclass('public.order_details') IS NULL OR EXISTS",
+      "to_regclass('public.cnc_telegram_packets') IS NULL OR EXISTS",
+      "to_regclass('public.mdf_evidence_revisions') IS NULL OR EXISTS",
+      "to_regclass('public.mdf_bazis_composition_intents') IS NULL OR EXISTS",
+      "t.tgname='mdf_cutover_fence'", "t.tgfoid=to_regprocedure('public.mdf_cutover_fence()')", 't.tgtype=62',
+      "to_regprocedure('public.mdf_reset_delete_baseline_rows(uuid)') IS NOT NULL",
+      "to_regprocedure('public.mdf_reset_unactivated_baseline(uuid)') IS NOT NULL",
+      "NOT has_function_privilege('public','mdf_reset_delete_baseline_rows(uuid)','EXECUTE')",
+      "NOT has_function_privilege('public','mdf_reset_unactivated_baseline(uuid)','EXECUTE')",
+    ]) expect(arm).toContain(marker);
+    const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verification).toMatch(/195_mdf_baseline_population\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
   it('probes sealed BASIS assignment and command intent effects before ledgering migration185', () => {
     const start = probeFn.indexOf('185_mdf_bazis_composition*)');
     const end = probeFn.indexOf('*) return 2', start);

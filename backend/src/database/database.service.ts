@@ -104,8 +104,8 @@ export class DatabaseService implements OnModuleDestroy, DatabaseClient {
   }
 
   async transaction<T>(handler: (client: TransactionClient) => Promise<T>, options: DatabaseTransactionOptions = {}): Promise<T> {
-    // The lock SELECT may wait behind cutover. Its snapshot must not be reused
-    // by the following mode SELECT. This is unsafe under RR/serializable.
+    // The boundary's cutover lock is a try-lock (fails fast during a cutover, §5.7b); its
+    // snapshot must still not be reused by the following mode SELECT. Unsafe under RR/serializable.
     if (options.mdf && options.isolation && options.isolation !== 'read committed') {
       throw new ApiError(503, 'MDF_COMMAND_ISOLATION_UNSUPPORTED', 'Команда требует отдельного протокола производственной транзакции');
     }

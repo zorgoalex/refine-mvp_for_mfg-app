@@ -3,10 +3,11 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { MdfActiveProductionReturnService } from './mdf-active-production-return.service';
 
 const user = (permissions: string[]): CurrentUser => ({ id: '7', username: 'u', role: 'manager', roleId: 2, permissions } as CurrentUser);
-function serviceWith(rows: { mode: string }[]) {
+function serviceWith(rows: { mode: string }[], locked = true) {
   const queries: string[] = [];
   const database = { transaction: async <T>(run: (tx: { query: (sql: string) => Promise<{ rows: unknown[] }> }) => Promise<T>) =>
-    run({ query: async (sql: string) => { queries.push(sql); return { rows: sql.includes('mdf_engine_state') ? rows : [] }; } }) };
+    run({ query: async (sql: string) => { queries.push(sql);
+      return { rows: sql.includes('pg_try_advisory_xact_lock_shared') ? [{ locked }] : sql.includes('mdf_engine_state') ? rows : [] }; } }) };
   return { service: new MdfActiveProductionReturnService(database as never), queries };
 }
 
@@ -18,7 +19,7 @@ describe('MDF engine mode (§5.5 return dialog selection)', () => {
     for (const mode of ['legacy', 'shadow', 'active', 'read_only']) {
       const { service, queries } = serviceWith([{ mode }]);
       await expect(service.engineMode(user(['orders.view']))).resolves.toEqual({ mode, publishedReads: true });
-      expect(queries[0]).toContain('pg_advisory_xact_lock_shared');
+      expect(queries[0]).toContain('pg_try_advisory_xact_lock_shared');
       expect(queries.some(sql => /\b(INSERT|UPDATE|DELETE)\b/i.test(sql))).toBe(false);
     }
   });
@@ -31,5 +32,11 @@ describe('MDF engine mode (§5.5 return dialog selection)', () => {
       .rejects.toMatchObject({ statusCode: 503, code: 'MDF_ENGINE_STATE_UNAVAILABLE' });
     await expect(serviceWith([{ mode: 'weird' }]).service.engineMode(user(['orders.view'])))
       .rejects.toMatchObject({ statusCode: 503 });
+  });
+
+  it('fails fast during a cutover instead of waiting (§5.7b)', async () => {
+    const { service, queries } = serviceWith([{ mode: 'legacy' }], false);
+    await expect(service.engineMode(user(['orders.view']))).rejects.toMatchObject({ statusCode: 409, code: 'MDF_CUTOVER_IN_PROGRESS' });
+    expect(queries).toHaveLength(1);
   });
 });

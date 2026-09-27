@@ -15,6 +15,9 @@ export async function publishMdfState(tx: DatabaseClient, input: {
   state: ReturnType<typeof projectMdfAcceptedState>;
   /** §5.4b retired baths: their published card is removed (history stays in audit/evidence). */
   retired?: readonly { kind: string; id: string }[];
+  /** §5.7b order-aggregate scope: position rows are replaced ONLY for these orders (open orders of the allocation
+   * scope, plus a closed order in its own `order:X` closure job). Defaults to `orderIds`. */
+  positionOrderIds?: readonly number[];
 }) {
   const row = (await tx.query<{ revision: string; published_at: string }>(`SELECT published_revision::text revision,
     transaction_timestamp()::text published_at FROM mdf_engine_state WHERE singleton FOR UPDATE`)).rows[0];
@@ -61,8 +64,11 @@ export async function publishMdfState(tx: DatabaseClient, input: {
     await tx.query(`DELETE FROM mdf_published_sources p USING unnest($1::text[],$2::text[]) s(kind,id)
       WHERE p.source_kind=s.kind AND p.source_id=s.id`, retired);
   }
-  await tx.query('DELETE FROM mdf_published_positions WHERE order_id=ANY($1::bigint[])',[input.orderIds]);
-  const positions = input.state.quantities.positions.map(p => ({ ...p, issues: input.state.positionIssues.get(mdfPositionKey(p)) ?? [] }));
+  const positionOrderIds = input.positionOrderIds ?? input.orderIds;
+  const positionOrders = new Set(positionOrderIds);
+  await tx.query('DELETE FROM mdf_published_positions WHERE order_id=ANY($1::bigint[])',[positionOrderIds]);
+  const positions = input.state.quantities.positions.filter(p => positionOrders.has(p.orderId))
+    .map(p => ({ ...p, issues: input.state.positionIssues.get(mdfPositionKey(p)) ?? [] }));
   await tx.query(`INSERT INTO mdf_published_positions(order_id,detail_id,required_quantity,cut_quantity,rolled_quantity,
     credited_cut,credited_rolled,remaining,issues,published_revision)
     SELECT "orderId","detailId",quantity,cut,rolled,"creditedCut","creditedRolled",remaining,issues,$2::bigint

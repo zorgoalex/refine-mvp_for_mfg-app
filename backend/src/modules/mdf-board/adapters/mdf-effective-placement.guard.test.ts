@@ -10,6 +10,7 @@ const ALLOWED = new Set([
   'mdf-board/adapters/mdf-published-snapshot.ts',   // reader: overwritten by the effective column
   'mdf-board/adapters/mdf-correction-snapshot.ts',  // overwritten by the effective column
   'mdf-board/application/mdf-accepted-job.ts',      // job-time history/prior column of unverified cards
+  'mdf-board/adapters/mdf-baseline-runner.ts',      // §5.7b dry-run report only (column distribution), no decision
   'status-automation/adapters/pg-mdf-board-event-repository.ts', // legacy derived alias, not the published column
 ]);
 

@@ -135,7 +135,7 @@ describe.skipIf(!enabled)(
         .replace(/^COMMIT;$/m, "");
       await client.query(migration);
       for (const file of ['165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql', '167_mdf_shadow_observations.sql', '171_mdf_shadow_commands.sql',
-        '174_mdf_execution_context.sql', '175_mdf_command_placement.sql', '178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql']) {
+        '174_mdf_execution_context.sql', '175_mdf_command_placement.sql', '178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql', '195_mdf_baseline_population.sql']) {
         await client.query(readFileSync(new URL(`../../../../db/migrations/${file}`, import.meta.url), 'utf8'));
       }
     }, 30000);
@@ -218,8 +218,10 @@ describe.skipIf(!enabled)(
       statements.length = 0;
       await expect(repository.preview(user, source, { targetColumn: 'parsed' })).rejects.toMatchObject(error);
       expect(statements).toEqual(['SET TRANSACTION ISOLATION LEVEL SERIALIZABLE', 'SHOW transaction_isolation',
-        "SELECT pg_advisory_xact_lock_shared(hashtextextended('mdf-engine-cutover',0))",
-        'SELECT mode FROM mdf_engine_state WHERE singleton=true FOR SHARE']);
+        "SELECT pg_try_advisory_xact_lock_shared(hashtextextended('mdf-engine-cutover',0)) AS locked",
+        'SELECT mode FROM mdf_engine_state WHERE singleton=true FOR SHARE',
+        'SELECT freeze_run_id FROM mdf_freeze_guard WHERE singleton=true FOR SHARE',
+        "SELECT set_config('mdf.command_writer',$1,true)"]);
       const entrance = [...statements];
       statements.length = 0;
       await expect(confirm(p)).rejects.toMatchObject(error);

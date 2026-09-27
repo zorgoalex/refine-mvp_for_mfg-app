@@ -38,7 +38,7 @@ describe.skipIf(!enabled)('MDF published presentation, isolated PostgreSQL schem
       '175_mdf_command_placement.sql', '178_mdf_correction_receipts.sql', '179_mdf_active_return.sql',
       '182_mdf_physical_lineage.sql', '185_mdf_bazis_composition.sql', '187_mdf_bazis_refill_rows.sql',
       '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql',
-      '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql',
+      '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql', '195_mdf_baseline_population.sql',
     ]);
     await fixture.client.query(`
       ALTER TABLE audit_log ALTER COLUMN audit_id SET DEFAULT gen_random_uuid();

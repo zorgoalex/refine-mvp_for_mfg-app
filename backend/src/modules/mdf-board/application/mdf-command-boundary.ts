@@ -5,8 +5,10 @@ export type MdfEngineMode = 'legacy' | 'shadow' | 'active' | 'read_only';
 export interface MdfCommandWriter {
   /** Server-defined owner, never an HTTP parameter or inferred SQL classification. */
   writer: string;
-  capability: 'legacy-only' | 'queued' | 'cnc-receipt' | 'cut-settlement' | 'order-demand' | 'bath-lifecycle';
+  capability: 'legacy-only' | 'queued' | 'cnc-receipt' | 'cut-settlement' | 'order-demand' | 'bath-lifecycle' | 'baseline';
 }
+/** §5.7b: the only writer admitted while a baseline population run is unfinished (durable freeze). */
+export const MDF_BASELINE_WRITER = 'mdf.baseline';
 /** Ordinary order commands (§5.4a). Their MDF consequence is decided after their own writes by
  * `openMdfOrderCommand`, so read_only admits them past the fence and rejects only an MDF impact. */
 export const MDF_ORDER_WRITERS = ['orders.update', 'orders.recalculate_hdf', 'orders.delete',
@@ -16,7 +18,7 @@ export type MdfOrderWriter = typeof MDF_ORDER_WRITERS[number];
 export const MDF_BATH_LIFECYCLE_WRITERS = ['cut.set_current_result', 'cut.archive_result', 'cut.unarchive_result',
   'cut.manual_layout', 'cut.archive'] as const;
 export type MdfBathLifecycleWriter = typeof MDF_BATH_LIFECYCLE_WRITERS[number];
-interface Boundary { protocol: 'read-committed' | 'serializable-legacy'; mode: Promise<MdfEngineMode> }
+interface Boundary { protocol: 'read-committed' | 'serializable-legacy'; mode: Promise<{ mode: MdfEngineMode; frozen: boolean }> }
 const modes = new WeakMap<TransactionClient, Boundary>();
 
 /** Owning transaction calls this BEFORE any project/order/source locks or
@@ -34,7 +36,7 @@ export async function enterMdfCommand(tx: TransactionClient, input: MdfCommandWr
   let boundary = modes.get(tx);
   if (boundary?.protocol === 'serializable-legacy') unsupportedIsolation();
   if (!boundary) {
-    boundary = { protocol: 'read-committed', mode: loadMode(tx) };
+    boundary = { protocol: 'read-committed', mode: loadMode(tx, input.writer) };
     modes.set(tx, boundary);
   }
   return checkCapability(await boundary.mode, input);
@@ -51,7 +53,7 @@ export async function enterMdfSerializableLegacyCommand(tx: TransactionClient, w
   const mode = (async () => {
     const isolation = (await tx.query<{ transaction_isolation: string }>('SHOW transaction_isolation')).rows[0]?.transaction_isolation;
     if (isolation !== 'serializable') unsupportedIsolation();
-    return loadMode(tx, true);
+    return loadMode(tx, writer, true);
   })();
   modes.set(tx, { protocol: 'serializable-legacy', mode });
   return checkCapability(await mode, { writer, capability: 'legacy-only' });
@@ -71,7 +73,21 @@ function unsupportedIsolation(): never {
   throw new ApiError(503, 'MDF_COMMAND_ISOLATION_UNSUPPORTED', 'Команда требует отдельного протокола производственной транзакции');
 }
 
-function checkCapability(mode: MdfEngineMode, input: MdfCommandWriter) {
+function checkCapability(state: { mode: MdfEngineMode; frozen: boolean }, input: MdfCommandWriter) {
+  const { mode } = state;
+  const baseline = input.capability === 'baseline' && input.writer === MDF_BASELINE_WRITER;
+  if (input.capability === 'baseline' && !baseline) {
+    throw new ApiError(503,'MDF_WRITER_NOT_CONNECTED','Недопустимый обработчик начального наполнения');
+  }
+  // §5.7b durable freeze: while a population run is unfinished only the run itself writes, in every mode.
+  if (state.frozen !== baseline) {
+    if (state.frozen) throw cutoverInProgress();
+    throw new ApiError(409,'MDF_BASELINE_NOT_RUNNING','Начальное наполнение не запущено');
+  }
+  if (baseline) {
+    if (mode !== 'read_only') throw new ApiError(409,'MDF_BASELINE_MODE_INVALID','Начальное наполнение требует режима только для чтения');
+    return { mode, queued: true };
+  }
   // Only closes an already-owned external calculation attempt. This protocol
   // cannot create production evidence, mutate details or dispatch board rules.
   const settlement = input.capability === 'cut-settlement' && input.writer === 'cut.calculate.settlement';
@@ -94,10 +110,25 @@ function checkCapability(mode: MdfEngineMode, input: MdfCommandWriter) {
   return { mode, queued: mode === 'active' || mode === 'read_only' };
 }
 
-async function loadMode(tx: TransactionClient, lockState = false): Promise<MdfEngineMode> {
-  await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended('mdf-engine-cutover',0))");
+function cutoverInProgress(): ApiError {
+  return new ApiError(409, 'MDF_CUTOVER_IN_PROGRESS', 'Идёт переключение производственного учёта, повторите позже');
+}
+
+/** §5.7b: fail fast, never wait for a population run (the runner holds the exclusive form of this lock). The freeze
+ * guard is a LOCKING read on a row only freeze lifecycle transitions update: a stale RR/SERIALIZABLE snapshot aborts
+ * with 40001 instead of missing an unfinished run. The writer tag lets the DB fence triggers recognise owned writes. */
+async function loadMode(tx: TransactionClient, writer: string, lockState = false): Promise<{ mode: MdfEngineMode; frozen: boolean }> {
+  const locked = (await tx.query<{ locked: boolean }>(
+    "SELECT pg_try_advisory_xact_lock_shared(hashtextextended('mdf-engine-cutover',0)) AS locked")).rows[0]?.locked;
+  if (locked !== true) throw cutoverInProgress();
   const rows = (await tx.query<{ mode: string }>(`SELECT mode FROM mdf_engine_state WHERE singleton=true${lockState ? ' FOR SHARE' : ''}`)).rows;
   const mode = rows[0]?.mode;
-  if (rows.length === 1 && (mode === 'legacy' || mode === 'shadow' || mode === 'active' || mode === 'read_only')) return mode;
-  throw new ApiError(503, 'MDF_ENGINE_STATE_UNAVAILABLE', 'Не удалось определить режим производственного учёта');
+  if (rows.length !== 1 || !(mode === 'legacy' || mode === 'shadow' || mode === 'active' || mode === 'read_only')) {
+    throw new ApiError(503, 'MDF_ENGINE_STATE_UNAVAILABLE', 'Не удалось определить режим производственного учёта');
+  }
+  const guard = (await tx.query<{ freeze_run_id: string | null }>(
+    'SELECT freeze_run_id FROM mdf_freeze_guard WHERE singleton=true FOR SHARE')).rows;
+  if (guard.length !== 1) throw new ApiError(503, 'MDF_ENGINE_STATE_UNAVAILABLE', 'Не удалось определить режим производственного учёта');
+  await tx.query("SELECT set_config('mdf.command_writer',$1,true)", [writer]);
+  return { mode, frozen: guard[0].freeze_run_id !== null };
 }

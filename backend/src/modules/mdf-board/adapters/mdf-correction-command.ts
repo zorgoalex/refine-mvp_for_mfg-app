@@ -13,7 +13,8 @@ import type { MdfPhysicalLineageAction, MdfPhysicalLineageManifest } from '../ap
 import { matchesMdfValidatedPhysicalLineage } from '../domain/mdf-physical-lineage';
 import { matchesMdfValidatedBazisAssignmentState } from '../application/mdf-bazis-assignment-state';
 import { MdfNeedsAttention, type MdfSourceKind } from '../application/mdf-job-runner';
-import { mdfCorrectionComposition, discoverMdfCorrectionClosure, loadMdfCorrectionSnapshot,
+import { loadMdfClosedOrders, loadMdfHistoricalCoverageOrders, reopenMdfClosure } from './mdf-closed-orders';
+import { mdfCorrectionComposition, discoverMdfCorrectionClosure, loadMdfCorrectionSnapshot, mdfCorrectionTargetOwners,
   MAX_MDF_CORRECTION_ORDERS, type MdfCorrectionOwner, type MdfCorrectionSnapshot } from './mdf-correction-snapshot';
 import { mdfSourceKey } from './mdf-execution-snapshot';
 import { mdfPlacement, parseMdfPlacementInputs } from '../domain/mdf-placement';
@@ -41,6 +42,8 @@ interface Prepared {
   affectedOrderIds: number[];
   candidateJobs: CandidateJob[];
   deferredJobs: MdfCorrectionDeferredJobEffect[];
+  /** §5.7b closed orders reopened by this return, with their locked `order:X` head fences. */
+  reopen: Array<{ orderId: number; received: string; version: string; epoch: string }>;
 }
 class MdfCorrectionScopeChanged extends Error {}
 
@@ -111,15 +114,30 @@ export class PgMdfCorrectionCommand {
 
   private async prepare(tx: TransactionClient,user: CurrentUser,source: Source,request: MdfCorrectionPreviewBody): Promise<Prepared> {
     assertCorrectionPermissions(user);
-    const initial = await discoverMdfCorrectionClosure(tx,source);
+    // §5.7b: a return on a card owned by an order closed by historical status reopens that order. The preview works
+    // on the POST-reopen closure (discovery through the reopened orders), authorizes and locks all of it.
+    // Reopen = every target owner with historical coverage (baseline closure or its carried successor).
+    const targetOwners = await mdfCorrectionTargetOwners(tx,source);
+    const reopenIds = await loadMdfHistoricalCoverageOrders(tx,targetOwners);
+    const closedTargets = [...await loadMdfClosedOrders(tx,targetOwners)];
+    const initial = await discoverMdfCorrectionClosure(tx,source,{ reopen: reopenIds });
     await lockOwners(tx,initial.orders);
     await lockOrderDetails(tx,initial.orders);
     const ownerRows = await loadOwners(tx,initial.orders);
     authorizeOwners(user,ownerRows,initial.orders);
-    await lockSourceHeads(tx,initial.sources);
+    const reopenSources = reopenIds.map(id => ({ kind: 'order', id: String(id) }));
+    await lockSourceHeads(tx,[...initial.sources,...reopenSources].sort((a,b)=>sourceKey(a)<sourceKey(b)?-1:1));
+    const reopen = (await tx.query<{ id: string; received: string; version: string; epoch: string }>(`SELECT source_id id,
+      received_revision_key received,version::text version,correction_epoch::text epoch FROM mdf_source_heads
+      WHERE source_kind='order' AND source_id=ANY($1::text[]) ORDER BY source_id FOR UPDATE`,
+    [reopenIds.map(String)])).rows.map(r => ({ orderId: Number(r.id), received: r.received, version: r.version, epoch: r.epoch }))
+      .sort((a,b)=>a.orderId-b.orderId);
+    if (reopen.length!==reopenIds.length) throw new MdfCorrectionScopeChanged();
     const snapshot = await loadMdfCorrectionSnapshot(tx,source,initial,{ detachmentAware: true });
-    const current = await discoverMdfCorrectionClosure(tx,source);
+    const current = await discoverMdfCorrectionClosure(tx,source,{ reopen: reopenIds });
     if (!sameClosure(initial,current)) throw new MdfCorrectionScopeChanged();
+    const stillCovered = await loadMdfHistoricalCoverageOrders(tx,await mdfCorrectionTargetOwners(tx,source));
+    if (JSON.stringify(stillCovered)!==JSON.stringify(reopenIds)) throw new MdfCorrectionScopeChanged();
     const targetHead = snapshot.heads.find(h => sourceKey(h)===sourceKey(source));
     if (!targetHead) fail(409,'MDF_CORRECTION_SOURCE_UNAVAILABLE','Карточка не найдена среди подтверждённых производственных данных');
     const token = mdfSourceCommandToken(source,{received:targetHead.received,version:targetHead.version,epoch:targetHead.epoch});
@@ -133,7 +151,10 @@ export class PgMdfCorrectionCommand {
     const cutRank = stages.find(s => s.code==='cut')?.rank;
     const laminatedRank = stages.find(s => s.code==='laminated')?.rank;
     if (cutRank===undefined||laminatedRank===undefined||cutRank>=laminatedRank) fail(422,'MDF_CORRECTION_STAGE_UNAVAILABLE','Не удалось определить производственные этапы реза и облицовки');
-    const input: MdfCorrectionInput = { target:source,targetRank:targetStage.rank,cutRank,laminatedRank,
+    // §5.7b: closed (and now reopened) orders' positions carry no allocations by construction.
+    const closedNow = new Set([...await loadMdfClosedOrders(tx,snapshot.orders),...closedTargets]);
+    const closedPositionKeys = new Set(snapshot.details.filter(d=>closedNow.has(d.orderId)).map(d=>`${d.orderId}:${d.detailId}`));
+    const input: MdfCorrectionInput = { target:source,targetRank:targetStage.rank,cutRank,laminatedRank,closedPositionKeys,
       sources:snapshot.plannerSources,allocations:snapshot.allocations,details:snapshot.details.map(d=>({
         orderId:d.orderId,detailId:d.detailId,quantity:d.quantity,currentRank:d.currentRank })) };
     const plan = planMdfCorrection(input);
@@ -146,13 +167,14 @@ export class PgMdfCorrectionCommand {
       return affected.length ? [{jobId:job.jobId,source:{kind:job.kind,id:job.id},status:job.status,affectedOrderIds:affected}] : [];
     });
     const response = makePreview(source,request,snapshot,plan,stages,targetStage,affectedOrderIds,deferredJobs,stageOptions);
+    if (reopen.length) response.reopenOrderIds = reopen.map(r => r.orderId);
     if (plan.status==='ready') {
       response.orders = await previewOrderAutomation(tx,user,snapshot,plan,stages,targetStage,affectedOrderIds);
       await previewPlacementAfter(tx,source,request,snapshot,plan,stages,response);
     }
     if (plan.status==='ready' && response.status==='ready') response.digest = correctionDigest(user,source,request,snapshot,plan,
       stages,targetStage,affectedOrderIds,candidateJobs,deferredJobs,response);
-    return {response,snapshot,plan,stages,targetStage,affectedOrderIds,candidateJobs,deferredJobs};
+    return {response,snapshot,plan,stages,targetStage,affectedOrderIds,candidateJobs,deferredJobs,reopen};
   }
 
   private async confirmInTransaction(tx: TransactionClient,user: CurrentUser,source: Source,request: MdfCorrectionConfirmBody,requestId: string): Promise<MdfCorrectionConfirmResponse> {
@@ -224,6 +246,12 @@ export class PgMdfCorrectionCommand {
       if (released.length!==plan.allocationReleaseIds.length) throw new MdfCorrectionScopeChanged();
     }
 
+    // §5.7b reopen: remove each closed order's historical-status closure BEFORE the source corrections, so the order
+    // re-enters normal allocation. Successor `order:X` revision without closure lines, publish_only, audited below.
+    for (const closed of prepared.reopen) {
+      await reopenMdfClosure(tx,{orderId:closed.orderId,carry:false,actorUserId:actorId,requestId,
+        causeKey:correctionCause,reason:'production_return'});
+    }
     const rules: Array<{ruleId:number;version:number}>=[];
     const replacementRef=(replacement:MdfCorrectionSourceReplacement)=>({kind:replacement.sourceKind,id:replacement.sourceId});
     const replacements=[plan.sourceReplacement,...plan.bathReplacements]
@@ -318,7 +346,8 @@ export class PgMdfCorrectionCommand {
         correctionEpoch:newEpoch},jobIds,allocationRows,details:plan.affectedDetails.map(effect=>({orderId:effect.orderId,detailId:effect.detailId,
           rank:effect.afterRank}))},metadata:{idempotencyKey:request.idempotencyKey,source,sourceToken:request.sourceToken,
         previewDigest:prepared.response.digest,affectedOrderIds:prepared.affectedOrderIds,
-        deferredPriorAutomation:prepared.deferredJobs,cncFreshnessBaseline:prepared.response.cncFreshnessBaseline},
+        deferredPriorAutomation:prepared.deferredJobs,cncFreshnessBaseline:prepared.response.cncFreshnessBaseline,
+        reopenedOrderIds:prepared.reopen.map(r=>r.orderId)},
       relatedEntities:prepared.affectedOrderIds.map(entityId=>({entityType:'order' as const,entityId}))});
     if (!auditId) throw new Error('MDF_CORRECTION_AUDIT_FAILED');
     const outbox=(await tx.query<{id:string}>(`INSERT INTO outbox_events(event_type,aggregate_type,aggregate_id,payload_json,idempotency_key)
@@ -595,6 +624,7 @@ function correctionDigest(user:CurrentUser,source:Source,request:MdfCorrectionPr
     allocations:snapshot.allocations,details:snapshot.details,owners:snapshot.owners.map(owner=>({...owner,assigned:[...owner.assigned].sort()})),
     metadata:[...snapshot.metadata].sort(([a],[b])=>a<b?-1:a>b?1:0),
     published:[...snapshot.published].sort(([a],[b])=>a.localeCompare(b)),stages,targetStage,plan,affectedOrderIds,candidateJobs,deferredJobs,
+    reopenOrderIds:response.reopenOrderIds??[],
     effects:{baths:response.affectedBaths,details:response.details,orders:response.orders,sourceAfter:response.sourceAfter},
     detached:snapshot.plannerSources.filter(s=>s.detachedPositionKeys?.size)
       .map(s=>[s.kind,s.id,[...s.detachedPositionKeys!].sort()]).sort((a,b)=>JSON.stringify(a)<JSON.stringify(b)?-1:1),

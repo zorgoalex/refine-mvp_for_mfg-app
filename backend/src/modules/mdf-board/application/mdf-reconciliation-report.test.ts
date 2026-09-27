@@ -20,8 +20,8 @@ function inventory(): MdfReconciliationInventory {
     ],
     references: { total: 6, byOrigin: { table: 4, manual_move: 2 }, nonSource: [] },
     demand: [{ orderId: 1, detailId: 10, quantity: 3, rank: 1 }, { orderId: 2, detailId: 20, quantity: 4, rank: 9 }],
-    orders: new Map([[1, { id: 1, name: 'A', status: 'В работе', deleted: false, kind: 'production_order', readyOrLater: false }],
-      [2, { id: 2, name: 'B', status: 'Выдан', deleted: false, kind: 'production_order', readyOrLater: true }]]),
+    orders: new Map([[1, { id: 1, name: 'A', status: 'В работе', deleted: false, kind: 'production_order', readyOrLater: false, createdAt: null }],
+      [2, { id: 2, name: 'B', status: 'Выдан', deleted: false, kind: 'production_order', readyOrLater: true, createdAt: null }]]),
     thresholds: { packed: 5, issued: 8, laminated: 4 },
   };
 }
