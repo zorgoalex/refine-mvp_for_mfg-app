@@ -254,6 +254,58 @@ WAHA запускается opt-in profile `whatsapp`, доступен толь
 Полный порядок backup → migrations 152/170 → pairing → canary → relay описан в
 [WhatsApp production runbook](whatsapp-production-runbook.md).
 
+## Агент 1С (mTLS)
+
+Локальная служба агента 1С сама подключается к ERP по отдельному хосту с
+взаимной TLS-аутентификацией. Путь API: `https://<ONEC_AGENT_FQDN>:8443/api/integration/1c-agents/v1/`.
+
+Устройство:
+- Traefik: entrypoint `onecsecure` (`:8443`, таймауты чтения/записи 330 с — под
+  long poll и загрузку пакетов) и TLS options `onec-mtls@file`
+  (`ops/traefik/dynamic/onec-mtls.yml`, `RequireAnyClientCert`). Файл копирует
+  `ops/deploy-stack.sh` в `<project>/data/traefik/dynamic/`.
+- Router агента (`ops/templates/docker-compose.onec-agent.yml`) подключается
+  `deploy-stack.sh` только при `BACKEND_ENABLE_ONEC_AGENT=true`: пересылает
+  сертификат клиента (`passTLSClientCert`) и добавляет заголовок
+  `X-Onec-Ingress-Auth` с `ONEC_INGRESS_SECRET` на backend-порт `ONEC_AGENT_PORT`
+  (3001). Обычный router `backend` эти заголовки вырезает.
+- Backend допускает запрос, только если он пришёл на порт агента, несёт верный
+  ingress-секрет, а SHA-256 отпечаток сертификата зарегистрирован и принадлежит
+  агенту из `X-Agent-Id`. Сертификаты регистрирует администратор в разделе
+  «Интеграция 1С» (PEM или отпечаток); отзыв действует сразу.
+
+Включение:
+1. Миграция `193_onec_agent_foundation`.
+2. DNS A-запись `ONEC_AGENT_FQDN` на VPS, открыть TCP 8443.
+3. В env: `BACKEND_ENABLE_ONEC_AGENT=true`, `ONEC_AGENT_FQDN`,
+   `ONEC_INGRESS_SECRET` (не короче 32 символов, `openssl rand -hex 32`),
+   `BACKEND_ONEC_MONITOR_OWNER=in_process`.
+4. Существующий `<project>/docker-compose.yml` шаблоном не перезаписывается:
+   перенести из `ops/templates/docker-compose.vps.yml` изменения Traefik
+   (entrypoint `onecsecure`, `--providers.file.*`, порт 8443, volume
+   `./data/traefik/dynamic`) и labels router `backend` (`service=backend`,
+   middleware `backend-strip-onec-headers`). Env backend и router агента несёт
+   overlay `docker-compose.onec-agent.yml`, его подключает `ops/deploy-stack.sh`.
+   Проверка без вывода секретов: `docker compose ... config --format json`
+   и `jq '.services.backend.environment | keys'` содержит `ONEC_*`.
+   После запуска — canary `ops/onec-agent-ingress-canary.sh` (см. ниже).
+5. Frontend: Vercel env `RUNTIME_CONFIG_BACKEND_ONEC=true`.
+6. В UI: создать источник, зарегистрировать агента, добавить его сертификат,
+   опубликовать конфигурацию.
+
+Проверки ingress:
+- до выкладки (локально, без DNS): `ops/onec-agent-ingress-harness.sh` — настоящий
+  Traefik с labels шаблона и echo-backend; `ops/onec-agent-ingress-e2e.sh` (через
+  heavy guard) — Traefik → настоящий модуль backend → изолированная схема PostgreSQL,
+  включая отзыв сертификата и откат;
+- после включения и после отката на stage/production: `ops/onec-agent-ingress-canary.sh`
+  с тестовым агентом и его сертификатом (`--expect-disabled` — проверка отката: обычный
+  API работает, API агента не отвечает 2xx).
+
+Ротация ingress-секрета: новое значение в `ONEC_INGRESS_SECRET`, прежнее — в
+`ONEC_INGRESS_SECRET_PREVIOUS`, пересоздать backend и Traefik, затем очистить
+`ONEC_INGRESS_SECRET_PREVIOUS`.
+
 ## PostgreSQL bind
 
 Bind address задаётся `PG_TAILSCALE_BIND_IP`, затем fallback

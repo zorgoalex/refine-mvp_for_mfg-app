@@ -99,3 +99,5 @@ node_modules/
 # worktree symlink to the backend package node_modules (never commit)
 backend/node_modules
 .superpowers/
+# Public (no private key) test certificates of the 1C agent module.
+!backend/src/modules/onec-agent/__fixtures__/*.cert.pem

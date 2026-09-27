@@ -65,6 +65,7 @@ export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
     'message_signals.manage_config',
   ],
   audit: ['audit.view'],
+  onec: ['onec.view', 'onec.manage', 'onec.commands.send'],
   'inbound-signals': ['message_signals.view'],
   'cut-jobs': ['cut.view'],
   cad: ['cad.view'],

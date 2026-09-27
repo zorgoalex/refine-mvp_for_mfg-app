@@ -66,6 +66,7 @@ const ProfilePage = lazy(async () => ({ default: (await import("./pages/profile"
 const Bitrix24IncomingRequestsPage = lazy(async () => ({
   default: (await import("./pages/bitrix24/IncomingRequestsPage")).Bitrix24IncomingRequestsPage,
 }));
+const OnecPage = lazy(async () => ({ default: (await import("./pages/onec/OnecPage")).OnecPage }));
 
 // Route-level code splitting: every page component is lazy-loaded so the root
 // bundle ships only shell/providers/login. WorkspaceLayout owns the Suspense
@@ -749,6 +750,17 @@ const ThemedApp = () => {
                   list: "/audit",
                   meta: { label: "Журналы" },
                 },
+                ...(featureFlags.useBackendOnec
+                  ? [
+                      {
+                        name: "onec",
+                        list: "/onec",
+                        meta: {
+                          label: "Интеграция 1С",
+                        },
+                      },
+                    ]
+                  : []),
                 { name: "inbound-signals", list: "/inbound-signals", meta: { label: "Входящие сигналы" } },
               ]}
               options={{
@@ -1031,6 +1043,9 @@ const ThemedApp = () => {
                   <Route path="/audit">
                     <Route index element={<AuditList />} />
                   </Route>
+                  {featureFlags.useBackendOnec && (
+                    <Route path="/onec" element={<OnecPage />} />
+                  )}
                   <Route path="/workshops" >
                     <Route index element={<WorkshopList />} />
                     <Route path="create" element={<WorkshopCreate />} />

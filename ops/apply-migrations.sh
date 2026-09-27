@@ -2353,6 +2353,30 @@ probe_file() {
       "SELECT count(*)=1 FROM pg_trigger t WHERE t.tgrelid=to_regclass('public.mdf_revision_presentation') AND t.tgname='mdf_revision_presentation_immutable' AND t.tgfoid=to_regprocedure('public.mdf_reject_revision_presentation_change()') AND t.tgtype=27 AND t.tgenabled='O' AND NOT t.tgisinternal;" \
       "SELECT to_regprocedure('public.mdf_source_presentation_digest(text,text)') IS NOT NULL;" \
       "SELECT to_regclass('public.mdf_board_history_events') IS NULL OR (COALESCE((SELECT md5(pg_get_functiondef(oid)) FROM pg_proc WHERE oid=to_regprocedure('public.record_mdf_board_history_from_audit()'))='cb273b6a454a8c02ffce436caa6f8863', false) AND COALESCE((SELECT md5(pg_get_functiondef(oid)) FROM pg_proc WHERE oid=to_regprocedure('public.record_mdf_board_history_from_audit_relation()'))='3a0cefb994d1231bb6fda6677fa2077e', false));" ;;
+    # 193: 1C agent E1 registry/config/outbox/alerts + onec.* permissions.
+    193_onec_agent_foundation*) probe_all \
+      "$(q_tbl onec_sources)" \
+      "$(q_tbl onec_agents)" \
+      "$(q_tbl onec_agent_certificates)" \
+      "$(q_tbl onec_agent_sessions)" \
+      "$(q_tbl onec_agent_status)" \
+      "$(q_tbl onec_agent_status_history)" \
+      "$(q_tbl onec_agent_config_drafts)" \
+      "$(q_tbl onec_agent_config_versions)" \
+      "$(q_tbl onec_agent_incidents)" \
+      "$(q_tbl onec_outbox_events)" \
+      "$(q_tbl onec_audit_links)" \
+      "$(q_tbl onec_alerts)" \
+      "$(q_col onec_sources generation_ref)" \
+      "$(q_col onec_agents config_publish_blocked)" \
+      "$(q_con_on onec_agents onec_agents_source_id_key)" \
+      "$(q_con_on onec_agent_certificates onec_agent_certificates_sha256_fingerprint_key)" \
+      "$(q_con_on onec_outbox_events onec_outbox_events_idempotency_key_key)" \
+      "$(q_con_on onec_audit_links onec_audit_links_audit_id_fkey)" \
+      "$(q_idx onec_agent_config_versions_one_published)" \
+      "$(q_idx onec_outbox_events_claim_idx)" \
+      "SELECT count(*)=1 FROM pg_trigger t WHERE t.tgrelid=to_regclass('public.onec_agent_config_versions') AND t.tgname='onec_agent_config_version_immutable' AND t.tgfoid=to_regprocedure('public.onec_reject_config_version_change()') AND t.tgenabled='O' AND NOT t.tgisinternal;" \
+      "SELECT count(*)=3 FROM permissions_catalog WHERE permission_name IN ('onec.view','onec.manage','onec.commands.send') AND is_active;" ;;
     186_bitrix24_product_import*) probe_all \
       "$(q_tbl bitrix24_product_mapping)" \
       "SELECT count(*)=8 FROM information_schema.columns WHERE table_schema='public' AND table_name='bitrix24_product_mapping';" \
@@ -2476,6 +2500,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     192_mdf_board_presentation_history*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    193_onec_agent_foundation*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     186_bitrix24_product_import*)

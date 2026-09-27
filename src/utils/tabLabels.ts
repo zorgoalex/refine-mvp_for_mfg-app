@@ -41,6 +41,7 @@ export const RESOURCE_LABELS: Record<string, string> = {
   doweling_orders_view: 'Присадка',
   configuration: 'Конфигурация',
   audit: 'Журналы',
+  onec: 'Интеграция 1С',
   'inbound-signals': 'Входящие сигналы',
   sheet_material_types: 'Листовые материалы',
   cut: 'Раскрой',

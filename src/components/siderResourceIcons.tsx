@@ -11,6 +11,7 @@ import {
   CalendarOutlined,
   CheckCircleOutlined,
   CheckSquareOutlined,
+  CloudServerOutlined,
   CreditCardOutlined,
   DeleteOutlined,
   DollarCircleOutlined,
@@ -89,4 +90,5 @@ export const SIDER_RESOURCE_ICONS: Record<string, React.ReactNode> = {
   configuration: <SettingOutlined />,
   audit: <AuditOutlined />,
   sheet_material_types: <BorderOutlined />,
+  onec: <CloudServerOutlined />,
 };

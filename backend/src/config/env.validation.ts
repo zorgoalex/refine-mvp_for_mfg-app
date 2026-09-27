@@ -422,6 +422,19 @@ export const envSchema = z
       .max(3600000)
       .default(600000),
     BACKEND_WHATSAPP_CLEANUP_OWNER: z.enum(['none', 'in_process', 'external']).default('none'),
+    /** 1C agent integration (E1): mTLS agent API on a dedicated listener + admin API. */
+    BACKEND_ENABLE_ONEC_AGENT: booleanFromEnv.default(false),
+    ONEC_AGENT_PORT: z.coerce.number().int().min(1).max(65535).default(3001),
+    /** Shared secret Traefik adds to agent requests; proves the request came through the mTLS router. */
+    ONEC_INGRESS_SECRET: optionalTrimmedStringFromEnv,
+    ONEC_INGRESS_SECRET_PREVIOUS: optionalTrimmedStringFromEnv,
+    /** Header Traefik passTLSClientCert writes the client certificate into. */
+    ONEC_CLIENT_CERT_HEADER: z.string().trim().min(1).max(100).default('x-forwarded-tls-client-cert'),
+    ONEC_AGENT_SESSION_TTL_MS: z.coerce.number().int().min(60000).max(86400000).default(600000),
+    /** Heartbeat interval the agent is expected to keep; "silent" after 3 intervals. */
+    ONEC_AGENT_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().min(10000).max(3600000).default(60000),
+    BACKEND_ONEC_MONITOR_OWNER: z.enum(['none', 'in_process']).default('none'),
+    BACKEND_ONEC_MONITOR_INTERVAL_MS: z.coerce.number().int().min(5000).max(3600000).default(60000),
     FREECUT_BASE_URL: optionalUrlFromEnv,
     FREECUT_OPTIMIZE_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
     /** Auto engine=heuristic for cut groups with >= this many item instances; 0 disables auto mode. */
@@ -754,6 +767,22 @@ export const envSchema = z
         path: ['BACKEND_WHATSAPP_CLEANUP_OWNER'],
       });
     }
+
+    if (env.BACKEND_ENABLE_ONEC_AGENT) {
+      for (const key of ['DATABASE_URL', 'ONEC_INGRESS_SECRET'] as const) {
+        if (!env[key]) {
+          ctx.addIssue({ code: 'custom', message: `${key} is required when BACKEND_ENABLE_ONEC_AGENT is true`, path: [key] });
+        }
+      }
+      if (env.ONEC_INGRESS_SECRET && env.ONEC_INGRESS_SECRET.length < 32) {
+        ctx.addIssue({ code: 'custom', message: 'ONEC_INGRESS_SECRET must be at least 32 characters', path: ['ONEC_INGRESS_SECRET'] });
+      }
+      if (env.ONEC_AGENT_PORT === env.PORT) {
+        ctx.addIssue({ code: 'custom', message: 'ONEC_AGENT_PORT must differ from PORT', path: ['ONEC_AGENT_PORT'] });
+      }
+    }
+    // BACKEND_ONEC_MONITOR_OWNER is ignored while BACKEND_ENABLE_ONEC_AGENT=false,
+    // so a one-flag rollback never blocks backend startup.
 
     if (env.BACKEND_ENABLE_WORKOS_AUTH) {
       if (!env.BACKEND_ENABLE_AUTH) {

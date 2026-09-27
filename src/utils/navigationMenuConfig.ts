@@ -43,6 +43,7 @@ export const LEGACY_CATEGORY_MAP: Record<string, string> = {
   configuration: 'Настройки',
   audit: 'Журналы',
   'inbound-signals': 'Журналы',
+  onec: 'Настройки',
 };
 
 export const EVOLUTION_CATEGORY_ORDER = ['CRM', 'Производство', 'Данные', 'Журналы', 'Настройки'] as const;
@@ -102,6 +103,7 @@ export const EVOLUTION_CATEGORY_MAP: Record<string, (typeof EVOLUTION_CATEGORY_O
   configuration: 'Настройки',
   audit: 'Журналы',
   'inbound-signals': 'Журналы',
+  onec: 'Настройки',
 };
 
 export function getSidebarMenuConfig(variant: UiVariant): {

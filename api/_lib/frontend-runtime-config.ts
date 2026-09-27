@@ -34,6 +34,7 @@ export interface FrontendRuntimeConfigResponse {
     enableLegacyHasura: boolean;
     workosAuth: boolean;
     backendWhatsApp: boolean;
+    backendOnec: boolean;
   };
   observability: {
     performanceRum: boolean;
@@ -101,6 +102,7 @@ export function buildFrontendRuntimeConfig(
       enableLegacyHasura: readBooleanEnv(env.RUNTIME_CONFIG_ENABLE_LEGACY_HASURA, true),
       workosAuth: readBooleanEnv(env.RUNTIME_CONFIG_WORKOS_AUTH, false),
       backendWhatsApp: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_WHATSAPP, false),
+      backendOnec: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_ONEC, false),
     },
     observability: {
       performanceRum: readBooleanEnv(env.RUNTIME_CONFIG_PERFORMANCE_RUM, false),

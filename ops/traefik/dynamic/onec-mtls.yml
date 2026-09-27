@@ -1,0 +1,12 @@
+# Traefik dynamic configuration (file provider), synced by ops/deploy-stack.sh
+# into <project>/data/traefik/dynamic/. Client-certificate policy of the 1C
+# agent host: Traefik requires a certificate; ERP decides access by its
+# SHA-256 fingerprint (onec_agent_certificates), so self-signed agent
+# certificates are allowed and revocation is immediate in ERP.
+tls:
+  options:
+    onec-mtls:
+      minVersion: VersionTLS12
+      sniStrict: true
+      clientAuth:
+        clientAuthType: RequireAnyClientCert

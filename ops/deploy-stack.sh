@@ -6,6 +6,8 @@ PROJECT_DIR="$REPO_DIR"
 ENV_FILE="$PROJECT_DIR/.env"
 COMPOSE_FILE="$PROJECT_DIR/docker-compose.yml"
 CNC_TELEGRAM_OVERLAY="$REPO_DIR/ops/templates/docker-compose.cnc-telegram-worker.yml"
+ONEC_AGENT_OVERLAY="$REPO_DIR/ops/templates/docker-compose.onec-agent.yml"
+TRAEFIK_DYNAMIC_SRC="$REPO_DIR/ops/traefik/dynamic"
 BACKEND_IDENTITY_OVERLAY="$REPO_DIR/ops/templates/docker-compose.backend-build-identity.yml"
 STACK_ENV_OVERLAY=""
 COMPOSE_FILE_ARGS=()
@@ -124,6 +126,13 @@ prepare_compose_file_args() {
     COMPOSE_FILE_ARGS+=(-f "$CNC_TELEGRAM_OVERLAY")
     log "Using CNC Telegram overlay to enforce worker and GLM fallback profiles"
   fi
+  if [[ "$(env_file_value BACKEND_ENABLE_ONEC_AGENT)" == "true" ]]; then
+    [[ -n "$(env_file_value ONEC_AGENT_FQDN)" ]] || fail "ONEC_AGENT_FQDN is required when BACKEND_ENABLE_ONEC_AGENT=true"
+    [[ -n "$(env_file_value ONEC_INGRESS_SECRET)" ]] || fail "ONEC_INGRESS_SECRET is required when BACKEND_ENABLE_ONEC_AGENT=true"
+    [[ -f "$ONEC_AGENT_OVERLAY" ]] || fail "1C agent overlay not found: $ONEC_AGENT_OVERLAY"
+    COMPOSE_FILE_ARGS+=(-f "$ONEC_AGENT_OVERLAY")
+    log "Using 1C agent mTLS ingress overlay"
+  fi
   stack_env="$(env_file_value ERP_STACK_ENV)"
   stack_env="${stack_env:-test}"
   STACK_ENV_OVERLAY="$REPO_DIR/ops/templates/docker-compose.${stack_env}.yml"
@@ -229,8 +238,12 @@ mkdir -p \
   "$PROJECT_DIR/data/postgres/main" \
   "$PROJECT_DIR/data/postgres/hasura_md" \
   "$PROJECT_DIR/data/traefik" \
+  "$PROJECT_DIR/data/traefik/dynamic" \
   "$PROJECT_DIR/backups" \
   "$PROJECT_DIR/restore"
+
+# Traefik file-provider config (TLS options) is versioned in the repo.
+cp "$TRAEFIK_DYNAMIC_SRC"/*.yml "$PROJECT_DIR/data/traefik/dynamic/"
 
 if [[ ! -f "$PROJECT_DIR/config/postgres/pg_hba.conf" ]]; then
   cp "$REPO_DIR/ops/templates/pg_hba.vps.conf" "$PROJECT_DIR/config/postgres/pg_hba.conf"

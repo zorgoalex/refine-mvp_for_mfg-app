@@ -45,6 +45,7 @@ const NAVIGATION_RESOURCES = [
   'configuration',
   'audit',
   'sheet_material_types',
+  'onec',
 ] as const;
 
 describe('SIDER_RESOURCE_ICONS', () => {

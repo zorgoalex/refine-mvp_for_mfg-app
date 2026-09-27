@@ -1,0 +1,109 @@
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+
+const read = (file: string) => readFileSync(new URL(file, import.meta.url), 'utf8');
+
+const page = read('./OnecPage.tsx');
+const api = read('./onecApi.ts');
+const agentsTab = read('./AgentsTab.tsx');
+const drawer = read('./AgentDetailsDrawer.tsx');
+const configTab = read('./ConfigurationTab.tsx');
+const alertsTab = read('./AlertsIncidentsTab.tsx');
+const entityModal = read('./ConfigEntityModal.tsx');
+
+describe('Onec (1C integration) UI wiring', () => {
+  it('gates the whole section on the backend flag and onec permissions', () => {
+    expect(page).toMatch(/featureFlags\.useBackendOnec/);
+    expect(page).toMatch(/can\('onec\.view'\)/);
+    expect(page).toMatch(/can\('onec\.manage'\)/);
+    expect(page).toMatch(/can\('onec\.commands\.send'\)/);
+  });
+
+  it('shows a friendly empty state when the backend integration is disabled', () => {
+    expect(page).toMatch(/ONEC_AGENT_DISABLED/);
+  });
+
+  it('auto-refreshes the overview every 30s and stops on unmount', () => {
+    expect(page).toMatch(/ONEC_OVERVIEW_POLL_MS\s*=\s*30_000/);
+    expect(page).toMatch(/clearInterval\(interval\)/);
+    expect(page).toMatch(/document\.hidden/);
+  });
+
+  it('talks to the backend admin API only, never GraphQL', () => {
+    for (const source of [api, agentsTab, drawer, configTab, alertsTab]) {
+      expect(source).not.toMatch(/gql`|useMutation\(|useQuery\(\s*gql/);
+    }
+    expect(api).toMatch(/httpClient\.get/);
+    expect(api).toMatch(/httpClient\.post/);
+    expect(api).toMatch(/httpClient\.put/);
+    expect(api).toMatch(/httpClient\.patch/);
+  });
+
+  it('sends optimistic-lock versions on agent block/unblock/update', () => {
+    expect(api).toMatch(/blockAgent\(agentId: string, version: number\)/);
+    expect(api).toMatch(/unblockAgent\(agentId: string, version: number\)/);
+    expect(drawer).toMatch(/onecApi\.blockAgent\(agent\.agentId, agent\.version\)/);
+    expect(drawer).toMatch(/onecApi\.unblockAgent\(agent\.agentId, agent\.version\)/);
+    expect(drawer).toMatch(/onecApi\.updateAgent\(agent\.agentId, \{ version: agent\.version/);
+  });
+
+  it('carries the draft revision as an If-Match header and omits it when there is no draft', () => {
+    expect(api).toMatch(/onecIfMatchHeader\(revision\)/);
+    // The draft revision of the LOADED agent (not merely the selected one).
+    expect(configTab).toMatch(/onecApi\.saveDraft\(target, configState\.draft\?\.revision \?\? null, formConfig\)/);
+  });
+
+  it('publishes with exactly the revision and configHash shown to the operator', () => {
+    // Captured when the confirm dialog opens, shown in it, and sent unchanged.
+    expect(configTab).toMatch(/setPublishTarget\(\{ agentId: configState\.agentId, revision: configState\.draft\.revision, configHash: configState\.draft\.configHash \}\)/);
+    expect(configTab).toMatch(/onecApi\.publish\(target\.agentId, target\.revision, target\.configHash\)/);
+    expect(configTab).toMatch(/Хэш конфигурации: \{publishTarget\.configHash\}/);
+  });
+
+  it('handles STALE_DRAFT, ONEC_CONFIG_UNCHANGED, ONEC_CONFIG_PUBLISH_BLOCKED and ONEC_CONFIG_INVALID', () => {
+    expect(configTab).toMatch(/STALE_DRAFT/);
+    expect(configTab).toMatch(/ONEC_CONFIG_UNCHANGED/);
+    expect(configTab).toMatch(/ONEC_CONFIG_PUBLISH_BLOCKED/);
+    expect(configTab).toMatch(/ONEC_CONFIG_INVALID/);
+  });
+
+  it('warns operators to never paste a private key when adding a certificate', () => {
+    expect(drawer).toMatch(/закрытый ключ/);
+  });
+
+  it('gates create/manage controls behind onec.manage and keeps alert acknowledge on onec.view', () => {
+    expect(agentsTab).toMatch(/canManage &&[\s\S]{0,40}Button[\s\S]{0,80}Добавить источник/);
+    expect(agentsTab).toMatch(/canManage &&[\s\S]{0,40}Button[\s\S]{0,120}Зарегистрировать агента/);
+    expect(alertsTab).toMatch(/canView && alert\.state === 'open'/);
+    expect(alertsTab).toMatch(/canManage && !incident\.resolvedAt/);
+  });
+
+  it('shows the identity_changed warning distinctly', () => {
+    expect(drawer).toMatch(/onecIdentityWarning/);
+    expect(agentsTab).toMatch(/identity_changed/);
+  });
+
+  it('never sends empty-string optional ETL entity fields to the strict backend schema', () => {
+    expect(entityModal).toMatch(/onecEtlEntityFromFormValues/);
+  });
+
+  it('binds configuration writes to the loaded agent and publishes the confirmed triple', () => {
+    const tab = read('./ConfigurationTab.tsx');
+    expect(tab).toContain('onecConfigWritable({');
+    expect(tab).toContain('onecIsCurrentResponse({');
+    expect(tab).toMatch(/disabled=\{!writable \|\| !dirty/);
+    expect(tab).toMatch(/disabled=\{!writable \|\| !configState\.draft/);
+    expect(tab).toContain('onecApi.saveDraft(target, configState.draft?.revision ?? null, formConfig)');
+    expect(tab).toContain('onecApi.publish(target.agentId, target.revision, target.configHash)');
+    expect(tab).toContain('setPublishTarget({ agentId: configState.agentId, revision: configState.draft.revision, configHash: configState.draft.configHash })');
+    // Switching agents clears the previous agent's form first.
+    expect(tab).toMatch(/setConfigState\(null\);\s*setFormConfig\(null\);/);
+  });
+
+  it('drops stale live-validation answers (older form generation or another agent)', () => {
+    const tab = read('./ConfigurationTab.tsx');
+    expect(tab).toContain('const seq = ++validateSeq.current;');
+    expect(tab).toMatch(/if \(isCurrent\(\)\) setValidationIssues\(result\.ok \? \[\] : result\.issues\)/);
+    expect(tab).toMatch(/if \(isCurrent\(\)\) setValidationIssues\(null\)/);
+  });
+});

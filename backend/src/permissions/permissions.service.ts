@@ -63,6 +63,8 @@ const DANGEROUS_PERMISSIONS = new Set<PermissionName>([
   'bitrix24.payments.confirm_overpayment',
   'settings.manage',
   'whatsapp.manage',
+  'onec.manage',
+  'onec.commands.send',
   'message_signals.resolve',
   'message_signals.manage_config',
   'audit.technical.view',

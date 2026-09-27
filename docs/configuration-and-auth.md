@@ -288,6 +288,26 @@ fallback profile и в обычном `cnc-telegram` не запускается
 Outer command timeout должен быть больше `GLM_OCR_CLIENT_TIMEOUT_SECONDS` (по
 умолчанию 660); engine входит в source fingerprint.
 
+### Интеграция 1С
+
+Backend: `BACKEND_ENABLE_ONEC_AGENT` (по умолчанию `false`), `ONEC_AGENT_PORT`
+(3001, отдельный listener только для API агента), `ONEC_INGRESS_SECRET` /
+`ONEC_INGRESS_SECRET_PREVIOUS`, `ONEC_CLIENT_CERT_HEADER`,
+`ONEC_AGENT_SESSION_TTL_MS`, `ONEC_AGENT_HEARTBEAT_INTERVAL_MS` (агент считается
+молчащим после трёх интервалов), `BACKEND_ONEC_MONITOR_OWNER`
+(`none` | `in_process`: алерты, сроки сертификатов, очистка) и
+`BACKEND_ONEC_MONITOR_INTERVAL_MS`. Frontend: `RUNTIME_CONFIG_BACKEND_ONEC`
+(Vercel runtime config → `features.backendOnec`) или `VITE_USE_BACKEND_ONEC`.
+
+Права: `onec.view` (просмотр раздела; подразумевается правами `onec.manage` и
+`onec.commands.send`), `onec.manage` (источники, агенты, сертификаты,
+конфигурация), `onec.commands.send` (служебные команды агенту). Миграция 193
+выдаёт их ролям admin и superadmin.
+
+Конфигурация агента версионируется: черновик сохраняется с `If-Match: <revision>`,
+публикуется только подтверждённая ревизия; опубликованные версии неизменяемы.
+Хеш конфигурации считается по алгоритму агента `agent-payload-sha256-base64-v1`.
+
 ## JSON snapshot заказов
 
 Snapshot export/import работает через NestJS, когда
