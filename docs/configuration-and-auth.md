@@ -165,6 +165,25 @@ login продолжает работать.
 `/api/v1/orders`. Dual-write отсутствует: при выключенном write-флаге остаётся
 legacy save path.
 
+### Потребности заказов: отметка «Закуплено»
+
+`BACKEND_RESOURCE_PROCUREMENT_ENABLED` (backend, по умолчанию `false`) включает
+отметки «Закуплено» у материалов заказа: команды
+`PUT /api/v1/orders/{orderId}/resource-procurement/{resourceKey}` и
+`POST /api/v1/orders/resource-procurement/bulk`, карточку
+`GET /api/v1/orders/{orderId}/resource-demands` и сводку
+`GET /api/v1/orders/resource-demands/by-material`. Отдельного frontend-флага нет:
+интерфейс включает эти функции по полю `capabilities` в ответе backend, поэтому
+выключение флага возвращает экран к прежнему виду без пересборки frontend.
+Отмечать закуп может роль с правом `procurement.manage`; видимость заказов — по
+scope `orders.view`. Порядок включения:
+
+1. применить миграцию `194_order_resource_procurement.sql`;
+2. выставить `BACKEND_RESOURCE_PROCUREMENT_ENABLED=true` и пересоздать backend.
+
+При выключенном флаге таблица `order_resource_procurement` не читается, а
+команды отвечают `503 PROCUREMENT_DISABLED`.
+
 ### Листовые материалы
 
 `VITE_SHEET_MATERIALS_READS` либо runtime
