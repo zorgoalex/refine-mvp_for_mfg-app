@@ -16,7 +16,11 @@ import {
   type ResourceKind,
 } from './resourceKinds';
 
-const compactNumber = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 });
+// Площадь — до сотых (0,02 м² не должно превращаться в 0), погонные метры — до десятых.
+const COMPACT_NUMBER_BY_UNIT = {
+  m2: new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }),
+  lm: new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }),
+} as const;
 
 /** Вид «Панель»: узкий список заказов слева, потребности выбранного заказа справа. */
 export function SplitPanelView({
@@ -133,7 +137,7 @@ function KindNumber({ row, kind }: { row: OrderResourceDemandRow; kind: Resource
   const hasValue = total.count > total.missingCount;
   return (
     <span style={{ ...numericStyle, whiteSpace: 'nowrap', fontWeight: 600, color: colorOf(kind) }}>
-      {hasValue ? compactNumber.format(total.total) : '—'}
+      {hasValue ? COMPACT_NUMBER_BY_UNIT[RESOURCE_KIND_BY_KEY[kind].unit].format(total.total) : '—'}
       <Typography.Text type="secondary" style={{ fontSize: 11, fontWeight: 400, marginInlineStart: 2 }}>
         {UNIT_LABELS[RESOURCE_KIND_BY_KEY[kind].unit]}
       </Typography.Text>
