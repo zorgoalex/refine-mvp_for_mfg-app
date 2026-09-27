@@ -1,20 +1,20 @@
 import { apiRoutes } from "./apiRoutes";
 import { httpClient, type RequestOptions } from "./httpClient";
 export type {
+  MdfCorrectionBlocker,
   MdfCorrectionConfirmBody,
   MdfCorrectionConfirmResponse,
   MdfCorrectionPreviewBody,
   MdfCorrectionPreviewResponse,
   MdfCorrectionSourceRef,
-} from "../../backend/src/modules/mdf-board/application/mdf-correction.types";
+} from "./types/mdfCorrectionApi.types";
 import type {
   MdfCorrectionConfirmBody,
   MdfCorrectionConfirmResponse,
   MdfCorrectionPreviewBody,
   MdfCorrectionPreviewResponse,
   MdfCorrectionSourceRef,
-} from "../../backend/src/modules/mdf-board/application/mdf-correction.types";
-export type { MdfCorrectionBlocker } from "../../backend/src/modules/mdf-board/domain/mdf-correction-plan";
+} from "./types/mdfCorrectionApi.types";
 
 /** Mirrors MdfEngineModeDto (mdf-active-production-return.service.ts). Declared
  * locally instead of imported: that service file pulls in the full NestJS/DB
