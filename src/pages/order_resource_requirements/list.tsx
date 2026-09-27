@@ -2,7 +2,14 @@ import { Table } from '../../ui/tooltipDelay';
 import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, } from 'react';
 import type { Key } from 'react';
 import type { IResourceComponentsProps } from '@refinedev/core';
-import { DownloadOutlined, FileTextOutlined, FilterFilled, ReloadOutlined } from '@ant-design/icons';
+import {
+  DownloadOutlined,
+  FileTextOutlined,
+  FilterFilled,
+  MinusSquareOutlined,
+  PlusSquareOutlined,
+  ReloadOutlined,
+} from '@ant-design/icons';
 import { Alert, Button, Checkbox, DatePicker, Drawer, Input, Modal, Pagination, Select, Space, Tag, Typography } from 'antd';
 import { Segmented } from "../../ui/Segmented";
 import type { TablePaginationConfig, TableProps } from 'antd';
@@ -125,6 +132,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
     'summary',
   );
   const [expandedRowKeys, setExpandedRowKeys] = useState<readonly Key[]>([]);
+  const [collapsedMaterialOrders, setCollapsedMaterialOrders] = useState<ReadonlySet<number>>(() => new Set());
   const [drawerSnapshot, setDrawerSnapshot] = useState<OrderResourceDemandRow | null>(null);
   const [panelOrderId, setPanelOrderId] = useState<number | null>(null);
   const deferredSearch = useDeferredValue(searchInput.trim());
@@ -150,6 +158,25 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
     [drawerSnapshot, rows],
   );
   const openCard = useCallback((row: OrderResourceDemandRow) => setDrawerSnapshot(row), []);
+
+  const toggleMaterialOrder = useCallback((orderId: number) => {
+    setCollapsedMaterialOrders((current) => {
+      const next = new Set(current);
+      if (next.has(orderId)) next.delete(orderId);
+      else next.add(orderId);
+      return next;
+    });
+  }, []);
+  // «Сводка»: строки свёрнуты по умолчанию; «Материалы»: группы развёрнуты по умолчанию.
+  const collapseAllState = resolveCollapseAll(viewMode, tableRows, expandedRowKeys, collapsedMaterialOrders);
+  const handleCollapseAll = useCallback(() => {
+    const allOrderIds = tableRows.map((row) => row.orderId);
+    if (viewMode === 'summary') {
+      setExpandedRowKeys(collapseAllState.collapse ? [] : allOrderIds);
+    } else if (viewMode === 'materials') {
+      setCollapsedMaterialOrders(collapseAllState.collapse ? new Set(allOrderIds) : new Set());
+    }
+  }, [collapseAllState.collapse, tableRows, viewMode]);
 
   const report = useMemo(
     () => buildResourceDemandReport({
@@ -305,6 +332,15 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
             options={RESOURCE_LIST_VIEW_OPTIONS}
             onChange={(value) => setViewMode(value as ResourceListViewMode)}
           />
+          {viewMode !== 'panel' && (
+            <Button
+              icon={collapseAllState.collapse ? <MinusSquareOutlined /> : <PlusSquareOutlined />}
+              disabled={tableRows.length === 0}
+              onClick={handleCollapseAll}
+            >
+              {collapseAllState.collapse ? 'Свернуть все' : 'Развернуть все'}
+            </Button>
+          )}
           <Input.Search
             allowClear
             aria-label="Поиск заказа"
@@ -453,6 +489,8 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
             loading={loading && !response}
             emptyText={EMPTY_LIST_TEXT}
             onOpenCard={openCard}
+            collapsed={collapsedMaterialOrders}
+            onToggleGroup={toggleMaterialOrder}
           />
         )}
         {viewMode === 'panel' && (
@@ -744,6 +782,26 @@ function downloadResourceDemandReport(report: ResourceDemandReport) {
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
+}
+
+/**
+ * Что делает кнопка «Свернуть все»: пока на странице есть хоть одна раскрытая строка,
+ * она сворачивает всё; когда всё свёрнуто — становится «Развернуть все».
+ */
+export function resolveCollapseAll(
+  viewMode: 'summary' | 'materials' | 'panel',
+  rows: Array<{ orderId: number }>,
+  expandedRowKeys: readonly Key[],
+  collapsedMaterialOrders: ReadonlySet<number>,
+): { collapse: boolean } {
+  if (viewMode === 'summary') {
+    const visible = new Set(rows.map((row) => String(row.orderId)));
+    return { collapse: expandedRowKeys.some((key) => visible.has(String(key))) };
+  }
+  if (viewMode === 'materials') {
+    return { collapse: rows.some((row) => !collapsedMaterialOrders.has(row.orderId)) };
+  }
+  return { collapse: false };
 }
 
 function normalizeFilterKeys(keys: Key[] | null): Key[] | null {

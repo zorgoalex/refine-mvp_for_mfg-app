@@ -29,18 +29,22 @@ export function MaterialRowsView({
   loading,
   emptyText,
   onOpenCard,
+  collapsed,
+  onToggleGroup,
 }: {
   rows: OrderResourceDemandRow[];
   loading: boolean;
   emptyText: string;
   onOpenCard: (row: OrderResourceDemandRow) => void;
+  /** Заказы со свёрнутыми материалами; хранится в списке, чтобы работала кнопка «Свернуть все». */
+  collapsed: ReadonlySet<number>;
+  onToggleGroup: (orderId: number) => void;
 }) {
   const colorOf = useResourceKindColor();
   const { token } = theme.useToken();
   const [visibleKinds, setVisibleKinds] = useState<Set<ResourceKind>>(
     () => new Set(RESOURCE_KINDS.map((meta) => meta.kind)),
   );
-  const [collapsed, setCollapsed] = useState<Set<number>>(() => new Set());
 
   const items = useMemo(() => buildMaterialRowsItems(rows, visibleKinds, collapsed), [collapsed, rows, visibleKinds]);
 
@@ -52,15 +56,6 @@ export function MaterialRowsView({
       } else {
         next.add(kind);
       }
-      return next;
-    });
-  };
-
-  const toggleGroup = (orderId: number) => {
-    setCollapsed((current) => {
-      const next = new Set(current);
-      if (next.has(orderId)) next.delete(orderId);
-      else next.add(orderId);
       return next;
     });
   };
@@ -110,7 +105,7 @@ export function MaterialRowsView({
                 row={item.row}
                 lines={item.lines}
                 collapsed={collapsed.has(item.row.orderId)}
-                onToggle={() => toggleGroup(item.row.orderId)}
+                onToggle={() => onToggleGroup(item.row.orderId)}
                 onOpenCard={() => onOpenCard(item.row)}
               />
             )
@@ -220,7 +215,7 @@ function MaterialGroupHeader({
 export function buildMaterialRowsItems(
   rows: OrderResourceDemandRow[],
   visibleKinds: Set<ResourceKind>,
-  collapsed: Set<number>,
+  collapsed: ReadonlySet<number>,
 ): MaterialRowsItem[] {
   const items: MaterialRowsItem[] = [];
   for (const row of rows) {
