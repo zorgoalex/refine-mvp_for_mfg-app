@@ -21,13 +21,16 @@ export const mdfPublishedApi = {
     }
     if (query.orderIds?.length) params.set('orderIds',query.orderIds.join(','));
     if (query.jobIds?.length) params.set('jobIds',query.jobIds.join(','));
+    if (query.searchOrderIds?.length) params.set('searchOrderIds',query.searchOrderIds.join(','));
     try {
       const snapshot=await httpClient.get<MdfPublishedSnapshot>(
         `${apiRoutes.orders.statusBoardMdfPublished}${params.size ? `?${params}` : ''}`,
         { signal,cache: 'no-store' },
       );
       assertMdfSession(sessionGeneration);
-      if (snapshot.schemaVersion!==1 || !Array.isArray(snapshot.trackedJobs)) {
+      if (snapshot.schemaVersion!==1 || !Array.isArray(snapshot.trackedJobs)
+        || !Array.isArray(snapshot.presentation) || !Array.isArray(snapshot.progress)
+        || !Array.isArray(snapshot.orders) || !Array.isArray(snapshot.unregistered)) {
         throw new Error('MDF_PUBLICATION_CONTRACT_INVALID');
       }
       return { sessionGeneration,snapshot };

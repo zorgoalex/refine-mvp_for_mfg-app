@@ -2340,6 +2340,19 @@ probe_file() {
       "$(q_col mdf_order_cascade_intents preview_digest)" \
       "SELECT count(*)=1 FROM pg_trigger t WHERE t.tgrelid=to_regclass('public.mdf_position_detachments') AND t.tgname='mdf_position_detachment_immutable' AND t.tgfoid=to_regprocedure('public.mdf_reject_position_detachment_change()') AND t.tgenabled='O' AND NOT t.tgisinternal;" \
       "SELECT to_regclass('public.mdf_physical_lineage_contracts') IS NULL OR COALESCE((SELECT md5(pg_get_functiondef(oid)) FROM pg_proc WHERE oid=to_regprocedure('public.mdf_validate_physical_lineage_seal()'))='f303a542a2e940954763bfa8a5d44bbe', false);" ;;
+    # record_mdf_board_history_from_audit[_relation] are created by 141. 192
+    # conditionally REDEFINES both in place (once mdf_board_history_events
+    # exists) to resolve the §5.6 engine-history card subject; the guard below
+    # requires the post-192 body only when that table (i.e. 141) is present —
+    # same conditional-redefinition pattern as 191's seal-guard check above.
+    192_mdf_board_presentation_history*) probe_all \
+      "$(q_tbl mdf_revision_presentation)" \
+      "$(q_con_on mdf_revision_presentation mdf_revision_presentation_pkey)" \
+      "$(q_con_on mdf_revision_presentation mdf_revision_presentation_presentation_digest_check)" \
+      "$(q_con_on mdf_revision_presentation mdf_revision_presentation_source_kind_source_id_revision_k_fkey)" \
+      "SELECT count(*)=1 FROM pg_trigger t WHERE t.tgrelid=to_regclass('public.mdf_revision_presentation') AND t.tgname='mdf_revision_presentation_immutable' AND t.tgfoid=to_regprocedure('public.mdf_reject_revision_presentation_change()') AND t.tgtype=27 AND t.tgenabled='O' AND NOT t.tgisinternal;" \
+      "SELECT to_regprocedure('public.mdf_source_presentation_digest(text,text)') IS NOT NULL;" \
+      "SELECT to_regclass('public.mdf_board_history_events') IS NULL OR (COALESCE((SELECT md5(pg_get_functiondef(oid)) FROM pg_proc WHERE oid=to_regprocedure('public.record_mdf_board_history_from_audit()'))='cb273b6a454a8c02ffce436caa6f8863', false) AND COALESCE((SELECT md5(pg_get_functiondef(oid)) FROM pg_proc WHERE oid=to_regprocedure('public.record_mdf_board_history_from_audit_relation()'))='3a0cefb994d1231bb6fda6677fa2077e', false));" ;;
     186_bitrix24_product_import*) probe_all \
       "$(q_tbl bitrix24_product_mapping)" \
       "SELECT count(*)=8 FROM information_schema.columns WHERE table_schema='public' AND table_name='bitrix24_product_mapping';" \
@@ -2460,6 +2473,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     191_mdf_order_corrections*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    192_mdf_board_presentation_history*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     186_bitrix24_product_import*)

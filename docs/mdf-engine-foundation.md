@@ -386,6 +386,32 @@ preview. Closed orders stay refused (`MDF_ORDER_CLOSED`). The preview also retur
 such as `READINESS_AFTER_RECALCULATION` when a bath's readiness is known only after the job) and per detail
 `cardQuantity` and `statusKept`. No reason is required.
 
+## Board on the coherent publication
+
+With the engine `active` or `read_only`, the MDF view of the board renders from one published snapshot
+(`GET /orders/status-board/mdf`): the set of cards, their columns, issues («Требует проверки»), queue state, command
+tokens, members and counters come only from that revision. In `legacy`/`shadow` the board is unchanged. If the engine is
+`active`/`read_only` but the reader is disabled or fails, the view shows «Производственный учёт недоступен» — never the
+legacy rendering.
+
+The snapshot also carries, from the same read-only transaction:
+- `presentation` — card presentation. Composition-sensitive content (items with sizes, previews, program/file names) is
+  shown only while the accepted revision's presentation binding (`mdf_revision_presentation`, migration 192) equals
+  `mdf_source_presentation_digest(kind, id)` of the current raw source; otherwise `stale` (minimal card). Only receipts
+  that establish membership from raw data compute a binding (manual SVG/CNC intake, BASIS source/composition, bath from a
+  cut result, bath successor); every other receipt inherits the predecessor's binding, so a stale one is never refreshed.
+  Comments, rework, thumbs-up, completion, doweling links and the BASIS name are live annotations outside the binding.
+  Items are limited to visible orders; file names, previews and live annotations need every owner visible;
+- `progress` — per-card member/cut/laminated from the card's own accepted lines (detached positions excluded);
+  whole-position totals stay in `positions`;
+- `orders` — names of visible orders; `unregistered` — authorized sources of the window not yet in the engine
+  («Ожидает учёта», read-only).
+`searchOrderIds` selects the (old, completed) cards of requested visible orders; `orderIds` keeps adding only position
+totals of the board's order cards. Reading never writes and runs no automation.
+
+Board history (migration 141 triggers, redefined by 192) also resolves engine events: entity `<kind>:<id>` of type
+`mdf_source`/`mdf_board_card`, bath ids of `mdf_bath`, and admits `mdf.order_correction.requested`.
+
 ## Storage and bounded lineage consumers
 
 ### Physical origin contract

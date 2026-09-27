@@ -3415,6 +3415,7 @@ paths:
         - { name: dateTo, in: query, schema: { type: string, format: date } }
         - { name: orderIds, in: query, description: До 100 положительных safe-integer ID через запятую, schema: { type: string } }
         - { name: jobIds, in: query, description: До 20 UUID через запятую; все владельцы зафиксированного состава и потребности должны быть доступны, schema: { type: string } }
+        - { name: searchOrderIds, in: query, description: 'Поиск (§5.6): до 100 ID заказов через запятую; дополнительно выбирает карточки этих заказов, включая старые и завершённые (каждый заказ проверяется на доступ). В отличие от orderIds, который добавляет только итоги позиций карточек заказов.', schema: { type: string } }
         - { name: focusKind, in: query, schema: { type: string, enum: [packet, bazisCutSet, bath] } }
         - { name: focusId, in: query, description: Обязателен вместе с focusKind; UUID файла, ID БАЗИС либо cut-result:ID, schema: { type: string } }
         - { name: If-None-Match, in: header, schema: { type: string } }
@@ -16962,8 +16963,96 @@ components:
     MdfPublishedSnapshot:
       type: object
       additionalProperties: false
-      required: [schemaVersion, mode, revision, generatedAt, dateFrom, dateTo, cards, members, positions, pendingJobs, trackedJobs, issues]
+      required: [schemaVersion, mode, revision, generatedAt, dateFrom, dateTo, cards, members, positions, pendingJobs, trackedJobs, issues, presentation, progress, orders, unregistered]
       properties:
+        presentation:
+          type: array
+          description: >-
+            Оформление карточек (§5.6) из того же снимка. Составочно-зависимые данные (позиции с размерами, превью, имена
+            файлов) — только если привязка принятой ревизии совпадает с текущими сырыми данными (иначе stale=true и
+            composition=null — минимальная карточка). Позиции — только видимых заказов; имена файлов, превью и живые
+            аннотации — только когда видимы все владельцы карточки.
+          items:
+            type: object
+            required: [kind, id, stale, composition, live]
+            properties:
+              kind: { type: string, enum: [packet, bazisCutSet, bath] }
+              id: { type: string }
+              stale: { type: boolean }
+              composition:
+                type: object
+                nullable: true
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        orderId: { type: integer }
+                        detailId: { type: integer, nullable: true }
+                        detailNumber: { nullable: true }
+                        widthMm: { type: number, nullable: true }
+                        heightMm: { type: number, nullable: true }
+                        quantity: { type: number }
+                  programName: { type: string, nullable: true }
+                  externalKey: { type: string, nullable: true }
+                  materialName: { type: string, nullable: true }
+                  hasSheetImage: { type: boolean }
+                  svgCutJobId: { type: number, nullable: true }
+                  svgCutResultId: { type: number, nullable: true }
+                  cuttingSequenceNo: { type: number, nullable: true }
+                  cutJobId: { type: number, nullable: true }
+                  cutJobName: { type: string, nullable: true }
+                  resultNo: { type: number, nullable: true }
+                  revisionNo: { type: number, nullable: true }
+              live:
+                type: object
+                nullable: true
+                description: Живые аннотации (текущие значения, не привязаны к ревизии).
+                properties:
+                  comments: {}
+                  rework: { type: boolean }
+                  thumbsUp: { type: boolean }
+                  completionStatus: { type: string, nullable: true }
+                  dowelingLinks: {}
+                  name: { type: string, nullable: true }
+        progress:
+          type: array
+          maxItems: 20000
+          description: Прогресс конкретной карточки по её собственным принятым строкам (выбывшие позиции исключены); итоги позиций — в positions.
+          items:
+            type: object
+            required: [kind, id, orderId, detailId, member, cut, laminated]
+            properties:
+              kind: { type: string }
+              id: { type: string }
+              orderId: { type: integer }
+              detailId: { type: integer }
+              member: { type: number }
+              cut: { type: number }
+              laminated: { type: number }
+        orders:
+          type: array
+          description: Названия видимых заказов карточек.
+          items:
+            type: object
+            required: [orderId, orderName]
+            properties:
+              orderId: { type: integer }
+              orderName: { type: string }
+        unregistered:
+          type: array
+          maxItems: 200
+          description: Файлы станка и наборы БАЗИС окна, ещё не учтённые движком, все заказы которых видимы («Ожидает учёта», только чтение).
+          items:
+            type: object
+            required: [kind, id, displayName, sourceCreatedAt, orderIds]
+            properties:
+              kind: { type: string, enum: [packet, bazisCutSet] }
+              id: { type: string }
+              displayName: { type: string }
+              sourceCreatedAt: { type: string }
+              orderIds: { type: array, items: { type: integer } }
         schemaVersion: { type: integer, enum: [1] }
         mode: { type: string, enum: [legacy, shadow, active, read_only] }
         revision: { type: string, pattern: '^[0-9]+$' }

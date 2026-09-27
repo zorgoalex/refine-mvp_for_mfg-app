@@ -43,13 +43,15 @@ describe.skipIf(!enabled)('MDF order-demand cascade, isolated PostgreSQL schema'
       'cnc_telegram_packets', 'mdf_board_manual_moves', 'command_idempotency_keys',
     ]);
     await fixture.client.query('ALTER TABLE cnc_telegram_packets ADD PRIMARY KEY(packet_id)');
+    // migration 141 references orders and users
+    await fixture.client.query('ALTER TABLE orders ADD PRIMARY KEY(order_id); ALTER TABLE users ADD PRIMARY KEY(user_id)');
     await fixture.client.query('CREATE UNIQUE INDEX ON command_idempotency_keys(idempotency_key)');
     await fixture.applyMigrations([
-      '165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql',
+      '141_mdf_board_history.sql', '165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql',
       '174_mdf_execution_context.sql', '175_mdf_command_placement.sql',
       '178_mdf_correction_receipts.sql', '179_mdf_active_return.sql',
       '182_mdf_physical_lineage.sql', '185_mdf_bazis_composition.sql', '187_mdf_bazis_refill_rows.sql',
-      '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql',
+      '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql',
     ]);
     await fixture.assertLocalRelations([
       'mdf_source_heads', 'mdf_evidence_revisions', 'mdf_revision_context', 'mdf_revision_demand',
@@ -59,6 +61,7 @@ describe.skipIf(!enabled)('MDF order-demand cascade, isolated PostgreSQL schema'
     ]);
     await fixture.client.query(`
       ALTER TABLE audit_log ALTER COLUMN audit_id SET DEFAULT gen_random_uuid();
+      ALTER TABLE audit_log ALTER COLUMN created_at SET DEFAULT now();
       ALTER TABLE outbox_events ALTER COLUMN outbox_event_id SET DEFAULT gen_random_uuid();
       CREATE UNIQUE INDEX e2e_cascade_related ON audit_log_related_entity(audit_id,entity_type,entity_id);
       CREATE UNIQUE INDEX e2e_cascade_outbox ON outbox_events(idempotency_key);
@@ -871,6 +874,63 @@ describe.skipIf(!enabled)('MDF order-demand cascade, isolated PostgreSQL schema'
       expect(await isPublished('bazisCutSet', s.sourceId)).toBe(false);
     });
   });
+  describe('engine events in the board history (§5.6)', () => {
+    beforeEach(() => { vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'true'); });
+    afterEach(() => { vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'false'); });
+    const historyRows = async (orderId: number) => (await fixture.client.query<{ step_code: string; subject_kind: string;
+      subject_id: string; actor_user_id: string | null; correlation_key: string }>(`SELECT step_code,subject_kind,subject_id,
+      actor_user_id::text,correlation_key FROM mdf_board_history_events WHERE order_id=$1 ORDER BY occurred_at,event_key`, [orderId])).rows;
+
+    it('records a confirmed order correction (requested + accepted) once per order with the card subject, and maps it', async () => {
+      const s = await makeSource({ cut: true, extraMember: true });
+      const del = (key: string, confirmation?: { digest: string }) => orderCommand(s.orderIds,
+        tx => tx.query('UPDATE order_details SET delete_flag=true WHERE detail_id=$1', [s.extra]), key, confirmation ? { confirmation } : {});
+      let digest = '';
+      try { await del('history-correction-1'); } catch (error) {
+        digest = (error as { details: { mdfConfirmation: { digest: string } } }).details.mdfConfirmation.digest;
+      }
+      await del('history-correction-confirmed', { digest });
+      await processJob((await pendingJob(s, (await head(s)).received)).job_id);
+      const rows = await historyRows(s.orderIds[0]);
+      const requested = rows.filter(r => r.step_code === 'mdf.order_correction.requested');
+      expect(requested).toHaveLength(1);
+      expect(requested[0]).toMatchObject({ actor_user_id: '1', correlation_key: 'history-correction-confirmed-request' });
+      const accepted = rows.filter(r => r.step_code === 'mdf_board.order_correction_accepted');
+      expect(accepted).toEqual([expect.objectContaining({ subject_kind: 'bazisCutSet', subject_id: s.sourceId })]);
+      // The endpoint's audit selection + mapper on the real rows.
+      const { PgMdfBoardHistoryRepository, mapAuditEvent } = await import('../../cnc-telegram/adapters/pg-mdf-board-history-repository');
+      const repository = new PgMdfBoardHistoryRepository(db() as never) as unknown as {
+        loadAuditHistory(orderId: number, from: string, to: string): Promise<Parameters<typeof mapAuditEvent>[0][]> };
+      const audit = await repository.loadAuditHistory(s.orderIds[0], '2000-01-01', '2100-01-01');
+      const order = { orderId: s.orderIds[0], orderName: 'E2E', fullNumber: 'E2E' } as never;
+      const events = audit.map(row => mapAuditEvent(row, order, { relatedCurrentCards: [] } as never)).filter(Boolean);
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({ reasonCode: 'ORDER_CORRECTION_CONFIRMED', subjectKind: 'order' }),
+        expect.objectContaining({ reasonCode: 'ORDER_CORRECTION_ACCEPTED', subjectKind: 'bazisCutSet', subjectId: s.sourceId }),
+      ]));
+    });
+
+    it('records a bath retirement with the bath subject', async () => {
+      const s = await makeSource({ cut: true });
+      const bathId = await addBath(s, 3);
+      const b = (await fixture.client.query<{ accepted: string; version: string; epoch: string }>(`SELECT accepted_revision_key accepted,
+        version::text,correction_epoch::text epoch FROM mdf_source_heads WHERE source_kind='bath' AND source_id=$1`, [bathId])).rows[0];
+      const transitionId = randomUUID(), jobId = randomUUID();
+      await db().transaction(tx => recordMdfBathTransition(tx, { transitionId, jobId, cutJobId: 1,
+        retired: { sourceId: bathId, predecessorRevisionKey: b.accepted, revisionKey: `bath-retired:${transitionId}`,
+          fence: { version: b.version, correctionEpoch: b.epoch }, sourceCreatedAt: '2026-09-24T00:00:00.000Z', displayName: 'E2E retired' },
+        ownerIds: [s.orderIds[0]], actorUserId: 1, requestId: `history-transition-${transitionId}`,
+        commandKey: `history-transition-${transitionId}`, rules: [] }));
+      await processJob(jobId);
+      const rows = await historyRows(s.orderIds[0]);
+      expect(rows.filter(r => r.step_code === 'mdf_board.bath_retired')).toEqual([
+        expect.objectContaining({ subject_kind: 'bath', subject_id: bathId })]);
+      // The released reservations are recorded inside the retirement audit (no separate supply event).
+      expect(rows.filter(r => r.step_code === 'mdf_board.bath_supply_reserved'))
+        .toEqual(expect.arrayContaining([expect.objectContaining({ subject_kind: 'bath', subject_id: bathId })]));
+    });
+  });
+
   describe('bath transition engine core (§5.4b)', () => {
     const bathAllocations = async (bathId: string) => (await fixture.client.query<{ state: string; q: string }>(`SELECT state,
       sum(quantity)::text q FROM mdf_bath_allocations WHERE bath_id=$1 GROUP BY state ORDER BY state`, [bathId])).rows;

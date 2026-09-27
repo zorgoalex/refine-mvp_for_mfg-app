@@ -35,7 +35,7 @@ export class MdfPublishedBoardController {
 
 export function parseMdfPublishedQuery(raw: Record<string,unknown>): MdfPublishedQuery {
   const invalid = (): never => { throw new ApiError(422,'MDF_QUERY_INVALID','Неверный период или идентификатор карточки'); };
-  if (Object.keys(raw).some(k => !['dateTo','focusKind','focusId','orderIds','jobIds'].includes(k))) invalid();
+  if (Object.keys(raw).some(k => !['dateTo','focusKind','focusId','orderIds','jobIds','searchOrderIds'].includes(k))) invalid();
   const query: MdfPublishedQuery = {};
   if (raw.jobIds!==undefined) {
     if (typeof raw.jobIds!=='string') invalid();
@@ -48,6 +48,13 @@ export function parseMdfPublishedQuery(raw: Record<string,unknown>): MdfPublishe
     const ids=String(raw.orderIds).split(',').map(Number);
     if (ids.length>100 || ids.some(id => !Number.isSafeInteger(id))) invalid();
     query.orderIds=[...new Set(ids)].sort((a,b) => a-b);
+  }
+  // §5.6 search beyond the window: also selects the (old/completed) cards of these orders; authorized server-side.
+  if (raw.searchOrderIds!==undefined) {
+    if (typeof raw.searchOrderIds!=='string' || !/^[1-9]\d*(,[1-9]\d*)*$/.test(raw.searchOrderIds)) invalid();
+    const ids=String(raw.searchOrderIds).split(',').map(Number);
+    if (ids.length>100 || ids.some(id => !Number.isSafeInteger(id))) invalid();
+    query.searchOrderIds=[...new Set(ids)].sort((a,b) => a-b);
   }
   if (raw.dateTo!==undefined) {
     if (typeof raw.dateTo!=='string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw.dateTo)) invalid();

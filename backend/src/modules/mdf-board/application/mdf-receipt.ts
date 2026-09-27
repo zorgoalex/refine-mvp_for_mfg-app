@@ -33,6 +33,9 @@ export interface MdfReceiptInput {
   correction?: true;
   lines: readonly MdfReceiptLine[];
   rules: readonly { ruleId: number; version: number }[];
+  /** §5.6 presentation binding (migration 192). 'compute' only for receipts that establish membership from raw source
+   * data; every other receipt inherits the predecessor's binding (absent stays absent, stale is never refreshed). */
+  presentation?: 'compute';
 }
 /** Internal v2 receipt path. Callers cannot select correction independently of
  * the immutable transition manifest, and cannot supply canonical origin IDs. */
@@ -198,7 +201,7 @@ export async function recordMdfBathTransition(tx: DatabaseClient, input: MdfBath
     ownerIds: [...input.ownerIds], commandKey: input.commandKey });
   if (input.successor) {
     await persistMdfReceipt(tx,{ sourceKind: 'bath', sourceId: input.successor.sourceId,
-      revisionKey: input.successor.revisionKey, origin: 'derived', actorUserId: input.actorUserId,
+      revisionKey: input.successor.revisionKey, origin: 'derived', actorUserId: input.actorUserId, presentation: 'compute',
       requestId: input.requestId, causeKey: input.successor.revisionKey, expectedFence: null, accept: true, rules: [],
       lines: input.successor.lines, executionContext: input.successor.executionContext },
     undefined,undefined,undefined,role('successor'));
@@ -470,6 +473,17 @@ async function persistMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput,
     (source_kind,source_id,revision_key,payload_digest,origin,actor_user_id,request_id,cause_key)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, [...source, input.revisionKey, digest, input.origin,
     input.actorUserId, input.requestId, input.causeKey]);
+  // §5.6: bind the card presentation to this revision — computed from raw data only by composition-establishing
+  // receipts, otherwise inherited from the predecessor received revision.
+  if (input.presentation === 'compute') {
+    await tx.query(`INSERT INTO mdf_revision_presentation(source_kind,source_id,revision_key,presentation_digest)
+      SELECT $1,$2,$3,d FROM (SELECT mdf_source_presentation_digest($1,$2) d) x WHERE d IS NOT NULL`,
+    [...source, input.revisionKey]);
+  } else if (head?.received_revision_key) {
+    await tx.query(`INSERT INTO mdf_revision_presentation(source_kind,source_id,revision_key,presentation_digest)
+      SELECT $1,$2,$3,presentation_digest FROM mdf_revision_presentation
+      WHERE source_kind=$1 AND source_id=$2 AND revision_key=$4`, [...source, input.revisionKey, head.received_revision_key]);
+  }
   // One SQL insertion for the entire frozen composition, not one query per part.
   await tx.query(`INSERT INTO mdf_evidence_lines
     (source_kind,source_id,revision_key,line_key,order_id,detail_id,quantity,stage_code,evidence_kind,rework)

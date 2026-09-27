@@ -152,7 +152,7 @@ export async function captureNewMdfManualSvgSource(tx: TransactionClient, input:
     FROM status_automation_rules WHERE is_enabled ORDER BY id`)).rows;
   const revisionKey=`manual-svg-created:${input.packetId}`;
   const imported=telegramImports.get(tx);
-  const result=await recordMdfReceipt(tx,{ sourceKind:'packet',sourceId:input.packetId,revisionKey,origin:'derived',
+  const result=await recordMdfReceipt(tx,{ sourceKind:'packet',sourceId:input.packetId,revisionKey,origin:'derived',presentation:'compute',
     actorUserId:Number(input.user.id),requestId:input.requestId,causeKey:revisionKey,expectedFence:null,accept:complete && !imported?.duplicate,rules,
     sourceDigest:createHash('sha256').update(JSON.stringify([header.payloadHash,header.resultDigest,imported ?? null])).digest('hex'),
     lines:[...members.values()].map(m=>({...m,stageCode:'membership',evidenceKind:'derived' as const,rework:header.rework})),

@@ -52,7 +52,7 @@ describe.skipIf(!enabled)('MDF CNC observations, isolated PostgreSQL schema', ()
     for (const migration of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql',
       '174_mdf_execution_context.sql','175_mdf_command_placement.sql','178_mdf_correction_receipts.sql',
       '179_mdf_active_return.sql','180_mdf_cnc_observations.sql','181_cnc_manual_send_observation.sql',
-      '182_mdf_physical_lineage.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql']) {
+      '182_mdf_physical_lineage.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql']) {
       await fixture.applyMigrations([migration]);
     }
     const localLineageRelations=(await fixture.client.query<{ relname:string; schema_name:string|null }>(`WITH wanted(relname) AS (

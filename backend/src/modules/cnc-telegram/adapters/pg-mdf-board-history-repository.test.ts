@@ -4,6 +4,7 @@ import type { MdfBoardHistoryOrderOptionDto } from '../dto/mdf-board-history.dto
 import {
   appendMdfHistoryOrderVisibilitySql,
   buildDiagnosis,
+  mapAuditEvent,
   type CurrentSource,
 } from './pg-mdf-board-history-repository';
 
@@ -119,3 +120,31 @@ function source(
 ): CurrentSource {
   return { kind, id, label, automaticColumn, currentColumn: automaticColumn, quantity };
 }
+
+describe('MDF board history: legacy and engine return events (§5.6)', () => {
+  const order = { orderId: 7, orderName: 'A', fullNumber: 'A' } as MdfBoardHistoryOrderOptionDto;
+  const diagnosis = { relatedCurrentCards: [] } as never;
+  const row = (overrides: Record<string, unknown>) => ({ audit_id: 'a1', event: 'mdf_board.production_returned',
+    entity_type: 'mdf_board_card', entity_id: 'packet:p1', username: 'u', source: null, request_id: 'r',
+    status_name: null, status_code: 'parsed', before_json: {}, after_json: {}, diff_json: {}, metadata_json: {},
+    created_at: '2026-09-27T00:00:00Z', provenance: null, ...overrides }) as never;
+
+  it('keeps the legacy return (metadata.scope) in history even though its entity is mdf_board_card', () => {
+    const event = mapAuditEvent(row({ metadata_json: { scope: { kind: 'packet', id: 'p1' } },
+      diff_json: { cards: [{ kind: 'packet', id: 'p1', before: 'completed' }] } }), order, diagnosis);
+    expect(event).toMatchObject({ subjectKind: 'packet', subjectId: 'p1', reasonCode: 'PRODUCTION_RETURN',
+      fromColumn: 'completed', toColumn: 'parsed' });
+  });
+
+  it('maps the active-engine return (metadata.source) and explicitly mapped engine events; unknown ones are dropped', () => {
+    expect(mapAuditEvent(row({ metadata_json: { source: { kind: 'bath', id: 'cut-result:5' } } }), order, diagnosis))
+      .toMatchObject({ subjectKind: 'bath', subjectId: 'cut-result:5', reasonCode: 'PRODUCTION_RETURN' });
+    expect(mapAuditEvent(row({ event: 'mdf_board.bath_retired', entity_type: 'mdf_source', entity_id: 'bath:cut-result:5' }),
+      order, diagnosis)).toMatchObject({ subjectKind: 'bath', subjectId: 'cut-result:5', reasonCode: 'BATH_RETIRED' });
+    expect(mapAuditEvent(row({ event: 'mdf_board.bath_supply_reserved', entity_type: 'mdf_bath', entity_id: 'cut-result:5' }),
+      order, diagnosis)).toMatchObject({ subjectKind: 'bath', reasonCode: 'BATH_SUPPLY_RESERVED' });
+    expect(mapAuditEvent(row({ event: 'mdf_board.something_new', entity_type: 'mdf_source', entity_id: 'packet:p1' }),
+      order, diagnosis)).toBeNull();
+  });
+});
+

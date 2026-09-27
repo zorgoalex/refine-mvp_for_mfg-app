@@ -234,7 +234,7 @@ export async function beginMdfBathLifecycle(tx: TransactionClient, input: {
       } else {
         // No active bath yet: the successor is simply the job's first bath.
         const saved = await recordMdfReceipt(tx, { sourceKind: 'bath', sourceId: successor!.sourceId,
-          revisionKey: `bath-created:${nextResultId}`, origin: 'derived', actorUserId: Number(input.user.id),
+          revisionKey: `bath-created:${nextResultId}`, origin: 'derived', presentation: 'compute', actorUserId: Number(input.user.id),
           requestId: command.requestId, causeKey: `bath-created:${nextResultId}`, expectedFence: null, accept: true, rules,
           lines: successor!.lines, executionContext: successor!.executionContext });
         jobId = saved.jobId;

@@ -16,6 +16,13 @@ describe('published MDF read endpoint', () => {
     expect(parseMdfPublishedQuery({ orderIds: '12,5,12',dateTo: '2026-09-21',focusKind: 'bath',focusId: 'cut-result:14' }))
       .toEqual({ dateTo: '2026-09-21',orderIds: [5,12],focus: { kind: 'bath',id: 'cut-result:14' } });
   });
+  it('normalizes searchOrderIds (§5.6) separately from orderIds and bounds it', () => {
+    expect(parseMdfPublishedQuery({ searchOrderIds: '9,3,9', orderIds: '4' }))
+      .toEqual({ orderIds: [4], searchOrderIds: [3, 9] });
+    expect(() => parseMdfPublishedQuery({ searchOrderIds: '0' })).toThrow();
+    expect(() => parseMdfPublishedQuery({ searchOrderIds: 'x' })).toThrow();
+    expect(() => parseMdfPublishedQuery({ searchOrderIds: Array.from({ length: 101 }, (_, i) => i + 1).join(',') })).toThrow();
+  });
   it('normalizes exact job IDs and includes terminal results in the ETag', () => {
     const id='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
     expect(parseMdfPublishedQuery({ jobIds: `${id.toUpperCase()},${id}` })).toEqual({ jobIds: [id] });

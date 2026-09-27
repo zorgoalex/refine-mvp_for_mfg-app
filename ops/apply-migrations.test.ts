@@ -237,6 +237,31 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(verification).toMatch(/182_mdf_physical_lineage\*\)\s+probe_file "\$f" \|\| die/);
   });
 
+  it('probes the presentation binding and conditionally-redefined board-history functions before ledgering migration192', () => {
+    const start = probeFn.indexOf('192_mdf_board_presentation_history*)');
+    const end = probeFn.indexOf('186_bitrix24_product_import*)', start);
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, end);
+    for (const marker of [
+      'mdf_revision_presentation', 'mdf_revision_presentation_pkey',
+      'mdf_revision_presentation_presentation_digest_check',
+      'mdf_revision_presentation_source_kind_source_id_revision_k_fkey',
+      'mdf_revision_presentation_immutable', "public.mdf_reject_revision_presentation_change()",
+      't.tgtype=27', "t.tgenabled='O'", 'NOT t.tgisinternal',
+      "to_regprocedure('public.mdf_source_presentation_digest(text,text)') IS NOT NULL",
+      // 192 conditionally redefines the two 141 board-history functions in place; the guard
+      // below only requires the post-192 body once mdf_board_history_events (141) exists —
+      // without it (191-only schema, no 141), the migration still applies and the check is skipped.
+      "to_regclass('public.mdf_board_history_events') IS NULL OR",
+      "to_regprocedure('public.record_mdf_board_history_from_audit()')",
+      "'cb273b6a454a8c02ffce436caa6f8863'",
+      "to_regprocedure('public.record_mdf_board_history_from_audit_relation()')",
+      "'3a0cefb994d1231bb6fda6677fa2077e'",
+    ]) expect(arm).toContain(marker);
+    const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verification).toMatch(/192_mdf_board_presentation_history\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
   it('probes sealed BASIS assignment and command intent effects before ledgering migration185', () => {
     const start = probeFn.indexOf('185_mdf_bazis_composition*)');
     const end = probeFn.indexOf('*) return 2', start);

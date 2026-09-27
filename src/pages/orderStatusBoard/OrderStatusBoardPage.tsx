@@ -3,13 +3,19 @@ import { MdfProductionReturnDialog, isMdfBackwardMove, type MdfReturnIntent } fr
 import { toMdfReturnBoardWindow } from '../../api/mdfProductionReturnApi';
 import { mdfCorrectionApi, type MdfEngineModeDto } from '../../api/mdfCorrectionApi';
 import { mdfPublishedApi } from '../../api/mdfPublishedApi';
-import type { MdfSessionSnapshot } from '../../api/types/mdfPublishedApi.types';
+import type { MdfSessionSnapshot, MdfSourceColumn, MdfSourceKind } from '../../api/types/mdfPublishedApi.types';
 import { isMdfEngineModeEndpointMissing, selectMdfReturnDialog } from './mdfReturnSelection';
 import {
   MdfCorrectionReturnDialog,
   type MdfCorrectionReturnDialogSelection,
   type MdfCorrectionReturnIntent,
 } from './MdfCorrectionReturnDialog';
+import { MdfBoardUnavailable } from './MdfBoardUnavailable';
+import { MdfPublishedBoardView } from './MdfPublishedBoardView';
+import { prepareMdfPublishedCommand } from './mdfPublishedCommand';
+import type { MdfPublishedBoardCard } from './mdfPublishedBoard';
+import { resolveMdfBoardRenderMode } from './mdfBoardMode';
+import { useMdfPublishedBoard } from './useMdfPublishedBoard';
 import React, {
   lazy,
   memo,
@@ -595,6 +601,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const finePointer = !touchBoardDragEnabled;
   const { canViewFinancials } = useOrderFinancialVisibility();
   const canViewCncCutMaps = can('cut.view');
+  // §5.6 finding 9: literal permission check for moving MDF published-board cards, separate from
+  // engine/card readiness.
+  const canMoveMdfPublishedCards = can('production.tasks.update');
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const workspaceTabsHeight = useWorkspaceTabsHeight();
@@ -623,6 +632,25 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     return parsed;
   }, [defaultCncOrderSearchPeriod, defaultSort, fixedView, searchParams]);
   const isCncToday = viewState.view === 'cnc_today';
+  // §5.6: which the MDF board (`cnc_today`) renders from. `null`/`legacy` fall through to the
+  // unchanged legacy rendering below; `published` and `unavailable` take over entirely.
+  const mdfFocusKind: MdfSourceKind | null =
+    viewState.cncCardKind === 'packet' || viewState.cncCardKind === 'bazisCutSet' || viewState.cncCardKind === 'bath'
+      ? viewState.cncCardKind
+      : null;
+  const mdfFocusId = mdfFocusKind ? viewState.cncCardId ?? null : null;
+  const mdfPublishedBoard = useMdfPublishedBoard({
+    enabled: active && isCncToday,
+    workday: viewState.cncWorkday ?? todayCncWorkday,
+    focusKind: mdfFocusKind,
+    focusId: mdfFocusId,
+  });
+  // §5.6 finding 5: what the board actually renders — legacy is reached ONLY on an explicit
+  // `legacy` mode result; `mode === null` (still resolving) always renders a loading state.
+  const mdfBoardRenderMode = useMemo(
+    () => resolveMdfBoardRenderMode({ mode: mdfPublishedBoard.mode, hasSession: mdfPublishedBoard.session !== null }),
+    [mdfPublishedBoard.mode, mdfPublishedBoard.session],
+  );
   const {
     orderStatuses: cncOrderStatuses,
     isLoading: cncOrderStatusesLoading,
@@ -2079,6 +2107,36 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     })();
   }, [computeMdfReturnSelection]);
 
+  // §5.6b/8: manual move on a published card. A backward move reuses the §5.5 return dialog
+  // selection (already engine-aware); a forward move uses the published-command token directly and
+  // refreshes the board's own snapshot afterwards — the legacy `moveCncCard` path is never used here.
+  const handleMdfPublishedMove = useCallback((
+    card: MdfPublishedBoardCard,
+    targetColumn: MdfSourceColumn,
+    targetTitle: string,
+  ) => {
+    if (isMdfBackwardMove(card.kind, card.column ?? undefined, targetColumn)) {
+      resolveMdfReturnDialog(card.kind, card.id, targetColumn as MdfReturnIntent['targetColumn'], targetTitle);
+      return;
+    }
+    const session = mdfPublishedBoard.session;
+    if (!session) {
+      message.error('Доска ещё не загружена. Обновите страницу.');
+      return;
+    }
+    try {
+      const prepared = prepareMdfPublishedCommand(session, { kind: card.kind, id: card.id }, targetColumn);
+      prepared.execute()
+        .then(() => mdfPublishedBoard.refresh())
+        .catch((error: unknown) => {
+          message.error(errorMessage(error, 'Не удалось переместить карточку.'));
+          mdfPublishedBoard.refresh();
+        });
+    } catch (error) {
+      message.error(errorMessage(error, 'Карточка ещё не готова к перемещению — обновите доску.'));
+    }
+  }, [mdfPublishedBoard, resolveMdfReturnDialog]);
+
   const moveCncCard = useCallback((
     kind: CncManualCardKind,
     cardId: string,
@@ -3111,7 +3169,29 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
               <Spin size="large" tip="Загрузка доски…" />
             </div>
           ) : isCncToday ? (
-            !cncHasRenderableColumns ? (
+            mdfBoardRenderMode === 'loading' ? (
+              <div className="status-board-loading">
+                <Spin size="large" tip="Загрузка доски…" />
+              </div>
+            ) : mdfBoardRenderMode === 'unavailable' ? (
+              <MdfBoardUnavailable onRetry={mdfPublishedBoard.refresh} loading={mdfPublishedBoard.loading} />
+            ) : mdfBoardRenderMode === 'published' && mdfPublishedBoard.session ? (
+              <MdfPublishedBoardView
+                session={mdfPublishedBoard.session}
+                workday={viewState.cncWorkday ?? todayCncWorkday}
+                period={viewState.cncOrderSearchPeriod}
+                orderFilters={cncOrderFilters}
+                searchText={viewState.search}
+                searchOrderIds={mdfPublishedBoard.searchOrderIds}
+                focusKind={mdfFocusKind}
+                focusId={mdfFocusId}
+                searchResolving={mdfPublishedBoard.searchResolving}
+                canMove={canMoveMdfPublishedCards}
+                onRequestSearchOrderNames={mdfPublishedBoard.requestSearchOrderNames}
+                onMove={handleMdfPublishedMove}
+                onFocusCard={focusMdfHistoryCard}
+              />
+            ) : !cncHasRenderableColumns ? (
               <Empty
                 description={
                   allCncColumnsHidden

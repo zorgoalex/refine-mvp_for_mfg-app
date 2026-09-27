@@ -160,7 +160,7 @@ export async function captureNewMdfBathResult(tx: TransactionClient, input: {
   const rules = (await tx.query<{ ruleId: number; version: number }>(`SELECT id::float8 "ruleId",version
     FROM status_automation_rules WHERE is_enabled ORDER BY id`)).rows;
   const revisionKey = `bath-created:${id}`;
-  const saved = await recordMdfReceipt(tx,{ sourceKind: 'bath',sourceId,revisionKey,origin: 'derived',
+  const saved = await recordMdfReceipt(tx,{ sourceKind: 'bath',sourceId,revisionKey,origin: 'derived',presentation: 'compute',
     actorUserId: Number(input.user.id),requestId: input.requestId,causeKey: revisionKey,expectedFence: null,
     // Recalculation is NOT confirmation that the old physical parts were made
     // again. Keep known membership visible but withhold automatic credit.

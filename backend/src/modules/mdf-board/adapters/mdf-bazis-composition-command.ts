@@ -564,8 +564,9 @@ export class PgMdfBazisCompositionCommand {
     const intentId = randomUUID();
     const assignmentStateId = randomUUID();
     const jobId = randomUUID();
+    // Raw rows (refill/shrink/removal above) are final here: the composition receipt establishes membership ⇒ binds.
     const saved = await recordMdfBazisCompositionReceipt(tx, { sourceKind: 'bazisCutSet', sourceId: target.id,
-      revisionKey, origin: 'manual', actorUserId: actorId, requestId, causeKey: revisionKey,
+      revisionKey, origin: 'manual', presentation: 'compute', actorUserId: actorId, requestId, causeKey: revisionKey,
       expectedFence: { version: prepared.head.version, correctionEpoch: prepared.head.epoch },
       accept: true, rules: [], lines: receiptLines,
       executionContext: { sourceCreatedAt: metadata.sourceCreatedAt, displayName: metadata.displayName,

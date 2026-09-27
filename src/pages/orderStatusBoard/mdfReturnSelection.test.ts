@@ -41,6 +41,10 @@ function snapshot(overrides: Partial<MdfPublishedSnapshot> = {}): MdfPublishedSn
     positions: [],
     pendingJobs: [],
     trackedJobs: [],
+    presentation: [],
+    progress: [],
+    orders: [],
+    unregistered: [],
     issues: [],
     ...overrides,
   };

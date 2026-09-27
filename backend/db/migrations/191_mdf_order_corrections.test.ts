@@ -28,7 +28,7 @@ describe.skipIf(!enabled)('MDF order corrections migration 191, isolated Postgre
     await fixture.applyMigrations([
       ...BASE_CHAIN,
       '182_mdf_physical_lineage.sql', '188_mdf_order_cascade_intents.sql',
-      '191_mdf_order_corrections.sql',
+      '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql',
     ]);
   }, 30000);
 
@@ -51,7 +51,7 @@ describe.skipIf(!enabled)('MDF order corrections migration 191, isolated Postgre
   }
 
   it('applies idempotently and installs the table, cascade-intent columns and immutability trigger', async () => {
-    await fixture.applyMigrations(['191_mdf_order_corrections.sql']);
+    await fixture.applyMigrations(['191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql']);
     await fixture.assertLocalRelations(['mdf_position_detachments']);
 
     const columns = await fixture.client.query<{ column_name: string }>(`
@@ -145,7 +145,7 @@ describe.skipIf(!enabled)('MDF order corrections migration 191, isolated Postgre
     await bare.connect();
     try {
       await bare.applyMigrations([...BASE_CHAIN]);
-      await expect(bare.applyMigrations(['191_mdf_order_corrections.sql']))
+      await expect(bare.applyMigrations(['191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql']))
         .rejects.toMatchObject({ message: expect.stringContaining('requires migration 188') });
     } finally {
       await bare.drop();

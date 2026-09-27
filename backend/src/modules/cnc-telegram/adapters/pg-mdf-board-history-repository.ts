@@ -90,6 +90,8 @@ const HISTORY_EVENT_PREFIXES = [
   'bazis_cut_set.',
   'mdf_board.',
   'status_automation.',
+  // §5.6: the confirmed order correction request (the only admitted `mdf.` event; see migration 192).
+  'mdf.order_correction.',
 ];
 
 export class PgMdfBoardHistoryRepository implements MdfBoardHistoryRepositoryPort {
@@ -463,7 +465,8 @@ export function buildDiagnosis(
   };
 }
 
-function mapAuditEvent(
+/** Exported for tests of the §5.6 engine-event mapping. */
+export function mapAuditEvent(
   row: AuditHistoryRow,
   order: MdfBoardHistoryOrderOptionDto,
   diagnosis: MdfBoardHistoryDiagnosisDto,
@@ -504,6 +507,35 @@ function mapAuditEvent(
     consequence = completed
       ? 'Распил по этой карточке больше не блокирует готовность заказа.'
       : 'У заказа появился МДФ-источник; он может быть показан на доске.';
+  } else if (row.event.startsWith('mdf.order_correction.')) {
+    if (row.event !== 'mdf.order_correction.requested') return null;
+    eventKind = 'progress';
+    reasonCode = 'ORDER_CORRECTION_CONFIRMED';
+    reason = 'Подтверждено изменение заказа, затрагивающее учтённое производство';
+    consequence = 'Лишнее количество стало излишком, удалённые позиции выбыли из учёта карточек; история сохранена.';
+  } else if (row.event === 'mdf_board.production_returned' && recordValue(metadata.source).kind !== undefined) {
+    // §5.6 active-engine return (mdf-corrections): the card is metadata.source / entity '<kind>:<id>'.
+    const source = recordValue(metadata.source);
+    const kind = historySubjectKind(textValue(source.kind));
+    if (!kind) return null;
+    subjectKind = kind;
+    subjectId = textValue(source.id) ?? row.audit_id;
+    subjectLabel = subjectLabelFor(subjectKind, subjectId, order);
+    eventKind = 'moved';
+    reasonCode = 'PRODUCTION_RETURN';
+    reason = 'Подтверждён возврат производственного этапа';
+    consequence = 'Отменены факты карточки выше выбранного этапа и зависящая от них закатка; статус заказа меняют только правила.';
+  } else if (ENGINE_EVENT_TEXT[row.event] && engineSubject(row)) {
+    // Only explicitly mapped engine events; the legacy return (metadata.scope, entity mdf_board_card) keeps its handler.
+    const engine = engineSubject(row)!;
+    subjectKind = engine.kind;
+    subjectId = engine.id;
+    subjectLabel = subjectLabelFor(subjectKind, subjectId, order);
+    const text = ENGINE_EVENT_TEXT[row.event];
+    if (!text) return null;
+    reasonCode = text.code;
+    reason = text.reason;
+    consequence = text.consequence;
   } else if (row.event === 'mdf_board.production_returned') {
     const scope=recordValue(metadata.scope);
     const kind=historySubjectKind(textValue(scope.kind));
@@ -655,6 +687,35 @@ function historySubjectKind(value: string | null): MdfBoardHistorySubjectKind | 
   if (value === 'order' || value === 'packet' || value === 'bazisCutSet' || value === 'bath') return value;
   return null;
 }
+
+/** §5.6 engine events address the card as entity '<kind>:<id>' (mdf_source / mdf_board_card) or the bath id (mdf_bath). */
+function engineSubject(row: { entity_type: string | null; entity_id: string | null }):
+  { kind: MdfBoardHistorySubjectKind; id: string } | null {
+  const entity = row.entity_id ?? '';
+  if (row.entity_type === 'mdf_bath' && /^cut-result:[1-9][0-9]*$/.test(entity)) return { kind: 'bath', id: entity };
+  if (row.entity_type !== 'mdf_source' && row.entity_type !== 'mdf_board_card') return null;
+  const separator = entity.indexOf(':');
+  if (separator <= 0) return null;
+  const kind = historySubjectKind(entity.slice(0, separator));
+  return kind && kind !== 'order' ? { kind, id: entity.slice(separator + 1) } : null;
+}
+
+const ENGINE_EVENT_TEXT: Record<string, { code: string; reason: string; consequence: string }> = {
+  'mdf_board.bath_retired': { code: 'BATH_RETIRED', reason: 'Ванна заменена новым раскроем',
+    consequence: 'Резервы старой ванны освобождены; история сохранена, карточка ушла с доски.' },
+  'mdf_board.bath_supply_reserved': { code: 'BATH_SUPPLY_RESERVED', reason: 'Под ванну зарезервированы распиленные детали',
+    consequence: 'Готовность ванны пересчитана.' },
+  'mdf_board.bath_supply_consumed': { code: 'BATH_SUPPLY_CONSUMED', reason: 'Закатка ванны списала зарезервированные детали',
+    consequence: 'Закатанные детали засчитаны заказу.' },
+  'mdf_board.bath_supply_released': { code: 'BATH_SUPPLY_RELEASED', reason: 'Резерв ванны освобождён',
+    consequence: 'Детали снова доступны другим ваннам.' },
+  'mdf_board.order_cascade_accepted': { code: 'ORDER_DEMAND_UPDATED', reason: 'Учтено изменение состава заказа',
+    consequence: 'Потребность карточки обновлена; учтённое производство не изменилось.' },
+  'mdf_board.order_correction_accepted': { code: 'ORDER_CORRECTION_ACCEPTED', reason: 'Учтено подтверждённое изменение заказа',
+    consequence: 'Лишнее стало излишком, выбывшие позиции больше не учитываются в карточке.' },
+  'mdf_board.forward_revision_accepted': { code: 'SOURCE_REVISION_ACCEPTED', reason: 'Принята новая версия карточки',
+    consequence: 'Учтённые факты перенесены в новую версию без изменений.' },
+};
 
 function subjectLabelFor(kind: MdfBoardHistorySubjectKind, id: string, order: MdfBoardHistoryOrderOptionDto): string {
   if (kind === 'order') return `Заказ ${order.fullNumber}`;
