@@ -1,4 +1,5 @@
-import { Badge, Dropdown, Empty, Select, Tag, Tooltip, Typography } from 'antd';
+import { Badge, Dropdown, Empty, Select, Tag, Typography } from 'antd';
+import { Tooltip } from '../../ui/tooltipDelay';
 import { SearchOutlined, WarningOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import React, { useMemo, useState } from 'react';

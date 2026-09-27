@@ -17,6 +17,8 @@ vi.mock('antd', () => ({
   Tooltip: 'mock-tooltip',
   Typography: { Text: 'mock-text', Title: 'mock-title' },
 }));
+// The view takes Tooltip from the app's delayed wrapper (tooltipDelay guard), not from antd.
+vi.mock('../../ui/tooltipDelay', () => ({ Tooltip: 'mock-tooltip' }));
 vi.mock('@ant-design/icons', () => ({
   SearchOutlined: 'mock-search-icon',
   WarningOutlined: 'mock-warning-icon',
