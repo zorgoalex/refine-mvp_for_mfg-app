@@ -1,7 +1,17 @@
 import React, { useMemo, useState } from 'react';
-import { Badge, Button, Form, Input, Modal, Select, Space, Tag, Tooltip, message } from 'antd';
+import {
+  Badge,
+  Button,
+  Form,
+  Input,
+  Modal,
+  Select,
+  Space,
+  Tag,
+  message,
+} from 'antd';
 import { PlusOutlined, UserAddOutlined } from '@ant-design/icons';
-import { Table } from '../../ui/tooltipDelay';
+import { Table, Tooltip } from '../../ui/tooltipDelay';
 import { ApiError } from '../../api/apiError';
 import { onecApi } from './onecApi';
 import type { OnecAgentView, OnecOverview, OnecSourceListItem } from './onecApi.types';
