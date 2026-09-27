@@ -358,6 +358,34 @@ cannot be made current again (409 `MDF_BATH_RESULT_RETIRED`, recalculate instead
 - Activation gate: no cut job may have more than one non-retired bath head. Rolling back to code without
   migration 190 after the first transition requires `read_only`.
 
+## Production returns in the active engine
+
+In `active`, a backward move of a machine file, BASIS set or bath card uses the accepted-evidence correction
+(`POST /orders/status-board/mdf-corrections/:cardKind/:cardId/preview|confirm`, token of the published card). The
+board asks `GET /orders/status-board/mdf-engine` first: the legacy return dialog is used only in `legacy`/`shadow`;
+in `active` a card that is not ready (pending job, no token, partial access, publication off) shows the reason
+instead of falling back; `read_only` allows no confirmation.
+
+A return of source S to stage T revokes S's own proof strictly above T and the lamination that depended on it:
+- supplier below cut: its allocations are released without replacement;
+- supplier at/above cut but below laminated: the cut stays, the affected consumed allocations become `reserved`;
+- bath below laminated: suppliers' cut stays, the bath's lamination is cancelled, its consumed allocations become
+  `reserved`.
+Proof of other sources and bath positions supplied by them are never touched; a detail moves back only if no
+remaining proof covers its current stage. Positions detached in S (§5.4e) are history only: they are carried or
+dropped like other lines but get no status effect and no credit; every owner of S, including one present only as
+detached history, stays locked and must pass view/update scope. BASIS composition still refuses closures with
+detachments (`MDF_CORRECTION_DETACHED_UNSUPPORTED`).
+
+The board never sets the order status. Orders in «Готов к выдаче»/«Выдан» may be returned; enabled
+`order.production_status_changed` rules (e.g. `anyProductionStatusIn` → «В производстве») decide. The preview runs the
+detail writes and those rules in a rolled-back savepoint and shows `orders[{before, after}]`; confirm dispatches the
+rules for real and fails `MDF_CORRECTION_STALE` (whole transaction rolled back) if any order ends differently from the
+preview. Closed orders stay refused (`MDF_ORDER_CLOSED`). The preview also returns, bound into its digest,
+`sourceAfter`/`affectedBaths[].afterColumn` (the §5.4d placement function on the post-return inputs; `afterIssues`
+such as `READINESS_AFTER_RECALCULATION` when a bath's readiness is known only after the job) and per detail
+`cardQuantity` and `statusKept`. No reason is required.
+
 ## Storage and bounded lineage consumers
 
 ### Physical origin contract

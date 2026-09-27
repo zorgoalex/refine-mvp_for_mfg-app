@@ -18,6 +18,9 @@ export interface MdfCorrectionSource {
   lineageIssue?: string;
   /** Issued only by the sealed-state snapshot loader; authenticates an intentional empty assignment. */
   assignmentState?: MdfValidatedBazisAssignmentState;
+  /** §5.4e positions detached in this source: lines stay (validated, carried or dropped like any other line) but
+   * are history only — no detail status effect, no quantity credit, no demand requirement. */
+  detachedPositionKeys?: ReadonlySet<string>;
   lines: MdfCorrectionSourceLine[];
 }
 export interface MdfCorrectionSourceLine {
@@ -65,6 +68,8 @@ export type MdfCorrectionPlan =
       affectedDetails: MdfCorrectionDetail[]; before: MdfQuantityResult; after: MdfQuantityResult };
 
 const cmp = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
+const isDetached = (s: MdfCorrectionSource, l: { orderId: number; detailId: number }) =>
+  s.detachedPositionKeys?.has(mdfPositionKey(l)) === true;
 const sourceKey = (kind: string, id: string) => JSON.stringify([kind, id]);
 const proofStage = (s: MdfCorrectionSource) => s.kind === 'bath' ? 'laminated' : 'cut';
 const positionReworkKey = (line: MdfCorrectionSourceLine) => JSON.stringify([mdfPositionKey(line),line.rework]);
@@ -311,20 +316,20 @@ export function planMdfCorrection(input: MdfCorrectionInput): MdfCorrectionPlan 
       const replaced=s.kind===target!.kind&&s.id===target!.id?sourceReplacement:
         bathReplacements.find(b=>b.sourceKind===s.kind&&b.sourceId===s.id);
       const lines=replaced ? replaced.lines : acceptedLines(s).map(lineOut);
-      for (const l of lines) if (l.stage==='cut'||l.stage==='laminated') evidence.push({source:sourceKey(s.kind,s.id),line:l.lineKey,
+      for (const l of lines) if ((l.stage==='cut'||l.stage==='laminated')&&!isDetached(s,l)) evidence.push({source:sourceKey(s.kind,s.id),line:l.lineKey,
         orderId:l.orderId,detailId:l.detailId,quantity:l.quantity,stage:l.stage,kind:l.evidence,rework:l.rework});
     }
     const demand=input.details.map(d=>({orderId:d.orderId,detailId:d.detailId,quantity:d.quantity}));
     const beforeEvidence:MdfQuantityEvidence[]=[];
     for (const s of input.sources) if (completeSource(s))
-      for (const l of acceptedLines(s)) if (l.stage==='cut'||l.stage==='laminated') beforeEvidence.push({source:sourceKey(s.kind,s.id),line:l.lineKey,
+      for (const l of acceptedLines(s)) if ((l.stage==='cut'||l.stage==='laminated')&&!isDetached(s,l)) beforeEvidence.push({source:sourceKey(s.kind,s.id),line:l.lineKey,
         orderId:l.orderId,detailId:l.detailId,quantity:l.quantity,stage:l.stage,kind:l.evidence,rework:l.rework});
     const before=calculateMdfQuantities({demand,evidence:beforeEvidence});
     const after=calculateMdfQuantities({demand,evidence});
     const targetMembers=acceptedLines(target!).filter(l=>l.stage==='membership'&&l.evidence==='derived');
     const targetPhysical=hasValidCurrentLineage(target!)&&(target!.kind==='packet'||target!.kind==='bazisCutSet')
       ? acceptedLines(target!).filter(l=>l.evidence==='physical'&&(l.stage==='cut'||l.stage==='laminated')) : [];
-    const affectedKeys=[...new Set([...targetMembers,...targetPhysical].map(mdfPositionKey))].sort(cmp);
+    const affectedKeys=[...new Set([...targetMembers,...targetPhysical].filter(l=>!isDetached(target!,l)).map(mdfPositionKey))].sort(cmp);
     const detailMap=new Map(input.details.map(d=>[mdfPositionKey(d),d]));
     const affectedDetails:MdfCorrectionDetail[]=[];
     for (const key of affectedKeys) {

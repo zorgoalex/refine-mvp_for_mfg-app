@@ -3489,6 +3489,28 @@ paths:
         '409': { description: Устаревший digest, конфликт ключа либо параллельное изменение }
         '422': { description: Возврат заблокирован условиями карточки }
         '503': { description: Изменения заказов отключены }
+  /api/v1/orders/status-board/mdf-engine:
+    get:
+      tags: [Orders]
+      operationId: getMdfEngineMode
+      summary: Режим производственного учёта МДФ для выбора диалога возврата
+      description: >-
+        Только чтение. Старый диалог возврата допустим лишь в legacy/shadow; в active — только новый возврат
+        (mdf-corrections), в read_only — без подтверждения.
+      responses:
+        '200':
+          description: Режим и включено ли согласованное чтение
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mode, publishedReads]
+                properties:
+                  mode: { type: string, enum: [legacy, shadow, active, read_only] }
+                  publishedReads: { type: boolean }
+        '401': { description: Требуется вход }
+        '403': { description: Нужна permission orders.view }
+        '503': { description: Режим учёта недоступен }
   /api/v1/orders/status-board/mdf-corrections/{cardKind}/{cardId}/preview:
     parameters:
       - { name: cardKind, in: path, required: true, schema: { type: string, enum: [packet, bath, bazisCutSet] } }
@@ -20451,7 +20473,7 @@ components:
           type: array
           items:
             type: object
-            required: [orderId, detailId, cutCoverage, laminatedCoverage, independentFloorRank, afterRank, after, orderName, detailNumber, beforeStatus, afterStatus]
+            required: [orderId, detailId, cutCoverage, laminatedCoverage, independentFloorRank, afterRank, after, orderName, detailNumber, beforeStatus, afterStatus, cardQuantity, statusKept]
             properties:
               orderId: { type: integer, minimum: 1 }
               detailId: { type: integer, minimum: 1 }
@@ -20464,11 +20486,33 @@ components:
               detailNumber: { type: integer, nullable: true }
               beforeStatus: { type: string, nullable: true }
               afterStatus: { type: string, nullable: true }
+              cardQuantity: { type: integer, minimum: 0, description: Количество позиции в этой карточке (after.quantity — вся деталь) }
+              statusKept: { type: boolean, description: Независимое подтверждение сохраняет текущий статус }
+        sourceAfter:
+          type: object
+          required: [afterColumn, afterIssues]
+          description: Итоговая колонка возвращаемой карточки (единая функция размещения §5.4d)
+          properties:
+            afterColumn: { type: string, nullable: true }
+            afterIssues: { type: array, items: { type: string } }
+        orders:
+          type: array
+          description: Следствия для статуса заказа; доска его не меняет — только включённые правила автостатусов (предпросмотр в откатываемой точке сохранения, повторная проверка при подтверждении)
+          items:
+            type: object
+            required: [orderId, orderName, before, after, beforeStatusId, afterStatusId]
+            properties:
+              orderId: { type: integer, minimum: 1 }
+              orderName: { type: string }
+              before: { type: string, nullable: true }
+              after: { type: string, nullable: true }
+              beforeStatusId: { type: integer, nullable: true }
+              afterStatusId: { type: integer, nullable: true }
         affectedBaths:
           type: array
           items:
             type: object
-            required: [source, previousRevision, cancelledLaminationQuantity, beforeColumn, manualPlacementColumnBefore, manualPlacementColumnAfter, clearsManualPlacementOverride]
+            required: [source, previousRevision, cancelledLaminationQuantity, beforeColumn, manualPlacementColumnBefore, manualPlacementColumnAfter, clearsManualPlacementOverride, afterColumn, afterIssues]
             properties:
               source: { $ref: '#/components/schemas/MdfCorrectionSource' }
               previousRevision: { type: string }
@@ -20477,6 +20521,8 @@ components:
               manualPlacementColumnBefore: { type: string, nullable: true }
               manualPlacementColumnAfter: { type: string, nullable: true }
               clearsManualPlacementOverride: { type: boolean }
+              afterColumn: { type: string, nullable: true, description: Итоговая колонка ванны после возврата }
+              afterIssues: { type: array, items: { type: string }, description: 'Непусто, если колонка станет известна только после пересчёта (например READINESS_AFTER_RECALCULATION)' }
         allocationReleases: { type: array, items: { type: string, format: uuid } }
         allocationReplacements: { type: array, items: { $ref: '#/components/schemas/MdfCorrectionAllocationReplacement' } }
         deferredPriorAutomation: { type: array, items: { $ref: '#/components/schemas/MdfCorrectionDeferredJobEffect' } }

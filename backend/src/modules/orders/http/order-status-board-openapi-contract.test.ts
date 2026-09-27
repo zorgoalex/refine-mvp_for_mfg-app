@@ -105,7 +105,15 @@ describe('order status board OpenAPI contract', () => {
     expect(schemas).toContain('manualPlacementColumnBefore');
     expect(schemas).toContain('manualPlacementColumnAfter');
     expect(schemas).toContain('clearsManualPlacementOverride');
-    expect(schemas).not.toContain('afterColumn');
+    // §5.5: authoritative resulting columns, card quantity and order status consequences are part of the preview.
+    expect(schemas).toContain('afterColumn:');
+    expect(schemas).toContain('afterIssues:');
+    expect(schemas).toContain('cardQuantity:');
+    expect(schemas).toContain('statusKept:');
+    expect(schemas).toContain('sourceAfter:');
+    expect(schemas).toContain('afterStatusId:');
+    expect(contract).toContain('  /api/v1/orders/status-board/mdf-engine:');
+    expect(contract).toContain('operationId: getMdfEngineMode');
     expect(schemas).not.toContain('replayed:');
     expect(contract).toContain('  /api/v1/orders/status-board/mdf-return/{cardKind}/{cardId}/preview:');
   });

@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
+import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
 import { recordMdfLineageReceipt, recordMdfReceipt, type MdfLineageReceiptInput } from '../application/mdf-receipt';
 import { MdfJobRunner } from '../application/mdf-job-runner';
 import { executeMdfAcceptedJob } from '../application/mdf-accepted-job';
@@ -430,18 +431,114 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
       cncFreshnessBaseline: { packetId: f.source.id, sourceVersion: '1', correctionEpoch: '1', state: 'waiting_pending' } });
     expect(preview.details).toHaveLength(1);
     expect(preview.details[0]).toMatchObject({ orderId: f.orderId, detailId: f.detailId,
-      beforeStatus: 'Распилен', afterStatus: 'Отрисован' });
+      beforeStatus: 'Распилен', afterStatus: 'Отрисован', cardQuantity: 10, statusKept: false });
+    // §5.5: authoritative resulting column of the returned card and the order status consequence.
+    expect(preview.sourceAfter).toEqual({ afterColumn: 'parsed', afterIssues: [] });
+    expect(preview.orders).toEqual([expect.objectContaining({ orderId: f.orderId, before: 'В производстве',
+      after: 'В производстве' })]);
     expect(await facts(f.orderId, f.source.id)).toEqual(before);
   });
 
-  it('fails closed for a card holding a detached order position (§5.4e) without changing anything', async () => {
-    const f = await acceptedPacket();
+  it('returns a card holding a detached position (§5.5c): the detached position is history, no status effect', async () => {
+    await fixture.client.query("UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now() WHERE status='pending'");
+    const orderId = ++orderSequence, a = orderId * 10, b = orderId * 10 + 1, packetId = randomUUID();
+    const source = { kind: 'packet' as const, id: packetId };
+    await fixture.client.query(`INSERT INTO orders(order_id,order_name,order_kind,delete_flag,version,order_status_id,
+      payment_status_id,created_by) VALUES($1,$2,'production_order',false,1,1,1,1)`, [orderId, `E2E detached ${orderId}`]);
+    await fixture.client.query(`INSERT INTO order_details(detail_id,order_id,detail_number,quantity,production_status_id,
+      delete_flag,material_id) VALUES($1,$3,1,10,2,false,1),($2,$3,2,5,2,false,1)`, [a, b, orderId]);
+    await fixture.client.query(`INSERT INTO cnc_telegram_packets(packet_id,external_packet_key,source_chat_id,source_message_id,
+      source_version,payload_hash,workday,completion_status,thumbs_up,completed_at,material_name,program_name,mdf_board_card_kind,
+      created_at,updated_at,parse_status,rework,mdf_completion_returned)
+      VALUES($1,$2,'E2E','1',1,$3,CURRENT_DATE,'completed',true,now(),'МДФ фасад 10 мм','E2E','machine_file',
+        now(),now(),'parsed',false,false)`, [packetId, `E2E-detached-${orderId}`, 'c'.repeat(64)]);
+    await fixture.client.query(`INSERT INTO cnc_telegram_packet_items(packet_item_id,packet_id,source_item_key,match_order_id,
+      match_detail_id,match_status,quantity,order_name,detail_number,width_mm,height_mm,source)
+      VALUES($1,$3,'part-1',$4,$5,'matched',10,$7,1,100,200,'manual'),($2,$3,'part-2',$4,$6,'matched',5,$7,2,100,200,'manual')`,
+    [randomUUID(), randomUUID(), packetId, orderId, a, b, `E2E detached ${orderId}`]);
+    const lines = [
+      { lineKey: 'part-1', orderId, detailId: a, quantity: 10, stageCode: 'membership', evidenceKind: 'derived' as const, rework: false },
+      { lineKey: 'part-2', orderId, detailId: b, quantity: 5, stageCode: 'membership', evidenceKind: 'derived' as const, rework: false },
+      { lineKey: 'cut-1', orderId, detailId: a, quantity: 10, stageCode: 'cut', evidenceKind: 'physical' as const, rework: false },
+      { lineKey: 'cut-2', orderId, detailId: b, quantity: 5, stageCode: 'cut', evidenceKind: 'physical' as const, rework: false },
+    ];
+    const saved = await database.transaction(tx => recordMdfReceipt(tx, { sourceKind: 'packet', sourceId: packetId, revisionKey: 'r1',
+      origin: 'cnc', actorUserId: 1, requestId: `E2E detached ${orderId}`, causeKey: `E2E detached ${orderId}`, expectedFence: null,
+      accept: true, rules: [], executionContext: { sourceCreatedAt: '2026-09-20T00:00:00Z', displayName: `E2E detached ${orderId}`,
+        priorColumn: 'completed', compositionComplete: true, demand: [{ orderId, detailId: a, quantity: 10 }, { orderId, detailId: b, quantity: 5 }] },
+      lines }));
+    expect(await runner.processOne()).toMatchObject({ status: 'done', jobId: saved.jobId });
+    // B was detached by a confirmed order correction (history only) and later restored as plain demand.
     await fixture.client.query(`INSERT INTO mdf_position_detachments(source_kind,source_id,order_id,detail_id,correction_id,
-      request_id,actor_user_id) VALUES('packet',$1,$2,$3,gen_random_uuid(),'e2e-detached-return',1)`, [f.source.id, f.orderId, f.detailId]);
-    const before = await facts(f.orderId, f.source.id);
-    await expect(command.preview(admin, f.source, bodyFor(f), 'E2E-detached-return'))
-      .rejects.toMatchObject({ statusCode: 409, code: 'MDF_CORRECTION_DETACHED_UNSUPPORTED' });
-    expect(await facts(f.orderId, f.source.id)).toEqual(before);
+      request_id,actor_user_id) VALUES('packet',$1,$2,$3,gen_random_uuid(),'e2e-detached-return',1)`, [packetId, orderId, b]);
+    const head = (await fixture.client.query<{ received: string; version: string; epoch: string }>(`SELECT received_revision_key received,
+      version::text,correction_epoch::text epoch FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`, [packetId])).rows[0];
+    const request = { sourceToken: mdfSourceCommandToken(source, head), targetColumn: 'parsed' as const };
+    const preview = await command.preview(admin, source, request, 'E2E-detached-return');
+    expect(preview.status).toBe('ready');
+    expect(preview.details.map(d => d.detailId)).toEqual([a]);
+    const result = await command.confirm(admin, source, { ...request, expectedDigest: preview.digest!,
+      idempotencyKey: `detached-return-${orderId}` }, 'E2E-detached-return-confirm');
+    for (let i = 0; i < result.jobIds.length; i++) expect((await runner.processOne()).status).toBe('done');
+    const statuses = (await fixture.client.query<{ id: string; s: number }>(`SELECT detail_id::text id,production_status_id s
+      FROM order_details WHERE detail_id=ANY($1::bigint[]) ORDER BY detail_id`, [[a, b]])).rows;
+    expect(statuses).toEqual([{ id: String(a), s: 1 }, { id: String(b), s: 2 }]);
+    // Detached lines are carried/dropped like any other line: the cut of the whole file is revoked consistently.
+    expect((await fixture.client.query(`SELECT 1 FROM mdf_evidence_lines e JOIN mdf_source_heads h ON h.source_kind=e.source_kind
+      AND h.source_id=e.source_id AND h.accepted_revision_key=e.revision_key WHERE e.source_kind='packet' AND e.source_id=$1
+      AND e.stage_code='cut'`, [packetId])).rows).toHaveLength(0);
+    expect((await fixture.client.query(`SELECT issues FROM mdf_published_sources WHERE source_kind='packet' AND source_id=$1`,
+      [packetId])).rows[0].issues).toEqual([]);
+  });
+
+  it('keeps a detached-only owner in scope (§5.5c): a user without access to it cannot return the card', async () => {
+    await fixture.client.query("UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now() WHERE status='pending'");
+    const orderA = ++orderSequence, orderB = ++orderSequence, a = orderA * 10, b = orderB * 10, packetId = randomUUID();
+    const source = { kind: 'packet' as const, id: packetId };
+    await fixture.client.query(`INSERT INTO orders(order_id,order_name,order_kind,delete_flag,version,order_status_id,
+      payment_status_id,created_by) VALUES($1,$2,'production_order',false,1,1,1,2),($3,$4,'production_order',false,1,1,1,1)`,
+    [orderA, `E2E scoped A ${orderA}`, orderB, `E2E scoped B ${orderB}`]);
+    await fixture.client.query(`INSERT INTO order_details(detail_id,order_id,detail_number,quantity,production_status_id,
+      delete_flag,material_id) VALUES($1,$2,1,10,2,false,1),($3,$4,1,5,2,false,1)`, [a, orderA, b, orderB]);
+    await fixture.client.query(`INSERT INTO cnc_telegram_packets(packet_id,external_packet_key,source_chat_id,source_message_id,
+      source_version,payload_hash,workday,completion_status,thumbs_up,completed_at,material_name,program_name,mdf_board_card_kind,
+      created_at,updated_at,parse_status,rework,mdf_completion_returned)
+      VALUES($1,$2,'E2E','1',1,$3,CURRENT_DATE,'completed',true,now(),'МДФ фасад 10 мм','E2E','machine_file',
+        now(),now(),'parsed',false,false)`, [packetId, `E2E-scoped-${orderA}`, 'd'.repeat(64)]);
+    await fixture.client.query(`INSERT INTO cnc_telegram_packet_items(packet_item_id,packet_id,source_item_key,match_order_id,
+      match_detail_id,match_status,quantity,order_name,detail_number,width_mm,height_mm,source)
+      VALUES($1,$3,'part-1',$4,$5,'matched',10,'A',1,100,200,'manual'),($2,$3,'part-2',$6,$7,'matched',5,'B',1,100,200,'manual')`,
+    [randomUUID(), randomUUID(), packetId, orderA, a, orderB, b]);
+    const saved = await database.transaction(tx => recordMdfReceipt(tx, { sourceKind: 'packet', sourceId: packetId, revisionKey: 'r1',
+      origin: 'cnc', actorUserId: 1, requestId: `E2E scoped ${orderA}`, causeKey: `E2E scoped ${orderA}`, expectedFence: null,
+      accept: true, rules: [], executionContext: { sourceCreatedAt: '2026-09-20T00:00:00Z', displayName: `E2E scoped ${orderA}`,
+        priorColumn: 'completed', compositionComplete: true,
+        demand: [{ orderId: orderA, detailId: a, quantity: 10 }, { orderId: orderB, detailId: b, quantity: 5 }] },
+      lines: [
+        { lineKey: 'part-1', orderId: orderA, detailId: a, quantity: 10, stageCode: 'membership', evidenceKind: 'derived', rework: false },
+        { lineKey: 'part-2', orderId: orderB, detailId: b, quantity: 5, stageCode: 'membership', evidenceKind: 'derived', rework: false },
+        { lineKey: 'cut-1', orderId: orderA, detailId: a, quantity: 10, stageCode: 'cut', evidenceKind: 'physical', rework: false },
+        { lineKey: 'cut-2', orderId: orderB, detailId: b, quantity: 5, stageCode: 'cut', evidenceKind: 'physical', rework: false },
+      ] }));
+    expect(await runner.processOne()).toMatchObject({ status: 'done', jobId: saved.jobId });
+    await fixture.client.query(`INSERT INTO mdf_position_detachments(source_kind,source_id,order_id,detail_id,correction_id,
+      request_id,actor_user_id) VALUES('packet',$1,$2,$3,gen_random_uuid(),'e2e-scoped-detached',1)`, [packetId, orderB, b]);
+    const head = (await fixture.client.query<{ received: string; version: string; epoch: string }>(`SELECT received_revision_key received,
+      version::text,correction_epoch::text epoch FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`, [packetId])).rows[0];
+    const request = { sourceToken: mdfSourceCommandToken(source, head), targetColumn: 'parsed' as const };
+    const scoped: CurrentUser = { ...admin, id: '2', policyScopes: { ...ROLE_POLICIES.admin,
+      orders: { view: 'own', update: 'own', export: 'own', delete: 'own' },
+      productionTasks: { ...ROLE_POLICIES.admin.productionTasks, update: 'own' } } } as CurrentUser;
+    const before = await fixture.snapshot(['orders','order_details','mdf_source_heads','mdf_evidence_revisions',
+      'mdf_correction_command_results','audit_log','outbox_events']);
+    await expect(command.preview(scoped, source, request, 'E2E-scoped-preview'))
+      .rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+    await expect(command.confirm(scoped, source, { ...request, expectedDigest: 'e'.repeat(64),
+      idempotencyKey: `scoped-${orderA}` }, 'E2E-scoped-confirm')).rejects.toMatchObject({ statusCode: 403 });
+    expect(await fixture.snapshot(Object.keys(before))).toEqual(before);
+    // The admin (access to both) may return it; the detached-only owner gets no status effect.
+    const preview = await command.preview(admin, source, request, 'E2E-scoped-admin');
+    expect(preview.details.map(d => d.detailId)).toEqual([a]);
   });
 
   it('rejects missing permissions and stale source tokens without changing correction or business rows', async () => {
@@ -751,7 +848,10 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
     expect(preview.details[0]).toMatchObject({ cutCoverage: 0, laminatedCoverage: 6, afterRank: 10,
       after: { creditedRolled: 6, remaining: 4 }, beforeStatus: 'Закатан', afterStatus: 'Отрисован' });
     expect(preview.affectedBaths).toEqual([expect.objectContaining({ source: f.bath, cancelledLaminationQuantity: 4,
-      manualPlacementColumnBefore: 'baths_laminated', manualPlacementColumnAfter: null, clearsManualPlacementOverride: true })]);
+      manualPlacementColumnBefore: 'baths_laminated', manualPlacementColumnAfter: null, clearsManualPlacementOverride: true,
+      // §5.5: supply released on this bath ⇒ readiness (and so the final column) is known only after the recalculation.
+      afterIssues: expect.arrayContaining(['READINESS_AFTER_RECALCULATION']) })]);
+    expect(preview.sourceAfter.afterColumn).toBe('parsed');
     expect(preview.allocationReleases).toEqual(f.allocations.map((row: any) => row.allocation_id).sort());
     expect(preview.allocationReplacements).toEqual([expect.objectContaining({ oldAllocationId: basisDebit.allocation_id,
       quantity: 6, state: 'consumed', evidenceLine: { kind: 'existing', evidenceLineId: expect.any(String) },
@@ -798,6 +898,35 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
       .toEqual({ cut_quantity: '0', credited_cut: '0', credited_rolled: '6', remaining: '4' });
     expect((await fixture.client.query('SELECT production_status_id FROM order_details WHERE detail_id=$1',[f.detailId])).rows[0]
       .production_status_id).toBe(1);
+  });
+
+  it('equality boundary (§5.5): bath completed_baths → baths_laminated keeps lamination and every consumed allocation', async () => {
+    const f = await splitPacketBasisBath({ initialDetailStatus: 4 });
+    const bathColumn = (await fixture.client.query<{ c: string }>(`SELECT column_key c FROM mdf_published_sources
+      WHERE source_kind='bath' AND source_id=$1`, [f.bath.id])).rows[0].c;
+    expect(bathColumn).toBe('completed_baths');
+    const allocationsBefore = (await fixture.client.query(`SELECT a.quantity::text q,a.state,e.source_kind k FROM mdf_bath_allocations a
+      JOIN mdf_evidence_lines e USING(evidence_line_id) WHERE a.bath_id=$1 AND a.state<>'released' ORDER BY e.source_kind`, [f.bath.id])).rows;
+    const request = { sourceToken: f.bathToken, targetColumn: 'baths_laminated' as const };
+    const preview = await command.preview(admin, f.bath, request, 'E2E-bath-equality-preview');
+    expect(preview.status).toBe('ready');
+    // The new bath revision rebases every debit one-for-one; nothing is withdrawn or demoted.
+    expect(preview.allocationReplacements.map(r => r.oldAllocationId).sort()).toEqual([...preview.allocationReleases].sort());
+    expect(preview.allocationReplacements.every(r => r.state === 'consumed')).toBe(true);
+    expect(preview.affectedBaths.every(b => b.cancelledLaminationQuantity === 0)).toBe(true);
+    const result = await command.confirm(admin, f.bath, { ...request, expectedDigest: preview.digest!,
+      idempotencyKey: `bath-equality-${f.orderId}` }, 'E2E-bath-equality-confirm');
+    for (let i = 0; i < result.jobIds.length; i++) expect((await runner.processOne()).status).toBe('done');
+    const laminated = (await fixture.client.query<{ q: string }>(`SELECT COALESCE(sum(e.quantity),0)::text q FROM mdf_evidence_lines e
+      JOIN mdf_source_heads h ON h.source_kind=e.source_kind AND h.source_id=e.source_id AND h.accepted_revision_key=e.revision_key
+      WHERE e.source_kind='bath' AND e.source_id=$1 AND e.stage_code='laminated'`, [f.bath.id])).rows[0].q;
+    expect(laminated).toBe('10');
+    // Rows may be rebased onto the replacement revision; per-source quantity and state stay identical.
+    expect((await fixture.client.query(`SELECT a.quantity::text q,a.state,e.source_kind k FROM mdf_bath_allocations a
+      JOIN mdf_evidence_lines e USING(evidence_line_id) WHERE a.bath_id=$1 AND a.state<>'released' ORDER BY e.source_kind`, [f.bath.id])).rows)
+      .toEqual(allocationsBefore);
+    expect((await fixture.client.query('SELECT production_status_id FROM order_details WHERE detail_id=$1', [f.detailId])).rows[0]
+      .production_status_id).toBe(3);
   });
 
   it('moves terminal completed_laminated to sanded while preserving new CNC proof and reserving its rebased 4', async () => {
@@ -997,7 +1126,7 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
     const preview = await command.preview(admin, f.source, request, 'E2E-stage-lock-preview');
     expect(preview.status).toBe('ready');
     await fixture.client.query(`CREATE FUNCTION ${fixture.schema}.e2e_slow_correction_detail() RETURNS trigger
-      LANGUAGE plpgsql AS $$ BEGIN IF NEW.detail_id=${f.detailId} THEN PERFORM pg_sleep(0.8); END IF; RETURN NEW; END $$;
+      LANGUAGE plpgsql AS $$ BEGIN IF NEW.detail_id=${f.detailId} THEN PERFORM pg_sleep(0.4); END IF; RETURN NEW; END $$;
       CREATE TRIGGER e2e_slow_correction_detail BEFORE UPDATE ON ${fixture.schema}.order_details
       FOR EACH ROW EXECUTE FUNCTION ${fixture.schema}.e2e_slow_correction_detail()`);
     const pending = command.confirm(admin, f.source, { ...request, expectedDigest: preview.digest!,
@@ -1086,5 +1215,109 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
     await expect(command.confirm(admin, f.source, { ...bodyFor(f), expectedDigest: preview.digest!,
       idempotencyKey: `placement-stale-${f.orderId}` }, 'E2E-placement-confirm'))
       .rejects.toMatchObject({ code: 'MDF_CORRECTION_STALE' });
+  });
+
+  describe('ready/issued orders reopen only through status automation (§5.5)', () => {
+    // Rule №15/№16 shape (stage config): ready/issued + a detail back before cut ⇒ «В производстве».
+    const reopenRule = async (enabled: boolean) => {
+      const updated = await fixture.client.query(`UPDATE status_automation_rules SET is_enabled=$1,version=version+1
+        WHERE id=15`, [enabled]);
+      if (updated.rowCount) return;
+      await fixture.client.query(`INSERT INTO status_automation_rules
+        (id,name,event_type,action_type,target_status_id,conditions_json,priority,is_enabled,version,action_config_json)
+        VALUES(15,'E2E reopen ready/issued','order.production_status_changed','change_order_status',1,
+          '{"currentOrderStatusIn":[2,3],"anyProductionStatusIn":[1]}',10,$1,1,'{}')`, [enabled]);
+    };
+    const orderStatus = async (orderId: number) => Number((await fixture.client.query<{ s: string }>(
+      'SELECT order_status_id::text s FROM orders WHERE order_id=$1', [orderId])).rows[0].s);
+    const detailStatus = async (detailId: number) => Number((await fixture.client.query<{ s: string }>(
+      'SELECT production_status_id::text s FROM order_details WHERE detail_id=$1', [detailId])).rows[0].s);
+    afterEach(async () => { await fixture.client.query('DELETE FROM status_automation_rules WHERE id IN (15,147)'); });
+    // Migration 147's reverse cascade (enabled on stage/prod): a USER reopening a ready/issued order sets details to
+    // «Закатан». An automation-origin reopen must not re-trigger it over the returned details.
+    const reverseCascade = () => fixture.client.query(`INSERT INTO status_automation_rules
+      (id,name,event_type,action_type,target_status_id,conditions_json,priority,is_enabled,version,action_config_json)
+      VALUES(147,'E2E В производстве после готовности -> Закатан','order.status_changed','change_details_production_status',3,
+        '{"currentOrderStatusIn":[1],"previousOrderStatusIn":[2,3]}',30,true,1,'{"detailTransitionMode":"set_exact"}')`);
+
+    for (const [statusId, label] of [[2, 'Готов к выдаче'], [3, 'Выдан']] as const) {
+      it(`previews and applies the rule reopening a «${label}» order; returned details keep the target stage`, async () => {
+        await reopenRule(true);
+        await reverseCascade();
+        const f = await acceptedPacket();
+        await fixture.client.query('UPDATE orders SET order_status_id=$2 WHERE order_id=$1', [f.orderId, statusId]);
+        const preview = await command.preview(admin, f.source, bodyFor(f), `E2E-ready-preview-${statusId}`);
+        expect(preview.status).toBe('ready');
+        expect(preview.orders).toEqual([{ orderId: f.orderId, orderName: `E2E correction ${f.orderId}`, before: label,
+          after: 'В производстве', beforeStatusId: statusId, afterStatusId: 1 }]);
+        // The preview itself changed nothing.
+        expect(await orderStatus(f.orderId)).toBe(statusId);
+        expect(await detailStatus(f.detailId)).toBe(2);
+        await command.confirm(admin, f.source, { ...bodyFor(f), expectedDigest: preview.digest!,
+          idempotencyKey: `E2E-ready-confirm-${f.orderId}` }, `E2E-ready-confirm-${statusId}`);
+        expect(await orderStatus(f.orderId)).toBe(1);
+        expect(await detailStatus(f.detailId)).toBe(1);
+        const rules = (await fixture.client.query(`SELECT 1 FROM audit_log WHERE request_id=$1 AND event LIKE 'status_automation%'`,
+          [`E2E-ready-confirm-${statusId}`])).rows.length;
+        expect(rules).toBeGreaterThan(0);
+      });
+    }
+
+    it('without an enabled rule the ready order keeps its status (the board never sets it)', async () => {
+      const f = await acceptedPacket();
+      await fixture.client.query('UPDATE orders SET order_status_id=2 WHERE order_id=$1', [f.orderId]);
+      const preview = await command.preview(admin, f.source, bodyFor(f), 'E2E-ready-no-rule');
+      expect(preview.orders).toEqual([expect.objectContaining({ before: 'Готов к выдаче', after: 'Готов к выдаче' })]);
+      await command.confirm(admin, f.source, { ...bodyFor(f), expectedDigest: preview.digest!,
+        idempotencyKey: `E2E-ready-no-rule-${f.orderId}` }, 'E2E-ready-no-rule-confirm');
+      expect(await orderStatus(f.orderId)).toBe(2);
+      expect(await detailStatus(f.detailId)).toBe(1);
+    });
+
+    it('fails stale and changes nothing when a rule changes between the confirm what-if and the real dispatch', async () => {
+      for (const change of ['disable', 'insert'] as const) {
+        await reopenRule(change === 'disable');
+        const f = await acceptedPacket();
+        await fixture.client.query('UPDATE orders SET order_status_id=2 WHERE order_id=$1', [f.orderId]);
+        const preview = await command.preview(admin, f.source, bodyFor(f), `E2E-race-preview-${change}`);
+        const before = await facts(f.orderId, f.source.id);
+        const auditBefore = (await fixture.client.query('SELECT count(*)::int n FROM audit_log')).rows[0].n;
+        let fired = false;
+        const racing = new PgMdfCorrectionCommand({
+          transaction: <T>(handler: (client: TransactionClient) => Promise<T>, options?: DatabaseTransactionOptions) =>
+            database.transaction(async client => {
+              const query = client.query.bind(client);
+              client.query = (async (sql: string, params?: readonly unknown[], queryOptions?: { timeoutMs?: number }) => {
+                const result = await query(sql, params as unknown[], queryOptions);
+                if (!fired && typeof sql === 'string' && sql.startsWith('RELEASE SAVEPOINT mdf_correction_preview')) {
+                  fired = true;
+                  await reopenRule(change === 'insert');
+                }
+                return result;
+              }) as typeof client.query;
+              return handler(client);
+            }, options),
+        });
+        await expect(racing.confirm(admin, f.source, { ...bodyFor(f), expectedDigest: preview.digest!,
+          idempotencyKey: `E2E-race-${change}-${f.orderId}` }, `E2E-race-${change}`))
+          .rejects.toMatchObject({ statusCode: 409, code: 'MDF_CORRECTION_STALE' });
+        expect(fired).toBe(true);
+        expect(await facts(f.orderId, f.source.id)).toEqual(before);
+        expect((await fixture.client.query('SELECT count(*)::int n FROM audit_log')).rows[0].n).toBe(auditBefore);
+        // A fresh preview reflects the new rule set and confirms.
+        const fresh = await command.preview(admin, f.source, bodyFor(f), `E2E-race-fresh-${change}`);
+        await command.confirm(admin, f.source, { ...bodyFor(f), expectedDigest: fresh.digest!,
+          idempotencyKey: `E2E-race-fresh-${change}-${f.orderId}` }, `E2E-race-fresh-confirm-${change}`);
+        expect(await orderStatus(f.orderId)).toBe(change === 'insert' ? 1 : 2);
+        await fixture.client.query('DELETE FROM status_automation_rules WHERE id=15');
+      }
+    }, 60000);
+
+    it('still refuses a closed order', async () => {
+      const f = await acceptedPacket();
+      await fixture.client.query('UPDATE orders SET order_status_id=4 WHERE order_id=$1', [f.orderId]);
+      await expect(command.preview(admin, f.source, bodyFor(f), 'E2E-closed'))
+        .rejects.toMatchObject({ statusCode: 409, code: 'MDF_ORDER_CLOSED' });
+    });
   });
 });

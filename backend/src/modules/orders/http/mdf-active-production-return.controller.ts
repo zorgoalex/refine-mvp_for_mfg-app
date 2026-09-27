@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, Inject, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Param, Post, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
@@ -10,7 +10,7 @@ import type {
   MdfActiveProductionReturnPreviewResponseDto,
   MdfActiveProductionReturnSourceDto,
 } from '../dto/mdf-active-production-return.dto';
-import { MdfActiveProductionReturnService } from '../application/mdf-active-production-return.service';
+import { MdfActiveProductionReturnService, type MdfEngineModeDto } from '../application/mdf-active-production-return.service';
 import { OrdersRuntimeConfigService } from './orders-runtime-config.service';
 
 const previewBodySchema = z.object({
@@ -139,3 +139,23 @@ export type {
   MdfActiveProductionReturnPreviewRequestDto,
   MdfActiveProductionReturnSourceDto,
 };
+
+/** §5.5 read-only engine mode for the board's return dialog selection. */
+@ApiTags('Orders')
+@ApiBearerAuth()
+@Controller('orders/status-board/mdf-engine')
+export class MdfEngineModeController {
+  constructor(
+    @Inject(MdfActiveProductionReturnService)
+    private readonly corrections: MdfActiveProductionReturnService,
+  ) {}
+
+  @Get()
+  @ApiOperation({ operationId: 'getMdfEngineMode', summary: 'Current MDF engine mode (legacy, shadow, active, read_only)' })
+  @ApiResponse({ status: 200, description: 'Engine mode and whether published reads are enabled' })
+  @ApiResponse({ status: 403, description: 'orders.view permission required' })
+  @ApiResponse({ status: 503, description: 'Engine state unavailable' })
+  mode(@Req() request: RequestWithCurrentUser): Promise<MdfEngineModeDto> {
+    return this.corrections.engineMode(requireCurrentUser(request));
+  }
+}

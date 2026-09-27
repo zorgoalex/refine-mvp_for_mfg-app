@@ -1,6 +1,7 @@
 import { ApiError } from '../../../common/errors/api-error';
 import type { QueryResultRow } from 'pg';
 import { loadMdfEffectivePlacement } from './mdf-effective-placement';
+import { loadMdfDetachedPositions } from './mdf-position-detachments';
 import type { TransactionClient } from '../../../database/database.types';
 import { MdfNeedsAttention, type MdfSourceKind } from '../application/mdf-job-runner';
 import type { MdfCorrectionAllocation, MdfCorrectionSource, MdfCorrectionSourceLine } from '../domain/mdf-correction-plan';
@@ -112,18 +113,18 @@ function numeric<T extends { orderId: number; detailId: number; quantity: number
 }
 
 export async function loadMdfCorrectionSnapshot(tx: TransactionClient, target: MdfCorrectionSourceRef,
-  closure: { orders: number[]; sources: Array<{ kind: MdfSourceKind; id: string }> }): Promise<MdfCorrectionSnapshot> {
+  closure: { orders: number[]; sources: Array<{ kind: MdfSourceKind; id: string }> },
+  options: { detachmentAware?: boolean } = {}): Promise<MdfCorrectionSnapshot> {
   const heads = (await tx.query<MdfCorrectionHead>(`SELECT h.source_kind kind,h.source_id id,
     h.received_revision_key received,h.accepted_revision_key accepted,h.correction_epoch::text epoch,h.version::text version
     FROM mdf_source_heads h JOIN unnest($1::text[],$2::text[]) s(kind,id)
       ON h.source_kind=s.kind AND h.source_id=s.id ORDER BY h.source_kind,h.source_id FOR UPDATE OF h`,
   [closure.sources.map(s => s.kind),closure.sources.map(s => s.id)])).rows;
   if (heads.length !== closure.sources.length) throw new MdfNeedsAttention('MDF_CORRECTION_HEAD_MISSING');
-  // §5.4e: the correction planner (returns, BASIS composition) does not model detached positions yet; a closure
-  // containing any detachment fails closed instead of planning over history-only lines (to be lifted in §5.5).
-  if ((await tx.query(`SELECT 1 FROM mdf_position_detachments d JOIN unnest($1::text[],$2::text[]) s(kind,id)
-      ON d.source_kind=s.kind AND d.source_id=s.id LIMIT 1`,
-  [closure.sources.map(s => s.kind),closure.sources.map(s => s.id)])).rows.length) {
+  // §5.4e/§5.5: the return planner models detached positions (history only: no status effects, no credit); BASIS
+  // composition does not yet, so without `detachmentAware` a closure containing any detachment fails closed.
+  const detached = await loadMdfDetachedPositions(tx, closure.sources);
+  if (!options.detachmentAware && detached.size) {
     throw new ApiError(409,'MDF_CORRECTION_DETACHED_UNSUPPORTED',
       'В карточке есть выбывшие позиции заказа — возврат и изменение состава для неё пока недоступны');
   }
@@ -202,7 +203,8 @@ export async function loadMdfCorrectionSnapshot(tx: TransactionClient, target: M
       lineage: lineageKey ? execution.lineage.get(lineageKey) : undefined,
       lineageIssue,
       assignmentState: revision ? execution.assignmentStates.get(mdfLineageRevisionKey(source,revision)) : undefined,
-      lines: lineRows.filter(l => key(l)===key(source)).map(line => ({ ...line })) as MdfCorrectionSourceLine[] };
+      lines: lineRows.filter(l => key(l)===key(source)).map(line => ({ ...line })) as MdfCorrectionSourceLine[],
+      ...(detached.get(key(source))?.size ? { detachedPositionKeys: detached.get(key(source)) } : {}) };
   });
   const publishedRows = (await tx.query<{kind:MdfSourceKind;id:string;column:string|null;accepted:string|null;received:string;issues:string[]}>(`SELECT
     source_kind kind,source_id id,column_key "column",accepted_revision_key accepted,received_revision_key received,issues

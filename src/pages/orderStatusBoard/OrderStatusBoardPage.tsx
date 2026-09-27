@@ -1,6 +1,15 @@
 import { Popover, Tooltip } from '../../ui/tooltipDelay';
 import { MdfProductionReturnDialog, isMdfBackwardMove, type MdfReturnIntent } from './MdfProductionReturnDialog';
 import { toMdfReturnBoardWindow } from '../../api/mdfProductionReturnApi';
+import { mdfCorrectionApi, type MdfEngineModeDto } from '../../api/mdfCorrectionApi';
+import { mdfPublishedApi } from '../../api/mdfPublishedApi';
+import type { MdfSessionSnapshot } from '../../api/types/mdfPublishedApi.types';
+import { isMdfEngineModeEndpointMissing, selectMdfReturnDialog } from './mdfReturnSelection';
+import {
+  MdfCorrectionReturnDialog,
+  type MdfCorrectionReturnDialogSelection,
+  type MdfCorrectionReturnIntent,
+} from './MdfCorrectionReturnDialog';
 import React, {
   lazy,
   memo,
@@ -737,6 +746,11 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const cncOrderBoardRequestKeyRef = useRef<string | null>(null);
   const cncManualMoveRequestSeqRef = useRef<Record<string, number>>({});
   const [mdfReturnIntent, setMdfReturnIntent] = useState<MdfReturnIntent | null>(null);
+  const [mdfCorrectionReturn, setMdfCorrectionReturn] = useState<{
+    intent: MdfCorrectionReturnIntent;
+    selection: MdfCorrectionReturnDialogSelection;
+  } | null>(null);
+  const mdfReturnResolveSeqRef = useRef(0);
   const [cncDetailedEnabled, setCncDetailedEnabled] = useState(false);
   const [cncBathsRequireMachineFiles, setCncBathsRequireMachineFiles] =
     useState(false);
@@ -2012,6 +2026,59 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     setActiveCncDetailedDetail(target);
   }, []);
 
+  // §5.5b: legacy dialog only in legacy/shadow; active engine picks the new
+  // mdf-corrections dialog (or a blocked/read_only/unavailable explanation),
+  // never the legacy one. Engine mode + (when active) the published session
+  // are re-resolved on every backward move; a superseded resolution is dropped.
+  // Engine mode (+ the published card when needed) → dialog selection. Also used by the new dialog to re-resolve a
+  // fresh card token after a stale confirm.
+  const computeMdfReturnSelection = useCallback(async (kind: 'packet' | 'bazisCutSet' | 'bath', cardId: string) => {
+    let engineMode: MdfEngineModeDto | null = null;
+    let engineModeEndpointMissing = false;
+    try {
+      engineMode = await mdfCorrectionApi.getEngineMode();
+    } catch (error) {
+      engineModeEndpointMissing = isMdfEngineModeEndpointMissing(error);
+    }
+    let publishedSession: MdfSessionSnapshot | null = null;
+    let publishedSessionFailed = false;
+    if (engineMode?.mode === 'active' || engineModeEndpointMissing) {
+      if (engineMode && !engineMode.publishedReads) {
+        publishedSessionFailed = true;
+      } else {
+        try {
+          publishedSession = await mdfPublishedApi.get({ focus: { kind, id: cardId } });
+        } catch {
+          publishedSessionFailed = true;
+        }
+      }
+    }
+    return selectMdfReturnDialog({ engineMode, engineModeEndpointMissing, publishedSession, publishedSessionFailed,
+      card: { kind, id: cardId } });
+  }, []);
+
+  const resolveMdfReturnDialog = useCallback((
+    kind: 'packet' | 'bazisCutSet' | 'bath',
+    cardId: string,
+    targetColumn: MdfReturnIntent['targetColumn'],
+    targetTitle: string,
+  ) => {
+    const seq = ++mdfReturnResolveSeqRef.current;
+    const state = viewStateRef.current;
+    const boardWindow = toMdfReturnBoardWindow(buildCncOrderSearchDateRange(
+      state.cncWorkday ?? dayjs().format('YYYY-MM-DD'), state.cncOrderSearchPeriod,
+    ));
+    void (async () => {
+      const selection = await computeMdfReturnSelection(kind, cardId);
+      if (seq !== mdfReturnResolveSeqRef.current) return;
+      if (selection.kind === 'legacy') {
+        setMdfReturnIntent({ source: { kind, id: cardId }, targetColumn, targetTitle, boardWindow });
+        return;
+      }
+      setMdfCorrectionReturn({ intent: { source: { kind, id: cardId }, targetColumn, targetTitle }, selection });
+    })();
+  }, [computeMdfReturnSelection]);
+
   const moveCncCard = useCallback((
     kind: CncManualCardKind,
     cardId: string,
@@ -2021,9 +2088,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     sourceColumn?: CncTelegramTodayDisplayColumnKey,
   ) => {
     if (kind !== 'order' && isMdfBackwardMove(kind, sourceColumn, targetColumn)) {
-      const state=viewStateRef.current;
-      const boardWindow=toMdfReturnBoardWindow(buildCncOrderSearchDateRange(state.cncWorkday ?? dayjs().format('YYYY-MM-DD'),state.cncOrderSearchPeriod));
-      setMdfReturnIntent({ source: { kind, id: cardId }, targetColumn:targetColumn as MdfReturnIntent['targetColumn'], targetTitle, boardWindow });
+      resolveMdfReturnDialog(kind, cardId, targetColumn as MdfReturnIntent['targetColumn'], targetTitle);
       return;
     }
     if (kind === 'order') {
@@ -2183,6 +2248,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     fetchCncManualMoves,
     fetchInitial,
     replacePending,
+    resolveMdfReturnDialog,
   ]);
 
   const syncCncBoardScrollTopButton = useCallback((viewportOverride?: HTMLElement | null) => {
@@ -3193,6 +3259,21 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
           columnTitle={(key) => isCncManualColumnKey(key) ? cncColumnTitleByKey(key) : key}
           onReturned={async () => {
             setMdfReturnIntent(null);
+            message.success('Возврат выполнен. Производственные данные и положение карточек обновлены.');
+            await fetchInitial({ mutationRefetch: true, preserveLoading: true });
+          }} />}
+        {mdfCorrectionReturn && <MdfCorrectionReturnDialog
+          intent={mdfCorrectionReturn.intent}
+          selection={mdfCorrectionReturn.selection}
+          onCancel={() => setMdfCorrectionReturn(null)}
+          reselect={() => computeMdfReturnSelection(mdfCorrectionReturn.intent.source.kind, mdfCorrectionReturn.intent.source.id)}
+          columnTitle={(key) => isCncManualColumnKey(key) ? cncColumnTitleByKey(key) : key}
+          onRefreshBoard={() => {
+            setMdfCorrectionReturn(null);
+            void fetchInitial({ mutationRefetch: true, preserveLoading: true });
+          }}
+          onReturned={async () => {
+            setMdfCorrectionReturn(null);
             message.success('Возврат выполнен. Производственные данные и положение карточек обновлены.');
             await fetchInitial({ mutationRefetch: true, preserveLoading: true });
           }} />}

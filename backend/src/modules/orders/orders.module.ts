@@ -48,7 +48,7 @@ import { OrderExportController } from './http/order-export.controller';
 import { OrderGroupLinksController } from './http/order-group-links.controller';
 import { MdfBoardManualMoveController } from './http/mdf-board-manual-move.controller';
 import { MdfProductionReturnController } from './http/mdf-production-return.controller';
-import { MdfActiveProductionReturnController } from './http/mdf-active-production-return.controller';
+import { MdfActiveProductionReturnController, MdfEngineModeController } from './http/mdf-active-production-return.controller';
 import { OrderResourceDemandController } from './http/order-resource-demand.controller';
 import { OrderSnapshotController } from './http/order-snapshot.controller';
 import { OrdersController } from './http/orders.controller';
@@ -76,6 +76,7 @@ export function shouldEnableOrderDeadlineSync(input: {
     // Register static `/orders/*` routes before the generic `/orders/:orderId`.
     MdfBoardManualMoveController,
     MdfActiveProductionReturnController,
+    MdfEngineModeController,
     MdfProductionReturnController,
     OrderStatusBoardController,
     OrderExportController,

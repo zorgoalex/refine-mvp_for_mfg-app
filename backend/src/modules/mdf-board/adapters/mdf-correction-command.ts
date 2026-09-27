@@ -16,12 +16,15 @@ import { MdfNeedsAttention, type MdfSourceKind } from '../application/mdf-job-ru
 import { mdfCorrectionComposition, discoverMdfCorrectionClosure, loadMdfCorrectionSnapshot,
   MAX_MDF_CORRECTION_ORDERS, type MdfCorrectionOwner, type MdfCorrectionSnapshot } from './mdf-correction-snapshot';
 import { mdfSourceKey } from './mdf-execution-snapshot';
+import { mdfPlacement, parseMdfPlacementInputs } from '../domain/mdf-placement';
+import { evaluateProductionCompositionAutomation, isStatusAutomationEnabled,
+  withIsolatedStatusAutomationVisits } from '../../status-automation/application/status-automation-runtime';
 import { mdfSourceCommandToken } from '../domain/mdf-manual-proof';
 import { planMdfCorrection, type MdfCorrectionDetail, type MdfCorrectionInput, type MdfCorrectionPlan,
   type MdfCorrectionSource, type MdfCorrectionSourceLine, type MdfCorrectionSourceReplacement } from '../domain/mdf-correction-plan';
 import { mdfPositionKey, mdfSum } from '../domain/mdf-quantities';
 import { returnStageOptions, type MdfReturnColumn, type MdfReturnKind, type MdfReturnStage } from '../../orders/domain/mdf-production-return';
-import type { MdfCorrectionBathEffect, MdfCorrectionConfirmBody, MdfCorrectionConfirmResponse,
+import type { MdfCorrectionBathEffect, MdfCorrectionOrderEffect, MdfCorrectionConfirmBody, MdfCorrectionConfirmResponse,
   MdfCorrectionDeferredJobEffect, MdfCorrectionHeadFence, MdfCorrectionPreviewBody,
   MdfCorrectionPreviewResponse, MdfCorrectionSourceRef } from '../application/mdf-correction.types';
 
@@ -114,7 +117,7 @@ export class PgMdfCorrectionCommand {
     const ownerRows = await loadOwners(tx,initial.orders);
     authorizeOwners(user,ownerRows,initial.orders);
     await lockSourceHeads(tx,initial.sources);
-    const snapshot = await loadMdfCorrectionSnapshot(tx,source,initial);
+    const snapshot = await loadMdfCorrectionSnapshot(tx,source,initial,{ detachmentAware: true });
     const current = await discoverMdfCorrectionClosure(tx,source);
     if (!sameClosure(initial,current)) throw new MdfCorrectionScopeChanged();
     const targetHead = snapshot.heads.find(h => sourceKey(h)===sourceKey(source));
@@ -143,6 +146,10 @@ export class PgMdfCorrectionCommand {
       return affected.length ? [{jobId:job.jobId,source:{kind:job.kind,id:job.id},status:job.status,affectedOrderIds:affected}] : [];
     });
     const response = makePreview(source,request,snapshot,plan,stages,targetStage,affectedOrderIds,deferredJobs,stageOptions);
+    if (plan.status==='ready') {
+      response.orders = await previewOrderAutomation(tx,user,snapshot,plan,stages,targetStage,affectedOrderIds);
+      await previewPlacementAfter(tx,source,request,snapshot,plan,stages,response);
+    }
     if (plan.status==='ready' && response.status==='ready') response.digest = correctionDigest(user,source,request,snapshot,plan,
       stages,targetStage,affectedOrderIds,candidateJobs,deferredJobs,response);
     return {response,snapshot,plan,stages,targetStage,affectedOrderIds,candidateJobs,deferredJobs};
@@ -290,18 +297,14 @@ export class PgMdfCorrectionCommand {
       if (inserted.length!==allocationRows.length) throw new Error('MDF_CORRECTION_ALLOCATION_REBASE_INCOMPLETE');
     }
 
-    const changedOrders=new Set<number>();
-    for (const effect of plan.affectedDetails) {
-      const before=prepared.snapshot.details.find(d=>d.orderId===effect.orderId&&d.detailId===effect.detailId);
-      if (!before||effect.afterRank===before.currentRank) continue;
-      const status=selectStatusForEffect(effect,prepared.stages,prepared.targetStage);
-      await tx.query(`UPDATE order_details SET production_status_id=$3,edited_by=$4,updated_at=now()
-        WHERE order_id=$1 AND detail_id=$2 AND NOT delete_flag`,[effect.orderId,effect.detailId,status.id,actorId]);
-      changedOrders.add(effect.orderId);
-    }
-    for (const orderId of sorted(changedOrders)) {
-      await tx.query(`UPDATE orders SET version=version+1,updated_at=now(),edited_by=$2 WHERE order_id=$1`,[orderId,actorId]);
-      await tx.query('SELECT recalc_order_production_status($1::bigint)',[orderId]);
+    const changedOrders=await applyDetailStatusEffects(tx,actorId,prepared.snapshot,plan,prepared.stages,prepared.targetStage);
+    // §5.5: the order status is owned by status automation only; dispatch it for the changed orders and require the
+    // exact previewed outcome (rules are read under READ COMMITTED and may change concurrently) — else roll back.
+    await dispatchOrderAutomation(tx,user,changedOrders,requestId,`mdf-correction:${hash([user.id,request.idempotencyKey])}`);
+    const actualOrders=await readOrderStatuses(tx,prepared.affectedOrderIds);
+    for (const expected of prepared.response.orders) {
+      if ((actualOrders.get(expected.orderId)?.statusId ?? null)!==expected.afterStatusId)
+        fail(409,'MDF_CORRECTION_STALE','Правила автостатусов изменились. Обновите предпросмотр возврата.');
     }
 
     const jobIds=[...receipts.values()].map(receipt=>receipt.jobId);
@@ -467,8 +470,6 @@ function checkOrderState(owners:readonly MdfCorrectionOwner[],affected:number[])
     const status=normalized(owner.status);
     if (owner.deleted||owner.orderKind!=='production_order'||['завершен','завершено'].includes(status))
       fail(409,'MDF_ORDER_CLOSED','Возврат карточки не открывает завершённый заказ автоматически');
-    if (['готов к выдаче','выдан'].includes(status))
-      fail(409,'MDF_ORDER_STATUS_TRANSITION_REQUIRED','Сначала измените статус готового или выданного заказа отдельной командой');
   }
 }
 
@@ -521,7 +522,11 @@ function makePreview(source:Source,request:MdfCorrectionPreviewBody,snapshot:Mdf
     const detail=snapshot.details.find(row=>row.orderId===effect.orderId&&row.detailId===effect.detailId)!;
     const after=resolveAfterStatus(effect,detail.currentRank,detail.status,targetStage,stages);
     return {...effect,orderName:snapshot.owners.find(o=>o.id===effect.orderId)?.name??String(effect.orderId),
-      detailNumber:detail.detailNumber,beforeStatus:detail.status,afterStatus:after};
+      detailNumber:detail.detailNumber,beforeStatus:detail.status,afterStatus:after,
+      cardQuantity:(snapshot.plannerSources.find(s=>sourceKey(s)===sourceKey(source))?.lines??[])
+        .filter(l=>l.stage==='membership'&&l.orderId===effect.orderId&&l.detailId===effect.detailId)
+        .reduce((sum,l)=>mdfSum(sum,l.quantity),0),
+      statusKept:effect.afterRank===detail.currentRank};
   }):[];
   const baths:MdfCorrectionBathEffect[]=[];
   if (plan.status==='ready') {
@@ -531,7 +536,7 @@ function makePreview(source:Source,request:MdfCorrectionPreviewBody,snapshot:Mdf
       baths.push({source:sourceRef,previousRevision:bath.previousRevision,cancelledLaminationQuantity:bath.cancelledLaminationQuantity,
         beforeColumn:snapshot.published.get(sourceKey(sourceRef))?.column??null,
         manualPlacementColumnBefore:metadata?.manualPlacementColumn??null,manualPlacementColumnAfter:null,
-        clearsManualPlacementOverride:(metadata?.manualPlacementColumn??null)!==null});
+        clearsManualPlacementOverride:(metadata?.manualPlacementColumn??null)!==null,afterColumn:null,afterIssues:[]});
     }
     if (source.kind==='bath') {
       const current=snapshot.plannerSources.find(s=>sourceKey(s)===sourceKey(source));
@@ -543,7 +548,7 @@ function makePreview(source:Source,request:MdfCorrectionPreviewBody,snapshot:Mdf
       baths.push({source,previousRevision:replacement.previousRevision,cancelledLaminationQuantity:Math.max(before-after,0),
         beforeColumn:snapshot.published.get(sourceKey(source))?.column??null,
         manualPlacementColumnBefore:metadata?.manualPlacementColumn??null,manualPlacementColumnAfter:request.targetColumn,
-        clearsManualPlacementOverride:false});
+        clearsManualPlacementOverride:false,afterColumn:null,afterIssues:[]});
     }
   }
   const baseline=head&&source.kind==='packet'&&plan.status==='ready'
@@ -553,7 +558,7 @@ function makePreview(source:Source,request:MdfCorrectionPreviewBody,snapshot:Mdf
   const response:MdfCorrectionPreviewResponse={protocol:'mdf-correction-v1',status:plan.status==='ready'?'ready':'blocked',
     source:{...source,label:sourceLabel},targetColumn:request.targetColumn,targetStage,stages:returnStages,
     sourceToken:token,headFence:{version:head.version,correctionEpoch:head.epoch},digest:null,affectedOrderIds,
-    details,affectedBaths:baths,allocationReleases:plan.status==='ready'?plan.allocationReleaseIds:[],
+    details,affectedBaths:baths,sourceAfter:{afterColumn:null,afterIssues:[]},orders:[],allocationReleases:plan.status==='ready'?plan.allocationReleaseIds:[],
     allocationReplacements:plan.status==='ready'?plan.allocationReplacements:[],deferredPriorAutomation:deferredJobs,
     cncFreshnessBaseline:baseline,blockers,warnings:[]};
   if (baseline) response.warnings.push('Для повторного подтверждения реза потребуется новое pending-событие и затем более новая completion-отметка; наблюдатель CNC пока не активирован.');
@@ -590,7 +595,10 @@ function correctionDigest(user:CurrentUser,source:Source,request:MdfCorrectionPr
     allocations:snapshot.allocations,details:snapshot.details,owners:snapshot.owners.map(owner=>({...owner,assigned:[...owner.assigned].sort()})),
     metadata:[...snapshot.metadata].sort(([a],[b])=>a<b?-1:a>b?1:0),
     published:[...snapshot.published].sort(([a],[b])=>a.localeCompare(b)),stages,targetStage,plan,affectedOrderIds,candidateJobs,deferredJobs,
-    effects:{baths:response.affectedBaths,details:response.details}});
+    effects:{baths:response.affectedBaths,details:response.details,orders:response.orders,sourceAfter:response.sourceAfter},
+    detached:snapshot.plannerSources.filter(s=>s.detachedPositionKeys?.size)
+      .map(s=>[s.kind,s.id,[...s.detachedPositionKeys!].sort()]).sort((a,b)=>JSON.stringify(a)<JSON.stringify(b)?-1:1),
+    automationEnabled:isStatusAutomationEnabled()});
 }
 
 /** Turn only an authenticated v2 predecessor into a return manifest. A return
@@ -627,4 +635,110 @@ function correctionLineageManifest(source:MdfCorrectionSource,predecessorRevisio
   const droppedPredecessorEvidenceLineIds=lineage.lines.filter(line=>!retained.has(line.evidenceLineId))
     .map(line=>line.evidenceLineId).sort((a,b)=>a<b?-1:a>b?1:0);
   return {operation:'correction',actions,droppedPredecessorEvidenceLineIds};
+}
+
+/** The scalar detail status writes of a ready plan (never forward: only effects whose rank changes). */
+async function applyDetailStatusEffects(tx:TransactionClient,actorId:number,snapshot:MdfCorrectionSnapshot,
+  plan:Extract<MdfCorrectionPlan,{status:'ready'}>,stages:StageRow[],targetStage:MdfReturnStage):Promise<number[]> {
+  const changedOrders=new Set<number>();
+  for (const effect of plan.affectedDetails) {
+    const before=snapshot.details.find(d=>d.orderId===effect.orderId&&d.detailId===effect.detailId);
+    if (!before||effect.afterRank===before.currentRank) continue;
+    const status=selectStatusForEffect(effect,stages,targetStage);
+    await tx.query(`UPDATE order_details SET production_status_id=$3,edited_by=$4,updated_at=now()
+      WHERE order_id=$1 AND detail_id=$2 AND NOT delete_flag`,[effect.orderId,effect.detailId,status.id,actorId]);
+    changedOrders.add(effect.orderId);
+  }
+  for (const orderId of sorted(changedOrders)) {
+    await tx.query(`UPDATE orders SET version=version+1,updated_at=now(),edited_by=$2 WHERE order_id=$1`,[orderId,actorId]);
+    await tx.query('SELECT recalc_order_production_status($1::bigint)',[orderId]);
+  }
+  return sorted(changedOrders);
+}
+
+async function dispatchOrderAutomation(tx:TransactionClient,user:CurrentUser,orderIds:readonly number[],requestId:string,keyBase:string) {
+  for (const orderId of orderIds) await evaluateProductionCompositionAutomation(tx,{orderId,actor:user,requestId,
+    sourceIdempotencyKey:`${keyBase}:order-${orderId}`});
+}
+
+async function readOrderStatuses(tx:TransactionClient,orderIds:readonly number[]) {
+  const rows=(await tx.query<{id:string;statusId:number|null;status:string|null}>(`SELECT o.order_id::text id,
+      o.order_status_id::integer "statusId",s.order_status_name status
+    FROM orders o LEFT JOIN order_statuses s ON s.order_status_id=o.order_status_id
+    WHERE o.order_id=ANY($1::bigint[])`,[[...orderIds]])).rows;
+  return new Map(rows.map(row=>[Number(row.id),{statusId:row.statusId,status:row.status}]));
+}
+
+/** What-if of the order status automation for a ready plan: apply only the detail status writes and the rules inside
+ * a savepoint (isolated rule-visit bookkeeping), read the resulting order statuses, roll back. All owner/detail/head
+ * locks are already held by prepare. */
+async function previewOrderAutomation(tx:TransactionClient,user:CurrentUser,snapshot:MdfCorrectionSnapshot,
+  plan:Extract<MdfCorrectionPlan,{status:'ready'}>,stages:StageRow[],targetStage:MdfReturnStage,
+  affectedOrderIds:readonly number[]):Promise<MdfCorrectionOrderEffect[]> {
+  const before=await readOrderStatuses(tx,affectedOrderIds);
+  let after:Awaited<ReturnType<typeof readOrderStatuses>>;
+  await tx.query('SAVEPOINT mdf_correction_preview');
+  try {
+    await withIsolatedStatusAutomationVisits(tx,async()=>{
+      const changed=await applyDetailStatusEffects(tx,intId(user.id),snapshot,plan,stages,targetStage);
+      await dispatchOrderAutomation(tx,user,changed,`mdf-correction-preview:${randomUUID()}`,
+        `mdf-correction-preview:${randomUUID()}`);
+    });
+    after=await readOrderStatuses(tx,affectedOrderIds);
+  } finally {
+    await tx.query('ROLLBACK TO SAVEPOINT mdf_correction_preview');
+    await tx.query('RELEASE SAVEPOINT mdf_correction_preview');
+  }
+  return [...affectedOrderIds].sort((a,b)=>a-b).map(orderId=>({orderId,
+    orderName:snapshot.owners.find(owner=>owner.id===orderId)?.name??String(orderId),
+    before:before.get(orderId)?.status??null,after:after.get(orderId)?.status??null,
+    beforeStatusId:before.get(orderId)?.statusId??null,afterStatusId:after.get(orderId)?.statusId??null}));
+}
+
+/** §5.5 resulting columns: the single placement function (§5.4d) on the card's published placement inputs with the
+ * planned changes applied (proof after the return, manual override cleared or set to the target, member ranks after
+ * the planned status effects). Bath readiness after a supply change is only known after the recalculation. */
+async function previewPlacementAfter(tx:TransactionClient,source:Source,request:MdfCorrectionPreviewBody,
+  snapshot:MdfCorrectionSnapshot,plan:Extract<MdfCorrectionPlan,{status:'ready'}>,stages:StageRow[],
+  response:MdfCorrectionPreviewResponse) {
+  const refs=[source,...response.affectedBaths.map(b=>b.source).filter(b=>sourceKey(b)!==sourceKey(source))];
+  const rows=(await tx.query<{kind:string;id:string;inputs:unknown;revision:string}>(`SELECT p.source_kind kind,p.source_id id,
+      p.placement_inputs inputs,p.published_revision::text revision FROM mdf_published_sources p
+    JOIN unnest($1::text[],$2::text[]) r(kind,id) ON p.source_kind=r.kind AND p.source_id=r.id`,
+  [refs.map(r=>r.kind),refs.map(r=>r.id)])).rows;
+  const rankOf=(code:string)=>{const ranks=stages.filter(s=>s.code===code).map(s=>s.rank);return ranks.length?Math.min(...ranks):null;};
+  const thresholds={packed:rankOf('packed'),issued:rankOf('issued'),laminated:rankOf('laminated')};
+  const releasedBaths=new Set([...plan.allocationReleaseIds.map(id=>snapshot.allocations.find(a=>a.allocationId===id)?.bathId),
+    ...plan.allocationReplacements.map(r=>snapshot.allocations.find(a=>a.allocationId===r.oldAllocationId)?.bathId)]);
+  const afterRank=(orderId:number,detailId:number)=>{
+    const effect=plan.affectedDetails.find(e=>e.orderId===orderId&&e.detailId===detailId);
+    return effect ? effect.afterRank : snapshot.details.find(d=>d.orderId===orderId&&d.detailId===detailId)?.currentRank??null;
+  };
+  const place=(ref:Source,manual:string|null):{afterColumn:string|null;afterIssues:string[]}=>{
+    const row=rows.find(r=>r.kind===ref.kind&&r.id===ref.id);
+    const inputs=row?parseMdfPlacementInputs(row.inputs,row.revision):null;
+    if (!inputs) return {afterColumn:null,afterIssues:['PLACEMENT_UNKNOWN']};
+    const lines=sourceKey(ref)===sourceKey(source)&&plan.sourceReplacement.sourceKind===ref.kind
+      ? plan.sourceReplacement.lines : plan.bathReplacements.find(b=>b.sourceId===ref.id)?.lines
+        ?? snapshot.plannerSources.find(s=>sourceKey(s)===sourceKey(ref))?.lines.filter(l=>l.revision===
+          snapshot.plannerSources.find(s=>sourceKey(s)===sourceKey(ref))?.acceptedRevision) ?? [];
+    const sum=(stage:string,evidence?:string)=>{const m=new Map<string,number>();
+      for (const l of lines) if (l.stage===stage&&!l.rework&&(!evidence||l.evidence===evidence))
+        m.set(mdfPositionKey(l),mdfSum(m.get(mdfPositionKey(l))??0,l.quantity));return m;};
+    const members=sum('membership'),cut=sum('cut','physical'),rolled=sum('laminated','physical');
+    const covers=(m:Map<string,number>)=>members.size>0&&[...members].every(([k,q])=>(m.get(k)??0)>=q);
+    const issues:string[]=[];
+    let bathReadiness=inputs.bathReadiness;
+    if (ref.kind==='bath'&&releasedBaths.has(ref.id)) { bathReadiness='unknown'; issues.push('READINESS_AFTER_RECALCULATION'); }
+    const memberRanks=lines.filter(l=>l.stage==='membership').map(l=>afterRank(l.orderId,l.detailId));
+    const placed=mdfPlacement({kind:inputs.kind,verified:inputs.verified,intentionalEmpty:inputs.intentionalEmpty,manual,
+      fullCut:covers(cut),fullRolled:covers(rolled),balanceBlocked:inputs.balanceBlocked,bathReadiness,
+      priorColumn:snapshot.published.get(sourceKey(ref))?.column??inputs.priorColumn},memberRanks,thresholds);
+    return {afterColumn:placed.column,afterIssues:[...new Set([...issues,...placed.issues])].sort()};
+  };
+  response.sourceAfter=place(source,request.targetColumn);
+  for (const bath of response.affectedBaths) {
+    const result=sourceKey(bath.source)===sourceKey(source)?response.sourceAfter:place(bath.source,bath.manualPlacementColumnAfter);
+    bath.afterColumn=result.afterColumn; bath.afterIssues=result.afterIssues;
+  }
 }
