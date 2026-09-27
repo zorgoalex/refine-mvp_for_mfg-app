@@ -3,21 +3,18 @@ import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, us
 import type { Key } from 'react';
 import type { IResourceComponentsProps } from '@refinedev/core';
 import { DownloadOutlined, FileTextOutlined, FilterFilled, ReloadOutlined } from '@ant-design/icons';
-import { Alert, Button, Checkbox, DatePicker, Input, Modal, Select, Space, Tag, Typography } from 'antd';
+import { Alert, Button, Checkbox, DatePicker, Drawer, Input, Modal, Pagination, Select, Space, Tag, Typography } from 'antd';
 import { Segmented } from "../../ui/Segmented";
-import type { TableProps } from 'antd';
+import type { TablePaginationConfig, TableProps } from 'antd';
 import type { FilterDropdownProps, SortOrder } from 'antd/es/table/interface';
 import dayjs, { type Dayjs } from 'dayjs';
-import { Link } from 'react-router-dom';
 import {
   ordersApi,
   subscribeOrderDataChanged,
 } from '../../api/ordersApi';
 import type {
-  OrderFilmDemandDto,
   OrderResourceDemandQuery,
   OrderResourceDemandResponse,
-  OrderSheetMaterialDemandDto,
 } from '../../api/types/orderApi.types';
 import { LocalizedList } from '../../components/LocalizedList';
 import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
@@ -30,18 +27,28 @@ import {
   type ResourceDemandReportFormat,
   type ResourceDemandReportMaterial,
 } from './resourceDemandReport';
+import { MaterialRowsView } from './MaterialRowsView';
+import { RESOURCE_CARD_MODES, ResourceDemandCard, type ResourceCardMode } from './ResourceDemandCard';
+import { KindSummaryCell, ResourceDemandBreakdown } from './ResourceDemandParts';
+import { resourceDemandLines } from './resourceKinds';
+import { SplitPanelView } from './SplitPanelView';
+import { useStoredViewMode } from './useStoredViewMode';
 
 const LIVE_REFRESH_INTERVAL_MS = 5_000;
-const numberFormatter = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 });
-const meterFormatter = new Intl.NumberFormat('ru-RU', {
-  minimumFractionDigits: 1,
-  maximumFractionDigits: 1,
-});
 const numericStyle = { fontVariantNumeric: 'tabular-nums' } as const;
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
 const RESOURCE_FILTER_EMPTY = '__order_resource_requirement_filter_empty__';
 const RESOURCE_FILTER_NONE = '__order_resource_requirement_filter_none__';
+type ResourceListViewMode = 'summary' | 'materials' | 'panel';
+const RESOURCE_LIST_VIEW_MODES: readonly ResourceListViewMode[] = ['summary', 'materials', 'panel'];
+const RESOURCE_LIST_VIEW_OPTIONS = [
+  { value: 'summary', label: 'Сводка' },
+  { value: 'materials', label: 'Материалы' },
+  { value: 'panel', label: 'Панель' },
+];
+const EMPTY_LIST_TEXT = 'Заказы по выбранным условиям не найдены';
+
 const REPORT_MATERIAL_OPTIONS: Array<{ value: ResourceDemandReportMaterial; label: string }> = [
   { value: 'films', label: 'Плёнка' },
   { value: 'sheetMaterials', label: 'Листовые материалы' },
@@ -107,6 +114,19 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
   );
   const [sortState, setSortState] = useState<HeaderSortState>(DEFAULT_SORT_STATE);
   const [refreshRevision, setRefreshRevision] = useState(0);
+  const [viewMode, setViewMode] = useStoredViewMode<ResourceListViewMode>(
+    'order-resource-requirements:list-view',
+    RESOURCE_LIST_VIEW_MODES,
+    'summary',
+  );
+  const [cardMode, setCardMode] = useStoredViewMode<ResourceCardMode>(
+    'order-resource-requirements:card-view',
+    RESOURCE_CARD_MODES,
+    'summary',
+  );
+  const [expandedRowKeys, setExpandedRowKeys] = useState<readonly Key[]>([]);
+  const [drawerSnapshot, setDrawerSnapshot] = useState<OrderResourceDemandRow | null>(null);
+  const [panelOrderId, setPanelOrderId] = useState<number | null>(null);
   const deferredSearch = useDeferredValue(searchInput.trim());
   const query = useMemo<OrderResourceDemandQuery>(() => ({
     page,
@@ -122,6 +142,15 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
     () => sortResourceDemandRows(filterResourceDemandRows(rows, headerFilters, readyCutsOnly), sortState),
     [headerFilters, readyCutsOnly, rows, sortState],
   );
+  // Карточка берёт свежую строку из live-обновлений, а если заказ ушёл со страницы — последний снимок.
+  const drawerRow = useMemo(
+    () => (drawerSnapshot == null
+      ? null
+      : rows.find((row) => row.orderId === drawerSnapshot.orderId) ?? drawerSnapshot),
+    [drawerSnapshot, rows],
+  );
+  const openCard = useCallback((row: OrderResourceDemandRow) => setDrawerSnapshot(row), []);
+
   const report = useMemo(
     () => buildResourceDemandReport({
       rows: reportRows,
@@ -233,6 +262,25 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
     [],
   );
 
+  const paginationConfig: TablePaginationConfig = {
+    current: response?.pagination.page ?? page,
+    pageSize: response?.pagination.pageSize ?? pageSize,
+    total: response?.pagination.total ?? 0,
+    showSizeChanger: true,
+    pageSizeOptions: PAGE_SIZE_OPTIONS,
+    showTotal: (total) => (
+      hasActiveListFilters ? `Заказов: ${total}; показано: ${tableRows.length}` : `Заказов: ${total}`
+    ),
+    onChange: (nextPage, nextPageSize) => {
+      if (nextPageSize !== pageSize) {
+        rememberPageSize(nextPageSize);
+        setPage(DEFAULT_PAGE);
+        return;
+      }
+      setPage(nextPage);
+    },
+  };
+
   const filterProps = (field: HeaderFilterField, options: HeaderFilterOption[]) => ({
     filteredValue: headerFilters[field],
     filterIcon: (filtered: boolean) => (
@@ -251,6 +299,12 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
     <LocalizedList title="Потребности заказов в ресурсах">
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         <Space wrap={false} size={8} style={{ width: '100%', overflowX: 'auto', whiteSpace: 'nowrap' }}>
+          <Segmented
+            aria-label="Вид списка"
+            value={viewMode}
+            options={RESOURCE_LIST_VIEW_OPTIONS}
+            onChange={(value) => setViewMode(value as ResourceListViewMode)}
+          />
           <Input.Search
             allowClear
             aria-label="Поиск заказа"
@@ -319,88 +373,117 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
           />
         )}
 
-        <Table
-          rowKey="orderId"
-          rowSelection={{
-            selectedRowKeys,
-            onChange: handleRowSelectionChange,
-            preserveSelectedRowKeys: true,
-            columnWidth: 48,
-          }}
-          dataSource={tableRows}
-          loading={loading && !response}
-          scroll={{ x: 1080 }}
-          onChange={handleTableChange}
-          pagination={{
-            current: response?.pagination.page ?? page,
-            pageSize: response?.pagination.pageSize ?? pageSize,
-            total: response?.pagination.total ?? 0,
-            showSizeChanger: true,
-            pageSizeOptions: PAGE_SIZE_OPTIONS,
-            showTotal: (total) => (
-              hasActiveListFilters ? `Заказов: ${total}; показано: ${tableRows.length}` : `Заказов: ${total}`
-            ),
-            onChange: (nextPage, nextPageSize) => {
-              if (nextPageSize !== pageSize) {
-                rememberPageSize(nextPageSize);
-                setPage(DEFAULT_PAGE);
-                return;
-              }
-              setPage(nextPage);
-            },
-          }}
-          locale={{ emptyText: 'Заказы по выбранным условиям не найдены' }}
+        {viewMode === 'summary' && (
+          <Table
+            rowKey="orderId"
+            rowSelection={{
+              selectedRowKeys,
+              onChange: handleRowSelectionChange,
+              preserveSelectedRowKeys: true,
+              columnWidth: 48,
+            }}
+            dataSource={tableRows}
+            loading={loading && !response}
+            scroll={{ x: 1080 }}
+            onChange={handleTableChange}
+            pagination={paginationConfig}
+            expandable={{
+              expandedRowKeys,
+              onExpandedRowsChange: setExpandedRowKeys,
+              expandedRowRender: (row: OrderResourceDemandRow) => (
+                <ResourceDemandBreakdown lines={resourceDemandLines(row)} />
+              ),
+            }}
+            locale={{ emptyText: EMPTY_LIST_TEXT }}
+          >
+            <Table.Column
+              key="order"
+              title="Заказ"
+              width={210}
+              sorter
+              sortOrder={sortState.columnKey === 'order' ? sortState.order : null}
+              {...filterProps('order', filterOptions.order)}
+              render={(_, row: OrderResourceDemandRow) => (
+                <Space direction="vertical" size={0}>
+                  <Typography.Link onClick={() => openCard(row)}>{orderDisplayNumber(row)}</Typography.Link>
+                  <Typography.Text type="secondary">
+                    {row.clientName || 'Клиент не указан'}
+                  </Typography.Text>
+                </Space>
+              )}
+            />
+            <Table.Column
+              key="date"
+              title="Дата заказа"
+              width={125}
+              sorter
+              sortOrder={sortState.columnKey === 'date' ? sortState.order : null}
+              {...filterProps('date', filterOptions.date)}
+              render={(_, row: OrderResourceDemandRow) => (
+                <span style={numericStyle}>{row.orderDate ? formatDate(row.orderDate) : '—'}</span>
+              )}
+            />
+            <Table.Column
+              key="sheetMaterials"
+              title="Листовые материалы"
+              width={280}
+              sorter
+              sortOrder={sortState.columnKey === 'sheetMaterials' ? sortState.order : null}
+              {...filterProps('sheetMaterials', filterOptions.sheetMaterials)}
+              render={(_, row: OrderResourceDemandRow) => (
+                <KindSummaryCell lines={resourceDemandLines(row)} kind="sheet_material" />
+              )}
+            />
+            <Table.Column
+              key="films"
+              title="Плёнка"
+              width={280}
+              sorter
+              sortOrder={sortState.columnKey === 'films' ? sortState.order : null}
+              {...filterProps('films', filterOptions.films)}
+              render={(_, row: OrderResourceDemandRow) => (
+                <KindSummaryCell lines={resourceDemandLines(row)} kind="film" />
+              )}
+            />
+          </Table>
+        )}
+        {viewMode === 'materials' && (
+          <MaterialRowsView
+            rows={tableRows}
+            loading={loading && !response}
+            emptyText={EMPTY_LIST_TEXT}
+            onOpenCard={openCard}
+          />
+        )}
+        {viewMode === 'panel' && (
+          <SplitPanelView
+            rows={tableRows}
+            loading={loading && !response}
+            emptyText={EMPTY_LIST_TEXT}
+            selectedOrderId={panelOrderId}
+            onSelectOrder={setPanelOrderId}
+            selectedRowKeys={selectedRowKeys}
+            onSelectionChange={handleRowSelectionChange}
+            cardMode={cardMode}
+            onCardModeChange={setCardMode}
+          />
+        )}
+        {viewMode !== 'summary' && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Pagination {...paginationConfig} />
+          </div>
+        )}
+        <Drawer
+          open={drawerRow != null}
+          width={1100}
+          title="Потребности заказа в ресурсах"
+          onClose={() => setDrawerSnapshot(null)}
+          destroyOnClose
         >
-          <Table.Column
-            key="order"
-            title="Заказ"
-            width={230}
-            sorter
-            sortOrder={sortState.columnKey === 'order' ? sortState.order : null}
-            {...filterProps('order', filterOptions.order)}
-            render={(_, row: OrderResourceDemandRow) => (
-              <Space direction="vertical" size={0}>
-                <Link to={`/orders/show/${row.orderId}`}>{orderDisplayNumber(row)}</Link>
-                <Typography.Text type="secondary">
-                  {row.clientName || 'Клиент не указан'}
-                </Typography.Text>
-              </Space>
-            )}
-          />
-          <Table.Column
-            key="date"
-            title="Дата заказа"
-            width={125}
-            sorter
-            sortOrder={sortState.columnKey === 'date' ? sortState.order : null}
-            {...filterProps('date', filterOptions.date)}
-            render={(_, row: OrderResourceDemandRow) => (
-              <span style={numericStyle}>{row.orderDate ? formatDate(row.orderDate) : '—'}</span>
-            )}
-          />
-          <Table.Column
-            key="sheetMaterials"
-            title="Листовые материалы"
-            width={360}
-            sorter
-            sortOrder={sortState.columnKey === 'sheetMaterials' ? sortState.order : null}
-            {...filterProps('sheetMaterials', filterOptions.sheetMaterials)}
-            render={(_, row: OrderResourceDemandRow) => (
-              <SheetMaterialCell rows={row.sheetMaterials} />
-            )}
-          />
-          <Table.Column
-            key="films"
-            title="Плёнка"
-            width={360}
-            sorter
-            sortOrder={sortState.columnKey === 'films' ? sortState.order : null}
-            {...filterProps('films', filterOptions.films)}
-            render={(_, row: OrderResourceDemandRow) => (
-              <FilmCell rows={row.films} />
-            )}
-          />
-        </Table>
+          {drawerRow && (
+            <ResourceDemandCard row={drawerRow} mode={cardMode} onModeChange={setCardMode} />
+          )}
+        </Drawer>
         <ResourceDemandReportModal
           open={reportOpen}
           report={report}
@@ -814,90 +897,6 @@ function compareDates(left: string | null | undefined, right: string | null | un
 
 function compareText(left: string | null | undefined, right: string | null | undefined): number {
   return (left ?? '').localeCompare(right ?? '', 'ru', { numeric: true, sensitivity: 'base' });
-}
-
-function SheetMaterialCell({ rows }: { rows: OrderSheetMaterialDemandDto[] }) {
-  if (rows.length === 0) return <Typography.Text type="secondary">—</Typography.Text>;
-  const totalArea = rows.reduce((sum, row) => sum + row.totalArea, 0);
-  return (
-    <Space direction="vertical" size={6} style={{ width: '100%' }}>
-      {rows.map((row) => (
-        <ResourceLine
-          key={row.sheetMaterialTypeId}
-          name={row.name}
-          provider={row.supplierName ? `Поставщик: ${row.supplierName}` : null}
-          quantity={`${numberFormatter.format(row.totalArea)} м²`}
-          detailsCount={row.detailsCount}
-        />
-      ))}
-      {rows.length > 1 && (
-        <Typography.Text strong style={numericStyle}>
-          Итого: {numberFormatter.format(totalArea)} м²
-        </Typography.Text>
-      )}
-    </Space>
-  );
-}
-
-function FilmCell({ rows }: { rows: OrderFilmDemandDto[] }) {
-  if (rows.length === 0) return <Typography.Text type="secondary">—</Typography.Text>;
-  const totalMeters = rows.reduce((sum, row) => sum + row.linearMeters, 0);
-  return (
-    <Space direction="vertical" size={6} style={{ width: '100%' }}>
-      {rows.map((row) => (
-        <ResourceLine
-          key={row.filmId}
-          name={row.name}
-          provider={row.vendorName ? `Производитель: ${row.vendorName}` : null}
-          quantity={row.hasCutData ? `${meterFormatter.format(row.linearMeters)} пог. м` : 'Нет готового раскроя'}
-          detailsCount={row.detailsCount}
-          secondaryQuantity={`${numberFormatter.format(row.totalArea)} м²`}
-        />
-      ))}
-      {rows.length > 1 && totalMeters > 0 && (
-        <Typography.Text strong style={numericStyle}>
-          Итого: {meterFormatter.format(totalMeters)} пог. м
-        </Typography.Text>
-      )}
-    </Space>
-  );
-}
-
-function ResourceLine({
-  name,
-  provider,
-  quantity,
-  detailsCount,
-  secondaryQuantity,
-}: {
-  name: string;
-  provider: string | null;
-  quantity: string;
-  detailsCount: number;
-  secondaryQuantity?: string;
-}) {
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', columnGap: 12 }}>
-      <div style={{ minWidth: 0 }}>
-        <Typography.Text>{name}</Typography.Text>
-        {(provider || secondaryQuantity) && (
-          <div>
-            <Typography.Text type="secondary">
-              {[provider, secondaryQuantity].filter(Boolean).join(' · ')}
-            </Typography.Text>
-          </div>
-        )}
-      </div>
-      <div style={{ textAlign: 'right' }}>
-        <Typography.Text strong style={numericStyle}>{quantity}</Typography.Text>
-        <div>
-          <Typography.Text type="secondary" style={numericStyle}>
-            Позиций: {detailsCount}
-          </Typography.Text>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function useLiveOrderResourceDemands(query: OrderResourceDemandQuery, refreshRevision: number) {
