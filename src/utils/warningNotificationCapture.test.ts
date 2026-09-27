@@ -22,6 +22,13 @@ describe('warning notification capture helpers', () => {
     );
   });
 
+  it('ignores decorative warning markers without words', () => {
+    expect(formatWarningText([], '●')).toBe('');
+    expect(formatWarningText([], ' • ')).toBe('');
+    expect(formatWarningText(['!'], '3')).toBe('');
+    expect(formatWarningText([], '● есть позиции без раскроя')).toBe('● есть позиции без раскроя');
+  });
+
   it('captures Ant Design status warnings and class-only transitions', () => {
     expect(WARNING_MARKER_SELECTOR).toContain('[class*="-status-warning"]');
     expect(WARNING_OBSERVER_OPTIONS).toMatchObject({

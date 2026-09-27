@@ -92,8 +92,12 @@ export function formatWarningText(
     .map(normalizeText)
     .filter((value): value is string => Boolean(value));
 
-  return unique(normalizedParts).join(': ') || normalizeText(fallback) || '';
+  const text = unique(normalizedParts).join(': ') || normalizeText(fallback) || '';
+  // Декоративные маркеры (например, «●» в Text type="warning") без слов в колокольчик не попадают.
+  return HAS_LETTER.test(text) ? text : '';
 }
+
+const HAS_LETTER = /\p{L}/u;
 
 function resolveWarningElement(marker: Element): Element {
   if (marker.classList.contains('ant-notification-notice-icon-warning')) {
