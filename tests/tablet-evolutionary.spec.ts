@@ -478,6 +478,8 @@ test.describe('Evolutionary tablet UI', () => {
         const health = collectPageHealth(page);
         await setupBoardTabletMocks(page, db);
 
+        // §5.6: the board asks the MDF engine mode first; these fixtures run the legacy board.
+        await page.route(/\/api\/v1\/orders\/status-board\/mdf-engine$/, (route) => route.fulfill({ json: { mode: 'legacy', publishedReads: false } }));
         await page.route(/\/api\/v1\/cnc-telegram\/today(?:\?.*)?$/, async (route) => {
             expect(new URL(route.request().url()).searchParams.get('operationalWindow')).toBe('two_months');
             await route.fulfill({
@@ -764,6 +766,8 @@ async function setupMdfOverflowPreviewMocks(page: Page, slowInitialLoad = false)
         user.permissions = [...user.permissions, 'cut.view', 'labels.generate'];
         localStorage.setItem('user', JSON.stringify(user));
     });
+    // §5.6: the board asks the MDF engine mode first; these fixtures run the legacy board.
+    await page.route(/\/api\/v1\/orders\/status-board\/mdf-engine$/, (route) => route.fulfill({ json: { mode: 'legacy', publishedReads: false } }));
     await page.route(/\/api\/v1\/cnc-telegram\/today(?:\?.*)?$/, async (route) => {
         if (slowInitialLoad) {
             slowInitialLoad = false;
@@ -926,6 +930,8 @@ async function setupBoardTabletMocks(page: Page, db: WorkflowMockDb) {
             ),
         });
     });
+    // §5.6: the board asks the MDF engine mode first; these fixtures run the legacy board.
+    await page.route(/\/api\/v1\/orders\/status-board\/mdf-engine$/, (route) => route.fulfill({ json: { mode: 'legacy', publishedReads: false } }));
     await page.route(/\/api\/v1\/cnc-telegram\/today(?:\?.*)?$/, async (route) => {
         expect(new URL(route.request().url()).searchParams.get('operationalWindow')).toBe('two_months');
         await route.fulfill({
