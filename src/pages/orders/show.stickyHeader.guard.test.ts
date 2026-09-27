@@ -23,6 +23,13 @@ describe('OrderShow sticky detail header guards', () => {
     expect(showSource).toContain('orderShowStickyEnabled');
   });
 
+  it('uses the shared hysteresis helper to resolve the stuck sticky summary state', () => {
+    expect(showSource).toContain("import { resolveStickySummaryStuck } from './utils/stickySummaryStuck';");
+    expect(showSource).toContain('resolveStickySummaryStuck({');
+    expect(orderFormSource).toContain("import { resolveStickySummaryStuck } from '../utils/stickySummaryStuck';");
+    expect(orderFormSource).toContain('resolveStickySummaryStuck({');
+  });
+
   it('keeps the order edit summary sticky only when the details list exceeds the viewport', () => {
     expect(orderFormSource).toContain('orderFormDetailsBlockRef');
     expect(orderFormSource).toContain('orderFormStickyEnabled');

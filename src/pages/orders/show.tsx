@@ -7,6 +7,7 @@ import { Alert, Button, Card, Checkbox, Breadcrumb, message, Dropdown, Space, Mo
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { getTableColumnDataIndex, getTableStickyOffsetHeader } from './utils/tableCompatibility';
+import { resolveStickySummaryStuck } from './utils/stickySummaryStuck';
 import { forwardRef, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useReactToPrint } from "react-to-print";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -1345,6 +1346,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const [orderShowDetailsToolbarRef, orderShowDetailsToolbarHeight] = useMeasuredElementHeight<HTMLDivElement>();
   const [orderShowStickyEnabled, setOrderShowStickyEnabled] = useState(false);
   const [orderShowSummaryStuck, setOrderShowSummaryStuck] = useState(false);
+  const orderShowSummaryStuckRef = useRef(false);
+  const orderShowExpandedSummaryHeightRef = useRef(0);
   const orderShowStickyStackMeasured = orderShowTabsShellHeight > 0 && orderShowDetailsToolbarHeight > 0;
   const orderShowTableHeaderTop = useMemo(() => (
     orderShowStickyEnabled && orderShowStickyStackMeasured
@@ -1406,12 +1409,29 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
   useEffect(() => {
     const update = () => {
+      if (!orderShowStickyEnabled) {
+        orderShowExpandedSummaryHeightRef.current = 0;
+      }
       const node = orderShowStickySentinelRef.current;
-      const next =
-        orderShowStickyEnabled &&
-        !!node &&
-        node.getBoundingClientRect().top <= workspaceTabsHeight;
-      setOrderShowSummaryStuck((prev) => (prev === next ? prev : next));
+      const wrapper = orderShowSummaryTabsRef.current;
+      const sentinelTop = node ? node.getBoundingClientRect().top : null;
+      const currentHeight = wrapper ? wrapper.getBoundingClientRect().height : 0;
+      const wasStuck = orderShowSummaryStuckRef.current;
+      if (!wasStuck && currentHeight > 0) {
+        orderShowExpandedSummaryHeightRef.current = currentHeight;
+      }
+      const next = resolveStickySummaryStuck({
+        enabled: orderShowStickyEnabled,
+        wasStuck,
+        sentinelTop,
+        stickyTop: workspaceTabsHeight,
+        expandedHeight: orderShowExpandedSummaryHeightRef.current,
+        currentHeight,
+      });
+      if (orderShowSummaryStuckRef.current !== next) {
+        orderShowSummaryStuckRef.current = next;
+        setOrderShowSummaryStuck(next);
+      }
     };
 
     update();

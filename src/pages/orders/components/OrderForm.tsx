@@ -40,6 +40,7 @@ import { can } from '../../../utils/permissions';
 import { authSession } from '../../../api/authSession';
 import { useOrderFinancialVisibility } from '../../../hooks/useOrderFinancialVisibility';
 import { resolveOrderTabLabel } from '../../../utils/tabLabels';
+import { resolveStickySummaryStuck } from '../utils/stickySummaryStuck';
 import {
   buildNextOrderNameFromList, collectProvenanceNodes, draftToFormSeed } from '../../bazis/bazisOrderDraft';
 import { ordersApi } from '../../../api/ordersApi';
@@ -300,6 +301,9 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   const paymentsTabRef = useRef<OrderPaymentsTabRef>(null);
   const orderFormDetailsBlockRef = useRef<HTMLDivElement>(null);
   const orderFormStickySentinelRef = useRef<HTMLDivElement>(null);
+  const orderFormSummaryTabsRef = useRef<HTMLDivElement>(null);
+  const orderFormSummaryStuckRef = useRef(false);
+  const orderFormExpandedSummaryHeightRef = useRef(0);
   const handledAddPaymentIntentRef = useRef<string | null>(null);
   const saveKeyRef = useRef<string | undefined>(undefined);
   const saveKeySignatureRef = useRef<string | undefined>(undefined);
@@ -1916,12 +1920,29 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
 
   useEffect(() => {
     const update = () => {
+      if (!orderFormStickyEnabled) {
+        orderFormExpandedSummaryHeightRef.current = 0;
+      }
       const node = orderFormStickySentinelRef.current;
-      const next =
-        orderFormStickyEnabled &&
-        !!node &&
-        node.getBoundingClientRect().top <= workspaceTabsHeight;
-      setOrderFormSummaryStuck((prev) => (prev === next ? prev : next));
+      const wrapper = orderFormSummaryTabsRef.current;
+      const sentinelTop = node ? node.getBoundingClientRect().top : null;
+      const currentHeight = wrapper ? wrapper.getBoundingClientRect().height : 0;
+      const wasStuck = orderFormSummaryStuckRef.current;
+      if (!wasStuck && currentHeight > 0) {
+        orderFormExpandedSummaryHeightRef.current = currentHeight;
+      }
+      const next = resolveStickySummaryStuck({
+        enabled: orderFormStickyEnabled,
+        wasStuck,
+        sentinelTop,
+        stickyTop: workspaceTabsHeight,
+        expandedHeight: orderFormExpandedSummaryHeightRef.current,
+        currentHeight,
+      });
+      if (orderFormSummaryStuckRef.current !== next) {
+        orderFormSummaryStuckRef.current = next;
+        setOrderFormSummaryStuck(next);
+      }
     };
 
     update();
@@ -2099,6 +2120,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
             <div className={orderFormPageClassName} style={orderFormStickyStyle}>
               <div ref={orderFormStickySentinelRef} className="order-show-sticky-sentinel" aria-hidden />
               <div
+                ref={orderFormSummaryTabsRef}
                 className={`order-show-summary-tabs-sticky${orderFormSummaryStuck ? ' order-show-summary-tabs-sticky--stuck' : ''}`}
               >
                 <OrderHeaderSummary compactSticky={orderFormStickyEnabled && orderFormSummaryStuck} />
@@ -2204,6 +2226,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         <div className={orderFormPageClassName} style={orderFormStickyStyle}>
         <div ref={orderFormStickySentinelRef} className="order-show-sticky-sentinel" aria-hidden />
         <div
+          ref={orderFormSummaryTabsRef}
           className={`order-show-summary-tabs-sticky${orderFormSummaryStuck ? ' order-show-summary-tabs-sticky--stuck' : ''}`}
         >
           <OrderHeaderSummary compactSticky={orderFormStickyEnabled && orderFormSummaryStuck} />
