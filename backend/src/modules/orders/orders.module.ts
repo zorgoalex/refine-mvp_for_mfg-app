@@ -51,6 +51,9 @@ import { MdfProductionReturnController } from './http/mdf-production-return.cont
 import { MdfActiveProductionReturnController, MdfEngineModeController } from './http/mdf-active-production-return.controller';
 import { OrderResourceDemandController } from './http/order-resource-demand.controller';
 import { OrderResourceProcurementController } from './http/order-resource-procurement.controller';
+import { OnecDocumentsController } from './http/onec-documents.controller';
+import { OnecDocumentsService } from './application/onec-documents.service';
+import { PgOnecDocumentsRepository } from './adapters/pg-onec-documents-repository';
 import { PgOrderResourceProcurementRepository } from './adapters/pg-order-resource-procurement-repository';
 import { OrderSnapshotController } from './http/order-snapshot.controller';
 import { OrdersController } from './http/orders.controller';
@@ -86,6 +89,7 @@ export function shouldEnableOrderDeadlineSync(input: {
     OrderGroupLinksController,
     OrderResourceDemandController,
     OrderResourceProcurementController,
+    OnecDocumentsController,
     OrderHdfSettingsController,
     OrdersController,
   ],
@@ -197,6 +201,15 @@ export function shouldEnableOrderDeadlineSync(input: {
     {
       provide: OrderRefreshService,
       useFactory: (database: DatabaseService) => new OrderRefreshService({ database }),
+      inject: [DatabaseService],
+    },
+    {
+      provide: OnecDocumentsService,
+      useFactory: (database: DatabaseService) =>
+        new OnecDocumentsService({
+          documents: new PgOnecDocumentsRepository(database),
+          auditClient: database,
+        }),
       inject: [DatabaseService],
     },
     {

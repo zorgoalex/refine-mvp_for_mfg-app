@@ -20,6 +20,7 @@ const NAVIGATION_RESOURCES = [
   'films',
   'materials',
   'order_resource_requirements',
+  'onec_purchase_documents',
   'film_types',
   'units',
   'material_types',

@@ -36,7 +36,7 @@ import {
   type ResourceDemandReportMaterial,
 } from './resourceDemandReport';
 import { MaterialRowsView } from './MaterialRowsView';
-import { ProcurementCheckbox, ProcurementProgressTag, useProcurementPermission } from './ProcurementParts';
+import { OnecDocChips, ProcurementCheckbox, ProcurementProgressTag, useProcurementPermission } from './ProcurementParts';
 import { RESOURCE_CARD_MODES, ResourceDemandCard, type ResourceCardMode } from './ResourceDemandCard';
 import { KindSummaryCell, ResourceDemandBreakdown } from './ResourceDemandParts';
 import { resolveByMaterialPeriod, resolveResourceCapabilities, resourceDemandLines, type ResourceDemandLine } from './resourceKinds';
@@ -476,6 +476,9 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
                       manageLoading={manageLoading}
                       onChanged={triggerRefresh}
                     />
+                  ) : undefined}
+                  renderOnecDocs={capabilities.onecDocuments ? (line: ResourceDemandLine) => (
+                    <OnecDocChips line={line} />
                   ) : undefined}
                 />
               ),

@@ -17,12 +17,15 @@ import {
   ORDER_SELECT_SQL,
   applyProcurement,
   buildScopedOrderWhere,
+  isReceiptLock,
+  loadOnecLinks,
   loadProcurementRows,
   loadProjectedOrders,
   orderNotFound,
   orphanLine,
   parseResourceKey,
   procurementRowKey,
+  type OnecLinkRow,
   type ProjectedOrder,
   type ResourceDemandOrderRow,
   type ResourceProcurementRow,
@@ -39,19 +42,20 @@ interface ProcurementItem {
 type ProcurementConflictCode =
   | 'PROCUREMENT_VERSION_CONFLICT'
   | 'PROCUREMENT_DEMAND_CHANGED'
-  | 'PROCUREMENT_RESOURCE_NOT_IN_ORDER';
+  | 'PROCUREMENT_RESOURCE_NOT_IN_ORDER'
+  | 'PROCUREMENT_LOCKED_BY_ONEC';
 
 type Decision =
   | { type: 'noop'; line: OrderResourceDemandLineDto }
   | { type: 'apply'; line: OrderResourceDemandLineDto; row: ResourceProcurementRow | undefined }
   | { type: 'conflict'; code: ProcurementConflictCode; line: OrderResourceDemandLineDto | null };
 
-interface Actor {
+export interface Actor {
   userId: number;
   username: string;
 }
 
-interface LockedOrder {
+export interface LockedOrder {
   row: ResourceDemandOrderRow;
   orderId: number;
   clientId: number | null;
@@ -72,7 +76,8 @@ export class PgOrderResourceProcurementRepository {
       if (!order) throw orderNotFound();
       const [projected] = await loadProjectedOrders(tx, [order.row], undefined);
       const procurement = await loadProcurementRows(tx, [order.orderId], true);
-      const decision = decide(projected, procurement, command.resourceKey, command.purchased, command);
+      const onecLinks = await loadOnecLinks(tx, [order.orderId]);
+      const decision = decide(projected, procurement, command.resourceKey, command.purchased, command, onecLinks);
       if (decision.type === 'conflict') throw conflictError(decision.code, decision.line);
       if (decision.type === 'noop') {
         return { orderId: order.orderId, resourceKey: command.resourceKey, changed: false, line: decision.line };
@@ -103,6 +108,7 @@ export class PgOrderResourceProcurementRepository {
       if (orders.length !== new Set(orderIds).size) throw orderNotFound();
       const projected = await loadProjectedOrders(tx, orders.map((order) => order.row), undefined);
       const procurement = await loadProcurementRows(tx, orders.map((order) => order.orderId), true);
+      const onecLinks = await loadOnecLinks(tx, orders.map((order) => order.orderId));
       const itemByOrder = new Map(command.items.map((item) => [item.orderId, item]));
 
       const decisions = orders.map((order) => {
@@ -116,6 +122,7 @@ export class PgOrderResourceProcurementRepository {
             command.resourceKey,
             command.purchased,
             item,
+            onecLinks,
           ),
         };
       });
@@ -163,11 +170,12 @@ export function decide(
   resourceKey: string,
   purchased: boolean,
   item: Pick<ProcurementItem, 'expectedVersion' | 'expectedDemandFingerprint'>,
+  onecLinks: OnecLinkRow[] = [],
 ): Decision {
   const row = procurement.find((candidate) => procurementRowKey(candidate) === resourceKey);
-  const lines = applyProcurement(projected?.lines ?? [], procurement).map(({ line }) => line);
+  const lines = applyProcurement(projected?.lines ?? [], procurement, { onecLinks }).map(({ line }) => line);
   // Снятая отметка у материала вне потребности в списки не попадает — берём строку-сироту.
-  const line = lines.find((candidate) => candidate.resourceKey === resourceKey) ?? (row ? orphanLine(row) : null);
+  const line = lines.find((candidate) => candidate.resourceKey === resourceKey) ?? (row ? orphanLine(row, { onecLinks }) : null);
   const currentPurchased = row?.purchased ?? false;
   const currentVersion = row ? Number(row.version) : 0;
 
@@ -183,6 +191,11 @@ export function decide(
   }
   if (purchased && demandLine && demandLine.demandFingerprint !== item.expectedDemandFingerprint) {
     return { type: 'conflict', code: 'PROCUREMENT_DEMAND_CHANGED', line };
+  }
+  // Приход из проведённого документа 1С держит отметку: снять её можно, только сняв распределение.
+  if (!purchased && row && onecLinks.some((link) => Number(link.order_resource_procurement_id)
+    === Number(row.order_resource_procurement_id) && isReceiptLock(link))) {
+    return { type: 'conflict', code: 'PROCUREMENT_LOCKED_BY_ONEC', line };
   }
   return { type: 'apply', line: line!, row };
 }
@@ -248,12 +261,14 @@ async function applyDecision(tx: DatabaseClient, input: ApplyInput): Promise<Ord
   const procurementId = Number(written.rows[0].id);
 
   const procurement = await loadProcurementRows(tx, [order.orderId]);
+  const onecLinks = await loadOnecLinks(tx, [order.orderId]);
   const [projected] = await loadProjectedOrders(tx, [order.row], undefined);
   const afterRow = procurement.find((row) => Number(row.order_resource_procurement_id) === procurementId);
   if (!afterRow) throw new Error('Procurement command did not produce a row');
-  const line = applyProcurement(projected?.lines ?? [], procurement)
+  const extras = { onecLinks, canSeeAmounts: input.currentUser.permissions.includes('finance.view') };
+  const line = applyProcurement(projected?.lines ?? [], procurement, extras)
     .map(({ line: candidate }) => candidate)
-    .find((candidate) => candidate.resourceKey === input.resourceKey) ?? orphanLine(afterRow);
+    .find((candidate) => candidate.resourceKey === input.resourceKey) ?? orphanLine(afterRow, extras);
   const after = snapshot(afterRow);
 
   const event = purchased ? 'order_resource.procurement_marked' : 'order_resource.procurement_unmarked';
@@ -331,7 +346,7 @@ function snapshot(row: ResourceProcurementRow): Record<string, unknown> {
   };
 }
 
-async function lockActor(tx: DatabaseClient, currentUser: CurrentUser): Promise<Actor> {
+export async function lockActor(tx: DatabaseClient, currentUser: CurrentUser): Promise<Actor> {
   const userId = Number(currentUser.id);
   if (!Number.isSafeInteger(userId) || userId < 1) {
     throw new ApiError(403, 'PROCUREMENT_ACTOR_INVALID', 'Отметка закупа доступна только активному пользователю ERP');
@@ -348,7 +363,7 @@ async function lockActor(tx: DatabaseClient, currentUser: CurrentUser): Promise<
   return { userId, username: actor.username };
 }
 
-async function lockOrders(tx: DatabaseClient, currentUser: CurrentUser, orderIds: number[]): Promise<LockedOrder[]> {
+export async function lockOrders(tx: DatabaseClient, currentUser: CurrentUser, orderIds: number[]): Promise<LockedOrder[]> {
   const params: unknown[] = [];
   const { whereSql } = buildScopedOrderWhere(currentUser, undefined, params);
   const idsIndex = params.push([...new Set(orderIds)]);
@@ -378,6 +393,9 @@ function requireResourceKey(value: string): { kind: OrderResourceKind; refId: nu
 function conflictError(code: ProcurementConflictCode, line: OrderResourceDemandLineDto | null): ApiError {
   if (code === 'PROCUREMENT_RESOURCE_NOT_IN_ORDER') {
     return new ApiError(422, code, 'Этого материала нет в потребности заказа');
+  }
+  if (code === 'PROCUREMENT_LOCKED_BY_ONEC') {
+    return new ApiError(409, code, 'Материал оприходован документом 1С. Чтобы снять отметку, сначала снимите распределение прихода', { line });
   }
   const message = code === 'PROCUREMENT_VERSION_CONFLICT'
     ? 'Отметку закупа уже изменил другой пользователь. Показано актуальное состояние'

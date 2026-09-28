@@ -228,7 +228,12 @@ export class PgOrderResourceDemandRepository implements OrderResourceDemandRepos
       const procurement = options.procurementEnabled
         ? await loadProcurementRows(client, [order.orderId])
         : [];
-      const lines = applyProcurement(order.lines, procurement.filter((row) => toNumber(row.order_id) === order.orderId));
+      const onecLinks = options.procurementEnabled ? await loadOnecLinks(client, [order.orderId]) : [];
+      const lines = applyProcurement(
+        order.lines,
+        procurement.filter((row) => toNumber(row.order_id) === order.orderId),
+        { onecLinks, canSeeAmounts: options.canSeeAmounts === true },
+      );
       const cardLines: OrderResourceCardLineDto[] = lines.map(({ line, details }) => ({ ...line, details }));
       return {
         data: {
@@ -308,10 +313,14 @@ export class PgOrderResourceDemandRepository implements OrderResourceDemandRepos
     const procurement = options.procurementEnabled && projected.length > 0
       ? await loadProcurementRows(client, projected.map((order) => order.orderId))
       : [];
+    const onecLinks = options.procurementEnabled && projected.length > 0
+      ? await loadOnecLinks(client, projected.map((order) => order.orderId))
+      : [];
     const data = projected.map<OrderResourceDemandDto>((order) => {
       const lines = applyProcurement(
         order.lines,
         procurement.filter((row) => toNumber(row.order_id) === order.orderId),
+        { onecLinks, canSeeAmounts: options.canSeeAmounts === true },
       ).map(({ line }) => line);
       return { ...order.base, lines, procurementSummary: summarizeProcurement(lines) };
     });
@@ -574,26 +583,111 @@ export function procurementDto(
  * Накладывает закуп на строки потребности. Отмеченный материал, которого заказу
  * больше не нужно, возвращается строкой-сиротой с нулевым количеством.
  */
+export interface OnecLinkRow extends QueryResultRow {
+  allocation_id: string | number;
+  order_resource_procurement_id: string | number;
+  role: 'receipt' | 'payment';
+  quantity: string | number | null;
+  amount: string | number | null;
+  origin: 'auto' | 'manual';
+  onec_document_id: string | number;
+  doc_kind: 'purchase_receipt' | 'cash_outflow' | 'bank_outflow';
+  number: string;
+  doc_date: string | Date;
+  posted: boolean;
+  deleted_in_onec: boolean;
+}
+
+export interface ApplyProcurementExtras {
+  /** Активные распределения документов 1С на закупы этих заказов. */
+  onecLinks?: OnecLinkRow[];
+  /** Право finance.view: без него суммы — null. */
+  canSeeAmounts?: boolean;
+}
+
+/**
+ * Активные распределения документов 1С на закупы заказов. Таблица фазы 3 читается
+ * только при включённом флаге закупа (вызывающая сторона проверяет флаг).
+ */
+export async function loadOnecLinks(client: DatabaseClient, orderIds: number[]): Promise<OnecLinkRow[]> {
+  if (orderIds.length === 0) return [];
+  const result = await client.query<OnecLinkRow>(
+    `
+    SELECT a.allocation_id, a.order_resource_procurement_id, a.role, a.quantity, a.amount, a.origin,
+           d.onec_document_id, d.doc_kind, d.number, d.doc_date::text AS doc_date, d.posted, d.deleted_in_onec
+      FROM order_resource_onec_allocations a
+      JOIN order_resource_procurement orp ON orp.order_resource_procurement_id = a.order_resource_procurement_id
+      JOIN onec_document_lines l ON l.onec_document_line_id = a.onec_document_line_id
+      JOIN onec_documents d ON d.onec_document_id = l.onec_document_id
+     WHERE orp.order_id = ANY($1::bigint[])
+       AND a.removed_at IS NULL
+     ORDER BY d.doc_date, d.onec_document_id, a.allocation_id
+    `,
+    [orderIds],
+  );
+  return result.rows;
+}
+
+/** Приход из проведённого и не удалённого документа запрещает снимать «Закуплено». */
+export function isReceiptLock(link: OnecLinkRow): boolean {
+  return link.role === 'receipt' && link.posted && !link.deleted_in_onec;
+}
+
+function onecForRow(
+  row: ResourceProcurementRow | undefined,
+  extras: ApplyProcurementExtras,
+): Pick<OrderResourceDemandLineDto, 'onec' | 'lockedByOnec'> {
+  if (!row) return { onec: { receipts: [], payments: [] }, lockedByOnec: false };
+  const id = toNumber(row.order_resource_procurement_id);
+  const links = (extras.onecLinks ?? []).filter((link) => toNumber(link.order_resource_procurement_id) === id);
+  const refs = links.map((link) => ({
+    documentId: toNumber(link.onec_document_id),
+    allocationId: toNumber(link.allocation_id),
+    kind: link.doc_kind,
+    number: link.number,
+    date: toDateOnly(link.doc_date) ?? '',
+    quantity: toNullableNumber(link.quantity),
+    amount: extras.canSeeAmounts ? toNullableNumber(link.amount) : null,
+    linkOrigin: link.origin,
+    posted: link.posted,
+    deletedInOnec: link.deleted_in_onec,
+  }));
+  return {
+    onec: {
+      receipts: refs.filter((_, index) => links[index].role === 'receipt'),
+      payments: refs.filter((_, index) => links[index].role === 'payment'),
+    },
+    lockedByOnec: links.some(isReceiptLock),
+  };
+}
+
 export function applyProcurement(
   lines: ProjectedResourceLine[],
   procurement: ResourceProcurementRow[],
+  extras: ApplyProcurementExtras = {},
 ): Array<{ line: OrderResourceDemandLineDto; details: OrderResourceDetailRefDto[] }> {
   const byKey = new Map(procurement.map((row) => [procurementRowKey(row), row]));
   const result = lines.map((projected) => {
     const { details, ...rest } = projected;
+    const row = byKey.get(projected.resourceKey);
     return {
       line: {
         ...rest,
         orphan: false,
-        procurement: procurementDto(byKey.get(projected.resourceKey), projected.demandFingerprint),
+        procurement: procurementDto(row, projected.demandFingerprint),
+        ...onecForRow(row, extras),
       },
       details,
     };
   });
   const present = new Set(lines.map((line) => line.resourceKey));
+  const linked = new Set((extras.onecLinks ?? []).map((link) => toNumber(link.order_resource_procurement_id)));
   for (const row of procurement) {
-    if (present.has(procurementRowKey(row)) || !row.purchased) continue;
-    result.push({ line: orphanLine(row), details: [] });
+    if (present.has(procurementRowKey(row))) continue;
+    // Сирота показывается, пока отмечена «Закуплено» или на неё распределён документ 1С —
+    // иначе такое распределение нельзя было бы снять (нет версии закупа).
+    if (!row.purchased && !linked.has(toNumber(row.order_resource_procurement_id))) continue;
+    result.push({ line: orphanLine(row, extras), details: [] });
   }
   return result;
 }
@@ -603,7 +697,7 @@ export function applyProcurement(
  * В списки попадает только отмеченная; команды используют её и после снятия
  * отметки, чтобы вернуть итоговое состояние (и для no-op повтора снятия).
  */
-export function orphanLine(row: ResourceProcurementRow): OrderResourceDemandLineDto {
+export function orphanLine(row: ResourceProcurementRow, extras: ApplyProcurementExtras = {}): OrderResourceDemandLineDto {
   const kind = row.resource_kind;
   const refId = kind === 'sheet_material' ? toNumber(row.sheet_material_type_id) : toNumber(row.film_id);
   const fingerprint = emptyDemandFingerprint(kind, refId);
@@ -621,6 +715,7 @@ export function orphanLine(row: ResourceProcurementRow): OrderResourceDemandLine
     demandFingerprint: fingerprint,
     orphan: true,
     procurement: procurementDto(row, fingerprint),
+    ...onecForRow(row, extras),
   };
 }
 
@@ -988,7 +1083,7 @@ export function capabilities(options: OrderResourceReadOptions): OrderResourceCa
     procurement: options.procurementEnabled,
     byMaterial: options.procurementEnabled,
     cardDetails: options.procurementEnabled,
-    onecDocuments: false,
+    onecDocuments: options.procurementEnabled,
   };
 }
 

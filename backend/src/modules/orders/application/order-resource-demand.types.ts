@@ -69,6 +69,24 @@ export interface OrderResourceDemandLineDto {
   /** Отметка закупа есть, а материал заказу больше не нужен. */
   orphan: boolean;
   procurement: OrderResourceProcurementDto;
+  /** Документы 1С, распределённые на этот закуп (активные распределения). */
+  onec: { receipts: OrderResourceOnecDocRefDto[]; payments: OrderResourceOnecDocRefDto[] };
+  /** Снять «Закуплено» нельзя: есть приход из проведённого документа 1С. */
+  lockedByOnec: boolean;
+}
+
+export interface OrderResourceOnecDocRefDto {
+  documentId: number;
+  allocationId: number;
+  kind: 'purchase_receipt' | 'cash_outflow' | 'bank_outflow';
+  number: string;
+  date: string;
+  quantity: number | null;
+  /** null без права finance.view. */
+  amount: number | null;
+  linkOrigin: 'auto' | 'manual';
+  posted: boolean;
+  deletedInOnec: boolean;
 }
 
 export interface OrderProcurementSummaryDto {
@@ -177,6 +195,8 @@ export interface GetOrderResourceCardCommand {
 export interface OrderResourceReadOptions {
   /** Флаг BACKEND_RESOURCE_PROCUREMENT_ENABLED: без него таблица закупа не читается. */
   procurementEnabled: boolean;
+  /** Право finance.view: суммы документов 1С. Без него — null. */
+  canSeeAmounts?: boolean;
 }
 
 export interface OrderResourceDemandRepositoryPort {

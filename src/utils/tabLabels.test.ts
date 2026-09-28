@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   resolveOrderTabLabel,
   resolveTabLabel,
+  resourceFromPath,
   RESOURCE_LABELS,
   shouldPreserveTabLabel,
 } from './tabLabels';
@@ -36,6 +37,12 @@ describe('resolveTabLabel', () => {
   });
   it('labels the cut page tab "Раскрой", not the raw path', () => {
     expect(resolveTabLabel('/cut')).toBe('Раскрой');
+  });
+  it('labels the 1C documents list and card tabs despite the nested /procurement path', () => {
+    expect(resolveTabLabel('/procurement/onec-documents')).toBe('Документы 1С');
+    expect(resolveTabLabel('/procurement/onec-documents/show/42')).toBe('Документы 1С · Просмотр #42');
+    expect(resourceFromPath('/procurement/onec-documents')).toBe('onec_purchase_documents');
+    expect(resourceFromPath('/procurement/onec-documents/show/42')).toBe('onec_purchase_documents');
   });
   it('falls back to the last segment for unknown routes', () => {
     expect(resolveTabLabel('/unknown-thing')).toBe('unknown-thing');

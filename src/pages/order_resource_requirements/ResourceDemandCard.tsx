@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import type { OrderResourceCapabilitiesDto } from '../../api/types/orderApi.types';
 import { Segmented } from '../../ui/Segmented';
 import { formatDate } from '../../utils/dateFormat';
-import { ProcurementCheckbox, ProcurementProgressTag } from './ProcurementParts';
+import { OnecDocChips, ProcurementCheckbox, ProcurementProgressTag } from './ProcurementParts';
 import {
   KindDot,
   KindTitle,
@@ -105,6 +105,10 @@ export function ResourceDemandCard({
     )
     : undefined;
 
+  const renderOnecDocs = capabilities.onecDocuments
+    ? (line: ResourceDemandLine) => <OnecDocChips line={line} />
+    : undefined;
+
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -149,12 +153,18 @@ export function ResourceDemandCard({
           Потребности не рассчитаны: у заказа нет деталей с материалом.
         </Typography.Text>
       ) : mode === 'tabs' ? (
-        <ResourceCardTabs lines={lines} renderProcurement={renderProcurement} expandableDetails={detailsAvailable} />
+        <ResourceCardTabs
+          lines={lines}
+          renderProcurement={renderProcurement}
+          renderOnecDocs={renderOnecDocs}
+          expandableDetails={detailsAvailable}
+        />
       ) : (
         <ResourceCardSummary
           lines={lines}
           compact={compact}
           renderProcurement={renderProcurement}
+          renderOnecDocs={renderOnecDocs}
           expandableDetails={detailsAvailable}
         />
       )}
@@ -165,10 +175,12 @@ export function ResourceDemandCard({
 function ResourceCardTabs({
   lines,
   renderProcurement,
+  renderOnecDocs,
   expandableDetails,
 }: {
   lines: ResourceDemandLine[];
   renderProcurement?: RenderProcurement;
+  renderOnecDocs?: RenderProcurement;
   expandableDetails: boolean;
 }) {
   const colorOf = useResourceKindColor();
@@ -181,6 +193,7 @@ function ResourceCardTabs({
           lines={lines}
           showKind
           renderProcurement={renderProcurement}
+          renderOnecDocs={renderOnecDocs}
           expandableDetails={expandableDetails}
         />
       ),
@@ -208,6 +221,7 @@ function ResourceCardTabs({
               lines={kindLines}
               showKind={false}
               renderProcurement={renderProcurement}
+              renderOnecDocs={renderOnecDocs}
               expandableDetails={expandableDetails}
             />
           </Space>
@@ -232,11 +246,13 @@ function ResourceCardSummary({
   lines,
   compact,
   renderProcurement,
+  renderOnecDocs,
   expandableDetails,
 }: {
   lines: ResourceDemandLine[];
   compact: boolean;
   renderProcurement?: RenderProcurement;
+  renderOnecDocs?: RenderProcurement;
   expandableDetails: boolean;
 }) {
   const colorOf = useResourceKindColor();
@@ -296,6 +312,7 @@ function ResourceCardSummary({
             showKind={false}
             compact={compact}
             renderProcurement={renderProcurement}
+            renderOnecDocs={renderOnecDocs}
             expandableDetails={expandableDetails}
           />
         </div>

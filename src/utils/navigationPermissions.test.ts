@@ -122,6 +122,15 @@ describe('navigation permissions', () => {
     );
   });
 
+  it('requires procurement.view for the 1C documents screen', () => {
+    expect(
+      canViewNavigationResource('onec_purchase_documents', { permissions: ['procurement.view'] }, true),
+    ).toBe(true);
+    expect(
+      canViewNavigationResource('onec_purchase_documents', { permissions: ['orders.view'] }, true),
+    ).toBe(false);
+  });
+
   it('keeps the MDF board hidden from packers', () => {
     expect(canViewNavigationResource(
       'mdf-work-board',

@@ -206,6 +206,9 @@ const OrderWorkshopShow = lazy(async () => ({ default: (await import("./pages/or
 const OrderResourceRequirementList = lazy(async () => ({ default: (await import("./pages/order_resource_requirements/list")).OrderResourceRequirementList }));
 const OrderResourceRequirementShow = lazy(async () => ({ default: (await import("./pages/order_resource_requirements/show")).OrderResourceRequirementShow }));
 
+const OnecPurchaseDocumentList = lazy(async () => ({ default: (await import("./pages/onec_purchase_documents/list")).OnecPurchaseDocumentList }));
+const OnecPurchaseDocumentShow = lazy(async () => ({ default: (await import("./pages/onec_purchase_documents/show")).OnecPurchaseDocumentShow }));
+
 // clients_analytics and payments_analytics each export two named components from one module.
 const ClientsAnalyticsList = lazy(async () => ({ default: (await import("./pages/clients_analytics")).ClientsAnalyticsList }));
 const ClientsAnalyticsShow = lazy(async () => ({ default: (await import("./pages/clients_analytics")).ClientsAnalyticsShow }));
@@ -728,6 +731,12 @@ const ThemedApp = () => {
                   meta: { idColumnName: "orderId", label: "Потребности заказов в ресурсах" },
                 },
                 {
+                  name: "onec_purchase_documents",
+                  list: "/procurement/onec-documents",
+                  show: "/procurement/onec-documents/show/:documentId",
+                  meta: { idColumnName: "documentId", label: "Документы 1С" },
+                },
+                {
                   name: "order_doweling_links",
                   meta: { idColumnName: "order_doweling_link_id" },
                 },
@@ -1069,6 +1078,10 @@ const ThemedApp = () => {
                   <Route path="/order-resource-requirements" >
                     <Route index element={<OrderResourceRequirementList />} />
                     <Route path="show/:orderId" element={<OrderResourceRequirementShow />} />
+                  </Route>
+                  <Route path="/procurement/onec-documents" >
+                    <Route index element={<OnecPurchaseDocumentList />} />
+                    <Route path="show/:documentId" element={<OnecPurchaseDocumentShow />} />
                   </Route>
                 </Route>
                 <Route

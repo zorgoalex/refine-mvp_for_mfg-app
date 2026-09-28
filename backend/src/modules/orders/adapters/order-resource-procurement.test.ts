@@ -551,7 +551,7 @@ describe('capabilities follow the procurement flag (rollback returns phase 1 UI)
   it('turns every phase-2 capability off with the flag and on with it', async () => {
     const { capabilities } = await import('./pg-order-resource-demand-repository');
     expect(capabilities({ procurementEnabled: false })).toEqual({ procurement: false, byMaterial: false, cardDetails: false, onecDocuments: false });
-    expect(capabilities({ procurementEnabled: true })).toEqual({ procurement: true, byMaterial: true, cardDetails: true, onecDocuments: false });
+    expect(capabilities({ procurementEnabled: true })).toEqual({ procurement: true, byMaterial: true, cardDetails: true, onecDocuments: true });
   });
 
   it('uses the runtime-configured scope of the user, not only the static role policy', async () => {

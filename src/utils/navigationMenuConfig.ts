@@ -4,6 +4,7 @@ export const LEGACY_CATEGORY_ORDER = [
   'Контрагенты',
   'Финансы',
   'Производство',
+  'Закупки',
   'Материалы',
   'Данные',
   'Справочники',
@@ -27,12 +28,14 @@ export const LEGACY_CATEGORY_MAP: Record<string, string> = {
   order_workshops: 'Производство',
   workshops: 'Производство',
   work_centers: 'Производство',
+  order_resource_requirements: 'Производство',
   doweling_orders_view: 'Производство',
   bazis: 'Производство',
   'cut-jobs': 'Производство',
   cad: 'Производство',
   'bazis-cut-sets': 'Производство',
   scan: 'Производство',
+  onec_purchase_documents: 'Закупки',
   films: 'Материалы',
   materials: 'Материалы',
   sheet_material_types: 'Материалы',
@@ -46,11 +49,12 @@ export const LEGACY_CATEGORY_MAP: Record<string, string> = {
   onec: 'Настройки',
 };
 
-export const EVOLUTION_CATEGORY_ORDER = ['CRM', 'Производство', 'Данные', 'Журналы', 'Настройки'] as const;
+export const EVOLUTION_CATEGORY_ORDER = ['CRM', 'Производство', 'Закупки', 'Данные', 'Журналы', 'Настройки'] as const;
 
 export const EVOLUTION_CATEGORY_LABELS: Record<(typeof EVOLUTION_CATEGORY_ORDER)[number], string> = {
   CRM: 'CRM',
   Производство: 'Производство',
+  Закупки: 'Закупки',
   Данные: 'Данные',
   Журналы: 'Журналы',
   Настройки: 'Система',
@@ -79,6 +83,7 @@ export const EVOLUTION_CATEGORY_MAP: Record<string, (typeof EVOLUTION_CATEGORY_O
   'cut-jobs': 'Производство',
   'bazis-cut-sets': 'Производство',
   scan: 'Производство',
+  onec_purchase_documents: 'Закупки',
   films: 'Данные',
   materials: 'Данные',
   sheet_material_types: 'Данные',

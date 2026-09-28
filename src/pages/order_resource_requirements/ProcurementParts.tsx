@@ -1,12 +1,22 @@
 import { useGetIdentity } from '@refinedev/core';
-import { Checkbox, Tag, Typography, message } from 'antd';
+import { Checkbox, Space, Tag, Typography, message } from 'antd';
+import { Link } from 'react-router-dom';
 import { Tooltip } from '../../ui/tooltipDelay';
 import { useState } from 'react';
 
 import { ApiError, isApiError } from '../../api/apiError';
 import { ordersApi } from '../../api/ordersApi';
-import { formatDateTime } from '../../utils/dateFormat';
-import { procurementMarkedTooltip, procurementProgressText, type ResourceDemandLine } from './resourceKinds';
+import { formatDate, formatDateTime } from '../../utils/dateFormat';
+import { onecDocKindShortLabel, onecDocumentShowPath } from './onecDocKind';
+import {
+  procurementMarkedTooltip,
+  procurementProgressText,
+  resourceLineOnecDocs,
+  type ResourceDemandLine,
+  type ResourceOnecDocRef,
+} from './resourceKinds';
+
+const ONEC_LOCK_TOOLTIP = 'Оприходовано документом 1С — сначала снимите распределение прихода';
 
 const MANAGE_PROCUREMENT_PERMISSION = 'procurement.manage';
 
@@ -38,12 +48,16 @@ export function ProcurementCheckbox({ orderId, line, canManage, manageLoading, o
   const procurement = line.procurement;
   if (!procurement) return null;
 
-  const tooltip = procurement.purchased
-    ? procurementMarkedTooltip(
-      procurement.markedByName,
-      procurement.markedAt ? formatDateTime(procurement.markedAt) : null,
-    )
-    : null;
+  // Приход из проведённого документа 1С блокирует снятие отметки, пока распределение не убрали.
+  const lockedByOnec = Boolean(procurement.purchased && line.lockedByOnec);
+  const tooltip = lockedByOnec
+    ? ONEC_LOCK_TOOLTIP
+    : procurement.purchased
+      ? procurementMarkedTooltip(
+        procurement.markedByName,
+        procurement.markedAt ? formatDateTime(procurement.markedAt) : null,
+      )
+      : null;
 
   const handleChange = async (checked: boolean) => {
     setPending(true);
@@ -66,7 +80,7 @@ export function ProcurementCheckbox({ orderId, line, canManage, manageLoading, o
   const checkboxNode = (
     <Checkbox
       checked={procurement.purchased}
-      disabled={manageLoading || !canManage || pending}
+      disabled={manageLoading || !canManage || pending || lockedByOnec}
       onChange={(event) => void handleChange(event.target.checked)}
     />
   );
@@ -85,6 +99,10 @@ function reportProcurementError(error: unknown): void {
     message.warning(`${error.message}. Потребность изменилась — проверьте и отметьте снова.`);
     return;
   }
+  if (isApiError(error, 'PROCUREMENT_LOCKED_BY_ONEC')) {
+    message.warning(error instanceof ApiError ? error.message : ONEC_LOCK_TOOLTIP);
+    return;
+  }
   if (
     isApiError(error, 'PROCUREMENT_VERSION_CONFLICT')
     || isApiError(error, 'PROCUREMENT_RESOURCE_NOT_IN_ORDER')
@@ -98,6 +116,38 @@ function reportProcurementError(error: unknown): void {
     return;
   }
   message.error('Не удалось изменить отметку «Закуплено»');
+}
+
+/**
+ * Чипы документов 1С, распределённых на закуп строки (фаза 3). Рендерить
+ * только при `capabilities.onecDocuments`; до фазы 4 документов ещё нет —
+ * показывает «—».
+ */
+export function OnecDocChips({ line }: { line: ResourceDemandLine }) {
+  const docs = resourceLineOnecDocs(line);
+  if (docs.receipts.length === 0 && docs.payments.length === 0) {
+    return <Typography.Text type="secondary">—</Typography.Text>;
+  }
+  return (
+    <Space size={[4, 4]} wrap>
+      {docs.receipts.map((doc) => <OnecDocTag key={`receipt-${doc.allocationId}`} doc={doc} />)}
+      {docs.payments.map((doc) => <OnecDocTag key={`payment-${doc.allocationId}`} doc={doc} />)}
+    </Space>
+  );
+}
+
+function OnecDocTag({ doc }: { doc: ResourceOnecDocRef }) {
+  const label = `${onecDocKindShortLabel(doc.kind)} №${doc.number} от ${formatDate(doc.date)}`;
+  const tag = (
+    <Tag style={{ marginInlineEnd: 0 }} color={doc.deletedInOnec ? 'error' : doc.posted ? undefined : 'warning'}>
+      <Link to={onecDocumentShowPath(doc.documentId)}>{label}</Link>
+    </Tag>
+  );
+  return doc.deletedInOnec ? (
+    <Tooltip title="Документ удалён в 1С">{tag}</Tooltip>
+  ) : !doc.posted ? (
+    <Tooltip title="Документ ещё не проведён в 1С">{tag}</Tooltip>
+  ) : tag;
 }
 
 /** Прогресс «Закуплено x/y» заказа/группы материалов. Рендерить только при `capabilities.procurement`. */

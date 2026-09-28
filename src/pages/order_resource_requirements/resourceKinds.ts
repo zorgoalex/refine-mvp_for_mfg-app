@@ -4,6 +4,7 @@ import type {
   OrderResourceDemandLineDto,
   OrderResourceDemandResponse,
   OrderResourceDetailRefDto,
+  OrderResourceOnecDocRefDto,
 } from '../../api/types/orderApi.types';
 
 export type OrderResourceDemandRow = OrderResourceDemandResponse['data'][number];
@@ -25,6 +26,16 @@ export interface ResourceProcurementState {
   /** Потребность изменилась после отметки. */
   changedSinceMark: boolean;
 }
+
+/** Ссылка на документ 1С в едином виде строки потребности (фаза 3). */
+export type ResourceOnecDocRef = OrderResourceOnecDocRefDto;
+
+export interface ResourceOnecDocRefs {
+  receipts: ResourceOnecDocRef[];
+  payments: ResourceOnecDocRef[];
+}
+
+export const EMPTY_ONEC_DOC_REFS: ResourceOnecDocRefs = { receipts: [], payments: [] };
 
 export interface ResourceDemandLine {
   resourceKey: string;
@@ -49,6 +60,20 @@ export interface ResourceDemandLine {
   orphan?: boolean;
   /** Детали, из которых складывается потребность строки. Только карточка (capabilities.cardDetails). */
   details?: OrderResourceDetailRefDto[];
+  /** Документы 1С, распределённые на закуп строки. Только при `capabilities.onecDocuments`. */
+  onec?: ResourceOnecDocRefs;
+  /** Снять «Закуплено» нельзя: есть приход из проведённого документа 1С. Только при `capabilities.onecDocuments`. */
+  lockedByOnec?: boolean;
+}
+
+/** Документы 1С строки потребности, всегда непустой массив-заглушка вместо undefined. */
+export function resourceLineOnecDocs(line: ResourceDemandLine): ResourceOnecDocRefs {
+  return line.onec ?? EMPTY_ONEC_DOC_REFS;
+}
+
+export function resourceLineHasOnecDocs(line: ResourceDemandLine): boolean {
+  const docs = resourceLineOnecDocs(line);
+  return docs.receipts.length > 0 || docs.payments.length > 0;
 }
 
 export interface ResourceKindMeta {
@@ -152,6 +177,8 @@ export function mapBackendResourceLine(
     },
     demandFingerprint: line.demandFingerprint,
     orphan: line.orphan,
+    onec: line.onec ?? EMPTY_ONEC_DOC_REFS,
+    lockedByOnec: line.lockedByOnec ?? false,
     ...('details' in line ? { details: line.details } : {}),
   };
 }

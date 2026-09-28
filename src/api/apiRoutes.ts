@@ -112,6 +112,14 @@ export const apiRoutes = {
       backendApiPath(`/orders/${orderId}/deadline-overrides/${overrideId}`),
     groups: orderGroupsRoute,
   },
+  onecDocuments: {
+    list: backendApiPath('/procurement/onec-documents'),
+    card: (documentId: number) => backendApiPath(`/procurement/onec-documents/${documentId}`),
+    allocations: (documentId: number, lineId: number) =>
+      backendApiPath(`/procurement/onec-documents/${documentId}/lines/${lineId}/allocations`),
+    allocation: (documentId: number, lineId: number, allocationId: number) =>
+      backendApiPath(`/procurement/onec-documents/${documentId}/lines/${lineId}/allocations/${allocationId}`),
+  },
   orderDetails: {
     productionStageEvent: (detailId: number, productionStatusId: number) =>
       backendApiPath(`/order-details/${detailId}/production-stage-events/${productionStatusId}`),

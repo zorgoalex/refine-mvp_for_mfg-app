@@ -60,7 +60,7 @@ export class OrderResourceProcurementController {
     const user = this.requireUser(request, false);
     return this.demands.getCard(
       { currentUser: user, orderId: parseOrderId(rawOrderId) },
-      { procurementEnabled: this.procurementEnabled() },
+      { procurementEnabled: this.procurementEnabled(), canSeeAmounts: user.permissions.includes('finance.view') },
     );
   }
 

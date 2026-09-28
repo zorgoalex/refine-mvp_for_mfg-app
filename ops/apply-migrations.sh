@@ -2345,6 +2345,36 @@ probe_file() {
     # exists) to resolve the §5.6 engine-history card subject; the guard below
     # requires the post-192 body only when that table (i.e. 141) is present —
     # same conditional-redefinition pattern as 191's seal-guard check above.
+    197_onec_purchase_documents*) probe_all \
+      "$(q_tbl onec_documents)" \
+      "$(q_tbl onec_document_lines)" \
+      "$(q_tbl order_resource_onec_allocations)" \
+      "SELECT count(*)=17 FROM information_schema.columns WHERE table_schema='public' AND table_name='onec_documents';" \
+      "SELECT count(*)=14 FROM information_schema.columns WHERE table_schema='public' AND table_name='onec_document_lines';" \
+      "SELECT count(*)=12 FROM information_schema.columns WHERE table_schema='public' AND table_name='order_resource_onec_allocations';" \
+      "$(q_con_on onec_documents chk_onec_documents_kind)" \
+      "$(q_con_on onec_documents chk_onec_documents_number)" \
+      "$(q_con_on onec_documents chk_onec_documents_amount)" \
+      "$(q_con_on onec_documents uq_onec_documents_ref)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.onec_documents'::regclass AND contype='f' AND convalidated AND confrelid='public.onec_sources'::regclass);" \
+      "$(q_con_on onec_document_lines chk_onec_document_lines_no)" \
+      "$(q_con_on onec_document_lines chk_onec_document_lines_quantity)" \
+      "$(q_con_on onec_document_lines chk_onec_document_lines_amount)" \
+      "$(q_con_on onec_document_lines chk_onec_document_lines_unit)" \
+      "$(q_con_on onec_document_lines chk_onec_document_lines_one_material)" \
+      "$(q_con_on onec_document_lines uq_onec_document_lines_no)" \
+      "$(q_con_on order_resource_onec_allocations chk_orp_alloc_role)" \
+      "$(q_con_on order_resource_onec_allocations chk_orp_alloc_origin)" \
+      "$(q_con_on order_resource_onec_allocations chk_orp_alloc_quantity)" \
+      "$(q_con_on order_resource_onec_allocations chk_orp_alloc_amount)" \
+      "$(q_con_on order_resource_onec_allocations chk_orp_alloc_measure)" \
+      "$(q_con_on order_resource_onec_allocations chk_orp_alloc_unit)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.order_resource_onec_allocations'::regclass AND contype='f' AND convalidated AND confrelid='public.order_resource_procurement'::regclass);" \
+      "$(q_idx idx_onec_documents_kind_date)" \
+      "$(q_idx uq_onec_document_lines_total)" \
+      "$(q_idx uq_orp_alloc_active)" \
+      "$(q_idx idx_orp_alloc_line_active)" \
+      "$(q_idx idx_orp_alloc_procurement)" ;;
     194_order_resource_procurement*) probe_all \
       "$(q_tbl order_resource_procurement)" \
       "SELECT count(*)=17 FROM information_schema.columns WHERE table_schema='public' AND table_name='order_resource_procurement';" \
@@ -2552,6 +2582,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     191_mdf_order_corrections*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    197_onec_purchase_documents*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     194_order_resource_procurement*)

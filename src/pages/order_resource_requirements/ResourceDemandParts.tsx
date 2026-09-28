@@ -111,11 +111,14 @@ export function ResourceDemandBreakdown({
   lines,
   kinds = RESOURCE_KINDS.map((meta) => meta.kind),
   renderProcurement,
+  renderOnecDocs,
 }: {
   lines: ResourceDemandLine[];
   kinds?: ResourceKind[];
   /** capabilities.procurement — чекбокс «Закуплено» под количеством строки. */
   renderProcurement?: RenderProcurement;
+  /** capabilities.onecDocuments — чипы привязанных документов 1С. */
+  renderOnecDocs?: RenderProcurement;
 }) {
   const colorOf = useResourceKindColor();
   const { token } = theme.useToken();
@@ -147,7 +150,12 @@ export function ResourceDemandBreakdown({
               </Typography.Text>
             ) : (
               kindLines.map((line) => (
-                <ResourceLineRow key={line.resourceKey} line={line} renderProcurement={renderProcurement} />
+                <ResourceLineRow
+                  key={line.resourceKey}
+                  line={line}
+                  renderProcurement={renderProcurement}
+                  renderOnecDocs={renderOnecDocs}
+                />
               ))
             )}
           </div>
@@ -157,7 +165,15 @@ export function ResourceDemandBreakdown({
   );
 }
 
-function ResourceLineRow({ line, renderProcurement }: { line: ResourceDemandLine; renderProcurement?: RenderProcurement }) {
+function ResourceLineRow({
+  line,
+  renderProcurement,
+  renderOnecDocs,
+}: {
+  line: ResourceDemandLine;
+  renderProcurement?: RenderProcurement;
+  renderOnecDocs?: RenderProcurement;
+}) {
   const { token } = theme.useToken();
   const secondary = [line.supplierLabel, line.secondaryText].filter(Boolean).join(' · ');
   return (
@@ -187,6 +203,9 @@ function ResourceLineRow({ line, renderProcurement }: { line: ResourceDemandLine
         </div>
         {renderProcurement && (
           <div style={{ marginTop: 4, display: 'flex', justifyContent: 'flex-end' }}>{renderProcurement(line)}</div>
+        )}
+        {renderOnecDocs && (
+          <div style={{ marginTop: 4, display: 'flex', justifyContent: 'flex-end' }}>{renderOnecDocs(line)}</div>
         )}
       </div>
     </div>
@@ -233,6 +252,7 @@ export function ResourceLinesTable({
   showKind,
   compact = false,
   renderProcurement,
+  renderOnecDocs,
   expandableDetails = false,
 }: {
   lines: ResourceDemandLine[];
@@ -240,6 +260,8 @@ export function ResourceLinesTable({
   compact?: boolean;
   /** capabilities.procurement — колонка «Закуп» с чекбоксом. */
   renderProcurement?: RenderProcurement;
+  /** capabilities.onecDocuments — колонка «Документы 1С» с чипами привязок. */
+  renderOnecDocs?: RenderProcurement;
   /** capabilities.cardDetails — строка раскрывается до списка деталей материала. */
   expandableDetails?: boolean;
 }) {
@@ -314,6 +336,14 @@ export function ResourceLinesTable({
           title="Закуп"
           width={160}
           render={(_, line) => renderProcurement(line)}
+        />
+      )}
+      {renderOnecDocs && (
+        <Table.Column<ResourceDemandLine>
+          key="onecDocs"
+          title="Документы 1С"
+          width={200}
+          render={(_, line) => renderOnecDocs(line)}
         />
       )}
     </Table>

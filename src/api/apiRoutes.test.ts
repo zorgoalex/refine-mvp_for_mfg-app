@@ -65,4 +65,15 @@ describe('apiRoutes', () => {
     expect(apiRoutes.orders.resourceProcurement(42, 'film:7')).toBe('/api/v1/orders/42/resource-procurement/film%3A7');
     expect(apiRoutes.orders.resourceProcurementBulk).toBe('/api/v1/orders/resource-procurement/bulk');
   });
+
+  it('exposes 1C purchase/payment document routes under procurement/onec-documents', () => {
+    expect(apiRoutes.onecDocuments.list).toBe('/api/v1/procurement/onec-documents');
+    expect(apiRoutes.onecDocuments.card(42)).toBe('/api/v1/procurement/onec-documents/42');
+    expect(apiRoutes.onecDocuments.allocations(42, 7)).toBe(
+      '/api/v1/procurement/onec-documents/42/lines/7/allocations',
+    );
+    expect(apiRoutes.onecDocuments.allocation(42, 7, 99)).toBe(
+      '/api/v1/procurement/onec-documents/42/lines/7/allocations/99',
+    );
+  });
 });

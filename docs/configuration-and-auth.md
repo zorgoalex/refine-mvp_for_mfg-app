@@ -178,11 +178,24 @@ legacy save path.
 Отмечать закуп может роль с правом `procurement.manage`; видимость заказов — по
 scope `orders.view`. Порядок включения:
 
-1. применить миграцию `194_order_resource_procurement.sql`;
+1. применить миграции `194_order_resource_procurement.sql` и
+   `197_onec_purchase_documents.sql` (197 требует таблицу `onec_sources` из
+   `193_onec_agent_foundation.sql`);
 2. выставить `BACKEND_RESOURCE_PROCUREMENT_ENABLED=true` и пересоздать backend.
 
-При выключенном флаге таблица `order_resource_procurement` не читается, а
-команды отвечают `503 PROCUREMENT_DISABLED`.
+При выключенном флаге таблицы закупа и документов 1С не читаются, а команды и
+экран документов отвечают `503 PROCUREMENT_DISABLED`.
+
+Тот же флаг включает раздел «Закупки → Документы 1С»:
+`GET /api/v1/procurement/onec-documents` (вкладки приходов и оплат),
+`GET /api/v1/procurement/onec-documents/{documentId}` и распределение строк
+документа на материалы заказов
+`POST|DELETE /api/v1/procurement/onec-documents/{documentId}/lines/{lineId}/allocations[/{allocationId}]`.
+Чтение — право `procurement.view`, распределение — `procurement.manage`; суммы и
+распределение оплат — только с `finance.view`. Документы появляются в ERP из
+интеграции с 1С; до её подключения список пуст. Пока у материала есть приход из
+проведённого документа 1С, отметку «Закуплено» снять нельзя (`409
+PROCUREMENT_LOCKED_BY_ONEC`) — сначала снимается распределение прихода.
 
 ### Листовые материалы
 

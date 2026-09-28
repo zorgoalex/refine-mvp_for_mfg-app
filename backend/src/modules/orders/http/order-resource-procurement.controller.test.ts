@@ -68,7 +68,8 @@ describe('OrderResourceProcurementController.card', () => {
 
     expect(getCard).toHaveBeenCalledWith(
       { currentUser: currentUser(), orderId: 501 },
-      { procurementEnabled: false },
+      // Суммы документов 1С — только с finance.view (у тестового пользователя его нет).
+      { procurementEnabled: false, canSeeAmounts: currentUser().permissions.includes('finance.view') },
     );
   });
 

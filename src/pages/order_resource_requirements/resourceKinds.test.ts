@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import type { OrderResourceDemandDto } from '../../api/types/orderApi.types';
+import type { OrderResourceDemandDto, OrderResourceDemandLineDto } from '../../api/types/orderApi.types';
 import {
   RESOURCE_KINDS,
   formatKindTotal,
   formatLineQuantity,
+  mapBackendResourceLine,
   orderDisplayName,
   positionsLabel,
   resourceDemandLines,
   resourceKindTotal,
+  resourceLineHasOnecDocs,
+  resourceLineOnecDocs,
   type ResourceDemandLine,
 } from './resourceKinds';
 
@@ -226,6 +229,74 @@ describe('orderDisplayName', () => {
 
   it('имя из одних пробелов — тоже fallback "#<id>"', () => {
     expect(orderDisplayName(makeRow({ orderId: 12, orderName: '   ' }))).toBe('#12');
+  });
+});
+
+function makeBackendLine(overrides: Partial<OrderResourceDemandLineDto> = {}): OrderResourceDemandLineDto {
+  return {
+    resourceKey: 'sheet_material:70',
+    kind: 'sheet_material',
+    refId: 70,
+    name: 'МДФ 18 Тест',
+    supplierName: null,
+    quantity: 4,
+    unit: 'm2',
+    areaM2: 4,
+    detailsCount: 2,
+    source: 'area',
+    demandFingerprint: 'b'.repeat(64),
+    orphan: false,
+    procurement: {
+      purchased: false,
+      version: 0,
+      origin: null,
+      markedAt: null,
+      markedBy: null,
+      quantityAtMark: null,
+      unitAtMark: null,
+      changedSinceMark: false,
+    },
+    ...overrides,
+  };
+}
+
+describe('mapBackendResourceLine — документы 1С (фаза 3)', () => {
+  it('переносит onec и lockedByOnec из ответа backend as-is', () => {
+    const backendLine = makeBackendLine({
+      lockedByOnec: true,
+      onec: {
+        receipts: [{
+          documentId: 1, allocationId: 11, kind: 'purchase_receipt', number: 'ПР-1',
+          date: '2026-09-20', quantity: 2, amount: null, linkOrigin: 'manual', posted: true, deletedInOnec: false,
+        }],
+        payments: [],
+      },
+    });
+    const line = mapBackendResourceLine(backendLine);
+    expect(line.lockedByOnec).toBe(true);
+    expect(resourceLineHasOnecDocs(line)).toBe(true);
+    expect(resourceLineOnecDocs(line).receipts).toHaveLength(1);
+    expect(resourceLineOnecDocs(line).payments).toHaveLength(0);
+  });
+
+  it('defaults onec to empty refs and lockedByOnec to false when the backend omits them (mixed deploy)', () => {
+    const backendLine = makeBackendLine();
+    delete (backendLine as { onec?: unknown }).onec;
+    delete (backendLine as { lockedByOnec?: unknown }).lockedByOnec;
+    const line = mapBackendResourceLine(backendLine);
+    expect(line.lockedByOnec).toBe(false);
+    expect(resourceLineHasOnecDocs(line)).toBe(false);
+    expect(resourceLineOnecDocs(line)).toEqual({ receipts: [], payments: [] });
+  });
+});
+
+describe('resourceLineOnecDocs / resourceLineHasOnecDocs on legacy-adapted lines', () => {
+  it('legacy lines (no API v2 data) have no onec docs', () => {
+    const [line] = resourceDemandLines(makeRow({
+      sheetMaterials: [{ sheetMaterialTypeId: 1, name: 'МДФ', totalArea: 3, detailsCount: 1, supplierId: null, supplierName: null }],
+    }));
+    expect(resourceLineHasOnecDocs(line)).toBe(false);
+    expect(resourceLineOnecDocs(line)).toEqual({ receipts: [], payments: [] });
   });
 });
 

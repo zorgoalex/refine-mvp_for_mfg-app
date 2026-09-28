@@ -53,7 +53,7 @@ export class OrderResourceDemandController {
     return this.demands.list({
       currentUser: user,
       query: parseOrderResourceDemandQuery(rawQuery),
-    }, this.readOptions());
+    }, this.readOptions(user));
   }
 
   @ApiQuery({ name: 'search', required: false, type: String })
@@ -75,7 +75,7 @@ export class OrderResourceDemandController {
     return this.demands.listByMaterial({
       currentUser: user,
       query: parseOrderResourceDemandQuery(rawQuery),
-    }, this.readOptions());
+    }, this.readOptions(user));
   }
 
   private requireReadable(request: RequestWithCurrentUser) {
@@ -90,8 +90,11 @@ export class OrderResourceDemandController {
     return request.user;
   }
 
-  private readOptions(): OrderResourceReadOptions {
-    return { procurementEnabled: this.runtimeConfig.getFeatureFlags().resourceProcurementEnabled === true };
+  private readOptions(user: { permissions: readonly string[] }): OrderResourceReadOptions {
+    return {
+      procurementEnabled: this.runtimeConfig.getFeatureFlags().resourceProcurementEnabled === true,
+      canSeeAmounts: user.permissions.includes('finance.view'),
+    };
   }
 }
 
