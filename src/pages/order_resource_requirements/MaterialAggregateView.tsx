@@ -10,7 +10,7 @@ import type {
   OrderResourceMaterialAggregateDto,
 } from '../../api/types/orderApi.types';
 import { KindTitle, numericStyle } from './ResourceDemandParts';
-import { canBulkMarkParticipants, formatResourceQuantity, isAggregateCurrent } from './resourceKinds';
+import { canBulkMarkParticipants, formatAggregateTotal, isAggregateCurrent, ordersLabel } from './resourceKinds';
 
 export interface MaterialAggregateState {
   data: OrderResourceMaterialAggregateDto[];
@@ -185,7 +185,7 @@ export function MaterialAggregateTable({
         align="right"
         render={(_, row) => (
           <Typography.Text strong style={numericStyle}>
-            {formatResourceQuantity(row.totalQuantity, row.unit)}
+            {formatAggregateTotal(row)}
           </Typography.Text>
         )}
       />
@@ -209,7 +209,7 @@ export function MaterialAggregateTable({
         align="right"
         width={100}
         render={(_, row) => (row.noDataOrders > 0
-          ? <Tag>{row.noDataOrders} заказов</Tag>
+          ? <Tag>{ordersLabel(row.noDataOrders)}</Tag>
           : <Typography.Text type="secondary">—</Typography.Text>)}
       />
       {showProcurement && (

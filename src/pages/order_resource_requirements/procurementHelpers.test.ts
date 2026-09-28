@@ -299,3 +299,22 @@ describe('период «По материалам» по умолчанию —
     expect(list).toContain('Период по умолчанию — последний месяц');
   });
 });
+
+describe('сводка «По материалам»: склонение и итог без данных', () => {
+  it('ordersLabel склоняет «заказ»', async () => {
+    const { ordersLabel } = await import('./resourceKinds');
+    expect([1, 2, 4, 5, 11, 12, 21, 22, 25, 101].map(ordersLabel)).toEqual([
+      '1 заказ', '2 заказа', '4 заказа', '5 заказов', '11 заказов', '12 заказов',
+      '21 заказ', '22 заказа', '25 заказов', '101 заказ',
+    ]);
+  });
+
+  it('итог «—», если количество не посчитано ни в одном заказе; иначе сумма известных', async () => {
+    const { formatAggregateTotal, formatResourceQuantity } = await import('./resourceKinds');
+    expect(formatAggregateTotal({ totalQuantity: 0, unit: 'lm', ordersCount: 1, noDataOrders: 1 })).toBe('—');
+    expect(formatAggregateTotal({ totalQuantity: 3.1, unit: 'lm', ordersCount: 2, noDataOrders: 1 }))
+      .toBe(formatResourceQuantity(3.1, 'lm'));
+    expect(formatAggregateTotal({ totalQuantity: 9.49, unit: 'm2', ordersCount: 3, noDataOrders: 0 }))
+      .toBe(formatResourceQuantity(9.49, 'm2'));
+  });
+});

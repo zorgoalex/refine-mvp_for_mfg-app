@@ -217,12 +217,36 @@ export function formatLineQuantity(line: ResourceDemandLine): string {
   return formatResourceQuantity(line.quantity, line.unit);
 }
 
-export function positionsLabel(count: number): string {
+/** Русское склонение по числу: 1 заказ, 2 заказа, 5 заказов. */
+export function pluralRu(count: number, one: string, few: string, many: string): string {
   const mod10 = count % 10;
   const mod100 = count % 100;
-  if (mod10 === 1 && mod100 !== 11) return `${count} позиция`;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return `${count} позиции`;
-  return `${count} позиций`;
+  if (mod10 === 1 && mod100 !== 11) return `${count} ${one}`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return `${count} ${few}`;
+  return `${count} ${many}`;
+}
+
+export function positionsLabel(count: number): string {
+  return pluralRu(count, 'позиция', 'позиции', 'позиций');
+}
+
+export function ordersLabel(count: number): string {
+  return pluralRu(count, 'заказ', 'заказа', 'заказов');
+}
+
+/**
+ * Итог материала в сводке «По материалам». Если количество не посчитано ни в
+ * одном заказе (например, у плёнки нигде нет готового раскроя), показываем «—»,
+ * а не «0,0 пог. м».
+ */
+export function formatAggregateTotal(row: {
+  totalQuantity: number;
+  unit: ResourceUnit;
+  ordersCount: number;
+  noDataOrders: number;
+}): string {
+  if (row.ordersCount > 0 && row.noDataOrders >= row.ordersCount) return '—';
+  return formatResourceQuantity(row.totalQuantity, row.unit);
 }
 
 export function orderDisplayName(row: OrderResourceDemandRow): string {
