@@ -48,6 +48,17 @@ export const onecEtlEntitySchema = z
     enabled: z.boolean().optional(),
     /** Agent deletes the batch file right after the ACK (sensitive data, agent to-erp/0032). */
     deleteBatchAfterAck: z.boolean().optional(),
+    /**
+     * Static OData $filter over the set (agent to-erp/0040): combined with date bounds by `and`, also used by
+     * $count and the key pass. Part of the entity domain: changing it means a new baseline on the agent.
+     */
+    filter: z
+      .string()
+      .min(1)
+      .max(512)
+      .regex(/^[^\u0000-\u001f\u007f]+$/u, 'no control characters')
+      .refine((value) => value.trim().length > 0, 'must not be blank')
+      .optional(),
   })
   .strict()
   .superRefine((entity, ctx) => {

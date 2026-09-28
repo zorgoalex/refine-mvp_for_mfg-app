@@ -220,6 +220,8 @@ export interface OnecEtlEntity {
   enabled?: boolean;
   /** Personal-data entities only: ask the agent to delete its local batch right after the ERP ack (E3b). */
   deleteBatchAfterAck?: boolean;
+  /** Static OData $filter (part of the entity domain on the agent). */
+  filter?: string;
 }
 
 export interface OnecAgentConfiguration {

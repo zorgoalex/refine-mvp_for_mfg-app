@@ -18348,6 +18348,8 @@ components:
         schemaVersion: {type: integer, minimum: 1}
         oDataVersion: {type: integer, enum: [3, 4]}
         enabled: {type: boolean}
+        deleteBatchAfterAck: {type: boolean, description: "Agent deletes the batch file right after the ACK (personal data)"}
+        filter: {type: string, minLength: 1, maxLength: 512, pattern: '^(?=.*\S)[^\x00-\x1F\x7F]+$', description: "Static OData $filter over the set; not blank, no control characters; part of the entity domain"}
     OnecAgentConfiguration:
       type: object
       additionalProperties: false

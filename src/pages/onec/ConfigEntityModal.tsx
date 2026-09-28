@@ -120,6 +120,14 @@ export function ConfigEntityModal({ initial, existingEntities, onCancel, onSubmi
           <Switch />
         </Form.Item>
         <Form.Item
+          name="filter"
+          label="Фильтр OData (опционально)"
+          tooltip="Статическое выражение $filter над набором, например Тип eq 'Телефон'. Смена фильтра у агента — новая базовая выгрузка сущности."
+          rules={[{ max: 512, message: 'Не длиннее 512 символов' }]}
+        >
+          <Input />
+        </Form.Item>
+        <Form.Item
           name="deleteBatchAfterAck"
           valuePropName="checked"
           tooltip="Только для персональных данных: агент удалит выгруженный пакет у себя сразу после подтверждения ERP, не дожидаясь ретеншена"

@@ -455,6 +455,7 @@ export interface OnecEtlEntityFormValues {
   oDataVersion: '' | 3 | 4;
   enabled: boolean;
   deleteBatchAfterAck: boolean;
+  filter: string;
 }
 
 function splitList(text: string): string[] {
@@ -479,6 +480,7 @@ export const ONEC_ETL_ENTITY_FORM_DEFAULTS: OnecEtlEntityFormValues = {
   oDataVersion: '',
   enabled: true,
   deleteBatchAfterAck: false,
+  filter: '',
 };
 
 /** Convert an API entity into edit-form values (arrays joined for a text input). */
@@ -499,6 +501,7 @@ export function onecEtlEntityToFormValues(entity: OnecEtlEntity): OnecEtlEntityF
     oDataVersion: entity.oDataVersion ?? '',
     enabled: entity.enabled ?? true,
     deleteBatchAfterAck: entity.deleteBatchAfterAck ?? false,
+    filter: entity.filter ?? '',
   };
 }
 
@@ -538,6 +541,7 @@ export function onecEtlEntityFromFormValues(values: OnecEtlEntityFormValues): On
   entity.enabled = values.enabled;
 
   if (values.deleteBatchAfterAck) entity.deleteBatchAfterAck = true;
+  if (values.filter.trim()) entity.filter = values.filter.trim();
 
   return entity;
 }
@@ -564,7 +568,7 @@ export function onecStripSourceGeneration(configuration: OnecPublishedAgentConfi
 
 /** Ready-made ETL entities for the 1C catalogs/registers agreed with the agent team (agent to-erp/0003, E3b). */
 export const ONEC_ETL_ENTITY_PRESETS: Record<
-  'items' | 'counterparties' | 'units' | 'item_categories' | 'warehouses' | 'stock_balances',
+  'items' | 'counterparties' | 'units' | 'item_categories' | 'warehouses' | 'stock_balances' | 'counterparty_phones',
   OnecEtlEntity
 > = {
   items: {
@@ -669,6 +673,22 @@ export const ONEC_ETL_ENTITY_PRESETS: Record<
     overlapMinutes: 0,
     enabled: true,
   },
+  // Personal data (agent to-erp/0040): phones only, the agent deletes its batch right after the ACK.
+  counterparty_phones: {
+    entityCode: 'counterparty_phones',
+    oDataPath: 'Catalog_Контрагенты_КонтактнаяИнформация',
+    keyField: 'Ref_Key',
+    keyFields: ['Ref_Key', 'LineNumber'],
+    updatedAtField: null,
+    deletedField: null,
+    select: ['Ref_Key', 'LineNumber', 'Тип', 'Вид_Key', 'Представление'],
+    filter: "Тип eq 'Телефон'",
+    deleteBatchAfterAck: true,
+    syncMode: 'incremental',
+    pageSize: 1000,
+    overlapMinutes: 0,
+    enabled: true,
+  },
 };
 
 export const ONEC_ETL_ENTITY_PRESET_LABELS: Record<keyof typeof ONEC_ETL_ENTITY_PRESETS, string> = {
@@ -678,6 +698,7 @@ export const ONEC_ETL_ENTITY_PRESET_LABELS: Record<keyof typeof ONEC_ETL_ENTITY_
   item_categories: 'Категории номенклатуры (item_categories)',
   warehouses: 'Склады (warehouses)',
   stock_balances: 'Остатки (stock_balances)',
+  counterparty_phones: 'Телефоны контрагентов (counterparty_phones, персональные данные)',
 };
 
 // ---------------------------------------------------------------- ETL tab labels

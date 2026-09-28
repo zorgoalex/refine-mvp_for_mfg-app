@@ -257,8 +257,9 @@ describe('Onec (1C integration) UI wiring', () => {
     expect(mirrorTab).toMatch(/entity === 'counterparty_phones' &&[\s\S]{0,200}Персональные данные/);
   });
 
-  it('does not offer a counterparty_phones ETL entity preset yet', () => {
-    expect(format).not.toMatch(/counterparty_phones:\s*\{/);
+  it('offers the phones preset only with the phone filter and deleteBatchAfterAck', () => {
+    expect(format).toMatch(/counterparty_phones:\s*\{[\s\S]{0,400}filter: "Тип eq 'Телефон'",\s*deleteBatchAfterAck: true,/);
+    expect(entityModal).toMatch(/name="filter"/);
   });
 
   it('gates ETL revoke/restore/rebaseline behind onec.manage, never onec.commands.send alone', () => {

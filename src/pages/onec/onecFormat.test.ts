@@ -720,8 +720,10 @@ describe('ONEC_ETL_ENTITY_PRESETS', () => {
     expect(ONEC_ETL_ENTITY_PRESET_LABELS.stock_balances).toBe('Остатки (stock_balances)');
   });
 
-  it('does not offer a counterparty_phones preset yet (phone-only filter not agreed with the agent)', () => {
-    expect(Object.keys(ONEC_ETL_ENTITY_PRESETS)).not.toContain('counterparty_phones');
+  it('offers the counterparty_phones preset: phones only, batch deleted after ACK', () => {
+    const phones = ONEC_ETL_ENTITY_PRESETS.counterparty_phones;
+    expect(phones).toMatchObject({ oDataPath: 'Catalog_Контрагенты_КонтактнаяИнформация', keyFields: ['Ref_Key', 'LineNumber'], filter: "Тип eq 'Телефон'", deleteBatchAfterAck: true });
+    expect(phones.select).toEqual(['Ref_Key', 'LineNumber', 'Тип', 'Вид_Key', 'Представление']);
   });
 });
 

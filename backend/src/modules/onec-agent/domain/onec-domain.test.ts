@@ -124,3 +124,13 @@ describe('E3b configuration schema', () => {
   });
 });
 
+describe('entity filter (agent to-erp/0040)', () => {
+  it('accepts a static OData filter and rejects blank or control characters', async () => {
+    const { validateOnecConfiguration } = await import('./onec-config');
+    const base = { entityCode: 'counterparty_phones', oDataPath: 'Catalog_Контрагенты_КонтактнаяИнформация', keyField: 'Ref_Key', keyFields: ['Ref_Key', 'LineNumber'], select: ['Ref_Key', 'LineNumber', 'Тип', 'Вид_Key', 'Представление'], syncMode: 'incremental', pageSize: 1000, overlapMinutes: 0, deleteBatchAfterAck: true };
+    const config = (filter: string) => ({ mode: 'Normal', commandTypes: [], etlIntervalMinutes: 60, etlEntities: [{ ...base, filter }] });
+    expect(validateOnecConfiguration(config("Тип eq 'Телефон'")).ok).toBe(true);
+    for (const bad of ['', '   ', 'a\nb', 'x'.repeat(513)]) expect(validateOnecConfiguration(config(bad)).ok).toBe(false);
+  });
+});
+
