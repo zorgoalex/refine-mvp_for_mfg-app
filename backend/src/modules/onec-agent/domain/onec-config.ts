@@ -23,11 +23,17 @@ export const ONEC_CONFIG_MAX_BYTES = 1024 * 1024;
 
 const identifier = z.string().trim().min(1).max(200);
 const odataName = z.string().min(1).max(200).regex(/^[^\s/?#]+$/u, 'must be a single OData name');
+/**
+ * Entity set, or strictly `<set>/Balance(Dimensions='<a>,<b>,…')` — the only function form the
+ * agent reads (register balances, agent to-erp/0029).
+ */
+export const ODATA_PATH_PATTERN = /^[^\s/?#()',]+(\/Balance\(Dimensions='[^\s/?#()',]+(,[^\s/?#()',]+)*'\))?$/u;
+const odataPath = z.string().min(1).max(400).regex(ODATA_PATH_PATTERN, "must be an entity set or <set>/Balance(Dimensions='…')");
 
 export const onecEtlEntitySchema = z
   .object({
     entityCode: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/, 'lowercase code: a-z, 0-9, _'),
-    oDataPath: odataName,
+    oDataPath: odataPath,
     keyField: odataName.optional(),
     keyFields: z.array(odataName).min(1).max(8).optional(),
     updatedAtField: odataName.nullable().optional(),
@@ -40,6 +46,8 @@ export const onecEtlEntitySchema = z
     schemaVersion: z.number().int().min(1).max(1000).optional(),
     oDataVersion: z.union([z.literal(3), z.literal(4)]).optional(),
     enabled: z.boolean().optional(),
+    /** Agent deletes the batch file right after the ACK (sensitive data, agent to-erp/0032). */
+    deleteBatchAfterAck: z.boolean().optional(),
   })
   .strict()
   .superRefine((entity, ctx) => {

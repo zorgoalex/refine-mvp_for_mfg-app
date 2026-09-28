@@ -25,6 +25,16 @@ export const ONEC_ETL_LIMITS = {
 
 export const ETL_COMMAND_TYPES = ['start_full_sync', 'reload_entity'] as const;
 
+/**
+ * Snapshot entities (plan §21.2): the mirror holds the last verified snapshot
+ * as a whole; rows absent from a newer verified snapshot are removed from the
+ * copy (no `missing` marks). Business data of ERP is never touched.
+ */
+export const SNAPSHOT_ENTITIES: ReadonlySet<string> = new Set(['stock_balances', 'counterparty_phones']);
+/** Personal data (plan §21.3): revocable by an operator, unconfirmed rows expire. */
+export const REVOCABLE_ENTITIES: ReadonlySet<string> = new Set(['counterparty_phones']);
+export const PERSONAL_DATA_TTL_MS = 30 * 24 * 60 * 60_000;
+
 const uuid = z
   .string()
   .regex(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/)

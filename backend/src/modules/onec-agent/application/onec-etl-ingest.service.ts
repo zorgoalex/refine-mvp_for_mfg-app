@@ -108,6 +108,7 @@ export class OnecEtlIngestService {
 
   private answerStored(agent: OnecAgentContext, batch: BatchRow, headers: BatchHeaders): BatchAck {
     if (batch.agentId !== agent.agentId) throw new ApiError(404, 'BATCH_NOT_FOUND', 'Batch not found');
+    if (batch.revoked && !batch.ack) throw entityRevoked();
     if (batch.contentSha256 !== headers['x-content-sha256'] || batch.runId !== headers['x-run-id'] || batch.entityCode !== headers['x-entity']) {
       throw new ApiError(409, 'BATCH_CONFLICT', 'A different batch was stored under this batchId');
     }
@@ -137,6 +138,7 @@ export class OnecEtlIngestService {
       const batch = await this.etl.getBatch(tx, headers['x-batch-id'], true);
       if (batch && batch.status !== 'receiving') return { kind: 'ack', ack: this.answerStored(agent, batch, headers) };
       if (run.status !== 'receiving') throw new ApiError(409, 'RUN_CLOSED', 'The run is already closed');
+      if (await this.etl.entityRevoked(tx, source.sourceId, headers['x-entity'], run.revokedEntities)) throw entityRevoked();
       if (headers['x-source-namespace'] && !run.sourceNamespace) await this.etl.setRunNamespace(tx, run.runId, headers['x-source-namespace']);
       if (batch) {
         if (batch.agentId !== agent.agentId) throw new ApiError(404, 'BATCH_NOT_FOUND', 'Batch not found');
@@ -186,8 +188,9 @@ export class OnecEtlIngestService {
       throw notStored(slot.reason);
     }
     const config = this.runtime.get();
-    const part = partPath(config.etlSpoolDir, batchId, owner);
-    const target = finalPath(config.etlSpoolDir, batchId, owner);
+    const key = { sourceId: agent.sourceId, entityCode: headers['x-entity'], batchId, token: owner };
+    const part = partPath(config.etlSpoolDir, key);
+    const target = finalPath(config.etlSpoolDir, key);
     const abort = new AbortController();
     let superseded = false;
     const heartbeat = setInterval(() => {
@@ -258,11 +261,28 @@ export class OnecEtlIngestService {
           uncompressedBytes,
         });
         if (!ok) throw new ApiError(409, 'BATCH_SUPERSEDED', 'A newer attempt of this batch took over');
+        // A revocation during the upload wins: the data is not stored (plan §21.3). Checked after the
+        // batch row is locked by markStored, keeping the order run → batch → entity_state; throwing rolls it back.
+        if (await this.etl.entityRevoked(tx, source.sourceId, headers['x-entity'], current.revokedEntities)) throw entityRevoked();
         await this.etl.touchFirstBatch(tx, run.runId);
       });
       published = true;
       this.parser.wake();
       return ack;
+    } catch (error) {
+      // The attempt may have lost its reservation meanwhile (stale-reservation claim, a newer attempt,
+      // a revocation): report that instead of whatever low-level error it caused (e.g. its file removed).
+      if (!(error instanceof ApiError)) {
+        const outcome = await this.attemptOutcome(batchId, owner, target);
+        // Our COMMIT went through although we saw an error: the batch is stored — answer with its ACK.
+        if (outcome.kind === 'stored') {
+          published = true;
+          this.parser.wake();
+          return outcome.ack;
+        }
+        if (outcome.kind === 'lost') throw new ApiError(409, 'BATCH_SUPERSEDED', 'This attempt no longer owns the batch');
+      }
+      throw error;
     } finally {
       clearInterval(heartbeat);
       this.releaseSlot(agent.agentId, expected);
@@ -278,6 +298,17 @@ export class OnecEtlIngestService {
    * file is deleted only when the database provably does not reference it;
    * otherwise it stays (the orphan sweep removes unreferenced files later).
    */
+  private async attemptOutcome(batchId: string, owner: string, target: string): Promise<{ kind: 'stored'; ack: BatchAck } | { kind: 'owned' } | { kind: 'lost' } | { kind: 'unknown' }> {
+    try {
+      const batch = await this.etl.getBatch(this.etl.db, batchId);
+      if (batch && batch.status !== 'receiving' && batch.spoolPath === target && batch.ack) return { kind: 'stored', ack: batch.ack as unknown as BatchAck };
+      if (batch?.status === 'receiving' && batch.receivingOwner === owner) return { kind: 'owned' };
+      return { kind: 'lost' };
+    } catch {
+      return { kind: 'unknown' }; // keep the original error
+    }
+  }
+
   private async cleanupAttempt(batchId: string, owner: string, part: string, target: string, storeAttempted: boolean): Promise<void> {
     try {
       await this.etl.deleteReservation(this.etl.db, batchId, owner);
@@ -322,6 +353,11 @@ export class OnecEtlIngestService {
     this.activeTotal = Math.max(0, this.activeTotal - 1);
     this.reservedBytes = Math.max(0, this.reservedBytes - bytes);
   }
+}
+
+/** The agent drops the batch without retries and blocks the run (agent to-erp/0032). */
+function entityRevoked(): ApiError {
+  return new ApiError(409, 'ENTITY_REVOKED', 'Data of this entity was revoked; the batch is not stored');
 }
 
 /** Run checks under the run lock (plan §6.5 step 3). */

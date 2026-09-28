@@ -32,6 +32,8 @@ export interface SourceRecord {
   generation: number;
   /** Never-reused generation reference; published to the agent as configuration.sourceGeneration. */
   generationRef: string;
+  /** Identity the agent reported last (session or heartbeat). */
+  observedIdentity: { databaseId: string; exportEpoch: string; environment: string } | null;
 }
 
 export interface PublishedConfig {
@@ -114,6 +116,7 @@ function toSource(row: QueryResultRow): SourceRecord {
     identityStatus: row.identity_status,
     generation: num(row.generation),
     generationRef: row.generation_ref,
+    observedIdentity: row.observed_identity ?? null,
   };
 }
 
@@ -311,7 +314,7 @@ export class PgOnecRepository {
   async listSources(): Promise<QueryResultRow[]> {
     const { rows } = await this.database.query(
       `SELECT s.source_id, s.code, s.display_name, s.identity, s.identity_status, s.generation,
-              s.created_at, s.updated_at, a.agent_id
+              s.observed_identity, s.created_at, s.updated_at, a.agent_id
          FROM onec_sources s LEFT JOIN onec_agents a ON a.source_id = s.source_id
         ORDER BY s.source_id`,
     );
@@ -337,7 +340,7 @@ export class PgOnecRepository {
   async listAgents(): Promise<QueryResultRow[]> {
     const { rows } = await this.database.query(
       `SELECT a.agent_id, a.source_id, s.display_name AS source_name, s.code AS source_code,
-              s.identity_status, s.identity, a.site_id, a.display_name, a.status,
+              s.identity_status, s.identity, s.observed_identity, s.generation AS source_generation, a.site_id, a.display_name, a.status,
               a.minimum_agent_version, a.config_publish_blocked, a.version, a.created_at, a.updated_at,
               st.received_at, st.agent_version, st.state, st.state_reason, st.heartbeat,
               st.active_config_version, st.rejected_config_version, st.rejected_reason, st.cert_expires_at,
@@ -424,6 +427,24 @@ export class PgOnecRepository {
   }
 
   // ---------------------------------------------------------------- admin: configuration
+
+  async recordObservedIdentity(client: DatabaseClient, sourceId: number, identity: NonNullable<SourceRecord['identity']>): Promise<void> {
+    await client.query(
+      `UPDATE onec_sources SET observed_identity = $2::jsonb, observed_identity_at = now()
+        WHERE source_id = $1 AND observed_identity IS DISTINCT FROM $2::jsonb`,
+      [sourceId, JSON.stringify({ databaseId: identity.databaseId, exportEpoch: identity.exportEpoch, environment: identity.environment })],
+    );
+  }
+
+  /**
+   * Rebaseline/revocation locks (plan §3.2, §21.3): FOR NO KEY UPDATE on the agent and the source, so the foreign-key
+   * KEY SHARE locks taken by concurrent ETL inserts (runs, batches, mirror rows) never wait on them.
+   */
+  async lockForRebaseline(tx: DatabaseClient, sourceId: number): Promise<{ agent: AgentRecord | null; source: SourceRecord | null }> {
+    const agent = await tx.query(`SELECT * FROM onec_agents WHERE source_id = $1 FOR NO KEY UPDATE`, [sourceId]);
+    const source = await tx.query(`SELECT * FROM onec_sources WHERE source_id = $1 FOR NO KEY UPDATE`, [sourceId]);
+    return { agent: agent.rows[0] ? toAgent(agent.rows[0]) : null, source: source.rows[0] ? toSource(source.rows[0]) : null };
+  }
 
   async getDraft(client: DatabaseClient, agentId: string, forUpdate = false): Promise<QueryResultRow | null> {
     const { rows } = await client.query(

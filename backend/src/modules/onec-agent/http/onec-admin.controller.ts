@@ -293,4 +293,52 @@ export class OnecAdminController {
   listEtlEntities(@Query('agentId') id: string | undefined) {
     return this.etl.listEntities(id ? agentId(id) : undefined);
   }
+
+  @ApiOperation({ summary: '1C data copy of one entity (paged list; «Данные 1С»)' })
+  @Get('etl/mirror')
+  @ApiBearerAuth('bearerAuth')
+  @RequirePermissions('onec.view')
+  listEtlMirror(@Query() query: { agentId?: string; entity?: string; search?: string; state?: string; offset?: string; limit?: string }) {
+    return this.etl.listMirror(query);
+  }
+
+  @ApiOperation({ summary: 'One row of the 1C data copy with its data' })
+  @Get('etl/mirror/row')
+  @ApiBearerAuth('bearerAuth')
+  @RequirePermissions('onec.view')
+  getEtlMirrorRow(@Query() query: { agentId?: string; entity?: string; key?: string }) {
+    return this.etl.getMirrorRow(query);
+  }
+
+  @ApiOperation({ summary: 'Revoke the data of a personal-data entity: write ban, configuration without it, purge' })
+  @Post('agents/:agentId/etl/entities/:entity/revoke')
+  @HttpCode(200)
+  @ApiBearerAuth('bearerAuth')
+  @RequirePermissions('onec.manage')
+  revokeEtlEntity(@Param('agentId') id: string, @Param('entity') entity: string, @Req() request: RequestWithCurrentUser) {
+    return this.service.revokeEntity(agentId(id), entityCode(entity), user(request), requestId(request));
+  }
+
+  @ApiOperation({ summary: 'Allow a revoked entity again once all its data is removed' })
+  @Post('agents/:agentId/etl/entities/:entity/restore')
+  @HttpCode(200)
+  @ApiBearerAuth('bearerAuth')
+  @RequirePermissions('onec.manage')
+  restoreEtlEntity(@Param('agentId') id: string, @Param('entity') entity: string, @Req() request: RequestWithCurrentUser) {
+    return this.service.restoreEntity(agentId(id), entityCode(entity), user(request), requestId(request));
+  }
+
+  @ApiOperation({ summary: 'Rebaseline a 1C source: new generation, open runs abandoned, copy cleared, configuration republished' })
+  @Post('sources/:sourceId/rebaseline')
+  @HttpCode(200)
+  @ApiBearerAuth('bearerAuth')
+  @RequirePermissions('onec.manage')
+  rebaselineSource(@Param('sourceId') sourceId: string, @Body() body: unknown, @Req() request: RequestWithCurrentUser) {
+    return this.service.rebaseline(positiveId(sourceId), body, user(request), requestId(request));
+  }
+}
+
+function entityCode(value: string): string {
+  if (!/^[a-z][a-z0-9_]{0,63}$/.test(value)) throw new ApiError(400, 'INVALID_ID', 'Invalid entity code');
+  return value;
 }

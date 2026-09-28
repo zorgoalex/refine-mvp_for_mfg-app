@@ -108,3 +108,19 @@ describe('1C agent certificates', () => {
     expect(() => parseCertificateInput({})).toThrow();
   });
 });
+
+describe('E3b configuration schema', () => {
+  it('accepts the strict Balance form and deleteBatchAfterAck, rejects other paths', async () => {
+    const { ODATA_PATH_PATTERN, validateOnecConfiguration } = await import('./onec-config');
+    expect(ODATA_PATH_PATTERN.test("AccumulationRegister_ЗапасыНаСкладах/Balance(Dimensions='Организация,Номенклатура,Характеристика,Партия,СтруктурнаяЕдиница,Ячейка')")).toBe(true);
+    for (const bad of ['Catalog_A/Catalog_B', "X/Balance()", "X/Balance(Dimensions='a b')", "X/SliceLast(Dimensions='a')", "X/Balance(Dimensions='a')?$top=1"]) {
+      expect(ODATA_PATH_PATTERN.test(bad)).toBe(false);
+    }
+    const result = validateOnecConfiguration({
+      mode: 'Normal', commandTypes: [], etlIntervalMinutes: 60,
+      etlEntities: [{ entityCode: 'counterparty_phones', oDataPath: 'Catalog_Контрагенты_КонтактнаяИнформация', keyFields: ['Ref_Key', 'LineNumber'], select: ['Ref_Key', 'LineNumber', 'Тип', 'Вид_Key', 'Представление'], syncMode: 'incremental', pageSize: 1000, overlapMinutes: 0, deleteBatchAfterAck: true }],
+    });
+    expect(result.ok).toBe(true);
+  });
+});
+

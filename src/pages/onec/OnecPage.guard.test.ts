@@ -12,6 +12,7 @@ const alertsTab = read('./AlertsIncidentsTab.tsx');
 const entityModal = read('./ConfigEntityModal.tsx');
 const commandsTab = read('./CommandsTab.tsx');
 const etlTab = read('./EtlTab.tsx');
+const mirrorTab = read('./MirrorTab.tsx');
 const format = read('./onecFormat.ts');
 
 describe('Onec (1C integration) UI wiring', () => {
@@ -33,7 +34,7 @@ describe('Onec (1C integration) UI wiring', () => {
   });
 
   it('talks to the backend admin API only, never GraphQL', () => {
-    for (const source of [api, agentsTab, drawer, configTab, alertsTab, commandsTab, etlTab]) {
+    for (const source of [api, agentsTab, drawer, configTab, alertsTab, commandsTab, etlTab, mirrorTab]) {
       expect(source).not.toMatch(/gql`|useMutation\(|useQuery\(\s*gql/);
     }
     expect(api).toMatch(/httpClient\.get/);
@@ -206,5 +207,104 @@ describe('Onec (1C integration) UI wiring', () => {
     expect(configTab).toMatch(/ONEC_ETL_ENTITY_PRESETS/);
     expect(configTab).toMatch(/addEntityPreset/);
     expect(configTab).toMatch(/уже есть в списке; шаблон не применён/);
+  });
+
+  it('adds a "Данные 1С" tab after "ETL" and before "Алерты и инциденты", gated by the page-level onec.view guard', () => {
+    expect(page).toMatch(/key:\s*'mirror'/);
+    expect(page).toMatch(/label:\s*'Данные 1С'/);
+    expect(page).toMatch(/<MirrorTab agents=\{agents\}/);
+    const etlIndex = page.indexOf("key: 'etl'");
+    const mirrorIndex = page.indexOf("key: 'mirror'");
+    const alertsIndex = page.indexOf("key: 'alerts'");
+    expect(etlIndex).toBeGreaterThan(-1);
+    expect(mirrorIndex).toBeGreaterThan(etlIndex);
+    expect(alertsIndex).toBeGreaterThan(mirrorIndex);
+  });
+
+  it('passes canManage into EtlTab (revoke/restore/rebaseline gate)', () => {
+    expect(page).toMatch(/<EtlTab[\s\S]{0,160}canManage=\{canManage\}/);
+  });
+
+  it('adds the mirror/revocation/rebaseline endpoints to the API client', () => {
+    expect(api).toMatch(/listEtlMirror\(/);
+    expect(api).toMatch(/getEtlMirrorRow\(/);
+    expect(api).toMatch(/revokeEtlEntity\(/);
+    expect(api).toMatch(/restoreEtlEntity\(/);
+    expect(api).toMatch(/rebaselineSource\(/);
+  });
+
+  it('keeps Table/Tooltip imports in MirrorTab routed through the delayed wrapper', () => {
+    expect(mirrorTab).toMatch(/from '\.\.\/\.\.\/ui\/tooltipDelay'/);
+    expect(mirrorTab).not.toMatch(/import\s+\{[^}]*\b(Table|Tooltip|Popover)\b[^}]*\}\s+from\s+'antd'/);
+  });
+
+  it('drops stale mirror responses keyed on agent, entity, filters and page', () => {
+    expect(mirrorTab).toMatch(/if \(seq !== requestSeq\.current \|\| requestKey !== currentKey\) return;/);
+    expect(mirrorTab).toContain('const requestKey = `${agentId}|${entity}|${search}|${state}|${page}`;');
+  });
+
+  it('resets the entity list and rows when the agent changes, and resets paging on filter change', () => {
+    expect(mirrorTab).toMatch(/useEffect\(\(\) => \{\s*setEntities\(\[\]\);\s*setEntity\(''\);\s*setRows\(\[\]\);\s*setTotal\(0\);\s*setPage\(1\);\s*\}, \[agentId\]\);/);
+    expect(mirrorTab).toMatch(/useEffect\(\(\) => \{\s*setPage\(1\);\s*\}, \[state, entity\]\);/);
+  });
+
+  it('debounces the search input before it becomes the active filter', () => {
+    expect(mirrorTab).toContain('ONEC_MIRROR_SEARCH_DEBOUNCE_MS');
+    expect(mirrorTab).toMatch(/setTimeout\(\(\) => \{\s*setSearch\(searchInput\.trim\(\)\);\s*setPage\(1\);\s*\}, ONEC_MIRROR_SEARCH_DEBOUNCE_MS\);/);
+  });
+
+  it('shows the personal-data notice only for counterparty_phones', () => {
+    expect(mirrorTab).toMatch(/entity === 'counterparty_phones' &&[\s\S]{0,200}Персональные данные/);
+  });
+
+  it('does not offer a counterparty_phones ETL entity preset yet', () => {
+    expect(format).not.toMatch(/counterparty_phones:\s*\{/);
+  });
+
+  it('gates ETL revoke/restore/rebaseline behind onec.manage, never onec.commands.send alone', () => {
+    expect(etlTab).toMatch(/const manageReady = canManage && !!agentId && loadedAgentId === agentId && sending === null;/);
+    expect(etlTab).toMatch(/manageReady && onecEtlEntityRevocable\(row\.entity\) && !row\.revokedAt/);
+    expect(etlTab).toMatch(/manageReady && row\.revokedAt && row\.purgedAt/);
+    expect(etlTab).toMatch(/canManage && agentId &&[\s\S]{0,80}disabled=\{!manageReady\}[\s\S]{0,80}Новое поколение/);
+  });
+
+  it('shows the snapshot column and revoked tag using the shared entity-state fields', () => {
+    expect(etlTab).toMatch(/onecEtlIsSnapshotEntity\(row\.entity\)/);
+    expect(etlTab).toMatch(/onecSnapshotRejectedReasonLabel\(row\.snapshotRejectedReason\)/);
+    expect(etlTab).toMatch(/row\.revokedAt \? <Tag color=\{row\.purgedAt \? 'red' : 'orange'\}>/);
+  });
+
+  it('freezes source, generation and identity when the rebaseline dialog opens and sends exactly those', () => {
+    expect(etlTab).toMatch(/identityChanged = selectedAgentView\?\.source\.identityStatus === 'identity_changed';/);
+    expect(etlTab).toMatch(/setRebaseline\(\{\s*sourceId: selectedAgentView\.source\.sourceId,\s*generation: selectedAgentView\.source\.generation,/);
+    expect(etlTab).toContain('expectedGeneration: rebaseline.generation,');
+    expect(etlTab).toContain('{ acceptIdentity: rebaseline.observedIdentity }');
+    expect(etlTab).not.toMatch(/expectedGeneration: selectedAgentView/);
+    expect(etlTab).not.toMatch(/acceptIdentity: observedIdentity/);
+  });
+
+  it('invalidates the identity tick when the agent reports another identity while the dialog is open', () => {
+    expect(etlTab).toMatch(/const identityMovedSinceOpen = rebaseline !== null && rebaseline\.identityChanged && JSON\.stringify\(rebaseline\.observedIdentity\) !== liveObservedKey;/);
+    expect(etlTab).toMatch(/if \(identityMovedSinceOpen\) setRebaselineAcceptIdentity\(false\);/);
+    expect(etlTab).toMatch(/if \(!rebaseline \|\| sending \|\| identityMovedSinceOpen\) return;/);
+  });
+
+  it('never resends with a newer generation: ONEC_GENERATION_CHANGED closes the dialog', () => {
+    expect(etlTab).toMatch(/err\.code === 'ONEC_GENERATION_CHANGED'\) \{\s*\/\/[^\n]*\n\s*setRebaseline\(null\);/);
+  });
+
+  it('uses the single `sending` guard for rebaseline (no separate idempotency key)', () => {
+    expect(etlTab).toContain("const rebaselining = sending === 'rebaseline';");
+    expect(etlTab).toMatch(/setSending\('rebaseline'\);/);
+    expect(etlTab).not.toMatch(/rebaselineIdempotencyKey/);
+  });
+
+  it('warns to republish the configuration when rebaseline leaves publication pending', () => {
+    expect(etlTab).toMatch(/result\.publishPending/);
+  });
+
+  it('adds deleteBatchAfterAck to the ETL entity form and only sends it when checked', () => {
+    expect(entityModal).toMatch(/deleteBatchAfterAck/);
+    expect(format).toMatch(/if \(values\.deleteBatchAfterAck\) entity\.deleteBatchAfterAck = true;/);
   });
 });

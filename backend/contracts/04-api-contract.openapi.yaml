@@ -17553,6 +17553,126 @@ paths:
         '401': {description: Authentication required}
         '403': {description: Permission denied}
         '503': {description: 1C integration is disabled}
+  /api/v1/onec/etl/mirror:
+    get:
+      tags:
+        - 1C integration
+      operationId: listOnecEtlMirror
+      summary: "1C data copy of one entity (paged list; «Данные 1С»)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: agentId, in: query, required: true, schema: {type: string}}
+        - {name: entity, in: query, required: true, schema: {type: string}}
+        - {name: search, in: query, required: false, schema: {type: string}}
+        - {name: state, in: query, required: false, schema: {type: string, enum: [all, active, missing, deleted]}}
+        - {name: offset, in: query, required: false, schema: {type: integer}}
+        - {name: limit, in: query, required: false, schema: {type: integer}}
+      responses:
+        '200': {description: "1C data copy of one entity (paged list; «Данные 1С»)"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '400': {description: "Agent and entity are required"}
+  /api/v1/onec/etl/mirror/row:
+    get:
+      tags:
+        - 1C integration
+      operationId: getOnecEtlMirrorRow
+      summary: "One row of the 1C data copy with its data"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: agentId, in: query, required: true, schema: {type: string}}
+        - {name: entity, in: query, required: true, schema: {type: string}}
+        - {name: key, in: query, required: true, schema: {type: string}}
+      responses:
+        '200': {description: "One row of the 1C data copy with its data"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '404': {description: "Row not found"}
+  /api/v1/onec/agents/{agentId}/etl/entities/{entity}/revoke:
+    post:
+      tags:
+        - 1C integration
+      operationId: revokeOnecEtlEntity
+      summary: "Revoke the data of a personal-data entity: write ban, configuration without it, purge"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      parameters:
+        - {name: agentId, in: path, required: true, schema: {type: string}}
+        - {name: entity, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: "Revoke the data of a personal-data entity: write ban, configuration without it, purge"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '400': {description: "Entity is not revocable"}
+        '409': {description: "Already revoked or publication blocked"}
+  /api/v1/onec/agents/{agentId}/etl/entities/{entity}/restore:
+    post:
+      tags:
+        - 1C integration
+      operationId: restoreOnecEtlEntity
+      summary: "Allow a revoked entity again once all its data is removed"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      parameters:
+        - {name: agentId, in: path, required: true, schema: {type: string}}
+        - {name: entity, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: "Allow a revoked entity again once all its data is removed"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '409': {description: "Not revoked or data not purged yet"}
+  /api/v1/onec/sources/{sourceId}/rebaseline:
+    post:
+      tags:
+        - 1C integration
+      operationId: rebaselineOnecSource
+      summary: "Rebaseline a 1C source: new generation, open runs abandoned, copy cleared, configuration republished"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      parameters:
+        - {name: sourceId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      description: >-
+        Destructive; safe to repeat: `expectedGeneration` must equal the current source generation (a repeat after a
+        lost response gets 409 ONEC_GENERATION_CHANGED instead of clearing the new baseline). When the 1C database
+        identity changed, `acceptIdentity` must equal the identity the agent reported last (`observedIdentity`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedGeneration]
+              additionalProperties: false
+              properties:
+                expectedGeneration: {type: integer, minimum: 1}
+                acceptIdentity:
+                  type: object
+                  required: [databaseId, exportEpoch, environment]
+                  additionalProperties: false
+                  properties:
+                    databaseId: {type: string, maxLength: 128}
+                    exportEpoch: {type: string, maxLength: 128}
+                    environment: {type: string, maxLength: 32}
+            example: {expectedGeneration: 2, acceptIdentity: {databaseId: "d4a2cd60-0000-4000-8000-000000000000", exportEpoch: "ae33eb2e-0000-4000-8000-000000000000", environment: test}}
+      responses:
+        '200': {description: "Rebaseline a 1C source: new generation, open runs abandoned, copy cleared, configuration republished"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '400': {description: "Invalid body (expectedGeneration required)"}
+        '404': {description: "Source or its agent not found"}
+        '409': {description: "ONEC_GENERATION_CHANGED (details.currentGeneration) or ONEC_IDENTITY_CONFIRMATION_REQUIRED (details.observedIdentity)"}
 
 components:
   securitySchemes:

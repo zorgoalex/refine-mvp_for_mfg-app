@@ -16,6 +16,7 @@ import { OnecAlertProjector } from './application/onec-alert-projector';
 import { OnecAuditWriter, type OnecAgentContext } from './application/onec-audit';
 import { OnecCommandWakeups } from './application/onec-command-wakeups';
 import { OnecCommandsService } from './application/onec-commands.service';
+import { OnecEtlRevocationService } from './application/onec-etl-revocation.service';
 import { OnecMonitorService } from './application/onec-monitor.service';
 import type { OnecRuntimeConfig, OnecRuntimeConfigService } from './onec-runtime-config.service';
 
@@ -72,7 +73,7 @@ suite('1C agent E2 command queue — isolated PostgreSQL', () => {
     // No LISTEN here (module init not called): wakes come from the in-process path.
     wakeups = new OnecCommandWakeups(db, runtime);
     service = new OnecCommandsService(commandsRepo, repo, new OnecAuditWriter(repo), wakeups, runtime, new PgOnecEtlRepository(db));
-    monitor = new OnecMonitorService(runtime, repo, db, new OnecAlertProjector(repo), commandsRepo, new PgOnecEtlRepository(db), new OnecAuditWriter(repo));
+    monitor = new OnecMonitorService(runtime, repo, db, new OnecAlertProjector(repo), commandsRepo, new PgOnecEtlRepository(db), new OnecAuditWriter(repo), new OnecEtlRevocationService(new PgOnecEtlRepository(db), runtime));
   }, 60000);
 
   afterAll(async () => {

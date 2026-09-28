@@ -20,12 +20,51 @@ export class EtlLimitError extends Error {
   }
 }
 
-export function partPath(dir: string, batchId: string, token: string): string {
-  return path.join(dir, `${batchId}.${token}.part`);
+/**
+ * File names start with `<sourceId>.<entityCode>.` so every file of an entity can be found on disk
+ * without any database record (revocation cleanup, plan §21.3): a lost row never hides a file.
+ */
+export interface SpoolKey {
+  sourceId: number;
+  entityCode: string;
+  batchId: string;
+  token: string;
 }
 
-export function finalPath(dir: string, batchId: string, token: string): string {
-  return path.join(dir, `${batchId}.${token}.ndjson.gz`);
+export function entityFilePrefix(sourceId: number, entityCode: string): string {
+  return `${sourceId}.${entityCode}.`;
+}
+
+export function partPath(dir: string, key: SpoolKey): string {
+  return path.join(dir, `${entityFilePrefix(key.sourceId, key.entityCode)}${key.batchId}.${key.token}.part`);
+}
+
+export function finalPath(dir: string, key: SpoolKey): string {
+  return path.join(dir, `${entityFilePrefix(key.sourceId, key.entityCode)}${key.batchId}.${key.token}.ndjson.gz`);
+}
+
+/**
+ * Files an attempt may have left, in both naming formats: the current `<source>.<entity>.<batch>.<attempt>.*`
+ * and the E3a format `<batch>.<attempt>.*` (files written before this change).
+ */
+export function attemptFiles(dir: string, key: SpoolKey): string[] {
+  return [
+    partPath(dir, key),
+    finalPath(dir, key),
+    path.join(dir, `${key.batchId}.${key.token}.part`),
+    path.join(dir, `${key.batchId}.${key.token}.ndjson.gz`),
+  ];
+}
+
+/** Every spool file of an entity (any attempt, stored or not). */
+export async function listEntityFiles(dir: string, sourceId: number, entityCode: string): Promise<string[]> {
+  const prefix = entityFilePrefix(sourceId, entityCode);
+  try {
+    return (await fs.readdir(dir)).filter((name) => name.startsWith(prefix)).map((name) => path.join(dir, name));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
 }
 
 export async function ensureSpoolDir(dir: string): Promise<void> {

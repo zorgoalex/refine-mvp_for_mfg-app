@@ -14,6 +14,7 @@ import { ApiError } from '../../common/errors/api-error';
 import type { BackendEnv } from '../../config/env.validation';
 import { DatabaseService } from '../../database/database.service';
 import type { PerformanceQueryTelemetryService } from '../../performance/performance-query-telemetry.service';
+import type { CurrentUser } from '../../permissions/current-user';
 import { PgOnecCommandRepository } from './adapters/pg-onec-command-repository';
 import { PgOnecEtlRepository } from './adapters/pg-onec-etl-repository';
 import { PgOnecRepository } from './adapters/pg-onec-repository';
@@ -21,12 +22,17 @@ import { OnecAlertProjector } from './application/onec-alert-projector';
 import { OnecAuditWriter, type OnecAgentContext } from './application/onec-audit';
 import { OnecCommandWakeups } from './application/onec-command-wakeups';
 import { OnecCommandsService } from './application/onec-commands.service';
+import { OnecAdminService } from './application/onec-admin.service';
 import { OnecEtlAdminService } from './application/onec-etl-admin.service';
+import { OnecEtlRevocationService } from './application/onec-etl-revocation.service';
 import { OnecEtlCompletionService } from './application/onec-etl-completion.service';
 import { OnecEtlIngestService } from './application/onec-etl-ingest.service';
 import { OnecEtlParserService } from './application/onec-etl-parser.service';
 import { OnecMonitorService } from './application/onec-monitor.service';
 import type { OnecRuntimeConfig, OnecRuntimeConfigService } from './onec-runtime-config.service';
+
+const actor = { id: '1', username: 'E2E-Тест', role: 'admin', roleId: 1, permissions: ['onec.manage', 'onec.view'] } as CurrentUser;
+const actx = (requestId: string) => ({ requestId, correlationId: null });
 
 const suite = process.env.ONEC_AGENT_DOCKER_TEST === 'true' ? describe : describe.skip;
 
@@ -53,6 +59,8 @@ suite('1C agent E3a ETL — isolated PostgreSQL + real spool', () => {
   let commands: OnecCommandsService;
   let monitor: OnecMonitorService;
   let admin: OnecEtlAdminService;
+  let onecAdmin: OnecAdminService;
+  let revocation: OnecEtlRevocationService;
   let generationRef = '';
   const agentA: OnecAgentContext = { agentId: 'agent-a', sourceId: 1, certId: 1, requestId: 'r-a', correlationId: null };
   const agentB: OnecAgentContext = { agentId: 'agent-b', sourceId: 2, certId: 2, requestId: 'r-b', correlationId: null };
@@ -74,7 +82,7 @@ suite('1C agent E3a ETL — isolated PostgreSQL + real spool', () => {
       CREATE TABLE permissions_state(id boolean, version integer, updated_at timestamptz); INSERT INTO permissions_state VALUES (true, 1, now());
       CREATE TABLE audit_log(LIKE public.audit_log INCLUDING ALL);
       CREATE TABLE audit_log_related_entity(LIKE public.audit_log_related_entity INCLUDING ALL);`);
-    for (const file of ['193_onec_agent_foundation.sql', '196_onec_agent_commands.sql', '198_onec_etl.sql']) {
+    for (const file of ['193_onec_agent_foundation.sql', '196_onec_agent_commands.sql', '198_onec_etl.sql', '200_onec_etl_snapshots_revocation.sql']) {
       await pool.query(readFileSync(new URL(`../../../db/migrations/${file}`, import.meta.url), 'utf8'));
     }
     const values: Partial<BackendEnv> = { DATABASE_URL: url.toString(), DATABASE_QUERY_TIMEOUT_MS: 20000, DATABASE_POOL_MIN: 0, DATABASE_POOL_MAX: 6, DATABASE_SSL: false };
@@ -90,7 +98,9 @@ suite('1C agent E3a ETL — isolated PostgreSQL + real spool', () => {
     completion = new OnecEtlCompletionService(etlRepo, repo, audit, parser);
     const commandsRepo = new PgOnecCommandRepository(db);
     commands = new OnecCommandsService(commandsRepo, repo, audit, new OnecCommandWakeups(db, runtime), runtime, etlRepo);
-    monitor = new OnecMonitorService(runtime, repo, db, new OnecAlertProjector(repo), commandsRepo, etlRepo, audit);
+    revocation = new OnecEtlRevocationService(etlRepo, runtime);
+    monitor = new OnecMonitorService(runtime, repo, db, new OnecAlertProjector(repo), commandsRepo, etlRepo, audit, revocation);
+    onecAdmin = new OnecAdminService(repo, audit, runtime, etlRepo, revocation);
     admin = new OnecEtlAdminService(etlRepo, repo, runtime);
   }, 60000);
 
@@ -380,7 +390,8 @@ suite('1C agent E3a ETL — isolated PostgreSQL + real spool', () => {
       return result;
     }) as typeof etlRepo.transaction;
     try {
-      await expect(upload({ runId, batchId, lines: [row('k1', {})] })).rejects.toThrow('connection lost after COMMIT');
+      // Our COMMIT went through: the attempt answers with the stored ACK instead of the transport error.
+      expect(await upload({ runId, batchId, lines: [row('k1', {})] })).toMatchObject({ batchId, status: 'acknowledged' });
     } finally {
       etlRepo.transaction = original;
     }
@@ -588,5 +599,359 @@ suite('1C agent E3a ETL — isolated PostgreSQL + real spool', () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
     expect((await upload({ runId: randomUUID(), lines: [row('k1', {})] })).rowsAccepted).toBe(1);
+  });
+  // ---------------------------------------------------------------- E3b: snapshots (§21.2)
+  const snapshotRun = async (lines: string[], extra: Record<string, unknown>, entity = 'stock_balances') => {
+    const runId = randomUUID();
+    await upload({ runId, entity, lines });
+    await parser.drainQueue();
+    await complete(runId, v2(runId, [entityV2(entity, { completeness: 'verified', completenessReason: null, rowsRead: lines.length, ...extra })], { mode: 'incremental' }));
+    return runId;
+  };
+  const keys = async (entity = 'stock_balances') => (await mirror(entity)).map((r) => r.source_key);
+
+  it('snapshot entity: a newer verified snapshot replaces the copy; unverified, stale or failed ones never touch it', async () => {
+    await snapshotRun([row('a', { q: 1 }), row('b', { q: 2 })], { snapshotAtUtc: '2026-09-28T10:00:00.000Z' });
+    expect(await keys()).toEqual(['a', 'b']);
+    await snapshotRun([row('b', { q: 3 }), row('c', { q: 4 })], { snapshotAtUtc: '2026-09-28T11:00:00.000Z' });
+    expect(await keys()).toEqual(['b', 'c']);
+    expect((await mirror()).every((r) => r.missing === false)).toBe(true);
+    await snapshotRun([row('z', {})], { snapshotAtUtc: '2026-09-28T12:00:00.000Z', completeness: 'unverified', completenessReason: 'COUNT_CHANGED' });
+    await snapshotRun([row('z', {})], { snapshotAtUtc: '2026-09-28T10:30:00.000Z' });
+    await snapshotRun([row('z', {})], { snapshotAtUtc: '2026-09-28T13:00:00.000Z', readScope: 'delta' });
+    expect(await keys()).toEqual(['b', 'c']);
+    const state = (await pool.query(`SELECT snapshot_version, snapshot_rejected_reason FROM onec_etl_entity_state WHERE entity_code = 'stock_balances'`)).rows[0];
+    expect([new Date(state.snapshot_version).toISOString(), state.snapshot_rejected_reason]).toEqual(['2026-09-28T11:00:00.000Z', 'NOT_FULL']);
+    expect((await pool.query(`SELECT kind FROM onec_agent_incidents`)).rows.map((r) => r.kind)).toEqual(['stale_snapshot_ignored']);
+    await monitor.relayOutbox();
+    expect((await pool.query(`SELECT kind, state FROM onec_alerts`)).rows).toEqual([{ kind: 'etl_snapshot_not_updated', state: 'open' }]);
+    // A verified empty snapshot (one empty batch) empties the copy and closes the alert.
+    await snapshotRun([], { snapshotAtUtc: '2026-09-28T14:00:00.000Z', rowsRead: 0 });
+    expect(await keys()).toEqual([]);
+    await monitor.relayOutbox();
+    expect((await pool.query(`SELECT state FROM onec_alerts`)).rows).toEqual([{ state: 'resolved' }]);
+  });
+
+  it('snapshot rejection reasons: failed, no snapshot time; the copy stays whole', async () => {
+    await snapshotRun([row('a', {})], { snapshotAtUtc: '2026-09-28T10:00:00.000Z' });
+    await snapshotRun([row('x', {})], { snapshotAtUtc: '2026-09-28T11:00:00.000Z', status: 'failed', errorCode: 'ODATA_HTTP_500' }).catch(() => undefined);
+    const noTime = randomUUID();
+    await upload({ runId: noTime, entity: 'stock_balances', lines: [row('x', {})] });
+    await parser.drainQueue();
+    await complete(noTime, v2(noTime, [entityV2('stock_balances', { completeness: 'verified', completenessReason: null, rowsRead: 1 })], { mode: 'incremental' }));
+    expect(await keys()).toEqual(['a']);
+    expect((await pool.query(`SELECT snapshot_rejected_reason FROM onec_etl_entity_state WHERE entity_code = 'stock_balances'`)).rows[0].snapshot_rejected_reason).toBe('NO_SNAPSHOT_TIME');
+  });
+
+  // ---------------------------------------------------------------- E3b: revocation (§21.3, §21.6)
+  it('revoking phones: write ban, copy/staging/spool purged in every run, later uploads 409 ENTITY_REVOKED, restore only when clean', async () => {
+    const done = await snapshotRun([row('p1', { Представление: '+7 700 000 00 00' })], { snapshotAtUtc: '2026-09-28T10:00:00.000Z' }, 'counterparty_phones');
+    const open = randomUUID();
+    await upload({ runId: open, lines: [row('k1', {})] });
+    await upload({ runId: open, entity: 'counterparty_phones', lines: [row('p2', {})] });
+    await parser.drainQueue();
+    expect(readdirSync(spoolDir).length).toBe(3);
+    expect(await status(() => onecAdmin.restoreEntity('agent-a', 'counterparty_phones', actor, actx('x')))).toBe('409 ONEC_ENTITY_NOT_PURGED');
+    const revoked = await onecAdmin.revokeEntity('agent-a', 'counterparty_phones', actor, actx('revoke'));
+    expect(revoked).toMatchObject({ revoked: true, clean: true });
+    expect(await status(() => onecAdmin.revokeEntity('agent-a', 'counterparty_phones', actor, actx('again')))).toBe('409 ONEC_ENTITY_ALREADY_REVOKED');
+    expect(await status(() => onecAdmin.revokeEntity('agent-a', 'items', actor, actx('x')))).toBe('400 ONEC_ENTITY_NOT_REVOCABLE');
+    expect(await mirror('counterparty_phones')).toEqual([]);
+    expect(readdirSync(spoolDir).length).toBe(1); // only the items batch of the open run is left
+    const phoneBatches = (await pool.query(`SELECT run_id, status, revoked, spool_path, ack IS NOT NULL AS acked FROM onec_etl_batches WHERE entity_code = 'counterparty_phones' ORDER BY run_id = $1`, [done])).rows;
+    expect(phoneBatches.map((b) => [b.status, b.revoked, b.spool_path, b.acked])).toEqual([['discarded', true, null, true], ['finalized', false, null, true]]);
+    expect((await pool.query(`SELECT revoked_entities FROM onec_etl_runs WHERE run_id = $1`, [open])).rows[0].revoked_entities).toEqual(['counterparty_phones']);
+    expect(await status(() => upload({ runId: open, entity: 'counterparty_phones', lines: [row('p3', {})] }))).toBe('409 ENTITY_REVOKED');
+    // The open run still completes: items published, phones (counted as acknowledged) ignored.
+    await complete(open, v2(open, [entityV2('counterparty_phones'), entityV2('items')], { batchesAcknowledged: 2 }));
+    expect(await keys('items')).toEqual(['k1']);
+    expect(await mirror('counterparty_phones')).toEqual([]);
+    const audit = await pool.query(`SELECT event, after_json::text AS after FROM audit_log WHERE event = 'onec.etl.entity_revoked'`);
+    expect(audit.rows).toHaveLength(1);
+    expect(audit.rows[0].after).not.toContain('+7');
+    await onecAdmin.restoreEntity('agent-a', 'counterparty_phones', actor, actx('restore'));
+    expect((await pool.query(`SELECT event_type FROM onec_outbox_events WHERE event_type LIKE 'onec.etl.entity_%' ORDER BY event_id`)).rows.map((r) => r.event_type))
+      .toEqual(['onec.etl.entity_revoked', 'onec.etl.entity_restored']);
+    expect((await pool.query(`SELECT revoked_at FROM onec_etl_entity_state WHERE entity_code = 'counterparty_phones'`)).rows[0].revoked_at).toBeNull();
+    // The run that saw the revocation keeps it; a new run may carry phones again.
+    expect(await status(() => upload({ runId: open, entity: 'counterparty_phones', lines: [row('p4', {})] }))).toBe('409 RUN_CLOSED');
+    await snapshotRun([row('p5', {})], { snapshotAtUtc: '2026-09-28T12:00:00.000Z' }, 'counterparty_phones');
+    expect(await keys('counterparty_phones')).toEqual(['p5']);
+  });
+
+  it('a revocation during parsing stops the parser: nothing of the entity reaches staging', async () => {
+    const runId = randomUUID();
+    const batchId = randomUUID();
+    await upload({ runId, batchId, entity: 'counterparty_phones', lines: [row('p1', {})] });
+    const claimed = (await etlRepo.transaction((tx) => etlRepo.claimForParse(tx)))!;
+    await onecAdmin.revokeEntity('agent-a', 'counterparty_phones', actor, actx('revoke'));
+    expect(await etlRepo.insertStagingChunk(claimed, claimed.parseAttempt, [{ lineNo: 1, line: row('p1', {}), sourceKey: 'p1', sourceUpdatedAt: null, deleted: false }])).toBe(false);
+    expect(await etlRepo.finishParse(claimed, claimed.parseAttempt)).toBe('stale');
+    expect((await pool.query(`SELECT count(*)::int AS n FROM onec_etl_staging_rows`)).rows[0].n).toBe(0);
+    expect((await pool.query(`SELECT status, revoked FROM onec_etl_batches WHERE batch_id = $1`, [batchId])).rows[0]).toEqual({ status: 'discarded', revoked: true });
+  });
+
+  it('personal data not confirmed by a snapshot for 30 days is removed', async () => {
+    await snapshotRun([row('p1', {})], { snapshotAtUtc: '2026-09-28T10:00:00.000Z' }, 'counterparty_phones');
+    expect(await revocation.cleanupAll()).toMatchObject({ personalRowsExpired: 0 });
+    await pool.query(`UPDATE onec_etl_entity_state SET snapshot_version = now() - interval '31 days' WHERE entity_code = 'counterparty_phones'`);
+    expect(await revocation.cleanupAll()).toMatchObject({ personalRowsExpired: 1 });
+    expect(await mirror('counterparty_phones')).toEqual([]);
+  });
+
+  // ---------------------------------------------------------------- E3b: rebaseline (§3.2)
+  it('rebaseline: new generation, open runs abandoned, copy cleared, old runs refused; identity change needs confirmation', async () => {
+    const done = randomUUID();
+    await upload({ runId: done, lines: [row('k1', {})] });
+    await parser.drainQueue();
+    await complete(done, v2(done, [entityV2('items')]));
+    const open = randomUUID();
+    await upload({ runId: open, lines: [row('k2', {})] });
+    const oldRef = generationRef;
+    const result = await onecAdmin.rebaseline(1, { expectedGeneration: 1 }, actor, actx('rb'));
+    // A repeat after a lost response finds the generation moved: refused, the new baseline is safe.
+    expect(await status(() => onecAdmin.rebaseline(1, { expectedGeneration: 1 }, actor, actx('rb-repeat')))).toBe('409 ONEC_GENERATION_CHANGED');
+    expect(result).toMatchObject({ sourceId: 1, generation: 2, abandonedRuns: 1, publishPending: true });
+    expect(await mirror()).toEqual([]);
+    expect((await pool.query(`SELECT status FROM onec_etl_runs WHERE run_id = $1`, [open])).rows[0].status).toBe('abandoned');
+    expect(await status(() => upload({ runId: open, lines: [row('k3', {})], headers: { 'x-source-generation': null } }))).toBe('409 RUN_GENERATION_CLOSED');
+    expect(await status(() => upload({ runId: randomUUID(), lines: [], headers: { 'x-source-generation': oldRef } }))).toBe('409 RUN_GENERATION_CLOSED');
+    generationRef = (await pool.query(`SELECT generation_ref FROM onec_sources WHERE source_id = 1`)).rows[0].generation_ref;
+    expect(generationRef).not.toBe(oldRef);
+    const fresh = randomUUID();
+    await upload({ runId: fresh, lines: [row('k9', {})] });
+    await parser.drainQueue();
+    await complete(fresh, v2(fresh, [entityV2('items')]));
+    expect(await keys('items')).toEqual(['k9']);
+    // identity_changed: refused without confirmation, then bound to the identity the agent reported.
+    const other = { databaseId: EPOCH, exportEpoch: DB_ID, environment: 'test' };
+    await pool.query(`UPDATE onec_sources SET identity_status = 'identity_changed', observed_identity = $1::jsonb WHERE source_id = 1`, [JSON.stringify(other)]);
+    expect(await status(() => onecAdmin.rebaseline(1, { expectedGeneration: 2 }, actor, actx('rb2')))).toBe('409 ONEC_IDENTITY_CONFIRMATION_REQUIRED');
+    // Only the identity shown to the operator (reported last by the agent) can be confirmed.
+    expect(await status(() => onecAdmin.rebaseline(1, { expectedGeneration: 2, acceptIdentity: { databaseId: DB_ID, exportEpoch: EPOCH, environment: 'test' } }, actor, actx('rb2b')))).toBe('409 ONEC_IDENTITY_CONFIRMATION_REQUIRED');
+    expect(await onecAdmin.rebaseline(1, { expectedGeneration: 2, acceptIdentity: other }, actor, actx('rb3'))).toMatchObject({ identityAccepted: true, generation: 3 });
+    expect((await pool.query(`SELECT identity, identity_status FROM onec_sources WHERE source_id = 1`)).rows[0]).toEqual({ identity: other, identity_status: 'bound' });
+    expect((await pool.query(`SELECT count(*)::int AS n FROM audit_log WHERE event = 'onec.source.generation_bumped'`)).rows[0].n).toBe(2);
+    expect((await pool.query(`SELECT count(*)::int AS n FROM onec_outbox_events WHERE event_type = 'onec.source.generation_bumped'`)).rows[0].n).toBe(2);
+  });
+
+  // ---------------------------------------------------------------- E3b: «Данные 1С»
+  it('mirror browse: paging, search, state filters, row detail', async () => {
+    const runId = randomUUID();
+    await upload({ runId, lines: [row('k1', { Code: '001', Description: 'Плита МДФ' }), row('k2', { Code: '002', Description: 'Кромка' }, null, true)] });
+    await parser.drainQueue();
+    await complete(runId, v2(runId, [entityV2('items')]));
+    const all = await admin.listMirror({ agentId: 'agent-a', entity: 'items' });
+    expect(all).toMatchObject({ total: 2 });
+    expect(all.rows.map((r) => r.description)).toEqual(['Кромка', 'Плита МДФ']);
+    expect((await admin.listMirror({ agentId: 'agent-a', entity: 'items', search: 'мдф' })).rows.map((r) => r.sourceKey)).toEqual(['k1']);
+    expect((await admin.listMirror({ agentId: 'agent-a', entity: 'items', state: 'deleted' })).rows.map((r) => r.sourceKey)).toEqual(['k2']);
+    expect((await admin.listMirror({ agentId: 'agent-a', entity: 'items', search: '%' })).total).toBe(0);
+    expect(await admin.getMirrorRow({ agentId: 'agent-a', entity: 'items', key: 'k1' })).toMatchObject({ data: { Code: '001' } });
+    expect(await status(() => admin.getMirrorRow({ agentId: 'agent-b', entity: 'items', key: 'k1' }))).toBe('404 ONEC_MIRROR_ROW_NOT_FOUND');
+  });
+  it('a spool file that cannot be deleted keeps the revoked entity "not clean" until it is gone', async () => {
+    await snapshotRun([row('p1', {})], { snapshotAtUtc: '2026-09-28T10:00:00.000Z' }, 'counterparty_phones');
+    const { chmodSync } = await import('node:fs');
+    chmodSync(spoolDir, 0o500);
+    let revoked;
+    try {
+      revoked = await onecAdmin.revokeEntity('agent-a', 'counterparty_phones', actor, actx('revoke'));
+      expect(revoked.clean).toBe(false);
+      expect(await status(() => onecAdmin.restoreEntity('agent-a', 'counterparty_phones', actor, actx('r')))).toBe('409 ONEC_ENTITY_NOT_PURGED');
+      expect((await pool.query(`SELECT count(*)::int AS n FROM onec_etl_batches WHERE spool_path IS NOT NULL AND entity_code = 'counterparty_phones'`)).rows[0].n).toBe(1);
+    } finally {
+      chmodSync(spoolDir, 0o700);
+    }
+    await revocation.cleanupAll();
+    expect(readdirSync(spoolDir)).toEqual([]);
+    await onecAdmin.restoreEntity('agent-a', 'counterparty_phones', actor, actx('restore'));
+  });
+
+  it('a crash between the ban and the cleanup still ends in "purged" (restore possible)', async () => {
+    await etlRepo.transaction((tx) => etlRepo.markRevoked(tx, 1, 'counterparty_phones', 1));
+    await revocation.cleanupAll();
+    expect((await pool.query(`SELECT purged_at IS NOT NULL AS purged FROM onec_etl_entity_state WHERE entity_code = 'counterparty_phones'`)).rows[0].purged).toBe(true);
+    await onecAdmin.restoreEntity('agent-a', 'counterparty_phones', actor, actx('restore'));
+  });
+
+  it('TTL re-checks under the lock: a snapshot published meanwhile is not removed', async () => {
+    await snapshotRun([row('p1', {})], { snapshotAtUtc: '2026-09-28T10:00:00.000Z' }, 'counterparty_phones');
+    await pool.query(`UPDATE onec_etl_entity_state SET snapshot_version = now() - interval '31 days' WHERE entity_code = 'counterparty_phones'`);
+    const holder = await pool.connect();
+    try {
+      await holder.query('BEGIN');
+      await holder.query(`SELECT 1 FROM onec_etl_entity_state WHERE entity_code = 'counterparty_phones' FOR UPDATE`);
+      const expiring = etlRepo.expirePersonalData(['counterparty_phones'], 30 * 24 * 60 * 60_000);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await holder.query(`UPDATE onec_etl_entity_state SET snapshot_version = now() WHERE entity_code = 'counterparty_phones'`);
+      await holder.query('COMMIT');
+      expect(await expiring).toBe(0);
+    } finally {
+      holder.release();
+    }
+    expect(await keys('counterparty_phones')).toEqual(['p1']);
+  });
+
+  it('a snapshot whose rowsRead disagrees with the received rows never replaces the copy', async () => {
+    await snapshotRun([row('a', {})], { snapshotAtUtc: '2026-09-28T10:00:00.000Z' });
+    await snapshotRun([], { snapshotAtUtc: '2026-09-28T11:00:00.000Z', rowsRead: 5 });
+    expect(await keys()).toEqual(['a']);
+    expect((await pool.query(`SELECT snapshot_rejected_reason FROM onec_etl_entity_state WHERE entity_code = 'stock_balances'`)).rows[0].snapshot_rejected_reason).toBe('ROWS_MISMATCH');
+  });
+
+  it('concurrent completions of one source and a rebaseline during a completion never deadlock', async () => {
+    const runs = [randomUUID(), randomUUID()];
+    for (const runId of runs) {
+      await upload({ runId, lines: [row(`k-${runId}`, {})] });
+      await upload({ runId, entity: 'counterparties', lines: [row(`c-${runId}`, {})] });
+    }
+    await parser.drainQueue();
+    const both = await Promise.allSettled(runs.map((runId) => complete(runId, v2(runId, [entityV2('counterparties'), entityV2('items')], { batchesAcknowledged: 2 }))));
+    expect(both.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled']);
+    const third = randomUUID();
+    await upload({ runId: third, lines: [row('k3', {})] });
+    await parser.drainQueue();
+    const raced = await Promise.allSettled([
+      complete(third, v2(third, [entityV2('items')])),
+      onecAdmin.rebaseline(1, { expectedGeneration: 1 }, actor, actx('rb-race')),
+    ]);
+    for (const outcome of raced) {
+      if (outcome.status === 'rejected') expect(String((outcome.reason as { code?: string }).code)).toBe('RUN_GENERATION_CLOSED');
+    }
+    expect(raced[1].status).toBe('fulfilled');
+  });
+  it('revocation removes a file written before a crash (reservation not yet stored) before calling the entity clean', async () => {
+    const runId = randomUUID();
+    await upload({ runId, lines: [row('k1', {})] });
+    const batchId = randomUUID();
+    const owner = randomUUID();
+    await pool.query(
+      `INSERT INTO onec_etl_batches (batch_id, run_id, agent_id, entity_code, schema_version, row_count, content_sha256, status, receiving_owner, receiving_heartbeat_at)
+       VALUES ($1, $2, 'agent-a', 'counterparty_phones', 1, 1, $3, 'receiving', $4, now())`,
+      [batchId, runId, sha(Buffer.from('x')), owner],
+    );
+    const { writeFileSync } = await import('node:fs');
+    const orphan = path.join(spoolDir, `1.counterparty_phones.${batchId}.${owner}.ndjson.gz`);
+    writeFileSync(orphan, gz([row('p1', { Представление: '+7' })]));
+    const revoked = await onecAdmin.revokeEntity('agent-a', 'counterparty_phones', actor, actx('revoke'));
+    expect(revoked.clean).toBe(true);
+    expect(readdirSync(spoolDir).some((f) => f.startsWith(batchId))).toBe(false);
+    expect((await pool.query(`SELECT count(*)::int AS n FROM onec_etl_batches WHERE batch_id = $1`, [batchId])).rows[0].n).toBe(0);
+  });
+
+  it('retention keeps the path of a file it could not delete and retries', async () => {
+    const runId = randomUUID();
+    await upload({ runId, lines: [row('k1', {})] });
+    await parser.drainQueue();
+    await complete(runId, v2(runId, [entityV2('items')]));
+    await pool.query(`UPDATE onec_etl_batches SET updated_at = now() - interval '8 days'`);
+    const { chmodSync } = await import('node:fs');
+    chmodSync(spoolDir, 0o500);
+    try {
+      expect(await monitor.etlRetention()).toMatchObject({ spoolFilesRemoved: 0 });
+      expect((await pool.query(`SELECT count(*)::int AS n FROM onec_etl_batches WHERE spool_path IS NOT NULL`)).rows[0].n).toBe(1);
+    } finally {
+      chmodSync(spoolDir, 0o700);
+    }
+    expect(await monitor.etlRetention()).toMatchObject({ spoolFilesRemoved: 1 });
+    expect(readdirSync(spoolDir)).toEqual([]);
+  });
+
+  it('a revocation waiting on an entity held by a completion does not deadlock when the completion inserts new mirror keys', async () => {
+    await snapshotRun([row('p1', {})], { snapshotAtUtc: '2026-09-28T10:00:00.000Z' }, 'counterparty_phones');
+    const holder = await pool.connect();
+    try {
+      await holder.query('BEGIN');
+      await holder.query(`SELECT 1 FROM onec_etl_entity_state WHERE entity_code = 'counterparty_phones' FOR UPDATE`);
+      const revoking = onecAdmin.revokeEntity('agent-a', 'counterparty_phones', actor, actx('revoke'));
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      // Like a completion publishing new keys: the FK takes KEY SHARE on the source row.
+      await holder.query(
+        `INSERT INTO onec_etl_mirror_rows (source_id, entity_code, source_key, deleted, data, row_hash, first_seen_run, last_run_id)
+         VALUES (1, 'counterparty_phones', 'p-new', false, '{}'::jsonb, 'h', gen_random_uuid(), gen_random_uuid())`,
+      );
+      await holder.query('COMMIT');
+      expect(await revoking).toMatchObject({ revoked: true });
+    } finally {
+      holder.release();
+    }
+    expect(await mirror('counterparty_phones')).toEqual([]);
+  }, 20000);
+  it('a file whose record was lost (crash after rename, then rebaseline) is still removed by revocation', async () => {
+    const runId = randomUUID();
+    await upload({ runId, lines: [row('k1', {})] });
+    const batchId = randomUUID();
+    const owner = randomUUID();
+    await pool.query(
+      `INSERT INTO onec_etl_batches (batch_id, run_id, agent_id, entity_code, schema_version, row_count, content_sha256, status, receiving_owner, receiving_heartbeat_at)
+       VALUES ($1, $2, 'agent-a', 'counterparty_phones', 1, 1, $3, 'receiving', $4, now())`,
+      [batchId, runId, sha(Buffer.from('x')), owner],
+    );
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync(path.join(spoolDir, `1.counterparty_phones.${batchId}.${owner}.ndjson.gz`), gz([row('p1', {})]));
+    await onecAdmin.rebaseline(1, { expectedGeneration: 1 }, actor, actx('rb')); // deletes the reservation row
+    expect((await pool.query(`SELECT count(*)::int AS n FROM onec_etl_batches WHERE batch_id = $1`, [batchId])).rows[0].n).toBe(0);
+    const revoked = await onecAdmin.revokeEntity('agent-a', 'counterparty_phones', actor, actx('revoke'));
+    expect(revoked.clean).toBe(true);
+    expect(readdirSync(spoolDir).some((f) => f.startsWith('1.counterparty_phones.'))).toBe(false);
+  });
+
+  it('stale-reservation cleanup claims first: a late uploader can no longer publish, and a stored batch is never touched', async () => {
+    const runId = randomUUID();
+    const batchId = randomUUID();
+    const body = gz([row('k1', {})]);
+    const stalled = new PassThrough();
+    const late = upload({ runId, batchId, body, rows: 1, stream: stalled });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await pool.query(`UPDATE onec_etl_batches SET receiving_heartbeat_at = now() - interval '11 minutes' WHERE batch_id = $1`, [batchId]);
+    await monitor.recoverEtl(new Date());
+    expect((await pool.query(`SELECT count(*)::int AS n FROM onec_etl_batches WHERE batch_id = $1`, [batchId])).rows[0].n).toBe(0);
+    stalled.end(body);
+    expect(await status(() => late)).toBe('409 BATCH_SUPERSEDED');
+    expect(readdirSync(spoolDir)).toEqual([]);
+    // Publication won the race: the claim finds nothing and the stored file stays.
+    const stored = randomUUID();
+    await upload({ runId, batchId: stored, lines: [row('k2', {})] });
+    await pool.query(`UPDATE onec_etl_batches SET receiving_heartbeat_at = now() - interval '11 minutes' WHERE batch_id = $1`, [stored]);
+    await monitor.recoverEtl(new Date());
+    expect((await pool.query(`SELECT status FROM onec_etl_batches WHERE batch_id = $1`, [stored])).rows[0].status).toBe('stored');
+    expect(readdirSync(spoolDir)).toHaveLength(1);
+  });
+  it('revocation also removes attempt files in the E3a naming format (written before the upgrade)', async () => {
+    const runId = randomUUID();
+    await upload({ runId, lines: [row('k1', {})] });
+    const batchId = randomUUID();
+    const owner = randomUUID();
+    await pool.query(
+      `INSERT INTO onec_etl_batches (batch_id, run_id, agent_id, entity_code, schema_version, row_count, content_sha256, status, receiving_owner, receiving_heartbeat_at)
+       VALUES ($1, $2, 'agent-a', 'counterparty_phones', 1, 1, $3, 'receiving', $4, now())`,
+      [batchId, runId, sha(Buffer.from('x')), owner],
+    );
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync(path.join(spoolDir, `${batchId}.${owner}.ndjson.gz`), gz([row('p1', {})]));
+    expect((await onecAdmin.revokeEntity('agent-a', 'counterparty_phones', actor, actx('revoke'))).clean).toBe(true);
+    expect(readdirSync(spoolDir).some((f) => f.startsWith(batchId))).toBe(false);
+  });
+
+  it('a delayed revocation sweep never deletes files of uploads allowed by a restore that happened meanwhile', async () => {
+    await onecAdmin.revokeEntity('agent-a', 'counterparty_phones', actor, actx('revoke'));
+    const holder = await pool.connect();
+    const { writeFileSync, existsSync } = await import('node:fs');
+    const fresh = path.join(spoolDir, `1.counterparty_phones.${randomUUID()}.${randomUUID()}.ndjson.gz`);
+    try {
+      await holder.query('BEGIN');
+      // Like restoreEntity: FOR UPDATE on the entity state, then the ban is lifted.
+      await holder.query(`SELECT 1 FROM onec_etl_entity_state WHERE entity_code = 'counterparty_phones' FOR UPDATE`);
+      const sweeping = revocation.cleanup(1, 'counterparty_phones');
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await holder.query(`UPDATE onec_etl_entity_state SET revoked_at = NULL WHERE entity_code = 'counterparty_phones'`);
+      writeFileSync(fresh, gz([row('p9', {})])); // a new, acknowledged upload after the restore
+      await holder.query('COMMIT');
+      await sweeping;
+    } finally {
+      holder.release();
+    }
+    expect(existsSync(fresh)).toBe(true);
   });
 });

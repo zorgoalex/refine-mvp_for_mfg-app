@@ -13,20 +13,33 @@ import type {
   OnecCommandView,
   OnecConfigValidationResult,
   OnecConfigVersion,
+  OnecEntityRestoreResult,
+  OnecEntityRevokeResult,
   OnecEtlEntityState,
   OnecEtlRun,
   OnecEtlRunDetail,
   OnecIncident,
+  OnecMirrorListResult,
+  OnecMirrorRowDetail,
+  OnecMirrorState,
   OnecOverview,
+  OnecSourceIdentity,
   OnecSourceListItem,
+  OnecSourceRebaselineResult,
 } from './onecApi.types';
 
 const AGENT_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 const COMMAND_ID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const ENTITY_CODE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 
 function agentIdPath(agentId: string): string {
   if (!AGENT_ID_PATTERN.test(agentId)) throw new Error('Invalid 1C agent id');
   return agentId;
+}
+
+function entityCodePath(entity: string): string {
+  if (!ENTITY_CODE_PATTERN.test(entity)) throw new Error('Invalid 1C entity code');
+  return entity;
 }
 
 function commandIdPath(commandId: string): string {
@@ -215,5 +228,54 @@ export const onecApi = {
 
   getEtlRun(runId: string): Promise<OnecEtlRunDetail> {
     return httpClient.get(path(`/etl/runs/${commandIdPath(runId)}`));
+  },
+
+  listEtlMirror(params: {
+    agentId: string;
+    entity: string;
+    search?: string;
+    state?: OnecMirrorState;
+    offset?: number;
+    limit?: number;
+  }): Promise<OnecMirrorListResult> {
+    const query = new URLSearchParams();
+    query.set('agentId', agentIdPath(params.agentId));
+    query.set('entity', entityCodePath(params.entity));
+    if (params.search) query.set('search', params.search);
+    if (params.state) query.set('state', params.state);
+    if (params.offset) query.set('offset', String(params.offset));
+    if (params.limit) query.set('limit', String(params.limit));
+    return httpClient.get(path(`/etl/mirror?${query.toString()}`));
+  },
+
+  getEtlMirrorRow(params: { agentId: string; entity: string; key: string }): Promise<OnecMirrorRowDetail> {
+    const query = new URLSearchParams({
+      agentId: agentIdPath(params.agentId),
+      entity: entityCodePath(params.entity),
+      key: params.key,
+    });
+    return httpClient.get(path(`/etl/mirror/row?${query.toString()}`));
+  },
+
+  /** Personal-data entity only (`counterparty_phones`); write ban + purge + republish without it. */
+  revokeEtlEntity(agentId: string, entity: string): Promise<OnecEntityRevokeResult> {
+    return httpClient.post(path(`/agents/${agentIdPath(agentId)}/etl/entities/${entityCodePath(entity)}/revoke`), {});
+  },
+
+  restoreEtlEntity(agentId: string, entity: string): Promise<OnecEntityRestoreResult> {
+    return httpClient.post(path(`/agents/${agentIdPath(agentId)}/etl/entities/${entityCodePath(entity)}/restore`), {});
+  },
+
+  /**
+   * New source generation: open runs abandoned, the 1C copy cleared, configuration republished.
+   * `expectedGeneration` must be the generation the operator last saw (409 ONEC_GENERATION_CHANGED
+   * otherwise); `acceptIdentity` is required, and must equal the agent-reported `observedIdentity`
+   * exactly, when the source's identity changed (409 ONEC_IDENTITY_CONFIRMATION_REQUIRED otherwise).
+   */
+  rebaselineSource(
+    sourceId: number,
+    input: { expectedGeneration: number; acceptIdentity?: OnecSourceIdentity },
+  ): Promise<OnecSourceRebaselineResult> {
+    return httpClient.post(path(`/sources/${positiveId(sourceId)}/rebaseline`), input);
   },
 };

@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Form, Input, InputNumber, Modal, Select, Switch } from 'antd';
+import { Checkbox, Form, Input, InputNumber, Modal, Select, Switch } from 'antd';
 import type { OnecEtlEntity } from './onecApi.types';
 import {
   ONEC_ETL_ENTITY_FORM_DEFAULTS,
@@ -118,6 +118,13 @@ export function ConfigEntityModal({ initial, existingEntities, onCancel, onSubmi
         </Form.Item>
         <Form.Item name="enabled" label="Включена" valuePropName="checked">
           <Switch />
+        </Form.Item>
+        <Form.Item
+          name="deleteBatchAfterAck"
+          valuePropName="checked"
+          tooltip="Только для персональных данных: агент удалит выгруженный пакет у себя сразу после подтверждения ERP, не дожидаясь ретеншена"
+        >
+          <Checkbox>Удалять пакет у агента сразу после подтверждения (персональные данные)</Checkbox>
         </Form.Item>
       </Form>
     </Modal>

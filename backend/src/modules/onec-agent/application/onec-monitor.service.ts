@@ -5,12 +5,13 @@ import { DatabaseService } from '../../../database/database.service';
 import { PgOnecCommandRepository } from '../adapters/pg-onec-command-repository';
 import { PgOnecEtlRepository } from '../adapters/pg-onec-etl-repository';
 import { ONEC_ETL_LIMITS } from '../domain/onec-etl';
-import { partPath, removeQuietly } from './onec-etl-spool';
+import { attemptFiles, removeQuietly } from './onec-etl-spool';
 import { PgOnecRepository } from '../adapters/pg-onec-repository';
 import { OnecRuntimeConfigService } from '../onec-runtime-config.service';
 import { buildOnecEvent } from '../domain/onec-events';
 import { OnecAlertProjector } from './onec-alert-projector';
 import { OnecAuditWriter } from './onec-audit';
+import { OnecEtlRevocationService } from './onec-etl-revocation.service';
 
 /** Monitor events are system-initiated; one request/correlation id per tick. */
 function systemEventBase(now: Date) {
@@ -47,6 +48,7 @@ export class OnecMonitorService implements OnModuleInit, OnModuleDestroy {
     @Inject(PgOnecCommandRepository) private readonly commands: PgOnecCommandRepository,
     @Inject(PgOnecEtlRepository) private readonly etl: PgOnecEtlRepository,
     @Inject(OnecAuditWriter) private readonly audit: OnecAuditWriter,
+    @Inject(OnecEtlRevocationService) private readonly revocation: OnecEtlRevocationService,
   ) {}
 
   onModuleInit(): void {
@@ -70,6 +72,7 @@ export class OnecMonitorService implements OnModuleInit, OnModuleDestroy {
         await this.detectExpiringCertificates(now);
         await this.expireUndeliveredCommands(now);
         await this.recoverEtl(now);
+        await this.revocation.cleanupAll();
         await this.relayOutbox();
         if (now.getTime() - this.lastRetentionAt >= RETENTION_EVERY_MS) {
           const removed = {
@@ -199,9 +202,10 @@ export class OnecMonitorService implements OnModuleInit, OnModuleDestroy {
       );
     });
     const spoolDir = this.runtime.get().etlSpoolDir;
-    for (const stale of await this.etl.listStaleReservations(ONEC_ETL_LIMITS.reservationStaleMs)) {
-      if (await this.etl.deleteReservation(this.etl.db, stale.batchId, stale.owner)) {
-        await removeQuietly(partPath(spoolDir, stale.batchId, stale.owner));
+    // Claim first (row deleted atomically, a late uploader can no longer publish), then remove its files.
+    for (const stale of await this.etl.claimStaleReservations(ONEC_ETL_LIMITS.reservationStaleMs)) {
+      for (const file of attemptFiles(spoolDir, { sourceId: stale.sourceId, entityCode: stale.entityCode, batchId: stale.batchId, token: stale.owner })) {
+        await removeQuietly(file);
       }
     }
     await this.etl.recoverStuckParsing(ONEC_ETL_LIMITS.parseStaleMs, ONEC_ETL_LIMITS.maxParseAttempts);
@@ -223,9 +227,14 @@ export class OnecMonitorService implements OnModuleInit, OnModuleDestroy {
   /** Spool files past 7 days, orphan files (no batch row) older than 1 h, run/batch journal past 90 days. */
   async etlRetention(): Promise<{ spoolFilesRemoved: number; orphanFilesRemoved: number; etlRunsPurged: number }> {
     let spoolFilesRemoved = 0;
-    for (const file of await this.etl.expireSpoolFiles(ONEC_ETL_LIMITS.spoolRetentionMs)) {
-      await removeQuietly(file);
-      spoolFilesRemoved += 1;
+    for (const file of await this.etl.listExpiredSpoolFiles(ONEC_ETL_LIMITS.spoolRetentionMs)) {
+      try {
+        await removeQuietly(file.path);
+        await this.etl.clearSpoolPath(file.batchId, file.path);
+        spoolFilesRemoved += 1;
+      } catch (error) {
+        this.logger.warn(`1C spool file not removed (kept for retry): ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
     const orphanFilesRemoved = await this.sweepOrphans();
     const etlRunsPurged = await this.etl.purgeJournal(ONEC_ETL_LIMITS.journalRetentionDays);
@@ -241,11 +250,12 @@ export class OnecMonitorService implements OnModuleInit, OnModuleDestroy {
       return 0;
     }
     const referenced = await this.etl.referencedSpoolPaths();
-    const reservations = new Set((await this.etl.listStaleReservations(0)).map((r) => partPath(dir, r.batchId, r.owner)));
+    // Live attempts (any reservation row) keep their files; files are named `<source>.<entity>.<batch>.<owner>.*`.
+    const live = new Set((await this.etl.listStaleReservations(0)).map((r) => `${r.batchId}.${r.owner}.`));
     let removed = 0;
     for (const name of names) {
       const file = path.join(dir, name);
-      if (referenced.has(file) || reservations.has(file)) continue;
+      if (referenced.has(file) || [...live].some((attempt) => name.includes(attempt))) continue;
       try {
         const stats = await fs.stat(file);
         if (!stats.isFile() || Date.now() - stats.mtimeMs < ONEC_ETL_LIMITS.orphanFileAgeMs) continue;

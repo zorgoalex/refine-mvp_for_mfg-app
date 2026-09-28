@@ -14,6 +14,7 @@ import { OnecEtlAdminService } from './application/onec-etl-admin.service';
 import { OnecEtlCompletionService } from './application/onec-etl-completion.service';
 import { OnecEtlIngestService } from './application/onec-etl-ingest.service';
 import { OnecEtlParserService } from './application/onec-etl-parser.service';
+import { OnecEtlRevocationService } from './application/onec-etl-revocation.service';
 import { OnecMonitorService } from './application/onec-monitor.service';
 import { OnecAdminController } from './http/onec-admin.controller';
 import { OnecAgentAuthGuard } from './http/onec-agent-auth.guard';
@@ -47,6 +48,7 @@ import { OnecRuntimeConfigService } from './onec-runtime-config.service';
     OnecEtlIngestService,
     OnecEtlCompletionService,
     OnecEtlAdminService,
+    OnecEtlRevocationService,
   ],
   // Port for business modules (E4): OnecCommandsService.enqueue(tx, …).
   exports: [OnecCommandsService],

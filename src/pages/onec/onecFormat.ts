@@ -110,6 +110,7 @@ export const ONEC_ALERT_KIND_LABELS: Record<string, string> = {
   etl_entity_failed: 'Ошибка выгрузки сущности',
   etl_run_abandoned: 'Выгрузка брошена',
   etl_full_sync_required: 'Нужна полная выгрузка',
+  etl_snapshot_not_updated: 'Снимок не обновлён',
 };
 
 /** Alerts about one past command/run: nothing re-derives them, the operator closes them once handled. */
@@ -140,6 +141,7 @@ export const ONEC_INCIDENT_KIND_LABELS: Record<string, string> = {
   late_delivery_of_expired_command: 'Просроченная команда всё же доставлена',
   etl_batch_invalid: 'Некорректный пакет выгрузки',
   late_mode_for_completed_run: 'Режим команды пришёл после завершения выгрузки',
+  stale_snapshot_ignored: 'Пропущен устаревший снимок',
 };
 
 export function onecIncidentKindLabel(kind: string): string {
@@ -452,6 +454,7 @@ export interface OnecEtlEntityFormValues {
   schemaVersion: number | null;
   oDataVersion: '' | 3 | 4;
   enabled: boolean;
+  deleteBatchAfterAck: boolean;
 }
 
 function splitList(text: string): string[] {
@@ -475,6 +478,7 @@ export const ONEC_ETL_ENTITY_FORM_DEFAULTS: OnecEtlEntityFormValues = {
   schemaVersion: null,
   oDataVersion: '',
   enabled: true,
+  deleteBatchAfterAck: false,
 };
 
 /** Convert an API entity into edit-form values (arrays joined for a text input). */
@@ -494,6 +498,7 @@ export function onecEtlEntityToFormValues(entity: OnecEtlEntity): OnecEtlEntityF
     schemaVersion: entity.schemaVersion ?? null,
     oDataVersion: entity.oDataVersion ?? '',
     enabled: entity.enabled ?? true,
+    deleteBatchAfterAck: entity.deleteBatchAfterAck ?? false,
   };
 }
 
@@ -532,6 +537,8 @@ export function onecEtlEntityFromFormValues(values: OnecEtlEntityFormValues): On
 
   entity.enabled = values.enabled;
 
+  if (values.deleteBatchAfterAck) entity.deleteBatchAfterAck = true;
+
   return entity;
 }
 
@@ -555,8 +562,11 @@ export function onecStripSourceGeneration(configuration: OnecPublishedAgentConfi
   return rest;
 }
 
-/** Ready-made ETL entities for the two 1C catalogs agreed with the agent team (agent to-erp/0003). */
-export const ONEC_ETL_ENTITY_PRESETS: Record<'items' | 'counterparties', OnecEtlEntity> = {
+/** Ready-made ETL entities for the 1C catalogs/registers agreed with the agent team (agent to-erp/0003, E3b). */
+export const ONEC_ETL_ENTITY_PRESETS: Record<
+  'items' | 'counterparties' | 'units' | 'item_categories' | 'warehouses' | 'stock_balances',
+  OnecEtlEntity
+> = {
   items: {
     entityCode: 'items',
     oDataPath: 'Catalog_Номенклатура',
@@ -574,6 +584,8 @@ export const ONEC_ETL_ENTITY_PRESETS: Record<'items' | 'counterparties', OnecEtl
       'Артикул',
       'НаименованиеПолное',
       'ЕдиницаИзмерения_Key',
+      'КатегорияНоменклатуры_Key',
+      'ТипНоменклатуры',
       'Поставщик_Key',
       'Склад_Key',
     ],
@@ -608,11 +620,64 @@ export const ONEC_ETL_ENTITY_PRESETS: Record<'items' | 'counterparties', OnecEtl
     overlapMinutes: 0,
     enabled: true,
   },
+  units: {
+    entityCode: 'units',
+    oDataPath: 'Catalog_КлассификаторЕдиницИзмерения',
+    keyField: 'Ref_Key',
+    updatedAtField: null,
+    deletedField: 'DeletionMark',
+    select: ['Ref_Key', 'DataVersion', 'DeletionMark', 'Code', 'Description', 'НаименованиеПолное', 'МеждународноеСокращение'],
+    syncMode: 'incremental',
+    pageSize: 1000,
+    overlapMinutes: 0,
+    enabled: true,
+  },
+  item_categories: {
+    entityCode: 'item_categories',
+    oDataPath: 'Catalog_КатегорииНоменклатуры',
+    keyField: 'Ref_Key',
+    updatedAtField: null,
+    deletedField: 'DeletionMark',
+    select: ['Ref_Key', 'DataVersion', 'DeletionMark', 'Code', 'Description', 'Parent_Key', 'IsFolder', 'ТипНоменклатурыПоУмолчанию', 'ЕдиницаИзмерения_Key'],
+    syncMode: 'incremental',
+    pageSize: 1000,
+    overlapMinutes: 0,
+    enabled: true,
+  },
+  warehouses: {
+    entityCode: 'warehouses',
+    oDataPath: 'Catalog_СтруктурныеЕдиницы',
+    keyField: 'Ref_Key',
+    updatedAtField: null,
+    deletedField: 'DeletionMark',
+    select: ['Ref_Key', 'DataVersion', 'DeletionMark', 'Code', 'Description', 'Parent_Key', 'ТипСтруктурнойЕдиницы'],
+    syncMode: 'incremental',
+    pageSize: 1000,
+    overlapMinutes: 0,
+    enabled: true,
+  },
+  stock_balances: {
+    entityCode: 'stock_balances',
+    oDataPath: "AccumulationRegister_ЗапасыНаСкладах/Balance(Dimensions='Организация,Номенклатура,Характеристика,Партия,СтруктурнаяЕдиница,Ячейка')",
+    keyField: 'Номенклатура_Key',
+    keyFields: ['Организация_Key', 'Номенклатура_Key', 'Характеристика_Key', 'Партия_Key', 'СтруктурнаяЕдиница_Key', 'Ячейка_Key'],
+    updatedAtField: null,
+    deletedField: null,
+    select: ['Организация_Key', 'Номенклатура_Key', 'Характеристика_Key', 'Партия_Key', 'СтруктурнаяЕдиница_Key', 'Ячейка_Key', 'КоличествоBalance'],
+    syncMode: 'incremental',
+    pageSize: 1000,
+    overlapMinutes: 0,
+    enabled: true,
+  },
 };
 
 export const ONEC_ETL_ENTITY_PRESET_LABELS: Record<keyof typeof ONEC_ETL_ENTITY_PRESETS, string> = {
   items: 'Номенклатура (items)',
   counterparties: 'Контрагенты (counterparties)',
+  units: 'Единицы измерения (units)',
+  item_categories: 'Категории номенклатуры (item_categories)',
+  warehouses: 'Склады (warehouses)',
+  stock_balances: 'Остатки (stock_balances)',
 };
 
 // ---------------------------------------------------------------- ETL tab labels
@@ -719,4 +784,53 @@ export function onecEtlEntityStatusColor(status: OnecEtlLastStatus | string | nu
   if (status === 'done') return 'green';
   if (status === 'failed') return 'red';
   return undefined;
+}
+
+// ---------------------------------------------------------------- Snapshot entities, revocation, mirror (E3b)
+
+/** Entities whose whole copy is replaced by a newer verified snapshot rather than merged incrementally. */
+export const ONEC_ETL_SNAPSHOT_ENTITIES: readonly string[] = ['stock_balances', 'counterparty_phones'];
+
+export function onecEtlIsSnapshotEntity(entity: string): boolean {
+  return ONEC_ETL_SNAPSHOT_ENTITIES.includes(entity);
+}
+
+/** Personal-data entities the operator may revoke (data purge + write ban) from the ETL tab. */
+export const ONEC_ETL_REVOCABLE_ENTITIES: readonly string[] = ['counterparty_phones'];
+
+export function onecEtlEntityRevocable(entity: string): boolean {
+  return ONEC_ETL_REVOCABLE_ENTITIES.includes(entity);
+}
+
+export const ONEC_SNAPSHOT_REJECTED_REASON_LABELS: Record<string, string> = {
+  FAILED: 'сущность не выгрузилась',
+  NO_BATCH: 'нет пакета',
+  NOT_FULL: 'чтение не полное',
+  NOT_VERIFIED: 'полнота не подтверждена',
+  NO_SNAPSHOT_TIME: 'нет времени снимка',
+  STALE: 'пришёл более старый снимок',
+};
+
+export function onecSnapshotRejectedReasonLabel(reason: string | null | undefined): string | null {
+  if (!reason) return null;
+  return ONEC_SNAPSHOT_REJECTED_REASON_LABELS[reason] ?? reason;
+}
+
+export const ONEC_MIRROR_STATE_LABELS: Record<'all' | 'active' | 'deleted' | 'missing', string> = {
+  all: 'Все',
+  active: 'Действующие',
+  deleted: 'Помечены на удаление в 1С',
+  missing: 'Пропали в 1С',
+};
+
+/** Options for the state filter Select, in the order they should appear (spec: "Все / Действующие / Помечены на удаление в 1С / Пропали в 1С"). */
+export const ONEC_MIRROR_STATE_OPTIONS: Array<{ value: 'all' | 'active' | 'deleted' | 'missing'; label: string }> = [
+  { value: 'all', label: ONEC_MIRROR_STATE_LABELS.all },
+  { value: 'active', label: ONEC_MIRROR_STATE_LABELS.active },
+  { value: 'deleted', label: ONEC_MIRROR_STATE_LABELS.deleted },
+  { value: 'missing', label: ONEC_MIRROR_STATE_LABELS.missing },
+];
+
+export function onecMirrorStateLabel(state: string): string {
+  return (ONEC_MIRROR_STATE_LABELS as Record<string, string>)[state] ?? state;
 }

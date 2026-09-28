@@ -2,9 +2,9 @@ import { createHash } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseClient } from '../../../database/database.types';
-import { PgOnecEtlRepository, type BatchRow, type EntityOutcome, type RunRow } from '../adapters/pg-onec-etl-repository';
+import { PgOnecEtlRepository, type BatchRow, type EntityOutcome, type EntityStateRow, type RunRow } from '../adapters/pg-onec-etl-repository';
 import { PgOnecRepository } from '../adapters/pg-onec-repository';
-import { ONEC_ETL_LIMITS, parseCompletion, readInFull, sourceNamespaceOf, type Completion, type CompletionEntity, type EtlMode } from '../domain/onec-etl';
+import { ONEC_ETL_LIMITS, parseCompletion, readInFull, SNAPSHOT_ENTITIES, sourceNamespaceOf, type Completion, type CompletionEntity, type EtlMode } from '../domain/onec-etl';
 import { buildOnecEvent } from '../domain/onec-events';
 import { OnecAuditWriter, type OnecAgentContext } from './onec-audit';
 import { OnecEtlParserService } from './onec-etl-parser.service';
@@ -86,24 +86,35 @@ export class OnecEtlCompletionService {
 
     const batches = await this.etl.listRunBatches(tx, run.runId, true);
     const acknowledged = batches.filter((b) => b.ack !== null);
+    // Entity states of the run are locked FOR UPDATE once, in sorted order, right after the batches
+    // (run → batches → entity_state): no SHARE→UPDATE upgrade that two completions could deadlock on.
+    const codes = [...new Set([...batches.map((b) => b.entityCode), ...(completion.entities ?? []).map((e) => e.entity)])].sort();
+    const states = new Map<string, EntityStateRow>();
+    for (const code of codes) states.set(code, await this.etl.lockEntityState(tx, run.sourceId, code));
+    // Revoked entities (plan §21.3): their batches are terminal in any status and never published.
+    const revoked = new Set<string>();
+    for (const code of codes) {
+      if (states.get(code)!.revokedAt || run.revokedEntities.includes(code) || batches.some((b) => b.entityCode === code && b.revoked)) revoked.add(code);
+    }
+    const live = batches.filter((b) => !revoked.has(b.entityCode));
     if (completion.batchesAcknowledged !== acknowledged.length) {
       throw new ApiError(409, 'RUN_BATCHES_MISMATCH', `ERP acknowledged ${acknowledged.length} batches of this run`, {
         erpAcknowledged: acknowledged.length,
       });
     }
-    const invalid = batches.find((b) => b.status === 'invalid');
+    const invalid = live.find((b) => b.status === 'invalid');
     if (invalid) {
       throw new ApiError(422, 'BATCH_PAYLOAD_INVALID', 'A batch of this run cannot be parsed', {
         batchId: invalid.batchId,
         reason: invalid.invalidReason,
       });
     }
-    if (batches.some((b) => b.status !== 'parsed')) {
+    if (live.some((b) => b.status !== 'parsed')) {
       return { kind: 'not_ready', code: 'RUN_NOT_READY', message: 'Batches of this run are still being parsed' };
     }
     // UNLOGGED staging is empty after a PostgreSQL restart: parse those batches again.
     let requeued = false;
-    for (const batch of batches) {
+    for (const batch of live) {
       if ((await this.etl.stagingCount(tx, batch.batchId)) !== batch.rowCount) {
         await this.etl.requeueForParse(tx, batch.batchId);
         requeued = true;
@@ -114,16 +125,44 @@ export class OnecEtlCompletionService {
       return { kind: 'not_ready', code: 'RUN_NOT_READY', message: 'Batches of this run are being parsed again' };
     }
 
-    checkEntities(completion, batches);
+    checkEntities(completion, live);
     const resolved = await this.resolveMode(tx, run, completion);
     if (!resolved) return { kind: 'not_ready', code: 'RUN_MODE_PENDING', message: 'The result of the ETL command has not arrived yet' };
 
     const outcomes: EntityOutcome[] = [];
+    const snapshots = new Map<string, { applied: boolean; reason: string | null }>();
     for (const entity of entitiesOf(completion, batches)) {
       const hasBatches = batches.some((b) => b.entityCode === entity.entity);
+      const state = states.get(entity.entity) ?? (await this.etl.lockEntityState(tx, run.sourceId, entity.entity));
+      if (revoked.has(entity.entity) || state.revokedAt) {
+        // Nothing of a revoked entity is published; its batches are discarded with the run.
+        await this.etl.discardRevokedInRun(tx, run.runId, entity.entity);
+        snapshots.set(entity.entity, { applied: false, reason: 'REVOKED' });
+        continue;
+      }
+      const snapshot = SNAPSHOT_ENTITIES.has(entity.entity);
       const fullRead = entity.status === 'done' && hasBatches && readInFull(entity, resolved.mode);
-      await this.etl.lockEntityState(tx, run.sourceId, entity.entity);
-      if (entity.status === 'done' && hasBatches) {
+      if (snapshot) {
+        const receivedRows = batches.filter((b) => b.entityCode === entity.entity).reduce((sum, b) => sum + b.rowCount, 0);
+        const reason = snapshotRejection(entity, hasBatches, state.snapshotVersion, receivedRows);
+        if (reason === null) {
+          await this.etl.replaceSnapshot(tx, run, entity.entity);
+          await this.etl.setSnapshotOutcome(tx, run.sourceId, entity.entity, { version: entity.snapshotAtUtc, rejectedReason: null });
+        } else {
+          // The previous snapshot stays whole (§21.2); an older snapshot arriving late is only reported.
+          await this.etl.setSnapshotOutcome(tx, run.sourceId, entity.entity, { version: null, rejectedReason: reason });
+          if (reason === 'STALE') {
+            await this.repository.recordIncident(tx, {
+              agentId: agent.agentId,
+              kind: 'stale_snapshot_ignored',
+              dedupeKey: `stale_snapshot_ignored:${run.runId}:${entity.entity}`,
+              details: { runId: run.runId, entity: entity.entity, snapshotAtUtc: entity.snapshotAtUtc },
+              runId: run.runId,
+            });
+          }
+        }
+        snapshots.set(entity.entity, { applied: reason === null, reason });
+      } else if (entity.status === 'done' && hasBatches) {
         await this.etl.publishEntity(tx, run, entity.entity);
         if (fullRead) await this.etl.markMissing(tx, run, entity.entity);
       }
@@ -136,7 +175,7 @@ export class OnecEtlCompletionService {
         snapshotAt: entity.snapshotAtUtc,
         errorCode: entity.errorCode,
         errorMessage: entity.errorMessage,
-        fullRead,
+        fullRead: fullRead && !snapshot,
       };
       await this.etl.updateEntityState(tx, run, outcome);
       outcomes.push(outcome);
@@ -150,7 +189,11 @@ export class OnecEtlCompletionService {
       completeness: o.completeness,
       errorCode: o.errorCode,
       rows: batches.filter((b) => b.entityCode === o.entityCode).reduce((sum, b) => sum + b.rowCount, 0),
+      ...(snapshots.has(o.entityCode) ? { snapshot: snapshots.get(o.entityCode) } : {}),
     }));
+    for (const [entity, outcome] of snapshots) {
+      if (outcome.reason === 'REVOKED') summary.push({ entity, status: 'done', readScope: null, fullRead: false, completeness: null, errorCode: 'REVOKED', rows: 0, snapshot: outcome });
+    }
     await this.etl.completeRun(tx, {
       runId: run.runId,
       mode: resolved.mode,
@@ -219,6 +262,22 @@ function checkEntities(completion: Completion, batches: BatchRow[]): void {
   const failed = completion.entities.filter((e) => e.status === 'failed').length;
   if (completion.entitiesFailed !== failed) throw mismatch('entitiesFailed does not match the entities list');
   if ((completion.status === 'succeeded') !== (failed === 0)) throw mismatch('status does not match the failed entities');
+}
+
+/**
+ * Why a snapshot does not replace the copy (plan §21.2), or null when it does:
+ * done + full + verified + has a batch + snapshotAtUtc strictly newer than the held one.
+ */
+function snapshotRejection(entity: CompletionEntity, hasBatches: boolean, held: Date | null, receivedRows: number): string | null {
+  if (entity.status !== 'done') return 'FAILED';
+  if (!hasBatches) return 'NO_BATCH';
+  // An empty copy only from a snapshot that says it read nothing (rowsRead=0) — never from a lost batch.
+  if (entity.rowsRead !== receivedRows) return 'ROWS_MISMATCH';
+  if (entity.readScope !== 'full') return 'NOT_FULL';
+  if (entity.completeness !== 'verified') return 'NOT_VERIFIED';
+  if (!entity.snapshotAtUtc) return 'NO_SNAPSHOT_TIME';
+  if (held && Date.parse(entity.snapshotAtUtc) <= held.getTime()) return 'STALE';
+  return null;
 }
 
 /** Entities of the run: the body's list (v2/partial), else every entity that has batches (v1: all done). */

@@ -2399,6 +2399,15 @@ probe_file() {
       "SELECT to_regclass('public.mdf_board_history_events') IS NULL OR (COALESCE((SELECT md5(pg_get_functiondef(oid)) FROM pg_proc WHERE oid=to_regprocedure('public.record_mdf_board_history_from_audit()'))='cb273b6a454a8c02ffce436caa6f8863', false) AND COALESCE((SELECT md5(pg_get_functiondef(oid)) FROM pg_proc WHERE oid=to_regprocedure('public.record_mdf_board_history_from_audit_relation()'))='3a0cefb994d1231bb6fda6677fa2077e', false));" ;;
     # 193: 1C agent E1 registry/config/outbox/alerts + onec.* permissions.
     # 196: 1C agent E2 command queue.
+    200_onec_etl_snapshots_revocation*) probe_all \
+      "$(q_col onec_etl_entity_state revoked_at)" \
+      "$(q_col onec_etl_entity_state purged_at)" \
+      "$(q_col onec_etl_entity_state snapshot_version)" \
+      "$(q_col onec_etl_entity_state snapshot_rejected_reason)" \
+      "$(q_col onec_etl_runs revoked_entities)" \
+      "$(q_col onec_etl_batches revoked)" \
+      "$(q_idx onec_etl_batches_entity_idx)" \
+      "$(q_col onec_sources observed_identity)" ;;
     198_onec_etl*) probe_all \
       "$(q_tbl onec_etl_runs)" \
       "$(q_tbl onec_etl_batches)" \
@@ -2625,6 +2634,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     192_mdf_board_presentation_history*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    200_onec_etl_snapshots_revocation*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     198_onec_etl*)

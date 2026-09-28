@@ -44,6 +44,53 @@ export class OnecEtlAdminService {
     };
   }
 
+  /** «Данные 1С»: one entity of the agent's source, paged; no data bodies in the list. */
+  async listMirror(query: { agentId?: string; entity?: string; search?: string; state?: string; offset?: string; limit?: string }) {
+    this.runtime.requireEnabled();
+    if (!query.agentId || !query.entity || !/^[a-z][a-z0-9_]{0,63}$/.test(query.entity)) {
+      throw new ApiError(400, 'VALIDATION_FAILED', 'Нужны агент и сущность');
+    }
+    const agent = await this.repository.getAgent(this.repository.db, query.agentId);
+    if (!agent) throw new ApiError(404, 'ONEC_AGENT_NOT_FOUND', 'Агент не найден');
+    const state = (['all', 'missing', 'deleted', 'active'] as const).find((value) => value === query.state) ?? 'all';
+    const limit = Math.min(Math.max(Number(query.limit ?? 50) || 50, 1), 200);
+    const offset = Math.max(Number(query.offset ?? 0) || 0, 0);
+    const search = query.search?.trim() ? query.search.trim().slice(0, 100) : null;
+    const rows = await this.etl.listMirror({ sourceId: agent.sourceId, entityCode: query.entity, search, state, offset, limit });
+    return {
+      total: rows.length > 0 ? Number(rows[0].total) : 0,
+      rows: rows.map((row) => ({
+        sourceKey: row.source_key,
+        code: row.code,
+        description: row.description,
+        deleted: row.deleted,
+        missingInSourceAt: iso(row.missing_in_source_at),
+        sourceUpdatedAt: iso(row.source_updated_at),
+        updatedAt: iso(row.updated_at),
+      })),
+    };
+  }
+
+  async getMirrorRow(query: { agentId?: string; entity?: string; key?: string }) {
+    this.runtime.requireEnabled();
+    if (!query.agentId || !query.entity || !query.key) throw new ApiError(400, 'VALIDATION_FAILED', 'Нужны агент, сущность и ключ');
+    const agent = await this.repository.getAgent(this.repository.db, query.agentId);
+    if (!agent) throw new ApiError(404, 'ONEC_AGENT_NOT_FOUND', 'Агент не найден');
+    const row = await this.etl.getMirrorRow(agent.sourceId, query.entity, query.key);
+    if (!row) throw new ApiError(404, 'ONEC_MIRROR_ROW_NOT_FOUND', 'Строка не найдена');
+    return {
+      sourceKey: row.source_key,
+      entity: row.entity_code,
+      deleted: row.deleted,
+      data: row.data,
+      sourceUpdatedAt: iso(row.source_updated_at),
+      missingInSourceAt: iso(row.missing_in_source_at),
+      firstSeenRun: row.first_seen_run,
+      lastRunId: row.last_run_id,
+      updatedAt: iso(row.updated_at),
+    };
+  }
+
   async listEntities(agentId: string | undefined) {
     this.runtime.requireEnabled();
     let sourceId: number | null = null;
@@ -69,6 +116,10 @@ export class OnecEtlAdminService {
       rowCount: Number(row.row_count),
       deletedCount: Number(row.deleted_count),
       missingCount: Number(row.missing_count),
+      revokedAt: iso(row.revoked_at),
+      purgedAt: iso(row.purged_at),
+      snapshotVersion: iso(row.snapshot_version),
+      snapshotRejectedReason: row.snapshot_rejected_reason ?? null,
     }));
   }
 }

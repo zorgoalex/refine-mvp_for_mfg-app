@@ -67,4 +67,25 @@ describe('restore-prod-backup safety contract', () => {
       expect(source).toContain(argument);
     }
   });
+
+  it('1C: blocks agent configuration publishing and starts a new source generation after restore (plan §6.8)', () => {
+    const step = source.slice(source.indexOf('1C agent: new source generations'));
+    expect(step).toContain("to_regclass('public.onec_sources')");
+    expect(step).toContain('SET generation = s.generation + 1, generation_ref = gen_random_uuid()');
+    expect(step).toContain('config_publish_blocked = true');
+    expect(step).toContain("UPDATE onec_etl_runs SET status = 'abandoned'");
+    expect(step).toContain("'onec.source.generation_bumped'");
+    expect(step).toContain('INSERT INTO onec_audit_links');
+    expect(step).toContain('-v restore_id="$ONEC_RESTORE_ID"');
+    const backup = readFileSync(new URL('./backup-prod-packet.sh', import.meta.url), 'utf8');
+    for (const table of ['onec_etl_runs', 'onec_etl_batches', 'onec_etl_staging_rows', 'onec_etl_mirror_rows']) {
+      expect(backup).toContain(`--exclude-table-data='public.${table}'`);
+    }
+    // Revocation bans live in onec_etl_entity_state and must survive backup/restore.
+    expect(backup).not.toContain("onec_etl_*");
+    expect(backup).not.toContain("public.onec_etl_entity_state");
+    expect(step).toContain('UPDATE onec_etl_entity_state SET last_run_id = NULL');
+    expect(step).not.toMatch(/onec_etl_entity_state SET[^;]*revoked_at/);
+  });
 });
+

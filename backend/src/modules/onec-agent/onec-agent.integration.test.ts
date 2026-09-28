@@ -20,6 +20,7 @@ import { OnecAgentProtocolService } from './application/onec-agent-protocol.serv
 import { OnecAlertProjector } from './application/onec-alert-projector';
 import { OnecAuditWriter, type OnecAgentContext } from './application/onec-audit';
 import type { RateLimitService } from '../../rate-limit/rate-limit.service';
+import { OnecEtlRevocationService } from './application/onec-etl-revocation.service';
 import { OnecMonitorService } from './application/onec-monitor.service';
 import { OnecAgentAuthGuard } from './http/onec-agent-auth.guard';
 import { OnecAgentController } from './http/onec-agent.controller';
@@ -87,7 +88,9 @@ suite('1C agent E1 — isolated PostgreSQL', () => {
       CREATE TABLE permissions_state(id boolean, version integer, updated_at timestamptz); INSERT INTO permissions_state VALUES (true, 1, now());
       CREATE TABLE audit_log(LIKE public.audit_log INCLUDING ALL);
       CREATE TABLE audit_log_related_entity(LIKE public.audit_log_related_entity INCLUDING ALL);`);
-    await pool.query(readFileSync(new URL('../../../db/migrations/193_onec_agent_foundation.sql', import.meta.url), 'utf8'));
+    for (const file of ['193_onec_agent_foundation.sql', '196_onec_agent_commands.sql', '198_onec_etl.sql', '200_onec_etl_snapshots_revocation.sql']) {
+      await pool.query(readFileSync(new URL(`../../../db/migrations/${file}`, import.meta.url), 'utf8'));
+    }
     const values: Partial<BackendEnv> = { DATABASE_URL: url.toString(), DATABASE_QUERY_TIMEOUT_MS: 10000, DATABASE_POOL_MIN: 0, DATABASE_POOL_MAX: 4, DATABASE_SSL: false };
     db = new DatabaseService(
       { get: (key: keyof BackendEnv) => values[key] } as ConfigService<BackendEnv, true>,
@@ -95,9 +98,10 @@ suite('1C agent E1 — isolated PostgreSQL', () => {
     );
     repo = new PgOnecRepository(db);
     const audit = new OnecAuditWriter(repo);
-    admin = new OnecAdminService(repo, audit, runtime);
+    const etlRepo = new PgOnecEtlRepository(db);
+    admin = new OnecAdminService(repo, audit, runtime, etlRepo, new OnecEtlRevocationService(etlRepo, runtime));
     protocol = new OnecAgentProtocolService(repo, audit);
-    monitor = new OnecMonitorService(runtime, repo, db, new OnecAlertProjector(repo), new PgOnecCommandRepository(db), new PgOnecEtlRepository(db), new OnecAuditWriter(repo));
+    monitor = new OnecMonitorService(runtime, repo, db, new OnecAlertProjector(repo), new PgOnecCommandRepository(db), etlRepo, new OnecAuditWriter(repo), new OnecEtlRevocationService(etlRepo, runtime));
     const rateLimit = { assertAllowed: async () => undefined, refund: async () => undefined } as unknown as RateLimitService;
     guard = new OnecAgentAuthGuard(new Reflector(), runtime, repo, rateLimit);
   }, 60000);

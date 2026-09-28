@@ -167,6 +167,8 @@ export class OnecAgentProtocolService {
     const source = await this.repository.getSource(tx, agent.sourceId, true);
     if (!source) throw new ApiError(403, 'SOURCE_UNKNOWN', 'Source is not registered');
     if (!identity) return source.identityStatus;
+    // What the operator confirms on rebaseline is the identity reported last, by either channel.
+    await this.repository.recordObservedIdentity(tx, source.sourceId, identity);
     if (source.identityStatus === 'unverified' || !source.identity) {
       await this.repository.bindSourceIdentity(tx, source.sourceId, identity, 'bound');
       await this.audit.byAgent(

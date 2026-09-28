@@ -168,6 +168,23 @@ export class OnecAlertProjector {
             [sourceId, code],
           );
           if (rows[0]?.last_run_id !== runId) continue;
+          // Snapshot entities (plan §21.2): an unreplaced snapshot is an alert until a newer one lands.
+          const snapshot = entity.snapshot as { applied?: boolean; reason?: string | null } | undefined;
+          if (snapshot && snapshot.reason !== 'REVOKED') {
+            const snapshotKey = `etl_snapshot_not_updated:${sourceId}:${code}`;
+            if (snapshot.applied) await this.repository.resolveAlertByDedupeKey(tx, snapshotKey);
+            else if (snapshot.reason !== 'STALE') {
+              await this.repository.upsertAlert(tx, {
+                kind: 'etl_snapshot_not_updated',
+                agentId,
+                sourceId,
+                certId: null,
+                severity: 'warning',
+                dedupeKey: snapshotKey,
+                details: { entity: code, runId, reason: snapshot.reason ?? null },
+              });
+            }
+          }
           const dedupeKey = `etl_entity_failed:${sourceId}:${code}`;
           if (entity.status === 'failed') {
             await this.repository.upsertAlert(tx, {
@@ -208,6 +225,11 @@ export class OnecAlertProjector {
           oneShot: true,
           details: { runId: str(p.runId), mode: str(p.mode), completedAs: str(p.completedAs) },
         });
+        return;
+      case 'onec.etl.entity_revoked':
+      case 'onec.etl.entity_restored':
+      case 'onec.source.generation_bumped':
+        // Operator actions: audited and published for subscribers; no alert of their own.
         return;
       default:
         throw new UnknownOnecEventError(event.eventType);

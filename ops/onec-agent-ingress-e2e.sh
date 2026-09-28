@@ -60,6 +60,7 @@ FP="$(openssl x509 -in "$WORK/certs/registered.crt" -outform DER | sha256sum | c
   cat "$REPO_DIR/backend/db/migrations/193_onec_agent_foundation.sql"
   cat "$REPO_DIR/backend/db/migrations/196_onec_agent_commands.sql"
   cat "$REPO_DIR/backend/db/migrations/198_onec_etl.sql"
+  cat "$REPO_DIR/backend/db/migrations/200_onec_etl_snapshots_revocation.sql"
   echo "INSERT INTO onec_sources(code, display_name) VALUES ('e2e','E2E-Тест источник');"
   echo "INSERT INTO onec_agents(agent_id, source_id, site_id, display_name) SELECT '$AGENT_ID', source_id, 'e2e', 'E2E-Тест агент' FROM onec_sources;"
   echo "INSERT INTO onec_agent_certificates(agent_id, sha256_fingerprint) VALUES ('$AGENT_ID', decode('$FP','hex'));"
@@ -127,17 +128,17 @@ code_of() { "$@" -o "$WORK/body" -w '%{http_code}' || true; }
 for _ in $(seq 1 40); do [[ "$(code_of "${API[@]}" "https://$API_HOST:$P_API/api/v1/ping")" == 200 ]] && break; sleep 0.5; done
 
 c="$(code_of "${AGENT[@]}" "${REG[@]}" -H "X-Agent-Id: $AGENT_ID" -H 'Content-Type: application/json' -d "$SESSION_BODY" "$BASE/session/start")"
-[[ "$c" == 200 && "$(jq -r .accepted "$WORK/body")" == true ]]; check "registered certificate: session/start 200 accepted ($c)" "$?"
+[[ "$c" == 200 && "$(jq -r .accepted "$WORK/body")" == true ]]; rc=$?; check "registered certificate: session/start 200 accepted ($c)" "$rc"
 c="$(code_of "${AGENT[@]}" "${REG[@]}" -H "X-Agent-Id: $AGENT_ID" -H 'Content-Type: application/json' \
   -d "{\"agentId\":\"$AGENT_ID\",\"version\":\"1.2.0\",\"state\":\"healthy\"}" "$BASE/heartbeat")"
 rows="$(echo "SELECT count(*) FROM $SCHEMA.onec_agent_status WHERE agent_id='$AGENT_ID';" | psql_exec -At)"
-[[ "$c" == 204 && "$rows" == 1 ]]; check "registered certificate: heartbeat 204 and stored in DB ($c, rows=$rows)" "$?"
+[[ "$c" == 204 && "$rows" == 1 ]]; rc=$?; check "registered certificate: heartbeat 204 and stored in DB ($c, rows=$rows)" "$rc"
 c="$(code_of "${AGENT[@]}" "${UNREG[@]}" -H "X-Agent-Id: $AGENT_ID" -H 'Content-Type: application/json' -d "$SESSION_BODY" "$BASE/session/start")"
-[[ "$c" == 403 && "$(jq -r .error.code "$WORK/body")" == CERT_UNKNOWN ]]; check "unregistered certificate: 403 CERT_UNKNOWN ($c)" "$?"
+[[ "$c" == 403 && "$(jq -r .error.code "$WORK/body")" == CERT_UNKNOWN ]]; rc=$?; check "unregistered certificate: 403 CERT_UNKNOWN ($c)" "$rc"
 c="$(code_of "${AGENT[@]}" "${REG[@]}" -H 'X-Agent-Id: someone-else' -H 'Content-Type: application/json' -d "$SESSION_BODY" "$BASE/session/start")"
-[[ "$c" == 403 && "$(jq -r .error.code "$WORK/body")" == AGENT_CERT_MISMATCH ]]; check "forged X-Agent-Id: 403 AGENT_CERT_MISMATCH ($c)" "$?"
+[[ "$c" == 403 && "$(jq -r .error.code "$WORK/body")" == AGENT_CERT_MISMATCH ]]; rc=$?; check "forged X-Agent-Id: 403 AGENT_CERT_MISMATCH ($c)" "$rc"
 c="$(code_of "${API[@]}" "https://$API_HOST:$P_API/api/v1/ping")"
-[[ "$c" == 200 ]]; check "regular API host works while the module is enabled ($c)" "$?"
+[[ "$c" == 200 ]]; rc=$?; check "regular API host works while the module is enabled ($c)" "$rc"
 
 # --- E2 command queue through the real ingress ---------------------------------------
 code_of "${AGENT[@]}" "${REG[@]}" -H "X-Agent-Id: $AGENT_ID" -H 'Content-Type: application/json' -d "$SESSION_BODY" "$BASE/session/start" >/dev/null
@@ -146,7 +147,7 @@ LEASE() { code_of "${AGENT[@]}" --max-time "$(( $1 + 20 ))" "${REG[@]}" -H "X-Ag
   -d "{\"sessionId\":\"$SESSION_ID\",\"supportedCommandTypes\":[\"integration_probe\"],\"maxWaitSeconds\":$1}" "$BASE/commands/lease"; }
 t0=$(date +%s); c="$(LEASE 70)"; t1=$(date +%s)
 [[ "$c" == 200 && "$(jq -r .hasCommand "$WORK/body")" == false && $(( t1 - t0 )) -ge 68 ]]
-check "empty long poll held ~70 s through Traefik and answered hasCommand=false ($c, $(( t1 - t0 )) s)" "$?"
+rc=$?; check "empty long poll held ~70 s through Traefik and answered hasCommand=false ($c, $(( t1 - t0 )) s)" "$rc"
 CMD_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
 CANON='{"marker":"E2E-\u0422\u0435\u0441\u0442"}'
 HASH="$(printf '%s' "$CANON" | openssl dgst -sha256 -binary | base64)"
@@ -154,18 +155,18 @@ echo "INSERT INTO $SCHEMA.onec_agent_commands (command_id, agent_id, source_id, 
   SELECT '$CMD_ID', '$AGENT_ID', source_id, 'integration_probe', 'business', 1, '$CANON', '$HASH', ${#CANON}, 'e2e', 'e2e-$CMD_ID' FROM $SCHEMA.onec_agents WHERE agent_id = '$AGENT_ID';" | psql_exec
 c="$(LEASE 20)"
 [[ "$c" == 200 && "$(jq -r .command.commandId "$WORK/body")" == "$CMD_ID" ]] && grep -qF "\"payload\":$CANON}" "$WORK/body"
-check "lease delivers the command with the canonical payload bytes verbatim ($c)" "$?"
+rc=$?; check "lease delivers the command with the canonical payload bytes verbatim ($c)" "$rc"
 LEASE_ID="$(jq -r .leaseId "$WORK/body")"
 c="$(code_of "${AGENT[@]}" "${REG[@]}" -H "X-Agent-Id: $AGENT_ID" -H 'Content-Type: application/json' \
   -d "{\"leaseId\":\"$LEASE_ID\",\"payloadHash\":\"$HASH\"}" "$BASE/commands/$CMD_ID/received")"
-[[ "$c" == 204 ]]; check "received 204 ($c)" "$?"
+[[ "$c" == 204 ]]; rc=$?; check "received 204 ($c)" "$rc"
 RESULT="{\"commandId\":\"$CMD_ID\",\"status\":\"succeeded\",\"resultVersion\":1,\"document\":{\"type\":\"integration_probe\"}}"
 c1="$(code_of "${AGENT[@]}" "${REG[@]}" -X PUT -H "X-Agent-Id: $AGENT_ID" -H 'Content-Type: application/json' -d "$RESULT" "$BASE/commands/$CMD_ID/result")"
 c2="$(code_of "${AGENT[@]}" "${REG[@]}" -X PUT -H "X-Agent-Id: $AGENT_ID" -H 'Content-Type: application/json' -d "$RESULT" "$BASE/commands/$CMD_ID/result")"
 c3="$(code_of "${AGENT[@]}" "${REG[@]}" -X PUT -H "X-Agent-Id: $AGENT_ID" -H 'Content-Type: application/json' -d "${RESULT/succeeded/dead_letter}" "$BASE/commands/$CMD_ID/result")"
 stored="$(echo "SELECT status || '|' || (result_sha256 = encode(sha256(convert_to(result_body, 'UTF8')), 'hex'))::text FROM $SCHEMA.onec_agent_commands WHERE command_id = '$CMD_ID';" | psql_exec -At)"
 [[ "$c1" == 204 && "$c2" == 204 && "$c3" == 409 && "$stored" == "succeeded|true" ]]
-check "result stored byte for byte; same bytes 204, different 409 ($c1/$c2/$c3, $stored)" "$?"
+rc=$?; check "result stored byte for byte; same bytes 204, different 409 ($c1/$c2/$c3, $stored)" "$rc"
 # --- E3a ETL intake through the real ingress (50k rows streamed, parsed, completed) ----
 RUN_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
 BATCH_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
@@ -184,12 +185,12 @@ UPLOAD() { code_of "${AGENT[@]}" --max-time 120 "${REG[@]}" -H "X-Agent-Id: $AGE
 c1="$(UPLOAD "$BATCH_SHA")"; ack1="$(jq -cS . "$WORK/body")"
 c2="$(UPLOAD "$BATCH_SHA")"; ack2="$(jq -cS . "$WORK/body")"
 [[ "$c1" == 200 && "$c2" == 200 && "$ack1" == "$ack2" && "$(jq -r .rowsAccepted "$WORK/body")" == 50000 && "$(jq -r .checksumValid "$WORK/body")" == true ]]
-check "ETL batch ($(stat -c %s "$WORK/batch.ndjson.gz") bytes gzip) acknowledged; repeat returns the same ACK ($c1/$c2)" "$?"
+rc=$?; check "ETL batch ($(stat -c %s "$WORK/batch.ndjson.gz") bytes gzip) acknowledged; repeat returns the same ACK ($c1/$c2)" "$rc"
 c="$(UPLOAD "$(printf 'other' | openssl dgst -sha256 -binary | base64)")"
-[[ "$c" == 409 && "$(jq -r .error.code "$WORK/body")" == BATCH_CONFLICT ]]; check "same batchId with another body: 409 BATCH_CONFLICT ($c)" "$?"
+[[ "$c" == 409 && "$(jq -r .error.code "$WORK/body")" == BATCH_CONFLICT ]]; rc=$?; check "same batchId with another body: 409 BATCH_CONFLICT ($c)" "$rc"
 c="$(code_of "${AGENT[@]}" "${REG[@]}" -H "X-Agent-Id: $AGENT_ID" "$BASE/etl/batches/$BATCH_ID")"
 ack3="$(jq -cS . "$WORK/body")"
-[[ "$c" == 200 && "$ack3" == "$ack1" ]]; check "GET etl/batches/{id} returns the original ACK ($c${ack3:+, same=$([[ "$ack3" == "$ack1" ]] && echo yes || echo "no: $ack1 vs $ack3")})" "$?"
+[[ "$c" == 200 && "$ack3" == "$ack1" ]]; rc=$?; check "GET etl/batches/{id} returns the original ACK ($c${ack3:+, same=$([[ "$ack3" == "$ack1" ]] && echo yes || echo "no: $ack1 vs $ack3")})" "$rc"
 COMPLETE="{\"runId\":\"$RUN_ID\",\"status\":\"succeeded\",\"mode\":\"bootstrap_full\",\"rowsRead\":50000,\"batchesCreated\":1,\"batchesAcknowledged\":1,\"completedAtUtc\":\"2026-09-28T10:00:00Z\",\"entitiesFailed\":0,\"entities\":[{\"entity\":\"items\",\"status\":\"done\",\"readScope\":\"full\",\"rowsRead\":50000,\"batchesCreated\":1,\"errorCode\":null,\"errorMessage\":null}]}"
 for _ in 1 2 3 4 5 6; do
   c="$(code_of "${AGENT[@]}" --max-time 60 "${REG[@]}" -H "X-Agent-Id: $AGENT_ID" -H 'Content-Type: application/json' -H "Idempotency-Key: $RUN_ID" -d "$COMPLETE" "$BASE/etl/runs/$RUN_ID/complete")"
@@ -197,23 +198,23 @@ for _ in 1 2 3 4 5 6; do
 done
 c2="$(code_of "${AGENT[@]}" "${REG[@]}" -H "X-Agent-Id: $AGENT_ID" -H 'Content-Type: application/json' -H "Idempotency-Key: $RUN_ID" -d "$COMPLETE" "$BASE/etl/runs/$RUN_ID/complete")"
 mirrored="$(echo "SELECT count(*) || '|' || bool_and(data->>'Price' = '12345678901234567890.1234500')::text FROM $SCHEMA.onec_etl_mirror_rows WHERE entity_code = 'items';" | psql_exec -At)"
-[[ "$c" == 204 && "$c2" == 204 && "$mirrored" == "50000|true" ]]; check "complete 204 (repeat 204): 50000 rows in the mirror ($c/$c2, $mirrored)" "$?"
+[[ "$c" == 204 && "$c2" == 204 && "$mirrored" == "50000|true" ]]; rc=$?; check "complete 204 (repeat 204): 50000 rows in the mirror ($c/$c2, $mirrored)" "$rc"
 
 c="$(code_of "${API[@]}" -H 'Content-Type: application/json' -H "X-Onec-Ingress-Auth: $SECRET" -H "X-Agent-Id: $AGENT_ID" \
   -d "$SESSION_BODY" "https://$API_HOST:$P_API/api/integration/1c-agents/v1/session/start")"
-[[ "$c" == 404 ]]; check "agent API unreachable via the regular API host even with the secret ($c)" "$?"
+[[ "$c" == 404 ]]; rc=$?; check "agent API unreachable via the regular API host even with the secret ($c)" "$rc"
 echo "UPDATE $SCHEMA.onec_agent_certificates SET status='revoked', revoked_at=now();" | psql_exec
 c="$(code_of "${AGENT[@]}" "${REG[@]}" -H "X-Agent-Id: $AGENT_ID" -H 'Content-Type: application/json' -d "$SESSION_BODY" "$BASE/session/start")"
-[[ "$c" == 403 && "$(jq -r .error.code "$WORK/body")" == CERT_UNKNOWN ]]; check "revoked certificate refused on the very next request ($c)" "$?"
+[[ "$c" == 403 && "$(jq -r .error.code "$WORK/body")" == CERT_UNKNOWN ]]; rc=$?; check "revoked certificate refused on the very next request ($c)" "$rc"
 audits="$(echo "SELECT count(*) FROM $SCHEMA.audit_log WHERE event='onec.auth.denied';" | psql_exec -At)"
-[[ "$audits" -ge 2 ]]; check "denials audited as onec.auth.denied ($audits rows)" "$?"
+[[ "$audits" -ge 2 ]]; rc=$?; check "denials audited as onec.auth.denied ($audits rows)" "$rc"
 
 # Rollback: module disabled -> agent listener gone, regular API unaffected.
 start_backend false
 for _ in $(seq 1 40); do [[ "$(code_of "${API[@]}" "https://$API_HOST:$P_API/api/v1/ping")" == 200 ]] && break; sleep 0.5; done
 c="$(code_of "${API[@]}" "https://$API_HOST:$P_API/api/v1/ping")"
-[[ "$c" == 200 ]]; check "rollback: regular API host works with the module disabled ($c)" "$?"
+[[ "$c" == 200 ]]; rc=$?; check "rollback: regular API host works with the module disabled ($c)" "$rc"
 c="$(code_of "${AGENT[@]}" "${REG[@]}" -H "X-Agent-Id: $AGENT_ID" -H 'Content-Type: application/json' -d "$SESSION_BODY" "$BASE/session/start")"
-[[ "$c" != 200 && "$c" != 204 ]]; check "rollback: agent API not served ($c)" "$?"
+[[ "$c" != 200 && "$c" != 204 ]]; rc=$?; check "rollback: agent API not served ($c)" "$rc"
 
 exit "$FAILED"

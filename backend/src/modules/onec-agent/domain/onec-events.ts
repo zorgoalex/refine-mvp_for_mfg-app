@@ -11,7 +11,10 @@ export type OnecEventType =
   | 'onec.command.expired_undelivered'
   | 'onec.etl.run_completed'
   | 'onec.etl.run_abandoned'
-  | 'onec.etl.full_sync_required';
+  | 'onec.etl.full_sync_required'
+  | 'onec.etl.entity_revoked'
+  | 'onec.etl.entity_restored'
+  | 'onec.source.generation_bumped';
 
 export type OnecEventSeverity = 'info' | 'warning' | 'critical';
 

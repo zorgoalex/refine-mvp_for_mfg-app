@@ -17,9 +17,11 @@ import {
   onecEtlCompletenessLabel,
   onecEtlEntityFromFormValues,
   onecEtlEntityLabel,
+  onecEtlEntityRevocable,
   onecEtlEntityStatusColor,
   onecEtlEntityStatusLabel,
   onecEtlEntityToFormValues,
+  onecEtlIsSnapshotEntity,
   onecEtlReadScopeLabel,
   onecEtlRunModeLabel,
   onecEtlRunStatusColor,
@@ -27,14 +29,19 @@ import {
   onecIdentityWarning,
   onecIfMatchHeader,
   onecIncidentKindLabel,
+  onecMirrorStateLabel,
   onecModeLabel,
   onecRelativeTime,
+  onecSnapshotRejectedReasonLabel,
   onecStableStringify,
   onecStateBadge,
   onecStripSourceGeneration,
   ONEC_ETL_ENTITY_FORM_DEFAULTS,
   ONEC_ETL_ENTITY_PRESET_LABELS,
   ONEC_ETL_ENTITY_PRESETS,
+  ONEC_ETL_REVOCABLE_ENTITIES,
+  ONEC_ETL_SNAPSHOT_ENTITIES,
+  ONEC_MIRROR_STATE_OPTIONS,
   ONEC_OPERATOR_RESOLVABLE_ALERT_KINDS,
   type OnecEtlEntityFormValues,
   onecAlertResolvable,
@@ -279,9 +286,24 @@ describe('onec ETL entity form conversion', () => {
     expect(entity).not.toHaveProperty('deletedField');
     expect(entity).not.toHaveProperty('schemaVersion');
     expect(entity).not.toHaveProperty('oDataVersion');
+    expect(entity).not.toHaveProperty('deleteBatchAfterAck');
     expect(entity.keyFields).toEqual(['Ref_Key']);
     expect(entity.select).toEqual(['Ref_Key', 'Description']);
     expect(entity.enabled).toBe(true);
+  });
+
+  it('carries deleteBatchAfterAck only when checked, and round-trips it back into the form', () => {
+    const values: OnecEtlEntityFormValues = {
+      ...ONEC_ETL_ENTITY_FORM_DEFAULTS,
+      entityCode: 'counterparty_phones',
+      oDataPath: 'Catalog_Контрагенты',
+      keyFieldsText: 'Ref_Key',
+      selectText: 'Ref_Key, Телефон',
+      deleteBatchAfterAck: true,
+    };
+    const entity = onecEtlEntityFromFormValues(values);
+    expect(entity.deleteBatchAfterAck).toBe(true);
+    expect(onecEtlEntityToFormValues(entity).deleteBatchAfterAck).toBe(true);
   });
 
   it('splits key/select fields on commas and whitespace', () => {
@@ -569,7 +591,7 @@ describe('onecStripSourceGeneration', () => {
 });
 
 describe('ONEC_ETL_ENTITY_PRESETS', () => {
-  it('matches the items preset agreed with the 1C agent team exactly', () => {
+  it('matches the items preset agreed with the 1C agent team exactly (E3b: +category/type fields)', () => {
     expect(ONEC_ETL_ENTITY_PRESETS.items).toEqual({
       entityCode: 'items',
       oDataPath: 'Catalog_Номенклатура',
@@ -587,6 +609,8 @@ describe('ONEC_ETL_ENTITY_PRESETS', () => {
         'Артикул',
         'НаименованиеПолное',
         'ЕдиницаИзмерения_Key',
+        'КатегорияНоменклатуры_Key',
+        'ТипНоменклатуры',
         'Поставщик_Key',
         'Склад_Key',
       ],
@@ -626,9 +650,123 @@ describe('ONEC_ETL_ENTITY_PRESETS', () => {
     });
   });
 
+  it('matches the units preset exactly', () => {
+    expect(ONEC_ETL_ENTITY_PRESETS.units).toEqual({
+      entityCode: 'units',
+      oDataPath: 'Catalog_КлассификаторЕдиницИзмерения',
+      keyField: 'Ref_Key',
+      updatedAtField: null,
+      deletedField: 'DeletionMark',
+      select: ['Ref_Key', 'DataVersion', 'DeletionMark', 'Code', 'Description', 'НаименованиеПолное', 'МеждународноеСокращение'],
+      syncMode: 'incremental',
+      pageSize: 1000,
+      overlapMinutes: 0,
+      enabled: true,
+    });
+  });
+
+  it('matches the item_categories preset exactly', () => {
+    expect(ONEC_ETL_ENTITY_PRESETS.item_categories).toEqual({
+      entityCode: 'item_categories',
+      oDataPath: 'Catalog_КатегорииНоменклатуры',
+      keyField: 'Ref_Key',
+      updatedAtField: null,
+      deletedField: 'DeletionMark',
+      select: ['Ref_Key', 'DataVersion', 'DeletionMark', 'Code', 'Description', 'Parent_Key', 'IsFolder', 'ТипНоменклатурыПоУмолчанию', 'ЕдиницаИзмерения_Key'],
+      syncMode: 'incremental',
+      pageSize: 1000,
+      overlapMinutes: 0,
+      enabled: true,
+    });
+  });
+
+  it('matches the warehouses preset exactly', () => {
+    expect(ONEC_ETL_ENTITY_PRESETS.warehouses).toEqual({
+      entityCode: 'warehouses',
+      oDataPath: 'Catalog_СтруктурныеЕдиницы',
+      keyField: 'Ref_Key',
+      updatedAtField: null,
+      deletedField: 'DeletionMark',
+      select: ['Ref_Key', 'DataVersion', 'DeletionMark', 'Code', 'Description', 'Parent_Key', 'ТипСтруктурнойЕдиницы'],
+      syncMode: 'incremental',
+      pageSize: 1000,
+      overlapMinutes: 0,
+      enabled: true,
+    });
+  });
+
+  it('matches the stock_balances preset exactly, including the Balance OData path and composite key', () => {
+    expect(ONEC_ETL_ENTITY_PRESETS.stock_balances).toEqual({
+      entityCode: 'stock_balances',
+      oDataPath: "AccumulationRegister_ЗапасыНаСкладах/Balance(Dimensions='Организация,Номенклатура,Характеристика,Партия,СтруктурнаяЕдиница,Ячейка')",
+      keyField: 'Номенклатура_Key',
+      keyFields: ['Организация_Key', 'Номенклатура_Key', 'Характеристика_Key', 'Партия_Key', 'СтруктурнаяЕдиница_Key', 'Ячейка_Key'],
+      updatedAtField: null,
+      deletedField: null,
+      select: ['Организация_Key', 'Номенклатура_Key', 'Характеристика_Key', 'Партия_Key', 'СтруктурнаяЕдиница_Key', 'Ячейка_Key', 'КоличествоBalance'],
+      syncMode: 'incremental',
+      pageSize: 1000,
+      overlapMinutes: 0,
+      enabled: true,
+    });
+  });
+
   it('has a human Russian label for each preset key', () => {
     expect(ONEC_ETL_ENTITY_PRESET_LABELS.items).toBe('Номенклатура (items)');
     expect(ONEC_ETL_ENTITY_PRESET_LABELS.counterparties).toBe('Контрагенты (counterparties)');
+    expect(ONEC_ETL_ENTITY_PRESET_LABELS.units).toBe('Единицы измерения (units)');
+    expect(ONEC_ETL_ENTITY_PRESET_LABELS.item_categories).toBe('Категории номенклатуры (item_categories)');
+    expect(ONEC_ETL_ENTITY_PRESET_LABELS.warehouses).toBe('Склады (warehouses)');
+    expect(ONEC_ETL_ENTITY_PRESET_LABELS.stock_balances).toBe('Остатки (stock_balances)');
+  });
+
+  it('does not offer a counterparty_phones preset yet (phone-only filter not agreed with the agent)', () => {
+    expect(Object.keys(ONEC_ETL_ENTITY_PRESETS)).not.toContain('counterparty_phones');
+  });
+});
+
+describe('snapshot entities and revocation (E3b)', () => {
+  it('treats stock_balances and counterparty_phones as snapshot entities, others not', () => {
+    expect(ONEC_ETL_SNAPSHOT_ENTITIES).toEqual(['stock_balances', 'counterparty_phones']);
+    expect(onecEtlIsSnapshotEntity('stock_balances')).toBe(true);
+    expect(onecEtlIsSnapshotEntity('counterparty_phones')).toBe(true);
+    expect(onecEtlIsSnapshotEntity('items')).toBe(false);
+  });
+
+  it('only counterparty_phones is revocable', () => {
+    expect(ONEC_ETL_REVOCABLE_ENTITIES).toEqual(['counterparty_phones']);
+    expect(onecEtlEntityRevocable('counterparty_phones')).toBe(true);
+    expect(onecEtlEntityRevocable('stock_balances')).toBe(false);
+  });
+
+  it('translates snapshot-rejected reasons to Russian, and null to null', () => {
+    expect(onecSnapshotRejectedReasonLabel('FAILED')).toBe('сущность не выгрузилась');
+    expect(onecSnapshotRejectedReasonLabel('NO_BATCH')).toBe('нет пакета');
+    expect(onecSnapshotRejectedReasonLabel('NOT_FULL')).toBe('чтение не полное');
+    expect(onecSnapshotRejectedReasonLabel('NOT_VERIFIED')).toBe('полнота не подтверждена');
+    expect(onecSnapshotRejectedReasonLabel('NO_SNAPSHOT_TIME')).toBe('нет времени снимка');
+    expect(onecSnapshotRejectedReasonLabel('STALE')).toBe('пришёл более старый снимок');
+    expect(onecSnapshotRejectedReasonLabel(null)).toBeNull();
+  });
+});
+
+describe('onec mirror state labels', () => {
+  it('translates every mirror state and orders the filter options as specified', () => {
+    expect(onecMirrorStateLabel('all')).toBe('Все');
+    expect(onecMirrorStateLabel('active')).toBe('Действующие');
+    expect(onecMirrorStateLabel('deleted')).toBe('Помечены на удаление в 1С');
+    expect(onecMirrorStateLabel('missing')).toBe('Пропали в 1С');
+    expect(ONEC_MIRROR_STATE_OPTIONS.map((o) => o.value)).toEqual(['all', 'active', 'deleted', 'missing']);
+  });
+});
+
+describe('onec E3b alert/incident labels', () => {
+  it('labels the snapshot-not-updated alert', () => {
+    expect(onecAlertKindLabel('etl_snapshot_not_updated')).toBe('Снимок не обновлён');
+  });
+
+  it('labels the stale-snapshot-ignored incident', () => {
+    expect(onecIncidentKindLabel('stale_snapshot_ignored')).toBe('Пропущен устаревший снимок');
   });
 });
 

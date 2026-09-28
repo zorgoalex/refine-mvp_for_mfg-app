@@ -84,6 +84,10 @@ export interface OnecAgentSource {
   displayName: string;
   identityStatus: OnecSourceIdentityStatus;
   identity: OnecSourceIdentity | null;
+  /** Identity the agent last reported; differs from `identity` exactly when `identityStatus === 'identity_changed'`. */
+  observedIdentity: OnecSourceIdentity | null;
+  /** Current source generation; the rebaseline call must echo it back as `expectedGeneration`. */
+  generation: number;
 }
 
 export interface OnecAgentQueues {
@@ -214,6 +218,8 @@ export interface OnecEtlEntity {
   schemaVersion?: number;
   oDataVersion?: 3 | 4;
   enabled?: boolean;
+  /** Personal-data entities only: ask the agent to delete its local batch right after the ERP ack (E3b). */
+  deleteBatchAfterAck?: boolean;
 }
 
 export interface OnecAgentConfiguration {
@@ -367,6 +373,16 @@ export type OnecEtlLastStatus = 'done' | 'failed' | null;
 export type OnecEtlReadScope = 'full' | 'delta' | null;
 export type OnecEtlCompleteness = 'verified' | 'unverified' | 'not_checked' | null;
 
+/** Why a received snapshot was rejected and the previous verified one was kept (E3b). */
+export type OnecSnapshotRejectedReason =
+  | 'FAILED'
+  | 'NO_BATCH'
+  | 'NOT_FULL'
+  | 'NOT_VERIFIED'
+  | 'NO_SNAPSHOT_TIME'
+  | 'STALE'
+  | null;
+
 /** `GET /onec/etl/entities`; mirrors backend `OnecEtlAdminService.listEntities`. */
 export interface OnecEtlEntityState {
   sourceId: number;
@@ -384,6 +400,71 @@ export interface OnecEtlEntityState {
   rowCount: number;
   deletedCount: number;
   missingCount: number;
+  /** Personal-data revocation state (E3b): set once the operator revoked this entity's data. */
+  revokedAt: string | null;
+  /** Set once the revoked entity's data has been fully purged from ERP. */
+  purgedAt: string | null;
+  /** Verified-snapshot entities only (`stock_balances`, `counterparty_phones`): timestamp of the last accepted snapshot. */
+  snapshotVersion: string | null;
+  /** Why the last received snapshot batch was rejected (previous verified copy kept). */
+  snapshotRejectedReason: OnecSnapshotRejectedReason;
+}
+
+// ---------------------------------------------------------------- «Данные 1С» (mirror tab)
+
+export type OnecMirrorState = 'all' | 'active' | 'missing' | 'deleted';
+
+/** `GET /onec/etl/mirror` row (no data body); mirrors backend `OnecEtlAdminService.listMirror`. */
+export interface OnecMirrorRow {
+  sourceKey: string;
+  code: string | null;
+  description: string | null;
+  deleted: boolean;
+  missingInSourceAt: string | null;
+  sourceUpdatedAt: string | null;
+  updatedAt: string;
+}
+
+export interface OnecMirrorListResult {
+  total: number;
+  rows: OnecMirrorRow[];
+}
+
+/** `GET /onec/etl/mirror/row`; mirrors backend `OnecEtlAdminService.getMirrorRow`. */
+export interface OnecMirrorRowDetail {
+  sourceKey: string;
+  entity: string;
+  deleted: boolean;
+  data: Record<string, unknown>;
+  sourceUpdatedAt: string | null;
+  missingInSourceAt: string | null;
+  firstSeenRun: string | null;
+  lastRunId: string | null;
+  updatedAt: string;
+}
+
+/** `POST /onec/agents/:agentId/etl/entities/:entity/revoke` result. */
+export interface OnecEntityRevokeResult {
+  entity: string;
+  revoked: true;
+  configVersion: number | null;
+  clean: boolean;
+}
+
+/** `POST /onec/agents/:agentId/etl/entities/:entity/restore` result. */
+export interface OnecEntityRestoreResult {
+  entity: string;
+  revoked: false;
+}
+
+/** `POST /onec/sources/:sourceId/rebaseline` result. */
+export interface OnecSourceRebaselineResult {
+  sourceId: number;
+  generation: number;
+  abandonedRuns: number;
+  configVersion: number | null;
+  publishPending: boolean;
+  identityAccepted: boolean;
 }
 
 export type OnecEtlRunStatus = 'receiving' | 'completed' | 'abandoned';

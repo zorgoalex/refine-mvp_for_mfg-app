@@ -9,6 +9,7 @@ import { AgentsTab } from './AgentsTab';
 import { ConfigurationTab } from './ConfigurationTab';
 import { CommandsTab } from './CommandsTab';
 import { EtlTab } from './EtlTab';
+import { MirrorTab } from './MirrorTab';
 import { AlertsIncidentsTab } from './AlertsIncidentsTab';
 
 const { Title } = Typography;
@@ -106,7 +107,12 @@ export function OnecPage() {
     {
       key: 'etl',
       label: 'ETL',
-      children: <EtlTab agents={agents} canSendCommands={canSendCommands} />,
+      children: <EtlTab agents={agents} canSendCommands={canSendCommands} canManage={canManage} />,
+    },
+    {
+      key: 'mirror',
+      label: 'Данные 1С',
+      children: <MirrorTab agents={agents} />,
     },
     {
       key: 'alerts',

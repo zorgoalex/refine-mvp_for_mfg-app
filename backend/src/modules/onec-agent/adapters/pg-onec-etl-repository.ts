@@ -22,6 +22,8 @@ export interface RunRow {
   completionSha256: string | null;
   completedAt: Date | null;
   createdAt: Date;
+  /** Entities revoked while this run was open (kept after a later re-enable, plan §21.3). */
+  revokedEntities: string[];
 }
 
 export interface BatchRow {
@@ -41,6 +43,7 @@ export interface BatchRow {
   ack: Record<string, unknown> | null;
   receivedAt: Date;
   updatedAt: Date;
+  revoked: boolean;
 }
 
 const toRun = (row: QueryResultRow): RunRow => ({
@@ -57,6 +60,7 @@ const toRun = (row: QueryResultRow): RunRow => ({
   completionSha256: row.completion_sha256,
   completedAt: row.completed_at,
   createdAt: row.created_at,
+  revokedEntities: row.revoked_entities ?? [],
 });
 
 const toBatch = (row: QueryResultRow): BatchRow => ({
@@ -76,6 +80,19 @@ const toBatch = (row: QueryResultRow): BatchRow => ({
   ack: row.ack,
   receivedAt: row.received_at,
   updatedAt: row.updated_at,
+  revoked: row.revoked === true,
+});
+
+export interface EntityStateRow {
+  revokedAt: Date | null;
+  purgedAt: Date | null;
+  snapshotVersion: Date | null;
+}
+
+const toEntityState = (row: QueryResultRow): EntityStateRow => ({
+  revokedAt: row.revoked_at ?? null,
+  purgedAt: row.purged_at ?? null,
+  snapshotVersion: row.snapshot_version ?? null,
 });
 
 export interface StagingChunkRow {
@@ -253,10 +270,13 @@ export class PgOnecEtlRepository {
   async insertStagingChunk(batch: BatchRow, attempt: number, rows: StagingChunkRow[]): Promise<boolean> {
     return this.database.transaction(async (tx) => {
       const current = await tx.query(
-        `SELECT 1 FROM onec_etl_batches WHERE batch_id = $1 AND status = 'parsing' AND parse_attempt = $2 FOR SHARE`,
+        `SELECT r.source_id, r.revoked_entities FROM onec_etl_batches b JOIN onec_etl_runs r ON r.run_id = b.run_id
+          WHERE b.batch_id = $1 AND b.status = 'parsing' AND b.parse_attempt = $2 FOR SHARE OF b`,
         [batch.batchId, attempt],
       );
       if (current.rowCount === 0) return false;
+      // Revoked data is never written again (plan §21.3): batch → entity_state order, shared locks.
+      if (await this.entityRevoked(tx, Number(current.rows[0].source_id), batch.entityCode, current.rows[0].revoked_entities ?? [])) return false;
       await tx.query(
         `INSERT INTO onec_etl_staging_rows (run_id, batch_id, line_no, entity_code, source_key, source_updated_at, deleted, data)
          SELECT $1, $2, r.line_no, $3, r.source_key, r.source_updated_at, r.deleted, (r.line::jsonb) -> 'data'
@@ -287,6 +307,12 @@ export class PgOnecEtlRepository {
         [batch.batchId, attempt],
       );
       if (locked.rowCount === 0) return 'stale';
+      const run = await tx.query(`SELECT source_id, revoked_entities FROM onec_etl_runs WHERE run_id = $1`, [batch.runId]);
+      if (await this.entityRevoked(tx, Number(run.rows[0].source_id), batch.entityCode, run.rows[0].revoked_entities ?? [])) {
+        await tx.query(`UPDATE onec_etl_batches SET status = 'discarded', revoked = true, updated_at = now() WHERE batch_id = $1`, [batch.batchId]);
+        await tx.query(`DELETE FROM onec_etl_staging_rows WHERE batch_id = $1`, [batch.batchId]);
+        return 'stale';
+      }
       const counted = await tx.query(`SELECT count(*)::int AS n FROM onec_etl_staging_rows WHERE batch_id = $1`, [batch.batchId]);
       const n = Number(counted.rows[0].n);
       if (n !== Number(locked.rows[0].row_count)) {
@@ -343,12 +369,61 @@ export class PgOnecEtlRepository {
     );
   }
 
-  async lockEntityState(tx: DatabaseClient, sourceId: number, entityCode: string): Promise<void> {
+  async lockEntityState(tx: DatabaseClient, sourceId: number, entityCode: string): Promise<EntityStateRow> {
     await tx.query(
       `INSERT INTO onec_etl_entity_state (source_id, entity_code) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
       [sourceId, entityCode],
     );
-    await tx.query(`SELECT 1 FROM onec_etl_entity_state WHERE source_id = $1 AND entity_code = $2 FOR UPDATE`, [sourceId, entityCode]);
+    const { rows } = await tx.query(`SELECT * FROM onec_etl_entity_state WHERE source_id = $1 AND entity_code = $2 FOR UPDATE`, [sourceId, entityCode]);
+    return toEntityState(rows[0]);
+  }
+
+  /** Write gate (plan §21.3): shared lock on the entity state; true when writing its data is forbidden. */
+  async entityRevoked(tx: DatabaseClient, sourceId: number, entityCode: string, runRevokedEntities: readonly string[]): Promise<boolean> {
+    if (runRevokedEntities.includes(entityCode)) return true;
+    const { rows } = await tx.query(
+      `SELECT revoked_at FROM onec_etl_entity_state WHERE source_id = $1 AND entity_code = $2 FOR SHARE`,
+      [sourceId, entityCode],
+    );
+    return rows[0]?.revoked_at != null;
+  }
+
+  /**
+   * Snapshot entity (plan §21.2): the copy becomes exactly the run's set —
+   * rows of the run are written as they are (no newer-wins across snapshots,
+   * the snapshot version already decided), rows absent from it are removed.
+   */
+  async replaceSnapshot(tx: DatabaseClient, run: RunRow, entityCode: string): Promise<{ upserted: number; removed: number }> {
+    const upsert = await tx.query(
+      `WITH latest AS (
+         SELECT DISTINCT ON (s.source_key) s.source_key, s.source_updated_at, s.deleted, s.data
+           FROM onec_etl_staging_rows s JOIN onec_etl_batches b ON b.batch_id = s.batch_id
+          WHERE s.run_id = $1 AND s.entity_code = $3
+          ORDER BY s.source_key, b.received_at DESC, b.batch_id DESC, s.line_no DESC)
+       INSERT INTO onec_etl_mirror_rows AS m (source_id, entity_code, source_key, source_updated_at, deleted, data, row_hash,
+              first_seen_run, last_run_id, missing_in_source_at, missing_in_source_run, updated_at)
+       SELECT $2, $3, l.source_key, l.source_updated_at, l.deleted, l.data,
+              encode(sha256(convert_to(l.data::text, 'UTF8')), 'hex'), $1, $1, NULL, NULL, now()
+         FROM latest l
+       ON CONFLICT (source_id, entity_code, source_key) DO UPDATE SET
+         source_updated_at = EXCLUDED.source_updated_at, deleted = EXCLUDED.deleted, data = EXCLUDED.data,
+         row_hash = EXCLUDED.row_hash, last_run_id = EXCLUDED.last_run_id, updated_at = now()`,
+      [run.runId, run.sourceId, entityCode],
+    );
+    const removed = await tx.query(
+      `DELETE FROM onec_etl_mirror_rows WHERE source_id = $1 AND entity_code = $2 AND last_run_id <> $3`,
+      [run.sourceId, entityCode, run.runId],
+    );
+    return { upserted: upsert.rowCount ?? 0, removed: removed.rowCount ?? 0 };
+  }
+
+  async setSnapshotOutcome(tx: DatabaseClient, sourceId: number, entityCode: string, outcome: { version: string | null; rejectedReason: string | null }): Promise<void> {
+    await tx.query(
+      `UPDATE onec_etl_entity_state SET snapshot_version = COALESCE($3::timestamptz, snapshot_version),
+              snapshot_rejected_reason = $4, updated_at = now()
+        WHERE source_id = $1 AND entity_code = $2`,
+      [sourceId, entityCode, outcome.version, outcome.rejectedReason],
+    );
   }
 
   /**
@@ -461,7 +536,26 @@ export class PgOnecEtlRepository {
     });
   }
 
-  /** Reservations without a heartbeat: removed conditionally on the owner that was read. */
+  /**
+   * Reservations without a heartbeat, claimed atomically: the row is deleted first (conditional on the
+   * owner that was read), so a late uploader can no longer publish (its markStored finds nothing); only
+   * then may the caller remove the attempt's files. A crash in between leaves an unreferenced file, found
+   * by the orphan sweep and, for a revoked entity, by its file-name prefix.
+   */
+  async claimStaleReservations(staleMs: number): Promise<Array<{ batchId: string; owner: string; sourceId: number; entityCode: string }>> {
+    const { rows } = await this.database.query(
+      `DELETE FROM onec_etl_batches b USING onec_etl_runs r
+        WHERE r.run_id = b.run_id AND b.status = 'receiving' AND b.ack IS NULL
+          AND b.receiving_heartbeat_at < now() - ($1::bigint * interval '1 millisecond')
+          AND b.batch_id IN (SELECT batch_id FROM onec_etl_batches WHERE status = 'receiving'
+                              AND receiving_heartbeat_at < now() - ($1::bigint * interval '1 millisecond')
+                              LIMIT 100 FOR UPDATE SKIP LOCKED)
+        RETURNING b.batch_id, b.receiving_owner, r.source_id, b.entity_code`,
+      [staleMs],
+    );
+    return rows.map((row) => ({ batchId: row.batch_id, owner: row.receiving_owner, sourceId: Number(row.source_id), entityCode: row.entity_code }));
+  }
+
   async listStaleReservations(staleMs: number): Promise<Array<{ batchId: string; owner: string }>> {
     const { rows } = await this.database.query(
       `SELECT batch_id, receiving_owner FROM onec_etl_batches
@@ -489,20 +583,20 @@ export class PgOnecEtlRepository {
     return rowCount ?? 0;
   }
 
-  /** Spool files past retention (finalized/discarded/invalid batches): paths to delete, then cleared. */
-  async expireSpoolFiles(retentionMs: number): Promise<string[]> {
+  /**
+   * Spool files past retention (finalized/discarded/invalid batches). Paths are only read here; the
+   * caller deletes each file and then clears its path (clearSpoolPath), so a failed unlink keeps the
+   * record and is retried.
+   */
+  async listExpiredSpoolFiles(retentionMs: number): Promise<Array<{ batchId: string; path: string }>> {
     const { rows } = await this.database.query(
-      `WITH expired AS (
-         SELECT batch_id, spool_path FROM onec_etl_batches
-          WHERE spool_path IS NOT NULL AND status IN ('finalized','discarded','invalid')
-            AND updated_at < now() - ($1::bigint * interval '1 millisecond')
-          LIMIT 500 FOR UPDATE SKIP LOCKED)
-       UPDATE onec_etl_batches b SET spool_path = NULL FROM expired
-        WHERE b.batch_id = expired.batch_id
-        RETURNING expired.spool_path AS old_path`,
+      `SELECT batch_id, spool_path FROM onec_etl_batches
+        WHERE spool_path IS NOT NULL AND status IN ('finalized','discarded','invalid')
+          AND updated_at < now() - ($1::bigint * interval '1 millisecond')
+        LIMIT 500`,
       [retentionMs],
     );
-    return rows.map((row) => row.old_path).filter((value): value is string => typeof value === 'string');
+    return rows.map((row) => ({ batchId: row.batch_id as string, path: row.spool_path as string }));
   }
 
   async referencedSpoolPaths(): Promise<Set<string>> {
@@ -538,6 +632,248 @@ export class PgOnecEtlRepository {
       );
       return rowCount ?? 0;
     });
+  }
+
+  // ---------------------------------------------------------------- revocation (plan §21.3, §21.6)
+
+  /** complete of a run that still holds a revoked entity's batches: discard them (run → batches already locked). */
+  async discardRevokedInRun(tx: DatabaseClient, runId: string, entityCode: string): Promise<void> {
+    await tx.query(
+      `UPDATE onec_etl_runs SET revoked_entities = array_append(revoked_entities, $2), updated_at = now()
+        WHERE run_id = $1 AND status = 'receiving' AND NOT ($2 = ANY(revoked_entities))`,
+      [runId, entityCode],
+    );
+    // Reservations are kept (discarded, with their owner) for the revocation cleanup to remove their files.
+    await tx.query(
+      `UPDATE onec_etl_batches SET status = 'discarded', revoked = true, updated_at = now()
+        WHERE run_id = $1 AND entity_code = $2 AND status NOT IN ('discarded','finalized')`,
+      [runId, entityCode],
+    );
+    await tx.query(`DELETE FROM onec_etl_staging_rows WHERE run_id = $1 AND entity_code = $2`, [runId, entityCode]);
+  }
+
+  /** Step 1 of a revocation: the write ban (entity_state only; batches and data untouched here). */
+  async markRevoked(tx: DatabaseClient, sourceId: number, entityCode: string, actorId: number): Promise<boolean> {
+    await this.lockEntityState(tx, sourceId, entityCode);
+    const { rowCount } = await tx.query(
+      `UPDATE onec_etl_entity_state SET revoked_at = now(), revoked_by = $3, purged_at = NULL, updated_at = now()
+        WHERE source_id = $1 AND entity_code = $2 AND revoked_at IS NULL`,
+      [sourceId, entityCode, actorId],
+    );
+    return (rowCount ?? 0) > 0;
+  }
+
+  async listRevokedEntities(): Promise<Array<{ sourceId: number; entityCode: string; purged: boolean }>> {
+    const { rows } = await this.database.query(`SELECT source_id, entity_code, purged_at FROM onec_etl_entity_state WHERE revoked_at IS NOT NULL`);
+    return rows.map((row) => ({ sourceId: Number(row.source_id), entityCode: row.entity_code, purged: row.purged_at != null }));
+  }
+
+  /**
+   * Step 2, idempotent, repeated until clean: every run of the source with this
+   * entity's batches (open or closed) in lock order run → batches → entity_state;
+   * then the source-wide copy (entity_state → mirror). Returns spool files to
+   * delete after commit.
+   */
+  async cleanupRevokedEntity(sourceId: number, entityCode: string): Promise<{
+    files: Array<{ batchId: string; path: string }>;
+    reservations: Array<{ batchId: string; owner: string }>;
+    purged: boolean;
+  }> {
+    // Note: files are also swept by name prefix in the service; database records are not the only link.
+    const files: Array<{ batchId: string; path: string }> = [];
+    const reservations: Array<{ batchId: string; owner: string }> = [];
+    const { rows: runs } = await this.database.query(
+      `SELECT DISTINCT b.run_id FROM onec_etl_batches b JOIN onec_etl_runs r ON r.run_id = b.run_id
+        WHERE r.source_id = $1 AND b.entity_code = $2
+          AND (b.status NOT IN ('discarded','finalized') OR b.spool_path IS NOT NULL OR b.receiving_owner IS NOT NULL
+               OR (r.status = 'receiving' AND NOT ($2 = ANY(r.revoked_entities))))`,
+      [sourceId, entityCode],
+    );
+    for (const { run_id: runId } of runs) {
+      await this.database.transaction(async (tx) => {
+        const run = await this.getRun(tx, runId, true);
+        if (!run) return;
+        await tx.query(`SELECT 1 FROM onec_etl_batches WHERE run_id = $1 AND entity_code = $2 ORDER BY batch_id FOR UPDATE`, [runId, entityCode]);
+        const state = await tx.query(`SELECT revoked_at FROM onec_etl_entity_state WHERE source_id = $1 AND entity_code = $2 FOR SHARE`, [sourceId, entityCode]);
+        if (state.rows[0]?.revoked_at == null) return; // re-enabled meanwhile: nothing to clean
+        if (run.status === 'receiving' && !run.revokedEntities.includes(entityCode)) {
+          await tx.query(`UPDATE onec_etl_runs SET revoked_entities = array_append(revoked_entities, $2), updated_at = now() WHERE run_id = $1`, [runId, entityCode]);
+        }
+        // Unacknowledged reservations are discarded but KEPT with their owner: a crash after the file
+        // was written (before markStored) leaves `<batchId>.<owner>.*` on disk, and the owner is the only
+        // link to it. The row goes only after its files are confirmed gone (clearReservationFiles).
+        await tx.query(
+          `UPDATE onec_etl_batches SET status = 'discarded', revoked = true, updated_at = now()
+            WHERE run_id = $1 AND entity_code = $2 AND status NOT IN ('discarded','finalized')`,
+          [runId, entityCode],
+        );
+        const { rows: owners } = await tx.query(
+          `SELECT batch_id, receiving_owner FROM onec_etl_batches WHERE run_id = $1 AND entity_code = $2 AND receiving_owner IS NOT NULL`,
+          [runId, entityCode],
+        );
+        reservations.push(...owners.map((row) => ({ batchId: row.batch_id as string, owner: row.receiving_owner as string })));
+        // Paths stay recorded until each file is confirmed deleted (clearSpoolPath): a crash or a failed
+        // unlink leaves the entity "not clean" and the next cleanup retries.
+        const { rows: paths } = await tx.query(
+          `SELECT batch_id, spool_path FROM onec_etl_batches WHERE run_id = $1 AND entity_code = $2 AND spool_path IS NOT NULL`,
+          [runId, entityCode],
+        );
+        files.push(...paths.map((row) => ({ batchId: row.batch_id as string, path: row.spool_path as string })));
+        await tx.query(`DELETE FROM onec_etl_staging_rows WHERE run_id = $1 AND entity_code = $2`, [runId, entityCode]);
+      });
+    }
+    const purged = await this.database.transaction(async (tx) => {
+      const { rows } = await tx.query(`SELECT revoked_at FROM onec_etl_entity_state WHERE source_id = $1 AND entity_code = $2 FOR UPDATE`, [sourceId, entityCode]);
+      if (rows[0]?.revoked_at == null) return false;
+      await tx.query(`DELETE FROM onec_etl_mirror_rows WHERE source_id = $1 AND entity_code = $2`, [sourceId, entityCode]);
+      await tx.query(
+        `UPDATE onec_etl_entity_state SET purged_at = COALESCE(purged_at, now()), row_count = 0, deleted_count = 0, missing_count = 0,
+                snapshot_version = NULL, updated_at = now()
+          WHERE source_id = $1 AND entity_code = $2`,
+        [sourceId, entityCode],
+      );
+      return true;
+    });
+    return { files, reservations, purged };
+  }
+
+  /** An unacknowledged attempt's files are gone: drop its row (its ACK never existed). */
+  async clearReservationFiles(batchId: string, owner: string): Promise<void> {
+    await this.database.query(
+      `DELETE FROM onec_etl_batches WHERE batch_id = $1 AND receiving_owner = $2 AND ack IS NULL AND status IN ('receiving','discarded')`,
+      [batchId, owner],
+    );
+  }
+
+  /** SHARE lock on the entity state held for the duration of a revocation file sweep. */
+  async stillRevokedShared(tx: DatabaseClient, sourceId: number, entityCode: string): Promise<boolean> {
+    const { rows } = await tx.query(
+      `SELECT revoked_at FROM onec_etl_entity_state WHERE source_id = $1 AND entity_code = $2 FOR SHARE`,
+      [sourceId, entityCode],
+    );
+    return rows[0]?.revoked_at != null;
+  }
+
+  /** After the file is gone: forget its path (only if it still points to that file). */
+  async clearSpoolPath(batchId: string, path: string): Promise<void> {
+    await this.database.query(`UPDATE onec_etl_batches SET spool_path = NULL WHERE batch_id = $1 AND spool_path = $2`, [batchId, path]);
+  }
+
+  /** The revoked entity leaves nothing behind (condition to allow a re-enable). */
+  async revokedEntityClean(client: DatabaseClient, sourceId: number, entityCode: string): Promise<boolean> {
+    const { rows } = await client.query(
+      `SELECT
+         NOT EXISTS (SELECT 1 FROM onec_etl_batches b JOIN onec_etl_runs r ON r.run_id = b.run_id
+                      WHERE r.source_id = $1 AND b.entity_code = $2
+                        AND (b.status NOT IN ('discarded','finalized') OR b.spool_path IS NOT NULL OR b.receiving_owner IS NOT NULL)) AND
+         NOT EXISTS (SELECT 1 FROM onec_etl_staging_rows s JOIN onec_etl_runs r ON r.run_id = s.run_id
+                      WHERE r.source_id = $1 AND s.entity_code = $2) AND
+         NOT EXISTS (SELECT 1 FROM onec_etl_mirror_rows WHERE source_id = $1 AND entity_code = $2) AS clean`,
+      [sourceId, entityCode],
+    );
+    return rows[0]?.clean === true;
+  }
+
+  async clearRevoked(tx: DatabaseClient, sourceId: number, entityCode: string): Promise<boolean> {
+    const { rowCount } = await tx.query(
+      `UPDATE onec_etl_entity_state SET revoked_at = NULL, revoked_by = NULL, updated_at = now()
+        WHERE source_id = $1 AND entity_code = $2 AND revoked_at IS NOT NULL AND purged_at IS NOT NULL`,
+      [sourceId, entityCode],
+    );
+    return (rowCount ?? 0) > 0;
+  }
+
+  /** Personal data not confirmed by a verified snapshot for the TTL is removed from the copy. */
+  async expirePersonalData(entityCodes: readonly string[], ttlMs: number): Promise<number> {
+    let removed = 0;
+    const { rows } = await this.database.query(
+      `SELECT source_id, entity_code FROM onec_etl_entity_state
+        WHERE entity_code = ANY($1::text[]) AND (snapshot_version IS NULL OR snapshot_version < now() - ($2::bigint * interval '1 millisecond'))`,
+      [entityCodes, ttlMs],
+    );
+    for (const row of rows) {
+      removed += await this.database.transaction(async (tx) => {
+        // Re-check under the lock: a completion may have just published a fresh snapshot.
+        const locked = await tx.query(
+          `SELECT 1 FROM onec_etl_entity_state WHERE source_id = $1 AND entity_code = $2
+             AND (snapshot_version IS NULL OR snapshot_version < now() - ($3::bigint * interval '1 millisecond')) FOR UPDATE`,
+          [row.source_id, row.entity_code, ttlMs],
+        );
+        if (locked.rowCount === 0) return 0;
+        const { rowCount } = await tx.query(`DELETE FROM onec_etl_mirror_rows WHERE source_id = $1 AND entity_code = $2`, [row.source_id, row.entity_code]);
+        if ((rowCount ?? 0) > 0) {
+          await tx.query(`UPDATE onec_etl_entity_state SET row_count = 0, deleted_count = 0, missing_count = 0, updated_at = now() WHERE source_id = $1 AND entity_code = $2`, [row.source_id, row.entity_code]);
+        }
+        return rowCount ?? 0;
+      });
+    }
+    return removed;
+  }
+
+  // ---------------------------------------------------------------- rebaseline (plan §3.2)
+
+  /**
+   * New generation of the source (called under the agent row lock): open runs
+   * are abandoned, the copy is cleared, entity state reset (revocations kept).
+   * A batch/complete of an older run is then refused 409 RUN_GENERATION_CLOSED.
+   */
+  async rebaselineSource(tx: DatabaseClient, sourceId: number): Promise<{ generation: number; generationRef: string; abandonedRuns: string[] }> {
+    const { rows: gen } = await tx.query(
+      `UPDATE onec_sources SET generation = generation + 1, generation_ref = gen_random_uuid(), updated_at = now()
+        WHERE source_id = $1 RETURNING generation, generation_ref`,
+      [sourceId],
+    );
+    const { rows: runs } = await tx.query(
+      `SELECT run_id FROM onec_etl_runs WHERE source_id = $1 AND status = 'receiving' ORDER BY run_id FOR UPDATE`,
+      [sourceId],
+    );
+    const runIds = runs.map((row) => row.run_id as string);
+    if (runIds.length > 0) {
+      await tx.query(`SELECT 1 FROM onec_etl_batches WHERE run_id = ANY($1::uuid[]) ORDER BY batch_id FOR UPDATE`, [runIds]);
+      await tx.query(`UPDATE onec_etl_runs SET status = 'abandoned', updated_at = now() WHERE run_id = ANY($1::uuid[])`, [runIds]);
+      await tx.query(`DELETE FROM onec_etl_batches WHERE run_id = ANY($1::uuid[]) AND status = 'receiving' AND ack IS NULL`, [runIds]);
+      await tx.query(`UPDATE onec_etl_batches SET status = 'discarded', updated_at = now() WHERE run_id = ANY($1::uuid[]) AND status NOT IN ('discarded','finalized')`, [runIds]);
+      await tx.query(`DELETE FROM onec_etl_staging_rows WHERE run_id = ANY($1::uuid[])`, [runIds]);
+    }
+    await tx.query(`SELECT 1 FROM onec_etl_entity_state WHERE source_id = $1 ORDER BY entity_code FOR UPDATE`, [sourceId]);
+    await tx.query(`DELETE FROM onec_etl_mirror_rows WHERE source_id = $1`, [sourceId]);
+    await tx.query(
+      `UPDATE onec_etl_entity_state SET last_run_id = NULL, last_run_at = NULL, last_status = NULL, last_read_scope = NULL,
+              last_completeness = NULL, last_completeness_reason = NULL, last_snapshot_at = NULL, last_full_run_id = NULL,
+              last_full_at = NULL, last_error_code = NULL, last_error_message = NULL, row_count = 0, deleted_count = 0,
+              missing_count = 0, snapshot_version = NULL, snapshot_rejected_reason = NULL, updated_at = now()
+        WHERE source_id = $1`,
+      [sourceId],
+    );
+    return { generation: Number(gen[0].generation), generationRef: gen[0].generation_ref, abandonedRuns: runIds };
+  }
+
+  // ---------------------------------------------------------------- mirror browse («Данные 1С»)
+
+  async listMirror(filter: { sourceId: number; entityCode: string; search: string | null; state: 'all' | 'missing' | 'deleted' | 'active'; offset: number; limit: number }) {
+    const params = [filter.sourceId, filter.entityCode, filter.search ? `%${filter.search.replace(/[\\%_]/g, (c) => `\\${c}`)}%` : null, filter.state, filter.limit, filter.offset];
+    const where = `m.source_id = $1 AND m.entity_code = $2
+       AND ($3::text IS NULL OR m.source_key ILIKE $3 OR m.data->>'Description' ILIKE $3 OR m.data->>'Code' ILIKE $3
+            OR m.data->>'Артикул' ILIKE $3 OR m.data->>'НаименованиеПолное' ILIKE $3 OR m.data->>'Представление' ILIKE $3)
+       AND ($4 = 'all' OR ($4 = 'missing' AND m.missing_in_source_at IS NOT NULL) OR ($4 = 'deleted' AND m.deleted)
+            OR ($4 = 'active' AND NOT m.deleted AND m.missing_in_source_at IS NULL))`;
+    const { rows } = await this.database.query(
+      `SELECT m.source_key, m.deleted, m.missing_in_source_at, m.source_updated_at, m.updated_at,
+              m.data->>'Code' AS code, COALESCE(m.data->>'Description', m.data->>'Представление') AS description,
+              count(*) OVER () AS total
+         FROM onec_etl_mirror_rows m WHERE ${where}
+        ORDER BY COALESCE(m.data->>'Description', m.source_key), m.source_key LIMIT $5 OFFSET $6`,
+      params,
+    );
+    return rows;
+  }
+
+  async getMirrorRow(sourceId: number, entityCode: string, sourceKey: string): Promise<QueryResultRow | null> {
+    const { rows } = await this.database.query(
+      `SELECT * FROM onec_etl_mirror_rows WHERE source_id = $1 AND entity_code = $2 AND source_key = $3`,
+      [sourceId, entityCode, sourceKey],
+    );
+    return rows[0] ?? null;
   }
 
   // ---------------------------------------------------------------- admin reads
