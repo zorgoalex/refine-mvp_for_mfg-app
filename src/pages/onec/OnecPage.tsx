@@ -10,6 +10,7 @@ import { ConfigurationTab } from './ConfigurationTab';
 import { CommandsTab } from './CommandsTab';
 import { EtlTab } from './EtlTab';
 import { MirrorTab } from './MirrorTab';
+import { MatchingTab } from './MatchingTab';
 import { AlertsIncidentsTab } from './AlertsIncidentsTab';
 
 const { Title } = Typography;
@@ -113,6 +114,11 @@ export function OnecPage() {
       key: 'mirror',
       label: 'Данные 1С',
       children: <MirrorTab agents={agents} />,
+    },
+    {
+      key: 'matching',
+      label: 'Сопоставление',
+      children: <MatchingTab agents={agents} />,
     },
     {
       key: 'alerts',

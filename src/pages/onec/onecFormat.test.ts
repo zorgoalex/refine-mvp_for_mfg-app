@@ -42,9 +42,20 @@ import {
   ONEC_ETL_REVOCABLE_ENTITIES,
   ONEC_ETL_SNAPSHOT_ENTITIES,
   ONEC_MIRROR_STATE_OPTIONS,
+  ONEC_MATCH_ROLE_OPTIONS,
+  ONEC_MATCH_STATUS_OPTIONS,
   ONEC_OPERATOR_RESOLVABLE_ALERT_KINDS,
   type OnecEtlEntityFormValues,
   onecAlertResolvable,
+  onecBinValidityLabel,
+  onecItemCategoryNameLabel,
+  onecItemTypeBreakdownLabel,
+  onecMatchByLabel,
+  onecMatchKindLabel,
+  onecMatchLine,
+  onecMatchStatusColor,
+  onecMatchStatusLabel,
+  onecMatchSummaryBreakdownLabel,
 } from './onecFormat';
 import type { OnecAgentConfiguration, OnecEtlEntity, OnecPublishedAgentConfiguration } from './onecApi.types';
 
@@ -777,5 +788,67 @@ describe('etl_full_sync_required alert', () => {
     expect(onecAlertKindLabel('etl_full_sync_required')).toBe('Нужна полная выгрузка');
     expect(onecAlertResolvable('etl_full_sync_required', 'open')).toBe(true);
     expect(onecAlertResolvable('etl_full_sync_required', 'acknowledged')).toBe(true);
+  });
+});
+
+describe('onec matching (E3c) labels', () => {
+  it('translates match status and orders the filter options as specified', () => {
+    expect(onecMatchStatusLabel('matched')).toBe('Сопоставлено');
+    expect(onecMatchStatusLabel('ambiguous')).toBe('Неоднозначно');
+    expect(onecMatchStatusLabel('unmatched')).toBe('Без пары');
+    expect(onecMatchStatusLabel('weird')).toBe('weird');
+    expect(ONEC_MATCH_STATUS_OPTIONS.map((o) => o.value)).toEqual(['all', 'matched', 'ambiguous', 'unmatched']);
+  });
+
+  it('colors match statuses', () => {
+    expect(onecMatchStatusColor('matched')).toBe('green');
+    expect(onecMatchStatusColor('ambiguous')).toBe('orange');
+    expect(onecMatchStatusColor('unmatched')).toBe('default');
+  });
+
+  it('orders the role filter options as specified', () => {
+    expect(ONEC_MATCH_ROLE_OPTIONS.map((o) => o.value)).toEqual(['all', 'buyer', 'supplier']);
+  });
+
+  it('translates match kind and "by" way', () => {
+    expect(onecMatchKindLabel('client')).toBe('Клиент');
+    expect(onecMatchKindLabel('supplier')).toBe('Поставщик');
+    expect(onecMatchByLabel('ref_key')).toBe('по ключу 1С');
+    expect(onecMatchByLabel('name')).toBe('по наименованию');
+    expect(onecMatchByLabel('phone')).toBe('по телефону');
+  });
+
+  it('builds a one-line ERP match description', () => {
+    expect(onecMatchLine({ kind: 'client', name: 'ТОО Ромашка', by: ['name', 'phone'] })).toBe(
+      'Клиент: ТОО Ромашка (по наименованию, по телефону)',
+    );
+    expect(onecMatchLine({ kind: 'supplier', name: 'Поставщик 1', by: [] })).toBe('Поставщик: Поставщик 1');
+  });
+
+  it('builds the summary breakdown line', () => {
+    expect(onecMatchSummaryBreakdownLabel({ byName: 5, byPhone: 2, byRefKey: 0 })).toBe(
+      'по наименованию 5, по телефону 2, по ключу 1С 0',
+    );
+  });
+
+  it('marks a BIN/IIN as incorrect only when the backend says so, never on absence', () => {
+    expect(onecBinValidityLabel(false)).toBe('некорректный');
+    expect(onecBinValidityLabel(true)).toBeNull();
+    expect(onecBinValidityLabel(null)).toBeNull();
+  });
+
+  it('labels a null category explicitly', () => {
+    expect(onecItemCategoryNameLabel('Крепёж')).toBe('Крепёж');
+    expect(onecItemCategoryNameLabel(null)).toBe('Без категории');
+  });
+
+  it('formats the item-type breakdown largest-first', () => {
+    expect(
+      onecItemTypeBreakdownLabel([
+        { type: 'Услуга', total: 1 },
+        { type: 'Запас', total: 1990 },
+      ]),
+    ).toBe('Запас 1990 · Услуга 1');
+    expect(onecItemTypeBreakdownLabel([])).toBe('');
   });
 });

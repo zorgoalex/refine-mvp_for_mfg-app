@@ -3,6 +3,7 @@ import { DatabaseModule } from '../../database/database.module';
 import { PermissionsModule } from '../../permissions/permissions.module';
 import { PgOnecCommandRepository } from './adapters/pg-onec-command-repository';
 import { PgOnecEtlRepository } from './adapters/pg-onec-etl-repository';
+import { PgOnecMatchingRepository } from './adapters/pg-onec-matching-repository';
 import { PgOnecRepository } from './adapters/pg-onec-repository';
 import { OnecAdminService } from './application/onec-admin.service';
 import { OnecAgentProtocolService } from './application/onec-agent-protocol.service';
@@ -15,6 +16,7 @@ import { OnecEtlCompletionService } from './application/onec-etl-completion.serv
 import { OnecEtlIngestService } from './application/onec-etl-ingest.service';
 import { OnecEtlParserService } from './application/onec-etl-parser.service';
 import { OnecEtlRevocationService } from './application/onec-etl-revocation.service';
+import { OnecMatchingService } from './application/onec-matching.service';
 import { OnecMonitorService } from './application/onec-monitor.service';
 import { OnecAdminController } from './http/onec-admin.controller';
 import { OnecAgentAuthGuard } from './http/onec-agent-auth.guard';
@@ -49,6 +51,8 @@ import { OnecRuntimeConfigService } from './onec-runtime-config.service';
     OnecEtlCompletionService,
     OnecEtlAdminService,
     OnecEtlRevocationService,
+    PgOnecMatchingRepository,
+    OnecMatchingService,
   ],
   // Port for business modules (E4): OnecCommandsService.enqueue(tx, …).
   exports: [OnecCommandsService],

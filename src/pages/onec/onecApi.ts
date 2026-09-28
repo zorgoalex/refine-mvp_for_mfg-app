@@ -13,12 +13,16 @@ import type {
   OnecCommandView,
   OnecConfigValidationResult,
   OnecConfigVersion,
+  OnecCounterpartyMatchResult,
   OnecEntityRestoreResult,
   OnecEntityRevokeResult,
   OnecEtlEntityState,
   OnecEtlRun,
   OnecEtlRunDetail,
   OnecIncident,
+  OnecItemDistributionResult,
+  OnecMatchRoleFilter,
+  OnecMatchStatusFilter,
   OnecMirrorListResult,
   OnecMirrorRowDetail,
   OnecMirrorState,
@@ -277,5 +281,29 @@ export const onecApi = {
     input: { expectedGeneration: number; acceptIdentity?: OnecSourceIdentity },
   ): Promise<OnecSourceRebaselineResult> {
     return httpClient.post(path(`/sources/${positiveId(sourceId)}/rebaseline`), input);
+  },
+
+  /** Read-only report: 1C counterparties matched against ERP clients/suppliers (plan §9, E3c). */
+  listMatchingCounterparties(params: {
+    agentId: string;
+    status?: OnecMatchStatusFilter;
+    role?: OnecMatchRoleFilter;
+    search?: string;
+    offset?: number;
+    limit?: number;
+  }): Promise<OnecCounterpartyMatchResult> {
+    const query = new URLSearchParams({ agentId: agentIdPath(params.agentId) });
+    if (params.status) query.set('status', params.status);
+    if (params.role) query.set('role', params.role);
+    if (params.search) query.set('search', params.search);
+    if (params.offset) query.set('offset', String(params.offset));
+    if (params.limit) query.set('limit', String(params.limit));
+    return httpClient.get(path(`/etl/matching/counterparties?${query.toString()}`));
+  },
+
+  /** Read-only report: 1C nomenclature per category and item type (plan §9, E3c). */
+  getMatchingItems(agentId: string): Promise<OnecItemDistributionResult> {
+    const query = new URLSearchParams({ agentId: agentIdPath(agentId) });
+    return httpClient.get(path(`/etl/matching/items?${query.toString()}`));
   },
 };

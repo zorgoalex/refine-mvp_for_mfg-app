@@ -13,6 +13,7 @@ const entityModal = read('./ConfigEntityModal.tsx');
 const commandsTab = read('./CommandsTab.tsx');
 const etlTab = read('./EtlTab.tsx');
 const mirrorTab = read('./MirrorTab.tsx');
+const matchingTab = read('./MatchingTab.tsx');
 const format = read('./onecFormat.ts');
 
 describe('Onec (1C integration) UI wiring', () => {
@@ -34,7 +35,7 @@ describe('Onec (1C integration) UI wiring', () => {
   });
 
   it('talks to the backend admin API only, never GraphQL', () => {
-    for (const source of [api, agentsTab, drawer, configTab, alertsTab, commandsTab, etlTab, mirrorTab]) {
+    for (const source of [api, agentsTab, drawer, configTab, alertsTab, commandsTab, etlTab, mirrorTab, matchingTab]) {
       expect(source).not.toMatch(/gql`|useMutation\(|useQuery\(\s*gql/);
     }
     expect(api).toMatch(/httpClient\.get/);
@@ -307,5 +308,56 @@ describe('Onec (1C integration) UI wiring', () => {
   it('adds deleteBatchAfterAck to the ETL entity form and only sends it when checked', () => {
     expect(entityModal).toMatch(/deleteBatchAfterAck/);
     expect(format).toMatch(/if \(values\.deleteBatchAfterAck\) entity\.deleteBatchAfterAck = true;/);
+  });
+
+  it('adds a "Сопоставление" tab after "Данные 1С" and before "Алерты и инциденты", gated by the page-level onec.view guard', () => {
+    expect(page).toMatch(/key:\s*'matching'/);
+    expect(page).toMatch(/label:\s*'Сопоставление'/);
+    expect(page).toMatch(/<MatchingTab agents=\{agents\}/);
+    const mirrorIndex = page.indexOf("key: 'mirror'");
+    const matchingIndex = page.indexOf("key: 'matching'");
+    const alertsIndex = page.indexOf("key: 'alerts'");
+    expect(mirrorIndex).toBeGreaterThan(-1);
+    expect(matchingIndex).toBeGreaterThan(mirrorIndex);
+    expect(alertsIndex).toBeGreaterThan(matchingIndex);
+  });
+
+  it('adds the matching (E3c) read endpoints to the API client', () => {
+    expect(api).toMatch(/listMatchingCounterparties\(/);
+    expect(api).toMatch(/getMatchingItems\(/);
+  });
+
+  it('keeps Table/Tooltip imports in MatchingTab routed through the delayed wrapper', () => {
+    expect(matchingTab).toMatch(/from '\.\.\/\.\.\/ui\/tooltipDelay'/);
+    expect(matchingTab).not.toMatch(/import\s+\{[^}]*\b(Table|Tooltip|Popover)\b[^}]*\}\s+from\s+'antd'/);
+  });
+
+  it('drops stale counterparty-matching responses keyed on agent and filters', () => {
+    expect(matchingTab).toMatch(/if \(seq !== requestSeq\.current \|\| requestKey !== currentKey\) return;/);
+    expect(matchingTab).toContain('const requestKey = `${agentId}|${status}|${role}|${search}|${page}`;');
+  });
+
+  it('drops stale item-distribution responses for a previously selected agent', () => {
+    expect(matchingTab).toMatch(/if \(seq !== itemsSeq\.current \|\| itemsSelectedAgent\.current !== agentId\) return;/);
+  });
+
+  it('resets the report and paging when the agent changes, and resets paging on filter change', () => {
+    expect(matchingTab).toMatch(/useEffect\(\(\) => \{\s*setSummary\(null\);\s*setSuggestionsAvailable\(false\);\s*setRows\(\[\]\);\s*setTotal\(0\);\s*setPage\(1\);\s*setCategories\(\[\]\);\s*\}, \[agentId\]\);/);
+    expect(matchingTab).toMatch(/useEffect\(\(\) => \{\s*setPage\(1\);\s*\}, \[status, role\]\);/);
+  });
+
+  it('debounces the search input before it becomes the active filter', () => {
+    expect(matchingTab).toContain('ONEC_MATCHING_SEARCH_DEBOUNCE_MS');
+    expect(matchingTab).toMatch(/setTimeout\(\(\) => \{\s*setSearch\(searchInput\.trim\(\)\);\s*setPage\(1\);\s*\}, ONEC_MATCHING_SEARCH_DEBOUNCE_MS\);/);
+  });
+
+  it('shows the "Похожие" suggestions column only when the backend reports suggestions are available', () => {
+    expect(matchingTab).toMatch(/\.\.\.\(suggestionsAvailable[\s\S]{0,20}\?\s*\[/);
+  });
+
+  it('never writes anything from the matching report: read-only GET calls only, with a read-only notice', () => {
+    expect(matchingTab).not.toMatch(/httpClient\.(post|put|patch|delete)/);
+    expect(matchingTab).not.toMatch(/onecApi\.(revoke|restore|publish|saveDraft|sendCommand|rebaseline)/);
+    expect(matchingTab).toMatch(/только для чтения/);
   });
 });

@@ -17553,6 +17553,51 @@ paths:
         '401': {description: Authentication required}
         '403': {description: Permission denied}
         '503': {description: 1C integration is disabled}
+  /api/v1/onec/etl/matching/counterparties:
+    get:
+      tags:
+        - 1C integration
+      operationId: matchOnecCounterparties
+      summary: "1C counterparties matched against ERP clients and suppliers (read-only report)"
+      description: >-
+        Match by 1C key (clients/suppliers.ref_key_1c), normalized name (case, quotes, legal-form words, punctuation
+        ignored) and, for clients, phone (last 10 digits). matched = at most one ERP row per kind; ambiguous = more;
+        unmatched rows get up to 3 similar-name suggestions when pg_trgm is installed. Nothing is written.
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: agentId, in: query, required: true, schema: {type: string}}
+        - {name: status, in: query, required: false, schema: {type: string, enum: [all, matched, ambiguous, unmatched]}}
+        - {name: role, in: query, required: false, schema: {type: string, enum: [all, buyer, supplier]}}
+        - {name: search, in: query, required: false, schema: {type: string}}
+        - {name: offset, in: query, required: false, schema: {type: integer}}
+        - {name: limit, in: query, required: false, schema: {type: integer}}
+      responses:
+        '200': {description: "Summary, page of counterparties with their ERP matches and suggestions"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '400': {description: "Agent is required"}
+        '404': {description: "Agent not found"}
+  /api/v1/onec/etl/matching/items:
+    get:
+      tags:
+        - 1C integration
+      operationId: onecItemDistribution
+      summary: "1C items per category and item type, with price/stock presence (read-only report)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: agentId, in: query, required: true, schema: {type: string}}
+      responses:
+        '200': {description: "Categories with totals by item type, deleted, with price, with stock"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '400': {description: "Agent is required"}
+        '404': {description: "Agent not found"}
   /api/v1/onec/etl/mirror:
     get:
       tags:

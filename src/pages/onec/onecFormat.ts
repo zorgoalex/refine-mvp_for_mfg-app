@@ -855,3 +855,89 @@ export const ONEC_MIRROR_STATE_OPTIONS: Array<{ value: 'all' | 'active' | 'delet
 export function onecMirrorStateLabel(state: string): string {
   return (ONEC_MIRROR_STATE_LABELS as Record<string, string>)[state] ?? state;
 }
+
+// ---------------------------------------------------------------- «Сопоставление» (matching tab, E3c)
+
+export const ONEC_MATCH_STATUS_LABELS: Record<'matched' | 'ambiguous' | 'unmatched', string> = {
+  matched: 'Сопоставлено',
+  ambiguous: 'Неоднозначно',
+  unmatched: 'Без пары',
+};
+
+export function onecMatchStatusLabel(status: string): string {
+  return (ONEC_MATCH_STATUS_LABELS as Record<string, string>)[status] ?? status;
+}
+
+export const ONEC_MATCH_STATUS_COLORS: Record<'matched' | 'ambiguous' | 'unmatched', string> = {
+  matched: 'green',
+  ambiguous: 'orange',
+  unmatched: 'default',
+};
+
+export function onecMatchStatusColor(status: string): string {
+  return (ONEC_MATCH_STATUS_COLORS as Record<string, string>)[status] ?? 'default';
+}
+
+/** Options for the status-filter Select, in the order they should appear. */
+export const ONEC_MATCH_STATUS_OPTIONS: Array<{ value: 'all' | 'matched' | 'ambiguous' | 'unmatched'; label: string }> = [
+  { value: 'all', label: 'Все' },
+  { value: 'matched', label: ONEC_MATCH_STATUS_LABELS.matched },
+  { value: 'ambiguous', label: ONEC_MATCH_STATUS_LABELS.ambiguous },
+  { value: 'unmatched', label: ONEC_MATCH_STATUS_LABELS.unmatched },
+];
+
+/** Options for the role-filter Select, in the order they should appear. */
+export const ONEC_MATCH_ROLE_OPTIONS: Array<{ value: 'all' | 'buyer' | 'supplier'; label: string }> = [
+  { value: 'all', label: 'Все' },
+  { value: 'buyer', label: 'Покупатели' },
+  { value: 'supplier', label: 'Поставщики' },
+];
+
+export const ONEC_MATCH_KIND_LABELS: Record<'client' | 'supplier', string> = {
+  client: 'Клиент',
+  supplier: 'Поставщик',
+};
+
+export function onecMatchKindLabel(kind: string): string {
+  return (ONEC_MATCH_KIND_LABELS as Record<string, string>)[kind] ?? kind;
+}
+
+export const ONEC_MATCH_BY_LABELS: Record<'ref_key' | 'name' | 'phone', string> = {
+  ref_key: 'по ключу 1С',
+  name: 'по наименованию',
+  phone: 'по телефону',
+};
+
+export function onecMatchByLabel(by: string): string {
+  return (ONEC_MATCH_BY_LABELS as Record<string, string>)[by] ?? by;
+}
+
+/** One ERP match line: "Клиент: Иванов ИП (по наименованию, по телефону)". */
+export function onecMatchLine(match: { kind: string; name: string; by: string[] }): string {
+  const ways = match.by.map(onecMatchByLabel).join(', ');
+  return `${onecMatchKindLabel(match.kind)}: ${match.name}${ways ? ` (${ways})` : ''}`;
+}
+
+/** Summary breakdown line: "по наименованию N, по телефону N, по ключу 1С N". */
+export function onecMatchSummaryBreakdownLabel(summary: { byName: number; byPhone: number; byRefKey: number }): string {
+  return `по наименованию ${summary.byName}, по телефону ${summary.byPhone}, по ключу 1С ${summary.byRefKey}`;
+}
+
+/** null = incorrect/unrecognized only when the backend explicitly says so (`binValid === false`). */
+export function onecBinValidityLabel(binValid: boolean | null): string | null {
+  return binValid === false ? 'некорректный' : null;
+}
+
+/** Category name shown in the item-distribution table; 1C categoryless items get an explicit label. */
+export function onecItemCategoryNameLabel(categoryName: string | null): string {
+  return categoryName ?? 'Без категории';
+}
+
+/** "Запас 1990 · Услуга 1" — item counts per 1C item type within one category, largest first. */
+export function onecItemTypeBreakdownLabel(byType: Array<{ type: string; total: number }>): string {
+  return byType
+    .slice()
+    .sort((a, b) => b.total - a.total)
+    .map((entry) => `${entry.type} ${entry.total}`)
+    .join(' · ');
+}

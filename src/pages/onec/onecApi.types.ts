@@ -521,3 +521,90 @@ export interface OnecEtlBatch {
 export interface OnecEtlRunDetail extends OnecEtlRun {
   batches: OnecEtlBatch[];
 }
+
+// ---------------------------------------------------------------- «Сопоставление» (matching tab, E3c, read-only)
+
+export type OnecMatchStatus = 'matched' | 'ambiguous' | 'unmatched';
+export type OnecMatchStatusFilter = 'all' | OnecMatchStatus;
+export type OnecMatchRoleFilter = 'all' | 'buyer' | 'supplier';
+export type OnecMatchKind = 'client' | 'supplier';
+export type OnecMatchBy = 'ref_key' | 'name' | 'phone';
+
+export interface OnecCounterpartyMatch {
+  kind: OnecMatchKind;
+  id: number;
+  name: string;
+  by: OnecMatchBy[];
+}
+
+export interface OnecCounterpartySuggestion {
+  kind: OnecMatchKind;
+  id: number;
+  name: string;
+  score: number;
+}
+
+/** `GET /onec/etl/matching/counterparties` row; mirrors backend `OnecMatchingService.counterparties`. */
+export interface OnecCounterpartyMatchRow {
+  sourceKey: string;
+  code: string | null;
+  name: string | null;
+  fullName: string | null;
+  bin: string | null;
+  binValid: boolean | null;
+  buyer: boolean;
+  supplier: boolean;
+  deleted: boolean;
+  missing: boolean;
+  status: OnecMatchStatus;
+  matches: OnecCounterpartyMatch[];
+  /** Up to 3 similar-name ERP candidates; populated only for `status === 'unmatched'` and only when `suggestionsAvailable`. */
+  suggestions: OnecCounterpartySuggestion[];
+}
+
+export interface OnecCounterpartyMatchSummary {
+  total: number;
+  buyers: number;
+  suppliers: number;
+  matched: number;
+  ambiguous: number;
+  unmatched: number;
+  byRefKey: number;
+  byName: number;
+  byPhone: number;
+}
+
+/** `GET /onec/etl/matching/counterparties`; mirrors backend `OnecMatchingService.counterparties`. */
+export interface OnecCounterpartyMatchResult {
+  summary: OnecCounterpartyMatchSummary;
+  /** false when pg_trgm is not installed: the "Похожие" column has nothing to show. */
+  suggestionsAvailable: boolean;
+  total: number;
+  rows: OnecCounterpartyMatchRow[];
+}
+
+export interface OnecItemTypeCount {
+  type: string;
+  total: number;
+}
+
+/** `GET /onec/etl/matching/items` category row; mirrors backend `OnecMatchingService.itemDistribution`. */
+export interface OnecItemCategoryDistribution {
+  /** null = items with no 1C category (backend groups them together). */
+  categoryKey: string | null;
+  categoryName: string | null;
+  defaultType: string | null;
+  total: number;
+  deleted: number;
+  withPrice: number;
+  withStock: number;
+  /** Items absent from the latest full read (not counted in total). */
+  missing: number;
+  byType: OnecItemTypeCount[];
+}
+
+/** `GET /onec/etl/matching/items`; mirrors backend `OnecMatchingService.itemDistribution`. */
+export interface OnecItemDistributionResult {
+  total: number;
+  categories: OnecItemCategoryDistribution[];
+}

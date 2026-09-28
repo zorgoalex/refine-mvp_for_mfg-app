@@ -6,6 +6,7 @@ import { RequirePermissions } from '../../../permissions/require-permissions.dec
 import { OnecAdminService } from '../application/onec-admin.service';
 import { OnecCommandsService } from '../application/onec-commands.service';
 import { OnecEtlAdminService } from '../application/onec-etl-admin.service';
+import { OnecMatchingService } from '../application/onec-matching.service';
 import type { OnecRequestContext } from '../application/onec-audit';
 import { OnecPermissionsGuard } from './onec-permissions.guard';
 
@@ -47,6 +48,7 @@ export class OnecAdminController {
     @Inject(OnecAdminService) private readonly service: OnecAdminService,
     @Inject(OnecCommandsService) private readonly commands: OnecCommandsService,
     @Inject(OnecEtlAdminService) private readonly etl: OnecEtlAdminService,
+    @Inject(OnecMatchingService) private readonly matching: OnecMatchingService,
   ) {}
 
   @ApiOperation({ summary: 'Overview of 1C agents: connection, state, queues, certificates, configuration' })
@@ -335,6 +337,22 @@ export class OnecAdminController {
   @RequirePermissions('onec.manage')
   rebaselineSource(@Param('sourceId') sourceId: string, @Body() body: unknown, @Req() request: RequestWithCurrentUser) {
     return this.service.rebaseline(positiveId(sourceId), body, user(request), requestId(request));
+  }
+
+  @ApiOperation({ summary: '1C counterparties matched against ERP clients and suppliers (read-only report)' })
+  @Get('etl/matching/counterparties')
+  @ApiBearerAuth('bearerAuth')
+  @RequirePermissions('onec.view')
+  matchCounterparties(@Query() query: { agentId?: string; status?: string; role?: string; search?: string; offset?: string; limit?: string }) {
+    return this.matching.counterparties(query);
+  }
+
+  @ApiOperation({ summary: '1C items per category and item type, with price/stock presence (read-only report)' })
+  @Get('etl/matching/items')
+  @ApiBearerAuth('bearerAuth')
+  @RequirePermissions('onec.view')
+  itemDistribution(@Query('agentId') id: string | undefined) {
+    return this.matching.itemDistribution(id);
   }
 }
 
