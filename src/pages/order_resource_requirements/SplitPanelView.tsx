@@ -53,6 +53,7 @@ export function SplitPanelView({
   byMaterialQuery,
   refreshRevision,
   clientFiltersActive = false,
+  byMaterialPeriodNote = null,
 }: {
   rows: OrderResourceDemandRow[];
   loading: boolean;
@@ -72,6 +73,8 @@ export function SplitPanelView({
   refreshRevision: number;
   /** Фильтры списка, которые не передаются в сводку по материалам (заголовки колонок, «Готовые раскрои»). */
   clientFiltersActive?: boolean;
+  /** Подсказка, что сводка взята за период по умолчанию (последний месяц). */
+  byMaterialPeriodNote?: string | null;
 }) {
   const { token } = theme.useToken();
   const selected = rows.find((row) => row.orderId === selectedOrderId) ?? rows[0] ?? null;
@@ -105,6 +108,7 @@ export function SplitPanelView({
           canManage={canManage}
           manageLoading={manageLoading}
           clientFiltersActive={clientFiltersActive}
+          periodNote={byMaterialPeriodNote}
           onChanged={() => {
             byMaterialState.reload();
             onProcurementChanged();

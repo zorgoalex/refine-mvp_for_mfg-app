@@ -275,3 +275,27 @@ describe('групповая отметка только по сводке те�
     expect(source).toContain(": !state.current ? 'Сводка обновляется по новым фильтрам' : null");
   });
 });
+
+describe('период «По материалам» по умолчанию — последний месяц', () => {
+  it('без выбранных дат берёт последний месяц и помечает его как умолчание', async () => {
+    const { resolveByMaterialPeriod } = await import('./resourceKinds');
+    expect(resolveByMaterialPeriod(undefined, undefined, '2026-08-28', '2026-09-28'))
+      .toEqual({ dateFrom: '2026-08-28', dateTo: '2026-09-28', isDefault: true });
+  });
+
+  it('выбранный пользователем период важнее, даже если задан только один край', async () => {
+    const { resolveByMaterialPeriod } = await import('./resourceKinds');
+    expect(resolveByMaterialPeriod('2026-09-01', '2026-09-10', '2026-08-28', '2026-09-28'))
+      .toEqual({ dateFrom: '2026-09-01', dateTo: '2026-09-10', isDefault: false });
+    expect(resolveByMaterialPeriod('2026-09-01', undefined, '2026-08-28', '2026-09-28'))
+      .toEqual({ dateFrom: '2026-09-01', isDefault: false });
+  });
+
+  it('список строит запрос сводки из этого периода и показывает подсказку', async () => {
+    const { readFileSync } = await import('node:fs');
+    const list = readFileSync(new URL('./list.tsx', import.meta.url), 'utf8');
+    expect(list).toContain("dayjs(todayKey).subtract(1, 'month').format('YYYY-MM-DD')");
+    expect(list).toContain('byMaterialPeriodNote={byMaterialPeriodNote}');
+    expect(list).toContain('Период по умолчанию — последний месяц');
+  });
+});

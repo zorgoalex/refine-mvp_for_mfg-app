@@ -39,7 +39,7 @@ import { MaterialRowsView } from './MaterialRowsView';
 import { ProcurementCheckbox, ProcurementProgressTag, useProcurementPermission } from './ProcurementParts';
 import { RESOURCE_CARD_MODES, ResourceDemandCard, type ResourceCardMode } from './ResourceDemandCard';
 import { KindSummaryCell, ResourceDemandBreakdown } from './ResourceDemandParts';
-import { resolveResourceCapabilities, resourceDemandLines, type ResourceDemandLine } from './resourceKinds';
+import { resolveByMaterialPeriod, resolveResourceCapabilities, resourceDemandLines, type ResourceDemandLine } from './resourceKinds';
 import { SplitPanelView } from './SplitPanelView';
 import { useStoredViewMode } from './useStoredViewMode';
 
@@ -152,12 +152,22 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
   const rows = response?.data ?? EMPTY_RESOURCE_DEMAND_ROWS;
   const capabilities = useMemo(() => resolveResourceCapabilities(response?.capabilities), [response]);
   const triggerRefresh = useCallback(() => setRefreshRevision((value) => value + 1), []);
+  const todayKey = dayjs().format('YYYY-MM-DD');
+  const byMaterialPeriod = useMemo(() => resolveByMaterialPeriod(
+    dateRange?.[0]?.format('YYYY-MM-DD'),
+    dateRange?.[1]?.format('YYYY-MM-DD'),
+    dayjs(todayKey).subtract(1, 'month').format('YYYY-MM-DD'),
+    todayKey,
+  ), [dateRange, todayKey]);
   const byMaterialQuery = useMemo<OrderResourceByMaterialQuery>(() => ({
     ...(deferredSearch ? { search: deferredSearch } : {}),
-    ...(dateRange?.[0] ? { dateFrom: dateRange[0].format('YYYY-MM-DD') } : {}),
-    ...(dateRange?.[1] ? { dateTo: dateRange[1].format('YYYY-MM-DD') } : {}),
+    ...(byMaterialPeriod.dateFrom ? { dateFrom: byMaterialPeriod.dateFrom } : {}),
+    ...(byMaterialPeriod.dateTo ? { dateTo: byMaterialPeriod.dateTo } : {}),
     ...(unpurchasedOnly ? { unpurchasedOnly: true } : {}),
-  }), [dateRange, deferredSearch, unpurchasedOnly]);
+  }), [byMaterialPeriod, deferredSearch, unpurchasedOnly]);
+  const byMaterialPeriodNote = byMaterialPeriod.isDefault && byMaterialPeriod.dateFrom && byMaterialPeriod.dateTo
+    ? `Период по умолчанию — последний месяц: ${formatDate(byMaterialPeriod.dateFrom)} – ${formatDate(byMaterialPeriod.dateTo)}. Чтобы изменить, выберите даты в фильтре «Заказы с даты — по дату».`
+    : null;
   const filterOptions = useMemo(() => buildResourceDemandFilterOptions(rows), [rows]);
   const tableRows = useMemo(
     () => sortResourceDemandRows(filterResourceDemandRows(rows, headerFilters, readyCutsOnly), sortState),
@@ -562,6 +572,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
             onProcurementChanged={triggerRefresh}
             byMaterialQuery={byMaterialQuery}
             clientFiltersActive={hasActiveListFilters}
+            byMaterialPeriodNote={byMaterialPeriodNote}
             refreshRevision={refreshRevision}
           />
         )}

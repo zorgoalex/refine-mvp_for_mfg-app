@@ -114,6 +114,7 @@ export function MaterialAggregateTable({
   manageLoading,
   onChanged,
   clientFiltersActive = false,
+  periodNote = null,
 }: {
   state: MaterialAggregateState;
   emptyText: string;
@@ -127,6 +128,8 @@ export function MaterialAggregateTable({
    * поэтому сводка шире списка, а групповая отметка задела бы скрытые заказы.
    */
   clientFiltersActive?: boolean;
+  /** Сводка взята за период по умолчанию — показать, какой именно. */
+  periodNote?: string | null;
 }) {
   if (state.tooMany) {
     return (
@@ -143,6 +146,7 @@ export function MaterialAggregateTable({
   }
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
+    {periodNote && <Typography.Text type="secondary">{periodNote}</Typography.Text>}
     {clientFiltersActive && (
       <Alert
         showIcon

@@ -288,3 +288,27 @@ export function matchingCardData<T extends { orderId: number }>(data: T | null |
 export function isAggregateCurrent(loading: boolean, dataKey: string | null, queryKey: string): boolean {
   return !loading && dataKey !== null && dataKey === queryKey;
 }
+
+export interface ByMaterialPeriod {
+  dateFrom?: string;
+  dateTo?: string;
+  /** Период подставлен по умолчанию (последний месяц), а не выбран пользователем. */
+  isDefault: boolean;
+}
+
+/**
+ * Период сводки «По материалам»: выбранный в фильтре важнее; если не выбран
+ * ни один край — последний месяц, иначе сводка по всем заказам почти всегда
+ * упирается в лимит 500 заказов.
+ */
+export function resolveByMaterialPeriod(
+  userFrom: string | undefined,
+  userTo: string | undefined,
+  defaultFrom: string,
+  defaultTo: string,
+): ByMaterialPeriod {
+  if (userFrom || userTo) {
+    return { ...(userFrom ? { dateFrom: userFrom } : {}), ...(userTo ? { dateTo: userTo } : {}), isDefault: false };
+  }
+  return { dateFrom: defaultFrom, dateTo: defaultTo, isDefault: true };
+}
