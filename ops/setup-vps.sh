@@ -544,6 +544,10 @@ fi
 confirm_deploy
 
 log "Deploying stack"
+# Shared image lock across build AND start: prune-old-images.sh must not remove
+# a freshly built (possibly cache-reused, old) image before it is started.
+exec 8>>"${ERP_IMAGE_LOCK_FILE:-/tmp/erp-images.lock}"
+flock -s 8
 run_deploy build
 [[ -z "$(freecut_git -C "$PROJECT_DIR/repo_freecut" status --porcelain)" ]] \
   || fail "Freecut checkout changed during build"
@@ -552,6 +556,12 @@ run_deploy build
 log "Freecut build source verified at $FREECUT_DEPLOY_SHA"
 run_deploy start
 flock -u 9
+# deploy-stack.sh skipped its cleanup while this shell held the lock; run it now.
+exec 8>&-
+if [[ "${ERP_IMAGE_PRUNE:-1}" != "0" ]]; then
+  "$REPO_DIR/ops/prune-old-images.sh" --root "$PROJECT_DIR" \
+    || log "WARN: old image cleanup failed; deploy is unaffected"
+fi
 
 run_restore_backup_if_requested
 apply_standalone_hasura_metadata_if_requested

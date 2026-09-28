@@ -256,6 +256,14 @@ fi
 
 cd "$PROJECT_DIR"
 
+# Hold a shared image lock while building and replacing containers so
+# prune-old-images.sh (exclusive, non-blocking) never runs mid-deploy, and pin
+# the pre-deploy images so they stay available for rollback.
+exec 8>>"${ERP_IMAGE_LOCK_FILE:-/tmp/erp-images.lock}"
+flock -s 8
+"$REPO_DIR/ops/prune-old-images.sh" --pin-running \
+  || fail "could not pin pre-deploy images for rollback; nothing was replaced"
+
 if [[ "$PULL" == "1" ]]; then
   log "Pulling base images"
   docker_compose pull traefik postgresdb hasura_metadata_db hasura
@@ -283,3 +291,11 @@ docker_compose "${up_args[@]}"
 
 log "Current services"
 docker_compose ps
+
+# Best-effort disk hygiene: drop old per-revision images, keeping a rollback
+# window (see ops/prune-old-images.sh). Never fails the deploy.
+exec 8>&-
+if [[ "${ERP_IMAGE_PRUNE:-1}" != "0" ]]; then
+  "$REPO_DIR/ops/prune-old-images.sh" --root "$PROJECT_DIR" \
+    || log "WARN: old image cleanup failed; deploy is unaffected"
+fi

@@ -82,6 +82,25 @@ preflight() {
   fi
 }
 
+# Hold a shared image lock while building/replacing containers so
+# prune-old-images.sh (exclusive, non-blocking) never runs mid-deploy, and pin
+# the pre-deploy images so they stay available for rollback.
+begin_image_deploy() {
+  exec 8>>"${ERP_IMAGE_LOCK_FILE:-/tmp/erp-images.lock}"
+  flock -s 8
+  bash "$SCRIPT_PATH/prune-old-images.sh" --pin-running \
+    || die "could not pin pre-deploy images for rollback; nothing was replaced"
+}
+
+# Best-effort disk hygiene after a build: drop old per-revision images, keeping
+# a rollback window (see prune-old-images.sh). ERP_IMAGE_PRUNE=0 disables it.
+prune_old_images() {
+  exec 8>&-
+  [ "${ERP_IMAGE_PRUNE:-1}" != "0" ] || return 0
+  bash "$SCRIPT_PATH/prune-old-images.sh" --root "$ROOT" \
+    || warn "old image cleanup failed; deploy is unaffected"
+}
+
 usage() { sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; }
 
 # --- Dispatch ----------------------------------------------------------------
@@ -92,12 +111,14 @@ shift || true
 case "$cmd" in
   up)
     preflight
+    begin_image_deploy
     compose up -d "$@"
     ;;
 
   rebuild)
     [ $# -ge 1 ] || die "rebuild needs a service name (e.g. backend, freecut, cad-service)"
     preflight
+    begin_image_deploy
     has_freecut=0
     for service in "$@"; do [ "$service" = freecut ] && has_freecut=1; done
     if [ "$has_freecut" -eq 1 ]; then
@@ -112,6 +133,7 @@ case "$cmd" in
     else
       compose up -d --build --no-deps "$@"
     fi
+    prune_old_images
     ;;
 
   ps)
@@ -168,6 +190,7 @@ case "$cmd" in
     if [ $DRY -eq 1 ]; then echo; echo "(dry-run: nothing executed)"; exit 0; fi
     if [ $YES -ne 1 ]; then read -r -p "Proceed? [y/N] " a; [ "$a" = "y" ] || die "aborted"; fi
 
+    begin_image_deploy
     exec 9>"$ROOT/.freecut-deploy.lock"
     flock 9
     bash "$SCRIPT_PATH/ensure-build-repos.sh" --update
@@ -204,6 +227,7 @@ case "$cmd" in
     esac
 
     if [ $DO_SMOKE -eq 1 ]; then bash "$SCRIPT_PATH/smoke-vps.sh" --project-dir "$ROOT" --env-file "$ENV_FILE" --compose-file "$VPS_FILE"; fi
+    prune_old_images
     echo "provision: done."
     ;;
 

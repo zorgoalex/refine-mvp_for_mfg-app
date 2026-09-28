@@ -376,6 +376,19 @@ sudo ops/setup-vps.sh --yes
 - `bootstrap-vps.sh` - installs Docker, opens firewall ports, creates folders.
 - `check-env.sh` - validates `.env`, CORS origins, placeholders, optional DNS.
 - `deploy-stack.sh` - creates missing templates and starts/rebuilds the stack.
+- `prune-old-images.sh` - removes old per-revision source images
+  (`erp-backend`, `cad-service`, `erp-cnc-telegram-worker`) with plain
+  `docker rmi`; other images and dangling images are not touched. Keeps images
+  used by any container, images pinned before a deploy (daemon-side tag
+  `<repo>:pinned-<epoch>-<image id>`, 7 days), the 3 newest per repository, images younger
+  than 24h, tags referenced by `backend-release*.env` / `*release*.yml` in the
+  runtime root, and `:local` tags. Fails closed if the root or a release file is
+  unreadable. `deploy-stack.sh`, `setup-vps.sh` and `up-all.sh up|rebuild|provision`
+  hold a shared host-wide lock (`ERP_IMAGE_LOCK_FILE`, default
+  `/tmp/erp-images.lock`) from build until the new containers run and abort if
+  pinning the running images fails; cleanup then runs best-effort and is
+  skipped while any deploy holds the lock. Disable with `ERP_IMAGE_PRUNE=0`;
+  supports `--dry-run`, `--keep N`, `--min-age-hours H`.
 - `smoke-vps.sh` - checks HTTPS health endpoints, Hasura CORS preflight, and
   deadline live-schema drift when deadlines are enabled.
 - `backup-prod-packet.sh` - default production/stage backup helper. It creates a
