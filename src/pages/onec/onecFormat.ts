@@ -9,8 +9,15 @@ import type {
   OnecCommandRequestedBy,
   OnecCommandStatus,
   OnecConnectionState,
+  OnecEtlBatchStatus,
+  OnecEtlCompleteness,
   OnecEtlEntity,
+  OnecEtlLastStatus,
+  OnecEtlReadScope,
+  OnecEtlRunMode,
+  OnecEtlRunStatus,
   OnecHeartbeatState,
+  OnecPublishedAgentConfiguration,
   OnecSourceIdentityStatus,
   OnecStatusHistorySummary,
 } from './onecApi.types';
@@ -100,10 +107,18 @@ export const ONEC_ALERT_KIND_LABELS: Record<string, string> = {
   source_identity_changed: 'Сменилась база 1С',
   command_dead_letter: 'Команда не выполнена',
   command_expired_undelivered: 'Команда не доставлена в срок',
+  etl_entity_failed: 'Ошибка выгрузки сущности',
+  etl_run_abandoned: 'Выгрузка брошена',
+  etl_full_sync_required: 'Нужна полная выгрузка',
 };
 
-/** Alerts about one past command: nothing re-derives them, the operator closes them once handled. */
-export const ONEC_OPERATOR_RESOLVABLE_ALERT_KINDS: readonly string[] = ['command_dead_letter', 'command_expired_undelivered'];
+/** Alerts about one past command/run: nothing re-derives them, the operator closes them once handled. */
+export const ONEC_OPERATOR_RESOLVABLE_ALERT_KINDS: readonly string[] = [
+  'command_dead_letter',
+  'command_expired_undelivered',
+  'etl_run_abandoned',
+  'etl_full_sync_required',
+];
 
 export function onecAlertResolvable(kind: string, state: string): boolean {
   return state !== 'resolved' && ONEC_OPERATOR_RESOLVABLE_ALERT_KINDS.includes(kind);
@@ -123,6 +138,8 @@ export const ONEC_INCIDENT_KIND_LABELS: Record<string, string> = {
   result_for_unknown_command: 'Результат неизвестной команды',
   result_for_cancelled_command: 'Отменённая команда всё же выполнена',
   late_delivery_of_expired_command: 'Просроченная команда всё же доставлена',
+  etl_batch_invalid: 'Некорректный пакет выгрузки',
+  late_mode_for_completed_run: 'Режим команды пришёл после завершения выгрузки',
 };
 
 export function onecIncidentKindLabel(kind: string): string {
@@ -525,4 +542,181 @@ export function onecEtlEntityCodeIsDuplicate(
   excludeIndex?: number,
 ): boolean {
   return entities.some((entity, index) => index !== excludeIndex && entity.entityCode === entityCode);
+}
+
+/**
+ * The backend stamps `sourceGeneration` onto a configuration only at publish
+ * time (`OnecAdminService.publish`); the draft schema is strict and rejects
+ * unknown keys. Every place that copies a published configuration into a
+ * draft (or a "no draft yet" fallback) must strip it first.
+ */
+export function onecStripSourceGeneration(configuration: OnecPublishedAgentConfiguration): OnecAgentConfiguration {
+  const { sourceGeneration: _sourceGeneration, ...rest } = configuration;
+  return rest;
+}
+
+/** Ready-made ETL entities for the two 1C catalogs agreed with the agent team (agent to-erp/0003). */
+export const ONEC_ETL_ENTITY_PRESETS: Record<'items' | 'counterparties', OnecEtlEntity> = {
+  items: {
+    entityCode: 'items',
+    oDataPath: 'Catalog_Номенклатура',
+    keyField: 'Ref_Key',
+    updatedAtField: null,
+    deletedField: 'DeletionMark',
+    select: [
+      'Ref_Key',
+      'DataVersion',
+      'Code',
+      'Description',
+      'Parent_Key',
+      'IsFolder',
+      'DeletionMark',
+      'Артикул',
+      'НаименованиеПолное',
+      'ЕдиницаИзмерения_Key',
+      'Поставщик_Key',
+      'Склад_Key',
+    ],
+    syncMode: 'incremental',
+    pageSize: 1000,
+    overlapMinutes: 0,
+    enabled: true,
+  },
+  counterparties: {
+    entityCode: 'counterparties',
+    oDataPath: 'Catalog_Контрагенты',
+    keyField: 'Ref_Key',
+    updatedAtField: null,
+    deletedField: 'DeletionMark',
+    select: [
+      'Ref_Key',
+      'DataVersion',
+      'Code',
+      'Description',
+      'Parent_Key',
+      'IsFolder',
+      'DeletionMark',
+      'НаименованиеПолное',
+      'Покупатель',
+      'Поставщик',
+      'ВидКонтрагента',
+      'ИдентификационныйНомер',
+      'ИдентификационныйНомерВведенКорректно',
+    ],
+    syncMode: 'incremental',
+    pageSize: 1000,
+    overlapMinutes: 0,
+    enabled: true,
+  },
+};
+
+export const ONEC_ETL_ENTITY_PRESET_LABELS: Record<keyof typeof ONEC_ETL_ENTITY_PRESETS, string> = {
+  items: 'Номенклатура (items)',
+  counterparties: 'Контрагенты (counterparties)',
+};
+
+// ---------------------------------------------------------------- ETL tab labels
+
+export const ONEC_ETL_ENTITY_LABELS: Record<string, string> = {
+  items: 'Номенклатура',
+  counterparties: 'Контрагенты',
+  units: 'Единицы измерения',
+  item_categories: 'Категории номенклатуры',
+  warehouses: 'Склады',
+  stock_balances: 'Остатки',
+  counterparty_phones: 'Телефоны контрагентов',
+  price_kinds: 'Виды цен',
+  item_prices: 'Цены',
+};
+
+export function onecEtlEntityLabel(code: string): string {
+  return ONEC_ETL_ENTITY_LABELS[code] ?? code;
+}
+
+export const ONEC_ETL_RUN_MODE_LABELS: Record<string, string> = {
+  bootstrap_full: 'Полная выгрузка',
+  entity_reload: 'Перезагрузка сущности',
+  incremental: 'Изменения',
+};
+
+export function onecEtlRunModeLabel(mode: OnecEtlRunMode | string | null): string {
+  if (!mode) return '—';
+  return ONEC_ETL_RUN_MODE_LABELS[mode] ?? mode;
+}
+
+export const ONEC_ETL_RUN_STATUS_LABELS: Record<OnecEtlRunStatus, string> = {
+  receiving: 'Получение',
+  completed: 'Завершена',
+  abandoned: 'Брошена',
+};
+
+export function onecEtlRunStatusLabel(status: string): string {
+  return (ONEC_ETL_RUN_STATUS_LABELS as Record<string, string>)[status] ?? status;
+}
+
+export const ONEC_ETL_RUN_STATUS_COLORS: Record<OnecEtlRunStatus, string | undefined> = {
+  receiving: 'processing',
+  completed: 'green',
+  abandoned: 'red',
+};
+
+export function onecEtlRunStatusColor(status: string): string | undefined {
+  return (ONEC_ETL_RUN_STATUS_COLORS as Record<string, string | undefined>)[status];
+}
+
+export const ONEC_ETL_BATCH_STATUS_LABELS: Record<OnecEtlBatchStatus, string> = {
+  receiving: 'Получение',
+  stored: 'Сохранён',
+  parsing: 'Разбор',
+  parsed: 'Разобран',
+  invalid: 'Ошибка разбора',
+  discarded: 'Отброшен',
+  finalized: 'Перенесён',
+};
+
+export function onecEtlBatchStatusLabel(status: string): string {
+  return (ONEC_ETL_BATCH_STATUS_LABELS as Record<string, string>)[status] ?? status;
+}
+
+export const ONEC_ETL_BATCH_STATUS_COLORS: Record<OnecEtlBatchStatus, string | undefined> = {
+  receiving: 'blue',
+  stored: 'blue',
+  parsing: 'processing',
+  parsed: 'green',
+  invalid: 'red',
+  discarded: 'default',
+  finalized: 'green',
+};
+
+export function onecEtlBatchStatusColor(status: string): string | undefined {
+  return (ONEC_ETL_BATCH_STATUS_COLORS as Record<string, string | undefined>)[status];
+}
+
+export const ONEC_ETL_COMPLETENESS_LABELS: Record<'verified' | 'unverified' | 'not_checked', string> = {
+  verified: 'Подтверждена',
+  unverified: 'Не подтверждена',
+  not_checked: 'Не проверялась',
+};
+
+export function onecEtlCompletenessLabel(value: OnecEtlCompleteness | string | null | undefined): string {
+  if (!value) return '—';
+  return (ONEC_ETL_COMPLETENESS_LABELS as Record<string, string>)[value] ?? value;
+}
+
+export function onecEtlReadScopeLabel(scope: OnecEtlReadScope | string | null | undefined): string {
+  if (scope === 'full') return 'Полное';
+  if (scope === 'delta') return 'Изменения';
+  return '—';
+}
+
+export function onecEtlEntityStatusLabel(status: OnecEtlLastStatus | string | null): string {
+  if (status === 'done') return 'Успешно';
+  if (status === 'failed') return 'Ошибка';
+  return 'Нет данных';
+}
+
+export function onecEtlEntityStatusColor(status: OnecEtlLastStatus | string | null): string | undefined {
+  if (status === 'done') return 'green';
+  if (status === 'failed') return 'red';
+  return undefined;
 }

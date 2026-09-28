@@ -13,6 +13,9 @@ import type {
   OnecCommandView,
   OnecConfigValidationResult,
   OnecConfigVersion,
+  OnecEtlEntityState,
+  OnecEtlRun,
+  OnecEtlRunDetail,
   OnecIncident,
   OnecOverview,
   OnecSourceListItem,
@@ -193,5 +196,24 @@ export const onecApi = {
 
   cancelCommand(commandId: string): Promise<OnecCommandView> {
     return httpClient.post(path(`/commands/${commandIdPath(commandId)}/cancel`), {});
+  },
+
+  listEtlEntities(params: { agentId?: string } = {}): Promise<OnecEtlEntityState[]> {
+    const query = new URLSearchParams();
+    if (params.agentId) query.set('agentId', params.agentId);
+    const suffix = query.size ? `?${query.toString()}` : '';
+    return httpClient.get(path(`/etl/entities${suffix}`));
+  },
+
+  listEtlRuns(params: { agentId?: string; limit?: number } = {}): Promise<OnecEtlRun[]> {
+    const query = new URLSearchParams();
+    if (params.agentId) query.set('agentId', params.agentId);
+    if (params.limit) query.set('limit', String(params.limit));
+    const suffix = query.size ? `?${query.toString()}` : '';
+    return httpClient.get(path(`/etl/runs${suffix}`));
+  },
+
+  getEtlRun(runId: string): Promise<OnecEtlRunDetail> {
+    return httpClient.get(path(`/etl/runs/${commandIdPath(runId)}`));
   },
 };

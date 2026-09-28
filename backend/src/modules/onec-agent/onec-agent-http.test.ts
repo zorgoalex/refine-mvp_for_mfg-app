@@ -8,6 +8,8 @@ import { NestFactory } from '@nestjs/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { OnecAgentProtocolService } from './application/onec-agent-protocol.service';
 import { OnecCommandsService } from './application/onec-commands.service';
+import { OnecEtlCompletionService } from './application/onec-etl-completion.service';
+import { OnecEtlIngestService } from './application/onec-etl-ingest.service';
 import { ApiErrorFilter } from '../../common/errors/api-error.filter';
 import { PgOnecRepository } from './adapters/pg-onec-repository';
 import { RateLimitService } from '../../rate-limit/rate-limit.service';
@@ -49,6 +51,19 @@ Module({
   providers: [
     { provide: OnecRuntimeConfigService, useValue: runtimeStub },
     { provide: OnecCommandsService, useValue: { lease: async () => ({ hasCommand: false }), received: async () => undefined, result: async () => undefined } },
+    {
+      provide: OnecEtlIngestService,
+      useValue: {
+        // Echoes what reached the controller: headers intact, body still an unread stream.
+        upload: async (_agent: unknown, headers: Record<string, string>, body: NodeJS.ReadableStream) => {
+          let bytes = 0;
+          for await (const chunk of body) bytes += (chunk as Buffer).length;
+          return { contentType: headers['content-type'], bytes };
+        },
+        lookup: async () => ({ batchId: 'b' }),
+      },
+    },
+    { provide: OnecEtlCompletionService, useValue: { complete: async () => undefined } },
     { provide: RateLimitService, useValue: { assertAllowed: async () => undefined, refund: async () => undefined } },
     { provide: PgOnecRepository, useValue: repositoryStub },
     {
@@ -130,5 +145,24 @@ describe('1C agent HTTP wiring (real Nest + Express, two listeners)', () => {
       method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', ...agentHeaders }, body: `a=${'x'.repeat(5 * 1024 * 1024)}`,
     });
     expect(form.status).toBe(415);
+  });
+
+  it('streams ETL batches (x-ndjson) to the controller unread; ndjson elsewhere stays refused', async () => {
+    const payload = Buffer.alloc(3 * 1024 * 1024, 7);
+    const batch = await fetch(`${agentUrl}/api/integration/1c-agents/v1/etl/batches`, {
+      method: 'POST', headers: { 'content-type': 'application/x-ndjson', 'content-encoding': 'gzip', ...agentHeaders }, body: payload,
+    });
+    expect(batch.status).toBe(200);
+    expect(await batch.json()).toEqual({ contentType: 'application/x-ndjson', bytes: payload.length });
+    const elsewhere = await fetch(`${agentUrl}/api/integration/1c-agents/v1/session/start`, {
+      method: 'POST', headers: { 'content-type': 'application/x-ndjson', ...agentHeaders }, body: 'x',
+    });
+    expect(elsewhere.status).toBe(415);
+    // Without agent credentials the guard refuses before the controller reads the body.
+    const anonymous = await fetch(`${agentUrl}/api/integration/1c-agents/v1/etl/batches`, {
+      method: 'POST', headers: { 'content-type': 'application/x-ndjson' }, body: 'x',
+    });
+    expect(anonymous.status).toBe(403);
+    expect((await post(agentUrl, '/api/integration/1c-agents/v1/etl/runs/not-a-uuid/complete', {})).status).toBe(404);
   });
 });

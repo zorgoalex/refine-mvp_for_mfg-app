@@ -8,7 +8,10 @@ export type OnecEventType =
   | 'onec.config.rejected'
   | 'onec.source.identity_changed'
   | 'onec.command.completed'
-  | 'onec.command.expired_undelivered';
+  | 'onec.command.expired_undelivered'
+  | 'onec.etl.run_completed'
+  | 'onec.etl.run_abandoned'
+  | 'onec.etl.full_sync_required';
 
 export type OnecEventSeverity = 'info' | 'warning' | 'critical';
 

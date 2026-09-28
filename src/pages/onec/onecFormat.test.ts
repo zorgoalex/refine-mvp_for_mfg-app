@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  onecAlertKindLabel,
   onecCertExpirySeverity,
   onecCommandCancellable,
   onecCommandPayloadFromForm,
@@ -11,19 +12,34 @@ import {
   onecConnectionBadge,
   onecDefaultProbeMarker,
   onecDiffConfigurations,
+  onecEtlBatchStatusColor,
+  onecEtlBatchStatusLabel,
+  onecEtlCompletenessLabel,
   onecEtlEntityFromFormValues,
+  onecEtlEntityLabel,
+  onecEtlEntityStatusColor,
+  onecEtlEntityStatusLabel,
   onecEtlEntityToFormValues,
+  onecEtlReadScopeLabel,
+  onecEtlRunModeLabel,
+  onecEtlRunStatusColor,
+  onecEtlRunStatusLabel,
   onecIdentityWarning,
   onecIfMatchHeader,
+  onecIncidentKindLabel,
   onecModeLabel,
   onecRelativeTime,
   onecStableStringify,
   onecStateBadge,
+  onecStripSourceGeneration,
   ONEC_ETL_ENTITY_FORM_DEFAULTS,
+  ONEC_ETL_ENTITY_PRESET_LABELS,
+  ONEC_ETL_ENTITY_PRESETS,
+  ONEC_OPERATOR_RESOLVABLE_ALERT_KINDS,
   type OnecEtlEntityFormValues,
   onecAlertResolvable,
 } from './onecFormat';
-import type { OnecAgentConfiguration, OnecEtlEntity } from './onecApi.types';
+import type { OnecAgentConfiguration, OnecEtlEntity, OnecPublishedAgentConfiguration } from './onecApi.types';
 
 describe('onecModeLabel', () => {
   it('translates known modes to Russian and falls back to the raw value', () => {
@@ -429,5 +445,197 @@ describe('onecAlertResolvable', () => {
     expect(onecAlertResolvable('command_expired_undelivered', 'acknowledged')).toBe(true);
     expect(onecAlertResolvable('command_dead_letter', 'resolved')).toBe(false);
     expect(onecAlertResolvable('agent_silent', 'open')).toBe(false);
+  });
+
+  it('also lets the operator close an abandoned ETL run alert', () => {
+    expect(ONEC_OPERATOR_RESOLVABLE_ALERT_KINDS).toContain('etl_run_abandoned');
+    expect(onecAlertResolvable('etl_run_abandoned', 'open')).toBe(true);
+    expect(onecAlertResolvable('etl_run_abandoned', 'resolved')).toBe(false);
+  });
+});
+
+describe('onec ETL alert/incident labels', () => {
+  it('translates the new ETL alert kinds', () => {
+    expect(onecAlertKindLabel('etl_entity_failed')).toBe('Ошибка выгрузки сущности');
+    expect(onecAlertKindLabel('etl_run_abandoned')).toBe('Выгрузка брошена');
+    expect(onecAlertKindLabel('mystery_kind')).toBe('mystery_kind');
+  });
+
+  it('translates the new ETL incident kinds', () => {
+    expect(onecIncidentKindLabel('etl_batch_invalid')).toBe('Некорректный пакет выгрузки');
+    expect(onecIncidentKindLabel('late_mode_for_completed_run')).toBe('Режим команды пришёл после завершения выгрузки');
+  });
+});
+
+describe('onec ETL entity label', () => {
+  it('translates known entity codes to Russian and falls back to the raw code', () => {
+    expect(onecEtlEntityLabel('items')).toBe('Номенклатура');
+    expect(onecEtlEntityLabel('counterparties')).toBe('Контрагенты');
+    expect(onecEtlEntityLabel('units')).toBe('Единицы измерения');
+    expect(onecEtlEntityLabel('item_categories')).toBe('Категории номенклатуры');
+    expect(onecEtlEntityLabel('warehouses')).toBe('Склады');
+    expect(onecEtlEntityLabel('stock_balances')).toBe('Остатки');
+    expect(onecEtlEntityLabel('counterparty_phones')).toBe('Телефоны контрагентов');
+    expect(onecEtlEntityLabel('price_kinds')).toBe('Виды цен');
+    expect(onecEtlEntityLabel('item_prices')).toBe('Цены');
+    expect(onecEtlEntityLabel('unknown_entity')).toBe('unknown_entity');
+  });
+});
+
+describe('onec ETL run mode/status labels', () => {
+  it('translates run modes and treats a missing mode as a dash', () => {
+    expect(onecEtlRunModeLabel('bootstrap_full')).toBe('Полная выгрузка');
+    expect(onecEtlRunModeLabel('entity_reload')).toBe('Перезагрузка сущности');
+    expect(onecEtlRunModeLabel('incremental')).toBe('Изменения');
+    expect(onecEtlRunModeLabel(null)).toBe('—');
+  });
+
+  it('translates run statuses with matching tag colors', () => {
+    expect(onecEtlRunStatusLabel('receiving')).toBe('Получение');
+    expect(onecEtlRunStatusColor('receiving')).toBe('processing');
+    expect(onecEtlRunStatusLabel('completed')).toBe('Завершена');
+    expect(onecEtlRunStatusColor('completed')).toBe('green');
+    expect(onecEtlRunStatusLabel('abandoned')).toBe('Брошена');
+    expect(onecEtlRunStatusColor('abandoned')).toBe('red');
+  });
+});
+
+describe('onec ETL batch status label/color', () => {
+  it('translates every batch status the agent may report', () => {
+    expect(onecEtlBatchStatusLabel('receiving')).toBe('Получение');
+    expect(onecEtlBatchStatusLabel('stored')).toBe('Сохранён');
+    expect(onecEtlBatchStatusLabel('parsing')).toBe('Разбор');
+    expect(onecEtlBatchStatusLabel('parsed')).toBe('Разобран');
+    expect(onecEtlBatchStatusLabel('invalid')).toBe('Ошибка разбора');
+    expect(onecEtlBatchStatusLabel('discarded')).toBe('Отброшен');
+    expect(onecEtlBatchStatusLabel('finalized')).toBe('Перенесён');
+    expect(onecEtlBatchStatusColor('invalid')).toBe('red');
+    expect(onecEtlBatchStatusColor('finalized')).toBe('green');
+  });
+});
+
+describe('onec ETL completeness/read-scope/entity-status labels', () => {
+  it('translates completeness, falling back to a dash for null', () => {
+    expect(onecEtlCompletenessLabel('verified')).toBe('Подтверждена');
+    expect(onecEtlCompletenessLabel('unverified')).toBe('Не подтверждена');
+    expect(onecEtlCompletenessLabel('not_checked')).toBe('Не проверялась');
+    expect(onecEtlCompletenessLabel(null)).toBe('—');
+  });
+
+  it('translates the read scope of the last run', () => {
+    expect(onecEtlReadScopeLabel('full')).toBe('Полное');
+    expect(onecEtlReadScopeLabel('delta')).toBe('Изменения');
+    expect(onecEtlReadScopeLabel(null)).toBe('—');
+  });
+
+  it('translates the entity last-run status with matching colors', () => {
+    expect(onecEtlEntityStatusLabel('done')).toBe('Успешно');
+    expect(onecEtlEntityStatusColor('done')).toBe('green');
+    expect(onecEtlEntityStatusLabel('failed')).toBe('Ошибка');
+    expect(onecEtlEntityStatusColor('failed')).toBe('red');
+    expect(onecEtlEntityStatusLabel(null)).toBe('Нет данных');
+    expect(onecEtlEntityStatusColor(null)).toBeUndefined();
+  });
+});
+
+describe('onecStripSourceGeneration', () => {
+  it('removes the server-added sourceGeneration stamp and keeps the rest untouched', () => {
+    const published: OnecPublishedAgentConfiguration = {
+      mode: 'Normal',
+      commandTypes: [],
+      etlIntervalMinutes: 60,
+      etlEntities: [],
+      sourceGeneration: 'gen-123',
+    };
+    const stripped = onecStripSourceGeneration(published);
+    expect(stripped).toEqual({
+      mode: 'Normal',
+      commandTypes: [],
+      etlIntervalMinutes: 60,
+      etlEntities: [],
+    });
+    expect('sourceGeneration' in stripped).toBe(false);
+  });
+
+  it('is a no-op when there is no sourceGeneration to strip', () => {
+    const published: OnecPublishedAgentConfiguration = {
+      mode: 'Normal',
+      commandTypes: [],
+      etlIntervalMinutes: 60,
+      etlEntities: [],
+    };
+    expect(onecStripSourceGeneration(published)).toEqual(published);
+  });
+});
+
+describe('ONEC_ETL_ENTITY_PRESETS', () => {
+  it('matches the items preset agreed with the 1C agent team exactly', () => {
+    expect(ONEC_ETL_ENTITY_PRESETS.items).toEqual({
+      entityCode: 'items',
+      oDataPath: 'Catalog_Номенклатура',
+      keyField: 'Ref_Key',
+      updatedAtField: null,
+      deletedField: 'DeletionMark',
+      select: [
+        'Ref_Key',
+        'DataVersion',
+        'Code',
+        'Description',
+        'Parent_Key',
+        'IsFolder',
+        'DeletionMark',
+        'Артикул',
+        'НаименованиеПолное',
+        'ЕдиницаИзмерения_Key',
+        'Поставщик_Key',
+        'Склад_Key',
+      ],
+      syncMode: 'incremental',
+      pageSize: 1000,
+      overlapMinutes: 0,
+      enabled: true,
+    });
+  });
+
+  it('matches the counterparties preset agreed with the 1C agent team exactly', () => {
+    expect(ONEC_ETL_ENTITY_PRESETS.counterparties).toEqual({
+      entityCode: 'counterparties',
+      oDataPath: 'Catalog_Контрагенты',
+      keyField: 'Ref_Key',
+      updatedAtField: null,
+      deletedField: 'DeletionMark',
+      select: [
+        'Ref_Key',
+        'DataVersion',
+        'Code',
+        'Description',
+        'Parent_Key',
+        'IsFolder',
+        'DeletionMark',
+        'НаименованиеПолное',
+        'Покупатель',
+        'Поставщик',
+        'ВидКонтрагента',
+        'ИдентификационныйНомер',
+        'ИдентификационныйНомерВведенКорректно',
+      ],
+      syncMode: 'incremental',
+      pageSize: 1000,
+      overlapMinutes: 0,
+      enabled: true,
+    });
+  });
+
+  it('has a human Russian label for each preset key', () => {
+    expect(ONEC_ETL_ENTITY_PRESET_LABELS.items).toBe('Номенклатура (items)');
+    expect(ONEC_ETL_ENTITY_PRESET_LABELS.counterparties).toBe('Контрагенты (counterparties)');
+  });
+});
+
+describe('etl_full_sync_required alert', () => {
+  it('is labelled and closable by the operator', () => {
+    expect(onecAlertKindLabel('etl_full_sync_required')).toBe('Нужна полная выгрузка');
+    expect(onecAlertResolvable('etl_full_sync_required', 'open')).toBe(true);
+    expect(onecAlertResolvable('etl_full_sync_required', 'acknowledged')).toBe(true);
   });
 });

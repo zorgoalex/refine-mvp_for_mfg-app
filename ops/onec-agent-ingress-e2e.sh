@@ -59,6 +59,7 @@ FP="$(openssl x509 -in "$WORK/certs/registered.crt" -outform DER | sha256sum | c
   echo "CREATE TABLE audit_log_related_entity(LIKE public.audit_log_related_entity INCLUDING ALL);"
   cat "$REPO_DIR/backend/db/migrations/193_onec_agent_foundation.sql"
   cat "$REPO_DIR/backend/db/migrations/196_onec_agent_commands.sql"
+  cat "$REPO_DIR/backend/db/migrations/198_onec_etl.sql"
   echo "INSERT INTO onec_sources(code, display_name) VALUES ('e2e','E2E-Тест источник');"
   echo "INSERT INTO onec_agents(agent_id, source_id, site_id, display_name) SELECT '$AGENT_ID', source_id, 'e2e', 'E2E-Тест агент' FROM onec_sources;"
   echo "INSERT INTO onec_agent_certificates(agent_id, sha256_fingerprint) VALUES ('$AGENT_ID', decode('$FP','hex'));"
@@ -165,6 +166,39 @@ c3="$(code_of "${AGENT[@]}" "${REG[@]}" -X PUT -H "X-Agent-Id: $AGENT_ID" -H 'Co
 stored="$(echo "SELECT status || '|' || (result_sha256 = encode(sha256(convert_to(result_body, 'UTF8')), 'hex'))::text FROM $SCHEMA.onec_agent_commands WHERE command_id = '$CMD_ID';" | psql_exec -At)"
 [[ "$c1" == 204 && "$c2" == 204 && "$c3" == 409 && "$stored" == "succeeded|true" ]]
 check "result stored byte for byte; same bytes 204, different 409 ($c1/$c2/$c3, $stored)" "$?"
+# --- E3a ETL intake through the real ingress (50k rows streamed, parsed, completed) ----
+RUN_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+BATCH_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+python3 - "$WORK/batch.ndjson.gz" <<'PY'
+import gzip, json, sys, random
+random.seed(7)
+with gzip.open(sys.argv[1], 'wt', encoding='utf-8') as out:
+    for i in range(50000):
+        data = {'Ref_Key': f'{i:08d}-0000-4000-8000-000000000000', 'Description': f'E2E-Тест {i} ' + ''.join(random.choice('abcdef0123456789') for _ in range(40)), 'Price': '12345678901234567890.1234500'}
+        out.write(json.dumps({'sourceId': data['Ref_Key'], 'sourceUpdatedAt': None, 'deleted': False, 'data': data}, ensure_ascii=False) + '\n')
+PY
+BATCH_SHA="$(openssl dgst -sha256 -binary "$WORK/batch.ndjson.gz" | base64)"
+UPLOAD() { code_of "${AGENT[@]}" --max-time 120 "${REG[@]}" -H "X-Agent-Id: $AGENT_ID" -H 'Content-Type: application/x-ndjson' -H 'Content-Encoding: gzip' \
+  -H "Idempotency-Key: $BATCH_ID" -H "X-Batch-Id: $BATCH_ID" -H "X-Run-Id: $RUN_ID" -H 'X-Entity: items' -H 'X-Schema-Version: 1' \
+  -H 'X-Row-Count: 50000' -H "X-Content-SHA256: $1" --data-binary "@$WORK/batch.ndjson.gz" "$BASE/etl/batches"; }
+c1="$(UPLOAD "$BATCH_SHA")"; ack1="$(jq -cS . "$WORK/body")"
+c2="$(UPLOAD "$BATCH_SHA")"; ack2="$(jq -cS . "$WORK/body")"
+[[ "$c1" == 200 && "$c2" == 200 && "$ack1" == "$ack2" && "$(jq -r .rowsAccepted "$WORK/body")" == 50000 && "$(jq -r .checksumValid "$WORK/body")" == true ]]
+check "ETL batch ($(stat -c %s "$WORK/batch.ndjson.gz") bytes gzip) acknowledged; repeat returns the same ACK ($c1/$c2)" "$?"
+c="$(UPLOAD "$(printf 'other' | openssl dgst -sha256 -binary | base64)")"
+[[ "$c" == 409 && "$(jq -r .error.code "$WORK/body")" == BATCH_CONFLICT ]]; check "same batchId with another body: 409 BATCH_CONFLICT ($c)" "$?"
+c="$(code_of "${AGENT[@]}" "${REG[@]}" -H "X-Agent-Id: $AGENT_ID" "$BASE/etl/batches/$BATCH_ID")"
+ack3="$(jq -cS . "$WORK/body")"
+[[ "$c" == 200 && "$ack3" == "$ack1" ]]; check "GET etl/batches/{id} returns the original ACK ($c${ack3:+, same=$([[ "$ack3" == "$ack1" ]] && echo yes || echo "no: $ack1 vs $ack3")})" "$?"
+COMPLETE="{\"runId\":\"$RUN_ID\",\"status\":\"succeeded\",\"mode\":\"bootstrap_full\",\"rowsRead\":50000,\"batchesCreated\":1,\"batchesAcknowledged\":1,\"completedAtUtc\":\"2026-09-28T10:00:00Z\",\"entitiesFailed\":0,\"entities\":[{\"entity\":\"items\",\"status\":\"done\",\"readScope\":\"full\",\"rowsRead\":50000,\"batchesCreated\":1,\"errorCode\":null,\"errorMessage\":null}]}"
+for _ in 1 2 3 4 5 6; do
+  c="$(code_of "${AGENT[@]}" --max-time 60 "${REG[@]}" -H "X-Agent-Id: $AGENT_ID" -H 'Content-Type: application/json' -H "Idempotency-Key: $RUN_ID" -d "$COMPLETE" "$BASE/etl/runs/$RUN_ID/complete")"
+  [[ "$c" == 503 ]] || break
+done
+c2="$(code_of "${AGENT[@]}" "${REG[@]}" -H "X-Agent-Id: $AGENT_ID" -H 'Content-Type: application/json' -H "Idempotency-Key: $RUN_ID" -d "$COMPLETE" "$BASE/etl/runs/$RUN_ID/complete")"
+mirrored="$(echo "SELECT count(*) || '|' || bool_and(data->>'Price' = '12345678901234567890.1234500')::text FROM $SCHEMA.onec_etl_mirror_rows WHERE entity_code = 'items';" | psql_exec -At)"
+[[ "$c" == 204 && "$c2" == 204 && "$mirrored" == "50000|true" ]]; check "complete 204 (repeat 204): 50000 rows in the mirror ($c/$c2, $mirrored)" "$?"
+
 c="$(code_of "${API[@]}" -H 'Content-Type: application/json' -H "X-Onec-Ingress-Auth: $SECRET" -H "X-Agent-Id: $AGENT_ID" \
   -d "$SESSION_BODY" "https://$API_HOST:$P_API/api/integration/1c-agents/v1/session/start")"
 [[ "$c" == 404 ]]; check "agent API unreachable via the regular API host even with the secret ($c)" "$?"

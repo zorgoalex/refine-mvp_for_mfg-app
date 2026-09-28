@@ -30,6 +30,8 @@ export interface SourceRecord {
   identity: { databaseId: string; exportEpoch: string; environment: string } | null;
   identityStatus: 'unverified' | 'bound' | 'identity_changed';
   generation: number;
+  /** Never-reused generation reference; published to the agent as configuration.sourceGeneration. */
+  generationRef: string;
 }
 
 export interface PublishedConfig {
@@ -67,6 +69,8 @@ export interface AuditLinkInput {
   sourceGeneration?: number | null;
   configVersion?: number | null;
   commandId?: string | null;
+  runId?: string | null;
+  batchId?: string | null;
   sessionId?: string | null;
   certId?: number | null;
   requestId?: string | null;
@@ -109,6 +113,7 @@ function toSource(row: QueryResultRow): SourceRecord {
     identity: row.identity ?? null,
     identityStatus: row.identity_status,
     generation: num(row.generation),
+    generationRef: row.generation_ref,
   };
 }
 
@@ -502,13 +507,13 @@ export class PgOnecRepository {
 
   async recordIncident(
     client: DatabaseClient,
-    input: { agentId: string | null; kind: string; dedupeKey: string; details: Record<string, unknown> },
+    input: { agentId: string | null; kind: string; dedupeKey: string; details: Record<string, unknown>; runId?: string | null; batchId?: string | null },
   ): Promise<void> {
     await client.query(
-      `INSERT INTO onec_agent_incidents (agent_id, kind, dedupe_key, details) VALUES ($1, $2, $3, $4::jsonb)
+      `INSERT INTO onec_agent_incidents (agent_id, kind, dedupe_key, details, run_id, batch_id) VALUES ($1, $2, $3, $4::jsonb, $5, $6)
        ON CONFLICT (dedupe_key) DO UPDATE SET occurrences = onec_agent_incidents.occurrences + 1,
          last_at = now(), details = EXCLUDED.details`,
-      [input.agentId, input.kind, input.dedupeKey, JSON.stringify(input.details)],
+      [input.agentId, input.kind, input.dedupeKey, JSON.stringify(input.details), input.runId ?? null, input.batchId ?? null],
     );
   }
 
@@ -677,8 +682,8 @@ export class PgOnecRepository {
   async insertAuditLink(client: DatabaseClient, auditId: string, link: AuditLinkInput): Promise<void> {
     await client.query(
       `INSERT INTO onec_audit_links (audit_id, actor_kind, agent_id, source_id, source_generation, config_version,
-                                     session_id, cert_id, request_id, correlation_id, command_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                                     session_id, cert_id, request_id, correlation_id, command_id, run_id, batch_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
       [
         auditId,
         link.actorKind,
@@ -691,6 +696,8 @@ export class PgOnecRepository {
         link.requestId ?? null,
         link.correlationId ?? null,
         link.commandId ?? null,
+        link.runId ?? null,
+        link.batchId ?? null,
       ],
     );
   }

@@ -11,6 +11,8 @@ const configTab = read('./ConfigurationTab.tsx');
 const alertsTab = read('./AlertsIncidentsTab.tsx');
 const entityModal = read('./ConfigEntityModal.tsx');
 const commandsTab = read('./CommandsTab.tsx');
+const etlTab = read('./EtlTab.tsx');
+const format = read('./onecFormat.ts');
 
 describe('Onec (1C integration) UI wiring', () => {
   it('gates the whole section on the backend flag and onec permissions', () => {
@@ -31,7 +33,7 @@ describe('Onec (1C integration) UI wiring', () => {
   });
 
   it('talks to the backend admin API only, never GraphQL', () => {
-    for (const source of [api, agentsTab, drawer, configTab, alertsTab, commandsTab]) {
+    for (const source of [api, agentsTab, drawer, configTab, alertsTab, commandsTab, etlTab]) {
       expect(source).not.toMatch(/gql`|useMutation\(|useQuery\(\s*gql/);
     }
     expect(api).toMatch(/httpClient\.get/);
@@ -148,5 +150,61 @@ describe('Onec (1C integration) UI wiring', () => {
   it('keeps Table/Tooltip imports in CommandsTab routed through the delayed wrapper', () => {
     expect(commandsTab).toMatch(/from '\.\.\/\.\.\/ui\/tooltipDelay'/);
     expect(commandsTab).not.toMatch(/import\s+\{[^}]*\b(Table|Tooltip|Popover)\b[^}]*\}\s+from\s+'antd'/);
+  });
+
+  it('adds an "ETL" tab between "Команды" and "Алерты и инциденты", gated by the page-level onec.view guard', () => {
+    expect(page).toMatch(/key:\s*'etl'/);
+    expect(page).toMatch(/label:\s*'ETL'/);
+    expect(page).toMatch(/<EtlTab[\s\S]{0,80}canSendCommands=\{canSendCommands\}/);
+    const commandsIndex = page.indexOf("key: 'commands'");
+    const etlIndex = page.indexOf("key: 'etl'");
+    const alertsIndex = page.indexOf("key: 'alerts'");
+    expect(commandsIndex).toBeGreaterThan(-1);
+    expect(etlIndex).toBeGreaterThan(commandsIndex);
+    expect(alertsIndex).toBeGreaterThan(etlIndex);
+  });
+
+  it('adds the ETL read endpoints to the API client', () => {
+    expect(api).toMatch(/listEtlEntities\(/);
+    expect(api).toMatch(/listEtlRuns\(/);
+    expect(api).toMatch(/getEtlRun\(/);
+  });
+
+  it('keeps Table/Tooltip imports in EtlTab routed through the delayed wrapper', () => {
+    expect(etlTab).toMatch(/from '\.\.\/\.\.\/ui\/tooltipDelay'/);
+    expect(etlTab).not.toMatch(/import\s+\{[^}]*\b(Table|Tooltip|Popover)\b[^}]*\}\s+from\s+'antd'/);
+  });
+
+  it('gates ETL commands, keeps one Idempotency-Key per intent until success and blocks parallel sends', () => {
+    expect(etlTab).toMatch(/const actionsReady = canSendCommands && !!agentId && loadedAgentId === agentId && sending === null;/);
+    expect(etlTab).toMatch(/let key = intentKeys\.current\.get\(intentId\);/);
+    expect(etlTab).toMatch(/await onecApi\.sendCommand\(agentId, key, command\);\s*intentKeys\.current\.delete\(intentId\);/);
+    expect(etlTab).not.toMatch(/sendCommand\(agentId, crypto\.randomUUID\(\)/);
+    expect(etlTab).toMatch(/if \(!agentId \|\| sending\) return;/);
+  });
+
+  it('never shows or acts on the previous agent rows after an agent switch', () => {
+    expect(etlTab).toMatch(/useEffect\(\(\) => \{\s*setEntities\(\[\]\);\s*setRuns\(\[\]\);\s*setLoadedAgentId\(null\);\s*\}, \[agentId\]\);/);
+    expect(etlTab).toMatch(/setLoadedAgentId\(agentId\);/);
+    expect(etlTab).toMatch(/if \(seq !== requestSeq\.current \|\| selectedAgent\.current !== agentId\) return;/);
+    expect(etlTab).toMatch(/if \(selectedAgent\.current === agentId\) void load\(\);/);
+  });
+
+  it('drops stale ETL journal responses for a previously selected agent', () => {
+    expect(etlTab).toContain('const requestSeq = useRef(0);');
+    expect(etlTab).toMatch(/if \(seq !== requestSeq\.current\) return;/);
+    expect(etlTab).toMatch(/document\.hidden/);
+  });
+
+  it('never lets a saved/compared configuration keep the published sourceGeneration stamp', () => {
+    expect(format).toMatch(/export function onecStripSourceGeneration/);
+    expect(configTab).toContain('onecStripSourceGeneration(data.published.configuration)');
+    expect(configTab).toContain('onecStripSourceGeneration(configState.published.configuration)');
+  });
+
+  it('offers the items/counterparties entity presets from ConfigurationTab without overwriting an existing code', () => {
+    expect(configTab).toMatch(/ONEC_ETL_ENTITY_PRESETS/);
+    expect(configTab).toMatch(/addEntityPreset/);
+    expect(configTab).toMatch(/уже есть в списке; шаблон не применён/);
   });
 });

@@ -78,4 +78,24 @@ export class OnecAuditWriter {
     });
     return auditId;
   }
+
+  /** System-initiated transitions (monitor): no user, no agent; one request id per tick. */
+  async bySystem(
+    tx: DatabaseClient,
+    actorName: string,
+    requestId: string,
+    event: Omit<AuditEvent, 'actorUserId' | 'actorUsername' | 'actorRole' | 'requestId' | 'source'>,
+    link: Omit<AuditLinkInput, 'actorKind' | 'requestId'> = {},
+  ): Promise<string> {
+    const auditId = await auditService.record(tx, {
+      ...event,
+      actorUserId: null,
+      actorUsername: actorName,
+      actorRole: null,
+      requestId,
+      source: ONEC_AGENT_AUDIT_SOURCE,
+    });
+    await this.repository.insertAuditLink(tx, auditId, { ...link, actorKind: 'system', requestId });
+    return auditId;
+  }
 }

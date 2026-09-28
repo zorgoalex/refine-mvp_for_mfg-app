@@ -8,6 +8,7 @@ import type { OnecOverview } from './onecApi.types';
 import { AgentsTab } from './AgentsTab';
 import { ConfigurationTab } from './ConfigurationTab';
 import { CommandsTab } from './CommandsTab';
+import { EtlTab } from './EtlTab';
 import { AlertsIncidentsTab } from './AlertsIncidentsTab';
 
 const { Title } = Typography;
@@ -101,6 +102,11 @@ export function OnecPage() {
       children: (
         <CommandsTab agents={agents} canSend={canSendCommands} onNavigateToConfig={() => setActiveTab('config')} />
       ),
+    },
+    {
+      key: 'etl',
+      label: 'ETL',
+      children: <EtlTab agents={agents} canSendCommands={canSendCommands} />,
     },
     {
       key: 'alerts',

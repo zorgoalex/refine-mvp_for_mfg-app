@@ -1,4 +1,5 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Post, Put, Query, Req, Res, SetMetadata, UseGuards } from '@nestjs/common';
+import type { IncomingMessage } from 'node:http';
+import { Body, Controller, Get, Headers, HttpCode, Inject, Param, Post, Put, Query, Req, Res, SetMetadata, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { ApiError } from '../../../common/errors/api-error';
@@ -6,6 +7,8 @@ import type { OnecAgentContext } from '../application/onec-audit';
 import { OnecAgentProtocolService } from '../application/onec-agent-protocol.service';
 import type { CommandRow } from '../adapters/pg-onec-command-repository';
 import { OnecCommandsService } from '../application/onec-commands.service';
+import { OnecEtlCompletionService } from '../application/onec-etl-completion.service';
+import { OnecEtlIngestService } from '../application/onec-etl-ingest.service';
 import { ONEC_ALLOW_BLOCKED_METADATA_KEY, OnecAgentAuthGuard } from './onec-agent-auth.guard';
 
 const AllowBlockedAgent = () => SetMetadata(ONEC_ALLOW_BLOCKED_METADATA_KEY, true);
@@ -27,6 +30,8 @@ export class OnecAgentController {
   constructor(
     @Inject(OnecAgentProtocolService) private readonly protocol: OnecAgentProtocolService,
     @Inject(OnecCommandsService) private readonly commands: OnecCommandsService,
+    @Inject(OnecEtlIngestService) private readonly ingest: OnecEtlIngestService,
+    @Inject(OnecEtlCompletionService) private readonly completion: OnecEtlCompletionService,
   ) {}
 
   @ApiOperation({ summary: 'Start an agent session and check version compatibility (mTLS)' })
@@ -91,6 +96,46 @@ export class OnecAgentController {
   async result(@Req() request: { onecAgent?: OnecAgentContext; rawBody?: Buffer }, @Param('commandId') commandId: string): Promise<void> {
     await this.commands.result(agentOf(request), uuid(commandId), request.rawBody);
   }
+
+  @ApiOperation({ summary: 'Receive one gzip NDJSON batch; ACK only after it is durably stored (idempotent by batchId)' })
+  @Post('etl/batches')
+  @HttpCode(200)
+  async uploadBatch(
+    @Req() request: IncomingMessage & { onecAgent?: OnecAgentContext },
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    try {
+      return await this.ingest.upload(agentOf(request), request.headers, request);
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'BATCH_NOT_STORED_RETRYABLE') response.setHeader('Retry-After', '30');
+      throw error;
+    }
+  }
+
+  @ApiOperation({ summary: 'Look up a batch: the original ACK, or 404 when ERP has not stored it' })
+  @Get('etl/batches/:batchId')
+  lookupBatch(@Req() request: { onecAgent?: OnecAgentContext }, @Param('batchId') batchId: string) {
+    return this.ingest.lookup(agentOf(request), uuidOr404(batchId, 'BATCH_NOT_FOUND'));
+  }
+
+  @ApiOperation({ summary: 'Complete a run: its staging becomes the mirror atomically (idempotent by runId)' })
+  @Post('etl/runs/:runId/complete')
+  @HttpCode(204)
+  async completeRun(
+    @Req() request: { onecAgent?: OnecAgentContext; rawBody?: Buffer },
+    @Param('runId') runId: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Body() body: unknown,
+  ): Promise<void> {
+    await this.completion.complete(agentOf(request), uuidOr404(runId, 'RUN_UNKNOWN'), idempotencyKey, body, request.rawBody);
+  }
+}
+
+function uuidOr404(value: string, code: string): string {
+  if (!/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(value)) {
+    throw new ApiError(404, code, 'Not found');
+  }
+  return value.toLowerCase();
 }
 
 function uuid(value: string): string {

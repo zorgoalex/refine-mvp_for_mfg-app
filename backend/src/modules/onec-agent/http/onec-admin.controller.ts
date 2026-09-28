@@ -5,6 +5,7 @@ import type { CurrentUser, RequestWithCurrentUser } from '../../../permissions/c
 import { RequirePermissions } from '../../../permissions/require-permissions.decorator';
 import { OnecAdminService } from '../application/onec-admin.service';
 import { OnecCommandsService } from '../application/onec-commands.service';
+import { OnecEtlAdminService } from '../application/onec-etl-admin.service';
 import type { OnecRequestContext } from '../application/onec-audit';
 import { OnecPermissionsGuard } from './onec-permissions.guard';
 
@@ -45,6 +46,7 @@ export class OnecAdminController {
   constructor(
     @Inject(OnecAdminService) private readonly service: OnecAdminService,
     @Inject(OnecCommandsService) private readonly commands: OnecCommandsService,
+    @Inject(OnecEtlAdminService) private readonly etl: OnecEtlAdminService,
   ) {}
 
   @ApiOperation({ summary: 'Overview of 1C agents: connection, state, queues, certificates, configuration' })
@@ -266,5 +268,29 @@ export class OnecAdminController {
   @RequirePermissions('onec.manage')
   resolveAlert(@Param('alertId') alertId: string, @Req() request: RequestWithCurrentUser) {
     return this.service.resolveAlert(positiveId(alertId), user(request), requestId(request));
+  }
+
+  @ApiOperation({ summary: 'List 1C ETL runs (journal; no row data)' })
+  @Get('etl/runs')
+  @ApiBearerAuth('bearerAuth')
+  @RequirePermissions('onec.view')
+  listEtlRuns(@Query() query: { agentId?: string; limit?: string }) {
+    return this.etl.listRuns(query);
+  }
+
+  @ApiOperation({ summary: 'One 1C ETL run with its batches' })
+  @Get('etl/runs/:runId')
+  @ApiBearerAuth('bearerAuth')
+  @RequirePermissions('onec.view')
+  getEtlRun(@Param('runId') runId: string) {
+    return this.etl.getRun(commandUuid(runId));
+  }
+
+  @ApiOperation({ summary: 'State of every 1C ETL entity (rows, missing, last run, errors)' })
+  @Get('etl/entities')
+  @ApiBearerAuth('bearerAuth')
+  @RequirePermissions('onec.view')
+  listEtlEntities(@Query('agentId') id: string | undefined) {
+    return this.etl.listEntities(id ? agentId(id) : undefined);
   }
 }

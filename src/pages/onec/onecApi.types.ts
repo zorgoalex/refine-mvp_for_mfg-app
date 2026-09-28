@@ -223,6 +223,14 @@ export interface OnecAgentConfiguration {
   etlEntities: OnecEtlEntity[];
 }
 
+/**
+ * Shape of a PUBLISHED configuration only: the backend stamps the source's
+ * generation token onto it at publish time (`OnecAdminService.publish`). A
+ * draft is validated against the strict `onecAgentConfigurationSchema` and
+ * MUST NOT carry this field (see `onecStripSourceGeneration` in onecFormat.ts).
+ */
+export type OnecPublishedAgentConfiguration = OnecAgentConfiguration & { sourceGeneration?: string };
+
 export interface OnecConfigDraft {
   revision: number;
   configHash: string;
@@ -233,7 +241,7 @@ export interface OnecConfigDraft {
 export interface OnecPublishedConfig {
   configVersion: number;
   configHash: string;
-  configuration: OnecAgentConfiguration;
+  configuration: OnecPublishedAgentConfiguration;
 }
 
 export interface OnecAgentReportedConfig {
@@ -267,7 +275,7 @@ export interface OnecConfigVersion {
   publishedFromRevision: number;
   publishedAt: string;
   publishedBy: string | null;
-  configuration: OnecAgentConfiguration;
+  configuration: OnecPublishedAgentConfiguration;
 }
 
 export interface OnecAlert {
@@ -351,4 +359,82 @@ export interface OnecStatusHistorySummary {
     deadLetters?: number;
   } | null;
   diskFreeBytes?: number | null;
+}
+
+// ---------------------------------------------------------------- ETL tab (read-only journal, no row data)
+
+export type OnecEtlLastStatus = 'done' | 'failed' | null;
+export type OnecEtlReadScope = 'full' | 'delta' | null;
+export type OnecEtlCompleteness = 'verified' | 'unverified' | 'not_checked' | null;
+
+/** `GET /onec/etl/entities`; mirrors backend `OnecEtlAdminService.listEntities`. */
+export interface OnecEtlEntityState {
+  sourceId: number;
+  entity: string;
+  lastRunId: string | null;
+  lastRunAt: string | null;
+  lastStatus: OnecEtlLastStatus;
+  lastReadScope: OnecEtlReadScope;
+  lastCompleteness: OnecEtlCompleteness;
+  lastCompletenessReason: string | null;
+  lastSnapshotAt: string | null;
+  lastFullAt: string | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  rowCount: number;
+  deletedCount: number;
+  missingCount: number;
+}
+
+export type OnecEtlRunStatus = 'receiving' | 'completed' | 'abandoned';
+export type OnecEtlRunMode = 'bootstrap_full' | 'entity_reload' | 'incremental' | null;
+
+/** One entity's outcome inside a run's completion payload (agent RunCompletionV2/PartialV1). */
+export interface OnecEtlRunEntitySummary {
+  entity: string;
+  status: 'done' | 'failed';
+  readScope?: OnecEtlReadScope;
+  completeness?: OnecEtlCompleteness;
+  errorCode: string | null;
+  errorMessage?: string | null;
+  rows?: number;
+  rowsRead?: number;
+}
+
+/** `GET /onec/etl/runs[?agentId=]`; mirrors backend `runView()`. */
+export interface OnecEtlRun {
+  runId: string;
+  agentId: string;
+  sourceId: number;
+  sourceGeneration: number;
+  status: OnecEtlRunStatus;
+  mode: OnecEtlRunMode;
+  modeOrigin: string | null;
+  commandId: string | null;
+  batchCount: number;
+  rowTotal: number;
+  entitiesFailed: number | null;
+  entities: OnecEtlRunEntitySummary[] | null;
+  createdAt: string;
+  firstBatchAt: string | null;
+  completedAt: string | null;
+}
+
+export type OnecEtlBatchStatus = 'receiving' | 'stored' | 'parsing' | 'parsed' | 'invalid' | 'discarded' | 'finalized';
+
+export interface OnecEtlBatch {
+  batchId: string;
+  entity: string;
+  status: OnecEtlBatchStatus;
+  rowCount: number;
+  parsedRows: number | null;
+  invalidReason: string | null;
+  parseAttempt: number;
+  receivedAt: string | null;
+  acknowledged: boolean;
+}
+
+/** `GET /onec/etl/runs/:runId`: the run plus its batches. */
+export interface OnecEtlRunDetail extends OnecEtlRun {
+  batches: OnecEtlBatch[];
 }

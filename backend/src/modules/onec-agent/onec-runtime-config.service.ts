@@ -14,6 +14,9 @@ export interface OnecRuntimeConfig {
   heartbeatIntervalMs: number;
   monitorOwner: 'none' | 'in_process';
   monitorIntervalMs: number;
+  etlWorkerOwner: 'none' | 'in_process';
+  etlSpoolDir: string;
+  etlSpoolMinFreeBytes: number;
 }
 
 @Injectable()
@@ -34,6 +37,9 @@ export class OnecRuntimeConfigService {
       heartbeatIntervalMs: this.config.get('ONEC_AGENT_HEARTBEAT_INTERVAL_MS', { infer: true }),
       monitorOwner: this.config.get('BACKEND_ONEC_MONITOR_OWNER', { infer: true }),
       monitorIntervalMs: this.config.get('BACKEND_ONEC_MONITOR_INTERVAL_MS', { infer: true }),
+      etlWorkerOwner: this.config.get('BACKEND_ONEC_ETL_WORKER_OWNER', { infer: true }),
+      etlSpoolDir: this.config.get('ONEC_ETL_SPOOL_DIR', { infer: true }),
+      etlSpoolMinFreeBytes: this.config.get('ONEC_ETL_SPOOL_MIN_FREE_BYTES', { infer: true }),
     };
   }
 

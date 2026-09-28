@@ -156,6 +156,59 @@ export class OnecAlertProjector {
           details: { commandId: str(p.commandId), commandType: str(p.commandType) },
         });
         return;
+      case 'onec.etl.run_completed': {
+        // Current state wins: only the run that is still the entity's latest may open/resolve its alert.
+        const runId = str(p.runId);
+        const entities = Array.isArray(p.entities) ? (p.entities as Array<Record<string, unknown>>) : [];
+        for (const entity of entities) {
+          const code = str(entity.entity);
+          if (!code || sourceId === null) continue;
+          const { rows } = await tx.query(
+            `SELECT last_run_id FROM onec_etl_entity_state WHERE source_id = $1 AND entity_code = $2`,
+            [sourceId, code],
+          );
+          if (rows[0]?.last_run_id !== runId) continue;
+          const dedupeKey = `etl_entity_failed:${sourceId}:${code}`;
+          if (entity.status === 'failed') {
+            await this.repository.upsertAlert(tx, {
+              kind: 'etl_entity_failed',
+              agentId,
+              sourceId,
+              certId: null,
+              severity: 'warning',
+              dedupeKey,
+              details: { entity: code, runId, errorCode: str(entity.errorCode) },
+            });
+          } else {
+            await this.repository.resolveAlertByDedupeKey(tx, dedupeKey);
+          }
+        }
+        return;
+      }
+      case 'onec.etl.run_abandoned':
+        await this.repository.upsertAlert(tx, {
+          kind: 'etl_run_abandoned',
+          agentId,
+          sourceId,
+          certId: null,
+          severity: 'warning',
+          dedupeKey: `etl_run_abandoned:${str(p.runId)}`,
+          oneShot: true,
+          details: { runId: str(p.runId) },
+        });
+        return;
+      case 'onec.etl.full_sync_required':
+        await this.repository.upsertAlert(tx, {
+          kind: 'etl_full_sync_required',
+          agentId,
+          sourceId,
+          certId: null,
+          severity: 'warning',
+          dedupeKey: `etl_full_sync_required:${str(p.runId)}`,
+          oneShot: true,
+          details: { runId: str(p.runId), mode: str(p.mode), completedAs: str(p.completedAs) },
+        });
+        return;
       default:
         throw new UnknownOnecEventError(event.eventType);
     }

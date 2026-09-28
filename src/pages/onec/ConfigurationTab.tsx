@@ -4,6 +4,7 @@ import {
   Button,
   Checkbox,
   Descriptions,
+  Dropdown,
   Empty,
   Form,
   InputNumber,
@@ -37,6 +38,9 @@ import {
   onecStableStringify,
   onecConfigWritable,
   onecIsCurrentResponse,
+  onecStripSourceGeneration,
+  ONEC_ETL_ENTITY_PRESETS,
+  ONEC_ETL_ENTITY_PRESET_LABELS,
 } from './onecFormat';
 import { ConfigEntityModal } from './ConfigEntityModal';
 
@@ -96,7 +100,14 @@ export function ConfigurationTab({ agents, canManage }: ConfigurationTabProps) {
       const data = await onecApi.getConfig(id);
       if (!onecIsCurrentResponse({ requestSeq: seq, latestSeq: loadSeq.current, requestAgentId: id, selectedAgentId: selectedAgentRef.current })) return;
       setConfigState(data);
-      setFormConfig(data.draft?.configuration ?? data.published?.configuration ?? emptyConfiguration(data.defaults));
+      // A published configuration carries the server-added `sourceGeneration`
+      // stamp; the draft schema is strict and rejects unknown keys, so it is
+      // stripped before ever being used as the editable form baseline.
+      setFormConfig(
+        data.draft?.configuration ??
+          (data.published ? onecStripSourceGeneration(data.published.configuration) : null) ??
+          emptyConfiguration(data.defaults),
+      );
     } catch (err) {
       if (seq !== loadSeq.current) return;
       setLoadError(err instanceof ApiError ? err.message : 'Не удалось загрузить конфигурацию');
@@ -148,7 +159,9 @@ export function ConfigurationTab({ agents, canManage }: ConfigurationTabProps) {
 
   const dirty = useMemo(() => {
     if (!configState || !formConfig) return false;
-    const baseline = configState.draft?.configuration ?? configState.published?.configuration ?? null;
+    const baseline =
+      configState.draft?.configuration ??
+      (configState.published ? onecStripSourceGeneration(configState.published.configuration) : null);
     return onecStableStringify(baseline) !== onecStableStringify(formConfig);
   }, [configState, formConfig]);
 
@@ -253,6 +266,16 @@ export function ConfigurationTab({ agents, canManage }: ConfigurationTabProps) {
     updateEntities(formConfig.etlEntities.filter((item) => item.entityCode !== entityCode));
   };
 
+  const addEntityPreset = (presetCode: keyof typeof ONEC_ETL_ENTITY_PRESETS) => {
+    if (!formConfig) return;
+    const preset = ONEC_ETL_ENTITY_PRESETS[presetCode];
+    if (formConfig.etlEntities.some((entity) => entity.entityCode === preset.entityCode)) {
+      message.warning(`Сущность «${preset.entityCode}» уже есть в списке; шаблон не применён`);
+      return;
+    }
+    updateEntities([...formConfig.etlEntities, preset]);
+  };
+
   const entityColumns = [
     { title: 'Код', dataIndex: 'entityCode', key: 'entityCode' },
     { title: 'OData-путь', dataIndex: 'oDataPath', key: 'oDataPath' },
@@ -352,6 +375,11 @@ export function ConfigurationTab({ agents, canManage }: ConfigurationTabProps) {
               {configState.draft ? `ревизия ${configState.draft.revision}` : 'нет'}
             </Descriptions.Item>
           </Descriptions>
+          {configState.published?.configuration.sourceGeneration && (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              Поколение источника: {configState.published.configuration.sourceGeneration}
+            </Text>
+          )}
 
           {viewMode === 'json' ? (
             <pre style={{ background: '#f5f5f5', padding: 12, maxHeight: 400, overflow: 'auto' }}>
@@ -403,6 +431,20 @@ export function ConfigurationTab({ agents, canManage }: ConfigurationTabProps) {
                     >
                       Добавить сущность
                     </Button>
+                  )}
+                  {canManage && (
+                    <Dropdown
+                      menu={{
+                        items: (Object.keys(ONEC_ETL_ENTITY_PRESETS) as Array<keyof typeof ONEC_ETL_ENTITY_PRESETS>).map((code) => ({
+                          key: code,
+                          label: ONEC_ETL_ENTITY_PRESET_LABELS[code],
+                          onClick: () => addEntityPreset(code),
+                        })),
+                      }}
+                      trigger={['click']}
+                    >
+                      <Button size="small">Добавить по шаблону</Button>
+                    </Dropdown>
                   )}
                 </Space>
                 <Table<OnecEtlEntity>

@@ -19,6 +19,10 @@ import { PgOnecCommandRepository } from '../src/modules/onec-agent/adapters/pg-o
 import { PgOnecRepository } from '../src/modules/onec-agent/adapters/pg-onec-repository';
 import { OnecCommandWakeups } from '../src/modules/onec-agent/application/onec-command-wakeups';
 import { OnecCommandsService } from '../src/modules/onec-agent/application/onec-commands.service';
+import { OnecEtlCompletionService } from '../src/modules/onec-agent/application/onec-etl-completion.service';
+import { OnecEtlIngestService } from '../src/modules/onec-agent/application/onec-etl-ingest.service';
+import { OnecEtlParserService } from '../src/modules/onec-agent/application/onec-etl-parser.service';
+import { PgOnecEtlRepository } from '../src/modules/onec-agent/adapters/pg-onec-etl-repository';
 import { OnecAgentProtocolService } from '../src/modules/onec-agent/application/onec-agent-protocol.service';
 import { OnecAuditWriter } from '../src/modules/onec-agent/application/onec-audit';
 import { OnecAgentAuthGuard } from '../src/modules/onec-agent/http/onec-agent-auth.guard';
@@ -71,9 +75,14 @@ async function main(): Promise<void> {
       heartbeatIntervalMs: 60000,
       monitorOwner: 'none' as const,
       monitorIntervalMs: 60000,
+      etlWorkerOwner: 'in_process' as const,
+      etlSpoolDir: process.env.ONEC_E2E_SPOOL_DIR ?? '/tmp/onec-e2e-spool',
+      etlSpoolMinFreeBytes: 0,
     }),
     requireEnabled: () => undefined,
   };
+  const etlRepository = new PgOnecEtlRepository(database);
+  const parser = new OnecEtlParserService(etlRepository, repository, runtime as unknown as OnecRuntimeConfigService);
   class E2eModule {}
   Module({
     controllers: [OnecAgentController, PingController],
@@ -97,7 +106,15 @@ async function main(): Promise<void> {
             audit,
             new OnecCommandWakeups(database, runtime as unknown as OnecRuntimeConfigService),
             runtime as unknown as OnecRuntimeConfigService,
+            etlRepository,
           ),
+        inject: [OnecAuditWriter],
+      },
+      { provide: OnecEtlParserService, useValue: parser },
+      { provide: OnecEtlIngestService, useValue: new OnecEtlIngestService(etlRepository, repository, runtime as unknown as OnecRuntimeConfigService, parser) },
+      {
+        provide: OnecEtlCompletionService,
+        useFactory: (audit: OnecAuditWriter) => new OnecEtlCompletionService(etlRepository, repository, audit, parser),
         inject: [OnecAuditWriter],
       },
       Reflector,
@@ -111,6 +128,7 @@ async function main(): Promise<void> {
   app.useGlobalFilters(new ApiErrorFilter());
   app.setGlobalPrefix('api/v1', { exclude: [{ path: 'health/live', method: RequestMethod.GET }, ONEC_AGENT_PREFIX_EXCLUDE] });
   await app.listen(mainPort, bind);
+  if (enabled) parser.onModuleInit();
   if (enabled) listenOnecAgent(app, agentPort, bind);
   process.stdout.write(`READY enabled=${enabled}\n`);
 }

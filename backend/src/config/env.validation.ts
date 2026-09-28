@@ -437,6 +437,12 @@ export const envSchema = z
     ONEC_AGENT_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().min(10000).max(3600000).default(60000),
     BACKEND_ONEC_MONITOR_OWNER: z.enum(['none', 'in_process']).default('none'),
     BACKEND_ONEC_MONITOR_INTERVAL_MS: z.coerce.number().int().min(5000).max(3600000).default(60000),
+    /** 1C agent E3: owner of the ETL batch parser (one process parses). */
+    BACKEND_ONEC_ETL_WORKER_OWNER: z.enum(['none', 'in_process']).default('none'),
+    /** Durable spool for received ETL batches (a volume; not in DB backups). */
+    ONEC_ETL_SPOOL_DIR: z.string().trim().min(1).max(500).default('/data/onec-etl-spool'),
+    /** Uploads are refused with 503 (retryable) when free space would drop below this. */
+    ONEC_ETL_SPOOL_MIN_FREE_BYTES: z.coerce.number().int().min(0).default(2 * 1024 * 1024 * 1024),
     FREECUT_BASE_URL: optionalUrlFromEnv,
     FREECUT_OPTIMIZE_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
     /** Auto engine=heuristic for cut groups with >= this many item instances; 0 disables auto mode. */

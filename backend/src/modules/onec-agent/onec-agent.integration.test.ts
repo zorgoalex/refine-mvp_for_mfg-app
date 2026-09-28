@@ -1,3 +1,4 @@
+import { sha256Base64 } from './canonical-json/canonical-json';
 import { execFileSync } from 'node:child_process';
 import { randomUUID, X509Certificate } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -12,6 +13,7 @@ import { DatabaseService } from '../../database/database.service';
 import type { PerformanceQueryTelemetryService } from '../../performance/performance-query-telemetry.service';
 import type { CurrentUser } from '../../permissions/current-user';
 import { PgOnecCommandRepository } from './adapters/pg-onec-command-repository';
+import { PgOnecEtlRepository } from './adapters/pg-onec-etl-repository';
 import { PgOnecRepository } from './adapters/pg-onec-repository';
 import { OnecAdminService } from './application/onec-admin.service';
 import { OnecAgentProtocolService } from './application/onec-agent-protocol.service';
@@ -95,7 +97,7 @@ suite('1C agent E1 — isolated PostgreSQL', () => {
     const audit = new OnecAuditWriter(repo);
     admin = new OnecAdminService(repo, audit, runtime);
     protocol = new OnecAgentProtocolService(repo, audit);
-    monitor = new OnecMonitorService(runtime, repo, db, new OnecAlertProjector(repo), new PgOnecCommandRepository(db));
+    monitor = new OnecMonitorService(runtime, repo, db, new OnecAlertProjector(repo), new PgOnecCommandRepository(db), new PgOnecEtlRepository(db), new OnecAuditWriter(repo));
     const rateLimit = { assertAllowed: async () => undefined, refund: async () => undefined } as unknown as RateLimitService;
     guard = new OnecAgentAuthGuard(new Reflector(), runtime, repo, rateLimit);
   }, 60000);
@@ -246,8 +248,13 @@ suite('1C agent E1 — isolated PostgreSQL', () => {
     if (!full.notModified) {
       const body = JSON.parse(full.body);
       expect(body.configVersion).toBe(published.configVersion);
-      expect(body.configHash).toBe(draft.configHash);
+      // Published = draft + the source generation token (plan §3.2); the hash covers what the agent receives.
+      expect(body.configHash).toBe(published.configHash);
+      expect(body.configHash).not.toBe(draft.configHash);
+      const generationRef = (await pool.query(`SELECT generation_ref FROM onec_sources WHERE source_id = $1`, [agent.sourceId])).rows[0].generation_ref;
+      expect(body.configuration.sourceGeneration).toBe(generationRef);
       expect(full.body).toContain('"configuration":{"commandTypes":["integration_probe"]');
+      expect(sha256Base64(full.body.slice(full.body.indexOf('"configuration":') + 16, -1))).toBe(published.configHash);
     }
     expect(await protocol.configuration(agent, String(published.configVersion))).toEqual({ notModified: true });
     expect(await statusOf(() => protocol.configuration(agent, '-1'))).toBe('400 INVALID_REQUEST');

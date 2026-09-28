@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { PgOnecRepository } from '../adapters/pg-onec-repository';
-import { parseStrictJson, toPlainValue } from '../canonical-json/canonical-json';
+import { canonicalizeValue, parseStrictJson, toPlainValue } from '../canonical-json/canonical-json';
 import { formatFingerprint, OnecCertificateError, parseCertificateInput } from '../domain/onec-certificates';
 import {
   DEFAULT_ONEC_AGENT_CONFIGURATION,
@@ -59,7 +59,7 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 const actorId = (actor: CurrentUser): number => Number(actor.id);
 
 /** Alerts about a single past fact; nothing re-derives them, so an operator closes them. */
-export const ONEC_OPERATOR_RESOLVABLE_ALERT_KINDS = ['command_dead_letter', 'command_expired_undelivered'] as const;
+export const ONEC_OPERATOR_RESOLVABLE_ALERT_KINDS = ['command_dead_letter', 'command_expired_undelivered', 'etl_run_abandoned', 'etl_full_sync_required'] as const;
 
 @Injectable()
 export class OnecAdminService {
@@ -426,8 +426,15 @@ export class OnecAdminService {
       if (!draft || Number(draft.revision) !== input.revision || draft.config_hash !== input.configHash) {
         throw new ApiError(409, 'STALE_DRAFT', 'Черновик изменился после подтверждения; проверьте его ещё раз');
       }
+      const source = await this.repository.getSource(tx, agent.sourceId, true);
+      if (!source) throw new ApiError(404, 'ONEC_SOURCE_NOT_FOUND', 'Источник не найден');
+      // The agent freezes this token per run (X-Source-Generation, plan §3.2 / agent to-erp/0003).
+      const outgoing = canonicalizeValue({
+        ...(toPlainValue(parseStrictJson(draft.configuration_canonical)) as Record<string, unknown>),
+        sourceGeneration: source.generationRef,
+      });
       const published = await this.repository.getPublishedConfig(tx, agentId);
-      if (published && published.configHash === draft.config_hash) {
+      if (published && published.configHash === outgoing.hash) {
         throw new ApiError(409, 'ONEC_CONFIG_UNCHANGED', 'Черновик совпадает с опубликованной конфигурацией');
       }
       // Never reuse a version the agent may have seen (plan §5.1): above the
@@ -437,8 +444,8 @@ export class OnecAdminService {
       await this.repository.publishConfigVersion(tx, {
         agentId,
         configVersion,
-        canonical: draft.configuration_canonical,
-        hash: draft.config_hash,
+        canonical: outgoing.canonical,
+        hash: outgoing.hash,
         revision: Number(draft.revision),
         actorId: actorId(actor),
       });
@@ -452,11 +459,11 @@ export class OnecAdminService {
           entityType: 'onec_agent_config_version',
           entityId: `${agentId}:${configVersion}`,
           before: published ? { configVersion: published.configVersion, configHash: published.configHash } : {},
-          after: { configVersion, configHash: draft.config_hash, revision: Number(draft.revision), mode: configuration.mode },
+          after: { configVersion, configHash: outgoing.hash, draftHash: draft.config_hash, revision: Number(draft.revision), mode: configuration.mode },
         },
-        { agentId, sourceId: agent.sourceId, configVersion },
+        { agentId, sourceId: agent.sourceId, configVersion, sourceGeneration: source.generation },
       );
-      return { configVersion, configHash: draft.config_hash };
+      return { configVersion, configHash: outgoing.hash };
     });
   }
 

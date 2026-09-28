@@ -10,6 +10,7 @@ import { DatabaseService } from '../../database/database.service';
 import type { PerformanceQueryTelemetryService } from '../../performance/performance-query-telemetry.service';
 import type { CurrentUser } from '../../permissions/current-user';
 import { PgOnecCommandRepository } from './adapters/pg-onec-command-repository';
+import { PgOnecEtlRepository } from './adapters/pg-onec-etl-repository';
 import { PgOnecRepository } from './adapters/pg-onec-repository';
 import { OnecAlertProjector } from './application/onec-alert-projector';
 import { OnecAuditWriter, type OnecAgentContext } from './application/onec-audit';
@@ -70,8 +71,8 @@ suite('1C agent E2 command queue — isolated PostgreSQL', () => {
     commandsRepo = new PgOnecCommandRepository(db);
     // No LISTEN here (module init not called): wakes come from the in-process path.
     wakeups = new OnecCommandWakeups(db, runtime);
-    service = new OnecCommandsService(commandsRepo, repo, new OnecAuditWriter(repo), wakeups, runtime);
-    monitor = new OnecMonitorService(runtime, repo, db, new OnecAlertProjector(repo), commandsRepo);
+    service = new OnecCommandsService(commandsRepo, repo, new OnecAuditWriter(repo), wakeups, runtime, new PgOnecEtlRepository(db));
+    monitor = new OnecMonitorService(runtime, repo, db, new OnecAlertProjector(repo), commandsRepo, new PgOnecEtlRepository(db), new OnecAuditWriter(repo));
   }, 60000);
 
   afterAll(async () => {

@@ -36,16 +36,23 @@ function captureRawBody(req: IncomingMessage, _res: ServerResponse, buffer: Buff
 /**
  * Only JSON bodies are accepted on the agent API. Any other content type is
  * refused before the body is read, so the global 50 MiB urlencoded/json
- * parsers never consume an unauthenticated agent-path body.
+ * parsers never consume an unauthenticated agent-path body. The one exception
+ * is `POST etl/batches` with application/x-ndjson: it is streamed to the spool
+ * by the ETL controller after the guard (no body parser matches that type).
  */
 function rejectNonJsonBody(
-  req: { method: string; headers: Record<string, string | string[] | undefined>; requestId?: string },
+  req: { method: string; path: string; headers: Record<string, string | string[] | undefined>; requestId?: string },
   res: { status(code: number): { json(body: unknown): void } },
   next: () => void,
 ): void {
   const length = req.headers['content-length'];
   const hasBody = req.headers['transfer-encoding'] !== undefined || (length !== undefined && length !== '0');
   const type = String(req.headers['content-type'] ?? '').split(';')[0]!.trim().toLowerCase();
+  // ETL batches are streamed (gzip NDJSON, up to 100 MB) by the controller itself; no parser reads them.
+  if (req.method === 'POST' && req.path === '/etl/batches' && type === 'application/x-ndjson') {
+    next();
+    return;
+  }
   if (hasBody && type !== 'application/json') {
     res.status(415).json({ error: { code: 'UNSUPPORTED_MEDIA_TYPE', message: 'Only application/json is accepted', requestId: req.requestId ?? 'req_unknown' } });
     return;

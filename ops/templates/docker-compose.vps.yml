@@ -254,6 +254,9 @@ services:
       ONEC_AGENT_HEARTBEAT_INTERVAL_MS: ${ONEC_AGENT_HEARTBEAT_INTERVAL_MS:-60000}
       BACKEND_ONEC_MONITOR_OWNER: ${BACKEND_ONEC_MONITOR_OWNER:-none}
       BACKEND_ONEC_MONITOR_INTERVAL_MS: ${BACKEND_ONEC_MONITOR_INTERVAL_MS:-60000}
+      BACKEND_ONEC_ETL_WORKER_OWNER: ${BACKEND_ONEC_ETL_WORKER_OWNER:-none}
+      ONEC_ETL_SPOOL_DIR: /data/onec-etl-spool
+      ONEC_ETL_SPOOL_MIN_FREE_BYTES: ${ONEC_ETL_SPOOL_MIN_FREE_BYTES:-2147483648}
       BACKEND_ENABLE_SHEET_MATERIALS: ${BACKEND_ENABLE_SHEET_MATERIALS:-false}
       BACKEND_SHEET_ORDERS_READS: ${BACKEND_SHEET_ORDERS_READS:-false}
       BACKEND_ENABLE_CUT_JOBS: ${BACKEND_ENABLE_CUT_JOBS:-false}
@@ -375,6 +378,8 @@ services:
     volumes:
       - cnc-telegram-media:/data/cnc-telegram-media
       - whatsapp-daily-digest:/data/whatsapp-daily-digest
+      # 1C ETL batches between ACK and parsing (7 days); not part of DB backups.
+      - onec-etl-spool:/data/onec-etl-spool
     networks:
       - back
       - edge
@@ -744,5 +749,6 @@ volumes:
   cnc-telegram-worker-data:
   cnc-telegram-media:
   whatsapp-daily-digest:
+  onec-etl-spool:
   glm-ocr-model-cache:
   waha-sessions:

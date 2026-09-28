@@ -17294,6 +17294,138 @@ paths:
         '404': {description: "Command not found"}
         '409': {description: "RESULT_CONFLICT: a different result is stored"}
         '403': {description: Certificate unknown, mismatched or agent blocked}
+  /api/integration/1c-agents/v1/etl/batches:
+    post:
+      tags:
+        - 1C agent protocol
+      operationId: onecAgentUploadEtlBatch
+      summary: "Receive one gzip NDJSON batch; ACK only after it is durably stored (idempotent by batchId)"
+      description: >-
+        Served only on the dedicated mutual-TLS host; see onecAgentSessionStart. The body is streamed to
+        a spool volume (compressed <= 100 MB, uncompressed <= 256 MiB, rows <= 1,000,000, row <= 8 MB);
+        parsing happens after the ACK. 503 BATCH_NOT_STORED_RETRYABLE attests nothing was stored.
+      security: []
+      x-auth: onec-agent-mtls
+      parameters:
+        - {name: X-Agent-Id, in: header, required: true, schema: {type: string}}
+        - {name: X-Request-Id, in: header, required: false, schema: {type: string}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, format: uuid}}
+        - {name: X-Batch-Id, in: header, required: true, schema: {type: string, format: uuid}}
+        - {name: X-Run-Id, in: header, required: true, schema: {type: string, format: uuid}}
+        - {name: X-Entity, in: header, required: true, schema: {type: string}}
+        - {name: X-Schema-Version, in: header, required: true, schema: {type: integer}}
+        - {name: X-Row-Count, in: header, required: true, schema: {type: integer}}
+        - {name: X-Content-SHA256, in: header, required: true, schema: {type: string}}
+        - {name: Content-Encoding, in: header, required: true, schema: {type: string, enum: [gzip]}}
+        - {name: X-Source-Namespace, in: header, required: false, schema: {type: string}}
+        - {name: X-Source-Generation, in: header, required: false, schema: {type: string}}
+      requestBody:
+        required: true
+        content: {application/x-ndjson: {schema: {type: string, format: binary}}}
+      responses:
+        '200': {description: Batch ACK, content: {application/json: {schema: {$ref: '#/components/schemas/OnecEtlBatchAck'}}}}
+        '400': {description: "Invalid batch headers"}
+        '403': {description: Certificate unknown, mismatched or agent blocked}
+        '404': {description: "Run or batch of another agent"}
+        '409': {description: "BATCH_CONFLICT, BATCH_SUPERSEDED, RUN_CLOSED, RUN_GENERATION_CLOSED, SOURCE_IDENTITY_MISMATCH"}
+        '413': {description: "BATCH_LIMIT_EXCEEDED"}
+        '422': {description: "BATCH_CHECKSUM_MISMATCH, BATCH_ROW_COUNT_MISMATCH, BATCH_GZIP_INVALID"}
+        '503': {description: "BATCH_NOT_STORED_RETRYABLE (Retry-After)"}
+  /api/integration/1c-agents/v1/etl/batches/{batchId}:
+    get:
+      tags:
+        - 1C agent protocol
+      operationId: onecAgentGetEtlBatch
+      summary: "Look up a batch: the original ACK, or 404 when ERP has not stored it"
+      description: >-
+        Served only on the dedicated mutual-TLS host; see onecAgentSessionStart.
+      security: []
+      x-auth: onec-agent-mtls
+      parameters:
+        - {name: X-Agent-Id, in: header, required: true, schema: {type: string}}
+        - {name: X-Request-Id, in: header, required: false, schema: {type: string}}
+        - {name: batchId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Original ACK, content: {application/json: {schema: {$ref: '#/components/schemas/OnecEtlBatchAck'}}}}
+        '404': {description: "Not stored (also another agent's batch)"}
+        '403': {description: Certificate unknown, mismatched or agent blocked}
+  /api/integration/1c-agents/v1/etl/runs/{runId}/complete:
+    post:
+      tags:
+        - 1C agent protocol
+      operationId: onecAgentCompleteEtlRun
+      summary: "Complete a run: its staging becomes the mirror atomically (idempotent by runId)"
+      description: >-
+        Served only on the dedicated mutual-TLS host; see onecAgentSessionStart. Accepts RunCompletionV2,
+        RunCompletionPartialV1 and RunCompletionV1 (agent OpenAPI 1.3.0). Rows absent from a full read are
+        only marked missing in the mirror; nothing is deleted.
+      security: []
+      x-auth: onec-agent-mtls
+      parameters:
+        - {name: X-Agent-Id, in: header, required: true, schema: {type: string}}
+        - {name: X-Request-Id, in: header, required: false, schema: {type: string}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, format: uuid}}
+        - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object}}}
+      responses:
+        '204': {description: OK (also a byte-identical repeat)}
+        '400': {description: "Invalid body"}
+        '403': {description: Certificate unknown, mismatched or agent blocked}
+        '409': {description: "RUN_UNKNOWN, RUN_BATCHES_MISMATCH, RUN_COMPLETION_CONFLICT, RUN_GENERATION_CLOSED, SOURCE_IDENTITY_MISMATCH"}
+        '422': {description: "BATCH_PAYLOAD_INVALID {batchId, reason}"}
+        '503': {description: "RUN_NOT_READY, RUN_MODE_PENDING (the agent repeats)"}
+  /api/v1/onec/etl/runs:
+    get:
+      tags:
+        - 1C integration
+      operationId: listOnecEtlRuns
+      summary: "List 1C ETL runs (journal; no row data)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: agentId, in: query, required: false, schema: {type: string}}
+        - {name: limit, in: query, required: false, schema: {type: integer}}
+      responses:
+        '200': {description: "List 1C ETL runs (journal; no row data)"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+  /api/v1/onec/etl/runs/{runId}:
+    get:
+      tags:
+        - 1C integration
+      operationId: getOnecEtlRun
+      summary: "One 1C ETL run with its batches"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: "One 1C ETL run with its batches"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '404': {description: "Run not found"}
+  /api/v1/onec/etl/entities:
+    get:
+      tags:
+        - 1C integration
+      operationId: listOnecEtlEntities
+      summary: "State of every 1C ETL entity (rows, missing, last run, errors)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: agentId, in: query, required: false, schema: {type: string}}
+      responses:
+        '200': {description: "State of every 1C ETL entity (rows, missing, last run, errors)"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
 
 components:
   securitySchemes:
@@ -17884,6 +18016,15 @@ components:
         leaseId: {type: string, format: uuid}
         receivedAtUtc: {type: string, format: date-time}
         payloadHash: {type: string}
+    OnecEtlBatchAck:
+      type: object
+      required: [batchId, status, rowsAccepted, checksumValid, acknowledgedAtUtc]
+      properties:
+        batchId: {type: string, format: uuid}
+        status: {type: string, enum: [acknowledged]}
+        rowsAccepted: {type: integer}
+        checksumValid: {type: boolean}
+        acknowledgedAtUtc: {type: string, format: date-time}
     OnecCommandResult:
       type: object
       required: [commandId, status, resultVersion]

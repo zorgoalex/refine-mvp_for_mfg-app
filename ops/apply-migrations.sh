@@ -2399,6 +2399,18 @@ probe_file() {
       "SELECT to_regclass('public.mdf_board_history_events') IS NULL OR (COALESCE((SELECT md5(pg_get_functiondef(oid)) FROM pg_proc WHERE oid=to_regprocedure('public.record_mdf_board_history_from_audit()'))='cb273b6a454a8c02ffce436caa6f8863', false) AND COALESCE((SELECT md5(pg_get_functiondef(oid)) FROM pg_proc WHERE oid=to_regprocedure('public.record_mdf_board_history_from_audit_relation()'))='3a0cefb994d1231bb6fda6677fa2077e', false));" ;;
     # 193: 1C agent E1 registry/config/outbox/alerts + onec.* permissions.
     # 196: 1C agent E2 command queue.
+    198_onec_etl*) probe_all \
+      "$(q_tbl onec_etl_runs)" \
+      "$(q_tbl onec_etl_batches)" \
+      "$(q_tbl onec_etl_staging_rows)" \
+      "$(q_tbl onec_etl_mirror_rows)" \
+      "$(q_tbl onec_etl_entity_state)" \
+      "$(q_col onec_etl_batches receiving_owner)" \
+      "$(q_col onec_etl_mirror_rows missing_in_source_at)" \
+      "$(q_con_on onec_etl_batches onec_etl_batches_status_check)" \
+      "$(q_con_on onec_etl_mirror_rows onec_etl_mirror_rows_pkey)" \
+      "$(q_idx onec_etl_batches_work_idx)" \
+      "SELECT relpersistence = 'u' FROM pg_class WHERE oid = 'public.onec_etl_staging_rows'::regclass;" ;;
     196_onec_agent_commands*) probe_all \
       "$(q_tbl onec_agent_commands)" \
       "$(q_col onec_agent_commands payload_canonical)" \
@@ -2591,6 +2603,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     192_mdf_board_presentation_history*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    198_onec_etl*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     196_onec_agent_commands*)

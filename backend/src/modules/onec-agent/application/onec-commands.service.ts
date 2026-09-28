@@ -5,7 +5,9 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { PgOnecCommandRepository, type CommandRow } from '../adapters/pg-onec-command-repository';
+import { PgOnecEtlRepository } from '../adapters/pg-onec-etl-repository';
 import { PgOnecRepository } from '../adapters/pg-onec-repository';
+import { ETL_COMMAND_TYPES } from '../domain/onec-etl';
 import {
   checkCommandPayload,
   commandKindOf,
@@ -82,6 +84,8 @@ function publishedCommandTypes(configurationCanonical: string): string[] {
 /** Mirrors markReceived: only queued/leased become received; terminal statuses stay. */
 const receivedStatus = (status: string) => (status === 'queued' || status === 'leased' ? 'received' : status);
 
+const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
 const sha256Hex = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex');
 
 export interface LeaseResponse {
@@ -99,6 +103,7 @@ export class OnecCommandsService {
     @Inject(OnecAuditWriter) private readonly audit: OnecAuditWriter,
     @Inject(OnecCommandWakeups) private readonly wakeups: OnecCommandWakeups,
     @Inject(OnecRuntimeConfigService) private readonly runtime: OnecRuntimeConfigService,
+    @Inject(PgOnecEtlRepository) private readonly etl: PgOnecEtlRepository,
   ) {}
 
   // ------------------------------------------------------------------ enqueue (port)
@@ -360,6 +365,55 @@ export class OnecCommandsService {
     await this.repository.resolveAlertByDedupeKey(tx, `command_expired_undelivered:${command.commandId}`);
   }
 
+  /**
+   * An accepted start_full_sync/reload_entity reports `{runId, mode}`: the run
+   * learns its mode (plan §6.7 step 3). A run already completed as a scheduled
+   * incremental run cannot be re-judged: incident, data unchanged.
+   */
+  private async linkEtlRun(tx: DatabaseClient, agent: OnecAgentContext, command: CommandRow, json: unknown): Promise<void> {
+    if (!(ETL_COMMAND_TYPES as readonly string[]).includes(command.commandType)) return;
+    const data = (json as { data?: { runId?: unknown; mode?: unknown } } | null)?.data;
+    const runId = typeof data?.runId === 'string' && UUID_PATTERN.test(data.runId) ? data.runId.toLowerCase() : null;
+    const mode = data?.mode === 'bootstrap_full' || data?.mode === 'entity_reload' || data?.mode === 'incremental' ? data.mode : null;
+    if (!runId || !mode) return;
+    const source = await this.repository.getSource(tx, command.sourceId);
+    if (!source) return;
+    const linked = await this.etl.recordCommandMode(tx, {
+      runId,
+      agentId: agent.agentId,
+      sourceId: source.sourceId,
+      generation: source.generation,
+      generationRef: source.generationRef,
+      mode,
+      commandId: command.commandId,
+    });
+    if (linked.completed && linked.modeOrigin === 'no_pending_etl_command' && linked.mode !== mode) {
+      await this.repository.recordIncident(tx, {
+        agentId: agent.agentId,
+        kind: 'late_mode_for_completed_run',
+        dedupeKey: `late_mode_for_completed_run:${runId}`,
+        details: { runId, commandId: command.commandId, mode, completedAs: linked.mode },
+        runId,
+      });
+      // The mirror of this run was judged incremental; a full export is needed to trust it (plan §6.7 step 3).
+      await this.repository.insertOutboxEvent(
+        tx,
+        buildOnecEvent({
+          eventType: 'onec.etl.full_sync_required',
+          severity: 'warning',
+          actor: { kind: 'onec_agent', id: agent.agentId },
+          agentId: agent.agentId,
+          sourceId: command.sourceId,
+          subject: { type: 'onec_etl_run', id: runId },
+          requestId: agent.requestId,
+          correlationId: command.correlationId ?? agent.correlationId,
+          data: { runId, commandId: command.commandId, mode, completedAs: linked.mode },
+          idempotencyKey: `onec.etl.full_sync_required:${runId}`,
+        }),
+      );
+    }
+  }
+
   private async incident(agent: OnecAgentContext, kind: string, dedupeKey: string, details: Record<string, unknown>): Promise<void> {
     await this.repository.recordIncident(this.repository.db, {
       agentId: agent.agentId,
@@ -395,6 +449,7 @@ export class OnecCommandsService {
       const errorCode = typeof parsed.data.error?.code === 'string' ? parsed.data.error.code : null;
       await this.commands.saveResult(tx, { commandId, status, body: text, sha256: sha, errorCode });
       if (command.status === 'expired_undelivered') await this.lateDelivery(tx, agent, command, 'result', status);
+      if (status === 'succeeded') await this.linkEtlRun(tx, agent, command, json);
       if (command.status === 'cancelled') {
         // The fact outranks the intent: a cancelled command that was still executed.
         await this.repository.recordIncident(tx, {
