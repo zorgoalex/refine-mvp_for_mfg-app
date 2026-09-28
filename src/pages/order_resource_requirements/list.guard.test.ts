@@ -43,10 +43,12 @@ describe('order resource requirements list guards', () => {
     expect(source).not.toContain('setPageSize(DEFAULT_PAGE_SIZE)');
   });
 
-  it('имеет быстрый фильтр периода «Сегодня» в одной строке шапки', () => {
+  it('имеет быстрый фильтр периода «Сегодня» в панели, которая переносится по ширине окна', () => {
     expect(source).toContain('Сегодня');
-    expect(source).toContain('wrap={false}');
-    expect(source).toContain("overflowX: 'auto'");
+    // Панель фильтров переносится по ширине окна: одна строка, пока помещается, без горизонтальной прокрутки.
+    expect(source).toContain('<Space wrap size={[8, 8]} style={{ width: \'100%\' }}>');
+    expect(source).not.toContain('wrap={false}');
+    expect(source).not.toContain("overflowX: 'auto'");
     expect(source).toContain("whiteSpace: 'nowrap'");
     expect(source).toContain('style={{ width: 220 }}');
     expect(source).toContain('setDateRange([today, today])');

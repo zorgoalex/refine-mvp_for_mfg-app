@@ -448,7 +448,8 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
   return (
     <LocalizedList title="Потребности заказов в ресурсах">
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
-        <Space wrap={false} size={8} style={{ width: '100%', overflowX: 'auto', whiteSpace: 'nowrap' }}>
+        {/* Панель фильтров в одну строку, пока помещается; на узком окне элементы переносятся, без горизонтальной прокрутки. */}
+        <Space wrap size={[8, 8]} style={{ width: '100%' }}>
           <Segmented
             aria-label="Вид списка"
             value={viewMode}
@@ -530,7 +531,12 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
             />
           )}
           {capabilities.onecDocuments && onecDocumentFilter && (
-            <Tag closable color="blue" onClose={() => handleOnecDocumentFilterChange(null)}>
+            <Tag
+              closable
+              color="blue"
+              style={{ maxWidth: '100%', whiteSpace: 'normal', marginInlineEnd: 0 }}
+              onClose={() => handleOnecDocumentFilterChange(null)}
+            >
               {onecDocumentFilterTagText(onecDocumentFilter.label)}
             </Tag>
           )}
