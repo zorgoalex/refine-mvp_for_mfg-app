@@ -143,6 +143,7 @@ export const OnecPurchaseDocumentList: React.FC<IResourceComponentsProps> = () =
           />
           <RangePicker
             allowClear
+            placeholder={['Документы с даты', 'по дату']}
             format="DD.MM.YYYY"
             value={dateRange}
             onChange={(value) => setDateRange(value ? [value[0], value[1]] : null)}
