@@ -17,6 +17,7 @@ import { PgMdfBoardManualMoveRepository } from '../../orders/adapters/pg-mdf-boa
 import { PgBazisCutRepository } from '../../bazis-cut/adapters/pg-bazis-cut-repository';
 import { loadMdfBazisCompositionReadiness } from './mdf-bazis-composition-readiness';
 import { openMdfOrderCommand } from './mdf-order-cascade';
+import type { BazisCutDetailFields } from '../../bazis-cut/dto/bazis-cut.dto';
 
 const enabled = process.env.MDF_ENGINE_INTEGRATION === '1';
 
@@ -60,6 +61,8 @@ describe.skipIf(!enabled)('BASIS composition command, isolated PostgreSQL schema
       // Refill snapshot builder (loadSnapshots) reads these; never fall back to public data.
       'projects', 'milling_types', 'films', 'bazis_node_order_detail_map', 'bazis_nodes', 'bazis_project_revisions',
       'bazis_order_links', 'cut_job_item', 'cut_job', 'cut_param_profiles', 'cut_result_archive_state',
+      // loadHdfSnapshots (repository.create/addDetails with hdfDetailIds) reads this config gate.
+      'hdf_calculation_config_state',
     ]);
     // CTAS clones drop constraints; the 179 FK needs a real local primary key on packet_id.
     await fixture.client.query('ALTER TABLE cnc_telegram_packets ADD PRIMARY KEY(packet_id)');
@@ -72,6 +75,11 @@ describe.skipIf(!enabled)('BASIS composition command, isolated PostgreSQL schema
       WHERE source_order_detail_id IS NOT NULL`);
     await fixture.client.query(`CREATE UNIQUE INDEX ON bazis_cut_set_details(bazis_cut_set_id,source_order_hdf_detail_id)
       WHERE source_order_hdf_detail_id IS NOT NULL`);
+    // insertSetHeader/insertSnapshots rely on these DB defaults (never set explicitly); CTAS drops them.
+    await fixture.client.query(`ALTER TABLE bazis_cut_sets ALTER COLUMN version SET DEFAULT 0,
+      ALTER COLUMN created_at SET DEFAULT now(), ALTER COLUMN updated_at SET DEFAULT now();
+      ALTER TABLE bazis_cut_set_details ALTER COLUMN created_at SET DEFAULT now(),
+      ALTER COLUMN updated_at SET DEFAULT now()`);
     await fixture.applyMigrations([
       '165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql',
       '174_mdf_execution_context.sql', '175_mdf_command_placement.sql',
@@ -102,6 +110,7 @@ describe.skipIf(!enabled)('BASIS composition command, isolated PostgreSQL schema
       INSERT INTO status_automation_rules(id,name,event_type,action_type,target_status_id,conditions_json,priority,is_enabled,version,action_config_json)
         VALUES(17,'E2E composition cut','mdf.board.completed','change_details_production_status',2,'{}',100,true,1,'{}'),
           (18,'E2E composition bath','mdf.board.baths_laminated','change_details_production_status',3,'{}',100,true,1,'{}');
+      INSERT INTO hdf_calculation_config_state(id,revision) VALUES(1,1);
     `);
     for (const name of ['set_session_user', 'order_production_summary', 'recalc_order_production_status']) {
       const definitions = (await fixture.client.query<{ definition: string }>(`SELECT pg_get_functiondef(p.oid) definition
@@ -212,6 +221,90 @@ describe.skipIf(!enabled)('BASIS composition command, isolated PostgreSQL schema
     }));
     expect(await processJob(receipt.jobId)).toMatchObject({ status: 'done', jobId: receipt.jobId });
     return bathId;
+  }
+
+  /** A1: a v1 (no lineage manifest) BASIS source whose accepted revision DOES carry a physical
+   * evidence line — unlike a genesis (membership-only) v1 source, this must still require v2 lineage. */
+  async function makeV1PhysicalSource(quantity = 10): Promise<SourceFixture> {
+    if (!database) throw new Error('MDF_TEST_DATABASE_NOT_READY');
+    const orderId = ++sequence;
+    const detailId = orderId * 100 + 1;
+    const setId = orderId;
+    const rowId = orderId * 1000 + 1;
+    const sourceId = String(setId);
+    const demand = [{ orderId, detailId, quantity }];
+    await fixture.client.query(`INSERT INTO orders(order_id,order_name,order_kind,delete_flag,version,order_status_id,payment_status_id,created_by)
+      VALUES($1,$2,'production_order',false,1,1,1,1)`, [orderId, `E2E v1 physical ${orderId}`]);
+    await fixture.client.query(`INSERT INTO order_details(detail_id,order_id,detail_number,quantity,production_status_id,delete_flag,material_id)
+      VALUES($1,$2,1,$3,1,false,1)`, [detailId, orderId, quantity]);
+    await fixture.client.query(`INSERT INTO bazis_cut_sets(bazis_cut_set_id,name,version,created_at,updated_at)
+      VALUES($1,$2,1,now(),now())`, [setId, `E2E v1 physical ${setId}`]);
+    await fixture.client.query(`INSERT INTO bazis_cut_set_details(bazis_cut_set_detail_id,bazis_cut_set_id,
+      source_order_id,source_order_detail_id,quantity,cut_enabled,source_type,material_name)
+      VALUES($1,$2,$3,$4,$5,true,'order_detail','MDF facade 10 mm')`, [rowId, setId, orderId, detailId, quantity]);
+    const receipt = await database.transaction(tx => recordMdfReceipt(tx, {
+      sourceKind: 'bazisCutSet', sourceId, revisionKey: `v1-physical:${setId}`, origin: 'manual',
+      actorUserId: Number(user.id), requestId: `v1-physical-${setId}`, causeKey: `v1-physical-${setId}`,
+      expectedFence: null, accept: true, rules: [],
+      lines: [
+        { lineKey: String(rowId), orderId, detailId, quantity, stageCode: 'membership', evidenceKind: 'derived', rework: false },
+        { lineKey: `physical:${setId}`, orderId, detailId, quantity, stageCode: 'cut', evidenceKind: 'physical', rework: false },
+      ],
+      executionContext: context(demand, `E2E v1 physical ${setId}`),
+    }));
+    expect(await processJob(receipt.jobId)).toMatchObject({ status: 'done', jobId: receipt.jobId });
+    return { orderId, detailId, setId, rowId, sourceId, demand };
+  }
+
+  /** A3: two independent BASIS sources (X, Y) owned by the SAME order, each with its own membership only. */
+  async function makeDetachmentPair(quantityX = 10, quantityY = 5) {
+    if (!database) throw new Error('MDF_TEST_DATABASE_NOT_READY');
+    const orderId = ++sequence;
+    const detailX = orderId * 100 + 1, detailY = orderId * 100 + 2;
+    const setX = orderId, setY = orderId + 600000;
+    const sourceX = String(setX), sourceY = String(setY);
+    await fixture.client.query(`INSERT INTO orders(order_id,order_name,order_kind,delete_flag,version,order_status_id,payment_status_id,created_by)
+      VALUES($1,$2,'production_order',false,1,1,1,1)`, [orderId, `E2E neighbour ${orderId}`]);
+    await fixture.client.query(`INSERT INTO order_details(detail_id,order_id,detail_number,quantity,production_status_id,delete_flag,material_id)
+      VALUES($1,$2,1,$3,1,false,1),($4,$2,2,$5,1,false,1)`, [detailX, orderId, quantityX, detailY, quantityY]);
+    await fixture.client.query(`INSERT INTO bazis_cut_sets(bazis_cut_set_id,name,version,created_at,updated_at)
+      VALUES($1,$2,1,now(),now()),($3,$4,1,now(),now())`,
+    [setX, `E2E neighbour X ${setX}`, setY, `E2E neighbour Y ${setY}`]);
+    const rowX = setX * 1000 + 1, rowY = setY * 1000 + 1;
+    await fixture.client.query(`INSERT INTO bazis_cut_set_details(bazis_cut_set_detail_id,bazis_cut_set_id,
+      source_order_id,source_order_detail_id,quantity,cut_enabled,source_type,material_name)
+      VALUES($1,$2,$3,$4,$5,true,'order_detail','MDF facade 10 mm'),($6,$7,$3,$8,$9,true,'order_detail','MDF facade 10 mm')`,
+    [rowX, setX, orderId, detailX, quantityX, rowY, setY, detailY, quantityY]);
+    // Frozen demand is the FULL live MDF demand of the owner order (captureNewMdfBazisSource's own contract),
+    // not just this source's own membership — both co-existing sources of order O carry both details.
+    const sharedDemand = [{ orderId, detailId: detailX, quantity: quantityX }, { orderId, detailId: detailY, quantity: quantityY }];
+    const demandX = sharedDemand;
+    const demandY = sharedDemand;
+    const physicalLineKey = `root:${setX}`;
+    const receiptX = await database.transaction(tx => recordMdfLineageReceipt(tx, {
+      sourceKind: 'bazisCutSet', sourceId: sourceX, revisionKey: `initial-v2:${setX}`, origin: 'manual',
+      actorUserId: Number(user.id), requestId: `neighbour-x-${setX}`, causeKey: `neighbour-x-${setX}`,
+      expectedFence: null, accept: true, rules: [],
+      lines: [
+        { lineKey: String(rowX), orderId, detailId: detailX, quantity: quantityX, stageCode: 'membership', evidenceKind: 'derived', rework: false },
+        { lineKey: physicalLineKey, orderId, detailId: detailX, quantity: quantityX, stageCode: 'cut', evidenceKind: 'physical', rework: false },
+      ],
+      lineage: { operation: 'production', authority: 'manual_production',
+        actions: [{ lineKey: physicalLineKey, action: 'root' }], droppedPredecessorEvidenceLineIds: [] },
+      executionContext: context(demandX, `E2E neighbour X ${setX}`),
+    }));
+    expect(await processJob(receiptX.jobId)).toMatchObject({ status: 'done', jobId: receiptX.jobId });
+    const receiptY = await database.transaction(tx => recordMdfReceipt(tx, {
+      sourceKind: 'bazisCutSet', sourceId: sourceY, revisionKey: `initial:${setY}`, origin: 'manual',
+      actorUserId: Number(user.id), requestId: `neighbour-y-${setY}`, causeKey: `neighbour-y-${setY}`,
+      expectedFence: null, accept: true, rules: [],
+      lines: [{ lineKey: String(rowY), orderId, detailId: detailY, quantity: quantityY,
+        stageCode: 'membership', evidenceKind: 'derived', rework: false }],
+      executionContext: context(demandY, `E2E neighbour Y ${setY}`),
+    }));
+    expect(await processJob(receiptY.jobId)).toMatchObject({ status: 'done', jobId: receiptY.jobId });
+    const x: SourceFixture = { orderId, detailId: detailX, setId: setX, rowId: rowX, sourceId: sourceX, demand: demandX };
+    return { orderId, detailX, detailY, x, setY, sourceY };
   }
 
   async function sourceToken(f: SourceFixture) {
@@ -1430,8 +1523,10 @@ describe.skipIf(!enabled)('BASIS composition command, isolated PostgreSQL schema
     try {
       expect((await loadMdfBazisCompositionReadiness(database! as never, manager, f.setId)).available).toBe(true);
     } finally { await fixture.client.query('UPDATE orders SET manager_id=NULL WHERE order_id=$1', [f.orderId]); }
-    expect(await loadMdfBazisCompositionReadiness(database! as never, user, 987654321))
-      .toEqual({ available: false, sourceToken: null, reason: 'MDF_SOURCE_NOT_REGISTERED', eligibleRowIds: [] });
+    // fixes-r1 (A2): a wholly nonexistent set (no bazis_cut_set_details rows at all, so zero MDF-eligible rows)
+    // now keeps the legacy editor (null) rather than answering MDF_SOURCE_NOT_REGISTERED unconditionally — see
+    // the dedicated 'A2: an unregistered HDF-only set...' test below for the two-way split this replaced.
+    expect(await loadMdfBazisCompositionReadiness(database! as never, user, 987654321)).toBeNull();
     // A queued (not yet accepted) composition makes the publication pending.
     const request = { expectedVersion: '1', sourceToken: await sourceToken(f), desiredRows: [] };
     const preview = await command().preview(user, f.setId, request, `readiness-preview-${f.setId}`);
@@ -1452,6 +1547,43 @@ describe.skipIf(!enabled)('BASIS composition command, isolated PostgreSQL schema
     }
   }, 60000);
 
+  // fixes-r1 finding 3 (A2): a set OUTSIDE the MDF ledger (no `mdf_source_heads` row at all) now distinguishes two
+  // cases instead of always answering `MDF_SOURCE_NOT_REGISTERED`: no MDF-eligible row (HDF-only/non-MDF) ⇒ `null`
+  // (legacy editor — the same rule `pg-bazis-cut-repository.ts`'s `isMdfLedgerSet` applies for its own edit gating);
+  // any MDF-eligible row present ⇒ still `MDF_SOURCE_NOT_REGISTERED` (composition unavailable, not legacy-editable).
+  it('A2: an unregistered HDF-only set answers null (legacy editor); one with an MDF-eligible row still answers MDF_SOURCE_NOT_REGISTERED', async () => {
+    const orderId = ++sequence, detailId = orderId * 100 + 1, hdfDetailId = orderId * 100 + 2;
+    await fixture.client.query(`INSERT INTO orders(order_id,order_name,order_kind,delete_flag,version,order_status_id,payment_status_id,created_by)
+      VALUES($1,$2,'production_order',false,1,1,1,1)`, [orderId, `E2E A2 unregistered ${orderId}`]);
+    await fixture.client.query(`INSERT INTO order_details(detail_id,order_id,detail_number,quantity,production_status_id,delete_flag,material_id)
+      VALUES($1,$2,1,10,1,false,1)`, [detailId, orderId]);
+
+    // (a) HDF-only set: never touched by MDF (`recordMdfLineageReceipt`/`recordMdfReceipt`), so it has NO
+    // `mdf_source_heads` row; its only row is an HDF row (source_order_hdf_detail_id set) — not MDF-eligible.
+    const hdfSetId = orderId, hdfRowId = orderId * 1000 + 1;
+    await fixture.client.query(`INSERT INTO bazis_cut_sets(bazis_cut_set_id,name,version,created_at,updated_at)
+      VALUES($1,$2,1,now(),now())`, [hdfSetId, `E2E A2 HDF-only ${hdfSetId}`]);
+    await fixture.client.query(`INSERT INTO bazis_cut_set_details(bazis_cut_set_detail_id,bazis_cut_set_id,
+      source_order_id,source_order_hdf_detail_id,quantity,cut_enabled,source_type,material_name)
+      VALUES($1,$2,$3,$4,10,true,'order_hdf_detail','HDF 16 mm')`, [hdfRowId, hdfSetId, orderId, hdfDetailId]);
+    expect((await fixture.client.query('SELECT 1 FROM mdf_source_heads WHERE source_kind=$1 AND source_id=$2',
+      ['bazisCutSet', String(hdfSetId)])).rows).toHaveLength(0);
+    expect(await loadMdfBazisCompositionReadiness(database! as never, user, hdfSetId)).toBeNull();
+
+    // (b) Same "unregistered" state (no mdf_source_heads row), but the set's only row IS MDF-eligible (ordinary
+    // order_detail row, cut_enabled, MDF material, no HDF linkage) — composition stays unavailable, not legacy.
+    const mdfSetId = orderId + 700000, mdfRowId = mdfSetId * 1000 + 1;
+    await fixture.client.query(`INSERT INTO bazis_cut_sets(bazis_cut_set_id,name,version,created_at,updated_at)
+      VALUES($1,$2,1,now(),now())`, [mdfSetId, `E2E A2 unregistered MDF ${mdfSetId}`]);
+    await fixture.client.query(`INSERT INTO bazis_cut_set_details(bazis_cut_set_detail_id,bazis_cut_set_id,
+      source_order_id,source_order_detail_id,quantity,cut_enabled,source_type,material_name)
+      VALUES($1,$2,$3,$4,10,true,'order_detail','MDF facade 10 mm')`, [mdfRowId, mdfSetId, orderId, detailId]);
+    expect((await fixture.client.query('SELECT 1 FROM mdf_source_heads WHERE source_kind=$1 AND source_id=$2',
+      ['bazisCutSet', String(mdfSetId)])).rows).toHaveLength(0);
+    expect(await loadMdfBazisCompositionReadiness(database! as never, user, mdfSetId))
+      .toEqual({ available: false, sourceToken: null, reason: 'MDF_SOURCE_NOT_REGISTERED', eligibleRowIds: [] });
+  });
+
   it('legacy BASIS edit entry points answer explicit codes in the active engine and keep history-bearing sets', async () => {
     const f = await makeV2Source(4);
     const repository = new PgBazisCutRepository(database! as never, {} as never);
@@ -1470,6 +1602,125 @@ describe.skipIf(!enabled)('BASIS composition command, isolated PostgreSQL schema
     expect((await fixture.client.query('SELECT 1 FROM bazis_cut_sets WHERE bazis_cut_set_id=$1', [f.setId])).rows).toHaveLength(1);
     expect((await fixture.client.query(`SELECT count(*)::int n FROM mdf_evidence_lines
       WHERE source_kind='bazisCutSet' AND source_id=$1 AND stage_code='cut'`, [f.sourceId])).rows[0].n).toBeGreaterThan(0);
+  }, 60000);
+
+  /** Full BazisCutDetailFields defaults for a plain (non-MDF) row; overrides win. */
+  function plainFields(overrides: Partial<BazisCutDetailFields> = {}): BazisCutDetailFields {
+    return {
+      cutEnabled: true, materialType: 'Площадной', materialName: 'ЛДСП 16 мм', materialArticle: '',
+      thicknessMm: 16, position: '001', partName: 'Деталь', finishedLengthMm: 1000,
+      finishedWidthMm: 500, cutLengthMm: 1000, cutWidthMm: 500, quantity: 3,
+      orientation: 'Не задана', groove: '', l1Name: '', l1Designation: '', l1ThicknessMm: 0,
+      l2Name: '', l2Designation: '', l2ThicknessMm: 0, w1Name: '', w1Designation: '', w1ThicknessMm: 0,
+      w2Name: '', w2Designation: '', w2ThicknessMm: 0, priority: null, comment: '', customProperty: '',
+      glue: '', milling: '', route: '', film: '', ...overrides,
+    };
+  }
+
+  it('keeps the legacy edit path open for an HDF-only set outside the MDF ledger: update, add and delete commit successfully and write no MDF shadow/engine rows (A2)', async () => {
+    const orderId = ++sequence;
+    await fixture.client.query(`INSERT INTO projects(project_id,code) SELECT $1,$2
+      WHERE NOT EXISTS (SELECT 1 FROM projects WHERE project_id=$1)`, [70000 + orderId, `E2Ehdf${orderId}`]);
+    await fixture.client.query(`INSERT INTO orders(order_id,order_name,order_kind,delete_flag,version,order_status_id,
+      payment_status_id,created_by,project_id) VALUES($1,$2,'production_order',false,1,1,1,1,$3)`,
+    [orderId, `E2E hdf-only ${orderId}`, 70000 + orderId]);
+    const hdfDetailId1 = orderId * 100 + 1, hdfDetailId2 = orderId * 100 + 2;
+    // loadHdfSnapshots' export mapper requires a positive thickness, so hdfDetailId2 (used through
+    // addDetails, which snapshot-validates it) needs a real sheet_material_types link.
+    await fixture.client.query(`INSERT INTO sheet_material_types(sheet_material_type_id,name,thickness_mm)
+      SELECT 77003,'HDF 3mm E2E',3 WHERE NOT EXISTS (SELECT 1 FROM sheet_material_types WHERE sheet_material_type_id=77003)`);
+    await fixture.client.query(`INSERT INTO order_hdf_details(order_hdf_detail_id,order_id,hdf_sheet_material_name,
+      hdf_sheet_material_type_id,source_detail_number,source_detail_name,hdf_height_mm,hdf_width_mm,quantity,
+      delete_flag,status,config_revision)
+      VALUES($1,$2,'HDF 3mm',77003,1,'E2E HDF 1',500,300,5,false,'ok',1),
+        ($3,$2,'HDF 3mm',77003,2,'E2E HDF 2',500,300,2,false,'ok',1)`, [hdfDetailId1, orderId, hdfDetailId2]);
+    const setId = orderId;
+    await fixture.client.query(`INSERT INTO bazis_cut_sets(bazis_cut_set_id,name,version,created_at,updated_at)
+      VALUES($1,$2,1,now(),now())`, [setId, `E2E hdf-only ${setId}`]);
+    const rowId = setId * 1000 + 1;
+    await fixture.client.query(`INSERT INTO bazis_cut_set_details(bazis_cut_set_detail_id,bazis_cut_set_id,
+      source_order_id,source_order_hdf_detail_id,quantity,cut_enabled,source_type,material_name)
+      VALUES($1,$2,$3,$4,5,true,'order_hdf_detail','HDF 3mm')`, [rowId, setId, orderId, hdfDetailId1]);
+    expect((await fixture.client.query(`SELECT 1 FROM mdf_source_heads WHERE source_kind='bazisCutSet' AND source_id=$1`,
+      [String(setId)])).rows).toHaveLength(0);
+
+    const repository = new PgBazisCutRepository(database! as never, {} as never);
+    const base = { currentUser: user, requestId: `hdf-only-${setId}`, setId };
+    const noMdfRows = async () => {
+      expect((await fixture.client.query(`SELECT 1 FROM mdf_source_heads WHERE source_kind='bazisCutSet' AND source_id=$1`,
+        [String(setId)])).rows).toHaveLength(0);
+      expect((await fixture.client.query(`SELECT 1 FROM mdf_evidence_revisions WHERE source_kind='bazisCutSet' AND source_id=$1`,
+        [String(setId)])).rows).toHaveLength(0);
+      expect((await fixture.client.query(`SELECT 1 FROM mdf_recalculation_jobs WHERE source_kind='bazisCutSet' AND source_id=$1`,
+        [String(setId)])).rows).toHaveLength(0);
+    };
+    await noMdfRows();
+
+    const updated = await repository.updateDetail({ ...base, detailId: rowId, expectedVersion: 1,
+      fields: plainFields({ materialName: 'HDF 3mm', quantity: 7 }), idempotencyKey: `hdf-only-update-${setId}` });
+    expect(updated.set.details.find(d => d.bazisCutSetDetailId === rowId)?.quantity).toBe(7);
+    await noMdfRows();
+
+    const added = await repository.addDetails({ ...base, orderId, hdfDetailIds: [hdfDetailId2], detailIds: [],
+      expectedVersion: updated.set.version, idempotencyKey: `hdf-only-add-${setId}` });
+    expect(added.addedCount).toBe(1);
+    expect((await fixture.client.query(`SELECT 1 FROM bazis_cut_set_details WHERE bazis_cut_set_id=$1
+      AND source_order_hdf_detail_id=$2`, [setId, hdfDetailId2])).rows).toHaveLength(1);
+    await noMdfRows();
+
+    const deleted = await repository.deleteDetail({ ...base, detailId: rowId, expectedVersion: added.set.version,
+      idempotencyKey: `hdf-only-delete-${setId}` });
+    expect(deleted.set.details.some(d => d.bazisCutSetDetailId === rowId)).toBe(false);
+    expect(deleted.set.details).toHaveLength(1);
+    // No MDF ledger, shadow evidence or engine job was ever created for this set: it stayed outside the
+    // engine throughout, even though every write committed successfully in active mode.
+    await noMdfRows();
+  }, 60000);
+
+  it('refuses a legacy edit that would create or add an MDF-eligible row, even outside the MDF ledger (A2)', async () => {
+    const orderId = ++sequence;
+    const detailId = orderId * 100 + 1, mdfDetailId = orderId * 100 + 2;
+    await fixture.client.query(`INSERT INTO materials(material_id,material_name) SELECT 2,'ЛДСП 16 мм'
+      WHERE NOT EXISTS (SELECT 1 FROM materials WHERE material_id=2)`);
+    await fixture.client.query(`INSERT INTO orders(order_id,order_name,order_kind,delete_flag,version,order_status_id,
+      payment_status_id,created_by) VALUES($1,$2,'production_order',false,1,1,1,1)`, [orderId, `E2E non-ledger ${orderId}`]);
+    await fixture.client.query(`INSERT INTO order_details(detail_id,order_id,detail_number,quantity,production_status_id,
+      delete_flag,material_id) VALUES($1,$2,1,3,1,false,2),($3,$2,2,4,1,false,1)`, [detailId, orderId, mdfDetailId]);
+    const setId = orderId;
+    await fixture.client.query(`INSERT INTO bazis_cut_sets(bazis_cut_set_id,name,version,created_at,updated_at)
+      VALUES($1,$2,1,now(),now())`, [setId, `E2E non-ledger ${setId}`]);
+    const rowId = setId * 1000 + 1;
+    await fixture.client.query(`INSERT INTO bazis_cut_set_details(bazis_cut_set_detail_id,bazis_cut_set_id,
+      source_order_id,source_order_detail_id,quantity,cut_enabled,source_type,material_name)
+      VALUES($1,$2,$3,$4,3,true,'order_detail','ЛДСП 16 мм')`, [rowId, setId, orderId, detailId]);
+    expect((await fixture.client.query(`SELECT 1 FROM mdf_source_heads WHERE source_kind='bazisCutSet' AND source_id=$1`,
+      [String(setId)])).rows).toHaveLength(0);
+
+    const repository = new PgBazisCutRepository(database! as never, {} as never);
+    const base = { currentUser: user, requestId: `non-ledger-${setId}`, setId, expectedVersion: 1 };
+
+    // An ordinary non-MDF edit stays on the legacy path (no ledger, no material change).
+    const updated = await repository.updateDetail({ ...base, detailId: rowId,
+      fields: plainFields({ quantity: 5 }), idempotencyKey: `non-ledger-plain-${setId}` });
+    expect(updated.set.details.find(d => d.bazisCutSetDetailId === rowId)?.quantity).toBe(5);
+
+    // Turning that same row into an MDF row is refused, even though the set never entered the ledger.
+    await expect(repository.updateDetail({ ...base, detailId: rowId, expectedVersion: updated.set.version,
+      fields: plainFields({ quantity: 5, materialName: 'MDF facade 10 mm', cutEnabled: true }),
+      idempotencyKey: `non-ledger-become-${setId}` }))
+      .rejects.toMatchObject({ code: 'MDF_COMPOSITION_REQUIRED', statusCode: 409 });
+    expect((await fixture.client.query(`SELECT material_name FROM bazis_cut_set_details WHERE bazis_cut_set_detail_id=$1`,
+      [rowId])).rows[0].material_name).toBe('ЛДСП 16 мм'); // refusal wrote nothing
+
+    // Adding an already-MDF order detail of the same order to this non-ledger set is refused too.
+    await expect(repository.addDetails({ currentUser: user, requestId: `non-ledger-add-${setId}`, setId, orderId,
+      detailIds: [mdfDetailId], hdfDetailIds: [], expectedVersion: updated.set.version,
+      idempotencyKey: `non-ledger-add-key-${setId}` }))
+      .rejects.toMatchObject({ code: 'MDF_SET_REFILL_NOT_CONNECTED', statusCode: 409 });
+    expect((await fixture.client.query(`SELECT 1 FROM bazis_cut_set_details WHERE bazis_cut_set_id=$1
+      AND source_order_detail_id=$2`, [setId, mdfDetailId])).rows).toHaveLength(0);
+    expect((await fixture.client.query(`SELECT 1 FROM mdf_source_heads WHERE source_kind='bazisCutSet' AND source_id=$1`,
+      [String(setId)])).rows).toHaveLength(0);
   }, 60000);
 
   /** Makes an order's details buildable by the server-side BASIS snapshot builder (project + MDF sheet material). */
@@ -1674,4 +1925,178 @@ describe.skipIf(!enabled)('BASIS composition command, isolated PostgreSQL schema
     release();
     await move;
   });
+
+  it('a genesis v1 BASIS source (real creation path) is accepted for composition 10→8 by the worker; a v1 source WITH a physical line still requires v2 lineage (A1)', async () => {
+    if (!database) throw new Error('MDF_TEST_DATABASE_NOT_READY');
+    const orderId = ++sequence;
+    const detailId = orderId * 100 + 1;
+    await fixture.client.query(`INSERT INTO orders(order_id,order_name,order_kind,delete_flag,version,order_status_id,payment_status_id,created_by)
+      VALUES($1,$2,'production_order',false,1,1,1,1)`, [orderId, `E2E genesis ${orderId}`]);
+    await fixture.client.query(`INSERT INTO order_details(detail_id,order_id,detail_number,quantity,production_status_id,delete_flag,material_id)
+      VALUES($1,$2,1,10,1,false,1),($3,$2,2,1,1,false,1)`, [detailId, orderId, detailId + 1]);
+    await makeRefillable(orderId);
+
+    // Real creation command (v1, membership-only receipt via captureNewMdfBazisSource) — exactly the audit's
+    // A1 regression scenario: "создать MDF-набор → дождаться публикации → изменить состав".
+    const repository = new PgBazisCutRepository(database as never, {} as never);
+    const created = await repository.create({ currentUser: user, requestId: `genesis-create-${orderId}`,
+      idempotencyKey: `genesis-create-${orderId}`, orderId, detailIds: [detailId] });
+    expect(created.mdfJobId).toEqual(expect.any(String));
+    expect(await processJob(created.mdfJobId!)).toMatchObject({ status: 'done', jobId: created.mdfJobId }); // wait publication
+    expect((await fixture.client.query(`SELECT stage_code,evidence_kind FROM mdf_evidence_lines
+      WHERE source_kind='bazisCutSet' AND source_id=$1`, [String(created.set.bazisCutSetId)])).rows)
+      .toEqual([{ stage_code: 'membership', evidence_kind: 'derived' }]); // pure v1 membership, no physical, no lineage
+    // A freshly created, never-edited set genuinely sits at version 0 (db/migrations/068_bazis_cut_sets.sql
+    // default); the fix accepts "0" as a valid expectedVersion.
+    expect(created.set.version).toBe(0);
+
+    const setId = created.set.bazisCutSetId;
+    const sourceId = String(setId);
+    const rowId = created.set.details[0].bazisCutSetDetailId;
+    const headBefore = (await fixture.client.query<{ received: string; accepted: string }>(`SELECT received_revision_key received,
+      accepted_revision_key accepted FROM mdf_source_heads WHERE source_kind='bazisCutSet' AND source_id=$1`, [sourceId])).rows[0];
+    const g: SourceFixture = { orderId, detailId, setId, rowId, sourceId,
+      demand: [{ orderId, detailId, quantity: 10 }] };
+    const request = { expectedVersion: String(created.set.version), sourceToken: await sourceToken(g),
+      desiredRows: [{ rowId: String(rowId), quantity: 8 }] };
+    const preview = await command().preview(user, setId, request, `genesis-composition-preview-${orderId}`);
+    expect(preview).toMatchObject({ status: 'ready', blockers: [] });
+    const queued = await command().confirm(user, setId, { ...request, expectedDigest: preview.previewDigest!,
+      idempotencyKey: `genesis-composition-${orderId}` }, `genesis-composition-confirm-${orderId}`);
+    expect(queued).toMatchObject({ status: 'queued' });
+    // The worker accepts it: the head advances (accepted moves past the create revision) and publication updates.
+    expect(await processJob((queued as { jobId: string }).jobId)).toMatchObject({ status: 'done' });
+    const headAfter = (await fixture.client.query<{ received: string; accepted: string }>(`SELECT received_revision_key received,
+      accepted_revision_key accepted FROM mdf_source_heads WHERE source_kind='bazisCutSet' AND source_id=$1`, [sourceId])).rows[0];
+    expect(headAfter.received).toBe(headAfter.accepted);
+    expect(headAfter.accepted).not.toBe(headBefore.accepted);
+    expect((await fixture.client.query(`SELECT order_id::float8 o,detail_id::float8 d,quantity::float8 q
+      FROM mdf_published_source_members WHERE source_kind='bazisCutSet' AND source_id=$1`, [sourceId])).rows)
+      .toEqual([{ o: orderId, d: detailId, q: 8 }]);
+    expect((await fixture.client.query(`SELECT issues FROM mdf_published_sources
+      WHERE source_kind='bazisCutSet' AND source_id=$1`, [sourceId])).rows[0]).toEqual({ issues: [] });
+
+    // A v1 (no-lineage) revision that DOES carry a physical evidence line must still require v2 lineage.
+    const withPhysical = await makeV1PhysicalSource();
+    const request2 = { expectedVersion: '1', sourceToken: await sourceToken(withPhysical),
+      desiredRows: [{ rowId: String(withPhysical.rowId), quantity: 8 }] };
+    const blocked = await command().preview(user, withPhysical.setId, request2, `v1-physical-preview-${withPhysical.orderId}`);
+    expect(blocked.status).toBe('blocked');
+    expect(blocked.blockers).toEqual([{ code: 'LINEAGE_V2_REQUIRED', sourceId: withPhysical.sourceId }]);
+  }, 60000);
+
+  it('a neighbour source detachment in the same order never blocks the target BASIS composition (A3)', async () => {
+    if (!database) throw new Error('MDF_TEST_DATABASE_NOT_READY');
+    vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'true');
+    try {
+      const pair = await makeDetachmentPair();
+      const db = database;
+      const detach = async (key: string, confirmation?: { digest: string }) => db.transaction(async tx => {
+        await tx.query('SELECT order_id FROM orders WHERE order_id=$1 FOR UPDATE', [pair.orderId]);
+        const mdf = await openMdfOrderCommand(tx, 'orders.update');
+        await mdf.captureBefore([pair.orderId]);
+        await tx.query('UPDATE order_details SET delete_flag=true WHERE detail_id=$1', [pair.detailY]);
+        await mdf.finish({ user, requestId: `${key}-request`, commandKey: key, orderIds: [pair.orderId],
+          confirmation: confirmation ?? null });
+      }, { mdf: { writer: 'orders.update', capability: 'order-demand' } });
+
+      let challenge: { statusCode: number; code: string; details: { mdfConfirmation?: { digest: string } } } | undefined;
+      try { await detach('neighbour-detach-preview'); }
+      catch (error) { challenge = error as typeof challenge; }
+      if (!challenge) throw new Error('E2E_NEIGHBOUR_DETACH_CHALLENGE_EXPECTED');
+      expect(challenge).toMatchObject({ statusCode: 409, code: 'MDF_ORDER_ASSIGNMENT_CONFLICT' });
+      const digest = challenge.details.mdfConfirmation?.digest;
+      if (!digest) throw new Error('E2E_NEIGHBOUR_DETACH_DIGEST_REQUIRED');
+      await detach('neighbour-detach-confirmed', { digest });
+
+      const detachments = (await fixture.client.query<{ kind: string; id: string; detail: string }>(
+        `SELECT source_kind kind,source_id id,detail_id::text detail FROM mdf_position_detachments WHERE order_id=$1`,
+        [pair.orderId])).rows;
+      expect(detachments).toEqual([{ kind: 'bazisCutSet', id: pair.sourceY, detail: String(pair.detailY) }]);
+
+      // Drain every follow-up job: Y's own detachment receipt, and X's ordinary demand-only cascade (the
+      // order's total live MDF demand shrank when Y was removed, so X's frozen demand — which, like every
+      // bazisCutSet source, freezes the order's FULL MDF demand, not just its own membership — is refreshed
+      // too; this is ordinary §5.4a cascade, not a correction, and never touches X's own raw row/membership).
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        const result = await runner().processOne();
+        if (result.status === 'idle') break;
+        expect(result.status).toBe('done');
+      }
+      const xHead = (await fixture.client.query<{ received: string; accepted: string }>(`SELECT received_revision_key received,
+        accepted_revision_key accepted FROM mdf_source_heads WHERE source_kind='bazisCutSet' AND source_id=$1`,
+      [pair.x.sourceId])).rows[0];
+      expect(xHead.received).toBe(xHead.accepted); // no longer pending
+      // X's own membership is byte-identical: still just detailX at 10, never touched by Y's detachment.
+      expect((await fixture.client.query(`SELECT order_id::float8 o,detail_id::float8 d,quantity::float8 q,stage_code
+        FROM mdf_evidence_lines WHERE source_kind='bazisCutSet' AND source_id=$1 AND revision_key=$2 AND stage_code='membership'`,
+      [pair.x.sourceId, xHead.accepted])).rows).toEqual([{ o: pair.orderId, d: pair.detailX, q: 10, stage_code: 'membership' }]);
+      expect((await fixture.client.query<{ q: number }>('SELECT quantity::float8 q FROM bazis_cut_set_details WHERE bazis_cut_set_detail_id=$1',
+        [pair.x.rowId])).rows[0].q).toBe(10);
+
+      // Composition change of X (10→8) succeeds despite Y's confirmed detachment in the same order/closure.
+      const request = { expectedVersion: '1', sourceToken: await sourceToken(pair.x),
+        desiredRows: [{ rowId: String(pair.x.rowId), quantity: 8 }] };
+      const preview = await command().preview(user, pair.x.setId, request, 'neighbour-composition-preview');
+      expect(preview).toMatchObject({ status: 'ready', blockers: [] });
+      const queued = await command().confirm(user, pair.x.setId, { ...request, expectedDigest: preview.previewDigest!,
+        idempotencyKey: 'neighbour-composition-key' }, 'neighbour-composition-confirm');
+      expect(queued).toMatchObject({ status: 'queued' });
+      expect(await processJob((queued as { jobId: string }).jobId)).toMatchObject({ status: 'done' });
+      expect((await fixture.client.query(`SELECT order_id::float8 o,detail_id::float8 d,quantity::float8 q
+        FROM mdf_published_source_members WHERE source_kind='bazisCutSet' AND source_id=$1`, [pair.x.sourceId])).rows)
+        .toEqual([{ o: pair.orderId, d: pair.detailX, q: 8 }]);
+    } finally { vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'false'); }
+  }, 60000);
+
+  it('refills a set after an explicit return of the retained cut leaves it with zero evidence lines (A4)', async () => {
+    if (!database) throw new Error('MDF_TEST_DATABASE_NOT_READY');
+    const f = await makeV2Source(10);
+    await emptyViaComposition(f, `a4-empty-${f.setId}`);
+    const source = cardSource(f);
+    const request = { sourceToken: await sourceToken(f), targetColumn: 'parsed' as const };
+    const preview = await correctionCommand().preview(user, source, request, `a4-return-preview-${f.setId}`);
+    expect(preview.status).toBe('ready');
+    if (!preview.digest) throw new Error('E2E_A4_RETURN_DIGEST_REQUIRED');
+    const body = { ...request, expectedDigest: preview.digest, idempotencyKey: `a4-return-${f.setId}` };
+    const returned = await correctionCommand().confirm(user, source, body, `a4-return-confirm-${f.setId}`);
+    await processJobs(returned.jobIds);
+
+    const corrected = (await fixture.client.query<{ received: string; accepted: string }>(`SELECT received_revision_key received,
+      accepted_revision_key accepted FROM mdf_source_heads WHERE source_kind='bazisCutSet' AND source_id=$1`, [f.sourceId])).rows[0];
+    expect(corrected.received).toBe(corrected.accepted);
+    // The explicit return dropped the retained physical line too: the accepted revision has zero lines.
+    expect((await fixture.client.query(`SELECT count(*)::int n FROM mdf_evidence_lines
+      WHERE source_kind='bazisCutSet' AND source_id=$1 AND revision_key=$2`, [f.sourceId, corrected.accepted])).rows[0].n).toBe(0);
+    expect((await fixture.client.query(`SELECT intentional_empty FROM mdf_bazis_assignment_states
+      WHERE source_kind='bazisCutSet' AND source_id=$1 AND revision_key=$2`, [f.sourceId, corrected.accepted])).rows[0])
+      .toEqual({ intentional_empty: true });
+    vi.stubEnv('BACKEND_MDF_BAZIS_REFILL', 'true');
+    try {
+      await makeRefillable(f.orderId);
+      const version = String((await fixture.client.query<{ version: string }>(
+        'SELECT version::text FROM bazis_cut_sets WHERE bazis_cut_set_id=$1', [f.setId])).rows[0].version);
+      const refillRequest = { expectedVersion: version, sourceToken: await sourceToken(f),
+        desiredRows: [{ newDetailId: f.detailId + 1, quantity: 1 }] };
+      // The A4 fix works: preview and confirm both succeed — the validated intentional-empty zero-line
+      // predecessor no longer trips CURRENT_SOURCE_MISSING (mdf-bazis-composition-command.ts prepare(),
+      // validatedIntentionalEmpty() checked before pushing the blocker) — and the worker accepts it too
+      // (mdf-bazis-composition-validation.ts validateMdfBazisCompositionAdvance(): an empty predecessor is
+      // allowed when its assignment state is intentionalEmpty).
+      const refillPreview = await command().preview(user, f.setId, refillRequest, `a4-refill-preview-${f.setId}`);
+      expect(refillPreview).toMatchObject({ status: 'ready', blockers: [] });
+      const queued = await command().confirm(user, f.setId, { ...refillRequest, expectedDigest: refillPreview.previewDigest!,
+        idempotencyKey: `a4-refill-${f.setId}` }, `a4-refill-confirm-${f.setId}`);
+      expect(queued).toMatchObject({ status: 'queued' });
+      // The worker accepts it: new membership with zero cut.
+      expect(await processJob((queued as { jobId: string }).jobId)).toMatchObject({ status: 'done' });
+      expect((await fixture.client.query(`SELECT order_id::float8 o,detail_id::float8 d,quantity::float8 q
+        FROM mdf_published_source_members WHERE source_kind='bazisCutSet' AND source_id=$1`, [f.sourceId])).rows)
+        .toEqual([{ o: f.orderId, d: f.detailId + 1, q: 1 }]);
+      expect((await fixture.client.query(`SELECT count(*)::int n FROM mdf_evidence_lines
+        WHERE source_kind='bazisCutSet' AND source_id=$1 AND stage_code='cut' AND revision_key=(
+          SELECT accepted_revision_key FROM mdf_source_heads WHERE source_kind='bazisCutSet' AND source_id=$1)`,
+      [f.sourceId])).rows[0].n).toBe(0);
+    } finally { vi.stubEnv('BACKEND_MDF_BAZIS_REFILL', 'false'); }
+  }, 60000);
 });

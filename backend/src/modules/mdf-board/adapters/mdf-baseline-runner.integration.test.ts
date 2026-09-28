@@ -19,9 +19,9 @@ import { PgMdfCorrectionCommand } from './mdf-correction-command';
 import { mdfSourceCommandToken } from '../domain/mdf-manual-proof';
 import { createMdfCorrectionPgFixture } from './mdf-correction-test-fixture.integration';
 import {
-  abortMdfBaseline, assertMdfBaselineFresh, dryRunMdfBaseline, handoffMdfBaseline,
-  markMdfBaselineRecorded, MdfBaselineRefused, recordMdfBaselineBatch, resetMdfBaseline, startMdfBaselineRun,
-  type MdfBaselineActor,
+  abortMdfBaseline, assertMdfBaselineFresh, dryRunMdfBaseline, fatalMdfBaselineSkips, handoffMdfBaseline,
+  hasMdfUnsupportedProductionRounds, loadMdfBaselineBuild, markMdfBaselineRecorded, MdfBaselineRefused,
+  recordMdfBaselineBatch, resetMdfBaseline, startMdfBaselineRun, type MdfBaselineActor,
 } from './mdf-baseline-runner';
 
 const enabled = process.env.MDF_ENGINE_INTEGRATION === '1';
@@ -487,6 +487,209 @@ describe.skipIf(!enabled)('MDF §5.7b baseline population, isolated PostgreSQL s
     expect((await fixture.client.query('SELECT freeze_run_id FROM mdf_freeze_guard')).rows[0].freeze_run_id).toBeNull();
 
     await expect(database.transaction(tx2 => assertMdfBaselineFresh(tx2))).resolves.toBeUndefined();
+  }, 30000);
+
+  // =====================================================================================================
+  // (E1) Rule 7 coverage: orders with live MDF demand but NO legacy source at all.
+  // =====================================================================================================
+  it('a source-less current order enters manual review with no receipt; a source-less finished order gets no closure (E1)', async () => {
+    const currentNoSource = await seedOrder({ orderStatusId: 1, quantity: 4 });
+    const finishedNoSource = await seedOrder({ orderStatusId: 2, quantity: 4 });
+
+    const build = await database.transaction(tx2 => loadMdfBaselineBuild(tx2));
+    expect(build.manualReviewOrderIds).toContain(currentNoSource.orderId);
+    expect(build.manualReviewOrderIds).not.toContain(finishedNoSource.orderId);
+    expect(build.closedOrderIds).not.toContain(finishedNoSource.orderId);
+    expect(build.items.some(i => i.orderIds.includes(currentNoSource.orderId))).toBe(false);
+    expect(build.items.some(i => i.orderIds.includes(finishedNoSource.orderId))).toBe(false);
+
+    // Through a real (aborted, never activated) run: neither order gets any receipt at all.
+    const started = await database.transaction(tx2 => startMdfBaselineRun(tx2, actor, {}));
+    for (let i = 0; i < started.build.items.length; i += 100) {
+      await database.transaction(tx2 => recordMdfBaselineBatch(tx2, actor, started.runId, started.runSeq,
+        started.build.items.slice(i, i + 100)));
+    }
+    expect((await fixture.client.query(`SELECT 1 FROM mdf_source_heads WHERE source_kind='order' AND source_id=ANY($1::text[])`,
+      [[String(currentNoSource.orderId), String(finishedNoSource.orderId)]])).rows).toHaveLength(0);
+    await database.transaction(tx2 => abortMdfBaseline(tx2, actor, started.runId));
+    await database.transaction(tx2 => resetMdfBaseline(tx2, actor, started.runId));
+    await expect(database.transaction(tx2 => assertMdfBaselineFresh(tx2))).resolves.toBeUndefined();
+  }, 30000);
+
+  // =====================================================================================================
+  // (E2) A source over the owner-context limit fails dry-run/apply and drifts a recorded handoff;
+  // LINE_OUTSIDE_DEMAND (a legitimate, non-fatal skip reason) never does.
+  // =====================================================================================================
+  it('an over-owner-limit source fails dry-run/apply and drifts a recorded handoff; LINE_OUTSIDE_DEMAND never does (E2)', async () => {
+    expect(fatalMdfBaselineSkips({ skipped: [{ itemKey: 'packet:x', reason: 'LINE_OUTSIDE_DEMAND' }] })).toEqual([]);
+    expect(fatalMdfBaselineSkips({ skipped: [{ itemKey: 'packet:x', reason: 'MEMBERSHIP_MISSING' }] })).toEqual([]);
+    expect(fatalMdfBaselineSkips({ skipped: [{ itemKey: 'packet:x', reason: 'CONTEXT_LIMIT' }] })).toEqual(['packet:x:CONTEXT_LIMIT']);
+
+    const owners: { orderId: number; detailId: number }[] = [];
+    for (let i = 0; i < 101; i++) owners.push(await seedOrder({ orderStatusId: 1, quantity: 1 }));
+    const packetId = await seedPacket({ completed: true,
+      items: owners.slice(0, 100).map((o, i) => ({ line: `ctx-${i}`, orderId: o.orderId, detailId: o.detailId, quantity: 1 })) });
+    // A raw legacy write: while a baseline run is unfinished (read_only), it must carry the baseline writer tag
+    // (same as the pre-existing "drift" test's `UPDATE orders`) — wrapped in one explicit transaction since
+    // `set_config(...,true)` is transaction-local and each bare statement is otherwise its own transaction.
+    const taggedWrite = async (sql: string, params: readonly unknown[]) => {
+      await fixture.client.query('BEGIN');
+      try {
+        await fixture.client.query("SELECT set_config('mdf.command_writer','mdf.baseline',true)");
+        await fixture.client.query(sql, [...params]);
+        await fixture.client.query('COMMIT');
+      } catch (error) { await fixture.client.query('ROLLBACK').catch(() => undefined); throw error; }
+    };
+    const addExtraOwner = () => taggedWrite(`INSERT INTO cnc_telegram_packet_items(packet_item_id,packet_id,source_item_key,
+      match_order_id,match_detail_id,match_status,quantity,order_name,detail_number,width_mm,height_mm,source)
+      VALUES($1,$2,'ctx-100',$3,$4,'matched',1,'E2E item',1,100,200,'manual')`,
+    [randomUUID(), packetId, owners[100].orderId, owners[100].detailId]);
+    const removeExtraOwner = () => taggedWrite(`DELETE FROM cnc_telegram_packet_items
+      WHERE packet_id=$1 AND source_item_key='ctx-100'`, [packetId]);
+
+    // 101 owners: over the limit from the start.
+    await addExtraOwner();
+    const overLimit = await database.transaction(tx2 => loadMdfBaselineBuild(tx2));
+    expect(overLimit.skipped).toContainEqual({ itemKey: `packet:${packetId}`, reason: 'CONTEXT_LIMIT' });
+
+    // Dry-run fails the gate specifically over this skip (not just any other failure).
+    await fixture.client.query('BEGIN ISOLATION LEVEL READ COMMITTED');
+    let report: Awaited<ReturnType<typeof dryRunMdfBaseline>>;
+    try { report = await dryRunMdfBaseline(tx(fixture.client), actor); } finally { await fixture.client.query('ROLLBACK'); }
+    expect(report.build.skipped).toContainEqual({ itemKey: `packet:${packetId}`, reason: 'CONTEXT_LIMIT' });
+    expect(report.failures).toContain('required_items_skipped');
+    expect(report.passed).toBe(false);
+
+    // A real (non-dry-run) start refuses outright, before writing any run row.
+    const runsBeforeRefusal = Number((await fixture.client.query('SELECT count(*)::int n FROM mdf_baseline_runs')).rows[0].n);
+    await expect(database.transaction(tx2 => startMdfBaselineRun(tx2, actor, {})))
+      .rejects.toMatchObject({ code: 'MDF_BASELINE_REQUIRED_ITEMS_SKIPPED',
+        detail: expect.arrayContaining([`packet:${packetId}:CONTEXT_LIMIT`]) });
+    expect(Number((await fixture.client.query('SELECT count(*)::int n FROM mdf_baseline_runs')).rows[0].n)).toBe(runsBeforeRefusal);
+    expect((await fixture.client.query('SELECT mode FROM mdf_engine_state')).rows[0].mode).toBe('legacy');
+
+    // Back under the limit: a real run starts, records and is marked recorded normally.
+    await removeExtraOwner();
+    const started = await database.transaction(tx2 => startMdfBaselineRun(tx2, actor, {}));
+    for (let i = 0; i < started.build.items.length; i += 100) {
+      await database.transaction(tx2 => recordMdfBaselineBatch(tx2, actor, started.runId, started.runSeq,
+        started.build.items.slice(i, i + 100)));
+    }
+    await database.transaction(tx2 => markMdfBaselineRecorded(tx2, actor, started.runId, started.build));
+
+    // The SAME source is pushed back over the limit between recording and handoff.
+    await addExtraOwner();
+    const handoff = await database.transaction(tx2 => handoffMdfBaseline(tx2, actor, started.runId));
+    expect(handoff.status).toBe('drifted');
+    expect(handoff.drift).toContain(`skipped:packet:${packetId}:CONTEXT_LIMIT`);
+
+    await database.transaction(tx2 => resetMdfBaseline(tx2, actor, started.runId));
+    await expect(database.transaction(tx2 => assertMdfBaselineFresh(tx2))).resolves.toBeUndefined();
+
+    // Cleanup: nothing here should linger and trip later real applies in this file (e.g. the activation test).
+    await fixture.client.query('DELETE FROM cnc_telegram_packet_items WHERE packet_id=$1', [packetId]);
+    await fixture.client.query('DELETE FROM cnc_telegram_packets WHERE packet_id=$1', [packetId]);
+    const ownerIds = owners.map(o => o.orderId);
+    await fixture.client.query('DELETE FROM order_details WHERE order_id=ANY($1::bigint[])', [ownerIds]);
+    await fixture.client.query('DELETE FROM orders WHERE order_id=ANY($1::bigint[])', [ownerIds]);
+    const clean = await database.transaction(tx2 => loadMdfBaselineBuild(tx2));
+    expect(clean.skipped.some(s => s.itemKey === `packet:${packetId}`)).toBe(false);
+  }, 60000);
+
+  // =====================================================================================================
+  // 7. Rework rounds (§5.5 variant B, hasMdfUnsupportedProductionRounds): the engine has no production-round model
+  // yet, so it must never (re)admit or (re)activate while any LIVE detail is in round > 1. Schema-tolerant: before
+  // the rework migration the column does not exist and there is nothing to check. Every scenario below opens its
+  // OWN transaction and always rolls back (never commits): `assertMdfBaselineFresh`'s whole-database freshness
+  // check (accepted heads/allocations/published/other-authority/mode) must keep holding for every OTHER test in
+  // this file regardless of run order, and the added column must not leak into any other test either way. MUST run
+  // before the "apply lifecycle" test below, which is the first test to really activate the engine (after which
+  // `assertMdfBaselineFresh` — and therefore `startMdfBaselineRun`/`dryRunMdfBaseline` — never succeeds again).
+  // =====================================================================================================
+  it('hasMdfUnsupportedProductionRounds: no column ⇒ false; all at 1 ⇒ false; a live detail at 2 ⇒ true; deleted ⇒ ignored', async () => {
+    const order = await seedOrder({ quantity: 5 });
+    await fixture.client.query('BEGIN ISOLATION LEVEL READ COMMITTED');
+    try {
+      expect(await hasMdfUnsupportedProductionRounds(tx(fixture.client))).toBe(false);
+      await fixture.client.query('ALTER TABLE order_details ADD COLUMN production_round int NOT NULL DEFAULT 1');
+      expect(await hasMdfUnsupportedProductionRounds(tx(fixture.client))).toBe(false);
+      await fixture.client.query('UPDATE order_details SET production_round=2 WHERE detail_id=$1', [order.detailId]);
+      expect(await hasMdfUnsupportedProductionRounds(tx(fixture.client))).toBe(true);
+      await fixture.client.query('UPDATE order_details SET delete_flag=true WHERE detail_id=$1', [order.detailId]);
+      expect(await hasMdfUnsupportedProductionRounds(tx(fixture.client))).toBe(false);
+    } finally {
+      await fixture.client.query('ROLLBACK');
+    }
+  });
+
+  it('apply refuses to start while a live detail is in production round > 1', async () => {
+    const order = await seedOrder({ quantity: 5 });
+    await fixture.client.query('BEGIN ISOLATION LEVEL READ COMMITTED');
+    try {
+      const locked = (await fixture.client.query<{ locked: boolean }>(
+        `SELECT pg_try_advisory_xact_lock(${LOCK_SQL}) locked`)).rows[0].locked;
+      expect(locked).toBe(true);
+      await fixture.client.query('ALTER TABLE order_details ADD COLUMN production_round int NOT NULL DEFAULT 1');
+      await fixture.client.query('UPDATE order_details SET production_round=2 WHERE detail_id=$1', [order.detailId]);
+      await expect(startMdfBaselineRun(tx(fixture.client), actor, {}))
+        .rejects.toMatchObject({ code: 'MDF_PRODUCTION_ROUNDS_UNSUPPORTED' });
+    } finally {
+      await fixture.client.query('ROLLBACK');
+    }
+  }, 30000);
+
+  it('apply proceeds when the only production-round>1 detail is deleted', async () => {
+    const order = await seedOrder({ quantity: 5 });
+    await fixture.client.query('BEGIN ISOLATION LEVEL READ COMMITTED');
+    try {
+      const locked = (await fixture.client.query<{ locked: boolean }>(
+        `SELECT pg_try_advisory_xact_lock(${LOCK_SQL}) locked`)).rows[0].locked;
+      expect(locked).toBe(true);
+      await fixture.client.query('ALTER TABLE order_details ADD COLUMN production_round int NOT NULL DEFAULT 1');
+      await fixture.client.query('UPDATE order_details SET production_round=2,delete_flag=true WHERE detail_id=$1', [order.detailId]);
+      const applied = await startMdfBaselineRun(tx(fixture.client), actor, {});
+      expect(typeof applied.runId).toBe('string');
+    } finally {
+      await fixture.client.query('ROLLBACK');
+    }
+  }, 30000);
+
+  it('dry-run reports drift and the production-rounds-unsupported failure code for a live detail at round > 1', async () => {
+    const order = await seedOrder({ quantity: 5 });
+    await fixture.client.query('BEGIN ISOLATION LEVEL READ COMMITTED');
+    try {
+      await fixture.client.query('ALTER TABLE order_details ADD COLUMN production_round int NOT NULL DEFAULT 1');
+      await fixture.client.query('UPDATE order_details SET production_round=2 WHERE detail_id=$1', [order.detailId]);
+      const report = await dryRunMdfBaseline(tx(fixture.client), actor);
+      expect(report.handoff).toBe('drifted');
+      expect(report.failures).toContain('production_rounds_unsupported');
+      expect(report.passed).toBe(false);
+    } finally {
+      await fixture.client.query('ROLLBACK');
+    }
+  }, 30000);
+
+  it('handoff drifts (not activates) when a live detail is in production round > 1 by the time of handoff', async () => {
+    const order = await seedOrder({ quantity: 5 });
+    await fixture.client.query('BEGIN ISOLATION LEVEL READ COMMITTED');
+    try {
+      const locked = (await fixture.client.query<{ locked: boolean }>(
+        `SELECT pg_try_advisory_xact_lock(${LOCK_SQL}) locked`)).rows[0].locked;
+      expect(locked).toBe(true);
+      const started = await startMdfBaselineRun(tx(fixture.client), actor, {});
+      for (let i = 0; i < started.build.items.length; i += 100) {
+        await recordMdfBaselineBatch(tx(fixture.client), actor, started.runId, started.runSeq, started.build.items.slice(i, i + 100));
+      }
+      await markMdfBaselineRecorded(tx(fixture.client), actor, started.runId, started.build);
+      // The rework round appears only AFTER recording (mirrors a live rework starting mid-run): handoff must catch it.
+      await fixture.client.query('ALTER TABLE order_details ADD COLUMN production_round int NOT NULL DEFAULT 1');
+      await fixture.client.query('UPDATE order_details SET production_round=2 WHERE detail_id=$1', [order.detailId]);
+      const handoff = await handoffMdfBaseline(tx(fixture.client), actor, started.runId);
+      expect(handoff.status).toBe('drifted');
+      expect(handoff.drift).toContain('production_rounds_unsupported');
+    } finally {
+      await fixture.client.query('ROLLBACK');
+    }
   }, 30000);
 
   // =====================================================================================================

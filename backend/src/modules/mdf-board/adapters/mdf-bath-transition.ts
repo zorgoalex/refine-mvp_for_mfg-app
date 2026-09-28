@@ -1,3 +1,4 @@
+import { isMdfLineDetached, loadMdfDetachedPositions } from './mdf-position-detachments';
 import type { DatabaseClient } from '../../../database/database.types';
 import { auditService } from '../../../common/audit/audit.service';
 import { MdfNeedsAttention, type MdfJob } from '../application/mdf-job-runner';
@@ -41,10 +42,14 @@ export async function advanceMdfBathTransition(tx: DatabaseClient, input: {
     || (t.successorSourceId && (!successor || successor.received !== t.successorRevisionKey || successor.accepted !== null))) {
     throw new MdfNeedsAttention('MDF_BATH_TRANSITION_INVALID');
   }
-  // Physical facts of the retired bath forbid retirement (the command checked; the worker re-checks).
+  // Physical facts of the retired bath forbid retirement (the command checked; the worker re-checks). Facts at positions
+  // detached in that bath (§5.4e, e.g. a confirmed deletion) are terminal history and never block it.
+  const detached = await loadMdfDetachedPositions(tx, [{ kind: 'bath', id: t.retiredSourceId }]);
+  const live = (p: { orderId: number; detailId: number }) => !isMdfLineDetached(detached,
+    { kind: 'bath', id: t.retiredSourceId, orderId: p.orderId, detailId: p.detailId });
   const laminated = input.lines.some(l => l.kind === 'bath' && l.id === t.retiredSourceId
-    && l.revision === t.retiredPredecessorRevisionKey && l.stage === 'laminated');
-  const consumed = input.allocations.some(a => a.bathId === t.retiredSourceId && a.state === 'consumed');
+    && l.revision === t.retiredPredecessorRevisionKey && l.stage === 'laminated' && live(l));
+  const consumed = input.allocations.some(a => a.bathId === t.retiredSourceId && a.state === 'consumed' && live(a));
   if (laminated || consumed) throw new MdfNeedsAttention('MDF_BATH_TRANSITION_HAS_PRODUCTION');
   const released = input.allocations.filter(a => a.bathId === t.retiredSourceId && a.state === 'reserved');
   if (released.length) {

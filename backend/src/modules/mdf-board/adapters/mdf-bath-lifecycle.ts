@@ -71,12 +71,17 @@ async function resultOwners(tx: TransactionClient, resultId: number): Promise<nu
     WHERE p.cut_result_id=$1 AND s.is_effective AND p.order_id IS NOT NULL ORDER BY 1`, [resultId])).rows.map(r => Number(r.id));
 }
 
+/** Live production on the bath. Positions detached in the bath (§5.4e) are terminal history: their lamination and
+ * consumed debit stay recorded but never block the job's lifecycle (archive/recalculation). */
 async function hasProduction(tx: TransactionClient, sourceId: string): Promise<boolean> {
   return (await tx.query<{ found: boolean }>(`SELECT EXISTS(
       SELECT 1 FROM mdf_source_heads h JOIN mdf_evidence_lines e ON e.source_kind=h.source_kind AND e.source_id=h.source_id
         AND e.revision_key IN (h.accepted_revision_key,h.received_revision_key) AND e.stage_code='laminated'
-      WHERE h.source_kind='bath' AND h.source_id=$1)
-    OR EXISTS(SELECT 1 FROM mdf_bath_allocations WHERE bath_id=$1 AND state='consumed') found`, [sourceId])).rows[0].found;
+      WHERE h.source_kind='bath' AND h.source_id=$1 AND NOT EXISTS (SELECT 1 FROM mdf_position_detachments x
+        WHERE x.source_kind='bath' AND x.source_id=$1 AND x.order_id=e.order_id AND x.detail_id=e.detail_id))
+    OR EXISTS(SELECT 1 FROM mdf_bath_allocations a WHERE a.bath_id=$1 AND a.state='consumed'
+      AND NOT EXISTS (SELECT 1 FROM mdf_position_detachments x WHERE x.source_kind='bath' AND x.source_id=$1
+        AND x.order_id=a.order_id AND x.detail_id=a.detail_id)) found`, [sourceId])).rows[0].found;
 }
 
 async function hasPendingTransition(tx: TransactionClient, cutJobId: number): Promise<boolean> {

@@ -7,6 +7,7 @@
 import type { TransactionClient } from '../../../database/database.types';
 import { auditService } from '../../../common/audit/audit.service';
 import { MDF_MARK_MODE_CHANGED_SQL } from '../application/mdf-command-boundary';
+import { hasMdfUnsupportedProductionRounds } from './mdf-baseline-runner';
 
 export const MDF_RECOVERY_WRITER = 'mdf.recovery';
 export class MdfCutoverControlRefused extends Error {
@@ -75,6 +76,10 @@ export async function changeMdfEngineMode(tx: TransactionClient, actor: MdfCutov
     throw new MdfCutoverControlRefused(activated ? 'MDF_REACTIVATION_REQUIRES_REBASELINE' : 'MDF_ACTIVATION_ONLY_VIA_HANDOFF');
   }
   if (engine(target) && !activated) throw new MdfCutoverControlRefused('MDF_ACTIVATION_PROVENANCE_MISSING');
+  // No engine model for rework rounds yet: never (re)enter `active` while a live detail is in round > 1.
+  if (target === 'active' && await hasMdfUnsupportedProductionRounds(tx)) {
+    throw new MdfCutoverControlRefused('MDF_PRODUCTION_ROUNDS_UNSUPPORTED');
+  }
   if (target === 'legacy' && engine(from)) {
     // Fail closed: an engine mode without an activated run has no loss-check provenance.
     if (!activated) throw new MdfCutoverControlRefused('MDF_ACTIVATION_PROVENANCE_MISSING');

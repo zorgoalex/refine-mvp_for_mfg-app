@@ -459,6 +459,30 @@ describe.skipIf(!enabled)('MDF §5.8 cutover controls (recovery freeze, mode mat
       expect(Number(count)).toBeGreaterThanOrEqual(2);
     });
 
+    // hasMdfUnsupportedProductionRounds (§5.5 variant B): the engine has no production-round model yet, so
+    // read_only -> active must refuse while any LIVE detail is in round > 1; a deleted one is ignored. The
+    // production_round column does not exist in this fixture's schema by default, so it is added and dropped
+    // inside this one test only (try/finally), leaving every other test in the file unaffected.
+    it('read_only -> active is refused while a live detail is in production round > 1; a deleted one is ignored', async () => {
+      await seedActivatedBaselineRun();
+      await fixture.client.query("UPDATE mdf_engine_state SET mode='read_only'");
+      await fixture.client.query('ALTER TABLE order_details ADD COLUMN production_round int NOT NULL DEFAULT 1');
+      try {
+        const detail = await makeOrderDetail({ materialId: 1, quantity: 3 });
+        await fixture.client.query('UPDATE order_details SET production_round=2 WHERE detail_id=$1', [detail.detailId]);
+        await expect(database.transaction(tx => changeMdfEngineMode(tx, actor, 'active')))
+          .rejects.toMatchObject({ code: 'MDF_PRODUCTION_ROUNDS_UNSUPPORTED' });
+        expect((await fixture.client.query<{ mode: string }>('SELECT mode FROM mdf_engine_state')).rows[0].mode).toBe('read_only');
+
+        // Deleted: the same round > 1 detail no longer blocks the transition.
+        await fixture.client.query('UPDATE order_details SET delete_flag=true WHERE detail_id=$1', [detail.detailId]);
+        expect(await database.transaction(tx => changeMdfEngineMode(tx, actor, 'active')))
+          .toEqual({ from: 'read_only', to: 'active', changed: true });
+      } finally {
+        await fixture.client.query('ALTER TABLE order_details DROP COLUMN production_round');
+      }
+    });
+
     it('active/read_only -> legacy succeeds once an activated run exists and there are no engine-only facts since activation', async () => {
       await seedActivatedBaselineRun();
       expect(await database.transaction(tx => changeMdfEngineMode(tx, actor, 'legacy')))

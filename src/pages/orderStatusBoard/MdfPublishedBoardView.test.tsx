@@ -106,7 +106,7 @@ function textOf(instance: ReactTestInstance): string {
   return parts.join('');
 }
 
-describe('MdfPublishedBoardView: §5.6 finding 6 — search/focus survive the period filter', () => {
+describe('MdfPublishedBoardView: §5.8/D2 — no client-side period re-filter (the backend display cut is the only filter)', () => {
   it('keeps a March card visible for a September search (order in the active searchOrderIds)', () => {
     const marchCard = card({ id: 'march-card', sourceCreatedAt: '2026-03-10T00:00:00.000Z' });
     const septCard = card({ id: 'sept-card', sourceCreatedAt: '2026-09-27T00:00:00.000Z' });
@@ -128,7 +128,10 @@ describe('MdfPublishedBoardView: §5.6 finding 6 — search/focus survive the pe
     expect(findCard(view, 'packet', 'sept-card')).toHaveLength(1);
   });
 
-  it('removes an out-of-window card when it is NOT part of the active search or focus', () => {
+  // D2: a card out of any conventional date window (e.g. March, searched from September) is no longer removed
+  // client-side even OUTSIDE an active search/focus — the backend's own display cut already decided what belongs
+  // in `session.snapshot.cards`; the view renders that set as-is (`filterMdfPublishedCardsByPeriod` is gone).
+  it('never removes a card by date — the backend display cut is the only filter, search/focus notwithstanding', () => {
     const marchCard = card({ id: 'march-card', sourceCreatedAt: '2026-03-10T00:00:00.000Z' });
     let view!: ReactTestRenderer;
     act(() => {
@@ -140,7 +143,7 @@ describe('MdfPublishedBoardView: §5.6 finding 6 — search/focus survive the pe
         />,
       );
     });
-    expect(findCard(view, 'packet', 'march-card')).toHaveLength(0);
+    expect(findCard(view, 'packet', 'march-card')).toHaveLength(1);
   });
 
   it('keeps the focused card visible even outside the window and outside the search', () => {
@@ -201,7 +204,10 @@ describe('MdfPublishedBoardView: §5.6 R2#2 — search control propagates the cu
     expect(onRequestSearchOrderNames).toHaveBeenCalledTimes(3);
   });
 
-  it('removing one exempted order from searchOrderIds (as the hook would after a tag removal) drops exactly that card', () => {
+  // D2: removing (or clearing) searchOrderIds no longer drops a card by date — there is no period-exemption
+  // mechanism left to fall out of. Both march cards stay visible regardless of the search selection, since the
+  // backend's own display cut (not the client) already decided they belong in `session.snapshot.cards`.
+  it('removing one previously-searched order from searchOrderIds does not drop its card (no exemption to lose)', () => {
     const marchA = card({ id: 'march-a', sourceCreatedAt: '2026-03-01T00:00:00.000Z' });
     const marchB = card({ id: 'march-b', sourceCreatedAt: '2026-03-02T00:00:00.000Z' });
     const props = {
@@ -223,10 +229,10 @@ describe('MdfPublishedBoardView: §5.6 R2#2 — search control propagates the cu
     // Simulate the hook dropping order 66 from searchOrderIds after its tag was removed.
     act(() => { view.update(<MdfPublishedBoardView {...props} searchOrderIds={[55]} />); });
     expect(findCard(view, 'packet', 'march-a')).toHaveLength(1);
-    expect(findCard(view, 'packet', 'march-b')).toHaveLength(0);
+    expect(findCard(view, 'packet', 'march-b')).toHaveLength(1);
   });
 
-  it('clearing searchOrderIds entirely (as the hook would after clearing the search) drops ALL previously-exempted cards', () => {
+  it('clearing searchOrderIds entirely does not drop any previously-searched card (no exemption to lose)', () => {
     const marchA = card({ id: 'march-a', sourceCreatedAt: '2026-03-01T00:00:00.000Z' });
     const marchB = card({ id: 'march-b', sourceCreatedAt: '2026-03-02T00:00:00.000Z' });
     const props = {
@@ -246,8 +252,8 @@ describe('MdfPublishedBoardView: §5.6 R2#2 — search control propagates the cu
     expect(findCard(view, 'packet', 'march-b')).toHaveLength(1);
 
     act(() => { view.update(<MdfPublishedBoardView {...props} searchOrderIds={[]} />); });
-    expect(findCard(view, 'packet', 'march-a')).toHaveLength(0);
-    expect(findCard(view, 'packet', 'march-b')).toHaveLength(0);
+    expect(findCard(view, 'packet', 'march-a')).toHaveLength(1);
+    expect(findCard(view, 'packet', 'march-b')).toHaveLength(1);
   });
 });
 

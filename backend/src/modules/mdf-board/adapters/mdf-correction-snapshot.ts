@@ -67,16 +67,29 @@ export const MAX_MDF_CORRECTION_ROWS = 5000;
 const key = (source: { kind: string; id: string }) => mdfSourceKey(source);
 const compare = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
 
+// §5.4e: a position detached in a source is terminal history of that source — it never connects the source to its
+// (possibly deleted) order, so detached owners neither expand the closure nor need authorization.
+const notDetached = (alias: string) => `NOT EXISTS (SELECT 1 FROM mdf_position_detachments x WHERE x.source_kind=${alias}.source_kind
+    AND x.source_id=${alias}.source_id AND x.order_id=${alias}.order_id AND x.detail_id=${alias}.detail_id)`;
 const graphEdges = `edges AS (
   SELECT l.source_kind kind,l.source_id id,l.order_id FROM mdf_source_heads h JOIN mdf_evidence_lines l
     ON l.source_kind=h.source_kind AND l.source_id=h.source_id
     AND (l.revision_key=h.accepted_revision_key OR l.revision_key=h.received_revision_key)
+    WHERE ${notDetached('l')}
   UNION SELECT e.source_kind,e.source_id,a.order_id FROM mdf_bath_allocations a
-    JOIN mdf_evidence_lines e USING(evidence_line_id) WHERE a.state<>'released'
-  UNION SELECT 'bath',bath_id,order_id FROM mdf_bath_allocations WHERE state<>'released'
+    JOIN mdf_evidence_lines e USING(evidence_line_id) WHERE a.state<>'released' AND ${notDetached('e')}
+      AND NOT EXISTS (SELECT 1 FROM mdf_position_detachments x WHERE x.source_kind='bath' AND x.source_id=a.bath_id
+        AND x.order_id=a.order_id AND x.detail_id=a.detail_id)
+  UNION SELECT 'bath',a.bath_id,a.order_id FROM mdf_bath_allocations a WHERE a.state<>'released'
+    AND NOT EXISTS (SELECT 1 FROM mdf_position_detachments x WHERE x.source_kind='bath' AND x.source_id=a.bath_id
+      AND x.order_id=a.order_id AND x.detail_id=a.detail_id)
+    AND NOT EXISTS (SELECT 1 FROM mdf_evidence_lines e JOIN mdf_position_detachments x ON x.source_kind=e.source_kind
+      AND x.source_id=e.source_id AND x.order_id=e.order_id AND x.detail_id=e.detail_id
+      WHERE e.evidence_line_id=a.evidence_line_id)
   UNION SELECT d.source_kind,d.source_id,d.order_id FROM mdf_source_heads h JOIN mdf_revision_demand d
     ON d.source_kind=h.source_kind AND d.source_id=h.source_id
     AND (d.revision_key=h.accepted_revision_key OR d.revision_key=h.received_revision_key)
+    WHERE ${notDetached('d')}
 )`;
 
 /** §5.7b: owners of the target card itself (its own graph edges), for the explicit reopen of closed orders. */
@@ -125,19 +138,47 @@ function numeric<T extends { orderId: number; detailId: number; quantity: number
     || !Number.isSafeInteger(row.quantity) || row.quantity < 0) throw new MdfNeedsAttention('MDF_CORRECTION_INVALID_EVIDENCE');
 }
 
+/** Sources that are NOT in the closure but whose non-released debits a correction of the closure must carry (history of a
+ * detached position whose supplier / bath lies outside the closure). They are lock dependencies only: callers take their
+ * source locks together with the closure's in the canonical order, and the snapshot locks their heads before any
+ * allocation lock (same order as every other writer), then re-checks the set. Never authorized or disclosed. */
+export async function discoverMdfHistorySuppliers(tx: TransactionClient,
+  sources: readonly { kind: string; id: string }[]): Promise<Array<{ kind: MdfSourceKind; id: string }>> {
+  if (!sources.length) return [];
+  // The closure is excluded IN SQL and the bound applies to the complete lock set (closure + suppliers): a truncated
+  // result is never treated as complete — overflow refuses before any head or allocation lock.
+  const budget = MAX_MDF_CORRECTION_SOURCES - sources.length;
+  if (budget < 0) throw new MdfNeedsAttention('MDF_CORRECTION_SCOPE_LIMIT');
+  const rows = (await tx.query<{ kind: MdfSourceKind; id: string }>(`WITH s AS (SELECT * FROM unnest($1::text[],$2::text[]) s(kind,id)),
+    found AS (
+      SELECT e.source_kind kind,e.source_id id FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+        WHERE a.state<>'released' AND a.bath_id IN (SELECT id FROM s WHERE kind='bath')
+      UNION SELECT 'bath',a.bath_id FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+        WHERE a.state<>'released' AND (e.source_kind,e.source_id) IN (SELECT kind,id FROM s))
+    SELECT DISTINCT kind,id FROM found WHERE (kind,id) NOT IN (SELECT kind,id FROM s) ORDER BY 1,2 LIMIT $3`,
+  [sources.map(x => x.kind), sources.map(x => x.id), budget + 1])).rows;
+  if (rows.length > budget) throw new MdfNeedsAttention('MDF_CORRECTION_SCOPE_LIMIT');
+  return rows;
+}
+
 export async function loadMdfCorrectionSnapshot(tx: TransactionClient, target: MdfCorrectionSourceRef,
   closure: { orders: number[]; sources: Array<{ kind: MdfSourceKind; id: string }> },
-  options: { detachmentAware?: boolean } = {}): Promise<MdfCorrectionSnapshot> {
-  const heads = (await tx.query<MdfCorrectionHead>(`SELECT h.source_kind kind,h.source_id id,
+  options: { detachmentAware?: boolean; supplementalSources?: ReadonlyArray<{ kind: MdfSourceKind; id: string }> } = {}): Promise<MdfCorrectionSnapshot> {
+  const supplemental = options.supplementalSources ?? [];
+  const lockSources = [...closure.sources, ...supplemental];
+  const lockedHeads = (await tx.query<MdfCorrectionHead>(`SELECT h.source_kind kind,h.source_id id,
     h.received_revision_key received,h.accepted_revision_key accepted,h.correction_epoch::text epoch,h.version::text version
     FROM mdf_source_heads h JOIN unnest($1::text[],$2::text[]) s(kind,id)
       ON h.source_kind=s.kind AND h.source_id=s.id ORDER BY h.source_kind,h.source_id FOR UPDATE OF h`,
-  [closure.sources.map(s => s.kind),closure.sources.map(s => s.id)])).rows;
+  [lockSources.map(s => s.kind),lockSources.map(s => s.id)])).rows;
+  const closureKeys = new Set(closure.sources.map(s => key(s)));
+  const heads = lockedHeads.filter(h => closureKeys.has(key(h)));
   if (heads.length !== closure.sources.length) throw new MdfNeedsAttention('MDF_CORRECTION_HEAD_MISSING');
   // §5.4e/§5.5: the return planner models detached positions (history only: no status effects, no credit); BASIS
-  // composition does not yet, so without `detachmentAware` a closure containing any detachment fails closed.
+  // composition does not model detachments of ITS OWN positions yet, so without `detachmentAware` a detachment in the
+  // target source fails closed. A neighbour's detachment is that neighbour's history and never blocks the target.
   const detached = await loadMdfDetachedPositions(tx, closure.sources);
-  if (!options.detachmentAware && detached.size) {
+  if (!options.detachmentAware && detached.get(JSON.stringify([target.kind, target.id]))?.size) {
     throw new ApiError(409,'MDF_CORRECTION_DETACHED_UNSUPPORTED',
       'В карточке есть выбывшие позиции заказа — возврат и изменение состава для неё пока недоступны');
   }
@@ -177,9 +218,20 @@ export async function loadMdfCorrectionSnapshot(tx: TransactionClient, target: M
     e.revision_key "evidenceRevision",a.bath_id "bathId",a.bath_revision "bathRevision",
     a.order_id::float8 "orderId",a.detail_id::float8 "detailId",a.quantity::float8 quantity,a.state
     FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
-    WHERE a.order_id=ANY($1::bigint[]) AND a.state<>'released'
-    ORDER BY a.allocation_id LIMIT $2 FOR UPDATE OF a`,[closure.orders,MAX_MDF_CORRECTION_ROWS + 1])).rows;
+    WHERE a.state<>'released' AND (a.order_id=ANY($1::bigint[])
+      -- Detached owners are outside the closure orders, but their debits on the closure's own sources/baths still
+      -- point at the revisions a correction replaces: load them so they are carried as history.
+      OR (e.source_kind,e.source_id) IN (SELECT * FROM unnest($3::text[],$4::text[]))
+      OR a.bath_id=ANY($5::text[]))
+    ORDER BY a.allocation_id LIMIT $2 FOR UPDATE OF a`,[closure.orders,MAX_MDF_CORRECTION_ROWS + 1,
+    closure.sources.map(s => s.kind),closure.sources.map(s => s.id),
+    closure.sources.filter(s => s.kind === 'bath').map(s => s.id)])).rows;
   if (allocationRows.length > MAX_MDF_CORRECTION_ROWS) throw new MdfNeedsAttention('MDF_CORRECTION_ROW_LIMIT');
+  // The lock dependencies must still be exactly the history suppliers now that the allocations are locked.
+  const suppliersNow = await discoverMdfHistorySuppliers(tx, closure.sources);
+  if (JSON.stringify(suppliersNow.map(x => key(x)).sort()) !== JSON.stringify(supplemental.map(x => key(x)).sort())) {
+    throw new ApiError(409, 'MDF_CORRECTION_SCOPE_CHANGED', 'Связанные производственные данные изменились — повторите');
+  }
   numeric(allocationRows);
 
   const owners = (await tx.query<MdfCorrectionOwner>(`SELECT o.order_id::float8 id,o.order_name name,

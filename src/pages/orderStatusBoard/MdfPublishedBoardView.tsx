@@ -17,7 +17,6 @@ import {
   buildMdfPublishedBoardCards,
   buildMdfUnregisteredLane,
   filterMdfPublishedCardsByOrderNames,
-  filterMdfPublishedCardsByPeriod,
   filterMdfPublishedCardsByText,
   groupMdfPublishedBoardCardsByColumn,
   type MdfPublishedBoardCard,
@@ -54,11 +53,8 @@ export interface MdfPublishedBoardViewProps {
 
 export const MdfPublishedBoardView: React.FC<MdfPublishedBoardViewProps> = ({
   session,
-  workday,
-  period,
   orderFilters,
   searchText,
-  searchOrderIds,
   focusKind,
   focusId,
   searchResolving,
@@ -70,19 +66,13 @@ export const MdfPublishedBoardView: React.FC<MdfPublishedBoardViewProps> = ({
   const { snapshot } = session;
   const readOnly = snapshot.mode === 'read_only';
   const cards = useMemo(() => buildMdfPublishedBoardCards(snapshot, canMove), [snapshot, canMove]);
-  const periodExemptions = useMemo(() => ({
-    searchOrderIds: new Set(searchOrderIds),
-    focusCard: focusKind && focusId ? { kind: focusKind, id: focusId } : null,
-  }), [searchOrderIds, focusKind, focusId]);
+  // §5.8: the period is applied ONCE, by the backend display cut (`displayFrom`, legacy per-kind dates: packet workday,
+  // BASIS/bath creation), with search/focus bypass. Re-filtering here by creation date hid packets the backend admitted.
   const visible = useMemo(() => {
     let result = filterMdfPublishedCardsByOrderNames(cards, orderFilters);
     result = filterMdfPublishedCardsByText(result, searchText);
-    // §5.6 finding 6: the period filter must NOT remove a card the user explicitly searched for
-    // (searchOrderIds) or is focused on — otherwise the very cards the search/focus surfaced
-    // vanish immediately.
-    result = filterMdfPublishedCardsByPeriod(result, workday, period, periodExemptions);
     return result;
-  }, [cards, orderFilters, searchText, workday, period, periodExemptions]);
+  }, [cards, orderFilters, searchText]);
   const grouped = useMemo(() => groupMdfPublishedBoardCardsByColumn(visible), [visible]);
   const unregistered = useMemo(() => buildMdfUnregisteredLane(snapshot), [snapshot]);
   const commentCandidates = useMemo(() => collectMdfCommentLinkCandidates(snapshot.presentation), [snapshot.presentation]);

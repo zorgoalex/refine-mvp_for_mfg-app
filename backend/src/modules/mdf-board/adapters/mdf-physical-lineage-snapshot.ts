@@ -176,7 +176,11 @@ export async function loadMdfPhysicalLineageSnapshot(tx: DatabaseClient,
   for (const revision of revisions) {
     const revisionKey=key(revision.kind,revision.id,revision.revision), contract=contractByRevision.get(revisionKey);
     if (!contract?.contractFound) {
-      if (contract?.sourceHasContract) result.lineageIssues.set(revisionKey,['MDF_LINEAGE_REQUIRED']);
+      // Once a source has v2 contracts, a contract-less revision is only acceptable when it has no physical row
+      // (genesis: set creation/baseline membership) — there is nothing to trace; physical rows still require lineage.
+      if (contract?.sourceHasContract && (currentLines.get(revisionKey) ?? []).some(line => line.evidenceKind==='physical')) {
+        result.lineageIssues.set(revisionKey,['MDF_LINEAGE_REQUIRED']);
+      }
       continue;
     }
     try {

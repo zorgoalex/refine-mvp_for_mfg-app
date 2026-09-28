@@ -1,14 +1,15 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type {
   MdfPublishedCard,
   MdfPublishedSnapshot,
 } from '../../api/types/mdfPublishedApi.types';
+import * as mdfPublishedBoardExports from './mdfPublishedBoard';
 import {
   buildMdfPublishedBoardCard,
   buildMdfPublishedBoardCards,
   buildMdfUnregisteredLane,
   filterMdfPublishedCardsByOrderNames,
-  filterMdfPublishedCardsByPeriod,
   filterMdfPublishedCardsByText,
   groupMdfPublishedBoardCardsByColumn,
   indexMdfPublishedPositions,
@@ -235,6 +236,43 @@ describe('buildMdfPublishedBoardCard: finding 8 — bath cards without compositi
   });
 });
 
+describe('buildMdfPublishedBoardCard: retained facts on an empty/emptied card (§5.2/D3)', () => {
+  it('an empty BASIS card with retained progress shows position totals and its orderIds, without adding to memberQuantities', () => {
+    const setCard = card({ kind: 'bazisCutSet', id: 'basis-empty' });
+    const snap = snapshot({
+      cards: [setCard],
+      orders: [{ orderId: 10, orderName: 'Заказ 10' }],
+      members: [], // intentionally empty: the authorized assignment was emptied, no current membership
+      progress: [{ kind: 'bazisCutSet', id: 'basis-empty', orderId: 10, detailId: 100, member: 0, cut: 8, laminated: 0 }],
+      positions: [{ orderId: 10, detailId: 100, required: 10, cut: 8, rolled: 0, creditedCut: 8, creditedRolled: 0, remaining: 2, issues: [] }],
+      presentation: [{ kind: 'bazisCutSet', id: 'basis-empty', stale: false, composition: { items: [] }, live: null }],
+    });
+    const view = buildMdfPublishedBoardCard(snap, setCard, true);
+    // Never fed into commands/membership.
+    expect(view.memberQuantities).toEqual([]);
+    // But the retained authorized production counters and owner association still show.
+    expect(view.positions).toEqual([
+      { orderId: 10, orderName: 'Заказ 10', detailId: 100, required: 10, creditedCut: 8, creditedRolled: 0, remaining: 2 },
+    ]);
+    expect(view.orderIds).toEqual([10]);
+    expect(view.orderNames).toEqual(['Заказ 10']);
+  });
+
+  it('does not retain a zero-progress position (never authorized, nothing to show)', () => {
+    const setCard = card({ kind: 'bazisCutSet', id: 'basis-empty-2' });
+    const snap = snapshot({
+      cards: [setCard],
+      orders: [{ orderId: 11, orderName: 'Заказ 11' }],
+      members: [],
+      progress: [{ kind: 'bazisCutSet', id: 'basis-empty-2', orderId: 11, detailId: 110, member: 0, cut: 0, laminated: 0 }],
+      presentation: [{ kind: 'bazisCutSet', id: 'basis-empty-2', stale: false, composition: { items: [] }, live: null }],
+    });
+    const view = buildMdfPublishedBoardCard(snap, setCard, true);
+    expect(view.positions).toEqual([]);
+    expect(view.orderIds).toEqual([]);
+  });
+});
+
 describe('mdfBoardIssueText', () => {
   it('maps known codes to Russian text', () => {
     expect(mdfBoardIssueText('MDF_PARTIAL_ACCESS')).toBe('Есть заказы, к которым у вас нет доступа');
@@ -340,17 +378,6 @@ describe('groupMdfPublishedBoardCardsByColumn', () => {
   });
 });
 
-const visibilityFiltersSnapshotForPeriod = snapshot({
-  cards: [
-    card({ id: 'a', sourceCreatedAt: '2026-09-27T00:00:00.000Z' }),
-    card({ id: 'b', sourceCreatedAt: '2026-08-01T00:00:00.000Z' }),
-  ],
-  orders: [{ orderId: 10, orderName: 'Заказ 10' }],
-  members: [
-    { kind: 'packet', id: 'a', orderId: 10, detailId: 100, quantity: 1 },
-    { kind: 'packet', id: 'b', orderId: 10, detailId: 101, quantity: 1 },
-  ],
-});
 
 describe('visibility filters', () => {
   const cards = buildMdfPublishedBoardCards(snapshot({
@@ -374,28 +401,23 @@ describe('visibility filters', () => {
     expect(filterMdfPublishedCardsByText(cards, 'a').map((c) => c.id)).toContain('a');
     expect(filterMdfPublishedCardsByText(cards, '').length).toBe(2);
   });
+});
 
-  it('filterMdfPublishedCardsByPeriod filters by sourceCreatedAt within the client-side window', () => {
-    const filtered = filterMdfPublishedCardsByPeriod(cards, '2026-09-27', '1d');
-    expect(filtered.map((c) => c.id)).toEqual(['a']);
+describe('§5.8/D2: no client-side period re-filter — the backend display cut is the only filter', () => {
+  // Source-text guards (this module has no jsdom/React harness; see repo convention): a client-side
+  // `filterMdfPublishedCardsByPeriod` re-filtering the already-loaded window previously hid cards the
+  // backend's own display cut had legitimately admitted (workday vs. sourceCreatedAt mismatch).
+  const boardModule = readFileSync(new URL('./mdfPublishedBoard.ts', import.meta.url), 'utf8');
+  const viewModule = readFileSync(new URL('./MdfPublishedBoardView.tsx', import.meta.url), 'utf8');
+
+  it('mdfPublishedBoard.ts no longer defines or exports a period filter function', () => {
+    expect(boardModule).not.toContain('filterMdfPublishedCardsByPeriod');
+    expect((mdfPublishedBoardExports as Record<string, unknown>).filterMdfPublishedCardsByPeriod).toBeUndefined();
   });
 
-  // §5.6 finding 6: an explicitly searched/focused card must survive the period filter. Both 'a'
-  // and 'b' belong to order 10 here (unlike the shared `cards` fixture above, where only 'a' does).
-  it('filterMdfPublishedCardsByPeriod exempts a card whose order is in the active search (searchOrderIds)', () => {
-    const cardsForOrder10 = buildMdfPublishedBoardCards(visibilityFiltersSnapshotForPeriod, true);
-    const filtered = filterMdfPublishedCardsByPeriod(cardsForOrder10, '2026-09-27', '1d', {
-      searchOrderIds: new Set([10]),
-    });
-    // 'b' (August, outside the 1-day window) is kept because its order (10) is being searched.
-    expect(filtered.map((c) => c.id)).toEqual(['a', 'b']);
-  });
-
-  it('filterMdfPublishedCardsByPeriod exempts the focused card regardless of its order', () => {
-    const filtered = filterMdfPublishedCardsByPeriod(cards, '2026-09-27', '1d', {
-      focusCard: { kind: 'packet', id: 'b' },
-    });
-    expect(filtered.map((c) => c.id)).toEqual(['a', 'b']);
+  it('MdfPublishedBoardView no longer applies a period filter to the visible cards', () => {
+    expect(viewModule).not.toContain('filterMdfPublishedCardsByPeriod');
+    expect(viewModule).not.toContain('periodExemptions');
   });
 });
 

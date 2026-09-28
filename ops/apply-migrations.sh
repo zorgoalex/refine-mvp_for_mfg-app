@@ -2486,6 +2486,10 @@ probe_file() {
     # §5.8 cutover controls (delta to 195, not a whole re-probe): durable RECOVERY freeze columns + owner
     # function, demand-drift conflicts table + its cutover fence, and the catalog classification guard on
     # materials/sheet_material_types (checked on a representative sample, not every constraint).
+    # §5.8 logic audit B1: the lineage head guard admits a contract-less revision without physical lines.
+    201_mdf_lineage_genesis_guard*) probe_all \
+      "$(q_fun_hash 'public.mdf_guard_physical_lineage_source_head()' 4895f75ef2c486bccd3715f8ab8e6dab)" \
+      ;;
     199_mdf_cutover_controls*) probe_all \
       "$(q_col mdf_freeze_guard recovery_frozen_at)" \
       "$(q_col mdf_freeze_guard recovery_reason)" \
@@ -2559,7 +2563,7 @@ probe_file() {
       "$(q_fun_hash 'public.mdf_guard_physical_lineage_insert()' 5f33a57477dcf2397fa18783d9b7ecae)" \
       "$(q_fun_hash 'public.mdf_guard_physical_lineage_immutable()' 39d2c9d9500956c4bca2546c68d8cc15)" \
       "$(q_fun_hash_either 'public.mdf_validate_physical_lineage_seal()' 3067d8c18cdc8b1603397ce68a56824b f303a542a2e940954763bfa8a5d44bbe)" \
-      "$(q_fun_hash 'public.mdf_guard_physical_lineage_source_head()' d2ab89206c2d81b774c16779d302d789)" \
+      "$(q_fun_hash_either 'public.mdf_guard_physical_lineage_source_head()' d2ab89206c2d81b774c16779d302d789 4895f75ef2c486bccd3715f8ab8e6dab)" \
       "$(q_fun_hash 'public.mdf_guard_source_fence()' 5865eedf3ea4c2cf2b715b6ac210d49a)" \
       "$(q_fun_hash 'public.mdf_reject_evidence_change()' a51e1b51d407124a856f1993d9c54fe8)" \
       "$(q_fun_hash 'public.mdf_guard_accepted_revision()' 945aada9b298e291ecda1442e6391f6d)" \
@@ -2652,6 +2656,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     199_mdf_cutover_controls*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    201_mdf_lineage_genesis_guard*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     186_bitrix24_product_import*)

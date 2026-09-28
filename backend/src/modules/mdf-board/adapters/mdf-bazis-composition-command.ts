@@ -22,7 +22,7 @@ import { planMdfBazisComposition, type MdfBazisCompositionMembership, type MdfBa
 import type { MdfCorrectionBlocker, MdfCorrectionSourceLine } from '../domain/mdf-correction-plan';
 import { loadMdfBazisAssignmentStateSnapshot } from './mdf-bazis-assignment-state-snapshot';
 import { deriveMdfBazisRowChanges, extractMdfBazisAssignmentRows, loadMdfBazisCompositionRawSnapshot, mdfBazisAllocationPinDigest, mdfBazisEligibleRowIdsFromRaw, normalizeMdfBazisDesiredRows, type MdfBazisAssignmentRow, type MdfBazisBathHeadPin, type MdfBazisRawSnapshot, type MdfBazisRowChange, isMdfBazisEligibleRawRow } from './mdf-bazis-composition-snapshot';
-import { discoverMdfCorrectionClosure, loadMdfCorrectionSnapshot, MAX_MDF_CORRECTION_ORDERS,
+import { discoverMdfCorrectionClosure, discoverMdfHistorySuppliers, loadMdfCorrectionSnapshot, MAX_MDF_CORRECTION_ORDERS,
   MAX_MDF_CORRECTION_ROWS,
   type MdfCorrectionSourceRef } from './mdf-correction-snapshot';
 import { mdfSourceKey, type MdfExecutionMetadata } from './mdf-execution-snapshot';
@@ -238,11 +238,12 @@ export class PgMdfBazisCompositionCommand {
     }
     await lockScopedOwners(tx, user, owners);
     await lockClosureDetails(tx, owners, rawInitial);
-    for (const source of [...initial.sources].sort((a, b) => cmpText(mdfSourceKey(a), mdfSourceKey(b)))) {
+    const supplemental = await discoverMdfHistorySuppliers(tx, initial.sources);
+    for (const source of [...initial.sources, ...supplemental].sort((a, b) => cmpText(mdfSourceKey(a), mdfSourceKey(b)))) {
       await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
         `mdf-source:${JSON.stringify([source.kind, source.id])}`]);
     }
-    const snapshot = await loadMdfCorrectionSnapshot(tx, target, initial);
+    const snapshot = await loadMdfCorrectionSnapshot(tx, target, initial, { supplementalSources: supplemental });
     const current = await discoverMdfCorrectionClosure(tx, target);
     if (JSON.stringify(current.orders) !== JSON.stringify(initial.orders)
       || JSON.stringify(current.sources) !== JSON.stringify(initial.sources)) throw new CompositionScopeChanged();
@@ -252,7 +253,8 @@ export class PgMdfBazisCompositionCommand {
     const head = snapshot.heads.find(row => mdfSourceKey(row) === targetKey);
     if (!head) fail(409, 'MDF_BAZIS_COMPOSITION_INVALID', 'Карточка BASIS не найдена в производственном учёте');
     const setVersion = Number(raw.header.version);
-    if (!Number.isSafeInteger(setVersion) || setVersion <= 0) throw new Error('MDF_BAZIS_SNAPSHOT_INVALID');
+    // A freshly created, never-edited set has version 0 (the column default); the intent stores the post-edit version.
+    if (!Number.isSafeInteger(setVersion) || setVersion < 0) throw new Error('MDF_BAZIS_SNAPSHOT_INVALID');
     if (request.expectedVersion !== String(setVersion)) {
       fail(409, 'MDF_BAZIS_COMPOSITION_STALE', 'Набор был изменён другим пользователем. Обновите предпросмотр.');
     }
@@ -264,12 +266,30 @@ export class PgMdfBazisCompositionCommand {
       fail(409, 'MDF_BAZIS_COMPOSITION_STALE', 'Изменения состава ещё не подтверждены');
     }
     const blockers: MdfCorrectionBlocker[] = [];
+    // Empty assignment is only authority with the genuine sealed marker validated against this exact accepted revision;
+    // never a missing-membership bypass.
+    const validatedIntentionalEmpty = async () => {
+      const lines = snapshot.lines.filter(line => line.kind === target.kind && line.id === target.id
+        && line.revision === accepted) as MdfCorrectionSourceLine[];
+      const stateSnapshot = await loadMdfBazisAssignmentStateSnapshot(tx, [{ kind: 'bazisCutSet', id: target.id,
+        received: head.received, accepted, epoch: head.epoch }]);
+      const state = stateSnapshot.states.get(JSON.stringify([target.kind, target.id, accepted]));
+      return state !== undefined && state.intentionalEmpty === true && matchesMdfValidatedBazisAssignmentState({
+        sourceKind: 'bazisCutSet', sourceId: target.id, revisionKey: accepted,
+        lines: lines.map(line => ({ lineKey: line.lineKey, orderId: line.orderId, detailId: line.detailId,
+          quantity: line.quantity, rework: line.rework, stageCode: line.stage, evidenceKind: line.evidence })),
+        state });
+    };
     for (const code of snapshot.sourceIssues.get(targetKey) ?? ['MDF_CONTEXT_REQUIRED']) {
       blockers.push({ code, sourceId: target.id });
     }
     const acceptedLines = snapshot.lines.filter(line => line.kind === target.kind && line.id === target.id
       && line.revision === accepted) as MdfCorrectionSourceLine[];
-    if (!acceptedLines.length) blockers.push({ code: 'CURRENT_SOURCE_MISSING', sourceId: target.id });
+    // A validated intentional-empty revision (e.g. after an explicit return of an emptied set) legitimately has zero
+    // lines; only an UNMARKED empty revision is a missing source (checked before other blockers can mask it).
+    if (!acceptedLines.length && !(await validatedIntentionalEmpty())) {
+      blockers.push({ code: 'CURRENT_SOURCE_MISSING', sourceId: target.id });
+    }
     const acceptedJob = (await tx.query<{ status: string }>(`SELECT status FROM mdf_recalculation_jobs
       WHERE source_kind=$1 AND source_id=$2 AND revision_key=$3`, [target.kind, target.id, accepted])).rows;
     if (acceptedJob.length !== 1 || acceptedJob[0].status !== 'done') {
@@ -282,8 +302,11 @@ export class PgMdfBazisCompositionCommand {
     const lineageKey = mdfLineageRevisionKey(target, accepted);
     const lineage = snapshot.lineage.get(lineageKey);
     const lineageIssue = snapshot.lineageIssues.get(lineageKey)?.[0];
-    if (!lineage || lineageIssue) blockers.push({ code: lineageIssue ?? 'LINEAGE_V2_REQUIRED', sourceId: target.id });
-    else if (!matchesMdfValidatedPhysicalLineage({ sourceKind: 'bazisCutSet', sourceId: target.id,
+    // A v1 revision (set creation, baseline) without any physical row has nothing to carry: its missing lineage is an
+    // empty lineage (the v2 composition receipt carries zero rows from it). Physical rows still require v2 lineage.
+    const genesis = !lineage && !lineageIssue && !acceptedLines.some(line => line.evidence === 'physical');
+    if ((!lineage && !genesis) || lineageIssue) blockers.push({ code: lineageIssue ?? 'LINEAGE_V2_REQUIRED', sourceId: target.id });
+    else if (lineage && !matchesMdfValidatedPhysicalLineage({ sourceKind: 'bazisCutSet', sourceId: target.id,
       revisionKey: accepted, lines: acceptedLines, lineage })) {
       blockers.push({ code: 'LINEAGE_MISMATCH', sourceId: target.id });
     }
@@ -302,19 +325,8 @@ export class PgMdfBazisCompositionCommand {
     if (!rawIssues.length && !sameRawAcceptedMembership(currentRows, membershipByLineKey, rowById)) {
       fail(409, 'MDF_BAZIS_COMPOSITION_STALE', 'Состав файла изменился после подтверждения. Обновите предпросмотр.');
     }
-    if (!currentRows.length && !membershipByLineKey.size && !blockers.length) {
-      // Empty assignment is only authority with the genuine sealed marker
-      // validated against this exact accepted revision; never a
-      // missing-membership bypass.
-      const stateSnapshot = await loadMdfBazisAssignmentStateSnapshot(tx, [{ kind: 'bazisCutSet', id: target.id,
-        received: head.received, accepted, epoch: head.epoch }]);
-      const state = stateSnapshot.states.get(JSON.stringify([target.kind, target.id, accepted]));
-      const marked = state !== undefined && matchesMdfValidatedBazisAssignmentState({
-        sourceKind: 'bazisCutSet', sourceId: target.id, revisionKey: accepted,
-        lines: acceptedLines.map(line => ({ lineKey: line.lineKey, orderId: line.orderId, detailId: line.detailId,
-          quantity: line.quantity, rework: line.rework, stageCode: line.stage, evidenceKind: line.evidence })),
-        state });
-      if (!marked || !state?.intentionalEmpty) blockers.push({ code: 'ASSIGNMENT_MARKER_MISSING', sourceId: target.id });
+    if (!currentRows.length && !membershipByLineKey.size && !blockers.length && !(await validatedIntentionalEmpty())) {
+      blockers.push({ code: 'ASSIGNMENT_MARKER_MISSING', sourceId: target.id });
     }
     const desired = normalizeMdfBazisDesiredRows({ eligibility, desired: canonicalDesiredRows(request.desiredRows) });
     // Refill (§5.2b): new rows are built server-side from ordinary MDF details of the CURRENT owners
@@ -624,7 +636,7 @@ export class PgMdfBazisCompositionCommand {
 function validatePreviewRequest(setId: number, request: MdfBazisCompositionPreviewRequest) {
   if (!Number.isSafeInteger(setId) || setId <= 0) fail(400, 'MDF_BAZIS_COMPOSITION_INVALID', 'Некорректный идентификатор набора');
   if (!request || typeof request !== 'object' || Array.isArray(request)) fail(400, 'MDF_BAZIS_COMPOSITION_INVALID', 'Некорректные параметры состава');
-  if (typeof request.expectedVersion !== 'string' || !/^[1-9][0-9]*$/.test(request.expectedVersion)) {
+  if (typeof request.expectedVersion !== 'string' || !/^(0|[1-9][0-9]*)$/.test(request.expectedVersion)) {
     fail(400, 'MDF_BAZIS_COMPOSITION_INVALID', 'Некорректная версия набора');
   }
   if (typeof request.sourceToken !== 'string' || !/^[a-f0-9]{64}$/.test(request.sourceToken)) {

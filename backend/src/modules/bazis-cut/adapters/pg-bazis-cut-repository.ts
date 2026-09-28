@@ -1,3 +1,4 @@
+import { CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE, CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE } from '../../../shared/cnc-material';
 import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
@@ -416,8 +417,11 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
     await this.assertOrderReadable(this.database, command.currentUser, command.orderId, command.requestId, command.setId);
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser);
-      // In the new MDF engine this legacy edit would bypass production accounting.
-      if ((await requireMdfCommandBoundary(tx,{ writer: 'bazis.add-details',capability: 'queued' })).queued) {
+      // In the new MDF engine a legacy edit of an MDF-ledger set would bypass production accounting; a set outside the
+      // ledger (no engine source, no MDF row) stays editable as long as nothing MDF is added (e.g. HDF-only sets).
+      const queued = (await requireMdfCommandBoundary(tx,{ writer: 'bazis.add-details',capability: 'queued' })).queued;
+      if (queued
+        && (await isMdfLedgerSet(tx, command.setId) || await anyMdfOrderDetail(tx, command.orderId, uniqueIds(command.detailIds)))) {
         throw new ApiError(409, 'MDF_SET_REFILL_NOT_CONNECTED', 'Добавление деталей в существующий набор пока недоступно в новом производственном учёте — создайте новый набор');
       }
       const detailIds = uniqueIds(command.detailIds);
@@ -469,7 +473,8 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
           addedDetailIds: additions.map((item) => item.provenance.sourceOrderDetailId).filter((id): id is number => id !== null),
           addedHdfDetailIds: additions.map((item) => item.provenance.sourceOrderHdfDetailId).filter((id): id is number => id !== null),
         });
-      await evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'details-added');
+      // Legacy MDF-board automation only outside the engine (same gate as set creation).
+      if (!queued) await evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'details-added');
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
     },{ mdf: { writer: 'bazis.add-details',capability: 'queued' } });
@@ -478,8 +483,11 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
   async updateDetail(command: UpdateBazisCutDetailCommand): Promise<BazisCutMutationResultDto> {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser);
-      // In the new MDF engine this legacy edit would bypass production accounting.
-      if ((await requireMdfCommandBoundary(tx,{ writer: 'bazis.update-detail',capability: 'queued' })).queued) {
+      // In the new MDF engine this legacy edit would bypass production accounting (MDF-ledger set, or an edit that turns
+      // the row into an MDF row); sets outside the ledger (HDF-only/non-MDF) keep the ordinary edit.
+      const queued = (await requireMdfCommandBoundary(tx,{ writer: 'bazis.update-detail',capability: 'queued' })).queued;
+      if (queued
+        && (await isMdfLedgerSet(tx, command.setId) || await becomesMdfRow(tx, command.setId, command.detailId, command.fields))) {
         throw new ApiError(409, 'MDF_COMPOSITION_REQUIRED', 'В новом производственном учёте количество меняется через изменение состава набора', { compositionRoute: `/api/v1/bazis-cut-sets/${command.setId}/composition/preview` });
       }
       const requestHash = hashRequest('bazis_cut_set.detail.update', command.currentUser,
@@ -514,7 +522,8 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
         command.idempotencyKey, fieldsAudit(before), command.fields, set,
         set.details.filter((detail) => detail.bazisCutSetDetailId === command.detailId),
         { updatedDetailId: command.detailId });
-      await evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'detail-updated');
+      // Legacy MDF-board automation only outside the engine (same gate as set creation).
+      if (!queued) await evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'detail-updated');
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
     },{ mdf: { writer: 'bazis.update-detail',capability: 'queued' } });
@@ -523,8 +532,10 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
   async deleteDetail(command: DeleteBazisCutDetailCommand): Promise<BazisCutMutationResultDto> {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser);
-      // In the new MDF engine this legacy edit would bypass production accounting.
-      if ((await requireMdfCommandBoundary(tx,{ writer: 'bazis.delete-detail',capability: 'queued' })).queued) {
+      // In the new MDF engine this legacy edit would bypass production accounting; sets outside the ledger keep it.
+      const queued = (await requireMdfCommandBoundary(tx,{ writer: 'bazis.delete-detail',capability: 'queued' })).queued;
+      if (queued
+        && await isMdfLedgerSet(tx, command.setId)) {
         throw new ApiError(409, 'MDF_COMPOSITION_REQUIRED', 'В новом производственном учёте позиции удаляются через изменение состава набора', { compositionRoute: `/api/v1/bazis-cut-sets/${command.setId}/composition/preview` });
       }
       const requestHash = hashRequest('bazis_cut_set.detail.delete', command.currentUser,
@@ -547,7 +558,8 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       await recordMutation(tx, command.currentUser, command.requestId, 'bazis_cut_set.detail_removed', command.setId,
         command.idempotencyKey, fieldsAudit(before), null, set, [before],
         { removedDetailId: command.detailId });
-      await evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'detail-removed');
+      // Legacy MDF-board automation only outside the engine (same gate as set creation).
+      if (!queued) await evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'detail-removed');
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
     },{ mdf: { writer: 'bazis.delete-detail',capability: 'queued' } });
@@ -1426,3 +1438,39 @@ function toNumber(value: unknown): number { return Number(value); }
 function nullableNumber(value: unknown): number | null { if (value === null || value === undefined || value === '') return null; const n = Number(value); return Number.isFinite(n) ? n : null; }
 function textValue(value: unknown): string { return value == null ? '' : String(value); }
 function iso(value: unknown): string { return value instanceof Date ? value.toISOString() : new Date(String(value)).toISOString(); }
+
+const MDF_RE = new RegExp(CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE, 'i');
+const OTHER_RE = new RegExp(CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE, 'i');
+const isMdfMaterial = (name: string | null | undefined) => MDF_RE.test(name ?? '') && !OTHER_RE.test(name ?? '');
+
+/** The set belongs to the MDF ledger: the engine captured it, or it holds an MDF-eligible row (same predicate as the
+ * source capture: enabled order-detail rows without HDF link and with an MDF material). Locks the set row first. */
+async function isMdfLedgerSet(tx: TransactionClient, setId: number): Promise<boolean> {
+  await tx.query('SELECT 1 FROM bazis_cut_sets WHERE bazis_cut_set_id=$1 FOR UPDATE', [setId]);
+  return (await tx.query<{ ledger: boolean }>(`SELECT EXISTS(SELECT 1 FROM mdf_source_heads
+      WHERE source_kind='bazisCutSet' AND source_id=$1::bigint::text)
+    OR EXISTS(SELECT 1 FROM bazis_cut_set_details WHERE bazis_cut_set_id=$1::bigint AND cut_enabled
+      AND source_type='order_detail' AND source_order_hdf_detail_id IS NULL
+      AND COALESCE(material_name,'') ~* $2 AND COALESCE(material_name,'') !~* $3) ledger`,
+  [setId, CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE, CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE])).rows[0].ledger;
+}
+
+/** An edit that would make an order-detail row MDF-eligible must go through the engine. */
+async function becomesMdfRow(tx: TransactionClient, setId: number, detailId: number,
+  fields: { cutEnabled: boolean; materialName: string }): Promise<boolean> {
+  const row = (await tx.query<{ source_type: string; hdf: boolean }>(`SELECT source_type,
+      (source_order_hdf_detail_id IS NOT NULL) hdf FROM bazis_cut_set_details
+    WHERE bazis_cut_set_id=$1 AND bazis_cut_set_detail_id=$2`, [setId, detailId])).rows[0];
+  return Boolean(row && row.source_type === 'order_detail' && !row.hdf && fields.cutEnabled && isMdfMaterial(fields.materialName));
+}
+
+/** Any of the order details to add is an MDF detail (sheet material type or legacy material name). */
+async function anyMdfOrderDetail(tx: TransactionClient, orderId: number, detailIds: readonly number[]): Promise<boolean> {
+  if (!detailIds.length) return false;
+  return (await tx.query<{ any: boolean }>(`SELECT EXISTS(SELECT 1 FROM order_details d
+      LEFT JOIN sheet_material_types mt ON mt.sheet_material_type_id=d.sheet_material_type_id
+      LEFT JOIN materials m ON m.material_id=d.material_id
+    WHERE d.order_id=$1 AND d.detail_id=ANY($2::bigint[])
+      AND COALESCE(mt.name,m.material_name,'') ~* $3 AND COALESCE(mt.name,m.material_name,'') !~* $4) "any"`,
+  [orderId, detailIds, CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE, CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE])).rows[0].any;
+}

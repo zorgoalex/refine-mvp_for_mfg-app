@@ -165,10 +165,13 @@ export async function loadMdfPublishedPresentation(tx: DatabaseClient, owners: s
       GREATEST(COALESCE(sum(l.quantity) FILTER (WHERE l.stage_code='laminated' AND l.evidence_kind='physical'),0),
         COALESCE(max(l.quantity) FILTER (WHERE l.stage_code='laminated' AND l.evidence_kind='declaration'),0))::float8 laminated
     FROM unnest($2::text[],$3::text[],$4::text[]) s(kind,id,revision)
+    JOIN mdf_evidence_revisions r ON r.source_kind=s.kind AND r.source_id=s.id AND r.revision_key=s.revision
     JOIN mdf_evidence_lines l ON l.source_kind=s.kind AND l.source_id=s.id AND l.revision_key=s.revision
     JOIN allowed a ON a.order_id=l.order_id
+    -- Only detachments already applied to THIS published revision (recorded with it or before it): a confirmed
+    -- correction whose successor is not yet published never changes the counters of the current publication.
     WHERE NOT l.rework AND NOT EXISTS(SELECT 1 FROM mdf_position_detachments x WHERE x.source_kind=l.source_kind
-      AND x.source_id=l.source_id AND x.order_id=l.order_id AND x.detail_id=l.detail_id)
+      AND x.source_id=l.source_id AND x.order_id=l.order_id AND x.detail_id=l.detail_id AND x.created_at<=r.created_at)
     GROUP BY 1,2,3,4 ORDER BY 1,2,3,4 LIMIT 20001`, [userId, kinds, ids, revisions])).rows;
 
   const orders = (await tx.query<PublishedOrderName>(`WITH allowed AS (${owners})

@@ -75,7 +75,10 @@ export async function loadMdfHistoricalCoverageOrders(tx: DatabaseClient, orderI
  *   demand is empty: its job removes X's stale published positions).
  * Caller holds the order row lock and the `mdf-source:["order",X]` advisory lock in the global source order. */
 export async function reopenMdfClosure(tx: DatabaseClient, input: { orderId: number; carry: boolean; actorUserId: number;
-  requestId: string; causeKey: string; reason: 'demand_changed' | 'production_return' }): Promise<{ revisionKey: string; jobId: string }> {
+  requestId: string; causeKey: string; reason: 'demand_changed' | 'production_return';
+  /** Production return: only these details (the returned card's positions in this order) lose their historical coverage;
+   * every other detail keeps its declarations (capped by live demand) under a `carried` successor. */
+  revokeDetailIds?: readonly number[] }): Promise<{ revisionKey: string; jobId: string }> {
   const head = (await tx.query<{ received: string; accepted: string | null; version: string; epoch: string }>(`SELECT
     received_revision_key received,accepted_revision_key accepted,version::text version,correction_epoch::text epoch
     FROM mdf_source_heads WHERE source_kind='order' AND source_id=$1 FOR UPDATE`, [String(input.orderId)])).rows[0];
@@ -90,13 +93,15 @@ export async function reopenMdfClosure(tx: DatabaseClient, input: { orderId: num
   const live = (await loadMdfExecutionDetails(tx, [input.orderId]))
     .map(d => ({ orderId: d.orderId, detailId: d.detailId, quantity: d.quantity }));
   const liveBy = new Map(live.map(d => [d.detailId, d.quantity]));
-  const carry = input.carry && covered && live.length > 0;
+  const revoke = new Set(input.revokeDetailIds ?? []);
+  const partialReturn = input.reason === 'production_return' && input.revokeDetailIds !== undefined;
+  const carry = (input.carry || partialReturn) && covered && live.length > 0;
   const previous = carry ? (await tx.query<{ lineKey: string; detailId: number; quantity: number; stageCode: string }>(`SELECT
     line_key "lineKey",detail_id::float8 "detailId",quantity::float8 quantity,stage_code "stageCode" FROM mdf_evidence_lines
     WHERE source_kind='order' AND source_id=$1 AND revision_key=$2 AND evidence_kind='declaration' ORDER BY line_key`,
   [String(input.orderId), head.accepted])).rows : [];
   // Line keys stay stable across refreshes (one per detail and stage), never growing a prefix chain.
-  const lines = previous.flatMap(l => {
+  const lines = previous.filter(l => !revoke.has(l.detailId)).flatMap(l => {
     const quantity = Math.min(l.quantity, liveBy.get(l.detailId) ?? 0);
     return quantity > 0 ? [{ lineKey: `historical:${l.detailId}:${l.stageCode}`, orderId: input.orderId, detailId: l.detailId,
       quantity, stageCode: l.stageCode, evidenceKind: 'declaration' as const, rework: false }] : [];
@@ -115,7 +120,7 @@ export async function reopenMdfClosure(tx: DatabaseClient, input: { orderId: num
     entityId: input.orderId, actorUserId: input.actorUserId, requestId: input.requestId, source: 'backend-mdf-closure',
     relatedOrderId: input.orderId, before: { revisionKey: head.accepted, closure: previousClosure },
     after: { revisionKey, closure: carry && lines.length ? 'carried' : null, carriedDeclarations: lines.length,
-      terminal: live.length === 0 },
+      terminal: live.length === 0, revokedDetailIds: [...revoke].sort((a, b) => a - b) },
     metadata: { reason: input.reason, jobId: saved.jobId, notificationEventDecision: 'publish_only_no_effects' },
     relatedEntities: [{ entityType: 'order' as const, entityId: input.orderId }] });
   if (!auditId) throw new Error('MDF_CLOSURE_REOPEN_AUDIT_FAILED');

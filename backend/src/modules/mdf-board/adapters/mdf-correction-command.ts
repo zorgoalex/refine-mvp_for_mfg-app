@@ -14,7 +14,7 @@ import { matchesMdfValidatedPhysicalLineage } from '../domain/mdf-physical-linea
 import { matchesMdfValidatedBazisAssignmentState } from '../application/mdf-bazis-assignment-state';
 import { MdfNeedsAttention, type MdfSourceKind } from '../application/mdf-job-runner';
 import { loadMdfClosedOrders, loadMdfHistoricalCoverageOrders, reopenMdfClosure } from './mdf-closed-orders';
-import { mdfCorrectionComposition, discoverMdfCorrectionClosure, loadMdfCorrectionSnapshot, mdfCorrectionTargetOwners,
+import { mdfCorrectionComposition, discoverMdfCorrectionClosure, discoverMdfHistorySuppliers, loadMdfCorrectionSnapshot, mdfCorrectionTargetOwners,
   MAX_MDF_CORRECTION_ORDERS, type MdfCorrectionOwner, type MdfCorrectionSnapshot } from './mdf-correction-snapshot';
 import { mdfSourceKey } from './mdf-execution-snapshot';
 import { mdfPlacement, parseMdfPlacementInputs } from '../domain/mdf-placement';
@@ -126,14 +126,17 @@ export class PgMdfCorrectionCommand {
     const ownerRows = await loadOwners(tx,initial.orders);
     authorizeOwners(user,ownerRows,initial.orders);
     const reopenSources = reopenIds.map(id => ({ kind: 'order', id: String(id) }));
-    await lockSourceHeads(tx,[...initial.sources,...reopenSources].sort((a,b)=>sourceKey(a)<sourceKey(b)?-1:1));
+    // History suppliers (detached debits whose supplier/bath is outside the closure) are lock dependencies only: locked in
+    // the same canonical pass, before any head or allocation lock (fixes-r3 lock order).
+    const supplemental = await discoverMdfHistorySuppliers(tx,initial.sources);
+    await lockSourceHeads(tx,[...initial.sources,...reopenSources,...supplemental].sort((a,b)=>sourceKey(a)<sourceKey(b)?-1:1));
     const reopen = (await tx.query<{ id: string; received: string; version: string; epoch: string }>(`SELECT source_id id,
       received_revision_key received,version::text version,correction_epoch::text epoch FROM mdf_source_heads
       WHERE source_kind='order' AND source_id=ANY($1::text[]) ORDER BY source_id FOR UPDATE`,
     [reopenIds.map(String)])).rows.map(r => ({ orderId: Number(r.id), received: r.received, version: r.version, epoch: r.epoch }))
       .sort((a,b)=>a.orderId-b.orderId);
     if (reopen.length!==reopenIds.length) throw new MdfCorrectionScopeChanged();
-    const snapshot = await loadMdfCorrectionSnapshot(tx,source,initial,{ detachmentAware: true });
+    const snapshot = await loadMdfCorrectionSnapshot(tx,source,initial,{ detachmentAware: true, supplementalSources: supplemental });
     const current = await discoverMdfCorrectionClosure(tx,source,{ reopen: reopenIds });
     if (!sameClosure(initial,current)) throw new MdfCorrectionScopeChanged();
     const stillCovered = await loadMdfHistoricalCoverageOrders(tx,await mdfCorrectionTargetOwners(tx,source));
@@ -248,9 +251,11 @@ export class PgMdfCorrectionCommand {
 
     // §5.7b reopen: remove each closed order's historical-status closure BEFORE the source corrections, so the order
     // re-enters normal allocation. Successor `order:X` revision without closure lines, publish_only, audited below.
+    // Only the returned card's positions lose historical coverage; the order's other details keep it (C1).
     for (const closed of prepared.reopen) {
+      const revokeDetailIds=[...new Set(plan.affectedDetails.filter(d=>d.orderId===closed.orderId).map(d=>d.detailId))];
       await reopenMdfClosure(tx,{orderId:closed.orderId,carry:false,actorUserId:actorId,requestId,
-        causeKey:correctionCause,reason:'production_return'});
+        causeKey:correctionCause,reason:'production_return',revokeDetailIds});
     }
     const rules: Array<{ruleId:number;version:number}>=[];
     const replacementRef=(replacement:MdfCorrectionSourceReplacement)=>({kind:replacement.sourceKind,id:replacement.sourceId});
@@ -441,15 +446,31 @@ function validateTarget(snapshot:MdfCorrectionSnapshot,source:Source,request:Mdf
     :['parsed','completed','completed_laminated'];
   if (sequence.indexOf(request.targetColumn)<0||sequence.indexOf(request.targetColumn)>=sequence.indexOf(card.column??''))
     fail(409,'MDF_RETURN_NOT_BACKWARD','Выберите предыдущую производственную колонку');
-  const raw=snapshot.rawTarget.rows.filter(row=>row.relevant);
+  const current=snapshot.plannerSources.find(s=>sourceKey(s)===sourceKey(source));
+  // §5.4e: positions detached in this source (e.g. a confirmed deletion) are history only — their raw rows may point at
+  // deleted details and never block a return of the surviving positions.
+  const detachedHere=(orderId:unknown,detailId:unknown)=>{
+    const o=Number(orderId), d=Number(detailId);
+    if (!Number.isSafeInteger(o)||o<=0||!Number.isSafeInteger(d)||d<=0) return false;
+    return current?.detachedPositionKeys?.has(mdfPositionKey({orderId:o,detailId:d}))===true;
+  };
+  // A deleted detail's raw row has no live identity (the loader joins live details only); its position is known from
+  // the accepted membership line with the same line key.
+  const acceptedByLineKey=new Map((current?.lines??[]).filter(line=>line.revision===current?.acceptedRevision
+    &&line.stage==='membership').map(line=>[line.lineKey,line]));
+  const detachedRow=(row:{line_key:string|null;order_id:string|null;detail_id:string|null})=>{
+    const line=row.line_key!==null?acceptedByLineKey.get(row.line_key):undefined;
+    return line?detachedHere(line.orderId,line.detailId):detachedHere(row.order_id,row.detail_id);
+  };
+  const raw=snapshot.rawTarget.rows.filter(row=>row.relevant&&!detachedRow(row));
   if (raw.some(row=>row.unresolved||!row.line_key||!row.order_id||!row.detail_id
     ||![Number(row.order_id),Number(row.detail_id),Number(row.quantity)].every(n=>Number.isSafeInteger(n)&&n>0)))
     fail(422,'MDF_CORRECTION_BLOCKED','Не все позиции исходной карточки сопоставлены с действующими деталями');
-  const current=snapshot.plannerSources.find(s=>sourceKey(s)===sourceKey(source));
   if (!current||!current.verified) fail(422,'MDF_CORRECTION_BLOCKED','Текущий состав карточки не подтверждён');
   if (!raw.length&&!authenticatedEmptyCorrectionTarget(current))
     fail(422,'MDF_CORRECTION_BLOCKED','Пустой состав карточки не является подтверждённым намеренным пустым набором BASIS');
-  const accepted=current.lines.filter(line=>line.revision===current.acceptedRevision&&line.stage==='membership'&&line.evidence==='derived');
+  const accepted=current.lines.filter(line=>line.revision===current.acceptedRevision&&line.stage==='membership'
+    &&line.evidence==='derived'&&!detachedHere(line.orderId,line.detailId));
   const rawComposition=mdfCorrectionComposition(raw.map(row=>({orderId:Number(row.order_id),detailId:Number(row.detail_id),
     quantity:Number(row.quantity),rework:row.rework})));
   const acceptedComposition=mdfCorrectionComposition(accepted.map(line=>({orderId:line.orderId,detailId:line.detailId,
@@ -481,9 +502,13 @@ function authenticatedEmptyCorrectionTarget(current:MdfCorrectionSource):boolean
 
 function findAffectedOrders(snapshot:MdfCorrectionSnapshot,plan:Extract<MdfCorrectionPlan,{status:'ready'}>):number[] {
   const affected=new Set<number>();
-  const addMembers=(kind:string,id:string)=>snapshot.plannerSources.find(s=>s.kind===kind&&s.id===id)?.lines
-    .filter(line=>line.revision===snapshot.plannerSources.find(s=>s.kind===kind&&s.id===id)?.acceptedRevision
-      &&line.stage==='membership'&&line.evidence==='derived').forEach(line=>affected.add(line.orderId));
+  // §5.4e: positions detached in a source are terminal history — their (possibly deleted, possibly unauthorized) owners
+  // are never affected, authorized, reported in the preview or given status effects.
+  const addMembers=(kind:string,id:string)=>{
+    const source=snapshot.plannerSources.find(s=>s.kind===kind&&s.id===id);
+    source?.lines.filter(line=>line.revision===source.acceptedRevision&&line.stage==='membership'&&line.evidence==='derived'
+      &&source.detachedPositionKeys?.has(mdfPositionKey(line))!==true).forEach(line=>affected.add(line.orderId));
+  };
   addMembers(plan.sourceReplacement.sourceKind,plan.sourceReplacement.sourceId);
   for (const bath of plan.bathReplacements) addMembers(bath.sourceKind,bath.sourceId);
   // Include every affected validated proof position, even if its status rank
@@ -587,8 +612,11 @@ function makePreview(source:Source,request:MdfCorrectionPreviewBody,snapshot:Mdf
   const response:MdfCorrectionPreviewResponse={protocol:'mdf-correction-v1',status:plan.status==='ready'?'ready':'blocked',
     source:{...source,label:sourceLabel},targetColumn:request.targetColumn,targetStage,stages:returnStages,
     sourceToken:token,headFence:{version:head.version,correctionEpoch:head.epoch},digest:null,affectedOrderIds,
-    details,affectedBaths:baths,sourceAfter:{afterColumn:null,afterIssues:[]},orders:[],allocationReleases:plan.status==='ready'?plan.allocationReleaseIds:[],
-    allocationReplacements:plan.status==='ready'?plan.allocationReplacements:[],deferredPriorAutomation:deferredJobs,
+    details,affectedBaths:baths,sourceAfter:{afterColumn:null,afterIssues:[]},orders:[],
+    // Carried history debits (detached, possibly unauthorized owners) are rebased internally and never disclosed.
+    allocationReleases:plan.status==='ready'?plan.allocationReleaseIds.filter(id=>!plan.historyAllocationIds.includes(id)):[],
+    allocationReplacements:plan.status==='ready'?plan.allocationReplacements
+      .filter(r=>!plan.historyAllocationIds.includes(r.oldAllocationId)):[],deferredPriorAutomation:deferredJobs,
     cncFreshnessBaseline:baseline,blockers,warnings:[]};
   if (baseline) response.warnings.push('Для повторного подтверждения реза потребуется новое pending-событие и затем более новая completion-отметка; наблюдатель CNC пока не активирован.');
   if (plan.status==='ready'&&plan.affectedDetails.some(effect=>effect.afterRank!==snapshot.details.find(d=>d.orderId===effect.orderId&&d.detailId===effect.detailId)?.currentRank))

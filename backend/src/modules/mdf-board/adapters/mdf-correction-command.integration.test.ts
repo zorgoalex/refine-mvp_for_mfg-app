@@ -5,6 +5,7 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
 import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
 import { recordMdfLineageReceipt, recordMdfReceipt, type MdfLineageReceiptInput } from '../application/mdf-receipt';
+import { mdfDemandDigest } from '../domain/mdf-execution-context';
 import { MdfJobRunner } from '../application/mdf-job-runner';
 import { executeMdfAcceptedJob } from '../application/mdf-accepted-job';
 import { PgCncTelegramMdfObservationRepository } from '../../cnc-telegram/adapters/pg-cnc-telegram-mdf-observation-repository';
@@ -12,6 +13,11 @@ import type { DatabaseTransactionOptions } from '../../../database/database.serv
 import type { TransactionClient } from '../../../database/database.types';
 import { mdfSourceCommandToken } from '../domain/mdf-manual-proof';
 import { PgMdfCorrectionCommand } from './mdf-correction-command';
+import { loadMdfClosedOrders, loadMdfHistoricalCoverageOrders } from './mdf-closed-orders';
+import { openMdfOrderCommand } from './mdf-order-cascade';
+import { discoverMdfHistorySuppliers, MAX_MDF_CORRECTION_SOURCES } from './mdf-correction-snapshot';
+import { readMdfPublishedSnapshot } from './mdf-published-snapshot';
+import { PgMdfBoardManualMoveRepository } from '../../orders/adapters/pg-mdf-board-manual-move-repository';
 import { createMdfCorrectionPgFixture } from './mdf-correction-test-fixture.integration';
 
 const enabled = process.env.MDF_ENGINE_INTEGRATION === '1';
@@ -66,6 +72,13 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
     await fixture.applyMigrations(['180_mdf_cnc_observations.sql']);
     await fixture.applyMigrations(['181_cnc_manual_send_observation.sql']);
     await fixture.applyMigrations(['182_mdf_physical_lineage.sql']);
+    // 191's own `mdf_validate_physical_lineage_seal()` replacement is conditional on `mdf_physical_lineage_contracts`
+    // (created by 182) already existing — but 191 was applied ABOVE, before 182. Its guard silently skipped the
+    // replacement then, leaving 182's ORIGINAL (pre-191, no detached-position exemption) seal-guard function
+    // active. Re-apply 191 now that 182 has run, so the exemption `mdf_validate_physical_lineage_seal()` actually
+    // installs (verified via `pg_get_functiondef`) — matching real deployments, which always apply migrations in
+    // strict numeric order (182 before 191) and never hit this gap.
+    await fixture.applyMigrations(['191_mdf_order_corrections.sql']);
     await fixture.applyMigrations(['185_mdf_bazis_composition.sql']);
     await fixture.assertLocalRelations(['bazis_cut_sets','bazis_cut_set_details',
       'mdf_bazis_assignment_states','mdf_bazis_composition_intents']);
@@ -483,15 +496,28 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
     const statuses = (await fixture.client.query<{ id: string; s: number }>(`SELECT detail_id::text id,production_status_id s
       FROM order_details WHERE detail_id=ANY($1::bigint[]) ORDER BY detail_id`, [[a, b]])).rows;
     expect(statuses).toEqual([{ id: String(a), s: 1 }, { id: String(b), s: 2 }]);
-    // Detached lines are carried/dropped like any other line: the cut of the whole file is revoked consistently.
-    expect((await fixture.client.query(`SELECT 1 FROM mdf_evidence_lines e JOIN mdf_source_heads h ON h.source_kind=e.source_kind
-      AND h.source_id=e.source_id AND h.accepted_revision_key=e.revision_key WHERE e.source_kind='packet' AND e.source_id=$1
-      AND e.stage_code='cut'`, [packetId])).rows).toHaveLength(0);
+    // A's (non-detached) cut proof is revoked by the return, like any ordinary line. B's cut proof is detached
+    // (terminal history, §5.4e/mdf-correction-plan.ts) and stays in the new revision unchanged, even though this
+    // same return revokes proof generally — its carried allocation debit (if any) keeps pointing at a valid line.
+    const survivingCut = (await fixture.client.query<{ lineKey: string; detailId: string }>(
+      `SELECT e.line_key "lineKey",e.detail_id::text "detailId" FROM mdf_evidence_lines e JOIN mdf_source_heads h
+        ON h.source_kind=e.source_kind AND h.source_id=e.source_id AND h.accepted_revision_key=e.revision_key
+      WHERE e.source_kind='packet' AND e.source_id=$1 AND e.stage_code='cut'`, [packetId])).rows;
+    expect(survivingCut).toEqual([{ lineKey: 'cut-2', detailId: String(b) }]);
     expect((await fixture.client.query(`SELECT issues FROM mdf_published_sources WHERE source_kind='packet' AND source_id=$1`,
       [packetId])).rows[0].issues).toEqual([]);
   });
 
-  it('keeps a detached-only owner in scope (§5.5c): a user without access to it cannot return the card', async () => {
+  // NOTE (C4 side effect, flagged for review): before the C4 fix, a detached-only co-owner (orderB below) still
+  // gated PERMISSION on this card (`discoverMdfCorrectionClosure`'s graph edges included it), so a user without
+  // access to orderB got 403 PERMISSION_DENIED. The C4 fix's `notDetached` filter removes a detached-only owner
+  // from discovery ENTIRELY (§5.4e: "neither expand the closure nor need authorization" — mdf-correction-snapshot.ts),
+  // which also means it no longer gates permission for OTHER users. Left unrepublished (as here — a raw detachment
+  // insert, not a real cascade), the card is instead MDF_CORRECTION_BLOCKED (its own frozen demand still names
+  // orderB) for EVERY actor, admin included, until republished — see the real-cascade C4 tests below for the
+  // normal (republished) path. This permission-scope narrowing is intentional per the fix's own comment, but is a
+  // notable behaviour change worth independent confirmation.
+  it('a card whose only connection to an order is a detached position is unverified for every actor until republished (§5.4e/C4)', async () => {
     await fixture.client.query("UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now() WHERE status='pending'");
     const orderA = ++orderSequence, orderB = ++orderSequence, a = orderA * 10, b = orderB * 10, packetId = randomUUID();
     const source = { kind: 'packet' as const, id: packetId };
@@ -532,13 +558,13 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
     const before = await fixture.snapshot(['orders','order_details','mdf_source_heads','mdf_evidence_revisions',
       'mdf_correction_command_results','audit_log','outbox_events']);
     await expect(command.preview(scoped, source, request, 'E2E-scoped-preview'))
-      .rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+      .rejects.toMatchObject({ statusCode: 422, code: 'MDF_CORRECTION_BLOCKED' });
     await expect(command.confirm(scoped, source, { ...request, expectedDigest: 'e'.repeat(64),
-      idempotencyKey: `scoped-${orderA}` }, 'E2E-scoped-confirm')).rejects.toMatchObject({ statusCode: 403 });
+      idempotencyKey: `scoped-${orderA}` }, 'E2E-scoped-confirm')).rejects.toMatchObject({ statusCode: 422 });
     expect(await fixture.snapshot(Object.keys(before))).toEqual(before);
-    // The admin (access to both) may return it; the detached-only owner gets no status effect.
-    const preview = await command.preview(admin, source, request, 'E2E-scoped-admin');
-    expect(preview.details.map(d => d.detailId)).toEqual([a]);
+    // Not a permission difference any more: the SAME actor-independent block applies to the admin too.
+    await expect(command.preview(admin, source, request, 'E2E-scoped-admin'))
+      .rejects.toMatchObject({ statusCode: 422, code: 'MDF_CORRECTION_BLOCKED' });
   });
 
   it('rejects missing permissions and stale source tokens without changing correction or business rows', async () => {
@@ -925,8 +951,10 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
     expect((await fixture.client.query(`SELECT a.quantity::text q,a.state,e.source_kind k FROM mdf_bath_allocations a
       JOIN mdf_evidence_lines e USING(evidence_line_id) WHERE a.bath_id=$1 AND a.state<>'released' ORDER BY e.source_kind`, [f.bath.id])).rows)
       .toEqual(allocationsBefore);
+    // C3 (rule 5): the detail started already PACKED (rank 80), beyond the board's last stage (laminated, rank 70) —
+    // a board return never rolls it back, regardless of the return's own target/floor.
     expect((await fixture.client.query('SELECT production_status_id FROM order_details WHERE detail_id=$1', [f.detailId])).rows[0]
-      .production_status_id).toBe(3);
+      .production_status_id).toBe(4);
   });
 
   it('moves terminal completed_laminated to sanded while preserving new CNC proof and reserving its rebased 4', async () => {
@@ -940,8 +968,10 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
     const preview = await command.preview(admin, f.source, request, 'E2E-terminal-band-preview');
     expect(preview.status).toBe('ready');
     expect(preview.targetStage).toMatchObject({ code: 'sanded', rank: 60 });
-    expect(preview.details[0]).toMatchObject({ beforeStatus: 'Упакован', afterStatus: 'Шлифован',
-      afterRank: 60, cutCoverage: 4, laminatedCoverage: 6,
+    // C3 (rule 5): the detail is already PACKED (rank 80), beyond the board's last stage (laminated, rank 70) —
+    // the return's own target (sanded, rank 60) never rolls it back; board facts (cut/laminated coverage) still are.
+    expect(preview.details[0]).toMatchObject({ beforeStatus: 'Упакован', afterStatus: 'Упакован',
+      afterRank: 80, cutCoverage: 4, laminatedCoverage: 6,
       after: { creditedCut: 4, creditedRolled: 6, remaining: 0 } });
     expect(preview.affectedBaths).toEqual([expect.objectContaining({ source: f.bath,
       cancelledLaminationQuantity: 4, manualPlacementColumnAfter: null, clearsManualPlacementOverride: true })]);
@@ -979,8 +1009,9 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
     expect((await fixture.client.query(`SELECT cut_quantity::text,credited_cut::text,credited_rolled::text,remaining::text
       FROM mdf_published_positions WHERE order_id=$1 AND detail_id=$2`, [f.orderId,f.detailId])).rows[0])
       .toEqual({ cut_quantity: '4', credited_cut: '4', credited_rolled: '6', remaining: '0' });
+    // Status stays packed (4), not rolled back to sanded (6) — same rule 5 preservation as the preview above.
     expect((await fixture.client.query(`SELECT production_status_id FROM order_details WHERE detail_id=$1`, [f.detailId])).rows[0]
-      .production_status_id).toBe(6);
+      .production_status_id).toBe(4);
   });
 
   it('direct BASIS correction stores its target override and retains only the CNC-linked bath debit', async () => {
@@ -1215,6 +1246,1122 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
     await expect(command.confirm(admin, f.source, { ...bodyFor(f), expectedDigest: preview.digest!,
       idempotencyKey: `placement-stale-${f.orderId}` }, 'E2E-placement-confirm'))
       .rejects.toMatchObject({ code: 'MDF_CORRECTION_STALE' });
+  });
+
+  describe('logic-audit regressions: C1/C3/C4', () => {
+    /** `confirm()`'s own `jobIds` only tracks the source-replacement/bath-replacement receipts — a §5.7b reopen
+     * (`reopenMdfClosure`, e.g. C1) creates its OWN 'order' job that is never included, so draining exactly
+     * `result.jobIds.length` times can leave it pending for a later test to stumble into. Drain to idle instead. */
+    async function drainAll() {
+      for (let i = 0; i < 20; i++) {
+        const r = await runner.processOne();
+        if (r.status === 'idle') return;
+        expect(r.status).toBe('done');
+      }
+      throw new Error('E2E_LOGIC_AUDIT_QUEUE_NOT_DRAINED');
+    }
+
+    /** Hand-crafted historical-status closure ('by_status'), independent of the baseline runner — mirrors
+     * `mdf-baseline-runner.integration.test.ts`'s `seedHandCraftedClosedOrder`. */
+    async function handCraftedClosedOrder(orderId: number,
+      demand: readonly { orderId: number; detailId: number; quantity: number }[]) {
+      const runId = randomUUID();
+      const revisionKey = `hand-closure:${randomUUID()}`;
+      const sourceId = String(orderId);
+      await fixture.client.query('BEGIN');
+      try {
+        await fixture.client.query("SELECT set_config('mdf.command_writer','mdf.baseline',true)");
+        await fixture.client.query(`INSERT INTO mdf_baseline_runs(run_id,status,operator_user_id,request_id,manifest)
+          VALUES($1,'started',1,'E2E hand-closure','{}'::jsonb)`, [runId]);
+        await fixture.client.query(`INSERT INTO mdf_evidence_revisions(source_kind,source_id,revision_key,payload_digest,origin,actor_user_id,request_id,cause_key)
+          VALUES('order',$1,$2,$3,'manual',1,'E2E hand-closure','E2E hand-closure')`, [sourceId, revisionKey, 'e'.repeat(64)]);
+        for (const d of demand) for (const stage of ['cut', 'laminated']) {
+          await fixture.client.query(`INSERT INTO mdf_evidence_lines(source_kind,source_id,revision_key,line_key,order_id,detail_id,quantity,stage_code,evidence_kind,rework)
+            VALUES('order',$1,$2,$3,$4,$5,$6,$7,'declaration',false)`,
+          [sourceId, revisionKey, `closed-by-status:${d.detailId}:${stage}`, d.orderId, d.detailId, d.quantity, stage]);
+        }
+        await fixture.client.query(`INSERT INTO mdf_revision_context(source_kind,source_id,revision_key,source_created_at,display_name,
+            prior_column,composition_complete,demand_digest,acceptance_requested,predecessor_accepted_revision_key,
+            predecessor_received_revision_key,effect_policy,baseline_run_id,closure)
+          VALUES('order',$1,$2,now(),$3,NULL,true,$4,true,NULL,NULL,'publish_only',$5,'by_status')`,
+        [sourceId, revisionKey, `Заказ ${orderId}`, mdfDemandDigest(demand), runId]);
+        await fixture.client.query(`INSERT INTO mdf_revision_demand(source_kind,source_id,revision_key,order_id,detail_id,quantity)
+          SELECT 'order',$1,$2,x."orderId",x."detailId",x.quantity FROM jsonb_to_recordset($3::jsonb) x("orderId" bigint,"detailId" bigint,quantity bigint)`,
+        [sourceId, revisionKey, JSON.stringify(demand)]);
+        await fixture.client.query(`INSERT INTO mdf_revision_seals(source_kind,source_id,revision_key) VALUES('order',$1,$2)`, [sourceId, revisionKey]);
+        await fixture.client.query(`INSERT INTO mdf_source_heads(source_kind,source_id,received_revision_key,accepted_revision_key,version,correction_epoch)
+          VALUES('order',$1,$2,$2,1,0)`, [sourceId, revisionKey]);
+        const jobId = randomUUID();
+        await fixture.client.query(`INSERT INTO mdf_recalculation_jobs(job_id,event_key,source_kind,source_id,revision_key,correction_epoch,actor_user_id,request_id,status,finished_at,effect_policy)
+          VALUES($1,$2,'order',$3,$4,0,1,'E2E hand-closure','done',now(),'publish_only')`,
+        [jobId, `e2e-hand-closure-job:${jobId}`, sourceId, revisionKey]);
+        await fixture.client.query('COMMIT');
+      } catch (error) {
+        await fixture.client.query('ROLLBACK').catch(() => undefined);
+        throw error;
+      }
+      return revisionKey;
+    }
+
+    it('C3: returns a card whose only member is already packed — the packed status is kept, board facts are still corrected', async () => {
+      const f = await acceptedPacket();
+      const packed = (await fixture.client.query<{ id: string }>(`SELECT production_status_id::text id FROM production_statuses
+        WHERE production_status_code='packed'`)).rows[0].id;
+      await fixture.client.query('UPDATE order_details SET production_status_id=$2 WHERE detail_id=$1', [f.detailId, packed]);
+      const preview = await command.preview(admin, f.source, bodyFor(f), 'E2E-C3-preview');
+      expect(preview.status).toBe('ready');
+      expect(preview.details[0]).toMatchObject({ orderId: f.orderId, detailId: f.detailId,
+        beforeStatus: 'Упакован', afterStatus: 'Упакован', statusKept: true });
+      const confirm = await command.confirm(admin, f.source, { ...bodyFor(f), expectedDigest: preview.digest!,
+        idempotencyKey: `c3-packed-${f.orderId}` }, 'E2E-C3-confirm');
+      for (let i = 0; i < confirm.jobIds.length; i++) expect((await runner.processOne()).status).toBe('done');
+      // The detail's own status is untouched by the return.
+      expect((await fixture.client.query('SELECT production_status_id::text id FROM order_details WHERE detail_id=$1',
+        [f.detailId])).rows[0]).toEqual({ id: packed });
+      // Board facts ARE still corrected: the returned cut evidence is gone, exactly as for an un-packed return.
+      expect((await fixture.client.query(`SELECT 1 FROM mdf_evidence_lines e JOIN mdf_source_heads h ON h.source_kind=e.source_kind
+        AND h.source_id=e.source_id AND h.accepted_revision_key=e.revision_key WHERE e.source_kind='packet' AND e.source_id=$1
+        AND e.stage_code='cut'`, [f.source.id])).rows).toHaveLength(0);
+      expect((await fixture.client.query(`SELECT credited_cut,credited_rolled,remaining FROM mdf_published_positions
+        WHERE detail_id=$1`, [f.detailId])).rows[0]).toEqual({ credited_cut: '0', credited_rolled: '0', remaining: '10' });
+    });
+
+    it('C1: a production return revokes only the returned card\'s positions — a sibling detail keeps its historical coverage', async () => {
+      const orderId = ++orderSequence, a = orderId * 10, b = orderId * 10 + 1;
+      await fixture.client.query(`INSERT INTO orders(order_id,order_name,order_kind,delete_flag,version,order_status_id,
+        payment_status_id,created_by) VALUES($1,$2,'production_order',false,1,2,1,1)`, [orderId, `E2E C1 ${orderId}`]);
+      await fixture.client.query(`INSERT INTO order_details(detail_id,order_id,detail_number,quantity,production_status_id,
+        delete_flag,material_id) VALUES($1,$3,1,10,2,false,1),($2,$3,2,5,2,false,1)`, [a, b, orderId]);
+      await handCraftedClosedOrder(orderId, [{ orderId, detailId: a, quantity: 10 }, { orderId, detailId: b, quantity: 5 }]);
+      // The order is historically closed (by_status), covering both A and B (§5.7b boundary — no publication step
+      // needed: `loadMdfClosedOrders` reads the closure straight off the accepted order-level revision).
+      expect(await database.transaction(tx => loadMdfClosedOrders(tx, [orderId]))).toEqual(new Set([orderId]));
+
+      // A card holding ONLY position A (B is not part of it, and is never touched by anything below).
+      const packetId = randomUUID();
+      await fixture.client.query(`INSERT INTO cnc_telegram_packets(packet_id,external_packet_key,source_chat_id,source_message_id,
+        source_version,payload_hash,workday,completion_status,thumbs_up,completed_at,material_name,program_name,mdf_board_card_kind,
+        created_at,updated_at,parse_status,rework,mdf_completion_returned)
+        VALUES($1,$2,'E2E','1',1,$3,CURRENT_DATE,'completed',true,now(),'МДФ фасад 10 мм','E2E','machine_file',
+          now(),now(),'parsed',false,false)`, [packetId, `E2E-C1-${orderId}`, 'f'.repeat(64)]);
+      await fixture.client.query(`INSERT INTO cnc_telegram_packet_items(packet_item_id,packet_id,source_item_key,match_order_id,
+        match_detail_id,match_status,quantity,order_name,detail_number,width_mm,height_mm,source)
+        VALUES($1,$2,'part-1',$3,$4,'matched',10,$5,1,100,200,'manual')`,
+      [randomUUID(), packetId, orderId, a, `E2E C1 ${orderId}`]);
+      const saved = await database.transaction(tx => recordMdfReceipt(tx, { sourceKind: 'packet', sourceId: packetId, revisionKey: 'r1',
+        origin: 'cnc', actorUserId: 1, requestId: `E2E C1 ${orderId}`, causeKey: `E2E C1 ${orderId}`, expectedFence: null,
+        accept: true, rules: [], executionContext: { sourceCreatedAt: '2026-09-20T00:00:00Z', displayName: `E2E C1 ${orderId}`,
+          // `demand` must be the order's FULL live MDF demand (both A and B), not just this card's own membership (A) —
+          // the execution snapshot flags MDF_DEMAND_CHANGED otherwise (checked against every live detail of the order).
+          priorColumn: 'completed', compositionComplete: true,
+          demand: [{ orderId, detailId: a, quantity: 10 }, { orderId, detailId: b, quantity: 5 }] },
+        lines: [
+          { lineKey: 'part-1', orderId, detailId: a, quantity: 10, stageCode: 'membership', evidenceKind: 'derived', rework: false },
+          { lineKey: 'cut-1', orderId, detailId: a, quantity: 10, stageCode: 'cut', evidenceKind: 'physical', rework: false },
+        ] }));
+      expect(await runner.processOne()).toMatchObject({ status: 'done', jobId: saved.jobId });
+
+      const head = (await fixture.client.query<{ received: string; version: string; epoch: string }>(`SELECT received_revision_key received,
+        version::text,correction_epoch::text epoch FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`, [packetId])).rows[0];
+      const source = { kind: 'packet' as const, id: packetId };
+      const request = { sourceToken: mdfSourceCommandToken(source, head), targetColumn: 'parsed' as const };
+      const preview = await command.preview(admin, source, request, 'E2E-C1-preview');
+      expect(preview.status).toBe('ready');
+      expect(preview.reopenOrderIds).toEqual([orderId]);
+      const result = await command.confirm(admin, source, { ...request, expectedDigest: preview.digest!,
+        idempotencyKey: `c1-return-${orderId}` }, 'E2E-C1-confirm');
+      expect(result.jobIds.length).toBeGreaterThan(0);
+      await drainAll();
+
+      // B keeps historical coverage (the order is no longer `by_status`-closed, but the successor still carries B's
+      // declaration under `loadMdfHistoricalCoverageOrders`'s broader by_status|carried boundary); A's own card lost it.
+      expect(await database.transaction(tx => loadMdfClosedOrders(tx, [orderId]))).toEqual(new Set());
+      expect(await database.transaction(tx => loadMdfHistoricalCoverageOrders(tx, [orderId]))).toEqual([orderId]);
+
+      // The order's successor revision carries B's declaration forward (never terminal, never `by_status` again).
+      const successor = (await fixture.client.query<{ closure: string | null }>(`SELECT c.closure FROM mdf_source_heads h
+        JOIN mdf_revision_context c ON c.source_kind=h.source_kind AND c.source_id=h.source_id AND c.revision_key=h.accepted_revision_key
+        WHERE h.source_kind='order' AND h.source_id=$1`, [String(orderId)])).rows[0];
+      expect(successor.closure).toBe('carried');
+      const survivingLines = (await fixture.client.query<{ detail_id: string }>(`SELECT detail_id::text FROM mdf_evidence_lines e
+        JOIN mdf_source_heads h ON h.source_kind=e.source_kind AND h.source_id=e.source_id AND h.accepted_revision_key=e.revision_key
+        WHERE e.source_kind='order' AND e.source_id=$1 ORDER BY detail_id`, [String(orderId)])).rows;
+      expect(survivingLines.every(r => r.detail_id === String(b))).toBe(true);
+      expect(survivingLines.length).toBeGreaterThan(0);
+      // Audit: only A's position was revoked.
+      const audit = (await fixture.client.query<{ after_json: { revokedDetailIds?: number[] } }>(
+        `SELECT after_json FROM audit_log WHERE event='mdf.order_closure.reopened' AND entity_id=$1
+         ORDER BY created_at DESC LIMIT 1`, [String(orderId)])).rows[0];
+      expect(audit.after_json.revokedDetailIds).toEqual([a]);
+    });
+
+    /** A real confirmed-deletion cascade (`openMdfOrderCommand`), unlike the direct `mdf_position_detachments`
+     * insert used elsewhere: the underlying order_detail (or whole order) is ACTUALLY deleted, so the raw
+     * packet row genuinely cannot be resolved to a live detail any more — exactly the C4 scenario. */
+    async function confirmedDelete(orderIds: number[], write: (tx: TransactionClient) => Promise<unknown>, key: string,
+      writer: 'orders.update' | 'orders.delete' = 'orders.update') {
+      const sortedIds = [...orderIds].sort((x, y) => x - y);
+      const attempt = (confirmation?: { digest: string }) => database.transaction(async tx => {
+        await tx.query('SELECT order_id FROM orders WHERE order_id=ANY($1::bigint[]) ORDER BY order_id FOR UPDATE', [sortedIds]);
+        const mdf = await openMdfOrderCommand(tx, writer);
+        await mdf.captureBefore(sortedIds);
+        await write(tx);
+        await mdf.finish({ user: admin, requestId: `${key}-request`, commandKey: key, orderIds: sortedIds,
+          confirmation: confirmation ?? null });
+      }, { mdf: { writer, capability: 'order-demand' } });
+      try {
+        await attempt();
+        throw new Error('E2E_EXPECTED_MDF_CHALLENGE');
+      } catch (error) {
+        const e = error as { code?: string; details?: { mdfConfirmation?: { digest: string } } };
+        if (e.code !== 'MDF_ORDER_PHYSICAL_CONFLICT' || !e.details?.mdfConfirmation) throw error;
+        await attempt({ digest: e.details.mdfConfirmation.digest });
+      }
+    }
+
+    async function packetOverTwoOrders(prefix: string, owners: { a: number; b: number } = { a: 1, b: 1 }) {
+      const orderA = ++orderSequence, orderB = ++orderSequence, a = orderA * 10, b = orderB * 10, packetId = randomUUID();
+      const source = { kind: 'packet' as const, id: packetId };
+      await fixture.client.query(`INSERT INTO orders(order_id,order_name,order_kind,delete_flag,version,order_status_id,
+        payment_status_id,created_by) VALUES($1,$2,'production_order',false,1,1,1,$5),($3,$4,'production_order',false,1,1,1,$6)`,
+      [orderA, `E2E ${prefix} A ${orderA}`, orderB, `E2E ${prefix} B ${orderB}`, owners.a, owners.b]);
+      await fixture.client.query(`INSERT INTO order_details(detail_id,order_id,detail_number,quantity,production_status_id,
+        delete_flag,material_id) VALUES($1,$2,1,10,2,false,1),($3,$4,1,5,2,false,1)`, [a, orderA, b, orderB]);
+      await fixture.client.query(`INSERT INTO cnc_telegram_packets(packet_id,external_packet_key,source_chat_id,source_message_id,
+        source_version,payload_hash,workday,completion_status,thumbs_up,completed_at,material_name,program_name,mdf_board_card_kind,
+        created_at,updated_at,parse_status,rework,mdf_completion_returned)
+        VALUES($1,$2,'E2E','1',1,$3,CURRENT_DATE,'completed',true,now(),'МДФ фасад 10 мм','E2E','machine_file',
+          now(),now(),'parsed',false,false)`, [packetId, `E2E-${prefix}-${orderA}`, 'f'.repeat(64)]);
+      await fixture.client.query(`INSERT INTO cnc_telegram_packet_items(packet_item_id,packet_id,source_item_key,match_order_id,
+        match_detail_id,match_status,quantity,order_name,detail_number,width_mm,height_mm,source) VALUES
+        ($1,$3,'part-1',$4,$5,'matched',10,'A',1,100,200,'manual'),($2,$3,'part-2',$6,$7,'matched',5,'B',1,100,200,'manual')`,
+      [randomUUID(), randomUUID(), packetId, orderA, a, orderB, b]);
+      const saved = await database.transaction(tx => recordMdfReceipt(tx, { sourceKind: 'packet', sourceId: packetId, revisionKey: 'r1',
+        origin: 'cnc', actorUserId: 1, requestId: `E2E ${prefix} ${orderA}`, causeKey: `E2E ${prefix} ${orderA}`, expectedFence: null,
+        accept: true, rules: [], executionContext: { sourceCreatedAt: '2026-09-20T00:00:00Z', displayName: `E2E ${prefix} ${orderA}`,
+          priorColumn: 'completed', compositionComplete: true,
+          demand: [{ orderId: orderA, detailId: a, quantity: 10 }, { orderId: orderB, detailId: b, quantity: 5 }] },
+        lines: [
+          { lineKey: 'part-1', orderId: orderA, detailId: a, quantity: 10, stageCode: 'membership', evidenceKind: 'derived', rework: false },
+          { lineKey: 'part-2', orderId: orderB, detailId: b, quantity: 5, stageCode: 'membership', evidenceKind: 'derived', rework: false },
+          { lineKey: 'cut-1', orderId: orderA, detailId: a, quantity: 10, stageCode: 'cut', evidenceKind: 'physical', rework: false },
+          { lineKey: 'cut-2', orderId: orderB, detailId: b, quantity: 5, stageCode: 'cut', evidenceKind: 'physical', rework: false },
+        ] }));
+      expect(await runner.processOne()).toMatchObject({ status: 'done', jobId: saved.jobId });
+      return { source, orderA, orderB, a, b, packetId };
+    }
+
+    // FIXED (C4): mdf-correction-command.ts's `validateTarget` now resolves a deleted detail's raw row through the
+    // accepted membership line sharing its `line_key` (`acceptedByLineKey`/`detachedRow`) instead of trusting the
+    // raw row's own (now-NULL, since `loadMdfShadowSource` LEFT JOINs live details only) order/detail id — no more
+    // `INVALID_MDF_IDENTITY`. Scenario: packet holds A (order A) + B (order B); B's OWN DETAIL is confirmed-deleted
+    // (delete_flag=true) via the real order-cascade (not merely `mdf_position_detachments` inserted for a still-live
+    // detail, as the neighbouring pre-existing "detached position" tests do).
+    it('C4: after a confirmed deletion of B\'s own detail, returning the surviving A succeeds without restoring rows', async () => {
+      vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'true');
+      try {
+        const f = await packetOverTwoOrders('C4-detail');
+        await confirmedDelete([f.orderA, f.orderB], tx => tx.query('UPDATE order_details SET delete_flag=true WHERE detail_id=$1',
+          [f.b]), `c4-detail-${f.orderB}`);
+        expect((await fixture.client.query('SELECT delete_flag FROM order_details WHERE detail_id=$1', [f.b])).rows[0])
+          .toEqual({ delete_flag: true });
+        await drainAll();
+
+        const head = (await fixture.client.query<{ received: string; version: string; epoch: string }>(`SELECT received_revision_key
+          received,version::text,correction_epoch::text epoch FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`,
+        [f.packetId])).rows[0];
+        const request = { sourceToken: mdfSourceCommandToken(f.source, head), targetColumn: 'parsed' as const };
+        const preview = await command.preview(admin, f.source, request, 'E2E-C4-detail-preview');
+        expect(preview.status).toBe('ready');
+        expect(preview.details.map(d => d.detailId)).toEqual([f.a]);
+        const result = await command.confirm(admin, f.source, { ...request, expectedDigest: preview.digest!,
+          idempotencyKey: `c4-detail-return-${f.orderA}` }, 'E2E-C4-detail-confirm');
+        for (let i = 0; i < result.jobIds.length; i++) expect((await runner.processOne()).status).toBe('done');
+        // B's row was never restored/undeleted by any of this.
+        expect((await fixture.client.query('SELECT delete_flag FROM order_details WHERE detail_id=$1', [f.b])).rows[0])
+          .toEqual({ delete_flag: true });
+        expect((await fixture.client.query(`SELECT issues FROM mdf_published_sources WHERE source_kind='packet' AND source_id=$1`,
+          [f.packetId])).rows[0].issues).toEqual([]);
+      } finally {
+        vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'false');
+      }
+    });
+
+    it('C4: after a confirmed deletion of B\'s WHOLE order, returning the surviving A succeeds without restoring rows', async () => {
+      vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'true');
+      try {
+        const f = await packetOverTwoOrders('C4-order');
+        await confirmedDelete([f.orderA, f.orderB], tx => tx.query('UPDATE orders SET delete_flag=true WHERE order_id=$1',
+          [f.orderB]), `c4-order-${f.orderB}`, 'orders.delete');
+        expect((await fixture.client.query('SELECT delete_flag FROM orders WHERE order_id=$1', [f.orderB])).rows[0])
+          .toEqual({ delete_flag: true });
+        await drainAll();
+
+        const head = (await fixture.client.query<{ received: string; version: string; epoch: string }>(`SELECT received_revision_key
+          received,version::text,correction_epoch::text epoch FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`,
+        [f.packetId])).rows[0];
+        const request = { sourceToken: mdfSourceCommandToken(f.source, head), targetColumn: 'parsed' as const };
+        const preview = await command.preview(admin, f.source, request, 'E2E-C4-order-preview');
+        expect(preview.status).toBe('ready');
+        expect(preview.details.map(d => d.detailId)).toEqual([f.a]);
+        const result = await command.confirm(admin, f.source, { ...request, expectedDigest: preview.digest!,
+          idempotencyKey: `c4-order-return-${f.orderA}` }, 'E2E-C4-order-confirm');
+        for (let i = 0; i < result.jobIds.length; i++) expect((await runner.processOne()).status).toBe('done');
+        expect((await fixture.client.query('SELECT delete_flag FROM orders WHERE order_id=$1', [f.orderB])).rows[0])
+          .toEqual({ delete_flag: true });
+        expect((await fixture.client.query(`SELECT issues FROM mdf_published_sources WHERE source_kind='packet' AND source_id=$1`,
+          [f.packetId])).rows[0].issues).toEqual([]);
+      } finally {
+        vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'false');
+      }
+    });
+
+    // FIXED (fixes-r1 finding 1, security): `findAffectedOrders`'s `addMembers` now applies the same
+    // `detachedPositionKeys` filter as the closure graph, so a detached-only co-owner (B here) is excluded from
+    // `affectedOrderIds` — and so from `previewOrderAutomation`'s `readOrderStatuses` call and the confirm-time
+    // audit/outbox `relatedEntities`/`orderIds` — not just from closure/authorization scope (which already excluded
+    // it before this fix). Actor is scoped to orders.view/update='own' and owns ONLY A (created_by=2); B is
+    // created_by=1 (a different, unrelated owner the scoped actor has no access to).
+    it('C4 security: an actor scoped only to A previews and confirms the return without B\'s id/status leaking in (fixes-r1 #1)', async () => {
+      vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'true');
+      try {
+        const f = await packetOverTwoOrders('C4-scoped', { a: 2, b: 1 });
+        await confirmedDelete([f.orderA, f.orderB], tx => tx.query('UPDATE order_details SET delete_flag=true WHERE detail_id=$1',
+          [f.b]), `c4-scoped-${f.orderB}`);
+        await drainAll();
+
+        const head = (await fixture.client.query<{ received: string; version: string; epoch: string }>(`SELECT received_revision_key
+          received,version::text,correction_epoch::text epoch FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`,
+        [f.packetId])).rows[0];
+        const request = { sourceToken: mdfSourceCommandToken(f.source, head), targetColumn: 'parsed' as const };
+        const scoped: CurrentUser = { ...admin, id: '2', policyScopes: { ...ROLE_POLICIES.admin,
+          orders: { view: 'own', update: 'own', export: 'own', delete: 'own' },
+          productionTasks: { ...ROLE_POLICIES.admin.productionTasks, update: 'own' } } } as CurrentUser;
+        const preview = await command.preview(scoped, f.source, request, 'E2E-C4-security-preview');
+        expect(preview.status).toBe('ready');
+        expect(preview.details.map(d => d.detailId)).toEqual([f.a]);
+        // No B id or status in the preview's own order-effects, however many entries it has.
+        expect(preview.orders.map(o => o.orderId)).not.toContain(f.orderB);
+        const result = await command.confirm(scoped, f.source, { ...request, expectedDigest: preview.digest!,
+          idempotencyKey: `c4-security-return-${f.orderA}` }, 'E2E-C4-security-confirm');
+        for (let i = 0; i < result.jobIds.length; i++) expect((await runner.processOne()).status).toBe('done');
+        // Confirm-time affectedOrderIds (audit relatedEntities, driven by the same findAffectedOrders) also excludes B.
+        const audit = (await fixture.client.query<{ id: string }>(`SELECT audit_id::text id FROM audit_log
+          WHERE event='mdf_board.production_returned' AND entity_id=$1 ORDER BY created_at DESC LIMIT 1`,
+        [`${f.source.kind}:${f.source.id}`])).rows[0];
+        expect((await fixture.client.query(`SELECT entity_id FROM audit_log_related_entity
+          WHERE audit_id=$1::uuid AND entity_type='order' ORDER BY entity_id`, [audit.id])).rows.map(r => r.entity_id))
+          .toEqual([String(f.orderA)]);
+        expect((await fixture.client.query('SELECT delete_flag FROM order_details WHERE detail_id=$1', [f.b])).rows[0])
+          .toEqual({ delete_flag: true });
+      } finally {
+        vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'false');
+      }
+    });
+
+    /** Two orders (A, B) contribute cut evidence from the SAME packet to a single laminated bath (mirrors
+     * `splitPacketBasisBath`'s bath receipt, but with demand split across two independent orders/owners
+     * instead of one). Yields two 'consumed' `mdf_bath_allocations` rows, one per order. */
+    async function packetOverTwoOrdersWithBath(prefix: string, owners: { a: number; b: number } = { a: 1, b: 1 }) {
+      const f = await packetOverTwoOrders(prefix, owners);
+      const demand = [{ orderId: f.orderA, detailId: f.a, quantity: 10 }, { orderId: f.orderB, detailId: f.b, quantity: 5 }];
+      // Status-automation's pinned-batch validator requires this exact shape for a bath source id (mdf-pinned-batch.ts).
+      const bathId = `cut-result:${f.orderA}`;
+      const bath = { kind: 'bath' as const, id: bathId };
+      await fixture.client.query(`INSERT INTO cut_result(cut_result_id,created_at,snapshot_digest)
+        VALUES($1,now(),repeat('c',64))`, [f.orderA]);
+      await fixture.client.query(`INSERT INTO cut_result_board_projection(cut_result_id,snapshot_digest,is_vacuum,cut_job_name,result_created_at)
+        VALUES($1,repeat('c',64),true,'E2E two-order bath',now())`, [f.orderA]);
+      await fixture.client.query(`INSERT INTO cut_result_sheet_map(cut_result_sheet_map_id,cut_result_id,is_effective)
+        VALUES($1,$1,true)`, [f.orderA]);
+      // A direct correction on the BATH itself reads its "raw" composition from these placement rows (mdf-shadow-source.ts),
+      // not from mdf_evidence_lines — without them `validateTarget` sees an empty raw target and refuses the return.
+      await fixture.client.query(`INSERT INTO cut_result_placement(cut_result_placement_id,cut_result_sheet_map_id,
+        cut_result_id,order_id,order_detail_id) SELECT $1*1000+g,$1,$1,$2,$3 FROM generate_series(1,10) g`,
+      [f.orderA, f.orderA, f.a]);
+      await fixture.client.query(`INSERT INTO cut_result_placement(cut_result_placement_id,cut_result_sheet_map_id,
+        cut_result_id,order_id,order_detail_id) SELECT $1*1000+500+g,$1,$1,$2,$3 FROM generate_series(1,5) g`,
+      [f.orderA, f.orderB, f.b]);
+      const bathReceipt = await database.transaction(tx => recordMdfReceipt(tx, { sourceKind: 'bath', sourceId: bathId,
+        revisionKey: 'r1', origin: 'manual', actorUserId: 1, requestId: `E2E ${prefix} bath`, causeKey: `E2E ${prefix} bath`,
+        expectedFence: null, accept: true, rules: [], executionContext: { sourceCreatedAt: '2026-09-20T00:00:00Z',
+          displayName: `E2E ${prefix} bath`, priorColumn: 'baths_laminated', manualPlacementColumn: 'baths_laminated',
+          compositionComplete: true, demand },
+        lines: [
+          { lineKey: 'member-a', orderId: f.orderA, detailId: f.a, quantity: 10, stageCode: 'membership', evidenceKind: 'derived', rework: false },
+          { lineKey: 'member-b', orderId: f.orderB, detailId: f.b, quantity: 5, stageCode: 'membership', evidenceKind: 'derived', rework: false },
+          { lineKey: 'laminated-a', orderId: f.orderA, detailId: f.a, quantity: 10, stageCode: 'laminated', evidenceKind: 'physical', rework: false },
+          { lineKey: 'laminated-b', orderId: f.orderB, detailId: f.b, quantity: 5, stageCode: 'laminated', evidenceKind: 'physical', rework: false },
+        ] }));
+      expect(await runner.processOne()).toMatchObject({ status: 'done', jobId: bathReceipt.jobId });
+      const allocations = (await fixture.client.query<{ id: string; quantity: string; state: string; orderId: string }>(
+        `SELECT allocation_id::text id,quantity::text quantity,state,order_id::text "orderId" FROM mdf_bath_allocations
+          WHERE bath_id=$1 AND state<>'released' ORDER BY order_id`, [bathId])).rows;
+      return { ...f, bath, bathId, allocations };
+    }
+
+    // FIXED (fixes-r1 finding 4, complete): `mdf-correction-snapshot.ts`'s `graphEdges` excludes `mdf_bath_allocations`
+    // edges at a detached position from BOTH UNION branches, so a consumed debit whose order was deleted no longer
+    // reintroduces that order into the correction closure — `authorizeOwners` no longer rejects the return with
+    // MDF_CORRECTION_SCOPE_CHANGED. It ALSO now loads a detached owner's debit when it points at the closure's own
+    // evidence sources/baths (so it can be carried, not just excluded). `mdf-correction-plan.ts` treats a debit
+    // detached in its evidence source or its bath as terminal history: excluded from validation/cancellation, never
+    // released-only, but carried UNCHANGED (same state, e.g. still 'consumed') onto whichever corrected revision now
+    // owns its evidence source/bath — exactly like the generic forward job path already does for the source it
+    // itself corrects. Only `correctionAllocated` in `mdf-receipt.ts` stays detachment-aware (plain `allocated` for
+    // ordinary production receipts was reverted to strict, restoring the pre-existing order-cascade/B1 behaviour).
+    // Net effect: the return of A carries B's debit forward instead of leaving it pinned to what is about to become
+    // the OLD accepted revision, so `mdf_guard_accepted_revision` (migration 165) never sees a stale outstanding row.
+    it('C4 (allocations): B\'s consumed lamination debit is carried forward as history; returning the surviving A succeeds (fixes-r1 #4)', async () => {
+      vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'true');
+      try {
+        const f = await packetOverTwoOrdersWithBath('C4-alloc');
+        expect(f.allocations).toEqual([
+          { id: expect.any(String), quantity: '10', state: 'consumed', orderId: String(f.orderA) },
+          { id: expect.any(String), quantity: '5', state: 'consumed', orderId: String(f.orderB) },
+        ]);
+        await confirmedDelete([f.orderA, f.orderB], tx => tx.query('UPDATE orders SET delete_flag=true WHERE order_id=$1',
+          [f.orderB]), `c4-alloc-${f.orderB}`, 'orders.delete');
+        await drainAll();
+
+        // Both the supply source (packet) AND the consuming bath detach B's position (terminal history).
+        expect((await fixture.client.query(`SELECT source_kind FROM mdf_position_detachments
+          WHERE order_id=$1 ORDER BY source_kind`, [f.orderB])).rows.map(r => r.source_kind)).toEqual(['bath', 'packet']);
+        const currentBRowsBefore = (await fixture.client.query<{ state: string; revision_key: string }>(`SELECT a.state,e.revision_key
+          FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id) JOIN mdf_source_heads h
+            ON h.source_kind=e.source_kind AND h.source_id=e.source_id AND h.accepted_revision_key=e.revision_key
+          WHERE a.bath_id=$1 AND a.order_id=$2`, [f.bathId, f.orderB])).rows;
+        expect(currentBRowsBefore.every(r => /^order-cascade:/.test(r.revision_key))).toBe(true);
+        expect(currentBRowsBefore.some(r => r.state === 'consumed')).toBe(true);
+
+        const head = (await fixture.client.query<{ received: string; version: string; epoch: string }>(`SELECT received_revision_key
+          received,version::text,correction_epoch::text epoch FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`,
+        [f.packetId])).rows[0];
+        const request = { sourceToken: mdfSourceCommandToken(f.source, head), targetColumn: 'parsed' as const };
+        const preview = await command.preview(admin, f.source, request, 'E2E-C4-alloc-preview');
+        expect(preview.status).toBe('ready');
+        expect(preview.details.map(d => d.detailId)).toEqual([f.a]);
+        const result = await command.confirm(admin, f.source, { ...request, expectedDigest: preview.digest!,
+          idempotencyKey: `c4-alloc-return-${f.orderA}` }, 'E2E-C4-alloc-confirm');
+        for (let i = 0; i < result.jobIds.length; i++) expect((await runner.processOne()).status).toBe('done');
+
+        // B's debit is carried forward as history: still 'consumed', still 5, now pointing at the NEW (post-return)
+        // revision that owns the packet's evidence — never released, never reassigned to a different order/detail.
+        const currentBRowsAfter = (await fixture.client.query<{ quantity: string; state: string; revision_key: string }>(
+          `SELECT a.quantity::text quantity,a.state,e.revision_key FROM mdf_bath_allocations a
+          JOIN mdf_evidence_lines e USING(evidence_line_id) JOIN mdf_source_heads h ON h.source_kind=e.source_kind
+            AND h.source_id=e.source_id AND h.accepted_revision_key=e.revision_key
+          WHERE a.bath_id=$1 AND a.order_id=$2`, [f.bathId, f.orderB])).rows;
+        expect(currentBRowsAfter.some(r => r.state === 'consumed' && r.quantity === '5')).toBe(true);
+        // The revision it now points at is genuinely NEW (the correction's own successor), not the pre-return one.
+        expect(currentBRowsAfter.some(r => r.revision_key !== currentBRowsBefore[0]?.revision_key)).toBe(true);
+        expect((await fixture.client.query('SELECT delete_flag FROM orders WHERE order_id=$1', [f.orderB])).rows[0])
+          .toEqual({ delete_flag: true });
+        expect((await fixture.client.query(`SELECT issues FROM mdf_published_sources WHERE source_kind='packet' AND source_id=$1`,
+          [f.packetId])).rows[0].issues).toEqual([]);
+        // The packet head genuinely advanced (received===accepted, no exception, no stuck state).
+        const newHead = (await fixture.client.query<{ received: string; accepted: string }>(`SELECT received_revision_key received,
+          accepted_revision_key accepted FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`, [f.packetId])).rows[0];
+        expect(newHead.received).toBe(newHead.accepted);
+        expect(newHead.received).not.toBe(head.received);
+      } finally {
+        vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'false');
+      }
+    });
+
+    it('C4 (allocations, scoped actor): the same laminate→delete-B→return-A succeeds for an actor scoped only to A (fixes-r1 #1+#4)', async () => {
+      vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'true');
+      try {
+        const f = await packetOverTwoOrdersWithBath('C4-alloc-scoped', { a: 2, b: 1 });
+        await confirmedDelete([f.orderA, f.orderB], tx => tx.query('UPDATE orders SET delete_flag=true WHERE order_id=$1',
+          [f.orderB]), `c4-alloc-scoped-${f.orderB}`, 'orders.delete');
+        await drainAll();
+
+        const head = (await fixture.client.query<{ received: string; version: string; epoch: string }>(`SELECT received_revision_key
+          received,version::text,correction_epoch::text epoch FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`,
+        [f.packetId])).rows[0];
+        const request = { sourceToken: mdfSourceCommandToken(f.source, head), targetColumn: 'parsed' as const };
+        const scoped: CurrentUser = { ...admin, id: '2', policyScopes: { ...ROLE_POLICIES.admin,
+          orders: { view: 'own', update: 'own', export: 'own', delete: 'own' },
+          productionTasks: { ...ROLE_POLICIES.admin.productionTasks, update: 'own' } } } as CurrentUser;
+        const preview = await command.preview(scoped, f.source, request, 'E2E-C4-alloc-scoped-preview');
+        expect(preview.status).toBe('ready');
+        expect(preview.details.map(d => d.detailId)).toEqual([f.a]);
+        expect(preview.orders.map(o => o.orderId)).not.toContain(f.orderB);
+        // fixes-r2 finding 1: B's carried-history debit must never surface in the PUBLIC preview response at all —
+        // not just filtered out of `orders`/`details`, but out of `allocationReleases`/`allocationReplacements` too
+        // (`plan.historyAllocationIds`, filtered in `makePreview`). Assert against the complete serialized response:
+        // no B order id, detail id, or either of B's own (pre-correction) allocation ids anywhere in it.
+        const bAllocationIds = f.allocations.filter(a => a.orderId === String(f.orderB)).map(a => a.id);
+        expect(bAllocationIds.length).toBeGreaterThan(0);
+        const previewJson = JSON.stringify(preview);
+        for (const id of bAllocationIds) expect(previewJson).not.toContain(id);
+        expect(preview.allocationReleases).not.toEqual(expect.arrayContaining(bAllocationIds));
+        expect(preview.allocationReplacements.some(r => bAllocationIds.includes(r.oldAllocationId))).toBe(false);
+        expect(preview.allocationReplacements.some(r => 'orderId' in r && (r as { orderId?: number }).orderId === f.orderB)).toBe(false);
+        // Structured field-by-field scan for B's raw identifiers (orderId/detailId), independent of how the response
+        // happens to be shaped, to catch a leak through any OTHER field this fixes-r1 didn't anticipate either.
+        const containsBIdentifier = (value: unknown): boolean => {
+          if (Array.isArray(value)) return value.some(containsBIdentifier);
+          if (value && typeof value === 'object') return Object.entries(value as Record<string, unknown>)
+            .some(([k, v]) => (k === 'orderId' && v === f.orderB) || (k === 'detailId' && v === f.b) || containsBIdentifier(v));
+          return false;
+        };
+        expect(containsBIdentifier(preview)).toBe(false);
+        const result = await command.confirm(scoped, f.source, { ...request, expectedDigest: preview.digest!,
+          idempotencyKey: `c4-alloc-scoped-return-${f.orderA}` }, 'E2E-C4-alloc-scoped-confirm');
+        // Same leak checks against the full confirm response (embeds the same `preview`, plus audit/outbox/job ids).
+        const resultJson = JSON.stringify(result);
+        for (const id of bAllocationIds) expect(resultJson).not.toContain(id);
+        expect(containsBIdentifier(result)).toBe(false);
+        for (let i = 0; i < result.jobIds.length; i++) expect((await runner.processOne()).status).toBe('done');
+        expect((await fixture.client.query(`SELECT a.quantity::text quantity,a.state FROM mdf_bath_allocations a
+          JOIN mdf_evidence_lines e USING(evidence_line_id) JOIN mdf_source_heads h ON h.source_kind=e.source_kind
+            AND h.source_id=e.source_id AND h.accepted_revision_key=e.revision_key
+          WHERE a.bath_id=$1 AND a.order_id=$2`, [f.bathId, f.orderB])).rows.some(r => r.state === 'consumed' && r.quantity === '5'))
+          .toBe(true);
+        const newHead = (await fixture.client.query<{ received: string; accepted: string }>(`SELECT received_revision_key received,
+          accepted_revision_key accepted FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`, [f.packetId])).rows[0];
+        expect(newHead.received).toBe(newHead.accepted);
+      } finally {
+        vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'false');
+      }
+    });
+
+    // FIXED (fixes-r2 finding 2): `planMdfCorrection`'s `targetProof` cancellation loop now skips a detached
+    // position (`if (isDetached(target!,l)) continue;`) instead of adding B's lamination to `cancelByPosition` while
+    // B's consumed debit has already moved out of `activeAllocations` — the old mismatch (B's positive
+    // lamination/membership vs. zero consumed/reserved) no longer happens, since B is excluded from cancellation
+    // entirely, same as it's excluded from validation.
+    it('C4 (direct bath return): after laminate A+B, delete B, publish — returning the BATH itself succeeds without PARTIAL_LAMINATION_ALLOCATION_MISMATCH (fixes-r2 #2)', async () => {
+      vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'true');
+      try {
+        const f = await packetOverTwoOrdersWithBath('C4-bath-direct');
+        await confirmedDelete([f.orderA, f.orderB], tx => tx.query('UPDATE orders SET delete_flag=true WHERE order_id=$1',
+          [f.orderB]), `c4-bath-direct-${f.orderB}`, 'orders.delete');
+        await drainAll();
+
+        const bathHead = (await fixture.client.query<{ received: string; version: string; epoch: string }>(`SELECT received_revision_key
+          received,version::text,correction_epoch::text epoch FROM mdf_source_heads WHERE source_kind='bath' AND source_id=$1`,
+        [f.bathId])).rows[0];
+        const request = { sourceToken: mdfSourceCommandToken(f.bath, bathHead), targetColumn: 'baths_ready' as const };
+        const preview = await command.preview(admin, f.bath, request, 'E2E-C4-bath-direct-preview');
+        expect(preview.status).toBe('ready');
+        expect(preview.details.map(d => d.detailId)).toEqual([f.a]);
+        const result = await command.confirm(admin, f.bath, { ...request, expectedDigest: preview.digest!,
+          idempotencyKey: `c4-bath-direct-return-${f.orderA}` }, 'E2E-C4-bath-direct-confirm');
+        for (let i = 0; i < result.jobIds.length; i++) expect((await runner.processOne()).status).toBe('done');
+
+        // A's lamination is cancelled as before: its consumed debit converts to reserved (supply preserved, not lost).
+        const aRows = (await fixture.client.query<{ state: string; quantity: string }>(`SELECT a.state,a.quantity::text quantity
+          FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id) JOIN mdf_source_heads h
+            ON h.source_kind=e.source_kind AND h.source_id=e.source_id AND h.accepted_revision_key=e.revision_key
+          WHERE a.bath_id=$1 AND a.order_id=$2`, [f.bathId, f.orderA])).rows;
+        expect(aRows.some(r => r.state === 'reserved' && r.quantity === '10')).toBe(true);
+        // B's consumed debit is carried, untouched, as history onto the bath's new revision.
+        const bRows = (await fixture.client.query<{ state: string; quantity: string }>(`SELECT a.state,a.quantity::text quantity
+          FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id) JOIN mdf_source_heads h
+            ON h.source_kind=e.source_kind AND h.source_id=e.source_id AND h.accepted_revision_key=e.revision_key
+          WHERE a.bath_id=$1 AND a.order_id=$2`, [f.bathId, f.orderB])).rows;
+        expect(bRows.some(r => r.state === 'consumed' && r.quantity === '5')).toBe(true);
+        const newBathHead = (await fixture.client.query<{ received: string; accepted: string }>(`SELECT received_revision_key received,
+          accepted_revision_key accepted FROM mdf_source_heads WHERE source_kind='bath' AND source_id=$1`, [f.bathId])).rows[0];
+        expect(newBathHead.received).toBe(newBathHead.accepted);
+      } finally {
+        vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'false');
+      }
+    });
+
+    /** Two INDEPENDENT packets (P_A owned by order A, P_B owned by order B) each supply cut evidence into ONE shared
+     * laminated bath — unlike `packetOverTwoOrdersWithBath`'s single shared packet, B's supplier here has NO other
+     * connection to A/the bath's other owner, so a correction targeting P_A (or the bath) never discovers P_B as
+     * part of its closure once B is detached. */
+    async function twoPacketsFeedBath(prefix: string, owners: { a: number; b: number } = { a: 1, b: 1 }) {
+      const orderA = ++orderSequence, orderB = ++orderSequence, a = orderA * 10, b = orderB * 10;
+      const packetIdA = randomUUID(), packetIdB = randomUUID();
+      const sourceA = { kind: 'packet' as const, id: packetIdA }, sourceB = { kind: 'packet' as const, id: packetIdB };
+      await fixture.client.query(`INSERT INTO orders(order_id,order_name,order_kind,delete_flag,version,order_status_id,
+        payment_status_id,created_by) VALUES($1,$2,'production_order',false,1,1,1,$5),($3,$4,'production_order',false,1,1,1,$6)`,
+      [orderA, `E2E ${prefix} A ${orderA}`, orderB, `E2E ${prefix} B ${orderB}`, owners.a, owners.b]);
+      await fixture.client.query(`INSERT INTO order_details(detail_id,order_id,detail_number,quantity,production_status_id,
+        delete_flag,material_id) VALUES($1,$2,1,10,2,false,1),($3,$4,1,5,2,false,1)`, [a, orderA, b, orderB]);
+      for (const [packetId, orderId, detailId, quantity, tag] of
+        [[packetIdA, orderA, a, 10, 'A'], [packetIdB, orderB, b, 5, 'B']] as const) {
+        await fixture.client.query(`INSERT INTO cnc_telegram_packets(packet_id,external_packet_key,source_chat_id,source_message_id,
+          source_version,payload_hash,workday,completion_status,thumbs_up,completed_at,material_name,program_name,mdf_board_card_kind,
+          created_at,updated_at,parse_status,rework,mdf_completion_returned)
+          VALUES($1,$2,'E2E','1',1,$3,CURRENT_DATE,'completed',true,now(),'МДФ фасад 10 мм','E2E','machine_file',
+            now(),now(),'parsed',false,false)`, [packetId, `E2E-${prefix}-${tag}-${orderId}`, tag === 'A' ? 'a'.repeat(64) : 'b'.repeat(64)]);
+        await fixture.client.query(`INSERT INTO cnc_telegram_packet_items(packet_item_id,packet_id,source_item_key,match_order_id,
+          match_detail_id,match_status,quantity,order_name,detail_number,width_mm,height_mm,source)
+          VALUES($1,$2,'part-1',$3,$4,'matched',$5,$6,1,100,200,'manual')`,
+        [randomUUID(), packetId, orderId, detailId, quantity, tag]);
+        const receipt = await database.transaction(tx => recordMdfReceipt(tx, { sourceKind: 'packet', sourceId: packetId,
+          revisionKey: 'r1', origin: 'cnc', actorUserId: 1, requestId: `E2E ${prefix} ${tag}`, causeKey: `E2E ${prefix} ${tag}`,
+          expectedFence: null, accept: true, rules: [], executionContext: { sourceCreatedAt: '2026-09-20T00:00:00Z',
+            displayName: `E2E ${prefix} ${tag}`, priorColumn: 'completed', compositionComplete: true,
+            demand: [{ orderId, detailId, quantity }] },
+          lines: [
+            { lineKey: 'part-1', orderId, detailId, quantity, stageCode: 'membership', evidenceKind: 'derived', rework: false },
+            { lineKey: 'cut-1', orderId, detailId, quantity, stageCode: 'cut', evidenceKind: 'physical', rework: false },
+          ] }));
+        expect(await runner.processOne()).toMatchObject({ status: 'done', jobId: receipt.jobId });
+      }
+      const bathId = `cut-result:${orderA}`;
+      const bath = { kind: 'bath' as const, id: bathId };
+      await fixture.client.query(`INSERT INTO cut_result(cut_result_id,created_at,snapshot_digest)
+        VALUES($1,now(),repeat('c',64))`, [orderA]);
+      await fixture.client.query(`INSERT INTO cut_result_board_projection(cut_result_id,snapshot_digest,is_vacuum,cut_job_name,result_created_at)
+        VALUES($1,repeat('c',64),true,'E2E separate-suppliers bath',now())`, [orderA]);
+      await fixture.client.query(`INSERT INTO cut_result_sheet_map(cut_result_sheet_map_id,cut_result_id,is_effective)
+        VALUES($1,$1,true)`, [orderA]);
+      // A direct correction on the BATH itself reads its "raw" composition from these placement rows (mdf-shadow-source.ts).
+      await fixture.client.query(`INSERT INTO cut_result_placement(cut_result_placement_id,cut_result_sheet_map_id,
+        cut_result_id,order_id,order_detail_id) SELECT $1*1000+g,$1,$1,$2,$3 FROM generate_series(1,10) g`,
+      [orderA, orderA, a]);
+      await fixture.client.query(`INSERT INTO cut_result_placement(cut_result_placement_id,cut_result_sheet_map_id,
+        cut_result_id,order_id,order_detail_id) SELECT $1*1000+500+g,$1,$1,$2,$3 FROM generate_series(1,5) g`,
+      [orderA, orderB, b]);
+      const demand = [{ orderId: orderA, detailId: a, quantity: 10 }, { orderId: orderB, detailId: b, quantity: 5 }];
+      const bathReceipt = await database.transaction(tx => recordMdfReceipt(tx, { sourceKind: 'bath', sourceId: bathId,
+        revisionKey: 'r1', origin: 'manual', actorUserId: 1, requestId: `E2E ${prefix} bath`, causeKey: `E2E ${prefix} bath`,
+        expectedFence: null, accept: true, rules: [], executionContext: { sourceCreatedAt: '2026-09-20T00:00:00Z',
+          displayName: `E2E ${prefix} bath`, priorColumn: 'baths_laminated', manualPlacementColumn: 'baths_laminated',
+          compositionComplete: true, demand },
+        lines: [
+          { lineKey: 'member-a', orderId: orderA, detailId: a, quantity: 10, stageCode: 'membership', evidenceKind: 'derived', rework: false },
+          { lineKey: 'member-b', orderId: orderB, detailId: b, quantity: 5, stageCode: 'membership', evidenceKind: 'derived', rework: false },
+          { lineKey: 'laminated-a', orderId: orderA, detailId: a, quantity: 10, stageCode: 'laminated', evidenceKind: 'physical', rework: false },
+          { lineKey: 'laminated-b', orderId: orderB, detailId: b, quantity: 5, stageCode: 'laminated', evidenceKind: 'physical', rework: false },
+        ] }));
+      expect(await runner.processOne()).toMatchObject({ status: 'done', jobId: bathReceipt.jobId });
+      const allocations = (await fixture.client.query<{ id: string; quantity: string; state: string; orderId: string }>(
+        `SELECT allocation_id::text id,quantity::text quantity,state,order_id::text "orderId" FROM mdf_bath_allocations
+          WHERE bath_id=$1 AND state<>'released' ORDER BY order_id`, [bathId])).rows;
+      return { sourceA, sourceB, orderA, orderB, a, b, packetIdA, packetIdB, bath, bathId, allocations };
+    }
+
+    // FIXED (fixes-r2 finding 3): the old `if (!evidence||(!targetDebit&&!bathRevised)) continue;` skipped B's
+    // history-carry entirely whenever its OWN supplier (P_B) was outside the closure (B's only tie was the
+    // detached position) — the snapshot loads B's debit via the bath, but not P_B's evidence lines (closure-scoped).
+    // The fix drops the `!evidence` short-circuit: a bath-only rebase (`bathRevised`) now applies even when
+    // `evidence` is undefined, keeping B's EXISTING evidence reference (still P_B's original 'r1' line) and only
+    // updating `bath_revision` to the bath's new revision — never expanding authorization to include P_B/order B.
+    it('C4 (separate suppliers): P_A supplies A, independent P_B supplies B, into one bath — delete B, return P_A (fixes-r2 #3)', async () => {
+      vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'true');
+      try {
+        const f = await twoPacketsFeedBath('C4-sep-suppliers');
+        await confirmedDelete([f.orderA, f.orderB], tx => tx.query('UPDATE orders SET delete_flag=true WHERE order_id=$1',
+          [f.orderB]), `c4-sep-${f.orderB}`, 'orders.delete');
+        await drainAll();
+
+        const bEvidenceBefore = (await fixture.client.query<{ evidence_source_id: string; revision_key: string }>(
+          `SELECT e.source_id evidence_source_id,e.revision_key FROM mdf_bath_allocations a
+            JOIN mdf_evidence_lines e USING(evidence_line_id) WHERE a.bath_id=$1 AND a.order_id=$2 AND a.state<>'released'`,
+        [f.bathId, f.orderB])).rows;
+        expect(bEvidenceBefore.every(r => r.evidence_source_id === f.packetIdB)).toBe(true);
+        // P_B is directly connected to order B, so THIS SAME confirmed-deletion cascade also refreshes P_B's own
+        // card (its own position is now fully detached too) — capture its post-cascade, pre-A-return state as the
+        // baseline "existing evidence reference" B's debit should keep pointing at.
+        const packetBHeadBeforeA = (await fixture.client.query<{ received: string; accepted: string }>(
+          `SELECT received_revision_key received,accepted_revision_key accepted FROM mdf_source_heads
+            WHERE source_kind='packet' AND source_id=$1`, [f.packetIdB])).rows[0];
+        expect(packetBHeadBeforeA.received).toBe(packetBHeadBeforeA.accepted);
+
+        const headA = (await fixture.client.query<{ received: string; version: string; epoch: string }>(`SELECT received_revision_key
+          received,version::text,correction_epoch::text epoch FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`,
+        [f.packetIdA])).rows[0];
+        const requestA = { sourceToken: mdfSourceCommandToken(f.sourceA, headA), targetColumn: 'parsed' as const };
+        const previewA = await command.preview(admin, f.sourceA, requestA, 'E2E-C4-sep-preview');
+        expect(previewA.status).toBe('ready');
+        expect(previewA.details.map(d => d.detailId)).toEqual([f.a]);
+        const resultA = await command.confirm(admin, f.sourceA, { ...requestA, expectedDigest: previewA.digest!,
+          idempotencyKey: `c4-sep-return-a-${f.orderA}` }, 'E2E-C4-sep-confirm');
+        for (let i = 0; i < resultA.jobIds.length; i++) expect((await runner.processOne()).status).toBe('done');
+
+        // B's debit is rebased bath-only: same evidence source/revision (P_B's existing, untouched-by-THIS-return
+        // line), only the bath side moved onto the bath's new revision; still consumed, quantity unchanged.
+        const bathHeadAfterA = (await fixture.client.query<{ accepted: string }>(`SELECT accepted_revision_key accepted
+          FROM mdf_source_heads WHERE source_kind='bath' AND source_id=$1`, [f.bathId])).rows[0];
+        const bRowsAfterA = (await fixture.client.query<{ state: string; quantity: string; evidence_source_id: string;
+          evidence_revision: string; bath_revision: string }>(`SELECT a.state,a.quantity::text quantity,e.source_id evidence_source_id,
+          e.revision_key evidence_revision,a.bath_revision FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
+          WHERE a.bath_id=$1 AND a.order_id=$2 AND a.state<>'released'`, [f.bathId, f.orderB])).rows;
+        expect(bRowsAfterA).toEqual([expect.objectContaining({ state: 'consumed', quantity: '5', evidence_source_id: f.packetIdB,
+          evidence_revision: packetBHeadBeforeA.accepted, bath_revision: bathHeadAfterA.accepted })]);
+        // P_B itself is untouched by returning A specifically (no further revision created on it).
+        const packetBHeadAfterA = (await fixture.client.query<{ received: string; accepted: string }>(`SELECT received_revision_key
+          received,accepted_revision_key accepted FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`,
+        [f.packetIdB])).rows[0];
+        expect(packetBHeadAfterA).toEqual(packetBHeadBeforeA);
+        const packetAHead = (await fixture.client.query<{ received: string; accepted: string }>(`SELECT received_revision_key received,
+          accepted_revision_key accepted FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`, [f.packetIdA])).rows[0];
+        expect(packetAHead.received).toBe(packetAHead.accepted);
+      } finally {
+        vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'false');
+      }
+    });
+
+    it('C4 (separate suppliers, direct bath variant): the same setup returning the BATH itself also succeeds (fixes-r2 #3)', async () => {
+      vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'true');
+      try {
+        const f = await twoPacketsFeedBath('C4-sep-suppliers-bath');
+        await confirmedDelete([f.orderA, f.orderB], tx => tx.query('UPDATE orders SET delete_flag=true WHERE order_id=$1',
+          [f.orderB]), `c4-sep-bath-${f.orderB}`, 'orders.delete');
+        await drainAll();
+
+        const bathHead = (await fixture.client.query<{ received: string; version: string; epoch: string }>(`SELECT received_revision_key
+          received,version::text,correction_epoch::text epoch FROM mdf_source_heads WHERE source_kind='bath' AND source_id=$1`,
+        [f.bathId])).rows[0];
+        const request = { sourceToken: mdfSourceCommandToken(f.bath, bathHead), targetColumn: 'baths_ready' as const };
+        const preview = await command.preview(admin, f.bath, request, 'E2E-C4-sep-bath-preview');
+        expect(preview.status).toBe('ready');
+        expect(preview.details.map(d => d.detailId)).toEqual([f.a]);
+        const result = await command.confirm(admin, f.bath, { ...request, expectedDigest: preview.digest!,
+          idempotencyKey: `c4-sep-bath-return-${f.orderA}` }, 'E2E-C4-sep-bath-confirm');
+        for (let i = 0; i < result.jobIds.length; i++) expect((await runner.processOne()).status).toBe('done');
+
+        const bRows = (await fixture.client.query<{ state: string; quantity: string; evidence_source_id: string }>(
+          `SELECT a.state,a.quantity::text quantity,e.source_id evidence_source_id FROM mdf_bath_allocations a
+            JOIN mdf_evidence_lines e USING(evidence_line_id) WHERE a.bath_id=$1 AND a.order_id=$2 AND a.state<>'released'`,
+        [f.bathId, f.orderB])).rows;
+        expect(bRows).toEqual([expect.objectContaining({ state: 'consumed', quantity: '5', evidence_source_id: f.packetIdB })]);
+        const newBathHead = (await fixture.client.query<{ received: string; accepted: string }>(`SELECT received_revision_key received,
+          accepted_revision_key accepted FROM mdf_source_heads WHERE source_kind='bath' AND source_id=$1`, [f.bathId])).rows[0];
+        expect(newBathHead.received).toBe(newBathHead.accepted);
+      } finally {
+        vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'false');
+      }
+    });
+
+    /** Like `twoPacketsFeedBath`, but P_B's own order carries a SECOND, live sibling detail (C) that P_B also
+     * supplies (membership+cut) but which never feeds the bath. After B is detached, P_B's own card still has a
+     * live position (C) to return — the scenario fixes-r3's lock-order regression needs: a correction of A's own
+     * closure (P_A + bath) discovers P_B as a history-supplier lock dependency, while P_B is ALSO, independently,
+     * the direct target of another actor's own correction (for C). */
+    async function twoPacketsWithLiveSiblingFeedBath(prefix: string) {
+      const orderA = ++orderSequence, orderB = ++orderSequence, orderC = ++orderSequence,
+        a = orderA * 10, b = orderB * 10, c = orderC * 10;
+      const packetIdA = randomUUID(), packetIdB = randomUUID();
+      const sourceA = { kind: 'packet' as const, id: packetIdA }, sourceB = { kind: 'packet' as const, id: packetIdB };
+      await fixture.client.query(`INSERT INTO orders(order_id,order_name,order_kind,delete_flag,version,order_status_id,
+        payment_status_id,created_by) VALUES($1,$2,'production_order',false,1,1,1,1),($3,$4,'production_order',false,1,1,1,1),
+        ($5,$6,'production_order',false,1,1,1,1)`,
+      [orderA, `E2E ${prefix} A ${orderA}`, orderB, `E2E ${prefix} B ${orderB}`, orderC, `E2E ${prefix} C ${orderC}`]);
+      await fixture.client.query(`INSERT INTO order_details(detail_id,order_id,detail_number,quantity,production_status_id,
+        delete_flag,material_id) VALUES($1,$2,1,10,2,false,1),($3,$4,1,5,2,false,1),($5,$6,1,7,2,false,1)`,
+      [a, orderA, b, orderB, c, orderC]);
+      await fixture.client.query(`INSERT INTO cnc_telegram_packets(packet_id,external_packet_key,source_chat_id,source_message_id,
+        source_version,payload_hash,workday,completion_status,thumbs_up,completed_at,material_name,program_name,mdf_board_card_kind,
+        created_at,updated_at,parse_status,rework,mdf_completion_returned)
+        VALUES($1,$2,'E2E','1',1,$3,CURRENT_DATE,'completed',true,now(),'МДФ фасад 10 мм','E2E','machine_file',
+          now(),now(),'parsed',false,false)`, [packetIdA, `E2E-${prefix}-A-${orderA}`, 'a'.repeat(64)]);
+      await fixture.client.query(`INSERT INTO cnc_telegram_packet_items(packet_item_id,packet_id,source_item_key,match_order_id,
+        match_detail_id,match_status,quantity,order_name,detail_number,width_mm,height_mm,source)
+        VALUES($1,$2,'part-1',$3,$4,'matched',10,'A',1,100,200,'manual')`, [randomUUID(), packetIdA, orderA, a]);
+      const receiptA = await database.transaction(tx => recordMdfReceipt(tx, { sourceKind: 'packet', sourceId: packetIdA,
+        revisionKey: 'r1', origin: 'cnc', actorUserId: 1, requestId: `E2E ${prefix} A`, causeKey: `E2E ${prefix} A`,
+        expectedFence: null, accept: true, rules: [], executionContext: { sourceCreatedAt: '2026-09-20T00:00:00Z',
+          displayName: `E2E ${prefix} A`, priorColumn: 'completed', compositionComplete: true, demand: [{ orderId: orderA, detailId: a, quantity: 10 }] },
+        lines: [
+          { lineKey: 'part-1', orderId: orderA, detailId: a, quantity: 10, stageCode: 'membership', evidenceKind: 'derived', rework: false },
+          { lineKey: 'cut-1', orderId: orderA, detailId: a, quantity: 10, stageCode: 'cut', evidenceKind: 'physical', rework: false },
+        ] }));
+      expect(await runner.processOne()).toMatchObject({ status: 'done', jobId: receiptA.jobId });
+
+      // P_B spans TWO orders (B, C) in one card — same validated shape as `packetOverTwoOrders` — so only B's
+      // position (not C's) is ever detached by a confirmed deletion of order B.
+      await fixture.client.query(`INSERT INTO cnc_telegram_packets(packet_id,external_packet_key,source_chat_id,source_message_id,
+        source_version,payload_hash,workday,completion_status,thumbs_up,completed_at,material_name,program_name,mdf_board_card_kind,
+        created_at,updated_at,parse_status,rework,mdf_completion_returned)
+        VALUES($1,$2,'E2E','1',1,$3,CURRENT_DATE,'completed',true,now(),'МДФ фасад 10 мм','E2E','machine_file',
+          now(),now(),'parsed',false,false)`, [packetIdB, `E2E-${prefix}-B-${orderB}`, 'b'.repeat(64)]);
+      await fixture.client.query(`INSERT INTO cnc_telegram_packet_items(packet_item_id,packet_id,source_item_key,match_order_id,
+        match_detail_id,match_status,quantity,order_name,detail_number,width_mm,height_mm,source) VALUES
+        ($1,$3,'part-b',$4,$5,'matched',5,'B',1,100,200,'manual'),($2,$3,'part-c',$6,$7,'matched',7,'C',1,100,200,'manual')`,
+      [randomUUID(), randomUUID(), packetIdB, orderB, b, orderC, c]);
+      const receiptB = await database.transaction(tx => recordMdfReceipt(tx, { sourceKind: 'packet', sourceId: packetIdB,
+        revisionKey: 'r1', origin: 'cnc', actorUserId: 1, requestId: `E2E ${prefix} B`, causeKey: `E2E ${prefix} B`,
+        expectedFence: null, accept: true, rules: [], executionContext: { sourceCreatedAt: '2026-09-20T00:00:00Z',
+          displayName: `E2E ${prefix} B`, priorColumn: 'completed', compositionComplete: true,
+          demand: [{ orderId: orderB, detailId: b, quantity: 5 }, { orderId: orderC, detailId: c, quantity: 7 }] },
+        lines: [
+          { lineKey: 'part-b', orderId: orderB, detailId: b, quantity: 5, stageCode: 'membership', evidenceKind: 'derived', rework: false },
+          { lineKey: 'part-c', orderId: orderC, detailId: c, quantity: 7, stageCode: 'membership', evidenceKind: 'derived', rework: false },
+          { lineKey: 'cut-b', orderId: orderB, detailId: b, quantity: 5, stageCode: 'cut', evidenceKind: 'physical', rework: false },
+          { lineKey: 'cut-c', orderId: orderC, detailId: c, quantity: 7, stageCode: 'cut', evidenceKind: 'physical', rework: false },
+        ] }));
+      expect(await runner.processOne()).toMatchObject({ status: 'done', jobId: receiptB.jobId });
+
+      const bathId = `cut-result:${orderA}`;
+      const bath = { kind: 'bath' as const, id: bathId };
+      await fixture.client.query(`INSERT INTO cut_result(cut_result_id,created_at,snapshot_digest)
+        VALUES($1,now(),repeat('c',64))`, [orderA]);
+      await fixture.client.query(`INSERT INTO cut_result_board_projection(cut_result_id,snapshot_digest,is_vacuum,cut_job_name,result_created_at)
+        VALUES($1,repeat('c',64),true,'E2E lock-order bath',now())`, [orderA]);
+      await fixture.client.query(`INSERT INTO cut_result_sheet_map(cut_result_sheet_map_id,cut_result_id,is_effective)
+        VALUES($1,$1,true)`, [orderA]);
+      await fixture.client.query(`INSERT INTO cut_result_placement(cut_result_placement_id,cut_result_sheet_map_id,
+        cut_result_id,order_id,order_detail_id) SELECT $1*1000+g,$1,$1,$2,$3 FROM generate_series(1,10) g`, [orderA, orderA, a]);
+      await fixture.client.query(`INSERT INTO cut_result_placement(cut_result_placement_id,cut_result_sheet_map_id,
+        cut_result_id,order_id,order_detail_id) SELECT $1*1000+500+g,$1,$1,$2,$3 FROM generate_series(1,5) g`, [orderA, orderB, b]);
+      const demand = [{ orderId: orderA, detailId: a, quantity: 10 }, { orderId: orderB, detailId: b, quantity: 5 }];
+      const bathReceipt = await database.transaction(tx => recordMdfReceipt(tx, { sourceKind: 'bath', sourceId: bathId,
+        revisionKey: 'r1', origin: 'manual', actorUserId: 1, requestId: `E2E ${prefix} bath`, causeKey: `E2E ${prefix} bath`,
+        expectedFence: null, accept: true, rules: [], executionContext: { sourceCreatedAt: '2026-09-20T00:00:00Z',
+          displayName: `E2E ${prefix} bath`, priorColumn: 'baths_laminated', manualPlacementColumn: 'baths_laminated',
+          compositionComplete: true, demand },
+        lines: [
+          { lineKey: 'member-a', orderId: orderA, detailId: a, quantity: 10, stageCode: 'membership', evidenceKind: 'derived', rework: false },
+          { lineKey: 'member-b', orderId: orderB, detailId: b, quantity: 5, stageCode: 'membership', evidenceKind: 'derived', rework: false },
+          { lineKey: 'laminated-a', orderId: orderA, detailId: a, quantity: 10, stageCode: 'laminated', evidenceKind: 'physical', rework: false },
+          { lineKey: 'laminated-b', orderId: orderB, detailId: b, quantity: 5, stageCode: 'laminated', evidenceKind: 'physical', rework: false },
+        ] }));
+      expect(await runner.processOne()).toMatchObject({ status: 'done', jobId: bathReceipt.jobId });
+      return { sourceA, sourceB, orderA, orderB, orderC, a, b, c, packetIdA, packetIdB, bath, bathId };
+    }
+
+    /** Patches (in place, preserving object identity — `enterMdfCommand`/`requireMdfCommandBoundary` key their
+     * transaction boundary WeakMap by the exact `TransactionClient` reference, so a wrapper object would silently
+     * break it) a real `TransactionClient`'s `query` so that AFTER the FIRST query matching the allocation
+     * `FOR UPDATE OF a` lock (the very last lock `loadMdfCorrectionSnapshot` takes, always after every head lock —
+     * fixes-r3's canonical order) resolves, it signals `onLocked` and awaits `gate` before letting the transaction
+     * continue — i.e. it holds the transaction open with every lock still acquired, exactly "after the snapshot".
+     * Returns a restore function. */
+    function pauseAfterAllocationLock(client: TransactionClient, onLocked: () => void, gate: Promise<void>): () => void {
+      const original = client.query.bind(client);
+      let paused = false;
+      (client as { query: TransactionClient['query'] }).query = (async (text: string, params?: readonly unknown[], options?: unknown) => {
+        const result = await (original as (t: string, p?: readonly unknown[], o?: unknown) => Promise<unknown>)(text, params, options);
+        if (!paused && typeof text === 'string' && text.includes('FOR UPDATE OF a')) {
+          paused = true;
+          onLocked();
+          await gate;
+        }
+        return result;
+      }) as TransactionClient['query'];
+      return () => { (client as { query: TransactionClient['query'] }).query = original; };
+    }
+
+    // FIXED (fixes-r3): `discoverMdfHistorySuppliers` finds sources outside the closure whose non-released debits a
+    // correction must carry (here: P_B, since the bath's B-debit's supplier is P_B, outside A's own closure of
+    // {P_A, bath}). The command now locks closure ∪ reopen ∪ these suppliers in ONE canonical sorted advisory pass,
+    // and the snapshot row-locks all their heads (FOR UPDATE, sorted) BEFORE the allocation lock — so a correction
+    // of A always acquires P_B's head lock strictly before touching any allocation, the SAME order a direct
+    // correction of P_B (for its own remaining live position C) acquires it in its own (trivial, single-source)
+    // closure. Two sessions can never form a lock cycle: whichever acquires P_B's head first is served first: no
+    // 40P01 deadlock, no illegitimate MDF_CORRECTION_STALE abort of a valid confirmation.
+    it('fixes-r3: concurrent correction of A (locks P_B as history-supplier) and direct correction of P_B for C never deadlock', async () => {
+      vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'true');
+      try {
+        const f = await twoPacketsWithLiveSiblingFeedBath('C4-lockorder');
+        await confirmedDelete([f.orderA, f.orderB], tx => tx.query('UPDATE orders SET delete_flag=true WHERE order_id=$1',
+          [f.orderB]), `c4-lockorder-${f.orderB}`, 'orders.delete');
+        await drainAll();
+        expect((await fixture.client.query('SELECT delete_flag FROM orders WHERE order_id=$1', [f.orderB])).rows[0])
+          .toEqual({ delete_flag: true });
+        expect((await fixture.client.query('SELECT delete_flag FROM order_details WHERE detail_id=$1', [f.c])).rows[0])
+          .toEqual({ delete_flag: false });
+        // P_B is genuinely a lock dependency of A's own correction: its supplied evidence still backs a live,
+        // non-released allocation into the bath.
+        expect((await fixture.client.query(`SELECT e.source_id FROM mdf_bath_allocations a
+          JOIN mdf_evidence_lines e USING(evidence_line_id) WHERE a.bath_id=$1 AND a.order_id=$2 AND a.state<>'released'`,
+        [f.bathId, f.orderB])).rows.every(r => r.source_id === f.packetIdB)).toBe(true);
+
+        const headA = (await fixture.client.query<{ received: string; version: string; epoch: string }>(`SELECT received_revision_key
+          received,version::text,correction_epoch::text epoch FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`,
+        [f.packetIdA])).rows[0];
+        const requestA = { sourceToken: mdfSourceCommandToken(f.sourceA, headA), targetColumn: 'parsed' as const };
+
+        // Preview runs unpaused (plain command) — only `confirm()` below needs to hold its locks open.
+        const previewA = await command.preview(admin, f.sourceA, requestA, 'E2E-lockorder-preview-a');
+        expect(previewA.status).toBe('ready');
+        const confirmABody = { ...requestA, expectedDigest: previewA.digest!, idempotencyKey: `lockorder-return-a-${f.orderA}` };
+
+        let session1Locked!: () => void; let releaseSession1!: () => void;
+        const session1HasLocks = new Promise<void>(resolve => { session1Locked = resolve; });
+        const session1Gate = new Promise<void>(resolve => { releaseSession1 = resolve; });
+        const session1Command = new PgMdfCorrectionCommand({
+          transaction: <T>(handler: (client: TransactionClient) => Promise<T>, options?: DatabaseTransactionOptions) =>
+            database.transaction(async client => {
+              const restore = pauseAfterAllocationLock(client, session1Locked, session1Gate);
+              try { return await handler(client); } finally { restore(); }
+            }, options),
+        });
+
+        // Session 1: confirm A's return, paused with every lock (including P_B's head, as a history supplier)
+        // still held, right after the snapshot's allocation lock resolves.
+        const session1 = session1Command.confirm(admin, f.sourceA, confirmABody, 'E2E-lockorder-confirm-a');
+        await session1HasLocks;
+        // Direct pg_locks-level proof that P_B's head ROW lock is genuinely held by session 1 at this point: a
+        // third, independent connection's own `FOR UPDATE NOWAIT` on the exact same row must fail immediately
+        // with lock_not_available (55P03), never silently succeed.
+        await fixture.client.query('BEGIN');
+        try {
+          await expect(fixture.client.query(`SELECT 1 FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1
+            FOR UPDATE NOWAIT`, [f.packetIdB])).rejects.toMatchObject({ code: '55P03' });
+        } finally {
+          await fixture.client.query('ROLLBACK');
+        }
+
+        // Session 2: directly correct P_B for its own remaining live position C, concurrently. Its OWN preview
+        // already takes P_B's head FOR UPDATE (P_B is session 2's own trivial closure) — the exact same row session
+        // 1 is holding — so session 2's preview call itself is what blocks.
+        const headB = (await fixture.client.query<{ received: string; version: string; epoch: string }>(`SELECT received_revision_key
+          received,version::text,correction_epoch::text epoch FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`,
+        [f.packetIdB])).rows[0];
+        const requestB = { sourceToken: mdfSourceCommandToken(f.sourceB, headB), targetColumn: 'parsed' as const };
+        let session2Pid: number | undefined;
+        const session2Command = new PgMdfCorrectionCommand({
+          transaction: <T>(handler: (client: TransactionClient) => Promise<T>, options?: DatabaseTransactionOptions) =>
+            database.transaction(async client => {
+              session2Pid = Number((await client.query<{ pid: number }>('SELECT pg_backend_pid() pid')).rows[0].pid);
+              return handler(client);
+            }, options),
+        });
+        const session2 = (async () => {
+          const previewB = await session2Command.preview(admin, f.sourceB, requestB, 'E2E-lockorder-preview-b');
+          if (previewB.status !== 'ready') return { blocked: true as const, previewB };
+          const resultB = await session2Command.confirm(admin, f.sourceB, { ...requestB, expectedDigest: previewB.digest!,
+            idempotencyKey: `lockorder-return-b-${f.orderB}` }, 'E2E-lockorder-confirm-b');
+          return { blocked: false as const, resultB };
+        })();
+
+        // Synchronize on the ACTUAL competing lock attempt (per fixes-r4 #3, no fixed-delay heuristic): poll until
+        // session 2's own backend is genuinely waiting on a lock (pg_stat_activity.wait_event_type='Lock', or an
+        // ungranted pg_locks row for its pid) before releasing session 1.
+        const deadline = Date.now() + 10000;
+        for (;;) {
+          if (session2Pid !== undefined) {
+            const waiting = (await fixture.client.query<{ waiting: boolean }>(
+              `SELECT (EXISTS(SELECT 1 FROM pg_stat_activity WHERE pid=$1 AND wait_event_type='Lock')
+                OR EXISTS(SELECT 1 FROM pg_locks WHERE pid=$1 AND NOT granted)) waiting`, [session2Pid])).rows[0];
+            if (waiting.waiting) break;
+          }
+          if (Date.now() > deadline) throw new Error('E2E_LOCKORDER_SESSION2_NEVER_OBSERVED_WAITING');
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+        releaseSession1();
+        const [resultA, outcomeB] = await Promise.all([
+          session1.catch(error => ({ error })),
+          session2.catch(error => ({ error })),
+        ]);
+        // Both operations succeed for this fixture: session 1 started first and holds every lock it needs; session
+        // 2 waited behind it (proven above) and then proceeds normally once session 1 commits — no 40P01 deadlock,
+        // and the command's own 40P01→MDF_CORRECTION_STALE mapping must never be reached here.
+        expect(resultA).not.toHaveProperty('error');
+        for (const jobId of (resultA as { jobIds: string[] }).jobIds) expect((await runner.processOne()).status).toBe('done');
+        expect(outcomeB).not.toHaveProperty('error');
+        if ('error' in outcomeB || outcomeB.blocked) {
+          throw new Error(`E2E_LOCKORDER_SESSION2_DID_NOT_SUCCEED: ${JSON.stringify(outcomeB)}`);
+        }
+        expect(outcomeB.resultB.preview.affectedOrderIds).toEqual([f.orderC]);
+        for (const jobId of outcomeB.resultB.jobIds) expect((await runner.processOne()).status).toBe('done');
+        const headBAfter = (await fixture.client.query<{ received: string; accepted: string }>(`SELECT received_revision_key
+          received,accepted_revision_key accepted FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`,
+        [f.packetIdB])).rows[0];
+        expect(headBAfter.received).toBe(headBAfter.accepted);
+      } finally {
+        vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'false');
+      }
+    });
+
+    /** Crafts N distinct fake "packet" suppliers, each with a single non-released 'consumed' allocation into
+     * `bathId` — bypassing the full receipt/job pipeline (250 real packets would be prohibitively expensive to
+     * set up), but through REAL tables and REAL constraints (`mdf_evidence_revisions`→`mdf_revision_seals`→
+     * `mdf_source_heads`→`mdf_evidence_lines`→`mdf_bath_allocations`, including the `mdf_guard_allocation`
+     * trigger's "accepted normal cut evidence" check) via one bulk `generate_series` INSERT per table. */
+    // `offset` defaults far outside any real `orderSequence`-derived order/detail id range (that counter only ever
+    // reaches double/low-triple digits over this whole file) — a collision would leak fake evidence/allocations
+    // into an unrelated LATER test's real order, corrupting its own job processing (observed once, fixed here).
+    async function craftHistorySuppliers(bathId: string, count: number, offset = 900000000) {
+      await fixture.client.query(`INSERT INTO mdf_evidence_revisions(source_kind,source_id,revision_key,payload_digest,
+          origin,actor_user_id,request_id,cause_key)
+        SELECT 'packet','scope-limit-supplier-'||(g+$2)::text,'r1',repeat('a',64),'manual',1,
+          'scope-limit-'||(g+$2)::text,'scope-limit-'||(g+$2)::text FROM generate_series(1,$1) g`, [count, offset]);
+      // Evidence lines must be written BEFORE the seal (`mdf_guard_revision_membership`: 'MDF revision is sealed'
+      // once a matching mdf_revision_seals row exists).
+      await fixture.client.query(`INSERT INTO mdf_evidence_lines(source_kind,source_id,revision_key,line_key,order_id,
+          detail_id,quantity,stage_code,evidence_kind,rework)
+        SELECT 'packet','scope-limit-supplier-'||(g+$2)::text,'r1','cut',(g+$2),(g+$2),1,'cut','physical',false
+        FROM generate_series(1,$1) g`, [count, offset]);
+      await fixture.client.query(`INSERT INTO mdf_revision_seals(source_kind,source_id,revision_key)
+        SELECT 'packet','scope-limit-supplier-'||(g+$2)::text,'r1' FROM generate_series(1,$1) g`, [count, offset]);
+      await fixture.client.query(`INSERT INTO mdf_source_heads(source_kind,source_id,received_revision_key,accepted_revision_key,
+          version,correction_epoch)
+        SELECT 'packet','scope-limit-supplier-'||(g+$2)::text,'r1','r1',1,0 FROM generate_series(1,$1) g`, [count, offset]);
+      await fixture.client.query(`INSERT INTO mdf_bath_allocations(evidence_line_id,bath_id,bath_revision,order_id,
+          detail_id,quantity,state,cause_key)
+        SELECT e.evidence_line_id,$3,'r1',e.order_id,e.detail_id,1,'consumed','scope-limit-alloc-'||e.order_id::text
+        FROM mdf_evidence_lines e WHERE e.source_kind='packet' AND e.source_id LIKE 'scope-limit-supplier-%'
+          AND e.order_id>$2 AND e.order_id<=($2+$1)`, [count, offset, bathId]);
+    }
+
+    // FIXED (fixes-r4 finding 1): `discoverMdfHistorySuppliers` now excludes the closure IN SQL and bounds the
+    // COMPLETE lock set (closure + suppliers ≤ MAX_MDF_CORRECTION_SOURCES): `budget = MAX - closure.length`, and a
+    // truncated (LIMIT budget+1) result exceeding budget throws MDF_CORRECTION_SCOPE_LIMIT BEFORE any lock —
+    // never silently treated as complete. Exactly at the bound, discovery still proceeds and returns every supplier.
+    it('fixes-r4 #1: discoverMdfHistorySuppliers refuses overflow (closure+suppliers > 250) and proceeds exactly at the bound', async () => {
+      const bathId = `cut-result:scopelimit${orderSequence + 1}`;
+      const closure = [{ kind: 'bath' as const, id: bathId }];
+      const budget = MAX_MDF_CORRECTION_SOURCES - closure.length; // 249
+
+      // One over budget: exactly `budget + 1` distinct suppliers exist ⇒ refusal before any lock.
+      await craftHistorySuppliers(bathId, budget + 1);
+      await expect(database.transaction(tx => discoverMdfHistorySuppliers(tx, closure)))
+        .rejects.toMatchObject({ code: 'MDF_CORRECTION_SCOPE_LIMIT' });
+
+      // Release (never delete: `mdf_guard_allocation` forbids it) exactly one supplier's allocation to land exactly
+      // at the bound: discovery now proceeds, returning every one of the remaining (budget) suppliers — the
+      // complete set, not a truncated prefix of it.
+      await fixture.client.query(`UPDATE mdf_bath_allocations SET state='released' WHERE bath_id=$1 AND cause_key=$2`,
+        [bathId, `scope-limit-alloc-${900000001}`]);
+      const atBound = await database.transaction(tx => discoverMdfHistorySuppliers(tx, closure));
+      expect(atBound).toHaveLength(budget);
+      expect(new Set(atBound.map(s => s.id)).size).toBe(budget);
+      expect(atBound.every(s => s.kind === 'packet')).toBe(true);
+    });
+
+    /** REAL-path reproduction for fixes-r4 finding 2 (the reviewer's "packet-path parity" gap): a packet supplies
+     * D1+D2 of ONE order via the real receipt/job path (`recordMdfReceipt`+`runner.processOne()`); a bath consumes
+     * them via a real genesis receipt (cut placed, membership only — "baths" column, NOT yet laminated); the bath
+     * is THEN laminated via the REAL manual-move command (`PgMdfBoardManualMoveRepository.upsert` →
+     * `executeMdfManualCommand`, whose OWN `addMdfManualProof` synthesizes the 'laminated' physical evidence line —
+     * never hand-inserted, unlike every earlier C4/allocation fixture in this file). */
+    async function realPathLaminatedBathFromPacket(prefix: string) {
+      const orderId = ++orderSequence, d1 = orderId * 10, d2 = orderId * 10 + 1, packetId = randomUUID();
+      const source = { kind: 'packet' as const, id: packetId };
+      await fixture.client.query(`INSERT INTO orders(order_id,order_name,order_kind,delete_flag,version,order_status_id,
+        payment_status_id,created_by) VALUES($1,$2,'production_order',false,1,1,1,1)`, [orderId, `E2E ${prefix} ${orderId}`]);
+      await fixture.client.query(`INSERT INTO order_details(detail_id,order_id,detail_number,quantity,production_status_id,
+        delete_flag,material_id) VALUES($1,$3,1,2,2,false,1),($2,$3,2,1,2,false,1)`, [d1, d2, orderId]);
+      await fixture.client.query(`INSERT INTO cnc_telegram_packets(packet_id,external_packet_key,source_chat_id,source_message_id,
+        source_version,payload_hash,workday,completion_status,thumbs_up,completed_at,material_name,program_name,mdf_board_card_kind,
+        created_at,updated_at,parse_status,rework,mdf_completion_returned)
+        VALUES($1,$2,'E2E','1',1,$3,CURRENT_DATE,'completed',true,now(),'МДФ фасад 10 мм','E2E','machine_file',
+          now(),now(),'parsed',false,false)`, [packetId, `E2E-${prefix}-${orderId}`, 'd'.repeat(64)]);
+      await fixture.client.query(`INSERT INTO cnc_telegram_packet_items(packet_item_id,packet_id,source_item_key,match_order_id,
+        match_detail_id,match_status,quantity,order_name,detail_number,width_mm,height_mm,source) VALUES
+        ($1,$3,'part-1',$4,$5,'matched',2,$6,1,100,200,'manual'),($2,$3,'part-2',$4,$7,'matched',1,$6,2,100,200,'manual')`,
+      [randomUUID(), randomUUID(), packetId, orderId, d1, `E2E ${prefix} ${orderId}`, d2]);
+      const demand = [{ orderId, detailId: d1, quantity: 2 }, { orderId, detailId: d2, quantity: 1 }];
+      const receipt = await database.transaction(tx => recordMdfReceipt(tx, { sourceKind: 'packet', sourceId: packetId,
+        revisionKey: 'r1', origin: 'cnc', actorUserId: 1, requestId: `E2E ${prefix}`, causeKey: `E2E ${prefix}`, expectedFence: null,
+        accept: true, rules: [], executionContext: { sourceCreatedAt: '2026-09-20T00:00:00Z', displayName: `E2E ${prefix}`,
+          priorColumn: 'completed', compositionComplete: true, demand },
+        lines: [
+          { lineKey: 'part-1', orderId, detailId: d1, quantity: 2, stageCode: 'membership', evidenceKind: 'derived', rework: false },
+          { lineKey: 'part-2', orderId, detailId: d2, quantity: 1, stageCode: 'membership', evidenceKind: 'derived', rework: false },
+          { lineKey: 'cut-1', orderId, detailId: d1, quantity: 2, stageCode: 'cut', evidenceKind: 'physical', rework: false },
+          { lineKey: 'cut-2', orderId, detailId: d2, quantity: 1, stageCode: 'cut', evidenceKind: 'physical', rework: false },
+        ] }));
+      expect(await runner.processOne()).toMatchObject({ status: 'done', jobId: receipt.jobId });
+
+      const bathId = `cut-result:${orderId}`;
+      const bath = { kind: 'bath' as const, id: bathId };
+      await fixture.client.query(`INSERT INTO cut_result(cut_result_id,created_at,snapshot_digest)
+        VALUES($1,now(),repeat('c',64))`, [orderId]);
+      await fixture.client.query(`INSERT INTO cut_result_board_projection(cut_result_id,snapshot_digest,is_vacuum,cut_job_name,result_created_at)
+        VALUES($1,repeat('c',64),true,'E2E real-path bath',now())`, [orderId]);
+      await fixture.client.query(`INSERT INTO cut_result_sheet_map(cut_result_sheet_map_id,cut_result_id,is_effective)
+        VALUES($1,$1,true)`, [orderId]);
+      await fixture.client.query(`INSERT INTO cut_result_placement(cut_result_placement_id,cut_result_sheet_map_id,
+        cut_result_id,order_id,order_detail_id) SELECT $1*1000+g,$1,$1,$2,$3 FROM generate_series(1,2) g`, [orderId, orderId, d1]);
+      await fixture.client.query(`INSERT INTO cut_result_placement(cut_result_placement_id,cut_result_sheet_map_id,
+        cut_result_id,order_id,order_detail_id) SELECT $1*1000+500+g,$1,$1,$2,$3 FROM generate_series(1,1) g`, [orderId, orderId, d2]);
+      // Genesis: cut placed on the bath (membership only) — NOT yet laminated. Matches the "baths" column.
+      const bathReceipt = await database.transaction(tx => recordMdfReceipt(tx, { sourceKind: 'bath', sourceId: bathId,
+        revisionKey: 'r1', origin: 'manual', actorUserId: 1, requestId: `E2E ${prefix} bath`, causeKey: `E2E ${prefix} bath`,
+        expectedFence: null, accept: true, rules: [], executionContext: { sourceCreatedAt: '2026-09-20T00:00:00Z',
+          displayName: `E2E ${prefix} bath`, priorColumn: 'baths', manualPlacementColumn: null, compositionComplete: true, demand },
+        lines: [
+          { lineKey: 'member-1', orderId, detailId: d1, quantity: 2, stageCode: 'membership', evidenceKind: 'derived', rework: false },
+          { lineKey: 'member-2', orderId, detailId: d2, quantity: 1, stageCode: 'membership', evidenceKind: 'derived', rework: false },
+        ] }));
+      expect(await runner.processOne()).toMatchObject({ status: 'done', jobId: bathReceipt.jobId });
+
+      // REAL manual-move command: laminate the bath.
+      const mover = new PgMdfBoardManualMoveRepository(database);
+      const board = await readMdfPublishedSnapshot(database, admin, { focus: { kind: 'bath', id: bathId } });
+      const card = board.cards.find(c => c.kind === 'bath' && c.id === bathId);
+      if (!card?.commandToken) throw new Error('E2E_REALPATH_BATH_CARD_MISSING');
+      await mover.upsert({ currentUser: admin, cardKind: 'bath', cardId: bathId, targetColumn: 'baths_laminated',
+        sourceToken: card.commandToken, idempotencyKey: `realpath-laminate-${orderId}`, requestId: `E2E ${prefix} laminate` });
+      await drainAll();
+      return { source, orderId, d1, d2, packetId, bath, bathId };
+    }
+
+    // FIXED (was a fixture bug, not a production one — see below): real-path packet+bath lamination, then a
+    // detail-level deletion of D2 through the real order cascade, succeeds per rule 4 (D2 detached in both
+    // sources, its reservation released, history kept; D1 unaffected).
+    //
+    // Root-cause diagnosis of the earlier DISCOVERED BUG (traced with temporary instrumentation in
+    // mdf-order-cascade.ts, fully reverted — `git diff` on that file is empty again):
+    // 1. Failing source: the BATH ('bath', 'cut-result:<id>'), inside `appendReceipt`'s `recordMdfOrderCascadeReceipt`
+    //    call (cascade=true — a confirmed, non-fully-detached correction has no `demand.reason`, so it takes the
+    //    SAME "cascade" branch as an ordinary demand-only change) with a lineage manifest attached (hasManifest=true).
+    //    The PACKET's own correction (plain v1, no lineage) was never reached — the bath's failure rolled back the
+    //    whole transaction first.
+    // 2. `corrections` (both non-fullyDetached): bath — detach=[{orderId,detailId:D2}], own positions = D1+D2 ×
+    //    {laminated/physical, membership/derived} (4 lines, unfiltered — `mdf-order-cascade.ts`'s `corrections.push`
+    //    uses `own`, not the detachment-filtered `attached`), next=[D1]; packet — same detach/shape, cut instead of
+    //    laminated.
+    // 3. At the moment `appendReceipt` ran for the bath, `mdf_position_detachments` already held EXACTLY
+    //    (bath,'cut-result:<id>',orderId,D2) — the detachment row for the failing source/position was correctly
+    //    present before the seal check (confirmed by direct instrumentation of `applyCorrections`).
+    // 4. The failing evaluation was never actually about a specific "outside demand, undetached" line — it was that
+    //    the ACTIVE `mdf_validate_physical_lineage_seal()` function in THIS TEST FILE's isolated schema had NO
+    //    detachment-exemption clause at all. This test file's `beforeAll` applied migration 191 BEFORE 182
+    //    (191_mdf_order_corrections.sql was in the first bulk-apply loop; 182_mdf_physical_lineage.sql ran later,
+    //    separately). Migration 191's own `mdf_validate_physical_lineage_seal()` replacement is guarded by
+    //    `IF to_regclass('mdf_physical_lineage_contracts') IS NOT NULL` (that table is created by 182) — applied
+    //    before 182, the guard is false and 191's fix silently never installs; 182 then runs LATER and (re)installs
+    //    its OWN original (pre-191, no exemption) version of the function, overwriting nothing since 191 already
+    //    no-opped. Verified directly via `pg_get_functiondef` in a throwaway schema: applying 191-before-182 leaves
+    //    the function without `mdf_position_detachments` in its body at all; re-applying 191 after 182 installs the
+    //    fixed version. Real deployments always apply migrations in strict numeric order (182 before 191), so this
+    //    ordering gap is unreachable in production — it was a defect in this test file's own migration list, now
+    //    fixed by re-applying 191 immediately after 182 in `beforeAll` (see the comment there). Confirmed empirically:
+    //    with the corrected migration order, this exact scenario now succeeds end-to-end.
+    it('fixes-r4 #2 (real path): packet+bath lamination, then a DETAIL-level deletion of D2 through the real order cascade succeeds (rule 4)', async () => {
+      vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'true');
+      try {
+        const f = await realPathLaminatedBathFromPacket('C4-realpath');
+        // D2 is genuinely laminated (consumed) before deletion — the real-path fixture reached a real bath v2
+        // lineage state (via `executeMdfManualCommand`'s own auto-promotion), not a hand-made one.
+        expect((await fixture.client.query(`SELECT count(*)::int n FROM mdf_bath_allocations a
+          JOIN mdf_evidence_lines e USING(evidence_line_id) WHERE a.bath_id=$1 AND e.source_id=$2 AND a.order_id=$3
+            AND a.detail_id=$4 AND a.state='consumed'`, [f.bathId, f.packetId, f.orderId, f.d2])).rows[0].n)
+          .toBeGreaterThan(0);
+        expect((await fixture.client.query(`SELECT 1 FROM mdf_physical_lineage_contracts WHERE source_kind='bath'
+          AND source_id=$1`, [f.bathId])).rows).toHaveLength(1);
+        expect((await fixture.client.query(`SELECT issues FROM mdf_published_sources WHERE source_kind='bath'
+          AND source_id=$1`, [f.bathId])).rows[0].issues).toEqual([]);
+        expect((await fixture.client.query(`SELECT issues FROM mdf_published_sources WHERE source_kind='packet'
+          AND source_id=$1`, [f.packetId])).rows[0].issues).toEqual([]);
+
+        await confirmedDelete([f.orderId], tx => tx.query('UPDATE order_details SET delete_flag=true WHERE detail_id=$1',
+          [f.d2]), `c4-realpath-${f.orderId}`);
+        await drainAll();
+
+        expect((await fixture.client.query('SELECT delete_flag FROM order_details WHERE detail_id=$1', [f.d2])).rows[0])
+          .toEqual({ delete_flag: true });
+        expect((await fixture.client.query('SELECT delete_flag FROM order_details WHERE detail_id=$1', [f.d1])).rows[0])
+          .toEqual({ delete_flag: false });
+        // Rule 4: D2 is detached (history) in BOTH the packet and the bath; its consumed debit is kept as history
+        // (never released-and-forgotten), never blocking D1's surviving position.
+        expect((await fixture.client.query(`SELECT source_kind FROM mdf_position_detachments WHERE order_id=$1 AND detail_id=$2
+          ORDER BY source_kind`, [f.orderId, f.d2])).rows.map(r => r.source_kind)).toEqual(['bath', 'packet']);
+        expect((await fixture.client.query(`SELECT count(*)::int n FROM mdf_bath_allocations WHERE bath_id=$1 AND state='consumed'`,
+          [f.bathId])).rows[0].n).toBeGreaterThan(0);
+        expect((await fixture.client.query(`SELECT issues FROM mdf_published_sources WHERE source_kind='bath'
+          AND source_id=$1`, [f.bathId])).rows[0].issues).toEqual([]);
+        expect((await fixture.client.query(`SELECT issues FROM mdf_published_sources WHERE source_kind='packet'
+          AND source_id=$1`, [f.packetId])).rows[0].issues).toEqual([]);
+      } finally {
+        vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS', 'false');
+      }
+    });
   });
 
   describe('ready/issued orders reopen only through status automation (§5.5)', () => {

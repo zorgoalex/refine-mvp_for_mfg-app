@@ -27,6 +27,8 @@ import { recordMdfLineageReceipt, recordMdfReceipt, type MdfReceiptLine } from '
 import type { MdfPhysicalLineageManifest } from '../application/mdf-physical-lineage';
 import type { MdfExecutionContext } from '../domain/mdf-execution-context';
 import { readMdfPublishedSnapshot } from './mdf-published-snapshot';
+import { PgMdfCorrectionCommand } from './mdf-correction-command';
+import { mdfSourceCommandToken } from '../domain/mdf-manual-proof';
 
 describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calculation → MDF receipt → queue → publication', () => {
   const schema = `e2e_mdf_cut_${randomUUID().replaceAll('-','')}`;
@@ -129,6 +131,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
     await db.query(readFileSync(new URL('../../../../db/migrations/181_cnc_manual_send_observation.sql',import.meta.url),'utf8'));
     await db.query(readFileSync(new URL('../../../../db/migrations/182_mdf_physical_lineage.sql',import.meta.url),'utf8'));
     await db.query(readFileSync(new URL('../../../../db/migrations/185_mdf_bazis_composition.sql',import.meta.url),'utf8'));
+    await db.query(readFileSync(new URL('../../../../db/migrations/201_mdf_lineage_genesis_guard.sql',import.meta.url),'utf8'));
     const expectedLocal = ['bazis_cut_set_details','bazis_cut_sets','mdf_bazis_assignment_states','mdf_bazis_composition_intents'];
     expect((await db.query<{relname:string}>(`SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
       WHERE n.nspname=$1 AND c.relkind='r' AND c.relname=ANY($2::text[]) ORDER BY c.relname`,[schema,expectedLocal]))
@@ -1930,6 +1933,112 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
       expect((await db.query('SELECT status FROM mdf_recalculation_jobs WHERE job_id=$1',[job.job_id])).rows[0].status).toBe('done');
       expect((await readMdfPublishedSnapshot(database,user,{ focus:{ kind:'bath',id:current } })).cards
         .find(c=>c.id===current)).toBeUndefined();
+    });
+
+    it('a laminated bath whose only detail is confirmed-deleted no longer refuses archive with MDF_BATH_HAS_PRODUCTION (B1)',async()=>{
+      vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS','true');
+      try {
+        const { f,bathId }=await laminatedBath(true);
+        expect((await db.query(`SELECT count(*)::int n FROM mdf_bath_allocations WHERE bath_id=$1 AND state='consumed'`,
+          [bathId])).rows[0].n).toBeGreaterThan(0);
+        // Before any deletion: archiving a genuinely-laminated, still-live bath is refused as today.
+        await expect(repository.archive({ currentUser:user,cutJobId:f.cutJobId,version:await jobVersion(f.cutJobId) } as never))
+          .rejects.toMatchObject({ code:'MDF_BATH_HAS_PRODUCTION' });
+
+        const confirmDelete=async()=>{
+          const attempt=(confirmation?:{digest:string})=>database.transaction(async tx=>{
+            await tx.query('SELECT order_id FROM orders WHERE order_id=$1 FOR UPDATE',[f.orderId]);
+            const mdf=await openMdfOrderCommand(tx,'orders.update');
+            await mdf.captureBefore([f.orderId]);
+            await tx.query('UPDATE order_details SET delete_flag=true WHERE detail_id=$1',[f.detailId]);
+            await mdf.finish({ user,requestId:'E2E-B1-delete-request',commandKey:'E2E-B1-delete',orderIds:[f.orderId],
+              confirmation:confirmation??null });
+          },{ mdf:{ writer:'orders.update',capability:'order-demand' } });
+          try { await attempt(); throw new Error('E2E_EXPECTED_MDF_CHALLENGE'); }
+          catch (error) {
+            const e=error as { code?:string; details?:{ mdfConfirmation?:{ digest:string } } };
+            if (e.code!=='MDF_ORDER_PHYSICAL_CONFLICT'||!e.details?.mdfConfirmation) throw error;
+            await attempt({ digest:e.details.mdfConfirmation.digest });
+          }
+        };
+        await confirmDelete();
+        expect((await db.query('SELECT delete_flag FROM order_details WHERE detail_id=$1',[f.detailId])).rows[0])
+          .toEqual({ delete_flag:true });
+        await drain();
+
+        // History remains: the bath still shows its consumed lamination debit, now detached (terminal history).
+        expect((await db.query(`SELECT count(*)::int n FROM mdf_bath_allocations WHERE bath_id=$1 AND state='consumed'`,
+          [bathId])).rows[0].n).toBeGreaterThan(0);
+        expect((await db.query(`SELECT count(*)::int n FROM mdf_position_detachments WHERE source_kind='bath' AND source_id=$1`,
+          [bathId])).rows[0].n).toBeGreaterThan(0);
+
+        // FIXED (B1 + migration 201, and fixes-r1 #4 follow-up): archive now succeeds end-to-end. `hasProduction()`
+        // no longer refuses (MDF_BATH_HAS_PRODUCTION never occurs), and the retirement receipt this then writes — a
+        // contract-less revision with NO physical evidence line, onto a source that carries real v2 lineage (via
+        // `PgBazisCutRepository`) — is admitted by the relaxed `mdf_guard_physical_lineage_source_head()` guard
+        // (migration 201: a lineage-v2 source may receive a contract-less revision only when it has no physical
+        // evidence line, which a bare retirement/genesis membership never does). The detached-but-still-consumed
+        // debit left by the earlier confirmed deletion no longer blocks this retirement's own accepted_revision_key
+        // advance: `mdf-correction-plan.ts` carries a detached debit forward (unchanged state) onto whichever
+        // revision now owns its evidence source/bath, so `mdf_guard_accepted_revision` (migration 165) never sees a
+        // stale OLD-revision debit still outstanding.
+        await repository.archive({ currentUser:user,cutJobId:f.cutJobId,version:await jobVersion(f.cutJobId) } as never);
+        expect((await db.query('SELECT status FROM cut_job WHERE cut_job_id=$1',[f.cutJobId])).rows[0].status).toBe('archived');
+        const transition=(await db.query("SELECT job_id FROM mdf_bath_transitions WHERE retired_source_id=$1",[bathId])).rows[0];
+        expect(transition).toBeDefined();
+        await drain();
+        expect((await db.query('SELECT status FROM mdf_recalculation_jobs WHERE job_id=$1',[transition.job_id])).rows[0].status)
+          .toBe('done');
+        // History rows still remain after archive/retirement.
+        expect((await db.query(`SELECT count(*)::int n FROM mdf_bath_allocations WHERE bath_id=$1 AND state='consumed'`,
+          [bathId])).rows[0].n).toBeGreaterThan(0);
+        expect((await readMdfPublishedSnapshot(database,user,{ focus:{ kind:'bath',id:bathId } })).cards
+          .find(c=>c.id===bathId)).toBeUndefined();
+      } finally {
+        vi.stubEnv('BACKEND_MDF_ORDER_CORRECTIONS','false');
+      }
+    });
+
+    // Migration 201, second path: NOT a detachment at all — the ordinary "return lamination" correction on a
+    // v2-lineage bath (the audit's own "return lamination first" escape hatch), followed by an ordinary
+    // recalculation. The correction's own successor revision is itself lineage-aware (`recordMdfLineageReceipt`,
+    // via `sourceSnapshot.lineage`) and unaffected by 201; it's the SUBSEQUENT recalculation's plain retirement
+    // receipt (`mdf-bath-lifecycle.ts`'s `finish()`, contract-less, no physical line left after the return) that
+    // needed 201's relaxed guard.
+    it('laminated bath (manual production, v2 lineage): explicit lamination return, then recalculation retires it without 23514',async()=>{
+      const { f,bathId }=await laminatedBath(true);
+      expect((await db.query(`SELECT count(*)::int n FROM mdf_bath_allocations WHERE bath_id=$1 AND state='consumed'`,
+        [bathId])).rows[0].n).toBeGreaterThan(0);
+
+      const bathHead=(await db.query<{ received:string; version:string; epoch:string }>(`SELECT received_revision_key received,
+        version::text,correction_epoch::text epoch FROM mdf_source_heads WHERE source_kind='bath' AND source_id=$1`,[bathId])).rows[0];
+      const bathSource={ kind:'bath' as const,id:bathId };
+      const command=new PgMdfCorrectionCommand(database);
+      const actor={ ...user,permissions:[...user.permissions,'orders.update','production.tasks.update','orders.change_production_status'] } as CurrentUser;
+      const request={ sourceToken:mdfSourceCommandToken(bathSource,bathHead),targetColumn:'baths_ready' as const };
+      const preview=await command.preview(actor,bathSource,request,'E2E-B1-lam-return-preview');
+      expect(preview.status).toBe('ready');
+      const result=await command.confirm(actor,bathSource,{ ...request,expectedDigest:preview.digest!,
+        idempotencyKey:`E2E-B1-lam-return-${f.cutJobId}` },'E2E-B1-lam-return-confirm');
+      for (let i=0;i<result.jobIds.length;i++) expect((await runner().processOne()).status).toBe('done');
+      expect((await readMdfPublishedSnapshot(database,user,{ focus:{ kind:'bath',id:bathId } })).cards
+        .find(c=>c.id===bathId)).toMatchObject({ column:'baths_ready' });
+      // The lamination is genuinely gone: no consumed debit remains.
+      expect((await db.query(`SELECT count(*)::int n FROM mdf_bath_allocations WHERE bath_id=$1 AND state='consumed'`,
+        [bathId])).rows[0].n).toBe(0);
+
+      // An ordinary recalculation now retires this (still v2-lineage-tagged, but no-longer-laminated) bath and
+      // captures its successor — the retirement receipt is contract-less and must not hit 23514.
+      await repository.calculate({ ...f.command(),commandId:randomUUID(),version:await jobVersion(f.cutJobId) });
+      const transition=(await db.query("SELECT job_id FROM mdf_bath_transitions WHERE retired_source_id=$1",[bathId])).rows[0];
+      expect(transition).toBeDefined();
+      await drain();
+      expect((await db.query('SELECT status FROM mdf_recalculation_jobs WHERE job_id=$1',[transition.job_id])).rows[0].status)
+        .toBe('done');
+      const newBathId=`cut-result:${await resultId(f.cutJobId)}`;
+      expect(newBathId).not.toBe(bathId);
+      expect((await readMdfPublishedSnapshot(database,user,{ focus:{ kind:'bath',id:newBathId } })).cards
+        .find(c=>c.id===newBathId)).toBeDefined();
     });
   });
   it('replay reauthorizes frozen result owners after the current basket is empty',async()=>{

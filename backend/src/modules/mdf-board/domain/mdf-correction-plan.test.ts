@@ -17,7 +17,10 @@ const source = (kind: Kind, id: string, members: { orderId: number; detailId: nu
       stage: p.stage, evidence: p.evidence ?? 'physical', rework: p.rework ?? false })),
   ],
 });
-const detail = (orderId=1,detailId=11,quantity=10,currentRank: number|null=10) => ({ orderId,detailId,quantity,currentRank });
+// Default rank sits AT laminatedRank (8, fixed by `request()` below), i.e. "on the board, not beyond it" — so
+// unrelated fixtures (not focused on rank behaviour) still exercise the Math.min/Math.max rollback formula
+// instead of always tripping rule 5's "beyond board" no-rollback branch (C3).
+const detail = (orderId=1,detailId=11,quantity=10,currentRank: number|null=8) => ({ orderId,detailId,quantity,currentRank });
 const allocation = (id: string, proofSource: MdfCorrectionSource, bath: MdfCorrectionSource,
   quantity: number, state: 'reserved'|'consumed'='consumed', proofLineKey='cut', orderId=1, detailId=11): MdfCorrectionAllocation => ({
   allocationId: id, evidenceLineId: `${proofSource.kind}:${proofSource.id}:${proofLineKey}`,
@@ -93,6 +96,39 @@ describe('pure MDF source correction planner', () => {
     expect(plan.affectedDetails[0]).toMatchObject({ laminatedCoverage:10,independentFloorRank:8,afterRank:8 });
   });
 
+  it('never rolls back a detail already beyond the board (packed/issued) but still corrects its board facts (C3)', () => {
+    const f=splitFixture(), input=request(f.sources,f.allocations);
+    input.details[0].currentRank=90; // packed/issued: above laminatedRank (8)
+    const plan=planMdfCorrection(input);
+    expect(plan.status).toBe('ready');
+    if (plan.status!=='ready') return;
+    // Board facts (coverage/position) are corrected exactly as in the base scenario (targetRank=2, cnc returned)...
+    expect(plan.affectedDetails[0]).toMatchObject({ orderId:1,detailId:11,cutCoverage:0,laminatedCoverage:6,
+      independentFloorRank:null,after:{ creditedRolled:6,remaining:4 } });
+    // ...but the detail's own status stays where it already was, never rolled back to the return's target rank.
+    expect(plan.affectedDetails[0].afterRank).toBe(90);
+  });
+
+  it('allows a direct bath return of partial lamination whose remainder is a validated replacement reservation (B2)', () => {
+    // Bath 10 members, already partially returned so only 6 remain laminated; consumed by Q=6, with a
+    // replacement cut R=4 reserved against the freed 4 units (never itself laminated).
+    const bath=source('bath','bath-a',[{orderId:1,detailId:11,quantity:10}],[{lineKey:'lam',quantity:6,stage:'laminated'}]);
+    const q=source('packet','q',[{orderId:1,detailId:11,quantity:6}],[{lineKey:'cut',quantity:6,stage:'cut'}]);
+    const r=source('packet','r',[{orderId:1,detailId:11,quantity:4}],[{lineKey:'cut',quantity:4,stage:'cut'}]);
+    const allocations=[allocation('q-debit',q,bath,6,'consumed'),allocation('r-debit',r,bath,4,'reserved')];
+    // Direct bath return, from baths_ready (or later) back to baths (targetRank below both cut and laminated bands).
+    const plan=planMdfCorrection(request([bath,q,r],allocations,'bath','bath-a',1));
+    expect(plan.status).toBe('ready');
+    if (plan.status!=='ready') return;
+    expect(plan.sourceReplacement.lines.some(l=>l.stage==='laminated')).toBe(false);
+    expect(plan.bathReplacements).toEqual([]);
+    expect(plan.allocationReleaseIds).toEqual(['q-debit','r-debit']);
+    const byId=Object.fromEntries(plan.allocationReplacements.map(a=>[a.oldAllocationId,a.state]));
+    // The consumed lamination is cancelled (returns to reserved, never lost); the replacement reservation
+    // for R carries over unchanged — neither trips PARTIAL_LAMINATION_ALLOCATION_MISMATCH.
+    expect(byId).toEqual({ 'q-debit':'reserved','r-debit':'reserved' });
+  });
+
   it('keeps independent cut on the same detail and an unrelated bath/order unchanged', () => {
     const f=splitFixture();
     const independent=source('packet','other-cnc',[{ orderId:2,detailId:21,quantity:7 }],[{ lineKey:'cut',quantity:7,stage:'cut' }]);
@@ -131,7 +167,7 @@ describe('pure MDF source correction planner', () => {
     target.lines.find(line => line.evidence === 'physical')!.detailId = 22;
     issueCarriedLineage(target, 'carried-b-cut', '33333333-3333-4333-8333-333333333333');
     const input = request([target], [], 'packet', 'target', 2);
-    input.details.push(detail(2, 22, 10, 10));
+    input.details.push(detail(2, 22, 10));
 
     const plan = planMdfCorrection(input);
 
@@ -183,22 +219,33 @@ describe('pure MDF source correction planner', () => {
     expect(partialPlan.status).toBe('ready');
     if (partialPlan.status==='ready') expect(partialPlan.bathReplacements[0].cancelledLaminationQuantity).toBe(4);
 
+    // B2: a bath fully laminated (member===lamQty) whose only debit is RESERVED (never consumed) has no
+    // consumed evidence to attribute a cancellation to — the bath's real physical fact is left untouched
+    // (no bathReplacements entry at all); only the now-orphaned reservation is released with its supplier.
     const queuedCnc=source('packet','cnc',[{orderId:1,detailId:11,quantity:10}],[{lineKey:'cut',quantity:10,stage:'cut'}]);
     const queuedBath=source('bath','queued',[{orderId:1,detailId:11,quantity:10}],[{lineKey:'lam',quantity:10,stage:'laminated'}]);
     const queuedPlan=planMdfCorrection(request([queuedCnc,queuedBath],[allocation('queued-debit',queuedCnc,queuedBath,10,'reserved')],'packet','cnc',2));
     expect(queuedPlan.status).toBe('ready');
     if (queuedPlan.status==='ready') {
-      expect(queuedPlan.bathReplacements[0].cancelledLaminationQuantity).toBe(10);
+      expect(queuedPlan.bathReplacements).toEqual([]);
       expect(queuedPlan.allocationReleaseIds).toEqual(['queued-debit']);
       expect(queuedPlan.allocationReplacements).toEqual([]);
     }
   });
 
-  it('blocks ambiguous partial lamination with queued debits and unmatched consumed stock', () => {
+  it('blocks a genuinely under-consumed lamination but allows a purely-reserved debit through untouched (B2)', () => {
     const cnc=source('packet','cnc',[{orderId:1,detailId:11,quantity:10}],[{lineKey:'cut',quantity:10,stage:'cut'}]);
     const bath=source('bath','partial',[{orderId:1,detailId:11,quantity:10}],[{lineKey:'lam',quantity:4,stage:'laminated'}]);
+    // A debit that never reached 'consumed' is not evidence of THIS lamination either way: the bath's own
+    // partial-lamination fact (4 of 10) is left exactly as-is, and the plan is not blocked as ambiguous.
     const queued=planMdfCorrection(request([cnc,bath],[allocation('reserved',cnc,bath,4,'reserved')],'packet','cnc',2));
-    expect(queued).toMatchObject({ status:'blocked',blockers:[expect.objectContaining({ code:'PARTIAL_LAMINATION_ALLOCATION_MISMATCH' })] });
+    expect(queued.status).toBe('ready');
+    if (queued.status==='ready') {
+      expect(queued.bathReplacements).toEqual([]);
+      expect(queued.allocationReleaseIds).toEqual(['reserved']);
+    }
+    // A genuinely mismatched CONSUMED quantity (3, under the bath's own 4-unit lamination fact) is still
+    // rejected as ambiguous — only the reservation-vs-consumption distinction changed, not this check.
     const underconsumed=planMdfCorrection(request([cnc,bath],[allocation('consumed',cnc,bath,3,'consumed')],'packet','cnc',2));
     expect(underconsumed).toMatchObject({ status:'blocked',blockers:[expect.objectContaining({ code:'PARTIAL_LAMINATION_ALLOCATION_MISMATCH' })] });
   });

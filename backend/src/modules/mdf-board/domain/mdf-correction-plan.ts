@@ -68,6 +68,8 @@ export type MdfCorrectionPlan =
   | { status: 'blocked'; blockers: MdfCorrectionBlocker[] }
   | { status: 'ready'; sourceReplacement: MdfCorrectionSourceReplacement; bathReplacements: MdfCorrectionBathReplacement[];
       allocationReleaseIds: string[]; allocationReplacementIds: string[]; allocationReplacements: MdfCorrectionAllocationReplacement[];
+      /** Carried history debits (detached positions): internal rebasing only, never part of a public response. */
+      historyAllocationIds: string[];
       affectedDetails: MdfCorrectionDetail[]; before: MdfQuantityResult; after: MdfQuantityResult };
 
 const cmp = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
@@ -131,12 +133,20 @@ export function planMdfCorrection(input: MdfCorrectionInput): MdfCorrectionPlan 
     const target=sourceMap.get(sourceKey(input.target.kind,input.target.id));
     if (!target || !target.verified || !target.acceptedRevision || target.acceptedRevision !== target.receivedRevision) add('TARGET_SOURCE_UNAVAILABLE',{sourceId:input.target.id});
     const activeAllocations: MdfCorrectionAllocation[]=[];
+    // §5.4e: a debit at a position detached in its evidence source or its bath is terminal history — never validated,
+    // cancelled or released by a return, only carried unchanged onto the corrected revisions (DB: an accepted revision may
+    // not change while allocations still point at it).
+    const historyAllocations: MdfCorrectionAllocation[]=[];
+    const detachedDebit=(a:MdfCorrectionAllocation)=>{
+      const evidence=linesById.get(a.evidenceLineId)?.source, bath=sourceMap.get(sourceKey('bath',a.bathId));
+      return (evidence!==undefined&&isDetached(evidence,a))||(bath!==undefined&&isDetached(bath,a));
+    };
     for (const a of input.allocations) {
       mdfPositionKey(a); mdfQuantity(a.quantity);
       if (!a.allocationId || mdfQuantity(a.quantity)===0) { add('INVALID_QUANTITY',{allocationId:a.allocationId}); continue; }
       if (allocationMap.has(a.allocationId) || !['reserved','consumed','released'].includes(a.state)) { add('INVALID_ALLOCATION',{allocationId:a.allocationId}); continue; }
       allocationMap.set(a.allocationId,a);
-      if (a.state !== 'released') activeAllocations.push(a);
+      if (a.state !== 'released') (detachedDebit(a)?historyAllocations:activeAllocations).push(a);
     }
     if (blockers.length) return blocked(blockers);
     const acceptedLines=(s:MdfCorrectionSource) => s.lines.filter(l=>l.revision===s.acceptedRevision)
@@ -188,7 +198,8 @@ export function planMdfCorrection(input: MdfCorrectionInput): MdfCorrectionPlan 
     const targetLive=activeAllocations.filter(a=>targetLineIds.has(a.evidenceLineId));
     const revokeTarget = input.target.kind==='bath' ? input.targetRank < input.laminatedRank : input.targetRank < input.cutRank;
     const cancelLinked = input.target.kind==='bath' ? revokeTarget : input.targetRank < input.laminatedRank;
-    const sourceLines=acceptedLines(target!).filter(l=>!(revokeTarget && l.stage===proofStage(target!))).map(lineOut)
+    // Detached positions' proof stays as history (its carried debits keep pointing at it).
+    const sourceLines=acceptedLines(target!).filter(l=>!(revokeTarget && l.stage===proofStage(target!)&&!isDetached(target!,l))).map(lineOut)
       .sort((a,b)=>cmp(JSON.stringify([a.stage==='membership'?1:0,a.lineKey,a.orderId,a.detailId]),JSON.stringify([b.stage==='membership'?1:0,b.lineKey,b.orderId,b.detailId])));
     const sourceReplacement:MdfCorrectionSourceReplacement={sourceKind:target!.kind,sourceId:target!.id,
       previousRevision:target!.acceptedRevision!,lines:sourceLines};
@@ -199,6 +210,8 @@ export function planMdfCorrection(input: MdfCorrectionInput): MdfCorrectionPlan 
         for (const l of targetProof) {
           const key=mdfPositionKey(l);
           if (input.closedPositionKeys?.has(key)) continue;
+          // A detached position's lamination is history: never cancelled, never allocation-checked.
+          if (isDetached(target!,l)) continue;
           if (l.evidence==='declaration'||l.rework) add('DEPENDENT_BATH_ATTRIBUTION_UNRESOLVED',{sourceId:target!.id});
           p.cancelByPosition.set(key,mdfSum(p.cancelByPosition.get(key)??0,l.quantity));
         }
@@ -216,8 +229,9 @@ export function planMdfCorrection(input: MdfCorrectionInput): MdfCorrectionPlan 
           .reduce((n,l)=>mdfSum(n,l.quantity),0);
         if (a.state==='consumed'&&lamAtPosition===0)
           add('PARTIAL_LAMINATION_ALLOCATION_MISMATCH',{sourceId:bath.id,allocationId:a.allocationId,position:key});
-        // Reservations without accepted physical lamination are not evidence of a cancellation.
-        if (lamAtPosition>0) p.cancelByPosition.set(key,mdfSum(p.cancelByPosition.get(key)??0,a.quantity));
+        // Only CONSUMED supply was laminated; a reservation (e.g. replacement cut filling the rest of a partially laminated
+        // bath) is not evidence of a lamination to cancel — it is simply released with its supplier.
+        if (lamAtPosition>0&&a.state==='consumed') p.cancelByPosition.set(key,mdfSum(p.cancelByPosition.get(key)??0,a.quantity));
         if (p.cancelByPosition.size) bathPlans.set(bath.id,p);
       }
       for (const p of bathPlans.values()) {
@@ -236,7 +250,9 @@ export function planMdfCorrection(input: MdfCorrectionInput): MdfCorrectionPlan 
           const rows=p.rows.filter(a=>mdfPositionKey(a)===key);
           const consumed=rows.filter(a=>a.state==='consumed').reduce((n,a)=>mdfSum(n,a.quantity),0);
           const reserved=rows.filter(a=>a.state==='reserved').reduce((n,a)=>mdfSum(n,a.quantity),0);
-          if (member===undefined || cancel>lamQty || (lamQty>0 && lamQty<member && (consumed!==lamQty || reserved!==0))
+          // Partial lamination: consumed must equal the laminated quantity; the remainder may be reserved (validated
+          // replacement supply) but never beyond membership.
+          if (member===undefined || cancel>lamQty || (lamQty>0 && lamQty<member && (consumed!==lamQty || mdfSum(consumed,reserved)>member))
             || (lamQty===member && mdfSum(consumed,reserved)!==member) || (lamQty===0 && consumed!==0)) {
             add('PARTIAL_LAMINATION_ALLOCATION_MISMATCH',{sourceId:p.source.id,position:key});
           }
@@ -312,6 +328,20 @@ export function planMdfCorrection(input: MdfCorrectionInput): MdfCorrectionPlan 
         orderId:a.orderId,detailId:a.detailId,quantity:a.quantity,state});
       releaseIds.add(a.allocationId);
     }
+    for (const a of historyAllocations) {
+      // The supplier may lie outside the closure (its only tie was the detached position): a bath-only rebase keeps the
+      // existing evidence reference.
+      const evidence=linesById.get(a.evidenceLineId);
+      const targetDebit=evidence!==undefined&&evidence.source===target;
+      const bathRevised=affectedBathIds.has(a.bathId);
+      if (!targetDebit&&!bathRevised) continue;
+      replacementById.set(a.allocationId,{oldAllocationId:a.allocationId,
+        evidenceLine:targetDebit?{kind:'replacement',sourceKind:target!.kind,sourceId:target!.id,lineKey:evidence!.line.lineKey}
+          :{kind:'existing',evidenceLineId:a.evidenceLineId},
+        bathRevision:bathRevised?{kind:'replacement',sourceId:a.bathId}:{kind:'existing',revision:a.bathRevision},
+        orderId:a.orderId,detailId:a.detailId,quantity:a.quantity,state:a.state as 'reserved'|'consumed'});
+      releaseIds.add(a.allocationId);
+    }
     // Direct bath corrections rebase every extant debit against the corrected bath revision.
     // A source correction preserving its cut also rebinds its debit to the new immutable source line.
     const evidence:MdfQuantityEvidence[]=[];
@@ -344,7 +374,11 @@ export function planMdfCorrection(input: MdfCorrectionInput): MdfCorrectionPlan 
       const cutCoverage=pos.creditedCut;
       const fullCutOrLater=pos.creditedCut+pos.creditedRolled;
       const floor=laminatedCoverage>=d.quantity?input.laminatedRank:fullCutOrLater>=d.quantity?input.cutRank:null;
-      const afterRank=d.currentRank===null?null:Math.min(d.currentRank,Math.max(input.targetRank,floor??0));
+      // Rule 5: a detail already beyond the board's last stage (packed/issued: rank above lamination) is never rolled back
+      // by a board return; its board facts are still corrected, its status is left as is.
+      const beyondBoard=d.currentRank!==null&&d.currentRank>input.laminatedRank;
+      const afterRank=d.currentRank===null?null:beyondBoard?d.currentRank
+        :Math.min(d.currentRank,Math.max(input.targetRank,floor??0));
       affectedDetails.push({orderId:d.orderId,detailId:d.detailId,cutCoverage,laminatedCoverage,independentFloorRank:floor,afterRank,after:pos});
     }
     if (blockers.length) return blocked(blockers);
@@ -352,6 +386,7 @@ export function planMdfCorrection(input: MdfCorrectionInput): MdfCorrectionPlan 
     // Do not manufacture a revision reference for allocations already current and unaffected.
     return {status:'ready',sourceReplacement,bathReplacements,allocationReleaseIds:[...releaseIds].sort(cmp),
       allocationReplacementIds:sortedReplacements.map(a=>a.oldAllocationId),allocationReplacements:sortedReplacements,
+      historyAllocationIds:historyAllocations.map(a=>a.allocationId).sort(cmp),
       affectedDetails,before,after};
   } catch (error) {
     const code=error instanceof Error ? error.message : 'INVALID_CORRECTION_INPUT';

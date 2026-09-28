@@ -491,6 +491,13 @@ async function persistMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput,
   const digest = finalizeDigest();
   // A production receipt must not be lost because its previous evidence is in
   // use. Keep received != accepted until an explicit correction resolves it.
+  // §5.4e: an allocation at a position detached in its evidence source or in its bath is terminal history (a consumed
+  // debit kept on purpose) — it never blocks a correction of the surviving positions (the correction carries it forward).
+  // The production-receipt `allocated` check below stays strict: the worker carries allocations before acceptance.
+  const liveAllocation = `NOT EXISTS (SELECT 1 FROM mdf_position_detachments x WHERE x.source_kind=e.source_kind
+      AND x.source_id=e.source_id AND x.order_id=a.order_id AND x.detail_id=a.detail_id)
+    AND NOT EXISTS (SELECT 1 FROM mdf_position_detachments x WHERE x.source_kind='bath' AND x.source_id=a.bath_id
+      AND x.order_id=a.order_id AND x.detail_id=a.detail_id)`;
   const allocated = head && input.accept ? (await tx.query<{ allocated: boolean }>(`SELECT EXISTS (
     SELECT 1 FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
     WHERE a.state<>'released' AND ((e.source_kind=$1 AND e.source_id=$2 AND e.revision_key=$3)
@@ -498,7 +505,7 @@ async function persistMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput,
   ) AS allocated`, [...source, head.accepted_revision_key])).rows[0].allocated : false;
   const correctionAllocated = isCorrection ? (await tx.query<{ allocated: boolean }>(`SELECT EXISTS (
     SELECT 1 FROM mdf_bath_allocations a JOIN mdf_evidence_lines e USING(evidence_line_id)
-    WHERE a.state<>'released' AND (e.source_kind=$1 AND e.source_id=$2 OR ($1='bath' AND a.bath_id=$2))
+    WHERE a.state<>'released' AND ${liveAllocation} AND (e.source_kind=$1 AND e.source_id=$2 OR ($1='bath' AND a.bath_id=$2))
   ) AS allocated`, source)).rows[0].allocated : false;
   if (isCorrection && correctionAllocated) invalid();
   if (transition && (input.sourceKind !== 'bath' || (transition.role === 'retired'

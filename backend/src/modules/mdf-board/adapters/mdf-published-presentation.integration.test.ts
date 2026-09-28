@@ -307,6 +307,40 @@ describe.skipIf(!enabled)('MDF published presentation, isolated PostgreSQL schem
     expect(p.composition!.items.map(i => i.orderId)).toEqual([a.orderId]);
   });
 
+  it('keeps a published card\'s progress after a detachment until the successor revision is published (D1)', async () => {
+    const a = await makeOrder(), b = await makeOrder();
+    const { packetId } = await packet([{ ...a, quantity: 10, cut: 10 }, { ...b, quantity: 10, cut: 10 }]);
+    const before = await read();
+    const progressOf = (snap: Awaited<ReturnType<typeof read>>) => snap.progress.filter((p) => p.id === packetId);
+    expect(progressOf(before)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ orderId: a.orderId, detailId: a.detailId, member: 10, cut: 10 }),
+      expect.objectContaining({ orderId: b.orderId, detailId: b.detailId, member: 10, cut: 10 }),
+    ]));
+    // A correction commits B's detachment (recorded now), but the publication job for the successor
+    // revision has NOT run yet — GET between correction commit and job publication.
+    await fixture.client.query(`INSERT INTO mdf_position_detachments(source_kind,source_id,order_id,detail_id,correction_id,
+      request_id,actor_user_id) VALUES('packet',$1,$2,$3,gen_random_uuid(),'e2e-progress-detached',1)`,
+    [packetId, b.orderId, b.detailId]);
+    const between = await read();
+    // The still-published revision's progress is unchanged: no logical mismatch (cut 0/10 next to credited 10/10).
+    expect(progressOf(between)).toEqual(progressOf(before));
+    // Once the successor revision publishes (the detachment predates it), progress finally drops B.
+    const head = (await fixture.client.query<{ version: string; epoch: string }>(`SELECT version::text,correction_epoch::text epoch
+      FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`, [packetId])).rows[0];
+    await db().transaction((tx) => recordMdfReceipt(tx, { sourceKind: 'packet', sourceId: packetId, revisionKey: 'r2', origin: 'cnc',
+      actorUserId: 1, requestId: 'E2E progress refresh', causeKey: 'E2E progress refresh',
+      expectedFence: { version: head.version, correctionEpoch: head.epoch }, accept: true, rules: [],
+      executionContext: { sourceCreatedAt: '2026-09-20T10:00:00Z', displayName: 'E2E progress refresh', priorColumn: 'parsed',
+        compositionComplete: true, demand: [{ orderId: a.orderId, detailId: a.detailId, quantity: 10 }] },
+      lines: [
+        { lineKey: 'm0', orderId: a.orderId, detailId: a.detailId, quantity: 10, stageCode: 'membership', evidenceKind: 'derived', rework: false },
+        { lineKey: 'c0', orderId: a.orderId, detailId: a.detailId, quantity: 10, stageCode: 'cut', evidenceKind: 'physical', rework: false },
+      ] }));
+    await drain();
+    const after = await read();
+    expect(progressOf(after).map((p) => p.detailId)).toEqual([a.detailId]);
+  });
+
   it('unregistered lane uses the shared MDF classifier (a non-MDF marker in the file name excludes the packet)', async () => {
     const o = await makeOrder();
     const hdf = await packet([{ ...o, quantity: 10 }], { register: false });

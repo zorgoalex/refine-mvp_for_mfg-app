@@ -224,16 +224,20 @@ function gateLineage(input: MdfBazisCompositionValidationInput, previous: readon
   const nextKey = mdfLineageRevisionKey(head, intent.revision);
   const oldLineage = snapshot.lineage.get(previousKey);
   const next = snapshot.lineage.get(nextKey);
-  if (!oldLineage || !next || (snapshot.lineageIssues.get(previousKey)?.length ?? 0) > 0
+  // Same rule as the command: a v1 predecessor without physical rows (creation/baseline) has an empty lineage.
+  const previousIssues = (snapshot.lineageIssues.get(previousKey)?.length ?? 0) > 0;
+  const genesis = !oldLineage && !previousIssues && !previous.some(line => line.evidence === 'physical');
+  if ((!oldLineage && !genesis) || !next || previousIssues
     || (snapshot.lineageIssues.get(nextKey)?.length ?? 0) > 0) attention('MDF_COMPOSITION_LINEAGE_UNAVAILABLE');
-  if (!matchesMdfValidatedPhysicalLineage({ sourceKind: 'bazisCutSet', sourceId: intent.sourceId,
-    revisionKey: intent.previousRevision, lines: previous, lineage: oldLineage })
+  if ((oldLineage && !matchesMdfValidatedPhysicalLineage({ sourceKind: 'bazisCutSet', sourceId: intent.sourceId,
+    revisionKey: intent.previousRevision, lines: previous, lineage: oldLineage }))
     || !matchesMdfValidatedPhysicalLineage({ sourceKind: 'bazisCutSet', sourceId: intent.sourceId,
       revisionKey: intent.revision, lines: received, lineage: next })) attention('MDF_COMPOSITION_LINEAGE_MISMATCH');
-  const parents = new Map(oldLineage.lines.map(line => [lower(line.evidenceLineId), line]));
+  const oldLines = oldLineage?.lines ?? [];
+  const parents = new Map(oldLines.map(line => [lower(line.evidenceLineId), line]));
   if (next.operation !== 'carry' || next.productionAuthority !== null
     || next.predecessorAcceptedRevisionKey !== intent.previousRevision || next.droppedPredecessorEvidenceLineIds.length !== 0
-    || next.lines.length !== oldLineage.lines.length || parents.size !== oldLineage.lines.length) {
+    || next.lines.length !== oldLines.length || parents.size !== oldLines.length) {
     attention('MDF_COMPOSITION_LINEAGE_NOT_CARRY');
   }
   const consumed = new Set<string>();
@@ -403,7 +407,11 @@ export async function validateMdfBazisCompositionAdvance(tx: DatabaseClient,
   gateRaw(input.raw, input.intent, new Set(input.orderIds));
   const previous = targetLines(input, input.intent.previousRevision);
   const received = targetLines(input, input.intent.revision);
-  if (!previous.length) attention('MDF_COMPOSITION_PREVIOUS_STALE');
+  // A zero-line predecessor is legitimate only as a validated intentional-empty assignment (e.g. after an explicit
+  // return of an emptied set, then a refill).
+  const previousEmpty = input.snapshot.assignmentStates.get(mdfLineageRevisionKey(input.head, input.intent.previousRevision))
+    ?.intentionalEmpty === true;
+  if (!previous.length && !previousEmpty) attention('MDF_COMPOSITION_PREVIOUS_STALE');
   await gatePrevious(tx, input);
   const membership = gateAssignment(input, membershipIndex(previous), received,
     await loadRefillProvenance(tx, input.intent));

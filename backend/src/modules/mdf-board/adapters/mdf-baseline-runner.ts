@@ -1,3 +1,4 @@
+import { CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE as MDF, CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE as OTHER } from '../../../shared/cnc-material';
 /**
  * §5.7b initial population (baseline) runner. Plan: spec_erp/plans/mdf-baseline-population-impl-2026-09-27.md
  * (GPT-6 R7/R8/R8b). Lifecycle: started → recorded → activated | started/recorded → aborted | recorded → drifted |
@@ -33,8 +34,21 @@ async function tagWriter(tx: TransactionClient) {
 export async function loadMdfBaselineBuild(tx: TransactionClient): Promise<MdfBaselineBuild> {
   const inventory = await loadMdfReconciliationInventory(tx);
   const sources = inventory.inputs.map(classifyMdfReconciliationSource);
-  return buildMdfBaselineItems({ sources, demand: inventory.demand, orders: new Map([...inventory.orders].map(([id, o]) =>
+  const build = buildMdfBaselineItems({ sources, demand: inventory.demand, orders: new Map([...inventory.orders].map(([id, o]) =>
     [id, { id, name: o.name, readyOrLater: o.readyOrLater, deleted: o.deleted, kind: o.kind, createdAt: o.createdAt }])) });
+  // User decision 28.09: finished orders never named by any legacy source are NOT closed (no card, a later rework starts
+  // from zero); CURRENT orders with MDF demand and no source at all are listed for manual review (report only, no writes).
+  const named = [...new Set(inventory.demand.map(d => d.orderId))];
+  const unnamedCurrent = (await tx.query<{ id: number }>(`SELECT DISTINCT d.order_id::integer id FROM order_details d
+    JOIN orders o ON o.order_id=d.order_id AND NOT o.delete_flag AND o.order_kind='production_order'
+    LEFT JOIN order_statuses s ON s.order_status_id=o.order_status_id
+    LEFT JOIN sheet_material_types mt ON mt.sheet_material_type_id=d.sheet_material_type_id
+    LEFT JOIN materials m ON m.material_id=d.material_id
+    WHERE NOT d.delete_flag AND d.order_id <> ALL($1::bigint[])
+      AND COALESCE(mt.name,m.material_name,'') ~* $2 AND COALESCE(mt.name,m.material_name,'') !~* $3
+      AND NOT COALESCE(s.sort_order >= (SELECT MIN(sort_order) FROM order_statuses
+        WHERE lower(trim(order_status_name))='готов к выдаче'),false)`, [named, MDF, OTHER])).rows.map(r => r.id);
+  return { ...build, manualReviewOrderIds: [...new Set([...build.manualReviewOrderIds, ...unnamedCurrent])].sort((a, b) => a - b) };
 }
 
 /** FRESH admission (R2/R3/R8): no accepted authority; only diagnostic shadow rows may pre-exist. */
@@ -82,11 +96,36 @@ async function setMode(tx: TransactionClient, actor: MdfBaselineActor, runId: st
 }
 
 /** Start: caller already holds the exclusive cutover lock (session for apply, xact for dry-run). */
+/** «Переделка» (rework rounds, plan 2026-09-27 v8 §5.5, variant B): the engine has no production-round model yet, so it
+ * must never be activated while any live detail is in round > 1. Schema-tolerant: before the rework migration the column
+ * does not exist and there is nothing to check. */
+export async function hasMdfUnsupportedProductionRounds(tx: TransactionClient): Promise<boolean> {
+  const column = (await tx.query<{ c: boolean }>(`SELECT EXISTS(SELECT 1 FROM information_schema.columns
+    WHERE table_schema=current_schema() AND table_name='order_details' AND column_name='production_round') c`)).rows[0].c;
+  if (!column) return false;
+  return (await tx.query<{ x: boolean }>(`SELECT EXISTS(SELECT 1 FROM order_details
+    WHERE production_round>1 AND NOT delete_flag) x`)).rows[0].x;
+}
+
+/** Skips that drop confirmed history (limits, missing creation date). Lines/sources outside live MDF demand
+ * (LINE_OUTSIDE_DEMAND, MEMBERSHIP_MISSING) are legitimately not carried. */
+export function fatalMdfBaselineSkips(build: Pick<MdfBaselineBuild, 'skipped'>): string[] {
+  return [...new Set(build.skipped.filter(s => s.reason === 'CONTEXT_LIMIT' || s.reason === 'SOURCE_CREATED_AT_MISSING')
+    .map(s => `${s.itemKey}:${s.reason}`))].sort();
+}
+
 export async function startMdfBaselineRun(tx: TransactionClient, actor: MdfBaselineActor,
   manifest: Record<string, unknown>): Promise<{ runId: string; runSeq: string; build: MdfBaselineBuild }> {
   await tagWriter(tx);
   await assertMdfBaselineFresh(tx);
   const build = await loadMdfBaselineBuild(tx);
+  // E2: an item skipped for a limit or missing creation date would silently drop confirmed history — refuse the real run
+  // (the dry-run reports it as a failure instead).
+  const fatal = fatalMdfBaselineSkips(build);
+  if (fatal.length && manifest.dryRun !== true) throw new MdfBaselineRefused('MDF_BASELINE_REQUIRED_ITEMS_SKIPPED', fatal.slice(0, 50));
+  if (manifest.dryRun !== true && await hasMdfUnsupportedProductionRounds(tx)) {
+    throw new MdfBaselineRefused('MDF_PRODUCTION_ROUNDS_UNSUPPORTED');
+  }
   const runId = randomUUID();
   const runSeq = (await tx.query<{ run_seq: string }>(`INSERT INTO mdf_baseline_runs(run_id,status,operator_user_id,request_id,manifest)
     VALUES($1,'started',$2,$3,$4::jsonb) RETURNING run_seq::text`, [runId, actor.operatorUserId, actor.requestId,
@@ -170,6 +209,8 @@ export async function handoffMdfBaseline(tx: TransactionClient, actor: MdfBaseli
   for (const i of live.items) if (recordedItems.get(i.itemKey) !== i.digest) drift.push(recordedItems.has(i.itemKey) ? `changed:${i.itemKey}` : `added:${i.itemKey}`);
   const liveKeys = new Set(live.items.map(i => i.itemKey));
   for (const k of recordedItems.keys()) if (!liveKeys.has(k)) drift.push(`removed:${k}`);
+  for (const k of fatalMdfBaselineSkips(live)) drift.push(`skipped:${k}`);
+  if (await hasMdfUnsupportedProductionRounds(tx)) drift.push('production_rounds_unsupported');
   if (drift.length) {
     await tx.query(`UPDATE mdf_baseline_runs SET status='drifted' WHERE run_id=$1`, [runId]);
     await audit(tx, actor, 'mdf.baseline.run_drifted', runId, { before: { status: 'recorded' }, after: { status: 'drifted' },
@@ -292,7 +333,9 @@ export async function dryRunMdfBaseline(tx: TransactionClient, actor: MdfBaselin
     ...(unfinishedJobs ? ['unfinished_jobs'] : []), ...(missingCards.length ? ['missing_cards'] : []),
     ...(missingPositions ? ['missing_positions'] : []), ...(mismatches.length ? ['quantity_mismatch'] : []),
     ...(Object.keys(cardIssues).length ? ['card_issues'] : []), ...(!statusesUnchanged ? ['statuses_changed'] : []),
-    ...(outboxAfter !== outboxBefore ? ['outbox'] : []), ...(automationAfter !== automationBefore ? ['automation'] : [])];
+    ...(outboxAfter !== outboxBefore ? ['outbox'] : []), ...(automationAfter !== automationBefore ? ['automation'] : []),
+    ...(fatalMdfBaselineSkips(build).length ? ['required_items_skipped'] : []),
+    ...(await hasMdfUnsupportedProductionRounds(tx) ? ['production_rounds_unsupported'] : [])];
   const provenance: Record<string, number> = {};
   for (const i of build.items) for (const [k, v] of Object.entries(i.provenance)) provenance[k] = (provenance[k] ?? 0) + (v ?? 0);
   return { build: { items: build.items.length, skipped: build.skipped, closedOrders: build.closedOrderIds.length,

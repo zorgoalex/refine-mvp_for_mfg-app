@@ -214,7 +214,8 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       "q_fun_hash 'public.mdf_guard_physical_lineage_immutable()' 39d2c9d9500956c4bca2546c68d8cc15",
       // 191 redefines the seal guard in place (detached-position exemption): either body is a valid 182 end-state.
       "q_fun_hash_either 'public.mdf_validate_physical_lineage_seal()' 3067d8c18cdc8b1603397ce68a56824b f303a542a2e940954763bfa8a5d44bbe",
-      "q_fun_hash 'public.mdf_guard_physical_lineage_source_head()' d2ab89206c2d81b774c16779d302d789",
+      // 201 redefines the lineage head guard (genesis/retirement without physical lines): either body is valid.
+      "q_fun_hash_either 'public.mdf_guard_physical_lineage_source_head()' d2ab89206c2d81b774c16779d302d789 4895f75ef2c486bccd3715f8ab8e6dab",
       "q_fun_hash 'public.mdf_guard_source_fence()' 5865eedf3ea4c2cf2b715b6ac210d49a",
       "q_fun_hash 'public.mdf_reject_evidence_change()' a51e1b51d407124a856f1993d9c54fe8",
       "q_fun_hash 'public.mdf_guard_accepted_revision()' 945aada9b298e291ecda1442e6391f6d",
@@ -317,6 +318,15 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     ]) expect(arm).toContain(marker);
     const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
     expect(verification).toMatch(/199_mdf_cutover_controls\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
+  it('probes the relaxed lineage head guard before ledgering migration201', () => {
+    const start = probeFn.indexOf('201_mdf_lineage_genesis_guard*)');
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, probeFn.indexOf(';;', start));
+    expect(arm).toContain("q_fun_hash 'public.mdf_guard_physical_lineage_source_head()' 4895f75ef2c486bccd3715f8ab8e6dab");
+    const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verification).toMatch(/201_mdf_lineage_genesis_guard\*\)\s+probe_file "\$f" \|\| die/);
   });
 
   it('probes sealed BASIS assignment and command intent effects before ledgering migration185', () => {

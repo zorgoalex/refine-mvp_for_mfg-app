@@ -1,3 +1,4 @@
+import { CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE, CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE } from '../../../shared/cnc-material';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { rolePolicyForUser } from '../../../permissions/policies/scope';
 import type { MdfJobDatabase } from '../application/mdf-job-runner';
@@ -42,7 +43,16 @@ export async function loadMdfBazisCompositionReadiness(database: MdfJobDatabase,
       FROM mdf_source_heads h
       LEFT JOIN mdf_published_sources p ON p.source_kind=h.source_kind AND p.source_id=h.source_id
       WHERE h.source_kind='bazisCutSet' AND h.source_id=$2::text`, [user.id, setId])).rows[0];
-    if (!row) return unavailable('MDF_SOURCE_NOT_REGISTERED');
+    if (!row) {
+      // A set outside the MDF ledger (no engine source, no MDF-eligible row — e.g. HDF-only) keeps the legacy editor, the
+      // same rule the legacy edit commands apply (pg-bazis-cut-repository isMdfLedgerSet); MDF-introducing edits there
+      // are still refused by those commands.
+      const mdfRows = (await tx.query<{ n: number }>(`SELECT count(*)::int n FROM bazis_cut_set_details
+        WHERE bazis_cut_set_id=$1::bigint AND cut_enabled AND source_type='order_detail' AND source_order_hdf_detail_id IS NULL
+          AND COALESCE(material_name,'') ~* $2 AND COALESCE(material_name,'') !~* $3`,
+      [setId, CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE, CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE])).rows[0].n;
+      return mdfRows === 0 ? null : unavailable('MDF_SOURCE_NOT_REGISTERED');
+    }
     if (!row.publishedReceived || row.publishedReceived !== row.received || row.accepted !== row.received) {
       return unavailable('MDF_PUBLICATION_PENDING');
     }

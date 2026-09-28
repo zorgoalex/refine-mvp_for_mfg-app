@@ -8,7 +8,6 @@ import type {
   MdfSourceKind,
 } from '../../api/types/mdfPublishedApi.types';
 import { parseMdfLiveComments } from './mdfBoardCommentLinks';
-import { buildCncOrderSearchDateRange, type CncOrderSearchPeriod } from './model';
 
 /** §5.6b/c: pure snapshot → board view-model adapter. The SET of cards, their column, issues,
  * command tokens, members and counters come only from the one loaded published snapshot; never
@@ -248,7 +247,13 @@ export function buildMdfPublishedBoardCard(
   // §5.6 finding 8: whole-position totals for every (orderId, detailId) this card has membership
   // in — read straight from the single `snapshot.positions` truth, never summed across cards.
   const positionsIndex = indexMdfPublishedPositions(snapshot);
-  const positions: MdfPublishedBoardPositionTotal[] = memberQuantities.map((member) => {
+  // Retained facts (§5.2 empty/emptied BASIS): this card's own authorized progress at positions no longer in its current
+  // membership still shows its counters and still associates the card with its orders (search). Never feeds commands.
+  const retained = progressRows
+    .filter((row) => !memberByKey.has(`${row.orderId}:${row.detailId}`) && (row.cut > 0 || row.laminated > 0))
+    .map((row) => ({ orderId: row.orderId, orderName: orderNameOf(row.orderId, snapshot.orders), detailId: row.detailId }))
+    .sort((a, b) => a.orderId - b.orderId || a.detailId - b.detailId);
+  const positions: MdfPublishedBoardPositionTotal[] = [...memberQuantities, ...retained].map((member) => {
     const position = positionsIndex.get(`${member.orderId}:${member.detailId}`);
     return {
       orderId: member.orderId,
@@ -261,7 +266,8 @@ export function buildMdfPublishedBoardCard(
     };
   });
 
-  const orderIds = [...new Set([...memberQuantities.map((m) => m.orderId), ...items.map((item) => item.orderId)])].sort((a, b) => a - b);
+  const orderIds = [...new Set([...memberQuantities.map((m) => m.orderId), ...retained.map((r) => r.orderId),
+    ...items.map((item) => item.orderId)])].sort((a, b) => a - b);
   const orderNames = orderIds.map((orderId) => orderNameOf(orderId, snapshot.orders)).filter((name): name is string => Boolean(name));
 
   const pendingJob = snapshot.pendingJobs.find((job) => job.kind === card.kind && job.id === card.id);
@@ -373,33 +379,6 @@ export function filterMdfPublishedCardsByText(
     || card.orderNames.some((name) => name.toLocaleLowerCase('ru-RU').includes(needle)));
 }
 
-export interface MdfPublishedPeriodFilterExemptions {
-  /** Order ids currently in the active explicit search (`searchOrderIds`): their cards are exempt
-   * from the period filter even when their `sourceCreatedAt` falls outside the window. */
-  searchOrderIds?: ReadonlySet<number>;
-  /** The currently focused card (deep link): always exempt, regardless of its date. */
-  focusCard?: { kind: MdfSourceKind; id: string } | null;
-}
-
-/** Visibility-only period filter over the already-loaded (two-month) window.
- * §5.6 finding 6: a card returned because of an explicit order search (`searchOrderIds`) or because
- * it is the focused/deep-linked card must stay visible even when its `sourceCreatedAt` is outside
- * the window — otherwise the very cards the user searched/focused for immediately disappear. */
-export function filterMdfPublishedCardsByPeriod(
-  cards: readonly MdfPublishedBoardCard[],
-  workday: string,
-  period: CncOrderSearchPeriod | undefined,
-  exemptions: MdfPublishedPeriodFilterExemptions = {},
-): MdfPublishedBoardCard[] {
-  const { dateFrom, dateTo } = buildCncOrderSearchDateRange(workday, period);
-  const { searchOrderIds, focusCard } = exemptions;
-  return cards.filter((card) => {
-    if (focusCard && card.kind === focusCard.kind && card.id === focusCard.id) return true;
-    if (searchOrderIds && card.orderIds.some((orderId) => searchOrderIds.has(orderId))) return true;
-    const day = card.sourceCreatedAt.slice(0, 10);
-    return day >= dateFrom && day <= dateTo;
-  });
-}
 
 const MAX_SEARCH_ORDER_IDS = 100;
 
@@ -438,8 +417,7 @@ export interface MdfPublishedSearchPlan {
  * NOT exempt from search: the default window fetch is time-scoped, not per-order, so an order with
  * one recent card can still have older cards outside the window. Being "known" only means the
  * order id needs no async name→id lookup — it still needs to be requested via `searchOrderIds` (so
- * the backend widens the fetch to ALL of that order's cards, and the client's period filter can
- * exempt them; see `filterMdfPublishedCardsByPeriod`). */
+ * the backend widens the fetch to ALL of that order's cards and exempts them from its display cut). */
 export function planMdfPublishedSearchOrderIds(input: MdfPublishedSearchPlanInput): MdfPublishedSearchPlan {
   const knownIdByKey = new Map(input.knownOrders.map((order) => [normalizeOrderKey(order.orderName), order.orderId]));
   const namesNeedingResolution: string[] = [];
