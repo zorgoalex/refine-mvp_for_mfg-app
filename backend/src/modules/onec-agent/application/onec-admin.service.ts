@@ -58,6 +58,9 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 
 const actorId = (actor: CurrentUser): number => Number(actor.id);
 
+/** Alerts about a single past fact; nothing re-derives them, so an operator closes them. */
+export const ONEC_OPERATOR_RESOLVABLE_ALERT_KINDS = ['command_dead_letter', 'command_expired_undelivered'] as const;
+
 @Injectable()
 export class OnecAdminService {
   constructor(
@@ -541,6 +544,27 @@ export class OnecAdminService {
         { agentId: row.agent_id ?? null, sourceId: row.source_id === null ? null : Number(row.source_id), certId: row.cert_id === null ? null : Number(row.cert_id) },
       );
       return { alertId, state: 'acknowledged' };
+    });
+  }
+
+  /** One-shot command alerts are closed by the operator once handled; state alerts resolve themselves. */
+  async resolveAlert(alertId: number, actor: CurrentUser, context: OnecRequestContext) {
+    this.runtime.requireEnabled();
+    return this.repository.transaction(async (tx) => {
+      const row = await this.repository.resolveAlert(tx, alertId, ONEC_OPERATOR_RESOLVABLE_ALERT_KINDS);
+      if (!row) throw new ApiError(404, 'ONEC_ALERT_NOT_FOUND', 'Незакрытый алерт команды не найден');
+      await this.audit.byUser(
+        tx,
+        actor,
+        context,
+        { event: 'onec.alert.resolved', entityType: 'onec_alert', entityId: alertId, after: { kind: row.kind }, statusCode: 'resolved' },
+        {
+          agentId: row.agent_id ?? null,
+          sourceId: row.source_id === null ? null : Number(row.source_id),
+          commandId: typeof row.details?.commandId === 'string' ? row.details.commandId : null,
+        },
+      );
+      return { alertId, state: 'resolved' };
     });
   }
 

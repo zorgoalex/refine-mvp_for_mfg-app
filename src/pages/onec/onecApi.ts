@@ -8,6 +8,9 @@ import type {
   OnecAgentView,
   OnecAlert,
   OnecCertificate,
+  OnecCommandDetail,
+  OnecCommandSendResult,
+  OnecCommandView,
   OnecConfigValidationResult,
   OnecConfigVersion,
   OnecIncident,
@@ -16,10 +19,16 @@ import type {
 } from './onecApi.types';
 
 const AGENT_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
+const COMMAND_ID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 function agentIdPath(agentId: string): string {
   if (!AGENT_ID_PATTERN.test(agentId)) throw new Error('Invalid 1C agent id');
   return agentId;
+}
+
+function commandIdPath(commandId: string): string {
+  if (!COMMAND_ID_PATTERN.test(commandId)) throw new Error('Invalid 1C command id');
+  return commandId;
 }
 
 function positiveId(value: number): number {
@@ -139,6 +148,10 @@ export const onecApi = {
     return httpClient.post(path(`/alerts/${positiveId(alertId)}/acknowledge`), {});
   },
 
+  resolveAlert(alertId: number): Promise<{ alertId: number; state: string }> {
+    return httpClient.post(path(`/alerts/${positiveId(alertId)}/resolve`), {});
+  },
+
   listIncidents(params: { open?: boolean; agentId?: string } = {}): Promise<OnecIncident[]> {
     const query = new URLSearchParams();
     if (params.open !== undefined) query.set('open', String(params.open));
@@ -149,5 +162,36 @@ export const onecApi = {
 
   resolveIncident(incidentId: number): Promise<{ incidentId: number; resolvedAt: string }> {
     return httpClient.post(path(`/incidents/${positiveId(incidentId)}/resolve`), {});
+  },
+
+  listCommands(
+    params: { agentId?: string; status?: string; commandType?: string; limit?: number } = {},
+  ): Promise<OnecCommandView[]> {
+    const query = new URLSearchParams();
+    if (params.agentId) query.set('agentId', params.agentId);
+    if (params.status) query.set('status', params.status);
+    if (params.commandType) query.set('commandType', params.commandType);
+    if (params.limit) query.set('limit', String(params.limit));
+    const suffix = query.size ? `?${query.toString()}` : '';
+    return httpClient.get(path(`/commands${suffix}`));
+  },
+
+  getCommand(commandId: string): Promise<OnecCommandDetail> {
+    return httpClient.get(path(`/commands/${commandIdPath(commandId)}`));
+  },
+
+  /** Idempotency-Key must be generated once per dialog open so a retry never creates a second command. */
+  sendCommand(
+    agentId: string,
+    idempotencyKey: string,
+    input: { commandType: string; payload: Record<string, unknown>; priority?: number },
+  ): Promise<OnecCommandSendResult> {
+    return httpClient.post(path(`/agents/${agentIdPath(agentId)}/commands`), input, {
+      headers: { 'Idempotency-Key': idempotencyKey },
+    });
+  },
+
+  cancelCommand(commandId: string): Promise<OnecCommandView> {
+    return httpClient.post(path(`/commands/${commandIdPath(commandId)}/cancel`), {});
   },
 };

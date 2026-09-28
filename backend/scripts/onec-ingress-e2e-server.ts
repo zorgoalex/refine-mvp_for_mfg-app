@@ -15,7 +15,10 @@ import { json } from 'express';
 import { ApiErrorFilter } from '../src/common/errors/api-error.filter';
 import type { BackendEnv } from '../src/config/env.validation';
 import { DatabaseService } from '../src/database/database.service';
+import { PgOnecCommandRepository } from '../src/modules/onec-agent/adapters/pg-onec-command-repository';
 import { PgOnecRepository } from '../src/modules/onec-agent/adapters/pg-onec-repository';
+import { OnecCommandWakeups } from '../src/modules/onec-agent/application/onec-command-wakeups';
+import { OnecCommandsService } from '../src/modules/onec-agent/application/onec-commands.service';
 import { OnecAgentProtocolService } from '../src/modules/onec-agent/application/onec-agent-protocol.service';
 import { OnecAuditWriter } from '../src/modules/onec-agent/application/onec-audit';
 import { OnecAgentAuthGuard } from '../src/modules/onec-agent/http/onec-agent-auth.guard';
@@ -83,6 +86,18 @@ async function main(): Promise<void> {
       {
         provide: OnecAgentProtocolService,
         useFactory: (audit: OnecAuditWriter) => new OnecAgentProtocolService(repository, audit),
+        inject: [OnecAuditWriter],
+      },
+      {
+        provide: OnecCommandsService,
+        useFactory: (audit: OnecAuditWriter) =>
+          new OnecCommandsService(
+            new PgOnecCommandRepository(database),
+            repository,
+            audit,
+            new OnecCommandWakeups(database, runtime as unknown as OnecRuntimeConfigService),
+            runtime as unknown as OnecRuntimeConfigService,
+          ),
         inject: [OnecAuditWriter],
       },
       Reflector,

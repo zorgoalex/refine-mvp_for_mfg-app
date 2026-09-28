@@ -58,6 +58,7 @@ FP="$(openssl x509 -in "$WORK/certs/registered.crt" -outform DER | sha256sum | c
   echo "CREATE TABLE audit_log(LIKE public.audit_log INCLUDING ALL);"
   echo "CREATE TABLE audit_log_related_entity(LIKE public.audit_log_related_entity INCLUDING ALL);"
   cat "$REPO_DIR/backend/db/migrations/193_onec_agent_foundation.sql"
+  cat "$REPO_DIR/backend/db/migrations/196_onec_agent_commands.sql"
   echo "INSERT INTO onec_sources(code, display_name) VALUES ('e2e','E2E-Тест источник');"
   echo "INSERT INTO onec_agents(agent_id, source_id, site_id, display_name) SELECT '$AGENT_ID', source_id, 'e2e', 'E2E-Тест агент' FROM onec_sources;"
   echo "INSERT INTO onec_agent_certificates(agent_id, sha256_fingerprint) VALUES ('$AGENT_ID', decode('$FP','hex'));"
@@ -136,6 +137,34 @@ c="$(code_of "${AGENT[@]}" "${REG[@]}" -H 'X-Agent-Id: someone-else' -H 'Content
 [[ "$c" == 403 && "$(jq -r .error.code "$WORK/body")" == AGENT_CERT_MISMATCH ]]; check "forged X-Agent-Id: 403 AGENT_CERT_MISMATCH ($c)" "$?"
 c="$(code_of "${API[@]}" "https://$API_HOST:$P_API/api/v1/ping")"
 [[ "$c" == 200 ]]; check "regular API host works while the module is enabled ($c)" "$?"
+
+# --- E2 command queue through the real ingress ---------------------------------------
+code_of "${AGENT[@]}" "${REG[@]}" -H "X-Agent-Id: $AGENT_ID" -H 'Content-Type: application/json' -d "$SESSION_BODY" "$BASE/session/start" >/dev/null
+SESSION_ID="$(jq -r .sessionId "$WORK/body")"
+LEASE() { code_of "${AGENT[@]}" --max-time "$(( $1 + 20 ))" "${REG[@]}" -H "X-Agent-Id: $AGENT_ID" -H 'Content-Type: application/json' \
+  -d "{\"sessionId\":\"$SESSION_ID\",\"supportedCommandTypes\":[\"integration_probe\"],\"maxWaitSeconds\":$1}" "$BASE/commands/lease"; }
+t0=$(date +%s); c="$(LEASE 70)"; t1=$(date +%s)
+[[ "$c" == 200 && "$(jq -r .hasCommand "$WORK/body")" == false && $(( t1 - t0 )) -ge 68 ]]
+check "empty long poll held ~70 s through Traefik and answered hasCommand=false ($c, $(( t1 - t0 )) s)" "$?"
+CMD_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+CANON='{"marker":"E2E-\u0422\u0435\u0441\u0442"}'
+HASH="$(printf '%s' "$CANON" | openssl dgst -sha256 -binary | base64)"
+echo "INSERT INTO $SCHEMA.onec_agent_commands (command_id, agent_id, source_id, command_type, command_kind, payload_version, payload_canonical, payload_hash, payload_bytes, source_module, idempotency_key)
+  SELECT '$CMD_ID', '$AGENT_ID', source_id, 'integration_probe', 'business', 1, '$CANON', '$HASH', ${#CANON}, 'e2e', 'e2e-$CMD_ID' FROM $SCHEMA.onec_agents WHERE agent_id = '$AGENT_ID';" | psql_exec
+c="$(LEASE 20)"
+[[ "$c" == 200 && "$(jq -r .command.commandId "$WORK/body")" == "$CMD_ID" ]] && grep -qF "\"payload\":$CANON}" "$WORK/body"
+check "lease delivers the command with the canonical payload bytes verbatim ($c)" "$?"
+LEASE_ID="$(jq -r .leaseId "$WORK/body")"
+c="$(code_of "${AGENT[@]}" "${REG[@]}" -H "X-Agent-Id: $AGENT_ID" -H 'Content-Type: application/json' \
+  -d "{\"leaseId\":\"$LEASE_ID\",\"payloadHash\":\"$HASH\"}" "$BASE/commands/$CMD_ID/received")"
+[[ "$c" == 204 ]]; check "received 204 ($c)" "$?"
+RESULT="{\"commandId\":\"$CMD_ID\",\"status\":\"succeeded\",\"resultVersion\":1,\"document\":{\"type\":\"integration_probe\"}}"
+c1="$(code_of "${AGENT[@]}" "${REG[@]}" -X PUT -H "X-Agent-Id: $AGENT_ID" -H 'Content-Type: application/json' -d "$RESULT" "$BASE/commands/$CMD_ID/result")"
+c2="$(code_of "${AGENT[@]}" "${REG[@]}" -X PUT -H "X-Agent-Id: $AGENT_ID" -H 'Content-Type: application/json' -d "$RESULT" "$BASE/commands/$CMD_ID/result")"
+c3="$(code_of "${AGENT[@]}" "${REG[@]}" -X PUT -H "X-Agent-Id: $AGENT_ID" -H 'Content-Type: application/json' -d "${RESULT/succeeded/dead_letter}" "$BASE/commands/$CMD_ID/result")"
+stored="$(echo "SELECT status || '|' || (result_sha256 = encode(sha256(convert_to(result_body, 'UTF8')), 'hex'))::text FROM $SCHEMA.onec_agent_commands WHERE command_id = '$CMD_ID';" | psql_exec -At)"
+[[ "$c1" == 204 && "$c2" == 204 && "$c3" == 409 && "$stored" == "succeeded|true" ]]
+check "result stored byte for byte; same bytes 204, different 409 ($c1/$c2/$c3, $stored)" "$?"
 c="$(code_of "${API[@]}" -H 'Content-Type: application/json' -H "X-Onec-Ingress-Auth: $SECRET" -H "X-Agent-Id: $AGENT_ID" \
   -d "$SESSION_BODY" "https://$API_HOST:$P_API/api/integration/1c-agents/v1/session/start")"
 [[ "$c" == 404 ]]; check "agent API unreachable via the regular API host even with the secret ($c)" "$?"

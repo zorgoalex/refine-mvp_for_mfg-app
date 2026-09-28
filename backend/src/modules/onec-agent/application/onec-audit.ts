@@ -56,7 +56,7 @@ export class OnecAuditWriter {
     tx: DatabaseClient,
     agent: OnecAgentContext,
     event: Omit<AuditEvent, 'actorUserId' | 'actorUsername' | 'actorRole' | 'requestId' | 'source'>,
-    link: Omit<AuditLinkInput, 'actorKind' | 'agentId' | 'requestId' | 'correlationId'> = {},
+    link: Omit<AuditLinkInput, 'actorKind' | 'agentId' | 'requestId'> = {},
   ): Promise<string> {
     const auditId = await auditService.record(tx, {
       ...event,
@@ -73,7 +73,8 @@ export class OnecAuditWriter {
       actorKind: 'onec_agent',
       agentId: agent.agentId,
       requestId: agent.requestId,
-      correlationId: agent.correlationId,
+      // A command's own correlation id wins over the (optional) request header.
+      correlationId: link.correlationId ?? agent.correlationId,
     });
     return auditId;
   }

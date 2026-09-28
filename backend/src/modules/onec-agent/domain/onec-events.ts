@@ -6,7 +6,9 @@ export type OnecEventType =
   | 'onec.agent.silent'
   | 'onec.certificate.expiring'
   | 'onec.config.rejected'
-  | 'onec.source.identity_changed';
+  | 'onec.source.identity_changed'
+  | 'onec.command.completed'
+  | 'onec.command.expired_undelivered';
 
 export type OnecEventSeverity = 'info' | 'warning' | 'critical';
 

@@ -160,6 +160,28 @@ export function measureJson(node: JsonNode): JsonShapeStats {
   return stats;
 }
 
+/**
+ * Command payload measures exactly as the 1C agent's CommandPayloadPolicy:
+ * depth = depth of the deepest VALUE with the root at 0 (`{"a":{"b":1}}` → 2);
+ * nodes = every value including the root (property names are not nodes,
+ * `{"a":[1,2]}` → 4); widest object = most properties in one object.
+ */
+export function commandPayloadStats(node: JsonNode): JsonShapeStats {
+  const stats: JsonShapeStats = { depth: 0, nodes: 0, maxObjectFields: 0 };
+  const visit = (current: JsonNode, depth: number) => {
+    stats.nodes += 1;
+    stats.depth = Math.max(stats.depth, depth);
+    if (current.kind === 'array') {
+      for (const item of current.items) visit(item, depth + 1);
+    } else if (current.kind === 'object') {
+      stats.maxObjectFields = Math.max(stats.maxObjectFields, current.entries.length);
+      for (const [, item] of current.entries) visit(item, depth + 1);
+    }
+  };
+  visit(node, 0);
+  return stats;
+}
+
 /** Converts a JSON tree back into a plain JS value (numbers as JS numbers). */
 export function toPlainValue(node: JsonNode): unknown {
   switch (node.kind) {

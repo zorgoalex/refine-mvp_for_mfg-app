@@ -4,6 +4,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser, RequestWithCurrentUser } from '../../../permissions/current-user';
 import { RequirePermissions } from '../../../permissions/require-permissions.decorator';
 import { OnecAdminService } from '../application/onec-admin.service';
+import { OnecCommandsService } from '../application/onec-commands.service';
 import type { OnecRequestContext } from '../application/onec-audit';
 import { OnecPermissionsGuard } from './onec-permissions.guard';
 
@@ -24,6 +25,13 @@ function positiveId(value: string): number {
   return id;
 }
 
+function commandUuid(value: string): string {
+  if (!/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(value)) {
+    throw new ApiError(400, 'INVALID_ID', 'Invalid command id');
+  }
+  return value.toLowerCase();
+}
+
 function agentId(value: string): string {
   if (!/^[A-Za-z0-9._-]{1,64}$/.test(value)) throw new ApiError(400, 'INVALID_ID', 'Invalid agent id');
   return value;
@@ -34,7 +42,10 @@ function agentId(value: string): string {
 @Controller('onec')
 @UseGuards(OnecPermissionsGuard)
 export class OnecAdminController {
-  constructor(@Inject(OnecAdminService) private readonly service: OnecAdminService) {}
+  constructor(
+    @Inject(OnecAdminService) private readonly service: OnecAdminService,
+    @Inject(OnecCommandsService) private readonly commands: OnecCommandsService,
+  ) {}
 
   @ApiOperation({ summary: 'Overview of 1C agents: connection, state, queues, certificates, configuration' })
   @Get('overview')
@@ -174,6 +185,46 @@ export class OnecAdminController {
     return this.service.listConfigVersions(agentId(id));
   }
 
+  @ApiOperation({ summary: 'List 1C agent commands (journal; no payload/result bodies)' })
+  @Get('commands')
+  @ApiBearerAuth('bearerAuth')
+  @RequirePermissions('onec.view')
+  listCommands(@Query() query: { agentId?: string; status?: string; commandType?: string; limit?: string }) {
+    return this.commands.list(query);
+  }
+
+  @ApiOperation({ summary: 'Get a 1C agent command; payload/result bodies only with onec.manage or onec.commands.send' })
+  @Get('commands/:commandId')
+  @ApiBearerAuth('bearerAuth')
+  @RequirePermissions('onec.view')
+  getCommand(@Param('commandId') commandId: string, @Req() request: RequestWithCurrentUser) {
+    const permissions = request.user?.permissions ?? [];
+    const includeBodies = permissions.includes('onec.manage') || permissions.includes('onec.commands.send');
+    return this.commands.get(commandUuid(commandId), includeBodies);
+  }
+
+  @ApiOperation({ summary: 'Queue an admin command or the integration probe for a 1C agent (Idempotency-Key required)' })
+  @Post('agents/:agentId/commands')
+  @ApiBearerAuth('bearerAuth')
+  @RequirePermissions('onec.commands.send')
+  sendCommand(
+    @Param('agentId') id: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Req() request: RequestWithCurrentUser,
+    @Body() body: unknown,
+  ) {
+    return this.commands.operatorEnqueue(agentId(id), body, idempotencyKey, user(request), requestId(request));
+  }
+
+  @ApiOperation({ summary: 'Cancel a 1C agent command that the agent has not received yet' })
+  @Post('commands/:commandId/cancel')
+  @HttpCode(200)
+  @ApiBearerAuth('bearerAuth')
+  @RequirePermissions('onec.commands.send')
+  cancelCommand(@Param('commandId') commandId: string, @Req() request: RequestWithCurrentUser) {
+    return this.commands.cancel(commandUuid(commandId), user(request), requestId(request));
+  }
+
   @ApiOperation({ summary: 'List 1C integration incidents' })
   @Get('incidents')
   @ApiBearerAuth('bearerAuth')
@@ -206,5 +257,14 @@ export class OnecAdminController {
   @RequirePermissions('onec.view')
   acknowledgeAlert(@Param('alertId') alertId: string, @Req() request: RequestWithCurrentUser) {
     return this.service.acknowledgeAlert(positiveId(alertId), user(request), requestId(request));
+  }
+
+  @ApiOperation({ summary: 'Resolve a handled one-shot 1C command alert' })
+  @Post('alerts/:alertId/resolve')
+  @HttpCode(200)
+  @ApiBearerAuth('bearerAuth')
+  @RequirePermissions('onec.manage')
+  resolveAlert(@Param('alertId') alertId: string, @Req() request: RequestWithCurrentUser) {
+    return this.service.resolveAlert(positiveId(alertId), user(request), requestId(request));
   }
 }

@@ -27,6 +27,37 @@ export const ONEC_COMMAND_TYPES = [
 ] as const;
 export type OnecCommandType = (typeof ONEC_COMMAND_TYPES)[number];
 
+/** Admin commands the agent executes itself (spec §4.6); reconcile_* are not implemented by the agent. */
+export const ONEC_ADMIN_COMMAND_TYPES = [
+  'start_full_sync',
+  'reload_entity',
+  'pause_etl',
+  'resume_etl',
+  'run_connectivity_test',
+  'collect_diagnostics',
+  'rotate_certificate_hint',
+] as const;
+export type OnecAdminCommandType = (typeof ONEC_ADMIN_COMMAND_TYPES)[number];
+
+/** Command types the "Отправить команду" dialog may send: admin commands + the business probe. */
+export const ONEC_OPERATOR_COMMAND_TYPES = [...ONEC_ADMIN_COMMAND_TYPES, 'integration_probe'] as const;
+export type OnecOperatorCommandType = (typeof ONEC_OPERATOR_COMMAND_TYPES)[number];
+
+export type OnecCommandKind = 'admin' | 'business';
+
+export const ONEC_COMMAND_STATUSES = [
+  'queued',
+  'leased',
+  'received',
+  'succeeded',
+  'business_error',
+  'dead_letter',
+  'expired',
+  'cancelled',
+  'expired_undelivered',
+] as const;
+export type OnecCommandStatus = (typeof ONEC_COMMAND_STATUSES)[number];
+
 export type OnecAgentStatus = 'active' | 'blocked';
 export type OnecConnectionState = 'online' | 'silent' | 'never_seen';
 export type OnecHeartbeatState =
@@ -263,6 +294,50 @@ export interface OnecIncident {
   firstAt: string;
   lastAt: string;
   resolvedAt: string | null;
+}
+
+export interface OnecCommandRequestedBy {
+  userId: string;
+  displayName: string;
+}
+
+/** Journal projection (`GET /onec/commands[/:commandId]`); mirrors backend `commandView()`. */
+export interface OnecCommandView {
+  commandId: string;
+  agentId: string;
+  commandType: string;
+  commandKind: OnecCommandKind;
+  status: OnecCommandStatus;
+  priority: number;
+  orderingKey: string | null;
+  payloadHash: string;
+  payloadBytes: number;
+  notBeforeUtc: string | null;
+  expiresAtUtc: string | null;
+  requestedBy: OnecCommandRequestedBy | null;
+  sourceModule: string;
+  sourceEntityType: string | null;
+  sourceEntityId: string | null;
+  leaseCount: number;
+  leasedAt: string | null;
+  receivedAt: string | null;
+  resultReceivedAt: string | null;
+  resultErrorCode: string | null;
+  cancelledAt: string | null;
+  createdAt: string;
+}
+
+/**
+ * `GET /onec/commands/:commandId` includes `payload`/`result` only when the
+ * caller has onec.manage or onec.commands.send; both keys are absent otherwise.
+ */
+export interface OnecCommandDetail extends OnecCommandView {
+  payload?: unknown;
+  result?: unknown;
+}
+
+export interface OnecCommandSendResult extends OnecCommandDetail {
+  created: boolean;
 }
 
 export interface OnecStatusHistorySummary {

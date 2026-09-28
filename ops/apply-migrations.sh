@@ -2368,6 +2368,19 @@ probe_file() {
       "SELECT to_regprocedure('public.mdf_source_presentation_digest(text,text)') IS NOT NULL;" \
       "SELECT to_regclass('public.mdf_board_history_events') IS NULL OR (COALESCE((SELECT md5(pg_get_functiondef(oid)) FROM pg_proc WHERE oid=to_regprocedure('public.record_mdf_board_history_from_audit()'))='cb273b6a454a8c02ffce436caa6f8863', false) AND COALESCE((SELECT md5(pg_get_functiondef(oid)) FROM pg_proc WHERE oid=to_regprocedure('public.record_mdf_board_history_from_audit_relation()'))='3a0cefb994d1231bb6fda6677fa2077e', false));" ;;
     # 193: 1C agent E1 registry/config/outbox/alerts + onec.* permissions.
+    # 196: 1C agent E2 command queue.
+    196_onec_agent_commands*) probe_all \
+      "$(q_tbl onec_agent_commands)" \
+      "$(q_col onec_agent_commands payload_canonical)" \
+      "$(q_col onec_agent_commands result_sha256)" \
+      "$(q_col onec_agent_commands payload_purged_at)" \
+      "$(q_con_on onec_agent_commands onec_agent_commands_pkey)" \
+      "$(q_con_on onec_agent_commands onec_agent_commands_source_module_idempotency_key_key)" \
+      "$(q_con_on onec_agent_commands onec_agent_commands_agent_id_fkey)" \
+      "$(q_con_on onec_agent_commands onec_agent_commands_status_check)" \
+      "$(q_idx onec_agent_commands_lease_idx)" \
+      "$(q_idx onec_agent_commands_ordering_idx)" \
+      "$(q_idx onec_agent_commands_expiry_idx)" ;;
     193_onec_agent_foundation*) probe_all \
       "$(q_tbl onec_sources)" \
       "$(q_tbl onec_agents)" \
@@ -2545,6 +2558,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     192_mdf_board_presentation_history*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    196_onec_agent_commands*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     193_onec_agent_foundation*)

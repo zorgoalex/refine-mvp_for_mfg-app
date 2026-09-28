@@ -7,6 +7,7 @@ import { onecApi } from './onecApi';
 import type { OnecOverview } from './onecApi.types';
 import { AgentsTab } from './AgentsTab';
 import { ConfigurationTab } from './ConfigurationTab';
+import { CommandsTab } from './CommandsTab';
 import { AlertsIncidentsTab } from './AlertsIncidentsTab';
 
 const { Title } = Typography;
@@ -24,6 +25,7 @@ export const ONEC_OVERVIEW_POLL_MS = 30_000;
 export function OnecPage() {
   const canView = can('onec.view') || can('onec.manage') || can('onec.commands.send');
   const canManage = can('onec.manage');
+  const canSendCommands = can('onec.commands.send');
   const sectionVisible = featureFlags.useBackendOnec && canView;
 
   const [overview, setOverview] = useState<OnecOverview | null>(null);
@@ -92,6 +94,13 @@ export function OnecPage() {
       key: 'config',
       label: 'Конфигурация',
       children: <ConfigurationTab agents={agents} canManage={canManage} />,
+    },
+    {
+      key: 'commands',
+      label: 'Команды',
+      children: (
+        <CommandsTab agents={agents} canSend={canSendCommands} onNavigateToConfig={() => setActiveTab('config')} />
+      ),
     },
     {
       key: 'alerts',

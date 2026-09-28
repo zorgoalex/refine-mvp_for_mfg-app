@@ -66,6 +66,7 @@ export interface AuditLinkInput {
   sourceId?: number | null;
   sourceGeneration?: number | null;
   configVersion?: number | null;
+  commandId?: string | null;
   sessionId?: string | null;
   certId?: number | null;
   requestId?: string | null;
@@ -80,6 +81,8 @@ export interface AlertUpsert {
   severity: 'info' | 'warning' | 'critical';
   dedupeKey: string;
   details: Record<string, unknown>;
+  /** One alert per fact: inserted once, never reopened by a replayed event. */
+  oneShot?: boolean;
 }
 
 const num = (value: unknown): number => Number(value);
@@ -530,6 +533,15 @@ export class PgOnecRepository {
   }
 
   async upsertAlert(client: DatabaseClient, alert: AlertUpsert): Promise<void> {
+    if (alert.oneShot) {
+      // One alert per fact (e.g. one command): a replayed event never reopens or rewrites it.
+      await client.query(
+        `INSERT INTO onec_alerts (kind, agent_id, source_id, cert_id, severity, dedupe_key, details)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb) ON CONFLICT (dedupe_key) DO NOTHING`,
+        [alert.kind, alert.agentId, alert.sourceId, alert.certId, alert.severity, alert.dedupeKey, JSON.stringify(alert.details)],
+      );
+      return;
+    }
     await client.query(
       `INSERT INTO onec_alerts (kind, agent_id, source_id, cert_id, severity, dedupe_key, details)
        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
@@ -541,6 +553,36 @@ export class PgOnecRepository {
          resolved_at = CASE WHEN onec_alerts.state = 'resolved' THEN NULL ELSE onec_alerts.resolved_at END`,
       [alert.kind, alert.agentId, alert.sourceId, alert.certId, alert.severity, alert.dedupeKey, JSON.stringify(alert.details)],
     );
+  }
+
+  /**
+   * Locks the command row (same lock as received/result) and tells whether the agent
+   * got it, so an "undelivered" alert is never created after a late receipt.
+   */
+  async commandReceivedForUpdate(client: DatabaseClient, commandId: string): Promise<boolean> {
+    const { rows } = await client.query(
+      `SELECT received_at IS NOT NULL AS received FROM onec_agent_commands WHERE command_id = $1 FOR UPDATE`,
+      [commandId],
+    );
+    return rows[0]?.received === true;
+  }
+
+  async resolveAlertByDedupeKey(client: DatabaseClient, dedupeKey: string): Promise<number> {
+    const { rowCount } = await client.query(
+      `UPDATE onec_alerts SET state = 'resolved', resolved_at = now() WHERE dedupe_key = $1 AND state <> 'resolved'`,
+      [dedupeKey],
+    );
+    return rowCount ?? 0;
+  }
+
+  /** Operator closes a one-shot alert (the fact was handled); only resolvable kinds, never state-projected ones. */
+  async resolveAlert(client: DatabaseClient, alertId: number, kinds: readonly string[]): Promise<QueryResultRow | null> {
+    const { rows } = await client.query(
+      `UPDATE onec_alerts SET state = 'resolved', resolved_at = now()
+        WHERE alert_id = $1 AND kind = ANY($2::text[]) AND state <> 'resolved' RETURNING *`,
+      [alertId, kinds],
+    );
+    return rows[0] ?? null;
   }
 
   /** Resolves open alerts of the given kinds for an agent (the condition cleared), except `keepDedupeKey`. */
@@ -635,8 +677,8 @@ export class PgOnecRepository {
   async insertAuditLink(client: DatabaseClient, auditId: string, link: AuditLinkInput): Promise<void> {
     await client.query(
       `INSERT INTO onec_audit_links (audit_id, actor_kind, agent_id, source_id, source_generation, config_version,
-                                     session_id, cert_id, request_id, correlation_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+                                     session_id, cert_id, request_id, correlation_id, command_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [
         auditId,
         link.actorKind,
@@ -648,6 +690,7 @@ export class PgOnecRepository {
         link.certId ?? null,
         link.requestId ?? null,
         link.correlationId ?? null,
+        link.commandId ?? null,
       ],
     );
   }

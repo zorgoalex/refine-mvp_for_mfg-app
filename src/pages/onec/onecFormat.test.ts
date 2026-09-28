@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   onecCertExpirySeverity,
+  onecCommandCancellable,
+  onecCommandPayloadFromForm,
+  onecCommandSourceLabel,
+  onecCommandStatusColor,
+  onecCommandStatusLabel,
+  onecCommandTypeDescription,
   onecCommandTypeLabel,
   onecConnectionBadge,
+  onecDefaultProbeMarker,
   onecDiffConfigurations,
   onecEtlEntityFromFormValues,
   onecEtlEntityToFormValues,
@@ -14,6 +21,7 @@ import {
   onecStateBadge,
   ONEC_ETL_ENTITY_FORM_DEFAULTS,
   type OnecEtlEntityFormValues,
+  onecAlertResolvable,
 } from './onecFormat';
 import type { OnecAgentConfiguration, OnecEtlEntity } from './onecApi.types';
 
@@ -301,5 +309,125 @@ describe('agent-bound configuration writes (R2 review: cross-agent save race)', 
       onecFormatHistorySummary({ version: '1.2.0', odataAvailable: true, commandApiAvailable: false,
         queues: { commandsPending: 1, resultsPending: 0, etlBatchesPending: 2, deadLetters: 0 }, diskFreeBytes: 2 * 1024 ** 3 }),
     ).toBe('версия 1.2.0; OData: доступен; команды 1С: недоступны; очереди: команды 1, результаты 0, пакеты 2, dead-letter 0; диск свободно 2.0 ГБ');
+  });
+});
+
+describe('onecCommandTypeLabel / onecCommandTypeDescription (admin commands)', () => {
+  it('translates admin command types to Russian and falls back to the raw value', () => {
+    expect(onecCommandTypeLabel('start_full_sync')).toBe('Запустить полную выгрузку');
+    expect(onecCommandTypeLabel('reload_entity')).toBe('Перезагрузить сущность');
+    expect(onecCommandTypeLabel('pause_etl')).toBe('Приостановить выгрузку');
+    expect(onecCommandTypeLabel('resume_etl')).toBe('Возобновить выгрузку');
+    expect(onecCommandTypeLabel('run_connectivity_test')).toBe('Проверить связь');
+    expect(onecCommandTypeLabel('collect_diagnostics')).toBe('Собрать диагностику');
+    expect(onecCommandTypeLabel('rotate_certificate_hint')).toBe('Запросить смену сертификата');
+    expect(onecCommandTypeLabel('mystery_command')).toBe('mystery_command');
+  });
+
+  it('has a one-line description for every operator-sendable command type', () => {
+    const types = [
+      'start_full_sync',
+      'reload_entity',
+      'pause_etl',
+      'resume_etl',
+      'run_connectivity_test',
+      'collect_diagnostics',
+      'rotate_certificate_hint',
+      'integration_probe',
+    ];
+    for (const type of types) {
+      expect(onecCommandTypeDescription(type).length).toBeGreaterThan(0);
+    }
+    expect(onecCommandTypeDescription('mystery_command')).toBe('');
+  });
+});
+
+describe('onecCommandStatusLabel / onecCommandStatusColor', () => {
+  it('maps every command status to a Russian label and the spec-mandated color band', () => {
+    expect(onecCommandStatusLabel('queued')).toBe('В очереди');
+    expect(onecCommandStatusColor('queued')).toBe('blue');
+    expect(onecCommandStatusColor('leased')).toBe('blue');
+    expect(onecCommandStatusColor('received')).toBe('processing');
+    expect(onecCommandStatusColor('succeeded')).toBe('green');
+    expect(onecCommandStatusColor('business_error')).toBe('orange');
+    expect(onecCommandStatusColor('dead_letter')).toBe('red');
+    expect(onecCommandStatusColor('expired')).toBe('default');
+    expect(onecCommandStatusColor('expired_undelivered')).toBe('default');
+    expect(onecCommandStatusColor('cancelled')).toBeUndefined();
+  });
+
+  it('falls back to the raw value for an unknown status', () => {
+    expect(onecCommandStatusLabel('mystery')).toBe('mystery');
+    expect(onecCommandStatusColor('mystery')).toBeUndefined();
+  });
+});
+
+describe('onecCommandCancellable', () => {
+  it('only queued and leased commands may be cancelled (spec §4.7)', () => {
+    expect(onecCommandCancellable('queued')).toBe(true);
+    expect(onecCommandCancellable('leased')).toBe(true);
+    expect(onecCommandCancellable('received')).toBe(false);
+    expect(onecCommandCancellable('succeeded')).toBe(false);
+    expect(onecCommandCancellable('business_error')).toBe(false);
+    expect(onecCommandCancellable('dead_letter')).toBe(false);
+    expect(onecCommandCancellable('expired')).toBe(false);
+    expect(onecCommandCancellable('expired_undelivered')).toBe(false);
+    expect(onecCommandCancellable('cancelled')).toBe(false);
+  });
+});
+
+describe('onecCommandSourceLabel', () => {
+  it('names the operator for onec_admin, falling back to the raw module otherwise', () => {
+    expect(onecCommandSourceLabel({ sourceModule: 'onec_admin', requestedBy: { userId: '1', displayName: 'Иванов И.И.' } })).toBe(
+      'Администратор: Иванов И.И.',
+    );
+    expect(onecCommandSourceLabel({ sourceModule: 'onec_admin', requestedBy: null })).toBe('Администратор');
+    expect(onecCommandSourceLabel({ sourceModule: 'orders', requestedBy: null })).toBe('orders');
+  });
+});
+
+describe('onecDefaultProbeMarker', () => {
+  it('embeds the local time so repeated probes are distinguishable', () => {
+    const now = new Date('2026-09-28T10:15:00Z');
+    expect(onecDefaultProbeMarker(now)).toBe(`ERP probe ${now.toLocaleString('ru-RU')}`);
+  });
+});
+
+describe('onecCommandPayloadFromForm', () => {
+  it('builds start_full_sync with the given entities (empty = all enabled entities)', () => {
+    expect(onecCommandPayloadFromForm('start_full_sync', { entities: ['orders', 'clients'] })).toEqual({
+      entities: ['orders', 'clients'],
+    });
+    expect(onecCommandPayloadFromForm('start_full_sync', {})).toEqual({ entities: [] });
+    expect(onecCommandPayloadFromForm('start_full_sync', { entities: [] })).toEqual({ entities: [] });
+  });
+
+  it('builds reload_entity with a single trimmed entity code', () => {
+    expect(onecCommandPayloadFromForm('reload_entity', { entity: '  orders  ' })).toEqual({ entity: 'orders' });
+  });
+
+  it('builds integration_probe with a trimmed marker', () => {
+    expect(onecCommandPayloadFromForm('integration_probe', { marker: '  ERP probe test  ' })).toEqual({
+      marker: 'ERP probe test',
+    });
+  });
+
+  it('builds an empty object for every no-field admin command', () => {
+    for (const type of ['pause_etl', 'resume_etl', 'run_connectivity_test', 'collect_diagnostics', 'rotate_certificate_hint']) {
+      expect(onecCommandPayloadFromForm(type, { entities: ['x'], entity: 'y', marker: 'z' })).toEqual({});
+    }
+  });
+
+  it('omits unrelated fields for an unknown command type', () => {
+    expect(onecCommandPayloadFromForm('unknown_type', { entities: ['x'], entity: 'y', marker: 'z' })).toEqual({});
+  });
+});
+
+describe('onecAlertResolvable', () => {
+  it('lets the operator close only unresolved one-shot command alerts', () => {
+    expect(onecAlertResolvable('command_dead_letter', 'open')).toBe(true);
+    expect(onecAlertResolvable('command_expired_undelivered', 'acknowledged')).toBe(true);
+    expect(onecAlertResolvable('command_dead_letter', 'resolved')).toBe(false);
+    expect(onecAlertResolvable('agent_silent', 'open')).toBe(false);
   });
 });

@@ -16897,6 +16897,26 @@ paths:
         '403': {description: Permission denied}
         '503': {description: 1C integration is disabled}
         '404': {description: Open alert not found}
+  /api/v1/onec/alerts/{alertId}/resolve:
+    post:
+      tags:
+        - 1C integration
+      operationId: resolveOnecAlert
+      summary: "Resolve a handled one-shot 1C command alert"
+      description: >-
+        Only command alerts (command_dead_letter, command_expired_undelivered) can be closed by an
+        operator; state-derived alerts resolve themselves when the condition clears.
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      parameters:
+        - {name: alertId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Resolve a handled one-shot 1C command alert}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '404': {description: Unresolved command alert not found}
   /api/integration/1c-agents/v1/session/start:
     post:
       tags:
@@ -16972,6 +16992,154 @@ paths:
         '400': {description: Invalid request or agentId mismatch}
         '403': {description: Certificate unknown, mismatched or agent blocked}
         '404': {description: Not served on this listener}
+
+  /api/v1/onec/commands:
+    get:
+      tags:
+        - 1C integration
+      operationId: listOnecCommands
+      summary: "List 1C agent commands (journal; no payload/result bodies)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: agentId, in: query, required: false, schema: {type: string}}
+        - {name: status, in: query, required: false, schema: {type: string}}
+        - {name: commandType, in: query, required: false, schema: {type: string}}
+        - {name: limit, in: query, required: false, schema: {type: integer}}
+      responses:
+        '200': {description: "List 1C agent commands (journal; no payload/result bodies)"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+  /api/v1/onec/commands/{commandId}:
+    get:
+      tags:
+        - 1C integration
+      operationId: getOnecCommand
+      summary: "Get a 1C agent command; payload/result bodies only with onec.manage or onec.commands.send"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: commandId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: "Get a 1C agent command; payload/result bodies only with onec.manage or onec.commands.send"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '400': {description: "Invalid command id"}
+        '404': {description: "Command not found"}
+  /api/v1/onec/agents/{agentId}/commands:
+    post:
+      tags:
+        - 1C integration
+      operationId: sendOnecCommand
+      summary: "Queue an admin command or the integration probe for a 1C agent (Idempotency-Key required)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.commands.send
+      parameters:
+        - {name: agentId, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 200}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/OnecOperatorCommand'}}}
+      responses:
+        '201': {description: "Queue an admin command or the integration probe for a 1C agent (Idempotency-Key required)"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '400': {description: "Idempotency-Key missing"}
+        '404': {description: "Agent not found"}
+        '409': {description: "Idempotency key reused for a different command"}
+        '422': {description: "Type not allowed, invalid payload or payload over the agent limits"}
+  /api/v1/onec/commands/{commandId}/cancel:
+    post:
+      tags:
+        - 1C integration
+      operationId: cancelOnecCommand
+      summary: "Cancel a 1C agent command that the agent has not received yet"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.commands.send
+      parameters:
+        - {name: commandId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: "Cancel a 1C agent command that the agent has not received yet"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '404': {description: "Command not found"}
+        '409': {description: "Already received by the agent or completed"}
+  /api/integration/1c-agents/v1/commands/lease:
+    post:
+      tags:
+        - 1C agent protocol
+      operationId: onecAgentCommandLease
+      summary: "Long poll for the next command (up to maxWaitSeconds); one command per response"
+      description: >-
+        Served only on the dedicated mutual-TLS host; see onecAgentSessionStart.
+      security: []
+      x-auth: onec-agent-mtls
+      parameters:
+        - {name: X-Agent-Id, in: header, required: true, schema: {type: string}}
+        - {name: X-Request-Id, in: header, required: false, schema: {type: string}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/OnecLeaseRequest'}}}
+      responses:
+        '200':
+          description: OK
+          content: {application/json: {schema: {$ref: '#/components/schemas/OnecLeaseResponse'}}}
+        '400': {description: "Invalid request"}
+        '409': {description: "SESSION_EXPIRED: start a new session"}
+        '403': {description: Certificate unknown, mismatched or agent blocked}
+  /api/integration/1c-agents/v1/commands/{commandId}/received:
+    post:
+      tags:
+        - 1C agent protocol
+      operationId: onecAgentCommandReceived
+      summary: "Acknowledge a leased command as durably received (idempotent)"
+      description: >-
+        Served only on the dedicated mutual-TLS host; see onecAgentSessionStart.
+      security: []
+      x-auth: onec-agent-mtls
+      parameters:
+        - {name: X-Agent-Id, in: header, required: true, schema: {type: string}}
+        - {name: X-Request-Id, in: header, required: false, schema: {type: string}}
+        - {name: commandId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/OnecReceivedRequest'}}}
+      responses:
+        '204': {description: OK}
+        '404': {description: "Command not found"}
+        '409': {description: "PAYLOAD_HASH_MISMATCH"}
+        '403': {description: Certificate unknown, mismatched or agent blocked}
+  /api/integration/1c-agents/v1/commands/{commandId}/result:
+    put:
+      tags:
+        - 1C agent protocol
+      operationId: onecAgentCommandResult
+      summary: "Store the command result byte for byte (repeat of the same bytes -> 204)"
+      description: >-
+        Served only on the dedicated mutual-TLS host; see onecAgentSessionStart.
+      security: []
+      x-auth: onec-agent-mtls
+      parameters:
+        - {name: X-Agent-Id, in: header, required: true, schema: {type: string}}
+        - {name: X-Request-Id, in: header, required: false, schema: {type: string}}
+        - {name: commandId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/OnecCommandResult'}}}
+      responses:
+        '204': {description: OK}
+        '400': {description: "Invalid result body"}
+        '404': {description: "Command not found"}
+        '409': {description: "RESULT_CONFLICT: a different result is stored"}
+        '403': {description: Certificate unknown, mismatched or agent blocked}
 
 components:
   securitySchemes:
@@ -17509,6 +17677,71 @@ components:
                   requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
 
   schemas:
+    OnecOperatorCommand:
+      type: object
+      additionalProperties: false
+      required: [commandType]
+      properties:
+        commandType: {type: string, enum: [start_full_sync, reload_entity, pause_etl, resume_etl, run_connectivity_test, collect_diagnostics, rotate_certificate_hint, integration_probe]}
+        payload: {type: object, description: 'Per type: start_full_sync {entities: string[]}, reload_entity {entity}, integration_probe {marker 1..256}, others {}'}
+        priority: {type: integer, minimum: -1000, maximum: 1000, default: 0}
+        orderingKey: {type: string, nullable: true, maxLength: 200}
+        notBeforeUtc: {type: string, format: date-time, nullable: true}
+        expiresAtUtc: {type: string, format: date-time, nullable: true}
+    OnecLeaseRequest:
+      type: object
+      required: [sessionId]
+      properties:
+        sessionId: {type: string, format: uuid}
+        supportedCommandTypes: {type: array, items: {type: string}}
+        maxWaitSeconds: {type: integer, minimum: 1, maximum: 120, default: 25}
+        currentLoad:
+          type: object
+          properties:
+            executing: {type: integer, minimum: 0}
+            capacity: {type: integer, minimum: 0}
+    OnecLeaseResponse:
+      type: object
+      required: [hasCommand]
+      properties:
+        hasCommand: {type: boolean}
+        leaseId: {type: string, format: uuid}
+        leaseExpiresAtUtc: {type: string, format: date-time}
+        command:
+          type: object
+          description: 'Envelope; payload is the stored canonical JSON (agent-payload-sha256-base64-v1) sent verbatim.'
+          properties:
+            commandId: {type: string, format: uuid}
+            commandType: {type: string}
+            payloadVersion: {type: integer}
+            priority: {type: integer}
+            orderingKey: {type: string, nullable: true}
+            correlationId: {type: string, format: uuid, nullable: true}
+            createdAtUtc: {type: string, format: date-time}
+            notBeforeUtc: {type: string, format: date-time, nullable: true}
+            expiresAtUtc: {type: string, format: date-time, nullable: true}
+            requestedBy: {type: object, nullable: true}
+            payloadHash: {type: string}
+            payload: {type: object}
+    OnecReceivedRequest:
+      type: object
+      required: [leaseId, payloadHash]
+      properties:
+        leaseId: {type: string, format: uuid}
+        receivedAtUtc: {type: string, format: date-time}
+        payloadHash: {type: string}
+    OnecCommandResult:
+      type: object
+      required: [commandId, status, resultVersion]
+      properties:
+        commandId: {type: string, format: uuid}
+        status: {type: string, enum: [succeeded, business_error, dead_letter, expired]}
+        resultVersion: {type: integer, enum: [1]}
+        completedAtUtc: {type: string, format: date-time}
+        document: {type: object}
+        data: {type: object}
+        warnings: {type: array, items: {type: object}}
+        error: {type: object, nullable: true}
     OnecSourceCreate:
       type: object
       additionalProperties: false

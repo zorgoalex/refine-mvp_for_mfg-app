@@ -8,6 +8,7 @@ import {
   ONEC_ALERT_SEVERITY_LABELS,
   ONEC_ALERT_STATE_LABELS,
   onecAlertKindLabel,
+  onecAlertResolvable,
   onecIncidentKindLabel,
 } from './onecFormat';
 
@@ -104,6 +105,16 @@ export function AlertsIncidentsTab({ agents, canManage, canView }: AlertsInciden
     }
   };
 
+  const resolveAlert = async (alertId: number) => {
+    try {
+      await onecApi.resolveAlert(alertId);
+      message.success('Алерт закрыт');
+      void loadAlerts();
+    } catch (err) {
+      message.error(err instanceof ApiError ? err.message : 'Не удалось закрыть алерт');
+    }
+  };
+
   const resolveIncident = async (incidentId: number) => {
     try {
       await onecApi.resolveIncident(incidentId);
@@ -157,12 +168,20 @@ export function AlertsIncidentsTab({ agents, canManage, canView }: AlertsInciden
             {
               title: '',
               key: 'actions',
-              render: (_: unknown, alert: OnecAlert) =>
-                canView && alert.state === 'open' ? (
-                  <Button size="small" onClick={() => void acknowledgeAlert(alert.alertId)}>
-                    Подтвердить
-                  </Button>
-                ) : null,
+              render: (_: unknown, alert: OnecAlert) => (
+                <Space size={4}>
+                  {canView && alert.state === 'open' ? (
+                    <Button size="small" onClick={() => void acknowledgeAlert(alert.alertId)}>
+                      Подтвердить
+                    </Button>
+                  ) : null}
+                  {canManage && onecAlertResolvable(alert.kind, alert.state) ? (
+                    <Button size="small" onClick={() => void resolveAlert(alert.alertId)}>
+                      Закрыть
+                    </Button>
+                  ) : null}
+                </Space>
+              ),
             },
           ]}
         />

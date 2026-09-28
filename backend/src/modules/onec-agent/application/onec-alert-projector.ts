@@ -125,6 +125,37 @@ export class OnecAlertProjector {
           details: {},
         });
         return;
+      case 'onec.command.completed': {
+        // Only failures that need an operator become alerts; success is audit + event only.
+        const status = str(p.status);
+        if (status !== 'dead_letter') return;
+        await this.repository.upsertAlert(tx, {
+          kind: 'command_dead_letter',
+          agentId,
+          sourceId,
+          certId: null,
+          severity: 'critical',
+          dedupeKey: `command_dead_letter:${str(p.commandId)}`,
+          oneShot: true,
+          details: { commandId: str(p.commandId), commandType: str(p.commandType), errorCode: str(p.errorCode) },
+        });
+        return;
+      }
+      case 'onec.command.expired_undelivered':
+        // A late receipt may have landed before this relay: then the alert would be false.
+        const expiredCommandId = str(p.commandId);
+        if (expiredCommandId && (await this.repository.commandReceivedForUpdate(tx, expiredCommandId))) return;
+        await this.repository.upsertAlert(tx, {
+          kind: 'command_expired_undelivered',
+          agentId,
+          sourceId,
+          certId: null,
+          severity: 'warning',
+          dedupeKey: `command_expired_undelivered:${str(p.commandId)}`,
+          oneShot: true,
+          details: { commandId: str(p.commandId), commandType: str(p.commandType) },
+        });
+        return;
       default:
         throw new UnknownOnecEventError(event.eventType);
     }

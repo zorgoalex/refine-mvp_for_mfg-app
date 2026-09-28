@@ -10,6 +10,7 @@ const drawer = read('./AgentDetailsDrawer.tsx');
 const configTab = read('./ConfigurationTab.tsx');
 const alertsTab = read('./AlertsIncidentsTab.tsx');
 const entityModal = read('./ConfigEntityModal.tsx');
+const commandsTab = read('./CommandsTab.tsx');
 
 describe('Onec (1C integration) UI wiring', () => {
   it('gates the whole section on the backend flag and onec permissions', () => {
@@ -30,7 +31,7 @@ describe('Onec (1C integration) UI wiring', () => {
   });
 
   it('talks to the backend admin API only, never GraphQL', () => {
-    for (const source of [api, agentsTab, drawer, configTab, alertsTab]) {
+    for (const source of [api, agentsTab, drawer, configTab, alertsTab, commandsTab]) {
       expect(source).not.toMatch(/gql`|useMutation\(|useQuery\(\s*gql/);
     }
     expect(api).toMatch(/httpClient\.get/);
@@ -105,5 +106,47 @@ describe('Onec (1C integration) UI wiring', () => {
     expect(tab).toContain('const seq = ++validateSeq.current;');
     expect(tab).toMatch(/if \(isCurrent\(\)\) setValidationIssues\(result\.ok \? \[\] : result\.issues\)/);
     expect(tab).toMatch(/if \(isCurrent\(\)\) setValidationIssues\(null\)/);
+  });
+
+  it('adds a "Команды" tab wired to the backend command journal, gated on onec.commands.send', () => {
+    expect(page).toMatch(/canSendCommands\s*=\s*can\('onec\.commands\.send'\)/);
+    expect(page).toMatch(/key:\s*'commands'/);
+    expect(page).toMatch(/label:\s*'Команды'/);
+    expect(page).toMatch(/<CommandsTab[\s\S]{0,120}canSend=\{canSendCommands\}/);
+    expect(api).toMatch(/listCommands\(/);
+    expect(api).toMatch(/getCommand\(/);
+    expect(api).toMatch(/sendCommand\(/);
+    expect(api).toMatch(/cancelCommand\(/);
+  });
+
+  it('gates sending and cancelling commands behind onec.commands.send, never onec.view alone', () => {
+    expect(commandsTab).toMatch(/canSend &&[\s\S]{0,60}Button[\s\S]{0,80}Отправить команду/);
+    expect(commandsTab).toMatch(/canSend && onecCommandCancellable\(/);
+  });
+
+  it('keeps one Idempotency-Key per intent (new key on any form change) and sends it on the request', () => {
+    expect(commandsTab).toMatch(/useState<string>\(\(\) => crypto\.randomUUID\(\)\)/);
+    expect(commandsTab).toMatch(/onValuesChange=\{\(changed\) => \{\s*setIdempotencyKey\(crypto\.randomUUID\(\)\)/);
+    expect(commandsTab).toMatch(/onecApi\.sendCommand\(values\.agentId, idempotencyKey,/);
+    expect(api).toMatch(/headers:\s*\{\s*'Idempotency-Key':\s*idempotencyKey\s*\}/);
+  });
+
+  it('drops stale journal responses and resets entity choices when the agent changes', () => {
+    expect(commandsTab).toMatch(/if \(seq !== requestSeq\.current\) return;/);
+    expect(commandsTab).toMatch(/form\.setFieldsValue\(\{ entities: \[\], entity: undefined \}\)/);
+    expect(commandsTab).toMatch(/\[agents, canSend, cancelCommand\]/);
+    // A late cancel response refreshes the journal for the current filters.
+    expect(commandsTab).toMatch(/loadRef\.current = load;/);
+    const cancelBody = commandsTab.slice(commandsTab.indexOf('const cancelCommand = useCallback'), commandsTab.indexOf('const columns = useMemo'));
+    expect(cancelBody).not.toMatch(/void load\(\)/);
+  });
+
+  it('builds admin/probe command payloads exactly as the backend schemas expect', () => {
+    expect(commandsTab).toMatch(/onecCommandPayloadFromForm\(/);
+  });
+
+  it('keeps Table/Tooltip imports in CommandsTab routed through the delayed wrapper', () => {
+    expect(commandsTab).toMatch(/from '\.\.\/\.\.\/ui\/tooltipDelay'/);
+    expect(commandsTab).not.toMatch(/import\s+\{[^}]*\b(Table|Tooltip|Popover)\b[^}]*\}\s+from\s+'antd'/);
   });
 });

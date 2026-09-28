@@ -1,4 +1,4 @@
-import { createServer, type Server } from 'node:http';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { RequestMethod, type INestApplication } from '@nestjs/common';
 import { json } from 'express';
 import { ONEC_AGENT_API_PATH } from './onec-runtime-config.service';
@@ -25,7 +25,12 @@ export function mountOnecAgentHttp(app: INestApplication, options: { enabled: bo
       next();
     },
   );
-  app.use(`/${ONEC_AGENT_API_PATH}`, rejectNonJsonBody, json({ limit: '2mb' }), bodyParserErrorHandler);
+  app.use(`/${ONEC_AGENT_API_PATH}`, rejectNonJsonBody, json({ limit: '2mb', verify: captureRawBody }), bodyParserErrorHandler);
+}
+
+/** Keeps the exact request bytes: `PUT result` must be stored/compared byte for byte. */
+function captureRawBody(req: IncomingMessage, _res: ServerResponse, buffer: Buffer): void {
+  (req as IncomingMessage & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
 }
 
 /**

@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { DatabaseService } from '../../../database/database.service';
+import { PgOnecCommandRepository } from '../adapters/pg-onec-command-repository';
 import { PgOnecRepository } from '../adapters/pg-onec-repository';
 import { OnecRuntimeConfigService } from '../onec-runtime-config.service';
 import { buildOnecEvent } from '../domain/onec-events';
@@ -37,6 +38,7 @@ export class OnecMonitorService implements OnModuleInit, OnModuleDestroy {
     @Inject(PgOnecRepository) private readonly repository: PgOnecRepository,
     @Inject(DatabaseService) private readonly database: DatabaseService,
     @Inject(OnecAlertProjector) private readonly projector: OnecAlertProjector,
+    @Inject(PgOnecCommandRepository) private readonly commands: PgOnecCommandRepository,
   ) {}
 
   onModuleInit(): void {
@@ -58,9 +60,10 @@ export class OnecMonitorService implements OnModuleInit, OnModuleDestroy {
       await this.database.withAdvisoryLock('onec-agent-monitor', async () => {
         await this.detectSilentAgents(now);
         await this.detectExpiringCertificates(now);
+        await this.expireUndeliveredCommands(now);
         await this.relayOutbox();
         if (now.getTime() - this.lastRetentionAt >= RETENTION_EVERY_MS) {
-          const removed = await this.repository.applyRetention();
+          const removed = { ...(await this.repository.applyRetention()), commandPayloadsPurged: await this.commands.purgeOldPayloads() };
           this.lastRetentionAt = now.getTime();
           this.logger.log(`1C retention: ${JSON.stringify(removed)}`);
         }
@@ -116,6 +119,30 @@ export class OnecMonitorService implements OnModuleInit, OnModuleDestroy {
         }),
       );
     }
+  }
+
+  /** Commands whose expiresAt passed before the agent received them (never delivered). */
+  async expireUndeliveredCommands(now: Date): Promise<number> {
+    return this.commands.transaction(async (tx) => {
+      const expired = await this.commands.expireUndelivered(tx);
+      for (const command of expired) {
+        await this.repository.insertOutboxEvent(
+          tx,
+          buildOnecEvent({
+            ...systemEventBase(now),
+            eventType: 'onec.command.expired_undelivered',
+            severity: 'warning',
+            agentId: command.agentId,
+            sourceId: command.sourceId,
+            subject: { type: 'onec_agent_command', id: command.commandId },
+            data: { commandId: command.commandId, commandType: command.commandType, sourceModule: command.sourceModule },
+            occurredAt: now,
+            idempotencyKey: `onec.command.expired_undelivered:${command.commandId}`,
+          }),
+        );
+      }
+      return expired.length;
+    });
   }
 
   async relayOutbox(): Promise<number> {

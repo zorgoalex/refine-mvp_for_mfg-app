@@ -7,6 +7,7 @@ import { Controller, Get, Module, RequestMethod, type INestApplication } from '@
 import { NestFactory } from '@nestjs/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { OnecAgentProtocolService } from './application/onec-agent-protocol.service';
+import { OnecCommandsService } from './application/onec-commands.service';
 import { ApiErrorFilter } from '../../common/errors/api-error.filter';
 import { PgOnecRepository } from './adapters/pg-onec-repository';
 import { RateLimitService } from '../../rate-limit/rate-limit.service';
@@ -47,6 +48,7 @@ Module({
   controllers: [OnecAgentController, PingController],
   providers: [
     { provide: OnecRuntimeConfigService, useValue: runtimeStub },
+    { provide: OnecCommandsService, useValue: { lease: async () => ({ hasCommand: false }), received: async () => undefined, result: async () => undefined } },
     { provide: RateLimitService, useValue: { assertAllowed: async () => undefined, refund: async () => undefined } },
     { provide: PgOnecRepository, useValue: repositoryStub },
     {

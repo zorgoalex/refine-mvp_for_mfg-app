@@ -6,6 +6,8 @@
 import type {
   OnecAgentConfiguration,
   OnecAgentMode,
+  OnecCommandRequestedBy,
+  OnecCommandStatus,
   OnecConnectionState,
   OnecEtlEntity,
   OnecHeartbeatState,
@@ -96,7 +98,16 @@ export const ONEC_ALERT_KIND_LABELS: Record<string, string> = {
   certificate_expiring: 'Истекает сертификат',
   config_rejected: 'Агент отклонил конфигурацию',
   source_identity_changed: 'Сменилась база 1С',
+  command_dead_letter: 'Команда не выполнена',
+  command_expired_undelivered: 'Команда не доставлена в срок',
 };
+
+/** Alerts about one past command: nothing re-derives them, the operator closes them once handled. */
+export const ONEC_OPERATOR_RESOLVABLE_ALERT_KINDS: readonly string[] = ['command_dead_letter', 'command_expired_undelivered'];
+
+export function onecAlertResolvable(kind: string, state: string): boolean {
+  return state !== 'resolved' && ONEC_OPERATOR_RESOLVABLE_ALERT_KINDS.includes(kind);
+}
 
 export function onecAlertKindLabel(kind: string): string {
   return ONEC_ALERT_KIND_LABELS[kind] ?? kind;
@@ -107,6 +118,11 @@ export const ONEC_INCIDENT_KIND_LABELS: Record<string, string> = {
   unknown_certificate: 'Неизвестный сертификат',
   agent_cert_mismatch: 'Несоответствие сертификата агента',
   source_identity_changed: 'Сменилась база 1С',
+  command_hash_mismatch: 'Хеш команды не совпал',
+  result_conflict: 'Другой результат команды',
+  result_for_unknown_command: 'Результат неизвестной команды',
+  result_for_cancelled_command: 'Отменённая команда всё же выполнена',
+  late_delivery_of_expired_command: 'Просроченная команда всё же доставлена',
 };
 
 export function onecIncidentKindLabel(kind: string): string {
@@ -135,10 +151,114 @@ export const ONEC_COMMAND_TYPE_LABELS: Record<string, string> = {
   create_material_receipt: 'Создать поступление материалов',
   create_material_writeoff: 'Создать списание материалов',
   create_payment_document: 'Создать платёжный документ',
+  start_full_sync: 'Запустить полную выгрузку',
+  reload_entity: 'Перезагрузить сущность',
+  pause_etl: 'Приостановить выгрузку',
+  resume_etl: 'Возобновить выгрузку',
+  run_connectivity_test: 'Проверить связь',
+  collect_diagnostics: 'Собрать диагностику',
+  rotate_certificate_hint: 'Запросить смену сертификата',
 };
 
 export function onecCommandTypeLabel(type: string): string {
   return ONEC_COMMAND_TYPE_LABELS[type] ?? type;
+}
+
+/** One-line explanations shown next to the command type in the "Отправить команду" dialog. */
+export const ONEC_COMMAND_TYPE_DESCRIPTIONS: Record<string, string> = {
+  integration_probe:
+    'Проверяет весь путь ERP → агент → расширение 1С без создания документов.',
+  start_full_sync: 'Ставит агенту задачу выгрузить заново указанные сущности (или все включённые).',
+  reload_entity: 'Ставит агенту задачу перезагрузить одну сущность выгрузки с нуля.',
+  pause_etl: 'Приостанавливает периодическую выгрузку данных агентом.',
+  resume_etl: 'Возобновляет ранее приостановленную выгрузку данных.',
+  run_connectivity_test: 'Просит агента проверить соединение с 1С и сообщить результат.',
+  collect_diagnostics: 'Просит агента собрать диагностическую информацию о своей работе.',
+  rotate_certificate_hint: 'Сообщает агенту, что пора запросить смену клиентского сертификата.',
+};
+
+export function onecCommandTypeDescription(type: string): string {
+  return ONEC_COMMAND_TYPE_DESCRIPTIONS[type] ?? '';
+}
+
+export const ONEC_COMMAND_STATUS_LABELS: Record<OnecCommandStatus, string> = {
+  queued: 'В очереди',
+  leased: 'Выдана агенту',
+  received: 'Выполняется',
+  succeeded: 'Успешно',
+  business_error: 'Ошибка выполнения',
+  dead_letter: 'Не выполнена',
+  expired: 'Истёк срок',
+  cancelled: 'Отменена',
+  expired_undelivered: 'Истёк срок (не доставлена)',
+};
+
+export function onecCommandStatusLabel(status: string): string {
+  return (ONEC_COMMAND_STATUS_LABELS as Record<string, string>)[status] ?? status;
+}
+
+/** Tag colors for the command journal (spec: queued/leased blue, received processing,
+ * succeeded green, business_error orange, dead_letter red, expired* grey, cancelled default). */
+export const ONEC_COMMAND_STATUS_COLORS: Record<OnecCommandStatus, string | undefined> = {
+  queued: 'blue',
+  leased: 'blue',
+  received: 'processing',
+  succeeded: 'green',
+  business_error: 'orange',
+  dead_letter: 'red',
+  expired: 'default',
+  expired_undelivered: 'default',
+  cancelled: undefined,
+};
+
+export function onecCommandStatusColor(status: string): string | undefined {
+  return (ONEC_COMMAND_STATUS_COLORS as Record<string, string | undefined>)[status];
+}
+
+/** Only a command the agent has not yet finished processing may be cancelled (spec §4.7). */
+export function onecCommandCancellable(status: string): boolean {
+  return status === 'queued' || status === 'leased';
+}
+
+/** Human-readable source of a command: the admin UI names the operator, others show the module code. */
+export function onecCommandSourceLabel(input: {
+  sourceModule: string;
+  requestedBy: OnecCommandRequestedBy | null;
+}): string {
+  if (input.sourceModule === 'onec_admin') {
+    return input.requestedBy ? `Администратор: ${input.requestedBy.displayName}` : 'Администратор';
+  }
+  return input.sourceModule;
+}
+
+/** Default `integration_probe` marker offered in the "Отправить команду" dialog. */
+export function onecDefaultProbeMarker(now: Date = new Date()): string {
+  return `ERP probe ${now.toLocaleString('ru-RU')}`;
+}
+
+/**
+ * Builds exactly the payload the backend `OPERATOR_COMMAND_SCHEMAS` expect for
+ * each operator-sendable command type; admin commands with no fields get `{}`.
+ */
+export function onecCommandPayloadFromForm(
+  type: string,
+  values: { entities?: string[]; entity?: string; marker?: string },
+): Record<string, unknown> {
+  switch (type) {
+    case 'start_full_sync':
+      return { entities: (values.entities ?? []).map((v) => v.trim()).filter((v) => v.length > 0) };
+    case 'reload_entity':
+      return { entity: (values.entity ?? '').trim() };
+    case 'integration_probe':
+      return { marker: (values.marker ?? '').trim() };
+    case 'pause_etl':
+    case 'resume_etl':
+    case 'run_connectivity_test':
+    case 'collect_diagnostics':
+    case 'rotate_certificate_hint':
+    default:
+      return {};
+  }
 }
 
 export type OnecCertExpirySeverity = 'critical' | 'warning' | 'ok' | 'none';

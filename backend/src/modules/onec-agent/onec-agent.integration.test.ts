@@ -11,6 +11,7 @@ import type { BackendEnv } from '../../config/env.validation';
 import { DatabaseService } from '../../database/database.service';
 import type { PerformanceQueryTelemetryService } from '../../performance/performance-query-telemetry.service';
 import type { CurrentUser } from '../../permissions/current-user';
+import { PgOnecCommandRepository } from './adapters/pg-onec-command-repository';
 import { PgOnecRepository } from './adapters/pg-onec-repository';
 import { OnecAdminService } from './application/onec-admin.service';
 import { OnecAgentProtocolService } from './application/onec-agent-protocol.service';
@@ -94,7 +95,7 @@ suite('1C agent E1 — isolated PostgreSQL', () => {
     const audit = new OnecAuditWriter(repo);
     admin = new OnecAdminService(repo, audit, runtime);
     protocol = new OnecAgentProtocolService(repo, audit);
-    monitor = new OnecMonitorService(runtime, repo, db, new OnecAlertProjector(repo));
+    monitor = new OnecMonitorService(runtime, repo, db, new OnecAlertProjector(repo), new PgOnecCommandRepository(db));
     const rateLimit = { assertAllowed: async () => undefined, refund: async () => undefined } as unknown as RateLimitService;
     guard = new OnecAgentAuthGuard(new Reflector(), runtime, repo, rateLimit);
   }, 60000);
