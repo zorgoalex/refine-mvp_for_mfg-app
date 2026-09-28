@@ -26,6 +26,12 @@ import { getCurrentUserRoleKey } from './resourceVisibility';
 
 type AnyObject = Record<string, any>;
 
+/** Strip columns whose values can only be written by catalog-import backend commands. */
+export function stripFilmCatalogOwnedFields(value: AnyObject): AnyObject {
+  const { canonical_film_id: _canonicalFilmId, catalog_key: _catalogKey, ref_key_1c: _refKey1c, ...rest } = value;
+  return rest;
+}
+
 interface HasuraRequestOptions {
   cache?: RequestCache;
 }
@@ -300,6 +306,9 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "film_texture",
     "is_active",
     "ref_key_1c",
+    "canonical_film_id",
+    "nomenclature_type",
+    "nomenclature_category",
     "created_by",
     "edited_by",
     "created_at",
@@ -1790,7 +1799,11 @@ export const dataProvider = (_apiUrl: string) => {
 
       // Auto-add is_active filter for reference tables (unless explicitly overridden)
       let enhancedFilters = filters || [];
-      if (ACTIVE_FILTERED_RESOURCES.includes(resource)) {
+      // Films looked up by explicit id(s) show historical references: merged duplicates are
+      // inactive after the 1C catalog import but old orders still point at them.
+      const isFilmIdLookup = resource === "films"
+        && enhancedFilters.some((f: any) => f.field === "film_id" && (f.operator === "eq" || f.operator === "in"));
+      if (ACTIVE_FILTERED_RESOURCES.includes(resource) && !isFilmIdLookup) {
         const hasIsActiveFilter = enhancedFilters.some((f: any) => f.field === "is_active");
         if (!hasIsActiveFilter) {
           enhancedFilters = [...enhancedFilters, { field: "is_active", operator: "eq", value: true }];
@@ -1914,7 +1927,10 @@ export const dataProvider = (_apiUrl: string) => {
       // console.log('[dataProvider.create] after omitting PK:', restVars);
 
       // Sanitize and drop null/undefined to avoid NOT NULL violations on inserts
-      const sanitized: AnyObject = sanitizeVariables(restVars, resource);
+      const sanitized: AnyObject = sanitizeVariables(
+        resource === "films" ? stripFilmCatalogOwnedFields(restVars) : restVars,
+        resource,
+      );
       // console.log('[dataProvider.create] after sanitize:', sanitized);
 
       const cleaned: AnyObject = {};
@@ -1994,7 +2010,7 @@ export const dataProvider = (_apiUrl: string) => {
         shadow_of_sheet_material_type_id: _shadowOfU,
         ...rest
       } = variables || {};
-      const payloadForUpdate = rest;
+      const payloadForUpdate = resource === "films" ? stripFilmCatalogOwnedFields(rest) : rest;
       const { literal: setLiteral, varHeader, varValues } = buildGqlInput(
         sanitizeVariables(payloadForUpdate, resource),
       );

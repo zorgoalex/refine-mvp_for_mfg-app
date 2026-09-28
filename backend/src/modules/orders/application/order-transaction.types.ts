@@ -1,4 +1,5 @@
 import type { MdfOrderWriter } from '../../mdf-board/application/mdf-command-boundary';
+import type { FilmReferenceResolution, FilmReferenceWriteInput } from '../domain/film-reference-resolution';
 import type { MdfOrderCommandHandle } from '../../mdf-board/adapters/mdf-order-cascade';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName } from '../../../permissions/permissions';
@@ -328,6 +329,11 @@ export interface OrderRestoreOutboxInput extends OrderRestoreAuditInput {
 
 export interface OrderWriteUnitOfWork {
   setSessionUser(userId: string): Promise<void>;
+  /**
+   * Каталог плёнок: новые/изменённые ссылки на дубль → канон под FOR SHARE,
+   * неактивная итоговая запись → 422 FILM_INACTIVE. Optional in test doubles.
+   */
+  resolveFilmReferencesForWrite?(orderId: number | null, input: FilmReferenceWriteInput): Promise<FilmReferenceResolution>;
   /** Optional in test doubles; the PostgreSQL unit of work always implements it. */
   openMdfOrderCommand?(writer: MdfOrderWriter): Promise<MdfOrderCommandHandle>;
   getTransactionClient(): TransactionClient;

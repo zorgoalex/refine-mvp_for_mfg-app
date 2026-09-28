@@ -23,6 +23,7 @@ import { OnecAgentAuthGuard } from './http/onec-agent-auth.guard';
 import { OnecAgentController } from './http/onec-agent.controller';
 import { OnecPermissionsGuard } from './http/onec-permissions.guard';
 import { OnecRuntimeConfigService } from './onec-runtime-config.service';
+import { OnecCatalogReader } from './onec-catalog-reader';
 
 /**
  * 1C agent integration (transport). Business mapping (orders, payments,
@@ -53,8 +54,9 @@ import { OnecRuntimeConfigService } from './onec-runtime-config.service';
     OnecEtlRevocationService,
     PgOnecMatchingRepository,
     OnecMatchingService,
+    OnecCatalogReader,
   ],
   // Port for business modules (E4): OnecCommandsService.enqueue(tx, …).
-  exports: [OnecCommandsService],
+  exports: [OnecCommandsService, OnecCatalogReader],
 })
 export class OnecAgentModule {}

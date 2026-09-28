@@ -1,0 +1,73 @@
+import type { CurrentUser } from '../../../permissions/current-user';
+import type { LineMatchStatus, LineQuantityStatus, StockDocType } from '../domain/stock-posting';
+
+export type StockDocStatus = 'draft' | 'posted' | 'cancelled';
+
+export interface WarehouseDto { warehouseId: number; name: string }
+
+export interface StockBalanceDto {
+  warehouseId: number; filmId: number; filmName: string; vendorId: number | null; vendorName: string | null;
+  quantity: number; lastMovementAt: string | null;
+}
+
+export interface StockDocumentSummaryDto {
+  documentId: number; docType: StockDocType; status: StockDocStatus; warehouseId: number; docDate: string;
+  source: 'manual' | 'import'; orderId: number | null; orderName: string | null;
+  fileName: string | null; comment: string | null; linesCount: number; totalQuantity: number;
+  version: number; createdAt: string; createdByName: string | null; postedAt: string | null; postedByName: string | null;
+}
+
+export interface StockDocumentLineDto {
+  lineId: number; lineNo: number; rawName: string | null; rawSupplier: string | null; rawQuantity: string | null;
+  filmId: number | null; filmName: string | null; quantity: number | null;
+  matchStatus: LineMatchStatus; quantityStatus: LineQuantityStatus;
+  suggestions: Array<{ filmId: number; filmName: string; score: number }>; issue: string | null;
+  balanceBefore: number | null; balanceAfter: number | null;
+}
+
+export interface StockDocumentDto extends StockDocumentSummaryDto {
+  /** Ранее проведённый документ с тем же SHA файла (повторная загрузка). */
+  previousPostedDocumentId: number | null;
+  lines: StockDocumentLineDto[];
+  movements: Array<{ filmId: number; filmName: string; movementType: string; delta: number; balanceBefore: number; balanceAfter: number }>;
+  unresolved: Array<{ lineId: number; lineNo: number; reason: 'match' | 'quantity' }>;
+  negativeAfter: Array<{ filmId: number; filmName: string; after: number }>;
+}
+
+export interface OrderFilmStockItemDto {
+  filmId: number; canonicalFilmId: number; canonicalName: string; vendorName: string | null;
+  stockLm: number | null; demandLm: number | null;
+  status: 'enough' | 'short' | 'none' | 'unknown_demand';
+}
+
+export interface CommandContext {
+  currentUser: CurrentUser;
+  requestId: string;
+  idempotencyKey: string;
+}
+
+export interface CreateManualDocumentInput {
+  docType: StockDocType; warehouseId: number; docDate: string; orderId: number | null; comment: string | null;
+  lines: Array<{ filmId: number; quantity: number }>; post: boolean; allowNegative: boolean;
+}
+
+export interface CreateImportDocumentInput {
+  docType: 'receipt' | 'inventory'; warehouseId: number; docDate: string;
+  fileName: string; fileSha256: string; sheetName: string;
+  rows: Array<{ rowNo: number; name: string; supplier: string | null; quantity: string | number | null }>;
+}
+
+export interface UpdateLineInput {
+  documentId: number; lineId: number; version: number;
+  filmId?: number; quantity?: number; confirmMatch?: boolean; confirmQuantity?: boolean; skip?: boolean;
+}
+
+export interface BalancesFilter {
+  warehouseId: number | null; vendorId: number | null; search: string | null;
+  nonZero: boolean; negative: boolean; offset: number; limit: number;
+}
+
+export interface DocumentsFilter {
+  type: StockDocType | null; status: StockDocStatus | null; from: string | null; to: string | null;
+  filmId: number | null; orderId: number | null; offset: number; limit: number;
+}

@@ -62,6 +62,8 @@ export type PermissionName =
   | 'doweling.create'
   | 'procurement.view'
   | 'procurement.manage'
+  | 'inventory.view'
+  | 'inventory.manage'
   | 'finance.view'
   | 'suppliers.view'
   | string;

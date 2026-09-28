@@ -1,4 +1,6 @@
 import { createHash } from 'crypto';
+import type { FilmReferenceResolution, FilmReferenceWriteInput } from '../domain/film-reference-resolution';
+import { resolveFilmReferencesForWrite } from './pg-film-reference-resolver';
 import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
@@ -290,6 +292,10 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
 
   async setSessionUser(userId: string): Promise<void> {
     await this.tx.query('SELECT set_session_user($1)', [userId]);
+  }
+
+  resolveFilmReferencesForWrite(orderId: number | null, input: FilmReferenceWriteInput): Promise<FilmReferenceResolution> {
+    return resolveFilmReferencesForWrite(this.tx, orderId, input);
   }
 
   async resolveProjectForCreate(input: {

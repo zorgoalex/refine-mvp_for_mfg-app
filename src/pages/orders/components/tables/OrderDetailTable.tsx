@@ -1,4 +1,5 @@
 import { resolveOrderBasisProject } from '../../../../utils/orderBasisProject';
+import { useFilmNamesWithInactive } from '../../../../hooks/useFilmNamesWithInactive';
 import { nameRule } from '../../../../utils/nameRules';
 import { Table, Tooltip } from '../../../../ui/tooltipDelay';
 // Order Details Table
@@ -99,6 +100,9 @@ import {
 import { useDeferredWorkspaceEditingKey } from '../../../../workspace/useDeferredWorkspaceEditingKey';
 import { millingTypeDimensionWarning } from '../../../../utils/millingTypeDimensions';
 import { newDetailMaterialDefault } from '../../newDetailMaterialDefault';
+import { useQuery } from '@tanstack/react-query';
+import { inventoryApi } from '../../../../api/inventoryApi';
+import { filmStockBadge } from '../../../inventory/filmStock';
 
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
@@ -829,6 +833,18 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const useBackendReferences = orderFormData.enabled;
   const bazisCutLinkEnabled = featureFlags.bazisCut && can('cut.view');
   const bazisProjectLinkEnabled = featureFlags.useBackendBazis && can('bazis.view');
+  const inventoryViewAllowed = featureFlags.inventory && can('inventory.view');
+  const filmStockQuery = useQuery({
+    queryKey: ['inventory', 'order-film-stock', header?.order_id],
+    queryFn: () => inventoryApi.orderFilmStock(header.order_id!),
+    enabled: inventoryViewAllowed && Number.isInteger(header?.order_id) && (header?.order_id ?? 0) > 0,
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+  const stockByFilmId = useMemo(
+    () => new Map((filmStockQuery.data?.items ?? []).map((item) => [item.filmId, item.stockLm])),
+    [filmStockQuery.data],
+  );
 
   // SP3: sheet picker gating (backend write + sheet_materials.view) + order-era
   // eligibility (create OR loaded order's sheet_eligible !== false).
@@ -2360,13 +2376,13 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           </Form.Item>
         ) : (
           <span style={{ fontSize: '11px' }}>
-            {getDisplayedField(d, 'film_id') ? (
-              <FilmCell
-                filmId={getDisplayedField(d, 'film_id')!}
-                namesById={filmNameById}
-                loading={referencesLoading}
-              />
-            ) : '—'}
+            {getDisplayedField(d, 'film_id') ? <>
+              <FilmCell filmId={getDisplayedField(d, 'film_id')!} namesById={filmNameById} loading={referencesLoading} />
+              {inventoryViewAllowed && editingKey === null && (() => {
+                const badge = filmStockBadge(stockByFilmId.get(getDisplayedField(d, 'film_id')!));
+                return <Tag color={badge.kind === 'none' ? 'red' : 'blue'} style={{ marginInlineStart: 4 }}>{badge.label}</Tag>;
+              })()}
+            </> : '—'}
           </span>
         );
       },
@@ -3287,7 +3303,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       useBackendReferences,
     ]
   );
-  const filmNameById = useMemo(
+  const activeFilmNameById = useMemo(
     () =>
       useBackendReferences
         ? orderFormData.references.filmNameById
@@ -3299,6 +3315,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       useBackendReferences,
     ]
   );
+  // Плёнки деталей, ставшие неактивными (дубли после импорта каталога 1С), — названия догружаются.
+  const detailFilmIds = useMemo(() => sortedDetails.map((detail) => detail.film_id ?? null), [sortedDetails]);
+  const filmNameById = useFilmNamesWithInactive(activeFilmNameById, detailFilmIds);
 
   const productionStatusNameById = useMemo(
     () =>

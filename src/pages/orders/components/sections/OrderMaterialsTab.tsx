@@ -16,11 +16,27 @@ import { computeOrderBathFilmUsage } from '../../../cut/cutFilmUsage';
 import { buildCutJobNameById, CutJobLinks } from '../../CutJobLinks';
 import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from '../../orderMaterialsSummary';
 import { businessOrderDetails } from '../../../../utils/orderDetailRows';
+import { useQuery } from '@tanstack/react-query';
+import { inventoryApi } from '../../../../api/inventoryApi';
+import { featureFlags } from '../../../../config/featureFlags';
+import { filmStockAvailability } from '../../../inventory/filmStock';
 
 const { Text } = Typography;
 
 export const OrderMaterialsTab: React.FC = () => {
   const { details, hdfDetails, header } = useOrderFormStore();
+  const inventoryViewAllowed = featureFlags.inventory && can('inventory.view');
+  const filmStockQuery = useQuery({
+    queryKey: ['inventory', 'order-film-stock', header.order_id],
+    queryFn: () => inventoryApi.orderFilmStock(header.order_id!),
+    enabled: inventoryViewAllowed && Number.isInteger(header.order_id) && (header.order_id ?? 0) > 0,
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+  const stockByFilmId = useMemo(
+    () => new Map((filmStockQuery.data?.items ?? []).map((item) => [item.filmId, item])),
+    [filmStockQuery.data],
+  );
   const businessDetails = useMemo(
     () => businessOrderDetails(details),
     [details],
@@ -63,9 +79,11 @@ export const OrderMaterialsTab: React.FC = () => {
     queryOptions: { enabled: hasLegacyMaterialIds },
   });
 
+  // Активные и неактивные: у старых заказов плёнка могла стать объединённым дублем.
   const { data: filmsData } = useList({
     resource: 'films',
     pagination: { pageSize: 10000 },
+    filters: [{ field: 'is_active', operator: 'in', value: [true, false] }],
   });
 
   // Создаем lookup maps
@@ -227,6 +245,22 @@ export const OrderMaterialsTab: React.FC = () => {
         <CutJobLinks cutJobIds={value} cutJobNameById={cutJobNameById} />
       ),
     },
+    ...(inventoryViewAllowed ? [
+      {
+        title: 'На складе, пог. м',
+        key: 'stockLm',
+        align: 'right' as const,
+        render: (_: unknown, row: (typeof filmMaterialRows)[number]) => {
+          const item = row.filmId === null ? undefined : stockByFilmId.get(row.filmId);
+          return item?.stockLm == null ? '—' : formatNumber(item.stockLm, 2);
+        },
+      },
+      {
+        title: 'Хватает',
+        key: 'stockStatus',
+        render: (_: unknown, row: (typeof filmMaterialRows)[number]) => filmStockAvailability(row.filmId === null ? undefined : stockByFilmId.get(row.filmId)?.status),
+      },
+    ] : []),
   ];
 
   return (
@@ -242,6 +276,7 @@ export const OrderMaterialsTab: React.FC = () => {
             <Text strong style={{ fontSize: 14 }}>
               Пленка
             </Text>
+            {inventoryViewAllowed && <div><Text type="secondary">Остаток на складе, без резерва</Text></div>}
           </div>
           <Table
             dataSource={filmMaterialRows}
@@ -251,7 +286,7 @@ export const OrderMaterialsTab: React.FC = () => {
             pagination={false}
             bordered
             loading={cutJobsLoading}
-            scroll={{ x: 680 }}
+            scroll={{ x: inventoryViewAllowed ? 900 : 680 }}
             locale={{
               emptyText: cutViewAllowed ? 'Нет данных по пленке' : 'Нет доступа к данным раскроя',
             }}
@@ -279,6 +314,7 @@ export const OrderMaterialsTab: React.FC = () => {
                     <Text strong style={{ fontSize: '1.1em' }}>{totalSheets > 0 ? totalSheets : '—'}</Text>
                   </Table.Summary.Cell>
                   <Table.Summary.Cell index={5} />
+                  {inventoryViewAllowed && <><Table.Summary.Cell index={6} /><Table.Summary.Cell index={7} /></>}
                 </Table.Summary.Row>
               );
             }}

@@ -49,4 +49,12 @@ describe('film filters', () => {
     expect(FILM_KEY_PATTERN.test('FILM-14')).toBe(false);
     expect(FILM_KEY_PATTERN.test('00000000')).toBe(false);
   });
+
+  it('filters nomenclature type/category and restores their query state', () => {
+    const filters = buildFilmFilters({ nomenclature_type: ' Запас ', nomenclature_category: ' ПЛЕНКА ', is_active: 'active' });
+    expect(filters).toContainEqual({ field: 'nomenclature_type', operator: 'contains', value: 'Запас' });
+    expect(filters).toContainEqual({ field: 'nomenclature_category', operator: 'contains', value: 'ПЛЕНКА' });
+    expect(readFilmFilters(filters)).toMatchObject({ nomenclature_type: 'Запас', nomenclature_category: 'ПЛЕНКА' });
+    expect(hasFilmFieldFilters(readFilmFilters(filters))).toBe(true);
+  });
 });

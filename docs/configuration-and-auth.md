@@ -197,6 +197,51 @@ scope `orders.view`. Порядок включения:
 проведённого документа 1С, отметку «Закуплено» снять нельзя (`409
 PROCUREMENT_LOCKED_BY_ONEC`) — сначала снимается распределение прихода.
 
+### Справочник плёнок: импорт каталога 1С
+
+`BACKEND_FILM_CATALOG_IMPORT_ENABLED` (backend, по умолчанию `false`) включает
+импорт каталога плёнок: `/api/v1/catalog-imports*` (черновик, сопоставление,
+применение, отмена, откат, выгрузка в Excel). При выключенном флаге эти маршруты
+отвечают `404`. Кнопку «Импорт каталога 1С» на странице `/films` показывает
+frontend-флаг `RUNTIME_CONFIG_FILM_CATALOG_IMPORT`.
+
+Права: импорт — `references.manage`; источник «Зеркало 1С» и пакеты, созданные из
+него, — дополнительно `onec.view` (проверяется при каждом запросе к пакету).
+История названий `GET /api/v1/films/{filmId}/name-history` и поиск похожих
+`GET /api/v1/films/similar` — `references.view`, работают без флага.
+
+Колонки `films.canonical_film_id`, `films.catalog_key` и `films.ref_key_1c`
+записывает только backend: Hasura разрешает запись в `films` лишь по явному списку
+колонок, а триггер базы отклоняет изменение служебных колонок вне операции
+импорта. Порядок включения:
+
+1. применить миграции `202_film_catalog_import.sql` и `203_film_stock.sql`
+   (аддитивны, совместимы с прежними frontend/backend) и перезагрузить схему Hasura
+   (`reload_metadata`), чтобы новые колонки `films` стали доступны для чтения;
+2. выкатить frontend (читает новые колонки, форма `/films` больше не отправляет
+   `ref_key_1c`) и backend;
+3. применить Hasura metadata для `films` (явный список колонок записи + preset
+   `edited_by`) — только после шага 2, иначе прежний frontend не сможет сохранить плёнку;
+4. выставить `BACKEND_FILM_CATALOG_IMPORT_ENABLED=true`, пересоздать backend и
+   включить `RUNTIME_CONFIG_FILM_CATALOG_IMPORT`.
+
+### Склад плёнки
+
+`BACKEND_INVENTORY_ENABLED` (backend, по умолчанию `false`) включает склад плёнки:
+`/api/v1/inventory/*` (склады, остатки, журнал документов, ручной приход/списание/
+инвентаризация, импорт файла остатков, проведение и отмена черновиков) и
+`GET /api/v1/orders/{orderId}/film-stock`. При выключенном флаге маршруты
+отвечают `404`. Frontend-флаг `RUNTIME_CONFIG_INVENTORY` показывает раздел
+«Склад → Остатки плёнки» и метки остатка в заказе.
+
+Права: чтение — `inventory.view`, изменения — `inventory.manage`. Документы,
+привязанные к заказу, видны и изменяемы только при `orders.view` и доступе к этому
+заказу. Команды записи требуют заголовок `Idempotency-Key`. Остатки ведутся по
+основной плёнке справочника; списание в минус требует подтверждения
+(`allowNegative`). Порядок включения: миграция `203_film_stock.sql` (после 202),
+затем `BACKEND_INVENTORY_ENABLED=true`, пересоздание backend и
+`RUNTIME_CONFIG_INVENTORY`.
+
 ### Листовые материалы
 
 `VITE_SHEET_MATERIALS_READS` либо runtime

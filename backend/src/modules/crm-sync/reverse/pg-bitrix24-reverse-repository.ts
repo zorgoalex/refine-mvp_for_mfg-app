@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { resolveFilmReferencesForWrite } from '../../orders/adapters/pg-film-reference-resolver';
 import { safeBitrixError } from '../../audit/application/bitrix-audit-sanitization';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { readOrderCatalogLines, prepareOrderCatalogLines, persistOrderCatalogLines, recordOrderCatalogLinesChange } from '../../orders/adapters/pg-order-catalog-lines';
@@ -2522,6 +2523,14 @@ export class PgBitrix24ReverseRepository {
             millingCostPerSqm,
           }, area),
         };
+      });
+      // Каталог плёнок: новые/изменённые ссылки на дубль → канон под FOR SHARE (заказ уже заблокирован).
+      const filmResolution = await resolveFilmReferencesForWrite(tx, orderId, {
+        headerFilmId: null,
+        details: normalized.map((detail) => ({ detailId: detail.id ?? null, filmId: detail.filmId })),
+      });
+      normalized.forEach((detail, index) => {
+        detail.filmId = filmResolution.detailFilmIds[index];
       });
       const retainedIds = normalized.flatMap((detail) => detail.id === undefined ? [] : [detail.id]);
       await tx.query(

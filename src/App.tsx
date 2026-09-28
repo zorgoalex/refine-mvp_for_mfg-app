@@ -92,6 +92,7 @@ const FilmList = lazy(async () => ({ default: (await import("./pages/films/list"
 const FilmCreate = lazy(async () => ({ default: (await import("./pages/films/create")).FilmCreate }));
 const FilmEdit = lazy(async () => ({ default: (await import("./pages/films/edit")).FilmEdit }));
 const FilmShow = lazy(async () => ({ default: (await import("./pages/films/show")).FilmShow }));
+const CatalogImportPage = lazy(async () => ({ default: (await import("./pages/films/catalog-import/CatalogImportPage")).CatalogImportPage }));
 
 const ClientList = lazy(async () => ({ default: (await import("./pages/clients/list")).ClientList }));
 const ClientCreate = lazy(async () => ({ default: (await import("./pages/clients/create")).ClientCreate }));
@@ -208,6 +209,7 @@ const OrderResourceRequirementShow = lazy(async () => ({ default: (await import(
 
 const OnecPurchaseDocumentList = lazy(async () => ({ default: (await import("./pages/onec_purchase_documents/list")).OnecPurchaseDocumentList }));
 const OnecPurchaseDocumentShow = lazy(async () => ({ default: (await import("./pages/onec_purchase_documents/show")).OnecPurchaseDocumentShow }));
+const FilmInventoryPage = lazy(async () => ({ default: (await import("./pages/inventory/FilmInventoryPage")).FilmInventoryPage }));
 
 // clients_analytics and payments_analytics each export two named components from one module.
 const ClientsAnalyticsList = lazy(async () => ({ default: (await import("./pages/clients_analytics")).ClientsAnalyticsList }));
@@ -421,6 +423,9 @@ const ThemedApp = () => {
                     ]
                   : []),
                 { name: 'cad', list: '/cad', meta: { label: 'CAD' } },
+                ...(featureFlags.inventory && can('inventory.view')
+                  ? [{ name: 'film-inventory', list: '/inventory/films', meta: { label: 'Остатки плёнки' } }]
+                  : []),
                 ...(featureFlags.useBackendCut
                   ? [
                       {
@@ -924,7 +929,10 @@ const ThemedApp = () => {
                     <Route path="create" element={<FilmCreate />} />
                     <Route path="edit/:id" element={<FilmEdit />} />
                     <Route path="show/:id" element={<FilmShow />} />
+                    <Route path="catalog-import" element={<CatalogImportPage />} />
+                    <Route path="catalog-import/:id" element={<CatalogImportPage />} />
                   </Route>
+                  <Route path="/inventory/films" element={featureFlags.inventory ? <PermissionRoute permission="inventory.view"><FilmInventoryPage /></PermissionRoute> : <Navigate to="/orders" replace />} />
                   <Route path="/clients" >
                     <Route index element={<ClientList />} />
                     <Route path="create" element={<ClientCreate />} />

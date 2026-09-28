@@ -1,4 +1,5 @@
 import { Tooltip } from '../../../../ui/tooltipDelay';
+import { useFilmNamesWithInactive } from '../../../../hooks/useFilmNamesWithInactive';
 // Order Details Tab
 // Container for managing order details with toolbar and CRUD operations
 
@@ -360,6 +361,9 @@ export const OrderDetailsTab = forwardRef<
     },
     [cutJobMaps.bathCutJobByDetailId, cutJobMaps.cutJobByDetailId],
   );
+  // Названия плёнок деталей, включая ставшие неактивными (дубли после импорта каталога 1С).
+  const groupFilmIds = useMemo(() => businessDetails.map((detail) => detail.film_id ?? null), [businessDetails]);
+  const groupFilmNameById = useFilmNamesWithInactive(orderFormData.references.filmNameById, groupFilmIds);
   const groupLabelOf = useCallback(
     (sample: OrderDetail, field: GroupField) => {
       switch (field) {
@@ -382,7 +386,7 @@ export const OrderDetailsTab = forwardRef<
         case 'detail_cost':
           return groupNumberLabel(sample.detail_cost);
         case 'film':
-          return sample.film_id != null ? (orderFormData.references.filmNameById.get(sample.film_id) || '—') : '—';
+          return sample.film_id != null ? (groupFilmNameById.get(sample.film_id) || '—') : '—';
         case 'production_status':
           return sample.production_status_id != null
             ? orderFormData.references.productionStatusNameById.get(sample.production_status_id) || sample.production_status_name || '—'
@@ -412,7 +416,7 @@ export const OrderDetailsTab = forwardRef<
       cutJobMaps.cutJobByDetailId,
       groupNumberLabel,
       orderFormData.references.edgeTypeNameById,
-      orderFormData.references.filmNameById,
+      groupFilmNameById,
       orderFormData.references.millingTypeNameById,
       orderFormData.references.productionStatusNameById,
       sheetNameById,

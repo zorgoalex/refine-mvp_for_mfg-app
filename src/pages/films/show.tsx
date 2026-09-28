@@ -1,6 +1,9 @@
-import { useShow, IResourceComponentsProps, useOne } from "@refinedev/core";
-import { Show, TextField, DateField } from "@refinedev/antd";
-import { Typography, Badge, Row, Col, Divider } from "antd";
+import { useShow, IResourceComponentsProps, useOne, useGetIdentity } from "@refinedev/core";
+import { Show, TextField, DateField, ShowButton } from "@refinedev/antd";
+import { Typography, Badge, Row, Col, Divider, List } from "antd";
+import { useEffect, useState } from 'react';
+import { filmCatalogImportApi } from '../../api/filmCatalogImportApi';
+import type { CatalogNameHistoryDto } from '../../api/types/filmCatalogImportApi.types';
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 import { ReferenceSortOrderShow } from "../../components/ReferenceSortOrder";
@@ -14,6 +17,9 @@ export const FilmShow: React.FC<IResourceComponentsProps> = () => {
   const { data, isLoading } = queryResult;
 
   const record = data?.data;
+  const { data: identity } = useGetIdentity<{ permissions?: string[] }>();
+  const canViewHistory = (identity?.permissions ?? []).includes('references.view');
+  const [history, setHistory] = useState<CatalogNameHistoryDto[]>([]);
 
   useCurrentRecordTabTitle(record);
   const { data: typeOne } = useOne({
@@ -26,6 +32,14 @@ export const FilmShow: React.FC<IResourceComponentsProps> = () => {
     id: record?.vendor_id,
     queryOptions: { enabled: !!record?.vendor_id },
   });
+  const { data: canonicalOne } = useOne({ resource: 'films', id: record?.canonical_film_id,
+    queryOptions: { enabled: !!record?.canonical_film_id } });
+  useEffect(() => {
+    if (!canViewHistory || !record?.film_id) { setHistory([]); return; }
+    let active = true;
+    void filmCatalogImportApi.nameHistory(record.film_id).then((result) => { if (active) setHistory(result.items); }).catch(() => { if (active) setHistory([]); });
+    return () => { active = false; };
+  }, [canViewHistory, record?.film_id]);
 
   return (
     <Show isLoading={isLoading} title="Просмотр Плёнки">
@@ -56,9 +70,25 @@ export const FilmShow: React.FC<IResourceComponentsProps> = () => {
           <Title level={5}>Поставщик плёнки</Title>
           <TextField value={vendorOne?.data?.vendor_name} />
         </Col>
+        <Col span={8}><Title level={5}>Тип номенклатуры</Title><TextField value={record?.nomenclature_type} /></Col>
+        <Col span={8}><Title level={5}>Категория номенклатуры</Title><TextField value={record?.nomenclature_category} /></Col>
       </Row>
 
       <Divider />
+
+      {record?.canonical_film_id && <>
+        <Title level={5}>Объединена в</Title>
+        <ShowButton resource="films" recordItemId={record.canonical_film_id}>{canonicalOne?.data?.film_name ?? `Плёнка ${record.canonical_film_id}`}</ShowButton>
+        <Divider />
+      </>}
+
+      {canViewHistory && <>
+        <Title level={5}>Прежние названия</Title>
+        <List size="small" dataSource={history} locale={{ emptyText: 'История названий пуста' }} renderItem={(item) =>
+          <List.Item>{item.oldName}{item.oldVendorName ? ` · ${item.oldVendorName}` : ''} → {item.newName}{item.newVendorName ? ` · ${item.newVendorName}` : ''} ({item.changedAt.slice(0, 10)})</List.Item>}
+        />
+        <Divider />
+      </>}
 
       <Row gutter={[16, 16]}>
         <Col span={8}>
@@ -69,7 +99,7 @@ export const FilmShow: React.FC<IResourceComponentsProps> = () => {
           />
         </Col>
         <Col span={8}>
-          <Title level={5}>Ключ 1C</Title>
+          <Title level={5}>Ref Key 1C</Title>
           <TextField value={record?.ref_key_1c} />
         </Col>
       </Row>

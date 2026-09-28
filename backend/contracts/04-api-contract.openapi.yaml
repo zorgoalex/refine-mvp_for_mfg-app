@@ -24,6 +24,10 @@ servers:
 tags:
   - name: Catalog
     description: Независимый справочник товаров и услуг
+  - name: Reference catalog import
+    description: Импорт каталога 1С в справочник плёнок
+  - name: Films
+    description: Справочник плёнок и история их названий
   - name: Audit
     description: Журнал аудита событий системы
   - name: Auth
@@ -17719,6 +17723,266 @@ paths:
         '404': {description: "Source or its agent not found"}
         '409': {description: "ONEC_GENERATION_CHANGED (details.currentGeneration) or ONEC_IDENTITY_CONFIRMATION_REQUIRED (details.observedIdentity)"}
 
+  /api/v1/catalog-imports:
+    post:
+      tags: [Reference catalog import]
+      operationId: createCatalogImport
+      summary: Create film catalog import draft
+      description: Requires BACKEND_FILM_CATALOG_IMPORT_ENABLED. File rows are JSON; backend recalculates targetName and catalogKey. Mirror source also requires onec.view.
+      security: [{bearerAuth: []}]
+      x-permission: references.manage
+      parameters:
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CatalogImportCreate'}
+      responses:
+        '201': {description: Draft created, content: {application/json: {schema: {$ref: '#/components/schemas/CatalogImportBatch'}}}}
+        '400': {description: VALIDATION_FAILED}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {description: CATALOG_IMPORT_NOT_FOUND when mirror permission is missing or feature flag is off}
+        '409': {description: ONEC_MIRROR_UNAVAILABLE}
+        '422': {description: IDEMPOTENCY_KEY_REUSED}
+    get:
+      tags: [Reference catalog import]
+      operationId: listCatalogImports
+      summary: List film catalog imports
+      security: [{bearerAuth: []}]
+      x-permission: references.manage
+      parameters:
+        - {name: kind, in: query, required: false, schema: {type: string, enum: [films]}}
+        - {name: status, in: query, required: false, schema: {type: string, enum: [draft, applied, cancelled, reverted]}}
+      responses:
+        '200': {description: Newest first, at most 100 items}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {description: CATALOG_IMPORT_NOT_FOUND when feature flag is off}
+  /api/v1/catalog-imports/onec-sources:
+    get:
+      tags: [Reference catalog import]
+      operationId: listCatalogImportOnecSources
+      summary: List available 1C sources
+      security: [{bearerAuth: []}]
+      x-permission: references.manage AND onec.view
+      responses:
+        '200': {description: Available 1C sources}
+        '404': {description: CATALOG_IMPORT_NOT_FOUND when feature flag is off}
+        '409': {description: ONEC_MIRROR_UNAVAILABLE}
+  /api/v1/catalog-imports/onec-categories:
+    get:
+      tags: [Reference catalog import]
+      operationId: listCatalogImportOnecCategories
+      summary: List active item categories from 1C mirror
+      security: [{bearerAuth: []}]
+      x-permission: references.manage AND onec.view
+      parameters:
+        - {name: onecSourceId, in: query, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Category key, name, and active item count}
+        '400': {description: VALIDATION_FAILED}
+        '404': {description: CATALOG_IMPORT_NOT_FOUND when feature flag is off}
+        '409': {description: ONEC_MIRROR_UNAVAILABLE}
+  /api/v1/catalog-imports/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+    get:
+      tags: [Reference catalog import]
+      operationId: getCatalogImport
+      summary: Get catalog import batch
+      security: [{bearerAuth: []}]
+      x-permission: references.manage
+      responses:
+        '200': {description: Batch detail, content: {application/json: {schema: {$ref: '#/components/schemas/CatalogImportBatch'}}}}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {description: CATALOG_IMPORT_NOT_FOUND; mirror batches also require onec.view}
+    patch:
+      tags: [Reference catalog import]
+      operationId: patchCatalogImport
+      summary: Edit film catalog import draft
+      security: [{bearerAuth: []}]
+      x-permission: references.manage
+      parameters:
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CatalogImportPatch'}
+      responses:
+        '200': {description: Updated draft, content: {application/json: {schema: {$ref: '#/components/schemas/CatalogImportBatch'}}}}
+        '400': {description: VALIDATION_FAILED}
+        '404': {description: CATALOG_IMPORT_NOT_FOUND}
+        '409': {description: CATALOG_IMPORT_STALE or CATALOG_IMPORT_NOT_DRAFT}
+        '422': {description: IDEMPOTENCY_KEY_REUSED}
+  /api/v1/catalog-imports/{id}/rows:
+    get:
+      tags: [Reference catalog import]
+      operationId: listCatalogImportRows
+      summary: List paged catalog rows
+      security: [{bearerAuth: []}]
+      x-permission: references.manage
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: status, in: query, schema: {type: string, enum: [ok, invalid, skipped]}}
+        - {name: conflict, in: query, schema: {type: boolean}}
+        - {name: search, in: query, schema: {type: string}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, default: 0}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 100}}
+      responses:
+        '200': {description: Page of catalog rows}
+        '400': {description: VALIDATION_FAILED}
+        '404': {description: CATALOG_IMPORT_NOT_FOUND}
+  /api/v1/catalog-imports/{id}/matches:
+    get:
+      tags: [Reference catalog import]
+      operationId: listCatalogImportMatches
+      summary: List paged film matches
+      security: [{bearerAuth: []}]
+      x-permission: references.manage
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: status, in: query, schema: {type: string, enum: [linked, auto, suggested, confirmed, manual, none, unchanged]}}
+        - {name: vendorId, in: query, schema: {type: integer, minimum: 1}}
+        - {name: rowId, in: query, schema: {type: integer, minimum: 1}}
+        - {name: search, in: query, schema: {type: string}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, default: 0}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 100}}
+      responses:
+        '200': {description: Page of film matches}
+        '400': {description: VALIDATION_FAILED}
+        '404': {description: CATALOG_IMPORT_NOT_FOUND}
+  /api/v1/catalog-imports/{id}/apply:
+    post:
+      tags: [Reference catalog import]
+      operationId: applyCatalogImport
+      summary: Apply film catalog import atomically
+      security: [{bearerAuth: []}]
+      x-permission: references.manage
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [version], properties: {version: {type: integer, minimum: 1}}}
+      responses:
+        '200': {description: Applied batch}
+        '404': {description: CATALOG_IMPORT_NOT_FOUND}
+        '409': {description: CATALOG_IMPORT_STALE, CATALOG_IMPORT_NOT_DRAFT, or CATALOG_IMPORT_CONFLICT}
+        '422': {description: CATALOG_IMPORT_UNRESOLVED or IDEMPOTENCY_KEY_REUSED}
+  /api/v1/catalog-imports/{id}/cancel:
+    post:
+      tags: [Reference catalog import]
+      operationId: cancelCatalogImport
+      summary: Cancel film catalog import draft
+      security: [{bearerAuth: []}]
+      x-permission: references.manage
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [version], properties: {version: {type: integer, minimum: 1}}}
+      responses:
+        '200': {description: Cancelled batch}
+        '404': {description: CATALOG_IMPORT_NOT_FOUND}
+        '409': {description: CATALOG_IMPORT_STALE or CATALOG_IMPORT_NOT_DRAFT}
+  /api/v1/catalog-imports/{id}/revert:
+    post:
+      tags: [Reference catalog import]
+      operationId: revertCatalogImport
+      summary: Revert latest applied package changes
+      security: [{bearerAuth: []}]
+      x-permission: references.manage
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false}
+      responses:
+        '200': {description: Reverted batch}
+        '404': {description: CATALOG_IMPORT_NOT_FOUND}
+        '409': {description: CATALOG_IMPORT_REVERT_BLOCKED}
+  /api/v1/catalog-imports/{id}/export.xlsx:
+    get:
+      tags: [Reference catalog import]
+      operationId: exportCatalogImport
+      summary: Export catalog rows and matches as xlsx
+      security: [{bearerAuth: []}]
+      x-permission: references.manage
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Workbook with Строки and Сопоставления sheets, content: {application/vnd.openxmlformats-officedocument.spreadsheetml.sheet: {schema: {type: string, format: binary}}}}
+        '404': {description: CATALOG_IMPORT_NOT_FOUND}
+  /api/v1/films/name-index:
+    get:
+      tags: [Films]
+      operationId: listFilmNameIndex
+      summary: List current and historical film names
+      description: Returns at most 20,000 current active canonical names, inactive duplicate names, and historical names resolved to canonical film IDs. truncated=true means the index was cut by the limit and must not be used for automatic matching.
+      security: [{bearerAuth: []}]
+      x-permission: references.view
+      responses:
+        '200':
+          description: Film names for import matching
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, truncated]
+                properties:
+                  truncated: {type: boolean}
+                  items:
+                    type: array
+                    maxItems: 20000
+                    items:
+                      type: object
+                      required: [name, filmId, canonicalFilmId, vendorId, active, source]
+                      properties:
+                        name: {type: string}
+                        filmId: {type: integer, format: int64}
+                        canonicalFilmId: {type: integer, format: int64}
+                        vendorId: {type: integer, format: int64, nullable: true}
+                        active: {type: boolean}
+                        source: {type: string, enum: [current, history]}
+  /api/v1/films/{id}/name-history:
+    get:
+      tags: [Films]
+      operationId: getFilmNameHistory
+      summary: Get film previous names and vendor changes
+      security: [{bearerAuth: []}]
+      x-permission: references.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Ordered film name history}
+        '404': {description: FILM_NOT_FOUND}
+  /api/v1/films/similar:
+    get:
+      tags: [Films]
+      operationId: findSimilarFilms
+      summary: Find similar films by current and former names
+      security: [{bearerAuth: []}]
+      x-permission: references.view
+      parameters:
+        - {name: name, in: query, required: true, schema: {type: string, maxLength: 500}}
+        - {name: vendorId, in: query, required: false, schema: {type: integer, minimum: 1}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 10, default: 10}}
+      responses:
+        '200': {description: At most 10 similar films}
+        '400': {description: VALIDATION_FAILED}
+
 components:
   securitySchemes:
     bitrixWidgetSession:
@@ -18255,6 +18519,124 @@ components:
                   requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
 
   schemas:
+    CatalogImportCreate:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [kind, source, fileName, fileSha256, sheetName, rows]
+          properties:
+            kind: {type: string, enum: [films]}
+            source: {type: string, enum: [file]}
+            fileName: {type: string, minLength: 1}
+            fileSha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+            sheetName: {type: string, minLength: 1}
+            rows:
+              type: array
+              minItems: 1
+              maxItems: 5000
+              items: {$ref: '#/components/schemas/CatalogImportRowInput'}
+        - type: object
+          additionalProperties: false
+          required: [kind, source, onecSourceId, categoryKey]
+          properties:
+            kind: {type: string, enum: [films]}
+            source: {type: string, enum: [onec_mirror]}
+            onecSourceId: {type: integer, minimum: 1}
+            categoryKey: {type: string, format: uuid}
+    CatalogImportRowInput:
+      type: object
+      additionalProperties: false
+      required: [rowNo, nameOriginal, nameFull, supplier, nomenclatureType, unit, nomenclatureCategory]
+      properties:
+        rowNo: {type: integer, minimum: 1}
+        nameOriginal: {type: string, maxLength: 500}
+        nameFull: {type: string, maxLength: 500}
+        supplier: {type: string, maxLength: 500}
+        nomenclatureType: {type: string, nullable: true, maxLength: 500}
+        unit: {type: string, nullable: true, maxLength: 500}
+        nomenclatureCategory: {type: string, nullable: true, maxLength: 500}
+    CatalogImportPatch:
+      type: object
+      additionalProperties: false
+      required: [version, actions]
+      properties:
+        version: {type: integer, minimum: 1}
+        actions:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            oneOf:
+              - type: object
+                required: [type, supplierNorm, vendorId]
+                properties:
+                  type: {const: setVendor}
+                  supplierNorm: {type: string}
+                  vendorId: {type: integer, minimum: 1}
+              - type: object
+                required: [type, supplierNorm]
+                properties:
+                  type: {const: createVendor}
+                  supplierNorm: {type: string}
+              - type: object
+                required: [type, createMissing]
+                properties:
+                  type: {const: setOption}
+                  createMissing: {type: boolean}
+              - type: object
+                required: [type]
+                properties:
+                  type: {const: acceptAllAuto}
+              - type: object
+                required: [type, filmId, rowId]
+                properties:
+                  type: {const: setMatch}
+                  filmId: {type: integer, minimum: 1}
+                  rowId: {type: integer, minimum: 1, nullable: true}
+              - type: object
+                required: [type, filmId]
+                properties:
+                  type: {const: confirmMatch}
+                  filmId: {type: integer, minimum: 1}
+              - type: object
+                required: [type, rowId, filmId]
+                properties:
+                  type: {const: setCanonical}
+                  rowId: {type: integer, minimum: 1}
+                  filmId: {type: integer, minimum: 1}
+              - type: object
+                required: [type, rowId, filmTexture, filmTypeId]
+                properties:
+                  type: {const: setCanonicalProperties}
+                  rowId: {type: integer, minimum: 1}
+                  filmTexture: {type: boolean}
+                  filmTypeId: {type: integer, minimum: 1}
+    CatalogImportBatch:
+      type: object
+      required: [id, kind, sourceKind, status, version, options, counters, vendorMappings, canApply, blockers, createdAt]
+      properties:
+        id: {type: integer, minimum: 1}
+        kind: {type: string, enum: [films]}
+        sourceKind: {type: string, enum: [file, onec_mirror]}
+        status: {type: string, enum: [draft, applied, cancelled, reverted]}
+        version: {type: integer, minimum: 1}
+        fileName: {type: string, nullable: true}
+        fileSha256: {type: string, nullable: true}
+        sheetName: {type: string, nullable: true}
+        onecSourceId: {type: integer, nullable: true}
+        onecCategoryKey: {type: string, format: uuid, nullable: true}
+        onecCategoryName: {type: string, nullable: true}
+        options: {type: object, properties: {createMissing: {type: boolean}}}
+        counters: {type: object, additionalProperties: {type: integer}}
+        vendorMappings: {type: array, items: {type: object}}
+        canApply: {type: boolean}
+        blockers: {type: array, items: {type: string}}
+        createdAt: {type: string, format: date-time}
+        createdByName: {type: string, nullable: true}
+        appliedAt: {type: string, format: date-time, nullable: true}
+        appliedByName: {type: string, nullable: true}
+        revertedAt: {type: string, format: date-time, nullable: true}
+        revertedByName: {type: string, nullable: true}
     OnecOperatorCommand:
       type: object
       additionalProperties: false

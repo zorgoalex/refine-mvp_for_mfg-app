@@ -37,6 +37,8 @@ import { PerformanceModule } from './performance/performance.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { OnecAgentModule } from './modules/onec-agent/onec-agent.module';
 import { MdfBoardModule } from './modules/mdf-board/mdf-board.module';
+import { ReferenceCatalogImportModule } from './modules/reference-catalog-import/reference-catalog-import.module';
+import { InventoryModule } from './modules/inventory/inventory.module';
 
 @Module({
   imports: [
@@ -80,6 +82,8 @@ import { MdfBoardModule } from './modules/mdf-board/mdf-board.module';
     WhatsAppModule,
     OnecAgentModule,
     MdfBoardModule,
+    ReferenceCatalogImportModule,
+    InventoryModule,
   ],
 })
 export class AppModule {}

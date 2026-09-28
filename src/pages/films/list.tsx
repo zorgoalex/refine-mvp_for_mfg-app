@@ -1,5 +1,5 @@
 import { Table } from '../../ui/tooltipDelay';
-import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/core";
+import { IResourceComponentsProps, useMany, useNavigation, useGetIdentity } from "@refinedev/core";
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import { Space, Badge, Button, Card, Col, Form, Input, InputNumber, Row, Select } from "antd";
@@ -11,6 +11,8 @@ import { LocalizedList } from "../../components/LocalizedList";
 import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
 import { buildFilmFilters, FILM_KEY_PATTERN, hasFilmFieldFilters, readFilmFilters, type FilmFilterValues } from "./filmFilters";
 import { FilmSearch } from "./FilmSearch";
+import { useNavigate } from 'react-router-dom';
+import { getLoadedRuntimeConfig } from '../../config/runtimeConfig';
 
 export const FilmList: React.FC<IResourceComponentsProps> = () => {
   const [filtersVisible, setFiltersVisible] = useState(false);
@@ -62,6 +64,9 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
     tableProps.dataSource,
   );
   const { show } = useNavigation();
+  const navigate = useNavigate();
+  const { data: identity } = useGetIdentity<{ permissions?: string[] }>();
+  const canManageCatalog = (identity?.permissions ?? []).includes('references.manage');
 
   const typeIds = useMemo(
     () =>
@@ -98,6 +103,10 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
     ids: vendorIds,
     queryOptions: { enabled: vendorIds.length > 0 },
   });
+  const canonicalIds = useMemo(() => Array.from(new Set(((tableProps?.dataSource as Array<Record<string, unknown>>) ?? [])
+    .map((row) => row.canonical_film_id).filter((id): id is number => typeof id === 'number'))), [tableProps?.dataSource]);
+  const { data: canonData } = useMany({ resource: 'films', ids: canonicalIds, queryOptions: { enabled: canonicalIds.length > 0 } });
+  const canonicalMap = useMemo(() => Object.fromEntries((canonData?.data ?? []).map((film: any) => [film.film_id, film.film_name])), [canonData]);
 
   const typeMap = useMemo(() => {
     const map: Record<string | number, string> = {};
@@ -118,6 +127,7 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
   return (
     <LocalizedList title="Плёнки">
       <Space wrap style={{ marginBottom: 16, width: "100%" }}>
+        {getLoadedRuntimeConfig()?.features?.filmCatalogImport === true && canManageCatalog && <Button onClick={() => navigate('/films/catalog-import')}>Импорт каталога 1С</Button>}
         <FilmSearch
           value={search}
           filters={appliedFilters}
@@ -185,6 +195,8 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
                     <InputNumber precision={0} placeholder="Порядок сортировки" style={{ width: "100%" }} />
                   </Form.Item>
                 </Col>
+                <Col xs={24} sm={12} lg={6}><Form.Item name="nomenclature_type" label="Тип номенклатуры"><Input allowClear /></Form.Item></Col>
+                <Col xs={24} sm={12} lg={6}><Form.Item name="nomenclature_category" label="Категория номенклатуры"><Input allowClear /></Form.Item></Col>
               </Row>
               <Space wrap>
                 <Button type="primary" htmlType="submit" icon={<SearchOutlined aria-hidden />}>Применить</Button>
@@ -207,6 +219,8 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column dataIndex="film_id" title="id" sorter />
         <ReferenceSortOrderColumn />
         <Table.Column dataIndex="film_name" title="Название" sorter />
+        <Table.Column dataIndex="nomenclature_type" title="Тип номенклатуры" />
+        <Table.Column dataIndex="nomenclature_category" title="Категория" />
         <Table.Column
           dataIndex="film_type_id"
           title="Тип плёнки"
@@ -250,6 +264,7 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
             </Space>
           )}
         />
+        <Table.Column title="Каталог" render={(_, record: any) => record.canonical_film_id ? <ShowButton resource="films" recordItemId={record.canonical_film_id}>Объединена: {canonicalMap[record.canonical_film_id] ?? `#${record.canonical_film_id}`}</ShowButton> : null} />
       </Table>
     </LocalizedList>
   );

@@ -277,6 +277,8 @@ export class OrderTransactionService {
         currentUser: command.currentUser,
         requestId: command.requestId ?? 'orders-create',
       });
+      // Каталог плёнок: дубль → канон под FOR SHARE, после блокировки проекта (§3.3 плана).
+      await this.canonicalizeFilmReferences(unitOfWork, null, prepared);
       const orderId = await unitOfWork.createOrderHeader({
         header: prepared.order.header,
         totals: prepared.totals,
@@ -616,6 +618,8 @@ export class OrderTransactionService {
       if (command.prePersistHook) {
         await command.prePersistHook(unitOfWork, lockedOrder);
       }
+      // Каталог плёнок: новые/изменённые ссылки на дубль → канон (после блокировок заказа/проекта).
+      await this.canonicalizeFilmReferences(unitOfWork, command.orderId, prepared);
       await unitOfWork.persistCatalogLines(command.orderId, catalogPlan, command.currentUser, command.requestId ?? 'orders-update');
       await unitOfWork.updateOrderHeader({
         orderId: command.orderId,
@@ -1475,6 +1479,23 @@ export class OrderTransactionService {
     // order rows and resolveShadowMaterialId is never called. setSaveContext is retained
     // on the interface as a no-op (dead after shadow removal — delete in follow-up).
     return true;
+  }
+
+  private async canonicalizeFilmReferences(
+    unitOfWork: OrderWriteUnitOfWork,
+    orderId: number | null,
+    prepared: PreparedOrderSave,
+  ): Promise<void> {
+    if (!unitOfWork.resolveFilmReferencesForWrite) return;
+    const resolution = await unitOfWork.resolveFilmReferencesForWrite(orderId, {
+      headerFilmId: prepared.order.header.filmId ?? null,
+      details: prepared.details.map((detail) => ({ detailId: detail.id ?? null, filmId: detail.filmId ?? null })),
+    });
+    if (resolution.replacements.length === 0) return;
+    prepared.order.header.filmId = resolution.headerFilmId;
+    resolution.detailFilmIds.forEach((filmId, index) => {
+      prepared.details[index].filmId = filmId;
+    });
   }
 
   private buildSaveMetadata(
