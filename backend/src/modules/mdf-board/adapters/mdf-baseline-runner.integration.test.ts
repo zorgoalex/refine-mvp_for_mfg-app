@@ -74,6 +74,10 @@ describe.skipIf(!enabled)('MDF §5.7b baseline population, isolated PostgreSQL s
     await fixture.applyMigrations(['181_cnc_manual_send_observation.sql']);
     await fixture.applyMigrations(['182_mdf_physical_lineage.sql']);
     await fixture.applyMigrations(['185_mdf_bazis_composition.sql']);
+    // §5.8: the mode-change stamp (mode_changed_at) and the stale-transaction guard are live here, so the
+    // single-transaction dry-run (mode switch + batches + job drain) is exercised against migration 199.
+    await fixture.client.query('ALTER TABLE users ADD PRIMARY KEY(user_id)');
+    await fixture.applyMigrations(['199_mdf_cutover_controls.sql']);
     await fixture.assertLocalRelations(['bazis_cut_sets', 'bazis_cut_set_details',
       'mdf_bazis_assignment_states', 'mdf_bazis_composition_intents']);
     await fixture.client.query(`
@@ -187,11 +191,15 @@ describe.skipIf(!enabled)('MDF §5.7b baseline population, isolated PostgreSQL s
   let cutResultSeq = 800000, placementSeq = 0;
   /** A real vacuum bath (cut_result + board projection + sheet map + placement rows), matching the reconciliation
    * loader's own "exists" requirement (a bare manual move with no cut_result row is HISTORY_SOURCE_MISSING). */
-  async function seedVacuumBath(opts: { createdAt: string; placements: { orderId: number; detailId: number; quantity: number }[] }) {
+  async function seedVacuumBath(opts: { createdAt: string; placements: { orderId: number; detailId: number; quantity: number }[];
+    supersededBy?: number }) {
     const cutResultId = ++cutResultSeq;
     const digest = randomUUID().replaceAll('-', '');
-    await fixture.client.query(`INSERT INTO cut_result(cut_result_id,created_at,snapshot_digest) VALUES($1,$2::timestamptz,$3)`,
-      [cutResultId, opts.createdAt, digest]);
+    // The job's current result (an active bath, §5.4b); `supersededBy` makes it a replaced result of the same job.
+    await fixture.client.query(`INSERT INTO cut_job(cut_job_id,status,current_cut_result_id) VALUES($1,'ready',$2)`,
+      [cutResultId, opts.supersededBy ?? cutResultId]);
+    await fixture.client.query(`INSERT INTO cut_result(cut_result_id,cut_job_id,result_no,created_at,snapshot_digest)
+      VALUES($1,$1,1,$2::timestamptz,$3)`, [cutResultId, opts.createdAt, digest]);
     await fixture.client.query(`INSERT INTO cut_result_board_projection(cut_result_id,snapshot_digest,is_vacuum,result_created_at)
       VALUES($1,$2,true,$3::timestamptz)`, [cutResultId, digest, opts.createdAt]);
     await fixture.client.query(`INSERT INTO cut_result_sheet_map(cut_result_sheet_map_id,cut_result_id,is_effective)

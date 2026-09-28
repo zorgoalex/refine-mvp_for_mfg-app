@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { QueryResult, QueryResultRow } from 'pg';
 import type { TransactionClient } from '../../../database/database.types';
-import { MDF_BASELINE_WRITER, enterMdfCommand, enterMdfSerializableLegacyCommand, requireMdfCommandBoundary } from './mdf-command-boundary';
+import { MDF_BASELINE_WRITER, MDF_MODE_STALE_SQL, enterMdfCommand, enterMdfSerializableLegacyCommand,
+  requireMdfCommandBoundary } from './mdf-command-boundary';
 
 function transaction(mode: unknown = 'legacy', isolation = 'serializable', locked = true,
-  freezeRunId: string | null = null, guardMissing = false) {
+  freezeRunId: string | null = null, guardMissing = false, recoveryAt: string | null = null,
+  stale: boolean | undefined = undefined) {
   const queries: string[] = [];
   const params: unknown[][] = [];
   const tx: TransactionClient = {
@@ -13,8 +15,8 @@ function transaction(mode: unknown = 'legacy', isolation = 'serializable', locke
       queries.push(sql);
       params.push(values ?? []);
       const rows = sql.includes('pg_try_advisory_xact_lock_shared') ? [{ locked }]
-        : sql.includes('SELECT mode FROM mdf_engine_state') ? [{ mode }]
-        : sql.includes('freeze_run_id FROM mdf_freeze_guard') ? (guardMissing ? [] : [{ freeze_run_id: freezeRunId }])
+        : sql.includes('FROM mdf_engine_state s WHERE s.singleton=true') ? [{ mode, stale }]
+        : sql.includes('FROM mdf_freeze_guard') ? (guardMissing ? [] : [{ freeze_run_id: freezeRunId, recovery: recoveryAt }])
         : sql === 'SHOW transaction_isolation' ? [{ transaction_isolation: isolation }] : [];
       return { rows, rowCount: rows.length, command: 'SELECT', oid: 0, fields: [] } as QueryResult<T>;
     },
@@ -28,8 +30,8 @@ describe('MDF command transaction boundary', () => {
     expect(await enterMdfSerializableLegacyCommand(f.tx, 'mdf.production_return')).toEqual({ mode, queued: false });
     expect(f.queries).toEqual(['SHOW transaction_isolation',
       "SELECT pg_try_advisory_xact_lock_shared(hashtextextended('mdf-engine-cutover',0)) AS locked",
-      'SELECT mode FROM mdf_engine_state WHERE singleton=true FOR SHARE',
-      'SELECT freeze_run_id FROM mdf_freeze_guard WHERE singleton=true FOR SHARE',
+      `SELECT s.mode,${MDF_MODE_STALE_SQL} stale FROM mdf_engine_state s WHERE s.singleton=true FOR SHARE`,
+      "SELECT g.freeze_run_id,to_jsonb(g)->>'recovery_frozen_at' recovery FROM mdf_freeze_guard g WHERE g.singleton=true FOR SHARE",
       "SELECT set_config('mdf.command_writer',$1,true)"]);
     expect(await requireMdfCommandBoundary(f.tx, { writer: 'nested-return', capability: 'legacy-only' }))
       .toEqual({ mode, queued: false });
@@ -48,7 +50,7 @@ describe('MDF command transaction boundary', () => {
       code: mode === 'active' ? 'MDF_WRITER_NOT_CONNECTED' : mode === 'read_only'
         ? 'MDF_ENGINE_READ_ONLY' : 'MDF_ENGINE_STATE_UNAVAILABLE',
     });
-    const modeQuery = f.queries.find(q => q.includes('SELECT mode FROM mdf_engine_state'));
+    const modeQuery = f.queries.find(q => q.includes('FROM mdf_engine_state s WHERE s.singleton=true'));
     expect(modeQuery).toContain('FOR SHARE');
     if (mode === 'active' || mode === 'read_only') {
       // valid mode: loadMode ran to completion (freeze guard read + writer tag set) before checkCapability threw.
@@ -81,8 +83,8 @@ describe('MDF command transaction boundary', () => {
       .toEqual({ mode, queued: false });
     expect(f.queries).toHaveLength(4);
     expect(f.queries[0]).toContain("pg_try_advisory_xact_lock_shared(hashtextextended('mdf-engine-cutover',0))");
-    expect(f.queries[1]).toContain('SELECT mode FROM mdf_engine_state');
-    expect(f.queries[2]).toContain('freeze_run_id FROM mdf_freeze_guard');
+    expect(f.queries[1]).toContain('FROM mdf_engine_state s WHERE s.singleton=true');
+    expect(f.queries[2]).toContain('FROM mdf_freeze_guard g');
     expect(f.queries[3]).toContain("set_config('mdf.command_writer'");
   });
 
@@ -206,5 +208,41 @@ describe('MDF command transaction boundary', () => {
     const f = transaction('active', 'serializable', true, null, true);
     await expect(enterMdfCommand(f.tx, { writer: 'manual-move', capability: 'queued' }))
       .rejects.toMatchObject({ code: 'MDF_ENGINE_STATE_UNAVAILABLE', statusCode: 503 });
+  });
+
+  // §5.8: a transaction that started before the last mode change must never write under the new mode.
+  it('a stale mode row rejects MDF_CUTOVER_IN_PROGRESS via enterMdfCommand, before the freeze guard read and before the writer tag is set', async () => {
+    const f = transaction('active', 'serializable', true, null, false, null, true);
+    await expect(enterMdfCommand(f.tx, { writer: 'manual-move', capability: 'queued' }))
+      .rejects.toMatchObject({ code: 'MDF_CUTOVER_IN_PROGRESS', statusCode: 409 });
+    expect(f.queries.some(q => q.includes('freeze_run_id'))).toBe(false);
+    expect(f.queries.some(q => q.includes('set_config'))).toBe(false);
+  });
+
+  it('a stale mode row also rejects MDF_CUTOVER_IN_PROGRESS via the serializable legacy entrance, before the freeze guard read and before the writer tag is set', async () => {
+    const f = transaction('legacy', 'serializable', true, null, false, null, true);
+    await expect(enterMdfSerializableLegacyCommand(f.tx, 'mdf.production_return'))
+      .rejects.toMatchObject({ code: 'MDF_CUTOVER_IN_PROGRESS', statusCode: 409 });
+    expect(f.queries.some(q => q.includes('freeze_run_id'))).toBe(false);
+    expect(f.queries.some(q => q.includes('set_config'))).toBe(false);
+  });
+
+  it.each([false, undefined])('a non-stale mode row (stale=%s) enters normally and sets the writer tag', async stale => {
+    const f = transaction('active', 'serializable', true, null, false, null, stale);
+    expect(await enterMdfCommand(f.tx, { writer: 'manual-move', capability: 'queued' }))
+      .toEqual({ mode: 'active', queued: true });
+    expect(f.queries.some(q => q.includes('freeze_run_id'))).toBe(true);
+    expect(f.queries.some(q => q.includes('set_config'))).toBe(true);
+  });
+
+  it('a recovery freeze rejects every writer on both entry paths (§5.8)', async () => {
+    for (const mode of ['legacy', 'active', 'read_only'] as const) {
+      await expect(enterMdfCommand(transaction(mode, 'read committed', true, null, false, '2026-09-28 10:00:00+05').tx,
+        { writer: 'cnc.mdf_observation.complete', capability: 'cnc-receipt' })).rejects.toMatchObject({ code: 'MDF_RECOVERY_FREEZE' });
+    }
+    await expect(enterMdfSerializableLegacyCommand(transaction('legacy', 'serializable', true, null, false, '2026-09-28').tx,
+      'mdf.production_return')).rejects.toMatchObject({ code: 'MDF_RECOVERY_FREEZE' });
+    await expect(enterMdfCommand(transaction('read_only', 'read committed', true, 'run', false, '2026-09-28').tx,
+      { writer: 'mdf.baseline', capability: 'baseline' })).rejects.toMatchObject({ code: 'MDF_RECOVERY_FREEZE' });
   });
 });

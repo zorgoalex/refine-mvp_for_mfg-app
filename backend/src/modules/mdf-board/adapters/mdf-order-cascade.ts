@@ -152,15 +152,34 @@ function contention(): never {
   throw new ApiError(409, 'MDF_ORDER_LOCK_CONTENTION', 'Связанные заказы сейчас изменяются — повторите сохранение');
 }
 
+/** §5.8 demand-drift reconciliation (writer `mdf.demand_reconcile`, active only): the ordinary cascade for one connected
+ * owner/source closure, comparing each source's FROZEN demand with live demand (catalog edits and any other demand
+ * change made outside order commands). Atomic like an order command; conflicts answer 409 exactly as for a save. */
+export async function reconcileMdfOrderDemand(tx: TransactionClient, input: { user: CurrentUser; requestId: string;
+  commandKey: string; orderIds: readonly number[]; confirmation?: MdfOrderConfirmation | null;
+  /** Called with EVERY owner of the final locked affected-source set (touched included) before any write. */
+  authorizeOwners?: (owners: readonly number[]) => Promise<void> }): Promise<void> {
+  const boundary = await requireMdfCommandBoundary(tx, { writer: 'mdf.demand_reconcile', capability: 'order-demand' });
+  if (boundary.mode !== 'active') throw new ApiError(409, 'MDF_ENGINE_ACTIVE_REQUIRED', 'Сверка спроса выполняется только в активном режиме');
+  // Like an order command, the reconciler owns its touched order rows (ascending) BEFORE demand/discovery reads, so
+  // concurrent ticks/confirmations/order saves serialize and the loser re-reads the reconciled state (no duplicate
+  // closure reopen or refresh).
+  const touched = [...new Set(input.orderIds)].sort((a, b) => a - b);
+  await tx.query('SELECT order_id FROM orders WHERE order_id=ANY($1::bigint[]) ORDER BY order_id FOR UPDATE', [touched]);
+  await runCascade(tx, { ...input, readOnly: false, before: { demand: [] }, reconcile: true });
+}
+
 async function runCascade(tx: TransactionClient, input: { user: CurrentUser; requestId: string; commandKey: string;
-  orderIds: readonly number[]; readOnly: boolean; before: CommandBefore; confirmation?: MdfOrderConfirmation | null }) {
+  orderIds: readonly number[]; readOnly: boolean; before: CommandBefore; confirmation?: MdfOrderConfirmation | null;
+  /** §5.8: bypass the command before/after gates; each source's frozen demand is compared with live demand. */
+  reconcile?: boolean; authorizeOwners?: (owners: readonly number[]) => Promise<void> }) {
   const touched = [...new Set(input.orderIds)].sort((a, b) => a - b);
   // Impact first: a command that did not change the MDF demand of its own orders has no MDF
   // consequence — before any discovery, scope limit or lock, whatever state the cards are in.
   // Status/rank changes never matter here: card placement follows live ranks at read time (§5.4d).
   const touchedSet = new Set(touched);
   const afterDemand = await loadOrderMdfDemand(tx, touched);
-  if (mdfDemandDigest(demandOf(input.before.demand, touchedSet))
+  if (!input.reconcile && mdfDemandDigest(demandOf(input.before.demand, touchedSet))
     === mdfDemandDigest(demandOf(afterDemand, touchedSet))) return;
   // §5.7b: a demand change on an order closed by historical status reopens it here (successor order:X keeping the
   // closure's historical coverage for positions still in demand) — also when the order has no card sources at all.
@@ -178,6 +197,7 @@ async function runCascade(tx: TransactionClient, input: { user: CurrentUser; req
     for (const s of closureSources) {
       await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`mdf-source:${JSON.stringify([s.kind, s.id])}`]);
     }
+    await input.authorizeOwners?.(touched);
     await reopenClosures();
     return;
   }
@@ -210,6 +230,8 @@ async function runCascade(tx: TransactionClient, input: { user: CurrentUser; req
   const againOwners = await frozenOwners(tx, again);
   if (JSON.stringify(again) !== JSON.stringify(discovered) || JSON.stringify(againOwners) !== JSON.stringify(owners)
     || heads.length !== discovered.length) contention();
+  // Final affected-owner set is now locked and stable: authorize all of it (not an earlier estimate) before writes.
+  await input.authorizeOwners?.([...new Set([...touched, ...owners])].sort((a, b) => a - b));
 
   // Bounded execution loaders run only for an affected source; their limits answer 409, never 500.
   const bounded = async <T>(load: () => Promise<T>): Promise<T> => {
@@ -268,8 +290,9 @@ async function runCascade(tx: TransactionClient, input: { user: CurrentUser; req
     // Existing problems of unaffected cards never block it.
     const own = lines.filter(l => l.kind === h.kind && l.id === h.id);
     const ownTouched = new Set(sourceOwners.filter(id => touchedSet.has(id)));
-    const demandImpact = mdfDemandDigest(demandOf(input.before.demand, ownTouched))
-      !== mdfDemandDigest(demandOf(afterDemand, ownTouched));
+    const demandImpact = input.reconcile
+      ? mdfDemandDigest(demandOf(frozen, ownTouched)) !== mdfDemandDigest(demandOf(afterDemand, ownTouched))
+      : mdfDemandDigest(demandOf(input.before.demand, ownTouched)) !== mdfDemandDigest(demandOf(afterDemand, ownTouched));
     if (!demandImpact) continue;
     // §5.4e: a retired bath or a fully detached source is terminal history; an order edit never touches it.
     if (snapshot.retired.has(key)) continue;

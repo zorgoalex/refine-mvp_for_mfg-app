@@ -115,6 +115,12 @@ export interface MdfPublishedSnapshot {
 
 export interface MdfPublishedQuery {
   dateTo?: string;
+  /** Legacy-parity display cut (ISO day): cards older than this are excluded from the default
+   * payload (search/focus still reach them via `searchOrderIds`/`focus`). Derived client-side the
+   * same way the legacy board derives its display window's `dateFrom` for the same
+   * period+workday — see `buildCncOrderSearchDateRange`. Omitted, the backend defaults to
+   * `dateTo` minus 6 days (period `1w`), bounded to the two-month window. */
+  displayFrom?: string;
   focus?: { kind: MdfSourceKind; id: string };
   orderIds?: readonly number[];
   jobIds?: readonly string[];

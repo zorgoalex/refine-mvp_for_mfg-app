@@ -292,6 +292,33 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(verification).toMatch(/195_mdf_baseline_population\*\)\s+probe_file "\$f" \|\| die/);
   });
 
+  it('probes the recovery freeze, demand-drift conflicts table and catalog classification guard before ledgering migration199', () => {
+    const start = probeFn.indexOf('199_mdf_cutover_controls*)');
+    const end = probeFn.indexOf('186_bitrix24_product_import*)', start);
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, end);
+    for (const marker of [
+      'q_col mdf_freeze_guard recovery_frozen_at', 'q_col mdf_freeze_guard recovery_reason',
+      'q_col mdf_engine_state mode_changed_at', "t.tgname='mdf_mode_changed_at_stamp'",
+      "to_regprocedure('public.mdf_recovery_owned()') IS NOT NULL",
+      'mdf_demand_drift_conflicts', 'mdf_demand_drift_conflicts_pkey',
+      'source_kind%source_id%predecessor_revision_key%live_demand_digest',
+      'CONFIRMATION_REQUIRED',
+      "confrelid=to_regclass('public.users')",
+      'idx_mdf_demand_drift_conflicts_open',
+      "q_stmt_trg mdf_cutover_fence mdf_demand_drift_conflicts mdf_cutover_fence 62",
+      "q_stmt_trg mdf_cutover_fence cut_result_archive_state mdf_cutover_fence 62",
+      "to_regprocedure('public.mdf_material_is_mdf(text)') IS NOT NULL",
+      'mdf_material_is_mdf', "to_regprocedure('public.mdf_guard_catalog_classification()') IS NOT NULL",
+      "to_regclass('public.sheet_material_types') IS NULL OR EXISTS",
+      "to_regclass('public.materials') IS NULL OR EXISTS",
+      "t.tgname='mdf_catalog_classification_guard'",
+      "t.tgfoid=to_regprocedure('public.mdf_guard_catalog_classification()')", 't.tgtype=19',
+    ]) expect(arm).toContain(marker);
+    const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verification).toMatch(/199_mdf_cutover_controls\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
   it('probes sealed BASIS assignment and command intent effects before ledgering migration185', () => {
     const start = probeFn.indexOf('185_mdf_bazis_composition*)');
     const end = probeFn.indexOf('*) return 2', start);

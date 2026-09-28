@@ -3413,6 +3413,7 @@ paths:
       security: [{ bearerAuth: [] }]
       parameters:
         - { name: dateTo, in: query, schema: { type: string, format: date } }
+        - { name: displayFrom, in: query, description: 'Начало окна показа карточек (§5.8 P1); по умолчанию dateTo минус 6 дней, не может выходить за пределы двухмесячного окна dateTo.', schema: { type: string, format: date } }
         - { name: orderIds, in: query, description: До 100 положительных safe-integer ID через запятую, schema: { type: string } }
         - { name: jobIds, in: query, description: До 20 UUID через запятую; все владельцы зафиксированного состава и потребности должны быть доступны, schema: { type: string } }
         - { name: searchOrderIds, in: query, description: 'Поиск (§5.6): до 100 ID заказов через запятую; дополнительно выбирает карточки этих заказов, включая старые и завершённые (каждый заказ проверяется на доступ). В отличие от orderIds, который добавляет только итоги позиций карточек заказов.', schema: { type: string } }
@@ -3916,6 +3917,91 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/orders/status-board/mdf-drift:
+    get:
+      tags:
+        - Orders
+      operationId: listMdfDemandDriftConflicts
+      summary: Открытые расхождения спроса МДФ, видимые пользователю (§5.8 сверщик)
+      description: >-
+        Только чтение. Сверщик спроса сравнивает зафиксированный спрос принятых источников
+        с текущим (изменения справочников и любые другие изменения вне команд заказа) и
+        записывает устойчивую строку конфликта при необходимости подтверждения или жёстком
+        конфликте. Список не создаёт подтверждений и не меняет карточки.
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      responses:
+        '200':
+          description: Открытые расхождения, видимые пользователю по scope orders.view
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MdfDemandDriftConflict'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/orders/status-board/mdf-drift/{conflictId}/confirm:
+    parameters:
+      - name: conflictId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags:
+        - Orders
+      operationId: confirmMdfDemandDrift
+      summary: Разрешить расхождение спроса МДФ через тот же подтверждённый каскад заказа
+      description: >-
+        Без digest — 409-предпросмотр с mdfConfirmation.digest (как при обычном
+        подтверждении сохранения заказа). С digest — применяет каскад для связной
+        компоненты источников, помечает конфликт(ы) разрешёнными и записывает аудит.
+        Требует orders.update и видимость ВСЕХ затронутых заказов.
+      security:
+        - bearerAuth: []
+      x-permission: orders.update
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                digest:
+                  type: string
+                  pattern: '^[a-f0-9]{64}$'
+      responses:
+        '200':
+          description: Расхождение(я) разрешено(ы)
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - resolved
+                properties:
+                  resolved:
+                    type: integer
+                    minimum: 0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Расхождение не найдено
+        '409':
+          description: Предпросмотр (mdfConfirmation.digest), уже разрешено, либо устаревший digest
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
   /api/v1/orders/{orderId}/resource-procurement/{resourceKey}:
     parameters:
       - $ref: '#/components/parameters/OrderId'
@@ -22164,6 +22250,36 @@ components:
         jobId:
           type: string
           description: Задание пересчёта active-движка; очистка не отзывает физические факты.
+
+    MdfDemandDriftConflict:
+      type: object
+      additionalProperties: false
+      required:
+        - conflictId
+        - sourceKind
+        - sourceId
+        - code
+        - orderIds
+        - detectedAt
+      properties:
+        conflictId:
+          type: string
+          format: uuid
+        sourceKind:
+          type: string
+          enum: [packet, bazisCutSet, bath, order]
+        sourceId:
+          type: string
+        code:
+          type: string
+          enum: [CONFIRMATION_REQUIRED, HARD_CONFLICT, BLOCKED_BY_CLOSURE, MDF_RECONCILE_SCOPE_LIMIT]
+        orderIds:
+          type: array
+          items:
+            type: integer
+        detectedAt:
+          type: string
+          format: date-time
 
     OrderStatusBoardResponse:
       type: object

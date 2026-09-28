@@ -2474,6 +2474,28 @@ probe_file() {
       "SELECT to_regprocedure('public.mdf_reset_unactivated_baseline(uuid)') IS NOT NULL;" \
       "SELECT NOT has_function_privilege('public','mdf_reset_delete_baseline_rows(uuid)','EXECUTE');" \
       "SELECT NOT has_function_privilege('public','mdf_reset_unactivated_baseline(uuid)','EXECUTE');" ;;
+    # §5.8 cutover controls (delta to 195, not a whole re-probe): durable RECOVERY freeze columns + owner
+    # function, demand-drift conflicts table + its cutover fence, and the catalog classification guard on
+    # materials/sheet_material_types (checked on a representative sample, not every constraint).
+    199_mdf_cutover_controls*) probe_all \
+      "$(q_col mdf_freeze_guard recovery_frozen_at)" \
+      "$(q_col mdf_freeze_guard recovery_reason)" \
+      "$(q_col mdf_engine_state mode_changed_at)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid='public.mdf_engine_state'::regclass AND t.tgname='mdf_mode_changed_at_stamp' AND t.tgfoid=to_regprocedure('public.mdf_stamp_mode_changed_at()') AND NOT t.tgisinternal);" \
+      "SELECT to_regprocedure('public.mdf_recovery_owned()') IS NOT NULL;" \
+      "$(q_tbl mdf_demand_drift_conflicts)" \
+      "$(q_con_on mdf_demand_drift_conflicts mdf_demand_drift_conflicts_pkey)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.mdf_demand_drift_conflicts'::regclass AND contype='u' AND pg_get_constraintdef(oid) LIKE '%source_kind%source_id%predecessor_revision_key%live_demand_digest%');" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.mdf_demand_drift_conflicts'::regclass AND contype='c' AND pg_get_constraintdef(oid) LIKE '%CONFIRMATION_REQUIRED%');" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.mdf_demand_drift_conflicts'::regclass AND contype='f' AND confrelid=to_regclass('public.users'));" \
+      "$(q_idx idx_mdf_demand_drift_conflicts_open)" \
+      "$(q_stmt_trg mdf_cutover_fence mdf_demand_drift_conflicts mdf_cutover_fence 62 '' '')" \
+      "$(q_stmt_trg mdf_cutover_fence cut_result_archive_state mdf_cutover_fence 62 '' '')" \
+      "SELECT to_regprocedure('public.mdf_material_is_mdf(text)') IS NOT NULL;" \
+      "SELECT mdf_material_is_mdf('МДФ фасад') AND NOT mdf_material_is_mdf('ЛДСП мдф-имитация');" \
+      "SELECT to_regprocedure('public.mdf_guard_catalog_classification()') IS NOT NULL;" \
+      "SELECT to_regclass('public.sheet_material_types') IS NULL OR EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgname='mdf_catalog_classification_guard' AND t.tgrelid=to_regclass('public.sheet_material_types') AND t.tgfoid=to_regprocedure('public.mdf_guard_catalog_classification()') AND t.tgtype=19 AND t.tgenabled='O' AND NOT t.tgisinternal);" \
+      "SELECT to_regclass('public.materials') IS NULL OR EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgname='mdf_catalog_classification_guard' AND t.tgrelid=to_regclass('public.materials') AND t.tgfoid=to_regprocedure('public.mdf_guard_catalog_classification()') AND t.tgtype=19 AND t.tgenabled='O' AND NOT t.tgisinternal);" ;;
     186_bitrix24_product_import*) probe_all \
       "$(q_tbl bitrix24_product_mapping)" \
       "SELECT count(*)=8 FROM information_schema.columns WHERE table_schema='public' AND table_name='bitrix24_product_mapping';" \
@@ -2615,6 +2637,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     195_mdf_baseline_population*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    199_mdf_cutover_controls*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     186_bitrix24_product_import*)

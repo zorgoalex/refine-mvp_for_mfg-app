@@ -12,6 +12,7 @@ import {
 import { selectMdfBoardMode, type MdfBoardMode, type MdfEngineModeFetchResult } from './mdfBoardMode';
 import { isMdfEngineModeEndpointMissing } from './mdfReturnSelection';
 import { planMdfPublishedSearchOrderIds } from './mdfPublishedBoard';
+import { buildCncOrderSearchDateRange, type CncOrderSearchPeriod } from './model';
 
 const POLL_INTERVAL_MS = 15000;
 
@@ -19,6 +20,10 @@ export interface UseMdfPublishedBoardParams {
   /** `active && isCncToday`. When false the hook tears its state down and does no IO. */
   enabled: boolean;
   workday: string;
+  /** The board's period selector (defaults to `1w` inside `buildCncOrderSearchDateRange` when
+   * undefined) — drives `displayFrom`, the legacy-parity display cut sent to the backend. Changing
+   * it must refetch (see the query-change effect below). */
+  period: CncOrderSearchPeriod | undefined;
   focusKind: MdfSourceKind | null;
   focusId: string | null;
 }
@@ -38,7 +43,7 @@ export interface UseMdfPublishedBoardResult {
 }
 
 export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdfPublishedBoardResult {
-  const { enabled, workday, focusKind, focusId } = params;
+  const { enabled, workday, period, focusKind, focusId } = params;
   const [mode, setMode] = useState<MdfBoardMode | null>(null);
   const [session, setSession] = useState<MdfSessionSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
@@ -93,9 +98,14 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
     }
     let publishedReadsFailed = false;
     let nextSession: MdfSessionSnapshot | null = null;
+    // Legacy-parity display cut: the same `dateFrom` the legacy board computes for this
+    // workday+period via `buildCncOrderSearchDateRange` (default period `1w` → workday − 6 days).
+    // Search/focus reach older cards regardless — this only trims the default payload.
+    const displayFrom = buildCncOrderSearchDateRange(workday, period).dateFrom;
     try {
       nextSession = await mdfPublishedApi.get({
         dateTo: workday,
+        displayFrom,
         ...(focusKind && focusId ? { focus: { kind: focusKind, id: focusId } } : {}),
         ...(searchOrderIdsRef.current.length ? { searchOrderIds: searchOrderIdsRef.current } : {}),
       });
@@ -107,7 +117,7 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
     setMode(resolvedMode);
     setSession(resolvedMode === 'published' ? nextSession : null);
     setLoading(false);
-  }, [workday, focusKind, focusId]);
+  }, [workday, period, focusKind, focusId]);
 
   const refresh = useCallback(() => {
     if (!enabledRef.current) return;
@@ -115,8 +125,9 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
     void runCycle(requestGeneration);
   }, [bump, runCycle]);
 
-  // Query change (workday, focus, mode-affecting session state, searchOrderIds) or enable/disable:
-  // one board-wide generation bump per change, superseded responses dropped (§5.6 req 7 / R2#2).
+  // Query change (workday, period — which drives `displayFrom` — focus, mode-affecting session
+  // state, searchOrderIds) or enable/disable: one board-wide generation bump per change, superseded
+  // responses dropped (§5.6 req 7 / R2#2).
   useEffect(() => {
     const requestGeneration = bump();
     if (!enabled) {
@@ -127,7 +138,7 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
     }
     void runCycle(requestGeneration);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, workday, focusKind, focusId, searchOrderIds.join(',')]);
+  }, [enabled, workday, period, focusKind, focusId, searchOrderIds.join(',')]);
 
   // Refresh every 15s and on tab visibility, like the legacy board.
   useEffect(() => {

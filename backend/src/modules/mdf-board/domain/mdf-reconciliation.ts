@@ -31,6 +31,8 @@ export interface MdfReconciliationSourceInput {
   exists: boolean;
   /** MDF scope (material/card kind/vacuum bath/eligible BASIS rows). */
   mdf: boolean;
+  /** Bath only: not the job's current, non-archived result (superseded/archived) — never an active bath. */
+  inactive?: boolean;
   createdAt: string | null;
   /** Card name as the live source writers use it (program name / set name / cut job name). */
   displayName?: string | null;
@@ -77,6 +79,16 @@ export function classifyMdfReconciliationSource(input: MdfReconciliationSourceIn
           : i.orderId === null ? 'HISTORY_NO_OWNER' : 'HISTORY_UNMATCHED_ITEMS' })) };
   if (!input.exists) return { ...base, disposition: 'blocked', reason: 'HISTORY_SOURCE_MISSING' };
   if (!input.mdf) return { ...base, disposition: 'excluded', reason: 'HISTORY_NOT_MDF' };
+  if (input.inactive) {
+    // A replaced/archived result is never an active bath. Production history recorded on it (lamination proof or a
+    // manual lamination column) is not dropped silently: the source is blocked and its live owners go to manual review.
+    const production = input.provenLaminated === true
+      || (input.manualColumn !== null && LAMINATED_COLUMNS.has(input.manualColumn));
+    if (!production) return { ...base, disposition: 'excluded', reason: 'HISTORY_BATH_NOT_CURRENT' };
+    const owners = [...new Set(input.items.filter(i => i.resolved && i.orderId !== null).map(i => i.orderId!))]
+      .sort((a, b) => a - b);
+    return { ...base, owners, disposition: 'blocked', reason: 'HISTORY_BATH_NOT_CURRENT_WITH_PRODUCTION' };
+  }
   const resolved = input.items.filter(i => i.resolved && i.orderId !== null && i.detailId !== null && i.quantity > 0);
   if (!resolved.length) {
     const states = new Set(input.items.map(i => i.ownerState));

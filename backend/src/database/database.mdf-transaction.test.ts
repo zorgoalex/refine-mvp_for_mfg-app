@@ -13,7 +13,7 @@ vi.mock('pg', () => ({ Pool: class {
     query: async (sql: string) => {
       state.calls.push(sql);
       const rows = sql.includes('pg_try_advisory_xact_lock_shared') ? [{ locked: state.locked }]
-        : sql.includes('SELECT mode FROM mdf_engine_state') ? [{ mode: state.mode }]
+        : sql.includes('FROM mdf_engine_state s WHERE s.singleton=true') ? [{ mode: state.mode }]
         : sql.includes('FROM mdf_freeze_guard') ? [{ freeze_run_id: state.freezeRunId }] : [];
       return { rows, rowCount: 0, fields: [], command: 'SELECT', oid: 0 };
     }, release: state.release,
@@ -41,7 +41,7 @@ describe('DatabaseService MDF command entry', () => {
     expect(state.calls[0]).toBe('BEGIN');
     expect(state.calls[1]).toBe('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
     expect(state.calls[2]).toContain('pg_try_advisory_xact_lock_shared');
-    expect(state.calls[3]).toContain('SELECT mode FROM mdf_engine_state');
+    expect(state.calls[3]).toContain('FROM mdf_engine_state s WHERE s.singleton=true');
     expect(state.calls[4]).toContain('FROM mdf_freeze_guard');
     expect(state.calls[5]).toContain("set_config('mdf.command_writer'");
     expect(state.calls.slice(6)).toEqual(['SELECT e2e_domain_lock', 'SELECT e2e_finalizer', 'COMMIT']);
@@ -80,6 +80,6 @@ describe('DatabaseService MDF command entry', () => {
     await db.transaction(async tx => {
       expect((await requireMdfCommandBoundary(tx, queued)).queued).toBe(true);
     }, { mdf: queued });
-    expect(state.calls.filter(sql => sql.includes('SELECT mode FROM mdf_engine_state'))).toHaveLength(2);
+    expect(state.calls.filter(sql => sql.includes('FROM mdf_engine_state s WHERE s.singleton=true'))).toHaveLength(2);
   });
 });

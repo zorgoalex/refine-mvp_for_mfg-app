@@ -10,6 +10,10 @@ import { loadMdfPublishedPresentation, loadMdfUnregisteredSources } from './mdf-
 
 export interface MdfPublishedQuery {
   dateTo?: string;
+  /** §5.8 default display cut (legacy parity): cards are shown only when their legacy display date is on/after this day
+   * (packet workday, BASIS set creation, bath result creation); default = dateTo − 6 days (period «1w»). Bounded to the
+   * two-month window. Focus and search bypass it; owners/positions/progress stay on the two-month window. */
+  displayFrom?: string;
   focus?: { kind: 'packet'|'bazisCutSet'|'bath'; id: string };
   /** Current order cards selected by the caller. Visibility only; quantities
    * still come from the complete accepted ledger, never the visible files. */
@@ -39,10 +43,14 @@ export interface PublishedMember { kind: string; id: string; orderId: number; de
 export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: CurrentUser, query: MdfPublishedQuery = {}) {
   return database.transaction(async tx => {
     await tx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
-    const state = (await tx.query<{ mode: string; revision: string; generatedAt: string; dateFrom: string; dateTo: string }>(`SELECT
+    const state = (await tx.query<{ mode: string; revision: string; generatedAt: string; dateFrom: string; dateTo: string;
+      displayFrom: string }>(`SELECT
       mode,published_revision::text revision,transaction_timestamp()::text "generatedAt",
       (COALESCE($1::date,current_date)-interval '2 months')::date::text "dateFrom",
-      COALESCE($1::date,current_date)::text "dateTo" FROM mdf_engine_state WHERE singleton`,[query.dateTo ?? null])).rows[0];
+      COALESCE($1::date,current_date)::text "dateTo",
+      LEAST(COALESCE($1::date,current_date),GREATEST((COALESCE($1::date,current_date)-interval '2 months')::date,
+        COALESCE($2::date,COALESCE($1::date,current_date)-6)))::text "displayFrom"
+      FROM mdf_engine_state WHERE singleton`,[query.dateTo ?? null,query.displayFrom ?? null])).rows[0];
     if (!state) throw new ApiError(503,'MDF_STATE_UNAVAILABLE','Состояние МДФ-доски недоступно');
     if (state.mode!=='active' && state.mode!=='read_only') return { schemaVersion: 1 as const, ...state,
       cards: [],positions: [],members: [],pendingJobs: [],trackedJobs: [],presentation: [],progress: [],orders: [],
@@ -62,12 +70,23 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
         h.accepted_revision_key head_accepted
       FROM mdf_published_sources p
       JOIN mdf_source_heads h ON h.source_kind=p.source_kind AND h.source_id=p.source_id
-      WHERE ((p.source_created_at >= $2::date AND p.source_created_at < $3::date+interval '1 day')
+      -- §5.8 legacy display parity: the legacy display date of each kind within [displayFrom, dateTo] (bath: no upper
+      -- bound, like the legacy board), operator-hidden packets excluded; the two-month candidate window still applies.
+      WHERE ((p.source_created_at >= $2::date AND p.source_created_at < $3::date+interval '1 day' AND CASE p.source_kind
+          WHEN 'packet' THEN EXISTS(SELECT 1 FROM cnc_telegram_packets r WHERE r.packet_id::text=p.source_id
+            AND r.workday BETWEEN $8::date AND $3::date AND r.mdf_board_hidden_at IS NULL)
+          WHEN 'bazisCutSet' THEN EXISTS(SELECT 1 FROM bazis_cut_sets r WHERE r.bazis_cut_set_id::text=p.source_id
+            AND r.created_at >= $8::date AND r.created_at < $3::date+interval '1 day')
+          WHEN 'bath' THEN EXISTS(SELECT 1 FROM cut_result r WHERE 'cut-result:'||r.cut_result_id::text=p.source_id
+            AND r.created_at >= $8::date)
+          ELSE false END)
         OR (p.source_kind=$4 AND p.source_id=$5)
         -- §5.6: cards of requested orders (old/completed ones included), each requested order authorized first.
-        OR (cardinality($7::bigint[])>0 AND EXISTS(SELECT 1 FROM allowed a
-          WHERE a.order_id=ANY($7::bigint[]) AND a.order_id IN (${cardOwners('p')}))))
-        AND ($6::boolean OR EXISTS(SELECT 1 FROM allowed a WHERE a.order_id IN (${cardOwners('p')})))
+        OR (cardinality($7::bigint[])>0 AND EXISTS(SELECT 1 FROM (${cardOwners('p')}) co(order_id)
+          WHERE co.order_id=ANY($7::bigint[]) AND co.order_id IN (SELECT order_id FROM allowed))))
+        -- §5.8: uncorrelated IN over the allowed set (hashed subplan) instead of a correlated scan per owner.
+        AND ($6::boolean OR EXISTS(SELECT 1 FROM (${cardOwners('p')}) co(order_id)
+          WHERE co.order_id IN (SELECT order_id FROM allowed)))
       ORDER BY p.source_created_at DESC,p.source_kind,p.source_id LIMIT 1001)
       SELECT page.source_kind kind,page.source_id id,page.display_name "displayName",page.column_key "column",
         page.source_created_at::text "sourceCreatedAt",page.accepted_revision_key "acceptedRevision",
@@ -76,11 +95,11 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
         o.owner_ids "ownerIds",o.all_allowed "allOwnersAllowed"
       FROM page CROSS JOIN LATERAL (
         SELECT COALESCE(array_agg(x.order_id::float8 ORDER BY x.order_id),'{}') owner_ids,
-          COALESCE(bool_and(EXISTS(SELECT 1 FROM allowed a WHERE a.order_id=x.order_id)),$6::boolean) all_allowed
+          COALESCE(bool_and(x.order_id IN (SELECT order_id FROM allowed)),$6::boolean) all_allowed
         FROM (${cardOwners('page')}) x(order_id)) o
       ORDER BY page.source_created_at DESC,page.source_kind,page.source_id`,
     [user.id,state.dateFrom,state.dateTo,query.focus?.kind ?? null,query.focus?.id ?? null,scope==='all',
-      [...(query.searchOrderIds ?? [])]])).rows;
+      [...(query.searchOrderIds ?? [])],state.displayFrom])).rows;
     checkLimit(cardRows,1000);
     const cardOwnerIds = cardRows.flatMap(c => c.ownerIds);
     // §5.4d: placement follows the members' live ranks (one set-based read, no writes/automation).
@@ -107,7 +126,7 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
         UNION SELECT s.kind,s.id,cp.order_id FROM s JOIN cut_result_placement cp
           ON s.kind='bath' AND ('cut-result:'||cp.cut_result_id::text)=s.id WHERE cp.order_id IS NOT NULL)
       SELECT s.kind,s.id,($4::boolean OR NOT EXISTS(SELECT 1 FROM raw r WHERE r.kind=s.kind AND r.id=s.id
-        AND NOT EXISTS(SELECT 1 FROM allowed a WHERE a.order_id=r.order_id))) ok FROM s`,
+        AND r.order_id NOT IN (SELECT order_id FROM allowed))) ok FROM s`,
     [user.id,cardRows.map(c => c.kind),cardRows.map(c => c.id),scope==='all'])).rows.map(r => [`${r.kind}:${r.id}`,r.ok]));
     const fullyVisible = (c: { kind: string; id: string; allOwnersAllowed: boolean }) =>
       c.allOwnersAllowed && rawOwnersVisible.get(`${c.kind}:${c.id}`) === true;

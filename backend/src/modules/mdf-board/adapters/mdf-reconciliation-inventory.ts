@@ -40,7 +40,7 @@ const NON_SOURCE_ENTITIES = ['cnc_manual_svg_upload_file', 'cnc_manual_svg_teleg
 type ItemRow = { kind: MdfReconciliationKind; id: string; line: string | null; order_id: string | null; detail_id: string | null;
   quantity: string | null; relevant: boolean; state: MdfReconciliationItem['ownerState'] };
 type HeaderRow = { kind: MdfReconciliationKind; id: string; created_at: string; completed: boolean; returned: boolean;
-  rework: boolean; source_mdf: boolean; name: string | null };
+  rework: boolean; source_mdf: boolean; name: string | null; inactive: boolean };
 
 export async function loadMdfReconciliationInventory(db: DatabaseClient): Promise<MdfReconciliationInventory> {
   const refs = (await db.query<MdfReconciliationReference>(`
@@ -70,11 +70,15 @@ export async function loadMdfReconciliationInventory(db: DatabaseClient): Promis
       (p.completion_status='completed' OR COALESCE(p.thumbs_up,false)) completed,COALESCE(p.mdf_completion_returned,false) returned,
       COALESCE(p.rework,false) rework,
       (${cncPacketCountsForMdfReadinessSql('p')} AND COALESCE(p.mdf_board_card_kind,'machine_file')='machine_file') source_mdf,
-      COALESCE(p.program_name,p.external_packet_key) name
+      COALESCE(p.program_name,p.external_packet_key) name,false inactive
     FROM cnc_telegram_packets p
-    UNION ALL SELECT 'bazisCutSet',s.bazis_cut_set_id::text,s.created_at::text,false,false,false,true,s.name FROM bazis_cut_sets s
+    UNION ALL SELECT 'bazisCutSet',s.bazis_cut_set_id::text,s.created_at::text,false,false,false,true,s.name,false FROM bazis_cut_sets s
     UNION ALL SELECT 'bath','cut-result:'||r.cut_result_id,r.created_at::text,false,false,false,
-      COALESCE(b.is_vacuum,false),b.cut_job_name FROM cut_result r
+      COALESCE(b.is_vacuum,false),b.cut_job_name,
+      -- §5.4b: a cut job has at most one active bath — its current, non-archived result of a non-archived job.
+      (j.current_cut_result_id IS DISTINCT FROM r.cut_result_id OR j.status='archived' OR archive.archived_at IS NOT NULL)
+    FROM cut_result r JOIN cut_job j ON j.cut_job_id=r.cut_job_id
+      LEFT JOIN cut_result_archive_state archive ON archive.cut_job_id=r.cut_job_id AND archive.result_no=r.result_no
       LEFT JOIN cut_result_board_projection b ON b.cut_result_id=r.cut_result_id AND b.snapshot_digest=r.snapshot_digest`))
     .rows.map(h => [`${h.kind}:${h.id}`, h]));
 
@@ -138,6 +142,7 @@ export async function loadMdfReconciliationInventory(db: DatabaseClient): Promis
         kind: ref.kind, id: ref.id, exists: header !== undefined,
         // Packet scope is file-level (material marker); BASIS/bath scope needs at least one MDF row.
         mdf: header !== undefined && header.source_mdf && (ref.kind === 'packet' || relevant.length > 0),
+        inactive: header?.inactive === true,
         createdAt: header?.created_at ?? null, displayName: header?.name?.trim() ? header.name.trim().slice(0, 2000) : null,
         items: relevant.map(i => ({ line: i.line!, orderId: i.order_id === null ? null : Number(i.order_id),
           detailId: i.detail_id === null ? null : Number(i.detail_id), quantity: Number(i.quantity ?? 0),

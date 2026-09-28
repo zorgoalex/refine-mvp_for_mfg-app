@@ -62,29 +62,36 @@ export async function loadMdfPublishedPresentation(tx: DatabaseClient, owners: s
   // members of the card (all owners, before redaction). Baths: cut results are immutable; no raw item rows.
   const bindings = new Map((await tx.query<{ kind: string; id: string; ok: boolean }>(`
     WITH s AS (SELECT * FROM unnest($1::text[],$2::text[],$3::text[]) s(kind,id,revision)),
+    -- Native-typed keys so the raw joins use the (packet_id)/(bazis_cut_set_id, …) indexes; malformed ids match nothing.
+    sp AS (SELECT id,id::uuid pid FROM s WHERE kind='packet'
+      AND id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),
+    sb AS (SELECT id,id::bigint bid FROM s WHERE kind='bazisCutSet' AND id ~ '^[1-9][0-9]{0,17}$'),
     raw AS (
-      SELECT 'packet'::text kind,i.packet_id::text id,i.match_order_id order_id,i.match_detail_id detail_id,sum(i.quantity) q
-        FROM cnc_telegram_packet_items i JOIN s ON s.kind='packet' AND s.id=i.packet_id::text
+      SELECT 'packet'::text kind,sp.id,i.match_order_id order_id,i.match_detail_id detail_id,sum(i.quantity) q
+        FROM cnc_telegram_packet_items i JOIN sp ON sp.pid=i.packet_id
         WHERE i.match_order_id IS NOT NULL AND i.match_detail_id IS NOT NULL
           AND ${notDetachedSql("'packet'", 'i.packet_id::text', 'i.match_order_id', 'i.match_detail_id')}
         GROUP BY 1,2,3,4
       UNION ALL
-      SELECT 'bazisCutSet',d.bazis_cut_set_id::text,d.source_order_id,d.source_order_detail_id,sum(d.quantity)
-        FROM bazis_cut_set_details d JOIN s ON s.kind='bazisCutSet' AND s.id=d.bazis_cut_set_id::text
+      SELECT 'bazisCutSet',sb.id,d.source_order_id,d.source_order_detail_id,sum(d.quantity)
+        FROM bazis_cut_set_details d JOIN sb ON sb.bid=d.bazis_cut_set_id
         WHERE ${bazisEligibleSql('d', '$4', '$5')}
           AND ${notDetachedSql("'bazisCutSet'", 'd.bazis_cut_set_id::text', 'd.source_order_id', 'd.source_order_detail_id')}
         GROUP BY 1,2,3,4),
     pub AS (SELECT m.source_kind kind,m.source_id id,m.order_id,m.detail_id,sum(m.quantity) q
-        FROM mdf_published_source_members m JOIN s ON s.kind=m.source_kind AND s.id=m.source_id GROUP BY 1,2,3,4)
+        FROM mdf_published_source_members m JOIN s ON s.kind=m.source_kind AND s.id=m.source_id GROUP BY 1,2,3,4),
+    -- §5.8: one canonical (sorted) membership array per source, compared once — rows are unique per (order, detail)
+    -- after GROUP BY, so array equality is exactly the former symmetric-EXCEPT set equality, without per-card scans.
+    raw_agg AS (SELECT kind,id,jsonb_agg(jsonb_build_array(order_id,detail_id,q) ORDER BY order_id,detail_id,q) arr
+      FROM raw GROUP BY kind,id),
+    pub_agg AS (SELECT kind,id,jsonb_agg(jsonb_build_array(order_id,detail_id,q) ORDER BY order_id,detail_id,q) arr
+      FROM pub GROUP BY kind,id)
     SELECT s.kind,s.id,(b.presentation_digest IS NOT NULL
         AND b.presentation_digest=mdf_source_presentation_digest(s.kind,s.id)
-        AND (s.kind='bath' OR NOT EXISTS(
-          (SELECT order_id,detail_id,q FROM raw r WHERE r.kind=s.kind AND r.id=s.id
-            EXCEPT SELECT order_id,detail_id,q FROM pub p WHERE p.kind=s.kind AND p.id=s.id)
-          UNION ALL
-          (SELECT order_id,detail_id,q FROM pub p WHERE p.kind=s.kind AND p.id=s.id
-            EXCEPT SELECT order_id,detail_id,q FROM raw r WHERE r.kind=s.kind AND r.id=s.id)))) ok
-    FROM s LEFT JOIN mdf_revision_presentation b ON b.source_kind=s.kind AND b.source_id=s.id AND b.revision_key=s.revision`,
+        AND (s.kind='bath' OR COALESCE(ra.arr,'[]'::jsonb)=COALESCE(pa.arr,'[]'::jsonb))) ok
+    FROM s LEFT JOIN mdf_revision_presentation b ON b.source_kind=s.kind AND b.source_id=s.id AND b.revision_key=s.revision
+      LEFT JOIN raw_agg ra ON ra.kind=s.kind AND ra.id=s.id
+      LEFT JOIN pub_agg pa ON pa.kind=s.kind AND pa.id=s.id`,
   [kinds, ids, revisions, MDF, OTHER])).rows.map(r => [`${r.kind}:${r.id}`, r.ok]));
 
   const packetIds = cards.filter(c => c.kind === 'packet').map(c => c.id);
@@ -182,7 +189,8 @@ export async function loadMdfUnregisteredSources(tx: DatabaseClient, owners: str
       FROM cnc_telegram_packets p
       WHERE COALESCE(p.source_created_at,p.created_at) >= $2::date AND COALESCE(p.source_created_at,p.created_at) < $3::date+interval '1 day'
         AND p.mdf_board_hidden_at IS NULL AND ${cncPacketCountsForMdfReadinessSql('p')}
-        AND NOT EXISTS(SELECT 1 FROM mdf_source_heads h WHERE h.source_kind='packet' AND h.source_id=p.packet_id::text)
+        -- Hashed set (heads are few, packets many): avoids a misestimated per-row nested anti-join.
+        AND p.packet_id::text NOT IN (SELECT h.source_id FROM mdf_source_heads h WHERE h.source_kind='packet')
     ), sets AS (
       SELECT 'bazisCutSet'::text kind,s.bazis_cut_set_id::text id,COALESCE(s.name,s.bazis_cut_set_id::text) "displayName",
         s.created_at created,
@@ -192,13 +200,13 @@ export async function loadMdfUnregisteredSources(tx: DatabaseClient, owners: str
       WHERE s.created_at >= $2::date AND s.created_at < $3::date+interval '1 day'
         AND EXISTS(SELECT 1 FROM bazis_cut_set_details d WHERE d.bazis_cut_set_id=s.bazis_cut_set_id
           AND ${bazisEligibleSql('d', '$4', '$5')})
-        AND NOT EXISTS(SELECT 1 FROM mdf_source_heads h WHERE h.source_kind='bazisCutSet' AND h.source_id=s.bazis_cut_set_id::text)
+        AND s.bazis_cut_set_id::text NOT IN (SELECT h.source_id FROM mdf_source_heads h WHERE h.source_kind='bazisCutSet')
     )
     SELECT x.kind,x.id,x."displayName",x.created::text "sourceCreatedAt",
       ARRAY(SELECT o::float8 FROM unnest(x.owners) o) "orderIds"
     FROM (SELECT * FROM packets UNION ALL SELECT * FROM sets) x
     WHERE cardinality(x.owners)>0 AND NOT EXISTS(SELECT 1 FROM unnest(x.owners) o
-      WHERE NOT EXISTS(SELECT 1 FROM allowed a WHERE a.order_id=o))
+      WHERE o NOT IN (SELECT order_id FROM allowed))
     ORDER BY x.created DESC,x.kind,x.id LIMIT 201`,
   [userId, window.dateFrom, window.dateTo, MDF, OTHER])).rows;
 }

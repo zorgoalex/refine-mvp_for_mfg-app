@@ -88,7 +88,17 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     `,[orderId,`E2E queued ${orderId}`]);
     await db.query(`INSERT INTO order_details(detail_id,order_id,detail_number,quantity,production_status_id,delete_flag,material_id)
       VALUES($1,$2,1,10,1,false,1),($3,$2,2,1,1,false,1)`,[detailId,orderId,detailId+1]);
-    await db.query("INSERT INTO cut_result(cut_result_id,created_at) VALUES($1,'2026-09-01')",[orderId]);
+    // §5.8: legacy display cut needs a raw row per kind (packet workday / BASIS created_at / bath cut_result.created_at)
+    // inside the default [dateTo-6,dateTo] window; this file reads with dateTo in 2026-09-21..2026-09-22, so pin the
+    // raw display date to 2026-09-21 regardless of the receipts' own (older) `sourceCreatedAt` below.
+    const packetId = randomUUID();
+    await db.query("INSERT INTO cut_result(cut_result_id,created_at) VALUES($1,'2026-09-21')",[orderId]);
+    await db.query(`INSERT INTO cnc_telegram_packets(packet_id,external_packet_key,source_chat_id,payload_hash,workday,
+        material_name,program_name,mdf_board_card_kind,source_created_at,parse_status)
+      VALUES($1,$2,'E2E','x','2026-09-21'::date,'МДФ фасад 10 мм','E2E queued','machine_file','2026-09-01T00:00:00Z','parsed')`,
+    [packetId,`E2E-fixture-${orderId}`]);
+    await db.query(`INSERT INTO bazis_cut_sets(bazis_cut_set_id,name,version,created_at,updated_at)
+      VALUES($1,$2,1,'2026-09-21','2026-09-21')`,[orderId,`E2E fixture ${orderId}`]);
     const demand = [{ orderId,detailId,quantity: 10 },{ orderId,detailId: detailId+1,quantity: 1 }];
     const make = (kind: 'packet'|'bazisCutSet'|'bath', id: string, quantity: number): MdfReceiptInput => ({
       sourceKind: kind,sourceId: id,revisionKey: '1',origin: kind==='packet' ? 'cnc' : 'manual',actorUserId: 1,
@@ -99,7 +109,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
       lines: [{ lineKey: 'member',orderId,detailId,quantity,stageCode: 'membership',evidenceKind: 'derived',rework: false },
         ...(kind!=='bath' || options.rolled ? [{ lineKey: 'proof',orderId,detailId,quantity,
           stageCode: kind==='bath' ? 'laminated' : 'cut',evidenceKind: 'physical' as const,rework: false }] : [])] });
-    const receipts = [make('packet',randomUUID(),4),make('bazisCutSet',String(orderId),6),make('bath',`cut-result:${orderId}`,10)];
+    const receipts = [make('packet',packetId,4),make('bazisCutSet',String(orderId),6),make('bath',`cut-result:${orderId}`,10)];
     const jobs = [];
     for (const r of receipts) jobs.push(await database().transaction(tx => recordMdfReceipt(tx,r)));
     return { orderId,detailId,receipts,jobs };
@@ -131,7 +141,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     const claimId = randomUUID();
     const candidateId = randomUUID();
     const itemId = randomUUID();
-    await db.query('INSERT INTO cnc_telegram_packets(packet_id,source_version) VALUES($1,1)', [packetId]);
+    // fixture() already seeds this packet's raw row (§5.8 display-cut row) with source_version=1; no separate insert needed.
     await db.query('INSERT INTO cnc_telegram_import_candidates(candidate_id) VALUES($1)', [candidateId]);
     await db.query('INSERT INTO cnc_telegram_import_items(import_item_id) VALUES($1)', [itemId]);
     await db.query(`INSERT INTO mdf_cnc_observation_targets
@@ -620,6 +630,11 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     const f=await fixture();
     await db.query("UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now() WHERE status='pending'");
     const sourceId=randomUUID();
+    // §5.8: a raw packet row is required for the default display cut (workday inside the file's 2026-09-21 window).
+    await db.query(`INSERT INTO cnc_telegram_packets(packet_id,external_packet_key,source_chat_id,payload_hash,workday,
+        material_name,program_name,mdf_board_card_kind,source_created_at,parse_status)
+      VALUES($1,$2,'E2E','x','2026-09-21'::date,'МДФ фасад 10 мм','E2E unlinked','machine_file','2026-09-01T00:00:00Z','parsed')`,
+    [sourceId,`E2E-unlinked-${sourceId.slice(0,8)}`]);
     const saved=await database().transaction(tx => recordMdfReceipt(tx,{ ...f.receipts[0],sourceId,accept: false,lines: [],
       executionContext: { sourceCreatedAt: '2026-09-01T00:00:00Z',displayName: 'Unlinked historical card',
         priorColumn: 'completed',compositionComplete: false,demand: [] } }));
@@ -791,6 +806,11 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     const f=await fixture(),other=await fixture();
     await db.query("UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now() WHERE status='pending'");
     const sourceId=randomUUID();
+    // §5.8: raw packet row for the default display cut (workday inside the file's 2026-09-21/22 window).
+    await db.query(`INSERT INTO cnc_telegram_packets(packet_id,external_packet_key,source_chat_id,payload_hash,workday,
+        material_name,program_name,mdf_board_card_kind,source_created_at,parse_status)
+      VALUES($1,$2,'E2E','x','2026-09-21'::date,'МДФ фасад 10 мм','E2E retained','machine_file','2026-09-01T00:00:00Z','parsed')`,
+    [sourceId,`E2E-retained-${sourceId.slice(0,8)}`]);
     const receipt={ ...f.receipts[0],sourceId,causeKey: randomUUID(),executionContext: {
       ...f.receipts[0].executionContext!,demand: [...f.receipts[0].executionContext!.demand,
         { orderId: other.orderId,detailId: other.detailId,quantity: 10 }] } };
@@ -818,22 +838,29 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     const denied = await fixture();
     await db.query('UPDATE orders SET manager_id=42 WHERE order_id=$1',[f.orderId]);
     const manager: CurrentUser = { ...admin,id: '42',role: 'manager',roleId: 4 };
-    // Synthetic publication rows only (test schema): bypass lineage guards/FKs for bulk setup.
+    // Synthetic publication rows only (test schema): bypass lineage guards/FKs for bulk setup. §5.8 needs a real raw
+    // cnc_telegram_packets row per source (packet_id is UUID) so these still pass the default display cut and get
+    // excluded by owner authorization only — the invariant this test targets, not by the (unrelated) display cut.
+    const deniedIds: string[] = Array.from({ length: 1001 },() => randomUUID());
     await db.query('SET session_replication_role=replica');
     try {
+      await db.query(`INSERT INTO cnc_telegram_packets(packet_id,external_packet_key,source_chat_id,payload_hash,workday,
+          material_name,program_name,mdf_board_card_kind,source_created_at,parse_status)
+        SELECT id,'E2E-denied-'||row_number() OVER (),'E2E','x','2026-09-21'::date,'МДФ фасад 10 мм','E2E denied',
+          'machine_file','2026-09-21T12:00:00Z'::timestamptz,'parsed' FROM unnest($1::uuid[]) id`,[deniedIds]);
       await db.query(`INSERT INTO mdf_source_heads(source_kind,source_id,received_revision_key,accepted_revision_key,correction_epoch,version,updated_at)
-        SELECT 'packet','E2E-denied-'||g,'1','1',0,1,now() FROM generate_series(1,1001) g`);
+        SELECT 'packet',id::text,'1','1',0,1,now() FROM unnest($1::uuid[]) id`,[deniedIds]);
       await db.query(`INSERT INTO mdf_published_sources(source_kind,source_id,received_revision_key,accepted_revision_key,
           source_created_at,display_name,column_key,reason,issues,published_revision)
-        SELECT 'packet','E2E-denied-'||g,'1','1','2026-09-21T12:00:00Z'::timestamptz,'E2E-Тест denied '||g,'parsed',
-          'awaiting_cut','{}'::text[],(SELECT published_revision FROM mdf_engine_state) FROM generate_series(1,1001) g`);
+        SELECT 'packet',id::text,'1','1','2026-09-21T12:00:00Z'::timestamptz,'E2E-Тест denied','parsed',
+          'awaiting_cut','{}'::text[],(SELECT published_revision FROM mdf_engine_state) FROM unnest($1::uuid[]) id`,[deniedIds]);
       await db.query(`INSERT INTO mdf_published_source_members(source_kind,source_id,order_id,detail_id,quantity)
-        SELECT 'packet','E2E-denied-'||g,$1,$2,1 FROM generate_series(1,1001) g`,[denied.orderId,denied.detailId]);
+        SELECT 'packet',id::text,$2,$3,1 FROM unnest($1::uuid[]) id`,[deniedIds,denied.orderId,denied.detailId]);
     } finally { await db.query('SET session_replication_role=origin'); }
     try {
     const view = await readMdfPublishedSnapshot(database(),manager,{ dateTo: '2026-09-21' });
     expect(view.cards.some(c => c.id===f.receipts[0].sourceId)).toBe(true);
-    expect(view.cards.some(c => c.id.startsWith('E2E-denied-'))).toBe(false);
+    expect(view.cards.some(c => deniedIds.includes(c.id))).toBe(false);
     const focused = await readMdfPublishedSnapshot(database(),manager,{ dateTo: '2026-09-21',
       focus: { kind: 'packet',id: f.receipts[0].sourceId } });
     expect(focused.cards.some(c => c.id===f.receipts[0].sourceId)).toBe(true);
@@ -845,9 +872,10 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
       await db.query('SET session_replication_role=replica');
       try {
         for (const table of ['mdf_published_source_members','mdf_published_sources','mdf_source_heads'])
-          await db.query(`DELETE FROM ${table} WHERE source_kind='packet' AND source_id LIKE 'E2E-denied-%'`);
+          await db.query(`DELETE FROM ${table} WHERE source_kind='packet' AND source_id=ANY($1::text[])`,[deniedIds]);
+        await db.query('DELETE FROM cnc_telegram_packets WHERE packet_id=ANY($1::uuid[])',[deniedIds]);
       } finally { await db.query('SET session_replication_role=origin'); }
-      expect((await db.query("SELECT count(*)::int n FROM mdf_source_heads WHERE source_id LIKE 'E2E-denied-%'")).rows[0].n).toBe(0);
+      expect((await db.query('SELECT count(*)::int n FROM mdf_source_heads WHERE source_id=ANY($1::text[])',[deniedIds])).rows[0].n).toBe(0);
     }
   });
   it('read-only MVCC snapshot cannot mix revisions when publication commits halfway through GET', async () => {

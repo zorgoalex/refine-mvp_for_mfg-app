@@ -1,7 +1,8 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MdfPublishedSnapshot, MdfSessionSnapshot } from '../../api/types/mdfPublishedApi.types';
+import type { MdfPublishedSnapshot, MdfSessionSnapshot, MdfSourceKind } from '../../api/types/mdfPublishedApi.types';
+import type { CncOrderSearchPeriod } from './model';
 
 const api = vi.hoisted(() => ({
   getEngineMode: vi.fn(),
@@ -39,8 +40,19 @@ function snapshot(overrides: Partial<MdfPublishedSnapshot> = {}): MdfPublishedSn
 }
 
 let current: UseMdfPublishedBoardResult | null = null;
-function Harness(props: { workday: string; focusKind: null; focusId: null }) {
-  current = useMdfPublishedBoard({ enabled: true, workday: props.workday, focusKind: props.focusKind, focusId: props.focusId });
+function Harness(props: {
+  workday: string;
+  period?: CncOrderSearchPeriod;
+  focusKind: MdfSourceKind | null;
+  focusId: string | null;
+}) {
+  current = useMdfPublishedBoard({
+    enabled: true,
+    workday: props.workday,
+    period: props.period,
+    focusKind: props.focusKind,
+    focusId: props.focusId,
+  });
   return null;
 }
 
@@ -183,5 +195,85 @@ describe('useMdfPublishedBoard: §5.6 R2 — replace (not union) semantics + com
     await vi.waitFor(() => expect(api.publishedGet).toHaveBeenCalledWith(
       expect.objectContaining({ searchOrderIds: [10, 30] }),
     ));
+  });
+});
+
+describe('useMdfPublishedBoard: displayFrom — legacy-parity display cut sent to the backend', () => {
+  let renderer: ReactTestRenderer;
+
+  beforeEach(() => {
+    current = null;
+    api.getEngineMode.mockReset().mockResolvedValue({ mode: 'active', publishedReads: true });
+    api.publishedGet.mockReset().mockResolvedValue({
+      sessionGeneration: 1,
+      snapshot: snapshot(),
+    } satisfies MdfSessionSnapshot);
+    api.searchMdfBoardHistoryOrders.mockReset();
+    vi.stubGlobal('window', { setInterval: vi.fn(() => 0), clearInterval: vi.fn() });
+    vi.stubGlobal('document', {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      visibilityState: 'visible',
+    });
+  });
+
+  afterEach(() => {
+    act(() => renderer?.unmount());
+    vi.unstubAllGlobals();
+  });
+
+  it('default request (no period, i.e. legacy default 1w) carries displayFrom = workday - 6', async () => {
+    act(() => {
+      renderer = create(<Harness workday="2026-09-27" focusKind={null} focusId={null} />);
+    });
+    await vi.waitFor(() => expect(current?.mode).toBe('published'));
+    expect(api.publishedGet).toHaveBeenCalledWith(
+      expect.objectContaining({ dateTo: '2026-09-27', displayFrom: '2026-09-21' }),
+    );
+  });
+
+  it.each<[CncOrderSearchPeriod, string]>([
+    ['1d', '2026-09-27'],
+    ['1w', '2026-09-21'],
+    ['2w', '2026-09-14'],
+    ['1m', '2026-08-28'],
+  ])('period %s maps to the same dateFrom the legacy board would use', async (period, expectedDisplayFrom) => {
+    act(() => {
+      renderer = create(<Harness workday="2026-09-27" period={period} focusKind={null} focusId={null} />);
+    });
+    await vi.waitFor(() => expect(current?.mode).toBe('published'));
+    expect(api.publishedGet).toHaveBeenCalledWith(
+      expect.objectContaining({ dateTo: '2026-09-27', displayFrom: expectedDisplayFrom }),
+    );
+  });
+
+  it('changing the period changes the query key and refetches (new displayFrom requested)', async () => {
+    act(() => {
+      renderer = create(<Harness workday="2026-09-27" period="1w" focusKind={null} focusId={null} />);
+    });
+    await vi.waitFor(() => expect(current?.mode).toBe('published'));
+    expect(api.publishedGet).toHaveBeenCalledWith(expect.objectContaining({ displayFrom: '2026-09-21' }));
+
+    api.publishedGet.mockClear();
+    act(() => {
+      renderer.update(<Harness workday="2026-09-27" period="1m" focusKind={null} focusId={null} />);
+    });
+    await vi.waitFor(() => expect(api.publishedGet).toHaveBeenCalledWith(
+      expect.objectContaining({ displayFrom: '2026-08-28' }),
+    ));
+  });
+
+  it('search/focus params are unaffected by displayFrom — both travel alongside it unchanged', async () => {
+    act(() => {
+      renderer = create(<Harness workday="2026-09-27" period="1w" focusKind="packet" focusId="pkt-1" />);
+    });
+    await vi.waitFor(() => expect(current?.mode).toBe('published'));
+    expect(api.publishedGet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dateTo: '2026-09-27',
+        displayFrom: '2026-09-21',
+        focus: { kind: 'packet', id: 'pkt-1' },
+      }),
+    );
   });
 });

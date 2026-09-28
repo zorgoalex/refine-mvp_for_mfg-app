@@ -128,7 +128,12 @@ export function buildMdfBaselineItems(input: {
 
   const traced = new Set(items.filter(i => i.itemKind === 'source' && i.lines.some(l => l.stageCode !== 'membership'))
     .flatMap(i => i.lines.filter(l => l.stageCode !== 'membership').map(l => l.orderId)));
-  const manualReviewOrderIds = [...demandByOrder.keys()].filter(id => !isFinished(id) && !traced.has(id)).sort((a, b) => a - b);
+  // Production history on a replaced/archived bath result cannot be credited to an active bath: its current owners are
+  // reviewed manually even when another trace exists.
+  const replacedHistory = new Set(input.sources.filter(s => s.reason === 'HISTORY_BATH_NOT_CURRENT_WITH_PRODUCTION')
+    .flatMap(s => s.owners));
+  const manualReviewOrderIds = [...demandByOrder.keys()].filter(id => !isFinished(id)
+    && (!traced.has(id) || replacedHistory.has(id))).sort((a, b) => a - b);
   items.sort((a, b) => a.itemKey < b.itemKey ? -1 : a.itemKey > b.itemKey ? 1 : 0);
   return { items, skipped, closedOrderIds, manualReviewOrderIds,
     itemsDigest: sha(items.map(i => [i.itemKey, i.digest])) };

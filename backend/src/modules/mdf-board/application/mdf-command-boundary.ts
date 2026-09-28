@@ -12,11 +12,12 @@ export const MDF_BASELINE_WRITER = 'mdf.baseline';
 /** Ordinary order commands (§5.4a). Their MDF consequence is decided after their own writes by
  * `openMdfOrderCommand`, so read_only admits them past the fence and rejects only an MDF impact. */
 export const MDF_ORDER_WRITERS = ['orders.update', 'orders.recalculate_hdf', 'orders.delete',
-  'orders.restore', 'orders.transfer_details'] as const;
+  'orders.restore', 'orders.transfer_details', 'mdf.demand_reconcile'] as const;
 export type MdfOrderWriter = typeof MDF_ORDER_WRITERS[number];
-/** Cut commands that may change a job's active bath (§5.4b); impact is decided after their locks. */
-export const MDF_BATH_LIFECYCLE_WRITERS = ['cut.set_current_result', 'cut.archive_result', 'cut.unarchive_result',
-  'cut.manual_layout', 'cut.archive'] as const;
+/** Cut commands that may change a job's active bath (§5.4b); impact is decided after their locks. Result
+ * archive/unarchive are not here: archiving the current result is refused (409 CUT_RESULT_CURRENT), so they never
+ * change which result is the active bath. */
+export const MDF_BATH_LIFECYCLE_WRITERS = ['cut.set_current_result', 'cut.manual_layout', 'cut.archive'] as const;
 export type MdfBathLifecycleWriter = typeof MDF_BATH_LIFECYCLE_WRITERS[number];
 interface Boundary { protocol: 'read-committed' | 'serializable-legacy'; mode: Promise<{ mode: MdfEngineMode; frozen: boolean }> }
 const modes = new WeakMap<TransactionClient, Boundary>();
@@ -110,6 +111,13 @@ function checkCapability(state: { mode: MdfEngineMode; frozen: boolean }, input:
   return { mode, queued: mode === 'active' || mode === 'read_only' };
 }
 
+/** True when the current transaction started at or before the last mode change (column added by migration 199). */
+export const MDF_MODE_STALE_SQL = "(COALESCE((to_jsonb(s)->>'mode_changed_at')::timestamptz >= transaction_timestamp(),false)"
+  + " AND current_setting('mdf.mode_changed_in_tx',true) IS DISTINCT FROM 'on')";
+/** Marks the current transaction as the one that changed the mode (transaction-local): it knows the new mode, so it is
+ * not stale (the single-transaction baseline dry-run switches mode, records batches and drains jobs, then rolls back). */
+export const MDF_MARK_MODE_CHANGED_SQL = "SELECT set_config('mdf.mode_changed_in_tx','on',true)";
+
 function cutoverInProgress(): ApiError {
   return new ApiError(409, 'MDF_CUTOVER_IN_PROGRESS', 'Идёт переключение производственного учёта, повторите позже');
 }
@@ -121,14 +129,22 @@ async function loadMode(tx: TransactionClient, writer: string, lockState = false
   const locked = (await tx.query<{ locked: boolean }>(
     "SELECT pg_try_advisory_xact_lock_shared(hashtextextended('mdf-engine-cutover',0)) AS locked")).rows[0]?.locked;
   if (locked !== true) throw cutoverInProgress();
-  const rows = (await tx.query<{ mode: string }>(`SELECT mode FROM mdf_engine_state WHERE singleton=true${lockState ? ' FOR SHARE' : ''}`)).rows;
+  const rows = (await tx.query<{ mode: string; stale?: boolean }>(`SELECT s.mode,${MDF_MODE_STALE_SQL} stale FROM mdf_engine_state s WHERE s.singleton=true${lockState ? ' FOR SHARE' : ''}`)).rows;
   const mode = rows[0]?.mode;
   if (rows.length !== 1 || !(mode === 'legacy' || mode === 'shadow' || mode === 'active' || mode === 'read_only')) {
     throw new ApiError(503, 'MDF_ENGINE_STATE_UNAVAILABLE', 'Не удалось определить режим производственного учёта');
   }
-  const guard = (await tx.query<{ freeze_run_id: string | null }>(
-    'SELECT freeze_run_id FROM mdf_freeze_guard WHERE singleton=true FOR SHARE')).rows;
+  // §5.8: a transaction that STARTED at or before the last mode change (activation handoff, recovery mode change) never
+  // writes under the new mode: its now()-stamped facts would predate the change and escape the rollback loss check.
+  // `mode_changed_at` (migration 199) is DB-stamped on mode changes only; schema-tolerant before 199. Retryable.
+  if (rows[0].stale === true) throw cutoverInProgress();
+  // §5.8 recovery freeze (migration 199) read schema-tolerantly: before 199 no recovery freeze can exist.
+  const guard = (await tx.query<{ freeze_run_id: string | null; recovery: string | null }>(
+    "SELECT g.freeze_run_id,to_jsonb(g)->>'recovery_frozen_at' recovery FROM mdf_freeze_guard g WHERE g.singleton=true FOR SHARE")).rows;
   if (guard.length !== 1) throw new ApiError(503, 'MDF_ENGINE_STATE_UNAVAILABLE', 'Не удалось определить режим производственного учёта');
+  if (guard[0].recovery != null) {
+    throw new ApiError(409, 'MDF_RECOVERY_FREEZE', 'Производственный учёт временно заморожен для восстановления, повторите позже');
+  }
   await tx.query("SELECT set_config('mdf.command_writer',$1,true)", [writer]);
   return { mode, frozen: guard[0].freeze_run_id !== null };
 }

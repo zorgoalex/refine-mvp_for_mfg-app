@@ -174,6 +174,18 @@ describe('VPS compose backend runtime flags', () => {
     expect(envExample).toContain('BACKEND_STATUS_AUTOMATION=false');
   });
 
+  it('passes every MDF engine flag through with safe defaults (runbook configuration reaches the backend)', () => {
+    const compose = readTemplate('ops/templates/docker-compose.vps.yml');
+    const envExample = readTemplate('ops/templates/env.vps.example');
+    for (const flag of ['SHADOW_INTAKE', 'SHADOW_COMPARE', 'PINNED_DISPATCH', 'JOB_WORKER', 'PUBLISHED_READS', 'BAZIS_REFILL',
+      'ORDER_CORRECTIONS']) {
+      expect(compose).toContain(`BACKEND_MDF_${flag}: \${BACKEND_MDF_${flag}:-false}`);
+      expect(envExample).toContain(`BACKEND_MDF_${flag}=false`);
+    }
+    expect(compose).toContain('BACKEND_MDF_RECONCILER_ACTOR_ID: ${BACKEND_MDF_RECONCILER_ACTOR_ID:-}');
+    expect(envExample).toContain('BACKEND_MDF_RECONCILER_ACTOR_ID=');
+  });
+
   it('passes order realtime gates with safe defaults', () => {
     const compose = readTemplate('ops/templates/docker-compose.vps.yml');
     const localCompose = readTemplate('backend/docker-compose.yml');

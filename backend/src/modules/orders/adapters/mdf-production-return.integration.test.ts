@@ -1,3 +1,4 @@
+import { MDF_MODE_STALE_SQL } from '../../mdf-board/application/mdf-command-boundary';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Client, type PoolClient } from "pg";
 import { randomUUID } from "node:crypto";
@@ -219,8 +220,8 @@ describe.skipIf(!enabled)(
       await expect(repository.preview(user, source, { targetColumn: 'parsed' })).rejects.toMatchObject(error);
       expect(statements).toEqual(['SET TRANSACTION ISOLATION LEVEL SERIALIZABLE', 'SHOW transaction_isolation',
         "SELECT pg_try_advisory_xact_lock_shared(hashtextextended('mdf-engine-cutover',0)) AS locked",
-        'SELECT mode FROM mdf_engine_state WHERE singleton=true FOR SHARE',
-        'SELECT freeze_run_id FROM mdf_freeze_guard WHERE singleton=true FOR SHARE',
+        `SELECT s.mode,${MDF_MODE_STALE_SQL} stale FROM mdf_engine_state s WHERE s.singleton=true FOR SHARE`,
+        "SELECT g.freeze_run_id,to_jsonb(g)->>'recovery_frozen_at' recovery FROM mdf_freeze_guard g WHERE g.singleton=true FOR SHARE",
         "SELECT set_config('mdf.command_writer',$1,true)"]);
       const entrance = [...statements];
       statements.length = 0;

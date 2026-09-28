@@ -39,7 +39,9 @@ function extractFenceTableList(migrationSql: string): string[] {
 describe('MDF §5.7b cutover fence covers every table the read-path loaders touch', () => {
   it('every FROM/JOIN table in the reconciliation/shadow loaders and the demand query is fenced by migration 195', () => {
     const migration195 = read('db/migrations/195_mdf_baseline_population.sql');
-    const fenced = new Set(extractFenceTableList(migration195));
+    // §5.8: migration 199 extends the list (cut_result_archive_state).
+    const migration199 = read('db/migrations/199_mdf_cutover_controls.sql');
+    const fenced = new Set([...extractFenceTableList(migration195), ...extractFenceTableList(migration199)]);
     expect(fenced.size).toBeGreaterThan(30);
 
     const reconciliationInventory = read('src/modules/mdf-board/adapters/mdf-reconciliation-inventory.ts');

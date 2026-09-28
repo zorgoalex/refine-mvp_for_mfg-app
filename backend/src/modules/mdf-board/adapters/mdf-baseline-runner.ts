@@ -8,7 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import type { TransactionClient } from '../../../database/database.types';
 import { auditService } from '../../../common/audit/audit.service';
-import { MDF_BASELINE_WRITER, enterMdfCommand, discardMdfCommandBoundary } from '../application/mdf-command-boundary';
+import { MDF_BASELINE_WRITER, MDF_MARK_MODE_CHANGED_SQL, enterMdfCommand, discardMdfCommandBoundary } from '../application/mdf-command-boundary';
 import { recordMdfBaselineReceipt } from '../application/mdf-receipt';
 import { MdfJobRunner } from '../application/mdf-job-runner';
 import { executeMdfAcceptedJob } from '../application/mdf-accepted-job';
@@ -76,6 +76,7 @@ async function setMode(tx: TransactionClient, actor: MdfBaselineActor, runId: st
   const from = (await tx.query<{ mode: string }>('SELECT mode FROM mdf_engine_state WHERE singleton FOR UPDATE')).rows[0]?.mode;
   if (from === to) return;
   await tx.query('UPDATE mdf_engine_state SET mode=$1,updated_at=now() WHERE singleton', [to]);
+  await tx.query(MDF_MARK_MODE_CHANGED_SQL);
   await audit(tx, actor, 'mdf.engine.mode_changed', runId, { entityType: 'mdf_engine', entityId: 'mode',
     before: { mode: from }, after: { mode: to } });
 }

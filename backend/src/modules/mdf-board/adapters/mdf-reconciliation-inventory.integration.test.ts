@@ -134,11 +134,15 @@ describe.skipIf(!enabled)('MDF legacy history reconciliation report, isolated Po
     [randomUUID(), `${cardKind}:${cardId}`, requestId, targetColumn]);
   }
 
-  async function seedVacuumBath(opts: { createdAt: string; placements: { orderId: number; detailId: number; quantity: number }[] }) {
+  async function seedVacuumBath(opts: { createdAt: string; placements: { orderId: number; detailId: number; quantity: number }[];
+    supersededBy?: number }) {
     const cutResultId = ++cutResultSeq;
     const digest = randomUUID().replaceAll('-', '');
-    await fixture.client.query(`INSERT INTO cut_result(cut_result_id,created_at,snapshot_digest)
-      VALUES($1,$2::timestamptz,$3)`, [cutResultId, opts.createdAt, digest]);
+    // The job's current result (an active bath, §5.4b); `supersededBy` makes it a replaced result of the same job.
+    await fixture.client.query(`INSERT INTO cut_job(cut_job_id,status,current_cut_result_id) VALUES($1,'ready',$2)`,
+      [cutResultId, opts.supersededBy ?? cutResultId]);
+    await fixture.client.query(`INSERT INTO cut_result(cut_result_id,cut_job_id,result_no,created_at,snapshot_digest)
+      VALUES($1,$1,1,$2::timestamptz,$3)`, [cutResultId, opts.createdAt, digest]);
     await fixture.client.query(`INSERT INTO cut_result_board_projection(cut_result_id,snapshot_digest,
       is_vacuum,result_created_at) VALUES($1,$2,true,$3::timestamptz)`, [cutResultId, digest, opts.createdAt]);
     await fixture.client.query(`INSERT INTO cut_result_sheet_map(cut_result_sheet_map_id,cut_result_id,is_effective)
@@ -205,6 +209,13 @@ describe.skipIf(!enabled)('MDF legacy history reconciliation report, isolated Po
     // 8. A manual move names a bath with no matching cut_result row at all: blocked HISTORY_SOURCE_MISSING.
     const missingBathId = 'cut-result:999999';
     await seedManualMove('bath', missingBathId, 'baths_ready');
+
+    // 8b. A replaced result of a re-cut job (the job's current result is another one) is never an active bath (§5.4b):
+    //     excluded HISTORY_BATH_NOT_CURRENT even with a manual column, so the baseline never captures it.
+    const o8b = await seedOrder();
+    const bathReplaced = await seedVacuumBath({ createdAt: '2019-01-01T00:00:00.000Z', supersededBy: 987654,
+      placements: [{ orderId: o8b.orderId, detailId: o8b.detailId, quantity: 1 }] });
+    await seedManualMove('bath', bathReplaced.bathId, 'baths_ready');
 
     // 9. Two vacuum baths compete for one completed packet's physical supply of the
     //    same detail: reservations never exceed supply, FIFO (older createdAt) wins.
@@ -363,6 +374,12 @@ describe.skipIf(!enabled)('MDF legacy history reconciliation report, isolated Po
     const s7 = source('packet', packet7)!;
     expect(s7.disposition).toBe('excluded');
     expect(s7.reason).toBe('HISTORY_NOT_MDF');
+
+    // Assertion 8b.
+    const s8b = source('bath', bathReplaced.bathId)!;
+    expect(s8b.disposition).toBe('excluded');
+    expect(s8b.reason).toBe('HISTORY_BATH_NOT_CURRENT');
+    expect(s8b.lines).toEqual([]);
 
     // Assertion 8.
     const s8 = source('bath', missingBathId)!;

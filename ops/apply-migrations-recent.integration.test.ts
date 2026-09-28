@@ -18,7 +18,8 @@ const files = readdirSync(dir).filter((f) => /^16[4-9]_.*\.sql$/.test(f)
     '181_cnc_manual_send_observation.sql','182_mdf_physical_lineage.sql',
     '185_mdf_bazis_composition.sql','187_mdf_bazis_refill_rows.sql','188_mdf_order_cascade_intents.sql',
     '189_mdf_placement_inputs.sql','190_mdf_bath_transitions.sql','191_mdf_order_corrections.sql',
-    '192_mdf_board_presentation_history.sql','195_mdf_baseline_population.sql'].includes(f)).sort();
+    '192_mdf_board_presentation_history.sql','195_mdf_baseline_population.sql',
+    '199_mdf_cutover_controls.sql'].includes(f)).sort();
 const helpers = source.slice(source.indexOf('q_col()'), source.indexOf('# These migrations contain conditional'));
 const queries = (file: string) => execFileSync('bash', ['-s', '--', file], {
   input: `${helpers}\nprobe_all() { printf '%s\\n' "$@"; }\nprobe_file "$1"`, encoding: 'utf8',
@@ -192,6 +193,15 @@ describe.skipIf(!enabled)('migration runner effect probes against actual SQL on 
     [185, 'CREATE OR REPLACE FUNCTION mdf_guard_bazis_composition_intent_insert() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;'],
     [185, 'CREATE OR REPLACE FUNCTION mdf_validate_bazis_composition_intent_job() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;'],
     [185, 'CREATE OR REPLACE FUNCTION mdf_reject_bazis_composition_marker_change() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;'],
+    [199, 'ALTER TABLE mdf_freeze_guard DROP COLUMN recovery_frozen_at;'],
+    [199, 'ALTER TABLE mdf_freeze_guard DROP COLUMN recovery_reason;'],
+    [199, 'DROP FUNCTION mdf_recovery_owned();'],
+    [199, 'ALTER TABLE mdf_demand_drift_conflicts DROP CONSTRAINT mdf_demand_drift_conflicts_pkey;'],
+    [199, 'DROP INDEX idx_mdf_demand_drift_conflicts_open;'],
+    [199, 'ALTER TABLE mdf_demand_drift_conflicts DISABLE TRIGGER mdf_cutover_fence;'],
+    [199, "DO $$ DECLARE c text; BEGIN SELECT conname INTO c FROM pg_constraint WHERE conrelid='mdf_demand_drift_conflicts'::regclass AND contype='u'; EXECUTE format('ALTER TABLE mdf_demand_drift_conflicts DROP CONSTRAINT %I',c); END $$;"],
+    [199, 'CREATE OR REPLACE FUNCTION mdf_material_is_mdf(name TEXT) RETURNS boolean LANGUAGE sql IMMUTABLE AS $$ SELECT false $$;'],
+    [199, 'DROP FUNCTION mdf_guard_catalog_classification() CASCADE;'],
   ] as const)('%s: rejects drift %s', (version, mutation) => {
     expect(present(fileFor(version), mutation)).toBe(false);
     expect(present(fileFor(version))).toBe(true); // rollback restored fixture

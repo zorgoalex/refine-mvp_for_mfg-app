@@ -84,17 +84,20 @@ describe.skipIf(!enabled)('MDF published presentation, isolated PostgreSQL schem
     return { orderId, detailId };
   }
 
-  /** Raw packet (items for the given positions) + a composition-establishing receipt (binding computed) + job. */
+  /** Raw packet (items for the given positions) + a composition-establishing receipt (binding computed) + job.
+   * §5.8: `workday` is the legacy display date for the default card set — it defaults to the source day (`createdAt`)
+   * so cards register within the shared `read()` default window; pass `workday` to test the display cut itself. */
   async function packet(positions: { orderId: number; detailId: number; quantity: number; cut?: number }[],
-    options: { createdAt?: string; register?: boolean } = {}) {
+    options: { createdAt?: string; workday?: string; register?: boolean } = {}) {
     const packetId = randomUUID();
     const createdAt = options.createdAt ?? '2026-09-20T10:00:00Z';
+    const workday = options.workday ?? createdAt.slice(0, 10);
     await fixture.client.query(`INSERT INTO cnc_telegram_packets(packet_id,external_packet_key,source_chat_id,source_message_id,
       source_version,payload_hash,workday,completion_status,thumbs_up,completed_at,material_name,program_name,mdf_board_card_kind,
       created_at,updated_at,source_created_at,parse_status,rework,mdf_completion_returned,comments_json)
-      VALUES($1,$2,'E2E','1',1,$3,CURRENT_DATE,'pending',false,NULL,'МДФ фасад 10 мм','CNC#_E2E.nc','machine_file',
+      VALUES($1,$2,'E2E','1',1,$3,$5::date,'pending',false,NULL,'МДФ фасад 10 мм','CNC#_E2E.nc','machine_file',
         now(),now(),$4,'parsed',false,false,'["первый комментарий"]'::jsonb)`,
-    [packetId, `E2E-${packetId.slice(0, 8)}`, createHash('sha256').update(packetId).digest('hex'), createdAt]);
+    [packetId, `E2E-${packetId.slice(0, 8)}`, createHash('sha256').update(packetId).digest('hex'), createdAt, workday]);
     for (const [index, p] of positions.entries()) {
       await fixture.client.query(`INSERT INTO cnc_telegram_packet_items(packet_item_id,packet_id,source_item_key,match_order_id,
         match_detail_id,match_status,quantity,order_name,detail_number,width_mm,height_mm,source)
@@ -120,7 +123,11 @@ describe.skipIf(!enabled)('MDF published presentation, isolated PostgreSQL schem
     return { packetId };
   }
 
-  const read = (user: CurrentUser = admin, query = {}) => readMdfPublishedSnapshot(db(), user, { dateTo: '2026-09-27', ...query });
+  // §5.8: displayFrom defaults to dateTo-6 (2026-09-21), which would cut out most of this file's fixed 2026-09-20
+  // fixtures; widen it here so existing presentation/progress/redaction assertions keep testing what they name, not
+  // the display cut. Dedicated display-cut coverage lives in mdf-published-snapshot.display-cut.integration.test.ts.
+  const read = (user: CurrentUser = admin, query = {}) => readMdfPublishedSnapshot(db(), user,
+    { dateTo: '2026-09-27', displayFrom: '2026-09-01', ...query });
   const presentationOf = (snapshot: Awaited<ReturnType<typeof read>>, id: string) => snapshot.presentation.find(p => p.id === id)!;
 
   it('binds presentation to the accepted revision: items/names shown, raw size/image change ⇒ stale, comment change ⇒ not stale', async () => {
@@ -237,7 +244,7 @@ describe.skipIf(!enabled)('MDF published presentation, isolated PostgreSQL schem
     await fixture.client.query(`INSERT INTO cnc_telegram_packets(packet_id,external_packet_key,source_chat_id,source_message_id,
       source_version,payload_hash,workday,completion_status,thumbs_up,material_name,program_name,mdf_board_card_kind,
       created_at,updated_at,source_created_at,parse_status,rework,mdf_completion_returned)
-      VALUES($1,$2,'E2E','1',1,$3,CURRENT_DATE,'pending',false,'МДФ фасад 10 мм','CNC#_OVERLAP.nc','machine_file',
+      VALUES($1,$2,'E2E','1',1,$3,'2026-09-20'::date,'pending',false,'МДФ фасад 10 мм','CNC#_OVERLAP.nc','machine_file',
         now(),now(),'2026-09-20T10:00:00Z','parsed',false,false)`, [packetId, `E2E-ov-${packetId.slice(0, 6)}`, 'd'.repeat(64)]);
     await db().transaction(tx => recordMdfReceipt(tx, { sourceKind: 'packet', sourceId: packetId, revisionKey: 'r1', origin: 'cnc',
       actorUserId: 1, requestId: 'E2E overlap', causeKey: 'E2E overlap', expectedFence: null, accept: true, rules: [],

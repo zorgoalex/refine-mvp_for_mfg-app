@@ -642,6 +642,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const mdfPublishedBoard = useMdfPublishedBoard({
     enabled: active && isCncToday,
     workday: viewState.cncWorkday ?? todayCncWorkday,
+    period: viewState.cncOrderSearchPeriod,
     focusKind: mdfFocusKind,
     focusId: mdfFocusId,
   });

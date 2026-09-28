@@ -15,6 +15,7 @@ export const mdfPublishedApi = {
     assertMdfSession(sessionGeneration);
     const params=new URLSearchParams();
     if (query.dateTo!==undefined) params.set('dateTo',query.dateTo);
+    if (query.displayFrom!==undefined) params.set('displayFrom',query.displayFrom);
     if (query.focus) {
       params.set('focusKind',query.focus.kind);
       params.set('focusId',query.focus.id);

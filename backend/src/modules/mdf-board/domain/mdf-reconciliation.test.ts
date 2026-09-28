@@ -47,6 +47,7 @@ describe('classifyMdfReconciliationSource', () => {
   it.each([
     [{ exists: false }, 'blocked', 'HISTORY_SOURCE_MISSING'],
     [{ mdf: false }, 'excluded', 'HISTORY_NOT_MDF'],
+    [{ kind: 'bath', inactive: true }, 'excluded', 'HISTORY_BATH_NOT_CURRENT'],
     [{ items: [] }, 'blocked', 'HISTORY_INCOMPLETE_COMPOSITION'],
     [{ items: [item('a', 1, 10, 2, 'deleted')] }, 'blocked', 'HISTORY_OWNER_DELETED'],
     [{ items: [item('a', 1, 10, 2, 'not_production')] }, 'blocked', 'HISTORY_OWNER_NOT_PRODUCTION'],
@@ -55,6 +56,31 @@ describe('classifyMdfReconciliationSource', () => {
   ] as const)('source-level failure %j', (patch, disposition, reason) => {
     const s = classifyMdfReconciliationSource(packet({ ...(patch as Partial<MdfReconciliationSourceInput>), completed: true }));
     expect([s.disposition, s.reason, s.lines]).toEqual([disposition, reason, []]);
+  });
+
+  it('an inactive bath with a legacy lamination manual column is blocked (production history), not excluded; owners are the live resolved ones only', () => {
+    const items = [item('1:10', 1, 10), item('1:11', 1, 11, 2, 'deleted'), item('2:20', 2, 20)];
+    const s = bath('cut-result:9', '2026-09-01T00:00:00Z', items, { inactive: true, manualColumn: 'completed_baths' });
+    expect(s.disposition).toBe('blocked');
+    expect(s.reason).toBe('HISTORY_BATH_NOT_CURRENT_WITH_PRODUCTION');
+    expect(s.owners).toEqual([1, 2]);
+    expect(s.lines).toEqual([]);
+  });
+
+  it('an inactive bath with a strict lamination proof (no manual column) is blocked (production history); owners are the live resolved ones only', () => {
+    const items = [item('1:10', 1, 10), item('2:20', 2, 20, 2, 'not_production')];
+    const s = bath('cut-result:10', '2026-09-01T00:00:00Z', items, { inactive: true, provenLaminated: true, manualColumn: null });
+    expect(s.disposition).toBe('blocked');
+    expect(s.reason).toBe('HISTORY_BATH_NOT_CURRENT_WITH_PRODUCTION');
+    expect(s.owners).toEqual([1]);
+    expect(s.lines).toEqual([]);
+  });
+
+  it('an inactive bath with neither a lamination manual column nor a proof stays excluded (not a production-history exception)', () => {
+    const s = bath('cut-result:11', '2026-09-01T00:00:00Z', [item('1:10', 1, 10)], { inactive: true, manualColumn: 'baths_ready' });
+    expect(s.disposition).toBe('excluded');
+    expect(s.reason).toBe('HISTORY_BATH_NOT_CURRENT');
+    expect(s.owners).toEqual([]);
   });
 
   it('BASIS cut only from an audited composition-bound proof, as declaration', () => {

@@ -22,7 +22,8 @@ const enabled = process.env.MDF_ENGINE_INTEGRATION === '1';
 //     mdf_reset_unactivated_baseline carries no such clause of its own.
 describe.skipIf(!enabled)('MDF baseline population migration 195, isolated PostgreSQL schema', () => {
   const fixture = createMdfCorrectionPgFixture('e2e195baseline');
-  const BASE_CHAIN = ['165_mdf_engine_foundation.sql', '174_mdf_execution_context.sql'] as const;
+  const BASE_CHAIN = ['165_mdf_engine_foundation.sql', '174_mdf_execution_context.sql',
+    '178_mdf_correction_receipts.sql'] as const; // 195's context CHECK uses effect_policy (178)
 
   beforeAll(async () => {
     await fixture.connect();
@@ -66,7 +67,7 @@ describe.skipIf(!enabled)('MDF baseline population migration 195, isolated Postg
 
   it('rejects a direct DELETE/UPDATE of the freeze guard singleton outside the baseline writer', async () => {
     await expect(fixture.client.query('DELETE FROM mdf_freeze_guard'))
-      .rejects.toMatchObject({ code: '55000', message: expect.stringContaining('owned by the baseline run') });
+      .rejects.toMatchObject({ code: '55000', message: expect.stringContaining('cannot be deleted') });
     await expect(fixture.client.query('UPDATE mdf_freeze_guard SET freeze_run_id = NULL'))
       .rejects.toMatchObject({ code: '55000', message: expect.stringContaining('owned by the baseline run') });
     await expect(fixture.client.query('TRUNCATE mdf_freeze_guard'))
@@ -102,12 +103,14 @@ describe.skipIf(!enabled)('MDF baseline population migration 195, isolated Postg
       FROM pg_trigger t JOIN pg_class r ON r.oid=t.tgrelid JOIN pg_namespace n ON n.oid=r.relnamespace
       WHERE n.nspname=$1 AND t.tgname='mdf_cutover_fence' AND NOT t.tgisinternal ORDER BY r.relname`,
     [fixture.schema]);
-    expect(triggers.rows).toEqual([
+    // Every present inventory/engine table is fenced; the representative ones must be among them.
+    expect(triggers.rows).toEqual(expect.arrayContaining([
       { relname: 'cnc_telegram_packets', tgenabled: 'O', tgtype: 62 },
       { relname: 'mdf_evidence_revisions', tgenabled: 'O', tgtype: 62 },
       { relname: 'order_details', tgenabled: 'O', tgtype: 62 },
       { relname: 'orders', tgenabled: 'O', tgtype: 62 },
-    ]);
+    ]));
+    expect(triggers.rows.every(t => t.tgenabled === 'O' && t.tgtype === 62)).toBe(true);
     // Unfrozen (freeze_run_id IS NULL): the fence's advisory lock always succeeds and the
     // freeze check is bypassed, so an ordinary write is not blocked by 195 itself.
     await expect(fixture.client.query('INSERT INTO orders(order_id) VALUES(1)'))

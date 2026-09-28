@@ -72,7 +72,8 @@ describe.skipIf(!enabled)('MDF order corrections migration 191, isolated Postgre
       JOIN pg_proc p ON p.oid=t.tgfoid
       WHERE n.nspname=$1 AND r.relname='mdf_position_detachments' AND NOT t.tgisinternal ORDER BY t.tgname`,
     [fixture.schema]);
-    expect(triggers.rows).toEqual([
+    // Migration 195 adds the statement-level cutover fence to this table (§5.7b).
+    expect(triggers.rows.filter(t => t.tgname !== 'mdf_cutover_fence')).toEqual([
       { tgname: 'mdf_position_detachment_immutable', tgenabled: 'O', function_name: 'mdf_reject_position_detachment_change',
         tgtype: 27, tgdeferrable: false, tginitdeferred: false },
     ]);

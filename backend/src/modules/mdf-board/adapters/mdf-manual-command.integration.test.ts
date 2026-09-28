@@ -103,12 +103,15 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real MDF manual com
     await db.query(`INSERT INTO order_details(detail_id,order_id,detail_number,quantity,production_status_id,delete_flag,material_id)
       VALUES($1,$2,1,$4,1,false,1),($3,$2,2,1,1,false,1)`,[detailId,orderId,detailId+1,orderQuantity]);
     if (kind === 'bazisCutSet') {
-      await db.query(`INSERT INTO bazis_cut_sets(bazis_cut_set_id,name,version,created_at,updated_at) VALUES($1,'E2E source',1,now(),now())`,[orderId]);
+      // §5.8: created_at is the legacy display date; pin it to the receipts' fixed sourceCreatedAt day below
+      // (2026-09-21) instead of now(), which drifts past this file's fixed dateTo as real time advances.
+      await db.query(`INSERT INTO bazis_cut_sets(bazis_cut_set_id,name,version,created_at,updated_at) VALUES($1,'E2E source',1,'2026-09-21','2026-09-21')`,[orderId]);
       await db.query(`INSERT INTO bazis_cut_set_details(bazis_cut_set_detail_id,bazis_cut_set_id,source_order_id,source_order_detail_id,quantity,cut_enabled,material_name)
         VALUES($1,$1,$1,$2,$3,true,'MDF 10 mm')`,[orderId,detailId,assignmentQuantity]);
     } else if (kind === 'packet') {
-      await db.query(`INSERT INTO cnc_telegram_packets(packet_id,material_name,comments_json,mdf_board_card_kind,rework,completion_status,thumbs_up)
-        VALUES($1,'MDF 10 mm','[]','machine_file',false,'pending',false)`,[source.id]);
+      // §5.8: workday is the legacy display date; pin it for the same reason as bazis_cut_sets.created_at above.
+      await db.query(`INSERT INTO cnc_telegram_packets(packet_id,material_name,comments_json,mdf_board_card_kind,rework,completion_status,thumbs_up,workday)
+        VALUES($1,'MDF 10 mm','[]','machine_file',false,'pending',false,'2026-09-21'::date)`,[source.id]);
       await db.query(`INSERT INTO cnc_telegram_packet_items(packet_item_id,packet_id,source_item_key,match_order_id,match_detail_id,match_status,quantity)
         VALUES($1,$2,'own-part',$3,$4,'matched',$5)`,[randomUUID(),source.id,orderId,detailId,assignmentQuantity]);
     } else {

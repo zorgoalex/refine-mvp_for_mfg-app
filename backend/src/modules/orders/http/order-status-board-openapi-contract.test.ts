@@ -118,6 +118,52 @@ describe('order status board OpenAPI contract', () => {
     expect(contract).toContain('  /api/v1/orders/status-board/mdf-return/{cardKind}/{cardId}/preview:');
   });
 
+  it('documents the displayFrom window param on the published MDF board route', () => {
+    const route = sectionBetween(
+      contract,
+      '  /api/v1/orders/status-board/mdf:',
+      '  /api/v1/orders/status-board/mdf-return/{cardKind}/{cardId}/preview:',
+    );
+    expect(route).toContain('operationId: getPublishedMdfBoard');
+    expect(route).toContain('- { name: displayFrom, in: query');
+    expect(route).toContain('dateTo минус 6 дней');
+  });
+
+  it('documents the demand-drift conflicts list/confirm routes (§5.8 reconciler)', () => {
+    const listRoute = sectionBetween(
+      contract,
+      '  /api/v1/orders/status-board/mdf-drift:',
+      '  /api/v1/orders/status-board/mdf-drift/{conflictId}/confirm:',
+    );
+    expect(listRoute).toContain('operationId: listMdfDemandDriftConflicts');
+    expect(listRoute).toContain('x-permission: orders.view');
+    expect(listRoute).toContain("$ref: '#/components/schemas/MdfDemandDriftConflict'");
+    expect(listRoute).toContain("'403':");
+
+    const confirmRoute = sectionBetween(
+      contract,
+      '  /api/v1/orders/status-board/mdf-drift/{conflictId}/confirm:',
+      '  /api/v1/orders/{orderId}/resource-procurement/{resourceKey}:',
+    );
+    expect(confirmRoute).toContain('operationId: confirmMdfDemandDrift');
+    expect(confirmRoute).toContain('x-permission: orders.update');
+    expect(confirmRoute).toContain("format: uuid");
+    expect(confirmRoute).toContain("pattern: '^[a-f0-9]{64}$'");
+    expect(confirmRoute).toContain('resolved:');
+    expect(confirmRoute).toContain("'404':");
+    expect(confirmRoute).toContain("'409':");
+
+    const schema = sectionBetween(
+      contract,
+      '    MdfDemandDriftConflict:',
+      '    OrderStatusBoardResponse:',
+    );
+    expect(schema).toContain('conflictId');
+    expect(schema).toContain('CONFIRMATION_REQUIRED, HARD_CONFLICT, BLOCKED_BY_CLOSURE, MDF_RECONCILE_SCOPE_LIMIT');
+    expect(schema).toContain('orderIds');
+    expect(schema).toContain('detectedAt');
+  });
+
   it('keeps pagination, capabilities and nullable financials explicit', () => {
     const response = sectionBetween(
       contract,

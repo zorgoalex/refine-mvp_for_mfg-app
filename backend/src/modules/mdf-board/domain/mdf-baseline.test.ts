@@ -61,6 +61,33 @@ describe('buildMdfBaselineItems', () => {
     expect(mdfBaselineItemDigest(rest)).toBe(digest);
     expect(mdfBaselineItemDigest({ ...rest, lines: rest.lines.map(l => ({ ...l, quantity: l.quantity + 1 })) })).not.toBe(digest);
   });
+
+  it('a current order with a credited trace is STILL flagged for manual review when a replaced-bath production history names it (mixed surviving trace)', () => {
+    const demand1 = [{ orderId: 1, detailId: 10, quantity: 2, rank: 1 }];
+    // Credited: a real physical CNC cut for order 1 / detail 10 -> makes order 1 "traced".
+    const tracedPacket = src({ completed: true });
+    // A replaced/archived bath naming the SAME order via its legacy lamination manual column: blocked, not credited,
+    // but still carries production history (mdf-reconciliation §B) -> its owners must never be silently dropped.
+    const replacedBath = classifyMdfReconciliationSource({ kind: 'bath', id: 'cut-result:9', exists: true, mdf: true,
+      createdAt: '2026-09-01T00:00:00Z', items: [item('1:10', 1, 10)], manualColumn: 'completed_baths', manualAudited: false,
+      inactive: true });
+    expect(replacedBath.reason).toBe('HISTORY_BATH_NOT_CURRENT_WITH_PRODUCTION');
+    const build = buildMdfBaselineItems({ sources: [tracedPacket, replacedBath], demand: demand1, orders: new Map([order(1, false)]) });
+    // The packet's physical cut line is still credited/traced for order 1 -- a real, surviving trace exists.
+    expect(build.items.find(i => i.itemKey === 'packet:p1')!.provenance).toEqual({ physical_cnc: 2 });
+    // Yet order 1 is ALWAYS in manualReviewOrderIds because of the replaced-bath history, even with that surviving trace.
+    expect(build.manualReviewOrderIds).toEqual([1]);
+  });
+
+  it('a finished order named by replaced-bath production history is closed by status, not manually reviewed', () => {
+    const demand1 = [{ orderId: 1, detailId: 10, quantity: 2, rank: 1 }];
+    const replacedBath = classifyMdfReconciliationSource({ kind: 'bath', id: 'cut-result:9', exists: true, mdf: true,
+      createdAt: '2026-09-01T00:00:00Z', items: [item('1:10', 1, 10)], manualColumn: 'completed_baths', manualAudited: false,
+      inactive: true });
+    const build = buildMdfBaselineItems({ sources: [replacedBath], demand: demand1, orders: new Map([order(1, true)]) });
+    expect(build.closedOrderIds).toEqual([1]);
+    expect(build.manualReviewOrderIds).toEqual([]);
+  });
 });
 
 describe('expectMdfBaseline', () => {

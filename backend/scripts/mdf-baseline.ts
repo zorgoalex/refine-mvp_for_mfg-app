@@ -6,6 +6,12 @@
  *   npx tsx scripts/mdf-baseline.ts handoff  --run <uuid>
  *   npx tsx scripts/mdf-baseline.ts abort    --run <uuid>
  *   npx tsx scripts/mdf-baseline.ts reset    --run <uuid>
+ *   npx tsx scripts/mdf-baseline.ts rollback-check                 engine-only facts since activation (read only)
+ *   npx tsx scripts/mdf-baseline.ts mode     <legacy|read_only|active>   audited transition matrix (§5.8)
+ *   npx tsx scripts/mdf-baseline.ts freeze   <on --reason "..."|off>    recovery freeze: every write rejected
+ *   npx tsx scripts/mdf-baseline.ts reconcile                      one demand-drift reconciliation tick (active only)
+ *   npx tsx scripts/mdf-baseline.ts drain    [--max <n>]       process pending engine jobs until idle (active mode only;
+ *                                                               for a database without a running backend worker)
  * Every command except dry-run requires MDF_BASELINE_TARGET="<current_database()>:<cluster system_identifier>" of the
  * intended cluster (refuses otherwise) and MDF_BASELINE_OPERATOR_ID (user id recorded in audit). Apply/resume hold the
  * exclusive cutover lock on this ONE session for the whole run (writers get 409 MDF_CUTOVER_IN_PROGRESS).
@@ -16,6 +22,13 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Pool, type PoolClient, type QueryResultRow } from 'pg';
 import type { TransactionClient } from '../src/database/database.types';
+import { MdfJobRunner } from '../src/modules/mdf-board/application/mdf-job-runner';
+import { enterMdfCommand } from '../src/modules/mdf-board/application/mdf-command-boundary';
+import { runMdfDemandReconcileTick } from '../src/modules/mdf-board/adapters/mdf-demand-reconciler';
+import { mapUserRow } from '../src/permissions/visibility/order-visibility-filter';
+import { changeMdfEngineMode, loadMdfEngineOnlyFacts, MdfCutoverControlRefused, setMdfRecoveryFreeze,
+  type MdfEngineTargetMode } from '../src/modules/mdf-board/adapters/mdf-cutover-control';
+import { executeMdfAcceptedJob } from '../src/modules/mdf-board/application/mdf-accepted-job';
 import { abortMdfBaseline, dryRunMdfBaseline, handoffMdfBaseline, loadMdfBaselineBuild, markMdfBaselineRecorded,
   recordMdfBaselineBatch, resetMdfBaseline, startMdfBaselineRun, MdfBaselineRefused, type MdfBaselineActor } from
   '../src/modules/mdf-board/adapters/mdf-baseline-runner';
@@ -73,6 +86,53 @@ async function main() {
     if (!expected || expected !== actual) throw new MdfBaselineRefused('MDF_BASELINE_TARGET_MISMATCH');
     if (actor.operatorUserId === null || !Number.isSafeInteger(actor.operatorUserId)) throw new MdfBaselineRefused('MDF_BASELINE_OPERATOR_REQUIRED');
     const runId = option('--run');
+    if (command === 'rollback-check') {
+      const loss = await inTransaction(client, t => loadMdfEngineOnlyFacts(t));
+      log(`activatedAt=${loss.activatedAt ?? 'never'} engineOnlyFacts=${JSON.stringify(loss.facts)} `
+        + `legacyFallback=${Object.keys(loss.facts).length ? 'REFUSED (fix forward: freeze/read_only)' : 'allowed'}`);
+      return;
+    }
+    if (command === 'mode') {
+      const target = args[0] as MdfEngineTargetMode;
+      if (!['legacy', 'read_only', 'active'].includes(target)) throw new MdfBaselineRefused('MDF_MODE_TARGET_INVALID');
+      const r = await inTransaction(client, t => changeMdfEngineMode(t, { operatorUserId: actor.operatorUserId!,
+        requestId: actor.requestId }, target));
+      log(`mode ${r.from} -> ${r.to}${r.changed ? '' : ' (unchanged)'}`);
+      return;
+    }
+    if (command === 'freeze') {
+      const on = args[0] === 'on';
+      if (args[0] !== 'on' && args[0] !== 'off') throw new MdfBaselineRefused('MDF_FREEZE_ARG_INVALID');
+      const r = await inTransaction(client, t => setMdfRecoveryFreeze(t, { operatorUserId: actor.operatorUserId!,
+        requestId: actor.requestId }, on, option('--reason')));
+      log(`recovery freeze ${on ? 'on' : 'off'}${r.changed ? '' : ' (unchanged)'}`);
+      return;
+    }
+    if (command === 'reconcile') {
+      // One demand-drift reconciliation tick (§5.8) as the operator (active mode only).
+      const row = (await client.query<{ user_id: string; username: string; role_id: number }>(
+        'SELECT user_id,username,role_id FROM users WHERE user_id=$1 AND is_active', [actor.operatorUserId])).rows[0];
+      const user = row ? mapUserRow(row) : null;
+      if (!user) throw new MdfBaselineRefused('MDF_RECONCILE_ACTOR_UNAVAILABLE');
+      const r = await runMdfDemandReconcileTick({ user, requestId: actor.requestId, transaction: handler =>
+        inTransaction(client, async t => { await enterMdfCommand(t, { writer: 'mdf.demand_reconcile', capability: 'order-demand' });
+          return handler(t); }) });
+      log(`reconcile: ${JSON.stringify(r)}`);
+      return;
+    }
+    if (command === 'drain') {
+      // Each job in its own READ COMMITTED transaction, exactly as the backend worker would run it.
+      const runner = new MdfJobRunner<TransactionClient>({ transaction: handler => inTransaction(client, handler) },
+        executeMdfAcceptedJob);
+      const max = Number(option('--max') ?? 100000), counts: Record<string, number> = {};
+      for (let i = 0; i < max; i++) {
+        const r = await runner.processOne();
+        counts[r.status] = (counts[r.status] ?? 0) + 1;
+        if (r.status === 'idle' || r.status === 'disabled') break;
+      }
+      log(`drain: ${JSON.stringify(counts)}`);
+      return;
+    }
     if (command === 'abort' || command === 'reset') {
       if (!runId) throw new MdfBaselineRefused('MDF_BASELINE_RUN_REQUIRED');
       await inTransaction(client, t => command === 'abort' ? abortMdfBaseline(t, actor, runId) : resetMdfBaseline(t, actor, runId));
@@ -148,7 +208,8 @@ async function assertResumeAdmission(t: TransactionClient, runId: string) {
 }
 
 main().catch(error => {
-  const detail = error instanceof MdfBaselineRefused && error.detail !== undefined ? ` ${JSON.stringify(error.detail)}` : '';
+  const detail = (error instanceof MdfBaselineRefused || error instanceof MdfCutoverControlRefused) && error.detail !== undefined
+    ? ` ${JSON.stringify(error.detail)}` : '';
   process.stderr.write(`[mdf-baseline] ${error instanceof Error ? error.message : 'failed'}${detail}\n`);
   process.exitCode = 1;
 }).finally(() => pool.end());
