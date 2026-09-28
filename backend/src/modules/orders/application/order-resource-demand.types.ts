@@ -12,6 +12,8 @@ export interface OrderResourceDemandQuery {
   vendorId?: number;
   /** Только заказы, у которых есть хотя бы один незакупленный материал. */
   unpurchasedOnly?: boolean;
+  /** Только заказы, на которые распределён этот документ 1С (активные распределения). */
+  onecDocumentId?: number;
 }
 
 export interface OrderSheetMaterialDemandDto {
@@ -182,6 +184,24 @@ export interface OrderResourceByMaterialResponseDto {
   capabilities: OrderResourceCapabilitiesDto;
 }
 
+/** Документ 1С, распределённый на заказы текущей выборки списка потребностей. */
+export interface OrderResourceOnecDocumentOptionDto {
+  documentId: number;
+  kind: 'purchase_receipt' | 'cash_outflow' | 'bank_outflow';
+  number: string;
+  date: string;
+  ordersCount: number;
+}
+
+export interface OrderResourceOnecDocumentOptionsResponseDto {
+  data: OrderResourceOnecDocumentOptionDto[];
+  /** Документов больше лимита — показаны самые свежие. */
+  truncated: boolean;
+}
+
+/** Лимит вариантов фильтра «Документ 1С». */
+export const RESOURCE_ONEC_DOCUMENT_OPTIONS_LIMIT = 200;
+
 export interface ListOrderResourceDemandsCommand {
   currentUser: CurrentUser;
   query: OrderResourceDemandQuery;
@@ -206,6 +226,10 @@ export interface OrderResourceDemandRepositoryPort {
     command: ListOrderResourceDemandsCommand,
     options: OrderResourceReadOptions,
   ): Promise<OrderResourceByMaterialResponseDto>;
+  listOnecDocumentOptions(
+    command: ListOrderResourceDemandsCommand,
+    options: OrderResourceReadOptions,
+  ): Promise<OrderResourceOnecDocumentOptionsResponseDto>;
 }
 
 /** Лимит заказов для агрегата «по материалам» (R1-8). */

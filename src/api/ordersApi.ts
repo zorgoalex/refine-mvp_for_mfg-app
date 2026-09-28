@@ -16,6 +16,8 @@ import type {
   OrderResourceDemandResponse,
   OrderResourceByMaterialQuery,
   OrderResourceByMaterialResponse,
+  OrderResourceDemandOnecDocumentsQuery,
+  OrderResourceDemandOnecDocumentsResponse,
   OrderResourceCardResponse,
   SetOrderResourceProcurementRequest,
   OrderResourceProcurementResultDto,
@@ -71,6 +73,15 @@ export const ordersApi = {
   listResourceDemandsByMaterial(params: OrderResourceByMaterialQuery = {}): Promise<OrderResourceByMaterialResponse> {
     return httpClient.get<OrderResourceByMaterialResponse>(
       withQuery(apiRoutes.orders.resourceDemandsByMaterial, params),
+    );
+  },
+
+  /** Документы 1С, привязанные к заказам текущей выборки списка потребностей («Документ 1С»-фильтр). */
+  listResourceDemandOnecDocuments(
+    params: OrderResourceDemandOnecDocumentsQuery = {},
+  ): Promise<OrderResourceDemandOnecDocumentsResponse> {
+    return httpClient.get<OrderResourceDemandOnecDocumentsResponse>(
+      withQuery(apiRoutes.orders.resourceDemandsOnecDocuments, params),
     );
   },
 

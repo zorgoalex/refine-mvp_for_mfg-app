@@ -15,12 +15,15 @@ import { Segmented } from "../../ui/Segmented";
 import type { TablePaginationConfig, TableProps } from 'antd';
 import type { FilterDropdownProps, SortOrder } from 'antd/es/table/interface';
 import dayjs, { type Dayjs } from 'dayjs';
+import { useSearchParams } from 'react-router-dom';
+import { onecDocumentsApi } from '../../api/onecDocumentsApi';
 import {
   ordersApi,
   subscribeOrderDataChanged,
 } from '../../api/ordersApi';
 import type {
   OrderResourceByMaterialQuery,
+  OrderResourceDemandOnecDocumentsQuery,
   OrderResourceDemandQuery,
   OrderResourceDemandResponse,
 } from '../../api/types/orderApi.types';
@@ -28,6 +31,16 @@ import { LocalizedList } from '../../components/LocalizedList';
 import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
 import { formatDate, formatDateTime } from '../../utils/dateFormat';
 import { subscribeCutJobReady } from '../cut/cutJobEvents';
+import {
+  buildOnecDocumentFilterOptionGroups,
+  onecDocumentFilterFallbackLabel,
+  onecDocumentFilterOptionLabel,
+  onecDocumentFilterTagText,
+  onecDocumentFilterTruncatedHint,
+  parseOnecDocumentIdParam,
+  type OnecDocumentFilterDoc,
+  type OnecDocumentFilterValue,
+} from './onecDocumentFilter';
 import {
   buildResourceDemandReport,
   type ResourceDemandReport,
@@ -42,6 +55,8 @@ import { KindSummaryCell, ResourceDemandBreakdown } from './ResourceDemandParts'
 import { resolveByMaterialPeriod, resolveResourceCapabilities, resourceDemandLines, type ResourceDemandLine } from './resourceKinds';
 import { SplitPanelView } from './SplitPanelView';
 import { useStoredViewMode } from './useStoredViewMode';
+
+const ONEC_DOCUMENT_FILTER_DEBOUNCE_MS = 300;
 
 const LIVE_REFRESH_INTERVAL_MS = 5_000;
 const numericStyle = { fontVariantNumeric: 'tabular-nums' } as const;
@@ -110,6 +125,13 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
   const [dateRange, setDateRange] = useState<DateRange>(null);
   const [readyCutsOnly, setReadyCutsOnly] = useState(false);
   const [unpurchasedOnly, setUnpurchasedOnly] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [onecDocumentFilter, setOnecDocumentFilter] = useState<OnecDocumentFilterValue | null>(null);
+  // Инициализация из URL идёт асинхронно (карточка документа) — синхронизация фильтра
+  // обратно в URL ждёт этого шага, иначе очистила бы ?onecDocumentId= до её завершения.
+  const [onecDocumentUrlInitialized, setOnecDocumentUrlInitialized] = useState(
+    () => parseOnecDocumentIdParam(searchParams.get('onecDocumentId')) == null,
+  );
   const { canManage, manageLoading } = useProcurementPermission();
   const [reportOpen, setReportOpen] = useState(false);
   const [reportRows, setReportRows] = useState<OrderResourceDemandRow[]>(EMPTY_RESOURCE_DEMAND_ROWS);
@@ -147,7 +169,8 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
     ...(dateRange?.[0] ? { dateFrom: dateRange[0].format('YYYY-MM-DD') } : {}),
     ...(dateRange?.[1] ? { dateTo: dateRange[1].format('YYYY-MM-DD') } : {}),
     ...(unpurchasedOnly ? { unpurchasedOnly: true } : {}),
-  }), [dateRange, deferredSearch, page, pageSize, unpurchasedOnly]);
+    ...(onecDocumentFilter ? { onecDocumentId: onecDocumentFilter.documentId } : {}),
+  }), [dateRange, deferredSearch, onecDocumentFilter, page, pageSize, unpurchasedOnly]);
   const { response, loading, error } = useLiveOrderResourceDemands(query, refreshRevision);
   const rows = response?.data ?? EMPTY_RESOURCE_DEMAND_ROWS;
   const capabilities = useMemo(() => resolveResourceCapabilities(response?.capabilities), [response]);
@@ -158,16 +181,35 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
     dateRange?.[1]?.format('YYYY-MM-DD'),
     dayjs(todayKey).subtract(1, 'month').format('YYYY-MM-DD'),
     todayKey,
-  ), [dateRange, todayKey]);
+    onecDocumentFilter != null,
+  ), [dateRange, onecDocumentFilter, todayKey]);
   const byMaterialQuery = useMemo<OrderResourceByMaterialQuery>(() => ({
     ...(deferredSearch ? { search: deferredSearch } : {}),
     ...(byMaterialPeriod.dateFrom ? { dateFrom: byMaterialPeriod.dateFrom } : {}),
     ...(byMaterialPeriod.dateTo ? { dateTo: byMaterialPeriod.dateTo } : {}),
     ...(unpurchasedOnly ? { unpurchasedOnly: true } : {}),
-  }), [byMaterialPeriod, deferredSearch, unpurchasedOnly]);
+    ...(onecDocumentFilter ? { onecDocumentId: onecDocumentFilter.documentId } : {}),
+  }), [byMaterialPeriod, deferredSearch, onecDocumentFilter, unpurchasedOnly]);
   const byMaterialPeriodNote = byMaterialPeriod.isDefault && byMaterialPeriod.dateFrom && byMaterialPeriod.dateTo
     ? `Период по умолчанию — последний месяц: ${formatDate(byMaterialPeriod.dateFrom)} – ${formatDate(byMaterialPeriod.dateTo)}. Чтобы изменить, выберите даты в фильтре «Заказы с даты — по дату».`
     : null;
+  // «Документ 1С»-фильтр: список опций Select — документы, привязанные к заказам ЭТОЙ
+  // выборки (те же условия, что у основного списка, без paging и onecDocumentId).
+  const onecDocumentPickerQuery = useMemo<OrderResourceDemandOnecDocumentsQuery>(() => ({
+    ...(deferredSearch ? { search: deferredSearch } : {}),
+    ...(dateRange?.[0] ? { dateFrom: dateRange[0].format('YYYY-MM-DD') } : {}),
+    ...(dateRange?.[1] ? { dateTo: dateRange[1].format('YYYY-MM-DD') } : {}),
+    ...(unpurchasedOnly ? { unpurchasedOnly: true } : {}),
+  }), [dateRange, deferredSearch, unpurchasedOnly]);
+  const onecDocumentOptionsState = useOnecDocumentFilterOptions(
+    onecDocumentPickerQuery,
+    capabilities.onecDocuments,
+  );
+  const onecDocumentOptionGroups = useMemo(
+    () => buildOnecDocumentFilterOptionGroups(onecDocumentOptionsState.documents),
+    [onecDocumentOptionsState.documents],
+  );
+  const onecDocumentTruncatedHint = onecDocumentFilterTruncatedHint(onecDocumentOptionsState.truncated);
   const filterOptions = useMemo(() => buildResourceDemandFilterOptions(rows), [rows]);
   const tableRows = useMemo(
     () => sortResourceDemandRows(filterResourceDemandRows(rows, headerFilters, readyCutsOnly), sortState),
@@ -224,6 +266,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
     hasActiveListFilters ||
     unpurchasedOnly ||
     hasActiveSort ||
+    onecDocumentFilter != null ||
     page !== DEFAULT_PAGE;
 
   const resetPage = useCallback(() => setPage(DEFAULT_PAGE), []);
@@ -231,6 +274,50 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
   useEffect(() => {
     setPage(DEFAULT_PAGE);
   }, [pageSize]);
+
+  // Deep link ?onecDocumentId=<id> — читаем один раз при монтировании; карточка документа
+  // даёт подпись фильтра, ошибка/404 не блокируют фильтр — заглушка «Документ #<id>».
+  useEffect(() => {
+    const initialDocumentId = parseOnecDocumentIdParam(searchParams.get('onecDocumentId'));
+    if (initialDocumentId == null) return;
+    let active = true;
+    onecDocumentsApi.getCard(initialDocumentId)
+      .then((response) => {
+        if (!active) return;
+        setOnecDocumentFilter({
+          documentId: initialDocumentId,
+          label: onecDocumentFilterOptionLabel({
+            kind: response.data.kind,
+            number: response.data.number,
+            date: response.data.date,
+          }),
+        });
+      })
+      .catch(() => {
+        if (!active) return;
+        setOnecDocumentFilter({ documentId: initialDocumentId, label: onecDocumentFilterFallbackLabel(initialDocumentId) });
+      })
+      .finally(() => {
+        if (active) setOnecDocumentUrlInitialized(true);
+      });
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Держим ?onecDocumentId= в адресной строке в согласии с фильтром (replace — не добавляем
+  // записи истории на каждый выбор/сброс).
+  useEffect(() => {
+    if (!onecDocumentUrlInitialized) return;
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (onecDocumentFilter) next.set('onecDocumentId', String(onecDocumentFilter.documentId));
+      else next.delete('onecDocumentId');
+      return next;
+    }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onecDocumentFilter, onecDocumentUrlInitialized]);
 
   useEffect(() => {
     if (selectedRowKeys.length === 0) {
@@ -264,10 +351,16 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
     setDateRange(null);
     setReadyCutsOnly(false);
     setUnpurchasedOnly(false);
+    setOnecDocumentFilter(null);
     setHeaderFilters(createDefaultHeaderFilters());
     setSortState(DEFAULT_SORT_STATE);
     setPage(DEFAULT_PAGE);
     setRefreshRevision((value) => value + 1);
+  }, []);
+
+  const handleOnecDocumentFilterChange = useCallback((value: OnecDocumentFilterValue | null) => {
+    setOnecDocumentFilter(value);
+    setPage(DEFAULT_PAGE);
   }, []);
 
   const handleRowSelectionChange = useCallback((keys: Key[], selectedRows: OrderResourceDemandRow[]) => {
@@ -417,6 +510,34 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
             >
               Есть незакупленное
             </Checkbox>
+          )}
+          {capabilities.onecDocuments && (
+            <Select
+              labelInValue
+              showSearch
+              allowClear
+              optionFilterProp="label"
+              aria-label="Документ 1С"
+              placeholder="Документ 1С"
+              style={{ width: 260 }}
+              loading={onecDocumentOptionsState.loading}
+              notFoundContent={onecDocumentOptionsState.loading ? 'Загрузка…' : 'Документы не найдены'}
+              value={onecDocumentFilter ? { value: onecDocumentFilter.documentId, label: onecDocumentFilter.label } : undefined}
+              options={onecDocumentOptionGroups}
+              onChange={(selected) => handleOnecDocumentFilterChange(
+                selected ? { documentId: Number(selected.value), label: String(selected.label) } : null,
+              )}
+            />
+          )}
+          {capabilities.onecDocuments && onecDocumentFilter && (
+            <Tag closable color="blue" onClose={() => handleOnecDocumentFilterChange(null)}>
+              {onecDocumentFilterTagText(onecDocumentFilter.label)}
+            </Tag>
+          )}
+          {capabilities.onecDocuments && onecDocumentTruncatedHint && (
+            <Typography.Text type="secondary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+              {onecDocumentTruncatedHint}
+            </Typography.Text>
           )}
           <Button icon={<FileTextOutlined />} onClick={openReportModal}>
             Отчёт
@@ -1092,6 +1213,68 @@ function useLiveOrderResourceDemands(query: OrderResourceDemandQuery, refreshRev
   }, [query, queryKey, refreshRevision]);
 
   return { response, loading, error };
+}
+
+interface OnecDocumentFilterOptionsState {
+  documents: OnecDocumentFilterDoc[];
+  loading: boolean;
+  error: string | null;
+  truncated: boolean;
+}
+
+const EMPTY_ONEC_DOCUMENT_FILTER_DOCS: OnecDocumentFilterDoc[] = [];
+const INITIAL_ONEC_DOCUMENT_FILTER_OPTIONS_STATE: OnecDocumentFilterOptionsState = {
+  documents: EMPTY_ONEC_DOCUMENT_FILTER_DOCS,
+  loading: false,
+  error: null,
+  truncated: false,
+};
+
+/**
+ * Опции Select «Документ 1С»: документы, привязанные к заказам ТЕКУЩЕЙ выборки списка
+ * (те же фильтры, что и основной список, без paging). Перезагружаются с debounce при
+ * смене фильтров; устаревший ответ игнорируется по номеру запроса.
+ */
+function useOnecDocumentFilterOptions(
+  query: OrderResourceDemandOnecDocumentsQuery,
+  enabled: boolean,
+): OnecDocumentFilterOptionsState {
+  const [state, setState] = useState<OnecDocumentFilterOptionsState>(INITIAL_ONEC_DOCUMENT_FILTER_OPTIONS_STATE);
+  const requestSequence = useRef(0);
+
+  useEffect(() => {
+    if (!enabled) {
+      setState(INITIAL_ONEC_DOCUMENT_FILTER_OPTIONS_STATE);
+      return;
+    }
+    let active = true;
+    const timer = window.setTimeout(() => {
+      const requestId = requestSequence.current + 1;
+      requestSequence.current = requestId;
+      setState((current) => ({ ...current, loading: true, error: null }));
+      ordersApi.listResourceDemandOnecDocuments(query)
+        .then((response) => {
+          if (!active || requestSequence.current !== requestId) return;
+          setState({ documents: response.data, loading: false, error: null, truncated: response.truncated });
+        })
+        .catch((loadError: unknown) => {
+          if (!active || requestSequence.current !== requestId) return;
+          setState({
+            documents: EMPTY_ONEC_DOCUMENT_FILTER_DOCS,
+            loading: false,
+            error: errorMessage(loadError),
+            truncated: false,
+          });
+        });
+    }, ONEC_DOCUMENT_FILTER_DEBOUNCE_MS);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, query]);
+
+  return state;
 }
 
 function errorMessage(error: unknown): string {

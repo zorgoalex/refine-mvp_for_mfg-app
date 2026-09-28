@@ -17,6 +17,7 @@ import {
   onecDocumentShowPath,
   onecDocumentStatusLabel,
   onecDocumentStatusTagColor,
+  orderResourceRequirementsOnecFilterPath,
 } from '../order_resource_requirements/onecDocKind';
 import { RESOURCE_KIND_BY_KEY } from '../order_resource_requirements/resourceKinds';
 import { allocationStateLabel, allocationStateTagColor, formatOnecAmount, ONEC_DOCUMENTS_TAB_OPTIONS } from './onecDocumentsHelpers';
@@ -229,6 +230,15 @@ export const OnecPurchaseDocumentList: React.FC<IResourceComponentsProps> = () =
                 )}
                 {row.orders.length === 0 && row.hiddenOrdersCount === 0 && (
                   <Typography.Text type="secondary">—</Typography.Text>
+                )}
+                {row.orders.length > 0 && (
+                  <Link
+                    to={orderResourceRequirementsOnecFilterPath(row.documentId)}
+                    onClick={(event) => event.stopPropagation()}
+                    style={{ fontSize: 12 }}
+                  >
+                    в потребностях
+                  </Link>
                 )}
                 {row.resourceKinds.map((kind) => (
                   <Tag key={kind} style={{ marginInlineEnd: 0 }} title={RESOURCE_KIND_BY_KEY[kind].label}>

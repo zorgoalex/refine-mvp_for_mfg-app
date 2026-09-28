@@ -313,6 +313,41 @@ describe.skipIf(!url)('1C documents allocations — real PostgreSQL, committed f
     expect(unlinked.data.some((row) => row.documentId === unpostedId)).toBe(true);
   });
 
+  it('filters the demand list and by-material summary to orders linked to one document', async () => {
+    const linked = (await connA.query<{ order_id: string }>(
+      `SELECT DISTINCT p.order_id::text FROM order_resource_onec_allocations a
+         JOIN order_resource_procurement p ON p.order_resource_procurement_id = a.order_resource_procurement_id
+         JOIN onec_document_lines l ON l.onec_document_line_id = a.onec_document_line_id
+        WHERE a.removed_at IS NULL AND l.onec_document_id = $1`, [receiptId])).rows.map((row) => Number(row.order_id)).sort();
+    expect(linked.length).toBeGreaterThan(0);
+    const listed = await readsA.list({ currentUser: admin, query: { page: 1, pageSize: 100, onecDocumentId: receiptId } }, options);
+    expect(listed.data.map((row) => row.orderId).sort()).toEqual(linked);
+    const aggregate = await readsA.listByMaterial({ currentUser: admin, query: { page: 1, pageSize: 20, onecDocumentId: receiptId } }, options);
+    expect(aggregate.ordersCount).toBe(linked.length);
+    const scoped = await readsA.list({ currentUser: manager, query: { page: 1, pageSize: 100, onecDocumentId: receiptId } }, options);
+    expect(scoped.data).toEqual([]);
+    const flagOff = await readsA.list({ currentUser: admin, query: { page: 1, pageSize: 100, onecDocumentId: receiptId } },
+      { procurementEnabled: false });
+    expect(flagOff.data).toEqual([]);
+  });
+
+  it('offers as filter options exactly the documents allocated to the listed orders', async () => {
+    const expected = (await connA.query<{ id: string }>(
+      `SELECT DISTINCT l.onec_document_id::text AS id FROM order_resource_onec_allocations a
+         JOIN order_resource_procurement p ON p.order_resource_procurement_id = a.order_resource_procurement_id
+         JOIN onec_document_lines l ON l.onec_document_line_id = a.onec_document_line_id
+        WHERE a.removed_at IS NULL AND p.order_id = ANY($1::bigint[])`, [orderIds])).rows.map((row) => Number(row.id)).sort();
+    const query = { page: 1, pageSize: 20, search: tag };
+    const result = await readsA.listOnecDocumentOptions({ currentUser: admin, query }, options);
+    expect(result.data.map((row) => row.documentId).sort()).toEqual(expected);
+    expect(result.truncated).toBe(false);
+    // The selected document must not narrow its own option list.
+    const withSelection = await readsA.listOnecDocumentOptions({ currentUser: admin, query: { ...query, onecDocumentId: receiptId } }, options);
+    expect(withSelection.data.map((row) => row.documentId).sort()).toEqual(expected);
+    expect((await readsA.listOnecDocumentOptions({ currentUser: manager, query }, options)).data).toEqual([]);
+    expect((await readsA.listOnecDocumentOptions({ currentUser: admin, query }, { procurementEnabled: false })).data).toEqual([]);
+  });
+
   it('refuses allocations and removals on orders outside the user scope', async () => {
     const orderId = orderIds[1];
     const current = await line(orderId);

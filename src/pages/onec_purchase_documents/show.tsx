@@ -14,6 +14,7 @@ import {
   onecDocKindLabel,
   onecDocumentStatusLabel,
   onecDocumentStatusTagColor,
+  orderResourceRequirementsOnecFilterPath,
 } from '../order_resource_requirements/onecDocKind';
 import { AllocationModal } from './AllocationModal';
 import { canAddOnecAllocation, formatOnecAmount, formatOnecQuantity, onecAllocationErrorMessage } from './onecDocumentsHelpers';
@@ -203,7 +204,7 @@ export const OnecPurchaseDocumentShow: React.FC<IResourceComponentsProps> = () =
               )}
             />
           </Table>
-          <OrdersSummary data={state.data} />
+          <OrdersSummary data={state.data} documentId={documentId} />
         </Space>
       )}
 
@@ -248,7 +249,7 @@ function DocumentHeader({ data, amountsVisible }: { data: OnecDocumentCardDto; a
 }
 
 /** «Заказы, для которых закуплено»: те же распределения, сгруппированные по заказу, а не по строке. */
-function OrdersSummary({ data }: { data: OnecDocumentCardDto }) {
+function OrdersSummary({ data, documentId }: { data: OnecDocumentCardDto; documentId: number }) {
   const byOrder = new Map<number, { orderName: string; items: Array<{ line: OnecDocumentLineDto; allocation: OnecAllocationDto }> }>();
   data.lines.forEach((line) => {
     line.allocations.forEach((allocation) => {
@@ -267,7 +268,10 @@ function OrdersSummary({ data }: { data: OnecDocumentCardDto }) {
   }
   return (
     <div>
-      <Typography.Title level={5}>Заказы, для которых закуплено</Typography.Title>
+      <Space size={12} align="baseline" wrap>
+        <Typography.Title level={5} style={{ marginBottom: 0 }}>Заказы, для которых закуплено</Typography.Title>
+        <Link to={orderResourceRequirementsOnecFilterPath(documentId)}>Показать заказы в потребностях</Link>
+      </Space>
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         {[...byOrder.entries()].map(([orderId, entry]) => (
           <div key={orderId}>

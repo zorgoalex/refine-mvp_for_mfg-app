@@ -217,3 +217,14 @@ describe('parseOrderResourceDemandQuery unpurchasedOnly', () => {
     }
   });
 });
+
+describe('parseOrderResourceDemandQuery — onecDocumentId filter', () => {
+  it('accepts a positive document id and rejects invalid ones', async () => {
+    const { parseOrderResourceDemandQuery } = await import('./order-resource-demand.controller');
+    expect(parseOrderResourceDemandQuery({ onecDocumentId: '42' })).toMatchObject({ onecDocumentId: 42 });
+    expect(parseOrderResourceDemandQuery({})).not.toHaveProperty('onecDocumentId');
+    for (const bad of ['0', '-1', 'abc', '1.5']) {
+      expect(() => parseOrderResourceDemandQuery({ onecDocumentId: bad })).toThrow();
+    }
+  });
+});

@@ -10,6 +10,7 @@ import {
   onecDocumentStatus,
   onecDocumentStatusLabel,
   onecDocumentStatusTagColor,
+  orderResourceRequirementsOnecFilterPath,
 } from './onecDocKind';
 
 describe('onecDocKind labels', () => {
@@ -42,6 +43,10 @@ describe('onec document routes', () => {
 
   it('builds the document list path', () => {
     expect(onecDocumentListPath()).toBe('/procurement/onec-documents');
+  });
+
+  it('builds the deep link to the resource requirements list filtered by this document', () => {
+    expect(orderResourceRequirementsOnecFilterPath(42)).toBe('/order-resource-requirements?onecDocumentId=42');
   });
 });
 

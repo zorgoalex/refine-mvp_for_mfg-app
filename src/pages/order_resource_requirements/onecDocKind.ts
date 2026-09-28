@@ -42,6 +42,16 @@ export function onecDocumentListPath(): string {
   return '/procurement/onec-documents';
 }
 
+/**
+ * Обратная ссылка «документ 1С → потребности заказов»: список потребностей с
+ * предвыбранным фильтром «Документ 1С». Единая точка правды для обеих ссылок
+ * на экранах документов 1С (список «в потребностях», карточка «Показать
+ * заказы в потребностях»).
+ */
+export function orderResourceRequirementsOnecFilterPath(documentId: number): string {
+  return `/order-resource-requirements?onecDocumentId=${documentId}`;
+}
+
 export type OnecDocumentStatus = 'posted' | 'unposted' | 'deleted';
 
 export function onecDocumentStatus(posted: boolean, deletedInOnec: boolean): OnecDocumentStatus {

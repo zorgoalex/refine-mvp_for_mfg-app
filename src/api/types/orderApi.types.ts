@@ -61,6 +61,8 @@ export interface OrderResourceDemandQuery {
   vendorId?: number;
   /** Только заказы, у которых есть хотя бы один незакупленный материал (капабилити procurement). */
   unpurchasedOnly?: boolean;
+  /** Только заказы с активным распределением этого документа 1С (капабилити onecDocuments). */
+  onecDocumentId?: number;
 }
 
 export type OrderResourceKind = 'sheet_material' | 'film';
@@ -230,6 +232,8 @@ export interface OrderResourceByMaterialQuery {
   dateFrom?: DateOnlyString;
   dateTo?: DateOnlyString;
   unpurchasedOnly?: boolean;
+  /** Только заказы с активным распределением этого документа 1С (капабилити onecDocuments). */
+  onecDocumentId?: number;
 }
 
 export interface OrderResourceByMaterialResponse {
@@ -237,6 +241,38 @@ export interface OrderResourceByMaterialResponse {
   ordersCount: number;
   refreshedAt: IsoDateTimeString;
   capabilities: OrderResourceCapabilitiesDto;
+}
+
+/**
+ * Запрос списка документов 1С «Документ 1С»-фильтра: те же условия, что и
+ * `GET orders/resource-demands` (без paging и без onecDocumentId) — backend
+ * возвращает документы, привязанные к заказам ЭТОЙ выборки.
+ */
+export interface OrderResourceDemandOnecDocumentsQuery {
+  search?: string;
+  dateFrom?: DateOnlyString;
+  dateTo?: DateOnlyString;
+  sheetMaterialTypeId?: number;
+  filmId?: number;
+  supplierId?: number;
+  vendorId?: number;
+  unpurchasedOnly?: boolean;
+}
+
+/** Документ 1С, встречающийся среди заказов текущей выборки списка потребностей. */
+export interface OrderResourceDemandOnecDocumentItemDto {
+  documentId: number;
+  kind: 'purchase_receipt' | 'cash_outflow' | 'bank_outflow';
+  number: string;
+  date: DateOnlyString;
+  /** Заказов текущей выборки с активным распределением этого документа. */
+  ordersCount: number;
+}
+
+export interface OrderResourceDemandOnecDocumentsResponse {
+  data: OrderResourceDemandOnecDocumentItemDto[];
+  /** true — найдено больше лимита (200), показаны только первые. */
+  truncated: boolean;
 }
 
 export interface SetOrderResourceProcurementRequest {

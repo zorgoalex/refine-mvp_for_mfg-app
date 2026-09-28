@@ -16,6 +16,9 @@ import {
 } from '../../cut/application/cut-freecut-mapping';
 import {
   RESOURCE_BY_MATERIAL_ORDER_LIMIT,
+  RESOURCE_ONEC_DOCUMENT_OPTIONS_LIMIT,
+  type OrderResourceOnecDocumentOptionsResponseDto,
+  type OrderResourceOnecDocRefDto,
   type GetOrderResourceCardCommand,
   type ListOrderResourceDemandsCommand,
   type OrderFilmDemandDto,
@@ -276,6 +279,53 @@ export class PgOrderResourceDemandRepository implements OrderResourceDemandRepos
         ordersCount: projected.length,
         refreshedAt: new Date().toISOString(),
         capabilities: capabilities(options),
+      };
+    });
+  }
+
+  /**
+   * Варианты фильтра «Документ 1С»: документы, активно распределённые на заказы
+   * текущей выборки (все страницы, те же фильтры и scope; сам onecDocumentId игнорируется).
+   */
+  async listOnecDocumentOptions(
+    command: ListOrderResourceDemandsCommand,
+    options: OrderResourceReadOptions,
+  ): Promise<OrderResourceOnecDocumentOptionsResponseDto> {
+    if (!options.procurementEnabled) return { data: [], truncated: false };
+    return this.database.transaction(async (client) => {
+      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const { onecDocumentId: _ignored, ...query } = command.query;
+      const { whereSql, params } = buildOrderWhere({ ...command, query }, options);
+      const limitIndex = params.push(RESOURCE_ONEC_DOCUMENT_OPTIONS_LIMIT + 1);
+      const result = await client.query<{
+        onec_document_id: string; doc_kind: OrderResourceOnecDocRefDto['kind']; number: string; doc_date: string; orders_count: number;
+      }>(
+        `SELECT d.onec_document_id::text, d.doc_kind, d.number, d.doc_date::text AS doc_date,
+                count(DISTINCT o.order_id)::int AS orders_count
+           FROM orders o
+           JOIN projects p ON p.project_id = o.project_id
+           LEFT JOIN clients c ON c.client_id = o.client_id
+           JOIN order_resource_procurement orp ON orp.order_id = o.order_id
+           JOIN order_resource_onec_allocations a
+             ON a.order_resource_procurement_id = orp.order_resource_procurement_id AND a.removed_at IS NULL
+           JOIN onec_document_lines l ON l.onec_document_line_id = a.onec_document_line_id
+           JOIN onec_documents d ON d.onec_document_id = l.onec_document_id
+          WHERE ${whereSql}
+          GROUP BY d.onec_document_id, d.doc_kind, d.number, d.doc_date
+          ORDER BY d.doc_date DESC, d.onec_document_id DESC
+          LIMIT $${limitIndex}`,
+        params,
+      );
+      const rows = result.rows.slice(0, RESOURCE_ONEC_DOCUMENT_OPTIONS_LIMIT);
+      return {
+        data: rows.map((row) => ({
+          documentId: Number(row.onec_document_id),
+          kind: row.doc_kind,
+          number: row.number,
+          date: row.doc_date,
+          ordersCount: Number(row.orders_count),
+        })),
+        truncated: result.rows.length > RESOURCE_ONEC_DOCUMENT_OPTIONS_LIMIT,
       };
     });
   }
@@ -1197,6 +1247,21 @@ function buildOrderWhere(
 
   if (command.query.unpurchasedOnly) {
     clauses.push(buildUnpurchasedPredicate(options.procurementEnabled));
+  }
+  if (command.query.onecDocumentId !== undefined) {
+    // Без флага таблицы документов 1С не читаются — и распределений быть не может.
+    clauses.push(options.procurementEnabled
+      ? `EXISTS (
+          SELECT 1
+            FROM order_resource_procurement orp_d
+            JOIN order_resource_onec_allocations a_d
+              ON a_d.order_resource_procurement_id = orp_d.order_resource_procurement_id
+             AND a_d.removed_at IS NULL
+            JOIN onec_document_lines l_d ON l_d.onec_document_line_id = a_d.onec_document_line_id
+           WHERE orp_d.order_id = o.order_id
+             AND l_d.onec_document_id = $${params.push(command.query.onecDocumentId)}
+        )`
+      : 'FALSE');
   }
 
   return { whereSql: clauses.join('\n        AND '), params };

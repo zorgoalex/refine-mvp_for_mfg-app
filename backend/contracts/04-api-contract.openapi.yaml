@@ -3788,6 +3788,13 @@ paths:
           description: Только заказы, у которых есть хотя бы один материал без отметки «Закуплено».
           schema:
             type: boolean
+        - name: onecDocumentId
+          in: query
+          required: false
+          description: Только заказы, на которые распределён этот документ 1С (при выключенном флаге закупа — пусто).
+          schema:
+            type: integer
+            minimum: 1
       responses:
         '200':
           description: Live order resource demand projection
@@ -3831,9 +3838,43 @@ paths:
           in: query
           required: false
           schema: { type: boolean }
+        - name: onecDocumentId
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1 }
       responses:
         '200':
           description: Aggregated demand by material with participants
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/orders/resource-demands/onec-documents:
+    get:
+      tags:
+        - Orders
+      operationId: listOrderResourceOnecDocumentOptions
+      summary: Варианты фильтра «Документ 1С» — документы, распределённые на заказы текущей выборки
+      description: Те же фильтры и scope, что у списка потребностей (onecDocumentId и страницы игнорируются); до 200 самых свежих документов, truncated — если есть ещё. При выключенном флаге закупа — пусто.
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      parameters:
+        - { name: search, in: query, required: false, schema: { type: string, maxLength: 200 } }
+        - { name: dateFrom, in: query, required: false, schema: { type: string, format: date } }
+        - { name: dateTo, in: query, required: false, schema: { type: string, format: date } }
+        - { name: unpurchasedOnly, in: query, required: false, schema: { type: boolean } }
+      responses:
+        '200':
+          description: Document options
           content:
             application/json:
               schema:

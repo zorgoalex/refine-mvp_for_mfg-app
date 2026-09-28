@@ -60,6 +60,25 @@ describe('onec purchase documents screen — empty state and gating', () => {
   });
 });
 
+describe('onec purchase documents — deep link back to the resource requirements filter', () => {
+  it('show.tsx links to the resource requirements list filtered by this document, only when it has visible orders', () => {
+    expect(showSource).toContain('orderResourceRequirementsOnecFilterPath');
+    expect(showSource).toContain('Показать заказы в потребностях');
+    expect(showSource).toContain('if (byOrder.size === 0) {');
+  });
+
+  it('list.tsx adds a small "в потребностях" link in the orders cell when the row has orders', () => {
+    expect(listSource).toContain('orderResourceRequirementsOnecFilterPath(row.documentId)');
+    expect(listSource).toContain('в потребностях');
+    expect(listSource).toContain('row.orders.length > 0 && (');
+  });
+
+  it('both share the single-source-of-truth path builder from onecDocKind.ts', () => {
+    expect(listSource).toContain("from '../order_resource_requirements/onecDocKind'");
+    expect(showSource).toContain("from '../order_resource_requirements/onecDocKind'");
+  });
+});
+
 describe('onec purchase documents navigation wiring', () => {
   it('registers the resource and both routes in App.tsx', () => {
     expect(appSource).toContain('name: "onec_purchase_documents"');

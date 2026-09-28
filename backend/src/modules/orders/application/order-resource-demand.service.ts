@@ -14,6 +14,7 @@ import {
   type OrderResourceCardResponseDto,
   type OrderResourceDemandRepositoryPort,
   type OrderResourceDemandResponseDto,
+  type OrderResourceOnecDocumentOptionsResponseDto,
   type OrderResourceProcurementResultDto,
   type OrderResourceReadOptions,
   type SetOrderResourceProcurementCommand,
@@ -64,6 +65,14 @@ export class OrderResourceDemandService {
   ): Promise<OrderResourceByMaterialResponseDto> {
     this.requireView(command.currentUser);
     return this.ports.demands.listByMaterial(command, options);
+  }
+
+  async listOnecDocumentOptions(
+    command: ListOrderResourceDemandsCommand,
+    options: OrderResourceReadOptions,
+  ): Promise<OrderResourceOnecDocumentOptionsResponseDto> {
+    this.requireView(command.currentUser);
+    return this.ports.demands.listOnecDocumentOptions(command, options);
   }
 
   async setProcurement(command: SetOrderResourceProcurementCommand): Promise<OrderResourceProcurementResultDto> {

@@ -350,16 +350,20 @@ export interface ByMaterialPeriod {
 /**
  * Период сводки «По материалам»: выбранный в фильтре важнее; если не выбран
  * ни один край — последний месяц, иначе сводка по всем заказам почти всегда
- * упирается в лимит 500 заказов.
+ * упирается в лимит 500 заказов. Исключение — активен фильтр «Документ 1С»
+ * (`skipDefaultPeriod`): заказы документа могут быть старше месяца, поэтому
+ * без явно выбранного периода период не подставляется вовсе.
  */
 export function resolveByMaterialPeriod(
   userFrom: string | undefined,
   userTo: string | undefined,
   defaultFrom: string,
   defaultTo: string,
+  skipDefaultPeriod: boolean = false,
 ): ByMaterialPeriod {
   if (userFrom || userTo) {
     return { ...(userFrom ? { dateFrom: userFrom } : {}), ...(userTo ? { dateTo: userTo } : {}), isDefault: false };
   }
+  if (skipDefaultPeriod) return { isDefault: false };
   return { dateFrom: defaultFrom, dateTo: defaultTo, isDefault: true };
 }

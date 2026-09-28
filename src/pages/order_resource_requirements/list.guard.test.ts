@@ -94,4 +94,44 @@ describe('order resource requirements list guards', () => {
     expect(source).toContain('PAGE_SIZE_OPTIONS');
     expect(source).toContain('rememberPageSize(nextPageSize)');
   });
+
+  it('фильтр «Документ 1С» гейтится по capabilities.onecDocuments', () => {
+    expect(source).toContain('capabilities.onecDocuments && (');
+    expect(source).toContain('capabilities.onecDocuments && onecDocumentFilter && (');
+    expect(source).toContain('capabilities.onecDocuments && onecDocumentTruncatedHint && (');
+    expect(source).toContain('aria-label="Документ 1С"');
+  });
+
+  it('фильтр «Документ 1С» участвует в query/byMaterialQuery, сбросе и «Сбросить фильтры»', () => {
+    expect(source).toContain('onecDocumentFilter ? { onecDocumentId: onecDocumentFilter.documentId } : {}');
+    expect(source).toContain('setOnecDocumentFilter(null)');
+    expect(source).toContain('onecDocumentFilter != null ||');
+  });
+
+  it('опции Select строятся из onec-documents endpoint текущей выборки, не из глобального поиска по 1С', () => {
+    expect(source).toContain('useOnecDocumentFilterOptions');
+    expect(source).toContain('ordersApi.listResourceDemandOnecDocuments(query)');
+    expect(source).toContain('buildOnecDocumentFilterOptionGroups(onecDocumentOptionsState.documents)');
+    expect(source).toContain('ONEC_DOCUMENT_FILTER_DEBOUNCE_MS');
+    expect(source).not.toContain('onecDocumentsApi.list({');
+  });
+
+  it('«По материалам» пропускает период по умолчанию, пока активен фильтр «Документ 1С»', () => {
+    expect(source).toContain('resolveByMaterialPeriod(');
+    expect(source).toContain('onecDocumentFilter != null,');
+    expect(source).toContain('[dateRange, onecDocumentFilter, todayKey]');
+  });
+
+  it('тег активного фильтра «Документ 1С» закрывается сбросом фильтра', () => {
+    expect(source).toContain('onecDocumentFilterTagText(onecDocumentFilter.label)');
+    expect(source).toContain('onClose={() => handleOnecDocumentFilterChange(null)}');
+  });
+
+  it('deep link ?onecDocumentId= читается из URL один раз при монтировании и держится в синхронизации через replace', () => {
+    expect(source).toContain("import { useSearchParams } from 'react-router-dom'");
+    expect(source).toContain("parseOnecDocumentIdParam(searchParams.get('onecDocumentId'))");
+    expect(source).toContain('onecDocumentsApi.getCard(initialDocumentId)');
+    expect(source).toContain('onecDocumentFilterFallbackLabel(initialDocumentId)');
+    expect(source).toContain('{ replace: true }');
+  });
 });

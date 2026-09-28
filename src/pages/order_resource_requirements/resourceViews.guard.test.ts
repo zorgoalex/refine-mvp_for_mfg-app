@@ -14,6 +14,7 @@ const procurementPartsSource = readFileSync(new URL('./ProcurementParts.tsx', di
 const materialAggregateViewSource = readFileSync(new URL('./MaterialAggregateView.tsx', dir), 'utf8');
 const useResourceDemandCardSource = readFileSync(new URL('./useResourceDemandCard.ts', dir), 'utf8');
 const showSourceForBoundaryGuard = readFileSync(new URL('./show.tsx', dir), 'utf8');
+const onecDocumentFilterSource = readFileSync(new URL('./onecDocumentFilter.ts', dir), 'utf8');
 
 describe('order resource requirements — переключатель видов списка (Сводка/Материалы/Панель)', () => {
   it('содержит Segmented с тремя видами и ключом хранения', () => {
@@ -57,6 +58,7 @@ describe('order resource requirements — границы владения дан
     ['MaterialAggregateView.tsx', materialAggregateViewSource],
     ['useResourceDemandCard.ts', useResourceDemandCardSource],
     ['show.tsx', showSourceForBoundaryGuard],
+    ['onecDocumentFilter.ts', onecDocumentFilterSource],
   ];
 
   it.each(sourcesByFile)('%s не содержит graphql/hasura/dataProvider', (_name, source) => {

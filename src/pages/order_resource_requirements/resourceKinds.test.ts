@@ -7,6 +7,7 @@ import {
   mapBackendResourceLine,
   orderDisplayName,
   positionsLabel,
+  resolveByMaterialPeriod,
   resourceDemandLines,
   resourceKindTotal,
   resourceLineHasOnecDocs,
@@ -309,5 +310,44 @@ describe('реестр RESOURCE_KINDS', () => {
   it('буквы типов уникальны', () => {
     const letters = RESOURCE_KINDS.map((meta) => meta.letter);
     expect(new Set(letters).size).toBe(letters.length);
+  });
+});
+
+describe('resolveByMaterialPeriod', () => {
+  it('выбранный пользователем период важнее периода по умолчанию', () => {
+    expect(resolveByMaterialPeriod('2026-01-01', '2026-01-31', '2026-08-28', '2026-09-28')).toEqual({
+      dateFrom: '2026-01-01',
+      dateTo: '2026-01-31',
+      isDefault: false,
+    });
+  });
+
+  it('без выбранного периода подставляет период по умолчанию (последний месяц)', () => {
+    expect(resolveByMaterialPeriod(undefined, undefined, '2026-08-28', '2026-09-28')).toEqual({
+      dateFrom: '2026-08-28',
+      dateTo: '2026-09-28',
+      isDefault: true,
+    });
+  });
+
+  it('частично выбранный период (только «с даты») не считается умолчанием', () => {
+    expect(resolveByMaterialPeriod('2026-01-01', undefined, '2026-08-28', '2026-09-28')).toEqual({
+      dateFrom: '2026-01-01',
+      isDefault: false,
+    });
+  });
+
+  it('активный фильтр «Документ 1С» без выбранного периода: период не подставляется вовсе', () => {
+    expect(resolveByMaterialPeriod(undefined, undefined, '2026-08-28', '2026-09-28', true)).toEqual({
+      isDefault: false,
+    });
+  });
+
+  it('фильтр «Документ 1С» не переопределяет явно выбранный пользователем период', () => {
+    expect(resolveByMaterialPeriod('2026-01-01', '2026-01-31', '2026-08-28', '2026-09-28', true)).toEqual({
+      dateFrom: '2026-01-01',
+      dateTo: '2026-01-31',
+      isDefault: false,
+    });
   });
 });
