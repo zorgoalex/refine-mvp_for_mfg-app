@@ -2493,6 +2493,13 @@ probe_file() {
       "$(q_trg trg_orders_rework_status_guard)" \
       "$(q_trg ctrg_orders_rework_round_consistency)" \
       "$(q_trg ctrg_order_production_rounds_consistency)" ;;
+    # «Переделка», миграция B: старые индексы «этап один раз» удалены, DB command boundary событий этапов.
+    211_order_rework_rounds_stage_boundary*) probe_all \
+      "SELECT to_regclass('public.uq_pse_detail_status_once') IS NULL AND to_regclass('public.uq_pse_order_status_once') IS NULL" \
+      "$(q_idx uq_pse_detail_status_round)" \
+      "$(q_idx uq_pse_order_status_round)" \
+      "$(q_trg trg_production_status_events_command_boundary)" \
+      "$(q_fun_hash 'public.trg_production_status_events_command_boundary()' 3e164baf56866d058a62346908295f10)" ;;
     # Сид 203 — хотя бы один склад (склад можно переименовать; после 205 повторный сид без ключа 1С невозможен).
     203_film_stock*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM public.warehouses)" \
@@ -2846,6 +2853,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|210_order_rework_rounds*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    211_order_rework_rounds_stage_boundary*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)

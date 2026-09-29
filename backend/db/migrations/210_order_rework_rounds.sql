@@ -17,6 +17,9 @@
 --    очередь отложенной эмиссии, ветка erp.realtime_defer в emit_one.
 -- 7. Guard входа в «Переделку» и deferred-согласованность статус ↔ открытый круг.
 
+-- Вся миграция — одна транзакция (нет окна без guard-триггеров при повторе).
+BEGIN;
+
 -- 1. Статус «Переделка» -------------------------------------------------------
 
 DO $$
@@ -470,3 +473,5 @@ CREATE CONSTRAINT TRIGGER ctrg_order_production_rounds_consistency
 AFTER INSERT OR UPDATE OR DELETE ON public.order_production_rounds
 DEFERRABLE INITIALLY DEFERRED
 FOR EACH ROW EXECUTE FUNCTION public.ctrg_order_production_rounds_consistency();
+
+COMMIT;

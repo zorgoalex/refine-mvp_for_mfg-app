@@ -37,3 +37,25 @@ describe('useProductionStatusEvent backend stage overrides', () => {
     });
   });
 });
+
+describe('legacy Hasura stage-event writes after production rounds', () => {
+  it('never treats a revoked Hasura mutation as success', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('./useProductionStatusEvent.ts', import.meta.url), 'utf8');
+    const branches = source.split("errorMsg.includes('not found in type')").slice(1);
+    expect(branches).toHaveLength(3);
+    for (const branch of branches) {
+      const body = branch.slice(0, branch.indexOf('}'));
+      expect(body).toContain('throw legacyStageWriteUnsupportedError(error)');
+      expect(body).not.toMatch(/return( true)?;/);
+    }
+  });
+
+  it('explains that stage marks go through the backend', async () => {
+    const { legacyStageWriteUnsupportedError, LEGACY_STAGE_WRITE_UNSUPPORTED_MESSAGE } = await import('./useProductionStatusEvent');
+    const cause = new Error('field "insert_production_status_events_one" not found in type: mutation_root');
+    const error = legacyStageWriteUnsupportedError(cause);
+    expect(error.message).toBe(LEGACY_STAGE_WRITE_UNSUPPORTED_MESSAGE);
+    expect((error as Error & { cause?: unknown }).cause).toBe(cause);
+  });
+});

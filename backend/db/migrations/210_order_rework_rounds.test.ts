@@ -14,6 +14,11 @@ function emitOneBody(source: string): string {
 }
 
 describe('210 order rework rounds migration (A)', () => {
+  it('runs as one transaction', () => {
+    expect(sql).toMatch(/^BEGIN;$/m);
+    expect(sql.trimEnd().endsWith('COMMIT;')).toBe(true);
+  });
+
   it('adds the rework status only by code, bumping a drifted identity first', () => {
     expect(sql).toMatch(/IF NOT EXISTS \(SELECT 1 FROM public\.order_statuses WHERE order_status_code = 'rework'\)/);
     expect(sql).toContain("pg_get_serial_sequence('public.order_statuses', 'order_status_id')");
