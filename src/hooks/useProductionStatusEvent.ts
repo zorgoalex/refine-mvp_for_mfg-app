@@ -18,7 +18,7 @@ import { runPageOwnedWorkspaceOperation } from '../workspace/workspaceOperationP
 
 /**
  * Direct Hasura writes to production_status_events are revoked (production
- * rounds, migration 211): stage marks go through the backend only. A client
+ * rounds, migration 221): stage marks go through the backend only. A client
  * still running the legacy path must see a failure, not a false success.
  */
 export const LEGACY_STAGE_WRITE_UNSUPPORTED_MESSAGE =

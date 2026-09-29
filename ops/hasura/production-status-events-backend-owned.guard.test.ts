@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 const metadata = JSON.parse(readFileSync(new URL('./metadata.json', import.meta.url), 'utf8'));
 const tables = metadata.sources[0].tables as Array<Record<string, any>>;
 
-// «Переделка» (migration 211): stage events are written only by the backend
+// «Переделка» (migration 221): stage events are written only by the backend
 // (production rounds, DB command boundary). Hasura keeps read access only.
 describe('production_status_events is backend-owned in Hasura', () => {
   const table = tables.find((entry) => entry.table?.name === 'production_status_events');

@@ -307,7 +307,7 @@ export const envSchema = z
     BACKEND_PROCUREMENT_NOTIFICATIONS_ENABLED: booleanFromEnv.default(false),
     // Шаблоны текста заявки поставщику (миграция 229); выключение — откат функции без заявок.
     BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED: booleanFromEnv.default(false),
-    // «Переделка»: команды кругов производства (миграции 210/211). Default off.
+    // «Переделка»: команды кругов производства (миграции 220–222). Default off.
     BACKEND_ORDER_REWORK_ENABLED: booleanFromEnv.default(false),
     BACKEND_FILM_CATALOG_IMPORT_ENABLED: booleanFromEnv.default(false),
     BACKEND_INVENTORY_ENABLED: booleanFromEnv.default(false),
