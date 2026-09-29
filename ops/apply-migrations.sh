@@ -924,7 +924,7 @@ probe_file() {
                      "$(q_fun_hash 'order_realtime_bridge_enabled_for_fanout(integer)' 31c9de672533a32b0493235924ea8261)" \
                      "$(q_fun_hash 'order_realtime_bridge_max_detail_ids()' d0485616d61b3904e36418387a09f506)" \
                      "$(q_fun_hash 'order_realtime_cut_job_snapshot_visible(bigint,text,text,bigint)' d0bb80f56f3010c62312a66b6a3575d2)" \
-                     "$(q_fun_hash 'order_realtime_emit_one(bigint,text[],bigint[],text)' bbf8a2f2fad9cd1483a144244fe9d522)" \
+                     "$(q_fun_hash_either 'order_realtime_emit_one(bigint,text[],bigint[],text)' bbf8a2f2fad9cd1483a144244fe9d522 04eabdca6d8369194f6937ca6d1b1fc6)" \
                      "$(q_fun_hash 'order_realtime_lock_cut_roots(bigint[])' 496b5bf6aebf43754456e0ec0dbb47d2)" \
                      "$(q_fun_hash 'order_realtime_order_snapshot_visible(bigint)' a8e335d989b19d0246523aa34fbfc324)" \
                      "$(q_fun_hash 'trg_order_realtime_detail_status_insert()' d3a33ea887a1ef1110ff46eb164773ea)" \
@@ -2907,6 +2907,29 @@ probe_file() {
                            AND pg_get_constraintdef(oid) LIKE '%neutral%'
                            AND pg_get_constraintdef(oid) LIKE '%workbench%'
                       );" ;;
+    # «Переделка», миграция A: статус, причины, круги, round_no, очередь realtime, guard'ы.
+    210_order_rework_rounds*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM public.order_statuses WHERE order_status_code='rework' AND sort_order=45)" \
+      "SELECT EXISTS (SELECT 1 FROM public.order_rework_reasons WHERE code='unclarified' AND is_system)" \
+      "$(q_tbl order_production_rounds)" \
+      "$(q_idx uq_order_production_rounds_open)" \
+      "$(q_tbl order_production_round_details)" \
+      "$(q_tbl order_production_round_sources)" \
+      "$(q_col orders production_round)" \
+      "$(q_col orders last_round_no)" \
+      "$(q_con_on orders chk_orders_production_round)" \
+      "$(q_col order_details production_round)" \
+      "$(q_col production_status_events round_no)" \
+      "$(q_idx uq_pse_detail_status_round)" \
+      "$(q_idx uq_pse_order_status_round)" \
+      "$(q_col cut_job_item production_round)" \
+      "$(q_con_on cut_job_item chk_cut_job_item_repeat_kind)" \
+      "$(q_tbl order_realtime_deferred)" \
+      "$(q_trg trg_order_realtime_stream_on_order_insert)" \
+      "$(q_fun_hash 'order_realtime_emit_one(bigint,text[],bigint[],text)' 04eabdca6d8369194f6937ca6d1b1fc6)" \
+      "$(q_trg trg_orders_rework_status_guard)" \
+      "$(q_trg ctrg_orders_rework_round_consistency)" \
+      "$(q_trg ctrg_order_production_rounds_consistency)" ;;
     # Сид 203 — хотя бы один склад (склад можно переименовать; после 205 повторный сид без ключа 1С невозможен).
     203_film_stock*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM public.warehouses)" \
@@ -3303,7 +3326,7 @@ verify_applied_effect() {
     205_warehouses_onec_key_required*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    231_cut_result_render_v2*|209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|234_reference_nomenclature_note*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|244_client_onec_permissions*|251_whatsapp_calendar_send_permission*|240_payment_onec_matches*|241_client_screen_settings*|245_onec_operator_role*|246_clients_analytics_view_real_orders*|247_onec_agent_expected_silence*|248_authorization_snapshot*|249_role_checks_to_permissions*|250_onec_stock_snapshots*|252_superadmin_group_batch_link*|254_trim_text_fields_json_escape*|253_references_quick_create_permission*|255_crm_sync_paid_payment_operations*|256_doweling_order_version_triggers*|257_status_automation_clear_details_action*|258_financial_projections*|259_payment_audit_capture*|260_crm_sync_payment_notifications*|261_whatsapp_notification_deliveries*|262_onec_alert_episodes*|263_mandatory_balloons_delivery_checks*|264_onec_alert_notifications*|265_onec_alert_whatsapp*|266_order_stage_marks_from_details*|267_integration_duplicates*|268_client_merges*|269_client_contacts_screen*|270_bitrix24_assignment_channel*|271_client_contacts_onec*|272_whatsapp_order_send_client_onec_phone*)
+    231_cut_result_render_v2*|209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|234_reference_nomenclature_note*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|244_client_onec_permissions*|251_whatsapp_calendar_send_permission*|240_payment_onec_matches*|241_client_screen_settings*|245_onec_operator_role*|246_clients_analytics_view_real_orders*|247_onec_agent_expected_silence*|248_authorization_snapshot*|249_role_checks_to_permissions*|250_onec_stock_snapshots*|252_superadmin_group_batch_link*|254_trim_text_fields_json_escape*|253_references_quick_create_permission*|255_crm_sync_paid_payment_operations*|256_doweling_order_version_triggers*|257_status_automation_clear_details_action*|258_financial_projections*|259_payment_audit_capture*|260_crm_sync_payment_notifications*|261_whatsapp_notification_deliveries*|262_onec_alert_episodes*|263_mandatory_balloons_delivery_checks*|264_onec_alert_notifications*|265_onec_alert_whatsapp*|266_order_stage_marks_from_details*|267_integration_duplicates*|268_client_merges*|269_client_contacts_screen*|270_bitrix24_assignment_channel*|271_client_contacts_onec*|272_whatsapp_order_send_client_onec_phone*|210_order_rework_rounds*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)
