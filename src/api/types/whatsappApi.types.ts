@@ -127,3 +127,19 @@ export interface WhatsAppReplyPreview {
   counterIsExample: boolean;
   timeZone: string;
 }
+
+export interface WhatsAppGroupDto {
+  id: string;
+  name: string;
+  participantCount: number | null;
+  announceOnly: boolean;
+  communityParent: boolean;
+  suspended: boolean;
+}
+
+export interface WhatsAppGroupsResponse {
+  groups: WhatsAppGroupDto[];
+  truncated: boolean;
+  fetchedAt: string;
+  cached: boolean;
+}

@@ -43,6 +43,7 @@ import type {
 } from "../../../api/types/whatsappApi.types";
 import { can } from "../../../utils/permissions";
 import "./WhatsAppConfigTabs.css";
+import { WhatsAppGroupsCard } from "./WhatsAppGroupsCard";
 import { WhatsAppReplyPreview, splitWhatsAppKeywords } from './WhatsAppReplyPreview';
 
 const { Paragraph, Text, Title } = Typography;
@@ -249,6 +250,7 @@ export const WhatsAppConnectionConfig: React.FC = () => {
           </Text>
         </Card>
       ) : null}
+      {canManage ? <WhatsAppGroupsCard /> : null}
     </div>
   );
 };

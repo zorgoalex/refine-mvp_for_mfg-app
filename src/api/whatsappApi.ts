@@ -4,6 +4,7 @@ import type {
   WhatsAppAuditDto,
   WhatsAppReplyPreview,
   WhatsAppDeliveryJobDto,
+  WhatsAppGroupsResponse,
   WhatsAppRuleDto,
   WhatsAppRuleInput,
   WhatsAppStatusDto,
@@ -17,6 +18,10 @@ export const whatsappApi = {
   preview: (body: { matchMode: WhatsAppRuleInput['matchMode']; keywords: string[]; body: string; bodyMode: 'text' | 'template'; text: string }) =>
     httpClient.post<WhatsAppReplyPreview>(apiRoutes.whatsapp.preview, body),
   status: () => httpClient.get<WhatsAppStatusDto>(apiRoutes.whatsapp.status),
+  groups: (options: { refresh?: boolean } = {}) =>
+    httpClient.get<WhatsAppGroupsResponse>(
+      options.refresh ? `${apiRoutes.whatsapp.groups}?refresh=true` : apiRoutes.whatsapp.groups,
+    ),
   qr: async () => (await httpClient.download(apiRoutes.whatsapp.qr)).blob,
   restart: (restrictionConfirmed: boolean) =>
     httpClient.post<unknown>(apiRoutes.whatsapp.restart, {

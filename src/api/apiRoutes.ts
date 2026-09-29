@@ -355,6 +355,7 @@ export const apiRoutes = {
   whatsapp: {
     preview: backendApiPath('/whatsapp/rules/preview'),
     status: backendApiPath('/whatsapp/status'),
+    groups: backendApiPath('/whatsapp/groups'),
     qr: backendApiPath('/whatsapp/qr'),
     restart: backendApiPath('/whatsapp/restart'),
     templates: backendApiPath('/whatsapp/templates'),
@@ -377,6 +378,23 @@ export const apiRoutes = {
         backendApiPath(`/whatsapp/daily-digest/runs/${encodeURIComponent(runId)}/pages/${pageIndex}/image`),
       retry: (runId: string) =>
         backendApiPath(`/whatsapp/daily-digest/runs/${encodeURIComponent(runId)}/retry`),
+    },
+    broadcasts: {
+      list: backendApiPath('/whatsapp/broadcasts'),
+      control: backendApiPath('/whatsapp/broadcasts/control'),
+      catalog: backendApiPath('/whatsapp/broadcasts/catalog'),
+      legacyDigestRuns: backendApiPath('/whatsapp/broadcasts/legacy-digest-runs'),
+      byId: (id: number) => backendApiPath(`/whatsapp/broadcasts/${id}`),
+      archive: (id: number) => backendApiPath(`/whatsapp/broadcasts/${id}/archive`),
+      preview: (id: number) => backendApiPath(`/whatsapp/broadcasts/${id}/preview`),
+      runs: (id: number) => backendApiPath(`/whatsapp/broadcasts/${id}/runs`),
+      replanToday: (id: number) => backendApiPath(`/whatsapp/broadcasts/${id}/schedule/today/replan`),
+      runById: (runId: string) =>
+        backendApiPath(`/whatsapp/broadcast-runs/${encodeURIComponent(runId)}`),
+      messageImage: (runId: string, seq: number) =>
+        backendApiPath(`/whatsapp/broadcast-runs/${encodeURIComponent(runId)}/messages/${seq}/image`),
+      retry: (runId: string) =>
+        backendApiPath(`/whatsapp/broadcast-runs/${encodeURIComponent(runId)}/retry`),
     },
   },
   groups: groupsRoutes,

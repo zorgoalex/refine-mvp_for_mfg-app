@@ -1,5 +1,10 @@
 # WhatsApp daily order digest
 
+> **Superseded by WhatsApp broadcasts** (migration 209, `whatsapp-broadcasts.md`): the
+> single digest became broadcast #1; the `/api/v1/whatsapp/daily-digest/*` routes were
+> removed. This page describes the previous behaviour and the legacy tables that the
+> backend still cleans up and shows read-only.
+
 The daily digest prepares a WhatsApp group message from production orders whose
 planned completion date is today in `Asia/Almaty`. It includes all matching
 orders regardless of production status, including issued orders. Each image
@@ -34,7 +39,9 @@ digest API operation requires all of these permissions:
 - `orders.view_financials`
 
 Configure one WhatsApp group JID ending in `@g.us`; direct/private chats are
-not accepted. The stored defaults are:
+not accepted. The group field offers the groups of the linked account by name
+(`GET /api/v1/whatsapp/groups`, see below); a JID can still be typed manually.
+The stored defaults are:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -57,6 +64,20 @@ a later send will contain. Before a manual send, review the destination, date,
 order count, and preview; the send action confirms those details may have
 changed and then captures the current order state. Manual sends are available
 with automation off, but not when the WhatsApp runtime/relay is unavailable.
+
+## Groups of the linked account
+
+`GET /api/v1/whatsapp/groups` (permission `whatsapp.manage`) lists the groups
+the linked account belongs to, for the group pickers and the
+«Конфигурация → WhatsApp → Подключение → Группы аккаунта» card. The backend
+reads WAHA `GET /api/{session}/groups?exclude=participants` only while the
+session is `WORKING` (otherwise `409 WHATSAPP_SESSION_NOT_READY`) and returns an
+allowlist per group: `id`, `name`, `participantCount`, `announceOnly`,
+`communityParent`, `suspended`. Member lists, owner/creator phone numbers and
+the group description never leave the backend. Results are cached in the
+backend process for 60 seconds; `refresh=true` bypasses the cache at most once
+per 10 seconds. The list is loaded only on an explicit user action. At most
+1000 groups are returned (`truncated=true` beyond that).
 
 ## Missed sends, partial runs, and uncertainty
 

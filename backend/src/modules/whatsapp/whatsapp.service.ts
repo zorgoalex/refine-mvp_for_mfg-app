@@ -12,6 +12,12 @@ import type {
   TemplateUpdate,
 } from "./whatsapp.dto";
 import { WahaClient } from "./waha.client";
+import {
+  normalizeWahaGroups,
+  WHATSAPP_GROUPS_MAX,
+  type WhatsAppGroupList,
+  type WhatsAppGroupsResponse,
+} from "./whatsapp-groups";
 import { WhatsAppRepository } from "./whatsapp.repository";
 import { WhatsAppRuntimeConfigService } from "./whatsapp-runtime-config.service";
 import type { WhatsAppTechnicalLogQuery } from "./whatsapp-technical-log.dto";
@@ -19,8 +25,19 @@ import { WhatsAppTechnicalLogService } from "./whatsapp-technical-log.service";
 import { parseReplyPreview } from './whatsapp.dto';
 import { matchReply, renderReply, validateReply } from './whatsapp-template';
 
+/** Listing groups queries WhatsApp servers; keep repeated clicks and tab switches local. */
+const GROUPS_CACHE_TTL_MS = 60_000;
+const GROUPS_MIN_REFRESH_MS = 10_000;
+
+type GroupsSnapshot = { value: WhatsAppGroupList; fetchedAt: Date };
+
 @Injectable()
 export class WhatsAppService {
+  private groupsCache?: GroupsSnapshot;
+  private groupsInFlight?: Promise<GroupsSnapshot>;
+  private groupsLastAttemptAt?: number;
+  private groupsLastFailure?: unknown;
+
   constructor(
     @Inject(WhatsAppRuntimeConfigService)
     private readonly runtime: WhatsAppRuntimeConfigService,
@@ -102,6 +119,50 @@ export class WhatsAppService {
   qr() {
     this.requireEnabled();
     return this.client.qr();
+  }
+  async listGroups(refresh = false, now = Date.now()): Promise<WhatsAppGroupsResponse> {
+    this.requireEnabled();
+    const cached = this.groupsCache;
+    if (cached && now - cached.fetchedAt.getTime() < (refresh ? GROUPS_MIN_REFRESH_MS : GROUPS_CACHE_TTL_MS))
+      return groupsResponse(cached, true);
+    if (this.groupsInFlight) return groupsResponse(await this.groupsInFlight, false);
+    // The cooldown also covers failed attempts, so repeated clicks during an outage
+    // are answered locally instead of reaching WAHA and WhatsApp servers again.
+    if (this.groupsLastAttemptAt !== undefined && now - this.groupsLastAttemptAt < GROUPS_MIN_REFRESH_MS) {
+      if (cached) return groupsResponse(cached, true);
+      if (this.groupsLastFailure) throw this.groupsLastFailure;
+    }
+    this.groupsLastAttemptAt = now;
+    const inFlight = (this.groupsInFlight = this.fetchGroups(now).finally(() => {
+      this.groupsInFlight = undefined;
+    }));
+    return groupsResponse(await inFlight, false);
+  }
+  private async fetchGroups(now: number): Promise<GroupsSnapshot> {
+    try {
+      const sessionStatus = safeStatus(await this.client.session());
+      if (sessionStatus !== "WORKING")
+        throw new ApiError(409, "WHATSAPP_SESSION_NOT_READY", "WhatsApp session is not connected");
+      const response = await this.client.groups(WHATSAPP_GROUPS_MAX + 1);
+      let value: WhatsAppGroupList;
+      try {
+        value = normalizeWahaGroups(response);
+      } catch (error) {
+        await this.technicalLog.record({
+          component: "waha", level: "error", eventCode: "waha.groups.response", outcome: "failed",
+          operation: "GET /api/{session}/groups", errorCode: "WAHA_GROUPS_RESPONSE_INVALID",
+          details: { container: Array.isArray(response) ? "array" : response === null ? "null" : typeof response },
+        });
+        throw error;
+      }
+      const snapshot = { value, fetchedAt: new Date(now) };
+      this.groupsCache = snapshot;
+      this.groupsLastFailure = undefined;
+      return snapshot;
+    } catch (error) {
+      this.groupsLastFailure = error;
+      throw error;
+    }
   }
   previewReply(body: unknown) {
     this.requireEnabled();
@@ -421,6 +482,10 @@ export class WhatsAppService {
       metadata: { ...metadata, correlationId: requestId },
     });
   }
+}
+
+function groupsResponse(snapshot: GroupsSnapshot, cached: boolean): WhatsAppGroupsResponse {
+  return { ...snapshot.value, fetchedAt: snapshot.fetchedAt.toISOString(), cached };
 }
 
 function safeStatus(value: unknown): string {
