@@ -127,3 +127,5 @@ export const PROCUREMENT_WORKLIST_ORDER_LIMIT = 500;
 export const PROCUREMENT_WORKLIST_LINE_LIMIT = 3000;
 /** Окно заказов сверху: плановая дата не дальше чем через N дней (без даты — всегда). */
 export const PROCUREMENT_WORKLIST_PLANNED_AHEAD_DAYS = 60;
+/** Статусы заказа, для которых материал уже не закупают: «Готов к выдаче», «Выдан», «Завершен» (order_statuses). */
+export const PROCUREMENT_WORKLIST_DONE_STATUS_CODES: readonly string[] = ['legacy_6', 'legacy_7', 'legacy_8'];

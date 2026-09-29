@@ -1,5 +1,5 @@
 import { DeleteOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
-import { Alert, Badge, Button, Card, Col, DatePicker, Empty, Input, Modal, Row, Select, Space, Statistic, Tag, Typography, message } from 'antd';
+import { Alert, Badge, Button, Card, Col, DatePicker, Empty, Input, Modal, Row, Select, Space, Statistic, Tag, Typography, message, theme } from 'antd';
 import dayjs from 'dayjs';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -48,6 +48,7 @@ export interface WorklistSectionProps {
 }
 
 export function WorklistSection({ active, onUrgentCount }: WorklistSectionProps) {
+  const { token } = theme.useToken();
   const [searchParams, setSearchParams] = useSearchParams();
   const state = useMemo(() => parseWorklistSearch(searchParams), [searchParams]);
   const setState = useCallback((patch: Partial<WorklistState>) => {
@@ -308,18 +309,19 @@ export function WorklistSection({ active, onUrgentCount }: WorklistSectionProps)
       {error && <Alert type="error" showIcon message={error} />}
 
       <Row gutter={[12, 12]}>
-        <Col xs={12} md={6}><Card size="small"><Statistic title="Не покрыто позиций" value={response?.totals.uncovered ?? 0} /></Card></Col>
+        <Col xs={12} md={6}><Card size="small"><Statistic title="Не покрыто позиций" value={response?.totals.uncovered ?? 0} groupSeparator=" " /></Card></Col>
         <Col xs={12} md={6}>
           <Card size="small">
             <Statistic
               title={`Срочно (≤ ${response?.settings.soonDays ?? 7} дн.)`}
               value={response?.totals.urgent ?? 0}
               valueStyle={{ color: (response?.totals.urgent ?? 0) > 0 ? '#cf1322' : undefined }}
+              groupSeparator=" "
             />
           </Card>
         </Col>
-        <Col xs={12} md={6}><Card size="small"><Statistic title="Дефицит листовых, м²" value={response?.totals.deficitM2 ?? 0} precision={2} /></Card></Col>
-        <Col xs={12} md={6}><Card size="small"><Statistic title="Дефицит плёнки, пог. м" value={response?.totals.deficitLm ?? 0} precision={1} /></Card></Col>
+        <Col xs={12} md={6}><Card size="small"><Statistic title="Дефицит листовых, м²" value={response?.totals.deficitM2 ?? 0} precision={2} groupSeparator=" " decimalSeparator="," /></Card></Col>
+        <Col xs={12} md={6}><Card size="small"><Statistic title="Дефицит плёнки, пог. м" value={response?.totals.deficitLm ?? 0} precision={1} groupSeparator=" " decimalSeparator="," /></Card></Col>
       </Row>
       {response && (
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -361,8 +363,9 @@ export function WorklistSection({ active, onUrgentCount }: WorklistSectionProps)
           aria-label="Действия с выбранным"
           style={{
             position: 'fixed', left: '50%', bottom: 16, transform: 'translateX(-50%)', zIndex: 20,
-            background: 'var(--ant-color-bg-elevated, #1f1f1f)', color: 'inherit', borderRadius: 12, padding: '10px 14px',
-            boxShadow: '0 8px 30px rgba(0,0,0,.25)', maxWidth: 'calc(100% - 32px)',
+            // Цвета темы: читаемо и в светлой, и в тёмной (CR8-1).
+            background: token.colorBgElevated, border: `1px solid ${token.colorBorder}`, borderRadius: 12, padding: '10px 14px',
+            boxShadow: '0 8px 30px rgba(0,0,0,.18)', maxWidth: 'calc(100% - 32px)',
           }}
         >
           <Space wrap>

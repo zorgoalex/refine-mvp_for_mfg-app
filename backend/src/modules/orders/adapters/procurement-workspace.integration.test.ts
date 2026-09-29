@@ -353,7 +353,22 @@ describe.skipIf(!url)('procurement workspace — real PostgreSQL, committed fixt
     const farFuture = await make('far-future', today, addDays(today, 90));
     const ids = async (query: ProcurementWorklistQuery) =>
       new Set((await workspace.listWorklist(admin, query, options)).lines.map((line) => line.orderId));
+    // Статусы «Готов к выдаче» / «Выдан» / «Завершен»: материал не нужен, даже если даты выдачи/завершения пусты (CR8-2).
+    const statusIds = new Map((await conn.query<{ order_status_code: string; order_status_id: string }>(
+      `SELECT order_status_code, order_status_id FROM order_statuses WHERE order_status_code = ANY($1::text[])`,
+      [['legacy_2', 'legacy_6', 'legacy_7', 'legacy_8']])).rows.map((row) => [row.order_status_code, Number(row.order_status_id)]));
+    expect([...statusIds.keys()].sort()).toEqual(['legacy_2', 'legacy_6', 'legacy_7', 'legacy_8']);
+    const byStatus = new Map<string, number>();
+    for (const code of ['legacy_2', 'legacy_6', 'legacy_7', 'legacy_8']) {
+      const id = await make(`status-${code}`, today, addDays(today, 2));
+      await conn.query('BEGIN');
+      await conn.query('UPDATE orders SET order_status_id = $2 WHERE order_id = $1', [id, statusIds.get(code)]);
+      await conn.query('COMMIT');
+      byStatus.set(code, id);
+    }
     const byDefault = await ids(allQuery);
+    expect(byDefault.has(byStatus.get('legacy_2')!)).toBe(true); // «Оформлен» — контроль: виден
+    for (const code of ['legacy_6', 'legacy_7', 'legacy_8']) expect(byDefault.has(byStatus.get(code)!)).toBe(false);
     expect(byDefault.has(oldOverdue)).toBe(false);
     expect(byDefault.has(oldNoDate)).toBe(true);
     expect(byDefault.has(farFuture)).toBe(false);
@@ -366,7 +381,7 @@ describe.skipIf(!url)('procurement workspace — real PostgreSQL, committed fixt
     } });
     expect((await ids(allQuery)).has(oldOverdue)).toBe(true);
     await conn.query('BEGIN');
-    await conn.query('UPDATE orders SET completion_date = order_date WHERE order_id = ANY($1::bigint[])', [[oldOverdue, oldNoDate, farFuture]]);
+    await conn.query('UPDATE orders SET completion_date = order_date WHERE order_id = ANY($1::bigint[])', [[oldOverdue, oldNoDate, farFuture, ...byStatus.values()]]);
     await conn.query('COMMIT');
   });
 

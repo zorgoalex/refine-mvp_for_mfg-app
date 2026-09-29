@@ -9,6 +9,7 @@ import type { OrderResourceKind } from '../application/order-resource-demand.typ
 import {
   PROCUREMENT_WORKLIST_LINE_LIMIT,
   PROCUREMENT_WORKLIST_ORDER_LIMIT,
+  PROCUREMENT_WORKLIST_DONE_STATUS_CODES,
   PROCUREMENT_WORKLIST_PLANNED_AHEAD_DAYS,
   type ProcurementSavedViewDto,
   type ProcurementSettingsDto,
@@ -340,6 +341,8 @@ async function loadWorklistOrders(
       WHERE ${whereSql}
         AND o.issue_date IS NULL
         AND o.completion_date IS NULL
+        -- «Готов к выдаче», «Выдан», «Завершен»: материал уже не нужен (на stage таких «незакрытых по датам» ~4 900).
+        AND COALESCE(os.order_status_code, '') <> ALL ($${params.push(PROCUREMENT_WORKLIST_DONE_STATUS_CODES)}::text[])
         AND (o.planned_completion_date IS NULL${plannedBounds.length > 0
           ? ` OR (${plannedBounds.join(' AND ')})`
           : ' OR TRUE'})
