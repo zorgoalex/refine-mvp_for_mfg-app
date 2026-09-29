@@ -29,6 +29,14 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-09-29", title: "Карточки рассылки заказов как в календаре",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "Картинки ежедневной рассылки заказов теперь выглядят как карточки календаря: уже и плотнее, номер заказа и статус оплаты жирным, метки материалов — в строке номера, коды этапов производства — по центру карточки.",
+      "Заголовок картинки — одна строка «Ср (30.09.2026)» с общей площадью справа, как в календаре.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-09-29", title: "Группы WhatsApp в настройках",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [
