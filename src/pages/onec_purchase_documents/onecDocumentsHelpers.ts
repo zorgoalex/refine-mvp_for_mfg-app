@@ -147,6 +147,17 @@ export function onecAllocationErrorRequiresReload(code: string | undefined): boo
   return code != null && STATE_CHANGING_ONEC_ERROR_CODES.has(code);
 }
 
+const ALLOCATION_ORIGIN_LABELS: Record<'auto' | 'manual' | 'suggested', string> = {
+  auto: 'авто',
+  manual: 'вручную',
+  suggested: 'подбор',
+};
+
+/** Подпись способа распределения: авто (по приходу/оплате), вручную, подбор (групповое из «Подобрать заказы»). */
+export function onecAllocationOriginLabel(origin: 'auto' | 'manual' | 'suggested'): string {
+  return ALLOCATION_ORIGIN_LABELS[origin];
+}
+
 /** Карточка потребностей в модалке распределения относится к выбранному заказу и уже загружена. */
 export function isOrderCardCurrent(
   cardOrderId: number | null,

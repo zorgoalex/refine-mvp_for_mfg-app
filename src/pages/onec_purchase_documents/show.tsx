@@ -1,6 +1,6 @@
 import { Show } from '@refinedev/antd';
 import type { IResourceComponentsProps } from '@refinedev/core';
-import { Alert, Descriptions, Popconfirm, Space, Spin, Tag, Typography, message } from 'antd';
+import { Alert, Button, Descriptions, Drawer, Popconfirm, Space, Spin, Tag, Typography, message } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
@@ -17,7 +17,8 @@ import {
   orderResourceRequirementsOnecFilterPath,
 } from '../order_resource_requirements/onecDocKind';
 import { AllocationModal } from './AllocationModal';
-import { canAddOnecAllocation, formatOnecAmount, formatOnecQuantity, onecAllocationErrorMessage } from './onecDocumentsHelpers';
+import { AllocationSuggestionPanel } from './AllocationSuggestionPanel';
+import { canAddOnecAllocation, formatOnecAmount, formatOnecQuantity, onecAllocationErrorMessage, onecAllocationOriginLabel } from './onecDocumentsHelpers';
 import { useOnecDocumentsPermissions } from './onecDocumentsPermissions';
 
 type LoadState =
@@ -25,7 +26,7 @@ type LoadState =
   | { status: 'disabled' }
   | { status: 'notfound' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; data: OnecDocumentCardDto; amountsVisible: boolean };
+  | { status: 'ready'; data: OnecDocumentCardDto; amountsVisible: boolean; supplyWorkspace: boolean };
 
 const BACK_TO_LIST = <Link to="/procurement/onec-documents">Вернуться к списку</Link>;
 
@@ -43,6 +44,7 @@ export const OnecPurchaseDocumentShow: React.FC<IResourceComponentsProps> = () =
   const { canManage, canSeeAmounts, loading: permissionsLoading } = useOnecDocumentsPermissions();
   const [allocationLineId, setAllocationLineId] = useState<number | null>(null);
   const [removingAllocationId, setRemovingAllocationId] = useState<number | null>(null);
+  const [suggestOpen, setSuggestOpen] = useState(false);
 
   const refresh = useCallback(() => setRevision((value) => value + 1), []);
 
@@ -56,7 +58,7 @@ export const OnecPurchaseDocumentShow: React.FC<IResourceComponentsProps> = () =
     onecDocumentsApi.getCard(documentId)
       .then((response) => {
         if (!active) return;
-        setState({ status: 'ready', data: response.data, amountsVisible: response.amountsVisible });
+        setState({ status: 'ready', data: response.data, amountsVisible: response.amountsVisible, supplyWorkspace: response.capabilities?.supplyWorkspace === true });
       })
       .catch((error: unknown) => {
         if (!active) return;
@@ -112,6 +114,10 @@ export const OnecPurchaseDocumentShow: React.FC<IResourceComponentsProps> = () =
       {state.status === 'ready' && (
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
           <DocumentHeader data={state.data} amountsVisible={state.amountsVisible} />
+          {/* Только при включённом экране снабжения (capability; старый backend без поля — выключено, CR1-3). */}
+          {state.supplyWorkspace && canSuggestAllocations(state.data) && canManage && !permissionsLoading && (
+            <Button onClick={() => setSuggestOpen(true)}>Подобрать заказы</Button>
+          )}
           <Table<OnecDocumentLineDto>
             rowKey="lineId"
             size="small"
@@ -171,7 +177,7 @@ export const OnecPurchaseDocumentShow: React.FC<IResourceComponentsProps> = () =
                       <span>
                         {allocation.role === 'receipt' ? formatOnecQuantity(allocation.quantity ?? 0, row.unitCode, row.unitName) : formatOnecAmount(allocation.amount, state.data.currency)}
                       </span>
-                      <Tag style={{ marginInlineEnd: 0 }}>{allocation.origin === 'auto' ? 'авто' : 'вручную'}</Tag>
+                      <Tag style={{ marginInlineEnd: 0 }}>{onecAllocationOriginLabel(allocation.origin)}</Tag>
                       {canManage && (
                         <Popconfirm
                           title="Снять распределение?"
@@ -221,9 +227,32 @@ export const OnecPurchaseDocumentShow: React.FC<IResourceComponentsProps> = () =
           }}
         />
       )}
+
+      {state.status === 'ready' && (
+        <Drawer
+          title="Подобрать заказы"
+          open={suggestOpen}
+          onClose={() => setSuggestOpen(false)}
+          width={960}
+          destroyOnClose
+        >
+          <AllocationSuggestionPanel
+            documentId={state.data.documentId}
+            onDone={() => {
+              setSuggestOpen(false);
+              refresh();
+            }}
+          />
+        </Drawer>
+      )}
     </Show>
   );
 };
+
+/** Кнопка «Подобрать заказы» — только для проведённого и не удалённого в 1С прихода. */
+function canSuggestAllocations(data: OnecDocumentCardDto): boolean {
+  return data.kind === 'purchase_receipt' && data.posted && !data.deletedInOnec;
+}
 
 function DocumentHeader({ data, amountsVisible }: { data: OnecDocumentCardDto; amountsVisible: boolean }) {
   return (
@@ -284,7 +313,7 @@ function OrdersSummary({ data, documentId }: { data: OnecDocumentCardDto; docume
                     ? formatOnecQuantity(allocation.quantity ?? 0, line.unitCode, line.unitName)
                     : formatOnecAmount(allocation.amount, data.currency)}
                   {' '}
-                  <Tag style={{ marginInlineEnd: 0 }}>{allocation.origin === 'auto' ? 'авто' : 'вручную'}</Tag>
+                  <Tag style={{ marginInlineEnd: 0 }}>{onecAllocationOriginLabel(allocation.origin)}</Tag>
                 </li>
               ))}
             </ul>

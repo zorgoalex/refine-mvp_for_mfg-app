@@ -5,6 +5,9 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import type {
   AddOnecAllocationCommand,
+  AllocationSuggestionsResponseDto,
+  BatchOnecAllocationCommand,
+  BatchOnecAllocationResultDto,
   OnecAllocationResultDto,
   OnecDocumentCardResponseDto,
   OnecDocumentListQuery,
@@ -19,6 +22,12 @@ export interface OnecDocumentsPort {
   getCard(user: CurrentUser, documentId: number, options: OnecDocumentReadOptions): Promise<OnecDocumentCardResponseDto>;
   addAllocation(command: AddOnecAllocationCommand): Promise<OnecAllocationResultDto>;
   removeAllocation(command: RemoveOnecAllocationCommand): Promise<OnecAllocationResultDto>;
+  addAllocationsBatch(command: BatchOnecAllocationCommand): Promise<BatchOnecAllocationResultDto>;
+}
+
+/** Автоподбор заказов для прихода — читает рабочий список (экран снабжения). */
+export interface AllocationSuggestionsPort {
+  allocationSuggestions(user: CurrentUser, documentId: number): Promise<AllocationSuggestionsResponseDto>;
 }
 
 const VIEW = 'procurement.view';
@@ -31,14 +40,15 @@ export class OnecDocumentsService {
 
   constructor(private readonly ports: {
     documents: OnecDocumentsPort;
+    suggestions?: AllocationSuggestionsPort;
     permissions?: OrderPermissionCheckerPort;
     auditClient?: DatabaseClient;
   }) {
     this.permissions = ports.permissions ?? new PermissionsService();
   }
 
-  readOptions(user: CurrentUser, procurementEnabled: boolean): OnecDocumentReadOptions {
-    return { procurementEnabled, canSeeAmounts: this.permissions.canUser(user, FINANCE) };
+  readOptions(user: CurrentUser, procurementEnabled: boolean, supplyWorkspaceEnabled = false): OnecDocumentReadOptions {
+    return { procurementEnabled, canSeeAmounts: this.permissions.canUser(user, FINANCE), supplyWorkspaceEnabled };
   }
 
   async list(user: CurrentUser, query: OnecDocumentListQuery, procurementEnabled: boolean): Promise<OnecDocumentListResponseDto> {
@@ -46,15 +56,29 @@ export class OnecDocumentsService {
     return this.ports.documents.list(user, query, this.readOptions(user, procurementEnabled));
   }
 
-  async getCard(user: CurrentUser, documentId: number, procurementEnabled: boolean): Promise<OnecDocumentCardResponseDto> {
+  async getCard(user: CurrentUser, documentId: number, procurementEnabled: boolean, supplyWorkspaceEnabled = false): Promise<OnecDocumentCardResponseDto> {
     this.requireView(user);
-    return this.ports.documents.getCard(user, documentId, this.readOptions(user, procurementEnabled));
+    return this.ports.documents.getCard(user, documentId, this.readOptions(user, procurementEnabled, supplyWorkspaceEnabled));
   }
 
   async addAllocation(command: AddOnecAllocationCommand): Promise<OnecAllocationResultDto> {
     await this.requireManage(command.currentUser, command.requestId, command.documentId);
     return this.withFinanceDeniedAudit(command.currentUser, command.requestId, command.documentId,
       () => this.ports.documents.addAllocation(command));
+  }
+
+  /** Групповое распределение прихода (экран снабжения, фаза 2): право procurement.manage, как у одиночного. */
+  async addAllocationsBatch(command: BatchOnecAllocationCommand): Promise<BatchOnecAllocationResultDto> {
+    await this.requireManage(command.currentUser, command.requestId, command.documentId);
+    return this.ports.documents.addAllocationsBatch(command);
+  }
+
+  /** Автоподбор: только чтение, но предлагается тем, кто может распределять (view + manage). */
+  async allocationSuggestions(user: CurrentUser, documentId: number, requestId: string): Promise<AllocationSuggestionsResponseDto> {
+    this.requireView(user);
+    await this.requireManage(user, requestId, documentId);
+    if (!this.ports.suggestions) throw new Error('Allocation suggestions port is not configured');
+    return this.ports.suggestions.allocationSuggestions(user, documentId);
   }
 
   async removeAllocation(command: RemoveOnecAllocationCommand): Promise<OnecAllocationResultDto> {

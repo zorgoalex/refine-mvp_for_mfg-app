@@ -221,6 +221,7 @@ export function shouldEnableOrderDeadlineSync(input: {
       useFactory: (database: DatabaseService) =>
         new OnecDocumentsService({
           documents: new PgOnecDocumentsRepository(database),
+          suggestions: new PgProcurementWorkspaceRepository(database),
           auditClient: database,
         }),
       inject: [DatabaseService],

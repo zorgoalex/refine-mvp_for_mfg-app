@@ -2408,6 +2408,9 @@ probe_file() {
       "$(q_col onec_etl_batches revoked)" \
       "$(q_idx onec_etl_batches_entity_idx)" \
       "$(q_col onec_sources observed_identity)" ;;
+    207_onec_allocation_origin_suggested*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='order_resource_onec_allocations' AND column_name='origin' AND character_maximum_length=16);" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='chk_orp_alloc_origin' AND conrelid='public.order_resource_onec_allocations'::regclass AND pg_get_constraintdef(oid) LIKE '%suggested%');" ;;
     204_procurement_workspace*) probe_all \
       "$(q_tbl procurement_settings)" \
       "SELECT EXISTS (SELECT 1 FROM public.procurement_settings WHERE config_id = 1);" \
@@ -2782,6 +2785,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     200_onec_etl_snapshots_revocation*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    207_onec_allocation_origin_suggested*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     204_procurement_workspace*)

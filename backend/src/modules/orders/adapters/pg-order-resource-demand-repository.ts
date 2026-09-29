@@ -639,7 +639,7 @@ export interface OnecLinkRow extends QueryResultRow {
   role: 'receipt' | 'payment';
   quantity: string | number | null;
   amount: string | number | null;
-  origin: 'auto' | 'manual';
+  origin: 'auto' | 'manual' | 'suggested';
   onec_document_id: string | number;
   doc_kind: 'purchase_receipt' | 'cash_outflow' | 'bank_outflow';
   number: string;

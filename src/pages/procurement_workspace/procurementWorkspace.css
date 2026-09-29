@@ -1,0 +1,206 @@
+/*
+ * Экран «Потребности заказов в ресурсах» в стиле мокапа
+ * (spec_erp/plans/order_resource_req/mockup-v2/index.html). Цвета — из токенов темы
+ * (CSS-переменные ставит ResourceRequirementsPage), поэтому в теме «Нейтральная» экран
+ * совпадает с мокапом, а в тёмном режиме и других темах остаётся читаемым.
+ */
+.rr-screen {
+  color: var(--rr-text);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.rr-screen .rr-num { font-variant-numeric: tabular-nums; }
+.rr-screen .rr-muted { color: var(--rr-muted); }
+
+/* Вкладки страницы — подчёркнутые, как в мокапе. */
+.rr-screen .rr-page-tabs > .ant-tabs-nav { margin-bottom: 16px; }
+.rr-screen .rr-page-tabs > .ant-tabs-nav .ant-tabs-tab { padding: 12px 14px; font-size: 15px; }
+.rr-screen .rr-page-tabs > .ant-tabs-nav .ant-tabs-tab-active .ant-tabs-tab-btn { font-weight: 600; }
+
+/* Рамка раздела. */
+.rr-screen .rr-frame {
+  background: var(--rr-surface);
+  border: 1px solid var(--rr-border);
+  border-radius: 10px;
+  box-shadow: var(--rr-shadow);
+  overflow: hidden;
+}
+.rr-screen .rr-subnav {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--rr-border);
+  background: var(--rr-surface-2);
+}
+.rr-screen .rr-appbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--rr-border);
+  background: var(--rr-surface-2);
+}
+.rr-screen .rr-appbar .rr-ttl { font-weight: 600; font-size: 17px; }
+.rr-screen .rr-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--rr-border);
+}
+.rr-screen .rr-pad { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.rr-screen .rr-pad--top { padding-bottom: 0; }
+
+/* Сегменты (наборы, группировка, разделы) — как .seg мокапа. */
+.rr-screen .ant-segmented {
+  background: var(--rr-surface-2);
+  border: 1px solid var(--rr-border);
+  border-radius: 8px;
+  padding: 3px;
+}
+.rr-screen .ant-segmented .ant-segmented-item { border-radius: 6px; color: var(--rr-text); }
+.rr-screen .ant-segmented .ant-segmented-item-selected {
+  background: var(--rr-surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .1);
+  font-weight: 600;
+}
+.rr-screen .ant-segmented .ant-segmented-item-label { padding: 0 11px; }
+
+/* Счётчики на наборах. */
+.rr-screen .rr-badge {
+  display: inline-block;
+  min-width: 20px;
+  padding: 0 6px;
+  margin-left: 4px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+  background: var(--rr-none-soft);
+  color: var(--rr-muted);
+  font-weight: 400;
+}
+.rr-screen .rr-badge--bad { background: var(--rr-bad-soft); color: var(--rr-bad); }
+
+/* Карточки показателей. */
+.rr-screen .rr-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 900px) { .rr-screen .rr-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.rr-screen .rr-kpi {
+  border: 1px solid var(--rr-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--rr-surface);
+}
+.rr-screen .rr-kpi .rr-kpi-l { font-size: 12px; color: var(--rr-muted); }
+.rr-screen .rr-kpi .rr-kpi-v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.rr-screen .rr-kpi .rr-kpi-v--bad { color: var(--rr-bad); }
+.rr-screen .rr-hint { font-size: 12px; color: var(--rr-muted); }
+
+.rr-screen .rr-legend { padding: 12px 16px 0; font-size: 13px; color: var(--rr-muted); display: flex; gap: 14px; flex-wrap: wrap; }
+.rr-screen .rr-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; vertical-align: 1px; }
+
+/* Таблицы — как .t мокапа. */
+.rr-screen .rr-table { margin-top: 8px; }
+.rr-screen .ant-table-wrapper .ant-table { background: var(--rr-surface); border-radius: 0; }
+.rr-screen .ant-table-wrapper .ant-table-container { border-radius: 0; }
+.rr-screen .ant-table-wrapper .ant-table-thead > tr > th {
+  background: var(--rr-surface-2);
+  color: var(--rr-text);
+  font-weight: 600;
+  font-size: 13px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--rr-border);
+  white-space: nowrap;
+}
+.rr-screen .ant-table-wrapper .ant-table-thead > tr > th::before { display: none; }
+.rr-screen .ant-table-wrapper .ant-table-tbody > tr > td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--rr-border);
+  vertical-align: middle;
+}
+.rr-screen .ant-table-wrapper .ant-table-tbody > tr.ant-table-row:hover > td { background: var(--rr-row-hover); }
+.rr-screen .ant-table-wrapper .ant-table-tbody > tr.ant-table-row-selected > td { background: var(--rr-row-selected); }
+.rr-screen .ant-table-wrapper .ant-table-tbody > tr.rr-grp > td,
+.rr-screen .ant-table-wrapper .ant-table-tbody > tr.rr-grp:hover > td {
+  background: var(--rr-surface-2);
+  font-weight: 600;
+}
+.rr-screen .rr-grp-info { color: var(--rr-muted); font-weight: 400; }
+.rr-screen .rr-focus > td { box-shadow: inset 3px 0 0 var(--rr-accent); }
+.rr-screen .rr-sub { color: var(--rr-muted); font-size: 12px; }
+
+/* Мягкие теги — как .tag мокапа. */
+.rr-screen .rr-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 18px;
+  padding: 0 7px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.rr-screen .rr-tag--ok { background: var(--rr-ok-soft); color: var(--rr-ok); }
+.rr-screen .rr-tag--warn { background: var(--rr-warn-soft); color: var(--rr-warn); }
+.rr-screen .rr-tag--bad { background: var(--rr-bad-soft); color: var(--rr-bad); }
+.rr-screen .rr-tag--info { background: var(--rr-accent-soft); color: var(--rr-accent); }
+.rr-screen .rr-tag--none { background: var(--rr-none-soft); color: var(--rr-muted); }
+.rr-screen .rr-tag--plain { background: var(--rr-surface); border-color: var(--rr-border); color: var(--rr-text); }
+
+/* Полоска покрытия. */
+.rr-screen .rr-cov { display: flex; flex-direction: column; gap: 3px; min-width: 180px; }
+.rr-screen .rr-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--rr-none-soft); }
+.rr-screen .rr-bar > i { display: block; height: 100%; }
+.rr-screen .rr-bar .rr-rcv { background: var(--rr-ok); }
+.rr-screen .rr-bar .rr-ord { background: var(--rr-ordered); }
+
+/* Закреплённая панель групповых действий — тёмная, как в мокапе. */
+.rr-sticky {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 16px;
+  z-index: 20;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  max-width: calc(100% - 32px);
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--rr-sticky-bg);
+  color: #fff;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, .25);
+}
+.rr-sticky .ant-btn { background: transparent; color: #fff; border-color: #4b5363; }
+.rr-sticky .ant-btn:not(:disabled):hover { color: #fff; border-color: #8a93a3; background: rgba(255, 255, 255, .06); }
+.rr-sticky .ant-btn-primary { background: var(--rr-accent); border-color: var(--rr-accent); }
+.rr-sticky .ant-btn-primary:not(:disabled):hover { background: var(--rr-accent-hover); border-color: var(--rr-accent-hover); }
+.rr-sticky .ant-btn:disabled { color: rgba(255, 255, 255, .45); border-color: #3a4150; background: transparent; }
+
+/* Карточка строки прихода (раздел «Приход 1С») — как .line мокапа. */
+.rr-screen .rr-line { border: 1px solid var(--rr-border); border-radius: 10px; overflow: hidden; background: var(--rr-surface); }
+.rr-screen .rr-line-head,
+.rr-screen .rr-line-foot {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  background: var(--rr-surface-2);
+}
+.rr-screen .rr-line-head { border-bottom: 1px solid var(--rr-border); }
+.rr-screen .rr-line-foot { border-top: 1px solid var(--rr-border); }
+.rr-screen .rr-hint-box {
+  border: 1px dashed var(--rr-border-strong);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--rr-muted);
+  font-size: 13px;
+}

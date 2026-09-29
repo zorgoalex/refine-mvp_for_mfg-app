@@ -93,7 +93,7 @@ export interface OrderResourceOnecDocRefDto {
   quantity: number | null;
   /** null без права finance.view. */
   amount: number | null;
-  linkOrigin: 'auto' | 'manual';
+  linkOrigin: 'auto' | 'manual' | 'suggested';
   posted: boolean;
   deletedInOnec: boolean;
 }

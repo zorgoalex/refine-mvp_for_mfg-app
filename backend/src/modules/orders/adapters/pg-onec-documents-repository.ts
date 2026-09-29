@@ -6,22 +6,27 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
-import type {
-  AddOnecAllocationCommand,
-  OnecAllocationDto,
-  OnecAllocationResultDto,
-  OnecAllocationRole,
-  OnecDocKind,
-  OnecDocumentCardResponseDto,
-  OnecDocumentLineDto,
-  OnecDocumentListItemDto,
-  OnecDocumentListQuery,
-  OnecDocumentListResponseDto,
-  OnecDocumentReadOptions,
-  OnecUnitCode,
-  RemoveOnecAllocationCommand,
+import {
+  ONEC_ALLOCATION_BATCH_LIMIT,
+  type AddOnecAllocationCommand,
+  type BatchOnecAllocationCommand,
+  type BatchOnecAllocationFailure,
+  type BatchOnecAllocationResultDto,
+  type OnecAllocationDto,
+  type OnecAllocationResultDto,
+  type OnecAllocationRole,
+  type OnecDocKind,
+  type OnecDocumentCardResponseDto,
+  type OnecDocumentLineDto,
+  type OnecDocumentListItemDto,
+  type OnecDocumentListQuery,
+  type OnecDocumentListResponseDto,
+  type OnecDocumentReadOptions,
+  type OnecUnitCode,
+  type RemoveOnecAllocationCommand,
 } from '../application/onec-documents.types';
 import type { OrderResourceDemandLineDto, OrderResourceKind } from '../application/order-resource-demand.types';
+import { sheetAreaM2 } from '../domain/procurement-worklist';
 import {
   applyProcurement,
   buildScopedOrderWhere,
@@ -95,7 +100,7 @@ interface AllocationRow extends QueryResultRow {
   role: OnecAllocationRole;
   quantity: string | number | null;
   amount: string | number | null;
-  origin: 'auto' | 'manual';
+  origin: 'auto' | 'manual' | 'suggested';
   created_at: string | Date;
   created_by_name: string | null;
   visible: boolean;
@@ -321,6 +326,185 @@ export class PgOnecDocumentsRepository {
       if (role === 'receipt') await recordResourceSuppliers(tx, [{ kind: key.kind, refId: key.refId, line }]);
       return { changed: true, allocationId, orderId: order.orderId, resourceKey: command.resourceKey,
         line: await currentLine(tx, order, command.resourceKey, command.currentUser) };
+    });
+  }
+
+  /**
+   * Групповое распределение прихода на несколько заказов — «всё или ничего» (план §5.4, R1-5, R2-2, R3-4).
+   * Те же блокировки и проверки, что у одиночной команды, в глобальном порядке: заказы → закупы → строки
+   * документа. Политика batch: отпечаток потребности проверяется для КАЖДОГО закупа с новым распределением
+   * (предложение построено на прочитанной потребности); одиночная команда своей политики не меняет.
+   */
+  async addAllocationsBatch(command: BatchOnecAllocationCommand): Promise<BatchOnecAllocationResultDto> {
+    const items = command.items;
+    if (items.length === 0 || items.length > ONEC_ALLOCATION_BATCH_LIMIT) {
+      throw new ApiError(422, 'ONEC_ALLOCATION_BATCH_SIZE_INVALID', `Групповое распределение: от 1 до ${ONEC_ALLOCATION_BATCH_LIMIT} строк`, {
+        limit: ONEC_ALLOCATION_BATCH_LIMIT,
+      });
+    }
+    // 1. Структура: ключи, дубликаты, общий expectedVersion/отпечаток у элементов одного закупа.
+    const seen = new Set<string>();
+    const expectedByProcurement = new Map<string, { version: number; fingerprint: string }>();
+    for (const [index, item] of items.entries()) {
+      if (!parseResourceKey(item.resourceKey)) {
+        throw new ApiError(422, 'PROCUREMENT_RESOURCE_KEY_INVALID', 'Некорректный ключ материала', { index, resourceKey: item.resourceKey });
+      }
+      const pair = `${item.lineId}|${item.orderId}|${item.resourceKey}`;
+      if (seen.has(pair)) throw new ApiError(422, 'ONEC_ALLOCATION_BATCH_DUPLICATE_ITEM', 'Строка документа указана для заказа дважды', { index });
+      seen.add(pair);
+      const procurementKey = `${item.orderId}|${item.resourceKey}`;
+      const expected = expectedByProcurement.get(procurementKey);
+      if (expected && (expected.version !== item.expectedVersion || expected.fingerprint !== item.expectedDemandFingerprint)) {
+        throw new ApiError(422, 'ONEC_ALLOCATION_BATCH_INCONSISTENT', 'У одного материала заказа разные версии в запросе', { index });
+      }
+      expectedByProcurement.set(procurementKey, { version: item.expectedVersion, fingerprint: item.expectedDemandFingerprint });
+    }
+
+    return this.database.transaction(async (tx) => {
+      // 2. Блокировки в глобальном порядке; снимок начального состояния.
+      const actor = await lockActor(tx, command.currentUser);
+      const orderIds = [...new Set(items.map((item) => item.orderId))].sort((left, right) => left - right);
+      const orders = await lockOrders(tx, command.currentUser, orderIds);
+      if (orders.length !== orderIds.length) throw orderNotFound();
+      const orderById = new Map(orders.map((order) => [order.orderId, order]));
+      const procurement = await loadProcurementRows(tx, orderIds, true);
+      const rowByKey = new Map(procurement.map((row) => [`${Number(row.order_id)}|${procurementRowKey(row)}`, row]));
+      const lineIds = [...new Set(items.map((item) => item.lineId))].sort((left, right) => left - right);
+      const lines = new Map<number, LockedLineRow>();
+      for (const lineId of lineIds) lines.set(lineId, await lockDocumentLine(tx, command.documentId, lineId));
+      // Размеры листовых материалов: FOR SHARE до конца транзакции — пересчёт «листы ↔ м²» не меняется под нами (CR3-1).
+      const sheetIds = [...new Set(items.map((item) => parseResourceKey(item.resourceKey)!)
+        .filter((key) => key.kind === 'sheet_material').map((key) => key.refId))].sort((left, right) => left - right);
+      const sheetArea = new Map((sheetIds.length === 0 ? [] : (await tx.query<{ id: string; width_mm: string | null; height_mm: string | null }>(
+        `SELECT sheet_material_type_id::text AS id, width_mm, height_mm FROM sheet_material_types
+          WHERE sheet_material_type_id = ANY($1::bigint[]) ORDER BY sheet_material_type_id FOR SHARE`,
+        [sheetIds],
+      )).rows).map((row) => [Number(row.id), sheetAreaM2(row.width_mm, row.height_mm)]));
+      const projected = await loadProjectedOrders(tx, orders.map((order) => order.row), undefined);
+      const demandByKey = new Map(projected.flatMap((order) => order.lines.map((demand) => [`${order.orderId}|${demand.resourceKey}`, demand])));
+
+      // 3–4. Классификация и проверки.
+      const failures: BatchOnecAllocationFailure[] = [];
+      const fail = (index: number, code: string, message: string) => failures.push({ index, code, message });
+      const classified: Array<{ index: number; kind: 'noop' | 'new'; allocationId?: number }> = [];
+      const newByLine = new Map<number, number>();
+      for (const [index, item] of items.entries()) {
+        const line = lines.get(item.lineId)!;
+        if (line.doc_kind !== 'purchase_receipt') { fail(index, 'ONEC_ALLOCATION_BATCH_RECEIPTS_ONLY', 'Групповое распределение — только для приходов'); continue; }
+        if (!line.posted || line.deleted_in_onec) { fail(index, 'ONEC_DOCUMENT_NOT_ALLOCATABLE', 'Документ не проведён или удалён в 1С'); continue; }
+        try { assertLineMaterial(line, item.resourceKey); } catch (error) {
+          fail(index, error instanceof ApiError ? error.code : 'ONEC_LINE_RESOURCE_MISMATCH', error instanceof Error ? error.message : 'Материал строки не совпадает');
+          continue;
+        }
+        const row = rowByKey.get(`${item.orderId}|${item.resourceKey}`);
+        const existing = row ? await activeAllocation(tx, Number(row.order_resource_procurement_id), item.lineId, 'receipt') : null;
+        if (existing) {
+          if (toThousandthsExact(Number(existing.quantity)) === toThousandthsExact(item.quantity)) {
+            classified.push({ index, kind: 'noop', allocationId: Number(existing.allocation_id) });
+          } else {
+            fail(index, 'ONEC_ALLOCATION_EXISTS', 'Эта строка уже распределена на этот материал заказа с другим количеством');
+          }
+          continue;
+        }
+        const initialVersion = row ? Number(row.version) : 0;
+        if (item.expectedVersion !== initialVersion) { fail(index, 'PROCUREMENT_VERSION_CONFLICT', 'Закуп материала уже изменил другой пользователь'); continue; }
+        const itemKey = parseResourceKey(item.resourceKey)!;
+        const currentArea = itemKey.kind === 'sheet_material' ? sheetArea.get(itemKey.refId) ?? null : null;
+        const areaChanged = (currentArea === null) !== (item.expectedSheetAreaM2 === null)
+          || (currentArea !== null && item.expectedSheetAreaM2 !== null && Math.abs(currentArea - item.expectedSheetAreaM2) > 1e-9);
+        if (line.unit_code !== item.expectedDocUnit || areaChanged) {
+          fail(index, 'ONEC_ALLOCATION_UNIT_CHANGED', 'Изменилась единица строки прихода или размер листа — подберите заново');
+          continue;
+        }
+        const demand = demandByKey.get(`${item.orderId}|${item.resourceKey}`);
+        if (!demand) { fail(index, 'PROCUREMENT_RESOURCE_NOT_IN_ORDER', 'Этого материала нет в потребности заказа'); continue; }
+        if (demand.demandFingerprint !== item.expectedDemandFingerprint) { fail(index, 'PROCUREMENT_DEMAND_CHANGED', 'Потребность в материале изменилась — подберите заново'); continue; }
+        classified.push({ index, kind: 'new' });
+        newByLine.set(item.lineId, (newByLine.get(item.lineId) ?? 0) + toThousandthsExact(item.quantity));
+      }
+      for (const [lineId, added] of newByLine) {
+        const line = lines.get(lineId)!;
+        const used = toThousandthsExact(await allocatedOnLine(tx, lineId, 'receipt'));
+        if (used + added > toThousandthsExact(Number(line.quantity))) {
+          for (const [index, item] of items.entries()) {
+            if (item.lineId === lineId && classified.some((entry) => entry.index === index && entry.kind === 'new')) {
+              fail(index, 'ONEC_ALLOCATION_EXCEEDS_LINE', 'Распределено больше, чем есть в строке документа');
+            }
+          }
+        }
+      }
+      // 5. Любая ошибка — ничего не пишем.
+      if (failures.length > 0) {
+        throw new ApiError(409, 'ONEC_ALLOCATION_BATCH_CONFLICT', 'Распределение не выполнено: данные изменились или не проходят проверку. Подберите заново', {
+          failures: failures.sort((left, right) => left.index - right.index),
+        });
+      }
+      const newEntries = classified.filter((entry) => entry.kind === 'new');
+      if (newEntries.length === 0) {
+        return {
+          changed: false,
+          results: classified.map((entry) => ({ index: entry.index, allocationId: entry.allocationId!, noop: true })),
+          lines: await currentLines(tx, orders, items, command.currentUser),
+        };
+      }
+
+      // 6. Запись: по закупам в порядке (заказ, материал), внутри — по индексу; версии идут подряд.
+      const allocationIds = new Map<number, number>();
+      const ordered = [...newEntries].sort((left, right) => {
+        const a = items[left.index];
+        const b = items[right.index];
+        return a.orderId - b.orderId || a.resourceKey.localeCompare(b.resourceKey) || left.index - right.index;
+      });
+      const suppliers: Array<{ kind: OrderResourceKind; refId: number; line: LockedLineRow }> = [];
+      for (const entry of ordered) {
+        const item = items[entry.index];
+        const key = parseResourceKey(item.resourceKey)!;
+        const order = orderById.get(item.orderId)!;
+        const line = lines.get(item.lineId)!;
+        const row = (await loadProcurementRows(tx, [order.orderId]))
+          .find((candidate) => procurementRowKey(candidate) === item.resourceKey);
+        const demand = demandByKey.get(`${item.orderId}|${item.resourceKey}`)!;
+        const marksPurchase = !(row?.purchased ?? false);
+        const before = row ? procurementSnapshot(row) : null;
+        const procurementId = await upsertProcurementForAllocation(tx, {
+          order, kind: key.kind, refId: key.refId, row, actor, marksPurchase,
+          demand: { quantity: demand.quantity, unit: demand.unit, fingerprint: demand.demandFingerprint },
+        });
+        const allocationId = Number((await tx.query<{ id: string }>(
+          `INSERT INTO order_resource_onec_allocations
+             (order_resource_procurement_id, onec_document_line_id, role, quantity, unit_code, amount, origin, created_by)
+           VALUES ($1, $2, 'receipt', $3, $4, NULL, $5, $6)
+           RETURNING allocation_id::text AS id`,
+          [procurementId, item.lineId, item.quantity, line.unit_code, command.origin, actor.userId],
+        )).rows[0].id);
+        allocationIds.set(entry.index, allocationId);
+        const afterRow = (await loadProcurementRows(tx, [order.orderId]))
+          .find((candidate) => Number(candidate.order_resource_procurement_id) === procurementId)!;
+        await writeAllocationEvent(tx, {
+          event: 'order_resource.onec_allocation_added',
+          changeType: 'allocation_added',
+          order, actor, currentUser: command.currentUser, requestId: command.requestId,
+          resourceKey: item.resourceKey, kind: key.kind, refId: key.refId,
+          procurementId, allocationId, documentId: Number(line.onec_document_id), lineId: item.lineId,
+          role: 'receipt', quantity: item.quantity, amount: null,
+          before, after: procurementSnapshot(afterRow), version: Number(afterRow.version),
+          source: 'erp_suggest', origin: command.origin, batchRequestId: command.requestId,
+        });
+        suppliers.push({ kind: key.kind, refId: key.refId, line });
+      }
+      // 7. Поставщики — одним шагом в конце, в каноническом порядке (R5-2).
+      await recordResourceSuppliers(tx, suppliers);
+      return {
+        changed: true,
+        results: classified
+          .sort((left, right) => left.index - right.index)
+          .map((entry) => ({
+            index: entry.index,
+            allocationId: entry.kind === 'new' ? allocationIds.get(entry.index)! : entry.allocationId!,
+            noop: entry.kind === 'noop',
+          })),
+        lines: await currentLines(tx, orders, items, command.currentUser),
+      };
     });
   }
 
@@ -697,6 +881,10 @@ async function writeAllocationEvent(tx: DatabaseClient, input: {
   before: Record<string, unknown> | null;
   after: Record<string, unknown>;
   version: number;
+  /** Групповое распределение из автоподбора: источник, origin и requestId всей команды. */
+  source?: 'erp_ui' | 'erp_suggest';
+  origin?: 'suggested' | 'manual';
+  batchRequestId?: string;
 }): Promise<void> {
   await auditService.record(tx, {
     event: input.event,
@@ -725,6 +913,7 @@ async function writeAllocationEvent(tx: DatabaseClient, input: {
       quantity: input.quantity,
       amount: input.amount,
       correlationId: input.requestId,
+      ...(input.batchRequestId ? { batchRequestId: input.batchRequestId, allocationOrigin: input.origin, commandSource: input.source } : {}),
     },
     relatedEntities: [
       { entityType: 'order', entityId: input.order.orderId },
@@ -755,7 +944,7 @@ async function writeAllocationEvent(tx: DatabaseClient, input: {
         actorUserId: input.actor.userId,
         requestId: input.requestId,
         correlationId: input.requestId,
-        source: 'erp_ui',
+        source: input.source ?? 'erp_ui',
       }),
       procurementOutboxKey(input.order.orderId, input.resourceKey, input.version),
     ],
@@ -776,6 +965,27 @@ async function currentLine(
     .map(({ line }) => line)
     .find((line) => line.resourceKey === key)
     ?? (row ? orphanLine(row, extras) : missingLine(key));
+}
+
+/** Количество в тысячных без погрешностей float (NUMERIC(14,3)). */
+function toThousandthsExact(value: number): number {
+  return Math.round(value * 1000);
+}
+
+async function currentLines(
+  tx: DatabaseClient,
+  orders: LockedOrder[],
+  items: BatchOnecAllocationCommand['items'],
+  user: CurrentUser,
+): Promise<BatchOnecAllocationResultDto['lines']> {
+  const keys = [...new Set(items.map((item) => `${item.orderId}|${item.resourceKey}`))].sort();
+  const result: BatchOnecAllocationResultDto['lines'] = [];
+  for (const key of keys) {
+    const [orderId, resourceKeyValue] = [Number(key.slice(0, key.indexOf('|'))), key.slice(key.indexOf('|') + 1)];
+    const order = orders.find((candidate) => candidate.orderId === orderId)!;
+    result.push({ orderId, line: await currentLine(tx, order, resourceKeyValue, user) });
+  }
+  return result;
 }
 
 function missingLine(key: string): OrderResourceDemandLineDto {

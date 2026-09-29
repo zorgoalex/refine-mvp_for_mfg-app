@@ -4,11 +4,14 @@ import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser, RequestWithCurrentUser } from '../../../permissions/current-user';
 import { OnecDocumentsService } from '../application/onec-documents.service';
-import type {
-  OnecAllocationResultDto,
-  OnecDocumentCardResponseDto,
-  OnecDocumentListQuery,
-  OnecDocumentListResponseDto,
+import {
+  ONEC_ALLOCATION_BATCH_LIMIT,
+  type AllocationSuggestionsResponseDto,
+  type BatchOnecAllocationResultDto,
+  type OnecAllocationResultDto,
+  type OnecDocumentCardResponseDto,
+  type OnecDocumentListQuery,
+  type OnecDocumentListResponseDto,
 } from '../application/onec-documents.types';
 import { OrdersRuntimeConfigService } from './orders-runtime-config.service';
 
@@ -28,6 +31,22 @@ const addSchema = z.object({
   expectedDemandFingerprint: fingerprint,
 }).strict();
 const removeSchema = z.object({ expectedVersion }).strict();
+export const batchSchema = z.object({
+  requestId: z.string().uuid(),
+  origin: z.enum(['suggested', 'manual']),
+  items: z.array(z.object({
+    lineId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    orderId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    resourceKey: z.string().min(1).max(64),
+    quantity: withScale(3),
+    expectedVersion,
+    expectedDemandFingerprint: fingerprint,
+    // Контекст пересчёта единиц, в котором построено предложение: сверяется в транзакции (CR3-1).
+    expectedDocUnit: z.enum(['sheet', 'm2', 'lm', 'pcs', 'set']).nullable(),
+    expectedSheetAreaM2: z.number().positive().max(1000).nullable(),
+    // Связи с заявками поставщикам появятся в фазе 3 — до неё поле отклоняется (план §5.4).
+  }).strict()).min(1).max(ONEC_ALLOCATION_BATCH_LIMIT),
+}).strict();
 const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const flag = z.enum(['true', 'false']).optional().transform((value) => value === 'true');
 const listSchema = z.object({
@@ -70,7 +89,8 @@ export class OnecDocumentsController {
   @Get(':documentId')
   async card(@Req() request: RequestWithCurrentUser, @Param('documentId') documentId: string): Promise<OnecDocumentCardResponseDto> {
     const user = this.requireUser(request, false);
-    return this.documents.getCard(user, parseId(documentId, 'documentId'), true);
+    return this.documents.getCard(user, parseId(documentId, 'documentId'), true,
+      this.runtimeConfig.getFeatureFlags().procurementWorkspaceEnabled === true);
   }
 
   @ApiResponse({ status: 200, description: 'Allocation state after the command (no-op when repeated)' })
@@ -94,6 +114,40 @@ export class OnecDocumentsController {
       documentId: parseId(documentId, 'documentId'),
       lineId: parseId(lineId, 'lineId'),
       requestId: request.requestId ?? 'unknown',
+    });
+  }
+
+  @ApiResponse({ status: 200, description: 'Suggested orders per receipt line, ranked, with proposed quantities' })
+  @ApiResponse({ status: 404, description: 'Document not found' })
+  @ApiResponse({ status: 409, description: 'Document is not a posted receipt' })
+  @ApiResponse({ status: 503, description: 'Procurement or the workspace is disabled' })
+  @ApiOperation({ operationId: 'getOnecAllocationSuggestions', summary: 'Suggest orders for a 1C receipt' })
+  @Get(':documentId/allocation-suggestions')
+  async suggestions(@Req() request: RequestWithCurrentUser, @Param('documentId') documentId: string): Promise<AllocationSuggestionsResponseDto> {
+    const user = this.requireUser(request, false, true);
+    return this.documents.allocationSuggestions(user, parseId(documentId, 'documentId'), request.requestId ?? 'unknown');
+  }
+
+  @ApiResponse({ status: 200, description: 'All items allocated, or every item already present (no-op)' })
+  @ApiResponse({ status: 404, description: 'Order out of scope or document line not found' })
+  @ApiResponse({ status: 409, description: 'ONEC_ALLOCATION_BATCH_CONFLICT with details.failures; nothing written' })
+  @ApiResponse({ status: 422, description: 'Invalid body, duplicates or inconsistent versions' })
+  @ApiResponse({ status: 503, description: 'Procurement or the workspace is disabled' })
+  @ApiOperation({ operationId: 'addOnecAllocationsBatch', summary: 'Allocate a 1C receipt to several orders at once' })
+  @Post(':documentId/allocations/batch')
+  async batch(
+    @Req() request: RequestWithCurrentUser,
+    @Param('documentId') documentId: string,
+    @Body() body: unknown,
+  ): Promise<BatchOnecAllocationResultDto> {
+    const user = this.requireUser(request, true, true);
+    const input = parse(batchSchema, body, 'ONEC_ALLOCATION_BATCH_INVALID_INPUT');
+    return this.documents.addAllocationsBatch({
+      currentUser: user,
+      documentId: parseId(documentId, 'documentId'),
+      requestId: input.requestId,
+      origin: input.origin,
+      items: input.items,
     });
   }
 
@@ -122,8 +176,11 @@ export class OnecDocumentsController {
     });
   }
 
-  private requireUser(request: RequestWithCurrentUser, write: boolean): CurrentUser {
+  private requireUser(request: RequestWithCurrentUser, write: boolean, workspace = false): CurrentUser {
     const flags = this.runtimeConfig.getFeatureFlags();
+    if (workspace && flags.ordersEnabled && flags.resourceProcurementEnabled === true && flags.procurementWorkspaceEnabled !== true) {
+      throw new ApiError(503, 'PROCUREMENT_WORKSPACE_DISABLED', 'Экран снабжения пока выключен', { feature: 'procurementWorkspace' });
+    }
     if (!flags.ordersEnabled) {
       throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Orders API is disabled', { feature: 'orders' });
     }

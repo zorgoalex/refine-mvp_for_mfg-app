@@ -1,4 +1,4 @@
-import { Badge, Tabs } from 'antd';
+import { Tabs } from 'antd';
 import { useGetIdentity } from '@refinedev/core';
 import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -7,8 +7,9 @@ import { procurementWorkspaceApi } from '../../api/procurementWorkspaceApi';
 import { LocalizedList } from '../../components/LocalizedList';
 import { OrderResourceRequirementList } from './list';
 import { resolveSupplyTab, type ResourceRequirementsTab } from './resourceRequirementsTabs';
+import { RrScreen } from '../procurement_workspace/RrScreen';
 
-const WorklistSection = lazy(async () => ({ default: (await import('../procurement_workspace/WorklistSection')).WorklistSection }));
+const SupplyWorkspace = lazy(async () => ({ default: (await import('../procurement_workspace/SupplyWorkspace')).SupplyWorkspace }));
 
 /**
  * Экран «Потребности заказов в ресурсах»: вкладка «Потребность заказов» — существующий
@@ -63,25 +64,28 @@ export function ResourceRequirementsPage() {
       key: 'supply',
       label: (
         <span>
-          Экран снабжения{' '}
-          {urgent !== null && urgent > 0 && <Badge count={urgent} title="Срочно на этой неделе" />}
+          Экран снабжения
+          {urgent !== null && urgent > 0 && <span className="rr-badge rr-badge--bad" title="Срочно на этой неделе">{urgent}</span>}
         </span>
       ),
       children: supplyMounted
-        ? <Suspense fallback={null}><WorklistSection active={tab === 'supply'} onUrgentCount={onUrgentCount} /></Suspense>
+        ? <Suspense fallback={null}><SupplyWorkspace active={tab === 'supply'} onUrgentCount={onUrgentCount} /></Suspense>
         : null,
     }] : []),
   ];
 
   return (
     <LocalizedList title="Потребности заказов в ресурсах">
+      <RrScreen>
       <Tabs
+        className="rr-page-tabs"
         activeKey={tab}
         onChange={changeTab}
         items={items}
         // Одна вкладка — без полосы вкладок: экран выглядит ровно как раньше.
         renderTabBar={available ? undefined : () => <></>}
       />
+      </RrScreen>
     </LocalizedList>
   );
 }

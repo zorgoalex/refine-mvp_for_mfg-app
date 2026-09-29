@@ -60,7 +60,7 @@ export interface OnecAllocationDto {
   quantity: number | null;
   /** null без права finance.view. */
   amount: number | null;
-  origin: 'auto' | 'manual';
+  origin: 'auto' | 'manual' | 'suggested';
   /** Версия закупа материала заказа — expectedVersion для снятия распределения. */
   procurementVersion: number;
   createdAt: IsoDateTimeString;
@@ -124,4 +124,80 @@ export interface OnecAllocationResultDto {
   orderId: number;
   resourceKey: string;
   line: OrderResourceDemandLineDto;
+}
+
+/** Автоподбор заказов для прихода 1С (экран снабжения, фаза 2). Количества — в единице строки (`docUnit`) и потребности. */
+export interface AllocationSuggestionCandidate {
+  orderId: number;
+  orderName: string;
+  fullNumber: string;
+  clientName: string | null;
+  dueDate: string | null;
+  urgency: 'overdue' | 'critical' | 'soon' | 'normal' | 'no_date';
+  daysLeft: number | null;
+  demandUnit: 'm2' | 'lm';
+  needInDemandUnit: number;
+  deficitInDemandUnit: number;
+  proposedInDocUnit: number;
+  proposedInDemandUnit: number;
+  reasons: Array<{ code: 'onec_order' | 'due' | 'unmarked' | 'supplier' | 'closes'; label: string; tone: 'info' | 'error' | 'warning' | 'success' | 'default' }>;
+  purchased: boolean;
+  procurementVersion: number;
+  demandFingerprint: string;
+}
+
+export interface AllocationSuggestionLine {
+  lineId: number;
+  lineNo: number;
+  nomenclatureName: string | null;
+  material: { resourceKey: string; kind: 'sheet_material' | 'film'; refId: number; name: string } | null;
+  docUnit: OnecUnitCode | null;
+  demandUnit: 'm2' | 'lm' | null;
+  sheetAreaM2: number | null;
+  capacityInDocUnit: number;
+  remainingInDocUnit: number;
+  skipReason: 'not_mapped' | 'incompatible_unit' | 'fully_allocated' | null;
+  alreadyAllocated: Array<{ orderId: number; orderName: string; quantityInDocUnit: number }>;
+  candidates: AllocationSuggestionCandidate[];
+  surplusInDocUnit: number;
+}
+
+export interface AllocationSuggestionsResponse {
+  documentId: number;
+  number: string;
+  date: string;
+  supplierName: string | null;
+  wastePercent: number;
+  proposalLimit: number;
+  proposalLimitReached: boolean;
+  lines: AllocationSuggestionLine[];
+}
+
+export interface BatchOnecAllocationRequest {
+  requestId: string;
+  origin: 'suggested' | 'manual';
+  items: Array<{
+    lineId: number;
+    orderId: number;
+    resourceKey: string;
+    /** Итоговое количество нового распределения в единице строки документа, до 3 знаков. */
+    quantity: number;
+    expectedVersion: number;
+    expectedDemandFingerprint: string;
+    /** Контекст пересчёта единиц предложения — сверяется сервером. */
+    expectedDocUnit: OnecUnitCode | null;
+    expectedSheetAreaM2: number | null;
+  }>;
+}
+
+export interface BatchOnecAllocationResponse {
+  changed: boolean;
+  results: Array<{ index: number; allocationId: number; noop: boolean }>;
+}
+
+/** 409 ONEC_ALLOCATION_BATCH_CONFLICT: details.failures — по элементам запроса. */
+export interface BatchOnecAllocationFailure {
+  index: number;
+  code: string;
+  message: string;
 }

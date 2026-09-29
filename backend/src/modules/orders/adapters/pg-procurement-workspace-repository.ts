@@ -46,6 +46,9 @@ import {
   type ResourceDemandOrderRow,
 } from './pg-order-resource-demand-repository';
 import { lockActor } from './pg-order-resource-procurement-repository';
+import { documentSupplierKey } from './pg-onec-documents-repository';
+import { pairKey, planAllocationSuggestions } from '../domain/allocation-suggestions';
+import { ONEC_ALLOCATION_BATCH_LIMIT, type AllocationSuggestionsResponseDto, type OnecUnitCode } from '../application/onec-documents.types';
 
 interface SettingsRow extends QueryResultRow {
   lead_days: number;
@@ -64,6 +67,35 @@ interface SettingsRow extends QueryResultRow {
 interface WorklistOrderRow extends ResourceDemandOrderRow {
   planned_completion_date: string | null;
   order_status_name: string | null;
+  ref_key_1c?: string | null;
+}
+
+interface SuggestionDocumentRow extends QueryResultRow {
+  onec_document_id: string | number;
+  doc_kind: string;
+  number: string;
+  doc_date: string;
+  posted: boolean;
+  deleted_in_onec: boolean;
+  doc_supplier_id: string | number | null;
+  doc_counterparty_ref_key: string | null;
+  doc_counterparty_name: string | null;
+  supplier_name: string | null;
+}
+
+interface SuggestionLineRow extends QueryResultRow {
+  onec_document_line_id: string | number;
+  line_no: number;
+  nomenclature_name: string | null;
+  quantity: string | number;
+  unit_code: OnecUnitCode | null;
+  sheet_material_type_id: string | number | null;
+  film_id: string | number | null;
+  onec_order_ref_key: string | null;
+  material_name: string | null;
+  width_mm: string | number | null;
+  height_mm: string | number | null;
+  allocated: string | number;
 }
 
 interface ReceiptRow extends QueryResultRow {
@@ -167,92 +199,7 @@ export class PgProcurementWorkspaceRepository {
       const today = todayInAlmaty();
       const window = worklistWindow(query, today, settings.overdueWindowDays);
       const orders = await loadWorklistOrders(client, currentUser, window, query, settings.leadDays);
-      const projected = await loadProjectedOrders(client, orders, undefined);
-      const orderIds = projected.map((order) => order.orderId);
-      const procurement = options.procurementEnabled ? await loadProcurementRows(client, orderIds) : [];
-      const receipts = options.procurementEnabled ? await loadReceipts(client, orderIds) : [];
-      const sheetIds = [...new Set(projected.flatMap((order) => order.lines)
-        .filter((line) => line.kind === 'sheet_material').map((line) => line.refId))];
-      const filmIds = [...new Set(projected.flatMap((order) => order.lines)
-        .filter((line) => line.kind === 'film').map((line) => line.refId))];
-      const geometry = await loadGeometry(client, sheetIds);
-      const recorded = await loadRecordedSuppliers(client, sheetIds, filmIds);
-
-      const orderById = new Map(orders.map((row) => [Number(row.order_id), row]));
-      const procurementByKey = new Map(procurement.map((row) => [`${Number(row.order_id)}|${procurementRowKey(row)}`, row]));
-      const receiptsByProcurement = groupBy(receipts, (row) => Number(row.order_resource_procurement_id));
-
-      const allLines: ProcurementWorklistLineDto[] = [];
-      for (const order of projected) {
-        const orderRow = orderById.get(order.orderId)!;
-        const planned = toDateOnly(orderRow.planned_completion_date);
-        const dueDate = planned === null ? null : subtractWorkingDays(planned, settings.leadDays);
-        const { urgency, daysLeft } = urgencyOf(dueDate, today, settings);
-        for (const projectedLine of order.lines) {
-          const key = `${order.orderId}|${projectedLine.resourceKey}`;
-          const row = procurementByKey.get(key);
-          const unit = demandUnitOf(projectedLine.kind);
-          const geo = projectedLine.kind === 'sheet_material' ? geometry.get(projectedLine.refId) : undefined;
-          const lineReceipts = row ? (receiptsByProcurement.get(Number(row.order_resource_procurement_id)) ?? []) : [];
-          const countable = lineReceipts.filter((receipt) => receipt.posted && !receipt.deleted_in_onec);
-          let receivedThousandths = 0;
-          let incompatible = 0;
-          for (const receipt of countable) {
-            const converted = toDemandUnit(Number(receipt.quantity), receipt.unit_code, unit, { sheetAreaM2: geo?.areaM2 ?? null });
-            if (converted === null) incompatible += 1;
-            else receivedThousandths += Math.round(converted * 1000);
-          }
-          const received = receivedThousandths / 1000;
-          const purchased = row?.purchased === true;
-          const demandChangedSinceMark = purchased && row?.demand_fingerprint_at_mark !== projectedLine.demandFingerprint;
-          const coverage = computeCoverage({
-            need: projectedLine.quantity,
-            received,
-            purchased,
-            origin: row?.origin ?? null,
-            hasActiveReceipts: countable.length > 0,
-            demandChangedSinceMark,
-            quantityAtMark: row?.quantity_at_mark === null || row?.quantity_at_mark === undefined ? null : Number(row.quantity_at_mark),
-            orderedOpen: 0,
-          });
-          allLines.push({
-            lineKey: key,
-            orderId: order.orderId,
-            orderName: order.base.orderName,
-            fullNumber: order.base.fullNumber,
-            clientName: order.base.clientName,
-            orderStatus: orderRow.order_status_name ?? null,
-            resourceKey: projectedLine.resourceKey,
-            kind: projectedLine.kind,
-            refId: projectedLine.refId,
-            name: projectedLine.name,
-            unit,
-            need: projectedLine.quantity,
-            received,
-            receivedIncompatibleCount: incompatible,
-            covered: coverage.covered,
-            orderedOpen: 0,
-            deficit: coverage.deficit,
-            coverage: coverage.coverage,
-            needsAction: coverage.needsAction,
-            purchased,
-            purchaseOrigin: purchased ? (row?.origin ?? null) : null,
-            demandChangedSinceMark,
-            plannedCompletionDate: planned,
-            dueDate,
-            daysLeft,
-            urgency,
-            supplier: resolveSupplier(
-              geo?.supplier ?? null,
-              recorded.get(resourceKey(projectedLine.kind, projectedLine.refId)) ?? [],
-            ),
-            procurementVersion: row ? Number(row.version) : 0,
-            demandFingerprint: projectedLine.demandFingerprint,
-            onecReceiptCount: lineReceipts.length,
-            lockedByOnec: countable.length > 0,
-          });
-        }
-      }
+      const { lines: allLines, orderIds } = await buildWorklistLines(client, orders, settings, today, options.procurementEnabled);
 
       const onecLineKeys = query.onecDocumentId === undefined || !options.procurementEnabled
         ? (query.onecDocumentId === undefined ? undefined : new Set<string>())
@@ -289,6 +236,126 @@ export class PgProcurementWorkspaceRepository {
         today,
         capabilities: { supplyWorkspace: options.supplyWorkspaceEnabled, procurement: options.procurementEnabled },
         refreshedAt: new Date().toISOString(),
+      };
+    });
+  }
+
+  /**
+   * Автоподбор заказов для прихода 1С (план §5.3). Только чтение, снимок REPEATABLE READ; кандидаты —
+   * только заказы в scope (никаких счётчиков скрытых — R1-1), активные (как рабочий список, без окна дат).
+   */
+  async allocationSuggestions(currentUser: CurrentUser, documentId: number): Promise<AllocationSuggestionsResponseDto> {
+    return this.database.transaction(async (client) => {
+      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const settingsRow = (await client.query<SettingsRow>(SETTINGS_SELECT)).rows[0];
+      if (!settingsRow) throw settingsMissing();
+      const settings = settingsDto(settingsRow);
+      const today = todayInAlmaty();
+      const doc = (await client.query<SuggestionDocumentRow>(
+        `SELECT d.onec_document_id, d.doc_kind, d.number, d.doc_date::text AS doc_date, d.posted, d.deleted_in_onec,
+                d.supplier_id AS doc_supplier_id, d.counterparty_ref_key::text AS doc_counterparty_ref_key,
+                d.counterparty_name AS doc_counterparty_name, s.supplier_name
+           FROM onec_documents d
+           LEFT JOIN suppliers s ON s.supplier_id = d.supplier_id
+          WHERE d.onec_document_id = $1`,
+        [documentId],
+      )).rows[0];
+      if (!doc) throw new ApiError(404, 'ONEC_DOCUMENT_NOT_FOUND', 'Документ 1С не найден');
+      if (doc.doc_kind !== 'purchase_receipt' || !doc.posted || doc.deleted_in_onec) {
+        throw new ApiError(409, 'ONEC_DOCUMENT_NOT_ALLOCATABLE', 'Подбор — только для проведённого прихода, не удалённого в 1С');
+      }
+      const lineRows = (await client.query<SuggestionLineRow>(
+        `SELECT l.onec_document_line_id, l.line_no, l.nomenclature_name, l.quantity, l.unit_code,
+                l.sheet_material_type_id, l.film_id, l.onec_order_ref_key::text AS onec_order_ref_key,
+                COALESCE(smt.name, f.film_name) AS material_name, smt.width_mm, smt.height_mm,
+                (SELECT COALESCE(sum(a.quantity), 0) FROM order_resource_onec_allocations a
+                  WHERE a.onec_document_line_id = l.onec_document_line_id AND a.removed_at IS NULL) AS allocated
+           FROM onec_document_lines l
+           LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = l.sheet_material_type_id
+           LEFT JOIN films f ON f.film_id = l.film_id
+          WHERE l.onec_document_id = $1 AND l.is_document_total = false
+          ORDER BY l.line_no, l.onec_document_line_id`,
+        [documentId],
+      )).rows;
+      const sheetIds = uniqueIds(lineRows.map((row) => row.sheet_material_type_id));
+      const filmIds = uniqueIds(lineRows.map((row) => row.film_id));
+      const orders = await loadSuggestionOrders(client, currentUser, sheetIds, filmIds);
+      const built = await buildWorklistLines(client, orders, settings, today, true);
+      const refKeyByOrder = new Map(orders.map((row) => [Number(row.order_id), row.ref_key_1c ?? null]));
+      const lineIds = lineRows.map((row) => Number(row.onec_document_line_id));
+      const allocations = lineIds.length === 0 ? [] : (await client.query<{ line_id: string; order_id: string; order_name: string; quantity: string }>(
+        `SELECT a.onec_document_line_id::text AS line_id, orp.order_id::text AS order_id, o.order_name, a.quantity::text AS quantity
+           FROM order_resource_onec_allocations a
+           JOIN order_resource_procurement orp ON orp.order_resource_procurement_id = a.order_resource_procurement_id
+           JOIN orders o ON o.order_id = orp.order_id
+          WHERE a.onec_document_line_id = ANY($1::bigint[]) AND a.removed_at IS NULL AND a.role = 'receipt'
+          ORDER BY a.onec_document_line_id, orp.order_id`,
+        [lineIds],
+      )).rows;
+      // «Уже распределено» — все заказы распределений в scope пользователя, включая выданные/завершённые
+      // (их распределения уменьшают остаток строки). Пригодность для новых предложений — отдельно (CR1-5).
+      const allocationOrderIds = [...new Set(allocations.map((row) => Number(row.order_id)))];
+      const visibleOrderIds = await scopedOrderIds(client, currentUser, allocationOrderIds);
+      const allocatedPairs = new Set(allocations.map((row) => pairKey(Number(row.line_id), Number(row.order_id))));
+      const alreadyAllocated = new Map<number, Array<{ orderId: number; orderName: string; quantityInDocUnit: number }>>();
+      for (const row of allocations) {
+        // Заказы вне scope не называются (как в карточке документа, где они — счётчиком).
+        if (!visibleOrderIds.has(Number(row.order_id))) continue;
+        const list = alreadyAllocated.get(Number(row.line_id)) ?? [];
+        list.push({ orderId: Number(row.order_id), orderName: row.order_name, quantityInDocUnit: Number(row.quantity) });
+        alreadyAllocated.set(Number(row.line_id), list);
+      }
+      const plan = planAllocationSuggestions({
+        lines: lineRows.map((row) => {
+          const kind: OrderResourceKind | null = row.sheet_material_type_id !== null ? 'sheet_material' : row.film_id !== null ? 'film' : null;
+          const refId = kind === 'sheet_material' ? Number(row.sheet_material_type_id) : kind === 'film' ? Number(row.film_id) : 0;
+          return {
+            lineId: Number(row.onec_document_line_id),
+            lineNo: Number(row.line_no),
+            nomenclatureName: row.nomenclature_name,
+            material: kind === null ? null : {
+              resourceKey: resourceKey(kind, refId), kind, refId, name: row.material_name?.trim() || `ID: ${refId}`,
+            },
+            docUnit: row.unit_code,
+            sheetAreaM2: kind === 'sheet_material' ? sheetAreaM2(row.width_mm, row.height_mm) : null,
+            capacityInDocUnit: Number(row.quantity),
+            allocatedInDocUnit: Number(row.allocated),
+            onecOrderRefKey: row.onec_order_ref_key,
+          };
+        }),
+        candidates: built.lines.map((line) => ({
+          orderId: line.orderId,
+          orderName: line.orderName,
+          fullNumber: line.fullNumber,
+          clientName: line.clientName,
+          orderRefKey1c: refKeyByOrder.get(line.orderId) ?? null,
+          resourceKey: line.resourceKey,
+          need: line.need,
+          covered: line.covered,
+          source: line.demandSource,
+          purchased: line.purchased,
+          dueDate: line.dueDate,
+          urgency: line.urgency,
+          daysLeft: line.daysLeft,
+          supplierKey: line.supplier.key,
+          procurementVersion: line.procurementVersion,
+          demandFingerprint: line.demandFingerprint,
+        })),
+        allocatedPairs,
+        alreadyAllocated,
+        documentSupplierKey: documentSupplierKey(doc),
+        wastePercent: settings.wastePercent,
+        maxProposals: ONEC_ALLOCATION_BATCH_LIMIT,
+      });
+      return {
+        documentId,
+        number: doc.number,
+        date: doc.doc_date.slice(0, 10),
+        supplierName: doc.supplier_name?.trim() || doc.doc_counterparty_name?.trim() || null,
+        wastePercent: settings.wastePercent,
+        proposalLimit: ONEC_ALLOCATION_BATCH_LIMIT,
+        proposalLimitReached: plan.limitReached,
+        lines: plan.lines,
       };
     });
   }
@@ -357,6 +424,107 @@ async function loadWorklistOrders(
     });
   }
   return result.rows;
+}
+
+/**
+ * Строки «заказ × материал» с покрытием, сроком и поставщиком — общая основа рабочего списка и
+ * автоподбора прихода (одинаковые правила §4.1–4.4).
+ */
+export async function buildWorklistLines(
+  client: DatabaseClient,
+  orders: WorklistOrderRow[],
+  settings: ProcurementSettingsDto,
+  today: string,
+  procurementEnabled: boolean,
+): Promise<{ lines: ProcurementWorklistLineDto[]; orderIds: number[]; geometry: Map<number, { areaM2: number | null; supplier: { id: number; name: string } | null }> }> {
+  const projected = await loadProjectedOrders(client, orders, undefined);
+  const orderIds = projected.map((order) => order.orderId);
+  const procurement = procurementEnabled ? await loadProcurementRows(client, orderIds) : [];
+  const receipts = procurementEnabled ? await loadReceipts(client, orderIds) : [];
+  const sheetIds = [...new Set(projected.flatMap((order) => order.lines)
+    .filter((line) => line.kind === 'sheet_material').map((line) => line.refId))];
+  const filmIds = [...new Set(projected.flatMap((order) => order.lines)
+    .filter((line) => line.kind === 'film').map((line) => line.refId))];
+  const geometry = await loadGeometry(client, sheetIds);
+  const recorded = await loadRecordedSuppliers(client, sheetIds, filmIds);
+
+  const orderById = new Map(orders.map((row) => [Number(row.order_id), row]));
+  const procurementByKey = new Map(procurement.map((row) => [`${Number(row.order_id)}|${procurementRowKey(row)}`, row]));
+  const receiptsByProcurement = groupBy(receipts, (row) => Number(row.order_resource_procurement_id));
+
+  const lines: ProcurementWorklistLineDto[] = [];
+  for (const order of projected) {
+    const orderRow = orderById.get(order.orderId)!;
+    const planned = toDateOnly(orderRow.planned_completion_date);
+    const dueDate = planned === null ? null : subtractWorkingDays(planned, settings.leadDays);
+    const { urgency, daysLeft } = urgencyOf(dueDate, today, settings);
+    for (const projectedLine of order.lines) {
+      const key = `${order.orderId}|${projectedLine.resourceKey}`;
+      const row = procurementByKey.get(key);
+      const unit = demandUnitOf(projectedLine.kind);
+      const geo = projectedLine.kind === 'sheet_material' ? geometry.get(projectedLine.refId) : undefined;
+      const lineReceipts = row ? (receiptsByProcurement.get(Number(row.order_resource_procurement_id)) ?? []) : [];
+      const countable = lineReceipts.filter((receipt) => receipt.posted && !receipt.deleted_in_onec);
+      let receivedThousandths = 0;
+      let incompatible = 0;
+      for (const receipt of countable) {
+        const converted = toDemandUnit(Number(receipt.quantity), receipt.unit_code, unit, { sheetAreaM2: geo?.areaM2 ?? null });
+        if (converted === null) incompatible += 1;
+        else receivedThousandths += Math.round(converted * 1000);
+      }
+      const received = receivedThousandths / 1000;
+      const purchased = row?.purchased === true;
+      const demandChangedSinceMark = purchased && row?.demand_fingerprint_at_mark !== projectedLine.demandFingerprint;
+      const coverage = computeCoverage({
+        need: projectedLine.quantity,
+        received,
+        purchased,
+        origin: row?.origin ?? null,
+        hasActiveReceipts: countable.length > 0,
+        demandChangedSinceMark,
+        quantityAtMark: row?.quantity_at_mark === null || row?.quantity_at_mark === undefined ? null : Number(row.quantity_at_mark),
+        orderedOpen: 0,
+      });
+      lines.push({
+        lineKey: key,
+        orderId: order.orderId,
+        orderName: order.base.orderName,
+        fullNumber: order.base.fullNumber,
+        clientName: order.base.clientName,
+        orderStatus: orderRow.order_status_name ?? null,
+        resourceKey: projectedLine.resourceKey,
+        kind: projectedLine.kind,
+        refId: projectedLine.refId,
+        name: projectedLine.name,
+        unit,
+        demandSource: projectedLine.source,
+        need: projectedLine.quantity,
+        received,
+        receivedIncompatibleCount: incompatible,
+        covered: coverage.covered,
+        orderedOpen: 0,
+        deficit: coverage.deficit,
+        coverage: coverage.coverage,
+        needsAction: coverage.needsAction,
+        purchased,
+        purchaseOrigin: purchased ? (row?.origin ?? null) : null,
+        demandChangedSinceMark,
+        plannedCompletionDate: planned,
+        dueDate,
+        daysLeft,
+        urgency,
+        supplier: resolveSupplier(
+          geo?.supplier ?? null,
+          recorded.get(resourceKey(projectedLine.kind, projectedLine.refId)) ?? [],
+        ),
+        procurementVersion: row ? Number(row.version) : 0,
+        demandFingerprint: projectedLine.demandFingerprint,
+        onecReceiptCount: lineReceipts.length,
+        lockedByOnec: countable.length > 0,
+      });
+    }
+  }
+  return { lines, orderIds, geometry };
 }
 
 /**
@@ -453,6 +621,70 @@ export function buildNarrowingPredicates(query: ProcurementWorklistQuery, leadDa
            WHERE dorp.order_id = o.order_id AND dl.onec_document_id = $${params.push(query.onecDocumentId)})`);
   }
   return clauses;
+}
+
+/** Кандидаты автоподбора: активные заказы в scope, в потребности которых есть материалы прихода. */
+async function loadSuggestionOrders(
+  client: DatabaseClient,
+  currentUser: CurrentUser,
+  sheetIds: number[],
+  filmIds: number[],
+): Promise<WorklistOrderRow[]> {
+  if (sheetIds.length === 0 && filmIds.length === 0) return [];
+  const params: unknown[] = [];
+  const { whereSql } = buildScopedOrderWhere(currentUser, undefined, params);
+  const sheetIndex = params.push(sheetIds);
+  const filmIndex = params.push(filmIds);
+  const doneIndex = params.push(PROCUREMENT_WORKLIST_DONE_STATUS_CODES);
+  const limitIndex = params.push(PROCUREMENT_WORKLIST_ORDER_LIMIT + 1);
+  const rows = (await client.query<WorklistOrderRow>(
+    `SELECT o.order_id, o.order_name, (p.code || '-' || o.order_name) AS full_number, o.order_date,
+            p.code AS project_code, c.client_name, o.client_id, o.updated_at,
+            o.planned_completion_date::text AS planned_completion_date, os.order_status_name, o.ref_key_1c::text AS ref_key_1c
+       FROM orders o
+       JOIN projects p ON p.project_id = o.project_id
+       LEFT JOIN clients c ON c.client_id = o.client_id
+       LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
+      WHERE ${whereSql}
+        AND o.issue_date IS NULL
+        AND o.completion_date IS NULL
+        AND COALESCE(os.order_status_code, '') <> ALL ($${doneIndex}::text[])
+        AND (EXISTS (SELECT 1 FROM order_details sd
+                      WHERE sd.order_id = o.order_id AND sd.delete_flag = false
+                        AND (sd.sheet_material_type_id = ANY($${sheetIndex}::bigint[]) OR sd.film_id = ANY($${filmIndex}::bigint[])))
+          OR EXISTS (SELECT 1 FROM order_hdf_details sh
+                      WHERE sh.order_id = o.order_id AND sh.delete_flag = false
+                        AND sh.hdf_sheet_material_type_id = ANY($${sheetIndex}::bigint[])))
+      ORDER BY o.planned_completion_date NULLS LAST, o.order_id
+      LIMIT $${limitIndex}`,
+    params,
+  )).rows;
+  if (rows.length > PROCUREMENT_WORKLIST_ORDER_LIMIT) {
+    throw new ApiError(422, 'PROCUREMENT_SUGGESTIONS_TOO_MANY', 'Слишком много заказов с этими материалами для подбора', {
+      limit: PROCUREMENT_WORKLIST_ORDER_LIMIT,
+    });
+  }
+  return rows;
+}
+
+async function scopedOrderIds(client: DatabaseClient, currentUser: CurrentUser, orderIds: number[]): Promise<Set<number>> {
+  if (orderIds.length === 0) return new Set();
+  const params: unknown[] = [];
+  const { whereSql } = buildScopedOrderWhere(currentUser, undefined, params);
+  const idsIndex = params.push(orderIds);
+  const rows = (await client.query<{ order_id: string }>(
+    `SELECT o.order_id::text AS order_id
+       FROM orders o
+       JOIN projects p ON p.project_id = o.project_id
+       LEFT JOIN clients c ON c.client_id = o.client_id
+      WHERE ${whereSql} AND o.order_id = ANY($${idsIndex}::bigint[])`,
+    params,
+  )).rows;
+  return new Set(rows.map((row) => Number(row.order_id)));
+}
+
+function uniqueIds(values: Array<string | number | null>): number[] {
+  return [...new Set(values.filter((value): value is string | number => value !== null).map(Number))].sort((a, b) => a - b);
 }
 
 async function loadReceipts(client: DatabaseClient, orderIds: number[]): Promise<ReceiptRow[]> {

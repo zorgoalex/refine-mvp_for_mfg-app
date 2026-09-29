@@ -1,5 +1,5 @@
 import type { CurrentUser } from '../../../permissions/current-user';
-import type { OrderResourceKind, OrderResourceUnit } from './order-resource-demand.types';
+import type { OrderResourceKind, OrderResourceSource, OrderResourceUnit } from './order-resource-demand.types';
 
 /** Настройки экрана снабжения (singleton `procurement_settings`, экран «Конфигурация»). */
 export interface ProcurementSettingsDto {
@@ -68,6 +68,8 @@ export interface ProcurementWorklistLineDto {
   refId: number;
   name: string;
   unit: OrderResourceUnit;
+  /** Откуда потребность: готовый раскрой, площадь деталей или нет данных (запас на обрезки — только для 'area'). */
+  demandSource: OrderResourceSource;
   need: number | null;
   received: number;
   /** Приходы в единицах, не пересчитываемых в единицу потребности (§4.4). */

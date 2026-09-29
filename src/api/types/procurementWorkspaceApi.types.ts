@@ -40,6 +40,7 @@ export interface ProcurementWorklistLine {
   refId: number;
   name: string;
   unit: 'm2' | 'lm';
+  demandSource: 'cut' | 'area' | 'none';
   need: number | null;
   received: number;
   receivedIncompatibleCount: number;

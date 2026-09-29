@@ -1,7 +1,7 @@
 import { DeleteOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
-import { Alert, Badge, Button, Card, Col, DatePicker, Empty, Input, Modal, Row, Select, Space, Statistic, Tag, Typography, message, theme } from 'antd';
+import { Alert, Button, DatePicker, Empty, Input, Modal, Select, Space, Tag, message } from 'antd';
 import dayjs from 'dayjs';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ordersApi, subscribeOrderDataChanged } from '../../api/ordersApi';
 import { procurementWorkspaceApi } from '../../api/procurementWorkspaceApi';
@@ -16,8 +16,11 @@ import { Segmented } from '../../ui/Segmented';
 import { Table, Tooltip, type TableProps } from '../../ui/tooltipDelay';
 import { useProcurementPermission } from '../order_resource_requirements/ProcurementParts';
 import {
+  buildOnecDocumentFilterOptionGroups,
+  type OnecDocumentFilterDoc,
+} from '../order_resource_requirements/onecDocumentFilter';
+import {
   COVERAGE_LABELS,
-  URGENCY_COLORS,
   coveragePercents,
   dueText,
   formatDate,
@@ -38,6 +41,11 @@ import {
 } from './worklistHelpers';
 
 const LIVE_REFRESH_MS = 30_000;
+/** Цвет вида материала — как в мокапе: листовой / плёнка. */
+const KIND_COLORS = { sheet_material: '#a0661c', film: '#0e8f84' } as const;
+/** Тона мягких тегов мокапа. */
+const COVERAGE_TONES = { covered: 'ok', partial: 'warn', ordered: 'info', none: 'bad', no_data: 'none' } as const;
+const URGENCY_TONES = { overdue: 'bad', critical: 'bad', soon: 'warn', normal: 'none', no_date: 'none' } as const;
 const PAGE_SIZE = 50;
 
 export interface WorklistSectionProps {
@@ -48,7 +56,6 @@ export interface WorklistSectionProps {
 }
 
 export function WorklistSection({ active, onUrgentCount }: WorklistSectionProps) {
-  const { token } = theme.useToken();
   const [searchParams, setSearchParams] = useSearchParams();
   const state = useMemo(() => parseWorklistSearch(searchParams), [searchParams]);
   const setState = useCallback((patch: Partial<WorklistState>) => {
@@ -120,6 +127,17 @@ export function WorklistSection({ active, onUrgentCount }: WorklistSectionProps)
   const supplierOptions = [...suppliersSeen.current.entries()]
     .sort(([, left], [, right]) => left.localeCompare(right, 'ru'))
     .map(([value, label]) => ({ value, label }));
+
+  // Варианты фильтра «Документ 1С»: документы, распределённые на заказы в scope пользователя.
+  const [onecDocs, setOnecDocs] = useState<OnecDocumentFilterDoc[]>([]);
+  useEffect(() => {
+    if (!active) return undefined;
+    let alive = true;
+    ordersApi.listResourceDemandOnecDocuments({})
+      .then((response) => { if (alive) setOnecDocs(response.data as OnecDocumentFilterDoc[]); })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [active]);
 
   const { canManage, manageLoading } = useProcurementPermission();
   const [marking, setMarking] = useState(false);
@@ -213,35 +231,58 @@ export function WorklistSection({ active, onUrgentCount }: WorklistSectionProps)
       setSelected((current) => applySelectionChange(current, changeRows.map((row) => row.lineKey), isSelected)),
   };
 
-  const table = (rows: ProcurementWorklistLine[], paginated: boolean) => (
-    <Table<ProcurementWorklistLine>
-      size="small"
-      rowKey="lineKey"
-      dataSource={rows}
-      columns={columns}
-      rowSelection={rowSelection}
-      loading={loading && !response}
-      pagination={paginated ? { current: page, onChange: setPage, pageSize: PAGE_SIZE, showSizeChanger: false, hideOnSinglePage: true } : false}
-      rowClassName={(row) => (row.lineKey === focusedKey ? 'ant-table-row-selected' : '')}
-      scroll={{ x: 1100 }}
-      locale={{ emptyText: <Empty description={state.preset === 'action' ? 'Всё покрыто — действий не требуется' : 'Нет позиций'} /> }}
-    />
-  );
+  // Одна таблица, как в мокапе: при группировке строки групп встроены в неё (заголовок + «Выделить группу»).
+  const tableRows: WorklistRow[] = useMemo(() => {
+    if (state.groupBy === 'none' || !response) return lines;
+    return response.groups.flatMap((group) => [
+      { rowType: 'group' as const, lineKey: `group:${group.key}`, group },
+      ...(group.lineKeys.map((key) => lineByKey.get(key)).filter(Boolean) as ProcurementWorklistLine[]),
+    ]);
+  }, [lineByKey, lines, response, state.groupBy]);
+  const groupColumns = useMemo(() => withGroupRows(columns ?? [], (group) => {
+    const whole = isGroupSelected(group.lineKeys, selected);
+    return (
+      <span>
+        {group.label}{' '}
+        <span className="rr-grp-info">
+          · {group.linesCount} поз. · дефицит {[group.deficitM2 ? formatQuantity(group.deficitM2, 'm2') : '', group.deficitLm ? formatQuantity(group.deficitLm, 'lm') : ''].filter(Boolean).join(' + ') || '0'}
+        </span>
+        <Button size="small" style={{ marginLeft: 10 }} disabled={stale} onClick={() => setSelected((current) => toggleGroupSelection(group.lineKeys, current))}>
+          {whole ? 'Снять выделение' : 'Выделить группу'}
+        </Button>
+      </span>
+    );
+  }), [columns, selected, stale]);
+  const worklistSelection: TableProps<WorklistRow>['rowSelection'] = {
+    ...(rowSelection as unknown as TableProps<WorklistRow>['rowSelection']),
+    getCheckboxProps: (row) => ({ disabled: stale || isGroupRow(row) }),
+    renderCell: (_checked, row, _index, node) => (isGroupRow(row) ? null : node),
+    onSelect: (record, isSelected) => { if (!isGroupRow(record)) setSelected((current) => applySelectionChange(current, [record.lineKey], isSelected)); },
+    onSelectAll: (isSelected, _rows, changeRows) =>
+      setSelected((current) => applySelectionChange(current, changeRows.filter((row) => !isGroupRow(row)).map((row) => row.lineKey), isSelected)),
+    onSelectMultiple: (isSelected, _rows, changeRows) =>
+      setSelected((current) => applySelectionChange(current, changeRows.filter((row) => !isGroupRow(row)).map((row) => row.lineKey), isSelected)),
+  };
 
   const selectionDeficit = summarizeDeficit(selectedLines);
   const selectedSuppliers = new Set(selectedLines.map((line) => line.supplier.key)).size;
+  const counts = response?.counts;
 
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%', paddingBottom: selected.size > 0 ? 72 : 0 }}>
-      <Space wrap size={[8, 8]} style={{ width: '100%' }}>
+    <div style={{ paddingBottom: selected.size > 0 ? 72 : 0 }}>
+      <div className="rr-appbar">
+        <span className="rr-ttl">Рабочий список</span>
+        <span className="rr-muted">что закупить и к какому сроку</span>
+      </div>
+      <div className="rr-toolbar">
         <Segmented
           aria-label="Набор"
           value={state.preset}
           onChange={(value) => setState({ preset: value as WorklistPreset })}
           options={[
-            { value: 'action', label: <span>Требует действия <Badge count={response?.counts.action ?? 0} showZero color="#8c8c8c" /></span> },
-            { value: 'urgent', label: <span>Срочно на этой неделе <Badge count={response?.counts.urgent ?? 0} showZero /></span> },
-            { value: 'all', label: <span>Всё <Badge count={response?.counts.all ?? 0} showZero color="#8c8c8c" /></span> },
+            { value: 'action', label: <span>Требует действия<span className="rr-badge">{counts?.action ?? 0}</span></span> },
+            { value: 'urgent', label: <span>Срочно на этой неделе<span className="rr-badge rr-badge--bad">{counts?.urgent ?? 0}</span></span> },
+            { value: 'all', label: <span>Всё<span className="rr-badge">{counts?.all ?? 0}</span></span> },
           ]}
         />
         <Segmented
@@ -254,16 +295,17 @@ export function WorklistSection({ active, onUrgentCount }: WorklistSectionProps)
             { value: 'material', label: 'По материалам' },
           ]}
         />
-        <Input.Search
+        <Input
           allowClear
-          placeholder="Заказ, клиент, материал, поставщик"
+          placeholder="Заказ, клиент, материал"
           value={searchInput}
           onChange={(event) => setSearchInput(event.target.value)}
-          style={{ width: 280 }}
+          style={{ width: 200 }}
         />
         <DatePicker.RangePicker
           format="DD.MM.YYYY"
           placeholder={['Нужно к: с', 'по']}
+          style={{ width: 230 }}
           value={state.dueFrom || state.dueTo ? [state.dueFrom ? dayjs(state.dueFrom) : null, state.dueTo ? dayjs(state.dueTo) : null] : null}
           onChange={(range) => setState({
             dueFrom: range?.[0] ? range[0].format('YYYY-MM-DD') : null,
@@ -272,8 +314,20 @@ export function WorklistSection({ active, onUrgentCount }: WorklistSectionProps)
         />
         <Select
           allowClear
+          showSearch
+          optionFilterProp="label"
+          placeholder="Документ 1С"
+          style={{ width: 170 }}
+          dropdownMatchSelectWidth={320}
+          value={state.onecDocumentId ?? undefined}
+          onChange={(value) => setState({ onecDocumentId: value ?? null })}
+          options={buildOnecDocumentFilterOptionGroups(onecDocs)}
+          notFoundContent="Нет распределённых документов"
+        />
+        <Select
+          allowClear
           placeholder="Вид"
-          style={{ width: 140 }}
+          style={{ width: 120 }}
           value={state.kind ?? undefined}
           onChange={(value) => setState({ kind: value ?? null })}
           options={[{ value: 'sheet_material', label: 'Листовые' }, { value: 'film', label: 'Плёнка' }]}
@@ -283,7 +337,7 @@ export function WorklistSection({ active, onUrgentCount }: WorklistSectionProps)
           showSearch
           optionFilterProp="label"
           placeholder="Поставщик"
-          style={{ width: 200 }}
+          style={{ width: 170 }}
           value={state.supplierKey ?? undefined}
           onChange={(value) => setState({ supplierKey: value ?? null })}
           options={supplierOptions}
@@ -291,8 +345,9 @@ export function WorklistSection({ active, onUrgentCount }: WorklistSectionProps)
         <Select
           mode="multiple"
           allowClear
+          maxTagCount="responsive"
           placeholder="Покрытие"
-          style={{ minWidth: 180 }}
+          style={{ minWidth: 150 }}
           value={state.coverage}
           onChange={(value) => setState({ coverage: value })}
           options={Object.entries(COVERAGE_LABELS).map(([value, { label }]) => ({ value, label }))}
@@ -301,89 +356,98 @@ export function WorklistSection({ active, onUrgentCount }: WorklistSectionProps)
         <Tooltip title="Обновить">
           <Button icon={<ReloadOutlined />} onClick={refresh} aria-label="Обновить" />
         </Tooltip>
-      </Space>
+      </div>
 
-      {state.onecDocumentId !== null && (
-        <Tag closable onClose={() => setState({ onecDocumentId: null })}>Только позиции документа 1С #{state.onecDocumentId}</Tag>
-      )}
-      {error && <Alert type="error" showIcon message={error} />}
+      <div className="rr-pad rr-pad--top">
+        {state.onecDocumentId !== null && (
+          <span>
+            <Tag closable onClose={() => setState({ onecDocumentId: null })}>Только позиции документа 1С #{state.onecDocumentId}</Tag>
+          </span>
+        )}
+        {error && <Alert type="error" showIcon message={error} />}
+        <div className="rr-summary">
+          <div className="rr-kpi"><div className="rr-kpi-l">Не покрыто позиций</div><div className="rr-kpi-v">{formatInteger(response?.totals.uncovered ?? 0)}</div></div>
+          <div className="rr-kpi">
+            <div className="rr-kpi-l">Срочно (≤ {response?.settings.soonDays ?? 7} дней)</div>
+            <div className={`rr-kpi-v${(response?.totals.urgent ?? 0) > 0 ? ' rr-kpi-v--bad' : ''}`}>{formatInteger(response?.totals.urgent ?? 0)}</div>
+          </div>
+          <div className="rr-kpi"><div className="rr-kpi-l">Дефицит листовых</div><div className="rr-kpi-v">{formatQuantity(response?.totals.deficitM2 ?? 0, 'm2')}</div></div>
+          <div className="rr-kpi"><div className="rr-kpi-l">Дефицит плёнки</div><div className="rr-kpi-v">{formatQuantity(response?.totals.deficitLm ?? 0, 'lm')}</div></div>
+        </div>
+        {response && (
+          <div className="rr-hint">
+            «Нужно к» = плановая дата − {response.settings.leadDays} раб. дн. Заказы: незавершённые и невыданные, без плановой даты или с датой
+            {response.window.plannedFrom ? ` с ${formatDate(response.window.plannedFrom)}` : ''}{response.window.plannedTo ? ` по ${formatDate(response.window.plannedTo)}` : ''}
+            {response.window.plannedFrom ? ' (более старые — через поиск или «Нужно к: с»)' : ''}; всего {response.window.ordersCount}.
+          </div>
+        )}
+      </div>
 
-      <Row gutter={[12, 12]}>
-        <Col xs={12} md={6}><Card size="small"><Statistic title="Не покрыто позиций" value={response?.totals.uncovered ?? 0} groupSeparator=" " /></Card></Col>
-        <Col xs={12} md={6}>
-          <Card size="small">
-            <Statistic
-              title={`Срочно (≤ ${response?.settings.soonDays ?? 7} дн.)`}
-              value={response?.totals.urgent ?? 0}
-              valueStyle={{ color: (response?.totals.urgent ?? 0) > 0 ? '#cf1322' : undefined }}
-              groupSeparator=" "
-            />
-          </Card>
-        </Col>
-        <Col xs={12} md={6}><Card size="small"><Statistic title="Дефицит листовых, м²" value={response?.totals.deficitM2 ?? 0} precision={2} groupSeparator=" " decimalSeparator="," /></Card></Col>
-        <Col xs={12} md={6}><Card size="small"><Statistic title="Дефицит плёнки, пог. м" value={response?.totals.deficitLm ?? 0} precision={1} groupSeparator=" " decimalSeparator="," /></Card></Col>
-      </Row>
-      {response && (
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          «Нужно к» = плановая дата − {response.settings.leadDays} раб. дн. Заказы: незавершённые и невыданные, без плановой даты или с датой
-          {response.window.plannedFrom ? ` с ${formatDate(response.window.plannedFrom)}` : ''}{response.window.plannedTo ? ` по ${formatDate(response.window.plannedTo)}` : ''}
-          {response.window.plannedFrom ? ' (более старые — через поиск или «Нужно к: с»)' : ''}; всего {response.window.ordersCount}.
-        </Typography.Text>
-      )}
+      <div className="rr-legend">
+        <span><i className="rr-dot" style={{ background: 'var(--rr-ok)' }} />пришло</span>
+        <span><i className="rr-dot" style={{ background: 'var(--rr-ordered)' }} />заказано поставщику</span>
+        <span><i className="rr-dot" style={{ background: 'var(--rr-none-soft)', outline: '1px solid var(--rr-border)' }} />дефицит</span>
+        <span><i className="rr-dot" style={{ background: KIND_COLORS.sheet_material }} />листовой материал</span>
+        <span><i className="rr-dot" style={{ background: KIND_COLORS.film }} />плёнка</span>
+      </div>
 
-      {state.groupBy === 'none' || !response
-        ? table(lines, true)
-        : response.groups.map((group) => {
-          const groupLines = group.lineKeys.map((key) => lineByKey.get(key)).filter(Boolean) as ProcurementWorklistLine[];
-          const whole = isGroupSelected(group.lineKeys, selected);
-          return (
-            <Card
-              key={group.key}
-              size="small"
-              title={(
-                <Space wrap>
-                  <Typography.Text strong>{group.label}</Typography.Text>
-                  <Typography.Text type="secondary">
-                    {group.linesCount} поз. · дефицит {[group.deficitM2 ? formatQuantity(group.deficitM2, 'm2') : '', group.deficitLm ? formatQuantity(group.deficitLm, 'lm') : ''].filter(Boolean).join(' + ') || '0'}
-                  </Typography.Text>
-                  <Button size="small" disabled={stale} onClick={() => setSelected((current) => toggleGroupSelection(group.lineKeys, current))}>
-                    {whole ? 'Снять выделение' : 'Выделить группу'}
-                  </Button>
-                </Space>
-              )}
-            >
-              {table(groupLines, false)}
-            </Card>
-          );
-        })}
+      <Table<WorklistRow>
+        className="rr-table"
+        rowKey="lineKey"
+        dataSource={tableRows}
+        columns={groupColumns}
+        rowSelection={worklistSelection}
+        loading={loading && !response}
+        pagination={state.groupBy === 'none'
+          ? { current: page, onChange: setPage, pageSize: PAGE_SIZE, showSizeChanger: false, hideOnSinglePage: true, style: { padding: '0 16px' } }
+          : false}
+        rowClassName={(row) => (isGroupRow(row) ? 'rr-grp' : row.lineKey === focusedKey ? 'rr-focus' : '')}
+        scroll={{ x: 1100 }}
+        locale={{ emptyText: <Empty description={state.preset === 'action' ? 'Всё покрыто — действий не требуется' : 'Нет позиций'} /> }}
+      />
 
       {selected.size > 0 && (
-        <div
-          role="region"
-          aria-label="Действия с выбранным"
-          style={{
-            position: 'fixed', left: '50%', bottom: 16, transform: 'translateX(-50%)', zIndex: 20,
-            // Цвета темы: читаемо и в светлой, и в тёмной (CR8-1).
-            background: token.colorBgElevated, border: `1px solid ${token.colorBorder}`, borderRadius: 12, padding: '10px 14px',
-            boxShadow: '0 8px 30px rgba(0,0,0,.18)', maxWidth: 'calc(100% - 32px)',
-          }}
-        >
-          <Space wrap>
-            <Typography.Text>
-              Выбрано <b>{selected.size}</b> поз. · дефицит {selectionDeficit} · поставщиков: {selectedSuppliers}
-            </Typography.Text>
-            <Tooltip title={markBlockReason ?? undefined}>
-              <Button type="primary" loading={marking} disabled={markBlockReason !== null} onClick={() => void markPurchased()}>
-                Отметить «Закуплено»
-              </Button>
-            </Tooltip>
-            <Button disabled={stale} onClick={() => void exportExcel()}>Выгрузить в Excel</Button>
-            <Button onClick={() => setSelected(new Set())}>Снять выделение</Button>
-          </Space>
+        <div className="rr-sticky" role="region" aria-label="Действия с выбранным">
+          <span>Выбрано <b>{selected.size}</b> поз. · дефицит {selectionDeficit} · поставщиков: {selectedSuppliers}</span>
+          <Tooltip title={markBlockReason ?? undefined}>
+            <Button type="primary" loading={marking} disabled={markBlockReason !== null} onClick={() => void markPurchased()}>
+              Отметить «Закуплено»
+            </Button>
+          </Tooltip>
+          <Button disabled={stale} onClick={() => void exportExcel()}>Выгрузить XLS</Button>
+          <Button onClick={() => setSelected(new Set())}>Снять выделение</Button>
         </div>
       )}
-    </Space>
+    </div>
   );
+}
+
+type GroupRow = { rowType: 'group'; lineKey: string; group: NonNullable<ProcurementWorklistResponse['groups']>[number] };
+type WorklistRow = ProcurementWorklistLine | GroupRow;
+
+function isGroupRow(row: WorklistRow): row is GroupRow {
+  return (row as GroupRow).rowType === 'group';
+}
+
+/** Колонки строк с встроенными строками групп: заголовок группы — на всю ширину таблицы. */
+function withGroupRows(
+  columns: NonNullable<TableProps<ProcurementWorklistLine>['columns']>,
+  renderGroup: (group: GroupRow['group']) => ReactNode,
+): NonNullable<TableProps<WorklistRow>['columns']> {
+  return columns.map((column, index) => {
+    const base = column as { render?: (value: unknown, row: ProcurementWorklistLine, index: number) => ReactNode };
+    return {
+      ...(column as object),
+      onCell: (row: WorklistRow) => (isGroupRow(row) ? { colSpan: index === 0 ? columns.length : 0 } : {}),
+      render: (value: unknown, row: WorklistRow, rowIndex: number) => (isGroupRow(row)
+        ? (index === 0 ? renderGroup(row.group) : null)
+        : base.render ? base.render(value, row, rowIndex) : (value as ReactNode)),
+    };
+  }) as NonNullable<TableProps<WorklistRow>['columns']>;
+}
+
+function formatInteger(value: number): string {
+  return new Intl.NumberFormat('ru-RU').format(value);
 }
 
 function summarizeDeficit(lines: ProcurementWorklistLine[]): string {
@@ -399,10 +463,10 @@ function useWorklistColumns(today: string | null): TableProps<ProcurementWorklis
       key: 'due',
       width: 130,
       render: (_value, line) => (
-        <Space direction="vertical" size={0}>
-          <span>{formatDate(line.dueDate)}</span>
-          <Tag color={line.needsAction ? URGENCY_COLORS[line.urgency] : 'default'} style={{ marginInlineEnd: 0 }}>{dueText(line)}</Tag>
-        </Space>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-start' }}>
+          <span className="rr-num">{formatDate(line.dueDate)}</span>
+          <span className={`rr-tag rr-tag--${line.needsAction ? URGENCY_TONES[line.urgency] : 'none'}`}>{dueText(line)}</span>
+        </div>
       ),
     },
     {
@@ -410,26 +474,34 @@ function useWorklistColumns(today: string | null): TableProps<ProcurementWorklis
       key: 'order',
       width: 200,
       render: (_value, line) => (
-        <Space direction="vertical" size={0}>
+        <div>
           <Link to={`/orders/show/${line.orderId}`}>{line.fullNumber}</Link>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            {[line.clientName, line.orderStatus].filter(Boolean).join(' · ')}
-          </Typography.Text>
-        </Space>
+          <div className="rr-sub">{[line.clientName, line.orderStatus].filter(Boolean).join(' · ')}</div>
+        </div>
       ),
     },
-    { title: 'Материал', dataIndex: 'name', key: 'name', width: 220 },
+    {
+      title: 'Материал',
+      key: 'name',
+      width: 220,
+      render: (_value, line) => (
+        <span>
+          <i className="rr-dot" aria-label={line.kind === 'film' ? 'плёнка' : 'листовой материал'} style={{ background: KIND_COLORS[line.kind] }} />
+          {line.name}
+        </span>
+      ),
+    },
     {
       title: 'Поставщик',
       key: 'supplier',
       width: 180,
       render: (_value, line) => (
         <Tooltip title={line.supplier.others.length > 0 ? `Также: ${line.supplier.others.map((other) => other.name).join(', ')}` : undefined}>
-          <Space direction="vertical" size={0}>
-            <span>{line.supplier.name}</span>
-            {line.supplier.source === 'first_receipt' && <Typography.Text type="secondary" style={{ fontSize: 12 }}>первый приход</Typography.Text>}
-            {line.supplier.others.length > 0 && <Typography.Text type="secondary" style={{ fontSize: 12 }}>+ ещё {line.supplier.others.length}</Typography.Text>}
-          </Space>
+          <div className={line.supplier.source === 'none' ? 'rr-muted' : undefined}>
+            {line.supplier.name}
+            {line.supplier.source === 'first_receipt' && <div className="rr-sub">первый приход</div>}
+            {line.supplier.others.length > 0 && <div className="rr-sub">+ ещё {line.supplier.others.length}</div>}
+          </div>
         </Tooltip>
       ),
     },
@@ -440,18 +512,19 @@ function useWorklistColumns(today: string | null): TableProps<ProcurementWorklis
       render: (_value, line) => {
         const { covered, ordered } = coveragePercents(line);
         return (
-          <Space direction="vertical" size={2} style={{ width: '100%' }}>
-            <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', background: 'var(--ant-color-fill-secondary, #f0f0f0)' }}>
-              <div style={{ width: `${covered}%`, background: '#52c41a' }} />
-              <div style={{ width: `${ordered}%`, background: '#7c8cf8' }} />
+          <div className="rr-cov">
+            <div className="rr-bar">
+              <i className="rr-rcv" style={{ width: `${covered}%` }} />
+              <i className="rr-ord" style={{ width: `${ordered}%` }} />
             </div>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            <span className="rr-sub rr-num">
               {line.need === null
                 ? 'нет раскроя — количество неизвестно'
-                : `покрыто ${formatQuantity(line.covered, line.unit)} из ${formatQuantity(line.need, line.unit)}`}
+                : `пришло ${formatQuantity(line.received, line.unit)} · заказано ${formatQuantity(line.orderedOpen, line.unit)} из ${formatQuantity(line.need, line.unit)}`}
+              {line.purchaseOrigin === 'manual' && !line.received ? ' · отмечено вручную' : ''}
               {line.receivedIncompatibleCount > 0 ? ` · приходов в других единицах: ${line.receivedIncompatibleCount}` : ''}
-            </Typography.Text>
-          </Space>
+            </span>
+          </div>
         );
       },
     },
@@ -460,18 +533,18 @@ function useWorklistColumns(today: string | null): TableProps<ProcurementWorklis
       key: 'deficit',
       width: 120,
       align: 'right',
-      render: (_value, line) => <b>{line.deficit ? formatQuantity(line.deficit, line.unit) : '—'}</b>,
+      render: (_value, line) => <b className="rr-num">{line.deficit ? formatQuantity(line.deficit, line.unit) : '—'}</b>,
     },
     {
       title: 'Статус',
       key: 'status',
       width: 200,
       render: (_value, line) => (
-        <Space wrap size={4}>
-          <Tag color={COVERAGE_LABELS[line.coverage].color}>{COVERAGE_LABELS[line.coverage].label}</Tag>
-          {line.purchased && <Tag>{line.purchaseOrigin === 'onec' ? 'отмечено приходом' : 'отмечено вручную'}</Tag>}
-          {line.demandChangedSinceMark && <Tag color="warning">потребность изменилась</Tag>}
-        </Space>
+        <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>
+          <span className={`rr-tag rr-tag--${COVERAGE_TONES[line.coverage]}`}>{COVERAGE_LABELS[line.coverage].label}</span>
+          {line.onecReceiptCount > 0 && <span className="rr-tag rr-tag--info">в приходе 1С</span>}
+          {line.demandChangedSinceMark && <span className="rr-tag rr-tag--warn">потребность изменилась</span>}
+        </span>
       ),
     },
   // eslint-disable-next-line react-hooks/exhaustive-deps

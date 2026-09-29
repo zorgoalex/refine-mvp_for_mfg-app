@@ -3,6 +3,9 @@ import { httpClient } from './httpClient';
 import { withQuery } from './ordersApi';
 import type {
   AddOnecAllocationRequest,
+  AllocationSuggestionsResponse,
+  BatchOnecAllocationRequest,
+  BatchOnecAllocationResponse,
   OnecAllocationResultDto,
   OnecDocumentCardResponse,
   OnecDocumentListParams,
@@ -31,6 +34,19 @@ export const onecDocumentsApi = {
         validatePositiveId(documentId, 'documentId'),
         validatePositiveId(lineId, 'lineId'),
       ),
+      body,
+    );
+  },
+
+  allocationSuggestions(documentId: number): Promise<AllocationSuggestionsResponse> {
+    return httpClient.get<AllocationSuggestionsResponse>(
+      apiRoutes.onecDocuments.allocationSuggestions(validatePositiveId(documentId, 'documentId')),
+    );
+  },
+
+  allocateBatch(documentId: number, body: BatchOnecAllocationRequest): Promise<BatchOnecAllocationResponse> {
+    return httpClient.post<BatchOnecAllocationResponse>(
+      apiRoutes.onecDocuments.allocationsBatch(validatePositiveId(documentId, 'documentId')),
       body,
     );
   },

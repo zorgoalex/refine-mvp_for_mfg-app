@@ -60,7 +60,7 @@ export interface OnecAllocationDto {
   quantity: number | null;
   /** null без права finance.view. */
   amount: number | null;
-  origin: 'auto' | 'manual';
+  origin: 'auto' | 'manual' | 'suggested';
   /** Версия закупа материала заказа — expectedVersion для снятия распределения. */
   procurementVersion: number;
   createdAt: string;
@@ -131,4 +131,95 @@ export interface OnecAllocationResultDto {
 export interface OnecDocumentReadOptions {
   procurementEnabled: boolean;
   canSeeAmounts: boolean;
+  /** BACKEND_PROCUREMENT_WORKSPACE_ENABLED — для capabilities.supplyWorkspace (кнопка «Подобрать заказы»). */
+  supplyWorkspaceEnabled?: boolean;
+}
+
+/** Групповое распределение прихода на несколько заказов (экран снабжения, фаза 2, план §5.4). */
+export const ONEC_ALLOCATION_BATCH_LIMIT = 100;
+
+export interface BatchOnecAllocationItem {
+  lineId: number;
+  orderId: number;
+  resourceKey: string;
+  /** Итоговое количество НОВОГО распределения, в единице строки документа. */
+  quantity: number;
+  expectedVersion: number;
+  expectedDemandFingerprint: string;
+  /** Единица строки документа, в которой считано предложение (CR3-1). */
+  expectedDocUnit: OnecUnitCode | null;
+  /** Площадь листа материала (м²), по которой пересчитано предложение; null — не листовой/нет размеров. */
+  expectedSheetAreaM2: number | null;
+}
+
+export interface BatchOnecAllocationCommand {
+  currentUser: CurrentUser;
+  documentId: number;
+  requestId: string;
+  /** 'suggested' — из автоподбора, 'manual' — набрано вручную. */
+  origin: 'suggested' | 'manual';
+  items: BatchOnecAllocationItem[];
+}
+
+export interface BatchOnecAllocationFailure {
+  index: number;
+  code: string;
+  message: string;
+}
+
+export interface BatchOnecAllocationResultDto {
+  changed: boolean;
+  results: Array<{ index: number; allocationId: number; noop: boolean }>;
+  /** Актуальные строки потребности затронутых заказов (по orderId|resourceKey). */
+  lines: Array<{ orderId: number; line: OrderResourceDemandLineDto }>;
+}
+
+export interface AllocationSuggestionCandidateDto {
+  orderId: number;
+  orderName: string;
+  fullNumber: string;
+  clientName: string | null;
+  dueDate: string | null;
+  urgency: 'overdue' | 'critical' | 'soon' | 'normal' | 'no_date';
+  daysLeft: number | null;
+  demandUnit: 'm2' | 'lm';
+  needInDemandUnit: number;
+  deficitInDemandUnit: number;
+  proposedInDocUnit: number;
+  proposedInDemandUnit: number;
+  reasons: Array<{ code: 'onec_order' | 'due' | 'unmarked' | 'supplier' | 'closes'; label: string; tone: 'info' | 'error' | 'warning' | 'success' | 'default' }>;
+  purchased: boolean;
+  procurementVersion: number;
+  demandFingerprint: string;
+}
+
+export interface AllocationSuggestionLineDto {
+  lineId: number;
+  lineNo: number;
+  nomenclatureName: string | null;
+  material: { resourceKey: string; kind: OrderResourceKind; refId: number; name: string } | null;
+  docUnit: OnecUnitCode | null;
+  demandUnit: 'm2' | 'lm' | null;
+  /** Площадь листа, м² — для пересчёта «листы ↔ м²» на клиенте. */
+  sheetAreaM2: number | null;
+  capacityInDocUnit: number;
+  remainingInDocUnit: number;
+  /** Почему строка не участвует в автоподборе (null — участвует). */
+  skipReason: 'not_mapped' | 'incompatible_unit' | 'fully_allocated' | null;
+  alreadyAllocated: Array<{ orderId: number; orderName: string; quantityInDocUnit: number }>;
+  candidates: AllocationSuggestionCandidateDto[];
+  surplusInDocUnit: number;
+}
+
+export interface AllocationSuggestionsResponseDto {
+  documentId: number;
+  number: string;
+  date: string;
+  supplierName: string | null;
+  wastePercent: number;
+  /** Не больше стольких предложенных распределений — лимит одной групповой команды. */
+  proposalLimit: number;
+  /** true — кандидатов больше лимита: остаток распределяется следующим подбором. */
+  proposalLimitReached: boolean;
+  lines: AllocationSuggestionLineDto[];
 }

@@ -198,7 +198,7 @@ describe('OnecDocumentsController.card — id validation', () => {
     const getCard = vi.fn().mockResolvedValue(expected);
     const controller = makeController({ getCard }, flags());
     await expect(controller.card(request(currentUser()), '701')).resolves.toBe(expected);
-    expect(getCard).toHaveBeenCalledWith(currentUser(), 701, true);
+    expect(getCard).toHaveBeenCalledWith(currentUser(), 701, true, false);
   });
 });
 
