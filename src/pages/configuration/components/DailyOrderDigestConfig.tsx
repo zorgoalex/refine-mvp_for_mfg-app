@@ -12,7 +12,6 @@ import {
   Spin,
   Switch,
   Tag,
-  TimePicker,
   Typography,
   message,
 } from 'antd';
@@ -34,6 +33,7 @@ import type {
 import { authSession } from '../../../api/authSession';
 import { getUserAuthorizationScopeKey } from '../../../api/authScopeIdentity';
 import { Table } from '../../../ui/tooltipDelay';
+import { CommitOnSelectTimePicker } from '../../../ui/CommitOnSelectTimePicker';
 
 const { Paragraph, Text, Title } = Typography;
 export const DAILY_DIGEST_REQUIRED_PERMISSIONS = [
@@ -477,7 +477,7 @@ export const DailyOrderDigestConfig: React.FC = () => {
           ]} />
         </Form.Item>
         <Form.Item name="sendTime" label="Начало окна отправки" rules={[{ required: true, message: 'Укажите время отправки.' }]}>
-          <TimePicker format="HH:mm" minuteStep={5} style={{ width: '100%' }} />
+          <CommitOnSelectTimePicker format="HH:mm" minuteStep={5} style={{ width: '100%' }} />
         </Form.Item>
         <Form.Item name="sendWindowMinutes" label="Случайное окно отправки, минут" dependencies={['sendTime']} rules={[{ required: true, message: 'Укажите длительность окна.' }, { validator: async (_, duration: number | undefined) => {
           const sendTime = form.getFieldValue('sendTime') as Dayjs | undefined;
@@ -499,7 +499,7 @@ export const DailyOrderDigestConfig: React.FC = () => {
           const windowMinutes = Number(form.getFieldValue('sendWindowMinutes') ?? 0);
           if (deadline && sendTime && deadline.hour() * 60 + deadline.minute() < sendTime.hour() * 60 + sendTime.minute() + windowMinutes) throw new Error('Контрольное время должно быть не раньше конца окна отправки.');
         } }]}>
-          <TimePicker format="HH:mm" minuteStep={5} style={{ width: '100%' }} />
+          <CommitOnSelectTimePicker format="HH:mm" minuteStep={5} style={{ width: '100%' }} />
         </Form.Item>}
         <Form.Item name="partialPolicy" label="Если отправлена только часть сводки" rules={[{ required: true }]}> 
           <Select style={{ width: '100%' }} options={[
