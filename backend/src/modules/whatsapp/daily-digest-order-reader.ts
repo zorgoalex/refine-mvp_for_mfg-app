@@ -170,6 +170,7 @@ export class DailyDigestOrderReader {
             `
             SELECT pse.order_id, pse.production_status_id
             FROM production_status_events pse
+            JOIN orders o ON o.order_id = pse.order_id AND o.production_round = pse.round_no
             WHERE pse.order_id = ANY($1::bigint[])
             ORDER BY pse.order_id ASC, pse.event_id ASC
             `,

@@ -482,6 +482,7 @@ export class PgOrderReadRepository
           o.link_cutting_file, o.link_cutting_image_file, o.link_cad_file, o.link_pdf_file,
           o.total_amount, o.final_amount, o.paid_amount, o.parts_count, o.total_area,
           o.created_at, o.updated_at, o.created_by, o.edited_by, o.version, o.ref_key_1c,
+          o.production_round,
           ${headerSheetSelect}${deletedSelect}
         FROM orders o
         LEFT JOIN projects mp ON mp.project_id = o.project_id
@@ -644,6 +645,7 @@ export class PgOrderReadRepository
             SELECT pse.production_status_id
             FROM production_status_events pse
             WHERE pse.order_id = o.order_id
+              AND pse.round_no = o.production_round
             UNION
             SELECT o.production_status_id
             WHERE o.production_status_id IS NOT NULL
@@ -764,6 +766,7 @@ export class PgOrderReadRepository
               SELECT pse.production_status_id
               FROM production_status_events pse
               WHERE pse.order_id = o.order_id
+                AND pse.round_no = o.production_round
               UNION
               SELECT o.production_status_id
               WHERE o.production_status_id IS NOT NULL

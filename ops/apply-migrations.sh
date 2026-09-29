@@ -924,7 +924,7 @@ probe_file() {
                      "$(q_fun_hash 'order_realtime_bridge_enabled_for_fanout(integer)' 31c9de672533a32b0493235924ea8261)" \
                      "$(q_fun_hash 'order_realtime_bridge_max_detail_ids()' d0485616d61b3904e36418387a09f506)" \
                      "$(q_fun_hash 'order_realtime_cut_job_snapshot_visible(bigint,text,text,bigint)' d0bb80f56f3010c62312a66b6a3575d2)" \
-                     "$(q_fun_hash 'order_realtime_emit_one(bigint,text[],bigint[],text)' bbf8a2f2fad9cd1483a144244fe9d522)" \
+                     "$(q_fun_hash_either 'order_realtime_emit_one(bigint,text[],bigint[],text)' bbf8a2f2fad9cd1483a144244fe9d522 04eabdca6d8369194f6937ca6d1b1fc6)" \
                      "$(q_fun_hash 'order_realtime_lock_cut_roots(bigint[])' 496b5bf6aebf43754456e0ec0dbb47d2)" \
                      "$(q_fun_hash 'order_realtime_order_snapshot_visible(bigint)' a8e335d989b19d0246523aa34fbfc324)" \
                      "$(q_fun_hash 'trg_order_realtime_detail_status_insert()' d3a33ea887a1ef1110ff46eb164773ea)" \
@@ -2470,6 +2470,29 @@ probe_file() {
                            AND pg_get_constraintdef(oid) LIKE '%air%'
                            AND pg_get_constraintdef(oid) LIKE '%neutral%'
                       );" ;;
+    # «Переделка», миграция A: статус, причины, круги, round_no, очередь realtime, guard'ы.
+    210_order_rework_rounds*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM public.order_statuses WHERE order_status_code='rework' AND sort_order=45)" \
+      "SELECT EXISTS (SELECT 1 FROM public.order_rework_reasons WHERE code='unclarified' AND is_system)" \
+      "$(q_tbl order_production_rounds)" \
+      "$(q_idx uq_order_production_rounds_open)" \
+      "$(q_tbl order_production_round_details)" \
+      "$(q_tbl order_production_round_sources)" \
+      "$(q_col orders production_round)" \
+      "$(q_col orders last_round_no)" \
+      "$(q_con_on orders chk_orders_production_round)" \
+      "$(q_col order_details production_round)" \
+      "$(q_col production_status_events round_no)" \
+      "$(q_idx uq_pse_detail_status_round)" \
+      "$(q_idx uq_pse_order_status_round)" \
+      "$(q_col cut_job_item production_round)" \
+      "$(q_con_on cut_job_item chk_cut_job_item_repeat_kind)" \
+      "$(q_tbl order_realtime_deferred)" \
+      "$(q_trg trg_order_realtime_stream_on_order_insert)" \
+      "$(q_fun_hash 'order_realtime_emit_one(bigint,text[],bigint[],text)' 04eabdca6d8369194f6937ca6d1b1fc6)" \
+      "$(q_trg trg_orders_rework_status_guard)" \
+      "$(q_trg ctrg_orders_rework_round_consistency)" \
+      "$(q_trg ctrg_order_production_rounds_consistency)" ;;
     # Сид 203 — хотя бы один склад (склад можно переименовать; после 205 повторный сид без ключа 1С невозможен).
     203_film_stock*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM public.warehouses)" \
@@ -2822,7 +2845,7 @@ verify_applied_effect() {
     205_warehouses_onec_key_required*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*)
+    209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|210_order_rework_rounds*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)

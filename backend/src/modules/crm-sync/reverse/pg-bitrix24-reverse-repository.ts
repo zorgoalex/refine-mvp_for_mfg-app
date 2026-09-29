@@ -14,6 +14,7 @@ import {
 import type { AuditService } from '../../../common/audit/audit.service';
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
+import { markStageEventWriter } from '../../../shared/production-status/stage-event-writer';
 import { type UserRole } from '../../../permissions/permissions';
 import { PgOrderDeadlineSync } from '../../deadlines/adapters/pg-order-deadline-sync';
 import {
@@ -2959,12 +2960,13 @@ export class PgBitrix24ReverseRepository {
           WHERE order_id=$1 AND delete_flag=false`,
         [input.orderId, status.production_status_id],
       );
+      await markStageEventWriter(tx);
       await tx.query(
         `INSERT INTO production_status_events (
-           detail_id, production_status_id, event_by, note, payload
+           detail_id, production_status_id, event_by, note, payload, round_no
          )
          SELECT detail_id, $2, $3, 'CRM request conversion',
-                jsonb_build_object('origin','crm_request_conversion')
+                jsonb_build_object('origin','crm_request_conversion'), production_round
            FROM order_details
           WHERE order_id=$1 AND delete_flag=false
          ON CONFLICT DO NOTHING`,
@@ -2972,9 +2974,10 @@ export class PgBitrix24ReverseRepository {
       );
       await tx.query(
         `INSERT INTO production_status_events (
-           order_id, production_status_id, event_by, note, payload
+           order_id, production_status_id, event_by, note, payload, round_no
          ) SELECT $1,$2,$3,'CRM request conversion',
-                   jsonb_build_object('origin','crm_request_conversion') WHERE $4::boolean
+                   jsonb_build_object('origin','crm_request_conversion'),
+                   (SELECT production_round FROM orders WHERE order_id=$1) WHERE $4::boolean
          ON CONFLICT DO NOTHING`,
         [input.orderId, status.production_status_id, input.actorUserId, details.rows.length > 0],
       );

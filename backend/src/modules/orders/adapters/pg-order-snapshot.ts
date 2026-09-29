@@ -11,6 +11,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import { auditService } from '../../../common/audit/audit.service';
 import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
+import { markStageEventWriter } from '../../../shared/production-status/stage-event-writer';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import type {
@@ -2649,12 +2650,15 @@ async function upsertProductionEvent(
   event: ProductionStatusEventSnapshotDto,
   targetId: number,
 ): Promise<number> {
+  // Snapshot format v1 has no production rounds: every imported event is round 1
+  // (full round support — plan «Переделка» §6.2).
+  await markStageEventWriter(tx, 'historical_import');
   const result = event.targetType === 'order'
     ? await tx.query<IdRow>(
         `
-        INSERT INTO production_status_events (order_id, production_status_id, event_at, event_by, note, payload)
-        VALUES ($1, $2, $3, $4, $5, $6::jsonb)
-        ON CONFLICT (order_id, production_status_id) WHERE order_id IS NOT NULL
+        INSERT INTO production_status_events (order_id, production_status_id, event_at, event_by, note, payload, round_no)
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb, 1)
+        ON CONFLICT (order_id, production_status_id, round_no) WHERE order_id IS NOT NULL
         DO UPDATE SET event_at = EXCLUDED.event_at,
                       event_by = EXCLUDED.event_by,
                       note = EXCLUDED.note,
@@ -2665,9 +2669,9 @@ async function upsertProductionEvent(
       )
     : await tx.query<IdRow>(
         `
-        INSERT INTO production_status_events (detail_id, production_status_id, event_at, event_by, note, payload)
-        VALUES ($1, $2, $3, $4, $5, $6::jsonb)
-        ON CONFLICT (detail_id, production_status_id) WHERE detail_id IS NOT NULL
+        INSERT INTO production_status_events (detail_id, production_status_id, event_at, event_by, note, payload, round_no)
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb, 1)
+        ON CONFLICT (detail_id, production_status_id, round_no) WHERE detail_id IS NOT NULL
         DO UPDATE SET event_at = EXCLUDED.event_at,
                       event_by = EXCLUDED.event_by,
                       note = EXCLUDED.note,
@@ -2943,6 +2947,7 @@ async function deleteMissingImportedProductionEvents(
     .map((row) => toNumber(row.local_entity_id));
   if (ids.length === 0) return;
 
+  await markStageEventWriter(tx, 'historical_import');
   await tx.query('DELETE FROM production_status_events WHERE event_id = ANY($1::bigint[])', [ids]);
 }
 

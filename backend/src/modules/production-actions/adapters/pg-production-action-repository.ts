@@ -4,6 +4,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import { auditService } from '../../../common/audit/audit.service';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
+import { markStageEventWriter } from '../../../shared/production-status/stage-event-writer';
 import { mdfCutReadinessCtes } from '../../../shared/cnc-material/cut-readiness-sql';
 import type { MdfBoardDetailScope } from '../../status-automation/application/mdf-board-event.types';
 import type { CurrentUser } from '../../../permissions/current-user';
@@ -3303,6 +3304,7 @@ async function findProductionEventId(
     SELECT event_id
     FROM production_status_events
     WHERE order_id = $1 AND production_status_id = $2
+      AND round_no = (SELECT production_round FROM orders WHERE order_id = $1)
     FOR UPDATE
     `,
     [orderId, productionStatusId],
@@ -3321,6 +3323,7 @@ async function findDetailProductionEventId(
     SELECT event_id
     FROM production_status_events
     WHERE detail_id = $1 AND production_status_id = $2
+      AND round_no = (SELECT production_round FROM order_details WHERE detail_id = $1)
     FOR UPDATE
     `,
     [detailId, productionStatusId],
@@ -3338,13 +3341,15 @@ async function insertProductionEvent(
     requestId: string;
   },
 ): Promise<number> {
+  await markStageEventWriter(tx);
   const result = await tx.query<ProductionEventRow>(
     `
     INSERT INTO production_status_events (
-      order_id, detail_id, production_status_id, event_by, note, payload
+      order_id, detail_id, production_status_id, event_by, note, payload, round_no
     )
-    VALUES ($1, NULL, $2, $3, NULL, $4::jsonb)
-    ON CONFLICT (order_id, production_status_id) WHERE order_id IS NOT NULL
+    VALUES ($1, NULL, $2, $3, NULL, $4::jsonb,
+      (SELECT production_round FROM orders WHERE order_id = $1))
+    ON CONFLICT (order_id, production_status_id, round_no) WHERE order_id IS NOT NULL
     DO UPDATE SET payload = production_status_events.payload
     RETURNING event_id
     `,
@@ -3372,13 +3377,15 @@ async function insertDetailProductionEvent(
     requestId: string;
   },
 ): Promise<number> {
+  await markStageEventWriter(tx);
   const result = await tx.query<ProductionEventRow>(
     `
     INSERT INTO production_status_events (
-      order_id, detail_id, production_status_id, event_by, note, payload
+      order_id, detail_id, production_status_id, event_by, note, payload, round_no
     )
-    VALUES (NULL, $1, $2, $3, $4, $5::jsonb)
-    ON CONFLICT (detail_id, production_status_id) WHERE detail_id IS NOT NULL
+    VALUES (NULL, $1, $2, $3, $4, $5::jsonb,
+      (SELECT production_round FROM order_details WHERE detail_id = $1))
+    ON CONFLICT (detail_id, production_status_id, round_no) WHERE detail_id IS NOT NULL
     DO UPDATE SET payload = production_status_events.payload
     RETURNING event_id
     `,
@@ -3398,6 +3405,7 @@ async function insertDetailProductionEvent(
 }
 
 async function deleteProductionEvent(tx: TransactionClient, eventId: number): Promise<void> {
+  await markStageEventWriter(tx);
   await tx.query('DELETE FROM production_status_events WHERE event_id = $1', [eventId]);
 }
 
