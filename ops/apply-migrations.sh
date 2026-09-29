@@ -2930,6 +2930,13 @@ probe_file() {
       "$(q_trg trg_orders_rework_status_guard)" \
       "$(q_trg ctrg_orders_rework_round_consistency)" \
       "$(q_trg ctrg_order_production_rounds_consistency)" ;;
+    # «Переделка», миграция B: старые индексы «этап один раз» удалены, DB command boundary событий этапов.
+    211_order_rework_rounds_stage_boundary*) probe_all \
+      "SELECT to_regclass('public.uq_pse_detail_status_once') IS NULL AND to_regclass('public.uq_pse_order_status_once') IS NULL" \
+      "$(q_idx uq_pse_detail_status_round)" \
+      "$(q_idx uq_pse_order_status_round)" \
+      "$(q_trg trg_production_status_events_command_boundary)" \
+      "$(q_fun_hash 'public.trg_production_status_events_command_boundary()' 3e164baf56866d058a62346908295f10)" ;;
     # Сид 203 — хотя бы один склад (склад можно переименовать; после 205 повторный сид без ключа 1С невозможен).
     203_film_stock*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM public.warehouses)" \
@@ -3327,6 +3334,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     231_cut_result_render_v2*|209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|234_reference_nomenclature_note*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|244_client_onec_permissions*|251_whatsapp_calendar_send_permission*|240_payment_onec_matches*|241_client_screen_settings*|245_onec_operator_role*|246_clients_analytics_view_real_orders*|247_onec_agent_expected_silence*|248_authorization_snapshot*|249_role_checks_to_permissions*|250_onec_stock_snapshots*|252_superadmin_group_batch_link*|254_trim_text_fields_json_escape*|253_references_quick_create_permission*|255_crm_sync_paid_payment_operations*|256_doweling_order_version_triggers*|257_status_automation_clear_details_action*|258_financial_projections*|259_payment_audit_capture*|260_crm_sync_payment_notifications*|261_whatsapp_notification_deliveries*|262_onec_alert_episodes*|263_mandatory_balloons_delivery_checks*|264_onec_alert_notifications*|265_onec_alert_whatsapp*|266_order_stage_marks_from_details*|267_integration_duplicates*|268_client_merges*|269_client_contacts_screen*|270_bitrix24_assignment_channel*|271_client_contacts_onec*|272_whatsapp_order_send_client_onec_phone*|210_order_rework_rounds*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    211_order_rework_rounds_stage_boundary*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)

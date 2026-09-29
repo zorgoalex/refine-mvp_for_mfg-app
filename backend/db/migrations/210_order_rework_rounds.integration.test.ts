@@ -22,6 +22,8 @@ describe.skipIf(!databaseUrl)('210 order rework rounds (real PostgreSQL)', () =>
   let status: { draft: number; ready: number; rework: number };
   let stage: { drawn: number; cut: number };
   const tag = randomUUID().slice(0, 8);
+  // Migration B (211) drops the old «stage once» indexes: phase-A-only checks skip then.
+  let phaseB = false;
 
   async function inTx<T>(run: (client: PoolClient) => Promise<T>): Promise<T> {
     const client = await pool.connect();
@@ -45,6 +47,7 @@ describe.skipIf(!databaseUrl)('210 order rework rounds (real PostgreSQL)', () =>
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: databaseUrl, max: 4 });
+    phaseB = (await pool.query("SELECT to_regclass('public.uq_pse_detail_status_once') IS NULL AS b")).rows[0].b === true;
     status = {
       draft: await orderStatusByCode('legacy_2'),
       ready: await orderStatusByCode('legacy_6'),
@@ -124,7 +127,8 @@ describe.skipIf(!databaseUrl)('210 order rework rounds (real PostgreSQL)', () =>
     expect(Number(row.rows[0].commit_sequence)).toBeGreaterThanOrEqual(0);
   });
 
-  it('keeps the old stage-event ON CONFLICT working (old backend compatibility)', async () => {
+  it('keeps the old stage-event ON CONFLICT working (old backend compatibility)', async (ctx) => {
+    if (phaseB) ctx.skip();
     await inTx(async (client) => {
       for (let attempt = 0; attempt < 2; attempt += 1) {
         await client.query(
@@ -145,6 +149,7 @@ describe.skipIf(!databaseUrl)('210 order rework rounds (real PostgreSQL)', () =>
 
   it('writes stage events of the detail round through the new conflict target', async () => {
     await inTx(async (client) => {
+      await client.query("SELECT set_config('erp.pse_writer', 'backend', true)");
       await client.query(
         `INSERT INTO production_status_events (detail_id, production_status_id, event_by, note, payload, round_no)
          VALUES ($1, $2, $3, NULL, '{}'::jsonb, (SELECT production_round FROM order_details WHERE detail_id = $1))
@@ -160,7 +165,8 @@ describe.skipIf(!databaseUrl)('210 order rework rounds (real PostgreSQL)', () =>
     expect(rows.rows[0].n).toBe(1);
   });
 
-  it('still rejects a second round of the same stage until migration B drops the old index', async () => {
+  it('still rejects a second round of the same stage until migration B drops the old index', async (ctx) => {
+    if (phaseB) ctx.skip();
     await expect(inTx((client) => client.query(
       `INSERT INTO production_status_events (detail_id, production_status_id, event_by, payload, round_no)
        VALUES ($1, $2, $3, '{}'::jsonb, 2)`,
@@ -324,11 +330,15 @@ describe.skipIf(!databaseUrl)('210 order rework rounds (real PostgreSQL)', () =>
     const drilled = Number((await pool.query("SELECT production_status_id FROM production_statuses WHERE production_status_code = 'drilled'")).rows[0].production_status_id);
     const current = Number((await pool.query('SELECT production_round FROM orders WHERE order_id = $1', [orderId])).rows[0].production_round);
     expect(current).toBeGreaterThan(1);
-    await pool.query(
-      `INSERT INTO production_status_events (order_id, production_status_id, payload, round_no)
-       VALUES ($1, $2, '{}'::jsonb, 1), ($1, $3, '{}'::jsonb, $4)`,
-      [orderId, stage.cut, drilled, current],
-    );
+    // Past-round history is written as a historical import (allowed by the phase-B boundary).
+    await inTx(async (client) => {
+      await client.query("SELECT set_config('erp.pse_writer', 'historical_import', true)");
+      await client.query(
+        `INSERT INTO production_status_events (order_id, production_status_id, payload, round_no)
+         VALUES ($1, $2, '{}'::jsonb, 1), ($1, $3, '{}'::jsonb, $4)`,
+        [orderId, stage.cut, drilled, current],
+      );
+    });
     const database: DatabaseClient = {
       query: (text: string, params: readonly unknown[] = []) => pool.query(text, [...params]),
     } as unknown as DatabaseClient;
