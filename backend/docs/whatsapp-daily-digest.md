@@ -1,5 +1,10 @@
 # WhatsApp daily order digest
 
+> **Superseded by WhatsApp broadcasts** (migration 209, `whatsapp-broadcasts.md`): the
+> single digest became broadcast #1; the `/api/v1/whatsapp/daily-digest/*` routes were
+> removed. This page describes the previous behaviour and the legacy tables that the
+> backend still cleans up and shows read-only.
+
 The daily digest prepares a WhatsApp group message from production orders whose
 planned completion date is today in `Asia/Almaty`. It includes all matching
 orders regardless of production status, including issued orders. Each image

@@ -2432,6 +2432,18 @@ probe_file() {
       "$(q_con_on inventory_onec_autosync_state chk_inventory_onec_autosync_seq)" ;;
     205_warehouses_onec_key_required*) probe_all \
       "$(q_con_on warehouses chk_warehouses_ref_key_1c_required)" ;;
+    # 209: new broadcast tables + cutover done (broadcast #1 exists; the digest singleton was disabled
+    # by the cutover, which the old backend keeps working with).
+    209_whatsapp_broadcasts*) probe_all \
+      "$(q_tbl whatsapp_broadcasts)" "$(q_tbl whatsapp_broadcast_control)" "$(q_tbl whatsapp_broadcast_commands)" \
+      "$(q_tbl whatsapp_broadcast_schedules)" "$(q_tbl whatsapp_broadcast_runs)" "$(q_tbl whatsapp_broadcast_messages)" \
+      "$(q_con_on whatsapp_broadcasts chk_whatsapp_broadcasts_enabled)" \
+      "$(q_con_on whatsapp_broadcasts chk_whatsapp_broadcasts_weekdays)" \
+      "$(q_con_on whatsapp_broadcast_runs chk_whatsapp_broadcast_runs_root)" \
+      "$(q_con_on whatsapp_broadcast_messages chk_whatsapp_broadcast_messages_image)" \
+      "$(q_idx idx_whatsapp_broadcast_runs_auto_slot)" \
+      "SELECT EXISTS (SELECT 1 FROM whatsapp_broadcasts WHERE broadcast_id = 1);" \
+      "SELECT EXISTS (SELECT 1 FROM whatsapp_broadcast_control WHERE singleton_id = 1);" ;;
     # Сид 203 — хотя бы один склад (склад можно переименовать; после 205 повторный сид без ключа 1С невозможен).
     203_film_stock*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM public.warehouses)" \
@@ -2776,6 +2788,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     205_warehouses_onec_key_required*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    209_whatsapp_broadcasts*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)

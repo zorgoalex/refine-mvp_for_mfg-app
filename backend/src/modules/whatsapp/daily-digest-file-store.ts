@@ -27,11 +27,21 @@ export class DailyDigestFileStore {
     @Inject(DatabaseService) private readonly database: DatabaseService,
     @Optional() @Inject(ConfigService) config?: ConfigService<BackendEnv, true>,
   ) {
-    this.root = resolve(config?.get('WHATSAPP_DAILY_DIGEST_DIR', { infer: true }) || '/data/whatsapp-daily-digest');
+    this.root = this.storeRoot(resolve(config?.get('WHATSAPP_DAILY_DIGEST_DIR', { infer: true }) || '/data/whatsapp-daily-digest'));
+  }
+
+  /** Directory of this store; the legacy digest uses the volume root. */
+  protected storeRoot(volumeRoot: string): string {
+    return volumeRoot;
+  }
+
+  /** Advisory lock serializing every mutation of this store's directory. */
+  protected storeLockName(): string {
+    return 'whatsapp-daily-digest-store';
   }
 
   withStoreLock<T>(handler: (assertOwned: () => Promise<void>) => Promise<T>): Promise<T | null> {
-    return this.database.withAdvisoryLock('whatsapp-daily-digest-store', handler);
+    return this.database.withAdvisoryLock(this.storeLockName(), handler);
   }
 
   async writePages(pages: DailyDigestRenderedPage[], expiresAt: Date, assertOwned: () => Promise<void>): Promise<DailyDigestFileMetadata[]> {

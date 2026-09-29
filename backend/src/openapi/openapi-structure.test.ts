@@ -52,35 +52,55 @@ describe('OpenAPI document structure', () => {
     expect(schemas.WhatsAppRuleUpdate.properties.replyMode).not.toHaveProperty('default');
   });
 
-  it('documents daily WhatsApp digest routes with the full permission gate and private image retention', () => {
+  it('documents WhatsApp broadcast routes with the full permission gate and private image retention', () => {
     const requiredPermissions = ['whatsapp.manage', 'calendar.view', 'orders.view', 'orders.view_financials'];
-    const dailyPaths = [
-      ['/api/v1/whatsapp/daily-digest/settings', 'get'],
-      ['/api/v1/whatsapp/daily-digest/settings', 'put'],
-      ['/api/v1/whatsapp/daily-digest/preview', 'post'],
-      ['/api/v1/whatsapp/daily-digest/runs', 'get'],
-      ['/api/v1/whatsapp/daily-digest/runs', 'post'],
-      ['/api/v1/whatsapp/daily-digest/runs/{id}', 'get'],
-      ['/api/v1/whatsapp/daily-digest/runs/{id}/pages/{index}/image', 'get'],
-      ['/api/v1/whatsapp/daily-digest/runs/{id}/retry', 'post'],
+    const broadcastPaths = [
+      ['/api/v1/whatsapp/broadcasts', 'get'],
+      ['/api/v1/whatsapp/broadcasts', 'post'],
+      ['/api/v1/whatsapp/broadcasts/control', 'get'],
+      ['/api/v1/whatsapp/broadcasts/control', 'post'],
+      ['/api/v1/whatsapp/broadcasts/catalog', 'get'],
+      ['/api/v1/whatsapp/broadcasts/legacy-digest-runs', 'get'],
+      ['/api/v1/whatsapp/broadcasts/{id}', 'get'],
+      ['/api/v1/whatsapp/broadcasts/{id}', 'patch'],
+      ['/api/v1/whatsapp/broadcasts/{id}/archive', 'post'],
+      ['/api/v1/whatsapp/broadcasts/{id}/preview', 'post'],
+      ['/api/v1/whatsapp/broadcasts/{id}/runs', 'get'],
+      ['/api/v1/whatsapp/broadcasts/{id}/runs', 'post'],
+      ['/api/v1/whatsapp/broadcasts/{id}/schedule/today/replan', 'post'],
+      ['/api/v1/whatsapp/broadcast-runs/{runId}', 'get'],
+      ['/api/v1/whatsapp/broadcast-runs/{runId}/messages/{seq}/image', 'get'],
+      ['/api/v1/whatsapp/broadcast-runs/{runId}/retry', 'post'],
     ] as const;
 
-    for (const [path, method] of dailyPaths) {
+    for (const [path, method] of broadcastPaths) {
       const operation = contract.paths[path]?.[method];
       expect(operation, `${method.toUpperCase()} ${path}`).toBeDefined();
       expect(operation.security).toEqual([{ bearerAuth: [] }]);
       expect(operation['x-permissions']).toEqual(requiredPermissions);
     }
 
-    expect(contract.paths['/api/v1/whatsapp/daily-digest/preview'].post.responses['200'].headers['Cache-Control'].schema.enum).toEqual(['private, no-store']);
-    expect(contract.paths['/api/v1/whatsapp/daily-digest/runs/{id}/pages/{index}/image'].get.responses['200'].content['image/png']).toBeDefined();
-    expect(contract.paths['/api/v1/whatsapp/daily-digest/runs/{id}/pages/{index}/image'].get.responses).toHaveProperty('410');
-    expect(contract.paths['/api/v1/whatsapp/daily-digest/runs/{id}/retry'].post.requestBody.content['application/json'].schema.$ref).toBe('#/components/schemas/WhatsAppDailyDigestRetryRequest');
-    expect(contract.components.schemas.WhatsAppDailyDigestSettings.properties.enabled.default).toBe(false);
-    expect(contract.components.schemas.WhatsAppDailyDigestSettings.properties.timeZone.enum).toEqual(['Asia/Almaty']);
-    expect(contract.components.schemas.WhatsAppDailyDigestSettingsUpdate.properties).not.toHaveProperty('timeZone');
-    expect(contract.components.schemas.WhatsAppDailyDigestRun.properties.state.enum).toContain('unknown');
-    expect(contract.components.schemas.WhatsAppDailyDigestPage.properties.imageAvailable.type).toBe('boolean');
+    // The single daily digest API was replaced by the broadcasts (migration 206).
+    expect(Object.keys(contract.paths).filter((path) => path.includes('/whatsapp/daily-digest'))).toEqual([]);
+    expect(contract.paths['/api/v1/whatsapp/broadcasts/{id}/preview'].post.responses['200'].headers['Cache-Control'].schema.enum).toEqual(['private, no-store']);
+    expect(contract.paths['/api/v1/whatsapp/broadcast-runs/{runId}/messages/{seq}/image'].get.responses['200'].content['image/png']).toBeDefined();
+    expect(contract.paths['/api/v1/whatsapp/broadcast-runs/{runId}/messages/{seq}/image'].get.responses).toHaveProperty('410');
+    expect(contract.paths['/api/v1/whatsapp/broadcast-runs/{runId}/retry'].post.requestBody.content['application/json'].schema.$ref).toBe('#/components/schemas/WhatsAppBroadcastRetryRequest');
+    expect(contract.paths['/api/v1/whatsapp/broadcasts/legacy-digest-runs'].get.responses['200'].content['application/json'].schema.$ref).toBe('#/components/schemas/WhatsAppDailyDigestRunList');
+    expect(contract.components.schemas.WhatsAppBroadcastInput.properties.orderDateOffsetDays.maximum).toBe(14);
+    expect(contract.components.schemas.WhatsAppBroadcastInput.properties.weekdays.items.maximum).toBe(7);
+    expect(contract.components.schemas.WhatsAppBroadcastRun.properties.state.enum).toEqual(expect.arrayContaining(['preparing', 'unknown']));
+    expect(contract.components.schemas.WhatsAppBroadcastMessage.properties.imageAvailable.type).toBe('boolean');
+    // A real PATCH body must satisfy the closed update schema (no contradictory allOf).
+    const update = contract.components.schemas.WhatsAppBroadcastUpdate;
+    expect(update.allOf).toBeUndefined();
+    expect(update.additionalProperties).toBe(false);
+    const patch = { version: 3, name: 'Цех', enabled: true, groupChatId: '120363338054016575@g.us', weekdays: [1, 2, 3, 4, 5], sendTime: '08:45',
+      sendWindowMinutes: 30, catchUpPolicy: 'until_deadline', catchUpDeadline: '10:00', partialPolicy: 'remaining', orderDateOffsetDays: 1,
+      cardsPerMessage: 2, captionTemplate: 'Заказы на {target_date}', duplicateRiskConfirmed: false };
+    expect(Object.keys(patch).filter((key) => !(key in update.properties))).toEqual([]);
+    expect(update.required.filter((key: string) => !(key in patch))).toEqual([]);
+    expect(Object.keys(contract.components.schemas.WhatsAppBroadcastInput.properties).every((key) => key in update.properties)).toBe(true);
   });
 
   it('has unique operation IDs and resolves every local reference and security scheme', () => {

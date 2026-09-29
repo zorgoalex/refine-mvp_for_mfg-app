@@ -782,146 +782,266 @@ paths:
       x-permission: whatsapp.view
       responses:
         '200': {description: Get WhatsApp session status}
-  /api/v1/whatsapp/daily-digest/settings:
+  /api/v1/whatsapp/broadcasts:
     get:
       tags: [WhatsApp]
-      operationId: getWhatsAppDailyDigestSettings
-      summary: Get daily order digest settings and WhatsApp runtime availability
-      description: Settings default to disabled at 08:45 Asia/Almaty. The chat JID is returned only by this protected settings endpoint. todaySchedule exposes today's durable chosen dispatch minute once planned (null until then); this read never writes to the database.
+      operationId: listWhatsAppBroadcasts
+      summary: 'List WhatsApp broadcasts with the send barrier and runtime state'
+      description: 'Non-archived broadcasts ordered by name, the global pause barrier, WhatsApp runtime availability and the enabled-broadcast limit. Replaces the single daily digest settings.'
       security: [{bearerAuth: []}]
       x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
       responses:
-        '200': {description: Settings and runtime readiness, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppDailyDigestSettingsResponse'}}}}
+        '200': {description: Broadcasts, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppBroadcastList'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
-        '503': {description: 'WHATSAPP_DAILY_DIGEST_NOT_MIGRATED'}
-    put:
+        '503': {description: 'BROADCASTS_NOT_MIGRATED'}
+    post:
       tags: [WhatsApp]
-      operationId: updateWhatsAppDailyDigestSettings
-      summary: Update daily order digest settings
-      description: Strict versioned update. Asia/Almaty is fixed and omitted from the request. repeat_all requires explicit duplicate-risk confirmation. sendWindowMinutes is optional for older clients; omitting it preserves the stored window duration. Once today's schedule exists, send time, window, and catch-up changes apply from the next business date.
+      operationId: createWhatsAppBroadcast
+      summary: 'Create a WhatsApp broadcast'
+      description: 'At most 20 broadcasts may be enabled at once. repeat_all requires explicit duplicate-risk confirmation.'
       security: [{bearerAuth: []}]
       x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
       requestBody:
         required: true
-        content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppDailyDigestSettingsUpdate'}}}
+        content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppBroadcastInput'}}}
       responses:
-        '200': {description: Updated settings and runtime availability, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppDailyDigestSettingsResponse'}}}}
+        '201': {description: Created broadcast, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppBroadcastEnvelope'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
-        '409': {description: 'WHATSAPP_DAILY_DIGEST_VERSION_CONFLICT or WHATSAPP_DAILY_DIGEST_DUPLICATE_CONFIRMATION_REQUIRED'}
+        '409': {description: 'BROADCAST_ACTIVE_LIMIT, BROADCAST_NAME_TAKEN or BROADCAST_DUPLICATE_CONFIRMATION_REQUIRED'}
         '422': {description: Invalid or inconsistent settings}
-        '503': {description: 'WHATSAPP_DAILY_DIGEST_NOT_MIGRATED'}
-  /api/v1/whatsapp/daily-digest/preview:
-    post:
+  /api/v1/whatsapp/broadcasts/control:
+    get:
       tags: [WhatsApp]
-      operationId: previewWhatsAppDailyDigest
-      summary: Render a private, in-memory preview of today's orders
-      description: Preview uses current production orders and does not require automation or relay availability. Images are returned only in this response and are not stored.
+      operationId: getWhatsAppBroadcastControl
+      summary: 'Read the global broadcast send barrier'
       security: [{bearerAuth: []}]
       x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      responses:
+        '200': {description: Send barrier, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppBroadcastControl'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    post:
+      tags: [WhatsApp]
+      operationId: setWhatsAppBroadcastControl
+      summary: 'Pause or resume all broadcasts'
+      description: 'While paused no command, automatic run or send intent is created; messages already being sent finish. Version compare-and-swap; audited.'
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppBroadcastControlUpdate'}}}
+      responses:
+        '200': {description: Send barrier, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppBroadcastControl'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {description: 'BROADCAST_VERSION_CONFLICT'}
+        '422': {description: Invalid request}
+  /api/v1/whatsapp/broadcasts/catalog:
+    get:
+      tags: [WhatsApp]
+      operationId: getWhatsAppBroadcastCatalog
+      summary: 'Variables available in broadcast captions'
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      responses:
+        '200': {description: Caption variables, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppBroadcastCatalog'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/whatsapp/broadcasts/legacy-digest-runs:
+    get:
+      tags: [WhatsApp]
+      operationId: listWhatsAppLegacyDigestRuns
+      summary: 'Read-only history of the daily digest before the broadcasts cutover'
+      description: 'At most 50 metadata-only records of the former single daily digest; chat IDs masked.'
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      responses:
+        '200': {description: Legacy runs, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppDailyDigestRunList'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/whatsapp/broadcasts/{id}:
+    get:
+      tags: [WhatsApp]
+      operationId: getWhatsAppBroadcast
+      summary: 'Read one broadcast with today''s frozen schedule'
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Broadcast, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppBroadcastEnvelope'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'BROADCAST_NOT_FOUND'}
+        '422': {description: Invalid id}
+    patch:
+      tags: [WhatsApp]
+      operationId: updateWhatsAppBroadcast
+      summary: 'Update a broadcast'
+      description: 'Strict versioned update. Disabling cancels only this broadcast''s pending automatic work. Once today''s schedule exists, time, window and catch-up changes apply from the next business date (use replan to apply today).'
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppBroadcastUpdate'}}}
+      responses:
+        '200': {description: Updated broadcast, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppBroadcastEnvelope'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'BROADCAST_NOT_FOUND'}
+        '409': {description: 'BROADCAST_VERSION_CONFLICT, BROADCAST_ARCHIVED, BROADCAST_ACTIVE_LIMIT, BROADCAST_NAME_TAKEN or BROADCAST_DUPLICATE_CONFIRMATION_REQUIRED'}
+        '422': {description: Invalid or inconsistent settings}
+  /api/v1/whatsapp/broadcasts/{id}/archive:
+    post:
+      tags: [WhatsApp]
+      operationId: archiveWhatsAppBroadcast
+      summary: 'Archive a broadcast'
+      description: 'History is kept; pending automatic work of this broadcast is cancelled.'
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppBroadcastVersion'}}}
+      responses:
+        '200': {description: Archived broadcast, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppBroadcastEnvelope'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'BROADCAST_NOT_FOUND'}
+        '409': {description: 'BROADCAST_VERSION_CONFLICT or BROADCAST_ARCHIVED'}
+  /api/v1/whatsapp/broadcasts/{id}/preview:
+    post:
+      tags: [WhatsApp]
+      operationId: previewWhatsAppBroadcast
+      summary: 'Render a private in-memory preview of the broadcast'
+      description: 'Uses current orders of the broadcast''s target date (today + orderDateOffsetDays); nothing is stored or sent.'
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
       responses:
         '200':
           description: Preview pages or an empty-day result
           headers:
             Cache-Control: {schema: {type: string, enum: ['private, no-store']}}
-          content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppDailyDigestPreview'}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppBroadcastPreview'}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
-        '413': {description: 'WHATSAPP_DAILY_DIGEST_IMAGE_LIMIT or order-count limit exceeded'}
+        '404': {description: 'BROADCAST_NOT_FOUND'}
+        '413': {description: Render size or order-count limit exceeded}
         '422': {description: Invalid or unrenderable order data}
-        '503': {description: Required database or render lease unavailable}
-  /api/v1/whatsapp/daily-digest/runs:
+        '503': {description: 'BROADCAST_RENDER_BUSY'}
+  /api/v1/whatsapp/broadcasts/{id}/runs:
     get:
       tags: [WhatsApp]
-      operationId: listWhatsAppDailyDigestRuns
-      summary: List the latest daily digest run history
-      description: Returns at most 50 metadata-only records. Chat IDs are masked; card snapshots and image data are excluded.
+      operationId: listWhatsAppBroadcastRuns
+      summary: 'List the latest runs of one broadcast'
+      description: 'At most 50 metadata-only records; chat IDs masked.'
       security: [{bearerAuth: []}]
       x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
       responses:
-        '200': {description: Latest runs, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppDailyDigestRunList'}}}}
+        '200': {description: Latest runs, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppBroadcastRunList'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
-        '503': {description: 'WHATSAPP_DAILY_DIGEST_NOT_MIGRATED'}
+        '404': {description: 'BROADCAST_NOT_FOUND'}
     post:
       tags: [WhatsApp]
-      operationId: createWhatsAppDailyDigestRun
-      summary: Queue a confirmed manual digest for today's orders
-      description: Manual runs work while scheduled automation is disabled, but require the existing WhatsApp runtime and relay owner. Request confirmation acknowledges current preview information may have changed. Empty days are recorded without sending.
+      operationId: createWhatsAppBroadcastRun
+      summary: 'Queue a confirmed manual broadcast run'
+      description: 'Idempotent through the command ledger: the same key and payload return the original run; a different payload returns 409 IDEMPOTENCY_KEY_REUSED.'
       security: [{bearerAuth: []}]
       x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
       requestBody:
         required: true
-        content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppDailyDigestRunRequest'}}}
+        content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppBroadcastRunRequest'}}}
       responses:
-        '202': {description: Run queued or recorded as empty, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppDailyDigestRunResponse'}}}}
+        '202': {description: Queued or replayed run, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppBroadcastRunResponse'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
-        '409': {description: 'WHATSAPP_DAILY_DIGEST_VERSION_CONFLICT, WHATSAPP_DAILY_DIGEST_DESTINATION_REQUIRED, or idempotency conflict'}
-        '422': {description: Invalid command body}
-        '503': {description: Runtime/relay unavailable or private image store unavailable}
-  /api/v1/whatsapp/daily-digest/runs/{id}:
-    parameters:
-      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
-    get:
-      tags: [WhatsApp]
-      operationId: getWhatsAppDailyDigestRun
-      summary: Get one digest run and per-page delivery states
-      description: Returns masked destination and page metadata only, never card content or image bytes.
-      security: [{bearerAuth: []}]
-      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
-      responses:
-        '200': {description: Run detail, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppDailyDigestRunDetail'}}}}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '403': {$ref: '#/components/responses/Forbidden'}
-        '404': {description: Run not found}
-        '422': {description: Invalid run ID}
-  /api/v1/whatsapp/daily-digest/runs/{id}/pages/{index}/image:
-    parameters:
-      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
-      - {name: index, in: path, required: true, schema: {type: integer, minimum: 1, maximum: 500}}
-    get:
-      tags: [WhatsApp]
-      operationId: getWhatsAppDailyDigestRunPageImage
-      summary: Download an unexpired private PNG page
-      description: Protected image bytes are served directly with no-store caching. Files expire within 24 hours; metadata history remains after physical deletion.
-      security: [{bearerAuth: []}]
-      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
-      responses:
-        '200':
-          description: PNG image bytes
-          headers:
-            Cache-Control: {schema: {type: string, enum: ['private, no-store']}}
-          content: {image/png: {schema: {type: string, format: binary}}}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '403': {$ref: '#/components/responses/Forbidden'}
-        '404': {description: 'WHATSAPP_DAILY_DIGEST_PAGE_NOT_FOUND or WHATSAPP_DAILY_DIGEST_IMAGE_MISSING'}
-        '410': {description: 'WHATSAPP_DAILY_DIGEST_IMAGE_EXPIRED; image bytes have passed their retention limit'}
-        '422': {description: Invalid run ID or page index}
-        '503': {description: Private image store unavailable}
-  /api/v1/whatsapp/daily-digest/runs/{id}/retry:
-    parameters:
-      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        '404': {description: 'BROADCAST_NOT_FOUND'}
+        '409': {description: 'BROADCASTS_PAUSED, BROADCAST_VERSION_CONFLICT, BROADCAST_ARCHIVED, BROADCAST_DESTINATION_REQUIRED or IDEMPOTENCY_KEY_REUSED'}
+        '503': {description: 'BROADCAST_RUNTIME_UNAVAILABLE, BROADCAST_STORE_UNAVAILABLE, BROADCAST_RENDER_BUSY or BROADCAST_STORE_BUSY'}
+  /api/v1/whatsapp/broadcasts/{id}/schedule/today/replan:
     post:
       tags: [WhatsApp]
-      operationId: retryWhatsAppDailyDigestRun
-      summary: Queue an explicitly confirmed retry of a digest
-      description: Retry uses the existing immutable run snapshot and cannot regenerate an expired image. After expiry, create a new manual run to capture today's orders. Retrying all pages requires duplicate-risk confirmation; an unknown provider outcome may duplicate a delivered message.
+      operationId: replanWhatsAppBroadcastToday
+      summary: 'Replan today''s automatic send'
+      description: 'Allowed only while no message of today''s automatic run chain is sending, sent or unknown. Supersedes that chain (history kept) and draws a new dispatch minute from the current settings. Idempotent through the command ledger.'
       security: [{bearerAuth: []}]
       x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
       requestBody:
         required: true
-        content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppDailyDigestRetryRequest'}}}
+        content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppBroadcastReplanRequest'}}}
       responses:
-        '202': {description: Retry run queued, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppDailyDigestRunResponse'}}}}
+        '200': {description: Broadcast with the new schedule generation, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppBroadcastEnvelope'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
-        '404': {description: Run not found}
-        '409': {description: Retry not available, limit reached, active retry, idempotency conflict, or duplicate confirmation required}
-        '410': {description: Retry cannot run because source images expired}
-        '422': {description: Invalid retry body or run ID}
-        '503': {description: WhatsApp runtime or relay unavailable}
+        '404': {description: 'BROADCAST_NOT_FOUND'}
+        '409': {description: 'BROADCASTS_PAUSED, BROADCAST_VERSION_CONFLICT, BROADCAST_ARCHIVED, BROADCAST_TODAY_ALREADY_SENDING or IDEMPOTENCY_KEY_REUSED'}
+  /api/v1/whatsapp/broadcast-runs/{runId}:
+    get:
+      tags: [WhatsApp]
+      operationId: getWhatsAppBroadcastRun
+      summary: 'Read one broadcast run with per-message delivery state'
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      parameters:
+        - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Run detail, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppBroadcastRunDetail'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'BROADCAST_RUN_NOT_FOUND'}
+        '422': {description: Invalid run id}
+  /api/v1/whatsapp/broadcast-runs/{runId}/messages/{seq}/image:
+    get:
+      tags: [WhatsApp]
+      operationId: getWhatsAppBroadcastImage
+      summary: 'Read one unexpired private PNG of a broadcast run'
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      parameters:
+        - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: seq, in: path, required: true, schema: {type: integer, minimum: 1, maximum: 560}}
+      responses:
+        '200': {description: Private PNG, content: {image/png: {schema: {type: string, format: binary}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'BROADCAST_MESSAGE_NOT_FOUND'}
+        '410': {description: 'BROADCAST_IMAGE_EXPIRED'}
+        '503': {description: 'BROADCAST_STORE_UNAVAILABLE or BROADCAST_STORE_BUSY'}
+  /api/v1/whatsapp/broadcast-runs/{runId}/retry:
+    post:
+      tags: [WhatsApp]
+      operationId: retryWhatsAppBroadcastRun
+      summary: 'Queue an explicitly confirmed retry of a broadcast run'
+      description: 'Retries inherit the snapshot, captions and author of the original run; runs superseded by a replan cannot be retried. Idempotent through the command ledger.'
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      parameters:
+        - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppBroadcastRetryRequest'}}}
+      responses:
+        '202': {description: Queued or replayed retry, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppBroadcastRunResponse'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'BROADCAST_RUN_NOT_FOUND'}
+        '409': {description: 'BROADCASTS_PAUSED, BROADCAST_RUN_SUPERSEDED, BROADCAST_RETRY_LIMIT, BROADCAST_RETRY_ACTIVE, BROADCAST_RETRY_NOT_AVAILABLE, BROADCAST_DUPLICATE_CONFIRMATION_REQUIRED or IDEMPOTENCY_KEY_REUSED'}
+        '410': {description: 'BROADCAST_IMAGE_EXPIRED, BROADCAST_DEADLINE_PASSED or BROADCAST_CONTENT_PURGED'}
+        '503': {description: 'BROADCAST_RUNTIME_UNAVAILABLE'}
   /api/v1/whatsapp/qr:
     get:
       tags:
@@ -28533,6 +28653,262 @@ components:
         truncated: {type: boolean}
         fetchedAt: {type: string, format: date-time}
         cached: {type: boolean}
+    WhatsAppBroadcastInput:
+      type: object
+      additionalProperties: false
+      required: [name, enabled, groupChatId, weekdays, sendTime, sendWindowMinutes, catchUpPolicy, catchUpDeadline, partialPolicy, orderDateOffsetDays, cardsPerMessage, captionTemplate]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+        enabled: {type: boolean}
+        groupChatId: {type: string, nullable: true, pattern: '^\d{5,24}(?:-\d{5,24})?@g\.us$'}
+        weekdays: {type: array, maxItems: 7, items: {type: integer, minimum: 1, maximum: 7}, description: 'ISO weekdays, 1 = Monday … 7 = Sunday'}
+        sendTime: {type: string, pattern: '^(?:[01]\d|2[0-3]):[0-5]\d$'}
+        sendWindowMinutes: {type: integer, minimum: 0, maximum: 1439}
+        catchUpPolicy: {type: string, enum: [skip, until_deadline, end_of_day]}
+        catchUpDeadline: {type: string, pattern: '^(?:[01]\d|2[0-3]):[0-5]\d$'}
+        partialPolicy: {type: string, enum: [remaining, repeat_all, manual]}
+        orderDateOffsetDays: {type: integer, minimum: 0, maximum: 14, description: '0 = orders planned for today, 1 = tomorrow, …'}
+        cardsPerMessage: {type: integer, enum: [1, 2]}
+        captionTemplate: {type: string, maxLength: 1000, description: 'Caption of the first image; variables {current_date} {current_time} {weekday} {target_date} {target_weekday}; {{ and }} for braces'}
+        duplicateRiskConfirmed: {type: boolean, default: false}
+    WhatsAppBroadcastUpdate:
+      type: object
+      additionalProperties: false
+      required: [version, name, enabled, groupChatId, weekdays, sendTime, sendWindowMinutes, catchUpPolicy, catchUpDeadline, partialPolicy, orderDateOffsetDays, cardsPerMessage, captionTemplate]
+      properties:
+        version: {type: integer, minimum: 1}
+        name: {type: string, minLength: 1, maxLength: 120}
+        enabled: {type: boolean}
+        groupChatId: {type: string, nullable: true, pattern: '^\d{5,24}(?:-\d{5,24})?@g\.us$'}
+        weekdays: {type: array, maxItems: 7, items: {type: integer, minimum: 1, maximum: 7}, description: 'ISO weekdays, 1 = Monday … 7 = Sunday'}
+        sendTime: {type: string, pattern: '^(?:[01]\d|2[0-3]):[0-5]\d$'}
+        sendWindowMinutes: {type: integer, minimum: 0, maximum: 1439}
+        catchUpPolicy: {type: string, enum: [skip, until_deadline, end_of_day]}
+        catchUpDeadline: {type: string, pattern: '^(?:[01]\d|2[0-3]):[0-5]\d$'}
+        partialPolicy: {type: string, enum: [remaining, repeat_all, manual]}
+        orderDateOffsetDays: {type: integer, minimum: 0, maximum: 14, description: '0 = orders planned for today, 1 = tomorrow, …'}
+        cardsPerMessage: {type: integer, enum: [1, 2]}
+        captionTemplate: {type: string, maxLength: 1000, description: 'Caption of the first image; variables {current_date} {current_time} {weekday} {target_date} {target_weekday}; {{ and }} for braces'}
+        duplicateRiskConfirmed: {type: boolean, default: false}
+    WhatsAppBroadcastVersion:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: {type: integer, minimum: 1}
+    WhatsAppBroadcast:
+      type: object
+      required: [id, version, name, enabled, groupChatId, weekdays, sendTime, sendWindowMinutes, catchUpPolicy, catchUpDeadline, partialPolicy, orderDateOffsetDays, cardsPerMessage, captionTemplate, archived, scheduleGeneration, createdAt, updatedAt, updatedBy]
+      properties:
+        id: {type: integer}
+        version: {type: integer}
+        name: {type: string}
+        enabled: {type: boolean}
+        groupChatId: {type: string, nullable: true}
+        weekdays: {type: array, items: {type: integer}}
+        sendTime: {type: string}
+        sendWindowMinutes: {type: integer}
+        catchUpPolicy: {type: string, enum: [skip, until_deadline, end_of_day]}
+        catchUpDeadline: {type: string}
+        partialPolicy: {type: string, enum: [remaining, repeat_all, manual]}
+        orderDateOffsetDays: {type: integer}
+        cardsPerMessage: {type: integer, enum: [1, 2]}
+        captionTemplate: {type: string}
+        archived: {type: boolean}
+        scheduleGeneration: {type: integer}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        updatedBy:
+          type: object
+          nullable: true
+          properties:
+            id: {type: string}
+            username: {type: string, nullable: true}
+    WhatsAppBroadcastSummary:
+      type: object
+      required: [id, name, enabled, groupChatId, weekdays, sendTime, sendWindowMinutes, orderDateOffsetDays, archived, lastRun]
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        enabled: {type: boolean}
+        groupChatId: {type: string, nullable: true}
+        weekdays: {type: array, items: {type: integer}}
+        sendTime: {type: string}
+        sendWindowMinutes: {type: integer}
+        orderDateOffsetDays: {type: integer}
+        archived: {type: boolean}
+        lastRun:
+          type: object
+          nullable: true
+          properties:
+            state: {type: string}
+            createdAt: {type: string, format: date-time}
+    WhatsAppBroadcastControl:
+      type: object
+      required: [paused, version, pausedAt, pausedBy]
+      properties:
+        paused: {type: boolean}
+        version: {type: integer}
+        pausedAt: {type: string, format: date-time, nullable: true}
+        pausedBy:
+          type: object
+          nullable: true
+          properties:
+            id: {type: string}
+            username: {type: string, nullable: true}
+    WhatsAppBroadcastControlUpdate:
+      type: object
+      additionalProperties: false
+      required: [version, paused]
+      properties:
+        version: {type: integer, minimum: 1}
+        paused: {type: boolean}
+    WhatsAppBroadcastRuntime:
+      type: object
+      required: [enabled, relayAvailable, unavailableReason]
+      properties:
+        enabled: {type: boolean}
+        relayAvailable: {type: boolean}
+        unavailableReason: {type: string, nullable: true}
+    WhatsAppBroadcastList:
+      type: object
+      required: [broadcasts, control, runtime, limits]
+      properties:
+        broadcasts: {type: array, items: {$ref: '#/components/schemas/WhatsAppBroadcastSummary'}}
+        control: {$ref: '#/components/schemas/WhatsAppBroadcastControl'}
+        runtime: {$ref: '#/components/schemas/WhatsAppBroadcastRuntime'}
+        limits:
+          type: object
+          properties:
+            maxActive: {type: integer}
+    WhatsAppBroadcastSchedule:
+      type: object
+      required: [broadcastId, businessDate, generation, scheduledAt, windowStart, windowEnd, sendWindowMinutes, catchUpPolicy, catchUpDeadline, settingsVersion, createdAt]
+      properties:
+        broadcastId: {type: integer}
+        businessDate: {type: string, format: date}
+        generation: {type: integer}
+        scheduledAt: {type: string, format: date-time}
+        windowStart: {type: string}
+        windowEnd: {type: string}
+        sendWindowMinutes: {type: integer}
+        catchUpPolicy: {type: string, enum: [skip, until_deadline, end_of_day]}
+        catchUpDeadline: {type: string}
+        settingsVersion: {type: integer}
+        createdAt: {type: string, format: date-time}
+    WhatsAppBroadcastEnvelope:
+      type: object
+      required: [broadcast, todaySchedule, runtime]
+      properties:
+        broadcast: {$ref: '#/components/schemas/WhatsAppBroadcast'}
+        todaySchedule: {allOf: [{$ref: '#/components/schemas/WhatsAppBroadcastSchedule'}], nullable: true}
+        runtime: {$ref: '#/components/schemas/WhatsAppBroadcastRuntime'}
+    WhatsAppBroadcastCatalog:
+      type: object
+      required: [captionVariables]
+      properties:
+        captionVariables:
+          type: array
+          items:
+            type: object
+            required: [name, label, example]
+            properties:
+              name: {type: string}
+              label: {type: string}
+              example: {type: string}
+    WhatsAppBroadcastPreview:
+      type: object
+      required: [businessDate, targetDate, orderCount, totalArea, caption, pages, empty]
+      properties:
+        businessDate: {type: string, format: date}
+        targetDate: {type: string, format: date}
+        orderCount: {type: integer}
+        totalArea: {type: number}
+        caption: {type: string}
+        empty: {type: boolean}
+        pages:
+          type: array
+          items:
+            type: object
+            required: [pageIndex, orderIds, imageDataUrl]
+            properties:
+              pageIndex: {type: integer}
+              orderIds: {type: array, items: {type: integer}}
+              imageDataUrl: {type: string}
+    WhatsAppBroadcastRunRequest:
+      type: object
+      additionalProperties: false
+      required: [settingsVersion, idempotencyKey, confirmed]
+      properties:
+        settingsVersion: {type: integer, minimum: 1}
+        idempotencyKey: {type: string, format: uuid}
+        confirmed: {type: boolean, enum: [true]}
+    WhatsAppBroadcastRetryRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, idempotencyKey]
+      properties:
+        mode: {type: string, enum: [remaining, all]}
+        idempotencyKey: {type: string, format: uuid}
+        duplicateRiskConfirmed: {type: boolean, default: false}
+    WhatsAppBroadcastReplanRequest:
+      type: object
+      additionalProperties: false
+      required: [version, idempotencyKey]
+      properties:
+        version: {type: integer, minimum: 1}
+        idempotencyKey: {type: string, format: uuid}
+    WhatsAppBroadcastRun:
+      type: object
+      required: [id, broadcastId, businessDate, targetDate, kind, parentRunId, state, reason, orderCount, totalArea, messageCount, sentMessageCount, destinationMasked, createdAt, updatedAt, expiresAt, scheduledAt, superseded]
+      properties:
+        id: {type: string, format: uuid}
+        broadcastId: {type: integer}
+        businessDate: {type: string, format: date}
+        targetDate: {type: string, format: date}
+        kind: {type: string, enum: [auto, manual, retry]}
+        parentRunId: {type: string, format: uuid, nullable: true}
+        state: {type: string, enum: [preparing, queued, sending, sent, partial, failed, unknown, cancelled, expired, empty, skipped]}
+        reason: {type: string, nullable: true}
+        orderCount: {type: integer}
+        totalArea: {type: number}
+        messageCount: {type: integer}
+        sentMessageCount: {type: integer}
+        destinationMasked: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time, nullable: true}
+        scheduledAt: {type: string, format: date-time, nullable: true}
+        superseded: {type: boolean}
+    WhatsAppBroadcastRunList:
+      type: object
+      required: [runs]
+      properties:
+        runs: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/WhatsAppBroadcastRun'}}
+    WhatsAppBroadcastMessage:
+      type: object
+      required: [deliverySeq, kind, orderIds, state, attemptCount, errorCode, sentAt, imageAvailable, expiresAt]
+      properties:
+        deliverySeq: {type: integer}
+        kind: {type: string, enum: [image, text]}
+        orderIds: {type: array, items: {type: integer}}
+        state: {type: string, enum: [pending, sending, sent, failed, unknown, cancelled, expired]}
+        attemptCount: {type: integer}
+        errorCode: {type: string, nullable: true}
+        sentAt: {type: string, format: date-time, nullable: true}
+        imageAvailable: {type: boolean}
+        expiresAt: {type: string, format: date-time}
+    WhatsAppBroadcastRunDetail:
+      type: object
+      required: [run, messages]
+      properties:
+        run: {$ref: '#/components/schemas/WhatsAppBroadcastRun'}
+        messages: {type: array, items: {$ref: '#/components/schemas/WhatsAppBroadcastMessage'}}
+    WhatsAppBroadcastRunResponse:
+      type: object
+      required: [run]
+      properties:
+        run: {$ref: '#/components/schemas/WhatsAppBroadcastRun'}
     WhatsAppDailyDigestSettingsResponse:
       type: object
       additionalProperties: false
