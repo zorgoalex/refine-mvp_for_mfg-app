@@ -402,9 +402,20 @@ export class PgMdfProductionReturn {
     }
     // The board never changes order statuses itself: after the detail stages
     // change, only enabled status-automation rules may move the order.
+    // «Переделка» (plan §5.5): details of production round > 1 are kept out of MDF
+    // automation — the card return never touches them; their stages are manual.
+    const cardDetails = before.details.filter((d) => quantities.has(d.id));
+    const reworkDetails = cardDetails.filter((d) => !d.deleted && d.productionRound > 1);
+    if (reworkDetails.length > 0 && reworkDetails.length === cardDetails.filter((d) => !d.deleted).length) {
+      fail(
+        "MDF_RETURN_REWORK_DETAILS_MANUAL",
+        "Детали карточки в переделке — их этапы отмечаются вручную",
+        409
+      );
+    }
     const changed = new Set(
       correctionDetailIds(
-        before.details.filter((d) => quantities.has(d.id)),
+        cardDetails.filter((d) => d.productionRound === 1),
         target.rank
       )
     );
@@ -437,6 +448,10 @@ export class PgMdfProductionReturn {
         source.kind === "packet" && request.targetColumn === "parsed",
       warnings: [],
     };
+    if (reworkDetails.length > 0)
+      preview.warnings.push(
+        `Детали в переделке пропущены (${reworkDetails.length}): их этапы отмечаются вручную.`
+      );
     if (card.wholeOrderIds?.length)
       preview.warnings.push(
         "В файле есть отметка «весь заказ». Возврат затронет все обычные позиции указанных заказов, включая отсутствующие в списке файла. ХДФ исключён."

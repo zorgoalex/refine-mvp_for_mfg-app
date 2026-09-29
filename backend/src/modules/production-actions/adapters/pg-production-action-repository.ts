@@ -2372,8 +2372,11 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
   if (ctx.mdfBoardScope) detailTransitionMode = 'advance_only';
   const order = await loadOrderForUpdate(tx, orderId);
   const status = await loadProductionStatus(tx, targetStatusId);
+  // «Переделка» (plan §5.5): MDF-sourced effects never move details of production round > 1.
+  const mdfSourced = ctx.eventType.startsWith('mdf.') || ctx.mdfBoardScope !== undefined;
   const currentDetails = await loadOrderDetailsForBatch(tx, order.orderId,
-    ctx.mdfBoardScope?.details.filter(d => d.requiredQuantity > 0 && d.eligibleQuantity >= d.requiredQuantity).map(d => d.detailId));
+    ctx.mdfBoardScope?.details.filter(d => d.requiredQuantity > 0 && d.eligibleQuantity >= d.requiredQuantity).map(d => d.detailId),
+    { firstRoundOnly: mdfSourced });
   if (currentDetails.length === 0) {
     return { status: 'skipped', skipReason: 'no_details' };
   }
@@ -3252,6 +3255,7 @@ async function loadOrderDetailsForBatch(
   tx: TransactionClient,
   orderId: number,
   selectedDetailIds?: number[],
+  options: { firstRoundOnly?: boolean } = {},
 ): Promise<Array<{
   detailId: number;
   productionStatusId: number | null;
@@ -3273,6 +3277,7 @@ async function loadOrderDetailsForBatch(
     WHERE detail.order_id = $1
       AND COALESCE(detail.delete_flag, false) = false
       ${selectedDetailIds === undefined ? '' : 'AND detail.detail_id = ANY($2::bigint[])'}
+      ${options.firstRoundOnly ? 'AND detail.production_round = 1' : ''}
     ORDER BY detail.detail_id
     FOR UPDATE OF detail
     `,
@@ -3719,7 +3724,9 @@ export async function loadMdfLaminatedBathAutomationRows(
             AND laminated_status.sort_order IS NOT NULL
             THEN detail_status.sort_order >= laminated_status.sort_order
           ELSE false
-        END AS laminated_or_later
+        END AS laminated_or_later,
+        -- «Переделка» (plan §5.5): a production round > 1 member neither blocks nor completes the bath.
+        detail.production_round > 1 AS excluded
       FROM result_details result_detail
       JOIN cut_result_placement placement
         ON placement.cut_result_id = result_detail.cut_result_id
@@ -3739,14 +3746,16 @@ export async function loadMdfLaminatedBathAutomationRows(
         placement.order_detail_id,
         completed.completed_quantity,
         detail_status.sort_order,
-        laminated_status.sort_order
+        laminated_status.sort_order,
+        detail.production_round
     )
     SELECT DISTINCT state.cut_result_id, state.order_id
     FROM detail_state state
-    WHERE NOT EXISTS (
+    WHERE NOT state.excluded AND NOT EXISTS (
       SELECT 1
       FROM detail_state candidate
       WHERE candidate.cut_result_id = state.cut_result_id
+        AND NOT candidate.excluded
         AND (
           candidate.completed_quantity < candidate.quantity
           OR candidate.laminated_or_later = false

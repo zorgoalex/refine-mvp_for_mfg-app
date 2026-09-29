@@ -82,6 +82,13 @@ export function createMdfCorrectionPgFixture(prefix = 'e2e_mdf_correction'): Mdf
         const exists = (await client.query(`SELECT to_regclass($1) AS relation`, [`${schema}.${table}`])).rows[0]?.relation;
         if (exists) throw new Error('MDF_TEST_CLONE_TARGET_EXISTS');
         await client.query(`CREATE TABLE ${safeIdentifier(schema)}.${safe} AS TABLE public.${safe} WITH NO DATA`);
+        // «Переделка»: order_details.production_round (NOT NULL DEFAULT 1) exists on every
+        // database, whether or not public already carries it; CREATE TABLE AS drops defaults.
+        if (table === 'order_details') {
+          await client.query(`ALTER TABLE ${safeIdentifier(schema)}.order_details
+            ADD COLUMN IF NOT EXISTS production_round integer NOT NULL DEFAULT 1`);
+          await client.query(`ALTER TABLE ${safeIdentifier(schema)}.order_details ALTER COLUMN production_round SET DEFAULT 1`);
+        }
       }
       await assertLocalRelations(tables);
     },

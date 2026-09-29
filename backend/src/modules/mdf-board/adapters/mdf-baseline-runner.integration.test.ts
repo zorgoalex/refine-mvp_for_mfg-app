@@ -611,6 +611,8 @@ describe.skipIf(!enabled)('MDF §5.7b baseline population, isolated PostgreSQL s
     const order = await seedOrder({ quantity: 5 });
     await fixture.client.query('BEGIN ISOLATION LEVEL READ COMMITTED');
     try {
+      // The fixture always carries production_round; drop it here to cover a pre-rework database.
+      await fixture.client.query('ALTER TABLE order_details DROP COLUMN production_round');
       expect(await hasMdfUnsupportedProductionRounds(tx(fixture.client))).toBe(false);
       await fixture.client.query('ALTER TABLE order_details ADD COLUMN production_round int NOT NULL DEFAULT 1');
       expect(await hasMdfUnsupportedProductionRounds(tx(fixture.client))).toBe(false);
@@ -630,7 +632,6 @@ describe.skipIf(!enabled)('MDF §5.7b baseline population, isolated PostgreSQL s
       const locked = (await fixture.client.query<{ locked: boolean }>(
         `SELECT pg_try_advisory_xact_lock(${LOCK_SQL}) locked`)).rows[0].locked;
       expect(locked).toBe(true);
-      await fixture.client.query('ALTER TABLE order_details ADD COLUMN production_round int NOT NULL DEFAULT 1');
       await fixture.client.query('UPDATE order_details SET production_round=2 WHERE detail_id=$1', [order.detailId]);
       await expect(startMdfBaselineRun(tx(fixture.client), actor, {}))
         .rejects.toMatchObject({ code: 'MDF_PRODUCTION_ROUNDS_UNSUPPORTED' });
@@ -646,7 +647,6 @@ describe.skipIf(!enabled)('MDF §5.7b baseline population, isolated PostgreSQL s
       const locked = (await fixture.client.query<{ locked: boolean }>(
         `SELECT pg_try_advisory_xact_lock(${LOCK_SQL}) locked`)).rows[0].locked;
       expect(locked).toBe(true);
-      await fixture.client.query('ALTER TABLE order_details ADD COLUMN production_round int NOT NULL DEFAULT 1');
       await fixture.client.query('UPDATE order_details SET production_round=2,delete_flag=true WHERE detail_id=$1', [order.detailId]);
       const applied = await startMdfBaselineRun(tx(fixture.client), actor, {});
       expect(typeof applied.runId).toBe('string');
@@ -659,7 +659,6 @@ describe.skipIf(!enabled)('MDF §5.7b baseline population, isolated PostgreSQL s
     const order = await seedOrder({ quantity: 5 });
     await fixture.client.query('BEGIN ISOLATION LEVEL READ COMMITTED');
     try {
-      await fixture.client.query('ALTER TABLE order_details ADD COLUMN production_round int NOT NULL DEFAULT 1');
       await fixture.client.query('UPDATE order_details SET production_round=2 WHERE detail_id=$1', [order.detailId]);
       const report = await dryRunMdfBaseline(tx(fixture.client), actor);
       expect(report.handoff).toBe('drifted');
@@ -683,7 +682,6 @@ describe.skipIf(!enabled)('MDF §5.7b baseline population, isolated PostgreSQL s
       }
       await markMdfBaselineRecorded(tx(fixture.client), actor, started.runId, started.build);
       // The rework round appears only AFTER recording (mirrors a live rework starting mid-run): handoff must catch it.
-      await fixture.client.query('ALTER TABLE order_details ADD COLUMN production_round int NOT NULL DEFAULT 1');
       await fixture.client.query('UPDATE order_details SET production_round=2 WHERE detail_id=$1', [order.detailId]);
       const handoff = await handoffMdfBaseline(tx(fixture.client), actor, started.runId);
       expect(handoff.status).toBe('drifted');

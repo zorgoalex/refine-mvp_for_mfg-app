@@ -324,6 +324,7 @@ interface BathColumnAutomationRow extends QueryResultRow {
   quantity: string | number;
   completed_quantity: string | number | null;
   laminated_or_later: boolean | null;
+  excluded: boolean | null;
 }
 
 interface BazisCutSetJoinedRow extends QueryResultRow {
@@ -6255,7 +6256,9 @@ export async function loadMdfBathColumnAutomationState(
           AND laminated_status.sort_order IS NOT NULL
           THEN detail_status.sort_order >= laminated_status.sort_order
         ELSE false
-      END AS laminated_or_later
+      END AS laminated_or_later,
+      -- «Переделка» (plan §5.5): a production round > 1 member neither blocks nor completes the bath.
+      detail.production_round > 1 AS excluded
     FROM cut_result_placement placement
     JOIN target_details target
       ON target.order_id = placement.order_id
@@ -6274,17 +6277,21 @@ export async function loadMdfBathColumnAutomationState(
       placement.order_detail_id,
       completed.completed_quantity,
       detail_status.sort_order,
-      laminated_status.sort_order
+      laminated_status.sort_order,
+      detail.production_round
     ORDER BY placement.order_id, placement.order_detail_id
     `,
     [cutResultId],
   );
-  if (result.rows.length === 0) return null;
+  // Members of production round > 1 are out of MDF automation: they neither block the
+  // bath nor receive its events; a bath of only such members is never auto-advanced.
+  const rows = result.rows.filter((row) => row.excluded !== true);
+  if (rows.length === 0) return null;
 
-  const orderIds = positiveNumberArray(result.rows.map((row) => row.order_id));
+  const orderIds = positiveNumberArray(rows.map((row) => row.order_id));
   if (orderIds.length === 0) return null;
-  const ready = result.rows.every((row) => toNumber(row.completed_quantity) >= toNumber(row.quantity));
-  const laminated = ready && result.rows.every((row) => row.laminated_or_later === true);
+  const ready = rows.every((row) => toNumber(row.completed_quantity) >= toNumber(row.quantity));
+  const laminated = ready && rows.every((row) => row.laminated_or_later === true);
   return {
     column: laminated ? 'baths_laminated' : ready ? 'baths_ready' : 'baths',
     orderIds,
@@ -6478,6 +6485,8 @@ async function applyCncAutoCutStatusCandidates(
     LEFT JOIN completed_quantities completed ON completed.detail_id = details.detail_id
     WHERE COALESCE(details.delete_flag, false) = false
       AND COALESCE(orders.delete_flag, false) = false
+      -- «Переделка» (plan §5.5): whole-order and matched targets are first-round details only.
+      AND details.production_round = 1
       AND details.order_id = ANY($3::bigint[])
       AND (
         (
@@ -6553,6 +6562,8 @@ async function applyCncAutoCutStatusCandidates(
     WHERE detail_id = ANY($2::bigint[])
       AND COALESCE(delete_flag, false) = false
       AND production_status_id IS DISTINCT FROM $1
+      -- «Переделка» (plan §5.5): details of production round > 1 are kept out of MDF/CNC automation.
+      AND production_round = 1
     RETURNING order_id, detail_id
     `,
     [toNumber(input.targetStatus.production_status_id), eligibleDetailIds],
