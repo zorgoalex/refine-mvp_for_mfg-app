@@ -13,19 +13,19 @@
 ## Тип и границы
 
 ```ts
-export type UiVariant = 'legacy' | 'evolution' | 'line' | 'air';
+export type UiVariant = 'legacy' | 'evolution' | 'line' | 'air' | 'neutral';
 ```
 
 Variant управляет только presentation composition и theme tokens. Он не передаётся в API clients, data hooks, validation, permission helpers, status transitions, accounting/cut calculations или route guards.
 
-`evolution`, `line` и `air` образуют modern family. `line` и `air` используют тот же application shell и route tree, что Evolutionary, но получают отдельные CSS variables и Ant Design tokens по мотивам `01_LINE_business_minimal` и `02_AIR_luminous_modern`.
+`evolution`, `line`, `air` и `neutral` образуют modern family. `line` и `air` используют тот же application shell и route tree, что Evolutionary, но получают отдельные CSS variables и Ant Design tokens по мотивам `01_LINE_business_minimal` и `02_AIR_luminous_modern`. `neutral` — светлая холодно-серая палитра поверх того же evolution shell (без operational LINE/AIR layout), с тёмным slate-сайдбаром.
 
 ## Текущий resolver
 
 ```text
 runtime forceLegacy === true                 -> legacy
 runtime evolutionEnabled !== true            -> legacy
-confirmed user preference legacy|evolution|line|air -> selected value
+confirmed user preference legacy|evolution|line|air|neutral -> selected value
 same-user confirmed cache while GET fails    -> cached value
 missing/invalid/timeout/user-change           -> evolution when modern UI is available, legacy otherwise
 ```
@@ -66,12 +66,13 @@ PATCH /api/v1/me/preferences
 { "uiVariant": "line" }
 ```
 
-- Zod принимает только `legacy|evolution|line|air`.
+- Zod принимает только `legacy|evolution|line|air|neutral`.
 - Migration 084 добавляет `user_preferences.ui_variant` с default `legacy`,
   `NOT NULL` и check constraint.
 - Migration 090 меняет DB default на `evolution`; migration 091 расширяет
   check constraint до `legacy|evolution|line|air` и сохраняет default
-  `evolution`.
+  `evolution`; migration 208 расширяет check constraint до
+  `legacy|evolution|line|air|neutral`, default остаётся `evolution`.
 - Partial PATCH semantics сохранены.
 - Старый backend может ответить 200 без нового поля; frontend считает такой
   ответ неподтверждённым, не пишет cache и не перезагружает shell.
@@ -81,7 +82,7 @@ PATCH /api/v1/me/preferences
 - `UiVariantProvider` owns immutable boot variant.
 - `useUiVariant()` returns value plus modern/evolution booleans for shell selection and conditional Ant tokens.
 - `App.tsx` keeps one route tree and selects only layout component.
-- Shell registry dynamically imports `WorkspaceLayout` for legacy and `EvolutionWorkspaceLayout` for `evolution|line|air`; выбранный boot variant загружает только свой shell chunk.
+- Shell registry dynamically imports `WorkspaceLayout` for legacy and `EvolutionWorkspaceLayout` for `evolution|line|air|neutral`; выбранный boot variant загружает только свой shell chunk.
 - Later screen migrations use a registry keyed by route capability, not duplicate routes. Domain hooks stay above or outside variant views.
 - No silent legacy fallback inside an enabled evolution shell after general launch. During staged screen work, coverage matrix explicitly marks shared legacy body under evolution shell.
 
@@ -89,8 +90,8 @@ PATCH /api/v1/me/preferences
 
 - Legacy CSS remains as-is.
 - Every modern selector starts under `[data-ui-variant="evolution"]`,
-  `[data-ui-variant="line"]`, `[data-ui-variant="air"]` or their shared
-  `:root:where(...)` marker.
+  `[data-ui-variant="line"]`, `[data-ui-variant="air"]`,
+  `[data-ui-variant="neutral"]` or their shared `:root:where(...)` marker.
 - Modern Ant tokens are passed conditionally through existing `ConfigProvider`.
 - Portals (dropdown/modal/tooltip) inherit Ant tokens; any custom portal selectors include a root/overlay variant class rather than unscoped overrides.
 - No target hex values in ten screen files.
@@ -119,7 +120,7 @@ PATCH /api/v1/me/preferences
 
 - Existing and new users without a stored choice use `evolution` by database
   and frontend default.
-- `RUNTIME_CONFIG_UI_EVOLUTION=true` makes `evolution|line|air` selectable.
+- `RUNTIME_CONFIG_UI_EVOLUTION=true` makes `evolution|line|air|neutral` selectable.
 - `RUNTIME_CONFIG_UI_FORCE_LEGACY=true` immediately overrides all stored
   preferences without deleting them.
 - Migration must precede backend; backend and the new resolver must precede the

@@ -23,10 +23,10 @@ describe('profile preferences OpenAPI contract', () => {
     expect(userPreferences).toMatch(/required:[\s\S]*- tabletMode/);
     expect(userPreferences).toMatch(/required:[\s\S]*- sidebarCollapsed/);
     expect(userPreferences).toMatch(
-      /uiVariant:\s*\n\s*type: string\s*\n\s*enum: \[legacy, evolution, line, air\]/,
+      /uiVariant:\s*\n\s*type: string\s*\n\s*enum: \[legacy, evolution, line, air, neutral\]/,
     );
     expect(updateRequest).toMatch(
-      /uiVariant:\s*\n\s*type: string\s*\n\s*enum: \[legacy, evolution, line, air\]/,
+      /uiVariant:\s*\n\s*type: string\s*\n\s*enum: \[legacy, evolution, line, air, neutral\]/,
     );
     expect(userPreferences).toMatch(/tabletMode:\s*\n\s*type: boolean/);
     expect(updateRequest).toMatch(/tabletMode:\s*\n\s*type: boolean/);

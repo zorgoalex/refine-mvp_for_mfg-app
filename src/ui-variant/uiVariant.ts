@@ -1,9 +1,9 @@
 import type { FrontendUiRuntimeConfig } from '../config/runtimeConfig';
 
-export const UI_VARIANTS = ['legacy', 'evolution', 'line', 'air'] as const;
+export const UI_VARIANTS = ['legacy', 'evolution', 'line', 'air', 'neutral'] as const;
 export type UiVariant = (typeof UI_VARIANTS)[number];
 
-export const MODERN_UI_VARIANTS = ['evolution', 'line', 'air'] as const;
+export const MODERN_UI_VARIANTS = ['evolution', 'line', 'air', 'neutral'] as const;
 export type ModernUiVariant = (typeof MODERN_UI_VARIANTS)[number];
 
 export const DEFAULT_UI_VARIANT: UiVariant = 'evolution';

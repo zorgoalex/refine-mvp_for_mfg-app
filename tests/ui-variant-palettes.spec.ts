@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { createWorkflowMockDb, setupWorkflowMockApi } from './helpers/mockWorkflowApi';
 
-type ModernPaletteVariant = 'line' | 'air';
+type ModernPaletteVariant = 'line' | 'air' | 'neutral';
 
 const variants: Array<{
     variant: ModernPaletteVariant;
@@ -23,10 +23,16 @@ const variants: Array<{
         primary: '#315bea',
         sidebar: '#ffffff',
         selected: '#315bea',
+    },    {
+        variant: 'neutral',
+        canvas: '#f3f5f8',
+        primary: '#1677ff',
+        sidebar: '#1d2330',
+        selected: '#1677ff',
     },
 ];
 
-test.describe('LINE/AIR UI palettes', () => {
+test.describe('LINE/AIR/NEUTRAL UI palettes', () => {
     test.setTimeout(60000);
 
     for (const palette of variants) {
@@ -107,7 +113,7 @@ test.describe('LINE/AIR UI palettes', () => {
         });
     });
 
-    test('profile exposes all four UI design choices', async ({ page }) => {
+    test('profile exposes all five UI design choices', async ({ page }) => {
         await setupVariantPaletteMocks(page, 'air');
 
         await page.goto('/profile', { waitUntil: 'domcontentloaded' });
@@ -115,6 +121,7 @@ test.describe('LINE/AIR UI palettes', () => {
         await expect(page.getByRole('radio', { name: 'Новый (Evolutionary)' })).toBeVisible();
         await expect(page.getByRole('radio', { name: 'LINE · Деловой минимализм' })).toBeVisible();
         await expect(page.getByRole('radio', { name: 'AIR · Светлая динамика' })).toBeChecked();
+        await expect(page.getByRole('radio', { name: 'Нейтральная · светлая' })).toBeVisible();
     });
 });
 

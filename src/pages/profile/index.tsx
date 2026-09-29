@@ -30,6 +30,7 @@ const uiVariantOptions: Array<{ label: string; value: UiVariant }> = [
   { label: "Новый (Evolutionary)", value: "evolution" },
   { label: "LINE · Деловой минимализм", value: "line" },
   { label: "AIR · Светлая динамика", value: "air" },
+  { label: "Нейтральная · светлая", value: "neutral" },
 ];
 
 export const ProfilePage: React.FC = () => {

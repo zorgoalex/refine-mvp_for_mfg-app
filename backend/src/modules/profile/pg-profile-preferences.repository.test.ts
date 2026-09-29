@@ -175,6 +175,12 @@ describe('PgProfilePreferencesRepository', () => {
     await expect(new PgProfilePreferencesRepository(air).getUserPreferences(7))
       .resolves.toMatchObject({ uiVariant: 'air' });
 
+    const neutral = new FakeDatabase([{
+      rows: [{ theme_mode: 'light', ui_variant: 'neutral', order_detail_columns: {} }],
+    }]);
+    await expect(new PgProfilePreferencesRepository(neutral).getUserPreferences(7))
+      .resolves.toMatchObject({ uiVariant: 'neutral' });
+
     const garbage = new FakeDatabase([{
       rows: [{ theme_mode: 'light', ui_variant: 'future', order_detail_columns: {} }],
     }]);

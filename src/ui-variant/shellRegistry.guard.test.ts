@@ -20,8 +20,10 @@ describe('UI shell registry', () => {
     expect(registrySource).toContain('lazy(shellLoaders.evolution)');
     expect(registrySource).toContain('line: evolutionShellLoader');
     expect(registrySource).toContain('air: evolutionShellLoader');
+    expect(registrySource).toContain('neutral: evolutionShellLoader');
     expect(registrySource).toContain('lazy(shellLoaders.line)');
     expect(registrySource).toContain('lazy(shellLoaders.air)');
+    expect(registrySource).toContain('lazy(shellLoaders.neutral)');
   });
 
   it('sets the root marker before importing App', () => {

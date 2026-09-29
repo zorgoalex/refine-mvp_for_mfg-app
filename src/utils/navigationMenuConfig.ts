@@ -120,7 +120,7 @@ export function getSidebarMenuConfig(variant: UiVariant): {
   categoryOrder: readonly string[];
   categoryMap: Record<string, string>;
 } {
-  if (variant === 'evolution' || variant === 'line' || variant === 'air') {
+  if (variant === 'evolution' || variant === 'line' || variant === 'air' || variant === 'neutral') {
     return {
       categoryOrder: EVOLUTION_CATEGORY_ORDER,
       categoryMap: EVOLUTION_CATEGORY_MAP,

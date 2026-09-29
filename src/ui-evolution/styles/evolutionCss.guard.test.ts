@@ -9,7 +9,8 @@ describe('evolution CSS isolation', () => {
     ':root[data-ui-variant="evolution"]',
     ':root[data-ui-variant="line"]',
     ':root[data-ui-variant="air"]',
-    ':root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"])',
+    ':root[data-ui-variant="neutral"]',
+    ':root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"], [data-ui-variant="neutral"])',
     ':root:where([data-ui-variant="line"], [data-ui-variant="air"])',
   ];
 
@@ -34,6 +35,7 @@ describe('evolution CSS isolation', () => {
     expect(source).toContain(':root[data-ui-variant="evolution"]');
     expect(source).toContain(':root[data-ui-variant="line"]');
     expect(source).toContain(':root[data-ui-variant="air"]');
-    expect(source).toContain(':root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"])');
+    expect(source).toContain(':root[data-ui-variant="neutral"]');
+    expect(source).toContain(':root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"], [data-ui-variant="neutral"])');
   });
 });

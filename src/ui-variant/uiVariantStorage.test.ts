@@ -16,11 +16,13 @@ describe('per-user UI variant cache', () => {
     setStoredUiVariant('7', 'evolution', storage);
     setStoredUiVariant('8', 'line', storage);
     setStoredUiVariant('9', 'air', storage);
+    setStoredUiVariant('10', 'neutral', storage);
 
     expect(uiVariantStorageKey('7')).not.toBe(uiVariantStorageKey('8'));
     expect(getStoredUiVariant('7', storage)).toBe('evolution');
     expect(getStoredUiVariant('8', storage)).toBe('line');
     expect(getStoredUiVariant('9', storage)).toBe('air');
+    expect(getStoredUiVariant('10', storage)).toBe('neutral');
 
     values.set(uiVariantStorageKey('7'), 'future');
     expect(getStoredUiVariant('7', storage)).toBeNull();
