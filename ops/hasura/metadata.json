@@ -7652,52 +7652,6 @@
                         "name": "warehouses",
                         "schema": "public"
                     },
-                    "insert_permissions": [
-                        {
-                            "role": "manager",
-                            "permission": {
-                                "check": {},
-                                "set": {
-                                    "created_by": "x-hasura-User-Id"
-                                },
-                                "columns": "*"
-                            },
-                            "comment": ""
-                        },
-                        {
-                            "role": "operator",
-                            "permission": {
-                                "check": {},
-                                "set": {
-                                    "created_by": "x-hasura-User-Id"
-                                },
-                                "columns": "*"
-                            },
-                            "comment": ""
-                        },
-                        {
-                            "role": "superadmin",
-                            "permission": {
-                                "check": {},
-                                "set": {
-                                    "created_by": "x-hasura-User-Id"
-                                },
-                                "columns": "*"
-                            },
-                            "comment": ""
-                        },
-                        {
-                            "role": "top_manager",
-                            "permission": {
-                                "check": {},
-                                "set": {
-                                    "created_by": "x-hasura-User-Id"
-                                },
-                                "columns": "*"
-                            },
-                            "comment": ""
-                        }
-                    ],
                     "select_permissions": [
                         {
                             "role": "manager",
@@ -7741,69 +7695,6 @@
                                 "columns": "*",
                                 "filter": {},
                                 "allow_aggregations": true
-                            },
-                            "comment": ""
-                        }
-                    ],
-                    "update_permissions": [
-                        {
-                            "role": "manager",
-                            "permission": {
-                                "columns": "*",
-                                "filter": {},
-                                "check": {},
-                                "set": {
-                                    "edited_by": "x-hasura-User-Id"
-                                }
-                            },
-                            "comment": ""
-                        },
-                        {
-                            "role": "operator",
-                            "permission": {
-                                "columns": "*",
-                                "filter": {},
-                                "check": {},
-                                "set": {
-                                    "edited_by": "x-hasura-User-Id"
-                                }
-                            },
-                            "comment": ""
-                        },
-                        {
-                            "role": "superadmin",
-                            "permission": {
-                                "columns": "*",
-                                "filter": {},
-                                "check": {},
-                                "set": {
-                                    "edited_by": "x-hasura-User-Id"
-                                }
-                            },
-                            "comment": ""
-                        },
-                        {
-                            "role": "top_manager",
-                            "permission": {
-                                "columns": "*",
-                                "filter": {},
-                                "check": {}
-                            },
-                            "comment": ""
-                        }
-                    ],
-                    "delete_permissions": [
-                        {
-                            "role": "manager",
-                            "permission": {
-                                "filter": {}
-                            },
-                            "comment": ""
-                        },
-                        {
-                            "role": "superadmin",
-                            "permission": {
-                                "filter": {}
                             },
                             "comment": ""
                         }

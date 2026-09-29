@@ -46,6 +46,21 @@ const lineSchema = z.object({
   skip: z.boolean().optional(),
 }).strict();
 
+const smallintId = z.number().int().positive().max(32767);
+const warehouseName = z.string().trim().min(1).max(128);
+const warehouseCreateSchema = z.object({
+  name: warehouseName,
+  workshopId: smallintId.nullable().optional(),
+  responsibleEmployeeId: id.nullable().optional(),
+}).strict();
+const warehouseUpdateSchema = z.object({
+  version: z.string().min(1).max(64),
+  name: warehouseName.optional(),
+  workshopId: smallintId.nullable().optional(),
+  responsibleEmployeeId: id.nullable().optional(),
+  isActive: z.boolean().optional(),
+}).strict();
+
 const postSchema = z.object({ version, allowNegative: z.boolean().optional() }).strict();
 const cancelSchema = z.object({ version }).strict();
 
@@ -88,8 +103,38 @@ export class InventoryController {
   @ApiOperation({ operationId: 'listInventoryWarehouses', summary: 'Active warehouses' })
   @ApiResponse({ status: 200, description: 'Warehouses' })
   @Get('inventory/warehouses')
-  async warehouses(@Req() request: RequestWithCurrentUser) {
-    return { items: await this.inventory.listWarehouses(this.user(request)) };
+  async warehouses(@Req() request: RequestWithCurrentUser, @Query('includeInactive') includeInactive?: string) {
+    return { items: await this.inventory.listWarehouses(this.user(request), includeInactive === 'true') };
+  }
+
+  @ApiOperation({ operationId: 'createInventoryWarehouse', summary: 'Create a warehouse' })
+  @ApiResponse({ status: 201, description: 'Warehouse' })
+  @Post('inventory/warehouses')
+  createWarehouse(
+    @Req() request: RequestWithCurrentUser,
+    @Headers('idempotency-key') key: string | undefined,
+    @Body() body: unknown,
+  ) {
+    const input = parse(warehouseCreateSchema, body);
+    return this.inventory.createWarehouse(this.ctx(request, key), {
+      name: input.name, workshopId: input.workshopId ?? null, responsibleEmployeeId: input.responsibleEmployeeId ?? null,
+    });
+  }
+
+  @ApiOperation({ operationId: 'updateInventoryWarehouse', summary: 'Update or (de)activate a warehouse' })
+  @ApiResponse({ status: 200, description: 'Warehouse' })
+  @ApiResponse({ status: 409, description: 'Stale version, duplicate name, or stock/drafts block deactivation' })
+  @Patch('inventory/warehouses/:warehouseId')
+  updateWarehouse(
+    @Req() request: RequestWithCurrentUser,
+    @Headers('idempotency-key') key: string | undefined,
+    @Param('warehouseId') warehouseId: string,
+    @Body() body: unknown,
+  ) {
+    const parsedId = parseId(warehouseId, 'warehouseId');
+    if (parsedId > 32767) throw new ApiError(404, 'WAREHOUSE_NOT_FOUND', 'Склад не найден');
+    const input = parse(warehouseUpdateSchema, body);
+    return this.inventory.updateWarehouse(this.ctx(request, key), { warehouseId: parsedId, ...input });
   }
 
   @ApiOperation({ operationId: 'listInventoryBalances', summary: 'Film stock balances' })

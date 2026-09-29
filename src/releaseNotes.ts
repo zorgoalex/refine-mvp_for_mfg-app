@@ -29,6 +29,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-09-29", title: "Справочник складов",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "В разделе «Склады» появился «Справочник складов»: название, цех, ответственный, остатки и черновики по каждому складу; склад можно добавить, переименовать, отключить и снова включить (склад с остатками или черновиками отключить нельзя).",
+    ],
+    changed: [
+      "Импорт остатков точнее находит плёнку, когда поставщик указан в её названии («… -АЙФ», «… алер»), и предлагает до 5 похожих плёнок для каждой строки без точного совпадения.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-09-29", title: "Склад плёнки в меню",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: [

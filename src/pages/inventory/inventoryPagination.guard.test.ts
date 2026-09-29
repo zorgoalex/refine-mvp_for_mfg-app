@@ -16,4 +16,13 @@ describe('inventory tables keep the chosen page size', () => {
     expect(source).not.toContain('pageSize: PAGE_SIZE, total');
     expect(source.match(/pagination=\{serverPagination\(/g)).toHaveLength(2);
   });
+
+  it('stock operations send the warehouse pinned when the form was opened', () => {
+    const source = readFileSync(resolve(__dirname, 'FilmInventoryPage.tsx'), 'utf8');
+    expect(source).toContain('warehouseId: operationWarehouseIdValue');
+    expect(source).toContain('warehouseId: importWarehouseId');
+    expect(source).not.toContain('docType: manualType!, warehouseId: activeWarehouseId');
+    expect(source).not.toContain('docType: importType, warehouseId: activeWarehouseId');
+    expect(source.match(/openOperation\(\(\) => /g)).toHaveLength(4);
+  });
 });

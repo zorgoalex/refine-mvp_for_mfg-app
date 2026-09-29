@@ -8,7 +8,7 @@ import * as XLSX from 'xlsx';
 import { inventoryApi, createInventoryIdempotencyKey } from '../../api/inventoryApi';
 import type { InventoryApiError, StockDocumentDto, StockDocType, StockDocumentSummaryDto } from '../../api/types/inventoryApi.types';
 import { can } from '../../utils/permissions';
-import { lineFilmOptions, lineFilmValue, parseStockCsv, parseStockRows, selectDefaultStockSheet, unresolvedLineIds, type ParsedStockSheet } from './filmStock';
+import { lineFilmOptions, lineFilmValue, operationWarehouse, parseStockCsv, parseStockRows, resolveActiveWarehouse, selectDefaultStockSheet, unresolvedLineIds, type ParsedStockSheet } from './filmStock';
 import './inventory.css';
 
 const { Title, Text } = Typography;
@@ -47,8 +47,32 @@ export const FilmInventoryPage: React.FC = () => {
   const retryKey = useRef<string>();
   const retryActionId = useRef<string>();
   const warehousesQuery = useQuery({ queryKey: ['inventory', 'warehouses'], queryFn: () => inventoryApi.warehouses(), enabled: viewAllowed });
-  const warehouse = warehousesQuery.data?.items[0];
-  const activeWarehouseId = warehouseId ?? warehouse?.warehouseId;
+  const [warehouseLost, setWarehouseLost] = useState(false);
+  const warehouseIds = warehousesQuery.data?.items.map((item) => item.warehouseId);
+  const { activeId: activeWarehouseId, lost: warehouseSelectionLost } = resolveActiveWarehouse(warehouseId, warehouseLost, warehouseIds);
+  useEffect(() => {
+    // Выбранный склад отключён: сбросить выбор и попросить выбрать заново.
+    if (warehouseSelectionLost && warehouseId !== undefined) {
+      setWarehouseId(undefined);
+      setWarehouseLost(true);
+      message.warning('Выбранный склад отключён — выберите склад');
+    }
+  }, [warehouseSelectionLost, warehouseId]);
+  useEffect(() => {
+    // Склад по умолчанию закрепляется как выбор: его отключение не подменяется другим складом.
+    if (warehouseId === undefined && !warehouseLost && activeWarehouseId !== undefined) setWarehouseId(activeWarehouseId);
+  }, [warehouseId, warehouseLost, activeWarehouseId]);
+  const chooseWarehouse = (id: number) => { setWarehouseId(id); setWarehouseLost(false); };
+  // Склад открытой формы (приход/списание/инвентаризация/импорт) закреплён при её открытии.
+  const [operationWarehouseId, setOperationWarehouseId] = useState<number>();
+  const warehouseName = (id: number | undefined) => warehousesQuery.data?.items.find((item) => item.warehouseId === id)?.name ?? '—';
+  const openOperation = (open: () => void) => { setOperationWarehouseId(activeWarehouseId); open(); };
+  const pinnedOperationWarehouse = () => {
+    const id = operationWarehouse(operationWarehouseId, warehouseIds);
+    if (id === null) message.warning('Склад этой операции отключён — закройте форму и выберите склад');
+    return id;
+  };
+  const warehouseReady = activeWarehouseId !== undefined;
   // Серверная пагинация: фильтры сбрасывают страницу.
   const [balancePage, setBalancePage] = useState({ current: 1, pageSize: 50 });
   const [docPage, setDocPage] = useState({ current: 1, pageSize: 30 });
@@ -152,13 +176,15 @@ export const FilmInventoryPage: React.FC = () => {
   };
   const createManual = async (allowNegative = false) => {
     const values = await manualForm.validateFields();
+    const operationWarehouseIdValue = pinnedOperationWarehouse();
+    if (operationWarehouseIdValue === null) return;
     setOperationBusy(true);
     const actionId = `manual:${manualType}:${JSON.stringify(values)}:allowNegative=${allowNegative}`;
     if (retryActionId.current !== actionId) { retryActionId.current = actionId; retryKey.current = undefined; }
     retryKey.current ??= createInventoryIdempotencyKey();
     try {
       const document = await inventoryApi.create({
-        docType: manualType!, warehouseId: activeWarehouseId!, docDate: values.docDate.format('YYYY-MM-DD'), post: true,
+        docType: manualType!, warehouseId: operationWarehouseIdValue, docDate: values.docDate.format('YYYY-MM-DD'), post: true,
         ...(allowNegative ? { allowNegative: true } : {}),
         ...(values.orderId ? { orderId: values.orderId } : {}), ...(values.comment ? { comment: values.comment } : {}),
         lines: values.lines.map((line: { filmId: number; quantity: number }) => ({ filmId: line.filmId, quantity: line.quantity })),
@@ -202,7 +228,9 @@ export const FilmInventoryPage: React.FC = () => {
   };
   const currentSheet = sheets.find((item) => item.name === sheetName);
   const createImportDraft = async () => {
-    if (!file || !currentSheet || !activeWarehouseId || importRows.length === 0) return;
+    if (!file || !currentSheet || importRows.length === 0) return;
+    const importWarehouseId = pinnedOperationWarehouse();
+    if (importWarehouseId === null) return;
     const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
     const fileSha256 = [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('');
     setOperationBusy(true);
@@ -210,7 +238,7 @@ export const FilmInventoryPage: React.FC = () => {
     if (retryActionId.current !== actionId) { retryActionId.current = actionId; retryKey.current = undefined; }
     try {
     const created = await inventoryApi.createImport({
-      docType: importType, warehouseId: activeWarehouseId, docDate: importDate, fileName: file.name, fileSha256,
+      docType: importType, warehouseId: importWarehouseId, docDate: importDate, fileName: file.name, fileSha256,
       sheetName: currentSheet.name, rows: importRows.map((row) => ({ ...row })),
     }, retryKey.current ?? (retryKey.current = createInventoryIdempotencyKey()));
     setSelectedDoc(created); setImportOpen(false); setImportRows([]); setFile(undefined); retryKey.current = undefined; retryActionId.current = undefined;
@@ -235,13 +263,14 @@ export const FilmInventoryPage: React.FC = () => {
     <Title level={2}>Остатки плёнки</Title>
     <Tabs activeKey={tab} onChange={setTab} items={[
       { key: 'balances', label: 'Остатки', children: <Card>
+        {warehousesQuery.isSuccess && !warehouseReady && <Alert style={{ marginBottom: 12 }} type="warning" showIcon message={(warehouseIds ?? []).length === 0 ? 'Нет активных складов — добавьте или включите склад в «Справочнике складов»' : 'Выберите склад'} />}
         <Space wrap style={{ marginBottom: 16 }}>
-          <Select placeholder="Склад" value={activeWarehouseId} style={{ minWidth: 180 }} options={(warehousesQuery.data?.items ?? []).map((item) => ({ value: item.warehouseId, label: item.name }))} onChange={setWarehouseId} />
+          <Select placeholder="Склад" value={activeWarehouseId} style={{ minWidth: 180 }} options={(warehousesQuery.data?.items ?? []).map((item) => ({ value: item.warehouseId, label: item.name }))} onChange={chooseWarehouse} status={warehouseReady ? undefined : 'warning'} />
           <Select allowClear placeholder="Поставщик" style={{ minWidth: 200 }} value={vendorId} options={vendors.map(([value, label]) => ({ value, label }))} onChange={setVendorId} />
           <Input.Search allowClear placeholder="Поиск плёнки" value={search} onChange={(event) => setSearch(event.target.value)} style={{ width: 240 }} />
           <Checkbox checked={nonZero} onChange={(event) => setNonZero(event.target.checked)}>Только ненулевые</Checkbox>
           <Checkbox checked={negative} onChange={(event) => setNegative(event.target.checked)}>Только отрицательные</Checkbox>
-          {manageAllowed && <><Button type="primary" onClick={() => setManualType('receipt')}>Приход</Button><Button onClick={() => setManualType('writeoff')}>Списание</Button><Button onClick={() => setManualType('inventory')}>Инвентаризация</Button><Button onClick={() => setImportOpen(true)}>Импорт остатков</Button></>}
+          {manageAllowed && <><Button type="primary" disabled={!warehouseReady} onClick={() => openOperation(() => setManualType('receipt'))}>Приход</Button><Button disabled={!warehouseReady} onClick={() => openOperation(() => setManualType('writeoff'))}>Списание</Button><Button disabled={!warehouseReady} onClick={() => openOperation(() => setManualType('inventory'))}>Инвентаризация</Button><Button disabled={!warehouseReady} onClick={() => openOperation(() => setImportOpen(true))}>Импорт остатков</Button></>}
           <Button onClick={() => { void exportBalances().catch(() => message.error('Не удалось выгрузить остатки')); }}>Выгрузить XLSX</Button>
         </Space>
         <Table rowKey="filmId" dataSource={balances} columns={balanceColumns} loading={balancesQuery.isLoading} pagination={{ current: balancePage.current, pageSize: balancePage.pageSize, total: balancesQuery.data?.total ?? 0, showSizeChanger: true, onChange: (current, pageSize) => setBalancePage({ current, pageSize }) }} rowClassName={(row) => row.quantity < 0 ? 'film-stock-negative' : ''} summary={() => <Table.Summary.Row><Table.Summary.Cell index={0} colSpan={2}><Text strong>Итого</Text></Table.Summary.Cell><Table.Summary.Cell index={2} align="right"><Text strong>{formatQuantity(balancesQuery.data?.totalQuantity ?? 0)}</Text></Table.Summary.Cell><Table.Summary.Cell index={3}>{balancesQuery.data?.total ?? balances.length} позиций</Table.Summary.Cell></Table.Summary.Row>} />
@@ -258,7 +287,7 @@ export const FilmInventoryPage: React.FC = () => {
       </Card> },
     ]} />
 
-    <Modal title={manualType ? docTypeName[manualType] : ''} open={Boolean(manualType)} onCancel={() => setManualType(undefined)} onOk={() => void createManual()} confirmLoading={operationBusy} width={720} okText="Провести">
+    <Modal title={manualType ? `${docTypeName[manualType]} · склад «${warehouseName(operationWarehouseId)}»` : ''} open={Boolean(manualType)} onCancel={() => setManualType(undefined)} onOk={() => void createManual()} confirmLoading={operationBusy} width={720} okText="Провести">
       <Form form={manualForm} layout="vertical" initialValues={{ docDate: undefined, lines: [{ quantity: 0 }] }}>
         <Form.Item label="Дата" name="docDate" rules={[{ required: true }]}><DatePicker format="DD.MM.YYYY" /></Form.Item>
         {manualType === 'writeoff' && <Form.Item label="Заказ (необязательно)" name="orderId"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>}
@@ -270,7 +299,7 @@ export const FilmInventoryPage: React.FC = () => {
       </Form>
     </Modal>
 
-    <Modal title="Импорт остатков" open={importOpen} onCancel={() => setImportOpen(false)} onOk={() => void createImportDraft()} okText="Создать черновик" confirmLoading={operationBusy} width={860}>
+    <Modal title={`Импорт остатков · склад «${warehouseName(operationWarehouseId)}»`} open={importOpen} onCancel={() => setImportOpen(false)} onOk={() => void createImportDraft()} okText="Создать черновик" confirmLoading={operationBusy} width={860}>
       <Space direction="vertical" style={{ width: '100%' }}>
         <Upload beforeUpload={(uploadFile: RcFile) => { void acceptFile(uploadFile); return false; }} showUploadList={false}><Button>Выбрать файл XLSX / XLS / CSV</Button></Upload>
         {file && <Text>{file.name}</Text>}

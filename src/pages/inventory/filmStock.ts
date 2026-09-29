@@ -100,3 +100,25 @@ export function lineFilmOptions(line: StockDocumentLineDto, activeFilms: FilmOpt
 export function lineFilmValue(line: StockDocumentLineDto): number | undefined {
   return line.filmId ?? line.suggestions[0]?.filmId ?? undefined;
 }
+
+/**
+ * Склад экрана остатков. Явно выбранный склад, пропавший из списка активных (отключён),
+ * не подменяется другим молча: выбор сбрасывается и требуется новый.
+ */
+export function resolveActiveWarehouse(
+  selectedId: number | undefined,
+  selectionLost: boolean,
+  activeWarehouseIds: number[] | undefined,
+): { activeId: number | undefined; lost: boolean } {
+  if (activeWarehouseIds === undefined) return { activeId: selectedId, lost: selectionLost };
+  if (selectedId !== undefined) {
+    return activeWarehouseIds.includes(selectedId) ? { activeId: selectedId, lost: false } : { activeId: undefined, lost: true };
+  }
+  return selectionLost ? { activeId: undefined, lost: true } : { activeId: activeWarehouseIds[0], lost: false };
+}
+
+/** Склад открытой операции: закреплён при открытии формы; отключён — операцию не отправлять. */
+export function operationWarehouse(pinnedId: number | undefined, activeWarehouseIds: number[] | undefined): number | null {
+  if (pinnedId === undefined || activeWarehouseIds === undefined) return null;
+  return activeWarehouseIds.includes(pinnedId) ? pinnedId : null;
+}

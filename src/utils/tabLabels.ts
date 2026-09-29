@@ -19,6 +19,7 @@ export const RESOURCE_LABELS: Record<string, string> = {
   order_resource_requirements: 'Потребности заказов',
   onec_purchase_documents: 'Документы 1С',
   'film-inventory': 'Остатки плёнки',
+  'inventory-warehouses': 'Справочник складов',
   film_types: 'Типы плёнки',
   units: 'Ед. измерения',
   material_types: 'Типы материалов',
@@ -92,6 +93,7 @@ export const resourceFromPath = (pathname: string): string | undefined => {
   if (pathname === ONEC_DOCUMENTS_PATH_PREFIX || pathname.startsWith(`${ONEC_DOCUMENTS_PATH_PREFIX}/`)) {
     return 'onec_purchase_documents';
   }
+  if (pathname === '/inventory/warehouses' || pathname.startsWith('/inventory/warehouses/')) return 'inventory-warehouses';
   const seg = pathname.split('/').filter(Boolean)[0];
   return seg ? resourceKeyFromSegment(seg) : undefined;
 };

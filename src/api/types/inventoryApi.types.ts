@@ -3,7 +3,18 @@ export type StockDocStatus = 'draft' | 'posted' | 'cancelled';
 export type LineMatchStatus = 'alias' | 'exact' | 'suggested' | 'confirmed' | 'manual' | 'unmatched' | 'skipped';
 export type LineQuantityStatus = 'ok' | 'needs_review' | 'missing' | 'confirmed';
 
-export interface WarehouseDto { warehouseId: number; name: string }
+export interface WarehouseDto {
+  warehouseId: number; name: string; isActive: boolean;
+  workshopId: number | null; workshopName: string | null;
+  responsibleEmployeeId: number | null; responsibleEmployeeName: string | null;
+  refKey1c: string | null; filmsWithStock: number; totalQuantity: number; draftDocuments: number;
+  /** Токен версии для PATCH. */
+  version: string;
+}
+export interface WarehouseCreateInput { name: string; workshopId?: number | null; responsibleEmployeeId?: number | null }
+export interface WarehousePatch {
+  version: string; name?: string; workshopId?: number | null; responsibleEmployeeId?: number | null; isActive?: boolean;
+}
 export interface StockBalanceDto {
   warehouseId: number; filmId: number; filmName: string; vendorId: number | null; vendorName: string | null;
   quantity: number; lastMovementAt: string | null;

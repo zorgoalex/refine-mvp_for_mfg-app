@@ -210,6 +210,7 @@ const OrderResourceRequirementShow = lazy(async () => ({ default: (await import(
 const OnecPurchaseDocumentList = lazy(async () => ({ default: (await import("./pages/onec_purchase_documents/list")).OnecPurchaseDocumentList }));
 const OnecPurchaseDocumentShow = lazy(async () => ({ default: (await import("./pages/onec_purchase_documents/show")).OnecPurchaseDocumentShow }));
 const FilmInventoryPage = lazy(async () => ({ default: (await import("./pages/inventory/FilmInventoryPage")).FilmInventoryPage }));
+const WarehousesPage = lazy(async () => ({ default: (await import("./pages/inventory/WarehousesPage")).WarehousesPage }));
 
 // clients_analytics and payments_analytics each export two named components from one module.
 const ClientsAnalyticsList = lazy(async () => ({ default: (await import("./pages/clients_analytics")).ClientsAnalyticsList }));
@@ -424,7 +425,10 @@ const ThemedApp = () => {
                   : []),
                 { name: 'cad', list: '/cad', meta: { label: 'CAD' } },
                 ...(featureFlags.inventory && can('inventory.view')
-                  ? [{ name: 'film-inventory', list: '/inventory/films', meta: { label: 'Остатки плёнки' } }]
+                  ? [
+                      { name: 'film-inventory', list: '/inventory/films', meta: { label: 'Остатки плёнки' } },
+                      { name: 'inventory-warehouses', list: '/inventory/warehouses', meta: { label: 'Справочник складов' } },
+                    ]
                   : []),
                 ...(featureFlags.useBackendCut
                   ? [
@@ -933,6 +937,7 @@ const ThemedApp = () => {
                     <Route path="catalog-import/:id" element={<CatalogImportPage />} />
                   </Route>
                   <Route path="/inventory/films" element={featureFlags.inventory ? <PermissionRoute permission="inventory.view"><FilmInventoryPage /></PermissionRoute> : <Navigate to="/orders" replace />} />
+                  <Route path="/inventory/warehouses" element={featureFlags.inventory ? <PermissionRoute permission="inventory.view"><WarehousesPage /></PermissionRoute> : <Navigate to="/orders" replace />} />
                   <Route path="/clients" >
                     <Route index element={<ClientList />} />
                     <Route path="create" element={<ClientCreate />} />

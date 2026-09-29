@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { filmStockAvailability, filmStockBadge, inventoryQueryString, parseStockCsv, parseStockRows, selectDefaultStockSheet, lineFilmOptions, lineFilmValue } from './filmStock';
+import { filmStockAvailability, filmStockBadge, inventoryQueryString, parseStockCsv, parseStockRows, selectDefaultStockSheet, lineFilmOptions, lineFilmValue, operationWarehouse, resolveActiveWarehouse } from './filmStock';
 
 describe('film stock frontend helpers', () => {
   it('parses rows by headers, skips totals and preserves missing quantity', () => {
@@ -78,5 +78,37 @@ describe('draft line film picker', () => {
     expect(lineFilmValue({ ...line, filmId: 10 })).toBe(10);
     expect(lineFilmValue({ ...line, suggestions: [] })).toBeUndefined();
     expect(lineFilmOptions({ ...line, suggestions: [] }, all)).toEqual([{ label: 'Все плёнки', options: all }]);
+  });
+});
+
+describe('stock screen warehouse selection', () => {
+  it('defaults to the first active warehouse and keeps a valid explicit choice', () => {
+    expect(resolveActiveWarehouse(undefined, false, [2, 5])).toEqual({ activeId: 2, lost: false });
+    expect(resolveActiveWarehouse(5, false, [2, 5])).toEqual({ activeId: 5, lost: false });
+    expect(resolveActiveWarehouse(5, false, undefined)).toEqual({ activeId: 5, lost: false });
+  });
+
+  it('drops a deactivated explicit choice instead of switching to another warehouse', () => {
+    expect(resolveActiveWarehouse(5, false, [2])).toEqual({ activeId: undefined, lost: true });
+    expect(resolveActiveWarehouse(undefined, true, [2])).toEqual({ activeId: undefined, lost: true });
+  });
+
+  it('has no warehouse when none is active', () => {
+    expect(resolveActiveWarehouse(undefined, false, [])).toEqual({ activeId: undefined, lost: false });
+  });
+});
+
+describe('open stock operation keeps its warehouse', () => {
+  it('pins the default warehouse: [A, B] → [B] drops the selection instead of switching to B', () => {
+    // По умолчанию выбран A; страница закрепляет его в состоянии (selected = A).
+    const initial = resolveActiveWarehouse(undefined, false, [2, 5]);
+    expect(initial.activeId).toBe(2);
+    expect(resolveActiveWarehouse(initial.activeId, false, [5])).toEqual({ activeId: undefined, lost: true });
+  });
+
+  it('sends an open operation only to its pinned warehouse while it is active', () => {
+    expect(operationWarehouse(2, [2, 5])).toBe(2);
+    expect(operationWarehouse(2, [5])).toBeNull();
+    expect(operationWarehouse(undefined, [5])).toBeNull();
   });
 });

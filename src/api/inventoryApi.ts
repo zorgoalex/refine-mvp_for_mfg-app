@@ -4,7 +4,7 @@ import { withQuery } from './ordersApi';
 import type {
   InventoryBalanceQuery, InventoryDocumentQuery, InventoryPage, ManualStockDocumentInput,
   OrderFilmStockDto, StockBalanceDto, StockDocumentDto, StockDocumentSummaryDto, StockImportInput,
-  StockLinePatch, WarehouseDto,
+  StockLinePatch, WarehouseCreateInput, WarehouseDto, WarehousePatch,
 } from './types/inventoryApi.types';
 
 const root = backendApiPath('/inventory');
@@ -15,7 +15,15 @@ export function createInventoryIdempotencyKey(): string {
 }
 
 export const inventoryApi = {
-  warehouses() { return httpClient.get<{ items: WarehouseDto[] }>(`${root}/warehouses`); },
+  warehouses(params: { includeInactive?: boolean } = {}) {
+    return httpClient.get<{ items: WarehouseDto[] }>(withQuery(`${root}/warehouses`, params.includeInactive ? { includeInactive: true } : {}));
+  },
+  createWarehouse(body: WarehouseCreateInput, key = createInventoryIdempotencyKey()) {
+    return httpClient.post<WarehouseDto>(`${root}/warehouses`, body, commandOptions(key));
+  },
+  updateWarehouse(id: number, body: WarehousePatch, key = createInventoryIdempotencyKey()) {
+    return httpClient.patch<WarehouseDto>(`${root}/warehouses/${id}`, body, commandOptions(key));
+  },
   balances(params: InventoryBalanceQuery = {}) {
     return httpClient.get<InventoryPage<StockBalanceDto>>(withQuery(`${root}/balances`, params));
   },

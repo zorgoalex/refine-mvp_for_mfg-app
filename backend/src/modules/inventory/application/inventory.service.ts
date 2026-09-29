@@ -5,25 +5,30 @@ import type { BackendEnv } from '../../../config/env.validation';
 import { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { PgInventoryRepository } from '../adapters/pg-inventory-repository';
+import { PgWarehouseRepository } from '../adapters/pg-warehouse-repository';
 import type {
   BalancesFilter,
   CommandContext,
   CreateImportDocumentInput,
   CreateManualDocumentInput,
+  CreateWarehouseInput,
   DocumentsFilter,
   UpdateLineInput,
+  UpdateWarehouseInput,
 } from './inventory.types';
 
 /** Склад плёнки: флаг BACKEND_INVENTORY_ENABLED и буквальная проверка прав. */
 @Injectable()
 export class InventoryService {
   private readonly repository: PgInventoryRepository;
+  private readonly warehouses: PgWarehouseRepository;
 
   constructor(
     @Inject(DatabaseService) database: DatabaseService,
     @Inject(ConfigService) private readonly config: ConfigService<BackendEnv, true>,
   ) {
     this.repository = new PgInventoryRepository(database);
+    this.warehouses = new PgWarehouseRepository(database);
   }
 
   enabled(): boolean {
@@ -37,9 +42,19 @@ export class InventoryService {
     }
   }
 
-  listWarehouses(user: CurrentUser) {
+  listWarehouses(user: CurrentUser, includeInactive = false) {
     this.require(user, 'inventory.view');
-    return this.repository.listWarehouses();
+    return this.warehouses.list(includeInactive);
+  }
+
+  createWarehouse(ctx: CommandContext, input: CreateWarehouseInput) {
+    this.require(ctx.currentUser, 'inventory.manage');
+    return this.warehouses.create(ctx, input);
+  }
+
+  updateWarehouse(ctx: CommandContext, input: UpdateWarehouseInput) {
+    this.require(ctx.currentUser, 'inventory.manage');
+    return this.warehouses.update(ctx, input);
   }
 
   listBalances(user: CurrentUser, filter: BalancesFilter) {

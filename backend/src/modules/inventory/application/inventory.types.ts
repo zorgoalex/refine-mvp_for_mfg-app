@@ -3,7 +3,37 @@ import type { LineMatchStatus, LineQuantityStatus, StockDocType } from '../domai
 
 export type StockDocStatus = 'draft' | 'posted' | 'cancelled';
 
-export interface WarehouseDto { warehouseId: number; name: string }
+export interface WarehouseDto {
+  warehouseId: number;
+  name: string;
+  isActive: boolean;
+  workshopId: number | null;
+  workshopName: string | null;
+  responsibleEmployeeId: number | null;
+  responsibleEmployeeName: string | null;
+  refKey1c: string | null;
+  /** Плёнок с ненулевым остатком. */
+  filmsWithStock: number;
+  totalQuantity: number;
+  draftDocuments: number;
+  /** Токен версии (updated_at) для защиты от устаревшей записи. */
+  version: string;
+}
+
+export interface CreateWarehouseInput {
+  name: string;
+  workshopId: number | null;
+  responsibleEmployeeId: number | null;
+}
+
+export interface UpdateWarehouseInput {
+  warehouseId: number;
+  version: string;
+  name?: string;
+  workshopId?: number | null;
+  responsibleEmployeeId?: number | null;
+  isActive?: boolean;
+}
 
 export interface StockBalanceDto {
   warehouseId: number; filmId: number; filmName: string; vendorId: number | null; vendorName: string | null;

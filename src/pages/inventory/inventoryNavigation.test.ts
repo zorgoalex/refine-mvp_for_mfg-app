@@ -58,4 +58,23 @@ describe('film inventory navigation', () => {
     expect(appSource).toContain("name: 'film-inventory', list: '/inventory/films'");
     expect(appSource).toContain('<Route path="/inventory/films"');
   });
+
+  it('shows the warehouse reference next to the stock in «Склады»', () => {
+    const categories = buildCategorizedResources({
+      resources: [resource, { name: 'inventory-warehouses', list: '/inventory/warehouses', meta: { label: 'Справочник складов' } }],
+      categoryOrder: LEGACY_CATEGORY_ORDER,
+      categoryMap: LEGACY_CATEGORY_MAP,
+      resourceLabels: RESOURCE_LABELS,
+      canViewNavigation: (name) => canViewNavigationResource(name, user(['inventory.view']), true),
+      canViewSettings: false,
+    });
+    expect(categories['Склады'].map((item) => item.label)).toEqual(['Остатки плёнки', 'Справочник складов']);
+    expect(EVOLUTION_CATEGORY_ORDER).toContain(EVOLUTION_CATEGORY_MAP['inventory-warehouses']);
+    expect(resourceFromPath('/inventory/warehouses')).toBe('inventory-warehouses');
+    expect(resolveTabLabel('/inventory/warehouses')).toBe('Справочник складов');
+    expect(resourceFromPath('/inventory/films')).toBe('film-inventory');
+    const appSource = readFileSync(resolve(__dirname, '../../App.tsx'), 'utf8');
+    expect(appSource).toContain("name: 'inventory-warehouses', list: '/inventory/warehouses'");
+    expect(appSource).toContain('<Route path="/inventory/warehouses"');
+  });
 });

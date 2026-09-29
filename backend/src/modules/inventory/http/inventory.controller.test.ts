@@ -71,4 +71,20 @@ describe('InventoryController', () => {
       { docType: 'writeoff', warehouseId: 1, docDate: '2026-09-29', orderId: 9, comment: null, lines: [{ filmId: 5, quantity: 2.1 }], post: true, allowNegative: false },
     );
   });
+
+  it('warehouse reference: manage permission, Idempotency-Key and strict bodies', async () => {
+    const { controller } = setup(true);
+    const view = { user: user(['inventory.view']) };
+    const manage = { user: user(['inventory.manage']) };
+    await expectError(() => controller.createWarehouse(view, 'k', { name: 'Склад 2' }), 403, 'FORBIDDEN');
+    await expectError(() => controller.updateWarehouse(view, 'k', '2', { version: 'v', name: 'Склад 3' }), 403, 'FORBIDDEN');
+    await expectError(() => controller.createWarehouse(manage, undefined, { name: 'Склад 2' }), 400, 'VALIDATION_FAILED');
+    await expectError(() => controller.createWarehouse(manage, 'k', { name: '   ' }), 400, 'VALIDATION_FAILED');
+    await expectError(() => controller.createWarehouse(manage, 'k', { name: 'x'.repeat(129) }), 400, 'VALIDATION_FAILED');
+    await expectError(() => controller.createWarehouse(manage, 'k', { name: 'Склад', workshopId: 40000 }), 400, 'VALIDATION_FAILED');
+    await expectError(() => controller.createWarehouse(manage, 'k', { name: 'Склад', extra: 1 }), 400, 'VALIDATION_FAILED');
+    await expectError(() => controller.updateWarehouse(manage, 'k', '2', { name: 'Склад' }), 400, 'VALIDATION_FAILED');
+    await expectError(() => controller.updateWarehouse(manage, 'k', 'abc', { version: 'v' }), 400, 'VALIDATION_FAILED');
+    await expectError(() => controller.updateWarehouse(manage, 'k', '40000', { version: 'v' }), 404, 'WAREHOUSE_NOT_FOUND');
+  });
 });

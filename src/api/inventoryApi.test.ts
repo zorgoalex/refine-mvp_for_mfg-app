@@ -44,4 +44,18 @@ describe('inventoryApi', () => {
   it('creates valid UUID idempotency keys for new actions', () => {
     expect(createInventoryIdempotencyKey()).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
   });
+
+  it('lists warehouses with inactive ones only on request and sends warehouse commands with Idempotency-Key', async () => {
+    get.mockResolvedValue({ items: [] });
+    await inventoryApi.warehouses();
+    await inventoryApi.warehouses({ includeInactive: true });
+    expect(String(get.mock.calls[0][0])).toMatch(/\/inventory\/warehouses$/);
+    expect(String(get.mock.calls[1][0])).toContain('/inventory/warehouses?includeInactive=true');
+    post.mockResolvedValue({ warehouseId: 3 });
+    patch.mockResolvedValue({ warehouseId: 3 });
+    await inventoryApi.createWarehouse({ name: 'Склад 2' }, 'k-create');
+    await inventoryApi.updateWarehouse(3, { version: 'v1', isActive: false }, 'k-update');
+    expect(post).toHaveBeenCalledWith(expect.stringContaining('/inventory/warehouses'), { name: 'Склад 2' }, { headers: { 'Idempotency-Key': 'k-create' } });
+    expect(patch).toHaveBeenCalledWith(expect.stringContaining('/inventory/warehouses/3'), { version: 'v1', isActive: false }, { headers: { 'Idempotency-Key': 'k-update' } });
+  });
 });

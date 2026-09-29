@@ -69,6 +69,7 @@ export const SIDER_RESOURCE_ICONS: Record<string, React.ReactNode> = {
   order_resource_requirements: <ShoppingCartOutlined />,
   onec_purchase_documents: <ShoppingOutlined />,
   'film-inventory': <ContainerOutlined />,
+  'inventory-warehouses': <HomeOutlined />,
   film_types: <TagsOutlined />,
   units: <CalculatorOutlined />,
   material_types: <AppstoreOutlined />,

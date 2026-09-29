@@ -211,14 +211,15 @@ export function levenshteinWithin(a: string, b: string, limit: number): boolean 
   return d[a.length][b.length] <= limit;
 }
 
-function wordSimilarity(a: string, b: string): number {
+/** Сходство слов (0 — не связаны). Экспорт — для индекса кандидатов. */
+export function wordSimilarity(a: string, b: string): number {
   if (a === b) return 1;
   if (a.length >= 5 && b.length >= 5 && levenshteinWithin(a, b, 2)) return 0.8;
   if (a.length >= 4 && b.length >= 4 && (a.startsWith(b) || b.startsWith(a))) return 0.7;
   return 0;
 }
 
-function codesMatch(a: string, b: string): boolean {
+export function codesMatch(a: string, b: string): boolean {
   if (a === b) return true;
   const short = a.length <= b.length ? a : b;
   const long = a.length <= b.length ? b : a;

@@ -25,7 +25,6 @@ import type {
   StockDocumentLineDto,
   StockDocumentSummaryDto,
   UpdateLineInput,
-  WarehouseDto,
 } from '../application/inventory.types';
 import {
   aliasKey,
@@ -49,7 +48,7 @@ import {
   type StockLineState,
 } from '../domain/stock-posting';
 
-const SOURCE = 'erp_ui';
+export const SOURCE = 'erp_ui';
 
 type Row = Record<string, unknown>;
 
@@ -65,13 +64,13 @@ function notFound(): ApiError {
   return new ApiError(404, 'STOCK_DOCUMENT_NOT_FOUND', 'Складской документ не найден');
 }
 
-function requestHash(value: unknown): string {
+export function requestHash(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
 // ---------------------------------------------------------------- идемпотентность
 
-async function beginIdempotent(
+export async function beginIdempotent(
   tx: TransactionClient,
   input: { key: string; command: string; actorId: string; entityType: string; entityId: string; hash: string },
 ): Promise<unknown | undefined> {
@@ -98,7 +97,7 @@ async function beginIdempotent(
 }
 
 /** entity_id не меняется: повтор сверяет его с исходным значением (для создания — 'new'). */
-async function completeIdempotent(tx: TransactionClient, key: string, _entityId: string, response: unknown): Promise<void> {
+export async function completeIdempotent(tx: TransactionClient, key: string, _entityId: string, response: unknown): Promise<void> {
   await tx.query(
     `UPDATE command_idempotency_keys
         SET status = 'completed', response_json = $2::jsonb, completed_at = now()
@@ -203,6 +202,17 @@ async function loadVendorResolver(client: DatabaseClient): Promise<(supplier: st
     const key = analyzeFilmName(supplier).vendorKey;
     return key && !key.startsWith('@') ? byName.get(normalizeAliasPart(key)) ?? null : null;
   };
+}
+
+/** Поставщики-заглушки («нд» и т. п.): у их плёнок поставщик вписан в название. */
+export const PLACEHOLDER_VENDOR_NAMES = ['нд', 'н/д', 'н.д.', 'нет данных', 'не указан', '-'];
+
+async function loadPlaceholderVendorIds(client: DatabaseClient): Promise<Set<number>> {
+  const rows = await client.query<{ vendor_id: number }>(
+    'SELECT vendor_id FROM vendors WHERE lower(btrim(vendor_name)) = ANY($1::text[])',
+    [PLACEHOLDER_VENDOR_NAMES],
+  );
+  return new Set(rows.rows.map((row) => Number(row.vendor_id)));
 }
 
 // ---------------------------------------------------------------- чтение документа
@@ -360,13 +370,6 @@ async function recordDocumentAudit(
 export class PgInventoryRepository {
   constructor(private readonly database: DatabaseService) {}
 
-  async listWarehouses(): Promise<WarehouseDto[]> {
-    const rows = await this.database.query<{ warehouse_id: number; warehouse_name: string }>(
-      'SELECT warehouse_id, warehouse_name FROM warehouses WHERE is_active = true ORDER BY warehouse_name',
-    );
-    return rows.rows.map((row) => ({ warehouseId: num(row.warehouse_id), name: row.warehouse_name }));
-  }
-
   async listBalances(filter: BalancesFilter): Promise<{ total: number; items: StockBalanceDto[]; totalQuantity: number }> {
     const params: unknown[] = [];
     const where: string[] = [];
@@ -478,20 +481,24 @@ export class PgInventoryRepository {
       const aliasMap = new Map(aliases.rows.map((row) => [`${row.source_name_norm}|${row.source_supplier_norm}`, num(row.film_id)]));
       const prepared = prepareCandidates(await loadStockCandidates(tx));
       const vendorIdForSupplier = await loadVendorResolver(tx);
+      const placeholderVendorIds = await loadPlaceholderVendorIds(tx);
       const documentId = await this.insertDocument(tx, ctx, {
         docType: input.docType, warehouseId: input.warehouseId, docDate: input.docDate, source: 'import',
         orderId: null, comment: null, fileName: input.fileName, fileSha256: input.fileSha256, sheetName: input.sheetName,
       });
       // Сопоставление в памяти, затем блокировка выбранных плёнок FOR SHARE (по возрастанию, §3.3) и
       // повторная проверка «канон и активна» под блокировкой — до сохранения ссылок в строках.
-      const planned = input.rows.map((row) => {
+      const planned: Array<{ row: (typeof input.rows)[number]; parsed: ReturnType<typeof parseNameWithQuantity>; match: ReturnType<typeof matchStockRow> }> = [];
+      for (const [position, row] of input.rows.entries()) {
+        // Сопоставление синхронное: раз в 100 строк отдаём event loop (до 2000 строк ≈ секунды).
+        if (position > 0 && position % 100 === 0) await new Promise((resolve) => setImmediate(resolve));
         const hasQuantityColumn = row.quantity !== null && row.quantity !== undefined && String(row.quantity).trim() !== '';
         const parsed = hasQuantityColumn
           ? { name: row.name.replace(/\s+/g, ' ').trim(), ...parseQuantityCell(row.quantity) }
           : parseNameWithQuantity(row.name);
-        const match = matchStockRow({ name: parsed.name, supplier: row.supplier ?? '' }, { aliases: aliasMap, vendorIdForSupplier, prepared });
-        return { row, parsed, match };
-      });
+        const match = matchStockRow({ name: parsed.name, supplier: row.supplier ?? '' }, { aliases: aliasMap, vendorIdForSupplier, placeholderVendorIds, prepared });
+        planned.push({ row, parsed, match });
+      }
       const chosenIds = [...new Set(planned.flatMap((item) => (item.match.filmId === null ? [] : [item.match.filmId])))].sort((a, b) => a - b);
       const validIds = new Set<number>();
       if (chosenIds.length > 0) {
@@ -704,7 +711,9 @@ export class PgInventoryRepository {
   // ------------------------------------------------------------ внутреннее
 
   private async assertWarehouse(tx: TransactionClient, warehouseId: number): Promise<void> {
-    const rows = await tx.query('SELECT 1 FROM warehouses WHERE warehouse_id = $1 AND is_active = true', [warehouseId]);
+    // FOR KEY SHARE: конфликтует с FOR UPDATE отключения склада; после ожидания
+    // строка перечитывается, и отключённый склад отклоняется.
+    const rows = await tx.query('SELECT 1 FROM warehouses WHERE warehouse_id = $1 AND is_active = true FOR KEY SHARE', [warehouseId]);
     if (rows.rows.length === 0) throw new ApiError(422, 'WAREHOUSE_NOT_FOUND', 'Склад не найден');
   }
 
