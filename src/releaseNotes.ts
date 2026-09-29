@@ -53,6 +53,13 @@ export const releaseNotes: ReleaseNoteEntry[] = [
     ],
   },
   {
+    version: APP_VERSION, date: "2026-09-29", title: "Выбор времени на циферблате",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "Время в настройках рассылки заказов выбирается на циферблате, как в Google Календаре: сначала час (внешнее кольцо 01–12, внутреннее 13–00), затем минуты с шагом 5. Выбор сохраняется сразу, работает мышью и пальцем; время можно по-прежнему ввести с клавиатуры (например, 845 или 8:45).",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-09-29", title: "Экран снабжения",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

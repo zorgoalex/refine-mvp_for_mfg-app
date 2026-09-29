@@ -33,6 +33,9 @@ vi.mock('../../../ui/tooltipDelay', () => ({
 vi.mock('./WhatsAppGroupSelect', () => ({
   WhatsAppGroupSelect: (props: Record<string, unknown>) => React.createElement('input', { placeholder: props.placeholder }),
 }));
+vi.mock('../../../ui/ClockTimePicker', () => ({
+  ClockTimePicker: (props: Record<string, unknown>) => React.createElement('input', { placeholder: props.placeholder }),
+}));
 vi.mock('antd', () => {
   const primitive = (tag: string) => (props: Record<string, unknown>) => React.createElement(tag, props, props.children as React.ReactNode);
   const Form = Object.assign(({ children }: { children?: React.ReactNode }) => React.createElement('form', null, children), {
