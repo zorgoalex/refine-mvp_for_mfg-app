@@ -2162,6 +2162,15 @@ export async function changeOrderStatusFromAutomationInTransaction(
   if (order.orderStatusId === targetStatusId) {
     return { status: 'skipped', skipReason: 'same_status' };
   }
+  // «Переделка» is entered only by the rework command; a legacy rule targeting it is
+  // skipped instead of failing (and rolling back) the source command.
+  const targetIsRework = await tx.query(
+    "SELECT 1 FROM order_statuses WHERE order_status_id = $1 AND order_status_code = 'rework'",
+    [targetStatusId],
+  );
+  if (targetIsRework.rows.length > 0) {
+    return { status: 'skipped', skipReason: 'rework_requires_command' };
+  }
 
   const status = await loadOrderStatus(tx, targetStatusId);
   const nextVersion = await updateOrderStatus(tx, order.orderId, status.orderStatusId);

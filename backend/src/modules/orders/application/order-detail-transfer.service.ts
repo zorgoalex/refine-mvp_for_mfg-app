@@ -386,6 +386,12 @@ export class OrderDetailTransferService {
           detailIds: command.dto.detailIds,
         });
       }
+      // After ownership is confirmed: the rework guard sees only this order's details.
+      await assertTransferOutsideProductionRounds(
+        tx,
+        detailOrderIds,
+        movedDetails.map((detail) => toNumber(detail.detail_id)),
+      );
       const remainingSourceDetails = sourceDetails.filter((detail) => !selectedSet.has(toNumber(detail.detail_id)));
       const sourceCatalogLines = await readOrderCatalogLines(tx, command.sourceOrderId);
       if (remainingSourceDetails.length === 0 && sourceCatalogLines.length === 0) {
@@ -742,6 +748,40 @@ async function lockLiveDetails(tx: TransactionClient, orderIds: readonly number[
     [[...orderIds]],
   );
   return result.rows;
+}
+
+/**
+ * «Переделка» (plan §5.3): details of an order under rework, or details already
+ * produced in a later round, are not transferred — round history and the before-
+ * state of «не переделка» stay bound to their order.
+ */
+async function assertTransferOutsideProductionRounds(
+  tx: TransactionClient,
+  orderIds: readonly number[],
+  detailIds: readonly number[],
+): Promise<void> {
+  const blocked = await tx.query<{ order_id: string | number | null; detail_id: string | number | null }>(
+    `
+    SELECT o.order_id, NULL::bigint AS detail_id
+    FROM orders o
+    JOIN order_statuses s ON s.order_status_id = o.order_status_id
+    WHERE o.order_id = ANY($1::bigint[])
+      AND (s.order_status_code = 'rework'
+        OR o.production_round > 1
+        OR EXISTS (SELECT 1 FROM order_production_rounds r WHERE r.order_id = o.order_id AND r.closed_at IS NULL))
+    UNION ALL
+    SELECT NULL::bigint, d.detail_id
+    FROM order_details d
+    WHERE d.detail_id = ANY($2::bigint[]) AND d.production_round > 1
+    `,
+    [[...orderIds], [...detailIds]],
+  );
+  if (blocked.rows.length > 0) {
+    throw new ApiError(409, 'ORDER_REWORK_TRANSFER_BLOCKED', 'Детали заказа в переделке переносить нельзя', {
+      orderIds: blocked.rows.filter((row) => row.order_id !== null).map((row) => toNumber(row.order_id)),
+      detailIds: blocked.rows.filter((row) => row.detail_id !== null).map((row) => toNumber(row.detail_id)),
+    });
+  }
 }
 
 async function lockOrderName(tx: TransactionClient, orderName: string): Promise<void> {

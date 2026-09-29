@@ -2500,6 +2500,10 @@ probe_file() {
       "$(q_idx uq_pse_order_status_round)" \
       "$(q_trg trg_production_status_events_command_boundary)" \
       "$(q_fun_hash 'public.trg_production_status_events_command_boundary()' 3e164baf56866d058a62346908295f10)" ;;
+    # «Переделка»: закрытие открытого круга при «Готов к выдаче»/«Выдан»/«Завершен» любым писателем.
+    212_order_rework_round_closure*) probe_all \
+      "$(q_trg trg_orders_close_rework_round)" \
+      "$(q_fun_hash 'public.trg_orders_close_rework_round()' b5591f65ae646e55dd5232ad77f8cac7)" ;;
     # Сид 203 — хотя бы один склад (склад можно переименовать; после 205 повторный сид без ключа 1С невозможен).
     203_film_stock*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM public.warehouses)" \
@@ -2856,6 +2860,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     211_order_rework_rounds_stage_boundary*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    212_order_rework_round_closure*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)

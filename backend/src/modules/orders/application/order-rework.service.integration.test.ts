@@ -7,6 +7,11 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
 import type { OrderDto } from '../dto/order.dto';
 import { OrderReworkService } from './order-rework.service';
+import { enterMdfCommand } from '../../mdf-board/application/mdf-command-boundary';
+import { OrderDetailTransferService } from './order-detail-transfer.service';
+import { PgStatusAutomationRepository } from '../../status-automation/adapters/pg-status-automation-repository';
+import { parseCreateStatusAutomationRuleRequest } from '../../status-automation/dto/status-automation.dto';
+import { changeOrderStatusFromAutomationInTransaction } from '../../production-actions/adapters/pg-production-action-repository';
 
 // Real PostgreSQL proof of the rework commands («Переделка», slice 4). Gated on
 // REWORK_INTEGRATION_DATABASE_URL (scratch DB: erp schema + migrations 210/211).
@@ -28,11 +33,17 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
 
   function database(): DatabaseService {
     return {
-      async transaction<T>(handler: (tx: TransactionClient) => Promise<T>): Promise<T> {
+      async transaction<T>(
+        handler: (tx: TransactionClient) => Promise<T>,
+        options: { mdf?: { writer: string; capability: string } } = {},
+      ): Promise<T> {
         const client: PoolClient = await pool.connect();
         try {
           await client.query('BEGIN');
-          const result = await handler({ raw: client, query: (text: string, params: readonly unknown[] = []) => client.query(text, [...params]) } as never);
+          const tx = { raw: client, query: (text: string, params: readonly unknown[] = []) => client.query(text, [...params]) } as never;
+          // Like DatabaseService.transaction: MDF-aware commands enter the command boundary first.
+          if (options.mdf) await enterMdfCommand(tx, options.mdf as never);
+          const result = await handler(tx);
           await client.query('COMMIT');
           return result;
         } catch (error) {
@@ -367,5 +378,167 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
       await cutover.query('ROLLBACK').catch(() => undefined);
       cutover.release();
     }
+  });
+
+  async function setStatusAsWriter(orderId: number, code: string): Promise<void> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT set_session_user($1)', [userId]);
+      await client.query("SELECT set_config('erp.request_id', 'req-e2e-writer', true)");
+      await client.query('UPDATE orders SET order_status_id = $2, version = version + 1 WHERE order_id = $1', [orderId, status[code]]);
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  it('closes the open round when any writer moves the order to ready/issued/completed (§5.4)', async () => {
+    const readyAgain = await createOrder('legacy_7', 'issued', 2);
+    await service.startOrExtend({
+      currentUser: admin, orderId: readyAgain.orderId, version: await version(readyAgain.orderId), idempotencyKey: key(),
+      dto: { reasonId: reasons.delivery_damage, details: [{ detailId: readyAgain.detailIds[0], productionStatusId: stage.cut }] },
+    });
+    // «Переделка» → «В производстве» keeps the round open; «Готов к выдаче» closes it.
+    await setStatusAsWriter(readyAgain.orderId, 'legacy_4');
+    expect((await pool.query('SELECT closed_at FROM order_production_rounds WHERE order_id = $1', [readyAgain.orderId])).rows[0].closed_at).toBeNull();
+    // A real status writer (automation action) moves the order to «Готов к выдаче».
+    const writerClient = await pool.connect();
+    try {
+      await writerClient.query('BEGIN');
+      const written = await changeOrderStatusFromAutomationInTransaction(
+        { raw: writerClient, query: (text: string, params: readonly unknown[] = []) => writerClient.query(text, [...params]) } as never,
+        readyAgain.orderId, status.legacy_6,
+        { actor: admin, requestId: 'req-e2e-automation', outboxIdempotencyKey: `e2e-close-${tag}` } as never,
+      );
+      expect(written.status).toBe('executed');
+      await writerClient.query('COMMIT');
+    } catch (error) {
+      await writerClient.query('ROLLBACK');
+      throw error;
+    } finally {
+      writerClient.release();
+    }
+    const round = (await pool.query('SELECT close_reason, closed_by, event_seq FROM order_production_rounds WHERE order_id = $1', [readyAgain.orderId])).rows[0];
+    expect(round).toMatchObject({ close_reason: 'ready', closed_by: null });
+    const audit = (await pool.query(
+      "SELECT audit_id, request_id, user_id, created_at, metadata_json FROM audit_log WHERE related_order_id = $1 AND event = 'order.rework_closed'",
+      [readyAgain.orderId],
+    )).rows;
+    expect(audit).toHaveLength(1);
+    expect(audit[0].user_id).toBeNull();
+    expect(audit[0].request_id).toMatch(/^db-order-rework-close:\d+$/);
+    // Correlation: the writer's own audit row of the same transaction carries the real actor/request.
+    const writerAudit = (await pool.query(
+      `SELECT user_id, request_id FROM audit_log
+       WHERE related_order_id = $1 AND event = 'orders.status_change'
+         AND created_at = (SELECT created_at FROM audit_log WHERE audit_id = $2)`,
+      [readyAgain.orderId, audit[0].audit_id],
+    )).rows;
+    expect(writerAudit).toHaveLength(1);
+    expect(writerAudit[0]).toMatchObject({ request_id: 'req-e2e-automation' });
+    expect(Number(writerAudit[0].user_id)).toBe(userId);
+    expect(audit[0].metadata_json).toMatchObject({ roundNo: 2, closeReason: 'ready' });
+    const linked = await pool.query("SELECT entity_id FROM audit_log_related_entity WHERE audit_id = $1 AND entity_type = 'order_detail'", [audit[0].audit_id]);
+    expect(linked.rows.map((row) => Number(row.entity_id))).toEqual([readyAgain.detailIds[0]]);
+    const outbox = (await pool.query("SELECT idempotency_key FROM outbox_events WHERE aggregate_id = $1 AND event_type = 'order.rework_closed'", [String(readyAgain.orderId)])).rows;
+    expect(outbox.map((row) => row.idempotency_key)).toEqual([`order:${readyAgain.orderId}:rework:2:closed:${round.event_seq}`]);
+    // A later status change does not close anything again.
+    await setStatusAsWriter(readyAgain.orderId, 'legacy_7');
+    expect(Number((await pool.query("SELECT count(*) FROM audit_log WHERE related_order_id = $1 AND event = 'order.rework_closed'", [readyAgain.orderId])).rows[0].count)).toBe(1);
+
+    const inProduction = await createOrder('legacy_4', 'cut', 1);
+    await service.startOrExtend({
+      currentUser: admin, orderId: inProduction.orderId, version: await version(inProduction.orderId), idempotencyKey: key(),
+      dto: { reasonId: reasons.workshop_defect, details: [{ detailId: inProduction.detailIds[0], productionStatusId: stage.drawn }] },
+    });
+    // Same connection: a user command set app.user_id earlier; a later writer without it must not
+    // be attributed to that user.
+    const shared = await pool.connect();
+    try {
+      await shared.query('BEGIN');
+      await shared.query('SELECT set_session_user($1)', [userId]);
+      await shared.query('COMMIT');
+      await shared.query('BEGIN');
+      await shared.query('UPDATE orders SET order_status_id = $2, version = version + 1 WHERE order_id = $1', [inProduction.orderId, status.legacy_8]);
+      await shared.query('COMMIT');
+    } finally {
+      shared.release();
+    }
+    const closedCompleted = (await pool.query('SELECT close_reason, closed_by FROM order_production_rounds WHERE order_id = $1', [inProduction.orderId])).rows[0];
+    expect(closedCompleted).toMatchObject({ close_reason: 'completed', closed_by: null });
+    const closedAudit = (await pool.query(
+      "SELECT user_id FROM audit_log WHERE related_order_id = $1 AND event = 'order.rework_closed'", [inProduction.orderId],
+    )).rows;
+    expect(closedAudit).toEqual([{ user_id: null }]);
+  });
+
+  it('blocks transferring details of an order under rework (§5.3)', async () => {
+    const source = await createOrder('legacy_6', 'packed', 2);
+    const target = await createOrder('legacy_4', 'cut', 1);
+    await service.startOrExtend({
+      currentUser: admin, orderId: source.orderId, version: await version(source.orderId), idempotencyKey: key(),
+      dto: { reasonId: reasons.workshop_defect, details: [{ detailId: source.detailIds[0], productionStatusId: stage.drawn }] },
+    });
+    const transfer = new OrderDetailTransferService({ database: database() } as never);
+    // A foreign detail (another order under rework) gets the same 404 as any foreign detail.
+    const foreign = await createOrder('legacy_6', 'packed', 1);
+    await service.startOrExtend({
+      currentUser: admin, orderId: foreign.orderId, version: await version(foreign.orderId), idempotencyKey: key(),
+      dto: { reasonId: reasons.workshop_defect, details: [{ detailId: foreign.detailIds[0], productionStatusId: stage.drawn }] },
+    });
+    await expect(transfer.transfer({
+      currentUser: admin, sourceOrderId: target.orderId, sourceVersion: await version(target.orderId), idempotencyKey: key(),
+      dto: { detailIds: [foreign.detailIds[0]], target: { mode: 'existing', orderId: source.orderId, version: await version(source.orderId) } } as never,
+    })).rejects.toMatchObject({ code: 'ORDER_DETAIL_NOT_FOUND' });
+    for (const detailIds of [[source.detailIds[0]], [source.detailIds[1]]]) {
+      await expect(transfer.transfer({
+        currentUser: admin, sourceOrderId: source.orderId, sourceVersion: await version(source.orderId), idempotencyKey: key(),
+        dto: { detailIds, target: { mode: 'existing', orderId: target.orderId, version: await version(target.orderId) } } as never,
+      })).rejects.toMatchObject({ code: 'ORDER_REWORK_TRANSFER_BLOCKED' });
+    }
+    const still = (await pool.query('SELECT count(*) FROM order_details WHERE order_id = $1', [source.orderId])).rows[0];
+    expect(Number(still.count)).toBe(2);
+  });
+
+  it('refuses automation rules that target «Переделка»; skips such a rule at runtime (§5.2)', async () => {
+    const repository = new PgStatusAutomationRepository(database());
+    await expect(repository.createRule({
+      currentUser: admin, requestId: 'e2e-rework-rule',
+      dto: parseCreateStatusAutomationRuleRequest({
+        name: `E2E-Тест правило переделки ${tag}`, eventType: 'order.status_changed', actionType: 'change_order_status',
+        targetStatusId: status.rework, conditions: {}, priority: 100, isEnabled: false,
+      }),
+    })).rejects.toMatchObject({ code: 'TARGET_STATUS_REWORK_FORBIDDEN' });
+    // «Переделка» remains a valid condition.
+    const allowed = await repository.createRule({
+      currentUser: admin, requestId: 'e2e-rework-rule',
+      dto: parseCreateStatusAutomationRuleRequest({
+        name: `E2E-Тест правило условие ${tag}`, eventType: 'order.status_changed', actionType: 'change_order_status',
+        targetStatusId: status.legacy_4, conditions: { currentOrderStatusIn: [status.rework] }, priority: 100, isEnabled: false,
+      }),
+    });
+    await pool.query('DELETE FROM status_automation_rules WHERE id = $1', [allowed.id]);
+    await pool.query("DELETE FROM audit_log WHERE request_id = 'e2e-rework-rule'");
+    await pool.query("DELETE FROM outbox_events WHERE payload_json->>'requestId' = 'e2e-rework-rule'");
+
+    const { orderId } = await createOrder('legacy_6', 'packed', 1);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await changeOrderStatusFromAutomationInTransaction(
+        { raw: client, query: (text: string, params: readonly unknown[] = []) => client.query(text, [...params]) } as never,
+        orderId, status.rework,
+        { actor: admin, requestId: 'e2e-rework-runtime', outboxIdempotencyKey: `e2e-rework-runtime-${tag}` } as never,
+      );
+      expect(result).toMatchObject({ status: 'skipped', skipReason: 'rework_requires_command' });
+      await client.query('ROLLBACK');
+    } finally {
+      client.release();
+    }
+    expect(Number((await pool.query('SELECT order_status_id FROM orders WHERE order_id = $1', [orderId])).rows[0].order_status_id)).toBe(status.legacy_6);
   });
 });
