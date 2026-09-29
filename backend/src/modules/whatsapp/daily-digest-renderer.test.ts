@@ -159,7 +159,7 @@ describe('DailyDigestRenderer', () => {
     expect(bold && existsSync(bold)).toBeTruthy();
     expect(bold).toContain('LiberationSans-Bold.ttf');
     expect(readFileSync(bold as string).byteLength).toBeGreaterThan(100_000);
-    expect(DAILY_DIGEST_RENDERER_VERSION).toBe('daily-order-cards-v2');
+    expect(DAILY_DIGEST_RENDERER_VERSION).toBe('daily-order-cards-v3');
   });
 
   it('renders a narrow image at layout width x zoom with a content-driven height', async () => {
@@ -177,6 +177,25 @@ describe('DailyDigestRenderer', () => {
     expect(PNG.sync.read(longer.png).height).toBeGreaterThan(plainPng.height);
     expect(PNG.sync.read(noStages.png).height).toBeLessThan(plainPng.height);
     expect(plainPng.height).toBeLessThan(450 * DAILY_DIGEST_RENDER_ZOOM);
+  });
+
+  it('renders an in-work order card on a white background (no yellow tint)', async () => {
+    const count = (png: PNG, rgb: [number, number, number]) => {
+      let n = 0;
+      for (let i = 0; i < png.data.length; i += 4) {
+        if (png.data[i] === rgb[0] && png.data[i + 1] === rgb[1] && png.data[i + 2] === rgb[2]) n += 1;
+      }
+      return n;
+    };
+    const [working] = await renderer.render({ ...makeSnapshot([makeOrder(2)]), cardsPerMessage: 1 });
+    const workingPng = PNG.sync.read(working.png);
+    expect(count(workingPng, [0xff, 0xf9, 0xe6])).toBe(0);
+    expect(count(workingPng, [0xff, 0xff, 0xff])).toBeGreaterThan(workingPng.width * workingPng.height * 0.3);
+    const [ready] = await renderer.render({
+      ...makeSnapshot([makeOrder(2, { orderStatusName: 'Готов' })]),
+      cardsPerMessage: 1,
+    });
+    expect(count(PNG.sync.read(ready.png), [0xff, 0xd9, 0xbf])).toBeGreaterThan(1000);
   });
 
   it('keeps one-card, two-card and maximum-content pages far below the byte limit', async () => {

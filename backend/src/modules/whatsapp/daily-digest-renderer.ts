@@ -395,7 +395,7 @@ function pageSvg(input: {
 
 function statusColor(status: string): string {
   if (status === 'готов') return '#ffd9bf';
-  if (status === 'в работе' || status.includes('работ')) return '#fff9e6';
+  if (status === 'в работе' || status.includes('работ')) return '#ffffff';
   if (status === 'отменен' || status.includes('отмен')) return '#ffe6e6';
   return '#ffffff';
 }
