@@ -9,7 +9,7 @@ import { Table } from '../../../ui/tooltipDelay';
 import { getLoadedRuntimeConfig } from '../../../config/runtimeConfig';
 import { filmCatalogImportApi } from '../../../api/filmCatalogImportApi';
 import type { CatalogImportAction, CatalogImportBatchDto, CatalogImportMatchDto, CatalogImportRowDto, CatalogSourceKind } from '../../../api/types/filmCatalogImportApi.types';
-import { catalogImportActions, catalogImportErrorMessage, catalogMatchQuery, catalogRowsQuery, importManageAllowed, inspectCatalogSheets, onecMirrorAllowed, resolveIdempotencyKey, sha256File, vendorMappingAction, type CatalogSheetPreview } from './catalogImportHelpers';
+import { catalogImportActions, catalogImportErrorMessage, catalogMatchQuery, catalogRowsQuery, importManageAllowed, inspectCatalogSheets, onecMirrorAllowed, resolveIdempotencyKey, sha256File, vendorMappingAction, type CatalogSheetPreview, serverPagination } from './catalogImportHelpers';
 
 const PAGE_SIZE = 50;
 const STATUS_LABELS: Record<string, string> = { draft: 'Черновик', applied: 'Применён', cancelled: 'Отменён', reverted: 'Откатан' };
@@ -41,9 +41,11 @@ export const CatalogImportPage: React.FC = () => {
   const [matchVendorId, setMatchVendorId] = useState<number>();
   const [matchSearch, setMatchSearch] = useState('');
   const [matchOffset, setMatchOffset] = useState(0);
+  const [matchPageSize, setMatchPageSize] = useState(PAGE_SIZE);
   const [rowStatus, setRowStatus] = useState<string>();
   const [rowSearch, setRowSearch] = useState('');
   const [rowOffset, setRowOffset] = useState(0);
+  const [rowPageSize, setRowPageSize] = useState(PAGE_SIZE);
   const [conflictOnly, setConflictOnly] = useState(false);
   const [propertyChoices, setPropertyChoices] = useState<Record<number, { filmTexture?: boolean; filmTypeId?: number }>>({});
   const pendingKey = useRef<{ signature: string; key: string } | null>(null);
@@ -56,11 +58,11 @@ export const CatalogImportPage: React.FC = () => {
     message.error(formatted.message);
     if (formatted.details.length) Modal.error({ title: formatted.message, content: <ul>{formatted.details.map((line, index) => <li key={index}>{line}</li>)}</ul> });
     if (formatted.reload && batchId) {
-      void Promise.all([filmCatalogImportApi.get(batchId), filmCatalogImportApi.matches(batchId, { offset: 0, limit: PAGE_SIZE }), filmCatalogImportApi.rows(batchId, { offset: 0, limit: PAGE_SIZE })])
-        .then(([freshBatch, freshMatches, freshRows]) => { setBatch(freshBatch); setMatches(freshMatches.items); setTotalMatches(freshMatches.total); setRows(freshRows.items); setTotalRows(freshRows.total); })
+      void Promise.all([filmCatalogImportApi.get(batchId), filmCatalogImportApi.matches(batchId, { offset: 0, limit: matchPageSize }), filmCatalogImportApi.rows(batchId, { offset: 0, limit: rowPageSize })])
+        .then(([freshBatch, freshMatches, freshRows]) => { setBatch(freshBatch); setMatches(freshMatches.items); setTotalMatches(freshMatches.total); setMatchOffset(0); setRows(freshRows.items); setTotalRows(freshRows.total); setRowOffset(0); })
         .catch(() => undefined);
     }
-  }, [batchId]);
+  }, [batchId, matchPageSize, rowPageSize]);
 
   const loadBatch = useCallback(async (id: number) => {
     setBusy(true);
@@ -76,18 +78,18 @@ export const CatalogImportPage: React.FC = () => {
   const loadMatches = useCallback(async () => {
     if (!batchId) return;
     try {
-      const result = await filmCatalogImportApi.matches(batchId, catalogMatchQuery({ status: matchStatus, vendorId: matchVendorId, search: matchSearch, offset: matchOffset, limit: PAGE_SIZE }));
+      const result = await filmCatalogImportApi.matches(batchId, catalogMatchQuery({ status: matchStatus, vendorId: matchVendorId, search: matchSearch, offset: matchOffset, limit: matchPageSize }));
       setMatches(result.items); setTotalMatches(result.total);
     } catch (error) { reportError(error); }
-  }, [batchId, matchStatus, matchVendorId, matchSearch, matchOffset, reportError]);
+  }, [batchId, matchStatus, matchVendorId, matchSearch, matchOffset, matchPageSize, reportError]);
 
   const loadRows = useCallback(async () => {
     if (!batchId) return;
     try {
-      const result = await filmCatalogImportApi.rows(batchId, catalogRowsQuery({ status: rowStatus, conflict: conflictOnly, search: rowSearch, offset: rowOffset, limit: PAGE_SIZE }));
+      const result = await filmCatalogImportApi.rows(batchId, catalogRowsQuery({ status: rowStatus, conflict: conflictOnly, search: rowSearch, offset: rowOffset, limit: rowPageSize }));
       setRows(result.items); setTotalRows(result.total);
     } catch (error) { reportError(error); }
-  }, [batchId, rowStatus, conflictOnly, rowSearch, rowOffset, reportError]);
+  }, [batchId, rowStatus, conflictOnly, rowSearch, rowOffset, rowPageSize, reportError]);
 
   useEffect(() => {
     if (!allowed || !featureEnabled) return;
@@ -238,11 +240,11 @@ export const CatalogImportPage: React.FC = () => {
         ]} /> },
         { key: 'matches', label: `Сопоставления (${totalMatches})`, children: <Space direction="vertical" style={{ width: '100%' }}>
           <Space wrap><Select allowClear placeholder="Статус" style={{ width: 160 }} value={matchStatus} onChange={(value) => { setMatchStatus(value); setMatchOffset(0); }} options={['linked','auto','suggested','confirmed','manual','none','unchanged'].map((value) => ({ value, label: value }))} /><Select allowClear placeholder="Поставщик" style={{ width: 220 }} {...vendorSelectProps} value={matchVendorId} onChange={(value) => { setMatchVendorId(value); setMatchOffset(0); }} /><Input.Search placeholder="Поиск плёнки" onSearch={(value) => { setMatchSearch(value); setMatchOffset(0); }} style={{ width: 240 }} /><Button onClick={() => void mutate([catalogImportActions.acceptAllAuto()], 'accept-all-auto')}>Принять все уверенные</Button></Space>
-          <Table rowKey="filmId" dataSource={matches} columns={matchColumns} pagination={{ current: Math.floor(matchOffset / PAGE_SIZE) + 1, pageSize: PAGE_SIZE, total: totalMatches, onChange: (page) => setMatchOffset((page - 1) * PAGE_SIZE) }} />
+          <Table rowKey="filmId" dataSource={matches} columns={matchColumns} pagination={serverPagination(matchOffset, matchPageSize, totalMatches, setMatchOffset, setMatchPageSize)} />
         </Space> },
         { key: 'rows', label: `Позиции каталога (${totalRows})`, children: <Space direction="vertical" style={{ width: '100%' }}>
           <Space wrap><Select allowClear placeholder="Статус строки" style={{ width: 180 }} value={rowStatus} onChange={(value) => { setRowStatus(value); setRowOffset(0); }} options={['ok','invalid','skipped'].map((value) => ({ value, label: value }))} /><Checkbox checked={conflictOnly} onChange={(event) => { setConflictOnly(event.target.checked); setRowOffset(0); }}>Разногласия свойств</Checkbox><Input.Search placeholder="Поиск строки каталога" onSearch={(value) => { setRowSearch(value); setRowOffset(0); }} style={{ width: 260 }} /></Space>
-          <Table rowKey="rowId" dataSource={rows} columns={rowColumns} pagination={{ current: Math.floor(rowOffset / PAGE_SIZE) + 1, pageSize: PAGE_SIZE, total: totalRows, onChange: (page) => setRowOffset((page - 1) * PAGE_SIZE) }} />
+          <Table rowKey="rowId" dataSource={rows} columns={rowColumns} pagination={serverPagination(rowOffset, rowPageSize, totalRows, setRowOffset, setRowPageSize)} />
         </Space> },
         { key: 'summary', label: 'Итог и действия', children: <Space direction="vertical" style={{ width: '100%' }}>
           <Row gutter={12}>{Object.entries(batch.counters).map(([key, value]) => <Col key={key} xs={12} md={6}><Statistic title={key} value={value} /></Col>)}</Row>

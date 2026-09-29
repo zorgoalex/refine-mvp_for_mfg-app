@@ -75,3 +75,28 @@ export function selectDefaultStockSheet(sheets: ParsedStockSheet[]): ParsedStock
 export function inventoryLineDisplay(line: StockDocumentLineDto): string {
   return [line.filmName ?? line.rawName ?? 'Плёнка не выбрана', line.rawSupplier].filter(Boolean).join(' · ');
 }
+
+export type FilmOption = { value: number; label: string };
+export type FilmOptionGroup = { label: string; options: FilmOption[] };
+
+/**
+ * Варианты плёнки для строки черновика: сначала «Похожие» (предложения backend с
+ * процентом сходства), затем «Все плёнки» без повторов.
+ */
+export function lineFilmOptions(line: StockDocumentLineDto, activeFilms: FilmOption[]): FilmOptionGroup[] {
+  const suggested = line.suggestions.map((suggestion) => ({
+    value: suggestion.filmId,
+    label: `${suggestion.filmName} · ${Math.round(Math.min(1, suggestion.score) * 100)}%`,
+  }));
+  const suggestedIds = new Set(suggested.map((option) => option.value));
+  const rest = activeFilms.filter((option) => !suggestedIds.has(option.value));
+  return [
+    ...(suggested.length > 0 ? [{ label: 'Похожие', options: suggested }] : []),
+    { label: 'Все плёнки', options: rest },
+  ];
+}
+
+/** Плёнка, показанная в строке до решения пользователя: выбранная или лучшее предложение. */
+export function lineFilmValue(line: StockDocumentLineDto): number | undefined {
+  return line.filmId ?? line.suggestions[0]?.filmId ?? undefined;
+}

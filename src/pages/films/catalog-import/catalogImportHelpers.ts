@@ -84,3 +84,30 @@ export async function sha256File(file: Pick<File, 'arrayBuffer'>): Promise<strin
   const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
+
+export const PAGE_SIZE_OPTIONS = [20, 50, 100, 200];
+
+/** Серверная пагинация по offset: смена размера страницы возвращает на первую страницу. */
+export function serverPagination(
+  offset: number,
+  pageSize: number,
+  total: number,
+  setOffset: (offset: number) => void,
+  setPageSize: (pageSize: number) => void,
+) {
+  return {
+    current: Math.floor(offset / pageSize) + 1,
+    pageSize,
+    total,
+    showSizeChanger: true,
+    pageSizeOptions: PAGE_SIZE_OPTIONS,
+    onChange: (page: number, size: number) => {
+      if (size !== pageSize) {
+        setPageSize(size);
+        setOffset(0);
+        return;
+      }
+      setOffset((page - 1) * size);
+    },
+  };
+}

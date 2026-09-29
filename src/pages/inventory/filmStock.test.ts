@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { filmStockAvailability, filmStockBadge, inventoryQueryString, parseStockCsv, parseStockRows, selectDefaultStockSheet } from './filmStock';
+import { filmStockAvailability, filmStockBadge, inventoryQueryString, parseStockCsv, parseStockRows, selectDefaultStockSheet, lineFilmOptions, lineFilmValue } from './filmStock';
 
 describe('film stock frontend helpers', () => {
   it('parses rows by headers, skips totals and preserves missing quantity', () => {
@@ -55,5 +55,28 @@ describe('film stock frontend helpers', () => {
 
   it('builds encoded API query strings', () => {
     expect(inventoryQueryString({ search: 'плёнка X', negative: true, offset: 0, status: undefined })).toBe('search=%D0%BF%D0%BB%D1%91%D0%BD%D0%BA%D0%B0%20X&negative=true&offset=0');
+  });
+});
+
+describe('draft line film picker', () => {
+  const line = {
+    lineId: 1, lineNo: 3, rawName: 'Айвори нубук', rawSupplier: 'Алер', rawQuantity: '5', filmId: null, filmName: null,
+    quantity: 5, matchStatus: 'suggested' as const, quantityStatus: 'ok' as const, issue: null, balanceBefore: null, balanceAfter: null,
+    suggestions: [{ filmId: 2593, filmName: 'айвори алер', score: 0.667 }, { filmId: 4897, filmName: 'Айвори софт AL17-Алер', score: 0.5 }],
+  };
+  const all = [{ value: 2593, label: 'айвори алер' }, { value: 10, label: 'Белый' }, { value: 4897, label: 'Айвори софт AL17-Алер' }];
+
+  it('lists similar films with similarity first, then all other films without duplicates', () => {
+    expect(lineFilmOptions(line, all)).toEqual([
+      { label: 'Похожие', options: [{ value: 2593, label: 'айвори алер · 67%' }, { value: 4897, label: 'Айвори софт AL17-Алер · 50%' }] },
+      { label: 'Все плёнки', options: [{ value: 10, label: 'Белый' }] },
+    ]);
+  });
+
+  it('shows the best suggestion until the user decides, and the chosen film afterwards', () => {
+    expect(lineFilmValue(line)).toBe(2593);
+    expect(lineFilmValue({ ...line, filmId: 10 })).toBe(10);
+    expect(lineFilmValue({ ...line, suggestions: [] })).toBeUndefined();
+    expect(lineFilmOptions({ ...line, suggestions: [] }, all)).toEqual([{ label: 'Все плёнки', options: all }]);
   });
 });

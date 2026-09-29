@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { catalogImportActions, catalogImportErrorMessage, filmReferenceViewAllowed, importManageAllowed, inspectCatalogSheets, catalogMatchQuery, catalogRowsQuery, onecMirrorAllowed, resolveIdempotencyKey, sha256File, vendorMappingAction } from './catalogImportHelpers';
+import { catalogImportActions, catalogImportErrorMessage, filmReferenceViewAllowed, importManageAllowed, inspectCatalogSheets, catalogMatchQuery, catalogRowsQuery, onecMirrorAllowed, resolveIdempotencyKey, sha256File, vendorMappingAction, serverPagination } from './catalogImportHelpers';
 
 describe('film catalog import helpers', () => {
   it('inspects matching sheets from browser cell arrays and reports invalid rows', () => {
@@ -56,5 +56,21 @@ describe('film catalog import helpers', () => {
     expect(catalogImportErrorMessage({ code: 'CATALOG_IMPORT_STALE' })).toMatchObject({ reload: true });
     expect(catalogImportErrorMessage({ code: 'CATALOG_IMPORT_CONFLICT', details: { conflicts: [{ filmId: 4, reason: 'changed' }] } })).toMatchObject({ reload: false, details: ['changed — Плёнка 4'] });
     expect(catalogImportErrorMessage({ code: 'CATALOG_IMPORT_UNRESOLVED', details: { blockers: ['vendor required'] } }).details).toEqual(['vendor required']);
+  });
+});
+
+describe('serverPagination', () => {
+  it('changes the page size and returns to the first page', () => {
+    const calls: string[] = [];
+    const pagination = serverPagination(100, 50, 400, (offset) => calls.push(`offset=${offset}`), (size) => calls.push(`size=${size}`));
+    expect(pagination).toMatchObject({ current: 3, pageSize: 50, total: 400, showSizeChanger: true });
+    pagination.onChange(3, 100);
+    expect(calls).toEqual(['size=100', 'offset=0']);
+  });
+
+  it('moves between pages with the current size', () => {
+    const offsets: number[] = [];
+    serverPagination(0, 20, 400, (offset) => offsets.push(offset), () => undefined).onChange(4, 20);
+    expect(offsets).toEqual([60]);
   });
 });
