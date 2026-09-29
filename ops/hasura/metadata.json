@@ -2027,7 +2027,8 @@
                                     "is_active",
                                     "sort_order",
                                     "nomenclature_type",
-                                    "nomenclature_category"
+                                    "nomenclature_category",
+                                    "note"
                                 ]
                             },
                             "comment": ""
@@ -2048,7 +2049,8 @@
                                     "is_active",
                                     "sort_order",
                                     "nomenclature_type",
-                                    "nomenclature_category"
+                                    "nomenclature_category",
+                                    "note"
                                 ]
                             },
                             "comment": ""
@@ -2069,7 +2071,8 @@
                                     "is_active",
                                     "sort_order",
                                     "nomenclature_type",
-                                    "nomenclature_category"
+                                    "nomenclature_category",
+                                    "note"
                                 ]
                             },
                             "comment": ""
@@ -2090,7 +2093,8 @@
                                     "is_active",
                                     "sort_order",
                                     "nomenclature_type",
-                                    "nomenclature_category"
+                                    "nomenclature_category",
+                                    "note"
                                 ]
                             },
                             "comment": ""
@@ -2155,7 +2159,8 @@
                                     "is_active",
                                     "sort_order",
                                     "nomenclature_type",
-                                    "nomenclature_category"
+                                    "nomenclature_category",
+                                    "note"
                                 ],
                                 "filter": {},
                                 "check": {},
@@ -2176,7 +2181,8 @@
                                     "is_active",
                                     "sort_order",
                                     "nomenclature_type",
-                                    "nomenclature_category"
+                                    "nomenclature_category",
+                                    "note"
                                 ],
                                 "filter": {},
                                 "check": {},
@@ -2197,7 +2203,8 @@
                                     "is_active",
                                     "sort_order",
                                     "nomenclature_type",
-                                    "nomenclature_category"
+                                    "nomenclature_category",
+                                    "note"
                                 ],
                                 "filter": {},
                                 "check": {},
@@ -2218,7 +2225,8 @@
                                     "is_active",
                                     "sort_order",
                                     "nomenclature_type",
-                                    "nomenclature_category"
+                                    "nomenclature_category",
+                                    "note"
                                 ],
                                 "filter": {},
                                 "check": {},

@@ -27,6 +27,7 @@ import {
   canAccessSourceKind,
   filmFingerprint,
   normalizeFilmBusinessFields,
+  noteWithPreviousName,
   refreshMatches,
   supplierNorm,
   type CatalogAction,
@@ -34,6 +35,19 @@ import {
   type ImportRow,
   type MatchResult,
 } from '../domain/catalog-import';
+import {
+  DECISIONS_FORMAT,
+  DECISIONS_MAX_ROWS,
+  DECISIONS_VERSION,
+  FINGERPRINT_VERSION,
+  planReplay,
+  verifyDecisionsFile,
+  withSha,
+  type DecisionRow,
+  type DecisionVendor,
+  type DecisionsFile,
+  type ReplayPlan,
+} from '../domain/catalog-decisions';
 
 const VENDOR_ALIASES: ReadonlyArray<readonly [string, string]> = [
   ['алимжан aif', 'Аиф'],
@@ -50,7 +64,8 @@ const VENDOR_ALIASES: ReadonlyArray<readonly [string, string]> = [
 const json = (value: unknown) => JSON.stringify(value);
 interface CreateInput {
   kind: 'films';
-  source: 'file' | 'onec_mirror';
+  source: 'file' | 'onec_mirror' | 'decisions';
+  decisions?: DecisionsFile;
   fileName?: string;
   fileSha256?: string;
   sheetName?: string;
@@ -163,7 +178,265 @@ export class CatalogImportService {
         },
       });
     }
-    throw validation('source must be file or onec_mirror');
+    if (source === 'decisions') {
+      if (!body.decisions) throw validation('decisions file is required');
+      return this.createFromDecisions(body.decisions, userId, requestId, key);
+    }
+    throw validation('source must be file, onec_mirror or decisions');
+  }
+
+  /**
+   * Файл решений применённого пакета (план §C): строки каталога с исходом `existing`
+   * (плёнки + сохранённые отпечатки черновика + роли) или `create` (без stage-ID) и
+   * поставщики с названием/типом материала. Только для пакета `applied`.
+   */
+  async exportDecisions(id: number, permissions: readonly string[]): Promise<DecisionsFile> {
+    const batch = await this.getBatch(id, permissions);
+    if (batch.status !== 'applied')
+      throw new ApiError(409, 'CATALOG_IMPORT_NOT_APPLIED', 'Файл решений выгружается только из применённого пакета');
+    const rows = await this.db.query(
+      `SELECT * FROM catalog_import_rows WHERE batch_id=$1 AND row_status='ok' ORDER BY row_no,row_id`,
+      [id]
+    );
+    const matches = await this.db.query<{ film_id: string; row_id: string; fingerprint: string; after: Record<string, unknown> }>(
+      `SELECT film_id,row_id,fingerprint,after FROM catalog_import_matches WHERE batch_id=$1 AND row_id IS NOT NULL AND after IS NOT NULL ORDER BY film_id`,
+      [id]
+    );
+    const byRow = new Map<number, typeof matches.rows>();
+    for (const m of matches.rows) {
+      const list = byRow.get(Number(m.row_id)) ?? [];
+      list.push(m);
+      byRow.set(Number(m.row_id), list);
+    }
+    const vendorByNorm = new Map<string, number>();
+    const decisionRows: DecisionRow[] = [];
+    for (const row of rows.rows) {
+      const group = byRow.get(Number(row.row_id)) ?? [];
+      if (!group.length) continue;
+      const created = group.some((m) => m.after?.created === true);
+      const lead = group.find((m) => m.after?.created === true || m.after?.canonical_film_id === null) ?? group[0];
+      const norm = supplierNorm(String(row.supplier));
+      if (lead.after?.vendor_id !== null && lead.after?.vendor_id !== undefined) vendorByNorm.set(norm, Number(lead.after.vendor_id));
+      decisionRows.push({
+        catalogKey: String(row.catalog_key),
+        onecRefKey: row.ref_key_1c ? String(row.ref_key_1c).toLowerCase() : null,
+        rowNo: Number(row.row_no),
+        nameOriginal: String(row.name_original),
+        nameFull: String(row.name_full),
+        supplier: String(row.supplier),
+        nomenclatureType: row.nomenclature_type ?? null,
+        unit: row.unit ?? null,
+        nomenclatureCategory: row.nomenclature_category ?? null,
+        targetName: String(row.target_name),
+        supplierNorm: norm,
+        canonicalFilmTexture: row.canonical_film_texture === null ? null : Boolean(row.canonical_film_texture),
+        canonicalFilmTypeId: row.canonical_film_type_id === null ? null : Number(row.canonical_film_type_id),
+        outcome: created ? 'create' : 'existing',
+        films: created ? [] : group.map((m) => ({
+          filmId: Number(m.film_id),
+          fingerprint: m.fingerprint,
+          role: m.after?.canonical_film_id === null || m.after?.canonical_film_id === undefined ? 'canonical' as const : 'duplicate' as const,
+        })),
+      });
+    }
+    // Поставщики — только из снимка на момент применения (текущий справочник мог измениться).
+    const snapshot = (batch.options as { appliedVendors?: DecisionVendor[] } | null)?.appliedVendors;
+    if (!snapshot)
+      throw new ApiError(409, 'CATALOG_DECISIONS_NO_SNAPSHOT', 'Пакет применён до поддержки файла решений — выгрузка невозможна; примените пакет заново');
+    const snapshotByNorm = new Map(snapshot.map((v) => [v.supplierNorm, v]));
+    const vendors: DecisionVendor[] = [...vendorByNorm.keys()].map((norm) => {
+      const v = snapshotByNorm.get(norm);
+      if (!v) throw new ApiError(409, 'CATALOG_DECISIONS_NO_SNAPSHOT', `Нет снимка поставщика «${norm}» в пакете`);
+      return v;
+    }).sort((x, y) => x.supplierNorm.localeCompare(y.supplierNorm));
+    return withSha({
+      format: DECISIONS_FORMAT,
+      version: DECISIONS_VERSION,
+      fingerprintVersion: FINGERPRINT_VERSION,
+      sourceBatchId: id,
+      exportedAt: new Date().toISOString(),
+      rows: decisionRows,
+      vendors,
+    });
+  }
+
+  /**
+   * Поставщики файла решений: тот же id с тем же названием и типом материала → название +
+   * тип материала → (created) создать с экспортированными названием и типом. Название
+   * сравнивается ТОЧНО — как UNIQUE (vendor_name, material_type_id) в БД: вставка
+   * `ON CONFLICT … DO NOTHING` + повторный SELECT атомарны относительно любых writers (в т.ч.
+   * Hasura). `create=false` — только проверка для сводки черновика; `create=true` — окончательно
+   * в транзакции apply: найденные строки берутся FOR SHARE (не меняются и не удаляются до commit;
+   * изменённая до блокировки строка перепроверяется по условию и не находится), снимок
+   * `appliedVendors` читается из тех же заблокированных строк.
+   */
+  private async resolveDecisionVendors(tx: TransactionClient, vendors: DecisionVendor[], create: boolean, userId: number) {
+    // inserted — поставщика вставила ЭТА транзакция (INSERT … RETURNING вернул строку); найденный
+    // чужой (в т.ч. вставленный параллельно) не считается созданным пакетом.
+    const resolved = new Map<string, { vendorId: number | null; create: boolean; inserted: boolean }>();
+    const unresolved: DecisionVendor[] = [];
+    for (const vendor of vendors) {
+      const byId = await tx.query<{ vendor_id: string }>(
+        `SELECT vendor_id FROM vendors WHERE vendor_id=$1 AND vendor_name=$2 AND material_type_id IS NOT DISTINCT FROM $3${create ? ' FOR SHARE' : ''}`,
+        [vendor.vendorId, vendor.vendorName, vendor.materialTypeId]
+      );
+      let vendorId = byId.rows[0] ? Number(byId.rows[0].vendor_id) : null;
+      if (vendorId === null) {
+        const byName = await tx.query<{ vendor_id: string }>(
+          `SELECT vendor_id FROM vendors WHERE vendor_name=$1 AND material_type_id IS NOT DISTINCT FROM $2${create ? ' FOR SHARE' : ''}`,
+          [vendor.vendorName, vendor.materialTypeId]
+        );
+        vendorId = byName.rows[0] ? Number(byName.rows[0].vendor_id) : null;
+      }
+      if (vendorId === null && vendor.created) {
+        if (!create) {
+          resolved.set(vendor.supplierNorm, { vendorId: null, create: true, inserted: false });
+          continue;
+        }
+        const inserted = await tx.query<{ vendor_id: string }>(
+          `INSERT INTO vendors(vendor_name,material_type_id,created_by) VALUES($1,$2,$3) ON CONFLICT ON CONSTRAINT uq_vendors_name_material_type DO NOTHING RETURNING vendor_id`,
+          [vendor.vendorName, vendor.materialTypeId, userId]
+        );
+        if (inserted.rows[0]) {
+          resolved.set(vendor.supplierNorm, { vendorId: Number(inserted.rows[0].vendor_id), create: false, inserted: true });
+          continue;
+        }
+        // Конфликт: строку вставила другая транзакция — используем её (FOR SHARE), но не как созданную пакетом.
+        const concurrent = await tx.query<{ vendor_id: string }>(
+          `SELECT vendor_id FROM vendors WHERE vendor_name=$1 AND material_type_id IS NOT DISTINCT FROM $2 FOR SHARE`,
+          [vendor.vendorName, vendor.materialTypeId]
+        );
+        vendorId = concurrent.rows[0] ? Number(concurrent.rows[0].vendor_id) : null;
+      }
+      if (vendorId === null) unresolved.push(vendor);
+      else resolved.set(vendor.supplierNorm, { vendorId, create: false, inserted: false });
+    }
+    return { resolved, unresolved };
+  }
+
+  /** Черновик строгого повтора из файла решений (только для чтения, план §C). */
+  private async createFromDecisions(file: DecisionsFile, userId: number, requestId: string, key: string) {
+    try {
+      verifyDecisionsFile(file);
+    } catch (error) {
+      throw new ApiError(422, 'CATALOG_DECISIONS_INVALID', error instanceof Error ? error.message : String(error));
+    }
+    if (file.rows.length > DECISIONS_MAX_ROWS) throw validation(`Не больше ${DECISIONS_MAX_ROWS} строк`);
+    return this.db.transaction(async (tx) => {
+      const replay = await this.claim(tx, key, 'catalog_import.create', userId, { kind: 'films', source: 'decisions', sha256: file.sha256 });
+      if (replay) return replay;
+      const vendorPlan = await this.resolveDecisionVendors(tx, file.vendors, false, userId);
+      if (vendorPlan.unresolved.length)
+        throw new ApiError(422, 'CATALOG_DECISIONS_VENDOR_UNRESOLVED', 'Поставщики из файла решений не найдены — выровняйте справочник поставщиков', {
+          vendors: vendorPlan.unresolved.map((v) => ({ vendorId: v.vendorId, vendorName: v.vendorName, materialTypeId: v.materialTypeId })),
+        });
+      const filmIds = file.rows.flatMap((row) => row.films.map((film) => film.filmId));
+      const current = new Map<number, string>();
+      if (filmIds.length) {
+        const films = await tx.query(`SELECT f.* FROM films f WHERE f.film_id=ANY($1::bigint[])`, [filmIds]);
+        for (const film of films.rows) current.set(Number(film.film_id), filmFingerprint(this.filmRecord(film)));
+      }
+      const createRows = file.rows.filter((row) => row.outcome === 'create');
+      const existing = createRows.length
+        ? await tx.query<{ catalog_key: string | null; ref: string | null }>(
+          `SELECT catalog_key,lower(ref_key_1c::text) AS ref FROM films WHERE catalog_key=ANY($1::text[]) OR lower(ref_key_1c::text)=ANY($2::text[])`,
+          [createRows.map((row) => row.catalogKey), createRows.flatMap((row) => (row.onecRefKey ? [row.onecRefKey.toLowerCase()] : []))]
+        )
+        : { rows: [] as Array<{ catalog_key: string | null; ref: string | null }> };
+      const plan: ReplayPlan = planReplay(
+        file,
+        current,
+        new Set(existing.rows.flatMap((row) => (row.catalog_key ? [row.catalog_key] : []))),
+        new Set(existing.rows.flatMap((row) => (row.ref ? [row.ref] : []))),
+      );
+      const planByKey = new Map(plan.rows.map((row) => [row.catalogKey, row]));
+      const createKeys = plan.rows.filter((row) => row.status === 'create').map((row) => row.catalogKey);
+      const options = {
+        createMissing: true,
+        vendorMappings: [...vendorPlan.resolved.entries()].map(([norm, v]) => ({ supplierNorm: norm, createVendor: v.create })),
+        decisions: {
+          sourceBatchId: file.sourceBatchId,
+          sha256: file.sha256,
+          fingerprintVersion: file.fingerprintVersion,
+          createKeys,
+          skipped: plan.skipped,
+          vendors: file.vendors,
+        },
+      };
+      const batch = (await tx.query<{ batch_id: string }>(
+        `INSERT INTO catalog_import_batches(reference_kind,status,source_kind,file_name,file_sha256,sheet_name,options,counters,created_by,request_id,correlation_id) VALUES('films','draft','file',$1,$2,'decisions',$3::jsonb,'{}'::jsonb,$4,$5,$5) RETURNING batch_id`,
+        [`decisions:${file.sourceBatchId}.json`, file.sha256, json(options), userId, requestId]
+      )).rows[0];
+      const batchId = Number(batch.batch_id);
+      let appliedRows = 0;
+      let appliedFilms = 0;
+      for (const row of file.rows) {
+        const rowPlan = planByKey.get(row.catalogKey)!;
+        const vendor = vendorPlan.resolved.get(row.supplierNorm);
+        const status = rowPlan.status === 'skipped' ? 'skipped' : 'ok';
+        const inserted = await tx.query<{ row_id: string }>(
+          `INSERT INTO catalog_import_rows(batch_id,row_no,name_original,name_full,supplier,nomenclature_type,unit,nomenclature_category,target_name,catalog_key,vendor_id,ref_key_1c,row_status,issue,onec_source_key,canonical_film_id,canonical_film_texture,canonical_film_type_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING row_id`,
+          [
+            batchId, row.rowNo, row.nameOriginal, row.nameFull, row.supplier, row.nomenclatureType, row.unit,
+            row.nomenclatureCategory, row.targetName, row.catalogKey, vendor?.vendorId ?? null, row.onecRefKey,
+            status, rowPlan.issue, row.onecRefKey, rowPlan.canonicalFilmId,
+            rowPlan.status === 'apply' ? row.canonicalFilmTexture : null,
+            rowPlan.status === 'apply' ? row.canonicalFilmTypeId : null,
+          ]
+        );
+        const rowId = Number(inserted.rows[0].row_id);
+        if (rowPlan.status !== 'apply') continue;
+        appliedRows += 1;
+        for (const film of rowPlan.films) {
+          appliedFilms += 1;
+          await tx.query(
+            `INSERT INTO catalog_import_matches(batch_id,film_id,row_id,match_status,score,candidates,fingerprint) VALUES($1,$2,$3,'confirmed',1,NULL,$4)`,
+            [batchId, film.filmId, rowId, current.get(film.filmId)]
+          );
+        }
+      }
+      const counters = {
+        rows: file.rows.length,
+        rowsOk: plan.rows.filter((row) => row.status !== 'skipped').length,
+        rowsInvalid: 0,
+        rowsSkipped: plan.rows.filter((row) => row.status === 'skipped').length,
+        films: appliedFilms,
+        linked: 0, auto: 0, suggested: 0, confirmed: appliedFilms, manual: 0, none: 0, unchanged: 0,
+        toRename: appliedFilms,
+        toMerge: Math.max(0, appliedFilms - appliedRows),
+        toCreate: createKeys.length,
+        unresolvedGroups: 0,
+        decisionsSkipped: plan.skipped.length,
+      };
+      await tx.query(`UPDATE catalog_import_batches SET counters=$2::jsonb WHERE batch_id=$1`, [batchId, json(counters)]);
+      await auditService.record(tx, {
+        event: 'catalog_import.created',
+        entityType: 'catalog_import_batch',
+        entityId: batchId,
+        actorUserId: userId,
+        requestId,
+        source: 'backend-catalog-import',
+        statusField: 'status',
+        statusCode: 'draft',
+        after: { sourceKind: 'decisions', counters },
+        metadata: {
+          referenceKind: 'films',
+          sourceKind: 'decisions',
+          fileSha256: file.sha256,
+          decisionsSourceBatchId: file.sourceBatchId,
+          rowsCount: file.rows.length,
+          appliedFilms,
+          createRows: createKeys.length,
+          skipped: plan.skipped.length,
+          version: 1,
+          correlationId: requestId,
+        },
+      });
+      await this.enqueue(tx, batchId, 'created', requestId, userId);
+      const result = await this.getBatchFrom(tx, batchId);
+      await this.complete(tx, key, result);
+      return result;
+    });
   }
 
   private async createSnapshot(input: {
@@ -640,6 +913,8 @@ export class CatalogImportService {
       );
       if (replay) return replay;
       const batch = await this.lockDraft(tx, id, body.version);
+      if ((batch.options as { decisions?: unknown } | null)?.decisions)
+        throw new ApiError(409, 'CATALOG_IMPORT_READ_ONLY', 'Пакет из файла решений не редактируется — примените или отмените его');
       const before = {
         status: batch.status,
         version: Number(batch.version),
@@ -894,6 +1169,18 @@ export class CatalogImportService {
             conflicts.push({ rowId: row.rowId, reason: 'ref_key_conflict' });
         }
         const canonical = row.canonicalFilmId ?? group[0]?.filmId;
+        // Ключ 1С уже связанной плёнки не перезаписывается и не снимается (любой импорт).
+        for (const match of group) {
+          const f = byId.get(match.filmId);
+          if (!f) continue;
+          const filmKey = f.ref_key_1c ? String(f.ref_key_1c).toLowerCase() : null;
+          if (match.filmId === canonical) {
+            if (filmKey !== null && filmKey !== (row.refKey1c ? String(row.refKey1c).toLowerCase() : null))
+              conflicts.push({ filmId: match.filmId, rowId: row.rowId, reason: 'ref_key_conflict' });
+          } else if (filmKey !== null || f.catalog_key) {
+            conflicts.push({ filmId: match.filmId, rowId: row.rowId, reason: 'duplicate_has_catalog_key' });
+          }
+        }
         if (canonical) {
           for (const match of group) {
             const f = byId.get(match.filmId);
@@ -917,7 +1204,26 @@ export class CatalogImportService {
         );
       const createdVendorIds: number[] = [];
       const createdFilmIds: number[] = [];
-      const vendors = await this.loadVendorMappings(tx, id);
+      const decisions = (batch.options as { decisions?: { createKeys: string[]; vendors: DecisionVendor[] } } | null)?.decisions ?? null;
+      if (decisions) {
+        // Поставщики пакета повтора — окончательно здесь, атомарно: с экспортированными названием и типом.
+        const plan = await this.resolveDecisionVendors(tx, decisions.vendors, true, userId);
+        if (plan.unresolved.length)
+          throw new ApiError(409, 'CATALOG_IMPORT_CONFLICT', 'Поставщики из файла решений не найдены', {
+            conflicts: plan.unresolved.map((v) => ({ reason: 'vendor_unresolved', vendorName: v.vendorName })),
+          });
+        for (const [norm, resolved] of plan.resolved) {
+          if (resolved.vendorId === null) continue;
+          if (resolved.inserted) createdVendorIds.push(resolved.vendorId);
+          await tx.query(
+            `INSERT INTO vendor_import_aliases(source_norm,vendor_id,created_by) VALUES($1,$2,$3) ON CONFLICT(source_norm) DO UPDATE SET vendor_id=EXCLUDED.vendor_id,created_by=EXCLUDED.created_by`,
+            [norm, resolved.vendorId, userId]
+          );
+          for (const row of rows)
+            if (supplierNorm(row.supplier) === norm) row.vendorId = resolved.vendorId;
+        }
+      }
+      const vendors = decisions ? [] : await this.loadVendorMappings(tx, id);
       for (const mapping of vendors) {
         let vendorId = mapping.vendorId;
         if (vendorId === null && mapping.createVendor) {
@@ -980,6 +1286,8 @@ export class CatalogImportService {
         if (!group.length) {
           if (!(batch.options as { createMissing: boolean }).createMissing)
             continue;
+          // Пакет повтора создаёт только позиции, созданные на stage.
+          if (decisions && !decisions.createKeys.includes(row.catalogKey)) continue;
           const vendorId = row.vendorId;
           if (vendorId === null) continue;
           const nd = await tx.query<{ film_type_id: number }>(
@@ -1057,8 +1365,14 @@ export class CatalogImportService {
             film_texture: isCanon ? texture : Boolean(f.film_texture),
             film_type_id: isCanon ? typeId : Number(f.film_type_id),
           };
+          // Примечание — вне отпечатка: текущее значение под блокировкой (FOR NO KEY UPDATE выше),
+          // прежнее название дописывается; «до/после» сохраняются рядом со снимком для отката.
+          const noteBefore = (f.note ?? null) as string | null;
+          const noteAfter = before.film_name !== row.targetName
+            ? noteWithPreviousName(noteBefore, String(before.film_name))
+            : noteBefore;
           await tx.query(
-            `UPDATE films SET film_name=$2,vendor_id=$3,nomenclature_type=$4,nomenclature_category=$5,canonical_film_id=$6,is_active=$7,catalog_key=$8,ref_key_1c=$9,film_texture=$10,film_type_id=$11,edited_by=$12 WHERE film_id=$1`,
+            `UPDATE films SET film_name=$2,vendor_id=$3,nomenclature_type=$4,nomenclature_category=$5,canonical_film_id=$6,is_active=$7,catalog_key=$8,ref_key_1c=$9,film_texture=$10,film_type_id=$11,edited_by=$12,note=$13 WHERE film_id=$1`,
             [
               match.filmId,
               after.film_name,
@@ -1072,17 +1386,39 @@ export class CatalogImportService {
               after.film_texture,
               after.film_type_id,
               userId,
+              noteAfter,
             ]
           );
+          // note — рядом со снимком (не в отпечатке): откат вернёт его, если после применения не правили.
           await tx.query(
             `UPDATE catalog_import_matches SET before=$3::jsonb,after=$4::jsonb WHERE batch_id=$1 AND film_id=$2`,
-            [id, match.filmId, json(before), json(after)]
+            [id, match.filmId, json({ ...before, note: noteBefore }), json({ ...after, note: noteAfter })]
           );
         }
       }
+      // Снимок поставщиков на момент применения (для файла решений): переименование поставщика
+      // после применения не меняет выгружаемую идентичность.
+      const usedVendors = new Map<string, number>();
+      for (const row of rows)
+        if (row.rowStatus === 'ok' && row.vendorId !== null) usedVendors.set(supplierNorm(row.supplier), row.vendorId);
+      const vendorSnapshot = usedVendors.size
+        ? (await tx.query<{ vendor_id: string; vendor_name: string; material_type_id: string | null }>(
+          `SELECT vendor_id,vendor_name,material_type_id FROM vendors WHERE vendor_id=ANY($1::smallint[]) ORDER BY vendor_id FOR SHARE`,
+          [[...new Set(usedVendors.values())]]
+        )).rows
+        : [];
+      const vendorById = new Map(vendorSnapshot.map((v) => [Number(v.vendor_id), v]));
+      const appliedVendors = [...usedVendors.entries()].flatMap(([norm, vendorId]) => {
+        const v = vendorById.get(vendorId);
+        return v ? [{
+          supplierNorm: norm, vendorId, vendorName: v.vendor_name,
+          materialTypeId: v.material_type_id === null ? null : Number(v.material_type_id),
+          created: createdVendorIds.includes(vendorId),
+        }] : [];
+      });
       await tx.query(
-        `UPDATE catalog_import_batches SET status='applied',applied_at=now(),applied_by=$2,version=version+1 WHERE batch_id=$1`,
-        [id, userId]
+        `UPDATE catalog_import_batches SET status='applied',applied_at=now(),applied_by=$2,version=version+1,options=options||jsonb_build_object('appliedVendors',$3::jsonb) WHERE batch_id=$1`,
+        [id, userId, json(appliedVendors)]
       );
       const summary = await tx.query(
         `SELECT count(*) FILTER (WHERE after->>'created'='true')::int AS created_count,count(*) FILTER (WHERE before->>'film_name' IS DISTINCT FROM after->>'film_name')::int AS renamed_count,count(*) FILTER (WHERE after->>'canonical_film_id' IS NOT NULL)::int AS merged_count,count(*) FILTER (WHERE row_id IS NULL)::int AS unchanged_count FROM catalog_import_matches WHERE batch_id=$1`,
@@ -1297,8 +1633,12 @@ export class CatalogImportService {
           continue;
         }
         const b = m.before as Record<string, unknown>;
+        const a = (m.after ?? {}) as Record<string, unknown>;
+        // Примечание: только пакеты с сохранённым note (после миграции 212) и только если после
+        // применения его не правили вручную; иначе остаётся текущее.
+        const restoreNote = 'note' in b && 'note' in a && (m.note ?? null) === (a.note ?? null);
         await tx.query(
-          `UPDATE films SET film_name=$2,vendor_id=$3,film_type_id=$4,film_texture=$5,is_active=$6,sort_order=$7,canonical_film_id=$8,catalog_key=$9,ref_key_1c=$10,nomenclature_type=$11,nomenclature_category=$12,edited_by=$13 WHERE film_id=$1`,
+          `UPDATE films SET film_name=$2,vendor_id=$3,film_type_id=$4,film_texture=$5,is_active=$6,sort_order=$7,canonical_film_id=$8,catalog_key=$9,ref_key_1c=$10,nomenclature_type=$11,nomenclature_category=$12,edited_by=$13,note=CASE WHEN $15::boolean THEN $14 ELSE note END WHERE film_id=$1`,
           [
             m.film_id,
             b.film_name,
@@ -1313,6 +1653,8 @@ export class CatalogImportService {
             b.nomenclature_type,
             b.nomenclature_category,
             userId,
+            (b.note ?? null) as string | null,
+            restoreNote,
           ]
         );
       }

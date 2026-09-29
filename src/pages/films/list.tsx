@@ -222,6 +222,12 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column dataIndex="nomenclature_type" title="Тип номенклатуры" />
         <Table.Column dataIndex="nomenclature_category" title="Категория" />
         <Table.Column
+          dataIndex="note"
+          title="Примечание"
+          ellipsis={{ showTitle: true }}
+          render={(value: string | null) => (value ? value.replace(/\s*\n\s*/g, ' · ') : '')}
+        />
+        <Table.Column
           dataIndex="film_type_id"
           title="Тип плёнки"
           render={(_, record: any) =>

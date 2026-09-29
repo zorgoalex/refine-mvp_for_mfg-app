@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useGetIdentity } from '@refinedev/core';
 import { useParams } from 'react-router-dom';
-import { Button, Card, Checkbox, Col, Input, message, Modal, Result, Row, Select, Space, Spin, Statistic, Tabs, Tag, Typography, Upload } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Input, message, Modal, Result, Row, Select, Space, Spin, Statistic, Tabs, Tag, Typography, Upload } from 'antd';
 import type { UploadProps } from 'antd';
 import { UploadOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useSelect } from '../../../ui/refineSelect';
 import { Table } from '../../../ui/tooltipDelay';
 import { getLoadedRuntimeConfig } from '../../../config/runtimeConfig';
 import { filmCatalogImportApi } from '../../../api/filmCatalogImportApi';
-import type { CatalogImportAction, CatalogImportBatchDto, CatalogImportMatchDto, CatalogImportRowDto, CatalogSourceKind } from '../../../api/types/filmCatalogImportApi.types';
-import { catalogImportActions, catalogImportErrorMessage, catalogMatchQuery, catalogRowsQuery, importManageAllowed, inspectCatalogSheets, onecMirrorAllowed, resolveIdempotencyKey, sha256File, vendorMappingAction, type CatalogSheetPreview, serverPagination } from './catalogImportHelpers';
+import type { CatalogDecisionsFile, CatalogImportAction, CatalogImportBatchDto, CatalogImportMatchDto, CatalogImportRowDto, CatalogSourceKind } from '../../../api/types/filmCatalogImportApi.types';
+import { catalogImportActions, catalogImportErrorMessage, catalogMatchQuery, catalogRowsQuery, importManageAllowed, inspectCatalogSheets, onecMirrorAllowed, resolveIdempotencyKey, sha256File, vendorMappingAction, type CatalogSheetPreview, serverPagination, DECISIONS_SKIP_LABELS, decisionsDownloadName, isDecisionsBatch, readDecisionsFile, sourceLabel } from './catalogImportHelpers';
 
 const PAGE_SIZE = 50;
 const STATUS_LABELS: Record<string, string> = { draft: 'Черновик', applied: 'Применён', cancelled: 'Отменён', reverted: 'Откатан' };
@@ -29,7 +29,8 @@ export const CatalogImportPage: React.FC = () => {
   const [totalMatches, setTotalMatches] = useState(0);
   const [totalRows, setTotalRows] = useState(0);
   const [busy, setBusy] = useState(false);
-  const [sourceKind, setSourceKind] = useState<CatalogSourceKind>('file');
+  const [sourceKind, setSourceKind] = useState<CatalogSourceKind | 'decisions'>('file');
+  const [decisionsFile, setDecisionsFile] = useState<CatalogDecisionsFile | null>(null);
   const [previewSheets, setPreviewSheets] = useState<CatalogSheetPreview[]>([]);
   const [selectedSheet, setSelectedSheet] = useState<string>();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -126,7 +127,27 @@ export const CatalogImportPage: React.FC = () => {
     catch (error) { reportError(error); }
     finally { setBusy(false); }
   };
-  const mutate = (actions: CatalogImportAction[], signature: string) => command(signature, (key) => filmCatalogImportApi.patch(batch!.id, batch!.version, actions, key));
+  const mutate = (actions: CatalogImportAction[], signature: string) => {
+    // Пакет из файла решений — только для чтения (backend ответит 409).
+    if (isDecisionsBatch(batch)) { message.info('Пакет из файла решений не редактируется — примените или отмените его'); return Promise.resolve(); }
+    return command(signature, (key) => filmCatalogImportApi.patch(batch!.id, batch!.version, actions, key));
+  };
+
+  const readDecisions: UploadProps['beforeUpload'] = async (file) => {
+    if (!/\.json$/i.test(file.name)) { message.error('Выберите файл решений .json'); return Upload.LIST_IGNORE; }
+    try { setDecisionsFile(readDecisionsFile(await file.text())); }
+    catch (error) { setDecisionsFile(null); message.error(error instanceof Error ? error.message : 'Не удалось прочитать файл'); }
+    return false;
+  };
+
+  const downloadDecisions = async () => {
+    if (!batch) return;
+    try {
+      const file = await filmCatalogImportApi.decisions(batch.id);
+      const url = URL.createObjectURL(new Blob([JSON.stringify(file, null, 1)], { type: 'application/json' }));
+      const link = document.createElement('a'); link.href = url; link.download = decisionsDownloadName(batch.id); link.click(); URL.revokeObjectURL(url);
+    } catch (error) { reportError(error); }
+  };
 
   const parseFile: UploadProps['beforeUpload'] = async (file) => {
     if (!/\.(xlsx|xls)$/i.test(file.name)) { message.error('Выберите файл .xlsx или .xls'); return Upload.LIST_IGNORE; }
@@ -144,6 +165,13 @@ export const CatalogImportPage: React.FC = () => {
   };
 
   const createDraft = async () => {
+    if (sourceKind === 'decisions') {
+      if (!decisionsFile) return;
+      const sig = `create-decisions:${decisionsFile.sha256}`; const key = keyFor(sig); setBusy(true);
+      try { const result = await filmCatalogImportApi.createDecisions(decisionsFile, key); clearKey(sig); window.location.assign(`/films/catalog-import/${result.id}`); }
+      catch (error) { reportError(error); } finally { setBusy(false); }
+      return;
+    }
     if (sourceKind === 'file') {
       if (!selectedFile || !currentPreview) return;
       const fileSha256 = await sha256File(selectedFile);
@@ -212,17 +240,21 @@ export const CatalogImportPage: React.FC = () => {
   if (!batchId) return <Card title="Импорт каталога 1С" extra={<Button icon={<ReloadOutlined />} onClick={() => void loadJournal()}>Обновить</Button>}>
     <Card type="inner" title="Новый черновик">
       <Space direction="vertical" style={{ width: '100%' }}>
-        <Select value={sourceKind} onChange={setSourceKind} options={[{ value: 'file', label: 'Файл' }, ...(canUseMirror ? [{ value: 'onec_mirror' as const, label: 'Зеркало 1С' }] : [])]} />
-        {sourceKind === 'file' ? <>
+        <Select value={sourceKind} onChange={setSourceKind} options={[{ value: 'file', label: 'Файл' }, ...(canUseMirror ? [{ value: 'onec_mirror' as const, label: 'Зеркало 1С' }] : []), { value: 'decisions' as const, label: 'Файл решений (перенос с другой базы)' }]} />
+        {sourceKind === 'decisions' ? <>
+          <Upload beforeUpload={readDecisions} maxCount={1} accept=".json"><Button icon={<UploadOutlined />}>Выбрать файл решений .json</Button></Upload>
+          {decisionsFile && <Typography.Text>Файл решений пакета {decisionsFile.sourceBatchId}: позиций {decisionsFile.rows.length}, выгружен {decisionsFile.exportedAt.slice(0, 16).replace('T', ' ')}</Typography.Text>}
+          <Typography.Text type="secondary">Применяются только решения для плёнок, не изменившихся с момента выгрузки; остальное не трогается. Черновик — только для чтения.</Typography.Text>
+        </> : sourceKind === 'file' ? <>
           <Upload beforeUpload={parseFile} maxCount={1} accept=".xlsx,.xls"><Button icon={<UploadOutlined />}>Выбрать .xlsx/.xls</Button></Upload>
           {previewSheets.length > 1 && <Select placeholder="Выберите лист с каталогом" value={selectedSheet} onChange={setSelectedSheet} options={previewSheets.map((sheet) => ({ value: sheet.name, label: sheet.name }))} />}
           {currentPreview && <Typography.Text>Лист {currentPreview.name}: строк {currentPreview.rows.length}, ошибок {currentPreview.errorCount}</Typography.Text>}
         </> : <Row gutter={8}><Col span={12}><Select style={{ width: '100%' }} placeholder="Источник 1С" value={mirrorSourceId} onChange={setMirrorSourceId} options={mirrorSources.map((item) => ({ value: item.sourceId, label: item.name }))} /></Col><Col span={12}><Select style={{ width: '100%' }} placeholder="Категория" value={mirrorCategoryKey} onChange={setMirrorCategoryKey} options={mirrorCategories.map((item) => ({ value: item.key, label: `${item.name} (${item.itemsCount})` }))} /></Col></Row>}
-        <Button type="primary" loading={busy} disabled={sourceKind === 'file' ? !currentPreview : !mirrorSourceId || !mirrorCategoryKey} onClick={() => void createDraft()}>Создать черновик</Button>
+        <Button type="primary" loading={busy} disabled={sourceKind === 'decisions' ? !decisionsFile : sourceKind === 'file' ? !currentPreview : !mirrorSourceId || !mirrorCategoryKey} onClick={() => void createDraft()}>Создать черновик</Button>
       </Space>
     </Card>
     <Table rowKey="id" dataSource={journal} pagination={false} columns={[
-      { title: 'Пакет', dataIndex: 'id' }, { title: 'Источник', dataIndex: 'sourceKind', render: (kind: string) => kind === 'file' ? 'Файл' : 'Зеркало 1С' },
+      { title: 'Пакет', dataIndex: 'id' }, { title: 'Источник', render: (_: unknown, item: CatalogImportBatchDto) => sourceLabel(item) },
       { title: 'Статус', dataIndex: 'status', render: (status: string) => STATUS_LABELS[status] }, { title: 'Строк', dataIndex: ['counters', 'rows'] },
       { title: 'Создан', dataIndex: 'createdAt', render: (value: string) => value.slice(0, 16).replace('T', ' ') },
       { title: '', render: (_: unknown, item: CatalogImportBatchDto) => <Space><Button href={`/films/catalog-import/${item.id}`}>Открыть</Button>{item.status === 'applied' && <Button danger loading={busy} onClick={() => void revertFromJournal(item)}>Откатить</Button>}</Space> },
@@ -233,13 +265,19 @@ export const CatalogImportPage: React.FC = () => {
   const sourceName = batch.fileName ?? batch.onecCategoryName ?? `Пакет ${batch.id}`;
   return <Card title={`Пакет ${batch.id} · ${sourceName}`} extra={<Space><Tag color={batch.status === 'applied' ? 'green' : 'blue'}>{STATUS_LABELS[batch.status]}</Tag><Button icon={<ReloadOutlined />} onClick={() => void loadBatch(batch.id)}>Обновить</Button></Space>}>
     <Spin spinning={busy}>
+      {batch.options.decisions && <Alert style={{ marginBottom: 12 }} type="info" showIcon
+        message={`Пакет из файла решений (пакет-источник №${batch.options.decisions.sourceBatchId}) — только для чтения: примените или отмените`}
+        description={batch.options.decisions.skipped.length === 0 ? 'Все решения применимы.' : <>
+          <Typography.Text>Не применяется решений: {batch.options.decisions.skipped.length}. Эти плёнки и позиции не будут изменены — их можно разобрать обычным импортом.</Typography.Text>
+          <ul style={{ maxHeight: 200, overflow: 'auto' }}>{batch.options.decisions.skipped.map((item, index) => <li key={index}>{item.filmId ? `плёнка ${item.filmId}` : 'позиция'} «{item.catalogKey}»: {DECISIONS_SKIP_LABELS[item.reason] ?? item.reason}</li>)}</ul>
+        </>} />}
       <Tabs items={[
         { key: 'vendors', label: `Поставщики (${batch.vendorMappings.length})`, children: <Table rowKey="supplierNorm" pagination={false} dataSource={batch.vendorMappings} columns={[
           { title: 'Поставщик из каталога', dataIndex: 'supplier' }, { title: 'Строк', dataIndex: 'rowsCount' },
-          { title: 'Поставщик ERP', render: (_: unknown, item) => <Select style={{ width: 320 }} showSearch placeholder="Выбрать ERP или создать" {...vendorSelectProps} options={[...(vendorSelectProps.options ?? []), { value: 0, label: 'Создать нового поставщика' }]} value={item.createVendor ? 0 : item.vendorId ?? undefined} onChange={(vendorId: number) => void mutate([vendorMappingAction(item.supplierNorm, vendorId === 0 ? null : vendorId)], `vendor:${item.supplierNorm}:${vendorId || 'create'}`)} /> },
+          { title: 'Поставщик ERP', render: (_: unknown, item) => <Select style={{ width: 320 }} disabled={Boolean(batch.options.decisions)} showSearch placeholder="Выбрать ERP или создать" {...vendorSelectProps} options={[...(vendorSelectProps.options ?? []), { value: 0, label: 'Создать нового поставщика' }]} value={item.createVendor ? 0 : item.vendorId ?? undefined} onChange={(vendorId: number) => void mutate([vendorMappingAction(item.supplierNorm, vendorId === 0 ? null : vendorId)], `vendor:${item.supplierNorm}:${vendorId || 'create'}`)} /> },
         ]} /> },
         { key: 'matches', label: `Сопоставления (${totalMatches})`, children: <Space direction="vertical" style={{ width: '100%' }}>
-          <Space wrap><Select allowClear placeholder="Статус" style={{ width: 160 }} value={matchStatus} onChange={(value) => { setMatchStatus(value); setMatchOffset(0); }} options={['linked','auto','suggested','confirmed','manual','none','unchanged'].map((value) => ({ value, label: value }))} /><Select allowClear placeholder="Поставщик" style={{ width: 220 }} {...vendorSelectProps} value={matchVendorId} onChange={(value) => { setMatchVendorId(value); setMatchOffset(0); }} /><Input.Search placeholder="Поиск плёнки" onSearch={(value) => { setMatchSearch(value); setMatchOffset(0); }} style={{ width: 240 }} /><Button onClick={() => void mutate([catalogImportActions.acceptAllAuto()], 'accept-all-auto')}>Принять все уверенные</Button></Space>
+          <Space wrap><Select allowClear placeholder="Статус" style={{ width: 160 }} value={matchStatus} onChange={(value) => { setMatchStatus(value); setMatchOffset(0); }} options={['linked','auto','suggested','confirmed','manual','none','unchanged'].map((value) => ({ value, label: value }))} /><Select allowClear placeholder="Поставщик" style={{ width: 220 }} {...vendorSelectProps} value={matchVendorId} onChange={(value) => { setMatchVendorId(value); setMatchOffset(0); }} /><Input.Search placeholder="Поиск плёнки" onSearch={(value) => { setMatchSearch(value); setMatchOffset(0); }} style={{ width: 240 }} />{!batch.options.decisions && <Button onClick={() => void mutate([catalogImportActions.acceptAllAuto()], 'accept-all-auto')}>Принять все уверенные</Button>}</Space>
           <Table rowKey="filmId" dataSource={matches} columns={matchColumns} pagination={serverPagination(matchOffset, matchPageSize, totalMatches, setMatchOffset, setMatchPageSize)} />
         </Space> },
         { key: 'rows', label: `Позиции каталога (${totalRows})`, children: <Space direction="vertical" style={{ width: '100%' }}>
@@ -249,8 +287,8 @@ export const CatalogImportPage: React.FC = () => {
         { key: 'summary', label: 'Итог и действия', children: <Space direction="vertical" style={{ width: '100%' }}>
           <Row gutter={12}>{Object.entries(batch.counters).map(([key, value]) => <Col key={key} xs={12} md={6}><Statistic title={key} value={value} /></Col>)}</Row>
           {batch.blockers.length > 0 && <Result status="warning" title="Нужно устранить блокеры" subTitle={<ul>{batch.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>} />}
-          {batch.status === 'draft' && <Checkbox checked={batch.options.createMissing} onChange={(event) => void mutate([catalogImportActions.setCreateMissing(event.target.checked)], `create-missing:${event.target.checked}`)}>Создавать отсутствующие позиции</Checkbox>}
-          <Space wrap><Button onClick={() => void openExport()}>Выгрузить в Excel</Button>{batch.status === 'draft' && <><Button danger onClick={() => void command('cancel', (key) => filmCatalogImportApi.cancel(batch.id, batch.version, key))}>Отменить черновик</Button><Button type="primary" disabled={!batch.canApply} onClick={() => void command('apply', (key) => filmCatalogImportApi.apply(batch.id, batch.version, key))}>Применить</Button></>}</Space>
+          {batch.status === 'draft' && !batch.options.decisions && <Checkbox checked={batch.options.createMissing} onChange={(event) => void mutate([catalogImportActions.setCreateMissing(event.target.checked)], `create-missing:${event.target.checked}`)}>Создавать отсутствующие позиции</Checkbox>}
+          <Space wrap><Button onClick={() => void openExport()}>Выгрузить в Excel</Button>{batch.status === 'applied' && <Button onClick={() => void downloadDecisions()}>Выгрузить файл решений (для переноса на прод)</Button>}{batch.status === 'draft' && <><Button danger onClick={() => void command('cancel', (key) => filmCatalogImportApi.cancel(batch.id, batch.version, key))}>Отменить черновик</Button><Button type="primary" disabled={!batch.canApply} onClick={() => void command('apply', (key) => filmCatalogImportApi.apply(batch.id, batch.version, key))}>Применить</Button></>}</Space>
         </Space> },
       ]} />
     </Spin>

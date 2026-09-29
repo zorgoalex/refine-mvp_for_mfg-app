@@ -264,6 +264,12 @@ frontend-флаг `RUNTIME_CONFIG_FILM_CATALOG_IMPORT`.
 4. выставить `BACKEND_FILM_CATALOG_IMPORT_ENABLED=true`, пересоздать backend и
    включить `RUNTIME_CONFIG_FILM_CATALOG_IMPORT`.
 
+Миграция `212_films_note.sql` (колонка `films.note`) применяется ДО выкладки
+frontend и backend этой версии (frontend запрашивает `note` у Hasura) и затем
+`reload_metadata`; права insert/update `films` в Hasura получают колонку `note`.
+Минимальная версия backend для черновиков из файла решений — эта; перед откатом
+backend ниже неё отменить черновики с источником «Файл решений».
+
 ### Склад плёнки
 
 `BACKEND_INVENTORY_ENABLED` (backend, по умолчанию `false`) включает склад плёнки:

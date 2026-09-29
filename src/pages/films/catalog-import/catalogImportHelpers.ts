@@ -1,3 +1,4 @@
+import type { CatalogDecisionsFile } from '../../../api/types/filmCatalogImportApi.types';
 import { detectCatalogHeader, extractCatalogRows, validateCatalogRows } from '@shared/film-catalog';
 import type { CatalogImportAction, CatalogImportErrorDto, CatalogRowInput } from '../../../api/types/filmCatalogImportApi.types';
 
@@ -110,4 +111,42 @@ export function serverPagination(
       setOffset((page - 1) * size);
     },
   };
+}
+
+export const DECISIONS_SKIP_LABELS: Record<string, string> = {
+  changed: 'плёнка изменена после выгрузки',
+  missing: 'плёнки нет в этой базе',
+  canonical_skipped: 'основная плёнка изменена — позиция не применяется',
+  no_films: 'плёнки позиции изменены или отсутствуют — позиция не применяется',
+  exists: 'позиция уже есть в справочнике — не создаётся',
+};
+
+/** Разбор файла решений из JSON-текста; ошибка — понятное сообщение. */
+export function readDecisionsFile(text: string): CatalogDecisionsFile {
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { throw new Error('Файл не является JSON'); }
+  const file = parsed as Partial<CatalogDecisionsFile> | null;
+  if (!file || typeof file !== 'object' || file.format !== 'erp.film-catalog-decisions') {
+    throw new Error('Это не файл решений импорта каталога 1С');
+  }
+  // Поля предпросмотра и отправки — с проверкой типов (полная проверка — на backend).
+  const valid = typeof file.version === 'number' && typeof file.fingerprintVersion === 'number'
+    && typeof file.sourceBatchId === 'number' && typeof file.exportedAt === 'string'
+    && typeof file.sha256 === 'string' && /^[0-9a-f]{64}$/.test(file.sha256)
+    && Array.isArray(file.rows) && Array.isArray(file.vendors);
+  if (!valid) throw new Error('Файл решений повреждён: не хватает обязательных полей');
+  return file as CatalogDecisionsFile;
+}
+
+export function decisionsDownloadName(batchId: number): string {
+  return `решения-каталога-1С-пакет-${batchId}.json`;
+}
+
+export function isDecisionsBatch(batch: { options: { decisions?: unknown } } | null | undefined): boolean {
+  return Boolean(batch?.options?.decisions);
+}
+
+export function sourceLabel(batch: { sourceKind: string; fileName: string | null }): string {
+  if (batch.sourceKind === 'file' && batch.fileName?.startsWith('decisions:')) return 'Файл решений';
+  return batch.sourceKind === 'file' ? 'Файл' : 'Зеркало 1С';
 }

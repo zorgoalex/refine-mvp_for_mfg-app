@@ -176,14 +176,20 @@ describe.skipIf(!url)('warehouse reference — real PostgreSQL, committed fixtur
   });
 
   it('an unlinked legacy warehouse must get a 1C key on any change (migration 205 + WAREHOUSE_1C_KEY_REQUIRED)', async () => {
-    const legacy = (await warehousesA.list(true)).find((row) => row.name === 'Склад плёнки');
+    // Непривязанный склад «до миграции 205»: ограничение временно снимается и возвращается NOT VALID.
+    await watcher.query('BEGIN');
+    await watcher.query('ALTER TABLE public.warehouses DROP CONSTRAINT chk_warehouses_ref_key_1c_required');
+    await watcher.query('INSERT INTO warehouses (warehouse_name) VALUES ($1)', [`${tag} Легаси`]);
+    await watcher.query('ALTER TABLE public.warehouses ADD CONSTRAINT chk_warehouses_ref_key_1c_required CHECK (ref_key_1c IS NOT NULL) NOT VALID');
+    await watcher.query('COMMIT');
+    const legacy = (await warehousesA.list(true)).find((row) => row.name === `${tag} Легаси`);
     expect(legacy?.refKey1c).toBeNull();
     // Прямое изменение строки без ключа отклоняет CHECK (NOT VALID действует на изменяемые строки).
     await watcher.query('BEGIN');
     await expect(watcher.query('UPDATE warehouses SET is_active = is_active WHERE warehouse_id = $1', [legacy!.warehouseId])).rejects.toMatchObject({ code: '23514' });
     await watcher.query('ROLLBACK');
     await expectApiError(
-      warehousesA.update(ctx(), { warehouseId: legacy!.warehouseId, version: legacy!.version, workshopId: null, name: 'Склад плёнки ' + tag }),
+      warehousesA.update(ctx(), { warehouseId: legacy!.warehouseId, version: legacy!.version, workshopId: null, name: `${tag} Легаси-2` }),
       422, 'WAREHOUSE_1C_KEY_REQUIRED',
     );
   });
@@ -192,13 +198,13 @@ describe.skipIf(!url)('warehouse reference — real PostgreSQL, committed fixtur
     const taken = await warehousesA.create(ctx(), { name: `${tag} Занято`, refKey1c: randomUUID(), workshopId: null, responsibleEmployeeId: null });
     const keys = { legacy: randomUUID(), fresh: randomUUID(), taken: randomUUID() };
     const onec = [
-      { refKey: keys.legacy, name: 'Склад плёнки' },
+      { refKey: keys.legacy, name: `${tag} Легаси` },
       { refKey: keys.fresh, name: `${tag} Цех из 1С` },
       { refKey: keys.taken, name: `${tag} занято ` },
     ];
     const key = randomUUID();
     const result = await warehousesA.syncFromOnec(ctx(key), async () => onec);
-    expect(result.linked.map((row) => [row.name, row.refKey1c])).toEqual([['Склад плёнки', keys.legacy]]);
+    expect(result.linked.map((row) => [row.name, row.refKey1c])).toEqual([[`${tag} Легаси`, keys.legacy]]);
     expect(result.created.map((row) => [row.name, row.refKey1c])).toEqual([[`${tag} Цех из 1С`, keys.fresh]]);
     expect(result.skipped).toEqual([{ refKey: keys.taken, name: `${tag} занято`, reason: 'name_taken' }]);
     // Повтор с тем же ключом не зависит от зеркала: изменилось или недоступно — тот же ответ.

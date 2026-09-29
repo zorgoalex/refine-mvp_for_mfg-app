@@ -2430,6 +2430,9 @@ probe_file() {
     206_inventory_onec_autosync_state*) probe_all \
       "$(q_tbl inventory_onec_autosync_state)" \
       "$(q_con_on inventory_onec_autosync_state chk_inventory_onec_autosync_seq)" ;;
+    212_films_note*) probe_all \
+      "$(q_col films note)" \
+      "$(q_con_on films chk_films_note_length)" ;;
     205_warehouses_onec_key_required*) probe_all \
       "$(q_con_on warehouses chk_warehouses_ref_key_1c_required)" ;;
     # 209: new broadcast tables + cutover done (broadcast #1 exists; the digest singleton was disabled
@@ -2785,6 +2788,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     206_inventory_onec_autosync_state*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    212_films_note*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     205_warehouses_onec_key_required*)

@@ -34,6 +34,7 @@ const allowlist = [
   'sort_order',
   'nomenclature_type',
   'nomenclature_category',
+  'note',
 ];
 const backendOwned = ['canonical_film_id', 'catalog_key', 'ref_key_1c'];
 

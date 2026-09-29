@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  noteWithPreviousName,
+  FILM_NOTE_MAX,
   applyPatchActions,
   assignCanonicals,
   blockers,
@@ -213,5 +215,25 @@ describe('film catalog matching domain', () => {
       { createMissing: true }
     );
     expect(matches[0]).toMatchObject({ rowId: 1, matchStatus: 'confirmed' });
+  });
+});
+
+describe('film note after a catalog rename', () => {
+  it('adds the previous name, keeps user text, and does not repeat the same line', () => {
+    expect(noteWithPreviousName(null, 'айвори алер')).toBe('Прежнее название: айвори алер');
+    expect(noteWithPreviousName('  ', 'айвори алер')).toBe('Прежнее название: айвори алер');
+    expect(noteWithPreviousName('Заказывать у Алер', 'айвори алер')).toBe('Заказывать у Алер\nПрежнее название: айвори алер');
+    const once = noteWithPreviousName('Заказывать у Алер', 'айвори алер');
+    expect(noteWithPreviousName(once, 'айвори алер')).toBe(once);
+    expect(noteWithPreviousName(once, 'Айвори Алер')).toBe(`${once}\nПрежнее название: Айвори Алер`);
+  });
+
+  it('never exceeds the limit and never cuts the user text', () => {
+    const long = 'x'.repeat(FILM_NOTE_MAX - 30);
+    const result = noteWithPreviousName(long, 'очень длинное прежнее название плёнки '.repeat(3))!;
+    expect(result.length).toBeLessThanOrEqual(FILM_NOTE_MAX);
+    expect(result.startsWith(long)).toBe(true);
+    const full = 'y'.repeat(FILM_NOTE_MAX - 5);
+    expect(noteWithPreviousName(full, 'старое')).toBe(full);
   });
 });

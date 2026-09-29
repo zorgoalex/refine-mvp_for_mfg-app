@@ -14,6 +14,7 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { z } from 'zod';
+import { DECISIONS_FORMAT, DECISIONS_MAX_ROWS } from '../domain/catalog-decisions';
 import { CATALOG_MAX_ROWS } from '../../../shared/film-catalog';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -32,7 +33,72 @@ const catalogRowSchema = z
     nomenclatureCategory: z.string().max(500).nullable(),
   })
   .strict();
+const hex64 = z.string().regex(/^[0-9a-f]{64}$/);
+const decisionsSchema = z
+  .object({
+    format: z.literal(DECISIONS_FORMAT),
+    version: z.number().int(),
+    fingerprintVersion: z.number().int(),
+    sourceBatchId: z.number().int().positive(),
+    exportedAt: z.string().max(40),
+    sha256: hex64,
+    rows: z
+      .array(
+        z
+          .object({
+            catalogKey: z.string().min(1).max(500),
+            onecRefKey: z.string().uuid().nullable(),
+            rowNo: z.number().int().positive().max(1_000_000),
+            nameOriginal: z.string().max(500),
+            nameFull: z.string().max(500),
+            supplier: z.string().max(500),
+            nomenclatureType: z.string().max(500).nullable(),
+            unit: z.string().max(500).nullable(),
+            nomenclatureCategory: z.string().max(500).nullable(),
+            targetName: z.string().min(1).max(500),
+            supplierNorm: z.string().max(500),
+            canonicalFilmTexture: z.boolean().nullable(),
+            canonicalFilmTypeId: z.number().int().positive().max(32767).nullable(),
+            outcome: z.enum(['existing', 'create']),
+            films: z
+              .array(
+                z
+                  .object({
+                    filmId: z.number().int().positive(),
+                    fingerprint: hex64,
+                    role: z.enum(['canonical', 'duplicate']),
+                  })
+                  .strict()
+              )
+              .max(500),
+          })
+          .strict()
+      )
+      .min(1)
+      .max(DECISIONS_MAX_ROWS),
+    vendors: z
+      .array(
+        z
+          .object({
+            supplierNorm: z.string().max(500),
+            vendorId: z.number().int().positive().max(32767),
+            vendorName: z.string().min(1).max(250),
+            materialTypeId: z.number().int().positive().max(32767).nullable(),
+            created: z.boolean(),
+          })
+          .strict()
+      )
+      .max(1000),
+  })
+  .strict();
 const createSchema = z.discriminatedUnion('source', [
+  z
+    .object({
+      kind: z.literal('films'),
+      source: z.literal('decisions'),
+      decisions: decisionsSchema,
+    })
+    .strict(),
   z
     .object({
       kind: z.literal('films'),
@@ -306,7 +372,17 @@ export class CatalogImportController {
       this.idempotency(key)
     );
   }
-  @Get(':id/export.xlsx')
+  @Get(':id/decisions')
+  @ApiOperation({
+    operationId: 'exportCatalogImportDecisions',
+    summary: 'Export the decisions file of an applied film catalog import (strict replay on another database)',
+  })
+  async decisions(@Req() req: RequestWithCurrentUser, @Param('id') id: string) {
+    const user = this.user(req);
+    this.enabled();
+    return this.service.exportDecisions(this.positive(id), user.permissions);
+  }
+    @Get(':id/export.xlsx')
   @ApiOperation({
     operationId: 'exportCatalogImport',
     summary: 'Export film catalog import workbook',

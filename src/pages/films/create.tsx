@@ -59,6 +59,7 @@ export const FilmCreate: React.FC<IResourceComponentsProps> = () => {
         </Form.Item>
         <Form.Item label="Тип номенклатуры" name="nomenclature_type" rules={[{ max: 50, message: 'Максимум 50 символов' }]}><Input maxLength={50} /></Form.Item>
         <Form.Item label="Категория номенклатуры" name="nomenclature_category" rules={[{ max: 150, message: 'Максимум 150 символов' }]}><Input maxLength={150} /></Form.Item>
+        <Form.Item label="Примечание" name="note" rules={[{ max: 2000, message: 'Максимум 2000 символов' }]}><Input.TextArea maxLength={2000} showCount autoSize={{ minRows: 2, maxRows: 6 }} /></Form.Item>
         <Form.Item label="Texture" name="film_texture" valuePropName="checked">
           <Switch />
         </Form.Item>

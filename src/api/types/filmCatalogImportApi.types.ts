@@ -29,7 +29,7 @@ export interface CatalogImportBatchDto {
   id: number; kind: 'films'; sourceKind: CatalogSourceKind; status: CatalogImportStatus; version: number;
   fileName: string | null; fileSha256: string | null; sheetName: string | null;
   onecSourceId: number | null; onecCategoryKey: string | null; onecCategoryName: string | null;
-  options: { createMissing: boolean }; counters: CatalogImportCounters; vendorMappings: VendorMappingDto[];
+  options: { createMissing: boolean; decisions?: CatalogDecisionsOptions }; counters: CatalogImportCounters; vendorMappings: VendorMappingDto[];
   canApply: boolean; blockers: string[]; createdAt: string; createdByName: string | null;
   appliedAt: string | null; appliedByName: string | null; revertedAt: string | null; revertedByName: string | null;
 }
@@ -67,4 +67,24 @@ export interface CatalogNameHistoryDto {
 export interface SimilarFilmDto {
   filmId: number; filmName: string; vendorName: string | null; isActive: boolean;
   canonicalFilmId: number | null; score: number;
+}
+
+export type DecisionSkipReason = 'changed' | 'missing' | 'canonical_skipped' | 'no_films' | 'exists';
+/** Пакет строгого повтора из файла решений (только для чтения). */
+export interface CatalogDecisionsOptions {
+  sourceBatchId: number;
+  sha256: string;
+  createKeys: string[];
+  skipped: Array<{ filmId: number | null; catalogKey: string; reason: DecisionSkipReason }>;
+}
+/** Файл решений (формат erp.film-catalog-decisions) — передаётся backend как есть. */
+export interface CatalogDecisionsFile {
+  format: 'erp.film-catalog-decisions';
+  version: number;
+  fingerprintVersion: number;
+  sourceBatchId: number;
+  exportedAt: string;
+  sha256: string;
+  rows: unknown[];
+  vendors: unknown[];
 }

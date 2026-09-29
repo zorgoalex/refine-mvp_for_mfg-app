@@ -73,6 +73,8 @@ export const FilmShow: React.FC<IResourceComponentsProps> = () => {
         <Col span={8}><Title level={5}>Тип номенклатуры</Title><TextField value={record?.nomenclature_type} /></Col>
         <Col span={8}><Title level={5}>Категория номенклатуры</Title><TextField value={record?.nomenclature_category} /></Col>
       </Row>
+      <Title level={5}>Примечание</Title>
+      <Typography.Paragraph style={{ whiteSpace: 'pre-wrap' }}>{record?.note || '—'}</Typography.Paragraph>
 
       <Divider />
 

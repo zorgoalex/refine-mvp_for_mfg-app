@@ -309,6 +309,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "canonical_film_id",
     "nomenclature_type",
     "nomenclature_category",
+    "note",
     "created_by",
     "edited_by",
     "created_at",

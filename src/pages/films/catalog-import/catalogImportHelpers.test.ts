@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { catalogImportActions, catalogImportErrorMessage, filmReferenceViewAllowed, importManageAllowed, inspectCatalogSheets, catalogMatchQuery, catalogRowsQuery, onecMirrorAllowed, resolveIdempotencyKey, sha256File, vendorMappingAction, serverPagination } from './catalogImportHelpers';
+import { catalogImportActions, catalogImportErrorMessage, filmReferenceViewAllowed, importManageAllowed, inspectCatalogSheets, catalogMatchQuery, catalogRowsQuery, onecMirrorAllowed, resolveIdempotencyKey, sha256File, vendorMappingAction, serverPagination, DECISIONS_SKIP_LABELS, decisionsDownloadName, isDecisionsBatch, readDecisionsFile, sourceLabel } from './catalogImportHelpers';
 
 describe('film catalog import helpers', () => {
   it('inspects matching sheets from browser cell arrays and reports invalid rows', () => {
@@ -72,5 +72,29 @@ describe('serverPagination', () => {
     const offsets: number[] = [];
     serverPagination(0, 20, 400, (offset) => offsets.push(offset), () => undefined).onChange(4, 20);
     expect(offsets).toEqual([60]);
+  });
+});
+
+describe('decisions file helpers', () => {
+  it('accepts only a decisions file', () => {
+    const file = { format: 'erp.film-catalog-decisions', version: 1, fingerprintVersion: 1, sourceBatchId: 3, exportedAt: 'x', sha256: 'a'.repeat(64), rows: [], vendors: [] };
+    expect(readDecisionsFile(JSON.stringify(file))).toEqual(file);
+    expect(() => readDecisionsFile('{')).toThrow('Файл не является JSON');
+    expect(() => readDecisionsFile(JSON.stringify({ format: 'other', rows: [] }))).toThrow('Это не файл решений');
+    expect(() => readDecisionsFile('null')).toThrow('Это не файл решений');
+    expect(() => readDecisionsFile(JSON.stringify({ format: 'erp.film-catalog-decisions', rows: [], sha256: 'x' }))).toThrow('повреждён');
+    expect(() => readDecisionsFile(JSON.stringify({ ...file, exportedAt: 5 }))).toThrow('повреждён');
+    const { exportedAt: _missing, ...noDate } = file;
+    expect(() => readDecisionsFile(JSON.stringify(noDate))).toThrow('повреждён');
+  });
+
+  it('labels decisions batches and skip reasons', () => {
+    expect(sourceLabel({ sourceKind: 'file', fileName: 'decisions:3.json' })).toBe('Файл решений');
+    expect(sourceLabel({ sourceKind: 'file', fileName: 'каталог.xlsx' })).toBe('Файл');
+    expect(sourceLabel({ sourceKind: 'onec_mirror', fileName: null })).toBe('Зеркало 1С');
+    expect(isDecisionsBatch({ options: { decisions: {} } })).toBe(true);
+    expect(isDecisionsBatch({ options: {} })).toBe(false);
+    expect(Object.keys(DECISIONS_SKIP_LABELS).sort()).toEqual(['canonical_skipped', 'changed', 'exists', 'missing', 'no_films']);
+    expect(decisionsDownloadName(3)).toBe('решения-каталога-1С-пакет-3.json');
   });
 });

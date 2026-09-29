@@ -170,6 +170,7 @@ describe.skipIf(!url)('film catalog import PostgreSQL transactions', () => {
   it('renames canonical, merges duplicates, records history and edited_by', async () => {
     const canonical = await createFilm(`${prefix} старое имя`);
     const duplicate = await createFilm(`${prefix} старое имя 2`);
+    await query(`UPDATE films SET note='Своя заметка' WHERE film_id=$1`, [duplicate]);
     const batch = await draft(`${prefix} новое имя`);
     const rows = await service.rows(batch.id, [], {});
     const rowId = rows.items[0]!.rowId;
@@ -234,6 +235,15 @@ describe.skipIf(!url)('film catalog import PostgreSQL transactions', () => {
           Number(item.changed_by) === actorId
       )
     ).toBe(true);
+    // Прежние названия — в примечании (канон и дубль); пользовательский текст сохраняется.
+    const notes = await query<{ film_id: string; note: string | null }>(
+      `SELECT film_id,note FROM films WHERE film_id=ANY($1::bigint[]) ORDER BY film_id`,
+      [[canonical, duplicate]]
+    );
+    expect(notes.rows.map((row) => row.note)).toEqual([
+      `Прежнее название: ${prefix} старое имя`,
+      `Своя заметка\nПрежнее название: ${prefix} старое имя 2`,
+    ]);
     // Индекс имён для импорта заказов: прежние имена ведут к канону, индекс полный.
     const index = await service.nameIndex();
     expect(index.truncated).toBe(false);
@@ -247,6 +257,11 @@ describe.skipIf(!url)('film catalog import PostgreSQL transactions', () => {
     await expect(service.apply(repeated.id, [], 1, actorId, randomUUID(), key())).resolves.toMatchObject({ status: 'applied' });
     await service.revert(repeated.id, [], actorId, randomUUID(), key());
     await service.revert(batch.id, [], actorId, randomUUID(), key());
+    const restored = await query<{ note: string | null }>(
+      `SELECT note FROM films WHERE film_id=ANY($1::bigint[]) ORDER BY film_id`,
+      [[canonical, duplicate]]
+    );
+    expect(restored.rows.map((row) => row.note)).toEqual([null, 'Своя заметка']);
   });
 
   it('creates absent film and rejects stale business fingerprint atomically', async () => {
@@ -319,6 +334,27 @@ describe.skipIf(!url)('film catalog import PostgreSQL transactions', () => {
       [filmId]
     );
     expect(history.rows).toHaveLength(0);
+  });
+
+  it('note: a manual edit after apply survives revert; a legacy package (no note snapshot) never touches the note', async () => {
+    const film = await createFilm(`${prefix} примечание`);
+    const batch = await draft(`${prefix} примечание новое`);
+    await matchAndApply(batch.id, [film]);
+    const applied = await query<{ note: string | null }>(`SELECT note FROM films WHERE film_id=$1`, [film]);
+    expect(applied.rows[0].note).toBe(`Прежнее название: ${prefix} примечание`);
+    await query(`UPDATE films SET note='ручная правка' WHERE film_id=$1`, [film]);
+    await service.revert(batch.id, [], actorId, randomUUID(), key());
+    const reverted = await query<{ film_name: string; note: string | null }>(`SELECT film_name,note FROM films WHERE film_id=$1`, [film]);
+    expect(reverted.rows[0]).toEqual({ film_name: `${prefix} примечание`, note: 'ручная правка' });
+
+    // Пакет «до миграции 212»: в снимках нет note — откат работает и примечание не меняет.
+    const legacy = await draft(`${prefix} примечание legacy`);
+    await matchAndApply(legacy.id, [film]);
+    await query(`UPDATE catalog_import_matches SET before=before-'note', after=after-'note' WHERE batch_id=$1`, [legacy.id]);
+    await query(`UPDATE films SET note='после применения' WHERE film_id=$1`, [film]);
+    await service.revert(legacy.id, [], actorId, randomUUID(), key());
+    const legacyReverted = await query<{ film_name: string; note: string | null }>(`SELECT film_name,note FROM films WHERE film_id=$1`, [film]);
+    expect(legacyReverted.rows[0]).toEqual({ film_name: `${prefix} примечание`, note: 'после применения' });
   });
 
   it('reverts latest package first and blocks after manual edit', async () => {

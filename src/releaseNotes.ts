@@ -29,6 +29,17 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-09-29", title: "Плёнки: примечание и перенос сопоставления каталога 1С",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "У плёнки появилось поле «Примечание»; при импорте каталога 1С в него дописывается прежнее название плёнки.",
+      "Решения импорта каталога 1С можно выгрузить файлом и повторить на другой базе: применяются только решения для неизменившихся плёнок, остальное не трогается.",
+    ],
+    changed: [
+      "Импорт каталога не перезаписывает у плёнки уже установленный ключ 1С.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-09-29", title: "Несколько WhatsApp-рассылок",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

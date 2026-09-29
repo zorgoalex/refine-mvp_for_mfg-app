@@ -101,6 +101,28 @@ export const BUSINESS_FIELDS = [
   'nomenclature_type',
   'nomenclature_category',
 ] as const;
+// Примечание (films.note) — свободный текст, НЕ бизнес-поле: не входит в отпечаток (старые
+// черновики и применённые пакеты сохраняют прежние отпечатки; ручная правка примечания не
+// конфликт). Импорт дописывает прежнее название, откат возвращает примечание только если
+// после применения его не правили.
+
+export const FILM_NOTE_MAX = 2000;
+export const PREVIOUS_NAME_PREFIX = 'Прежнее название: ';
+
+/**
+ * Примечание после переименования импортом каталога: строка «Прежнее название: …» дописывается
+ * в конец (пользовательский текст сохраняется), повтор той же строки не добавляется; при
+ * превышении лимита укорачивается дописанная строка, а не начало примечания.
+ */
+export function noteWithPreviousName(note: string | null, previousName: string): string | null {
+  const line = `${PREVIOUS_NAME_PREFIX}${previousName.trim()}`;
+  const current = note ?? '';
+  if (current.split('\n').some((existing) => existing.trim() === line)) return note;
+  const prefix = current.trim() ? `${current.replace(/\s+$/, '')}\n` : '';
+  const room = FILM_NOTE_MAX - prefix.length;
+  if (room <= PREVIOUS_NAME_PREFIX.length) return note;
+  return prefix + line.slice(0, room);
+}
 export function normalizeFilmBusinessFields(
   film: Record<string, unknown>
 ): Record<(typeof BUSINESS_FIELDS)[number], unknown> {

@@ -2,7 +2,7 @@ import { backendApiPath } from './apiRoutes';
 import { httpClient } from './httpClient';
 import { withQuery } from './ordersApi';
 import type {
-  CatalogImportAction, CatalogImportBatchDto, CatalogImportMatchDto,
+  CatalogDecisionsFile, CatalogImportAction, CatalogImportBatchDto, CatalogImportMatchDto,
   CatalogImportRowDto, CatalogNameHistoryDto, CatalogPage, CatalogRowInput, SimilarFilmDto,
 } from './types/filmCatalogImportApi.types';
 
@@ -31,6 +31,11 @@ export const filmCatalogImportApi = {
   cancel(id: number, version: number, key: string) { return httpClient.post<CatalogImportBatchDto>(`${root}/${id}/cancel`, { version }, commandOptions(key)); },
   revert(id: number, key: string) { return httpClient.post<CatalogImportBatchDto>(`${root}/${id}/revert`, {}, commandOptions(key)); },
   export(id: number) { return httpClient.download(`${root}/${id}/export.xlsx`); },
+  /** Файл решений применённого пакета — для строгого повтора на другой базе (прод). */
+  decisions(id: number) { return httpClient.get<CatalogDecisionsFile>(`${root}/${id}/decisions`); },
+  createDecisions(decisions: CatalogDecisionsFile, key: string) {
+    return httpClient.post<CatalogImportBatchDto>(root, { kind: 'films', source: 'decisions', decisions }, commandOptions(key));
+  },
   onecSources() { return httpClient.get<{ items: Array<{ sourceId: number; name: string }> }>(`${root}/onec-sources`); },
   onecCategories(sourceId: number) { return httpClient.get<{ items: Array<{ key: string; name: string; itemsCount: number }> }>(withQuery(`${root}/onec-categories`, { onecSourceId: sourceId })); },
   nameHistory(filmId: number) { return httpClient.get<{ items: CatalogNameHistoryDto[] }>(backendApiPath(`/films/${filmId}/name-history`)); },
