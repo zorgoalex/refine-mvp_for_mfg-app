@@ -190,7 +190,7 @@ describe.skipIf(!url)('inventory ↔ catalog import races — real PostgreSQL', 
     const p = await film(`${tag} алиас-пэ`);
     const q = await film(`${tag} алиас-ку`);
     const second = Number((await watcher.query<{ warehouse_id: number }>(
-      'INSERT INTO warehouses (warehouse_name, is_active) VALUES ($1, true) RETURNING warehouse_id', [`${tag} склад 2`],
+      'INSERT INTO warehouses (warehouse_name, is_active, ref_key_1c) VALUES ($1, true, gen_random_uuid()) RETURNING warehouse_id', [`${tag} склад 2`],
     )).rows[0].warehouse_id);
     const makeDraft = async (repo: PgInventoryRepository, wh: number, names: string[], films: number[]) => {
       let doc = await repo.createImport(ctx(), {

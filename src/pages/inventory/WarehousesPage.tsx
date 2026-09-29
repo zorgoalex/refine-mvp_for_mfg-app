@@ -1,12 +1,12 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { useList } from '@refinedev/core';
-import { Button, Card, Checkbox, Form, Input, Modal, Select, Space, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Checkbox, Form, Input, Modal, Select, Space, Tag, Typography, message } from 'antd';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Table, Tooltip } from '../../ui/tooltipDelay';
 import { createInventoryIdempotencyKey, inventoryApi } from '../../api/inventoryApi';
 import type { InventoryApiError, WarehouseDto } from '../../api/types/inventoryApi.types';
 import { can } from '../../utils/permissions';
-import { warehouseDeactivationBlock, warehousePatch, type WarehouseFormValues } from './warehouses';
+import { isOnecKey, onecStatusText, onecWarehouseOptions, syncSummary, warehouseDeactivationBlock, warehousePatch, type WarehouseFormValues } from './warehouses';
 
 const { Text } = Typography;
 
@@ -30,6 +30,12 @@ export const WarehousesPage: React.FC = () => {
     queryFn: () => inventoryApi.warehouses({ includeInactive }),
     enabled: viewAllowed,
   });
+  const onecQuery = useQuery({
+    queryKey: ['inventory', 'warehouses', 'onec'],
+    queryFn: () => inventoryApi.onecWarehouses(),
+    enabled: manageAllowed,
+  });
+  const onecAvailable = onecQuery.data?.available === true;
   const { data: workshopsList } = useList<{ workshop_id: number; workshop_name: string }>({
     resource: 'workshops',
     pagination: { mode: 'off' },
@@ -70,14 +76,19 @@ export const WarehousesPage: React.FC = () => {
   const openEditor = (warehouse: WarehouseDto | 'new') => {
     setEditing(warehouse);
     form.setFieldsValue(warehouse === 'new'
-      ? { name: '', workshopId: null, responsibleEmployeeId: null }
-      : { name: warehouse.name, workshopId: warehouse.workshopId, responsibleEmployeeId: warehouse.responsibleEmployeeId });
+      ? { name: '', refKey1c: null, workshopId: null, responsibleEmployeeId: null }
+      : { name: warehouse.name, refKey1c: warehouse.refKey1c, workshopId: warehouse.workshopId, responsibleEmployeeId: warehouse.responsibleEmployeeId });
   };
+
+  const syncWithOnec = () => void runCommand('sync-onec', async (key) => {
+    const result = await inventoryApi.syncWarehouses(key);
+    message.info(syncSummary(result));
+  }, 'Склады синхронизированы с 1С');
 
   const submit = async () => {
     const values = await form.validateFields();
     if (editing === 'new') {
-      const body = { name: values.name.trim(), workshopId: values.workshopId ?? null, responsibleEmployeeId: values.responsibleEmployeeId ?? null };
+      const body = { name: values.name.trim(), refKey1c: String(values.refKey1c).trim().toLowerCase(), workshopId: values.workshopId ?? null, responsibleEmployeeId: values.responsibleEmployeeId ?? null };
       if (await runCommand(`create:${JSON.stringify(body)}`, (key) => inventoryApi.createWarehouse(body, key), 'Склад добавлен')) setEditing(null);
       return;
     }
@@ -111,7 +122,16 @@ export const WarehousesPage: React.FC = () => {
     { title: 'Плёнок с остатком', dataIndex: 'filmsWithStock', align: 'right' as const },
     { title: 'Остаток, пог. м', dataIndex: 'totalQuantity', align: 'right' as const, render: formatQuantity },
     { title: 'Черновики', dataIndex: 'draftDocuments', align: 'right' as const },
-    { title: 'Ключ 1С', dataIndex: 'refKey1c', render: (value: string | null) => value ? <Tooltip title={value}><Text code>{value.slice(0, 8)}…</Text></Tooltip> : '—' },
+    {
+      title: 'Склад 1С',
+      render: (_: unknown, row: WarehouseDto) => {
+        const status = onecStatusText(row);
+        const body = status.tone === 'ok' ? <Text>{status.text}</Text>
+          : status.tone === 'muted' ? <Text code>{status.text.slice(0, 8)}…</Text>
+            : <Tag color={status.tone === 'error' ? 'red' : 'orange'}>{status.text}</Tag>;
+        return row.refKey1c ? <Tooltip title={`Ключ 1С: ${row.refKey1c}`}>{body}</Tooltip> : body;
+      },
+    },
     ...(manageAllowed ? [{
       title: 'Действия',
       render: (_: unknown, row: WarehouseDto) => {
@@ -131,9 +151,13 @@ export const WarehousesPage: React.FC = () => {
       title="Справочник складов"
       extra={<Space>
         <Checkbox checked={includeInactive} onChange={(event) => setIncludeInactive(event.target.checked)}>Показывать неактивные</Checkbox>
+        {manageAllowed && onecAvailable && <Button disabled={busy} onClick={syncWithOnec}>Синхронизировать с 1С</Button>}
         {manageAllowed && <Button type="primary" onClick={() => openEditor('new')}>Добавить склад</Button>}
       </Space>}
     >
+      {(warehousesQuery.data?.items ?? []).some((row) => row.onecStatus === 'unlinked') && (
+        <Alert style={{ marginBottom: 12 }} type="error" showIcon message="Есть склады без привязки к складу 1С — документы 1С не смогут на них сослаться. Откройте «Изменить» и выберите склад 1С." />
+      )}
       <Table
         rowKey="warehouseId"
         dataSource={warehousesQuery.data?.items ?? []}
@@ -154,6 +178,28 @@ export const WarehousesPage: React.FC = () => {
         <Form form={form} layout="vertical">
           <Form.Item name="name" label="Название" rules={[{ required: true, whitespace: true, message: 'Укажите название' }, { max: 128, message: 'До 128 символов' }]}>
             <Input maxLength={128} />
+          </Form.Item>
+          <Form.Item
+            name="refKey1c"
+            label="Склад 1С"
+            rules={[
+              { required: true, message: 'Выберите склад 1С' },
+              ...(onecAvailable ? [] : [{ validator: (_: unknown, value: string) => (isOnecKey(value) ? Promise.resolve() : Promise.reject(new Error('Ключ 1С — GUID вида xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'))) }]),
+            ]}
+            extra={onecAvailable ? undefined : 'Данные 1С недоступны — укажите ключ склада 1С (Ref_Key) вручную.'}
+          >
+            {onecAvailable
+              ? <Select
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder="Выберите склад 1С"
+                  options={onecWarehouseOptions(onecQuery.data?.items ?? [], editing && editing !== 'new' ? editing.warehouseId : null)}
+                  onChange={(_value: string, option) => {
+                    const picked = Array.isArray(option) ? undefined : (option as { name?: string } | undefined);
+                    if (editing === 'new' && picked?.name && !form.getFieldValue('name')) form.setFieldsValue({ name: picked.name });
+                  }}
+                />
+              : <Input placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />}
           </Form.Item>
           <Form.Item name="workshopId" label="Цех">
             <Select allowClear showSearch optionFilterProp="label" placeholder="Не указан" options={workshopOptions} />

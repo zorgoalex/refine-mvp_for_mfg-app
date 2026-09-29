@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { BackendEnv } from '../../../config/env.validation';
 import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
+import type { OnecCatalogReader } from '../../onec-agent/onec-catalog-reader';
 import { InventoryService } from '../application/inventory.service';
 import { InventoryController } from './inventory.controller';
 
@@ -12,7 +13,8 @@ const user = (permissions: string[]): CurrentUser => ({
 
 function setup(enabled: boolean) {
   const config = new ConfigService<BackendEnv, true>({ BACKEND_INVENTORY_ENABLED: enabled });
-  const service = new InventoryService({} as DatabaseService, config);
+  const onec = { listWarehouses: vi.fn().mockResolvedValue([]) } as unknown as OnecCatalogReader;
+  const service = new InventoryService({} as DatabaseService, config, onec);
   const controller = new InventoryController(service);
   return { service, controller };
 }
@@ -76,10 +78,17 @@ describe('InventoryController', () => {
     const { controller } = setup(true);
     const view = { user: user(['inventory.view']) };
     const manage = { user: user(['inventory.manage']) };
-    await expectError(() => controller.createWarehouse(view, 'k', { name: 'Склад 2' }), 403, 'FORBIDDEN');
+    const key1c = '6325798a-6fde-11ee-84da-94de808e1036';
+    await expectError(() => controller.createWarehouse(view, 'k', { name: 'Склад 2', refKey1c: key1c }), 403, 'FORBIDDEN');
+    await expectError(() => controller.createWarehouse(manage, 'k', { name: 'Склад 2' }), 400, 'VALIDATION_FAILED');
+    await expectError(() => controller.createWarehouse(manage, 'k', { name: 'Склад 2', refKey1c: 'не-ключ' }), 400, 'VALIDATION_FAILED');
+    await expectError(() => controller.updateWarehouse(manage, 'k', '2', { version: 'v', refKey1c: '123' }), 400, 'VALIDATION_FAILED');
+    await expectError(() => controller.onecWarehouses(view), 403, 'FORBIDDEN');
+    await expectError(() => controller.syncWarehouses(view, 'k'), 403, 'FORBIDDEN');
+    await expectError(() => controller.syncWarehouses(manage, undefined), 400, 'VALIDATION_FAILED');
     await expectError(() => controller.updateWarehouse(view, 'k', '2', { version: 'v', name: 'Склад 3' }), 403, 'FORBIDDEN');
-    await expectError(() => controller.createWarehouse(manage, undefined, { name: 'Склад 2' }), 400, 'VALIDATION_FAILED');
-    await expectError(() => controller.createWarehouse(manage, 'k', { name: '   ' }), 400, 'VALIDATION_FAILED');
+    await expectError(() => controller.createWarehouse(manage, undefined, { name: 'Склад 2', refKey1c: key1c }), 400, 'VALIDATION_FAILED');
+    await expectError(() => controller.createWarehouse(manage, 'k', { name: '   ', refKey1c: key1c }), 400, 'VALIDATION_FAILED');
     await expectError(() => controller.createWarehouse(manage, 'k', { name: 'x'.repeat(129) }), 400, 'VALIDATION_FAILED');
     await expectError(() => controller.createWarehouse(manage, 'k', { name: 'Склад', workshopId: 40000 }), 400, 'VALIDATION_FAILED');
     await expectError(() => controller.createWarehouse(manage, 'k', { name: 'Склад', extra: 1 }), 400, 'VALIDATION_FAILED');
@@ -87,4 +96,5 @@ describe('InventoryController', () => {
     await expectError(() => controller.updateWarehouse(manage, 'k', 'abc', { version: 'v' }), 400, 'VALIDATION_FAILED');
     await expectError(() => controller.updateWarehouse(manage, 'k', '40000', { version: 'v' }), 404, 'WAREHOUSE_NOT_FOUND');
   });
+
 });

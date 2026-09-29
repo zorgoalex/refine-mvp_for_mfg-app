@@ -18,10 +18,15 @@ export interface WarehouseDto {
   draftDocuments: number;
   /** Токен версии (updated_at) для защиты от устаревшей записи. */
   version: string;
+  /** Склад 1С по ключу: linked — найден в зеркале, missing — нет в зеркале, unlinked — ключа нет, unknown — зеркало недоступно. */
+  onecStatus: 'linked' | 'missing' | 'unlinked' | 'unknown';
+  onecName: string | null;
+  onecCode: string | null;
 }
 
 export interface CreateWarehouseInput {
   name: string;
+  refKey1c: string;
   workshopId: number | null;
   responsibleEmployeeId: number | null;
 }
@@ -30,9 +35,25 @@ export interface UpdateWarehouseInput {
   warehouseId: number;
   version: string;
   name?: string;
+  refKey1c?: string;
   workshopId?: number | null;
   responsibleEmployeeId?: number | null;
   isActive?: boolean;
+}
+
+/** Склад 1С для выбора в справочнике: к какому складу ERP уже привязан. */
+export interface OnecWarehouseOptionDto {
+  refKey: string;
+  code: string | null;
+  name: string;
+  linkedWarehouseId: number | null;
+  linkedWarehouseName: string | null;
+}
+
+export interface WarehouseSyncResultDto {
+  created: WarehouseDto[];
+  linked: WarehouseDto[];
+  skipped: Array<{ refKey: string; name: string; reason: 'name_taken' }>;
 }
 
 export interface StockBalanceDto {

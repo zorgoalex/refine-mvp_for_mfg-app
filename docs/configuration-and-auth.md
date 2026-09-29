@@ -281,6 +281,21 @@ frontend-флаг `RUNTIME_CONFIG_FILM_CATALOG_IMPORT`.
 затем `BACKEND_INVENTORY_ENABLED=true`, пересоздание backend и
 `RUNTIME_CONFIG_INVENTORY`.
 
+Справочник складов (`/api/v1/inventory/warehouses`) пишет только backend; в Hasura
+таблица `warehouses` — только чтение. Каждый склад привязан к складу 1С
+(`ref_key_1c`, `Ref_Key` справочника «Структурные единицы», тип «Склад»); при
+доступном зеркале 1С ключ проверяется по нему, `POST …/warehouses/sync-onec`
+создаёт склады ERP для всех складов 1С (зеркало обязательно).
+
+Миграция `205_warehouses_onec_key_required.sql` (CHECK `ref_key_1c IS NOT NULL`
+NOT VALID) применяется **после** выкладки backend со справочником складов с ключом
+1С: такой backend работает и без 205, а прежний создаёт склады без ключа и после
+205 получит отказ. Порядок: backend + frontend → миграция 205 → привязать склады
+без ключа в «Справочнике складов» (на проде без зеркала 1С — ввод `Ref_Key`
+вручную). Откат backend ниже этой версии: сначала
+`ALTER TABLE public.warehouses DROP CONSTRAINT IF EXISTS chk_warehouses_ref_key_1c_required;`
+(данные не меняются; повторное применение 205 вернёт ограничение).
+
 ### Листовые материалы
 
 `VITE_SHEET_MATERIALS_READS` либо runtime

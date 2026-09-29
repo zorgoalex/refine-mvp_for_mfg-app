@@ -2427,8 +2427,11 @@ probe_file() {
       "$(q_idx uq_resource_suppliers_film)" \
       "$(q_col user_preferences procurement_saved_views)" \
       "$(q_con_on user_preferences chk_user_preferences_procurement_saved_views)" ;;
+    205_warehouses_onec_key_required*) probe_all \
+      "$(q_con_on warehouses chk_warehouses_ref_key_1c_required)" ;;
+    # Сид 203 — хотя бы один склад (склад можно переименовать; после 205 повторный сид без ключа 1С невозможен).
     203_film_stock*) probe_all \
-      "SELECT EXISTS (SELECT 1 FROM public.warehouses WHERE warehouse_name='Склад плёнки')" \
+      "SELECT EXISTS (SELECT 1 FROM public.warehouses)" \
       "$(q_tbl stock_documents)" \
       "$(q_con_on stock_documents chk_stock_documents_doc_type)" \
       "$(q_con_on stock_documents chk_stock_documents_status)" \
@@ -2764,6 +2767,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     204_procurement_workspace*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    205_warehouses_onec_key_required*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)

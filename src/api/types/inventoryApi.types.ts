@@ -10,10 +10,20 @@ export interface WarehouseDto {
   refKey1c: string | null; filmsWithStock: number; totalQuantity: number; draftDocuments: number;
   /** Токен версии для PATCH. */
   version: string;
+  /** linked — найден в данных 1С, missing — ключа нет в 1С, unlinked — не привязан, unknown — данные 1С недоступны. */
+  onecStatus: 'linked' | 'missing' | 'unlinked' | 'unknown';
+  onecName: string | null;
+  onecCode: string | null;
 }
-export interface WarehouseCreateInput { name: string; workshopId?: number | null; responsibleEmployeeId?: number | null }
+export interface WarehouseCreateInput { name: string; refKey1c: string; workshopId?: number | null; responsibleEmployeeId?: number | null }
 export interface WarehousePatch {
-  version: string; name?: string; workshopId?: number | null; responsibleEmployeeId?: number | null; isActive?: boolean;
+  version: string; name?: string; refKey1c?: string; workshopId?: number | null; responsibleEmployeeId?: number | null; isActive?: boolean;
+}
+export interface OnecWarehouseOptionDto {
+  refKey: string; code: string | null; name: string; linkedWarehouseId: number | null; linkedWarehouseName: string | null;
+}
+export interface WarehouseSyncResultDto {
+  created: WarehouseDto[]; linked: WarehouseDto[]; skipped: Array<{ refKey: string; name: string; reason: 'name_taken' }>;
 }
 export interface StockBalanceDto {
   warehouseId: number; filmId: number; filmName: string; vendorId: number | null; vendorName: string | null;

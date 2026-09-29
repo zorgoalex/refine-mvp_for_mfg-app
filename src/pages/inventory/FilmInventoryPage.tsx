@@ -263,6 +263,7 @@ export const FilmInventoryPage: React.FC = () => {
     <Title level={2}>Остатки плёнки</Title>
     <Tabs activeKey={tab} onChange={setTab} items={[
       { key: 'balances', label: 'Остатки', children: <Card>
+        {warehousesQuery.data?.items.find((item) => item.warehouseId === activeWarehouseId)?.onecStatus === 'unlinked' && <Alert style={{ marginBottom: 12 }} type="warning" showIcon message="Склад не привязан к складу 1С — привяжите его в «Справочнике складов»" />}
         {warehousesQuery.isSuccess && !warehouseReady && <Alert style={{ marginBottom: 12 }} type="warning" showIcon message={(warehouseIds ?? []).length === 0 ? 'Нет активных складов — добавьте или включите склад в «Справочнике складов»' : 'Выберите склад'} />}
         <Space wrap style={{ marginBottom: 16 }}>
           <Select placeholder="Склад" value={activeWarehouseId} style={{ minWidth: 180 }} options={(warehousesQuery.data?.items ?? []).map((item) => ({ value: item.warehouseId, label: item.name }))} onChange={chooseWarehouse} status={warehouseReady ? undefined : 'warning'} />

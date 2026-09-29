@@ -112,10 +112,11 @@ describe.skipIf(!url)('warehouse reference — real PostgreSQL, committed fixtur
 
   it('creates a warehouse with audit and one outbox event; a replay returns the same result; names are unique ignoring case', async () => {
     const key = randomUUID();
-    const created = await warehousesA.create(ctx(key), { name: `${tag} Основной`, workshopId: null, responsibleEmployeeId: null });
-    expect(created).toMatchObject({ name: `${tag} Основной`, isActive: true, filmsWithStock: 0, draftDocuments: 0 });
+    const refKey1c = randomUUID();
+    const created = await warehousesA.create(ctx(key), { name: `${tag} Основной`, refKey1c, workshopId: null, responsibleEmployeeId: null });
+    expect(created).toMatchObject({ name: `${tag} Основной`, isActive: true, filmsWithStock: 0, draftDocuments: 0, refKey1c });
     expect(created.version).toEqual(expect.any(String));
-    const replay = await warehousesA.create(ctx(key), { name: `${tag} Основной`, workshopId: null, responsibleEmployeeId: null });
+    const replay = await warehousesA.create(ctx(key), { name: `${tag} Основной`, refKey1c, workshopId: null, responsibleEmployeeId: null });
     expect(replay).toEqual(created);
     const audit = await watcher.query<{ event: string }>(
       "SELECT event FROM audit_log WHERE entity_type = 'warehouse' AND entity_id = $1", [String(created.warehouseId)],
@@ -126,7 +127,7 @@ describe.skipIf(!url)('warehouse reference — real PostgreSQL, committed fixtur
     );
     expect(outbox.rows.map((row) => row.payload_json.action)).toEqual(['created']);
     await expectApiError(
-      warehousesA.create(ctx(), { name: `  ${tag} основной `.toUpperCase(), workshopId: null, responsibleEmployeeId: null }),
+      warehousesA.create(ctx(), { name: `  ${tag} основной `.toUpperCase(), refKey1c: randomUUID(), workshopId: null, responsibleEmployeeId: null }),
       409, 'WAREHOUSE_NAME_DUPLICATE',
     );
   });
@@ -140,7 +141,7 @@ describe.skipIf(!url)('warehouse reference — real PostgreSQL, committed fixtur
       [`${tag} сотрудник А`, `${tag} сотрудник Б`],
     );
     const [employeeA, employeeB] = employees.rows.map((row) => Number(row.employee_id));
-    const created = await warehousesA.create(ctx(), { name: `${tag} Аудит`, workshopId, responsibleEmployeeId: employeeA });
+    const created = await warehousesA.create(ctx(), { name: `${tag} Аудит`, refKey1c: randomUUID(), workshopId, responsibleEmployeeId: employeeA });
     const changed = await warehousesA.update(ctx(), { warehouseId: created.warehouseId, version: created.version, workshopId: null, responsibleEmployeeId: employeeB });
     expect(changed).toMatchObject({ workshopId: null, responsibleEmployeeId: employeeB });
     const audit = await watcher.query<{ audit_id: string; diff_json: Record<string, { from: unknown; to: unknown }> }>(
@@ -160,8 +161,94 @@ describe.skipIf(!url)('warehouse reference — real PostgreSQL, committed fixtur
     expect(links).toContain(`workshop:${workshopId}`);
   });
 
+  it('keeps the 1C key unique and required', async () => {
+    const refKey1c = randomUUID();
+    const first = await warehousesA.create(ctx(), { name: `${tag} Ключ-1`, refKey1c, workshopId: null, responsibleEmployeeId: null });
+    await expectApiError(
+      warehousesA.create(ctx(), { name: `${tag} Ключ-2`, refKey1c: refKey1c.toUpperCase().toLowerCase(), workshopId: null, responsibleEmployeeId: null }),
+      409, 'WAREHOUSE_1C_KEY_TAKEN',
+    );
+    const second = await warehousesA.create(ctx(), { name: `${tag} Ключ-2`, refKey1c: randomUUID(), workshopId: null, responsibleEmployeeId: null });
+    await expectApiError(warehousesA.update(ctx(), { warehouseId: second.warehouseId, version: second.version, refKey1c }), 409, 'WAREHOUSE_1C_KEY_TAKEN');
+    // Миграция 205: новая строка без ключа не вставляется.
+    await expect(watcher.query("INSERT INTO warehouses (warehouse_name) VALUES ($1)", [`${tag} без ключа`])).rejects.toMatchObject({ code: '23514' });
+    expect(first.refKey1c).toBe(refKey1c);
+  });
+
+  it('an unlinked legacy warehouse must get a 1C key on any change (migration 205 + WAREHOUSE_1C_KEY_REQUIRED)', async () => {
+    const legacy = (await warehousesA.list(true)).find((row) => row.name === 'Склад плёнки');
+    expect(legacy?.refKey1c).toBeNull();
+    // Прямое изменение строки без ключа отклоняет CHECK (NOT VALID действует на изменяемые строки).
+    await watcher.query('BEGIN');
+    await expect(watcher.query('UPDATE warehouses SET is_active = is_active WHERE warehouse_id = $1', [legacy!.warehouseId])).rejects.toMatchObject({ code: '23514' });
+    await watcher.query('ROLLBACK');
+    await expectApiError(
+      warehousesA.update(ctx(), { warehouseId: legacy!.warehouseId, version: legacy!.version, workshopId: null, name: 'Склад плёнки ' + tag }),
+      422, 'WAREHOUSE_1C_KEY_REQUIRED',
+    );
+  });
+
+  it('syncs 1C warehouses: links an unlinked warehouse with the same name, creates the rest, skips a taken name; replay is identical', async () => {
+    const taken = await warehousesA.create(ctx(), { name: `${tag} Занято`, refKey1c: randomUUID(), workshopId: null, responsibleEmployeeId: null });
+    const keys = { legacy: randomUUID(), fresh: randomUUID(), taken: randomUUID() };
+    const onec = [
+      { refKey: keys.legacy, name: 'Склад плёнки' },
+      { refKey: keys.fresh, name: `${tag} Цех из 1С` },
+      { refKey: keys.taken, name: `${tag} занято ` },
+    ];
+    const key = randomUUID();
+    const result = await warehousesA.syncFromOnec(ctx(key), async () => onec);
+    expect(result.linked.map((row) => [row.name, row.refKey1c])).toEqual([['Склад плёнки', keys.legacy]]);
+    expect(result.created.map((row) => [row.name, row.refKey1c])).toEqual([[`${tag} Цех из 1С`, keys.fresh]]);
+    expect(result.skipped).toEqual([{ refKey: keys.taken, name: `${tag} занято`, reason: 'name_taken' }]);
+    // Повтор с тем же ключом не зависит от зеркала: изменилось или недоступно — тот же ответ.
+    expect(await warehousesA.syncFromOnec(ctx(key), async () => [{ refKey: randomUUID(), name: `${tag} появился позже` }])).toEqual(result);
+    expect(await warehousesA.syncFromOnec(ctx(key), async () => { throw new Error('mirror unavailable'); })).toEqual(result);
+    const again = await warehousesA.syncFromOnec(ctx(), async () => onec);
+    expect(again.created).toEqual([]);
+    expect(again.linked).toEqual([]);
+    const audit = await watcher.query<{ event: string; stage_code: string }>(
+      "SELECT event, stage_code FROM audit_log WHERE entity_type = 'warehouse' AND entity_id = $1", [String(result.linked[0].warehouseId)],
+    );
+    expect(audit.rows).toContainEqual({ event: 'inventory.warehouse_updated', stage_code: 'linked' });
+    const created = await watcher.query<{ n: string }>(
+      "SELECT count(*) AS n FROM audit_log WHERE entity_type = 'warehouse' AND entity_id = $1", [String(result.created[0].warehouseId)],
+    );
+    expect(Number(created.rows[0].n)).toBe(1);
+    void taken;
+  });
+
+  it('checks the 1C key only on a new execution: a rejected key leaves no trace, a replay ignores the mirror', async () => {
+    const key = randomUUID();
+    const input = { name: `${tag} Зеркало`, refKey1c: randomUUID(), workshopId: null, responsibleEmployeeId: null };
+    const reject = async (_tx: unknown, _key: string) => { throw Object.assign(new Error('Склад 1С не найден'), { statusCode: 422, code: 'WAREHOUSE_1C_NOT_FOUND' }); };
+    await expectApiError(warehousesA.create(ctx(key), input, reject), 422, 'WAREHOUSE_1C_NOT_FOUND');
+    expect((await watcher.query('SELECT 1 FROM warehouses WHERE warehouse_name = $1', [input.name])).rows).toHaveLength(0);
+    // Тот же ключ после отказа свободен: транзакция с записью идемпотентности откатилась.
+    let validated = 0;
+    const created = await warehousesA.create(ctx(key), input, async () => { validated += 1; });
+    expect(validated).toBe(1);
+    // Повтор: склад 1С «исчез» из зеркала — возвращается сохранённый результат, проверка не вызывается.
+    expect(await warehousesA.create(ctx(key), input, reject)).toEqual(created);
+    const audit = await watcher.query("SELECT 1 FROM audit_log WHERE entity_type = 'warehouse' AND entity_id = $1", [String(created.warehouseId)]);
+    expect(audit.rows).toHaveLength(1);
+  });
+
+  it('rollback path: dropping the 205 check lets the previous backend insert a warehouse without a 1C key', async () => {
+    await watcher.query('BEGIN');
+    try {
+      await watcher.query('ALTER TABLE public.warehouses DROP CONSTRAINT IF EXISTS chk_warehouses_ref_key_1c_required');
+      const legacy = await watcher.query('INSERT INTO warehouses (warehouse_name, workshop_id, responsible_employee_id, is_active, created_by, edited_by) VALUES ($1, NULL, NULL, true, $2, $2) RETURNING warehouse_id', [`${tag} старый backend`, actorId]);
+      expect(legacy.rows).toHaveLength(1);
+    } finally {
+      await watcher.query('ROLLBACK');
+    }
+    const check = await watcher.query("SELECT convalidated FROM pg_constraint WHERE conname = 'chk_warehouses_ref_key_1c_required'");
+    expect(check.rows).toHaveLength(1);
+  });
+
   it('renames with the current version and rejects a stale version', async () => {
-    const created = await warehousesA.create(ctx(), { name: `${tag} Цеховой`, workshopId: null, responsibleEmployeeId: null });
+    const created = await warehousesA.create(ctx(), { name: `${tag} Цеховой`, refKey1c: randomUUID(), workshopId: null, responsibleEmployeeId: null });
     const renamed = await warehousesA.update(ctx(), { warehouseId: created.warehouseId, version: created.version, name: `${tag} Цеховой-2` });
     expect(renamed.name).toBe(`${tag} Цеховой-2`);
     expect(renamed.version).not.toBe(created.version);
@@ -177,7 +264,7 @@ describe.skipIf(!url)('warehouse reference — real PostgreSQL, committed fixtur
   });
 
   it('refuses to deactivate a warehouse with stock or drafts; an empty one is deactivated and takes no documents', async () => {
-    const wh = await warehousesA.create(ctx(), { name: `${tag} Отключаемый`, workshopId: null, responsibleEmployeeId: null });
+    const wh = await warehousesA.create(ctx(), { name: `${tag} Отключаемый`, refKey1c: randomUUID(), workshopId: null, responsibleEmployeeId: null });
     const receipt = await stockB.createManual(ctx(), {
       docType: 'receipt', warehouseId: wh.warehouseId, docDate: today, orderId: null, comment: tag,
       lines: [{ filmId, quantity: 4 }], post: true, allowNegative: false,
@@ -215,7 +302,7 @@ describe.skipIf(!url)('warehouse reference — real PostgreSQL, committed fixtur
   });
 
   it('race: a document started while the warehouse is being deactivated is rejected after the deactivation commits', async () => {
-    const wh = await warehousesA.create(ctx(), { name: `${tag} Гонка-1`, workshopId: null, responsibleEmployeeId: null });
+    const wh = await warehousesA.create(ctx(), { name: `${tag} Гонка-1`, refKey1c: randomUUID(), workshopId: null, responsibleEmployeeId: null });
     // Отключение держит строку склада FOR UPDATE и ещё не зафиксировано.
     await connA.query('BEGIN');
     await connA.query('SELECT warehouse_id FROM warehouses WHERE warehouse_id = $1 FOR UPDATE', [wh.warehouseId]);
@@ -232,7 +319,7 @@ describe.skipIf(!url)('warehouse reference — real PostgreSQL, committed fixtur
   });
 
   it('race: deactivation waits for a document in progress and then refuses because of its draft', async () => {
-    const wh = await warehousesA.create(ctx(), { name: `${tag} Гонка-2`, workshopId: null, responsibleEmployeeId: null });
+    const wh = await warehousesA.create(ctx(), { name: `${tag} Гонка-2`, refKey1c: randomUUID(), workshopId: null, responsibleEmployeeId: null });
     const version = wh.version;
     // Документ (как в assertWarehouse) держит склад FOR KEY SHARE и вставляет черновик.
     await connB.query('BEGIN');

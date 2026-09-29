@@ -4,7 +4,7 @@ import { withQuery } from './ordersApi';
 import type {
   InventoryBalanceQuery, InventoryDocumentQuery, InventoryPage, ManualStockDocumentInput,
   OrderFilmStockDto, StockBalanceDto, StockDocumentDto, StockDocumentSummaryDto, StockImportInput,
-  StockLinePatch, WarehouseCreateInput, WarehouseDto, WarehousePatch,
+  OnecWarehouseOptionDto, StockLinePatch, WarehouseCreateInput, WarehouseDto, WarehousePatch, WarehouseSyncResultDto,
 } from './types/inventoryApi.types';
 
 const root = backendApiPath('/inventory');
@@ -23,6 +23,12 @@ export const inventoryApi = {
   },
   updateWarehouse(id: number, body: WarehousePatch, key = createInventoryIdempotencyKey()) {
     return httpClient.patch<WarehouseDto>(`${root}/warehouses/${id}`, body, commandOptions(key));
+  },
+  onecWarehouses() {
+    return httpClient.get<{ available: boolean; items: OnecWarehouseOptionDto[] }>(`${root}/warehouses/onec`);
+  },
+  syncWarehouses(key = createInventoryIdempotencyKey()) {
+    return httpClient.post<WarehouseSyncResultDto>(`${root}/warehouses/sync-onec`, {}, commandOptions(key));
   },
   balances(params: InventoryBalanceQuery = {}) {
     return httpClient.get<InventoryPage<StockBalanceDto>>(withQuery(`${root}/balances`, params));

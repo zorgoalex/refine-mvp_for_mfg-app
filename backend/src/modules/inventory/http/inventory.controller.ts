@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
@@ -48,14 +48,17 @@ const lineSchema = z.object({
 
 const smallintId = z.number().int().positive().max(32767);
 const warehouseName = z.string().trim().min(1).max(128);
+const onecKey = z.string().trim().uuid();
 const warehouseCreateSchema = z.object({
   name: warehouseName,
+  refKey1c: onecKey,
   workshopId: smallintId.nullable().optional(),
   responsibleEmployeeId: id.nullable().optional(),
 }).strict();
 const warehouseUpdateSchema = z.object({
   version: z.string().min(1).max(64),
   name: warehouseName.optional(),
+  refKey1c: onecKey.optional(),
   workshopId: smallintId.nullable().optional(),
   responsibleEmployeeId: id.nullable().optional(),
   isActive: z.boolean().optional(),
@@ -117,8 +120,24 @@ export class InventoryController {
   ) {
     const input = parse(warehouseCreateSchema, body);
     return this.inventory.createWarehouse(this.ctx(request, key), {
-      name: input.name, workshopId: input.workshopId ?? null, responsibleEmployeeId: input.responsibleEmployeeId ?? null,
+      name: input.name, refKey1c: input.refKey1c, workshopId: input.workshopId ?? null, responsibleEmployeeId: input.responsibleEmployeeId ?? null,
     });
+  }
+
+  @ApiOperation({ operationId: 'listInventoryOnecWarehouses', summary: '1C warehouses from the mirror with their ERP links' })
+  @ApiResponse({ status: 200, description: '{available, items}' })
+  @Get('inventory/warehouses/onec')
+  onecWarehouses(@Req() request: RequestWithCurrentUser) {
+    return this.inventory.listOnecWarehouses(this.user(request));
+  }
+
+  @ApiOperation({ operationId: 'syncInventoryWarehousesFromOnec', summary: 'Create or link ERP warehouses for all 1C warehouses' })
+  @ApiResponse({ status: 200, description: '{created, linked, skipped}' })
+  @ApiResponse({ status: 409, description: '1C mirror unavailable' })
+  @Post('inventory/warehouses/sync-onec')
+  @HttpCode(200)
+  syncWarehouses(@Req() request: RequestWithCurrentUser, @Headers('idempotency-key') key: string | undefined) {
+    return this.inventory.syncWarehousesFromOnec(this.ctx(request, key));
   }
 
   @ApiOperation({ operationId: 'updateInventoryWarehouse', summary: 'Update or (de)activate a warehouse' })

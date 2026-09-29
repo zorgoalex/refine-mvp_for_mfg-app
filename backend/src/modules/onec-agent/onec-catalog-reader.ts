@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { DatabaseService } from '../../database/database.service';
+import type { DatabaseClient } from '../../database/database.types';
 import { ApiError } from '../../common/errors/api-error';
 import { OnecRuntimeConfigService } from './onec-runtime-config.service';
 
@@ -13,6 +14,14 @@ export interface OnecCatalogItem {
   deletionMark: boolean;
   isFolder: boolean;
 }
+/** Склад 1С из зеркала (справочник «Структурные единицы», только тип «Склад»). */
+export interface OnecWarehouse {
+  sourceId: number;
+  refKey: string;
+  code: string | null;
+  name: string;
+}
+
 @Injectable()
 export class OnecCatalogReader {
   constructor(
@@ -20,14 +29,15 @@ export class OnecCatalogReader {
     @Inject(OnecRuntimeConfigService)
     private readonly runtime: OnecRuntimeConfigService
   ) {}
-  private async available(): Promise<void> {
+  /** `client` — текущая транзакция вызывающего (не брать второе соединение пула внутри неё). */
+  private async available(client: DatabaseClient = this.db): Promise<void> {
     if (!this.runtime.get().enabled)
       throw new ApiError(
         409,
         'ONEC_MIRROR_UNAVAILABLE',
         'Зеркало 1С недоступно'
       );
-    const result = await this.db.query<{ ready: boolean }>(
+    const result = await client.query<{ ready: boolean }>(
       `SELECT to_regclass('public.onec_sources') IS NOT NULL AND to_regclass('public.onec_etl_mirror_rows') IS NOT NULL AS ready`
     );
     if (!result.rows[0]?.ready)
@@ -135,5 +145,28 @@ export class OnecCatalogReader {
       [description, categoryName]
     );
     return rows.map((row) => String(row.source_key));
+  }
+
+  /**
+   * Действующие склады 1С всех источников: тип «Склад», не помечены на удаление,
+   * не пропали из последней полной выгрузки. Недоступное зеркало — 409 ONEC_MIRROR_UNAVAILABLE.
+   * Внутри транзакции передавать её клиент.
+   */
+  async listWarehouses(client: DatabaseClient = this.db): Promise<OnecWarehouse[]> {
+    await this.available(client);
+    const { rows } = await client.query<{ source_id: string; source_key: string; code: string | null; name: string }>(
+      `SELECT source_id, source_key, data->>'Code' AS code, COALESCE(data->>'Description', source_key) AS name
+         FROM onec_etl_mirror_rows
+        WHERE entity_code = 'warehouses' AND NOT deleted AND missing_in_source_at IS NULL
+          AND data->>'ТипСтруктурнойЕдиницы' = 'Склад'
+          AND COALESCE((data->>'DeletionMark')::boolean, false) = false
+        ORDER BY name, source_key`,
+    );
+    return rows.map((row) => ({
+      sourceId: Number(row.source_id),
+      refKey: String(row.source_key).toLowerCase(),
+      code: row.code,
+      name: String(row.name),
+    }));
   }
 }

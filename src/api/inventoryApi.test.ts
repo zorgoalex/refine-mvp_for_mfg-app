@@ -53,9 +53,11 @@ describe('inventoryApi', () => {
     expect(String(get.mock.calls[1][0])).toContain('/inventory/warehouses?includeInactive=true');
     post.mockResolvedValue({ warehouseId: 3 });
     patch.mockResolvedValue({ warehouseId: 3 });
-    await inventoryApi.createWarehouse({ name: 'Склад 2' }, 'k-create');
+    await inventoryApi.createWarehouse({ name: 'Склад 2', refKey1c: 'k1c' }, 'k-create');
     await inventoryApi.updateWarehouse(3, { version: 'v1', isActive: false }, 'k-update');
-    expect(post).toHaveBeenCalledWith(expect.stringContaining('/inventory/warehouses'), { name: 'Склад 2' }, { headers: { 'Idempotency-Key': 'k-create' } });
+    expect(post).toHaveBeenCalledWith(expect.stringContaining('/inventory/warehouses'), { name: 'Склад 2', refKey1c: 'k1c' }, { headers: { 'Idempotency-Key': 'k-create' } });
+    await inventoryApi.syncWarehouses('k-sync');
+    expect(post).toHaveBeenLastCalledWith(expect.stringContaining('/inventory/warehouses/sync-onec'), {}, { headers: { 'Idempotency-Key': 'k-sync' } });
     expect(patch).toHaveBeenCalledWith(expect.stringContaining('/inventory/warehouses/3'), { version: 'v1', isActive: false }, { headers: { 'Idempotency-Key': 'k-update' } });
   });
 });

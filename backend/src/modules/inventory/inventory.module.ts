@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../../database/database.module';
+import { OnecAgentModule } from '../onec-agent/onec-agent.module';
 import { InventoryService } from './application/inventory.service';
 import { InventoryController } from './http/inventory.controller';
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, OnecAgentModule],
   controllers: [InventoryController],
   providers: [InventoryService],
   exports: [InventoryService],
