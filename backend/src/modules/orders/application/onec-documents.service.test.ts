@@ -36,8 +36,14 @@ function fakePort(overrides: Partial<OnecDocumentsPort> = {}): OnecDocumentsPort
 describe('OnecDocumentsService.readOptions', () => {
   it('grants canSeeAmounts only with finance.view (literal permission check)', () => {
     const service = new OnecDocumentsService({ documents: fakePort() });
-    expect(service.readOptions(user(['procurement.view']), true)).toEqual({ procurementEnabled: true, canSeeAmounts: false });
-    expect(service.readOptions(user(['procurement.view', 'finance.view']), true)).toEqual({ procurementEnabled: true, canSeeAmounts: true });
+    expect(service.readOptions(user(['procurement.view']), true)).toEqual({ procurementEnabled: true, canSeeAmounts: false, supplyWorkspaceEnabled: false });
+    expect(service.readOptions(user(['procurement.view', 'finance.view']), true)).toEqual({ procurementEnabled: true, canSeeAmounts: true, supplyWorkspaceEnabled: false });
+  });
+
+  it('forwards supplyWorkspaceEnabled (capability of the receipt card)', () => {
+    const service = new OnecDocumentsService({ documents: fakePort() });
+    expect(service.readOptions(user([]), true, true)).toMatchObject({ supplyWorkspaceEnabled: true });
+    expect(service.readOptions(user([]), true)).toMatchObject({ supplyWorkspaceEnabled: false });
   });
 
   it('forwards procurementEnabled unchanged', () => {
@@ -82,7 +88,7 @@ describe('OnecDocumentsService.list / getCard permission gate', () => {
     const currentUser = user(['procurement.view', 'finance.view']);
 
     await expect(service.list(currentUser, query, true)).resolves.toBe(expected);
-    expect(list).toHaveBeenCalledWith(currentUser, query, { procurementEnabled: true, canSeeAmounts: true });
+    expect(list).toHaveBeenCalledWith(currentUser, query, { procurementEnabled: true, canSeeAmounts: true, supplyWorkspaceEnabled: false });
   });
 
   it('delegates getCard() with procurement.view, passing readOptions as the third argument', async () => {
@@ -92,7 +98,7 @@ describe('OnecDocumentsService.list / getCard permission gate', () => {
     const currentUser = user(['procurement.view']);
 
     await expect(service.getCard(currentUser, 501, false)).resolves.toBe(expected);
-    expect(getCard).toHaveBeenCalledWith(currentUser, 501, { procurementEnabled: false, canSeeAmounts: false });
+    expect(getCard).toHaveBeenCalledWith(currentUser, 501, { procurementEnabled: false, canSeeAmounts: false, supplyWorkspaceEnabled: false });
   });
 });
 
