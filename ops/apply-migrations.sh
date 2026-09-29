@@ -2471,7 +2471,7 @@ probe_file() {
                            AND pg_get_constraintdef(oid) LIKE '%neutral%'
                       );" ;;
     # «Переделка», миграция A: статус, причины, круги, round_no, очередь realtime, guard'ы.
-    210_order_rework_rounds*) probe_all \
+    220_order_rework_rounds*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM public.order_statuses WHERE order_status_code='rework' AND sort_order=45)" \
       "SELECT EXISTS (SELECT 1 FROM public.order_rework_reasons WHERE code='unclarified' AND is_system)" \
       "$(q_tbl order_production_rounds)" \
@@ -2494,14 +2494,14 @@ probe_file() {
       "$(q_trg ctrg_orders_rework_round_consistency)" \
       "$(q_trg ctrg_order_production_rounds_consistency)" ;;
     # «Переделка», миграция B: старые индексы «этап один раз» удалены, DB command boundary событий этапов.
-    211_order_rework_rounds_stage_boundary*) probe_all \
+    221_order_rework_rounds_stage_boundary*) probe_all \
       "SELECT to_regclass('public.uq_pse_detail_status_once') IS NULL AND to_regclass('public.uq_pse_order_status_once') IS NULL" \
       "$(q_idx uq_pse_detail_status_round)" \
       "$(q_idx uq_pse_order_status_round)" \
       "$(q_trg trg_production_status_events_command_boundary)" \
       "$(q_fun_hash 'public.trg_production_status_events_command_boundary()' 3e164baf56866d058a62346908295f10)" ;;
     # «Переделка»: закрытие открытого круга при «Готов к выдаче»/«Выдан»/«Завершен» любым писателем.
-    212_order_rework_round_closure*) probe_all \
+    222_order_rework_round_closure*) probe_all \
       "$(q_trg trg_orders_close_rework_round)" \
       "$(q_fun_hash 'public.trg_orders_close_rework_round()' b5591f65ae646e55dd5232ad77f8cac7)" ;;
     # Сид 203 — хотя бы один склад (склад можно переименовать; после 205 повторный сид без ключа 1С невозможен).
@@ -2856,13 +2856,13 @@ verify_applied_effect() {
     205_warehouses_onec_key_required*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|210_order_rework_rounds*)
+    209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|220_order_rework_rounds*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    211_order_rework_rounds_stage_boundary*)
+    221_order_rework_rounds_stage_boundary*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    212_order_rework_round_closure*)
+    222_order_rework_round_closure*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)

@@ -296,26 +296,29 @@ extend the conversion map. Selection excludes the manual Variant-B side files
 (`*_preflight/_verify/_rollback.sql`) and `*.test.ts`. Override the target with
 `--container`, `--user`, `--db`, `--dir`.
 
-### Migrations 210/211 — production rounds («Переделка»): order of rollout
+### Migrations 220–222 — production rounds («Переделка»): order of rollout
 
-`210_order_rework_rounds` is additive and safe with the previous backend.
-`211_order_rework_rounds_stage_boundary` must be applied **only after**:
+`220_order_rework_rounds` is additive and safe with the previous backend.
+`221_order_rework_rounds_stage_boundary` must be applied **only after**:
 
 1. the backend that writes round-aware stage events (commit
    «round-aware stage events», migration A) runs on every instance;
 2. the frontend writes production stages through the backend:
    `backendProductionActions` is `true` in the runtime config (check
-   `/api/runtime-config`); after 211 direct Hasura writes to
+   `/api/runtime-config`); after 221 direct Hasura writes to
    `production_status_events` are rejected (`STAGE_EVENT_WRITE_REQUIRES_BACKEND`)
    and the Hasura insert/update/delete permissions on that table are removed.
 
-After 211 do not roll the backend back below migration A: the old
+After 221 do not roll the backend back below migration A: the old
 `ON CONFLICT (detail_id|order_id, production_status_id)` no longer has an index.
 
-Rollback of 211 (only while no production round > 1 exists; otherwise it refuses):
-`psql -v ON_ERROR_STOP=1 -f backend/db/rollback/211_order_rework_rounds_stage_boundary.down.sql`
+`222_order_rework_round_closure` (closes an open round when the order reaches
+«Готов к выдаче»/«Выдан»/«Завершен») goes with 220/221, before the rework flag is enabled.
+
+Rollback of 221 (only while no production round > 1 exists; otherwise it refuses):
+`psql -v ON_ERROR_STOP=1 -f backend/db/rollback/221_order_rework_rounds_stage_boundary.down.sql`
 — one transaction: drops the stage-event boundary, restores the «stage once»
-indexes and removes the 211 ledger row. Hasura write permissions are not restored.
+indexes and removes the 221 ledger row. Hasura write permissions are not restored.
 
 ### auto — one command for a freshly restored prod dump
 

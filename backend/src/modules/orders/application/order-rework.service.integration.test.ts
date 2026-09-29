@@ -14,7 +14,7 @@ import { parseCreateStatusAutomationRuleRequest } from '../../status-automation/
 import { changeOrderStatusFromAutomationInTransaction } from '../../production-actions/adapters/pg-production-action-repository';
 
 // Real PostgreSQL proof of the rework commands («Переделка», slice 4). Gated on
-// REWORK_INTEGRATION_DATABASE_URL (scratch DB: erp schema + migrations 210/211).
+// REWORK_INTEGRATION_DATABASE_URL (scratch DB: erp schema + migrations 220–222).
 // Creates and removes its own `E2E-Тест` fixtures.
 const databaseUrl = process.env.REWORK_INTEGRATION_DATABASE_URL;
 

@@ -9,7 +9,7 @@
 --
 -- 1. Удаляются старые unique-индексы «этап один раз на деталь/заказ»:
 --    повтор этапа в следующем круге становится возможен (уникальность —
---    (detail|order, status, round_no) из миграции 210).
+--    (detail|order, status, round_no) из миграции 220).
 -- 2. DB command boundary на production_status_events: INSERT/UPDATE/DELETE
 --    только в транзакции backend-писателя (erp.pse_writer='backend') или
 --    backend-импорта snapshot ('historical_import'); для 'backend' запись

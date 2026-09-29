@@ -289,7 +289,7 @@ export const envSchema = z
     // Отметки «Закуплено» у материалов заказа (команды и чтение таблицы order_resource_procurement).
     BACKEND_RESOURCE_PROCUREMENT_ENABLED: booleanFromEnv.default(false),
     BACKEND_PROCUREMENT_WORKSPACE_ENABLED: booleanFromEnv.default(false),
-    // «Переделка»: команды кругов производства (миграции 210/211). Default off.
+    // «Переделка»: команды кругов производства (миграции 220–222). Default off.
     BACKEND_ORDER_REWORK_ENABLED: booleanFromEnv.default(false),
     BACKEND_FILM_CATALOG_IMPORT_ENABLED: booleanFromEnv.default(false),
     BACKEND_INVENTORY_ENABLED: booleanFromEnv.default(false),

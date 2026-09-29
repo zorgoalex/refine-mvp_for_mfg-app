@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const sql = readFileSync(new URL('./212_order_rework_round_closure.sql', import.meta.url), 'utf8');
+const sql = readFileSync(new URL('./222_order_rework_round_closure.sql', import.meta.url), 'utf8');
 const runner = readFileSync(new URL('../../../ops/apply-migrations.sh', import.meta.url), 'utf8');
 
-describe('212 order rework round closure migration', () => {
+describe('222 order rework round closure migration', () => {
   it('closes the open round on ready/issued/completed from any writer, in one transaction', () => {
     expect(sql).toMatch(/^BEGIN;$/m);
     expect(sql.trimEnd().endsWith('COMMIT;')).toBe(true);
@@ -25,9 +25,9 @@ describe('212 order rework round closure migration', () => {
   });
 
   it('is probed before the ledger records it', () => {
-    expect(runner).toContain('212_order_rework_round_closure*) probe_all');
+    expect(runner).toContain('222_order_rework_round_closure*) probe_all');
     expect(runner).toContain("q_fun_hash 'public.trg_orders_close_rework_round()' b5591f65ae646e55dd5232ad77f8cac7");
     const verify = runner.slice(runner.indexOf('verify_applied_effect() {'));
-    expect(verify).toMatch(/212_order_rework_round_closure\*\)\s+probe_file "\$f" \|\| die/);
+    expect(verify).toMatch(/222_order_rework_round_closure\*\)\s+probe_file "\$f" \|\| die/);
   });
 });

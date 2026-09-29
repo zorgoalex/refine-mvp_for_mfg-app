@@ -4,15 +4,15 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { DatabaseClient } from '../../src/database/database.types';
 import { PgOrderReadRepository } from '../../src/modules/orders/adapters/pg-order-read-repository';
 
-// Real PostgreSQL proof of migration 210 («Переделка», migration A): old-backend
+// Real PostgreSQL proof of migration 220 («Переделка», migration A): old-backend
 // compatibility, the rework status guard, the commit-time status/round
 // consistency, realtime stream pre-creation and deferred emission.
 // Gated on REWORK_INTEGRATION_DATABASE_URL (a scratch DB with the erp schema and
-// migration 210 applied); skips cleanly without it. Creates and removes its own
+// migration 220 applied); skips cleanly without it. Creates and removes its own
 // `E2E-Тест` fixtures.
 const databaseUrl = process.env.REWORK_INTEGRATION_DATABASE_URL;
 
-describe.skipIf(!databaseUrl)('210 order rework rounds (real PostgreSQL)', () => {
+describe.skipIf(!databaseUrl)('220 order rework rounds (real PostgreSQL)', () => {
   let pool: Pool;
   let userId: number;
   let clientId: number;
@@ -22,7 +22,7 @@ describe.skipIf(!databaseUrl)('210 order rework rounds (real PostgreSQL)', () =>
   let status: { draft: number; ready: number; rework: number };
   let stage: { drawn: number; cut: number };
   const tag = randomUUID().slice(0, 8);
-  // Migration B (211) drops the old «stage once» indexes: phase-A-only checks skip then.
+  // Migration B (221) drops the old «stage once» indexes: phase-A-only checks skip then.
   let phaseB = false;
 
   async function inTx<T>(run: (client: PoolClient) => Promise<T>): Promise<T> {
@@ -105,6 +105,24 @@ describe.skipIf(!databaseUrl)('210 order rework rounds (real PostgreSQL)', () =>
     try {
       if (orderId) {
         await pool.query('DELETE FROM realtime_event_log WHERE order_id = $1', [orderId]);
+        await pool.query('DELETE FROM audit_log_related_entity WHERE audit_id IN (SELECT audit_id FROM audit_log WHERE related_order_id = $1)', [orderId]);
+        await pool.query('DELETE FROM audit_log WHERE related_order_id = $1', [orderId]);
+        await pool.query("DELETE FROM outbox_events WHERE aggregate_type = 'order' AND aggregate_id = $1", [String(orderId)]);
+        // Append-only MDF board history (written by DB triggers on status changes): remove with triggers off.
+        const history = await pool.connect();
+        try {
+          await history.query('BEGIN');
+          await history.query('SET LOCAL session_replication_role = replica');
+          await history.query('DELETE FROM mdf_board_history_state WHERE order_id = $1', [orderId]);
+          await history.query('DELETE FROM mdf_board_history_coverage WHERE order_id = $1', [orderId]);
+          await history.query('DELETE FROM mdf_board_history_events WHERE order_id = $1', [orderId]);
+          await history.query('COMMIT');
+        } catch (error) {
+          await history.query('ROLLBACK');
+          throw error;
+        } finally {
+          history.release();
+        }
         await pool.query('DELETE FROM orders WHERE order_id = $1', [orderId]);
       }
       if (projectId) await pool.query('DELETE FROM projects WHERE project_id = $1', [projectId]);
@@ -204,22 +222,32 @@ describe.skipIf(!databaseUrl)('210 order rework rounds (real PostgreSQL)', () =>
       );
     });
     await expect(inTx((client) => client.query(
-      'UPDATE orders SET order_status_id = $2 WHERE order_id = $1',
-      [orderId, status.ready],
-    ))).rejects.toThrow(/ORDER_REWORK_ROUND_OPEN_AT_TERMINAL/);
-    await expect(inTx((client) => client.query(
       `INSERT INTO order_production_rounds
          (order_id, round_no, mode, reason_id, from_order_status_id, from_order_production_round)
        VALUES ($1, 3, 'after_ready', $2, $3, 2)`,
       [orderId, reasonId, status.ready],
     ))).rejects.toThrow(/uq_order_production_rounds_open/);
-    await inTx(async (client) => {
-      await client.query(
-        "UPDATE order_production_rounds SET closed_at = now(), close_reason = 'ready' WHERE order_id = $1 AND round_no = 2",
-        [orderId],
-      );
-      await client.query('UPDATE orders SET order_status_id = $2, production_round = 2 WHERE order_id = $1', [orderId, status.ready]);
-    });
+    // With migration 222 a terminal status closes the open round; without it the commit is refused.
+    const closure = (await pool.query(
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_orders_close_rework_round') AS b",
+    )).rows[0].b === true;
+    if (closure) {
+      await inTx((client) => client.query('UPDATE orders SET order_status_id = $2 WHERE order_id = $1', [orderId, status.ready]));
+      const closed = (await pool.query('SELECT close_reason FROM order_production_rounds WHERE order_id = $1 AND round_no = 2', [orderId])).rows[0];
+      expect(closed.close_reason).toBe('ready');
+    } else {
+      await expect(inTx((client) => client.query(
+        'UPDATE orders SET order_status_id = $2 WHERE order_id = $1',
+        [orderId, status.ready],
+      ))).rejects.toThrow(/ORDER_REWORK_ROUND_OPEN_AT_TERMINAL/);
+      await inTx(async (client) => {
+        await client.query(
+          "UPDATE order_production_rounds SET closed_at = now(), close_reason = 'ready' WHERE order_id = $1 AND round_no = 2",
+          [orderId],
+        );
+        await client.query('UPDATE orders SET order_status_id = $2, production_round = 2 WHERE order_id = $1', [orderId, status.ready]);
+      });
+    }
     const order = (await pool.query('SELECT order_status_id, production_round, last_round_no FROM orders WHERE order_id = $1', [orderId])).rows[0];
     expect(Number(order.order_status_id)).toBe(status.ready);
     expect(Number(order.last_round_no)).toBe(2);

@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const sql = readFileSync(new URL('./211_order_rework_rounds_stage_boundary.sql', import.meta.url), 'utf8');
+const sql = readFileSync(new URL('./221_order_rework_rounds_stage_boundary.sql', import.meta.url), 'utf8');
 const runner = readFileSync(new URL('../../../ops/apply-migrations.sh', import.meta.url), 'utf8');
 
-describe('211 order rework rounds stage boundary migration (B)', () => {
+describe('221 order rework rounds stage boundary migration (B)', () => {
   it('drops only the old «stage once» indexes', () => {
     expect(sql).toContain('DROP INDEX IF EXISTS public.uq_pse_detail_status_once;');
     expect(sql).toContain('DROP INDEX IF EXISTS public.uq_pse_order_status_once;');
@@ -30,18 +30,18 @@ describe('211 order rework rounds stage boundary migration (B)', () => {
     expect(sql).toMatch(/^BEGIN;$/m);
     expect(sql.trimEnd().endsWith('COMMIT;')).toBe(true);
     const { readFileSync: read } = await import('node:fs');
-    const down = read(new URL('../rollback/211_order_rework_rounds_stage_boundary.down.sql', import.meta.url), 'utf8');
+    const down = read(new URL('../rollback/221_order_rework_rounds_stage_boundary.down.sql', import.meta.url), 'utf8');
     expect(down).toMatch(/^BEGIN;$/m);
-    expect(down).toContain('REWORK_211_ROLLBACK_BLOCKED');
+    expect(down).toContain('REWORK_221_ROLLBACK_BLOCKED');
     expect(down).toContain('LOCK TABLE public.production_status_events IN ACCESS EXCLUSIVE MODE NOWAIT;');
-    expect(down.indexOf('ACCESS EXCLUSIVE MODE NOWAIT')).toBeLessThan(down.indexOf('REWORK_211_ROLLBACK_BLOCKED'));
-    expect(down).toContain("DELETE FROM public.schema_migrations WHERE filename = '211_order_rework_rounds_stage_boundary.sql'");
+    expect(down.indexOf('ACCESS EXCLUSIVE MODE NOWAIT')).toBeLessThan(down.indexOf('REWORK_221_ROLLBACK_BLOCKED'));
+    expect(down).toContain("DELETE FROM public.schema_migrations WHERE filename = '221_order_rework_rounds_stage_boundary.sql'");
   });
 
   it('is probed before the ledger records it', () => {
-    expect(runner).toContain('211_order_rework_rounds_stage_boundary*) probe_all');
+    expect(runner).toContain('221_order_rework_rounds_stage_boundary*) probe_all');
     expect(runner).toContain("q_fun_hash 'public.trg_production_status_events_command_boundary()' 3e164baf56866d058a62346908295f10");
     const verify = runner.slice(runner.indexOf('verify_applied_effect() {'));
-    expect(verify).toMatch(/211_order_rework_rounds_stage_boundary\*\)\s+probe_file "\$f" \|\| die/);
+    expect(verify).toMatch(/221_order_rework_rounds_stage_boundary\*\)\s+probe_file "\$f" \|\| die/);
   });
 });

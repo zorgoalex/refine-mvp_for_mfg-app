@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const sql = readFileSync(new URL('./210_order_rework_rounds.sql', import.meta.url), 'utf8');
+const sql = readFileSync(new URL('./220_order_rework_rounds.sql', import.meta.url), 'utf8');
 const sql098 = readFileSync(new URL('./098_order_realtime_producer_bridge.sql', import.meta.url), 'utf8');
 const runner = readFileSync(new URL('../../../ops/apply-migrations.sh', import.meta.url), 'utf8');
 
@@ -13,7 +13,7 @@ function emitOneBody(source: string): string {
   return source.slice(start, end);
 }
 
-describe('210 order rework rounds migration (A)', () => {
+describe('220 order rework rounds migration (A)', () => {
   it('runs as one transaction', () => {
     expect(sql).toMatch(/^BEGIN;$/m);
     expect(sql.trimEnd().endsWith('COMMIT;')).toBe(true);
@@ -57,15 +57,15 @@ describe('210 order rework rounds migration (A)', () => {
   });
 
   it('emit_one without erp.realtime_defer is byte-identical to 098', () => {
-    const body210 = emitOneBody(sql);
-    const deferBlock = body210.slice(
-      body210.indexOf('  -- Операции кругов «Переделки» не берут stream'),
-      body210.indexOf('  INSERT INTO order_realtime_stream (order_id)'),
+    const body220 = emitOneBody(sql);
+    const deferBlock = body220.slice(
+      body220.indexOf('  -- Операции кругов «Переделки» не берут stream'),
+      body220.indexOf('  INSERT INTO order_realtime_stream (order_id)'),
     );
     expect(deferBlock).toContain("current_setting('erp.realtime_defer', true)");
     expect(deferBlock).toContain('INSERT INTO order_realtime_deferred');
     expect(deferBlock).toContain('RETURN false;');
-    expect(body210.replace(deferBlock, '')).toBe(emitOneBody(sql098));
+    expect(body220.replace(deferBlock, '')).toBe(emitOneBody(sql098));
     expect(sql).toContain("IS 'order-realtime-producer-bridge-v1'");
   });
 
@@ -81,10 +81,10 @@ describe('210 order rework rounds migration (A)', () => {
   });
 
   it('is probed before the ledger records it, and 098 accepts the redefined emit_one', () => {
-    expect(runner).toContain('210_order_rework_rounds*) probe_all');
+    expect(runner).toContain('220_order_rework_rounds*) probe_all');
     expect(runner).toContain("q_fun_hash 'order_realtime_emit_one(bigint,text[],bigint[],text)' 04eabdca6d8369194f6937ca6d1b1fc6");
     expect(runner).toContain("q_fun_hash_either 'order_realtime_emit_one(bigint,text[],bigint[],text)' bbf8a2f2fad9cd1483a144244fe9d522 04eabdca6d8369194f6937ca6d1b1fc6");
     const verify = runner.slice(runner.indexOf('verify_applied_effect() {'));
-    expect(verify).toMatch(/210_order_rework_rounds\*\)\s+probe_file "\$f" \|\| die/);
+    expect(verify).toMatch(/220_order_rework_rounds\*\)\s+probe_file "\$f" \|\| die/);
   });
 });
