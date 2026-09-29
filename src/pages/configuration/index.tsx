@@ -31,6 +31,7 @@ import {
   FileExcelOutlined,
   SafetyCertificateOutlined,
   MessageOutlined,
+  ShoppingOutlined,
 } from '@ant-design/icons';
 import { useAppSettings, SETTING_KEYS, CurrencySettings } from '../../hooks/useAppSettings';
 import { featureFlags } from '../../config/featureFlags';
@@ -47,6 +48,7 @@ import { LabelsConfigTab } from './components/LabelsConfigTab';
 import { FinancialLayerAccessMatrix } from './components/FinancialLayerAccessMatrix';
 import { ExportTemplatesConfigTab } from './components/ExportTemplatesConfigTab';
 import { ProductionThresholdsConfigTab } from './components/ProductionThresholdsConfigTab';
+import { ProcurementSettingsTab } from './components/ProcurementSettingsTab';
 import {
   RolesPermissionsMatrixTab,
   canViewRolesMatrixTab,
@@ -92,6 +94,7 @@ export const filterConfigurationTabItems = <T extends { key: string }>(
   whatsappSettingsVisible = false,
   messageProcessingVisible = false,
   dailyDigestVisible = false,
+  procurementSettingsVisible = false,
 ): T[] =>
   items.filter((item) => {
     if (item.key === 'message-processing') return messageProcessingVisible;
@@ -99,6 +102,7 @@ export const filterConfigurationTabItems = <T extends { key: string }>(
     if (item.key === 'whatsapp-connection' || item.key === 'whatsapp-automation' || item.key === 'whatsapp-technical-logs') {
       return whatsappSettingsVisible;
     }
+    if (item.key === 'procurement-settings') return procurementSettingsVisible;
     if (generalSettingsVisible) return true;
     if (deadlineSettingsVisible && item.key === 'production') return true;
     return false;
@@ -598,6 +602,8 @@ export const ConfigurationPage: React.FC = () => {
     featureFlags.useBackendWhatsApp &&
     (!featureFlags.useBackendPermissions || can('whatsapp.view') || can('whatsapp.manage'));
   const dailyDigestVisible = dailyDigestTabVisible(authSession.getUser()?.permissions);
+  const procurementSettingsVisible =
+    !featureFlags.useBackendPermissions || can('settings.manage') || can('procurement.view');
 
   const allTabItems = [
     ...(can('message_signals.manage_config') ? [{ key: 'message-processing', label: 'Обработка сообщений', children: <MessageProcessingConfig /> }] : []),
@@ -724,6 +730,16 @@ export const ConfigurationPage: React.FC = () => {
       children: <FinanceConfigTab />,
     },
     {
+      key: 'procurement-settings',
+      label: (
+        <span>
+          <ShoppingOutlined />
+          Закупки
+        </span>
+      ),
+      children: <ProcurementSettingsTab />,
+    },
+    {
       key: 'table-visibility',
       label: (
         <span>
@@ -803,6 +819,7 @@ export const ConfigurationPage: React.FC = () => {
     whatsappSettingsVisible,
     can('message_signals.manage_config'),
     dailyDigestVisible,
+    procurementSettingsVisible,
   );
 
   const availableTabKeys = tabItems.map((item) => item.key);

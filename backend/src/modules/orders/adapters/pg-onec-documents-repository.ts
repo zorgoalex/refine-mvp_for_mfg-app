@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { auditService } from '../../../common/audit/audit.service';
 import { computeDiff } from '../../../common/audit/audit-diff';
@@ -101,7 +101,7 @@ interface AllocationRow extends QueryResultRow {
   visible: boolean;
 }
 
-interface LockedLineRow extends QueryResultRow {
+export interface LockedLineRow extends QueryResultRow {
   is_document_total: boolean;
   onec_document_line_id: string | number;
   onec_document_id: string | number;
@@ -115,6 +115,9 @@ interface LockedLineRow extends QueryResultRow {
   deleted_in_onec: boolean;
   doc_amount: string | number | null;
   number: string;
+  doc_supplier_id: string | number | null;
+  doc_counterparty_ref_key: string | null;
+  doc_counterparty_name: string | null;
 }
 
 /**
@@ -314,6 +317,8 @@ export class PgOnecDocumentsRepository {
         role, quantity: role === 'receipt' ? measure : null, amount: role === 'payment' ? measure : null,
         before, after: procurementSnapshot(afterRow), version: Number(afterRow.version),
       });
+      // Последним шагом, после всех блокировок (план §4.3, R5-2): первый записанный поставщик не затирается.
+      if (role === 'receipt') await recordResourceSuppliers(tx, [{ kind: key.kind, refId: key.refId, line }]);
       return { changed: true, allocationId, orderId: order.orderId, resourceKey: command.resourceKey,
         line: await currentLine(tx, order, command.resourceKey, command.currentUser) };
     });
@@ -534,7 +539,9 @@ function allocationDto(row: AllocationRow, options: OnecDocumentReadOptions): On
 async function lockDocumentLine(tx: DatabaseClient, documentId: number, lineId: number): Promise<LockedLineRow> {
   const line = (await tx.query<LockedLineRow>(
     `SELECT l.onec_document_line_id, l.onec_document_id, l.quantity, l.amount, l.unit_code, l.is_document_total,
-            l.sheet_material_type_id, l.film_id, d.doc_kind, d.posted, d.deleted_in_onec, d.amount AS doc_amount, d.number
+            l.sheet_material_type_id, l.film_id, d.doc_kind, d.posted, d.deleted_in_onec, d.amount AS doc_amount, d.number,
+            d.supplier_id AS doc_supplier_id, d.counterparty_ref_key::text AS doc_counterparty_ref_key,
+            d.counterparty_name AS doc_counterparty_name
        FROM onec_document_lines l
        JOIN onec_documents d ON d.onec_document_id = l.onec_document_id
       WHERE l.onec_document_line_id = $1 AND l.onec_document_id = $2
@@ -588,6 +595,45 @@ async function allocatedOnLine(tx: DatabaseClient, lineId: number, role: OnecAll
   )).rows[0].used);
 }
 
+/** Ключ поставщика документа: s:<supplier_id> | c:<1C ref> | n:<имя>; null — поставщик не указан. */
+export function documentSupplierKey(line: Pick<LockedLineRow, 'doc_supplier_id' | 'doc_counterparty_ref_key' | 'doc_counterparty_name'>): string | null {
+  if (line.doc_supplier_id !== null && line.doc_supplier_id !== undefined) return `s:${Number(line.doc_supplier_id)}`;
+  if (line.doc_counterparty_ref_key) return `c:${line.doc_counterparty_ref_key}`;
+  // Имя контрагента из 1С — любой длины; ключ фиксированной длины, как md5(lower(btrim(...))) в миграции 204.
+  // btrim() в SQL убирает только пробелы — так же и здесь, чтобы ключи совпадали.
+  const name = line.doc_counterparty_name?.replace(/^ +| +$/g, '');
+  return name ? `n:${createHash('md5').update(name.toLowerCase(), 'utf8').digest('hex')}` : null;
+}
+
+/**
+ * Запись поставщиков материалов из приходов (план §4.3). Только INSERT … ON CONFLICT DO NOTHING:
+ * существующая строка никогда не меняется. Вставка может ждать конкурирующую вставку того же
+ * ключа, поэтому все писатели (распределения, ETL) вставляют ключи одним шагом в конце
+ * транзакции, после остальных блокировок, в каноническом порядке (kind, ref, key) — R5-2.
+ */
+export async function recordResourceSuppliers(
+  tx: DatabaseClient,
+  items: Array<{ kind: OrderResourceKind; refId: number; line: LockedLineRow }>,
+): Promise<void> {
+  const rows = new Map<string, { kind: OrderResourceKind; refId: number; key: string; line: LockedLineRow }>();
+  for (const item of items) {
+    const key = documentSupplierKey(item.line);
+    if (key === null) continue;
+    rows.set(`${item.kind}\u0000${String(item.refId).padStart(20, '0')}\u0000${key}`, { ...item, key });
+  }
+  for (const [, row] of [...rows.entries()].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))) {
+    await tx.query(
+      `INSERT INTO resource_suppliers (resource_kind, sheet_material_type_id, film_id, supplier_key, supplier_id,
+          counterparty_name, first_onec_document_id, source)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'onec_receipt')
+       ON CONFLICT DO NOTHING`,
+      [row.kind, row.kind === 'sheet_material' ? row.refId : null, row.kind === 'film' ? row.refId : null, row.key,
+        row.line.doc_supplier_id === null ? null : Number(row.line.doc_supplier_id),
+        row.line.doc_counterparty_name?.trim() || null, Number(row.line.onec_document_id)],
+    );
+  }
+}
+
 async function upsertProcurementForAllocation(tx: DatabaseClient, input: {
   order: LockedOrder;
   kind: OrderResourceKind;
@@ -602,7 +648,7 @@ async function upsertProcurementForAllocation(tx: DatabaseClient, input: {
     if (marksPurchase && demand) {
       await tx.query(
         `UPDATE order_resource_procurement
-            SET purchased = true, origin = 'manual', quantity_at_mark = $2, unit_at_mark = $3,
+            SET purchased = true, origin = 'onec', quantity_at_mark = $2, unit_at_mark = $3,
                 demand_fingerprint_at_mark = $4, marked_by = $5, marked_at = now(),
                 version = version + 1, updated_at = now(), updated_by = $5
           WHERE order_resource_procurement_id = $1`,
@@ -618,7 +664,7 @@ async function upsertProcurementForAllocation(tx: DatabaseClient, input: {
     return Number(row.order_resource_procurement_id);
   }
   const values = marksPurchase && demand
-    ? [true, 'manual', demand.quantity, demand.unit, demand.fingerprint, actor.userId]
+    ? [true, 'onec', demand.quantity, demand.unit, demand.fingerprint, actor.userId]
     : [false, null, null, null, null, null];
   return Number((await tx.query<{ id: string }>(
     `INSERT INTO order_resource_procurement (

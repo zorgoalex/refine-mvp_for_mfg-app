@@ -13,6 +13,7 @@ const pages = [
   ['src/pages/order_resource_requirements/ResourceDemandCard.tsx', 1],
   ['src/pages/order_resource_requirements/SplitPanelView.tsx', 1],
   ['src/pages/onec_purchase_documents/list.tsx', 1],
+  ['src/pages/procurement_workspace/WorklistSection.tsx', 2],
   ['src/pages/orders/list.tsx', 1],
   ['src/pages/orderStatusBoard/OrderStatusBoardPage.tsx', 7],
   ['src/pages/calendar/components/CalendarBoard.tsx', 4],

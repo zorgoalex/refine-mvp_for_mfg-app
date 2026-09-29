@@ -1134,6 +1134,7 @@ export function capabilities(options: OrderResourceReadOptions): OrderResourceCa
     byMaterial: options.procurementEnabled,
     cardDetails: options.procurementEnabled,
     onecDocuments: options.procurementEnabled,
+    supplyWorkspace: options.procurementEnabled && options.supplyWorkspaceEnabled === true,
   };
 }
 

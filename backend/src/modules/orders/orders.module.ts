@@ -55,6 +55,9 @@ import { OnecDocumentsController } from './http/onec-documents.controller';
 import { OnecDocumentsService } from './application/onec-documents.service';
 import { PgOnecDocumentsRepository } from './adapters/pg-onec-documents-repository';
 import { PgOrderResourceProcurementRepository } from './adapters/pg-order-resource-procurement-repository';
+import { PgProcurementWorkspaceRepository } from './adapters/pg-procurement-workspace-repository';
+import { ProcurementWorkspaceService } from './application/procurement-workspace.service';
+import { ProcurementWorkspaceController } from './http/procurement-workspace.controller';
 import { OrderSnapshotController } from './http/order-snapshot.controller';
 import { OrdersController } from './http/orders.controller';
 import { OrderHdfSettingsController } from './http/order-hdf-settings.controller';
@@ -90,6 +93,7 @@ export function shouldEnableOrderDeadlineSync(input: {
     OrderResourceDemandController,
     OrderResourceProcurementController,
     OnecDocumentsController,
+    ProcurementWorkspaceController,
     OrderHdfSettingsController,
     OrdersController,
   ],
@@ -201,6 +205,15 @@ export function shouldEnableOrderDeadlineSync(input: {
     {
       provide: OrderRefreshService,
       useFactory: (database: DatabaseService) => new OrderRefreshService({ database }),
+      inject: [DatabaseService],
+    },
+    {
+      provide: ProcurementWorkspaceService,
+      useFactory: (database: DatabaseService) =>
+        new ProcurementWorkspaceService({
+          repository: new PgProcurementWorkspaceRepository(database),
+          auditClient: database,
+        }),
       inject: [DatabaseService],
     },
     {

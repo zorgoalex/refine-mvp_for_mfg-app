@@ -116,9 +116,11 @@ export class OrderResourceDemandController {
   }
 
   private readOptions(user: { permissions: readonly string[] }): OrderResourceReadOptions {
+    const flags = this.runtimeConfig.getFeatureFlags();
     return {
-      procurementEnabled: this.runtimeConfig.getFeatureFlags().resourceProcurementEnabled === true,
+      procurementEnabled: flags.resourceProcurementEnabled === true,
       canSeeAmounts: user.permissions.includes('finance.view'),
+      supplyWorkspaceEnabled: flags.procurementWorkspaceEnabled === true,
     };
   }
 }

@@ -447,7 +447,7 @@ describe.skipIf(!url)('order resource procurement — real PostgreSQL, committed
       const hasUnpurchased = order.lines.some((candidate) => !candidate.orphan && !candidate.procurement.purchased);
       expect(ids.has(order.orderId)).toBe(hasUnpurchased);
     }
-    expect(all.capabilities).toEqual({ procurement: true, byMaterial: true, cardDetails: true, onecDocuments: true });
+    expect(all.capabilities).toEqual({ procurement: true, byMaterial: true, cardDetails: true, onecDocuments: true, supplyWorkspace: false });
   });
 
   it('aggregates by material across the filtered orders with per-order participants', async () => {

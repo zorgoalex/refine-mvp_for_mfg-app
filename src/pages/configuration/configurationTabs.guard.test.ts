@@ -30,6 +30,32 @@ describe('configuration tabs layout', () => {
     expect(source).toContain('<ExportTemplatesConfigTab />');
   });
 
+  it('registers the procurement settings tab gated on settings.manage or procurement.view', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, 'index.tsx'), 'utf8');
+    expect(source).toContain("key: 'procurement-settings'");
+    expect(source).toContain('<ProcurementSettingsTab />');
+    expect(source).toContain(
+      "can('settings.manage') || can('procurement.view')",
+    );
+  });
+
+  it('shows the procurement settings tab only to settings.manage/procurement.view holders', () => {
+    const items = [
+      { key: 'orders' },
+      { key: 'procurement-settings' },
+    ];
+
+    expect(filterConfigurationTabItems(items, false, false, false, false, false, false)).toEqual([]);
+    expect(filterConfigurationTabItems(items, false, false, false, false, false, true)).toEqual([
+      { key: 'procurement-settings' },
+    ]);
+    // A settings.manage holder also has generalSettingsVisible=true, but the
+    // dedicated flag must still be threaded through for the tab to appear.
+    expect(filterConfigurationTabItems(items, true, false, false, false, false, false)).toEqual([
+      { key: 'orders' },
+    ]);
+  });
+
   it('does not register journals inside the configuration screen', () => {
     const source = fs.readFileSync(path.resolve(__dirname, 'index.tsx'), 'utf8');
     expect(source).not.toContain("key: 'history-journal'");

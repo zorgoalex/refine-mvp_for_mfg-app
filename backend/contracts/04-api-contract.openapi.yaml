@@ -4059,6 +4059,177 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/worklist:
+    get:
+      tags:
+        - Orders
+      operationId: listProcurementWorklist
+      summary: Экран снабжения — рабочий список «заказ × материал»
+      description: >-
+        Покрытие (пришло/заказано/дефицит), срок «нужно к» (плановая дата − leadDays рабочих дней), срочность,
+        основной поставщик (ручной из справочника, иначе первый по приходам). Все фильтры — на сервере; строки
+        отдаются целиком (до 3000), листание — на клиенте. Заказы — только в scope orders.view, незавершённые и
+        невыданные, в окне плановой даты. Требует BACKEND_RESOURCE_PROCUREMENT_ENABLED и
+        BACKEND_PROCUREMENT_WORKSPACE_ENABLED, иначе 503 PROCUREMENT_WORKSPACE_DISABLED.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      parameters:
+        - { name: preset, in: query, required: false, schema: { type: string, enum: [action, urgent, all], default: action } }
+        - { name: search, in: query, required: false, schema: { type: string, maxLength: 200 } }
+        - { name: dueFrom, in: query, required: false, schema: { type: string, format: date } }
+        - { name: dueTo, in: query, required: false, schema: { type: string, format: date } }
+        - { name: kind, in: query, required: false, schema: { type: string, enum: [sheet_material, film] } }
+        - { name: supplierKey, in: query, required: false, schema: { type: string, maxLength: 300 } }
+        - { name: coverage, in: query, required: false, description: "Через запятую: covered, partial, ordered, none, no_data", schema: { type: string } }
+        - { name: onecDocumentId, in: query, required: false, schema: { type: integer, minimum: 1 } }
+        - { name: groupBy, in: query, required: false, schema: { type: string, enum: [none, supplier, material], default: none } }
+        - { name: sort, in: query, required: false, schema: { type: string, enum: [due, deficit, order, material], default: due } }
+      responses:
+        '200':
+          description: Строки, группы, счётчики пресетов, итоги дефицита, настройки срока
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/worklist/saved-views:
+    get:
+      tags:
+        - Orders
+      operationId: getProcurementSavedViews
+      summary: Сохранённые представления рабочего списка текущего пользователя
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      responses:
+        '200':
+          description: "{ views: [{ id, name, query }] }"
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      tags:
+        - Orders
+      operationId: replaceProcurementSavedViews
+      summary: Заменить сохранённые представления (не больше 20)
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [views]
+              properties:
+                views:
+                  type: array
+                  maxItems: 20
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [id, name, query]
+                    properties:
+                      id: { type: string, format: uuid }
+                      name: { type: string, minLength: 1, maxLength: 60 }
+                      query: { type: string, maxLength: 1000 }
+      responses:
+        '200':
+          description: "{ views: [...] }"
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/settings:
+    get:
+      tags:
+        - Orders
+      operationId: getProcurementSettings
+      summary: Настройки экрана снабжения
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      responses:
+        '200':
+          description: leadDays, criticalDays, soonDays, wastePercent, digestTime, unallocatedAlertDays, overdueWindowDays, version
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      tags:
+        - Orders
+      operationId: updateProcurementSettings
+      summary: Изменить настройки экрана снабжения
+      description: Повтор с теми же значениями — 200 changed=false. Устаревшая версия — 409 PROCUREMENT_SETTINGS_VERSION_CONFLICT (details.settings — актуальные).
+      security:
+        - bearerAuth: []
+      x-permission: settings.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [leadDays, criticalDays, soonDays, wastePercent, digestTime, unallocatedAlertDays, overdueWindowDays, expectedVersion]
+              properties:
+                leadDays: { type: integer, minimum: 0, maximum: 60 }
+                criticalDays: { type: integer, minimum: 0, maximum: 60 }
+                soonDays: { type: integer, minimum: 0, maximum: 60 }
+                wastePercent: { type: number, minimum: 0, maximum: 50 }
+                digestTime: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
+                unallocatedAlertDays: { type: integer, minimum: 1, maximum: 30 }
+                overdueWindowDays: { type: integer, minimum: 1, maximum: 365, description: 'Рабочий список: просроченные заказы не старше стольких дней' }
+                expectedVersion: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Настройки после команды и признак changed
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /api/v1/procurement/onec-documents:
     get:
       tags:

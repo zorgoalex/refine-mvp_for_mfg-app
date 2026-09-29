@@ -115,7 +115,14 @@ function createDefaultHeaderFilters(): HeaderFilterState {
   };
 }
 
-export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = () => {
+export interface OrderResourceRequirementListProps extends IResourceComponentsProps {
+  /** Внутри вкладок страницы: заголовок страницы рисует оболочка (план §1.1). */
+  embedded?: boolean;
+  /** Вкладка скрыта — live-опрос на паузе, состояние экрана сохраняется. */
+  active?: boolean;
+}
+
+export const OrderResourceRequirementList: React.FC<OrderResourceRequirementListProps> = ({ embedded = false, active = true }) => {
   const [page, setPage] = useState(DEFAULT_PAGE);
   const { pageSize, setPageSize: rememberPageSize } = usePageSizePreference(
     'order-resource-requirements:list',
@@ -171,7 +178,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
     ...(unpurchasedOnly ? { unpurchasedOnly: true } : {}),
     ...(onecDocumentFilter ? { onecDocumentId: onecDocumentFilter.documentId } : {}),
   }), [dateRange, deferredSearch, onecDocumentFilter, page, pageSize, unpurchasedOnly]);
-  const { response, loading, error } = useLiveOrderResourceDemands(query, refreshRevision);
+  const { response, loading, error } = useLiveOrderResourceDemands(query, refreshRevision, !active);
   const rows = response?.data ?? EMPTY_RESOURCE_DEMAND_ROWS;
   const capabilities = useMemo(() => resolveResourceCapabilities(response?.capabilities), [response]);
   const triggerRefresh = useCallback(() => setRefreshRevision((value) => value + 1), []);
@@ -446,7 +453,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
   });
 
   return (
-    <LocalizedList title="Потребности заказов в ресурсах">
+    <ListFrame embedded={embedded}>
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         {/* Панель фильтров в одну строку, пока помещается; на узком окне элементы переносятся, без горизонтальной прокрутки. */}
         <Space wrap size={[8, 8]} style={{ width: '100%' }}>
@@ -745,9 +752,15 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
           onDownload={() => downloadResourceDemandReport(report)}
         />
       </Space>
-    </LocalizedList>
+    </ListFrame>
   );
 };
+
+function ListFrame({ embedded, children }: { embedded: boolean; children: React.ReactNode }) {
+  return embedded
+    ? <>{children}</>
+    : <LocalizedList title="Потребности заказов в ресурсах">{children}</LocalizedList>;
+}
 
 const ResourceDemandFilterDropdown: React.FC<
   FilterDropdownProps & {
@@ -1166,7 +1179,7 @@ function compareText(left: string | null | undefined, right: string | null | und
   return (left ?? '').localeCompare(right ?? '', 'ru', { numeric: true, sensitivity: 'base' });
 }
 
-function useLiveOrderResourceDemands(query: OrderResourceDemandQuery, refreshRevision: number) {
+function useLiveOrderResourceDemands(query: OrderResourceDemandQuery, refreshRevision: number, paused = false) {
   const [response, setResponse] = useState<OrderResourceDemandResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1174,6 +1187,8 @@ function useLiveOrderResourceDemands(query: OrderResourceDemandQuery, refreshRev
   const queryKey = JSON.stringify(query);
 
   useEffect(() => {
+    // Скрытая вкладка не опрашивает сервер; при возврате вкладки данные перечитываются.
+    if (paused) return undefined;
     let active = true;
     let inFlight = false;
 
@@ -1216,7 +1231,7 @@ function useLiveOrderResourceDemands(query: OrderResourceDemandQuery, refreshRev
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [query, queryKey, refreshRevision]);
+  }, [query, queryKey, refreshRevision, paused]);
 
   return { response, loading, error };
 }

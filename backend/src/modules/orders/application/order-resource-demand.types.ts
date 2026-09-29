@@ -102,6 +102,8 @@ export interface OrderResourceCapabilitiesDto {
   byMaterial: boolean;
   cardDetails: boolean;
   onecDocuments: boolean;
+  /** Вкладка «Экран снабжения»: BACKEND_PROCUREMENT_WORKSPACE_ENABLED и флаг закупа. */
+  supplyWorkspace: boolean;
 }
 
 export interface OrderResourceDemandDto {
@@ -217,6 +219,8 @@ export interface OrderResourceReadOptions {
   procurementEnabled: boolean;
   /** Право finance.view: суммы документов 1С. Без него — null. */
   canSeeAmounts?: boolean;
+  /** Флаг BACKEND_PROCUREMENT_WORKSPACE_ENABLED (только для capabilities). */
+  supplyWorkspaceEnabled?: boolean;
 }
 
 export interface OrderResourceDemandRepositoryPort {

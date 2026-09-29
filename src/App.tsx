@@ -204,7 +204,7 @@ const OrderWorkshopCreate = lazy(async () => ({ default: (await import("./pages/
 const OrderWorkshopEdit = lazy(async () => ({ default: (await import("./pages/order_workshops/edit")).OrderWorkshopEdit }));
 const OrderWorkshopShow = lazy(async () => ({ default: (await import("./pages/order_workshops/show")).OrderWorkshopShow }));
 
-const OrderResourceRequirementList = lazy(async () => ({ default: (await import("./pages/order_resource_requirements/list")).OrderResourceRequirementList }));
+const ResourceRequirementsPage = lazy(async () => ({ default: (await import("./pages/order_resource_requirements/ResourceRequirementsPage")).ResourceRequirementsPage }));
 const OrderResourceRequirementShow = lazy(async () => ({ default: (await import("./pages/order_resource_requirements/show")).OrderResourceRequirementShow }));
 
 const OnecPurchaseDocumentList = lazy(async () => ({ default: (await import("./pages/onec_purchase_documents/list")).OnecPurchaseDocumentList }));
@@ -1089,7 +1089,7 @@ const ThemedApp = () => {
                     <Route path="show/:id" element={<OrderWorkshopShow />} />
                   </Route>
                   <Route path="/order-resource-requirements" >
-                    <Route index element={<OrderResourceRequirementList />} />
+                    <Route index element={<ResourceRequirementsPage />} />
                     <Route path="show/:orderId" element={<OrderResourceRequirementShow />} />
                   </Route>
                   <Route path="/procurement/onec-documents" >

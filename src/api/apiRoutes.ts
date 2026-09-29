@@ -113,6 +113,11 @@ export const apiRoutes = {
       backendApiPath(`/orders/${orderId}/deadline-overrides/${overrideId}`),
     groups: orderGroupsRoute,
   },
+  procurement: {
+    worklist: backendApiPath('/procurement/worklist'),
+    savedViews: backendApiPath('/procurement/worklist/saved-views'),
+    settings: backendApiPath('/procurement/settings'),
+  },
   onecDocuments: {
     list: backendApiPath('/procurement/onec-documents'),
     card: (documentId: number) => backendApiPath(`/procurement/onec-documents/${documentId}`),

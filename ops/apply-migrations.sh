@@ -2408,6 +2408,25 @@ probe_file() {
       "$(q_col onec_etl_batches revoked)" \
       "$(q_idx onec_etl_batches_entity_idx)" \
       "$(q_col onec_sources observed_identity)" ;;
+    204_procurement_workspace*) probe_all \
+      "$(q_tbl procurement_settings)" \
+      "SELECT EXISTS (SELECT 1 FROM public.procurement_settings WHERE config_id = 1);" \
+      "$(q_con_on procurement_settings chk_procurement_settings_singleton)" \
+      "$(q_con_on procurement_settings chk_procurement_settings_lead_days)" \
+      "$(q_con_on procurement_settings chk_procurement_settings_urgency)" \
+      "$(q_con_on procurement_settings chk_procurement_settings_waste)" \
+      "$(q_con_on procurement_settings chk_procurement_settings_unallocated)" \
+      "$(q_con_on procurement_settings chk_procurement_settings_overdue_window)" \
+      "$(q_con_on procurement_settings chk_procurement_settings_version)" \
+      "$(q_tbl resource_suppliers)" \
+      "$(q_con_on resource_suppliers chk_resource_suppliers_kind)" \
+      "$(q_con_on resource_suppliers chk_resource_suppliers_one_ref)" \
+      "$(q_con_on resource_suppliers chk_resource_suppliers_key)" \
+      "$(q_con_on resource_suppliers chk_resource_suppliers_source)" \
+      "$(q_idx uq_resource_suppliers_sheet_material)" \
+      "$(q_idx uq_resource_suppliers_film)" \
+      "$(q_col user_preferences procurement_saved_views)" \
+      "$(q_con_on user_preferences chk_user_preferences_procurement_saved_views)" ;;
     203_film_stock*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM public.warehouses WHERE warehouse_name='Склад плёнки')" \
       "$(q_tbl stock_documents)" \
@@ -2742,6 +2761,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     200_onec_etl_snapshots_revocation*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    204_procurement_workspace*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)

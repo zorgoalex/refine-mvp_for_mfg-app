@@ -181,7 +181,7 @@ describe.skipIf(!url)('1C documents allocations — real PostgreSQL, committed f
     const beforeEvents = await events(orderId);
     const result = await add(docsA, { orderId, quantity: 2, expectedVersion: 0, expectedDemandFingerprint: seen.demandFingerprint, suffix: 'add' });
     expect(result.changed).toBe(true);
-    expect(result.line.procurement).toMatchObject({ purchased: true, version: 1, origin: 'manual' });
+    expect(result.line.procurement).toMatchObject({ purchased: true, version: 1, origin: 'onec' }); // R9-1: авто-отметка приходом — origin 'onec'
     expect(result.line.lockedByOnec).toBe(true);
     expect(result.line.onec.receipts).toEqual([expect.objectContaining({ documentId: receiptId, quantity: 2, linkOrigin: 'manual' })]);
     expect(await events(orderId)).toBe(beforeEvents + 1);

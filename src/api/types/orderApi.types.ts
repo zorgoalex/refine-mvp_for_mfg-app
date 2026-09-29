@@ -134,6 +134,8 @@ export interface OrderResourceCapabilitiesDto {
   byMaterial: boolean;
   cardDetails: boolean;
   onecDocuments: boolean;
+  /** Вкладка «Экран снабжения»; нет в ответе старого backend → false. */
+  supplyWorkspace?: boolean;
 }
 
 export interface OrderSheetMaterialDemandDto {

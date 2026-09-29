@@ -141,6 +141,9 @@ describe('VPS compose backend runtime flags', () => {
     expect(compose).toContain('BACKEND_RESOURCE_PROCUREMENT_ENABLED: ${BACKEND_RESOURCE_PROCUREMENT_ENABLED:-false}');
     expect(localCompose).toContain('BACKEND_RESOURCE_PROCUREMENT_ENABLED: ${BACKEND_RESOURCE_PROCUREMENT_ENABLED:-false}');
     expect(envExample).toContain('BACKEND_RESOURCE_PROCUREMENT_ENABLED=false');
+    expect(compose).toContain('BACKEND_PROCUREMENT_WORKSPACE_ENABLED: ${BACKEND_PROCUREMENT_WORKSPACE_ENABLED:-false}');
+    expect(localCompose).toContain('BACKEND_PROCUREMENT_WORKSPACE_ENABLED: ${BACKEND_PROCUREMENT_WORKSPACE_ENABLED:-false}');
+    expect(envExample).toContain('BACKEND_PROCUREMENT_WORKSPACE_ENABLED=false');
   });
 
   it('passes Groups feature flags to the backend container with safe defaults', () => {
