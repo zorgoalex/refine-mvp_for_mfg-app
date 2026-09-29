@@ -67,6 +67,8 @@ import { SupplierRequestsService } from './application/supplier-requests.service
 import { SupplierRequestsController } from './http/supplier-requests.controller';
 import { OrderSnapshotController } from './http/order-snapshot.controller';
 import { OrdersController } from './http/orders.controller';
+import { OrderReworkCatalogController, OrderReworkController } from './http/order-rework.controller';
+import { OrderReworkService } from './application/order-rework.service';
 import { OrderHdfSettingsController } from './http/order-hdf-settings.controller';
 import { OrderStatusBoardController } from './http/order-status-board.controller';
 import { OrdersRuntimeConfigService } from './http/orders-runtime-config.service';
@@ -109,6 +111,8 @@ export function shouldEnableOrderDeadlineSync(input: {
     SupplierRequestsController,
     ProcurementWorkspaceController,
     OrderHdfSettingsController,
+    OrderReworkCatalogController,
+    OrderReworkController,
     OrdersController, SupplierTextTemplatesController, MySupplierTextTemplatesController],
   providers: [
     OnecDocumentsProcurementConsumer,
@@ -198,6 +202,16 @@ export function shouldEnableOrderDeadlineSync(input: {
         });
       },
       inject: [DatabaseService, ConfigService],
+    },
+    {
+      provide: OrderReworkService,
+      useFactory: (database: DatabaseService, config: ConfigService<BackendEnv, true>, query: OrderQueryService) =>
+        new OrderReworkService({
+          database,
+          isEnabled: () => config.get('BACKEND_ORDER_REWORK_ENABLED', { infer: true }) === true,
+          readOrder: (currentUser, orderId) => query.getById({ currentUser, orderId }),
+        }),
+      inject: [DatabaseService, ConfigService, OrderQueryService],
     },
     {
       provide: OrderDetailTransferService,

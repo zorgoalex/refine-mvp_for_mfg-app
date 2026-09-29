@@ -17,6 +17,8 @@ export interface OrdersHttpFeatureFlags {
   procurementNotificationsEnabled?: boolean;
   /** BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED: шаблоны текста заявки поставщику (отдельный откат от заявок). */
   supplierTextTemplatesEnabled?: boolean;
+  /** BACKEND_ORDER_REWORK_ENABLED: команды «Переделки» (круги производства). */
+  orderReworkEnabled?: boolean;
 }
 
 @Injectable()
@@ -34,6 +36,7 @@ export class OrdersRuntimeConfigService {
       supplierRequestsEnabled: this.config.get('BACKEND_SUPPLIER_REQUESTS_ENABLED', { infer: true }),
       procurementNotificationsEnabled: this.config.get('BACKEND_PROCUREMENT_NOTIFICATIONS_ENABLED', { infer: true }),
       supplierTextTemplatesEnabled: this.config.get('BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED', { infer: true }),
+      orderReworkEnabled: this.config.get('BACKEND_ORDER_REWORK_ENABLED', { infer: true }),
     };
   }
 }
