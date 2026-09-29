@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-09-29", title: "Склад плёнки в меню",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: [
+      "Экран остатков плёнки появился в левом меню: раздел «Склады» → «Остатки плёнки» (виден при праве просмотра склада).",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-09-28", title: "Склад плёнки",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

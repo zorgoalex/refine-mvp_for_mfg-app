@@ -1,7 +1,7 @@
 import { Tooltip } from '../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Layout as AntLayout, Menu, Collapse, Button, Typography } from "antd";
-import { PlusOutlined, DollarOutlined, InboxOutlined, ToolOutlined, TeamOutlined, SettingOutlined, ContactsOutlined, DatabaseOutlined, AuditOutlined, ShoppingOutlined, } from "@ant-design/icons";
+import { PlusOutlined, DollarOutlined, InboxOutlined, ToolOutlined, TeamOutlined, SettingOutlined, ContactsOutlined, DatabaseOutlined, AuditOutlined, ShoppingOutlined, ContainerOutlined, } from "@ant-design/icons";
 import type { MenuProps } from "antd";
 import { useResource, useNavigation } from "@refinedev/core";
 import { useLocation } from "react-router-dom";
@@ -52,6 +52,7 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   "Финансы": <DollarOutlined />,
   "Производство": <ToolOutlined />,
   "Закупки": <ShoppingOutlined />,
+  "Склады": <ContainerOutlined />,
   "Материалы": <InboxOutlined />,
   "Данные": <DatabaseOutlined />,
   "Справочники": <SettingOutlined />,

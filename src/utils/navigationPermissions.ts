@@ -25,6 +25,7 @@ export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
   order_workshops: ['orders.view'],
   order_resource_requirements: ['orders.view'],
   onec_purchase_documents: ['procurement.view'],
+  'film-inventory': ['inventory.view'],
   crm: ['orders.view'],
   clients: ['references.view'],
   bitrix24_incoming_requests: ['bitrix24.requests.view'],

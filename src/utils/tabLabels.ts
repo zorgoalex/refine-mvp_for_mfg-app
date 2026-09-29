@@ -18,6 +18,7 @@ export const RESOURCE_LABELS: Record<string, string> = {
   materials: 'Материалы',
   order_resource_requirements: 'Потребности заказов',
   onec_purchase_documents: 'Документы 1С',
+  'film-inventory': 'Остатки плёнки',
   film_types: 'Типы плёнки',
   units: 'Ед. измерения',
   material_types: 'Типы материалов',
@@ -72,6 +73,7 @@ const PATH_TO_RESOURCE: Record<string, string> = {
   'extra-resources': 'extra_resources',
   'catalog-items': 'catalog_items',
   'bazis-cut': 'bazis-cut-sets',
+  inventory: 'film-inventory',
 };
 
 const ACTION_LABELS: Record<string, string> = {
