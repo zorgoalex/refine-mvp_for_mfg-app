@@ -5231,6 +5231,231 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/order-rework/availability:
+    get:
+      tags:
+        - Orders
+      operationId: getOrderReworkAvailability
+      summary: Доступность команд «Переделки»
+      description: |
+        available — команды доступны; disabled_flag — выключено флагом BACKEND_ORDER_REWORK_ENABLED;
+        mdf_engine_unsupported — МДФ-движок активен без поддержки кругов; mdf_cutover_in_progress —
+        идёт переключение режима МДФ-движка.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Доступность
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderReworkAvailabilityResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/order-rework/reasons:
+    get:
+      tags:
+        - Orders
+      operationId: listOrderReworkReasons
+      summary: Причины переделки (ручной выбор)
+      description: Активные несистемные причины; системная «Уточнить» не возвращается.
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      responses:
+        '200':
+          description: Причины
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderReworkReasonsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/orders/{orderId}/rework:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    post:
+      tags:
+        - Orders
+      operationId: startOrExtendOrderRework
+      summary: Начать круг переделки или добавить детали в открытый круг
+      description: |
+        Без открытого круга: из «Готов к выдаче»/«Выдан» заказ переходит в «Переделку»; из «Оформлен»/
+        «Запланирован»/«В производстве» открывается круг без смены статуса. Причина обязательна.
+        С открытым кругом: детали добавляются в него (причина не передаётся). Выбранные детали
+        возвращаются на указанный этап (раньше текущего, не «Выдан»/«Завершено»).
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - orders.rework
+        - orders.update
+      x-transactional: true
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatchVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderReworkStartRequest'
+      responses:
+        '200':
+          description: Круг начат/расширен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderReworkCommandResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/orders/{orderId}/rework/rounds:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    get:
+      tags:
+        - Orders
+      operationId: listOrderReworkRounds
+      summary: История кругов производства заказа
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      responses:
+        '200':
+          description: Круги
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderReworkRoundsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/orders/{orderId}/rework/rounds/{roundNo}/reason:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+      - name: roundNo
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 2
+    patch:
+      tags:
+        - Orders
+      operationId: clarifyOrderReworkReason
+      summary: Уточнить причину круга переделки
+      description: Разрешено для открытого и закрытого круга; системную «Уточнить» выбрать нельзя.
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - orders.rework
+        - orders.update
+      x-transactional: true
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatchVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderReworkReasonRequest'
+      responses:
+        '200':
+          description: Причина уточнена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderReworkCommandResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/orders/{orderId}/rework/rounds/{roundNo}/false-positive:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+      - name: roundNo
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 2
+    post:
+      tags:
+        - Orders
+      operationId: closeOrderReworkAsFalsePositive
+      summary: «Это не переделка» — закрыть открытый круг и восстановить детали
+      description: |
+        Этапы и круги деталей восстанавливаются из сохранённого состояния «до»; после переделки из готовых
+        заказ возвращается в прежний статус. Номер круга не переиспользуется.
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - orders.rework
+        - orders.update
+      x-transactional: true
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatchVersion'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderReworkFalsePositiveRequest'
+      responses:
+        '200':
+          description: Круг закрыт как ложный
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderReworkCommandResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/orders/{orderId}/groups:
     parameters:
       - $ref: '#/components/parameters/OrderId'
@@ -18934,6 +19159,126 @@ components:
                   requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
 
   schemas:
+    OrderReworkAvailabilityResponse:
+      type: object
+      required: [availability]
+      properties:
+        availability:
+          type: string
+          enum: [available, disabled_flag, mdf_engine_unsupported, mdf_cutover_in_progress]
+    OrderReworkReason:
+      type: object
+      required: [reasonId, code, name, requiresComment, sortOrder]
+      properties:
+        reasonId: {type: integer}
+        code: {type: string}
+        name: {type: string}
+        requiresComment: {type: boolean}
+        sortOrder: {type: integer}
+    OrderReworkReasonsResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderReworkReason'
+    OrderReworkStartRequest:
+      type: object
+      additionalProperties: false
+      required: [details]
+      properties:
+        reasonId:
+          type: integer
+          minimum: 1
+          description: Обязательна при начале круга; не передаётся при добавлении деталей в открытый круг.
+        comment:
+          type: string
+          nullable: true
+          maxLength: 2000
+        details:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            additionalProperties: false
+            required: [detailId, productionStatusId]
+            properties:
+              detailId: {type: integer, minimum: 1}
+              productionStatusId: {type: integer, minimum: 1}
+    OrderReworkReasonRequest:
+      type: object
+      additionalProperties: false
+      required: [reasonId]
+      properties:
+        reasonId: {type: integer, minimum: 1}
+        comment: {type: string, nullable: true, maxLength: 2000}
+    OrderReworkFalsePositiveRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        comment: {type: string, nullable: true, maxLength: 2000}
+    OrderReworkCommandResponse:
+      type: object
+      required: [orderId, roundNo, mode, action, version, detailIds, requestId, order]
+      properties:
+        orderId: {type: integer}
+        roundNo: {type: integer}
+        mode: {type: string, enum: [after_ready, in_production]}
+        action: {type: string, enum: [started, extended, noop, reason_clarified, false_positive]}
+        version: {type: integer}
+        detailIds:
+          type: array
+          items: {type: integer}
+        requestId: {type: string}
+        order:
+          type: object
+          nullable: true
+          additionalProperties: true
+    OrderReworkRoundDetail:
+      type: object
+      required: [detailId, detailNumber, fromProductionStatusId, fromProductionStatusName, fromProductionRound, toProductionStatusId, toProductionStatusName, addedAt, addedBySource]
+      properties:
+        detailId: {type: integer}
+        detailNumber: {type: integer, nullable: true}
+        fromProductionStatusId: {type: integer, nullable: true}
+        fromProductionStatusName: {type: string, nullable: true}
+        fromProductionRound: {type: integer}
+        toProductionStatusId: {type: integer}
+        toProductionStatusName: {type: string, nullable: true}
+        addedAt: {type: string, format: date-time}
+        addedBySource: {type: string, enum: [start, extend]}
+    OrderReworkRound:
+      type: object
+      required: [roundNo, mode, source, reasonId, reasonCode, reasonName, reasonIsSystem, reasonComment, startedAt, startedByUserId, startedByUsername, reasonClarifiedAt, closedAt, closeReason, details]
+      properties:
+        roundNo: {type: integer}
+        mode: {type: string, enum: [after_ready, in_production]}
+        source: {type: string}
+        reasonId: {type: integer}
+        reasonCode: {type: string}
+        reasonName: {type: string}
+        reasonIsSystem: {type: boolean}
+        reasonComment: {type: string, nullable: true}
+        startedAt: {type: string, format: date-time}
+        startedByUserId: {type: integer, nullable: true}
+        startedByUsername: {type: string, nullable: true}
+        reasonClarifiedAt: {type: string, format: date-time, nullable: true}
+        closedAt: {type: string, format: date-time, nullable: true}
+        closeReason: {type: string, nullable: true, enum: [ready, issued, completed, false_positive, null]}
+        details:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderReworkRoundDetail'
+    OrderReworkRoundsResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderReworkRound'
     CatalogImportCreate:
       oneOf:
         - type: object
