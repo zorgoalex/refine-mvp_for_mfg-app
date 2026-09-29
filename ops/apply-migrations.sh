@@ -2218,6 +2218,18 @@ probe_file() {
       "SELECT count(*)=2 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_schedules'::regclass AND contype='c' AND convalidated AND pg_get_constraintdef(oid) LIKE '%AT TIME ZONE%';" \
       "SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_schedules'::regclass AND contype='c' AND convalidated AND pg_get_constraintdef(oid) LIKE '%date_trunc%');" \
       "SELECT NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.whatsapp_daily_digest_settings'::regclass AND NOT convalidated);" ;;
+    # 209: new broadcast tables + cutover done (broadcast #1 exists; the digest singleton was disabled
+    # by the cutover, which the old backend keeps working with).
+    209_whatsapp_broadcasts*) probe_all \
+      "$(q_tbl whatsapp_broadcasts)" "$(q_tbl whatsapp_broadcast_control)" "$(q_tbl whatsapp_broadcast_commands)" \
+      "$(q_tbl whatsapp_broadcast_schedules)" "$(q_tbl whatsapp_broadcast_runs)" "$(q_tbl whatsapp_broadcast_messages)" \
+      "$(q_con_on whatsapp_broadcasts chk_whatsapp_broadcasts_enabled)" \
+      "$(q_con_on whatsapp_broadcasts chk_whatsapp_broadcasts_weekdays)" \
+      "$(q_con_on whatsapp_broadcast_runs chk_whatsapp_broadcast_runs_root)" \
+      "$(q_con_on whatsapp_broadcast_messages chk_whatsapp_broadcast_messages_image)" \
+      "$(q_idx idx_whatsapp_broadcast_runs_auto_slot)" \
+      "SELECT EXISTS (SELECT 1 FROM whatsapp_broadcasts WHERE broadcast_id = 1);" \
+      "SELECT EXISTS (SELECT 1 FROM whatsapp_broadcast_control WHERE singleton_id = 1);" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -2241,6 +2253,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     184_whatsapp_daily_digest_schedule*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    209_whatsapp_broadcasts*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     173_inbound_signals*)

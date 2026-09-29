@@ -3,11 +3,19 @@ import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
 import { describe, expect, it } from 'vitest';
-import { DailyDigestRenderer } from './daily-digest-renderer';
+import { existsSync, readFileSync } from 'node:fs';
+import {
+  DAILY_DIGEST_LAYOUT_WIDTH,
+  DAILY_DIGEST_RENDER_ZOOM,
+  DailyDigestRenderer,
+  resolveBoldFontPath,
+} from './daily-digest-renderer';
+import { resolveFontPath } from '../cut/render/sheet-png';
 import {
   DAILY_DIGEST_MAX_ORDERS,
   DAILY_DIGEST_MAX_PAGE_BYTES,
   DAILY_DIGEST_MAX_RUN_BYTES,
+  DAILY_DIGEST_RENDERER_VERSION,
   type DailyDigestOrderCard,
   type DailyDigestSnapshot,
 } from './daily-digest-snapshot.types';
@@ -142,5 +150,95 @@ describe('DailyDigestRenderer', () => {
     await expect(renderer.render({ ...makeSnapshot([]), cardsPerMessage: 3 as 1 | 2 })).rejects.toMatchObject({
       code: 'DAILY_DIGEST_SNAPSHOT_INVALID',
     });
+  });
+
+  it('loads both Regular and Bold font files and bumps the renderer version', () => {
+    const regular = resolveFontPath();
+    const bold = resolveBoldFontPath();
+    expect(regular && existsSync(regular)).toBeTruthy();
+    expect(bold && existsSync(bold)).toBeTruthy();
+    expect(bold).toContain('LiberationSans-Bold.ttf');
+    expect(readFileSync(bold as string).byteLength).toBeGreaterThan(100_000);
+    expect(DAILY_DIGEST_RENDERER_VERSION).toBe('daily-order-cards-v3');
+  });
+
+  it('renders a narrow image at layout width x zoom with a content-driven height', async () => {
+    const [plain] = await renderer.render({ ...makeSnapshot([makeOrder(2)]), cardsPerMessage: 1 });
+    const [longer] = await renderer.render({
+      ...makeSnapshot([makeOrder(2, { clientName: 'Очень длинное имя клиента для переноса строки в карточке' })]),
+      cardsPerMessage: 1,
+    });
+    const [noStages] = await renderer.render({
+      ...makeSnapshot([makeOrder(2, { passedProductionCodes: [] })]),
+      cardsPerMessage: 1,
+    });
+    const plainPng = PNG.sync.read(plain.png);
+    expect(plainPng.width).toBe(DAILY_DIGEST_LAYOUT_WIDTH * DAILY_DIGEST_RENDER_ZOOM);
+    expect(PNG.sync.read(longer.png).height).toBeGreaterThan(plainPng.height);
+    expect(PNG.sync.read(noStages.png).height).toBeLessThan(plainPng.height);
+    expect(plainPng.height).toBeLessThan(450 * DAILY_DIGEST_RENDER_ZOOM);
+  });
+
+  it('renders an in-work order card on a white background (no yellow tint)', async () => {
+    const count = (png: PNG, rgb: [number, number, number]) => {
+      let n = 0;
+      for (let i = 0; i < png.data.length; i += 4) {
+        if (png.data[i] === rgb[0] && png.data[i + 1] === rgb[1] && png.data[i + 2] === rgb[2]) n += 1;
+      }
+      return n;
+    };
+    const [working] = await renderer.render({ ...makeSnapshot([makeOrder(2)]), cardsPerMessage: 1 });
+    const workingPng = PNG.sync.read(working.png);
+    expect(count(workingPng, [0xff, 0xf9, 0xe6])).toBe(0);
+    expect(count(workingPng, [0xff, 0xff, 0xff])).toBeGreaterThan(workingPng.width * workingPng.height * 0.3);
+    const [ready] = await renderer.render({
+      ...makeSnapshot([makeOrder(2, { orderStatusName: 'Готов' })]),
+      cardsPerMessage: 1,
+    });
+    expect(count(PNG.sync.read(ready.png), [0xff, 0xd9, 0xbf])).toBeGreaterThan(1000);
+  });
+
+  it('keeps one-card, two-card and maximum-content pages far below the byte limit', async () => {
+    const heavy = (id: number) => makeOrder(id, {
+      orderName: `К${id} ` + 'Длинное название заказа',
+      basisProjectDisplay: 'ПМЗ-15 длинный проект',
+      clientName: 'Очень длинное имя клиента для переноса',
+      materials: [
+        { fullName: 'МДФ 18мм', label: '18мм' },
+        { fullName: 'МДФ 16мм', label: 'Черн. 16мм' },
+      ],
+    });
+    for (const count of [1, 2] as const) {
+      const pages = await renderer.render({
+        ...makeSnapshot(Array.from({ length: count }, (_, index) => heavy(index + 1))),
+        cardsPerMessage: count,
+      });
+      expect(pages).toHaveLength(1);
+      expect(pages[0].png.byteLength).toBeLessThan(DAILY_DIGEST_MAX_PAGE_BYTES / 4);
+    }
+  });
+
+  it('accepts the plural-free header (no order counter) and centers stage codes', async () => {
+    // Text nodes are internal, so probe via pixels: the orange stage label must
+    // be horizontally centred within the card (card spans gutter..width-gutter).
+    const [page] = await renderer.render({
+      ...makeSnapshot([makeOrder(2, { passedProductionCodes: ['cut'] })]),
+      cardsPerMessage: 1,
+    });
+    const png = PNG.sync.read(page.png);
+    let minX = png.width;
+    let maxX = -1;
+    for (let y = 0; y < png.height; y += 1) {
+      for (let x = 0; x < png.width; x += 1) {
+        const i = (y * png.width + x) * 4;
+        const [r, g, b] = [png.data[i], png.data[i + 1], png.data[i + 2]];
+        if (r > 220 && g > 90 && g < 150 && b < 40) {
+          minX = Math.min(minX, x);
+          maxX = Math.max(maxX, x);
+        }
+      }
+    }
+    expect(maxX).toBeGreaterThan(minX);
+    expect(Math.abs((minX + maxX) / 2 - png.width / 2)).toBeLessThan(3);
   });
 });

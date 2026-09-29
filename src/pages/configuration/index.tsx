@@ -57,7 +57,8 @@ import {
   WhatsAppTechnicalLogsConfig,
 } from './components/WhatsAppConfigTabs';
 import { can } from '../../utils/permissions';
-import { DailyOrderDigestConfig, dailyDigestTabVisible } from './components/DailyOrderDigestConfig';
+import { dailyDigestTabVisible } from './components/DailyOrderDigestConfig';
+import { MessageBroadcastsTab } from './components/broadcasts/MessageBroadcastsTab';
 import { authSession } from '../../api/authSession';
 import {
   buildInitialResourceVisibility,
@@ -640,7 +641,7 @@ export const ConfigurationPage: React.FC = () => {
               <BellOutlined /> Рассылка сообщений
             </span>
           ),
-          children: <DailyOrderDigestConfig />,
+          children: <MessageBroadcastsTab />,
         }]
       : []),
     {
