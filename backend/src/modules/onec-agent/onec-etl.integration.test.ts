@@ -22,6 +22,7 @@ import { OnecAlertProjector } from './application/onec-alert-projector';
 import { OnecAuditWriter, type OnecAgentContext } from './application/onec-audit';
 import { OnecCommandWakeups } from './application/onec-command-wakeups';
 import { OnecCommandsService } from './application/onec-commands.service';
+import { OnecEtlEvents, type WarehousesPublished } from './application/onec-etl-events';
 import { OnecAdminService } from './application/onec-admin.service';
 import { OnecEtlAdminService } from './application/onec-etl-admin.service';
 import { OnecEtlRevocationService } from './application/onec-etl-revocation.service';
@@ -61,6 +62,7 @@ suite('1C agent E3a ETL — isolated PostgreSQL + real spool', () => {
   let admin: OnecEtlAdminService;
   let onecAdmin: OnecAdminService;
   let revocation: OnecEtlRevocationService;
+  const events = new OnecEtlEvents();
   let generationRef = '';
   const agentA: OnecAgentContext = { agentId: 'agent-a', sourceId: 1, certId: 1, requestId: 'r-a', correlationId: null };
   const agentB: OnecAgentContext = { agentId: 'agent-b', sourceId: 2, certId: 2, requestId: 'r-b', correlationId: null };
@@ -95,7 +97,7 @@ suite('1C agent E3a ETL — isolated PostgreSQL + real spool', () => {
     parser = new OnecEtlParserService(etlRepo, repo, runtime);
     ingest = new OnecEtlIngestService(etlRepo, repo, runtime, parser);
     const audit = new OnecAuditWriter(repo);
-    completion = new OnecEtlCompletionService(etlRepo, repo, audit, parser);
+    completion = new OnecEtlCompletionService(etlRepo, repo, audit, parser, events);
     const commandsRepo = new PgOnecCommandRepository(db);
     commands = new OnecCommandsService(commandsRepo, repo, audit, new OnecCommandWakeups(db, runtime), runtime, etlRepo);
     revocation = new OnecEtlRevocationService(etlRepo, runtime);
@@ -271,6 +273,36 @@ suite('1C agent E3a ETL — isolated PostgreSQL + real spool', () => {
     await parser.drainQueue();
     await complete(run2, v2(run2, [entityV2('items', { readScope: 'delta' })], { mode: 'incremental' }));
     expect((await mirror()).map((r) => JSON.parse(r.data).v)).toEqual(['new', 'dated']);
+  });
+
+  it('signals a done warehouses entity once, after commit; a repeat or a failed warehouses entity does not signal', async () => {
+    const seen: WarehousesPublished[] = [];
+    const off = events.onWarehousesPublished((event) => { seen.push(event); });
+    try {
+      const runId = randomUUID();
+      await upload({ runId, entity: 'warehouses', lines: [row('w1', { Description: 'Склад', ТипСтруктурнойЕдиницы: 'Склад' })] });
+      await upload({ runId, lines: [row('k1', {})] });
+      await parser.drainQueue();
+      const body = v2(runId, [entityV2('items'), entityV2('warehouses')]);
+      await complete(runId, body);
+      await complete(runId, body);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(seen).toEqual([{ sourceId: 1, runId, requestId: 'r-a', correlationId: 'r-a' }]);
+      // The listener sees committed data.
+      expect(await mirror('warehouses')).toHaveLength(1);
+      const run2 = randomUUID();
+      await upload({ runId: run2, entity: 'warehouses', lines: [row('w2', {})] });
+      await parser.drainQueue();
+      await complete(run2, v2(run2, [entityV2('warehouses', { status: 'failed', errorCode: 'ODATA_HTTP_500', errorMessage: 'E2E' })], { status: 'partial_success', entitiesFailed: 1 }));
+      const run3 = randomUUID();
+      await upload({ runId: run3, lines: [row('k2', {})] });
+      await parser.drainQueue();
+      await complete(run3, v2(run3, [entityV2('items')]));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(seen).toHaveLength(1);
+    } finally {
+      off();
+    }
   });
 
   it('failed entity: its staging is dropped, others publish; an alert opens and closes with the next done run', async () => {

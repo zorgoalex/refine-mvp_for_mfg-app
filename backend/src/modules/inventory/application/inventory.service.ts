@@ -6,7 +6,7 @@ import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { PgInventoryRepository } from '../adapters/pg-inventory-repository';
-import { PgWarehouseRepository } from '../adapters/pg-warehouse-repository';
+import { PgWarehouseRepository, type WarehouseSyncOptions } from '../adapters/pg-warehouse-repository';
 import { OnecCatalogReader, type OnecWarehouse } from '../../onec-agent/onec-catalog-reader';
 import type {
   BalancesFilter,
@@ -56,6 +56,29 @@ export class InventoryService {
       if (error instanceof ApiError && error.code === 'ONEC_MIRROR_UNAVAILABLE') return null;
       throw error;
     }
+  }
+
+  /**
+   * Склады 1С для синхронизации: под `entity_state FOR SHARE` источников (до commit
+   * синхронизации выгрузка, отзыв и rebaseline не меняют прочитанную копию). null — как у onecWarehouses.
+   */
+  async lockedOnecWarehouses(tx: DatabaseClient, sourceIds?: readonly number[]): Promise<OnecWarehouse[] | null> {
+    try {
+      const rows = await this.onec.lockAndListWarehouses(tx, sourceIds);
+      return rows.length > 0 ? rows : null;
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'ONEC_MIRROR_UNAVAILABLE') return null;
+      throw error;
+    }
+  }
+
+  /** Для автозапуска: та же синхронизация без проверки прав пользователя (исполнитель — служебный). */
+  syncWarehousesAsService(ctx: CommandContext, sourceId: number, options: WarehouseSyncOptions) {
+    return this.warehouses.syncFromOnec(
+      ctx,
+      async (tx) => ((await this.lockedOnecWarehouses(tx, [sourceId])) ?? []).map((row) => ({ refKey: row.refKey, name: row.name })),
+      options,
+    );
   }
 
   private withOnec(dto: WarehouseDto, onec: OnecWarehouse[] | null): WarehouseDto {
@@ -128,13 +151,12 @@ export class InventoryService {
   /** Создать/привязать склады ERP по всем складам 1С (зеркало обязательно для нового выполнения). */
   async syncWarehousesFromOnec(ctx: CommandContext) {
     this.require(ctx.currentUser, 'inventory.manage');
-    const onec = this.onecLoader();
     const result = await this.warehouses.syncFromOnec(ctx, async (tx) => {
-      const rows = await onec(tx);
+      const rows = await this.lockedOnecWarehouses(tx);
       if (rows === null) throw new ApiError(409, 'ONEC_MIRROR_UNAVAILABLE', 'Данные 1С о складах недоступны');
       return rows.map((row) => ({ refKey: row.refKey, name: row.name }));
     });
-    const current = await onec();
+    const current = await this.onecWarehouses();
     return {
       ...result,
       created: result.created.map((row) => this.withOnec(row, current)),

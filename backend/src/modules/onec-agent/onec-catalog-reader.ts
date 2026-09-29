@@ -152,7 +152,36 @@ export class OnecCatalogReader {
    * не пропали из последней полной выгрузки. Недоступное зеркало — 409 ONEC_MIRROR_UNAVAILABLE.
    * Внутри транзакции передавать её клиент.
    */
-  async listWarehouses(client: DatabaseClient = this.db): Promise<OnecWarehouse[]> {
+  /**
+   * Склады 1С для записи в справочник ERP (синхронизация): сначала `onec_etl_entity_state`
+   * склада каждого источника `FOR SHARE` (в порядке source_id), затем копия — только этих
+   * источников, в той же транзакции. `complete`, отзыв и rebaseline берут эту строку
+   * `FOR UPDATE`/`FOR NO KEY UPDATE`: пока транзакция вызывающего открыта, прочитанная копия
+   * не меняется. Источник без строки состояния в этот вызов не входит. `sourceIds` сужает набор.
+   */
+  async lockAndListWarehouses(tx: DatabaseClient, sourceIds?: readonly number[]): Promise<OnecWarehouse[]> {
+    await this.available(tx);
+    const locked = await tx.query<{ source_id: string }>(
+      `SELECT source_id FROM onec_etl_entity_state
+        WHERE entity_code = 'warehouses' AND ($1::bigint[] IS NULL OR source_id = ANY($1::bigint[]))
+        ORDER BY source_id FOR SHARE`,
+      [sourceIds ? [...sourceIds] : null],
+    );
+    const ids = locked.rows.map((row) => Number(row.source_id));
+    if (ids.length === 0) return [];
+    return this.listWarehouses(tx, ids);
+  }
+
+  /** Все источники, по которым выгружались склады (часовой проход автосинхронизации). */
+  async warehouseSourceIds(client: DatabaseClient = this.db): Promise<number[]> {
+    await this.available(client);
+    const { rows } = await client.query<{ source_id: string }>(
+      `SELECT source_id FROM onec_etl_entity_state WHERE entity_code = 'warehouses' ORDER BY source_id`,
+    );
+    return rows.map((row) => Number(row.source_id));
+  }
+
+  async listWarehouses(client: DatabaseClient = this.db, sourceIds?: readonly number[]): Promise<OnecWarehouse[]> {
     await this.available(client);
     const { rows } = await client.query<{ source_id: string; source_key: string; code: string | null; name: string }>(
       `SELECT source_id, source_key, data->>'Code' AS code, COALESCE(data->>'Description', source_key) AS name
@@ -160,7 +189,9 @@ export class OnecCatalogReader {
         WHERE entity_code = 'warehouses' AND NOT deleted AND missing_in_source_at IS NULL
           AND data->>'ТипСтруктурнойЕдиницы' = 'Склад'
           AND COALESCE((data->>'DeletionMark')::boolean, false) = false
+          AND ($1::bigint[] IS NULL OR source_id = ANY($1::bigint[]))
         ORDER BY name, source_key`,
+      [sourceIds ? [...sourceIds] : null],
     );
     return rows.map((row) => ({
       sourceId: Number(row.source_id),

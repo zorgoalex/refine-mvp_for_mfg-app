@@ -95,6 +95,12 @@ export interface CommandContext {
   currentUser: CurrentUser;
   requestId: string;
   idempotencyKey: string;
+  /** Источник команды в аудите/outbox; по умолчанию `erp_ui` (действие пользователя). */
+  source?: string;
+  /** Корреляция с внешним процессом (например run 1С); по умолчанию requestId. */
+  correlationId?: string;
+  /** Роль исполнителя в аудите, если она не из USER_ROLES (служебный пользователь). */
+  actorRole?: string;
 }
 
 export interface CreateManualDocumentInput {

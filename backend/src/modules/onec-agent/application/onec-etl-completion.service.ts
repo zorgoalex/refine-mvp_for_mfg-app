@@ -7,13 +7,14 @@ import { PgOnecRepository } from '../adapters/pg-onec-repository';
 import { ONEC_ETL_LIMITS, parseCompletion, readInFull, SNAPSHOT_ENTITIES, sourceNamespaceOf, type Completion, type CompletionEntity, type EtlMode } from '../domain/onec-etl';
 import { buildOnecEvent } from '../domain/onec-events';
 import { OnecAuditWriter, type OnecAgentContext } from './onec-audit';
+import { OnecEtlEvents } from './onec-etl-events';
 import { OnecEtlParserService } from './onec-etl-parser.service';
 
 const sha256Hex = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 const WAIT_STEP_MS = 500;
 
 /** Outcome of the locked transaction; refusals that must keep their writes are thrown after commit. */
-type Verdict = { kind: 'done' } | { kind: 'repeat' } | { kind: 'not_ready'; code: 'RUN_NOT_READY' | 'RUN_MODE_PENDING'; message: string };
+type Verdict = { kind: 'done'; sourceId: number; warehousesPublished: boolean } | { kind: 'repeat' } | { kind: 'not_ready'; code: 'RUN_NOT_READY' | 'RUN_MODE_PENDING'; message: string };
 
 /**
  * `POST etl/runs/{runId}/complete` (spec §7.2, plan §6.7, §20): staging of the
@@ -27,6 +28,7 @@ export class OnecEtlCompletionService {
     @Inject(PgOnecRepository) private readonly repository: PgOnecRepository,
     @Inject(OnecAuditWriter) private readonly audit: OnecAuditWriter,
     @Inject(OnecEtlParserService) private readonly parser: OnecEtlParserService,
+    @Inject(OnecEtlEvents) private readonly events: OnecEtlEvents,
   ) {}
 
   async complete(agent: OnecAgentContext, runId: string, idempotencyKey: string | undefined, body: unknown, rawBody: Buffer | undefined, waitMs = ONEC_ETL_LIMITS.completeWaitMs): Promise<void> {
@@ -41,6 +43,10 @@ export class OnecEtlCompletionService {
     await this.waitForParsing(agent, runId, waitMs);
     const verdict = await this.etl.transaction((tx) => this.finalize(tx, agent, completion, sha));
     if (verdict.kind === 'not_ready') throw new ApiError(503, verdict.code, verdict.message);
+    // After commit only; a byte-identical repeat (`repeat`) does not signal again.
+    if (verdict.kind === 'done' && verdict.warehousesPublished) {
+      this.events.emitWarehousesPublished({ sourceId: verdict.sourceId, runId, requestId: agent.requestId, correlationId: agent.correlationId ?? agent.requestId });
+    }
   }
 
   /** Outside any transaction: give the parser up to 25 s (the agent repeats complete on 503). */
@@ -230,7 +236,11 @@ export class OnecEtlCompletionService {
         idempotencyKey: `onec.etl.run_completed:${run.runId}`,
       }),
     );
-    return { kind: 'done' };
+    return {
+      kind: 'done',
+      sourceId: run.sourceId,
+      warehousesPublished: outcomes.some((o) => o.entityCode === 'warehouses' && o.status === 'done'),
+    };
   }
 
   /**

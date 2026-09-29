@@ -40,6 +40,9 @@ describe.skipIf(!url)('warehouses with 1C keys — InventoryService, real reader
       "INSERT INTO onec_sources (code, display_name) VALUES ($1, $2) RETURNING source_id",
       [`it-${randomUUID().slice(0, 8)}`, `${tag} база`],
     )).rows[0].source_id);
+    // Копия появляется только через выгрузку ETL, которая создаёт строку состояния сущности;
+    // синхронизация читает копию под её блокировкой (autosync plan R1-1).
+    await watcher.query("INSERT INTO onec_etl_entity_state (source_id, entity_code) VALUES ($1, 'warehouses')", [source]);
     const row = (key: string, name: string, kind: string) => [source, key, JSON.stringify({ Ref_Key: key, Code: `IT-${name.length}`, Description: name, DeletionMark: false, ТипСтруктурнойЕдиницы: kind })];
     for (const [key, name, kind] of [[mirror.a, `${tag} Цех А`, 'Склад'], [mirror.b, `${tag} Цех Б`, 'Склад'], [mirror.group, `${tag} Группа`, 'МагазинГруппаСкладов']] as const) {
       await watcher.query(

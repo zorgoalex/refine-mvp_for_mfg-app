@@ -35,6 +35,14 @@ interface WarehouseRow {
   version: string;
 }
 
+/** Дополнения синхронизации для автозапуска (кнопка их не передаёт). */
+export interface WarehouseSyncOptions {
+  /** В той же транзакции, только при новом выполнении (не при повторе по Idempotency-Key). */
+  onFreshResult?: (tx: TransactionClient, result: WarehouseSyncResultDto) => Promise<void>;
+  /** Сбросить app.user_id перед commit (служебный исполнитель). */
+  resetSessionUser?: boolean;
+}
+
 /** Склад 1С, по которому создаётся или привязывается склад ERP. */
 export interface OnecWarehouseRef {
   refKey: string;
@@ -163,9 +171,9 @@ async function recordWarehouseChange(
     entityId: input.after.warehouseId,
     actorUserId: ctx.currentUser.id,
     actorUsername: ctx.currentUser.username ?? null,
-    actorRole: ctx.currentUser.role ?? null,
+    actorRole: ctx.actorRole ?? ctx.currentUser.role ?? null,
     requestId: ctx.requestId,
-    source: SOURCE,
+    source: ctx.source ?? SOURCE,
     statusField: 'is_active',
     statusCode: input.after.isActive ? 'active' : 'inactive',
     stageCode: input.action,
@@ -177,7 +185,7 @@ async function recordWarehouseChange(
       action: input.action,
       changedFields: Object.keys(changes),
       refKey1c: input.after.refKey1c,
-      correlationId: ctx.requestId,
+      correlationId: ctx.correlationId ?? ctx.requestId,
       commandSource: input.commandSource ?? SOURCE,
     },
     relatedEntities: relatedWarehouseEntities(input.before, input.after),
@@ -191,7 +199,7 @@ async function recordWarehouseChange(
       String(input.after.warehouseId),
       JSON.stringify({
         eventId: randomUUID(), eventType: 'inventory.warehouse_changed', action: input.action,
-        actorUserId: ctx.currentUser.id, requestId: ctx.requestId, correlationId: ctx.requestId, source: SOURCE,
+        actorUserId: ctx.currentUser.id, requestId: ctx.requestId, correlationId: ctx.correlationId ?? ctx.requestId, source: ctx.source ?? SOURCE,
         occurredAt: new Date().toISOString(), entity: { type: 'warehouse', id: input.after.warehouseId },
         refKey1c: input.after.refKey1c, changes,
       }),
@@ -327,7 +335,11 @@ export class PgWarehouseRepository {
    * непривязанный склад ERP с тем же названием или создать новый (название из 1С).
    * Склад ERP с тем же названием, но другим ключом 1С — пропуск (name_taken).
    */
-  async syncFromOnec(ctx: CommandContext, loadOnec: (tx: TransactionClient) => Promise<OnecWarehouseRef[]>): Promise<WarehouseSyncResultDto> {
+  async syncFromOnec(
+    ctx: CommandContext,
+    loadOnec: (tx: TransactionClient) => Promise<OnecWarehouseRef[]>,
+    options: WarehouseSyncOptions = {},
+  ): Promise<WarehouseSyncResultDto> {
     return this.database.transaction(async (tx) => {
       // Хеш — только от содержимого запроса (тела нет): повтор не зависит от текущего зеркала 1С.
       const replay = await beginIdempotent(tx, {
@@ -377,6 +389,10 @@ export class PgWarehouseRepository {
         byKey.add(refKey);
       }
       await completeIdempotent(tx, ctx.idempotencyKey, 'onec', result);
+      if (options.onFreshResult) await options.onFreshResult(tx, result);
+      // set_session_user — сеансовая настройка: без сброса соединение пула после commit
+      // несло бы этого исполнителя в следующие команды. При rollback откатывается сама.
+      if (options.resetSessionUser) await tx.query("SELECT set_config('app.user_id', '', false)");
       return result;
     });
   }

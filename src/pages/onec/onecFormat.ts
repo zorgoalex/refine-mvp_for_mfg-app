@@ -111,6 +111,7 @@ export const ONEC_ALERT_KIND_LABELS: Record<string, string> = {
   etl_run_abandoned: 'Выгрузка брошена',
   etl_full_sync_required: 'Нужна полная выгрузка',
   etl_snapshot_not_updated: 'Снимок не обновлён',
+  warehouse_autosync_failed: 'Склады 1С не синхронизированы',
 };
 
 /** Alerts about one past command/run: nothing re-derives them, the operator closes them once handled. */

@@ -291,6 +291,10 @@ export const envSchema = z
     BACKEND_PROCUREMENT_WORKSPACE_ENABLED: booleanFromEnv.default(false),
     BACKEND_FILM_CATALOG_IMPORT_ENABLED: booleanFromEnv.default(false),
     BACKEND_INVENTORY_ENABLED: booleanFromEnv.default(false),
+    BACKEND_INVENTORY_ONEC_AUTOSYNC: booleanFromEnv.default(false),
+    BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID: z
+      .union([emptyTrimmedStringFromEnv, z.coerce.number().int().positive()])
+      .optional(),
     BACKEND_ENABLE_PDF_IMPORT_LAYOUT_PATTERNS: booleanFromEnv.default(false),
     BACKEND_STATUS_AUTOMATION: booleanFromEnv.default(false),
     BACKEND_ENABLE_NOTIFICATION_ENGINE: booleanFromEnv.default(false),
@@ -1019,6 +1023,13 @@ export const envSchema = z
         code: 'custom',
         path: ['BITRIX24_REQUEST_TIMEOUT_MS'],
         message: 'must be less than BACKEND_BITRIX24_SYNC_LEASE_MS',
+      });
+    }
+    if (env.BACKEND_INVENTORY_ONEC_AUTOSYNC && !env.BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID'],
+        message: 'required when BACKEND_INVENTORY_ONEC_AUTOSYNC=true',
       });
     }
     if (env.BACKEND_ENABLE_BITRIX24_REVERSE_SYNC) {

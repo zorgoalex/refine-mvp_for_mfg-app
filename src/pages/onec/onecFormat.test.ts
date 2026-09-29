@@ -773,6 +773,12 @@ describe('onec mirror state labels', () => {
   });
 });
 
+describe('onec warehouse autosync alert label', () => {
+  it('labels the failed warehouse autosync alert', () => {
+    expect(onecAlertKindLabel('warehouse_autosync_failed')).toBe('Склады 1С не синхронизированы');
+  });
+});
+
 describe('onec E3b alert/incident labels', () => {
   it('labels the snapshot-not-updated alert', () => {
     expect(onecAlertKindLabel('etl_snapshot_not_updated')).toBe('Снимок не обновлён');

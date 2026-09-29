@@ -29,6 +29,14 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-09-29", title: "Склады из 1С — автоматически",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "Новые склады 1С появляются в справочнике складов ERP сами: после каждой выгрузки складов из 1С и раз в час выполняется та же синхронизация, что по кнопке «Синхронизировать с 1С». Включается настройкой сервера.",
+      "Если автосинхронизация не удалась, на экране «1С» появляется алерт «Склады 1С не синхронизированы»; следующий успешный запуск закрывает его.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-09-29", title: "Карточки рассылки заказов как в календаре",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [

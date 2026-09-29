@@ -2427,6 +2427,9 @@ probe_file() {
       "$(q_idx uq_resource_suppliers_film)" \
       "$(q_col user_preferences procurement_saved_views)" \
       "$(q_con_on user_preferences chk_user_preferences_procurement_saved_views)" ;;
+    206_inventory_onec_autosync_state*) probe_all \
+      "$(q_tbl inventory_onec_autosync_state)" \
+      "$(q_con_on inventory_onec_autosync_state chk_inventory_onec_autosync_seq)" ;;
     205_warehouses_onec_key_required*) probe_all \
       "$(q_con_on warehouses chk_warehouses_ref_key_1c_required)" ;;
     # Сид 203 — хотя бы один склад (склад можно переименовать; после 205 повторный сид без ключа 1С невозможен).
@@ -2767,6 +2770,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     204_procurement_workspace*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    206_inventory_onec_autosync_state*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     205_warehouses_onec_key_required*)

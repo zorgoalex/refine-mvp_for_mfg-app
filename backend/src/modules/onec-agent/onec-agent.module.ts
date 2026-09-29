@@ -8,11 +8,13 @@ import { PgOnecRepository } from './adapters/pg-onec-repository';
 import { OnecAdminService } from './application/onec-admin.service';
 import { OnecAgentProtocolService } from './application/onec-agent-protocol.service';
 import { OnecAlertProjector } from './application/onec-alert-projector';
+import { OnecAlertsPort } from './application/onec-alerts-port';
 import { OnecAuditWriter } from './application/onec-audit';
 import { OnecCommandWakeups } from './application/onec-command-wakeups';
 import { OnecCommandsService } from './application/onec-commands.service';
 import { OnecEtlAdminService } from './application/onec-etl-admin.service';
 import { OnecEtlCompletionService } from './application/onec-etl-completion.service';
+import { OnecEtlEvents } from './application/onec-etl-events';
 import { OnecEtlIngestService } from './application/onec-etl-ingest.service';
 import { OnecEtlParserService } from './application/onec-etl-parser.service';
 import { OnecEtlRevocationService } from './application/onec-etl-revocation.service';
@@ -40,6 +42,7 @@ import { OnecCatalogReader } from './onec-catalog-reader';
     OnecAgentProtocolService,
     OnecAdminService,
     OnecAlertProjector,
+    OnecAlertsPort,
     OnecMonitorService,
     OnecAgentAuthGuard,
     OnecPermissionsGuard,
@@ -50,6 +53,7 @@ import { OnecCatalogReader } from './onec-catalog-reader';
     OnecEtlParserService,
     OnecEtlIngestService,
     OnecEtlCompletionService,
+    OnecEtlEvents,
     OnecEtlAdminService,
     OnecEtlRevocationService,
     PgOnecMatchingRepository,
@@ -57,6 +61,6 @@ import { OnecCatalogReader } from './onec-catalog-reader';
     OnecCatalogReader,
   ],
   // Port for business modules (E4): OnecCommandsService.enqueue(tx, …).
-  exports: [OnecCommandsService, OnecCatalogReader],
+  exports: [OnecCommandsService, OnecCatalogReader, OnecEtlEvents, OnecAlertsPort],
 })
 export class OnecAgentModule {}
