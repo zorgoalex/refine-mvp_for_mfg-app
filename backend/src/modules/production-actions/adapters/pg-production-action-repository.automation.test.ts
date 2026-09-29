@@ -45,6 +45,16 @@ describe('production-action automation in-transaction actions', () => {
     expect(database.auditCalls[0]?.metadata).toMatchObject({ changedDetailIds: [101], mdfBoardScope: context.mdfBoardScope });
     expect(database.sql.some(sql => sql.includes('DELETE FROM mdf_board_manual_moves'))).toBe(false);
     expect(statusAutomationMocks.evaluateMdfBoardColumnAutomation).not.toHaveBeenCalled();
+    // «Переделка» (plan §5.5): MDF effects never load details of production round > 1.
+    expect(database.sql.some(sql => sql.includes('AND detail.production_round = 1'))).toBe(true);
+  });
+
+  it('non-MDF automation still loads details of every production round', async () => {
+    const database = createAutomationTx({ updatedDetailIds: [101] });
+    await changeDetailsProductionStatusFromAutomationInTransaction(database.tx, 15, 2, automationContext());
+    const load = database.sql.find(sql => sql.includes('FROM order_details detail') && sql.includes('FOR UPDATE OF detail'));
+    expect(load).toBeDefined();
+    expect(load).not.toContain('production_round');
   });
 
   it('rejects direct unscoped MDF batch commands before any database access', async () => {
@@ -312,7 +322,7 @@ describe('production-action automation in-transaction actions', () => {
         CREATE TEMP TABLE cut_param_profiles (cut_param_profile_id bigint, params jsonb);
         CREATE TEMP TABLE cut_result_archive_state (cut_job_id bigint, result_no int, archived_at timestamptz);
         CREATE TEMP TABLE orders (order_id bigint, delete_flag boolean, order_name text, order_kind text, order_status_id int, production_status_id int);
-        CREATE TEMP TABLE order_details (detail_id bigint, production_status_id int, delete_flag boolean, order_id bigint, detail_number int, width numeric, height numeric);
+        CREATE TEMP TABLE order_details (detail_id bigint, production_status_id int, delete_flag boolean, order_id bigint, detail_number int, width numeric, height numeric, production_round int NOT NULL DEFAULT 1);
         CREATE TEMP TABLE cnc_telegram_packets (packet_id int, material_name text, program_name text, external_packet_key text, comments_json jsonb, completion_status text, thumbs_up boolean,
           rework boolean, mdf_board_card_kind text, mdf_board_hidden_at timestamptz, source_chat_id text, source_version int);
         CREATE TEMP TABLE cnc_telegram_packet_items (packet_id int, match_detail_id bigint, quantity int, match_status text,

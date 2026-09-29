@@ -40,6 +40,8 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
     for (const table of tables) {
       await client.query(`CREATE TEMP TABLE ${table} AS TABLE public.${table} WITH NO DATA`);
     }
+    // CREATE TABLE AS drops defaults; order_details.production_round is NOT NULL DEFAULT 1 («Переделка»).
+    await client.query('ALTER TABLE order_details ALTER COLUMN production_round SET DEFAULT 1');
     await client.query(`
       ALTER TABLE pg_temp.cut_result_placement ADD COLUMN IF NOT EXISTS order_hdf_detail_id bigint;
       ALTER TABLE pg_temp.audit_log ALTER COLUMN audit_id SET DEFAULT gen_random_uuid();
@@ -821,6 +823,36 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
     await expectAllReadiness(true);
   });
 
+  // «Переделка» (plan §5.5, variant B): a production round > 1 detail is out of MDF automation.
+  it('a production round > 1 bath member neither blocks nor completes the bath automation', async () => {
+    await seed(1, [1, 3], '2026-09-06T12:00:00+05');
+    const state = () => loadMdfBathColumnAutomationState(client as unknown as TransactionClient, 1);
+    const laminated = () => loadMdfLaminatedBathAutomationRows(client as unknown as TransactionClient, [1, 3]);
+    expect((await state())?.column).toBe('baths');
+    expect(await laminated()).toEqual([]);
+
+    await client.query('UPDATE pg_temp.order_details SET production_round=2 WHERE detail_id=3');
+    expect(await state()).toEqual({ column: 'baths_laminated', orderIds: [1] });
+    expect(await laminated()).toEqual([expect.objectContaining({ cut_result_id: '1', order_id: '1' })]);
+    const events = await eventsFor({ kind: 'bath', id: 'cut-result:1' });
+    expect(events.flatMap(event => event.scope.details.map(detail => detail.detailId))).toEqual([1]);
+
+    await client.query('UPDATE pg_temp.order_details SET production_round=2 WHERE detail_id=1');
+    expect(await state()).toBeNull();
+    expect(await laminated()).toEqual([]);
+    expect(await eventsFor({ kind: 'bath', id: 'cut-result:1' })).toEqual([]);
+  });
+
+  it('a production round > 1 file position emits no board event and does not block the file', async () => {
+    await client.query(`INSERT INTO pg_temp.cnc_telegram_packet_items(packet_id,match_order_id,match_detail_id,quantity)
+      VALUES('00000000-0000-0000-0000-000000000001',1,3,1)`);
+    expect((await eventsFor()).flatMap(event => event.scope.details.map(detail => detail.detailId)).sort()).toEqual([1, 3]);
+    await client.query('UPDATE pg_temp.order_details SET production_round=2 WHERE detail_id=3');
+    expect((await eventsFor()).flatMap(event => event.scope.details.map(detail => detail.detailId))).toEqual([1]);
+    await client.query('UPDATE pg_temp.order_details SET production_round=2 WHERE detail_id=1');
+    expect(await eventsFor()).toEqual([]);
+  });
+
   it('discovers and completes a BASIS-only bath', async () => {
     await seed(1, [1, 1], '2026-09-06T12:00:00+05');
     await client.query('TRUNCATE pg_temp.cnc_telegram_packets, pg_temp.cnc_telegram_packet_items');
@@ -913,6 +945,34 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
     await expectAllReadiness(ready);
     await client.query('UPDATE pg_temp.orders SET production_status_id=NULL,order_status_id=NULL WHERE order_id=1');
     await expectAllReadiness(false);
+  });
+
+  // «Переделка» (plan §5.5): neither BASIS aggregate (packed, cardRules terminal) counts an excluded member.
+  it('an excluded BASIS member neither blocks the cardRules terminal nor completes the set alone', async () => {
+    await seed(1, [1], '2026-09-06T12:00:00+05');
+    await client.query(`TRUNCATE pg_temp.cnc_telegram_packets, pg_temp.cnc_telegram_packet_items;
+      UPDATE pg_temp.order_details SET production_status_id=2 WHERE detail_id IN (1,2);
+      UPDATE pg_temp.orders SET order_status_id=6 WHERE order_id=1`);
+    await addBasis(1, 'parsed');
+    await client.query(`INSERT INTO pg_temp.bazis_cut_set_details(bazis_cut_set_id,source_order_id,source_order_detail_id,quantity,material_name)
+      VALUES(1,2,2,1,'МДФ 18мм');
+      INSERT INTO pg_temp.app_settings(setting_key,value_json,is_active)
+      VALUES('status_automation.mdf_board_hidden_production_statuses','{"cardRules":[{"cardKind":"bazisCutSet","orderStatusIds":[6]}]}',true)`);
+    const state = () => loadMdfBathColumnAutomationState(client as unknown as TransactionClient, 1);
+    const basis = { kind: 'bazisCutSet' as const, id: '1' };
+    expect((await state())?.column).toBe('baths'); // order 2 member is neither packed nor hidden
+    expect((await eventsFor(basis)).map(event => event.eventType)).not.toContain('mdf.board.completed');
+
+    await client.query('UPDATE pg_temp.order_details SET production_round=2 WHERE detail_id=2');
+    expect((await state())?.column).not.toBe('baths');
+    const events = await eventsFor(basis);
+    expect(events.filter(event => event.eventType === 'mdf.board.completed')
+      .flatMap(event => event.scope.details.map(detail => detail.detailId))).toEqual([1]);
+    expect(events.flatMap(event => event.scope.details.map(detail => detail.detailId))).not.toContain(2);
+
+    await client.query('UPDATE pg_temp.order_details SET production_round=2 WHERE detail_id=1');
+    expect(await state()).toBeNull();
+    expect(await eventsFor(basis)).toEqual([]);
   });
 
   it('requires the whole file to be issued for the pending-file terminal shortcut', async () => {

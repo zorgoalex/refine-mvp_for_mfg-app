@@ -340,6 +340,7 @@ export async function applyMdfCncAuthorityEffects(tx: TransactionClient, input: 
   const changed = await tx.query<{ order_id: string; detail_id: string; before_status_id: number|null }>(`WITH before_rows AS (
       SELECT order_id,detail_id,production_status_id FROM order_details
       WHERE detail_id=ANY($2::bigint[]) AND COALESCE(delete_flag,false)=false
+        AND production_round=1 -- «Переделка» (plan §5.5): round > 1 stays manual
     ) UPDATE order_details d SET production_status_id=$1
       FROM before_rows b WHERE d.detail_id=b.detail_id AND d.production_status_id IS DISTINCT FROM $1
       RETURNING d.order_id::text order_id,d.detail_id::text detail_id,b.production_status_id before_status_id`,

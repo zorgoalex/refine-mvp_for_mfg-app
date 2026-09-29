@@ -41,6 +41,8 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
       'order_import_entity_map','order_workshops']) {
       await db.query(`CREATE TABLE ${table} AS TABLE public.${table} WITH NO DATA`);
     }
+    // CREATE TABLE AS drops defaults; order_details.production_round is NOT NULL DEFAULT 1 («Переделка»).
+    await db.query('ALTER TABLE order_details ALTER COLUMN production_round SET DEFAULT 1');
     await db.query(`ALTER TABLE cnc_telegram_packets ADD PRIMARY KEY(packet_id);
       ALTER TABLE cnc_telegram_import_candidates ADD PRIMARY KEY(candidate_id);
       ALTER TABLE cnc_telegram_import_items ADD PRIMARY KEY(import_item_id)`);

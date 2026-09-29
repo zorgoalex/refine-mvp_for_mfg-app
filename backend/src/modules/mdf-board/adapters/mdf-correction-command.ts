@@ -703,8 +703,9 @@ async function applyDetailStatusEffects(tx:TransactionClient,actorId:number,snap
     const before=snapshot.details.find(d=>d.orderId===effect.orderId&&d.detailId===effect.detailId);
     if (!before||effect.afterRank===before.currentRank) continue;
     const status=selectStatusForEffect(effect,stages,targetStage);
+    // «Переделка» (plan §5.5): details of production round > 1 stay out of MDF effects.
     await tx.query(`UPDATE order_details SET production_status_id=$3,edited_by=$4,updated_at=now()
-      WHERE order_id=$1 AND detail_id=$2 AND NOT delete_flag`,[effect.orderId,effect.detailId,status.id,actorId]);
+      WHERE order_id=$1 AND detail_id=$2 AND NOT delete_flag AND production_round=1`,[effect.orderId,effect.detailId,status.id,actorId]);
     changedOrders.add(effect.orderId);
   }
   for (const orderId of sorted(changedOrders)) {

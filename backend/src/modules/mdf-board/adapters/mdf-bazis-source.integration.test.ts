@@ -45,6 +45,8 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real BASIS creation
       'cut_result_board_projection','cut_result_placement','cut_result_sheet_map']) {
       await db.query(`CREATE TABLE ${table} AS TABLE public.${table} WITH NO DATA`);
     }
+    // CREATE TABLE AS drops defaults; order_details.production_round is NOT NULL DEFAULT 1 («Переделка»).
+    await db.query('ALTER TABLE order_details ALTER COLUMN production_round SET DEFAULT 1');
     await db.query('ALTER TABLE cnc_telegram_packets ADD PRIMARY KEY(packet_id)');
     await db.query(readFileSync(new URL('../../../../db/migrations/179_mdf_active_return.sql',import.meta.url),'utf8'));
     await db.query(readFileSync(new URL('../../../../db/migrations/182_mdf_physical_lineage.sql',import.meta.url),'utf8'));
