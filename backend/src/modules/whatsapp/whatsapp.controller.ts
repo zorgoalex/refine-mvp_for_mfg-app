@@ -28,6 +28,7 @@ import {
 import { WhatsAppPermissionsGuard } from "./whatsapp-permissions.guard";
 import { WhatsAppService } from "./whatsapp.service";
 import { parseWhatsAppTechnicalLogQuery } from "./whatsapp-technical-log.dto";
+import { parseGroupsRefresh } from "./whatsapp-groups";
 
 @ApiTags("WhatsApp")
 @Controller("whatsapp")
@@ -52,6 +53,14 @@ export class WhatsAppController {
       .type(qr.contentType)
       .setHeader("Cache-Control", "no-store")
       .send(Buffer.from(qr.bytes));
+  }
+  @ApiOperation({ summary: 'List groups of the linked WhatsApp account' })
+  @Get("groups")
+  @ApiBearerAuth('bearerAuth')
+  @RequirePermissions("whatsapp.manage")
+  groups(@Query("refresh") refresh: unknown, @Res({ passthrough: true }) response: Response) {
+    response.setHeader("Cache-Control", "private, no-store");
+    return this.service.listGroups(parseGroupsRefresh(refresh));
   }
   @ApiOperation({ summary: 'Restart the WhatsApp session after confirmation' })
   @Post("restart")

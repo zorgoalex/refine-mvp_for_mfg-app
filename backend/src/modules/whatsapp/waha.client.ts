@@ -38,6 +38,10 @@ export class WahaClient {
       method: "POST",
     });
   }
+  /** Groups of the linked account without participants (member phone numbers stay in WAHA). */
+  groups(limit: number) {
+    return this.request(`/api/${this.sessionPath()}/groups?exclude=participants&limit=${limit}`);
+  }
 
   async qr(): Promise<{ bytes: Uint8Array; contentType: string }> {
     const response = await this.raw(

@@ -933,6 +933,24 @@ paths:
       x-permission: whatsapp.manage
       responses:
         '200': {description: Response content, content: {image/*: {schema: {type: string, format: binary}}}}
+  /api/v1/whatsapp/groups:
+    get:
+      tags: [WhatsApp]
+      operationId: listWhatsAppGroups
+      summary: List groups of the linked WhatsApp account
+      description: Reads groups from WAHA without participants and returns only allowlisted fields (no owner or member phone numbers). Results are cached in-process for 60 seconds; refresh=true bypasses the cache at most once per 10 seconds. Requires a WORKING session.
+      security: [{bearerAuth: []}]
+      x-permission: whatsapp.manage
+      parameters:
+        - {name: refresh, in: query, required: false, schema: {type: string, enum: ['true', 'false', '1', '0']}}
+      responses:
+        '200': {description: Groups of the linked account, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppGroupsResponse'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {description: 'WHATSAPP_SESSION_NOT_READY'}
+        '422': {description: 'WHATSAPP_GROUPS_QUERY_INVALID'}
+        '502': {description: 'WAHA_PROVIDER_ERROR'}
+        '503': {description: 'WHATSAPP_NOT_CONFIGURED or WAHA_UNAVAILABLE'}
   /api/v1/whatsapp/restart:
     post:
       tags:
@@ -28493,6 +28511,28 @@ components:
           type: string
           nullable: true
 
+    WhatsAppGroupsResponse:
+      type: object
+      additionalProperties: false
+      required: [groups, truncated, fetchedAt, cached]
+      properties:
+        groups:
+          type: array
+          maxItems: 1000
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, name, participantCount, announceOnly, communityParent, suspended]
+            properties:
+              id: {type: string, pattern: '^\d{5,24}(?:-\d{5,24})?@g\.us$'}
+              name: {type: string, maxLength: 200}
+              participantCount: {type: integer, nullable: true, minimum: 0}
+              announceOnly: {type: boolean, description: Only admins may post}
+              communityParent: {type: boolean, description: Community parent group that does not accept regular messages}
+              suspended: {type: boolean}
+        truncated: {type: boolean}
+        fetchedAt: {type: string, format: date-time}
+        cached: {type: boolean}
     WhatsAppDailyDigestSettingsResponse:
       type: object
       additionalProperties: false

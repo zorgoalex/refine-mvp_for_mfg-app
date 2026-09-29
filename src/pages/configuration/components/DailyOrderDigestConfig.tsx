@@ -5,7 +5,6 @@ import {
   Card,
   Checkbox,
   Form,
-  Input,
   InputNumber,
   Modal,
   Select,
@@ -22,6 +21,7 @@ import { ReloadOutlined, SendOutlined } from '@ant-design/icons';
 import { dailyOrderDigestApi } from '../../../api/dailyOrderDigestApi';
 import { ApiError } from '../../../api/apiError';
 import './DailyOrderDigestConfig.css';
+import { WhatsAppGroupSelect } from './WhatsAppGroupSelect';
 import type {
   DailyDigestPreview,
   DailyDigestRun,
@@ -458,36 +458,37 @@ export const DailyOrderDigestConfig: React.FC = () => {
     <Card title="Расписание и правила">
       <Form form={form} layout="vertical" initialValues={DEFAULT_SETTINGS} disabled={saving || loading} onFinish={(values: SettingsFormValues) => void saveSettings(values)}>
         <Form.Item name="version" hidden><InputNumber /></Form.Item>
-        <Space align="center" size="middle" wrap>
-          <Form.Item name="enabled" label="Автоматическая рассылка" valuePropName="checked" style={{ marginBottom: 8 }}>
-            <Switch checkedChildren="Включена" unCheckedChildren="Выключена" />
-          </Form.Item>
-          <Text type="secondary">При первом подключении выключена. Предпросмотр и ручная отправка настраиваются отдельно.</Text>
-        </Space>
-        <Form.Item name="groupChatId" label="Группа WhatsApp" rules={[
+        <div className="daily-digest-settings-grid">
+        <Form.Item name="enabled" label="Автоматическая рассылка" valuePropName="checked" tooltip="При первом подключении выключена. Предпросмотр и ручная отправка настраиваются отдельно.">
+          <Switch checkedChildren="Включена" unCheckedChildren="Выключена" />
+        </Form.Item>
+        <Form.Item className="daily-digest-settings-wide" name="groupChatId" label="Группа WhatsApp" rules={[
           { validator: async (_, value: string | null | undefined) => {
             if (!value && !form.getFieldValue('enabled')) return;
-            if (!value || !/^\d{5,20}@g\.us$/.test(value.trim())) throw new Error('Введите ID группы из 5–20 цифр, заканчивающийся на @g.us.');
+            if (!value || !/^\d{5,24}(?:-\d{5,24})?@g\.us$/.test(value.trim())) throw new Error('Введите ID группы WhatsApp, заканчивающийся на @g.us.');
           } },
-        ]} extra="ID группы хранится в защищённых настройках. В истории показывается только маска.">
-          <Input placeholder="120…@g.us" autoComplete="off" />
+        ]} tooltip="ID группы хранится в защищённых настройках. В истории показывается только маска.">
+          <WhatsAppGroupSelect placeholder="120…@g.us" />
+        </Form.Item>
+        <Form.Item name="cardsPerMessage" label="Карточек в одном сообщении" rules={[{ required: true }]} tooltip="Настройка применяется к новым предпросмотрам и запускам." extra="Повтор использует изображения и количество карточек из исходного запуска.">
+          <Select style={{ width: '100%' }} options={[
+            { value: 1, label: '1 карточка' },
+            { value: 2, label: '2 карточки' },
+          ]} />
         </Form.Item>
         <Form.Item name="sendTime" label="Начало окна отправки" rules={[{ required: true, message: 'Укажите время отправки.' }]}>
-          <TimePicker format="HH:mm" minuteStep={5} style={{ width: 160 }} />
+          <TimePicker format="HH:mm" minuteStep={5} style={{ width: '100%' }} />
         </Form.Item>
         <Form.Item name="sendWindowMinutes" label="Случайное окно отправки, минут" dependencies={['sendTime']} rules={[{ required: true, message: 'Укажите длительность окна.' }, { validator: async (_, duration: number | undefined) => {
           const sendTime = form.getFieldValue('sendTime') as Dayjs | undefined;
           if (duration === undefined || !sendTime) return;
           if (!Number.isInteger(duration) || duration < 0 || duration > 1439) throw new Error('Длительность окна — от 0 до 1439 минут.');
           if (sendTime.hour() * 60 + sendTime.minute() + duration > 1439) throw new Error('Окно должно заканчиваться до полуночи.');
-        } }]} extra="0 — отправка точно в указанное время. Больше 0 — сервер один раз в день случайно выбирает минуту внутри окна и фиксирует её до конца дня.">
-          <InputNumber min={0} max={1439} step={5} style={{ width: 160 }} />
+        } }]} tooltip="0 — отправка точно в указанное время. Больше 0 — сервер один раз в день случайно выбирает минуту внутри окна и фиксирует её до конца дня.">
+          <InputNumber min={0} max={1439} step={5} style={{ width: '100%' }} />
         </Form.Item>
-        {envelope?.todaySchedule ? <Alert type="info" showIcon message={`Сегодня отправка запланирована на ${formatScheduleTime(envelope.todaySchedule.scheduledAt)}`}
-          description={`${envelope.todaySchedule.sendWindowMinutes > 0 ? `Время выбрано случайно в окне ${envelope.todaySchedule.windowStart}–${envelope.todaySchedule.windowEnd} и зафиксировано до конца дня. ` : 'Время зафиксировано до конца дня. '}Изменения времени, окна и правил догона применятся к завтрашнему расписанию. Отправка начнётся при первом проходе планировщика после выбранной минуты.`} />
-          : settings?.enabled ? <Paragraph type="secondary">Время отправки на сегодня ещё не выбрано — планировщик зафиксирует его при следующем проходе.</Paragraph> : null}
         <Form.Item name="catchUpPolicy" label="Если сервер пропустил время отправки" rules={[{ required: true }]}>
-          <Select options={[
+          <Select style={{ width: '100%' }} options={[
             { value: 'skip', label: 'Пропустить сводку за сегодня' },
             { value: 'until_deadline', label: 'Отправить до контрольного времени' },
             { value: 'end_of_day', label: 'Отправить до конца дня' },
@@ -498,24 +499,22 @@ export const DailyOrderDigestConfig: React.FC = () => {
           const windowMinutes = Number(form.getFieldValue('sendWindowMinutes') ?? 0);
           if (deadline && sendTime && deadline.hour() * 60 + deadline.minute() < sendTime.hour() * 60 + sendTime.minute() + windowMinutes) throw new Error('Контрольное время должно быть не раньше конца окна отправки.');
         } }]}>
-          <TimePicker format="HH:mm" minuteStep={5} style={{ width: 160 }} />
+          <TimePicker format="HH:mm" minuteStep={5} style={{ width: '100%' }} />
         </Form.Item>}
-        <Form.Item name="cardsPerMessage" label="Карточек в одном сообщении" rules={[{ required: true }]} extra="Настройка применяется к новым предпросмотрам и запускам. Повтор использует изображения и количество карточек из исходного запуска.">
-          <Select options={[
-            { value: 1, label: '1 карточка' },
-            { value: 2, label: '2 карточки' },
-          ]} />
-        </Form.Item>
         <Form.Item name="partialPolicy" label="Если отправлена только часть сводки" rules={[{ required: true }]}> 
-          <Select options={[
+          <Select style={{ width: '100%' }} options={[
             { value: 'remaining', label: 'Продолжить с неотправленных карточек' },
             { value: 'repeat_all', label: 'Повторить всю сводку' },
             { value: 'manual', label: 'Остановить и ждать решения оператора' },
           ]} />
         </Form.Item>
+        </div>
+        {envelope?.todaySchedule ? <Alert type="info" showIcon message={`Сегодня отправка запланирована на ${formatScheduleTime(envelope.todaySchedule.scheduledAt)}`}
+          description={`${envelope.todaySchedule.sendWindowMinutes > 0 ? `Время выбрано случайно в окне ${envelope.todaySchedule.windowStart}–${envelope.todaySchedule.windowEnd} и зафиксировано до конца дня. ` : 'Время зафиксировано до конца дня. '}Изменения времени, окна и правил догона применятся к завтрашнему расписанию. Отправка начнётся при первом проходе планировщика после выбранной минуты.`} />
+          : settings?.enabled ? <Paragraph type="secondary">Время отправки на сегодня ещё не выбрано — планировщик зафиксирует его при следующем проходе.</Paragraph> : null}
         {partialPolicy === 'repeat_all' && <Alert type="warning" showIcon message="Повтор может отправить уже полученные карточки ещё раз." description={<Checkbox checked={riskConfirmed} onChange={(event) => setRiskConfirmed(event.target.checked)}>Подтверждаю возможные повторные сообщения</Checkbox>} />}
         <Paragraph type="secondary">Сводка содержит все незакрытые и закрытые производственные заказы с плановой датой сегодня. На каждом изображении — не более {settings?.cardsPerMessage === 1 ? 'одной карточки' : 'двух карточек'}; общий метраж считается по всем заказам.</Paragraph>
-        <Space wrap>
+        <Space wrap className="daily-digest-settings-actions">
           <Button type="primary" htmlType="submit" loading={saving} disabled={!dirty || (partialPolicy === 'repeat_all' && !riskConfirmed)}>Сохранить настройки</Button>
           <Button icon={<ReloadOutlined />} onClick={() => void loadSettings()} disabled={saving}>Обновить</Button>
         </Space>

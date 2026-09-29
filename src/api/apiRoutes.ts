@@ -382,6 +382,7 @@ export const apiRoutes = {
   whatsapp: {
     preview: backendApiPath('/whatsapp/rules/preview'),
     status: backendApiPath('/whatsapp/status'),
+    groups: backendApiPath('/whatsapp/groups'),
     qr: backendApiPath('/whatsapp/qr'),
     restart: backendApiPath('/whatsapp/restart'),
     templates: backendApiPath('/whatsapp/templates'),

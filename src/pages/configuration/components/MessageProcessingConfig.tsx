@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Alert, Button, Card, Form, Input, InputNumber, Select, Space, Switch, Tabs, Typography } from 'antd';
 import { inboundSignalsApi as api, type SignalConfiguration } from '../../../api/inboundSignalsApi';
 import { can } from '../../../utils/permissions';
+import { featureFlags } from '../../../config/featureFlags';
+import { WhatsAppGroupSelect } from './WhatsAppGroupSelect';
 
 const codeRules = [{ required: true, pattern: /^[a-z][a-z0-9_.-]{1,63}$/, message: 'Код: 2–64 символа, латиница, цифры, точка, дефис или подчёркивание' }];
 const required = [{ required: true, message: 'Заполните поле' }];
@@ -13,6 +15,7 @@ export function MessageProcessingConfig() {
   const values = Form.useWatch([], form) as SignalConfiguration | undefined;
   const sources = (values?.sources ?? []).filter(Boolean), signals = (values?.signals ?? []).filter(Boolean), resolvers = (values?.resolvers ?? []).filter(Boolean);
   const allowed = can('message_signals.manage_config');
+  const canPickGroups = !featureFlags.useBackendPermissions || can('whatsapp.manage');
   const load = async () => { setBusy(true); try { form.setFieldsValue(await api.configuration()); setReady(true); setError(''); } catch (e) { setError(e instanceof Error ? e.message : 'Не удалось загрузить настройки'); } finally { setBusy(false); } };
   useEffect(() => { if (allowed) void load(); }, [allowed]);
   useEffect(() => {
@@ -43,7 +46,7 @@ export function MessageProcessingConfig() {
             {identity(field.name)}<Space wrap align="start">
               <Form.Item name={[field.name, 'channel']} label="Канал" rules={required}><Select style={{ width: 150 }} options={[{ value: 'whatsapp', label: 'WhatsApp' }]} /></Form.Item>
               <Form.Item name={[field.name, 'connection']} label="Имя сессии WAHA" rules={required}><Input /></Form.Item>
-              <Form.Item name={[field.name, 'chatId']} label="ID группы" rules={[{ required: true, pattern: /^\d+(?:-\d+)?@g\.us$/, message: 'Нужен ID группы, заканчивающийся на @g.us' }]}><Input placeholder="120…@g.us" /></Form.Item>
+              <Form.Item name={[field.name, 'chatId']} label="ID группы" rules={[{ required: true, pattern: /^\d+(?:-\d+)?@g\.us$/, message: 'Нужен ID группы, заканчивающийся на @g.us' }]}>{canPickGroups ? <WhatsAppGroupSelect placeholder="120…@g.us" /> : <Input placeholder="120…@g.us" />}</Form.Item>
               <Form.Item name={[field.name, 'enabled']} label="Принимать сообщения" valuePropName="checked"><Switch /></Form.Item>
             </Space>
           </Card>)}
