@@ -302,6 +302,40 @@ describe.skipIf(!url)('film catalog import PostgreSQL transactions', () => {
     expect(await matchOf()).toEqual(rejected);
   });
 
+  it('a cancelled stock document does not block merging a duplicate; a draft still does', async () => {
+    const warehouseId = Number((await query<{ id: number }>(`SELECT min(warehouse_id) AS id FROM warehouses`)).rows[0].id);
+    const stockLine = async (filmId: number, status: 'draft' | 'cancelled') => {
+      const doc = Number((await query<{ document_id: string }>(
+        `INSERT INTO stock_documents(doc_type,status,warehouse_id,doc_date,source,created_by,request_id,cancelled_by,cancelled_at)
+         VALUES('inventory',$1,$2,current_date,'manual',$3,$4,CASE WHEN $1='cancelled' THEN $3::bigint END,CASE WHEN $1='cancelled' THEN now() END) RETURNING document_id`,
+        [status, warehouseId, actorId, `req-${randomUUID()}`],
+      )).rows[0].document_id);
+      await query(`INSERT INTO stock_document_lines(document_id,line_no,film_id,quantity,match_status,quantity_status) VALUES($1,1,$2,1.1,'manual','confirmed')`, [doc, filmId]);
+    };
+    const mergeInto = async (label: string, lineStatus: 'draft' | 'cancelled') => {
+      await newSupplier();
+      const canonical = await createFilm(`${prefix} ${label} основная`);
+      const duplicate = await createFilm(`${prefix} ${label} дубль`);
+      await stockLine(duplicate, lineStatus);
+      const batch = await draft(`${prefix} ${label} каталог`);
+      const row = (await service.rows(batch.id, [], {})).items[0]!;
+      await service.patch(batch.id, [], { version: 1, actions: [
+        { type: 'setMatch', filmId: canonical, rowId: row.rowId }, { type: 'setMatch', filmId: duplicate, rowId: row.rowId },
+        { type: 'setCanonical', rowId: row.rowId, filmId: canonical },
+      ] }, actorId, randomUUID(), key());
+      return { batch, duplicate, canonical };
+    };
+    const cancelled = await mergeInto('отменённый', 'cancelled');
+    await service.apply(cancelled.batch.id, [], 2, actorId, randomUUID(), key());
+    expect((await query<{ canonical_film_id: string }>(`SELECT canonical_film_id FROM films WHERE film_id=$1`, [cancelled.duplicate])).rows[0].canonical_film_id)
+      .toBe(String(cancelled.canonical));
+    const drafted = await mergeInto('черновик', 'draft');
+    const failure = await service.apply(drafted.batch.id, [], 2, actorId, randomUUID(), key())
+      .then(() => null, (error: { statusCode?: number; code?: string; details?: { conflicts?: Array<{ reason: string }> } }) => error);
+    expect({ statusCode: failure?.statusCode, code: failure?.code }).toEqual({ statusCode: 409, code: 'CATALOG_IMPORT_CONFLICT' });
+    expect(failure?.details?.conflicts?.map((c) => c.reason)).toContain('stock_dependency:stock_document_lines');
+  });
+
   it('creates absent film and rejects stale business fingerprint atomically', async () => {
     const newBatch = await draft(`${prefix} отсутствующая`);
     await service.apply(newBatch.id, [], 1, actorId, randomUUID(), key());

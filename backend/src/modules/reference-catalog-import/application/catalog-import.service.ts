@@ -2149,8 +2149,12 @@ export class CatalogImportService {
       `SELECT table_name FROM unnest(ARRAY['stock_balances','stock_movements','stock_document_lines']::text[]) table_name WHERE to_regclass('public.'||table_name) IS NOT NULL`
     );
     for (const { table_name } of available.rows) {
+      // Строки отменённых документов (отменяется только черновик — движений нет) не держат плёнку:
+      // слияние/откат не меняют остатков; черновики и проведённые документы по-прежнему блокируют.
       const exists = await tx.query(
-        `SELECT 1 FROM ${table_name} WHERE film_id=ANY($1::bigint[]) LIMIT 1`,
+        table_name === 'stock_document_lines'
+          ? `SELECT 1 FROM stock_document_lines l JOIN stock_documents d USING(document_id) WHERE l.film_id=ANY($1::bigint[]) AND d.status<>'cancelled' LIMIT 1`
+          : `SELECT 1 FROM ${table_name} WHERE film_id=ANY($1::bigint[]) LIMIT 1`,
         [ids]
       );
       if (exists.rows.length) {
