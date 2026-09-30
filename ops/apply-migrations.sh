@@ -189,6 +189,19 @@ ensure_ledger() {
              checksum text NOT NULL,
              applied_at timestamptz NOT NULL DEFAULT now());" >/dev/null
 }
+# «Переделка» §5.9 (accepted residual risk): the deferred realtime drain must not run
+# while DDL/maintenance holds table locks. An active drain keeps its own connection
+# with application_name 'erp-order-realtime-drain' (OrderRealtimeDeferredDrainService).
+warn_active_realtime_drain() {
+  local active
+  active="$(pg_query "SELECT count(*) FROM pg_stat_activity
+    WHERE datname = current_database() AND application_name = 'erp-order-realtime-drain';" 2>/dev/null || echo 0)"
+  if [ "${active:-0}" != "0" ]; then
+    err "WARNING: the deferred realtime drain is active ($active connection(s) 'erp-order-realtime-drain')."
+    err "Before migrations/maintenance set BACKEND_ORDER_REALTIME_DEFERRED_DRAIN=false and restart every"
+    err "backend instance (it logs 'drain stopped'), or stop the backend; re-enable afterwards (ops/README.md)."
+  fi
+}
 ledger_exists() {
   [ "$(pg_query "SELECT to_regclass('public.schema_migrations') IS NOT NULL;")" = "t" ]
 }
@@ -3779,6 +3792,7 @@ case "$MODE" in
 
   apply)
     hard_stop_gate
+    warn_active_realtime_drain
     ensure_ledger
     # Recompute applied set now the ledger surely exists.
     APPLIED_SUM=()
@@ -3818,6 +3832,7 @@ case "$MODE" in
     # migration head. See the plan:
     # spec_erp/plans/2026-07-04-auto-migrations-restored-dump-plan.md
     # ------------------------------------------------------------------
+    warn_active_realtime_drain
     if [ "$CLEAR_HARD_STOP" -eq 1 ] && ledger_exists; then
       err "Clearing ${HARD_STOP_PREFIX}* sentinel(s) on operator request."
       pg_query "DELETE FROM schema_migrations WHERE filename LIKE '${HARD_STOP_PREFIX}%';" >/dev/null

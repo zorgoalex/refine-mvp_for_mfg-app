@@ -309,6 +309,8 @@ export const envSchema = z
     BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED: booleanFromEnv.default(false),
     // «Переделка»: команды кругов производства (миграции 220–222). Default off.
     BACKEND_ORDER_REWORK_ENABLED: booleanFromEnv.default(false),
+    // «Переделка» §5.9: false stops the deferred realtime drain and sweeper (DB migrations/maintenance).
+    BACKEND_ORDER_REALTIME_DEFERRED_DRAIN: booleanFromEnv.default(true),
     BACKEND_FILM_CATALOG_IMPORT_ENABLED: booleanFromEnv.default(false),
     BACKEND_INVENTORY_ENABLED: booleanFromEnv.default(false),
     BACKEND_INVENTORY_ONEC_AUTOSYNC: booleanFromEnv.default(false),

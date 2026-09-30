@@ -124,6 +124,11 @@ export interface OrderReworkServicePorts {
   isEnabled: () => boolean;
   /** Post-commit read through the order query service (permissions/financial redaction apply). */
   readOrder: (currentUser: CurrentUser, orderId: number) => Promise<OrderDto>;
+  /**
+   * §5.7 п.5: fire-and-forget delivery of the realtime emissions this command deferred
+   * (`order_realtime_deferred`); the periodic sweeper covers a crash before it.
+   */
+  requestRealtimeDrain?: (orderIds: number[]) => void;
 }
 
 interface LockedOrderRow extends QueryResultRow {
@@ -712,6 +717,12 @@ export class OrderReworkService {
   }
 
   private async withOrder(result: OrderReworkCommandResultDto, currentUser: CurrentUser): Promise<OrderReworkResponseDto> {
+    // Committed: deliver the deferred realtime emissions; errors never affect the command response.
+    try {
+      this.ports.requestRealtimeDrain?.([result.orderId]);
+    } catch {
+      // The sweeper delivers later.
+    }
     const order = await this.ports.readOrder(currentUser, result.orderId);
     return { ...result, order };
   }
