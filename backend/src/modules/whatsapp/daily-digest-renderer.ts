@@ -27,6 +27,12 @@ const TEXT_WIDTH = CARD_WIDTH - 2 * CARD_PAD_X;
 const HEADER_HEIGHT = 34;
 const CARD_GAP = 8;
 const PAGE_FOOTER_HEIGHT = 16;
+/**
+ * Every page is as tall as two card slots. WhatsApp fits an image into a frame of limited height,
+ * so a short one-card image was shown ~1.5x wider than a two-card one; with equal proportions
+ * both are scaled alike. A page with one card keeps the second slot empty.
+ */
+const MIN_CARD_SLOTS = 2;
 const MAX_RENDER_DURATION_MS = 30_000;
 const BOLD_FONT_FILE = 'LiberationSans-Bold.ttf';
 
@@ -56,11 +62,14 @@ export class DailyDigestRenderer {
       const header = pageIndex === 1 ? renderDayHeader(snapshot) : '';
       let y = pageIndex === 1 ? HEADER_HEIGHT + 6 : PAGE_GUTTER;
       const cardSvgs: string[] = [];
+      let lastCardHeight = 0;
       for (const order of orders) {
         const card = renderOrderCard(order, snapshot);
         cardSvgs.push(`<g transform="translate(${PAGE_GUTTER} ${y})">${card.svg}</g>`);
         y += card.height + CARD_GAP;
+        lastCardHeight = card.height;
       }
+      for (let slot = orders.length; slot < MIN_CARD_SLOTS; slot += 1) y += lastCardHeight + CARD_GAP;
       y = y - CARD_GAP + PAGE_FOOTER_HEIGHT;
       const svg = pageSvg({
         height: y,
