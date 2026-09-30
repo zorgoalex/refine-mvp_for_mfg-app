@@ -159,7 +159,20 @@ describe('DailyDigestRenderer', () => {
     expect(bold && existsSync(bold)).toBeTruthy();
     expect(bold).toContain('LiberationSans-Bold.ttf');
     expect(readFileSync(bold as string).byteLength).toBeGreaterThan(100_000);
-    expect(DAILY_DIGEST_RENDERER_VERSION).toBe('daily-order-cards-v3');
+    expect(DAILY_DIGEST_RENDERER_VERSION).toBe('daily-order-cards-v4');
+  });
+
+  it('gives one-card images the proportions of two-card images (same width in WhatsApp)', async () => {
+    const orders = Array.from({ length: 5 }, (_, index) => makeOrder(index + 2));
+    const two = await renderer.render(makeSnapshot(orders));
+    const one = await renderer.render({ ...makeSnapshot(orders), cardsPerMessage: 1 });
+    const size = (png: Buffer) => { const image = PNG.sync.read(png); return `${image.width}x${image.height}`; };
+    // Identical cards: page 1 carries the day header in both modes, later pages do not.
+    expect(size(one[0].png)).toBe(size(two[0].png));
+    expect(size(one[1].png)).toBe(size(two[1].png));
+    // The odd last page of the two-card mode keeps the second slot empty as well.
+    expect(two[2].orderIds).toHaveLength(1);
+    expect(size(two[2].png)).toBe(size(two[1].png));
   });
 
   it('renders a narrow image at layout width x zoom with a content-driven height', async () => {
