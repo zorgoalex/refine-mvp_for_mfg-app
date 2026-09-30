@@ -167,16 +167,23 @@ export function toFormValues(broadcast: Broadcast): BroadcastFormValues {
   };
 }
 
-export function buildBroadcastInput(values: BroadcastFormValues, riskConfirmed: boolean): BroadcastInput {
+const DEFAULT_CATCH_UP_DEADLINE = '10:00';
+
+/** «HH:mm» of a picked time; `fallback` when the field is empty (e.g. hidden for the chosen policy). */
+function clockText(value: Dayjs | null | undefined, fallback: string): string {
+  return value && typeof value.isValid === 'function' && value.isValid() ? value.format('HH:mm') : fallback;
+}
+
+export function buildBroadcastInput(values: BroadcastFormValues, riskConfirmed: boolean, saved?: Pick<BroadcastInput, 'sendTime' | 'catchUpDeadline'>): BroadcastInput {
   return {
     name: values.name.trim(),
     enabled: values.enabled,
     groupChatId: values.groupChatId?.trim() || null,
     weekdays: [...new Set(values.weekdays)].sort((a, b) => a - b),
-    sendTime: values.sendTime.format('HH:mm'),
+    sendTime: clockText(values.sendTime, saved?.sendTime ?? ''),
     sendWindowMinutes: values.sendWindowMinutes,
     catchUpPolicy: values.catchUpPolicy,
-    catchUpDeadline: values.catchUpDeadline.format('HH:mm'),
+    catchUpDeadline: clockText(values.catchUpDeadline, saved?.catchUpDeadline ?? DEFAULT_CATCH_UP_DEADLINE),
     partialPolicy: values.partialPolicy,
     orderDateOffsetDays: values.orderDateOffsetDays,
     cardsPerMessage: values.cardsPerMessage,
@@ -191,20 +198,23 @@ export type BroadcastSaveRequest =
 
 /** Create sends no version; update always carries the loaded version. */
 export function buildSaveRequest(
-  current: Pick<Broadcast, 'id' | 'version'> | null,
+  current: (Pick<Broadcast, 'id' | 'version'> & Partial<Pick<Broadcast, 'sendTime' | 'catchUpDeadline'>>) | null,
   values: BroadcastFormValues,
   riskConfirmed: boolean,
 ): BroadcastSaveRequest {
-  const body = buildBroadcastInput(values, riskConfirmed);
+  const saved = current?.sendTime && current.catchUpDeadline ? { sendTime: current.sendTime, catchUpDeadline: current.catchUpDeadline } : undefined;
+  const body = buildBroadcastInput(values, riskConfirmed, saved);
   return current
     ? { kind: 'update', id: current.id, body: { ...body, version: current.version } }
     : { kind: 'create', body };
 }
 
-export function draftMatchesSaved(values: BroadcastFormValues, broadcast: Broadcast): boolean {
+export function draftMatchesSaved(values: Partial<BroadcastFormValues>, broadcast: Broadcast): boolean {
   const saved = toFormValues(broadcast);
-  const input = buildBroadcastInput(values, true);
-  const savedInput = buildBroadcastInput(saved, true);
+  // A field the form does not report (not yet mounted, or hidden) counts as unchanged.
+  const present = Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined)) as Partial<BroadcastFormValues>;
+  const input = buildBroadcastInput({ ...saved, ...present }, true, broadcast);
+  const savedInput = buildBroadcastInput(saved, true, broadcast);
   return JSON.stringify(input) === JSON.stringify(savedInput);
 }
 

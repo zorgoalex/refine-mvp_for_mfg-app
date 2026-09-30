@@ -228,12 +228,16 @@ export const BroadcastEditor: React.FC<BroadcastEditorProps> = ({
             { value: 'end_of_day', label: 'Отправить до конца дня' },
           ]} />
         </Form.Item>
-        {catchUpPolicy === 'until_deadline' && <Form.Item name="catchUpDeadline" label="Контрольное время" dependencies={['sendTime', 'sendWindowMinutes']} rules={[{ required: true, message: 'Укажите контрольное время.' }, { validator: async (_, deadline: unknown) => {
+        {/* Always registered (only hidden) for the other policies: the form values must keep the saved deadline. */}
+        <Form.Item name="catchUpDeadline" label="Контрольное время" hidden={catchUpPolicy !== 'until_deadline'}
+          dependencies={['sendTime', 'sendWindowMinutes', 'catchUpPolicy']} rules={[{ validator: async (_, deadline: unknown) => {
+          if (form.getFieldValue('catchUpPolicy') !== 'until_deadline') return;
+          if (!deadline) throw new Error('Укажите контрольное время.');
           const problem = validateDeadline(deadline as BroadcastFormValues['catchUpDeadline'], form.getFieldValue('sendTime'), Number(form.getFieldValue('sendWindowMinutes') ?? 0));
           if (problem) throw new Error(problem);
         } }]}>
           <ClockTimePicker minuteStep={5} style={{ width: '100%' }} />
-        </Form.Item>}
+        </Form.Item>
         <Form.Item name="partialPolicy" label="Если отправлена только часть" rules={[{ required: true }]}>
           <Select style={{ width: '100%' }} options={[
             { value: 'remaining', label: 'Продолжить с неотправленных карточек' },
