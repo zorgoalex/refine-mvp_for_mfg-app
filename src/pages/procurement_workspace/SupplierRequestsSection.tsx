@@ -19,6 +19,7 @@ import { Segmented } from '../../ui/Segmented';
 import { Table, Tooltip, type TableProps } from '../../ui/tooltipDelay';
 import { onecUnitLabel } from '../onec_purchase_documents/onecDocumentsHelpers';
 import { useProcurementPermission } from '../order_resource_requirements/ProcurementParts';
+import { RrScreen } from './RrScreen';
 import { useSelect } from '../../ui/refineSelect';
 import {
   buildDraftsBody,
@@ -456,6 +457,8 @@ function SupplierRequestDrawer({ requestId, onClose, onChanged, canManage, manag
       {state.status === 'loading' && <Typography.Text type="secondary">Загрузка…</Typography.Text>}
       {state.status === 'error' && <Alert type="error" showIcon message={state.message} />}
       {card && (
+        // Drawer рендерится в портал вне экрана — стили rr-* и токены темы подключаются своей обёрткой.
+        <RrScreen>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {editable ? (
             <Space wrap align="start">
@@ -475,6 +478,7 @@ function SupplierRequestDrawer({ requestId, onClose, onChanged, canManage, manag
                 <div className="rr-sub">Ожидаем к</div>
                 <DatePicker
                   format="DD.MM.YYYY"
+                  placeholder="Выберите дату"
                   style={{ width: 160 }}
                   value={expectedDateValue ? dayjs(expectedDateValue) : null}
                   onChange={(value) => setExpectedDateValue(value ? value.format('YYYY-MM-DD') : null)}
@@ -530,6 +534,7 @@ function SupplierRequestDrawer({ requestId, onClose, onChanged, canManage, manag
             </Tooltip>
           </Space>
         </div>
+        </RrScreen>
       )}
     </Drawer>
   );
