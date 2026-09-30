@@ -1338,6 +1338,7 @@ function mergeBaseDefaultGetByIdSql(): string {
     '        o.production_status_id, prod_s.production_status_name,',
     '        o.production_detail_count, o.production_unassigned_count, o.production_distinct_status_count,',
     '        o.production_status_from_details_enabled,',
+    '        o.production_round, o.last_round_no,',
     '        (',
     '          SELECT ARRAY_AGG(statuses.production_status_code ORDER BY statuses.sort_order, statuses.production_status_code)',
     '          FROM (',

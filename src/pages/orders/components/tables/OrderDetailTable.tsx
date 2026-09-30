@@ -1,3 +1,4 @@
+import { withRoundSuffix } from '../../../../api/orderReworkApi';
 import { resolveOrderBasisProject } from '../../../../utils/orderBasisProject';
 import { useFilmNamesWithInactive } from '../../../../hooks/useFilmNamesWithInactive';
 import { nameRule } from '../../../../utils/nameRules';
@@ -2519,6 +2520,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           getDisplayedField(d, 'production_status_id') ? (
             <ProductionStatusCell
               statusId={getDisplayedField(d, 'production_status_id')!}
+              round={(d as { production_round?: number }).production_round}
               namesById={productionStatusNameById}
               loading={referencesLoading}
             />
@@ -4287,10 +4289,16 @@ const ProductionStatusCell: React.FC<{
   statusId: number;
   namesById: Map<number, string>;
   loading: boolean;
-}> = ({ statusId, namesById, loading }) => {
+  /** «Переделка»: production round of the detail — «Распилен ·2». */
+  round?: number | null;
+}> = ({ statusId, namesById, loading, round }) => {
   const statusName = resolveReferenceLabel(statusId, namesById);
   if (!statusName && loading) return <span style={ORDER_DETAIL_TABLE_STATUS_BADGE_STYLE}>…</span>;
-  return <span style={ORDER_DETAIL_TABLE_STATUS_BADGE_STYLE}>{statusName || `ID: ${statusId}`}</span>;
+  return (
+    <span style={ORDER_DETAIL_TABLE_STATUS_BADGE_STYLE} title={round && round > 1 ? `Переделка, круг ${round}` : undefined}>
+      {withRoundSuffix(statusName || `ID: ${statusId}`, round)}
+    </span>
+  );
 };
 
 const ORDER_DETAIL_TABLE_STATUS_BADGE_STYLE: React.CSSProperties = {

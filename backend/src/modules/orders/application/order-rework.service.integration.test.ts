@@ -20,6 +20,7 @@ import { PgRecipientSourceAdapter } from '../../notifications-engine/adapters/pg
 import { PgVisibilityAdapter } from '../../notifications-engine/adapters/pg-visibility';
 import { RecipientResolverService } from '../../notifications-engine/application/recipient-resolver.service';
 import { ROLE_TO_ROLE_ID } from '../../../permissions/permissions';
+import { OrderReworkReasonCatalogService } from './order-rework-reason-catalog.service';
 
 // Real PostgreSQL proof of the rework commands («Переделка», slice 4). Gated on
 // REWORK_INTEGRATION_DATABASE_URL (scratch DB: erp schema + migrations 220–222).
@@ -45,11 +46,13 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
     return {
       async transaction<T>(
         handler: (tx: TransactionClient) => Promise<T>,
-        options: { mdf?: { writer: string; capability: string } } = {},
+        options: { mdf?: { writer: string; capability: string }; isolation?: string } = {},
       ): Promise<T> {
         const client: PoolClient = await pool.connect();
         try {
           await client.query('BEGIN');
+          // Like DatabaseService.transaction: honour the requested isolation level.
+          if (options.isolation) await client.query(`SET TRANSACTION ISOLATION LEVEL ${options.isolation.toUpperCase()}`);
           const tx = { raw: client, query: (text: string, params: readonly unknown[] = []) => client.query(text, [...params]) } as never;
           // Like DatabaseService.transaction: MDF-aware commands enter the command boundary first.
           if (options.mdf) await enterMdfCommand(tx, options.mdf as never);
@@ -1152,5 +1155,191 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
       .toEqual(sortRows(snapshot.permissions));
     expect(sortRows((await pool.query('SELECT scope_key, scope_value FROM role_policy_scopes WHERE role_id = $1', [roleId])).rows))
       .toEqual(sortRows(snapshot.scopes));
+  });
+
+  it('reason catalogue: references.manage, generated code, duplicates, stale edits, system reason, deactivation, audit', async () => {
+    const catalog = new OrderReworkReasonCatalogService(database());
+    const name = `E2E-Тест причина ${tag}`;
+    const noManage = { ...admin, permissions: admin.permissions.filter((p) => p !== 'references.manage') };
+    await expect(catalog.list(noManage)).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    await expect(catalog.create(noManage, { name })).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    let createdId: number | null = null;
+    try {
+      const created = await catalog.create(admin, { name, requiresComment: true, sortOrder: 55 }, 'e2e-reason');
+      createdId = created.reasonId;
+      expect(created).toMatchObject({ name, requiresComment: true, sortOrder: 55, isSystem: false, isActive: true, usedRounds: 0 });
+      expect(created.code).toMatch(/^custom_[0-9a-f]{8}$/);
+      await expect(catalog.create(admin, { name: name.toUpperCase() })).rejects.toMatchObject({ code: 'ORDER_REWORK_REASON_DUPLICATE' });
+      await expect(catalog.create(admin, { name: `${name} 2`, code: created.code })).rejects.toMatchObject({ code: 'ORDER_REWORK_REASON_DUPLICATE' });
+
+      const renamed = await catalog.update(admin, created.reasonId, { expectedUpdatedAt: created.updatedAt, name: `${name} изм` });
+      expect(renamed).toMatchObject({ name: `${name} изм`, code: created.code });
+      await expect(catalog.update(admin, created.reasonId, { expectedUpdatedAt: created.updatedAt, sortOrder: 1 }))
+        .rejects.toMatchObject({ code: 'ORDER_REWORK_REASON_STALE' });
+      const deactivated = await catalog.update(admin, created.reasonId, { expectedUpdatedAt: renamed.updatedAt, isActive: false });
+      expect(deactivated.isActive).toBe(false);
+      expect((await service.listReasons(admin)).data.map((r) => r.reasonId)).not.toContain(created.reasonId);
+      expect((await catalog.list(admin)).data.find((r) => r.reasonId === created.reasonId)?.isActive).toBe(false);
+
+      const system = (await catalog.list(admin)).data.find((r) => r.code === 'unclarified')!;
+      await expect(catalog.update(admin, system.reasonId, { expectedUpdatedAt: system.updatedAt, name: 'x' }))
+        .rejects.toMatchObject({ code: 'ORDER_REWORK_REASON_SYSTEM' });
+
+      const audits = (await pool.query(
+        "SELECT event FROM audit_log WHERE entity_type = 'order_rework_reason' AND entity_id = $1 ORDER BY created_at, audit_id",
+        [String(created.reasonId)])).rows.map((row) => row.event);
+      expect(audits).toEqual(['order_rework_reason.created', 'order_rework_reason.updated', 'order_rework_reason.updated']);
+    } finally {
+      if (createdId) {
+        await pool.query(
+          "DELETE FROM audit_log_related_entity WHERE audit_id IN (SELECT audit_id FROM audit_log WHERE entity_type = 'order_rework_reason' AND entity_id = $1)",
+          [String(createdId)]);
+        await pool.query("DELETE FROM audit_log WHERE entity_type = 'order_rework_reason' AND entity_id = $1", [String(createdId)]);
+        await pool.query('DELETE FROM order_rework_reasons WHERE order_rework_reason_id = $1', [createdId]);
+      }
+    }
+    expect((await pool.query('SELECT count(*)::int AS n FROM order_rework_reasons WHERE name LIKE $1', [`E2E-Тест причина ${tag}%`])).rows[0].n).toBe(0);
+  });
+
+  it('order read DTO carries production rounds of the order and details', async () => {
+    const { orderId, detailIds } = await createOrder('legacy_6', 'packed', 2);
+    await service.startOrExtend({
+      currentUser: admin, orderId, version: await version(orderId), idempotencyKey: key(),
+      dto: { reasonId: reasons.workshop_defect, details: [{ detailId: detailIds[0], productionStatusId: stage.drawn }] },
+    });
+    const { PgOrderReadRepository } = await import('../adapters/pg-order-read-repository');
+    const repo = new PgOrderReadRepository(pool as never);
+    const order = await repo.getOrderById({ currentUser: admin, orderId }) as unknown as { header: { productionRound: number; lastRoundNo: number }; details: Array<{ id: number; productionRound: number }> };
+    expect([order.header.productionRound, order.header.lastRoundNo]).toEqual([2, 2]);
+    expect(order.details.map((d) => [d.id, d.productionRound])).toEqual([[detailIds[0], 2], [detailIds[1], 1]]);
+  });
+
+  it('rounds response tells the UI which rework action the order allows now', async () => {
+    const ready = await createOrder('legacy_6', 'packed', 1);
+    expect((await service.listRounds(admin, ready.orderId)).order).toMatchObject({ action: 'return', openRoundNo: null, productionRound: 1 });
+    await service.startOrExtend({
+      currentUser: admin, orderId: ready.orderId, version: await version(ready.orderId), idempotencyKey: key(),
+      dto: { reasonId: reasons.workshop_defect, details: [{ detailId: ready.detailIds[0], productionStatusId: stage.drawn }] },
+    });
+    expect((await service.listRounds(admin, ready.orderId)).order).toMatchObject({
+      action: 'extend', openRoundNo: 2, productionRound: 2, orderStatusCode: 'rework', version: await version(ready.orderId),
+    });
+    const inProduction = await createOrder('legacy_4', 'cut', 1);
+    expect((await service.listRounds(admin, inProduction.orderId)).order.action).toBe('start_in_production');
+    const completed = await createOrder('legacy_8', 'packed', 1);
+    expect((await service.listRounds(admin, completed.orderId)).order.action).toBeNull();
+  });
+
+  it('reason catalogue under concurrency: case-insensitive duplicates → exactly one wins, the other 409 (never 500)', async () => {
+    const catalog = new OrderReworkReasonCatalogService(database());
+    const base = `E2E-Тест гонка ${tag}`;
+    const created: number[] = [];
+    try {
+      const results = await Promise.allSettled([
+        catalog.create(admin, { name: `${base} скол` }),
+        catalog.create(admin, { name: `${base} СКОЛ` }),
+      ]);
+      const ok = results.filter((r) => r.status === 'fulfilled') as Array<PromiseFulfilledResult<{ reasonId: number }>>;
+      ok.forEach((r) => created.push(r.value.reasonId));
+      expect(ok).toHaveLength(1);
+      expect((results.find((r) => r.status === 'rejected') as PromiseRejectedResult).reason)
+        .toMatchObject({ statusCode: 409, code: 'ORDER_REWORK_REASON_DUPLICATE' });
+
+      const a = await catalog.create(admin, { name: `${base} А` });
+      const b = await catalog.create(admin, { name: `${base} Б` });
+      created.push(a.reasonId, b.reasonId);
+      const renames = await Promise.allSettled([
+        catalog.update(admin, a.reasonId, { expectedUpdatedAt: a.updatedAt, name: `${base} общий` }),
+        catalog.update(admin, b.reasonId, { expectedUpdatedAt: b.updatedAt, name: `${base} ОБЩИЙ` }),
+      ]);
+      expect(renames.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      expect((renames.find((r) => r.status === 'rejected') as PromiseRejectedResult).reason)
+        .toMatchObject({ code: 'ORDER_REWORK_REASON_DUPLICATE' });
+    } finally {
+      for (const id of created) {
+        await pool.query(
+          "DELETE FROM audit_log_related_entity WHERE audit_id IN (SELECT audit_id FROM audit_log WHERE entity_type = 'order_rework_reason' AND entity_id = $1)",
+          [String(id)]);
+        await pool.query("DELETE FROM audit_log WHERE entity_type = 'order_rework_reason' AND entity_id = $1", [String(id)]);
+        await pool.query('DELETE FROM order_rework_reasons WHERE order_rework_reason_id = $1', [id]);
+      }
+    }
+    expect((await pool.query('SELECT count(*)::int AS n FROM order_rework_reasons WHERE name ILIKE $1', [`${base}%`])).rows[0].n).toBe(0);
+  });
+
+  it('the reason of a closed round can still be clarified (history action)', async () => {
+    const { orderId, detailIds } = await createOrder('legacy_6', 'packed', 1);
+    await service.startOrExtend({
+      currentUser: admin, orderId, version: await version(orderId), idempotencyKey: key(),
+      dto: { reasonId: reasons.workshop_defect, details: [{ detailId: detailIds[0], productionStatusId: stage.drawn }] },
+    });
+    await setStatusAsWriter(orderId, 'legacy_6'); // closes round 2
+    const clarified = await service.clarifyReason({
+      currentUser: admin, orderId, roundNo: 2, version: await version(orderId), idempotencyKey: key(),
+      dto: { reasonId: reasons.client_change, comment: 'уточнили после выдачи' },
+    });
+    expect(clarified).toMatchObject({ action: 'reason_clarified', roundNo: 2 });
+    const round = (await service.listRounds(admin, orderId)).data[0];
+    expect(round).toMatchObject({ reasonCode: 'client_change', closeReason: 'ready' });
+  });
+
+  it('rounds and order version come from one snapshot even if a round starts between the reads', async () => {
+    const { orderId, detailIds } = await createOrder('legacy_6', 'packed', 1);
+    const before = await version(orderId);
+    let injected = false;
+    const plain = database();
+    const racing = {
+      ...plain,
+      async transaction<T>(handler: (tx: TransactionClient) => Promise<T>, options: { isolation?: string } = {}): Promise<T> {
+        return plain.transaction(async (tx) => handler({
+          ...tx,
+          query: async (text: string, params: readonly unknown[] = []) => {
+            // After the order row was read, a rework round commits on another connection.
+            if (!injected && text.includes('FROM order_production_rounds r')) {
+              injected = true;
+              await service.startOrExtend({
+                currentUser: admin, orderId, version: before, idempotencyKey: key(),
+                dto: { reasonId: reasons.workshop_defect, details: [{ detailId: detailIds[0], productionStatusId: stage.drawn }] },
+              });
+            }
+            return tx.query(text, params as unknown[]);
+          },
+        } as never), options as never);
+      },
+    } as unknown as DatabaseService;
+    const reader = new OrderReworkService({ database: racing, isEnabled: () => true, readOrder: async () => ({}) as OrderDto });
+    const state = await reader.listRounds(admin, orderId);
+    expect(injected).toBe(true);
+    // The pair is the pre-round snapshot: version N with no rounds (not N with round 2).
+    expect(state.order).toMatchObject({ version: before, openRoundNo: null, productionRound: 1, action: 'return' });
+    expect(state.data).toEqual([]);
+    expect(await version(orderId)).toBeGreaterThan(before);
+  });
+
+  it('canRework mirrors the command gates: orders.rework + orders.update within the update scope; history stays readable', async () => {
+    const { orderId } = await createOrder('legacy_6', 'packed', 1);
+    const foreign = await createOrder('legacy_6', 'packed', 1);
+    await pool.query('UPDATE orders SET manager_id = NULL WHERE order_id = ANY($1::bigint[])', [[orderId, foreign.orderId]]);
+    const own = { orders: { view: 'all', update: 'own', export: 'none', delete: 'none' },
+      payments: { view: 'none', create: 'none', update: 'none', delete: 'none' },
+      productionTasks: { view: 'none', update: 'none' } } as never;
+    const noUpdate = { ...admin, permissions: admin.permissions.filter((p) => p !== 'orders.update') };
+    const scoped = { ...admin, policyScopes: own };
+    expect((await service.listRounds(admin, orderId)).order.canRework).toBe(true);
+    expect((await service.listRounds(noUpdate, orderId)).order.canRework).toBe(false);
+    // The test user created both orders; make the second one foreign (created by nobody the user owns).
+    const other = Number((await pool.query(
+      "INSERT INTO users (username, email, password_hash) VALUES ($1, $2, 'x') RETURNING user_id",
+      [`e2e_rework_owner_${tag}`, `e2e_rework_owner_${tag}@example.invalid`])).rows[0].user_id);
+    try {
+      await pool.query('UPDATE orders SET created_by = $2 WHERE order_id = $1', [foreign.orderId, other]);
+      expect((await service.listRounds(scoped, orderId)).order.canRework).toBe(true);
+      const foreignState = await service.listRounds(scoped, foreign.orderId);
+      expect(foreignState.order.canRework).toBe(false);
+      expect(foreignState.data).toEqual([]); // still readable
+    } finally {
+      await pool.query('UPDATE orders SET created_by = $2 WHERE order_id = $1', [foreign.orderId, userId]);
+      await pool.query('DELETE FROM users WHERE user_id = $1', [other]);
+    }
   });
 });

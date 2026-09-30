@@ -7225,6 +7225,134 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+    post:
+      tags:
+        - Orders
+      operationId: createOrderReworkReason
+      summary: Добавить причину переделки
+      description: Код (латиница) необязателен — иначе генерируется; уникальны название и код (409).
+      security:
+        - bearerAuth: []
+      x-permission: references.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 100
+                code:
+                  type: string
+                  pattern: '^[a-z][a-z0-9_]{1,63}$'
+                requiresComment:
+                  type: boolean
+                sortOrder:
+                  type: integer
+                  minimum: 0
+      responses:
+        '201':
+          description: Созданная причина
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderReworkReasonCatalogItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v1/order-rework/reasons/catalog:
+    get:
+      tags:
+        - Orders
+      operationId: listOrderReworkReasonCatalog
+      summary: Справочник причин переделки (все, включая неактивные и системную)
+      security:
+        - bearerAuth: []
+      x-permission: references.manage
+      responses:
+        '200':
+          description: Причины с признаками isSystem/isActive, usedRounds и updatedAt (токен конкурентной правки)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OrderReworkReasonCatalogItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/order-rework/reasons/{reasonId}:
+    parameters:
+      - name: reasonId
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+    patch:
+      tags:
+        - Orders
+      operationId: updateOrderReworkReason
+      summary: Изменить или деактивировать причину переделки
+      description: Код неизменяем; системную «Уточнить» менять нельзя (409). expectedUpdatedAt — из справочника (409 при расхождении).
+      security:
+        - bearerAuth: []
+      x-permission: references.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedUpdatedAt]
+              properties:
+                expectedUpdatedAt:
+                  type: string
+                name:
+                  type: string
+                  maxLength: 100
+                requiresComment:
+                  type: boolean
+                sortOrder:
+                  type: integer
+                  minimum: 0
+                isActive:
+                  type: boolean
+      responses:
+        '200':
+          description: Изменённая причина
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderReworkReasonCatalogItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
   /api/v1/orders/{orderId}/rework:
     parameters:
       - $ref: '#/components/parameters/OrderId'
@@ -22527,6 +22655,29 @@ components:
         name: {type: string}
         requiresComment: {type: boolean}
         sortOrder: {type: integer}
+    OrderReworkReasonCatalogItem:
+      type: object
+      required: [reasonId, code, name, requiresComment, isSystem, isActive, sortOrder, usedRounds, updatedAt]
+      properties:
+        reasonId:
+          type: integer
+        code:
+          type: string
+        name:
+          type: string
+        requiresComment:
+          type: boolean
+        isSystem:
+          type: boolean
+        isActive:
+          type: boolean
+        sortOrder:
+          type: integer
+        usedRounds:
+          type: integer
+        updatedAt:
+          type: string
+          description: Метка изменения с микросекундами (токен expectedUpdatedAt)
     OrderReworkReasonsResponse:
       type: object
       required: [data]
@@ -22625,8 +22776,34 @@ components:
             $ref: '#/components/schemas/OrderReworkRoundDetail'
     OrderReworkRoundsResponse:
       type: object
-      required: [data]
+      required: [order, data]
       properties:
+        order:
+          type: object
+          description: Состояние для UI; команды перепроверяют всё сами.
+          required: [orderStatusCode, version, canRework, productionRound, lastRoundNo, openRoundNo, action]
+          properties:
+            orderStatusCode:
+              type: string
+            version:
+              type: integer
+              description: Версия заказа того же снимка (REPEATABLE READ), что и круги, — If-Match команд из этого состояния.
+            canRework:
+              type: boolean
+              description: Текущий пользователь может выполнять команды переделки по этому заказу (orders.rework + orders.update в scope).
+            productionRound:
+              type: integer
+              minimum: 1
+            lastRoundNo:
+              type: integer
+              minimum: 1
+            openRoundNo:
+              type: integer
+              nullable: true
+            action:
+              type: string
+              nullable: true
+              enum: [return, start_in_production, extend, null]
         data:
           type: array
           items:
@@ -27604,6 +27781,16 @@ components:
         - orderStatusId
         - version
       properties:
+        productionRound:
+          type: integer
+          minimum: 1
+          readOnly: true
+          description: «Переделка» — текущий круг производства заказа (1 — исходный).
+        lastRoundNo:
+          type: integer
+          minimum: 1
+          readOnly: true
+          description: Наибольший использованный номер круга.
         orderId:
           type: integer
           format: int64
@@ -27736,6 +27923,11 @@ components:
         - bazisCutSets
         - bazisProjects
       properties:
+        productionRound:
+          type: integer
+          minimum: 1
+          readOnly: true
+          description: «Переделка» — текущий круг детали (1 — исходный).
         id:
           type: integer
           format: int64

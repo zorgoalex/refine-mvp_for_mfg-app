@@ -20,6 +20,7 @@ import { buildProductionStagesDisplayConfig } from '../../../../utils/production
 import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../../types/productionWorkflow';
 import { OrderHeaderContextMenu } from '../OrderHeaderContextMenu';
 import { RowSeparator } from './RowSeparator';
+import { withRoundSuffix } from '../../../../api/orderReworkApi';
 import dayjs from 'dayjs';
 import { calculateOrderTotalArea } from '../../../../utils/orderArea';
 import { useOperationalUi } from '../../../../ui-operational/OperationalPrimitives';
@@ -390,7 +391,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({
                     : '#4F46E5'
               }
             >
-              {orderStatusData?.data?.order_status_name || 'Не назначен'}
+              {withRoundSuffix(orderStatusData?.data?.order_status_name || 'Не назначен', header.production_round)}
             </Tag>
             <Tag
               color={

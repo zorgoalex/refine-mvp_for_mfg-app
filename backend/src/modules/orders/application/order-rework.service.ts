@@ -59,6 +59,18 @@ export type OrderReworkAvailability =
   | 'mdf_engine_unsupported'
   | 'mdf_cutover_in_progress';
 
+export interface OrderReworkOrderStateDto {
+  orderStatusCode: string;
+  /** Order version of the same snapshot as the rounds (If-Match for commands from this state). */
+  version: number;
+  /** The current user may run rework commands on this order (orders.rework + orders.update in scope). */
+  canRework: boolean;
+  productionRound: number;
+  lastRoundNo: number;
+  openRoundNo: number | null;
+  action: 'return' | 'start_in_production' | 'extend' | null;
+}
+
 export interface OrderReworkReasonDto {
   reasonId: number;
   code: string;
@@ -232,16 +244,21 @@ export class OrderReworkService {
     return { data: rows.rows.map(mapReason) };
   }
 
-  async listRounds(currentUser: CurrentUser, orderId: number): Promise<{ data: OrderReworkRoundDto[] }> {
+  async listRounds(currentUser: CurrentUser, orderId: number): Promise<{ order: OrderReworkOrderStateDto; data: OrderReworkRoundDto[] }> {
     requirePermission(currentUser, 'orders.view');
-    const order = (await this.ports.database.query<LockedOrderRow>(
-      `SELECT order_id, created_by, manager_id FROM orders WHERE order_id = $1 AND delete_flag = false`,
+    // One REPEATABLE READ snapshot: the returned `order.version` is exactly the version the
+    // rounds correspond to, so a UI form can send data and If-Match version as one consistent pair.
+    return this.ports.database.transaction(async (tx) => {
+    const order = (await tx.query<LockedOrderRow>(
+      `SELECT o.order_id, o.created_by, o.manager_id, o.production_round, o.last_round_no, o.version, s.order_status_code
+       FROM orders o JOIN order_statuses s ON s.order_status_id = o.order_status_id
+       WHERE o.order_id = $1 AND o.delete_flag = false`,
       [orderId],
     )).rows[0];
     if (!order || !this.orderAccessPolicy.canView(currentUser, policySubject(order))) {
       throw new OrderNotFoundError(orderId);
     }
-    const rounds = await this.ports.database.query(
+    const rounds = await tx.query(
       `SELECT r.round_no, r.mode, r.source, r.reason_id, rr.code AS reason_code, rr.name AS reason_name,
               rr.is_system AS reason_is_system, r.reason_comment, r.started_at, r.started_by,
               u.username AS started_by_username, r.reason_clarified_at, r.closed_at, r.close_reason,
@@ -253,7 +270,7 @@ export class OrderReworkService {
        ORDER BY r.round_no`,
       [orderId],
     );
-    const details = await this.ports.database.query(
+    const details = await tx.query(
       `SELECT rd.order_production_round_id, rd.detail_id, d.detail_number,
               rd.from_production_status_id, fs.production_status_name AS from_name,
               rd.from_production_round, rd.to_production_status_id, ts.production_status_name AS to_name,
@@ -284,7 +301,21 @@ export class OrderReworkService {
       });
       byRound.set(key, list);
     }
+    const openRound = rounds.rows.find((row) => row.closed_at === null);
+    const mode = resolveReworkMode(order.order_status_code);
     return {
+      // UI state (plan §9): which rework action the order allows now (commands re-check everything).
+      order: {
+        orderStatusCode: order.order_status_code,
+        version: Number(order.version),
+        // Same gates as the commands (requirePermission + assertCanUpdate), resolved by the backend.
+        canRework: currentUser.permissions.includes('orders.rework')
+          && this.orderAccessPolicy.canUpdate(currentUser, policySubject(order)),
+        productionRound: Number(order.production_round),
+        lastRoundNo: Number(order.last_round_no),
+        openRoundNo: openRound ? Number(openRound.round_no) : null,
+        action: (openRound ? 'extend' : mode === 'after_ready' ? 'return' : mode === 'in_production' ? 'start_in_production' : null) as OrderReworkOrderStateDto['action'],
+      },
       data: rounds.rows.map((row) => ({
         roundNo: Number(row.round_no),
         mode: row.mode,
@@ -303,6 +334,7 @@ export class OrderReworkService {
         details: byRound.get(String(row.order_production_round_id)) ?? [],
       })),
     };
+    }, { isolation: 'repeatable read' });
   }
 
   // --------------------------------------------------------------- commands
