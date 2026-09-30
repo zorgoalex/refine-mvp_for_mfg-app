@@ -310,3 +310,28 @@ describe('pending command protocol (retry / replan / manual send)', () => {
     expect(readPendingRetry(runId, '11', storage)).toBeNull();
   });
 });
+
+describe('catch-up deadline hidden for skip / end_of_day (prod crash on opening a broadcast)', () => {
+  const skip: Broadcast = { ...saved, catchUpPolicy: 'skip', catchUpDeadline: '11:30' };
+
+  it('treats a form without the hidden deadline field as unchanged instead of throwing', () => {
+    const { catchUpDeadline: _hidden, ...values } = toFormValues(skip);
+    expect(() => draftMatchesSaved(values, skip)).not.toThrow();
+    expect(draftMatchesSaved(values, skip)).toBe(true);
+    expect(draftMatchesSaved({ ...values, catchUpPolicy: 'end_of_day' }, skip)).toBe(false);
+  });
+
+  it('keeps the saved deadline when saving without the field', () => {
+    const { catchUpDeadline: _hidden, ...values } = toFormValues(skip);
+    const request = buildSaveRequest(skip, values as never, false);
+    expect(request.kind).toBe('update');
+    expect(request.body).toMatchObject({ catchUpPolicy: 'skip', catchUpDeadline: '11:30', sendTime: '08:45' });
+  });
+
+  it('keeps the deadline field registered in the editor (hidden, not unmounted)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('./BroadcastEditor.tsx', import.meta.url), 'utf8');
+    expect(source).not.toMatch(/catchUpPolicy === 'until_deadline' && <Form\.Item name="catchUpDeadline"/);
+    expect(source).toMatch(/<Form\.Item name="catchUpDeadline"[^>]*hidden=\{catchUpPolicy !== 'until_deadline'\}/);
+  });
+});
