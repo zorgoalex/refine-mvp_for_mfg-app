@@ -304,6 +304,14 @@ export function buildMatches(
   });
 }
 
+/**
+ * «Нет пары», выбранное пользователем (setMatch с rowId null поверх предложения): `none` с кандидатами.
+ * buildMatches возвращает `none` только без кандидатов, поэтому пересчёт такое решение не перезаписывает.
+ */
+export function isRejectedByUser(match: Pick<MatchResult, 'matchStatus' | 'candidates'>): boolean {
+  return match.matchStatus === 'none' && match.candidates.length > 0;
+}
+
 export function refreshMatches(
   rows: ImportRow[],
   films: FilmCandidate[],
@@ -317,7 +325,8 @@ export function refreshMatches(
     if (
       old &&
       (preserveFilmIds.has(match.filmId) ||
-        ['linked', 'manual', 'confirmed'].includes(old.matchStatus))
+        ['linked', 'manual', 'confirmed'].includes(old.matchStatus) ||
+        isRejectedByUser(old))
     )
       return old;
     return match;

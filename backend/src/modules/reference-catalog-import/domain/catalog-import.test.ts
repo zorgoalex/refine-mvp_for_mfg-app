@@ -11,6 +11,8 @@ import {
   type FilmCandidate,
   type ImportRow,
   vendorMatchMap,
+  refreshMatches,
+  isRejectedByUser,
 } from './catalog-import';
 
 const film = (
@@ -247,5 +249,28 @@ describe('vendorMatchMap', () => {
       { supplierNorm: 'алер', vendorId: 15, vendorName: undefined },
     ]);
     expect([...map.entries()]).toEqual([['decor 777', 14], ['decor777', 14], ['алер', 15]]);
+  });
+});
+
+describe('refreshMatches keeps user decisions', () => {
+  const rows = [row(1, { targetName: 'Белый снег; Аиф', catalogKey: 'k1' }), row(2, { targetName: 'Серый туман; Аиф', catalogKey: 'k2', nameOriginal: 'Серый туман', nameFull: 'Серый туман; Аиф' })];
+  const films = [film(10, 1, { filmName: 'Белый снег Аиф' }), film(11, 1, { filmName: 'Совсем другое название Аиф' })];
+
+  it('buildMatches never returns «none» with candidates (so candidates mark a user rejection)', () => {
+    for (const match of buildMatches(rows, films, new Map([['аиф', 1]]))) {
+      if (match.matchStatus === 'none') expect(match.candidates).toEqual([]);
+      expect(isRejectedByUser(match)).toBe(false);
+    }
+  });
+
+  it('a user «no pair» over a suggestion survives a recalculation; an algorithmic «none» is recalculated', () => {
+    const built = buildMatches(rows, films, new Map([['аиф', 1]]));
+    const target = built.find((match) => match.filmId === 10)!;
+    expect(target.candidates.length).toBeGreaterThan(0);
+    const rejected = { ...target, rowId: null, matchStatus: 'none' as const };
+    const algorithmicNone = { ...built.find((match) => match.filmId === 11)!, matchStatus: 'none' as const, rowId: null, candidates: [] };
+    const refreshed = refreshMatches(rows, films, new Map([['аиф', 1]]), [rejected, algorithmicNone], new Set());
+    expect(refreshed.find((match) => match.filmId === 10)).toEqual(rejected);
+    expect(refreshed.find((match) => match.filmId === 11)).toEqual(built.find((match) => match.filmId === 11));
   });
 });

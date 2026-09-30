@@ -264,7 +264,7 @@ describe.skipIf(!url)('film catalog import PostgreSQL transactions', () => {
     expect(restored.rows.map((row) => row.note)).toEqual([null, 'Своя заметка']);
   });
 
-  it('setVendor keeps name-derived matches of films on «нд» whose vendor has no own films (DECOR 777)', async () => {
+  it('setVendor keeps name-derived matches (DECOR 777, vendor without own films) and a user «no pair»', async () => {
     const nd = (await query<{ vendor_id: number }>(`SELECT vendor_id FROM vendors WHERE lower(trim(vendor_name))='нд' ORDER BY vendor_id LIMIT 1`)).rows[0];
     const decor = (await query<{ vendor_id: number }>(`SELECT vendor_id FROM vendors WHERE lower(trim(vendor_name))='decor777' ORDER BY vendor_id LIMIT 1`)).rows[0];
     expect(nd && decor).toBeTruthy();
@@ -294,6 +294,12 @@ describe.skipIf(!url)('film catalog import PostgreSQL transactions', () => {
     // Сопоставление ДРУГОГО поставщика пересчитывает неявные плёнки — плёнка DECOR 777 не теряет строку.
     await service.patch(batch.id, [], { version: 1, actions: [{ type: 'setVendor', supplierNorm: unknownSupplier.trim().toLowerCase(), vendorId }] }, actorId, randomUUID(), key());
     expect(await matchOf()).toEqual(before);
+    // «Нет пары» пользователя поверх сопоставления переживает следующий пересчёт (setVendor).
+    await service.patch(batch.id, [], { version: 2, actions: [{ type: 'setMatch', filmId: film, rowId: null }] }, actorId, randomUUID(), key());
+    const rejected = await matchOf();
+    expect(rejected).toEqual({ match_status: 'none', row_id: null });
+    await service.patch(batch.id, [], { version: 3, actions: [{ type: 'setVendor', supplierNorm: unknownSupplier.trim().toLowerCase(), vendorId }] }, actorId, randomUUID(), key());
+    expect(await matchOf()).toEqual(rejected);
   });
 
   it('creates absent film and rejects stale business fingerprint atomically', async () => {
