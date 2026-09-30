@@ -14,6 +14,8 @@ import { parseCreateStatusAutomationRuleRequest } from '../../status-automation/
 import { changeOrderStatusFromAutomationInTransaction } from '../../production-actions/adapters/pg-production-action-repository';
 import { PgOrderSnapshot } from '../adapters/pg-order-snapshot';
 import type { OrderSnapshotDto } from '../dto/order-snapshot.dto';
+import { ConfigService } from '@nestjs/config';
+import { OrderRealtimeDeferredDrainService } from '../../order-realtime/application/order-realtime-deferred-drain.service';
 
 // Real PostgreSQL proof of the rework commands («Переделка», slice 4). Gated on
 // REWORK_INTEGRATION_DATABASE_URL (scratch DB: erp schema + migrations 220–222).
@@ -820,4 +822,161 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
       [`E2E-Тест переделка сервис ${tag} прямая вставка`, clientId, projectId, status.rework, userId],
     )).rejects.toMatchObject({ message: expect.stringContaining('ORDER_REWORK_REQUIRES_COMMAND') });
   });
+
+  // ------------------------------------------------ deferred realtime drain (§5.7 п.5)
+
+  function drainService(enabled = true): OrderRealtimeDeferredDrainService {
+    return new OrderRealtimeDeferredDrainService(new ConfigService({
+      BACKEND_ORDER_REALTIME_DEFERRED_DRAIN: enabled, DATABASE_URL: databaseUrl, DATABASE_QUERY_TIMEOUT_MS: 10000,
+    }) as never);
+  }
+  const queueRows = async (orderId: number) => (await pool.query(
+    'SELECT attempts FROM order_realtime_deferred WHERE order_id = $1 ORDER BY order_realtime_deferred_id', [orderId],
+  )).rows.map((row) => Number(row.attempts));
+  const logCount = async (orderId: number) => Number((await pool.query(
+    'SELECT count(*) FROM realtime_event_log WHERE order_id = $1', [orderId],
+  )).rows[0].count);
+
+  async function queuedOrder(): Promise<number> {
+    const { orderId, detailIds } = await createOrder('legacy_6', 'packed', 1);
+    await service.startOrExtend({
+      currentUser: admin, orderId, version: await version(orderId), idempotencyKey: key(),
+      dto: { reasonId: reasons.workshop_defect, details: [{ detailId: detailIds[0], productionStatusId: stage.drawn }] },
+    });
+    expect((await queueRows(orderId)).length).toBeGreaterThan(0);
+    return orderId;
+  }
+
+  it('drain delivers the deferred emissions through emit_one and empties the queue', async () => {
+    const orderId = await queuedOrder();
+    const before = await logCount(orderId);
+    const drain = drainService();
+    try {
+      expect(await drain.drainOrder(orderId)).toBe('delivered');
+      expect(await queueRows(orderId)).toEqual([]);
+      expect(await logCount(orderId)).toBeGreaterThan(before);
+      expect(await drain.drainOrder(orderId)).toBe('empty');
+    } finally {
+      await drain.onModuleDestroy();
+    }
+  });
+
+  it.each([
+    ['the stream row is locked by another writer', 'SELECT 1 FROM order_realtime_stream WHERE order_id = $1 FOR UPDATE', true],
+    ['DDL holds ACCESS EXCLUSIVE on app_settings', 'LOCK TABLE app_settings IN ACCESS EXCLUSIVE MODE', false],
+    ['DDL holds ACCESS EXCLUSIVE on the event log', 'LOCK TABLE realtime_event_log IN ACCESS EXCLUSIVE MODE', false],
+  ] as const)('drain never waits when %s: busy, queue kept with backoff, delivered afterwards', async (_label, holdSql, withOrder) => {
+    const orderId = await queuedOrder();
+    const holder = await pool.connect();
+    const drain = drainService();
+    try {
+      await holder.query('BEGIN');
+      await holder.query(holdSql, withOrder ? [orderId] : []);
+      const started = Date.now();
+      const result = await drain.drainOrder(orderId);
+      expect(result).toBe('busy');
+      expect(Date.now() - started).toBeLessThan(2000);
+      await holder.query('ROLLBACK');
+      const attempts = await queueRows(orderId);
+      expect(attempts.length).toBeGreaterThan(0);
+      // The backoff itself may be skipped when the queue table was the locked one; never an error.
+      expect(attempts.every((value) => value <= 1)).toBe(true);
+      expect(await drain.drainOrder(orderId)).toBe('delivered');
+      expect(await queueRows(orderId)).toEqual([]);
+    } finally {
+      await holder.query('ROLLBACK').catch(() => undefined);
+      holder.release();
+      await drain.onModuleDestroy();
+    }
+  });
+
+  it('with the drain flag off the queue is kept; after enabling, the sweeper delivers it', async () => {
+    const orderId = await queuedOrder();
+    const off = drainService(false);
+    off.onModuleInit();
+    off.request([orderId]);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect((await queueRows(orderId)).length).toBeGreaterThan(0);
+    await off.onModuleDestroy();
+
+    const on = drainService(true);
+    try {
+      on.onModuleInit(); // first sweep runs immediately
+      for (let i = 0; i < 50 && (await queueRows(orderId)).length > 0; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(await queueRows(orderId)).toEqual([]);
+    } finally {
+      await on.onModuleDestroy();
+    }
+  });
+
+  it('bridge switched off before the drain: queue kept; delivered once it is on again', async () => {
+    const orderId = await queuedOrder();
+    const setting = (await pool.query("SELECT value_json FROM app_settings WHERE setting_key = 'order_realtime.writes'")).rows[0];
+    const drain = drainService();
+    try {
+      await pool.query(
+        "UPDATE app_settings SET value_json = jsonb_set(value_json, '{enabled}', 'false'::jsonb) WHERE setting_key = 'order_realtime.writes'");
+      expect(await drain.drainOrder(orderId)).toBe('bridge_disabled');
+      expect((await queueRows(orderId)).length).toBeGreaterThan(0);
+    } finally {
+      await pool.query("UPDATE app_settings SET value_json = $1 WHERE setting_key = 'order_realtime.writes'", [setting.value_json]);
+    }
+    try {
+      expect(await drain.drainOrder(orderId)).toBe('delivered');
+      expect(await queueRows(orderId)).toEqual([]);
+    } finally {
+      await drain.onModuleDestroy();
+    }
+    expect((await pool.query("SELECT value_json FROM app_settings WHERE setting_key = 'order_realtime.writes'")).rows[0].value_json)
+      .toEqual(setting.value_json);
+  });
+
+  it.each(['FOR UPDATE', 'FOR NO KEY UPDATE'] as const)(
+    'drain holds the stream while a command holds the order (%s) and waits for the stream: the command completes, no deadlock, delivered once',
+    async (orderLock) => {
+      const orderId = await queuedOrder();
+      const queued = (await queueRows(orderId)).length;
+      const before = await logCount(orderId);
+      const other = await pool.connect();
+      let otherDone: Promise<unknown> | null = null;
+      class SeamDrain extends OrderRealtimeDeferredDrainService {
+        protected override async afterStreamLocked(): Promise<void> {
+          if (otherDone) return; // only the first attempt races the command
+          await other.query('BEGIN');
+          await other.query(`SELECT 1 FROM orders WHERE order_id = $1 ${orderLock}`, [orderId]);
+          // The command now needs the stream, which the drain holds: it waits.
+          otherDone = other.query('SELECT 1 FROM order_realtime_stream WHERE order_id = $1 FOR UPDATE', [orderId]);
+          for (let i = 0; i < 50; i += 1) {
+            const waiting = await pool.query(
+              "SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE '%FROM order_realtime_stream WHERE order_id = $1 FOR UPDATE'");
+            if (waiting.rows[0].n > 0) break;
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+        }
+      }
+      const drain = new SeamDrain(new ConfigService({
+        BACKEND_ORDER_REALTIME_DEFERRED_DRAIN: true, DATABASE_URL: databaseUrl, DATABASE_QUERY_TIMEOUT_MS: 10000,
+      }) as never);
+      try {
+        const result = await drain.drainOrder(orderId);
+        // FOR UPDATE conflicts with the drain's KEY SHARE NOWAIT → the drain yields;
+        // FOR NO KEY UPDATE is compatible → the drain finishes first and the command follows.
+        expect(result).toBe(orderLock === 'FOR UPDATE' ? 'busy' : 'delivered');
+        await otherDone; // the command got the stream: not a deadlock victim
+        await other.query('COMMIT');
+        if (result === 'busy') {
+          expect((await queueRows(orderId)).length).toBe(queued);
+          expect(await drain.drainOrder(orderId)).toBe('delivered');
+        }
+        expect(await queueRows(orderId)).toEqual([]);
+        expect(await logCount(orderId)).toBe(before + queued); // delivered exactly once
+      } finally {
+        await other.query('ROLLBACK').catch(() => undefined);
+        other.release();
+        await drain.onModuleDestroy();
+      }
+    },
+  );
 });

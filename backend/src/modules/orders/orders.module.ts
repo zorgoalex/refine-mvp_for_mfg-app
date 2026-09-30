@@ -62,6 +62,8 @@ import { OrderSnapshotController } from './http/order-snapshot.controller';
 import { OrdersController } from './http/orders.controller';
 import { OrderReworkCatalogController, OrderReworkController } from './http/order-rework.controller';
 import { OrderReworkService } from './application/order-rework.service';
+import { OrderRealtimeModule } from '../order-realtime/order-realtime.module';
+import { OrderRealtimeDeferredDrainService } from '../order-realtime/application/order-realtime-deferred-drain.service';
 import { OrderHdfSettingsController } from './http/order-hdf-settings.controller';
 import { OrderStatusBoardController } from './http/order-status-board.controller';
 import { OrdersRuntimeConfigService } from './http/orders-runtime-config.service';
@@ -81,7 +83,7 @@ export function shouldEnableOrderDeadlineSync(input: {
 }
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, OrderRealtimeModule],
   controllers: [
     // Register static `/orders/*` routes before the generic `/orders/:orderId`.
     MdfBoardManualMoveController,
@@ -190,13 +192,19 @@ export function shouldEnableOrderDeadlineSync(input: {
     },
     {
       provide: OrderReworkService,
-      useFactory: (database: DatabaseService, config: ConfigService<BackendEnv, true>, query: OrderQueryService) =>
+      useFactory: (
+        database: DatabaseService,
+        config: ConfigService<BackendEnv, true>,
+        query: OrderQueryService,
+        drain: OrderRealtimeDeferredDrainService,
+      ) =>
         new OrderReworkService({
           database,
           isEnabled: () => config.get('BACKEND_ORDER_REWORK_ENABLED', { infer: true }) === true,
           readOrder: (currentUser, orderId) => query.getById({ currentUser, orderId }),
+          requestRealtimeDrain: (orderIds) => drain.request(orderIds),
         }),
-      inject: [DatabaseService, ConfigService, OrderQueryService],
+      inject: [DatabaseService, ConfigService, OrderQueryService, OrderRealtimeDeferredDrainService],
     },
     {
       provide: OrderDetailTransferService,

@@ -315,6 +315,17 @@ After 221 do not roll the backend back below migration A: the old
 `222_order_rework_round_closure` (closes an open round when the order reaches
 «Готов к выдаче»/«Выдан»/«Завершен») goes with 220/221, before the rework flag is enabled.
 
+Deferred realtime drain (production-round commands queue their realtime
+emissions in `order_realtime_deferred`; the backend delivers them with a
+non-waiting drain and a 5 s sweeper). **Before any migration or manual DB
+maintenance** (`REINDEX`, `CREATE INDEX`, `VACUUM FULL`, `CLUSTER`, `ALTER`,
+long `LOCK TABLE`) set `BACKEND_ORDER_REALTIME_DEFERRED_DRAIN=false` and
+restart **every** backend instance — each waits for its active attempt and logs
+`drain stopped` — or stop the backend; set it back to `true` afterwards. The
+queue is kept meanwhile and delivered after re-enabling (SSE invalidation of
+round commands is only delayed). `ops/apply-migrations.sh apply` warns while a
+drain connection (`application_name = 'erp-order-realtime-drain'`) is active.
+
 Rollback of 221 (only while no production round > 1 exists; otherwise it refuses):
 `psql -v ON_ERROR_STOP=1 -f backend/db/rollback/221_order_rework_rounds_stage_boundary.down.sql`
 — one transaction: drops the stage-event boundary, restores the «stage once»
