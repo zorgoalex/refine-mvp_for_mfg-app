@@ -76,7 +76,17 @@ describe('DailyDigestRenderer', () => {
     ));
     const first = PNG.sync.read(pages[0].png);
     const second = PNG.sync.read(pages[1].png);
-    expect(first.height).toBeGreaterThan(second.height);
+    // Equal sizes; only page one carries the red day-total label of the header.
+    const redPixels = (image: PNG) => {
+      let count = 0;
+      for (let i = 0; i < image.data.length; i += 4) {
+        if (image.data[i] > 180 && image.data[i + 1] < 90 && image.data[i + 2] < 60) count += 1;
+      }
+      return count;
+    };
+    expect([second.width, second.height]).toEqual([first.width, first.height]);
+    expect(redPixels(first)).toBeGreaterThan(50);
+    expect(redPixels(second)).toBe(0);
   });
 
   it('uses the frozen cards-per-message value while keeping the whole-day header on page one', async () => {
@@ -88,7 +98,7 @@ describe('DailyDigestRenderer', () => {
 
     expect(twoPerMessage.map((page) => page.orderIds)).toEqual([[1, 2], [3]]);
     expect(onePerMessage.map((page) => page.orderIds)).toEqual([[1], [2], [3]]);
-    expect(PNG.sync.read(onePerMessage[0].png).height).toBeGreaterThan(PNG.sync.read(onePerMessage[1].png).height);
+    expect(PNG.sync.read(onePerMessage[0].png).height).toBe(PNG.sync.read(onePerMessage[1].png).height);
     expect(makeSnapshot(orders).totalArea).toBe(6.75);
     expect(changedAggregate[0].png.equals(onePerMessage[0].png)).toBe(false);
     expect(changedAggregate[1].png.equals(onePerMessage[1].png)).toBe(true);
@@ -159,23 +169,31 @@ describe('DailyDigestRenderer', () => {
     expect(bold && existsSync(bold)).toBeTruthy();
     expect(bold).toContain('LiberationSans-Bold.ttf');
     expect(readFileSync(bold as string).byteLength).toBeGreaterThan(100_000);
-    expect(DAILY_DIGEST_RENDERER_VERSION).toBe('daily-order-cards-v4');
+    expect(DAILY_DIGEST_RENDERER_VERSION).toBe('daily-order-cards-v5');
   });
 
-  it('gives one-card images the proportions of two-card images (same width in WhatsApp)', async () => {
+  it('gives every image of a digest the proportions of the first one, taller than wide (same width in WhatsApp)', async () => {
     const orders = Array.from({ length: 5 }, (_, index) => makeOrder(index + 2));
-    const two = await renderer.render(makeSnapshot(orders));
-    const one = await renderer.render({ ...makeSnapshot(orders), cardsPerMessage: 1 });
-    const size = (png: Buffer) => { const image = PNG.sync.read(png); return `${image.width}x${image.height}`; };
-    // Identical cards: page 1 carries the day header in both modes, later pages do not.
-    expect(size(one[0].png)).toBe(size(two[0].png));
-    expect(size(one[1].png)).toBe(size(two[1].png));
-    // The odd last page of the two-card mode keeps the second slot empty as well.
-    expect(two[2].orderIds).toHaveLength(1);
-    expect(size(two[2].png)).toBe(size(two[1].png));
+    const size = (png: Buffer) => { const image = PNG.sync.read(png); return [image.width, image.height]; };
+    for (const cardsPerMessage of [1, 2] as const) {
+      const pages = await renderer.render({ ...makeSnapshot(orders), cardsPerMessage });
+      const [width, height] = size(pages[0].png);
+      expect(height / width).toBeGreaterThanOrEqual(1.1);
+      // Header page, plain pages and the odd one-card last page: all the same size.
+      for (const page of pages) expect(size(page.png)).toEqual([width, height]);
+    }
+    // A taller card on a later page makes every page of that digest taller, the first one included.
+    const tall = await renderer.render(makeSnapshot([...orders.slice(0, 4), makeOrder(9, {
+      orderName: 'К9 Длинное название заказа', basisProjectDisplay: 'ПМЗ-15 длинный проект',
+      clientName: 'Очень длинное имя клиента для переноса',
+      materials: [{ fullName: 'МДФ 18мм', label: '18мм' }, { fullName: 'МДФ 16мм', label: 'Черн. 16мм' }],
+    })]));
+    const [tallWidth, tallHeight] = size(tall[0].png);
+    expect(size(tall[2].png)).toEqual([tallWidth, tallHeight]);
+    expect(tallHeight).toBeGreaterThanOrEqual(size((await renderer.render(makeSnapshot(orders)))[0].png)[1]);
   });
 
-  it('renders a narrow image at layout width x zoom with a content-driven height', async () => {
+  it('renders a narrow image at layout width x zoom, at least 1.1 times taller than wide', async () => {
     const [plain] = await renderer.render({ ...makeSnapshot([makeOrder(2)]), cardsPerMessage: 1 });
     const [longer] = await renderer.render({
       ...makeSnapshot([makeOrder(2, { clientName: 'Очень длинное имя клиента для переноса строки в карточке' })]),
@@ -187,8 +205,10 @@ describe('DailyDigestRenderer', () => {
     });
     const plainPng = PNG.sync.read(plain.png);
     expect(plainPng.width).toBe(DAILY_DIGEST_LAYOUT_WIDTH * DAILY_DIGEST_RENDER_ZOOM);
-    expect(PNG.sync.read(longer.png).height).toBeGreaterThan(plainPng.height);
-    expect(PNG.sync.read(noStages.png).height).toBeLessThan(plainPng.height);
+    // A single short page is padded to the minimal «taller than wide» proportion.
+    expect(plainPng.height).toBe(Math.ceil(DAILY_DIGEST_LAYOUT_WIDTH * 1.1) * DAILY_DIGEST_RENDER_ZOOM);
+    expect(PNG.sync.read(longer.png).height).toBeGreaterThanOrEqual(plainPng.height);
+    expect(PNG.sync.read(noStages.png).height).toBe(plainPng.height);
     expect(plainPng.height).toBeLessThan(450 * DAILY_DIGEST_RENDER_ZOOM);
   });
 
