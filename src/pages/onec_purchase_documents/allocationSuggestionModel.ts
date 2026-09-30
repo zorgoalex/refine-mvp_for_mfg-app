@@ -212,12 +212,23 @@ export interface OverallUnitSummary {
 export interface OverallSummary {
   /** Строки, доступные для подбора (не skipReason). */
   linesCount: number;
+  /** Все строки прихода, включая пропущенные подбором. */
+  totalLinesCount: number;
   /** Заказы с хотя бы одним отмеченным кандидатом с количеством > 0, по всем строкам. */
   ordersCount: number;
   /** Есть хотя бы одна строка с overrun — блокирует отправку. */
   overrun: boolean;
   /** «На склад / излишек» по единицам строк документа (строки могут быть в разных единицах). */
   surplusByUnit: OverallUnitSummary[];
+}
+
+export type OverallCheck = { label: string; tone: 'bad' | 'ok' | 'muted' };
+
+/** Итог панели: перебор блокирует отправку; без выбранных заказов распределять нечего. */
+export function overallCheck(summary: Pick<OverallSummary, 'overrun' | 'ordersCount'>): OverallCheck {
+  if (summary.overrun) return { label: 'Есть перебор', tone: 'bad' };
+  if (summary.ordersCount === 0) return { label: 'Нечего распределять', tone: 'muted' };
+  return { label: 'Можно распределять', tone: 'ok' };
 }
 
 export function computeOverallSummary(response: AllocationSuggestionsResponse, draft: SuggestionDraftState): OverallSummary {
@@ -241,6 +252,7 @@ export function computeOverallSummary(response: AllocationSuggestionsResponse, d
 
   return {
     linesCount: eligible.length,
+    totalLinesCount: response.lines.length,
     ordersCount: orders.size,
     overrun,
     surplusByUnit: [...surplusByUnitMilli.entries()].map(([unit, milli]) => ({ unit, surplusInDocUnit: fromMilli(milli) })),

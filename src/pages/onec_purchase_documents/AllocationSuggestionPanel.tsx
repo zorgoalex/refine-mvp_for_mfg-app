@@ -18,6 +18,7 @@ import {
   clearSuggestionDraft,
   computeLineTotals,
   computeOverallSummary,
+  overallCheck,
   getLineDraft,
   lineCapacityDemandEquivalent,
   lineCheckStatus,
@@ -158,6 +159,7 @@ export function AllocationSuggestionPanel({ documentId, onDone }: AllocationSugg
   if (!response || !summary) return null;
 
   const eligibleLines = response.lines.filter((line) => line.skipReason === null);
+  const check = overallCheck(summary);
   // После конфликта отправка недоступна до «Подобрать заново» (CR1-1): данные в панели устарели.
   const submitDisabled = submitting || conflict !== null || summary.overrun || summary.ordersCount === 0;
 
@@ -165,7 +167,10 @@ export function AllocationSuggestionPanel({ documentId, onDone }: AllocationSugg
     <RrScreen>
     <div className="rr-pad">
       <div className="rr-summary">
-        <div className="rr-kpi"><div className="rr-kpi-l">Строк прихода</div><div className="rr-kpi-v">{summary.linesCount}</div></div>
+        <div className="rr-kpi">
+          <div className="rr-kpi-l">Строк к подбору</div>
+          <div className="rr-kpi-v">{summary.linesCount}<span className="rr-muted" style={{ fontSize: 14, fontWeight: 400 }}> из {summary.totalLinesCount}</span></div>
+        </div>
         <div className="rr-kpi"><div className="rr-kpi-l">Заказов в распределении</div><div className="rr-kpi-v">{summary.ordersCount}</div></div>
         <div className="rr-kpi">
           <div className="rr-kpi-l">На склад / излишек</div>
@@ -173,8 +178,8 @@ export function AllocationSuggestionPanel({ documentId, onDone }: AllocationSugg
         </div>
         <div className="rr-kpi">
           <div className="rr-kpi-l">Проверка</div>
-          <div className="rr-kpi-v" style={{ fontSize: 15, color: summary.overrun ? 'var(--rr-bad)' : 'var(--rr-ok)' }}>
-            {summary.overrun ? 'Есть перебор' : 'Можно распределять'}
+          <div className="rr-kpi-v" style={{ fontSize: 15, color: `var(--rr-${check.tone})` }}>
+            {check.label}
           </div>
         </div>
       </div>

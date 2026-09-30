@@ -123,6 +123,9 @@ export function planAllocationSuggestions(input: SuggestionPlanInput): { lines: 
       .filter(({ need }) => need > 0)
       .sort((a, b) => compareCandidates(a, b, line, left, demandUnit, docUnit, geometry, input.documentSupplierKeys));
 
+    // Количество в единице строки — вниз до 0,001; хвост меньше 0,001 единицы строки (0,001 листа ≈ 0,006 м²)
+    // закрытием не мешает: заказ считается закрытым полностью и хвост не предлагается другим строкам.
+    const slack = toThousandths(toDemandUnit(0.001, docUnit, demandUnit, geometry) ?? 0);
     const candidates: AllocationSuggestionCandidateDto[] = [];
     for (const { candidate, need } of ranked) {
       const needInDoc = toDocUnitFloor(fromThousandths(need), demandUnit, docUnit, geometry) ?? 0;
@@ -133,7 +136,8 @@ export function planAllocationSuggestions(input: SuggestionPlanInput): { lines: 
       const proposedDemand = take > 0 ? toThousandths(toDemandUnit(fromThousandths(take), docUnit, demandUnit, geometry) ?? 0) : 0;
       if (take > 0) {
         left -= take;
-        remainingNeed.set(needKey(candidate.orderId, candidate.resourceKey), Math.max(0, need - proposedDemand));
+        const rest = need - proposedDemand;
+        remainingNeed.set(needKey(candidate.orderId, candidate.resourceKey), rest <= slack ? 0 : rest);
       }
       candidates.push({
         orderId: candidate.orderId,
@@ -148,7 +152,7 @@ export function planAllocationSuggestions(input: SuggestionPlanInput): { lines: 
         deficitInDemandUnit: fromThousandths(need),
         proposedInDocUnit: fromThousandths(take),
         proposedInDemandUnit: fromThousandths(proposedDemand),
-        reasons: reasonsFor(candidate, line, input.documentSupplierKeys, take, proposedDemand, need),
+        reasons: reasonsFor(candidate, line, input.documentSupplierKeys, take, proposedDemand, need, slack),
         purchased: candidate.purchased,
         procurementVersion: candidate.procurementVersion,
         demandFingerprint: candidate.demandFingerprint,
@@ -193,6 +197,7 @@ function reasonsFor(
   take: number,
   proposedDemand: number,
   need: number,
+  slack: number,
 ): AllocationSuggestionCandidateDto['reasons'] {
   const reasons: AllocationSuggestionCandidateDto['reasons'] = [];
   if (line.onecOrderRefKey !== null && candidate.orderRefKey1c === line.onecOrderRefKey) {
@@ -210,7 +215,7 @@ function reasonsFor(
     reasons.push({ code: 'supplier', label: 'поставщик совпадает', tone: 'success' });
   }
   if (take > 0) {
-    reasons.push(proposedDemand >= need
+    reasons.push(proposedDemand + slack >= need
       ? { code: 'closes', label: 'закрывает полностью', tone: 'success' }
       : { code: 'closes', label: 'закроет частично', tone: 'warning' });
   }

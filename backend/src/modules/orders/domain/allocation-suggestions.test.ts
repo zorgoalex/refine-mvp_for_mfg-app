@@ -161,3 +161,28 @@ describe('CR1-2: предложение укладывается в одну а�
     expect(result.limitReached).toBe(false);
   });
 });
+
+describe('округление листов вниз не превращает закрытие в «частично»', () => {
+  it('дефицит 3,19 м² при листе 5,796 м² → 0,55 листа = «закрывает полностью», хвост не уходит на другую строку', () => {
+    const results = planAllocationSuggestions({
+      lines: [
+        line({ lineId: 1, lineNo: 1, docUnit: 'sheet', sheetAreaM2: 5.796, capacityInDocUnit: 38 }),
+        line({ lineId: 2, lineNo: 2, docUnit: 'sheet', sheetAreaM2: 5.796, capacityInDocUnit: 38 }),
+      ],
+      candidates: [candidate({ need: 3.19, source: 'cut' })],
+      allocatedPairs: new Set(), alreadyAllocated: new Map(), documentSupplierKeys: [], wastePercent: 0, maxProposals: 100,
+    }).lines;
+    expect(results[0].candidates[0]).toMatchObject({ proposedInDocUnit: 0.55 });
+    expect(results[0].candidates[0].reasons.find((r) => r.code === 'closes')?.label).toBe('закрывает полностью');
+    expect(results[1].candidates).toEqual([]);
+  });
+
+  it('недостаток больше 0,001 листа — по-прежнему «закроет частично»', () => {
+    const [result] = planAllocationSuggestions({
+      lines: [line({ docUnit: 'sheet', sheetAreaM2: 5.796, capacityInDocUnit: 0.5 })],
+      candidates: [candidate({ need: 3.19, source: 'cut' })],
+      allocatedPairs: new Set(), alreadyAllocated: new Map(), documentSupplierKeys: [], wastePercent: 0, maxProposals: 100,
+    }).lines;
+    expect(result.candidates[0].reasons.find((r) => r.code === 'closes')?.label).toBe('закроет частично');
+  });
+});

@@ -9,6 +9,7 @@ import {
   clearSuggestionDraft,
   computeLineTotals,
   computeOverallSummary,
+  overallCheck,
   convertDocUnitToDemandUnit,
   getLineDraft,
   hasAnySelection,
@@ -218,6 +219,7 @@ describe('computeOverallSummary / hasAnySelection / canSubmitBatch', () => {
     const draft = buildInitialDraft(response);
     const summary = computeOverallSummary(response, draft);
     expect(summary.linesCount).toBe(0);
+    expect(summary.totalLinesCount).toBe(1);
   });
 
   it('blocks submit on overrun even if something is selected', () => {
@@ -504,5 +506,13 @@ describe('CR2-1: смена единицы/материала строки пр�
     const edited = setCandidateQuantity(reconcileDraftWithResponse(null, base), 1, 2971, 0.4);
     const otherArea = makeResponse({ lines: [{ ...base.lines[0], sheetAreaM2: 5.0325 }] });
     expect(reconcileDraftWithResponse(edited, otherArea).lines[1].candidates[2971].quantity).toBe(1);
+  });
+});
+
+describe('overallCheck', () => {
+  it('перебор важнее всего; без выбранных заказов — «Нечего распределять», иначе можно', () => {
+    expect(overallCheck({ overrun: true, ordersCount: 0 })).toEqual({ label: 'Есть перебор', tone: 'bad' });
+    expect(overallCheck({ overrun: false, ordersCount: 0 })).toEqual({ label: 'Нечего распределять', tone: 'muted' });
+    expect(overallCheck({ overrun: false, ordersCount: 2 })).toEqual({ label: 'Можно распределять', tone: 'ok' });
   });
 });
