@@ -30,6 +30,7 @@ import {
   noteWithPreviousName,
   refreshMatches,
   supplierNorm,
+  vendorMatchMap,
   type CatalogAction,
   type FilmCandidate,
   type ImportRow,
@@ -577,14 +578,7 @@ export class CatalogImportService {
         createVendor: false,
         suggestedVendorId: v.suggestedVendorId,
       }));
-      const vendorIds = new Map<string, number>();
-      for (const v of vendors)
-        if (v.vendorId !== null) {
-          vendorIds.set(v.supplierNorm, v.vendorId);
-          if (v.vendorName)
-            vendorIds.set(supplierNorm(v.vendorName), v.vendorId);
-        }
-      const matches = buildMatches(inserted, films, vendorIds);
+      const matches = buildMatches(inserted, films, vendorMatchMap(vendors));
       assignCanonicals(inserted, matches, films);
       for (const row of inserted)
         await tx.query(
@@ -965,16 +959,23 @@ export class CatalogImportService {
         throw new ApiError(400, 'VALIDATION_FAILED', String(error));
       }
       if (body.actions.some((action) => action.type === 'setVendor')) {
-        const vendorBySupplier = new Map<string, number>();
-        for (const vendor of vendors) {
-          if (vendor.vendorId === null) continue;
-          vendorBySupplier.set(vendor.supplierNorm, vendor.vendorId);
-          const vendorName = films.find(
-            (film) => film.vendorId === vendor.vendorId
-          )?.vendorName;
-          if (vendorName)
-            vendorBySupplier.set(supplierNorm(vendorName), vendor.vendorId);
-        }
+        // Названия поставщиков — из справочника, как при создании черновика (не из плёнок: у
+        // поставщика может не быть своих плёнок, и ключ из названия плёнки на «нд» терялся).
+        const mappedIds = [...new Set(vendors.flatMap((vendor) => (vendor.vendorId === null ? [] : [vendor.vendorId])))];
+        const names = new Map(
+          (
+            await tx.query<{ vendor_id: number; vendor_name: string }>(
+              `SELECT vendor_id,vendor_name FROM vendors WHERE vendor_id=ANY($1::smallint[])`,
+              [mappedIds]
+            )
+          ).rows.map((row) => [Number(row.vendor_id), row.vendor_name])
+        );
+        const vendorBySupplier = vendorMatchMap(
+          vendors.map((vendor) => ({
+            ...vendor,
+            vendorName: vendor.vendorId === null ? null : names.get(vendor.vendorId) ?? null,
+          }))
+        );
         const explicitFilmIds = new Set(
           body.actions.flatMap((action) =>
             action.type === 'setMatch' || action.type === 'confirmMatch'

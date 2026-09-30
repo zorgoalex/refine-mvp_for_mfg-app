@@ -10,6 +10,7 @@ import {
   filmFingerprint,
   type FilmCandidate,
   type ImportRow,
+  vendorMatchMap,
 } from './catalog-import';
 
 const film = (
@@ -235,5 +236,16 @@ describe('film note after a catalog rename', () => {
     expect(result.startsWith(long)).toBe(true);
     const full = 'y'.repeat(FILM_NOTE_MAX - 5);
     expect(noteWithPreviousName(full, 'старое')).toBe(full);
+  });
+});
+
+describe('vendorMatchMap', () => {
+  it('maps the catalog supplier and the ERP vendor name (film-name vendor key) to the vendor; skips unresolved', () => {
+    const map = vendorMatchMap([
+      { supplierNorm: 'decor 777', vendorId: 14, vendorName: 'Decor777' },
+      { supplierNorm: 'новый', vendorId: null, vendorName: null },
+      { supplierNorm: 'алер', vendorId: 15, vendorName: undefined },
+    ]);
+    expect([...map.entries()]).toEqual([['decor 777', 14], ['decor777', 14], ['алер', 15]]);
   });
 });

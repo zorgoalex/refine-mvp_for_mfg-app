@@ -152,6 +152,24 @@ export function filmFingerprint(film: Record<string, unknown>): string {
     .digest('hex');
 }
 
+/**
+ * Карта «поставщик → vendor» для сопоставления плёнок: норма поставщика строки каталога и норма
+ * названия поставщика ERP (ключ поставщика из названия плёнки на «нд», например «декор777» →
+ * `decor777`). Одна для создания черновика и пересчёта в PATCH: название берётся из справочника
+ * поставщиков, не из плёнок (у поставщика может не быть своих плёнок — все висят на «нд»).
+ */
+export function vendorMatchMap(
+  vendors: ReadonlyArray<{ supplierNorm: string; vendorId: number | null; vendorName: string | null | undefined }>
+): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const vendor of vendors) {
+    if (vendor.vendorId === null) continue;
+    map.set(vendor.supplierNorm, vendor.vendorId);
+    if (vendor.vendorName) map.set(supplierNorm(vendor.vendorName), vendor.vendorId);
+  }
+  return map;
+}
+
 export function buildMatches(
   rows: ImportRow[],
   films: FilmCandidate[],

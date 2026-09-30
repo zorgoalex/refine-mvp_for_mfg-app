@@ -264,6 +264,38 @@ describe.skipIf(!url)('film catalog import PostgreSQL transactions', () => {
     expect(restored.rows.map((row) => row.note)).toEqual([null, 'Своя заметка']);
   });
 
+  it('setVendor keeps name-derived matches of films on «нд» whose vendor has no own films (DECOR 777)', async () => {
+    const nd = (await query<{ vendor_id: number }>(`SELECT vendor_id FROM vendors WHERE lower(trim(vendor_name))='нд' ORDER BY vendor_id LIMIT 1`)).rows[0];
+    const decor = (await query<{ vendor_id: number }>(`SELECT vendor_id FROM vendors WHERE lower(trim(vendor_name))='decor777' ORDER BY vendor_id LIMIT 1`)).rows[0];
+    expect(nd && decor).toBeTruthy();
+    expect((await query<{ n: number }>(`SELECT count(*)::int n FROM films WHERE vendor_id=$1`, [decor.vendor_id])).rows[0].n).toBe(0);
+    // Уникальное кириллическое слово: цифры в названии разбор принял бы за код.
+    const word = [...randomUUID().replaceAll('-', '').slice(0, 8)].map((c) => 'абвгдежзиклмнопр'['0123456789abcdef'.indexOf(c)]).join('');
+    const film = Number((await query<{ film_id: string }>(
+      `INSERT INTO films(film_name,vendor_id,film_type_id,film_texture,is_active,created_by,edited_by) VALUES($1,$2,$3,false,true,$4,$4) RETURNING film_id`,
+      [`${prefix} ${word} супермат декор777`, nd.vendor_id, filmTypeId, actorId],
+    )).rows[0].film_id);
+    const row = (name: string, supplier: string, rowNo: number) => ({
+      rowNo, nameOriginal: name, nameFull: `${name}; ${supplier}`, supplier,
+      nomenclatureType: 'Пленка', unit: 'пог. м', nomenclatureCategory: 'ПЛЕНКА ПВХ ДЛЯ МДФ',
+    });
+    const unknownSupplier = `${prefix} неизвестный ${word}`;
+    const batch = await catalog().create({
+      kind: 'films', source: 'file', fileName: 'fixture.xlsx', fileSha256: randomUUID().replaceAll('-', '').padEnd(64, '0').slice(0, 64), sheetName: 'Пленки',
+      rows: [row(`${prefix} ${word} супермат`, 'DECOR 777', 2), row(`${prefix} ${word} другая`, unknownSupplier, 3)],
+    }, actorId, randomUUID(), key());
+    const matchOf = async () => (await query<{ match_status: string; row_id: string | null }>(
+      `SELECT match_status,row_id FROM catalog_import_matches WHERE batch_id=$1 AND film_id=$2`, [batch.id, film],
+    )).rows[0];
+    const before = await matchOf();
+    const decorRow = (await query<{ row_id: string }>(`SELECT row_id FROM catalog_import_rows WHERE batch_id=$1 AND supplier='DECOR 777'`, [batch.id])).rows[0];
+    expect(before.match_status).not.toBe('unchanged');
+    expect(before.row_id).toBe(decorRow.row_id);
+    // Сопоставление ДРУГОГО поставщика пересчитывает неявные плёнки — плёнка DECOR 777 не теряет строку.
+    await service.patch(batch.id, [], { version: 1, actions: [{ type: 'setVendor', supplierNorm: unknownSupplier.trim().toLowerCase(), vendorId }] }, actorId, randomUUID(), key());
+    expect(await matchOf()).toEqual(before);
+  });
+
   it('creates absent film and rejects stale business fingerprint atomically', async () => {
     const newBatch = await draft(`${prefix} отсутствующая`);
     await service.apply(newBatch.id, [], 1, actorId, randomUUID(), key());
