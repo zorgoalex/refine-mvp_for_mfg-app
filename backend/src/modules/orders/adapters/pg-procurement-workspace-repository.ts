@@ -48,6 +48,7 @@ import {
 import { lockActor } from './pg-order-resource-procurement-repository';
 import { documentSupplierKeys } from './pg-onec-documents-repository';
 import { pairKey, planAllocationSuggestions, type OpenRequestLineInput } from '../domain/allocation-suggestions';
+import { openThousandths } from '../domain/supplier-request-links';
 import { ONEC_ALLOCATION_BATCH_LIMIT, PROCUREMENT_DOC_KINDS, type AllocationSuggestionsResponseDto, type OnecUnitCode } from '../application/onec-documents.types';
 
 interface SettingsRow extends QueryResultRow {
@@ -504,7 +505,7 @@ export async function buildWorklistLines(
       let orderedThousandths = 0;
       for (const ref of refs) {
         if (ref.status !== 'sent') continue;
-        const open = Math.max(0, Math.round(Number(ref.quantity) * 1000) - Math.round(Number(ref.fulfilled) * 1000)) / 1000;
+        const open = openThousandths(Math.round(Number(ref.quantity) * 1000), Math.round(Number(ref.fulfilled) * 1000)) / 1000;
         if (open <= 0) continue;
         const converted = toDemandUnit(open, ref.unit_code, unit, { sheetAreaM2: geo?.areaM2 ?? null });
         if (converted !== null) orderedThousandths += Math.round(converted * 1000);
@@ -822,7 +823,7 @@ async function loadOpenRequestLines(client: DatabaseClient, orderIds: number[]):
     [orderIds],
   )).rows;
   for (const row of rows) {
-    const remaining = Math.round(Number(row.quantity) * 1000) - Math.round(Number(row.fulfilled) * 1000);
+    const remaining = openThousandths(Math.round(Number(row.quantity) * 1000), Math.round(Number(row.fulfilled) * 1000));
     if (remaining <= 0) continue;
     const key = `${Number(row.order_id)}|${resourceKey(row.resource_kind, Number(row.ref_id))}`;
     const list = result.get(key) ?? [];

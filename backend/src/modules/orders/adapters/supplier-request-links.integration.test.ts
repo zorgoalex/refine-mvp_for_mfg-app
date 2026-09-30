@@ -188,9 +188,12 @@ describe.skipIf(!url)('Supplier request links (phase 3b) — real PostgreSQL', {
     const fulfilledOrder = after.lineItems[0].orders[0];
     expect(fulfilledOrder.fulfilled).toBe(candidate.requestLinks[0].quantity);
     expect(fulfilledOrder.receipts).toEqual([expect.objectContaining({ documentId: doc.documentId })]);
-    expect(after.receiptState).toBe(fulfilledOrder.fulfilled >= fulfilledOrder.quantity ? 'done' : 'partial');
+    // Заявка округляла заказ вверх до 0,001, подбор — связь вниз: хвост в пределах допуска — «получено».
+    expect(fulfilledOrder.quantity - fulfilledOrder.fulfilled).toBeLessThanOrEqual(0.001 + 1e-9);
+    expect(fulfilledOrder.fulfillment).toBe('received');
+    expect(after.receiptState).toBe('done');
     const line = await worklistLine(orderIds[0]);
-    expect(line.orderedOpen).toBeLessThan(before.orderedOpen);
+    expect(line.orderedOpen).toBe(0);
     // Аудит распределения несёт связь, событие — одно на распределение.
     const audit = (await conn.query(
       `SELECT metadata_json FROM audit_log WHERE event = 'order_resource.onec_allocation_added' AND metadata_json->>'onecDocumentId' = $1`,

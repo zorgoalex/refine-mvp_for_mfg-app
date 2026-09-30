@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { convertThousandths, fulfillmentOf, supplierMatch } from './supplier-request-links';
+import { convertThousandths, fulfillmentOf, openThousandths, supplierMatch } from './supplier-request-links';
 
 describe('supplierMatch (§5.5)', () => {
   const doc = (overrides: Partial<Parameters<typeof supplierMatch>[1]> = {}) => ({ supplierId: null, counterpartyRefKey: null, keys: [], ...overrides });
@@ -39,5 +39,16 @@ describe('fulfillmentOf', () => {
     expect(fulfillmentOf(2000, 500)).toBe('partial');
     expect(fulfillmentOf(2000, 2000)).toBe('received');
     expect(fulfillmentOf(2000, 2500)).toBe('received');
+  });
+
+  it('хвост округления (0,001 единицы) — получено: заявка округляла вверх, подбор — вниз', () => {
+    expect(fulfillmentOf(551, 550)).toBe('received');
+    expect(fulfillmentOf(551, 549)).toBe('partial');
+    expect(openThousandths(551, 550)).toBe(0);
+    expect(openThousandths(551, 549)).toBe(2);
+    // Заказ на 0,001 без прихода — открыт (CR5-1).
+    expect(openThousandths(1, 0)).toBe(1);
+    expect(fulfillmentOf(1, 0)).toBe('waiting');
+    expect(openThousandths(1, 1)).toBe(0);
   });
 });

@@ -44,10 +44,23 @@ export function convertThousandths(
 
 export type LineOrderFulfillment = 'waiting' | 'partial' | 'received';
 
+/**
+ * Допуск исполнения, тысячные единицы строки заявки: заявка округляет заказ вверх до 0,001, подбор — связь вниз, поэтому
+ * «пришло 0,55 из 0,551 листа» — это получено. Лимит привязки (не больше заказанного) остаётся строгим.
+ */
+export const FULFILLMENT_SLACK = 1;
+
+/** Сколько ещё ждём по заказу строки заявки (тысячные); хвост в пределах допуска — 0. */
+export function openThousandths(ordered: number, fulfilled: number): number {
+  const open = Math.max(0, ordered - fulfilled);
+  // Допуск — только когда приход уже есть: заказ на 0,001 без прихода остаётся открытым (CR5-1).
+  return fulfilled > 0 && open <= FULFILLMENT_SLACK ? 0 : open;
+}
+
 /** Исполнение заказа строки заявки по приходным связям (тысячные единицы строки заявки). */
 export function fulfillmentOf(ordered: number, fulfilled: number): LineOrderFulfillment {
   if (fulfilled <= 0) return 'waiting';
-  return fulfilled >= ordered ? 'received' : 'partial';
+  return openThousandths(ordered, fulfilled) === 0 ? 'received' : 'partial';
 }
 
 /** Не больше стольких связей с заявками у одного распределения за одну команду (batch DTO, подбор). */

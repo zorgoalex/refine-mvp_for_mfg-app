@@ -41,7 +41,7 @@ import {
 } from '../domain/supplier-requests';
 import { buildOwnershipOrderWhere, loadProcurementRows, orderNotFound, parseResourceKey, procurementRowKey } from './pg-order-resource-demand-repository';
 import { lockActor, lockOrders, type Actor } from './pg-order-resource-procurement-repository';
-import { fromDemandFloor, fulfillmentOf, inDemandExact, supplierMatch } from '../domain/supplier-request-links';
+import { fromDemandFloor, fulfillmentOf, inDemandExact, openThousandths, supplierMatch } from '../domain/supplier-request-links';
 import { documentSupplierKeys } from './pg-onec-documents-repository';
 import {
   buildWorklistLines,
@@ -593,7 +593,8 @@ async function loadPossibleMatches(
     if (!line) continue;
     const demandUnit = demandUnitOf(line.resource_kind);
     const area = line.resource_kind === 'sheet_material' ? sheetAreaM2(line.width_mm, line.height_mm) : null;
-    const remaining = toMilli(order.quantity) - toMilli(order.fulfilled);
+    const remaining = openThousandths(toMilli(order.quantity), toMilli(order.fulfilled));
+    if (remaining <= 0) continue;
     const list: SupplierRequestPossibleMatchDto[] = [];
     for (const allocation of allocations) {
       if (Number(allocation.procurement_id) !== Number(order.order_resource_procurement_id)) continue;
@@ -679,7 +680,7 @@ function receiptStateOf(orders: LineOrderRow[]): 'none' | 'partial' | 'done' {
   const active = orders.filter((order) => !order.order_deleted);
   const fulfilled = active.reduce((sum, order) => sum + toMilli(order.fulfilled), 0);
   if (fulfilled <= 0) return 'none';
-  return active.every((order) => toMilli(order.fulfilled) >= toMilli(order.quantity)) ? 'done' : 'partial';
+  return active.every((order) => openThousandths(toMilli(order.quantity), toMilli(order.fulfilled)) === 0) ? 'done' : 'partial';
 }
 
 async function loadCard(client: DatabaseClient, currentUser: CurrentUser, supplierRequestId: number, canManage: boolean): Promise<SupplierRequestCardDto> {
