@@ -765,7 +765,7 @@ async function assertMdfFence(tx: TransactionClient): Promise<void> {
 }
 
 /** §5.5: creating/extending rounds is refused while the MDF engine is active without round support. */
-async function assertMdfSupportsRounds(tx: TransactionClient): Promise<void> {
+export async function assertMdfSupportsRounds(tx: TransactionClient): Promise<void> {
   await assertMdfFence(tx);
   if (!(await mdfEngineSupportsRounds(tx))) {
     throw new ApiError(409, 'ORDER_REWORK_MDF_ENGINE_UNSUPPORTED', 'Переделка станет доступна после поддержки кругов в МДФ-движке');

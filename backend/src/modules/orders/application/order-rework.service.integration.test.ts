@@ -12,6 +12,8 @@ import { OrderDetailTransferService } from './order-detail-transfer.service';
 import { PgStatusAutomationRepository } from '../../status-automation/adapters/pg-status-automation-repository';
 import { parseCreateStatusAutomationRuleRequest } from '../../status-automation/dto/status-automation.dto';
 import { changeOrderStatusFromAutomationInTransaction } from '../../production-actions/adapters/pg-production-action-repository';
+import { PgOrderSnapshot } from '../adapters/pg-order-snapshot';
+import type { OrderSnapshotDto } from '../dto/order-snapshot.dto';
 
 // Real PostgreSQL proof of the rework commands («Переделка», slice 4). Gated on
 // REWORK_INTEGRATION_DATABASE_URL (scratch DB: erp schema + migrations 220–222).
@@ -26,6 +28,8 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
   let clientId: number;
   let projectId: number;
   const orderIds: number[] = [];
+  const importProjectIds: number[] = [];
+  const importSource = `e2e-rework-${tag}`;
   let status: Record<string, number>;
   let stage: Record<string, number>;
   let reasons: Record<string, number>;
@@ -154,6 +158,17 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
           history.release();
         }
         await pool.query('DELETE FROM orders WHERE order_id = $1', [orderId]);
+      }
+      await pool.query('DELETE FROM order_import_entity_map WHERE source_instance_id LIKE $1', [`${importSource}%`]);
+      await pool.query('DELETE FROM order_import_runs WHERE source_instance_id LIKE $1', [`${importSource}%`]);
+      for (const importProject of importProjectIds) {
+        await pool.query(
+          "DELETE FROM audit_log_related_entity WHERE audit_id IN (SELECT audit_id FROM audit_log WHERE entity_type = 'project' AND entity_id = $1)",
+          [String(importProject)],
+        );
+        await pool.query("DELETE FROM audit_log WHERE entity_type = 'project' AND entity_id = $1", [String(importProject)]);
+        await pool.query("DELETE FROM outbox_events WHERE aggregate_type = 'project' AND aggregate_id = $1", [String(importProject)]);
+        await pool.query('DELETE FROM projects WHERE project_id = $1', [importProject]);
       }
       if (projectId) await pool.query('DELETE FROM projects WHERE project_id = $1', [projectId]);
       if (clientId) await pool.query('DELETE FROM clients WHERE client_id = $1', [clientId]);
@@ -540,5 +555,269 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
       client.release();
     }
     expect(Number((await pool.query('SELECT order_status_id FROM orders WHERE order_id = $1', [orderId])).rows[0].order_status_id)).toBe(status.legacy_6);
+  });
+
+  // ---------------------------------------------------------------- snapshot (§6.2)
+
+  const snapshots = () => new PgOrderSnapshot(database());
+  async function exportSnapshot(orderId: number): Promise<OrderSnapshotDto> {
+    return JSON.parse((await snapshots().exportOrderSnapshot({ orderId, currentUser: admin, requestId: key() })).content) as OrderSnapshotDto;
+  }
+  /** Same content as another ERP instance would send: fresh source instance, unique order name. */
+  function retarget(snapshot: OrderSnapshotDto, label: string): OrderSnapshotDto {
+    const copy = structuredClone(snapshot);
+    copy.source.sourceInstanceId = `${importSource}-${randomUUID()}`;
+    copy.source.payloadHash = '';
+    copy.data.order.orderName = `E2E-Тест переделка сервис ${tag} ${label}`;
+    return copy;
+  }
+  async function importSnapshot(snapshot: OrderSnapshotDto) {
+    const result = await snapshots().importOrderSnapshot({ snapshot, currentUser: admin, requestId: key() });
+    if (!orderIds.includes(result.orderId)) {
+      orderIds.push(result.orderId);
+      const project = (await pool.query('SELECT project_id FROM orders WHERE order_id = $1', [result.orderId])).rows[0];
+      if (project && Number(project.project_id) !== projectId) importProjectIds.push(Number(project.project_id));
+    }
+    return result;
+  }
+  const detailRounds = async (orderId: number) => (await pool.query(
+    'SELECT detail_id, production_round FROM order_details WHERE order_id = $1 ORDER BY detail_number', [orderId],
+  )).rows.map((row) => ({ detailId: Number(row.detail_id), round: Number(row.production_round) }));
+  const roundRows = async (orderId: number) => (await pool.query(
+    `SELECT r.round_no, r.mode, r.close_reason, r.event_seq, reason.code, r.reason_comment,
+            (SELECT count(*)::int FROM order_production_round_details d
+             WHERE d.order_production_round_id = r.order_production_round_id) AS details
+     FROM order_production_rounds r JOIN order_rework_reasons reason ON reason.order_rework_reason_id = r.reason_id
+     WHERE r.order_id = $1 ORDER BY r.round_no`, [orderId],
+  )).rows.map((row) => [Number(row.round_no), row.mode, row.close_reason, Number(row.event_seq), row.code, row.reason_comment, row.details]);
+  const eventRounds = async (orderId: number) => (await pool.query(
+    `SELECT d.detail_number, e.production_status_id, e.round_no FROM production_status_events e
+     JOIN order_details d ON d.detail_id = e.detail_id WHERE d.order_id = $1
+     ORDER BY d.detail_number, e.round_no, e.production_status_id`, [orderId],
+  )).rows.map((row) => [Number(row.detail_number), Number(row.production_status_id), Number(row.round_no)]);
+
+  async function orderWithRounds(): Promise<{ orderId: number; detailIds: number[] }> {
+    const created = await createOrder('legacy_6', 'packed', 2);
+    await service.startOrExtend({
+      currentUser: admin, orderId: created.orderId, version: await version(created.orderId), idempotencyKey: key(),
+      dto: { reasonId: reasons.workshop_defect, details: [{ detailId: created.detailIds[0], productionStatusId: stage.drawn }] },
+    });
+    await setStatusAsWriter(created.orderId, 'legacy_6'); // closes round 2 (ready)
+    await service.startOrExtend({
+      currentUser: admin, orderId: created.orderId, version: await version(created.orderId), idempotencyKey: key(),
+      dto: { reasonId: reasons.client_change, comment: 'цвет', details: [{ detailId: created.detailIds[1], productionStatusId: stage.cut }] },
+    });
+    return created;
+  }
+
+  it('exports an order without rounds as unchanged format 1.0.0', async () => {
+    const { orderId } = await createOrder('legacy_6', 'packed', 1);
+    const snapshot = await exportSnapshot(orderId);
+    expect(snapshot.formatVersion).toBe('1.0.0');
+    expect(snapshot.exporterService.compatibleImportVersions).toEqual(['1.0.0']);
+    expect(snapshot.data.productionRounds).toBeUndefined();
+    expect(snapshot.data.productionStatusEvents.every((event) => !('roundNo' in event))).toBe(true);
+  });
+
+  it('round-trips rounds 1/2/3 into a NEW order (open «Переделка»); re-import is noop/skipped; the next start there is round 4', async () => {
+    const source = await orderWithRounds();
+    const exported = await exportSnapshot(source.orderId);
+    expect(exported.formatVersion).toBe('1.1.0');
+    expect(exported.data.productionRounds).toMatchObject({
+      productionRound: 3, lastRoundNo: 3,
+      detailRounds: [
+        { detailSourceId: String(source.detailIds[0]), productionRound: 2 },
+        { detailSourceId: String(source.detailIds[1]), productionRound: 3 },
+      ],
+    });
+    expect(exported.data.productionRounds?.rounds.map((round) => [round.roundNo, round.reasonCode, round.closeReason]))
+      .toEqual([[2, 'workshop_defect', 'ready'], [3, 'client_change', null]]);
+
+    const snapshot = retarget(exported, 'импорт кругов');
+    const imported = await importSnapshot(snapshot);
+    expect(imported.status).toBe('created');
+    const order = (await pool.query('SELECT order_status_id, production_round, last_round_no FROM orders WHERE order_id = $1', [imported.orderId])).rows[0];
+    expect([Number(order.order_status_id), Number(order.production_round), Number(order.last_round_no)]).toEqual([status.rework, 3, 3]);
+    expect((await detailRounds(imported.orderId)).map((detail) => detail.round)).toEqual([2, 3]);
+    expect(await roundRows(imported.orderId)).toEqual(await roundRows(source.orderId));
+    expect(await eventRounds(imported.orderId)).toEqual(await eventRounds(source.orderId));
+    const before = (await pool.query(
+      `SELECT d.from_production_status_id, d.from_production_round, d.to_production_status_id FROM order_production_round_details d
+       JOIN order_production_rounds r USING (order_production_round_id) WHERE r.order_id = $1 ORDER BY r.round_no`, [imported.orderId],
+    )).rows.map((row) => [Number(row.from_production_status_id), Number(row.from_production_round), Number(row.to_production_status_id)]);
+    expect(before).toEqual([[stage.packed, 1, stage.drawn], [stage.packed, 1, stage.cut]]);
+    const audit = (await pool.query(
+      "SELECT metadata_json FROM audit_log WHERE related_order_id = $1 AND event = 'orders.snapshot_import'", [imported.orderId],
+    )).rows;
+    expect(audit.map((row) => row.metadata_json.productionRoundNos)).toEqual([[2, 3]]);
+
+    // Existing target (new and old format): noop/skipped, rounds and counters untouched.
+    const rounds = await roundRows(imported.orderId);
+    expect((await importSnapshot(snapshot)).status).toBe('noop');
+    const oldFormat = structuredClone(snapshot);
+    oldFormat.formatVersion = '1.0.0';
+    delete oldFormat.data.productionRounds;
+    for (const event of oldFormat.data.productionStatusEvents) delete event.roundNo;
+    expect(await importSnapshot(oldFormat)).toMatchObject({ status: 'skipped', orderId: imported.orderId });
+    expect(await roundRows(imported.orderId)).toEqual(rounds);
+
+    await setStatusAsWriter(imported.orderId, 'legacy_6'); // closes the imported round 3
+    const details = await detailRounds(imported.orderId);
+    const next = await service.startOrExtend({
+      currentUser: admin, orderId: imported.orderId, version: await version(imported.orderId), idempotencyKey: key(),
+      dto: { reasonId: reasons.workshop_defect, details: [{ detailId: details[1].detailId, productionStatusId: stage.drawn }] },
+    });
+    expect(next).toMatchObject({ roundNo: 4, action: 'started' });
+  });
+
+  it('exports one consistent snapshot while a rework commits between its reads; audit records the file format', async () => {
+    const { orderId, detailIds } = await createOrder('legacy_6', 'packed', 1);
+    const plain = database();
+    let injected = false;
+    const racing = {
+      ...plain,
+      async transaction<T>(handler: (tx: TransactionClient) => Promise<T>, options: { isolation?: string } = {}): Promise<T> {
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          if (options.isolation) await client.query(`SET TRANSACTION ISOLATION LEVEL ${options.isolation.toUpperCase()}`);
+          const tx = {
+            raw: client,
+            query: async (text: string, params: readonly unknown[] = []) => {
+              const result = await client.query(text, [...params]);
+              // Right after the export read its header, a rework round commits on another connection.
+              if (!injected && /INNER JOIN clients c ON c\.client_id = o\.client_id/.test(text)) {
+                injected = true;
+                await service.startOrExtend({
+                  currentUser: admin, orderId, version: await version(orderId), idempotencyKey: key(),
+                  dto: { reasonId: reasons.workshop_defect, details: [{ detailId: detailIds[0], productionStatusId: stage.drawn }] },
+                });
+              }
+              return result;
+            },
+          } as never;
+          const result = await handler(tx);
+          await client.query('COMMIT');
+          return result;
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally {
+          client.release();
+        }
+      },
+    } as unknown as DatabaseService;
+    const raced = JSON.parse((await new PgOrderSnapshot(racing).exportOrderSnapshot({ orderId, currentUser: admin, requestId: key() })).content) as OrderSnapshotDto;
+    expect(injected).toBe(true);
+    // The whole file is the state before the rework: no rounds, format 1.0.0, importable.
+    expect(raced.formatVersion).toBe('1.0.0');
+    expect(raced.data.productionRounds).toBeUndefined();
+    expect(Number((await pool.query('SELECT production_round FROM orders WHERE order_id = $1', [orderId])).rows[0].production_round)).toBe(2);
+    const after = await exportSnapshot(orderId);
+    expect(after.formatVersion).toBe('1.1.0');
+    const formats = (await pool.query(
+      "SELECT metadata_json->>'formatVersion' AS format FROM audit_log WHERE related_order_id = $1 AND event = 'orders.snapshot_export' ORDER BY created_at",
+      [orderId],
+    )).rows.map((row) => row.format);
+    expect(formats).toEqual(['1.0.0', '1.1.0']);
+  });
+
+  it('import → «Это не переделка» → export → import stays valid', async () => {
+    const source = await orderWithRounds();
+    const imported = await importSnapshot(retarget(await exportSnapshot(source.orderId), 'отмена после импорта'));
+    await service.falsePositive({
+      currentUser: admin, orderId: imported.orderId, roundNo: 3, version: await version(imported.orderId), idempotencyKey: key(), dto: {},
+    });
+    const again = await exportSnapshot(imported.orderId);
+    expect(again.data.productionRounds).toMatchObject({ productionRound: 2 });
+    const reimported = await importSnapshot(retarget(again, 'повторный импорт после отмены'));
+    expect(reimported.status).toBe('created');
+    expect((await roundRows(reimported.orderId)).map((round) => [round[0], round[2]])).toEqual([[2, 'ready'], [3, 'false_positive']]);
+  });
+
+  it('imports an intermediate state: open round with «В производстве» after «Переделка»', async () => {
+    const { orderId, detailIds } = await createOrder('legacy_6', 'packed', 1);
+    await service.startOrExtend({
+      currentUser: admin, orderId, version: await version(orderId), idempotencyKey: key(),
+      dto: { reasonId: reasons.workshop_defect, details: [{ detailId: detailIds[0], productionStatusId: stage.drawn }] },
+    });
+    await setStatusAsWriter(orderId, 'legacy_4');
+    const imported = await importSnapshot(retarget(await exportSnapshot(orderId), 'промежуточный'));
+    expect(imported.status).toBe('created');
+    const order = (await pool.query('SELECT order_status_id, production_round FROM orders WHERE order_id = $1', [imported.orderId])).rows[0];
+    expect([Number(order.order_status_id), Number(order.production_round)]).toEqual([status.legacy_4, 2]);
+    expect((await roundRows(imported.orderId)).map((round) => [round[0], round[2]])).toEqual([[2, null]]);
+  });
+
+  it('rejects inconsistent round snapshots before creating anything (422)', async () => {
+    const source = await orderWithRounds();
+    const exported = await exportSnapshot(source.orderId);
+    const cases: Array<[string, (snapshot: OrderSnapshotDto) => void, string]> = [
+      ['без открытого круга', (snapshot) => {
+        const last = snapshot.data.productionRounds!.rounds[1];
+        last.closedAt = last.startedAt;
+        last.closeReason = 'ready';
+      }, 'SNAPSHOT_ROUNDS_INVALID'],
+      ['неизвестная причина', (snapshot) => { snapshot.data.productionRounds!.rounds[0].reasonCode = 'e2e_unknown_reason'; }, 'SNAPSHOT_REWORK_REASON_UNKNOWN'],
+      ['формат 1.0.0 с кругами', (snapshot) => { snapshot.formatVersion = '1.0.0'; }, 'SNAPSHOT_ROUNDS_INVALID'],
+      ['чужая деталь круга', (snapshot) => { snapshot.data.productionRounds!.rounds[0].details[0].detailSourceId = '999999999'; }, 'SNAPSHOT_ROUNDS_INVALID'],
+      ['событие неизвестного круга', (snapshot) => { snapshot.data.productionStatusEvents[0].roundNo = 7; }, 'SNAPSHOT_ROUNDS_INVALID'],
+      ['текущий круг не равен открытому', (snapshot) => { snapshot.data.productionRounds!.productionRound = 2; }, 'SNAPSHOT_ROUNDS_INVALID'],
+      ['деталь открытого круга без detailRounds', (snapshot) => {
+        snapshot.data.productionRounds!.detailRounds = snapshot.data.productionRounds!.detailRounds.filter((detail) => detail.productionRound !== 3);
+      }, 'SNAPSHOT_ROUNDS_INVALID'],
+      ['before-state открытого круга на отменённый круг', (snapshot) => {
+        const rounds = snapshot.data.productionRounds!;
+        rounds.rounds[0].closeReason = 'false_positive';
+        rounds.detailRounds = rounds.detailRounds.filter((detail) => detail.productionRound === 3);
+        rounds.rounds[1].details[0].fromProductionRound = 1;
+      }, 'SNAPSHOT_ROUNDS_INVALID'],
+      ['отмена вернёт деталь ниже живого круга', (snapshot) => {
+        const rounds = snapshot.data.productionRounds!;
+        // Detail 2 also belonged to round 2 (closed ready); round 3 would restore it to round 1.
+        rounds.rounds[0].details.push({ ...rounds.rounds[0].details[0], detailSourceId: rounds.rounds[1].details[0].detailSourceId });
+        rounds.rounds[1].details[0].fromProductionRound = 1;
+      }, 'SNAPSHOT_ROUNDS_INVALID'],
+      ['отмена after_ready вернёт статус «Переделка»', (snapshot) => {
+        snapshot.data.productionRounds!.rounds[1].fromOrderStatusId = status.rework;
+      }, 'SNAPSHOT_ROUNDS_INVALID'],
+      ['in_production при статусе «Переделка»', (snapshot) => {
+        snapshot.data.productionRounds!.rounds[1].mode = 'in_production';
+      }, 'SNAPSHOT_ROUNDS_INVALID'],
+      ['деталь возвращается в круг, где её не было', (snapshot) => {
+        snapshot.data.productionRounds!.rounds[1].details[0].fromProductionRound = 2;
+      }, 'SNAPSHOT_ROUNDS_INVALID'],
+      ['before-state на отсутствующий круг', (snapshot) => {
+        snapshot.data.productionRounds!.rounds = snapshot.data.productionRounds!.rounds.filter((round) => round.roundNo === 3);
+        snapshot.data.productionRounds!.detailRounds = snapshot.data.productionRounds!.detailRounds.filter((detail) => detail.productionRound === 3);
+        for (const event of snapshot.data.productionStatusEvents) if (event.roundNo === 2) event.roundNo = 1;
+      }, 'SNAPSHOT_ROUNDS_INVALID'],
+    ];
+    for (const [label, mutate, code] of cases) {
+      const snapshot = retarget(exported, `отказ ${label}`);
+      mutate(snapshot);
+      await expect(importSnapshot(snapshot), label).rejects.toMatchObject({ code });
+      const created = await pool.query('SELECT count(*)::int AS n FROM orders WHERE order_name = $1', [snapshot.data.order.orderName]);
+      expect(created.rows[0].n, label).toBe(0);
+    }
+  });
+
+  it('fails fast with 409 when the MDF cutover holds the fence; a direct «Переделка» insert without marker is refused', async () => {
+    const source = await orderWithRounds();
+    const snapshot = retarget(await exportSnapshot(source.orderId), 'fence');
+    const cutover = await pool.connect();
+    try {
+      await cutover.query('BEGIN');
+      await cutover.query("SELECT pg_advisory_xact_lock(hashtextextended('mdf-engine-cutover', 0))");
+      await expect(importSnapshot(snapshot)).rejects.toMatchObject({ code: 'ORDER_REWORK_MDF_CUTOVER_IN_PROGRESS' });
+    } finally {
+      await cutover.query('ROLLBACK').catch(() => undefined);
+      cutover.release();
+    }
+    expect((await pool.query('SELECT count(*)::int AS n FROM orders WHERE order_name = $1', [snapshot.data.order.orderName])).rows[0].n).toBe(0);
+    await expect(pool.query(
+      'INSERT INTO orders (order_name, client_id, project_id, order_status_id, created_by) VALUES ($1, $2, $3, $4, $5)',
+      [`E2E-Тест переделка сервис ${tag} прямая вставка`, clientId, projectId, status.rework, userId],
+    )).rejects.toMatchObject({ message: expect.stringContaining('ORDER_REWORK_REQUIRES_COMMAND') });
   });
 });
