@@ -77,6 +77,20 @@ export class PgRecipientSourceAdapter implements RecipientSourcePort {
         );
         return res.rows.map((r) => Number(r.user_id)).filter(Number.isFinite);
       }
+      case 'rework_managers': {
+        // Literal `orders.rework` membership of the user's active role (the role matrix, as auth).
+        const res = await client.query<{ user_id: string | number }>(
+          `SELECT DISTINCT u.user_id
+           FROM public.users u
+           JOIN public.roles r ON r.role_id = u.role_id AND r.is_active = true
+           JOIN public.role_permissions rp
+             ON rp.role_id = u.role_id AND rp.permission_name = 'orders.rework' AND rp.is_enabled = true
+           JOIN public.permissions_catalog pc
+             ON pc.permission_name = rp.permission_name AND pc.is_active = true
+           WHERE u.is_active = true`,
+        );
+        return res.rows.map((r) => Number(r.user_id)).filter(Number.isFinite);
+      }
       default:
         return [];
     }

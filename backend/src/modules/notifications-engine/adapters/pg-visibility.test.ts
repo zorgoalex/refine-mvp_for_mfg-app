@@ -42,15 +42,65 @@ describe('PgVisibilityAdapter (fail-closed guards)', () => {
     expect(query).not.toHaveBeenCalled();
   });
 
-  it('delegates to the shared order-visibility predicate when an order anchor is present', async () => {
-    // Shape rows so the shared helper resolves user 1 as base-visible (admin role_id 1, manager of the order).
-    const query = vi.fn().mockResolvedValue({
-      rows: [{ user_id: '1', username: 'u1', role_id: 1, order_id: 500, created_by: 1, manager_id: 1 }],
+  // Live role matrix (same source as backend authorization), not static role defaults.
+  function matrixClient(input: {
+    users: Array<{ user_id: string; role_id: number; manager_id?: number; created_by?: number }>;
+    permissions: Array<{ role_id: number; permission_name: string }>;
+    scopes: Array<{ role_id: number; scope_key: string; scope_value: string }>;
+    assigned?: string[];
+  }) {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('CROSS JOIN public.orders')) {
+        return { rows: input.users.map((u) => ({ username: 'u', order_id: 500, created_by: u.created_by ?? 99, manager_id: u.manager_id ?? 99, ...u })) };
+      }
+      if (sql.includes('FROM public.role_permissions')) return { rows: input.permissions };
+      if (sql.includes('FROM public.role_policy_scopes')) return { rows: input.scopes };
+      if (sql.includes('FROM public.order_workshops')) return { rows: (input.assigned ?? []).map((user_id) => ({ user_id })) };
+      return { rows: [] };
     });
-    const client = { query } as unknown as DatabaseClient;
-    const result = await new PgVisibilityAdapter().filterByBaseVisibility(client, [1, 2], buildContext({ orderId: 500 }));
-    expect(query).toHaveBeenCalledTimes(1);
-    expect(result).toContain(1);
-    expect(result).not.toContain(2); // user 2 absent from the visibility query result -> dropped
+    return { query, client: { query } as unknown as DatabaseClient };
+  }
+  const visible = (client: DatabaseClient, ids: number[]) =>
+    new PgVisibilityAdapter().filterByBaseVisibility(client, ids, buildContext({ orderId: 500 }));
+
+  it('keeps a user whose live role has orders.view with scope all; drops users missing from the order query', async () => {
+    const { client } = matrixClient({
+      users: [{ user_id: '1', role_id: 10 }],
+      permissions: [{ role_id: 10, permission_name: 'orders.view' }],
+      scopes: [{ role_id: 10, scope_key: 'orders.view', scope_value: 'all' }],
+    });
+    expect(await visible(client, [1, 2])).toEqual([1]);
+  });
+
+  it('drops a user whose live role lost orders.view (static defaults would still allow it)', async () => {
+    const { client } = matrixClient({
+      users: [{ user_id: '1', role_id: 10 }],
+      permissions: [{ role_id: 10, permission_name: 'orders.rework' }],
+      scopes: [{ role_id: 10, scope_key: 'orders.view', scope_value: 'all' }],
+    });
+    expect(await visible(client, [1])).toEqual([]);
+  });
+
+  it('applies the live scope: none drops, own keeps only the own order', async () => {
+    const perms = [{ role_id: 10, permission_name: 'orders.view' }];
+    expect(await visible(matrixClient({ users: [{ user_id: '1', role_id: 10 }], permissions: perms,
+      scopes: [{ role_id: 10, scope_key: 'orders.view', scope_value: 'none' }] }).client, [1])).toEqual([]);
+    expect(await visible(matrixClient({ users: [{ user_id: '1', role_id: 10 }], permissions: perms,
+      scopes: [{ role_id: 10, scope_key: 'orders.view', scope_value: 'own' }] }).client, [1])).toEqual([]);
+    expect(await visible(matrixClient({ users: [{ user_id: '1', role_id: 10, manager_id: 1 }], permissions: perms,
+      scopes: [{ role_id: 10, scope_key: 'orders.view', scope_value: 'own' }] }).client, [1])).toEqual([1]);
+  });
+
+  it('applies the live assigned scope through order workshop responsibility', async () => {
+    const base = { permissions: [{ role_id: 11, permission_name: 'orders.view' }],
+      scopes: [{ role_id: 11, scope_key: 'orders.view', scope_value: 'assigned' }] };
+    const users = [{ user_id: '1', role_id: 11 }, { user_id: '2', role_id: 11 }];
+    expect(await visible(matrixClient({ ...base, users, assigned: ['1'] }).client, [1, 2])).toEqual([1]);
+    expect(await visible(matrixClient({ ...base, users, assigned: [] }).client, [1, 2])).toEqual([]);
+  });
+
+  it('fails closed for a role without matrix rows', async () => {
+    const { client } = matrixClient({ users: [{ user_id: '1', role_id: 1 }], permissions: [], scopes: [] });
+    expect(await visible(client, [1])).toEqual([]);
   });
 });

@@ -626,7 +626,7 @@ function flattenRolePolicy(policy: RolePolicy): Record<RolePolicyScopeKey, Scope
   };
 }
 
-function scopesFromRows(rows: readonly ScopeRow[]): RolePolicy {
+export function scopesFromRows(rows: readonly Pick<ScopeRow, 'scope_key' | 'scope_value'>[]): RolePolicy {
   const flat = Object.fromEntries(
     ROLE_POLICY_SCOPE_KEYS.map((key) => [key, 'none' as Scope]),
   ) as Record<RolePolicyScopeKey, Scope>;

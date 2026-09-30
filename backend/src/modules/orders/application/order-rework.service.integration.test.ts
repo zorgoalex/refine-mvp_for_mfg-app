@@ -16,6 +16,10 @@ import { PgOrderSnapshot } from '../adapters/pg-order-snapshot';
 import type { OrderSnapshotDto } from '../dto/order-snapshot.dto';
 import { ConfigService } from '@nestjs/config';
 import { OrderRealtimeDeferredDrainService } from '../../order-realtime/application/order-realtime-deferred-drain.service';
+import { PgRecipientSourceAdapter } from '../../notifications-engine/adapters/pg-recipient-source';
+import { PgVisibilityAdapter } from '../../notifications-engine/adapters/pg-visibility';
+import { RecipientResolverService } from '../../notifications-engine/application/recipient-resolver.service';
+import { ROLE_TO_ROLE_ID } from '../../../permissions/permissions';
 
 // Real PostgreSQL proof of the rework commands («Переделка», slice 4). Gated on
 // REWORK_INTEGRATION_DATABASE_URL (scratch DB: erp schema + migrations 220–222).
@@ -979,4 +983,174 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
       }
     },
   );
+
+  it('rework_managers resolves active holders of orders.rework through the role matrix (real SQL)', async () => {
+    const roleId = Number((await pool.query('SELECT role_id FROM users WHERE user_id = $1', [userId])).rows[0].role_id);
+    const had = (await pool.query(
+      "SELECT is_enabled FROM role_permissions WHERE role_id = $1 AND permission_name = 'orders.rework'", [roleId])).rows[0];
+    const catalogHad = (await pool.query("SELECT is_active FROM permissions_catalog WHERE permission_name = 'orders.rework'")).rows[0];
+    try {
+      if (!catalogHad) {
+        await pool.query(`INSERT INTO permissions_catalog (permission_name, domain, label, sort_order, is_dangerous)
+          VALUES ('orders.rework', 'orders', 'Заказы: переделка', 9999, false)`);
+      }
+      await pool.query(`INSERT INTO role_permissions (role_id, permission_name, is_enabled) VALUES ($1, 'orders.rework', true)
+        ON CONFLICT (role_id, permission_name) DO UPDATE SET is_enabled = true`, [roleId]);
+      const resolve = () => new PgRecipientSourceAdapter().resolveDynamic(pool as never, 'rework_managers', {
+        eventType: 'order.rework_started', orderId: 1, groupIds: [] } as never);
+      expect(await resolve()).toContain(userId);
+      await pool.query("UPDATE role_permissions SET is_enabled = false WHERE role_id = $1 AND permission_name = 'orders.rework'", [roleId]);
+      expect(await resolve()).not.toContain(userId);
+    } finally {
+      if (had) {
+        await pool.query("UPDATE role_permissions SET is_enabled = $2 WHERE role_id = $1 AND permission_name = 'orders.rework'", [roleId, had.is_enabled]);
+      } else {
+        await pool.query("DELETE FROM role_permissions WHERE role_id = $1 AND permission_name = 'orders.rework'", [roleId]);
+      }
+      if (!catalogHad) await pool.query("DELETE FROM permissions_catalog WHERE permission_name = 'orders.rework'");
+    }
+  });
+
+  it('rework notifications reach only users the LIVE role matrix lets see the order (resolver → visibility)', async () => {
+    const roleId = ROLE_TO_ROLE_ID.manager;
+    const { orderId } = await createOrder('legacy_6', 'packed', 1);
+    const foreign = await createOrder('legacy_6', 'packed', 1);
+    // A foreign order: created by another (fixture) user.
+    const otherUserId = Number((await pool.query(
+      "INSERT INTO users (username, email, password_hash) VALUES ($1, $2, 'x') RETURNING user_id",
+      [`e2e_rework_other_${tag}`, `e2e_rework_other_${tag}@example.invalid`],
+    )).rows[0].user_id);
+    await pool.query('UPDATE orders SET created_by = $2, manager_id = NULL WHERE order_id = $1', [foreign.orderId, otherUserId]);
+    const originalRole = (await pool.query('SELECT role_id FROM users WHERE user_id = $1', [userId])).rows[0].role_id;
+    const snapshot = {
+      permissions: (await pool.query('SELECT permission_name, is_enabled FROM role_permissions WHERE role_id = $1', [roleId])).rows,
+      scopes: (await pool.query('SELECT scope_key, scope_value FROM role_policy_scopes WHERE role_id = $1', [roleId])).rows,
+      catalog: (await pool.query("SELECT permission_name FROM permissions_catalog WHERE permission_name IN ('orders.rework','orders.view')")).rows
+        .map((row) => row.permission_name as string),
+    };
+    const setPermission = (name: string, enabled: boolean) => pool.query(
+      `INSERT INTO role_permissions (role_id, permission_name, is_enabled) VALUES ($1, $2, $3)
+       ON CONFLICT (role_id, permission_name) DO UPDATE SET is_enabled = EXCLUDED.is_enabled`, [roleId, name, enabled]);
+    const setScope = (value: string) => pool.query(
+      `INSERT INTO role_policy_scopes (role_id, scope_key, scope_value) VALUES ($1, 'orders.view', $2)
+       ON CONFLICT (role_id, scope_key) DO UPDATE SET scope_value = EXCLUDED.scope_value`, [roleId, value]);
+    const resolver = new RecipientResolverService(new PgRecipientSourceAdapter(), new PgVisibilityAdapter());
+    const recipients = (order: number) => resolver.resolve(pool as never, { resolvers: ['rework_managers'] },
+      { eventType: 'order.rework_started', orderId: order, groupIds: [] } as never);
+    try {
+      for (const name of ['orders.rework', 'orders.view']) {
+        if (!snapshot.catalog.includes(name)) {
+          await pool.query(`INSERT INTO permissions_catalog (permission_name, domain, label, sort_order, is_dangerous)
+            VALUES ($1, 'orders', $1, 9999, false)`, [name]);
+        }
+      }
+      await pool.query('UPDATE users SET role_id = $2 WHERE user_id = $1', [userId, roleId]);
+      await setPermission('orders.rework', true);
+      await setPermission('orders.view', true);
+      await setScope('all');
+      expect(await recipients(orderId)).toContain(userId);
+      await setPermission('orders.view', false);
+      expect(await recipients(orderId)).not.toContain(userId);
+      await setPermission('orders.view', true);
+      await setScope('none');
+      expect(await recipients(orderId)).not.toContain(userId);
+      await setScope('own');
+      expect(await recipients(orderId)).toContain(userId); // created by the test user
+      expect(await recipients(foreign.orderId)).not.toContain(userId);
+    } finally {
+      await pool.query('UPDATE orders SET created_by = $2 WHERE order_id = $1', [foreign.orderId, userId]);
+      await pool.query('DELETE FROM audit_log WHERE user_id = $1', [String(otherUserId)]).catch(() => undefined);
+      await pool.query('DELETE FROM users WHERE user_id = $1', [otherUserId]);
+      await pool.query('UPDATE users SET role_id = $2 WHERE user_id = $1', [userId, originalRole]);
+      await pool.query("DELETE FROM role_permissions WHERE role_id = $1 AND permission_name IN ('orders.rework','orders.view')", [roleId]);
+      for (const row of snapshot.permissions.filter((r) => ['orders.rework', 'orders.view'].includes(r.permission_name))) {
+        await setPermission(row.permission_name, row.is_enabled);
+      }
+      await pool.query("DELETE FROM role_policy_scopes WHERE role_id = $1 AND scope_key = 'orders.view'", [roleId]);
+      for (const row of snapshot.scopes.filter((r) => r.scope_key === 'orders.view')) await setScope(row.scope_value);
+      for (const name of ['orders.rework', 'orders.view']) {
+        if (!snapshot.catalog.includes(name)) await pool.query('DELETE FROM permissions_catalog WHERE permission_name = $1', [name]);
+      }
+    }
+    const after = {
+      permissions: (await pool.query('SELECT permission_name, is_enabled FROM role_permissions WHERE role_id = $1', [roleId])).rows,
+      scopes: (await pool.query('SELECT scope_key, scope_value FROM role_policy_scopes WHERE role_id = $1', [roleId])).rows,
+    };
+    const sortRows = (rows: Array<Record<string, unknown>>) => rows.map((r) => JSON.stringify(r)).sort();
+    expect(sortRows(after.permissions)).toEqual(sortRows(snapshot.permissions));
+    expect(sortRows(after.scopes)).toEqual(sortRows(snapshot.scopes));
+  });
+
+  it('assigned scope: only the workshop-responsible user receives rework and ordinary order notifications', async () => {
+    const roleId = ROLE_TO_ROLE_ID.operator;
+    const { orderId } = await createOrder('legacy_6', 'packed', 1);
+    const originalRole = (await pool.query('SELECT role_id, employee_id FROM users WHERE user_id = $1', [userId])).rows[0];
+    const snapshot = {
+      permissions: (await pool.query('SELECT permission_name, is_enabled FROM role_permissions WHERE role_id = $1', [roleId])).rows,
+      scopes: (await pool.query('SELECT scope_key, scope_value FROM role_policy_scopes WHERE role_id = $1', [roleId])).rows,
+      catalog: (await pool.query("SELECT permission_name FROM permissions_catalog WHERE permission_name IN ('orders.rework','orders.view')")).rows
+        .map((row) => row.permission_name as string),
+    };
+    const setPermission = (name: string, enabled: boolean) => pool.query(
+      `INSERT INTO role_permissions (role_id, permission_name, is_enabled) VALUES ($1, $2, $3)
+       ON CONFLICT (role_id, permission_name) DO UPDATE SET is_enabled = EXCLUDED.is_enabled`, [roleId, name, enabled]);
+    const setScope = (value: string) => pool.query(
+      `INSERT INTO role_policy_scopes (role_id, scope_key, scope_value) VALUES ($1, 'orders.view', $2)
+       ON CONFLICT (role_id, scope_key) DO UPDATE SET scope_value = EXCLUDED.scope_value`, [roleId, value]);
+    const employeeId = Number((await pool.query(
+      "INSERT INTO employees (position, full_name) VALUES ('E2E', $1) RETURNING employee_id", [`E2E-Тест исполнитель ${tag}`])).rows[0].employee_id);
+    const workshopId = Number((await pool.query(
+      'INSERT INTO workshops (workshop_name) VALUES ($1) RETURNING workshop_id', [`E2E-Тест цех ${tag}`])).rows[0].workshop_id);
+    const otherUserId = Number((await pool.query(
+      "INSERT INTO users (username, email, password_hash, role_id) VALUES ($1, $2, 'x', $3) RETURNING user_id",
+      [`e2e_rework_unassigned_${tag}`, `e2e_rework_unassigned_${tag}@example.invalid`, roleId])).rows[0].user_id);
+    const resolver = new RecipientResolverService(new PgRecipientSourceAdapter(), new PgVisibilityAdapter());
+    const recipients = (eventType: string, resolvers: string[]) => resolver.resolve(pool as never, { resolvers: resolvers as never },
+      { eventType, orderId, groupIds: [] } as never);
+    let orderWorkshopId: number | null = null;
+    try {
+      for (const name of ['orders.rework', 'orders.view']) {
+        if (!snapshot.catalog.includes(name)) {
+          await pool.query(`INSERT INTO permissions_catalog (permission_name, domain, label, sort_order, is_dangerous)
+            VALUES ($1, 'orders', $1, 9999, false)`, [name]);
+        }
+      }
+      await pool.query('UPDATE users SET role_id = $2, employee_id = $3 WHERE user_id = $1', [userId, roleId, employeeId]);
+      await setPermission('orders.rework', true);
+      await setPermission('orders.view', true);
+      await setScope('assigned');
+      // Not assigned yet: nobody sees the order.
+      expect(await recipients('order.rework_started', ['rework_managers'])).toEqual([]);
+      orderWorkshopId = Number((await pool.query(
+        `INSERT INTO order_workshops (order_id, workshop_id, production_status_id, created_by, responsible_employee_id)
+         VALUES ($1, $2, $3, $4, $5) RETURNING order_workshop_id`,
+        [orderId, workshopId, stage.packed, userId, employeeId])).rows[0].order_workshop_id);
+      expect(await recipients('order.rework_started', ['rework_managers'])).toEqual([userId]);
+      expect(await recipients('order.status_changed', ['stage_assignee'])).toEqual([userId]);
+      // Unassigned user of the same role never; removed assignment → nobody.
+      expect(await recipients('order.rework_started', ['rework_managers'])).not.toContain(otherUserId);
+      await pool.query('UPDATE order_workshops SET delete_flag = true WHERE order_workshop_id = $1', [orderWorkshopId]);
+      expect(await recipients('order.rework_started', ['rework_managers'])).toEqual([]);
+    } finally {
+      if (orderWorkshopId) await pool.query('DELETE FROM order_workshops WHERE order_workshop_id = $1', [orderWorkshopId]);
+      await pool.query('UPDATE users SET role_id = $2, employee_id = $3 WHERE user_id = $1', [userId, originalRole.role_id, originalRole.employee_id]);
+      await pool.query('DELETE FROM users WHERE user_id = $1', [otherUserId]);
+      await pool.query('DELETE FROM workshops WHERE workshop_id = $1', [workshopId]);
+      await pool.query('DELETE FROM employees WHERE employee_id = $1', [employeeId]);
+      await pool.query("DELETE FROM role_permissions WHERE role_id = $1 AND permission_name IN ('orders.rework','orders.view')", [roleId]);
+      for (const row of snapshot.permissions.filter((r) => ['orders.rework', 'orders.view'].includes(r.permission_name))) {
+        await setPermission(row.permission_name, row.is_enabled);
+      }
+      await pool.query("DELETE FROM role_policy_scopes WHERE role_id = $1 AND scope_key = 'orders.view'", [roleId]);
+      for (const row of snapshot.scopes.filter((r) => r.scope_key === 'orders.view')) await setScope(row.scope_value);
+      for (const name of ['orders.rework', 'orders.view']) {
+        if (!snapshot.catalog.includes(name)) await pool.query('DELETE FROM permissions_catalog WHERE permission_name = $1', [name]);
+      }
+    }
+    const sortRows = (rows: Array<Record<string, unknown>>) => rows.map((r) => JSON.stringify(r)).sort();
+    expect(sortRows((await pool.query('SELECT permission_name, is_enabled FROM role_permissions WHERE role_id = $1', [roleId])).rows))
+      .toEqual(sortRows(snapshot.permissions));
+    expect(sortRows((await pool.query('SELECT scope_key, scope_value FROM role_policy_scopes WHERE role_id = $1', [roleId])).rows))
+      .toEqual(sortRows(snapshot.scopes));
+  });
 });
