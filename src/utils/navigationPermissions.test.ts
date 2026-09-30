@@ -205,4 +205,10 @@ describe('navigation permissions', () => {
     expect(isLegacyAdminUser({ role: 'admin' }, true)).toBe(false);
     expect(isLegacyAdminUser({ role: 'superadmin' }, true)).toBe(false);
   });
+
+  it('shows «Конфигурация» to a holder of references.manage only (rework reasons tab)', () => {
+    const user = { permissions: ['references.manage'] } as never;
+    expect(canViewNavigationResource('configuration', user, true)).toBe(true);
+    expect(canViewSettingsCategory(user, true, false)).toBe(true);
+  });
 });

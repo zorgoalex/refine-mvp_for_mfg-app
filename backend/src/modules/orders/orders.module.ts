@@ -62,6 +62,7 @@ import { OrderSnapshotController } from './http/order-snapshot.controller';
 import { OrdersController } from './http/orders.controller';
 import { OrderReworkCatalogController, OrderReworkController } from './http/order-rework.controller';
 import { OrderReworkService } from './application/order-rework.service';
+import { OrderReworkReasonCatalogService } from './application/order-rework-reason-catalog.service';
 import { OrderRealtimeModule } from '../order-realtime/order-realtime.module';
 import { OrderRealtimeDeferredDrainService } from '../order-realtime/application/order-realtime-deferred-drain.service';
 import { OrderHdfSettingsController } from './http/order-hdf-settings.controller';
@@ -189,6 +190,11 @@ export function shouldEnableOrderDeadlineSync(input: {
         });
       },
       inject: [DatabaseService, ConfigService],
+    },
+    {
+      provide: OrderReworkReasonCatalogService,
+      useFactory: (database: DatabaseService) => new OrderReworkReasonCatalogService(database),
+      inject: [DatabaseService],
     },
     {
       provide: OrderReworkService,

@@ -779,6 +779,9 @@ export interface OrderHeaderDto {
   productionStatusName?: string | null;
   productionStatusFromDetailsEnabled?: boolean | null;
   passedProductionStatusCodes?: string[];
+  /** «Переделка»: current production round (1 = original run) and the highest used. */
+  productionRound?: number;
+  lastRoundNo?: number;
   plannedCompletionDate?: DateOnlyString | null;
   completionDate?: DateOnlyString | null;
   issueDate?: DateOnlyString | null;
@@ -816,6 +819,8 @@ export interface OrderDetailDto {
   id: number;
   clientKey?: string | null;
   orderId?: number | null;
+  /** «Переделка»: current production round of the detail (read-only). */
+  productionRound?: number;
   detailNumber: number;
   detailName?: string | null;
   height: number;

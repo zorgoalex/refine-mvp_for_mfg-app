@@ -12,6 +12,8 @@ export const SETTINGS_CATEGORY_PERMISSIONS: PermissionName[] = [
   'whatsapp.view',
   'whatsapp.manage',
   'message_signals.manage_config',
+  // «Причины переделки» tab in /configuration.
+  'references.manage',
 ];
 
 export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
@@ -66,6 +68,7 @@ export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
     'whatsapp.view',
     'whatsapp.manage',
     'message_signals.manage_config',
+    'references.manage',
   ],
   audit: ['audit.view'],
   onec: ['onec.view', 'onec.manage', 'onec.commands.send'],

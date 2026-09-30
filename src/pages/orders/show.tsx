@@ -22,6 +22,8 @@ import { generateOrderFileName } from "../../utils/excel/fileNameGenerator";
 import { handleExcelError } from "../../utils/excel/excelErrorHandler";
 import { openOrderProductionPdfPreview } from "../../utils/pdf/orderProductionPdf";
 import { OrderPrintView } from "./components/print/OrderPrintView";
+import { OrderReworkPanel } from './components/rework/OrderReworkPanel';
+import { withRoundSuffix } from '../../api/orderReworkApi';
 import { OrderShowHeader } from "./components/sections/OrderShowHeader";
 import { overlayDetailProductionStatuses } from '../../utils/orderProductionSummary';
 import { OrderDatesBlock } from "./components/sections/OrderDatesBlock";
@@ -525,11 +527,14 @@ const OrderDetailProductionStatusTag = memo(function OrderDetailProductionStatus
   name,
   statusesById,
   loading,
+  round,
 }: {
   statusId?: number | null;
   name?: string | null;
   statusesById: Map<number, DetailProductionStatusMeta>;
   loading: boolean;
+  /** «Переделка»: production round of the detail — «Распилен ·2». */
+  round?: number | null;
 }) {
   if (statusId === null || statusId === undefined) {
     const text = 'Не назначен';
@@ -553,7 +558,7 @@ const OrderDetailProductionStatusTag = memo(function OrderDetailProductionStatus
     );
   }
 
-  const text = label || `ID: ${statusId}`;
+  const text = withRoundSuffix(label || `ID: ${statusId}`, round);
   const statusColor = statusMeta?.color;
 
   return (
@@ -2680,6 +2685,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             name={statusName}
             statusesById={productionStatusesById}
             loading={productionStatusesLoading}
+            round={Number(detail.production_round ?? 1)}
           />
         );
       },
@@ -3369,6 +3375,30 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   </>
                 )
               )}
+            />
+          ) : null}
+          {record?.order_id ? (
+            <OrderReworkPanel
+              orderId={Number(record.order_id)}
+              version={Number(record.version ?? backendOrder?.version ?? 0)}
+              details={(detailsWithLiveProductionStatuses as Array<Record<string, unknown>>).map((detail) => ({
+                id: Number(detail.detail_id),
+                detailNumber: detail.detail_number == null ? null : Number(detail.detail_number),
+                name: String(detail.detail_name ?? ''),
+                productionStatusId: detail.production_status_id == null ? null : Number(detail.production_status_id),
+                productionRound: Number(detail.production_round ?? 1),
+              }))}
+              stages={(productionStatusesData?.data ?? []).map((status: Record<string, unknown>) => ({
+                id: Number(status.production_status_id),
+                name: String(status.production_status_name ?? ''),
+                sortOrder: Number(status.sort_order ?? 0),
+                code: status.production_status_code == null ? null : String(status.production_status_code),
+                isActive: status.is_active !== false,
+              }))}
+              onChanged={() => {
+                void queryResult.refetch();
+                void refetchDetails();
+              }}
             />
           ) : null}
           <div

@@ -1,4 +1,5 @@
 // Order Show Header (Read-only summary for show page)
+import { withRoundSuffix } from '../../../../api/orderReworkApi';
 import { OrderProductionSummary } from '../../../../components/OrderProductionSummary';
 // Adapted from OrderHeaderSummary for use with props instead of store
 
@@ -292,7 +293,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
                   : '#4F46E5'
             }
           >
-            {record?.order_status_name || 'Не назначен'}
+            {withRoundSuffix(record?.order_status_name || 'Не назначен', record?.production_round)}
           </Tag>
           {showFinancials && (
             <Tag
@@ -355,7 +356,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
               {record?.priority !== undefined ? formatNumber(record.priority, 0) : '—'}
             </span>
             <Tag color={record?.order_status_name === 'Готов к выдаче' ? '#059669' : record?.order_status_name === 'Предварительный' ? '#91caff' : '#4F46E5'}>
-              {record?.order_status_name || 'Не назначен'}
+              {withRoundSuffix(record?.order_status_name || 'Не назначен', record?.production_round)}
             </Tag>
           </span>
           <span className="order-show-header__compact-item order-show-header__compact-client" title={record?.client_name || ''}>

@@ -11,11 +11,19 @@ import {
 import {
   OrderReworkService,
   type OrderReworkAvailability,
+  type OrderReworkOrderStateDto,
   type OrderReworkReasonDto,
   type OrderReworkResponseDto,
   type OrderReworkRoundDto,
 } from '../application/order-rework.service';
 import { parseIdempotencyKeyHeader, parseIfMatchVersion, parseOrderId } from './orders.controller';
+import {
+  OrderReworkReasonCatalogService,
+  createReworkReasonSchema,
+  parseReworkReasonRequest,
+  updateReworkReasonSchema,
+  type OrderReworkReasonCatalogItemDto,
+} from '../application/order-rework-reason-catalog.service';
 import { OrdersRuntimeConfigService } from './orders-runtime-config.service';
 
 const commentProperty = { type: 'string', maxLength: 4000, nullable: true };
@@ -81,7 +89,65 @@ export class OrderReworkCatalogController {
   constructor(
     @Inject(OrderReworkService) private readonly rework: OrderReworkService,
     @Inject(OrdersRuntimeConfigService) private readonly runtime: OrdersRuntimeConfigService,
+    @Inject(OrderReworkReasonCatalogService) private readonly reasonCatalogService: OrderReworkReasonCatalogService,
   ) {}
+
+  @Get('reasons/catalog')
+  @ApiOperation({ operationId: 'listOrderReworkReasonCatalog', summary: 'All rework reasons incl. inactive/system (references.manage)' })
+  @ApiResponse({ status: 200, schema: { type: 'object', required: ['data'], properties: { data: { type: 'array', items: { type: 'object', additionalProperties: true } } } } })
+  async reasonCatalog(@Req() request: RequestWithCurrentUser): Promise<{ data: OrderReworkReasonCatalogItemDto[] }> {
+    return this.reasonCatalogService.list(requireUser(request, this.runtime, false));
+  }
+
+  @Post('reasons')
+  @HttpCode(201)
+  @ApiBody({
+    schema: {
+      type: 'object', required: ['name'], additionalProperties: false,
+      properties: {
+        name: { type: 'string', maxLength: 100 },
+        code: { type: 'string', pattern: '^[a-z][a-z0-9_]{1,63}$' },
+        requiresComment: { type: 'boolean' },
+        sortOrder: { type: 'integer', minimum: 0 },
+      },
+    },
+  })
+  @ApiResponse({ status: 201, schema: { type: 'object', additionalProperties: true } })
+  @ApiResponse({ status: 409, description: 'Duplicate name or code' })
+  @ApiOperation({ operationId: 'createOrderReworkReason', summary: 'Create a rework reason (references.manage)' })
+  async createReason(@Req() request: RequestWithCurrentUser, @Body() body: unknown): Promise<OrderReworkReasonCatalogItemDto> {
+    const currentUser = requireUser(request, this.runtime, true);
+    return this.reasonCatalogService.create(currentUser, parseReworkReasonRequest(createReworkReasonSchema, body), request.requestId);
+  }
+
+  @Patch('reasons/:reasonId')
+  @HttpCode(200)
+  @ApiParam({ name: 'reasonId', type: Number })
+  @ApiBody({
+    schema: {
+      type: 'object', required: ['expectedUpdatedAt'], additionalProperties: false,
+      properties: {
+        expectedUpdatedAt: { type: 'string', description: 'updatedAt from the catalogue (optimistic concurrency)' },
+        name: { type: 'string', maxLength: 100 },
+        requiresComment: { type: 'boolean' },
+        sortOrder: { type: 'integer', minimum: 0 },
+        isActive: { type: 'boolean' },
+      },
+    },
+  })
+  @ApiResponse({ status: 200, schema: { type: 'object', additionalProperties: true } })
+  @ApiResponse({ status: 409, description: 'Stale, duplicate name or system reason' })
+  @ApiOperation({ operationId: 'updateOrderReworkReason', summary: 'Update/deactivate a rework reason (references.manage)' })
+  async updateReason(
+    @Req() request: RequestWithCurrentUser,
+    @Param('reasonId') reasonIdParam: string,
+    @Body() body: unknown,
+  ): Promise<OrderReworkReasonCatalogItemDto> {
+    const currentUser = requireUser(request, this.runtime, true);
+    const reasonId = Number(reasonIdParam);
+    if (!Number.isSafeInteger(reasonId) || reasonId < 1) throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный ID причины');
+    return this.reasonCatalogService.update(currentUser, reasonId, parseReworkReasonRequest(updateReworkReasonSchema, body), request.requestId);
+  }
 
   @Get('availability')
   @ApiOperation({ operationId: 'getOrderReworkAvailability', summary: 'Whether rework commands are available now' })
@@ -150,7 +216,7 @@ export class OrderReworkController {
   async rounds(
     @Req() request: RequestWithCurrentUser,
     @Param('orderId') orderIdParam: string,
-  ): Promise<{ data: OrderReworkRoundDto[] }> {
+  ): Promise<{ order: OrderReworkOrderStateDto; data: OrderReworkRoundDto[] }> {
     return this.rework.listRounds(requireUser(request, this.runtime, false), parseOrderId(orderIdParam));
   }
 
