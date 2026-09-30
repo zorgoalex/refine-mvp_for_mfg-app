@@ -56,6 +56,7 @@ describe('ONEC_DOCUMENTS_TAB_OPTIONS', () => {
 describe('canAddOnecAllocation', () => {
   it('allows a mapped, posted, non-exhausted receipt line for a manager', () => {
     expect(canAddOnecAllocation(baseInput())).toBe(true);
+    expect(canAddOnecAllocation({ ...baseInput(), lineClosed: true })).toBe(false);
   });
 
   it('denies without procurement.manage', () => {

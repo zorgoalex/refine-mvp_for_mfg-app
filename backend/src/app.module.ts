@@ -39,6 +39,7 @@ import { OnecAgentModule } from './modules/onec-agent/onec-agent.module';
 import { MdfBoardModule } from './modules/mdf-board/mdf-board.module';
 import { ReferenceCatalogImportModule } from './modules/reference-catalog-import/reference-catalog-import.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
+import { OnecSyncModule } from './modules/onec-sync/onec-sync.module';
 
 @Module({
   imports: [
@@ -84,6 +85,7 @@ import { InventoryModule } from './modules/inventory/inventory.module';
     MdfBoardModule,
     ReferenceCatalogImportModule,
     InventoryModule,
+    OnecSyncModule,
   ],
 })
 export class AppModule {}

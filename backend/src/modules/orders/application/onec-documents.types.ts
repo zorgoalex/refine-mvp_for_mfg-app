@@ -36,6 +36,8 @@ export interface OnecDocumentListItemDto {
   currency: string;
   posted: boolean;
   deletedInOnec: boolean;
+  /** Нет в последней выгрузке 1С — только диагностика, распределения не запрещает. */
+  missingInSource: boolean;
   linesCount: number;
   allocationState: 'none' | 'partial' | 'full';
   /** Заказы в scope пользователя; остальные — только счётчиком. */
@@ -81,6 +83,10 @@ export interface OnecDocumentLineDto {
   /** Сумма активных распределений (количество для прихода, сумма для оплаты; для оплаты без finance.view — null). */
   allocated: number | null;
   remaining: number | null;
+  /** Строка удалена в 1С (хранится ради истории распределений) — новые распределения запрещены. */
+  removedInOnec: boolean;
+  /** Изменение 1С не применено из-за распределений (код конфликта) — новые распределения запрещены. */
+  onecConflict: string | null;
   allocations: OnecAllocationDto[];
   hiddenAllocationsCount: number;
 }
@@ -205,7 +211,7 @@ export interface AllocationSuggestionLineDto {
   capacityInDocUnit: number;
   remainingInDocUnit: number;
   /** Почему строка не участвует в автоподборе (null — участвует). */
-  skipReason: 'not_mapped' | 'incompatible_unit' | 'fully_allocated' | null;
+  skipReason: 'removed_in_onec' | 'onec_conflict' | 'not_mapped' | 'incompatible_unit' | 'fully_allocated' | null;
   alreadyAllocated: Array<{ orderId: number; orderName: string; quantityInDocUnit: number }>;
   candidates: AllocationSuggestionCandidateDto[];
   surplusInDocUnit: number;

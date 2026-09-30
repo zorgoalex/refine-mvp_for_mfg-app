@@ -222,6 +222,37 @@ describe.skipIf(!url)('1C receipt suggestions + batch allocation — real Postgr
     expect(await events(orderId)).toBe(eventsBefore);
   });
 
+  it('1C loader: a line in conflict / removed in 1C refuses new allocations (409, per-item code, nothing written); a repeat stays a no-op', async () => {
+    const orderId = await makeOrder(40, 9000, addDays(today, 3));
+    const other = await makeOrder(41, 9000, addDays(today, 4));
+    const doc = await receipt([{ lineNo: 1, quantity: 5 }]);
+    const d0 = await demand(orderId);
+    await batch(docsA, doc.documentId, [{ lineId: doc.lineIds[0], orderId, resourceKey: key(), quantity: 2,
+      expectedVersion: d0.procurement.version, expectedDemandFingerprint: d0.demandFingerprint }]);
+    const repeat = { lineId: doc.lineIds[0], orderId, resourceKey: key(), quantity: 2,
+      expectedVersion: (await demand(orderId)).procurement.version, expectedDemandFingerprint: d0.demandFingerprint };
+    const d1 = await demand(other);
+    const fresh = { lineId: doc.lineIds[0], orderId: other, resourceKey: key(), quantity: 1,
+      expectedVersion: d1.procurement.version, expectedDemandFingerprint: d1.demandFingerprint };
+    for (const [column, value, code] of [
+      ['load_conflict_code', 'QUANTITY_BELOW_ALLOCATED', 'ONEC_LINE_CONFLICT'],
+      ['removed_in_onec_at', new Date().toISOString(), 'ONEC_LINE_REMOVED_IN_ONEC'],
+    ] as const) {
+      await pool.query(`UPDATE onec_document_lines SET ${column} = $2 WHERE onec_document_line_id = $1`, [doc.lineIds[0], value]);
+      try {
+        // Повтор существующего распределения классифицируется до проверки строки — no-op.
+        expect((await batch(docsA, doc.documentId, [repeat])).results.map((entry) => entry.noop)).toEqual([true]);
+        const before = await events(other);
+        await expect(batch(docsA, doc.documentId, [fresh])).rejects.toMatchObject({
+          statusCode: 409, code: 'ONEC_ALLOCATION_BATCH_CONFLICT', details: { failures: [expect.objectContaining({ index: 0, code })] },
+        });
+        expect(await events(other)).toBe(before);
+      } finally {
+        await pool.query(`UPDATE onec_document_lines SET ${column} = NULL WHERE onec_document_line_id = $1`, [doc.lineIds[0]]);
+      }
+    }
+  });
+
   it('all-or-nothing: one stale item rejects the whole batch; over-capacity and changed demand are reported per item', async () => {
     const a = await makeOrder(4, 5000, addDays(today, 3));
     const b = await makeOrder(5, 5000, addDays(today, 3));

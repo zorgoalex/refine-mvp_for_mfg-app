@@ -20,7 +20,7 @@ import {
   orderResourceRequirementsOnecFilterPath,
 } from '../order_resource_requirements/onecDocKind';
 import { RESOURCE_KIND_BY_KEY } from '../order_resource_requirements/resourceKinds';
-import { allocationStateLabel, allocationStateTagColor, formatOnecAmount, ONEC_DOCUMENTS_TAB_OPTIONS } from './onecDocumentsHelpers';
+import { allocationStateLabel, allocationStateTagColor, formatOnecAmount, ONEC_DOCUMENTS_TAB_OPTIONS, ONEC_MISSING_IN_SOURCE_LABEL } from './onecDocumentsHelpers';
 import { useOnecDocumentsPermissions } from './onecDocumentsPermissions';
 
 const { RangePicker } = DatePicker;
@@ -204,9 +204,12 @@ export const OnecPurchaseDocumentList: React.FC<IResourceComponentsProps> = () =
             title="Статус в 1С"
             width={130}
             render={(_, row) => (
-              <Tag color={onecDocumentStatusTagColor(row.posted, row.deletedInOnec)}>
-                {onecDocumentStatusLabel(row.posted, row.deletedInOnec)}
-              </Tag>
+              <>
+                <Tag color={onecDocumentStatusTagColor(row.posted, row.deletedInOnec)}>
+                  {onecDocumentStatusLabel(row.posted, row.deletedInOnec)}
+                </Tag>
+                {row.missingInSource && <Tag>{ONEC_MISSING_IN_SOURCE_LABEL}</Tag>}
+              </>
             )}
           />
           <Table.Column<OnecDocumentListItemDto> key="lines" title="Строк" width={80} align="right" render={(_, row) => row.linesCount} />

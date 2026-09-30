@@ -26,6 +26,10 @@ export interface SuggestionLineInput {
   allocatedInDocUnit: number;
   /** Заказ, указанный в строке 1С (ref_key заказа), если есть. */
   onecOrderRefKey: string | null;
+  /** Строка удалена в 1С (загрузчик R1-2) — в подбор не попадает. */
+  removedInOnec?: boolean;
+  /** Изменение 1С в конфликте с распределениями (R2-1) — в подбор не попадает. */
+  onecConflict?: boolean;
 }
 
 export interface SuggestionCandidateInput {
@@ -54,7 +58,8 @@ export interface SuggestionPlanInput {
   /** Пары «строка × заказ» с активным распределением: не предлагаются (R2-3). */
   allocatedPairs: Set<string>;
   alreadyAllocated: Map<number, Array<{ orderId: number; orderName: string; quantityInDocUnit: number }>>;
-  documentSupplierKey: string | null;
+  /** Все известные ключи поставщика документа (c: ref 1С, s: поставщик ERP, n: имя) — совпадение = любой из них. */
+  documentSupplierKeys: readonly string[];
   wastePercent: number;
   /** Не больше стольких предложенных распределений на документ — лимит одной атомарной команды (CR1-2). */
   maxProposals: number;
@@ -102,6 +107,8 @@ export function planAllocationSuggestions(input: SuggestionPlanInput): { lines: 
     };
     const skip = (skipReason: AllocationSuggestionLineDto['skipReason']): AllocationSuggestionLineDto =>
       ({ ...base, skipReason, candidates: [], surplusInDocUnit: fromThousandths(left) });
+    if (line.removedInOnec) { result.push(skip('removed_in_onec')); continue; }
+    if (line.onecConflict) { result.push(skip('onec_conflict')); continue; }
     if (!line.material) { result.push(skip('not_mapped')); continue; }
     const demandUnit = demandUnitOf(line.material.kind);
     const geometry = { sheetAreaM2: line.sheetAreaM2 };
@@ -114,7 +121,7 @@ export function planAllocationSuggestions(input: SuggestionPlanInput): { lines: 
       .filter((candidate) => !input.allocatedPairs.has(pairKey(line.lineId, candidate.orderId)))
       .map((candidate) => ({ candidate, need: remainingNeed.get(needKey(candidate.orderId, candidate.resourceKey)) ?? 0 }))
       .filter(({ need }) => need > 0)
-      .sort((a, b) => compareCandidates(a, b, line, left, demandUnit, docUnit, geometry, input.documentSupplierKey));
+      .sort((a, b) => compareCandidates(a, b, line, left, demandUnit, docUnit, geometry, input.documentSupplierKeys));
 
     const candidates: AllocationSuggestionCandidateDto[] = [];
     for (const { candidate, need } of ranked) {
@@ -141,7 +148,7 @@ export function planAllocationSuggestions(input: SuggestionPlanInput): { lines: 
         deficitInDemandUnit: fromThousandths(need),
         proposedInDocUnit: fromThousandths(take),
         proposedInDemandUnit: fromThousandths(proposedDemand),
-        reasons: reasonsFor(candidate, line, input.documentSupplierKey, take, proposedDemand, need),
+        reasons: reasonsFor(candidate, line, input.documentSupplierKeys, take, proposedDemand, need),
         purchased: candidate.purchased,
         procurementVersion: candidate.procurementVersion,
         demandFingerprint: candidate.demandFingerprint,
@@ -164,11 +171,11 @@ function compareCandidates(
   demandUnit: OrderResourceUnit,
   docUnit: ProcurementDocUnit | null,
   geometry: { sheetAreaM2: number | null },
-  documentSupplierKey: string | null,
+  documentSupplierKeys: readonly string[],
 ): number {
   const onec = (c: SuggestionCandidateInput) => (line.onecOrderRefKey !== null && c.orderRefKey1c === line.onecOrderRefKey ? 0 : 1);
   const unmarked = (c: SuggestionCandidateInput) => (c.purchased ? 1 : 0);
-  const supplier = (c: SuggestionCandidateInput) => (documentSupplierKey !== null && c.supplierKey === documentSupplierKey ? 0 : 1);
+  const supplier = (c: SuggestionCandidateInput) => (documentSupplierKeys.includes(c.supplierKey) ? 0 : 1);
   const closes = (need: number) => (toThousandths(toDocUnitFloor(fromThousandths(need), demandUnit, docUnit, geometry) ?? 0) <= left ? 0 : 1);
   return onec(a.candidate) - onec(b.candidate)
     || URGENCY_RANK[a.candidate.urgency] - URGENCY_RANK[b.candidate.urgency]
@@ -182,7 +189,7 @@ function compareCandidates(
 function reasonsFor(
   candidate: SuggestionCandidateInput,
   line: SuggestionLineInput,
-  documentSupplierKey: string | null,
+  documentSupplierKeys: readonly string[],
   take: number,
   proposedDemand: number,
   need: number,
@@ -199,7 +206,7 @@ function reasonsFor(
     });
   }
   if (!candidate.purchased) reasons.push({ code: 'unmarked', label: 'без отметки', tone: 'default' });
-  if (documentSupplierKey !== null && candidate.supplierKey === documentSupplierKey) {
+  if (documentSupplierKeys.includes(candidate.supplierKey)) {
     reasons.push({ code: 'supplier', label: 'поставщик совпадает', tone: 'success' });
   }
   if (take > 0) {

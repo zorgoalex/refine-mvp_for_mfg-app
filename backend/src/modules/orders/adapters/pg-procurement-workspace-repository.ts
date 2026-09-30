@@ -46,7 +46,7 @@ import {
   type ResourceDemandOrderRow,
 } from './pg-order-resource-demand-repository';
 import { lockActor } from './pg-order-resource-procurement-repository';
-import { documentSupplierKey } from './pg-onec-documents-repository';
+import { documentSupplierKeys } from './pg-onec-documents-repository';
 import { pairKey, planAllocationSuggestions } from '../domain/allocation-suggestions';
 import { ONEC_ALLOCATION_BATCH_LIMIT, type AllocationSuggestionsResponseDto, type OnecUnitCode } from '../application/onec-documents.types';
 
@@ -96,6 +96,8 @@ interface SuggestionLineRow extends QueryResultRow {
   width_mm: string | number | null;
   height_mm: string | number | null;
   allocated: string | number;
+  removed_in_onec_at: Date | null;
+  load_conflict_code: string | null;
 }
 
 interface ReceiptRow extends QueryResultRow {
@@ -267,6 +269,7 @@ export class PgProcurementWorkspaceRepository {
       const lineRows = (await client.query<SuggestionLineRow>(
         `SELECT l.onec_document_line_id, l.line_no, l.nomenclature_name, l.quantity, l.unit_code,
                 l.sheet_material_type_id, l.film_id, l.onec_order_ref_key::text AS onec_order_ref_key,
+                l.removed_in_onec_at, l.load_conflict_code,
                 COALESCE(smt.name, f.film_name) AS material_name, smt.width_mm, smt.height_mm,
                 (SELECT COALESCE(sum(a.quantity), 0) FROM order_resource_onec_allocations a
                   WHERE a.onec_document_line_id = l.onec_document_line_id AND a.removed_at IS NULL) AS allocated
@@ -319,6 +322,8 @@ export class PgProcurementWorkspaceRepository {
             docUnit: row.unit_code,
             sheetAreaM2: kind === 'sheet_material' ? sheetAreaM2(row.width_mm, row.height_mm) : null,
             capacityInDocUnit: Number(row.quantity),
+            removedInOnec: row.removed_in_onec_at !== null,
+            onecConflict: row.load_conflict_code !== null,
             allocatedInDocUnit: Number(row.allocated),
             onecOrderRefKey: row.onec_order_ref_key,
           };
@@ -343,7 +348,7 @@ export class PgProcurementWorkspaceRepository {
         })),
         allocatedPairs,
         alreadyAllocated,
-        documentSupplierKey: documentSupplierKey(doc),
+        documentSupplierKeys: documentSupplierKeys(doc),
         wastePercent: settings.wastePercent,
         maxProposals: ONEC_ALLOCATION_BATCH_LIMIT,
       });

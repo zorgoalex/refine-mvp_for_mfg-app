@@ -172,6 +172,72 @@ export class OnecCatalogReader {
     return this.listWarehouses(tx, ids);
   }
 
+  /** Источники, по которым выгружалась сущность (часовые проходы потребителей копии). */
+  async entitySourceIds(entityCode: string, client: DatabaseClient = this.db): Promise<number[]> {
+    await this.available(client);
+    const { rows } = await client.query<{ source_id: string }>(
+      'SELECT source_id FROM onec_etl_entity_state WHERE entity_code = $1 ORDER BY source_id',
+      [entityCode],
+    );
+    return rows.map((row) => Number(row.source_id));
+  }
+
+  /**
+   * Ключи строк копии документа в хронологическом порядке (`Date`, `Number`, ключ) — порядок первого прохода
+   * загрузчика документов (реестр поставщиков: «первым» должен быть самый ранний документ).
+   */
+  async orderedDocumentKeys(sourceId: number, entityCode: string, client: DatabaseClient = this.db): Promise<string[]> {
+    await this.available(client);
+    const { rows } = await client.query<{ source_key: string }>(
+      `SELECT source_key FROM onec_etl_mirror_rows
+        WHERE source_id = $1 AND entity_code = $2
+        ORDER BY data->>'Date', data->>'Number', source_key`,
+      [sourceId, entityCode],
+    );
+    return rows.map((row) => row.source_key);
+  }
+
+  /**
+   * `onec_etl_entity_state` сущности `FOR SHARE` в транзакции вызывающего: пока она открыта, `complete`, отзыв и
+   * rebaseline этой сущности ждут. false — сущность ещё не выгружалась.
+   */
+  async lockEntityShare(tx: DatabaseClient, sourceId: number, entityCode: string): Promise<boolean> {
+    const { rows } = await tx.query(
+      'SELECT 1 FROM onec_etl_entity_state WHERE source_id = $1 AND entity_code = $2 FOR SHARE',
+      [sourceId, entityCode],
+    );
+    return rows.length > 0;
+  }
+
+  /** Строки копии по ключам (документ или справочные значения): данные, удаление, пропажа из выгрузки. */
+  async mirrorRows(
+    client: DatabaseClient,
+    sourceId: number,
+    entityCode: string,
+    keys: readonly string[],
+  ): Promise<Map<string, { data: Record<string, unknown>; deleted: boolean; missing: boolean }>> {
+    const result = new Map<string, { data: Record<string, unknown>; deleted: boolean; missing: boolean }>();
+    if (keys.length === 0) return result;
+    const { rows } = await client.query<{ source_key: string; data: Record<string, unknown>; deleted: boolean; missing: boolean }>(
+      `SELECT source_key, data, deleted, missing_in_source_at IS NOT NULL AS missing
+         FROM onec_etl_mirror_rows
+        WHERE source_id = $1 AND entity_code = $2 AND source_key = ANY($3::text[])`,
+      [sourceId, entityCode, [...new Set(keys)]],
+    );
+    for (const row of rows) result.set(row.source_key, { data: row.data, deleted: row.deleted, missing: row.missing });
+    return result;
+  }
+
+  /** Данные всех строк сущности источника (справочники для потребителей копии: единицы, номенклатура, контрагенты). */
+  async entityData(sourceId: number, entityCode: string, client: DatabaseClient = this.db): Promise<Map<string, Record<string, unknown>>> {
+    await this.available(client);
+    const { rows } = await client.query<{ source_key: string; data: Record<string, unknown> }>(
+      'SELECT source_key, data FROM onec_etl_mirror_rows WHERE source_id = $1 AND entity_code = $2',
+      [sourceId, entityCode],
+    );
+    return new Map(rows.map((row) => [row.source_key.toLowerCase(), row.data]));
+  }
+
   /** Все источники, по которым выгружались склады (часовой проход автосинхронизации). */
   async warehouseSourceIds(client: DatabaseClient = this.db): Promise<number[]> {
     await this.available(client);

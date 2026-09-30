@@ -62,6 +62,7 @@ interface DocumentRow extends QueryResultRow {
   currency: string;
   posted: boolean;
   deleted_in_onec: boolean;
+  missing_in_source?: boolean;
   lines_count: string | number;
   total_quantity: string | number;
   allocated_quantity: string | number;
@@ -86,6 +87,8 @@ interface LineRow extends QueryResultRow {
   sheet_material_type_id: string | number | null;
   film_id: string | number | null;
   material_name: string | null;
+  removed_in_onec_at?: Date | null;
+  load_conflict_code?: string | null;
 }
 
 interface AllocationRow extends QueryResultRow {
@@ -123,6 +126,10 @@ export interface LockedLineRow extends QueryResultRow {
   doc_supplier_id: string | number | null;
   doc_counterparty_ref_key: string | null;
   doc_counterparty_name: string | null;
+  /** Строка исчезла из документа 1С, но на неё есть ссылки распределений (загрузчик onec-sync, R1-2). */
+  removed_in_onec_at: Date | null;
+  /** Изменение 1С не применено из-за активных распределений (R2-1). */
+  load_conflict_code: string | null;
 }
 
 /**
@@ -265,6 +272,8 @@ export class PgOnecDocumentsRepository {
         }
         throw new ApiError(409, 'ONEC_ALLOCATION_EXISTS', 'Эта строка документа уже распределена на этот материал заказа. Снимите распределение и добавьте заново');
       }
+      const closed = lineClosedCode(line);
+      if (closed) throw new ApiError(422, closed.code, closed.message);
       const currentVersion = row ? Number(row.version) : 0;
       if (command.expectedVersion !== currentVersion) {
         throw new ApiError(409, 'PROCUREMENT_VERSION_CONFLICT', 'Отметку закупа уже изменил другой пользователь. Показано актуальное состояние', {
@@ -406,6 +415,9 @@ export class PgOnecDocumentsRepository {
           }
           continue;
         }
+        // Повтор (такое же активное распределение) классифицирован выше; новое — только в открытую строку.
+        const closed = lineClosedCode(line);
+        if (closed) { fail(index, closed.code, closed.message); continue; }
         const initialVersion = row ? Number(row.version) : 0;
         if (item.expectedVersion !== initialVersion) { fail(index, 'PROCUREMENT_VERSION_CONFLICT', 'Закуп материала уже изменил другой пользователь'); continue; }
         const itemKey = parseResourceKey(item.resourceKey)!;
@@ -578,14 +590,15 @@ export class PgOnecDocumentsRepository {
 
 const DOCUMENT_SELECT_SQL = `
   SELECT d.onec_document_id, d.doc_kind, d.number, d.doc_date::text AS doc_date, d.counterparty_name,
-         s.supplier_name, d.amount, d.currency, d.posted, d.deleted_in_onec, d.comment, d.loaded_at,
+         s.supplier_name, d.amount, d.currency, d.posted, d.deleted_in_onec, d.missing_in_source_at IS NOT NULL AS missing_in_source, d.comment, d.loaded_at,
          src.code AS source_code,
          (SELECT count(*) FROM onec_document_lines cl WHERE cl.onec_document_id = d.onec_document_id) AS lines_count,
+         -- Строки, удалённые в 1С (хранятся ради истории распределений), не входят в ёмкость и полноту (code review R3).
          (SELECT COALESCE(sum(ql.quantity), 0) FROM onec_document_lines ql
-           WHERE ql.onec_document_id = d.onec_document_id AND NOT ql.is_document_total) AS total_quantity,
+           WHERE ql.onec_document_id = d.onec_document_id AND NOT ql.is_document_total AND ql.removed_in_onec_at IS NULL) AS total_quantity,
          (SELECT COALESCE(sum(qa.quantity), 0) FROM onec_document_lines ql
             JOIN order_resource_onec_allocations qa ON qa.onec_document_line_id = ql.onec_document_line_id AND qa.removed_at IS NULL
-           WHERE ql.onec_document_id = d.onec_document_id) AS allocated_quantity,
+           WHERE ql.onec_document_id = d.onec_document_id AND ql.removed_in_onec_at IS NULL) AS allocated_quantity,
          (SELECT COALESCE(sum(qa.amount), 0) FROM onec_document_lines ql
             JOIN order_resource_onec_allocations qa ON qa.onec_document_line_id = ql.onec_document_line_id AND qa.removed_at IS NULL
            WHERE ql.onec_document_id = d.onec_document_id) AS allocated_amount,
@@ -656,6 +669,7 @@ function listItem(
     currency: row.currency,
     posted: row.posted,
     deletedInOnec: row.deleted_in_onec,
+    missingInSource: row.missing_in_source === true,
     linesCount: Number(row.lines_count),
     allocationState: state,
     orders: [...visibleOrders].map(([orderId, orderName]) => ({ orderId, orderName })),
@@ -672,6 +686,8 @@ function lineDto(
   documentAmount: string | number | null,
 ): OnecDocumentLineDto {
   const lineId = Number(line.onec_document_line_id);
+  const removed = line.removed_in_onec_at !== null && line.removed_in_onec_at !== undefined;
+  const closed = removed || Boolean(line.load_conflict_code);
   const own = allocations.filter((allocation) => Number(allocation.onec_document_line_id) === lineId);
   const isReceipt = kind === 'purchase_receipt';
   const allocatedRaw = own.reduce((sum, allocation) => sum + Number(isReceipt ? allocation.quantity : allocation.amount), 0);
@@ -696,7 +712,10 @@ function lineDto(
     isDocumentTotal: line.is_document_total,
     material,
     allocated: amountsHidden ? null : allocatedRaw,
-    remaining: amountsHidden ? null : Math.max(0, capacity - allocatedRaw),
+    // Удалённая в 1С или конфликтная строка новые распределения не принимает — остатка у неё нет.
+    remaining: amountsHidden ? null : closed ? 0 : Math.max(0, capacity - allocatedRaw),
+    removedInOnec: removed,
+    onecConflict: line.load_conflict_code ?? null,
     allocations: own.filter((allocation) => allocation.visible).map((allocation) => allocationDto(allocation, options)),
     hiddenAllocationsCount: own.filter((allocation) => !allocation.visible).length,
   };
@@ -720,26 +739,47 @@ function allocationDto(row: AllocationRow, options: OnecDocumentReadOptions): On
   };
 }
 
-async function lockDocumentLine(tx: DatabaseClient, documentId: number, lineId: number): Promise<LockedLineRow> {
-  const line = (await tx.query<LockedLineRow>(
+/**
+ * Блокировка строки документа, затем ОТДЕЛЬНЫМ запросом — шапка (загрузчик R1-1): при ожидании блокировки строки
+ * Read Committed перепроверяет только заблокированную строку, а шапка из JOIN осталась бы из снимка до commit
+ * загрузчика (например, прежнее posted=true у уже распроведённого документа).
+ */
+export async function lockDocumentLine(tx: DatabaseClient, documentId: number, lineId: number): Promise<LockedLineRow> {
+  const line = (await tx.query<Pick<LockedLineRow, 'onec_document_line_id' | 'onec_document_id' | 'quantity' | 'amount' | 'unit_code'
+    | 'is_document_total' | 'sheet_material_type_id' | 'film_id' | 'removed_in_onec_at' | 'load_conflict_code'>>(
     `SELECT l.onec_document_line_id, l.onec_document_id, l.quantity, l.amount, l.unit_code, l.is_document_total,
-            l.sheet_material_type_id, l.film_id, d.doc_kind, d.posted, d.deleted_in_onec, d.amount AS doc_amount, d.number,
-            d.supplier_id AS doc_supplier_id, d.counterparty_ref_key::text AS doc_counterparty_ref_key,
-            d.counterparty_name AS doc_counterparty_name
+            l.sheet_material_type_id, l.film_id, l.removed_in_onec_at, l.load_conflict_code
        FROM onec_document_lines l
-       JOIN onec_documents d ON d.onec_document_id = l.onec_document_id
       WHERE l.onec_document_line_id = $1 AND l.onec_document_id = $2
-      FOR UPDATE OF l`,
+      FOR UPDATE`,
     [lineId, documentId],
   )).rows[0];
   if (!line) throw new ApiError(404, 'ONEC_DOCUMENT_LINE_NOT_FOUND', 'Строка документа 1С не найдена');
-  return line;
+  const header = (await tx.query<Pick<LockedLineRow, 'doc_kind' | 'posted' | 'deleted_in_onec' | 'doc_amount' | 'number'
+    | 'doc_supplier_id' | 'doc_counterparty_ref_key' | 'doc_counterparty_name'>>(
+    `SELECT d.doc_kind, d.posted, d.deleted_in_onec, d.amount AS doc_amount, d.number, d.supplier_id AS doc_supplier_id,
+            d.counterparty_ref_key::text AS doc_counterparty_ref_key, d.counterparty_name AS doc_counterparty_name
+       FROM onec_documents d WHERE d.onec_document_id = $1`,
+    [documentId],
+  )).rows[0];
+  return { ...line, ...header } as LockedLineRow;
 }
 
 function assertAllocatable(line: LockedLineRow): void {
   if (!line.posted || line.deleted_in_onec) {
     throw new ApiError(409, 'ONEC_DOCUMENT_NOT_ALLOCATABLE', 'Документ не проведён или удалён в 1С — распределять его нельзя');
   }
+}
+
+/** Код отказа новому распределению строки: удалена в 1С (R1-2) или изменение 1С в конфликте (R2-1); null — можно. */
+export function lineClosedCode(line: LockedLineRow): { code: 'ONEC_LINE_REMOVED_IN_ONEC' | 'ONEC_LINE_CONFLICT'; message: string } | null {
+  if (line.removed_in_onec_at !== null && line.removed_in_onec_at !== undefined) {
+    return { code: 'ONEC_LINE_REMOVED_IN_ONEC', message: 'Строка удалена из документа в 1С — распределять её нельзя' };
+  }
+  if (line.load_conflict_code) {
+    return { code: 'ONEC_LINE_CONFLICT', message: 'Строка изменилась в 1С — сначала разберите конфликт' };
+  }
+  return null;
 }
 
 function assertLineMaterial(line: LockedLineRow, resourceKey: string): void {
@@ -779,41 +819,82 @@ async function allocatedOnLine(tx: DatabaseClient, lineId: number, role: OnecAll
   )).rows[0].used);
 }
 
-/** Ключ поставщика документа: s:<supplier_id> | c:<1C ref> | n:<имя>; null — поставщик не указан. */
+/**
+ * Ключ поставщика документа: c:<1C ref> | s:<supplier_id> | n:<имя>; null — поставщик не указан. Ключ 1С — первым
+ * (согласовано с закупками, code review загрузчика): идентичность стабильна и не меняется, когда у поставщика ERP
+ * заполнят ref_key_1c (иначе тот же контрагент получил бы второй ключ s:). Миграция 204 считала ключ в прежнем
+ * порядке (s: первым) — её блоки не переиспользовать без смены порядка.
+ */
 export function documentSupplierKey(line: Pick<LockedLineRow, 'doc_supplier_id' | 'doc_counterparty_ref_key' | 'doc_counterparty_name'>): string | null {
-  if (line.doc_supplier_id !== null && line.doc_supplier_id !== undefined) return `s:${Number(line.doc_supplier_id)}`;
   if (line.doc_counterparty_ref_key) return `c:${line.doc_counterparty_ref_key}`;
+  if (line.doc_supplier_id !== null && line.doc_supplier_id !== undefined) return `s:${Number(line.doc_supplier_id)}`;
   // Имя контрагента из 1С — любой длины; ключ фиксированной длины, как md5(lower(btrim(...))) в миграции 204.
   // btrim() в SQL убирает только пробелы — так же и здесь, чтобы ключи совпадали.
   const name = line.doc_counterparty_name?.replace(/^ +| +$/g, '');
   return name ? `n:${createHash('md5').update(name.toLowerCase(), 'utf8').digest('hex')}` : null;
 }
 
+/** Строка документа для реестра поставщиков: поставщик шапки + документ. */
+export type SupplierSourceLine = Pick<LockedLineRow, 'doc_supplier_id' | 'doc_counterparty_ref_key' | 'doc_counterparty_name' | 'onec_document_id'>;
+
+/** Все известные ключи поставщика документа — для совпадения в подборе (ручной поставщик позиции даёт s:<id>). */
+export function documentSupplierKeys(line: Pick<LockedLineRow, 'doc_supplier_id' | 'doc_counterparty_ref_key' | 'doc_counterparty_name'>): string[] {
+  const keys: string[] = [];
+  if (line.doc_counterparty_ref_key) keys.push(`c:${line.doc_counterparty_ref_key}`);
+  if (line.doc_supplier_id !== null && line.doc_supplier_id !== undefined) keys.push(`s:${Number(line.doc_supplier_id)}`);
+  if (keys.length === 0) {
+    const key = documentSupplierKey(line);
+    if (key) keys.push(key);
+  }
+  return keys;
+}
+
 /**
- * Запись поставщиков материалов из приходов (план §4.3). Только INSERT … ON CONFLICT DO NOTHING:
- * существующая строка никогда не меняется. Вставка может ждать конкурирующую вставку того же
- * ключа, поэтому все писатели (распределения, ETL) вставляют ключи одним шагом в конце
+ * Запись поставщиков материалов из приходов (план §4.3). Вставка может ждать конкурирующую вставку того же
+ * ключа, поэтому все писатели (распределения, загрузчик документов 1С) вставляют ключи одним шагом в конце
  * транзакции, после остальных блокировок, в каноническом порядке (kind, ref, key) — R5-2.
+ * Без `firstSeenAt` (распределения) — только INSERT … ON CONFLICT DO NOTHING. С `firstSeenAt` (дата документа,
+ * загрузчик R2-4) — у строк source='onec_receipt' дата первого появления понижается до строго более ранней, с её
+ * документом; supplier_id и counterparty_name не меняются; строки source='manual' не меняются никогда.
  */
 export async function recordResourceSuppliers(
   tx: DatabaseClient,
-  items: Array<{ kind: OrderResourceKind; refId: number; line: LockedLineRow }>,
+  items: Array<{ kind: OrderResourceKind; refId: number; line: SupplierSourceLine; firstSeenAt?: string }>,
 ): Promise<void> {
-  const rows = new Map<string, { kind: OrderResourceKind; refId: number; key: string; line: LockedLineRow }>();
+  const rows = new Map<string, { kind: OrderResourceKind; refId: number; key: string; line: SupplierSourceLine; firstSeenAt?: string }>();
   for (const item of items) {
     const key = documentSupplierKey(item.line);
     if (key === null) continue;
-    rows.set(`${item.kind}\u0000${String(item.refId).padStart(20, '0')}\u0000${key}`, { ...item, key });
+    const mapKey = `${item.kind}\u0000${String(item.refId).padStart(20, '0')}\u0000${key}`;
+    const previous = rows.get(mapKey);
+    // Один ключ в транзакции — самая ранняя дата (и её документ).
+    if (!previous || (item.firstSeenAt && (!previous.firstSeenAt || item.firstSeenAt < previous.firstSeenAt))) rows.set(mapKey, { ...item, key });
   }
   for (const [, row] of [...rows.entries()].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))) {
+    const values = [row.kind, row.kind === 'sheet_material' ? row.refId : null, row.kind === 'film' ? row.refId : null, row.key,
+      row.line.doc_supplier_id === null ? null : Number(row.line.doc_supplier_id),
+      row.line.doc_counterparty_name?.trim() || null, Number(row.line.onec_document_id)];
+    if (!row.firstSeenAt) {
+      await tx.query(
+        `INSERT INTO resource_suppliers (resource_kind, sheet_material_type_id, film_id, supplier_key, supplier_id,
+            counterparty_name, first_onec_document_id, source)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'onec_receipt')
+         ON CONFLICT DO NOTHING`,
+        values,
+      );
+      continue;
+    }
+    const target = row.kind === 'sheet_material'
+      ? '(sheet_material_type_id, supplier_key) WHERE resource_kind = \'sheet_material\''
+      : '(film_id, supplier_key) WHERE resource_kind = \'film\'';
     await tx.query(
       `INSERT INTO resource_suppliers (resource_kind, sheet_material_type_id, film_id, supplier_key, supplier_id,
-          counterparty_name, first_onec_document_id, source)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'onec_receipt')
-       ON CONFLICT DO NOTHING`,
-      [row.kind, row.kind === 'sheet_material' ? row.refId : null, row.kind === 'film' ? row.refId : null, row.key,
-        row.line.doc_supplier_id === null ? null : Number(row.line.doc_supplier_id),
-        row.line.doc_counterparty_name?.trim() || null, Number(row.line.onec_document_id)],
+          counterparty_name, first_onec_document_id, source, first_seen_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'onec_receipt', $8::date)
+       ON CONFLICT ${target} DO UPDATE
+         SET first_seen_at = EXCLUDED.first_seen_at, first_onec_document_id = EXCLUDED.first_onec_document_id
+       WHERE resource_suppliers.source = 'onec_receipt' AND resource_suppliers.first_seen_at > EXCLUDED.first_seen_at`,
+      [...values, row.firstSeenAt],
     );
   }
 }

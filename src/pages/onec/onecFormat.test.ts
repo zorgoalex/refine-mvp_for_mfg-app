@@ -774,6 +774,11 @@ describe('onec mirror state labels', () => {
 });
 
 describe('onec warehouse autosync alert label', () => {
+  it('labels the 1C documents loader alerts', () => {
+    expect(onecAlertKindLabel('onec_documents_load_failed')).toBe('Документы 1С не загружены');
+    expect(onecAlertKindLabel('onec_document_conflict')).toBe('Документ 1С изменился — конфликт с распределениями');
+  });
+
   it('labels the failed warehouse autosync alert', () => {
     expect(onecAlertKindLabel('warehouse_autosync_failed')).toBe('Склады 1С не синхронизированы');
   });

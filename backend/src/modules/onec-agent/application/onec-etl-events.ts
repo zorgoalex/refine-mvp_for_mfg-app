@@ -8,7 +8,17 @@ export interface WarehousesPublished {
   correlationId: string;
 }
 
+/** A run published these entities (status `done`, not revoked); emitted only after its `complete` committed. */
+export interface EntitiesPublished {
+  sourceId: number;
+  runId: string;
+  requestId: string;
+  correlationId: string;
+  entities: string[];
+}
+
 type Listener = (event: WarehousesPublished) => Promise<void> | void;
+type EntitiesListener = (event: EntitiesPublished) => Promise<void> | void;
 
 /**
  * In-process signals of the ETL for business modules (plan E4: business modules subscribe,
@@ -19,6 +29,16 @@ type Listener = (event: WarehousesPublished) => Promise<void> | void;
 export class OnecEtlEvents {
   private readonly logger = new Logger(OnecEtlEvents.name);
   private readonly warehouseListeners = new Set<Listener>();
+  private readonly entityListeners = new Set<EntitiesListener>();
+
+  onEntitiesPublished(listener: EntitiesListener): () => void {
+    this.entityListeners.add(listener);
+    return () => this.entityListeners.delete(listener);
+  }
+
+  emitEntitiesPublished(event: EntitiesPublished): void {
+    for (const listener of this.entityListeners) this.deliver(() => listener(event), 'entities');
+  }
 
   onWarehousesPublished(listener: Listener): () => void {
     this.warehouseListeners.add(listener);
@@ -26,11 +46,13 @@ export class OnecEtlEvents {
   }
 
   emitWarehousesPublished(event: WarehousesPublished): void {
-    for (const listener of this.warehouseListeners) {
-      // Never delays or fails the agent's complete response.
-      void Promise.resolve()
-        .then(() => listener(event))
-        .catch((error: unknown) => this.logger.error(`warehouses listener failed: ${error instanceof Error ? error.message : String(error)}`));
-    }
+    for (const listener of this.warehouseListeners) this.deliver(() => listener(event), 'warehouses');
+  }
+
+  /** Never delays or fails the agent's complete response. */
+  private deliver(call: () => Promise<void> | void, name: string): void {
+    void Promise.resolve()
+      .then(call)
+      .catch((error: unknown) => this.logger.error(`${name} listener failed: ${error instanceof Error ? error.message : String(error)}`));
   }
 }

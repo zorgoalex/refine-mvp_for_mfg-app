@@ -14,7 +14,7 @@ const sha256Hex = (bytes: Buffer) => createHash('sha256').update(bytes).digest('
 const WAIT_STEP_MS = 500;
 
 /** Outcome of the locked transaction; refusals that must keep their writes are thrown after commit. */
-type Verdict = { kind: 'done'; sourceId: number; warehousesPublished: boolean } | { kind: 'repeat' } | { kind: 'not_ready'; code: 'RUN_NOT_READY' | 'RUN_MODE_PENDING'; message: string };
+type Verdict = { kind: 'done'; sourceId: number; warehousesPublished: boolean; published: string[] } | { kind: 'repeat' } | { kind: 'not_ready'; code: 'RUN_NOT_READY' | 'RUN_MODE_PENDING'; message: string };
 
 /**
  * `POST etl/runs/{runId}/complete` (spec §7.2, plan §6.7, §20): staging of the
@@ -46,6 +46,12 @@ export class OnecEtlCompletionService {
     // After commit only; a byte-identical repeat (`repeat`) does not signal again.
     if (verdict.kind === 'done' && verdict.warehousesPublished) {
       this.events.emitWarehousesPublished({ sourceId: verdict.sourceId, runId, requestId: agent.requestId, correlationId: agent.correlationId ?? agent.requestId });
+    }
+    if (verdict.kind === 'done' && verdict.published.length > 0) {
+      this.events.emitEntitiesPublished({
+        sourceId: verdict.sourceId, runId, requestId: agent.requestId, correlationId: agent.correlationId ?? agent.requestId,
+        entities: verdict.published,
+      });
     }
   }
 
@@ -240,6 +246,7 @@ export class OnecEtlCompletionService {
       kind: 'done',
       sourceId: run.sourceId,
       warehousesPublished: outcomes.some((o) => o.entityCode === 'warehouses' && o.status === 'done'),
+      published: outcomes.filter((o) => o.status === 'done').map((o) => o.entityCode).sort(),
     };
   }
 

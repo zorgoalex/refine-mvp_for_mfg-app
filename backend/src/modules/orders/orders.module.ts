@@ -1,3 +1,5 @@
+import { OnecSyncModule } from '../onec-sync/onec-sync.module';
+import { OnecDocumentsProcurementConsumer } from './application/onec-documents-procurement-consumer';
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DatabaseModule } from '../../database/database.module';
@@ -79,7 +81,7 @@ export function shouldEnableOrderDeadlineSync(input: {
 }
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, OnecSyncModule],
   controllers: [
     // Register static `/orders/*` routes before the generic `/orders/:orderId`.
     MdfBoardManualMoveController,
@@ -98,6 +100,7 @@ export function shouldEnableOrderDeadlineSync(input: {
     OrdersController,
   ],
   providers: [
+    OnecDocumentsProcurementConsumer,
     OrdersRuntimeConfigService,
     GroupsRuntimeConfigService,
     {

@@ -288,6 +288,7 @@ export const envSchema = z
     BACKEND_ENABLE_BAZIS: booleanFromEnv.default(false),
     // Отметки «Закуплено» у материалов заказа (команды и чтение таблицы order_resource_procurement).
     BACKEND_RESOURCE_PROCUREMENT_ENABLED: booleanFromEnv.default(false),
+    BACKEND_ONEC_DOCUMENTS_LOAD: booleanFromEnv.default(false),
     BACKEND_PROCUREMENT_WORKSPACE_ENABLED: booleanFromEnv.default(false),
     BACKEND_FILM_CATALOG_IMPORT_ENABLED: booleanFromEnv.default(false),
     BACKEND_INVENTORY_ENABLED: booleanFromEnv.default(false),

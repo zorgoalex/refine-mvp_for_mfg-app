@@ -112,6 +112,8 @@ export const ONEC_ALERT_KIND_LABELS: Record<string, string> = {
   etl_full_sync_required: 'Нужна полная выгрузка',
   etl_snapshot_not_updated: 'Снимок не обновлён',
   warehouse_autosync_failed: 'Склады 1С не синхронизированы',
+  onec_documents_load_failed: 'Документы 1С не загружены',
+  onec_document_conflict: 'Документ 1С изменился — конфликт с распределениями',
 };
 
 /** Alerts about one past command/run: nothing re-derives them, the operator closes them once handled. */

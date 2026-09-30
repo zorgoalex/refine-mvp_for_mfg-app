@@ -18,7 +18,7 @@ import {
 } from '../order_resource_requirements/onecDocKind';
 import { AllocationModal } from './AllocationModal';
 import { AllocationSuggestionPanel } from './AllocationSuggestionPanel';
-import { canAddOnecAllocation, formatOnecAmount, formatOnecQuantity, onecAllocationErrorMessage, onecAllocationOriginLabel } from './onecDocumentsHelpers';
+import { canAddOnecAllocation, formatOnecAmount, formatOnecQuantity, onecAllocationErrorMessage, onecAllocationOriginLabel, ONEC_MISSING_IN_SOURCE_LABEL } from './onecDocumentsHelpers';
 import { useOnecDocumentsPermissions } from './onecDocumentsPermissions';
 
 type LoadState =
@@ -128,7 +128,13 @@ export const OnecPurchaseDocumentShow: React.FC<IResourceComponentsProps> = () =
             <Table.Column<OnecDocumentLineDto>
               key="nomenclature"
               title="Номенклатура 1С"
-              render={(_, row) => row.nomenclatureName ?? '—'}
+              render={(_, row) => (
+              <>
+                {row.nomenclatureName ?? '—'}
+                {row.removedInOnec && <Tag style={{ marginInlineStart: 8 }}>удалена в 1С</Tag>}
+                {row.onecConflict && <Tag color="warning" style={{ marginInlineStart: 8 }}>изменилась в 1С</Tag>}
+              </>
+            )}
             />
             <Table.Column<OnecDocumentLineDto>
               key="material"
@@ -200,6 +206,7 @@ export const OnecPurchaseDocumentShow: React.FC<IResourceComponentsProps> = () =
                     posted: state.data.posted,
                     deletedInOnec: state.data.deletedInOnec,
                     lineMapped: row.material != null,
+                    lineClosed: row.removedInOnec || row.onecConflict != null,
                     remaining: row.remaining,
                     canManage,
                     canSeeAmounts,
@@ -270,6 +277,7 @@ function DocumentHeader({ data, amountsVisible }: { data: OnecDocumentCardDto; a
         <Tag color={onecDocumentStatusTagColor(data.posted, data.deletedInOnec)}>
           {onecDocumentStatusLabel(data.posted, data.deletedInOnec)}
         </Tag>
+        {data.missingInSource && <Tag>{ONEC_MISSING_IN_SOURCE_LABEL}</Tag>}
       </Descriptions.Item>
       <Descriptions.Item label="Источник">{data.sourceCode}</Descriptions.Item>
       <Descriptions.Item label="Загружен">{formatDateTime(data.loadedAt)}</Descriptions.Item>

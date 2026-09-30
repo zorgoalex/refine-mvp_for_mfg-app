@@ -28,7 +28,7 @@ function candidate(overrides: Partial<SuggestionCandidateInput> = {}): Suggestio
 function plan(overrides: Partial<SuggestionPlanInput>) {
   return planAllocationSuggestions({
     lines: [line()], candidates: [candidate()], allocatedPairs: new Set(), alreadyAllocated: new Map(),
-    documentSupplierKey: null, wastePercent: 5, maxProposals: 100, ...overrides,
+    documentSupplierKeys: [], wastePercent: 5, maxProposals: 100, ...overrides,
   }).lines;
 }
 
@@ -103,6 +103,14 @@ describe('planAllocationSuggestions', () => {
     expect(plan({ lines: [line({ allocatedInDocUnit: 10 })] })[0].skipReason).toBe('fully_allocated');
   });
 
+  it('строка удалена или изменилась в 1С — причина раньше not_mapped и fully_allocated, кандидатов нет', () => {
+    const removed = plan({ lines: [line({ removedInOnec: true, material: null, allocatedInDocUnit: 10 })] })[0];
+    expect(removed).toMatchObject({ skipReason: 'removed_in_onec', candidates: [] });
+    const conflict = plan({ lines: [line({ onecConflict: true, material: null, allocatedInDocUnit: 10 })] })[0];
+    expect(conflict).toMatchObject({ skipReason: 'onec_conflict', candidates: [] });
+    expect(plan({ lines: [line({ removedInOnec: true, onecConflict: true })] })[0].skipReason).toBe('removed_in_onec');
+  });
+
   it('детерминирован и учитывает совпадение поставщика и отметку', () => {
     const input = {
       lines: [line({ capacityInDocUnit: 1 })],
@@ -111,7 +119,7 @@ describe('planAllocationSuggestions', () => {
         candidate({ orderId: 4, supplierKey: 's:1' }),
         candidate({ orderId: 5 }),
       ],
-      documentSupplierKey: 's:1',
+      documentSupplierKeys: ['c:11111111-1111-1111-1111-111111111111', 's:1'],
     };
     const first = plan(input);
     expect(first[0].candidates.map((c) => c.orderId)).toEqual([4, 5, 3]);
@@ -125,7 +133,7 @@ describe('CR1-2: предложение укладывается в одну а�
     const candidates = Array.from({ length: 101 }, (_, index) => candidate({ orderId: index + 1, need: 1 }));
     const result = planAllocationSuggestions({
       lines: [line({ capacityInDocUnit: 101 })], candidates, allocatedPairs: new Set(), alreadyAllocated: new Map(),
-      documentSupplierKey: null, wastePercent: 0, maxProposals: 100,
+      documentSupplierKeys: [], wastePercent: 0, maxProposals: 100,
     });
     const proposed = result.lines[0].candidates.filter((c) => c.proposedInDocUnit > 0);
     expect(proposed).toHaveLength(100);
@@ -137,7 +145,7 @@ describe('CR1-2: предложение укладывается в одну а�
     const candidates = Array.from({ length: 120 }, (_, index) => candidate({ orderId: index + 1, need: 1 }));
     const result = planAllocationSuggestions({
       lines: [line({ lineId: 1, lineNo: 1, capacityInDocUnit: 60 }), line({ lineId: 2, lineNo: 2, capacityInDocUnit: 60 })],
-      candidates, allocatedPairs: new Set(), alreadyAllocated: new Map(), documentSupplierKey: null, wastePercent: 0, maxProposals: 100,
+      candidates, allocatedPairs: new Set(), alreadyAllocated: new Map(), documentSupplierKeys: [], wastePercent: 0, maxProposals: 100,
     });
     const total = result.lines.flatMap((l) => l.candidates).filter((c) => c.proposedInDocUnit > 0).length;
     expect(total).toBe(100);
@@ -148,7 +156,7 @@ describe('CR1-2: предложение укладывается в одну а�
     const candidates = Array.from({ length: 100 }, (_, index) => candidate({ orderId: index + 1, need: 1 }));
     const result = planAllocationSuggestions({
       lines: [line({ capacityInDocUnit: 100 })], candidates, allocatedPairs: new Set(), alreadyAllocated: new Map(),
-      documentSupplierKey: null, wastePercent: 0, maxProposals: 100,
+      documentSupplierKeys: [], wastePercent: 0, maxProposals: 100,
     });
     expect(result.limitReached).toBe(false);
   });

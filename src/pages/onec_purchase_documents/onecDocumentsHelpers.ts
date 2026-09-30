@@ -1,5 +1,8 @@
 import type { OnecAllocationState, OnecDocumentsTab, OnecUnitCode } from '../../api/types/onecDocumentsApi.types';
 
+/** Документа нет в последней выгрузке 1С — только диагностика, распределения не запрещает. */
+export const ONEC_MISSING_IN_SOURCE_LABEL = 'нет в последней выгрузке 1С';
+
 export const ONEC_DOCUMENTS_TABS: readonly OnecDocumentsTab[] = ['receipts', 'payments'];
 
 export const ONEC_DOCUMENTS_TAB_OPTIONS: Array<{ value: OnecDocumentsTab; label: string }> = [
@@ -33,6 +36,8 @@ export interface OnecAllocationEligibilityInput {
   deletedInOnec: boolean;
   /** Строка сопоставлена с материалом ERP (только приход). */
   lineMapped: boolean;
+  /** Строка удалена в 1С или в конфликте с изменением 1С — новые распределения запрещены. */
+  lineClosed?: boolean;
   /** null — прогресс не считается (единица строки не сопоставима с потребностью), позволяет распределение. */
   remaining: number | null;
   canManage: boolean;
@@ -51,6 +56,7 @@ export function canAddOnecAllocation(input: OnecAllocationEligibilityInput): boo
   if (!input.posted || input.deletedInOnec) return false;
   if (input.tab === 'payments' && !input.canSeeAmounts) return false;
   if (input.tab === 'receipts' && !input.lineMapped) return false;
+  if (input.lineClosed) return false;
   if (input.remaining != null && input.remaining <= 0) return false;
   return true;
 }
@@ -115,6 +121,8 @@ export function formatOnecAmount(amount: number | null, currency: string | null 
 const ONEC_ALLOCATION_ERROR_MESSAGES: Record<string, string> = {
   ONEC_DOCUMENT_NOT_ALLOCATABLE: 'Документ не проведён или удалён в 1С',
   ONEC_LINE_NOT_MAPPED: 'Строка документа не сопоставлена с материалом ERP',
+  ONEC_LINE_REMOVED_IN_ONEC: 'Строка удалена из документа в 1С',
+  ONEC_LINE_CONFLICT: 'Строка изменилась в 1С — сначала разберите конфликт',
   ONEC_LINE_RESOURCE_MISMATCH: 'Материал строки документа не совпадает с выбранным',
   ONEC_ALLOCATION_MEASURE_INVALID: 'Неверное количество или сумма для этого вида документа',
   ONEC_ALLOCATION_EXCEEDS_LINE: 'Распределено больше, чем есть в строке документа',

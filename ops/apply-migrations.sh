@@ -2430,6 +2430,13 @@ probe_file() {
       "$(q_idx uq_resource_suppliers_film)" \
       "$(q_col user_preferences procurement_saved_views)" \
       "$(q_con_on user_preferences chk_user_preferences_procurement_saved_views)" ;;
+    213_onec_documents_loader*) probe_all \
+      "$(q_col onec_documents applied_revision)" \
+      "$(q_col onec_documents missing_in_source_at)" \
+      "$(q_col onec_document_lines load_conflict_code)" \
+      "$(q_col onec_document_lines removed_in_onec_at)" \
+      "$(q_tbl onec_documents_load_state)" \
+      "$(q_tbl onec_currency_map)" ;;
     206_inventory_onec_autosync_state*) probe_all \
       "$(q_tbl inventory_onec_autosync_state)" \
       "$(q_con_on inventory_onec_autosync_state chk_inventory_onec_autosync_seq)" ;;
@@ -2811,6 +2818,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     204_procurement_workspace*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    213_onec_documents_loader*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     206_inventory_onec_autosync_state*)

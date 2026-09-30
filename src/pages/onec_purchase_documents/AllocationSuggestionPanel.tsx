@@ -34,6 +34,8 @@ import {
 const DEMAND_UNIT_LABEL: Record<'m2' | 'lm', string> = { m2: 'м²', lm: 'пог. м' };
 
 const SKIP_REASON_LABEL: Record<NonNullable<AllocationSuggestionLine['skipReason']>, string> = {
+  removed_in_onec: 'Строка удалена из документа в 1С — подбор недоступен',
+  onec_conflict: 'Строка изменилась в 1С — сначала разберите конфликт',
   not_mapped: 'Строка не сопоставлена с материалом ERP — подбор недоступен',
   incompatible_unit: 'Единица строки несовместима с потребностью — распределите вручную из карточки документа',
   fully_allocated: 'Строка прихода полностью распределена',
@@ -213,7 +215,9 @@ export function AllocationSuggestionPanel({ documentId, onDone }: AllocationSugg
         <div className="rr-hint-box">
           {response.lines.every((line) => line.skipReason === 'fully_allocated')
             ? 'Весь приход уже распределён.'
-            : 'Подобрать нечего: строки прихода распределены, не сопоставлены с материалами ERP или указаны в единицах, которые нельзя пересчитать. Причина — у каждой строки ниже.'}
+            : response.lines.some((line) => line.skipReason === 'removed_in_onec' || line.skipReason === 'onec_conflict')
+              ? 'Подобрать нечего: строки прихода распределены, не сопоставлены с материалами ERP, указаны в единицах, которые нельзя пересчитать, или изменились/удалены в 1С. Причина — у каждой строки ниже.'
+              : 'Подобрать нечего: строки прихода распределены, не сопоставлены с материалами ERP или указаны в единицах, которые нельзя пересчитать. Причина — у каждой строки ниже.'}
         </div>
       )}
 
