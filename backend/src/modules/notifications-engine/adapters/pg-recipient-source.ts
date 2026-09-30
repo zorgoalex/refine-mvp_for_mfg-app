@@ -77,6 +77,15 @@ export class PgRecipientSourceAdapter implements RecipientSourcePort {
         );
         return res.rows.map((r) => Number(r.user_id)).filter(Number.isFinite);
       }
+      case 'rework_managers': {
+        // Literal `orders.rework` in the user's effective permissions (same source as authorization, access groups).
+        const res = await client.query<{ user_id: string | number }>(
+          `SELECT DISTINCT ep.user_id
+           FROM public.user_effective_permissions ep
+           WHERE ep.permission_name = 'orders.rework'`,
+        );
+        return res.rows.map((r) => Number(r.user_id)).filter(Number.isFinite);
+      }
       default:
         return [];
     }

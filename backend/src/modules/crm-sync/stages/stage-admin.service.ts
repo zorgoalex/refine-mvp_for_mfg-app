@@ -15,6 +15,7 @@ import {
   provisioningRows,
   stageError,
   targetStage,
+  stageMapping,
   verifyDeal,
   type StageConfig,
 } from './stage-policy';
@@ -123,7 +124,7 @@ export class StageAdminService {
       await this.repo.db
         .query<StatusReference>(`SELECT s.order_status_id AS id,s.order_status_name AS name,s.order_status_code AS code,s.color,s.is_active AS active,
       EXISTS(SELECT 1 FROM orders o WHERE o.order_status_id=s.order_status_id AND o.order_kind='production_order' AND NOT o.delete_flag) AS used
-      FROM order_statuses s WHERE s.order_status_code<>'crm_request' ORDER BY s.sort_order,s.order_status_id`)
+      FROM order_statuses s WHERE s.order_status_code NOT IN ('crm_request','rework') ORDER BY s.sort_order,s.order_status_id`)
     ).rows;
   }
   async state() {
@@ -606,10 +607,10 @@ export class StageAdminService {
         const remote = await this.bitrix.getCrmItem(2, order.bitrix_id);
         if (!remote) throw stageError('DEAL_MISSING', 'Сделка недоступна');
         verifyDeal(order, remote, c);
+        const mapping = stageMapping(order, mappings);
         const target = targetStage(
-          order.order_status_id,
-          mappings.find((x) => x.order_status_id === order.order_status_id)
-            ?.stage_id,
+          mapping.statusId,
+          mapping.stageId,
           catalog.stages,
           c.completed_status_id
         );

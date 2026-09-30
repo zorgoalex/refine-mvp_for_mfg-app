@@ -32,6 +32,18 @@ export async function filterUserIdsByOrderVisibility(
   );
   // Effective authorization (same snapshot as the token), not the static role matrix.
   const users = await loadEvaluationUsersWith(client, rows.rows.map((row) => row.user_id));
+  // `assigned` scope: the backend predicate — responsible employee of a live order workshop linked to an active
+  // user (pg-order-status-board-repository assignmentExistsSql). Without it `assigned` never matched.
+  const assignedUserIds = rows.rows.length === 0 ? [] : (await client.query<{ user_id: string | number }>(
+    `SELECT DISTINCT assigned_user.user_id
+     FROM public.order_workshops assigned_ow
+     JOIN public.users assigned_user ON assigned_user.employee_id = assigned_ow.responsible_employee_id
+     WHERE assigned_ow.order_id = $1::bigint
+       AND assigned_ow.delete_flag = false
+       AND assigned_ow.responsible_employee_id IS NOT NULL
+       AND assigned_user.is_active = true`,
+    [orderId],
+  )).rows.map((row) => String(row.user_id));
   const allowed = new Set<string>();
   for (const row of rows.rows) {
     const currentUser = users.get(String(row.user_id)) ?? null;
@@ -40,6 +52,7 @@ export async function filterUserIdsByOrderVisibility(
       createdByUserId: nullableString(row.created_by),
       managerUserId: nullableString(row.manager_id),
       ownerUserId: nullableString(row.manager_id),
+      assignedUserIds,
     })) {
       allowed.add(String(row.user_id));
     }
