@@ -2,6 +2,13 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import type { OrderResourceCapabilitiesDto, OrderResourceDemandLineDto, OrderResourceKind } from './order-resource-demand.types';
 
 export type OnecDocKind = 'purchase_receipt' | 'cash_outflow' | 'bank_outflow';
+
+/**
+ * Виды документов 1С, с которыми работает закуп. Общий слой onec_documents получает и другие виды (расход, списания,
+ * перемещения — потребитель склад); все пути чтения и команд закупа явно ограничены этим списком: чужой вид —
+ * «не найден», а не «оплата».
+ */
+export const PROCUREMENT_DOC_KINDS: readonly OnecDocKind[] = ['purchase_receipt', 'cash_outflow', 'bank_outflow'];
 export type OnecDocumentsTab = 'receipts' | 'payments';
 export type OnecAllocationRole = 'receipt' | 'payment';
 export type OnecUnitCode = 'sheet' | 'm2' | 'lm' | 'pcs' | 'set';
@@ -156,6 +163,8 @@ export interface BatchOnecAllocationItem {
   expectedDocUnit: OnecUnitCode | null;
   /** Площадь листа материала (м²), по которой пересчитано предложение; null — не листовой/нет размеров. */
   expectedSheetAreaM2: number | null;
+  /** Связи нового распределения с заказами строк отправленных заявок (ф.3б): количество — в единице строки заявки. */
+  requestLinks?: Array<{ lineOrderId: number; quantity: number }>;
 }
 
 export interface BatchOnecAllocationCommand {
@@ -193,10 +202,15 @@ export interface AllocationSuggestionCandidateDto {
   deficitInDemandUnit: number;
   proposedInDocUnit: number;
   proposedInDemandUnit: number;
-  reasons: Array<{ code: 'onec_order' | 'due' | 'unmarked' | 'supplier' | 'closes'; label: string; tone: 'info' | 'error' | 'warning' | 'success' | 'default' }>;
+  reasons: Array<{ code: 'onec_order' | 'request' | 'due' | 'unmarked' | 'supplier' | 'closes'; label: string; tone: 'info' | 'error' | 'warning' | 'success' | 'default' }>;
   purchased: boolean;
   procurementVersion: number;
   demandFingerprint: string;
+  /**
+   * Разбиение предложенного количества по открытым строкам отправленных заявок (ф.3б) — отправляются в batch как
+   * requestLinks; количество — в единице строки заявки. Пусто — приход без ссылки на заявку.
+   */
+  requestLinks: Array<{ lineOrderId: number; supplierRequestId: number; requestNumber: string; quantity: number; unit: OnecUnitCode }>;
 }
 
 export interface AllocationSuggestionLineDto {

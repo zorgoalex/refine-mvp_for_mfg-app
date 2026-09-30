@@ -15,6 +15,7 @@ import { onecUnitLabel } from './onecDocumentsHelpers';
 import {
   buildBatchRequest,
   candidateDisplay,
+  candidateRequestLinkNote,
   clearSuggestionDraft,
   computeLineTotals,
   computeOverallSummary,
@@ -351,8 +352,14 @@ function SuggestionLineCard({ line, lineDraft, onToggle, onQuantityChange, onRes
             title="Почему предложен"
             render={(_, candidate) => (
               <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>
-                {candidate.reasons.map((reason) => (
+                {/* code='request' — заменён чипом ниже с количеством по каждой связи (ф.3б). */}
+                {candidate.reasons.filter((reason) => reason.code !== 'request').map((reason) => (
                   <span key={reason.code} className={`rr-tag rr-tag--${REASON_TONE[reason.tone]}`}>{reason.label}</span>
+                ))}
+                {(candidate.requestLinks ?? []).map((link) => (
+                  <span key={`request-link-${link.lineOrderId}`} className="rr-tag rr-tag--info">
+                    по заявке {link.requestNumber} · {round2(link.quantity)} {onecUnitLabel(link.unit, null)}
+                  </span>
                 ))}
               </span>
             )}
@@ -369,17 +376,21 @@ function SuggestionLineCard({ line, lineDraft, onToggle, onQuantityChange, onRes
             align="right"
             render={(_, candidate) => {
               const display = candidateDisplay(line, candidate, lineDraft);
+              const note = candidateRequestLinkNote(candidate, lineDraft.candidates[candidate.orderId]);
               return (
-                <InputNumber<number>
-                  size="small"
-                  min={0}
-                  precision={3}
-                  step={0.1}
-                  disabled={!display.checked}
-                  value={display.quantityInDocUnit}
-                  onChange={(value) => onQuantityChange(candidate.orderId, value ?? 0)}
-                  aria-label={`Количество для заказа ${candidate.fullNumber}`}
-                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-end' }}>
+                  <InputNumber<number>
+                    size="small"
+                    min={0}
+                    precision={3}
+                    step={0.1}
+                    disabled={!display.checked}
+                    value={display.quantityInDocUnit}
+                    onChange={(value) => onQuantityChange(candidate.orderId, value ?? 0)}
+                    aria-label={`Количество для заказа ${candidate.fullNumber}`}
+                  />
+                  {note && <span className="rr-sub" style={{ maxWidth: 220, textAlign: 'right' }}>{note}</span>}
+                </div>
               );
             }}
           />

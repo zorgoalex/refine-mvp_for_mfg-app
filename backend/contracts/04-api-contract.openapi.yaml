@@ -4838,6 +4838,21 @@ paths:
                       expectedDemandFingerprint: { type: string, pattern: '^[0-9a-f]{64}$' }
                       expectedDocUnit: { type: string, nullable: true, enum: [sheet, m2, lm, pcs, set], description: 'Единица строки, в которой построено предложение' }
                       expectedSheetAreaM2: { type: number, nullable: true, description: 'Площадь листа, по которой пересчитано предложение; расхождение → failure ONEC_ALLOCATION_UNIT_CHANGED' }
+                      requestLinks:
+                        type: array
+                        maxItems: 20
+                        description: >-
+                          Связи нового распределения с заказами строк ОТПРАВЛЕННЫХ заявок поставщикам (ответ подбора
+                          candidates[].requestLinks); количество — в единице строки заявки. Нужен
+                          BACKEND_SUPPLIER_REQUESTS_ENABLED. Нарушение (заявка не отправлена, другой поставщик, больше
+                          заказанного или распределённого) → failure позиции. Для no-op позиции связи не меняются.
+                        items:
+                          type: object
+                          additionalProperties: false
+                          required: [lineOrderId, quantity]
+                          properties:
+                            lineOrderId: { type: integer, minimum: 1 }
+                            quantity: { type: number, exclusiveMinimum: 0 }
       responses:
         '200':
           description: Результат по элементам и актуальные строки потребности
@@ -4855,6 +4870,99 @@ paths:
           $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/onec-documents/{documentId}/lines/{lineId}/allocations/{allocationId}/request-links:
+    parameters:
+      - { name: documentId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      - { name: lineId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      - { name: allocationId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    post:
+      tags:
+        - Orders
+      operationId: linkOnecAllocationToRequest
+      summary: Привязать распределение прихода 1С к заказу строки отправленной заявки
+      description: >-
+        Исполнение заявки считается только по таким связям. Проверки под блокировками (заказ → закуп → строка
+        документа → распределение → заявка FOR SHARE): заявка отправлена (иначе 409 SUPPLIER_REQUEST_NOT_SENT), строка
+        заявки того же закупа, поставщик прихода не расходится с поставщиком заявки (422
+        SUPPLIER_REQUEST_SUPPLIER_MISMATCH), единицы пересчитываются, не больше заказанного по заявке и не больше
+        распределённого по приходу. Та же активная связь с тем же количеством — no-op; с другим — 409
+        SUPPLIER_REQUEST_LINK_EXISTS. Версия закупа растёт; аудит и событие order.resource_procurement_changed.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [lineOrderId, quantity, expectedVersion]
+              properties:
+                lineOrderId: { type: integer, minimum: 1 }
+                quantity: { type: number, exclusiveMinimum: 0, description: 'В единице строки заявки, до 3 знаков' }
+                expectedVersion: { type: integer, minimum: 0, description: 'Версия закупа распределения' }
+      responses:
+        '200':
+          description: changed, linkId, новая версия закупа, supplierCheck (match | unknown)
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/onec-documents/{documentId}/lines/{lineId}/allocations/{allocationId}/request-links/{linkId}:
+    parameters:
+      - { name: documentId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      - { name: lineId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      - { name: allocationId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      - { name: linkId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    delete:
+      tags:
+        - Orders
+      operationId: unlinkOnecAllocationFromRequest
+      summary: Отвязать приход от заявки
+      description: Связь помечается снятой (история сохраняется); уже снятая — no-op. Версия закупа растёт.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: changed и новая версия закупа
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /api/v1/procurement/onec-documents/{documentId}/lines/{lineId}/allocations:

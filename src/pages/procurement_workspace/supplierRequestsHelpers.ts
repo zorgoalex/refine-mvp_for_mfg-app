@@ -5,6 +5,9 @@ import type {
   CreateSupplierRequestDraftsResultDto,
   DraftSkipReason,
   SupplierRequestCardDto,
+  SupplierRequestFulfillment,
+  SupplierRequestPossibleMatchDto,
+  SupplierRequestReceiptLinkDto,
   SupplierRequestStatus,
 } from '../../api/types/supplierRequestsApi.types';
 import { onecUnitLabel } from '../onec_purchase_documents/onecDocumentsHelpers';
@@ -317,11 +320,15 @@ export interface RequestRefTag {
   label: string;
 }
 
-/** Тег в рабочем списке рядом с покрытием (план §6): draft → «в черновике», sent → «заказано». */
+/**
+ * Тег в рабочем списке рядом с покрытием (план §6, ф.3б): draft → «в черновике», sent → «заказано»
+ * (+ «пришло X из Y», если по заявке уже есть привязанные приходы).
+ */
 export function requestRefTag(ref: WorklistRequestRef): RequestRefTag {
-  return ref.status === 'sent'
-    ? { tone: 'info', label: `заказано · ${ref.requestNumber}` }
-    : { tone: 'none', label: `в черновике ${ref.requestNumber}` };
+  if (ref.status !== 'sent') return { tone: 'none', label: `в черновике ${ref.requestNumber}` };
+  const fulfilled = ref.fulfilled ?? 0;
+  const suffix = fulfilled > 0 ? ` · пришло ${formatRequestQuantity(fulfilled, ref.unit)} из ${formatRequestQuantity(ref.quantity, ref.unit)}` : '';
+  return { tone: 'info', label: `заказано · ${ref.requestNumber}${suffix}` };
 }
 
 export type StepState = 'done' | 'part' | 'todo';
@@ -334,11 +341,14 @@ export interface RequestSteps {
 
 export const REQUEST_STEP_LABELS = ['Заявка', 'Приход', 'Оплата'] as const;
 
-/** Сверка «заявка → приход → оплата» (§5.5): в этой фазе приход/оплата — всегда «○». */
-export function computeRequestSteps(status: SupplierRequestStatus): RequestSteps {
+/**
+ * Сверка «заявка → приход → оплата» (§5.5, ф.3б): «Приход» — по receiptState заявки (done/partial/none →
+ * done/part/todo); «Оплата» в этой фазе — всегда «○». Старый backend без receiptState — трактуется как 'none'.
+ */
+export function computeRequestSteps(status: SupplierRequestStatus, receiptState: 'none' | 'partial' | 'done' = 'none'): RequestSteps {
   return {
     request: status === 'sent' || status === 'closed' ? 'done' : 'todo',
-    receipt: 'todo',
+    receipt: receiptState === 'done' ? 'done' : receiptState === 'partial' ? 'part' : 'todo',
     payment: 'todo',
   };
 }
@@ -353,6 +363,51 @@ export function hiddenOrdersLabel(count: number): string | null {
 
 export function formatLineItemText(line: { name: string; quantity: number; unit: OnecUnitCode }): string {
   return `${line.name} — ${formatRequestQuantity(line.quantity, line.unit)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Привязка приходов 1С к заказам заявки (ф.3б): статус исполнения, привязанные приходы,
+// «Возможные совпадения» — привязать/отвязать в карточке.
+// ---------------------------------------------------------------------------
+
+export interface FulfillmentTag {
+  tone: 'none' | 'warn' | 'ok';
+  label: string;
+}
+
+export const FULFILLMENT_LABELS: Record<SupplierRequestFulfillment, string> = {
+  waiting: 'Ждём',
+  partial: 'Частично',
+  received: 'Получено',
+};
+
+/** Тег «Ждём / Частично / Получено» у заказа строки заявки; без значения (старый backend) — «Ждём». */
+export function fulfillmentTag(state: SupplierRequestFulfillment | undefined): FulfillmentTag {
+  const value = state ?? 'waiting';
+  const tone: FulfillmentTag['tone'] = value === 'received' ? 'ok' : value === 'partial' ? 'warn' : 'none';
+  return { tone, label: FULFILLMENT_LABELS[value] };
+}
+
+/** «Приход 16756 от 02.09.2026 — 1 лист» — строка привязанного прихода под заказом заявки. */
+export function receiptLineLabel(receipt: Pick<SupplierRequestReceiptLinkDto, 'documentNumber' | 'documentDate' | 'quantity'>, unit: OnecUnitCode): string {
+  return `Приход ${receipt.documentNumber} от ${formatDateOnly(receipt.documentDate)} — ${formatRequestQuantity(receipt.quantity, unit)}`;
+}
+
+/** Максимум для «Привязать»: не больше, чем не привязано в приходе, и не больше остатка по заказу заявки. */
+export function possibleMatchMaxQuantity(
+  order: { quantity: number; fulfilled?: number },
+  match: Pick<SupplierRequestPossibleMatchDto, 'unlinkedQuantity'>,
+): number {
+  const remaining = order.quantity - (order.fulfilled ?? 0);
+  return Math.max(0, roundTo3Number(Math.min(match.unlinkedQuantity, remaining)));
+}
+
+/** Значение по умолчанию в поле «Привязать»: предложение сервера, но не больше пересчитанного максимума. */
+export function possibleMatchDefaultQuantity(
+  order: { quantity: number; fulfilled?: number },
+  match: Pick<SupplierRequestPossibleMatchDto, 'unlinkedQuantity' | 'suggestedQuantity'>,
+): number {
+  return roundTo3Number(Math.min(match.suggestedQuantity, possibleMatchMaxQuantity(order, match)));
 }
 
 // ---------------------------------------------------------------------------
@@ -420,6 +475,22 @@ export const SUPPLIER_REQUEST_ERROR_MESSAGES: Record<string, string> = {
   SUPPLIER_REQUEST_NOT_FOUND: 'Заявка не найдена',
   IDEMPOTENCY_KEY_REUSED: 'Повтор с другим содержимым — обновите страницу и попробуйте снова',
   PERMISSION_DENIED: 'Недостаточно прав для этой операции',
+  // Привязка приходов к заявкам (ф.3б) — «Привязать» / «Отвязать» в карточке.
+  SUPPLIER_REQUEST_NOT_SENT: 'Привязать приход можно только к отправленной заявке',
+  SUPPLIER_REQUEST_SUPPLIER_MISMATCH: 'Поставщик прихода не совпадает с поставщиком заявки',
+  SUPPLIER_REQUEST_LINK_EXCEEDS_REQUEST: 'Больше, чем заказано в заявке',
+  SUPPLIER_REQUEST_LINK_EXCEEDS_ALLOCATION: 'Связей с заявками больше, чем распределено по приходу',
+  SUPPLIER_REQUEST_LINK_UNIT: 'Единицы прихода и заявки несовместимы',
+  SUPPLIER_REQUEST_LINK_OTHER_ORDER: 'Строка заявки относится к другому заказу или материалу',
+  SUPPLIER_REQUEST_LINK_EXISTS: 'Приход уже привязан к этой строке заявки с другим количеством. Отвяжите и привяжите заново',
+  SUPPLIER_REQUEST_LINK_DUPLICATE: 'Заказ строки заявки указан дважды',
+  SUPPLIER_REQUEST_LINE_ORDER_NOT_FOUND: 'Строка заявки не найдена — обновите заявку',
+  SUPPLIER_REQUEST_LINK_NOT_FOUND: 'Связь с заявкой не найдена — обновите заявку',
+  SUPPLIER_REQUEST_LINK_RECEIPTS_ONLY: 'К заявке привязывается приход; оплаты — позже',
+  SUPPLIER_REQUESTS_DISABLED: 'Заявки поставщикам пока выключены',
+  ONEC_ALLOCATION_NOT_FOUND: 'Распределение не найдено',
+  ONEC_ALLOCATION_REMOVED: 'Распределение уже снято',
+  PROCUREMENT_VERSION_CONFLICT: 'Закуп материала уже изменил другой пользователь. Обновите карточку',
 };
 
 /** Сообщение об ошибке команды заявки — код важнее общего message сервера, если он известен. */

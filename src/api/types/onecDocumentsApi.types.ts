@@ -146,10 +146,15 @@ export interface AllocationSuggestionCandidate {
   deficitInDemandUnit: number;
   proposedInDocUnit: number;
   proposedInDemandUnit: number;
-  reasons: Array<{ code: 'onec_order' | 'due' | 'unmarked' | 'supplier' | 'closes'; label: string; tone: 'info' | 'error' | 'warning' | 'success' | 'default' }>;
+  reasons: Array<{ code: 'onec_order' | 'request' | 'due' | 'unmarked' | 'supplier' | 'closes'; label: string; tone: 'info' | 'error' | 'warning' | 'success' | 'default' }>;
   purchased: boolean;
   procurementVersion: number;
   demandFingerprint: string;
+  /**
+   * Разбиение предложенного количества по открытым строкам отправленных заявок поставщикам (ф.3б): отправляется в
+   * batch как requestLinks; количество — в единице строки заявки. Старый backend поле не присылает — трактовать как [].
+   */
+  requestLinks?: Array<{ lineOrderId: number; supplierRequestId: number; requestNumber: string; quantity: number; unit: OnecUnitCode }>;
 }
 
 export interface AllocationSuggestionLine {
@@ -193,6 +198,8 @@ export interface BatchOnecAllocationRequest {
     /** Контекст пересчёта единиц предложения — сверяется сервером. */
     expectedDocUnit: OnecUnitCode | null;
     expectedSheetAreaM2: number | null;
+    /** Связи нового распределения с заказами строк отправленных заявок (ф.3б); количество — в единице строки заявки. */
+    requestLinks?: Array<{ lineOrderId: number; quantity: number }>;
   }>;
 }
 
@@ -206,4 +213,26 @@ export interface BatchOnecAllocationFailure {
   index: number;
   code: string;
   message: string;
+}
+
+/** «Привязать к заявке» / «Отвязать» (ф.3б) — тело команды и результат. */
+export interface RequestLinkRequest {
+  lineOrderId: number;
+  /** В единице строки заявки, до 3 знаков. */
+  quantity: number;
+  /** Версия закупа распределения. */
+  expectedVersion: number;
+}
+
+export interface UnlinkRequestLinkRequest {
+  expectedVersion: number;
+}
+
+export interface RequestLinkResultDto {
+  changed: boolean;
+  linkId: number;
+  allocationId: number;
+  procurementVersion: number;
+  /** 'unknown' — поставщика документа и заявки не сравнить. */
+  supplierCheck?: 'match' | 'unknown';
 }

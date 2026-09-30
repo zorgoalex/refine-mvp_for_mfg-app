@@ -17,6 +17,8 @@ import {
   type SupplierRequestCardDto,
   type SupplierRequestCommandResultDto,
   type SupplierRequestLineDto,
+  type SupplierRequestPossibleMatchDto,
+  type SupplierRequestReceiptLinkDto,
   type SupplierRequestsListQuery,
   type SupplierRequestsListResponseDto,
   type SupplierRequestStatus,
@@ -39,6 +41,8 @@ import {
 } from '../domain/supplier-requests';
 import { buildOwnershipOrderWhere, loadProcurementRows, orderNotFound, parseResourceKey, procurementRowKey } from './pg-order-resource-demand-repository';
 import { lockActor, lockOrders, type Actor } from './pg-order-resource-procurement-repository';
+import { fromDemandFloor, fulfillmentOf, inDemandExact, supplierMatch } from '../domain/supplier-request-links';
+import { documentSupplierKeys } from './pg-onec-documents-repository';
 import {
   buildWorklistLines,
   loadProcurementSettings,
@@ -89,6 +93,9 @@ interface LineOrderRow extends QueryResultRow {
   client_name: string | null;
   quantity: string | number;
   order_deleted: boolean;
+  /** Пришло по активным приходным связям (ф.3б), в единице строки заявки. */
+  fulfilled: string | number;
+  procurement_version: string | number;
 }
 
 const REQUEST_SELECT = `
@@ -492,7 +499,10 @@ async function loadLineOrders(client: DatabaseClient, lineIds: number[]): Promis
   return (await client.query<LineOrderRow>(
     `SELECT lo.supplier_request_line_order_id, lo.supplier_request_line_id, lo.order_resource_procurement_id,
             o.order_id, o.order_name, (p.code || '-' || o.order_name) AS full_number, c.client_name, lo.quantity,
-            o.delete_flag AS order_deleted
+            o.delete_flag AS order_deleted, orp.version AS procurement_version,
+            (SELECT COALESCE(sum(k.quantity), 0) FROM order_resource_allocation_request_links k
+              WHERE k.supplier_request_line_order_id = lo.supplier_request_line_order_id
+                AND k.removed_at IS NULL AND k.quantity IS NOT NULL) AS fulfilled
        FROM supplier_request_line_orders lo
        JOIN order_resource_procurement orp ON orp.order_resource_procurement_id = lo.order_resource_procurement_id
        JOIN orders o ON o.order_id = orp.order_id
@@ -502,6 +512,128 @@ async function loadLineOrders(client: DatabaseClient, lineIds: number[]): Promis
       ORDER BY lo.supplier_request_line_id, o.order_id`,
     [lineIds],
   )).rows;
+}
+
+async function loadReceiptLinks(client: DatabaseClient, lineOrderIds: number[]): Promise<Map<number, SupplierRequestReceiptLinkDto[]>> {
+  const result = new Map<number, SupplierRequestReceiptLinkDto[]>();
+  if (lineOrderIds.length === 0) return result;
+  const rows = (await client.query<{
+    link_id: string; allocation_id: string; line_order_id: string; quantity: string; document_id: string; number: string;
+    doc_date: string; line_id: string; version: string;
+  }>(
+    `SELECT k.link_id::text, k.allocation_id::text, k.supplier_request_line_order_id::text AS line_order_id, k.quantity::text,
+            d.onec_document_id::text AS document_id, d.number, d.doc_date::text AS doc_date,
+            a.onec_document_line_id::text AS line_id, orp.version::text
+       FROM order_resource_allocation_request_links k
+       JOIN order_resource_onec_allocations a ON a.allocation_id = k.allocation_id
+       JOIN order_resource_procurement orp ON orp.order_resource_procurement_id = a.order_resource_procurement_id
+       JOIN onec_document_lines l ON l.onec_document_line_id = a.onec_document_line_id
+       JOIN onec_documents d ON d.onec_document_id = l.onec_document_id
+      WHERE k.supplier_request_line_order_id = ANY($1::bigint[]) AND k.removed_at IS NULL AND k.quantity IS NOT NULL
+      ORDER BY d.doc_date, k.link_id`,
+    [lineOrderIds],
+  )).rows;
+  for (const row of rows) {
+    const list = result.get(Number(row.line_order_id)) ?? [];
+    list.push({
+      linkId: Number(row.link_id), allocationId: Number(row.allocation_id), documentId: Number(row.document_id),
+      documentNumber: row.number, documentDate: row.doc_date, lineId: Number(row.line_id), quantity: Number(row.quantity),
+      procurementVersion: Number(row.version),
+    });
+    result.set(Number(row.line_order_id), list);
+  }
+  return result;
+}
+
+/**
+ * «Возможные совпадения» (§5.5): активные распределения прихода по закупу заказа строки заявки из проведённых
+ * документов, поставщик которых не расходится с поставщиком заявки, с непривязанным остатком. Приход без связи
+ * исполнение не меняет — это только подсказка для «Привязать».
+ */
+async function loadPossibleMatches(
+  client: DatabaseClient,
+  requestSupplierKey: string,
+  lines: LineRow[],
+  orders: LineOrderRow[],
+): Promise<Map<number, SupplierRequestPossibleMatchDto[]>> {
+  const result = new Map<number, SupplierRequestPossibleMatchDto[]>();
+  const procurementIds = [...new Set(orders.map((order) => Number(order.order_resource_procurement_id)))];
+  if (procurementIds.length === 0) return result;
+  const allocations = (await client.query<{
+    allocation_id: string; procurement_id: string; quantity: string; unit_code: OnecUnitCode | null; line_id: string;
+    document_id: string; number: string; doc_date: string; supplier_id: string | null; counterparty_ref_key: string | null;
+    counterparty_name: string | null; version: string;
+  }>(
+    `SELECT a.allocation_id::text, a.order_resource_procurement_id::text AS procurement_id, a.quantity::text, a.unit_code,
+            a.onec_document_line_id::text AS line_id, d.onec_document_id::text AS document_id, d.number, d.doc_date::text AS doc_date,
+            d.supplier_id::text, d.counterparty_ref_key::text, d.counterparty_name, orp.version::text
+       FROM order_resource_onec_allocations a
+       JOIN order_resource_procurement orp ON orp.order_resource_procurement_id = a.order_resource_procurement_id
+       JOIN onec_document_lines l ON l.onec_document_line_id = a.onec_document_line_id
+       JOIN onec_documents d ON d.onec_document_id = l.onec_document_id
+      WHERE a.order_resource_procurement_id = ANY($1::bigint[]) AND a.role = 'receipt' AND a.removed_at IS NULL
+        AND d.posted AND NOT d.deleted_in_onec
+        -- Строка, удалённая или изменённая в 1С (конфликт), для новой привязки не годится (CR1-1).
+        AND l.removed_in_onec_at IS NULL AND l.load_conflict_code IS NULL
+      ORDER BY d.doc_date, a.allocation_id`,
+    [procurementIds],
+  )).rows;
+  if (allocations.length === 0) return result;
+  const links = (await client.query<{ allocation_id: string; line_order_id: string; quantity: string; unit_code: OnecUnitCode }>(
+    `SELECT k.allocation_id::text, k.supplier_request_line_order_id::text AS line_order_id, k.quantity::text, sl.unit_code
+       FROM order_resource_allocation_request_links k
+       JOIN supplier_request_line_orders lo ON lo.supplier_request_line_order_id = k.supplier_request_line_order_id
+       JOIN supplier_request_lines sl ON sl.supplier_request_line_id = lo.supplier_request_line_id
+      WHERE k.allocation_id = ANY($1::bigint[]) AND k.removed_at IS NULL AND k.quantity IS NOT NULL`,
+    [allocations.map((allocation) => Number(allocation.allocation_id))],
+  )).rows;
+  const lineById = new Map(lines.map((line) => [Number(line.supplier_request_line_id), line]));
+  for (const order of orders) {
+    const line = lineById.get(Number(order.supplier_request_line_id));
+    if (!line) continue;
+    const demandUnit = demandUnitOf(line.resource_kind);
+    const area = line.resource_kind === 'sheet_material' ? sheetAreaM2(line.width_mm, line.height_mm) : null;
+    const remaining = toMilli(order.quantity) - toMilli(order.fulfilled);
+    const list: SupplierRequestPossibleMatchDto[] = [];
+    for (const allocation of allocations) {
+      if (Number(allocation.procurement_id) !== Number(order.order_resource_procurement_id)) continue;
+      const own = links.filter((link) => Number(link.allocation_id) === Number(allocation.allocation_id));
+      if (own.some((link) => Number(link.line_order_id) === Number(order.supplier_request_line_order_id))) continue;
+      const docKeys = documentSupplierKeys({
+        doc_supplier_id: allocation.supplier_id, doc_counterparty_ref_key: allocation.counterparty_ref_key, doc_counterparty_name: allocation.counterparty_name,
+      });
+      const check = supplierMatch(requestSupplierKey, {
+        supplierId: allocation.supplier_id === null ? null : Number(allocation.supplier_id),
+        counterpartyRefKey: allocation.counterparty_ref_key,
+        keys: docKeys,
+      });
+      if (check === 'mismatch') continue;
+      // Точный непривязанный остаток в единице потребности; подсказка — вниз до 0,001 единицы заявки, поэтому
+      // «Привязать» с предложенным количеством проходит проверку команды (CR1-6).
+      let linkedDemand = 0;
+      for (const link of own) linkedDemand += inDemandExact(Number(link.quantity), link.unit_code, demandUnit, area) ?? 0;
+      const allocationDemand = inDemandExact(Number(allocation.quantity), allocation.unit_code, demandUnit, area);
+      if (allocationDemand === null) continue;
+      const unlinkedRequest = fromDemandFloor(Math.max(0, allocationDemand - linkedDemand), line.unit_code, demandUnit, area);
+      if (unlinkedRequest === null) continue;
+      const unlinked = Math.round(unlinkedRequest * 1000);
+      if (unlinked <= 0) continue;
+      list.push({
+        allocationId: Number(allocation.allocation_id),
+        documentId: Number(allocation.document_id),
+        documentNumber: allocation.number,
+        documentDate: allocation.doc_date,
+        lineId: Number(allocation.line_id),
+        counterpartyName: allocation.counterparty_name,
+        unlinkedQuantity: unlinked / 1000,
+        suggestedQuantity: Math.max(0, Math.min(unlinked, remaining)) / 1000,
+        supplierCheck: check,
+        procurementVersion: Number(allocation.version),
+      });
+    }
+    if (list.length > 0) result.set(Number(order.supplier_request_line_order_id), list);
+  }
+  return result;
 }
 
 function summaryDto(row: RequestRow, lines: LineRow[], lineOrders: LineOrderRow[], visible: Set<number>): SupplierRequestSummaryDto {
@@ -522,7 +654,14 @@ function summaryDto(row: RequestRow, lines: LineRow[], lineOrders: LineOrderRow[
     expectedDate: row.expected_date,
     comment: row.comment,
     linesCount: ownLines.length,
-    lines: ownLines.map((line) => ({ name: line.name ?? '—', quantity: Number(line.quantity), unit: line.unit_code })),
+    lines: ownLines.map((line) => ({
+      name: line.name ?? '—',
+      quantity: Number(line.quantity),
+      unit: line.unit_code,
+      fulfilled: own.filter((order) => Number(order.supplier_request_line_id) === Number(line.supplier_request_line_id))
+        .reduce((sum, order) => sum + toMilli(order.fulfilled), 0) / 1000,
+    })),
+    receiptState: receiptStateOf(own),
     ordersCount: visibleCount,
     hiddenOrdersCount: orderIds.size - visibleCount,
     deletedOrdersCount: deletedIds.size,
@@ -535,12 +674,26 @@ function summaryDto(row: RequestRow, lines: LineRow[], lineOrders: LineOrderRow[
   };
 }
 
+/** Сверка «приход» по заказам заявки (ф.3б): только по активным связям; заказы в корзине не учитываются. */
+function receiptStateOf(orders: LineOrderRow[]): 'none' | 'partial' | 'done' {
+  const active = orders.filter((order) => !order.order_deleted);
+  const fulfilled = active.reduce((sum, order) => sum + toMilli(order.fulfilled), 0);
+  if (fulfilled <= 0) return 'none';
+  return active.every((order) => toMilli(order.fulfilled) >= toMilli(order.quantity)) ? 'done' : 'partial';
+}
+
 async function loadCard(client: DatabaseClient, currentUser: CurrentUser, supplierRequestId: number, canManage: boolean): Promise<SupplierRequestCardDto> {
   const row = (await client.query<RequestRow>(`${REQUEST_SELECT} WHERE r.supplier_request_id = $1`, [supplierRequestId])).rows[0];
   if (!row) throw requestNotFound();
   const lines = await loadLines(client, [supplierRequestId]);
   const lineOrders = await loadLineOrders(client, lines.map((line) => Number(line.supplier_request_line_id)));
   const visible = await scopedOrderIds(client, currentUser, [...new Set(lineOrders.map((order) => Number(order.order_id)))]);
+  const shownOrders = lineOrders.filter((order) => !order.order_deleted && visible.has(Number(order.order_id)));
+  const receipts = await loadReceiptLinks(client, shownOrders.map((order) => Number(order.supplier_request_line_order_id)));
+  // Возможные совпадения ищутся только для отправленной заявки: к другим привязать нельзя.
+  const matches = row.status === 'sent'
+    ? await loadPossibleMatches(client, row.supplier_key, lines, shownOrders)
+    : new Map<number, SupplierRequestPossibleMatchDto[]>();
   const lineItems: SupplierRequestLineDto[] = lines.map((line) => {
     const lineId = Number(line.supplier_request_line_id);
     const orders = lineOrders.filter((order) => Number(order.supplier_request_line_id) === lineId);
@@ -568,6 +721,10 @@ async function loadCard(client: DatabaseClient, currentUser: CurrentUser, suppli
         clientName: order.client_name,
         procurementId: Number(order.order_resource_procurement_id),
         quantity: Number(order.quantity),
+        fulfilled: Number(order.fulfilled),
+        fulfillment: fulfillmentOf(toMilli(order.quantity), toMilli(order.fulfilled)),
+        receipts: receipts.get(Number(order.supplier_request_line_order_id)) ?? [],
+        possibleMatches: matches.get(Number(order.supplier_request_line_order_id)) ?? [],
       })),
       hiddenOrdersCount: hidden.length,
       hiddenOrdersQuantity: hidden.reduce((sum, order) => sum + toMilli(order.quantity), 0) / 1000,

@@ -2,14 +2,19 @@ import { CopyOutlined, DeleteOutlined } from '@ant-design/icons';
 import { Alert, Button, DatePicker, Drawer, Empty, Input, InputNumber, Modal, Select, Space, Typography, message } from 'antd';
 import { useGetIdentity } from '@refinedev/core';
 import dayjs from 'dayjs';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 
 import { ApiError, isApiError } from '../../api/apiError';
+import { onecDocumentsApi } from '../../api/onecDocumentsApi';
 import { supplierRequestsApi } from '../../api/supplierRequestsApi';
+import type { OnecUnitCode } from '../../api/types/onecDocumentsApi.types';
 import type {
   CreateSupplierRequestDraftsResultDto,
   SupplierRequestCardDto,
   SupplierRequestLineDto,
+  SupplierRequestLineOrderDto,
+  SupplierRequestPossibleMatchDto,
+  SupplierRequestReceiptLinkDto,
   SupplierRequestsListResponseDto,
   SupplierRequestStatus,
 } from '../../api/types/supplierRequestsApi.types';
@@ -31,10 +36,14 @@ import {
   formatDemandQuantity,
   formatLineItemText,
   formatRequestQuantity,
+  fulfillmentTag,
   groupDraftPreviewBySupplier,
   hiddenOrdersLabel,
   isStockNegative,
   loadDraftPreview,
+  possibleMatchDefaultQuantity,
+  possibleMatchMaxQuantity,
+  receiptLineLabel,
   REQUEST_STEP_LABELS,
   requestsStatusCounts,
   resolveDraftRequestId,
@@ -43,6 +52,7 @@ import {
   hasRequestSupplier,
   hasUnsavedRequestChanges,
   statusFilterToParam,
+  type StepState,
   stepIcon,
   SUPPLIER_REQUEST_STATUS_LABELS,
   summarizeDraftsResult,
@@ -177,7 +187,7 @@ export function SupplierRequestsSection({ active }: SupplierRequestsSectionProps
       title: 'Сверка',
       key: 'steps',
       width: 260,
-      render: (_value, request) => <StepsCell status={request.status} />,
+      render: (_value, request) => <StepsCell status={request.status} receiptState={request.receiptState ?? 'none'} />,
     },
     {
       title: 'Статус',
@@ -267,7 +277,7 @@ export function SupplierRequestsSection({ active }: SupplierRequestsSectionProps
           onRow={(request) => ({ onClick: () => setOpenId(request.requestId), style: { cursor: 'pointer' } })}
           locale={{ emptyText: <Empty description="Заявок нет" /> }}
         />
-        <div className="rr-hint">Отправленная заявка отмечается в рабочем списке как «заказано». Сверка с приходами и оплатами 1С появится позже — пока закройте заявку вручную, когда материал пришёл: тогда непокрытый остаток снова попадёт в рабочий список.</div>
+        <div className="rr-hint">Отправленная заявка отмечается в рабочем списке как «заказано». Приход засчитывается по привязке к заявке (карточка заявки → «Привязать»); оплаты — позже. Если остаток не нужен — закройте заявку вручную: непокрытый остаток вернётся в рабочий список.</div>
       </div>
 
       <SupplierRequestDrawer
@@ -283,14 +293,20 @@ export function SupplierRequestsSection({ active }: SupplierRequestsSectionProps
   );
 }
 
-function StepsCell({ status }: { status: SupplierRequestStatus }) {
-  const steps = computeRequestSteps(status);
-  const values = [steps.request, steps.receipt, steps.payment];
+function StepsCell({ status, receiptState }: { status: SupplierRequestStatus; receiptState: 'none' | 'partial' | 'done' }) {
+  const steps = computeRequestSteps(status, receiptState);
+  const values: Array<{ state: StepState; tooltip?: string }> = [
+    { state: steps.request },
+    { state: steps.receipt },
+    { state: steps.payment, tooltip: 'оплаты — позже' },
+  ];
   return (
     <div className="rr-steps">
-      {values.map((state, index) => (
+      {values.map((entry, index) => (
         <span key={index}>
-          <span className={`rr-step rr-step--${state}`}>{stepIcon(state)} {REQUEST_STEP_LABELS[index]}</span>
+          <Tooltip title={entry.tooltip}>
+            <span className={`rr-step rr-step--${entry.state}`}>{stepIcon(entry.state)} {REQUEST_STEP_LABELS[index]}</span>
+          </Tooltip>
           {index < values.length - 1 && <span className="rr-muted"> → </span>}
         </span>
       ))}
@@ -339,6 +355,8 @@ function SupplierRequestDrawer({ requestId, onClose, onChanged, canManage, manag
   const [removedLines, setRemovedLines] = useState<Set<number>>(new Set());
   const [saving, setSaving] = useState(false);
   const [busyTransition, setBusyTransition] = useState<'send' | 'close' | 'cancel' | null>(null);
+  // Ключ занятой связи (ф.3б) — блокирует конкретную кнопку «Привязать»/«Отвязать», не всю карточку.
+  const [linkBusyKey, setLinkBusyKey] = useState<string | null>(null);
 
   const { selectProps: supplierSelectProps } = useSelect({ resource: 'suppliers', optionLabel: 'supplier_name', optionValue: 'supplier_id' });
 
@@ -375,6 +393,74 @@ function SupplierRequestDrawer({ requestId, onClose, onChanged, canManage, manag
 
   const card = state.status === 'ready' ? state.card : null;
   const editable = Boolean(card?.actions.edit);
+
+  // Ответ, пришедший после закрытия карточки, не применяется (CR2-2): экземпляр — на одну заявку (key), а флаг
+  // снимается при размонтировании.
+  const aliveRef = useRef(true);
+  // setup ставит флаг, cleanup снимает: под StrictMode (setup → cleanup → setup) флаг остаётся true (CR3-1).
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => { aliveRef.current = false; };
+  }, []);
+  const reloadCard = useCallback(async () => {
+    if (requestId == null) return;
+    const fresh = await supplierRequestsApi.card(requestId);
+    if (aliveRef.current && fresh.requestId === requestId) applyCard(fresh);
+  }, [requestId, applyCard]);
+
+  // «Привязать» (ф.3б): documentId/lineId/allocationId — из выбранного «возможного совпадения», сам заказ строки —
+  // из карточки заявки. После успеха/конфликта версии карточка перечитывается целиком — проще и надёжнее частичного патча.
+  const handleLinkReceipt = async (match: SupplierRequestPossibleMatchDto, lineOrderId: number, quantity: number) => {
+    const key = `link:${match.documentId}:${match.lineId}:${match.allocationId}:${lineOrderId}`;
+    setLinkBusyKey(key);
+    try {
+      const result = await onecDocumentsApi.linkToRequest(match.documentId, match.lineId, match.allocationId, {
+        lineOrderId, quantity, expectedVersion: match.procurementVersion,
+      });
+      if (result.supplierCheck === 'unknown') {
+        message.warning('Приход привязан. Поставщика прихода не удалось сверить с поставщиком заявки — проверьте вручную.');
+      } else {
+        message.success(result.changed ? 'Приход привязан к заявке' : 'Уже привязано с таким количеством');
+      }
+      await reloadCard();
+      onChanged();
+    } catch (error) {
+      if (isApiError(error, 'PROCUREMENT_VERSION_CONFLICT')) {
+        message.warning('Данные устарели — карточка обновлена');
+        await reloadCard().catch(() => {});
+        onChanged();
+      } else {
+        message.error(supplierRequestErrorMessage(error instanceof ApiError ? error : { message: error instanceof Error ? error.message : undefined }));
+      }
+    } finally {
+      setLinkBusyKey(null);
+    }
+  };
+
+  const handleUnlinkReceipt = async (receipt: SupplierRequestReceiptLinkDto) => {
+    const confirmed = await confirmModal('Отвязать приход', `Отвязать приход ${receipt.documentNumber} от заявки?`);
+    if (!confirmed) return;
+    const key = `unlink:${receipt.linkId}`;
+    setLinkBusyKey(key);
+    try {
+      await onecDocumentsApi.unlinkFromRequest(receipt.documentId, receipt.lineId, receipt.allocationId, receipt.linkId, {
+        expectedVersion: receipt.procurementVersion,
+      });
+      message.success('Приход отвязан');
+      await reloadCard();
+      onChanged();
+    } catch (error) {
+      if (isApiError(error, 'PROCUREMENT_VERSION_CONFLICT')) {
+        message.warning('Данные устарели — карточка обновлена');
+        await reloadCard().catch(() => {});
+        onChanged();
+      } else {
+        message.error(supplierRequestErrorMessage(error instanceof ApiError ? error : { message: error instanceof Error ? error.message : undefined }));
+      }
+    } finally {
+      setLinkBusyKey(null);
+    }
+  };
 
   const handleSave = async () => {
     if (!card) return;
@@ -497,6 +583,10 @@ function SupplierRequestDrawer({ requestId, onClose, onChanged, canManage, manag
             </Space>
           )}
 
+          {card.status === 'sent' && card.receiptState === 'done' && (
+            <Alert showIcon type="info" message="Всё заказанное пришло — заявку можно закрыть" />
+          )}
+
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {keptLines.map((line) => (
               <SupplierRequestLineCard
@@ -507,6 +597,11 @@ function SupplierRequestDrawer({ requestId, onClose, onChanged, canManage, manag
                 onRemove={keptLines.length > 1 ? () => setRemovedLines((current) => new Set(current).add(line.lineId)) : undefined}
                 edit={lineEdits[line.lineId] ?? { quantity: line.quantity, orders: {} }}
                 onChange={(next) => setLineEdits((current) => ({ ...current, [line.lineId]: next }))}
+                requestStatus={card.status}
+                canManage={canManage}
+                linkBusyKey={linkBusyKey}
+                onLinkReceipt={handleLinkReceipt}
+                onUnlinkReceipt={handleUnlinkReceipt}
               />
             ))}
           </div>
@@ -547,9 +642,17 @@ interface SupplierRequestLineCardProps {
   onChange: (next: LineEditValues) => void;
   /** Убрать материал из черновика; нет — строка последняя (тогда заявку отменяют). */
   onRemove?: () => void;
+  requestStatus: SupplierRequestStatus;
+  canManage: boolean;
+  /** Ключ занятой связи (ф.3б) — блокирует только свою кнопку «Привязать»/«Отвязать». */
+  linkBusyKey: string | null;
+  onLinkReceipt: (match: SupplierRequestPossibleMatchDto, lineOrderId: number, quantity: number) => void;
+  onUnlinkReceipt: (receipt: SupplierRequestReceiptLinkDto) => void;
 }
 
-function SupplierRequestLineCard({ line, editable, edit, onChange, onRemove }: SupplierRequestLineCardProps) {
+function SupplierRequestLineCard({
+  line, editable, edit, onChange, onRemove, requestStatus, canManage, linkBusyKey, onLinkReceipt, onUnlinkReceipt,
+}: SupplierRequestLineCardProps) {
   const unitLabel = onecUnitLabel(line.unit, null);
   // Просмотр — сохранённый остаток; правка черновика — предпросмотр (заказы в корзине при сохранении уйдут; CR3-3).
   const stock = editable ? computeLineStock(edit.quantity, Object.values(edit.orders), line.hiddenOrdersQuantity) : line.stockQuantity;
@@ -619,6 +722,23 @@ function SupplierRequestLineCard({ line, editable, edit, onChange, onRemove }: S
               ) : <span className="rr-num">{formatRequestQuantity(edit.orders[order.lineOrderId] ?? 0, line.unit)}</span>
             )}
           />
+          {!editable && (
+            <Table.Column<typeof visibleOrders[number]>
+              key="receipt"
+              title="Приход"
+              render={(_value, order) => (
+                <OrderReceiptStatus
+                  order={order}
+                  unit={line.unit}
+                  showPossibleMatches={requestStatus === 'sent'}
+                  canManage={canManage}
+                  linkBusyKey={linkBusyKey}
+                  onLink={onLinkReceipt}
+                  onUnlink={onUnlinkReceipt}
+                />
+              )}
+            />
+          )}
           {editable && (
             <Table.Column<typeof visibleOrders[number]>
               key="remove"
@@ -645,6 +765,115 @@ function SupplierRequestLineCard({ line, editable, edit, onChange, onRemove }: S
           Заказов в корзине: {line.deletedOrdersCount} — {editable ? 'при сохранении черновика они будут убраны из заявки' : 'в «заказано» не учитываются'}
         </div>
       )}
+    </div>
+  );
+}
+
+interface OrderReceiptStatusProps {
+  order: SupplierRequestLineOrderDto;
+  unit: OnecUnitCode;
+  /** «Возможные совпадения» показываются только для отправленных заявок. */
+  showPossibleMatches: boolean;
+  canManage: boolean;
+  linkBusyKey: string | null;
+  onLink: (match: SupplierRequestPossibleMatchDto, lineOrderId: number, quantity: number) => void;
+  onUnlink: (receipt: SupplierRequestReceiptLinkDto) => void;
+}
+
+/** Ячейка «Приход» у заказа строки заявки (ф.3б): статус исполнения, привязанные приходы, возможные совпадения. */
+function OrderReceiptStatus({ order, unit, showPossibleMatches, canManage, linkBusyKey, onLink, onUnlink }: OrderReceiptStatusProps) {
+  const tag = fulfillmentTag(order.fulfillment);
+  const receipts = order.receipts ?? [];
+  const possibleMatches = showPossibleMatches ? order.possibleMatches ?? [] : [];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 220 }}>
+      <div>
+        <span className={`rr-tag rr-tag--${tag.tone}`}>{tag.label}</span>{' '}
+        <span className="rr-sub rr-num">пришло {formatRequestQuantity(order.fulfilled ?? 0, unit)} из {formatRequestQuantity(order.quantity, unit)}</span>
+      </div>
+      {receipts.map((receipt) => (
+        <div key={receipt.linkId} className="rr-sub" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span>{receiptLineLabel(receipt, unit)}</span>
+          {canManage && (
+            <Button
+              size="small"
+              type="link"
+              loading={linkBusyKey === `unlink:${receipt.linkId}`}
+              disabled={linkBusyKey !== null && linkBusyKey !== `unlink:${receipt.linkId}`}
+              onClick={() => onUnlink(receipt)}
+            >
+              Отвязать
+            </Button>
+          )}
+        </div>
+      ))}
+      {possibleMatches.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span className="rr-sub">Возможные совпадения:</span>
+          {possibleMatches.map((match) => (
+            <PossibleMatchRow
+              // Ключ включает остатки: после соседней привязки строка пересоздаётся со свежим количеством (CR2-3).
+              key={`${match.documentId}-${match.lineId}-${match.allocationId}-${match.suggestedQuantity}-${order.fulfilled}`}
+              order={order}
+              match={match}
+              unit={unit}
+              canManage={canManage}
+              busy={linkBusyKey === `link:${match.documentId}:${match.lineId}:${match.allocationId}:${order.lineOrderId}`}
+              disabled={linkBusyKey !== null && linkBusyKey !== `link:${match.documentId}:${match.lineId}:${match.allocationId}:${order.lineOrderId}`}
+              onLink={(quantity) => onLink(match, order.lineOrderId, quantity)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface PossibleMatchRowProps {
+  order: SupplierRequestLineOrderDto;
+  match: SupplierRequestPossibleMatchDto;
+  unit: OnecUnitCode;
+  canManage: boolean;
+  busy: boolean;
+  disabled: boolean;
+  onLink: (quantity: number) => void;
+}
+
+/** Строка «возможного совпадения»: приход того же заказа/материала, не привязанный к заявке целиком. */
+function PossibleMatchRow({ order, match, unit, canManage, busy, disabled, onLink }: PossibleMatchRowProps) {
+  const max = possibleMatchMaxQuantity(order, match);
+  const [quantity, setQuantity] = useState(() => possibleMatchDefaultQuantity(order, match));
+
+  return (
+    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+      <span className="rr-sub">
+        {match.documentNumber} от {formatDate(match.documentDate)}
+        {match.counterpartyName ? ` · ${match.counterpartyName}` : ''}
+        {' · '}не привязано {formatRequestQuantity(match.unlinkedQuantity, unit)}
+      </span>
+      <InputNumber<number>
+        size="small"
+        min={0}
+        max={max}
+        precision={3}
+        step={0.1}
+        value={quantity}
+        disabled={!canManage}
+        aria-label={`Количество для привязки прихода ${match.documentNumber}`}
+        onChange={(value) => setQuantity(Math.min(max, Math.max(0, value ?? 0)))}
+      />
+      <Tooltip title={match.supplierCheck === 'unknown' ? 'Поставщика прихода не удалось сверить с поставщиком заявки' : undefined}>
+        <Button
+          size="small"
+          type={match.supplierCheck === 'unknown' ? 'default' : 'primary'}
+          loading={busy}
+          disabled={!canManage || disabled || quantity <= 0 || quantity > max}
+          onClick={() => onLink(quantity)}
+        >
+          Привязать
+        </Button>
+      </Tooltip>
     </div>
   );
 }

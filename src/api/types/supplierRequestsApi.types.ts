@@ -26,6 +26,38 @@ export interface CreateSupplierRequestDraftsResultDto {
   skipped: Array<{ orderId: number; resourceKey: string; reason: DraftSkipReason }>;
 }
 
+/** Приход 1С, привязанный к заказу строки заявки (ф.3б). Старый backend поле не присылает. */
+export interface SupplierRequestReceiptLinkDto {
+  linkId: number;
+  allocationId: number;
+  documentId: number;
+  documentNumber: string;
+  documentDate: string;
+  lineId: number;
+  /** В единице строки заявки. */
+  quantity: number;
+  /** Версия закупа — для «Отвязать». */
+  procurementVersion: number;
+}
+
+/** Приход того же заказа и материала, не привязанный к заявке целиком — кандидат для «Привязать» (ф.3б). */
+export interface SupplierRequestPossibleMatchDto {
+  allocationId: number;
+  documentId: number;
+  documentNumber: string;
+  documentDate: string;
+  lineId: number;
+  counterpartyName: string | null;
+  /** Не привязано к заявкам, в единице строки заявки. */
+  unlinkedQuantity: number;
+  /** Предложение для привязки: min(не привязано, осталось получить по заявке). */
+  suggestedQuantity: number;
+  supplierCheck: 'match' | 'unknown';
+  procurementVersion: number;
+}
+
+export type SupplierRequestFulfillment = 'waiting' | 'partial' | 'received';
+
 export interface SupplierRequestLineOrderDto {
   lineOrderId: number;
   orderId: number;
@@ -34,6 +66,12 @@ export interface SupplierRequestLineOrderDto {
   clientName: string | null;
   procurementId: number;
   quantity: number;
+  /** Пришло по привязанным приходам (единица строки заявки). Старый backend не присылает — трактовать как 0. */
+  fulfilled?: number;
+  fulfillment?: SupplierRequestFulfillment;
+  receipts?: SupplierRequestReceiptLinkDto[];
+  /** Только для отправленных заявок. */
+  possibleMatches?: SupplierRequestPossibleMatchDto[];
 }
 
 export interface SupplierRequestLineDto {
@@ -67,7 +105,10 @@ export interface SupplierRequestSummaryDto {
   expectedDate: string | null;
   comment: string | null;
   linesCount: number;
-  lines: Array<{ name: string; quantity: number; unit: OnecUnitCode }>;
+  /** fulfilled — пришло по заказам строки (единица строки заявки). Старый backend не присылает — трактовать как 0. */
+  lines: Array<{ name: string; quantity: number; unit: OnecUnitCode; fulfilled?: number }>;
+  /** Сверка «приход» по заказам заявки. Старый backend не присылает — трактовать как 'none'. */
+  receiptState?: 'none' | 'partial' | 'done';
   ordersCount: number;
   hiddenOrdersCount: number;
   deletedOrdersCount?: number;

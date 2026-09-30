@@ -47,8 +47,8 @@ import {
 } from './pg-order-resource-demand-repository';
 import { lockActor } from './pg-order-resource-procurement-repository';
 import { documentSupplierKeys } from './pg-onec-documents-repository';
-import { pairKey, planAllocationSuggestions } from '../domain/allocation-suggestions';
-import { ONEC_ALLOCATION_BATCH_LIMIT, type AllocationSuggestionsResponseDto, type OnecUnitCode } from '../application/onec-documents.types';
+import { pairKey, planAllocationSuggestions, type OpenRequestLineInput } from '../domain/allocation-suggestions';
+import { ONEC_ALLOCATION_BATCH_LIMIT, PROCUREMENT_DOC_KINDS, type AllocationSuggestionsResponseDto, type OnecUnitCode } from '../application/onec-documents.types';
 
 interface SettingsRow extends QueryResultRow {
   lead_days: number;
@@ -253,7 +253,7 @@ export class PgProcurementWorkspaceRepository {
    * Автоподбор заказов для прихода 1С (план §5.3). Только чтение, снимок REPEATABLE READ; кандидаты —
    * только заказы в scope (никаких счётчиков скрытых — R1-1), активные (как рабочий список, без окна дат).
    */
-  async allocationSuggestions(currentUser: CurrentUser, documentId: number): Promise<AllocationSuggestionsResponseDto> {
+  async allocationSuggestions(currentUser: CurrentUser, documentId: number, options: { supplierRequestsEnabled?: boolean } = {}): Promise<AllocationSuggestionsResponseDto> {
     return this.database.transaction(async (client) => {
       await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
       const settingsRow = (await client.query<SettingsRow>(SETTINGS_SELECT)).rows[0];
@@ -269,7 +269,10 @@ export class PgProcurementWorkspaceRepository {
           WHERE d.onec_document_id = $1`,
         [documentId],
       )).rows[0];
-      if (!doc) throw new ApiError(404, 'ONEC_DOCUMENT_NOT_FOUND', 'Документ 1С не найден');
+      // Документы других видов (склад) для закупа не существуют; оплаты — не для подбора.
+      if (!doc || !(PROCUREMENT_DOC_KINDS as readonly string[]).includes(doc.doc_kind)) {
+        throw new ApiError(404, 'ONEC_DOCUMENT_NOT_FOUND', 'Документ 1С не найден');
+      }
       if (doc.doc_kind !== 'purchase_receipt' || !doc.posted || doc.deleted_in_onec) {
         throw new ApiError(409, 'ONEC_DOCUMENT_NOT_ALLOCATABLE', 'Подбор — только для проведённого прихода, не удалённого в 1С');
       }
@@ -292,6 +295,7 @@ export class PgProcurementWorkspaceRepository {
       const orders = await loadSuggestionOrders(client, currentUser, sheetIds, filmIds);
       const built = await buildWorklistLines(client, orders, settings, today, true);
       const refKeyByOrder = new Map(orders.map((row) => [Number(row.order_id), row.ref_key_1c ?? null]));
+      const openLines = options.supplierRequestsEnabled === true ? await loadOpenRequestLines(client, built.orderIds) : new Map<string, OpenRequestLineInput[]>();
       const lineIds = lineRows.map((row) => Number(row.onec_document_line_id));
       const allocations = lineIds.length === 0 ? [] : (await client.query<{ line_id: string; order_id: string; order_name: string; quantity: string }>(
         `SELECT a.onec_document_line_id::text AS line_id, orp.order_id::text AS order_id, o.order_name, a.quantity::text AS quantity
@@ -352,10 +356,15 @@ export class PgProcurementWorkspaceRepository {
           supplierKey: line.supplier.key,
           procurementVersion: line.procurementVersion,
           demandFingerprint: line.demandFingerprint,
+          openRequestLines: openLines.get(`${line.orderId}|${line.resourceKey}`) ?? [],
         })),
         allocatedPairs,
         alreadyAllocated,
         documentSupplierKeys: documentSupplierKeys(doc),
+        documentSupplier: {
+          supplierId: doc.doc_supplier_id === null ? null : Number(doc.doc_supplier_id),
+          counterpartyRefKey: doc.doc_counterparty_ref_key,
+        },
         wastePercent: settings.wastePercent,
         maxProposals: ONEC_ALLOCATION_BATCH_LIMIT,
       });
@@ -491,11 +500,13 @@ export async function buildWorklistLines(
       }
       const received = receivedThousandths / 1000;
       const refs = row ? (requestRefs.get(Number(row.order_resource_procurement_id)) ?? []) : [];
-      // Заказано по отправленным заявкам (§5.5): в ф.3а приходы к заявкам ещё не привязываются, исполнено = 0.
+      // Заказано и ещё не пришло по отправленным заявкам (§5.5, R1-3): количество строки минус приходы по связям.
       let orderedThousandths = 0;
       for (const ref of refs) {
         if (ref.status !== 'sent') continue;
-        const converted = toDemandUnit(Number(ref.quantity), ref.unit_code, unit, { sheetAreaM2: geo?.areaM2 ?? null });
+        const open = Math.max(0, Math.round(Number(ref.quantity) * 1000) - Math.round(Number(ref.fulfilled) * 1000)) / 1000;
+        if (open <= 0) continue;
+        const converted = toDemandUnit(open, ref.unit_code, unit, { sheetAreaM2: geo?.areaM2 ?? null });
         if (converted !== null) orderedThousandths += Math.round(converted * 1000);
       }
       const orderedOpen = orderedThousandths / 1000;
@@ -535,6 +546,7 @@ export async function buildWorklistLines(
           status: ref.status,
           supplierName: ref.supplier_name,
           quantity: Number(ref.quantity),
+          fulfilled: Number(ref.fulfilled),
           unit: ref.unit_code,
         })),
         deficit: coverage.deficit,
@@ -761,6 +773,8 @@ interface RequestRefRow extends QueryResultRow {
   supplier_name: string;
   quantity: string | number;
   unit_code: ProcurementDocUnit;
+  /** Пришло по связям с приходами (ф.3б), в единице строки заявки. */
+  fulfilled: string | number;
 }
 
 /** Черновики и отправленные заявки по закупам (§5.5); закрытые и отменённые не участвуют. */
@@ -768,7 +782,10 @@ async function loadRequestRefs(client: DatabaseClient, procurementIds: number[])
   if (procurementIds.length === 0) return [];
   return (await client.query<RequestRefRow>(
     `SELECT lo.order_resource_procurement_id, r.supplier_request_id, r.request_number, r.status, r.supplier_name,
-            lo.quantity, l.unit_code
+            lo.quantity, l.unit_code,
+            (SELECT COALESCE(sum(k.quantity), 0) FROM order_resource_allocation_request_links k
+              WHERE k.supplier_request_line_order_id = lo.supplier_request_line_order_id
+                AND k.removed_at IS NULL AND k.quantity IS NOT NULL) AS fulfilled
        FROM supplier_request_line_orders lo
        JOIN supplier_request_lines l ON l.supplier_request_line_id = lo.supplier_request_line_id
        JOIN supplier_requests r ON r.supplier_request_id = l.supplier_request_id
@@ -777,6 +794,45 @@ async function loadRequestRefs(client: DatabaseClient, procurementIds: number[])
       ORDER BY r.supplier_request_id, lo.supplier_request_line_order_id`,
     [procurementIds],
   )).rows;
+}
+
+/**
+ * Открытые строки ОТПРАВЛЕННЫХ заявок по заказам (ф.3б, §5.3): остаток = количество − привязанные приходы > 0;
+ * порядок — sent_at, затем id (так подбор раскладывает приход по заявкам).
+ */
+async function loadOpenRequestLines(client: DatabaseClient, orderIds: number[]): Promise<Map<string, OpenRequestLineInput[]>> {
+  const result = new Map<string, OpenRequestLineInput[]>();
+  if (orderIds.length === 0) return result;
+  const rows = (await client.query<{
+    line_order_id: string; order_id: string; resource_kind: OrderResourceKind; ref_id: string; quantity: string; fulfilled: string;
+    unit_code: OnecUnitCode; supplier_request_id: string; request_number: string; supplier_key: string;
+  }>(
+    `SELECT lo.supplier_request_line_order_id::text AS line_order_id, orp.order_id::text, orp.resource_kind,
+            COALESCE(orp.sheet_material_type_id, orp.film_id)::text AS ref_id, lo.quantity::text, l.unit_code,
+            r.supplier_request_id::text, r.request_number, r.supplier_key,
+            (SELECT COALESCE(sum(k.quantity), 0) FROM order_resource_allocation_request_links k
+              WHERE k.supplier_request_line_order_id = lo.supplier_request_line_order_id
+                AND k.removed_at IS NULL AND k.quantity IS NOT NULL)::text AS fulfilled
+       FROM supplier_request_line_orders lo
+       JOIN supplier_request_lines l ON l.supplier_request_line_id = lo.supplier_request_line_id
+       JOIN supplier_requests r ON r.supplier_request_id = l.supplier_request_id
+       JOIN order_resource_procurement orp ON orp.order_resource_procurement_id = lo.order_resource_procurement_id
+      WHERE r.status = 'sent' AND orp.order_id = ANY($1::bigint[])
+      ORDER BY r.sent_at, lo.supplier_request_line_order_id`,
+    [orderIds],
+  )).rows;
+  for (const row of rows) {
+    const remaining = Math.round(Number(row.quantity) * 1000) - Math.round(Number(row.fulfilled) * 1000);
+    if (remaining <= 0) continue;
+    const key = `${Number(row.order_id)}|${resourceKey(row.resource_kind, Number(row.ref_id))}`;
+    const list = result.get(key) ?? [];
+    list.push({
+      lineOrderId: Number(row.line_order_id), supplierRequestId: Number(row.supplier_request_id), requestNumber: row.request_number,
+      supplierKey: row.supplier_key, unit: row.unit_code, remaining,
+    });
+    result.set(key, list);
+  }
+  return result;
 }
 
 async function loadReceipts(client: DatabaseClient, orderIds: number[]): Promise<ReceiptRow[]> {

@@ -63,6 +63,8 @@ export interface WorklistRequestRefDto {
   supplierName: string;
   /** Заказано для этого заказа, в единице строки заявки. */
   quantity: number;
+  /** Пришло по привязанным приходам, в единице строки заявки. */
+  fulfilled: number;
   unit: 'sheet' | 'm2' | 'lm' | 'pcs' | 'set';
 }
 

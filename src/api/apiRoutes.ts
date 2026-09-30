@@ -137,6 +137,10 @@ export const apiRoutes = {
       backendApiPath(`/procurement/onec-documents/${documentId}/allocation-suggestions`),
     allocationsBatch: (documentId: number) =>
       backendApiPath(`/procurement/onec-documents/${documentId}/allocations/batch`),
+    requestLinks: (documentId: number, lineId: number, allocationId: number) =>
+      backendApiPath(`/procurement/onec-documents/${documentId}/lines/${lineId}/allocations/${allocationId}/request-links`),
+    requestLink: (documentId: number, lineId: number, allocationId: number, linkId: number) =>
+      backendApiPath(`/procurement/onec-documents/${documentId}/lines/${lineId}/allocations/${allocationId}/request-links/${linkId}`),
   },
   orderDetails: {
     productionStageEvent: (detailId: number, productionStatusId: number) =>

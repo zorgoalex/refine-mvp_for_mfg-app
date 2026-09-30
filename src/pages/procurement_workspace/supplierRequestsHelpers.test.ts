@@ -12,6 +12,7 @@ import {
   draftPreviewSignature,
   formatLineItemText,
   formatRequestQuantity,
+  fulfillmentTag,
   hasRequestSupplier,
   hasUnsavedRequestChanges,
   loadDraftRequestId,
@@ -21,6 +22,9 @@ import {
   isStockNegative,
   isWholeSheetQuantity,
   loadDraftPreview,
+  possibleMatchDefaultQuantity,
+  possibleMatchMaxQuantity,
+  receiptLineLabel,
   requestRefTag,
   requestsStatusCounts,
   resolveDraftRequestId,
@@ -156,11 +160,24 @@ describe('список заявок: фильтр, счётчики, теги, �
     expect(requestRefTag(sentRef)).toEqual({ tone: 'info', label: 'заказано · 26-0003' });
   });
 
-  it('сверка: «Заявка» done у sent/closed, приход и оплата всегда «○» в этой фазе', () => {
+  it('ф.3б: тег sent с fulfilled > 0 показывает «пришло X из Y»; без fulfilled или draft — без добавки', () => {
+    const sentRef: WorklistRequestRef = { requestId: 1, requestNumber: '26-0003', status: 'sent', supplierName: 'МТ', quantity: 2, unit: 'sheet' };
+    expect(requestRefTag({ ...sentRef, fulfilled: 0 })).toEqual({ tone: 'info', label: 'заказано · 26-0003' });
+    expect(requestRefTag({ ...sentRef, fulfilled: 1 })).toEqual({ tone: 'info', label: 'заказано · 26-0003 · пришло 1 лист из 2 лист' });
+    expect(requestRefTag({ ...sentRef, status: 'draft', fulfilled: 1 })).toEqual({ tone: 'none', label: 'в черновике 26-0003' });
+  });
+
+  it('сверка: «Заявка» done у sent/closed; «Приход» — по receiptState (по умолчанию — «○»)', () => {
     expect(computeRequestSteps('draft')).toEqual({ request: 'todo', receipt: 'todo', payment: 'todo' });
     expect(computeRequestSteps('sent')).toEqual({ request: 'done', receipt: 'todo', payment: 'todo' });
     expect(computeRequestSteps('closed')).toEqual({ request: 'done', receipt: 'todo', payment: 'todo' });
     expect(computeRequestSteps('cancelled')).toEqual({ request: 'todo', receipt: 'todo', payment: 'todo' });
+  });
+
+  it('ф.3б: «Приход» отражает receiptState (none/partial/done); «Оплата» всегда «○»', () => {
+    expect(computeRequestSteps('sent', 'none')).toEqual({ request: 'done', receipt: 'todo', payment: 'todo' });
+    expect(computeRequestSteps('sent', 'partial')).toEqual({ request: 'done', receipt: 'part', payment: 'todo' });
+    expect(computeRequestSteps('sent', 'done')).toEqual({ request: 'done', receipt: 'done', payment: 'todo' });
   });
 
   it('«ещё N вне доступа» — только когда есть скрытые заказы', () => {
@@ -297,5 +314,34 @@ describe('CR4-1: превью и ключ повтора изолированы 
     expect(loadDraftRequestId('B', storage)).toBeNull();
     expect(loadDraftPreview('A', storage)).toEqual(items);
     expect(loadDraftRequestId('A', storage)).toEqual({ signature: '1:film:2', requestId: 'req-a' });
+  });
+});
+
+describe('ф.3б: привязка приходов к заявкам — статус исполнения и «возможные совпадения»', () => {
+  it('fulfillmentTag: waiting/partial/received → тон и подпись; без значения — «Ждём»', () => {
+    expect(fulfillmentTag('waiting')).toEqual({ tone: 'none', label: 'Ждём' });
+    expect(fulfillmentTag('partial')).toEqual({ tone: 'warn', label: 'Частично' });
+    expect(fulfillmentTag('received')).toEqual({ tone: 'ok', label: 'Получено' });
+    expect(fulfillmentTag(undefined)).toEqual({ tone: 'none', label: 'Ждём' });
+  });
+
+  it('receiptLineLabel: «Приход <номер> от <дата> — <количество> <единица>»', () => {
+    expect(receiptLineLabel({ documentNumber: '16756', documentDate: '2026-09-02', quantity: 1 }, 'sheet')).toBe('Приход 16756 от 02.09.2026 — 1 лист');
+    expect(receiptLineLabel({ documentNumber: '16757', documentDate: '2026-09-03', quantity: 2.5 }, 'm2')).toBe('Приход 16757 от 03.09.2026 — 2,5 м²');
+  });
+
+  it('possibleMatchMaxQuantity: min(не привязано, осталось получить по заказу заявки)', () => {
+    expect(possibleMatchMaxQuantity({ quantity: 5, fulfilled: 2 }, { unlinkedQuantity: 10 })).toBe(3);
+    expect(possibleMatchMaxQuantity({ quantity: 5, fulfilled: 2 }, { unlinkedQuantity: 1 })).toBe(1);
+    // остаток по заказу уже исчерпан — максимум не уходит в минус
+    expect(possibleMatchMaxQuantity({ quantity: 5, fulfilled: 5 }, { unlinkedQuantity: 4 })).toBe(0);
+    // старый backend без fulfilled — трактуется как 0
+    expect(possibleMatchMaxQuantity({ quantity: 5 }, { unlinkedQuantity: 10 })).toBe(5);
+  });
+
+  it('possibleMatchDefaultQuantity: предложение сервера, но не больше пересчитанного максимума', () => {
+    expect(possibleMatchDefaultQuantity({ quantity: 5, fulfilled: 2 }, { unlinkedQuantity: 10, suggestedQuantity: 3 })).toBe(3);
+    // suggestedQuantity устарела (например, fulfilled успели обновить) — клампится к максимуму
+    expect(possibleMatchDefaultQuantity({ quantity: 5, fulfilled: 4 }, { unlinkedQuantity: 10, suggestedQuantity: 3 })).toBe(1);
   });
 });

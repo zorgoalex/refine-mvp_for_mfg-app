@@ -1,3 +1,4 @@
+import type { LinkCommandBase, RequestLinkResultDto } from '../adapters/pg-request-links-repository';
 import { ApiError } from '../../../common/errors/api-error';
 import { auditService } from '../../../common/audit/audit.service';
 import type { DatabaseClient } from '../../../database/database.types';
@@ -27,7 +28,7 @@ export interface OnecDocumentsPort {
 
 /** Автоподбор заказов для прихода — читает рабочий список (экран снабжения). */
 export interface AllocationSuggestionsPort {
-  allocationSuggestions(user: CurrentUser, documentId: number): Promise<AllocationSuggestionsResponseDto>;
+  allocationSuggestions(user: CurrentUser, documentId: number, options?: { supplierRequestsEnabled?: boolean }): Promise<AllocationSuggestionsResponseDto>;
 }
 
 const VIEW = 'procurement.view';
@@ -35,12 +36,18 @@ const MANAGE = 'procurement.manage';
 const FINANCE = 'finance.view';
 
 /** Документы 1С на экране «Закупки → Документы 1С»: права и сборка опций чтения. */
+export interface RequestLinksPort {
+  link(command: LinkCommandBase & { lineOrderId: number; quantity: number }): Promise<RequestLinkResultDto>;
+  unlink(command: LinkCommandBase & { linkId: number }): Promise<RequestLinkResultDto>;
+}
+
 export class OnecDocumentsService {
   private readonly permissions: OrderPermissionCheckerPort;
 
   constructor(private readonly ports: {
     documents: OnecDocumentsPort;
     suggestions?: AllocationSuggestionsPort;
+    links?: RequestLinksPort;
     permissions?: OrderPermissionCheckerPort;
     auditClient?: DatabaseClient;
   }) {
@@ -74,17 +81,30 @@ export class OnecDocumentsService {
   }
 
   /** Автоподбор: только чтение, но предлагается тем, кто может распределять (view + manage). */
-  async allocationSuggestions(user: CurrentUser, documentId: number, requestId: string): Promise<AllocationSuggestionsResponseDto> {
+  async allocationSuggestions(user: CurrentUser, documentId: number, requestId: string, options: { supplierRequestsEnabled?: boolean } = {}): Promise<AllocationSuggestionsResponseDto> {
     this.requireView(user);
     await this.requireManage(user, requestId, documentId);
     if (!this.ports.suggestions) throw new Error('Allocation suggestions port is not configured');
-    return this.ports.suggestions.allocationSuggestions(user, documentId);
+    return this.ports.suggestions.allocationSuggestions(user, documentId, options);
   }
 
   async removeAllocation(command: RemoveOnecAllocationCommand): Promise<OnecAllocationResultDto> {
     await this.requireManage(command.currentUser, command.requestId, command.documentId);
     return this.withFinanceDeniedAudit(command.currentUser, command.requestId, command.documentId,
       () => this.ports.documents.removeAllocation(command));
+  }
+
+  /** Привязать приход к заявке поставщику (ф.3б): право procurement.manage, как у распределения. */
+  async linkToRequest(command: LinkCommandBase & { lineOrderId: number; quantity: number }): Promise<RequestLinkResultDto> {
+    await this.requireManage(command.currentUser, command.requestId, command.documentId);
+    if (!this.ports.links) throw new Error('Request links port is not configured');
+    return this.ports.links.link(command);
+  }
+
+  async unlinkFromRequest(command: LinkCommandBase & { linkId: number }): Promise<RequestLinkResultDto> {
+    await this.requireManage(command.currentUser, command.requestId, command.documentId);
+    if (!this.ports.links) throw new Error('Request links port is not configured');
+    return this.ports.links.unlink(command);
   }
 
   /**

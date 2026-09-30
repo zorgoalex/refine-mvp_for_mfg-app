@@ -31,6 +31,11 @@ export interface CandidateDraftState {
    */
   version?: number;
   fingerprint?: string;
+  /**
+   * Отпечаток requestLinks кандидата на момент предложения (ф.3б): изменились связи с заявками (заявку отправили/
+   * отменили, приход перепривязали) — сохранённое значение не восстанавливается, берётся свежее предложение.
+   */
+  requestLinksSignature?: string;
   /** true — пользователь правил галочку/количество; иначе значение — просто предложение сервера. */
   edited?: boolean;
 }
@@ -86,8 +91,37 @@ function proposalState(candidate: AllocationSuggestionCandidate): CandidateDraft
     quantity: roundToDocUnit(candidate.proposedInDocUnit),
     version: candidate.procurementVersion,
     fingerprint: candidate.demandFingerprint,
+    requestLinksSignature: candidateRequestLinksSignature(candidate),
     edited: false,
   };
+}
+
+/** Отпечаток requestLinks кандидата — устойчив к порядку элементов (ф.3б, CR-контекст черновика). */
+export function candidateRequestLinksSignature(candidate: AllocationSuggestionCandidate): string {
+  const links = candidate.requestLinks ?? [];
+  return links
+    .map((link) => `${link.lineOrderId}:${link.supplierRequestId}:${link.quantity}:${link.unit}`)
+    .sort()
+    .join('|');
+}
+
+/** Совпадает ли количество с предложением сервера (до 0,001 в единице строки документа). */
+export function candidateProposalUnmodified(candidate: AllocationSuggestionCandidate, quantityInDocUnit: number): boolean {
+  return roundToDocUnit(quantityInDocUnit) === roundToDocUnit(candidate.proposedInDocUnit);
+}
+
+/**
+ * Подсказка под кандидатом (ф.3б): приход не привяжется к заявке, если пользователь изменил
+ * предложенное количество — сервер получает requestLinks только для нетронутого предложения.
+ */
+export function candidateRequestLinkNote(
+  candidate: AllocationSuggestionCandidate,
+  state: Pick<CandidateDraftState, 'quantity'> | undefined,
+): string | null {
+  if (!candidate.requestLinks || candidate.requestLinks.length === 0) return null;
+  if (!state) return null;
+  if (candidateProposalUnmodified(candidate, state.quantity)) return null;
+  return 'Количество изменено — приход не будет привязан к заявке. Привяжите его в карточке заявки.';
 }
 
 function emptyLineDraft(): LineDraftState {
@@ -318,6 +352,11 @@ export function buildBatchRequest(
       if (!state?.checked) continue;
       const quantity = roundToDocUnit(state.quantity);
       if (quantity <= 0) continue;
+      // Связи с заявками едут в batch, только пока количество не тронуто (ф.3б): иное количество
+      // означает другое распределение по заказам, для которого предложенное разбиение уже не верно.
+      const requestLinks = candidate.requestLinks && candidate.requestLinks.length > 0 && candidateProposalUnmodified(candidate, quantity)
+        ? candidate.requestLinks.map((link) => ({ lineOrderId: link.lineOrderId, quantity: link.quantity }))
+        : undefined;
       items.push({
         lineId: line.lineId,
         orderId: candidate.orderId,
@@ -328,6 +367,7 @@ export function buildBatchRequest(
         // Контекст пересчёта единиц: сервер отклонит, если строка или размер листа изменились (CR3-1).
         expectedDocUnit: line.docUnit,
         expectedSheetAreaM2: line.sheetAreaM2,
+        ...(requestLinks ? { requestLinks } : {}),
       });
     }
   }
@@ -495,7 +535,10 @@ export function reconcileDraftWithResponse(
       // иначе количество могло устареть — берётся свежее предложение сервера.
       const stillValid = storedState?.edited === true
         && storedState.version === candidate.procurementVersion
-        && storedState.fingerprint === candidate.demandFingerprint;
+        && storedState.fingerprint === candidate.demandFingerprint
+        // Черновик без сохранённого отпечатка (до ф.3б или без связей) считается совпадающим, только если у
+        // свежего кандидата тоже нет связей — иначе появление/пропажа связей делает предложение «свежим».
+        && (storedState.requestLinksSignature ?? '') === candidateRequestLinksSignature(candidate);
       candidates[candidate.orderId] = stillValid ? storedState : freshCandidates[candidate.orderId];
     }
     lines[line.lineId] = { candidates, context: lineDraftContext(line) };

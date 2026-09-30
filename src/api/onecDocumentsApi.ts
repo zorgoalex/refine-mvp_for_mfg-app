@@ -11,6 +11,9 @@ import type {
   OnecDocumentListParams,
   OnecDocumentListResponse,
   RemoveOnecAllocationRequest,
+  RequestLinkRequest,
+  RequestLinkResultDto,
+  UnlinkRequestLinkRequest,
 } from './types/onecDocumentsApi.types';
 
 export const onecDocumentsApi = {
@@ -62,6 +65,45 @@ export const onecDocumentsApi = {
         validatePositiveId(documentId, 'documentId'),
         validatePositiveId(lineId, 'lineId'),
         validatePositiveId(allocationId, 'allocationId'),
+      ),
+      {
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    );
+  },
+
+  /** Привязать распределение прихода к заказу строки отправленной заявки (ф.3б). */
+  linkToRequest(
+    documentId: number,
+    lineId: number,
+    allocationId: number,
+    body: RequestLinkRequest,
+  ): Promise<RequestLinkResultDto> {
+    return httpClient.post<RequestLinkResultDto>(
+      apiRoutes.onecDocuments.requestLinks(
+        validatePositiveId(documentId, 'documentId'),
+        validatePositiveId(lineId, 'lineId'),
+        validatePositiveId(allocationId, 'allocationId'),
+      ),
+      body,
+    );
+  },
+
+  /** Отвязать приход от заявки (ф.3б). */
+  unlinkFromRequest(
+    documentId: number,
+    lineId: number,
+    allocationId: number,
+    linkId: number,
+    body: UnlinkRequestLinkRequest,
+  ): Promise<RequestLinkResultDto> {
+    return httpClient.delete<RequestLinkResultDto>(
+      apiRoutes.onecDocuments.requestLink(
+        validatePositiveId(documentId, 'documentId'),
+        validatePositiveId(lineId, 'lineId'),
+        validatePositiveId(allocationId, 'allocationId'),
+        validatePositiveId(linkId, 'linkId'),
       ),
       {
         headers: { 'Content-Type': 'application/json' },

@@ -132,6 +132,15 @@ const ONEC_ALLOCATION_ERROR_MESSAGES: Record<string, string> = {
   PROCUREMENT_RESOURCE_NOT_IN_ORDER: 'Этого материала нет в потребности заказа',
   PROCUREMENT_LOCKED_BY_ONEC: 'Материал уже оприходован документом 1С',
   PERMISSION_DENIED: 'Недостаточно прав для этой операции',
+  // Привязка приходов к заявкам поставщикам (ф.3б) — батч-подбор и «Привязать»/«Отвязать» в карточке заявки.
+  SUPPLIER_REQUEST_NOT_SENT: 'Привязать приход можно только к отправленной заявке',
+  SUPPLIER_REQUEST_SUPPLIER_MISMATCH: 'Поставщик прихода не совпадает с поставщиком заявки',
+  SUPPLIER_REQUEST_LINK_EXCEEDS_REQUEST: 'Больше, чем заказано в заявке',
+  SUPPLIER_REQUEST_LINK_EXCEEDS_ALLOCATION: 'Связей с заявками больше, чем распределено по приходу',
+  SUPPLIER_REQUEST_LINK_UNIT: 'Единицы прихода и заявки несовместимы',
+  SUPPLIER_REQUEST_LINK_OTHER_ORDER: 'Строка заявки относится к другому заказу или материалу',
+  SUPPLIER_REQUEST_LINK_EXISTS: 'Приход уже привязан к этой строке заявки с другим количеством. Отвяжите и привяжите заново',
+  SUPPLIER_REQUESTS_DISABLED: 'Заявки поставщикам пока выключены',
 };
 
 /** Сообщение об ошибке команды распределения — код важнее общего message сервера, если он известен. */

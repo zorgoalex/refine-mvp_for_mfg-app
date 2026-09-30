@@ -7,6 +7,7 @@ vi.mock('@nestjs/common', () => ({
   Controller: () => () => undefined,
   Delete: () => () => undefined,
   Get: () => () => undefined,
+  HttpCode: () => () => undefined,
   Inject: () => () => undefined,
   Injectable: () => () => undefined,
   Optional: () => () => undefined,

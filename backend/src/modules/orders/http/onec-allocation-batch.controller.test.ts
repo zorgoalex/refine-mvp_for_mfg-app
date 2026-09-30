@@ -13,10 +13,16 @@ describe('batch allocation body', () => {
     expect(batchSchema.safeParse(body).success).toBe(true);
   });
 
+  it('phase 3b: an item may carry request links (line order + quantity in the request unit)', () => {
+    expect(batchSchema.safeParse({ ...body, items: [{ ...item, requestLinks: [{ lineOrderId: 3, quantity: 1.5 }] }] }).success).toBe(true);
+    expect(batchSchema.safeParse({ ...body, items: [{ ...item, requestLinks: [] }] }).success).toBe(true);
+  });
+
   it.each([
     ['more than 3 decimals', { ...body, items: [{ ...item, quantity: 1.0005 }] }],
     ['zero quantity', { ...body, items: [{ ...item, quantity: 0 }] }],
-    ['request links before phase 3', { ...body, items: [{ ...item, requestLinks: [] }] }],
+    ['request link with a zero quantity', { ...body, items: [{ ...item, requestLinks: [{ lineOrderId: 3, quantity: 0 }] }] }],
+    ['request link with an extra field', { ...body, items: [{ ...item, requestLinks: [{ lineOrderId: 3, quantity: 1, note: 'x' }] }] }],
     ['unknown origin', { ...body, origin: 'auto' }],
     ['no items', { ...body, items: [] }],
     ['101 items', { ...body, items: Array.from({ length: 101 }, (_, index) => ({ ...item, lineId: index + 1 })) }],

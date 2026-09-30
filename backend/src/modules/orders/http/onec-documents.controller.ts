@@ -1,9 +1,11 @@
-import { Body, Controller, Delete, Get, Inject, Param, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, HttpCode, Delete, Get, Inject, Param, Post, Query, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser, RequestWithCurrentUser } from '../../../permissions/current-user';
 import { OnecDocumentsService } from '../application/onec-documents.service';
+import type { RequestLinkResultDto } from '../adapters/pg-request-links-repository';
+import { MAX_REQUEST_LINKS_PER_ALLOCATION } from '../domain/supplier-request-links';
 import {
   ONEC_ALLOCATION_BATCH_LIMIT,
   type AllocationSuggestionsResponseDto,
@@ -31,6 +33,11 @@ const addSchema = z.object({
   expectedDemandFingerprint: fingerprint,
 }).strict();
 const removeSchema = z.object({ expectedVersion }).strict();
+export const linkSchema = z.object({
+  lineOrderId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  quantity: withScale(3),
+  expectedVersion,
+}).strict();
 export const batchSchema = z.object({
   requestId: z.string().uuid(),
   origin: z.enum(['suggested', 'manual']),
@@ -44,7 +51,11 @@ export const batchSchema = z.object({
     // Контекст пересчёта единиц, в котором построено предложение: сверяется в транзакции (CR3-1).
     expectedDocUnit: z.enum(['sheet', 'm2', 'lm', 'pcs', 'set']).nullable(),
     expectedSheetAreaM2: z.number().positive().max(1000).nullable(),
-    // Связи с заявками поставщикам появятся в фазе 3 — до неё поле отклоняется (план §5.4).
+    // Связи нового распределения с заказами строк отправленных заявок (ф.3б), количество — в единице строки заявки.
+    requestLinks: z.array(z.object({
+      lineOrderId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+      quantity: withScale(3),
+    }).strict()).max(MAX_REQUEST_LINKS_PER_ALLOCATION).optional(),
   }).strict()).min(1).max(ONEC_ALLOCATION_BATCH_LIMIT),
 }).strict();
 const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -125,7 +136,10 @@ export class OnecDocumentsController {
   @Get(':documentId/allocation-suggestions')
   async suggestions(@Req() request: RequestWithCurrentUser, @Param('documentId') documentId: string): Promise<AllocationSuggestionsResponseDto> {
     const user = this.requireUser(request, false, true);
-    return this.documents.allocationSuggestions(user, parseId(documentId, 'documentId'), request.requestId ?? 'unknown');
+    // Без флага заявок подбор их не учитывает: откат фазы 3 не ломает применение предложений (CR1-3).
+    return this.documents.allocationSuggestions(user, parseId(documentId, 'documentId'), request.requestId ?? 'unknown', {
+      supplierRequestsEnabled: this.runtimeConfig.getFeatureFlags().supplierRequestsEnabled === true,
+    });
   }
 
   @ApiResponse({ status: 200, description: 'All items allocated, or every item already present (no-op)' })
@@ -142,6 +156,7 @@ export class OnecDocumentsController {
   ): Promise<BatchOnecAllocationResultDto> {
     const user = this.requireUser(request, true, true);
     const input = parse(batchSchema, body, 'ONEC_ALLOCATION_BATCH_INVALID_INPUT');
+    if (input.items.some((item) => (item.requestLinks?.length ?? 0) > 0)) this.requireRequests();
     return this.documents.addAllocationsBatch({
       currentUser: user,
       documentId: parseId(documentId, 'documentId'),
@@ -174,6 +189,67 @@ export class OnecDocumentsController {
       allocationId: parseId(allocationId, 'allocationId'),
       requestId: request.requestId ?? 'unknown',
     });
+  }
+
+  @ApiResponse({ status: 200, description: 'Receipt allocation linked to a sent supplier request line order (no-op when the same link exists)' })
+  @ApiResponse({ status: 404, description: 'Allocation, line order or order not found / outside the scope' })
+  @ApiResponse({ status: 409, description: 'Stale version, request not sent, link exists with another quantity' })
+  @ApiResponse({ status: 422, description: 'Supplier mismatch, incompatible units, over the request or the allocation' })
+  @ApiResponse({ status: 503, description: 'Procurement, the workspace or supplier requests are disabled' })
+  @ApiOperation({ operationId: 'linkOnecAllocationToRequest', summary: 'Link a receipt allocation to a supplier request' })
+  @Post(':documentId/lines/:lineId/allocations/:allocationId/request-links')
+  @HttpCode(200)
+  async linkToRequest(
+    @Req() request: RequestWithCurrentUser,
+    @Param('documentId') documentId: string,
+    @Param('lineId') lineId: string,
+    @Param('allocationId') allocationId: string,
+    @Body() body: unknown,
+  ): Promise<RequestLinkResultDto> {
+    const user = this.requireUser(request, true, true);
+    this.requireRequests();
+    const input = parse(linkSchema, body, 'SUPPLIER_REQUEST_LINK_INVALID_INPUT');
+    return this.documents.linkToRequest({
+      ...input,
+      currentUser: user,
+      documentId: parseId(documentId, 'documentId'),
+      lineId: parseId(lineId, 'lineId'),
+      allocationId: parseId(allocationId, 'allocationId'),
+      requestId: request.requestId ?? 'unknown',
+    });
+  }
+
+  @ApiResponse({ status: 200, description: 'Link removed (no-op when already removed)' })
+  @ApiResponse({ status: 404, description: 'Link not found' })
+  @ApiResponse({ status: 409, description: 'Stale version' })
+  @ApiOperation({ operationId: 'unlinkOnecAllocationFromRequest', summary: 'Unlink a receipt allocation from a supplier request' })
+  @Delete(':documentId/lines/:lineId/allocations/:allocationId/request-links/:linkId')
+  async unlinkFromRequest(
+    @Req() request: RequestWithCurrentUser,
+    @Param('documentId') documentId: string,
+    @Param('lineId') lineId: string,
+    @Param('allocationId') allocationId: string,
+    @Param('linkId') linkId: string,
+    @Body() body: unknown,
+  ): Promise<RequestLinkResultDto> {
+    const user = this.requireUser(request, true, true);
+    this.requireRequests();
+    const input = parse(removeSchema, body, 'SUPPLIER_REQUEST_LINK_INVALID_INPUT');
+    return this.documents.unlinkFromRequest({
+      ...input,
+      currentUser: user,
+      documentId: parseId(documentId, 'documentId'),
+      lineId: parseId(lineId, 'lineId'),
+      allocationId: parseId(allocationId, 'allocationId'),
+      linkId: parseId(linkId, 'linkId'),
+      requestId: request.requestId ?? 'unknown',
+    });
+  }
+
+  private requireRequests(): void {
+    if (this.runtimeConfig.getFeatureFlags().supplierRequestsEnabled !== true) {
+      throw new ApiError(503, 'SUPPLIER_REQUESTS_DISABLED', 'Заявки поставщикам пока выключены', { feature: 'supplierRequests' });
+    }
   }
 
   private requireUser(request: RequestWithCurrentUser, write: boolean, workspace = false): CurrentUser {

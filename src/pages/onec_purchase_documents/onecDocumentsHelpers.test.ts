@@ -173,6 +173,12 @@ describe('onecAllocationErrorMessage', () => {
     expect(onecAllocationErrorMessage(undefined)).toBe('Не удалось выполнить операцию');
     expect(onecAllocationErrorMessage({})).toBe('Не удалось выполнить операцию');
   });
+
+  it('ф.3б: коды связи приходов с заявками поставщикам тоже сопоставлены', () => {
+    expect(onecAllocationErrorMessage({ code: 'SUPPLIER_REQUEST_NOT_SENT' })).toBe('Привязать приход можно только к отправленной заявке');
+    expect(onecAllocationErrorMessage({ code: 'SUPPLIER_REQUEST_LINK_EXCEEDS_REQUEST' })).toBe('Больше, чем заказано в заявке');
+    expect(onecAllocationErrorMessage({ code: 'SUPPLIER_REQUESTS_DISABLED' })).toBe('Заявки поставщикам пока выключены');
+  });
 });
 
 describe('onecAllocationErrorRequiresReload', () => {

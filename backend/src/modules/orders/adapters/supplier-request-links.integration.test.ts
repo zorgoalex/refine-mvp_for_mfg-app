@@ -1,0 +1,406 @@
+import { randomUUID } from 'node:crypto';
+import { ConfigService } from '@nestjs/config';
+import { Pool, type PoolClient, type QueryResultRow } from 'pg';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { BackendEnv } from '../../../config/env.validation';
+import { DatabaseService } from '../../../database/database.service';
+import type { TransactionClient } from '../../../database/database.types';
+import type { CurrentUser } from '../../../permissions/current-user';
+import type { BatchOnecAllocationItem } from '../application/onec-documents.types';
+import { addDays, todayInAlmaty } from '../domain/procurement-worklist';
+import { PgOnecDocumentsRepository } from './pg-onec-documents-repository';
+import { PgProcurementWorkspaceRepository } from './pg-procurement-workspace-repository';
+import { PgRequestLinksRepository } from './pg-request-links-repository';
+import { PgSupplierRequestsRepository } from './pg-supplier-requests-repository';
+
+// Committed fixtures in an OWNED disposable database only (spec_erp/reviews/supplier-requests-3b/run-races.cjs).
+const url = process.env.ERP_PROCUREMENT_RACE_DATABASE_URL;
+const targetEnv = process.env.ERP_PROCUREMENT_RACE_TARGET_ENV;
+
+class CommittedDatabase extends DatabaseService {
+  readonly tx: TransactionClient;
+  constructor(readonly client: PoolClient) {
+    super(new ConfigService<BackendEnv, true>({ DATABASE_QUERY_TIMEOUT_MS: 15000 }), {} as never);
+    this.tx = { raw: client, query: this.query.bind(this) };
+  }
+  override async query<T extends QueryResultRow = QueryResultRow>(sql: string, params: readonly unknown[] = []) {
+    return this.client.query<T>(sql, [...params]);
+  }
+  override async transaction<T>(handler: (tx: TransactionClient) => Promise<T>): Promise<T> {
+    await this.client.query('BEGIN');
+    await this.client.query("SET LOCAL lock_timeout='10s'");
+    try {
+      const result = await handler(this.tx);
+      await this.client.query('COMMIT');
+      return result;
+    } catch (error) {
+      await this.client.query('ROLLBACK');
+      throw error;
+    }
+  }
+}
+
+describe.skipIf(!url)('Supplier request links (phase 3b) — real PostgreSQL', { timeout: 60000 }, () => {
+  let pool: Pool;
+  let conn: PoolClient;
+  let conn2: PoolClient;
+  let links2: PgRequestLinksRepository;
+  let requests: PgSupplierRequestsRepository;
+  let docs: PgOnecDocumentsRepository;
+  let workspace: PgProcurementWorkspaceRepository;
+  let links: PgRequestLinksRepository;
+  const tag = 'E2E-Тест-СЗ-' + randomUUID().slice(0, 8);
+  const today = todayInAlmaty();
+  let admin: CurrentUser;
+  let orderIds: number[] = [];
+  let material: number;
+  let materialArea: number;
+  let supplierId: number;
+  let otherSupplierId: number;
+  let sourceId: number;
+  let millingTypeId: number;
+  let edgeTypeId: number;
+  const key = () => `sheet_material:${material}`;
+  const options = { procurementEnabled: true, supplyWorkspaceEnabled: true, supplierRequestsEnabled: true };
+
+  async function makeOrder(index: number, areaMm: number) {
+    await conn.query('BEGIN');
+    const clientId = Number((await conn.query('SELECT client_id FROM clients WHERE client_name = $1', [tag])).rows[0].client_id);
+    const projectId = Number((await conn.query('SELECT project_id FROM projects WHERE name = $1', [tag])).rows[0].project_id);
+    const orderId = Number((await conn.query(
+      `INSERT INTO orders (order_name, client_id, project_id, order_status_id, payment_status_id, created_by, planned_completion_date)
+       VALUES ($1, $2, $3, 1, 1, $4, $5::date) RETURNING order_id`,
+      [`${tag}-${index}`, clientId, projectId, Number(admin.id), addDays(today, 3 + index)])).rows[0].order_id);
+    await conn.query(
+      `INSERT INTO order_details (order_id, detail_number, height, width, quantity, area, sheet_material_type_id, milling_type_id, edge_type_id, created_by)
+       VALUES ($1, 1, 1000, $2, 1, 1, $3, $4, $5, $6)`,
+      [orderId, areaMm, material, millingTypeId, edgeTypeId, Number(admin.id)]);
+    await conn.query('COMMIT');
+    return orderId;
+  }
+
+  async function receipt(sheets: number, docSupplierId: number, unit: 'sheet' | 'm2' = 'sheet') {
+    const documentId = Number((await conn.query(
+      `INSERT INTO onec_documents (source_id, doc_kind, onec_ref_key, number, doc_date, posted, counterparty_name, supplier_id, amount)
+       VALUES ($1, 'purchase_receipt', $2, $3, $4, true, $5, $6, 1000) RETURNING onec_document_id`,
+      [sourceId, randomUUID(), `${tag.slice(-8)}-${randomUUID().slice(0, 6)}`, today, `${tag} Поставщик`, docSupplierId])).rows[0].onec_document_id);
+    const lineId = Number((await conn.query(
+      `INSERT INTO onec_document_lines (onec_document_id, line_no, nomenclature_name, quantity, unit_code, sheet_material_type_id)
+       VALUES ($1, 1, 'лист', $2, $4, $3) RETURNING onec_document_line_id`,
+      [documentId, sheets, material, unit])).rows[0].onec_document_line_id);
+    return { documentId, lineId };
+  }
+
+  async function sentRequest(orders: number[]) {
+    const created = await requests.createDrafts({ currentUser: admin, requestId: randomUUID(), items: orders.map((orderId) => ({ orderId, resourceKey: key() })) });
+    const id = created.requests[0].requestId;
+    // Поставщик мог уже подставиться из реестра (приходы прошлых сценариев) — тогда правка — no-op.
+    const patched = await requests.update({ currentUser: admin, requestId: randomUUID(), supplierRequestId: id, expectedVersion: 0, supplierId });
+    await requests.transition({ currentUser: admin, requestId: randomUUID(), supplierRequestId: id, expectedVersion: patched.request.version, transition: 'send' });
+    return requests.getCard(admin, id, true);
+  }
+
+  /** Распределение всей строки прихода на заказ без связей — одиночной командой (без условия дефицита). */
+  async function allocate(doc: { documentId: number; lineId: number }, orderId: number) {
+    const line = (await workspace.listWorklist(admin, { preset: 'all', groupBy: 'none', sort: 'due', search: tag }, options))
+      .lines.find((entry) => entry.orderId === orderId && entry.resourceKey === key())!;
+    const quantity = Number((await conn.query('SELECT quantity FROM onec_document_lines WHERE onec_document_line_id = $1', [doc.lineId])).rows[0].quantity);
+    await docs.addAllocation({ currentUser: admin, requestId: randomUUID(), documentId: doc.documentId, lineId: doc.lineId, orderId,
+      resourceKey: key(), quantity, expectedVersion: line.procurementVersion, expectedDemandFingerprint: line.demandFingerprint });
+    return (await conn.query(
+      `SELECT a.allocation_id, a.onec_document_line_id AS line_id, a.quantity, orp.version FROM order_resource_onec_allocations a
+         JOIN order_resource_procurement orp USING (order_resource_procurement_id)
+        WHERE a.onec_document_line_id = $1 AND orp.order_id = $2 AND a.removed_at IS NULL`, [doc.lineId, orderId])).rows[0];
+  }
+
+  const worklistLine = async (orderId: number) => (await workspace.listWorklist(admin, { preset: 'all', groupBy: 'none', sort: 'due', search: tag }, options))
+    .lines.find((line) => line.orderId === orderId && line.resourceKey === key())!;
+
+  function items(response: Awaited<ReturnType<PgProcurementWorkspaceRepository['allocationSuggestions']>>): BatchOnecAllocationItem[] {
+    return response.lines.flatMap((line) => line.candidates.filter((candidate) => candidate.proposedInDocUnit > 0).map((candidate) => ({
+      lineId: line.lineId, orderId: candidate.orderId, resourceKey: line.material!.resourceKey, quantity: candidate.proposedInDocUnit,
+      expectedVersion: candidate.procurementVersion, expectedDemandFingerprint: candidate.demandFingerprint,
+      expectedDocUnit: line.docUnit, expectedSheetAreaM2: line.sheetAreaM2,
+      requestLinks: candidate.requestLinks.map((link) => ({ lineOrderId: link.lineOrderId, quantity: link.quantity })),
+    })));
+  }
+
+  beforeAll(async () => {
+    expect(targetEnv).toBe('backend-test');
+    expect(decodeURIComponent(new URL(url!).pathname.slice(1)).startsWith('procurement_race_')).toBe(true);
+    pool = new Pool({ connectionString: url, max: 3, connectionTimeoutMillis: 5000, statement_timeout: 20000 });
+    conn = await pool.connect();
+    conn2 = await pool.connect();
+    links2 = new PgRequestLinksRepository(new CommittedDatabase(conn2));
+    const db = new CommittedDatabase(conn);
+    requests = new PgSupplierRequestsRepository(db);
+    docs = new PgOnecDocumentsRepository(db);
+    workspace = new PgProcurementWorkspaceRepository(db);
+    links = new PgRequestLinksRepository(db);
+    const adminId = Number((await conn.query(
+      `INSERT INTO users (username, email, password_hash, role_id) VALUES ($1, $2, 'E2E-NO-LOGIN', 1) RETURNING user_id`,
+      [`${tag}-admin`, `${tag}-admin@example.invalid`])).rows[0].user_id);
+    for (const c of [conn, conn2]) {
+      await c.query('SELECT set_config($1, $2, false)', ['app.user_id', String(adminId)]);
+      await c.query('SELECT set_config($1, $2, false)', ['hasura.user', JSON.stringify({ 'x-hasura-user-id': String(adminId), 'x-hasura-role': 'admin' })]);
+    }
+    admin = { id: String(adminId), username: `${tag}-admin`, role: 'admin', roleId: 1, permissions: ['orders.view', 'procurement.view', 'procurement.manage'] };
+    material = Number((await conn.query(
+      `SELECT sheet_material_type_id FROM sheet_material_types WHERE width_mm > 0 AND height_mm > 0 ORDER BY sheet_material_type_id OFFSET 5 LIMIT 1`)).rows[0].sheet_material_type_id);
+    const dims = (await conn.query('SELECT width_mm, height_mm FROM sheet_material_types WHERE sheet_material_type_id = $1', [material])).rows[0];
+    materialArea = (Number(dims.width_mm) * Number(dims.height_mm)) / 1_000_000;
+    await conn.query('UPDATE sheet_material_types SET supplier_id = NULL WHERE sheet_material_type_id = $1', [material]);
+    const suppliers = (await conn.query('SELECT supplier_id FROM suppliers ORDER BY supplier_id LIMIT 2')).rows.map((row) => Number(row.supplier_id));
+    [supplierId, otherSupplierId] = suppliers;
+    millingTypeId = Number((await conn.query('SELECT milling_type_id FROM milling_types ORDER BY 1 LIMIT 1')).rows[0].milling_type_id);
+    edgeTypeId = Number((await conn.query('SELECT edge_type_id FROM edge_types ORDER BY 1 LIMIT 1')).rows[0].edge_type_id);
+    const clientId = Number((await conn.query('INSERT INTO clients (client_name) VALUES ($1) RETURNING client_id', [tag])).rows[0].client_id);
+    await conn.query('INSERT INTO projects (code, name, client_id, created_by) VALUES ($1, $2, $3, $4)',
+      [('E2E-' + randomUUID().slice(0, 8)).toUpperCase(), tag, clientId, adminId]);
+    sourceId = Number((await conn.query(`INSERT INTO onec_sources (code, display_name) VALUES ($1, $2) RETURNING source_id`,
+      [('e2e-' + randomUUID().slice(0, 8)), tag])).rows[0].source_id);
+    // Потребности ~1 и ~2 листа (площадь деталей, запас 5 %).
+    orderIds = [await makeOrder(0, Math.round(materialArea * 1000)), await makeOrder(1, Math.round(materialArea * 2000))];
+  }, 60000);
+
+  afterAll(async () => {
+    try { conn?.release(); } catch { /* released */ }
+    try { conn2?.release(); } catch { /* released */ }
+    await pool?.end().catch(() => undefined);
+  });
+
+  it('suggestions split a receipt over the open request; the unchanged batch links it; the request and the worklist show the fulfilment', async () => {
+    const card = await sentRequest([orderIds[0]]);
+    const lineOrder = card.lineItems[0].orders[0];
+    const before = await worklistLine(orderIds[0]);
+    expect(before.orderedOpen).toBeGreaterThan(0);
+    const doc = await receipt(5, supplierId);
+    const suggestions = await workspace.allocationSuggestions(admin, doc.documentId, { supplierRequestsEnabled: true });
+    const candidate = suggestions.lines[0].candidates.find((entry) => entry.orderId === orderIds[0])!;
+    expect(candidate.reasons[0]).toMatchObject({ code: 'request' });
+    expect(candidate.requestLinks).toEqual([expect.objectContaining({ lineOrderId: lineOrder.lineOrderId, supplierRequestId: card.requestId })]);
+    const body = items(suggestions).filter((item) => item.orderId === orderIds[0]);
+    const result = await docs.addAllocationsBatch({ currentUser: admin, documentId: doc.documentId, requestId: randomUUID(), origin: 'suggested', items: body });
+    expect(result.changed).toBe(true);
+    const linked = (await conn.query('SELECT count(*)::int AS c FROM order_resource_allocation_request_links WHERE supplier_request_line_order_id = $1 AND removed_at IS NULL', [lineOrder.lineOrderId])).rows[0].c;
+    expect(linked).toBe(1);
+    const after = await requests.getCard(admin, card.requestId, true);
+    const fulfilledOrder = after.lineItems[0].orders[0];
+    expect(fulfilledOrder.fulfilled).toBe(candidate.requestLinks[0].quantity);
+    expect(fulfilledOrder.receipts).toEqual([expect.objectContaining({ documentId: doc.documentId })]);
+    expect(after.receiptState).toBe(fulfilledOrder.fulfilled >= fulfilledOrder.quantity ? 'done' : 'partial');
+    const line = await worklistLine(orderIds[0]);
+    expect(line.orderedOpen).toBeLessThan(before.orderedOpen);
+    // Аудит распределения несёт связь, событие — одно на распределение.
+    const audit = (await conn.query(
+      `SELECT metadata_json FROM audit_log WHERE event = 'order_resource.onec_allocation_added' AND metadata_json->>'onecDocumentId' = $1`,
+      [String(doc.documentId)])).rows;
+    expect(audit.some((row) => Array.isArray(row.metadata_json.requestLinks) && row.metadata_json.requestLinks.length === 1)).toBe(true);
+    // Повтор batch — no-op, связь не дублируется.
+    const repeat = await docs.addAllocationsBatch({ currentUser: admin, documentId: doc.documentId, requestId: randomUUID(), origin: 'suggested', items: body });
+    expect(repeat.changed).toBe(false);
+    expect((await conn.query('SELECT count(*)::int AS c FROM order_resource_allocation_request_links WHERE supplier_request_line_order_id = $1', [lineOrder.lineOrderId])).rows[0].c).toBe(1);
+
+    // Снятие распределения снимает связь: исполнение и «заказано» возвращаются.
+    const allocation = (await conn.query(
+      `SELECT a.allocation_id, orp.version FROM order_resource_onec_allocations a
+         JOIN order_resource_procurement orp USING (order_resource_procurement_id)
+        WHERE a.onec_document_line_id = $1 AND orp.order_id = $2 AND a.removed_at IS NULL`, [doc.lineId, orderIds[0]])).rows[0];
+    await docs.removeAllocation({ currentUser: admin, requestId: randomUUID(), documentId: doc.documentId, lineId: doc.lineId,
+      allocationId: Number(allocation.allocation_id), expectedVersion: Number(allocation.version) });
+    const reverted = await requests.getCard(admin, card.requestId, true);
+    expect(reverted.lineItems[0].orders[0]).toMatchObject({ fulfilled: 0, fulfillment: 'waiting' });
+    expect((await worklistLine(orderIds[0])).orderedOpen).toBeCloseTo(before.orderedOpen, 3);
+    const removedAudit = (await conn.query(
+      `SELECT metadata_json FROM audit_log WHERE event = 'order_resource.onec_allocation_removed' AND entity_id = $1`, [String(allocation.allocation_id)])).rows[0];
+    expect(removedAudit.metadata_json.removedRequestLinks).toEqual([expect.objectContaining({ supplierRequestId: card.requestId, lineOrderId: lineOrder.lineOrderId })]);
+    const removedEvent = (await conn.query(
+      `SELECT payload_json FROM outbox_events WHERE payload_json->>'changeType' = 'allocation_removed' AND payload_json->>'allocationId' = $1`, [String(allocation.allocation_id)])).rows[0];
+    expect(removedEvent.payload_json.supplierRequestIds).toEqual([card.requestId]);
+    const bridge = (await conn.query(
+      `SELECT count(*)::int AS c FROM audit_log a JOIN audit_log_related_entity r ON r.audit_id = a.audit_id
+        WHERE a.event = 'order_resource.onec_allocation_removed' AND a.entity_id = $1 AND r.entity_type = 'supplier_request' AND r.entity_id = $2`,
+      [String(allocation.allocation_id), String(card.requestId)])).rows[0].c;
+    expect(bridge).toBe(1);
+  });
+
+  it('manual link from a possible match: checks, no-op repeat, unlink', async () => {
+    const card = await sentRequest([orderIds[1]]);
+    const lineOrder = card.lineItems[0].orders[0];
+    // Приход без ссылки (ручной batch без requestLinks) — только «возможное совпадение».
+    const doc = await receipt(10, supplierId);
+    const suggestions = await workspace.allocationSuggestions(admin, doc.documentId, { supplierRequestsEnabled: true });
+    const plain = items(suggestions).filter((item) => item.orderId === orderIds[1]).map((item) => ({ ...item, requestLinks: [] }));
+    await docs.addAllocationsBatch({ currentUser: admin, documentId: doc.documentId, requestId: randomUUID(), origin: 'manual', items: plain });
+    const withMatch = await requests.getCard(admin, card.requestId, true);
+    const [match] = withMatch.lineItems[0].orders[0].possibleMatches;
+    expect(match).toMatchObject({ documentId: doc.documentId, supplierCheck: 'match' });
+    expect(match.suggestedQuantity).toBeGreaterThan(0);
+    const base = { currentUser: admin, documentId: doc.documentId, lineId: match.lineId, allocationId: match.allocationId };
+
+    await expect(links.link({ ...base, requestId: randomUUID(), lineOrderId: lineOrder.lineOrderId, quantity: lineOrder.quantity + 1, expectedVersion: match.procurementVersion }))
+      .rejects.toMatchObject({ statusCode: 422, code: 'SUPPLIER_REQUEST_LINK_EXCEEDS_REQUEST' });
+    await expect(links.link({ ...base, requestId: randomUUID(), lineOrderId: lineOrder.lineOrderId, quantity: match.suggestedQuantity, expectedVersion: match.procurementVersion + 5 }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'PROCUREMENT_VERSION_CONFLICT' });
+    const linked = await links.link({ ...base, requestId: randomUUID(), lineOrderId: lineOrder.lineOrderId, quantity: match.suggestedQuantity, expectedVersion: match.procurementVersion });
+    expect(linked).toMatchObject({ changed: true, supplierCheck: 'match', procurementVersion: match.procurementVersion + 1 });
+    const repeat = await links.link({ ...base, requestId: randomUUID(), lineOrderId: lineOrder.lineOrderId, quantity: match.suggestedQuantity, expectedVersion: linked.procurementVersion });
+    expect(repeat).toMatchObject({ changed: false, linkId: linked.linkId });
+    await expect(links.link({ ...base, requestId: randomUUID(), lineOrderId: lineOrder.lineOrderId, quantity: 0.001, expectedVersion: linked.procurementVersion }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'SUPPLIER_REQUEST_LINK_EXISTS' });
+    const afterLink = await requests.getCard(admin, card.requestId, true);
+    expect(afterLink.lineItems[0].orders[0]).toMatchObject({ fulfilled: match.suggestedQuantity, possibleMatches: [] });
+    const outbox = (await conn.query(`SELECT payload_json FROM outbox_events WHERE payload_json->>'changeType' = 'allocation_linked' AND payload_json->>'linkId' = $1`, [String(linked.linkId)])).rows;
+    expect(outbox).toHaveLength(1);
+
+    const unlinked = await links.unlink({ ...base, requestId: randomUUID(), linkId: linked.linkId, expectedVersion: linked.procurementVersion });
+    expect(unlinked.changed).toBe(true);
+    const again = await links.unlink({ ...base, requestId: randomUUID(), linkId: linked.linkId, expectedVersion: unlinked.procurementVersion });
+    expect(again.changed).toBe(false);
+    expect((await requests.getCard(admin, card.requestId, true)).lineItems[0].orders[0].fulfilled).toBe(0);
+    // Закрытая заявка: новые связи запрещены.
+    await requests.transition({ currentUser: admin, requestId: randomUUID(), supplierRequestId: card.requestId, expectedVersion: afterLink.version, transition: 'close' });
+    await expect(links.link({ ...base, requestId: randomUUID(), lineOrderId: lineOrder.lineOrderId, quantity: 0.5, expectedVersion: unlinked.procurementVersion }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'SUPPLIER_REQUEST_NOT_SENT' });
+  });
+
+  it('a receipt of another supplier is not a match and can not be linked', async () => {
+    const order = await makeOrder(2, Math.round(materialArea * 1000));
+    const card = await sentRequest([order]);
+    const lineOrder = card.lineItems[0].orders[0];
+    const doc = await receipt(3, otherSupplierId);
+    const suggestions = await workspace.allocationSuggestions(admin, doc.documentId, { supplierRequestsEnabled: true });
+    const candidate = suggestions.lines[0].candidates.find((entry) => entry.orderId === order)!;
+    expect(candidate.requestLinks).toEqual([]);
+    const body = items(suggestions).filter((item) => item.orderId === order);
+    // Batch с чужой ссылкой — отказ позиции, ничего не записано.
+    const forged = body.map((item) => ({ ...item, requestLinks: [{ lineOrderId: lineOrder.lineOrderId, quantity: 0.5 }] }));
+    await expect(docs.addAllocationsBatch({ currentUser: admin, documentId: doc.documentId, requestId: randomUUID(), origin: 'manual', items: forged }))
+      .rejects.toMatchObject({ statusCode: 409, details: { failures: [expect.objectContaining({ code: 'SUPPLIER_REQUEST_SUPPLIER_MISMATCH' })] } });
+    expect((await conn.query('SELECT count(*)::int AS c FROM order_resource_onec_allocations WHERE onec_document_line_id = $1', [doc.lineId])).rows[0].c).toBe(0);
+    await docs.addAllocationsBatch({ currentUser: admin, documentId: doc.documentId, requestId: randomUUID(), origin: 'manual', items: body });
+    expect((await requests.getCard(admin, card.requestId, true)).lineItems[0].orders[0].possibleMatches).toEqual([]);
+    const allocation = (await conn.query(
+      `SELECT a.allocation_id, orp.version FROM order_resource_onec_allocations a JOIN order_resource_procurement orp USING (order_resource_procurement_id)
+        WHERE a.onec_document_line_id = $1 AND orp.order_id = $2 AND a.removed_at IS NULL`, [doc.lineId, order])).rows[0];
+    await expect(links.link({ currentUser: admin, requestId: randomUUID(), documentId: doc.documentId, lineId: doc.lineId,
+      allocationId: Number(allocation.allocation_id), lineOrderId: lineOrder.lineOrderId, quantity: 0.5, expectedVersion: Number(allocation.version) }))
+      .rejects.toMatchObject({ statusCode: 422, code: 'SUPPLIER_REQUEST_SUPPLIER_MISMATCH' });
+  });
+
+  it('R1: an unposted document or a conflicting line can not be linked and is not a possible match (CR1-1)', async () => {
+    const order = await makeOrder(3, Math.round(materialArea * 1000));
+    const card = await sentRequest([order]);
+    const lineOrder = card.lineItems[0].orders[0];
+    const doc = await receipt(2, supplierId);
+    const allocation = await allocate(doc, order);
+    expect((await requests.getCard(admin, card.requestId, true)).lineItems[0].orders[0].possibleMatches).toHaveLength(1);
+    const base = { currentUser: admin, documentId: doc.documentId, lineId: Number(allocation.line_id), allocationId: Number(allocation.allocation_id), lineOrderId: lineOrder.lineOrderId, quantity: 0.1 };
+    await conn.query('UPDATE onec_document_lines SET load_conflict_code = $2 WHERE onec_document_line_id = $1', [allocation.line_id, 'QUANTITY_BELOW_ALLOCATED']);
+    expect((await requests.getCard(admin, card.requestId, true)).lineItems[0].orders[0].possibleMatches).toEqual([]);
+    await expect(links.link({ ...base, requestId: randomUUID(), expectedVersion: Number(allocation.version) })).rejects.toMatchObject({ statusCode: 422, code: 'ONEC_LINE_CONFLICT' });
+    await conn.query('UPDATE onec_document_lines SET load_conflict_code = NULL WHERE onec_document_line_id = $1', [allocation.line_id]);
+    await conn.query('UPDATE onec_documents SET posted = false WHERE onec_document_id = $1', [doc.documentId]);
+    expect((await requests.getCard(admin, card.requestId, true)).lineItems[0].orders[0].possibleMatches).toEqual([]);
+    await expect(links.link({ ...base, requestId: randomUUID(), expectedVersion: Number(allocation.version) })).rejects.toMatchObject({ statusCode: 409, code: 'ONEC_DOCUMENT_NOT_ALLOCATABLE' });
+    await conn.query('UPDATE onec_documents SET posted = true WHERE onec_document_id = $1', [doc.documentId]);
+  });
+
+  it('R1: links of one allocation are summed exactly across units — two halves in m² can not exceed a 1-sheet receipt (CR1-2)', async () => {
+    const order = await makeOrder(4, Math.round(materialArea * 1500));
+    const card = await sentRequest([order]);
+    const lineOrder = card.lineItems[0].orders[0];
+    // Строка заявки в м² (одноразовая БД): количество = заказ + склад, как требует триггер строки.
+    await conn.query('BEGIN');
+    await conn.query('UPDATE supplier_request_line_orders SET quantity = 10 WHERE supplier_request_line_order_id = $1', [lineOrder.lineOrderId]);
+    await conn.query(`UPDATE supplier_request_lines SET unit_code = 'm2', quantity = 10, stock_quantity = 0 WHERE supplier_request_line_id = $1`, [card.lineItems[0].lineId]);
+    await conn.query('COMMIT');
+    const doc = await receipt(1, supplierId);
+    const allocation = await allocate(doc, order);
+    expect(Number(allocation.quantity)).toBe(1);
+    const base = { currentUser: admin, documentId: doc.documentId, lineId: Number(allocation.line_id), allocationId: Number(allocation.allocation_id), lineOrderId: lineOrder.lineOrderId };
+    // 1 лист + 0,002 м²: округление связи до тысячной листа дало бы ровно 1,000 листа; точная сумма — больше прихода.
+    const tooMuch = await links.link({ ...base, requestId: randomUUID(), quantity: Math.round((materialArea + 0.002) * 1000) / 1000, expectedVersion: Number(allocation.version) }).catch((error) => error);
+    expect(tooMuch).toMatchObject({ statusCode: 422, code: 'SUPPLIER_REQUEST_LINK_EXCEEDS_ALLOCATION' });
+    const exact = await links.link({ ...base, requestId: randomUUID(), quantity: Math.floor(materialArea * 1000) / 1000, expectedVersion: Number(allocation.version) });
+    expect(exact.changed).toBe(true);
+  });
+
+  it('R1: the database refuses a link to another order and concurrent links can not exceed the request (CR1-5)', async () => {
+    const order = await makeOrder(5, Math.round(materialArea * 1000));
+    const other = await makeOrder(6, Math.round(materialArea * 1000));
+    const card = await sentRequest([order]);
+    const lineOrder = card.lineItems[0].orders[0];
+    const docA = await receipt(1, supplierId);
+    const docB = await receipt(1, supplierId);
+    const a = await allocate(docA, order);
+    const b = await allocate(docB, order);
+    const foreign = await allocate(await receipt(1, supplierId), other);
+    await conn.query('BEGIN');
+    await conn.query('INSERT INTO order_resource_allocation_request_links (allocation_id, supplier_request_line_order_id, quantity, created_by) VALUES ($1, $2, 0.1, $3)',
+      [foreign.allocation_id, lineOrder.lineOrderId, Number(admin.id)]);
+    await expect(conn.query('COMMIT')).rejects.toMatchObject({ code: '23514' });
+    await conn.query('ROLLBACK').catch(() => undefined);
+    // Две параллельные привязки по разным приходам: каждая в пределах заявки, вместе — больше. Одна должна отказать.
+    const quantity = Math.round((lineOrder.quantity * 0.6) * 1000) / 1000;
+    const results = await Promise.allSettled([
+      links.link({ currentUser: admin, requestId: randomUUID(), documentId: docA.documentId, lineId: Number(a.line_id), allocationId: Number(a.allocation_id), lineOrderId: lineOrder.lineOrderId, quantity, expectedVersion: Number(a.version) }),
+      links2.link({ currentUser: admin, requestId: randomUUID(), documentId: docB.documentId, lineId: Number(b.line_id), allocationId: Number(b.allocation_id), lineOrderId: lineOrder.lineOrderId, quantity, expectedVersion: Number(b.version) }),
+    ]);
+    // Обе на один закуп: вторая либо упрётся в лимит заявки, либо в версию закупа — но не пройдёт сверх заказанного.
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const fulfilled = Number((await conn.query('SELECT COALESCE(sum(quantity), 0) AS q FROM order_resource_allocation_request_links WHERE supplier_request_line_order_id = $1 AND removed_at IS NULL', [lineOrder.lineOrderId])).rows[0].q);
+    expect(fulfilled).toBeLessThanOrEqual(lineOrder.quantity);
+  });
+
+  it('R2: concurrent direct INSERTs over the ordered quantity — the database trigger serializes and refuses one (CR2-1)', async () => {
+    const order = await makeOrder(8, Math.round(materialArea * 1000));
+    const card = await sentRequest([order]);
+    const lineOrder = card.lineItems[0].orders[0];
+    const a = await allocate(await receipt(1, supplierId), order);
+    const b = await allocate(await receipt(1, supplierId), order);
+    const quantity = Math.round(lineOrder.quantity * 0.6 * 1000) / 1000;
+    for (const [c, allocation] of [[conn, a], [conn2, b]] as const) {
+      await c.query('BEGIN');
+      await c.query('INSERT INTO order_resource_allocation_request_links (allocation_id, supplier_request_line_order_id, quantity, created_by) VALUES ($1, $2, $3, $4)',
+        [allocation.allocation_id, lineOrder.lineOrderId, quantity, Number(admin.id)]);
+    }
+    const commits = await Promise.allSettled([conn.query('COMMIT'), conn2.query('COMMIT')]);
+    await conn.query('ROLLBACK').catch(() => undefined);
+    await conn2.query('ROLLBACK').catch(() => undefined);
+    expect(commits.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(commits.find((result) => result.status === 'rejected')).toMatchObject({ reason: { code: '23514' } });
+  });
+
+  it('R1: with supplier requests switched off the suggestions ignore open requests (CR1-3)', async () => {
+    const order = await makeOrder(7, Math.round(materialArea * 1000));
+    await sentRequest([order]);
+    const doc = await receipt(2, supplierId);
+    const off = await workspace.allocationSuggestions(admin, doc.documentId);
+    const candidate = off.lines[0].candidates.find((entry) => entry.orderId === order)!;
+    expect(candidate.requestLinks).toEqual([]);
+    expect(candidate.reasons.map((reason) => reason.code)).not.toContain('request');
+  });
+
+  it('a document of a foreign kind (warehouse shipment) does not exist for procurement: card, suggestions, allocation, link — 404', async () => {
+    // Одноразовая БД: снимаем CHECK вида, как это сделает миграция загрузчика расходных документов.
+    await conn.query('ALTER TABLE onec_documents DROP CONSTRAINT IF EXISTS chk_onec_documents_kind');
+    const documentId = Number((await conn.query(
+      `INSERT INTO onec_documents (source_id, doc_kind, onec_ref_key, number, doc_date, posted, counterparty_name, amount)
+       VALUES ($1, 'sales_shipment', $2, $3, $4, true, $5, 1000) RETURNING onec_document_id`,
+      [sourceId, randomUUID(), `${tag.slice(-8)}-ship`, today, `${tag} Покупатель`])).rows[0].onec_document_id);
+    const lineId = Number((await conn.query(
+      `INSERT INTO onec_document_lines (onec_document_id, line_no, nomenclature_name, quantity, unit_code, sheet_material_type_id)
+       VALUES ($1, 1, 'лист', 2, 'sheet', $2) RETURNING onec_document_line_id`, [documentId, material])).rows[0].onec_document_line_id);
+    await expect(docs.getCard(admin, documentId, { procurementEnabled: true, canSeeAmounts: true })).rejects.toMatchObject({ statusCode: 404 });
+    await expect(workspace.allocationSuggestions(admin, documentId)).rejects.toMatchObject({ statusCode: 404 });
+    const list = await docs.list(admin, { tab: 'payments', page: 1, pageSize: 100 }, { procurementEnabled: true, canSeeAmounts: true });
+    expect(list.data.some((item) => item.documentId === documentId)).toBe(false);
+    const demand = (await workspace.listWorklist(admin, { preset: 'all', groupBy: 'none', sort: 'due', search: tag }, options))
+      .lines.find((line) => line.orderId === orderIds[0])!;
+    await expect(docs.addAllocation({ currentUser: admin, requestId: randomUUID(), documentId, lineId, orderId: orderIds[0], resourceKey: key(),
+      quantity: 1, expectedVersion: demand.procurementVersion, expectedDemandFingerprint: demand.demandFingerprint }))
+      .rejects.toMatchObject({ statusCode: 404 });
+  });
+
+});

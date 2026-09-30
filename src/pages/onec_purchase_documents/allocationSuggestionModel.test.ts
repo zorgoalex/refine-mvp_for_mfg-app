@@ -6,6 +6,9 @@ import {
   buildInitialDraft,
   canSubmitBatch,
   candidateDisplay,
+  candidateProposalUnmodified,
+  candidateRequestLinkNote,
+  candidateRequestLinksSignature,
   clearSuggestionDraft,
   computeLineTotals,
   computeOverallSummary,
@@ -514,5 +517,78 @@ describe('overallCheck', () => {
     expect(overallCheck({ overrun: true, ordersCount: 0 })).toEqual({ label: 'Есть перебор', tone: 'bad' });
     expect(overallCheck({ overrun: false, ordersCount: 0 })).toEqual({ label: 'Нечего распределять', tone: 'muted' });
     expect(overallCheck({ overrun: false, ordersCount: 2 })).toEqual({ label: 'Можно распределять', tone: 'ok' });
+  });
+});
+
+describe('ф.3б: связи автоподбора с заявками поставщикам', () => {
+  function withRequestLinks(): AllocationSuggestionsResponse {
+    const base = makeResponse();
+    return {
+      ...base,
+      lines: [{
+        ...base.lines[0],
+        candidates: [
+          {
+            ...base.lines[0].candidates[0],
+            reasons: [...base.lines[0].candidates[0].reasons, { code: 'request', label: 'по заявке 26-0007', tone: 'info' }],
+            requestLinks: [{ lineOrderId: 501, supplierRequestId: 7, requestNumber: '26-0007', quantity: 1, unit: 'sheet' }],
+          },
+          base.lines[0].candidates[1],
+        ],
+      }],
+    };
+  }
+
+  it('candidateRequestLinksSignature: пусто без связей, устойчиво к порядку элементов', () => {
+    const [withLinks, noLinks] = withRequestLinks().lines[0].candidates;
+    expect(candidateRequestLinksSignature(noLinks)).toBe('');
+    const reordered = { ...withLinks, requestLinks: [...(withLinks.requestLinks ?? [])].reverse() };
+    expect(candidateRequestLinksSignature(withLinks)).toBe(candidateRequestLinksSignature(reordered));
+    expect(candidateRequestLinksSignature(withLinks)).not.toBe('');
+  });
+
+  it('candidateProposalUnmodified: сравнивает с точностью до 0,001 единицы строки документа', () => {
+    const [candidate] = withRequestLinks().lines[0].candidates; // proposedInDocUnit: 1
+    expect(candidateProposalUnmodified(candidate, 1)).toBe(true);
+    expect(candidateProposalUnmodified(candidate, 1.0004)).toBe(true); // округляется к тому же значению
+    expect(candidateProposalUnmodified(candidate, 1.5)).toBe(false);
+  });
+
+  it('candidateRequestLinkNote: подсказка только когда есть связи и количество изменено', () => {
+    const [withLinks, noLinks] = withRequestLinks().lines[0].candidates;
+    expect(candidateRequestLinkNote(noLinks, { quantity: 5 })).toBeNull();
+    expect(candidateRequestLinkNote(withLinks, undefined)).toBeNull();
+    expect(candidateRequestLinkNote(withLinks, { quantity: 1 })).toBeNull();
+    expect(candidateRequestLinkNote(withLinks, { quantity: 2 })).toMatch(/Количество изменено/);
+  });
+
+  it('buildBatchRequest: связи едут в batch, только пока количество не тронуто', () => {
+    const response = withRequestLinks();
+    const draft = buildInitialDraft(response);
+    const built = buildBatchRequest(response, draft, 'req-links-1');
+    expect(built.request?.items[0]).toMatchObject({ orderId: 2971, requestLinks: [{ lineOrderId: 501, quantity: 1 }] });
+  });
+
+  it('buildBatchRequest: изменённое количество — без requestLinks в отправке', () => {
+    const response = withRequestLinks();
+    let draft = buildInitialDraft(response);
+    draft = setCandidateQuantity(draft, 1, 2971, 2);
+    const built = buildBatchRequest(response, draft, 'req-links-2');
+    expect(built.request?.items[0]).not.toHaveProperty('requestLinks');
+  });
+
+  it('reconcile: появление связей в свежем ответе сбрасывает старую правку («иной» контекст)', () => {
+    const before = makeResponse(); // без requestLinks
+    const edited = setCandidateQuantity(reconcileDraftWithResponse(null, before), 1, 2971, 0.5);
+    const after = withRequestLinks(); // теперь у того же кандидата есть requestLinks
+    const reconciled = reconcileDraftWithResponse(edited, after);
+    // Правка не восстановлена: свежее предложение (проверено по «сброшенному» quantity/edited).
+    expect(reconciled.lines[1].candidates[2971]).toMatchObject({ quantity: 1, edited: false });
+  });
+
+  it('reconcile: правка переживает перезагрузку, пока requestLinks не изменились', () => {
+    const response = withRequestLinks();
+    const edited = setCandidateQuantity(reconcileDraftWithResponse(null, response), 1, 2971, 0.5);
+    expect(reconcileDraftWithResponse(edited, response).lines[1].candidates[2971]).toMatchObject({ quantity: 0.5, edited: true });
   });
 });

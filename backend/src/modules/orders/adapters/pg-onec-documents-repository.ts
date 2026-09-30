@@ -16,6 +16,7 @@ import {
   type OnecAllocationResultDto,
   type OnecAllocationRole,
   type OnecDocKind,
+  PROCUREMENT_DOC_KINDS,
   type OnecDocumentCardResponseDto,
   type OnecDocumentLineDto,
   type OnecDocumentListItemDto,
@@ -27,6 +28,7 @@ import {
 } from '../application/onec-documents.types';
 import type { OrderResourceDemandLineDto, OrderResourceKind } from '../application/order-resource-demand.types';
 import { sheetAreaM2 } from '../domain/procurement-worklist';
+import { checkReceiptLinks, insertReceiptLinks, type CheckedReceiptLink } from './pg-request-links-repository';
 import {
   applyProcurement,
   buildScopedOrderWhere,
@@ -209,7 +211,8 @@ export class PgOnecDocumentsRepository {
     return this.database.transaction(async (client) => {
       await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
       const document = (await client.query<DocumentRow>(
-        `${DOCUMENT_SELECT_SQL} WHERE d.onec_document_id = $1`, [documentId])).rows[0];
+        `${DOCUMENT_SELECT_SQL} WHERE d.onec_document_id = $1 AND d.doc_kind = ANY($2::text[])`,
+        [documentId, PROCUREMENT_DOC_KINDS])).rows[0];
       if (!document) throw documentNotFound();
       const lines = await client.query<LineRow>(
         `SELECT l.*, COALESCE(smt.name, f.film_name) AS material_name
@@ -250,7 +253,7 @@ export class PgOnecDocumentsRepository {
       const row = procurement.find((candidate) => procurementRowKey(candidate) === command.resourceKey);
       const line = await lockDocumentLine(tx, command.documentId, command.lineId);
       assertAllocatable(line);
-      const role: OnecAllocationRole = line.doc_kind === 'purchase_receipt' ? 'receipt' : 'payment';
+      const role: OnecAllocationRole = allocationRoleOf(line.doc_kind);
       if (role === 'payment') requireFinance(command.currentUser);
       const measure = role === 'receipt' ? command.quantity : command.amount;
       if (measure === undefined || (role === 'receipt' ? command.amount !== undefined : command.quantity !== undefined)) {
@@ -397,6 +400,8 @@ export class PgOnecDocumentsRepository {
       const fail = (index: number, code: string, message: string) => failures.push({ index, code, message });
       const classified: Array<{ index: number; kind: 'noop' | 'new'; allocationId?: number }> = [];
       const newByLine = new Map<number, number>();
+      const checkedLinks = new Map<number, CheckedReceiptLink[]>();
+      const pendingLinks = new Map<number, number>();
       for (const [index, item] of items.entries()) {
         const line = lines.get(item.lineId)!;
         if (line.doc_kind !== 'purchase_receipt') { fail(index, 'ONEC_ALLOCATION_BATCH_RECEIPTS_ONLY', 'Групповое распределение — только для приходов'); continue; }
@@ -431,6 +436,20 @@ export class PgOnecDocumentsRepository {
         const demand = demandByKey.get(`${item.orderId}|${item.resourceKey}`);
         if (!demand) { fail(index, 'PROCUREMENT_RESOURCE_NOT_IN_ORDER', 'Этого материала нет в потребности заказа'); continue; }
         if (demand.demandFingerprint !== item.expectedDemandFingerprint) { fail(index, 'PROCUREMENT_DEMAND_CHANGED', 'Потребность в материале изменилась — подберите заново'); continue; }
+        // Связи с заявками (ф.3б): под теми же блокировками, заявки — FOR SHARE (закуп → заявка).
+        if (item.requestLinks && item.requestLinks.length > 0) {
+          if (!row) { fail(index, 'SUPPLIER_REQUEST_LINK_OTHER_ORDER', 'У заказа нет заявки на этот материал'); continue; }
+          try {
+            checkedLinks.set(index, await checkReceiptLinks(tx, {
+              links: item.requestLinks, procurementId: Number(row.order_resource_procurement_id), kind: itemKey.kind, refId: itemKey.refId,
+              line, allocationQuantity: toThousandthsExact(item.quantity), allocationId: null, pendingByLineOrder: pendingLinks,
+            }));
+          } catch (error) {
+            if (!(error instanceof ApiError)) throw error;
+            fail(index, error.code, error.message);
+            continue;
+          }
+        }
         classified.push({ index, kind: 'new' });
         newByLine.set(item.lineId, (newByLine.get(item.lineId) ?? 0) + toThousandthsExact(item.quantity));
       }
@@ -490,6 +509,7 @@ export class PgOnecDocumentsRepository {
           [procurementId, item.lineId, item.quantity, line.unit_code, command.origin, actor.userId],
         )).rows[0].id);
         allocationIds.set(entry.index, allocationId);
+        const requestLinks = await insertReceiptLinks(tx, allocationId, checkedLinks.get(entry.index) ?? [], actor);
         const afterRow = (await loadProcurementRows(tx, [order.orderId]))
           .find((candidate) => Number(candidate.order_resource_procurement_id) === procurementId)!;
         await writeAllocationEvent(tx, {
@@ -501,6 +521,7 @@ export class PgOnecDocumentsRepository {
           role: 'receipt', quantity: item.quantity, amount: null,
           before, after: procurementSnapshot(afterRow), version: Number(afterRow.version),
           source: 'erp_suggest', origin: command.origin, batchRequestId: command.requestId,
+          requestLinks,
         });
         suppliers.push({ kind: key.kind, refId: key.refId, line });
       }
@@ -563,6 +584,24 @@ export class PgOnecDocumentsRepository {
         `UPDATE order_resource_onec_allocations SET removed_at = now(), removed_by = $2 WHERE allocation_id = $1`,
         [command.allocationId, actor.userId],
       );
+      // Связи с заявками снимаются вместе с распределением (§5.5): история остаётся, исполнение заявки уменьшается.
+      const removedLinks = (await tx.query<{ link_id: string; line_order_id: string; quantity: string; supplier_request_id: string }>(
+        `WITH removed AS (
+           UPDATE order_resource_allocation_request_links SET removed_at = now(), removed_by = $2
+            WHERE allocation_id = $1 AND removed_at IS NULL
+            RETURNING link_id, supplier_request_line_order_id, quantity
+         )
+         SELECT removed.link_id::text, removed.supplier_request_line_order_id::text AS line_order_id,
+                removed.quantity::text, sl.supplier_request_id::text
+           FROM removed
+           JOIN supplier_request_line_orders lo ON lo.supplier_request_line_order_id = removed.supplier_request_line_order_id
+           JOIN supplier_request_lines sl ON sl.supplier_request_line_id = lo.supplier_request_line_id
+          ORDER BY removed.link_id`,
+        [command.allocationId, actor.userId],
+      )).rows.map((link) => ({
+        linkId: Number(link.link_id), lineOrderId: Number(link.line_order_id),
+        supplierRequestId: Number(link.supplier_request_id), quantity: Number(link.quantity),
+      }));
       await tx.query(
         `UPDATE order_resource_procurement SET version = version + 1, updated_at = now(), updated_by = $2
           WHERE order_resource_procurement_id = $1`,
@@ -581,6 +620,7 @@ export class PgOnecDocumentsRepository {
         quantity: allocation.quantity === null ? null : Number(allocation.quantity),
         amount: allocation.amount === null ? null : Number(allocation.amount),
         before, after: procurementSnapshot(afterRow), version: Number(afterRow.version),
+        removedRequestLinks: removedLinks,
       });
       return { changed: true, allocationId: command.allocationId, orderId: order.orderId, resourceKey: resourceKeyValue,
         line: await currentLine(tx, order, resourceKeyValue, command.currentUser) };
@@ -759,13 +799,26 @@ export async function lockDocumentLine(tx: DatabaseClient, documentId: number, l
     | 'doc_supplier_id' | 'doc_counterparty_ref_key' | 'doc_counterparty_name'>>(
     `SELECT d.doc_kind, d.posted, d.deleted_in_onec, d.amount AS doc_amount, d.number, d.supplier_id AS doc_supplier_id,
             d.counterparty_ref_key::text AS doc_counterparty_ref_key, d.counterparty_name AS doc_counterparty_name
-       FROM onec_documents d WHERE d.onec_document_id = $1`,
-    [documentId],
+       FROM onec_documents d WHERE d.onec_document_id = $1 AND d.doc_kind = ANY($2::text[])`,
+    [documentId, PROCUREMENT_DOC_KINDS],
   )).rows[0];
+  // Документ другого вида (расход, списание, перемещение — склад): для закупа его нет.
+  if (!header) throw new ApiError(404, 'ONEC_DOCUMENT_LINE_NOT_FOUND', 'Строка документа 1С не найдена');
   return { ...line, ...header } as LockedLineRow;
 }
 
-function assertAllocatable(line: LockedLineRow): void {
+function affectedRequestIds(input: { requestLinks?: Array<{ supplierRequestId: number }>; removedRequestLinks?: Array<{ supplierRequestId: number }> }): number[] {
+  return [...new Set([...(input.requestLinks ?? []), ...(input.removedRequestLinks ?? [])].map((link) => link.supplierRequestId))].sort((a, b) => a - b);
+}
+
+/** Роль распределения по виду документа — явно; чужой вид сюда не доходит (lockDocumentLine → 404). */
+function allocationRoleOf(kind: OnecDocKind): OnecAllocationRole {
+  if (kind === 'purchase_receipt') return 'receipt';
+  if (kind === 'cash_outflow' || kind === 'bank_outflow') return 'payment';
+  throw new ApiError(404, 'ONEC_DOCUMENT_NOT_FOUND', 'Документ 1С не найден');
+}
+
+export function assertAllocatable(line: LockedLineRow): void {
   if (!line.posted || line.deleted_in_onec) {
     throw new ApiError(409, 'ONEC_DOCUMENT_NOT_ALLOCATABLE', 'Документ не проведён или удалён в 1С — распределять его нельзя');
   }
@@ -942,7 +995,7 @@ async function upsertProcurementForAllocation(tx: DatabaseClient, input: {
   )).rows[0].id);
 }
 
-async function writeAllocationEvent(tx: DatabaseClient, input: {
+export async function writeAllocationEvent(tx: DatabaseClient, input: {
   event: string;
   changeType: 'allocation_added' | 'allocation_removed';
   order: LockedOrder;
@@ -966,6 +1019,9 @@ async function writeAllocationEvent(tx: DatabaseClient, input: {
   source?: 'erp_ui' | 'erp_suggest';
   origin?: 'suggested' | 'manual';
   batchRequestId?: string;
+  /** Связи с заявками поставщикам: созданные вместе с распределением (batch) или снятые вместе с ним (CR1-4). */
+  requestLinks?: Array<{ linkId: number; lineOrderId: number; supplierRequestId: number; quantity: number }>;
+  removedRequestLinks?: Array<{ linkId: number; lineOrderId: number; supplierRequestId: number; quantity: number }>;
 }): Promise<void> {
   await auditService.record(tx, {
     event: input.event,
@@ -995,6 +1051,8 @@ async function writeAllocationEvent(tx: DatabaseClient, input: {
       amount: input.amount,
       correlationId: input.requestId,
       ...(input.batchRequestId ? { batchRequestId: input.batchRequestId, allocationOrigin: input.origin, commandSource: input.source } : {}),
+      ...(input.requestLinks && input.requestLinks.length > 0 ? { requestLinks: input.requestLinks } : {}),
+      ...(input.removedRequestLinks && input.removedRequestLinks.length > 0 ? { removedRequestLinks: input.removedRequestLinks } : {}),
     },
     relatedEntities: [
       { entityType: 'order', entityId: input.order.orderId },
@@ -1002,6 +1060,7 @@ async function writeAllocationEvent(tx: DatabaseClient, input: {
       { entityType: 'order_resource_onec_allocation', entityId: input.allocationId },
       { entityType: 'onec_document', entityId: input.documentId },
       { entityType: input.kind === 'sheet_material' ? 'sheet_material_type' : 'film', entityId: input.refId },
+      ...affectedRequestIds(input).map((supplierRequestId) => ({ entityType: 'supplier_request', entityId: supplierRequestId })),
     ],
   });
   await tx.query(
@@ -1026,6 +1085,9 @@ async function writeAllocationEvent(tx: DatabaseClient, input: {
         requestId: input.requestId,
         correlationId: input.requestId,
         source: input.source ?? 'erp_ui',
+        ...(input.requestLinks && input.requestLinks.length > 0 ? { requestLinks: input.requestLinks } : {}),
+        ...(input.removedRequestLinks && input.removedRequestLinks.length > 0 ? { removedRequestLinks: input.removedRequestLinks } : {}),
+        ...(affectedRequestIds(input).length > 0 ? { supplierRequestIds: affectedRequestIds(input) } : {}),
       }),
       procurementOutboxKey(input.order.orderId, input.resourceKey, input.version),
     ],

@@ -186,3 +186,96 @@ describe('округление листов вниз не превращает �
     expect(result.candidates[0].reasons.find((r) => r.code === 'closes')?.label).toBe('закроет частично');
   });
 });
+
+describe('ф.3б: открытые заявки в подборе', () => {
+  const open = (overrides: Partial<import('./allocation-suggestions').OpenRequestLineInput> = {}) => ({
+    lineOrderId: 71, supplierRequestId: 7, requestNumber: '26-0007', supplierKey: 's:1', unit: 'sheet' as const, remaining: 1000, ...overrides,
+  });
+
+  it('заказ в открытой заявке этому поставщику — сразу после указанного в 1С, с причиной и разбиением по заявке', () => {
+    const [result] = plan({
+      lines: [line({ docUnit: 'sheet', sheetAreaM2: 5, capacityInDocUnit: 3 })],
+      candidates: [
+        candidate({ orderId: 1, need: 5 }),
+        candidate({ orderId: 2, need: 10, dueDate: '2026-11-01', urgency: 'normal', daysLeft: 30, openRequestLines: [open()] }),
+      ],
+      documentSupplierKeys: ['s:1'], documentSupplier: { supplierId: 1, counterpartyRefKey: null }, wastePercent: 0,
+    });
+    expect(result.candidates[0]).toMatchObject({ orderId: 2, proposedInDocUnit: 2 });
+    expect(result.candidates[0].reasons[0]).toMatchObject({ code: 'request', label: 'по заявке 26-0007' });
+    // Заявка на 1 лист: 1 лист привязан, второй — без ссылки.
+    expect(result.candidates[0].requestLinks).toEqual([{ lineOrderId: 71, supplierRequestId: 7, requestNumber: '26-0007', quantity: 1, unit: 'sheet' }]);
+    expect(result.candidates[1]).toMatchObject({ orderId: 1, proposedInDocUnit: 1, requestLinks: [] });
+  });
+
+  it('остаток заявки ведётся на весь документ (R3-6), единицы пересчитываются (м² строки ↔ листы заявки)', () => {
+    const results = plan({
+      lines: [
+        line({ lineId: 1, lineNo: 1, docUnit: 'm2', sheetAreaM2: 5, capacityInDocUnit: 5 }),
+        line({ lineId: 2, lineNo: 2, docUnit: 'm2', sheetAreaM2: 5, capacityInDocUnit: 5 }),
+      ],
+      candidates: [candidate({ orderId: 2, need: 10, openRequestLines: [open({ remaining: 1500 })] })],
+      documentSupplierKeys: ['s:1'], documentSupplier: { supplierId: 1, counterpartyRefKey: null }, wastePercent: 0,
+    });
+    expect(results[0].candidates[0].requestLinks).toEqual([expect.objectContaining({ lineOrderId: 71, quantity: 1 })]);
+    expect(results[1].candidates[0].requestLinks).toEqual([expect.objectContaining({ lineOrderId: 71, quantity: 0.5 })]);
+  });
+
+  it('заявка другому поставщику или без известного совпадения — не участвует', () => {
+    const [other] = plan({
+      lines: [line({ capacityInDocUnit: 3 })],
+      candidates: [candidate({ openRequestLines: [open({ supplierKey: 's:9', unit: 'm2' })] })],
+      documentSupplierKeys: ['s:1'], documentSupplier: { supplierId: 1, counterpartyRefKey: null },
+    });
+    expect(other.candidates[0].requestLinks).toEqual([]);
+    expect(other.candidates[0].reasons.map((reason) => reason.code)).not.toContain('request');
+  });
+});
+
+describe('ф.3б R1: лимит и точность связей в подборе', () => {
+  const open = (lineOrderId: number, remaining: number, unit: 'sheet' | 'm2' = 'm2') => ({
+    lineOrderId, supplierRequestId: lineOrderId, requestNumber: `26-${lineOrderId}`, supplierKey: 's:1', unit, remaining,
+  });
+
+  it('CR1-7: не больше 20 связей на позицию, остаток — без ссылки', () => {
+    const [result] = plan({
+      lines: [line({ docUnit: 'm2', sheetAreaM2: 5, capacityInDocUnit: 21 })],
+      candidates: [candidate({ need: 21, openRequestLines: Array.from({ length: 21 }, (_, index) => open(index + 1, 1000)) })],
+      documentSupplierKeys: ['s:1'], documentSupplier: { supplierId: 1, counterpartyRefKey: null }, wastePercent: 0,
+    });
+    expect(result.candidates[0].proposedInDocUnit).toBe(21);
+    expect(result.candidates[0].requestLinks).toHaveLength(20);
+  });
+
+  it('CR1-2: связи в листах по приходу в м² не превышают приход в сумме (вниз до 0,001 листа)', () => {
+    const [result] = plan({
+      lines: [line({ docUnit: 'm2', sheetAreaM2: 5.796, capacityInDocUnit: 2.9 })],
+      candidates: [candidate({ need: 10, openRequestLines: [open(1, 250, 'sheet'), open(2, 1000, 'sheet')] })],
+      documentSupplierKeys: ['s:1'], documentSupplier: { supplierId: 1, counterpartyRefKey: null }, wastePercent: 0,
+    });
+    const links = result.candidates[0].requestLinks;
+    const totalM2 = links.reduce((sum, link) => sum + link.quantity * 5.796, 0);
+    expect(links.map((link) => link.quantity)).toEqual([0.25, 0.25]);
+    expect(totalM2).toBeLessThanOrEqual(2.9 + 1e-9);
+  });
+});
+
+describe('ф.3б R2: исчерпанная заявка не даёт приоритета (CR2-4)', () => {
+  it('вторая строка прихода: заказ с уже покрытой заявкой не опережает более срочный', () => {
+    const results = plan({
+      lines: [
+        line({ lineId: 1, lineNo: 1, docUnit: 'm2', sheetAreaM2: 5, capacityInDocUnit: 5 }),
+        line({ lineId: 2, lineNo: 2, docUnit: 'm2', sheetAreaM2: 5, capacityInDocUnit: 5 }),
+      ],
+      candidates: [
+        candidate({ orderId: 1, need: 20, dueDate: '2026-11-01', urgency: 'normal', daysLeft: 30,
+          openRequestLines: [{ lineOrderId: 9, supplierRequestId: 9, requestNumber: '26-0009', supplierKey: 's:1', unit: 'sheet', remaining: 1000 }] }),
+        candidate({ orderId: 2, need: 10, dueDate: '2026-10-01', urgency: 'critical', daysLeft: 2 }),
+      ],
+      documentSupplierKeys: ['s:1'], documentSupplier: { supplierId: 1, counterpartyRefKey: null }, wastePercent: 0,
+    });
+    expect(results[0].candidates[0]).toMatchObject({ orderId: 1, proposedInDocUnit: 5 });
+    expect(results[1].candidates[0].orderId).toBe(2);
+    expect(results[1].candidates.find((entry) => entry.orderId === 1)!.requestLinks).toEqual([]);
+  });
+});
