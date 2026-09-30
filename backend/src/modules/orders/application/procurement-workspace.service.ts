@@ -18,7 +18,7 @@ export interface ProcurementWorkspaceRepositoryPort {
   listWorklist(
     currentUser: CurrentUser,
     query: ProcurementWorklistQuery,
-    options: { procurementEnabled: boolean; supplyWorkspaceEnabled: boolean },
+    options: { procurementEnabled: boolean; supplyWorkspaceEnabled: boolean; supplierRequestsEnabled?: boolean },
   ): Promise<ProcurementWorklistResponseDto>;
   getSavedViews(currentUser: CurrentUser): Promise<ProcurementSavedViewDto[]>;
   replaceSavedViews(currentUser: CurrentUser, views: ProcurementSavedViewDto[]): Promise<ProcurementSavedViewDto[]>;
@@ -77,7 +77,7 @@ export class ProcurementWorkspaceService {
   async listWorklist(
     user: CurrentUser,
     query: ProcurementWorklistQuery,
-    options: { procurementEnabled: boolean; supplyWorkspaceEnabled: boolean },
+    options: { procurementEnabled: boolean; supplyWorkspaceEnabled: boolean; supplierRequestsEnabled?: boolean },
   ): Promise<ProcurementWorklistResponseDto> {
     this.requireView(user);
     return this.ports.repository.listWorklist(user, query, options);

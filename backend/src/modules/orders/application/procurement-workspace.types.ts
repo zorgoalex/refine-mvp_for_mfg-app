@@ -55,6 +55,17 @@ export interface WorklistSupplierDto {
   others: Array<{ key: string; name: string }>;
 }
 
+/** Заявка поставщику, в которой есть эта позиция (черновик или отправленная, §5.5). */
+export interface WorklistRequestRefDto {
+  requestId: number;
+  requestNumber: string;
+  status: 'draft' | 'sent';
+  supplierName: string;
+  /** Заказано для этого заказа, в единице строки заявки. */
+  quantity: number;
+  unit: 'sheet' | 'm2' | 'lm' | 'pcs' | 'set';
+}
+
 /** Строка «заказ × материал». Все количества — в единице потребности `unit`. */
 export interface ProcurementWorklistLineDto {
   lineKey: string;
@@ -75,7 +86,10 @@ export interface ProcurementWorklistLineDto {
   /** Приходы в единицах, не пересчитываемых в единицу потребности (§4.4). */
   receivedIncompatibleCount: number;
   covered: number;
+  /** Заказано у поставщиков по отправленным заявкам и ещё не пришло (в единице потребности, §5.5). */
   orderedOpen: number;
+  /** Черновики и отправленные заявки с этой позицией. */
+  requests: WorklistRequestRefDto[];
   deficit: number | null;
   coverage: WorklistCoverage;
   needsAction: boolean;
@@ -111,7 +125,7 @@ export interface ProcurementWorklistResponseDto {
   /** Окно заказов: плановая дата в [plannedFrom, plannedTo] (null — без границы) или без даты. */
   window: { plannedFrom: string | null; plannedTo: string | null; ordersCount: number };
   today: string;
-  capabilities: { supplyWorkspace: boolean; procurement: boolean };
+  capabilities: { supplyWorkspace: boolean; procurement: boolean; supplierRequests: boolean };
   refreshedAt: string;
 }
 

@@ -1194,6 +1194,16 @@ export function buildScopedOrderWhere(
   return { whereSql: clauses.join('\n        AND '), params };
 }
 
+/**
+ * Scope пользователя без фильтра активности: заказ в корзине по-прежнему «свой» или «чужой». Для проверки
+ * полномочий над связями, которые переживают удаление заказа (заявки поставщикам, CR3-1), — не для чтения данных.
+ */
+export function buildOwnershipOrderWhere(currentUser: CurrentUser, params: unknown[] = []): { whereSql: string; params: unknown[] } {
+  const scope: Scope = rolePolicyForUser(currentUser).orders.view;
+  const actorIndex = scopeNeedsActor(scope) ? params.push(normalizeActorUserId(currentUser.id)) : null;
+  return { whereSql: [`o.order_kind = 'production_order'`, buildScopePredicate(scope, actorIndex)].join('\n        AND '), params };
+}
+
 function buildOrderWhere(
   command: ListOrderResourceDemandsCommand,
   options: OrderResourceReadOptions,

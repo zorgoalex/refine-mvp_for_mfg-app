@@ -86,7 +86,11 @@ export class ProcurementWorkspaceController {
   async worklist(@Req() request: RequestWithCurrentUser, @Query() rawQuery: unknown): Promise<ProcurementWorklistResponseDto> {
     const user = this.requireWorkspace(request, false);
     const query = parse(worklistQuerySchema, rawQuery, 'PROCUREMENT_WORKLIST_QUERY_INVALID') as ProcurementWorklistQuery;
-    return this.workspace.listWorklist(user, query, { procurementEnabled: true, supplyWorkspaceEnabled: true });
+    return this.workspace.listWorklist(user, query, {
+      procurementEnabled: true,
+      supplyWorkspaceEnabled: true,
+      supplierRequestsEnabled: this.runtimeConfig.getFeatureFlags().supplierRequestsEnabled === true,
+    });
   }
 
   @ApiResponse({ status: 200, description: 'Saved worklist views of the current user' })

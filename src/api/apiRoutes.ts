@@ -117,6 +117,14 @@ export const apiRoutes = {
     worklist: backendApiPath('/procurement/worklist'),
     savedViews: backendApiPath('/procurement/worklist/saved-views'),
     settings: backendApiPath('/procurement/settings'),
+    supplierRequests: {
+      list: backendApiPath('/procurement/supplier-requests'),
+      drafts: backendApiPath('/procurement/supplier-requests/drafts'),
+      byId: (supplierRequestId: number) => backendApiPath(`/procurement/supplier-requests/${supplierRequestId}`),
+      send: (supplierRequestId: number) => backendApiPath(`/procurement/supplier-requests/${supplierRequestId}/send`),
+      close: (supplierRequestId: number) => backendApiPath(`/procurement/supplier-requests/${supplierRequestId}/close`),
+      cancel: (supplierRequestId: number) => backendApiPath(`/procurement/supplier-requests/${supplierRequestId}/cancel`),
+    },
   },
   onecDocuments: {
     list: backendApiPath('/procurement/onec-documents'),

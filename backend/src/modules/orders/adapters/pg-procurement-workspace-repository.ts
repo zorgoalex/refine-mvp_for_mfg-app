@@ -64,7 +64,7 @@ interface SettingsRow extends QueryResultRow {
   updated_by_name: string | null;
 }
 
-interface WorklistOrderRow extends ResourceDemandOrderRow {
+export interface WorklistOrderRow extends ResourceDemandOrderRow {
   planned_completion_date: string | null;
   order_status_name: string | null;
   ref_key_1c?: string | null;
@@ -136,6 +136,8 @@ const SETTINGS_SELECT = `
 export interface ProcurementWorklistReadOptions {
   procurementEnabled: boolean;
   supplyWorkspaceEnabled: boolean;
+  /** BACKEND_SUPPLIER_REQUESTS_ENABLED: заявки поставщикам читаются только при включённом флаге. */
+  supplierRequestsEnabled?: boolean;
 }
 
 export class PgProcurementWorkspaceRepository {
@@ -201,7 +203,8 @@ export class PgProcurementWorkspaceRepository {
       const today = todayInAlmaty();
       const window = worklistWindow(query, today, settings.overdueWindowDays);
       const orders = await loadWorklistOrders(client, currentUser, window, query, settings.leadDays);
-      const { lines: allLines, orderIds } = await buildWorklistLines(client, orders, settings, today, options.procurementEnabled);
+      const { lines: allLines, orderIds } = await buildWorklistLines(client, orders, settings, today, options.procurementEnabled,
+        options.supplierRequestsEnabled === true);
 
       const onecLineKeys = query.onecDocumentId === undefined || !options.procurementEnabled
         ? (query.onecDocumentId === undefined ? undefined : new Set<string>())
@@ -236,7 +239,11 @@ export class PgProcurementWorkspaceRepository {
         },
         window: { ...window, ordersCount: orders.length },
         today,
-        capabilities: { supplyWorkspace: options.supplyWorkspaceEnabled, procurement: options.procurementEnabled },
+        capabilities: {
+          supplyWorkspace: options.supplyWorkspaceEnabled,
+          procurement: options.procurementEnabled,
+          supplierRequests: options.supplierRequestsEnabled === true,
+        },
         refreshedAt: new Date().toISOString(),
       };
     });
@@ -441,6 +448,7 @@ export async function buildWorklistLines(
   settings: ProcurementSettingsDto,
   today: string,
   procurementEnabled: boolean,
+  supplierRequestsEnabled = false,
 ): Promise<{ lines: ProcurementWorklistLineDto[]; orderIds: number[]; geometry: Map<number, { areaM2: number | null; supplier: { id: number; name: string } | null }> }> {
   const projected = await loadProjectedOrders(client, orders, undefined);
   const orderIds = projected.map((order) => order.orderId);
@@ -456,6 +464,10 @@ export async function buildWorklistLines(
   const orderById = new Map(orders.map((row) => [Number(row.order_id), row]));
   const procurementByKey = new Map(procurement.map((row) => [`${Number(row.order_id)}|${procurementRowKey(row)}`, row]));
   const receiptsByProcurement = groupBy(receipts, (row) => Number(row.order_resource_procurement_id));
+  const requestRefs = procurementEnabled && supplierRequestsEnabled
+    ? groupBy(await loadRequestRefs(client, procurement.map((row) => Number(row.order_resource_procurement_id))),
+      (row) => Number(row.order_resource_procurement_id))
+    : new Map<number, RequestRefRow[]>();
 
   const lines: ProcurementWorklistLineDto[] = [];
   for (const order of projected) {
@@ -478,6 +490,15 @@ export async function buildWorklistLines(
         else receivedThousandths += Math.round(converted * 1000);
       }
       const received = receivedThousandths / 1000;
+      const refs = row ? (requestRefs.get(Number(row.order_resource_procurement_id)) ?? []) : [];
+      // Заказано по отправленным заявкам (§5.5): в ф.3а приходы к заявкам ещё не привязываются, исполнено = 0.
+      let orderedThousandths = 0;
+      for (const ref of refs) {
+        if (ref.status !== 'sent') continue;
+        const converted = toDemandUnit(Number(ref.quantity), ref.unit_code, unit, { sheetAreaM2: geo?.areaM2 ?? null });
+        if (converted !== null) orderedThousandths += Math.round(converted * 1000);
+      }
+      const orderedOpen = orderedThousandths / 1000;
       const purchased = row?.purchased === true;
       const demandChangedSinceMark = purchased && row?.demand_fingerprint_at_mark !== projectedLine.demandFingerprint;
       const coverage = computeCoverage({
@@ -488,7 +509,7 @@ export async function buildWorklistLines(
         hasActiveReceipts: countable.length > 0,
         demandChangedSinceMark,
         quantityAtMark: row?.quantity_at_mark === null || row?.quantity_at_mark === undefined ? null : Number(row.quantity_at_mark),
-        orderedOpen: 0,
+        orderedOpen,
       });
       lines.push({
         lineKey: key,
@@ -507,7 +528,15 @@ export async function buildWorklistLines(
         received,
         receivedIncompatibleCount: incompatible,
         covered: coverage.covered,
-        orderedOpen: 0,
+        orderedOpen,
+        requests: refs.map((ref) => ({
+          requestId: Number(ref.supplier_request_id),
+          requestNumber: ref.request_number,
+          status: ref.status,
+          supplierName: ref.supplier_name,
+          quantity: Number(ref.quantity),
+          unit: ref.unit_code,
+        })),
         deficit: coverage.deficit,
         coverage: coverage.coverage,
         needsAction: coverage.needsAction,
@@ -629,6 +658,38 @@ export function buildNarrowingPredicates(query: ProcurementWorklistQuery, leadDa
 }
 
 /** Кандидаты автоподбора: активные заказы в scope, в потребности которых есть материалы прихода. */
+/** Настройки снабжения (singleton); нет строки — миграции не применены. */
+export async function loadProcurementSettings(client: DatabaseClient): Promise<ProcurementSettingsDto> {
+  const row = (await client.query<SettingsRow>(SETTINGS_SELECT)).rows[0];
+  if (!row) throw settingsMissing();
+  return settingsDto(row);
+}
+
+/**
+ * Заказы по id для черновиков заявок (вызывающая сторона уже заблокировала их с проверкой scope). `done` —
+ * выданные/завершённые и «Готов к выдаче»: материал им уже не нужен (как окно рабочего списка).
+ */
+export async function loadWorklistOrdersByIds(
+  client: DatabaseClient,
+  orderIds: number[],
+): Promise<Array<WorklistOrderRow & { done: boolean }>> {
+  if (orderIds.length === 0) return [];
+  return (await client.query<WorklistOrderRow & { done: boolean }>(
+    `SELECT o.order_id, o.order_name, (p.code || '-' || o.order_name) AS full_number, o.order_date,
+            p.code AS project_code, c.client_name, o.client_id, o.updated_at,
+            o.planned_completion_date::text AS planned_completion_date, os.order_status_name,
+            (o.issue_date IS NOT NULL OR o.completion_date IS NOT NULL
+              OR COALESCE(os.order_status_code, '') = ANY ($2::text[])) AS done
+       FROM orders o
+       JOIN projects p ON p.project_id = o.project_id
+       LEFT JOIN clients c ON c.client_id = o.client_id
+       LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
+      WHERE o.order_id = ANY($1::bigint[])
+      ORDER BY o.order_id`,
+    [orderIds, PROCUREMENT_WORKLIST_DONE_STATUS_CODES],
+  )).rows;
+}
+
 async function loadSuggestionOrders(
   client: DatabaseClient,
   currentUser: CurrentUser,
@@ -672,7 +733,7 @@ async function loadSuggestionOrders(
   return rows;
 }
 
-async function scopedOrderIds(client: DatabaseClient, currentUser: CurrentUser, orderIds: number[]): Promise<Set<number>> {
+export async function scopedOrderIds(client: DatabaseClient, currentUser: CurrentUser, orderIds: number[]): Promise<Set<number>> {
   if (orderIds.length === 0) return new Set();
   const params: unknown[] = [];
   const { whereSql } = buildScopedOrderWhere(currentUser, undefined, params);
@@ -690,6 +751,32 @@ async function scopedOrderIds(client: DatabaseClient, currentUser: CurrentUser, 
 
 function uniqueIds(values: Array<string | number | null>): number[] {
   return [...new Set(values.filter((value): value is string | number => value !== null).map(Number))].sort((a, b) => a - b);
+}
+
+interface RequestRefRow extends QueryResultRow {
+  order_resource_procurement_id: string | number;
+  supplier_request_id: string | number;
+  request_number: string;
+  status: 'draft' | 'sent';
+  supplier_name: string;
+  quantity: string | number;
+  unit_code: ProcurementDocUnit;
+}
+
+/** Черновики и отправленные заявки по закупам (§5.5); закрытые и отменённые не участвуют. */
+async function loadRequestRefs(client: DatabaseClient, procurementIds: number[]): Promise<RequestRefRow[]> {
+  if (procurementIds.length === 0) return [];
+  return (await client.query<RequestRefRow>(
+    `SELECT lo.order_resource_procurement_id, r.supplier_request_id, r.request_number, r.status, r.supplier_name,
+            lo.quantity, l.unit_code
+       FROM supplier_request_line_orders lo
+       JOIN supplier_request_lines l ON l.supplier_request_line_id = lo.supplier_request_line_id
+       JOIN supplier_requests r ON r.supplier_request_id = l.supplier_request_id
+      WHERE lo.order_resource_procurement_id = ANY($1::bigint[])
+        AND r.status IN ('draft', 'sent')
+      ORDER BY r.supplier_request_id, lo.supplier_request_line_order_id`,
+    [procurementIds],
+  )).rows;
 }
 
 async function loadReceipts(client: DatabaseClient, orderIds: number[]): Promise<ReceiptRow[]> {

@@ -4207,8 +4207,10 @@ paths:
         Покрытие (пришло/заказано/дефицит), срок «нужно к» (плановая дата − leadDays рабочих дней), срочность,
         основной поставщик (ручной из справочника, иначе первый по приходам). Все фильтры — на сервере; строки
         отдаются целиком (до 3000), листание — на клиенте. Заказы — только в scope orders.view, незавершённые и
-        невыданные, в окне плановой даты. Требует BACKEND_RESOURCE_PROCUREMENT_ENABLED и
-        BACKEND_PROCUREMENT_WORKSPACE_ENABLED, иначе 503 PROCUREMENT_WORKSPACE_DISABLED.
+        невыданные, в окне плановой даты. С BACKEND_SUPPLIER_REQUESTS_ENABLED строка получает requests[]
+        (черновики и отправленные заявки) и orderedOpen — заказано по отправленным заявкам. Требует
+        BACKEND_RESOURCE_PROCUREMENT_ENABLED и BACKEND_PROCUREMENT_WORKSPACE_ENABLED, иначе 503
+        PROCUREMENT_WORKSPACE_DISABLED.
       security:
         - bearerAuth: []
       x-permission: procurement.view
@@ -4362,6 +4364,325 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/supplier-requests:
+    get:
+      tags:
+        - Orders
+      operationId: listSupplierRequests
+      summary: Заявки поставщикам — список
+      description: >-
+        Черновики и отправленные — первыми, до 200 заявок; счётчики по статусам. Заказы заявки — только в scope
+        orders.view, остальные — числом hiddenOrdersCount. Требует BACKEND_RESOURCE_PROCUREMENT_ENABLED,
+        BACKEND_PROCUREMENT_WORKSPACE_ENABLED и BACKEND_SUPPLIER_REQUESTS_ENABLED, иначе 503 SUPPLIER_REQUESTS_DISABLED.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      parameters:
+        - { name: status, in: query, required: false, description: "Через запятую: draft, sent, closed, cancelled", schema: { type: string } }
+        - { name: search, in: query, required: false, schema: { type: string, maxLength: 200 } }
+      responses:
+        '200':
+          description: Заявки, счётчики по статусам, truncated
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/supplier-requests/drafts:
+    post:
+      tags:
+        - Orders
+      operationId: createSupplierRequestDrafts
+      summary: Сформировать черновики заявок из позиций рабочего списка
+      description: >-
+        По черновику на основного поставщика позиции, по строке на материал; количество — дефицит (+ запас на
+        обрезки для потребности по площади), листы — вверх до 0,001 на заказ и до целого на строку (разница — «на
+        склад»). Позиции без дефицита, закрытые заказы и позиции, уже стоящие в черновике, пропускаются
+        (skipped[]); если пропущено всё — 422 SUPPLIER_REQUEST_NOTHING_TO_ORDER. Повтор с тем же requestId и телом
+        возвращает сохранённый результат; другое тело или пользователь — 409 IDEMPOTENCY_KEY_REUSED.
+        Заказ вне scope → 404.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [requestId, items]
+              properties:
+                requestId: { type: string, format: uuid }
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [orderId, resourceKey]
+                    properties:
+                      orderId: { type: integer, minimum: 1 }
+                      resourceKey: { type: string, pattern: '^(sheet_material|film):[1-9][0-9]{0,15}$' }
+      responses:
+        '200':
+          description: Созданные заявки (номер YY-XXXX) и пропущенные позиции
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/supplier-requests/{supplierRequestId}:
+    parameters:
+      - name: supplierRequestId
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1 }
+    get:
+      tags:
+        - Orders
+      operationId: getSupplierRequest
+      summary: Карточка заявки поставщику
+      description: Строки с заказами в scope (остальные — числом), доступные действия.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      responses:
+        '200':
+          description: Карточка заявки
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      tags:
+        - Orders
+      operationId: updateSupplierRequest
+      summary: Изменить черновик заявки
+      description: >-
+        Только черновик (иначе 409 SUPPLIER_REQUEST_NOT_EDITABLE), expectedVersion (иначе 409 с актуальной
+        карточкой). lines — полная замена: строки и заказы, которых нет в списке, удаляются; «на склад» =
+        количество − Σ заказов (≥ 0); листы — целые. Нужны procurement.view и procurement.manage и доступ ко
+        всем заказам заявки, включая заказы в корзине, — иначе 403 SUPPLIER_REQUEST_SCOPE (так же send/close/cancel).
+        Заказы в корзине интерфейс не показывает — сохранение черновика убирает их. То же содержимое — no-op
+        (changed=false).
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 0 }
+                comment: { type: string, nullable: true, maxLength: 2000 }
+                expectedDate: { type: string, format: date, nullable: true }
+                supplierId: { type: integer, minimum: 1, nullable: true, description: 'null — «Поставщик не указан»' }
+                lines:
+                  type: array
+                  maxItems: 100
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [lineId, quantity, orders]
+                    properties:
+                      lineId: { type: integer, minimum: 1 }
+                      quantity: { type: number, exclusiveMinimum: 0 }
+                      orders:
+                        type: array
+                        maxItems: 200
+                        items:
+                          type: object
+                          additionalProperties: false
+                          required: [lineOrderId, quantity]
+                          properties:
+                            lineOrderId: { type: integer, minimum: 1 }
+                            quantity: { type: number, exclusiveMinimum: 0 }
+      responses:
+        '200':
+          description: changed и актуальная карточка заявки
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/supplier-requests/{supplierRequestId}/send:
+    parameters:
+      - name: supplierRequestId
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1 }
+    post:
+      tags:
+        - Orders
+      operationId: sendSupplierRequest
+      summary: Отметить заявку отправленной
+      description: >-
+        draft → sent; нужен поставщик (иначе 422 SUPPLIER_REQUEST_SUPPLIER_REQUIRED). Уже sent — no-op. Отправка — только смена статуса, во внешние системы ничего не уходит.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: changed и актуальная карточка заявки
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/supplier-requests/{supplierRequestId}/close:
+    parameters:
+      - name: supplierRequestId
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1 }
+    post:
+      tags:
+        - Orders
+      operationId: closeSupplierRequest
+      summary: Закрыть заявку
+      description: >-
+        sent → closed; уже closed — no-op; прочие переходы — 409 SUPPLIER_REQUEST_INVALID_TRANSITION.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: changed и актуальная карточка заявки
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/supplier-requests/{supplierRequestId}/cancel:
+    parameters:
+      - name: supplierRequestId
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1 }
+    post:
+      tags:
+        - Orders
+      operationId: cancelSupplierRequest
+      summary: Отменить заявку
+      description: >-
+        draft | sent → cancelled; уже cancelled — no-op; из closed — 409 SUPPLIER_REQUEST_INVALID_TRANSITION.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: changed и актуальная карточка заявки
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
         '422':

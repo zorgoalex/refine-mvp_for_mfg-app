@@ -60,6 +60,9 @@ import { PgOrderResourceProcurementRepository } from './adapters/pg-order-resour
 import { PgProcurementWorkspaceRepository } from './adapters/pg-procurement-workspace-repository';
 import { ProcurementWorkspaceService } from './application/procurement-workspace.service';
 import { ProcurementWorkspaceController } from './http/procurement-workspace.controller';
+import { PgSupplierRequestsRepository } from './adapters/pg-supplier-requests-repository';
+import { SupplierRequestsService } from './application/supplier-requests.service';
+import { SupplierRequestsController } from './http/supplier-requests.controller';
 import { OrderSnapshotController } from './http/order-snapshot.controller';
 import { OrdersController } from './http/orders.controller';
 import { OrderHdfSettingsController } from './http/order-hdf-settings.controller';
@@ -95,6 +98,7 @@ export function shouldEnableOrderDeadlineSync(input: {
     OrderResourceDemandController,
     OrderResourceProcurementController,
     OnecDocumentsController,
+    SupplierRequestsController,
     ProcurementWorkspaceController,
     OrderHdfSettingsController,
     OrdersController,
@@ -215,6 +219,15 @@ export function shouldEnableOrderDeadlineSync(input: {
       useFactory: (database: DatabaseService) =>
         new ProcurementWorkspaceService({
           repository: new PgProcurementWorkspaceRepository(database),
+          auditClient: database,
+        }),
+      inject: [DatabaseService],
+    },
+    {
+      provide: SupplierRequestsService,
+      useFactory: (database: DatabaseService) =>
+        new SupplierRequestsService({
+          repository: new PgSupplierRequestsRepository(database),
           auditClient: database,
         }),
       inject: [DatabaseService],

@@ -204,3 +204,18 @@
   color: var(--rr-muted);
   font-size: 13px;
 }
+
+/* Сверка «заявка → приход → оплата» (раздел «Заявки поставщикам») — как .steps/.step мокапа. */
+.rr-screen .rr-steps { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rr-screen .rr-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  padding: 2px 9px;
+  border-radius: 12px;
+  border: 1px solid var(--rr-border);
+}
+.rr-screen .rr-step--done { background: var(--rr-ok-soft); color: var(--rr-ok); border-color: transparent; }
+.rr-screen .rr-step--part { background: var(--rr-warn-soft); color: var(--rr-warn); border-color: transparent; }
+.rr-screen .rr-step--todo { background: var(--rr-none-soft); color: var(--rr-muted); border-color: transparent; }

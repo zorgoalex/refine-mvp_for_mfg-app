@@ -2,6 +2,7 @@ import { DeleteOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons'
 import { Alert, Button, DatePicker, Empty, Input, Modal, Select, Space, Tag, message } from 'antd';
 import dayjs from 'dayjs';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useGetIdentity } from '@refinedev/core';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ordersApi, subscribeOrderDataChanged } from '../../api/ordersApi';
 import { procurementWorkspaceApi } from '../../api/procurementWorkspaceApi';
@@ -12,6 +13,7 @@ import type {
   WorklistGroupBy,
   WorklistPreset,
 } from '../../api/types/procurementWorkspaceApi.types';
+import type { UserIdentity } from '../../types/auth';
 import { Segmented } from '../../ui/Segmented';
 import { Table, Tooltip, type TableProps } from '../../ui/tooltipDelay';
 import { useProcurementPermission } from '../order_resource_requirements/ProcurementParts';
@@ -19,6 +21,7 @@ import {
   buildOnecDocumentFilterOptionGroups,
   type OnecDocumentFilterDoc,
 } from '../order_resource_requirements/onecDocumentFilter';
+import { buildDraftPreviewItems, requestRefTag, saveDraftPreview } from './supplierRequestsHelpers';
 import {
   COVERAGE_LABELS,
   coveragePercents,
@@ -53,9 +56,11 @@ export interface WorklistSectionProps {
   active: boolean;
   /** Счётчик срочных позиций — для бейджа вкладки. */
   onUrgentCount?: (count: number) => void;
+  /** `capabilities` последнего ответа — чтобы родитель мог показать/скрыть вкладку «Заявки поставщикам». */
+  onCapabilities?: (capabilities: ProcurementWorklistResponse['capabilities']) => void;
 }
 
-export function WorklistSection({ active, onUrgentCount }: WorklistSectionProps) {
+export function WorklistSection({ active, onUrgentCount, onCapabilities }: WorklistSectionProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const state = useMemo(() => parseWorklistSearch(searchParams), [searchParams]);
   const setState = useCallback((patch: Partial<WorklistState>) => {
@@ -106,6 +111,7 @@ export function WorklistSection({ active, onUrgentCount }: WorklistSectionProps)
   }, [active, paramsKey, revision]);
 
   useEffect(() => { if (response) onUrgentCount?.(response.counts.urgent); }, [onUrgentCount, response]);
+  useEffect(() => { if (response) onCapabilities?.(response.capabilities); }, [onCapabilities, response]);
 
   const stale = loading || responseKey !== paramsKey || error !== null;
   const staleRef = useRef(stale);
@@ -176,6 +182,21 @@ export function WorklistSection({ active, onUrgentCount }: WorklistSectionProps)
     else Modal.warning({ title: `Отмечено ${done} из ${plan.requests.length}`, content: failures.join('\n') });
     refresh();
   }, [markBlockReason, plan, refresh]);
+
+  // «Сформировать заявки» (план §6): превью выделения — в sessionStorage, переход на раздел «requests».
+  const { data: identity } = useGetIdentity<UserIdentity>();
+  const identityId = identity?.id === undefined || identity?.id === null ? null : String(identity.id);
+  const formRequests = useCallback(() => {
+    const items = buildDraftPreviewItems(selectedLines);
+    if (items.length === 0) { message.info('У выбранных позиций нет непокрытого дефицита — заказывать нечего'); return; }
+    if (identityId === null) { message.info('Профиль ещё загружается — повторите через секунду'); return; }
+    saveDraftPreview(identityId, items);
+    setSearchParams((current) => {
+      const params = new URLSearchParams(current);
+      params.set('section', 'requests');
+      return params;
+    }, { replace: true });
+  }, [identityId, selectedLines, setSearchParams]);
 
   const exportExcel = useCallback(async () => {
     if (staleRef.current) return;
@@ -414,6 +435,9 @@ export function WorklistSection({ active, onUrgentCount }: WorklistSectionProps)
               Отметить «Закуплено»
             </Button>
           </Tooltip>
+          {response?.capabilities.supplierRequests && (
+            <Button disabled={stale} onClick={formRequests}>Сформировать заявки</Button>
+          )}
           <Button disabled={stale} onClick={() => void exportExcel()}>Выгрузить XLS</Button>
           <Button onClick={() => setSelected(new Set())}>Снять выделение</Button>
         </div>
@@ -524,6 +548,14 @@ function useWorklistColumns(today: string | null): TableProps<ProcurementWorklis
               {line.purchaseOrigin === 'manual' && !line.received ? ' · отмечено вручную' : ''}
               {line.receivedIncompatibleCount > 0 ? ` · приходов в других единицах: ${line.receivedIncompatibleCount}` : ''}
             </span>
+            {(line.requests ?? []).length > 0 && (
+              <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>
+                {(line.requests ?? []).map((ref) => {
+                  const tag = requestRefTag(ref);
+                  return <span key={ref.requestId} className={`rr-tag rr-tag--${tag.tone}`}>{tag.label}</span>;
+                })}
+              </span>
+            )}
           </div>
         );
       },

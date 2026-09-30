@@ -11,6 +11,8 @@ export interface OrdersHttpFeatureFlags {
   resourceProcurementEnabled?: boolean;
   /** BACKEND_PROCUREMENT_WORKSPACE_ENABLED: вкладка «Экран снабжения» (рабочий список). */
   procurementWorkspaceEnabled?: boolean;
+  /** BACKEND_SUPPLIER_REQUESTS_ENABLED: заявки поставщикам (экран снабжения, ф.3). */
+  supplierRequestsEnabled?: boolean;
 }
 
 @Injectable()
@@ -25,6 +27,7 @@ export class OrdersRuntimeConfigService {
       exportDisabled: this.config.get('BACKEND_EXPORT_DISABLED', { infer: true }),
       resourceProcurementEnabled: this.config.get('BACKEND_RESOURCE_PROCUREMENT_ENABLED', { infer: true }),
       procurementWorkspaceEnabled: this.config.get('BACKEND_PROCUREMENT_WORKSPACE_ENABLED', { infer: true }),
+      supplierRequestsEnabled: this.config.get('BACKEND_SUPPLIER_REQUESTS_ENABLED', { infer: true }),
     };
   }
 }

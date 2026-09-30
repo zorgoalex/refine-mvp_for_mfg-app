@@ -22,7 +22,7 @@ function line(overrides: Partial<ProcurementWorklistLine>): ProcurementWorklistL
   return {
     lineKey: '1|sheet_material:8', orderId: 1, orderName: '2972', fullNumber: 'A-2972', clientName: 'Клиент', orderStatus: null,
     resourceKey: 'sheet_material:8', kind: 'sheet_material', refId: 8, name: 'МДФ 16мм', unit: 'm2', demandSource: 'cut', need: 10, received: 0,
-    receivedIncompatibleCount: 0, covered: 0, orderedOpen: 0, deficit: 10, coverage: 'none', needsAction: true, purchased: false,
+    receivedIncompatibleCount: 0, covered: 0, orderedOpen: 0, requests: [], deficit: 10, coverage: 'none', needsAction: true, purchased: false,
     purchaseOrigin: null, demandChangedSinceMark: false, plannedCompletionDate: '2026-10-02', dueDate: '2026-09-30', daysLeft: 2,
     urgency: 'critical', supplier: { key: 's:1', name: 'Мебель-Трейд', source: 'material', others: [] },
     procurementVersion: 3, demandFingerprint: 'a'.repeat(64), onecReceiptCount: 0, lockedByOnec: false,
