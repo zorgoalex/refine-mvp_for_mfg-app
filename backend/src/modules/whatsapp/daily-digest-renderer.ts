@@ -28,11 +28,12 @@ const HEADER_HEIGHT = 34;
 const CARD_GAP = 8;
 const PAGE_FOOTER_HEIGHT = 16;
 /**
- * Every page is as tall as two card slots. WhatsApp fits an image into a frame of limited height,
- * so a short one-card image was shown ~1.5x wider than a two-card one; with equal proportions
- * both are scaled alike. A page with one card keeps the second slot empty.
+ * All pages of one digest share one height: the tallest page (normally the first one, with the day
+ * header), and never less than MIN_PAGE_ASPECT x width. WhatsApp shows an image taller than wide
+ * narrow and a square or wide one at full width, so equal "tall" proportions keep every image
+ * exactly as narrow as the first one. Shorter pages keep empty space below their cards.
  */
-const MIN_CARD_SLOTS = 2;
+const MIN_PAGE_ASPECT = 1.1;
 const MAX_RENDER_DURATION_MS = 30_000;
 const BOLD_FONT_FILE = 'LiberationSans-Bold.ttf';
 
@@ -53,26 +54,29 @@ export class DailyDigestRenderer {
     let totalBytes = 0;
     const startedAt = Date.now();
 
+    // Lay out every page first: the common page height is only known after the tallest one.
+    const layouts: Array<{ pageIndex: number; orders: DailyDigestOrderCard[]; header: string; cardSvgs: string[]; height: number }> = [];
     for (let pageOffset = 0; pageOffset < sortedOrders.length; pageOffset += snapshot.cardsPerMessage) {
-      // Resvg is synchronous; yield between bounded pages so a maximum-size
-      // digest does not monopolize the Nest event loop for the whole run.
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      const pageIndex = pages.length + 1;
+      const pageIndex = layouts.length + 1;
       const orders = sortedOrders.slice(pageOffset, pageOffset + snapshot.cardsPerMessage);
       const header = pageIndex === 1 ? renderDayHeader(snapshot) : '';
       let y = pageIndex === 1 ? HEADER_HEIGHT + 6 : PAGE_GUTTER;
       const cardSvgs: string[] = [];
-      let lastCardHeight = 0;
       for (const order of orders) {
         const card = renderOrderCard(order, snapshot);
         cardSvgs.push(`<g transform="translate(${PAGE_GUTTER} ${y})">${card.svg}</g>`);
         y += card.height + CARD_GAP;
-        lastCardHeight = card.height;
       }
-      for (let slot = orders.length; slot < MIN_CARD_SLOTS; slot += 1) y += lastCardHeight + CARD_GAP;
-      y = y - CARD_GAP + PAGE_FOOTER_HEIGHT;
+      layouts.push({ pageIndex, orders, header, cardSvgs, height: y - CARD_GAP + PAGE_FOOTER_HEIGHT });
+    }
+    const pageHeight = Math.max(Math.ceil(IMAGE_WIDTH * MIN_PAGE_ASPECT), ...layouts.map((layout) => layout.height));
+
+    for (const { pageIndex, orders, header, cardSvgs } of layouts) {
+      // Resvg is synchronous; yield between bounded pages so a maximum-size
+      // digest does not monopolize the Nest event loop for the whole run.
+      await new Promise<void>((resolve) => setImmediate(resolve));
       const svg = pageSvg({
-        height: y,
+        height: pageHeight,
         header,
         cardSvgs,
         pageIndex,

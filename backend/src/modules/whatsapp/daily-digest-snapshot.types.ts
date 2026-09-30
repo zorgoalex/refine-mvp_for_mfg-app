@@ -1,4 +1,4 @@
-export const DAILY_DIGEST_RENDERER_VERSION = 'daily-order-cards-v4';
+export const DAILY_DIGEST_RENDERER_VERSION = 'daily-order-cards-v5';
 export const DAILY_DIGEST_MAX_ORDERS = 500;
 export const DAILY_DIGEST_MAX_PAGE_BYTES = 1024 * 1024;
 export const DAILY_DIGEST_MAX_RUN_BYTES = 16 * 1024 * 1024;
