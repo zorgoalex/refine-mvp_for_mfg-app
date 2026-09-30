@@ -19,3 +19,26 @@ describe('film inventory page guards', () => {
     expect(source).toContain('Пропустить');
   });
 });
+
+describe('warehouse stock tabs guards', () => {
+  const table = readFileSync(new URL('./WarehouseStockTable.tsx', import.meta.url), 'utf8');
+
+  it('reads material tabs through the inventory API; film operations stay on the film tab', () => {
+    expect(source).toContain('inventoryApi.stock(');
+    expect(source).toContain('stockGroup === FILM_GROUP ?');
+    expect(table).not.toMatch(/hasura|useUpdate|useCreate/i);
+  });
+
+  it('stops requesting /inventory/stock after an old backend answered 404 (sticky flag gates the query)', () => {
+    expect(source).toContain('enabled: viewAllowed && activeWarehouseId !== undefined && !stockUnsupported');
+    expect(source).toContain('setStockUnsupported(true)');
+    expect(source).not.toMatch(/const stockUnsupported = isStockUnsupported\(stockQuery\.error\)/);
+  });
+
+  it('links a 1C item through the sheet materials command after a fresh read, never with a guessed version', () => {
+    expect(table).toContain('sheetMaterialsApi.get(sheetId)');
+    expect(table).toContain('fresh.version');
+    expect(table).toContain('linkDecision(fresh');
+    expect(source).toContain("can('sheet_materials.view') && can('sheet_materials.manage')");
+  });
+});

@@ -41,6 +41,16 @@ export interface SheetMaterialTypeDto {
 }
 
 export const sheetMaterialsApi = {
+  list(includeInactive = false): Promise<SheetMaterialTypeDto[]> {
+    return httpClient.get<SheetMaterialTypeDto[]>(
+      includeInactive ? `${apiRoutes.sheetMaterials.list}?includeInactive=true` : apiRoutes.sheetMaterials.list,
+    );
+  },
+
+  get(id: number): Promise<SheetMaterialTypeDto> {
+    return httpClient.get<SheetMaterialTypeDto>(apiRoutes.sheetMaterials.byId(id));
+  },
+
   async create(input: SheetMaterialTypeInput): Promise<SheetMaterialTypeDto> {
     const response = await httpClient.post<SheetMaterialTypeDto>(
       apiRoutes.sheetMaterials.list,

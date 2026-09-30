@@ -12,9 +12,9 @@ import { canViewNavigationResource } from '../../utils/navigationPermissions';
 import { buildCategorizedResources } from '../../utils/siderMenuItems';
 import { RESOURCE_LABELS, resolveTabLabel, resourceFromPath } from '../../utils/tabLabels';
 
-// «Остатки плёнки» в левом сайдбаре: без записи в RESOURCE_PERMISSION_MAP пункт
+// «Остатки на складах» в левом сайдбаре: без записи в RESOURCE_PERMISSION_MAP пункт
 // скрывался при backend-правах (ресурс был зарегистрирован, но в меню не попадал).
-const resource = { name: 'film-inventory', list: '/inventory/films', meta: { label: 'Остатки плёнки' } };
+const resource = { name: 'film-inventory', list: '/inventory/films', meta: { label: 'Остатки на складах' } };
 const user = (permissions: PermissionName[]) => ({ permissions });
 
 describe('film inventory navigation', () => {
@@ -23,7 +23,7 @@ describe('film inventory navigation', () => {
     expect(canViewNavigationResource('film-inventory', user(['references.view']), true)).toBe(false);
   });
 
-  it('shows «Остатки плёнки» in the «Склады» section of the sidebar', () => {
+  it('shows «Остатки на складах» in the «Склады» section of the sidebar', () => {
     const categories = buildCategorizedResources({
       resources: [resource],
       categoryOrder: LEGACY_CATEGORY_ORDER,
@@ -32,7 +32,7 @@ describe('film inventory navigation', () => {
       canViewNavigation: (name) => canViewNavigationResource(name, user(['inventory.view']), true),
       canViewSettings: false,
     });
-    expect(categories['Склады']).toEqual([{ name: 'film-inventory', label: 'Остатки плёнки', route: '/inventory/films' }]);
+    expect(categories['Склады']).toEqual([{ name: 'film-inventory', label: 'Остатки на складах', route: '/inventory/films' }]);
   });
 
   it('has a category in the evolution navigation too (unmapped resources fall into a missing category)', () => {
@@ -50,7 +50,7 @@ describe('film inventory navigation', () => {
 
   it('names the workspace tab and highlights the menu item for /inventory/films', () => {
     expect(resourceFromPath('/inventory/films')).toBe('film-inventory');
-    expect(resolveTabLabel('/inventory/films')).toBe('Остатки плёнки');
+    expect(resolveTabLabel('/inventory/films')).toBe('Остатки на складах');
   });
 
   it('registers the resource with the same route in App.tsx', () => {
@@ -68,7 +68,7 @@ describe('film inventory navigation', () => {
       canViewNavigation: (name) => canViewNavigationResource(name, user(['inventory.view']), true),
       canViewSettings: false,
     });
-    expect(categories['Склады'].map((item) => item.label)).toEqual(['Остатки плёнки', 'Справочник складов']);
+    expect(categories['Склады'].map((item) => item.label)).toEqual(['Остатки на складах', 'Справочник складов']);
     expect(EVOLUTION_CATEGORY_ORDER).toContain(EVOLUTION_CATEGORY_MAP['inventory-warehouses']);
     expect(resourceFromPath('/inventory/warehouses')).toBe('inventory-warehouses');
     expect(resolveTabLabel('/inventory/warehouses')).toBe('Справочник складов');

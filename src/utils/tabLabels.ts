@@ -18,7 +18,7 @@ export const RESOURCE_LABELS: Record<string, string> = {
   materials: 'Материалы',
   order_resource_requirements: 'Потребности заказов',
   onec_purchase_documents: 'Документы 1С',
-  'film-inventory': 'Остатки плёнки',
+  'film-inventory': 'Остатки на складах',
   'inventory-warehouses': 'Справочник складов',
   film_types: 'Типы плёнки',
   units: 'Ед. измерения',

@@ -5,6 +5,7 @@ import type {
   InventoryBalanceQuery, InventoryDocumentQuery, InventoryPage, ManualStockDocumentInput,
   OrderFilmStockDto, StockBalanceDto, StockDocumentDto, StockDocumentSummaryDto, StockImportInput,
   OnecWarehouseOptionDto, StockLinePatch, WarehouseCreateInput, WarehouseDto, WarehousePatch, WarehouseSyncResultDto,
+  WarehouseStockDto, WarehouseStockQuery,
 } from './types/inventoryApi.types';
 
 const root = backendApiPath('/inventory');
@@ -32,6 +33,10 @@ export const inventoryApi = {
   },
   balances(params: InventoryBalanceQuery = {}) {
     return httpClient.get<InventoryPage<StockBalanceDto>>(withQuery(`${root}/balances`, params));
+  },
+  /** Остатки склада по вкладкам: плёнка — учёт ERP, прочие материалы — остатки 1С (только чтение). */
+  stock(params: WarehouseStockQuery) {
+    return httpClient.get<WarehouseStockDto>(withQuery(`${root}/stock`, params));
   },
   documents(params: InventoryDocumentQuery = {}) {
     return httpClient.get<InventoryPage<StockDocumentSummaryDto>>(withQuery(`${root}/documents`, params));

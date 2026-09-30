@@ -21,6 +21,30 @@ export interface OnecWarehouse {
   code: string | null;
   name: string;
 }
+/**
+ * Состояние снимка остатков 1С источника. `snapshotVersion` — as-of последнего ПРИМЕНЁННОГО
+ * verified-снимка (отклонённый его не двигает); `revoked` — отзыв пары (источник, сущность).
+ */
+export interface OnecStockState {
+  sourceId: number;
+  /** Есть применённый снимок (`snapshot_version`); пустой применённый снимок — тоже загружен. */
+  loaded: boolean;
+  snapshotVersion: string | null;
+  rejectedReason: string | null;
+  completeness: string | null;
+  revoked: { stockBalances: boolean; items: boolean; units: boolean; itemCategories: boolean };
+}
+/** Остаток 1С позиции на складе: сумма по организациям/характеристикам/партиям/ячейкам. */
+export interface OnecStockBalance {
+  itemRefKey: string;
+  code: string | null;
+  name: string | null;
+  unitName: string | null;
+  categoryKey: string | null;
+  categoryName: string | null;
+  quantity: number;
+}
+const ZERO_GUID = '00000000-0000-0000-0000-000000000000';
 
 @Injectable()
 export class OnecCatalogReader {
@@ -245,6 +269,95 @@ export class OnecCatalogReader {
       `SELECT source_id FROM onec_etl_entity_state WHERE entity_code = 'warehouses' ORDER BY source_id`,
     );
     return rows.map((row) => Number(row.source_id));
+  }
+
+  /**
+   * Состояние снимка `stock_balances` и отзыв справочников источника. Для согласованности с
+   * `stockBalances` читать в одной транзакции REPEATABLE READ READ ONLY вызывающего (снимок
+   * применяется одной транзакцией: строки + состояние). Без блокировок.
+   */
+  async stockState(sourceId: number, client: DatabaseClient = this.db): Promise<OnecStockState> {
+    await this.available(client);
+    const { rows } = await client.query<{
+      entity_code: string; revoked: boolean; snapshot_version: Date | string | null;
+      snapshot_rejected_reason: string | null; last_completeness: string | null;
+    }>(
+      `SELECT entity_code, revoked_at IS NOT NULL AS revoked, snapshot_version, snapshot_rejected_reason, last_completeness
+         FROM onec_etl_entity_state
+        WHERE source_id = $1 AND entity_code IN ('stock_balances', 'items', 'units', 'item_categories')`,
+      [sourceId],
+    );
+    const byEntity = new Map(rows.map((row) => [row.entity_code, row]));
+    const stock = byEntity.get('stock_balances');
+    const version = stock?.snapshot_version ?? null;
+    return {
+      sourceId,
+      // Строка состояния появляется до первого применённого снимка (и после отклонённого первого):
+      // загруженным считается только применённый снимок.
+      loaded: stock?.snapshot_version != null,
+      snapshotVersion: version === null ? null : new Date(version).toISOString(),
+      rejectedReason: stock?.snapshot_rejected_reason ?? null,
+      completeness: stock?.last_completeness ?? null,
+      revoked: {
+        stockBalances: byEntity.get('stock_balances')?.revoked === true,
+        items: byEntity.get('items')?.revoked === true,
+        units: byEntity.get('units')?.revoked === true,
+        itemCategories: byEntity.get('item_categories')?.revoked === true,
+      },
+    };
+  }
+
+  /**
+   * Остатки 1С склада `warehouseRefKey` источника: SUM(КоличествоBalance) по позиции. Фильтр
+   * удаления/пропажи — только на строках остатков; справочник позиций присоединяется LEFT JOIN
+   * без фильтров пометки удаления (остаток на помеченной позиции реален). Отозванный справочник —
+   * поля NULL, остаток остаётся. Нулевой/невалидный ключ позиции — строка отбрасывается.
+   * Ключи копии (`source_key`, `…_Key`) хранятся в нижнем регистре — соединения по `source_key` без функций.
+   */
+  async stockBalances(
+    sourceId: number,
+    warehouseRefKey: string,
+    revoked: OnecStockState['revoked'],
+    client: DatabaseClient = this.db,
+  ): Promise<OnecStockBalance[]> {
+    await this.available(client);
+    // Отозванные остатки до очистки ещё лежат в копии — не отдавать их никакому потребителю.
+    if (revoked.stockBalances) return [];
+    const { rows } = await client.query<{
+      item_key: string; quantity: string; code: string | null; name: string | null;
+      unit_name: string | null; category_key: string | null; category_name: string | null;
+    }>(
+      `WITH b AS (
+         SELECT lower(data->>'Номенклатура_Key') AS item_key, sum((data->>'КоличествоBalance')::numeric) AS quantity
+           FROM onec_etl_mirror_rows
+          WHERE source_id = $1 AND entity_code = 'stock_balances' AND NOT deleted AND missing_in_source_at IS NULL
+            AND lower(data->>'СтруктурнаяЕдиница_Key') = lower($2)
+            AND data->>'Номенклатура_Key' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+            AND lower(data->>'Номенклатура_Key') <> $3
+            AND data->>'КоличествоBalance' ~ '^-?[0-9]+(\\.[0-9]+)?([eE][-+]?[0-9]+)?$'
+          GROUP BY 1)
+       SELECT b.item_key, b.quantity::text AS quantity,
+              CASE WHEN $4 THEN NULL ELSE i.data->>'Code' END AS code,
+              CASE WHEN $4 THEN NULL ELSE i.data->>'Description' END AS name,
+              CASE WHEN $4 OR $5 THEN NULL ELSE COALESCE(u.data->>'Description', u.data->>'Представление') END AS unit_name,
+              CASE WHEN $4 THEN NULL ELSE lower(i.data->>'КатегорияНоменклатуры_Key') END AS category_key,
+              CASE WHEN $4 OR $6 THEN NULL ELSE COALESCE(c.data->>'Description', c.data->>'Представление') END AS category_name
+         FROM b
+         LEFT JOIN onec_etl_mirror_rows i ON i.source_id = $1 AND i.entity_code = 'items' AND i.source_key = b.item_key
+         LEFT JOIN onec_etl_mirror_rows u ON u.source_id = $1 AND u.entity_code = 'units' AND u.source_key = lower(i.data->>'ЕдиницаИзмерения_Key')
+         LEFT JOIN onec_etl_mirror_rows c ON c.source_id = $1 AND c.entity_code = 'item_categories' AND c.source_key = lower(i.data->>'КатегорияНоменклатуры_Key')
+        ORDER BY b.item_key`,
+      [sourceId, warehouseRefKey, ZERO_GUID, revoked.items, revoked.units, revoked.itemCategories],
+    );
+    return rows.map((row) => ({
+      itemRefKey: row.item_key,
+      code: row.code,
+      name: row.name,
+      unitName: row.unit_name,
+      categoryKey: row.category_key,
+      categoryName: row.category_name,
+      quantity: Number(row.quantity),
+    }));
   }
 
   async listWarehouses(client: DatabaseClient = this.db, sourceIds?: readonly number[]): Promise<OnecWarehouse[]> {

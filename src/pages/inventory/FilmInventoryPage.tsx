@@ -9,6 +9,8 @@ import { inventoryApi, createInventoryIdempotencyKey } from '../../api/inventory
 import type { InventoryApiError, StockDocumentDto, StockDocType, StockDocumentSummaryDto } from '../../api/types/inventoryApi.types';
 import { can } from '../../utils/permissions';
 import { lineFilmOptions, lineFilmValue, operationWarehouse, parseStockCsv, parseStockRows, resolveActiveWarehouse, selectDefaultStockSheet, unresolvedLineIds, type ParsedStockSheet } from './filmStock';
+import { WarehouseStockTable } from './WarehouseStockTable';
+import { FILM_GROUP, isOnecGroup, isStockUnsupported, nextStockSupport, pageTitle, readStoredGroup, resolveGroup, stockExportRows, stockTabs, storeGroup } from './warehouseStock';
 import './inventory.css';
 
 const { Title, Text } = Typography;
@@ -84,6 +86,44 @@ export const FilmInventoryPage: React.FC = () => {
     queryFn: () => inventoryApi.balances({ ...balanceFilter, offset: (balancePage.current - 1) * balancePage.pageSize, limit: balancePage.pageSize }),
     enabled: viewAllowed && activeWarehouseId !== undefined,
   });
+  // «Остатки на складах»: вкладки-пресеты по материалам (плёнка — учёт ERP, остальное — остатки 1С).
+  const [storedGroup, setStoredGroup] = useState<string | undefined>(() => readStoredGroup());
+  const [categoryKey, setCategoryKey] = useState<string>();
+  const [stockPage, setStockPage] = useState({ current: 1, pageSize: 50 });
+  const [stockRequestGroup, setStockRequestGroup] = useState<string>(() => readStoredGroup() ?? 'all');
+  useEffect(() => { setStockPage((page) => ({ ...page, current: 1 })); }, [activeWarehouseId, search, nonZero, negative, categoryKey, stockRequestGroup]);
+  // Категории 1С — свои у каждого склада.
+  useEffect(() => { setCategoryKey(undefined); }, [activeWarehouseId]);
+  const [stockUnsupported, setStockUnsupported] = useState(false);
+  const stockQuery = useQuery({
+    queryKey: ['inventory', 'stock', activeWarehouseId, stockRequestGroup, search, nonZero, negative, categoryKey, stockPage.current, stockPage.pageSize],
+    queryFn: () => inventoryApi.stock({
+      warehouseId: activeWarehouseId!, group: stockRequestGroup, search: search || undefined, nonZero: nonZero || undefined, negative: negative || undefined,
+      categoryKey: isOnecGroup(stockRequestGroup) ? categoryKey : undefined,
+      // На вкладке «Плёнка» таблица — прежняя (учёт ERP с операциями); отсюда нужны только вкладки.
+      offset: stockRequestGroup === FILM_GROUP ? 0 : (stockPage.current - 1) * stockPage.pageSize,
+      limit: stockRequestGroup === FILM_GROUP ? 1 : stockPage.pageSize,
+    }),
+    enabled: viewAllowed && activeWarehouseId !== undefined && !stockUnsupported,
+    retry: (count, error) => !isStockUnsupported(error) && count < 2,
+    // Вкладки не мигают при переключении: до ответа видны прежние.
+    keepPreviousData: true,
+  });
+  useEffect(() => { if (nextStockSupport(false, stockQuery.error)) setStockUnsupported(true); }, [stockQuery.error]);
+  const stockGroup = resolveGroup(storedGroup, stockQuery.data, stockUnsupported);
+  useEffect(() => { if (stockGroup !== stockRequestGroup) setStockRequestGroup(stockGroup); }, [stockGroup, stockRequestGroup]);
+  const chooseStockGroup = (group: string) => { setStoredGroup(group); storeGroup(group); setCategoryKey(undefined); setStockRequestGroup(group); };
+  const canLinkSheets = can('sheet_materials.view') && can('sheet_materials.manage');
+  const exportStock = async () => {
+    const rows: Parameters<typeof stockExportRows>[0][number][] = [];
+    for (let offset = 0; ; offset += 500) {
+      const page = await inventoryApi.stock({ warehouseId: activeWarehouseId!, group: stockGroup, search: search || undefined, nonZero: nonZero || undefined, negative: negative || undefined, categoryKey: isOnecGroup(stockGroup) ? categoryKey : undefined, offset, limit: 500 });
+      rows.push(...page.items);
+      if (page.items.length < 500 || rows.length >= page.total) break;
+    }
+    const sheet = XLSX.utils.json_to_sheet(stockExportRows(rows));
+    const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, 'Остатки'); XLSX.writeFile(book, `Остатки-${stockGroup.replace(':', '-')}.xlsx`);
+  };
   const documentsQuery = useQuery({
     queryKey: ['inventory', 'documents', docTypeFilter, docStatusFilter, docDateRange, docFilmId, docOrderId, docPage.current, docPage.pageSize],
     queryFn: () => inventoryApi.documents({ type: docTypeFilter, status: docStatusFilter, from: docDateRange?.[0], to: docDateRange?.[1], filmId: docFilmId, orderId: docOrderId, offset: (docPage.current - 1) * docPage.pageSize, limit: docPage.pageSize }),
@@ -260,21 +300,31 @@ export const FilmInventoryPage: React.FC = () => {
   ];
   if (!viewAllowed) return <Alert type="error" message="Нет доступа к складу плёнки" />;
   return <div className="film-inventory-page">
-    <Title level={2}>Остатки плёнки</Title>
+    <Title level={2}>{pageTitle(warehousesQuery.data?.items.find((item) => item.warehouseId === activeWarehouseId)?.name)}</Title>
     <Tabs activeKey={tab} onChange={setTab} items={[
       { key: 'balances', label: 'Остатки', children: <Card>
         {warehousesQuery.data?.items.find((item) => item.warehouseId === activeWarehouseId)?.onecStatus === 'unlinked' && <Alert style={{ marginBottom: 12 }} type="warning" showIcon message="Склад не привязан к складу 1С — привяжите его в «Справочнике складов»" />}
         {warehousesQuery.isSuccess && !warehouseReady && <Alert style={{ marginBottom: 12 }} type="warning" showIcon message={(warehouseIds ?? []).length === 0 ? 'Нет активных складов — добавьте или включите склад в «Справочнике складов»' : 'Выберите склад'} />}
-        <Space wrap style={{ marginBottom: 16 }}>
+        <Space wrap style={{ marginBottom: 12 }}>
           <Select placeholder="Склад" value={activeWarehouseId} style={{ minWidth: 180 }} options={(warehousesQuery.data?.items ?? []).map((item) => ({ value: item.warehouseId, label: item.name }))} onChange={chooseWarehouse} status={warehouseReady ? undefined : 'warning'} />
-          <Select allowClear placeholder="Поставщик" style={{ minWidth: 200 }} value={vendorId} options={vendors.map(([value, label]) => ({ value, label }))} onChange={setVendorId} />
-          <Input.Search allowClear placeholder="Поиск плёнки" value={search} onChange={(event) => setSearch(event.target.value)} style={{ width: 240 }} />
+          <Input.Search allowClear placeholder="Поиск" value={search} onChange={(event) => setSearch(event.target.value)} style={{ width: 240 }} />
           <Checkbox checked={nonZero} onChange={(event) => setNonZero(event.target.checked)}>Только ненулевые</Checkbox>
           <Checkbox checked={negative} onChange={(event) => setNegative(event.target.checked)}>Только отрицательные</Checkbox>
-          {manageAllowed && <><Button type="primary" disabled={!warehouseReady} onClick={() => openOperation(() => setManualType('receipt'))}>Приход</Button><Button disabled={!warehouseReady} onClick={() => openOperation(() => setManualType('writeoff'))}>Списание</Button><Button disabled={!warehouseReady} onClick={() => openOperation(() => setManualType('inventory'))}>Инвентаризация</Button><Button disabled={!warehouseReady} onClick={() => openOperation(() => setImportOpen(true))}>Импорт остатков</Button></>}
-          <Button onClick={() => { void exportBalances().catch(() => message.error('Не удалось выгрузить остатки')); }}>Выгрузить XLSX</Button>
+          <Button onClick={() => { void (stockGroup === FILM_GROUP ? exportBalances() : exportStock()).catch(() => message.error('Не удалось выгрузить остатки')); }}>Выгрузить XLSX</Button>
         </Space>
-        <Table rowKey="filmId" dataSource={balances} columns={balanceColumns} loading={balancesQuery.isLoading} pagination={{ current: balancePage.current, pageSize: balancePage.pageSize, total: balancesQuery.data?.total ?? 0, showSizeChanger: true, onChange: (current, pageSize) => setBalancePage({ current, pageSize }) }} rowClassName={(row) => row.quantity < 0 ? 'film-stock-negative' : ''} summary={() => <Table.Summary.Row><Table.Summary.Cell index={0} colSpan={2}><Text strong>Итого</Text></Table.Summary.Cell><Table.Summary.Cell index={2} align="right"><Text strong>{formatQuantity(balancesQuery.data?.totalQuantity ?? 0)}</Text></Table.Summary.Cell><Table.Summary.Cell index={3}>{balancesQuery.data?.total ?? balances.length} позиций</Table.Summary.Cell></Table.Summary.Row>} />
+        {stockUnsupported && <Alert style={{ marginBottom: 12 }} type="info" showIcon message="Остатки других материалов из 1С недоступны в этой версии сервера — показана плёнка." />}
+        {stockQuery.isError && !stockUnsupported && <Alert style={{ marginBottom: 12 }} type="error" showIcon message="Не удалось загрузить вкладки материалов" />}
+        <Tabs size="small" activeKey={stockGroup} onChange={chooseStockGroup} items={stockTabs(stockQuery.data, stockUnsupported)} />
+        {stockGroup === FILM_GROUP ? <>
+          <Space wrap style={{ marginBottom: 16 }}>
+            <Select allowClear placeholder="Поставщик" style={{ minWidth: 200 }} value={vendorId} options={vendors.map(([value, label]) => ({ value, label }))} onChange={setVendorId} />
+            {manageAllowed && <><Button type="primary" disabled={!warehouseReady} onClick={() => openOperation(() => setManualType('receipt'))}>Приход</Button><Button disabled={!warehouseReady} onClick={() => openOperation(() => setManualType('writeoff'))}>Списание</Button><Button disabled={!warehouseReady} onClick={() => openOperation(() => setManualType('inventory'))}>Инвентаризация</Button><Button disabled={!warehouseReady} onClick={() => openOperation(() => setImportOpen(true))}>Импорт остатков</Button></>}
+          </Space>
+          <Table rowKey="filmId" dataSource={balances} columns={balanceColumns} loading={balancesQuery.isLoading} pagination={{ current: balancePage.current, pageSize: balancePage.pageSize, total: balancesQuery.data?.total ?? 0, showSizeChanger: true, onChange: (current, pageSize) => setBalancePage({ current, pageSize }) }} rowClassName={(row) => row.quantity < 0 ? 'film-stock-negative' : ''} summary={() => <Table.Summary.Row><Table.Summary.Cell index={0} colSpan={2}><Text strong>Итого</Text></Table.Summary.Cell><Table.Summary.Cell index={2} align="right"><Text strong>{formatQuantity(balancesQuery.data?.totalQuantity ?? 0)}</Text></Table.Summary.Cell><Table.Summary.Cell index={3}>{balancesQuery.data?.total ?? balances.length} позиций</Table.Summary.Cell></Table.Summary.Row>} />
+        </> : <WarehouseStockTable
+          group={stockGroup} data={stockQuery.data} loading={stockQuery.isFetching}
+          categoryKey={categoryKey} onCategoryChange={setCategoryKey}
+          page={stockPage} onPageChange={(current, pageSize) => setStockPage({ current, pageSize })} canLink={canLinkSheets} />}
       </Card> },
       { key: 'documents', label: 'Документы', children: <Card>
         <Space wrap style={{ marginBottom: 16 }}>

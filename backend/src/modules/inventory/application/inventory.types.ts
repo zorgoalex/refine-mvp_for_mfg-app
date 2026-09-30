@@ -128,3 +128,57 @@ export interface DocumentsFilter {
   type: StockDocType | null; status: StockDocStatus | null; from: string | null; to: string | null;
   filmId: number | null; orderId: number | null; offset: number; limit: number;
 }
+
+/** Почему остатки 1С склада недоступны (вкладки 1С показывают причину, «Плёнка» работает). */
+export type OnecStockUnavailableReason =
+  | 'onec_disabled' | 'warehouse_unlinked' | 'warehouse_not_in_onec' | 'ambiguous_source' | 'not_loaded' | 'revoked';
+
+export interface WarehouseStockFilter {
+  warehouseId: number;
+  /** all | film | film_unlinked | no_type | unlinked | material:<id> */
+  group: string;
+  search: string | null;
+  nonZero: boolean;
+  negative: boolean;
+  /** Категория 1С (фильтр в группах 1С). */
+  categoryKey: string | null;
+  offset: number;
+  limit: number;
+}
+
+export interface WarehouseStockItemDto {
+  source: 'erp' | '1c';
+  group: string;
+  groupLabel: string;
+  filmId: number | null;
+  itemRefKey: string | null;
+  code: string | null;
+  name: string;
+  vendorName: string | null;
+  categoryKey: string | null;
+  categoryName: string | null;
+  unitName: string | null;
+  quantity: number;
+  sheetMaterialTypeId: number | null;
+  ambiguousLink: boolean;
+}
+
+export interface WarehouseStockDto {
+  warehouseId: number;
+  warehouseName: string;
+  onec: {
+    available: boolean;
+    reason: OnecStockUnavailableReason | null;
+    onecWarehouseName: string | null;
+    snapshotVersion: string | null;
+    rejectedReason: string | null;
+    completeness: string | null;
+    /** Отозван справочник позиций/единиц/категорий: у строк нет названий, остатки на месте. */
+    directoriesRevoked: boolean;
+  };
+  tabs: Array<{ key: string; label: string; count: number }>;
+  /** Категории 1С строк текущей группы (фильтр). */
+  categories: Array<{ key: string; name: string; count: number }>;
+  total: number;
+  items: WarehouseStockItemDto[];
+}

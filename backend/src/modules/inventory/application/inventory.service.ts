@@ -7,7 +7,9 @@ import type { DatabaseClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { PgInventoryRepository } from '../adapters/pg-inventory-repository';
 import { PgWarehouseRepository, type WarehouseSyncOptions } from '../adapters/pg-warehouse-repository';
-import { OnecCatalogReader, type OnecWarehouse } from '../../onec-agent/onec-catalog-reader';
+import { PgWarehouseStockRepository } from '../adapters/pg-warehouse-stock-repository';
+import { buildWarehouseStockView } from '../domain/warehouse-stock-view';
+import { OnecCatalogReader, type OnecStockBalance, type OnecStockState, type OnecWarehouse } from '../../onec-agent/onec-catalog-reader';
 import type {
   BalancesFilter,
   CommandContext,
@@ -17,8 +19,11 @@ import type {
   DocumentsFilter,
   OnecWarehouseOptionDto,
   UpdateLineInput,
+  OnecStockUnavailableReason,
   UpdateWarehouseInput,
   WarehouseDto,
+  WarehouseStockDto,
+  WarehouseStockFilter,
 } from './inventory.types';
 
 /** Склад плёнки: флаг BACKEND_INVENTORY_ENABLED и буквальная проверка прав. */
@@ -26,9 +31,10 @@ import type {
 export class InventoryService {
   private readonly repository: PgInventoryRepository;
   private readonly warehouses: PgWarehouseRepository;
+  private readonly stock = new PgWarehouseStockRepository();
 
   constructor(
-    @Inject(DatabaseService) database: DatabaseService,
+    @Inject(DatabaseService) private readonly database: DatabaseService,
     @Inject(ConfigService) private readonly config: ConfigService<BackendEnv, true>,
     @Inject(OnecCatalogReader) private readonly onec: OnecCatalogReader,
   ) {
@@ -167,6 +173,64 @@ export class InventoryService {
   listBalances(user: CurrentUser, filter: BalancesFilter) {
     this.require(user, 'inventory.view');
     return this.repository.listBalances(filter);
+  }
+
+  /**
+   * «Остатки на складах»: плёнка — учёт ERP, прочие материалы — остатки 1С (только чтение).
+   * Склад, учёт ERP, источник 1С, состояние снимка и строки зеркала — одна транзакция
+   * REPEATABLE READ READ ONLY (снимок остатков 1С применяется одной транзакцией: строки + состояние).
+   */
+  async warehouseStock(user: CurrentUser, filter: WarehouseStockFilter): Promise<WarehouseStockDto> {
+    this.require(user, 'inventory.view');
+    return this.database.transaction(async (tx) => {
+      await tx.query('SET TRANSACTION READ ONLY');
+      const warehouse = await this.stock.warehouse(tx, filter.warehouseId);
+      if (!warehouse) throw new ApiError(404, 'WAREHOUSE_NOT_FOUND', 'Склад не найден');
+      const filmRows = await this.stock.filmBalances(tx, warehouse.warehouseId);
+      const onec = await this.onecStock(tx, warehouse.refKey1c);
+      const { links, materialTypeNames } = onec.sourceId === null
+        ? { links: { filmKeys: new Set<string>(), sheetByKey: new Map(), hiddenMaterialTypeIds: new Set<number>(), filmCatalogItemKeys: new Set<string>() }, materialTypeNames: new Map<number, string>() }
+        : await this.stock.links(tx, onec.sourceId, onec.rows.map((row) => row.itemRefKey));
+      const view = buildWarehouseStockView({ filmRows, onecRows: onec.rows, links, materialTypeNames, filter });
+      return {
+        warehouseId: warehouse.warehouseId,
+        warehouseName: warehouse.name,
+        onec: {
+          available: onec.reason === null,
+          reason: onec.reason,
+          onecWarehouseName: onec.warehouseName,
+          snapshotVersion: onec.state?.snapshotVersion ?? null,
+          rejectedReason: onec.state?.rejectedReason ?? null,
+          completeness: onec.state?.completeness ?? null,
+          directoriesRevoked: Boolean(onec.state && (onec.state.revoked.items || onec.state.revoked.units || onec.state.revoked.itemCategories)),
+        },
+        ...view,
+      };
+    }, { isolation: 'repeatable read' });
+  }
+
+  /** Остатки 1С склада из единственного источника с этим ключом; причина, если недоступны. */
+  private async onecStock(tx: DatabaseClient, refKey1c: string | null): Promise<{
+    reason: OnecStockUnavailableReason | null; sourceId: number | null; warehouseName: string | null;
+    state: OnecStockState | null; rows: OnecStockBalance[];
+  }> {
+    const none = (reason: OnecStockUnavailableReason, extra: Partial<{ sourceId: number; warehouseName: string; state: OnecStockState }> = {}) =>
+      ({ reason, sourceId: null, warehouseName: extra.warehouseName ?? null, state: extra.state ?? null, rows: [] });
+    if (!refKey1c) return none('warehouse_unlinked');
+    try {
+      const matches = (await this.onec.listWarehouses(tx)).filter((row) => row.refKey === refKey1c);
+      if (matches.length === 0) return none('warehouse_not_in_onec');
+      if (new Set(matches.map((row) => row.sourceId)).size > 1) return none('ambiguous_source');
+      const [{ sourceId, name }] = matches;
+      const state = await this.onec.stockState(sourceId, tx);
+      if (state.revoked.stockBalances) return none('revoked', { warehouseName: name, state });
+      if (!state.loaded) return none('not_loaded', { warehouseName: name, state });
+      const rows = await this.onec.stockBalances(sourceId, refKey1c, state.revoked, tx);
+      return { reason: null, sourceId, warehouseName: name, state, rows };
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'ONEC_MIRROR_UNAVAILABLE') return none('onec_disabled');
+      throw error;
+    }
   }
 
   listDocuments(user: CurrentUser, filter: DocumentsFilter) {

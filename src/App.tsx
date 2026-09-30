@@ -426,7 +426,7 @@ const ThemedApp = () => {
                 { name: 'cad', list: '/cad', meta: { label: 'CAD' } },
                 ...(featureFlags.inventory && can('inventory.view')
                   ? [
-                      { name: 'film-inventory', list: '/inventory/films', meta: { label: 'Остатки плёнки' } },
+                      { name: 'film-inventory', list: '/inventory/films', meta: { label: 'Остатки на складах' } },
                       { name: 'inventory-warehouses', list: '/inventory/warehouses', meta: { label: 'Справочник складов' } },
                     ]
                   : []),

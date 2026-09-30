@@ -97,4 +97,34 @@ describe('InventoryController', () => {
     await expectError(() => controller.updateWarehouse(manage, 'k', '40000', { version: 'v' }), 404, 'WAREHOUSE_NOT_FOUND');
   });
 
+  it('warehouse stock: view permission, strict group/category/paging, normalized filter', async () => {
+    const { controller, service } = setup(true);
+    const view = { user: user(['inventory.view']) };
+    await expectError(() => controller.warehouseStock({ user: user(['orders.view']) }, { warehouseId: '2' }), 403, 'FORBIDDEN');
+    await expectError(() => controller.warehouseStock(view, {}), 400, 'VALIDATION_FAILED');
+    await expectError(() => controller.warehouseStock(view, { warehouseId: 'abc' }), 400, 'VALIDATION_FAILED');
+    await expectError(() => controller.warehouseStock(view, { warehouseId: '40000' }), 404, 'WAREHOUSE_NOT_FOUND');
+    for (const group of ['film_linked', 'material:', 'material:0', 'material:x', "all' OR 1=1"]) {
+      await expectError(() => controller.warehouseStock(view, { warehouseId: '2', group }), 400, 'VALIDATION_FAILED');
+    }
+    await expectError(() => controller.warehouseStock(view, { warehouseId: '2', categoryKey: 'сырьё' }), 400, 'VALIDATION_FAILED');
+    await expectError(() => controller.warehouseStock(view, { warehouseId: '2', limit: '501' }), 400, 'VALIDATION_FAILED');
+    const spy = vi.spyOn(service, 'warehouseStock').mockResolvedValue({ tabs: [] } as never);
+    await controller.warehouseStock(view, { warehouseId: '2', group: 'film_unlinked', categoryKey: '3C755876-EC79-11F0-A6D6-B01921AAA755', search: '  мдф ', nonZero: 'true', limit: '50' });
+    expect(spy).toHaveBeenLastCalledWith(view.user, {
+      warehouseId: 2, group: 'film_unlinked', categoryKey: '3c755876-ec79-11f0-a6d6-b01921aaa755',
+      search: 'мдф', nonZero: true, negative: false, offset: 0, limit: 50,
+    });
+    await controller.warehouseStock(view, { warehouseId: '2', group: 'material:12', categoryKey: 'none' });
+    expect(spy).toHaveBeenLastCalledWith(view.user, expect.objectContaining({ group: 'material:12', categoryKey: 'none', limit: 100 }));
+    await controller.warehouseStock(view, { warehouseId: '2', categoryKey: '' });
+    expect(spy).toHaveBeenLastCalledWith(view.user, expect.objectContaining({ categoryKey: null }));
+    await controller.warehouseStock(view, { warehouseId: '2' });
+    expect(spy).toHaveBeenLastCalledWith(view.user, expect.objectContaining({ group: 'all', categoryKey: null }));
+  });
+
+  it('warehouse stock answers 404 when the feature flag is off', async () => {
+    const { controller } = setup(false);
+    await expectError(() => controller.warehouseStock({ user: user(['inventory.view']) }, { warehouseId: '2' }), 404, 'NOT_FOUND');
+  });
 });

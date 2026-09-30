@@ -65,3 +65,52 @@ export interface StockImportInput {
 }
 export interface StockLinePatch { version: number; filmId?: number; quantity?: number; confirmMatch?: boolean; confirmQuantity?: boolean; skip?: boolean }
 export interface InventoryApiError { statusCode?: number; code?: string; message?: string; details?: unknown }
+
+/** «Остатки на складах»: вкладка — all | film | film_unlinked | no_type | unlinked | material:<id>. */
+export interface WarehouseStockQuery {
+  warehouseId: number;
+  group?: string;
+  search?: string;
+  nonZero?: boolean;
+  negative?: boolean;
+  /** GUID категории 1С или 'none' — строки 1С без категории; не задано — без фильтра. */
+  categoryKey?: string;
+  offset?: number;
+  limit?: number;
+}
+export type OnecStockUnavailableReason =
+  | 'onec_disabled' | 'warehouse_unlinked' | 'warehouse_not_in_onec' | 'ambiguous_source' | 'not_loaded' | 'revoked';
+export interface WarehouseStockItemDto {
+  source: 'erp' | '1c';
+  group: string;
+  groupLabel: string;
+  filmId: number | null;
+  itemRefKey: string | null;
+  code: string | null;
+  name: string;
+  vendorName: string | null;
+  categoryKey: string | null;
+  categoryName: string | null;
+  unitName: string | null;
+  quantity: number;
+  sheetMaterialTypeId: number | null;
+  ambiguousLink: boolean;
+}
+export interface WarehouseStockOnecDto {
+  available: boolean;
+  reason: OnecStockUnavailableReason | null;
+  onecWarehouseName: string | null;
+  snapshotVersion: string | null;
+  rejectedReason: string | null;
+  completeness: string | null;
+  directoriesRevoked: boolean;
+}
+export interface WarehouseStockDto {
+  warehouseId: number;
+  warehouseName: string;
+  onec: WarehouseStockOnecDto;
+  tabs: Array<{ key: string; label: string; count: number }>;
+  categories: Array<{ key: string; name: string; count: number }>;
+  total: number;
+  items: WarehouseStockItemDto[];
+}

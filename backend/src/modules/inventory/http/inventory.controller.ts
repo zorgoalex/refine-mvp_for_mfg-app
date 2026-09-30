@@ -88,6 +88,20 @@ function optionalId(value: string | undefined, field: string): number | null {
   return value === undefined || value === '' ? null : parseId(value, field);
 }
 
+const STOCK_GROUP = /^(all|film|film_unlinked|no_type|unlinked|material:[1-9][0-9]{0,4})$/;
+const CATEGORY_KEY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Группа вкладки и категория 1С «Остатков на складах»; `none` — строки 1С без категории, '' — без фильтра. */
+function stockGroup(group: string | undefined, categoryKey: string | undefined): { group: string; categoryKey: string | null } {
+  const value = group === undefined || group === '' ? 'all' : group;
+  if (!STOCK_GROUP.test(value)) throw new ApiError(400, 'VALIDATION_FAILED', 'Некорректная группа', { field: 'group' });
+  if (categoryKey === undefined || categoryKey === '') return { group: value, categoryKey: null };
+  if (categoryKey !== 'none' && !CATEGORY_KEY.test(categoryKey)) {
+    throw new ApiError(400, 'VALIDATION_FAILED', 'Некорректная категория 1С', { field: 'categoryKey' });
+  }
+  return { group: value, categoryKey: categoryKey.toLowerCase() };
+}
+
 function paging(offset: string | undefined, limit: string | undefined, max: number): { offset: number; limit: number } {
   const o = offset === undefined ? 0 : Number(offset);
   const l = limit === undefined ? Math.min(100, max) : Number(limit);
@@ -164,6 +178,26 @@ export class InventoryController {
     return this.inventory.listBalances(this.user(request), {
       warehouseId: optionalId(query.warehouseId, 'warehouseId'),
       vendorId: optionalId(query.vendorId, 'vendorId'),
+      search: query.search?.trim().slice(0, 200) || null,
+      nonZero: query.nonZero === 'true',
+      negative: query.negative === 'true',
+      ...page,
+    });
+  }
+
+  @ApiOperation({ operationId: 'getInventoryWarehouseStock', summary: 'Warehouse stock by material tabs: films from ERP, other materials from 1C (read-only)' })
+  @ApiResponse({ status: 200, description: 'Tabs, 1C source state and a page of stock rows' })
+  @Get('inventory/stock')
+  warehouseStock(@Req() request: RequestWithCurrentUser, @Query() query: Record<string, string | undefined>) {
+    const page = paging(query.offset, query.limit, 500);
+    if (query.warehouseId === undefined || query.warehouseId === '') {
+      throw new ApiError(400, 'VALIDATION_FAILED', 'Не указан склад', { field: 'warehouseId' });
+    }
+    const warehouseId = parseId(query.warehouseId, 'warehouseId');
+    if (warehouseId > 32767) throw new ApiError(404, 'WAREHOUSE_NOT_FOUND', 'Склад не найден');
+    return this.inventory.warehouseStock(this.user(request), {
+      warehouseId,
+      ...stockGroup(query.group, query.categoryKey),
       search: query.search?.trim().slice(0, 200) || null,
       nonZero: query.nonZero === 'true',
       negative: query.negative === 'true',
