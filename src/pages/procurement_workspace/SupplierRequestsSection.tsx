@@ -229,7 +229,7 @@ export function SupplierRequestsSection({ active }: SupplierRequestsSectionProps
     <div>
       <div className="rr-appbar">
         <span className="rr-ttl">Заявки поставщикам</span>
-        <span className="rr-muted">заявка → приход 1С → оплата 1С (сверка — позже)</span>
+        <span className="rr-muted">заявка → приход 1С → оплата 1С</span>
       </div>
 
       <div className="rr-pad">
