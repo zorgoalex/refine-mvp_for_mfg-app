@@ -115,7 +115,11 @@ export function AgentsTab({ overview, canManage, onChanged }: AgentsTabProps) {
         render: (_: unknown, agent: OnecAgentView) => onecRelativeTime(agent.lastHeartbeatAt),
       },
       {
-        title: 'Очереди',
+        title: (
+          <Tooltip title="Отказы — пакеты выгрузки, команды и результаты, которые агент не смог доставить. С версии агента 1.1.0 отказы выгрузки — только неразобранные: после разрешения прогона они из счётчика уходят.">
+            <span>Очереди</span>
+          </Tooltip>
+        ),
         key: 'queues',
         render: (_: unknown, agent: OnecAgentView) => queuesSummary(agent),
       },
