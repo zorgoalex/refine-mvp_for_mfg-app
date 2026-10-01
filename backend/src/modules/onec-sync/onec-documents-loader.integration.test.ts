@@ -666,20 +666,7 @@ describe.skipIf(!url)('1C documents loader — real PostgreSQL', { timeout: 1200
   });
 
   describe('currency change with active allocations (CURRENCY_CHANGED, request of the procurement session)', () => {
-    // Тестовый потребитель повторяет guard закупок (их часть): смена валюты + активное распределение строки-итога.
-    const currencyGuard = (name: string) => consumersRef.register({
-      name,
-      docKinds: ['cash_outflow'],
-      async guardLineChanges(tx, doc) {
-        if (!doc.previous || doc.previous.currency === doc.currency) return [];
-        const { rows } = await tx.query<{ line_no: number }>(
-          `SELECT l.line_no FROM onec_document_lines l JOIN order_resource_onec_allocations a ON a.onec_document_line_id = l.onec_document_line_id
-            WHERE l.onec_document_id = $1 AND l.is_document_total AND a.removed_at IS NULL LIMIT 1`, [doc.documentId]);
-        return rows.map((row) => ({ lineNo: row.line_no, code: 'CURRENCY_CHANGED' as const }));
-      },
-      async referencedLineIds() { return new Set<number>(); },
-      async afterDocumentLoaded() {},
-    });
+    // Код ставит настоящий потребитель закупок (OnecDocumentsProcurementConsumer, ф.3б-2), зарегистрированный в beforeAll.
     const CUR_EUR = K();
     beforeAll(async () => {
       await watcher.query('INSERT INTO onec_currency_map (source_id, currency_ref_key, iso_code) VALUES ($1, $2, $3)', [source, CUR_EUR, 'EUR']);
@@ -688,79 +675,103 @@ describe.skipIf(!url)('1C documents loader — real PostgreSQL', { timeout: 1200
       'SELECT currency, amount::text, load_conflict, applied_revision::int AS revision FROM onec_documents WHERE onec_document_id = $1', [id])).rows[0];
 
     it('keeps currency AND amount, proposes both, marks the unchanged total line; applies after the allocation is removed', async () => {
-      const unregister = currencyGuard('zz-test-currency');
-      try {
-        const P = K();
-        await payment(P, 100);
-        await loader.run(trigger('doc_cash_outflows'));
-        const p = await doc(P);
-        const [total] = await lines(p.id);
-        const allocation = await allocate(total.id, 'payment', 60);
-        // Валюта и рост суммы: 100 KZT → 200 EUR. Новая сумма в прежней валюте не применяется (code review R1-2).
-        await payment(P, 200, { ВалютаДенежныхСредств_Key: CUR_EUR });
-        expect(await loader.run(trigger('doc_cash_outflows'))).toMatchObject({ result: { conflicts: 1 } });
-        const conflicted = await header(p.id);
-        expect(conflicted).toMatchObject({ currency: 'KZT', amount: '100.00' });
-        expect(conflicted.load_conflict).toMatchObject({ proposedCurrency: 'EUR', proposedAmount: '200.00',
-          lines: [expect.objectContaining({ lineNo: 1, code: 'CURRENCY_CHANGED', codes: ['CURRENCY_CHANGED'] })] });
-        expect((await lines(p.id))[0]).toMatchObject({ load_conflict_code: 'CURRENCY_CHANGED', amount: '100.00' });
-        expect((await audits(p.id)).at(-1)).toBe('onec.document.conflict');
-        // Строка, получившая код без собственных изменений, — в linesChanged события (code review R1-3).
-        const eventCount = (await events(p.id)).length;
-        expect((await events(p.id)).at(-1)!.payload_json).toMatchObject({ conflict: true, linesChanged: [total.id] });
-        // Повтор при том же распределении — без ревизии и события.
-        await loader.run(trigger('doc_cash_outflows'));
-        expect((await header(p.id)).revision).toBe(conflicted.revision);
-        expect(await events(p.id)).toHaveLength(eventCount);
-        // Распределение снято — шапка и итог применяются вместе, код снят.
-        await unallocate(allocation);
-        await loader.run(trigger('doc_cash_outflows'));
-        expect(await header(p.id)).toMatchObject({ currency: 'EUR', amount: '200.00', load_conflict: null });
-        expect((await lines(p.id))[0]).toMatchObject({ load_conflict_code: null, amount: '200.00' });
-      } finally {
-        unregister();
-      }
+      const P = K();
+      await payment(P, 100);
+      await loader.run(trigger('doc_cash_outflows'));
+      const p = await doc(P);
+      const [total] = await lines(p.id);
+      const allocation = await allocate(total.id, 'payment', 60);
+      // Валюта и рост суммы: 100 KZT → 200 EUR. Новая сумма в прежней валюте не применяется (code review R1-2).
+      await payment(P, 200, { ВалютаДенежныхСредств_Key: CUR_EUR });
+      expect(await loader.run(trigger('doc_cash_outflows'))).toMatchObject({ result: { conflicts: 1 } });
+      const conflicted = await header(p.id);
+      expect(conflicted).toMatchObject({ currency: 'KZT', amount: '100.00' });
+      expect(conflicted.load_conflict).toMatchObject({ proposedCurrency: 'EUR', proposedAmount: '200.00',
+        lines: [expect.objectContaining({ lineNo: 1, code: 'CURRENCY_CHANGED', codes: ['CURRENCY_CHANGED'] })] });
+      expect((await lines(p.id))[0]).toMatchObject({ load_conflict_code: 'CURRENCY_CHANGED', amount: '100.00' });
+      expect((await audits(p.id)).at(-1)).toBe('onec.document.conflict');
+      // Строка, получившая код без собственных изменений, — в linesChanged события (code review R1-3).
+      const eventCount = (await events(p.id)).length;
+      expect((await events(p.id)).at(-1)!.payload_json).toMatchObject({ conflict: true, linesChanged: [total.id] });
+      // Повтор при том же распределении — без ревизии и события.
+      await loader.run(trigger('doc_cash_outflows'));
+      expect((await header(p.id)).revision).toBe(conflicted.revision);
+      expect(await events(p.id)).toHaveLength(eventCount);
+      // Распределение снято — шапка и итог применяются вместе, код снят.
+      await unallocate(allocation);
+      await loader.run(trigger('doc_cash_outflows'));
+      expect(await header(p.id)).toMatchObject({ currency: 'EUR', amount: '200.00', load_conflict: null });
+      expect((await lines(p.id))[0]).toMatchObject({ load_conflict_code: null, amount: '200.00' });
     });
 
     it('currency only (100 KZT → 100 EUR): the unchanged total line gets the code, linesChanged, no repeat event; applies after removal', async () => {
-      const unregister = currencyGuard('zz-test-currency');
-      try {
+      const P = K();
+      await payment(P, 100);
+      await loader.run(trigger('doc_cash_outflows'));
+      const p = await doc(P);
+      const [total] = await lines(p.id);
+      const allocation = await allocate(total.id, 'payment', 60);
+      await payment(P, 100, { ВалютаДенежныхСредств_Key: CUR_EUR });
+      expect(await loader.run(trigger('doc_cash_outflows'))).toMatchObject({ result: { conflicts: 1 } });
+      const conflicted = await header(p.id);
+      expect(conflicted).toMatchObject({ currency: 'KZT', amount: '100.00' });
+      const detail = conflicted.load_conflict.lines[0];
+      expect(conflicted.load_conflict).toMatchObject({ proposedCurrency: 'EUR', proposedAmount: '100.00' });
+      expect(detail).toMatchObject({ lineNo: 1, lineId: total.id, code: 'CURRENCY_CHANGED', codes: ['CURRENCY_CHANGED'] });
+      expect(detail.before).toEqual(detail.after);
+      expect((await lines(p.id))[0]).toMatchObject({ load_conflict_code: 'CURRENCY_CHANGED', amount: '100.00' });
+      const audit = (await watcher.query(
+        `SELECT metadata_json FROM audit_log WHERE entity_type = 'onec_document' AND entity_id = $1 AND event = 'onec.document.conflict'
+          ORDER BY created_at DESC, audit_id DESC LIMIT 1`, [String(p.id)])).rows[0];
+      expect(audit.metadata_json.linesChanged).toEqual([total.id]);
+      expect((await events(p.id)).at(-1)!.payload_json).toMatchObject({ conflict: true, linesChanged: [total.id] });
+      const eventCount = (await events(p.id)).length;
+      await loader.run(trigger('doc_cash_outflows'));
+      expect((await header(p.id)).revision).toBe(conflicted.revision);
+      expect(await events(p.id)).toHaveLength(eventCount);
+      await unallocate(allocation);
+      await loader.run(trigger('doc_cash_outflows'));
+      expect(await header(p.id)).toMatchObject({ currency: 'EUR', amount: '100.00', load_conflict: null });
+      expect((await lines(p.id))[0].load_conflict_code).toBeNull();
+    });
+
+    {
+      it('amount below allocated together with a currency change keeps both codes', async () => {
         const P = K();
         await payment(P, 100);
         await loader.run(trigger('doc_cash_outflows'));
         const p = await doc(P);
         const [total] = await lines(p.id);
         const allocation = await allocate(total.id, 'payment', 60);
-        await payment(P, 100, { ВалютаДенежныхСредств_Key: CUR_EUR });
-        expect(await loader.run(trigger('doc_cash_outflows'))).toMatchObject({ result: { conflicts: 1 } });
+        await payment(P, 50, { ВалютаДенежныхСредств_Key: CUR_EUR });
+        await loader.run(trigger('doc_cash_outflows'));
         const conflicted = await header(p.id);
         expect(conflicted).toMatchObject({ currency: 'KZT', amount: '100.00' });
-        const detail = conflicted.load_conflict.lines[0];
-        expect(conflicted.load_conflict).toMatchObject({ proposedCurrency: 'EUR', proposedAmount: '100.00' });
-        expect(detail).toMatchObject({ lineNo: 1, lineId: total.id, code: 'CURRENCY_CHANGED', codes: ['CURRENCY_CHANGED'] });
-        expect(detail.before).toEqual(detail.after);
-        expect((await lines(p.id))[0]).toMatchObject({ load_conflict_code: 'CURRENCY_CHANGED', amount: '100.00' });
-        const audit = (await watcher.query(
-          `SELECT metadata_json FROM audit_log WHERE entity_type = 'onec_document' AND entity_id = $1 AND event = 'onec.document.conflict'
-            ORDER BY created_at DESC, audit_id DESC LIMIT 1`, [String(p.id)])).rows[0];
-        expect(audit.metadata_json.linesChanged).toEqual([total.id]);
-        expect((await events(p.id)).at(-1)!.payload_json).toMatchObject({ conflict: true, linesChanged: [total.id] });
-        const eventCount = (await events(p.id)).length;
-        await loader.run(trigger('doc_cash_outflows'));
-        expect((await header(p.id)).revision).toBe(conflicted.revision);
-        expect(await events(p.id)).toHaveLength(eventCount);
+        expect(conflicted.load_conflict).toMatchObject({ proposedCurrency: 'EUR', proposedAmount: '50.00' });
+        expect(conflicted.load_conflict.lines[0].codes.sort()).toEqual(['AMOUNT_BELOW_ALLOCATED', 'CURRENCY_CHANGED']);
         await unallocate(allocation);
         await loader.run(trigger('doc_cash_outflows'));
-        expect(await header(p.id)).toMatchObject({ currency: 'EUR', amount: '100.00', load_conflict: null });
-        expect((await lines(p.id))[0].load_conflict_code).toBeNull();
-      } finally {
-        unregister();
-      }
-    });
+        expect(await header(p.id)).toMatchObject({ currency: 'EUR', amount: '50.00', load_conflict: null });
+      });
+    }
 
-    for (const name of ['aa-test-currency', 'zz-test-currency']) {
-      it(`amount below allocated together with a currency change keeps both (guard order: ${name} vs procurement)`, async () => {
-        const unregister = currencyGuard(name);
+    // Регрессия R1-1 загрузчика: блокировки полей — по кодам ВСЕХ потребителей, а не по первому коду строки. Двойник с
+    // другим именем (до и после «procurement») ставит AMOUNT_BELOW_ALLOCATED, закупки — только CURRENCY_CHANGED (200 ≥ 60).
+    for (const name of ['aa-test-amount', 'zz-test-amount']) {
+      it(`codes of all consumers hold the header: ${name} AMOUNT_BELOW_ALLOCATED + procurement CURRENCY_CHANGED`, async () => {
+        const unregister = consumersRef.register({
+          name,
+          docKinds: ['cash_outflow'],
+          async guardLineChanges(tx, view) {
+            if (!view.previous) return [];
+            const { rows } = await tx.query<{ line_no: number }>(
+              `SELECT l.line_no FROM onec_document_lines l JOIN order_resource_onec_allocations a ON a.onec_document_line_id = l.onec_document_line_id
+                WHERE l.onec_document_id = $1 AND l.is_document_total AND a.removed_at IS NULL LIMIT 1`, [view.documentId]);
+            return rows.map((row) => ({ lineNo: row.line_no, code: 'AMOUNT_BELOW_ALLOCATED' as const }));
+          },
+          async referencedLineIds() { return new Set<number>(); },
+          async afterDocumentLoaded() {},
+        });
         try {
           const P = K();
           await payment(P, 100);
@@ -768,19 +779,79 @@ describe.skipIf(!url)('1C documents loader — real PostgreSQL', { timeout: 1200
           const p = await doc(P);
           const [total] = await lines(p.id);
           const allocation = await allocate(total.id, 'payment', 60);
-          await payment(P, 50, { ВалютаДенежныхСредств_Key: CUR_EUR });
+          await payment(P, 200, { ВалютаДенежныхСредств_Key: CUR_EUR });
           await loader.run(trigger('doc_cash_outflows'));
           const conflicted = await header(p.id);
           expect(conflicted).toMatchObject({ currency: 'KZT', amount: '100.00' });
-          expect(conflicted.load_conflict).toMatchObject({ proposedCurrency: 'EUR', proposedAmount: '50.00' });
-          expect(conflicted.load_conflict.lines[0].codes.sort()).toEqual(['AMOUNT_BELOW_ALLOCATED', 'CURRENCY_CHANGED']);
+          expect(conflicted.load_conflict).toMatchObject({ proposedCurrency: 'EUR', proposedAmount: '200.00' });
+          expect([...conflicted.load_conflict.lines[0].codes].sort()).toEqual(['AMOUNT_BELOW_ALLOCATED', 'CURRENCY_CHANGED']);
           await unallocate(allocation);
           await loader.run(trigger('doc_cash_outflows'));
-          expect(await header(p.id)).toMatchObject({ currency: 'EUR', amount: '50.00', load_conflict: null });
+          expect(await header(p.id)).toMatchObject({ currency: 'EUR', amount: '200.00', load_conflict: null });
         } finally {
           unregister();
         }
       });
     }
+
+    it('two payment allocations of one document: the currency is held until the last one is removed (procurement 3b-2 CR2-1)', async () => {
+      const P = K();
+      await payment(P, 10000);
+      await loader.run(trigger('doc_cash_outflows'));
+      const p = await doc(P);
+      const [total] = await lines(p.id);
+      const first = await allocate(total.id, 'payment', 6000);
+      const second = await allocate(total.id, 'payment', 4000);
+      await payment(P, 10000, { ВалютаДенежныхСредств_Key: CUR_EUR });
+      await loader.run(trigger('doc_cash_outflows'));
+      expect(await header(p.id)).toMatchObject({ currency: 'KZT', amount: '10000.00' });
+      // Сняли одно — второе в прежней валюте, валюта держится.
+      await unallocate(first);
+      await loader.run(trigger('doc_cash_outflows'));
+      expect(await header(p.id)).toMatchObject({ currency: 'KZT', amount: '10000.00' });
+      expect((await lines(p.id))[0].load_conflict_code).toBe('CURRENCY_CHANGED');
+      await unallocate(second);
+      await loader.run(trigger('doc_cash_outflows'));
+      expect(await header(p.id)).toMatchObject({ currency: 'EUR', amount: '10000.00', load_conflict: null });
+      expect((await lines(p.id))[0].load_conflict_code).toBeNull();
+    });
+
+    it('an allocation committed while the loader waits on the line lock still holds the currency', async () => {
+      const P = K();
+      await payment(P, 500);
+      await loader.run(trigger('doc_cash_outflows'));
+      const p = await doc(P);
+      const [total] = await lines(p.id);
+      await payment(P, 500, { ВалютаДенежныхСредств_Key: CUR_EUR });
+      // «Команда распределения»: держит строку (как lockDocumentLine) и вставляет распределение, не фиксируя.
+      const command = new Client({ connectionString: url });
+      await command.connect();
+      let allocationId = 0;
+      try {
+        await command.query('BEGIN');
+        await command.query('SELECT 1 FROM onec_document_lines WHERE onec_document_line_id = $1 FOR NO KEY UPDATE', [total.id]);
+        const pending = loader.run(trigger('doc_cash_outflows'));
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        await command.query("SET session_replication_role = replica");
+        const orderId = 900000000 + Math.floor(Math.random() * 99999999);
+        await command.query(`INSERT INTO orders (order_id, order_name, client_id, order_status_id, payment_status_id, created_by, project_id) OVERRIDING SYSTEM VALUE VALUES ($1, $2, 1, 1, 1, 1, 1)`, [orderId, `${tag}-${orderId}`]);
+        const procurement = (await command.query(
+          `INSERT INTO order_resource_procurement (order_id, resource_kind, sheet_material_type_id, purchased, version) VALUES ($1, 'sheet_material', 1, false, 1)
+           RETURNING order_resource_procurement_id::int AS id`, [orderId])).rows[0].id;
+        allocationId = (await command.query(
+          `INSERT INTO order_resource_onec_allocations (order_resource_procurement_id, onec_document_line_id, role, amount, origin)
+           VALUES ($1, $2, 'payment', 300, 'manual') RETURNING allocation_id::int AS id`, [procurement, total.id])).rows[0].id;
+        await command.query("SET session_replication_role = origin");
+        await command.query('COMMIT');
+        await pending;
+      } finally {
+        await command.end();
+      }
+      expect(await header(p.id)).toMatchObject({ currency: 'KZT', amount: '500.00' });
+      expect((await lines(p.id))[0].load_conflict_code).toBe('CURRENCY_CHANGED');
+      await unallocate(allocationId);
+      await loader.run(trigger('doc_cash_outflows'));
+      expect(await header(p.id)).toMatchObject({ currency: 'EUR', load_conflict: null });
+    });
   });
 });

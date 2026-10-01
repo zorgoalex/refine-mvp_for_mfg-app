@@ -37,7 +37,7 @@ const FINANCE = 'finance.view';
 
 /** Документы 1С на экране «Закупки → Документы 1С»: права и сборка опций чтения. */
 export interface RequestLinksPort {
-  link(command: LinkCommandBase & { lineOrderId: number; quantity: number }): Promise<RequestLinkResultDto>;
+  link(command: LinkCommandBase & { lineOrderId: number; quantity?: number; amount?: number }): Promise<RequestLinkResultDto>;
   unlink(command: LinkCommandBase & { linkId: number }): Promise<RequestLinkResultDto>;
 }
 
@@ -95,16 +95,19 @@ export class OnecDocumentsService {
   }
 
   /** Привязать приход к заявке поставщику (ф.3б): право procurement.manage, как у распределения. */
-  async linkToRequest(command: LinkCommandBase & { lineOrderId: number; quantity: number }): Promise<RequestLinkResultDto> {
+  async linkToRequest(command: LinkCommandBase & { lineOrderId: number; quantity?: number; amount?: number }): Promise<RequestLinkResultDto> {
     await this.requireManage(command.currentUser, command.requestId, command.documentId);
     if (!this.ports.links) throw new Error('Request links port is not configured');
-    return this.ports.links.link(command);
+    const links = this.ports.links;
+    // Оплата требует finance.view внутри транзакции: отказ пишется после отката, как у распределения оплаты.
+    return this.withFinanceDeniedAudit(command.currentUser, command.requestId, command.documentId, () => links.link(command));
   }
 
   async unlinkFromRequest(command: LinkCommandBase & { linkId: number }): Promise<RequestLinkResultDto> {
     await this.requireManage(command.currentUser, command.requestId, command.documentId);
     if (!this.ports.links) throw new Error('Request links port is not configured');
-    return this.ports.links.unlink(command);
+    const links = this.ports.links;
+    return this.withFinanceDeniedAudit(command.currentUser, command.requestId, command.documentId, () => links.unlink(command));
   }
 
   /**

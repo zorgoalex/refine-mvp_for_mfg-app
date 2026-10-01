@@ -17,7 +17,9 @@ import {
   type SupplierRequestCardDto,
   type SupplierRequestCommandResultDto,
   type SupplierRequestLineDto,
+  type SupplierRequestPaymentLinkDto,
   type SupplierRequestPossibleMatchDto,
+  type SupplierRequestPossiblePaymentDto,
   type SupplierRequestReceiptLinkDto,
   type SupplierRequestsListQuery,
   type SupplierRequestsListResponseDto,
@@ -256,13 +258,16 @@ export class PgSupplierRequestsRepository {
       const lines = await loadLines(client, ids);
       const lineOrders = await loadLineOrders(client, lines.map((line) => Number(line.supplier_request_line_id)));
       const visible = await scopedOrderIds(client, currentUser, [...new Set(lineOrders.map((row) => Number(row.order_id)))]);
+      const payments = canSeeAmounts(currentUser)
+        ? await loadPaymentLinks(client, lineOrders.filter((row) => visible.has(Number(row.order_id))).map((row) => Number(row.supplier_request_line_order_id)))
+        : null;
       const countsRows = (await client.query<{ status: SupplierRequestStatus; count: number }>(
         'SELECT status, count(*)::int AS count FROM supplier_requests GROUP BY status',
       )).rows;
       const counts: Record<SupplierRequestStatus, number> = { draft: 0, sent: 0, closed: 0, cancelled: 0 };
       for (const row of countsRows) counts[row.status] = Number(row.count);
       return {
-        data: page.map((row) => summaryDto(row, lines, lineOrders, visible)),
+        data: page.map((row) => summaryDto(row, lines, lineOrders, visible, payments)),
         counts,
         truncated: rows.length > SUPPLIER_REQUESTS_LIST_LIMIT,
       };
@@ -545,6 +550,94 @@ async function loadReceiptLinks(client: DatabaseClient, lineOrderIds: number[]):
   return result;
 }
 
+async function loadPaymentLinks(client: DatabaseClient, lineOrderIds: number[]): Promise<Map<number, SupplierRequestPaymentLinkDto[]>> {
+  const result = new Map<number, SupplierRequestPaymentLinkDto[]>();
+  if (lineOrderIds.length === 0) return result;
+  const rows = (await client.query<{
+    link_id: string; allocation_id: string; line_order_id: string; amount: string; currency: string; document_id: string; number: string;
+    doc_date: string; line_id: string; version: string;
+  }>(
+    `SELECT k.link_id::text, k.allocation_id::text, k.supplier_request_line_order_id::text AS line_order_id, k.amount::text, k.currency,
+            d.onec_document_id::text AS document_id, d.number, d.doc_date::text AS doc_date,
+            a.onec_document_line_id::text AS line_id, orp.version::text
+       FROM order_resource_allocation_request_links k
+       JOIN order_resource_onec_allocations a ON a.allocation_id = k.allocation_id
+       JOIN order_resource_procurement orp ON orp.order_resource_procurement_id = a.order_resource_procurement_id
+       JOIN onec_document_lines l ON l.onec_document_line_id = a.onec_document_line_id
+       JOIN onec_documents d ON d.onec_document_id = l.onec_document_id
+      WHERE k.supplier_request_line_order_id = ANY($1::bigint[]) AND k.removed_at IS NULL AND k.amount IS NOT NULL
+      ORDER BY d.doc_date, k.link_id`,
+    [lineOrderIds],
+  )).rows;
+  for (const row of rows) {
+    const list = result.get(Number(row.line_order_id)) ?? [];
+    list.push({
+      linkId: Number(row.link_id), allocationId: Number(row.allocation_id), documentId: Number(row.document_id),
+      documentNumber: row.number, documentDate: row.doc_date, lineId: Number(row.line_id), amount: Number(row.amount),
+      currency: row.currency, procurementVersion: Number(row.version),
+    });
+    result.set(Number(row.line_order_id), list);
+  }
+  return result;
+}
+
+/**
+ * Оплаты того же закупа с непривязанной суммой (ф.3б-2): действующие распределения оплат из проведённых документов,
+ * получатель не расходится с поставщиком заявки, ещё не связанные с этой строкой заявки. Только подсказка.
+ */
+async function loadPossiblePayments(client: DatabaseClient, requestSupplierKey: string, orders: LineOrderRow[]): Promise<Map<number, SupplierRequestPossiblePaymentDto[]>> {
+  const result = new Map<number, SupplierRequestPossiblePaymentDto[]>();
+  const procurementIds = [...new Set(orders.map((order) => Number(order.order_resource_procurement_id)))];
+  if (procurementIds.length === 0) return result;
+  const rows = (await client.query<{
+    allocation_id: string; procurement_id: string; amount: string; linked: string; linked_to: string[] | null; line_id: string;
+    document_id: string; number: string; doc_date: string; supplier_id: string | null; counterparty_ref_key: string | null;
+    counterparty_name: string | null; currency: string; version: string; currency_changed: boolean;
+  }>(
+    `SELECT a.allocation_id::text, a.order_resource_procurement_id::text AS procurement_id, a.amount::text,
+            (SELECT COALESCE(sum(k.amount), 0) FROM order_resource_allocation_request_links k
+              WHERE k.allocation_id = a.allocation_id AND k.removed_at IS NULL AND k.amount IS NOT NULL)::text AS linked,
+            (SELECT array_agg(k.supplier_request_line_order_id::text) FROM order_resource_allocation_request_links k
+              WHERE k.allocation_id = a.allocation_id AND k.removed_at IS NULL) AS linked_to,
+            -- Связи в другой валюте (документ сменил валюту в 1С) — совпадение не предлагается (CR1-2).
+            EXISTS (SELECT 1 FROM order_resource_allocation_request_links k
+              WHERE k.allocation_id = a.allocation_id AND k.removed_at IS NULL AND k.amount IS NOT NULL AND k.currency <> d.currency) AS currency_changed,
+            a.onec_document_line_id::text AS line_id, d.onec_document_id::text AS document_id, d.number, d.doc_date::text AS doc_date,
+            d.supplier_id::text, d.counterparty_ref_key::text, d.counterparty_name, d.currency, orp.version::text
+       FROM order_resource_onec_allocations a
+       JOIN order_resource_procurement orp ON orp.order_resource_procurement_id = a.order_resource_procurement_id
+       JOIN onec_document_lines l ON l.onec_document_line_id = a.onec_document_line_id
+       JOIN onec_documents d ON d.onec_document_id = l.onec_document_id
+      WHERE a.order_resource_procurement_id = ANY($1::bigint[]) AND a.role = 'payment' AND a.removed_at IS NULL
+        AND d.posted AND NOT d.deleted_in_onec AND d.doc_kind = ANY($2::text[])
+        AND l.removed_in_onec_at IS NULL AND l.load_conflict_code IS NULL
+      ORDER BY d.doc_date, a.allocation_id`,
+    [procurementIds, ['cash_outflow', 'bank_outflow']],
+  )).rows;
+  for (const order of orders) {
+    const list: SupplierRequestPossiblePaymentDto[] = [];
+    for (const row of rows) {
+      if (Number(row.procurement_id) !== Number(order.order_resource_procurement_id)) continue;
+      if ((row.linked_to ?? []).includes(String(order.supplier_request_line_order_id)) || row.currency_changed) continue;
+      const check = supplierMatch(requestSupplierKey, {
+        supplierId: row.supplier_id === null ? null : Number(row.supplier_id),
+        counterpartyRefKey: row.counterparty_ref_key,
+        keys: documentSupplierKeys({ doc_supplier_id: row.supplier_id, doc_counterparty_ref_key: row.counterparty_ref_key, doc_counterparty_name: row.counterparty_name }),
+      });
+      if (check === 'mismatch') continue;
+      const unlinked = Math.round(Number(row.amount) * 100) - Math.round(Number(row.linked) * 100);
+      if (unlinked <= 0) continue;
+      list.push({
+        allocationId: Number(row.allocation_id), documentId: Number(row.document_id), documentNumber: row.number,
+        documentDate: row.doc_date, lineId: Number(row.line_id), counterpartyName: row.counterparty_name,
+        unlinkedAmount: unlinked / 100, currency: row.currency, supplierCheck: check, procurementVersion: Number(row.version),
+      });
+    }
+    if (list.length > 0) result.set(Number(order.supplier_request_line_order_id), list);
+  }
+  return result;
+}
+
 /**
  * «Возможные совпадения» (§5.5): активные распределения прихода по закупу заказа строки заявки из проведённых
  * документов, поставщик которых не расходится с поставщиком заявки, с непривязанным остатком. Приход без связи
@@ -637,7 +730,24 @@ async function loadPossibleMatches(
   return result;
 }
 
-function summaryDto(row: RequestRow, lines: LineRow[], lineOrders: LineOrderRow[], visible: Set<number>): SupplierRequestSummaryDto {
+/** Буквальная проверка права на суммы (как в документах 1С). */
+function canSeeAmounts(user: CurrentUser): boolean {
+  return (user.permissions ?? []).includes('finance.view');
+}
+
+function paidByCurrency(links: SupplierRequestPaymentLinkDto[]): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const link of links) result[link.currency] = Math.round(((result[link.currency] ?? 0) + link.amount) * 100) / 100;
+  return result;
+}
+
+function summaryDto(
+  row: RequestRow,
+  lines: LineRow[],
+  lineOrders: LineOrderRow[],
+  visible: Set<number>,
+  payments: Map<number, SupplierRequestPaymentLinkDto[]> | null,
+): SupplierRequestSummaryDto {
   const id = Number(row.supplier_request_id);
   const ownLines = lines.filter((line) => Number(line.supplier_request_id) === id);
   const lineIds = new Set(ownLines.map((line) => Number(line.supplier_request_line_id)));
@@ -663,6 +773,7 @@ function summaryDto(row: RequestRow, lines: LineRow[], lineOrders: LineOrderRow[
         .reduce((sum, order) => sum + toMilli(order.fulfilled), 0) / 1000,
     })),
     receiptState: receiptStateOf(own),
+    ...paymentSummary(own, payments),
     ordersCount: visibleCount,
     hiddenOrdersCount: orderIds.size - visibleCount,
     deletedOrdersCount: deletedIds.size,
@@ -673,6 +784,15 @@ function summaryDto(row: RequestRow, lines: LineRow[], lineOrders: LineOrderRow[
     closedAt: row.closed_at === null ? null : toIso(row.closed_at),
     cancelledAt: row.cancelled_at === null ? null : toIso(row.cancelled_at),
   };
+}
+
+function paymentSummary(
+  orders: LineOrderRow[],
+  payments: Map<number, SupplierRequestPaymentLinkDto[]> | null,
+): Pick<SupplierRequestSummaryDto, 'paymentState' | 'paid'> {
+  if (payments === null) return { paymentState: 'hidden', paid: {} };
+  const links = orders.flatMap((order) => payments.get(Number(order.supplier_request_line_order_id)) ?? []);
+  return { paymentState: links.length > 0 ? 'paid' : 'none', paid: paidByCurrency(links) };
 }
 
 /** Сверка «приход» по заказам заявки (ф.3б): только по активным связям; заказы в корзине не учитываются. */
@@ -691,6 +811,11 @@ async function loadCard(client: DatabaseClient, currentUser: CurrentUser, suppli
   const visible = await scopedOrderIds(client, currentUser, [...new Set(lineOrders.map((order) => Number(order.order_id)))]);
   const shownOrders = lineOrders.filter((order) => !order.order_deleted && visible.has(Number(order.order_id)));
   const receipts = await loadReceiptLinks(client, shownOrders.map((order) => Number(order.supplier_request_line_order_id)));
+  const amounts = canSeeAmounts(currentUser);
+  const payments = amounts ? await loadPaymentLinks(client, shownOrders.map((order) => Number(order.supplier_request_line_order_id))) : null;
+  const possiblePayments = amounts && row.status === 'sent'
+    ? await loadPossiblePayments(client, row.supplier_key, shownOrders)
+    : new Map<number, SupplierRequestPossiblePaymentDto[]>();
   // Возможные совпадения ищутся только для отправленной заявки: к другим привязать нельзя.
   const matches = row.status === 'sent'
     ? await loadPossibleMatches(client, row.supplier_key, lines, shownOrders)
@@ -726,6 +851,9 @@ async function loadCard(client: DatabaseClient, currentUser: CurrentUser, suppli
         fulfillment: fulfillmentOf(toMilli(order.quantity), toMilli(order.fulfilled)),
         receipts: receipts.get(Number(order.supplier_request_line_order_id)) ?? [],
         possibleMatches: matches.get(Number(order.supplier_request_line_order_id)) ?? [],
+        payments: payments?.get(Number(order.supplier_request_line_order_id)) ?? [],
+        paid: paidByCurrency(payments?.get(Number(order.supplier_request_line_order_id)) ?? []),
+        possiblePayments: possiblePayments.get(Number(order.supplier_request_line_order_id)) ?? [],
       })),
       hiddenOrdersCount: hidden.length,
       hiddenOrdersQuantity: hidden.reduce((sum, order) => sum + toMilli(order.quantity), 0) / 1000,
@@ -733,7 +861,7 @@ async function loadCard(client: DatabaseClient, currentUser: CurrentUser, suppli
       deletedOrdersQuantity: deleted.reduce((sum, order) => sum + toMilli(order.quantity), 0) / 1000,
     };
   });
-  const summary = summaryDto(row, lines, lineOrders, visible);
+  const summary = summaryDto(row, lines, lineOrders, visible, payments);
   // Команды — только при доступе ко всем заказам заявки, включая заказы в корзине (CR1-1, CR3-1).
   const allOrderIds = [...new Set(lineOrders.map((order) => Number(order.order_id)))];
   const owned = canManage ? await ownedOrderIds(client, currentUser, allOrderIds) : new Set<number>();

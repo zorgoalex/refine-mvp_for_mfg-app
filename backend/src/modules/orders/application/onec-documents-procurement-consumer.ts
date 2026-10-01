@@ -35,11 +35,12 @@ export class OnecDocumentsProcurementConsumer implements OnecDocumentConsumer, O
 
   async guardLineChanges(
     tx: DatabaseClient,
-    _doc: LoadedDocumentView,
+    doc: LoadedDocumentView,
     changes: readonly DocumentLineChange[],
   ): Promise<Array<{ lineNo: number; code: LineConflictCode }>> {
+    const conflicts = await this.currencyConflicts(tx, doc);
     const lineIds = changes.flatMap((change) => (change.lineId === null ? [] : [change.lineId]));
-    if (lineIds.length === 0) return [];
+    if (lineIds.length === 0) return conflicts;
     const { rows } = await tx.query<{ line_id: string; quantity: string; amount: string }>(
       `SELECT onec_document_line_id::text AS line_id, COALESCE(sum(quantity), 0)::text AS quantity, COALESCE(sum(amount), 0)::text AS amount
          FROM order_resource_onec_allocations
@@ -48,7 +49,6 @@ export class OnecDocumentsProcurementConsumer implements OnecDocumentConsumer, O
       [lineIds],
     );
     const active = new Map(rows.map((row) => [Number(row.line_id), { quantity: Number(row.quantity), amount: Number(row.amount) }]));
-    const conflicts: Array<{ lineNo: number; code: LineConflictCode }> = [];
     for (const change of changes) {
       const used = change.lineId === null ? undefined : active.get(change.lineId);
       if (!used || (used.quantity <= 0 && used.amount <= 0)) continue;
@@ -69,6 +69,23 @@ export class OnecDocumentsProcurementConsumer implements OnecDocumentConsumer, O
       }
     }
     return conflicts;
+  }
+
+  /**
+   * Смена валюты документа при активных распределениях строки-итога (оплата; ф.3б-2, CR1-2/CR2-1): суммы распределений
+   * и связей с заявками — в прежней валюте, поэтому загрузчик держит прежние валюту и сумму, пока распределения не
+   * сняты. Код — на строке-итоге, даже если строки 1С не менялись (changes пуст).
+   */
+  private async currencyConflicts(tx: DatabaseClient, doc: LoadedDocumentView): Promise<Array<{ lineNo: number; code: LineConflictCode }>> {
+    if (!doc.previous || doc.previous.currency === doc.currency) return [];
+    const { rows } = await tx.query<{ line_no: number }>(
+      `SELECT l.line_no FROM onec_document_lines l
+        WHERE l.onec_document_id = $1 AND l.is_document_total
+          AND EXISTS (SELECT 1 FROM order_resource_onec_allocations a
+                       WHERE a.onec_document_line_id = l.onec_document_line_id AND a.removed_at IS NULL)`,
+      [doc.documentId],
+    );
+    return rows.map((row) => ({ lineNo: Number(row.line_no), code: 'CURRENCY_CHANGED' as const }));
   }
 
   /** Любые распределения (включая снятые) — ссылка FK, физически удалить строку нельзя. */

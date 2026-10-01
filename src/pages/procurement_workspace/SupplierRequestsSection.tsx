@@ -13,7 +13,9 @@ import type {
   SupplierRequestCardDto,
   SupplierRequestLineDto,
   SupplierRequestLineOrderDto,
+  SupplierRequestPaymentLinkDto,
   SupplierRequestPossibleMatchDto,
+  SupplierRequestPossiblePaymentDto,
   SupplierRequestReceiptLinkDto,
   SupplierRequestsListResponseDto,
   SupplierRequestStatus,
@@ -30,19 +32,27 @@ import {
   buildDraftsBody,
   buildSupplierCopyText,
   buildUpdatePatchBody,
+  canLinkPaymentAmount,
+  canSeePayments,
   clearDraftPreview,
   computeLineStock,
   computeRequestSteps,
   formatDemandQuantity,
   formatLineItemText,
+  formatPaidSummary,
+  formatPaymentAmount,
   formatRequestQuantity,
   fulfillmentTag,
   groupDraftPreviewBySupplier,
   hiddenOrdersLabel,
   isStockNegative,
   loadDraftPreview,
+  paymentLineLabel,
+  paymentStepInfo,
   possibleMatchDefaultQuantity,
   possibleMatchMaxQuantity,
+  possiblePaymentDefaultAmount,
+  possiblePaymentMaxAmount,
   receiptLineLabel,
   REQUEST_STEP_LABELS,
   requestsStatusCounts,
@@ -187,7 +197,14 @@ export function SupplierRequestsSection({ active }: SupplierRequestsSectionProps
       title: 'Сверка',
       key: 'steps',
       width: 260,
-      render: (_value, request) => <StepsCell status={request.status} receiptState={request.receiptState ?? 'none'} />,
+      render: (_value, request) => (
+        <StepsCell
+          status={request.status}
+          receiptState={request.receiptState ?? 'none'}
+          paymentState={request.paymentState}
+          paid={request.paid}
+        />
+      ),
     },
     {
       title: 'Статус',
@@ -277,7 +294,7 @@ export function SupplierRequestsSection({ active }: SupplierRequestsSectionProps
           onRow={(request) => ({ onClick: () => setOpenId(request.requestId), style: { cursor: 'pointer' } })}
           locale={{ emptyText: <Empty description="Заявок нет" /> }}
         />
-        <div className="rr-hint">Отправленная заявка отмечается в рабочем списке как «заказано». Приход засчитывается по привязке к заявке (карточка заявки → «Привязать»); оплаты — позже. Если остаток не нужен — закройте заявку вручную: непокрытый остаток вернётся в рабочий список.</div>
+        <div className="rr-hint">Отправленная заявка отмечается в рабочем списке как «заказано». Приход и оплата засчитываются по привязке к заявке (карточка заявки → «Привязать» / «Привязать оплату»). Если остаток не нужен — закройте заявку вручную: непокрытый остаток вернётся в рабочий список.</div>
       </div>
 
       <SupplierRequestDrawer
@@ -293,12 +310,20 @@ export function SupplierRequestsSection({ active }: SupplierRequestsSectionProps
   );
 }
 
-function StepsCell({ status, receiptState }: { status: SupplierRequestStatus; receiptState: 'none' | 'partial' | 'done' }) {
-  const steps = computeRequestSteps(status, receiptState);
+interface StepsCellProps {
+  status: SupplierRequestStatus;
+  receiptState: 'none' | 'partial' | 'done';
+  paymentState?: 'hidden' | 'none' | 'paid';
+  paid?: Record<string, number>;
+}
+
+function StepsCell({ status, receiptState, paymentState, paid }: StepsCellProps) {
+  const steps = computeRequestSteps(status, receiptState, paymentState);
+  const payment = paymentStepInfo(paymentState, paid);
   const values: Array<{ state: StepState; tooltip?: string }> = [
     { state: steps.request },
     { state: steps.receipt },
-    { state: steps.payment, tooltip: 'оплаты — позже' },
+    { state: steps.payment, tooltip: payment.tooltip },
   ];
   return (
     <div className="rr-steps">
@@ -393,6 +418,8 @@ function SupplierRequestDrawer({ requestId, onClose, onChanged, canManage, manag
 
   const card = state.status === 'ready' ? state.card : null;
   const editable = Boolean(card?.actions.edit);
+  // Оплаты видны только с finance.view (card.paymentState !== 'hidden'); старый backend без поля — трактуется как «hidden».
+  const showPayments = canSeePayments(card?.paymentState);
 
   // Ответ, пришедший после закрытия карточки, не применяется (CR2-2): экземпляр — на одну заявку (key), а флаг
   // снимается при размонтировании.
@@ -447,6 +474,59 @@ function SupplierRequestDrawer({ requestId, onClose, onChanged, canManage, manag
         expectedVersion: receipt.procurementVersion,
       });
       message.success('Приход отвязан');
+      await reloadCard();
+      onChanged();
+    } catch (error) {
+      if (isApiError(error, 'PROCUREMENT_VERSION_CONFLICT')) {
+        message.warning('Данные устарели — карточка обновлена');
+        await reloadCard().catch(() => {});
+        onChanged();
+      } else {
+        message.error(supplierRequestErrorMessage(error instanceof ApiError ? error : { message: error instanceof Error ? error.message : undefined }));
+      }
+    } finally {
+      setLinkBusyKey(null);
+    }
+  };
+
+  // «Привязать оплату» (ф.3б-2, finance.view): та же схема, что и у приходов, только сумма вместо количества.
+  const handleLinkPayment = async (possiblePayment: SupplierRequestPossiblePaymentDto, lineOrderId: number, amount: number) => {
+    const key = `link-payment:${possiblePayment.documentId}:${possiblePayment.lineId}:${possiblePayment.allocationId}:${lineOrderId}`;
+    setLinkBusyKey(key);
+    try {
+      const result = await onecDocumentsApi.linkToRequest(possiblePayment.documentId, possiblePayment.lineId, possiblePayment.allocationId, {
+        lineOrderId, amount, expectedVersion: possiblePayment.procurementVersion,
+      });
+      if (result.supplierCheck === 'unknown') {
+        message.warning('Оплата привязана. Получателя оплаты не удалось сверить с поставщиком заявки — проверьте вручную.');
+      } else {
+        message.success(result.changed ? 'Оплата привязана к заявке' : 'Уже привязано с такой суммой');
+      }
+      await reloadCard();
+      onChanged();
+    } catch (error) {
+      if (isApiError(error, 'PROCUREMENT_VERSION_CONFLICT')) {
+        message.warning('Данные устарели — карточка обновлена');
+        await reloadCard().catch(() => {});
+        onChanged();
+      } else {
+        message.error(supplierRequestErrorMessage(error instanceof ApiError ? error : { message: error instanceof Error ? error.message : undefined }));
+      }
+    } finally {
+      setLinkBusyKey(null);
+    }
+  };
+
+  const handleUnlinkPayment = async (payment: SupplierRequestPaymentLinkDto) => {
+    const confirmed = await confirmModal('Отвязать оплату', `Отвязать оплату ${payment.documentNumber} от заявки?`);
+    if (!confirmed) return;
+    const key = `unlink-payment:${payment.linkId}`;
+    setLinkBusyKey(key);
+    try {
+      await onecDocumentsApi.unlinkFromRequest(payment.documentId, payment.lineId, payment.allocationId, payment.linkId, {
+        expectedVersion: payment.procurementVersion,
+      });
+      message.success('Оплата отвязана');
       await reloadCard();
       onChanged();
     } catch (error) {
@@ -602,6 +682,9 @@ function SupplierRequestDrawer({ requestId, onClose, onChanged, canManage, manag
                 linkBusyKey={linkBusyKey}
                 onLinkReceipt={handleLinkReceipt}
                 onUnlinkReceipt={handleUnlinkReceipt}
+                showPayments={showPayments}
+                onLinkPayment={handleLinkPayment}
+                onUnlinkPayment={handleUnlinkPayment}
               />
             ))}
           </div>
@@ -644,14 +727,19 @@ interface SupplierRequestLineCardProps {
   onRemove?: () => void;
   requestStatus: SupplierRequestStatus;
   canManage: boolean;
-  /** Ключ занятой связи (ф.3б) — блокирует только свою кнопку «Привязать»/«Отвязать». */
+  /** Ключ занятой связи (ф.3б/ф.3б-2) — блокирует только свою кнопку «Привязать»/«Отвязать». */
   linkBusyKey: string | null;
   onLinkReceipt: (match: SupplierRequestPossibleMatchDto, lineOrderId: number, quantity: number) => void;
   onUnlinkReceipt: (receipt: SupplierRequestReceiptLinkDto) => void;
+  /** Оплаты видны только с finance.view (ф.3б-2). */
+  showPayments: boolean;
+  onLinkPayment: (possiblePayment: SupplierRequestPossiblePaymentDto, lineOrderId: number, amount: number) => void;
+  onUnlinkPayment: (payment: SupplierRequestPaymentLinkDto) => void;
 }
 
 function SupplierRequestLineCard({
   line, editable, edit, onChange, onRemove, requestStatus, canManage, linkBusyKey, onLinkReceipt, onUnlinkReceipt,
+  showPayments, onLinkPayment, onUnlinkPayment,
 }: SupplierRequestLineCardProps) {
   const unitLabel = onecUnitLabel(line.unit, null);
   // Просмотр — сохранённый остаток; правка черновика — предпросмотр (заказы в корзине при сохранении уйдут; CR3-3).
@@ -735,6 +823,22 @@ function SupplierRequestLineCard({
                   linkBusyKey={linkBusyKey}
                   onLink={onLinkReceipt}
                   onUnlink={onUnlinkReceipt}
+                />
+              )}
+            />
+          )}
+          {!editable && showPayments && (
+            <Table.Column<typeof visibleOrders[number]>
+              key="payment"
+              title="Оплата"
+              render={(_value, order) => (
+                <OrderPaymentStatus
+                  order={order}
+                  showPossiblePayments={requestStatus === 'sent'}
+                  canManage={canManage}
+                  linkBusyKey={linkBusyKey}
+                  onLink={onLinkPayment}
+                  onUnlink={onUnlinkPayment}
                 />
               )}
             />
@@ -872,6 +976,114 @@ function PossibleMatchRow({ order, match, unit, canManage, busy, disabled, onLin
           onClick={() => onLink(quantity)}
         >
           Привязать
+        </Button>
+      </Tooltip>
+    </div>
+  );
+}
+
+interface OrderPaymentStatusProps {
+  order: SupplierRequestLineOrderDto;
+  /** «Возможные оплаты» показываются только для отправленных заявок. */
+  showPossiblePayments: boolean;
+  canManage: boolean;
+  linkBusyKey: string | null;
+  onLink: (possiblePayment: SupplierRequestPossiblePaymentDto, lineOrderId: number, amount: number) => void;
+  onUnlink: (payment: SupplierRequestPaymentLinkDto) => void;
+}
+
+/**
+ * Ячейка «Оплата» у заказа строки заявки (ф.3б-2, видно только с finance.view): «Оплачено: …» по валютам
+ * (без смешения), привязанные оплаты, «Возможные оплаты» — привязать/отвязать в карточке.
+ */
+function OrderPaymentStatus({ order, showPossiblePayments, canManage, linkBusyKey, onLink, onUnlink }: OrderPaymentStatusProps) {
+  const payments = order.payments ?? [];
+  const possiblePayments = showPossiblePayments ? order.possiblePayments ?? [] : [];
+  const paidSummary = formatPaidSummary(order.paid ?? {});
+
+  if (!paidSummary && payments.length === 0 && possiblePayments.length === 0) {
+    return <span className="rr-muted">—</span>;
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 220 }}>
+      {paidSummary && <div className="rr-sub rr-num">Оплачено: {paidSummary}</div>}
+      {payments.map((payment) => (
+        <div key={payment.linkId} className="rr-sub" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span>{paymentLineLabel(payment)}</span>
+          {canManage && (
+            <Button
+              size="small"
+              type="link"
+              loading={linkBusyKey === `unlink-payment:${payment.linkId}`}
+              disabled={linkBusyKey !== null && linkBusyKey !== `unlink-payment:${payment.linkId}`}
+              onClick={() => onUnlink(payment)}
+            >
+              Отвязать
+            </Button>
+          )}
+        </div>
+      ))}
+      {possiblePayments.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span className="rr-sub">Возможные оплаты:</span>
+          {possiblePayments.map((possiblePayment) => (
+            <PossiblePaymentRow
+              // Ключ включает непривязанную сумму: после соседней привязки строка пересоздаётся со свежим значением.
+              key={`${possiblePayment.documentId}-${possiblePayment.lineId}-${possiblePayment.allocationId}-${possiblePayment.unlinkedAmount}`}
+              possiblePayment={possiblePayment}
+              canManage={canManage}
+              busy={linkBusyKey === `link-payment:${possiblePayment.documentId}:${possiblePayment.lineId}:${possiblePayment.allocationId}:${order.lineOrderId}`}
+              disabled={linkBusyKey !== null && linkBusyKey !== `link-payment:${possiblePayment.documentId}:${possiblePayment.lineId}:${possiblePayment.allocationId}:${order.lineOrderId}`}
+              onLink={(amount) => onLink(possiblePayment, order.lineOrderId, amount)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface PossiblePaymentRowProps {
+  possiblePayment: SupplierRequestPossiblePaymentDto;
+  canManage: boolean;
+  busy: boolean;
+  disabled: boolean;
+  onLink: (amount: number) => void;
+}
+
+/** Строка «возможной оплаты»: оплата того же заказа/материала с непривязанной суммой. */
+function PossiblePaymentRow({ possiblePayment, canManage, busy, disabled, onLink }: PossiblePaymentRowProps) {
+  const max = possiblePaymentMaxAmount(possiblePayment);
+  const [amount, setAmount] = useState(() => possiblePaymentDefaultAmount(possiblePayment));
+
+  return (
+    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+      <span className="rr-sub">
+        {possiblePayment.documentNumber} от {formatDate(possiblePayment.documentDate)}
+        {possiblePayment.counterpartyName ? ` · ${possiblePayment.counterpartyName}` : ''}
+        {' · '}не привязано {formatPaymentAmount(possiblePayment.unlinkedAmount, possiblePayment.currency)}
+      </span>
+      <InputNumber<number>
+        size="small"
+        min={0}
+        max={max}
+        precision={2}
+        step={1}
+        value={amount}
+        disabled={!canManage}
+        aria-label={`Сумма для привязки оплаты ${possiblePayment.documentNumber}`}
+        onChange={(value) => setAmount(Math.min(max, Math.max(0, value ?? 0)))}
+      />
+      <Tooltip title={possiblePayment.supplierCheck === 'unknown' ? 'Получателя оплаты не удалось сверить с поставщиком заявки' : undefined}>
+        <Button
+          size="small"
+          type={possiblePayment.supplierCheck === 'unknown' ? 'default' : 'primary'}
+          loading={busy}
+          disabled={!canManage || disabled || !canLinkPaymentAmount(amount, max)}
+          onClick={() => onLink(amount)}
+        >
+          Привязать оплату
         </Button>
       </Tooltip>
     </div>

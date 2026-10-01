@@ -33,11 +33,15 @@ const addSchema = z.object({
   expectedDemandFingerprint: fingerprint,
 }).strict();
 const removeSchema = z.object({ expectedVersion }).strict();
+/** Приход — количество (единица строки заявки), оплата — сумма (валюта документа); ровно одно (ф.3б-2). */
 export const linkSchema = z.object({
   lineOrderId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-  quantity: withScale(3),
+  quantity: withScale(3).optional(),
+  amount: withScale(2).optional(),
   expectedVersion,
-}).strict();
+}).strict().refine((value) => (value.quantity === undefined) !== (value.amount === undefined), {
+  message: 'нужно ровно одно: quantity (приход) или amount (оплата)', path: ['quantity'],
+});
 export const batchSchema = z.object({
   requestId: z.string().uuid(),
   origin: z.enum(['suggested', 'manual']),

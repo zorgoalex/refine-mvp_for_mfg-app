@@ -4888,7 +4888,9 @@ paths:
         заявки того же закупа, поставщик прихода не расходится с поставщиком заявки (422
         SUPPLIER_REQUEST_SUPPLIER_MISMATCH), единицы пересчитываются, не больше заказанного по заявке и не больше
         распределённого по приходу. Та же активная связь с тем же количеством — no-op; с другим — 409
-        SUPPLIER_REQUEST_LINK_EXISTS. Версия закупа растёт; аудит и событие order.resource_procurement_changed.
+        SUPPLIER_REQUEST_LINK_EXISTS. Оплата (ф.3б-2): только с finance.view, сумма в валюте документа (снимок в связи),
+        сумма связей оплаты не больше распределённой; верхней границы по заявке нет. Версия закупа растёт; аудит и
+        событие order.resource_procurement_changed.
       security:
         - bearerAuth: []
       x-permission: procurement.manage
@@ -4899,10 +4901,17 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [lineOrderId, quantity, expectedVersion]
+              required: [lineOrderId, expectedVersion]
+              description: Ровно одно из quantity (распределение прихода) или amount (распределение оплаты).
+              oneOf:
+                - required: [quantity]
+                  not: { required: [amount] }
+                - required: [amount]
+                  not: { required: [quantity] }
               properties:
                 lineOrderId: { type: integer, minimum: 1 }
-                quantity: { type: number, exclusiveMinimum: 0, description: 'В единице строки заявки, до 3 знаков' }
+                quantity: { type: number, exclusiveMinimum: 0, description: 'Приход: в единице строки заявки, до 3 знаков' }
+                amount: { type: number, exclusiveMinimum: 0, description: 'Оплата: в валюте документа, до 2 знаков; нужен finance.view (иначе 403)' }
                 expectedVersion: { type: integer, minimum: 0, description: 'Версия закупа распределения' }
       responses:
         '200':

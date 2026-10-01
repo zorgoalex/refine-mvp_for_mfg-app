@@ -128,6 +128,8 @@ export interface LockedLineRow extends QueryResultRow {
   doc_supplier_id: string | number | null;
   doc_counterparty_ref_key: string | null;
   doc_counterparty_name: string | null;
+  /** Валюта документа (оплаты — суммы в ней; связь оплаты с заявкой хранит её снимок). */
+  doc_currency?: string;
   /** Строка исчезла из документа 1С, но на неё есть ссылки распределений (загрузчик onec-sync, R1-2). */
   removed_in_onec_at: Date | null;
   /** Изменение 1С не применено из-за активных распределений (R2-1). */
@@ -585,7 +587,7 @@ export class PgOnecDocumentsRepository {
         [command.allocationId, actor.userId],
       );
       // Связи с заявками снимаются вместе с распределением (§5.5): история остаётся, исполнение заявки уменьшается.
-      const removedLinks = (await tx.query<{ link_id: string; line_order_id: string; quantity: string; supplier_request_id: string }>(
+      const removedLinks = (await tx.query<{ link_id: string; line_order_id: string; quantity: string | null; supplier_request_id: string }>(
         `WITH removed AS (
            UPDATE order_resource_allocation_request_links SET removed_at = now(), removed_by = $2
             WHERE allocation_id = $1 AND removed_at IS NULL
@@ -600,7 +602,8 @@ export class PgOnecDocumentsRepository {
         [command.allocationId, actor.userId],
       )).rows.map((link) => ({
         linkId: Number(link.link_id), lineOrderId: Number(link.line_order_id),
-        supplierRequestId: Number(link.supplier_request_id), quantity: Number(link.quantity),
+        // Связь оплаты — без количества (null, не 0); сумма в журнал не пишется (её видят только с finance.view).
+        supplierRequestId: Number(link.supplier_request_id), quantity: link.quantity === null ? null : Number(link.quantity),
       }));
       await tx.query(
         `UPDATE order_resource_procurement SET version = version + 1, updated_at = now(), updated_by = $2
@@ -796,8 +799,8 @@ export async function lockDocumentLine(tx: DatabaseClient, documentId: number, l
   )).rows[0];
   if (!line) throw new ApiError(404, 'ONEC_DOCUMENT_LINE_NOT_FOUND', 'Строка документа 1С не найдена');
   const header = (await tx.query<Pick<LockedLineRow, 'doc_kind' | 'posted' | 'deleted_in_onec' | 'doc_amount' | 'number'
-    | 'doc_supplier_id' | 'doc_counterparty_ref_key' | 'doc_counterparty_name'>>(
-    `SELECT d.doc_kind, d.posted, d.deleted_in_onec, d.amount AS doc_amount, d.number, d.supplier_id AS doc_supplier_id,
+    | 'doc_supplier_id' | 'doc_counterparty_ref_key' | 'doc_counterparty_name' | 'doc_currency'>>(
+    `SELECT d.doc_kind, d.posted, d.deleted_in_onec, d.amount AS doc_amount, d.number, d.supplier_id AS doc_supplier_id, d.currency AS doc_currency,
             d.counterparty_ref_key::text AS doc_counterparty_ref_key, d.counterparty_name AS doc_counterparty_name
        FROM onec_documents d WHERE d.onec_document_id = $1 AND d.doc_kind = ANY($2::text[])`,
     [documentId, PROCUREMENT_DOC_KINDS],
@@ -1021,7 +1024,7 @@ export async function writeAllocationEvent(tx: DatabaseClient, input: {
   batchRequestId?: string;
   /** Связи с заявками поставщикам: созданные вместе с распределением (batch) или снятые вместе с ним (CR1-4). */
   requestLinks?: Array<{ linkId: number; lineOrderId: number; supplierRequestId: number; quantity: number }>;
-  removedRequestLinks?: Array<{ linkId: number; lineOrderId: number; supplierRequestId: number; quantity: number }>;
+  removedRequestLinks?: Array<{ linkId: number; lineOrderId: number; supplierRequestId: number; quantity: number | null }>;
 }): Promise<void> {
   await auditService.record(tx, {
     event: input.event,

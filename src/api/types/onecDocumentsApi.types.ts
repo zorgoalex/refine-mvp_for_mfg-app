@@ -215,11 +215,13 @@ export interface BatchOnecAllocationFailure {
   message: string;
 }
 
-/** «Привязать к заявке» / «Отвязать» (ф.3б) — тело команды и результат. */
+/** «Привязать к заявке» / «Отвязать» (ф.3б, ф.3б-2) — тело команды и результат. */
 export interface RequestLinkRequest {
   lineOrderId: number;
-  /** В единице строки заявки, до 3 знаков. */
-  quantity: number;
+  /** Приход: в единице строки заявки, до 3 знаков. Ровно одно из quantity/amount. */
+  quantity?: number;
+  /** Оплата (ф.3б-2, finance.view): сумма в валюте документа, до 2 знаков. Ровно одно из quantity/amount. */
+  amount?: number;
   /** Версия закупа распределения. */
   expectedVersion: number;
 }

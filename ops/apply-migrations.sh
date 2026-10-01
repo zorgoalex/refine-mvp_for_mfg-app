@@ -2445,6 +2445,9 @@ probe_file() {
       "$(q_con_on onec_documents chk_onec_documents_currency_kind)" \
       "$(q_con_on onec_documents chk_onec_documents_destination_kind)" \
       "$(q_idx idx_onec_document_lines_warehouse)" ;;
+    218_request_payment_links*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'allocation_request_link_invariant' AND prosrc LIKE '%payment links exceed the allocated amount%');" \
+      "$(q_trg trg_allocation_request_link_invariant)" ;;
     215_allocation_request_links*) probe_all \
       "$(q_tbl order_resource_allocation_request_links)" \
       "$(q_con_on order_resource_allocation_request_links chk_orarl_measure)" \
@@ -2868,6 +2871,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     216_onec_consumption_documents*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    218_request_payment_links*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     215_allocation_request_links*)

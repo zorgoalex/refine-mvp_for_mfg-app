@@ -52,6 +52,7 @@ describe.skipIf(!url)('Supplier request links (phase 3b) — real PostgreSQL', {
   const tag = 'E2E-Тест-СЗ-' + randomUUID().slice(0, 8);
   const today = todayInAlmaty();
   let admin: CurrentUser;
+  let finance: CurrentUser;
   let orderIds: number[] = [];
   let material: number;
   let materialArea: number;
@@ -145,6 +146,8 @@ describe.skipIf(!url)('Supplier request links (phase 3b) — real PostgreSQL', {
       await c.query('SELECT set_config($1, $2, false)', ['hasura.user', JSON.stringify({ 'x-hasura-user-id': String(adminId), 'x-hasura-role': 'admin' })]);
     }
     admin = { id: String(adminId), username: `${tag}-admin`, role: 'admin', roleId: 1, permissions: ['orders.view', 'procurement.view', 'procurement.manage'] };
+    // Тот же пользователь с правом на суммы — для оплат (ф.3б-2).
+    finance = { ...admin, permissions: [...admin.permissions, 'finance.view'] };
     material = Number((await conn.query(
       `SELECT sheet_material_type_id FROM sheet_material_types WHERE width_mm > 0 AND height_mm > 0 ORDER BY sheet_material_type_id OFFSET 5 LIMIT 1`)).rows[0].sheet_material_type_id);
     const dims = (await conn.query('SELECT width_mm, height_mm FROM sheet_material_types WHERE sheet_material_type_id = $1', [material])).rows[0];
@@ -383,6 +386,158 @@ describe.skipIf(!url)('Supplier request links (phase 3b) — real PostgreSQL', {
     const candidate = off.lines[0].candidates.find((entry) => entry.orderId === order)!;
     expect(candidate.requestLinks).toEqual([]);
     expect(candidate.reasons.map((reason) => reason.code)).not.toContain('request');
+  });
+
+  async function payment(amount: number, docSupplierId: number, currency = 'KZT') {
+    const documentId = Number((await conn.query(
+      `INSERT INTO onec_documents (source_id, doc_kind, onec_ref_key, number, doc_date, posted, counterparty_name, supplier_id, amount, currency)
+       VALUES ($1, 'bank_outflow', $2, $3, $4, true, $5, $6, $7, $8) RETURNING onec_document_id`,
+      [sourceId, randomUUID(), `${tag.slice(-8)}-pay-${randomUUID().slice(0, 4)}`, today, `${tag} Поставщик`, docSupplierId, amount, currency])).rows[0].onec_document_id);
+    const lineId = Number((await conn.query(
+      `INSERT INTO onec_document_lines (onec_document_id, line_no, quantity, amount, is_document_total)
+       VALUES ($1, 1, 0, $2, true) RETURNING onec_document_line_id`, [documentId, amount])).rows[0].onec_document_line_id);
+    return { documentId, lineId };
+  }
+
+  async function payOrder(doc: { documentId: number; lineId: number }, orderId: number, amount: number) {
+    const line = (await workspace.listWorklist(admin, { preset: 'all', groupBy: 'none', sort: 'due', search: tag }, options))
+      .lines.find((entry) => entry.orderId === orderId && entry.resourceKey === key())!;
+    await docs.addAllocation({ currentUser: finance, requestId: randomUUID(), documentId: doc.documentId, lineId: doc.lineId, orderId,
+      resourceKey: key(), amount, expectedVersion: line.procurementVersion, expectedDemandFingerprint: line.demandFingerprint });
+    return (await conn.query(
+      `SELECT a.allocation_id, orp.version FROM order_resource_onec_allocations a JOIN order_resource_procurement orp USING (order_resource_procurement_id)
+        WHERE a.onec_document_line_id = $1 AND orp.order_id = $2 AND a.removed_at IS NULL`, [doc.lineId, orderId])).rows[0];
+  }
+
+  it('3b-2: a payment is linked by amount in the document currency, only with finance.view; the card shows «paid» per currency', async () => {
+    const order = await makeOrder(9, Math.round(materialArea * 1000));
+    const card = await sentRequest([order]);
+    const lineOrder = card.lineItems[0].orders[0];
+    const doc = await payment(50000, supplierId);
+    const allocation = await payOrder(doc, order, 30000);
+    const before = await requests.getCard(finance, card.requestId, true);
+    expect(before.lineItems[0].orders[0].possiblePayments).toEqual([expect.objectContaining({ allocationId: Number(allocation.allocation_id), unlinkedAmount: 30000, currency: 'KZT', supplierCheck: 'match' })]);
+    expect(before).toMatchObject({ paymentState: 'none', paid: {} });
+    const base = { documentId: doc.documentId, lineId: doc.lineId, allocationId: Number(allocation.allocation_id), lineOrderId: lineOrder.lineOrderId };
+    // Без finance.view — 403 (сервис пишет denied-аудит после отката), ничего не записано.
+    await expect(links.link({ ...base, currentUser: admin, requestId: randomUUID(), amount: 1000, expectedVersion: Number(allocation.version) }))
+      .rejects.toMatchObject({ statusCode: 403 });
+    await expect(links.link({ ...base, currentUser: finance, requestId: randomUUID(), quantity: 1, expectedVersion: Number(allocation.version) }))
+      .rejects.toMatchObject({ statusCode: 422, code: 'SUPPLIER_REQUEST_LINK_MEASURE' });
+    await expect(links.link({ ...base, currentUser: finance, requestId: randomUUID(), amount: 30000.01, expectedVersion: Number(allocation.version) }))
+      .rejects.toMatchObject({ statusCode: 422, code: 'SUPPLIER_REQUEST_LINK_EXCEEDS_ALLOCATION' });
+    const linked = await links.link({ ...base, currentUser: finance, requestId: randomUUID(), amount: 20000, expectedVersion: Number(allocation.version) });
+    expect(linked).toMatchObject({ changed: true, supplierCheck: 'match' });
+    expect((await links.link({ ...base, currentUser: finance, requestId: randomUUID(), amount: 20000, expectedVersion: linked.procurementVersion })).changed).toBe(false);
+    await expect(links.link({ ...base, currentUser: finance, requestId: randomUUID(), amount: 100, expectedVersion: linked.procurementVersion }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'SUPPLIER_REQUEST_LINK_EXISTS' });
+    const row = (await conn.query('SELECT amount, currency, quantity FROM order_resource_allocation_request_links WHERE link_id = $1', [linked.linkId])).rows[0];
+    expect(row).toMatchObject({ currency: 'KZT', quantity: null });
+    expect(Number(row.amount)).toBe(20000);
+    const after = await requests.getCard(finance, card.requestId, true);
+    expect(after).toMatchObject({ paymentState: 'paid', paid: { KZT: 20000 } });
+    expect(after.lineItems[0].orders[0]).toMatchObject({ paid: { KZT: 20000 }, fulfilled: 0, fulfillment: 'waiting' });
+    expect(after.lineItems[0].orders[0].payments).toEqual([expect.objectContaining({ linkId: linked.linkId, amount: 20000, currency: 'KZT' })]);
+    // Без finance.view суммы не видны вовсе.
+    const hidden = await requests.getCard(admin, card.requestId, true);
+    expect(hidden).toMatchObject({ paymentState: 'hidden', paid: {} });
+    expect(hidden.lineItems[0].orders[0]).toMatchObject({ payments: [], paid: {}, possiblePayments: [] });
+    // Отвязка без finance.view — 403; с правом — проходит.
+    await expect(links.unlink({ ...base, currentUser: admin, requestId: randomUUID(), linkId: linked.linkId, expectedVersion: linked.procurementVersion }))
+      .rejects.toMatchObject({ statusCode: 403 });
+    const unlinked = await links.unlink({ ...base, currentUser: finance, requestId: randomUUID(), linkId: linked.linkId, expectedVersion: linked.procurementVersion });
+    expect(unlinked.changed).toBe(true);
+    expect((await requests.getCard(finance, card.requestId, true)).paid).toEqual({});
+  });
+
+  it('3b-2 R1: no payment amounts in audit/outbox; a currency changed in 1C blocks new links and hides the match', async () => {
+    const order = await makeOrder(12, Math.round(materialArea * 1000));
+    const card = await sentRequest([order]);
+    const lineOrder = card.lineItems[0].orders[0];
+    const doc = await payment(8000, supplierId);
+    const allocation = await payOrder(doc, order, 8000);
+    const base = { currentUser: finance, documentId: doc.documentId, lineId: doc.lineId, allocationId: Number(allocation.allocation_id), lineOrderId: lineOrder.lineOrderId };
+    const linked = await links.link({ ...base, requestId: randomUUID(), amount: 3000, expectedVersion: Number(allocation.version) });
+    const audit = (await conn.query(
+      `SELECT before_json, after_json, diff_json, metadata_json FROM audit_log WHERE event = 'order_resource.onec_allocation_linked_to_request' AND metadata_json->>'linkId' = $1`,
+      [String(linked.linkId)])).rows[0];
+    expect(JSON.stringify(audit)).not.toMatch(/"amount"|3000|"currency"/);
+    expect(audit.metadata_json).toMatchObject({ role: 'payment', supplierRequestId: card.requestId });
+    const event = (await conn.query(`SELECT payload_json FROM outbox_events WHERE payload_json->>'linkId' = $1`, [String(linked.linkId)])).rows[0];
+    expect(JSON.stringify(event.payload_json)).not.toMatch(/"amount"|3000/);
+    // Загрузчик 1С сменил валюту документа после привязки.
+    await conn.query(`UPDATE onec_documents SET currency = 'USD' WHERE onec_document_id = $1`, [doc.documentId]);
+    const other = await sentRequest([await makeOrder(13, Math.round(materialArea * 1000))]);
+    expect((await requests.getCard(finance, card.requestId, true)).lineItems[0].orders[0].possiblePayments).toEqual([]);
+    await links.unlink({ ...base, requestId: randomUUID(), linkId: linked.linkId, expectedVersion: linked.procurementVersion });
+    await conn.query(`UPDATE onec_documents SET currency = 'KZT' WHERE onec_document_id = $1`, [doc.documentId]);
+    const again = await links.link({ ...base, requestId: randomUUID(), amount: 3000, expectedVersion: linked.procurementVersion + 1 });
+    await conn.query(`UPDATE onec_documents SET currency = 'USD' WHERE onec_document_id = $1`, [doc.documentId]);
+    // Вторая строка заявки того же закупа — чтобы проверить новую связь при сменённой валюте.
+    await conn.query('BEGIN');
+    await conn.query('UPDATE supplier_request_lines SET stock_quantity = stock_quantity - 0.001 WHERE supplier_request_line_id = $1', [other.lineItems[0].lineId]);
+    const secondLineOrder = Number((await conn.query(
+      `INSERT INTO supplier_request_line_orders (supplier_request_line_id, order_resource_procurement_id, quantity)
+       VALUES ($1, $2, 0.001) RETURNING supplier_request_line_order_id`, [other.lineItems[0].lineId, lineOrder.procurementId])).rows[0].supplier_request_line_order_id);
+    await conn.query('COMMIT');
+    await expect(links.link({ ...base, lineOrderId: secondLineOrder, requestId: randomUUID(), amount: 1000, expectedVersion: again.procurementVersion }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'SUPPLIER_REQUEST_LINK_CURRENCY_CHANGED' });
+    await conn.query(`UPDATE onec_documents SET currency = 'KZT' WHERE onec_document_id = $1`, [doc.documentId]);
+    // Снятие распределения: связь оплаты в журнале — quantity null, без суммы.
+    await docs.removeAllocation({ currentUser: finance, requestId: randomUUID(), documentId: doc.documentId, lineId: doc.lineId,
+      allocationId: Number(allocation.allocation_id), expectedVersion: again.procurementVersion });
+    const removed = (await conn.query(
+      `SELECT metadata_json FROM audit_log WHERE event = 'order_resource.onec_allocation_removed' AND entity_id = $1`, [String(allocation.allocation_id)])).rows[0];
+    expect(removed.metadata_json.removedRequestLinks).toEqual([expect.objectContaining({ linkId: again.linkId, quantity: null })]);
+  });
+
+  it('3b-2 R2: a currency changed in 1C blocks links of every allocation of the document, not only the linked one', async () => {
+    const first = await makeOrder(14, Math.round(materialArea * 1000));
+    const second = await makeOrder(15, Math.round(materialArea * 1000));
+    const card = await sentRequest([first, second]);
+    const orderOf = (orderId: number) => card.lineItems[0].orders.find((entry) => entry.orderId === orderId)!;
+    const doc = await payment(10000, supplierId);
+    const firstAllocation = await payOrder(doc, first, 6000);
+    const secondAllocation = await payOrder(doc, second, 4000);
+    await links.link({ currentUser: finance, requestId: randomUUID(), documentId: doc.documentId, lineId: doc.lineId,
+      allocationId: Number(firstAllocation.allocation_id), lineOrderId: orderOf(first).lineOrderId, amount: 6000, expectedVersion: Number(firstAllocation.version) });
+    await conn.query(`UPDATE onec_documents SET currency = 'USD' WHERE onec_document_id = $1`, [doc.documentId]);
+    await expect(links.link({ currentUser: finance, requestId: randomUUID(), documentId: doc.documentId, lineId: doc.lineId,
+      allocationId: Number(secondAllocation.allocation_id), lineOrderId: orderOf(second).lineOrderId, amount: 4000, expectedVersion: Number(secondAllocation.version) }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'SUPPLIER_REQUEST_LINK_CURRENCY_CHANGED' });
+    await conn.query(`UPDATE onec_documents SET currency = 'KZT' WHERE onec_document_id = $1`, [doc.documentId]);
+  });
+
+  it('3b-2: the database trigger refuses a payment link in another currency and concurrent links over the allocated amount', async () => {
+    const order = await makeOrder(10, Math.round(materialArea * 1000));
+    const card = await sentRequest([order]);
+    const lineOrder = card.lineItems[0].orders[0];
+    const doc = await payment(10000, supplierId);
+    const allocation = await payOrder(doc, order, 10000);
+    await conn.query('BEGIN');
+    await conn.query('INSERT INTO order_resource_allocation_request_links (allocation_id, supplier_request_line_order_id, amount, currency, created_by) VALUES ($1, $2, 100, $3, $4)',
+      [allocation.allocation_id, lineOrder.lineOrderId, 'USD', Number(admin.id)]);
+    await expect(conn.query('COMMIT')).rejects.toMatchObject({ code: '23514' });
+    await conn.query('ROLLBACK').catch(() => undefined);
+    // Вторая строка заказа того же закупа в другой отправленной заявке (одноразовая БД): 0,001 листа со «склада» строки.
+    const other = await sentRequest([await makeOrder(11, Math.round(materialArea * 1000))]);
+    await conn.query('BEGIN');
+    await conn.query('UPDATE supplier_request_lines SET stock_quantity = stock_quantity - 0.001 WHERE supplier_request_line_id = $1', [other.lineItems[0].lineId]);
+    const secondLineOrder = Number((await conn.query(
+      `INSERT INTO supplier_request_line_orders (supplier_request_line_id, order_resource_procurement_id, quantity)
+       VALUES ($1, $2, 0.001) RETURNING supplier_request_line_order_id`, [other.lineItems[0].lineId, lineOrder.procurementId])).rows[0].supplier_request_line_order_id);
+    await conn.query('COMMIT');
+    // Две параллельные связи одной оплаты 10 000: 6 000 + 6 000 — одна должна отказать на COMMIT.
+    for (const [client, target] of [[conn, lineOrder.lineOrderId], [conn2, secondLineOrder]] as const) {
+      await client.query('BEGIN');
+      await client.query('INSERT INTO order_resource_allocation_request_links (allocation_id, supplier_request_line_order_id, amount, currency, created_by) VALUES ($1, $2, 6000, $3, $4)',
+        [allocation.allocation_id, target, 'KZT', Number(admin.id)]);
+    }
+    const commits = await Promise.allSettled([conn.query('COMMIT'), conn2.query('COMMIT')]);
+    await conn.query('ROLLBACK').catch(() => undefined);
+    await conn2.query('ROLLBACK').catch(() => undefined);
+    expect(commits.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(commits.find((result) => result.status === 'rejected')).toMatchObject({ reason: { code: '23514' } });
   });
 
   it('a document of a foreign kind (warehouse shipment) does not exist for procurement: card, suggestions, allocation, link — 404', async () => {

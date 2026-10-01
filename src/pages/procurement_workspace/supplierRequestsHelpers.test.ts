@@ -6,11 +6,16 @@ import {
   buildDraftsBody,
   buildSupplierCopyText,
   buildUpdatePatchBody,
+  canLinkPaymentAmount,
+  canSeePayments,
   clearDraftPreview,
   computeLineStock,
   computeRequestSteps,
+  currencyLabel,
   draftPreviewSignature,
   formatLineItemText,
+  formatPaidSummary,
+  formatPaymentAmount,
   formatRequestQuantity,
   fulfillmentTag,
   hasRequestSupplier,
@@ -22,8 +27,12 @@ import {
   isStockNegative,
   isWholeSheetQuantity,
   loadDraftPreview,
+  paymentLineLabel,
+  paymentStepInfo,
   possibleMatchDefaultQuantity,
   possibleMatchMaxQuantity,
+  possiblePaymentDefaultAmount,
+  possiblePaymentMaxAmount,
   receiptLineLabel,
   requestRefTag,
   requestsStatusCounts,
@@ -343,5 +352,81 @@ describe('ф.3б: привязка приходов к заявкам — ста
     expect(possibleMatchDefaultQuantity({ quantity: 5, fulfilled: 2 }, { unlinkedQuantity: 10, suggestedQuantity: 3 })).toBe(3);
     // suggestedQuantity устарела (например, fulfilled успели обновить) — клампится к максимуму
     expect(possibleMatchDefaultQuantity({ quantity: 5, fulfilled: 4 }, { unlinkedQuantity: 10, suggestedQuantity: 3 })).toBe(1);
+  });
+});
+
+describe('ф.3б-2: оплаты 1С → заявки поставщикам (finance.view)', () => {
+  it('currencyLabel: ₸ для KZT (в любом регистре/с пробелами), иначе — код как есть', () => {
+    expect(currencyLabel('KZT')).toBe('₸');
+    expect(currencyLabel('kzt')).toBe('₸');
+    expect(currencyLabel(' Kzt ')).toBe('₸');
+    expect(currencyLabel('USD')).toBe('USD');
+    expect(currencyLabel('rub')).toBe('RUB');
+  });
+
+  it('formatPaymentAmount: Intl ru-RU до 2 знаков + суффикс валюты', () => {
+    expect(formatPaymentAmount(50000, 'KZT')).toBe('50 000 ₸');
+    expect(formatPaymentAmount(120.5, 'USD')).toBe('120,5 USD');
+    expect(formatPaymentAmount(1234.567, 'KZT')).toBe('1 234,57 ₸');
+  });
+
+  it('formatPaidSummary: каждая валюта форматируется отдельно, никогда не складываются; KZT — первой, остальные — по алфавиту', () => {
+    expect(formatPaidSummary({ KZT: 50000, USD: 120 })).toBe('50 000 ₸ + 120 USD');
+    expect(formatPaidSummary({ USD: 120, EUR: 10, KZT: 50000 })).toBe('50 000 ₸ + 10 EUR + 120 USD');
+    expect(formatPaidSummary({ USD: 5 })).toBe('5 USD');
+  });
+
+  it('formatPaidSummary: нулевые суммы не показываются; пустой/все-нулевой набор — null (строку «Оплачено:» не рисовать)', () => {
+    expect(formatPaidSummary({})).toBeNull();
+    expect(formatPaidSummary({ KZT: 0 })).toBeNull();
+    expect(formatPaidSummary({ KZT: 0, USD: 10 })).toBe('10 USD');
+  });
+
+  it('possiblePaymentMaxAmount/possiblePaymentDefaultAmount: вся непривязанная сумма (в заявке нет цен — верхней границы по заказу нет)', () => {
+    expect(possiblePaymentMaxAmount({ unlinkedAmount: 1234.567 })).toBe(1234.57);
+    expect(possiblePaymentDefaultAmount({ unlinkedAmount: 1234.567 })).toBe(1234.57);
+    expect(possiblePaymentMaxAmount({ unlinkedAmount: 0 })).toBe(0);
+  });
+
+  it('canLinkPaymentAmount: доступно только (0, max]', () => {
+    expect(canLinkPaymentAmount(100, 100)).toBe(true);
+    expect(canLinkPaymentAmount(0.01, 100)).toBe(true);
+    expect(canLinkPaymentAmount(0, 100)).toBe(false);
+    expect(canLinkPaymentAmount(-1, 100)).toBe(false);
+    expect(canLinkPaymentAmount(100.01, 100)).toBe(false);
+  });
+
+  it('paymentLineLabel: «Оплата <номер> от <дата> — <сумма> <валюта>»', () => {
+    expect(paymentLineLabel({ documentNumber: '123', documentDate: '2026-10-01', amount: 20000, currency: 'KZT' })).toBe('Оплата 123 от 01.10.2026 — 20 000 ₸');
+    expect(paymentLineLabel({ documentNumber: '124', documentDate: '2026-10-02', amount: 100, currency: 'USD' })).toBe('Оплата 124 от 02.10.2026 — 100 USD');
+  });
+
+  it('canSeePayments: true для none/paid, false для hidden и старого backend (undefined)', () => {
+    expect(canSeePayments('none')).toBe(true);
+    expect(canSeePayments('paid')).toBe(true);
+    expect(canSeePayments('hidden')).toBe(false);
+    expect(canSeePayments(undefined)).toBe(false);
+  });
+
+  it('paymentStepInfo: paid → ◐ (часть, без полноты — в заявке нет цен) с подсказкой «оплачено: …»; none → ○ без подсказки', () => {
+    expect(paymentStepInfo('paid', { KZT: 50000 })).toEqual({ state: 'part', tooltip: 'оплачено: 50 000 ₸' });
+    expect(paymentStepInfo('none', {})).toEqual({ state: 'todo' });
+  });
+
+  it('paymentStepInfo: hidden и старый backend (undefined) → ○ с подсказкой про право на финансы', () => {
+    expect(paymentStepInfo('hidden', undefined)).toEqual({ state: 'todo', tooltip: 'суммы видны с правом на финансы' });
+    expect(paymentStepInfo(undefined, undefined)).toEqual({ state: 'todo', tooltip: 'суммы видны с правом на финансы' });
+  });
+
+  it('computeRequestSteps: шаг «Оплата» берётся из paymentState (paid → часть); по умолчанию (старый backend) — «○»', () => {
+    expect(computeRequestSteps('sent', 'done', 'paid')).toEqual({ request: 'done', receipt: 'done', payment: 'part' });
+    expect(computeRequestSteps('sent', 'done', 'none')).toEqual({ request: 'done', receipt: 'done', payment: 'todo' });
+    expect(computeRequestSteps('sent', 'done')).toEqual({ request: 'done', receipt: 'done', payment: 'todo' });
+  });
+
+  it('сообщение об ошибке: 403 PERMISSION_DENIED с requiredPermissions=[finance.view] — «Нужно право на финансы»; обычный PERMISSION_DENIED — общий текст', () => {
+    expect(supplierRequestErrorMessage({ code: 'PERMISSION_DENIED', message: 'x', details: { requiredPermissions: ['finance.view'] } })).toBe('Нужно право на финансы (finance.view)');
+    expect(supplierRequestErrorMessage({ code: 'PERMISSION_DENIED', message: 'x', details: { requiredPermissions: ['procurement.manage'] } })).toBe('Недостаточно прав для этой операции');
+    expect(supplierRequestErrorMessage({ code: 'SUPPLIER_REQUEST_LINK_MEASURE' })).toBe('Неверная величина связи: приход — количеством, оплата — суммой');
   });
 });

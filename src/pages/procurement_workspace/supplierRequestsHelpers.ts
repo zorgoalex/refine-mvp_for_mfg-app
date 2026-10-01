@@ -6,9 +6,12 @@ import type {
   DraftSkipReason,
   SupplierRequestCardDto,
   SupplierRequestFulfillment,
+  SupplierRequestPaymentLinkDto,
   SupplierRequestPossibleMatchDto,
+  SupplierRequestPossiblePaymentDto,
   SupplierRequestReceiptLinkDto,
   SupplierRequestStatus,
+  SupplierRequestSummaryDto,
 } from '../../api/types/supplierRequestsApi.types';
 import { onecUnitLabel } from '../onec_purchase_documents/onecDocumentsHelpers';
 
@@ -342,14 +345,19 @@ export interface RequestSteps {
 export const REQUEST_STEP_LABELS = ['Заявка', 'Приход', 'Оплата'] as const;
 
 /**
- * Сверка «заявка → приход → оплата» (§5.5, ф.3б): «Приход» — по receiptState заявки (done/partial/none →
- * done/part/todo); «Оплата» в этой фазе — всегда «○». Старый backend без receiptState — трактуется как 'none'.
+ * Сверка «заявка → приход → оплата» (§5.5, ф.3б/ф.3б-2): «Приход» — по receiptState заявки (done/partial/none →
+ * done/part/todo); «Оплата» — по paymentState (paid → part: полноты нет, в заявке нет цен; none/hidden → todo).
+ * Старый backend без receiptState/paymentState — трактуется как 'none'/'hidden'.
  */
-export function computeRequestSteps(status: SupplierRequestStatus, receiptState: 'none' | 'partial' | 'done' = 'none'): RequestSteps {
+export function computeRequestSteps(
+  status: SupplierRequestStatus,
+  receiptState: 'none' | 'partial' | 'done' = 'none',
+  paymentState: SupplierRequestSummaryDto['paymentState'] = 'hidden',
+): RequestSteps {
   return {
     request: status === 'sent' || status === 'closed' ? 'done' : 'todo',
     receipt: receiptState === 'done' ? 'done' : receiptState === 'partial' ? 'part' : 'todo',
-    payment: 'todo',
+    payment: paymentStepInfo(paymentState, undefined).state,
   };
 }
 
@@ -408,6 +416,93 @@ export function possibleMatchDefaultQuantity(
   match: Pick<SupplierRequestPossibleMatchDto, 'unlinkedQuantity' | 'suggestedQuantity'>,
 ): number {
   return roundTo3Number(Math.min(match.suggestedQuantity, possibleMatchMaxQuantity(order, match)));
+}
+
+// ---------------------------------------------------------------------------
+// Оплаты 1С → заявки поставщикам (ф.3б-2, видно только с finance.view): форматирование сумм по
+// валютам (без смешения), «возможные оплаты» (по аналогии с приходами) и шаг «Оплата» сверки.
+// ---------------------------------------------------------------------------
+
+export function roundTo2Number(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+const amountFormatter2 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 });
+
+/** ₸ для KZT, иначе — код валюты как есть (разные валюты не смешиваются одним символом). */
+export function currencyLabel(currency: string): string {
+  const code = currency.trim().toUpperCase();
+  return code === 'KZT' ? '₸' : code;
+}
+
+export function formatPaymentAmount(amount: number, currency: string): string {
+  return `${amountFormatter2.format(amount)} ${currencyLabel(currency)}`;
+}
+
+/**
+ * «50 000 ₸ + 120 USD»: суммы разных валют никогда не складываются (R3-3) — каждая форматируется
+ * отдельно и соединяется « + »; KZT (основная валюта) — первой, остальные — по алфавиту кода.
+ * Нулевые/отсутствующие валюты не показываются; пустой набор — null (строку «Оплачено:» не рисовать).
+ */
+export function formatPaidSummary(paid: Record<string, number>): string | null {
+  const entries = Object.entries(paid).filter(([, amount]) => amount > 0);
+  if (entries.length === 0) return null;
+  entries.sort(([leftCurrency], [rightCurrency]) => {
+    if (leftCurrency === rightCurrency) return 0;
+    if (leftCurrency === 'KZT') return -1;
+    if (rightCurrency === 'KZT') return 1;
+    return leftCurrency.localeCompare(rightCurrency);
+  });
+  return entries.map(([currency, amount]) => formatPaymentAmount(amount, currency)).join(' + ');
+}
+
+/**
+ * Максимум для «Привязать оплату»: не больше непривязанной суммы прихода оплаты. Верхней границы по
+ * заказу заявки нет (в заявке нет цен, §5.5 R2-4) — в отличие от приходов, где есть остаток по количеству.
+ */
+export function possiblePaymentMaxAmount(possiblePayment: Pick<SupplierRequestPossiblePaymentDto, 'unlinkedAmount'>): number {
+  return Math.max(0, roundTo2Number(possiblePayment.unlinkedAmount));
+}
+
+/** Значение по умолчанию в поле «Привязать оплату» — вся непривязанная сумма (верхней границы по заявке нет). */
+export function possiblePaymentDefaultAmount(possiblePayment: Pick<SupplierRequestPossiblePaymentDto, 'unlinkedAmount'>): number {
+  return possiblePaymentMaxAmount(possiblePayment);
+}
+
+/** Кнопка «Привязать оплату» доступна только для суммы из (0, max]. */
+export function canLinkPaymentAmount(amount: number, max: number): boolean {
+  return amount > 0 && amount <= max;
+}
+
+/** «Оплата 123 от 01.10.2026 — 20 000 ₸» — строка привязанной оплаты под заказом заявки. */
+export function paymentLineLabel(payment: Pick<SupplierRequestPaymentLinkDto, 'documentNumber' | 'documentDate' | 'amount' | 'currency'>): string {
+  return `Оплата ${payment.documentNumber} от ${formatDateOnly(payment.documentDate)} — ${formatPaymentAmount(payment.amount, payment.currency)}`;
+}
+
+/** Суммы оплат видны — т.е. у пользователя есть finance.view (старый backend без paymentState — трактуется как «hidden»). */
+export function canSeePayments(paymentState: SupplierRequestSummaryDto['paymentState'] | undefined): boolean {
+  return paymentState === 'none' || paymentState === 'paid';
+}
+
+export interface StepInfo {
+  state: StepState;
+  tooltip?: string;
+}
+
+/**
+ * Шаг «Оплата» сверки (§5.5 ф.3б-2): 'paid' → ◐ (не «✓» — полноты нет, в заявке нет цен для сравнения);
+ * 'none' → ○ без подсказки; 'hidden'/старый backend → ○ с подсказкой про право на финансы.
+ */
+export function paymentStepInfo(
+  paymentState: SupplierRequestSummaryDto['paymentState'] | undefined,
+  paid: Record<string, number> | undefined,
+): StepInfo {
+  if (paymentState === 'paid') {
+    const summary = formatPaidSummary(paid ?? {});
+    return { state: 'part', tooltip: summary ? `оплачено: ${summary}` : undefined };
+  }
+  if (paymentState === 'none') return { state: 'todo' };
+  return { state: 'todo', tooltip: 'суммы видны с правом на финансы' };
 }
 
 // ---------------------------------------------------------------------------
@@ -487,15 +582,25 @@ export const SUPPLIER_REQUEST_ERROR_MESSAGES: Record<string, string> = {
   SUPPLIER_REQUEST_LINE_ORDER_NOT_FOUND: 'Строка заявки не найдена — обновите заявку',
   SUPPLIER_REQUEST_LINK_NOT_FOUND: 'Связь с заявкой не найдена — обновите заявку',
   SUPPLIER_REQUEST_LINK_RECEIPTS_ONLY: 'К заявке привязывается приход; оплаты — позже',
+  // Привязка оплат к заявкам (ф.3б-2) — «Привязать оплату» / «Отвязать» в карточке (finance.view).
+  SUPPLIER_REQUEST_LINK_MEASURE: 'Неверная величина связи: приход — количеством, оплата — суммой',
   SUPPLIER_REQUESTS_DISABLED: 'Заявки поставщикам пока выключены',
   ONEC_ALLOCATION_NOT_FOUND: 'Распределение не найдено',
   ONEC_ALLOCATION_REMOVED: 'Распределение уже снято',
   PROCUREMENT_VERSION_CONFLICT: 'Закуп материала уже изменил другой пользователь. Обновите карточку',
 };
 
+/** Отказ 403 именно из-за отсутствия finance.view (сервер шлёт общий код PERMISSION_DENIED + details.requiredPermissions). */
+function isFinancePermissionDenied(error: { code?: string; details?: unknown } | null | undefined): boolean {
+  if (!error || error.code !== 'PERMISSION_DENIED') return false;
+  const details = error.details as { requiredPermissions?: unknown } | undefined;
+  return Array.isArray(details?.requiredPermissions) && details.requiredPermissions.includes('finance.view');
+}
+
 /** Сообщение об ошибке команды заявки — код важнее общего message сервера, если он известен. */
-export function supplierRequestErrorMessage(error: { code?: string; message?: string } | null | undefined): string {
+export function supplierRequestErrorMessage(error: { code?: string; message?: string; details?: unknown } | null | undefined): string {
   if (!error) return 'Не удалось выполнить операцию';
+  if (isFinancePermissionDenied(error)) return 'Нужно право на финансы (finance.view)';
   const known = error.code ? SUPPLIER_REQUEST_ERROR_MESSAGES[error.code] : undefined;
   return known ?? error.message ?? 'Не удалось выполнить операцию';
 }

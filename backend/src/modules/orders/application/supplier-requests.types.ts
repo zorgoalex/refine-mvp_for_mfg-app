@@ -64,6 +64,33 @@ export interface SupplierRequestPossibleMatchDto {
   procurementVersion: number;
 }
 
+/** Оплата 1С, привязанная к заказу строки заявки (ф.3б-2); видна только с finance.view. */
+export interface SupplierRequestPaymentLinkDto {
+  linkId: number;
+  allocationId: number;
+  documentId: number;
+  documentNumber: string;
+  documentDate: string;
+  lineId: number;
+  amount: number;
+  currency: string;
+  procurementVersion: number;
+}
+
+/** Оплата того же заказа и материала с непривязанной суммой — кандидат для «Привязать оплату». */
+export interface SupplierRequestPossiblePaymentDto {
+  allocationId: number;
+  documentId: number;
+  documentNumber: string;
+  documentDate: string;
+  lineId: number;
+  counterpartyName: string | null;
+  unlinkedAmount: number;
+  currency: string;
+  supplierCheck: 'match' | 'unknown';
+  procurementVersion: number;
+}
+
 export type SupplierRequestFulfillment = 'waiting' | 'partial' | 'received';
 
 export interface SupplierRequestLineOrderDto {
@@ -79,6 +106,10 @@ export interface SupplierRequestLineOrderDto {
   fulfillment: SupplierRequestFulfillment;
   receipts: SupplierRequestReceiptLinkDto[];
   possibleMatches: SupplierRequestPossibleMatchDto[];
+  /** Оплаты и «оплачено» по валютам (суммы разных валют не складываются, R3-3) — пусто без finance.view. */
+  payments: SupplierRequestPaymentLinkDto[];
+  paid: Record<string, number>;
+  possiblePayments: SupplierRequestPossiblePaymentDto[];
 }
 
 export interface SupplierRequestLineDto {
@@ -119,6 +150,10 @@ export interface SupplierRequestSummaryDto {
   lines: Array<{ name: string; quantity: number; unit: OnecUnitCode; fulfilled: number }>;
   /** Сверка «приход» по заказам заявки: нет / частично / всё заказанное для заказов пришло (ф.3б). */
   receiptState: 'none' | 'partial' | 'done';
+  /** Сверка «оплата» (ф.3б-2): 'hidden' — нет finance.view; 'paid' — есть привязанные оплаты (полноты нет: в заявке нет цен). */
+  paymentState: 'hidden' | 'none' | 'paid';
+  /** Оплачено по валютам — только с finance.view. */
+  paid: Record<string, number>;
   ordersCount: number;
   hiddenOrdersCount: number;
   /** Заказы в корзине (не блокируют команды над заявкой). */

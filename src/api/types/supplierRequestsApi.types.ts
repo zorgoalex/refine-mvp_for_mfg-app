@@ -58,6 +58,33 @@ export interface SupplierRequestPossibleMatchDto {
 
 export type SupplierRequestFulfillment = 'waiting' | 'partial' | 'received';
 
+/** Оплата 1С, привязанная к заказу строки заявки (ф.3б-2); видна только с finance.view. Старый backend не присылает. */
+export interface SupplierRequestPaymentLinkDto {
+  linkId: number;
+  allocationId: number;
+  documentId: number;
+  documentNumber: string;
+  documentDate: string;
+  lineId: number;
+  amount: number;
+  currency: string;
+  procurementVersion: number;
+}
+
+/** Оплата того же заказа и материала с непривязанной суммой — кандидат для «Привязать оплату» (ф.3б-2). */
+export interface SupplierRequestPossiblePaymentDto {
+  allocationId: number;
+  documentId: number;
+  documentNumber: string;
+  documentDate: string;
+  lineId: number;
+  counterpartyName: string | null;
+  unlinkedAmount: number;
+  currency: string;
+  supplierCheck: 'match' | 'unknown';
+  procurementVersion: number;
+}
+
 export interface SupplierRequestLineOrderDto {
   lineOrderId: number;
   orderId: number;
@@ -72,6 +99,10 @@ export interface SupplierRequestLineOrderDto {
   receipts?: SupplierRequestReceiptLinkDto[];
   /** Только для отправленных заявок. */
   possibleMatches?: SupplierRequestPossibleMatchDto[];
+  /** Оплаты и «оплачено» по валютам (ф.3б-2) — пусто без finance.view, нет поля на старом backend. */
+  payments?: SupplierRequestPaymentLinkDto[];
+  paid?: Record<string, number>;
+  possiblePayments?: SupplierRequestPossiblePaymentDto[];
 }
 
 export interface SupplierRequestLineDto {
@@ -109,6 +140,10 @@ export interface SupplierRequestSummaryDto {
   lines: Array<{ name: string; quantity: number; unit: OnecUnitCode; fulfilled?: number }>;
   /** Сверка «приход» по заказам заявки. Старый backend не присылает — трактовать как 'none'. */
   receiptState?: 'none' | 'partial' | 'done';
+  /** Сверка «оплата» (ф.3б-2): 'hidden' — нет finance.view. Старый backend не присылает — трактовать как 'hidden'. */
+  paymentState?: 'hidden' | 'none' | 'paid';
+  /** Оплачено по валютам — только с finance.view. Старый backend не присылает. */
+  paid?: Record<string, number>;
   ordersCount: number;
   hiddenOrdersCount: number;
   deletedOrdersCount?: number;

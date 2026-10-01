@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { OnecDocumentsService } from '../application/onec-documents.service';
-import { batchSchema } from './onec-documents.controller';
+import { batchSchema, linkSchema } from './onec-documents.controller';
 
 const item = {
   lineId: 1, orderId: 2, resourceKey: 'sheet_material:8', quantity: 1.5,
@@ -62,5 +62,15 @@ describe('OnecDocumentsService batch and suggestions permissions', () => {
     await expect(service.allocationSuggestions(user(['procurement.manage']), 1, 'r')).rejects.toMatchObject({ statusCode: 403 });
     await expect(service.allocationSuggestions(user(['procurement.view']), 1, 'r')).rejects.toMatchObject({ statusCode: 403 });
     await expect(service.allocationSuggestions(user(['procurement.view', 'procurement.manage']), 1, 'r')).resolves.toMatchObject({ documentId: 1 });
+  });
+});
+
+describe('request link body (3b-2)', () => {
+  it('exactly one of quantity (receipt) or amount (payment)', () => {
+    expect(linkSchema.safeParse({ lineOrderId: 1, quantity: 1.5, expectedVersion: 0 }).success).toBe(true);
+    expect(linkSchema.safeParse({ lineOrderId: 1, amount: 1500.25, expectedVersion: 0 }).success).toBe(true);
+    expect(linkSchema.safeParse({ lineOrderId: 1, quantity: 1, amount: 1, expectedVersion: 0 }).success).toBe(false);
+    expect(linkSchema.safeParse({ lineOrderId: 1, expectedVersion: 0 }).success).toBe(false);
+    expect(linkSchema.safeParse({ lineOrderId: 1, amount: 1.005, expectedVersion: 0 }).success).toBe(false);
   });
 });
