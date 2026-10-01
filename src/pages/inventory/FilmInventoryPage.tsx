@@ -21,6 +21,8 @@ const formatQuantity = (value: number | null | undefined) => value == null ? '�
 const today = () => new Date().toISOString().slice(0, 10);
 const docTypeName: Record<StockDocKind, string> = { receipt: 'Приход', writeoff: 'Списание', inventory: 'Инвентаризация', onec: 'Расход 1С' };
 const statusName = { draft: 'Черновик', posted: 'Проведён', cancelled: 'Отменён' };
+// Модалки склада: шапка и кнопки («Провести / Отменить») всегда на экране, длинный список прокручивается внутри.
+const scrollingModal = { centered: true, bodyStyle: { maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' as const, overflowX: 'auto' as const } };
 const apiError = (error: unknown): InventoryApiError => typeof error === 'object' && error !== null ? error as InventoryApiError : {};
 
 export const FilmInventoryPage: React.FC = () => {
@@ -350,7 +352,7 @@ export const FilmInventoryPage: React.FC = () => {
       ...(consumptionSupported ? [{ key: 'onec-issues', label: 'Не учтено из 1С', children: tab === 'onec-issues' ? <OnecIssuesTab warehouseId={activeWarehouseId} manageAllowed={manageAllowed} /> : null }] : []),
     ]} />
 
-    <Modal title={manualType ? `${docTypeName[manualType]} · склад «${warehouseName(operationWarehouseId)}»` : ''} open={Boolean(manualType)} onCancel={() => setManualType(undefined)} onOk={() => void createManual()} confirmLoading={operationBusy} width={720} okText="Провести">
+    <Modal {...scrollingModal} title={manualType ? `${docTypeName[manualType]} · склад «${warehouseName(operationWarehouseId)}»` : ''} open={Boolean(manualType)} onCancel={() => setManualType(undefined)} onOk={() => void createManual()} confirmLoading={operationBusy} width={720} okText="Провести">
       <Form form={manualForm} layout="vertical" initialValues={{ docDate: undefined, lines: [{ quantity: 0 }] }}>
         <Form.Item label="Дата" name="docDate" rules={[{ required: true }]}><DatePicker format="DD.MM.YYYY" /></Form.Item>
         {consumptionSupported && manualType === 'inventory' && <Form.Item label="Момент подсчёта" name="countedAt" extra="Когда пересчитали остатки. Расход из 1С учитывается только после этого момента. Пусто — момент проведения." rules={[{ validator: (_: unknown, value?: dayjs.Dayjs) => !value || !value.isAfter(dayjs()) ? Promise.resolve() : Promise.reject(new Error('Момент подсчёта не может быть в будущем')) }]}><DatePicker showTime={{ format: 'HH:mm' }} format="DD.MM.YYYY HH:mm" placeholder="Момент проведения" /></Form.Item>}
@@ -363,7 +365,7 @@ export const FilmInventoryPage: React.FC = () => {
       </Form>
     </Modal>
 
-    <Modal title={`Импорт остатков · склад «${warehouseName(operationWarehouseId)}»`} open={importOpen} onCancel={() => setImportOpen(false)} onOk={() => void createImportDraft()} okText="Создать черновик" confirmLoading={operationBusy} width={860}>
+    <Modal {...scrollingModal} title={`Импорт остатков · склад «${warehouseName(operationWarehouseId)}»`} open={importOpen} onCancel={() => setImportOpen(false)} onOk={() => void createImportDraft()} okText="Создать черновик" confirmLoading={operationBusy} width={860}>
       <Space direction="vertical" style={{ width: '100%' }}>
         <Upload beforeUpload={(uploadFile: RcFile) => { void acceptFile(uploadFile); return false; }} showUploadList={false}><Button>Выбрать файл XLSX / XLS / CSV</Button></Upload>
         {file && <Text>{file.name}</Text>}
@@ -374,7 +376,7 @@ export const FilmInventoryPage: React.FC = () => {
       </Space>
     </Modal>
 
-    <Modal title={`Документ №${selectedDoc?.documentId ?? ''}`} open={Boolean(selectedDoc)} onCancel={() => setSelectedDoc(undefined)} footer={selectedDoc?.status === 'draft' && manageAllowed ? <Space><Button onClick={() => { if (selectedDoc.previousPostedDocumentId) { Modal.confirm({ title: 'Этот файл уже проводился', content: `Документ №${selectedDoc.previousPostedDocumentId} с тем же файлом уже проведён. Провести ещё раз?`, okText: 'Провести', cancelText: 'Отмена', onOk: () => postSelectedDocument() }); } else void postSelectedDocument(); }}>Провести</Button><Button danger onClick={() => void runCommand(async (key) => { const cancelled = await inventoryApi.cancel(selectedDoc.documentId, selectedDoc.version, key); await refreshDocument(cancelled); }, `cancel:${selectedDoc.documentId}:${selectedDoc.version}`)}>Отменить</Button></Space> : null} width={900}>
+    <Modal {...scrollingModal} title={`Документ №${selectedDoc?.documentId ?? ''}`} open={Boolean(selectedDoc)} onCancel={() => setSelectedDoc(undefined)} footer={selectedDoc?.status === 'draft' && manageAllowed ? <Space><Button onClick={() => { if (selectedDoc.previousPostedDocumentId) { Modal.confirm({ title: 'Этот файл уже проводился', content: `Документ №${selectedDoc.previousPostedDocumentId} с тем же файлом уже проведён. Провести ещё раз?`, okText: 'Провести', cancelText: 'Отмена', onOk: () => postSelectedDocument() }); } else void postSelectedDocument(); }}>Провести</Button><Button danger onClick={() => void runCommand(async (key) => { const cancelled = await inventoryApi.cancel(selectedDoc.documentId, selectedDoc.version, key); await refreshDocument(cancelled); }, `cancel:${selectedDoc.documentId}:${selectedDoc.version}`)}>Отменить</Button></Space> : null} width={900}>
       {selectedDoc && <><Space wrap><Tag color={selectedDoc.docType === 'onec' ? 'blue' : undefined}>{docTypeName[selectedDoc.docType] ?? selectedDoc.docType}</Tag><Tag>{statusName[selectedDoc.status]}</Tag><Text>{selectedDoc.docDate}</Text><Text>{selectedDoc.fileName}</Text>
         {selectedDoc.docType === 'inventory' && selectedDoc.countedAt && <Text type="secondary">Подсчёт: {formatMoment(selectedDoc.countedAt)}</Text>}
         {selectedDoc.source === 'onec' && <Text>{documentBasis(selectedDoc)}{selectedDoc.onec?.projectionSeq ? ` · изменение ${selectedDoc.onec.projectionSeq}` : ''}</Text>}</Space>

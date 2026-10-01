@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-01", title: "Склад: кнопки документа всегда на экране",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: [
+      "В карточке складского документа, импорте остатков и ручных операциях длинный список прокручивается внутри окна, а кнопки «Провести» и «Отменить» остаются на экране при любом размере страницы.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-01", title: "Новый дизайн «Верстак» — по желанию",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

@@ -20,6 +20,14 @@ describe('film inventory page guards', () => {
   });
 });
 
+describe('stock modals keep their buttons on screen', () => {
+  it('every modal scrolls its body inside the viewport instead of pushing the footer off screen', () => {
+    expect(source).toContain("bodyStyle: { maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' as const");
+    expect(source.match(/<Modal /g)).toHaveLength(3);
+    expect(source.match(/<Modal \{\.\.\.scrollingModal\} /g)).toHaveLength(3);
+  });
+});
+
 describe('warehouse stock tabs guards', () => {
   const table = readFileSync(new URL('./WarehouseStockTable.tsx', import.meta.url), 'utf8');
 
