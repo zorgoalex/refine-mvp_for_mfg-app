@@ -31,7 +31,7 @@ const uiVariantOptions: Array<{ label: string; value: UiVariant }> = [
   { label: "LINE · Деловой минимализм", value: "line" },
   { label: "AIR · Светлая динамика", value: "air" },
   { label: "Нейтральная · светлая", value: "neutral" },
-  { label: "Верстак · новый дизайн", value: "workbench" },
+  { label: "NewLine · новый дизайн", value: "workbench" },
 ];
 
 export const ProfilePage: React.FC = () => {

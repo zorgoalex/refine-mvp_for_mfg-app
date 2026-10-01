@@ -129,7 +129,7 @@ test.describe('LINE/AIR/NEUTRAL/WORKBENCH UI palettes', () => {
         await expect(page.getByRole('radio', { name: 'LINE · Деловой минимализм' })).toBeVisible();
         await expect(page.getByRole('radio', { name: 'AIR · Светлая динамика' })).toBeChecked();
         await expect(page.getByRole('radio', { name: 'Нейтральная · светлая' })).toBeVisible();
-        await expect(page.getByRole('radio', { name: 'Верстак · новый дизайн' })).toBeVisible();
+        await expect(page.getByRole('radio', { name: 'NewLine · новый дизайн' })).toBeVisible();
     });
 });
 

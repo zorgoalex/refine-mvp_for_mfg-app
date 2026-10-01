@@ -27,6 +27,8 @@ import { overlayDetailProductionStatuses } from '../../utils/orderProductionSumm
 import { OrderDatesBlock } from "./components/sections/OrderDatesBlock";
 import { OrderFinanceBlock } from "./components/sections/OrderFinanceBlock";
 import { OrderProductionBlock } from "./components/sections/OrderProductionBlock";
+import { OrderProductionFlow } from "./components/sections/OrderProductionFlow";
+import { useOptionalUiVariant } from "../../ui-variant/UiVariantProvider";
 import { OrderFilesBlock } from "./components/sections/OrderFilesBlock";
 import {
   deriveOrderProgressiveLoadingState,
@@ -154,7 +156,7 @@ import {
   runPageOwnedWorkspaceOperation,
 } from '../../workspace/workspaceOperationPins';
 
-type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
+type OrderInfoPanelKey = 'flow' | 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
 type OrderInfoTab = { key: string; panel: OrderInfoPanelKey | null; label: string; color: string };
 type OrderExcelExportMode = 'full' | 'without-prices';
 
@@ -178,7 +180,11 @@ const productionPdfButtonStyle: CSSProperties = {
   color: '#52c41a',
 };
 
+// «Ход производства» is a «NewLine»-only spoiler; other variants keep the original five tabs.
+const WORKBENCH_ORDER_INFO_PANEL: OrderInfoPanelKey = 'flow';
+
 const orderInfoTabs: Array<{ key: OrderInfoPanelKey; label: string; color: string }> = [
+  { key: 'flow', label: 'Ход производства', color: '#52c41a' },
   { key: 'groups', label: 'Группы заказа', color: '#722ed1' },
   { key: 'deadlines', label: 'Дедлайны', color: '#1677ff' },
   { key: 'finance', label: 'Финансы', color: '#faad14' },
@@ -681,8 +687,10 @@ const modalConfirm = (content: string): Promise<boolean> =>
     });
   });
 
-function readOrderInfoPanelCheckpoint(value: unknown): OrderInfoPanelKey | null {
-  return typeof value === 'string' && orderInfoTabs.some((tab) => tab.key === value)
+function readOrderInfoPanelCheckpoint(value: unknown, workbench: boolean): OrderInfoPanelKey | null {
+  return typeof value === 'string'
+    && orderInfoTabs.some((tab) => tab.key === value)
+    && (workbench || value !== WORKBENCH_ORDER_INFO_PANEL)
     ? value as OrderInfoPanelKey
     : null;
 }
@@ -712,6 +720,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const navigate = useNavigate();
   const dataProvider = useDataProvider();
   const isOperational = useOperationalUi();
+  const isWorkbench = useOptionalUiVariant()?.variant === 'workbench';
   const isMobile = useIsMobile();
   const { isActive: isWorkspaceTabActive } = useKeepAlive();
   const ordinaryReadActive = useOrderLifecycleReadActive();
@@ -731,7 +740,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const [searchParams] = useSearchParams();
   const highlightDetail = Number(searchParams.get('highlightDetail')) || null;
   const [activeInfoPanel, setActiveInfoPanel] = useState<OrderInfoPanelKey | null>(() => (
-    readOrderInfoPanelCheckpoint(restoredShowCheckpoint?.activeInfoPanel)
+    readOrderInfoPanelCheckpoint(restoredShowCheckpoint?.activeInfoPanel, isWorkbench)
   ));
   const [activeOperationalTab, setActiveOperationalTab] = useState(() => (
     typeof restoredShowCheckpoint?.activeOperationalTab === 'string'
@@ -2897,7 +2906,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     : null;
   const orderShowDetailsToolbar = (
     <div ref={orderShowDetailsToolbarRef} className="order-show-details-toolbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-      <div style={{ fontSize: 14, fontWeight: 600, color: '#1890ff' }}>
+      <div className="order-show-details-toolbar__title" style={{ fontSize: 14, fontWeight: 600, color: '#1890ff' }}>
         Детали заказа
       </div>
       <Space size="small" wrap>
@@ -2962,7 +2971,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     { key: 'labels', panel: 'additional', label: 'Бирки', color: 'var(--operational-brand)' },
     { key: 'activity', panel: 'deadlines', label: 'Активность', color: 'var(--operational-brand)' },
   ] satisfies OrderInfoTab[] : orderInfoTabs.map((tab) => ({ ...tab, panel: tab.key })))
-    .filter((tab) => canViewFinancials || tab.panel !== 'finance');
+    .filter((tab) => canViewFinancials || tab.panel !== 'finance')
+    .filter((tab) => isWorkbench || tab.panel !== WORKBENCH_ORDER_INFO_PANEL);
   const activeOrderInfoLabel = isOperational
     ? visibleOrderInfoTabs.find((tab) => tab.key === activeOperationalTab)?.label
     : visibleOrderInfoTabs.find((tab) => tab.panel === activeInfoPanel)?.label;
@@ -3395,6 +3405,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             <div
               role="tablist"
               aria-label="Секции заказа"
+              className="order-show-info-tabs"
               style={{
                 display: 'flex',
                 flexWrap: 'nowrap',
@@ -3415,6 +3426,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     role="tab"
                     aria-selected={isActive}
                     title={tab.label}
+                    className="order-show-info-tab"
                     onClick={() => {
                       if (isOperational) {
                         setActiveOperationalTab(tab.key);
@@ -3475,6 +3487,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   background: 'var(--app-surface)',
                 }}
               >
+                {activeInfoPanel === WORKBENCH_ORDER_INFO_PANEL && (
+                  <OrderProductionFlow
+                    details={detailsWithLiveProductionStatuses}
+                    statuses={productionStatusesData?.data as any[] ?? []}
+                    loading={productionStatusesLoading || !productionSummaryDetailsLoaded}
+                  />
+                )}
+
                 <OrderLifecycleReadSurface active={activeInfoPanel === 'groups'}>
                   {activeInfoPanel === 'groups' && (
                     useBackendOrdersRead && featureFlags.useBackendGroups && record?.order_id ? (

@@ -95,16 +95,17 @@ PATCH /api/v1/me/preferences
 - Every modern selector starts under `[data-ui-variant="evolution"]`,
   `[data-ui-variant="line"]`, `[data-ui-variant="air"]`,
   `[data-ui-variant="neutral"]`, `[data-ui-variant="workbench"]` or their shared
-  `:root:where(...)` marker. Правила, существующие только для «Верстака», лежат в
-  `src/ui-evolution/styles/workbench.css` и начинаются с
-  `:root[data-ui-variant="workbench"]`.
+  `:root:where(...)` marker. Правила, существующие только для «NewLine», лежат в
+  `src/ui-evolution/styles/workbench.css` (оболочка, общие компоненты) и
+  `src/ui-evolution/styles/workbench-orders.css` (список заказов, карточка заказа) и
+  начинаются с `:root[data-ui-variant="workbench"]`.
 - Modern Ant tokens are passed conditionally through existing `ConfigProvider`.
 - Portals (dropdown/modal/tooltip) inherit Ant tokens; any custom portal selectors include a root/overlay variant class rather than unscoped overrides.
 - No target hex values in ten screen files.
 
-## Вариант «Верстак» (`workbench`)
+## Вариант «NewLine» (`workbench`)
 
-- Включается только пользователем в профиле («Верстак · новый дизайн»); вариантом по
+- Включается только пользователем в профиле («NewLine · новый дизайн»); вариантом по
   умолчанию не является.
 - Это слой представления: те же компоненты страниц, хуки, права и маршруты, что в
   Evolution. Свои — палитра и плотность в `evolutionTheme.ts`, CSS-переменные
@@ -115,6 +116,17 @@ PATCH /api/v1/me/preferences
 - На планшетном устройстве и при включённом «Планшетном виде» оболочка остаётся
   планшетной Evolution; сохранённый выбор `workbench` при этом не теряется.
 - Футер только сжат: дата, сессия, версия и «Журнал изменений» остаются.
+- Список заказов: те же колонки, ключи, фильтры, действия и общие с другими вариантами
+  настройки колонок. Отличаются отрисовка ячеек (статусы-метки, подсказка у срока —
+  `orderListWorkbench.ts`) и порядок колонок по умолчанию, пока пользователь не сохранил
+  свой (`orderListWorkbenchDefaultOrder` — те же ключи, ничего не скрывает).
+- Карточка заказа: шапка `OrderShowHeader` в этом варианте рисуется плитками, но из тех
+  же данных и с теми же действиями (контекстное меню клиента, телефон, этапы); липкая
+  компактная строка и секции — общие. Единственное добавление состава — секция-спойлер
+  «Ход производства» (свёрнута по умолчанию, как остальные секции): позиции и штуки по
+  текущим этапам (`buildOrderProductionFlow`), только отображение, без вывода о
+  готовности заказа.
+  В остальных вариантах секции нет.
 
 ## Routing and state safety
 

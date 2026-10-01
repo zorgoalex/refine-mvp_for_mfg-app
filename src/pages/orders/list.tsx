@@ -124,6 +124,8 @@ import { useAuthCacheNamespace } from "../../query/authCacheNamespace";
 import { getOrdersReadBackendMode } from "../../query/orderPrimaryResource";
 import { ORDER_PRIMARY_HARD_STALE_TIME_MS } from "../../query/orderPrimaryFetchPolicy";
 import { useOrderLifecycleCohort } from "../../performance/orderLifecycleCohortStore";
+import { useOptionalUiVariant } from "../../ui-variant/UiVariantProvider";
+import { orderDeadlineHint, orderListWorkbenchDefaultOrder, orderStatusTone, paymentStatusTone } from "./orderListWorkbench";
 import "./list.css";
 
 const ORDER_LIST_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
@@ -229,6 +231,8 @@ const OrdersMobileHeaderDisclosure: React.FC<OrdersMobileHeaderDisclosureProps> 
 );
 
 export const OrderList: React.FC<IResourceComponentsProps> = () => {
+  // «NewLine» меняет только отрисовку ячеек; колонки, их ключи и настройки общие.
+  const isWorkbench = useOptionalUiVariant()?.variant === 'workbench';
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [searchOrderId, setSearchOrderId] = useState<string>("");
   const [highlightedOrderId, setHighlightedOrderId] = useState<number | null>(null);
@@ -269,8 +273,12 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     [canViewFinancials],
   );
   const orderListDefaultOrder = useMemo(
-    () => orderListColumnDefinitions.map((definition) => definition.key),
-    [orderListColumnDefinitions],
+    () => {
+      const keys = orderListColumnDefinitions.map((definition) => definition.key);
+      // Same columns; only the order used until the user saves their own.
+      return isWorkbench ? orderListWorkbenchDefaultOrder(keys) : keys;
+    },
+    [isWorkbench, orderListColumnDefinitions],
   );
   // Keep-alive: when this /orders tab is hidden (another tab active) every data
   // hook is disabled so the cached list stops reacting to invalidateQueries.
@@ -932,6 +940,11 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
 
   const renderStatus = (value?: string | null) => {
     const displayValue = value || "—";
+    if (isWorkbench) {
+      return (
+        <span className="wb-pill" data-tone={orderStatusTone(value)} title={displayValue}>{displayValue}</span>
+      );
+    }
     return (
       <Tooltip title={displayValue} placement="topLeft">
         <span className="orders-status-value">{displayValue}</span>
@@ -1418,7 +1431,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         }]
       : []),
     { dataIndex: "order_date", key: "order_date", title: "Дата заказа", sorter: true, width: 90, className: "orders-col orders-col--order-date", render: (value) => formatDate(value) },
-    { dataIndex: "client_name", key: "client_name", title: "Клиент", width: 99, className: "orders-col orders-col--client" },
+    { dataIndex: "client_name", key: "client_name", title: "Клиент", width: isWorkbench ? 170 : 99, className: "orders-col orders-col--client" },
     {
       dataIndex: "milling_type_name",
       key: "milling_type_name",
@@ -1438,16 +1451,30 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     },
     { dataIndex: "material_name", key: "material_name", title: "Материал", width: 95, className: "orders-col orders-col--wrap", render: (_, record) => getMaterialsList(record.order_id, record) },
     { dataIndex: "notes", key: "notes", title: "Примечание", width: 130, className: "orders-col orders-col--wrap" },
-    { dataIndex: "planned_completion_date", key: "planned_completion_date", title: "План. дата вып-я", sorter: true, width: 100, className: "orders-col orders-col--planned-date", render: (value) => formatDate(value) },
-    { dataIndex: "order_status_name", key: "order_status_name", title: "Статус заказа", width: 100, className: "orders-col status order-status orders-col--wrap", render: (value) => renderStatus(value) },
+    { dataIndex: "planned_completion_date", key: "planned_completion_date", title: "План. дата вып-я", sorter: true, width: 100, className: "orders-col orders-col--planned-date", render: (value, record) => {
+      const hint = isWorkbench ? orderDeadlineHint(record) : null;
+      if (!hint) return formatDate(value);
+      return (
+        <span className="wb-deadline" data-tone={hint.tone}>
+          <span>{formatDate(value)}</span>
+          <small>{hint.text}</small>
+        </span>
+      );
+    } },
+    { dataIndex: "order_status_name", key: "order_status_name", title: "Статус заказа", width: isWorkbench ? 146 : 100, className: "orders-col status order-status orders-col--wrap", render: (value) => renderStatus(value) },
     {
       dataIndex: "payment_status_name",
       key: "payment_status_name",
       title: "Статус оплаты",
-      width: 100,
+      width: isWorkbench ? 150 : 100,
       className: "orders-col status payment-status orders-col--wrap",
       render: (value) => {
         const displayValue = value || "—";
+        if (isWorkbench) {
+          return (
+            <span className="wb-pill" data-tone={paymentStatusTone(value)} title={displayValue}>{displayValue}</span>
+          );
+        }
         let color = undefined;
         if (value === 'Не оплачен') color = '#ff4d4f';
         else if (value === 'Частично оплачен') color = '#d4a574';

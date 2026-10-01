@@ -66,7 +66,7 @@ export const EVOLUTION_CATEGORY_LABELS: Record<(typeof EVOLUTION_CATEGORY_ORDER)
 type EvolutionCategoryLabels = Record<(typeof EVOLUTION_CATEGORY_ORDER)[number], string>;
 
 /**
- * «Верстак» only renames the groups. Category keys, the resource→category map and
+ * «NewLine» only renames the groups. Category keys, the resource→category map and
  * the order stay shared with Evolution, so the user's stored menu order, the
  * 'Настройки' permission gate and role visibility keep working unchanged.
  */

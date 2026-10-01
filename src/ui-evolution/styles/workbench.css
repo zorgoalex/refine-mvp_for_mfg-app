@@ -1,4 +1,4 @@
-/* «Верстак» (uiVariant = workbench): только представление.
+/* «NewLine» (uiVariant = workbench): только представление.
    Все правила — под :root[data-ui-variant="workbench"]; другие варианты не затрагиваются.
    Компоненты страниц и их функциональность те же, что в Evolution. */
 

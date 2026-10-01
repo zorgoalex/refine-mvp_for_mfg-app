@@ -40,8 +40,11 @@ describe('evolution CSS isolation', () => {
     expect(source).toContain(':root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"], [data-ui-variant="neutral"], [data-ui-variant="workbench"])');
   });
 
-  it('keeps the workbench stylesheet scoped to its own variant marker', () => {
-    const workbench = postcss.parse(readFileSync('src/ui-evolution/styles/workbench.css', 'utf8'));
+  it.each([
+    'src/ui-evolution/styles/workbench.css',
+    'src/ui-evolution/styles/workbench-orders.css',
+  ])('keeps the workbench stylesheet %s scoped to its own variant marker', (file) => {
+    const workbench = postcss.parse(readFileSync(file, 'utf8'));
     const unscoped: string[] = [];
     workbench.walkRules((rule) => {
       rule.selectors.forEach((selector) => {
