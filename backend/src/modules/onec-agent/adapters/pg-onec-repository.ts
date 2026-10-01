@@ -748,8 +748,9 @@ export class PgOnecRepository {
   async applyRetention(): Promise<Record<string, number>> {
     const run = async (sql: string) => (await this.database.query(sql)).rowCount ?? 0;
     return {
-      sessions: await run(`DELETE FROM onec_agent_sessions WHERE last_seen_at < now() - interval '30 days'`),
-      statusHistory: await run(`DELETE FROM onec_agent_status_history WHERE at < now() - interval '90 days'`),
+      // Логи связи живут сутки (журнал за сутки, решение пользователя 2026-10-02); 25 ч — запас на почасовую очистку.
+      sessions: await run(`DELETE FROM onec_agent_sessions WHERE last_seen_at < now() - interval '25 hours'`),
+      statusHistory: await run(`DELETE FROM onec_agent_status_history WHERE at < now() - interval '25 hours'`),
       outbox: await run(`DELETE FROM onec_outbox_events WHERE status = 'processed' AND processed_at < now() - interval '30 days'`),
       // Incidents are aggregated per hour; unresolved ones also expire so floods cannot accumulate.
       incidents: await run(`DELETE FROM onec_agent_incidents WHERE resolved_at < now() - interval '180 days' OR last_at < now() - interval '90 days'`),

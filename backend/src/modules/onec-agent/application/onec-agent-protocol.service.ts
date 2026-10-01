@@ -25,7 +25,7 @@ function agentEventBase(agent: OnecAgentContext) {
 }
 
 /** Status history is written on every state change and at most every 10 minutes otherwise. */
-const HISTORY_SAMPLE_MS = 10 * 60 * 1000;
+export const HISTORY_SAMPLE_MS = 10 * 60 * 1000;
 
 export interface SessionStartResponse {
   sessionId: string;

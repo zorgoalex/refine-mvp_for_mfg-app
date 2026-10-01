@@ -9,6 +9,7 @@ import { AgentsTab } from './AgentsTab';
 import { ConfigurationTab } from './ConfigurationTab';
 import { CommandsTab } from './CommandsTab';
 import { EtlTab } from './EtlTab';
+import { DailyJournalTab } from './DailyJournalTab';
 import { MirrorTab } from './MirrorTab';
 import { MatchingTab } from './MatchingTab';
 import { AlertsIncidentsTab } from './AlertsIncidentsTab';
@@ -109,6 +110,11 @@ export function OnecPage() {
       key: 'etl',
       label: 'ETL',
       children: <EtlTab agents={agents} canSendCommands={canSendCommands} canManage={canManage} />,
+    },
+    {
+      key: 'journal',
+      label: 'Журнал за сутки',
+      children: <DailyJournalTab agents={agents} />,
     },
     {
       key: 'mirror',

@@ -18051,6 +18051,23 @@ paths:
         '401': {description: Authentication required}
         '403': {description: Permission denied}
         '503': {description: 1C integration is disabled}
+  /api/v1/onec/agents/{agentId}/journal/daily:
+    get:
+      tags:
+        - 1C integration
+      operationId: getOnecAgentDailyJournal
+      summary: "Daily journal of the 1C agent connection: sessions, states, runs, batches, commands, alerts (last 24 h)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: agentId, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}}
+      responses:
+        '200': {description: Aggregated summary of the last 24 hours, computed on request (no stored journal)}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {description: Agent not found}
+        '503': {description: 1C integration is disabled}
   /api/v1/onec/incidents:
     get:
       tags:

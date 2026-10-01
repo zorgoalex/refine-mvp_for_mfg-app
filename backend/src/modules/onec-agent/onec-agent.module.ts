@@ -13,6 +13,8 @@ import { OnecAuditWriter } from './application/onec-audit';
 import { OnecCommandWakeups } from './application/onec-command-wakeups';
 import { OnecCommandsService } from './application/onec-commands.service';
 import { OnecEtlAdminService } from './application/onec-etl-admin.service';
+import { OnecJournalService } from './application/onec-journal.service';
+import { PgOnecJournalRepository } from './adapters/pg-onec-journal-repository';
 import { OnecEtlCompletionService } from './application/onec-etl-completion.service';
 import { OnecEtlEvents } from './application/onec-etl-events';
 import { OnecEtlIngestService } from './application/onec-etl-ingest.service';
@@ -55,6 +57,8 @@ import { OnecCatalogReader } from './onec-catalog-reader';
     OnecEtlCompletionService,
     OnecEtlEvents,
     OnecEtlAdminService,
+    PgOnecJournalRepository,
+    OnecJournalService,
     OnecEtlRevocationService,
     PgOnecMatchingRepository,
     OnecMatchingService,

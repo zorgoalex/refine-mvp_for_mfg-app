@@ -1,6 +1,7 @@
 import { backendApiPath } from '../../api/apiRoutes';
 import { httpClient } from '../../api/httpClient';
 import { onecIfMatchHeader } from './onecFormat';
+import type { OnecDailyJournal } from './onecJournal';
 import type {
   OnecAgentConfigState,
   OnecAgentConfiguration,
@@ -85,6 +86,10 @@ export const onecApi = {
     minimumAgentVersion?: string;
   }): Promise<OnecAgentView> {
     return httpClient.post(path('/agents'), input);
+  },
+
+  dailyJournal(agentId: string): Promise<OnecDailyJournal> {
+    return httpClient.get(path(`/agents/${agentIdPath(agentId)}/journal/daily`));
   },
 
   getAgent(agentId: string): Promise<OnecAgentDetail> {

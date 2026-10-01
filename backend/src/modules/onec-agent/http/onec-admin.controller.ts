@@ -7,6 +7,7 @@ import { OnecAdminService } from '../application/onec-admin.service';
 import { OnecCommandsService } from '../application/onec-commands.service';
 import { OnecEtlAdminService } from '../application/onec-etl-admin.service';
 import { OnecMatchingService } from '../application/onec-matching.service';
+import { OnecJournalService } from '../application/onec-journal.service';
 import type { OnecRequestContext } from '../application/onec-audit';
 import { OnecPermissionsGuard } from './onec-permissions.guard';
 
@@ -49,6 +50,7 @@ export class OnecAdminController {
     @Inject(OnecCommandsService) private readonly commands: OnecCommandsService,
     @Inject(OnecEtlAdminService) private readonly etl: OnecEtlAdminService,
     @Inject(OnecMatchingService) private readonly matching: OnecMatchingService,
+    @Inject(OnecJournalService) private readonly journal: OnecJournalService,
   ) {}
 
   @ApiOperation({ summary: 'Overview of 1C agents: connection, state, queues, certificates, configuration' })
@@ -57,6 +59,15 @@ export class OnecAdminController {
   @RequirePermissions('onec.view')
   overview() {
     return this.service.overview();
+  }
+
+  @ApiOperation({ summary: 'Daily journal of the 1C agent connection: sessions, states, runs, batches, commands, alerts (last 24 h)' })
+  @Get('agents/:agentId/journal/daily')
+  @ApiBearerAuth('bearerAuth')
+  @RequirePermissions('onec.view')
+  dailyJournal(@Param('agentId') agentId: string) {
+    if (!/^[A-Za-z0-9._-]{1,64}$/.test(agentId)) throw new ApiError(404, 'ONEC_AGENT_NOT_FOUND', 'Агент не найден');
+    return this.journal.daily(agentId);
   }
 
   @ApiOperation({ summary: 'List 1C sources (databases)' })
