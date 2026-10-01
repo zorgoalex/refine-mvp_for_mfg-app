@@ -1,4 +1,4 @@
-import type { UiVariant } from '../ui-variant/uiVariant';
+import { isModernUiVariant, type UiVariant } from '../ui-variant/uiVariant';
 
 export const LEGACY_CATEGORY_ORDER = [
   'Контрагенты',
@@ -63,6 +63,26 @@ export const EVOLUTION_CATEGORY_LABELS: Record<(typeof EVOLUTION_CATEGORY_ORDER)
   Настройки: 'Система',
 };
 
+type EvolutionCategoryLabels = Record<(typeof EVOLUTION_CATEGORY_ORDER)[number], string>;
+
+/**
+ * «Верстак» only renames the groups. Category keys, the resource→category map and
+ * the order stay shared with Evolution, so the user's stored menu order, the
+ * 'Настройки' permission gate and role visibility keep working unchanged.
+ */
+const WORKBENCH_CATEGORY_LABELS: EvolutionCategoryLabels = {
+  CRM: 'Продажи и финансы',
+  Производство: 'Производство',
+  Закупки: 'Снабжение и склад',
+  Данные: 'Справочники',
+  Журналы: 'Журналы',
+  Настройки: 'Настройка',
+};
+
+export function getEvolutionCategoryLabels(variant: UiVariant): EvolutionCategoryLabels {
+  return variant === 'workbench' ? WORKBENCH_CATEGORY_LABELS : EVOLUTION_CATEGORY_LABELS;
+}
+
 export const EVOLUTION_CATEGORY_MAP: Record<string, (typeof EVOLUTION_CATEGORY_ORDER)[number]> = {
   clients: 'CRM',
   bitrix24_incoming_requests: 'CRM',
@@ -120,7 +140,7 @@ export function getSidebarMenuConfig(variant: UiVariant): {
   categoryOrder: readonly string[];
   categoryMap: Record<string, string>;
 } {
-  if (variant === 'evolution' || variant === 'line' || variant === 'air' || variant === 'neutral') {
+  if (isModernUiVariant(variant)) {
     return {
       categoryOrder: EVOLUTION_CATEGORY_ORDER,
       categoryMap: EVOLUTION_CATEGORY_MAP,

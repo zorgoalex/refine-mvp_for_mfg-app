@@ -42,6 +42,43 @@ describe('UI variant bootstrap', () => {
     expect(restoreSession).not.toHaveBeenCalled();
   });
 
+  it('resolves a confirmed workbench preference on desktop and keeps the kill-switch stronger', async () => {
+    const setCached = vi.fn();
+    await expect(resolveInitialUiVariant(
+      { evolutionEnabled: true, forceLegacy: false },
+      makeDependencies({ getPreferences: async () => ({ preferences: { uiVariant: 'workbench' } }), setCached }),
+    )).resolves.toBe('workbench');
+    expect(setCached).toHaveBeenCalledWith('7', 'workbench');
+    await expect(resolveInitialUiVariant(
+      { evolutionEnabled: true, forceLegacy: true },
+      makeDependencies({ getPreferences: async () => ({ preferences: { uiVariant: 'workbench' } }) }),
+    )).resolves.toBe('legacy');
+  });
+
+  it('keeps the tablet shell on Evolution for a saved workbench preference (phase 1: desktop/phone only)', async () => {
+    await expect(resolveInitialUiVariant(
+      { evolutionEnabled: true, forceLegacy: false },
+      makeDependencies({ isTabletDevice: () => true, getCached: () => 'workbench' }),
+    )).resolves.toBe('evolution');
+    const setCached = vi.fn();
+    await expect(resolveInitialUiVariant(
+      { evolutionEnabled: true, forceLegacy: false },
+      makeDependencies({
+        getPreferences: async () => ({ preferences: { uiVariant: 'workbench', tabletMode: true } }),
+        setCached,
+      }),
+    )).resolves.toBe('evolution');
+    // the stored choice is not overwritten by the tablet override
+    expect(setCached).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the same-user cached workbench choice when preferences cannot be read', async () => {
+    await expect(resolveInitialUiVariant(
+      { evolutionEnabled: true, forceLegacy: false },
+      makeDependencies({ getPreferences: async () => { throw new Error('offline'); }, getCached: () => 'workbench' }),
+    )).resolves.toBe('workbench');
+  });
+
   it('forces Evolution before preference lookup on a physical tablet', async () => {
     const restoreSession = vi.fn(async () => undefined);
     const getPreferences = vi.fn(async () => ({ preferences: { uiVariant: 'legacy' } }));

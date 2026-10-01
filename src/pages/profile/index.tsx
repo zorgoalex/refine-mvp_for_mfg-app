@@ -31,6 +31,7 @@ const uiVariantOptions: Array<{ label: string; value: UiVariant }> = [
   { label: "LINE · Деловой минимализм", value: "line" },
   { label: "AIR · Светлая динамика", value: "air" },
   { label: "Нейтральная · светлая", value: "neutral" },
+  { label: "Верстак · новый дизайн", value: "workbench" },
 ];
 
 export const ProfilePage: React.FC = () => {
@@ -151,7 +152,7 @@ export const ProfilePage: React.FC = () => {
             </Radio.Group>
             <Typography.Text type="secondary">
               {modernUiAvailable
-                ? "После сохранения страница перезагрузится в выбранном дизайне."
+                ? "После сохранения страница перезагрузится в выбранном дизайне. На планшете всегда используется планшетный вид."
                 : "Новые варианты дизайна временно отключены администратором."}
             </Typography.Text>
           </Space>

@@ -1,0 +1,171 @@
+/* «Верстак» (uiVariant = workbench): только представление.
+   Все правила — под :root[data-ui-variant="workbench"]; другие варианты не затрагиваются.
+   Компоненты страниц и их функциональность те же, что в Evolution. */
+
+@font-face { font-family: 'Onest'; font-style: normal; font-weight: 400 700; font-display: swap; src: url('../fonts/Onest-cyrillic-ext-400-700.woff2') format('woff2'); unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F; }
+@font-face { font-family: 'Onest'; font-style: normal; font-weight: 400 700; font-display: swap; src: url('../fonts/Onest-cyrillic-400-700.woff2') format('woff2'); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: 'Onest'; font-style: normal; font-weight: 400 700; font-display: swap; src: url('../fonts/Onest-latin-ext-400-700.woff2') format('woff2'); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: 'Onest'; font-style: normal; font-weight: 400 700; font-display: swap; src: url('../fonts/Onest-latin-400-700.woff2') format('woff2'); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+
+:root[data-ui-variant="workbench"] {
+  font-family: Onest, "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+}
+
+/* ---------- навигация: в тоне холста, рабочие панели белые ---------- */
+:root[data-ui-variant="workbench"] .evolution-sider.ant-layout-sider {
+  border-right: 1px solid var(--evo-sidebar-border);
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider__brand {
+  min-height: 56px;
+  border-bottom: 0;
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider__brand-mark {
+  flex-basis: 32px;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider__nav {
+  height: calc(100vh - 56px);
+  padding-top: 8px;
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider__group-label {
+  margin: 14px 10px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: none;
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider .ant-menu-item {
+  min-height: 34px;
+  margin: 1px 0;
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider:not(.ant-layout-sider-collapsed) .ant-menu-item {
+  padding-block: 6px;
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider .ant-menu-item-selected {
+  box-shadow: 0 0 0 1px var(--evo-sidebar-border), 0 1px 2px rgba(16, 24, 40, 0.04);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider .ant-menu-item-selected .anticon {
+  color: var(--evo-primary);
+}
+
+/* ---------- верхняя панель и вкладки рабочего пространства ---------- */
+:root[data-ui-variant="workbench"] .evolution-header.ant-layout-header {
+  min-height: 56px;
+  height: 56px;
+  border-bottom: 0;
+  background: color-mix(in srgb, var(--evo-canvas) 94%, transparent);
+}
+
+:root[data-ui-variant="workbench"] .evolution-header__search {
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .evolution-workspace-tabs.workspace-tabs {
+  top: 56px;
+  padding: 0 24px 8px;
+  border-bottom: 1px solid var(--evo-border);
+  background: var(--evo-canvas);
+}
+
+:root[data-ui-variant="workbench"] .evolution-workspace-tabs.workspace-tabs.ant-tabs-card > .ant-tabs-nav::before {
+  border-bottom: 0;
+}
+
+:root[data-ui-variant="workbench"] .evolution-workspace-tabs.workspace-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab {
+  height: 32px;
+  margin: 0 2px 0 0 !important;
+  border: 0;
+  border-radius: var(--evo-radius-md);
+  color: var(--evo-text-secondary);
+  font-weight: 500;
+}
+
+:root[data-ui-variant="workbench"] .evolution-workspace-tabs.workspace-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab:hover {
+  background: var(--evo-sidebar-hover);
+}
+
+:root[data-ui-variant="workbench"] .evolution-workspace-tabs.workspace-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab-active {
+  background: var(--evo-surface);
+  box-shadow: 0 0 0 1px var(--evo-border), 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+
+:root[data-ui-variant="workbench"] .evolution-workspace-tabs.workspace-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: var(--evo-text);
+  font-weight: 600;
+}
+
+/* ---------- футер: только сжат, все элементы и «Журнал изменений» на месте ---------- */
+:root[data-ui-variant="workbench"] .evolution-shell .ant-layout-footer {
+  padding: 3px 24px !important;
+  border-top: 1px solid var(--evo-border) !important;
+  background: var(--evo-canvas) !important;
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell .ant-layout-footer .ant-typography {
+  font-size: 12px;
+}
+
+/* ---------- поверхности ---------- */
+:root[data-ui-variant="workbench"] .ant-card {
+  box-shadow: var(--evo-shadow);
+}
+
+:root[data-ui-variant="workbench"] .ant-card-bordered {
+  border-color: transparent;
+}
+
+/* ---------- таблицы: спокойная шапка без капса, табличные цифры ---------- */
+:root[data-ui-variant="workbench"] .ant-table-thead > tr > th,
+:root[data-ui-variant="workbench"] .ant-table-thead > tr > td {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+:root[data-ui-variant="workbench"] .ant-table {
+  font-size: 13.5px;
+}
+
+/* ---------- статусы-теги: пилюли, без капса ---------- */
+:root[data-ui-variant="workbench"] .ant-tag {
+  border-radius: 999px;
+  font-weight: 550;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* ---------- ход производства: приглушён, чтобы не перетягивать взгляд ---------- */
+:root[data-ui-variant="workbench"] .cnc-order-card__progress {
+  background: var(--wb-progress-track);
+}
+
+:root[data-ui-variant="workbench"] .cnc-order-card__progress-segment--cut {
+  background: var(--wb-progress-start);
+}
+
+:root[data-ui-variant="workbench"] .cnc-order-card__progress-segment--rolled {
+  background: var(--wb-progress-done);
+}
+
+:root[data-ui-variant="workbench"] .production-stages__stage--passed {
+  color: var(--evo-success) !important;
+}
+
+:root[data-ui-variant="workbench"] .production-stages__stage--pending {
+  color: var(--wb-ink-3) !important;
+}

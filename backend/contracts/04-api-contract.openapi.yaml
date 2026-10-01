@@ -21667,7 +21667,7 @@ components:
           enum: [default, small]
         uiVariant:
           type: string
-          enum: [legacy, evolution, line, air, neutral]
+          enum: [legacy, evolution, line, air, neutral, workbench]
         tabletMode:
           type: boolean
           description: Force the tablet layout independently of physical device or viewport size.
@@ -21709,7 +21709,7 @@ components:
           enum: [default, small]
         uiVariant:
           type: string
-          enum: [legacy, evolution, line, air, neutral]
+          enum: [legacy, evolution, line, air, neutral, workbench]
         tabletMode:
           type: boolean
         sidebarCollapsed:

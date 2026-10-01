@@ -21,6 +21,9 @@ describe('ui variant resolver', () => {
     expect(resolveUiVariant({ evolutionEnabled: true }, 'line')).toBe('line');
     expect(resolveUiVariant({ evolutionEnabled: true }, 'air')).toBe('air');
     expect(resolveUiVariant({ evolutionEnabled: true }, 'neutral')).toBe('neutral');
+    expect(resolveUiVariant({ evolutionEnabled: true }, 'workbench')).toBe('workbench');
+    expect(resolveUiVariant({ evolutionEnabled: true })).toBe('evolution');
+    expect(resolveUiVariant({ evolutionEnabled: true, forceLegacy: true }, 'workbench')).toBe('legacy');
     expect(resolveUiVariant({ evolutionEnabled: true }, 'legacy')).toBe('legacy');
     expect(resolveUiVariant({ evolutionEnabled: true }, 'future')).toBe('evolution');
   });
@@ -44,11 +47,13 @@ describe('ui variant resolver', () => {
     expect(isUiVariant('line')).toBe(true);
     expect(isUiVariant('air')).toBe(true);
     expect(isUiVariant('neutral')).toBe(true);
+    expect(isUiVariant('workbench')).toBe(true);
     expect(isUiVariant('EVOLUTION')).toBe(false);
     expect(isUiVariant(null)).toBe(false);
     expect(isModernUiVariant('legacy')).toBe(false);
     expect(isModernUiVariant('line')).toBe(true);
     expect(isModernUiVariant('neutral')).toBe(true);
+    expect(isModernUiVariant('workbench')).toBe(true);
   });
 
   it('sets the document marker synchronously before React renders', () => {

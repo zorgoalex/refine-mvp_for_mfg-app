@@ -16,6 +16,7 @@ export const shellLoaders: Record<UiVariant, () => Promise<ShellModule>> = {
   line: evolutionShellLoader,
   air: evolutionShellLoader,
   neutral: evolutionShellLoader,
+  workbench: evolutionShellLoader,
 };
 
 const shellRegistry: Record<UiVariant, React.LazyExoticComponent<React.ComponentType>> = {
@@ -24,6 +25,7 @@ const shellRegistry: Record<UiVariant, React.LazyExoticComponent<React.Component
   line: lazy(shellLoaders.line),
   air: lazy(shellLoaders.air),
   neutral: lazy(shellLoaders.neutral),
+  workbench: lazy(shellLoaders.workbench),
 };
 
 const ShellLoadingFallback: React.FC = () => (

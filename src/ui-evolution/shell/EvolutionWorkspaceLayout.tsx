@@ -30,6 +30,7 @@ import { resolveModernRouteFamily, resolveOperationalPageKind } from './tabletRo
 import '../styles/evolution.css';
 import '../../ui-operational/operational.css';
 import '../styles/tablet.css';
+import '../styles/workbench.css';
 
 const EvolutionRouteSkeleton: React.FC = () => (
   <div

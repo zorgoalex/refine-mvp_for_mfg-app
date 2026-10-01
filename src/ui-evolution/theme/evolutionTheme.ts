@@ -30,7 +30,17 @@ interface ModernUiPalette {
   menuHoverColor: string;
   menuSelectedBg: string;
   menuSelectedColor: string;
+  /** Optional per-variant typography/density; other variants keep the shared defaults. */
+  fontFamily?: string;
+  controlHeight?: number;
+  controlHeightSM?: number;
+  controlHeightLG?: number;
+  tableCellPaddingBlock?: number;
+  buttonFontWeight?: number;
 }
+
+const DEFAULT_FONT_FAMILY = 'Inter, "Noto Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+export const WORKBENCH_FONT_FAMILY = 'Onest, "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif';
 
 const palettes: Record<ModernUiVariant, Record<ThemeMode, ModernUiPalette>> = {
   evolution: {
@@ -273,6 +283,78 @@ const palettes: Record<ModernUiVariant, Record<ThemeMode, ModernUiPalette>> = {
       menuSelectedColor: '#FFFFFF',
     },
   },
+  workbench: {
+    light: {
+      canvas: '#F2F4F7',
+      surface: '#FFFFFF',
+      surfaceMuted: '#F7F8FA',
+      text: '#141A24',
+      textSecondary: '#4A5363',
+      border: '#E4E7EC',
+      borderStrong: '#B9C0CB',
+      primary: '#2552D9',
+      primaryHover: '#1D45C0',
+      primaryActive: '#17389E',
+      primaryShadow: '0 1px 2px rgba(20, 40, 110, 0.18)',
+      focusShadow: '0 0 0 3px rgba(37, 82, 217, 0.30)',
+      navigation: '#14B8A6',
+      success: '#16723F',
+      warning: '#8F5600',
+      danger: '#BC2E2A',
+      rowHoverBg: '#F3F5F8',
+      radiusSm: 6,
+      radiusMd: 8,
+      radiusLg: 12,
+      shadow: '0 12px 32px rgba(16, 24, 40, 0.14), 0 2px 6px rgba(16, 24, 40, 0.06)',
+      shadowSecondary: '0 4px 14px rgba(16, 24, 40, 0.08), 0 1px 3px rgba(16, 24, 40, 0.06)',
+      menuItemColor: '#4A5363',
+      menuHoverBg: '#EEF1F5',
+      menuHoverColor: '#141A24',
+      menuSelectedBg: '#FFFFFF',
+      menuSelectedColor: '#141A24',
+      fontFamily: WORKBENCH_FONT_FAMILY,
+      controlHeight: 34,
+      controlHeightSM: 28,
+      controlHeightLG: 40,
+      tableCellPaddingBlock: 9,
+      buttonFontWeight: 600,
+    },
+    dark: {
+      canvas: '#0D1219',
+      surface: '#151B25',
+      surfaceMuted: '#111720',
+      text: '#E6EAF1',
+      textSecondary: '#A6B0C0',
+      border: '#232B37',
+      borderStrong: '#465061',
+      primary: '#4E74F2',
+      primaryHover: '#6A8AF7',
+      primaryActive: '#3B63E8',
+      primaryShadow: '0 1px 2px rgba(0, 0, 0, 0.4)',
+      focusShadow: '0 0 0 3px rgba(124, 155, 255, 0.38)',
+      navigation: '#14B8A6',
+      success: '#71D79E',
+      warning: '#F4C46A',
+      danger: '#FF9591',
+      rowHoverBg: '#1A212C',
+      radiusSm: 6,
+      radiusMd: 8,
+      radiusLg: 12,
+      shadow: '0 16px 40px rgba(0, 0, 0, 0.5)',
+      shadowSecondary: '0 6px 18px rgba(0, 0, 0, 0.32)',
+      menuItemColor: '#A6B0C0',
+      menuHoverBg: '#1D2430',
+      menuHoverColor: '#E6EAF1',
+      menuSelectedBg: '#151B25',
+      menuSelectedColor: '#E6EAF1',
+      fontFamily: WORKBENCH_FONT_FAMILY,
+      controlHeight: 34,
+      controlHeightSM: 28,
+      controlHeightLG: 40,
+      tableCellPaddingBlock: 9,
+      buttonFontWeight: 600,
+    },
+  },
 };
 
 export function getModernUiTheme(mode: ThemeMode, variant: ModernUiVariant): ThemeConfig {
@@ -298,23 +380,23 @@ export function getModernUiTheme(mode: ThemeMode, variant: ModernUiVariant): The
       colorBorder: colors.border,
       colorBorderSecondary: colors.border,
       colorSplit: colors.border,
-      controlHeight: 40,
-      controlHeightSM: 32,
-      controlHeightLG: 44,
+      controlHeight: colors.controlHeight ?? 40,
+      controlHeightSM: colors.controlHeightSM ?? 32,
+      controlHeightLG: colors.controlHeightLG ?? 44,
       borderRadius: colors.radiusMd,
       borderRadiusLG: colors.radiusLg,
       borderRadiusSM: colors.radiusSm,
-      fontFamily: 'Inter, "Noto Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+      fontFamily: colors.fontFamily ?? DEFAULT_FONT_FAMILY,
       fontSize: 14,
       boxShadow: colors.shadow,
       boxShadowSecondary: colors.shadowSecondary,
     },
     components: {
       Button: {
-        controlHeight: 40,
+        controlHeight: colors.controlHeight ?? 40,
         borderRadius: colors.radiusMd,
         primaryShadow: colors.primaryShadow,
-        fontWeight: 650,
+        fontWeight: colors.buttonFontWeight ?? 650,
       },
       Input: {
         activeBorderColor: colors.primary,
@@ -336,7 +418,7 @@ export function getModernUiTheme(mode: ThemeMode, variant: ModernUiVariant): The
         headerColor: colors.textSecondary,
         rowHoverBg: colors.rowHoverBg,
         borderColor: colors.border,
-        cellPaddingBlock: 12,
+        cellPaddingBlock: colors.tableCellPaddingBlock ?? 12,
         cellPaddingInline: 12,
       },
       Tabs: {

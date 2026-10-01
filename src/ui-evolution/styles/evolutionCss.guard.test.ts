@@ -10,7 +10,8 @@ describe('evolution CSS isolation', () => {
     ':root[data-ui-variant="line"]',
     ':root[data-ui-variant="air"]',
     ':root[data-ui-variant="neutral"]',
-    ':root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"], [data-ui-variant="neutral"])',
+    ':root[data-ui-variant="workbench"]',
+    ':root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"], [data-ui-variant="neutral"], [data-ui-variant="workbench"])',
     ':root:where([data-ui-variant="line"], [data-ui-variant="air"])',
   ];
 
@@ -36,6 +37,22 @@ describe('evolution CSS isolation', () => {
     expect(source).toContain(':root[data-ui-variant="line"]');
     expect(source).toContain(':root[data-ui-variant="air"]');
     expect(source).toContain(':root[data-ui-variant="neutral"]');
-    expect(source).toContain(':root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"], [data-ui-variant="neutral"])');
+    expect(source).toContain(':root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"], [data-ui-variant="neutral"], [data-ui-variant="workbench"])');
+  });
+
+  it('keeps the workbench stylesheet scoped to its own variant marker', () => {
+    const workbench = postcss.parse(readFileSync('src/ui-evolution/styles/workbench.css', 'utf8'));
+    const unscoped: string[] = [];
+    workbench.walkRules((rule) => {
+      rule.selectors.forEach((selector) => {
+        if (!selector.trim().startsWith(':root[data-ui-variant="workbench"]')) unscoped.push(selector);
+      });
+    });
+    expect(unscoped).toEqual([]);
+  });
+
+  it('declares the workbench palette for both themes', () => {
+    expect(source).toContain(':root[data-ui-variant="workbench"] {');
+    expect(source).toContain(':root[data-ui-variant="workbench"][data-theme="dark"] {');
   });
 });

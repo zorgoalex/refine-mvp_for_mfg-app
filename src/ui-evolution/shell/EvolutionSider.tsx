@@ -21,8 +21,9 @@ import { SidebarMenuSettingsButton } from '../../components/SidebarMenuSettingsB
 import { SIDER_RESOURCE_ICONS } from '../../components/siderResourceIcons';
 import type { UserIdentity } from '../../types/auth';
 import { APP_VERSION } from '../../version';
+import { useUiVariant } from '../../ui-variant/UiVariantProvider';
+import { getEvolutionCategoryLabels } from '../../utils/navigationMenuConfig';
 import {
-  EVOLUTION_CATEGORY_LABELS,
   EVOLUTION_CATEGORY_ORDER,
   useEvolutionNavigation,
 } from './useEvolutionNavigation';
@@ -36,6 +37,8 @@ export interface EvolutionSiderProps {
 export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCollapse, operational = false }) => {
   const { sider, isCreateModalOpen, setIsCreateModalOpen, sidebarMenuPreferences } = useEvolutionNavigation();
   const { data: identity } = useGetIdentity<UserIdentity>();
+  const { variant } = useUiVariant();
+  const categoryLabels = getEvolutionCategoryLabels(variant);
   const resourceItems = Object.values(sider.categorizedResources).flat();
   const activeCategory = Object.entries(sider.categorizedResources)
     .find(([, items]) => items.some((item) => item.name === sider.selectedKey))?.[0];
@@ -224,7 +227,7 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
                       <SidebarMenuSettingsButton
                         topItems={sider.topMenuOrderItems}
                         categorizedResources={sider.categorizedResources}
-                        categoryLabels={EVOLUTION_CATEGORY_LABELS}
+                        categoryLabels={categoryLabels}
                         defaults={sider.menuOrderDefaults}
                         settings={sider.menuOrderSettings}
                         onChange={sidebarMenuPreferences.saveSettings}
@@ -241,7 +244,7 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
                   <SidebarMenuSettingsButton
                     topItems={sider.topMenuOrderItems}
                     categorizedResources={sider.categorizedResources}
-                    categoryLabels={EVOLUTION_CATEGORY_LABELS}
+                    categoryLabels={categoryLabels}
                     defaults={sider.menuOrderDefaults}
                     settings={sider.menuOrderSettings}
                     onChange={sidebarMenuPreferences.saveSettings}
@@ -254,8 +257,8 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
               {sider.categoryOrder.map((category) => {
                 const resources = sider.categorizedResources[category] ?? [];
                 if (resources.length === 0) return null;
-                const categoryLabel = EVOLUTION_CATEGORY_LABELS[
-                  category as keyof typeof EVOLUTION_CATEGORY_LABELS
+                const categoryLabel = categoryLabels[
+                  category as keyof typeof categoryLabels
                 ] ?? category;
                 const items = resources.map((item) => ({
                   key: item.name,
@@ -289,7 +292,7 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
                 <SidebarMenuSettingsButton
                   topItems={sider.topMenuOrderItems}
                   categorizedResources={sider.categorizedResources}
-                  categoryLabels={EVOLUTION_CATEGORY_LABELS}
+                  categoryLabels={categoryLabels}
                   defaults={sider.menuOrderDefaults}
                   settings={sider.menuOrderSettings}
                   onChange={sidebarMenuPreferences.saveSettings}

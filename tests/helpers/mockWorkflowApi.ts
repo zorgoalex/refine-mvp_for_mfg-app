@@ -10,7 +10,7 @@ export interface WorkflowMockApiOptions {
     graphqlErrorForQuery?: (query: string) => string | null | undefined;
     runtimeConfig?: false | Record<string, boolean>;
     themeMode?: 'light' | 'dark';
-    uiVariant?: 'legacy' | 'evolution' | 'line' | 'air' | 'neutral';
+    uiVariant?: 'legacy' | 'evolution' | 'line' | 'air' | 'neutral' | 'workbench';
     tabletMode?: boolean;
     authToken?: string;
     authRefreshToken?: string;
@@ -911,7 +911,7 @@ export async function setupWorkflowMockApi(
 }
 
 function isMockUiVariant(value: unknown): value is NonNullable<WorkflowMockApiOptions['uiVariant']> {
-    return value === 'legacy' || value === 'evolution' || value === 'line' || value === 'air' || value === 'neutral';
+    return value === 'legacy' || value === 'evolution' || value === 'line' || value === 'air' || value === 'neutral' || value === 'workbench';
 }
 
 function createOrderFormDataResponse(db: WorkflowMockDb) {

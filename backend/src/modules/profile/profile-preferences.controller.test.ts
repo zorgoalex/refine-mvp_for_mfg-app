@@ -141,6 +141,7 @@ describe('ProfilePreferencesController', () => {
     expect(parseUpdateUserPreferencesRequest({ uiVariant: 'line' })).toEqual({ uiVariant: 'line' });
     expect(parseUpdateUserPreferencesRequest({ uiVariant: 'air' })).toEqual({ uiVariant: 'air' });
     expect(parseUpdateUserPreferencesRequest({ uiVariant: 'neutral' })).toEqual({ uiVariant: 'neutral' });
+    expect(parseUpdateUserPreferencesRequest({ uiVariant: 'workbench' })).toEqual({ uiVariant: 'workbench' });
     expect(parseUpdateUserPreferencesRequest({ tabletMode: true })).toEqual({ tabletMode: true });
     expect(parseUpdateUserPreferencesRequest({ tabletMode: false })).toEqual({ tabletMode: false });
     expect(parseUpdateUserPreferencesRequest({ sidebarCollapsed: true })).toEqual({ sidebarCollapsed: true });

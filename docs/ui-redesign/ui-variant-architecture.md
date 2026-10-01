@@ -13,7 +13,7 @@
 ## Тип и границы
 
 ```ts
-export type UiVariant = 'legacy' | 'evolution' | 'line' | 'air' | 'neutral';
+export type UiVariant = 'legacy' | 'evolution' | 'line' | 'air' | 'neutral' | 'workbench';
 ```
 
 Variant управляет только presentation composition и theme tokens. Он не передаётся в API clients, data hooks, validation, permission helpers, status transitions, accounting/cut calculations или route guards.
@@ -25,7 +25,7 @@ Variant управляет только presentation composition и theme tokens
 ```text
 runtime forceLegacy === true                 -> legacy
 runtime evolutionEnabled !== true            -> legacy
-confirmed user preference legacy|evolution|line|air|neutral -> selected value
+confirmed user preference legacy|evolution|line|air|neutral|workbench -> selected value
 same-user confirmed cache while GET fails    -> cached value
 missing/invalid/timeout/user-change           -> evolution when modern UI is available, legacy otherwise
 ```
@@ -66,13 +66,16 @@ PATCH /api/v1/me/preferences
 { "uiVariant": "line" }
 ```
 
-- Zod принимает только `legacy|evolution|line|air|neutral`.
+- Zod принимает только `legacy|evolution|line|air|neutral|workbench`; иное значение в PATCH — 422.
 - Migration 084 добавляет `user_preferences.ui_variant` с default `legacy`,
   `NOT NULL` и check constraint.
 - Migration 090 меняет DB default на `evolution`; migration 091 расширяет
   check constraint до `legacy|evolution|line|air` и сохраняет default
   `evolution`; migration 208 расширяет check constraint до
-  `legacy|evolution|line|air|neutral`, default остаётся `evolution`.
+  `legacy|evolution|line|air|neutral`, default остаётся `evolution`; migration 223
+  добавляет `workbench` (default и существующие строки не меняются).
+- Backend, не знающий значения из БД, при чтении отдаёт `evolution` (значение в БД
+  сохраняется), поэтому откат backend не требует правки данных.
 - Partial PATCH semantics сохранены.
 - Старый backend может ответить 200 без нового поля; frontend считает такой
   ответ неподтверждённым, не пишет cache и не перезагружает shell.
@@ -82,7 +85,7 @@ PATCH /api/v1/me/preferences
 - `UiVariantProvider` owns immutable boot variant.
 - `useUiVariant()` returns value plus modern/evolution booleans for shell selection and conditional Ant tokens.
 - `App.tsx` keeps one route tree and selects only layout component.
-- Shell registry dynamically imports `WorkspaceLayout` for legacy and `EvolutionWorkspaceLayout` for `evolution|line|air|neutral`; выбранный boot variant загружает только свой shell chunk.
+- Shell registry dynamically imports `WorkspaceLayout` for legacy and `EvolutionWorkspaceLayout` for `evolution|line|air|neutral|workbench`; выбранный boot variant загружает только свой shell chunk.
 - Later screen migrations use a registry keyed by route capability, not duplicate routes. Domain hooks stay above or outside variant views.
 - No silent legacy fallback inside an enabled evolution shell after general launch. During staged screen work, coverage matrix explicitly marks shared legacy body under evolution shell.
 
@@ -91,10 +94,27 @@ PATCH /api/v1/me/preferences
 - Legacy CSS remains as-is.
 - Every modern selector starts under `[data-ui-variant="evolution"]`,
   `[data-ui-variant="line"]`, `[data-ui-variant="air"]`,
-  `[data-ui-variant="neutral"]` or their shared `:root:where(...)` marker.
+  `[data-ui-variant="neutral"]`, `[data-ui-variant="workbench"]` or their shared
+  `:root:where(...)` marker. Правила, существующие только для «Верстака», лежат в
+  `src/ui-evolution/styles/workbench.css` и начинаются с
+  `:root[data-ui-variant="workbench"]`.
 - Modern Ant tokens are passed conditionally through existing `ConfigProvider`.
 - Portals (dropdown/modal/tooltip) inherit Ant tokens; any custom portal selectors include a root/overlay variant class rather than unscoped overrides.
 - No target hex values in ten screen files.
+
+## Вариант «Верстак» (`workbench`)
+
+- Включается только пользователем в профиле («Верстак · новый дизайн»); вариантом по
+  умолчанию не является.
+- Это слой представления: те же компоненты страниц, хуки, права и маршруты, что в
+  Evolution. Свои — палитра и плотность в `evolutionTheme.ts`, CSS-переменные
+  `--evo-*`, шрифт Onest (`src/ui-evolution/fonts`, лицензия OFL) и `workbench.css`.
+- Навигация: ключи категорий, карта «ресурс → категория» и порядок общие с Evolution
+  (сохранённый пользователем порядок меню и права работают без изменений); отличаются
+  только подписи групп — `getEvolutionCategoryLabels(variant)`.
+- На планшетном устройстве и при включённом «Планшетном виде» оболочка остаётся
+  планшетной Evolution; сохранённый выбор `workbench` при этом не теряется.
+- Футер только сжат: дата, сессия, версия и «Журнал изменений» остаются.
 
 ## Routing and state safety
 
@@ -120,7 +140,7 @@ PATCH /api/v1/me/preferences
 
 - Existing and new users without a stored choice use `evolution` by database
   and frontend default.
-- `RUNTIME_CONFIG_UI_EVOLUTION=true` makes `evolution|line|air|neutral` selectable.
+- `RUNTIME_CONFIG_UI_EVOLUTION=true` makes `evolution|line|air|neutral|workbench` selectable.
 - `RUNTIME_CONFIG_UI_FORCE_LEGACY=true` immediately overrides all stored
   preferences without deleting them.
 - Migration must precede backend; backend and the new resolver must precede the

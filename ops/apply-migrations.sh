@@ -2524,6 +2524,27 @@ probe_file() {
                            AND pg_get_constraintdef(oid) LIKE '%air%'
                            AND pg_get_constraintdef(oid) LIKE '%neutral%'
                       );" ;;
+    223_user_preferences_ui_variant_workbench*) probe_all "$(q_col user_preferences ui_variant)" \
+                     "SELECT EXISTS (
+                        SELECT 1
+                          FROM information_schema.columns
+                         WHERE table_schema='public'
+                           AND table_name='user_preferences'
+                           AND column_name='ui_variant'
+                           AND column_default='''evolution''::text'
+                      );" \
+                     "SELECT EXISTS (
+                        SELECT 1
+                          FROM pg_constraint
+                         WHERE conname = 'chk_user_preferences_ui_variant'
+                           AND conrelid = 'user_preferences'::regclass
+                           AND pg_get_constraintdef(oid) LIKE '%legacy%'
+                           AND pg_get_constraintdef(oid) LIKE '%evolution%'
+                           AND pg_get_constraintdef(oid) LIKE '%line%'
+                           AND pg_get_constraintdef(oid) LIKE '%air%'
+                           AND pg_get_constraintdef(oid) LIKE '%neutral%'
+                           AND pg_get_constraintdef(oid) LIKE '%workbench%'
+                      );" ;;
     # Сид 203 — хотя бы один склад (склад можно переименовать; после 205 повторный сид без ключа 1С невозможен).
     203_film_stock*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM public.warehouses)" \
@@ -2897,7 +2918,7 @@ verify_applied_effect() {
     205_warehouses_onec_key_required*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*)
+    209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)

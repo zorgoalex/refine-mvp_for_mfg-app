@@ -151,6 +151,12 @@ describe('PgProfilePreferencesRepository', () => {
     });
     expect(database.queries[0].params).toEqual([7, null, 'small', null, null, null, null, null, null]);
 
+    const workbench = new FakeDatabase([{
+      rows: [{ theme_mode: 'light', ui_variant: 'workbench', order_detail_columns: {} }],
+    }]);
+    await expect(new PgProfilePreferencesRepository(workbench).getUserPreferences(7))
+      .resolves.toMatchObject({ uiVariant: 'workbench' });
+
     const garbage = new FakeDatabase([{ rows: [{ theme_mode: 'light', ui_size: 'huge', order_detail_columns: {} }] }]);
     await expect(new PgProfilePreferencesRepository(garbage).getUserPreferences(7)).resolves.toMatchObject({
       uiSize: 'default',
