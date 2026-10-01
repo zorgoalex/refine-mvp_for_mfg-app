@@ -9,6 +9,7 @@ interface OutboxEventRow {
   aggregate_id: string;
   payload_json: Record<string, unknown> | null;
   attempts: number | string;
+  created_at?: Date | string | null;
 }
 
 export class PgOutboxRepository implements OutboxRepositoryPort {
@@ -23,7 +24,7 @@ export class PgOutboxRepository implements OutboxRepositoryPort {
          LIMIT $1
          FOR UPDATE SKIP LOCKED
        )
-       RETURNING outbox_event_id, event_type, aggregate_type, aggregate_id, payload_json, attempts`,
+       RETURNING outbox_event_id, event_type, aggregate_type, aggregate_id, payload_json, attempts, created_at`,
       [input.batchSize, input.workerId, input.now],
     );
     return result.rows.map((row) => ({
@@ -33,6 +34,7 @@ export class PgOutboxRepository implements OutboxRepositoryPort {
       aggregateId: row.aggregate_id,
       payload: row.payload_json ?? {},
       attempts: Number(row.attempts),
+      ...(row.created_at ? { createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : new Date(row.created_at).toISOString() } : {}),
     }));
   }
 

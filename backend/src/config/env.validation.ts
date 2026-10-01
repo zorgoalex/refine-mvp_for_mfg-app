@@ -298,6 +298,8 @@ export const envSchema = z
     ),
     BACKEND_PROCUREMENT_WORKSPACE_ENABLED: booleanFromEnv.default(false),
     BACKEND_SUPPLIER_REQUESTS_ENABLED: booleanFromEnv.default(false),
+    // Уведомления закупа (экран снабжения, ф.4б): только in_app, правила засеяны выключенными; проверяется при обработке.
+    BACKEND_PROCUREMENT_NOTIFICATIONS_ENABLED: booleanFromEnv.default(false),
     BACKEND_FILM_CATALOG_IMPORT_ENABLED: booleanFromEnv.default(false),
     BACKEND_INVENTORY_ENABLED: booleanFromEnv.default(false),
     BACKEND_INVENTORY_ONEC_AUTOSYNC: booleanFromEnv.default(false),

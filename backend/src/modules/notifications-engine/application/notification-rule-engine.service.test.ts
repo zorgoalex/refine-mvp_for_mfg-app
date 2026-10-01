@@ -69,7 +69,9 @@ interface Fakes {
   recipientResolver: { resolve: ReturnType<typeof vi.fn> };
   notificationWrite: { insertIfAbsent: ReturnType<typeof vi.fn> };
   channelDelivery: { enqueueIfAbsent: ReturnType<typeof vi.fn> };
-  runtimeConfig?: { isEngineOwnsDeadline(): boolean };
+  runtimeConfig?: { isEngineOwnsDeadline(): boolean; isFeatureEnabled?(flag: string): boolean };
+  now?: () => Date;
+  procurementVisibility?: { filterByBaseVisibility: ReturnType<typeof vi.fn> };
 }
 
 function fakes(overrides: Partial<Fakes> = {}): Fakes {
@@ -394,5 +396,78 @@ describe('NotificationRuleEngineService.processEvent', () => {
 
     expect(result.matched).toBe(1);
     expect(deps.ruleRepo.listEnabledByEvent).toHaveBeenCalledWith(client, 'order.production_status_changed');
+  });
+
+  describe('procurement events (§5.7, phase 4b)', () => {
+    const NOW = new Date('2026-10-01T12:00:00.000Z');
+    const procurementEvent = (overrides: Partial<OutboxEventRecord> = {}) => event({
+      eventType: 'order.resource_procurement_changed',
+      payload: { orderId: 500, changeType: 'allocation_added', role: 'receipt' },
+      createdAt: '2026-10-01T11:00:00.000Z',
+      ...overrides,
+    });
+    const arrived = rule({
+      eventType: 'order.resource_procurement_changed',
+      conditions: { procurementChangeTypes: ['allocation_added'], allocationRoles: ['receipt'] },
+    });
+    const procurementFakes = (enabled: boolean) => fakes({
+      ruleRepo: { listEnabledByEvent: vi.fn(async () => [arrived]) },
+      contextBuilder: { buildContext: vi.fn(async (_client: unknown, record: OutboxEventRecord) => ctx({ eventType: record.eventType, payload: record.payload })) },
+      recipientResolver: { resolve: vi.fn(async () => [7]) },
+      runtimeConfig: { isEngineOwnsDeadline: () => false, isFeatureEnabled: (flag: string) => flag === 'procurementNotifications' && enabled },
+      now: () => NOW,
+      procurementVisibility: { filterByBaseVisibility: vi.fn(async () => [7]) },
+    });
+
+    it('flag off at processing time: skipped_disabled, nothing read or written', async () => {
+      const deps = procurementFakes(false);
+      expect(await service(deps).processEvent(client, procurementEvent())).toEqual({ matched: 0, created: 0, skipped: 'skipped_disabled' });
+      expect(deps.ruleRepo.listEnabledByEvent).not.toHaveBeenCalled();
+      expect(deps.notificationWrite.insertIfAbsent).not.toHaveBeenCalled();
+    });
+
+    it('fails closed without the runtime flag reader', async () => {
+      const deps = { ...procurementFakes(true), runtimeConfig: { isEngineOwnsDeadline: () => false } };
+      expect((await service(deps).processEvent(client, procurementEvent())).skipped).toBe('skipped_disabled');
+    });
+
+    it('flag on: a receipt allocation writes in_app with its own source_type; stale or undated events are skipped', async () => {
+      const deps = procurementFakes(true);
+      expect(await service(deps).processEvent(client, procurementEvent())).toEqual({ matched: 1, created: 1 });
+      expect(deps.notificationWrite.insertIfAbsent).toHaveBeenCalledWith(client, expect.objectContaining({
+        userId: 7, sourceType: 'procurement_order_event', entityType: 'order', entityId: '500',
+      }));
+      expect((await service(deps).processEvent(client, procurementEvent({ createdAt: '2026-09-30T11:59:00.000Z' }))).skipped).toBe('skipped_stale');
+      expect((await service(deps).processEvent(client, procurementEvent({ createdAt: undefined }))).skipped).toBe('skipped_stale');
+    });
+
+    it('recipients go through the procurement visibility (live role matrix); without it nobody is notified (CR1-1)', async () => {
+      const deps = procurementFakes(true);
+      await service(deps).processEvent(client, procurementEvent());
+      expect(deps.recipientResolver.resolve).toHaveBeenCalledWith(client, arrived.recipients, expect.anything(), deps.procurementVisibility);
+      const blind = { ...procurementFakes(true), procurementVisibility: undefined };
+      expect(await service(blind).processEvent(client, procurementEvent())).toEqual({ matched: 1, created: 0 });
+      expect(blind.recipientResolver.resolve).not.toHaveBeenCalled();
+    });
+
+    it('payment, mark and removal do not match the «material arrived» rule', async () => {
+      const deps = procurementFakes(true);
+      for (const payload of [
+        { orderId: 500, changeType: 'allocation_added', role: 'payment' },
+        { orderId: 500, changeType: 'marked' },
+        { orderId: 500, changeType: 'allocation_removed', role: 'receipt' },
+      ]) {
+        expect(await service(deps).processEvent(client, procurementEvent({ payload }))).toEqual({ matched: 0, created: 0 });
+      }
+      expect(deps.notificationWrite.insertIfAbsent).not.toHaveBeenCalled();
+    });
+
+    it('a stored telegram channel is never delivered for a procurement event', async () => {
+      const deps = procurementFakes(true);
+      deps.ruleRepo.listEnabledByEvent = vi.fn(async () => [{ ...arrived, channels: ['in_app', 'telegram'] }]);
+      await service(deps).processEvent(client, procurementEvent());
+      expect(deps.channelDelivery.enqueueIfAbsent).not.toHaveBeenCalled();
+      expect(deps.notificationWrite.insertIfAbsent).toHaveBeenCalledTimes(1);
+    });
   });
 });

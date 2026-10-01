@@ -1,3 +1,5 @@
+import type { CurrentUser } from '../../../permissions/current-user';
+
 export type NotificationLevel = 'info' | 'warning' | 'error';
 
 export interface NotificationDto {
@@ -37,17 +39,23 @@ export interface NotificationListResponse {
   unreadCount: number;
 }
 
+/**
+ * Читатель уведомлений: владелец строк (`id`) и его ТЕКУЩИЕ права/scope — уведомления закупа фильтруются по ним
+ * при каждом чтении (§5.7 R5-1), остальные — только по владельцу, как раньше.
+ */
+export type NotificationViewer = CurrentUser;
+
 export interface NotificationRepositoryPort {
   listForUser(input: {
-    userId: string;
+    viewer: NotificationViewer;
     unreadOnly: boolean;
     page: number;
     pageSize: number;
   }): Promise<NotificationListResult>;
   markReadForUser(input: {
     notificationId: string;
-    userId: string;
+    viewer: NotificationViewer;
   }): Promise<NotificationDto | null>;
-  markAllReadForUser(userId: string): Promise<number>;
-  deleteForUser(input: { notificationId: string; userId: string }): Promise<boolean>;
+  markAllReadForUser(viewer: NotificationViewer): Promise<number>;
+  deleteForUser(input: { notificationId: string; viewer: NotificationViewer }): Promise<boolean>;
 }

@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { BackendEnv } from '../../../config/env.validation';
+import type { NotificationFeatureFlag } from '../domain/notification-event-registry';
 
 export interface NotificationsFeatureFlags {
   engineEnabled: boolean;
@@ -11,6 +12,8 @@ export interface NotificationsFeatureFlags {
   relayBatchSize: number;
   relayWorkerId: string;
   relayMaxAttempts: number;
+  /** BACKEND_PROCUREMENT_NOTIFICATIONS_ENABLED: уведомления закупа (экран снабжения, ф.4б). */
+  procurementNotificationsEnabled: boolean;
 }
 
 @Injectable()
@@ -29,6 +32,7 @@ export class NotificationsRuntimeConfigService {
       relayBatchSize: this.config.get('BACKEND_OUTBOX_RELAY_BATCH_SIZE', { infer: true }),
       relayWorkerId: this.config.get('BACKEND_OUTBOX_RELAY_WORKER_ID', { infer: true }),
       relayMaxAttempts: this.config.get('BACKEND_OUTBOX_RELAY_MAX_ATTEMPTS', { infer: true }),
+      procurementNotificationsEnabled: this.config.get('BACKEND_PROCUREMENT_NOTIFICATIONS_ENABLED', { infer: true }) === true,
     };
   }
 
@@ -42,5 +46,11 @@ export class NotificationsRuntimeConfigService {
 
   isEngineOwnsDeadline(): boolean {
     return this.getFeatureFlags().engineOwnsDeadline;
+  }
+
+  /** Читается при каждой обработке события — не кешируется. */
+  isFeatureEnabled(flag: NotificationFeatureFlag): boolean {
+    if (flag === 'procurementNotifications') return this.getFeatureFlags().procurementNotificationsEnabled;
+    return false;
   }
 }

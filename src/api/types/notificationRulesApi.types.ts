@@ -15,6 +15,9 @@ export interface NotificationRuleConditions {
   excludeOrderStatusIds?: number[];
   excludeCompletedOrders?: boolean;
   requireCurrentDeadlineEvent?: boolean;
+  /** Закуп (ф.4б): изменения закупа и роль распределения; правится не формой, а сохраняется как есть. */
+  procurementChangeTypes?: Array<'marked' | 'unmarked' | 'allocation_added' | 'allocation_removed' | 'allocation_linked' | 'allocation_unlinked'>;
+  allocationRoles?: Array<'receipt' | 'payment'>;
 }
 
 export interface NotificationRuleRecipients {

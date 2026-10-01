@@ -5,7 +5,17 @@ export const NOTIFICATION_CHANNELS = ['in_app', 'telegram'] as const;
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 export type DeadlineNotificationEntityType = 'order' | 'order_stage';
 
+/** Изменения закупа материала заказа (payload `changeType` события `order.resource_procurement_changed`). */
+export const PROCUREMENT_CHANGE_TYPES = ['marked', 'unmarked', 'allocation_added', 'allocation_removed', 'allocation_linked', 'allocation_unlinked'] as const;
+export type ProcurementChangeType = (typeof PROCUREMENT_CHANGE_TYPES)[number];
+export const ALLOCATION_ROLES = ['receipt', 'payment'] as const;
+export type AllocationRole = (typeof ALLOCATION_ROLES)[number];
+
 export interface NotificationRuleConditions {
+  /** Только эти изменения закупа (обязательно для событий закупа — правило не срабатывает на всё подряд). */
+  procurementChangeTypes?: ProcurementChangeType[];
+  /** Только распределения/связи этой роли; событие без роли при заданном условии не совпадает. */
+  allocationRoles?: AllocationRole[];
   allowedFromOrderStatusIds?: number[];
   deadlineEntityTypes?: DeadlineNotificationEntityType[];
   excludeOrderStatusIds?: number[];

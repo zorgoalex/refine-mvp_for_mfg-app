@@ -111,4 +111,16 @@ describe('validateNotificationRuleInput', () => {
       { knownRoleCodes: [] },
     )).toEqual({ ok: false, code: 'DEADLINE_CONDITION_UNSUPPORTED' });
   });
+  it('procurement event: in_app only, change types required, procurement conditions only there', () => {
+    const procurement = {
+      ...base, eventType: 'order.resource_procurement_changed', conditions: { procurementChangeTypes: ['allocation_added' as const], allocationRoles: ['receipt' as const] },
+    };
+    expect(validateNotificationRuleInput(procurement, { knownRoleCodes: [] })).toEqual({ ok: true });
+    expect(validateNotificationRuleInput({ ...procurement, channels: ['telegram'] }, { knownRoleCodes: [] }))
+      .toEqual({ ok: false, code: 'UNSUPPORTED_CHANNEL', detail: 'telegram' });
+    expect(validateNotificationRuleInput({ ...procurement, conditions: {} }, { knownRoleCodes: [] }))
+      .toEqual({ ok: false, code: 'PROCUREMENT_CHANGE_TYPES_REQUIRED' });
+    expect(validateNotificationRuleInput({ ...base, conditions: { allocationRoles: ['receipt'] } }, { knownRoleCodes: [] }))
+      .toEqual({ ok: false, code: 'PROCUREMENT_CONDITION_UNSUPPORTED' });
+  });
 });

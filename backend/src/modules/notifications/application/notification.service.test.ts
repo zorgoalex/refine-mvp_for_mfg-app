@@ -36,7 +36,7 @@ describe('NotificationService', () => {
       unreadCount: 0,
     });
     expect(listSpy).toHaveBeenCalledWith({
-      userId: '42',
+      viewer: currentUser('42'),
       unreadOnly: true,
       page: 1,
       pageSize: 50,
@@ -48,11 +48,11 @@ describe('NotificationService', () => {
       async markReadForUser(input) {
         expect(input).toEqual({
           notificationId: '11111111-1111-4111-8111-111111111111',
-          userId: '42',
+          viewer: currentUser('42'),
         });
         return createNotification({
           notificationId: input.notificationId,
-          userId: input.userId,
+          userId: input.viewer.id,
           readAt: '2026-05-23T10:00:00.000Z',
         });
       },
@@ -94,8 +94,8 @@ describe('NotificationService', () => {
 
   it('marks all current-user notifications as read', async () => {
     const repository = createRepository({
-      async markAllReadForUser(userId) {
-        expect(userId).toBe('42');
+      async markAllReadForUser(viewer) {
+        expect(viewer.id).toBe('42');
         return 3;
       },
     });
@@ -111,7 +111,7 @@ describe('NotificationService', () => {
       async deleteForUser(input) {
         expect(input).toEqual({
           notificationId: '11111111-1111-4111-8111-111111111111',
-          userId: '42',
+          viewer: currentUser('42'),
         });
         return true;
       },
@@ -148,7 +148,7 @@ function createRepository(
       return { data: [], total: 0, unreadCount: 0 };
     },
     async markReadForUser(input) {
-      return createNotification({ notificationId: input.notificationId, userId: input.userId });
+      return createNotification({ notificationId: input.notificationId, userId: input.viewer.id });
     },
     async markAllReadForUser() {
       return 0;

@@ -22,8 +22,10 @@ import {
   buildUpdatePayload,
   canManageNotificationRules,
   canViewNotificationRules,
+  creatableEventTypes,
   emptyDraft,
   generateNotificationRuleCode,
+  isProcurementEventType,
   type NotificationRuleDraft,
 } from './notificationRulesView';
 
@@ -38,7 +40,19 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   'order.payment_status_changed': 'Изменение статуса оплаты',
   DEADLINE_EXPIRED: 'Истечение срока',
   GROUP_DEADLINE_OVERDUE: 'Просрочка срока группы',
+  'order.resource_procurement_changed': 'Закуп материала заказа',
 };
+
+const PROCUREMENT_CHANGE_LABELS: Record<string, string> = {
+  marked: 'отмечено «Закуплено»',
+  unmarked: 'снята отметка',
+  allocation_added: 'распределение документа 1С',
+  allocation_removed: 'снятие распределения',
+  allocation_linked: 'привязка к заявке',
+  allocation_unlinked: 'отвязка от заявки',
+};
+
+const ALLOCATION_ROLE_LABELS: Record<string, string> = { receipt: 'приход', payment: 'оплата' };
 
 const TEMPLATE_PLACEHOLDER_LABELS: Record<string, string> = {
   '{orderId}': 'заказ',
@@ -136,6 +150,12 @@ function describeRecipients(
 
 function describeConditions(rule: NotificationRuleDto, orderStatusNameById: ReadonlyMap<number, string>): string {
   const parts: string[] = [];
+  if (rule.conditions.procurementChangeTypes?.length) {
+    parts.push(`закуп: ${rule.conditions.procurementChangeTypes.map((type) => PROCUREMENT_CHANGE_LABELS[type] ?? type).join(', ')}`);
+  }
+  if (rule.conditions.allocationRoles?.length) {
+    parts.push(`документ: ${rule.conditions.allocationRoles.map((role) => ALLOCATION_ROLE_LABELS[role] ?? role).join(', ')}`);
+  }
   if (rule.conditions.deadlineEntityTypes?.length) {
     parts.push(
       `сроки: ${rule.conditions.deadlineEntityTypes
@@ -690,7 +710,7 @@ export function NotificationRulesConfig() {
               value={draft.eventType || undefined}
               onChange={(value) => updateDraft({ eventType: value })}
               disabled={editor.kind === 'edit'}
-              options={eventTypes.map((eventType) => ({
+              options={(editor.kind === 'create' ? creatableEventTypes(eventTypes) : eventTypes).map((eventType) => ({
                 value: eventType.eventType,
                 label: eventTypeLabel(eventType.eventType),
               }))}
@@ -755,7 +775,8 @@ export function NotificationRulesConfig() {
             >
               <Space direction="vertical" size={8}>
                 <Checkbox value="in_app">В приложении</Checkbox>
-                <Checkbox value="telegram">Telegram</Checkbox>
+                {/* Уведомления закупа — только в приложении (бэкенд не сохранит Telegram). */}
+                <Checkbox value="telegram" disabled={isProcurementEventType(draft.eventType)}>Telegram</Checkbox>
               </Space>
             </Checkbox.Group>
           </Form.Item>

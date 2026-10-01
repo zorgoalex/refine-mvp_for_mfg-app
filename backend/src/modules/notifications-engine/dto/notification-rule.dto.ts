@@ -6,7 +6,7 @@ import type {
   NotificationRuleConditions,
   NotificationRuleRecipients,
 } from '../domain/notification-rule.types';
-import { NOTIFICATION_CHANNELS } from '../domain/notification-rule.types';
+import { ALLOCATION_ROLES, NOTIFICATION_CHANNELS, PROCUREMENT_CHANGE_TYPES } from '../domain/notification-rule.types';
 
 /**
  * Structural-only parse result for `recipients`. `resolvers` is kept as
@@ -49,6 +49,8 @@ const conditionsSchema = z
     excludeOrderStatusIds: integerArraySchema.optional(),
     excludeCompletedOrders: z.boolean().optional(),
     requireCurrentDeadlineEvent: z.boolean().optional(),
+    procurementChangeTypes: z.array(z.enum(PROCUREMENT_CHANGE_TYPES)).min(1).max(PROCUREMENT_CHANGE_TYPES.length).optional(),
+    allocationRoles: z.array(z.enum(ALLOCATION_ROLES)).min(1).max(ALLOCATION_ROLES.length).optional(),
   })
   .strict();
 

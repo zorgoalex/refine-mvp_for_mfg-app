@@ -6,7 +6,9 @@ import {
   buildUpdatePayload,
   canManageNotificationRules,
   canViewNotificationRules,
+  creatableEventTypes,
   emptyDraft,
+  isProcurementEventType,
   generateNotificationRuleCode,
   type NotificationRuleDraft,
 } from './notificationRulesView';
@@ -242,4 +244,26 @@ describe('notificationRulesView', () => {
       expect(canViewNotificationRules(undefined)).toBe(false);
     });
   });
+
+  it('keeps procurement conditions the form does not edit, so enabling the rule does not widen it (phase 4b)', () => {
+    const procurementRule: NotificationRuleDto = {
+      ...baseRule,
+      eventType: 'order.resource_procurement_changed',
+      isEnabled: false,
+      channels: ['in_app'],
+      conditions: { procurementChangeTypes: ['allocation_added'], allocationRoles: ['receipt'] },
+    };
+    const draft = buildDraftFromRule(procurementRule);
+    draft.isEnabled = true;
+    expect(buildUpdatePayload(draft, 'включить', procurementRule.updatedAt).conditions)
+      .toEqual({ procurementChangeTypes: ['allocation_added'], allocationRoles: ['receipt'] });
+  });
+
+  it('procurement events cannot be created from the form (no change-type picker) and are recognised for in_app-only (phase 4b CR1-2)', () => {
+    const types = [{ eventType: 'order.status_changed' }, { eventType: 'order.resource_procurement_changed' }];
+    expect(creatableEventTypes(types)).toEqual([{ eventType: 'order.status_changed' }]);
+    expect(isProcurementEventType('order.resource_procurement_changed')).toBe(true);
+    expect(isProcurementEventType('DEADLINE_EXPIRED')).toBe(false);
+  });
 });
+

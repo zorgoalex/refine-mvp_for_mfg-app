@@ -3,6 +3,7 @@ import type {
   DeadlineNotificationEntityType,
   NotificationChannel,
   NotificationLevel,
+  NotificationRuleConditions,
   NotificationRuleDto,
   RecipientResolverKind,
   UpdateNotificationRuleRequest,
@@ -27,6 +28,11 @@ export interface NotificationRuleDraft {
   userIds: number[];
   titleTemplate: string;
   messageTemplate: string;
+  /**
+   * Условия, которые форма не редактирует (закуп: procurementChangeTypes/allocationRoles). Сохраняются как есть:
+   * иначе правка правила (например, включение) стёрла бы их и правило сработало бы на любые изменения (ф.4б).
+   */
+  preservedConditions?: Pick<NotificationRuleConditions, 'procurementChangeTypes' | 'allocationRoles'>;
 }
 
 export function emptyDraft(): NotificationRuleDraft {
@@ -70,6 +76,12 @@ export function buildDraftFromRule(rule: NotificationRuleDto): NotificationRuleD
     userIds: [...(rule.recipients.userIds ?? [])],
     titleTemplate: rule.titleTemplate ?? '',
     messageTemplate: rule.messageTemplate ?? '',
+    ...(rule.conditions.procurementChangeTypes || rule.conditions.allocationRoles ? {
+      preservedConditions: {
+        ...(rule.conditions.procurementChangeTypes ? { procurementChangeTypes: [...rule.conditions.procurementChangeTypes] } : {}),
+        ...(rule.conditions.allocationRoles ? { allocationRoles: [...rule.conditions.allocationRoles] } : {}),
+      },
+    } : {}),
   };
 }
 
@@ -91,13 +103,13 @@ function normalizeTemplate(value: string): string | null {
 }
 
 function buildConditions(draft: Partial<NotificationRuleDraft>) {
-  const conditions: {
-    allowedFromOrderStatusIds?: number[];
-    deadlineEntityTypes?: DeadlineNotificationEntityType[];
-    excludeOrderStatusIds?: number[];
-    excludeCompletedOrders?: boolean;
-    requireCurrentDeadlineEvent?: boolean;
-  } = {};
+  const conditions: NotificationRuleConditions = {};
+  if (draft.preservedConditions?.procurementChangeTypes?.length) {
+    conditions.procurementChangeTypes = [...draft.preservedConditions.procurementChangeTypes];
+  }
+  if (draft.preservedConditions?.allocationRoles?.length) {
+    conditions.allocationRoles = [...draft.preservedConditions.allocationRoles];
+  }
 
   if (draft.deadlineEntityTypes && draft.deadlineEntityTypes.length > 0) {
     conditions.deadlineEntityTypes = [...draft.deadlineEntityTypes];
@@ -208,4 +220,18 @@ function createRuleCodeEntropy(): string {
   }
 
   return Math.random().toString(36).slice(2);
+}
+
+/**
+ * События закупа (ф.4б): правило нельзя создать формой (нет выбора изменений закупа — бэкенд потребует
+ * procurementChangeTypes), только засеянное правило правится/включается; канал — только «в приложении».
+ */
+export const PROCUREMENT_EVENT_TYPES: readonly string[] = ['order.resource_procurement_changed'];
+
+export function isProcurementEventType(eventType: string): boolean {
+  return PROCUREMENT_EVENT_TYPES.includes(eventType);
+}
+
+export function creatableEventTypes<T extends { eventType: string }>(eventTypes: readonly T[]): T[] {
+  return eventTypes.filter((eventType) => !isProcurementEventType(eventType.eventType));
 }

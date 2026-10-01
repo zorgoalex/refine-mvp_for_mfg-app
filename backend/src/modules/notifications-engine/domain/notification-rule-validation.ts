@@ -52,6 +52,10 @@ export function validateNotificationRuleInput(
     if (!(NOTIFICATION_CHANNELS as readonly string[]).includes(channel)) {
       return { ok: false, code: 'UNSUPPORTED_CHANNEL', detail: channel };
     }
+    // События закупа — только in_app (В-4): правило с telegram не сохраняется.
+    if (def.allowedChannels && !def.allowedChannels.includes(channel)) {
+      return { ok: false, code: 'UNSUPPORTED_CHANNEL', detail: channel };
+    }
   }
 
   const { resolvers = [], roleCodes = [], userIds = [] } = input.recipients ?? {};
@@ -80,6 +84,16 @@ export function validateNotificationRuleInput(
     input.conditions.excludeCompletedOrders === true;
   if (usesOrderConditions && !def.supportsOrderConditions) {
     return { ok: false, code: 'ORDER_CONDITION_UNSUPPORTED' };
+  }
+
+  const usesProcurementConditions =
+    input.conditions.procurementChangeTypes !== undefined || input.conditions.allocationRoles !== undefined;
+  if (usesProcurementConditions && !def.supportsProcurementConditions) {
+    return { ok: false, code: 'PROCUREMENT_CONDITION_UNSUPPORTED' };
+  }
+  // Правило закупа без списка изменений сработало бы на всё (отметки, оплаты, отвязки) — так нельзя.
+  if (def.supportsProcurementConditions && (input.conditions.procurementChangeTypes?.length ?? 0) === 0) {
+    return { ok: false, code: 'PROCUREMENT_CHANGE_TYPES_REQUIRED' };
   }
 
   const usesDeadlineConditions = (input.conditions.deadlineEntityTypes?.length ?? 0) > 0;

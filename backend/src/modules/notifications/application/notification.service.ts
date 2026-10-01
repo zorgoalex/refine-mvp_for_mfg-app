@@ -24,7 +24,7 @@ export class NotificationService {
     const page = normalizePage(input.query.page);
     const pageSize = normalizePageSize(input.query.pageSize);
     const result = await this.deps.repository.listForUser({
-      userId: currentUser.id,
+      viewer: currentUser,
       unreadOnly: input.query.unreadOnly,
       page,
       pageSize,
@@ -47,7 +47,7 @@ export class NotificationService {
     const notificationId = parseNotificationId(input.notificationId);
     const notification = await this.deps.repository.markReadForUser({
       notificationId,
-      userId: currentUser.id,
+      viewer: currentUser,
     });
 
     if (!notification) {
@@ -59,7 +59,7 @@ export class NotificationService {
 
   async markAllRead(input: { currentUser: CurrentUser | undefined }) {
     const currentUser = requireCurrentUser(input.currentUser);
-    const updatedCount = await this.deps.repository.markAllReadForUser(currentUser.id);
+    const updatedCount = await this.deps.repository.markAllReadForUser(currentUser);
     return { updatedCount };
   }
 
@@ -71,7 +71,7 @@ export class NotificationService {
     const notificationId = parseNotificationId(input.notificationId);
     const deleted = await this.deps.repository.deleteForUser({
       notificationId,
-      userId: currentUser.id,
+      viewer: currentUser,
     });
 
     if (!deleted) {

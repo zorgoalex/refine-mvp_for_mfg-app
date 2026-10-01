@@ -27197,6 +27197,22 @@ components:
           type: boolean
         requireCurrentDeadlineEvent:
           type: boolean
+        procurementChangeTypes:
+          type: array
+          description: >-
+            Только для order.resource_procurement_changed (там обязательно): изменения закупа, на которые правило
+            срабатывает. Для событий закупа допустим только канал in_app.
+          minItems: 1
+          items:
+            type: string
+            enum: [marked, unmarked, allocation_added, allocation_removed, allocation_linked, allocation_unlinked]
+        allocationRoles:
+          type: array
+          description: Только для событий закупа — роль распределения документа 1С (приход/оплата).
+          minItems: 1
+          items:
+            type: string
+            enum: [receipt, payment]
 
     NotificationRuleRecipients:
       type: object
