@@ -117,6 +117,7 @@ export const apiRoutes = {
     worklist: backendApiPath('/procurement/worklist'),
     savedViews: backendApiPath('/procurement/worklist/saved-views'),
     settings: backendApiPath('/procurement/settings'),
+    history: backendApiPath('/procurement/history'),
     supplierRequests: {
       list: backendApiPath('/procurement/supplier-requests'),
       drafts: backendApiPath('/procurement/supplier-requests/drafts'),

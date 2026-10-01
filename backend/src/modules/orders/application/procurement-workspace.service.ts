@@ -11,6 +11,7 @@ import type {
   ProcurementWorklistResponseDto,
   UpdateProcurementSettingsCommand,
 } from './procurement-workspace.types';
+import type { ProcurementHistoryQuery, ProcurementHistoryResponseDto } from './procurement-history.types';
 
 export interface ProcurementWorkspaceRepositoryPort {
   getSettings(): Promise<ProcurementSettingsDto>;
@@ -24,8 +25,13 @@ export interface ProcurementWorkspaceRepositoryPort {
   replaceSavedViews(currentUser: CurrentUser, views: ProcurementSavedViewDto[]): Promise<ProcurementSavedViewDto[]>;
 }
 
+export interface ProcurementHistoryRepositoryPort {
+  getHistory(query: ProcurementHistoryQuery, options: { canSeeAmounts: boolean }): Promise<ProcurementHistoryResponseDto>;
+}
+
 export interface ProcurementWorkspaceServicePorts {
   repository: ProcurementWorkspaceRepositoryPort;
+  history?: ProcurementHistoryRepositoryPort;
   permissions?: OrderPermissionCheckerPort;
   /** Пул БД для denied-аудита вне транзакции команды. */
   auditClient?: DatabaseClient;
@@ -91,6 +97,13 @@ export class ProcurementWorkspaceService {
   async replaceSavedViews(user: CurrentUser, views: ProcurementSavedViewDto[]): Promise<ProcurementSavedViewDto[]> {
     this.requireView(user);
     return this.ports.repository.replaceSavedViews(user, views);
+  }
+
+  /** История закупа материала заказа (§5.6): procurement.view + scope заказа; суммы — буквально finance.view. */
+  async getHistory(query: ProcurementHistoryQuery): Promise<ProcurementHistoryResponseDto> {
+    this.requireView(query.currentUser);
+    if (!this.ports.history) throw new ApiError(503, 'PROCUREMENT_WORKSPACE_DISABLED', 'История закупа недоступна');
+    return this.ports.history.getHistory(query, { canSeeAmounts: query.currentUser.permissions.includes('finance.view') });
   }
 
   private requireView(user: CurrentUser): void {

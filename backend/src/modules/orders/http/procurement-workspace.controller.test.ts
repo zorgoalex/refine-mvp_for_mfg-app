@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ProcurementWorkspaceService } from '../application/procurement-workspace.service';
-import { savedViewsSchema, settingsSchema, worklistQuerySchema } from './procurement-workspace.controller';
+import { encodeHistoryCursor } from '../domain/procurement-history';
+import { historyQuerySchema, savedViewsSchema, settingsSchema, worklistQuerySchema } from './procurement-workspace.controller';
 
 describe('worklist query parsing', () => {
   it('defaults to «требует действия», без группировки, по сроку', () => {
@@ -82,6 +83,17 @@ describe('ProcurementWorkspaceService permissions', () => {
     await expect(service.getSavedViews(user(['procurement.view']))).resolves.toEqual([]);
   });
 
+  it('history requires procurement.view literally; amounts follow finance.view literally', async () => {
+    const calls: Array<{ canSeeAmounts: boolean }> = [];
+    const history = { getHistory: async (_query: unknown, options: { canSeeAmounts: boolean }) => { calls.push(options); return {} as never; } };
+    const service = new ProcurementWorkspaceService({ repository: repo, history });
+    const query = { orderId: 1, resourceKey: 'film:1', limit: 50, before: null };
+    await expect(service.getHistory({ ...query, currentUser: user(['orders.view', 'finance.view']) })).rejects.toMatchObject({ statusCode: 403 });
+    await service.getHistory({ ...query, currentUser: user(['procurement.view']) });
+    await service.getHistory({ ...query, currentUser: user(['procurement.view', 'finance.view']) });
+    expect(calls).toEqual([{ canSeeAmounts: false }, { canSeeAmounts: true }]);
+  });
+
   it('settings: read with procurement.view or settings.manage, write only with settings.manage + denied audit', async () => {
     const denied: unknown[] = [];
     const auditClient = { query: async (_sql: string, params: unknown[]) => { denied.push(params); return { rows: [], rowCount: 1 }; } };
@@ -98,5 +110,25 @@ describe('ProcurementWorkspaceService permissions', () => {
       currentUser: user(['settings.manage']), requestId: 'r2', expectedVersion: 1,
       settings: { leadDays: 2, criticalDays: 3, soonDays: 7, wastePercent: 5, digestTime: '08:30', unallocatedAlertDays: 2, overdueWindowDays: 30 },
     })).resolves.toMatchObject({ changed: true });
+  });
+});
+
+describe('history query parsing (4a)', () => {
+  it('requires an order and a material key; limit defaults to 50 and is capped at 200', () => {
+    expect(historyQuerySchema.parse({ orderId: '11631', resourceKey: 'sheet_material:8' }))
+      .toEqual({ orderId: 11631, resourceKey: 'sheet_material:8', limit: 50, before: null });
+    expect(historyQuerySchema.safeParse({ orderId: '1', resourceKey: 'film:1', limit: '201' }).success).toBe(false);
+    expect(historyQuerySchema.safeParse({ resourceKey: 'film:1' }).success).toBe(false);
+    expect(historyQuerySchema.safeParse({ orderId: '1', resourceKey: 'material:1' }).success).toBe(false);
+    expect(historyQuerySchema.safeParse({ orderId: '1', resourceKey: 'film:1', extra: '1' }).success).toBe(false);
+  });
+
+  it('decodes the cursor and rejects a broken one', () => {
+    const before = encodeHistoryCursor('2026-10-01T10:00:00.123456Z', '187cb766-908e-4751-ae24-6a99cdc0aa56');
+    expect(historyQuerySchema.parse({ orderId: '1', resourceKey: 'film:1', before }).before)
+      .toEqual({ at: '2026-10-01T10:00:00.123456Z', id: '187cb766-908e-4751-ae24-6a99cdc0aa56' });
+    expect(historyQuerySchema.safeParse({ orderId: '1', resourceKey: 'film:1', before: 'xx' }).success).toBe(false);
+    const dashes = encodeHistoryCursor('2026-10-01T10:00:00.123456Z', '-'.repeat(36));
+    expect(historyQuerySchema.safeParse({ orderId: '1', resourceKey: 'film:1', before: dashes }).success).toBe(false);
   });
 });

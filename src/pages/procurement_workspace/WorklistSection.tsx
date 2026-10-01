@@ -1,4 +1,4 @@
-import { DeleteOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
+import { DeleteOutlined, HistoryOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
 import { Alert, Button, DatePicker, Empty, Input, Modal, Select, Space, Tag, message } from 'antd';
 import dayjs from 'dayjs';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -14,6 +14,7 @@ import type {
   WorklistPreset,
 } from '../../api/types/procurementWorkspaceApi.types';
 import type { UserIdentity } from '../../types/auth';
+import { HistoryDrawer, type HistoryDrawerLine } from './HistoryDrawer';
 import { Segmented } from '../../ui/Segmented';
 import { Table, Tooltip, type TableProps } from '../../ui/tooltipDelay';
 import { useProcurementPermission } from '../order_resource_requirements/ProcurementParts';
@@ -239,7 +240,13 @@ export function WorklistSection({ active, onUrgentCount, onCapabilities }: Workl
   }, [active, displayKeys, focusIndex]);
   const focusedKey = displayKeys[focusIndex] ?? null;
 
-  const columns = useWorklistColumns(response?.today ?? null);
+  // «История» (этап 4a): отдельная строка открывает Drawer; смена строки до закрытия — новый экземпляр (key).
+  const [historyLine, setHistoryLine] = useState<HistoryDrawerLine | null>(null);
+  const openHistory = useCallback((line: ProcurementWorklistLine) => {
+    setHistoryLine({ orderId: line.orderId, resourceKey: line.resourceKey, name: line.name, fullNumber: line.fullNumber });
+  }, []);
+
+  const columns = useWorklistColumns(response?.today ?? null, openHistory);
   // Изменения выделения приходят порциями (строка, страница, диапазон Shift) — применяем только их,
   // строки других групп/страниц сохраняются (CR1-6). Пока список не совпадает с фильтрами — выделять нельзя.
   const rowSelection: TableProps<ProcurementWorklistLine>['rowSelection'] = {
@@ -442,6 +449,8 @@ export function WorklistSection({ active, onUrgentCount, onCapabilities }: Workl
           <Button onClick={() => setSelected(new Set())}>Снять выделение</Button>
         </div>
       )}
+
+      <HistoryDrawer line={historyLine} onClose={() => setHistoryLine(null)} />
     </div>
   );
 }
@@ -480,7 +489,10 @@ function summarizeDeficit(lines: ProcurementWorklistLine[]): string {
   return [m2 ? formatQuantity(m2, 'm2') : '', lm ? formatQuantity(lm, 'lm') : ''].filter(Boolean).join(' + ') || '0';
 }
 
-function useWorklistColumns(today: string | null): TableProps<ProcurementWorklistLine>['columns'] {
+function useWorklistColumns(
+  today: string | null,
+  onHistory: (line: ProcurementWorklistLine) => void,
+): TableProps<ProcurementWorklistLine>['columns'] {
   return useMemo(() => [
     {
       title: 'Нужно к',
@@ -579,8 +591,24 @@ function useWorklistColumns(today: string | null): TableProps<ProcurementWorklis
         </span>
       ),
     },
+    {
+      title: '',
+      key: 'history',
+      width: 44,
+      render: (_value, line) => (
+        <Tooltip title="История">
+          <Button
+            size="small"
+            type="text"
+            icon={<HistoryOutlined />}
+            aria-label={`История ${line.name} по заказу ${line.fullNumber}`}
+            onClick={(event) => { event.stopPropagation(); onHistory(line); }}
+          />
+        </Tooltip>
+      ),
+    },
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [today]);
+  ], [today, onHistory]);
 }
 
 function SavedViews({ state, onApply, active }: { state: WorklistState; onApply: (state: WorklistState) => void; active: boolean }) {

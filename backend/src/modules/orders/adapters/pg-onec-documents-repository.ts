@@ -334,6 +334,7 @@ export class PgOnecDocumentsRepository {
         resourceKey: command.resourceKey, kind: key.kind, refId: key.refId,
         procurementId, allocationId, documentId: Number(line.onec_document_id), lineId: command.lineId,
         role, quantity: role === 'receipt' ? measure : null, amount: role === 'payment' ? measure : null,
+        currency: role === 'payment' ? line.doc_currency ?? null : null,
         before, after: procurementSnapshot(afterRow), version: Number(afterRow.version),
       });
       // Последним шагом, после всех блокировок (план §4.3, R5-2): первый записанный поставщик не затирается.
@@ -622,6 +623,7 @@ export class PgOnecDocumentsRepository {
         documentId: Number(line.onec_document_id), lineId: command.lineId, role: allocation.role,
         quantity: allocation.quantity === null ? null : Number(allocation.quantity),
         amount: allocation.amount === null ? null : Number(allocation.amount),
+        currency: allocation.role === 'payment' ? line.doc_currency ?? null : null,
         before, after: procurementSnapshot(afterRow), version: Number(afterRow.version),
         removedRequestLinks: removedLinks,
       });
@@ -1015,6 +1017,8 @@ export async function writeAllocationEvent(tx: DatabaseClient, input: {
   role: OnecAllocationRole;
   quantity: number | null;
   amount: number | null;
+  /** Валюта документа на момент операции (оплата) — снимок для истории: загрузчик может сменить её после снятия (4а CR1-1). */
+  currency?: string | null;
   before: Record<string, unknown> | null;
   after: Record<string, unknown>;
   version: number;
@@ -1052,6 +1056,7 @@ export async function writeAllocationEvent(tx: DatabaseClient, input: {
       role: input.role,
       quantity: input.quantity,
       amount: input.amount,
+      ...(input.role === 'payment' && input.currency ? { currency: input.currency } : {}),
       correlationId: input.requestId,
       ...(input.batchRequestId ? { batchRequestId: input.batchRequestId, allocationOrigin: input.origin, commandSource: input.source } : {}),
       ...(input.requestLinks && input.requestLinks.length > 0 ? { requestLinks: input.requestLinks } : {}),

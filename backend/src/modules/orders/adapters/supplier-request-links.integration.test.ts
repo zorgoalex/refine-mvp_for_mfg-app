@@ -9,6 +9,7 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import type { BatchOnecAllocationItem } from '../application/onec-documents.types';
 import { addDays, todayInAlmaty } from '../domain/procurement-worklist';
 import { PgOnecDocumentsRepository } from './pg-onec-documents-repository';
+import { PgProcurementHistoryRepository } from './pg-procurement-history-repository';
 import { PgProcurementWorkspaceRepository } from './pg-procurement-workspace-repository';
 import { PgRequestLinksRepository } from './pg-request-links-repository';
 import { PgSupplierRequestsRepository } from './pg-supplier-requests-repository';
@@ -49,6 +50,7 @@ describe.skipIf(!url)('Supplier request links (phase 3b) — real PostgreSQL', {
   let docs: PgOnecDocumentsRepository;
   let workspace: PgProcurementWorkspaceRepository;
   let links: PgRequestLinksRepository;
+  let history: PgProcurementHistoryRepository;
   const tag = 'E2E-Тест-СЗ-' + randomUUID().slice(0, 8);
   const today = todayInAlmaty();
   let admin: CurrentUser;
@@ -138,6 +140,7 @@ describe.skipIf(!url)('Supplier request links (phase 3b) — real PostgreSQL', {
     docs = new PgOnecDocumentsRepository(db);
     workspace = new PgProcurementWorkspaceRepository(db);
     links = new PgRequestLinksRepository(db);
+    history = new PgProcurementHistoryRepository(db);
     const adminId = Number((await conn.query(
       `INSERT INTO users (username, email, password_hash, role_id) VALUES ($1, $2, 'E2E-NO-LOGIN', 1) RETURNING user_id`,
       [`${tag}-admin`, `${tag}-admin@example.invalid`])).rows[0].user_id);
@@ -561,4 +564,82 @@ describe.skipIf(!url)('Supplier request links (phase 3b) — real PostgreSQL', {
       .rejects.toMatchObject({ statusCode: 404 });
   });
 
+  it('4a: the history of an order material lists marks, allocations, links and requests; amounts only with finance.view; scope and paging', async () => {
+    const order = await makeOrder(16, Math.round(materialArea * 1000));
+    const other = await makeOrder(17, Math.round(materialArea * 1000));
+    const card = await sentRequest([order, other]);
+    const lineOrder = card.lineItems[0].orders.find((entry) => entry.orderId === order)!;
+    const doc = await receipt(1, supplierId);
+    const allocation = await allocate(doc, order);
+    const linked = await links.link({ currentUser: admin, requestId: randomUUID(), documentId: doc.documentId, lineId: doc.lineId,
+      allocationId: Number(allocation.allocation_id), lineOrderId: lineOrder.lineOrderId, quantity: 0.5, expectedVersion: Number(allocation.version) });
+    const pay = await payment(5000, supplierId);
+    await payOrder(pay, order, 1200);
+    const query = { orderId: order, resourceKey: key(), limit: 50, before: null };
+    const plain = await history.getHistory({ ...query, currentUser: admin }, { canSeeAmounts: false });
+    expect(plain.current).toMatchObject({ purchased: true, origin: 'onec' });
+    // Правка поставщика в sentRequest может дать request_updated — порядок остальных фиксирован.
+    const events = plain.events.filter((event) => event.kind !== 'request_updated');
+    expect(events.map((event) => event.kind)).toEqual(['allocation_added', 'allocation_linked', 'allocation_added', 'request_sent', 'request_created']);
+    const [paymentEvent, linkEvent, receiptEvent, sent, created] = events;
+    expect(paymentEvent).toMatchObject({ role: 'payment', amount: null, currency: null, document: { documentId: pay.documentId } });
+    expect(linkEvent).toMatchObject({ role: 'receipt', quantity: 0.5, unit: 'sheet', request: { supplierRequestId: card.requestId } });
+    expect(linked.linkId).toBeGreaterThan(0);
+    expect(receiptEvent).toMatchObject({ role: 'receipt', quantity: 1, unit: 'sheet', markedPurchased: true, document: { documentId: doc.documentId } });
+    expect(sent).toMatchObject({ request: { supplierRequestId: card.requestId, number: card.requestNumber }, quantity: lineOrder.quantity });
+    expect(created.quantity).toBe(lineOrder.quantity);
+    // Ни одного другого заказа заявки в ответе.
+    expect(JSON.stringify(plain)).not.toContain(`"orderId":${other}`);
+    const withAmounts = await history.getHistory({ ...query, currentUser: finance }, { canSeeAmounts: true });
+    expect(withAmounts.events[0]).toMatchObject({ amount: 1200, currency: 'KZT' });
+    // Страницы: курсор продолжает строго после последнего события, без повторов.
+    const first = await history.getHistory({ ...query, limit: 2, currentUser: admin }, { canSeeAmounts: false });
+    expect(first.events).toHaveLength(2);
+    const { decodeHistoryCursor } = await import('../domain/procurement-history');
+    const second = await history.getHistory({ ...query, limit: 50, before: decodeHistoryCursor(first.nextCursor!), currentUser: admin }, { canSeeAmounts: false });
+    expect([...first.events, ...second.events].map((event) => event.id)).toEqual(plain.events.map((event) => event.id));
+    expect(second.nextCursor).toBeNull();
+    // Другой материал того же заказа — пусто; заказ вне scope менеджера — 404.
+    expect((await history.getHistory({ ...query, resourceKey: 'film:1', currentUser: admin }, { canSeeAmounts: false })).events).toEqual([]);
+    const manager: CurrentUser = { ...admin, id: '999999998', username: `${tag}-manager`, role: 'manager', roleId: 10 };
+    await expect(history.getHistory({ ...query, currentUser: manager }, { canSeeAmounts: false })).rejects.toMatchObject({ statusCode: 404 });
+    await expect(history.getHistory({ ...query, resourceKey: 'bad', currentUser: admin }, { canSeeAmounts: false })).rejects.toMatchObject({ statusCode: 422 });
+  });
+
+  it('4a R1: batch links and links removed with an allocation are in the history; a payment keeps the currency of its time', async () => {
+    const order = await makeOrder(18, Math.round(materialArea * 1000));
+    const card = await sentRequest([order]);
+    const doc = await receipt(5, supplierId);
+    // Элемент batch собран вручную: подбор мог отдать приход заказам прежних сценариев (общий материал прогона).
+    const suggestions = await workspace.allocationSuggestions(admin, doc.documentId, { supplierRequestsEnabled: true });
+    const docLine = suggestions.lines[0];
+    const worklist = await worklistLine(order);
+    const ordered = card.lineItems[0].orders[0].quantity;
+    const body: BatchOnecAllocationItem[] = [{
+      lineId: doc.lineId, orderId: order, resourceKey: key(), quantity: ordered,
+      expectedVersion: worklist.procurementVersion, expectedDemandFingerprint: worklist.demandFingerprint,
+      expectedDocUnit: docLine.docUnit, expectedSheetAreaM2: docLine.sheetAreaM2,
+      requestLinks: [{ lineOrderId: card.lineItems[0].orders[0].lineOrderId, quantity: ordered }],
+    }];
+    await docs.addAllocationsBatch({ currentUser: admin, documentId: doc.documentId, requestId: randomUUID(), origin: 'suggested', items: body });
+    const allocation = (await conn.query(
+      `SELECT a.allocation_id, orp.version FROM order_resource_onec_allocations a JOIN order_resource_procurement orp USING (order_resource_procurement_id)
+        WHERE a.onec_document_line_id = $1 AND orp.order_id = $2 AND a.removed_at IS NULL`, [doc.lineId, order])).rows[0];
+    await docs.removeAllocation({ currentUser: admin, requestId: randomUUID(), documentId: doc.documentId, lineId: doc.lineId,
+      allocationId: Number(allocation.allocation_id), expectedVersion: Number(allocation.version) });
+    // Оплата 1200 KZT: распределили, сняли, загрузчик сменил валюту на USD — история остаётся в KZT.
+    const pay = await payment(5000, supplierId);
+    const paid = await payOrder(pay, order, 1200);
+    await docs.removeAllocation({ currentUser: finance, requestId: randomUUID(), documentId: pay.documentId, lineId: pay.lineId,
+      allocationId: Number(paid.allocation_id), expectedVersion: Number(paid.version) });
+    await conn.query(`UPDATE onec_documents SET currency = 'USD' WHERE onec_document_id = $1`, [pay.documentId]);
+    const result = await history.getHistory({ orderId: order, resourceKey: key(), limit: 50, before: null, currentUser: finance }, { canSeeAmounts: true });
+    const [payRemoved, payAdded, removed, added] = result.events.filter((event) => event.kind === 'allocation_added' || event.kind === 'allocation_removed');
+    expect(payRemoved).toMatchObject({ kind: 'allocation_removed', role: 'payment', amount: 1200, currency: 'KZT' });
+    expect(payAdded).toMatchObject({ kind: 'allocation_added', role: 'payment', amount: 1200, currency: 'KZT' });
+    const link = { supplierRequestId: card.requestId, number: card.requestNumber, quantity: ordered, unit: 'sheet' };
+    expect(added).toMatchObject({ kind: 'allocation_added', role: 'receipt', requestLinks: [{ action: 'linked', ...link }] });
+    expect(removed).toMatchObject({ kind: 'allocation_removed', role: 'receipt', requestLinks: [{ action: 'unlinked', ...link }] });
+    await conn.query(`UPDATE onec_documents SET currency = 'KZT' WHERE onec_document_id = $1`, [pay.documentId]);
+  });
 });

@@ -1,6 +1,7 @@
 import { apiRoutes } from './apiRoutes';
 import { httpClient } from './httpClient';
 import { withQuery } from './ordersApi';
+import type { ProcurementHistoryParams, ProcurementHistoryResponse } from './types/procurementHistoryApi.types';
 import type {
   ProcurementSavedView,
   ProcurementSettings,
@@ -12,6 +13,10 @@ import type {
 export const procurementWorkspaceApi = {
   worklist(params: ProcurementWorklistParams, options?: { signal?: AbortSignal }): Promise<ProcurementWorklistResponse> {
     return httpClient.get<ProcurementWorklistResponse>(withQuery(apiRoutes.procurement.worklist, params), options);
+  },
+
+  history(params: ProcurementHistoryParams, options?: { signal?: AbortSignal }): Promise<ProcurementHistoryResponse> {
+    return httpClient.get<ProcurementHistoryResponse>(withQuery(apiRoutes.procurement.history, params), options);
   },
 
   async savedViews(): Promise<ProcurementSavedView[]> {

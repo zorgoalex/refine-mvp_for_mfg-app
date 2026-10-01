@@ -11,6 +11,12 @@ import {
   type ProcurementWorklistQuery,
   type ProcurementWorklistResponseDto,
 } from '../application/procurement-workspace.types';
+import {
+  PROCUREMENT_HISTORY_DEFAULT_LIMIT,
+  PROCUREMENT_HISTORY_MAX_LIMIT,
+  type ProcurementHistoryResponseDto,
+} from '../application/procurement-history.types';
+import { decodeHistoryCursor } from '../domain/procurement-history';
 import { withScale } from './onec-documents.controller';
 import { OrdersRuntimeConfigService } from './orders-runtime-config.service';
 
@@ -58,6 +64,21 @@ export const settingsSchema = z.object({
   message: '«Критично» не может быть больше «Скоро»', path: ['criticalDays'],
 });
 
+export const historyQuerySchema = z.object({
+  orderId: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  resourceKey: z.string().regex(/^(sheet_material|film):[1-9][0-9]{0,17}$/),
+  limit: z.coerce.number().int().min(1).max(PROCUREMENT_HISTORY_MAX_LIMIT).default(PROCUREMENT_HISTORY_DEFAULT_LIMIT),
+  before: z.string().max(200).optional().transform((value, ctx) => {
+    if (value === undefined) return null;
+    const cursor = decodeHistoryCursor(value);
+    if (!cursor) {
+      ctx.addIssue({ code: 'custom', message: 'некорректный курсор' });
+      return z.NEVER;
+    }
+    return cursor;
+  }),
+}).strict();
+
 export const savedViewsSchema = z.object({
   views: z.array(z.object({
     id: z.string().uuid(),
@@ -91,6 +112,19 @@ export class ProcurementWorkspaceController {
       supplyWorkspaceEnabled: true,
       supplierRequestsEnabled: this.runtimeConfig.getFeatureFlags().supplierRequestsEnabled === true,
     });
+  }
+
+  @ApiResponse({ status: 200, description: 'Procurement history of one order material: marks, 1C allocations, request links and supplier requests (newest first)' })
+  @ApiResponse({ status: 403, description: 'procurement.view required' })
+  @ApiResponse({ status: 404, description: 'Order not found or outside the user scope' })
+  @ApiResponse({ status: 422, description: 'Invalid query or cursor' })
+  @ApiResponse({ status: 503, description: 'Orders API, procurement or the workspace is disabled' })
+  @ApiOperation({ operationId: 'getProcurementHistory', summary: 'Procurement history of an order material' })
+  @Get('history')
+  async history(@Req() request: RequestWithCurrentUser, @Query() rawQuery: unknown): Promise<ProcurementHistoryResponseDto> {
+    const user = this.requireWorkspace(request, false);
+    const query = parse(historyQuerySchema, rawQuery, 'PROCUREMENT_HISTORY_QUERY_INVALID');
+    return this.workspace.getHistory({ ...query, currentUser: user });
   }
 
   @ApiResponse({ status: 200, description: 'Saved worklist views of the current user' })

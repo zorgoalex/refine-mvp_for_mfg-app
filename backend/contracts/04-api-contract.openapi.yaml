@@ -4197,6 +4197,44 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/history:
+    get:
+      tags:
+        - Orders
+      operationId: getProcurementHistory
+      summary: История закупа материала заказа
+      description: >-
+        События журнала аудита по заказу × материалу, новые сверху: отметки «Закуплено», распределения приходов и
+        оплат 1С, привязки к заявкам поставщикам, создание/правка/отправка/закрытие/отмена заявок (количество —
+        только этого заказа, другие заказы заявки не раскрываются). Сумма и валюта оплаты — только с finance.view.
+        current — текущая потребность и отметка, changedSinceMark — потребность изменилась после отметки
+        (было quantityAtMark). Заказ — в scope orders.view, не в корзине, иначе 404. Требует
+        BACKEND_RESOURCE_PROCUREMENT_ENABLED и BACKEND_PROCUREMENT_WORKSPACE_ENABLED, иначе 503.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      parameters:
+        - { name: orderId, in: query, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: resourceKey, in: query, required: true, schema: { type: string, pattern: '^(sheet_material|film):[1-9][0-9]{0,17}$' } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: before, in: query, required: false, description: Курсор nextCursor предыдущей страницы, schema: { type: string, maxLength: 200 } }
+      responses:
+        '200':
+          description: current, events[], nextCursor
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Заказ не найден или вне scope
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          description: Экран снабжения выключен
   /api/v1/procurement/worklist:
     get:
       tags:
