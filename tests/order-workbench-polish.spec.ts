@@ -44,36 +44,58 @@ test.describe('Workbench orders polish', () => {
         expect(pageErrors).toEqual([]);
     });
 
-    test('order card: «Ход производства» is a collapsed spoiler next to the original sections', async ({ page }) => {
+    test('order card follows the NewLine layout and keeps every section and action', async ({ page }) => {
         const pageErrors = await openWithVariant(page, 'workbench');
 
         await page.goto('/orders/show/15', { waitUntil: 'domcontentloaded' });
         const tabs = page.getByRole('tablist', { name: 'Секции заказа' });
         await expect(tabs).toBeVisible({ timeout: 60000 });
 
-        for (const name of ['Ход производства', ...ORIGINAL_SECTIONS]) {
-            await expect(tabs.getByRole('tab', { name })).toHaveAttribute('aria-selected', 'false');
-        }
-        await expect(page.locator('.order-show-info-panel')).toHaveCount(0);
-        await expect(page.locator('.order-production-flow')).toHaveCount(0);
-
-        // шапка «NewLine» несёт те же сведения, что прежняя сводка
+        // шапка страницы: заголовок, статусы, клиент, действия
         const head = page.locator('.wb-order-head');
-        await expect(head.locator('.wb-order-head__number')).toHaveText('Тест-2972');
+        await expect(head.locator('h1')).toHaveText('Заказ Тест-2972');
         await expect(head.locator('.wb-pill').first()).toHaveText('В производстве');
-        for (const label of ['Сумма', 'Оплачено', 'Срок выполнения', 'Производство', 'Состав', 'Материал', 'Примечание']) {
+        await expect(head.locator('.wb-pill').nth(1)).toHaveText('Частично оплачен');
+        await expect(head.locator('.wb-order-head__client')).toHaveText('Базовый клиент');
+        const actions = head.locator('.wb-order-head__actions');
+        await expect(actions.getByRole('button', { name: 'Добавить платёж' })).toBeVisible();
+        await expect(actions.getByRole('button', { name: 'Изменить' })).toBeVisible();
+        await actions.getByRole('button', { name: /Печать/ }).click();
+        for (const item of ['Печать', 'Экспорт в Excel', 'PDF для производства', 'Excel для производства', 'JSON snapshot']) {
+            await expect(page.getByRole('menuitem', { name: item })).toBeVisible();
+        }
+        await page.keyboard.press('Escape');
+        await actions.getByRole('button', { name: 'Ещё действия' }).click();
+        await expect(page.getByRole('menuitem', { name: 'Обновить' })).toBeVisible();
+        await page.keyboard.press('Escape');
+
+        // плитки показателей
+        for (const label of ['Сумма', 'Оплачено', 'Срок выполнения', 'Состав', 'Материал']) {
             await expect(head.locator('.wb-order-head__label', { hasText: label })).toBeVisible();
         }
         await expect(head).toContainText('скидка');
         await expect(head).toContainText('остаток');
-        await expect(head).toContainText('Фасады кухни, срочно к пятнице');
-        for (const name of ['Изменить', 'Обновить', 'Печать']) {
-            await expect(page.getByRole('button', { name }).first()).toBeVisible();
-        }
+
+        // вкладки: «Детали» + прежние пять секций; открыта таблица деталей
+        await expect(tabs.getByRole('tab')).toHaveText([/Детали/, ...ORIGINAL_SECTIONS.map((name) => new RegExp(name))]);
+        await expect(tabs.getByRole('tab', { name: /Детали/ })).toHaveAttribute('aria-selected', 'true');
         await expect(page.locator('.order-show-details-table')).toBeVisible();
+        await expect(page.locator('.order-show-info-panel')).toHaveCount(0);
+
+        // «Ход производства» — спойлер, по умолчанию свёрнут
+        const flowToggle = page.getByRole('button', { name: /Ход производства/ });
+        await expect(flowToggle).toHaveAttribute('aria-expanded', 'false');
+        await expect(page.locator('.order-production-flow')).toHaveCount(0);
+
+        // правая колонка
+        const side = page.locator('.wb-order-side');
+        for (const title of ['Клиент', 'Сроки', 'Связи', 'Примечание']) {
+            await expect(side.getByRole('heading', { name: title })).toBeVisible();
+        }
+        await expect(side).toContainText('Фасады кухни, срочно к пятнице');
         await shot(page, 'order-card');
 
-        await tabs.getByRole('tab', { name: 'Ход производства' }).click();
+        await flowToggle.click();
         const flow = page.locator('.order-production-flow');
         await expect(flow).toBeVisible();
         await expect(flow.locator('.order-production-flow__stage', { hasText: 'Распилен' })).toContainText('2 поз. · 5 шт.');
@@ -81,14 +103,43 @@ test.describe('Workbench orders polish', () => {
         await expect(flow.locator('.order-production-flow__stage', { hasText: 'Упакован' })).toHaveAttribute('data-empty', 'true');
         await expect(flow).toContainText('Всего 3 поз. · 6 шт.');
         await shot(page, 'order-card-flow');
-
-        await tabs.getByRole('tab', { name: 'Ход производства' }).click();
+        await flowToggle.click();
         await expect(flow).toHaveCount(0);
 
+        // секция заменяет таблицу деталей, «Детали» возвращает её
         await tabs.getByRole('tab', { name: 'Финансы' }).click();
         await expect(page.locator('.order-show-info-panel')).toBeVisible();
+        await expect(page.locator('.order-show-details-table')).toBeHidden();
         await shot(page, 'order-card-finance');
+        await tabs.getByRole('tab', { name: /Детали/ }).click();
+        await expect(page.locator('.order-show-info-panel')).toHaveCount(0);
+        await expect(page.locator('.order-show-details-table')).toBeVisible();
         expect(pageErrors).toEqual([]);
+    });
+
+    test('compact bar replaces the head while scrolling and stays below the app chrome', async ({ page }) => {
+        await page.setViewportSize({ width: 1440, height: 520 });
+        await openWithVariant(page, 'workbench');
+
+        await page.goto('/orders/show/15', { waitUntil: 'domcontentloaded' });
+        await expect(page.locator('.wb-order-head h1')).toBeVisible({ timeout: 60000 });
+        const slot = page.locator('.wb-order-bar-slot');
+        await expect(slot).toHaveAttribute('data-on', 'false');
+
+        await page.locator('.order-show-details-table').scrollIntoViewIfNeeded();
+        await page.mouse.wheel(0, 500);
+        await expect(slot).toHaveAttribute('data-on', 'true');
+        const metrics = await page.evaluate(() => {
+            const bar = document.querySelector('.wb-order-bar')!.getBoundingClientRect();
+            const tabs = document.querySelector('.workspace-tabs')!.getBoundingClientRect();
+            return { barTop: Math.round(bar.top), barBottom: Math.round(bar.bottom), chromeBottom: Math.round(tabs.bottom) };
+        });
+        expect(metrics.barTop).toBeGreaterThanOrEqual(metrics.chromeBottom - 1);
+        expect(metrics.barTop).toBeLessThanOrEqual(metrics.chromeBottom + 2);
+        const bar = page.locator('.wb-order-bar');
+        await expect(bar).toContainText('Заказ Тест-2972');
+        await expect(bar.getByRole('button', { name: 'Изменить' })).toBeVisible();
+        await shot(page, 'order-card-scrolled');
     });
 
     test('dark theme keeps the card readable', async ({ page }) => {
@@ -98,7 +149,7 @@ test.describe('Workbench orders polish', () => {
         const tabs = page.getByRole('tablist', { name: 'Секции заказа' });
         await expect(tabs).toBeVisible({ timeout: 60000 });
         await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-        await tabs.getByRole('tab', { name: 'Ход производства' }).click();
+        await page.getByRole('button', { name: /Ход производства/ }).click();
         await expect(page.locator('.order-production-flow')).toBeVisible();
         await shot(page, 'order-card-dark');
 

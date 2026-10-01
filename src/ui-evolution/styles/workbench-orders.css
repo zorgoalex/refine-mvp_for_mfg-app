@@ -243,17 +243,237 @@
 
 /* ================= Карточка заказа ================= */
 
-/* шапка: строка заказа, строка клиента, плитки показателей, примечание */
-:root[data-ui-variant="workbench"] .wb-order-head {
-  margin-bottom: 14px;
+/* --- каркас страницы: свои крошки и шапка, стандартная шапка Refine скрыта --- */
+:root[data-ui-variant="workbench"] .ant-card:has(> .ant-card-body .order-show-page--workbench) {
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .ant-card:has(> .ant-card-body .order-show-page--workbench) > .ant-card-body {
+  padding: 0;
+}
+
+:root[data-ui-variant="workbench"] .evolution-screen-frame:has(.order-show-page--workbench) .ant-page-header-heading,
+:root[data-ui-variant="workbench"] .evolution-screen-frame:has(.order-show-page--workbench) .ant-page-header > .ant-breadcrumb {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .evolution-screen-frame:has(.order-show-page--workbench) .ant-page-header {
+  padding: 0;
+}
+
+:root[data-ui-variant="workbench"] .evolution-screen-frame:has(.order-show-page--workbench) .ant-page-header-content {
+  padding-top: 0;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench {
   display: grid;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  /* строки 1–9 — по содержимому; высоту правой колонки забирает последняя */
+  grid-template-rows: repeat(9, auto) 1fr;
+  column-gap: 16px;
+  align-items: start;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > * {
+  grid-column: 1;
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .order-show-sticky-sentinel {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-bar-slot {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-crumbs {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+
+/* обёртка прежней «липкой» стопки растворена: её части — отдельные строки сетки */
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .order-show-summary-tabs-sticky {
+  display: contents;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-summary-tabs-sticky > .order-show-header {
+  grid-column: 1 / -1;
+  grid-row: 3;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-flow {
+  grid-row: 4;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .ant-card {
+  grid-row: 5;
+  margin-bottom: 16px !important;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-summary-tabs-sticky > .order-show-tabs-shell {
+  grid-column: 1;
+  grid-row: 6;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-summary-tabs-sticky > .order-show-details-toolbar {
+  grid-column: 1;
+  grid-row: 7;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .order-show-info-panel {
+  grid-row: 8;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .order-show-details-section {
+  grid-row: 9;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-side {
+  grid-column: 2;
+  grid-row: 4 / 11;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* колонка «прилипает» только на высоком экране, иначе её низ был бы недоступен */
+@media (min-width: 1241px) and (min-height: 880px) {
+  :root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-side {
+    position: sticky;
+    top: calc(var(--wb-order-sticky-top) + var(--wb-order-bar-height) + 12px);
+  }
+}
+
+@media (max-width: 1240px) {
+  :root[data-ui-variant="workbench"] .order-show-page--workbench {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-side {
+    grid-column: 1;
+    grid-row: 11;
+    position: static;
+    margin-top: 16px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  :root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-side {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+:root[data-ui-variant="workbench"] .wb-panel {
+  border-radius: var(--evo-radius-lg);
+  background: var(--evo-surface);
+  box-shadow: var(--evo-shadow);
+}
+
+/* --- крошки --- */
+:root[data-ui-variant="workbench"] .wb-order-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 10px;
+  color: var(--evo-text-secondary);
+  font-size: 13px;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-crumbs a {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-order-crumbs a:hover {
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-order-crumbs .anticon {
+  font-size: 10px;
+  color: var(--evo-border-strong);
+}
+
+/* --- сжатая шапка: появляется, когда основная ушла под верхнюю панель --- */
+:root[data-ui-variant="workbench"] .wb-order-bar-slot {
+  position: sticky;
+  top: var(--wb-order-sticky-top);
+  z-index: 20;
+  height: 0;
+  margin: 0 -24px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-6px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-bar-slot[data-on="true"] {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-bar {
+  height: var(--wb-order-bar-height);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--evo-border);
+  background: color-mix(in srgb, var(--evo-canvas) 92%, transparent);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-bar__title {
+  font-size: 16px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-bar__meta {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--evo-text-secondary);
+  font-size: 13.5px;
+  text-overflow: ellipsis;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-bar__spacer {
+  flex: 1 1 auto;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-bar .ant-btn {
+  height: 30px;
+  padding-inline: 12px;
+  font-size: 13px;
+}
+
+/* --- шапка страницы --- */
+:root[data-ui-variant="workbench"] .wb-order-head {
+  margin-bottom: 16px;
+  display: grid;
+  gap: 14px;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px 24px;
+  flex-wrap: wrap;
 }
 
 :root[data-ui-variant="workbench"] .wb-order-head__identity {
   display: grid;
   gap: 6px;
   min-width: 0;
+  flex: 1 1 420px;
 }
 
 :root[data-ui-variant="workbench"] .wb-order-head__title {
@@ -264,17 +484,18 @@
 }
 
 :root[data-ui-variant="workbench"] .wb-order-head__number {
+  margin: 0;
   color: var(--evo-text);
   font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.01em;
-  line-height: 1.2;
+  line-height: 1.25;
   font-variant-numeric: tabular-nums;
 }
 
 :root[data-ui-variant="workbench"] .wb-pill--lg {
   padding: 3px 11px 3px 22px;
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 20px;
 }
 
@@ -294,11 +515,11 @@
 :root[data-ui-variant="workbench"] .wb-order-head__meta {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: 4px 0;
   min-width: 0;
   color: var(--evo-text-secondary);
-  font-size: 13px;
+  font-size: 13.5px;
 }
 
 :root[data-ui-variant="workbench"] .wb-order-head__client {
@@ -316,8 +537,23 @@
 
 :root[data-ui-variant="workbench"] .wb-order-head__meta-item::before {
   content: '·';
-  margin: 0 9px;
+  margin: 0 10px;
   color: var(--evo-border-strong);
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__meta-item--plain {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 14px;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__meta-item--plain::before {
+  content: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__meta-item--plain a {
+  color: var(--evo-text);
 }
 
 :root[data-ui-variant="workbench"] .wb-order-head__meta-item strong {
@@ -325,9 +561,23 @@
   font-weight: 600;
 }
 
+:root[data-ui-variant="workbench"] .wb-order-head__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__actions .ant-btn:not(.ant-btn-icon-only) {
+  padding-inline: 14px;
+  font-weight: 600;
+}
+
+/* --- плитки показателей --- */
 :root[data-ui-variant="workbench"] .wb-order-head__tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(176px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   overflow: hidden;
   border-radius: var(--evo-radius-lg);
   background: var(--evo-surface);
@@ -338,46 +588,39 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 12px 16px;
+  gap: 4px;
+  padding: 14px 16px 16px;
   /* разделители без двойных линий при переносе плиток */
   box-shadow: 1px 0 0 var(--evo-border), 0 1px 0 var(--evo-border);
 }
 
-:root[data-ui-variant="workbench"] .wb-order-head__tile--wide {
-  grid-column: span 1;
-}
-
 :root[data-ui-variant="workbench"] .wb-order-head__label {
   color: var(--evo-text-secondary);
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 500;
 }
 
 :root[data-ui-variant="workbench"] .wb-order-head__value {
   overflow: hidden;
   color: var(--evo-text);
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 650;
+  letter-spacing: -0.01em;
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
-:root[data-ui-variant="workbench"] .wb-order-head__value--inline {
-  display: flex;
-  align-items: center;
-  min-height: 22px;
-}
-
-:root[data-ui-variant="workbench"] .wb-order-head__value--inline .order-production-summary {
-  font-size: 12.5px;
-  line-height: 22px;
+:root[data-ui-variant="workbench"] .wb-order-head__of {
+  color: var(--evo-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
 }
 
 :root[data-ui-variant="workbench"] .wb-order-head__value--text {
-  font-size: 14.5px;
+  font-size: 15px;
   white-space: normal;
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -393,17 +636,18 @@
   color: var(--evo-text);
 }
 
-:root[data-ui-variant="workbench"] .wb-order-head__sub > span {
-  white-space: nowrap;
-}
-
 :root[data-ui-variant="workbench"] .wb-order-head__sub {
   display: flex;
   flex-wrap: wrap;
-  gap: 0 10px;
+  align-items: center;
+  gap: 2px 10px;
   color: var(--evo-text-secondary);
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__sub > span {
+  white-space: nowrap;
 }
 
 :root[data-ui-variant="workbench"] .wb-order-head__sub [data-tone="danger"] {
@@ -421,8 +665,8 @@
 }
 
 :root[data-ui-variant="workbench"] .wb-order-head__bar {
-  height: 4px;
-  margin: 2px 0 1px;
+  height: 5px;
+  margin: 3px 0 2px;
   overflow: hidden;
   border-radius: 999px;
   background: var(--wb-progress-track);
@@ -432,116 +676,406 @@
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: var(--wb-progress-done);
+  background: var(--evo-success);
 }
 
-:root[data-ui-variant="workbench"] .wb-order-head__notes {
+:root[data-ui-variant="workbench"] .wb-order-head__bar[data-tone="warning"] > i {
+  background: #e0a030;
+}
+
+:root[data-ui-variant="workbench"] .wb-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--evo-primary);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-link:hover {
+  text-decoration: underline;
+}
+
+/* --- «Ход производства»: спойлер, по умолчанию свёрнут --- */
+:root[data-ui-variant="workbench"] .wb-order-flow {
+  margin-bottom: 16px;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-flow__summary {
+  width: 100%;
+  min-height: 54px;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
-  min-width: 0;
+  padding: 0 18px;
+  border: 0;
+  border-radius: var(--evo-radius-lg);
+  background: none;
+  color: var(--evo-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-flow__summary:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: -2px;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-flow__summary h2 {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-flow__chevron {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  transition: transform 150ms ease;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-flow--open .wb-order-flow__chevron {
+  transform: rotate(90deg);
+}
+
+:root[data-ui-variant="workbench"] .wb-order-flow__sub {
+  color: var(--evo-text-secondary);
   font-size: 13px;
 }
 
-:root[data-ui-variant="workbench"] .wb-order-head__notes-text {
+:root[data-ui-variant="workbench"] .wb-order-flow__body {
+  padding: 2px 18px 18px;
+}
+
+/* --- панель с вкладками: «Детали» и секции заказа --- */
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-tabs-shell {
+  margin-bottom: 0;
+  padding: 0 10px;
+  border-radius: var(--evo-radius-lg) var(--evo-radius-lg) 0 0;
+  background: var(--evo-surface);
+  box-shadow: var(--evo-shadow);
+  clip-path: inset(-2px -2px 0 -2px);
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-info-tabs {
+  gap: 2px;
+  border-bottom: 1px solid var(--evo-border) !important;
+  overflow-x: auto !important;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-info-tab {
+  flex: 0 0 auto !important;
+  height: 46px !important;
+  margin-bottom: -1px !important;
+  padding: 0 12px !important;
+  border: 0 !important;
+  border-bottom: 2px solid transparent !important;
+  border-radius: 0 !important;
+  background: none !important;
+  color: var(--evo-text-secondary) !important;
+  font-family: inherit;
+  font-size: 14px !important;
+  font-weight: 550 !important;
+  gap: 7px !important;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-info-tab:hover {
+  color: var(--evo-text) !important;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-info-tab:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: -2px;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-info-tab[aria-selected="true"] {
+  border-bottom-color: var(--evo-primary) !important;
+  color: var(--evo-text) !important;
+  font-weight: 650 !important;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-info-tab > .anticon {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .order-show-info-tab__count {
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-summary-tabs-sticky > .order-show-details-toolbar {
+  margin: 0 !important;
+  padding: 10px 14px;
+  border: 0;
+  background: var(--evo-surface);
+  box-shadow: var(--evo-shadow);
+  clip-path: inset(0 -2px 0 -2px);
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-details-toolbar__title {
+  visibility: hidden;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .order-show-details-section {
+  margin-bottom: 0;
+  padding: 0 0 6px;
+  border-radius: 0 0 var(--evo-radius-lg) var(--evo-radius-lg);
+  background: var(--evo-surface);
+  box-shadow: var(--evo-shadow);
+  clip-path: inset(0 -2px -2px -2px);
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .order-show-info-panel {
+  margin: 0;
+  padding: 16px 18px 18px !important;
+  border: 0 !important;
+  border-radius: 0 0 var(--evo-radius-lg) var(--evo-radius-lg);
+  background: var(--evo-surface) !important;
+  box-shadow: var(--evo-shadow);
+  clip-path: inset(0 -2px -2px -2px);
+}
+
+/* открыта секция — таблица деталей и её панель скрыты, как у вкладок */
+:root[data-ui-variant="workbench"] .order-show-page--workbench-section .order-show-summary-tabs-sticky > .order-show-details-toolbar,
+:root[data-ui-variant="workbench"] .order-show-page--workbench-section > .order-show-details-section {
+  display: none;
+}
+
+/* --- таблица деталей --- */
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-details-table .ant-table-thead > tr > th {
+  padding: 9px 6px !important;
+  border-inline-end: 0 !important;
+  background: var(--evo-surface) !important;
+  color: var(--evo-text-secondary);
+  font-size: 12px !important;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-details-table .ant-table-tbody > tr > td {
+  padding: 8px 6px !important;
+  border-inline-end: 0 !important;
+  border-bottom-color: var(--evo-border);
+  font-size: 13px !important;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-details-table .ant-table-container,
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-details-table .ant-table-container table {
+  border: 0 !important;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-details-table .ant-table-tbody > tr.table-row-dark > td,
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-details-table .ant-table-tbody > tr.table-row-light > td {
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-details-table .ant-table-tbody > tr:hover > td {
+  background: var(--app-row-hover) !important;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-details-table .ant-table-summary > tr > td {
+  padding: 10px 6px !important;
+  border-inline-end: 0 !important;
+  background: var(--evo-surface-muted) !important;
+  font-size: 13px;
+}
+
+/* --- правая колонка --- */
+:root[data-ui-variant="workbench"] .wb-side-card__head {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 16px 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-side-card__head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .wb-side-card__link {
+  padding: 3px 8px;
+  border-radius: var(--evo-radius-sm);
+  color: var(--evo-text-secondary);
+  font-size: 13px;
+  font-weight: 550;
+}
+
+:root[data-ui-variant="workbench"] .wb-side-card__link:hover {
+  background: var(--evo-sidebar-hover);
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-side-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 6px 16px 16px;
+  font-size: 13.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-side-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+:root[data-ui-variant="workbench"] .wb-side-row > .anticon {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-side-row a {
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-side-row small {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-side-row--muted {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-side-row__strong {
   min-width: 0;
   overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+:root[data-ui-variant="workbench"] .wb-side-row__spacer {
+  flex: 1 1 auto;
+}
+
+:root[data-ui-variant="workbench"] .wb-avatar {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--evo-primary-soft);
+  color: var(--evo-primary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .wb-icon-btn {
+  width: 26px;
+  height: 26px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--evo-radius-sm);
+  background: none;
+  color: var(--evo-text-secondary);
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-icon-btn:hover {
+  background: var(--evo-sidebar-hover);
   color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-dates {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 9px 10px;
+  align-items: center;
+  font-size: 13px;
+}
+
+:root[data-ui-variant="workbench"] .wb-dates__icon {
+  color: var(--evo-border-strong);
+  line-height: 1;
+}
+
+:root[data-ui-variant="workbench"] .wb-dates__icon[data-done="true"] {
+  color: var(--evo-success);
+}
+
+:root[data-ui-variant="workbench"] .wb-dates__icon[data-strong="true"] {
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-dates__label b {
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-dates__label [data-tone="danger"] {
+  color: var(--evo-danger);
+}
+
+:root[data-ui-variant="workbench"] .wb-dates__label [data-tone="warning"] {
+  color: var(--evo-warning);
+}
+
+:root[data-ui-variant="workbench"] .wb-dates__value {
+  color: var(--evo-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-dates__value[data-strong="true"] {
+  color: var(--evo-text);
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .wb-side-card--links .wb-side-card__body {
+  gap: 0;
+  padding-top: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-link-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 -10px;
+  padding: 8px 10px;
+  border-radius: var(--evo-radius-md);
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] a.wb-link-row:hover {
+  background: var(--evo-sidebar-hover);
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-link-row__icon {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-link-row__label {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* страница карточки: панели лежат на холсте, без общей белой подложки */
-:root[data-ui-variant="workbench"] .ant-card:has(> .ant-card-body .order-show-page:not(.order-show-page--operational)) {
-  background: transparent;
-  box-shadow: none;
-}
-
-:root[data-ui-variant="workbench"] .ant-card:has(> .ant-card-body .order-show-page:not(.order-show-page--operational)) > .ant-card-body {
-  padding: 0;
-}
-
-:root[data-ui-variant="workbench"] .order-show-page--sticky-enabled .order-show-summary-tabs-sticky {
-  background: var(--evo-canvas);
-}
-
-:root[data-ui-variant="workbench"] .order-show-summary-tabs-sticky .order-show-details-toolbar {
-  padding: 4px 2px 8px;
-  border: 0;
-  background: transparent;
-}
-
-:root[data-ui-variant="workbench"] .order-show-details-section {
-  padding: 12px 14px 14px;
-  border-radius: var(--evo-radius-lg);
-  background: var(--evo-surface);
-  box-shadow: var(--evo-shadow);
-}
-
-:root[data-ui-variant="workbench"] .order-show-header--compact-sticky {
-  border-color: var(--evo-border);
-  border-radius: var(--evo-radius-md);
-}
-
-/* секции-спойлеры карточки: спокойные «пилюли» вместо цветных вкладок */
-:root[data-ui-variant="workbench"] .order-show-info-tabs {
-  gap: 6px;
-  padding-bottom: 8px;
-  border-bottom: 0 !important;
-  overflow: visible !important;
-}
-
-:root[data-ui-variant="workbench"] .order-show-info-tab {
-  height: 32px !important;
-  margin-bottom: 0 !important;
-  padding: 4px 12px !important;
-  border: 1px solid var(--evo-border) !important;
-  border-radius: var(--evo-radius-md) !important;
-  background: var(--evo-surface) !important;
-  color: var(--evo-text-secondary) !important;
-  font-family: inherit;
-  font-size: 12.5px !important;
-  font-weight: 550 !important;
-  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
-}
-
-:root[data-ui-variant="workbench"] .order-show-info-tab:hover {
-  border-color: var(--evo-border-strong) !important;
-  color: var(--evo-text) !important;
-}
-
-:root[data-ui-variant="workbench"] .order-show-info-tab:focus-visible {
-  outline: 2px solid var(--evo-primary);
-  outline-offset: 1px;
-}
-
-:root[data-ui-variant="workbench"] .order-show-info-tab[aria-selected="true"] {
-  border-color: transparent !important;
-  background: var(--evo-primary-soft) !important;
-  color: var(--evo-primary) !important;
-  font-weight: 600 !important;
-}
-
-:root[data-ui-variant="workbench"] .order-show-info-panel {
-  margin: 0 0 12px;
-  padding: 14px 16px !important;
-  border: 0 !important;
-  border-radius: var(--evo-radius-lg);
-  box-shadow: var(--evo-shadow);
-}
-
-:root[data-ui-variant="workbench"] .order-show-details-toolbar__title {
-  color: var(--evo-text) !important;
-  font-size: 15px !important;
-  font-weight: 650 !important;
-}
-
-:root[data-ui-variant="workbench"] .order-show-details-table .ant-table-thead > tr > th {
-  background: var(--evo-surface-muted);
+:root[data-ui-variant="workbench"] .wb-link-row small {
+  flex: 0 0 auto;
   color: var(--evo-text-secondary);
-  font-weight: 600;
+  font-size: 12px;
 }
 
-:root[data-ui-variant="workbench"] .order-show-details-table .ant-table-tbody > tr > td {
-  font-variant-numeric: tabular-nums;
+:root[data-ui-variant="workbench"] .wb-notes {
+  color: var(--evo-text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+:root[data-ui-variant="workbench"] .wb-notes--empty {
+  color: var(--evo-border-strong);
 }

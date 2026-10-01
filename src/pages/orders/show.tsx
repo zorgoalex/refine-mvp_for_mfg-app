@@ -4,7 +4,7 @@ import { useDataProvider, useParsed, IResourceComponentsProps } from "@refinedev
 import type { BaseRecord } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Alert, Button, Card, Checkbox, Breadcrumb, message, Dropdown, Space, Modal, Select } from "antd";
-import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
+import { WalletOutlined, FolderOutlined, ApartmentOutlined, ScissorOutlined, BlockOutlined, AimOutlined, RightOutlined, PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { getTableColumnDataIndex, getTableStickyOffsetHeader } from './utils/tableCompatibility';
 import { resolveStickySummaryStuck } from './utils/stickySummaryStuck';
@@ -28,6 +28,15 @@ import { OrderDatesBlock } from "./components/sections/OrderDatesBlock";
 import { OrderFinanceBlock } from "./components/sections/OrderFinanceBlock";
 import { OrderProductionBlock } from "./components/sections/OrderProductionBlock";
 import { OrderProductionFlow } from "./components/sections/OrderProductionFlow";
+import { OrderProductionSummary } from "../../components/OrderProductionSummary";
+import {
+  OrderClientCard,
+  OrderDatesCard,
+  OrderLinksCard,
+  OrderNotesCard,
+  type OrderLinkItem,
+} from "./components/sections/OrderShowWorkbenchSide";
+import { collectOrderBasisProjects } from "./components/sections/orderBasisProjects";
 import { useOptionalUiVariant } from "../../ui-variant/UiVariantProvider";
 import { OrderFilesBlock } from "./components/sections/OrderFilesBlock";
 import {
@@ -156,8 +165,8 @@ import {
   runPageOwnedWorkspaceOperation,
 } from '../../workspace/workspaceOperationPins';
 
-type OrderInfoPanelKey = 'flow' | 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
-type OrderInfoTab = { key: string; panel: OrderInfoPanelKey | null; label: string; color: string };
+type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
+type OrderInfoTab = { key: string; panel: OrderInfoPanelKey | null; label: string; color: string; count?: number };
 type OrderExcelExportMode = 'full' | 'without-prices';
 
 // Display fields shared by legacy and backend-adapted primary reads. Other
@@ -180,11 +189,11 @@ const productionPdfButtonStyle: CSSProperties = {
   color: '#52c41a',
 };
 
-// «Ход производства» is a «NewLine»-only spoiler; other variants keep the original five tabs.
-const WORKBENCH_ORDER_INFO_PANEL: OrderInfoPanelKey = 'flow';
+// «NewLine»: height of the compact order bar that replaces the head while it is scrolled away.
+const WORKBENCH_ORDER_BAR_HEIGHT = 52;
+const WORKBENCH_DETAIL_COLUMN_SCALE = 1.4;
 
 const orderInfoTabs: Array<{ key: OrderInfoPanelKey; label: string; color: string }> = [
-  { key: 'flow', label: 'Ход производства', color: '#52c41a' },
   { key: 'groups', label: 'Группы заказа', color: '#722ed1' },
   { key: 'deadlines', label: 'Дедлайны', color: '#1677ff' },
   { key: 'finance', label: 'Финансы', color: '#faad14' },
@@ -318,6 +327,8 @@ function cncOrderCuttingSequenceStatusLabel(status: CncTelegramOrderCuttingSeque
 }
 
 type OrderShowStickyStyle = CSSProperties & {
+  '--wb-order-sticky-top': string;
+  '--wb-order-bar-height': string;
   '--order-show-sticky-top': string;
   '--order-show-compact-header-height': string;
   '--order-show-tabs-shell-height': string;
@@ -358,6 +369,44 @@ function useWorkspaceTabsHeight(): number {
   }, []);
 
   return height;
+}
+
+/**
+ * «NewLine»: bottom edge of the sticky app chrome (top bar + workspace tabs), i.e. where
+ * page-owned sticky elements must stop. The tabs bar is itself sticky under the top bar.
+ */
+function useWorkspaceChromeBottom(): number {
+  const [bottom, setBottom] = useState(0);
+
+  useEffect(() => {
+    let ro: ResizeObserver | null = null;
+    const attach = (): boolean => {
+      const tabs = document.querySelector<HTMLElement>('.workspace-tabs');
+      if (!tabs) return false;
+      const measure = () => {
+        const style = window.getComputedStyle(tabs);
+        const stickyTop = style.position === 'sticky' ? Number.parseFloat(style.top) || 0 : 0;
+        setBottom(Math.round(stickyTop + tabs.getBoundingClientRect().height));
+      };
+      measure();
+      if (typeof ResizeObserver !== 'undefined') {
+        ro = new ResizeObserver(measure);
+        ro.observe(tabs);
+      }
+      return true;
+    };
+    if (attach()) return () => ro?.disconnect();
+    const mo = new MutationObserver(() => {
+      if (attach()) mo.disconnect();
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      mo.disconnect();
+      ro?.disconnect();
+    };
+  }, []);
+
+  return bottom;
 }
 
 function useMeasuredElementHeight<T extends HTMLElement>() {
@@ -687,10 +736,8 @@ const modalConfirm = (content: string): Promise<boolean> =>
     });
   });
 
-function readOrderInfoPanelCheckpoint(value: unknown, workbench: boolean): OrderInfoPanelKey | null {
-  return typeof value === 'string'
-    && orderInfoTabs.some((tab) => tab.key === value)
-    && (workbench || value !== WORKBENCH_ORDER_INFO_PANEL)
+function readOrderInfoPanelCheckpoint(value: unknown): OrderInfoPanelKey | null {
+  return typeof value === 'string' && orderInfoTabs.some((tab) => tab.key === value)
     ? value as OrderInfoPanelKey
     : null;
 }
@@ -740,7 +787,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const [searchParams] = useSearchParams();
   const highlightDetail = Number(searchParams.get('highlightDetail')) || null;
   const [activeInfoPanel, setActiveInfoPanel] = useState<OrderInfoPanelKey | null>(() => (
-    readOrderInfoPanelCheckpoint(restoredShowCheckpoint?.activeInfoPanel, isWorkbench)
+    readOrderInfoPanelCheckpoint(restoredShowCheckpoint?.activeInfoPanel)
   ));
   const [activeOperationalTab, setActiveOperationalTab] = useState(() => (
     typeof restoredShowCheckpoint?.activeOperationalTab === 'string'
@@ -1350,6 +1397,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     void refreshLiveDetailProductionStatuses();
   }, [activationRevision, orderRealtimeEnabled, ordinaryReadActive, record?.order_id, refreshLiveDetailProductionStatuses]);
   const workspaceTabsHeight = useWorkspaceTabsHeight();
+  const workbenchChromeBottom = useWorkspaceChromeBottom();
+  const [workbenchFlowOpen, setWorkbenchFlowOpen] = useState(false);
+  const [workbenchHeadHidden, setWorkbenchHeadHidden] = useState(false);
   const orderShowStickySentinelRef = useRef<HTMLDivElement>(null);
   const orderShowDetailsBlockRef = useRef<HTMLDivElement>(null);
   const orderShowSummaryTabsRef = useRef<HTMLDivElement>(null);
@@ -1377,30 +1427,65 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     workspaceTabsHeight,
   ]);
   const orderShowStickyStyle = useMemo<OrderShowStickyStyle>(() => ({
+    '--wb-order-sticky-top': `${workbenchChromeBottom}px`,
+    '--wb-order-bar-height': `${WORKBENCH_ORDER_BAR_HEIGHT}px`,
     '--order-show-sticky-top': `${workspaceTabsHeight}px`,
     '--order-show-compact-header-height': `${ORDER_SHOW_COMPACT_HEADER_STICKY_HEIGHT}px`,
     '--order-show-tabs-shell-height': `${orderShowTabsShellHeight}px`,
     '--order-show-details-toolbar-height': `${orderShowDetailsToolbarHeight}px`,
     '--order-show-table-header-top': `${orderShowTableHeaderTop}px`,
-  }), [orderShowDetailsToolbarHeight, orderShowTableHeaderTop, orderShowTabsShellHeight, workspaceTabsHeight]);
+  }), [orderShowDetailsToolbarHeight, orderShowTableHeaderTop, orderShowTabsShellHeight, workbenchChromeBottom, workspaceTabsHeight]);
   const orderShowPageClassName = useMemo(() => [
     'order-show-page',
     isOperational ? 'order-show-page--operational' : '',
     isOperational && activeInfoPanel === 'cut' ? 'order-show-page--cut-active' : '',
     isOperational && activeInfoPanel === 'additional' ? 'order-show-page--additional-active' : '',
     orderShowStickyEnabled ? 'order-show-page--sticky-enabled' : '',
-  ].filter(Boolean).join(' '), [activeInfoPanel, isOperational, orderShowStickyEnabled]);
-  const orderShowDetailTableSticky = useMemo(() => (
-    orderShowStickyEnabled && orderShowTableHeaderTop > 0
+    isWorkbench ? 'order-show-page--workbench' : '',
+    isWorkbench && activeInfoPanel ? 'order-show-page--workbench-section' : '',
+  ].filter(Boolean).join(' '), [activeInfoPanel, isOperational, isWorkbench, orderShowStickyEnabled]);
+  const orderShowDetailTableSticky = useMemo(() => {
+    if (isWorkbench) {
+      return workbenchChromeBottom > 0
+        ? { offsetHeader: workbenchChromeBottom + WORKBENCH_ORDER_BAR_HEIGHT }
+        : undefined;
+    }
+    return orderShowStickyEnabled && orderShowTableHeaderTop > 0
       ? { offsetHeader: orderShowTableHeaderTop }
-      : undefined
-  ), [orderShowStickyEnabled, orderShowTableHeaderTop]);
+      : undefined;
+  }, [isWorkbench, orderShowStickyEnabled, orderShowTableHeaderTop, workbenchChromeBottom]);
+
+  // «NewLine»: the compact bar appears once the page head has scrolled under the app chrome.
+  useEffect(() => {
+    if (!isWorkbench) return;
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const head = orderShowStickySentinelRef.current?.parentElement?.querySelector('.wb-order-head__top');
+      const next = head ? head.getBoundingClientRect().bottom < workbenchChromeBottom : false;
+      setWorkbenchHeadHidden((prev) => (prev === next ? prev : next));
+    };
+    const schedule = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(update);
+    };
+    update();
+    window.addEventListener('scroll', schedule, { passive: true, capture: true });
+    window.addEventListener('resize', schedule);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', schedule, { capture: true });
+      window.removeEventListener('resize', schedule);
+    };
+  }, [isWorkbench, record?.order_id, workbenchChromeBottom]);
 
   useEffect(() => {
     const update = () => {
       const block = orderShowDetailsBlockRef.current;
       const availableHeight = window.innerHeight - workspaceTabsHeight;
+      // «NewLine» has its own compact bar; the legacy sticky stack stays off there.
       const next =
+        !isWorkbench &&
         !isMobile &&
         details.length > 0 &&
         !!block &&
@@ -1416,7 +1501,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       window.removeEventListener('resize', update);
       ro?.disconnect();
     };
-  }, [details.length, isMobile, workspaceTabsHeight]);
+  }, [details.length, isMobile, isWorkbench, workspaceTabsHeight]);
 
   useEffect(() => {
     const update = () => {
@@ -2837,6 +2922,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               : null;
         return {
           ...column,
+          // «NewLine» uses the normal table font instead of 70–80%, so the fixed widths grow with it.
+          width: isWorkbench && typeof column.width === 'number'
+            ? Math.round(column.width * WORKBENCH_DETAIL_COLUMN_SCALE)
+            : column.width,
           sortOrder: column.key === orderShowActiveSorter?.key ? orderShowActiveSorter.order : null,
           shouldCellUpdate: (row: any, previousRow: any) => {
             if (liveVersionKey) return row?.[liveVersionKey] !== previousRow?.[liveVersionKey];
@@ -2866,7 +2955,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           },
         };
       }),
-    [orderShowActiveSorter, renderGroupedSummaryValue, visibleDetailColumns],
+    [isWorkbench, orderShowActiveSorter, renderGroupedSummaryValue, visibleDetailColumns],
   );
   const stableRenderedDetailColumns = useStableOrderShowColumns(
     renderedDetailColumns,
@@ -2971,8 +3060,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     { key: 'labels', panel: 'additional', label: 'Бирки', color: 'var(--operational-brand)' },
     { key: 'activity', panel: 'deadlines', label: 'Активность', color: 'var(--operational-brand)' },
   ] satisfies OrderInfoTab[] : orderInfoTabs.map((tab) => ({ ...tab, panel: tab.key })))
-    .filter((tab) => canViewFinancials || tab.panel !== 'finance')
-    .filter((tab) => isWorkbench || tab.panel !== WORKBENCH_ORDER_INFO_PANEL);
+    .filter((tab) => canViewFinancials || tab.panel !== 'finance');
+  // «NewLine»: the details table is the first tab of the same row; sections replace it instead of stacking above.
+  const renderedOrderInfoTabs: OrderInfoTab[] = isWorkbench
+    ? [{ key: 'details', panel: null, label: 'Детали', color: 'inherit', count: details.length }, ...visibleOrderInfoTabs]
+    : visibleOrderInfoTabs;
   const activeOrderInfoLabel = isOperational
     ? visibleOrderInfoTabs.find((tab) => tab.key === activeOperationalTab)?.label
     : visibleOrderInfoTabs.find((tab) => tab.panel === activeInfoPanel)?.label;
@@ -3017,11 +3109,117 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     </Dropdown>
   ) : null;
 
+  // «NewLine» draws its own page head (crumbs, title, actions); a deleted order keeps the standard one.
+  const ownPageHead = isOperational || (isWorkbench && !deletedOrder);
+  const openAddPayment = record?.order_id && canCreatePayment
+    ? () => navigate(buildOrderEditAddPaymentPath(Number(record.order_id)))
+    : undefined;
+  const workbenchPrintItems = canExportOrders ? [
+    ...(canViewFinancials ? [
+      { key: 'print', icon: <PrinterOutlined />, label: 'Печать', disabled: !record || details.length === 0 },
+      {
+        key: 'excel',
+        icon: <FileExcelOutlined />,
+        label: 'Экспорт в Excel',
+        disabled: !record || details.length === 0 || isClientResolving || isAnyExcelExporting,
+      },
+    ] : []),
+    { key: 'pdf-production', icon: <FilePdfOutlined />, label: 'PDF для производства', disabled: productionPdfDisabled },
+    { key: 'excel-without-prices', icon: <FileExcelOutlined />, label: 'Excel для производства', disabled: productionExcelDisabled },
+    ...(canViewFinancials ? [
+      { key: 'json', icon: <FileTextOutlined />, label: 'JSON snapshot', disabled: !record || isSnapshotExporting },
+    ] : []),
+  ] : [];
+  const workbenchMoreItems = [
+    ...(canUpdateOrders ? [{ key: 'refresh', icon: <ReloadOutlined />, label: 'Обновить', disabled: isRefreshingOrder }] : []),
+    ...(canMoveOrderProject ? [{ key: 'move-project', icon: <SwapOutlined />, label: 'Перенести в другой проект' }] : []),
+    ...(canDeleteOrder ? [{ key: 'delete-order', icon: <DeleteOutlined />, label: 'Удалить заказ', danger: true }] : []),
+  ];
+  const handleWorkbenchAction = ({ key }: { key: string }) => {
+    if (key === 'refresh') void handleRefreshOrder();
+    if (key === 'print') handlePrint();
+    if (key === 'excel') void handleExportExcel();
+    if (key === 'pdf-production') handleProductionPdf();
+    if (key === 'excel-without-prices') void handleExportExcel('without-prices');
+    if (key === 'json') void handleExportSnapshot();
+    if (key === 'move-project') setMoveModalOpen(true);
+    if (key === 'delete-order') handleDeleteOrder();
+  };
+  const workbenchEditButton = canEditOrderContent && record?.order_id ? (
+    <Button type="primary" icon={<EditOutlined />} onClick={() => navigate(`/orders/edit/${record.order_id}`)}>
+      Изменить
+    </Button>
+  ) : null;
+  const workbenchPaymentButton = openAddPayment ? (
+    <Button icon={<WalletOutlined />} onClick={openAddPayment}>Добавить платёж</Button>
+  ) : null;
+  const workbenchHeadActions = isWorkbench ? (
+    <>
+      {workbenchPaymentButton}
+      {workbenchPrintItems.length > 0 ? (
+        <Dropdown trigger={['click']} menu={{ items: workbenchPrintItems, onClick: handleWorkbenchAction }}>
+          <Button icon={<PrinterOutlined />} loading={isAnyExcelExporting || isSnapshotExporting}>
+            Печать <DownOutlined style={{ fontSize: 10 }} />
+          </Button>
+        </Dropdown>
+      ) : null}
+      {workbenchEditButton}
+      {workbenchMoreItems.length > 0 ? (
+        <Dropdown trigger={['click']} menu={{ items: workbenchMoreItems, onClick: handleWorkbenchAction }}>
+          <Tooltip title="Ещё действия">
+            <Button aria-label="Ещё действия" icon={<EllipsisOutlined />} loading={isRefreshingOrder} disabled={!record} />
+          </Tooltip>
+        </Dropdown>
+      ) : null}
+    </>
+  ) : null;
+  const workbenchLinkItems: OrderLinkItem[] = isWorkbench && record ? [
+    ...(featureFlags.projects && projectId ? [{
+      key: 'project',
+      icon: <FolderOutlined />,
+      label: `Проект ${projectLabel}`,
+      to: `/projects/show/${projectId}`,
+    }] : []),
+    ...((record.groups ?? backendOrder?.groups ?? []) as any[]).map((group: any, index: number) => ({
+      key: `group-${group.groupId ?? group.id ?? index}`,
+      icon: <ApartmentOutlined />,
+      label: [group.code, group.name].filter(Boolean).join(' · ') || 'Группа',
+      hint: group.isPrimary ? 'основная' : 'группа',
+    })),
+    ...collectOrderBasisProjects(details || []).map((name: string) => ({
+      key: `basis-${name}`,
+      icon: <BlockOutlined />,
+      label: `Базис-проект ${name}`,
+    })),
+    ...dowelingLinks.map((link: any, index: number) => {
+      const dowelingOrderId = link.doweling_order?.doweling_order_id ?? link.doweling_order_id;
+      const name = link.doweling_order?.doweling_order_name || link.doweling_order_name
+        || (dowelingOrderId ? String(dowelingOrderId) : '—');
+      return {
+        key: `doweling-${link.order_doweling_link_id ?? index}`,
+        icon: <AimOutlined />,
+        label: `Присадка ${name}`,
+        to: getDowelingOrderShowPath(dowelingOrderId),
+      };
+    }),
+    ...(cutColumnEnabled ? cutOrderJobs.map((job) => {
+      const versionRef = latestReadyCutRefByJobId.get(job.cutJobId);
+      return {
+        key: `cut-${job.cutJobId}`,
+        icon: <ScissorOutlined />,
+        label: job.name,
+        title: job.name,
+        to: versionRef ? cutJobDeepLink(versionRef) : cutJobDeepLink(job.cutJobId),
+        hint: cutJobProfileLabel(job),
+      };
+    }) : []),
+  ] : [];
+
   return (
     <Show
       isLoading={false}
-      title={isOperational ? ' ' : showTitle}
-      breadcrumb={isOperational ? false : (
+      title={ownPageHead ? ' ' : showTitle}
+      breadcrumb={ownPageHead ? false : (
         <Breadcrumb>
           <Breadcrumb.Item>
             <Link to="/">
@@ -3034,7 +3232,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           <Breadcrumb.Item>Просмотр</Breadcrumb.Item>
         </Breadcrumb>
       )}
-      headerButtons={() => isOperational ? null : (
+      headerButtons={() => ownPageHead ? null : (
         deletedOrder ? null : (
           isMobile ? (
             <>
@@ -3288,6 +3486,27 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       ) : record && (
         <div className={orderShowPageClassName} style={orderShowStickyStyle}>
           <div ref={orderShowStickySentinelRef} className="order-show-sticky-sentinel" aria-hidden />
+          {isWorkbench ? (
+            <>
+              <nav className="wb-order-crumbs" aria-label="Хлебные крошки">
+                <Link to="/orders">Заказы</Link>
+                <RightOutlined aria-hidden />
+                <span>{record.order_name}</span>
+              </nav>
+              <div className="wb-order-bar-slot" data-on={workbenchHeadHidden} aria-hidden={!workbenchHeadHidden}>
+                <OrderShowHeader
+                  record={record}
+                  details={detailsWithLiveProductionStatuses}
+                  detailsLoaded={productionSummaryDetailsLoaded}
+                  dowelingLinks={dowelingLinks}
+                  compactSticky
+                  showFinancials={canViewFinancials}
+                  hdfDetails={hdfDetails}
+                  compactActions={<>{workbenchPaymentButton}{workbenchEditButton}</>}
+                />
+              </div>
+            </>
+          ) : null}
           {isOperational ? (
             <OperationalPageHeader
               breadcrumbs={(
@@ -3399,6 +3618,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               headerMaterialName={headerMaterialName}
               showFinancials={canViewFinancials}
               hdfDetails={hdfDetails}
+              actions={workbenchHeadActions}
+              projectLabel={featureFlags.projects && projectId ? projectLabel : null}
+              onAddPayment={openAddPayment}
             />
 
             <div ref={orderShowTabsShellRef} className="order-show-tabs-shell">
@@ -3414,7 +3636,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 overflow: 'hidden',
               }}
             >
-              {visibleOrderInfoTabs.map((tab) => {
+              {renderedOrderInfoTabs.map((tab) => {
                 const isActive = isOperational
                   ? activeOperationalTab === tab.key
                   : activeInfoPanel === tab.panel;
@@ -3467,6 +3689,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     >
                       {tab.label}
                     </span>
+                    {tab.count != null ? <span className="order-show-info-tab__count">{tab.count}</span> : null}
                     {isActive ? <UpOutlined style={{ fontSize: 10 }} /> : <DownOutlined style={{ fontSize: 10 }} />}
                   </button>
                 );
@@ -3475,6 +3698,48 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             </div>
             {orderShowDetailsToolbar}
           </div>
+
+          {isWorkbench ? (
+            <>
+              <section className={`wb-panel wb-order-flow${workbenchFlowOpen ? ' wb-order-flow--open' : ''}`}>
+                <button
+                  type="button"
+                  className="wb-order-flow__summary"
+                  aria-expanded={workbenchFlowOpen}
+                  onClick={() => setWorkbenchFlowOpen((open) => !open)}
+                >
+                  <RightOutlined className="wb-order-flow__chevron" aria-hidden />
+                  <h2>Ход производства</h2>
+                  <span className="wb-order-flow__sub">
+                    <OrderProductionSummary
+                      order={record as any}
+                      details={productionSummaryDetailsLoaded ? detailsWithLiveProductionStatuses : undefined}
+                      statuses={productionStatusesData?.data as any[] ?? []}
+                    />
+                  </span>
+                </button>
+                {workbenchFlowOpen ? (
+                  <div className="wb-order-flow__body">
+                    <OrderProductionFlow
+                      details={detailsWithLiveProductionStatuses}
+                      statuses={productionStatusesData?.data as any[] ?? []}
+                      loading={productionStatusesLoading || !productionSummaryDetailsLoaded}
+                    />
+                  </div>
+                ) : null}
+              </section>
+              <aside className="wb-order-side" aria-label="Сводка заказа">
+                <OrderClientCard
+                  clientId={record.client_id}
+                  clientName={record.client_name}
+                  canViewClients={!featureFlags.useBackendPermissions || can('clients.view')}
+                />
+                <OrderDatesCard record={record} />
+                <OrderLinksCard items={workbenchLinkItems} />
+                <OrderNotesCard notes={record.notes} />
+              </aside>
+            </>
+          ) : null}
 
             {activeInfoPanel && (
               <div
@@ -3487,14 +3752,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   background: 'var(--app-surface)',
                 }}
               >
-                {activeInfoPanel === WORKBENCH_ORDER_INFO_PANEL && (
-                  <OrderProductionFlow
-                    details={detailsWithLiveProductionStatuses}
-                    statuses={productionStatusesData?.data as any[] ?? []}
-                    loading={productionStatusesLoading || !productionSummaryDetailsLoaded}
-                  />
-                )}
-
                 <OrderLifecycleReadSurface active={activeInfoPanel === 'groups'}>
                   {activeInfoPanel === 'groups' && (
                     useBackendOrdersRead && featureFlags.useBackendGroups && record?.order_id ? (
