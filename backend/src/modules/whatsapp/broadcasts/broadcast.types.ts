@@ -12,6 +12,8 @@ export const BROADCAST_BASE_PERMISSIONS = ['whatsapp.manage', 'calendar.view', '
 /** Upper bound of simultaneously enabled broadcasts (plan §6.2). */
 export const BROADCAST_MAX_ACTIVE = 20;
 export const BROADCAST_MAX_ORDER_OFFSET_DAYS = 14;
+/** «Отправить в чат» from the calendar: any day within this many days of today (Asia/Almaty). */
+export const CALENDAR_SEND_MAX_DAYS = 366;
 
 export interface BroadcastInput {
   name: string;
@@ -147,4 +149,37 @@ export interface BroadcastStoredImage {
   sizeBytes: number;
   expiresAt: Date;
   caption: string | null;
+}
+
+/** Settings of the system broadcast behind «Отправить в чат» in the calendar. */
+export interface CalendarSendSettings {
+  broadcastId: number;
+  version: number;
+  groupChatId: string | null;
+  cardsPerMessage: 1 | 2;
+  captionTemplate: string;
+  /** Frequency threshold: deliveries from the calendar start at most once per this many minutes. */
+  minIntervalMinutes: number;
+  updatedAt: string;
+  updatedBy: { id: string; username: string | null } | null;
+}
+
+export interface CalendarSendUpdateInput {
+  version: number;
+  groupChatId: string | null;
+  cardsPerMessage: 1 | 2;
+  captionTemplate: string;
+  minIntervalMinutes: number;
+}
+
+export interface CalendarSendState {
+  settings: CalendarSendSettings;
+  /** Earliest start of the next calendar delivery, or null when it is allowed now. */
+  nextAllowedAt: string | null;
+  /** A calendar send is still queued or being delivered. */
+  activeRun: boolean;
+}
+
+export interface CalendarSendEnvelope extends CalendarSendState {
+  runtime: BroadcastRuntime;
 }

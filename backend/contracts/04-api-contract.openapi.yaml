@@ -857,6 +857,54 @@ paths:
         '200': {description: Legacy runs, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppDailyDigestRunList'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/whatsapp/calendar-send:
+    get:
+      tags: [WhatsApp]
+      operationId: getWhatsAppCalendarSend
+      summary: 'Settings of «Отправить в чат» from the calendar with the frequency threshold state'
+      description: 'The calendar command sends through one system broadcast (never scheduled, not in the broadcast list). nextAllowedAt is the earliest start of the next calendar delivery (null = now); activeRun = a calendar send is still queued or being delivered.'
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      responses:
+        '200': {description: Calendar send settings, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppCalendarSendEnvelope'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '503': {description: 'BROADCAST_CALENDAR_UNAVAILABLE'}
+    put:
+      tags: [WhatsApp]
+      operationId: updateWhatsAppCalendarSend
+      summary: 'Update the calendar send settings (version compare-and-swap)'
+      description: 'Group, cards per image, caption template and the frequency threshold (minimal interval between the starts of calendar deliveries, 1–1440 minutes). Audited.'
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppCalendarSendUpdate'}}}
+      responses:
+        '200': {description: Calendar send settings, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppCalendarSendEnvelope'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {description: 'BROADCAST_VERSION_CONFLICT'}
+        '422': {description: Invalid request}
+        '503': {description: 'BROADCAST_CALENDAR_UNAVAILABLE'}
+  /api/v1/whatsapp/calendar-send/runs:
+    post:
+      tags: [WhatsApp]
+      operationId: createWhatsAppCalendarSendRun
+      summary: 'Queue the order cards of one calendar day for the configured chat (idempotent)'
+      description: 'Sends right away (no send window, no confirmation): all production orders planned for that day, like a broadcast. The same idempotencyKey with the same payload returns the original run. At most one calendar send is active, and calendar deliveries start at most once per the configured interval (409 BROADCAST_CALENDAR_COOLDOWN with details.nextAllowedAt). A day without orders creates an empty run and does not use the threshold.'
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppCalendarSendRunRequest'}}}
+      responses:
+        '202': {description: Queued (or empty) run, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppBroadcastRunDetail'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {description: 'BROADCASTS_PAUSED, BROADCAST_CALENDAR_ACTIVE, BROADCAST_CALENDAR_COOLDOWN, BROADCAST_DESTINATION_REQUIRED, BROADCAST_VERSION_CONFLICT or IDEMPOTENCY_KEY_REUSED'}
+        '422': {description: Invalid request}
+        '503': {description: 'BROADCAST_RUNTIME_UNAVAILABLE, BROADCAST_RENDER_BUSY, BROADCAST_STORE_BUSY, BROADCAST_STORE_UNAVAILABLE or BROADCAST_CALENDAR_UNAVAILABLE'}
   /api/v1/whatsapp/broadcasts/{id}:
     get:
       tags: [WhatsApp]
@@ -889,7 +937,7 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {description: 'BROADCAST_NOT_FOUND'}
-        '409': {description: 'BROADCAST_VERSION_CONFLICT, BROADCAST_ARCHIVED, BROADCAST_ACTIVE_LIMIT, BROADCAST_NAME_TAKEN or BROADCAST_DUPLICATE_CONFIRMATION_REQUIRED'}
+        '409': {description: 'BROADCAST_SYSTEM (system calendar broadcast), BROADCAST_VERSION_CONFLICT, BROADCAST_ARCHIVED, BROADCAST_ACTIVE_LIMIT, BROADCAST_NAME_TAKEN or BROADCAST_DUPLICATE_CONFIRMATION_REQUIRED'}
         '422': {description: Invalid or inconsistent settings}
   /api/v1/whatsapp/broadcasts/{id}/archive:
     post:
@@ -909,7 +957,7 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {description: 'BROADCAST_NOT_FOUND'}
-        '409': {description: 'BROADCAST_VERSION_CONFLICT or BROADCAST_ARCHIVED'}
+        '409': {description: 'BROADCAST_SYSTEM (system calendar broadcast), BROADCAST_VERSION_CONFLICT or BROADCAST_ARCHIVED'}
   /api/v1/whatsapp/broadcasts/{id}/preview:
     post:
       tags: [WhatsApp]
@@ -964,7 +1012,7 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {description: 'BROADCAST_NOT_FOUND'}
-        '409': {description: 'BROADCASTS_PAUSED, BROADCAST_VERSION_CONFLICT, BROADCAST_ARCHIVED, BROADCAST_DESTINATION_REQUIRED or IDEMPOTENCY_KEY_REUSED'}
+        '409': {description: 'BROADCAST_SYSTEM (system calendar broadcast), BROADCASTS_PAUSED, BROADCAST_VERSION_CONFLICT, BROADCAST_ARCHIVED, BROADCAST_DESTINATION_REQUIRED or IDEMPOTENCY_KEY_REUSED'}
         '503': {description: 'BROADCAST_RUNTIME_UNAVAILABLE, BROADCAST_STORE_UNAVAILABLE, BROADCAST_RENDER_BUSY or BROADCAST_STORE_BUSY'}
   /api/v1/whatsapp/broadcasts/{id}/schedule/today/replan:
     post:
@@ -984,7 +1032,7 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {description: 'BROADCAST_NOT_FOUND'}
-        '409': {description: 'BROADCASTS_PAUSED, BROADCAST_VERSION_CONFLICT, BROADCAST_ARCHIVED, BROADCAST_TODAY_ALREADY_SENDING or IDEMPOTENCY_KEY_REUSED'}
+        '409': {description: 'BROADCAST_SYSTEM (system calendar broadcast), BROADCASTS_PAUSED, BROADCAST_VERSION_CONFLICT, BROADCAST_ARCHIVED, BROADCAST_TODAY_ALREADY_SENDING or IDEMPOTENCY_KEY_REUSED'}
   /api/v1/whatsapp/broadcast-runs/{runId}:
     get:
       tags: [WhatsApp]
@@ -1035,7 +1083,7 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {description: 'BROADCAST_RUN_NOT_FOUND'}
-        '409': {description: 'BROADCASTS_PAUSED, BROADCAST_RUN_SUPERSEDED, BROADCAST_RETRY_LIMIT, BROADCAST_RETRY_ACTIVE, BROADCAST_RETRY_NOT_AVAILABLE, BROADCAST_DUPLICATE_CONFIRMATION_REQUIRED or IDEMPOTENCY_KEY_REUSED'}
+        '409': {description: 'BROADCAST_CALENDAR_ACTIVE, BROADCAST_CALENDAR_COOLDOWN (calendar sends), BROADCASTS_PAUSED, BROADCAST_RUN_SUPERSEDED, BROADCAST_RETRY_LIMIT, BROADCAST_RETRY_ACTIVE, BROADCAST_RETRY_NOT_AVAILABLE, BROADCAST_DUPLICATE_CONFIRMATION_REQUIRED or IDEMPOTENCY_KEY_REUSED'}
         '410': {description: 'BROADCAST_IMAGE_EXPIRED, BROADCAST_DEADLINE_PASSED or BROADCAST_CONTENT_PURGED'}
         '503': {description: 'BROADCAST_RUNTIME_UNAVAILABLE'}
   /api/v1/whatsapp/qr:
@@ -25804,6 +25852,48 @@ components:
           properties:
             id: {type: string}
             username: {type: string, nullable: true}
+    WhatsAppCalendarSendSettings:
+      type: object
+      required: [broadcastId, version, groupChatId, cardsPerMessage, captionTemplate, minIntervalMinutes, updatedAt, updatedBy]
+      properties:
+        broadcastId: {type: integer, description: 'System broadcast id; its history is GET /whatsapp/broadcasts/{id}/runs'}
+        version: {type: integer}
+        groupChatId: {type: string, nullable: true}
+        cardsPerMessage: {type: integer, enum: [1, 2]}
+        captionTemplate: {type: string}
+        minIntervalMinutes: {type: integer, minimum: 1, maximum: 1440}
+        updatedAt: {type: string, format: date-time}
+        updatedBy:
+          type: object
+          nullable: true
+          properties:
+            id: {type: string}
+            username: {type: string, nullable: true}
+    WhatsAppCalendarSendEnvelope:
+      type: object
+      required: [settings, nextAllowedAt, activeRun, runtime]
+      properties:
+        settings: {$ref: '#/components/schemas/WhatsAppCalendarSendSettings'}
+        nextAllowedAt: {type: string, format: date-time, nullable: true}
+        activeRun: {type: boolean}
+        runtime: {$ref: '#/components/schemas/WhatsAppBroadcastRuntime'}
+    WhatsAppCalendarSendUpdate:
+      type: object
+      additionalProperties: false
+      required: [version, groupChatId, cardsPerMessage, captionTemplate, minIntervalMinutes]
+      properties:
+        version: {type: integer, minimum: 1}
+        groupChatId: {type: string, nullable: true, maxLength: 120}
+        cardsPerMessage: {type: integer, enum: [1, 2]}
+        captionTemplate: {type: string, maxLength: 1000}
+        minIntervalMinutes: {type: integer, minimum: 1, maximum: 1440}
+    WhatsAppCalendarSendRunRequest:
+      type: object
+      additionalProperties: false
+      required: [date, idempotencyKey]
+      properties:
+        date: {type: string, format: date, description: 'Calendar day (Asia/Almaty), within 366 days of today'}
+        idempotencyKey: {type: string, format: uuid}
     WhatsAppBroadcastControlUpdate:
       type: object
       additionalProperties: false

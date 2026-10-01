@@ -69,6 +69,26 @@ describe('broadcastsApi wire contract', () => {
     expect(body(15)).toEqual({ mode: 'all', idempotencyKey: 'k3', duplicateRiskConfirmed: true });
   });
 
+  it('uses the calendar-send routes with the documented methods and bodies', async () => {
+    vi.stubEnv('VITE_API_URL', '');
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const update = { version: 2, groupChatId: '123456789@g.us', cardsPerMessage: 1 as const, captionTemplate: 'x', minIntervalMinutes: 30 };
+
+    await broadcastsApi.calendarSendSettings();
+    await broadcastsApi.updateCalendarSendSettings(update);
+    await broadcastsApi.calendarSend({ date: '2026-10-02', idempotencyKey: 'k1' });
+
+    const calls = fetchMock.mock.calls as unknown as Array<[RequestInfo | URL, RequestInit | undefined]>;
+    expect(calls.map(([url, init]) => `${init?.method} ${String(url)}`)).toEqual([
+      'GET /api/v1/whatsapp/calendar-send',
+      'PUT /api/v1/whatsapp/calendar-send',
+      'POST /api/v1/whatsapp/calendar-send/runs',
+    ]);
+    expect(JSON.parse(calls[1][1]?.body as string)).toEqual(update);
+    expect(JSON.parse(calls[2][1]?.body as string)).toEqual({ date: '2026-10-02', idempotencyKey: 'k1' });
+  });
+
   it('never touches the legacy daily-digest routes', async () => {
     vi.stubEnv('VITE_API_URL', '');
     const fetchMock = vi.fn(async () => new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }));

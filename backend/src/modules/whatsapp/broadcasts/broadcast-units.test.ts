@@ -60,6 +60,25 @@ describe('broadcast caption', () => {
   });
 });
 
+describe('calendar send DTO', () => {
+  it('accepts a real day within a year and a 1–1440 minute threshold', async () => {
+    const { parseCalendarSendRun, parseCalendarSendUpdate } = await import('./broadcast.dto');
+    const now = new Date('2026-10-01T06:00:00Z');
+    const key = '0f8fad5b-d9cb-469f-a165-70867728950e';
+    expect(parseCalendarSendRun({ date: '2026-09-01', idempotencyKey: key }, now).date).toBe('2026-09-01');
+    expect(parseCalendarSendRun({ date: '2027-10-02', idempotencyKey: key }, now).date).toBe('2027-10-02');
+    for (const date of ['2025-09-29', '2027-10-03', '2026-02-30', '2026-9-1']) {
+      expect(() => parseCalendarSendRun({ date, idempotencyKey: key }, now)).toThrow();
+    }
+    expect(() => parseCalendarSendRun({ date: '2026-10-01', idempotencyKey: key, extra: 1 }, now)).toThrow();
+    const base = { version: 1, groupChatId: ' 120363338054016575@g.us ', cardsPerMessage: 2, captionTemplate: 'Заказы на {target_date}', minIntervalMinutes: 15 };
+    expect(parseCalendarSendUpdate(base)).toMatchObject({ groupChatId: '120363338054016575@g.us', minIntervalMinutes: 15 });
+    for (const minIntervalMinutes of [0, 1441, 1.5]) expect(() => parseCalendarSendUpdate({ ...base, minIntervalMinutes })).toThrow();
+    expect(() => parseCalendarSendUpdate({ ...base, captionTemplate: '{nope}' })).toThrow();
+    expect(() => parseCalendarSendUpdate({ ...base, groupChatId: 'bad' })).toThrow();
+  });
+});
+
 describe('broadcast DTO', () => {
   it('normalizes name, weekdays and caption', () => {
     const input = parseBroadcastCreate(base);

@@ -1,4 +1,6 @@
 import React from 'react';
+import { LoadingOutlined, SendOutlined } from '@ant-design/icons';
+import { Tooltip } from '../../../ui/tooltipDelay';
 import { Empty } from 'antd';
 import { useDrop } from 'react-dnd';
 import OrderCard, { DRAG_TYPE } from './OrderCard';
@@ -21,6 +23,9 @@ const DayColumn: React.FC<DayColumnProps> = ({
   productionWorkflowDisplay,
   onDrop,
   onContextMenu,
+  onDayContextMenu,
+  onDaySend,
+  daySending = false,
   onCheckboxChange,
   showFinancials = true,
 }) => {
@@ -48,6 +53,24 @@ const DayColumn: React.FC<DayColumnProps> = ({
       canDrop: monitor.canDrop(),
     }),
   });
+
+  // Header click / right click opens the day menu. Clicks on interactive children
+  // (the send icon, any button/link/input) are not hijacked.
+  const handleHeaderClick = (e: React.MouseEvent<HTMLElement>) => {
+    if (!onDayContextMenu) return;
+    if ((e.target as HTMLElement).closest('button, a, input, [role="button"]')) return;
+    onDayContextMenu(e, date);
+  };
+  const handleHeaderContextMenu = (e: React.MouseEvent<HTMLElement>) => {
+    if (!onDayContextMenu) return;
+    e.preventDefault();
+    onDayContextMenu(e, date);
+  };
+  const handleSendClick = (e: React.MouseEvent<HTMLElement>) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!daySending && onDaySend) onDaySend(date);
+  };
 
   // Форматируем дату для отображения (12.11.2025)
   const [day, month, year] = dateKey.split('.');
@@ -81,7 +104,11 @@ const DayColumn: React.FC<DayColumnProps> = ({
       }}
     >
       {/* Заголовок дня: Пн (17.11.2025) - 55.54 кв.м. */}
-      <div className="day-column__header">
+      <div
+        className="day-column__header"
+        onClick={onDayContextMenu ? handleHeaderClick : undefined}
+        onContextMenu={onDayContextMenu ? handleHeaderContextMenu : undefined}
+      >
         <div className="day-column__header-top">
           <div className="day-column__header-left">
             <span className="day-column__day-name">{dayName}</span>
@@ -89,7 +116,21 @@ const DayColumn: React.FC<DayColumnProps> = ({
               {isOperational ? `${day}.${month}` : `(${formattedDate})`}
             </span>
           </div>
-          <div className="day-column__header-right">
+          <div className={`day-column__header-right${onDaySend ? ' day-column__header-right--with-send' : ''}`}>
+            {onDaySend ? (
+              <Tooltip title="Отправить в чат">
+                <button
+                  type="button"
+                  className={`day-column__send${daySending ? ' day-column__send--busy' : ''}`}
+                  aria-label="Отправить в чат"
+                  aria-busy={daySending}
+                  aria-disabled={daySending}
+                  onClick={handleSendClick}
+                >
+                  {daySending ? <LoadingOutlined spin /> : <SendOutlined />}
+                </button>
+              </Tooltip>
+            ) : null}
             <span className="day-column__total-area">
               {totalArea > 0 ? `${totalArea.toFixed(2)} м²` : '—'}
             </span>

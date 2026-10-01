@@ -68,7 +68,7 @@ describe.skipIf(!databaseUrl)('BroadcastRepository PostgreSQL (isolated schema)'
       INSERT INTO users VALUES (11, 'broadcast-admin', 1, true), (12, 'broadcast-other', 2, true);
       INSERT INTO permissions_catalog(permission_name) VALUES ('whatsapp.manage'),('calendar.view'),('orders.view'),('orders.view_financials');
       INSERT INTO role_permissions(role_id, permission_name) SELECT r, p FROM (VALUES (1),(2)) roles(r), permissions_catalog pc(p);`);
-    for (const file of ['183_whatsapp_daily_digest.sql', '184_whatsapp_daily_digest_schedule.sql', '209_whatsapp_broadcasts.sql']) {
+    for (const file of ['183_whatsapp_daily_digest.sql', '184_whatsapp_daily_digest_schedule.sql', '209_whatsapp_broadcasts.sql', '224_whatsapp_calendar_send.sql']) {
       await q(await readFile(new URL(`../../../../db/migrations/${file}`, import.meta.url), 'utf8'));
     }
     database = {
@@ -458,5 +458,180 @@ describe.skipIf(!databaseUrl)('BroadcastRepository PostgreSQL (isolated schema)'
       await q(`SET search_path="${schema}",public`);
       await q(`DROP SCHEMA IF EXISTS "${reference}" CASCADE`);
     }
+  });
+
+  describe('«Отправить в чат» from the calendar (migration 224)', () => {
+    const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Almaty' }).format(new Date());
+    const shift = (date: string, days: number) => {
+      const [y, m, d] = date.split('-').map(Number);
+      return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+    };
+    const calendarId = () => repository.calendarBroadcastId();
+    const calendarRun = async (targetDate: string, orderIds = [5, 6], key = randomUUID()) => {
+      const state = await repository.getCalendarSend();
+      return repository.createManualRun({ broadcastId: state.settings.broadcastId, settingsVersion: state.settings.version, idempotencyKey: key,
+        fingerprint: commandFingerprint({ kind: 'calendar', date: targetDate, key }), actor: admin, requestId: `req-cal-${key}`,
+        businessDate: today(), targetDate, snapshot: snapshotFor(targetDate, orderIds), images: orderIds.length ? [image(1, orderIds)] : [],
+        imageExpiresAt: FAR_FUTURE, source: 'calendar' });
+    };
+    const finish = async (runId: string) => {
+      for (const { delivery_seq: seq } of (await q<{ delivery_seq: number }>('SELECT delivery_seq FROM whatsapp_broadcast_messages WHERE run_id = $1 ORDER BY delivery_seq', [runId])).rows) {
+        const grant = await repository.createSendIntent(runId, seq, true);
+        expect(grant).not.toBeNull();
+        await repository.settleMessage(runId, seq, grant!.token, { state: 'sent', providerMessageId: `wamid-${seq}` });
+      }
+    };
+    const setLastDelivery = (minutesAgo: number | null) => q(`UPDATE whatsapp_broadcasts SET calendar_last_delivery_at = $1 WHERE purpose = 'calendar'`,
+      [minutesAgo === null ? null : new Date(Date.now() - minutesAgo * 60_000)]);
+    const configure = async (group: string | null = GROUP, minIntervalMinutes = 15) => {
+      const state = await repository.getCalendarSend();
+      return repository.updateCalendarSend({ version: state.settings.version, groupChatId: group, cardsPerMessage: 2, captionTemplate: 'Заказы на {target_date}',
+        minIntervalMinutes }, admin, `req-${randomUUID()}`);
+    };
+
+    beforeEach(async () => {
+      await q(`UPDATE whatsapp_broadcast_runs SET state = 'sent' WHERE state IN ('preparing','queued','sending')`);
+      await setLastDelivery(null);
+      await configure();
+    });
+
+    it('creates one hidden, never-scheduled system broadcast with a 15-minute default threshold', async () => {
+      const id = await calendarId();
+      const row = (await q('SELECT purpose, enabled, weekdays, calendar_min_interval_minutes FROM whatsapp_broadcasts WHERE broadcast_id = $1', [id])).rows[0];
+      expect(row).toMatchObject({ purpose: 'calendar', enabled: false, weekdays: [], calendar_min_interval_minutes: 15 });
+      expect((await repository.listBroadcasts()).map((broadcast) => broadcast.id)).not.toContain(id);
+      expect(await repository.listActiveBroadcastIds()).not.toContain(id);
+      await expect(q('UPDATE whatsapp_broadcasts SET enabled = true WHERE broadcast_id = $1', [id])).rejects.toThrow(/chk_whatsapp_broadcasts_calendar_manual/);
+      await expect(q(`INSERT INTO whatsapp_broadcasts (name, purpose, calendar_min_interval_minutes) VALUES ('second', 'calendar', 15)`)).rejects.toThrow(/idx_whatsapp_broadcasts_calendar_active/);
+      await expect(q('UPDATE whatsapp_broadcasts SET calendar_min_interval_minutes = 0 WHERE broadcast_id = $1', [id])).rejects.toThrow(/chk_whatsapp_broadcasts_calendar_interval/);
+      // NULL must not switch the threshold off either.
+      await expect(q('UPDATE whatsapp_broadcasts SET calendar_min_interval_minutes = NULL WHERE broadcast_id = $1', [id])).rejects.toThrow(/chk_whatsapp_broadcasts_calendar_interval/);
+      await expect(q(`UPDATE whatsapp_broadcasts SET calendar_last_delivery_at = now() WHERE purpose = 'schedule'`)).rejects.toThrow(/chk_whatsapp_broadcasts_calendar_interval/);
+      // Its name does not block a user broadcast with the same name.
+      expect((await create({ name: 'Отправка из календаря', enabled: false })).name).toBe('Отправка из календаря');
+    });
+
+    it('updates the settings with compare-and-swap and audits the threshold change', async () => {
+      const before = await repository.getCalendarSend();
+      const after = await repository.updateCalendarSend({ version: before.settings.version, groupChatId: OTHER_GROUP, cardsPerMessage: 1,
+        captionTemplate: 'День {target_date}', minIntervalMinutes: 30 }, admin, 'req-cal-settings');
+      expect(after.settings).toMatchObject({ version: before.settings.version + 1, groupChatId: OTHER_GROUP, cardsPerMessage: 1, minIntervalMinutes: 30 });
+      await expect(repository.updateCalendarSend({ ...after.settings, version: before.settings.version }, admin, 'req-stale'))
+        .rejects.toMatchObject({ code: 'BROADCAST_VERSION_CONFLICT' });
+      const audit = (await q<{ diff_json: Record<string, unknown>; metadata_json: Record<string, unknown> }>(
+        `SELECT diff_json, metadata_json FROM audit_log WHERE request_id = 'req-cal-settings'`)).rows[0];
+      expect(audit.metadata_json).toMatchObject({ purpose: 'calendar' });
+      expect(Object.keys(audit.diff_json)).toEqual(expect.arrayContaining(['minIntervalMinutes', 'cardsPerMessage', 'groupFingerprint']));
+      expect(JSON.stringify(audit)).not.toContain('429893275855');
+    });
+
+    it('refuses the ordinary routes for the system broadcast and calendar runs for user broadcasts', async () => {
+      const id = await calendarId();
+      const state = await repository.getCalendarSend();
+      await expect(repository.updateBroadcast(id, { ...input({ enabled: false }), version: state.settings.version }, admin, 'r')).rejects.toMatchObject({ code: 'BROADCAST_SYSTEM' });
+      await expect(repository.archiveBroadcast(id, state.settings.version, admin, 'r')).rejects.toMatchObject({ code: 'BROADCAST_SYSTEM' });
+      await expect(repository.replanToday({ broadcastId: id, version: state.settings.version, idempotencyKey: randomUUID(), fingerprint: 'f'.repeat(64), actor: admin, requestId: 'r', now: new Date() }))
+        .rejects.toMatchObject({ code: 'BROADCAST_SYSTEM' });
+      await expect(repository.createManualRun({ broadcastId: id, settingsVersion: state.settings.version, idempotencyKey: randomUUID(), fingerprint: 'a'.repeat(64),
+        actor: admin, requestId: 'r', businessDate: today(), targetDate: today(), snapshot: snapshotFor(today(), [1]), images: [image(1, [1])], imageExpiresAt: FAR_FUTURE }))
+        .rejects.toMatchObject({ code: 'BROADCAST_SYSTEM' });
+      const user = await create({ enabled: false });
+      await expect(repository.createManualRun({ broadcastId: user.id, settingsVersion: user.version, idempotencyKey: randomUUID(), fingerprint: 'b'.repeat(64),
+        actor: admin, requestId: 'r', businessDate: today(), targetDate: today(), snapshot: snapshotFor(today(), [1]), images: [image(1, [1])], imageExpiresAt: FAR_FUTURE, source: 'calendar' }))
+        .rejects.toMatchObject({ code: 'BROADCAST_SYSTEM' });
+    });
+
+    it('accepts any calendar day within a year (past days too) while broadcast runs keep 0..14 days', async () => {
+      const past = await calendarRun(shift(today(), -10), []);
+      expect((await q('SELECT state, source FROM whatsapp_broadcast_runs WHERE run_id = $1', [past.runId])).rows[0]).toEqual({ state: 'empty', source: 'calendar' });
+      expect((await calendarRun(shift(today(), 366), [])).replayed).toBe(false);
+      await expect(calendarRun(shift(today(), -367), [])).rejects.toThrow(/chk_whatsapp_broadcast_runs_target/);
+      const user = await create({ enabled: false });
+      await expect(repository.createManualRun({ broadcastId: user.id, settingsVersion: user.version, idempotencyKey: randomUUID(), fingerprint: 'c'.repeat(64),
+        actor: admin, requestId: 'r', businessDate: today(), targetDate: shift(today(), -1), snapshot: snapshotFor(today(), []), images: [], imageExpiresAt: FAR_FUTURE }))
+        .rejects.toThrow(/chk_whatsapp_broadcast_runs_target/);
+    });
+
+    it('allows one active calendar send, then waits for the threshold counted from the delivery start', async () => {
+      const first = await calendarRun(today());
+      await expect(calendarRun(shift(today(), 1))).rejects.toMatchObject({ code: 'BROADCAST_CALENDAR_ACTIVE' });
+      await finish(first.runId);
+      const last = (await q<{ at: Date }>(`SELECT calendar_last_delivery_at at FROM whatsapp_broadcasts WHERE purpose = 'calendar'`)).rows[0].at;
+      expect(Date.now() - last.getTime()).toBeLessThan(60_000);
+      const refusal = await calendarRun(shift(today(), 1)).catch((error) => error);
+      expect(refusal).toMatchObject({ code: 'BROADCAST_CALENDAR_COOLDOWN', details: { minIntervalMinutes: 15 } });
+      expect(Date.parse(refusal.details.nextAllowedAt)).toBe(last.getTime() + 15 * 60_000);
+      expect((await repository.getCalendarSend()).nextAllowedAt).toBe(refusal.details.nextAllowedAt);
+      await setLastDelivery(16);
+      expect((await calendarRun(shift(today(), 1))).replayed).toBe(false);
+    });
+
+    it('does not spend the threshold on an empty day and replays a key even within the threshold', async () => {
+      await calendarRun(today(), []);
+      expect((await repository.getCalendarSend()).nextAllowedAt).toBeNull();
+      const key = randomUUID();
+      const sent = await calendarRun(today(), [7], key);
+      await finish(sent.runId);
+      expect(await calendarRun(today(), [7], key)).toEqual({ runId: sent.runId, replayed: true });
+      await expect(calendarRun(today(), [7])).rejects.toMatchObject({ code: 'BROADCAST_CALENDAR_COOLDOWN' });
+    });
+
+    it('lets only one of two simultaneous calendar sends through (independent connections)', async () => {
+      const results = await Promise.allSettled([calendarRun(today()), calendarRun(shift(today(), 1))]);
+      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+      expect(results.find((result) => result.status === 'rejected')).toMatchObject({ reason: { code: 'BROADCAST_CALENDAR_ACTIVE' } });
+    });
+
+    it('holds the first delivery of a calendar run until the threshold has passed (gate under the broadcast lock)', async () => {
+      const run = await calendarRun(today());
+      // Another calendar delivery started a minute ago (e.g. a retry after a pause): this run must wait.
+      await setLastDelivery(1);
+      expect(await repository.createSendIntent(run.runId, 1, true)).toBeNull();
+      const waiting = (await q<{ next_attempt_at: Date; state: string }>('SELECT next_attempt_at, state FROM whatsapp_broadcast_messages WHERE run_id = $1', [run.runId])).rows[0];
+      expect(waiting.state).toBe('pending');
+      expect(waiting.next_attempt_at.getTime()).toBeGreaterThan(Date.now() + 13 * 60_000);
+      await setLastDelivery(20);
+      await q('UPDATE whatsapp_broadcast_messages SET next_attempt_at = now() WHERE run_id = $1', [run.runId]);
+      expect(await repository.createSendIntent(run.runId, 1, true)).not.toBeNull();
+      const started = (await q<{ at: Date }>(`SELECT calendar_last_delivery_at at FROM whatsapp_broadcasts WHERE purpose = 'calendar'`)).rows[0].at;
+      expect(Date.now() - started.getTime()).toBeLessThan(60_000);
+    });
+
+    it('subjects retries of calendar runs to the threshold and keeps their source', async () => {
+      const run = await calendarRun(today());
+      const grant = await repository.createSendIntent(run.runId, 1, true);
+      await repository.settleMessage(run.runId, 1, grant!.token, { state: 'failed', errorCode: 'WAHA_PROVIDER_ERROR' });
+      const retryInput = { mode: 'remaining' as const, idempotencyKey: randomUUID(), duplicateRiskConfirmed: false, actor: admin, requestId: 'req-cal-retry',
+        fingerprintFor: (id: number) => commandFingerprint({ kind: 'retry', id }) };
+      await expect(repository.createRetry(run.runId, retryInput)).rejects.toMatchObject({ code: 'BROADCAST_CALENDAR_COOLDOWN' });
+      await setLastDelivery(16);
+      const retry = await repository.createRetry(run.runId, retryInput);
+      expect((await q('SELECT source FROM whatsapp_broadcast_runs WHERE run_id = $1', [retry.runId])).rows[0].source).toBe('calendar');
+    });
+
+    it('serves the calendar queue head before older broadcast queues', async () => {
+      const user = await create({ enabled: false });
+      await repository.createManualRun({ broadcastId: user.id, settingsVersion: user.version, idempotencyKey: randomUUID(), fingerprint: 'd'.repeat(64),
+        actor: admin, requestId: 'r', businessDate: today(), targetDate: today(), snapshot: snapshotFor(today(), [1]), images: [image(1, [1])], imageExpiresAt: FAR_FUTURE });
+      const calendar = await calendarRun(today());
+      expect((await repository.listDeliverableRuns())[0]).toBe(calendar.runId);
+    });
+
+    it('rollback runbook SQL archives the system broadcast and cancels its unsent work; un-archiving restores it', async () => {
+      const run = await calendarRun(today());
+      await q(`BEGIN;
+        UPDATE whatsapp_broadcast_messages m SET state = 'cancelled', error_code = 'CALENDAR_ROLLBACK', updated_at = now()
+          FROM whatsapp_broadcast_runs r, whatsapp_broadcasts b
+          WHERE m.run_id = r.run_id AND r.broadcast_id = b.broadcast_id AND b.purpose = 'calendar' AND m.state = 'pending';
+        UPDATE whatsapp_broadcast_runs r SET state = 'cancelled', reason = 'CALENDAR_ROLLBACK', updated_at = now()
+          FROM whatsapp_broadcasts b WHERE r.broadcast_id = b.broadcast_id AND b.purpose = 'calendar' AND r.state IN ('preparing','queued','sending');
+        UPDATE whatsapp_broadcasts SET archived_at = now() WHERE purpose = 'calendar' AND archived_at IS NULL;
+        COMMIT;`);
+      expect((await q('SELECT state FROM whatsapp_broadcast_runs WHERE run_id = $1', [run.runId])).rows[0].state).toBe('cancelled');
+      expect(await repository.listDeliverableRuns()).not.toContain(run.runId);
+      await expect(repository.getCalendarSend()).rejects.toMatchObject({ code: 'BROADCAST_CALENDAR_UNAVAILABLE' });
+      await q(`UPDATE whatsapp_broadcasts SET archived_at = NULL WHERE purpose = 'calendar'`);
+      expect((await repository.getCalendarSend()).settings.broadcastId).toBe(await calendarId());
+    });
   });
 });

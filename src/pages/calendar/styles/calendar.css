@@ -266,6 +266,47 @@
   text-align: right;
 }
 
+.day-column__header-right--with-send {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.day-column__header-right--with-send .day-column__send {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 18px;
+  margin: -2px 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--app-text-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.day-column__send:hover:not(.day-column__send--busy),
+.day-column__send:focus-visible {
+  color: #1890ff;
+}
+
+.day-column__send--busy {
+  cursor: default;
+}
+
+@media (pointer: coarse) {
+  .day-column__header-right--with-send .day-column__send {
+    width: 32px;
+    margin: -8px -4px -8px 0;
+    height: 34px;
+  }
+}
+
 .day-column__total-area {
   font-weight: 700;
   font-size: 14px;

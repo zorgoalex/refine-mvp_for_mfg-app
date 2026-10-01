@@ -2,6 +2,9 @@ import { apiRoutes } from './apiRoutes';
 import { httpClient } from './httpClient';
 import type {
   BroadcastCatalog,
+  CalendarSendEnvelope,
+  CalendarSendRunInput,
+  CalendarSendUpdateInput,
   BroadcastControl,
   BroadcastEnvelope,
   BroadcastInput,
@@ -41,6 +44,11 @@ export const broadcastsApi = {
   run: (runId: string) => httpClient.get<BroadcastRunDetail>(routes.runById(runId)),
   messageImage: async (runId: string, seq: number) =>
     (await httpClient.download(routes.messageImage(runId, seq))).blob,
+  calendarSendSettings: () => httpClient.get<CalendarSendEnvelope>(routes.calendarSend),
+  updateCalendarSendSettings: (body: CalendarSendUpdateInput) =>
+    httpClient.put<CalendarSendEnvelope>(routes.calendarSend, body),
+  calendarSend: (body: CalendarSendRunInput) =>
+    httpClient.post<BroadcastRunDetail>(routes.calendarSendRuns, body),
   retry: (runId: string, body: BroadcastRetryInput) =>
     httpClient.post<BroadcastRunResponse>(routes.retry(runId), body),
 };

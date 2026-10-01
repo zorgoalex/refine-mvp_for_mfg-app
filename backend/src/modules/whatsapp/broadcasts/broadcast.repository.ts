@@ -15,6 +15,7 @@ import {
   BROADCAST_BASE_PERMISSIONS, BROADCAST_MAX_ACTIVE,
   type Broadcast, type BroadcastControl, type BroadcastInput, type BroadcastMessage, type BroadcastRun, type BroadcastRunDetail,
   type BroadcastRunState, type BroadcastSchedule, type BroadcastStoredImage, type BroadcastSummary, type BroadcastUpdateInput,
+  type CalendarSendSettings, type CalendarSendState, type CalendarSendUpdateInput,
 } from './broadcast.types';
 
 type Client = Pick<DatabaseService, 'query'> | TransactionClient;
@@ -26,6 +27,7 @@ interface BroadcastRow extends QueryResultRow {
   partial_policy: string; schedule_generation: number; order_date_offset_days: number; cards_per_message: number;
   caption_template: string; required_permissions: string[]; created_at: Date; updated_at: Date;
   updated_by: string | number | null; updated_by_username?: string | null; archived_at: Date | null;
+  purpose: 'schedule' | 'calendar'; calendar_min_interval_minutes: number | null; calendar_last_delivery_at: Date | null;
 }
 interface ScheduleRow extends QueryResultRow {
   broadcast_id: string | number; business_date: string | Date; generation: number; scheduled_at: Date; window_start: string;
@@ -43,7 +45,7 @@ interface FullRunRow extends RunRow {
   snapshot_author_user_id: string | number | null; initiated_by_user_id: string | number | null; required_permissions: string[];
   counter_value: string | number | null; catch_up_policy: string; deadline_at: Date | null; partial_policy: string;
   cards_per_message: number; snapshot: DailyDigestSnapshot | null; renderer_version: string; retry_depth: number;
-  content_purged_at: Date | null; request_id: string | null;
+  content_purged_at: Date | null; request_id: string | null; source: 'broadcast' | 'calendar';
 }
 interface ControlRow extends QueryResultRow {
   paused: boolean; version: number; paused_at: Date | null; paused_by: string | number | null; paused_by_username?: string | null;
@@ -82,7 +84,7 @@ export class BroadcastRepository {
       FROM whatsapp_broadcasts b
       LEFT JOIN LATERAL (SELECT r.state, r.created_at FROM whatsapp_broadcast_runs r
         WHERE r.broadcast_id = b.broadcast_id ORDER BY r.created_at DESC, r.run_id DESC LIMIT 1) last ON true
-      WHERE b.archived_at IS NULL ORDER BY lower(b.name), b.broadcast_id`);
+      WHERE b.archived_at IS NULL AND b.purpose = 'schedule' ORDER BY lower(b.name), b.broadcast_id`);
     return rows.rows.map((row) => ({
       id: Number(row.broadcast_id), name: row.name, enabled: row.enabled, groupChatId: row.group_chat_id,
       weekdays: row.weekdays.map(Number), sendTime: time5(row.send_time), sendWindowMinutes: Number(row.send_window_minutes),
@@ -130,6 +132,7 @@ export class BroadcastRepository {
       // Enabling is serialized before the broadcast lock so the 20-broadcast cap holds under concurrency.
       if (input.enabled) await lockCapacity(tx);
       const before = await this.lockBroadcast(tx, id, 'UPDATE');
+      if (before.purpose !== 'schedule') throw systemBroadcast();
       if (before.archived_at) throw archived();
       if (before.version !== input.version) throw versionConflict();
       if (input.enabled && !before.enabled) await this.assertActiveCapacity(tx, id);
@@ -158,6 +161,7 @@ export class BroadcastRepository {
     return this.database.transaction(async (tx) => {
       await tx.query('SELECT paused FROM whatsapp_broadcast_control WHERE singleton_id = 1 FOR SHARE');
       const before = await this.lockBroadcast(tx, id, 'UPDATE');
+      if (before.purpose !== 'schedule') throw systemBroadcast();
       if (before.archived_at) throw archived();
       if (before.version !== version) throw versionConflict();
       await tx.query(`UPDATE whatsapp_broadcasts SET version = version + 1, enabled = FALSE, archived_at = now(), archived_by = $2,
@@ -368,7 +372,10 @@ export class BroadcastRepository {
   async createManualRun(input: {
     broadcastId: number; settingsVersion: number; idempotencyKey: string; fingerprint: string; actor: CurrentUser; requestId: string;
     businessDate: string; targetDate: string; snapshot: DailyDigestSnapshot; images: BroadcastStoredImage[]; imageExpiresAt: Date;
+    /** 'calendar' only for «Отправить в чат»; the system broadcast refuses ordinary manual runs. */
+    source?: 'broadcast' | 'calendar';
   }, beforeCommit?: () => Promise<void>): Promise<{ runId: string; replayed: boolean }> {
+    const source = input.source ?? 'broadcast';
     return this.database.transaction(async (tx) => {
       const control = (await tx.query<{ paused: boolean }>('SELECT paused FROM whatsapp_broadcast_control WHERE singleton_id = 1 FOR SHARE')).rows[0];
       const broadcast = await this.lockBroadcast(tx, input.broadcastId, 'UPDATE');
@@ -376,8 +383,10 @@ export class BroadcastRepository {
       if (prior) return { runId: String(prior.runId), replayed: true };
       if (!control || control.paused) throw paused();
       if (broadcast.archived_at) throw archived();
+      if ((broadcast.purpose === 'calendar') !== (source === 'calendar')) throw systemBroadcast();
       if (broadcast.version !== input.settingsVersion) throw versionConflict();
       if (!broadcast.group_chat_id) throw new ApiError(409, 'BROADCAST_DESTINATION_REQUIRED', 'Укажите группу WhatsApp перед отправкой');
+      if (broadcast.purpose === 'calendar') await this.assertCalendarAvailable(tx, broadcast);
       const runId = randomUUID();
       const commandId = randomUUID();
       await this.insertCommand(tx, commandId, input.broadcastId, 'manual', input.idempotencyKey, input.fingerprint, { runId }, input.actor, input.requestId);
@@ -386,18 +395,18 @@ export class BroadcastRepository {
         INSERT INTO whatsapp_broadcast_runs (run_id, broadcast_id, business_date, target_date, kind, root_run_id, command_id,
           settings_version, snapshot_author_user_id, initiated_by_user_id, required_permissions, destination_chat_id, catch_up_policy,
           deadline_at, partial_policy, cards_per_message, snapshot, renderer_version, order_count, total_area, state, reason,
-          request_id, image_expires_at)
+          request_id, image_expires_at, source)
         VALUES ($1, $2, $3::date, $4::date, 'manual', $1, $5, $6, $7, $7, $8::text[], $9, $10, $11, $12, $13, $14::jsonb, $15, $16, $17,
-          $18, $19, $20, $21)`,
+          $18, $19, $20, $21, $22)`,
       [runId, input.broadcastId, input.businessDate, input.targetDate, commandId, broadcast.version, input.actor.id,
         broadcast.required_permissions, broadcast.group_chat_id, broadcast.catch_up_policy, empty ? null : input.imageExpiresAt,
         broadcast.partial_policy, broadcast.cards_per_message, JSON.stringify(input.snapshot), input.snapshot.rendererVersion,
         input.snapshot.orders.length, input.snapshot.totalArea, empty ? 'empty' : 'queued', empty ? 'NO_ORDERS' : null,
-        input.requestId, empty ? null : input.imageExpiresAt]);
+        input.requestId, empty ? null : input.imageExpiresAt, source]);
       await this.insertImages(tx, runId, input.images);
       const orderIds = input.snapshot.orders.map((order) => order.orderId);
       await this.audit(tx, input.actor, input.requestId, 'run.manual', 'whatsapp_broadcast_run', runId,
-        { businessDate: input.businessDate, targetDate: input.targetDate, orderCount: orderIds.length, messageCount: input.images.length, state: empty ? 'empty' : 'queued' },
+        { businessDate: input.businessDate, targetDate: input.targetDate, orderCount: orderIds.length, messageCount: input.images.length, source, state: empty ? 'empty' : 'queued' },
         { broadcastId: input.broadcastId, orderIds });
       await beforeCommit?.();
       return { runId, replayed: false };
@@ -431,6 +440,7 @@ export class BroadcastRepository {
       // Separate codes: the limit is final, an active retry in the chain is temporary (clients keep their key).
       if (lineage.retryCount >= 3) throw new ApiError(409, 'BROADCAST_RETRY_LIMIT', 'Достигнут предел повторных запусков');
       if (lineage.hasActive) throw new ApiError(409, 'BROADCAST_RETRY_ACTIVE', 'Повторная отправка уже выполняется; дождитесь её завершения');
+      if (broadcast.purpose === 'calendar') await this.assertCalendarAvailable(tx, broadcast);
       const rows = (await tx.query<MessageRow>('SELECT * FROM whatsapp_broadcast_messages WHERE run_id = $1 ORDER BY delivery_seq FOR UPDATE', [parentRunId])).rows;
       if (!rows.length) throw new ApiError(409, 'BROADCAST_RETRY_NOT_AVAILABLE', 'В запуске нет сообщений для повтора');
       const hasUncertain = rows.some((row) => row.state === 'unknown');
@@ -465,6 +475,7 @@ export class BroadcastRepository {
       const prior = await findCommandIn(tx, input.broadcastId, input.idempotencyKey, input.fingerprint);
       if (prior) return { generation: Number(prior.generation), replayed: true };
       if (!control || control.paused) throw paused();
+      if (broadcast.purpose !== 'schedule') throw systemBroadcast();
       if (broadcast.archived_at) throw archived();
       if (broadcast.version !== input.version) throw versionConflict();
       const date = businessDate(input.now);
@@ -500,10 +511,12 @@ export class BroadcastRepository {
   /** One queued/sending run per broadcast (oldest first) for round-robin delivery. */
   async listDeliverableRuns(): Promise<string[]> {
     const rows = await this.database.query<{ run_id: string }>(`
-      SELECT run_id FROM (
-        SELECT DISTINCT ON (broadcast_id) run_id, created_at FROM whatsapp_broadcast_runs
+      SELECT heads.run_id FROM (
+        SELECT DISTINCT ON (broadcast_id) run_id, broadcast_id, created_at FROM whatsapp_broadcast_runs
         WHERE state IN ('queued','sending') AND content_purged_at IS NULL ORDER BY broadcast_id, created_at, run_id) heads
-      ORDER BY created_at, run_id LIMIT ${BROADCAST_MAX_ACTIVE}`);
+      JOIN whatsapp_broadcasts b ON b.broadcast_id = heads.broadcast_id
+      -- «Отправить в чат» from the calendar is served first, then queues by age.
+      ORDER BY (b.purpose = 'calendar') DESC, heads.created_at, heads.run_id LIMIT ${BROADCAST_MAX_ACTIVE}`);
     return rows.rows.map((row) => row.run_id);
   }
 
@@ -524,13 +537,15 @@ export class BroadcastRepository {
 
   /** Grant one send attempt, re-checking every barrier under the locks (plan §2.1, §4.3, §6.3). */
   async createSendIntent(runId: string, seq: number, runtimeEnabled: boolean, clock: () => Date = () => new Date()): Promise<IntentGrant | null> {
-    const owner = (await this.database.query<{ broadcast_id: string }>('SELECT broadcast_id FROM whatsapp_broadcast_runs WHERE run_id = $1', [runId])).rows[0];
+    const owner = (await this.database.query<{ broadcast_id: string; purpose: string }>(`SELECT r.broadcast_id, b.purpose
+      FROM whatsapp_broadcast_runs r JOIN whatsapp_broadcasts b ON b.broadcast_id = r.broadcast_id WHERE r.run_id = $1`, [runId])).rows[0];
     if (!owner) return null;
     const broadcastId = Number(owner.broadcast_id);
     return this.database.transaction(async (tx) => {
       const control = (await tx.query<{ paused: boolean }>('SELECT paused FROM whatsapp_broadcast_control WHERE singleton_id = 1 FOR SHARE')).rows[0];
       if (!control || control.paused) return null;
-      const broadcast = await this.lockBroadcast(tx, broadcastId, 'SHARE');
+      // The system broadcast row carries the calendar delivery mark: lock it for update (same lock order).
+      const broadcast = await this.lockBroadcast(tx, broadcastId, owner.purpose === 'calendar' ? 'UPDATE' : 'SHARE');
       const run = (await tx.query<FullRunRow>('SELECT * FROM whatsapp_broadcast_runs WHERE run_id = $1 FOR UPDATE', [runId])).rows[0];
       const message = (await tx.query<MessageRow & { next_attempt_at: Date; text_body: string | null }>(
         'SELECT * FROM whatsapp_broadcast_messages WHERE run_id = $1 AND delivery_seq = $2 FOR UPDATE', [runId, seq])).rows[0];
@@ -574,6 +589,20 @@ export class BroadcastRepository {
         await this.audit(tx, null, run.request_id, 'run.permission_revoked', 'whatsapp_broadcast_run', runId,
           { authorOk, initiatorOk, stage: 'send_intent', state: revokedState }, { broadcastId });
         return null;
+      }
+      if (broadcast.purpose === 'calendar' && !run.auto_origin) {
+        // Frequency threshold: a calendar delivery (new send or user retry) starts at most once per interval.
+        const started = (await tx.query<{ started: boolean }>(`SELECT EXISTS (SELECT 1 FROM whatsapp_broadcast_messages
+          WHERE run_id = $1 AND attempt_count > 0) started`, [runId])).rows[0]?.started;
+        if (!started) {
+          const allowedAt = calendarAllowedAt(broadcast);
+          if (allowedAt && allowedAt.getTime() > now.getTime()) {
+            await tx.query('UPDATE whatsapp_broadcast_messages SET next_attempt_at = $3, updated_at = now() WHERE run_id = $1 AND delivery_seq = $2',
+              [runId, seq, allowedAt]);
+            return null;
+          }
+          await tx.query('UPDATE whatsapp_broadcasts SET calendar_last_delivery_at = $2 WHERE broadcast_id = $1', [broadcastId, now]);
+        }
       }
       const token = randomUUID();
       await tx.query(`UPDATE whatsapp_broadcast_messages SET state = 'sending', attempt_count = attempt_count + 1, send_started_at = now(),
@@ -762,6 +791,68 @@ export class BroadcastRepository {
 
   // ---------------------------------------------------------------- internals
 
+  /** Refuses a new calendar send or retry: another one is queued/sending, or the frequency threshold has not passed. */
+  private async assertCalendarAvailable(client: Client, broadcast: BroadcastRow) {
+    const state = await this.calendarState(client, broadcast);
+    if (state.activeRun) throw new ApiError(409, 'BROADCAST_CALENDAR_ACTIVE', 'Предыдущая отправка из календаря ещё не завершена');
+    if (state.nextAllowedAt) {
+      throw new ApiError(409, 'BROADCAST_CALENDAR_COOLDOWN', 'Отправка из календаря возможна не чаще установленного интервала',
+        { nextAllowedAt: state.nextAllowedAt, minIntervalMinutes: Number(broadcast.calendar_min_interval_minutes) });
+    }
+  }
+
+  private async calendarState(client: Client, broadcast: BroadcastRow): Promise<{ nextAllowedAt: string | null; activeRun: boolean }> {
+    const active = (await client.query<{ active: boolean }>(`SELECT EXISTS (SELECT 1 FROM whatsapp_broadcast_runs
+      WHERE broadcast_id = $1 AND state IN ('preparing','queued','sending')) active`, [broadcast.broadcast_id])).rows[0]?.active ?? false;
+    const allowedAt = calendarAllowedAt(broadcast);
+    return { activeRun: active, nextAllowedAt: allowedAt && allowedAt.getTime() > Date.now() ? allowedAt.toISOString() : null };
+  }
+
+  private async calendarRow(client: Client, lock?: 'UPDATE'): Promise<BroadcastRow> {
+    const row = (await client.query<BroadcastRow>(`SELECT b.*, u.username updated_by_username FROM whatsapp_broadcasts b
+      LEFT JOIN users u ON u.user_id = b.updated_by
+      WHERE b.purpose = 'calendar' AND b.archived_at IS NULL${lock ? ' FOR UPDATE OF b' : ''}`)).rows[0];
+    if (!row) throw new ApiError(503, 'BROADCAST_CALENDAR_UNAVAILABLE', 'Отправка из календаря не настроена на сервере');
+    return row;
+  }
+
+  async broadcastPurpose(id: number): Promise<'schedule' | 'calendar'> {
+    const row = (await this.database.query<{ purpose: 'schedule' | 'calendar' }>('SELECT purpose FROM whatsapp_broadcasts WHERE broadcast_id = $1', [id])).rows[0];
+    if (!row) throw notFound();
+    return row.purpose;
+  }
+
+  /** Early refusal before rendering (no lock); createManualRun repeats it under the broadcast lock. */
+  async preflightCalendar(): Promise<void> {
+    await this.assertCalendarAvailable(this.database, await this.calendarRow(this.database));
+  }
+
+  async calendarBroadcastId(): Promise<number> {
+    return Number((await this.calendarRow(this.database)).broadcast_id);
+  }
+
+  async getCalendarSend(): Promise<CalendarSendState> {
+    const row = await this.calendarRow(this.database);
+    return { settings: mapCalendarSettings(row), ...(await this.calendarState(this.database, row)) };
+  }
+
+  async updateCalendarSend(input: CalendarSendUpdateInput, actor: CurrentUser, requestId: string): Promise<CalendarSendState> {
+    return this.database.transaction(async (tx) => {
+      await tx.query('SELECT paused FROM whatsapp_broadcast_control WHERE singleton_id = 1 FOR SHARE');
+      const before = await this.calendarRow(tx, 'UPDATE');
+      if (Number(before.version) !== input.version) throw versionConflict();
+      await tx.query(`UPDATE whatsapp_broadcasts SET version = version + 1, group_chat_id = $2, cards_per_message = $3,
+        caption_template = $4, calendar_min_interval_minutes = $5, updated_by = $6, updated_at = now() WHERE broadcast_id = $1`,
+      [before.broadcast_id, input.groupChatId, input.cardsPerMessage, input.captionTemplate, input.minIntervalMinutes, actor.id]);
+      const after = await this.calendarRow(tx);
+      const id = Number(after.broadcast_id);
+      await this.audit(tx, actor, requestId, 'updated', 'whatsapp_broadcast', id,
+        { version: Number(after.version), purpose: 'calendar', before: auditCalendarSettings(before), after: auditCalendarSettings(after) },
+        { broadcastId: id });
+      return { settings: mapCalendarSettings(after), ...(await this.calendarState(tx, after)) };
+    });
+  }
+
   private async lockBroadcast(tx: TransactionClient, id: number, mode: 'UPDATE' | 'SHARE'): Promise<BroadcastRow> {
     const row = (await tx.query<BroadcastRow>(`SELECT * FROM whatsapp_broadcasts WHERE broadcast_id = $1 FOR ${mode}`, [id])).rows[0];
     if (!row) throw notFound();
@@ -770,7 +861,7 @@ export class BroadcastRepository {
 
   private async assertActiveCapacity(tx: TransactionClient, exceptId: number | null) {
     const count = Number((await tx.query<{ count: string }>(`SELECT count(*) FROM whatsapp_broadcasts
-      WHERE enabled AND archived_at IS NULL AND ($1::bigint IS NULL OR broadcast_id <> $1)`, [exceptId])).rows[0]?.count ?? 0);
+      WHERE enabled AND archived_at IS NULL AND purpose = 'schedule' AND ($1::bigint IS NULL OR broadcast_id <> $1)`, [exceptId])).rows[0]?.count ?? 0);
     if (count >= BROADCAST_MAX_ACTIVE) throw new ApiError(409, 'BROADCAST_ACTIVE_LIMIT', `Одновременно могут работать не больше ${BROADCAST_MAX_ACTIVE} рассылок`);
   }
 
@@ -828,14 +919,14 @@ export class BroadcastRepository {
       INSERT INTO whatsapp_broadcast_runs (run_id, broadcast_id, business_date, target_date, kind, auto_origin, parent_run_id, root_run_id,
         command_id, settings_version, snapshot_author_user_id, initiated_by_user_id, required_permissions, counter_value, destination_chat_id,
         catch_up_policy, deadline_at, partial_policy, cards_per_message, snapshot, renderer_version, order_count, total_area, state,
-        retry_depth, request_id, image_expires_at)
+        retry_depth, request_id, image_expires_at, source)
       VALUES ($1, $2, $3::date, $4::date, $5, $6, $7, $8, $9, $10, $11, $12, $13::text[], $14, $15, $16, $17, $18, $19, $20::jsonb, $21,
-        $22, $23, 'queued', $24, $25, $26)`,
+        $22, $23, 'queued', $24, $25, $26, $27)`,
     [input.runId, parent.broadcast_id, parent.business_date, parent.target_date, input.kind, input.autoOrigin,
       parent.run_id, parent.root_run_id, input.commandId, parent.settings_version, parent.snapshot_author_user_id, input.initiatedBy,
       parent.required_permissions, parent.counter_value, parent.destination_chat_id, parent.catch_up_policy, parent.deadline_at,
       parent.partial_policy, parent.cards_per_message, parent.snapshot ? JSON.stringify(parent.snapshot) : null, parent.renderer_version,
-      parent.order_count, parent.total_area, parent.retry_depth + 1, input.requestId, parent.image_expires_at]);
+      parent.order_count, parent.total_area, parent.retry_depth + 1, input.requestId, parent.image_expires_at, parent.source]);
   }
 
   private async copyMessages(tx: TransactionClient, runId: string, rows: MessageRow[]) {
@@ -949,6 +1040,35 @@ function runSelect() {
     (SELECT count(*)::int FROM whatsapp_broadcast_messages m WHERE m.run_id = r.run_id) message_count,
     (SELECT count(*)::int FROM whatsapp_broadcast_messages m WHERE m.run_id = r.run_id AND m.state = 'sent') sent_message_count
     FROM whatsapp_broadcast_runs r`;
+}
+
+/** Earliest start of the next calendar delivery: the latest delivery start plus the threshold. */
+function calendarAllowedAt(row: BroadcastRow): Date | null {
+  if (row.purpose !== 'calendar' || !row.calendar_last_delivery_at || !row.calendar_min_interval_minutes) return null;
+  return new Date(row.calendar_last_delivery_at.getTime() + Number(row.calendar_min_interval_minutes) * 60_000);
+}
+
+function mapCalendarSettings(row: BroadcastRow): CalendarSendSettings {
+  return {
+    broadcastId: Number(row.broadcast_id), version: Number(row.version), groupChatId: row.group_chat_id,
+    cardsPerMessage: Number(row.cards_per_message) as 1 | 2, captionTemplate: row.caption_template,
+    minIntervalMinutes: Number(row.calendar_min_interval_minutes), updatedAt: row.updated_at.toISOString(),
+    updatedBy: row.updated_by === null ? null : { id: String(row.updated_by), username: row.updated_by_username ?? null },
+  };
+}
+
+function auditCalendarSettings(row: BroadcastRow) {
+  return {
+    groupChatId: maskDestination(row.group_chat_id ?? ''),
+    groupFingerprint: row.group_chat_id ? createHash('sha256').update(row.group_chat_id).digest('hex').slice(0, 12) : null,
+    cardsPerMessage: Number(row.cards_per_message),
+    captionSha256: createHash('sha256').update(row.caption_template).digest('hex'), captionLength: row.caption_template.length,
+    minIntervalMinutes: Number(row.calendar_min_interval_minutes),
+  };
+}
+
+function systemBroadcast() {
+  return new ApiError(409, 'BROADCAST_SYSTEM', 'Отправка из календаря настраивается в блоке «Отправка из календаря»');
 }
 
 function mapBroadcast(row: BroadcastRow): Broadcast {

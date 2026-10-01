@@ -208,3 +208,38 @@ export interface BroadcastRetryInput {
   idempotencyKey: string;
   duplicateRiskConfirmed: boolean;
 }
+
+// ---- calendar send («Отправить в чат» from a calendar day) ----
+
+export interface CalendarSendSettings {
+  /** The system broadcast whose history lists calendar sends. */
+  broadcastId: number;
+  version: number;
+  groupChatId: string | null;
+  cardsPerMessage: 1 | 2;
+  captionTemplate: string;
+  minIntervalMinutes: number;
+  updatedAt: string;
+  updatedBy: { id: number | string; username: string | null } | null;
+}
+
+export interface CalendarSendEnvelope {
+  settings: CalendarSendSettings;
+  nextAllowedAt: string | null;
+  activeRun: boolean;
+  runtime: BroadcastRuntime;
+}
+
+export interface CalendarSendUpdateInput {
+  version: number;
+  groupChatId: string | null;
+  cardsPerMessage: 1 | 2;
+  captionTemplate: string;
+  minIntervalMinutes: number;
+}
+
+export interface CalendarSendRunInput {
+  /** Order date, YYYY-MM-DD. */
+  date: string;
+  idempotencyKey: string;
+}
