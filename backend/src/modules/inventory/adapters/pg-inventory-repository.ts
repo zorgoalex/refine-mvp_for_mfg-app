@@ -20,6 +20,7 @@ import type {
   DocumentsFilter,
   OrderFilmStockItemDto,
   StockBalanceDto,
+  StockDocKind,
   StockDocStatus,
   StockDocumentDto,
   StockDocumentLineDto,
@@ -218,19 +219,27 @@ async function loadPlaceholderVendorIds(client: DatabaseClient): Promise<Set<num
 // ---------------------------------------------------------------- чтение документа
 
 interface DocumentRow {
-  document_id: string; doc_type: StockDocType; status: StockDocStatus; warehouse_id: number; doc_date: unknown;
-  source: 'manual' | 'import'; order_id: string | null; order_name: string | null; file_name: string | null;
+  document_id: string; doc_type: StockDocKind; status: StockDocStatus; warehouse_id: number; doc_date: unknown;
+  source: 'manual' | 'import' | 'onec'; order_id: string | null; order_name: string | null; file_name: string | null;
   comment: string | null; version: number; created_at: unknown; created_by_name: string | null;
   posted_at: unknown; posted_by_name: string | null; lines_count: string; total_quantity: string | null;
+  counted_at: unknown; onec_document_id: string | null; onec_ref_key: string | null; onec_revision: number | null;
+  projection_seq: number | null;
 }
 
 const DOCUMENT_SELECT = `
   SELECT d.document_id, d.doc_type, d.status, d.warehouse_id, d.doc_date, d.source, d.order_id,
          o_ref.order_name, d.file_name, d.comment, d.version, d.created_at, d.posted_at,
+         d.counted_at, d.onec_document_id, d.onec_ref_key::text AS onec_ref_key, d.onec_revision, d.projection_seq,
          COALESCE(cu.full_name, cu.username) AS created_by_name,
          COALESCE(pu.full_name, pu.username) AS posted_by_name,
-         (SELECT count(*) FROM stock_document_lines l WHERE l.document_id = d.document_id AND l.match_status <> 'skipped') AS lines_count,
-         (SELECT COALESCE(sum(l.quantity), 0) FROM stock_document_lines l WHERE l.document_id = d.document_id AND l.match_status <> 'skipped') AS total_quantity
+         -- Документ проекции 1С строк не имеет: количество и сумма — по его движениям (дельты со знаком).
+         CASE WHEN d.source = 'onec'
+           THEN (SELECT count(*) FROM stock_movements m WHERE m.document_id = d.document_id)
+           ELSE (SELECT count(*) FROM stock_document_lines l WHERE l.document_id = d.document_id AND l.match_status <> 'skipped') END AS lines_count,
+         CASE WHEN d.source = 'onec'
+           THEN (SELECT COALESCE(sum(m.delta), 0) FROM stock_movements m WHERE m.document_id = d.document_id)
+           ELSE (SELECT COALESCE(sum(l.quantity), 0) FROM stock_document_lines l WHERE l.document_id = d.document_id AND l.match_status <> 'skipped') END AS total_quantity
     FROM stock_documents d
     LEFT JOIN orders o_ref ON o_ref.order_id = d.order_id
     LEFT JOIN users cu ON cu.user_id = d.created_by
@@ -244,6 +253,10 @@ function toSummary(row: DocumentRow): StockDocumentSummaryDto {
     totalQuantity: Number(row.total_quantity ?? 0), version: num(row.version),
     createdAt: iso(row.created_at) ?? '', createdByName: row.created_by_name,
     postedAt: iso(row.posted_at), postedByName: row.posted_by_name,
+    countedAt: iso(row.counted_at),
+    onec: row.onec_document_id === null ? null : {
+      documentId: num(row.onec_document_id), refKey: row.onec_ref_key, revision: row.onec_revision, projectionSeq: row.projection_seq,
+    },
   };
 }
 
@@ -286,7 +299,8 @@ async function readDocument(client: DatabaseClient, user: CurrentUser, documentI
   let negative: StockDocumentDto['negativeAfter'] = [];
   if (doc.status === 'posted') {
     preview = new Map(movements.rows.map((row) => [num(row.film_id), { before: Number(row.balance_before), after: Number(row.balance_after) }]));
-  } else if (doc.status === 'draft') {
+  } else if (doc.status === 'draft' && doc.doc_type !== 'onec') {
+    // Документы проекции 1С всегда проведены; черновики — только receipt/writeoff/inventory.
     const aggregated = aggregateLines(states.filter((state) => state.matchStatus !== 'skipped'));
     const ids = [...aggregated.keys()];
     const balances = ids.length === 0 ? new Map<number, number>() : new Map((await client.query<{ film_id: string; quantity: string }>(
@@ -411,7 +425,12 @@ export class PgInventoryRepository {
     if (filter.from) where.push(`d.doc_date >= $${params.push(filter.from)}::date`);
     if (filter.to) where.push(`d.doc_date <= $${params.push(filter.to)}::date`);
     if (filter.orderId !== null) where.push(`d.order_id = $${params.push(filter.orderId)}`);
-    if (filter.filmId !== null) where.push(`EXISTS (SELECT 1 FROM stock_document_lines fl WHERE fl.document_id = d.document_id AND fl.film_id = $${params.push(filter.filmId)})`);
+    if (filter.filmId !== null) {
+      // Документы расхода 1С строк не имеют — плёнка в их движениях.
+      const film = `$${params.push(filter.filmId)}`;
+      where.push(`(EXISTS (SELECT 1 FROM stock_document_lines fl WHERE fl.document_id = d.document_id AND fl.film_id = ${film})
+        OR (d.source = 'onec' AND EXISTS (SELECT 1 FROM stock_movements fm WHERE fm.document_id = d.document_id AND fm.film_id = ${film})))`);
+    }
     const limitIndex = params.push(filter.limit);
     const offsetIndex = params.push(filter.offset);
     const rows = await this.database.query<DocumentRow & { total: string }>(
@@ -440,6 +459,7 @@ export class PgInventoryRepository {
       const documentId = await this.insertDocument(tx, ctx, {
         docType: input.docType, warehouseId: input.warehouseId, docDate: input.docDate, source: 'manual',
         orderId: input.orderId, comment: input.comment, fileName: null, fileSha256: null, sheetName: null,
+        countedAt: input.countedAt ?? null,
       });
       let lineNo = 0;
       for (const line of input.lines) {
@@ -485,6 +505,7 @@ export class PgInventoryRepository {
       const documentId = await this.insertDocument(tx, ctx, {
         docType: input.docType, warehouseId: input.warehouseId, docDate: input.docDate, source: 'import',
         orderId: null, comment: null, fileName: input.fileName, fileSha256: input.fileSha256, sheetName: input.sheetName,
+        countedAt: input.countedAt ?? null,
       });
       // Сопоставление в памяти, затем блокировка выбранных плёнок FOR SHARE (по возрастанию, §3.3) и
       // повторная проверка «канон и активна» под блокировкой — до сохранения ссылок в строках.
@@ -720,16 +741,16 @@ export class PgInventoryRepository {
   private async insertDocument(
     tx: TransactionClient,
     ctx: CommandContext,
-    doc: { docType: StockDocType; warehouseId: number; docDate: string; source: 'manual' | 'import'; orderId: number | null; comment: string | null; fileName: string | null; fileSha256: string | null; sheetName: string | null },
+    doc: { docType: StockDocType; warehouseId: number; docDate: string; source: 'manual' | 'import'; orderId: number | null; comment: string | null; fileName: string | null; fileSha256: string | null; sheetName: string | null; countedAt?: string | null },
   ): Promise<number> {
     const result = await tx.query<{ document_id: string }>(
       `INSERT INTO stock_documents
          (doc_type, status, warehouse_id, doc_date, source, order_id, file_name, file_sha256, sheet_name, comment,
-          created_by, request_id, correlation_id)
-       VALUES ($1, 'draft', $2, $3::date, $4, $5, $6, $7, $8, $9, $10, $11, $11)
+          created_by, request_id, correlation_id, counted_at)
+       VALUES ($1, 'draft', $2, $3::date, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12::timestamptz)
        RETURNING document_id`,
       [doc.docType, doc.warehouseId, doc.docDate, doc.source, doc.orderId, doc.fileName, doc.fileSha256, doc.sheetName,
-        doc.comment, ctx.currentUser.id, ctx.requestId],
+        doc.comment, ctx.currentUser.id, ctx.requestId, doc.docType === 'inventory' ? doc.countedAt ?? null : null],
     );
     return num(result.rows[0].document_id);
   }
@@ -815,6 +836,38 @@ export class PgInventoryRepository {
         [warehouseId, movement.filmId, fromCents(movement.afterCents)],
       );
     }
+    let onecGenerations = 0;
+    let onecAppliedReset = 0;
+    if (doc.doc_type === 'inventory') {
+      // Инвентаризация ставит абсолютный остаток: расход 1С по этим плёнкам поглощён (план 1С-расхода §4.3а).
+      // Под уже взятой блокировкой stock_balances (w, f): отсечка = момент подсчёта, поколение +1 на КАЖДОЕ
+      // проведение, применённый расход 1С по (w, f) := 0 без движений. Блокировку проекции не берём.
+      const counted = await tx.query<{ counted_at: Date }>(
+        `UPDATE stock_documents SET counted_at = COALESCE(counted_at, now()) WHERE document_id = $1 RETURNING counted_at`,
+        [documentId],
+      );
+      const countedAt = counted.rows[0].counted_at;
+      if (countedAt.getTime() > Date.now() + 60_000) {
+        throw new ApiError(422, 'STOCK_COUNTED_AT_IN_FUTURE', 'Момент подсчёта инвентаризации позже проведения');
+      }
+      for (const filmId of [...filmIds].sort((a, b) => a - b)) {
+        await tx.query(
+          `INSERT INTO inventory_onec_generation (warehouse_id, film_id, gen, counted_at, inventory_document_id)
+           VALUES ($1, $2, 1, $3, $4)
+           ON CONFLICT (warehouse_id, film_id) DO UPDATE
+             SET gen = inventory_onec_generation.gen + 1, counted_at = EXCLUDED.counted_at,
+                 inventory_document_id = EXCLUDED.inventory_document_id, updated_at = now()`,
+          [warehouseId, filmId, countedAt, documentId],
+        );
+      }
+      const reset = await tx.query(
+        `UPDATE inventory_onec_applied SET quantity = 0, updated_at = now()
+          WHERE warehouse_id = $1 AND film_id = ANY($2::bigint[]) AND quantity <> 0`,
+        [warehouseId, filmIds],
+      );
+      onecGenerations = filmIds.length;
+      onecAppliedReset = reset.rowCount ?? 0;
+    }
     // Алиасы: сбор, схлопывание повторов внутри документа и upsert в едином порядке ключей —
     // два проведения с общими алиасами берут их блокировки в одинаковом порядке (без deadlock).
     const aliasByKey = new Map<string, { nameNorm: string; supplierNorm: string; filmId: number }>();
@@ -848,7 +901,7 @@ export class PgInventoryRepository {
     await recordDocumentAudit(tx, {
       event: 'inventory.document_posted', ctx, documentId, docType: doc.doc_type, warehouseId, orderId,
       statusCode: 'posted', before: { status: 'draft' }, after: { status: 'posted' },
-      metadata: { filmCount: planned.length, sumDelta: fromCents(sumDeltaCents), allowNegative, negativeCount: negative.length },
+      metadata: { filmCount: planned.length, sumDelta: fromCents(sumDeltaCents), allowNegative, negativeCount: negative.length, onecGenerations, onecAppliedReset },
       filmIds,
     });
     await tx.query(

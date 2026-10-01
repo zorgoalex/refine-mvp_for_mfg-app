@@ -84,7 +84,7 @@ describe.skipIf(!url)('inventory repository — real PostgreSQL, committed fixtu
       permissions: ['inventory.view', 'inventory.manage', 'orders.view'],
     };
     await connA.query("SELECT set_config('app.user_id', $1, false)", [admin.id]);
-    const warehouse = await connA.query<{ warehouse_id: number }>("SELECT warehouse_id FROM warehouses WHERE warehouse_name = 'Склад плёнки'");
+    const warehouse = await connA.query<{ warehouse_id: number }>("SELECT warehouse_id FROM warehouses WHERE is_active ORDER BY warehouse_id LIMIT 1");
     warehouseId = Number(warehouse.rows[0].warehouse_id);
     const vendor = await connA.query<{ vendor_id: number; vendor_name: string }>("SELECT vendor_id, vendor_name FROM vendors WHERE vendor_name = 'ADILET'");
     vendorName = vendor.rows[0].vendor_name;

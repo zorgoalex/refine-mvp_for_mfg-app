@@ -4,6 +4,7 @@ import type { BackendEnv } from '../../../config/env.validation';
 import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { OnecCatalogReader } from '../../onec-agent/onec-catalog-reader';
+import type { InventoryOnecProjectionService } from '../application/inventory-onec-projection.service';
 import { InventoryService } from '../application/inventory.service';
 import { InventoryController } from './inventory.controller';
 
@@ -15,8 +16,9 @@ function setup(enabled: boolean) {
   const config = new ConfigService<BackendEnv, true>({ BACKEND_INVENTORY_ENABLED: enabled });
   const onec = { listWarehouses: vi.fn().mockResolvedValue([]) } as unknown as OnecCatalogReader;
   const service = new InventoryService({} as DatabaseService, config, onec);
-  const controller = new InventoryController(service);
-  return { service, controller };
+  const projection = { listIssues: vi.fn(), runNow: vi.fn(), compensate: vi.fn() } as unknown as InventoryOnecProjectionService;
+  const controller = new InventoryController(service, projection);
+  return { service, controller, projection };
 }
 
 async function expectError(run: () => unknown, status: number, code: string) {
@@ -126,5 +128,27 @@ describe('InventoryController', () => {
   it('warehouse stock answers 404 when the feature flag is off', async () => {
     const { controller } = setup(false);
     await expectError(() => controller.warehouseStock({ user: user(['inventory.view']) }, { warehouseId: '2' }), 404, 'NOT_FOUND');
+  });
+
+  it('1C consumption routes: codes validated, compensate needs a warehouse id, forwarded to the projection service', async () => {
+    const { controller, projection } = setup(true);
+    const view = { user: user(['inventory.view']) };
+    await expectError(() => controller.onecIssues(view, { code: 'bad code' }), 400, 'VALIDATION_FAILED');
+    await controller.onecIssues(view, { warehouseId: '2', code: 'FILM_UNLINKED', includeBeforeCutoff: 'true' });
+    expect(projection.listIssues).toHaveBeenLastCalledWith(['inventory.view'], { warehouseId: 2, code: 'FILM_UNLINKED', includeBeforeCutoff: true, offset: 0, limit: 100 });
+    await controller.runOnecConsumption(view);
+    expect(projection.runNow).toHaveBeenCalledWith(['inventory.view']);
+    await expectError(() => controller.compensateOnecConsumption({ user: user(['inventory.manage']) }, 'k', 'abc'), 400, 'VALIDATION_FAILED');
+    await expectError(() => controller.compensateOnecConsumption({ user: user(['inventory.manage']) }, 'k', '40000'), 404, 'WAREHOUSE_NOT_FOUND');
+    await controller.compensateOnecConsumption({ user: user(['inventory.manage']), requestId: 'r' }, 'k1', '2');
+    expect(projection.compensate).toHaveBeenLastCalledWith(expect.objectContaining({ idempotencyKey: 'k1' }), 2);
+  });
+
+  it('countedAt only for inventory documents; since only as an ISO moment', async () => {
+    const { controller } = setup(true);
+    const manage = { user: user(['inventory.manage']) };
+    await expectError(() => controller.createManual(manage, 'k', { ...manualBody, countedAt: '2026-09-26T05:14:55Z' }), 400, 'VALIDATION_FAILED');
+    await expectError(() => controller.createManual(manage, 'k', { ...manualBody, docType: 'inventory', countedAt: '26.09.2026' }), 400, 'VALIDATION_FAILED');
+    await expectError(() => controller.updateWarehouse(manage, 'k', '2', { version: 'v', onecConsumptionSince: 'вчера' }), 400, 'VALIDATION_FAILED');
   });
 });

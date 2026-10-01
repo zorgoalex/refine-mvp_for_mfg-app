@@ -18865,10 +18865,11 @@ paths:
                 workshopId: {type: integer, nullable: true}
                 responsibleEmployeeId: {type: integer, nullable: true}
                 isActive: {type: boolean}
+                onecConsumptionSince: {type: string, format: date-time, nullable: true, description: 'Момент начала расхода из документов 1С (null — выключить); 409 ONEC_BASELINE_REQUIRED, если инвентаризации склада не учтены'}
       responses:
         '200': {description: Updated warehouse}
         '404': {description: WAREHOUSE_NOT_FOUND}
-        '409': {description: WAREHOUSE_STALE, WAREHOUSE_HAS_STOCK or WAREHOUSE_HAS_DRAFTS}
+        '409': {description: WAREHOUSE_STALE, WAREHOUSE_HAS_STOCK, WAREHOUSE_HAS_DRAFTS or ONEC_BASELINE_REQUIRED}
         '422': {description: WAREHOUSE_1C_NOT_FOUND or WAREHOUSE_1C_KEY_REQUIRED}
   /api/v1/inventory/balances:
     get:
@@ -18919,7 +18920,7 @@ paths:
       security: [{bearerAuth: []}]
       x-permission: inventory.view
       parameters:
-        - {name: type, in: query, required: false, schema: {type: string, enum: [receipt, writeoff, inventory]}}
+        - {name: type, in: query, required: false, schema: {type: string, enum: [receipt, writeoff, inventory, onec]}}
         - {name: status, in: query, required: false, schema: {type: string, enum: [draft, posted, cancelled]}}
         - {name: from, in: query, required: false, schema: {type: string, format: date}}
         - {name: to, in: query, required: false, schema: {type: string, format: date}}
@@ -18954,6 +18955,7 @@ paths:
                 lines: {type: array, minItems: 1, maxItems: 200, items: {type: object, additionalProperties: false, required: [filmId, quantity], properties: {filmId: {type: integer, minimum: 1}, quantity: {type: number, minimum: 0}}}}
                 post: {type: boolean}
                 allowNegative: {type: boolean}
+                countedAt: {type: string, format: date-time, nullable: true, description: 'Момент подсчёта (только inventory)'}
       responses:
         '201': {description: Stock document}
         '409': {description: STOCK_WOULD_GO_NEGATIVE}
@@ -18994,6 +18996,7 @@ paths:
                 fileSha256: {type: string, pattern: '^[0-9a-f]{64}$'}
                 sheetName: {type: string, minLength: 1, maxLength: 255}
                 rows: {type: array, minItems: 1, maxItems: 2000, items: {type: object}}
+                countedAt: {type: string, format: date-time, nullable: true, description: 'Момент подсчёта (только inventory)'}
       responses:
         '201': {description: Draft stock document with matched lines}
   /api/v1/inventory/documents/{documentId}/lines/{lineId}:
@@ -19061,6 +19064,45 @@ paths:
       responses:
         '201': {description: Cancelled stock document}
         '409': {description: STOCK_DOCUMENT_STALE or STOCK_DOCUMENT_NOT_DRAFT}
+  /api/v1/inventory/onec-consumption/issues:
+    get:
+      tags: [Inventory]
+      operationId: listInventoryOnecIssues
+      summary: 1C consumption lines not applied to the ERP ledger (reasons)
+      security: [{bearerAuth: []}]
+      x-permission: inventory.view
+      parameters:
+        - {name: warehouseId, in: query, required: false, schema: {type: integer, minimum: 1}}
+        - {name: code, in: query, required: false, schema: {type: string, pattern: '^[A-Z_]{3,40}$'}}
+        - {name: includeBeforeCutoff, in: query, required: false, schema: {type: boolean}}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 500}}
+      responses:
+        '200': {description: '{total, counts[], items[]}'}
+  /api/v1/inventory/onec-consumption/run:
+    post:
+      tags: [Inventory]
+      operationId: runInventoryOnecConsumption
+      summary: Run the 1C consumption projection pass now (skipped when BACKEND_INVENTORY_ONEC_CONSUMPTION is off)
+      security: [{bearerAuth: []}]
+      x-permission: inventory.manage
+      responses:
+        '200': {description: 'Pass outcome {status, candidates, processed, documents, failed} or {status: skipped, reason}'}
+  /api/v1/inventory/warehouses/{warehouseId}/onec-consumption/compensate:
+    post:
+      tags: [Inventory]
+      operationId: compensateInventoryOnecConsumption
+      summary: Return the 1C consumption of a warehouse to zero and clear its start moment (rollback)
+      security: [{bearerAuth: []}]
+      x-permission: inventory.manage
+      parameters:
+        - {name: warehouseId, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      responses:
+        '200': {description: '{documents, remaining}; повтор с тем же Idempotency-Key возвращает сохранённый ответ'}
+        '404': {description: WAREHOUSE_NOT_FOUND}
+        '409': {description: 'ONEC_COMPENSATION_SUPERSEDED (прерванный откат, а расход снова включён), IDEMPOTENCY_IN_PROGRESS не возвращается — прерванный откат продолжается'}
+        '422': {description: IDEMPOTENCY_KEY_REUSED}
   /api/v1/orders/{orderId}/film-stock:
     get:
       tags: [Inventory]

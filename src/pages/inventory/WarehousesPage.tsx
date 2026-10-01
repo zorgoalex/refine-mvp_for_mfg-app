@@ -1,12 +1,14 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { useList } from '@refinedev/core';
-import { Alert, Button, Card, Checkbox, Form, Input, Modal, Select, Space, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Checkbox, DatePicker, Form, Input, Modal, Select, Space, Tag, Typography, message } from 'antd';
+import dayjs, { type Dayjs } from 'dayjs';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Table, Tooltip } from '../../ui/tooltipDelay';
 import { createInventoryIdempotencyKey, inventoryApi } from '../../api/inventoryApi';
 import type { InventoryApiError, WarehouseDto } from '../../api/types/inventoryApi.types';
 import { can } from '../../utils/permissions';
 import { isOnecKey, onecStatusText, onecWarehouseOptions, syncSummary, warehouseDeactivationBlock, warehousePatch, type WarehouseFormValues } from './warehouses';
+import { formatMoment, supportsOnecConsumption } from './onecConsumption';
 
 const { Text } = Typography;
 
@@ -21,7 +23,7 @@ export const WarehousesPage: React.FC = () => {
   const [includeInactive, setIncludeInactive] = useState(false);
   const [editing, setEditing] = useState<WarehouseDto | 'new' | null>(null);
   const [busy, setBusy] = useState(false);
-  const [form] = Form.useForm<WarehouseFormValues>();
+  const [form] = Form.useForm<Omit<WarehouseFormValues, 'onecConsumptionSince'> & { onecSince?: Dayjs | null }>();
   const retryActionId = useRef<string>();
   const retryKey = useRef<string>();
 
@@ -77,7 +79,10 @@ export const WarehousesPage: React.FC = () => {
     setEditing(warehouse);
     form.setFieldsValue(warehouse === 'new'
       ? { name: '', refKey1c: null, workshopId: null, responsibleEmployeeId: null }
-      : { name: warehouse.name, refKey1c: warehouse.refKey1c, workshopId: warehouse.workshopId, responsibleEmployeeId: warehouse.responsibleEmployeeId });
+      : {
+        name: warehouse.name, refKey1c: warehouse.refKey1c, workshopId: warehouse.workshopId, responsibleEmployeeId: warehouse.responsibleEmployeeId,
+        onecSince: warehouse.onecConsumptionSince ? dayjs(warehouse.onecConsumptionSince) : null,
+      });
   };
 
   const syncWithOnec = () => void runCommand('sync-onec', async (key) => {
@@ -93,7 +98,11 @@ export const WarehousesPage: React.FC = () => {
       return;
     }
     if (!editing) return;
-    const patch = warehousePatch(editing, values);
+    const { onecSince, ...rest } = values;
+    const patch = warehousePatch(editing, {
+      ...rest,
+      ...(supportsOnecConsumption(editing) ? { onecConsumptionSince: onecSince ? onecSince.toISOString() : null } : {}),
+    });
     if (!patch) { setEditing(null); return; }
     if (await runCommand(`update:${editing.warehouseId}:${JSON.stringify(patch)}`, (key) => inventoryApi.updateWarehouse(editing.warehouseId, patch, key), 'Склад сохранён')) setEditing(null);
   };
@@ -112,6 +121,24 @@ export const WarehousesPage: React.FC = () => {
       ),
     });
   };
+
+  // Откат расхода 1С склада: применённое возвращается в 0 документами-дельтами, дата начала очищается.
+  const compensate = (warehouse: WarehouseDto) => {
+    Modal.confirm({
+      title: `Откатить расход из 1С по складу «${warehouse.name}»?`,
+      content: 'Все списания по документам 1С на этом складе вернутся в остатки, дата начала расхода очистится и новые документы 1С перестанут применяться. Записи отката останутся в журнале документов.',
+      okText: 'Откатить',
+      okButtonProps: { danger: true },
+      cancelText: 'Отмена',
+      // Ключ — на склад и его версию: повтор после сбоя продолжает тот же откат; после нового включения расхода — новый.
+      onOk: () => runCommand(`compensate:${warehouse.warehouseId}:${warehouse.version}`, async (key) => {
+        const result = await inventoryApi.compensateOnecConsumption(warehouse.warehouseId, key);
+        message.info(`Откат расхода 1С: записано документов ${result.documents}${result.remaining !== 0 ? `, осталось применённого ${formatQuantity(result.remaining)} м — повторите откат` : ''}`);
+      }, 'Расход из 1С по складу откачен'),
+    });
+  };
+
+  const consumptionSupported = (warehousesQuery.data?.items ?? []).some(supportsOnecConsumption);
 
   if (!viewAllowed) return <Card title="Справочник складов"><Text type="secondary">Нет права просмотра склада.</Text></Card>;
 
@@ -132,12 +159,18 @@ export const WarehousesPage: React.FC = () => {
         return row.refKey1c ? <Tooltip title={`Ключ 1С: ${row.refKey1c}`}>{body}</Tooltip> : body;
       },
     },
+    ...(consumptionSupported ? [{
+      title: 'Расход из 1С с',
+      dataIndex: 'onecConsumptionSince',
+      render: (value: string | null | undefined) => value ? formatMoment(value) : <Text type="secondary">не ведётся</Text>,
+    }] : []),
     ...(manageAllowed ? [{
       title: 'Действия',
       render: (_: unknown, row: WarehouseDto) => {
         const block = row.isActive ? warehouseDeactivationBlock(row) : null;
         return <Space>
           <Button size="small" onClick={() => openEditor(row)}>Изменить</Button>
+          {supportsOnecConsumption(row) && <Button size="small" disabled={busy} onClick={() => compensate(row)}>Откатить расход 1С</Button>}
           <Tooltip title={block ?? undefined}>
             <Button size="small" danger={row.isActive} disabled={busy || block !== null} onClick={() => toggleActive(row)}>{row.isActive ? 'Отключить' : 'Включить'}</Button>
           </Tooltip>
@@ -207,6 +240,15 @@ export const WarehousesPage: React.FC = () => {
           <Form.Item name="responsibleEmployeeId" label="Ответственный">
             <Select allowClear showSearch optionFilterProp="label" placeholder="Не указан" options={employeeOptions} />
           </Form.Item>
+          {editing !== null && editing !== 'new' && supportsOnecConsumption(editing) && (
+            <Form.Item
+              name="onecSince"
+              label="Расход из 1С с"
+              extra="Документы 1С (реализация, возврат поставщику, списание, перемещение) после этого момента уменьшают остатки склада. Обычно — момент подсчёта последней инвентаризации. Пусто — расход из 1С не ведётся."
+            >
+              <DatePicker showTime={{ format: 'HH:mm' }} format="DD.MM.YYYY HH:mm" placeholder="Не ведётся" style={{ width: 220 }} />
+            </Form.Item>
+          )}
         </Form>
       </Modal>
     </Card>

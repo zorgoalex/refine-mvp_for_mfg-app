@@ -1,10 +1,13 @@
 import type { OnecWarehouseOptionDto, WarehouseDto, WarehousePatch, WarehouseSyncResultDto } from '../../api/types/inventoryApi.types';
+import { sameMoment } from './onecConsumption';
 
 export interface WarehouseFormValues {
   name: string;
   refKey1c?: string | null;
   workshopId?: number | null;
   responsibleEmployeeId?: number | null;
+  /** Момент начала расхода 1С (ISO) или null — выключить; undefined — поле не показано (старый backend). */
+  onecConsumptionSince?: string | null;
 }
 
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -31,6 +34,8 @@ export function warehousePatch(before: WarehouseDto, values: WarehouseFormValues
   if (workshopId !== before.workshopId) patch.workshopId = workshopId;
   const responsibleEmployeeId = values.responsibleEmployeeId ?? null;
   if (responsibleEmployeeId !== before.responsibleEmployeeId) patch.responsibleEmployeeId = responsibleEmployeeId;
+  if (values.onecConsumptionSince !== undefined && before.onecConsumptionSince !== undefined
+    && !sameMoment(values.onecConsumptionSince, before.onecConsumptionSince)) patch.onecConsumptionSince = values.onecConsumptionSince || null;
   return Object.keys(patch).length > 1 ? patch : null;
 }
 

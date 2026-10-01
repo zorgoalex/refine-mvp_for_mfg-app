@@ -3,12 +3,15 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagg
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser, RequestWithCurrentUser } from '../../../permissions/current-user';
+import { InventoryOnecProjectionService } from '../application/inventory-onec-projection.service';
 import { InventoryService } from '../application/inventory.service';
-import type { CommandContext } from '../application/inventory.types';
+import type { CommandContext, StockDocKind } from '../application/inventory.types';
 
 const id = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const quantity = z.number().finite().min(0).max(1_000_000);
+/** Момент подсчёта инвентаризации: ISO-дата-время с поясом (отсечка расхода 1С). */
+const countedAt = z.string().datetime({ offset: true }).nullable().optional();
 const version = z.number().int().min(1).max(2147483646);
 
 const manualSchema = z.object({
@@ -20,7 +23,10 @@ const manualSchema = z.object({
   lines: z.array(z.object({ filmId: id, quantity }).strict()).min(1).max(200),
   post: z.boolean().optional(),
   allowNegative: z.boolean().optional(),
-}).strict().refine((body) => !body.orderId || body.docType === 'writeoff', { message: 'orderId only for writeoff', path: ['orderId'] });
+  countedAt,
+}).strict()
+  .refine((body) => !body.orderId || body.docType === 'writeoff', { message: 'orderId only for writeoff', path: ['orderId'] })
+  .refine((body) => !body.countedAt || body.docType === 'inventory', { message: 'countedAt only for inventory', path: ['countedAt'] });
 
 const importSchema = z.object({
   docType: z.enum(['receipt', 'inventory']),
@@ -35,7 +41,8 @@ const importSchema = z.object({
     supplier: z.string().max(200).nullable(),
     quantity: z.union([z.string().max(50), quantity]).nullable(),
   }).strict()).min(1).max(2000),
-}).strict();
+  countedAt,
+}).strict().refine((body) => !body.countedAt || body.docType === 'inventory', { message: 'countedAt only for inventory', path: ['countedAt'] });
 
 const lineSchema = z.object({
   version,
@@ -62,6 +69,7 @@ const warehouseUpdateSchema = z.object({
   workshopId: smallintId.nullable().optional(),
   responsibleEmployeeId: id.nullable().optional(),
   isActive: z.boolean().optional(),
+  onecConsumptionSince: z.string().datetime({ offset: true }).nullable().optional(),
 }).strict();
 
 const postSchema = z.object({ version, allowNegative: z.boolean().optional() }).strict();
@@ -115,7 +123,10 @@ function paging(offset: string | undefined, limit: string | undefined, max: numb
 @ApiBearerAuth()
 @Controller()
 export class InventoryController {
-  constructor(@Inject(InventoryService) private readonly inventory: InventoryService) {}
+  constructor(
+    @Inject(InventoryService) private readonly inventory: InventoryService,
+    @Inject(InventoryOnecProjectionService) private readonly projection: InventoryOnecProjectionService,
+  ) {}
 
   @ApiOperation({ operationId: 'listInventoryWarehouses', summary: 'Active warehouses' })
   @ApiResponse({ status: 200, description: 'Warehouses' })
@@ -210,7 +221,7 @@ export class InventoryController {
   @Get('inventory/documents')
   documents(@Req() request: RequestWithCurrentUser, @Query() query: Record<string, string | undefined>) {
     const page = paging(query.offset, query.limit, 200);
-    const type = query.type && ['receipt', 'writeoff', 'inventory'].includes(query.type) ? query.type as 'receipt' : null;
+    const type = query.type && ['receipt', 'writeoff', 'inventory', 'onec'].includes(query.type) ? query.type as StockDocKind : null;
     const status = query.status && ['draft', 'posted', 'cancelled'].includes(query.status) ? query.status as 'draft' : null;
     const from = query.from && /^\d{4}-\d{2}-\d{2}$/.test(query.from) ? query.from : null;
     const to = query.to && /^\d{4}-\d{2}-\d{2}$/.test(query.to) ? query.to : null;
@@ -243,6 +254,7 @@ export class InventoryController {
       docType: input.docType, warehouseId: input.warehouseId, docDate: input.docDate,
       orderId: input.orderId ?? null, comment: input.comment?.trim() || null,
       lines: input.lines, post: input.post === true, allowNegative: input.allowNegative === true,
+      ...(input.countedAt ? { countedAt: input.countedAt } : {}),
     });
   }
 
@@ -299,6 +311,43 @@ export class InventoryController {
   ) {
     const input = parse(cancelSchema, body);
     return this.inventory.cancel(this.ctx(request, key), parseId(documentId, 'documentId'), input.version);
+  }
+
+  @ApiOperation({ operationId: 'listInventoryOnecIssues', summary: '1C consumption lines not applied to the ERP ledger (reasons)' })
+  @ApiResponse({ status: 200, description: 'Issues page with counts by code' })
+  @Get('inventory/onec-consumption/issues')
+  onecIssues(@Req() request: RequestWithCurrentUser, @Query() query: Record<string, string | undefined>) {
+    const page = paging(query.offset, query.limit, 500);
+    const code = query.code?.trim() || null;
+    if (code !== null && !/^[A-Z_]{3,40}$/.test(code)) throw new ApiError(400, 'VALIDATION_FAILED', 'Некорректный код', { field: 'code' });
+    return this.projection.listIssues(this.user(request).permissions, {
+      warehouseId: optionalId(query.warehouseId, 'warehouseId'), code, includeBeforeCutoff: query.includeBeforeCutoff === 'true', ...page,
+    });
+  }
+
+  @ApiOperation({ operationId: 'runInventoryOnecConsumption', summary: 'Run the 1C consumption projection pass now' })
+  @ApiResponse({ status: 200, description: 'Pass outcome' })
+  @Post('inventory/onec-consumption/run')
+  @HttpCode(200)
+  runOnecConsumption(@Req() request: RequestWithCurrentUser) {
+    return this.projection.runNow(this.user(request).permissions);
+  }
+
+  @ApiOperation({ operationId: 'compensateInventoryOnecConsumption', summary: 'Return the 1C consumption of a warehouse to zero and clear its start moment (rollback)' })
+  @ApiResponse({ status: 200, description: 'Compensation result: documents written and remaining applied amount; a replay returns the stored result' })
+  @ApiResponse({ status: 404, description: 'Warehouse not found' })
+  @ApiResponse({ status: 409, description: 'ONEC_COMPENSATION_SUPERSEDED: an interrupted rollback, consumption enabled again since' })
+  @ApiResponse({ status: 422, description: 'IDEMPOTENCY_KEY_REUSED' })
+  @Post('inventory/warehouses/:warehouseId/onec-consumption/compensate')
+  @HttpCode(200)
+  compensateOnecConsumption(
+    @Req() request: RequestWithCurrentUser,
+    @Headers('idempotency-key') key: string | undefined,
+    @Param('warehouseId') warehouseId: string,
+  ) {
+    const parsedId = parseId(warehouseId, 'warehouseId');
+    if (parsedId > 32767) throw new ApiError(404, 'WAREHOUSE_NOT_FOUND', 'Склад не найден');
+    return this.projection.compensate(this.ctx(request, key), parsedId);
   }
 
   @ApiOperation({ operationId: 'getOrderFilmStock', summary: 'Stock of the films used by an order (physical, no reservation)' })

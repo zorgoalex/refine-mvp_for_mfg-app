@@ -330,6 +330,32 @@ NOT VALID) применяется **после** выкладки backend со �
 `ALTER TABLE public.warehouses DROP CONSTRAINT IF EXISTS chk_warehouses_ref_key_1c_required;`
 (данные не меняются; повторное применение 205 вернёт ограничение).
 
+Расход из документов 1С: `BACKEND_INVENTORY_ONEC_CONSUMPTION` (backend, по умолчанию
+`false`) переносит расход плёнки из документов 1С (реализация, возврат поставщику,
+списание, перемещение) в учёт склада. Нужны `BACKEND_INVENTORY_ENABLED`, загрузка
+документов 1С и `BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID` — от имени этого
+служебного пользователя пишутся документы `onec`. Без него backend с включённым
+флагом не стартует. Маршруты: `GET /api/v1/inventory/onec-consumption/issues`
+(`inventory.view`), `POST /api/v1/inventory/onec-consumption/run` и
+`POST /api/v1/inventory/warehouses/{warehouseId}/onec-consumption/compensate`
+(`inventory.manage`; компенсация — с `Idempotency-Key`). `PATCH …/warehouses/{id}`
+принимает `onecConsumptionSince`, инвентаризация (ручная и импорт) — `countedAt`.
+Склад участвует, только если у него задан `onecConsumptionSince`.
+
+Порядок включения:
+
+1. Миграция `217_inventory_onec_consumption.sql`.
+2. Backend и frontend.
+3. На складе провести инвентаризацию с моментом подсчёта.
+4. Задать «Расход из 1С с» (тот же момент).
+5. Включить флаг и пересоздать backend.
+6. Проверка: «Пересчитать сейчас»; сумма документов «Расход 1С» должна равняться сумме
+   строк 1С, а повторный пересчёт — давать «записано изменений 0».
+
+С выключенным флагом проход не выполняется, а компенсация работает. Откат:
+«Откатить расход 1С» на каждом складе с датой начала (можно уже с выключенным флагом),
+затем выключить флаг. Документы `onec` остаются в журнале.
+
 ### Листовые материалы
 
 `VITE_SHEET_MATERIALS_READS` либо runtime

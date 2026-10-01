@@ -46,6 +46,20 @@ export class InventoryService {
     return this.config.get('BACKEND_INVENTORY_ENABLED', { infer: true }) === true;
   }
 
+  /** Сигнал проекции расхода 1С: изменились входы (дата начала склада, проведённая инвентаризация). */
+  private readonly projectionListeners = new Set<(reason: string) => void>();
+
+  onProjectionInputsChanged(listener: (reason: string) => void): () => void {
+    this.projectionListeners.add(listener);
+    return () => this.projectionListeners.delete(listener);
+  }
+
+  private notifyProjection(reason: string): void {
+    for (const listener of this.projectionListeners) {
+      try { listener(reason); } catch { /* сигнал не должен ломать команду */ }
+    }
+  }
+
   private require(user: CurrentUser, permission: 'inventory.view' | 'inventory.manage'): void {
     if (!this.enabled()) throw new ApiError(404, 'NOT_FOUND', 'Склад выключен');
     if (!user.permissions.includes(permission)) {
@@ -151,6 +165,7 @@ export class InventoryService {
       { ...input, ...(refKey1c !== undefined ? { refKey1c } : {}) },
       async (tx, key) => this.assertOnecWarehouse(key, await onec(tx)),
     );
+    if (input.onecConsumptionSince !== undefined) this.notifyProjection('since');
     return this.withOnec(updated, await onec());
   }
 
@@ -243,9 +258,11 @@ export class InventoryService {
     return this.repository.getDocument(user, documentId);
   }
 
-  createManual(ctx: CommandContext, input: CreateManualDocumentInput) {
+  async createManual(ctx: CommandContext, input: CreateManualDocumentInput) {
     this.require(ctx.currentUser, 'inventory.manage');
-    return this.repository.createManual(ctx, input);
+    const document = await this.repository.createManual(ctx, input);
+    if (document.docType === 'inventory' && document.status === 'posted') this.notifyProjection('inventory');
+    return document;
   }
 
   createImport(ctx: CommandContext, input: CreateImportDocumentInput) {
@@ -258,9 +275,11 @@ export class InventoryService {
     return this.repository.updateLine(ctx, input);
   }
 
-  post(ctx: CommandContext, documentId: number, version: number, allowNegative: boolean) {
+  async post(ctx: CommandContext, documentId: number, version: number, allowNegative: boolean) {
     this.require(ctx.currentUser, 'inventory.manage');
-    return this.repository.post(ctx, documentId, version, allowNegative);
+    const document = await this.repository.post(ctx, documentId, version, allowNegative);
+    if (document.docType === 'inventory' && document.status === 'posted') this.notifyProjection('inventory');
+    return document;
   }
 
   cancel(ctx: CommandContext, documentId: number, version: number) {

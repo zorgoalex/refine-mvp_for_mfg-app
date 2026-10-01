@@ -12,6 +12,8 @@ export interface WarehouseDto {
   responsibleEmployeeId: number | null;
   responsibleEmployeeName: string | null;
   refKey1c: string | null;
+  /** Момент начала расхода из документов 1С (ISO) или null — склад не участвует. */
+  onecConsumptionSince: string | null;
   /** Плёнок с ненулевым остатком. */
   filmsWithStock: number;
   totalQuantity: number;
@@ -39,6 +41,8 @@ export interface UpdateWarehouseInput {
   workshopId?: number | null;
   responsibleEmployeeId?: number | null;
   isActive?: boolean;
+  /** Момент начала расхода 1С (ISO с поясом) или null — выключить. */
+  onecConsumptionSince?: string | null;
 }
 
 /** Склад 1С для выбора в справочнике: к какому складу ERP уже привязан. */
@@ -61,11 +65,18 @@ export interface StockBalanceDto {
   quantity: number; lastMovementAt: string | null;
 }
 
+/** Вид документа в журнале: команды создают receipt/writeoff/inventory, проекция расхода 1С — onec. */
+export type StockDocKind = StockDocType | 'onec';
+
 export interface StockDocumentSummaryDto {
-  documentId: number; docType: StockDocType; status: StockDocStatus; warehouseId: number; docDate: string;
-  source: 'manual' | 'import'; orderId: number | null; orderName: string | null;
+  documentId: number; docType: StockDocKind; status: StockDocStatus; warehouseId: number; docDate: string;
+  source: 'manual' | 'import' | 'onec'; orderId: number | null; orderName: string | null;
   fileName: string | null; comment: string | null; linesCount: number; totalQuantity: number;
   version: number; createdAt: string; createdByName: string | null; postedAt: string | null; postedByName: string | null;
+  /** Момент подсчёта инвентаризации (отсечка расхода 1С). */
+  countedAt: string | null;
+  /** Документ-дельта проекции расхода 1С: какой документ 1С, ревизия, порядковый номер применения. */
+  onec: { documentId: number; refKey: string | null; revision: number | null; projectionSeq: number | null } | null;
 }
 
 export interface StockDocumentLineDto {
@@ -106,12 +117,16 @@ export interface CommandContext {
 export interface CreateManualDocumentInput {
   docType: StockDocType; warehouseId: number; docDate: string; orderId: number | null; comment: string | null;
   lines: Array<{ filmId: number; quantity: number }>; post: boolean; allowNegative: boolean;
+  /** Момент подсчёта инвентаризации (ISO с поясом); только для inventory, по умолчанию — момент проведения. */
+  countedAt?: string | null;
 }
 
 export interface CreateImportDocumentInput {
   docType: 'receipt' | 'inventory'; warehouseId: number; docDate: string;
   fileName: string; fileSha256: string; sheetName: string;
   rows: Array<{ rowNo: number; name: string; supplier: string | null; quantity: string | number | null }>;
+  /** Момент подсчёта инвентаризации (ISO с поясом); только для inventory. */
+  countedAt?: string | null;
 }
 
 export interface UpdateLineInput {
@@ -125,7 +140,7 @@ export interface BalancesFilter {
 }
 
 export interface DocumentsFilter {
-  type: StockDocType | null; status: StockDocStatus | null; from: string | null; to: string | null;
+  type: StockDocKind | null; status: StockDocStatus | null; from: string | null; to: string | null;
   filmId: number | null; orderId: number | null; offset: number; limit: number;
 }
 

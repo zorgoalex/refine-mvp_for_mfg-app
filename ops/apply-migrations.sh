@@ -2466,6 +2466,22 @@ probe_file() {
     206_inventory_onec_autosync_state*) probe_all \
       "$(q_tbl inventory_onec_autosync_state)" \
       "$(q_con_on inventory_onec_autosync_state chk_inventory_onec_autosync_seq)" ;;
+    217_inventory_onec_consumption*) probe_all \
+      "$(q_col warehouses onec_consumption_since)" \
+      "$(q_col stock_documents counted_at)" \
+      "$(q_col stock_documents projection_seq)" \
+      "$(q_con_on stock_documents chk_stock_documents_onec)" \
+      "$(q_con_on stock_documents chk_stock_documents_counted_at)" \
+      "$(q_con_def_on_safe chk_stock_documents_doc_type stock_documents "CHECK ((doc_type = ANY (ARRAY['receipt'::text, 'writeoff'::text, 'inventory'::text, 'onec'::text])))")" \
+      "$(q_con_def_on_safe chk_stock_documents_source stock_documents "CHECK ((source = ANY (ARRAY['manual'::text, 'import'::text, 'onec'::text])))")" \
+      "$(q_con_def_on_safe chk_stock_movements_type stock_movements "CHECK ((movement_type = ANY (ARRAY['receipt'::text, 'writeoff'::text, 'inventory_adjustment'::text, 'onec'::text])))")" \
+      "$(q_idx uq_stock_documents_onec_projection)" \
+      "$(q_idx idx_stock_movements_inventory_last)" \
+      "$(q_tbl inventory_onec_projection)" \
+      "$(q_tbl inventory_onec_applied)" \
+      "$(q_tbl inventory_onec_issues)" \
+      "$(q_con_on inventory_onec_issues chk_inventory_onec_issues_code)" \
+      "$(q_tbl inventory_onec_generation)" ;;
     212_films_note*) probe_all \
       "$(q_col films note)" \
       "$(q_con_on films chk_films_note_length)" ;;
@@ -2859,6 +2875,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     206_inventory_onec_autosync_state*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    217_inventory_onec_consumption*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     212_films_note*)

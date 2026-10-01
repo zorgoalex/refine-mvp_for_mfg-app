@@ -21,6 +21,7 @@ import { beginIdempotent, completeIdempotent, requestHash, SOURCE } from './pg-i
 // отключение ждёт их фиксации.
 
 interface WarehouseRow {
+  onec_consumption_since: Date | string | null;
   warehouse_id: number | string;
   warehouse_name: string;
   is_active: boolean;
@@ -52,6 +53,7 @@ export interface OnecWarehouseRef {
 const WAREHOUSE_SELECT = `
   SELECT w.warehouse_id, w.warehouse_name, w.is_active, w.workshop_id, ws.workshop_name,
          w.responsible_employee_id, e.full_name AS responsible_employee_name, w.ref_key_1c::text AS ref_key_1c,
+         w.onec_consumption_since,
          (SELECT count(*) FROM stock_balances b WHERE b.warehouse_id = w.warehouse_id AND b.quantity <> 0) AS films_with_stock,
          (SELECT COALESCE(sum(b.quantity), 0) FROM stock_balances b WHERE b.warehouse_id = w.warehouse_id) AS total_quantity,
          (SELECT count(*) FROM stock_documents d WHERE d.warehouse_id = w.warehouse_id AND d.status = 'draft') AS draft_documents,
@@ -73,6 +75,7 @@ function toDto(row: WarehouseRow): WarehouseDto {
     responsibleEmployeeId: numOrNull(row.responsible_employee_id),
     responsibleEmployeeName: row.responsible_employee_name,
     refKey1c: row.ref_key_1c,
+    onecConsumptionSince: row.onec_consumption_since === null ? null : new Date(row.onec_consumption_since).toISOString(),
     filmsWithStock: Number(row.films_with_stock),
     totalQuantity: Number(row.total_quantity),
     draftDocuments: Number(row.draft_documents),
@@ -92,6 +95,7 @@ function auditShape(dto: WarehouseDto): Record<string, unknown> {
     refKey1c: dto.refKey1c,
     workshopId: dto.workshopId,
     responsibleEmployeeId: dto.responsibleEmployeeId,
+    onecConsumptionSince: dto.onecConsumptionSince,
   };
 }
 
@@ -102,6 +106,42 @@ async function readWarehouse(client: DatabaseClient, warehouseId: number): Promi
 
 function notFound(): ApiError {
   return new ApiError(404, 'WAREHOUSE_NOT_FOUND', 'Склад не найден');
+}
+
+/**
+ * Плёнки склада, чья последняя проведённая инвентаризация (последнее движение inventory_adjustment по
+ * movement_id) не учтена поколением проекции расхода 1С: проведена до backend проекции или поколение
+ * указывает на другой документ. Пусто — ворота открыты (план 1С-расхода §4.3а).
+ */
+export async function onecBaselineGaps(client: DatabaseClient, warehouseId: number): Promise<Array<{ filmId: number; lastInventoryDocumentId: number }>> {
+  const { rows } = await client.query<{ film_id: string; document_id: string }>(
+    `SELECT last.film_id, last.document_id
+       FROM (SELECT DISTINCT ON (film_id) film_id, document_id
+               FROM stock_movements
+              WHERE warehouse_id = $1 AND movement_type = 'inventory_adjustment'
+              ORDER BY film_id, movement_id DESC) last
+       LEFT JOIN inventory_onec_generation g ON g.warehouse_id = $1 AND g.film_id = last.film_id
+      WHERE g.inventory_document_id IS DISTINCT FROM last.document_id
+      ORDER BY last.film_id`,
+    [warehouseId],
+  );
+  return rows.map((row) => ({ filmId: Number(row.film_id), lastInventoryDocumentId: Number(row.document_id) }));
+}
+
+export const ONEC_COMPENSATE_COMMAND = 'inventory.warehouse.onec_compensate';
+
+export interface OnecCompensationResult { documents: number; remaining: number }
+
+/** Расход по складу снова включён после начала отката — прежний откат не продолжается. */
+export const supersededCompensation = (): ApiError => new ApiError(409, 'ONEC_COMPENSATION_SUPERSEDED',
+  'Расход из 1С по складу снова включён после начала отката — обновите список и запустите откат заново');
+
+async function assertOnecBaseline(tx: TransactionClient, warehouseId: number): Promise<void> {
+  const gaps = await onecBaselineGaps(tx, warehouseId);
+  if (gaps.length > 0) {
+    throw new ApiError(409, 'ONEC_BASELINE_REQUIRED',
+      'Нужна новая инвентаризация склада: прежние инвентаризации не учтены для расхода из 1С', { gaps: gaps.slice(0, 50), total: gaps.length });
+  }
 }
 
 /** Сериализация проверок уникальности названий (без учёта регистра) и ключей 1С. */
@@ -280,9 +320,13 @@ export class PgWarehouseRepository {
         workshopId: changes.workshopId !== undefined ? changes.workshopId : before.workshopId,
         responsibleEmployeeId: changes.responsibleEmployeeId !== undefined ? changes.responsibleEmployeeId : before.responsibleEmployeeId,
         isActive: changes.isActive ?? before.isActive,
+        onecConsumptionSince: changes.onecConsumptionSince !== undefined
+          ? (changes.onecConsumptionSince === null ? null : new Date(changes.onecConsumptionSince).toISOString())
+          : before.onecConsumptionSince,
       };
       const changed = next.name !== before.name || next.refKey1c !== before.refKey1c || next.workshopId !== before.workshopId
-        || next.responsibleEmployeeId !== before.responsibleEmployeeId || next.isActive !== before.isActive;
+        || next.responsibleEmployeeId !== before.responsibleEmployeeId || next.isActive !== before.isActive
+        || next.onecConsumptionSince !== before.onecConsumptionSince;
       if (!changed) {
         await completeIdempotent(tx, ctx.idempotencyKey, String(warehouseId), before);
         return before;
@@ -310,11 +354,17 @@ export class PgWarehouseRepository {
           throw new ApiError(409, 'WAREHOUSE_HAS_DRAFTS', 'На складе есть черновики документов — проведите или отмените их', { draftDocuments: before.draftDocuments });
         }
       }
+      if (next.onecConsumptionSince !== null && next.onecConsumptionSince !== before.onecConsumptionSince) {
+        // Ворота расхода 1С (план §4.3а): все проведённые инвентаризации склада учтены поколением.
+        await assertOnecBaseline(tx, warehouseId);
+      }
       await tx.query(
         `UPDATE warehouses
-            SET warehouse_name = $2, ref_key_1c = $3::uuid, workshop_id = $4, responsible_employee_id = $5, is_active = $6, edited_by = $7
+            SET warehouse_name = $2, ref_key_1c = $3::uuid, workshop_id = $4, responsible_employee_id = $5, is_active = $6, edited_by = $7,
+                onec_consumption_since = $8::timestamptz
           WHERE warehouse_id = $1`,
-        [warehouseId, next.name, next.refKey1c, next.workshopId, next.responsibleEmployeeId, next.isActive, ctx.currentUser.id],
+        [warehouseId, next.name, next.refKey1c, next.workshopId, next.responsibleEmployeeId, next.isActive, ctx.currentUser.id,
+          next.onecConsumptionSince],
       );
       const after = await readWarehouse(tx, warehouseId);
       if (!after) throw notFound();
@@ -327,6 +377,62 @@ export class PgWarehouseRepository {
       });
       await completeIdempotent(tx, ctx.idempotencyKey, String(warehouseId), after);
       return after;
+    });
+  }
+
+  /**
+   * Шаг 1 компенсации расхода 1С (откат §7.3) (Idempotency-Key — на всю команду): завершённый ключ — ответ повтора; ключ
+   * «в работе» (прерванная компенсация) — продолжение, если дата начала всё ещё пуста (иначе расход снова включили —
+   * прежний ключ не откатывает новые применения); новый ключ — очистка даты начала с аудитом в той же транзакции.
+   */
+  async beginOnecCompensation(ctx: CommandContext, warehouseId: number): Promise<{ replay: OnecCompensationResult | null }> {
+    return this.database.transaction(async (tx) => {
+      let resumed = false;
+      try {
+        const replay = await beginIdempotent(tx, {
+          key: ctx.idempotencyKey, command: ONEC_COMPENSATE_COMMAND, actorId: ctx.currentUser.id,
+          entityType: 'warehouse', entityId: String(warehouseId), hash: requestHash({ command: ONEC_COMPENSATE_COMMAND, warehouseId }),
+        });
+        if (replay !== undefined) return { replay: replay as OnecCompensationResult };
+      } catch (error) {
+        if (!(error instanceof ApiError && error.code === 'IDEMPOTENCY_IN_PROGRESS')) throw error;
+        resumed = true;
+      }
+      await tx.query('SELECT set_session_user($1)', [ctx.currentUser.id]);
+      const locked = await tx.query('SELECT 1 FROM warehouses WHERE warehouse_id = $1 FOR UPDATE', [warehouseId]);
+      if (locked.rows.length === 0) throw notFound();
+      const before = await readWarehouse(tx, warehouseId);
+      if (!before) throw notFound();
+      if (resumed) {
+        if (before.onecConsumptionSince !== null) throw supersededCompensation();
+        return { replay: null };
+      }
+      if (before.onecConsumptionSince === null) return { replay: null };
+      await tx.query('UPDATE warehouses SET onec_consumption_since = NULL, edited_by = $2 WHERE warehouse_id = $1', [warehouseId, ctx.currentUser.id]);
+      const after = await readWarehouse(tx, warehouseId);
+      if (!after) throw notFound();
+      await recordWarehouseChange(tx, ctx, { event: 'inventory.warehouse_updated', action: 'updated', before, after, commandSource: 'onec_consumption_compensate' });
+      return { replay: null };
+    });
+  }
+
+  /**
+   * Шаг 2 компенсации: результат под ключом (повтор вернёт его, не выполняя откат заново). Сохранённый результат
+   * неизменяем: параллельный исполнитель того же ключа, закончивший позже, получает уже сохранённый ответ.
+   */
+  async completeOnecCompensation(ctx: CommandContext, warehouseId: number, result: OnecCompensationResult): Promise<OnecCompensationResult> {
+    return this.database.transaction(async (tx) => {
+      const updated = await tx.query(
+        `UPDATE command_idempotency_keys SET status = 'completed', response_json = $2::jsonb, completed_at = now()
+          WHERE idempotency_key = $1 AND command_name = $3 AND entity_id = $4 AND status = 'processing'`,
+        [ctx.idempotencyKey, JSON.stringify(result), ONEC_COMPENSATE_COMMAND, String(warehouseId)],
+      );
+      if ((updated.rowCount ?? 0) > 0) return result;
+      const stored = await tx.query<{ response_json: OnecCompensationResult }>(
+        'SELECT response_json FROM command_idempotency_keys WHERE idempotency_key = $1 AND command_name = $2 AND entity_id = $3',
+        [ctx.idempotencyKey, ONEC_COMPENSATE_COMMAND, String(warehouseId)],
+      );
+      return stored.rows[0]?.response_json ?? result;
     });
   }
 

@@ -42,3 +42,29 @@ describe('warehouse stock tabs guards', () => {
     expect(source).toContain("can('sheet_materials.view') && can('sheet_materials.manage')");
   });
 });
+
+describe('1C consumption guards', () => {
+  const warehouses = readFileSync(new URL('./WarehousesPage.tsx', import.meta.url), 'utf8');
+  const issues = readFileSync(new URL('./OnecIssuesTab.tsx', import.meta.url), 'utf8');
+
+  it('sends the count moment only for inventories, only when filled and only to a backend that knows it', () => {
+    expect(source).toContain("consumptionSupported && manualType === 'inventory' && values.countedAt ? { countedAt: values.countedAt.toISOString() } : {}");
+    expect(source).toContain("consumptionSupported && importType === 'inventory' && importCountedAt ? new Date(importCountedAt).toISOString() : undefined");
+    expect(source).toContain("consumptionSupported && manualType === 'inventory' && <Form.Item label=\"Момент подсчёта\"");
+    expect(source).toContain("consumptionSupported && importType === 'inventory' && <Tooltip");
+  });
+
+  it('offers the 1C start field, the issues tab and rollback only to a backend that knows them', () => {
+    expect(warehouses).toContain('supportsOnecConsumption(editing) ? { onecConsumptionSince:');
+    expect(warehouses).toContain('supportsOnecConsumption(row) && <Button');
+    expect(source).toContain("...(consumptionSupported ? [{ key: 'onec-issues'");
+  });
+
+  it('rollback goes through the backend command with a confirmation; the issues tab only reads and re-runs', () => {
+    expect(warehouses).toContain('inventoryApi.compensateOnecConsumption(warehouse.warehouseId, key)');
+    expect(warehouses).toContain('Modal.confirm');
+    expect(issues).toContain('inventoryApi.onecIssues(');
+    expect(issues).toContain('inventoryApi.runOnecConsumption()');
+    expect(issues).not.toMatch(/hasura|useUpdate|useCreate/i);
+  });
+});

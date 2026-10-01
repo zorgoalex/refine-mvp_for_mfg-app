@@ -25,6 +25,17 @@ describe('warehouse reference helpers', () => {
   });
 });
 
+describe('warehouse 1C consumption start', () => {
+  const supported = { ...warehouse, onecConsumptionSince: null };
+  it('sends the start moment only when it changes and only to a backend that knows the field', () => {
+    const since = '2026-09-26T05:14:55.000Z';
+    expect(warehousePatch(supported, { name: 'Склад плёнки', workshopId: 3, onecConsumptionSince: since })).toEqual({ version: warehouse.version, onecConsumptionSince: since });
+    expect(warehousePatch({ ...supported, onecConsumptionSince: '2026-09-26T10:14:55+05:00' }, { name: 'Склад плёнки', workshopId: 3, onecConsumptionSince: since })).toBeNull();
+    expect(warehousePatch({ ...supported, onecConsumptionSince: since }, { name: 'Склад плёнки', workshopId: 3, onecConsumptionSince: null })).toEqual({ version: warehouse.version, onecConsumptionSince: null });
+    expect(warehousePatch(warehouse, { name: 'Склад плёнки', workshopId: 3, onecConsumptionSince: since })).toBeNull();
+  });
+});
+
 describe('warehouse 1C link', () => {
   it('requires a GUID key and sends it lower-cased only when it changes', () => {
     expect(isOnecKey(KEY)).toBe(true);

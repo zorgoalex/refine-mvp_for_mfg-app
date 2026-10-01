@@ -1,22 +1,25 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useList } from '@refinedev/core';
 import { Alert, Button, Card, Checkbox, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Tabs, Tag, Typography, Upload, message } from 'antd';
-import { Table } from '../../ui/tooltipDelay';
+import { Table, Tooltip } from '../../ui/tooltipDelay';
 import type { RcFile } from 'antd/es/upload';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as XLSX from 'xlsx';
 import { inventoryApi, createInventoryIdempotencyKey } from '../../api/inventoryApi';
-import type { InventoryApiError, StockDocumentDto, StockDocType, StockDocumentSummaryDto } from '../../api/types/inventoryApi.types';
+import type { InventoryApiError, StockDocKind, StockDocumentDto, StockDocType, StockDocumentSummaryDto } from '../../api/types/inventoryApi.types';
+import dayjs from 'dayjs';
 import { can } from '../../utils/permissions';
 import { lineFilmOptions, lineFilmValue, operationWarehouse, parseStockCsv, parseStockRows, resolveActiveWarehouse, selectDefaultStockSheet, unresolvedLineIds, type ParsedStockSheet } from './filmStock';
 import { WarehouseStockTable } from './WarehouseStockTable';
+import { OnecIssuesTab } from './OnecIssuesTab';
+import { documentBasis, formatMoment, supportsOnecConsumption } from './onecConsumption';
 import { FILM_GROUP, isOnecGroup, isStockUnsupported, nextStockSupport, pageTitle, readStoredGroup, resolveGroup, stockExportRows, stockTabs, storeGroup } from './warehouseStock';
 import './inventory.css';
 
 const { Title, Text } = Typography;
 const formatQuantity = (value: number | null | undefined) => value == null ? '—' : new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(value);
 const today = () => new Date().toISOString().slice(0, 10);
-const docTypeName: Record<StockDocType, string> = { receipt: 'Приход', writeoff: 'Списание', inventory: 'Инвентаризация' };
+const docTypeName: Record<StockDocKind, string> = { receipt: 'Приход', writeoff: 'Списание', inventory: 'Инвентаризация', onec: 'Расход 1С' };
 const statusName = { draft: 'Черновик', posted: 'Проведён', cancelled: 'Отменён' };
 const apiError = (error: unknown): InventoryApiError => typeof error === 'object' && error !== null ? error as InventoryApiError : {};
 
@@ -30,7 +33,7 @@ export const FilmInventoryPage: React.FC = () => {
   const [search, setSearch] = useState('');
   const [nonZero, setNonZero] = useState(false);
   const [negative, setNegative] = useState(false);
-  const [docTypeFilter, setDocTypeFilter] = useState<StockDocType>();
+  const [docTypeFilter, setDocTypeFilter] = useState<StockDocKind>();
   const [docStatusFilter, setDocStatusFilter] = useState<'draft' | 'posted' | 'cancelled'>();
   const [docDateRange, setDocDateRange] = useState<[string | undefined, string | undefined]>();
   const [docFilmId, setDocFilmId] = useState<number>();
@@ -44,6 +47,8 @@ export const FilmInventoryPage: React.FC = () => {
   const [importRows, setImportRows] = useState<ParsedStockSheet['rows']>([]);
   const [importType, setImportType] = useState<'receipt' | 'inventory'>('inventory');
   const [importDate, setImportDate] = useState(today());
+  // Момент подсчёта инвентаризации (локальное время, datetime-local): отсечка расхода из 1С; пусто — момент проведения.
+  const [importCountedAt, setImportCountedAt] = useState('');
   const [file, setFile] = useState<File>();
   const [operationBusy, setOperationBusy] = useState(false);
   const retryKey = useRef<string>();
@@ -51,6 +56,9 @@ export const FilmInventoryPage: React.FC = () => {
   const warehousesQuery = useQuery({ queryKey: ['inventory', 'warehouses'], queryFn: () => inventoryApi.warehouses(), enabled: viewAllowed });
   const [warehouseLost, setWarehouseLost] = useState(false);
   const warehouseIds = warehousesQuery.data?.items.map((item) => item.warehouseId);
+  // Backend знает расход 1С (поле склада в ответе): только тогда — «Момент подсчёта» и «Не учтено из 1С»
+  // (прежний backend отклоняет неизвестное поле countedAt).
+  const consumptionSupported = (warehousesQuery.data?.items ?? []).some(supportsOnecConsumption);
   const { activeId: activeWarehouseId, lost: warehouseSelectionLost } = resolveActiveWarehouse(warehouseId, warehouseLost, warehouseIds);
   useEffect(() => {
     // Выбранный склад отключён: сбросить выбор и попросить выбрать заново.
@@ -227,6 +235,7 @@ export const FilmInventoryPage: React.FC = () => {
         docType: manualType!, warehouseId: operationWarehouseIdValue, docDate: values.docDate.format('YYYY-MM-DD'), post: true,
         ...(allowNegative ? { allowNegative: true } : {}),
         ...(values.orderId ? { orderId: values.orderId } : {}), ...(values.comment ? { comment: values.comment } : {}),
+        ...(consumptionSupported && manualType === 'inventory' && values.countedAt ? { countedAt: values.countedAt.toISOString() } : {}),
         lines: values.lines.map((line: { filmId: number; quantity: number }) => ({ filmId: line.filmId, quantity: line.quantity })),
       }, retryKey.current);
       retryKey.current = undefined;
@@ -274,12 +283,13 @@ export const FilmInventoryPage: React.FC = () => {
     const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
     const fileSha256 = [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('');
     setOperationBusy(true);
-    const actionId = `import:${fileSha256}:${currentSheet.name}:${importType}:${importDate}`;
+    const countedAt = consumptionSupported && importType === 'inventory' && importCountedAt ? new Date(importCountedAt).toISOString() : undefined;
+    const actionId = `import:${fileSha256}:${currentSheet.name}:${importType}:${importDate}:${countedAt ?? ''}`;
     if (retryActionId.current !== actionId) { retryActionId.current = actionId; retryKey.current = undefined; }
     try {
     const created = await inventoryApi.createImport({
       docType: importType, warehouseId: importWarehouseId, docDate: importDate, fileName: file.name, fileSha256,
-      sheetName: currentSheet.name, rows: importRows.map((row) => ({ ...row })),
+      sheetName: currentSheet.name, rows: importRows.map((row) => ({ ...row })), ...(countedAt ? { countedAt } : {}),
     }, retryKey.current ?? (retryKey.current = createInventoryIdempotencyKey()));
     setSelectedDoc(created); setImportOpen(false); setImportRows([]); setFile(undefined); retryKey.current = undefined; retryActionId.current = undefined;
     await queryClient.invalidateQueries({ queryKey: ['inventory'] });
@@ -293,10 +303,11 @@ export const FilmInventoryPage: React.FC = () => {
   ];
   const documentColumns = [
     { title: '№', dataIndex: 'documentId', key: 'documentId' }, { title: 'Дата', dataIndex: 'docDate', key: 'docDate' },
-    { title: 'Тип', dataIndex: 'docType', key: 'docType', render: (value: StockDocType) => docTypeName[value] },
+    { title: 'Тип', dataIndex: 'docType', key: 'docType', render: (value: StockDocKind) => value === 'onec' ? <Tag color="blue">{docTypeName[value]}</Tag> : docTypeName[value] ?? value },
     { title: 'Статус', dataIndex: 'status', key: 'status', render: (value: keyof typeof statusName) => statusName[value] },
     { title: 'Строк', dataIndex: 'linesCount', key: 'linesCount' }, { title: 'Количество, пог. м', dataIndex: 'totalQuantity', key: 'totalQuantity', render: (value: number) => formatQuantity(value) },
     { title: 'Заказ', dataIndex: 'orderName', key: 'orderName', render: (value: string | null, row: StockDocumentSummaryDto) => value ?? (row.orderId ? `№${row.orderId}` : '—') },
+    { title: 'Основание', key: 'basis', render: (_: unknown, row: StockDocumentSummaryDto) => documentBasis(row) },
   ];
   if (!viewAllowed) return <Alert type="error" message="Нет доступа к складу плёнки" />;
   return <div className="film-inventory-page">
@@ -336,11 +347,13 @@ export const FilmInventoryPage: React.FC = () => {
         </Space>
         <Table rowKey="documentId" dataSource={documentsQuery.data?.items ?? []} columns={documentColumns} loading={documentsQuery.isLoading} onRow={(row) => ({ onClick: () => void openDocument(row.documentId), style: { cursor: 'pointer' } })} pagination={{ current: docPage.current, pageSize: docPage.pageSize, total: documentsQuery.data?.total ?? 0, showSizeChanger: true, onChange: (current, pageSize) => setDocPage({ current, pageSize }) }} />
       </Card> },
+      ...(consumptionSupported ? [{ key: 'onec-issues', label: 'Не учтено из 1С', children: tab === 'onec-issues' ? <OnecIssuesTab warehouseId={activeWarehouseId} manageAllowed={manageAllowed} /> : null }] : []),
     ]} />
 
     <Modal title={manualType ? `${docTypeName[manualType]} · склад «${warehouseName(operationWarehouseId)}»` : ''} open={Boolean(manualType)} onCancel={() => setManualType(undefined)} onOk={() => void createManual()} confirmLoading={operationBusy} width={720} okText="Провести">
       <Form form={manualForm} layout="vertical" initialValues={{ docDate: undefined, lines: [{ quantity: 0 }] }}>
         <Form.Item label="Дата" name="docDate" rules={[{ required: true }]}><DatePicker format="DD.MM.YYYY" /></Form.Item>
+        {consumptionSupported && manualType === 'inventory' && <Form.Item label="Момент подсчёта" name="countedAt" extra="Когда пересчитали остатки. Расход из 1С учитывается только после этого момента. Пусто — момент проведения." rules={[{ validator: (_: unknown, value?: dayjs.Dayjs) => !value || !value.isAfter(dayjs()) ? Promise.resolve() : Promise.reject(new Error('Момент подсчёта не может быть в будущем')) }]}><DatePicker showTime={{ format: 'HH:mm' }} format="DD.MM.YYYY HH:mm" placeholder="Момент проведения" /></Form.Item>}
         {manualType === 'writeoff' && <Form.Item label="Заказ (необязательно)" name="orderId"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>}
         <Form.List name="lines">{(fields, { add, remove }) => <>{fields.map(({ key, name, ...rest }) => <Space key={key} align="baseline">
           <Form.Item {...rest} name={[name, 'filmId']} rules={[{ required: true }]}><Select showSearch placeholder="Активная плёнка" optionFilterProp="label" style={{ minWidth: 360 }} options={activeFilmOptions} /></Form.Item>
@@ -355,17 +368,20 @@ export const FilmInventoryPage: React.FC = () => {
         <Upload beforeUpload={(uploadFile: RcFile) => { void acceptFile(uploadFile); return false; }} showUploadList={false}><Button>Выбрать файл XLSX / XLS / CSV</Button></Upload>
         {file && <Text>{file.name}</Text>}
         {sheets.length > 1 && <><Alert type="warning" message="Выберите лист с исходными строками. Лист «Свод» может объединять строки." /><Select value={sheetName} onChange={(value) => { setSheetName(value); setImportRows(sheets.find((sheet) => sheet.name === value)?.rows ?? []); }} options={sheets.map((sheet) => ({ value: sheet.name, label: `${sheet.name}${sheet.hasName && sheet.hasSupplier ? '' : ' (нет нужных колонок)'}` }))} style={{ width: 320 }} /></>}
-        <Space><Select value={importType} onChange={setImportType} options={[{ value: 'receipt', label: 'Приход' }, { value: 'inventory', label: 'Инвентаризация' }]} /><Input type="date" value={importDate} onChange={(event) => setImportDate(event.target.value)} /></Space>
+        <Space wrap><Select value={importType} onChange={setImportType} options={[{ value: 'receipt', label: 'Приход' }, { value: 'inventory', label: 'Инвентаризация' }]} /><Input type="date" value={importDate} onChange={(event) => setImportDate(event.target.value)} />
+          {consumptionSupported && importType === 'inventory' && <Tooltip title="Когда пересчитали остатки. Расход из 1С учитывается только после этого момента. Пусто — момент проведения."><Input type="datetime-local" aria-label="Момент подсчёта" value={importCountedAt} max={dayjs().format('YYYY-MM-DDTHH:mm')} onChange={(event) => setImportCountedAt(event.target.value)} style={{ width: 220 }} /></Tooltip>}</Space>
         {importRows.length > 0 && <><Text>{importRows.length} строк готовы к проверке</Text><Table size="small" rowKey="rowNo" pagination={{ defaultPageSize: 10, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100] }} dataSource={importRows} columns={[{ title: 'Строка', dataIndex: 'rowNo' }, { title: 'Плёнка', dataIndex: 'name' }, { title: 'Поставщик', dataIndex: 'supplier' }, { title: 'Количество', dataIndex: 'quantity', render: (value: string | null) => value ?? 'Разберёт backend' }, { title: 'Сопоставление', render: () => <Tag>Предварительно</Tag> }]} /></>}
       </Space>
     </Modal>
 
     <Modal title={`Документ №${selectedDoc?.documentId ?? ''}`} open={Boolean(selectedDoc)} onCancel={() => setSelectedDoc(undefined)} footer={selectedDoc?.status === 'draft' && manageAllowed ? <Space><Button onClick={() => { if (selectedDoc.previousPostedDocumentId) { Modal.confirm({ title: 'Этот файл уже проводился', content: `Документ №${selectedDoc.previousPostedDocumentId} с тем же файлом уже проведён. Провести ещё раз?`, okText: 'Провести', cancelText: 'Отмена', onOk: () => postSelectedDocument() }); } else void postSelectedDocument(); }}>Провести</Button><Button danger onClick={() => void runCommand(async (key) => { const cancelled = await inventoryApi.cancel(selectedDoc.documentId, selectedDoc.version, key); await refreshDocument(cancelled); }, `cancel:${selectedDoc.documentId}:${selectedDoc.version}`)}>Отменить</Button></Space> : null} width={900}>
-      {selectedDoc && <><Space wrap><Tag>{docTypeName[selectedDoc.docType]}</Tag><Tag>{statusName[selectedDoc.status]}</Tag><Text>{selectedDoc.docDate}</Text><Text>{selectedDoc.fileName}</Text></Space>
+      {selectedDoc && <><Space wrap><Tag color={selectedDoc.docType === 'onec' ? 'blue' : undefined}>{docTypeName[selectedDoc.docType] ?? selectedDoc.docType}</Tag><Tag>{statusName[selectedDoc.status]}</Tag><Text>{selectedDoc.docDate}</Text><Text>{selectedDoc.fileName}</Text>
+        {selectedDoc.docType === 'inventory' && selectedDoc.countedAt && <Text type="secondary">Подсчёт: {formatMoment(selectedDoc.countedAt)}</Text>}
+        {selectedDoc.source === 'onec' && <Text>{documentBasis(selectedDoc)}{selectedDoc.onec?.projectionSeq ? ` · изменение ${selectedDoc.onec.projectionSeq}` : ''}</Text>}</Space>
         {selectedDoc.previousPostedDocumentId && <Alert type="warning" message={`Этот файл уже проводился (документ №${selectedDoc.previousPostedDocumentId})`} action={<Button size="small" onClick={() => void openDocument(selectedDoc.previousPostedDocumentId!)}>Открыть</Button>} />}
         {selectedDoc.negativeAfter.length > 0 && <Alert type="warning" message="После проведения появятся отрицательные остатки" description={selectedDoc.negativeAfter.map((row) => `${row.filmName}: ${formatQuantity(row.after)} м`).join('; ')} />}
         {selectedDoc.unresolved.length > 0 && <Alert type="error" message="Есть неразрешённые строки. Сопоставьте плёнку и количество перед проведением." />}
-        <Table size="small" rowKey="lineId" dataSource={selectedDoc.lines} rowClassName={(line) => unresolvedLineIds(selectedDoc).has(line.lineId) ? 'film-stock-unresolved' : ''} columns={[
+        {selectedDoc.source !== 'onec' && <Table size="small" rowKey="lineId" dataSource={selectedDoc.lines} rowClassName={(line) => unresolvedLineIds(selectedDoc).has(line.lineId) ? 'film-stock-unresolved' : ''} columns={[
           { title: '№', dataIndex: 'lineNo' }, { title: 'Плёнка', render: (_: unknown, line: StockDocumentDto['lines'][number]) => line.filmName ?? line.rawName ?? '—' },
           { title: 'Поставщик', dataIndex: 'rawSupplier', render: (value: string | null) => value ?? '—' }, { title: 'Статус', render: (_: unknown, line: StockDocumentDto['lines'][number]) => `${line.matchStatus} / ${line.quantityStatus}${line.issue ? ` · ${line.issue}` : ''}` },
           { title: 'Кол-во', render: (_: unknown, line: StockDocumentDto['lines'][number]) => line.quantity == null ? line.rawQuantity ?? '—' : formatQuantity(line.quantity) },
@@ -375,7 +391,7 @@ export const FilmInventoryPage: React.FC = () => {
             {line.matchStatus !== 'skipped' && <><InputNumber size="small" min={selectedDoc.docType === 'inventory' ? 0 : 0.01} precision={2} defaultValue={line.quantity ?? undefined} onBlur={(event) => { const quantity = Number(event.target.value); if (Number.isFinite(quantity) && quantity >= (selectedDoc.docType === 'inventory' ? 0 : 0.01) && quantity !== line.quantity) void runCommand(async (key) => refreshDocument(await inventoryApi.patchLine(selectedDoc.documentId, line.lineId, { version: selectedDoc.version, quantity, confirmQuantity: true }, key)), `line:${selectedDoc.documentId}:${line.lineId}:quantity:${quantity}`); }} /><Button size="small" onClick={() => void runCommand(async (key) => refreshDocument(await inventoryApi.patchLine(selectedDoc.documentId, line.lineId, { version: selectedDoc.version, confirmQuantity: true }, key)), `line:${selectedDoc.documentId}:${line.lineId}:confirmQuantity`)}>Подтвердить количество</Button></>}
             <Button size="small" onClick={() => void runCommand(async (key) => refreshDocument(await inventoryApi.patchLine(selectedDoc.documentId, line.lineId, { version: selectedDoc.version, skip: true }, key)), `line:${selectedDoc.documentId}:${line.lineId}:skip`)}>Пропустить</Button>
           </Space> },
-        ]} pagination={{ defaultPageSize: 20, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100] }} />
+        ]} pagination={{ defaultPageSize: 20, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100] }} />}
         {selectedDoc.movements.length > 0 && <Table size="small" rowKey={(row) => `${row.filmId}-${row.movementType}`} dataSource={selectedDoc.movements} columns={[{ title: 'Плёнка', dataIndex: 'filmName' }, { title: 'Движение', dataIndex: 'movementType' }, { title: 'Δ', dataIndex: 'delta', render: formatQuantity }, { title: 'Было', dataIndex: 'balanceBefore', render: formatQuantity }, { title: 'Стало', dataIndex: 'balanceAfter', render: formatQuantity }]} pagination={false} />}
       </>}
     </Modal>

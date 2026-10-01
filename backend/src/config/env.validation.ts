@@ -304,6 +304,8 @@ export const envSchema = z
     BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID: z
       .union([emptyTrimmedStringFromEnv, z.coerce.number().int().positive()])
       .optional(),
+    // Расход склада из документов 1С (проекция; исполнитель — BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID).
+    BACKEND_INVENTORY_ONEC_CONSUMPTION: booleanFromEnv.default(false),
     BACKEND_ENABLE_PDF_IMPORT_LAYOUT_PATTERNS: booleanFromEnv.default(false),
     BACKEND_STATUS_AUTOMATION: booleanFromEnv.default(false),
     BACKEND_ENABLE_NOTIFICATION_ENGINE: booleanFromEnv.default(false),
@@ -1039,6 +1041,13 @@ export const envSchema = z
         code: 'custom',
         path: ['BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID'],
         message: 'required when BACKEND_INVENTORY_ONEC_AUTOSYNC=true',
+      });
+    }
+    if (env.BACKEND_INVENTORY_ONEC_CONSUMPTION && !env.BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID'],
+        message: 'required when BACKEND_INVENTORY_ONEC_CONSUMPTION=true',
       });
     }
     if (env.BACKEND_ENABLE_BITRIX24_REVERSE_SYNC) {

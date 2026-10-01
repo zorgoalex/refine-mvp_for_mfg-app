@@ -143,6 +143,14 @@ describe('VPS compose backend runtime flags', () => {
     expect(envExample).toContain('BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID=');
   });
 
+  it('passes the 1C consumption projection flag with a safe default', () => {
+    const compose = readTemplate('ops/templates/docker-compose.vps.yml');
+    const envExample = readTemplate('ops/templates/env.vps.example');
+
+    expect(compose).toContain('BACKEND_INVENTORY_ONEC_CONSUMPTION: ${BACKEND_INVENTORY_ONEC_CONSUMPTION:-false}');
+    expect(envExample).toContain('BACKEND_INVENTORY_ONEC_CONSUMPTION=false');
+  });
+
   it('passes the resource procurement flag with a safe default', () => {
     const compose = readTemplate('ops/templates/docker-compose.vps.yml');
     const localCompose = readTemplate('backend/docker-compose.yml');

@@ -101,7 +101,7 @@ describe.skipIf(!url)('inventory ↔ catalog import races — real PostgreSQL', 
       [supplier, material.rows[0].material_type_id, actorId],
     )).rows[0].vendor_id);
     filmTypeId = Number((await watcher.query<{ film_type_id: number }>('SELECT min(film_type_id) AS film_type_id FROM film_types')).rows[0].film_type_id);
-    warehouseId = Number((await watcher.query<{ warehouse_id: number }>("SELECT warehouse_id FROM warehouses WHERE warehouse_name = 'Склад плёнки'")).rows[0].warehouse_id);
+    warehouseId = Number((await watcher.query<{ warehouse_id: number }>("SELECT warehouse_id FROM warehouses WHERE is_active ORDER BY warehouse_id LIMIT 1")).rows[0].warehouse_id);
     stockA = new PgInventoryRepository(new CommittedDatabase(connA));
     stockB = new PgInventoryRepository(new CommittedDatabase(connB));
     catalogB = new CatalogImportService(new CommittedDatabase(connB), {} as unknown as OnecCatalogReader);

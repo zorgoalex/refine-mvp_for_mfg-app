@@ -4,7 +4,7 @@ import { withQuery } from './ordersApi';
 import type {
   InventoryBalanceQuery, InventoryDocumentQuery, InventoryPage, ManualStockDocumentInput,
   OrderFilmStockDto, StockBalanceDto, StockDocumentDto, StockDocumentSummaryDto, StockImportInput,
-  OnecWarehouseOptionDto, StockLinePatch, WarehouseCreateInput, WarehouseDto, WarehousePatch, WarehouseSyncResultDto,
+  OnecCompensateDto, OnecConsumptionRunDto, OnecIssuesPage, OnecIssuesQuery, OnecWarehouseOptionDto, StockLinePatch, WarehouseCreateInput, WarehouseDto, WarehousePatch, WarehouseSyncResultDto,
   WarehouseStockDto, WarehouseStockQuery,
 } from './types/inventoryApi.types';
 
@@ -56,6 +56,17 @@ export const inventoryApi = {
   },
   cancel(id: number, version: number, key = createInventoryIdempotencyKey()) {
     return httpClient.post<StockDocumentDto>(`${root}/documents/${id}/cancel`, { version }, commandOptions(key));
+  },
+  /** Строки расхода 1С, не попавшие в остатки (причины). */
+  onecIssues(params: OnecIssuesQuery = {}) {
+    return httpClient.get<OnecIssuesPage>(withQuery(`${root}/onec-consumption/issues`, params));
+  },
+  runOnecConsumption() {
+    return httpClient.post<OnecConsumptionRunDto>(`${root}/onec-consumption/run`, {});
+  },
+  /** Откат: расход 1С склада возвращается в 0, дата начала очищается. */
+  compensateOnecConsumption(warehouseId: number, key = createInventoryIdempotencyKey()) {
+    return httpClient.post<OnecCompensateDto>(`${root}/warehouses/${warehouseId}/onec-consumption/compensate`, {}, commandOptions(key));
   },
   orderFilmStock(orderId: number) {
     return httpClient.get<OrderFilmStockDto>(backendApiPath(`/orders/${orderId}/film-stock`));
