@@ -8,9 +8,13 @@ import { redactLogFields } from '../../../common/logging/redaction';
 import { CrmSyncRuntimeConfigService } from '../http/crm-sync-runtime-config.service';
 import { Bitrix24ReverseProcessorService } from './bitrix24-reverse-processor.service';
 
+const RECONCILE_RETENTION_INTERVAL_MS = 30 * 60 * 1000;
+const RECONCILE_RETENTION_BACKLOG_INTERVAL_MS = 60 * 1000;
+
 export class Bitrix24ReverseSchedulerService implements OnModuleInit, OnModuleDestroy {
   private interval?: ReturnType<typeof setInterval>;
   private running = false;
+  private nextRetentionAt = 0;
 
   constructor(
     private readonly processor: Bitrix24ReverseProcessorService,
@@ -60,8 +64,37 @@ export class Bitrix24ReverseSchedulerService implements OnModuleInit, OnModuleDe
         durationMs: Date.now() - startedAt,
         errorMessage: error instanceof Error ? error.message : String(error),
       }));
+    }
+    try {
+      await this.pruneReconcileRecords();
     } finally {
       this.running = false;
+    }
+  }
+
+  /** Retention is housekeeping: its failure must never stop the event tick. */
+  private async pruneReconcileRecords(): Promise<void> {
+    if (Date.now() < this.nextRetentionAt) return;
+    this.nextRetentionAt = Date.now() + RECONCILE_RETENTION_INTERVAL_MS;
+    const startedAt = Date.now();
+    try {
+      const pruned = await this.processor.runRetentionTick();
+      if (pruned?.backlog) {
+        this.nextRetentionAt = Date.now() + RECONCILE_RETENTION_BACKLOG_INTERVAL_MS;
+      }
+      if (pruned && pruned.auditDeleted + pruned.inboundDeleted > 0) {
+        this.logger.log(redactLogFields({
+          event: 'bitrix24_reconcile_retention_finished',
+          ...pruned,
+          durationMs: Date.now() - startedAt,
+        }));
+      }
+    } catch (error) {
+      this.logger.error(redactLogFields({
+        event: 'bitrix24_reconcile_retention_failed',
+        durationMs: Date.now() - startedAt,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      }));
     }
   }
 }

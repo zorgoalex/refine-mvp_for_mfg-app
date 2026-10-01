@@ -15,6 +15,13 @@ import { PgBitrix24ReverseRepository } from './pg-bitrix24-reverse-repository';
 import { Bitrix24PaidConversionService } from './bitrix24-paid-conversion.service';
 import { Bitrix24ProductSyncService } from './bitrix24-product-sync.service';
 
+/** Owner decision 2026-10-01: unchanged reconcile records are kept for a week. */
+const RECONCILE_RETENTION_DAYS = 7;
+// A scheduler run is one statement under the pool's statement timeout, so the batch is small: a
+// half-hourly run meets about a thousand new candidates per table, a backlog drains a batch a
+// minute.
+const RECONCILE_RETENTION_BATCH_SIZE = 2_000;
+
 export class Bitrix24ReverseProcessorService {
   constructor(
     private readonly repository: PgBitrix24ReverseRepository,
@@ -110,6 +117,26 @@ export class Bitrix24ReverseProcessorService {
       batchSize: flags.batchSize,
       intervalMs: flags.reconcileIntervalMs,
     });
+  }
+
+  /** Same ownership gate as the scheduled reconcile that produces the records being pruned. */
+  async runRetentionTick(): Promise<{
+    auditDeleted: number;
+    inboundDeleted: number;
+    /** A full batch was removed: more is waiting, the next run should not wait a whole interval. */
+    backlog: boolean;
+  } | null> {
+    const flags = this.config.getReverseSync();
+    if (!flags.enabled || flags.relayOwner === 'none' || flags.dryRun) return null;
+    const pruned = await this.repository.pruneReconcileNoise({
+      retentionDays: RECONCILE_RETENTION_DAYS,
+      batchSize: RECONCILE_RETENTION_BATCH_SIZE,
+    });
+    return {
+      ...pruned,
+      backlog: pruned.auditDeleted >= RECONCILE_RETENTION_BATCH_SIZE
+        || pruned.inboundDeleted >= RECONCILE_RETENTION_BATCH_SIZE,
+    };
   }
 
   async reconcileMappedOrderPaymentsNow(input: {

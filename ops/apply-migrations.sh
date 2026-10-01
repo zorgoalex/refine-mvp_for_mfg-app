@@ -2527,6 +2527,10 @@ probe_file() {
     225_procurement_notification_rules*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM notification_rules WHERE rule_code = 'procurement-material-arrived' AND event_type = 'order.resource_procurement_changed');" ;;
     # 224: calendar send = one system broadcast (purpose calendar) + runs source with the widened target window.
+    226_bitrix24_reconcile_retention*) probe_all \
+      "SELECT to_regprocedure('public.prune_bitrix24_reconcile_noise(timestamptz,integer)') IS NOT NULL;" \
+      "$(q_idx idx_bitrix24_inbound_event_reconcile_processed)" "$(q_idx idx_cad_events_audit_id)" \
+      "SELECT EXISTS (SELECT 1 FROM audit_log WHERE event='bitrix24_reverse.reconcile_retention_pruned' AND request_id='migration:226');" ;;
     224_whatsapp_calendar_send*) probe_all \
       "$(q_col whatsapp_broadcasts purpose)" "$(q_col whatsapp_broadcasts calendar_min_interval_minutes)" \
       "$(q_col whatsapp_broadcasts calendar_last_delivery_at)" "$(q_col whatsapp_broadcast_runs source)" \
@@ -2935,7 +2939,7 @@ verify_applied_effect() {
     205_warehouses_onec_key_required*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*)
+    209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)

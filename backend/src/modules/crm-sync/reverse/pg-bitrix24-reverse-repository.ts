@@ -1590,6 +1590,8 @@ export class PgBitrix24ReverseRepository {
         requestId: incomingRequestId,
         orderId: null,
       });
+      const paymentOwner = { requestId: incomingRequestId };
+      const stored = await readPaymentSnapshotState(tx, paymentOwner);
       await tx.query(
         `UPDATE bitrix24_incoming_request_payment
             SET state='deleted', updated_at=now()
@@ -1653,10 +1655,7 @@ export class PgBitrix24ReverseRepository {
         actorUserId: null,
         requestId: auditRequestId,
         source: 'bitrix24',
-        after: {
-          activePaymentCount: payments.length,
-          activePaymentAmount: payments.reduce((sum, payment) => sum + payment.amount, 0),
-        },
+        ...paymentReconcileAuditState(stored, await readPaymentSnapshotState(tx, paymentOwner), payments),
       });
       await bumpPaymentSyncGen(tx, discovered.bitrix_deal_id);
       return { applied: true };
@@ -1848,6 +1847,7 @@ export class PgBitrix24ReverseRepository {
       const paymentOwner = await resolveMappedPaymentOwner(tx, orderId, bitrixDealId, true);
       const activeIds = payments.map((payment) => payment.bitrixPaymentId);
       await assertPaymentSnapshotOwnership(tx, activeIds, paymentOwner);
+      const stored = await readPaymentSnapshotState(tx, paymentOwner);
       await tx.query(
         `UPDATE bitrix24_incoming_request_payment
             SET state='deleted', updated_at=now()
@@ -1913,10 +1913,7 @@ export class PgBitrix24ReverseRepository {
         requestId: auditRequestId,
         source: 'bitrix24',
         relatedOrderId: orderId,
-        after: {
-          activePaymentCount: payments.length,
-          activePaymentAmount: payments.reduce((sum, payment) => sum + payment.amount, 0),
-        },
+        ...paymentReconcileAuditState(stored, await readPaymentSnapshotState(tx, paymentOwner), payments),
       });
       await bumpPaymentSyncGen(tx, bitrixDealId);
       return { applied: true };
@@ -2015,6 +2012,49 @@ export class PgBitrix24ReverseRepository {
         [last],
       );
       return deals.rows.length;
+    });
+  }
+
+  /**
+   * Reconcile records older than the retention window keep only the ones where the payment set
+   * changed; the rule itself lives in prune_bitrix24_reconcile_noise (migration 226).
+   */
+  async pruneReconcileNoise(input: {
+    retentionDays: number;
+    batchSize: number;
+  }): Promise<{ auditDeleted: number; inboundDeleted: number }> {
+    return this.db.transaction(async (tx) => {
+      const pruned = await tx.query<{
+        cutoff: Date | string;
+        audit_deleted: string | number;
+        inbound_deleted: string | number;
+      }>(
+        `SELECT window_start.cutoff, pruned.audit_deleted, pruned.inbound_deleted
+           FROM (SELECT now() - make_interval(days => $1::int) AS cutoff) window_start
+          CROSS JOIN LATERAL prune_bitrix24_reconcile_noise(window_start.cutoff, $2::int) pruned`,
+        [input.retentionDays, input.batchSize],
+      );
+      const row = pruned.rows[0];
+      const auditDeleted = Number(row?.audit_deleted ?? 0);
+      const inboundDeleted = Number(row?.inbound_deleted ?? 0);
+      if (row && auditDeleted + inboundDeleted > 0) {
+        await this.audit.record(tx, {
+          event: 'bitrix24_reverse.reconcile_retention_pruned',
+          entityType: 'audit_retention',
+          entityId: 'bitrix24_reconcile',
+          actorUserId: null,
+          requestId: `bitrix24-reconcile-retention:${randomUUID()}`,
+          source: 'bitrix24',
+          metadata: {
+            trigger: 'scheduler',
+            retentionDays: input.retentionDays,
+            cutoff: new Date(row.cutoff).toISOString(),
+            auditDeleted,
+            inboundDeleted,
+          },
+        });
+      }
+      return { auditDeleted, inboundDeleted };
     });
   }
 
@@ -6547,6 +6587,90 @@ export async function lockPaymentSyncGen(
 }
 
 /** Advance the Deal-scoped payment generation — every snapshot mutation. */
+type PaymentSnapshotOwner =
+  | { requestId: number }
+  | { requestId: number | null; orderId: number | null };
+
+interface PaymentSnapshotState {
+  digest: string;
+  activePaymentCount: number;
+  activePaymentAmount: number;
+}
+
+type PaymentSnapshotStateRow = {
+  digest: string;
+  active_count: string | number;
+  active_amount: string | number;
+};
+
+// Everything a reconcile can persist, minus the columns it rewrites on every pass.
+const PAYMENT_SNAPSHOT_STATE_SELECT = `
+  SELECT md5(COALESCE(string_agg(
+           md5((to_jsonb(payment) - 'last_fetched_at' - 'updated_at' - 'sync_version')::text),
+           ',' ORDER BY payment.bitrix_payment_id
+         ), '')) AS digest,
+         count(*) FILTER (WHERE payment.state IN ('active','materialized')) AS active_count,
+         COALESCE(sum(payment.amount) FILTER (WHERE payment.state IN ('active','materialized')), 0)
+           AS active_amount
+    FROM bitrix24_incoming_request_payment payment`;
+
+/**
+ * Stored payment snapshots of one owner — the same rows a reconcile marks deleted or upserts (a
+ * request owns by request_id alone, a mapped order by the order/request pair). Read before and
+ * after the rewrite under the Deal advisory lock and the payment generation row, so a differing
+ * digest means this reconcile changed persisted data, whichever column it was.
+ */
+async function readPaymentSnapshotState(
+  tx: TransactionClient,
+  owner: PaymentSnapshotOwner,
+): Promise<PaymentSnapshotState> {
+  const result = 'orderId' in owner
+    ? await tx.query<PaymentSnapshotStateRow>(
+        `${PAYMENT_SNAPSHOT_STATE_SELECT}
+          WHERE payment.erp_order_id IS NOT DISTINCT FROM $1::bigint
+            AND payment.request_id IS NOT DISTINCT FROM $2::bigint`,
+        [owner.orderId, owner.requestId],
+      )
+    : await tx.query<PaymentSnapshotStateRow>(
+        `${PAYMENT_SNAPSHOT_STATE_SELECT}
+          WHERE payment.request_id=$1`,
+        [owner.requestId],
+      );
+  const row = result.rows[0];
+  return {
+    digest: row.digest,
+    activePaymentCount: Number(row.active_count),
+    activePaymentAmount: Number(row.active_amount),
+  };
+}
+
+/**
+ * Audit state of a payment reconcile. `changed` is what the retention of reconcile records keys
+ * on: the scheduled reconcile mostly re-reads an unchanged payment set, and beyond the retention
+ * window only the records that changed something are kept (migration 226).
+ */
+export function paymentReconcileAuditState(
+  before: PaymentSnapshotState,
+  after: Pick<PaymentSnapshotState, 'digest'>,
+  incoming: readonly Pick<ReversePaymentSnapshot, 'amount'>[],
+): {
+  before: { activePaymentCount: number; activePaymentAmount: number };
+  after: { activePaymentCount: number; activePaymentAmount: number };
+  metadata: { changed: boolean };
+} {
+  return {
+    before: {
+      activePaymentCount: before.activePaymentCount,
+      activePaymentAmount: before.activePaymentAmount,
+    },
+    after: {
+      activePaymentCount: incoming.length,
+      activePaymentAmount: incoming.reduce((sum, payment) => sum + payment.amount, 0),
+    },
+    metadata: { changed: before.digest !== after.digest },
+  };
+}
+
 export async function bumpPaymentSyncGen(
   tx: TransactionClient,
   dealId: string,

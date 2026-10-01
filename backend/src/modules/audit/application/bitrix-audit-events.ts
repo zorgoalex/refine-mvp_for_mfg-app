@@ -180,6 +180,13 @@ export const BITRIX_EVENT_CATALOG: BitrixEventDefinition[] = [
     'success'
   ),
   definition(
+    'bitrix24_reverse.reconcile_retention_pruned',
+    'Очистка журнала сверок',
+    'reverse',
+    'processing',
+    'success'
+  ),
+  definition(
     'bitrix24_reverse.payments_materialize',
     'Платежи заявки перенесены в ERP',
     'reverse',
