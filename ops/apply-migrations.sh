@@ -2230,6 +2230,18 @@ probe_file() {
       "$(q_idx idx_whatsapp_broadcast_runs_auto_slot)" \
       "SELECT EXISTS (SELECT 1 FROM whatsapp_broadcasts WHERE broadcast_id = 1);" \
       "SELECT EXISTS (SELECT 1 FROM whatsapp_broadcast_control WHERE singleton_id = 1);" ;;
+    # 224: calendar send = one system broadcast (purpose calendar) + runs source with the widened target window.
+    224_whatsapp_calendar_send*) probe_all \
+      "$(q_col whatsapp_broadcasts purpose)" "$(q_col whatsapp_broadcasts calendar_min_interval_minutes)" \
+      "$(q_col whatsapp_broadcasts calendar_last_delivery_at)" "$(q_col whatsapp_broadcast_runs source)" \
+      "$(q_con_on whatsapp_broadcasts chk_whatsapp_broadcasts_purpose)" \
+      "$(q_con_on whatsapp_broadcasts chk_whatsapp_broadcasts_calendar_manual)" \
+      "$(q_con_on whatsapp_broadcasts chk_whatsapp_broadcasts_calendar_interval)" \
+      "$(q_con_on whatsapp_broadcast_runs chk_whatsapp_broadcast_runs_source)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='chk_whatsapp_broadcast_runs_target' AND pg_get_constraintdef(oid) LIKE '%calendar%');" \
+      "$(q_idx idx_whatsapp_broadcasts_calendar_active)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname='idx_whatsapp_broadcasts_name_active' AND indexdef LIKE '%purpose%');" \
+      "SELECT EXISTS (SELECT 1 FROM whatsapp_broadcasts WHERE purpose = 'calendar');" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -2256,6 +2268,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     209_whatsapp_broadcasts*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    224_whatsapp_calendar_send*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     173_inbound_signals*)

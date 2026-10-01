@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Put, Req, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { ApiError } from '../../../common/errors/api-error';
@@ -7,7 +7,7 @@ import { RequirePermissions } from '../../../permissions/require-permissions.dec
 import { WhatsAppPermissionsGuard } from '../whatsapp-permissions.guard';
 import {
   parseBroadcastControl, parseBroadcastCreate, parseBroadcastId, parseBroadcastReplan, parseBroadcastRetry, parseBroadcastRun,
-  parseBroadcastUpdate, parseBroadcastVersion, parseDeliverySeq, parseRunId,
+  parseBroadcastUpdate, parseBroadcastVersion, parseCalendarSendRun, parseCalendarSendUpdate, parseDeliverySeq, parseRunId,
 } from './broadcast.dto';
 import { BroadcastService } from './broadcast.service';
 import { BROADCAST_BASE_PERMISSIONS } from './broadcast.types';
@@ -50,6 +50,22 @@ export class BroadcastController {
   @ApiOperation({ summary: 'Read-only history of the daily digest before the broadcasts cutover' })
   @Get('broadcasts/legacy-digest-runs') @RequirePermissions(GATES)
   legacyRuns() { return this.service.legacyRuns(); }
+
+  @ApiOperation({ summary: 'Settings of «Отправить в чат» from the calendar with the frequency threshold state' })
+  @Get('calendar-send') @RequirePermissions(GATES)
+  calendarSend() { return this.service.calendarSend(); }
+
+  @ApiOperation({ summary: 'Update the calendar send settings (version compare-and-swap)' })
+  @Put('calendar-send') @RequirePermissions(GATES)
+  updateCalendarSend(@Req() request: RequestWithCurrentUser, @Body() body: unknown) {
+    return this.service.updateCalendarSend(parseCalendarSendUpdate(body), user(request), requestId(request));
+  }
+
+  @ApiOperation({ summary: 'Queue the order cards of one calendar day for the configured chat (idempotent)' })
+  @Post('calendar-send/runs') @HttpCode(202) @RequirePermissions(GATES)
+  createCalendarRun(@Req() request: RequestWithCurrentUser, @Body() body: unknown) {
+    return this.service.createCalendarRun(parseCalendarSendRun(body), user(request), requestId(request));
+  }
 
   @ApiOperation({ summary: 'Read one broadcast with today\'s frozen schedule' })
   @Get('broadcasts/:id') @RequirePermissions(GATES)

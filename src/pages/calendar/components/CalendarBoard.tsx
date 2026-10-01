@@ -26,6 +26,7 @@ import { useInvalidate } from '@refinedev/core';
 import DayColumn from './DayColumn';
 import CalendarOrderDragLayer from './CalendarOrderDragLayer';
 import OrderContextMenu from './OrderContextMenu';
+import DayContextMenu from './DayContextMenu';
 import { useCalendarDays } from '../hooks/useCalendarDays';
 import { useCalendarData } from '../hooks/useCalendarData';
 import { useOrderMove } from '../hooks/useOrderMove';
@@ -50,7 +51,10 @@ import {
   isMobileDevice,
   isNarrowDevice,
 } from '../utils/calendarLayout';
-import { formatDateKey } from '../utils/dateUtils';
+import { formatDateKey, formatDateForApi } from '../utils/dateUtils';
+import { broadcastsApi } from '../../../api/broadcastsApi';
+import { runCalendarSend } from '../../configuration/components/broadcasts/calendarSendModel';
+import { useCalendarSendSupport } from '../../configuration/components/broadcasts/calendarSendSupport';
 import { useResponsive } from '../hooks/useResponsive';
 import { useOperationalUi } from '../../../ui-operational/OperationalPrimitives';
 import {
@@ -288,6 +292,8 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   const currentUser = authSession.getUser();
   const packerMode = isPackerUser(currentUser);
   const { canViewFinancials } = useOrderFinancialVisibility(currentUser);
+  const { support: calendarSendSupport, minIntervalMinutes: calendarSendInterval } = useCalendarSendSupport();
+  const dayMenuAvailable = !packerMode && calendarSendSupport === 'supported';
   const { orderStatuses, paymentStatuses, productionStatuses, isLoading: isLoadingStatuses } = useOrderStatuses({
     loadPaymentAndProduction: !packerMode,
     loadPayment: canViewFinancials,
@@ -369,6 +375,15 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
     submenuDirection: 'right',
     order: null,
   });
+
+  // Day header menu («Отправить в чат»): its own state, never mixed with the order menu.
+  const [dayMenu, setDayMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    compact: boolean;
+    date: string;
+  }>({ visible: false, x: 0, y: 0, compact: false, date: '' });
 
   // Hook для событий производственных статусов выбранного заказа
   const { events: productionEvents, toggleOrderEvent, refetch: refetchEvents } = useProductionStatusEvent({
@@ -467,6 +482,51 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
     });
   };
   
+  const handleDayContextMenu = (e: React.MouseEvent, date: Date) => {
+    if (!dayMenuAvailable) return;
+    e.preventDefault();
+    const menuPosition = resolveCalendarContextMenuPosition(
+      e.clientX,
+      e.clientY,
+      window.innerWidth,
+      window.innerHeight,
+      compactContextMenu,
+    );
+    setContextMenu((prev) => (prev.visible ? { ...prev, visible: false, x: 0, y: 0 } : prev));
+    setDayMenu({
+      visible: true,
+      x: menuPosition.x,
+      y: menuPosition.y,
+      compact: compactContextMenu,
+      date: formatDateForApi(date),
+    });
+  };
+
+  const handleCloseDayMenu = useCallback(() => {
+    setDayMenu((prev) => (prev.visible ? { ...prev, visible: false } : prev));
+  }, []);
+
+  const [sendingDays, setSendingDays] = useState<ReadonlySet<string>>(() => new Set());
+  const sendingDaysRef = useRef(new Set<string>());
+
+  const handleSendDayToChat = useCallback(async (date: string) => {
+    if (sendingDaysRef.current.has(date)) return;
+    sendingDaysRef.current.add(date);
+    setSendingDays(new Set(sendingDaysRef.current));
+    try {
+      const toast = await runCalendarSend({
+        date,
+        actorId: String(authSession.getUser()?.id ?? ''),
+        send: broadcastsApi.calendarSend,
+        minIntervalMinutes: calendarSendInterval,
+      });
+      if (toast) message[toast.type](toast.text);
+    } finally {
+      sendingDaysRef.current.delete(date);
+      setSendingDays(new Set(sendingDaysRef.current));
+    }
+  }, [calendarSendInterval]);
+
   // Обработчик изменения статуса через контекстное меню (для order_status и payment_status)
   const handleStatusChange = async (fieldName: string, statusId: number, statusName: string) => {
     if (!contextMenu.order) return;
@@ -1072,6 +1132,9 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
                     columnWidth={columnWidth}
                     onDrop={handleDrop}
                     onContextMenu={handleContextMenu}
+                    onDayContextMenu={dayMenuAvailable ? handleDayContextMenu : undefined}
+                    onDaySend={dayMenuAvailable ? (d) => void handleSendDayToChat(formatDateForApi(d)) : undefined}
+                    daySending={sendingDays.has(formatDateForApi(day))}
                     onCheckboxChange={handleCheckboxChange}
                     viewMode={viewMode}
                     cardScale={cardScale}
@@ -1094,6 +1157,17 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
           локальный isMoveModalOpen теряется до того, как Modal успеет
           открыться. Само попап-меню внутри OrderContextMenu
           рендерится только когда visible=true. */}
+      {dayMenuAvailable && dayMenu.date && (
+        <DayContextMenu
+          date={dayMenu.date}
+          visible={dayMenu.visible}
+          x={dayMenu.x}
+          y={dayMenu.y}
+          compact={dayMenu.compact}
+          onClose={handleCloseDayMenu}
+          onSendToChat={(date) => void handleSendDayToChat(date)}
+        />
+      )}
       {contextMenu.order && (
         <OrderContextMenu
           order={contextMenu.order}

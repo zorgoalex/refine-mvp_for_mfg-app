@@ -55,6 +55,12 @@ export class BroadcastWorker implements OnModuleInit {
     await this.repository.legacyQueueUnfinished().then(async (unfinished) => {
       if (unfinished) await this.log('warn', 'whatsapp.broadcast.legacy_queue', 'startup.legacy_queue', 'LEGACY_DIGEST_QUEUE_UNFINISHED');
     }).catch(() => undefined);
+    // After a rollback the calendar system broadcast stays archived until the runbook restores it.
+    try {
+      await this.repository.calendarBroadcastId();
+    } catch {
+      await this.log('warn', 'whatsapp.broadcast.calendar_missing', 'startup.calendar_send', 'BROADCAST_CALENDAR_UNAVAILABLE').catch(() => undefined);
+    }
   }
 
   get storeReady(): boolean {
@@ -278,6 +284,11 @@ export class BroadcastWorker implements OnModuleInit {
 
   private async logError(eventCode: string, operation: string, error: unknown, details?: Record<string, string | number | boolean | null>) {
     await this.log('error', eventCode, operation, error instanceof ApiError ? error.code : 'BROADCAST_FAILED', details);
+  }
+
+  /** A calendar send refused by the frequency threshold: no effect, only a technical trace. */
+  async logCalendarRefusal(errorCode: string, details: Record<string, string | number | boolean | null>) {
+    await this.log('warn', 'whatsapp.broadcast.calendar_refused', 'calendar_send', errorCode, details);
   }
 
   private async log(level: 'warn' | 'error', eventCode: string, operation: string, errorCode: string, details?: Record<string, string | number | boolean | null>) {

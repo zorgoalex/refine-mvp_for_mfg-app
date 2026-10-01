@@ -195,6 +195,12 @@ export interface DayColumnProps {
   onOrderClick?: (order: CalendarOrder) => void;
   onPrintDay?: (date: Date, orders: CalendarOrder[]) => void;
   onContextMenu?: (e: React.MouseEvent, order: CalendarOrder) => void;
+  /** Click / right click on the day header; absent = no day menu. */
+  onDayContextMenu?: (e: React.MouseEvent, date: Date) => void;
+  /** Header send icon («Отправить в чат»); absent = no icon. */
+  onDaySend?: (date: Date) => void;
+  /** A send for this day is in flight: the icon shows a spinner and ignores clicks. */
+  daySending?: boolean;
   onCheckboxChange?: (order: CalendarOrder, isChecked: boolean) => void;
   showFinancials?: boolean;
 }

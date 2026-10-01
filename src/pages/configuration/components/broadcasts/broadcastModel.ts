@@ -11,6 +11,7 @@ import type {
   BroadcastRunState,
   BroadcastSummary,
   BroadcastUpdateInput,
+  CalendarSendRunInput,
 } from '../../../../api/broadcastsApiTypes';
 
 export const GROUP_ID_PATTERN = /^\d{5,24}(?:-\d{5,24})?@g\.us$/;
@@ -314,6 +315,8 @@ export const ERROR_CODE_MESSAGES: Record<string, string> = {
   BROADCAST_DEADLINE_PASSED: 'Срок отправки этого запуска истёк.',
   BROADCAST_IMAGE_EXPIRED: 'Срок хранения картинок истёк.',
   BROADCAST_CAPTION_TOO_LONG: 'Подпись после подстановки длиннее 1024 символов.',
+  BROADCAST_CALENDAR_COOLDOWN: 'Отправлять из календаря можно не чаще, чем задано в настройках. Повторите позже.',
+  BROADCAST_CALENDAR_ACTIVE: 'Предыдущая отправка из календаря ещё не завершена.',
   BROADCASTS_NOT_MIGRATED: 'Сервер ещё не переключён на новые рассылки.',
 };
 
@@ -524,6 +527,47 @@ export function isKnownNotCreatedCommandError(error: unknown, priorAttemptWasAmb
   ].includes(error.code)) return true;
   // Transient: another retry or today's sending may finish, after which an in-flight attempt could still succeed.
   return !priorAttemptWasAmbiguous && ['BROADCAST_RETRY_ACTIVE', 'BROADCAST_TODAY_ALREADY_SENDING'].includes(error.code);
+}
+
+// ---- pending calendar send (per order date) ----
+
+export const PENDING_CALENDAR_SEND_PREFIX = 'broadcast.pending-calendar-send.v1';
+
+export interface PendingCalendarSend {
+  actorId: string;
+  date: string;
+  payload: CalendarSendRunInput;
+  ambiguous: boolean;
+}
+
+export function readPendingCalendarSend(date: string, actorId: string, storage: StorageLike | null = defaultStorage()): PendingCalendarSend | null {
+  const record = readRecord(`${PENDING_CALENDAR_SEND_PREFIX}.${date}`, storage);
+  const payload = record?.payload as Record<string, unknown> | undefined;
+  if (!record || !payload || typeof payload !== 'object') return null;
+  if (record.actorId !== actorId || record.date !== date || payload.date !== date
+    || typeof payload.idempotencyKey !== 'string' || !UUID_PATTERN.test(payload.idempotencyKey)
+    || typeof record.ambiguous !== 'boolean') return null;
+  return { actorId, date, payload: { date, idempotencyKey: payload.idempotencyKey }, ambiguous: record.ambiguous };
+}
+
+export function persistPendingCalendarSend(request: PendingCalendarSend, storage: StorageLike | null = defaultStorage()): boolean {
+  return writeRecord(`${PENDING_CALENDAR_SEND_PREFIX}.${request.date}`, request, storage);
+}
+
+export function clearPendingCalendarSend(date: string, storage: StorageLike | null = defaultStorage()): void {
+  removeRecord(`${PENDING_CALENDAR_SEND_PREFIX}.${date}`, storage);
+}
+
+/**
+ * A calendar send is guarded by cooldown/active-run checks that do not belong to the key
+ * fingerprint, so a refusal proves nothing once an earlier attempt of the same key may still
+ * commit. First attempt: every 4xx is final. After an ambiguous attempt only a key reuse with
+ * different parameters is final; any other refusal keeps the key for a later replay.
+ */
+export function isKnownCalendarSendNotQueuedError(error: unknown, priorAttemptWasAmbiguous: boolean): boolean {
+  if (!(error instanceof ApiError)) return false;
+  if (priorAttemptWasAmbiguous) return error.code === 'IDEMPOTENCY_KEY_REUSED';
+  return error.status >= 400 && error.status < 500;
 }
 
 export type PendingCommandOutcome<T, R> =
