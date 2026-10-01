@@ -15,7 +15,9 @@ export type LineConflictCode =
   | 'REMOVED_WITH_ALLOCATION'
   | 'MATERIAL_CHANGED'
   | 'UNIT_CHANGED'
-  | 'AMOUNT_BELOW_ALLOCATED';
+  | 'AMOUNT_BELOW_ALLOCATED'
+  /** Сменилась валюта документа при активных распределениях (суммы распределений — в прежней валюте). */
+  | 'CURRENCY_CHANGED';
 
 /** Состояние строки документа, как оно хранится в onec_document_lines. */
 export interface DocumentLineState {
@@ -50,6 +52,10 @@ export interface LoadedDocumentView {
   counterpartyRefKey: string | null;
   counterpartyName: string | null;
   amount: string | null;
+  /** Валюта (ISO) — целевая при проверке, применённая после загрузки; null у документов без валюты. */
+  currency: string | null;
+  /** Применённое состояние шапки до этой загрузки; null — документ новый. */
+  previous: { currency: string | null; amount: string | null } | null;
 }
 
 export interface AppliedDocumentLine extends DocumentLineState {

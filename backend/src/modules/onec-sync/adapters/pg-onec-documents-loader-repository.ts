@@ -83,7 +83,7 @@ interface HeaderRow extends QueryResultRow {
   observed_fingerprint: string | null;
   applied_fingerprint: string | null;
   applied_revision: string;
-  load_conflict: { proposedAmount?: string | null } | null;
+  load_conflict: { proposedAmount?: string | null; proposedCurrency?: string | null } | null;
   missing_in_source_at: Date | null;
   mapping_issue: string | null;
 }
@@ -491,12 +491,19 @@ export class PgOnecDocumentsLoaderRepository {
       documentId, sourceId: ctx.sourceId, docKind: ctx.docKind, onecRefKey: refKey, docDate: target.docDate,
       posted: target.posted, deletedInOnec: target.deletedInOnec, supplierId: target.supplierId,
       counterpartyRefKey: target.counterpartyRefKey, counterpartyName: target.counterpartyName, amount: target.amount,
+      currency: target.currency, previous: { currency: header.currency, amount: header.amount },
     };
     const consumers = this.consumers.forKind(ctx.docKind);
+    // Код строки для показа — первый по порядку потребителей; блокировки полей шапки — по ВСЕМ кодам (code review R1-1).
     const conflicts = new Map<number, LineConflictCode>();
+    const allCodes = new Set<LineConflictCode>();
+    const lineCodes = new Map<number, LineConflictCode[]>();
     for (const consumer of consumers) {
       for (const conflict of await consumer.guardLineChanges(tx, view, changes)) {
         if (!conflicts.has(conflict.lineNo)) conflicts.set(conflict.lineNo, conflict.code);
+        allCodes.add(conflict.code);
+        const codes = lineCodes.get(conflict.lineNo) ?? [];
+        if (!codes.includes(conflict.code)) lineCodes.set(conflict.lineNo, [...codes, conflict.code]);
       }
     }
     const removedIds = changes.filter((change) => change.kind === 'remove').map((change) => change.lineId!);
@@ -504,26 +511,47 @@ export class PgOnecDocumentsLoaderRepository {
     for (const consumer of consumers) for (const id of await consumer.referencedLineIds(tx, removedIds)) referenced.add(id);
 
     // 3. Шапка. Поле, ограничивающее существующие распределения (сумма оплаты), при конфликте не меняется (R3-1).
-    const amountConflict = [...conflicts.values()].includes('AMOUNT_BELOW_ALLOCATED');
-    const conflictDetails = changes.filter((change) => conflicts.has(change.lineNo)).map((change) => ({
-      lineNo: change.lineNo, lineId: change.lineId, code: conflicts.get(change.lineNo)!, before: change.before, after: change.after,
-    }));
+    // Валюта, в которой хранятся суммы распределений, при конфликте не меняется (как сумма оплаты); сумма — вместе с ней:
+    // новая сумма в прежней валюте не применяется (code review R1-2). Оба предложения сохраняются.
+    const currencyConflict = allCodes.has('CURRENCY_CHANGED');
+    const amountConflict = allCodes.has('AMOUNT_BELOW_ALLOCATED') || currencyConflict;
+    // Конфликт строки, которая сама не меняется (смена валюты шапки): строка остаётся, получает код конфликта.
+    const unchangedConflicts = [...conflicts.entries()]
+      .filter(([lineNo]) => !changes.some((change) => change.lineNo === lineNo) && current.has(lineNo))
+      .map(([lineNo, code]) => ({ row: current.get(lineNo)!, code }));
+    const conflictDetails = [
+      ...changes.filter((change) => conflicts.has(change.lineNo)).map((change) => ({
+        lineNo: change.lineNo, lineId: change.lineId, code: conflicts.get(change.lineNo)!, codes: lineCodes.get(change.lineNo)!,
+        before: change.before, after: change.after,
+      })),
+      ...unchangedConflicts.map(({ row, code }) => ({
+        lineNo: row.line_no, lineId: Number(row.onec_document_line_id), code, codes: lineCodes.get(row.line_no)!,
+        before: stateOfRow(row), after: stateOfRow(row),
+      })),
+    ].sort((left, right) => left.lineNo - right.lineNo);
     const loadConflict = conflictDetails.length > 0 || target.missingInSource
-      ? { lines: conflictDetails, missingInSource: target.missingInSource, proposedAmount: amountConflict ? target.amount : null }
+      ? {
+        lines: conflictDetails, missingInSource: target.missingInSource, proposedAmount: amountConflict ? target.amount : null,
+        ...(currencyConflict ? { proposedCurrency: target.currency } : {}),
+      }
       : null;
     await tx.query(
       `UPDATE onec_documents SET number = $2, doc_date = $3::date, posted = $4, deleted_in_onec = $5, counterparty_ref_key = $6::uuid,
-         counterparty_name = $7, supplier_id = $8, amount = CASE WHEN $15 THEN amount ELSE $9::numeric END, currency = $10, comment = $11,
+         counterparty_name = $7, supplier_id = $8, amount = CASE WHEN $15 THEN amount ELSE $9::numeric END,
+         currency = CASE WHEN $23 THEN currency ELSE $10 END, comment = $11,
          missing_in_source_at = CASE WHEN $12 THEN COALESCE(missing_in_source_at, now()) END, mapping_issue = $13,
          observed_fingerprint = $14, load_conflict = $16::jsonb, source_updated_at = now(), updated_at = now(),
          operation_kind = $17, doc_at = ($18::timestamp AT TIME ZONE $19::text), warehouse_ref_key = $20::uuid,
          destination_warehouse_ref_key = $21::uuid, normalizer_version = $22
        WHERE onec_document_id = $1`,
       [documentId, ...this.headerValues(target), fingerprint, amountConflict, loadConflict === null ? null : JSON.stringify(loadConflict),
-        ...this.v2HeaderValues(target), NORMALIZER_VERSION],
+        ...this.v2HeaderValues(target), NORMALIZER_VERSION, currencyConflict],
     );
 
     // 4. Строки.
+    for (const { row, code } of unchangedConflicts) {
+      await tx.query('UPDATE onec_document_lines SET load_conflict_code = $2 WHERE onec_document_line_id = $1', [row.onec_document_line_id, code]);
+    }
     const insertedIds: number[] = [];
     for (const change of changes) {
       const code = conflicts.get(change.lineNo) ?? null;
@@ -564,7 +592,11 @@ export class PgOnecDocumentsLoaderRepository {
     const changed = await this.commitRevision(tx, ctx, refKey, state, header, lines, {
       created: false,
       conflicts: conflictDetails.map((detail) => ({ lineNo: detail.lineNo, code: detail.code })),
-      linesChanged: [...changes.filter((change) => change.lineId !== null).map((change) => change.lineId!), ...insertedIds].sort((a, b) => a - b),
+      // Строки, получившие код конфликта без собственных изменений, — тоже изменённые (code review R1-3).
+      linesChanged: [...new Set([
+        ...changes.filter((change) => change.lineId !== null).map((change) => change.lineId!), ...insertedIds,
+        ...unchangedConflicts.map(({ row }) => Number(row.onec_document_line_id)),
+      ])].sort((a, b) => a - b),
     });
     return { status: changed ? 'changed' : 'unchanged', conflicts: conflictDetails.length };
   }
@@ -706,6 +738,7 @@ export class PgOnecDocumentsLoaderRepository {
       documentId, sourceId: ctx.sourceId, docKind: ctx.docKind, onecRefKey: refKey, docDate: header.doc_date,
       posted: header.posted, deletedInOnec: header.deleted_in_onec, supplierId: header.supplier_id === null ? null : Number(header.supplier_id),
       counterpartyRefKey: header.counterparty_ref_key, counterpartyName: header.counterparty_name, amount: header.amount,
+      currency: header.currency, previous: before === null ? null : { currency: before.currency, amount: before.amount },
     };
     for (const consumer of this.consumers.forKind(ctx.docKind)) {
       await consumer.afterDocumentLoaded(tx, view, {
