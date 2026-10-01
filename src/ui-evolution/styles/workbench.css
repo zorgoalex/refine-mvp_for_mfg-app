@@ -17,7 +17,6 @@
 }
 
 :root[data-ui-variant="workbench"] .evolution-sider__brand {
-  min-height: 56px;
   border-bottom: 0;
 }
 
@@ -29,7 +28,6 @@
 }
 
 :root[data-ui-variant="workbench"] .evolution-sider__nav {
-  height: calc(100vh - 56px);
   padding-top: 8px;
 }
 
@@ -63,8 +61,7 @@
 
 /* ---------- верхняя панель и вкладки рабочего пространства ---------- */
 :root[data-ui-variant="workbench"] .evolution-header.ant-layout-header {
-  min-height: 56px;
-  height: 56px;
+  /* высота шапки (64px) не меняется: от неё считаются липкие отступы страниц и досок */
   border-bottom: 0;
   background: color-mix(in srgb, var(--evo-canvas) 94%, transparent);
 }
@@ -74,7 +71,6 @@
 }
 
 :root[data-ui-variant="workbench"] .evolution-workspace-tabs.workspace-tabs {
-  top: 56px;
   padding: 0 24px 8px;
   border-bottom: 1px solid var(--evo-border);
   background: var(--evo-canvas);
@@ -135,10 +131,6 @@
   font-weight: 600;
   letter-spacing: 0;
   text-transform: none;
-}
-
-:root[data-ui-variant="workbench"] .ant-table {
-  font-size: 13.5px;
 }
 
 /* ---------- статусы-теги: пилюли, без капса ---------- */
