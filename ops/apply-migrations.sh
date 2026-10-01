@@ -2430,6 +2430,19 @@ probe_file() {
       "$(q_idx uq_resource_suppliers_film)" \
       "$(q_col user_preferences procurement_saved_views)" \
       "$(q_con_on user_preferences chk_user_preferences_procurement_saved_views)" ;;
+    216_onec_consumption_documents*) probe_all \
+      "$(q_col onec_sources time_zone)" \
+      "$(q_col onec_documents doc_at)" \
+      "$(q_col onec_documents destination_warehouse_ref_key)" \
+      "$(q_col onec_documents normalizer_version)" \
+      "$(q_col onec_document_lines warehouse_ref_key)" \
+      "$(q_col onec_document_lines is_stock_item)" \
+      "$(q_col onec_document_lines unit_is_package)" \
+      "$(q_con_on onec_sources chk_onec_sources_time_zone)" \
+      "$(q_con_on onec_documents chk_onec_documents_kind_v2)" \
+      "$(q_con_on onec_documents chk_onec_documents_currency_kind)" \
+      "$(q_con_on onec_documents chk_onec_documents_destination_kind)" \
+      "$(q_idx idx_onec_document_lines_warehouse)" ;;
     215_allocation_request_links*) probe_all \
       "$(q_tbl order_resource_allocation_request_links)" \
       "$(q_con_on order_resource_allocation_request_links chk_orarl_measure)" \
@@ -2831,6 +2844,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     204_procurement_workspace*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    216_onec_consumption_documents*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     215_allocation_request_links*)

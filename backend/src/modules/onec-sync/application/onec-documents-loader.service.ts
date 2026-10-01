@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiError } from '../../../common/errors/api-error';
 import type { BackendEnv } from '../../../config/env.validation';
@@ -8,7 +8,8 @@ import { OnecAlertsPort } from '../../onec-agent/application/onec-alerts-port';
 import { OnecEtlEvents, type EntitiesPublished } from '../../onec-agent/application/onec-etl-events';
 import { OnecCatalogReader } from '../../onec-agent/onec-catalog-reader';
 import { PgOnecDocumentsLoaderRepository, type LoadContext } from '../adapters/pg-onec-documents-loader-repository';
-import { DOCUMENT_ENTITIES } from '../domain/onec-document-normalizer';
+import { DEFAULT_DOC_KINDS, DOCUMENT_ENTITIES, effectiveDocKinds, entityDocKinds, type OnecDocKind } from '../domain/onec-document-normalizer';
+import { OnecDocumentsEvents } from './onec-documents-events';
 import { OnecDocumentConsumers } from './onec-document-consumers';
 
 export const LOAD_ALERT_KIND = 'onec_documents_load_failed';
@@ -22,6 +23,8 @@ export type LoadTrigger =
 export interface PassResult {
   created: number;
   changed: number;
+  /** Технический переход правил v1 → v2 (без ревизии, аудита документа и outbox). */
+  upgraded: number;
   unchanged: number;
   skipped: number;
   conflicts: number;
@@ -58,6 +61,7 @@ export class OnecDocumentsLoaderService implements OnModuleInit, OnModuleDestroy
     @Inject(OnecEtlEvents) private readonly events: OnecEtlEvents,
     @Inject(OnecAlertsPort) private readonly alerts: OnecAlertsPort,
     @Inject(OnecDocumentConsumers) consumers: OnecDocumentConsumers,
+    @Optional() @Inject(OnecDocumentsEvents) private readonly documentEvents: OnecDocumentsEvents = new OnecDocumentsEvents(),
   ) {
     this.repository = new PgOnecDocumentsLoaderRepository(database, reader, consumers, alerts);
   }
@@ -77,15 +81,29 @@ export class OnecDocumentsLoaderService implements OnModuleInit, OnModuleDestroy
     if (this.hourly) clearInterval(this.hourly);
   }
 
-  /** Флаг загрузчика и модуль закупок (единственный потребитель сейчас); модуль 1С — при чтении копии. */
+  /** Флаг загрузчика (план расхода §3.3, R1-4: не зависит от закупок); модуль 1С — при чтении копии. */
   private configured(): boolean {
-    return this.config.get('BACKEND_ONEC_DOCUMENTS_LOAD', { infer: true }) === true
-      && this.config.get('BACKEND_RESOURCE_PROCUREMENT_ENABLED', { infer: true }) === true;
+    return this.config.get('BACKEND_ONEC_DOCUMENTS_LOAD', { infer: true }) === true && this.enabledKinds().size > 0;
+  }
+
+  /** Действующие виды: список ∩ разрешённые (виды закупок — только при включённых закупках). */
+  enabledKinds(): Set<OnecDocKind> {
+    return effectiveDocKinds(
+      this.config.get('BACKEND_ONEC_DOCUMENTS_KINDS', { infer: true }) ?? DEFAULT_DOC_KINDS,
+      this.config.get('BACKEND_RESOURCE_PROCUREMENT_ENABLED', { infer: true }) === true,
+    );
+  }
+
+  /** Сущность обрабатывается, если действует хотя бы один её вид. */
+  private entityEnabled(entityCode: string): boolean {
+    const config = DOCUMENT_ENTITIES[entityCode];
+    const enabled = this.enabledKinds();
+    return config !== undefined && entityDocKinds(config).some((kind) => enabled.has(kind));
   }
 
   /** Граница сигнала: фоновая загрузка не должна ронять процесс. */
   private async onPublished(event: EntitiesPublished): Promise<void> {
-    for (const entityCode of event.entities.filter((entity) => entity in DOCUMENT_ENTITIES)) {
+    for (const entityCode of event.entities.filter((entity) => this.entityEnabled(entity))) {
       try {
         const outcome = await this.run({ kind: 'run', sourceId: event.sourceId, entityCode, runId: event.runId, requestId: event.requestId, correlationId: event.correlationId });
         this.logger.log(`1C documents ${entityCode} after run ${event.runId}: ${JSON.stringify(outcome)}`);
@@ -106,7 +124,7 @@ export class OnecDocumentsLoaderService implements OnModuleInit, OnModuleDestroy
   async hourlyPass(now = new Date()): Promise<void> {
     if (!this.configured()) return;
     const hour = now.toISOString().slice(0, 13).replace(/[-T]/g, '');
-    for (const entityCode of Object.keys(DOCUMENT_ENTITIES).sort()) {
+    for (const entityCode of Object.keys(DOCUMENT_ENTITIES).sort().filter((entity) => this.entityEnabled(entity))) {
       const sources = await this.sourcesOrNull(entityCode);
       if (sources === null) return;
       for (const sourceId of sources) {
@@ -136,7 +154,9 @@ export class OnecDocumentsLoaderService implements OnModuleInit, OnModuleDestroy
   async run(trigger: LoadTrigger): Promise<PassOutcome> {
     const config = DOCUMENT_ENTITIES[trigger.entityCode];
     if (!config) return { status: 'skipped', reason: 'not_a_document' };
-    if (!this.configured() || (await this.sourcesOrNull(trigger.entityCode)) === null) return { status: 'skipped', reason: 'disabled' };
+    if (!this.configured() || !this.entityEnabled(trigger.entityCode) || (await this.sourcesOrNull(trigger.entityCode)) === null) {
+      return { status: 'skipped', reason: 'disabled' };
+    }
     const slot = `${trigger.sourceId}:${trigger.entityCode}`;
     if (this.running.has(slot)) {
       this.running.set(slot, trigger);
@@ -158,27 +178,38 @@ export class OnecDocumentsLoaderService implements OnModuleInit, OnModuleDestroy
   private async pass(trigger: LoadTrigger): Promise<PassOutcome> {
     const config = DOCUMENT_ENTITIES[trigger.entityCode];
     const seq = await this.allocateSeq(trigger.sourceId, trigger.entityCode);
-    const result: PassResult = { created: 0, changed: 0, unchanged: 0, skipped: 0, conflicts: 0, invalid: {}, failed: 0 };
+    const result: PassResult = { created: 0, changed: 0, upgraded: 0, unchanged: 0, skipped: 0, conflicts: 0, invalid: {}, failed: 0 };
+    const enabledKinds = this.enabledKinds();
+    // Закоммиченные изменения прохода — для сигнала OnecDocumentsLoaded (code review R1-2).
+    const affected = new Map<number, OnecDocKind>();
     let firstError: string | null = null;
     try {
       const ctx: LoadContext = trigger.kind === 'run'
-        ? { sourceId: trigger.sourceId, entityCode: trigger.entityCode, config, requestId: trigger.requestId, correlationId: trigger.correlationId, runId: trigger.runId }
-        : { sourceId: trigger.sourceId, entityCode: trigger.entityCode, config, runId: null,
+        ? { sourceId: trigger.sourceId, entityCode: trigger.entityCode, config, enabledKinds, requestId: trigger.requestId, correlationId: trigger.correlationId, runId: trigger.runId }
+        : { sourceId: trigger.sourceId, entityCode: trigger.entityCode, config, enabledKinds, runId: null,
           requestId: `onec-documents-hourly-${trigger.sourceId}-${trigger.entityCode}-${trigger.hour}`,
           correlationId: `onec-documents-hourly-${trigger.sourceId}-${trigger.entityCode}-${trigger.hour}` };
       const refs = await this.repository.loadReferences(trigger.sourceId);
-      const stored = await this.repository.storedState(trigger.sourceId, config.docKind);
+      const stored = await this.repository.storedState(trigger.sourceId, entityDocKinds(config));
       const keys = await this.reader.orderedDocumentKeys(trigger.sourceId, trigger.entityCode);
       const rows = await this.reader.mirrorRows(this.database, trigger.sourceId, trigger.entityCode, keys);
       for (const key of keys) {
         const row = rows.get(key);
         const preview = row ? this.repository.previewFingerprint(ctx, row.data, row.missing, refs) : null;
+        if (preview && !enabledKinds.has(preview.docKind)) { result.skipped += 1; continue; }
         const known = preview ? stored.get(preview.refKey) : undefined;
         if (preview && known && known.observed === preview.fingerprint && !known.blocking) { result.unchanged += 1; continue; }
         try {
           const outcome = await this.repository.loadDocument(ctx, key, refs);
           if (outcome.status === 'invalid') result.invalid[outcome.code] = (result.invalid[outcome.code] ?? 0) + 1;
-          else { result[outcome.status] += 1; result.conflicts += outcome.conflicts; }
+          else {
+            result[outcome.status] += 1;
+            result.conflicts += outcome.conflicts;
+            if ((outcome.status === 'created' || outcome.status === 'changed') && outcome.documentId && outcome.docKind) {
+              affected.set(outcome.documentId, outcome.docKind);
+            }
+            for (const removed of outcome.removed ?? []) affected.set(removed.documentId, removed.docKind);
+          }
         } catch (error) {
           result.failed += 1;
           firstError ??= describe(error);
@@ -193,6 +224,14 @@ export class OnecDocumentsLoaderService implements OnModuleInit, OnModuleDestroy
     const ok = result.failed === 0 && !invalid;
     const code = ok ? null : result.failed > 0 ? (firstError ?? 'LOAD_ERROR').slice(0, 64) : `INVALID_DOCUMENTS:${Object.keys(result.invalid).sort().join(',')}`.slice(0, 64);
     await this.database.transaction((tx) => this.finish(tx, trigger, seq, ok, code, result));
+    if (affected.size > 0) {
+      const requestId = trigger.kind === 'run' ? trigger.requestId : `onec-documents-hourly-${trigger.sourceId}-${trigger.entityCode}-${trigger.hour}`;
+      this.documentEvents.emitDocumentsLoaded({
+        sourceId: trigger.sourceId, entityCode: trigger.entityCode, docKinds: [...new Set(affected.values())].sort(),
+        documentIds: [...affected.keys()].sort((a, b) => a - b), requestId,
+        correlationId: trigger.kind === 'run' ? trigger.correlationId : requestId,
+      });
+    }
     return { status: ok ? 'succeeded' : 'failed', seq, result };
   }
 

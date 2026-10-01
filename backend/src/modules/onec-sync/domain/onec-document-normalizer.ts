@@ -4,24 +4,81 @@ import { createHash } from 'node:crypto';
 // (план 2026-09-30-onec-documents-loader-plan.md, Р5–Р7, R1-4, R2-3). Только чистые функции:
 // разбор строки копии и сборка целевого состояния документа из разобранных данных и справочных значений.
 
-export type OnecDocKind = 'purchase_receipt' | 'cash_outflow' | 'bank_outflow';
+export type OnecDocKind =
+  | 'purchase_receipt' | 'cash_outflow' | 'bank_outflow'
+  | 'sales_shipment' | 'supplier_return' | 'inventory_writeoff' | 'inventory_transfer';
 export type OnecUnitCode = 'sheet' | 'm2' | 'lm' | 'pcs' | 'set';
 
+/** Виды закупок (потребитель — модуль закупок) и виды расхода (проекция склада), план §3.3. */
+export const PROCUREMENT_DOC_KINDS: readonly OnecDocKind[] = ['purchase_receipt', 'cash_outflow', 'bank_outflow'];
+export const CONSUMPTION_DOC_KINDS: readonly OnecDocKind[] = ['sales_shipment', 'supplier_return', 'inventory_writeoff', 'inventory_transfer'];
+export const ALL_DOC_KINDS: readonly OnecDocKind[] = [...PROCUREMENT_DOC_KINDS, ...CONSUMPTION_DOC_KINDS];
+export const DEFAULT_DOC_KINDS = 'purchase_receipt,cash_outflow,bank_outflow';
+
 /** Версия правил нормализации: входит в отпечаток — смена правил переприменяет все документы. */
-export const NORMALIZER_VERSION = 'onec-documents-v1';
+export const NORMALIZER_VERSION = 'onec-documents-v2';
 
 export interface DocumentEntityConfig {
-  docKind: OnecDocKind;
+  /** Вид документа по `ВидОперации`; ключ '*' — единственный вид сущности (поле не читается). */
+  kinds: Readonly<Record<string, OnecDocKind>>;
   /** Коллекция табличной части со строками товаров; null — оплата (одна строка-итог). */
   linesField: string | null;
-  currencyField: string;
+  /** Валюта шапки; null — у документа нет валюты (списание, перемещение). */
+  currencyField: string | null;
+  /** Склад шапки. */
+  headerWarehouseField: string | null;
+  /** Склад строки (приоритетнее шапки). */
+  lineWarehouseField: string | null;
+  /** Склад-получатель (перемещение). */
+  destinationWarehouseField: string | null;
+  /** Признак складской позиции строки (`ТипНоменклатурыЗапас`); null — все строки складские. */
+  stockFlagField: string | null;
 }
 
 export const DOCUMENT_ENTITIES: Readonly<Record<string, DocumentEntityConfig>> = {
-  doc_purchase_receipts: { docKind: 'purchase_receipt', linesField: 'Запасы', currencyField: 'ВалютаДокумента_Key' },
-  doc_cash_outflows: { docKind: 'cash_outflow', linesField: null, currencyField: 'ВалютаДенежныхСредств_Key' },
-  doc_bank_outflows: { docKind: 'bank_outflow', linesField: null, currencyField: 'ВалютаДенежныхСредств_Key' },
+  doc_purchase_receipts: {
+    kinds: { '*': 'purchase_receipt' }, linesField: 'Запасы', currencyField: 'ВалютаДокумента_Key',
+    headerWarehouseField: 'СтруктурнаяЕдиница_Key', lineWarehouseField: 'СтруктурнаяЕдиница_Key', destinationWarehouseField: null, stockFlagField: null,
+  },
+  doc_cash_outflows: {
+    kinds: { '*': 'cash_outflow' }, linesField: null, currencyField: 'ВалютаДенежныхСредств_Key',
+    headerWarehouseField: null, lineWarehouseField: null, destinationWarehouseField: null, stockFlagField: null,
+  },
+  doc_bank_outflows: {
+    kinds: { '*': 'bank_outflow' }, linesField: null, currencyField: 'ВалютаДенежныхСредств_Key',
+    headerWarehouseField: null, lineWarehouseField: null, destinationWarehouseField: null, stockFlagField: null,
+  },
+  doc_sales_shipments: {
+    kinds: { ПродажаПокупателю: 'sales_shipment', ВозвратПоставщику: 'supplier_return' }, linesField: 'Запасы', currencyField: 'ВалютаДокумента_Key',
+    headerWarehouseField: 'СтруктурнаяЕдиница_Key', lineWarehouseField: 'СтруктурнаяЕдиница_Key', destinationWarehouseField: null,
+    stockFlagField: 'ТипНоменклатурыЗапас',
+  },
+  doc_inventory_writeoffs: {
+    kinds: { '*': 'inventory_writeoff' }, linesField: 'Запасы', currencyField: null,
+    headerWarehouseField: 'СтруктурнаяЕдиница_Key', lineWarehouseField: null, destinationWarehouseField: null, stockFlagField: null,
+  },
+  doc_inventory_transfers: {
+    kinds: { Перемещение: 'inventory_transfer' }, linesField: 'Запасы', currencyField: null,
+    headerWarehouseField: 'СтруктурнаяЕдиница_Key', lineWarehouseField: null, destinationWarehouseField: 'СтруктурнаяЕдиницаПолучатель_Key',
+    stockFlagField: null,
+  },
 };
+
+/** Все виды, которые может дать сущность. */
+export function entityDocKinds(config: DocumentEntityConfig): OnecDocKind[] {
+  return [...new Set(Object.values(config.kinds))].sort();
+}
+
+/**
+ * Действующие виды (план §3.3, R1-4): список `BACKEND_ONEC_DOCUMENTS_KINDS` ∩ разрешённые. Виды закупок — только при
+ * включённом модуле закупок (их потребитель и guard-и); виды расхода от закупок не зависят. Неизвестное имя — ошибка.
+ */
+export function effectiveDocKinds(listed: string, procurementEnabled: boolean): Set<OnecDocKind> {
+  const names = listed.split(',').map((name) => name.trim()).filter(Boolean);
+  const unknown = names.filter((name) => !(ALL_DOC_KINDS as readonly string[]).includes(name));
+  if (unknown.length > 0) throw new Error(`Unknown 1C document kinds: ${unknown.join(', ')}`);
+  return new Set((names as OnecDocKind[]).filter((kind) => procurementEnabled || !PROCUREMENT_DOC_KINDS.includes(kind)));
+}
 
 /** Код ОКЕИ единицы 1С → нормализованная единица ERP; остальные — NULL (единица неизвестна). */
 export const OKEI_UNIT_CODES: Readonly<Record<string, OnecUnitCode>> = {
@@ -37,6 +94,13 @@ const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface ParsedHeader {
   refKey: string;
+  docKind: OnecDocKind;
+  /** `ВидОперации` как есть (null — поле отсутствует). */
+  operationKind: string | null;
+  /** Локальное время базы 1С `YYYY-MM-DDTHH:MM:SS` (без смещения). */
+  docAtLocal: string;
+  warehouseRefKey: string | null;
+  destinationWarehouseRefKey: string | null;
   number: string;
   docDate: string; // YYYY-MM-DD
   posted: boolean;
@@ -56,6 +120,9 @@ export interface ParsedLine {
   amount: string | null;
   onecOrderRefKey: string | null;
   isDocumentTotal: boolean;
+  warehouseRefKey: string | null;
+  isStockItem: boolean;
+  unitIsPackage: boolean;
 }
 
 export type ParseResult = { ok: true; header: ParsedHeader; lines: ParsedLine[] } | { ok: false; code: string };
@@ -95,24 +162,48 @@ const text = (value: unknown): string | null => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
+/**
+ * Вид документа по данным копии без разбора остального (gate действующих видов — до валидации, code review R2):
+ * `{ ok, docKind, refKey }` или код ошибки ключа/вида операции.
+ */
+export function documentKindOf(config: DocumentEntityConfig, data: Record<string, unknown>):
+  { ok: true; docKind: OnecDocKind; refKey: string } | { ok: false; code: string } {
+  const refKey = ref(data.Ref_Key);
+  if (!refKey) return { ok: false, code: 'INVALID_REF_KEY' };
+  const operationKind = text(data.ВидОперации);
+  const docKind = config.kinds['*'] ?? (operationKind ? config.kinds[operationKind] : undefined);
+  return docKind ? { ok: true, docKind, refKey } : { ok: false, code: 'UNKNOWN_OPERATION_KIND' };
+}
+
 /** Разбор строки копии документа. Ошибка — документ не загружается (код в итоге прохода). */
 export function parseDocument(config: DocumentEntityConfig, data: Record<string, unknown>): ParseResult {
   const refKey = ref(data.Ref_Key);
   if (!refKey) return { ok: false, code: 'INVALID_REF_KEY' };
   const number = text(data.Number);
   if (!number || number.length > 64) return { ok: false, code: 'INVALID_NUMBER' };
+  const operationKind = text(data.ВидОперации);
+  const docKind = config.kinds['*'] ?? (operationKind ? config.kinds[operationKind] : undefined);
+  if (!docKind) return { ok: false, code: 'UNKNOWN_OPERATION_KIND' };
   const date = typeof data.Date === 'string' ? data.Date.slice(0, 10) : '';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, code: 'INVALID_DATE' };
+  const docAtLocal = typeof data.Date === 'string' ? data.Date.slice(0, 19) : '';
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(docAtLocal)) return { ok: false, code: 'INVALID_DATE' };
+  const headerWarehouse = config.headerWarehouseField ? ref(data[config.headerWarehouseField]) : null;
   const amount = decimalLexeme(data.СуммаДокумента, 2);
   if (amount !== null && Number(amount) < 0) return { ok: false, code: 'NEGATIVE_AMOUNT' };
   const header: ParsedHeader = {
     refKey,
+    docKind,
+    operationKind,
+    docAtLocal,
+    warehouseRefKey: headerWarehouse,
+    destinationWarehouseRefKey: config.destinationWarehouseField ? ref(data[config.destinationWarehouseField]) : null,
     number,
     docDate: date,
     posted: data.Posted === true,
     deletedInOnec: data.DeletionMark === true,
     counterpartyRefKey: ref(data.Контрагент_Key),
-    currencyRefKey: ref(data[config.currencyField]),
+    currencyRefKey: config.currencyField ? ref(data[config.currencyField]) : null,
     amount,
     comment: text(data.Комментарий),
   };
@@ -121,6 +212,7 @@ export function parseDocument(config: DocumentEntityConfig, data: Record<string,
     return { ok: true, header, lines: [{
       lineNo: 1, nomenclatureRefKey: null, quantity: '0.000', unitRefKey: null, price: null,
       amount: amount ?? '0.00', onecOrderRefKey: null, isDocumentTotal: true,
+      warehouseRefKey: null, isStockItem: true, unitIsPackage: false,
     }] };
   }
   const raw = data[config.linesField];
@@ -146,6 +238,13 @@ export function parseDocument(config: DocumentEntityConfig, data: Record<string,
       amount: lineAmount,
       onecOrderRefKey: ref(row.ЗаказПокупателя_Key),
       isDocumentTotal: false,
+      // Склад строки; у перемещения склада в строке нет — склад-источник шапки.
+      warehouseRefKey: (config.lineWarehouseField ? ref(row[config.lineWarehouseField]) : null) ?? headerWarehouse,
+      // Услуги/работы расходной накладной (`ТипНоменклатурыЗапас = false`) — не складской расход.
+      isStockItem: config.stockFlagField ? row[config.stockFlagField] !== false : true,
+      // Единица не из классификатора — единица упаковки: в OData она `UnavailableEntity_…` (справочник
+      // `Catalog_ЕдиницыИзмерения` не опубликован), коэффициент неизвестен.
+      unitIsPackage: typeof row.ЕдиницаИзмерения_Type === 'string' && !row.ЕдиницаИзмерения_Type.endsWith('Catalog_КлассификаторЕдиницИзмерения'),
     });
   }
   lines.sort((left, right) => left.lineNo - right.lineNo);
@@ -162,9 +261,20 @@ export interface ReferenceData {
   sheetMaterials: ReadonlyMap<string, number[]>;
   films: ReadonlyMap<string, number[]>;
   currencies: ReadonlyMap<string, string>;
+  /** Часовой пояс информационной базы источника (`onec_sources.time_zone`) — для `doc_at`. */
+  timeZone: string;
 }
 
+/** Виды без валюты документа. */
+const NO_CURRENCY_KINDS: ReadonlySet<OnecDocKind> = new Set(['inventory_writeoff', 'inventory_transfer']);
+
 export interface TargetHeader {
+  docKind: OnecDocKind;
+  operationKind: string | null;
+  docAtLocal: string;
+  timeZone: string;
+  warehouseRefKey: string | null;
+  destinationWarehouseRefKey: string | null;
   number: string;
   docDate: string;
   posted: boolean;
@@ -173,7 +283,7 @@ export interface TargetHeader {
   counterpartyName: string | null;
   supplierId: number | null;
   amount: string | null;
-  currency: string;
+  currency: string | null;
   comment: string | null;
   missingInSource: boolean;
   mappingIssue: string | null;
@@ -193,6 +303,9 @@ export interface TargetLine {
   filmId: number | null;
   onecOrderRefKey: string | null;
   mappingIssue: string | null;
+  warehouseRefKey: string | null;
+  isStockItem: boolean;
+  unitIsPackage: boolean;
 }
 
 export type TargetResult = { ok: true; header: TargetHeader; lines: TargetLine[]; fingerprint: string } | { ok: false; code: string };
@@ -209,10 +322,17 @@ export function buildTarget(
   missingInSource: boolean,
 ): TargetResult {
   const { header } = parsed;
-  const currency = header.currencyRefKey ? refs.currencies.get(header.currencyRefKey) : undefined;
-  if (!currency) return { ok: false, code: 'UNKNOWN_CURRENCY' };
+  const noCurrency = NO_CURRENCY_KINDS.has(header.docKind);
+  const currency = noCurrency ? null : header.currencyRefKey ? refs.currencies.get(header.currencyRefKey) ?? null : null;
+  if (!noCurrency && !currency) return { ok: false, code: 'UNKNOWN_CURRENCY' };
   const supplierCandidates = header.counterpartyRefKey ? refs.suppliers.get(header.counterpartyRefKey) ?? [] : [];
   const targetHeader: TargetHeader = {
+    docKind: header.docKind,
+    operationKind: header.operationKind,
+    docAtLocal: header.docAtLocal,
+    timeZone: refs.timeZone,
+    warehouseRefKey: header.warehouseRefKey,
+    destinationWarehouseRefKey: header.destinationWarehouseRefKey,
     number: header.number,
     docDate: header.docDate,
     posted: header.posted,
@@ -245,6 +365,9 @@ export function buildTarget(
       filmId: candidates === 1 && films.length === 1 ? films[0] : null,
       onecOrderRefKey: line.onecOrderRefKey,
       mappingIssue: candidates > 1 ? 'ambiguous_material' : null,
+      warehouseRefKey: line.warehouseRefKey,
+      isStockItem: line.isStockItem,
+      unitIsPackage: line.unitIsPackage,
     };
   });
   const fingerprint = createHash('sha256')

@@ -289,6 +289,13 @@ export const envSchema = z
     // Отметки «Закуплено» у материалов заказа (команды и чтение таблицы order_resource_procurement).
     BACKEND_RESOURCE_PROCUREMENT_ENABLED: booleanFromEnv.default(false),
     BACKEND_ONEC_DOCUMENTS_LOAD: booleanFromEnv.default(false),
+    // Виды документов 1С загрузчика (план расхода §3.3); виды закупок действуют только при включённых закупках.
+    BACKEND_ONEC_DOCUMENTS_KINDS: z.string().trim().default('purchase_receipt,cash_outflow,bank_outflow').refine(
+      (value) => value.split(',').map((name) => name.trim()).filter(Boolean).every((name) => [
+        'purchase_receipt', 'cash_outflow', 'bank_outflow', 'sales_shipment', 'supplier_return', 'inventory_writeoff', 'inventory_transfer',
+      ].includes(name)),
+      'BACKEND_ONEC_DOCUMENTS_KINDS: unknown 1C document kind',
+    ),
     BACKEND_PROCUREMENT_WORKSPACE_ENABLED: booleanFromEnv.default(false),
     BACKEND_SUPPLIER_REQUESTS_ENABLED: booleanFromEnv.default(false),
     BACKEND_FILM_CATALOG_IMPORT_ENABLED: booleanFromEnv.default(false),

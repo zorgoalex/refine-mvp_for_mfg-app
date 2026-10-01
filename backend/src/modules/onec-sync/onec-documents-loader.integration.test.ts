@@ -13,6 +13,9 @@ import { lineClosedCode, lockDocumentLine, PgOnecDocumentsRepository } from '../
 import { OnecDocumentsProcurementConsumer } from '../orders/application/onec-documents-procurement-consumer';
 import { OnecDocumentConsumers } from './application/onec-document-consumers';
 import { OnecDocumentsLoaderService, type LoadTrigger } from './application/onec-documents-loader.service';
+import { OnecDocumentsEvents, type OnecDocumentsLoaded } from './application/onec-documents-events';
+import { OnecDocumentsReader } from './application/onec-documents-reader';
+import { DOCUMENT_ENTITIES } from './domain/onec-document-normalizer';
 
 // Загрузчик документов 1С (план 2026-09-30-onec-documents-loader-plan.md): настоящие сервисы, потребитель закупок,
 // одноразовая БД film_catalog_it_* (schema-only erp_test + миграция 213). Фикстуры заказов/закупов/распределений и
@@ -35,6 +38,8 @@ describe.skipIf(!url)('1C documents loader — real PostgreSQL', { timeout: 1200
   const ITEM_AMB = K();
   const CP = K();
   let seq = 0;
+  let configRef: ConfigService<BackendEnv, true>;
+  const documentEvents = new OnecDocumentsEvents();
 
   const trigger = (entityCode: string): LoadTrigger => {
     seq += 1;
@@ -106,7 +111,7 @@ describe.skipIf(!url)('1C documents loader — real PostgreSQL', { timeout: 1200
       [`it-${randomUUID().slice(0, 8)}`, `${tag} база`])).rows[0].source_id);
     await watcher.query('INSERT INTO onec_agents (agent_id, source_id, site_id, display_name) VALUES ($1, $2, $3, $4)',
       [`it-${randomUUID().slice(0, 12)}`, source, 'it', `${tag} агент`]);
-    for (const entity of ['doc_purchase_receipts', 'doc_cash_outflows', 'units', 'items', 'counterparties']) {
+    for (const entity of ['doc_purchase_receipts', 'doc_cash_outflows', 'doc_sales_shipments', 'doc_inventory_writeoffs', 'doc_inventory_transfers', 'units', 'items', 'counterparties']) {
       await watcher.query('INSERT INTO onec_etl_entity_state (source_id, entity_code) VALUES ($1, $2)', [source, entity]);
     }
     await watcher.query('INSERT INTO onec_currency_map (source_id, currency_ref_key, iso_code) VALUES ($1, $2, $3)', [source, CUR, 'KZT']);
@@ -123,12 +128,14 @@ describe.skipIf(!url)('1C documents loader — real PostgreSQL', { timeout: 1200
       DATABASE_URL: url, DATABASE_POOL_MIN: 1, DATABASE_POOL_MAX: 3, DATABASE_SSL: false, DATABASE_QUERY_TIMEOUT_MS: 15000,
       BACKEND_ENABLE_ONEC_AGENT: true, ONEC_CLIENT_CERT_HEADER: 'x-client-cert',
       BACKEND_ONEC_DOCUMENTS_LOAD: true, BACKEND_RESOURCE_PROCUREMENT_ENABLED: true,
+      BACKEND_ONEC_DOCUMENTS_KINDS: 'purchase_receipt,cash_outflow,bank_outflow,sales_shipment,supplier_return,inventory_writeoff,inventory_transfer',
     } as Partial<BackendEnv>);
+    configRef = config;
     database = new DatabaseService(config, { measure: (_text: string, run: () => Promise<unknown>) => run() } as never);
     const reader = new OnecCatalogReader(database, new OnecRuntimeConfigService(config));
     const consumers = new OnecDocumentConsumers();
     new OnecDocumentsProcurementConsumer(consumers).onModuleInit();
-    loader = new OnecDocumentsLoaderService(database, config, reader, new OnecEtlEvents(), new OnecAlertsPort(new PgOnecRepository(database)), consumers);
+    loader = new OnecDocumentsLoaderService(database, config, reader, new OnecEtlEvents(), new OnecAlertsPort(new PgOnecRepository(database)), consumers, documentEvents);
   });
 
   afterAll(async () => {
@@ -305,8 +312,8 @@ describe.skipIf(!url)('1C documents loader — real PostgreSQL', { timeout: 1200
     // Март сопоставляется раньше января (отдельный вызов), затем полный проход.
     const internals = loader as unknown as { repository: { loadReferences(s: number): Promise<unknown>; loadDocument(ctx: unknown, key: string, refs: unknown): Promise<unknown> } };
     const refs = await internals.repository.loadReferences(source);
-    await internals.repository.loadDocument({ sourceId: source, entityCode: 'doc_purchase_receipts', config: { docKind: 'purchase_receipt', linesField: 'Запасы', currencyField: 'ВалютаДокумента_Key' },
-      requestId: 'req-march', correlationId: 'corr-march', runId: null }, MARCH, refs);
+    await internals.repository.loadDocument({ sourceId: source, entityCode: 'doc_purchase_receipts', config: DOCUMENT_ENTITIES.doc_purchase_receipts,
+      enabledKinds: new Set(['purchase_receipt']), requestId: 'req-march', correlationId: 'corr-march', runId: null }, MARCH, refs);
     await loader.run(trigger('doc_purchase_receipts'));
     const supplier = (await watcher.query(
       `SELECT to_char(first_seen_at, 'YYYY-MM-DD') AS first_seen, first_onec_document_id::int AS doc_id, source
@@ -436,5 +443,223 @@ describe.skipIf(!url)('1C documents loader — real PostgreSQL', { timeout: 1200
     const off = new OnecDocumentsLoaderService(database, config, new OnecCatalogReader(database, new OnecRuntimeConfigService(config)), new OnecEtlEvents(),
       new OnecAlertsPort(new PgOnecRepository(database)), new OnecDocumentConsumers());
     expect(await off.run(trigger('doc_purchase_receipts'))).toEqual({ status: 'skipped', reason: 'disabled' });
+  });
+
+  describe('consumption documents (plan 2026-09-30-onec-consumption-documents-plan.md §3)', () => {
+    const WH = K();
+    const WH2 = K();
+    const SERVICE = K();
+    const shipment = (key: string, lines: Array<Record<string, unknown>>, extra: Record<string, unknown> = {}) =>
+      mirror('doc_sales_shipments', key, {
+        Ref_Key: key, Number: `${tag}-S${key.slice(0, 5)}`, Date: '2026-06-02T14:36:52', Posted: true, DeletionMark: false,
+        ВидОперации: 'ПродажаПокупателю', Контрагент_Key: CP, ВалютаДокумента_Key: CUR, СуммаДокумента: 500, СтруктурнаяЕдиница_Key: WH,
+        Запасы: lines, ...extra,
+      });
+    const sline = (no: number, item: string, qty: number, extra: Record<string, unknown> = {}) => ({
+      LineNumber: no, Номенклатура_Key: item, Количество: qty, ЕдиницаИзмерения: UNIT_SHEET,
+      ЕдиницаИзмерения_Type: 'StandardODATA.Catalog_КлассификаторЕдиницИзмерения', ТипНоменклатурыЗапас: true, Цена: 5, Всего: qty * 5,
+      СтруктурнаяЕдиница_Key: WH, ...extra,
+    });
+    const header = async (key: string) => (await watcher.query(
+      `SELECT onec_document_id::int AS id, doc_kind, currency, operation_kind, lower(warehouse_ref_key::text) AS wh,
+              lower(destination_warehouse_ref_key::text) AS dest, to_char(doc_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS') AS doc_at_utc,
+              normalizer_version, applied_revision::int AS revision
+         FROM onec_documents WHERE source_id = $1 AND onec_ref_key = $2::uuid`, [source, key])).rows;
+    const flags = async (id: number) => (await watcher.query(
+      `SELECT line_no, lower(warehouse_ref_key::text) AS wh, is_stock_item, unit_is_package FROM onec_document_lines WHERE onec_document_id = $1 ORDER BY line_no`,
+      [id])).rows;
+    const reader = () => new OnecDocumentsReader(database, configRef);
+
+    it('loads shipments, write-offs and transfers: kind, moment in the source zone, warehouses, stock flag, package unit', async () => {
+      const S = K();
+      const W = K();
+      const T = K();
+      await shipment(S, [sline(1, ITEM_A, 4), sline(2, SERVICE, 1, { ТипНоменклатурыЗапас: false, СтруктурнаяЕдиница_Key: WH2 }),
+        sline(3, ITEM_B, 2, { ЕдиницаИзмерения_Type: 'UnavailableEntities.UnavailableEntity_8e3bc82d-8e1f-4c4b-80be-7cfff345e705' })]);
+      await mirror('doc_inventory_writeoffs', W, { Ref_Key: W, Number: `${tag}-W`, Date: '2026-03-09T12:00:00', Posted: true, DeletionMark: false,
+        СтруктурнаяЕдиница_Key: WH, Запасы: [{ LineNumber: 1, Номенклатура_Key: ITEM_A, Количество: 1, ЕдиницаИзмерения: UNIT_SHEET }] });
+      await mirror('doc_inventory_transfers', T, { Ref_Key: T, Number: `${tag}-T`, Date: '2026-03-11T14:03:28', Posted: true, DeletionMark: false,
+        ВидОперации: 'Перемещение', СтруктурнаяЕдиница_Key: WH, СтруктурнаяЕдиницаПолучатель_Key: WH2,
+        Запасы: [{ LineNumber: 1, Номенклатура_Key: ITEM_A, Количество: 3, ЕдиницаИзмерения: UNIT_SHEET }] });
+      expect(await loader.run(trigger('doc_sales_shipments'))).toMatchObject({ status: 'succeeded', result: { created: 1, failed: 0 } });
+      expect(await loader.run(trigger('doc_inventory_writeoffs'))).toMatchObject({ status: 'succeeded', result: { created: 1 } });
+      expect(await loader.run(trigger('doc_inventory_transfers'))).toMatchObject({ status: 'succeeded', result: { created: 1 } });
+      const [s] = await header(S);
+      // Asia/Almaty = UTC+5: 14:36:52 местного — 09:36:52 UTC.
+      expect(s).toMatchObject({ doc_kind: 'sales_shipment', currency: 'KZT', operation_kind: 'ПродажаПокупателю', wh: WH, dest: null,
+        doc_at_utc: '2026-06-02T09:36:52', normalizer_version: 'onec-documents-v2', revision: 1 });
+      expect(await flags(s.id)).toEqual([
+        { line_no: 1, wh: WH, is_stock_item: true, unit_is_package: false },
+        { line_no: 2, wh: WH2, is_stock_item: false, unit_is_package: false },
+        { line_no: 3, wh: WH, is_stock_item: true, unit_is_package: true },
+      ]);
+      expect((await header(W))[0]).toMatchObject({ doc_kind: 'inventory_writeoff', currency: null, wh: WH });
+      const [t] = await header(T);
+      expect(t).toMatchObject({ doc_kind: 'inventory_transfer', currency: null, wh: WH, dest: WH2 });
+      expect((await flags(t.id))[0].wh).toBe(WH);
+      // Повтор — без изменений; потребитель закупок новые виды не видит (реестр поставщиков не пополняется).
+      expect(await loader.run(trigger('doc_sales_shipments'))).toMatchObject({ result: { created: 0, changed: 0, unchanged: 1 } });
+      expect((await watcher.query('SELECT count(*)::int AS n FROM resource_suppliers WHERE first_onec_document_id = $1', [s.id])).rows[0].n).toBe(0);
+      // Read-порт: кандидаты по складу получателя и документу.
+      const candidates = await reader().consumptionCandidates({ sourceIds: [source], warehouseRefKeys: [WH2] });
+      expect(candidates.map((c) => c.documentId).sort((a, b) => a - b)).toEqual([s.id, t.id].sort((a, b) => a - b));
+      const view = candidates.find((c) => c.documentId === t.id)!;
+      expect(view).toMatchObject({ docKind: 'inventory_transfer', revision: 1, docAt: '2026-03-11T09:03:28Z', warehouseRefKey: WH, destinationWarehouseRefKey: WH2,
+        posted: true, deletedInOnec: false, missingInSource: false });
+      expect(view.lines).toEqual([expect.objectContaining({ lineNo: 1, warehouseRefKey: WH, quantity: '3.000', unitCode: 'sheet', isStockItem: true, unitIsPackage: false })]);
+    });
+
+    it('a kind change removes the old-kind document with audit and event; the read port then sees it as gone', async () => {
+      const S = K();
+      await shipment(S, [sline(1, ITEM_A, 2)]);
+      await loader.run(trigger('doc_sales_shipments'));
+      const [before] = await header(S);
+      await shipment(S, [sline(1, ITEM_A, 2)], { ВидОперации: 'ВозвратПоставщику' });
+      await loader.run(trigger('doc_sales_shipments'));
+      const after = await header(S);
+      expect(after).toHaveLength(1);
+      expect(after[0]).toMatchObject({ doc_kind: 'supplier_return', revision: 1 });
+      expect(after[0].id).not.toBe(before.id);
+      expect(await audits(before.id)).toEqual(['onec.document.loaded', 'onec.document.removed']);
+      expect((await events(before.id)).map((e) => [e.idempotency_key, e.payload_json.removed ?? false])).toEqual([
+        [`onec_document:${before.id}:1`, false], [`onec_document:${before.id}:2`, true],
+      ]);
+      const tx = await database.transaction(async (client) => reader().lockDocumentForProjection(before.id, client));
+      expect(tx).toBeNull();
+    });
+
+    it('lockDocumentForProjection holds the loader until the caller commits', async () => {
+      const S = K();
+      await shipment(S, [sline(1, ITEM_A, 2)]);
+      await loader.run(trigger('doc_sales_shipments'));
+      const [s] = await header(S);
+      const projection = new Client({ connectionString: url });
+      await projection.connect();
+      try {
+        await projection.query('BEGIN');
+        const view = await reader().lockDocumentForProjection(s.id, projection as never);
+        expect(view?.lines[0].quantity).toBe('2.000');
+        await shipment(S, [sline(1, ITEM_A, 7)]);
+        const pending = loader.run(trigger('doc_sales_shipments'));
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        expect((await lines(s.id))[0].quantity).toBe('2.000');
+        await projection.query('COMMIT');
+        expect(await pending).toMatchObject({ status: 'succeeded', result: { changed: 1 } });
+      } finally {
+        await projection.end();
+      }
+      expect((await lines(s.id))[0].quantity).toBe('7.000');
+    });
+
+    it('v1 → v2: a receipt applied by v1 gets the new fields without a revision, audit or outbox; a second pass is a no-op', async () => {
+      const R = K();
+      await receipt(R, '2024-04-01', [rline(1, ITEM_A, 2, UNIT_SHEET)], { СтруктурнаяЕдиница_Key: WH });
+      await loader.run(trigger('doc_purchase_receipts'));
+      const r = await doc(R);
+      // Имитация документа, применённого правилами v1: новых полей нет, отпечатки — прежние (другие).
+      await watcher.query(`UPDATE onec_documents SET normalizer_version = NULL, operation_kind = NULL, doc_at = NULL, warehouse_ref_key = NULL,
+        observed_fingerprint = 'v1-observed', applied_fingerprint = 'v1-applied' WHERE onec_document_id = $1`, [r.id]);
+      await watcher.query('UPDATE onec_document_lines SET warehouse_ref_key = NULL WHERE onec_document_id = $1', [r.id]);
+      const eventsBefore = (await events(r.id)).length;
+      const auditsBefore = (await audits(r.id)).length;
+      expect(await loader.run(trigger('doc_purchase_receipts'))).toMatchObject({ status: 'succeeded', result: { upgraded: 1, changed: 0 } });
+      const upgraded = (await watcher.query(
+        `SELECT applied_revision::int AS revision, normalizer_version, lower(warehouse_ref_key::text) AS wh, doc_at IS NOT NULL AS has_at,
+                observed_fingerprint <> 'v1-observed' AS observed_new, applied_fingerprint <> 'v1-applied' AS applied_new
+           FROM onec_documents WHERE onec_document_id = $1`, [r.id])).rows[0];
+      expect(upgraded).toEqual({ revision: r.revision, normalizer_version: 'onec-documents-v2', wh: WH, has_at: true, observed_new: true, applied_new: true });
+      expect((await flags(r.id))[0].wh).toBe(WH);
+      expect(await events(r.id)).toHaveLength(eventsBefore);
+      // Аудит перехода — одна запись на документ, в его транзакции (code review R1-1).
+      expect((await audits(r.id)).slice(auditsBefore)).toEqual(['onec.document.normalizer_upgraded']);
+      const upgradeAudit = (await watcher.query(
+        `SELECT metadata_json, diff_json FROM audit_log WHERE event = 'onec.document.normalizer_upgraded' AND entity_id = $1`, [String(r.id)])).rows[0];
+      expect(upgradeAudit.metadata_json).toMatchObject({ documentId: r.id, revision: r.revision, normalizerVersion: 'onec-documents-v2' });
+      expect(upgradeAudit.diff_json).toEqual({ normalizerVersion: { from: null, to: 'onec-documents-v2' } });
+      // Повтор — документ не выбирается (оба отпечатка v2): ни транзакции обновления, ни аудита, ни outbox.
+      expect(await loader.run(trigger('doc_purchase_receipts'))).toMatchObject({ result: { upgraded: 0, changed: 0 } });
+      expect(await events(r.id)).toHaveLength(eventsBefore);
+      expect(await audits(r.id)).toHaveLength(auditsBefore + 1);
+    });
+
+    it('flag matrix: procurement off loads consumption kinds only; a kind outside the list is skipped', async () => {
+      const make = (extra: Partial<BackendEnv>) => {
+        const config = new ConfigService<BackendEnv, true>({ BACKEND_ONEC_DOCUMENTS_LOAD: true, BACKEND_ENABLE_ONEC_AGENT: true, ONEC_CLIENT_CERT_HEADER: 'x-client-cert', ...extra } as Partial<BackendEnv>);
+        return new OnecDocumentsLoaderService(database, config, new OnecCatalogReader(database, new OnecRuntimeConfigService(config)), new OnecEtlEvents(),
+          new OnecAlertsPort(new PgOnecRepository(database)), new OnecDocumentConsumers());
+      };
+      const all = 'purchase_receipt,cash_outflow,bank_outflow,sales_shipment,supplier_return,inventory_writeoff,inventory_transfer';
+      const noProcurement = make({ BACKEND_RESOURCE_PROCUREMENT_ENABLED: false, BACKEND_ONEC_DOCUMENTS_KINDS: all });
+      expect(await noProcurement.run(trigger('doc_purchase_receipts'))).toEqual({ status: 'skipped', reason: 'disabled' });
+      const S = K();
+      await shipment(S, [sline(1, ITEM_A, 1)]);
+      expect(await noProcurement.run(trigger('doc_sales_shipments'))).toMatchObject({ status: 'succeeded' });
+      expect(await header(S)).toHaveLength(1);
+      // По умолчанию (виды закупок) без закупок — загрузчик выключен, как раньше.
+      expect(await make({ BACKEND_RESOURCE_PROCUREMENT_ENABLED: false }).run(trigger('doc_sales_shipments'))).toEqual({ status: 'skipped', reason: 'disabled' });
+      // Только продажа: возврат поставщику в той же сущности пропускается.
+      const onlySales = make({ BACKEND_RESOURCE_PROCUREMENT_ENABLED: false, BACKEND_ONEC_DOCUMENTS_KINDS: 'sales_shipment' });
+      const B = K();
+      await shipment(B, [sline(1, ITEM_A, 1)], { ВидОперации: 'ВозвратПоставщику' });
+      const outcome = await onlySales.run(trigger('doc_sales_shipments'));
+      expect(outcome).toMatchObject({ status: 'succeeded' });
+      expect(await header(B)).toHaveLength(0);
+      // Выключенный вид пропускается до нормализации — и с неизвестной валютой (code review R1-3).
+      await shipment(B, [sline(1, ITEM_A, 1)], { ВидОперации: 'ВозвратПоставщику', ВалютаДокумента_Key: K() });
+      expect(await onlySales.run(trigger('doc_sales_shipments'))).toMatchObject({ status: 'succeeded', result: { invalid: {} } });
+      expect(await header(B)).toHaveLength(0);
+      // …и с невалидной строкой (code review R2).
+      await shipment(B, [sline(1, ITEM_A, -3)], { ВидОперации: 'ВозвратПоставщику' });
+      expect(await onlySales.run(trigger('doc_sales_shipments'))).toMatchObject({ status: 'succeeded', result: { invalid: {} } });
+      // Не оставлять в общей копии документ с неизвестной валютой для следующих проходов основного загрузчика.
+      await shipment(B, [sline(1, ITEM_A, 1)], { ВидОперации: 'ВозвратПоставщику' });
+      // Read-порт выключен вместе с загрузчиком.
+      const off = new OnecDocumentsReader(database, new ConfigService<BackendEnv, true>({ BACKEND_ONEC_DOCUMENTS_LOAD: false, BACKEND_ENABLE_ONEC_AGENT: true } as Partial<BackendEnv>));
+      await expect(off.consumptionCandidates({ sourceIds: [source] })).rejects.toMatchObject({ code: 'ONEC_DOCUMENTS_UNAVAILABLE' });
+    });
+
+    it('an unknown operation kind is not loaded and raises the load alert', async () => {
+      const S = K();
+      await shipment(S, [sline(1, ITEM_A, 1)], { ВидОперации: 'ПередачаНаКомиссию' });
+      const outcome = await loader.run(trigger('doc_sales_shipments'));
+      expect(outcome).toMatchObject({ status: 'failed', result: { invalid: { UNKNOWN_OPERATION_KIND: 1 } } });
+      expect(await header(S)).toHaveLength(0);
+      await shipment(S, [sline(1, ITEM_A, 1)]);
+      expect(await loader.run(trigger('doc_sales_shipments'))).toMatchObject({ status: 'succeeded' });
+    });
+
+    it('publishes OnecDocumentsLoaded with committed created/changed/removed documents only', async () => {
+      const received: OnecDocumentsLoaded[] = [];
+      const off = documentEvents.onDocumentsLoaded((event) => { received.push(event); });
+      try {
+        const A = K();
+        const BAD = K();
+        await shipment(A, [sline(1, ITEM_A, 1)]);
+        await shipment(BAD, [sline(1, ITEM_A, 1)], { ВидОперации: 'ПередачаНаКомиссию' });
+        const first = await loader.run(trigger('doc_sales_shipments'));
+        expect(first).toMatchObject({ status: 'failed', result: { invalid: { UNKNOWN_OPERATION_KIND: 1 } } });
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        const [a] = await header(A);
+        expect(received.at(-1)).toMatchObject({ sourceId: source, entityCode: 'doc_sales_shipments', docKinds: ['sales_shipment'] });
+        expect(received.at(-1)!.documentIds).toContain(a.id);
+        expect(await header(BAD)).toHaveLength(0);
+        // Смена вида: в сигнале удалённый документ и новый.
+        const count = received.length;
+        await shipment(BAD, [sline(1, ITEM_A, 1)]);
+        await shipment(A, [sline(1, ITEM_A, 1)], { ВидОперации: 'ВозвратПоставщику' });
+        await loader.run(trigger('doc_sales_shipments'));
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        const [aNew] = await header(A);
+        expect(received).toHaveLength(count + 1);
+        expect(received.at(-1)!.docKinds).toEqual(['sales_shipment', 'supplier_return']);
+        expect(received.at(-1)!.documentIds).toEqual(expect.arrayContaining([a.id, aNew.id, (await header(BAD))[0].id]));
+        // Повтор без изменений — без сигнала.
+        await loader.run(trigger('doc_sales_shipments'));
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(received).toHaveLength(count + 1);
+      } finally {
+        off();
+      }
+    });
   });
 });
