@@ -60,6 +60,8 @@ describe('desiredForDocument', () => {
     expect(codes({ loadConflictCode: 'X' })).toEqual(['LINE_CONFLICT']);
     expect(codes({ isStockItem: false })).toEqual([]);
     expect(codes({ removedInOnec: true })).toEqual([]);
+    // Несвязанная строка документа до начала расхода по складу — история, не issue.
+    expect(codes({ nomenclatureRefKey: '00000000-1111-2222-3333-444444444444' }, { docAt: '2020-01-01T00:00:00Z' })).toEqual([]);
     // Позиция без плёнки ERP не в пог. м или в упаковке — другой материал (МДФ, фрезеровка): молча, без issue.
     const other = '00000000-1111-2222-3333-555555555555';
     expect(codes({ nomenclatureRefKey: other, unitCode: 'm2' })).toEqual([]);

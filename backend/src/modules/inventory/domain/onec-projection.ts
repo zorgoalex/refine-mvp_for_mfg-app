@@ -122,7 +122,8 @@ export function desiredForDocument(
       // Неавторитетный источник склада (другая база) — желаемое 0: смена источника возвращает применённое.
       if (wh.source !== doc.sourceId) continue;
       if (!wh.baselineOk) { frozen.add(w); issue('NO_BASELINE', w); continue; }
-      if (film === undefined) { issue('FILM_UNLINKED', w); continue; }
+      // Несвязанная строка до начала расхода по складу — история до учёта, не «не учтено».
+      if (film === undefined) { if (docAt === null || docAt > Date.parse(wh.since)) issue('FILM_UNLINKED', w); continue; }
       if (line.unitIsPackage) { issue('UNIT_PACKAGE', w); continue; }
       if (line.unitCode !== 'lm') { issue('UNIT_MISMATCH', w); continue; }
       const key = stockKey(w, film);

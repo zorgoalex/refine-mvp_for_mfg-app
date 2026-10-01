@@ -102,7 +102,7 @@ import { millingTypeDimensionWarning } from '../../../../utils/millingTypeDimens
 import { newDetailMaterialDefault } from '../../newDetailMaterialDefault';
 import { useQuery } from '@tanstack/react-query';
 import { inventoryApi } from '../../../../api/inventoryApi';
-import { filmStockBadge } from '../../../inventory/filmStock';
+import { filmStockBadge, ORDER_FILM_STOCK_REFRESH, orderFilmStockKey } from '../../../inventory/filmStock';
 
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
@@ -835,11 +835,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const bazisProjectLinkEnabled = featureFlags.useBackendBazis && can('bazis.view');
   const inventoryViewAllowed = featureFlags.inventory && can('inventory.view');
   const filmStockQuery = useQuery({
-    queryKey: ['inventory', 'order-film-stock', header?.order_id],
+    queryKey: orderFilmStockKey(header?.order_id),
     queryFn: () => inventoryApi.orderFilmStock(header.order_id!),
     enabled: inventoryViewAllowed && Number.isInteger(header?.order_id) && (header?.order_id ?? 0) > 0,
-    staleTime: 30_000,
-    refetchOnWindowFocus: true,
+    ...ORDER_FILM_STOCK_REFRESH,
   });
   const stockByFilmId = useMemo(
     () => new Map((filmStockQuery.data?.items ?? []).map((item) => [item.filmId, item.stockLm])),

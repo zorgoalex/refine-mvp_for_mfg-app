@@ -29,6 +29,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-01", title: "Заказ: остатки плёнки обновляются сами",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "В карточке заказа остаток плёнки на складе (метка у позиции и колонки «На складе, пог. м» / «Хватает» во вкладке «Материалы») обновляется сам каждые 15 секунд; во вкладке «Материалы» есть кнопка «Обновить остатки» и время последнего обновления.",
+    ],
+    fixed: [
+      "Вкладка «Не учтено из 1С» больше не показывает строки документов 1С, проведённых до начала расхода по складу.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-01", title: "Склад: кнопки документа всегда на экране",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: [

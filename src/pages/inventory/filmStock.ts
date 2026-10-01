@@ -6,6 +6,14 @@ export function filmStockBadge(stock: number | null | undefined): FilmStockBadge
     ? { kind: 'stock', label: `склад ${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(stock)} м`, quantity: stock }
     : { kind: 'none', label: 'нет на складе', quantity: stock ?? null };
 }
+/** Остатки плёнки в карточке заказа: обновляются сами каждые 15 с, пока вкладка браузера открыта, и по фокусу окна. */
+export const ORDER_FILM_STOCK_REFRESH = {
+  staleTime: 10_000,
+  refetchOnWindowFocus: true,
+  refetchInterval: 15_000,
+  refetchIntervalInBackground: false,
+} as const;
+export const orderFilmStockKey = (orderId: number | null | undefined) => ['inventory', 'order-film-stock', orderId] as const;
 export function filmStockAvailability(status: OrderFilmStockDto['items'][number]['status'] | null | undefined): string {
   switch (status) {
     case 'enough': return 'Хватает';

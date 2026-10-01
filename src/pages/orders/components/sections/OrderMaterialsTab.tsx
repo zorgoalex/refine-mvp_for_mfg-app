@@ -3,7 +3,7 @@ import { Table } from '../../../../ui/tooltipDelay';
 // Displays aggregated data for materials and films
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Row, Col, Typography } from 'antd';
+import { Button, Row, Col, Space, Typography } from 'antd';
 import { useList, useOrderAsyncReadGuard } from '../../../../query/orderLifecycleQueries';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { formatNumber } from '../../../../utils/numberFormat';
@@ -16,23 +16,29 @@ import { computeOrderBathFilmUsage } from '../../../cut/cutFilmUsage';
 import { buildCutJobNameById, CutJobLinks } from '../../CutJobLinks';
 import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from '../../orderMaterialsSummary';
 import { businessOrderDetails } from '../../../../utils/orderDetailRows';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { inventoryApi } from '../../../../api/inventoryApi';
 import { featureFlags } from '../../../../config/featureFlags';
-import { filmStockAvailability } from '../../../inventory/filmStock';
+import { filmStockAvailability, ORDER_FILM_STOCK_REFRESH, orderFilmStockKey } from '../../../inventory/filmStock';
 
 const { Text } = Typography;
 
 export const OrderMaterialsTab: React.FC = () => {
   const { details, hdfDetails, header } = useOrderFormStore();
   const inventoryViewAllowed = featureFlags.inventory && can('inventory.view');
+  const stockEnabled = inventoryViewAllowed && Number.isInteger(header.order_id) && (header.order_id ?? 0) > 0;
   const filmStockQuery = useQuery({
-    queryKey: ['inventory', 'order-film-stock', header.order_id],
+    queryKey: orderFilmStockKey(header.order_id),
     queryFn: () => inventoryApi.orderFilmStock(header.order_id!),
-    enabled: inventoryViewAllowed && Number.isInteger(header.order_id) && (header.order_id ?? 0) > 0,
-    staleTime: 30_000,
-    refetchOnWindowFocus: true,
+    enabled: stockEnabled,
+    ...ORDER_FILM_STOCK_REFRESH,
   });
+  // «Обновить»: тот же ключ читает и таблица деталей — обновляются обе.
+  const queryClient = useQueryClient();
+  const refreshStock = () => queryClient.invalidateQueries({ queryKey: orderFilmStockKey(header.order_id) });
+  const stockUpdatedAt = filmStockQuery.dataUpdatedAt > 0
+    ? new Date(filmStockQuery.dataUpdatedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : null;
   const stockByFilmId = useMemo(
     () => new Map((filmStockQuery.data?.items ?? []).map((item) => [item.filmId, item])),
     [filmStockQuery.data],
@@ -276,7 +282,13 @@ export const OrderMaterialsTab: React.FC = () => {
             <Text strong style={{ fontSize: 14 }}>
               Пленка
             </Text>
-            {inventoryViewAllowed && <div><Text type="secondary">Остаток на складе, без резерва</Text></div>}
+            {inventoryViewAllowed && <div><Space size={8} wrap>
+              <Text type="secondary">Остаток на складе, без резерва{stockUpdatedAt ? ` · обновлено в ${stockUpdatedAt}` : ''}</Text>
+              {stockEnabled
+                ? <Button size="small" loading={filmStockQuery.isFetching} onClick={() => void refreshStock()}>Обновить остатки</Button>
+                : <Text type="secondary">· появится после сохранения заказа</Text>}
+              {filmStockQuery.isError && <Text type="danger">не удалось получить остатки</Text>}
+            </Space></div>}
           </div>
           <Table
             dataSource={filmMaterialRows}
