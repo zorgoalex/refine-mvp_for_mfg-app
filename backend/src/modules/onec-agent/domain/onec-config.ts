@@ -24,11 +24,20 @@ export const ONEC_CONFIG_MAX_BYTES = 1024 * 1024;
 const identifier = z.string().trim().min(1).max(200);
 const odataName = z.string().min(1).max(200).regex(/^[^\s/?#]+$/u, 'must be a single OData name');
 /**
- * Entity set, or strictly `<set>/Balance(Dimensions='<a>,<b>,…')` — the only function form the
- * agent reads (register balances, agent to-erp/0029).
+ * Entity set, or strictly one of the register function forms the agent reads (same check as agent ≥ 1.1.3):
+ * `<set>/Balance(Dimensions='<a>,<b>,…')` (balances, agent to-erp/0029) or
+ * `<set>/BalanceAndTurnovers(StartPeriod=datetime'YYYY-MM-DDTHH:MM:SS'[,EndPeriod=datetime'…'],Dimensions='<a>,…')`
+ * (balances and turnovers over the window, agent to-erp/0091/0093).
  */
-export const ODATA_PATH_PATTERN = /^[^\s/?#()',]+(\/Balance\(Dimensions='[^\s/?#()',]+(,[^\s/?#()',]+)*'\))?$/u;
-const odataPath = z.string().min(1).max(400).regex(ODATA_PATH_PATTERN, "must be an entity set or <set>/Balance(Dimensions='…')");
+const ODATA_NAME = "[^\\s/?#()',]+";
+const ODATA_DIMENSIONS = `Dimensions='${ODATA_NAME}(,${ODATA_NAME})*'`;
+const ODATA_DATETIME = "datetime'\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}'";
+export const ODATA_PATH_PATTERN = new RegExp(
+  `^${ODATA_NAME}(\\/Balance\\(${ODATA_DIMENSIONS}\\)` +
+    `|\\/BalanceAndTurnovers\\(StartPeriod=${ODATA_DATETIME}(,EndPeriod=${ODATA_DATETIME})?,${ODATA_DIMENSIONS}\\))?$`,
+  'u',
+);
+const odataPath = z.string().min(1).max(400).regex(ODATA_PATH_PATTERN, "must be an entity set, <set>/Balance(Dimensions='…') or <set>/BalanceAndTurnovers(StartPeriod=datetime'…',Dimensions='…')");
 
 export const onecEtlEntitySchema = z
   .object({

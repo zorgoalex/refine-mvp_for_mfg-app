@@ -113,7 +113,16 @@ describe('E3b configuration schema', () => {
   it('accepts the strict Balance form and deleteBatchAfterAck, rejects other paths', async () => {
     const { ODATA_PATH_PATTERN, validateOnecConfiguration } = await import('./onec-config');
     expect(ODATA_PATH_PATTERN.test("AccumulationRegister_ЗапасыНаСкладах/Balance(Dimensions='Организация,Номенклатура,Характеристика,Партия,СтруктурнаяЕдиница,Ячейка')")).toBe(true);
-    for (const bad of ['Catalog_A/Catalog_B', "X/Balance()", "X/Balance(Dimensions='a b')", "X/SliceLast(Dimensions='a')", "X/Balance(Dimensions='a')?$top=1"]) {
+    expect(ODATA_PATH_PATTERN.test("AccumulationRegister_Запасы/BalanceAndTurnovers(StartPeriod=datetime'2025-12-01T00:00:00',Dimensions='СтруктурнаяЕдиница,Номенклатура,Характеристика,Партия')")).toBe(true);
+    expect(ODATA_PATH_PATTERN.test("AccumulationRegister_Запасы/BalanceAndTurnovers(StartPeriod=datetime'2025-12-01T00:00:00',EndPeriod=datetime'2026-01-01T00:00:00',Dimensions='Номенклатура')")).toBe(true);
+    expect(ODATA_PATH_PATTERN.test('Catalog_Номенклатура')).toBe(true);
+    for (const bad of ['Catalog_A/Catalog_B', "X/Balance()", "X/Balance(Dimensions='a b')", "X/SliceLast(Dimensions='a')", "X/Balance(Dimensions='a')?$top=1",
+      "X/BalanceAndTurnovers(Dimensions='a')", "X/BalanceAndTurnovers(StartPeriod=datetime'2025-12-01',Dimensions='a')",
+      "X/BalanceAndTurnovers(StartPeriod=datetime'2025-12-01T00:00:00',Periodicity=Month,Dimensions='a')",
+      "X/BalanceAndTurnovers(StartPeriod=datetime'2025-12-01T00:00:00',Dimensions='a')/$count",
+      "X/BalanceAndTurnovers(EndPeriod=datetime'2025-12-01T00:00:00',StartPeriod=datetime'2025-11-01T00:00:00',Dimensions='a')",
+      "X/BalanceAndTurnovers(StartPeriod=datetime'2025-12-01T00:00:00',Dimensions='a')&$filter=1",
+      "X/Turnovers(StartPeriod=datetime'2025-12-01T00:00:00',Dimensions='a')"]) {
       expect(ODATA_PATH_PATTERN.test(bad)).toBe(false);
     }
     const result = validateOnecConfiguration({
