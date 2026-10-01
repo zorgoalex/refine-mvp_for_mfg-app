@@ -1,7 +1,10 @@
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import { validateCaptionTemplate } from './broadcast-caption';
-import { BROADCAST_MAX_ORDER_OFFSET_DAYS, type BroadcastInput, type BroadcastUpdateInput } from './broadcast.types';
+import { addDays, businessDate } from './broadcast-time';
+import {
+  BROADCAST_MAX_ORDER_OFFSET_DAYS, CALENDAR_SEND_MAX_DAYS, type BroadcastInput, type BroadcastUpdateInput, type CalendarSendUpdateInput,
+} from './broadcast.types';
 
 const uuid = z.string().uuid();
 const time = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
@@ -34,6 +37,14 @@ const retryInput = z.object({
 }).strict();
 const replanInput = z.object({ version: z.number().int().positive(), idempotencyKey: uuid }).strict();
 const controlInput = z.object({ version: z.number().int().positive(), paused: z.boolean() }).strict();
+const calendarSettingsInput = z.object({
+  version: z.number().int().positive(),
+  groupChatId: broadcastFields.groupChatId,
+  cardsPerMessage: broadcastFields.cardsPerMessage,
+  captionTemplate: broadcastFields.captionTemplate,
+  minIntervalMinutes: z.number().int().min(1).max(1440),
+}).strict();
+const calendarRunInput = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), idempotencyKey: uuid }).strict();
 
 export function parseBroadcastCreate(value: unknown): BroadcastInput {
   return normalize(parse(createInput, value));
@@ -49,6 +60,25 @@ export const parseBroadcastRun = (value: unknown) => parse(runInput, value);
 export const parseBroadcastRetry = (value: unknown) => parse(retryInput, value);
 export const parseBroadcastReplan = (value: unknown) => parse(replanInput, value);
 export const parseBroadcastControl = (value: unknown) => parse(controlInput, value);
+
+export function parseCalendarSendUpdate(value: unknown): CalendarSendUpdateInput {
+  const input = parse(calendarSettingsInput, value);
+  const groupChatId = input.groupChatId?.trim() || null;
+  if (groupChatId && !GROUP_ID.test(groupChatId)) invalid('Некорректный ID группы WhatsApp.');
+  return { ...input, groupChatId, captionTemplate: validateCaptionTemplate(input.captionTemplate.trim()) };
+}
+
+/** A real calendar day within CALENDAR_SEND_MAX_DAYS of today (Asia/Almaty). */
+export function parseCalendarSendRun(value: unknown, now = new Date()): { date: string; idempotencyKey: string } {
+  const input = parse(calendarRunInput, value);
+  const [year, month, day] = input.date.split('-').map(Number);
+  const real = new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10) === input.date;
+  const today = businessDate(now);
+  if (!real || input.date < addDays(today, -CALENDAR_SEND_MAX_DAYS) || input.date > addDays(today, CALENDAR_SEND_MAX_DAYS)) {
+    invalid('Некорректная дата для отправки из календаря.');
+  }
+  return input;
+}
 
 export function parseBroadcastId(value: string): number {
   const id = Number(value);

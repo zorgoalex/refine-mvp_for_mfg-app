@@ -56,6 +56,55 @@
 уникален в пределах рассылки: повтор с тем же ключом и теми же параметрами
 возвращает прежний результат, с другими — `409 IDEMPOTENCY_KEY_REUSED`.
 
+## Отправка из календаря («Отправить в чат»)
+
+- В календаре маленькая иконка отправки в заголовке дня, или клик (правый клик; на телефоне —
+  касание) по заголовку → «Отправить в чат»:
+  карточки производственных заказов этого дня (как в рассылке, без учёта фильтров экрана) сразу
+  ставятся в очередь — без окна отправки и без подтверждения. День без заказов ничего не отправляет.
+- Настройка — Конфигурация → «Рассылка сообщений» → «Отправка из календаря»: группа, карточек на
+  картинке, подпись, **порог частоты** «Не чаще одного раза в N минут» (1–1440, по умолчанию 15).
+  История отправок — там же.
+- Порог: одновременно идёт не больше одной отправки из календаря (`BROADCAST_CALENDAR_ACTIVE`), а
+  начала доставок (новые отправки и повторы) разнесены не меньше чем на порог
+  (`BROADCAST_CALENDAR_COOLDOWN`, `details.nextAllowedAt`). Порог проверяется и при создании команды,
+  и в момент начала доставки под блокировкой, поэтому пауза/возобновление и одновременные клики его
+  не обходят. Пустой день порог не тратит.
+- Права — как у рассылок. Пауза «Остановить все рассылки» останавливает и эти отправки.
+- Под капотом — системная рассылка `purpose = 'calendar'` (миграция 224): её нет в списке рассылок,
+  планировщик её не запускает, обычные маршруты изменения/архива/отправки отвечают `409 BROADCAST_SYSTEM`.
+- API: `GET`/`PUT /api/v1/whatsapp/calendar-send`, `POST /api/v1/whatsapp/calendar-send/runs`
+  (`{date, idempotencyKey}`).
+
+### Выкладка миграции 224
+
+Как у 209: остановить старый backend → `apply-migrations.sh` (224) → запустить новый. Старый backend
+на схеме 224 не запускать: он покажет системную рассылку как обычную и позволит отправить её без
+порога. Frontend можно выложить раньше — без API пункт меню и блок скрыты.
+
+### Откат на backend без 224
+
+1. Включить паузу «Остановить все рассылки»; дождаться, что нет сообщений в отправке (запрос из
+   раздела «Откат на предыдущий backend», шаг 2).
+2. Остановить новый backend.
+3. Одной транзакцией отменить незавершённые отправки из календаря и спрятать системную рассылку:
+   ```sql
+   BEGIN;
+   UPDATE whatsapp_broadcast_messages m SET state = 'cancelled', error_code = 'CALENDAR_ROLLBACK', updated_at = now()
+     FROM whatsapp_broadcast_runs r, whatsapp_broadcasts b
+     WHERE m.run_id = r.run_id AND r.broadcast_id = b.broadcast_id AND b.purpose = 'calendar' AND m.state = 'pending';
+   UPDATE whatsapp_broadcast_runs r SET state = 'cancelled', reason = 'CALENDAR_ROLLBACK', updated_at = now()
+     FROM whatsapp_broadcasts b
+     WHERE r.broadcast_id = b.broadcast_id AND b.purpose = 'calendar' AND r.state IN ('preparing', 'queued', 'sending');
+   UPDATE whatsapp_broadcasts SET archived_at = now() WHERE purpose = 'calendar' AND archived_at IS NULL;
+   COMMIT;
+   ```
+   Старый backend архивную рассылку не показывает и не отправляет.
+4. Запустить предыдущий backend, снять паузу, перезагрузить страницы.
+
+Повторный переход на новый backend: остановить старый, снять архив
+(`UPDATE whatsapp_broadcasts SET archived_at = NULL WHERE purpose = 'calendar';`), запустить новый.
+
 ## Хранение
 
 Картинки — в `<WHATSAPP_DAILY_DIGEST_DIR>/broadcasts/`, срок 23 ч 50 мин. Снимки

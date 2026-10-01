@@ -21,6 +21,7 @@ function makeWorker(overrides: Record<string, unknown> = {}) {
     listDeliverableRuns: vi.fn().mockResolvedValue([]),
     expireAndPrune: vi.fn().mockResolvedValue({ referenced: new Map(), expiredKeys: [], prunedRuns: 0 }),
     legacyQueueUnfinished: vi.fn().mockResolvedValue(false),
+    calendarBroadcastId: vi.fn().mockResolvedValue(9),
     ...overrides,
   };
   const files = [{ fileKey: 'f1', sha256: 'a'.repeat(64), sizeBytes: 1, expiresAt: new Date() }];
@@ -147,6 +148,7 @@ describe('BroadcastService manual send', () => {
     const order: string[] = [];
     const repository = {
       findCommand: vi.fn(async () => { order.push('ledger'); return null; }),
+      broadcastPurpose: vi.fn(async () => { order.push('purpose'); return 'schedule'; }),
       getBroadcast: vi.fn(async () => { order.push('settings'); return { id: 4, version: 4, archived: false, groupChatId: 'g@g.us', orderDateOffsetDays: 0 }; }),
     };
     const worker = { storeReady: true, runtime: () => ({ relayAvailable: true }),
@@ -154,7 +156,41 @@ describe('BroadcastService manual send', () => {
     const service = new BroadcastService(repository as never, worker as never, {} as never, {} as never);
     await expect(service.createManual(4, { settingsVersion: 3, idempotencyKey: '0f8fad5b-d9cb-469f-a165-70867728950e', confirmed: true },
       { id: '11', username: 'u', role: 'admin', roleId: 1, permissions: [] }, 'req')).rejects.toMatchObject({ code: 'BROADCAST_VERSION_CONFLICT' });
-    expect(order).toEqual(['ledger', 'lease', 'ledger', 'settings']);
+    expect(order).toEqual(['ledger', 'lease', 'ledger', 'purpose', 'settings']);
+  });
+
+  it('refuses the ordinary manual route for the system calendar broadcast before rendering', async () => {
+    const repository = { findCommand: vi.fn().mockResolvedValue(null), broadcastPurpose: vi.fn().mockResolvedValue('calendar'), getBroadcast: vi.fn() };
+    const worker = { storeReady: true, runtime: () => ({ relayAvailable: true }), readSnapshot: vi.fn(),
+      withRenderLease: vi.fn(async (handler: (owned: () => Promise<void>) => unknown) => handler(async () => undefined)) };
+    const service = new BroadcastService(repository as never, worker as never, {} as never, {} as never);
+    await expect(service.createManual(4, { settingsVersion: 3, idempotencyKey: '0f8fad5b-d9cb-469f-a165-70867728950e', confirmed: true },
+      { id: '11', username: 'u', role: 'admin', roleId: 1, permissions: [] }, 'req')).rejects.toMatchObject({ code: 'BROADCAST_SYSTEM' });
+    expect(repository.getBroadcast).not.toHaveBeenCalled();
+    expect(worker.readSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('calendar send: refuses during the threshold before rendering, targets the chosen day', async () => {
+    const order: string[] = [];
+    const repository = {
+      calendarBroadcastId: vi.fn().mockResolvedValue(9),
+      findCommand: vi.fn().mockResolvedValue(null),
+      broadcastPurpose: vi.fn().mockResolvedValue('calendar'),
+      getBroadcast: vi.fn().mockResolvedValue({ id: 9, version: 2, archived: false, groupChatId: 'g@g.us', orderDateOffsetDays: 0, cardsPerMessage: 2, captionTemplate: '' }),
+      preflightCalendar: vi.fn(async () => {
+        order.push('preflight');
+        throw new ApiError(409, 'BROADCAST_CALENDAR_COOLDOWN', 'cooldown', { nextAllowedAt: '2026-10-01T10:15:00.000Z', minIntervalMinutes: 15 });
+      }),
+    };
+    const worker = { storeReady: true, runtime: () => ({ relayAvailable: true }), readSnapshot: vi.fn(async () => { order.push('snapshot'); return {}; }),
+      logCalendarRefusal: vi.fn().mockResolvedValue(undefined),
+      withRenderLease: vi.fn(async (handler: (owned: () => Promise<void>) => unknown) => handler(async () => undefined)) };
+    const service = new BroadcastService(repository as never, worker as never, {} as never, {} as never);
+    await expect(service.createCalendarRun({ date: '2026-09-15', idempotencyKey: '0f8fad5b-d9cb-469f-a165-70867728950e' },
+      { id: '11', username: 'u', role: 'admin', roleId: 1, permissions: [] }, 'req')).rejects.toMatchObject({ code: 'BROADCAST_CALENDAR_COOLDOWN' });
+    expect(order).toEqual(['preflight']);
+    expect(worker.logCalendarRefusal).toHaveBeenCalledWith('BROADCAST_CALENDAR_COOLDOWN', { date: '2026-09-15', nextAllowedAt: '2026-10-01T10:15:00.000Z' });
+    expect(repository.findCommand).toHaveBeenCalledWith(9, '0f8fad5b-d9cb-469f-a165-70867728950e', expect.any(String));
   });
 
   it('replays a committed command without rendering', async () => {

@@ -10,6 +10,7 @@ import { BroadcastRepository, commandFingerprint } from './broadcast.repository'
 import {
   BROADCAST_MAX_ACTIVE,
   type BroadcastEnvelope, type BroadcastInput, type BroadcastPreview, type BroadcastRunDetail, type BroadcastUpdateInput,
+  type CalendarSendEnvelope, type CalendarSendUpdateInput,
 } from './broadcast.types';
 
 @Injectable()
@@ -77,7 +78,46 @@ export class BroadcastService {
 
   async createManual(id: number, input: { settingsVersion: number; idempotencyKey: string; confirmed: true }, actor: CurrentUser, requestId: string): Promise<BroadcastRunDetail> {
     const fingerprint = commandFingerprint({ kind: 'manual', broadcastId: id, settingsVersion: input.settingsVersion, actorId: actor.id, confirmed: input.confirmed });
-    const replay = await this.repository.findCommand(id, input.idempotencyKey, fingerprint);
+    return this.runManual({ broadcastId: id, fingerprint, idempotencyKey: input.idempotencyKey, actor, requestId, source: 'broadcast',
+      settingsVersion: input.settingsVersion });
+  }
+
+  // ---------------------------------------------------------------- «Отправить в чат» from the calendar
+
+  async calendarSend(): Promise<CalendarSendEnvelope> {
+    return { ...(await this.repository.getCalendarSend()), runtime: this.worker.runtime() };
+  }
+
+  async updateCalendarSend(input: CalendarSendUpdateInput, actor: CurrentUser, requestId: string): Promise<CalendarSendEnvelope> {
+    return { ...(await this.repository.updateCalendarSend(input, actor, requestId)), runtime: this.worker.runtime() };
+  }
+
+  /** Queues the cards of one calendar day for the configured chat right away (no window, no confirmation). */
+  async createCalendarRun(input: { date: string; idempotencyKey: string }, actor: CurrentUser, requestId: string): Promise<BroadcastRunDetail> {
+    const broadcastId = await this.repository.calendarBroadcastId();
+    const fingerprint = commandFingerprint({ kind: 'calendar', broadcastId, date: input.date, actorId: actor.id });
+    try {
+      return await this.runManual({ broadcastId, fingerprint, idempotencyKey: input.idempotencyKey, actor, requestId, source: 'calendar',
+        targetDate: input.date });
+    } catch (error) {
+      if (error instanceof ApiError && ['BROADCAST_CALENDAR_COOLDOWN', 'BROADCAST_CALENDAR_ACTIVE'].includes(error.code)) {
+        const nextAllowedAt = error.details?.nextAllowedAt;
+        await this.worker.logCalendarRefusal(error.code, { date: input.date, nextAllowedAt: typeof nextAllowedAt === 'string' ? nextAllowedAt : null });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Manual run of a broadcast: an ordinary «Отправить сейчас» (target = today + offset, CAS on the
+   * settings version) or a calendar send (target = the chosen day, the current settings version).
+   */
+  private async runManual(params: {
+    broadcastId: number; fingerprint: string; idempotencyKey: string; actor: CurrentUser; requestId: string;
+    source: 'broadcast' | 'calendar'; settingsVersion?: number; targetDate?: string;
+  }): Promise<BroadcastRunDetail> {
+    const { broadcastId: id, fingerprint, idempotencyKey, actor, requestId, source } = params;
+    const replay = await this.repository.findCommand(id, idempotencyKey, fingerprint);
     if (replay) return this.repository.getRunDetail(String(replay.runId));
     if (!this.worker.storeReady) throw new ApiError(503, 'BROADCAST_STORE_UNAVAILABLE', 'Хранилище рассылок временно недоступно');
     const runtime = this.worker.runtime();
@@ -86,15 +126,22 @@ export class BroadcastService {
       // Idempotency is resolved again under the lease and finally inside the write transaction.
       // A same-key attempt can only commit while holding this lease, so a refusal below is never
       // returned for a key that is already committed (it is replayed here instead).
-      const committed = await this.repository.findCommand(id, input.idempotencyKey, fingerprint);
+      const committed = await this.repository.findCommand(id, idempotencyKey, fingerprint);
       if (committed) return { runId: String(committed.runId), replayed: true };
+      const purpose = await this.repository.broadcastPurpose(id);
+      if ((purpose === 'calendar') !== (source === 'calendar')) {
+        throw new ApiError(409, 'BROADCAST_SYSTEM', 'Отправка из календаря настраивается в блоке «Отправка из календаря»');
+      }
       const broadcast = await this.repository.getBroadcast(id);
       if (broadcast.archived) throw new ApiError(409, 'BROADCAST_ARCHIVED', 'Рассылка в архиве');
-      if (broadcast.version !== input.settingsVersion) throw new ApiError(409, 'BROADCAST_VERSION_CONFLICT', 'Рассылка уже изменена; обновите страницу');
+      const settingsVersion = params.settingsVersion ?? broadcast.version;
+      if (broadcast.version !== settingsVersion) throw new ApiError(409, 'BROADCAST_VERSION_CONFLICT', 'Рассылка уже изменена; обновите страницу');
       if (!broadcast.groupChatId) throw new ApiError(409, 'BROADCAST_DESTINATION_REQUIRED', 'Укажите группу WhatsApp перед отправкой');
+      // Refuse before rendering; the authoritative check repeats under the broadcast lock.
+      if (source === 'calendar') await this.repository.preflightCalendar();
       const now = new Date();
       const date = businessDate(now);
-      const targetDate = addDays(date, broadcast.orderDateOffsetDays);
+      const targetDate = params.targetDate ?? addDays(date, broadcast.orderDateOffsetDays);
       const snapshot = { ...(await this.worker.readSnapshot(targetDate)), cardsPerMessage: broadcast.cardsPerMessage };
       const caption = renderCaption(broadcast.captionTemplate, { now, targetDate });
       const rendered = snapshot.orders.length ? await this.worker.renderChecked(snapshot) : [];
@@ -106,7 +153,7 @@ export class BroadcastService {
           await assertRenderOwned();
           await assertStoreOwned();
           const outcome = await this.repository.createManualRun({
-            broadcastId: id, settingsVersion: input.settingsVersion, idempotencyKey: input.idempotencyKey, fingerprint, actor, requestId,
+            broadcastId: id, settingsVersion, idempotencyKey, fingerprint, actor, requestId, source,
             businessDate: date, targetDate, snapshot, images: toImages(rendered, files, caption), imageExpiresAt: expiresAt,
           }, assertStoreOwned);
           keep = !outcome.replayed;

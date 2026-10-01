@@ -2524,6 +2524,18 @@ probe_file() {
                            AND pg_get_constraintdef(oid) LIKE '%air%'
                            AND pg_get_constraintdef(oid) LIKE '%neutral%'
                       );" ;;
+    # 224: calendar send = one system broadcast (purpose calendar) + runs source with the widened target window.
+    224_whatsapp_calendar_send*) probe_all \
+      "$(q_col whatsapp_broadcasts purpose)" "$(q_col whatsapp_broadcasts calendar_min_interval_minutes)" \
+      "$(q_col whatsapp_broadcasts calendar_last_delivery_at)" "$(q_col whatsapp_broadcast_runs source)" \
+      "$(q_con_on whatsapp_broadcasts chk_whatsapp_broadcasts_purpose)" \
+      "$(q_con_on whatsapp_broadcasts chk_whatsapp_broadcasts_calendar_manual)" \
+      "$(q_con_on whatsapp_broadcasts chk_whatsapp_broadcasts_calendar_interval)" \
+      "$(q_con_on whatsapp_broadcast_runs chk_whatsapp_broadcast_runs_source)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='chk_whatsapp_broadcast_runs_target' AND pg_get_constraintdef(oid) LIKE '%calendar%');" \
+      "$(q_idx idx_whatsapp_broadcasts_calendar_active)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname='idx_whatsapp_broadcasts_name_active' AND indexdef LIKE '%purpose%');" \
+      "SELECT EXISTS (SELECT 1 FROM whatsapp_broadcasts WHERE purpose = 'calendar');" ;;
     223_user_preferences_ui_variant_workbench*) probe_all "$(q_col user_preferences ui_variant)" \
                      "SELECT EXISTS (
                         SELECT 1
@@ -2918,7 +2930,7 @@ verify_applied_effect() {
     205_warehouses_onec_key_required*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*)
+    209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)

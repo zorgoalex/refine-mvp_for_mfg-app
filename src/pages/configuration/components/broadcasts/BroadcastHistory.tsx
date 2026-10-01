@@ -32,7 +32,7 @@ const { Paragraph, Text } = Typography;
 const KIND_LABELS = { auto: 'Авто', manual: 'Вручную', retry: 'Повтор' } as const;
 
 export interface BroadcastHistoryProps {
-  broadcast: Broadcast;
+  broadcast: Pick<Broadcast, 'id'>;
   actorId: string;
   runtimeAvailable: boolean;
   refreshToken: number;

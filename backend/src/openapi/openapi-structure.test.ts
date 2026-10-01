@@ -71,6 +71,9 @@ describe('OpenAPI document structure', () => {
       ['/api/v1/whatsapp/broadcast-runs/{runId}', 'get'],
       ['/api/v1/whatsapp/broadcast-runs/{runId}/messages/{seq}/image', 'get'],
       ['/api/v1/whatsapp/broadcast-runs/{runId}/retry', 'post'],
+      ['/api/v1/whatsapp/calendar-send', 'get'],
+      ['/api/v1/whatsapp/calendar-send', 'put'],
+      ['/api/v1/whatsapp/calendar-send/runs', 'post'],
     ] as const;
 
     for (const [path, method] of broadcastPaths) {
@@ -87,6 +90,14 @@ describe('OpenAPI document structure', () => {
     expect(contract.paths['/api/v1/whatsapp/broadcast-runs/{runId}/messages/{seq}/image'].get.responses).toHaveProperty('410');
     expect(contract.paths['/api/v1/whatsapp/broadcast-runs/{runId}/retry'].post.requestBody.content['application/json'].schema.$ref).toBe('#/components/schemas/WhatsAppBroadcastRetryRequest');
     expect(contract.paths['/api/v1/whatsapp/broadcasts/legacy-digest-runs'].get.responses['200'].content['application/json'].schema.$ref).toBe('#/components/schemas/WhatsAppDailyDigestRunList');
+    // «Отправить в чат» from the calendar: closed request schemas and the frequency threshold.
+    const calendar = contract.paths['/api/v1/whatsapp/calendar-send/runs'].post;
+    expect(calendar.responses).toHaveProperty('202');
+    expect(calendar.responses['409'].description).toContain('BROADCAST_CALENDAR_COOLDOWN');
+    expect(contract.components.schemas.WhatsAppCalendarSendRunRequest.additionalProperties).toBe(false);
+    expect(contract.components.schemas.WhatsAppCalendarSendRunRequest.required).toEqual(['date', 'idempotencyKey']);
+    expect(contract.components.schemas.WhatsAppCalendarSendUpdate.additionalProperties).toBe(false);
+    expect(contract.components.schemas.WhatsAppCalendarSendUpdate.properties.minIntervalMinutes).toMatchObject({ minimum: 1, maximum: 1440 });
     expect(contract.components.schemas.WhatsAppBroadcastInput.properties.orderDateOffsetDays.maximum).toBe(14);
     expect(contract.components.schemas.WhatsAppBroadcastInput.properties.weekdays.items.maximum).toBe(7);
     expect(contract.components.schemas.WhatsAppBroadcastRun.properties.state.enum).toEqual(expect.arrayContaining(['preparing', 'unknown']));
