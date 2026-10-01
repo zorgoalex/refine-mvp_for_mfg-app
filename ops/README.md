@@ -378,7 +378,8 @@ sudo ops/setup-vps.sh --yes
 - `deploy-stack.sh` - creates missing templates and starts/rebuilds the stack.
 - `prune-old-images.sh` - removes old per-revision source images
   (`erp-backend`, `cad-service`, `erp-cnc-telegram-worker`) with plain
-  `docker rmi`; other images and dangling images are not touched. Keeps images
+  `docker rmi`; other images and dangling images are not touched unless
+  `--dangling` is given. Keeps images
   used by any container, images pinned before a deploy (daemon-side tag
   `<repo>:pinned-<epoch>-<image id>`, 7 days), the 3 newest per repository, images younger
   than 24h, tags referenced by `backend-release*.env` / `*release*.yml` in the
@@ -389,6 +390,20 @@ sudo ops/setup-vps.sh --yes
   pinning the running images fails; cleanup then runs best-effort and is
   skipped while any deploy holds the lock. Disable with `ERP_IMAGE_PRUNE=0`;
   supports `--dry-run`, `--keep N`, `--min-age-hours H`.
+  `--dangling` (opt-in; the deploy scripts above never pass it) also removes
+  untagged leftovers of the backend `build` stage (label
+  `app.erp.image-role=backend-build-stage`, set in `backend/Dockerfile`) that
+  are older than the age window and not used by any container. Legacy builds
+  (`DOCKER_BUILDKIT=0`) leave that stage image behind after every backend
+  build, about 0.3 GB each. Untagged images of other projects and images with
+  a registry digest are never touched. The step is skipped while any
+  `docker build`, `buildx build`, `compose build` or `compose up --build` client
+  runs on the host and stops as soon as one starts; a build that starts in the
+  moment before a removal and reuses that stage image as cache fails and has
+  to be rerun. Builds that hold the shared lock are never affected. On a host
+  that builds images outside these deploy scripts, schedule it, for example
+  every 6 hours:
+  `17 */6 * * * bash <repo>/ops/prune-old-images.sh --dangling >> <log> 2>&1`.
 - `smoke-vps.sh` - checks HTTPS health endpoints, Hasura CORS preflight, and
   deadline live-schema drift when deadlines are enabled.
 - `backup-prod-packet.sh` - default production/stage backup helper. It creates a

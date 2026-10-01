@@ -7,12 +7,13 @@
 # rollback window and removes the rest.
 #
 # Usage:
-#   ops/prune-old-images.sh [--keep N] [--min-age-hours H] [--root DIR] [--dry-run]
+#   ops/prune-old-images.sh [--keep N] [--min-age-hours H] [--root DIR] [--dry-run] [--dangling]
 #   ops/prune-old-images.sh --pin-running
 #
 # Only images of erp-backend, cad-service and erp-cnc-telegram-worker are
 # considered; everything else on the daemon (base images, other projects,
-# dangling images) is never touched. An image is KEPT when any of these holds:
+# dangling images) is never touched unless --dangling is given (see below).
+# An image is KEPT when any of these holds:
 #   - it is used by any container (running or stopped);
 #   - it carries a `<repo>:pinned-<epoch>-<id>` tag younger than
 #     ERP_IMAGE_PRUNE_PIN_DAYS (7). Deploy scripts run --pin-running before
@@ -26,6 +27,18 @@
 #   - one of its tags is `local` (compose templates reference cad-service:local).
 # Everything else is untagged with plain `docker rmi` (never -f), including
 # expired pin tags.
+#
+# --dangling (opt-in, used on the stage host): also remove untagged leftovers of
+# the backend `build` stage older than H hours. Legacy builds (DOCKER_BUILDKIT=0)
+# leave that intermediate stage image behind after every backend build; it is
+# marked with the label app.erp.image-role=backend-build-stage (backend/Dockerfile),
+# so untagged images of other projects are never touched. Images with a tag or a
+# registry digest, images used by any container and images younger than H hours
+# are kept. The step is skipped while any image build runs on the host and stops
+# as soon as one starts: a build may reuse an old stage image as cache. A build
+# that starts between that check and `docker rmi` and needs the removed image
+# fails and has to be rerun; deployed images are never affected (they are
+# tagged). It runs under the same lock as the tag cleanup.
 #
 # Concurrency: deploy scripts hold a shared flock on ERP_IMAGE_LOCK_FILE
 # (default /tmp/erp-images.lock, one per host/daemon) from build until the new
@@ -45,7 +58,9 @@ PIN_DAYS="${ERP_IMAGE_PRUNE_PIN_DAYS:-7}"
 LOCK_FILE="${ERP_IMAGE_LOCK_FILE:-/tmp/erp-images.lock}"
 DRY_RUN=0
 PIN_RUNNING=0
+DANGLING=0
 REPOS=(erp-backend cad-service erp-cnc-telegram-worker)
+BUILD_STAGE_ROLE=backend-build-stage
 
 log() { printf 'prune-old-images: %s\n' "$*"; }
 die() { printf 'prune-old-images: %s\n' "$*" >&2; exit 1; }
@@ -56,8 +71,9 @@ while [[ $# -gt 0 ]]; do
     --min-age-hours) MIN_AGE_HOURS="${2:?}"; shift 2 ;;
     --root) ROOT="${2:?}"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
+    --dangling) DANGLING=1; shift ;;
     --pin-running) PIN_RUNNING=1; shift ;;
-    -h|--help) sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,46p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -165,5 +181,52 @@ for repo in "${REPOS[@]}"; do
   done <<<"$rows"
   unset keep_reason
 done
+
+# True while any client builds an image on this host: docker build, buildx,
+# compose build or `compose up --build`. A false positive only skips cleanup.
+# -ww: an exported COLUMNS would otherwise truncate long command lines.
+build_in_progress() {
+  local procs
+  procs="$(ps -ww -eo args=)" || return 0
+  grep -qE '(^|/)docker(-buildx|-compose)?( [^ ]+)* (build|--build)( |$)' <<<"$procs"
+}
+
+if (( DANGLING )); then
+  if build_in_progress; then
+    log "an image build is running; skipping dangling cleanup"
+  else
+    dangling="$(docker images --filter dangling=true --filter "label=app.erp.image-role=$BUILD_STAGE_ROLE" \
+      --quiet --no-trunc)" || die "cannot list dangling images"
+    dangling="$(sort -u <<<"$dangling" | sed '/^$/d')"
+    removed_dangling=0
+    while IFS= read -r id; do
+      [[ -n "$id" ]] || continue
+      short="${id#sha256:}"
+      short="<none>@${short:0:12}"
+      # An image that vanished meanwhile is simply ignored.
+      meta="$(docker image inspect --format \
+        '{{.Created}}|{{len .RepoTags}}|{{len .RepoDigests}}|{{index .Config.Labels "app.erp.image-role"}}' \
+        "$id" 2>/dev/null)" || continue
+      IFS='|' read -r created_at tag_count digest_count role <<<"$meta"
+      created="$(date -d "$created_at" +%s)" || die "cannot parse the creation time of $short"
+      if [[ "$role" != "$BUILD_STAGE_ROLE" ]]; then log "keep   $short (not a backend build stage)"
+      elif [[ "$tag_count" != 0 ]]; then log "keep   $short (tagged meanwhile)"
+      elif [[ "$digest_count" != 0 ]]; then log "keep   $short (pulled from a registry)"
+      elif grep -qxF "$id" <<<"$used_ids"; then log "keep   $short (used by a container)"
+      elif (( created > min_age_cutoff )); then log "keep   $short (younger than ${MIN_AGE_HOURS}h)"
+      elif (( DRY_RUN )); then log "remove $short (dry-run)"
+      elif build_in_progress; then
+        log "an image build started; stopping dangling cleanup"
+        break
+      elif docker rmi "$id" >/dev/null 2>&1; then
+        log "remove $short"
+        removed_dangling=$((removed_dangling + 1))
+      else
+        log "skip   $short (docker rmi refused)"
+      fi
+    done <<<"$dangling"
+    (( DRY_RUN )) || log "removed $removed_dangling dangling image(s)"
+  fi
+fi
 
 if (( DRY_RUN )); then log "dry-run: nothing removed"; else log "removed $removed tag(s)"; fi

@@ -6,6 +6,11 @@ RUN npm ci
 
 FROM deps AS build
 
+# Marks the intermediate stage image that legacy builds (DOCKER_BUILDKIT=0)
+# leave untagged, so `ops/prune-old-images.sh --dangling` removes only these.
+# Labels do not carry over to the runtime stage (it starts from its own base).
+LABEL app.erp.image-role="backend-build-stage"
+
 COPY tsconfig.json ./
 COPY src ./src
 COPY assets ./assets

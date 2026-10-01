@@ -16,9 +16,10 @@ const iso = (secondsAgo: number) => new Date((now - secondsAgo) * 1000).toISOStr
 type Image = { ref: string; id: string; ageHours: number };
 type Container = { image: string; id: string; running: boolean };
 
-// Fake docker backed by files: images.tsv (ref, id, created ISO) and
-// containers.tsv (config image, image id, running 0/1). `tag` appends a row,
-// `rmi` deletes one; every call is appended to calls.log.
+// Fake docker backed by files: images.tsv (ref, id, created ISO),
+// dangling.tsv (id, created ISO, tag count, digest count, image-role label) and containers.tsv
+// (config image, image id, running 0/1). `tag` appends a row, `rmi` deletes
+// one; every call is appended to calls.log.
 const fakeDocker = `#!/usr/bin/env bash
 set -euo pipefail
 D="$FAKE_DOCKER_DIR"
@@ -40,9 +41,19 @@ case "$1" in
     done
     exit 0 ;;
   images)
+    if [ "$2" = --filter ]; then
+      [ "$3" = dangling=true ] && [ "$4" = --filter ] || exit 2
+      [ -f "$D/dangling-fails" ] && exit 1
+      awk -F'\\t' -v want="$5" '"label=app.erp.image-role=" $5 == want {print $1}' "$D/dangling.tsv"
+      exit 0
+    fi
     awk -F'\\t' -v repo="$2" '{ split($1, a, ":"); if (a[1] == repo) print $1 }' "$D/images.tsv"
     exit 0 ;;
   image)
+    if [ "$2" = inspect ] && [ "\${5#sha256:}" != "$5" ] && grep -q "^$5	" "$D/dangling.tsv"; then
+      awk -F'\\t' -v id="$5" '$1 == id {print $2 "|" $3 "|" $4 "|" $5}' "$D/dangling.tsv"
+      exit 0
+    fi
     if [ "$2" = inspect ]; then
       line="$(awk -F'\\t' -v ref="$5" '$1 == ref' "$D/images.tsv")"
       [ -n "$line" ] || exit 1
@@ -61,18 +72,39 @@ case "$1" in
     [ -f "$D/rmi-fails" ] && exit 1
     awk -F'\\t' -v ref="$2" '$1 != ref' "$D/images.tsv" > "$D/images.tmp"
     mv "$D/images.tmp" "$D/images.tsv"
+    awk -F'\\t' -v id="$2" '$1 != id' "$D/dangling.tsv" > "$D/dangling.tmp"
+    mv "$D/dangling.tmp" "$D/dangling.tsv"
+    # Interleaving: a build starts right after the first removal.
+    [ -f "$D/build-starts-on-rmi" ] && echo "docker build -t erp-backend:new /src/backend" > "$D/ps.txt"
     exit 0 ;;
 esac
 echo "unexpected docker call: $*" >&2
 exit 2
 `;
 
+// Fake ps: prints ps.txt (the host process list) or fails with ps-fails.
+const fakePs = `#!/usr/bin/env bash
+D="$FAKE_DOCKER_DIR"
+echo "ps $*" >> "$D/calls.log"
+[ -f "$D/ps-list-fails" ] && exit 1
+[ -f "$D/ps.txt" ] && cat "$D/ps.txt"
+exit 0
+`;
+
+// role: value of the app.erp.image-role label; the backend build stage by default.
+type Dangling = { id: string; ageHours: number; tags?: number; digests?: number; role?: string };
+
 const dirs: string[] = [];
 afterEach(() => {
   while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
 });
 
-function setup(images: Image[], containers: Container[], releaseFiles: Record<string, string> = {}) {
+function setup(
+  images: Image[],
+  containers: Container[],
+  releaseFiles: Record<string, string> = {},
+  dangling: Dangling[] = [],
+) {
   const dir = mkdtempSync(resolve(tmpdir(), 'prune-images-test-'));
   dirs.push(dir);
   const bin = resolve(dir, 'bin');
@@ -81,6 +113,14 @@ function setup(images: Image[], containers: Container[], releaseFiles: Record<st
   mkdirSync(root);
   writeFileSync(resolve(bin, 'docker'), fakeDocker);
   chmodSync(resolve(bin, 'docker'), 0o755);
+  writeFileSync(resolve(bin, 'ps'), fakePs);
+  chmodSync(resolve(bin, 'ps'), 0o755);
+  writeFileSync(
+    resolve(dir, 'dangling.tsv'),
+    dangling
+      .map((d) => `${d.id}\t${iso(d.ageHours * HOUR)}\t${d.tags ?? 0}\t${d.digests ?? 0}\t${d.role ?? 'backend-build-stage'}\n`)
+      .join(''),
+  );
   writeFileSync(
     resolve(dir, 'images.tsv'),
     images.map((i) => `${i.ref}\t${i.id}\t${iso(i.ageHours * HOUR)}\n`).join(''),
@@ -280,6 +320,166 @@ describe('prune-old-images.sh', () => {
   it('rejects invalid arguments', () => {
     const { dir, root } = setup([], []);
     expect(run(dir, ['--root', root, '--keep', 'x']).status).not.toBe(0);
+  });
+
+  it('--dangling removes old locally built untagged images and keeps young, pulled and used ones', () => {
+    const dangling: Dangling[] = [
+      { id: 'sha256:n1old', ageHours: 30 }, // stage leftover → removed
+      { id: 'sha256:n2old', ageHours: 200 }, // removed
+      { id: 'sha256:n3young', ageHours: 2 }, // younger than 24h → kept
+      { id: 'sha256:n4pulled', ageHours: 500, digests: 1 }, // pulled by digest → kept
+      { id: 'sha256:n5used', ageHours: 500 }, // stopped container → kept
+      { id: 'sha256:n6tagged', ageHours: 500, tags: 1 }, // tagged meanwhile → kept
+    ];
+    const images = [backend('g1', 1), backend('g2', 30), backend('g3', 40), backend('g4', 50)];
+    const { dir, root } = setup(images, [{ image: 'sha256:n5used', id: 'sha256:n5used', running: false }], {}, dangling);
+    const result = run(dir, ['--root', root, '--dangling']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.rmi.sort()).toEqual(['rmi erp-backend:g4', 'rmi sha256:n1old', 'rmi sha256:n2old']);
+    expect(result.calls.some((c) => / -f( |$)/.test(c) && c.startsWith('rmi'))).toBe(false);
+    expect(result.stdout).toContain('keep   <none>@n3young (younger than 24h)');
+    expect(result.stdout).toContain('keep   <none>@n4pulled (pulled from a registry)');
+    expect(result.stdout).toContain('keep   <none>@n5used (used by a container)');
+    expect(result.stdout).toContain('keep   <none>@n6tagged (tagged meanwhile)');
+    expect(result.stdout).toContain('removed 2 dangling image(s)');
+  });
+
+  it('--dangling never touches untagged images that are not backend build stages', () => {
+    const dangling: Dangling[] = [
+      { id: 'sha256:other', ageHours: 300, role: '' }, // another project's leftover → not even listed
+      { id: 'sha256:mine', ageHours: 300 },
+    ];
+    const { dir, root } = setup([], [], {}, dangling);
+    const result = run(dir, ['--root', root, '--dangling']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.rmi).toEqual(['rmi sha256:mine']);
+    expect(result.calls).toContain('images --filter dangling=true --filter label=app.erp.image-role=backend-build-stage --quiet --no-trunc');
+  });
+
+  it('--dangling re-checks the label on inspection', () => {
+    // A listing that ignored the label filter must still not lead to removal.
+    const { dir, root } = setup([], [], {}, [{ id: 'sha256:relabeled', ageHours: 300, role: 'backend-build-stage' }]);
+    writeFileSync(
+      resolve(dir, 'dangling.tsv'),
+      readFileSync(resolve(dir, 'dangling.tsv'), 'utf8').replace(/\tbackend-build-stage\n$/, '\tother-role\n'),
+    );
+    writeFileSync(resolve(dir, 'bin', 'docker'), fakeDocker.replace('"label=app.erp.image-role=" $5 == want', '1'));
+    const result = run(dir, ['--root', root, '--dangling']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.rmi).toEqual([]);
+    expect(result.stdout).toContain('keep   <none>@relabeled (not a backend build stage)');
+  });
+
+  it('--dangling stops as soon as an image build starts mid-cleanup', () => {
+    const dangling: Dangling[] = [
+      { id: 'sha256:a-first', ageHours: 300 },
+      { id: 'sha256:b-second', ageHours: 300 },
+    ];
+    const { dir, root } = setup([], [], {}, dangling);
+    writeFileSync(resolve(dir, 'build-starts-on-rmi'), '');
+    const result = run(dir, ['--root', root, '--dangling']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.rmi).toEqual(['rmi sha256:a-first']);
+    expect(result.stdout).toContain('an image build started; stopping dangling cleanup');
+    expect(result.stdout).toContain('removed 1 dangling image(s)');
+  });
+
+  it('backend Dockerfile labels the build stage only, not the runtime image', () => {
+    const dockerfile = readFileSync(resolve(__dirname, '../backend/Dockerfile'), 'utf8');
+    const buildAt = dockerfile.indexOf('FROM deps AS build');
+    const labelAt = dockerfile.indexOf('LABEL app.erp.image-role="backend-build-stage"');
+    const runtimeAt = dockerfile.indexOf('AS runtime');
+    expect(buildAt).toBeGreaterThan(0);
+    expect(labelAt).toBeGreaterThan(buildAt);
+    expect(labelAt).toBeLessThan(runtimeAt);
+    expect(dockerfile.slice(runtimeAt)).not.toContain('app.erp.image-role');
+    expect(dockerfile.slice(runtimeAt)).toMatch(/^AS runtime\n/);
+  });
+
+  it('never touches dangling images without --dangling', () => {
+    const { dir, root } = setup([backend('h1', 100)], [], {}, [{ id: 'sha256:old', ageHours: 300 }]);
+    const result = run(dir, ['--root', root, '--keep', '0', '--min-age-hours', '0']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.rmi).toEqual(['rmi erp-backend:h1']);
+    expect(result.calls.some((c) => c.startsWith('images --filter dangling=true') || c === 'ps -ww -eo args=')).toBe(false);
+  });
+
+  it.each([
+    'docker build --cpuset-cpus 1 -t erp-backend:abc /src/backend',
+    '/usr/bin/docker build -t x .',
+    '/usr/libexec/docker/cli-plugins/docker-buildx buildx build --load .',
+    'docker compose -f a.yml up -d --build backend',
+    '/usr/libexec/docker/cli-plugins/docker-compose compose build backend',
+  ])('skips dangling cleanup while an image build runs: %s', (proc) => {
+    const { dir, root } = setup([backend('k1', 100)], [], {}, [{ id: 'sha256:old', ageHours: 300 }]);
+    writeFileSync(resolve(dir, 'ps.txt'), `bash\n${proc}\nsleep 5\n`);
+    const result = run(dir, ['--root', root, '--keep', '0', '--dangling']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('an image build is running; skipping dangling cleanup');
+    expect(result.rmi).toEqual(['rmi erp-backend:k1']);
+  });
+
+  it('does not mistake other docker commands for a build', () => {
+    const { dir, root } = setup([], [], {}, [{ id: 'sha256:old', ageHours: 300 }]);
+    writeFileSync(
+      resolve(dir, 'ps.txt'),
+      ['docker builder prune -f', 'node stage-deploy.cjs build abc', 'docker logs -f backend', 'vim build'].join('\n') + '\n',
+    );
+    const result = run(dir, ['--root', root, '--dangling']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.rmi).toEqual(['rmi sha256:old']);
+  });
+
+  it('skips dangling cleanup when the process list cannot be read', () => {
+    const { dir, root } = setup([], [], {}, [{ id: 'sha256:old', ageHours: 300 }]);
+    writeFileSync(resolve(dir, 'ps-list-fails'), '');
+    const result = run(dir, ['--root', root, '--dangling']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('skipping dangling cleanup');
+    expect(result.rmi).toEqual([]);
+  });
+
+  it('fails closed when dangling images cannot be listed', () => {
+    const { dir, root } = setup([], [], {}, [{ id: 'sha256:old', ageHours: 300 }]);
+    writeFileSync(resolve(dir, 'dangling-fails'), '');
+    const result = run(dir, ['--root', root, '--dangling']);
+    expect(result.status).not.toBe(0);
+    expect(result.rmi).toEqual([]);
+  });
+
+  it('--dangling with --dry-run removes nothing', () => {
+    const { dir, root } = setup([], [], {}, [{ id: 'sha256:old', ageHours: 300 }]);
+    const result = run(dir, ['--root', root, '--dangling', '--dry-run']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.rmi).toEqual([]);
+    expect(result.stdout).toContain('remove <none>@old (dry-run)');
+  });
+
+  it('reports a refused dangling rmi and still exits 0', () => {
+    const { dir, root } = setup([], [], {}, [{ id: 'sha256:old', ageHours: 300 }]);
+    writeFileSync(resolve(dir, 'rmi-fails'), '');
+    const result = run(dir, ['--root', root, '--dangling']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('skip   <none>@old (docker rmi refused)');
+  });
+
+  it('skips dangling cleanup too while a deploy holds the shared image lock', async () => {
+    const { dir, root, lock } = setup([], [], {}, [{ id: 'sha256:old', ageHours: 300 }]);
+    const holder = spawn('flock', ['-s', lock, 'sleep', '5']);
+    try {
+      for (let i = 0; i < 50 && !existsSync(lock); i++) await new Promise((r) => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 100));
+      const result = run(dir, ['--root', root, '--dangling']);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain('skipping cleanup');
+      expect(result.rmi).toEqual([]);
+    } finally {
+      holder.kill();
+    }
+  });
+
+  it('deploy scripts never pass --dangling (production behaviour unchanged)', () => {
+    for (const source of [deploySource, upAllSource, setupSource]) expect(source).not.toContain('--dangling');
   });
 
   it('deploy-stack.sh pins under the shared lock before replacing containers and prunes after releasing it', () => {
