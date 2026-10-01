@@ -3,7 +3,7 @@ import { Table } from '../../../../ui/tooltipDelay';
 // Displays aggregated data for materials and films
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Row, Col, Space, Typography } from 'antd';
+import { Row, Col, Typography } from 'antd';
 import { useList, useOrderAsyncReadGuard } from '../../../../query/orderLifecycleQueries';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { formatNumber } from '../../../../utils/numberFormat';
@@ -16,33 +16,15 @@ import { computeOrderBathFilmUsage } from '../../../cut/cutFilmUsage';
 import { buildCutJobNameById, CutJobLinks } from '../../CutJobLinks';
 import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from '../../orderMaterialsSummary';
 import { businessOrderDetails } from '../../../../utils/orderDetailRows';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { inventoryApi } from '../../../../api/inventoryApi';
-import { featureFlags } from '../../../../config/featureFlags';
-import { filmStockAvailability, ORDER_FILM_STOCK_REFRESH, orderFilmStockKey } from '../../../inventory/filmStock';
+import { ORDER_FILM_COLUMN_WIDTH, OrderFilmStockCaption, orderFilmStockColumns } from '../../../inventory/orderFilmStockColumns';
+import { useOrderFilmStock } from '../../../inventory/useOrderFilmStock';
 
 const { Text } = Typography;
 
 export const OrderMaterialsTab: React.FC = () => {
   const { details, hdfDetails, header } = useOrderFormStore();
-  const inventoryViewAllowed = featureFlags.inventory && can('inventory.view');
-  const stockEnabled = inventoryViewAllowed && Number.isInteger(header.order_id) && (header.order_id ?? 0) > 0;
-  const filmStockQuery = useQuery({
-    queryKey: orderFilmStockKey(header.order_id),
-    queryFn: () => inventoryApi.orderFilmStock(header.order_id!),
-    enabled: stockEnabled,
-    ...ORDER_FILM_STOCK_REFRESH,
-  });
-  // «Обновить»: тот же ключ читает и таблица деталей — обновляются обе.
-  const queryClient = useQueryClient();
-  const refreshStock = () => queryClient.invalidateQueries({ queryKey: orderFilmStockKey(header.order_id) });
-  const stockUpdatedAt = filmStockQuery.dataUpdatedAt > 0
-    ? new Date(filmStockQuery.dataUpdatedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-    : null;
-  const stockByFilmId = useMemo(
-    () => new Map((filmStockQuery.data?.items ?? []).map((item) => [item.filmId, item])),
-    [filmStockQuery.data],
-  );
+  const filmStock = useOrderFilmStock(header.order_id);
+  const inventoryViewAllowed = filmStock.allowed;
   const businessDetails = useMemo(
     () => businessOrderDetails(details),
     [details],
@@ -217,14 +199,16 @@ export const OrderMaterialsTab: React.FC = () => {
       key: 'name',
     },
     {
-      title: 'Кол-во м²',
+      title: 'м²',
+      width: ORDER_FILM_COLUMN_WIDTH.number,
       dataIndex: 'totalArea',
       key: 'totalArea',
       align: 'right' as const,
       render: (value: number) => formatNumber(value, 2),
     },
     {
-      title: 'Кол-во деталей',
+      title: 'Детали',
+      width: ORDER_FILM_COLUMN_WIDTH.number,
       dataIndex: 'detailsCount',
       key: 'detailsCount',
       align: 'center' as const,
@@ -233,6 +217,7 @@ export const OrderMaterialsTab: React.FC = () => {
       title: 'Пог. м',
       dataIndex: 'bathLinearMeters',
       key: 'bathLinearMeters',
+      width: ORDER_FILM_COLUMN_WIDTH.number,
       align: 'right' as const,
       render: (value: number) => value > 0 ? formatNumber(value, 1) : '—',
     },
@@ -240,6 +225,7 @@ export const OrderMaterialsTab: React.FC = () => {
       title: 'Листы',
       dataIndex: 'bathSheets',
       key: 'bathSheets',
+      width: ORDER_FILM_COLUMN_WIDTH.sheets,
       align: 'center' as const,
       render: (value: number) => value > 0 ? value : '—',
     },
@@ -247,26 +233,12 @@ export const OrderMaterialsTab: React.FC = () => {
       title: 'Раскрои',
       dataIndex: 'cutJobIds',
       key: 'cutJobIds',
+      width: ORDER_FILM_COLUMN_WIDTH.cutJobs,
       render: (value: number[]) => (
-        <CutJobLinks cutJobIds={value} cutJobNameById={cutJobNameById} />
+        <CutJobLinks compact cutJobIds={value} cutJobNameById={cutJobNameById} />
       ),
     },
-    ...(inventoryViewAllowed ? [
-      {
-        title: 'На складе, пог. м',
-        key: 'stockLm',
-        align: 'right' as const,
-        render: (_: unknown, row: (typeof filmMaterialRows)[number]) => {
-          const item = row.filmId === null ? undefined : stockByFilmId.get(row.filmId);
-          return item?.stockLm == null ? '—' : formatNumber(item.stockLm, 2);
-        },
-      },
-      {
-        title: 'Хватает',
-        key: 'stockStatus',
-        render: (_: unknown, row: (typeof filmMaterialRows)[number]) => filmStockAvailability(row.filmId === null ? undefined : stockByFilmId.get(row.filmId)?.status),
-      },
-    ] : []),
+    ...(inventoryViewAllowed ? orderFilmStockColumns<(typeof filmMaterialRows)[number]>(filmStock.byFilmId) : []),
   ];
 
   return (
@@ -282,13 +254,7 @@ export const OrderMaterialsTab: React.FC = () => {
             <Text strong style={{ fontSize: 14 }}>
               Пленка
             </Text>
-            {inventoryViewAllowed && <div><Space size={8} wrap>
-              <Text type="secondary">Остаток на складе, без резерва{stockUpdatedAt ? ` · обновлено в ${stockUpdatedAt}` : ''}</Text>
-              {stockEnabled
-                ? <Button size="small" loading={filmStockQuery.isFetching} onClick={() => void refreshStock()}>Обновить остатки</Button>
-                : <Text type="secondary">· появится после сохранения заказа</Text>}
-              {filmStockQuery.isError && <Text type="danger">не удалось получить остатки</Text>}
-            </Space></div>}
+            {inventoryViewAllowed && <div><OrderFilmStockCaption {...filmStock} /></div>}
           </div>
           <Table
             dataSource={filmMaterialRows}
@@ -298,7 +264,7 @@ export const OrderMaterialsTab: React.FC = () => {
             pagination={false}
             bordered
             loading={cutJobsLoading}
-            scroll={{ x: inventoryViewAllowed ? 900 : 680 }}
+            tableLayout="fixed"
             locale={{
               emptyText: cutViewAllowed ? 'Нет данных по пленке' : 'Нет доступа к данным раскроя',
             }}
