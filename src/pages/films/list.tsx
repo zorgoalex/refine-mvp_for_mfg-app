@@ -235,19 +235,24 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column dataIndex="film_id" title="id" sorter width={WIDTH.id} />
         <Table.Column dataIndex="sort_order" title="Порядок" sorter width={WIDTH.sort} />
         <Table.Column dataIndex="film_name" title="Название" sorter render={(value: string) => <span className="films-list__name">{value}</span>} />
-        <Table.Column dataIndex="nomenclature_type" title="Тип номенклатуры" width={WIDTH.nomenclatureType} />
-        <Table.Column dataIndex="nomenclature_category" title="Категория" width={WIDTH.category} render={(value: string | null) => <span className="films-list__category">{value}</span>} />
+        <Table.Column dataIndex="nomenclature_type" title="Тип номенклатуры" width={WIDTH.nomenclatureType} ellipsis />
+        <Table.Column dataIndex="nomenclature_category" title="Категория" width={WIDTH.category} ellipsis />
         <Table.Column
           dataIndex="note"
           title="Примечание"
           width={WIDTH.note}
-          ellipsis={{ showTitle: true }}
-          render={(value: string | null) => (value ? value.replace(/\s*\n\s*/g, ' · ') : '')}
+          render={(value: string | null) => {
+            if (!value) return '';
+            const text = value.replace(/\s*\n\s*/g, ' · ');
+            // Две строки, остальное — «…»; полный текст — в подсказке.
+            return <Tooltip title={text}><span className="films-list__note">{text}</span></Tooltip>;
+          }}
         />
         <Table.Column
           dataIndex="film_type_id"
           title="Тип плёнки"
           width={WIDTH.filmType}
+          ellipsis
           render={(_, record: any) =>
             typeMap[record?.film_type_id] ?? record?.film_type_id
           }
@@ -256,6 +261,7 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
           dataIndex="vendor_id"
           title="Поставщик плёнки"
           width={WIDTH.vendor}
+          ellipsis
           render={(_, record: any) =>
             vendorMap[record?.vendor_id] ?? record?.vendor_id
           }

@@ -34,7 +34,11 @@ describe('film catalog screens guard', () => {
     expect(list).toContain('tableLayout="fixed"');
     expect(css).toMatch(/\.films-list__head \{\s*position: sticky;/);
     expect(css).toMatch(/\.ant-table-pagination\.ant-pagination \{\s*position: sticky;\s*bottom: var\(--films-list-bottom, 0px\);/);
-    expect(css).toContain('.films-list__name { font-size: 0.75em;');
+    // Один размер шрифта во всех ячейках: название не уменьшается и не обрезается, примечание — две строки.
+    expect(css).not.toContain('font-size: 0.75em');
+    expect(css).toMatch(/\.films-list__note \{[^}]*-webkit-line-clamp: 2;[^}]*overflow: hidden;/);
+    expect(css).toMatch(/\.films-list__name \{ overflow-wrap: anywhere;/);
+    expect(list).toContain('<Tooltip title={text}><span className="films-list__note">{text}</span></Tooltip>');
     expect(list).toContain('<Tooltip title={value}><span className="films-list__key">{value}</span></Tooltip>');
     expect(css).toMatch(/\.films-list__key \{[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/);
     expect(list).toContain('note: 110');
