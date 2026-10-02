@@ -35,17 +35,27 @@ export interface DocumentEntityConfig {
   stockFlagField: string | null;
 }
 
+/**
+ * Оплаты закупок — только операции закупок, явно (план 2026-10-02-onec-customer-documents-plan.md §3.1, шаг 0): любая
+ * другая операция (в т.ч. возврат покупателю `Покупателю`) — `UNKNOWN_OPERATION_KIND`, а не оплата поставщику; иначе
+ * возвраты, выгруженные агентом, стали бы распределяемыми оплатами закупок.
+ */
+const PAYMENT_OUTFLOW_KINDS = {
+  cash: { Поставщику: 'cash_outflow', НаРасходы: 'cash_outflow', Прочее: 'cash_outflow' },
+  bank: { Поставщику: 'bank_outflow', НаРасходы: 'bank_outflow', Прочее: 'bank_outflow' },
+} as const satisfies Record<string, Readonly<Record<string, OnecDocKind>>>;
+
 export const DOCUMENT_ENTITIES: Readonly<Record<string, DocumentEntityConfig>> = {
   doc_purchase_receipts: {
     kinds: { '*': 'purchase_receipt' }, linesField: 'Запасы', currencyField: 'ВалютаДокумента_Key',
     headerWarehouseField: 'СтруктурнаяЕдиница_Key', lineWarehouseField: 'СтруктурнаяЕдиница_Key', destinationWarehouseField: null, stockFlagField: null,
   },
   doc_cash_outflows: {
-    kinds: { '*': 'cash_outflow' }, linesField: null, currencyField: 'ВалютаДенежныхСредств_Key',
+    kinds: PAYMENT_OUTFLOW_KINDS.cash, linesField: null, currencyField: 'ВалютаДенежныхСредств_Key',
     headerWarehouseField: null, lineWarehouseField: null, destinationWarehouseField: null, stockFlagField: null,
   },
   doc_bank_outflows: {
-    kinds: { '*': 'bank_outflow' }, linesField: null, currencyField: 'ВалютаДенежныхСредств_Key',
+    kinds: PAYMENT_OUTFLOW_KINDS.bank, linesField: null, currencyField: 'ВалютаДенежныхСредств_Key',
     headerWarehouseField: null, lineWarehouseField: null, destinationWarehouseField: null, stockFlagField: null,
   },
   doc_sales_shipments: {
@@ -162,6 +172,12 @@ const text = (value: unknown): string | null => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
+/** Вид по `ВидОперации`: только собственные ключи карты (`constructor`, `toString` — неизвестная операция, code review step 0). */
+function kindOf(config: DocumentEntityConfig, operationKind: string | null): OnecDocKind | undefined {
+  if (Object.prototype.hasOwnProperty.call(config.kinds, '*')) return config.kinds['*'];
+  return operationKind !== null && Object.prototype.hasOwnProperty.call(config.kinds, operationKind) ? config.kinds[operationKind] : undefined;
+}
+
 /**
  * Вид документа по данным копии без разбора остального (gate действующих видов — до валидации, code review R2):
  * `{ ok, docKind, refKey }` или код ошибки ключа/вида операции.
@@ -171,7 +187,7 @@ export function documentKindOf(config: DocumentEntityConfig, data: Record<string
   const refKey = ref(data.Ref_Key);
   if (!refKey) return { ok: false, code: 'INVALID_REF_KEY' };
   const operationKind = text(data.ВидОперации);
-  const docKind = config.kinds['*'] ?? (operationKind ? config.kinds[operationKind] : undefined);
+  const docKind = kindOf(config, operationKind);
   return docKind ? { ok: true, docKind, refKey } : { ok: false, code: 'UNKNOWN_OPERATION_KIND' };
 }
 
@@ -182,7 +198,7 @@ export function parseDocument(config: DocumentEntityConfig, data: Record<string,
   const number = text(data.Number);
   if (!number || number.length > 64) return { ok: false, code: 'INVALID_NUMBER' };
   const operationKind = text(data.ВидОперации);
-  const docKind = config.kinds['*'] ?? (operationKind ? config.kinds[operationKind] : undefined);
+  const docKind = kindOf(config, operationKind);
   if (!docKind) return { ok: false, code: 'UNKNOWN_OPERATION_KIND' };
   const date = typeof data.Date === 'string' ? data.Date.slice(0, 10) : '';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, code: 'INVALID_DATE' };

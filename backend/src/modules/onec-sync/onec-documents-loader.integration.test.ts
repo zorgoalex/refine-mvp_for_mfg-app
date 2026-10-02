@@ -65,7 +65,7 @@ describe.skipIf(!url)('1C documents loader — real PostgreSQL', { timeout: 1200
   const payment = (key: string, amount: number, extra: Record<string, unknown> = {}) =>
     mirror('doc_cash_outflows', key, {
       Ref_Key: key, Number: `${tag}-P${key.slice(0, 5)}`, Date: '2024-02-01T09:00:00', Posted: true, DeletionMark: false,
-      Контрагент_Key: CP, ВалютаДенежныхСредств_Key: CUR, СуммаДокумента: amount, ...extra,
+      ВидОперации: 'Поставщику', Контрагент_Key: CP, ВалютаДенежныхСредств_Key: CUR, СуммаДокумента: amount, ...extra,
     });
   const doc = async (key: string) =>
     (await watcher.query(
@@ -327,6 +327,18 @@ describe.skipIf(!url)('1C documents loader — real PostgreSQL', { timeout: 1200
     expect((await doc(JAN)).supplier_id).toBe('32001');
     const keys = (await watcher.query(`SELECT supplier_key, to_char(first_seen_at, 'YYYY-MM-DD') AS first_seen FROM resource_suppliers WHERE resource_kind = 'film' AND film_id = $1`, [filmId])).rows;
     expect(keys).toEqual([{ supplier_key: `c:${CP}`, first_seen: '2024-01-15' }]);
+  });
+
+  it('a refund to a customer in the payments mirror is never loaded as a supplier payment (plan 2026-10-02 §3.1, step 0)', async () => {
+    const REFUND = K();
+    await payment(REFUND, 70, { ВидОперации: 'Покупателю' });
+    try {
+      expect(await loader.run(trigger('doc_cash_outflows'))).toMatchObject({ status: 'failed', result: { created: 0, invalid: { UNKNOWN_OPERATION_KIND: 1 } } });
+      expect(await doc(REFUND)).toBeUndefined();
+    } finally {
+      await watcher.query('DELETE FROM onec_etl_mirror_rows WHERE source_id = $1 AND entity_code = $2 AND source_key = $3', [source, 'doc_cash_outflows', REFUND]);
+    }
+    expect(await loader.run(trigger('doc_cash_outflows'))).toMatchObject({ status: 'succeeded', result: { invalid: {} } });
   });
 
   it('an unmapped currency fails the pass with an alert; mapping it fixes the next pass', async () => {

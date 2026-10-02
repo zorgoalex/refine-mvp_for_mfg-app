@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildTarget, decimalLexeme, DOCUMENT_ENTITIES, effectiveDocKinds, entityDocKinds, parseDocument, type ReferenceData } from './onec-document-normalizer';
+import { buildTarget, decimalLexeme, documentKindOf, DOCUMENT_ENTITIES, effectiveDocKinds, entityDocKinds, parseDocument, type ReferenceData } from './onec-document-normalizer';
 
 const REF = '11111111-1111-1111-1111-111111111111';
 const CUR = '22222222-2222-2222-2222-222222222222';
@@ -38,9 +38,24 @@ describe('1C document normalizer', () => {
 
   it('turns a payment into one document-total line with the document amount', () => {
     const parsed = parseDocument(DOCUMENT_ENTITIES.doc_cash_outflows, { Ref_Key: REF, Number: 'К-1', Date: '2024-01-02T00:00:00', Posted: true,
-      DeletionMark: false, ВалютаДенежныхСредств_Key: CUR, СуммаДокумента: 50 });
+      DeletionMark: false, ВидОперации: 'Поставщику', ВалютаДенежныхСредств_Key: CUR, СуммаДокумента: 50 });
     expect(parsed.ok && parsed.lines).toEqual([{ lineNo: 1, nomenclatureRefKey: null, quantity: '0.000', unitRefKey: null, price: null,
       amount: '50.00', onecOrderRefKey: null, isDocumentTotal: true, warehouseRefKey: null, isStockItem: true, unitIsPackage: false }]);
+  });
+
+  it('payments: only procurement operations are outflows; a refund to a customer or a missing operation is refused', () => {
+    const payment = (extra: Record<string, unknown>) => ({ Ref_Key: REF, Number: 'К-1', Date: '2024-01-02T00:00:00', Posted: true,
+      DeletionMark: false, ВалютаДенежныхСредств_Key: CUR, СуммаДокумента: 50, ...extra });
+    for (const [entity, kind] of [['doc_cash_outflows', 'cash_outflow'], ['doc_bank_outflows', 'bank_outflow']] as const) {
+      for (const operation of ['Поставщику', 'НаРасходы', 'Прочее']) {
+        expect(parseDocument(DOCUMENT_ENTITIES[entity], payment({ ВидОперации: operation }))).toMatchObject({ ok: true, header: { docKind: kind } });
+      }
+      expect(entityDocKinds(DOCUMENT_ENTITIES[entity])).toEqual([kind]);
+      for (const extra of [{ ВидОперации: 'Покупателю' }, { ВидОперации: 'ВозвратПокупателю' }, { ВидОперации: 'constructor' }, { ВидОперации: 'toString' }, {}]) {
+        expect(parseDocument(DOCUMENT_ENTITIES[entity], payment(extra))).toEqual({ ok: false, code: 'UNKNOWN_OPERATION_KIND' });
+        expect(documentKindOf(DOCUMENT_ENTITIES[entity], payment(extra))).toEqual({ ok: false, code: 'UNKNOWN_OPERATION_KIND' });
+      }
+    }
   });
 
   it('refuses malformed documents with a code', () => {
