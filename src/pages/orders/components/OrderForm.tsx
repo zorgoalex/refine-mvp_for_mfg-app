@@ -6,7 +6,7 @@ import { Tooltip } from '../../../ui/tooltipDelay';
 import React, { CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Alert, Card, Tabs, Button, Empty, Space, notification, Modal, Form, Select, Tag, Popconfirm, message } from 'antd';
-import { SaveOutlined, CloseOutlined, EyeOutlined, DeleteOutlined } from '@ant-design/icons';
+import { SaveOutlined, CloseOutlined, EyeOutlined, DeleteOutlined, RightOutlined } from '@ant-design/icons';
 import { useNavigation, useParsed } from '@refinedev/core';
 import { toClientKey } from '../../../api/mappers/orderMapper';
 import { orderSaveRetryKey } from '../../../utils/orderSaveRetryKey';
@@ -110,6 +110,8 @@ import {
   readAddPaymentIntent,
 } from '../orderPaymentIntent';
 import { OperationalPageHeader, useOperationalUi } from '../../../ui-operational/OperationalPrimitives';
+import { useOptionalUiVariant } from '../../../ui-variant/UiVariantProvider';
+import { useWorkspaceChromeBottom } from '../useWorkspaceChromeBottom';
 import {
   appendOrderDetailEmptyTailRowsForDisplay,
   businessOrderDetails,
@@ -152,8 +154,13 @@ interface BazisDraftRuntime {
 }
 
 const ORDER_FORM_COMPACT_HEADER_STICKY_HEIGHT = 40;
+// «NewLine» hybrid form: these tabs become always-open sections of one page, the rest are folds.
+const HYBRID_MAIN_SECTION_KEYS: readonly string[] = ['basic', 'dates', 'details', 'services', 'finance'];
+const HYBRID_MAIN_SECTION_ORDER: readonly string[] = ['basic', 'details', 'services', 'finance'];
 
 type OrderFormStickyStyle = CSSProperties & {
+  '--wb-order-sticky-top': string;
+  '--wb-order-bar-height': string;
   '--order-show-sticky-top': string;
   '--order-show-compact-header-height': string;
   '--order-show-tabs-shell-height': string;
@@ -235,6 +242,11 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   const location = useLocation();
   const navigate = useNavigate();
   const isOperational = useOperationalUi();
+  // «NewLine»: own page head, compact bar while scrolling and underline tabs; the form itself is the same.
+  const uiVariant = useOptionalUiVariant()?.variant;
+  const isWorkbench = !isOperational && uiVariant === 'workbench';
+  const workbenchChromeBottom = useWorkspaceChromeBottom();
+  const [workbenchHeadHidden, setWorkbenchHeadHidden] = useState(false);
   const isMobile = useIsMobile();
   const workspaceTabsHeight = useWorkspaceTabsHeight();
   const orderKey = mode === 'create' ? NEW_ORDER_KEY : String(orderId);
@@ -329,18 +341,21 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     };
   }, []);
   const orderFormStickyStyle = useMemo<OrderFormStickyStyle>(() => ({
+    '--wb-order-sticky-top': `${workbenchChromeBottom}px`,
+    '--wb-order-bar-height': '52px',
     '--order-show-sticky-top': `${workspaceTabsHeight}px`,
     '--order-show-compact-header-height': `${ORDER_FORM_COMPACT_HEADER_STICKY_HEIGHT}px`,
     '--order-show-tabs-shell-height': '0px',
     '--order-show-details-toolbar-height': '0px',
     '--order-show-table-header-top': '0px',
-  }), [workspaceTabsHeight]);
+  }), [workbenchChromeBottom, workspaceTabsHeight]);
   const orderFormPageClassName = useMemo(() => [
     'order-show-page',
     'order-form-sticky-page',
     isOperational ? 'order-show-page--operational' : '',
     orderFormStickyEnabled ? 'order-show-page--sticky-enabled' : '',
-  ].filter(Boolean).join(' '), [isOperational, orderFormStickyEnabled]);
+    isWorkbench ? 'order-form-page--workbench' : '',
+  ].filter(Boolean).join(' '), [isOperational, isWorkbench, orderFormStickyEnabled]);
 
   const {
     defaultOrderStatus,
@@ -465,6 +480,40 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       ? restoredOrderFormCheckpoint.activeTab
       : activeTabFromUrl
   ));
+  // «NewLine» hybrid layout: the main sections live on one page and are always active;
+  // the rare ones are folds that start reading only when opened.
+  const [hybridOpenSections, setHybridOpenSections] = useState<string[]>([]);
+  const hybridSectionRefs = useRef<Record<string, HTMLElement | null>>({});
+  const hybridInitialTabRef = useRef(true);
+  const isFormSectionActive = (key: string) => (
+    isWorkbench
+      ? HYBRID_MAIN_SECTION_KEYS.includes(key) || hybridOpenSections.includes(key)
+      : activeTab === key
+  );
+  const scrollToFormSection = useCallback((key: string) => {
+    window.requestAnimationFrame(() => {
+      hybridSectionRefs.current[key]?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    });
+  }, []);
+  const goToFormSection = useCallback((key: string) => {
+    if (!HYBRID_MAIN_SECTION_KEYS.includes(key)) {
+      setHybridOpenSections((current) => (current.includes(key) ? current : [...current, key]));
+    }
+    setActiveTab(key);
+    scrollToFormSection(key);
+  }, [scrollToFormSection]);
+  // every existing jump (`?tab=finance`, save validation → details, Ctrl+Tab) lands on its section
+  useEffect(() => {
+    if (!isWorkbench) return;
+    if (!HYBRID_MAIN_SECTION_KEYS.includes(activeTab)) {
+      setHybridOpenSections((current) => (current.includes(activeTab) ? current : [...current, activeTab]));
+    }
+    const initial = hybridInitialTabRef.current;
+    hybridInitialTabRef.current = false;
+    // the form opens at its top; only an explicit `?tab=` deep link scrolls on open
+    if (initial && !new URLSearchParams(window.location.search).get('tab')) return;
+    scrollToFormSection(activeTab);
+  }, [activeTab, isWorkbench, scrollToFormSection]);
   useWorkspaceCheckpointAdapter(tabKey, 'order-form', {
     capture: () => ({
       activeTab,
@@ -1702,7 +1751,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         key: 'basic',
         label: isOperational ? 'Обзор' : 'Основная информация',
         children: (
-          <OrderLifecycleReadSurface active={activeTab === 'basic'}>
+          <OrderLifecycleReadSurface active={isFormSectionActive('basic')}>
             <Space direction="vertical" style={{ width: '100%' }} size="large">
               <OrderBasicInfo
                 clientLocked={bazisDraftClientLocked}
@@ -1717,7 +1766,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         key: 'details',
         label: isOperational ? 'Состав' : 'Детали заказа',
         children: (
-          <OrderLifecycleReadSurface active={activeTab === 'details'}>
+          <OrderLifecycleReadSurface active={isFormSectionActive('details')}>
             <div ref={orderFormDetailsBlockRef} className="order-form-details-section">
               <OrderSaveValidationContext.Provider value={saveValidation}>
                 <OrderDetailsTab
@@ -1733,18 +1782,18 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       {
         key: 'hdf',
         label: 'ХДФ',
-        children: <OrderLifecycleReadSurface active={activeTab === 'hdf'}><OrderHdfTab onSave={handleSave} isSaving={isSaving} /></OrderLifecycleReadSurface>,
+        children: <OrderLifecycleReadSurface active={isFormSectionActive('hdf')}><OrderHdfTab onSave={handleSave} isSaving={isSaving} /></OrderLifecycleReadSurface>,
       },
       {
         key: 'dates',
         label: isOperational ? 'Логистика' : 'Даты',
-        children: <OrderLifecycleReadSurface active={activeTab === 'dates'}><OrderDatesSection /></OrderLifecycleReadSurface>,
+        children: <OrderLifecycleReadSurface active={isFormSectionActive('dates')}><OrderDatesSection /></OrderLifecycleReadSurface>,
       },
       {
         key: 'finance',
         label: 'Финансы',
         children: (
-          <OrderLifecycleReadSurface active={activeTab === 'finance'}>
+          <OrderLifecycleReadSurface active={isFormSectionActive('finance')}>
             <Space direction="vertical" style={{ width: '100%' }} size="large">
               <OrderFinanceSection />
               <OrderPaymentsTab ref={paymentsTabRef} />
@@ -1758,7 +1807,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
               key: 'cut',
               label: 'Раскрой',
               children: header.order_id ? (
-                <OrderLifecycleReadSurface active={activeTab === 'cut'}>
+                <OrderLifecycleReadSurface active={isFormSectionActive('cut')}>
                   <CutPage embeddedOrderId={header.order_id} />
                 </OrderLifecycleReadSurface>
               ) : null,
@@ -1784,7 +1833,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         key: 'requirements',
         label: 'Материалы',
         children: (
-          <OrderLifecycleReadSurface active={activeTab === 'requirements'}>
+          <OrderLifecycleReadSurface active={isFormSectionActive('requirements')}>
             <OrderMaterialsTab />
           </OrderLifecycleReadSurface>
         ),
@@ -1794,7 +1843,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         key: 'additional',
         label: isOperational ? 'Бирки' : 'Дополнительно',
         children: (
-          <OrderLifecycleReadSurface active={activeTab === 'additional'}>
+          <OrderLifecycleReadSurface active={isFormSectionActive('additional')}>
             {isOperational ? (
               <Space direction="vertical" style={{ width: '100%' }} size="large">
                 <OrderTelegramScreenshots orderId={header.order_id ?? orderId} />
@@ -1838,6 +1887,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     [
       mode,
       activeTab,
+      hybridOpenSections,
+      isWorkbench,
       header.order_id,
       header.project_code,
       header.project_id,
@@ -1899,7 +1950,9 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     const update = () => {
       const block = orderFormDetailsBlockRef.current;
       const availableHeight = window.innerHeight - workspaceTabsHeight;
+      // «NewLine» has its own compact bar; the legacy sticky stack stays off there.
       const next =
+        !isWorkbench &&
         !isMobile &&
         activeTab === 'details' &&
         details.length > 0 &&
@@ -1916,7 +1969,31 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       window.removeEventListener('resize', update);
       ro?.disconnect();
     };
-  }, [activeTab, details.length, isMobile, workspaceTabsHeight]);
+  }, [activeTab, details.length, isMobile, isWorkbench, workspaceTabsHeight]);
+
+  // «NewLine»: the compact bar appears once the page head has scrolled under the app chrome.
+  useEffect(() => {
+    if (!isWorkbench) return;
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const head = orderFormStickySentinelRef.current?.parentElement?.querySelector('.wb-order-head__top');
+      const next = head ? head.getBoundingClientRect().bottom < workbenchChromeBottom : false;
+      setWorkbenchHeadHidden((prev) => (prev === next ? prev : next));
+    };
+    const schedule = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(update);
+    };
+    update();
+    window.addEventListener('scroll', schedule, { passive: true, capture: true });
+    window.addEventListener('resize', schedule);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', schedule, { capture: true });
+      window.removeEventListener('resize', schedule);
+    };
+  }, [isWorkbench, orderKey, workbenchChromeBottom]);
 
   useEffect(() => {
     const update = () => {
@@ -2139,14 +2216,27 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     );
   }
 
-  return (
-    <OrderDraftStoreProvider orderKey={orderKey}>
-    <Card
-      title={cardTitle}
-      extra={
+  const hybridItemByKey = new Map(headerTabItems.map((item) => [String(item.key), item]));
+  const hybridSectionTitle = (key: string, label: React.ReactNode): React.ReactNode => (
+    key === 'basic' ? 'Клиент и срок' : key === 'services' ? 'Услуги и товары' : label
+  );
+  const hybridAnchors = [
+    ...HYBRID_MAIN_SECTION_ORDER
+      .filter((key) => hybridItemByKey.has(key))
+      .map((key) => ({
+        key,
+        label: hybridSectionTitle(key, hybridItemByKey.get(key)!.label),
+        disabled: false,
+      })),
+    ...headerTabItems
+      .filter((item) => !HYBRID_MAIN_SECTION_KEYS.includes(String(item.key)))
+      .map((item) => ({ key: String(item.key), label: item.label, disabled: Boolean(item.disabled) })),
+  ];
+  const formActions = (
         <Space>
           {mode === 'edit' && orderId && (
             <Button
+              className="order-form-action order-form-action--view"
               icon={<EyeOutlined />}
               onClick={() => show('orders_view', orderId)}
               style={{ height: '27px', fontSize: '13px', padding: '0 12px' }}
@@ -2188,6 +2278,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
             >
               <Tooltip title="Удалить заказ">
                 <Button
+                  className="order-form-action order-form-action--delete"
                   danger
                   icon={<DeleteOutlined />}
                   disabled={isSaving}
@@ -2197,6 +2288,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
             </Popconfirm>
           ) : null}
           <Button
+            className="order-form-action order-form-action--save"
             type={(isDirty || isDetailEditing || isPaymentEditing) ? "primary" : "default"}
             icon={<SaveOutlined />}
             onClick={handleSave}
@@ -2207,6 +2299,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
             Сохранить
           </Button>
           <Button
+            className="order-form-action order-form-action--close"
             icon={<CloseOutlined />}
             onClick={handleCancel}
             disabled={isSaving}
@@ -2215,7 +2308,30 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
             Закрыть
           </Button>
         </Space>
-      }
+  );
+  const formHasUnsavedChanges = isDirty || isDetailEditing || isPaymentEditing;
+  // «NewLine» compact bar: the two actions needed while editing a long details list.
+  const workbenchCompactActions = (
+    <>
+      <Button icon={<CloseOutlined />} onClick={handleCancel} disabled={isSaving}>Закрыть</Button>
+      <Button
+        type={formHasUnsavedChanges ? 'primary' : 'default'}
+        icon={<SaveOutlined />}
+        onClick={handleSave}
+        loading={isSaving}
+        disabled={!formHasUnsavedChanges}
+      >
+        Сохранить
+      </Button>
+    </>
+  );
+
+  return (
+    <OrderDraftStoreProvider orderKey={orderKey}>
+    <Card
+      className={isWorkbench ? 'order-form-card order-form-card--workbench' : 'order-form-card'}
+      title={isWorkbench ? undefined : cardTitle}
+      extra={isWorkbench ? undefined : formActions}
     >
       <OrderFormProgressiveSurface
         state={formProgressiveLoading}
@@ -2225,6 +2341,97 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         {/* Read-only header with order summary (both create and edit modes) */}
         <div className={orderFormPageClassName} style={orderFormStickyStyle}>
         <div ref={orderFormStickySentinelRef} className="order-show-sticky-sentinel" aria-hidden />
+        {isWorkbench ? (
+          <>
+            <nav className="wb-order-crumbs" aria-label="Хлебные крошки">
+              <Link to="/orders">Заказы</Link>
+              <RightOutlined aria-hidden />
+              {mode === 'edit' && orderId ? (
+                <>
+                  <Link to={`/orders/show/${orderId}`}>{orderName || orderId}</Link>
+                  <RightOutlined aria-hidden />
+                  <span>Редактирование</span>
+                </>
+              ) : (
+                <span>Новый заказ</span>
+              )}
+            </nav>
+            <div className="wb-order-bar-slot" data-on={workbenchHeadHidden} aria-hidden={!workbenchHeadHidden}>
+              <OrderHeaderSummary compactSticky dirty={formHasUnsavedChanges} compactActions={workbenchCompactActions} />
+            </div>
+            <OrderHeaderSummary pageTitle={cardTitle} actions={formActions} dirty={formHasUnsavedChanges} />
+            <nav className="wb-form-anchors" aria-label="Разделы формы">
+              {hybridAnchors.map((anchor) => (
+                <button
+                  key={anchor.key}
+                  type="button"
+                  className="wb-form-anchors__item"
+                  disabled={anchor.disabled}
+                  onClick={() => goToFormSection(anchor.key)}
+                >
+                  {anchor.label}
+                </button>
+              ))}
+            </nav>
+            {HYBRID_MAIN_SECTION_ORDER.map((key, index) => {
+              const item = hybridItemByKey.get(key);
+              if (!item) return null;
+              const dates = key === 'basic' ? hybridItemByKey.get('dates') : undefined;
+              return (
+                <section
+                  key={key}
+                  ref={(node) => {
+                    hybridSectionRefs.current[key] = node;
+                    if (key === 'basic') hybridSectionRefs.current.dates = node;
+                  }}
+                  className="wb-panel wb-form-section"
+                >
+                  <h2 className="wb-form-section__title">
+                    <span className="wb-form-section__num" aria-hidden>{index + 1}</span>
+                    {hybridSectionTitle(key, item.label)}
+                  </h2>
+                  <div className="wb-form-section__body">
+                    {item.children}
+                    {dates ? <div className="wb-form-section__sub">{dates.children}</div> : null}
+                  </div>
+                </section>
+              );
+            })}
+            {headerTabItems
+              .filter((item) => !HYBRID_MAIN_SECTION_KEYS.includes(String(item.key)))
+              .map((item) => {
+                const key = String(item.key);
+                const open = hybridOpenSections.includes(key);
+                return (
+                  <section
+                    key={key}
+                    ref={(node) => { hybridSectionRefs.current[key] = node; }}
+                    className={`wb-panel wb-form-section wb-form-section--fold${open ? ' wb-form-section--open' : ''}`}
+                  >
+                    <button
+                      type="button"
+                      className="wb-form-section__toggle"
+                      aria-expanded={open}
+                      disabled={item.disabled}
+                      title={item.disabled ? 'Доступно после сохранения заказа' : undefined}
+                      onClick={() => {
+                        setHybridOpenSections((current) => (
+                          current.includes(key) ? current.filter((value) => value !== key) : [...current, key]
+                        ));
+                        if (!open) setActiveTab(key);
+                      }}
+                    >
+                      <RightOutlined className="wb-form-section__chevron" aria-hidden />
+                      <h2 className="wb-form-section__title">{item.label}</h2>
+                      {item.disabled ? <span className="wb-form-section__hint">после сохранения заказа</span> : null}
+                    </button>
+                    {open ? <div className="wb-form-section__body">{item.children}</div> : null}
+                  </section>
+                );
+              })}
+          </>
+        ) : (
+          <>
         <div
           ref={orderFormSummaryTabsRef}
           className={`order-show-summary-tabs-sticky${orderFormSummaryStuck ? ' order-show-summary-tabs-sticky--stuck' : ''}`}
@@ -2239,6 +2446,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
           items={headerTabItems}
           type="card"
         />
+          </>
+        )}
         </div>
       </OrderFormProgressiveSurface>
     </Card>

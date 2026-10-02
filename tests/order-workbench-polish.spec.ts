@@ -155,7 +155,18 @@ test.describe('Workbench orders polish', () => {
             (rows) => rows.map((row) => Math.round(row.getBoundingClientRect().height)),
         );
         expect(new Set(rowHeights).size).toBe(1);
+        // «История» — отдельный спойлер, по умолчанию свёрнут; записи берутся из журнала истории по заказу
+        const history = additional.locator('.order-history');
+        const historyToggle = history.getByRole('button', { name: /История/ });
+        await expect(historyToggle).toHaveAttribute('aria-expanded', 'false');
+        await expect(history.locator('.order-history__item')).toHaveCount(0);
+        await historyToggle.click();
+        await expect(history.locator('.order-history__item')).toHaveCount(2);
+        await expect(history.locator('.order-history__item').first()).toContainText('01.10.2026');
+        await expect(history.locator('.order-history__count')).toHaveText('2');
         await shot(page, 'order-card-additional');
+        await historyToggle.click();
+        await expect(history.locator('.order-history__item')).toHaveCount(0);
 
         await tabs.getByRole('tab', { name: /Детали/ }).click();
         await expect(page.locator('.order-show-info-panel')).toHaveCount(0);
@@ -194,7 +205,7 @@ test.describe('Workbench orders polish', () => {
         // от свёрнутой колонки остаётся тонкая линия, которой её можно вернуть
         const rail = page.locator('.wb-order-side-rail');
         await expect(rail).toBeVisible();
-        expect(await rail.evaluate((element) => Math.round(element.getBoundingClientRect().width))).toBeLessThanOrEqual(16);
+        expect(await rail.evaluate((element) => Math.round(element.getBoundingClientRect().width))).toBeLessThanOrEqual(32);
         await shot(page, 'order-card-wide');
         // выбор запоминается в браузере (мок-окружение очищает localStorage при загрузке, поэтому без reload)
         expect(await page.evaluate(() => localStorage.getItem('erp.orderShow.sideCollapsed'))).toBe('1');
@@ -257,6 +268,131 @@ test.describe('Workbench orders polish', () => {
         await shot(page, 'orders-list-dark');
     });
 
+    test('shell: one top bar with tabs and utilities, search and collapse live in the sidebar', async ({ page }) => {
+        const pageErrors = await openWithVariant(page, 'workbench');
+
+        await page.goto('/orders', { waitUntil: 'domcontentloaded' });
+        await expect(page.locator('.orders-table tr[data-row-key="15"]')).toBeVisible({ timeout: 60000 });
+
+        const topbar = page.locator('.wb-topbar');
+        await expect(topbar).toBeVisible();
+        await expect(page.locator('.evolution-header')).toHaveCount(0);
+        await expect(topbar.locator('.workspace-tabs')).toBeVisible();
+        await expect(topbar.getByRole('tab', { name: 'Заказы' })).toBeVisible();
+        await expect(topbar.getByRole('button', { name: /Меню пользователя/ })).toBeVisible();
+        await expect(topbar.getByRole('switch', { name: 'Переключить тему' })).toBeVisible();
+        // панель одна и её высота совпадает с высотой вкладок: от неё страницы считают липкие отступы
+        const heights = await page.evaluate(() => ({
+            bar: Math.round(document.querySelector('.wb-topbar')!.getBoundingClientRect().height),
+            tabs: Math.round(document.querySelector('.workspace-tabs')!.getBoundingClientRect().height),
+        }));
+        expect(heights.bar).toBe(48);
+        expect(heights.tabs).toBe(48);
+
+        const sider = page.locator('.evolution-sider');
+        await sider.getByRole('button', { name: 'Открыть быстрый переход' }).click();
+        await expect(page.getByRole('combobox').first()).toBeVisible();
+        await page.keyboard.press('Escape');
+
+        // группы меню сворачиваются
+        const group = sider.locator('.evolution-sider__group').first();
+        const toggle = group.locator('.evolution-sider__group-toggle');
+        const itemsBefore = await group.locator('.ant-menu-item').count();
+        expect(itemsBefore).toBeGreaterThan(0);
+        await toggle.click();
+        await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+        await expect(group.locator('.ant-menu-item')).toHaveCount(0);
+        await toggle.click();
+        await expect(group.locator('.ant-menu-item')).toHaveCount(itemsBefore);
+        await shot(page, 'shell');
+
+        await sider.getByRole('button', { name: 'Свернуть меню' }).click();
+        await expect(page.locator('.evolution-shell--collapsed')).toBeVisible();
+        await shot(page, 'shell-collapsed');
+        await sider.getByRole('button', { name: 'Развернуть меню' }).click();
+        await expect(page.locator('.evolution-shell--collapsed')).toHaveCount(0);
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('other variants keep the separate header and tabs rows', async ({ page }) => {
+        await openWithVariant(page, 'evolution');
+
+        await page.goto('/orders', { waitUntil: 'domcontentloaded' });
+        await expect(page.locator('.orders-table tr[data-row-key="15"]')).toBeVisible({ timeout: 60000 });
+        await expect(page.locator('.wb-topbar')).toHaveCount(0);
+        await expect(page.locator('.evolution-header')).toBeVisible();
+        await expect(page.locator('.evolution-header').getByRole('button', { name: 'Открыть быстрый переход' })).toBeVisible();
+        await expect(page.locator('.evolution-sider__search')).toHaveCount(0);
+        await expect(page.locator('.evolution-sider__collapse')).toBeVisible();
+    });
+
+    test('order form: NewLine head with the same actions and tabs', async ({ page }) => {
+        const pageErrors = await openWithVariant(page, 'workbench');
+
+        await page.goto('/orders/edit/15', { waitUntil: 'domcontentloaded' });
+        const head = page.locator('.order-form-page--workbench .wb-order-head');
+        await expect(head.locator('h1')).toHaveText('Редактирование заказа «Тест-2972»', { timeout: 60000 });
+        await expect(page.locator('.order-form-card .ant-card-head')).toHaveCount(0);
+        const actions = head.locator('.wb-order-head__actions');
+        await expect(actions.getByRole('button', { name: 'Просмотр' })).toBeVisible();
+        await expect(actions.getByRole('button', { name: 'Закрыть' })).toBeVisible();
+        const save = actions.getByRole('button', { name: 'Сохранить' });
+        await expect(save).toBeVisible();
+        // (в мок-окружении заказ считается изменённым сразу и в прежней форме, поэтому состояние кнопки здесь не проверяется)
+        // «Сохранить» стоит последней
+        const order = await actions.locator('.order-form-action').evaluateAll(
+            (buttons) => buttons
+                .map((button) => ({ left: button.getBoundingClientRect().left, text: (button as HTMLElement).innerText.trim() }))
+                .sort((a, b) => a.left - b.left)
+                .map((button) => button.text),
+        );
+        expect(order[order.length - 1]).toBe('Сохранить');
+
+        for (const label of ['Сумма', 'Оплачено', 'Срок выполнения', 'Состав', 'Материал', 'Общие параметры']) {
+            await expect(head.locator('.wb-order-head__label', { hasText: label })).toBeVisible();
+        }
+        // гибрид: основные разделы на одной странице, без вкладок
+        await expect(page.locator('.order-form-page--workbench .ant-tabs')).toHaveCount(0);
+        const anchors = page.locator('.wb-form-anchors__item');
+        await expect(anchors).toContainText(['Клиент и срок', 'Детали заказа', 'Услуги и товары', 'Финансы', 'ХДФ', 'Материалы', 'Дополнительно']);
+        const mainSections = page.locator('.wb-form-section:not(.wb-form-section--fold)');
+        await expect(mainSections).toHaveCount(4);
+        await expect(mainSections.locator('.wb-form-section__title')).toHaveText([/Клиент и срок/, /Детали заказа/, /Услуги и товары/, /Финансы/]);
+        // таблица деталей и финансы видны сразу, без переключения
+        await expect(page.locator('.order-form-details-section')).toBeVisible();
+        await expect(mainSections.nth(3)).toContainText('Сумма заказа');
+        await shot(page, 'order-form');
+
+        // редкие разделы — сворачиваемые секции, по умолчанию закрыты
+        const folds = page.locator('.wb-form-section--fold');
+        const additionalFold = folds.filter({ hasText: 'Дополнительно' });
+        const additionalToggle = additionalFold.getByRole('button', { name: /Дополнительно/ });
+        await expect(additionalToggle).toHaveAttribute('aria-expanded', 'false');
+        await expect(additionalFold.locator('.wb-form-section__body')).toHaveCount(0);
+        await additionalToggle.click();
+        await expect(additionalToggle).toHaveAttribute('aria-expanded', 'true');
+        await expect(additionalFold.locator('.wb-form-section__body')).toBeVisible();
+        await additionalToggle.click();
+        await expect(additionalFold.locator('.wb-form-section__body')).toHaveCount(0);
+
+        // якорь открывает раздел и прокручивает к нему
+        await anchors.filter({ hasText: 'Финансы' }).click();
+        await expect(mainSections.nth(3)).toBeInViewport();
+        await shot(page, 'order-form-finance');
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('order form in other variants keeps the card title and buttons', async ({ page }) => {
+        await openWithVariant(page, 'evolution');
+
+        await page.goto('/orders/edit/15', { waitUntil: 'domcontentloaded' });
+        const cardHead = page.locator('.order-form-card .ant-card-head');
+        await expect(cardHead).toContainText('Редактирование заказа «Тест-2972»', { timeout: 60000 });
+        await expect(cardHead.getByRole('button', { name: 'Сохранить' })).toBeVisible();
+        await expect(page.locator('.wb-order-head')).toHaveCount(0);
+        await expect(page.locator('.wb-order-bar-slot')).toHaveCount(0);
+    });
+
     test('other variants keep the original five sections', async ({ page }) => {
         await openWithVariant(page, 'evolution');
 
@@ -289,6 +425,25 @@ async function openWithVariant(page: Page, uiVariant: 'workbench' | 'evolution',
             status: 200,
             contentType: 'application/json',
             body: JSON.stringify({ ok: true, providerConfigured: false, limits: { maxUploadMb: 20, allowedMimeTypes: ['image/jpeg'] } }),
+        });
+    });
+    await page.route(/\/api\/v1\/audit\?.*orderIds=15/, async (route) => {
+        const event = (auditId: string, name: string, createdAt: string) => ({
+            auditId, event: name, entityType: 'order', entityId: '15', entityName: 'Тест-2972', entityDetailNumber: null,
+            userId: 1, username: 'admin', role: 'admin', source: 'ui', relatedOrderId: 15, relatedOrderName: 'Тест-2972',
+            relatedClientId: null, relatedClientName: null, relatedPaymentId: null, relatedDeadlineId: null,
+            relatedProductionEventId: null, relatedUserId: null, relatedEntities: [], statusField: null, statusId: null,
+            statusName: null, statusCode: null, stageCode: null, requestId: `req-${auditId}`, ip: null, userAgent: null,
+            before: null, after: null, diff: null, metadata: null, createdAt,
+        });
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                data: [event('a2', 'order.updated', '2026-10-01T12:30:00+05:00'), event('a1', 'order.created', '2026-09-25T10:00:00+05:00')],
+                pagination: { page: 1, pageSize: 20, total: 2, totalPages: 1 },
+                requestId: 'audit-list',
+            }),
         });
     });
     await page.route(/\/api\/v1\/notifications(?:\?.*)?$/, async (route) => {

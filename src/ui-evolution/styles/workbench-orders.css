@@ -269,7 +269,7 @@
 :root[data-ui-variant="workbench"] .order-show-page--workbench {
   display: grid;
   /* основная колонка | линия-ручка правой колонки | правая колонка */
-  grid-template-columns: minmax(0, 1fr) 16px 300px;
+  grid-template-columns: minmax(0, 1fr) 32px 300px;
   /* строки 1–9 — по содержимому; высоту правой колонки забирает последняя */
   grid-template-rows: repeat(9, auto) 1fr;
   column-gap: 0;
@@ -1228,7 +1228,7 @@
 
 /* --- правая колонка сворачивается в тонкую линию; таблица деталей занимает её место --- */
 :root[data-ui-variant="workbench"] .order-show-page--workbench-wide {
-  grid-template-columns: minmax(0, 1fr) 16px;
+  grid-template-columns: minmax(0, 1fr) 32px;
 }
 
 :root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-side[hidden] {
@@ -1240,7 +1240,7 @@
   grid-row: 4 / 11;
   align-self: stretch;
   position: relative;
-  width: 16px;
+  width: 32px;
   min-height: 120px;
   padding: 0;
   border: 0;
@@ -1254,9 +1254,9 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 7px;
-  width: 2px;
-  border-radius: 2px;
+  left: 14px;
+  width: 4px;
+  border-radius: 4px;
   background: var(--evo-border);
   transition: background-color 120ms ease;
 }
@@ -1274,16 +1274,16 @@
   position: sticky;
   top: calc(var(--wb-order-sticky-top) + var(--wb-order-bar-height) + 16px);
   z-index: 1;
-  width: 16px;
-  height: 36px;
-  margin-top: 14px;
+  width: 24px;
+  height: 48px;
+  margin: 14px 4px 0;
   display: grid;
   place-items: center;
   border-radius: 8px;
   background: var(--evo-surface);
   box-shadow: var(--evo-shadow);
   color: var(--evo-text-secondary);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 :root[data-ui-variant="workbench"] .wb-order-side-rail:hover .wb-order-side-rail__grip,
@@ -1512,4 +1512,199 @@
   height: 44px;
   padding-block: 3px !important;
   line-height: 1.3;
+}
+
+/* ================= Форма заказа (создание и редактирование) ================= */
+
+/* страница формы: своя шапка вместо заголовка карточки, панели лежат на холсте */
+:root[data-ui-variant="workbench"] .order-form-card--workbench.ant-card {
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .order-form-card--workbench.ant-card > .ant-card-body {
+  padding: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__dirty,
+:root[data-ui-variant="workbench"] .wb-order-bar__dirty {
+  position: relative;
+  padding-left: 14px;
+  color: var(--evo-warning);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__dirty::before,
+:root[data-ui-variant="workbench"] .wb-order-bar__dirty::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 7px;
+  height: 7px;
+  margin-top: -3.5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__meta-item--notes {
+  max-width: 360px;
+  font-style: italic;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__sub--stack {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__sub--stack b {
+  color: var(--evo-text);
+  font-weight: 600;
+}
+
+/* действия формы: обычный размер кнопок, «Сохранить» — последней */
+:root[data-ui-variant="workbench"] .wb-order-head__actions .order-form-action {
+  height: 32px !important;
+  padding: 0 14px !important;
+  font-size: 14px !important;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__actions .order-form-action.ant-btn-icon-only {
+  width: 32px;
+  padding: 0 !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__actions .ant-space-item:has(.order-form-action--close) {
+  order: 3;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__actions .ant-space-item:has(.order-form-action--save) {
+  order: 4;
+}
+
+/* гибридная форма: основные разделы — одна страница, редкие — сворачиваемые секции */
+:root[data-ui-variant="workbench"] .wb-form-anchors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: 0 0 12px;
+  border-bottom: 1px solid var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-anchors__item {
+  height: 38px;
+  margin-bottom: -1px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--evo-text-secondary);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-anchors__item:hover:not(:disabled) {
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-anchors__item:disabled {
+  color: var(--evo-border-strong);
+  cursor: default;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-anchors__item:focus-visible,
+:root[data-ui-variant="workbench"] .wb-form-section__toggle:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: -2px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section {
+  margin-bottom: 12px;
+  /* при переходе к разделу он встаёт под сжатой шапкой, а не под ней */
+  scroll-margin-top: calc(var(--wb-order-sticky-top) + var(--wb-order-bar-height) + 10px);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 14px 16px 2px;
+  color: var(--evo-text);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section__num {
+  width: 22px;
+  height: 22px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--evo-surface-muted);
+  box-shadow: inset 0 0 0 1px var(--evo-border);
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section__body {
+  min-width: 0;
+  padding: 10px 16px 16px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section__sub {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section__toggle {
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--evo-radius-lg);
+  background: none;
+  color: var(--evo-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section__toggle .wb-form-section__title {
+  padding: 0;
+  font-size: 14px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section__toggle:disabled {
+  cursor: default;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section__toggle:disabled .wb-form-section__title {
+  color: var(--evo-border-strong);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section__chevron {
+  color: var(--evo-text-secondary);
+  font-size: 10px;
+  transition: transform 150ms ease;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section--open .wb-form-section__chevron {
+  transform: rotate(90deg);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section__hint {
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
 }

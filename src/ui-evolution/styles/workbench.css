@@ -70,6 +70,62 @@
   background: var(--evo-surface);
 }
 
+/* одна верхняя панель (desktop): вкладки слева, действия справа; её высота — и есть
+   нижняя граница «липкой» шапки, от которой страницы считают свои отступы */
+:root[data-ui-variant="workbench"] .wb-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-right: 16px;
+  border-bottom: 1px solid var(--evo-border);
+  background: color-mix(in srgb, var(--evo-canvas) 94%, transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+:root[data-ui-variant="workbench"] .wb-topbar > .evolution-workspace-tabs.workspace-tabs {
+  position: static;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 48px;
+  /* вкладки высотой 32px стоят по центру панели */
+  padding: 8px 0 0 16px;
+  border-bottom: 0;
+  background: transparent;
+}
+
+:root[data-ui-variant="workbench"] .wb-topbar__actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+}
+
+:root[data-ui-variant="workbench"] .wb-topbar__actions .evolution-header__leading:empty {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-topbar__actions .evolution-header__identity {
+  height: 40px;
+  padding: 2px 6px;
+}
+
+:root[data-ui-variant="workbench"] .wb-topbar__actions .evolution-header__identity .ant-avatar {
+  width: 28px;
+  height: 28px;
+  line-height: 28px;
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-topbar__actions .evolution-header__identity-copy .ant-typography:first-child {
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+/* вкладки рабочего пространства: «пилюли»; на телефоне они остаются отдельной строкой */
 :root[data-ui-variant="workbench"] .evolution-workspace-tabs.workspace-tabs {
   padding: 0 24px 8px;
   border-bottom: 1px solid var(--evo-border);
@@ -101,6 +157,148 @@
 :root[data-ui-variant="workbench"] .evolution-workspace-tabs.workspace-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab-active .ant-tabs-tab-btn {
   color: var(--evo-text);
   font-weight: 600;
+}
+
+/* ---------- боковое меню: поиск, сворачиваемые группы, строка «Свернуть меню» ---------- */
+:root[data-ui-variant="workbench"] .evolution-sider__brand {
+  min-height: 56px;
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider__search {
+  padding: 0 10px 6px;
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider__search .ant-btn {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 10px;
+  border-color: var(--evo-border);
+  background: var(--evo-surface);
+  box-shadow: none;
+  color: var(--evo-text-secondary);
+  font-weight: 500;
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider__search .ant-btn > span:not(.anticon) {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider__search kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--evo-border);
+  border-radius: 5px;
+  background: var(--evo-surface-muted);
+  color: var(--evo-text-secondary);
+  font: inherit;
+  font-size: 11px;
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider.ant-layout-sider-collapsed .evolution-sider__search {
+  padding: 0 0 6px;
+  display: flex;
+  justify-content: center;
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider.ant-layout-sider-collapsed .evolution-sider__search .ant-btn {
+  width: 36px;
+  justify-content: center;
+  padding: 0;
+}
+
+/* бренд 56 + поиск 40 + строка сворачивания 44 */
+:root[data-ui-variant="workbench"] .evolution-sider__nav {
+  height: calc(100vh - 140px);
+  padding-top: 4px;
+  padding-bottom: 12px;
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider.ant-layout-sider-collapsed .evolution-sider__nav {
+  /* внизу ещё кнопка настроек меню */
+  height: calc(100vh - 184px);
+  padding-bottom: 12px;
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider__group-toggle {
+  width: calc(100% - 20px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 0;
+  border: 0;
+  border-radius: var(--evo-radius-sm);
+  background: none;
+  color: var(--evo-sidebar-group);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider__group-toggle:hover {
+  color: var(--evo-sidebar-hover-text);
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider__group-toggle:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: 2px;
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider__group-toggle .anticon {
+  font-size: 10px;
+  transition: transform 150ms ease;
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider__group-toggle[aria-expanded="false"] .anticon {
+  transform: rotate(-90deg);
+}
+
+/* круглая кнопка на границе заменена строкой внизу меню */
+:root[data-ui-variant="workbench"] .evolution-sider__collapse {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider__collapse-row {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 20px;
+  border: 0;
+  border-top: 1px solid var(--evo-sidebar-border);
+  background: var(--evo-sidebar);
+  color: var(--evo-sidebar-text);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider__collapse-row:hover {
+  color: var(--evo-sidebar-hover-text);
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider__collapse-row:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: -2px;
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider.ant-layout-sider-collapsed .evolution-sider__collapse-row {
+  justify-content: center;
+  padding: 0;
+}
+
+:root[data-ui-variant="workbench"] .evolution-sider.ant-layout-sider-collapsed .evolution-sider__settings-bottom {
+  bottom: 52px;
 }
 
 /* ---------- футер: только сжат, все элементы и «Журнал изменений» на месте ---------- */

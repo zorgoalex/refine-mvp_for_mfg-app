@@ -19,7 +19,8 @@ describe('order header production status synchronization', () => {
   });
 
   it('shares one optimistic event controller with every context-menu rendering', () => {
-    expect(summarySource.match(/productionStatusEvents=\{productionStatusEvents\}/g)).toHaveLength(3);
+    // operational, compact, default and the NewLine head (its bar and tiles share one menu node)
+    expect(summarySource.match(/productionStatusEvents=\{productionStatusEvents\}/g)).toHaveLength(4);
     expect(menuSource).toContain('const { toggleOrderEvent, events, refetch } = productionStatusEvents;');
     expect(menuSource).not.toContain('useProductionStatusEvent({');
   });

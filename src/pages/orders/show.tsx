@@ -29,6 +29,8 @@ import { OrderFinanceBlock } from "./components/sections/OrderFinanceBlock";
 import { OrderProductionBlock } from "./components/sections/OrderProductionBlock";
 import { OrderProductionFlow, OrderProductionFlowCodes } from "./components/sections/OrderProductionFlow";
 import { OrderMaterialsWorkbenchTable } from "./components/sections/OrderMaterialsWorkbenchTable";
+import { OrderHistorySpoiler } from "./components/sections/OrderHistorySpoiler";
+import { useWorkspaceChromeBottom } from "./useWorkspaceChromeBottom";
 import {
   OrderClientCard,
   OrderDatesCard,
@@ -392,44 +394,6 @@ function useWorkspaceTabsHeight(): number {
   }, []);
 
   return height;
-}
-
-/**
- * «NewLine»: bottom edge of the sticky app chrome (top bar + workspace tabs), i.e. where
- * page-owned sticky elements must stop. The tabs bar is itself sticky under the top bar.
- */
-function useWorkspaceChromeBottom(): number {
-  const [bottom, setBottom] = useState(0);
-
-  useEffect(() => {
-    let ro: ResizeObserver | null = null;
-    const attach = (): boolean => {
-      const tabs = document.querySelector<HTMLElement>('.workspace-tabs');
-      if (!tabs) return false;
-      const measure = () => {
-        const style = window.getComputedStyle(tabs);
-        const stickyTop = style.position === 'sticky' ? Number.parseFloat(style.top) || 0 : 0;
-        setBottom(Math.round(stickyTop + tabs.getBoundingClientRect().height));
-      };
-      measure();
-      if (typeof ResizeObserver !== 'undefined') {
-        ro = new ResizeObserver(measure);
-        ro.observe(tabs);
-      }
-      return true;
-    };
-    if (attach()) return () => ro?.disconnect();
-    const mo = new MutationObserver(() => {
-      if (attach()) mo.disconnect();
-    });
-    mo.observe(document.body, { childList: true, subtree: true });
-    return () => {
-      mo.disconnect();
-      ro?.disconnect();
-    };
-  }, []);
-
-  return bottom;
 }
 
 function useMeasuredElementHeight<T extends HTMLElement>() {
@@ -4321,6 +4285,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                           <OrderMetaBlock record={record} compact />
                         </div>
                       </details>
+                      {isWorkbench && record?.order_id ? (
+                        <div className="order-additional__history">
+                          <OrderHistorySpoiler orderId={Number(record.order_id)} />
+                        </div>
+                      ) : null}
                     </div>
                     </div>
                   )

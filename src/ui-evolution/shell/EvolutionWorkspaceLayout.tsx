@@ -21,6 +21,7 @@ import { useGlobalUnloadGuard } from '../../hooks/useTabDirty';
 import { useUiVariant } from '../../ui-variant/UiVariantProvider';
 import { EvolutionAirNavigation } from './EvolutionAirNavigation';
 import { EvolutionHeader } from './EvolutionHeader';
+import { EvolutionHeaderUtilities } from './EvolutionHeaderUtilities';
 import { EvolutionMobileNavigation } from './EvolutionMobileNavigation';
 import { EvolutionSider } from './EvolutionSider';
 import { EvolutionTabletNavigation } from './EvolutionTabletNavigation';
@@ -84,6 +85,8 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
   const isOperational = variant === 'line' || variant === 'air';
   const isAirDesktop = variant === 'air' && !isMobile && !isTablet;
   const effectiveCollapsed = isOperational ? false : collapsed;
+  // «NewLine» on desktop: one top bar — workspace tabs on the left, utilities on the right.
+  const isWorkbenchDesktop = variant === 'workbench' && !isMobile && !isTablet;
 
   useTabSync();
   useGlobalUnloadGuard();
@@ -152,6 +155,7 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
     effectiveCollapsed && !isAirDesktop ? 'evolution-shell--collapsed' : '',
     isAirDesktop ? 'evolution-shell--air-desktop' : '',
     isTablet ? 'evolution-shell--tablet' : '',
+    isWorkbenchDesktop ? 'evolution-shell--topbar' : '',
   ].filter(Boolean).join(' ');
 
   return (
@@ -175,7 +179,14 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
         )
       ) : null}
       <Layout className="evolution-shell__main">
-        {!isAirDesktop && !isTabletLandscape ? (
+        {isWorkbenchDesktop ? (
+          <div className="wb-topbar">
+            <EvolutionWorkspaceTabs keepEmptyBar />
+            <div className="wb-topbar__actions">
+              <EvolutionHeaderUtilities hideSearch />
+            </div>
+          </div>
+        ) : !isAirDesktop && !isTabletLandscape ? (
           <EvolutionHeader
             onOpenSider={isMobile || isTabletPortrait ? () => setIsNavigationOpen(true) : undefined}
             operational={isOperational}
@@ -183,7 +194,7 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
           />
         ) : null}
         <FrontendVersionNotice />
-        {!isOperational ? <EvolutionWorkspaceTabs /> : null}
+        {isWorkbenchDesktop ? null : (!isOperational ? <EvolutionWorkspaceTabs /> : null)}
         <Layout.Content
           className="evolution-shell__content"
           data-modern-route={routeFamily}

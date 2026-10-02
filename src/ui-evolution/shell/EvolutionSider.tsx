@@ -11,11 +11,15 @@ import {
   InboxOutlined,
   LeftOutlined,
   LineChartOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
   PlusOutlined,
   RightOutlined,
+  SearchOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
 import { useGetIdentity } from '@refinedev/core';
+import { useKBar } from '@refinedev/kbar';
 import { OrderCreateModal } from '../../pages/orders/components/OrderCreateModal';
 import { SidebarMenuSettingsButton } from '../../components/SidebarMenuSettingsButton';
 import { SIDER_RESOURCE_ICONS } from '../../components/siderResourceIcons';
@@ -28,6 +32,8 @@ import {
   useEvolutionNavigation,
 } from './useEvolutionNavigation';
 
+const FOLDED_GROUPS_KEY = 'erp.sidebar.foldedGroups';
+
 export interface EvolutionSiderProps {
   collapsed: boolean;
   onCollapse: (collapsed: boolean) => void;
@@ -38,6 +44,28 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
   const { sider, isCreateModalOpen, setIsCreateModalOpen, sidebarMenuPreferences } = useEvolutionNavigation();
   const { data: identity } = useGetIdentity<UserIdentity>();
   const { variant } = useUiVariant();
+  const { query: quickSearch } = useKBar();
+  const isWorkbench = variant === 'workbench';
+  // «NewLine»: menu groups fold on click; the choice is a per-browser convenience.
+  const [foldedGroups, setFoldedGroups] = React.useState<readonly string[]>(() => {
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(FOLDED_GROUPS_KEY) ?? '[]');
+      return Array.isArray(stored) ? stored.filter((item): item is string => typeof item === 'string') : [];
+    } catch {
+      return [];
+    }
+  });
+  const toggleGroup = (category: string) => {
+    setFoldedGroups((current) => {
+      const next = current.includes(category) ? current.filter((item) => item !== category) : [...current, category];
+      try {
+        window.localStorage.setItem(FOLDED_GROUPS_KEY, JSON.stringify(next));
+      } catch {
+        // storage can be unavailable; folding still works until reload
+      }
+      return next;
+    });
+  };
   const categoryLabels = getEvolutionCategoryLabels(variant);
   const resourceItems = Object.values(sider.categorizedResources).flat();
   const activeCategory = Object.entries(sider.categorizedResources)
@@ -198,6 +226,21 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
               />
             </Tooltip>
 
+            {isWorkbench ? (
+              <div className="evolution-sider__search">
+                <Tooltip title={collapsed ? 'Поиск и быстрый переход (Ctrl K)' : undefined} placement="right">
+                  <Button
+                    aria-label="Открыть быстрый переход"
+                    block={!collapsed}
+                    icon={<SearchOutlined />}
+                    onClick={() => quickSearch.toggle()}
+                  >
+                    {collapsed ? null : <><span>Поиск</span><kbd>Ctrl K</kbd></>}
+                  </Button>
+                </Tooltip>
+              </div>
+            ) : null}
+
             <nav className="evolution-sider__nav">
               {!collapsed ? <Typography.Text className="evolution-sider__group-label">Работа</Typography.Text> : null}
               <Menu
@@ -268,13 +311,28 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
                   onClick: () => sider.handleNavigate(item.route),
                 }));
 
+                // a folded group still shows while it holds the current page, so the selection is never hidden
+                const holdsSelection = resources.some((item) => item.name === sider.selectedKey);
+                const folded = isWorkbench && !collapsed && foldedGroups.includes(category) && !holdsSelection;
+
                 return (
                   <div className="evolution-sider__group" key={category}>
-                    {!collapsed ? (
+                    {!collapsed && isWorkbench ? (
+                      <button
+                        type="button"
+                        className="evolution-sider__group-label evolution-sider__group-toggle"
+                        aria-expanded={!folded}
+                        onClick={() => toggleGroup(category)}
+                      >
+                        <span>{categoryLabel}</span>
+                        <DownOutlined aria-hidden />
+                      </button>
+                    ) : !collapsed ? (
                       <Typography.Text className="evolution-sider__group-label">
                         {categoryLabel}
                       </Typography.Text>
                     ) : null}
+                    {folded ? null : (
                     <Menu
                       aria-label={categoryLabel}
                       inlineCollapsed={collapsed}
@@ -283,10 +341,22 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
                       selectedKeys={resources.some((item) => item.name === sider.selectedKey) ? [sider.selectedKey] : []}
                       theme="dark"
                     />
+                    )}
                   </div>
                 );
               })}
             </nav>
+            {isWorkbench ? (
+              <button
+                type="button"
+                className="evolution-sider__collapse-row"
+                aria-label={collapsed ? 'Развернуть меню' : 'Свернуть меню'}
+                onClick={() => onCollapse(!collapsed)}
+              >
+                {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+                {collapsed ? null : <span>Свернуть меню</span>}
+              </button>
+            ) : null}
             {collapsed ? (
               <div className="evolution-sider__settings-bottom">
                 <SidebarMenuSettingsButton

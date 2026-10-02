@@ -5,7 +5,7 @@ import { OrderProductionSummary } from '../../../../components/OrderProductionSu
 
 import React, { useMemo, useState } from 'react';
 import { Tag, Space, Typography } from 'antd';
-import { StarOutlined } from '@ant-design/icons';
+import { PhoneOutlined, StarOutlined } from '@ant-design/icons';
 import { useList, useOne } from '../../../../query/orderLifecycleQueries';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { orderCatalogSubtotal } from '../../../../utils/orderCatalogLines';
@@ -31,15 +31,31 @@ import {
   resolveActiveProductionEventCodes,
 } from '../../currentProductionStatus';
 import { businessOrderDetails } from '../../../../utils/orderDetailRows';
+import { useOptionalUiVariant } from '../../../../ui-variant/UiVariantProvider';
+import { orderDeadlineHint, orderStatusTone, paymentStatusTone } from '../../orderListWorkbench';
 
 const { Text } = Typography;
 
 interface OrderHeaderSummaryProps {
   compactSticky?: boolean;
+  /** «NewLine» page head of the form: page title and the form actions at its right. */
+  pageTitle?: string;
+  actions?: React.ReactNode;
+  /** «NewLine» compact bar: the short action set shown while the head is scrolled away. */
+  compactActions?: React.ReactNode;
+  /** «NewLine»: there are unsaved changes. */
+  dirty?: boolean;
 }
 
-export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactSticky = false }) => {
+export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({
+  compactSticky = false,
+  pageTitle,
+  actions,
+  compactActions,
+  dirty = false,
+}) => {
   const isOperational = useOperationalUi();
+  const isWorkbench = useOptionalUiVariant()?.variant === 'workbench';
   const { header, details, hdfDetails, payments, isPaymentStatusManual, dowelingLinks, catalogLines } = useOrderFormStore();
   const { getSetting } = useOrderAppSettings();
   const productionStatusEvents = useProductionStatusEvent({
@@ -402,6 +418,210 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
           onClose={closeContextMenu}
           productionStatusEvents={productionStatusEvents}
         />
+      </>
+    );
+  }
+
+  if (isWorkbench) {
+    // «NewLine»: шапка формы — те же сведения и ПКМ-меню статусов, что в сводке ниже.
+    const clientName = clientData?.data?.client_name || '—';
+    const deadlineAt = header.planned_completion_date ? dayjs(header.planned_completion_date) : null;
+    const deadlineHint = orderDeadlineHint(header as any);
+    const totalBeforeDiscount = Number(header.total_amount) || totals.total_amount || 0;
+    const discountPercent = totalBeforeDiscount > 0 ? (discount / totalBeforeDiscount) * 100 : 0;
+    const paidShare = finalAmount > 0 ? Math.min(1, paidAmount / finalAmount) : 0;
+    // тиын показываем только когда они есть: «160 381 ₸», но «7 818,65 ₸»
+    const money = (value: number) => `${formatNumber(value, Math.abs(value * 100 - Math.round(value) * 100) < 0.5 ? 0 : 2)} ${CURRENCY_SYMBOL}`;
+    const constructorName = basisProjects.length === 0
+      ? (latestDowelingLink?.doweling_order?.design_engineer_id
+        ? employeesMap.get(latestDowelingLink.doweling_order.design_engineer_id) || '—'
+        : !latestDowelingLink && header.design_engineer_id ? employeesMap.get(header.design_engineer_id) || '—' : null)
+      : null;
+    const statusPills = (
+      <>
+        <span className="wb-pill wb-pill--lg" data-tone={orderStatusTone(orderStatusName)}>{orderStatusName}</span>
+        <span
+          className="wb-pill wb-pill--lg"
+          data-tone={paymentStatusTone(paymentStatusName)}
+          title={isPaymentStatusManual ? 'Статус оплаты задан вручную' : undefined}
+        >
+          {paymentStatusName}{isPaymentStatusManual ? ' · вручную' : ''}
+        </span>
+      </>
+    );
+    const contextMenuNode = (
+      <OrderHeaderContextMenu
+        visible={contextMenu.visible}
+        x={contextMenu.x}
+        y={contextMenu.y}
+        onClose={closeContextMenu}
+        productionStatusEvents={productionStatusEvents}
+      />
+    );
+
+    if (compactSticky) {
+      return (
+        <>
+          <div className="wb-order-bar" aria-label="Сводка заказа" onContextMenu={handleContextMenu} title="ПКМ — изменить статусы">
+            <b className="wb-order-bar__title">{header.order_name ? `Заказ ${header.order_name}` : 'Новый заказ'}</b>
+            {dirty ? <span className="wb-order-bar__dirty">Не сохранено</span> : null}
+            {statusPills}
+            <span className="wb-order-bar__meta">
+              {clientName}
+              {deadlineAt ? ` · срок ${deadlineAt.format('DD.MM')}` : ''}
+            </span>
+            <span className="wb-order-bar__fact" title="Состав заказа">
+              {formatNumber(totals.parts_count, 0)} дет. · {formatNumber(totals.total_area, 2)} м²
+            </span>
+            <span className="wb-order-bar__fact" title={amountBreakdown}>
+              <b>{money(finalAmount)}</b>
+              {remainingAmount > 0
+                ? <> · <span data-tone="warning">остаток {money(remainingAmount)}</span></>
+                : finalAmount > 0 ? <> · <span data-tone="ready">оплачен полностью</span></> : null}
+            </span>
+            <span className="wb-order-bar__spacer" />
+            {compactActions}
+          </div>
+          {contextMenuNode}
+        </>
+      );
+    }
+
+    return (
+      <>
+        <div className="order-show-header wb-order-head" aria-label="Сводка заказа">
+          <div className="wb-order-head__top">
+            <div
+              className="wb-order-head__identity"
+              onContextMenu={handleContextMenu}
+              title="ПКМ — изменить статусы"
+              style={{ cursor: 'context-menu' }}
+            >
+              <div className="wb-order-head__title">
+                <h1 className="wb-order-head__number">{pageTitle || header.order_name || 'Новый заказ'}</h1>
+                {dirty ? <span className="wb-order-head__dirty">Не сохранено</span> : null}
+                {statusPills}
+                <span className="wb-order-head__priority" title="Приоритет">
+                  <StarOutlined
+                    aria-hidden
+                    style={{ color: header.priority && header.priority <= 50 ? 'var(--evo-warning)' : undefined }}
+                  />
+                  {header.priority !== undefined ? formatNumber(header.priority, 0) : '—'}
+                </span>
+              </div>
+              <div className="wb-order-head__meta">
+                <span className="wb-order-head__client">{clientName}</span>
+                {primaryPhone && (
+                  <span className="wb-order-head__meta-item wb-order-head__meta-item--plain">
+                    <PhoneOutlined aria-hidden />
+                    {primaryPhone}
+                  </span>
+                )}
+                <span className="wb-order-head__meta-item">
+                  от {header.order_date ? dayjs(header.order_date).format('DD.MM.YYYY') : '—'}
+                </span>
+                {basisProjectSummary ? (
+                  <span className="wb-order-head__meta-item" title={basisProjectSummary}>
+                    Базис-проект: <strong>{basisProjectSummary}</strong>
+                    {basisProjects.length === 0 && dowelingLinks.length > 1 && ` +${dowelingLinks.length - 1}`}
+                  </span>
+                ) : null}
+                {basisProjectSummary && constructorName ? (
+                  <span className="wb-order-head__meta-item">Конструктор: {constructorName}</span>
+                ) : null}
+                {header.notes ? (
+                  <span className="wb-order-head__meta-item wb-order-head__meta-item--notes" title={header.notes}>{header.notes}</span>
+                ) : null}
+              </div>
+            </div>
+            {actions ? <div className="wb-order-head__actions">{actions}</div> : null}
+          </div>
+
+          <div
+            className="wb-order-head__tiles"
+            onContextMenu={handleContextMenu}
+            title="ПКМ — изменить статусы"
+            style={{ cursor: 'context-menu' }}
+          >
+            <div className="wb-order-head__tile">
+              <span className="wb-order-head__label">Сумма</span>
+              <span className="wb-order-head__value" title={amountBreakdown}>{money(finalAmount)}</span>
+              <span className="wb-order-head__sub">
+                {discount > 0 && (
+                  <span data-tone="danger">скидка {formatNumber(discountPercent, 1)}% · −{money(discount)}</span>
+                )}
+                {surcharge > 0 && <span>наценка +{money(surcharge)}</span>}
+                {discount <= 0 && surcharge <= 0 && <span>без скидки и наценки</span>}
+              </span>
+            </div>
+            <div className="wb-order-head__tile">
+              <span className="wb-order-head__label">Оплачено</span>
+              <span className="wb-order-head__value">
+                <span className="wb-order-head__amount">{money(paidAmount)}</span>
+                {' '}
+                <span className="wb-order-head__of">из {money(finalAmount)}</span>
+              </span>
+              <span className="wb-order-head__bar" data-tone={remainingAmount > 0 ? 'warning' : 'ready'} aria-hidden>
+                <i style={{ width: `${Math.round(paidShare * 100)}%` }} />
+              </span>
+              <span className="wb-order-head__sub">
+                {remainingAmount > 0
+                  ? <span>остаток <b data-tone="warning">{money(remainingAmount)}</b></span>
+                  : <span data-tone="ready">{finalAmount > 0 ? 'оплачен полностью' : 'платежей нет'}</span>}
+              </span>
+            </div>
+            <div className="wb-order-head__tile">
+              <span className="wb-order-head__label">Срок выполнения</span>
+              <span className="wb-order-head__value">
+                {deadlineAt ? `${deadlineAt.format('DD.MM')} · ${deadlineAt.format('dd')}` : '—'}
+              </span>
+              <span className="wb-order-head__sub">
+                <span data-tone={deadlineHint?.tone ?? 'neutral'}>{deadlineHint?.text ?? 'срок не указан'}</span>
+              </span>
+            </div>
+            <div className="wb-order-head__tile">
+              <span className="wb-order-head__label">Состав</span>
+              <span className="wb-order-head__value">{formatNumber(totals.parts_count, 0)} дет.</span>
+              <span className="wb-order-head__sub">
+                <span>{formatNumber(totals.positions_count, 0)} поз. · {formatNumber(totals.total_area, 2)} м²</span>
+              </span>
+            </div>
+            <div className="wb-order-head__tile">
+              <span className="wb-order-head__label">Материал</span>
+              <span className="wb-order-head__value wb-order-head__value--text" title={materialsSummary}>
+                {materialSummaryItems.length === 0 ? '—' : materialSummaryItems.map((item, index) => (
+                  <React.Fragment key={item.key}>
+                    {index > 0 && ', '}
+                    <span className="wb-order-head__material" style={{ '--wb-material-color': getMaterialColor(item.colorName) } as React.CSSProperties}>{item.label}</span>
+                  </React.Fragment>
+                ))}
+              </span>
+              <span className="wb-order-head__sub wb-order-head__sub--production">
+                <OrderProductionSummary order={header} />
+                {passedProductionCodes.length > 0 ? (
+                  <ProductionStagesDisplay
+                    passedCodes={passedProductionCodes}
+                    displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
+                    codeToLetter={productionWorkflowDisplay?.codeToLetter}
+                    codeToName={productionWorkflowDisplay?.codeToName}
+                    fontSize={12}
+                    passedColor="#52c41a"
+                    showTooltip={true}
+                  />
+                ) : null}
+              </span>
+            </div>
+            <div className="wb-order-head__tile">
+              <span className="wb-order-head__label">Общие параметры</span>
+              <span className="wb-order-head__sub wb-order-head__sub--stack">
+                <span>Фрезеровка: <b>{commonProductionValues.millingTypeName}</b></span>
+                <span>Обкат: <b>{commonProductionValues.edgeTypeName}</b></span>
+                <span>Плёнка: <b>{commonProductionValues.filmName}</b></span>
+              </span>
+            </div>
+          </div>
+        </div>
+        {contextMenuNode}
       </>
     );
   }
