@@ -26,4 +26,17 @@ describe('film catalog screens guard', () => {
     expect(list).toContain('Объединена:');
     expect(list).toContain('features?.filmCatalogImport === true');
   });
+
+  it('keeps the list head and pagination on screen and fits the table without horizontal scrolling', () => {
+    const css = readFileSync(new URL('./films.css', import.meta.url), 'utf8');
+    expect(list).toContain('className="films-list__head" style={{ top: tabsHeight }}');
+    expect(list).toContain('sticky={{ offsetHeader: tabsHeight + headHeight }}');
+    expect(list).toContain('tableLayout="fixed"');
+    expect(css).toMatch(/\.films-list__head \{\s*position: sticky;/);
+    expect(css).toMatch(/\.ant-table-pagination\.ant-pagination \{\s*position: sticky;\s*bottom: var\(--films-list-bottom, 0px\);/);
+    expect(css).toContain('.films-list__name { font-size: 0.75em;');
+    expect(list).toContain('<Tooltip title={value}><span className="films-list__key">{value}</span></Tooltip>');
+    expect(css).toMatch(/\.films-list__key \{[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/);
+    expect(list).toContain('note: 140');
+  });
 });

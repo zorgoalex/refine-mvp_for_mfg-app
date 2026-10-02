@@ -1,18 +1,22 @@
-import { Table } from '../../ui/tooltipDelay';
+import { Table, Tooltip } from '../../ui/tooltipDelay';
 import { IResourceComponentsProps, useMany, useNavigation, useGetIdentity } from "@refinedev/core";
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import { Space, Badge, Button, Card, Col, Form, Input, InputNumber, Row, Select } from "antd";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ClearOutlined, FilterOutlined, SearchOutlined } from "@ant-design/icons";
 import { useSelect } from "../../ui/refineSelect";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { LocalizedList } from "../../components/LocalizedList";
-import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
 import { buildFilmFilters, FILM_KEY_PATTERN, hasFilmFieldFilters, readFilmFilters, type FilmFilterValues } from "./filmFilters";
 import { FilmSearch } from "./FilmSearch";
 import { useNavigate } from 'react-router-dom';
 import { getLoadedRuntimeConfig } from '../../config/runtimeConfig';
+import { useRefHeight, useSelectorHeight } from '../../hooks/useElementHeight';
+import './films.css';
+
+// Узкие колонки фиксированной ширины: список помещается без горизонтальной прокрутки, «Название» берёт остаток.
+const WIDTH = { id: 64, sort: 76, nomenclatureType: 110, category: 110, note: 140, filmType: 100, vendor: 120, texture: 76, key: 110, active: 104, actions: 76, catalog: 130 } as const;
 
 export const FilmList: React.FC<IResourceComponentsProps> = () => {
   const [filtersVisible, setFiltersVisible] = useState(false);
@@ -67,6 +71,11 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
   const navigate = useNavigate();
   const { data: identity } = useGetIdentity<{ permissions?: string[] }>();
   const canManageCatalog = (identity?.permissions ?? []).includes('references.manage');
+  // Липкие блоки: шапка списка — под лентой вкладок, шапка таблицы — под ней, пагинация — над подвалом приложения.
+  const headRef = useRef<HTMLDivElement>(null);
+  const tabsHeight = useSelectorHeight('.workspace-tabs');
+  const footerHeight = useSelectorHeight('.ant-layout-footer');
+  const headHeight = useRefHeight(headRef);
 
   const typeIds = useMemo(
     () =>
@@ -126,7 +135,9 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <LocalizedList title="Плёнки">
-      <Space wrap style={{ marginBottom: 16, width: "100%" }}>
+      <div className="films-list" style={{ '--films-list-bottom': `${footerHeight}px` } as CSSProperties}>
+      <div ref={headRef} className="films-list__head" style={{ top: tabsHeight }}>
+      <Space wrap style={{ width: "100%" }}>
         {getLoadedRuntimeConfig()?.features?.filmCatalogImport === true && canManageCatalog && <Button onClick={() => navigate('/films/catalog-import')}>Импорт каталога 1С</Button>}
         <FilmSearch
           value={search}
@@ -146,7 +157,7 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
       </Space>
       {filtersVisible && (
         <section id="films-filters" aria-label="Фильтры плёнок">
-          <Card title="Фильтры" style={{ marginBottom: 16 }}>
+          <Card title="Фильтры" size="small" style={{ marginTop: 8 }}>
             <Form form={form} layout="vertical" initialValues={appliedFilters}
               onFinish={(values) => applyFilters({ ...values, film_name: search })}>
               <Row gutter={16}>
@@ -206,30 +217,35 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
           </Card>
         </section>
       )}
+      </div>
       <Table
         {...tableProps}
         {...highlightProps}
         rowKey="film_id"
+        tableLayout="fixed"
+        sticky={{ offsetHeader: tabsHeight + headHeight }}
         onRow={(record) => ({
           onDoubleClick: () => {
             show("films", record.film_id);
           },
         })}
       >
-        <Table.Column dataIndex="film_id" title="id" sorter />
-        <ReferenceSortOrderColumn />
-        <Table.Column dataIndex="film_name" title="Название" sorter />
-        <Table.Column dataIndex="nomenclature_type" title="Тип номенклатуры" />
-        <Table.Column dataIndex="nomenclature_category" title="Категория" />
+        <Table.Column dataIndex="film_id" title="id" sorter width={WIDTH.id} />
+        <Table.Column dataIndex="sort_order" title="Порядок" sorter width={WIDTH.sort} />
+        <Table.Column dataIndex="film_name" title="Название" sorter render={(value: string) => <span className="films-list__name">{value}</span>} />
+        <Table.Column dataIndex="nomenclature_type" title="Тип номенклатуры" width={WIDTH.nomenclatureType} />
+        <Table.Column dataIndex="nomenclature_category" title="Категория" width={WIDTH.category} render={(value: string | null) => <span className="films-list__category">{value}</span>} />
         <Table.Column
           dataIndex="note"
           title="Примечание"
+          width={WIDTH.note}
           ellipsis={{ showTitle: true }}
           render={(value: string | null) => (value ? value.replace(/\s*\n\s*/g, ' · ') : '')}
         />
         <Table.Column
           dataIndex="film_type_id"
           title="Тип плёнки"
+          width={WIDTH.filmType}
           render={(_, record: any) =>
             typeMap[record?.film_type_id] ?? record?.film_type_id
           }
@@ -237,15 +253,22 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column
           dataIndex="vendor_id"
           title="Поставщик плёнки"
+          width={WIDTH.vendor}
           render={(_, record: any) =>
             vendorMap[record?.vendor_id] ?? record?.vendor_id
           }
         />
-        <Table.Column dataIndex="film_texture" title="Фактура" render={(value: boolean) => value ? "Да" : "Нет"} />
-        <Table.Column dataIndex="ref_key_1c" title="1C-key" />
+        <Table.Column dataIndex="film_texture" title="Фактура" width={WIDTH.texture} render={(value: boolean) => value ? "Да" : "Нет"} />
+        <Table.Column
+          dataIndex="ref_key_1c"
+          title="1C-key"
+          width={WIDTH.key}
+          render={(value: string | null) => (value ? <Tooltip title={value}><span className="films-list__key">{value}</span></Tooltip> : null)}
+        />
         <Table.Column
           dataIndex="is_active"
           title="Активен"
+          width={WIDTH.active}
           render={(value: boolean) => (
             <Badge
               status={value ? "success" : "default"}
@@ -254,6 +277,7 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
           )}
         />
         <Table.Column
+          width={WIDTH.actions}
           title="Действия"
           render={(_, record: any) => (
             <Space size={4}>
@@ -270,8 +294,9 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
             </Space>
           )}
         />
-        <Table.Column title="Каталог" render={(_, record: any) => record.canonical_film_id ? <ShowButton resource="films" recordItemId={record.canonical_film_id}>Объединена: {canonicalMap[record.canonical_film_id] ?? `#${record.canonical_film_id}`}</ShowButton> : null} />
+        <Table.Column title="Каталог" width={WIDTH.catalog} ellipsis render={(_, record: any) => record.canonical_film_id ? <ShowButton resource="films" recordItemId={record.canonical_film_id}>Объединена: {canonicalMap[record.canonical_film_id] ?? `#${record.canonical_film_id}`}</ShowButton> : null} />
       </Table>
+      </div>
     </LocalizedList>
   );
 };

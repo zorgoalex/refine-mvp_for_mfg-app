@@ -29,6 +29,14 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-02", title: "Справочник плёнок: список без горизонтальной прокрутки",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "В списке плёнок шапка с поиском и фильтрами и строка пагинации всегда остаются на экране; заголовки колонок тоже закреплены.",
+      "Колонки стали уже: «Примечание» вдвое, название и категория — мельче, ключ 1С — в одну строку с обрезкой (полный ключ — при наведении). Список помещается без горизонтальной прокрутки.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-02", title: "Заявки поставщикам: учитываются только действующие документы 1С",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: [
