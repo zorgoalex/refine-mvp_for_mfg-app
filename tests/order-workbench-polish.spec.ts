@@ -129,13 +129,14 @@ test.describe('Workbench orders polish', () => {
         await page.locator('.order-show-details-table').scrollIntoViewIfNeeded();
         await page.mouse.wheel(0, 500);
         await expect(slot).toHaveAttribute('data-on', 'true');
-        const metrics = await page.evaluate(() => {
+        // строка появляется с короткой анимацией сдвига — меряем после неё
+        const readOffset = () => page.evaluate(() => {
             const bar = document.querySelector('.wb-order-bar')!.getBoundingClientRect();
             const tabs = document.querySelector('.workspace-tabs')!.getBoundingClientRect();
-            return { barTop: Math.round(bar.top), barBottom: Math.round(bar.bottom), chromeBottom: Math.round(tabs.bottom) };
+            return Math.round(bar.top) - Math.round(tabs.bottom);
         });
-        expect(metrics.barTop).toBeGreaterThanOrEqual(metrics.chromeBottom - 1);
-        expect(metrics.barTop).toBeLessThanOrEqual(metrics.chromeBottom + 2);
+        await expect.poll(readOffset, { timeout: 5000 }).toBeGreaterThanOrEqual(-1);
+        expect(await readOffset()).toBeLessThanOrEqual(2);
         const bar = page.locator('.wb-order-bar');
         await expect(bar).toContainText('Заказ Тест-2972');
         await expect(bar.getByRole('button', { name: 'Изменить' })).toBeVisible();

@@ -612,7 +612,12 @@
   font-variant-numeric: tabular-nums;
 }
 
+:root[data-ui-variant="workbench"] .wb-order-head__value:has(.wb-order-head__of) {
+  white-space: normal;
+}
+
 :root[data-ui-variant="workbench"] .wb-order-head__of {
+  white-space: nowrap;
   color: var(--evo-text-secondary);
   font-size: 13px;
   font-weight: 500;
@@ -855,7 +860,7 @@
 }
 
 :root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-details-table .ant-table-tbody > tr > td {
-  padding: 8px 6px !important;
+  padding: 6px 6px !important;
   border-inline-end: 0 !important;
   border-bottom-color: var(--evo-border);
   font-size: 13px !important;
@@ -1063,7 +1068,11 @@
 }
 
 :root[data-ui-variant="workbench"] .wb-link-row small {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--evo-text-secondary);
   font-size: 12px;
 }
@@ -1078,4 +1087,21 @@
 
 :root[data-ui-variant="workbench"] .wb-notes--empty {
   color: var(--evo-border-strong);
+}
+
+/* статус детали — мягкая метка в цвете этапа вместо рамки */
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-detail-status-badge {
+  min-height: 20px;
+  padding: 2px 4px !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: color-mix(in srgb, currentColor 13%, transparent) !important;
+  /* размер шрифта подбирает сама ячейка по длине названия этапа */
+  font-weight: 600;
+  line-height: 16px !important;
+}
+
+/* ссылки на раскрои в строке детали: мельче основного текста, чтобы строка не росла */
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-details-table .ant-table-tbody > tr > td a {
+  font-size: 12px;
 }

@@ -591,7 +591,7 @@ const OrderDetailProductionStatusTag = memo(function OrderDetailProductionStatus
   if (statusId === null || statusId === undefined) {
     const text = 'Не назначен';
     return (
-      <span title={text} style={getOrderDetailStatusBadgeStyle(text, ORDER_DETAIL_STATUS_EMPTY_BADGE_STYLE)}>
+      <span className="order-detail-status-badge" title={text} style={getOrderDetailStatusBadgeStyle(text, ORDER_DETAIL_STATUS_EMPTY_BADGE_STYLE)}>
         {text}
       </span>
     );
@@ -604,7 +604,7 @@ const OrderDetailProductionStatusTag = memo(function OrderDetailProductionStatus
   if (!label && loading) {
     const text = '...';
     return (
-      <span title={text} style={getOrderDetailStatusBadgeStyle(text, ORDER_DETAIL_STATUS_BADGE_STYLE)}>
+      <span className="order-detail-status-badge" title={text} style={getOrderDetailStatusBadgeStyle(text, ORDER_DETAIL_STATUS_BADGE_STYLE)}>
         {text}
       </span>
     );
@@ -615,6 +615,7 @@ const OrderDetailProductionStatusTag = memo(function OrderDetailProductionStatus
 
   return (
     <span
+      className="order-detail-status-badge"
       title={text}
       style={getOrderDetailStatusBadgeStyle(text, ORDER_DETAIL_STATUS_BADGE_STYLE, statusColor)}
     >
