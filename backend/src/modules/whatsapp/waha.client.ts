@@ -95,6 +95,34 @@ export class WahaClient {
     return { messageId: typeof record?.id === 'string' && record.id.length > 0 ? record.id : undefined };
   }
 
+  /** Sends a document (PDF/XLSX). Only a non-empty message id means WhatsApp accepted it. */
+  async sendFile(chatId: string, bytes: Buffer, filename: string, mimetype: string, caption: string): Promise<{ messageId?: string }> {
+    const value = await this.request('/api/sendFile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session: this.sessionName(), chatId,
+        file: { mimetype, filename, data: bytes.toString('base64') },
+        caption,
+      }),
+    });
+    const record = asRecord(value);
+    const id = record?.id;
+    const messageId = typeof id === 'string' ? id : typeof asRecord(id)?._serialized === 'string' ? String(asRecord(id)?._serialized) : undefined;
+    return { messageId: messageId && messageId.length > 0 ? messageId : undefined };
+  }
+
+  /**
+   * Whether a phone (7XXXXXXXXXX) is on WhatsApp, and its chat id (`…@c.us` or `…@lid`). The phone
+   * travels only in the query, which is never written to the technical log (see safePath).
+   */
+  async checkPhone(phone: string): Promise<{ exists: boolean; chatId: string | null }> {
+    const value = await this.request(`/api/contacts/check-exists?phone=${encodeURIComponent(phone)}&session=${encodeURIComponent(this.sessionName())}`);
+    const record = asRecord(value);
+    const chatId = typeof record?.chatId === 'string' && /^\d{5,24}@(c\.us|lid)$/.test(record.chatId) ? record.chatId : null;
+    return { exists: record?.numberExists === true && chatId !== null, chatId };
+  }
+
   private sessionPath(): string {
     return encodeURIComponent(this.sessionName());
   }
@@ -146,7 +174,8 @@ export class WahaClient {
         throw new ApiError(
           502,
           "WAHA_PROVIDER_ERROR",
-          `WAHA request failed (${response.status})`
+          `WAHA request failed (${response.status})`,
+          { httpStatus: response.status }
         );
       }
       await this.technicalLogs?.record({ component: "waha", level: "info", eventCode: "waha.api.request",
@@ -163,9 +192,11 @@ export class WahaClient {
     }
   }
 
+  /** Route template only: the query (phones, session) never reaches the technical log. */
   private safePath(path: string): string {
+    const route = path.split("?")[0];
     const session = this.runtime.getConfig().sessionName;
-    return session ? path.replaceAll(encodeURIComponent(session), "{session}") : path;
+    return session ? route.replaceAll(encodeURIComponent(session), "{session}") : route;
   }
 }
 

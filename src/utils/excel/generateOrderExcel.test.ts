@@ -206,3 +206,56 @@ describe('buildOrderExcelBuffer dynamic detail rows', () => {
     expect(worksheet.getCell('M8').value).toEqual({ formula: 'SUM(D12:D66)' });
   });
 });
+
+describe('buildOrderExcelBuffer financial data and template source', () => {
+  const payments = [
+    { payment_id: 1, payment_date: '2026-06-20', amount: 777123, payment_type: { payment_type_name: 'ТестОплатаКаспи' } },
+    { payment_id: 2, payment_date: '2026-06-21', amount: 555321, payment_type: { payment_type_name: 'ТестОплатаНал' } },
+  ];
+
+  async function build(pricingMode: 'full' | 'omit') {
+    const template = await fs.readFile(templatePath);
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const buffer = await buildOrderExcelBuffer({
+      order: { order_id: 1, order_name: 'E2E Финансы', order_date: '2026-06-19' },
+      details: makeDetails(3),
+      payments,
+      client: { client_name: 'Тестовый клиент' },
+      clientPhone: '+7 777 000 00 00',
+      pricingMode,
+      templateBytes: new Uint8Array(template),
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+    return workbook;
+  }
+
+  function everyCell(workbook: ExcelJS.Workbook) {
+    const cells: Array<{ address: string; value: unknown }> = [];
+    workbook.eachSheet((sheet) => sheet.eachRow({ includeEmpty: false }, (row) => row.eachCell({ includeEmpty: false }, (cell) => {
+      cells.push({ address: `${sheet.name}!${cell.address}`, value: cell.value });
+    })));
+    return cells;
+  }
+
+  it('writes payments only to the full form', async () => {
+    const full = JSON.stringify(everyCell(await build('full')));
+    expect(full).toContain('777123');
+    expect(full).toContain('ТестОплатаКаспи');
+  });
+
+  it('keeps no payment, price or sum anywhere in the workbook of the price-free form', async () => {
+    const cells = everyCell(await build('omit'));
+    const text = JSON.stringify(cells);
+    expect(text).not.toContain('777123');
+    expect(text).not.toContain('555321');
+    expect(text).not.toContain('ТестОплата');
+    // Prices of makeDetails are 1000..1002 per sqm.
+    expect(cells.filter((cell) => cell.value === 1000 || cell.value === 1001 || cell.value === 1002)).toEqual([]);
+    const sumFormulas = cells.filter((cell) => typeof cell.value === 'object' && cell.value !== null
+      && 'formula' in cell.value && /(^|[^A-Z])(J|I|Q)\d/.test(String((cell.value as { formula: string }).formula)));
+    expect(sumFormulas).toEqual([]);
+  });
+});

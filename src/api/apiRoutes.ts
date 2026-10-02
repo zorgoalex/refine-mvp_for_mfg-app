@@ -112,6 +112,7 @@ export const apiRoutes = {
     deadlineOverride: (orderId: number, overrideId: string) =>
       backendApiPath(`/orders/${orderId}/deadline-overrides/${overrideId}`),
     groups: orderGroupsRoute,
+    whatsappSends: (orderId: number) => backendApiPath(`/orders/${orderId}/whatsapp-sends`),
   },
   procurement: {
     worklist: backendApiPath('/procurement/worklist'),
@@ -422,6 +423,10 @@ export const apiRoutes = {
         backendApiPath(`/whatsapp/daily-digest/runs/${encodeURIComponent(runId)}/pages/${pageIndex}/image`),
       retry: (runId: string) =>
         backendApiPath(`/whatsapp/daily-digest/runs/${encodeURIComponent(runId)}/retry`),
+    },
+    orderSend: {
+      settings: backendApiPath('/whatsapp/order-send/settings'),
+      menu: backendApiPath('/whatsapp/order-send/menu'),
     },
     broadcasts: {
       list: backendApiPath('/whatsapp/broadcasts'),

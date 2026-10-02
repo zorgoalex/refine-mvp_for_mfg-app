@@ -208,7 +208,7 @@ describe("WahaClient.groups", () => {
         "http://waha:3000/api/erp/groups?exclude=participants&limit=1001",
         expect.objectContaining({ headers: expect.objectContaining({ "X-Api-Key": "a".repeat(32) }) }),
       );
-      expect(record).toHaveBeenCalledWith(expect.objectContaining({ operation: "GET /api/{session}/groups?exclude=participants&limit=1001" }));
+      expect(record).toHaveBeenCalledWith(expect.objectContaining({ operation: "GET /api/{session}/groups" }));
     } finally {
       vi.unstubAllGlobals();
     }
