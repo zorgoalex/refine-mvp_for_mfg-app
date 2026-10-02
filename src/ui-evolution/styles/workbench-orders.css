@@ -1412,11 +1412,20 @@
 }
 
 :root[data-ui-variant="workbench"] .wb-materials__table th:first-child {
-  width: 28%;
+  width: 24%;
 }
 
 :root[data-ui-variant="workbench"] .wb-materials__table th.wb-materials__num {
-  width: 84px;
+  width: 72px;
+}
+
+/* «Ванны» — самая содержательная колонка: номер и название ванны; «Покрытие» — короткий статус */
+:root[data-ui-variant="workbench"] .wb-materials__table th:nth-child(6) {
+  width: auto;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__table th:nth-child(8) {
+  width: 104px;
 }
 
 :root[data-ui-variant="workbench"] .wb-materials__table td {
