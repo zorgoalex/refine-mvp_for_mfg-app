@@ -76,12 +76,15 @@
   position: sticky;
   top: 0;
   z-index: 30;
-  height: 48px;
+  /* одна строка вкладок — 48px; когда вкладки переносятся на новые строки, панель растёт
+     вместе с ними, и содержимое экрана начинается под последней строкой */
+  min-height: 48px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
   padding-right: 16px;
-  border-bottom: 1px solid var(--evo-border);
+  /* линия снизу — тенью, а не рамкой: высота панели равна высоте вкладок, от неё страницы считают липкие отступы */
+  box-shadow: 0 1px 0 var(--evo-border);
   background: color-mix(in srgb, var(--evo-canvas) 94%, transparent);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
@@ -91,17 +94,22 @@
   position: static;
   flex: 1 1 auto;
   min-width: 0;
-  height: 48px;
-  /* вкладки высотой 32px стоят по центру панели */
-  padding: 8px 0 0 16px;
+  min-height: 48px;
+  /* вкладки высотой 32px: 8px сверху и снизу, между строками — 4px */
+  padding: 8px 0 8px 16px;
   border-bottom: 0;
   background: transparent;
 }
 
+:root[data-ui-variant="workbench"] .wb-topbar > .evolution-workspace-tabs.workspace-tabs > .ant-tabs-nav .ant-tabs-nav-list {
+  row-gap: 4px;
+}
+
 :root[data-ui-variant="workbench"] .wb-topbar__actions {
   flex: 0 0 auto;
-  /* остаются справа и тогда, когда ни одной вкладки не открыто */
+  /* остаются справа и тогда, когда ни одной вкладки не открыто; при нескольких строках — в первой */
   margin-left: auto;
+  height: 48px;
   display: flex;
   align-items: center;
 }

@@ -314,6 +314,49 @@ test.describe('Workbench orders polish', () => {
         expect(pageErrors).toEqual([]);
     });
 
+    test('shell: the top bar grows with wrapped tab rows and the screen starts below it', async ({ page }) => {
+        await openWithVariant(page, 'workbench');
+        await page.setViewportSize({ width: 1100, height: 900 });
+
+        await page.goto('/orders', { waitUntil: 'domcontentloaded' });
+        await expect(page.locator('.orders-table tr[data-row-key="15"]')).toBeVisible({ timeout: 60000 });
+
+        const measure = () => page.evaluate(() => {
+            const bar = document.querySelector('.wb-topbar')!.getBoundingClientRect();
+            const tabs = [...document.querySelectorAll('.wb-topbar .ant-tabs-tab')].map((tab) => tab.getBoundingClientRect());
+            const content = document.querySelector('.evolution-shell__content')!;
+            return {
+                barBottom: Math.round(bar.bottom),
+                barHeight: Math.round(bar.height),
+                tabsHeight: Math.round(document.querySelector('.wb-topbar .workspace-tabs')!.getBoundingClientRect().height),
+                rows: new Set(tabs.map((tab) => Math.round(tab.top))).size,
+                lastTabBottom: Math.round(Math.max(...tabs.map((tab) => tab.bottom))),
+                contentTop: Math.round(content.getBoundingClientRect().top),
+                background: getComputedStyle(document.querySelector('.wb-topbar')!).backgroundColor,
+            };
+        });
+
+        const items = page.locator('.evolution-sider .ant-menu-item');
+        const total = await items.count();
+        let state = await measure();
+        for (let index = 0; index < total && state.rows < 3; index += 1) {
+            await items.nth(index).click();
+            await page.waitForTimeout(250);
+            state = await measure();
+        }
+
+        expect(state.rows).toBeGreaterThanOrEqual(3);
+        // все строки вкладок лежат внутри панели с фоном, экран начинается под ней
+        expect(state.barHeight).toBeGreaterThan(48 + 32);
+        expect(state.lastTabBottom).toBeLessThanOrEqual(state.barBottom);
+        expect(state.contentTop).toBeGreaterThanOrEqual(state.barBottom);
+        expect(state.background).not.toBe('rgba(0, 0, 0, 0)');
+        await shot(page, 'shell-tabs-wrapped');
+
+        // липкие строки страниц считают отступ от высоты вкладок — она равна высоте всей панели
+        expect(state.tabsHeight).toBe(state.barHeight);
+    });
+
     test('other variants keep the separate header and tabs rows', async ({ page }) => {
         await openWithVariant(page, 'evolution');
 
