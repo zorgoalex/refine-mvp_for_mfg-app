@@ -54,6 +54,7 @@ import {
 import { formatDateKey, formatDateForApi } from '../utils/dateUtils';
 import { broadcastsApi } from '../../../api/broadcastsApi';
 import { runCalendarSend } from '../../configuration/components/broadcasts/calendarSendModel';
+import { announceWhatsAppSendQueued, currentOwner } from '../../../components/whatsapp/myWhatsAppSendsModel';
 import { useCalendarSendSupport } from '../../configuration/components/broadcasts/calendarSendSupport';
 import { useCalendarSendTooltip } from '../../configuration/components/broadcasts/calendarSendTarget';
 import { useResponsive } from '../hooks/useResponsive';
@@ -515,6 +516,8 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   const handleSendDayToChat = useCallback(async (date: string) => {
     if (sendingDaysRef.current.has(date)) return;
     sendingDaysRef.current.add(date);
+    // Who sends: captured before the command, so a re-login while it runs cannot take over its result.
+    const owner = currentOwner();
     setSendingDays(new Set(sendingDaysRef.current));
     try {
       const toast = await runCalendarSend({
@@ -522,6 +525,8 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
         actorId: String(authSession.getUser()?.id ?? ''),
         send: broadcastsApi.calendarSend,
         minIntervalMinutes: calendarSendInterval,
+        // Queued: the bell follows this run and shows a balloon when it ends.
+        onQueued: (runId) => { void announceWhatsAppSendQueued(runId, { kind: 'calendar_send' }, owner); },
       });
       if (toast) message[toast.type](toast.text);
     } finally {

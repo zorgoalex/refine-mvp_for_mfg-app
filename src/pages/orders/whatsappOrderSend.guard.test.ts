@@ -22,6 +22,6 @@ describe('order card WhatsApp send wiring', () => {
 
   it('sends through the idempotent runner and shows its toast', () => {
     expect(show).toContain('runOrderSend({');
-    expect(show).toContain('message[toast.type](toast.text)');
+    expect(show).toContain('message[result.type](result.text)');
   });
 });

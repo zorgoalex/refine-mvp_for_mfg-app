@@ -407,6 +407,7 @@ export const apiRoutes = {
     preview: backendApiPath('/whatsapp/rules/preview'),
     status: backendApiPath('/whatsapp/status'),
     groups: backendApiPath('/whatsapp/groups'),
+    mySends: backendApiPath('/whatsapp/my-sends'),
     qr: backendApiPath('/whatsapp/qr'),
     restart: backendApiPath('/whatsapp/restart'),
     templates: backendApiPath('/whatsapp/templates'),

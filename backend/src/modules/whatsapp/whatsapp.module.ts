@@ -21,6 +21,8 @@ import { BroadcastRepository } from './broadcasts/broadcast.repository';
 import { BroadcastScheduler } from './broadcasts/broadcast.scheduler';
 import { BroadcastService } from './broadcasts/broadcast.service';
 import { BroadcastWorker } from './broadcasts/broadcast-worker.service';
+import { MySendsController } from './my-sends/my-sends.controller';
+import { MySendsRepository } from './my-sends/my-sends.repository';
 import { OrderSendActors } from './order-send/order-send-actors';
 import { OrderSendController } from './order-send/order-send.controller';
 import { OrderSendFileStore } from './order-send/order-send-file-store';
@@ -30,7 +32,7 @@ import { OrderSendWorker } from './order-send/order-send-worker.service';
 
 @Module({
   imports: [DatabaseModule, PermissionsModule, InboundSignalsModule],
-  controllers: [WhatsAppController, BroadcastController, OrderSendController],
+  controllers: [WhatsAppController, BroadcastController, OrderSendController, MySendsController],
   providers: [
     WhatsAppRuntimeConfigService,
     WahaClient,
@@ -51,6 +53,7 @@ import { OrderSendWorker } from './order-send/order-send-worker.service';
     OrderSendActors,
     OrderSendWorker,
     OrderSendService,
+    MySendsRepository,
     DailyDigestOrderReader,
     DailyDigestRenderer,
     { provide: DAILY_DIGEST_ORDER_READER, useExisting: DailyDigestOrderReader },

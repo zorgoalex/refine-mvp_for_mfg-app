@@ -29,6 +29,14 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-02", title: "WhatsApp: балуны об отправке и время под колокольчиком",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "Когда ваша отправка из карточки заказа или из календаря уходит в WhatsApp, внизу справа на 15 секунд появляется полупрозрачный балун «Отправлено в WhatsApp» (или причина, если не получилось) с крестиком для закрытия. Несколько балунов встают друг над другом. Видит только тот, кто отправлял.",
+      "Под колокольчиком — блок «WhatsApp: ожидают отправки»: ваши отправки в очереди и примерное время ухода (с учётом порога частоты и окна отправки).",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-02", title: "Шаблоны текста для поставщика",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

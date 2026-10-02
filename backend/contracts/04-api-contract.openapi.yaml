@@ -909,6 +909,19 @@ paths:
         '409': {description: 'BROADCASTS_PAUSED, BROADCAST_CALENDAR_ACTIVE, BROADCAST_CALENDAR_COOLDOWN, BROADCAST_DESTINATION_REQUIRED, BROADCAST_VERSION_CONFLICT or IDEMPOTENCY_KEY_REUSED'}
         '422': {description: Invalid request}
         '503': {description: 'BROADCAST_RUNTIME_UNAVAILABLE, BROADCAST_RENDER_BUSY, BROADCAST_STORE_BUSY, BROADCAST_STORE_UNAVAILABLE or BROADCAST_CALENDAR_UNAVAILABLE'}
+  /api/v1/whatsapp/my-sends:
+    get:
+      tags: [WhatsApp]
+      operationId: listMyWhatsAppSends
+      summary: 'WhatsApp sends started by the current user (order card and calendar) with the estimated send time'
+      description: 'Only the caller''s own sends: every active one, the finished ones of the last 24 hours (at most 30) and the followed ids. Order card sends by actor, calendar sends by initiator, newest first. No recipient ids or phones. estimatedAt — approximate start of the delivery for queued/sending items (queue state, frequency threshold and send window), null when final.'
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: ids, in: query, required: false, description: 'Comma-separated sendId/runId (at most 50) of followed sends: returned whatever their age within 7 days, own only', schema: {type: string}}
+      responses:
+        '200': {description: My sends, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppMySends'}}}}
+        '422': {description: Invalid ids}
+        '401': {$ref: '#/components/responses/Unauthorized'}
   /api/v1/whatsapp/order-send/settings:
     get:
       tags: [WhatsApp]
@@ -30231,6 +30244,29 @@ components:
         cardsPerMessage: {type: integer, enum: [1, 2]}
         captionTemplate: {type: string, maxLength: 1000}
         minIntervalMinutes: {type: integer, minimum: 1, maximum: 1440}
+    WhatsAppMySends:
+      type: object
+      required: [serverTime, items]
+      properties:
+        serverTime: {type: string, format: date-time}
+        items:
+          type: array
+          items:
+            type: object
+            required: [kind, id, title, state, active, estimatedAt, createdAt, finishedAt, errorCode, cancelReason, orderId, targetDate]
+            properties:
+              kind: {type: string, enum: [order_send, calendar_send]}
+              id: {type: string, format: uuid}
+              title: {type: string}
+              state: {type: string}
+              active: {type: boolean}
+              estimatedAt: {type: string, format: date-time, nullable: true}
+              createdAt: {type: string, format: date-time}
+              finishedAt: {type: string, format: date-time, nullable: true}
+              errorCode: {type: string, nullable: true}
+              cancelReason: {type: string, nullable: true}
+              orderId: {type: integer, nullable: true}
+              targetDate: {type: string, format: date, nullable: true}
     WhatsAppOrderFormCode:
       type: string
       enum: [production_pdf, order_pdf, production_excel, order_excel]

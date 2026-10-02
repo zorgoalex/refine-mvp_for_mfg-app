@@ -100,7 +100,8 @@ import { groupCheckboxState, toggleGroupSelection, filterNumericKeys } from './g
 import { authSession } from '../../api/authSession';
 import { orderSendApi } from '../../api/orderSendApi';
 import { buildOrderWhatsAppMenuItems, describeOrderWhatsAppSend, isOrderWhatsAppKey, parseOrderWhatsAppKey } from './whatsappOrderSendMenu';
-import { followOrderSend, runOrderSend } from './whatsappOrderSendModel';
+import { runOrderSend } from './whatsappOrderSendModel';
+import { announceWhatsAppSendQueued, currentOwner } from '../../components/whatsapp/myWhatsAppSendsModel';
 import { useOrderSendMenu } from './whatsappOrderSendSupport';
 import { mapOrderDtoToFormValues } from '../../api/mappers/orderMapper';
 import { OrderCatalogLinesTable } from './components/OrderCatalogLinesTable';
@@ -1624,6 +1625,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     const orderId = Number(record?.order_id);
     if (!parsed || !orderSendMenu || !Number.isFinite(orderId) || orderSendBusy.has(key)) return;
     const { targetLabel, formTitle } = describeOrderWhatsAppSend(orderSendMenu, parsed.target, parsed.form);
+    // Who sends: captured before the command, so a re-login while it runs cannot take over its result.
+    const owner = currentOwner();
     setOrderSendBusy((keys) => new Set(keys).add(key));
     void runOrderSend({
       orderId,
@@ -1634,11 +1637,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       formTitle,
       send: orderSendApi.send,
       confirmAfterUnknown,
-      // The delivery runs in the background: tell the user how it ended (sent, no WhatsApp, unknown…).
-      onQueued: (queued) => {
-        void followOrderSend({ orderId, sendId: queued.sendId, list: orderSendApi.list, targetLabel, formTitle })
-          .then((toast) => message[toast.type](toast.text));
-      },
+      // The delivery runs in the background: the shell tracker follows it (also through an older
+      // backend's endpoints) and shows a balloon when it ends. The owner was captured before the POST.
+      onQueued: (queued) => { void announceWhatsAppSendQueued(queued.sendId, { kind: 'order_send', orderId }, owner); },
     })
       .then((result) => {
         if (!result) return;

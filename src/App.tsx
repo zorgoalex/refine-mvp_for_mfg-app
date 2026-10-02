@@ -1,4 +1,5 @@
 import { Refine, Authenticated } from "@refinedev/core";
+import { WhatsAppSendsProvider } from "./components/whatsapp/WhatsAppSendsProvider";
 import { RefineKbar, RefineKbarProvider } from "@refinedev/kbar";
 import { VariantWorkspaceLayout } from "./ui-variant/shellRegistry";
 import routerProvider, { CatchAllNavigate } from "@refinedev/react-router-v6";
@@ -801,7 +802,9 @@ const ThemedApp = () => {
                       key="authenticated-routes"
                       fallback={<CatchAllNavigate to="/login" />}
                     >
-                      <VariantWorkspaceLayout />
+                      <WhatsAppSendsProvider>
+                        <VariantWorkspaceLayout />
+                      </WhatsAppSendsProvider>
                     </Authenticated>
                   }
                 >
