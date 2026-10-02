@@ -38,6 +38,22 @@ export interface UnallocatedReceiptRow {
   remainingHash: string;
 }
 
+/** Состояние правила-включателя сервиса: включено ли и кому слать (пусто — умолчание сервиса). */
+export interface ServiceRuleState {
+  ruleCode: string;
+  isEnabled: boolean;
+  roleCodes: string[];
+  userIds: number[];
+  /** md5 `recipients_json` — сверка в транзакции записи: сменились получатели — запись прогона пропускается (R1-4). */
+  recipientsHash: string;
+}
+
+/** Сверка с правилом в транзакции записи: правило выключено или получатели сменились — запись не делается. */
+export interface ServiceRuleGuard {
+  ruleCode: string;
+  recipientsHash: string;
+}
+
 export interface ServiceNotificationInput {
   eventType: 'procurement.deficit_digest' | 'procurement.receipt_unallocated';
   aggregateType: string;
@@ -62,7 +78,14 @@ export class PgProcurementNotificationsRepository {
   private readonly demandBatch: number;
   private readonly receiptBatch: number;
 
-  constructor(private readonly database: DatabaseService, limits: { demandBatch?: number; receiptBatch?: number } = {}) {
+  /** Только для тестов гонок: пауза после блокировки строки правила, до вставок (детерминированный порядок). */
+  private readonly afterRuleLocked?: () => Promise<void>;
+
+  constructor(
+    private readonly database: DatabaseService,
+    limits: { demandBatch?: number; receiptBatch?: number; afterRuleLocked?: () => Promise<void> } = {},
+  ) {
+    this.afterRuleLocked = limits.afterRuleLocked;
     this.demandBatch = limits.demandBatch ?? DEMAND_SCAN_ORDER_LIMIT;
     this.receiptBatch = limits.receiptBatch ?? UNALLOCATED_DOCUMENT_LIMIT;
   }
@@ -84,15 +107,54 @@ export class PgProcurementNotificationsRepository {
 
   /** Активные пользователи, у роли которых буквально есть право (матрица ролей, не статические умолчания). */
   async permissionHolders(permission: string): Promise<CurrentUser[]> {
+    return this.selectUsers({ byPermission: permission, roleCodes: [], userIds: [] }, [permission]);
+  }
+
+  async loadRule(ruleCode: string): Promise<ServiceRuleState> {
+    const row = (await this.database.query<{ is_enabled: boolean; recipients_json: unknown; recipients_hash: string }>(
+      `SELECT is_enabled, recipients_json, md5(COALESCE(recipients_json, '{}'::jsonb)::text) AS recipients_hash
+         FROM notification_rules WHERE rule_code = $1`,
+      [ruleCode],
+    )).rows[0];
+    const recipients = (row?.recipients_json ?? {}) as { roleCodes?: unknown; userIds?: unknown };
+    return {
+      ruleCode,
+      isEnabled: row?.is_enabled === true,
+      roleCodes: Array.isArray(recipients.roleCodes) ? recipients.roleCodes.filter((code): code is string => typeof code === 'string') : [],
+      userIds: Array.isArray(recipients.userIds) ? recipients.userIds.map(Number).filter((id) => Number.isSafeInteger(id) && id > 0) : [],
+      recipientsHash: row?.recipients_hash ?? '',
+    };
+  }
+
+  /**
+   * Получатели сервисного правила (план 2026-10-02 §2.1): пусто — умолчание (право `defaultPermission`), иначе —
+   * пользователи выбранных ролей ∪ выбранные пользователи; ВСЕГДА только активные несервисные с каждым правом из
+   * `required` (буквально по матрице ролей) — данные закупа не уходят тому, кто их не видит.
+   */
+  async ruleRecipients(rule: Pick<ServiceRuleState, 'roleCodes' | 'userIds'>, defaultPermission: string, required: string[]): Promise<CurrentUser[]> {
+    const custom = rule.roleCodes.length > 0 || rule.userIds.length > 0;
+    return this.selectUsers(custom ? { byPermission: null, roleCodes: rule.roleCodes, userIds: rule.userIds } : { byPermission: defaultPermission, roleCodes: [], userIds: [] }, required);
+  }
+
+  private async selectUsers(
+    filter: { byPermission: string | null; roleCodes: string[]; userIds: number[] },
+    required: string[],
+  ): Promise<CurrentUser[]> {
     const rows = (await this.database.query<{ user_id: string; username: string | null; role_id: string | number }>(
       `SELECT u.user_id::text AS user_id, u.username, u.role_id
          FROM users u
          JOIN roles r ON r.role_id = u.role_id AND r.is_active = true
-         JOIN role_permissions rp ON rp.role_id = u.role_id AND rp.permission_name = $1 AND rp.is_enabled = true
-         JOIN permissions_catalog pc ON pc.permission_name = rp.permission_name AND pc.is_active = true
         WHERE u.is_active = true AND COALESCE(u.is_service_account, false) = false
+          AND CASE WHEN $1::text IS NOT NULL
+                   THEN EXISTS (SELECT 1 FROM role_permissions rp JOIN permissions_catalog pc ON pc.permission_name = rp.permission_name AND pc.is_active = true
+                                 WHERE rp.role_id = u.role_id AND rp.permission_name = $1 AND rp.is_enabled = true)
+                   ELSE (r.role_code = ANY($2::text[]) OR u.user_id = ANY($3::bigint[])) END
+          AND NOT EXISTS (
+            SELECT 1 FROM unnest($4::text[]) AS need(permission_name)
+             WHERE NOT EXISTS (SELECT 1 FROM role_permissions rp JOIN permissions_catalog pc ON pc.permission_name = rp.permission_name AND pc.is_active = true
+                                WHERE rp.role_id = u.role_id AND rp.permission_name = need.permission_name AND rp.is_enabled = true))
         ORDER BY u.user_id`,
-      [permission],
+      [filter.byPermission, filter.roleCodes, filter.userIds, required],
     )).rows;
     const byRole = new Map<number, Awaited<ReturnType<typeof loadRoleAuthorizationWith>>>();
     const users: CurrentUser[] = [];
@@ -236,8 +298,19 @@ export class PgProcurementNotificationsRepository {
    * Уведомление сервиса (§5.7 п.4): событие outbox с ключом идемпотентности и in_app-запись с ключом `${key}:in_app`
    * в одной транзакции; повтор с тем же ключом ничего не создаёт. Событие сразу «processed»: реле его не обрабатывает.
    */
-  async writeServiceNotification(input: ServiceNotificationInput): Promise<boolean> {
+  async writeServiceNotification(input: ServiceNotificationInput, guard?: ServiceRuleGuard): Promise<boolean> {
     return this.database.transaction(async (client: DatabaseClient) => {
+      if (guard) {
+        // Точка сериализации с PATCH правила (R1-4): FOR SHARE строки правила ДО вставок; выключено или получатели
+        // сменились после выборки прогона — запись пропускается (следующий прогон выберет заново).
+        const rule = (await client.query<{ is_enabled: boolean; recipients_hash: string }>(
+          `SELECT is_enabled, md5(COALESCE(recipients_json, '{}'::jsonb)::text) AS recipients_hash
+             FROM notification_rules WHERE rule_code = $1 FOR SHARE`,
+          [guard.ruleCode],
+        )).rows[0];
+        if (!rule || rule.is_enabled !== true || rule.recipients_hash !== guard.recipientsHash) return false;
+        await this.afterRuleLocked?.();
+      }
       const event = await client.query(
         `INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key, status, processed_at)
          VALUES ($1, $2, $3, $4::jsonb, $5, 'processed', now())

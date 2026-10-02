@@ -59,9 +59,10 @@ export function validateNotificationRuleInput(
   }
 
   const { resolvers = [], roleCodes = [], userIds = [] } = input.recipients ?? {};
-  // Событие сервиса (сводка закупа): получатели — по праву, правило — только включатель; свои получатели не задаются.
+  // Событие сервиса (сводки закупа): получатели — роли и/или пользователи (пусто — умолчание сервиса: право
+  // «Закупки: управление»); способы определения (resolvers) не применимы. Сервис всегда сверяет право получателя.
   if (def.owner === 'service') {
-    if (resolvers.length > 0 || roleCodes.length > 0 || userIds.length > 0) {
+    if (resolvers.length > 0) {
       return { ok: false, code: 'SERVICE_EVENT_RECIPIENTS_FIXED' };
     }
     // Правило сервиса — только включатель (4б-2 CR2-2): группа, важность и тексты задаёт сервис, их правка не действует.

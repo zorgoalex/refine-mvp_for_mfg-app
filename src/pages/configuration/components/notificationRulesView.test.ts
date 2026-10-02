@@ -275,4 +275,20 @@ describe('notificationRulesView', () => {
     expect(isServiceEventType('procurement.receipt_unallocated')).toBe(true);
     expect(isServiceEventType('order.resource_demand_changed_after_mark')).toBe(false);
   });
+
+  it('service rules (plan 2026-10-02): recipients ALWAYS sent — roles/users or {} to reset to the default; resolvers never', async () => {
+    const { describeServiceRecipients } = await import('./notificationRulesView');
+    const base = { eventType: 'procurement.receipt_unallocated', priority: 100, isEnabled: true, channels: ['in_app'] } as unknown as NotificationRuleDraft;
+    const chosen = buildUpdatePayload({ ...base, resolvers: [], roleCodes: ['manager'], userIds: [7] } as NotificationRuleDraft, 'кому', '2026-10-02T00:00:00.000Z');
+    expect(chosen.recipients).toEqual({ roleCodes: ['manager'], userIds: [7] });
+    const cleared = buildUpdatePayload({ ...base, resolvers: [], roleCodes: [], userIds: [] } as NotificationRuleDraft, 'сброс', '2026-10-02T00:00:00.000Z');
+    expect(cleared.recipients).toEqual({});
+    const stray = buildUpdatePayload({ ...base, resolvers: ['order_manager'], roleCodes: [], userIds: [3] } as unknown as NotificationRuleDraft, 'x', '2026-10-02T00:00:00.000Z');
+    expect(stray.recipients).toEqual({ userIds: [3] });
+    // Обычное правило: пустые получатели по-прежнему не отправляются.
+    expect(buildUpdatePayload({ ...base, eventType: 'order.status_changed', resolvers: [], roleCodes: [], userIds: [] } as NotificationRuleDraft, 'x', '2026-10-02T00:00:00.000Z').recipients).toBeUndefined();
+    expect(describeServiceRecipients('procurement.receipt_unallocated', null)).toBe('По умолчанию: все с правом «Закупки: управление»');
+    expect(describeServiceRecipients('procurement.receipt_unallocated', 'пользователи: Иван')).toBe('пользователи: Иван (только с правом «Закупки: просмотр»)');
+    expect(describeServiceRecipients('procurement.deficit_digest', 'роли: Снабжение')).toBe('роли: Снабжение (только с правом «Закупки: управление»)');
+  });
 });

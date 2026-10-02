@@ -113,7 +113,8 @@ export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefini
     recipientVisibility: 'procurement',
     maxEventAgeHours: 24,
   },
-  // Ф.4б-2: сводка дефицита (procurement.manage) и «приход не распределён» (procurement.view) — пишет сервис закупа.
+  // Ф.4б-2: сводка дефицита (procurement.manage) и сводка нераспределённых приходов (procurement.view) — пишет сервис
+  // закупа; получатели — `recipients` правила (роли/пользователи) или умолчание сервиса, всегда с проверкой права.
   'procurement.deficit_digest': {
     eventType: 'procurement.deficit_digest',
     aggregateType: 'user',
@@ -126,9 +127,10 @@ export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefini
     allowedChannels: ['in_app'],
     featureFlag: 'procurementNotifications',
   },
+  // Ежедневная сводка нераспределённых приходов на получателя (агрегат — пользователь, план 2026-10-02 §2.2).
   'procurement.receipt_unallocated': {
     eventType: 'procurement.receipt_unallocated',
-    aggregateType: 'onec_document',
+    aggregateType: 'user',
     owner: 'service',
     contextFields: [],
     supportedResolvers: [],

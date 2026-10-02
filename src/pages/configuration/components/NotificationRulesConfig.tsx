@@ -28,6 +28,8 @@ import {
   isProcurementEventType,
   isServiceEventType,
   SERVICE_EVENT_RECIPIENTS,
+  SERVICE_EVENT_REQUIRED_RIGHT,
+  describeServiceRecipients,
   type NotificationRuleDraft,
 } from './notificationRulesView';
 
@@ -652,7 +654,9 @@ export function NotificationRulesConfig() {
               title: 'Получатели',
               key: 'recipients',
               render: (_, rule) => (
-                <Text type="secondary">{SERVICE_EVENT_RECIPIENTS[rule.eventType] ?? describeRecipients(rule, roleNameByCode, userNameById)}</Text>
+                <Text type="secondary">{isServiceEventType(rule.eventType)
+                  ? describeServiceRecipients(rule.eventType, (rule.recipients.roleCodes?.length || rule.recipients.userIds?.length) ? describeRecipients(rule, roleNameByCode, userNameById) : null)
+                  : describeRecipients(rule, roleNameByCode, userNameById)}</Text>
               ),
             },
             {
@@ -856,8 +860,34 @@ export function NotificationRulesConfig() {
           )}
 
           {isServiceEventType(draft.eventType) ? (
-            <Form.Item label="Получатели">
-              <Text type="secondary">{SERVICE_EVENT_RECIPIENTS[draft.eventType]}</Text>
+            <Form.Item
+              label="Получатели"
+              extra={`Пусто — ${SERVICE_EVENT_RECIPIENTS[draft.eventType].replace(/^По умолчанию: /, '')}. Получают только те, у кого есть право «${SERVICE_EVENT_REQUIRED_RIGHT[draft.eventType]}».`}
+            >
+              <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                <Select<string[]>
+                  mode="multiple"
+                  value={draft.roleCodes}
+                  onChange={(values) => updateDraft({ roleCodes: values })}
+                  options={selectedRoleOptions}
+                  placeholder="Роли получателей (пусто — по умолчанию)"
+                  loading={rolesLoading}
+                  optionFilterProp="label"
+                  showSearch
+                  allowClear
+                />
+                <Select<number[]>
+                  mode="multiple"
+                  value={draft.userIds}
+                  onChange={(values) => updateDraft({ userIds: values })}
+                  options={selectedUserOptions}
+                  placeholder="Пользователи-получатели (пусто — по умолчанию)"
+                  loading={usersLoading}
+                  optionFilterProp="label"
+                  showSearch
+                  allowClear
+                />
+              </Space>
             </Form.Item>
           ) : (
           <Form.Item label="Получатели" required>

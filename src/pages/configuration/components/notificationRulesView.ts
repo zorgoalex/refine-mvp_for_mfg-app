@@ -196,7 +196,14 @@ export function buildUpdatePayload(
   result.conditions = buildConditions(draft);
 
   const recipients = buildRecipients(draft);
-  if (Object.keys(recipients).length > 0) {
+  if (draft.eventType && isServiceEventType(draft.eventType)) {
+    // Сервисное правило закупа: получатели отправляются ВСЕГДА — пустой выбор `{}` сбрасывает к умолчанию
+    // (иначе backend оставил бы прежних получателей, план 2026-10-02 R1-1); способы определения не применимы.
+    result.recipients = {
+      ...(recipients.roleCodes ? { roleCodes: recipients.roleCodes } : {}),
+      ...(recipients.userIds ? { userIds: recipients.userIds } : {}),
+    };
+  } else if (Object.keys(recipients).length > 0) {
     result.recipients = recipients;
   }
 
@@ -234,13 +241,26 @@ export const PROCUREMENT_EVENT_TYPES: readonly string[] = [
 ];
 
 /**
- * События сервиса закупа (ф.4б-2): уведомления пишет сервис по расписанию, правило — только включатель, получатели —
- * по праву (backend не принимает своих получателей).
+ * События сервиса закупа (ф.4б-2, план 2026-10-02): уведомления пишет сервис по расписанию (раз в день); получатели —
+ * роли и/или пользователи правила, пусто — умолчание. Получает только тот, у кого есть нужное право.
  */
 export const SERVICE_EVENT_RECIPIENTS: Readonly<Record<string, string>> = {
-  'procurement.deficit_digest': 'Все пользователи с правом «Закупки: управление» — каждому по его заказам',
-  'procurement.receipt_unallocated': 'Все пользователи с правом «Закупки: просмотр»',
+  'procurement.deficit_digest': 'По умолчанию: все с правом «Закупки: управление» — каждому по его заказам',
+  'procurement.receipt_unallocated': 'По умолчанию: все с правом «Закупки: управление»',
 };
+
+/** Право, без которого сервис не пошлёт уведомление выбранному получателю. */
+export const SERVICE_EVENT_REQUIRED_RIGHT: Readonly<Record<string, string>> = {
+  'procurement.deficit_digest': 'Закупки: управление',
+  'procurement.receipt_unallocated': 'Закупки: просмотр',
+};
+
+/** Описание получателей сервисного правила в таблице: свои — с оговоркой о праве; пусто — умолчание. */
+export function describeServiceRecipients(eventType: string, custom: string | null): string {
+  if (!custom) return SERVICE_EVENT_RECIPIENTS[eventType] ?? '—';
+  const right = SERVICE_EVENT_REQUIRED_RIGHT[eventType];
+  return right ? `${custom} (только с правом «${right}»)` : custom;
+}
 
 export function isServiceEventType(eventType: string): boolean {
   return eventType in SERVICE_EVENT_RECIPIENTS;
