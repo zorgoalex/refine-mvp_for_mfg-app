@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { RightOutlined } from '@ant-design/icons';
+import { LeftOutlined, RightOutlined } from '@ant-design/icons';
 
 export const findTableHorizontalScroller = (root: ParentNode): HTMLElement | null =>
   (root.querySelector('.ant-table-body') as HTMLElement | null) ??
@@ -16,6 +16,8 @@ interface TableTopScrollProps {
   className?: string;
   manageAntTableScroll?: boolean;
   horizontalEdgeScrollButton?: boolean;
+  /** Extra button on the left edge, shown only while the table is scrolled away from its start. */
+  horizontalBackScrollButton?: boolean;
 }
 
 const VERTICAL_WHEEL_SCROLL_QUIET_MS = 160;
@@ -48,6 +50,14 @@ export const syncHorizontalEdgeButton = (
   button.title = scrollsBack ? 'Прокрутить влево' : 'Прокрутить вправо';
 };
 
+export const syncHorizontalBackButton = (
+  button: HTMLButtonElement | null,
+  scroller: HTMLElement | null,
+) => {
+  if (!button || !scroller) return;
+  button.dataset.visible = scroller.scrollLeft > 1 ? 'true' : 'false';
+};
+
 export const isPrimarilyVerticalWheel = (
   event: Pick<WheelEvent, 'deltaX' | 'deltaY'>,
 ): boolean => Math.abs(event.deltaY) > Math.abs(event.deltaX);
@@ -72,11 +82,13 @@ export const TableTopScroll: React.FC<TableTopScrollProps> = ({
   className,
   manageAntTableScroll = false,
   horizontalEdgeScrollButton = false,
+  horizontalBackScrollButton = false,
 }) => {
   const wrapRef = useRef<HTMLDivElement>(null);
   const topRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLElement | null>(null);
   const edgeButtonRef = useRef<HTMLButtonElement>(null);
+  const backButtonRef = useRef<HTMLButtonElement>(null);
   const [scrollState, setScrollState] = useState<TableTopScrollState>({
     scrollWidth: 0,
     clientWidth: 0,
@@ -130,6 +142,7 @@ export const TableTopScroll: React.FC<TableTopScrollProps> = ({
           : next,
       );
       syncHorizontalEdgeButton(edgeButtonRef.current, scroller);
+      syncHorizontalBackButton(backButtonRef.current, scroller);
       scheduleEdgeButtonTop();
     };
 
@@ -150,6 +163,7 @@ export const TableTopScroll: React.FC<TableTopScrollProps> = ({
         headerScroller.scrollLeft = scrollLeft;
       }
       syncHorizontalEdgeButton(edgeButtonRef.current, scroller);
+      syncHorizontalBackButton(backButtonRef.current, scroller);
       syncingScroller = false;
     };
 
@@ -244,6 +258,15 @@ export const TableTopScroll: React.FC<TableTopScrollProps> = ({
     syncHorizontalEdgeButton(edgeButtonRef.current, scroller);
   };
 
+  const scrollTableBack = () => {
+    const scroller = scrollerRef.current ?? (wrapRef.current ? findTableHorizontalScroller(wrapRef.current) : null);
+    if (!scroller) return;
+    const step = Math.max(160, Math.floor(scroller.clientWidth * 0.82));
+    const nextLeft = Math.max(0, scroller.scrollLeft - step);
+    scroller.scrollTo({ left: nextLeft, behavior: 'smooth' });
+    if (topRef.current) topRef.current.scrollTo({ left: nextLeft, behavior: 'smooth' });
+  };
+
   return (
     <div
       ref={wrapRef}
@@ -274,6 +297,19 @@ export const TableTopScroll: React.FC<TableTopScrollProps> = ({
           onClick={scrollTableFromEdgeButton}
         >
           <RightOutlined aria-hidden />
+        </button>
+      ) : null}
+      {horizontalEdgeScrollButton && horizontalBackScrollButton && scrollState.visible ? (
+        <button
+          ref={backButtonRef}
+          type="button"
+          className="app-table-horizontal-edge-button app-table-horizontal-edge-button--left"
+          data-visible="false"
+          aria-label="Прокрутить список деталей влево"
+          title="Прокрутить влево"
+          onClick={scrollTableBack}
+        >
+          <LeftOutlined aria-hidden />
         </button>
       ) : null}
     </div>

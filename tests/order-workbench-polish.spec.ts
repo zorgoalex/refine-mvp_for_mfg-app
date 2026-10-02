@@ -146,11 +146,44 @@ test.describe('Workbench orders polish', () => {
         for (const title of ['Материалы заказа', 'Даты', 'Производство', 'Присадки', 'Файлы', 'Служебная информация']) {
             await expect(additional.getByText(title, { exact: true }).first()).toBeVisible();
         }
+        // материалы: одна шапка на плёнку и листовые, колонка «Ванны», строки одной высоты
+        const materials = additional.locator('.wb-materials__table');
+        await expect(materials.locator('thead tr')).toHaveCount(1);
+        await expect(materials.locator('thead th')).toContainText(['Материал', 'м²', 'Детали', 'Пог. м', 'Листы', 'Ванны']);
+        await expect(materials.locator('.wb-materials__section')).toHaveText([/Плёнка/, /Листовые материалы/]);
+        const rowHeights = await materials.locator('tbody tr:not(.wb-materials__section)').evaluateAll(
+            (rows) => rows.map((row) => Math.round(row.getBoundingClientRect().height)),
+        );
+        expect(new Set(rowHeights).size).toBe(1);
         await shot(page, 'order-card-additional');
 
         await tabs.getByRole('tab', { name: /Детали/ }).click();
         await expect(page.locator('.order-show-info-panel')).toHaveCount(0);
         await expect(page.locator('.order-show-details-table')).toBeVisible();
+
+        // свёрнутый «Ход производства» показывает коды этапов с числом деталей
+        const codes = page.locator('.order-production-flow-codes__item');
+        await expect(codes).toHaveCount(7);
+        await expect(codes.filter({ hasText: /^Р\s*5$/ })).toHaveCount(1);
+        await expect(codes.filter({ hasText: /^З\s*1$/ })).toHaveCount(1);
+
+        // колонка ХДФ скрыта, пока в заказе нет ХДФ
+        await expect(page.locator('.order-show-details-table thead th', { hasText: /^ХДФ$/ })).toHaveCount(0);
+
+        // группировка: у каждой группы, включая первую, заголовок «по чему разбито: значение»
+        await page.getByRole('button', { name: /Группировать/ }).click();
+        await page.getByRole('menuitem', { name: 'по статусу' }).click();
+        const separation = page.getByRole('checkbox', { name: 'Разделение на группы' });
+        if (!(await separation.isChecked())) await separation.check();
+        const groupHeads = page.locator('.order-show-details-table .wb-group-head');
+        await expect(groupHeads).toHaveCount(2);
+        await expect(groupHeads.nth(0)).toContainText('Статус');
+        await expect(groupHeads.nth(0)).toContainText('Распилен');
+        await expect(groupHeads.nth(0)).toContainText('2 поз.');
+        await expect(groupHeads.nth(1)).toContainText('Закатан');
+        const firstRowKind = await page.locator('.order-show-details-table .ant-table-tbody > tr.ant-table-row').first().getAttribute('class');
+        expect(firstRowKind).toContain('detail-group-separator');
+        await shot(page, 'order-card-grouped');
 
         // правая колонка сворачивается, таблица деталей занимает освободившуюся ширину
         const tableWidth = () => page.locator('.order-show-details-section').evaluate((element) => Math.round(element.getBoundingClientRect().width));
@@ -158,6 +191,10 @@ test.describe('Workbench orders polish', () => {
         await page.getByRole('button', { name: 'Свернуть боковую панель' }).click();
         await expect(side).toBeHidden();
         expect(await tableWidth()).toBeGreaterThan(widthWithSide + 250);
+        // от свёрнутой колонки остаётся тонкая линия, которой её можно вернуть
+        const rail = page.locator('.wb-order-side-rail');
+        await expect(rail).toBeVisible();
+        expect(await rail.evaluate((element) => Math.round(element.getBoundingClientRect().width))).toBeLessThanOrEqual(16);
         await shot(page, 'order-card-wide');
         // выбор запоминается в браузере (мок-окружение очищает localStorage при загрузке, поэтому без reload)
         expect(await page.evaluate(() => localStorage.getItem('erp.orderShow.sideCollapsed'))).toBe('1');
@@ -194,6 +231,12 @@ test.describe('Workbench orders polish', () => {
         await expect(bar).toContainText('м²');
         await expect(bar).toContainText('160 381');
         await expect(bar).toContainText('остаток 100 381');
+        // статусы в строке не обрезаются
+        for (const pill of await bar.locator('.wb-pill').all()) {
+            expect(await pill.evaluate((element) => element.scrollWidth > element.clientWidth + 1)).toBe(false);
+        }
+        const overflow = await bar.evaluate((element) => element.scrollWidth - element.clientWidth);
+        expect(overflow).toBeLessThanOrEqual(1);
         await expect(bar.getByRole('button', { name: 'Изменить' })).toBeVisible();
         await shot(page, 'order-card-scrolled');
     });

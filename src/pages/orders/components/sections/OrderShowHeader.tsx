@@ -398,7 +398,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
             <span className="wb-order-bar__fact" title="Сумма заказа и оплата">
               <b>{money(finalAmount)}</b>
               {remainingAmount > 0
-                ? <> · оплачено {money(paidAmount)} · <span data-tone="warning">остаток {money(remainingAmount)}</span></>
+                ? <> · <span data-tone="warning">остаток {money(remainingAmount)}</span></>
                 : <> · <span data-tone="ready">оплачен полностью</span></>}
             </span>
           )}

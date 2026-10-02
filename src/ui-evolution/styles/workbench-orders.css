@@ -268,10 +268,11 @@
 
 :root[data-ui-variant="workbench"] .order-show-page--workbench {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
+  /* основная колонка | линия-ручка правой колонки | правая колонка */
+  grid-template-columns: minmax(0, 1fr) 16px 300px;
   /* строки 1–9 — по содержимому; высоту правой колонки забирает последняя */
   grid-template-rows: repeat(9, auto) 1fr;
-  column-gap: 16px;
+  column-gap: 0;
   align-items: start;
 }
 
@@ -333,7 +334,7 @@
 }
 
 :root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-side {
-  grid-column: 2;
+  grid-column: 3;
   grid-row: 4 / 11;
   display: flex;
   flex-direction: column;
@@ -1143,40 +1144,6 @@
   font-size: 12px;
 }
 
-/* --- правая колонка сворачивается: таблица деталей занимает всю ширину --- */
-:root[data-ui-variant="workbench"] .order-show-page--workbench-wide {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-:root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-side[hidden] {
-  display: none;
-}
-
-:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-tabs-shell {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border-bottom: 1px solid var(--evo-border);
-}
-
-:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-tabs-shell > .order-show-info-tabs {
-  flex: 1 1 auto;
-  min-width: 0;
-  border-bottom: 0 !important;
-}
-
-:root[data-ui-variant="workbench"] .wb-order-side-toggle {
-  flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
-  font-size: 15px;
-}
-
-:root[data-ui-variant="workbench"] .wb-order-side-toggle:focus-visible {
-  outline: 2px solid var(--evo-primary);
-  outline-offset: 1px;
-}
-
 /* --- «Дополнительная информация»: материалы сверху, остальное — ровными блоками на всю ширину --- */
 :root[data-ui-variant="workbench"] .order-show-page--workbench .order-additional {
   display: flex;
@@ -1229,4 +1196,311 @@
 
 :root[data-ui-variant="workbench"] .order-show-page--workbench .order-additional__title {
   font-size: 14px !important;
+}
+
+/* файлам и скринам раскроя — вся ширина, чтобы превью шли в ряд, а не столбцом */
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-additional__files {
+  flex-basis: 100% !important;
+}
+
+/* сжатая строка: статусы не обрезаются, сжимается только имя клиента */
+:root[data-ui-variant="workbench"] .wb-order-bar > .wb-pill,
+:root[data-ui-variant="workbench"] .wb-order-bar__title,
+:root[data-ui-variant="workbench"] .wb-order-bar__production {
+  flex: 0 0 auto;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-bar__meta {
+  flex: 0 1 auto;
+  min-width: 48px;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-additional .order-telegram-screenshots__files {
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+/* на средних экранах значок этапа в сжатой строке уступает место составу и оплате */
+@media (max-width: 1560px) {
+  :root[data-ui-variant="workbench"] .wb-order-bar__production {
+    display: none;
+  }
+}
+
+/* --- правая колонка сворачивается в тонкую линию; таблица деталей занимает её место --- */
+:root[data-ui-variant="workbench"] .order-show-page--workbench-wide {
+  grid-template-columns: minmax(0, 1fr) 16px;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-side[hidden] {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-side-rail {
+  grid-column: 2;
+  grid-row: 4 / 11;
+  align-self: stretch;
+  position: relative;
+  width: 16px;
+  min-height: 120px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+/* сама линия */
+:root[data-ui-variant="workbench"] .wb-order-side-rail::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 7px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--evo-border);
+  transition: background-color 120ms ease;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-side-rail:hover::before,
+:root[data-ui-variant="workbench"] .wb-order-side-rail:focus-visible::before {
+  background: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-order-side-rail:focus-visible {
+  outline: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-side-rail__grip {
+  position: sticky;
+  top: calc(var(--wb-order-sticky-top) + var(--wb-order-bar-height) + 16px);
+  z-index: 1;
+  width: 16px;
+  height: 36px;
+  margin-top: 14px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--evo-surface);
+  box-shadow: var(--evo-shadow);
+  color: var(--evo-text-secondary);
+  font-size: 9px;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-side-rail:hover .wb-order-side-rail__grip,
+:root[data-ui-variant="workbench"] .wb-order-side-rail:focus-visible .wb-order-side-rail__grip {
+  color: var(--evo-primary);
+  box-shadow: 0 0 0 1px var(--evo-primary);
+}
+
+@media (max-width: 1240px) {
+  /* колонка уходит под таблицу — ручка не нужна, сводка всегда видна */
+  :root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-side-rail {
+    display: none;
+  }
+
+  :root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-side[hidden] {
+    display: grid;
+  }
+}
+
+/* --- заголовок группы деталей: по чему разбито и значение --- */
+:root[data-ui-variant="workbench"] .order-show-page--workbench .details-grouped .ant-table-tbody > tr.detail-group-separator > td {
+  height: 32px;
+  padding: 6px 10px !important;
+  /* заголовок группы — слева и на месте при горизонтальной прокрутке */
+  text-align: left !important;
+  border-top: 1px solid var(--evo-border);
+  background-color: var(--evo-surface-muted) !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-group-head {
+  position: sticky;
+  left: 10px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  max-width: 100%;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-group-head__field {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-group-head__field::after {
+  content: ':';
+}
+
+:root[data-ui-variant="workbench"] .wb-group-head__value {
+  overflow: hidden;
+  color: var(--evo-text);
+  font-weight: 650;
+  text-overflow: ellipsis;
+}
+
+:root[data-ui-variant="workbench"] .wb-group-head__count {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- кнопки горизонтальной прокрутки: спокойные, полупрозрачные --- */
+:root[data-ui-variant="workbench"] .order-show-page--workbench .app-table-horizontal-edge-button {
+  width: 36px;
+  height: 36px;
+  background: color-mix(in srgb, var(--evo-primary) 16%, transparent);
+  color: var(--evo-primary);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--evo-primary) 20%, transparent);
+  opacity: 0.7;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .app-table-horizontal-edge-button--left[data-visible="false"] {
+  opacity: 0;
+}
+
+/* --- свёрнутый «Ход производства»: коды этапов с числом деталей, намеренно бледно --- */
+:root[data-ui-variant="workbench"] .order-production-flow-codes {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0 9px;
+  color: color-mix(in srgb, var(--evo-text-secondary) 62%, transparent);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .order-production-flow-codes__item {
+  display: inline-flex;
+  gap: 3px;
+}
+
+:root[data-ui-variant="workbench"] .order-production-flow-codes__item b {
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .order-production-flow-codes__item[data-empty="true"] {
+  opacity: 0.5;
+}
+
+/* --- материалы заказа: одна шапка на плёнку и листовые, строки одной высоты --- */
+:root[data-ui-variant="workbench"] .wb-materials {
+  overflow-x: auto;
+  border: 1px solid var(--evo-border);
+  border-radius: var(--evo-radius-md);
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__table th {
+  height: 36px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--evo-border);
+  background: var(--evo-surface-muted);
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: left;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__table th:first-child {
+  width: 28%;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__table th.wb-materials__num {
+  width: 84px;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__table td {
+  /* высота рассчитана на две строки текста в ячейке */
+  height: 44px;
+  padding: 3px 10px;
+  border-bottom: 1px solid var(--evo-border);
+  line-height: 1.3;
+  vertical-align: middle;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__table tr:last-child > td {
+  border-bottom: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__table .wb-materials__num {
+  text-align: right;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__table td[data-negative="true"] {
+  color: var(--evo-danger);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__clamp {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__dash {
+  color: var(--evo-border-strong);
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__section > td {
+  height: 34px;
+  background: var(--evo-surface-muted);
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__section-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__section-line b {
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__section-line .ant-typography {
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__total > td {
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__empty > td {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__baths {
+  display: grid;
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__bath-numbers,
+:root[data-ui-variant="workbench"] .wb-materials__bath-names {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__bath-names {
+  color: var(--evo-text-secondary);
+  font-size: 11.5px;
+}
+
+/* остальные таблицы вкладки: строки той же высоты, не больше двух строк текста */
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-additional .ant-table-tbody > tr > td {
+  height: 44px;
+  padding-block: 3px !important;
+  line-height: 1.3;
 }

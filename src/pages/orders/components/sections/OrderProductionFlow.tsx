@@ -5,6 +5,12 @@ import {
   type OrderProductionFlowStatus,
 } from '../../orderProductionFlow';
 import { formatNumber } from '../../../../utils/numberFormat';
+import { Tooltip } from '../../../../ui/tooltipDelay';
+import { SETTING_KEYS } from '../../../../hooks/useAppSettings';
+import { useOrderAppSettings } from '../../../../hooks/useOrderAppSettings';
+import { buildProductionStagesDisplayConfig } from '../../../../utils/productionWorkflow';
+import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../../types/productionWorkflow';
+import { PRODUCTION_STATUS_CODE_LETTERS } from '../../../../types/orders';
 import './orderProductionFlow.css';
 
 interface OrderProductionFlowProps {
@@ -53,5 +59,56 @@ export const OrderProductionFlow: React.FC<OrderProductionFlowProps> = ({ detail
         {' '}Сводка не подтверждает готовность заказа.
       </div>
     </div>
+  );
+};
+
+/**
+ * Collapsed-spoiler summary: every stage as its letter code with the number of pieces
+ * currently in it. Deliberately faint — it must not draw attention.
+ */
+export const OrderProductionFlowCodes: React.FC<Omit<OrderProductionFlowProps, 'loading'>> = ({ details, statuses }) => {
+  const { getSetting } = useOrderAppSettings();
+  const workflow = getSetting<ProductionWorkflowConfig>(SETTING_KEYS.PRODUCTION_WORKFLOW_DEFAULT);
+  const codeToLetter = useMemo(() => {
+    const refs = statuses
+      .filter((status) => typeof status.production_status_code === 'string')
+      .map((status) => ({
+        production_status_id: status.production_status_id,
+        production_status_code: status.production_status_code,
+        production_status_name: status.production_status_name,
+        sort_order: status.sort_order,
+        is_active: status.is_active !== false,
+      })) as unknown as ProductionStatusRef[];
+    if (refs.length === 0) return undefined;
+    return buildProductionStagesDisplayConfig({
+      workflow,
+      statuses: refs,
+      workflowKey: SETTING_KEYS.PRODUCTION_WORKFLOW_DEFAULT,
+    }).display?.codeToLetter;
+  }, [statuses, workflow]);
+  const flow = useMemo(() => buildOrderProductionFlow(details, statuses), [details, statuses]);
+
+  if (flow.stages.length === 0) return null;
+
+  return (
+    <span className="order-production-flow-codes" aria-label="Детали заказа по этапам производства">
+      {flow.stages.map((stage) => {
+        const rawLetter = stage.statusId === null
+          ? '—'
+          : (stage.code ? codeToLetter?.[stage.code] || PRODUCTION_STATUS_CODE_LETTERS[stage.code] : '') || stage.name;
+        const letter = rawLetter.trim().slice(0, 1).toUpperCase() || '?';
+        return (
+          <Tooltip
+            key={stage.key}
+            title={`${stage.name}: ${formatNumber(stage.quantity, 0)} шт. · ${formatNumber(stage.positions, 0)} поз.`}
+          >
+            <span className="order-production-flow-codes__item" data-empty={stage.positions === 0}>
+              <b>{letter}</b>
+              {formatNumber(stage.quantity, 0)}
+            </span>
+          </Tooltip>
+        );
+      })}
+    </span>
   );
 };

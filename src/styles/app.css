@@ -814,6 +814,17 @@ html {
   transform: translateY(-50%) scale(0.96);
 }
 
+/* Left twin of the edge button: appears only while the table is scrolled away from its start. */
+.app-table-horizontal-edge-button--left {
+  right: auto;
+  left: 8px;
+}
+
+.app-table-horizontal-edge-button--left[data-visible="false"] {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .app-table-horizontal-edge-button .anticon {
   font-size: 18px;
   transition: transform 150ms cubic-bezier(0.2, 0, 0, 1);

@@ -46,6 +46,22 @@ describe('order card under the NewLine variant', () => {
     }
   });
 
+  it('keeps a thin rail to bring the folded column back', () => {
+    expect(show).toContain('className="wb-order-side-rail"');
+    expect(show).toContain('aria-controls="order-show-side"');
+  });
+
+  it('heads every group and hides the ХДФ column without ХДФ only in NewLine', () => {
+    expect(show).toContain('includeLeadingSeparator: cutSelectMode || isWorkbench');
+    expect(show).toContain(".filter((column) => !isWorkbench || orderHasHdf || column.key !== 'hdf_parameter_override_mm')");
+  });
+
+  it('keeps the two original material tables for the other variants', () => {
+    expect(show).toContain('{isWorkbench ? (\n                        <OrderMaterialsWorkbenchTable');
+    expect(show).toContain("<div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Пленка</div>");
+    expect(show).toContain("<div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Листовые материалы</div>");
+  });
+
   it('loads the orders stylesheet of the variant with the shell', () => {
     expect(layout).toContain("import '../styles/workbench-orders.css';");
   });

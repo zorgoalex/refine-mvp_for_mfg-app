@@ -178,7 +178,7 @@ describe('OrderShow sticky detail header guards', () => {
     expect(showSource).toContain('sorter: true');
     expect(showSource).toContain('sortOrder: column.key === orderShowActiveSorter?.key ? orderShowActiveSorter.order : null');
     expect(showSource).toContain('setOrderShowActiveSorter({ key: String(next.columnKey), order: next.order });');
-    expect(showSource).toContain('<TableTopScroll className="order-show-details-table-wrap" horizontalEdgeScrollButton>');
+    expect(showSource).toContain('<TableTopScroll className="order-show-details-table-wrap" horizontalEdgeScrollButton horizontalBackScrollButton={isWorkbench}>');
     expect(editDetailTableSource).toContain('horizontalEdgeScrollButton');
   });
 });

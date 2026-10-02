@@ -61,7 +61,16 @@ describe('buildOrderProductionFlow', () => {
     ], []);
 
     expect(flow.stages).toEqual([
-      { key: '3', statusId: 3, name: 'Распилен', positions: 1, quantity: 2, share: 1 },
+      { key: '3', statusId: 3, code: null, name: 'Распилен', positions: 1, quantity: 2, share: 1 },
     ]);
+  });
+
+  it('carries the stage code for the compact letter summary', () => {
+    const flow = buildOrderProductionFlow(
+      [{ production_status_id: 3, quantity: 2 }],
+      [{ production_status_id: 3, production_status_name: 'Распилен', production_status_code: ' cut ', sort_order: 30, is_active: true }],
+    );
+
+    expect(flow.stages[0].code).toBe('cut');
   });
 });

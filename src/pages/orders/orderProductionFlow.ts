@@ -1,6 +1,7 @@
 export interface OrderProductionFlowStatus {
   production_status_id: number;
   production_status_name?: string | null;
+  production_status_code?: string | null;
   sort_order?: number | null;
   is_active?: boolean | null;
 }
@@ -15,6 +16,8 @@ export interface OrderProductionFlowDetail {
 export interface OrderProductionFlowStage {
   key: string;
   statusId: number | null;
+  /** production_status_code of the stage, when the reference is available. */
+  code: string | null;
   name: string;
   /** Detail rows currently at this stage. */
   positions: number;
@@ -58,12 +61,17 @@ export function buildOrderProductionFlow(
 
   const totalPositions = active.length;
   const totalQuantity = active.reduce((sum, detail) => sum + toQuantity(detail.quantity), 0);
+  const codeById = new Map(statuses.map((status) => [
+    status.production_status_id,
+    status.production_status_code?.trim() || null,
+  ]));
   const toStage = (statusId: number | null, name: string): OrderProductionFlowStage => {
     const entry = counts.get(statusId);
     const positions = entry?.positions ?? 0;
     return {
       key: statusId === null ? 'unassigned' : String(statusId),
       statusId,
+      code: statusId === null ? null : codeById.get(statusId) ?? null,
       name,
       positions,
       quantity: entry?.quantity ?? 0,
