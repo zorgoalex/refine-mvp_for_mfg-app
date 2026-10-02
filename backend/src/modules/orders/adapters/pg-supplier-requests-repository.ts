@@ -51,6 +51,8 @@ import {
   loadWorklistOrdersByIds,
   scopedOrderIds,
 } from './pg-procurement-workspace-repository';
+import { FULFILLED_SQL, isCountableState, LINKED_SQL, onecStateSql, type OnecDocumentState } from '../domain/onec-document-state';
+
 
 const COMMAND_CREATE_DRAFTS = 'supplier_requests.create_drafts';
 
@@ -95,8 +97,10 @@ interface LineOrderRow extends QueryResultRow {
   client_name: string | null;
   quantity: string | number;
   order_deleted: boolean;
-  /** Пришло по активным приходным связям (ф.3б), в единице строки заявки. */
+  /** Пришло по приходным связям ДЕЙСТВУЮЩИХ документов 1С (ф.3б), в единице строки заявки. */
   fulfilled: string | number;
+  /** Все неснятые приходные связи — лимит привязки (недействующие тоже). */
+  linked: string | number;
   procurement_version: string | number;
 }
 
@@ -505,9 +509,7 @@ async function loadLineOrders(client: DatabaseClient, lineIds: number[]): Promis
     `SELECT lo.supplier_request_line_order_id, lo.supplier_request_line_id, lo.order_resource_procurement_id,
             o.order_id, o.order_name, (p.code || '-' || o.order_name) AS full_number, c.client_name, lo.quantity,
             o.delete_flag AS order_deleted, orp.version AS procurement_version,
-            (SELECT COALESCE(sum(k.quantity), 0) FROM order_resource_allocation_request_links k
-              WHERE k.supplier_request_line_order_id = lo.supplier_request_line_order_id
-                AND k.removed_at IS NULL AND k.quantity IS NOT NULL) AS fulfilled
+            ${FULFILLED_SQL} AS fulfilled, ${LINKED_SQL} AS linked
        FROM supplier_request_line_orders lo
        JOIN order_resource_procurement orp ON orp.order_resource_procurement_id = lo.order_resource_procurement_id
        JOIN orders o ON o.order_id = orp.order_id
@@ -524,11 +526,11 @@ async function loadReceiptLinks(client: DatabaseClient, lineOrderIds: number[]):
   if (lineOrderIds.length === 0) return result;
   const rows = (await client.query<{
     link_id: string; allocation_id: string; line_order_id: string; quantity: string; document_id: string; number: string;
-    doc_date: string; line_id: string; version: string;
+    doc_date: string; line_id: string; version: string; doc_state: OnecDocumentState;
   }>(
     `SELECT k.link_id::text, k.allocation_id::text, k.supplier_request_line_order_id::text AS line_order_id, k.quantity::text,
             d.onec_document_id::text AS document_id, d.number, d.doc_date::text AS doc_date,
-            a.onec_document_line_id::text AS line_id, orp.version::text
+            a.onec_document_line_id::text AS line_id, orp.version::text, ${onecStateSql()} AS doc_state
        FROM order_resource_allocation_request_links k
        JOIN order_resource_onec_allocations a ON a.allocation_id = k.allocation_id
        JOIN order_resource_procurement orp ON orp.order_resource_procurement_id = a.order_resource_procurement_id
@@ -543,7 +545,7 @@ async function loadReceiptLinks(client: DatabaseClient, lineOrderIds: number[]):
     list.push({
       linkId: Number(row.link_id), allocationId: Number(row.allocation_id), documentId: Number(row.document_id),
       documentNumber: row.number, documentDate: row.doc_date, lineId: Number(row.line_id), quantity: Number(row.quantity),
-      procurementVersion: Number(row.version),
+      procurementVersion: Number(row.version), documentState: row.doc_state,
     });
     result.set(Number(row.line_order_id), list);
   }
@@ -555,11 +557,11 @@ async function loadPaymentLinks(client: DatabaseClient, lineOrderIds: number[]):
   if (lineOrderIds.length === 0) return result;
   const rows = (await client.query<{
     link_id: string; allocation_id: string; line_order_id: string; amount: string; currency: string; document_id: string; number: string;
-    doc_date: string; line_id: string; version: string;
+    doc_date: string; line_id: string; version: string; doc_state: OnecDocumentState;
   }>(
     `SELECT k.link_id::text, k.allocation_id::text, k.supplier_request_line_order_id::text AS line_order_id, k.amount::text, k.currency,
             d.onec_document_id::text AS document_id, d.number, d.doc_date::text AS doc_date,
-            a.onec_document_line_id::text AS line_id, orp.version::text
+            a.onec_document_line_id::text AS line_id, orp.version::text, ${onecStateSql()} AS doc_state
        FROM order_resource_allocation_request_links k
        JOIN order_resource_onec_allocations a ON a.allocation_id = k.allocation_id
        JOIN order_resource_procurement orp ON orp.order_resource_procurement_id = a.order_resource_procurement_id
@@ -574,7 +576,7 @@ async function loadPaymentLinks(client: DatabaseClient, lineOrderIds: number[]):
     list.push({
       linkId: Number(row.link_id), allocationId: Number(row.allocation_id), documentId: Number(row.document_id),
       documentNumber: row.number, documentDate: row.doc_date, lineId: Number(row.line_id), amount: Number(row.amount),
-      currency: row.currency, procurementVersion: Number(row.version),
+      currency: row.currency, procurementVersion: Number(row.version), documentState: row.doc_state,
     });
     result.set(Number(row.line_order_id), list);
   }
@@ -609,7 +611,7 @@ async function loadPossiblePayments(client: DatabaseClient, requestSupplierKey: 
        JOIN onec_document_lines l ON l.onec_document_line_id = a.onec_document_line_id
        JOIN onec_documents d ON d.onec_document_id = l.onec_document_id
       WHERE a.order_resource_procurement_id = ANY($1::bigint[]) AND a.role = 'payment' AND a.removed_at IS NULL
-        AND d.posted AND NOT d.deleted_in_onec AND d.doc_kind = ANY($2::text[])
+        AND d.posted AND NOT d.deleted_in_onec AND d.missing_in_source_at IS NULL AND d.doc_kind = ANY($2::text[])
         AND l.removed_in_onec_at IS NULL AND l.load_conflict_code IS NULL
       ORDER BY d.doc_date, a.allocation_id`,
     [procurementIds, ['cash_outflow', 'bank_outflow']],
@@ -665,7 +667,7 @@ async function loadPossibleMatches(
        JOIN onec_document_lines l ON l.onec_document_line_id = a.onec_document_line_id
        JOIN onec_documents d ON d.onec_document_id = l.onec_document_id
       WHERE a.order_resource_procurement_id = ANY($1::bigint[]) AND a.role = 'receipt' AND a.removed_at IS NULL
-        AND d.posted AND NOT d.deleted_in_onec
+        AND d.posted AND NOT d.deleted_in_onec AND d.missing_in_source_at IS NULL
         -- Строка, удалённая или изменённая в 1С (конфликт), для новой привязки не годится (CR1-1).
         AND l.removed_in_onec_at IS NULL AND l.load_conflict_code IS NULL
       ORDER BY d.doc_date, a.allocation_id`,
@@ -686,7 +688,8 @@ async function loadPossibleMatches(
     if (!line) continue;
     const demandUnit = demandUnitOf(line.resource_kind);
     const area = line.resource_kind === 'sheet_material' ? sheetAreaM2(line.width_mm, line.height_mm) : null;
-    const remaining = openThousandths(toMilli(order.quantity), toMilli(order.fulfilled));
+    // Под лимит привязки — все неснятые связи (как в БД), а не только действующие (CR1-1 live-docs).
+    const remaining = openThousandths(toMilli(order.quantity), toMilli(order.linked));
     if (remaining <= 0) continue;
     const list: SupplierRequestPossibleMatchDto[] = [];
     for (const allocation of allocations) {
@@ -735,9 +738,10 @@ function canSeeAmounts(user: CurrentUser): boolean {
   return (user.permissions ?? []).includes('finance.view');
 }
 
+/** Оплачено — только по действующим документам 1С (распроведённые/удалённые/выпавшие из выгрузки — нет). */
 function paidByCurrency(links: SupplierRequestPaymentLinkDto[]): Record<string, number> {
   const result: Record<string, number> = {};
-  for (const link of links) result[link.currency] = Math.round(((result[link.currency] ?? 0) + link.amount) * 100) / 100;
+  for (const link of links.filter((entry) => isCountableState(entry.documentState))) result[link.currency] = Math.round(((result[link.currency] ?? 0) + link.amount) * 100) / 100;
   return result;
 }
 
@@ -791,7 +795,8 @@ function paymentSummary(
   payments: Map<number, SupplierRequestPaymentLinkDto[]> | null,
 ): Pick<SupplierRequestSummaryDto, 'paymentState' | 'paid'> {
   if (payments === null) return { paymentState: 'hidden', paid: {} };
-  const links = orders.flatMap((order) => payments.get(Number(order.supplier_request_line_order_id)) ?? []);
+  const links = orders.flatMap((order) => payments.get(Number(order.supplier_request_line_order_id)) ?? [])
+    .filter((link) => isCountableState(link.documentState));
   return { paymentState: links.length > 0 ? 'paid' : 'none', paid: paidByCurrency(links) };
 }
 
@@ -848,6 +853,7 @@ async function loadCard(client: DatabaseClient, currentUser: CurrentUser, suppli
         procurementId: Number(order.order_resource_procurement_id),
         quantity: Number(order.quantity),
         fulfilled: Number(order.fulfilled),
+        linked: Number(order.linked),
         fulfillment: fulfillmentOf(toMilli(order.quantity), toMilli(order.fulfilled)),
         receipts: receipts.get(Number(order.supplier_request_line_order_id)) ?? [],
         possibleMatches: matches.get(Number(order.supplier_request_line_order_id)) ?? [],

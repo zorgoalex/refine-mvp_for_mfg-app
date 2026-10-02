@@ -41,6 +41,7 @@ import {
   type OrderResourceUnit,
   type OrderSheetMaterialDemandDto,
 } from '../application/order-resource-demand.types';
+import { isCountableState, onecStateSql, type OnecDocumentState } from '../domain/onec-document-state';
 
 interface CountRow extends QueryResultRow {
   total: string | number;
@@ -646,6 +647,8 @@ export interface OnecLinkRow extends QueryResultRow {
   doc_date: string | Date;
   posted: boolean;
   deleted_in_onec: boolean;
+  /** Состояние документа/строки 1С (onecStateSql). */
+  doc_state: OnecDocumentState;
 }
 
 export interface ApplyProcurementExtras {
@@ -664,7 +667,8 @@ export async function loadOnecLinks(client: DatabaseClient, orderIds: number[]):
   const result = await client.query<OnecLinkRow>(
     `
     SELECT a.allocation_id, a.order_resource_procurement_id, a.role, a.quantity, a.amount, a.origin,
-           d.onec_document_id, d.doc_kind, d.number, d.doc_date::text AS doc_date, d.posted, d.deleted_in_onec
+           d.onec_document_id, d.doc_kind, d.number, d.doc_date::text AS doc_date, d.posted, d.deleted_in_onec,
+           ${onecStateSql()} AS doc_state
       FROM order_resource_onec_allocations a
       JOIN order_resource_procurement orp ON orp.order_resource_procurement_id = a.order_resource_procurement_id
       JOIN onec_document_lines l ON l.onec_document_line_id = a.onec_document_line_id
@@ -678,9 +682,12 @@ export async function loadOnecLinks(client: DatabaseClient, orderIds: number[]):
   return result.rows;
 }
 
-/** Приход из проведённого и не удалённого документа запрещает снимать «Закуплено». */
+/**
+ * Приход из ДЕЙСТВУЮЩЕГО документа 1С (проведён, не удалён, есть в выгрузке, строка не удалена; конфликт — действует)
+ * запрещает снимать «Закуплено».
+ */
 export function isReceiptLock(link: OnecLinkRow): boolean {
-  return link.role === 'receipt' && link.posted && !link.deleted_in_onec;
+  return link.role === 'receipt' && isCountableState(link.doc_state);
 }
 
 function onecForRow(
@@ -701,6 +708,7 @@ function onecForRow(
     linkOrigin: link.origin,
     posted: link.posted,
     deletedInOnec: link.deleted_in_onec,
+    documentState: link.doc_state,
   }));
   return {
     onec: {

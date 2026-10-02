@@ -54,7 +54,7 @@ function procurementRow(overrides: Partial<ResourceProcurementRow> = {}): Resour
 }
 
 function onecLink(overrides: Partial<OnecLinkRow> = {}): OnecLinkRow {
-  return {
+  const row = {
     allocation_id: 5001,
     order_resource_procurement_id: 9001,
     role: 'receipt',
@@ -69,6 +69,9 @@ function onecLink(overrides: Partial<OnecLinkRow> = {}): OnecLinkRow {
     deleted_in_onec: false,
     ...overrides,
   };
+  // Состояние документа — как в onecStateSql: удалён / не проведён, иначе действует (если не задано явно).
+  const state = overrides.doc_state ?? (row.deleted_in_onec ? 'deleted' : !row.posted ? 'unposted' : 'active');
+  return { ...row, doc_state: state } as OnecLinkRow;
 }
 
 function projectedOrder(orderId: number, lines: ProjectedResourceLine[]): ProjectedOrder {
@@ -303,5 +306,14 @@ describe('orphan rows with active 1C allocations stay visible (R1)', () => {
     expect(withLink[0].line).toMatchObject({ orphan: true, procurement: { purchased: false } });
     expect(withLink[0].line.onec.payments).toHaveLength(1);
     expect(applyProcurement([], [row], { onecLinks: [] })).toHaveLength(0);
+  });
+});
+
+describe('isReceiptLock — documents that no longer count in 1C (2026-10-02)', () => {
+  it('a receipt from a document missing from the 1C export, changed kind or with a removed line does not lock; a conflict still locks', () => {
+    for (const state of ['missing', 'kind_changed', 'line_removed'] as const) {
+      expect(isReceiptLock(onecLink({ role: 'receipt', doc_state: state }))).toBe(false);
+    }
+    expect(isReceiptLock(onecLink({ role: 'receipt', doc_state: 'conflict' }))).toBe(true);
   });
 });

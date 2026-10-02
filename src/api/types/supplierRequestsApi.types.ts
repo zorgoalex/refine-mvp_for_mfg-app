@@ -27,6 +27,8 @@ export interface CreateSupplierRequestDraftsResultDto {
 }
 
 /** Приход 1С, привязанный к заказу строки заявки (ф.3б). Старый backend поле не присылает. */
+export type OnecDocumentState = 'active' | 'conflict' | 'kind_changed' | 'missing' | 'deleted' | 'unposted' | 'line_removed';
+
 export interface SupplierRequestReceiptLinkDto {
   linkId: number;
   allocationId: number;
@@ -38,6 +40,8 @@ export interface SupplierRequestReceiptLinkDto {
   quantity: number;
   /** Версия закупа — для «Отвязать». */
   procurementVersion: number;
+  /** Состояние документа 1С (нет у старого backend — действует). */
+  documentState?: OnecDocumentState;
 }
 
 /** Приход того же заказа и материала, не привязанный к заявке целиком — кандидат для «Привязать» (ф.3б). */
@@ -69,6 +73,8 @@ export interface SupplierRequestPaymentLinkDto {
   amount: number;
   currency: string;
   procurementVersion: number;
+  /** Состояние документа 1С (нет у старого backend — действует). */
+  documentState?: OnecDocumentState;
 }
 
 /** Оплата того же заказа и материала с непривязанной суммой — кандидат для «Привязать оплату» (ф.3б-2). */
@@ -95,6 +101,8 @@ export interface SupplierRequestLineOrderDto {
   quantity: number;
   /** Пришло по привязанным приходам (единица строки заявки). Старый backend не присылает — трактовать как 0. */
   fulfilled?: number;
+  /** Все неснятые приходные связи — лимит «Привязать» (нет у старого backend). */
+  linked?: number;
   fulfillment?: SupplierRequestFulfillment;
   receipts?: SupplierRequestReceiptLinkDto[];
   /** Только для отправленных заявок. */

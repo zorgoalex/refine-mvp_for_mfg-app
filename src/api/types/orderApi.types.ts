@@ -96,6 +96,8 @@ export interface OrderResourceOnecDocRefDto {
   linkOrigin: 'auto' | 'manual' | 'suggested';
   posted: boolean;
   deletedInOnec: boolean;
+  /** Состояние документа 1С (нет у старого backend). */
+  documentState?: 'active' | 'conflict' | 'kind_changed' | 'missing' | 'deleted' | 'unposted' | 'line_removed';
 }
 
 export interface OrderResourceDemandLineDto {

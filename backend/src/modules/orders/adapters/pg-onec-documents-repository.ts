@@ -130,6 +130,8 @@ export interface LockedLineRow extends QueryResultRow {
   doc_counterparty_name: string | null;
   /** Валюта документа (оплаты — суммы в ней; связь оплаты с заявкой хранит её снимок). */
   doc_currency?: string;
+  /** Документ выпал из выгрузки 1С (в т.ч. сменил вид операции) — распределять нельзя. */
+  doc_missing_in_source_at?: Date | string | null;
   /** Строка исчезла из документа 1С, но на неё есть ссылки распределений (загрузчик onec-sync, R1-2). */
   removed_in_onec_at: Date | null;
   /** Изменение 1С не применено из-за активных распределений (R2-1). */
@@ -408,7 +410,7 @@ export class PgOnecDocumentsRepository {
       for (const [index, item] of items.entries()) {
         const line = lines.get(item.lineId)!;
         if (line.doc_kind !== 'purchase_receipt') { fail(index, 'ONEC_ALLOCATION_BATCH_RECEIPTS_ONLY', 'Групповое распределение — только для приходов'); continue; }
-        if (!line.posted || line.deleted_in_onec) { fail(index, 'ONEC_DOCUMENT_NOT_ALLOCATABLE', 'Документ не проведён или удалён в 1С'); continue; }
+        if (!line.posted || line.deleted_in_onec || (line.doc_missing_in_source_at !== null && line.doc_missing_in_source_at !== undefined)) { fail(index, 'ONEC_DOCUMENT_NOT_ALLOCATABLE', 'Документ не проведён или удалён в 1С'); continue; }
         try { assertLineMaterial(line, item.resourceKey); } catch (error) {
           fail(index, error instanceof ApiError ? error.code : 'ONEC_LINE_RESOURCE_MISMATCH', error instanceof Error ? error.message : 'Материал строки не совпадает');
           continue;
@@ -801,8 +803,9 @@ export async function lockDocumentLine(tx: DatabaseClient, documentId: number, l
   )).rows[0];
   if (!line) throw new ApiError(404, 'ONEC_DOCUMENT_LINE_NOT_FOUND', 'Строка документа 1С не найдена');
   const header = (await tx.query<Pick<LockedLineRow, 'doc_kind' | 'posted' | 'deleted_in_onec' | 'doc_amount' | 'number'
-    | 'doc_supplier_id' | 'doc_counterparty_ref_key' | 'doc_counterparty_name' | 'doc_currency'>>(
+    | 'doc_supplier_id' | 'doc_counterparty_ref_key' | 'doc_counterparty_name' | 'doc_currency' | 'doc_missing_in_source_at'>>(
     `SELECT d.doc_kind, d.posted, d.deleted_in_onec, d.amount AS doc_amount, d.number, d.supplier_id AS doc_supplier_id, d.currency AS doc_currency,
+            d.missing_in_source_at AS doc_missing_in_source_at,
             d.counterparty_ref_key::text AS doc_counterparty_ref_key, d.counterparty_name AS doc_counterparty_name
        FROM onec_documents d WHERE d.onec_document_id = $1 AND d.doc_kind = ANY($2::text[])`,
     [documentId, PROCUREMENT_DOC_KINDS],
@@ -824,7 +827,8 @@ function allocationRoleOf(kind: OnecDocKind): OnecAllocationRole {
 }
 
 export function assertAllocatable(line: LockedLineRow): void {
-  if (!line.posted || line.deleted_in_onec) {
+  // Выпавший из выгрузки 1С документ (в т.ч. сменивший вид операции) тоже не действует (2026-10-02, с сессией 1С).
+  if (!line.posted || line.deleted_in_onec || (line.doc_missing_in_source_at !== null && line.doc_missing_in_source_at !== undefined)) {
     throw new ApiError(409, 'ONEC_DOCUMENT_NOT_ALLOCATABLE', 'Документ не проведён или удалён в 1С — распределять его нельзя');
   }
 }

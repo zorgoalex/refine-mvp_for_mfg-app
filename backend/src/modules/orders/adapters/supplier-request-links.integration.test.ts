@@ -9,6 +9,7 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import type { BatchOnecAllocationItem } from '../application/onec-documents.types';
 import { addDays, todayInAlmaty } from '../domain/procurement-worklist';
 import { PgOnecDocumentsRepository } from './pg-onec-documents-repository';
+import { PgOrderResourceDemandRepository } from './pg-order-resource-demand-repository';
 import { PgProcurementHistoryRepository } from './pg-procurement-history-repository';
 import { PgProcurementWorkspaceRepository } from './pg-procurement-workspace-repository';
 import { PgRequestLinksRepository } from './pg-request-links-repository';
@@ -641,5 +642,105 @@ describe.skipIf(!url)('Supplier request links (phase 3b) — real PostgreSQL', {
     expect(added).toMatchObject({ kind: 'allocation_added', role: 'receipt', requestLinks: [{ action: 'linked', ...link }] });
     expect(removed).toMatchObject({ kind: 'allocation_removed', role: 'receipt', requestLinks: [{ action: 'unlinked', ...link }] });
     await conn.query(`UPDATE onec_documents SET currency = 'KZT' WHERE onec_document_id = $1`, [pay.documentId]);
+  });
+
+  it('live documents (2026-10-02, with the 1C session): unposted / deleted / missing / kind changed / line removed drop out of paid, received and ordered; a conflict still counts', async () => {
+    const order = await makeOrder(19, Math.round(materialArea * 1000));
+    const card = await sentRequest([order]);
+    const lineOrder = card.lineItems[0].orders[0];
+    const doc = await receipt(1, supplierId);
+    const allocation = await allocate(doc, order);
+    const linked = await links.link({ currentUser: admin, requestId: randomUUID(), documentId: doc.documentId, lineId: doc.lineId,
+      allocationId: Number(allocation.allocation_id), lineOrderId: lineOrder.lineOrderId, quantity: 0.5, expectedVersion: Number(allocation.version) });
+    const pay = await payment(4000, supplierId);
+    const paid = await payOrder(pay, order, 1500);
+    await links.link({ currentUser: finance, requestId: randomUUID(), documentId: pay.documentId, lineId: pay.lineId,
+      allocationId: Number(paid.allocation_id), lineOrderId: lineOrder.lineOrderId, amount: 1000, expectedVersion: Number(paid.version) });
+    const state = async () => {
+      const view = await requests.getCard(finance, card.requestId, true);
+      const entry = view.lineItems[0].orders[0];
+      return { fulfilled: entry.fulfilled, paid: entry.paid, requestPaid: view.paid, paymentState: view.paymentState,
+        receiptState: view.receiptState, receipt: entry.receipts[0]?.documentState, payment: entry.payments[0]?.documentState,
+        orderedOpen: (await worklistLine(order)).orderedOpen };
+    };
+    const live = await state();
+    expect(live).toMatchObject({ fulfilled: 0.5, paid: { KZT: 1000 }, requestPaid: { KZT: 1000 }, paymentState: 'paid', receipt: 'active', payment: 'active' });
+    expect(linked.linkId).toBeGreaterThan(0);
+    const dead = async (expected: string) => {
+      const now = await state();
+      expect(now).toMatchObject({ fulfilled: 0, paid: {}, requestPaid: {}, paymentState: 'none', receiptState: 'none', receipt: expected, payment: expected });
+      expect(now.orderedOpen).toBeGreaterThan(live.orderedOpen);
+    };
+    const both = [doc.documentId, pay.documentId];
+    const lines = [doc.lineId, pay.lineId];
+    const cases: Array<[string, string, string]> = [
+      ['unposted', 'UPDATE onec_documents SET posted = false WHERE onec_document_id = ANY($1::bigint[])', 'UPDATE onec_documents SET posted = true WHERE onec_document_id = ANY($1::bigint[])'],
+      ['deleted', 'UPDATE onec_documents SET deleted_in_onec = true WHERE onec_document_id = ANY($1::bigint[])', 'UPDATE onec_documents SET deleted_in_onec = false WHERE onec_document_id = ANY($1::bigint[])'],
+      ['missing', 'UPDATE onec_documents SET missing_in_source_at = now() WHERE onec_document_id = ANY($1::bigint[])', 'UPDATE onec_documents SET missing_in_source_at = NULL WHERE onec_document_id = ANY($1::bigint[])'],
+      ['kind_changed', `UPDATE onec_documents SET missing_in_source_at = now(), load_conflict = '{"missingInSource": true, "kindChangedTo": "customer_refund"}'::jsonb WHERE onec_document_id = ANY($1::bigint[])`,
+        'UPDATE onec_documents SET missing_in_source_at = NULL, load_conflict = NULL WHERE onec_document_id = ANY($1::bigint[])'],
+    ];
+    for (const [expected, kill, revive] of cases) {
+      await conn.query(kill, [both]);
+      await dead(expected);
+      await conn.query(revive, [both]);
+      expect(await state()).toEqual(live);
+    }
+    await conn.query('UPDATE onec_document_lines SET removed_in_onec_at = now() WHERE onec_document_line_id = ANY($1::bigint[])', [lines]);
+    await dead('line_removed');
+    await conn.query('UPDATE onec_document_lines SET removed_in_onec_at = NULL WHERE onec_document_line_id = ANY($1::bigint[])', [lines]);
+    // Конфликт загрузки — прежние значения действуют: учитывается, помечен.
+    await conn.query(`UPDATE onec_document_lines SET load_conflict_code = 'QUANTITY_BELOW_ALLOCATED' WHERE onec_document_line_id = $1`, [doc.lineId]);
+    expect(await state()).toMatchObject({ fulfilled: 0.5, receipt: 'conflict', payment: 'active' });
+    await conn.query('UPDATE onec_document_lines SET load_conflict_code = NULL WHERE onec_document_line_id = $1', [doc.lineId]);
+    // Документ, выпавший из выгрузки, не распределяется; приход из него не держит «Закуплено».
+    await conn.query('UPDATE onec_documents SET missing_in_source_at = now() WHERE onec_document_id = $1', [doc.documentId]);
+    const line = await worklistLine(order);
+    await expect(docs.addAllocation({ currentUser: admin, requestId: randomUUID(), documentId: doc.documentId, lineId: doc.lineId, orderId: order,
+      resourceKey: key(), quantity: 0.1, expectedVersion: line.procurementVersion, expectedDemandFingerprint: line.demandFingerprint }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'ONEC_DOCUMENT_NOT_ALLOCATABLE' });
+    const demand = (await new PgOrderResourceDemandRepository(new CommittedDatabase(conn)).getCard({ currentUser: finance, orderId: order },
+      { procurementEnabled: true, canSeeAmounts: true })).data.lines.find((entry) => entry.resourceKey === key())!;
+    expect(demand.onec.receipts[0]).toMatchObject({ documentState: 'missing' });
+    expect(demand.lockedByOnec).toBe(false);
+    await conn.query('UPDATE onec_documents SET missing_in_source_at = NULL WHERE onec_document_id = $1', [doc.documentId]);
+    expect(await state()).toEqual(live);
+  });
+
+  it('live documents CR1-1: a dead receipt still holds the link limit — possible matches and suggestions offer only what is left, and applying them succeeds', async () => {
+    const order = await makeOrder(20, Math.round(materialArea * 1000));
+    const card = await sentRequest([order]);
+    const lineOrder = card.lineItems[0].orders[0];
+    const half = Math.floor(lineOrder.quantity * 500) / 1000;
+    const docA = await receipt(1, supplierId);
+    const allocationA = await allocate(docA, order);
+    await links.link({ currentUser: admin, requestId: randomUUID(), documentId: docA.documentId, lineId: docA.lineId,
+      allocationId: Number(allocationA.allocation_id), lineOrderId: lineOrder.lineOrderId, quantity: half, expectedVersion: Number(allocationA.version) });
+    await conn.query('UPDATE onec_documents SET posted = false WHERE onec_document_id = $1', [docA.documentId]);
+    try {
+      const docB = await receipt(1, supplierId);
+      const allocationB = await allocate(docB, order);
+      const view = await requests.getCard(admin, card.requestId, true);
+      const entry = view.lineItems[0].orders[0];
+      // Пришло — 0 (A недействует), но под лимитом осталось только «заказано − половина».
+      expect(entry.fulfilled).toBe(0);
+      const match = entry.possibleMatches.find((candidate) => candidate.allocationId === Number(allocationB.allocation_id))!;
+      expect(match.suggestedQuantity).toBeLessThanOrEqual(lineOrder.quantity - half + 1e-9);
+      expect(match.suggestedQuantity).toBeGreaterThan(0);
+      const linkedB = await links.link({ currentUser: admin, requestId: randomUUID(), documentId: docB.documentId, lineId: docB.lineId,
+        allocationId: Number(allocationB.allocation_id), lineOrderId: lineOrder.lineOrderId, quantity: match.suggestedQuantity,
+        expectedVersion: match.procurementVersion });
+      expect(linkedB.changed).toBe(true);
+      // Лимит выбран полностью (A + B) — больше не предлагается ни в карточке, ни в подборе.
+      const after = (await requests.getCard(admin, card.requestId, true)).lineItems[0].orders[0];
+      expect(after.fulfilled).toBeCloseTo(match.suggestedQuantity, 3);
+      expect(after.possibleMatches).toEqual([]);
+      const docC = await receipt(1, supplierId);
+      const suggestions = await workspace.allocationSuggestions(admin, docC.documentId, { supplierRequestsEnabled: true });
+      const candidate = suggestions.lines[0]?.candidates.find((entry) => entry.orderId === order);
+      expect(candidate?.requestLinks ?? []).toEqual([]);
+    } finally {
+      await conn.query('UPDATE onec_documents SET posted = true WHERE onec_document_id = $1', [docA.documentId]);
+    }
   });
 });

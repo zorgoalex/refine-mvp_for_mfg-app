@@ -49,6 +49,7 @@ import { lockActor } from './pg-order-resource-procurement-repository';
 import { documentSupplierKeys } from './pg-onec-documents-repository';
 import { pairKey, planAllocationSuggestions, type OpenRequestLineInput } from '../domain/allocation-suggestions';
 import { openThousandths } from '../domain/supplier-request-links';
+import { FULFILLED_SQL, LINKED_SQL, onecLiveSql } from '../domain/onec-document-state';
 import { ONEC_ALLOCATION_BATCH_LIMIT, PROCUREMENT_DOC_KINDS, type AllocationSuggestionsResponseDto, type OnecUnitCode } from '../application/onec-documents.types';
 
 interface SettingsRow extends QueryResultRow {
@@ -78,6 +79,7 @@ interface SuggestionDocumentRow extends QueryResultRow {
   doc_date: string;
   posted: boolean;
   deleted_in_onec: boolean;
+  missing_in_source: boolean;
   doc_supplier_id: string | number | null;
   doc_counterparty_ref_key: string | null;
   doc_counterparty_name: string | null;
@@ -108,6 +110,8 @@ interface ReceiptRow extends QueryResultRow {
   unit_code: ProcurementDocUnit | null;
   posted: boolean;
   deleted_in_onec: boolean;
+  /** Документ действует для итогов (onecLiveSql). */
+  live: boolean;
 }
 
 interface GeometryRow extends QueryResultRow {
@@ -263,6 +267,7 @@ export class PgProcurementWorkspaceRepository {
       const today = todayInAlmaty();
       const doc = (await client.query<SuggestionDocumentRow>(
         `SELECT d.onec_document_id, d.doc_kind, d.number, d.doc_date::text AS doc_date, d.posted, d.deleted_in_onec,
+                d.missing_in_source_at IS NOT NULL AS missing_in_source,
                 d.supplier_id AS doc_supplier_id, d.counterparty_ref_key::text AS doc_counterparty_ref_key,
                 d.counterparty_name AS doc_counterparty_name, s.supplier_name
            FROM onec_documents d
@@ -274,7 +279,7 @@ export class PgProcurementWorkspaceRepository {
       if (!doc || !(PROCUREMENT_DOC_KINDS as readonly string[]).includes(doc.doc_kind)) {
         throw new ApiError(404, 'ONEC_DOCUMENT_NOT_FOUND', 'Документ 1С не найден');
       }
-      if (doc.doc_kind !== 'purchase_receipt' || !doc.posted || doc.deleted_in_onec) {
+      if (doc.doc_kind !== 'purchase_receipt' || !doc.posted || doc.deleted_in_onec || doc.missing_in_source) {
         throw new ApiError(409, 'ONEC_DOCUMENT_NOT_ALLOCATABLE', 'Подбор — только для проведённого прихода, не удалённого в 1С');
       }
       const lineRows = (await client.query<SuggestionLineRow>(
@@ -491,7 +496,8 @@ export async function buildWorklistLines(
       const unit = demandUnitOf(projectedLine.kind);
       const geo = projectedLine.kind === 'sheet_material' ? geometry.get(projectedLine.refId) : undefined;
       const lineReceipts = row ? (receiptsByProcurement.get(Number(row.order_resource_procurement_id)) ?? []) : [];
-      const countable = lineReceipts.filter((receipt) => receipt.posted && !receipt.deleted_in_onec);
+      // Пришло — только по действующим документам 1С (проведён, не удалён, есть в выгрузке, строка не удалена).
+      const countable = lineReceipts.filter((receipt) => receipt.live === true);
       let receivedThousandths = 0;
       let incompatible = 0;
       for (const receipt of countable) {
@@ -784,9 +790,7 @@ async function loadRequestRefs(client: DatabaseClient, procurementIds: number[])
   return (await client.query<RequestRefRow>(
     `SELECT lo.order_resource_procurement_id, r.supplier_request_id, r.request_number, r.status, r.supplier_name,
             lo.quantity, l.unit_code,
-            (SELECT COALESCE(sum(k.quantity), 0) FROM order_resource_allocation_request_links k
-              WHERE k.supplier_request_line_order_id = lo.supplier_request_line_order_id
-                AND k.removed_at IS NULL AND k.quantity IS NOT NULL) AS fulfilled
+            ${FULFILLED_SQL} AS fulfilled
        FROM supplier_request_line_orders lo
        JOIN supplier_request_lines l ON l.supplier_request_line_id = lo.supplier_request_line_id
        JOIN supplier_requests r ON r.supplier_request_id = l.supplier_request_id
@@ -798,7 +802,8 @@ async function loadRequestRefs(client: DatabaseClient, procurementIds: number[])
 }
 
 /**
- * Открытые строки ОТПРАВЛЕННЫХ заявок по заказам (ф.3б, §5.3): остаток = количество − привязанные приходы > 0;
+ * Открытые строки ОТПРАВЛЕННЫХ заявок по заказам (ф.3б, §5.3): остаток = количество − ВСЕ неснятые приходные связи
+ * (лимит привязки БД; недействующая связь занимает лимит, пока её не отвяжут — CR1-1 live-docs) > 0;
  * порядок — sent_at, затем id (так подбор раскладывает приход по заявкам).
  */
 async function loadOpenRequestLines(client: DatabaseClient, orderIds: number[]): Promise<Map<string, OpenRequestLineInput[]>> {
@@ -811,9 +816,7 @@ async function loadOpenRequestLines(client: DatabaseClient, orderIds: number[]):
     `SELECT lo.supplier_request_line_order_id::text AS line_order_id, orp.order_id::text, orp.resource_kind,
             COALESCE(orp.sheet_material_type_id, orp.film_id)::text AS ref_id, lo.quantity::text, l.unit_code,
             r.supplier_request_id::text, r.request_number, r.supplier_key,
-            (SELECT COALESCE(sum(k.quantity), 0) FROM order_resource_allocation_request_links k
-              WHERE k.supplier_request_line_order_id = lo.supplier_request_line_order_id
-                AND k.removed_at IS NULL AND k.quantity IS NOT NULL)::text AS fulfilled
+            ${LINKED_SQL}::text AS fulfilled
        FROM supplier_request_line_orders lo
        JOIN supplier_request_lines l ON l.supplier_request_line_id = lo.supplier_request_line_id
        JOIN supplier_requests r ON r.supplier_request_id = l.supplier_request_id
@@ -839,7 +842,8 @@ async function loadOpenRequestLines(client: DatabaseClient, orderIds: number[]):
 async function loadReceipts(client: DatabaseClient, orderIds: number[]): Promise<ReceiptRow[]> {
   if (orderIds.length === 0) return [];
   return (await client.query<ReceiptRow>(
-    `SELECT a.order_resource_procurement_id, l.onec_document_id, a.quantity, a.unit_code, d.posted, d.deleted_in_onec
+    `SELECT a.order_resource_procurement_id, l.onec_document_id, a.quantity, a.unit_code, d.posted, d.deleted_in_onec,
+            ${onecLiveSql()} AS live
        FROM order_resource_onec_allocations a
        JOIN order_resource_procurement orp ON orp.order_resource_procurement_id = a.order_resource_procurement_id
        JOIN onec_document_lines l ON l.onec_document_line_id = a.onec_document_line_id

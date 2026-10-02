@@ -1,3 +1,4 @@
+import type { OnecDocumentState } from '../domain/onec-document-state';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { OnecUnitCode } from './onec-documents.types';
 import type { OrderResourceKind, OrderResourceUnit } from './order-resource-demand.types';
@@ -46,6 +47,8 @@ export interface SupplierRequestReceiptLinkDto {
   quantity: number;
   /** Версия закупа — для «Отвязать». */
   procurementVersion: number;
+  /** Состояние документа 1С; недействующие (не active/conflict) в «пришло» не входят. */
+  documentState: OnecDocumentState;
 }
 
 /** Приход того же заказа и материала, не привязанный к заявке целиком — кандидат для «Привязать» (§5.5). */
@@ -75,6 +78,8 @@ export interface SupplierRequestPaymentLinkDto {
   amount: number;
   currency: string;
   procurementVersion: number;
+  /** Состояние документа 1С; недействующие (не active/conflict) в «оплачено» не входят. */
+  documentState: OnecDocumentState;
 }
 
 /** Оплата того же заказа и материала с непривязанной суммой — кандидат для «Привязать оплату». */
@@ -103,6 +108,8 @@ export interface SupplierRequestLineOrderDto {
   quantity: number;
   /** Пришло по привязанным приходам (единица строки заявки). */
   fulfilled: number;
+  /** Все неснятые приходные связи (лимит «Привязать», включая недействующие документы 1С). */
+  linked: number;
   fulfillment: SupplierRequestFulfillment;
   receipts: SupplierRequestReceiptLinkDto[];
   possibleMatches: SupplierRequestPossibleMatchDto[];

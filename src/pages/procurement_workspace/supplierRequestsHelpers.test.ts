@@ -430,3 +430,20 @@ describe('ф.3б-2: оплаты 1С → заявки поставщикам (fi
     expect(supplierRequestErrorMessage({ code: 'SUPPLIER_REQUEST_LINK_MEASURE' })).toBe('Неверная величина связи: приход — количеством, оплата — суммой');
   });
 });
+
+describe('1C document state of request links (2026-10-02)', () => {
+  it('labels states that do not count; a conflict counts with a mark; old backend — counts', async () => {
+    const { onecDocumentStateLabel, isCountableDocumentState, possibleMatchMaxQuantity } = await import('./supplierRequestsHelpers');
+    expect(onecDocumentStateLabel('active')).toBeNull();
+    expect(onecDocumentStateLabel(undefined)).toBeNull();
+    expect(onecDocumentStateLabel('unposted')).toBe('распроведён в 1С');
+    expect(onecDocumentStateLabel('kind_changed')).toBe('изменён вид операции в 1С');
+    expect(onecDocumentStateLabel('missing')).toBe('нет в выгрузке 1С');
+    expect(isCountableDocumentState('conflict')).toBe(true);
+    expect(isCountableDocumentState(undefined)).toBe(true);
+    expect(isCountableDocumentState('deleted')).toBe(false);
+    // Лимит «Привязать» — по всем неснятым связям, а не по «пришло».
+    expect(possibleMatchMaxQuantity({ quantity: 1, fulfilled: 0, linked: 0.5 }, { unlinkedQuantity: 3 })).toBe(0.5);
+    expect(possibleMatchMaxQuantity({ quantity: 1, fulfilled: 0.2 }, { unlinkedQuantity: 3 })).toBe(0.8);
+  });
+});

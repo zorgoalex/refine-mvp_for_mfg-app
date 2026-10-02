@@ -1,3 +1,4 @@
+import type { OnecDocumentState } from '../domain/onec-document-state';
 import type { CurrentUser } from '../../../permissions/current-user';
 
 export interface OrderResourceDemandQuery {
@@ -89,6 +90,8 @@ export interface OrderResourceOnecDocRefDto {
   linkOrigin: 'auto' | 'manual' | 'suggested';
   posted: boolean;
   deletedInOnec: boolean;
+  /** Состояние документа 1С: active/conflict — действует; остальные — в итоги не входят (показывается со статусом). */
+  documentState: OnecDocumentState;
 }
 
 export interface OrderProcurementSummaryDto {

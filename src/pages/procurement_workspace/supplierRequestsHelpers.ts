@@ -403,16 +403,17 @@ export function receiptLineLabel(receipt: Pick<SupplierRequestReceiptLinkDto, 'd
 
 /** Максимум для «Привязать»: не больше, чем не привязано в приходе, и не больше остатка по заказу заявки. */
 export function possibleMatchMaxQuantity(
-  order: { quantity: number; fulfilled?: number },
+  order: { quantity: number; fulfilled?: number; linked?: number },
   match: Pick<SupplierRequestPossibleMatchDto, 'unlinkedQuantity'>,
 ): number {
-  const remaining = order.quantity - (order.fulfilled ?? 0);
+  // Лимит — все неснятые связи (как в БД), включая недействующие документы 1С; старый backend — по «пришло».
+  const remaining = order.quantity - (order.linked ?? order.fulfilled ?? 0);
   return Math.max(0, roundTo3Number(Math.min(match.unlinkedQuantity, remaining)));
 }
 
 /** Значение по умолчанию в поле «Привязать»: предложение сервера, но не больше пересчитанного максимума. */
 export function possibleMatchDefaultQuantity(
-  order: { quantity: number; fulfilled?: number },
+  order: { quantity: number; fulfilled?: number; linked?: number },
   match: Pick<SupplierRequestPossibleMatchDto, 'unlinkedQuantity' | 'suggestedQuantity'>,
 ): number {
   return roundTo3Number(Math.min(match.suggestedQuantity, possibleMatchMaxQuantity(order, match)));
@@ -643,4 +644,24 @@ export function hasUnsavedRequestChanges(
     Object.keys(edits[lineId].orders).map(Number).sort((a, b) => a - b).map((orderId) => [orderId, roundTo3Number(edits[lineId].orders[orderId])]),
   ]));
   return normalize(form.lineEdits) !== normalize(baseline);
+}
+
+const ONEC_DOCUMENT_STATE_LABELS: Record<string, string> = {
+  conflict: 'конфликт с 1С',
+  kind_changed: 'изменён вид операции в 1С',
+  missing: 'нет в выгрузке 1С',
+  deleted: 'помечен на удаление в 1С',
+  unposted: 'распроведён в 1С',
+  line_removed: 'строка удалена в 1С',
+};
+
+/** Пометка состояния документа 1С у связи; null — действует без замечаний. */
+export function onecDocumentStateLabel(state: string | undefined | null): string | null {
+  if (!state || state === 'active') return null;
+  return ONEC_DOCUMENT_STATE_LABELS[state] ?? 'документ 1С не действует';
+}
+
+/** Связь входит в итоги (пришло / оплачено): действующий документ или конфликт (прежние значения действуют). */
+export function isCountableDocumentState(state: string | undefined | null): boolean {
+  return !state || state === 'active' || state === 'conflict';
 }

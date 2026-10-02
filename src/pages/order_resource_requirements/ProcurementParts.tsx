@@ -136,18 +136,27 @@ export function OnecDocChips({ line }: { line: ResourceDemandLine }) {
   );
 }
 
+const ONEC_DOC_STATE_TOOLTIPS: Record<string, string> = {
+  deleted: 'Документ помечен на удаление в 1С — не учитывается',
+  unposted: 'Документ не проведён в 1С — не учитывается',
+  missing: 'Документа нет в выгрузке 1С — не учитывается',
+  kind_changed: 'В 1С изменён вид операции — не учитывается',
+  line_removed: 'Строка удалена из документа в 1С — не учитывается',
+  conflict: 'В 1С есть неразобранное изменение — пока действуют прежние значения',
+};
+
 function OnecDocTag({ doc }: { doc: ResourceOnecDocRef }) {
   const label = `${onecDocKindShortLabel(doc.kind)} №${doc.number} от ${formatDate(doc.date)}`;
+  // Состояние из backend; старый backend — по posted/deletedInOnec.
+  const state = doc.documentState ?? (doc.deletedInOnec ? 'deleted' : doc.posted ? 'active' : 'unposted');
+  const color = state === 'active' ? undefined : state === 'conflict' || state === 'unposted' ? 'warning' : 'error';
   const tag = (
-    <Tag style={{ marginInlineEnd: 0 }} color={doc.deletedInOnec ? 'error' : doc.posted ? undefined : 'warning'}>
+    <Tag style={{ marginInlineEnd: 0 }} color={color}>
       <Link to={onecDocumentShowPath(doc.documentId)}>{label}</Link>
     </Tag>
   );
-  return doc.deletedInOnec ? (
-    <Tooltip title="Документ удалён в 1С">{tag}</Tooltip>
-  ) : !doc.posted ? (
-    <Tooltip title="Документ ещё не проведён в 1С">{tag}</Tooltip>
-  ) : tag;
+  const tooltip = ONEC_DOC_STATE_TOOLTIPS[state];
+  return tooltip ? <Tooltip title={tooltip}>{tag}</Tooltip> : tag;
 }
 
 /** Прогресс «Закуплено x/y» заказа/группы материалов. Рендерить только при `capabilities.procurement`. */

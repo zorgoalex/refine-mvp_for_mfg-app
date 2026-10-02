@@ -44,6 +44,8 @@ import {
   formatPaymentAmount,
   formatRequestQuantity,
   fulfillmentTag,
+  isCountableDocumentState,
+  onecDocumentStateLabel,
   groupDraftPreviewBySupplier,
   hiddenOrdersLabel,
   isStockNegative,
@@ -904,7 +906,7 @@ function OrderReceiptStatus({ order, unit, showPossibleMatches, canManage, linkB
       </div>
       {receipts.map((receipt) => (
         <div key={receipt.linkId} className="rr-sub" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span>{receiptLineLabel(receipt, unit)}</span>
+          <DocumentStateLine text={receiptLineLabel(receipt, unit)} state={receipt.documentState} />
           {canManage && (
             <Button
               size="small"
@@ -988,6 +990,25 @@ function PossibleMatchRow({ order, match, unit, canManage, busy, disabled, onLin
   );
 }
 
+/**
+ * Строка связи с документом 1С: недействующий документ (распроведён, удалён, нет в выгрузке, строка удалена) — текст
+ * зачёркнут, в «пришло/оплачено» не входит; конфликт — входит, с пометкой.
+ */
+function DocumentStateLine({ text, state }: { text: string; state?: string }) {
+  const label = onecDocumentStateLabel(state);
+  const countable = isCountableDocumentState(state);
+  return (
+    <span>
+      <span style={countable ? undefined : { textDecoration: 'line-through' }}>{text}</span>
+      {label && (
+        <Tooltip title={countable ? 'Учитывается: в 1С есть неразобранное изменение' : 'Не учитывается в «пришло/оплачено»; отвяжите связь, чтобы освободить заявку'}>
+          {' '}<span className={`rr-tag rr-tag--${countable ? 'warn' : 'bad'}`}>{label}</span>
+        </Tooltip>
+      )}
+    </span>
+  );
+}
+
 interface OrderPaymentStatusProps {
   order: SupplierRequestLineOrderDto;
   /** «Возможные оплаты» показываются только для отправленных заявок. */
@@ -1016,7 +1037,7 @@ function OrderPaymentStatus({ order, showPossiblePayments, canManage, linkBusyKe
       {paidSummary && <div className="rr-sub rr-num">Оплачено: {paidSummary}</div>}
       {payments.map((payment) => (
         <div key={payment.linkId} className="rr-sub" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span>{paymentLineLabel(payment)}</span>
+          <DocumentStateLine text={paymentLineLabel(payment)} state={payment.documentState} />
           {canManage && (
             <Button
               size="small"
