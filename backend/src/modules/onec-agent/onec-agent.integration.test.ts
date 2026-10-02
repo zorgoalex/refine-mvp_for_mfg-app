@@ -451,4 +451,31 @@ suite('1C agent E1 — isolated PostgreSQL', () => {
     expect(unknown.rows[0]).toMatchObject({ status: 'pending', attempts: 1 });
     expect(unknown.rows[0].last_error).toContain('No projector');
   });
+
+  it('heartbeat identity check does not wait for FOR KEY SHARE locks on the source (ETL complete inserting mirror rows)', async () => {
+    const { source } = await registerAgent();
+    const agent = await authenticate(agentRequest(), 'heartbeat');
+    const identity = { databaseId: 'db-1', exportEpoch: 'e-1', environment: 'test' };
+    await protocol.startSession(agent, { agentId: 'agent-a', siteId: 'e2e-site', agentVersion: '1.2.0', sourceIdentity: identity });
+    // A long transaction that holds FOR KEY SHARE on the source row — what every insert with a foreign key to
+    // onec_sources takes (a `complete` publishing mirror rows held it for ~30 s; the heartbeat used FOR UPDATE and timed out).
+    const holder = await pool.connect();
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT 1 FROM onec_sources WHERE source_id = $1 FOR KEY SHARE', [source.sourceId]);
+      const started = Date.now();
+      await protocol.heartbeat({ ...agent, requestId: randomUUID() },
+        { agentId: 'agent-a', version: '1.2.0', state: 'healthy', sourceIdentity: identity });
+      expect(Date.now() - started).toBeLessThan(2000);
+      // A FOR UPDATE writer (admin source operations) still waits for the KEY SHARE holder.
+      const blocked = pool.query(`SELECT 1 FROM onec_sources WHERE source_id = $1 FOR UPDATE NOWAIT`, [source.sourceId]);
+      await expect(blocked).rejects.toThrow(/could not obtain lock/);
+    } finally {
+      await holder.query('ROLLBACK');
+      holder.release();
+    }
+    const status = await pool.query(`SELECT state FROM onec_agent_status WHERE agent_id = 'agent-a'`);
+    expect(status.rows[0].state).toBe('healthy');
+  });
 });
+

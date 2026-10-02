@@ -164,7 +164,9 @@ export class OnecAgentProtocolService {
     agent: OnecAgentContext,
     identity: Identity | null,
   ): Promise<SourceRecord['identityStatus']> {
-    const source = await this.repository.getSource(tx, agent.sourceId, true);
+    // FOR NO KEY UPDATE: only non-key columns change here; FOR UPDATE would wait for the KEY SHARE locks of a running
+    // ETL `complete` (mirror rows reference the source) — the heartbeat timed out with 500 (agent to-erp/0123).
+    const source = await this.repository.getSource(tx, agent.sourceId, 'no_key');
     if (!source) throw new ApiError(403, 'SOURCE_UNKNOWN', 'Source is not registered');
     if (!identity) return source.identityStatus;
     // What the operator confirms on rebaseline is the identity reported last, by either channel.

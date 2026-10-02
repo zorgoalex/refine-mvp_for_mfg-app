@@ -160,9 +160,15 @@ export class PgOnecRepository {
     return rows[0] ? toAgent(rows[0]) : null;
   }
 
-  async getSource(client: DatabaseClient, sourceId: number, forUpdate = false): Promise<SourceRecord | null> {
+  /**
+   * `lock`: `true` — FOR UPDATE (admin source operations); `'no_key'` — FOR NO KEY UPDATE (as rebaseline): serializes writers of
+   * non-key columns (agent identity check on heartbeat/session) but, unlike FOR UPDATE, does not wait for the FOR KEY SHARE
+   * locks every insert referencing the source takes (e.g. an ETL `complete` publishing thousands of mirror rows).
+   */
+  async getSource(client: DatabaseClient, sourceId: number, lock: boolean | 'no_key' = false): Promise<SourceRecord | null> {
+    const clause = lock === 'no_key' ? 'FOR NO KEY UPDATE' : lock ? 'FOR UPDATE' : '';
     const { rows } = await client.query(
-      `SELECT * FROM onec_sources WHERE source_id = $1 ${forUpdate ? 'FOR UPDATE' : ''}`,
+      `SELECT * FROM onec_sources WHERE source_id = $1 ${clause}`,
       [sourceId],
     );
     return rows[0] ? toSource(rows[0]) : null;
