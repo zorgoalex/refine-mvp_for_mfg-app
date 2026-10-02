@@ -226,7 +226,25 @@ function createRuleCodeEntropy(): string {
  * События закупа (ф.4б): правило нельзя создать формой (нет выбора изменений закупа — бэкенд потребует
  * procurementChangeTypes), только засеянное правило правится/включается; канал — только «в приложении».
  */
-export const PROCUREMENT_EVENT_TYPES: readonly string[] = ['order.resource_procurement_changed'];
+export const PROCUREMENT_EVENT_TYPES: readonly string[] = [
+  'order.resource_procurement_changed',
+  'order.resource_demand_changed_after_mark',
+  'procurement.deficit_digest',
+  'procurement.receipt_unallocated',
+];
+
+/**
+ * События сервиса закупа (ф.4б-2): уведомления пишет сервис по расписанию, правило — только включатель, получатели —
+ * по праву (backend не принимает своих получателей).
+ */
+export const SERVICE_EVENT_RECIPIENTS: Readonly<Record<string, string>> = {
+  'procurement.deficit_digest': 'Все пользователи с правом «Закупки: управление» — каждому по его заказам',
+  'procurement.receipt_unallocated': 'Все пользователи с правом «Закупки: просмотр»',
+};
+
+export function isServiceEventType(eventType: string): boolean {
+  return eventType in SERVICE_EVENT_RECIPIENTS;
+}
 
 export function isProcurementEventType(eventType: string): boolean {
   return PROCUREMENT_EVENT_TYPES.includes(eventType);

@@ -265,5 +265,14 @@ describe('notificationRulesView', () => {
     expect(isProcurementEventType('order.resource_procurement_changed')).toBe(true);
     expect(isProcurementEventType('DEADLINE_EXPIRED')).toBe(false);
   });
-});
 
+  it('scheduled procurement events (phase 4b-2): not creatable, in_app only, recipients by permission', async () => {
+    const { isServiceEventType } = await import('./notificationRulesView');
+    const types = ['order.status_changed', 'order.resource_demand_changed_after_mark', 'procurement.deficit_digest', 'procurement.receipt_unallocated']
+      .map((eventType) => ({ eventType }));
+    expect(creatableEventTypes(types)).toEqual([{ eventType: 'order.status_changed' }]);
+    expect(isProcurementEventType('procurement.deficit_digest')).toBe(true);
+    expect(isServiceEventType('procurement.receipt_unallocated')).toBe(true);
+    expect(isServiceEventType('order.resource_demand_changed_after_mark')).toBe(false);
+  });
+});

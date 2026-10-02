@@ -2524,6 +2524,8 @@ probe_file() {
                            AND pg_get_constraintdef(oid) LIKE '%air%'
                            AND pg_get_constraintdef(oid) LIKE '%neutral%'
                       );" ;;
+    228_procurement_scheduled_notification_rules*) probe_all \
+      "SELECT (SELECT count(*) FROM notification_rules WHERE rule_code IN ('procurement-demand-changed', 'procurement-deficit-digest', 'procurement-receipt-unallocated')) = 3;" ;;
     225_procurement_notification_rules*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM notification_rules WHERE rule_code = 'procurement-material-arrived' AND event_type = 'order.resource_procurement_changed');" ;;
     # 224: calendar send = one system broadcast (purpose calendar) + runs source with the widened target window.
@@ -2904,6 +2906,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     204_procurement_workspace*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    228_procurement_scheduled_notification_rules*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     225_procurement_notification_rules*)

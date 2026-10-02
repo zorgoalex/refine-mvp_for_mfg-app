@@ -59,7 +59,17 @@ export function validateNotificationRuleInput(
   }
 
   const { resolvers = [], roleCodes = [], userIds = [] } = input.recipients ?? {};
-  if (resolvers.length === 0 && roleCodes.length === 0 && userIds.length === 0) {
+  // Событие сервиса (сводка закупа): получатели — по праву, правило — только включатель; свои получатели не задаются.
+  if (def.owner === 'service') {
+    if (resolvers.length > 0 || roleCodes.length > 0 || userIds.length > 0) {
+      return { ok: false, code: 'SERVICE_EVENT_RECIPIENTS_FIXED' };
+    }
+    // Правило сервиса — только включатель (4б-2 CR2-2): группа, важность и тексты задаёт сервис, их правка не действует.
+    if ((input.groupId ?? null) !== null || input.level !== 'info'
+      || (input.titleTemplate ?? null) !== null || (input.messageTemplate ?? null) !== null) {
+      return { ok: false, code: 'SERVICE_EVENT_FIELDS_FIXED' };
+    }
+  } else if (resolvers.length === 0 && roleCodes.length === 0 && userIds.length === 0) {
     return { ok: false, code: 'EMPTY_RECIPIENTS' };
   }
   for (const resolver of resolvers) {

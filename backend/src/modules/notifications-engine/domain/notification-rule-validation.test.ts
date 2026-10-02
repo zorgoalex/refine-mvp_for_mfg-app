@@ -123,4 +123,19 @@ describe('validateNotificationRuleInput', () => {
     expect(validateNotificationRuleInput({ ...base, conditions: { allocationRoles: ['receipt'] } }, { knownRoleCodes: [] }))
       .toEqual({ ok: false, code: 'PROCUREMENT_CONDITION_UNSUPPORTED' });
   });
+  it('service events (procurement digest): no own recipients, in_app only', () => {
+    const digest = { ...base, eventType: 'procurement.deficit_digest', level: 'info' as const, conditions: {}, recipients: {} };
+    expect(validateNotificationRuleInput(digest, { knownRoleCodes: [] })).toEqual({ ok: true });
+    expect(validateNotificationRuleInput({ ...digest, recipients: { userIds: [1] } }, { knownRoleCodes: [] }))
+      .toEqual({ ok: false, code: 'SERVICE_EVENT_RECIPIENTS_FIXED' });
+    expect(validateNotificationRuleInput({ ...digest, channels: ['telegram'] }, { knownRoleCodes: [] }))
+      .toEqual({ ok: false, code: 'UNSUPPORTED_CHANNEL', detail: 'telegram' });
+    for (const patch of [{ level: 'warning' as const }, { titleTemplate: 'x' }, { messageTemplate: 'y' }, { groupId: '22222222-2222-4222-8222-222222222222' }]) {
+      expect(validateNotificationRuleInput({ ...digest, level: 'info' as const, ...patch }, { knownRoleCodes: [] }))
+        .toEqual({ ok: false, code: 'SERVICE_EVENT_FIELDS_FIXED' });
+    }
+    expect(validateNotificationRuleInput({ ...base, eventType: 'order.resource_demand_changed_after_mark', conditions: {} }, { knownRoleCodes: [] }))
+      .toEqual({ ok: true });
+  });
 });
+

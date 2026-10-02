@@ -17,6 +17,11 @@ import { PgVisibilityAdapter } from '../../notifications-engine/adapters/pg-visi
 import { NotificationRuleEngineService } from '../../notifications-engine/application/notification-rule-engine.service';
 import { OutboxRelayService } from '../../notifications-engine/application/outbox-relay.service';
 import { RecipientResolverService } from '../../notifications-engine/application/recipient-resolver.service';
+import { ProcurementNotificationsService } from '../application/procurement-notifications.service';
+import { addDays, todayInAlmaty } from '../domain/procurement-worklist';
+import { PgProcurementNotificationsRepository } from './pg-procurement-notifications-repository';
+import { PgProcurementWorkspaceRepository } from './pg-procurement-workspace-repository';
+import { PgOrderResourceDemandRepository } from './pg-order-resource-demand-repository';
 
 // Committed fixtures in an OWNED disposable database only (spec_erp/reviews/procurement-notifications-4b/run-races.cjs).
 const url = process.env.ERP_PROCUREMENT_RACE_DATABASE_URL;
@@ -268,5 +273,232 @@ describe.skipIf(!url)('Procurement notifications (phase 4b) — real PostgreSQL'
       await conn.query('DELETE FROM notifications WHERE source_type = $1 AND entity_id = $2', ['procurement_order_event', String(ownOrder)]);
       await conn.query('DELETE FROM outbox_events WHERE idempotency_key = $1', [key]);
     }
+  });
+
+  describe('phase 4b-2: scheduled procurement notifications', () => {
+    const material = async () => Number((await conn.query('SELECT sheet_material_type_id FROM order_details WHERE order_id = $1 LIMIT 1', [ownOrder])).rows[0].sheet_material_type_id);
+
+    it('§5.7 p.2: the scanner emits one «demand changed after mark» event per change; a repeat pass adds nothing', async () => {
+      const notifications = new PgProcurementNotificationsRepository(database);
+      const smt = await material();
+      await conn.query(
+        `INSERT INTO order_resource_procurement (order_id, resource_kind, sheet_material_type_id, purchased, origin, quantity_at_mark, unit_at_mark,
+           demand_fingerprint_at_mark, marked_at, marked_by, version)
+         VALUES ($1, 'sheet_material', $2, true, 'manual', 0.5, 'm2', repeat('0', 64), now(), $3, 1)`, [ownOrder, smt, adminId]);
+      const events = async () => (await conn.query(
+        `SELECT idempotency_key, payload_json FROM outbox_events WHERE event_type = 'order.resource_demand_changed_after_mark' AND aggregate_id = $1`,
+        [String(ownOrder)])).rows;
+      try {
+        await notifications.scanDemandChanges(async () => true);
+        const first = await events();
+        expect(first).toHaveLength(1);
+        expect(first[0].idempotency_key).toMatch(new RegExp(`^procurement_demand_changed:${ownOrder}:sheet_material:${smt}:[0-9a-f]{64}$`));
+        expect(first[0].payload_json).toMatchObject({ orderId: ownOrder, resourceKey: `sheet_material:${smt}`, quantityAtMark: 0.5, unitAtMark: 'm2' });
+        await notifications.scanDemandChanges(async () => true);
+        expect(await events()).toHaveLength(1);
+      } finally {
+        await conn.query(`DELETE FROM outbox_events WHERE event_type = 'order.resource_demand_changed_after_mark' AND aggregate_id = $1`, [String(ownOrder)]);
+        await conn.query('DELETE FROM order_resource_procurement WHERE order_id = $1', [ownOrder]);
+      }
+    });
+
+    it('CR1-4: demand and marks come from one snapshot — a re-mark between the two reads does not produce a false event', async () => {
+      const notifications = new PgProcurementNotificationsRepository(database);
+      const smt = await material();
+      const admin: CurrentUser = { id: String(adminId), username: `${tag}-admin`, role: 'admin', roleId: 1, permissions: ['orders.view'] };
+      const card = await new PgOrderResourceDemandRepository(database).getCard({ currentUser: admin, orderId: ownOrder }, { procurementEnabled: true });
+      const fingerprint = card.data.lines.find((line) => line.resourceKey === `sheet_material:${smt}`)!.demandFingerprint;
+      // Отметка совпадает с текущей потребностью — изменения нет.
+      await conn.query(
+        `INSERT INTO order_resource_procurement (order_id, resource_kind, sheet_material_type_id, purchased, origin, quantity_at_mark, unit_at_mark,
+           demand_fingerprint_at_mark, marked_at, marked_by, version)
+         VALUES ($1, 'sheet_material', $2, true, 'manual', 0.5, 'm2', $3, now(), $4, 1)`, [ownOrder, smt, fingerprint, adminId]);
+      const events = async () => Number((await conn.query(
+        `SELECT count(*) FROM outbox_events WHERE event_type = 'order.resource_demand_changed_after_mark' AND aggregate_id = $1`, [String(ownOrder)])).rows[0].count);
+      try {
+        // Между чтением потребности и отметок отметку «переставили» (другой отпечаток): в снимке сканера её не видно.
+        await notifications.scanDemandChanges(async () => true, {
+          afterProjection: async () => {
+            await conn.query(`UPDATE order_resource_procurement SET demand_fingerprint_at_mark = repeat('1', 64) WHERE order_id = $1`, [ownOrder]);
+          },
+        });
+        expect(await events()).toBe(0);
+        // Следующий проход видит уже новую отметку (не совпадает с потребностью) — одно событие.
+        await notifications.scanDemandChanges(async () => true);
+        expect(await events()).toBe(1);
+        // Выключили посреди прохода — ничего не пишется.
+        await conn.query(`DELETE FROM outbox_events WHERE event_type = 'order.resource_demand_changed_after_mark' AND aggregate_id = $1`, [String(ownOrder)]);
+        await notifications.scanDemandChanges(async () => false);
+        expect(await events()).toBe(0);
+      } finally {
+        await conn.query(`DELETE FROM outbox_events WHERE event_type = 'order.resource_demand_changed_after_mark' AND aggregate_id = $1`, [String(ownOrder)]);
+        await conn.query('DELETE FROM order_resource_procurement WHERE order_id = $1', [ownOrder]);
+      }
+    });
+
+    it('CR1-1: batches walk through every order and every receipt (batch size 1)', async () => {
+      const notifications = new PgProcurementNotificationsRepository(database, { demandBatch: 1, receiptBatch: 1 });
+      const smt = await material();
+      for (const orderId of [ownOrder, foreignOrder]) {
+        await conn.query(
+          `INSERT INTO order_resource_procurement (order_id, resource_kind, sheet_material_type_id, purchased, origin, quantity_at_mark, unit_at_mark,
+             demand_fingerprint_at_mark, marked_at, marked_by, version)
+           VALUES ($1, 'sheet_material', $2, true, 'manual', 0.5, 'm2', repeat('0', 64), now(), $3, 1)`, [orderId, smt, adminId]);
+      }
+      const today = todayInAlmaty();
+      const sourceId = Number((await conn.query(`INSERT INTO onec_sources (code, display_name) VALUES ($1, $2) RETURNING source_id`,
+        [`e2e-${randomUUID().slice(0, 8)}`, tag])).rows[0].source_id);
+      const docs: number[] = [];
+      for (const daysAgo of [6, 7]) {
+        const documentId = Number((await conn.query(
+          `INSERT INTO onec_documents (source_id, doc_kind, onec_ref_key, number, doc_date, posted, counterparty_name, amount)
+           VALUES ($1, 'purchase_receipt', $2, $3, $4::date, true, $5, 100) RETURNING onec_document_id`,
+          [sourceId, randomUUID(), `${tag.slice(-8)}-b${daysAgo}`, addDays(today, -daysAgo), `${tag} Поставщик`])).rows[0].onec_document_id);
+        await conn.query(`INSERT INTO onec_document_lines (onec_document_id, line_no, nomenclature_name, quantity, unit_code, sheet_material_type_id)
+          VALUES ($1, 1, 'лист', 1, 'sheet', $2)`, [documentId, smt]);
+        docs.push(documentId);
+      }
+      try {
+        await notifications.scanDemandChanges(async () => true);
+        const orders = (await conn.query(
+          `SELECT DISTINCT aggregate_id FROM outbox_events WHERE event_type = 'order.resource_demand_changed_after_mark' AND aggregate_id = ANY($1::text[])`,
+          [[String(ownOrder), String(foreignOrder)]])).rows.map((row) => Number(row.aggregate_id)).sort((a, b) => a - b);
+        expect(orders).toEqual([ownOrder, foreignOrder].sort((a, b) => a - b));
+        const seen: number[] = [];
+        let after: { docDate: string; documentId: number } | null = null;
+        for (;;) {
+          const page = await notifications.unallocatedReceipts(addDays(today, -2), addDays(today, -32), after);
+          if (page.length === 0) break;
+          expect(page).toHaveLength(1);
+          seen.push(page[0].documentId);
+          after = { docDate: page[0].docDate, documentId: page[0].documentId };
+        }
+        expect(docs.every((documentId) => seen.includes(documentId))).toBe(true);
+      } finally {
+        await conn.query(`DELETE FROM outbox_events WHERE event_type = 'order.resource_demand_changed_after_mark' AND aggregate_id = ANY($1::text[])`,
+          [[String(ownOrder), String(foreignOrder)]]);
+        await conn.query('DELETE FROM order_resource_procurement WHERE order_id = ANY($1::bigint[])', [[ownOrder, foreignOrder]]);
+      }
+    });
+
+    it('§5.7 p.4: unallocated receipts — older than the threshold, within the window, with an unallocated remainder only', async () => {
+      const notifications = new PgProcurementNotificationsRepository(database);
+      const smt = await material();
+      const today = todayInAlmaty();
+      const sourceId = Number((await conn.query(`INSERT INTO onec_sources (code, display_name) VALUES ($1, $2) RETURNING source_id`,
+        [`e2e-${randomUUID().slice(0, 8)}`, tag])).rows[0].source_id);
+      const receipt = async (daysAgo: number) => {
+        const documentId = Number((await conn.query(
+          `INSERT INTO onec_documents (source_id, doc_kind, onec_ref_key, number, doc_date, posted, counterparty_name, amount)
+           VALUES ($1, 'purchase_receipt', $2, $3, $4::date, true, $5, 100) RETURNING onec_document_id`,
+          [sourceId, randomUUID(), `${tag.slice(-8)}-${daysAgo}`, addDays(today, -daysAgo), `${tag} Поставщик`])).rows[0].onec_document_id);
+        const lineId = Number((await conn.query(
+          `INSERT INTO onec_document_lines (onec_document_id, line_no, nomenclature_name, quantity, unit_code, sheet_material_type_id)
+           VALUES ($1, 1, 'лист', 2, 'sheet', $2) RETURNING onec_document_line_id`, [documentId, smt])).rows[0].onec_document_line_id);
+        return { documentId, lineId };
+      };
+      const fresh = await receipt(1);
+      const due = await receipt(5);
+      const old = await receipt(60);
+      const found = async () => (await notifications.unallocatedReceipts(addDays(today, -2), addDays(today, -32)))
+        .filter((row) => [fresh.documentId, due.documentId, old.documentId].includes(row.documentId));
+      const before = await found();
+      expect(before.map((row) => row.documentId)).toEqual([due.documentId]);
+      expect(before[0]).toMatchObject({ lines: 1, supplierName: `${tag} Поставщик` });
+      // Распределили часть — другой остаток (новый хеш); всё — документ уходит.
+      const procurementId = Number((await conn.query(
+        `INSERT INTO order_resource_procurement (order_id, resource_kind, sheet_material_type_id) VALUES ($1, 'sheet_material', $2) RETURNING order_resource_procurement_id`,
+        [ownOrder, smt])).rows[0].order_resource_procurement_id);
+      try {
+        await conn.query(`INSERT INTO order_resource_onec_allocations (order_resource_procurement_id, onec_document_line_id, role, quantity, unit_code, origin, created_by)
+          VALUES ($1, $2, 'receipt', 1, 'sheet', 'manual', $3)`, [procurementId, due.lineId, adminId]);
+        const partial = await found();
+        expect(partial[0].remainingHash).not.toBe(before[0].remainingHash);
+        await conn.query(`UPDATE order_resource_onec_allocations SET quantity = 2 WHERE onec_document_line_id = $1`, [due.lineId]);
+        expect(await found()).toEqual([]);
+      } finally {
+        await conn.query('DELETE FROM order_resource_onec_allocations WHERE order_resource_procurement_id = $1', [procurementId]);
+        await conn.query('DELETE FROM order_resource_procurement WHERE order_resource_procurement_id = $1', [procurementId]);
+      }
+    });
+
+    it('§5.7 p.4: the digest goes to procurement.manage holders under their own scope, once a day, readable only with procurement.view', async () => {
+      const notifications = new PgProcurementNotificationsRepository(database);
+      const workspace = new PgProcurementWorkspaceRepository(database);
+      const now = new Date(`${todayInAlmaty()}T18:00:00Z`); // 23:00 Almaty — после времени сводки
+      const set = (code: string, value: boolean) => conn.query('UPDATE notification_rules SET is_enabled = $2 WHERE rule_code = $1', [code, value]);
+      const manageBefore = (await conn.query(`SELECT is_enabled FROM role_permissions WHERE role_id = 10 AND permission_name = 'procurement.manage'`)).rows[0]?.is_enabled;
+      const setManage = (enabled: boolean) => conn.query(
+        `INSERT INTO role_permissions (role_id, permission_name, is_enabled) VALUES (10, 'procurement.manage', $1)
+         ON CONFLICT (role_id, permission_name) DO UPDATE SET is_enabled = EXCLUDED.is_enabled`, [enabled]);
+      const startedAt = new Date();
+      await setManage(true);
+      await set('procurement-deficit-digest', true);
+      try {
+        const service = new ProcurementNotificationsService({
+          repository: notifications, worklist: workspace, enabled: () => true, supplierRequestsEnabled: () => true, now: () => now,
+        });
+        const first = await service.runOnce();
+        const holder = (await notifications.permissionHolders('procurement.manage')).find((user) => Number(user.id) === managerId)!;
+        expect(holder).toBeDefined();
+        const own = await workspace.listWorklist(holder, { preset: 'all', groupBy: 'none', sort: 'due' },
+          { procurementEnabled: true, supplyWorkspaceEnabled: true, supplierRequestsEnabled: true });
+        const rows = (await conn.query(
+          `SELECT title, message, entity_type, entity_id FROM notifications WHERE user_id = $1 AND source_type = 'procurement_digest'`, [managerId])).rows;
+        if (own.totals.uncovered > 0) {
+          expect(rows).toHaveLength(1);
+          expect(rows[0].message).toContain(`Не покрыто позиций: ${own.totals.uncovered}, из них срочно: ${own.totals.urgent}.`);
+          expect(rows[0]).toMatchObject({ entity_type: 'procurement_worklist', entity_id: null });
+          expect(rows[0].message).not.toContain(tag);
+        } else {
+          expect(rows).toHaveLength(0);
+        }
+        expect(first.digests).toBeGreaterThanOrEqual(rows.length);
+        // Повтор в тот же день — ничего нового.
+        expect((await service.runOnce()).digests).toBe(0);
+      } finally {
+        await set('procurement-deficit-digest', false);
+        if (manageBefore !== undefined) await setManage(manageBefore);
+        await conn.query(`DELETE FROM notifications WHERE source_type = 'procurement_digest' AND created_at >= $1`, [startedAt]);
+        await conn.query(`DELETE FROM outbox_events WHERE event_type = 'procurement.deficit_digest' AND created_at >= $1`, [startedAt]);
+      }
+    });
+
+    it('CR2-1: digest totals are computed in batches with the worklist rules — equal to the screen totals at any batch size', async () => {
+      const workspace = new PgProcurementWorkspaceRepository(database);
+      const options = { procurementEnabled: true, supplyWorkspaceEnabled: true, supplierRequestsEnabled: true };
+      const admin: CurrentUser = { id: String(adminId), username: `${tag}-admin`, role: 'admin', roleId: 1, permissions: ['orders.view', 'procurement.view'] };
+      for (const viewer of [manager, admin]) {
+        // Владельческая БД мала — экран не упирается в лимиты, сравнение обязательно (CR3-1).
+        const screen = await workspace.listWorklist(viewer, { preset: 'all', groupBy: 'none', sort: 'due' }, options);
+        const byOne = await workspace.worklistTotals(viewer, options, 1);
+        const byDefault = await workspace.worklistTotals(viewer, options);
+        expect(byOne).toEqual(byDefault);
+        expect(byOne.uncovered).toBe(screen.totals.uncovered);
+        expect(byOne.urgent).toBe(screen.totals.urgent);
+        expect(byOne.deficitM2).toBeCloseTo(screen.totals.deficitM2, 2);
+        expect(byOne.deficitLm).toBeCloseTo(screen.totals.deficitLm, 2);
+      }
+    });
+
+    it('§5.7 p.4: a service notification is written with its outbox event exactly once per key', async () => {
+      const notifications = new PgProcurementNotificationsRepository(database);
+      const key = `procurement_unallocated:${managerId}:1:${randomUUID()}`;
+      const input = { eventType: 'procurement.receipt_unallocated' as const, aggregateType: 'onec_document', aggregateId: '1', key,
+        userId: managerId, title: 'Поступление не распределено', message: 'тест', entityType: 'onec_document', entityId: '1' };
+      try {
+        expect(await notifications.writeServiceNotification(input)).toBe(true);
+        expect(await notifications.writeServiceNotification(input)).toBe(false);
+        const event = (await conn.query('SELECT status FROM outbox_events WHERE idempotency_key = $1', [key])).rows;
+        expect(event).toEqual([{ status: 'processed' }]);
+        const listed = await repository.listForUser({ viewer: manager, unreadOnly: false, page: 1, pageSize: 50 });
+        expect(listed.data.filter((row) => row.sourceType === 'procurement_digest' && row.message === 'тест')).toHaveLength(1);
+        const hidden = await repository.listForUser({ viewer: { ...manager, permissions: ['orders.view'] }, unreadOnly: false, page: 1, pageSize: 50 });
+        expect(hidden.data.filter((row) => row.sourceType === 'procurement_digest')).toEqual([]);
+      } finally {
+        await conn.query('DELETE FROM notifications WHERE idempotency_key = $1', [`${key}:in_app`]);
+        await conn.query('DELETE FROM outbox_events WHERE idempotency_key = $1', [key]);
+      }
+    });
   });
 });

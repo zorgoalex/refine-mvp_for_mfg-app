@@ -255,6 +255,46 @@ export class PgProcurementWorkspaceRepository {
   }
 
   /**
+   * Итоги рабочего списка получателя для сводки дефицита (ф.4б-2, CR2-1): те же scope, окно дат и правила строк, что
+   * у `listWorklist` (пресет «все», без фильтров), но порциями заказов по order_id в ОДНОМ снимке — без лимитов
+   * экрана (500 заказов / 3000 строк), чтобы сводка доходила и до получателя с большим scope.
+   */
+  async worklistTotals(
+    currentUser: CurrentUser,
+    options: ProcurementWorklistReadOptions,
+    pageSize = PROCUREMENT_WORKLIST_ORDER_LIMIT,
+  ): Promise<ProcurementWorklistResponseDto['totals']> {
+    return this.database.transaction(async (client) => {
+      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const settingsRow = (await client.query<SettingsRow>(SETTINGS_SELECT)).rows[0];
+      if (!settingsRow) throw settingsMissing();
+      const settings = settingsDto(settingsRow);
+      const today = todayInAlmaty();
+      const query: ProcurementWorklistQuery = { preset: 'all', groupBy: 'none', sort: 'due' };
+      const window = worklistWindow(query, today, settings.overdueWindowDays);
+      const totals = { uncovered: 0, urgent: 0, deficitM2: 0, deficitLm: 0 };
+      let afterOrderId = 0;
+      for (;;) {
+        const orders = await loadWorklistOrders(client, currentUser, window, query, settings.leadDays, { afterOrderId, limit: pageSize });
+        if (orders.length === 0) break;
+        const { lines } = await buildWorklistLines(client, orders, settings, today, options.procurementEnabled,
+          options.supplierRequestsEnabled === true);
+        totals.uncovered += lines.filter((line) => line.needsAction).length;
+        totals.urgent += lines.filter(isUrgent).length;
+        totals.deficitM2 += sumDeficit(lines, 'm2');
+        totals.deficitLm += sumDeficit(lines, 'lm');
+        if (orders.length < pageSize) break;
+        afterOrderId = Math.max(...orders.map((order) => Number(order.order_id)));
+      }
+      return {
+        ...totals,
+        deficitM2: Math.round(totals.deficitM2 * 1000) / 1000,
+        deficitLm: Math.round(totals.deficitLm * 1000) / 1000,
+      };
+    });
+  }
+
+  /**
    * Автоподбор заказов для прихода 1С (план §5.3). Только чтение, снимок REPEATABLE READ; кандидаты —
    * только заказы в scope (никаких счётчиков скрытых — R1-1), активные (как рабочий список, без окна дат).
    */
@@ -415,6 +455,8 @@ async function loadWorklistOrders(
   window: { plannedFrom: string | null; plannedTo: string | null },
   query: ProcurementWorklistQuery,
   leadDays: number,
+  /** Порция для сводки (ф.4б-2 CR2-1): по order_id после курсора, без исключения о переполнении. */
+  page?: { afterOrderId: number; limit: number },
 ): Promise<WorklistOrderRow[]> {
   const params: unknown[] = [];
   const { whereSql } = buildScopedOrderWhere(currentUser, undefined, params);
@@ -423,7 +465,8 @@ async function loadWorklistOrders(
     ...(window.plannedTo ? [`o.planned_completion_date <= $${params.push(window.plannedTo)}::date`] : []),
   ];
   const narrowing = buildNarrowingPredicates(query, leadDays, params);
-  const limitIndex = params.push(PROCUREMENT_WORKLIST_ORDER_LIMIT + 1);
+  if (page) narrowing.push(`o.order_id > $${params.push(page.afterOrderId)}`);
+  const limitIndex = params.push(page ? page.limit : PROCUREMENT_WORKLIST_ORDER_LIMIT + 1);
   const result = await client.query<WorklistOrderRow>(
     `SELECT o.order_id, o.order_name, (p.code || '-' || o.order_name) AS full_number, o.order_date,
             p.code AS project_code, c.client_name, o.client_id, o.updated_at,
@@ -441,11 +484,11 @@ async function loadWorklistOrders(
           ? ` OR (${plannedBounds.join(' AND ')})`
           : ' OR TRUE'})
         ${narrowing.map((clause) => `AND ${clause}`).join('\n        ')}
-      ORDER BY o.planned_completion_date NULLS LAST, o.order_id
+      ORDER BY ${page ? 'o.order_id' : 'o.planned_completion_date NULLS LAST, o.order_id'}
       LIMIT $${limitIndex}`,
     params,
   );
-  if (result.rows.length > PROCUREMENT_WORKLIST_ORDER_LIMIT) {
+  if (!page && result.rows.length > PROCUREMENT_WORKLIST_ORDER_LIMIT) {
     throw new ApiError(422, 'PROCUREMENT_WORKLIST_TOO_MANY', 'Слишком много заказов для рабочего списка. Сузьте фильтры', {
       limit: PROCUREMENT_WORKLIST_ORDER_LIMIT,
     });

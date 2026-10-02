@@ -26,6 +26,8 @@ import {
   emptyDraft,
   generateNotificationRuleCode,
   isProcurementEventType,
+  isServiceEventType,
+  SERVICE_EVENT_RECIPIENTS,
   type NotificationRuleDraft,
 } from './notificationRulesView';
 
@@ -41,6 +43,9 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   DEADLINE_EXPIRED: 'Истечение срока',
   GROUP_DEADLINE_OVERDUE: 'Просрочка срока группы',
   'order.resource_procurement_changed': 'Закуп материала заказа',
+  'order.resource_demand_changed_after_mark': 'Потребность изменилась после закупа',
+  'procurement.deficit_digest': 'Сводка дефицита закупа (утром)',
+  'procurement.receipt_unallocated': 'Приход 1С не распределён',
 };
 
 const PROCUREMENT_CHANGE_LABELS: Record<string, string> = {
@@ -187,6 +192,8 @@ function describeConditions(rule: NotificationRuleDto, orderStatusNameById: Read
 }
 
 function isRecipientDraftValid(draft: NotificationRuleDraft): boolean {
+  // Событие сервиса закупа: получатели — по праву, своих не бывает.
+  if (isServiceEventType(draft.eventType)) return true;
   if (draft.resolvers.length > 0) return true;
   if (draft.roleCodes.length > 0) return true;
   if (draft.userIds.length > 0) return true;
@@ -645,7 +652,7 @@ export function NotificationRulesConfig() {
               title: 'Получатели',
               key: 'recipients',
               render: (_, rule) => (
-                <Text type="secondary">{describeRecipients(rule, roleNameByCode, userNameById)}</Text>
+                <Text type="secondary">{SERVICE_EVENT_RECIPIENTS[rule.eventType] ?? describeRecipients(rule, roleNameByCode, userNameById)}</Text>
               ),
             },
             {
@@ -720,6 +727,7 @@ export function NotificationRulesConfig() {
             />
           </Form.Item>
 
+          {!isServiceEventType(draft.eventType) && (
           <Form.Item label="Группа">
             <Select
               allowClear
@@ -734,8 +742,10 @@ export function NotificationRulesConfig() {
               notFoundContent={groupOptionsLoading ? <Spin size="small" /> : null}
             />
           </Form.Item>
+          )}
 
           <Space size={12} style={{ width: '100%' }}>
+            {!isServiceEventType(draft.eventType) && (
             <Form.Item label="Важность" style={{ width: 180 }}>
               <Select<NotificationLevel>
                 value={draft.level}
@@ -747,6 +757,8 @@ export function NotificationRulesConfig() {
                 ]}
               />
             </Form.Item>
+            )}
+            {!isServiceEventType(draft.eventType) && (
             <Form.Item label="Приоритет" style={{ width: 160 }}>
               <InputNumber
                 min={0}
@@ -756,6 +768,7 @@ export function NotificationRulesConfig() {
                 style={{ width: 120 }}
               />
             </Form.Item>
+            )}
             <Form.Item label="Включено" style={{ width: 100 }}>
               <Switch checked={draft.isEnabled} onChange={(checked) => updateDraft({ isEnabled: checked })} />
             </Form.Item>
@@ -781,6 +794,7 @@ export function NotificationRulesConfig() {
             </Checkbox.Group>
           </Form.Item>
 
+          {!isServiceEventType(draft.eventType) && (
           <Form.Item label="Условия">
             <Space direction="vertical" size={6} style={{ width: '100%' }}>
               <Checkbox
@@ -839,7 +853,13 @@ export function NotificationRulesConfig() {
               />
             </Space>
           </Form.Item>
+          )}
 
+          {isServiceEventType(draft.eventType) ? (
+            <Form.Item label="Получатели">
+              <Text type="secondary">{SERVICE_EVENT_RECIPIENTS[draft.eventType]}</Text>
+            </Form.Item>
+          ) : (
           <Form.Item label="Получатели" required>
             <Space direction="vertical" size={6} style={{ width: '100%' }}>
               <Select<RecipientResolverKind[]>
@@ -878,7 +898,10 @@ export function NotificationRulesConfig() {
               />
             </Space>
           </Form.Item>
+          )}
 
+          {!isServiceEventType(draft.eventType) && (
+            <>
           <Form.Item label="Заголовок уведомления">
             <Input
               value={draft.titleTemplate}
@@ -906,6 +929,8 @@ export function NotificationRulesConfig() {
               placeholder="У заказа {orderId} истёк срок"
             />
           </Form.Item>
+            </>
+          )}
 
           {editor.kind === 'edit' && (
             <Form.Item label="Причина изменения" required>

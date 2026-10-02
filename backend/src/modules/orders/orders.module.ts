@@ -1,6 +1,6 @@
 import { OnecSyncModule } from '../onec-sync/onec-sync.module';
 import { OnecDocumentsProcurementConsumer } from './application/onec-documents-procurement-consumer';
-import { Module } from '@nestjs/common';
+import { Logger, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DatabaseModule } from '../../database/database.module';
 import { DatabaseService } from '../../database/database.service';
@@ -70,6 +70,9 @@ import { OrdersController } from './http/orders.controller';
 import { OrderHdfSettingsController } from './http/order-hdf-settings.controller';
 import { OrderStatusBoardController } from './http/order-status-board.controller';
 import { OrdersRuntimeConfigService } from './http/orders-runtime-config.service';
+import { PgProcurementNotificationsRepository } from './adapters/pg-procurement-notifications-repository';
+import { ProcurementNotificationsService } from './application/procurement-notifications.service';
+import { ProcurementNotificationsSchedulerService } from './application/procurement-notifications-scheduler.service';
 
 export function shouldEnableOrderDeadlineSync(input: {
   databaseConfigured: boolean;
@@ -225,6 +228,25 @@ export function shouldEnableOrderDeadlineSync(input: {
           auditClient: database,
         }),
       inject: [DatabaseService],
+    },
+    {
+      // Уведомления закупа по расписанию (ф.4б-2): флаги читаются на каждом проходе; правила-включатели — на экране правил.
+      provide: ProcurementNotificationsSchedulerService,
+      useFactory: (database: DatabaseService, runtimeConfig: OrdersRuntimeConfigService) => {
+        const flags = () => runtimeConfig.getFeatureFlags();
+        return new ProcurementNotificationsSchedulerService(new ProcurementNotificationsService({
+          repository: new PgProcurementNotificationsRepository(database),
+          worklist: new PgProcurementWorkspaceRepository(database),
+          enabled: () => {
+            const current = flags();
+            return current.ordersEnabled && current.resourceProcurementEnabled === true
+              && current.procurementWorkspaceEnabled === true && current.procurementNotificationsEnabled === true;
+          },
+          supplierRequestsEnabled: () => flags().supplierRequestsEnabled === true,
+          logger: new Logger('ProcurementNotificationsService'),
+        }));
+      },
+      inject: [DatabaseService, OrdersRuntimeConfigService],
     },
     {
       provide: SupplierRequestsService,

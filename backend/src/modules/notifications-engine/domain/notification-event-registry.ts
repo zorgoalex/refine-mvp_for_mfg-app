@@ -1,4 +1,8 @@
-export type NotificationOwner = 'engine' | 'legacy_inline';
+/**
+ * `service` — уведомления пишет свой сервис по расписанию (сводка закупа, «приход не распределён»); правило такого
+ * события — только включатель, получатели определяются правом, движок/реле событие не обрабатывают.
+ */
+export type NotificationOwner = 'engine' | 'legacy_inline' | 'service';
 export type RecipientResolverKind =
   | 'order_manager'
   | 'stage_assignee'
@@ -94,6 +98,46 @@ export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefini
     recipientVisibility: 'procurement',
     maxEventAgeHours: 24,
   },
+  // Ф.4б-2: потребность материала изменилась после отметки «Закуплено» — событие пишет сканер закупа.
+  'order.resource_demand_changed_after_mark': {
+    eventType: 'order.resource_demand_changed_after_mark',
+    aggregateType: 'order',
+    owner: 'engine',
+    contextFields: ['orderId', 'clientId'],
+    supportedResolvers: ORDER_RESOLVERS,
+    supportsOrderConditions: true,
+    supportsDeadlineConditions: false,
+    sourceType: PROCUREMENT_ORDER_EVENT_SOURCE,
+    allowedChannels: ['in_app'],
+    featureFlag: 'procurementNotifications',
+    recipientVisibility: 'procurement',
+    maxEventAgeHours: 24,
+  },
+  // Ф.4б-2: сводка дефицита (procurement.manage) и «приход не распределён» (procurement.view) — пишет сервис закупа.
+  'procurement.deficit_digest': {
+    eventType: 'procurement.deficit_digest',
+    aggregateType: 'user',
+    owner: 'service',
+    contextFields: [],
+    supportedResolvers: [],
+    supportsOrderConditions: false,
+    supportsDeadlineConditions: false,
+    sourceType: PROCUREMENT_DIGEST_SOURCE,
+    allowedChannels: ['in_app'],
+    featureFlag: 'procurementNotifications',
+  },
+  'procurement.receipt_unallocated': {
+    eventType: 'procurement.receipt_unallocated',
+    aggregateType: 'onec_document',
+    owner: 'service',
+    contextFields: [],
+    supportedResolvers: [],
+    supportsOrderConditions: false,
+    supportsDeadlineConditions: false,
+    sourceType: PROCUREMENT_DIGEST_SOURCE,
+    allowedChannels: ['in_app'],
+    featureFlag: 'procurementNotifications',
+  },
   DEADLINE_EXPIRED: {
     eventType: 'DEADLINE_EXPIRED',
     aggregateType: 'deadline',
@@ -124,7 +168,7 @@ export function isEngineOwnedEvent(eventType: string): boolean {
 
 export function listConfigurableEventTypes(): NotificationEventDefinition[] {
   return Object.values(NOTIFICATION_EVENT_REGISTRY).filter(
-    (d) => d.owner === 'engine' || d.supportsDeadlineConditions,
+    (d) => d.owner === 'engine' || d.owner === 'service' || d.supportsDeadlineConditions,
   );
 }
 
