@@ -2231,6 +2231,10 @@ probe_file() {
       "SELECT EXISTS (SELECT 1 FROM whatsapp_broadcasts WHERE broadcast_id = 1);" \
       "SELECT EXISTS (SELECT 1 FROM whatsapp_broadcast_control WHERE singleton_id = 1);" ;;
     # 224: calendar send = one system broadcast (purpose calendar) + runs source with the widened target window.
+    226_bitrix24_reconcile_retention*) probe_all \
+      "SELECT to_regprocedure('public.prune_bitrix24_reconcile_noise(timestamptz,integer)') IS NOT NULL;" \
+      "$(q_idx idx_bitrix24_inbound_event_reconcile_processed)" "$(q_idx idx_cad_events_audit_id)" \
+      "SELECT EXISTS (SELECT 1 FROM audit_log WHERE event='bitrix24_reverse.reconcile_retention_pruned' AND request_id='migration:226');" ;;
     224_whatsapp_calendar_send*) probe_all \
       "$(q_col whatsapp_broadcasts purpose)" "$(q_col whatsapp_broadcasts calendar_min_interval_minutes)" \
       "$(q_col whatsapp_broadcasts calendar_last_delivery_at)" "$(q_col whatsapp_broadcast_runs source)" \
@@ -2270,7 +2274,7 @@ verify_applied_effect() {
     209_whatsapp_broadcasts*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    224_whatsapp_calendar_send*)
+    224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     173_inbound_signals*)

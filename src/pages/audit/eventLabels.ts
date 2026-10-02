@@ -17,6 +17,7 @@ export const AUDIT_EVENT_TITLES: Record<string, string> = {
   'bitrix24_reverse.order_payments_reconcile': 'Сверены платежи заказа с Bitrix24',
   'bitrix24_reverse.payment_type_mapping_upsert': 'Сохранено соответствие типа платежа Bitrix24',
   'bitrix24_reverse.payments_materialize': 'Перенесены платежи Bitrix24 в ERP',
+  'bitrix24_reverse.reconcile_retention_pruned': 'Очищен журнал сверок Bitrix24',
   'bitrix24_reverse.request_payments_reconcile': 'Сверены платежи заявки с Bitrix24',
   'bitrix24_reverse.retry_failed': 'Повторная обработка ошибок синхронизации Bitrix24',
   'permissions.roles_matrix.reset': 'Сброшена матрица прав ролей',
