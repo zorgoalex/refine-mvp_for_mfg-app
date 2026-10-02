@@ -69,8 +69,9 @@ BEGIN
     SELECT c.audit_id
       FROM classified c
      WHERE NOT c.keep
+       -- cad_events is the only reference to audit_log that does not cascade. Tables of optional
+       -- modules must not be named here: the function has to run where they are not installed.
        AND NOT EXISTS (SELECT 1 FROM public.cad_events ce WHERE ce.audit_id = c.audit_id)
-       AND NOT EXISTS (SELECT 1 FROM public.onec_audit_links l WHERE l.audit_id = c.audit_id)
      ORDER BY c.created_at, c.audit_id
      LIMIT p_batch
   ),

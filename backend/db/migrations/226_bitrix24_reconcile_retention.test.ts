@@ -13,7 +13,8 @@ describe('226 Bitrix24 reconcile retention migration', () => {
     expect([...new Set(events)].sort()).toEqual([...BITRIX_RECONCILE_EVENTS].sort());
     expect(sql).toMatch(/a\.created_at < p_cutoff/);
     expect(sql).toMatch(/NOT EXISTS \(SELECT 1 FROM public\.cad_events/);
-    expect(sql).toMatch(/NOT EXISTS \(SELECT 1 FROM public\.onec_audit_links/);
+    // Production applies 226 before the 1C module (migration 193) exists there.
+    expect(sql).not.toMatch(/onec_/);
   });
 
   it('keeps a marked record and every record that differs from its predecessor', () => {
