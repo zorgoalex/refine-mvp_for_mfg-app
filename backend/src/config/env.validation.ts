@@ -464,6 +464,8 @@ export const envSchema = z
     ONEC_AGENT_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().min(10000).max(3600000).default(60000),
     BACKEND_ONEC_MONITOR_OWNER: z.enum(['none', 'in_process']).default('none'),
     BACKEND_ONEC_MONITOR_INTERVAL_MS: z.coerce.number().int().min(5000).max(3600000).default(60000),
+    /** Hour (UTC, 0–23) of the nightly start_full_sync per active agent; -1 = off. Runs in the monitor owner process. */
+    BACKEND_ONEC_NIGHTLY_FULL_SYNC_HOUR_UTC: z.coerce.number().int().min(-1).max(23).default(-1),
     /** 1C agent E3: owner of the ETL batch parser (one process parses). */
     BACKEND_ONEC_ETL_WORKER_OWNER: z.enum(['none', 'in_process']).default('none'),
     /** Durable spool for received ETL batches (a volume; not in DB backups). */

@@ -226,6 +226,19 @@ export class OnecAlertProjector {
           details: { runId: str(p.runId), mode: str(p.mode), completedAs: str(p.completedAs) },
         });
         return;
+      case 'onec.etl.nightly_full_sync_missed':
+        // One alert per agent and night; the operator closes it once handled (a replay never reopens it).
+        await this.repository.upsertAlert(tx, {
+          kind: 'onec_nightly_full_sync_missed',
+          agentId,
+          sourceId,
+          certId: null,
+          severity: 'warning',
+          dedupeKey: `onec_nightly_full_sync_missed:${agentId}:${str(p.slot)}`,
+          oneShot: true,
+          details: { slot: str(p.slot), slotStart: str(p.slotStart), deadline: str(p.deadline), reason: str(p.reason) },
+        });
+        return;
       case 'onec.etl.entity_revoked':
       case 'onec.etl.entity_restored':
       case 'onec.source.generation_bumped':

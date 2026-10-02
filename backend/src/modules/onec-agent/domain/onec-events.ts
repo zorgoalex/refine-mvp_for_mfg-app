@@ -12,6 +12,7 @@ export type OnecEventType =
   | 'onec.etl.run_completed'
   | 'onec.etl.run_abandoned'
   | 'onec.etl.full_sync_required'
+  | 'onec.etl.nightly_full_sync_missed'
   | 'onec.etl.entity_revoked'
   | 'onec.etl.entity_restored'
   | 'onec.source.generation_bumped';

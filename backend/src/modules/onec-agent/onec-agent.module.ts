@@ -22,6 +22,7 @@ import { OnecEtlParserService } from './application/onec-etl-parser.service';
 import { OnecEtlRevocationService } from './application/onec-etl-revocation.service';
 import { OnecMatchingService } from './application/onec-matching.service';
 import { OnecMonitorService } from './application/onec-monitor.service';
+import { OnecNightlyFullSyncService } from './application/onec-nightly-full-sync.service';
 import { OnecAdminController } from './http/onec-admin.controller';
 import { OnecAgentAuthGuard } from './http/onec-agent-auth.guard';
 import { OnecAgentController } from './http/onec-agent.controller';
@@ -46,6 +47,7 @@ import { OnecCatalogReader } from './onec-catalog-reader';
     OnecAlertProjector,
     OnecAlertsPort,
     OnecMonitorService,
+    OnecNightlyFullSyncService,
     OnecAgentAuthGuard,
     OnecPermissionsGuard,
     PgOnecCommandRepository,

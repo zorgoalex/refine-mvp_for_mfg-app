@@ -526,7 +526,17 @@ Backend: `BACKEND_ENABLE_ONEC_AGENT` (по умолчанию `false`), `ONEC_AG
 `ONEC_AGENT_SESSION_TTL_MS`, `ONEC_AGENT_HEARTBEAT_INTERVAL_MS` (агент считается
 молчащим после трёх интервалов), `BACKEND_ONEC_MONITOR_OWNER`
 (`none` | `in_process`: алерты, сроки сертификатов, очистка) и
-`BACKEND_ONEC_MONITOR_INTERVAL_MS`. Frontend: `RUNTIME_CONFIG_BACKEND_ONEC`
+`BACKEND_ONEC_MONITOR_INTERVAL_MS`. `BACKEND_ONEC_NIGHTLY_FULL_SYNC_HOUR_UTC` (час UTC 0–23,
+по умолчанию `-1` — выключено): раз в сутки в этот час процесс-владелец монитора ставит каждому активному агенту
+`start_full_sync` по всем наборам (одна команда на агента за ночь; пропуск, если полная выгрузка уже доставлена агенту
+в эту ночь или открыта и успеет до срока). Окно запуска и срок команды — 4 ч от часа (21:00 UTC → не позже 01:00 UTC),
+команду, не полученную агентом до срока, ERP не выдаёт. Если до срока агент не получил ни одной полной выгрузки по всем
+наборам (ночной или ручной), после окна — алерт «Ночная полная выгрузка не прошла» (событие модуля
+`onec.etl.nightly_full_sync_missed`, закрывает оператор). Проверяются только ночи, когда расписание действовало в этот час:
+включение, смена часа и выключение (`-1`) записываются в аудит (`onec.nightly_full_sync.activated`) как начало нового периода;
+обычный перезапуск с тем же часом период не меняет. Нужна при оконной
+ежечасной выгрузке (`windowField`/`incrementalWindowDays` в конфигурации агента): только полная выгрузка отмечает строки,
+исчезнувшие в 1С. Frontend: `RUNTIME_CONFIG_BACKEND_ONEC`
 (Vercel runtime config → `features.backendOnec`) или `VITE_USE_BACKEND_ONEC`.
 
 Права: `onec.view` (просмотр раздела; подразумевается правами `onec.manage` и

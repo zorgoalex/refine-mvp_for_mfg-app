@@ -71,7 +71,9 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 const actorId = (actor: CurrentUser): number => Number(actor.id);
 
 /** Alerts about a single past fact; nothing re-derives them, so an operator closes them. */
-export const ONEC_OPERATOR_RESOLVABLE_ALERT_KINDS = ['command_dead_letter', 'command_expired_undelivered', 'etl_run_abandoned', 'etl_full_sync_required'] as const;
+export const ONEC_OPERATOR_RESOLVABLE_ALERT_KINDS = [
+  'command_dead_letter', 'command_expired_undelivered', 'etl_run_abandoned', 'etl_full_sync_required', 'onec_nightly_full_sync_missed',
+] as const;
 
 @Injectable()
 export class OnecAdminService {

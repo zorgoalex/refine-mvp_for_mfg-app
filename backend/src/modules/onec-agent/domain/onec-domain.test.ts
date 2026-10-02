@@ -143,3 +143,22 @@ describe('entity filter (agent to-erp/0040)', () => {
   });
 });
 
+
+describe('windowed incremental (agent to-erp/0101/0102)', () => {
+  it('accepts windowField with incrementalWindowDays on a set without updatedAtField; rejects half or with updatedAtField', async () => {
+    const { validateOnecConfiguration } = await import('./onec-config');
+    const doc = { entityCode: 'doc_customer_orders', oDataPath: 'Document_ЗаказПокупателя', keyField: 'Ref_Key', select: ['Ref_Key', 'Date'],
+      updatedAtField: null, syncMode: 'incremental', pageSize: 1000, overlapMinutes: 0, filter: "Date ge datetime'2025-12-01T00:00:00'" };
+    const config = (extra: Record<string, unknown>) => ({ mode: 'Normal', commandTypes: [], etlIntervalMinutes: 60, etlEntities: [{ ...doc, ...extra }] });
+    expect(validateOnecConfiguration(config({})).ok).toBe(true);
+    expect(validateOnecConfiguration(config({ windowField: 'Date', incrementalWindowDays: 60 })).ok).toBe(true);
+    expect(validateOnecConfiguration(config({ windowField: 'Period', incrementalWindowDays: 1 })).ok).toBe(true);
+    expect(validateOnecConfiguration(config({ windowField: 'Date', incrementalWindowDays: 3650 })).ok).toBe(true);
+    for (const bad of [
+      { windowField: 'Date' }, { incrementalWindowDays: 60 }, { windowField: 'Date', incrementalWindowDays: 0 },
+      { windowField: 'Date', incrementalWindowDays: 3651 }, { windowField: 'Date', incrementalWindowDays: 1.5 },
+      { windowField: 'a b', incrementalWindowDays: 60 }, { windowField: '', incrementalWindowDays: 60 },
+      { windowField: 'Date', incrementalWindowDays: 60, updatedAtField: 'ДатаИзменения' },
+    ]) expect(validateOnecConfiguration(config(bad)).ok).toBe(false);
+  });
+});

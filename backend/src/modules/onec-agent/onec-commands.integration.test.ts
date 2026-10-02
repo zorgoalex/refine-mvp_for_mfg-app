@@ -18,6 +18,7 @@ import { OnecCommandWakeups } from './application/onec-command-wakeups';
 import { OnecCommandsService } from './application/onec-commands.service';
 import { OnecEtlRevocationService } from './application/onec-etl-revocation.service';
 import { OnecMonitorService } from './application/onec-monitor.service';
+import { OnecNightlyFullSyncService } from './application/onec-nightly-full-sync.service';
 import type { OnecRuntimeConfig, OnecRuntimeConfigService } from './onec-runtime-config.service';
 
 const suite = process.env.ONEC_AGENT_DOCKER_TEST === 'true' ? describe : describe.skip;
@@ -380,5 +381,130 @@ suite('1C agent E2 command queue — isolated PostgreSQL', () => {
     await monitor.relayOutbox();
     expect((await pool.query(`SELECT kind, severity FROM onec_alerts`)).rows).toEqual([{ kind: 'command_expired_undelivered', severity: 'warning' }]);
     expect(queued.created).toBe(true);
+  });
+  it('nightly activation periods over days: 12 → 21 → 12 and 12 → off → 12 never report watched-elsewhere nights; a real miss once', async () => {
+    const now = new Date();
+    // H: today's H-window already closed (H + 4 h <= now) — the "return" happens after it.
+    const H = new Date(now.getTime() - 6 * 60 * 60_000).getUTCHours();
+    const scheduler = (hourUtc: number | null) => new OnecNightlyFullSyncService(
+      { get: () => ({ ...runtimeConfig, nightlyFullSyncHourUtc: hourUtc }), requireEnabled: () => undefined } as unknown as OnecRuntimeConfigService,
+      repo, db, service, new OnecAuditWriter(repo), wakeups,
+    );
+    await pool.query(`UPDATE onec_agents SET status = 'blocked' WHERE agent_id = 'agent-b'`);
+    const activation = (hour: number, daysAgo: number) => pool.query(
+      `INSERT INTO audit_log (event, request_id, entity_type, entity_id, metadata_json, created_at)
+       VALUES ('onec.nightly_full_sync.activated', 'fixture', 'onec_agent', 'agent-a', jsonb_build_object('hourUtc', $1::int), now() - ($2::int * interval '1 day'))`,
+      [hour, daysAgo]);
+    const missed = async () => (await pool.query(`SELECT payload_json->'data'->>'slot' AS slot FROM onec_outbox_events
+      WHERE event_type = 'onec.etl.nightly_full_sync_missed' ORDER BY event_id`)).rows.map((row) => row.slot);
+    // History: H for 5 days, then 21 (other hour) for 3 days; now back to H — today's closed H-window was watched at the other hour.
+    const other = (H + 9) % 24;
+    await activation(H, 5);
+    await activation(other, 3);
+    expect(await scheduler(H).schedule(now)).toEqual([]);
+    expect(await missed()).toEqual([]);
+    // Off for a period, then H again: the night while off is not reported either.
+    await scheduler(null).schedule(new Date(now.getTime() + 60_000));
+    expect(await scheduler(H).schedule(new Date(now.getTime() + 2 * 60_000))).toEqual([]);
+    expect(await missed()).toEqual([]);
+    const periods = (await pool.query(`SELECT (metadata_json->>'hourUtc')::int AS h FROM audit_log WHERE event = 'onec.nightly_full_sync.activated'
+      AND entity_id = 'agent-a' ORDER BY created_at, audit_id`)).rows.map((row) => row.h);
+    expect(periods).toEqual([H, other, H, -1, H]);
+    // An ordinary restart at the same hour opens no new period.
+    await scheduler(H).schedule(new Date(now.getTime() + 3 * 60_000));
+    expect((await pool.query(`SELECT count(*)::int AS n FROM audit_log WHERE event = 'onec.nightly_full_sync.activated'`)).rows[0].n).toBe(5);
+    // Tomorrow's H-window closes without any full sync (owner down) → exactly one missed event, for tomorrow only.
+    const startToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), H));
+    if (startToday.getTime() > now.getTime()) startToday.setUTCDate(startToday.getUTCDate() - 1);
+    const tomorrow = new Date(startToday.getTime() + 24 * 60 * 60_000);
+    const afterTomorrow = new Date(tomorrow.getTime() + 5 * 60 * 60_000);
+    await scheduler(H).schedule(afterTomorrow);
+    await scheduler(H).schedule(new Date(afterTomorrow.getTime() + 5 * 60_000));
+    expect(await missed()).toEqual([tomorrow.toISOString().slice(0, 10)]);
+  });
+
+  it('nightly full sync: full-scope only, delivered-before-deadline satisfies, deferred/cancelled do not, missed-night event → alert', async () => {
+    const now = new Date();
+    const hour = new Date(now.getTime() - 60 * 60_000).getUTCHours();
+    const nightlyAt = (at: Date, slotHour = hour) => new OnecNightlyFullSyncService(
+      { get: () => ({ ...runtimeConfig, nightlyFullSyncHourUtc: slotHour }), requireEnabled: () => undefined } as unknown as OnecRuntimeConfigService,
+      repo, db, service, new OnecAuditWriter(repo), wakeups,
+    ).schedule(at);
+    const operator = (agentId: string, key: string, entities: string[], extra: { notBeforeUtc?: string } = {}) =>
+      db.transaction((tx) => service.enqueue(tx, { agentId, commandType: 'start_full_sync', payload: { entities }, sourceModule: 'onec_admin', idempotencyKey: key, ...extra }));
+    const done = (where: string) => pool.query(`UPDATE onec_agent_commands SET status = 'succeeded', received_at = now() WHERE ${where}`);
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hour));
+    if (start.getTime() > now.getTime()) start.setUTCDate(start.getUTCDate() - 1);
+    const slotDate = start.toISOString().slice(0, 10);
+    // Outside the window: nothing enqueued; no history → nothing "missed"; activation is recorded once per agent.
+    expect(await nightlyAt(now, (hour + 12) % 24)).toEqual([]);
+    await monitor.relayOutbox();
+    expect((await pool.query(`SELECT count(*)::int AS n FROM onec_alerts`)).rows[0].n).toBe(0);
+    // agent-a: open PARTIAL operator sync does not block; agent-b: open FULL operator sync blocks.
+    await operator('agent-a', 'operator-a-partial', ['items']);
+    const fullB = await operator('agent-b', 'operator-b-full', []);
+    expect(await nightlyAt(now)).toEqual(['agent-a']);
+    expect(await nightlyAt(new Date(now.getTime() + 5 * 60_000))).toEqual([]);
+    const nightly = async () => (await pool.query(`SELECT agent_id, idempotency_key, payload_canonical, status, expires_at_utc, correlation_id
+      FROM onec_agent_commands WHERE source_module = 'onec_nightly' ORDER BY agent_id`)).rows;
+    const [rowA] = await nightly();
+    expect(rowA).toMatchObject({ agent_id: 'agent-a', idempotency_key: `onec-nightly-full-sync:agent-a:${slotDate}`, payload_canonical: '{"entities":[]}', status: 'queued' });
+    expect(new Date(rowA.expires_at_utc).getTime()).toBe(start.getTime() + 4 * 60 * 60_000);
+    expect(rowA.correlation_id).toMatch(/^[0-9a-f-]{36}$/);
+    // agent-b's full operator sync is cancelled → not busy any more → nightly enqueued.
+    await pool.query(`UPDATE onec_agent_commands SET status = 'cancelled' WHERE command_id = $1`, [fullB.command.commandId]);
+    expect(await nightlyAt(new Date(now.getTime() + 10 * 60_000))).toEqual(['agent-b']);
+    await done(`source_module = 'onec_nightly'`);
+    expect(await nightlyAt(new Date(now.getTime() + 15 * 60_000))).toEqual([]);
+    const audits = (await pool.query(`SELECT event, count(*)::int AS n FROM audit_log WHERE username = 'onec-nightly-full-sync' GROUP BY event ORDER BY event`)).rows;
+    expect(audits).toEqual([{ event: 'onec.command.enqueued', n: 2 }, { event: 'onec.nightly_full_sync.activated', n: 4 }]); // 2 agents × 2 hour changes
+    // Window closes for this night: both delivered → nothing missed.
+    const afterWindow = new Date(start.getTime() + 5 * 60 * 60_000);
+    expect(await nightlyAt(afterWindow)).toEqual([]);
+    await monitor.relayOutbox();
+    expect((await pool.query(`SELECT count(*)::int AS n FROM onec_alerts WHERE kind = 'onec_nightly_full_sync_missed'`)).rows[0].n).toBe(0);
+    // Next night: agent-a has an operator full sync DEFERRED past the deadline → it neither blocks nor satisfies.
+    const nextStart = new Date(start.getTime() + 24 * 60 * 60_000);
+    await operator('agent-a', 'operator-a-deferred', [], { notBeforeUtc: new Date(nextStart.getTime() + 12 * 60 * 60_000).toISOString() });
+    // The owner is down during the whole next night window; it recovers after the deadline → one missed event per agent.
+    const afterNextWindow = new Date(nextStart.getTime() + 5 * 60 * 60_000);
+    expect(await nightlyAt(afterNextWindow)).toEqual([]);
+    expect(await nightlyAt(new Date(afterNextWindow.getTime() + 5 * 60_000))).toEqual([]);
+    const events = (await pool.query(`SELECT event_type, payload_json->'data'->>'reason' AS reason, payload_json->'actor'->>'kind' AS actor
+      FROM onec_outbox_events WHERE event_type = 'onec.etl.nightly_full_sync_missed' ORDER BY aggregate_id`)).rows;
+    expect(events).toEqual([
+      { event_type: 'onec.etl.nightly_full_sync_missed', reason: 'not_enqueued', actor: 'system' },
+      { event_type: 'onec.etl.nightly_full_sync_missed', reason: 'not_enqueued', actor: 'system' },
+    ]);
+    await monitor.relayOutbox();
+    await monitor.relayOutbox();
+    const missed = (await pool.query(`SELECT agent_id, state FROM onec_alerts WHERE kind = 'onec_nightly_full_sync_missed' ORDER BY agent_id`)).rows;
+    expect(missed).toEqual([{ agent_id: 'agent-a', state: 'open' }, { agent_id: 'agent-b', state: 'open' }]);
+    // Blocked agent is not listed for the monitor → skipped.
+    await pool.query(`UPDATE onec_agent_commands SET status = 'cancelled' WHERE idempotency_key = 'operator-a-deferred'`);
+    await pool.query(`UPDATE onec_agents SET status = 'blocked' WHERE agent_id = 'agent-b'`);
+    expect(await nightlyAt(new Date(start.getTime() + 48 * 60 * 60_000 + 60_000))).toEqual(['agent-a']);
+    // Code review R3-1: agent-a's night N+2 command was never delivered; the owner recovers only INSIDE night N+3's
+    // window → N+3 is enqueued AND the missed N+2 is reported exactly once.
+    await pool.query(`UPDATE onec_agent_commands SET status = 'expired_undelivered' WHERE source_module = 'onec_nightly' AND status = 'queued'`);
+    const insideN3 = new Date(start.getTime() + 72 * 60 * 60_000 + 30 * 60_000);
+    expect(await nightlyAt(insideN3)).toEqual(['agent-a']);
+    expect(await nightlyAt(new Date(insideN3.getTime() + 5 * 60_000))).toEqual([]);
+    const n2 = new Date(start.getTime() + 48 * 60 * 60_000).toISOString().slice(0, 10);
+    const missedN2 = (await pool.query(`SELECT payload_json->'data'->>'reason' AS reason FROM onec_outbox_events
+      WHERE event_type = 'onec.etl.nightly_full_sync_missed' AND payload_json->'data'->>'slot' = $1`, [n2])).rows;
+    expect(missedN2).toEqual([{ reason: 'nightly_command_expired_undelivered' }]);
+    // Code review R3-2: switching the schedule to another hour does not report that hour's past night.
+    const eventsBefore = (await pool.query(`SELECT count(*)::int AS n FROM onec_outbox_events WHERE event_type = 'onec.etl.nightly_full_sync_missed'`)).rows[0].n;
+    expect(await nightlyAt(new Date(), (hour + 12) % 24)).toEqual([]);
+    expect(await nightlyAt(new Date(Date.now() + 5 * 60_000), (hour + 12) % 24)).toEqual([]);
+    expect((await pool.query(`SELECT count(*)::int AS n FROM onec_outbox_events WHERE event_type = 'onec.etl.nightly_full_sync_missed'`)).rows[0].n).toBe(eventsBefore);
+    // Code review R4-1: returning to the original hour opens a new activation period — the nights watched at the other
+    // hour (and the current closed one) are not reported; three hour changes = three more activation records.
+    expect(await nightlyAt(new Date(Date.now() + 10 * 60_000), hour)).toEqual([]);
+    expect((await pool.query(`SELECT count(*)::int AS n FROM onec_outbox_events WHERE event_type = 'onec.etl.nightly_full_sync_missed'`)).rows[0].n).toBe(eventsBefore);
+    const periods = (await pool.query(`SELECT (metadata_json->>'hourUtc')::int AS h FROM audit_log WHERE event = 'onec.nightly_full_sync.activated'
+      AND entity_id = 'agent-a' ORDER BY created_at, audit_id`)).rows.map((row) => row.h);
+    expect(periods).toEqual([(hour + 12) % 24, hour, (hour + 12) % 24, hour]);
   });
 });

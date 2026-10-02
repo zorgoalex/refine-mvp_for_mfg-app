@@ -58,6 +58,14 @@ export const onecEtlEntitySchema = z
     /** Agent deletes the batch file right after the ACK (sensitive data, agent to-erp/0032). */
     deleteBatchAfterAck: z.boolean().optional(),
     /**
+     * Windowed hourly incremental (agent ≥ 1.3.0, to-erp/0101/0102): a scheduled incremental reads only rows with
+     * `windowField ≥ start of day (UTC) − incrementalWindowDays` and completes with `readScope: delta` (upsert only); full runs
+     * ignore the window. Both or neither; only for sets without `updatedAtField`. Not part of the entity domain (no new
+     * baseline). Needs the nightly full sync (BACKEND_ONEC_NIGHTLY_FULL_SYNC_HOUR_UTC) to detect rows removed in 1C.
+     */
+    windowField: odataName.optional(),
+    incrementalWindowDays: z.number().int().min(1).max(3650).optional(),
+    /**
      * Static OData $filter over the set (agent to-erp/0040): combined with date bounds by `and`, also used by
      * $count and the key pass. Part of the entity domain: changing it means a new baseline on the agent.
      */
@@ -73,6 +81,12 @@ export const onecEtlEntitySchema = z
   .superRefine((entity, ctx) => {
     if (!entity.keyField && !entity.keyFields) {
       ctx.addIssue({ code: 'custom', message: 'keyField or keyFields is required', path: ['keyField'] });
+    }
+    if ((entity.windowField === undefined) !== (entity.incrementalWindowDays === undefined)) {
+      ctx.addIssue({ code: 'custom', message: 'windowField and incrementalWindowDays go together', path: ['windowField'] });
+    }
+    if (entity.windowField !== undefined && entity.updatedAtField) {
+      ctx.addIssue({ code: 'custom', message: 'windowField is only for sets without updatedAtField', path: ['windowField'] });
     }
     const selected = new Set(entity.select);
     if (selected.size !== entity.select.length) {

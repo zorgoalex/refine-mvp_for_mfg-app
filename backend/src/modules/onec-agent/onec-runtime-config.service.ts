@@ -14,10 +14,15 @@ export interface OnecRuntimeConfig {
   heartbeatIntervalMs: number;
   monitorOwner: 'none' | 'in_process';
   monitorIntervalMs: number;
+  /** UTC hour of the nightly full sync; null — off. */
+  nightlyFullSyncHourUtc: number | null;
   etlWorkerOwner: 'none' | 'in_process';
   etlSpoolDir: string;
   etlSpoolMinFreeBytes: number;
 }
+
+const nightlyHour = (value: number | undefined): number | null =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 23 ? value : null;
 
 @Injectable()
 export class OnecRuntimeConfigService {
@@ -37,6 +42,7 @@ export class OnecRuntimeConfigService {
       heartbeatIntervalMs: this.config.get('ONEC_AGENT_HEARTBEAT_INTERVAL_MS', { infer: true }),
       monitorOwner: this.config.get('BACKEND_ONEC_MONITOR_OWNER', { infer: true }),
       monitorIntervalMs: this.config.get('BACKEND_ONEC_MONITOR_INTERVAL_MS', { infer: true }),
+      nightlyFullSyncHourUtc: nightlyHour(this.config.get('BACKEND_ONEC_NIGHTLY_FULL_SYNC_HOUR_UTC', { infer: true })),
       etlWorkerOwner: this.config.get('BACKEND_ONEC_ETL_WORKER_OWNER', { infer: true }),
       etlSpoolDir: this.config.get('ONEC_ETL_SPOOL_DIR', { infer: true }),
       etlSpoolMinFreeBytes: this.config.get('ONEC_ETL_SPOOL_MIN_FREE_BYTES', { infer: true }),

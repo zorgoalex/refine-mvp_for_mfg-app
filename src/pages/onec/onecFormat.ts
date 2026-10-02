@@ -114,6 +114,7 @@ export const ONEC_ALERT_KIND_LABELS: Record<string, string> = {
   warehouse_autosync_failed: 'Склады 1С не синхронизированы',
   onec_documents_load_failed: 'Документы 1С не загружены',
   onec_document_conflict: 'Документ 1С изменился — конфликт с распределениями',
+  onec_nightly_full_sync_missed: 'Ночная полная выгрузка не прошла',
 };
 
 /** Alerts about one past command/run: nothing re-derives them, the operator closes them once handled. */
@@ -122,6 +123,7 @@ export const ONEC_OPERATOR_RESOLVABLE_ALERT_KINDS: readonly string[] = [
   'command_expired_undelivered',
   'etl_run_abandoned',
   'etl_full_sync_required',
+  'onec_nightly_full_sync_missed',
 ];
 
 export function onecAlertResolvable(kind: string, state: string): boolean {
