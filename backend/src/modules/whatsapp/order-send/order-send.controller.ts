@@ -1,0 +1,53 @@
+import { Body, Controller, Get, HttpCode, Inject, Param, Post, Put, Req, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiError } from '../../../common/errors/api-error';
+import type { RequestWithCurrentUser } from '../../../permissions/current-user';
+import { RequirePermissions } from '../../../permissions/require-permissions.decorator';
+import { WhatsAppPermissionsGuard } from '../whatsapp-permissions.guard';
+import { parseOrderId, parseOrderSendCommand, parseOrderSendSettings } from './order-send.dto';
+import { OrderSendService } from './order-send.service';
+import { ORDER_SEND_PERMISSIONS, ORDER_SEND_SETTINGS_PERMISSIONS } from './order-send.types';
+
+@ApiTags('WhatsApp')
+@ApiBearerAuth('bearerAuth')
+@Controller()
+@UseGuards(WhatsAppPermissionsGuard)
+export class OrderSendController {
+  constructor(@Inject(OrderSendService) private readonly service: OrderSendService) {}
+
+  @ApiOperation({ summary: 'Settings of sending an order to WhatsApp from the order card' })
+  @Get('whatsapp/order-send/settings') @RequirePermissions(ORDER_SEND_SETTINGS_PERMISSIONS)
+  settings() { return this.service.settings(); }
+
+  @ApiOperation({ summary: 'Update the order card send settings (version compare-and-swap)' })
+  @Put('whatsapp/order-send/settings') @RequirePermissions(ORDER_SEND_SETTINGS_PERMISSIONS)
+  updateSettings(@Req() request: RequestWithCurrentUser, @Body() body: unknown) {
+    return this.service.updateSettings(parseOrderSendSettings(body), user(request), requestId(request));
+  }
+
+  @ApiOperation({ summary: 'Order card menu: recipients and forms available to the current user (no group ids)' })
+  @Get('whatsapp/order-send/menu') @RequirePermissions(ORDER_SEND_PERMISSIONS)
+  menu(@Req() request: RequestWithCurrentUser) { return this.service.menu(user(request)); }
+
+  @ApiOperation({ summary: 'Latest WhatsApp sends of one order' })
+  @Get('orders/:orderId/whatsapp-sends') @RequirePermissions(ORDER_SEND_PERMISSIONS)
+  list(@Param('orderId') orderId: string, @Req() request: RequestWithCurrentUser) {
+    return this.service.listForOrder(parseOrderId(orderId), user(request));
+  }
+
+  @ApiOperation({ summary: 'Queue an order form for the client or a configured chat (idempotent)' })
+  @Post('orders/:orderId/whatsapp-sends') @HttpCode(202) @RequirePermissions(ORDER_SEND_PERMISSIONS)
+  send(@Param('orderId') orderId: string, @Req() request: RequestWithCurrentUser, @Body() body: unknown) {
+    return this.service.send(parseOrderId(orderId), parseOrderSendCommand(body), user(request), requestId(request));
+  }
+}
+
+function user(request: RequestWithCurrentUser) {
+  if (!request.user) throw new ApiError(401, 'AUTH_REQUIRED', 'Authentication required');
+  return request.user;
+}
+
+function requestId(request: RequestWithCurrentUser) {
+  if (!request.requestId) throw new ApiError(500, 'INTERNAL_ERROR', 'Missing request id');
+  return request.requestId;
+}

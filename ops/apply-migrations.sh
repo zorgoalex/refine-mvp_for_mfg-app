@@ -2235,6 +2235,18 @@ probe_file() {
       "SELECT to_regprocedure('public.prune_bitrix24_reconcile_noise(timestamptz,integer)') IS NOT NULL;" \
       "$(q_idx idx_bitrix24_inbound_event_reconcile_processed)" "$(q_idx idx_cad_events_audit_id)" \
       "SELECT EXISTS (SELECT 1 FROM audit_log WHERE event='bitrix24_reverse.reconcile_retention_pruned' AND request_id='migration:226');" ;;
+    # 230: order card send = settings singleton + chats (archived, immutable group) + sends (ledger and outbox).
+    230_whatsapp_order_send*) probe_all \
+      "$(q_col whatsapp_order_send_settings min_interval_minutes)" "$(q_col whatsapp_order_send_settings send_window_minutes)" \
+      "$(q_col whatsapp_order_send_settings next_delivery_at)" "$(q_col whatsapp_order_send_chats archived_at)" \
+      "$(q_col whatsapp_order_sends provider_ack)" "$(q_col whatsapp_order_sends purged_at)" \
+      "$(q_con_on whatsapp_order_sends uq_whatsapp_order_sends_command)" \
+      "$(q_con_on whatsapp_order_sends chk_whatsapp_order_sends_target)" \
+      "$(q_con_on whatsapp_order_sends chk_whatsapp_order_sends_sent)" \
+      "$(q_con_on whatsapp_order_sends chk_whatsapp_order_sends_purged)" \
+      "$(q_idx idx_whatsapp_order_sends_one_active)" "$(q_idx idx_whatsapp_order_send_chats_group_active)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_whatsapp_order_send_chats_immutable' AND NOT tgisinternal);" \
+      "SELECT EXISTS (SELECT 1 FROM whatsapp_order_send_settings WHERE singleton);" ;;
     224_whatsapp_calendar_send*) probe_all \
       "$(q_col whatsapp_broadcasts purpose)" "$(q_col whatsapp_broadcasts calendar_min_interval_minutes)" \
       "$(q_col whatsapp_broadcasts calendar_last_delivery_at)" "$(q_col whatsapp_broadcast_runs source)" \
@@ -2274,7 +2286,7 @@ verify_applied_effect() {
     209_whatsapp_broadcasts*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*)
+    224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     173_inbound_signals*)

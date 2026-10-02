@@ -11,6 +11,7 @@ import type {
 import { authSession } from '../../../../api/authSession';
 import { BroadcastEditor } from './BroadcastEditor';
 import { CalendarSendSettings } from './CalendarSendSettings';
+import { OrderSendSettings } from './OrderSendSettings';
 import { useCalendarSendSupport } from './calendarSendSupport';
 import { BroadcastHistory, LegacyDigestHistory } from './BroadcastHistory';
 import { BroadcastList } from './BroadcastList';
@@ -205,6 +206,7 @@ export const BroadcastsPanel: React.FC<BroadcastsPanelProps> = ({ initial }) => 
       <BroadcastHistory broadcast={current} actorId={actorId} runtimeAvailable={runtimeAvailable && !paused} refreshToken={historyToken} />
     </>}
     {calendarSendSupport === 'supported' && <CalendarSendSettings captionVariables={catalog} paused={paused} />}
+    <OrderSendSettings />
     <LegacyDigestHistory />
     <Modal open={confirmPause} title="Остановить все рассылки" okText="Остановить" cancelText="Отмена" okButtonProps={{ danger: true }} confirmLoading={controlBusy} onCancel={() => setConfirmPause(false)} onOk={() => void applyControl(true)}>
       <Paragraph>Отправка всех рассылок — автоматических и ручных — будет остановлена немедленно. Сообщения, которые ещё не ушли, не будут отправлены, пока остановку не снимут.</Paragraph>

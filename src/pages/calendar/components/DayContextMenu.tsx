@@ -13,6 +13,8 @@ export interface DayContextMenuProps {
   x: number;
   y: number;
   compact?: boolean;
+  /** Send item text, e.g. «Отправить в чат «ЧПУ»». */
+  sendLabel?: string;
   onClose: () => void;
   onSendToChat: (date: string) => void;
 }
@@ -24,6 +26,7 @@ export const DayContextMenu: React.FC<DayContextMenuProps> = ({
   x,
   y,
   compact = false,
+  sendLabel = 'Отправить в чат',
   onClose,
   onSendToChat,
 }) => {
@@ -57,7 +60,7 @@ export const DayContextMenu: React.FC<DayContextMenuProps> = ({
     { type: 'divider' },
     {
       key: 'send_to_chat',
-      label: 'Отправить в чат',
+      label: sendLabel,
       icon: <SendOutlined />,
       onClick: () => {
         onClose();

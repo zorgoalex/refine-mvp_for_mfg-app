@@ -38,7 +38,8 @@ async function open(context, query, handlers) {
     const request = route.request();
     const url = request.url();
     const method = request.method();
-    if (url.includes('/whatsapp/groups')) return route.fulfill({ json: { groups: [], truncated: false, fetchedAt: '2026-10-01T00:00:00Z', cached: true } });
+    if (url.includes('/whatsapp/groups')) return route.fulfill({ json: { groups: [{ id: settings.groupChatId, name: 'Цех ЧПУ', participantCount: 5, announceOnly: false,
+      communityParent: false, suspended: false }], truncated: false, fetchedAt: '2026-10-01T00:00:00Z', cached: true } });
     if (/\/whatsapp\/broadcasts\/9\/runs$/.test(url) && method === 'GET') return route.fulfill({ json: { runs: [] } });
     if (url.endsWith('/whatsapp/calendar-send') && method === 'GET') return route.fulfill({ json: envelope() });
     if (url.endsWith('/whatsapp/calendar-send') && method === 'PUT') {
@@ -69,6 +70,7 @@ try {
     await page.locator('.day-column__header').first().click({ position: { x: 10, y: 10 } });
     await expect(page.locator('.calendar-context-menu')).toBeVisible();
     await expect(page.locator('.calendar-context-menu').getByText('Пт, 02.10.2026')).toBeVisible();
+    await expect(page.locator('.calendar-context-menu').getByText('Отправить в чат «Цех ЧПУ»')).toBeVisible();
     // Another header click while the menu is open re-opens it for that day.
     await page.locator('.day-column__header').nth(1).click({ position: { x: 10, y: 10 } });
     await expect(page.locator('.calendar-context-menu').getByText('Сб, 03.10.2026')).toBeVisible();
@@ -81,6 +83,7 @@ try {
     assert.match(posts[0].idempotencyKey, UUID);
     await expect(page.locator('.calendar-context-menu')).toBeHidden();
     assert.deepEqual(errors, [], 'no runtime errors (queued)');
+    results.push('menu item names the chat «Цех ЧПУ»');
     results.push('header click / right click -> menu; item -> POST date 2026-10-02 + uuid key + success toast: ok');
     await page.close();
   }
@@ -147,6 +150,10 @@ try {
     await expect(page.getByTestId('support')).toHaveText('supported', { timeout: 20000 });
     const icons = page.locator('.day-column__send');
     await expect(icons).toHaveCount(2);
+    await icons.nth(0).hover();
+    await expect(page.getByRole('tooltip').getByText('Отправить в чат «Цех ЧПУ»')).toBeVisible({ timeout: 5000 });
+    if (process.env.SHOT_DIR) await page.locator('.day-column').first().screenshot({ path: path.join(process.env.SHOT_DIR, 'send-tooltip.png') });
+    await page.mouse.move(600, 800);
     const before = await page.locator('.day-column__header').first().boundingBox();
     await icons.nth(1).click();
     await expect(page.locator('.calendar-context-menu')).toBeHidden();
@@ -169,6 +176,7 @@ try {
     assert.equal(Math.round(after.height), Math.round(before.height));
     assert.ok(after.height < 60, `header height ${after.height}`);
     assert.deepEqual(errors, [], 'no runtime errors (icon)');
+    results.push('icon tooltip names the chat «Цех ЧПУ»');
     results.push('header icon -> POST 2026-10-03, no menu, spinner/disabled while in flight, repeat ignored: ok');
     await page.close();
   }

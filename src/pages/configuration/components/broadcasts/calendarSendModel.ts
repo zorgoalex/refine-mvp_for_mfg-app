@@ -96,6 +96,8 @@ export interface RunCalendarSendInput {
   send: (body: CalendarSendRunInput) => Promise<BroadcastRunDetail>;
   minIntervalMinutes?: number | null;
   storage?: Parameters<typeof readPendingCalendarSend>[2];
+  /** Called with the run id of a send that is queued (not final yet), right after the server accepted it. */
+  onQueued?: (runId: string) => void;
 }
 
 /**
@@ -115,6 +117,7 @@ export async function runCalendarSend(input: RunCalendarSendInput): Promise<Cale
       send: (request) => input.send(request.payload),
       isDefinite: isKnownCalendarSendNotQueuedError,
     });
+    if (outcome.status === 'done' && ['preparing', 'queued', 'sending'].includes(outcome.result.run.state)) input.onQueued?.(outcome.result.run.id);
     return calendarSendToast(
       outcome.status === 'done' ? { status: 'done', result: outcome.result }
         : outcome.status === 'not-stored' ? outcome

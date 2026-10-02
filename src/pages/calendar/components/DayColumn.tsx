@@ -26,6 +26,8 @@ const DayColumn: React.FC<DayColumnProps> = ({
   onDayContextMenu,
   onDaySend,
   daySending = false,
+  daySendTitle = 'Отправить в чат',
+  onDaySendHover,
   onCheckboxChange,
   showFinancials = true,
 }) => {
@@ -118,7 +120,7 @@ const DayColumn: React.FC<DayColumnProps> = ({
           </div>
           <div className={`day-column__header-right${onDaySend ? ' day-column__header-right--with-send' : ''}`}>
             {onDaySend ? (
-              <Tooltip title="Отправить в чат">
+              <Tooltip title={daySendTitle} onOpenChange={(open: boolean) => { if (open) onDaySendHover?.(); }}>
                 <button
                   type="button"
                   className={`day-column__send${daySending ? ' day-column__send--busy' : ''}`}

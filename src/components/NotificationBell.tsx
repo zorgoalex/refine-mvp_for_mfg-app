@@ -3,6 +3,8 @@ import { Badge, Button, Dropdown, type DropdownProps } from 'antd';
 import { BellOutlined } from '@ant-design/icons';
 import { useGetIdentity } from '@refinedev/core';
 import { NotificationPanel } from './NotificationPanel';
+import { MyWhatsAppSendsBlock } from './whatsapp/MyWhatsAppSendsBlock';
+import { useWhatsAppSends } from './whatsapp/WhatsAppSendsProvider';
 import { useNavbarNotifications } from '../hooks/useNavbarNotifications';
 import type { UserIdentity } from '../types/auth';
 
@@ -17,14 +19,21 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
 }) => {
   const { data: user } = useGetIdentity<UserIdentity>();
   const notifications = useNavbarNotifications(user?.id);
+  // The user's own WhatsApp sends: balloons when they finish, «≈ когда» while they wait.
+  const whatsappSends = useWhatsAppSends();
+  const pendingSends = whatsappSends.items.filter((item) => item.active).length;
 
   return (
     <Dropdown
       dropdownRender={() => (
-        <NotificationPanel
-          notificationsState={notifications}
-        />
+        <div>
+          <MyWhatsAppSendsBlock items={whatsappSends.items} />
+          <NotificationPanel
+            notificationsState={notifications}
+          />
+        </div>
       )}
+      onOpenChange={(open) => { if (open) whatsappSends.refresh(); }}
       trigger={['click']}
       placement={placement}
       arrow={false}
@@ -37,7 +46,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
         className={className}
         type="text"
       >
-        <Badge count={notifications.unreadCount} offset={[0, 0]} size="small">
+        <Badge count={notifications.unreadCount} dot={notifications.unreadCount === 0 && pendingSends > 0} offset={[0, 0]} size="small">
           <BellOutlined style={{ fontSize: 18 }} />
         </Badge>
       </Button>

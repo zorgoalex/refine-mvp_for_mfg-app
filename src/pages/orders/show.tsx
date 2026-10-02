@@ -4,7 +4,7 @@ import { useDataProvider, useParsed, IResourceComponentsProps } from "@refinedev
 import type { BaseRecord } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Alert, Button, Card, Checkbox, Breadcrumb, message, Dropdown, Space, Modal, Select } from "antd";
-import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
+import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, WhatsAppOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { getTableColumnDataIndex, getTableStickyOffsetHeader } from './utils/tableCompatibility';
 import { forwardRef, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
@@ -84,6 +84,11 @@ import { useDetailGrouping } from './useDetailGrouping';
 import { DetailGroupingControls } from './components/DetailGroupingControls';
 import { groupCheckboxState, toggleGroupSelection, filterNumericKeys } from './groupSelection';
 import { authSession } from '../../api/authSession';
+import { orderSendApi } from '../../api/orderSendApi';
+import { buildOrderWhatsAppMenuItems, describeOrderWhatsAppSend, isOrderWhatsAppKey, parseOrderWhatsAppKey } from './whatsappOrderSendMenu';
+import { runOrderSend } from './whatsappOrderSendModel';
+import { announceWhatsAppSendQueued, currentOwner } from '../../components/whatsapp/myWhatsAppSendsModel';
+import { useOrderSendMenu } from './whatsappOrderSendSupport';
 import { mapOrderDtoToFormValues } from '../../api/mappers/orderMapper';
 import { OrderCatalogLinesTable } from './components/OrderCatalogLinesTable';
 import { useIsMobile } from '../../hooks/useDeviceTier';
@@ -1490,6 +1495,49 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     const primary = phones.find((p: any) => p.is_primary) || phones[0];
     return primary?.phone_number ? formatPhone(primary.phone_number) : '';
   })();
+
+  // «Отправить в WhatsApp» из меню «⋯»: меню грузится в фоне и не блокирует карточку.
+  const orderSendMenu = useOrderSendMenu(canExportOrders && (!featureFlags.useBackendPermissions || can('orders.view')));
+  const [orderSendBusy, setOrderSendBusy] = useState<ReadonlySet<string>>(() => new Set<string>());
+  const handleOrderWhatsAppSend = (key: string, confirmAfterUnknown?: string) => {
+    const parsed = parseOrderWhatsAppKey(key);
+    const orderId = Number(record?.order_id);
+    if (!parsed || !orderSendMenu || !Number.isFinite(orderId) || orderSendBusy.has(key)) return;
+    const { targetLabel, formTitle } = describeOrderWhatsAppSend(orderSendMenu, parsed.target, parsed.form);
+    // Who sends: captured before the command, so a re-login while it runs cannot take over its result.
+    const owner = currentOwner();
+    setOrderSendBusy((keys) => new Set(keys).add(key));
+    void runOrderSend({
+      orderId,
+      target: parsed.target,
+      form: parsed.form,
+      actorId: String(authSession.getUser()?.id ?? ''),
+      targetLabel,
+      formTitle,
+      send: orderSendApi.send,
+      confirmAfterUnknown,
+      // The delivery runs in the background: the shell tracker follows it (also through an older
+      // backend's endpoints) and shows a balloon when it ends. The owner was captured before the POST.
+      onQueued: (queued) => { void announceWhatsAppSendQueued(queued.sendId, { kind: 'order_send', orderId }, owner); },
+    })
+      .then((result) => {
+        if (!result) return;
+        // The server refuses a repeat after an unknown outcome until the user confirms it explicitly.
+        if (result.confirmUnknown) {
+          const previous = result.confirmUnknown;
+          Modal.confirm({
+            title: 'Результат прежней отправки неизвестен',
+            content: result.text,
+            okText: 'Отправить ещё раз',
+            cancelText: 'Не отправлять',
+            onOk: () => handleOrderWhatsAppSend(key, previous.sendId),
+          });
+          return;
+        }
+        message[result.type](result.text);
+      })
+      .finally(() => setOrderSendBusy((keys) => { const next = new Set(keys); next.delete(key); return next; }));
+  };
 
   // Создаем lookup maps для быстрого поиска
   const millingTypesMap = useMemo(
@@ -2914,6 +2962,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const activeOrderInfoLabel = isOperational
     ? visibleOrderInfoTabs.find((tab) => tab.key === activeOperationalTab)?.label
     : visibleOrderInfoTabs.find((tab) => tab.panel === activeInfoPanel)?.label;
+  const orderWhatsAppItems = canExportOrders && !deletedOrder
+    ? buildOrderWhatsAppMenuItems(orderSendMenu, { hasClientPhone: Boolean(clientPhone), sending: orderSendBusy, icon: <WhatsAppOutlined /> })
+    : [];
   const productionPdfDisabled = !record || details.length === 0 || isClientResolving;
   const productionExcelDisabled = productionPdfDisabled || isAnyExcelExporting;
   const productionPdfAction = canExportOrders ? (
@@ -2936,11 +2987,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           icon: <FileExcelOutlined />,
           label: 'Excel для производства',
           disabled: productionExcelDisabled,
-        }],
+        }, ...orderWhatsAppItems],
         onClick: ({ key }) => {
           if (key === 'excel-without-prices') {
             void handleExportExcel('without-prices');
           }
+          if (isOrderWhatsAppKey(key)) handleOrderWhatsAppSend(key);
         },
       }}
     >
@@ -3018,6 +3070,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                         label: 'JSON snapshot',
                         disabled: !record || isSnapshotExporting,
                       }] : []),
+                      ...orderWhatsAppItems,
                     ] : []),
                     ...((canMoveOrderProject || canDeleteOrder) && (canViewFinancials || canExportOrders)
                       ? [
@@ -3064,6 +3117,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     }
                     if (key === 'json') {
                       void handleExportSnapshot();
+                    }
+                    if (isOrderWhatsAppKey(key)) {
+                      handleOrderWhatsAppSend(key);
                     }
                     if (key === 'move-project') {
                       setMoveModalOpen(true);
@@ -3146,6 +3202,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                             },
                           ]
                         : []),
+                      ...orderWhatsAppItems,
                       ...(canExportOrders && (canMoveOrderProject || canDeleteOrder)
                         ? [
                             {
@@ -3182,6 +3239,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       }
                       if (key === 'json') {
                         void handleExportSnapshot();
+                      }
+                      if (isOrderWhatsAppKey(key)) {
+                        handleOrderWhatsAppSend(key);
                       }
                       if (key === 'move-project') {
                         setMoveModalOpen(true);

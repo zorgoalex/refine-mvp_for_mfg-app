@@ -23,6 +23,7 @@
     "@nestjs/swagger": "^11.4.2",
     "@resvg/resvg-js": "^2.6.2",
     "bcryptjs": "^3.0.3",
+    "exceljs": "^4.4.0",
     "express": "^5.2.1",
     "fast-xml-parser": "^4.5.7",
     "jsonwebtoken": "^9.0.3",
