@@ -96,7 +96,7 @@ export const OrderMaterialsWorkbenchTable: React.FC<OrderMaterialsWorkbenchTable
             <th className="wb-materials__num">Листы</th>
             <th>Ванны</th>
             {filmStock.allowed && <th className="wb-materials__num">На складе, пог. м</th>}
-            {filmStock.allowed && <th>Покрытие</th>}
+            {filmStock.allowed && <th>Склад</th>}
           </tr>
         </thead>
         <tbody>

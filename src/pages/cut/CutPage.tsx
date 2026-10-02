@@ -5090,6 +5090,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
 
       {job && job.groups.length > 0 && (
         <Space size={12} wrap className="cut-sheet-view-controls">
+          {isWorkbench ? <span className="wb-cut-view-label">Лист</span> : null}
           <Radio.Group
             className="cut-sheet-icon-radio"
             value={sheetPortrait}
@@ -5108,6 +5109,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               </Radio.Button>
             </Tooltip>
           </Radio.Group>
+          {isWorkbench ? <span className="wb-cut-view-label">Отсчёт</span> : null}
           <Radio.Group
             className="cut-sheet-icon-radio"
             value={sheetAxisOrigin}
@@ -5485,6 +5487,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   return (
                     <div
                       key={elemKey}
+                      className="cut-sheet-preview-item"
                       style={
                         // Open (enlarged) sheet spans the full previews row so the
                         // image can grow ~2× instead of being capped by the thumbnail

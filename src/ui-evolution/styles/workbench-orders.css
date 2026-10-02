@@ -2022,3 +2022,46 @@
   min-height: 28px !important;
   height: 28px;
 }
+
+/* ---------- открытое задание раскроя ---------- */
+/* версии расчёта: таблица прокручивается внутри своего блока, а не вылезает за край */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-results-block {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+/* заголовок группы раскроя виден всегда: кнопки при нехватке места уходят на следующую строку */
+:root[data-ui-variant="workbench"] .cut-page-modern__group > .ant-card-head .ant-card-head-wrapper {
+  flex-wrap: wrap;
+  row-gap: 6px;
+  padding-block: 6px;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern__group > .ant-card-head .ant-card-head-title {
+  flex: 1 1 auto;
+  min-width: 200px;
+  overflow: visible;
+  white-space: normal;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern__group > .ant-card-head .ant-card-extra {
+  margin-inline-start: auto;
+  max-width: 100%;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern__group > .ant-card-head .ant-card-extra .ant-space {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+/* подписи к переключателям вида листа */
+:root[data-ui-variant="workbench"] .wb-cut-view-label {
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+}
+
+/* миниатюра листа — 170px; запас высоты под неё, а не под крупный лист (без пустого поля) */
+:root[data-ui-variant="workbench"] .cut-sheet-preview-item {
+  /* шапка листа + миниатюра 170px: место держится и пока миниатюра перезагружается */
+  min-height: 240px !important;
+}

@@ -458,6 +458,28 @@ test.describe('Workbench orders polish', () => {
             items: [], groups: [],
         });
         const jobs = [cutJob(1, 'E2E-Тест раскрой кухня', 'ready'), cutJob(2, 'E2E-Тест раскрой шкаф', 'draft')];
+        // first job is calculated: one version, one group with one sheet
+        const totals = jobs[0].totals;
+        Object.assign(jobs[0], {
+            cutResults: [{
+                cutResultId: 11, cutJobId: 1, resultNo: 1, cutNumber: '1-1', resultKind: 'manual', sourceJobVersion: 1, basedOnResultId: null,
+                createdBy: 1, createdByName: 'admin', createdAt: '2026-09-25T10:00:00.000Z', totals, isCurrent: true,
+                isArchived: false, archivedAt: null, archivedBy: null,
+            }],
+            groups: [{
+                cutGroupId: 100, sheetMaterialTypeId: 7, filmId: null, status: 'ready', pdfTemplate: 'standard',
+                summary: { used_stock_count: 1, waste_percent: 12 },
+                sheets: [{
+                    cutGroupSheetId: 1, sheetIndex: 0, pngCacheKey: null,
+                    placements: { trim_mm: { left: 10, right: 10, top: 10, bottom: 10 }, sheet_width_mm: 2800, sheet_height_mm: 2070, pieces: [] },
+                }],
+            }],
+        });
+        await page.route(/\/api\/v1\/cut-jobs\/1\/groups\/100\/sheets\/0\.png(\?.*)?$/, (route) => route.fulfill({
+            status: 200,
+            contentType: 'image/png',
+            body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64'),
+        }));
         const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
         await page.route(/\/api\/v1\/cut-jobs(\?.*)?$/, (route) => route.fulfill(json(jobs)));
         await page.route(/\/api\/v1\/cut-jobs\/placements(\?.*)?$/, (route) => route.fulfill(json({
@@ -515,6 +537,29 @@ test.describe('Workbench orders polish', () => {
         expect(layout.sameRow).toBe(true);
         for (const overflow of layout.overflow) expect(overflow).toBeLessThanOrEqual(1);
         await shot(page, 'order-card-cut');
+
+        // открытое задание: версии не вылезают за край, заголовок группы виден, у переключателей вида есть подписи
+        await expect(jobCard.locator('.cut-results-block')).toContainText('1-1');
+        const jobLayout = await page.evaluate(() => {
+            const job = document.querySelector('.cut-page-modern__job')!.getBoundingClientRect();
+            const versions = document.querySelector('.cut-results-block .ant-table')!.getBoundingClientRect();
+            const visibleRight = Math.min(versions.right, document.querySelector('.cut-results-block')!.getBoundingClientRect().right);
+            const title = document.querySelector('.cut-page-modern__group .ant-card-head-title') as HTMLElement;
+            const item = document.querySelector('.cut-sheet-preview-item') as HTMLElement;
+            return {
+                versionsInside: visibleRight <= job.right + 1,
+                titleText: title.innerText.trim(),
+                titleWidth: Math.round(title.getBoundingClientRect().width),
+                itemHeight: Math.round(item.getBoundingClientRect().height),
+            };
+        });
+        expect(jobLayout.versionsInside).toBe(true);
+        expect(jobLayout.titleText).toMatch(/Раскрой|Группа/);
+        expect(jobLayout.titleWidth).toBeGreaterThan(150);
+        expect(jobLayout.itemHeight).toBeLessThanOrEqual(320);
+        await expect(page.locator('.wb-cut-view-label')).toHaveText(['Лист', 'Отсчёт']);
+        await page.locator('.cut-page-modern__group').scrollIntoViewIfNeeded();
+        await shot(page, 'order-card-cut-job');
 
         // клик по другому заданию показывает его справа
         await cards.nth(1).locator('.wb-cut-job__name').click();
