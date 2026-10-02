@@ -54,7 +54,9 @@ import {
 import { formatDateKey, formatDateForApi } from '../utils/dateUtils';
 import { broadcastsApi } from '../../../api/broadcastsApi';
 import { runCalendarSend } from '../../configuration/components/broadcasts/calendarSendModel';
+import { announceWhatsAppSendQueued, currentOwner } from '../../../components/whatsapp/myWhatsAppSendsModel';
 import { useCalendarSendSupport } from '../../configuration/components/broadcasts/calendarSendSupport';
+import { useCalendarSendTooltip } from '../../configuration/components/broadcasts/calendarSendTarget';
 import { useResponsive } from '../hooks/useResponsive';
 import { useOperationalUi } from '../../../ui-operational/OperationalPrimitives';
 import {
@@ -294,6 +296,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   const { canViewFinancials } = useOrderFinancialVisibility(currentUser);
   const { support: calendarSendSupport, minIntervalMinutes: calendarSendInterval } = useCalendarSendSupport();
   const dayMenuAvailable = !packerMode && calendarSendSupport === 'supported';
+  const { title: calendarSendTitle, refresh: refreshCalendarSendTitle } = useCalendarSendTooltip(dayMenuAvailable);
   const { orderStatuses, paymentStatuses, productionStatuses, isLoading: isLoadingStatuses } = useOrderStatuses({
     loadPaymentAndProduction: !packerMode,
     loadPayment: canViewFinancials,
@@ -485,6 +488,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   const handleDayContextMenu = (e: React.MouseEvent, date: Date) => {
     if (!dayMenuAvailable) return;
     e.preventDefault();
+    refreshCalendarSendTitle();
     const menuPosition = resolveCalendarContextMenuPosition(
       e.clientX,
       e.clientY,
@@ -512,6 +516,8 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   const handleSendDayToChat = useCallback(async (date: string) => {
     if (sendingDaysRef.current.has(date)) return;
     sendingDaysRef.current.add(date);
+    // Who sends: captured before the command, so a re-login while it runs cannot take over its result.
+    const owner = currentOwner();
     setSendingDays(new Set(sendingDaysRef.current));
     try {
       const toast = await runCalendarSend({
@@ -519,6 +525,8 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
         actorId: String(authSession.getUser()?.id ?? ''),
         send: broadcastsApi.calendarSend,
         minIntervalMinutes: calendarSendInterval,
+        // Queued: the bell follows this run and shows a balloon when it ends.
+        onQueued: (runId) => { void announceWhatsAppSendQueued(runId, { kind: 'calendar_send' }, owner); },
       });
       if (toast) message[toast.type](toast.text);
     } finally {
@@ -1135,6 +1143,8 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
                     onDayContextMenu={dayMenuAvailable ? handleDayContextMenu : undefined}
                     onDaySend={dayMenuAvailable ? (d) => void handleSendDayToChat(formatDateForApi(d)) : undefined}
                     daySending={sendingDays.has(formatDateForApi(day))}
+                    daySendTitle={calendarSendTitle}
+                    onDaySendHover={refreshCalendarSendTitle}
                     onCheckboxChange={handleCheckboxChange}
                     viewMode={viewMode}
                     cardScale={cardScale}
@@ -1164,6 +1174,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
           x={dayMenu.x}
           y={dayMenu.y}
           compact={dayMenu.compact}
+          sendLabel={calendarSendTitle}
           onClose={handleCloseDayMenu}
           onSendToChat={(date) => void handleSendDayToChat(date)}
         />

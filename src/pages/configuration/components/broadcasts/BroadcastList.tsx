@@ -5,12 +5,12 @@ import { Table } from '../../../../ui/tooltipDelay';
 import {
   RUN_STATE_LABELS,
   formatTimestamp,
-  maskGroupId,
   offsetLabel,
   runStateColor,
   timeLabel,
   weekdaysLabel,
 } from './broadcastModel';
+import { WhatsAppGroupLabel } from '../WhatsAppGroupLabel';
 
 const { Text } = Typography;
 
@@ -24,7 +24,7 @@ export interface BroadcastListProps {
 export const BroadcastList: React.FC<BroadcastListProps> = ({ broadcasts, selectedId, loading, onSelect }) => {
   const columns = [
     { title: 'Название', dataIndex: 'name', ellipsis: true, render: (name: string, row: BroadcastSummary) => <Text strong={row.id === selectedId}>{name}</Text> },
-    { title: 'Группа', dataIndex: 'groupChatId', width: 130, render: (id: string | null) => maskGroupId(id) },
+    { title: 'Группа', dataIndex: 'groupChatId', width: 220, ellipsis: true, render: (id: string | null) => <WhatsAppGroupLabel id={id} /> },
     { title: 'Дни', dataIndex: 'weekdays', width: 130, render: (days: number[]) => weekdaysLabel(days) },
     { title: 'Время', width: 170, render: (_: unknown, row: BroadcastSummary) => timeLabel(row.sendTime, row.sendWindowMinutes) },
     { title: 'Заказы на', dataIndex: 'orderDateOffsetDays', width: 130, render: (offset: number) => offsetLabel(offset) },

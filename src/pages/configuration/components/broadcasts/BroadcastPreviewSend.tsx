@@ -10,7 +10,6 @@ import {
   formatArea,
   isKnownNotQueuedError,
   isVersionConflict,
-  maskGroupId,
   persistPendingManualSend,
   readPendingManualSend,
   runPendingCommand,
@@ -18,6 +17,7 @@ import {
   weekdayDate,
   type PendingManualSend,
 } from './broadcastModel';
+import { WhatsAppGroupLabel } from '../WhatsAppGroupLabel';
 import './broadcasts.css';
 
 const { Paragraph, Text } = Typography;
@@ -141,7 +141,7 @@ export const BroadcastPreviewSend: React.FC<BroadcastPreviewSendProps> = ({ broa
       {uncertain
         ? <Alert type="warning" showIcon message="Предыдущий результат неизвестен" description="Повтор использует прежний идентификатор и исходные параметры; новый запуск создан не будет." />
         : <>
-          <Paragraph>Отправить рассылку «{broadcast.name}» в группу <Text code>{maskGroupId(broadcast.groupChatId)}</Text>?</Paragraph>
+          <Paragraph>Отправить рассылку «{broadcast.name}» в группу <WhatsAppGroupLabel id={broadcast.groupChatId} />?</Paragraph>
           {preview && <Paragraph>{preview.orderCount} заказов, общий метраж {formatArea(preview.totalArea)}.</Paragraph>}
           <Alert type="warning" showIcon message="Состав может измениться" description="Предпросмотр фиксирует текущее состояние. Перед отправкой сервер заново соберёт заказы." />
         </>}

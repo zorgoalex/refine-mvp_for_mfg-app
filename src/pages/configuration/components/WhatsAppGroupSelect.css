@@ -1,0 +1,20 @@
+.whatsapp-group-select-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.whatsapp-group-select-row .whatsapp-group-select-input {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.whatsapp-group-select-row .whatsapp-group-select-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

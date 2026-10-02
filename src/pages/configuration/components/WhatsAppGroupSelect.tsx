@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AutoComplete, Space, Typography } from 'antd';
-import { whatsappApi } from '../../../api/whatsappApi';
+import './WhatsAppGroupSelect.css';
 import type { WhatsAppGroupDto } from '../../../api/types/whatsappApi.types';
 import {
   filterGroups,
@@ -9,6 +9,7 @@ import {
   groupWarnings,
   groupsErrorText,
 } from './whatsappGroupsView';
+import { loadWhatsAppGroups } from './whatsappGroupsCache';
 
 const { Text } = Typography;
 
@@ -29,9 +30,10 @@ export function trackMounted(ref: { current: boolean }): () => void {
 }
 
 /**
- * Picker WhatsApp-групп для Form.Item. Список грузится лениво при первом
- * фокусе/открытии и никогда не опрашивается автоматически. Ручной ввод ID
- * остаётся доступным (fallback, если WAHA недоступен).
+ * Picker WhatsApp-групп для Form.Item. Список грузится один раз: сразу, если ID
+ * уже выбран (чтобы рядом показать название группы), иначе при первом
+ * фокусе/открытии; периодически не опрашивается. Ручной ввод ID остаётся
+ * доступным (fallback, если WAHA недоступен).
  */
 export const WhatsAppGroupSelect: React.FC<WhatsAppGroupSelectProps> = ({
   value,
@@ -55,9 +57,9 @@ export const WhatsAppGroupSelect: React.FC<WhatsAppGroupSelectProps> = ({
     setLoading(true);
     setLoadError(null);
     try {
-      const response = await whatsappApi.groups();
+      const list = await loadWhatsAppGroups();
       loadState.current = 'loaded';
-      if (mounted.current) setGroups(response.groups);
+      if (mounted.current) setGroups(list);
     } catch (error) {
       loadState.current = 'failed';
       if (mounted.current) setLoadError(groupsErrorText(error));
@@ -67,6 +69,11 @@ export const WhatsAppGroupSelect: React.FC<WhatsAppGroupSelectProps> = ({
   }, []);
 
   const text = value ?? '';
+  const hasValue = text.trim() !== '';
+  // A saved group is shown by name right away; an empty field still waits for the user.
+  useEffect(() => {
+    if (hasValue && loadState.current === 'idle') void ensureLoaded();
+  }, [hasValue, ensureLoaded]);
   const options = useMemo(
     () =>
       filterGroups(groups, search).map((group) => ({
@@ -84,29 +91,39 @@ export const WhatsAppGroupSelect: React.FC<WhatsAppGroupSelectProps> = ({
   );
   const selected = findGroupById(groups, text);
   const warnings = selected ? groupWarnings(selected) : [];
+  const missing = /@g\.us$/.test(text.trim()) && !selected && !loading && loadState.current === 'loaded';
 
   return (
     <div>
-      <AutoComplete
-        value={text}
-        options={options}
-        disabled={disabled}
-        placeholder={placeholder}
-        style={{ width: '100%' }}
-        notFoundContent={loading ? 'Загрузка групп…' : null}
-        filterOption={false}
-        onFocus={() => void ensureLoaded()}
-        onDropdownVisibleChange={(open: boolean) => { if (open) void ensureLoaded(); }}
-        onSearch={setSearch}
-        onChange={(next: string) => {
-          setSearch(next ?? '');
-          onChange?.(next ?? '');
-        }}
-        onSelect={() => setSearch('')}
-      />
-      {selected ? (
+      <div className="whatsapp-group-select-row">
+        <AutoComplete
+          value={text}
+          options={options}
+          disabled={disabled}
+          placeholder={placeholder}
+          className="whatsapp-group-select-input"
+          notFoundContent={loading ? 'Загрузка групп…' : null}
+          filterOption={false}
+          onFocus={() => void ensureLoaded()}
+          onDropdownVisibleChange={(open: boolean) => { if (open) void ensureLoaded(); }}
+          onSearch={setSearch}
+          onChange={(next: string) => {
+            setSearch(next ?? '');
+            onChange?.(next ?? '');
+          }}
+          onSelect={() => setSearch('')}
+        />
+        {selected ? (
+          <Text strong className="whatsapp-group-select-name" title={groupDisplayName(selected)}>
+            {groupDisplayName(selected)}
+          </Text>
+        ) : null}
+        {missing ? (
+          <Text type="warning" className="whatsapp-group-select-name">Нет в списке групп аккаунта</Text>
+        ) : null}
+      </div>
+      {warnings.length > 0 ? (
         <div style={{ marginTop: 4 }}>
-          <Text type="secondary">Группа: {groupDisplayName(selected)}</Text>
           {warnings.map((warning) => (
             <div key={warning.key}>
               <Text type="warning">{warning.text}</Text>

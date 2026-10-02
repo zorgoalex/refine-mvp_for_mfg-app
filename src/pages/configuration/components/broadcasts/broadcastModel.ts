@@ -368,9 +368,9 @@ export function pendingManualSendKey(broadcastId: number): string {
   return `${PENDING_MANUAL_SEND_PREFIX}.${broadcastId}`;
 }
 
-type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+export type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
-function defaultStorage(): StorageLike | null {
+export function defaultStorage(): StorageLike | null {
   try {
     return typeof window === 'undefined' ? null : window.localStorage;
   } catch {
@@ -444,9 +444,9 @@ export interface PendingReplan {
   ambiguous: boolean;
 }
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function readRecord(key: string, storage: StorageLike | null): Record<string, unknown> | null {
+export function readRecord(key: string, storage: StorageLike | null): Record<string, unknown> | null {
   try {
     const stored = storage?.getItem(key);
     if (!stored) return null;
@@ -457,7 +457,7 @@ function readRecord(key: string, storage: StorageLike | null): Record<string, un
   }
 }
 
-function writeRecord(key: string, value: unknown, storage: StorageLike | null): boolean {
+export function writeRecord(key: string, value: unknown, storage: StorageLike | null): boolean {
   if (!storage) return false;
   try {
     const serialized = JSON.stringify(value);
@@ -468,7 +468,7 @@ function writeRecord(key: string, value: unknown, storage: StorageLike | null): 
   }
 }
 
-function removeRecord(key: string, storage: StorageLike | null): void {
+export function removeRecord(key: string, storage: StorageLike | null): void {
   try {
     storage?.removeItem(key);
   } catch {

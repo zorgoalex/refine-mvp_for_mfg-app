@@ -59,6 +59,36 @@ describe("WahaClient", () => {
       file: { mimetype: 'image/png', filename: 'daily-1.png', data: png.toString('base64') }, caption: 'Заказы на сегодня' });
   });
 
+  it('sends a document with its mimetype and treats only a non-empty id as accepted', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'true_77014952060@c.us_A1' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: '' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new WahaClient({ getConfig: () => config } as WhatsAppRuntimeConfigService);
+    const pdf = Buffer.from('%PDF-1.7');
+    await expect(client.sendFile('77014952060@c.us', pdf, 'Заказ 1.pdf', 'application/pdf', 'Заказ 1')).resolves.toEqual({ messageId: 'true_77014952060@c.us_A1' });
+    expect(fetchMock.mock.calls[0][0]).toBe('http://waha:3000/api/sendFile');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ session: 'erp', chatId: '77014952060@c.us',
+      file: { mimetype: 'application/pdf', filename: 'Заказ 1.pdf', data: pdf.toString('base64') }, caption: 'Заказ 1' });
+    await expect(client.sendFile('1@c.us', pdf, 'a.pdf', 'application/pdf', '')).resolves.toEqual({ messageId: undefined });
+  });
+
+  it('checks a phone and never logs it; a rejected request keeps its HTTP status for the caller', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ numberExists: true, chatId: '123456789@lid' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ numberExists: false }), { status: 200 }))
+      .mockResolvedValueOnce(new Response('{}', { status: 422 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const record = vi.fn().mockResolvedValue(undefined);
+    const client = new WahaClient({ getConfig: () => config } as WhatsAppRuntimeConfigService, { record } as never);
+    await expect(client.checkPhone('77014952060')).resolves.toEqual({ exists: true, chatId: '123456789@lid' });
+    expect(fetchMock.mock.calls[0][0]).toBe('http://waha:3000/api/contacts/check-exists?phone=77014952060&session=erp');
+    await expect(client.checkPhone('77014952061')).resolves.toEqual({ exists: false, chatId: null });
+    await expect(client.sendFile('1@c.us', Buffer.from('x'), 'a.pdf', 'application/pdf', '')).rejects.toMatchObject({ code: 'WAHA_PROVIDER_ERROR', details: { httpStatus: 422 } });
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({ operation: 'GET /api/contacts/check-exists' }));
+    expect(JSON.stringify(record.mock.calls)).not.toContain('7014952060');
+  });
+
   it("uses the WAHA 2026 session routes for capping and timelock", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("{}", {
       status: 200,
@@ -102,7 +132,7 @@ describe("WahaClient", () => {
     expect(record).toHaveBeenCalledWith(expect.objectContaining({
       component: "waha",
       level: "error",
-      operation: "GET /api/{session}/auth/qr?format=image",
+      operation: "GET /api/{session}/auth/qr",
       httpStatus: 500,
       errorCode: "WAHA_PROVIDER_ERROR",
     }));

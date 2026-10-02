@@ -623,7 +623,8 @@ function flattenRolePolicy(policy: RolePolicy): Record<RolePolicyScopeKey, Scope
   };
 }
 
-function scopesFromRows(rows: readonly ScopeRow[]): RolePolicy {
+/** Строки role_policy_scopes → политика роли (неизвестные/отсутствующие ключи — 'none'). */
+export function scopesFromRows(rows: readonly { scope_key: string; scope_value: string }[]): RolePolicy {
   const flat = Object.fromEntries(
     ROLE_POLICY_SCOPE_KEYS.map((key) => [key, 'none' as Scope]),
   ) as Record<RolePolicyScopeKey, Scope>;
