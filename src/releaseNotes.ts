@@ -29,6 +29,15 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-02", title: "Названия групп WhatsApp в настройках",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "В настройках рассылок и «Отправки из календаря» рядом с ID группы WhatsApp сразу показывается её название — не нужно открывать список, чтобы понять, что это за группа.",
+      "В списке рассылок колонка «Группа» показывает название группы и короткую маску ID.",
+      "Если сохранённой группы нет в списке групп подключённого аккаунта, рядом с полем появляется предупреждение «Нет в списке групп аккаунта».",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-02", title: "Журнал связи с 1С за сутки",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

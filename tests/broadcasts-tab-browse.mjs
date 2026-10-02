@@ -66,9 +66,17 @@ try {
   await page.goto(`http://127.0.0.1:${PORT}/fixture`);
   await expect(page.getByText('Список рассылок')).toBeVisible({ timeout: 30000 });
   results.push('list rendered');
+  await expect(page.getByRole('cell', { name: 'ЧПУ · 1203…@g.us' })).toBeVisible({ timeout: 20000 });
+  results.push('list shows the group name with the masked id');
   await page.getByRole('cell', { name: 'Рассылка заказов' }).first().click();
   await expect(page.getByText('Рассылка: Рассылка заказов')).toBeVisible({ timeout: 20000 });
   results.push('editor opened (skip policy)');
+  const groupRow = page.locator('.whatsapp-group-select-row').first();
+  await expect(groupRow.locator('.whatsapp-group-select-name')).toHaveText('ЧПУ', { timeout: 20000 });
+  const [inputBox, nameBox] = await Promise.all([groupRow.locator('.whatsapp-group-select-input').boundingBox(), groupRow.locator('.whatsapp-group-select-name').boundingBox()]);
+  assert.ok(nameBox.x >= inputBox.x + inputBox.width && Math.abs(nameBox.y + nameBox.height / 2 - (inputBox.y + inputBox.height / 2)) < 8, 'name sits right of the id field');
+  if (process.env.SHOT_DIR) await groupRow.screenshot({ path: path.join(process.env.SHOT_DIR, 'group-row-desktop.png') });
+  results.push('editor shows the group name next to the id field');
   await expect(page.getByText('История отправок')).toBeVisible();
   await expect(page.getByText('Готовится').first()).toBeVisible();
   results.push('history rendered with preparing/queued/sent/skipped/failed');
@@ -78,6 +86,13 @@ try {
   await page.getByText('История до перехода').click();
   await expect(page.getByText('Нет заказов').first()).toBeVisible({ timeout: 20000 });
   results.push('legacy history rendered with every state');
+  await page.setViewportSize({ width: 390, height: 900 });
+  const narrowRow = page.locator('.whatsapp-group-select-row').first();
+  await expect(narrowRow.locator('.whatsapp-group-select-name')).toBeVisible();
+  const narrow = await narrowRow.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+  assert.ok(narrow.scroll <= narrow.client + 1, `group row fits at phone width: ${JSON.stringify(narrow)}`);
+  if (process.env.SHOT_DIR) await narrowRow.screenshot({ path: path.join(process.env.SHOT_DIR, 'group-row-phone.png') });
+  results.push('group row wraps at phone width');
   assert.deepEqual([...new Set(errors)], [], 'no runtime errors');
   console.log(JSON.stringify({ browse: 'passed', results }, null, 1));
 } catch (error) {
