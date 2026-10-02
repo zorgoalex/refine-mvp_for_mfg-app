@@ -68,6 +68,8 @@ import { buildPieceMetaByItemId } from './cutPieceMeta';
 import { pushHistory } from './editorHistory';
 import { CutSheetLabelGenerateAction, type CutSheetLabelDetailInstance } from './CutSheetLabelGenerateAction';
 import { CutSvgUploadModal } from './CutSvgUploadModal';
+import { CutJobCardList } from './CutJobCardList';
+import { useOptionalUiVariant } from '../../ui-variant/UiVariantProvider';
 import { CutTelegramImportModal } from './CutTelegramImportModal';
 import { authSession } from '../../api/authSession';
 import { useCutDetailLastReady } from '../orders/useCutDetailLastReady';
@@ -980,6 +982,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const ordinaryReadActiveRef = useRef(ordinaryReadActive);
   ordinaryReadActiveRef.current = ordinaryReadActive;
   const isOperational = useOperationalUi();
+  // «NewLine»: the jobs list is drawn as cards from the same column renderers.
+  const uiVariant = useOptionalUiVariant()?.variant;
+  const isWorkbench = !isOperational && uiVariant === 'workbench';
   const canViewCut = can('cut.view');
   const canManage = can('cut.manage');
   const canViewOrders = can('orders.view');
@@ -4470,7 +4475,18 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             </Tooltip>
           </div>
         ) : null}
-        {isOperational && isEmbeddedOrder ? (
+        {isWorkbench ? (
+          <CutJobCardList<CutJobDto>
+            jobs={filteredJobs}
+            columns={jobColumns}
+            activeJobId={job?.cutJobId ?? null}
+            loading={jobsLoading}
+            emptyText={isEmbeddedOrder ? 'Нет заданий для этого заказа' : 'Нет раскроев'}
+            onOpen={(row) => {
+              if (!busy) void openJob(row.cutJobId);
+            }}
+          />
+        ) : isOperational && isEmbeddedOrder ? (
           <div className="cut-jobs-operational-list">
             {jobsLoading ? <Spin /> : filteredJobs.length === 0 ? (
               <Text type="secondary">Нет заданий для этого заказа</Text>
