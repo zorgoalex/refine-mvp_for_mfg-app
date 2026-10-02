@@ -505,16 +505,21 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     hybridSpacerHeightRef.current = height;
     setHybridSpacerHeight(height);
   }, []);
+  const hybridScrollTimersRef = useRef<number[]>([]);
   const scrollToFormSection = useCallback((key: string) => {
-    // two frames: a section opened by this click is in the document before it is measured
-    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+    hybridScrollTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    hybridScrollTimersRef.current = [];
+    const bringToTop = (settle: boolean) => {
       const node = hybridSectionRefs.current[key];
       if (!node) return;
+      const stickyBottom = Number.parseFloat(window.getComputedStyle(node).scrollMarginTop) || 0;
+      // a section that loads its content after opening changes height: once it has settled,
+      // nothing is done if it already stands under the sticky rows
+      if (settle && Math.abs(node.getBoundingClientRect().top - stickyBottom) <= 2) return;
       const spacer = hybridSpacerRef.current;
       if (spacer) {
         // the last sections are shorter than the screen: without extra room below, the page ends
         // before the section reaches the sticky rows and the previous block stays in view
-        const stickyBottom = Number.parseFloat(window.getComputedStyle(node).scrollMarginTop) || 0;
         const spacerTop = spacer.getBoundingClientRect().top;
         const belowSpacer = document.documentElement.scrollHeight
           - (window.scrollY + spacerTop + hybridSpacerHeightRef.current);
@@ -524,8 +529,11 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         spacer.style.height = `${height}px`;
         setHybridSpacer(height);
       }
-      window.requestAnimationFrame(() => node.scrollIntoView({ block: 'start', behavior: 'smooth' }));
-    }));
+      window.requestAnimationFrame(() => node.scrollIntoView({ block: 'start', behavior: settle ? 'auto' : 'smooth' }));
+    };
+    // two frames: a section opened by this click is in the document before it is measured
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => bringToTop(false)));
+    hybridScrollTimersRef.current = [700, 1800].map((delay) => window.setTimeout(() => bringToTop(true), delay));
   }, [setHybridSpacer]);
   const goToFormSection = useCallback((key: string) => {
     if (!HYBRID_MAIN_SECTION_KEYS.includes(key)) {
@@ -2044,6 +2052,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       frame = window.requestAnimationFrame(update);
     };
     const unpin = () => {
+      hybridScrollTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      hybridScrollTimersRef.current = [];
       setWorkbenchPinnedSection(null);
       dropSpacer();
     };
