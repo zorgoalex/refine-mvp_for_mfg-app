@@ -10,7 +10,13 @@ const { Text } = Typography;
 const formatQuantity = (value: number | null) => value == null ? '—' : new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 3 }).format(value);
 
 /** «Не учтено из 1С»: строки документов расхода 1С, не попавшие в остатки склада, с причинами. Только чтение + пересчёт. */
-export const OnecIssuesTab: React.FC<{ warehouseId: number | undefined; manageAllowed: boolean }> = ({ warehouseId, manageAllowed }) => {
+export const OnecIssuesTab: React.FC<{
+  warehouseId: number | undefined;
+  manageAllowed: boolean;
+  /** Склад выбирается здесь же (тот же выбор, что на «Остатках»). */
+  warehouseOptions: Array<{ value: number; label: string }>;
+  onWarehouseChange: (warehouseId: number) => void;
+}> = ({ warehouseId, manageAllowed, warehouseOptions, onWarehouseChange }) => {
   const queryClient = useQueryClient();
   const [code, setCode] = useState<string>();
   const [includeBeforeCutoff, setIncludeBeforeCutoff] = useState(false);
@@ -48,8 +54,8 @@ export const OnecIssuesTab: React.FC<{ warehouseId: number | undefined; manageAl
   ];
   return <Card>
     <Alert style={{ marginBottom: 12 }} type="info" showIcon message="Строки плёнки из документов 1С (реализация, возврат поставщику, списание, перемещение), которые не попали в остатки склада. Прочие материалы (МДФ, фрезеровка) здесь не показываются. Исправленные строки применяются при следующем пересчёте (сам — каждый час и после загрузки документов 1С)." />
-    {warehouseId === undefined && <Alert style={{ marginBottom: 12 }} type="warning" showIcon message="Выберите склад на вкладке «Остатки»" />}
     <Space wrap style={{ marginBottom: 12 }}>
+      <Select placeholder="Склад" style={{ minWidth: 220 }} value={warehouseId} options={warehouseOptions} onChange={onWarehouseChange} status={warehouseId === undefined ? 'warning' : undefined} />
       <Select allowClear placeholder="Причина" style={{ minWidth: 280 }} value={code} onChange={setCode}
         options={counts.map((row) => ({ value: row.code, label: `${onecIssueLabel(row.code)} (${row.count})` }))} />
       <Checkbox checked={includeBeforeCutoff} onChange={(event) => setIncludeBeforeCutoff(event.target.checked)}>Показать строки до инвентаризации</Checkbox>

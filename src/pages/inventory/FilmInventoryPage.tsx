@@ -9,7 +9,7 @@ import { inventoryApi, createInventoryIdempotencyKey } from '../../api/inventory
 import type { InventoryApiError, StockDocKind, StockDocumentDto, StockDocType, StockDocumentSummaryDto } from '../../api/types/inventoryApi.types';
 import dayjs from 'dayjs';
 import { can } from '../../utils/permissions';
-import { lineFilmOptions, lineFilmValue, operationWarehouse, parseStockCsv, parseStockRows, resolveActiveWarehouse, selectDefaultStockSheet, unresolvedLineIds, type ParsedStockSheet } from './filmStock';
+import { lineFilmOptions, lineFilmValue, operationWarehouse, preferredWarehouseIds, parseStockCsv, parseStockRows, resolveActiveWarehouse, selectDefaultStockSheet, unresolvedLineIds, type ParsedStockSheet } from './filmStock';
 import { WarehouseStockTable } from './WarehouseStockTable';
 import { OnecIssuesTab } from './OnecIssuesTab';
 import { documentBasis, formatMoment, supportsOnecConsumption } from './onecConsumption';
@@ -57,7 +57,8 @@ export const FilmInventoryPage: React.FC = () => {
   const retryActionId = useRef<string>();
   const warehousesQuery = useQuery({ queryKey: ['inventory', 'warehouses'], queryFn: () => inventoryApi.warehouses(), enabled: viewAllowed });
   const [warehouseLost, setWarehouseLost] = useState(false);
-  const warehouseIds = warehousesQuery.data?.items.map((item) => item.warehouseId);
+  // По умолчанию — склад плёнки (с расходом из 1С), затем склады с остатком плёнки.
+  const warehouseIds = warehousesQuery.data ? preferredWarehouseIds(warehousesQuery.data.items) : undefined;
   // Backend знает расход 1С (поле склада в ответе): только тогда — «Момент подсчёта» и «Не учтено из 1С»
   // (прежний backend отклоняет неизвестное поле countedAt).
   const consumptionSupported = (warehousesQuery.data?.items ?? []).some(supportsOnecConsumption);
@@ -349,7 +350,7 @@ export const FilmInventoryPage: React.FC = () => {
         </Space>
         <Table rowKey="documentId" dataSource={documentsQuery.data?.items ?? []} columns={documentColumns} loading={documentsQuery.isLoading} onRow={(row) => ({ onClick: () => void openDocument(row.documentId), style: { cursor: 'pointer' } })} pagination={{ current: docPage.current, pageSize: docPage.pageSize, total: documentsQuery.data?.total ?? 0, showSizeChanger: true, onChange: (current, pageSize) => setDocPage({ current, pageSize }) }} />
       </Card> },
-      ...(consumptionSupported ? [{ key: 'onec-issues', label: 'Не учтено из 1С', children: tab === 'onec-issues' ? <OnecIssuesTab warehouseId={activeWarehouseId} manageAllowed={manageAllowed} /> : null }] : []),
+      ...(consumptionSupported ? [{ key: 'onec-issues', label: 'Не учтено из 1С', children: tab === 'onec-issues' ? <OnecIssuesTab warehouseId={activeWarehouseId} manageAllowed={manageAllowed} warehouseOptions={(warehousesQuery.data?.items ?? []).map((item) => ({ value: item.warehouseId, label: item.name }))} onWarehouseChange={chooseWarehouse} /> : null }] : []),
     ]} />
 
     <Modal {...scrollingModal} title={manualType ? `${docTypeName[manualType]} · склад «${warehouseName(operationWarehouseId)}»` : ''} open={Boolean(manualType)} onCancel={() => setManualType(undefined)} onOk={() => void createManual()} confirmLoading={operationBusy} width={720} okText="Провести">

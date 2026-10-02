@@ -1,4 +1,4 @@
-import type { OrderFilmStockDto, StockDocumentDto, StockDocumentLineDto } from '../../api/types/inventoryApi.types';
+import type { OrderFilmStockDto, StockDocumentDto, StockDocumentLineDto, WarehouseDto } from '../../api/types/inventoryApi.types';
 
 export type FilmStockBadge = { kind: 'stock' | 'none'; label: string; quantity: number | null };
 export function filmStockBadge(stock: number | null | undefined): FilmStockBadge {
@@ -113,6 +113,15 @@ export function lineFilmValue(line: StockDocumentLineDto): number | undefined {
  * Склад экрана остатков. Явно выбранный склад, пропавший из списка активных (отключён),
  * не подменяется другим молча: выбор сбрасывается и требуется новый.
  */
+/**
+ * Порядок складов для выбора по умолчанию: сначала склад, где ведётся расход из 1С (склад плёнки), затем склады с
+ * остатком плёнки, затем остальные в исходном порядке (по названию).
+ */
+export function preferredWarehouseIds(items: ReadonlyArray<Pick<WarehouseDto, 'warehouseId' | 'onecConsumptionSince' | 'filmsWithStock'>>): number[] {
+  const rank = (item: (typeof items)[number]) => (item.onecConsumptionSince ? 0 : item.filmsWithStock > 0 ? 1 : 2);
+  return items.map((item, index) => ({ item, index })).sort((a, b) => rank(a.item) - rank(b.item) || a.index - b.index).map(({ item }) => item.warehouseId);
+}
+
 export function resolveActiveWarehouse(
   selectedId: number | undefined,
   selectionLost: boolean,

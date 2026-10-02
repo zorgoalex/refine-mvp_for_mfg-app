@@ -29,6 +29,14 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-03", title: "Остатки на складах: сразу склад плёнки",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "Экран «Остатки на складах» открывается на складе, где ведётся расход плёнки из 1С (затем — на складе с остатком плёнки), а не на первом складе по алфавиту.",
+      "На вкладке «Не учтено из 1С» можно выбрать склад прямо в ней.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-02", title: "Уведомления закупа: кому отправлять и сводка по нераспределённым поступлениям",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [

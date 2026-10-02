@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { preferredWarehouseIds } from './filmStock';
 import { documentBasis, onecIssueDocument, onecIssueLabel, onecRunText, sameMoment, supportsOnecConsumption } from './onecConsumption';
 
 describe('1C consumption screen helpers', () => {
@@ -30,5 +31,14 @@ describe('1C consumption screen helpers', () => {
     expect(documentBasis({ source: 'onec', comment: '1С: Реализация № 1 от 26.09.2026', fileName: null })).toBe('1С: Реализация № 1 от 26.09.2026');
     expect(documentBasis({ source: 'import', comment: null, fileName: 'остатки.xlsx' })).toBe('остатки.xlsx');
     expect(documentBasis({ source: 'manual', comment: null, fileName: null })).toBe('—');
+  });
+
+  it('opens the film warehouse by default: consumption from 1C first, then film stock, then the rest by name', () => {
+    expect(preferredWarehouseIds([
+      { warehouseId: 8, onecConsumptionSince: null, filmsWithStock: 0 },
+      { warehouseId: 3, onecConsumptionSince: null, filmsWithStock: 4 },
+      { warehouseId: 2, onecConsumptionSince: '2026-09-26T05:14:00Z', filmsWithStock: 70 },
+      { warehouseId: 5, onecConsumptionSince: undefined, filmsWithStock: 0 },
+    ])).toEqual([2, 3, 8, 5]);
   });
 });
