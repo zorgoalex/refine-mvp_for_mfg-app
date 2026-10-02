@@ -37,6 +37,9 @@ describe('film catalog screens guard', () => {
     expect(css).toContain('.films-list__name { font-size: 0.75em;');
     expect(list).toContain('<Tooltip title={value}><span className="films-list__key">{value}</span></Tooltip>');
     expect(css).toMatch(/\.films-list__key \{[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/);
-    expect(list).toContain('note: 140');
+    expect(list).toContain('note: 110');
+    // width: auto отключает fixed-раскладку (колонки по содержимому) — таблице нужна ширина 100%.
+    expect(list).toContain("scroll={{ x: '100%' }}");
+    expect(list).toContain("useStickyBottom('.workspace-tabs')");
   });
 });

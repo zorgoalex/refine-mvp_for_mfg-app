@@ -12,11 +12,12 @@ import { buildFilmFilters, FILM_KEY_PATTERN, hasFilmFieldFilters, readFilmFilter
 import { FilmSearch } from "./FilmSearch";
 import { useNavigate } from 'react-router-dom';
 import { getLoadedRuntimeConfig } from '../../config/runtimeConfig';
-import { useRefHeight, useSelectorHeight } from '../../hooks/useElementHeight';
+import { useRefHeight, useSelectorHeight, useStickyBottom } from '../../hooks/useElementHeight';
 import './films.css';
 
 // Узкие колонки фиксированной ширины: список помещается без горизонтальной прокрутки, «Название» берёт остаток.
-const WIDTH = { id: 64, sort: 76, nomenclatureType: 110, category: 110, note: 140, filmType: 100, vendor: 120, texture: 76, key: 110, active: 104, actions: 76, catalog: 130 } as const;
+// Сумма 960px: при ширине окна 1440 «Названию» остаётся ~200px.
+const WIDTH = { id: 56, sort: 60, nomenclatureType: 84, category: 84, note: 110, filmType: 84, vendor: 100, texture: 60, key: 90, active: 92, actions: 76, catalog: 64 } as const;
 
 export const FilmList: React.FC<IResourceComponentsProps> = () => {
   const [filtersVisible, setFiltersVisible] = useState(false);
@@ -73,7 +74,7 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
   const canManageCatalog = (identity?.permissions ?? []).includes('references.manage');
   // Липкие блоки: шапка списка — под лентой вкладок, шапка таблицы — под ней, пагинация — над подвалом приложения.
   const headRef = useRef<HTMLDivElement>(null);
-  const tabsHeight = useSelectorHeight('.workspace-tabs');
+  const tabsHeight = useStickyBottom('.workspace-tabs');
   const footerHeight = useSelectorHeight('.ant-layout-footer');
   const headHeight = useRefHeight(headRef);
 
@@ -223,6 +224,7 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
         {...highlightProps}
         rowKey="film_id"
         tableLayout="fixed"
+        scroll={{ x: '100%' }}
         sticky={{ offsetHeader: tabsHeight + headHeight }}
         onRow={(record) => ({
           onDoubleClick: () => {

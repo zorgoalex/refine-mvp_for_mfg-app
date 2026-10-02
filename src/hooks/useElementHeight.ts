@@ -26,3 +26,29 @@ export function useRefHeight(ref: RefObject<HTMLElement>): number {
   useEffect(() => observeHeight(ref.current, setHeight), [ref]);
   return height;
 }
+
+/**
+ * Нижняя граница липкого элемента оболочки в закреплённом состоянии: его sticky/fixed `top` + высота. Лента вкладок
+ * закрепляется под шапкой приложения (top 64px) или у верхнего края (top 0) — зависит от варианта оболочки.
+ */
+export function useStickyBottom(selector: string): number {
+  const [bottom, setBottom] = useState(0);
+  useEffect(() => {
+    const element = document.querySelector<HTMLElement>(selector);
+    if (!element) { setBottom(0); return undefined; }
+    const update = () => {
+      const style = getComputedStyle(element);
+      const pinned = style.position === 'sticky' || style.position === 'fixed';
+      setBottom(Math.ceil((pinned ? parseFloat(style.top) || 0 : 0) + element.getBoundingClientRect().height));
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    window.addEventListener('resize', update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, [selector]);
+  return bottom;
+}
