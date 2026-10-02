@@ -14,6 +14,8 @@ interface CutJobCardListProps<Row extends { cutJobId: number }> {
   activeJobId?: number | null;
   loading?: boolean;
   emptyText: string;
+  /** the full page keeps a long list inside its own scroll box, like the table did */
+  scrollable?: boolean;
   onOpen: (row: Row) => void;
 }
 
@@ -45,6 +47,7 @@ export function CutJobCardList<Row extends { cutJobId: number }>({
   activeJobId,
   loading = false,
   emptyText,
+  scrollable = false,
   onOpen,
 }: CutJobCardListProps<Row>) {
   const [sort, setSort] = useState<string>('default');
@@ -120,7 +123,7 @@ export function CutJobCardList<Row extends { cutJobId: number }>({
           />
         </div>
       ) : null}
-      <div className="wb-cut-jobs__grid">
+      <div className={scrollable ? 'wb-cut-jobs__grid wb-cut-jobs__grid--scroll' : 'wb-cut-jobs__grid'}>
         {sortedJobs.map((row, index) => (
           <article
             key={row.cutJobId}

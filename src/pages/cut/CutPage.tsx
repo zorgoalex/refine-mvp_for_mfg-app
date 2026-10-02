@@ -4482,6 +4482,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             activeJobId={job?.cutJobId ?? null}
             loading={jobsLoading}
             emptyText={isEmbeddedOrder ? 'Нет заданий для этого заказа' : 'Нет раскроев'}
+            scrollable={!isEmbeddedOrder}
             onOpen={(row) => {
               if (!busy) void openJob(row.cutJobId);
             }}
