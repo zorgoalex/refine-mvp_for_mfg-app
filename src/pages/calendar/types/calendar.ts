@@ -201,6 +201,10 @@ export interface DayColumnProps {
   onDaySend?: (date: Date) => void;
   /** A send for this day is in flight: the icon shows a spinner and ignores clicks. */
   daySending?: boolean;
+  /** Send icon tooltip, e.g. «Отправить в чат «ЧПУ»». */
+  daySendTitle?: string;
+  /** The send icon tooltip opened: refresh the chat name. */
+  onDaySendHover?: () => void;
   onCheckboxChange?: (order: CalendarOrder, isChecked: boolean) => void;
   showFinancials?: boolean;
 }

@@ -11,6 +11,7 @@ import { formatDateForApi } from '../../src/pages/calendar/utils/dateUtils';
 import { runCalendarSend } from '../../src/pages/configuration/components/broadcasts/calendarSendModel';
 import { useCalendarSendSupport } from '../../src/pages/configuration/components/broadcasts/calendarSendSupport';
 import { CalendarSendSettings } from '../../src/pages/configuration/components/broadcasts/CalendarSendSettings';
+import { useCalendarSendTooltip } from '../../src/pages/configuration/components/broadcasts/calendarSendTarget';
 import '../../src/pages/calendar/styles/calendar.css';
 import '../../src/pages/calendar/styles/calendar-mobile.css';
 
@@ -28,6 +29,7 @@ authSession.setUser({
 function DayHarness() {
   const { support, minIntervalMinutes } = useCalendarSendSupport();
   const available = support === 'supported';
+  const { title, refresh } = useCalendarSendTooltip(available);
   const [menu, setMenu] = useState({ visible: false, x: 0, y: 0, date: '' });
   const [sending, setSending] = useState<string[]>([]);
   const send = (date: string) => {
@@ -43,11 +45,13 @@ function DayHarness() {
       key={date.toISOString()} date={date} orders={[]} columnWidth={320}
       onDaySend={available ? (d) => send(formatDateForApi(d)) : undefined}
       daySending={sending.includes(formatDateForApi(date))}
+      daySendTitle={title} onDaySendHover={refresh}
       onDayContextMenu={available ? (e, d) => {
         e.preventDefault();
+        refresh();
         setMenu({ visible: true, x: compact ? 8 : e.clientX, y: e.clientY, date: formatDateForApi(d) });
       } : undefined} />)}
-    {menu.date && <DayContextMenu date={menu.date} visible={menu.visible} x={menu.x} y={menu.y} compact={compact}
+    {menu.date && <DayContextMenu date={menu.date} visible={menu.visible} x={menu.x} y={menu.y} compact={compact} sendLabel={title}
       onClose={() => setMenu((m) => ({ ...m, visible: false }))}
       onSendToChat={send} />}
   </DndProvider>;

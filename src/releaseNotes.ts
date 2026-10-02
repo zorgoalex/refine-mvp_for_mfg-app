@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-02", title: "Календарь: в какой чат уйдёт отправка",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "Подсказка у иконки «Отправить в чат» в заголовке дня и пункт контекстного меню дня показывают название группы WhatsApp, например «Отправить в чат «Цех ЧПУ»». Если группа не выбрана, об этом сказано в подсказке.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-02", title: "Названия групп WhatsApp в настройках",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [
