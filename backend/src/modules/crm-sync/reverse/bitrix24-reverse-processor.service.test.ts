@@ -31,6 +31,31 @@ function enabledConfig() {
 }
 
 describe('Bitrix24ReverseProcessorService', () => {
+  it('prunes reconcile records with a seven-day window under the reconcile ownership gate', async () => {
+    const repository = { pruneReconcileNoise: vi.fn().mockResolvedValue({ auditDeleted: 5, inboundDeleted: 4 }) };
+    const service = new Bitrix24ReverseProcessorService(repository as never, {} as never, enabledConfig() as never);
+    await expect(service.runRetentionTick()).resolves.toEqual({ auditDeleted: 5, inboundDeleted: 4, backlog: false });
+    expect(repository.pruneReconcileNoise).toHaveBeenCalledWith({ retentionDays: 7, batchSize: 2_000 });
+  });
+  it.each([
+    [{ auditDeleted: 2_000, inboundDeleted: 0 }],
+    [{ auditDeleted: 0, inboundDeleted: 2_000 }],
+  ])('reports a backlog when a full batch was removed: %o', async (pruned) => {
+    const repository = { pruneReconcileNoise: vi.fn().mockResolvedValue(pruned) };
+    const service = new Bitrix24ReverseProcessorService(repository as never, {} as never, enabledConfig() as never);
+    await expect(service.runRetentionTick()).resolves.toMatchObject({ backlog: true });
+  });
+  it.each([
+    ['disabled', { enabled: false }],
+    ['without a relay owner', { relayOwner: 'none' }],
+    ['in dry-run', { dryRun: true }],
+  ])('does not prune reconcile records %s', async (_label, override) => {
+    const repository = { pruneReconcileNoise: vi.fn() };
+    const config = { getReverseSync: () => ({ ...enabledConfig().getReverseSync(), ...override }) };
+    const service = new Bitrix24ReverseProcessorService(repository as never, {} as never, config as never);
+    await expect(service.runRetentionTick()).resolves.toBeNull();
+    expect(repository.pruneReconcileNoise).not.toHaveBeenCalled();
+  });
   it.each([true, false])('counts a failed attempt only after winning CAS: %s', async (committed) => {
     const repository = { claimEvents: vi.fn().mockResolvedValue([event]), heartbeatEvent: vi.fn().mockResolvedValue(true), markEventFailed: vi.fn().mockResolvedValue(committed) };
     const bitrix = { withRequestGuard: vi.fn().mockRejectedValue(new Error('E2E failed read')) };
