@@ -181,7 +181,7 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
       <Layout className="evolution-shell__main">
         {isWorkbenchDesktop ? (
           <div className="wb-topbar">
-            <EvolutionWorkspaceTabs keepEmptyBar />
+            <EvolutionWorkspaceTabs />
             <div className="wb-topbar__actions">
               <EvolutionHeaderUtilities hideSearch />
             </div>

@@ -100,6 +100,8 @@
 
 :root[data-ui-variant="workbench"] .wb-topbar__actions {
   flex: 0 0 auto;
+  /* остаются справа и тогда, когда ни одной вкладки не открыто */
+  margin-left: auto;
   display: flex;
   align-items: center;
 }

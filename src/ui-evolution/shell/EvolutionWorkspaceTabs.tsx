@@ -37,12 +37,7 @@ export function requestEvolutionTabClose(request: EvolutionTabCloseRequest): voi
   close();
 }
 
-export interface EvolutionWorkspaceTabsProps {
-  /** Keep an empty bar when no tab is open: pages measure `.workspace-tabs` for their sticky offsets. */
-  keepEmptyBar?: boolean;
-}
-
-export const EvolutionWorkspaceTabs: React.FC<EvolutionWorkspaceTabsProps> = ({ keepEmptyBar = false }) => {
+export const EvolutionWorkspaceTabs: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const tabs = useTabStore((state) => state.tabs);
@@ -73,11 +68,7 @@ export const EvolutionWorkspaceTabs: React.FC<EvolutionWorkspaceTabsProps> = ({ 
     });
   };
 
-  if (tabs.length === 0) {
-    return keepEmptyBar
-      ? <div className="workspace-tabs evolution-workspace-tabs evolution-workspace-tabs--empty" aria-hidden />
-      : null;
-  }
+  if (tabs.length === 0) return null;
 
   return (
     <Tabs
