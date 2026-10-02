@@ -155,6 +155,7 @@ interface BazisDraftRuntime {
 
 const ORDER_FORM_COMPACT_HEADER_STICKY_HEIGHT = 40;
 // «NewLine» hybrid form: these tabs become always-open sections of one page, the rest are folds.
+const WORKBENCH_FORM_BAR_HEIGHT = 52;
 const HYBRID_MAIN_SECTION_KEYS: readonly string[] = ['basic', 'dates', 'details', 'services', 'finance'];
 const HYBRID_MAIN_SECTION_ORDER: readonly string[] = ['basic', 'details', 'services', 'finance'];
 
@@ -247,6 +248,13 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   const isWorkbench = !isOperational && uiVariant === 'workbench';
   const workbenchChromeBottom = useWorkspaceChromeBottom();
   const [workbenchHeadHidden, setWorkbenchHeadHidden] = useState(false);
+  // the section anchors stay under the compact bar while the form scrolls
+  const [workbenchAnchorsStuck, setWorkbenchAnchorsStuck] = useState(false);
+  const workbenchAnchorsRef = useRef<HTMLElement>(null);
+  const [workbenchSpySection, setWorkbenchSpySection] = useState<string | null>(null);
+  // the anchor the user clicked stays current until they scroll the form themselves
+  // (a short last section cannot reach the top of the screen)
+  const [workbenchPinnedSection, setWorkbenchPinnedSection] = useState<string | null>(null);
   const isMobile = useIsMobile();
   const workspaceTabsHeight = useWorkspaceTabsHeight();
   const orderKey = mode === 'create' ? NEW_ORDER_KEY : String(orderId);
@@ -342,7 +350,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   }, []);
   const orderFormStickyStyle = useMemo<OrderFormStickyStyle>(() => ({
     '--wb-order-sticky-top': `${workbenchChromeBottom}px`,
-    '--wb-order-bar-height': '52px',
+    '--wb-order-bar-height': `${WORKBENCH_FORM_BAR_HEIGHT}px`,
     '--order-show-sticky-top': `${workspaceTabsHeight}px`,
     '--order-show-compact-header-height': `${ORDER_FORM_COMPACT_HEADER_STICKY_HEIGHT}px`,
     '--order-show-tabs-shell-height': '0px',
@@ -500,6 +508,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       setHybridOpenSections((current) => (current.includes(key) ? current : [...current, key]));
     }
     setActiveTab(key);
+    setWorkbenchPinnedSection(key);
     scrollToFormSection(key);
   }, [scrollToFormSection]);
   // every existing jump (`?tab=finance`, save validation → details, Ctrl+Tab) lands on its section
@@ -1980,18 +1989,41 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       const head = orderFormStickySentinelRef.current?.parentElement?.querySelector('.wb-order-head__top');
       const next = head ? head.getBoundingClientRect().bottom < workbenchChromeBottom : false;
       setWorkbenchHeadHidden((prev) => (prev === next ? prev : next));
+      const anchors = workbenchAnchorsRef.current;
+      const stuck = anchors
+        ? anchors.getBoundingClientRect().top <= workbenchChromeBottom + WORKBENCH_FORM_BAR_HEIGHT + 1
+        : false;
+      setWorkbenchAnchorsStuck((prev) => (prev === stuck ? prev : stuck));
+      // the anchor of the section that is under the sticky rows right now
+      const line = workbenchChromeBottom + WORKBENCH_FORM_BAR_HEIGHT + (anchors?.offsetHeight ?? 0) + 24;
+      let current: string | null = null;
+      let currentTop = -Infinity;
+      for (const [key, node] of Object.entries(hybridSectionRefs.current)) {
+        if (!node || key === 'dates') continue;
+        const top = node.getBoundingClientRect().top;
+        if (top <= line && top > currentTop) {
+          current = key;
+          currentTop = top;
+        }
+      }
+      setWorkbenchSpySection((prev) => (prev === current ? prev : current));
     };
     const schedule = () => {
       if (frame) return;
       frame = window.requestAnimationFrame(update);
     };
+    const unpin = () => setWorkbenchPinnedSection(null);
     update();
     window.addEventListener('scroll', schedule, { passive: true, capture: true });
     window.addEventListener('resize', schedule);
+    window.addEventListener('wheel', unpin, { passive: true });
+    window.addEventListener('touchmove', unpin, { passive: true });
     return () => {
       if (frame) window.cancelAnimationFrame(frame);
       window.removeEventListener('scroll', schedule, { capture: true });
       window.removeEventListener('resize', schedule);
+      window.removeEventListener('wheel', unpin);
+      window.removeEventListener('touchmove', unpin);
     };
   }, [isWorkbench, orderKey, workbenchChromeBottom]);
 
@@ -2232,6 +2264,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       .filter((item) => !HYBRID_MAIN_SECTION_KEYS.includes(String(item.key)))
       .map((item) => ({ key: String(item.key), label: item.label, disabled: Boolean(item.disabled) })),
   ];
+  // «Сроки» live inside the first section, so they share its anchor
+  const hybridCurrentAnchor = workbenchPinnedSection ?? workbenchSpySection ?? (activeTab === 'dates' ? 'basic' : activeTab);
   const formActions = (
         <Space>
           {mode === 'edit' && orderId && (
@@ -2360,12 +2394,18 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
               <OrderHeaderSummary compactSticky dirty={formHasUnsavedChanges} compactActions={workbenchCompactActions} />
             </div>
             <OrderHeaderSummary pageTitle={cardTitle} actions={formActions} dirty={formHasUnsavedChanges} />
-            <nav className="wb-form-anchors" aria-label="Разделы формы">
+            <nav
+              ref={workbenchAnchorsRef}
+              className="wb-form-anchors"
+              data-stuck={workbenchAnchorsStuck}
+              aria-label="Разделы формы"
+            >
               {hybridAnchors.map((anchor) => (
                 <button
                   key={anchor.key}
                   type="button"
                   className="wb-form-anchors__item"
+                  aria-current={hybridCurrentAnchor === anchor.key ? 'true' : undefined}
                   disabled={anchor.disabled}
                   onClick={() => goToFormSection(anchor.key)}
                 >

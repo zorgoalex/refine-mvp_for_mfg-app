@@ -985,6 +985,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   // «NewLine»: the jobs list is drawn as cards from the same column renderers.
   const uiVariant = useOptionalUiVariant()?.variant;
   const isWorkbench = !isOperational && uiVariant === 'workbench';
+  // in the order card/form the jobs are a narrow list on the left and the open job fills the right side
+  const isWorkbenchSplit = isWorkbench && embeddedOrderId != null;
   const canViewCut = can('cut.view');
   const canManage = can('cut.manage');
   const canViewOrders = can('orders.view');
@@ -3226,7 +3228,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   useEffect(() => {
     if (
       !ordinaryReadActive
-      || !isOperational
+      || !(isOperational || isWorkbench)
       || !isEmbeddedOrder
       || jobsLoading
       || busy
@@ -3236,7 +3238,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       return;
     }
     void openJob(filteredJobs[0].cutJobId);
-  }, [busy, filteredJobs, isEmbeddedOrder, isOperational, job, jobsLoading, openJob, ordinaryReadActive]);
+  }, [busy, filteredJobs, isEmbeddedOrder, isOperational, isWorkbench, job, jobsLoading, openJob, ordinaryReadActive]);
 
   const jobsSummary = useMemo(() => ({
     total: jobs.filter((candidate) => candidate.status !== 'archived').length,
@@ -3982,6 +3984,49 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     return <Alert type="error" message="Недостаточно прав для просмотра раскроя" showIcon />;
   }
 
+  // one set of list controls: the card head in the full page, the top of the jobs rail in the order card
+  const jobsToolbarControls = (
+    <>
+      <Select<string>
+        value={statusFilter}
+        onChange={setStatusFilter}
+        options={[...CUT_JOB_STATUS_FILTER_OPTIONS]}
+        style={{ width: 160 }}
+      />
+      <Select<CutJobProfileFilter>
+        allowClear
+        showSearch
+        optionFilterProp="label"
+        aria-label="Фильтр по профилю раскроя"
+        placeholder="Все профили"
+        options={jobProfileFilterOptions}
+        value={profileFilter}
+        onChange={setProfileFilter}
+        style={{ width: 220 }}
+      />
+      <Checkbox checked={showDeletedJobs} onChange={(event) => setShowDeletedJobs(event.target.checked)}>
+        Показывать удалённые
+      </Checkbox>
+      {canManage && (
+        <Button icon={<UploadOutlined />} onClick={() => setSvgUploadOpen(true)}>
+          SVG
+        </Button>
+      )}
+      {canTelegramImport && (
+        <Button
+          icon={<SendOutlined />}
+          onClick={() => setTelegramImportOpen(true)}
+          style={{ minHeight: 40 }}
+        >
+          Импорт из Telegram
+        </Button>
+      )}
+      <Button onClick={() => void loadJobs()} loading={jobsLoading}>
+        Обновить
+      </Button>
+    </>
+  );
+
   return (
     <>
       <Space
@@ -3991,6 +4036,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           job ? 'cut-page-modern--detail' : 'cut-page-modern--list',
           isCreationPreview ? 'cut-page-modern--creation-preview' : '',
           criteriaOpen ? 'cut-page-modern--criteria-open' : '',
+          isWorkbenchSplit ? 'cut-page-modern--wb-split' : '',
         ].filter(Boolean).join(' ')}
         direction="vertical"
         size="large"
@@ -4368,48 +4414,13 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         className="cut-page-modern__jobs"
         size="small"
         title={isOperational ? undefined : 'Задания на раскрой'}
-        extra={!isOperational ? (
+        extra={!isOperational && !isWorkbenchSplit ? (
           <Space>
-            <Select<string>
-              value={statusFilter}
-              onChange={setStatusFilter}
-              options={[...CUT_JOB_STATUS_FILTER_OPTIONS]}
-              style={{ width: 160 }}
-            />
-            <Select<CutJobProfileFilter>
-              allowClear
-              showSearch
-              optionFilterProp="label"
-              aria-label="Фильтр по профилю раскроя"
-              placeholder="Все профили"
-              options={jobProfileFilterOptions}
-              value={profileFilter}
-              onChange={setProfileFilter}
-              style={{ width: 220 }}
-            />
-            <Checkbox checked={showDeletedJobs} onChange={(event) => setShowDeletedJobs(event.target.checked)}>
-              Показывать удалённые
-            </Checkbox>
-            {canManage && (
-              <Button icon={<UploadOutlined />} onClick={() => setSvgUploadOpen(true)}>
-                SVG
-              </Button>
-            )}
-            {canTelegramImport && (
-              <Button
-                icon={<SendOutlined />}
-                onClick={() => setTelegramImportOpen(true)}
-                style={{ minHeight: 40 }}
-              >
-                Импорт из Telegram
-              </Button>
-            )}
-            <Button onClick={() => void loadJobs()} loading={jobsLoading}>
-              Обновить
-            </Button>
+            {jobsToolbarControls}
           </Space>
         ) : undefined}
       >
+        {isWorkbenchSplit ? <div className="wb-cut-rail__filters">{jobsToolbarControls}</div> : null}
         {!isEmbeddedOrder ? (
           <Tabs
             className="cut-job-kind-tabs"
@@ -4483,6 +4494,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             loading={jobsLoading}
             emptyText={isEmbeddedOrder ? 'Нет заданий для этого заказа' : 'Нет раскроев'}
             scrollable={!isEmbeddedOrder}
+            compact={isWorkbenchSplit}
             onOpen={(row) => {
               if (!busy) void openJob(row.cutJobId);
             }}
@@ -4540,6 +4552,16 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           </div>
         )}
       </Card>
+
+      {isWorkbenchSplit && !job && !isCreationPreview ? (
+        <div className="wb-cut-empty" data-testid="cut-job-empty">
+          {jobsLoading || busy
+            ? 'Загрузка задания…'
+            : filteredJobs.length === 0
+              ? 'Для этого заказа ещё нет заданий на раскрой. Выберите плёнки и нажмите «Подбор деталей на раскрой».'
+              : 'Выберите задание в списке слева.'}
+        </div>
+      ) : null}
 
       {job && (
         <Card

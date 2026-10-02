@@ -57,6 +57,11 @@ export function rowFromProjection(event: OrderHistoryEvent): HistoryRow {
   };
 }
 
+// «нет данных → нет данных» says nothing: such a line is not shown
+const hasVisibleChange = (change: HistoryRow['changes'][number]): boolean => (
+  (change.before || '') !== (change.after || '')
+);
+
 export const OrderHistorySpoiler: React.FC<OrderHistorySpoilerProps> = ({ orderId }) => {
   // the journal is chosen by the actual right; without it (whatever the permission flag) the order history is read
   const journalAccess = can('audit.view');
@@ -117,7 +122,7 @@ export const OrderHistorySpoiler: React.FC<OrderHistorySpoilerProps> = ({ orderI
         {total != null ? <span className="order-history__count">{total}</span> : null}
       </button>
       {open ? (
-        <div className="order-history__body">
+        <div className="order-history__body" tabIndex={0} aria-label="История заказа">
           {error ? (
             <div className="order-history__note order-history__note--error">
               {error}
@@ -139,7 +144,7 @@ export const OrderHistorySpoiler: React.FC<OrderHistorySpoilerProps> = ({ orderI
                         <span>{summary.actor}</span>
                         {summary.object ? <span>{summary.object}</span> : null}
                       </div>
-                      {summary.changes.map((change, index) => (
+                      {summary.changes.filter(hasVisibleChange).map((change, index) => (
                         <div className="order-history__change" key={`${change.label}-${index}`}>
                           <span>{change.label}:</span>
                           {change.before && change.before !== '—' ? <s>{change.before}</s> : null}

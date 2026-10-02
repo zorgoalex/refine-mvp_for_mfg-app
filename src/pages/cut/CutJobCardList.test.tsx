@@ -9,6 +9,12 @@ vi.mock('antd', () => ({
   Select: (props: any) => React.createElement('select-stub', props),
   Spin: () => React.createElement('spin-stub'),
 }));
+vi.mock('../../ui/tooltipDelay', () => ({
+  Popover: (props: any) => React.createElement('popover-stub', null, props.children, props.content),
+}));
+vi.mock('@ant-design/icons', () => ({
+  InfoCircleOutlined: () => React.createElement('info-icon'),
+}));
 
 interface Job { cutJobId: number; name: string; createdAt: string; details: number; }
 
@@ -62,6 +68,23 @@ describe('CutJobCardList', () => {
       cards()[2].findByType('button').props.onClick();
     });
     expect(onDelete).toHaveBeenCalledWith(3);
+  });
+
+  it('compact rail keeps every value: the main ones on the card, the rest in the details popover', () => {
+    mount({ compact: true });
+
+    expect(cards()).toHaveLength(3);
+    const first = cards()[0];
+    const text = JSON.stringify(renderer.toJSON());
+    for (const expected of ['#1', 'Первое', 'Детали', 'Новая колонка', 'extra-1', 'Удалить']) {
+      expect(text).toContain(expected);
+    }
+    // the popover button does not open the job, the rest of the card does
+    expect(first.findByProps({ 'aria-label': 'Подробнее о задании' }).type).toBe('button');
+    act(() => {
+      first.findAll((node) => node.type === 'button' && node.props.onClick)[0].props.onClick();
+    });
+    expect(onDelete).toHaveBeenCalledWith(1);
   });
 
   it('keeps the sorting the table headers offered', () => {

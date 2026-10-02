@@ -424,10 +424,10 @@
   align-items: center;
   gap: 10px;
   padding: 0 24px;
-  border-bottom: 1px solid var(--evo-border);
-  background: color-mix(in srgb, var(--evo-canvas) 92%, transparent);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
+  /* липкая строка — белая, с чётким контуром: её видно поверх любого содержимого */
+  border-bottom: 1px solid var(--wb-sticky-line);
+  background: var(--evo-surface);
+  box-shadow: var(--wb-sticky-shadow);
   white-space: nowrap;
 }
 
@@ -1588,11 +1588,33 @@
 
 /* гибридная форма: основные разделы — одна страница, редкие — сворачиваемые секции */
 :root[data-ui-variant="workbench"] .wb-form-anchors {
+  /* якоря разделов остаются под сжатой шапкой при прокрутке формы */
+  position: sticky;
+  top: calc(var(--wb-order-sticky-top) + var(--wb-order-bar-height));
+  z-index: 19;
   display: flex;
   flex-wrap: wrap;
   gap: 2px;
-  margin: 0 0 12px;
+  margin: 0 -24px 12px;
+  padding: 0 24px;
   border-bottom: 1px solid var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-anchors[data-stuck="true"] {
+  border-bottom-color: var(--wb-sticky-line);
+  background: var(--evo-surface);
+  box-shadow: var(--wb-sticky-shadow);
+}
+
+/* в форме контур несут якоря — строка заказа над ними отделена тонкой линией */
+:root[data-ui-variant="workbench"] .order-form-page--workbench:has(.wb-form-anchors[data-stuck="true"]) .wb-order-bar {
+  border-bottom-color: var(--evo-border);
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-anchors__item[aria-current="true"] {
+  border-bottom-color: var(--evo-primary);
+  color: var(--evo-primary);
 }
 
 :root[data-ui-variant="workbench"] .wb-form-anchors__item {
@@ -1627,7 +1649,7 @@
 :root[data-ui-variant="workbench"] .wb-form-section {
   margin-bottom: 12px;
   /* при переходе к разделу он встаёт под сжатой шапкой, а не под ней */
-  scroll-margin-top: calc(var(--wb-order-sticky-top) + var(--wb-order-bar-height) + 10px);
+  scroll-margin-top: calc(var(--wb-order-sticky-top) + var(--wb-order-bar-height) + 38px + 10px);
 }
 
 :root[data-ui-variant="workbench"] .wb-form-section__title {
@@ -1707,4 +1729,296 @@
 :root[data-ui-variant="workbench"] .wb-form-section__hint {
   color: var(--evo-text-secondary);
   font-size: 12.5px;
+}
+
+/* ---------- липкие строки: общий контур ---------- */
+:root[data-ui-variant="workbench"] {
+  --wb-sticky-line: color-mix(in srgb, var(--evo-text) 42%, var(--evo-surface));
+  --wb-sticky-shadow: 0 6px 14px -8px rgba(16, 24, 40, 0.45);
+}
+
+/* липкая шапка таблицы деталей в карточке заказа */
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-details-table .ant-table-sticky-holder {
+  background: var(--evo-surface);
+  border-bottom: 1px solid var(--wb-sticky-line);
+  box-shadow: var(--wb-sticky-shadow);
+}
+
+/* ---------- список заказов: «Базис-проект» в одну строку ---------- */
+:root[data-ui-variant="workbench"] .orders-table td.orders-col--basis-project {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ---------- «История» заказа: свой блок с собственной прокруткой ---------- */
+:root[data-ui-variant="workbench"] .order-history {
+  border: 1px solid var(--evo-border);
+  border-radius: var(--evo-radius-lg, 12px);
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .order-history__summary {
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  border: 0;
+  background: none;
+  color: var(--evo-text);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .order-history__summary:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: -2px;
+}
+
+:root[data-ui-variant="workbench"] .order-history__chevron {
+  color: var(--evo-text-secondary);
+  font-size: 11px;
+  transition: transform 140ms ease;
+}
+
+:root[data-ui-variant="workbench"] .order-history--open .order-history__chevron {
+  transform: rotate(90deg);
+}
+
+:root[data-ui-variant="workbench"] .order-history__count {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--evo-surface-muted);
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* записи прокручиваются внутри блока и не удлиняют страницу */
+:root[data-ui-variant="workbench"] .order-history__body {
+  max-height: 420px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 16px 14px;
+  border-top: 1px solid var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .order-history__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+:root[data-ui-variant="workbench"] .order-history__item {
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr);
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--evo-border);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+:root[data-ui-variant="workbench"] .order-history__item:last-child {
+  border-bottom: 0;
+}
+
+:root[data-ui-variant="workbench"] .order-history__time {
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .order-history__event {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+
+:root[data-ui-variant="workbench"] .order-history__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+}
+
+:root[data-ui-variant="workbench"] .order-history__head > b {
+  color: var(--evo-text);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .order-history__head > span {
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+}
+
+:root[data-ui-variant="workbench"] .order-history__change {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .order-history__change > s {
+  color: var(--evo-text-secondary);
+  opacity: 0.75;
+}
+
+:root[data-ui-variant="workbench"] .order-history__change > b {
+  color: var(--evo-text);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .order-history__notes,
+:root[data-ui-variant="workbench"] .order-history__note {
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+}
+
+:root[data-ui-variant="workbench"] .order-history__note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+}
+
+:root[data-ui-variant="workbench"] .order-history__note--error {
+  color: var(--evo-danger, #c0392b);
+}
+
+:root[data-ui-variant="workbench"] .order-history__body > .ant-btn {
+  margin-top: 10px;
+}
+
+/* ---------- вкладка «Раскрой» в заказе: список заданий слева, задание справа ---------- */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split {
+  display: grid !important;
+  grid-template-columns: 212px minmax(0, 1fr);
+  column-gap: 14px;
+  row-gap: 0;
+  align-items: start;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split > .ant-space-item {
+  grid-column: 2;
+  min-width: 0;
+  margin-bottom: 12px;
+}
+
+/* подбор деталей — во всю ширину над списком и заданием */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split > .ant-space-item:has(> .cut-page-modern__criteria) {
+  grid-column: 1 / -1;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split > .ant-space-item:has(> .cut-page-modern__jobs) {
+  grid-column: 1;
+  grid-row: 2 / span 80;
+  position: sticky;
+  top: calc(var(--wb-order-sticky-top, 48px) + var(--wb-order-bar-height, 52px) + 12px);
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-page-modern__jobs > .ant-card-head {
+  min-height: 40px;
+  padding: 0 12px;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-page-modern__jobs > .ant-card-head .ant-card-head-title {
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-page-modern__jobs > .ant-card-body {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .wb-cut-jobs__grid {
+  max-height: calc(100vh - var(--wb-order-sticky-top, 48px) - var(--wb-order-bar-height, 52px) - 330px);
+  min-height: 160px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 1px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__filters > .ant-select,
+:root[data-ui-variant="workbench"] .wb-cut-rail__filters > .ant-checkbox-wrapper {
+  grid-column: 1 / -1;
+  width: 100% !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__filters > .ant-checkbox-wrapper {
+  font-size: 12.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__filters > .ant-btn {
+  min-height: 30px !important;
+  height: 30px;
+  padding-inline: 8px;
+  font-size: 12.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-empty {
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  border: 1px dashed var(--evo-border-strong);
+  border-radius: var(--evo-radius-lg);
+  color: var(--evo-text-secondary);
+  text-align: center;
+}
+
+@media (max-width: 1100px) {
+  :root[data-ui-variant="workbench"] .cut-page-modern--wb-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :root[data-ui-variant="workbench"] .cut-page-modern--wb-split > .ant-space-item,
+  :root[data-ui-variant="workbench"] .cut-page-modern--wb-split > .ant-space-item:has(> .cut-page-modern__jobs) {
+    grid-column: 1;
+    grid-row: auto;
+    position: static;
+  }
+}
+
+/* фильтры списка заданий — плотно, чтобы сами задания были видны сразу */
+:root[data-ui-variant="workbench"] .wb-cut-rail__filters .ant-select {
+  height: 28px;
+  font-size: 12.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__filters .ant-select .ant-select-selector {
+  height: 28px !important;
+  min-height: 28px;
+  padding-inline: 8px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__filters .ant-select .ant-select-selection-item,
+:root[data-ui-variant="workbench"] .wb-cut-rail__filters .ant-select .ant-select-selection-placeholder {
+  line-height: 26px !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__filters .ant-select .ant-select-selection-search-input {
+  height: 26px !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__filters > .ant-btn {
+  min-height: 28px !important;
+  height: 28px;
 }

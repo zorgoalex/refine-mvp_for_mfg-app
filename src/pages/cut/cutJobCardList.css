@@ -18,6 +18,8 @@
 }
 
 .wb-cut-jobs__count {
+  flex: 0 0 auto;
+  white-space: nowrap;
   color: var(--app-text-muted);
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
@@ -154,4 +156,90 @@
   max-height: min(70vh, 720px);
   overflow-y: auto;
   padding: 1px;
+}
+
+/* ---------- narrow rail next to the open job (order card / form) ---------- */
+.wb-cut-jobs--compact .wb-cut-jobs__toolbar {
+  gap: 8px;
+}
+
+.wb-cut-jobs--compact .wb-cut-jobs__toolbar .ant-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto !important;
+}
+
+.wb-cut-jobs--compact .wb-cut-jobs__grid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+
+.wb-cut-jobs--compact .wb-cut-job {
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+
+.wb-cut-jobs--compact .wb-cut-job__head {
+  gap: 6px;
+}
+
+.wb-cut-jobs--compact .wb-cut-job__name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.wb-cut-jobs--compact .wb-cut-job__date {
+  margin-left: 0;
+}
+
+.wb-cut-jobs--compact .wb-cut-job__facts {
+  gap: 2px 10px;
+}
+
+.wb-cut-jobs--compact .wb-cut-job__mdf {
+  padding-top: 6px;
+  gap: 4px 8px;
+}
+
+.wb-cut-jobs--compact .wb-cut-job__actions {
+  justify-content: flex-start;
+}
+
+.wb-cut-jobs--compact .wb-cut-job__actions .ant-btn {
+  height: 24px;
+  padding-inline: 0 8px;
+}
+
+.wb-cut-job__info {
+  margin-left: auto;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--app-text-muted);
+  cursor: help;
+}
+
+.wb-cut-job__info:hover,
+.wb-cut-job__info:focus-visible {
+  background: var(--evo-surface-muted, rgba(0, 0, 0, 0.05));
+  color: inherit;
+}
+
+.wb-cut-job__more {
+  max-width: 320px;
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.wb-cut-job__more .wb-cut-job__pair {
+  display: flex;
 }

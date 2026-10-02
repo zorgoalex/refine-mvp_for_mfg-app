@@ -40,6 +40,21 @@ test.describe('Workbench orders polish', () => {
         expect(await row.locator('td.orders-col--order-date').evaluate((element) => getComputedStyle(element).whiteSpace)).toBe('nowrap');
         await page.locator('.orders-table .ant-table-body, .orders-table .ant-table-content').first().evaluate((element) => { element.scrollLeft = 0; });
 
+        // «Базис-проект» — той же ширины, что «Дата заказа», значение в одну строку
+        // (сравниваем заданную ширину колонок: в мок-таблице их мало, и браузер растягивает сортируемые)
+        const widths = await table.evaluate((element) => {
+            const heads = [...element.querySelectorAll('thead th')];
+            const cols = [...element.querySelectorAll('colgroup')].pop()?.querySelectorAll('col') ?? [];
+            const width = (title: string) => {
+                const index = heads.findIndex((cell) => cell.textContent?.trim() === title);
+                return index >= 0 ? (cols[index] as HTMLElement | undefined)?.style.width ?? null : null;
+            };
+            return { basis: width('Базис-проект'), date: width('Дата заказа') };
+        });
+        expect(widths.basis).toBe('90px');
+        expect(widths.basis).toBe(widths.date);
+        expect(await row.locator('td.orders-col--basis-project').evaluate((element) => getComputedStyle(element).whiteSpace)).toBe('nowrap');
+
         await shot(page, 'orders-list');
         expect(pageErrors).toEqual([]);
     });
@@ -164,6 +179,12 @@ test.describe('Workbench orders polish', () => {
         await expect(history.locator('.order-history__item')).toHaveCount(2);
         await expect(history.locator('.order-history__item').first()).toContainText('01.10.2026');
         await expect(history.locator('.order-history__count')).toHaveText('2');
+        // записи прокручиваются внутри блока и не удлиняют страницу
+        const historyBox = await history.locator('.order-history__body').evaluate((element) => {
+            const style = getComputedStyle(element);
+            return { overflowY: style.overflowY, maxHeight: style.maxHeight };
+        });
+        expect(historyBox).toEqual({ overflowY: 'auto', maxHeight: '420px' });
         await shot(page, 'order-card-additional');
         await historyToggle.click();
         await expect(history.locator('.order-history__item')).toHaveCount(0);
@@ -237,6 +258,13 @@ test.describe('Workbench orders polish', () => {
         expect(await readOffset()).toBeLessThanOrEqual(2);
         const bar = page.locator('.wb-order-bar');
         await expect(bar).toContainText('Заказ Тест-2972');
+        // липкая строка — белая, с контуром темнее обычной серой линии
+        const barLook = await bar.evaluate((element) => {
+            const style = getComputedStyle(element);
+            return { background: style.backgroundColor, line: style.borderBottomColor };
+        });
+        expect(barLook.background).toBe('rgb(255, 255, 255)');
+        expect(barLook.line).not.toBe('rgb(228, 231, 236)');
         // состав и оплата видны при прокрутке
         await expect(bar).toContainText('6 дет.');
         await expect(bar).toContainText('м²');
@@ -357,6 +385,69 @@ test.describe('Workbench orders polish', () => {
         expect(state.tabsHeight).toBe(state.barHeight);
     });
 
+    test('order card: «Раскрой» — jobs list on the left, the open job on the right', async ({ page }) => {
+        const pageErrors = await openWithVariant(page, 'workbench', 'light', { cut: true });
+        const cutJob = (cutJobId: number, name: string, status: string) => ({
+            cutJobId, displayNumber: String(cutJobId), isVacuum: false, name, status, source: 'manual',
+            createdAt: `2026-09-2${cutJobId}T08:30:00.000Z`, version: 1, pdfPrewarmState: 'pending', paramProfileId: null,
+            sheetMaterialTypeId: null, pdfTemplate: 'standard', combineFilms: false, splitByMaterial: true, rotationAllowed: true,
+            textureDirection: 'none', materialNames: ['МДФ 16 мм'],
+            totals: { positions: 4, details: 12 + cutJobId, area: 3.4, sheets: 2, materialsCount: 1, filmsCount: 1 },
+            items: [], groups: [],
+        });
+        const jobs = [cutJob(1, 'E2E-Тест раскрой кухня', 'ready'), cutJob(2, 'E2E-Тест раскрой шкаф', 'draft')];
+        const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+        await page.route(/\/api\/v1\/cut-jobs(\?.*)?$/, (route) => route.fulfill(json(jobs)));
+        await page.route(/\/api\/v1\/cut-jobs\/placements(\?.*)?$/, (route) => route.fulfill(json({
+            jobs: jobs.map((item) => ({ cutJobId: item.cutJobId, name: item.name, paramProfileId: null, profileName: null, profileIsActive: null })),
+            hasArchived: false,
+        })));
+        await page.route(/\/api\/v1\/cut-jobs\/(1|2)$/, (route) => {
+            const id = Number(route.request().url().split('/').pop());
+            return route.fulfill(json(jobs.find((item) => item.cutJobId === id)));
+        });
+
+        await page.goto('/orders/show/15', { waitUntil: 'domcontentloaded' });
+        await page.getByRole('tablist', { name: 'Секции заказа' }).getByRole('tab', { name: /Раскрой/ }).click({ timeout: 60000 });
+
+        const rail = page.locator('.cut-page-modern--wb-split .cut-page-modern__jobs');
+        const cards = rail.getByTestId('cut-job-card');
+        await expect(cards).toHaveCount(2, { timeout: 60000 });
+        await expect(rail.locator('.cut-jobs-table')).toHaveCount(0);
+        // фильтры и действия списка — в самом списке
+        const filters = rail.locator('.wb-cut-rail__filters');
+        await expect(filters.getByText('Показывать удалённые')).toBeVisible();
+        await expect(filters.getByRole('button', { name: 'Обновить' })).toBeVisible();
+
+        // первое задание открывается само; его содержимое — справа от списка
+        const jobCard = page.locator('.cut-page-modern__job');
+        await expect(jobCard).toBeVisible({ timeout: 30000 });
+        await expect(cards.first()).toHaveAttribute('data-active', 'true');
+        await expect(jobCard).toContainText('E2E-Тест раскрой кухня');
+        const layout = await page.evaluate(() => {
+            const rect = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
+            const railRect = rect('.cut-page-modern__jobs');
+            const jobRect = rect('.cut-page-modern__job');
+            return {
+                railWidth: Math.round(railRect.width),
+                jobLeftOfRail: jobRect.left < railRect.right,
+                sameRow: Math.abs(jobRect.top - railRect.top) < 4,
+                overflow: [...document.querySelectorAll('[data-testid="cut-job-card"]')].map((card) => card.scrollWidth - card.clientWidth),
+            };
+        });
+        expect(layout.railWidth).toBe(212);
+        expect(layout.jobLeftOfRail).toBe(false);
+        expect(layout.sameRow).toBe(true);
+        for (const overflow of layout.overflow) expect(overflow).toBeLessThanOrEqual(1);
+        await shot(page, 'order-card-cut');
+
+        // клик по другому заданию показывает его справа
+        await cards.nth(1).locator('.wb-cut-job__name').click();
+        await expect(jobCard).toContainText('E2E-Тест раскрой шкаф', { timeout: 30000 });
+        await expect(cards.nth(1)).toHaveAttribute('data-active', 'true');
+        expect(pageErrors).toEqual([]);
+    });
+
     test('other variants keep the separate header and tabs rows', async ({ page }) => {
         await openWithVariant(page, 'evolution');
 
@@ -421,6 +512,31 @@ test.describe('Workbench orders polish', () => {
         // якорь открывает раздел и прокручивает к нему
         await anchors.filter({ hasText: 'Финансы' }).click();
         await expect(mainSections.nth(3)).toBeInViewport();
+        // якоря остаются на экране под сжатой шапкой — белой полосой с чётким контуром
+        const stickyRows = () => page.evaluate(() => {
+            const rect = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
+            const nav = document.querySelector('.wb-form-anchors')!;
+            const style = getComputedStyle(nav);
+            return {
+                gap: Math.round(rect('.wb-form-anchors').top - rect('.wb-order-bar').bottom),
+                barTop: Math.round(rect('.wb-order-bar').top - rect('.wb-topbar').bottom),
+                stuck: nav.getAttribute('data-stuck'),
+                background: style.backgroundColor,
+                line: style.borderBottomColor,
+                barBackground: getComputedStyle(document.querySelector('.wb-order-bar')!).backgroundColor,
+            };
+        });
+        await expect.poll(async () => (await stickyRows()).stuck, { timeout: 5000 }).toBe('true');
+        await expect.poll(async () => Math.abs((await stickyRows()).gap), { timeout: 5000 }).toBeLessThanOrEqual(1);
+        const rows = await stickyRows();
+        expect(Math.abs(rows.barTop)).toBeLessThanOrEqual(1);
+        expect(rows.background).toBe('rgb(255, 255, 255)');
+        expect(rows.barBackground).toBe('rgb(255, 255, 255)');
+        expect(rows.line).not.toBe('rgb(228, 231, 236)');
+        await expect(anchors.filter({ hasText: 'Финансы' })).toHaveAttribute('aria-current', 'true');
+        for (const label of ['Клиент и срок', 'Финансы', 'Дополнительно']) {
+            await expect(anchors.filter({ hasText: label })).toBeInViewport();
+        }
         await shot(page, 'order-form-finance');
         expect(pageErrors).toEqual([]);
     });
@@ -452,12 +568,27 @@ async function shot(page: Page, name: string) {
     await page.screenshot({ path: `${shotsDir}/${name}.png` });
 }
 
-async function openWithVariant(page: Page, uiVariant: 'workbench' | 'evolution', themeMode: 'light' | 'dark' = 'light') {
+async function openWithVariant(
+    page: Page,
+    uiVariant: 'workbench' | 'evolution',
+    themeMode: 'light' | 'dark' = 'light',
+    extra: { cut?: boolean } = {},
+) {
     const pageErrors: string[] = [];
     page.on('pageerror', (error) => pageErrors.push(error.message));
     const db = createWorkflowMockDb();
     seed(db);
-    await setupWorkflowMockApi(page, db, { uiVariant, themeMode });
+    await setupWorkflowMockApi(page, db, {
+        uiVariant,
+        themeMode,
+        ...(extra.cut ? {
+            runtimeConfig: { backendCut: true },
+            authUser: {
+                id: '1', user_id: 1, username: 'admin', role: 'admin', role_id: 1,
+                permissions: ['orders.view', 'orders.create', 'orders.update', 'payments.view', 'clients.view', 'settings.view', 'cut.view', 'cut.manage'],
+            },
+        } : {}),
+    });
     if (themeMode === 'dark') {
         await page.addInitScript(() => {
             localStorage.setItem('erp.themeMode.1', 'dark');
@@ -468,6 +599,20 @@ async function openWithVariant(page: Page, uiVariant: 'workbench' | 'evolution',
             status: 200,
             contentType: 'application/json',
             body: JSON.stringify({ ok: true, providerConfigured: false, limits: { maxUploadMb: 20, allowedMimeTypes: ['image/jpeg'] } }),
+        });
+    });
+    // без права на журнал история читается из GET /orders/:id/history (закрытая проекция событий)
+    await page.route(/\/api\/v1\/orders\/15\/history(\?.*)?$/, async (route) => {
+        const event = (auditId: string, name: string, createdAt: string) => ({
+            auditId, event: name, createdAt, actorName: 'admin', entityType: 'order', statusField: null, statusName: null, stageCode: null,
+        });
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                data: [event('a2', 'order.updated', '2026-10-01T12:30:00+05:00'), event('a1', 'order.created', '2026-09-25T10:00:00+05:00')],
+                pagination: { page: 1, pageSize: 20, total: 2, totalPages: 1 },
+            }),
         });
     });
     await page.route(/\/api\/v1\/audit\?.*orderIds=15/, async (route) => {

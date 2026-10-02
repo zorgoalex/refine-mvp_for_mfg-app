@@ -1371,7 +1371,8 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       dataIndex: "doweling_order_name",
       key: "doweling_order_name",
       title: "Базис-проект",
-      width: 120,
+      // «NewLine»: as wide as «Дата заказа»; the value stays on one line, the tooltip shows it in full
+      width: isWorkbench ? 90 : 120,
       className: "orders-col orders-col--basis-project",
       render: (_, record) => {
         const latestLink = getLatestDoweling(record.order_id, record);

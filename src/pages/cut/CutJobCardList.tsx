@@ -3,6 +3,8 @@
 // the list only arranges those cells differently and adds the sorting the table headers had.
 import React, { useMemo, useState } from 'react';
 import { Select, Spin } from 'antd';
+import { Popover } from '../../ui/tooltipDelay';
+import { InfoCircleOutlined } from '@ant-design/icons';
 import type { ColumnsType, ColumnType } from 'antd/es/table';
 import './cutJobCardList.css';
 
@@ -16,6 +18,8 @@ interface CutJobCardListProps<Row extends { cutJobId: number }> {
   emptyText: string;
   /** the full page keeps a long list inside its own scroll box, like the table did */
   scrollable?: boolean;
+  /** a narrow rail next to the open job: the main facts on the card, the rest in a «details» popover */
+  compact?: boolean;
   onOpen: (row: Row) => void;
 }
 
@@ -48,6 +52,7 @@ export function CutJobCardList<Row extends { cutJobId: number }>({
   loading = false,
   emptyText,
   scrollable = false,
+  compact = false,
   onOpen,
 }: CutJobCardListProps<Row>) {
   const [sort, setSort] = useState<string>('default');
@@ -109,7 +114,7 @@ export function CutJobCardList<Row extends { cutJobId: number }>({
   }
 
   return (
-    <div className="wb-cut-jobs" aria-busy={loading}>
+    <div className={compact ? 'wb-cut-jobs wb-cut-jobs--compact' : 'wb-cut-jobs'} aria-busy={loading}>
       {sortOptions.length > 1 ? (
         <div className="wb-cut-jobs__toolbar">
           <span className="wb-cut-jobs__count">Заданий: {jobs.length}</span>
@@ -119,7 +124,7 @@ export function CutJobCardList<Row extends { cutJobId: number }>({
             value={sort}
             onChange={setSort}
             options={sortOptions}
-            style={{ width: 190 }}
+            style={{ width: compact ? '100%' : 190 }}
           />
         </div>
       ) : null}
@@ -136,26 +141,61 @@ export function CutJobCardList<Row extends { cutJobId: number }>({
               onOpen(row);
             }}
           >
-            <header className="wb-cut-job__head">
-              <span className="wb-cut-job__number">{cell('id', row, index)}</span>
-              <span className="wb-cut-job__source">{cell('source', row, index)}</span>
-              <span className="wb-cut-job__status">{cell('status', row, index)}</span>
-              <span className="wb-cut-job__date">{cell('createdAt', row, index)}</span>
-            </header>
-            <div className="wb-cut-job__name">{cell('name', row, index)}</div>
-            <div className="wb-cut-job__facts">
-              {FACT_KEYS.map((key) => labelled(key, row, index))}
-            </div>
-            <div className="wb-cut-job__meta">
-              {[...META_KEYS, ...extraKeys].map((key) => labelled(key, row, index))}
-            </div>
-            {byKey.has('mdfBoard') ? (
-              <div className="wb-cut-job__mdf">
-                <span className="wb-cut-job__label">{columnTitle(byKey.get('mdfBoard'))}</span>
-                {cell('mdfBoard', row, index)}
-              </div>
-            ) : null}
-            <footer className="wb-cut-job__actions">{cell('actions', row, index)}</footer>
+            {compact ? (
+              <>
+                <header className="wb-cut-job__head">
+                  <span className="wb-cut-job__number">{cell('id', row, index)}</span>
+                  <span className="wb-cut-job__status">{cell('status', row, index)}</span>
+                  <Popover
+                    placement="rightTop"
+                    content={(
+                      <div className="wb-cut-job__more">
+                        {['source', 'positions', 'filmUsage', ...META_KEYS, ...extraKeys].map((key) => labelled(key, row, index))}
+                      </div>
+                    )}
+                  >
+                    <button type="button" className="wb-cut-job__info" aria-label="Подробнее о задании">
+                      <InfoCircleOutlined aria-hidden />
+                    </button>
+                  </Popover>
+                </header>
+                <div className="wb-cut-job__name">{cell('name', row, index)}</div>
+                <div className="wb-cut-job__date">{cell('createdAt', row, index)}</div>
+                <div className="wb-cut-job__facts">
+                  {(['details', 'area', 'sheets'] as const).map((key) => labelled(key, row, index))}
+                </div>
+                {byKey.has('mdfBoard') ? (
+                  <div className="wb-cut-job__mdf">
+                    <span className="wb-cut-job__label">{columnTitle(byKey.get('mdfBoard'))}</span>
+                    {cell('mdfBoard', row, index)}
+                  </div>
+                ) : null}
+                <footer className="wb-cut-job__actions">{cell('actions', row, index)}</footer>
+              </>
+            ) : (
+              <>
+                <header className="wb-cut-job__head">
+                  <span className="wb-cut-job__number">{cell('id', row, index)}</span>
+                  <span className="wb-cut-job__source">{cell('source', row, index)}</span>
+                  <span className="wb-cut-job__status">{cell('status', row, index)}</span>
+                  <span className="wb-cut-job__date">{cell('createdAt', row, index)}</span>
+                </header>
+                <div className="wb-cut-job__name">{cell('name', row, index)}</div>
+                <div className="wb-cut-job__facts">
+                  {FACT_KEYS.map((key) => labelled(key, row, index))}
+                </div>
+                <div className="wb-cut-job__meta">
+                  {[...META_KEYS, ...extraKeys].map((key) => labelled(key, row, index))}
+                </div>
+                {byKey.has('mdfBoard') ? (
+                  <div className="wb-cut-job__mdf">
+                    <span className="wb-cut-job__label">{columnTitle(byKey.get('mdfBoard'))}</span>
+                    {cell('mdfBoard', row, index)}
+                  </div>
+                ) : null}
+                <footer className="wb-cut-job__actions">{cell('actions', row, index)}</footer>
+              </>
+            )}
           </article>
         ))}
       </div>
