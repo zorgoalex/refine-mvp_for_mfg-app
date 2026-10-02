@@ -2,7 +2,8 @@
 // data the card already shows elsewhere (header, «Дополнительная информация», groups).
 import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Tooltip, message } from 'antd';
+import { message } from 'antd';
+import { Tooltip } from '../../../../ui/tooltipDelay';
 import {
   CopyOutlined,
   PhoneOutlined,
