@@ -10,6 +10,7 @@ import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { LocalizedList } from "../../components/LocalizedList";
 import { buildFilmFilters, FILM_KEY_PATTERN, hasFilmFieldFilters, readFilmFilters, type FilmFilterValues } from "./filmFilters";
 import { FilmSearch } from "./FilmSearch";
+import { categoryDisplay } from "./categoryDisplay";
 import { useNavigate } from 'react-router-dom';
 import { getLoadedRuntimeConfig } from '../../config/runtimeConfig';
 import { useRefHeight, useSelectorHeight, useStickyBottom } from '../../hooks/useElementHeight';
@@ -236,7 +237,7 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column dataIndex="sort_order" title="Порядок" sorter width={WIDTH.sort} />
         <Table.Column dataIndex="film_name" title="Название" sorter render={(value: string) => <span className="films-list__name">{value}</span>} />
         <Table.Column dataIndex="nomenclature_type" title="Тип номенклатуры" width={WIDTH.nomenclatureType} ellipsis />
-        <Table.Column dataIndex="nomenclature_category" title="Категория" width={WIDTH.category} ellipsis />
+        <Table.Column dataIndex="nomenclature_category" title="Категория" width={WIDTH.category} ellipsis render={(value: string | null) => categoryDisplay(value)} />
         <Table.Column
           dataIndex="note"
           title="Примечание"
