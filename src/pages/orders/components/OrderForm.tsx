@@ -498,11 +498,35 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       ? HYBRID_MAIN_SECTION_KEYS.includes(key) || hybridOpenSections.includes(key)
       : activeTab === key
   );
-  const scrollToFormSection = useCallback((key: string) => {
-    window.requestAnimationFrame(() => {
-      hybridSectionRefs.current[key]?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-    });
+  const hybridSpacerRef = useRef<HTMLDivElement>(null);
+  const [hybridSpacerHeight, setHybridSpacerHeight] = useState(0);
+  const hybridSpacerHeightRef = useRef(0);
+  const setHybridSpacer = useCallback((height: number) => {
+    hybridSpacerHeightRef.current = height;
+    setHybridSpacerHeight(height);
   }, []);
+  const scrollToFormSection = useCallback((key: string) => {
+    // two frames: a section opened by this click is in the document before it is measured
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      const node = hybridSectionRefs.current[key];
+      if (!node) return;
+      const spacer = hybridSpacerRef.current;
+      if (spacer) {
+        // the last sections are shorter than the screen: without extra room below, the page ends
+        // before the section reaches the sticky rows and the previous block stays in view
+        const stickyBottom = Number.parseFloat(window.getComputedStyle(node).scrollMarginTop) || 0;
+        const spacerTop = spacer.getBoundingClientRect().top;
+        const belowSpacer = document.documentElement.scrollHeight
+          - (window.scrollY + spacerTop + hybridSpacerHeightRef.current);
+        const contentBelow = spacerTop - node.getBoundingClientRect().top + Math.max(0, belowSpacer);
+        const height = Math.max(0, Math.ceil(window.innerHeight - stickyBottom - contentBelow));
+        // the room must exist before the scroll starts, so it is applied to the node right away
+        spacer.style.height = `${height}px`;
+        setHybridSpacer(height);
+      }
+      window.requestAnimationFrame(() => node.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+    }));
+  }, [setHybridSpacer]);
   const goToFormSection = useCallback((key: string) => {
     if (!HYBRID_MAIN_SECTION_KEYS.includes(key)) {
       setHybridOpenSections((current) => (current.includes(key) ? current : [...current, key]));
@@ -2008,11 +2032,21 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       }
       setWorkbenchSpySection((prev) => (prev === current ? prev : current));
     };
+    // the extra room is dropped once the user has scrolled away from it (it is below the screen then)
+    const dropSpacer = () => {
+      const spacer = hybridSpacerRef.current;
+      if (hybridSpacerHeightRef.current > 0 && spacer && spacer.getBoundingClientRect().top >= window.innerHeight) {
+        setHybridSpacer(0);
+      }
+    };
     const schedule = () => {
       if (frame) return;
       frame = window.requestAnimationFrame(update);
     };
-    const unpin = () => setWorkbenchPinnedSection(null);
+    const unpin = () => {
+      setWorkbenchPinnedSection(null);
+      dropSpacer();
+    };
     update();
     window.addEventListener('scroll', schedule, { passive: true, capture: true });
     window.addEventListener('resize', schedule);
@@ -2025,7 +2059,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       window.removeEventListener('wheel', unpin);
       window.removeEventListener('touchmove', unpin);
     };
-  }, [isWorkbench, orderKey, workbenchChromeBottom]);
+  }, [isWorkbench, orderKey, setHybridSpacer, workbenchChromeBottom]);
 
   useEffect(() => {
     const update = () => {
@@ -2469,6 +2503,13 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
                   </section>
                 );
               })}
+            {/* room below the last sections, so an anchor can bring any of them right under the sticky rows */}
+            <div
+              ref={hybridSpacerRef}
+              className="wb-form-spacer"
+              style={{ height: hybridSpacerHeight }}
+              aria-hidden
+            />
           </>
         ) : (
           <>

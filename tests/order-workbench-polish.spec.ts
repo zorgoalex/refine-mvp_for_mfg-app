@@ -59,6 +59,68 @@ test.describe('Workbench orders polish', () => {
         expect(pageErrors).toEqual([]);
     });
 
+    test('orders list: NewLine keeps its own column layout and draws it at once after a reload', async ({ page }) => {
+        await openWithVariant(page, 'workbench');
+        const hiddenInOldUi = ['order_status_name', 'payment_status_name', 'final_amount', 'production_status_name', 'planned_completion_date',
+            'bazis_cut_numbers', 'cut_numbers', 'bath_cut_numbers', 'groups', 'priority', 'paid_amount', 'total_amount', 'discount', 'surcharge',
+            'design_engineer', 'payment_date', 'issue_date', 'total_area', 'completion_date', 'parts_count', 'edge_type_name', 'created_by'];
+        let saved: Record<string, { order: string[]; hidden: string[] }> = {
+            // расклад, сохранённый в прежнем интерфейсе: статусы и суммы скрыты
+            orderList: { order: ['order_name', 'doweling_order_name', 'order_date', 'client_name'], hidden: hiddenInOldUi },
+        };
+        await page.route(/\/api\/v1\/me\/preferences$/, async (route) => {
+            if (route.request().method() === 'PATCH') {
+                const body = JSON.parse(route.request().postData() || '{}');
+                if (body.orderDetailColumns) saved = body.orderDetailColumns;
+            }
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ preferences: { themeMode: 'light', tabletMode: false, uiVariant: 'workbench', orderDetailColumns: saved } }),
+            });
+        });
+
+        await page.goto('/orders', { waitUntil: 'domcontentloaded' });
+        const table = page.locator('.orders-table');
+        await expect(table.locator('tr[data-row-key="15"]')).toBeVisible({ timeout: 60000 });
+        const headers = () => table.locator('thead th').evaluateAll((cells) => cells.map((cell) => cell.textContent?.trim()).filter(Boolean));
+        // расклад прежнего интерфейса не подменяет список NewLine
+        await page.waitForTimeout(1500);
+        expect(await headers()).toEqual(expect.arrayContaining(['Статус заказа', 'Статус оплаты', 'Сумма, итого', 'Этапы']));
+
+        // свой расклад NewLine: сохраняется под отдельным ключом и после перезагрузки рисуется сразу
+        saved = { ...saved, 'orderList.workbench': { order: ['order_name', 'doweling_order_name', 'order_date', 'client_name', 'film_name'], hidden: hiddenInOldUi } };
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await expect(table.locator('tr[data-row-key="15"]')).toBeVisible({ timeout: 60000 });
+        await expect.poll(headers).not.toContain('Статус заказа');
+        expect(await page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith('erp.columnSettings.orderList.workbench')))).toHaveLength(1);
+        const sparse = await table.evaluate((element) => {
+            const width = (title: string) => {
+                const th = [...element.querySelectorAll('thead th')].find((cell) => cell.textContent?.trim() === title);
+                return th ? Math.round(th.getBoundingClientRect().width) : null;
+            };
+            return { basis: width('Базис-проект'), date: width('Дата заказа'), client: width('Клиент'), film: width('Пленка'), table: Math.round(element.getBoundingClientRect().width) };
+        });
+        await shot(page, 'orders-list-own-layout');
+        // при скрытых колонках свободное место не достаётся одной «Базис-проект»
+        expect(sparse.basis! - sparse.date!).toBeLessThanOrEqual(40);
+
+        let defaultDrawn = false;
+        await page.exposeFunction('reportHeaders', (titles: string[]) => { if (titles.includes('Статус заказа')) defaultDrawn = true; });
+        await page.addInitScript(() => {
+            const observer = new MutationObserver(() => {
+                const titles = [...document.querySelectorAll('.orders-table thead th')].map((cell) => cell.textContent?.trim() ?? '');
+                if (titles.length > 0) (window as unknown as { reportHeaders: (titles: string[]) => void }).reportHeaders(titles);
+            });
+            document.addEventListener('DOMContentLoaded', () => observer.observe(document.body, { childList: true, subtree: true }));
+        });
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await expect(table.locator('tr[data-row-key="15"]')).toBeVisible({ timeout: 60000 });
+        await page.waitForTimeout(1000);
+        // расклад по умолчанию не мелькает перед сохранённым
+        expect(defaultDrawn).toBe(false);
+    });
+
     test('order card follows the NewLine layout and keeps every section and action', async ({ page }) => {
         const pageErrors = await openWithVariant(page, 'workbench');
 
@@ -402,6 +464,17 @@ test.describe('Workbench orders polish', () => {
             jobs: jobs.map((item) => ({ cutJobId: item.cutJobId, name: item.name, paramProfileId: null, profileName: null, profileIsActive: null })),
             hasArchived: false,
         })));
+        const eligibleDetail = (orderDetailId: number) => ({
+            orderDetailId, orderId: 15, orderName: 'Тест-2972', clientName: 'Базовый клиент', detailNumber: orderDetailId,
+            detailName: null, height: 500, width: 400, quantity: 1, area: 0.2, materialId: null, sheetMaterialTypeId: 7,
+            materialName: 'МДФ 16 мм', millingTypeName: null, edgeTypeName: null, filmId: null, filmName: null,
+            productionStatusName: null, priority: null, jointOrderId: null, note: null, linkCuttingFile: null,
+            linkCuttingImageFile: null, linkCadFile: null, linkPdfFile: null, eligible: true, ineligibleReason: null,
+            placements: [],
+        });
+        await page.route(/\/api\/v1\/cut-jobs\/eligible-details(\?.*)?$/, (route) => route.fulfill(json({
+            details: [eligibleDetail(1), eligibleDetail(2)], noSheetSpecCount: 0,
+        })));
         await page.route(/\/api\/v1\/cut-jobs\/(1|2)$/, (route) => {
             const id = Number(route.request().url().split('/').pop());
             return route.fulfill(json(jobs.find((item) => item.cutJobId === id)));
@@ -418,6 +491,8 @@ test.describe('Workbench orders polish', () => {
         const filters = rail.locator('.wb-cut-rail__filters');
         await expect(filters.getByText('Показывать удалённые')).toBeVisible();
         await expect(filters.getByRole('button', { name: 'Обновить' })).toBeVisible();
+        // загрузка SVG в карточке заказа не нужна
+        await expect(rail.getByRole('button', { name: 'SVG' })).toHaveCount(0);
 
         // первое задание открывается само; его содержимое — справа от списка
         const jobCard = page.locator('.cut-page-modern__job');
@@ -445,6 +520,21 @@ test.describe('Workbench orders polish', () => {
         await cards.nth(1).locator('.wb-cut-job__name').click();
         await expect(jobCard).toContainText('E2E-Тест раскрой шкаф', { timeout: 30000 });
         await expect(cards.nth(1)).toHaveAttribute('data-active', 'true');
+
+        // подбор деталей можно отменить: блок со списком исчезает, выбор сброшен, список заданий как был
+        await page.getByRole('button', { name: 'Подбор деталей на раскрой' }).click();
+        const preview = page.locator('.cut-page-modern__creation');
+        await expect(preview).toBeVisible({ timeout: 30000 });
+        await expect(preview).toContainText('Выбрано: 2');
+        await expect(jobCard).toHaveCount(0);
+        // пока идёт подбор, существующее задание само не открывается поверх него
+        await page.waitForTimeout(1500);
+        await expect(preview).toBeVisible();
+        await preview.getByRole('button', { name: 'Отмена' }).click();
+        await expect(preview).toHaveCount(0);
+        await expect(page.locator('.cut-page-modern__eligible')).toHaveCount(0);
+        await expect(jobCard).toBeVisible({ timeout: 30000 });
+        await expect(cards).toHaveCount(2);
         expect(pageErrors).toEqual([]);
     });
 
@@ -534,6 +624,21 @@ test.describe('Workbench orders polish', () => {
         expect(rows.barBackground).toBe('rgb(255, 255, 255)');
         expect(rows.line).not.toBe('rgb(228, 231, 236)');
         await expect(anchors.filter({ hasText: 'Финансы' })).toHaveAttribute('aria-current', 'true');
+        // раздел встаёт вплотную под липкие строки — предыдущий блок не остаётся на экране
+        const sectionGap = (title: RegExp) => page.evaluate((source) => {
+            const pattern = new RegExp(source);
+            const section = [...document.querySelectorAll('.wb-form-section')]
+                .find((node) => pattern.test(node.querySelector('.wb-form-section__title')?.textContent ?? ''))!;
+            return Math.round(section.getBoundingClientRect().top - document.querySelector('.wb-form-anchors')!.getBoundingClientRect().bottom);
+        }, title.source);
+        await expect.poll(() => sectionGap(/Финансы/), { timeout: 8000 }).toBeLessThanOrEqual(12);
+        expect(await sectionGap(/Финансы/)).toBeGreaterThanOrEqual(0);
+        await anchors.filter({ hasText: 'Дополнительно' }).click();
+        await expect.poll(() => sectionGap(/Дополнительно/), { timeout: 8000 }).toBeLessThanOrEqual(12);
+        expect(await sectionGap(/Дополнительно/)).toBeGreaterThanOrEqual(0);
+        await shot(page, 'order-form-last-section');
+        await anchors.filter({ hasText: 'Финансы' }).click();
+        await expect.poll(() => sectionGap(/Финансы/), { timeout: 8000 }).toBeLessThanOrEqual(12);
         for (const label of ['Клиент и срок', 'Финансы', 'Дополнительно']) {
             await expect(anchors.filter({ hasText: label })).toBeInViewport();
         }

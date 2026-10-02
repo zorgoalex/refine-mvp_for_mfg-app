@@ -87,9 +87,45 @@ export function applyOrderDetailColumnSettings<T>(
   ];
 }
 
-export function useOrderDetailColumnPreferences(tableKey: string, defaultOrder: string[], definitions: OrderDetailColumnDefinition[]) {
+const COLUMN_SETTINGS_CACHE_PREFIX = 'erp.columnSettings.';
+
+function readCachedColumnSettings(cacheKey: string | undefined): Partial<OrderDetailColumnPreference> | null {
+  if (!cacheKey) return null;
+  try {
+    const raw = window.localStorage.getItem(COLUMN_SETTINGS_CACHE_PREFIX + cacheKey);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && Array.isArray(parsed.order) && Array.isArray(parsed.hidden) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedColumnSettings(cacheKey: string | undefined, value: OrderDetailColumnPreference | undefined): void {
+  if (!cacheKey) return;
+  try {
+    if (value) window.localStorage.setItem(COLUMN_SETTINGS_CACHE_PREFIX + cacheKey, JSON.stringify(value));
+    else window.localStorage.removeItem(COLUMN_SETTINGS_CACHE_PREFIX + cacheKey);
+  } catch {
+    // the cache only spares a flash of the default layout on reload
+  }
+}
+
+/**
+ * `cacheKey` (optional, per user and table): the last saved layout is remembered in this browser,
+ * so a reload draws the table in that layout at once instead of showing the default one until
+ * the profile preferences arrive. The server copy stays the source of truth.
+ */
+export function useOrderDetailColumnPreferences(
+  tableKey: string,
+  defaultOrder: string[],
+  definitions: OrderDetailColumnDefinition[],
+  options: { cacheKey?: string } = {},
+) {
+  const { cacheKey } = options;
   const [allPreferences, setAllPreferences] = useState<Record<string, OrderDetailColumnPreference>>({});
-  const [settings, setSettings] = useState(() => normalizeOrderDetailColumnSettings(defaultOrder, definitions));
+  const [settings, setSettings] = useState(() => (
+    normalizeOrderDetailColumnSettings(defaultOrder, definitions, readCachedColumnSettings(cacheKey))
+  ));
 
   useEffect(() => {
     let alive = true;
@@ -99,16 +135,17 @@ export function useOrderDetailColumnPreferences(tableKey: string, defaultOrder: 
         const nextAll = response.preferences.orderDetailColumns ?? {};
         setAllPreferences(nextAll);
         setSettings(normalizeOrderDetailColumnSettings(defaultOrder, definitions, nextAll[tableKey]));
+        writeCachedColumnSettings(cacheKey, nextAll[tableKey]);
       })
       .catch(() => {
         if (alive) {
-          setSettings(normalizeOrderDetailColumnSettings(defaultOrder, definitions));
+          setSettings(normalizeOrderDetailColumnSettings(defaultOrder, definitions, readCachedColumnSettings(cacheKey)));
         }
       });
     return () => {
       alive = false;
     };
-  }, [defaultOrder, definitions, tableKey]);
+  }, [cacheKey, defaultOrder, definitions, tableKey]);
 
   const saveSettings = useCallback(async (next: OrderDetailColumnPreference) => {
     const normalized = normalizeOrderDetailColumnSettings(defaultOrder, definitions, next);
@@ -120,7 +157,8 @@ export function useOrderDetailColumnPreferences(tableKey: string, defaultOrder: 
     const savedAll = response.preferences.orderDetailColumns ?? nextAll;
     setAllPreferences(savedAll);
     setSettings(normalizeOrderDetailColumnSettings(defaultOrder, definitions, savedAll[tableKey]));
-  }, [allPreferences, defaultOrder, definitions, tableKey]);
+    writeCachedColumnSettings(cacheKey, savedAll[tableKey]);
+  }, [allPreferences, cacheKey, defaultOrder, definitions, tableKey]);
 
   return { settings, saveSettings };
 }

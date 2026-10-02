@@ -103,7 +103,6 @@ import { buildOrderWhatsAppMenuItems, describeOrderWhatsAppSend, isOrderWhatsApp
 import { runOrderSend } from './whatsappOrderSendModel';
 import { announceWhatsAppSendQueued, currentOwner } from '../../components/whatsapp/myWhatsAppSendsModel';
 import { useOrderSendMenu } from './whatsappOrderSendSupport';
-import { mapOrderDtoToFormValues } from '../../api/mappers/orderMapper';
 import { OrderCatalogLinesTable } from './components/OrderCatalogLinesTable';
 import { useIsMobile } from '../../hooks/useDeviceTier';
 import { DetailCardList } from './mobile/DetailCardList';
@@ -130,6 +129,7 @@ import { buildCutJobNameById, CutJobLinks } from "./CutJobLinks";
 import { ORDER_FILM_COLUMN_WIDTH, OrderFilmStockCaption, orderFilmStockColumns } from "../inventory/orderFilmStockColumns";
 import { useOrderFilmStock } from "../inventory/useOrderFilmStock";
 import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from "./orderMaterialsSummary";
+import { resolveOrderShowHdfDetails } from "./orderShowHdfDetails";
 import { useOrderDetailLiveState } from "./useOrderDetailLiveState";
 import {
   isOrderDetailStatusRefreshDue,
@@ -1178,7 +1178,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     }));
   }, [legacyBazisCutSetsByDetailId, rawDetails, useBackendOrdersRead]);
   const hdfDetails = useMemo(
-    () => (backendOrder ? mapOrderDtoToFormValues(backendOrder as OrderDto).hdfDetails ?? [] : []),
+    () => resolveOrderShowHdfDetails(backendOrder),
     [backendOrder],
   );
   const hdfDetailBySourceDetailId = useMemo(
@@ -1564,7 +1564,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const { data: filmsData } = useList({
     resource: "films",
     pagination: { pageSize: 10000 },
-    filters: [],  // Убираем любые фильтры чтобы загрузить все записи
+    // Активные и неактивные: плёнка заказа могла стать объединённым дублем — её название всё равно нужно показать.
+    filters: [{ field: "is_active", operator: "in", value: [true, false] }],
     queryOptions: { enabled: canViewReferences },
   });
 

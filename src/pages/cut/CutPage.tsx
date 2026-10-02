@@ -2431,6 +2431,17 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     }
   }, [job, criteriaFromForm, handleError]);
 
+  // «Подбор деталей на раскрой» can be taken back: nothing has been created yet, so the
+  // selection and the whole preview block are simply dropped.
+  const cancelCreationPreview = useCallback(() => {
+    openSeqRef.current += 1;
+    setEligible(null);
+    setNoSheetSpecCount(0);
+    setSelected([]);
+    setPreviewName('');
+    setBusy(false);
+  }, []);
+
   const closeEligibleDetails = useCallback(() => {
     setEligible(null);
     setNoSheetSpecCount(0);
@@ -3234,11 +3245,13 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       || busy
       || job
       || !filteredJobs[0]
+      // «NewLine»: a new cut is being composed — the preview must not be replaced by an existing job
+      || (isWorkbench && eligible !== null)
     ) {
       return;
     }
     void openJob(filteredJobs[0].cutJobId);
-  }, [busy, filteredJobs, isEmbeddedOrder, isOperational, isWorkbench, job, jobsLoading, openJob, ordinaryReadActive]);
+  }, [busy, eligible, filteredJobs, isEmbeddedOrder, isOperational, isWorkbench, job, jobsLoading, openJob, ordinaryReadActive]);
 
   const jobsSummary = useMemo(() => ({
     total: jobs.filter((candidate) => candidate.status !== 'archived').length,
@@ -4007,7 +4020,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       <Checkbox checked={showDeletedJobs} onChange={(event) => setShowDeletedJobs(event.target.checked)}>
         Показывать удалённые
       </Checkbox>
-      {canManage && (
+      {canManage && !isWorkbenchSplit && (
         <Button icon={<UploadOutlined />} onClick={() => setSvgUploadOpen(true)}>
           SVG
         </Button>
@@ -4258,6 +4271,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               <Text type="secondary">Выбрано: {selected.length}</Text>
               <Button type="primary" onClick={createJobFromPreview} disabled={!canManage || selected.length === 0} loading={busy}>
                 Создать
+              </Button>
+              <Button icon={<CloseOutlined />} onClick={cancelCreationPreview} data-testid="cut-preview-cancel">
+                Отмена
               </Button>
             </Space>
           }

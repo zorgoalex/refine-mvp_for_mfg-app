@@ -893,8 +893,16 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     await handleSnapshotImport(snapshotReferenceMapping.file, referenceMappings, { fromMapping: true });
   };
 
+  // «NewLine» keeps its own column layout: the one saved in the other variants was made for another
+  // set of default columns and would replace the NewLine list right after it is drawn.
+  const orderListColumnsKey = isWorkbench ? 'orderList.workbench' : 'orderList';
+  const orderListColumnsCacheKey = isWorkbench
+    ? `${orderListColumnsKey}:${String((currentUser as { user_id?: unknown; id?: unknown } | null)?.user_id ?? (currentUser as { id?: unknown } | null)?.id ?? 'anonymous')}`
+    : undefined;
   const { settings: orderListColumnSettings, saveSettings: saveOrderListColumnSettings } =
-    useOrderDetailColumnPreferences('orderList', orderListDefaultOrder, orderListColumnDefinitions);
+    useOrderDetailColumnPreferences(orderListColumnsKey, orderListDefaultOrder, orderListColumnDefinitions, {
+      cacheKey: orderListColumnsCacheKey,
+    });
   const snapshotImportBusy = snapshotImporting || snapshotReferenceMappingSubmitting;
   const snapshotImportBusyFileName = snapshotImportFileName ?? snapshotReferenceMapping?.file.name ?? null;
   const hasOrderListData = tableQueryResult.data !== undefined;
@@ -923,7 +931,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           </Button>
         )}
         <OrderDetailColumnSettingsButton
-          tableKey="orderList"
+          tableKey={orderListColumnsKey}
           definitions={orderListColumnDefinitions}
           defaultOrder={orderListDefaultOrder}
           settings={orderListColumnSettings}
@@ -931,7 +939,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         />
       </Space>
     ),
-  }), [isTablet, orderListColumnDefinitions, orderListColumnSettings, orderListDefaultOrder, saveOrderListColumnSettings, shortTabletLandscape, tableProps?.pagination, useBackendCut, selectedCutOrderIds]);
+  }), [isTablet, orderListColumnDefinitions, orderListColumnSettings, orderListColumnsKey, orderListDefaultOrder, saveOrderListColumnSettings, shortTabletLandscape, tableProps?.pagination, useBackendCut, selectedCutOrderIds]);
 
   const formatDate = (date: string | null) => {
     if (!date) return "—";
