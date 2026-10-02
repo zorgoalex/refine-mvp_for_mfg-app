@@ -598,6 +598,27 @@ export async function setupWorkflowMockApi(
         });
     });
 
+    // The bell asks for the user's own WhatsApp sends; none in the mock world.
+    await page.route(/\/api\/v1\/whatsapp\/my-sends(?:\?.*)?$/, async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ serverTime: new Date().toISOString(), items: [] }),
+        });
+    });
+
+    // The order card asks for the «Отправить в WhatsApp» menu; the feature is off in the mock world.
+    await page.route(/\/api\/v1\/whatsapp\/order-send\/menu(?:\?.*)?$/, async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                enabled: false, forms: [], client: { forms: [] }, chats: [], nextAllowedAt: null, activeSend: false,
+                runtime: { enabled: false, relayAvailable: false, unavailableReason: null },
+            }),
+        });
+    });
+
     await page.route(/\/api\/v1\/notifications(?:\?.*)?$/, async (route) => {
         await route.fulfill({
             status: 200,
