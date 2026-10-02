@@ -84,12 +84,13 @@ export async function readOrderFormData(tx: DatabaseClient, orderId: number): Pr
     WHERE p.order_id = $1 AND p.delete_flag = false
     ORDER BY p.payment_date ASC, p.payment_id ASC`, [orderId])).rows;
   const doweling = (await tx.query<QueryResultRow & { doweling_order_name: string | null; design_engineer_name: string | null }>(`
+    -- Same rule as the order card: the first live link (a removed link never reaches the form).
     SELECT d.doweling_order_name, e.full_name AS design_engineer_name
-    FROM doweling_orders d
-    LEFT JOIN order_doweling_links odl ON odl.doweling_order_id = d.doweling_order_id
+    FROM order_doweling_links odl
+    LEFT JOIN doweling_orders d ON d.doweling_order_id = odl.doweling_order_id
     LEFT JOIN employees e ON e.employee_id = d.design_engineer_id
-    WHERE (d.order_id = $1 OR odl.order_id = $1) AND d.delete_flag = false
-    ORDER BY d.doweling_order_id DESC LIMIT 1`, [orderId])).rows[0];
+    WHERE odl.order_id = $1 AND odl.delete_flag = false
+    ORDER BY odl.order_doweling_link_id ASC LIMIT 1`, [orderId])).rows[0];
   return {
     orderId: Number(header.order_id),
     orderName: header.order_name,

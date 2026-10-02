@@ -14,6 +14,7 @@ import type { WahaClient } from '../waha.client';
 import type { WhatsAppRuntimeConfigService } from '../whatsapp-runtime-config.service';
 import { OrderSendActors } from './order-send-actors';
 import { OrderSendFileStore } from './order-send-file-store';
+import { readOrderFormData } from './forms/order-form-data';
 import { parseOrderSendSettings } from './order-send.dto';
 import { OrderSendRepository } from './order-send.repository';
 import { OrderSendService } from './order-send.service';
@@ -88,7 +89,7 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
       CREATE TABLE payments(payment_id serial PRIMARY KEY, order_id bigint, type_paid_id int, payment_date date, amount numeric, delete_flag boolean DEFAULT false);
       CREATE TABLE employees(employee_id int PRIMARY KEY, full_name text);
       CREATE TABLE doweling_orders(doweling_order_id serial PRIMARY KEY, order_id bigint, doweling_order_name text, design_engineer_id int, delete_flag boolean DEFAULT false);
-      CREATE TABLE order_doweling_links(order_id bigint, doweling_order_id int);
+      CREATE TABLE order_doweling_links(order_doweling_link_id serial PRIMARY KEY, order_id bigint, doweling_order_id int, delete_flag boolean DEFAULT false);
       INSERT INTO clients VALUES (501, 'Тест Клиент'), (502, 'Тест Другой');
       INSERT INTO milling_types VALUES (1, 'Фасад'); INSERT INTO edge_types VALUES (1, 'R3'); INSERT INTO films VALUES (1, 'Белый'), (2, 'Дуб');
       INSERT INTO payment_types VALUES (1, 'ТестКаспи');
@@ -615,5 +616,17 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
     expect(menu.chats[0]).toMatchObject({ label: 'Цех ЧПУ', forms: ['production_pdf', 'production_excel'] });
     const view = (await send(9001, { target: { kind: 'chat', chatKey: menu.chats[0].chatKey }, form: 'production_pdf' as never })).send;
     expect(view).toMatchObject({ recipientLabel: 'Цех ЧПУ', recipientMasked: '1203…@g.us', actor: { username: 'order-send-admin' } });
+  });
+  it('the form takes the doweling order of the first live link, like the card, and never a removed one', async () => {
+    await q(`INSERT INTO employees VALUES (71, 'Тест Конструктор'), (72, 'Тест Другой')`);
+    await q(`INSERT INTO doweling_orders(doweling_order_id, doweling_order_name, design_engineer_id) VALUES (100, 'Тест-П-100', 71), (200, 'Тест-П-200', 72)`);
+    await q(`INSERT INTO order_doweling_links(order_id, doweling_order_id, delete_flag) VALUES (9002, 100, false), (9002, 200, true)`);
+    const read = () => database.transaction((tx) => readOrderFormData(tx as never, 9002));
+    expect(await read()).toMatchObject({ prisadkaName: 'Тест-П-100', prisadkaDesignerName: 'Тест Конструктор' });
+    await q(`UPDATE order_doweling_links SET delete_flag = true WHERE order_id = 9002`);
+    expect(await read()).toMatchObject({ prisadkaName: null, prisadkaDesignerName: null });
+    await q(`DELETE FROM order_doweling_links WHERE order_id = 9002`);
+    await q(`DELETE FROM doweling_orders WHERE doweling_order_id IN (100, 200)`);
+    await q(`DELETE FROM employees WHERE employee_id IN (71, 72)`);
   });
 });
