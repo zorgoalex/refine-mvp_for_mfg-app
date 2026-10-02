@@ -34,6 +34,18 @@ describe('order card under the NewLine variant', () => {
     expect(show).toContain('{ offsetHeader: workbenchChromeBottom + WORKBENCH_ORDER_BAR_HEIGHT }');
   });
 
+  it('lets the right column be folded and remembers it per browser', () => {
+    expect(show).toContain("const WORKBENCH_SIDE_COLLAPSED_KEY = 'erp.orderShow.sideCollapsed';");
+    expect(show).toContain('hidden={workbenchSideCollapsed}');
+    expect(show).toContain("isWorkbench && workbenchSideCollapsed ? 'order-show-page--workbench-wide' : ''");
+  });
+
+  it('keeps every block of «Дополнительная информация» under its class hook', () => {
+    for (const hook of ['order-additional__summary', 'order-additional__materials', 'order-additional__files', 'order-additional__labels', 'order-additional__meta']) {
+      expect(show).toContain(`className="${hook}"`);
+    }
+  });
+
   it('loads the orders stylesheet of the variant with the shell', () => {
     expect(layout).toContain("import '../styles/workbench-orders.css';");
   });

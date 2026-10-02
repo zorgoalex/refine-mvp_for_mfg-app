@@ -4,7 +4,7 @@ import { useDataProvider, useParsed, IResourceComponentsProps } from "@refinedev
 import type { BaseRecord } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Alert, Button, Card, Checkbox, Breadcrumb, message, Dropdown, Space, Modal, Select } from "antd";
-import { WalletOutlined, FolderOutlined, ApartmentOutlined, ScissorOutlined, BlockOutlined, AimOutlined, RightOutlined, PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
+import { MenuFoldOutlined, MenuUnfoldOutlined, WalletOutlined, FolderOutlined, ApartmentOutlined, ScissorOutlined, BlockOutlined, AimOutlined, RightOutlined, PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { getTableColumnDataIndex, getTableStickyOffsetHeader } from './utils/tableCompatibility';
 import { resolveStickySummaryStuck } from './utils/stickySummaryStuck';
@@ -192,6 +192,7 @@ const productionPdfButtonStyle: CSSProperties = {
 // «NewLine»: height of the compact order bar that replaces the head while it is scrolled away.
 const WORKBENCH_ORDER_BAR_HEIGHT = 52;
 const WORKBENCH_DETAIL_COLUMN_SCALE = 1.4;
+const WORKBENCH_SIDE_COLLAPSED_KEY = 'erp.orderShow.sideCollapsed';
 
 const orderInfoTabs: Array<{ key: OrderInfoPanelKey; label: string; color: string }> = [
   { key: 'groups', label: 'Группы заказа', color: '#722ed1' },
@@ -1400,6 +1401,25 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const workspaceTabsHeight = useWorkspaceTabsHeight();
   const workbenchChromeBottom = useWorkspaceChromeBottom();
   const [workbenchFlowOpen, setWorkbenchFlowOpen] = useState(false);
+  // «NewLine»: the right column can be folded to give the details table the full width (per browser).
+  const [workbenchSideCollapsed, setWorkbenchSideCollapsed] = useState(() => {
+    try {
+      return window.localStorage.getItem(WORKBENCH_SIDE_COLLAPSED_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleWorkbenchSide = useCallback(() => {
+    setWorkbenchSideCollapsed((collapsed) => {
+      const next = !collapsed;
+      try {
+        window.localStorage.setItem(WORKBENCH_SIDE_COLLAPSED_KEY, next ? '1' : '0');
+      } catch {
+        // storage can be unavailable (private mode); the toggle still works for this page
+      }
+      return next;
+    });
+  }, []);
   const [workbenchHeadHidden, setWorkbenchHeadHidden] = useState(false);
   const orderShowStickySentinelRef = useRef<HTMLDivElement>(null);
   const orderShowDetailsBlockRef = useRef<HTMLDivElement>(null);
@@ -1444,7 +1464,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     orderShowStickyEnabled ? 'order-show-page--sticky-enabled' : '',
     isWorkbench ? 'order-show-page--workbench' : '',
     isWorkbench && activeInfoPanel ? 'order-show-page--workbench-section' : '',
-  ].filter(Boolean).join(' '), [activeInfoPanel, isOperational, isWorkbench, orderShowStickyEnabled]);
+    isWorkbench && workbenchSideCollapsed ? 'order-show-page--workbench-wide' : '',
+  ].filter(Boolean).join(' '), [activeInfoPanel, isOperational, isWorkbench, orderShowStickyEnabled, workbenchSideCollapsed]);
   const orderShowDetailTableSticky = useMemo(() => {
     if (isWorkbench) {
       return workbenchChromeBottom > 0
@@ -3696,6 +3717,20 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 );
               })}
             </div>
+            {isWorkbench ? (
+              <Tooltip title={workbenchSideCollapsed ? 'Показать боковую панель' : 'Свернуть боковую панель'}>
+                <button
+                  type="button"
+                  className="wb-icon-btn wb-order-side-toggle"
+                  aria-label={workbenchSideCollapsed ? 'Показать боковую панель' : 'Свернуть боковую панель'}
+                  aria-expanded={!workbenchSideCollapsed}
+                  aria-controls="order-show-side"
+                  onClick={toggleWorkbenchSide}
+                >
+                  {workbenchSideCollapsed ? <MenuFoldOutlined /> : <MenuUnfoldOutlined />}
+                </button>
+              </Tooltip>
+            ) : null}
             </div>
             {orderShowDetailsToolbar}
           </div>
@@ -3729,7 +3764,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   </div>
                 ) : null}
               </section>
-              <aside className="wb-order-side" aria-label="Сводка заказа">
+              <aside id="order-show-side" className="wb-order-side" aria-label="Сводка заказа" hidden={workbenchSideCollapsed}>
                 <OrderClientCard
                   clientId={record.client_id}
                   clientName={record.client_name}
@@ -3820,9 +3855,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       )}
                     </div>
                   ) : (
-                    <>
+                    <div className="order-additional">
                     {/* Три колонки: Даты | Производство | Присадки + Раскрой */}
                     <div
+                      className="order-additional__summary"
                       style={{
                         display: 'grid',
                         gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
@@ -3999,8 +4035,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       </div>
                     </div>
 
-                    <div style={{ marginTop: 12, borderTop: '1px solid var(--app-border)', paddingTop: 8 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: '#1677ff', marginBottom: 6 }}>
+                    <div className="order-additional__materials" style={{ marginTop: 12, borderTop: '1px solid var(--app-border)', paddingTop: 8 }}>
+                      <div className="order-additional__title" style={{ fontSize: 12, fontWeight: 600, color: '#1677ff', marginBottom: 6 }}>
                         Материалы заказа
                       </div>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 12 }}>
@@ -4149,9 +4185,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     </div>
 
                     {/* Ниже — на всю ширину: Файлы, Бирки, Служебная информация */}
-                    <div style={{ marginTop: 12, borderTop: '1px solid var(--app-border)', paddingTop: 8 }}>
+                    <div className="order-additional__extras" style={{ marginTop: 12, borderTop: '1px solid var(--app-border)', paddingTop: 8 }}>
                       {/* Файлы */}
-                      <div style={{ marginBottom: 8 }}>
+                      <div className="order-additional__files" style={{ marginBottom: 8 }}>
                         <div style={{ fontSize: 12, fontWeight: 600, color: '#722ed1', marginBottom: 3 }}>
                           Файлы
                         </div>
@@ -4159,11 +4195,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       </div>
 
                       {labelsEnabled && record?.order_id && (
-                        <OrderLatestLabelsPreview orderId={record.order_id} />
+                        <div className="order-additional__labels">
+                          <OrderLatestLabelsPreview orderId={record.order_id} />
+                        </div>
                       )}
 
                       {/* Служебная информация — спойлер, по умолчанию свёрнут */}
-                      <details style={{ borderTop: '1px solid var(--app-border)', paddingTop: 8 }}>
+                      <details className="order-additional__meta" style={{ borderTop: '1px solid var(--app-border)', paddingTop: 8 }}>
                         <summary
                           style={{
                             fontSize: 12,
@@ -4180,7 +4218,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                         </div>
                       </details>
                     </div>
-                    </>
+                    </div>
                   )
                 )}
               </div>

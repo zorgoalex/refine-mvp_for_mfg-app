@@ -391,6 +391,17 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
             {record?.client_name || '—'}
             {deadlineAt ? ` · срок ${deadlineAt.format('DD.MM')}` : ''}
           </span>
+          <span className="wb-order-bar__fact" title="Состав заказа">
+            {formatNumber(totals.parts_count, 0)} дет. · {formatNumber(totals.total_area, 2)} м²
+          </span>
+          {showFinancials && (
+            <span className="wb-order-bar__fact" title="Сумма заказа и оплата">
+              <b>{money(finalAmount)}</b>
+              {remainingAmount > 0
+                ? <> · оплачено {money(paidAmount)} · <span data-tone="warning">остаток {money(remainingAmount)}</span></>
+                : <> · <span data-tone="ready">оплачен полностью</span></>}
+            </span>
+          )}
           <span className="wb-order-bar__production">
             <OrderProductionSummary order={record ?? {}} details={detailsLoaded ? details : undefined} statuses={statusesForWorkflow} />
           </span>
@@ -485,8 +496,9 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
             <div className="wb-order-head__tile">
               <span className="wb-order-head__label">Оплачено</span>
               <span className="wb-order-head__value">
-                {money(paidAmount)}
-                <span className="wb-order-head__of"> из {money(finalAmount)}</span>
+                <span className="wb-order-head__amount">{money(paidAmount)}</span>
+                {' '}
+                <span className="wb-order-head__of">из {money(finalAmount)}</span>
               </span>
               <span className="wb-order-head__bar" data-tone={remainingAmount > 0 ? 'warning' : 'ready'} aria-hidden>
                 <i style={{ width: `${Math.round(paidShare * 100)}%` }} />

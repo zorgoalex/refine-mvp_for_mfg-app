@@ -76,6 +76,12 @@ test.describe('Workbench orders polish', () => {
         await expect(head).toContainText('скидка');
         await expect(head).toContainText('остаток');
 
+        // компактные размеры: плитки показателей и свёрнутый «Ход производства»
+        const tileHeight = await head.locator('.wb-order-head__tiles').evaluate((element) => Math.round(element.getBoundingClientRect().height));
+        expect(tileHeight).toBeLessThanOrEqual(88);
+        const flowHeight = await page.locator('.wb-order-flow').evaluate((element) => Math.round(element.getBoundingClientRect().height));
+        expect(flowHeight).toBeLessThanOrEqual(30);
+
         // вкладки: «Детали» + прежние пять секций; открыта таблица деталей
         await expect(tabs.getByRole('tab')).toHaveText([/Детали/, ...ORIGINAL_SECTIONS.map((name) => new RegExp(name))]);
         await expect(tabs.getByRole('tab', { name: /Детали/ })).toHaveAttribute('aria-selected', 'true');
@@ -110,10 +116,54 @@ test.describe('Workbench orders polish', () => {
         await tabs.getByRole('tab', { name: 'Финансы' }).click();
         await expect(page.locator('.order-show-info-panel')).toBeVisible();
         await expect(page.locator('.order-show-details-table')).toBeHidden();
+        await expect(page.locator('.order-show-details-toolbar')).toBeHidden();
         await shot(page, 'order-card-finance');
+        // «Дополнительная информация»: материалы заказа сверху, остальные блоки ниже на всю ширину
+        await tabs.getByRole('tab', { name: 'Дополнительная информация' }).click();
+        const additional = page.locator('.order-additional');
+        await expect(additional).toBeVisible();
+        const layout = await additional.evaluate((root) => {
+            const box = (selector: string) => root.querySelector(selector)!.getBoundingClientRect();
+            const blocks = [
+                ...root.querySelectorAll('.order-additional__summary > div, .order-additional__extras > *'),
+            ].map((element) => element.getBoundingClientRect());
+            const rootBox = root.getBoundingClientRect();
+            const rows = new Map<number, { left: number; right: number }>();
+            blocks.forEach((block) => {
+                const key = Math.round(block.top);
+                const row = rows.get(key) ?? { left: block.left, right: block.right };
+                rows.set(key, { left: Math.min(row.left, block.left), right: Math.max(row.right, block.right) });
+            });
+            return {
+                materialsTop: box('.order-additional__materials').top,
+                firstBlockTop: Math.min(...blocks.map((block) => block.top)),
+                gaps: [...rows.values()].map((row) => Math.round((row.left - rootBox.left) + (rootBox.right - row.right))),
+            };
+        });
+        expect(layout.materialsTop).toBeLessThan(layout.firstBlockTop);
+        // каждая строка блоков занимает всю ширину вкладки
+        layout.gaps.forEach((gap) => expect(gap).toBeLessThanOrEqual(2));
+        for (const title of ['Материалы заказа', 'Даты', 'Производство', 'Присадки', 'Файлы', 'Служебная информация']) {
+            await expect(additional.getByText(title, { exact: true }).first()).toBeVisible();
+        }
+        await shot(page, 'order-card-additional');
+
         await tabs.getByRole('tab', { name: /Детали/ }).click();
         await expect(page.locator('.order-show-info-panel')).toHaveCount(0);
         await expect(page.locator('.order-show-details-table')).toBeVisible();
+
+        // правая колонка сворачивается, таблица деталей занимает освободившуюся ширину
+        const tableWidth = () => page.locator('.order-show-details-section').evaluate((element) => Math.round(element.getBoundingClientRect().width));
+        const widthWithSide = await tableWidth();
+        await page.getByRole('button', { name: 'Свернуть боковую панель' }).click();
+        await expect(side).toBeHidden();
+        expect(await tableWidth()).toBeGreaterThan(widthWithSide + 250);
+        await shot(page, 'order-card-wide');
+        // выбор запоминается в браузере (мок-окружение очищает localStorage при загрузке, поэтому без reload)
+        expect(await page.evaluate(() => localStorage.getItem('erp.orderShow.sideCollapsed'))).toBe('1');
+        await page.getByRole('button', { name: 'Показать боковую панель' }).click();
+        await expect(side).toBeVisible();
+        expect(await page.evaluate(() => localStorage.getItem('erp.orderShow.sideCollapsed'))).toBe('0');
         expect(pageErrors).toEqual([]);
     });
 
@@ -139,6 +189,11 @@ test.describe('Workbench orders polish', () => {
         expect(await readOffset()).toBeLessThanOrEqual(2);
         const bar = page.locator('.wb-order-bar');
         await expect(bar).toContainText('Заказ Тест-2972');
+        // состав и оплата видны при прокрутке
+        await expect(bar).toContainText('6 дет.');
+        await expect(bar).toContainText('м²');
+        await expect(bar).toContainText('160 381');
+        await expect(bar).toContainText('остаток 100 381');
         await expect(bar.getByRole('button', { name: 'Изменить' })).toBeVisible();
         await shot(page, 'order-card-scrolled');
     });
