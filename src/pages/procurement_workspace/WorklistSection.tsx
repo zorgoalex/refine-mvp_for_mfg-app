@@ -17,6 +17,7 @@ import type { UserIdentity } from '../../types/auth';
 import { HistoryDrawer, type HistoryDrawerLine } from './HistoryDrawer';
 import { Segmented } from '../../ui/Segmented';
 import { Table, Tooltip, type TableProps } from '../../ui/tooltipDelay';
+import { OrderNumber } from '../order_resource_requirements/OrderNumber';
 import { useProcurementPermission } from '../order_resource_requirements/ProcurementParts';
 import {
   buildOnecDocumentFilterOptionGroups,
@@ -243,7 +244,7 @@ export function WorklistSection({ active, onUrgentCount, onCapabilities }: Workl
   // «История» (этап 4a): отдельная строка открывает Drawer; смена строки до закрытия — новый экземпляр (key).
   const [historyLine, setHistoryLine] = useState<HistoryDrawerLine | null>(null);
   const openHistory = useCallback((line: ProcurementWorklistLine) => {
-    setHistoryLine({ orderId: line.orderId, resourceKey: line.resourceKey, name: line.name, fullNumber: line.fullNumber });
+    setHistoryLine({ orderId: line.orderId, resourceKey: line.resourceKey, name: line.name, orderName: line.orderName, fullNumber: line.fullNumber });
   }, []);
 
   const columns = useWorklistColumns(response?.today ?? null, openHistory);
@@ -511,7 +512,9 @@ function useWorklistColumns(
       width: 200,
       render: (_value, line) => (
         <div>
-          <Link to={`/orders/show/${line.orderId}`}>{line.fullNumber}</Link>
+          <Link to={`/orders/show/${line.orderId}`}>
+            <OrderNumber orderName={line.orderName} fullNumber={line.fullNumber} />
+          </Link>
           <div className="rr-sub">{[line.clientName, line.orderStatus].filter(Boolean).join(' · ')}</div>
         </div>
       ),

@@ -2,6 +2,7 @@ import { Alert, Space, Spin, Tabs, Typography, theme } from 'antd';
 import { Link } from 'react-router-dom';
 
 import type { OrderResourceCapabilitiesDto } from '../../api/types/orderApi.types';
+import { OrderNumber } from './OrderNumber';
 import { Segmented } from '../../ui/Segmented';
 import { formatDate } from '../../utils/dateFormat';
 import { OnecDocChips, ProcurementCheckbox, ProcurementProgressTag } from './ProcurementParts';
@@ -20,7 +21,6 @@ import {
   linesOfKind,
   mapBackendResourceLine,
   matchingCardData,
-  orderDisplayName,
   positionsLabel,
   resourceDemandLines,
   resourceKindTotal,
@@ -114,7 +114,7 @@ export function ResourceDemandCard({
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <Space direction="vertical" size={0}>
           <Typography.Title level={compact ? 5 : 4} style={{ margin: 0 }}>
-            Заказ {orderDisplayName(row)}
+            Заказ <OrderNumber orderName={row.orderName} orderId={row.orderId} projectCode={row.projectCode} />
           </Typography.Title>
           <Typography.Text type="secondary">
             {[row.clientName || 'Клиент не указан', row.orderDate ? formatDate(row.orderDate) : null]

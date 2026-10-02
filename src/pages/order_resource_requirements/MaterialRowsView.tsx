@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import type { OrderResourceCapabilitiesDto } from '../../api/types/orderApi.types';
 import { Table } from '../../ui/tooltipDelay';
 import { formatDate } from '../../utils/dateFormat';
+import { OrderNumber } from './OrderNumber';
 import { ProcurementCheckbox, ProcurementProgressTag } from './ProcurementParts';
 import { KindDot, KindTitle, SourceTag, numericStyle, useResourceKindColor } from './ResourceDemandParts';
 import {
@@ -11,7 +12,6 @@ import {
   formatKindTotal,
   formatLineQuantity,
   linesOfKind,
-  orderDisplayName,
   resourceDemandLines,
   resourceKindTotal,
   type OrderResourceDemandRow,
@@ -220,7 +220,7 @@ function MaterialGroupHeader({
       >
         {collapsed ? '▶' : '▼'}
       </Button>
-      <Typography.Link strong onClick={onOpenCard}>{orderDisplayName(row)}</Typography.Link>
+      <OrderNumber orderName={row.orderName} orderId={row.orderId} projectCode={row.projectCode} onClick={onOpenCard} strong />
       <Typography.Text type="secondary">{row.clientName || 'Клиент не указан'}</Typography.Text>
       <Typography.Text type="secondary" style={numericStyle}>{row.orderDate ? formatDate(row.orderDate) : '—'}</Typography.Text>
       {showProcurement && <ProcurementProgressTag summary={row.procurementSummary} />}

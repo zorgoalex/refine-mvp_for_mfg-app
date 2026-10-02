@@ -8,6 +8,7 @@ import { onecDocumentsApi } from '../../api/onecDocumentsApi';
 import type { AllocationSuggestionCandidate, AllocationSuggestionLine, AllocationSuggestionsResponse } from '../../api/types/onecDocumentsApi.types';
 import type { UserIdentity } from '../../types/auth';
 import { Table, Tooltip } from '../../ui/tooltipDelay';
+import { OrderNumber } from '../order_resource_requirements/OrderNumber';
 import { useProcurementPermission } from '../order_resource_requirements/ProcurementParts';
 import { RrScreen } from '../procurement_workspace/RrScreen';
 import { dueText } from '../procurement_workspace/worklistHelpers';
@@ -332,7 +333,11 @@ function SuggestionLineCard({ line, lineDraft, onToggle, onQuantityChange, onRes
             title="Заказ"
             render={(_, candidate) => (
               <div>
-                <b><Link to={`/order-resource-requirements/show/${candidate.orderId}`}>{candidate.fullNumber}</Link></b>
+                <b>
+                  <Link to={`/order-resource-requirements/show/${candidate.orderId}`}>
+                    <OrderNumber orderName={candidate.orderName} fullNumber={candidate.fullNumber} />
+                  </Link>
+                </b>
                 <div className="rr-sub">{candidate.clientName ?? '—'}</div>
               </div>
             )}

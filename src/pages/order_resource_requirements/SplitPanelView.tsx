@@ -6,6 +6,7 @@ import { Segmented } from '../../ui/Segmented';
 import { Table } from '../../ui/tooltipDelay';
 import { formatDate } from '../../utils/dateFormat';
 import { MaterialAggregateTable, useResourceDemandByMaterial } from './MaterialAggregateView';
+import { OrderNumber } from './OrderNumber';
 import { ProcurementProgressTag } from './ProcurementParts';
 import { ResourceDemandCard, type ResourceCardMode } from './ResourceDemandCard';
 import { KindDot, numericStyle, useResourceKindColor } from './ResourceDemandParts';
@@ -13,7 +14,6 @@ import {
   RESOURCE_KIND_BY_KEY,
   RESOURCE_KINDS,
   UNIT_LABELS,
-  orderDisplayName,
   resolvePanelSubMode,
   resourceDemandLines,
   resourceKindTotal,
@@ -149,7 +149,7 @@ export function SplitPanelView({
               title="Заказ"
               render={(_, row) => (
                 <>
-                  <Typography.Text strong>{orderDisplayName(row)}</Typography.Text>
+                  <OrderNumber orderName={row.orderName} orderId={row.orderId} projectCode={row.projectCode} strong />
                   <div>
                     <Typography.Text type="secondary" style={{ fontSize: 12 }}>{row.clientName || 'Клиент не указан'}</Typography.Text>
                   </div>

@@ -49,6 +49,8 @@ import {
   type ResourceDemandReportMaterial,
 } from './resourceDemandReport';
 import { MaterialRowsView } from './MaterialRowsView';
+import { OrderNumber } from './OrderNumber';
+import { orderNumberText } from './orderNumber';
 import { OnecDocChips, ProcurementCheckbox, ProcurementProgressTag, useProcurementPermission } from './ProcurementParts';
 import { RESOURCE_CARD_MODES, ResourceDemandCard, type ResourceCardMode } from './ResourceDemandCard';
 import { KindSummaryCell, ResourceDemandBreakdown } from './ResourceDemandParts';
@@ -95,7 +97,9 @@ type HeaderSortKey = 'order' | 'date' | 'sheetMaterials' | 'films';
 
 interface HeaderFilterOption {
   value: string;
-  label: string;
+  label: React.ReactNode;
+  /** Текстовая форма для сортировки списка значений (label — ReactNode у колонки «Заказ»). */
+  sortText: string;
 }
 
 interface HeaderSortState {
@@ -628,7 +632,7 @@ export const OrderResourceRequirementList: React.FC<OrderResourceRequirementList
               {...filterProps('order', filterOptions.order)}
               render={(_, row: OrderResourceDemandRow) => (
                 <Space direction="vertical" size={0}>
-                  <Typography.Link onClick={() => openCard(row)}>{orderDisplayNumber(row)}</Typography.Link>
+                  <OrderNumber orderName={row.orderName} orderId={row.orderId} projectCode={row.projectCode} onClick={() => openCard(row)} />
                   <Typography.Text type="secondary">
                     {row.clientName || 'Клиент не указан'}
                   </Typography.Text>
@@ -1049,11 +1053,20 @@ function buildResourceDemandFilterOptions(rows: OrderResourceDemandRow[]): Recor
   let hasRowsWithoutFilms = false;
 
   for (const row of rows) {
-    const orderLabel = [orderDisplayNumber(row), row.clientName?.trim()].filter(Boolean).join(' · ');
-    orders.set(String(row.orderId), { value: String(row.orderId), label: orderLabel || `#${row.orderId}` });
+    const orderSortText = [orderNumberText(row), row.clientName?.trim()].filter(Boolean).join(' · ') || `#${row.orderId}`;
+    orders.set(String(row.orderId), {
+      value: String(row.orderId),
+      label: (
+        <span>
+          <OrderNumber orderName={row.orderName} orderId={row.orderId} projectCode={row.projectCode} />
+          {row.clientName?.trim() ? ` · ${row.clientName.trim()}` : ''}
+        </span>
+      ),
+      sortText: orderSortText,
+    });
 
     if (row.orderDate) {
-      dates.set(row.orderDate, { value: row.orderDate, label: formatDate(row.orderDate) });
+      dates.set(row.orderDate, { value: row.orderDate, label: formatDate(row.orderDate), sortText: formatDate(row.orderDate) });
     } else {
       hasRowsWithoutDate = true;
     }
@@ -1063,7 +1076,7 @@ function buildResourceDemandFilterOptions(rows: OrderResourceDemandRow[]): Recor
     } else {
       for (const material of row.sheetMaterials) {
         const value = String(material.sheetMaterialTypeId);
-        sheetMaterials.set(value, { value, label: material.name });
+        sheetMaterials.set(value, { value, label: material.name, sortText: material.name });
       }
     }
 
@@ -1072,21 +1085,21 @@ function buildResourceDemandFilterOptions(rows: OrderResourceDemandRow[]): Recor
     } else {
       for (const film of row.films) {
         const value = String(film.filmId);
-        films.set(value, { value, label: film.name });
+        films.set(value, { value, label: film.name, sortText: film.name });
       }
     }
   }
 
   const dateOptions = sortHeaderFilterOptions([...dates.values()]);
-  if (hasRowsWithoutDate) dateOptions.push({ value: RESOURCE_FILTER_EMPTY, label: '(без даты)' });
+  if (hasRowsWithoutDate) dateOptions.push({ value: RESOURCE_FILTER_EMPTY, label: '(без даты)', sortText: '(без даты)' });
 
   const sheetMaterialOptions = sortHeaderFilterOptions([...sheetMaterials.values()]);
   if (hasRowsWithoutSheetMaterials) {
-    sheetMaterialOptions.push({ value: RESOURCE_FILTER_EMPTY, label: '(без листовых материалов)' });
+    sheetMaterialOptions.push({ value: RESOURCE_FILTER_EMPTY, label: '(без листовых материалов)', sortText: '(без листовых материалов)' });
   }
 
   const filmOptions = sortHeaderFilterOptions([...films.values()]);
-  if (hasRowsWithoutFilms) filmOptions.push({ value: RESOURCE_FILTER_EMPTY, label: '(без плёнки)' });
+  if (hasRowsWithoutFilms) filmOptions.push({ value: RESOURCE_FILTER_EMPTY, label: '(без плёнки)', sortText: '(без плёнки)' });
 
   return {
     order: sortHeaderFilterOptions([...orders.values()]),
@@ -1097,7 +1110,7 @@ function buildResourceDemandFilterOptions(rows: OrderResourceDemandRow[]): Recor
 }
 
 function sortHeaderFilterOptions(options: HeaderFilterOption[]): HeaderFilterOption[] {
-  return [...options].sort((a, b) => compareText(a.label, b.label));
+  return [...options].sort((a, b) => compareText(a.sortText, b.sortText));
 }
 
 function filterResourceDemandRows(

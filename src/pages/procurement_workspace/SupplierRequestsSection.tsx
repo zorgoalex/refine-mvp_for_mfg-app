@@ -25,6 +25,7 @@ import { formatDate } from '../../utils/dateFormat';
 import { Segmented } from '../../ui/Segmented';
 import { Table, Tooltip, type TableProps } from '../../ui/tooltipDelay';
 import { onecUnitLabel } from '../onec_purchase_documents/onecDocumentsHelpers';
+import { OrderNumber } from '../order_resource_requirements/OrderNumber';
 import { useProcurementPermission } from '../order_resource_requirements/ProcurementParts';
 import { RrScreen } from './RrScreen';
 import { useSelect } from '../../ui/refineSelect';
@@ -790,7 +791,12 @@ function SupplierRequestLineCard({
           <Table.Column<typeof visibleOrders[number]>
             key="order"
             title="Заказ"
-            render={(_value, order) => <span>{order.fullNumber}{order.clientName ? ` · ${order.clientName}` : ''}</span>}
+            render={(_value, order) => (
+              <span>
+                <OrderNumber orderName={order.orderName} fullNumber={order.fullNumber} />
+                {order.clientName ? ` · ${order.clientName}` : ''}
+              </span>
+            )}
           />
           <Table.Column<typeof visibleOrders[number]>
             key="quantity"

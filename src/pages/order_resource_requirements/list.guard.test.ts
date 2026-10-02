@@ -65,10 +65,11 @@ describe('order resource requirements list guards', () => {
     expect(source).toContain('setSelectedRowsByKey(new Map())');
   });
 
-  it('в колонке «Заказ» показывает номер заказа без кода проекта', () => {
-    expect(source).toContain('orderDisplayNumber(row)');
-    expect(source).toContain("return row.orderName?.trim() || `#${row.orderId}`;");
+  it('в колонке «Заказ» номер заказа показан первым, код проекта — после него мелким серым текстом', () => {
+    expect(source).toContain('<OrderNumber orderName={row.orderName} orderId={row.orderId} projectCode={row.projectCode} onClick={() => openCard(row)} />');
     expect(source).not.toContain('{row.fullNumber}</Link>');
+    // Сортировка колонки — по номеру заказа, как раньше (без кода проекта).
+    expect(source).toContain("return row.orderName?.trim() || `#${row.orderId}`;");
     expect(source).toContain('compareText(orderDisplayNumber(left), orderDisplayNumber(right))');
   });
 

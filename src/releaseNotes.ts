@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-02", title: "Потребности заказов: номер заказа первым",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "На всех вкладках экрана «Потребности заказов в ресурсах» (потребность, рабочий список, приход 1С, заявки поставщикам, история) сначала показывается номер заказа, а код проекта — после него мелким серым шрифтом.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-02", title: "Календарь: в какой чат уйдёт отправка",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [

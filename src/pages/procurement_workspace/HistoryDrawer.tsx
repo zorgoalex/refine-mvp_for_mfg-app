@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 
 import { procurementWorkspaceApi } from '../../api/procurementWorkspaceApi';
 import type { ProcurementHistoryEvent, ProcurementHistoryResponse } from '../../api/types/procurementHistoryApi.types';
+import { OrderNumber } from '../order_resource_requirements/OrderNumber';
 import { currentSummaryLines, historyDocumentLabel, historyEventTitle, historyRequestLinkLabels, sortHistoryEventsDesc } from './historyHelpers';
 import { RrScreen } from './RrScreen';
 
@@ -13,6 +14,7 @@ export interface HistoryDrawerLine {
   resourceKey: string;
   /** Имя материала строки рабочего списка — пока история не загрузилась, или если сервер его не знает. */
   name: string;
+  orderName: string;
   fullNumber: string;
 }
 
@@ -89,7 +91,7 @@ export function HistoryDrawer({ line, onClose }: HistoryDrawerProps) {
       title={line ? (
         <Space direction="vertical" size={0}>
           <b>{materialName}</b>
-          <span className="rr-muted">{line.fullNumber}</span>
+          <OrderNumber orderName={line.orderName} fullNumber={line.fullNumber} />
         </Space>
       ) : 'История'}
     >
