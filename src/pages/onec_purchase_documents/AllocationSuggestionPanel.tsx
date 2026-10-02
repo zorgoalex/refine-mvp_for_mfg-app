@@ -9,6 +9,7 @@ import type { AllocationSuggestionCandidate, AllocationSuggestionLine, Allocatio
 import type { UserIdentity } from '../../types/auth';
 import { Table, Tooltip } from '../../ui/tooltipDelay';
 import { OrderNumber } from '../order_resource_requirements/OrderNumber';
+import { ordersLabel } from '../order_resource_requirements/resourceKinds';
 import { useProcurementPermission } from '../order_resource_requirements/ProcurementParts';
 import { RrScreen } from '../procurement_workspace/RrScreen';
 import { dueText } from '../procurement_workspace/worklistHelpers';
@@ -243,7 +244,7 @@ export function AllocationSuggestionPanel({ documentId, onDone }: AllocationSugg
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <Tooltip title={submitDisabled ? submitBlockReason(summary, submitting, conflict !== null) : undefined}>
           <Button type="primary" disabled={submitDisabled} loading={submitting} onClick={() => void handleSubmit()}>
-            Распределить выбранное ({summary.ordersCount} заказов)
+            Распределить выбранное ({ordersLabel(summary.ordersCount)})
           </Button>
         </Tooltip>
         <span className="rr-sub" style={{ fontSize: 13 }}>

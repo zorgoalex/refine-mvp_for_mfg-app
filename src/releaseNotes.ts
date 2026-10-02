@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-02", title: "Подбор заказов: падеж в кнопке",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: [
+      "Кнопка «Распределить выбранное» в подборе заказов для прихода 1С пишет «1 заказ», «2 заказа», «5 заказов» вместо «1 заказов».",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-02", title: "Уведомления закупа: сводка, нераспределённые приходы, изменение потребности",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [
