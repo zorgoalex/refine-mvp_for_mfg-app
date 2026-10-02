@@ -177,6 +177,8 @@ export interface SupplierRequestCardDto extends SupplierRequestSummaryDto {
   lineItems: SupplierRequestLineDto[];
   /** Действия, доступные пользователю в текущем статусе. */
   actions: { edit: boolean; send: boolean; close: boolean; cancel: boolean };
+  /** Только в ответе GET карточки: включены ли шаблоны текста поставщику (флаг BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED). */
+  capabilities?: { supplierTextTemplates: boolean };
 }
 
 export interface SupplierRequestsListQuery {

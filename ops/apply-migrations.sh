@@ -2537,6 +2537,9 @@ probe_file() {
                            AND pg_get_constraintdef(oid) LIKE '%air%'
                            AND pg_get_constraintdef(oid) LIKE '%neutral%'
                       );" ;;
+    229_supplier_text_templates*) probe_all \
+      "$(q_tbl supplier_request_text_templates)" "$(q_idx uq_srtt_active_name)" "$(q_idx uq_srtt_one_default)" \
+      "SELECT EXISTS (SELECT 1 FROM supplier_request_text_templates WHERE is_default AND deleted_at IS NULL);" ;;
     228_procurement_scheduled_notification_rules*) probe_all \
       "SELECT (SELECT count(*) FROM notification_rules WHERE rule_code IN ('procurement-demand-changed', 'procurement-deficit-digest', 'procurement-receipt-unallocated')) = 3;" ;;
     225_procurement_notification_rules*) probe_all \
@@ -2931,6 +2934,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     204_procurement_workspace*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    229_supplier_text_templates*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     228_procurement_scheduled_notification_rules*)

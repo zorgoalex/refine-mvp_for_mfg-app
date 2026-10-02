@@ -253,6 +253,13 @@ PROCUREMENT_LOCKED_BY_ONEC`) — сначала снимается распре�
 не отменена. При выключенном флаге маршруты отвечают `503 SUPPLIER_REQUESTS_DISABLED`,
 а раздел и кнопка «Сформировать заявки» не показываются.
 
+`BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED` (backend, по умолчанию `false`; работает поверх
+`BACKEND_SUPPLIER_REQUESTS_ENABLED`) — шаблоны текста заявки поставщику: выбор шаблона и предпросмотр у кнопки
+«Скопировать текст для поставщика», редактор в «Конфигурация → Закупки» (правка — `procurement.manage`). Миграция
+`229_supplier_text_templates.sql` создаёт таблицу и шаблон «Стандартный» (прежний текст) по умолчанию. Выключен —
+API шаблонов отвечает `503 SUPPLIER_TEXT_TEMPLATES_DISABLED`, карточка заявки сообщает
+`capabilities.supplierTextTemplates=false`, и кнопка копирует прежний стандартный текст; данные шаблонов остаются.
+
 `BACKEND_PROCUREMENT_NOTIFICATIONS_ENABLED` (backend, по умолчанию `false`) — уведомления закупа, только в
 приложении (in_app). Миграция `225_procurement_notification_rules.sql` засевает **выключенное** правило
 «Материал пришёл по заказу» (`order.resource_procurement_changed`: распределение прихода 1С на заказ →

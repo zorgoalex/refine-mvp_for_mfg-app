@@ -166,6 +166,8 @@ export interface SupplierRequestSummaryDto {
 export interface SupplierRequestCardDto extends SupplierRequestSummaryDto {
   lineItems: SupplierRequestLineDto[];
   actions: { edit: boolean; send: boolean; close: boolean; cancel: boolean };
+  /** Только в ответе GET карточки; нет — старый backend (шаблонов нет). */
+  capabilities?: { supplierTextTemplates: boolean };
 }
 
 export interface SupplierRequestsListParams {

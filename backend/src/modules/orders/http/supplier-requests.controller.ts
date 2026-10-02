@@ -104,7 +104,8 @@ export class SupplierRequestsController {
   @Get(':supplierRequestId')
   async card(@Req() request: RequestWithCurrentUser, @Param('supplierRequestId') supplierRequestId: string): Promise<SupplierRequestCardDto> {
     const user = this.requireEnabled(request, false);
-    return this.requests.getCard(user, parseId(supplierRequestId));
+    const card = await this.requests.getCard(user, parseId(supplierRequestId));
+    return { ...card, capabilities: { supplierTextTemplates: this.runtimeConfig.getFeatureFlags().supplierTextTemplatesEnabled === true } };
   }
 
   @ApiResponse({ status: 200, description: 'Draft updated (no-op when unchanged)' })

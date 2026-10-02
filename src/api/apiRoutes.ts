@@ -128,6 +128,11 @@ export const apiRoutes = {
       close: (supplierRequestId: number) => backendApiPath(`/procurement/supplier-requests/${supplierRequestId}/close`),
       cancel: (supplierRequestId: number) => backendApiPath(`/procurement/supplier-requests/${supplierRequestId}/cancel`),
     },
+    supplierTextTemplates: {
+      list: backendApiPath('/procurement/supplier-text-templates'),
+      byId: (templateId: number) => backendApiPath(`/procurement/supplier-text-templates/${templateId}`),
+      setDefault: (templateId: number) => backendApiPath(`/procurement/supplier-text-templates/${templateId}/default`),
+    },
   },
   onecDocuments: {
     list: backendApiPath('/procurement/onec-documents'),

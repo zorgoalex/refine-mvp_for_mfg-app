@@ -4630,7 +4630,9 @@ paths:
         - Orders
       operationId: getSupplierRequest
       summary: Карточка заявки поставщику
-      description: Строки с заказами в scope (остальные — числом), доступные действия.
+      description: >-
+        Строки с заказами в scope (остальные — числом), доступные действия; capabilities.supplierTextTemplates —
+        включены ли шаблоны текста поставщику (флаг BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED).
       security:
         - bearerAuth: []
       x-permission: procurement.view
@@ -4835,6 +4837,206 @@ paths:
       responses:
         '200':
           description: changed и актуальная карточка заявки
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/supplier-text-templates:
+    get:
+      tags:
+        - Orders
+      operationId: listSupplierTextTemplates
+      summary: Шаблоны текста заявки поставщику
+      description: >-
+        Активные шаблоны (по умолчанию — первым) и canManage (procurement.manage). Рендер текста — на клиенте.
+        Флаг BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED (иначе 503 SUPPLIER_TEXT_TEMPLATES_DISABLED).
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      responses:
+        '200':
+          description: templates (templateId, name, body, lineTemplate, isDefault, version, updatedAt) и canManage
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      tags:
+        - Orders
+      operationId: createSupplierTextTemplate
+      summary: Создать шаблон текста поставщику
+      description: >-
+        Нужны procurement.view и procurement.manage (иначе 403 и denied-аудит). Флаг BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED (иначе 503 SUPPLIER_TEXT_TEMPLATES_DISABLED). Аудит без текста шаблона (sha256 и длина). Не больше 50 активных (409 SUPPLIER_TEXT_TEMPLATE_LIMIT); имя уникально без учёта регистра (409 SUPPLIER_TEXT_TEMPLATE_NAME_TAKEN); неизвестные поля и незакрытые скобки — 422 SUPPLIER_TEXT_TEMPLATE_INVALID.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [commandKey, name, body, lineTemplate]
+              properties:
+                commandKey: { type: string, format: uuid, description: 'Ключ повтора: то же тело — сохранённый результат, другое — 409 IDEMPOTENCY_KEY_REUSED' }
+                name: { type: string, minLength: 1, maxLength: 80 }
+                body: { type: string, minLength: 1, maxLength: 4000, description: 'Поля {номер} {поставщик} {дата} {ожидаем_к} {комментарий} {позиции} {позиций_всего}; {{ и }} — скобки' }
+                lineTemplate: { type: string, minLength: 1, maxLength: 500, description: 'Поля {№} {материал} {количество} {единица} {количество_с_единицей}' }
+      responses:
+        '200':
+          description: changed, шаблон и актуальный список шаблонов
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/supplier-text-templates/{templateId}:
+    parameters:
+      - name: templateId
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1 }
+    patch:
+      tags:
+        - Orders
+      operationId: updateSupplierTextTemplate
+      summary: Изменить шаблон текста поставщику
+      description: >-
+        Нужны procurement.view и procurement.manage (иначе 403 и denied-аудит). Флаг BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED (иначе 503 SUPPLIER_TEXT_TEMPLATES_DISABLED). Аудит без текста шаблона (sha256 и длина). expectedVersion (иначе 409 SUPPLIER_TEXT_TEMPLATE_VERSION_CONFLICT); без изменений — no-op (changed=false).
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [commandKey, expectedVersion]
+              properties:
+                commandKey: { type: string, format: uuid, description: 'Ключ повтора: то же тело — сохранённый результат, другое — 409 IDEMPOTENCY_KEY_REUSED' }
+                expectedVersion: { type: integer, minimum: 1 }
+                name: { type: string, minLength: 1, maxLength: 80 }
+                body: { type: string, minLength: 1, maxLength: 4000, description: 'Поля {номер} {поставщик} {дата} {ожидаем_к} {комментарий} {позиции} {позиций_всего}; {{ и }} — скобки' }
+                lineTemplate: { type: string, minLength: 1, maxLength: 500, description: 'Поля {№} {материал} {количество} {единица} {количество_с_единицей}' }
+      responses:
+        '200':
+          description: changed, шаблон и актуальный список шаблонов
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      tags:
+        - Orders
+      operationId: deleteSupplierTextTemplate
+      summary: Удалить шаблон текста поставщику (мягко)
+      description: >-
+        Нужны procurement.view и procurement.manage (иначе 403 и denied-аудит). Флаг BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED (иначе 503 SUPPLIER_TEXT_TEMPLATES_DISABLED). Аудит без текста шаблона (sha256 и длина). Шаблон по умолчанию и последний не удаляются (409); expectedVersion.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [commandKey, expectedVersion]
+              properties:
+                commandKey: { type: string, format: uuid, description: 'Ключ повтора: то же тело — сохранённый результат, другое — 409 IDEMPOTENCY_KEY_REUSED' }
+                expectedVersion: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: changed, шаблон и актуальный список шаблонов
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/supplier-text-templates/{templateId}/default:
+    parameters:
+      - name: templateId
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1 }
+    post:
+      tags:
+        - Orders
+      operationId: setDefaultSupplierTextTemplate
+      summary: Сделать шаблон по умолчанию
+      description: >-
+        Нужны procurement.view и procurement.manage (иначе 403 и denied-аудит). Флаг BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED (иначе 503 SUPPLIER_TEXT_TEMPLATES_DISABLED). Аудит без текста шаблона (sha256 и длина). Снять у прежнего и поставить новому — одна транзакция, версии обоих +1; expectedVersion назначаемого (устаревшая — 409).
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [commandKey, expectedVersion]
+              properties:
+                commandKey: { type: string, format: uuid, description: 'Ключ повтора: то же тело — сохранённый результат, другое — 409 IDEMPOTENCY_KEY_REUSED' }
+                expectedVersion: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: changed, шаблон и актуальный список шаблонов
           content:
             application/json:
               schema:

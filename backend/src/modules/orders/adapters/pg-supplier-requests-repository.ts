@@ -415,7 +415,7 @@ function dedupeItems(items: Array<{ orderId: number; resourceKey: string }>): Ar
  * Первый шаг команды (R2-6): вставка ключа; конфликт — ждём коммита конкурента и читаем его строку.
  * Тот же пользователь и тело — сохранённый результат (без аудита и событий); иначе 409.
  */
-async function claimCommandKey(tx: DatabaseClient, requestId: string, command: string, userId: number, bodyHash: string): Promise<unknown | null> {
+export async function claimCommandKey(tx: DatabaseClient, requestId: string, command: string, userId: number, bodyHash: string): Promise<unknown | null> {
   const inserted = await tx.query(
     `INSERT INTO procurement_command_keys (request_id, command, user_id, body_hash) VALUES ($1, $2, $3, $4)
      ON CONFLICT (request_id) DO NOTHING`,

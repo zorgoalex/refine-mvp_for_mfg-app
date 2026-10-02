@@ -1,4 +1,4 @@
-import { CopyOutlined, DeleteOutlined } from '@ant-design/icons';
+import { DeleteOutlined } from '@ant-design/icons';
 import { Alert, Button, DatePicker, Drawer, Empty, Input, InputNumber, Modal, Select, Space, Typography, message } from 'antd';
 import { useGetIdentity } from '@refinedev/core';
 import dayjs from 'dayjs';
@@ -28,10 +28,10 @@ import { onecUnitLabel } from '../onec_purchase_documents/onecDocumentsHelpers';
 import { OrderNumber } from '../order_resource_requirements/OrderNumber';
 import { useProcurementPermission } from '../order_resource_requirements/ProcurementParts';
 import { RrScreen } from './RrScreen';
+import { SupplierTextCopy } from './SupplierTextCopy';
 import { useSelect } from '../../ui/refineSelect';
 import {
   buildDraftsBody,
-  buildSupplierCopyText,
   buildUpdatePatchBody,
   canLinkPaymentAmount,
   canSeePayments,
@@ -385,6 +385,8 @@ function SupplierRequestDrawer({ requestId, onClose, onChanged, canManage, manag
   const [busyTransition, setBusyTransition] = useState<'send' | 'close' | 'cancel' | null>(null);
   // Ключ занятой связи (ф.3б) — блокирует конкретную кнопку «Привязать»/«Отвязать», не всю карточку.
   const [linkBusyKey, setLinkBusyKey] = useState<string | null>(null);
+  // Только из GET карточки: ответы команд capabilities не несут.
+  const [textTemplatesCapability, setTextTemplatesCapability] = useState<boolean | undefined>(undefined);
 
   const { selectProps: supplierSelectProps } = useSelect({ resource: 'suppliers', optionLabel: 'supplier_name', optionValue: 'supplier_id' });
 
@@ -403,7 +405,7 @@ function SupplierRequestDrawer({ requestId, onClose, onChanged, canManage, manag
     let alive = true;
     setState({ status: 'loading' });
     supplierRequestsApi.card(requestId)
-      .then((card) => { if (alive) applyCard(card); })
+      .then((card) => { if (alive) { setTextTemplatesCapability(card.capabilities?.supplierTextTemplates); applyCard(card); } })
       .catch((error: unknown) => { if (alive) setState({ status: 'error', message: error instanceof Error ? error.message : 'Не удалось открыть заявку' }); });
     return () => { alive = false; };
   }, [requestId, applyCard]);
@@ -435,7 +437,7 @@ function SupplierRequestDrawer({ requestId, onClose, onChanged, canManage, manag
   const reloadCard = useCallback(async () => {
     if (requestId == null) return;
     const fresh = await supplierRequestsApi.card(requestId);
-    if (aliveRef.current && fresh.requestId === requestId) applyCard(fresh);
+    if (aliveRef.current && fresh.requestId === requestId) { setTextTemplatesCapability(fresh.capabilities?.supplierTextTemplates); applyCard(fresh); }
   }, [requestId, applyCard]);
 
   // «Привязать» (ф.3б): documentId/lineId/allocationId — из выбранного «возможного совпадения», сам заказ строки —
@@ -589,17 +591,6 @@ function SupplierRequestDrawer({ requestId, onClose, onChanged, canManage, manag
     }
   };
 
-  const copyText = async () => {
-    if (!card) return;
-    const text = buildSupplierCopyText(card);
-    try {
-      await navigator.clipboard.writeText(text);
-      message.success('Текст скопирован');
-    } catch {
-      message.error('Не удалось скопировать — браузер отклонил доступ к буферу обмена');
-    }
-  };
-
   // Любые несохранённые правки блокируют «Отправить» (CR3-2): иначе отправилась бы сохранённая версия.
   const dirty = card !== null && (removedLines.size > 0 || hasUnsavedRequestChanges(card, {
     supplierTouched, comment: commentValue, expectedDate: expectedDateValue, lineEdits,
@@ -710,9 +701,7 @@ function SupplierRequestDrawer({ requestId, onClose, onChanged, canManage, manag
               <Button danger loading={busyTransition === 'cancel'} disabled={!canManage || manageLoading} onClick={() => void doTransition('cancel')}>Отменить заявку</Button>
             )}
             {/* Копируется сохранённая заявка — при несохранённых правках текст разошёлся бы с экраном (CR4-3). */}
-            <Tooltip title={dirty ? 'Сначала сохраните изменения' : undefined}>
-              <Button icon={<CopyOutlined />} disabled={dirty} onClick={() => void copyText()}>Скопировать текст для поставщика</Button>
-            </Tooltip>
+            <SupplierTextCopy card={card} capability={textTemplatesCapability} dirty={dirty} />
           </Space>
         </div>
         </RrScreen>

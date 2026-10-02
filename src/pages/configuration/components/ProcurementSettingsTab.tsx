@@ -5,6 +5,7 @@ import { procurementWorkspaceApi } from '../../../api/procurementWorkspaceApi';
 import type { ProcurementSettings } from '../../../api/types/procurementWorkspaceApi.types';
 import { ApiError } from '../../../api/apiError';
 import { can } from '../../../utils/permissions';
+import { SupplierTextTemplatesEditor } from './SupplierTextTemplatesEditor';
 import {
   buildProcurementSettingsUpdate,
   extractProcurementConflictSettings,
@@ -282,6 +283,7 @@ export const ProcurementSettingsTab: React.FC = () => {
           )}
         </Form>
       </Card>
+      <SupplierTextTemplatesEditor />
     </Space>
   );
 };

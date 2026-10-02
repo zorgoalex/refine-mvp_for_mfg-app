@@ -305,6 +305,8 @@ export const envSchema = z
     BACKEND_SUPPLIER_REQUESTS_ENABLED: booleanFromEnv.default(false),
     // Уведомления закупа (экран снабжения, ф.4б): только in_app, правила засеяны выключенными; проверяется при обработке.
     BACKEND_PROCUREMENT_NOTIFICATIONS_ENABLED: booleanFromEnv.default(false),
+    // Шаблоны текста заявки поставщику (миграция 229); выключение — откат функции без заявок.
+    BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED: booleanFromEnv.default(false),
     BACKEND_FILM_CATALOG_IMPORT_ENABLED: booleanFromEnv.default(false),
     BACKEND_INVENTORY_ENABLED: booleanFromEnv.default(false),
     BACKEND_INVENTORY_ONEC_AUTOSYNC: booleanFromEnv.default(false),

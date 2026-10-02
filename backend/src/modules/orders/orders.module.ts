@@ -70,6 +70,9 @@ import { OrdersController } from './http/orders.controller';
 import { OrderHdfSettingsController } from './http/order-hdf-settings.controller';
 import { OrderStatusBoardController } from './http/order-status-board.controller';
 import { OrdersRuntimeConfigService } from './http/orders-runtime-config.service';
+import { PgSupplierTextTemplatesRepository } from './adapters/pg-supplier-text-templates-repository';
+import { SupplierTextTemplatesService } from './application/supplier-text-templates.service';
+import { SupplierTextTemplatesController } from './http/supplier-text-templates.controller';
 import { PgProcurementNotificationsRepository } from './adapters/pg-procurement-notifications-repository';
 import { ProcurementNotificationsService } from './application/procurement-notifications.service';
 import { ProcurementNotificationsSchedulerService } from './application/procurement-notifications-scheduler.service';
@@ -106,8 +109,7 @@ export function shouldEnableOrderDeadlineSync(input: {
     SupplierRequestsController,
     ProcurementWorkspaceController,
     OrderHdfSettingsController,
-    OrdersController,
-  ],
+    OrdersController, SupplierTextTemplatesController],
   providers: [
     OnecDocumentsProcurementConsumer,
     OrdersRuntimeConfigService,
@@ -248,6 +250,12 @@ export function shouldEnableOrderDeadlineSync(input: {
         }));
       },
       inject: [DatabaseService, OrdersRuntimeConfigService],
+    },
+    {
+      provide: SupplierTextTemplatesService,
+      useFactory: (database: DatabaseService) =>
+        new SupplierTextTemplatesService({ repository: new PgSupplierTextTemplatesRepository(database), auditClient: database }),
+      inject: [DatabaseService],
     },
     {
       provide: SupplierRequestsService,
