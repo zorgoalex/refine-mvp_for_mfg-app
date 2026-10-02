@@ -6,17 +6,22 @@ import { createHash } from 'node:crypto';
 
 export type OnecDocKind =
   | 'purchase_receipt' | 'cash_outflow' | 'bank_outflow'
-  | 'sales_shipment' | 'supplier_return' | 'inventory_writeoff' | 'inventory_transfer';
+  | 'sales_shipment' | 'supplier_return' | 'inventory_writeoff' | 'inventory_transfer'
+  | 'customer_order' | 'cash_receipt' | 'bank_receipt' | 'cash_refund' | 'bank_refund';
 export type OnecUnitCode = 'sheet' | 'm2' | 'lm' | 'pcs' | 'set';
 
 /** Виды закупок (потребитель — модуль закупок) и виды расхода (проекция склада), план §3.3. */
 export const PROCUREMENT_DOC_KINDS: readonly OnecDocKind[] = ['purchase_receipt', 'cash_outflow', 'bank_outflow'];
 export const CONSUMPTION_DOC_KINDS: readonly OnecDocKind[] = ['sales_shipment', 'supplier_return', 'inventory_writeoff', 'inventory_transfer'];
-export const ALL_DOC_KINDS: readonly OnecDocKind[] = [...PROCUREMENT_DOC_KINDS, ...CONSUMPTION_DOC_KINDS];
+/** Заказы покупателей, поступления от покупателей и возвраты покупателям (план 2026-10-02 §3.1): потребителей нет. */
+export const CUSTOMER_DOC_KINDS: readonly OnecDocKind[] = ['customer_order', 'cash_receipt', 'bank_receipt', 'cash_refund', 'bank_refund'];
+export const ALL_DOC_KINDS: readonly OnecDocKind[] = [...PROCUREMENT_DOC_KINDS, ...CONSUMPTION_DOC_KINDS, ...CUSTOMER_DOC_KINDS];
 export const DEFAULT_DOC_KINDS = 'purchase_receipt,cash_outflow,bank_outflow';
 
 /** Версия правил нормализации: входит в отпечаток — смена правил переприменяет все документы. */
-export const NORMALIZER_VERSION = 'onec-documents-v2';
+export const NORMALIZER_VERSION = 'onec-documents-v3';
+/** Версия, переход с которой — технический (план 2026-10-02 §3.5): v3 добавляет только новые поля. */
+export const PREVIOUS_NORMALIZER_VERSION = 'onec-documents-v2';
 
 export interface DocumentEntityConfig {
   /** Вид документа по `ВидОперации`; ключ '*' — единственный вид сущности (поле не читается). */
@@ -33,6 +38,14 @@ export interface DocumentEntityConfig {
   destinationWarehouseField: string | null;
   /** Признак складской позиции строки (`ТипНоменклатурыЗапас`); null — все строки складские. */
   stockFlagField: string | null;
+  /** Виды, у которых строки — расшифровка платежа (`РасшифровкаПлатежа`), а не `linesField` (план 2026-10-02 §3.3). */
+  paymentLinesKinds?: readonly OnecDocKind[];
+  /** Вторая ТЧ товарного документа — работы (`Работы` заказа покупателя), нумерация 1 000 000 + LineNumber. */
+  worksField?: string;
+  /** Заказ покупателя шапки (`Заказ` + `Заказ_Type`). */
+  headerOrderField?: string;
+  /** Ответственный шапки (`Ответственный_Key`). */
+  responsibleField?: string;
 }
 
 /**
@@ -41,8 +54,8 @@ export interface DocumentEntityConfig {
  * возвраты, выгруженные агентом, стали бы распределяемыми оплатами закупок.
  */
 const PAYMENT_OUTFLOW_KINDS = {
-  cash: { Поставщику: 'cash_outflow', НаРасходы: 'cash_outflow', Прочее: 'cash_outflow' },
-  bank: { Поставщику: 'bank_outflow', НаРасходы: 'bank_outflow', Прочее: 'bank_outflow' },
+  cash: { Поставщику: 'cash_outflow', НаРасходы: 'cash_outflow', Прочее: 'cash_outflow', Покупателю: 'cash_refund' },
+  bank: { Поставщику: 'bank_outflow', НаРасходы: 'bank_outflow', Прочее: 'bank_outflow', Покупателю: 'bank_refund' },
 } as const satisfies Record<string, Readonly<Record<string, OnecDocKind>>>;
 
 export const DOCUMENT_ENTITIES: Readonly<Record<string, DocumentEntityConfig>> = {
@@ -53,15 +66,32 @@ export const DOCUMENT_ENTITIES: Readonly<Record<string, DocumentEntityConfig>> =
   doc_cash_outflows: {
     kinds: PAYMENT_OUTFLOW_KINDS.cash, linesField: null, currencyField: 'ВалютаДенежныхСредств_Key',
     headerWarehouseField: null, lineWarehouseField: null, destinationWarehouseField: null, stockFlagField: null,
+    paymentLinesKinds: ['cash_refund'],
   },
   doc_bank_outflows: {
     kinds: PAYMENT_OUTFLOW_KINDS.bank, linesField: null, currencyField: 'ВалютаДенежныхСредств_Key',
     headerWarehouseField: null, lineWarehouseField: null, destinationWarehouseField: null, stockFlagField: null,
+    paymentLinesKinds: ['bank_refund'],
   },
   doc_sales_shipments: {
     kinds: { ПродажаПокупателю: 'sales_shipment', ВозвратПоставщику: 'supplier_return' }, linesField: 'Запасы', currencyField: 'ВалютаДокумента_Key',
     headerWarehouseField: 'СтруктурнаяЕдиница_Key', lineWarehouseField: 'СтруктурнаяЕдиница_Key', destinationWarehouseField: null,
-    stockFlagField: 'ТипНоменклатурыЗапас',
+    stockFlagField: 'ТипНоменклатурыЗапас', headerOrderField: 'Заказ', responsibleField: 'Ответственный_Key',
+  },
+  doc_customer_orders: {
+    kinds: { ЗаказНаПродажу: 'customer_order' }, linesField: 'Запасы', worksField: 'Работы', currencyField: 'ВалютаДокумента_Key',
+    headerWarehouseField: 'СтруктурнаяЕдиницаРезерв_Key', lineWarehouseField: 'СтруктурнаяЕдиницаРезерв_Key', destinationWarehouseField: null,
+    stockFlagField: 'ТипНоменклатурыЗапас', responsibleField: 'Ответственный_Key',
+  },
+  doc_cash_receipts: {
+    kinds: { ОтПокупателя: 'cash_receipt' }, linesField: null, currencyField: 'ВалютаДенежныхСредств_Key',
+    headerWarehouseField: null, lineWarehouseField: null, destinationWarehouseField: null, stockFlagField: null,
+    paymentLinesKinds: ['cash_receipt'],
+  },
+  doc_bank_receipts: {
+    kinds: { ОтПокупателя: 'bank_receipt' }, linesField: null, currencyField: 'ВалютаДенежныхСредств_Key',
+    headerWarehouseField: null, lineWarehouseField: null, destinationWarehouseField: null, stockFlagField: null,
+    paymentLinesKinds: ['bank_receipt'],
   },
   doc_inventory_writeoffs: {
     kinds: { '*': 'inventory_writeoff' }, linesField: 'Запасы', currencyField: null,
@@ -81,7 +111,8 @@ export function entityDocKinds(config: DocumentEntityConfig): OnecDocKind[] {
 
 /**
  * Действующие виды (план §3.3, R1-4): список `BACKEND_ONEC_DOCUMENTS_KINDS` ∩ разрешённые. Виды закупок — только при
- * включённом модуле закупок (их потребитель и guard-и); виды расхода от закупок не зависят. Неизвестное имя — ошибка.
+ * включённом модуле закупок (их потребитель и guard-и); виды расхода и покупателей от закупок не зависят. Неизвестное
+ * имя — ошибка.
  */
 export function effectiveDocKinds(listed: string, procurementEnabled: boolean): Set<OnecDocKind> {
   const names = listed.split(',').map((name) => name.trim()).filter(Boolean);
@@ -102,6 +133,24 @@ export const OKEI_UNIT_CODES: Readonly<Record<string, OnecUnitCode>> = {
 const ZERO_GUID = '00000000-0000-0000-0000-000000000000';
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+export interface CustomerOrderAttributes {
+  stateRefKey: string | null;
+  orderKindRefKey: string | null;
+  paymentStatus: string | null;
+  productionStatus: string | null;
+  completionVariant: string | null;
+  deliveryMethod: string | null;
+  shipmentDate: string | null; // YYYY-MM-DD
+  deliveryAddress: string | null;
+  deliveryServiceRefKey: string | null;
+  expectedDeliveryDate: string | null;
+  salesUnitRefKey: string | null;
+  workshopRefKey: string | null;
+  contractRefKey: string | null;
+  /** `ДатаИзменения` заказа — локальное время базы `YYYY-MM-DDTHH:MM:SS`. */
+  onecChangedAtLocal: string | null;
+}
+
 export interface ParsedHeader {
   refKey: string;
   docKind: OnecDocKind;
@@ -119,10 +168,19 @@ export interface ParsedHeader {
   currencyRefKey: string | null;
   amount: string | null; // NUMERIC(14,2) лексема
   comment: string | null;
+  authorRefKey: string | null;
+  responsibleRefKey: string | null;
+  /** Заказ покупателя шапки (план 2026-10-02 §3.2). */
+  onecOrderRefKey: string | null;
+  basis: DocumentRef | null;
+  customerOrder: CustomerOrderAttributes | null;
 }
+
+export type LineSection = 'goods' | 'works' | 'payment' | 'total';
 
 export interface ParsedLine {
   lineNo: number;
+  section: LineSection;
   nomenclatureRefKey: string | null;
   quantity: string; // NUMERIC(14,3)
   unitRefKey: string | null;
@@ -133,6 +191,16 @@ export interface ParsedLine {
   warehouseRefKey: string | null;
   isStockItem: boolean;
   unitIsPackage: boolean;
+  settlementDoc: DocumentRef | null;
+  isAdvance: boolean;
+  content: string | null;
+  lineShipmentDate: string | null;
+}
+
+/** Ссылка на документ 1С: ключ (нижний регистр) и тип без префикса `StandardODATA.` (`Document_РасходнаяНакладная`). */
+export interface DocumentRef {
+  refKey: string;
+  type: string;
 }
 
 export type ParseResult = { ok: true; header: ParsedHeader; lines: ParsedLine[] } | { ok: false; code: string };
@@ -142,6 +210,45 @@ const ref = (value: unknown): string | null => {
   const key = value.trim().toLowerCase();
   return GUID.test(key) && key !== ZERO_GUID ? key : null;
 };
+
+/** Работы заказа: `line_no = WORKS_LINE_BASE + LineNumber`; `LineNumber` любой ТЧ — 1 … MAX_SOURCE_LINE_NUMBER (§3.3). */
+export const WORKS_LINE_BASE = 1_000_000;
+export const MAX_SOURCE_LINE_NUMBER = 999_999;
+const ODATA_PREFIX = 'StandardODATA.';
+const CUSTOMER_ORDER_TYPE = 'StandardODATA.Document_ЗаказПокупателя';
+
+/** Ссылка составного поля (`<поле>` + `<поле>_Type`) — только на документ (`Document_*`); иначе null. */
+function documentRef(row: Record<string, unknown>, field: string): DocumentRef | null {
+  const type = row[`${field}_Type`];
+  if (typeof type !== 'string' || !type.startsWith(`${ODATA_PREFIX}Document_`)) return null;
+  const key = ref(row[field]);
+  return key ? { refKey: key, type: type.slice(ODATA_PREFIX.length) } : null;
+}
+
+/**
+ * Заказ покупателя строки/шапки (план 2026-10-02 §3.2): пара `Заказ` + `Заказ_Type` = `Document_ЗаказПокупателя`;
+ * запасной вариант — `ЗаказПокупателя_Key` (в выгрузке пуст). Заказ поставщику (приходы) — null.
+ */
+function customerOrderRef(row: Record<string, unknown>, field = 'Заказ'): string | null {
+  if (row[`${field}_Type`] === CUSTOMER_ORDER_TYPE) {
+    const key = ref(row[field]);
+    if (key) return key;
+  }
+  return ref(row.ЗаказПокупателя_Key);
+}
+
+/** Дата 1С `YYYY-MM-DD…`; пустая дата 1С (`0001-01-01`) — null. */
+function dateOnly(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const date = value.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) && !date.startsWith('0001-') ? date : null;
+}
+
+function localDateTime(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const at = value.slice(0, 19);
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(at) && !at.startsWith('0001-') ? at : null;
+}
 
 /**
  * Число 1С → лексема с фиксированной точностью, округление половины вверх по цифрам (без двоичной арифметики:
@@ -191,6 +298,108 @@ export function documentKindOf(config: DocumentEntityConfig, data: Record<string
   return docKind ? { ok: true, docKind, refKey } : { ok: false, code: 'UNKNOWN_OPERATION_KIND' };
 }
 
+/** Одна строка-итог оплаты с суммой документа (§4.4 плана закупок; расшифровки нет). */
+function totalLine(amount: string | null): ParsedLine {
+  return {
+    lineNo: 1, section: 'total', nomenclatureRefKey: null, quantity: '0.000', unitRefKey: null, price: null,
+    amount: amount ?? '0.00', onecOrderRefKey: null, isDocumentTotal: true, warehouseRefKey: null, isStockItem: true,
+    unitIsPackage: false, settlementDoc: null, isAdvance: false, content: null, lineShipmentDate: null,
+  };
+}
+
+const sourceLineNumber = (row: Record<string, unknown>): number | null => {
+  const lineNo = Number(row.LineNumber);
+  return Number.isInteger(lineNo) && lineNo >= 1 && lineNo <= MAX_SOURCE_LINE_NUMBER ? lineNo : null;
+};
+
+/** Строки расшифровки платежа (поступления, возвраты): сумма платежа, заказ, документ расчётов, аванс. */
+function paymentLines(raw: unknown, amount: string | null): ParsedLine[] | { code: string } {
+  if (raw === undefined || raw === null) return [totalLine(amount)];
+  if (!Array.isArray(raw)) return { code: 'INVALID_LINES' };
+  if (raw.length === 0) return [totalLine(amount)];
+  const lines: ParsedLine[] = [];
+  const seen = new Set<number>();
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') return { code: 'INVALID_LINES' };
+    const row = item as Record<string, unknown>;
+    const lineNo = sourceLineNumber(row);
+    if (lineNo === null || seen.has(lineNo)) return { code: 'INVALID_LINE_NUMBER' };
+    seen.add(lineNo);
+    const lineAmount = decimalLexeme(row.СуммаПлатежа, 2);
+    if (lineAmount === null) return { code: 'INVALID_AMOUNT' };
+    if (Number(lineAmount) < 0) return { code: 'NEGATIVE_AMOUNT' };
+    lines.push({
+      lineNo, section: 'payment', nomenclatureRefKey: null, quantity: '0.000', unitRefKey: null, price: null, amount: lineAmount,
+      onecOrderRefKey: customerOrderRef(row), isDocumentTotal: false, warehouseRefKey: null, isStockItem: true, unitIsPackage: false,
+      settlementDoc: documentRef(row, 'Документ'), isAdvance: row.ПризнакАванса === true, content: null, lineShipmentDate: null,
+    });
+  }
+  return lines.sort((left, right) => left.lineNo - right.lineNo);
+}
+
+/** Товарные строки (`Запасы`) и работы (`Работы`, номер 1 000 000 + LineNumber). */
+function goodsLines(config: DocumentEntityConfig, raw: unknown, section: 'goods' | 'works', headerWarehouse: string | null): ParsedLine[] | { code: string } {
+  if (!Array.isArray(raw)) return { code: 'INVALID_LINES' };
+  const lines: ParsedLine[] = [];
+  const seen = new Set<number>();
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') return { code: 'INVALID_LINES' };
+    const row = item as Record<string, unknown>;
+    const sourceNo = sourceLineNumber(row);
+    if (sourceNo === null || seen.has(sourceNo)) return { code: 'INVALID_LINE_NUMBER' };
+    seen.add(sourceNo);
+    const quantity = decimalLexeme(row.Количество, 3);
+    if (quantity === null || Number(quantity) < 0) return { code: 'INVALID_QUANTITY' };
+    const lineAmount = decimalLexeme(row.Всего, 2);
+    if (lineAmount !== null && Number(lineAmount) < 0) return { code: 'NEGATIVE_AMOUNT' };
+    // Номенклатура заказа покупателя — составное поле (`Номенклатура` + `_Type`), у остальных документов — `_Key`.
+    const nomenclature = ref(row.Номенклатура_Key)
+      ?? (typeof row.Номенклатура_Type === 'string' && row.Номенклатура_Type.endsWith('Catalog_Номенклатура') ? ref(row.Номенклатура) : null);
+    lines.push({
+      lineNo: section === 'works' ? WORKS_LINE_BASE + sourceNo : sourceNo,
+      section,
+      nomenclatureRefKey: nomenclature,
+      quantity,
+      unitRefKey: ref(row.ЕдиницаИзмерения),
+      price: decimalLexeme(row.Цена, 2),
+      amount: lineAmount,
+      onecOrderRefKey: customerOrderRef(row),
+      isDocumentTotal: false,
+      // Склад строки; у перемещения склада в строке нет — склад-источник шапки.
+      warehouseRefKey: (config.lineWarehouseField ? ref(row[config.lineWarehouseField]) : null) ?? headerWarehouse,
+      // Услуги/работы (`ТипНоменклатурыЗапас = false`, ТЧ «Работы») — не складской расход.
+      isStockItem: section === 'works' ? false : config.stockFlagField ? row[config.stockFlagField] !== false : true,
+      // Единица не из классификатора — единица упаковки: в OData она `UnavailableEntity_…` (справочник
+      // `Catalog_ЕдиницыИзмерения` не опубликован), коэффициент неизвестен.
+      unitIsPackage: typeof row.ЕдиницаИзмерения_Type === 'string' && !row.ЕдиницаИзмерения_Type.endsWith('Catalog_КлассификаторЕдиницИзмерения'),
+      settlementDoc: null,
+      isAdvance: false,
+      content: text(row.Содержание),
+      lineShipmentDate: dateOnly(row.ДатаОтгрузки),
+    });
+  }
+  return lines;
+}
+
+function customerOrderAttributes(data: Record<string, unknown>): CustomerOrderAttributes {
+  return {
+    stateRefKey: ref(data.СостояниеЗаказа),
+    orderKindRefKey: ref(data.ВидЗаказа),
+    paymentStatus: text(data.Оплата),
+    productionStatus: text(data.ПроизводственныйСтатус),
+    completionVariant: text(data.ВариантЗавершения),
+    deliveryMethod: text(data.СпособДоставки),
+    shipmentDate: dateOnly(data.ДатаОтгрузки),
+    deliveryAddress: text(data.АдресДоставки),
+    deliveryServiceRefKey: ref(data.СлужбаДоставки_Key),
+    expectedDeliveryDate: dateOnly(data.ОжидаемаяДатаВручения),
+    salesUnitRefKey: ref(data.СтруктурнаяЕдиницаПродажи_Key),
+    workshopRefKey: ref(data.Цех_Key),
+    contractRefKey: ref(data.Договор_Key),
+    onecChangedAtLocal: localDateTime(data.ДатаИзменения),
+  };
+}
+
 /** Разбор строки копии документа. Ошибка — документ не загружается (код в итоге прохода). */
 export function parseDocument(config: DocumentEntityConfig, data: Record<string, unknown>): ParseResult {
   const refKey = ref(data.Ref_Key);
@@ -222,48 +431,27 @@ export function parseDocument(config: DocumentEntityConfig, data: Record<string,
     currencyRefKey: config.currencyField ? ref(data[config.currencyField]) : null,
     amount,
     comment: text(data.Комментарий),
+    authorRefKey: ref(data.Автор_Key),
+    responsibleRefKey: config.responsibleField ? ref(data[config.responsibleField]) : null,
+    onecOrderRefKey: config.headerOrderField ? customerOrderRef(data, config.headerOrderField) : null,
+    basis: documentRef(data, 'ДокументОснование'),
+    customerOrder: docKind === 'customer_order' ? customerOrderAttributes(data) : null,
   };
-  if (config.linesField === null) {
-    // Оплата (§4.4 плана закупок): одна строка-итог с суммой документа, количество 0.
-    return { ok: true, header, lines: [{
-      lineNo: 1, nomenclatureRefKey: null, quantity: '0.000', unitRefKey: null, price: null,
-      amount: amount ?? '0.00', onecOrderRefKey: null, isDocumentTotal: true,
-      warehouseRefKey: null, isStockItem: true, unitIsPackage: false,
-    }] };
+  if (config.paymentLinesKinds?.includes(docKind)) {
+    const lines = paymentLines(data.РасшифровкаПлатежа, amount);
+    return Array.isArray(lines) ? { ok: true, header, lines } : { ok: false, code: lines.code };
   }
-  const raw = data[config.linesField];
-  if (!Array.isArray(raw)) return { ok: false, code: 'INVALID_LINES' };
-  const lines: ParsedLine[] = [];
-  const seen = new Set<number>();
-  for (const item of raw) {
-    if (!item || typeof item !== 'object') return { ok: false, code: 'INVALID_LINES' };
-    const row = item as Record<string, unknown>;
-    const lineNo = Number(row.LineNumber);
-    if (!Number.isInteger(lineNo) || lineNo < 1 || seen.has(lineNo)) return { ok: false, code: 'INVALID_LINE_NUMBER' };
-    seen.add(lineNo);
-    const quantity = decimalLexeme(row.Количество, 3);
-    if (quantity === null || Number(quantity) < 0) return { ok: false, code: 'INVALID_QUANTITY' };
-    const lineAmount = decimalLexeme(row.Всего, 2);
-    if (lineAmount !== null && Number(lineAmount) < 0) return { ok: false, code: 'NEGATIVE_AMOUNT' };
-    lines.push({
-      lineNo,
-      nomenclatureRefKey: ref(row.Номенклатура_Key),
-      quantity,
-      unitRefKey: ref(row.ЕдиницаИзмерения),
-      price: decimalLexeme(row.Цена, 2),
-      amount: lineAmount,
-      onecOrderRefKey: ref(row.ЗаказПокупателя_Key),
-      isDocumentTotal: false,
-      // Склад строки; у перемещения склада в строке нет — склад-источник шапки.
-      warehouseRefKey: (config.lineWarehouseField ? ref(row[config.lineWarehouseField]) : null) ?? headerWarehouse,
-      // Услуги/работы расходной накладной (`ТипНоменклатурыЗапас = false`) — не складской расход.
-      isStockItem: config.stockFlagField ? row[config.stockFlagField] !== false : true,
-      // Единица не из классификатора — единица упаковки: в OData она `UnavailableEntity_…` (справочник
-      // `Catalog_ЕдиницыИзмерения` не опубликован), коэффициент неизвестен.
-      unitIsPackage: typeof row.ЕдиницаИзмерения_Type === 'string' && !row.ЕдиницаИзмерения_Type.endsWith('Catalog_КлассификаторЕдиницИзмерения'),
-    });
+  // Оплата закупок (§4.4 плана закупок): одна строка-итог с суммой документа, количество 0.
+  if (config.linesField === null) return { ok: true, header, lines: [totalLine(amount)] };
+  const goods = goodsLines(config, data[config.linesField], 'goods', headerWarehouse);
+  if (!Array.isArray(goods)) return { ok: false, code: goods.code };
+  let works: ParsedLine[] = [];
+  if (config.worksField && data[config.worksField] !== undefined && data[config.worksField] !== null) {
+    const parsed = goodsLines(config, data[config.worksField], 'works', headerWarehouse);
+    if (!Array.isArray(parsed)) return { ok: false, code: parsed.code };
+    works = parsed;
   }
-  lines.sort((left, right) => left.lineNo - right.lineNo);
+  const lines = [...goods, ...works].sort((left, right) => left.lineNo - right.lineNo);
   return { ok: true, header, lines };
 }
 
@@ -279,10 +467,22 @@ export interface ReferenceData {
   currencies: ReadonlyMap<string, string>;
   /** Часовой пояс информационной базы источника (`onec_sources.time_zone`) — для `doc_at`. */
   timeZone: string;
+  /** Имена справочников 1С (план 2026-10-02 §3.4): пользователи, сотрудники, состояния/виды заказов, службы доставки. */
+  userNames: ReadonlyMap<string, string>;
+  employeeNames: ReadonlyMap<string, string>;
+  orderStateNames: ReadonlyMap<string, string>;
+  orderKindNames: ReadonlyMap<string, string>;
+  deliveryServiceNames: ReadonlyMap<string, string>;
 }
 
 /** Виды без валюты документа. */
 const NO_CURRENCY_KINDS: ReadonlySet<OnecDocKind> = new Set(['inventory_writeoff', 'inventory_transfer']);
+
+export interface TargetCustomerOrder extends CustomerOrderAttributes {
+  stateName: string | null;
+  orderKindName: string | null;
+  deliveryServiceName: string | null;
+}
 
 export interface TargetHeader {
   docKind: OnecDocKind;
@@ -303,10 +503,19 @@ export interface TargetHeader {
   comment: string | null;
   missingInSource: boolean;
   mappingIssue: string | null;
+  authorRefKey: string | null;
+  authorName: string | null;
+  responsibleRefKey: string | null;
+  responsibleName: string | null;
+  onecOrderRefKey: string | null;
+  basisRefKey: string | null;
+  basisType: string | null;
+  customerOrder: TargetCustomerOrder | null;
 }
 
 export interface TargetLine {
   lineNo: number;
+  section: LineSection;
   nomenclatureRefKey: string | null;
   nomenclatureName: string | null;
   quantity: string;
@@ -322,9 +531,16 @@ export interface TargetLine {
   warehouseRefKey: string | null;
   isStockItem: boolean;
   unitIsPackage: boolean;
+  settlementDocRefKey: string | null;
+  settlementDocType: string | null;
+  isAdvance: boolean;
+  content: string | null;
+  lineShipmentDate: string | null;
 }
 
 export type TargetResult = { ok: true; header: TargetHeader; lines: TargetLine[]; fingerprint: string } | { ok: false; code: string };
+
+const nameOf = (names: ReadonlyMap<string, string>, key: string | null): string | null => (key ? names.get(key) ?? null : null);
 
 /**
  * Целевое состояние документа. Сопоставление материала — только при единственном кандидате среди листовых
@@ -342,6 +558,7 @@ export function buildTarget(
   const currency = noCurrency ? null : header.currencyRefKey ? refs.currencies.get(header.currencyRefKey) ?? null : null;
   if (!noCurrency && !currency) return { ok: false, code: 'UNKNOWN_CURRENCY' };
   const supplierCandidates = header.counterpartyRefKey ? refs.suppliers.get(header.counterpartyRefKey) ?? [] : [];
+  const order = header.customerOrder;
   const targetHeader: TargetHeader = {
     docKind: header.docKind,
     operationKind: header.operationKind,
@@ -361,6 +578,19 @@ export function buildTarget(
     comment: header.comment,
     missingInSource,
     mappingIssue: supplierCandidates.length > 1 ? 'ambiguous_supplier' : null,
+    authorRefKey: header.authorRefKey,
+    authorName: nameOf(refs.userNames, header.authorRefKey),
+    responsibleRefKey: header.responsibleRefKey,
+    responsibleName: nameOf(refs.employeeNames, header.responsibleRefKey),
+    onecOrderRefKey: header.onecOrderRefKey,
+    basisRefKey: header.basis?.refKey ?? null,
+    basisType: header.basis?.type ?? null,
+    customerOrder: order === null ? null : {
+      ...order,
+      stateName: nameOf(refs.orderStateNames, order.stateRefKey),
+      orderKindName: nameOf(refs.orderKindNames, order.orderKindRefKey),
+      deliveryServiceName: nameOf(refs.deliveryServiceNames, order.deliveryServiceRefKey),
+    },
   };
   const lines = parsed.lines.map((line): TargetLine => {
     const unit = line.unitRefKey ? refs.units.get(line.unitRefKey) : undefined;
@@ -369,6 +599,7 @@ export function buildTarget(
     const candidates = sheets.length + films.length;
     return {
       lineNo: line.lineNo,
+      section: line.section,
       nomenclatureRefKey: line.nomenclatureRefKey,
       nomenclatureName: line.nomenclatureRefKey ? refs.itemNames.get(line.nomenclatureRefKey) ?? null : null,
       quantity: line.quantity,
@@ -384,10 +615,39 @@ export function buildTarget(
       warehouseRefKey: line.warehouseRefKey,
       isStockItem: line.isStockItem,
       unitIsPackage: line.unitIsPackage,
+      settlementDocRefKey: line.settlementDoc?.refKey ?? null,
+      settlementDocType: line.settlementDoc?.type ?? null,
+      isAdvance: line.isAdvance,
+      content: line.content,
+      lineShipmentDate: line.lineShipmentDate,
     };
   });
   const fingerprint = createHash('sha256')
     .update(JSON.stringify({ v: NORMALIZER_VERSION, header: targetHeader, lines }))
     .digest('hex');
   return { ok: true, header: targetHeader, lines, fingerprint };
+}
+
+/** Ссылки 1С документа для аудита (план 2026-10-02 §10, R1-3): заказ (шапка и строки), документ зачёта, основание. */
+export interface AuditOnecRef {
+  role: 'customer_order' | 'settlement_doc' | 'basis';
+  refKey: string;
+  type: string | null;
+}
+
+export function auditRefsOf(
+  header: { onecOrderRefKey: string | null; basisRefKey: string | null; basisType: string | null },
+  lines: ReadonlyArray<{ onecOrderRefKey: string | null; settlementDocRefKey: string | null; settlementDocType: string | null }>,
+): AuditOnecRef[] {
+  const refs = new Map<string, AuditOnecRef>();
+  const add = (role: AuditOnecRef['role'], refKey: string | null, type: string | null) => {
+    if (refKey) refs.set(`${role}:${refKey}`, { role, refKey, type });
+  };
+  add('customer_order', header.onecOrderRefKey, 'Document_ЗаказПокупателя');
+  add('basis', header.basisRefKey, header.basisType);
+  for (const line of lines) {
+    add('customer_order', line.onecOrderRefKey, 'Document_ЗаказПокупателя');
+    add('settlement_doc', line.settlementDocRefKey, line.settlementDocType);
+  }
+  return [...refs.values()].sort((left, right) => `${left.role}:${left.refKey}`.localeCompare(`${right.role}:${right.refKey}`));
 }

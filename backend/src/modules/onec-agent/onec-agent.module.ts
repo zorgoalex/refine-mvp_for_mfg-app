@@ -65,6 +65,6 @@ import { OnecCatalogReader } from './onec-catalog-reader';
     OnecCatalogReader,
   ],
   // Port for business modules (E4): OnecCommandsService.enqueue(tx, …).
-  exports: [OnecCommandsService, OnecCatalogReader, OnecEtlEvents, OnecAlertsPort],
+  exports: [OnecCommandsService, OnecCatalogReader, OnecEtlEvents, OnecAlertsPort, OnecRuntimeConfigService],
 })
 export class OnecAgentModule {}

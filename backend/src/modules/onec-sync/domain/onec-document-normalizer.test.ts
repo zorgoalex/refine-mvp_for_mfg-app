@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildTarget, decimalLexeme, documentKindOf, DOCUMENT_ENTITIES, effectiveDocKinds, entityDocKinds, parseDocument, type ReferenceData } from './onec-document-normalizer';
+import { auditRefsOf, buildTarget, decimalLexeme, documentKindOf, DOCUMENT_ENTITIES, effectiveDocKinds, entityDocKinds, parseDocument, type ReferenceData } from './onec-document-normalizer';
 
 const REF = '11111111-1111-1111-1111-111111111111';
 const CUR = '22222222-2222-2222-2222-222222222222';
@@ -24,6 +24,11 @@ const refs = (overrides: Partial<ReferenceData> = {}): ReferenceData => ({
   films: new Map(),
   currencies: new Map([[CUR, 'KZT']]),
   timeZone: 'Asia/Almaty',
+  userNames: new Map(),
+  employeeNames: new Map(),
+  orderStateNames: new Map(),
+  orderKindNames: new Map(),
+  deliveryServiceNames: new Map(),
   ...overrides,
 });
 
@@ -39,19 +44,21 @@ describe('1C document normalizer', () => {
   it('turns a payment into one document-total line with the document amount', () => {
     const parsed = parseDocument(DOCUMENT_ENTITIES.doc_cash_outflows, { Ref_Key: REF, Number: 'К-1', Date: '2024-01-02T00:00:00', Posted: true,
       DeletionMark: false, ВидОперации: 'Поставщику', ВалютаДенежныхСредств_Key: CUR, СуммаДокумента: 50 });
-    expect(parsed.ok && parsed.lines).toEqual([{ lineNo: 1, nomenclatureRefKey: null, quantity: '0.000', unitRefKey: null, price: null,
-      amount: '50.00', onecOrderRefKey: null, isDocumentTotal: true, warehouseRefKey: null, isStockItem: true, unitIsPackage: false }]);
+    expect(parsed.ok && parsed.lines).toEqual([{ lineNo: 1, section: 'total', nomenclatureRefKey: null, quantity: '0.000', unitRefKey: null, price: null,
+      amount: '50.00', onecOrderRefKey: null, isDocumentTotal: true, warehouseRefKey: null, isStockItem: true, unitIsPackage: false,
+      settlementDoc: null, isAdvance: false, content: null, lineShipmentDate: null }]);
   });
 
-  it('payments: only procurement operations are outflows; a refund to a customer or a missing operation is refused', () => {
+  it('payments: procurement operations are outflows, a refund to a customer is its own kind, anything else is refused', () => {
     const payment = (extra: Record<string, unknown>) => ({ Ref_Key: REF, Number: 'К-1', Date: '2024-01-02T00:00:00', Posted: true,
       DeletionMark: false, ВалютаДенежныхСредств_Key: CUR, СуммаДокумента: 50, ...extra });
-    for (const [entity, kind] of [['doc_cash_outflows', 'cash_outflow'], ['doc_bank_outflows', 'bank_outflow']] as const) {
+    for (const [entity, kind, refund] of [['doc_cash_outflows', 'cash_outflow', 'cash_refund'], ['doc_bank_outflows', 'bank_outflow', 'bank_refund']] as const) {
       for (const operation of ['Поставщику', 'НаРасходы', 'Прочее']) {
         expect(parseDocument(DOCUMENT_ENTITIES[entity], payment({ ВидОперации: operation }))).toMatchObject({ ok: true, header: { docKind: kind } });
       }
-      expect(entityDocKinds(DOCUMENT_ENTITIES[entity])).toEqual([kind]);
-      for (const extra of [{ ВидОперации: 'Покупателю' }, { ВидОперации: 'ВозвратПокупателю' }, { ВидОперации: 'constructor' }, { ВидОперации: 'toString' }, {}]) {
+      expect(parseDocument(DOCUMENT_ENTITIES[entity], payment({ ВидОперации: 'Покупателю' }))).toMatchObject({ ok: true, header: { docKind: refund } });
+      expect(entityDocKinds(DOCUMENT_ENTITIES[entity])).toEqual([kind, refund].sort());
+      for (const extra of [{ ВидОперации: 'ВозвратПокупателю' }, { ВидОперации: 'constructor' }, { ВидОперации: 'toString' }, {}]) {
         expect(parseDocument(DOCUMENT_ENTITIES[entity], payment(extra))).toEqual({ ok: false, code: 'UNKNOWN_OPERATION_KIND' });
         expect(documentKindOf(DOCUMENT_ENTITIES[entity], payment(extra))).toEqual({ ok: false, code: 'UNKNOWN_OPERATION_KIND' });
       }
@@ -183,4 +190,105 @@ describe('1C document normalizer', () => {
       expect(() => effectiveDocKinds('purchase_receipt, shipments', true)).toThrow('shipments');
     });
   });
+
+  describe('customer documents (plan 2026-10-02)', () => {
+    const ORDER = '66666666-6666-6666-6666-666666666666';
+    const SHIP = '77777777-7777-7777-7777-777777777777';
+    const AUTHOR = '88888888-8888-8888-8888-888888888888';
+    const EMPLOYEE = '99999999-9999-9999-9999-999999999999';
+    const STATE = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    const orderRef = (ref: string, type = 'StandardODATA.Document_ЗаказПокупателя') => ({ Заказ: ref, Заказ_Type: type });
+    const base = (extra: Record<string, unknown>) => ({ Ref_Key: REF, Number: 'Ф25-2994', Date: '2026-10-01T14:16:01', Posted: true,
+      DeletionMark: false, Контрагент_Key: CP, ВалютаДокумента_Key: CUR, ВалютаДенежныхСредств_Key: CUR, СуммаДокумента: 1600, Автор_Key: AUTHOR, ...extra });
+    const named = refs({
+      userNames: new Map([[AUTHOR, 'Куннур Т']]), employeeNames: new Map([[EMPLOYEE, 'Асем']]),
+      orderStateNames: new Map([[STATE, 'В работе']]),
+    });
+
+    it('customer order: goods and works sections, compound nomenclature, delivery, state and author names', () => {
+      const parsed = parseDocument(DOCUMENT_ENTITIES.doc_customer_orders, base({
+        ВидОперации: 'ЗаказНаПродажу', Ответственный_Key: EMPLOYEE, СостояниеЗаказа: STATE, Оплата: 'Оплачен', СпособДоставки: 'Курьер',
+        ДатаОтгрузки: '2026-10-05T00:00:00', ОжидаемаяДатаВручения: '0001-01-01T00:00:00', АдресДоставки: ' Байтурсынова 36 ',
+        ДатаИзменения: '2026-10-01T15:00:00', ДокументОснование: SHIP, ДокументОснование_Type: 'StandardODATA.Document_СчетНаОплату',
+        Запасы: [{ LineNumber: '1', Номенклатура: ITEM.toUpperCase(), Номенклатура_Type: 'StandardODATA.Catalog_Номенклатура', Количество: 1,
+          ЕдиницаИзмерения: UNIT, ЕдиницаИзмерения_Type: 'StandardODATA.Catalog_КлассификаторЕдиницИзмерения', Цена: 1600, Всего: 1600,
+          Содержание: '', ДатаОтгрузки: '2026-10-05T00:00:00', ТипНоменклатурыЗапас: false }],
+        Работы: [{ LineNumber: '1', Номенклатура: ITEM, Номенклатура_Type: 'StandardODATA.Catalog_Номенклатура', Количество: 2, Цена: 10, Всего: 20,
+          Содержание: 'Монтаж' }],
+      }));
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      expect(parsed.header).toMatchObject({ docKind: 'customer_order', authorRefKey: AUTHOR, responsibleRefKey: EMPLOYEE,
+        basis: { refKey: SHIP, type: 'Document_СчетНаОплату' } });
+      expect(parsed.lines.map((l) => [l.lineNo, l.section, l.nomenclatureRefKey, l.isStockItem, l.content, l.lineShipmentDate])).toEqual([
+        [1, 'goods', ITEM, false, null, '2026-10-05'], [1_000_001, 'works', ITEM, false, 'Монтаж', null]]);
+      const target = buildTarget(parsed, named, false);
+      expect(target.ok && target.header).toMatchObject({ authorName: 'Куннур Т', responsibleName: 'Асем', customerOrder: {
+        stateName: 'В работе', paymentStatus: 'Оплачен', deliveryMethod: 'Курьер', shipmentDate: '2026-10-05', expectedDeliveryDate: null,
+        deliveryAddress: 'Байтурсынова 36', onecChangedAtLocal: '2026-10-01T15:00:00' } });
+    });
+
+    it('source line numbers are bounded so goods and works never collide', () => {
+      const order = (goods: number, works: number) => parseDocument(DOCUMENT_ENTITIES.doc_customer_orders, base({ ВидОперации: 'ЗаказНаПродажу',
+        Запасы: [{ LineNumber: String(goods), Количество: 1 }], Работы: [{ LineNumber: String(works), Количество: 1 }] }));
+      const ok = order(999_999, 999_999);
+      expect(ok.ok && ok.lines.map((l) => l.lineNo)).toEqual([999_999, 1_999_999]);
+      expect(order(1_000_000, 1)).toEqual({ ok: false, code: 'INVALID_LINE_NUMBER' });
+      expect(order(1, 1_000_000)).toEqual({ ok: false, code: 'INVALID_LINE_NUMBER' });
+      expect(order(0, 1)).toEqual({ ok: false, code: 'INVALID_LINE_NUMBER' });
+    });
+
+    it('receipt: one line per payment breakdown row with order, settlement document and advance; empty breakdown → total line', () => {
+      const parsed = parseDocument(DOCUMENT_ENTITIES.doc_bank_receipts, base({ ВидОперации: 'ОтПокупателя', РасшифровкаПлатежа: [
+        { LineNumber: '2', ...orderRef(ORDER), Документ: SHIP, Документ_Type: 'StandardODATA.Document_РасходнаяНакладная', СуммаПлатежа: 1000, ПризнакАванса: false },
+        { LineNumber: '1', ...orderRef(ORDER), Документ: ZERO, Документ_Type: 'StandardODATA.Undefined', СуммаПлатежа: 600, ПризнакАванса: true },
+      ] }));
+      expect(parsed.ok && parsed.header.docKind).toBe('bank_receipt');
+      expect(parsed.ok && parsed.lines.map((l) => [l.lineNo, l.section, l.amount, l.onecOrderRefKey, l.settlementDoc, l.isAdvance])).toEqual([
+        [1, 'payment', '600.00', ORDER, null, true],
+        [2, 'payment', '1000.00', ORDER, { refKey: SHIP, type: 'Document_РасходнаяНакладная' }, false]]);
+      const empty = parseDocument(DOCUMENT_ENTITIES.doc_cash_receipts, base({ ВидОперации: 'ОтПокупателя', РасшифровкаПлатежа: [] }));
+      expect(empty.ok && empty.lines.map((l) => [l.section, l.amount, l.isDocumentTotal])).toEqual([['total', '1600.00', true]]);
+      expect(parseDocument(DOCUMENT_ENTITIES.doc_cash_receipts, base({ ВидОперации: 'ОтПокупателя', РасшифровкаПлатежа: [
+        { LineNumber: '1', СуммаПлатежа: -1 }] }))).toEqual({ ok: false, code: 'NEGATIVE_AMOUNT' });
+      // Procurement payments keep the single total line even when 1C sends a breakdown.
+      const supplier = parseDocument(DOCUMENT_ENTITIES.doc_cash_outflows, base({ ВидОперации: 'Поставщику', РасшифровкаПлатежа: [
+        { LineNumber: '1', СуммаПлатежа: 5 }] }));
+      expect(supplier.ok && supplier.lines.map((l) => [l.section, l.amount])).toEqual([['total', '1600.00']]);
+      const refund = parseDocument(DOCUMENT_ENTITIES.doc_cash_outflows, base({ ВидОперации: 'Покупателю', РасшифровкаПлатежа: [
+        { LineNumber: '1', ...orderRef(ORDER), СуммаПлатежа: 5 }] }));
+      expect(refund.ok && refund.lines.map((l) => [l.section, l.amount, l.onecOrderRefKey])).toEqual([['payment', '5.00', ORDER]]);
+    });
+
+    it('shipment order link comes from Заказ + Заказ_Type; a supplier order or Undefined is not a customer order', () => {
+      const ship = (extra: Record<string, unknown>, lineExtra: Record<string, unknown>) => parseDocument(DOCUMENT_ENTITIES.doc_sales_shipments,
+        base({ ВидОперации: 'ПродажаПокупателю', СтруктурнаяЕдиница_Key: UNIT, ...extra, Запасы: [line({ ...lineExtra })] }));
+      const linked = ship(orderRef(ORDER), orderRef(ORDER.toUpperCase()));
+      expect(linked.ok && [linked.header.onecOrderRefKey, linked.lines[0].onecOrderRefKey]).toEqual([ORDER, ORDER]);
+      const supplier = ship(orderRef(ORDER, 'StandardODATA.Document_ЗаказПоставщику'), orderRef(ORDER, 'StandardODATA.Document_ЗаказПоставщику'));
+      expect(supplier.ok && [supplier.header.onecOrderRefKey, supplier.lines[0].onecOrderRefKey]).toEqual([null, null]);
+      const undef = ship({}, { Заказ: ZERO, Заказ_Type: 'StandardODATA.Undefined' });
+      expect(undef.ok && undef.lines[0].onecOrderRefKey).toBeNull();
+      // Purchase receipts: Заказ is a supplier order — the line keeps ЗаказПокупателя_Key semantics (still null here).
+      const purchase = parseDocument(DOCUMENT_ENTITIES.doc_purchase_receipts, receipt([line(orderRef(ORDER, 'StandardODATA.Document_ЗаказПоставщику'))]));
+      expect(purchase.ok && purchase.lines[0].onecOrderRefKey).toBeNull();
+    });
+
+    it('audit refs: unique customer orders, settlement documents and basis of header and lines', () => {
+      expect(auditRefsOf({ onecOrderRefKey: ORDER, basisRefKey: SHIP, basisType: 'Document_ЗаказПокупателя' }, [
+        { onecOrderRefKey: ORDER, settlementDocRefKey: SHIP, settlementDocType: 'Document_РасходнаяНакладная' },
+        { onecOrderRefKey: null, settlementDocRefKey: null, settlementDocType: null },
+      ])).toEqual([
+        { role: 'basis', refKey: SHIP, type: 'Document_ЗаказПокупателя' },
+        { role: 'customer_order', refKey: ORDER, type: 'Document_ЗаказПокупателя' },
+        { role: 'settlement_doc', refKey: SHIP, type: 'Document_РасходнаяНакладная' },
+      ]);
+    });
+
+    it('effective kinds: customer kinds do not depend on procurement', () => {
+      expect([...effectiveDocKinds('customer_order,cash_receipt,bank_receipt,cash_refund,bank_refund', false)])
+        .toEqual(['customer_order', 'cash_receipt', 'bank_receipt', 'cash_refund', 'bank_refund']);
+    });
+  });
 });
+

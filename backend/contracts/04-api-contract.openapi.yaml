@@ -18068,6 +18068,62 @@ paths:
         '403': {description: Permission denied}
         '404': {description: Agent not found}
         '503': {description: 1C integration is disabled}
+  /api/v1/onec/customer-orders:
+    get:
+      tags:
+        - 1C integration
+      operationId: listOnecCustomerOrders
+      summary: "1C customer orders with paid/shipped totals in the order currency (links resolved at read time)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: search, in: query, required: false, schema: {type: string, maxLength: 100}, description: Number or counterparty substring}
+        - {name: from, in: query, required: false, schema: {type: string, format: date}}
+        - {name: to, in: query, required: false, schema: {type: string, format: date}}
+        - {name: stateRefKey, in: query, required: false, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0, default: 0}}
+      responses:
+        '200': {description: "{total, limit, offset, states[{refKey,name,count}], items[]}; paid = posted receipts − refunds, shipped = posted shipment lines (NUMERIC strings)"}
+        '400': {description: Invalid filter}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+  /api/v1/onec/customer-orders/{documentId}:
+    get:
+      tags:
+        - 1C integration
+      operationId: getOnecCustomerOrder
+      summary: "1C customer order: header, authors, delivery, goods/works lines, linked receipts/refunds and shipments"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: documentId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: "Order with payments[] and shipments[] (each with settlements[]; unresolved 1C refs have documentId null)"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {description: Not a loaded 1C customer order}
+        '503': {description: 1C integration is disabled}
+  /api/v1/onec/documents/{documentId}/links:
+    get:
+      tags:
+        - 1C integration
+      operationId: getOnecDocumentLinks
+      summary: "Links of a 1C document: referenced customer orders and settlement documents, documents settled by it"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: documentId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: "{orders[], settlements[], basis, settledBy[]}"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {description: 1C document not found}
+        '503': {description: 1C integration is disabled}
   /api/v1/onec/incidents:
     get:
       tags:

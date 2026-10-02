@@ -21,7 +21,8 @@ describe('216 1C consumption documents migration', () => {
 
   it('probes the new objects before recording the ledger', () => {
     expect(runner).toContain('216_onec_consumption_documents*) probe_all');
-    expect(runner).toContain('q_con_on onec_documents chk_onec_documents_kind_v2');
+    // END-state: 227 replaces kind_v2 by kind_v3 — either one means 216 is applied (a rerun would restore the narrower v2).
+    expect(runner).toContain("conname IN ('chk_onec_documents_kind_v2','chk_onec_documents_kind_v3')");
     expect(runner).toContain('q_col onec_documents doc_at');
     expect(runner).toContain('q_col onec_sources time_zone');
     const verify = runner.slice(runner.indexOf('verify_applied_effect() {'));

@@ -7,7 +7,7 @@ import type { DatabaseClient } from '../../../database/database.types';
 import { OnecAlertsPort } from '../../onec-agent/application/onec-alerts-port';
 import { OnecEtlEvents, type EntitiesPublished } from '../../onec-agent/application/onec-etl-events';
 import { OnecCatalogReader } from '../../onec-agent/onec-catalog-reader';
-import { PgOnecDocumentsLoaderRepository, type LoadContext } from '../adapters/pg-onec-documents-loader-repository';
+import { passDecision, PgOnecDocumentsLoaderRepository, type LoadContext } from '../adapters/pg-onec-documents-loader-repository';
 import { DEFAULT_DOC_KINDS, DOCUMENT_ENTITIES, effectiveDocKinds, entityDocKinds, type OnecDocKind } from '../domain/onec-document-normalizer';
 import { OnecDocumentsEvents } from './onec-documents-events';
 import { OnecDocumentConsumers } from './onec-document-consumers';
@@ -196,13 +196,23 @@ export class OnecDocumentsLoaderService implements OnModuleInit, OnModuleDestroy
       for (const key of keys) {
         const row = rows.get(key);
         const preview = row ? this.repository.previewFingerprint(ctx, row.data, row.missing, refs) : null;
-        if (preview && !enabledKinds.has(preview.docKind)) { result.skipped += 1; continue; }
-        const known = preview ? stored.get(preview.refKey) : undefined;
-        if (preview && known && known.observed === preview.fingerprint && !known.blocking) { result.unchanged += 1; continue; }
+        if (preview) {
+          // Отбор по виду (план 2026-10-02 §3.6): документ другого вида того же ключа, ждущий снятия, всегда идёт в транзакцию.
+          const decision = passDecision(stored.get(preview.refKey), {
+            docKind: preview.docKind, fingerprint: preview.fingerprint, enabled: enabledKinds.has(preview.docKind),
+          });
+          if (decision === 'skip') { result.skipped += 1; continue; }
+          if (decision === 'unchanged') { result.unchanged += 1; continue; }
+        }
         try {
           const outcome = await this.repository.loadDocument(ctx, key, refs);
-          if (outcome.status === 'invalid') result.invalid[outcome.code] = (result.invalid[outcome.code] ?? 0) + 1;
+          if (outcome.status === 'invalid') {
+            result.invalid[outcome.code] = (result.invalid[outcome.code] ?? 0) + 1;
+            // Прежний вид снят/удалён и при ошибке данных нового документа (code review R1-3) — сигнал потребителям.
+            for (const removed of outcome.removed ?? []) affected.set(removed.documentId, removed.docKind);
+          }
           else {
+            // Выключенный вид, у которого сняли с вида документ прежнего вида: учитывается как изменение.
             result[outcome.status] += 1;
             result.conflicts += outcome.conflicts;
             if ((outcome.status === 'created' || outcome.status === 'changed') && outcome.documentId && outcome.docKind) {

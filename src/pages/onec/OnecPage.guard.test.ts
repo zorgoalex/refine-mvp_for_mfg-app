@@ -360,4 +360,16 @@ describe('Onec (1C integration) UI wiring', () => {
     expect(matchingTab).not.toMatch(/onecApi\.(revoke|restore|publish|saveDraft|sendCommand|rebaseline)/);
     expect(matchingTab).toMatch(/только для чтения/);
   });
+
+  it('adds a read-only "Заказы 1С" tab (page-level onec.view guard) that drops stale list and order responses', () => {
+    expect(page).toMatch(/key:\s*'customer-orders'/);
+    expect(page).toMatch(/label:\s*'Заказы 1С'/);
+    expect(page).toMatch(/<CustomerOrdersTab \/>/);
+    const ordersTab = readFileSync(new URL('./CustomerOrdersTab.tsx', import.meta.url), 'utf8');
+    expect(ordersTab).toMatch(/if \(current === generation\.current\) setList\(result\)/);
+    expect(ordersTab).toMatch(/if \(current === detailGeneration\.current\) setDetail\(result\)/);
+    // Read-only: no mutations from this tab.
+    expect(ordersTab).not.toMatch(/httpClient\.(post|put|patch|delete)|onecApi\.(resolve|acknowledge|publish|send|cancel)/);
+  });
 });
+

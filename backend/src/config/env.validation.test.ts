@@ -907,3 +907,18 @@ describe('backend env validation', () => {
       .toMatchObject({ BACKEND_INVENTORY_ONEC_AUTOSYNC: true, BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID: 42 });
   });
 });
+
+describe('BACKEND_ONEC_DOCUMENTS_KINDS (1C customer documents rollout, plan 2026-10-02 §9)', () => {
+  it('accepts every loader kind incl. customer orders, receipts and refunds; rejects unknown names; matches the normalizer', async () => {
+    const { ALL_DOC_KINDS } = await import('../modules/onec-sync/domain/onec-document-normalizer');
+    const { ONEC_DOCUMENT_KINDS_ENV } = await import('./env.validation');
+    expect([...ONEC_DOCUMENT_KINDS_ENV].sort()).toEqual([...ALL_DOC_KINDS].sort());
+    for (const kinds of [
+      'purchase_receipt,cash_outflow,bank_outflow,sales_shipment,supplier_return,inventory_writeoff,inventory_transfer,customer_order,cash_receipt,bank_receipt',
+      'purchase_receipt,cash_outflow,bank_outflow,sales_shipment,supplier_return,inventory_writeoff,inventory_transfer,customer_order,cash_receipt,bank_receipt,cash_refund,bank_refund',
+    ]) {
+      expect(validateEnv({ BACKEND_ONEC_DOCUMENTS_KINDS: kinds }).BACKEND_ONEC_DOCUMENTS_KINDS).toBe(kinds);
+    }
+    expect(() => validateEnv({ BACKEND_ONEC_DOCUMENTS_KINDS: 'customer_order,customer_orders' })).toThrow(/unknown 1C document kind/);
+  });
+});

@@ -2430,6 +2430,19 @@ probe_file() {
       "$(q_idx uq_resource_suppliers_film)" \
       "$(q_col user_preferences procurement_saved_views)" \
       "$(q_con_on user_preferences chk_user_preferences_procurement_saved_views)" ;;
+    227_onec_customer_documents*) probe_all \
+      "$(q_col onec_documents author_ref_key)" \
+      "$(q_col onec_documents onec_order_ref_key)" \
+      "$(q_col onec_documents basis_ref_key)" \
+      "$(q_col onec_document_lines line_section)" \
+      "$(q_col onec_document_lines settlement_doc_ref_key)" \
+      "$(q_tbl onec_customer_orders)" \
+      "$(q_tbl onec_document_audit_refs)" \
+      "$(q_con_on onec_documents chk_onec_documents_kind_v3)" \
+      "$(q_con_on onec_document_lines chk_onec_document_lines_section)" \
+      "$(q_con_on onec_document_audit_refs chk_onec_document_audit_refs_role)" \
+      "$(q_idx idx_onec_document_lines_order_ref)" \
+      "$(q_idx idx_onec_document_audit_refs_ref)" ;;
     219_onec_currency_conflict*) probe_all \
       "$(q_con_on onec_document_lines chk_onec_document_lines_conflict_code_v2)" ;;
     216_onec_consumption_documents*) probe_all \
@@ -2441,7 +2454,7 @@ probe_file() {
       "$(q_col onec_document_lines is_stock_item)" \
       "$(q_col onec_document_lines unit_is_package)" \
       "$(q_con_on onec_sources chk_onec_sources_time_zone)" \
-      "$(q_con_on onec_documents chk_onec_documents_kind_v2)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.onec_documents'::regclass AND conname IN ('chk_onec_documents_kind_v2','chk_onec_documents_kind_v3'));" \
       "$(q_con_on onec_documents chk_onec_documents_currency_kind)" \
       "$(q_con_on onec_documents chk_onec_documents_destination_kind)" \
       "$(q_idx idx_onec_document_lines_warehouse)" ;;
@@ -2912,6 +2925,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     225_procurement_notification_rules*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    227_onec_customer_documents*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     219_onec_currency_conflict*)

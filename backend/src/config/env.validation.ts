@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import { DEFAULT_API_PREFIX, isVersionedApiPrefix, normalizeApiPrefix } from './api-prefix';
 
+/** Виды документов 1С, допустимые в BACKEND_ONEC_DOCUMENTS_KINDS (совпадает с ALL_DOC_KINDS нормализатора onec-sync). */
+export const ONEC_DOCUMENT_KINDS_ENV = [
+  'purchase_receipt', 'cash_outflow', 'bank_outflow', 'sales_shipment', 'supplier_return', 'inventory_writeoff', 'inventory_transfer',
+  'customer_order', 'cash_receipt', 'bank_receipt', 'cash_refund', 'bank_refund',
+] as const;
+
 const booleanFromEnv = z
   .union([z.boolean(), z.string()])
   .optional()
@@ -289,11 +295,10 @@ export const envSchema = z
     // Отметки «Закуплено» у материалов заказа (команды и чтение таблицы order_resource_procurement).
     BACKEND_RESOURCE_PROCUREMENT_ENABLED: booleanFromEnv.default(false),
     BACKEND_ONEC_DOCUMENTS_LOAD: booleanFromEnv.default(false),
-    // Виды документов 1С загрузчика (план расхода §3.3); виды закупок действуют только при включённых закупках.
+    // Виды документов 1С загрузчика (план расхода §3.3; заказы/поступления/возвраты — план 2026-10-02 §3.1); виды закупок
+    // действуют только при включённых закупках. Список = ALL_DOC_KINDS нормализатора (тест сверяет).
     BACKEND_ONEC_DOCUMENTS_KINDS: z.string().trim().default('purchase_receipt,cash_outflow,bank_outflow').refine(
-      (value) => value.split(',').map((name) => name.trim()).filter(Boolean).every((name) => [
-        'purchase_receipt', 'cash_outflow', 'bank_outflow', 'sales_shipment', 'supplier_return', 'inventory_writeoff', 'inventory_transfer',
-      ].includes(name)),
+      (value) => value.split(',').map((name) => name.trim()).filter(Boolean).every((name) => (ONEC_DOCUMENT_KINDS_ENV as readonly string[]).includes(name)),
       'BACKEND_ONEC_DOCUMENTS_KINDS: unknown 1C document kind',
     ),
     BACKEND_PROCUREMENT_WORKSPACE_ENABLED: booleanFromEnv.default(false),

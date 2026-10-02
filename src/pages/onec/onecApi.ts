@@ -2,6 +2,7 @@ import { backendApiPath } from '../../api/apiRoutes';
 import { httpClient } from '../../api/httpClient';
 import { onecIfMatchHeader } from './onecFormat';
 import type { OnecDailyJournal } from './onecJournal';
+import type { OnecCustomerOrderDetail, OnecCustomerOrderList } from './onecCustomerOrders';
 import type {
   OnecAgentConfigState,
   OnecAgentConfiguration,
@@ -310,5 +311,21 @@ export const onecApi = {
   getMatchingItems(agentId: string): Promise<OnecItemDistributionResult> {
     const query = new URLSearchParams({ agentId: agentIdPath(agentId) });
     return httpClient.get(path(`/etl/matching/items?${query.toString()}`));
+  },
+
+  listCustomerOrders(params: { search?: string; from?: string; to?: string; stateRefKey?: string; limit?: number; offset?: number } = {}): Promise<OnecCustomerOrderList> {
+    const query = new URLSearchParams();
+    if (params.search) query.set('search', params.search);
+    if (params.from) query.set('from', params.from);
+    if (params.to) query.set('to', params.to);
+    if (params.stateRefKey) query.set('stateRefKey', params.stateRefKey);
+    if (params.limit !== undefined) query.set('limit', String(params.limit));
+    if (params.offset !== undefined) query.set('offset', String(params.offset));
+    const suffix = query.size ? `?${query.toString()}` : '';
+    return httpClient.get(path(`/customer-orders${suffix}`));
+  },
+
+  getCustomerOrder(documentId: number): Promise<OnecCustomerOrderDetail> {
+    return httpClient.get(path(`/customer-orders/${positiveId(documentId)}`));
   },
 };
