@@ -49,6 +49,7 @@ import {
 import type {
   DeleteOrderResponseDto,
   OrderAuditListResponseDto,
+  OrderHistoryListResponseDto,
   OrderDto,
   OrderListResponseDto,
   OrderResponseDto,
@@ -882,6 +883,33 @@ const orderFormDataResponseSwaggerSchema = {
   },
 } as const;
 
+const orderHistoryListResponseSwaggerSchema = {
+  type: 'object',
+  required: ['data', 'pagination'],
+  additionalProperties: false,
+  properties: {
+    data: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['auditId', 'event', 'createdAt', 'actorName', 'entityType', 'statusField', 'statusName', 'stageCode'],
+        additionalProperties: false,
+        properties: {
+          auditId: { type: 'string' },
+          event: { type: 'string' },
+          createdAt: { type: 'string', format: 'date-time' },
+          actorName: nullableStringSwaggerSchema,
+          entityType: nullableStringSwaggerSchema,
+          statusField: nullableStringSwaggerSchema,
+          statusName: nullableStringSwaggerSchema,
+          stageCode: nullableStringSwaggerSchema,
+        },
+      },
+    },
+    pagination: orderPaginationSwaggerSchema,
+  },
+} as const;
+
 const orderAuditListResponseSwaggerSchema = {
   type: 'object',
   required: ['data', 'pagination', 'requestId'],
@@ -1273,6 +1301,40 @@ export class OrdersController {
     });
     const order = await this.orderQueries.getById({ currentUser, orderId });
     return { order, ...metadata };
+  }
+
+  @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number' })
+  @ApiQuery({ name: 'pageSize', required: false, type: Number, description: 'Items per page (max 50)' })
+  @ApiResponse({ status: 200, description: 'Order history events', schema: swaggerSchema(orderHistoryListResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  @ApiResponse({ status: 422, description: 'Invalid order history query' })
+  @ApiResponse({ status: 503, description: 'Orders API is disabled' })
+  @ApiOperation({
+    operationId: 'getOrderHistory',
+    summary: 'Get order history',
+    description: 'История заказа для всех, кто может открыть заказ (orders.view): фиксированная проекция событий из белого списка, без audit JSON и технических полей. События оплат — только при orders.view_financials и payments.view.',
+  })
+  @Get(':orderId/history')
+  async getHistory(
+    @Req() request: RequestWithCurrentUser,
+    @Param('orderId') orderIdParam: string,
+    @Query() query: Record<string, string | string[] | undefined>,
+  ): Promise<OrderHistoryListResponseDto> {
+    this.assertOrdersReadEnabled();
+
+    const currentUser = this.requireCurrentUser(request);
+    const orderId = parseOrderId(orderIdParam);
+    const historyQuery = parseOrderHistoryQuery(query);
+
+    return this.orderQueries.getHistory({
+      currentUser,
+      orderId,
+      page: historyQuery.page,
+      pageSize: historyQuery.pageSize,
+    });
   }
 
   @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
@@ -1681,6 +1743,15 @@ export function parseOrderAuditQuery(
   return {
     page: parsePositiveInteger(query.page, 'page', 1, 1, Number.MAX_SAFE_INTEGER),
     pageSize: parsePositiveInteger(query.pageSize, 'pageSize', 50, 1, 200),
+  };
+}
+
+export function parseOrderHistoryQuery(
+  query: Record<string, string | string[] | undefined>,
+): { page: number; pageSize: number } {
+  return {
+    page: parsePositiveInteger(query.page, 'page', 1, 1, Number.MAX_SAFE_INTEGER),
+    pageSize: parsePositiveInteger(query.pageSize, 'pageSize', 20, 1, 50),
   };
 }
 

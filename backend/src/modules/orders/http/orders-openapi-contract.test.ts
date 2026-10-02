@@ -263,6 +263,34 @@ describe('orders OpenAPI contract', () => {
       expect(orderListItemSection).toContain(`${field}:`);
     }
   });
+
+  it('documents the order history endpoint as a closed projection for orders.view', () => {
+    const contract = readOpenApiContract();
+    const historySection = sectionBetween(
+      contract,
+      '  /api/v1/orders/{orderId}/history:',
+      '  /api/v1/orders/{orderId}/audit:',
+    );
+    const eventSchema = sectionBetween(
+      contract,
+      '    OrderHistoryEvent:',
+      '    AuditListResponse:',
+    );
+
+    expect(historySection).toContain('operationId: getOrderHistory');
+    expect(historySection).toContain('- orders.view');
+    expect(historySection).not.toContain('- orders.view_audit');
+    expect(historySection).not.toContain('- orders.view_financials');
+    expect(historySection).toContain('maximum: 50');
+    expect(historySection).toContain("'404':");
+    expect(eventSchema).toContain('additionalProperties: false');
+    for (const field of ['auditId', 'event', 'createdAt', 'actorName', 'entityType', 'statusField', 'statusName', 'stageCode']) {
+      expect(eventSchema).toContain(`        ${field}:`);
+    }
+    for (const forbidden of ['before', 'after', 'diff', 'metadata', 'requestId', 'ip', 'userAgent', 'userId']) {
+      expect(eventSchema).not.toContain(`        ${forbidden}:`);
+    }
+  });
 });
 
 // Generated Swagger document tests — asserts the CONTROLLER DECORATOR schemas (not only the

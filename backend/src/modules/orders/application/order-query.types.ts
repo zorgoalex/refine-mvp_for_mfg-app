@@ -1,6 +1,7 @@
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { OrderFormDataResponseDto } from '../dto/order-form-data.dto';
-import type { OrderAuditListResponseDto, OrderDto, OrderListResponseDto } from '../dto/order.dto';
+import type { OrderAuditListResponseDto, OrderDto, OrderListResponseDto, OrderHistoryListResponseDto } from '../dto/order.dto';
+import type { OrderHistoryVisibility } from './order-history-events';
 
 export const ORDER_LIST_SORT_FIELDS = [
   'orderId',
@@ -64,6 +65,21 @@ export interface GetOrderAuditCommand {
   page: number;
   pageSize: number;
   requestId: string;
+}
+
+export interface GetOrderHistoryCommand {
+  currentUser: CurrentUser;
+  orderId: number;
+  page: number;
+  pageSize: number;
+}
+
+/** Reads the allow-listed, projected order history; the service decides the visibility. */
+export interface OrderHistoryReaderPort {
+  getOrderHistory(
+    command: GetOrderHistoryCommand,
+    visibility: OrderHistoryVisibility,
+  ): Promise<OrderHistoryListResponseDto>;
 }
 
 export interface GetOrderFormDataCommand {

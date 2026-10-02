@@ -77,6 +77,7 @@ export const apiRoutes = {
     byId: (orderId: number) => backendApiPath(`/orders/${orderId}`),
     recalculateHdf: (orderId: number) => backendApiPath(`/orders/${orderId}/recalculate-hdf`),
     refresh: (orderId: number) => backendApiPath(`/orders/${orderId}/refresh`),
+    history: (orderId: number) => backendApiPath(`/orders/${orderId}/history`),
     detailLiveState: (orderId: number) =>
       backendApiPath(`/orders/${orderId}/detail-live-state`),
     liveEvents: (orderId: number) => backendApiPath(`/orders/${orderId}/live-events`),

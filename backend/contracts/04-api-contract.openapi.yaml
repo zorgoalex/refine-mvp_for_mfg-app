@@ -6622,6 +6622,53 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/orders/{orderId}/history:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    get:
+      tags:
+        - Orders
+      operationId: getOrderHistory
+      summary: История заказа
+      description: >-
+        История заказа для всех, кто может открыть заказ. Возвращает фиксированную проекцию
+        событий из белого списка: без audit JSON (before/after/diff/metadata), request id,
+        адресов и связанных сущностей. События оплат и статус оплаты входят только при
+        orders.view_financials и payments.view. Полный журнал остаётся в GET /api/v1/audit.
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - orders.view
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: События истории заказа
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderHistoryListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/orders/{orderId}/audit:
     parameters:
       - $ref: '#/components/parameters/OrderId'
@@ -29604,6 +29651,56 @@ components:
           type: string
         entityId:
           type: integer
+
+    OrderHistoryListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - data
+        - pagination
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderHistoryEvent'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    OrderHistoryEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - auditId
+        - event
+        - createdAt
+        - actorName
+        - entityType
+        - statusField
+        - statusName
+        - stageCode
+      properties:
+        auditId:
+          type: string
+        event:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        actorName:
+          type: string
+          nullable: true
+        entityType:
+          type: string
+          nullable: true
+        statusField:
+          type: string
+          nullable: true
+        statusName:
+          type: string
+          nullable: true
+        stageCode:
+          type: string
+          nullable: true
 
     AuditListResponse:
       type: object

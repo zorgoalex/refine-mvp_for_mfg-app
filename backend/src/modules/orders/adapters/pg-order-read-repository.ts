@@ -7,6 +7,7 @@ import type {
   OrderAuditEventDto,
   OrderAuditListResponseDto,
   OrderDto,
+  OrderHistoryListResponseDto,
   OrderListItemDto,
   OrderListResponseDto,
 } from '../dto/order.dto';
@@ -16,11 +17,14 @@ import type {
   GetOrderFormDataCommand,
   GetOrderAuditCommand,
   GetOrderByIdCommand,
+  GetOrderHistoryCommand,
   ListOrdersCommand,
+  OrderHistoryReaderPort,
   OrderListSortBy,
   OrderReadRepositoryPort,
   OrderNameSuggestionRepositoryPort,
 } from '../application/order-query.types';
+import type { OrderHistoryVisibility } from '../application/order-history-events';
 import { formatCutJobNumber } from '../../cut/application/cut-numbering';
 
 const SORT_COLUMNS: Record<OrderListSortBy, string> = {
@@ -334,6 +338,36 @@ interface AuditLogRow extends QueryResultRow {
   created_at: string | Date;
 }
 
+interface OrderHistoryRow extends QueryResultRow {
+  audit_id: string;
+  event: string;
+  created_at: string | Date;
+  username: string | null;
+  entity_type: string | null;
+  status_field: string | null;
+  status_name: string | null;
+  stage_code: string | null;
+}
+
+/**
+ * A refused command is audited under the SAME event name with status_field = 'denied'
+ * (e.g. a rejected `orders.restore`). History lists what happened to the order, never
+ * refusals, for every caller regardless of rights.
+ */
+const ORDER_HISTORY_NOT_DENIED_PREDICATE = `AND audit_log.status_field IS DISTINCT FROM 'denied'`;
+
+/**
+ * Second line of defence behind the event allow-list: without finance rights no row with a
+ * payment dimension is returned, even if such an event name is ever added to the common list.
+ */
+const ORDER_HISTORY_NON_FINANCIAL_PREDICATE = `
+        AND audit_log.status_field IS DISTINCT FROM 'paymentStatus'
+        AND audit_log.related_payment_id IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM audit_log_related_entity payment_link
+          WHERE payment_link.audit_id = audit_log.audit_id AND payment_link.entity_type = 'payment'
+        )`;
+
 interface IdNameLookupRow extends QueryResultRow {
   id: string | number;
   name: string;
@@ -379,7 +413,7 @@ interface UnitLookupRow extends QueryResultRow {
 }
 
 export class PgOrderReadRepository
-  implements OrderReadRepositoryPort, OrderNameSuggestionRepositoryPort
+  implements OrderReadRepositoryPort, OrderNameSuggestionRepositoryPort, OrderHistoryReaderPort
 {
   // SP3: sheetOrdersReads gates the migration-029 sheet columns/joins in order reads.
   // Defaults true so direct instantiations (tests) keep full sheet reads; the orders
@@ -1151,6 +1185,67 @@ export class PgOrderReadRepository
         totalPages: Math.max(1, Math.ceil(total / command.pageSize)),
       },
       requestId: command.requestId,
+    };
+  }
+
+  /**
+   * Order history for everyone who can open the order. The SELECT list IS the contract:
+   * no audit JSON, request id, address, user id/role or related entity can leave this method.
+   * Count and rows share one predicate, so hidden events never show up in `total` either.
+   */
+  async getOrderHistory(
+    command: GetOrderHistoryCommand,
+    visibility: OrderHistoryVisibility,
+  ): Promise<OrderHistoryListResponseDto> {
+    const where = `
+      WHERE audit_log.audit_id IN (
+        SELECT candidate.audit_id FROM audit_log candidate WHERE candidate.related_order_id = $1
+        UNION
+        SELECT candidate.audit_id FROM audit_log candidate
+        WHERE candidate.entity_type = 'order' AND candidate.entity_id = $2
+        UNION
+        SELECT r.audit_id FROM audit_log_related_entity r WHERE r.entity_type = 'order' AND r.entity_id = $1
+      )
+        AND audit_log.event = ANY($3::text[])
+        ${ORDER_HISTORY_NOT_DENIED_PREDICATE}
+        ${visibility.includeFinancial ? '' : ORDER_HISTORY_NON_FINANCIAL_PREDICATE}
+    `;
+    const params = [command.orderId, String(command.orderId), visibility.events];
+    const count = await this.database.query<CountRow>(
+      `SELECT COUNT(*)::int AS total FROM audit_log ${where}`,
+      params,
+    );
+    const rows = await this.database.query<OrderHistoryRow>(
+      `
+      SELECT
+        audit_log.audit_id, audit_log.event, audit_log.created_at, audit_log.username,
+        audit_log.entity_type, audit_log.status_field, audit_log.status_name, audit_log.stage_code
+      FROM audit_log
+      ${where}
+      ORDER BY audit_log.created_at DESC, audit_log.audit_id DESC
+      LIMIT $4 OFFSET $5
+      `,
+      [...params, command.pageSize, (command.page - 1) * command.pageSize],
+    );
+    const total = toNumber(count.rows[0]?.total ?? 0);
+
+    return {
+      data: rows.rows.map((row) => ({
+        auditId: row.audit_id,
+        event: row.event,
+        createdAt: toIsoString(row.created_at),
+        actorName: row.username,
+        entityType: row.entity_type,
+        statusField: row.status_field,
+        statusName: row.status_name,
+        stageCode: row.stage_code,
+      })),
+      pagination: {
+        page: command.page,
+        pageSize: command.pageSize,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / command.pageSize)),
+      },
     };
   }
 

@@ -16,6 +16,7 @@ import {
   parseIdempotencyKeyHeader,
   parseIfMatchVersion,
   parseOrderAuditQuery,
+  parseOrderHistoryQuery,
   parseOrderId,
   parseOrderListQuery,
   parseTransferOrderDetailsRequest,
@@ -772,6 +773,14 @@ describe('OrdersController read endpoints', () => {
     expect(() => parseOrderListQuery({ deleted: 'да' })).toThrow(ApiError);
     expect(() => parseOrderListQuery({ sortBy: 'deletedAt' })).toThrow(ApiError);
     expect(() => parseOrderAuditQuery({ pageSize: '201' })).toThrow(ApiError);
+  });
+
+  it('parses the order history query with a 50-row page limit', () => {
+    expect(parseOrderHistoryQuery({})).toEqual({ page: 1, pageSize: 20 });
+    expect(parseOrderHistoryQuery({ page: '3', pageSize: '50' })).toEqual({ page: 3, pageSize: 50 });
+    expect(() => parseOrderHistoryQuery({ pageSize: '51' })).toThrow(ApiError);
+    expect(() => parseOrderHistoryQuery({ page: '0' })).toThrow(ApiError);
+    expect(() => parseOrderHistoryQuery({ page: 'abc' })).toThrow(ApiError);
   });
 });
 

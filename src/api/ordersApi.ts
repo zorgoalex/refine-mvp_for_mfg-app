@@ -55,7 +55,31 @@ function confirmationRequestOptions(
   return options?.confirmationDigest ? { headers: confirmationHeaders(options) } : undefined;
 }
 
+/** Order history for everyone who can open the order: a closed projection, no audit payload. */
+export interface OrderHistoryEvent {
+  auditId: string;
+  event: string;
+  createdAt: string;
+  actorName: string | null;
+  entityType: string | null;
+  statusField: string | null;
+  statusName: string | null;
+  stageCode: string | null;
+}
+
+export interface OrderHistoryListResponse {
+  data: OrderHistoryEvent[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+}
+
 export const ordersApi = {
+  history(orderId: number, query: { page: number; pageSize: number }): Promise<OrderHistoryListResponse> {
+    const params = new URLSearchParams({ page: String(query.page), pageSize: String(query.pageSize) });
+    return httpClient.get<OrderHistoryListResponse>(
+      `${apiRoutes.orders.history(validateOrderId(orderId))}?${params.toString()}`,
+    );
+  },
+
   list(params: OrderListQuery = {}): Promise<OrderListResponse> {
     return httpClient.get<OrderListResponse>(withQuery(apiRoutes.orders.list, params));
   },

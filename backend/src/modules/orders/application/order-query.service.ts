@@ -4,17 +4,21 @@ import type { OrderFormDataResponseDto } from '../dto/order-form-data.dto';
 import type {
   OrderAuditListResponseDto,
   OrderDto,
+  OrderHistoryListResponseDto,
   OrderListResponseDto,
   OrderNameSuggestionResponseDto,
 } from '../dto/order.dto';
 import { OrderNotFoundError } from '../errors/order.errors';
+import { resolveOrderHistoryVisibility } from './order-history-events';
 import type { OrderPermissionCheckerPort } from './order-transaction.types';
 import type {
   GetOrderFormDataCommand,
   GetOrderNameSuggestionCommand,
   GetOrderAuditCommand,
   GetOrderByIdCommand,
+  GetOrderHistoryCommand,
   ListOrdersCommand,
+  OrderHistoryReaderPort,
   OrderReadRepositoryPort,
   OrderNameSuggestionRepositoryPort,
   OrderListSortBy,
@@ -30,6 +34,7 @@ const PACKER_ALLOWED_ORDER_STATUS_NAMES = new Set(['готов к выдаче',
 
 export interface OrderQueryServicePorts {
   reader: OrderReadRepositoryPort;
+  history?: OrderHistoryReaderPort;
   nameSuggestions?: OrderNameSuggestionRepositoryPort;
   permissions?: OrderPermissionCheckerPort;
 }
@@ -87,6 +92,34 @@ export class OrderQueryService {
     }
 
     return this.ports.reader.getOrderAudit(command);
+  }
+
+  /**
+   * History for everyone who can open the order. Unlike getAudit it needs neither
+   * orders.view_audit nor finance visibility: the reader returns a fixed projection of
+   * allow-listed events, and financial facts are added only with both finance rights.
+   */
+  async getHistory(command: GetOrderHistoryCommand): Promise<OrderHistoryListResponseDto> {
+    this.requireViewPermission(command);
+
+    if (!this.ports.history) {
+      throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Order history is unavailable');
+    }
+
+    // same visibility as opening the order: unknown and deleted orders are not found
+    const order = await this.ports.reader.getOrderById({
+      currentUser: command.currentUser,
+      orderId: command.orderId,
+    });
+
+    if (!order) {
+      throw new OrderNotFoundError(command.orderId);
+    }
+
+    return this.ports.history.getOrderHistory(command, resolveOrderHistoryVisibility({
+      canViewFinancials: this.canViewFinancials(command),
+      canViewPayments: this.permissions.canUser(command.currentUser, 'payments.view'),
+    }));
   }
 
   async getFormData(command: GetOrderFormDataCommand): Promise<OrderFormDataResponseDto> {
