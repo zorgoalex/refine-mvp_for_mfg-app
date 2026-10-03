@@ -1,3 +1,16 @@
+import {
+  buildFrozenSheetRenderModel,
+  FROZEN_SHEET_RENDER_V1,
+  FROZEN_SHEET_RENDER_V2,
+  FROZEN_SHEET_STORED_VIEW_KEY,
+  FROZEN_SHEET_VIEWS,
+  frozenSheetView,
+  FrozenSheetModelError,
+  frozenSheetRenderProblem,
+  renderFrozenSheetView,
+  type FrozenSheetRenderModel,
+} from '../render/frozen-sheet-render';
+import { readRenderSnapshotContract } from './frozen-render-contract';
 import { createHash, randomUUID } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { auditService } from '../../../common/audit/audit.service';
@@ -125,6 +138,8 @@ import type {
   CutManualLayoutDto,
   CutManualSheetDto,
   CutSheetRenderSnapshotDto,
+  CutSheetRenderSnapshotV1Dto,
+  CutSheetRenderSnapshotV2Dto,
   EligibleDetailDto,
   EligibleDetailsResponseDto,
 } from '../dto/cut.dto';
@@ -234,6 +249,8 @@ interface RenderedSheetContext {
   placements: SheetPlacementsJson;
   svg: string;
   bathSvg: string;
+  /** Present on live renders: what a contract v2 result keeps to redraw this sheet. */
+  renderModel?: FrozenSheetRenderModel;
   pdfMeta: PdfSheetMeta;
   pdfDetailRows: PdfSheetDetailRow[];
   filmRequirementLinearMeters: number | null;
@@ -628,7 +645,6 @@ function frozenPieceLabelLines(
   });
 }
 
-const FROZEN_RENDER_VIEW_COUNT = 12;
 
 function sheetsMatchCanonical(existing: import('../dto/cut.dto').CutManualSheetDto[], canonical: import('../dto/cut.dto').CutManualSheetDto[]): boolean {
   return stableJson(existing) === stableJson(canonical);
@@ -2463,13 +2479,30 @@ export class PgCutRepository implements CutRepositoryPort {
     const sheets = sourceSheets.map((sheet) => {
       const placements = sheet.placements;
       const renderSnapshot = sheet.renderSnapshot;
-      const view = renderSnapshot?.views[frozenRenderViewKey({
-        rotate90: args.rotate90,
-        originTopLeft: args.originTopLeft,
-        axisOrigin: args.axisOrigin,
-        showLabels: args.showLabels,
-      })];
-      if (!renderSnapshot || renderSnapshot.contractVersion !== 'cut_sheet_render_v1' || !view) {
+      let view: { svg: string; bathSvg: string } | undefined;
+      if (renderSnapshot?.contractVersion === FROZEN_SHEET_RENDER_V1) {
+        view = renderSnapshot.views[frozenRenderViewKey({
+          rotate90: args.rotate90,
+          originTopLeft: args.originTopLeft,
+          axisOrigin: args.axisOrigin,
+          showLabels: args.showLabels,
+        })];
+      } else if (renderSnapshot?.contractVersion === FROZEN_SHEET_RENDER_V2) {
+        // The requested view is drawn from the stored coordinates and model, normalized the way
+        // the v1 view key was (the top-left flag only counts for rotated views).
+        try {
+          view = renderFrozenSheetView(placements, renderSnapshot.model, frozenSheetView({
+            rotate90: args.rotate90,
+            originTopLeft: args.originTopLeft,
+            axisOrigin: args.axisOrigin,
+            showLabels: args.showLabels,
+          }));
+        } catch (error) {
+          if (error instanceof FrozenSheetModelError) view = undefined;
+          else throw error;
+        }
+      }
+      if (!renderSnapshot || !view) {
         throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_CORRUPT', `Нет frozen render листа ${sheet.sheetIndex}`);
       }
       const baseSvg = rebuildSvgWithPieceMetadata && (
@@ -2544,55 +2577,14 @@ export class PgCutRepository implements CutRepositoryPort {
   }
 
   private async attachFrozenRenderSnapshots(tx: TransactionClient, snapshot: CutJobDto): Promise<CutJobDto> {
+    const contract = await readRenderSnapshotContract(tx);
     const groups: CutGroupDto[] = [];
     for (const group of snapshot.groups) {
-      const freezeVariant = async <T extends { sheetIndex: number; placements: SheetPlacementsJson }>(
-        variant: 'auto' | 'manual',
-        sourceSheets: T[],
-      ): Promise<Array<T & { renderSnapshot: CutSheetRenderSnapshotDto }>> => {
-        const renderBySheet = new Map<number, CutSheetRenderSnapshotDto>();
-        const viewArgs: Array<{ rotate90: boolean; originTopLeft: boolean; axisOrigin: 'top-left' | 'bottom-left'; showLabels: boolean }> = [];
-        for (const rotate90 of [false, true]) {
-          for (const originTopLeft of rotate90 ? [false, true] : [false]) {
-            for (const axisOrigin of ['top-left', 'bottom-left'] as const) {
-              for (const showLabels of [false, true]) {
-                viewArgs.push({ rotate90, originTopLeft, axisOrigin, showLabels });
-              }
-            }
-          }
-        }
-        for (const view of viewArgs) {
-          const rendered = await this.loadGroupRenderContext(
-            group.cutGroupId,
-            view.rotate90,
-            view.originTopLeft,
-            view.axisOrigin,
-            variant,
-            snapshot.cutJobId,
-            view.showLabels,
-            tx,
-            true,
-          );
-          for (const sheet of rendered.sheets) {
-            const existing = renderBySheet.get(sheet.sheetIndex) ?? {
-              contractVersion: 'cut_sheet_render_v1' as const,
-              views: {},
-              pdfMeta: sheet.pdfMeta,
-              pdfDetailRows: sheet.pdfDetailRows,
-            };
-            existing.views[frozenRenderViewKey(view)] = { svg: sheet.svg, bathSvg: sheet.bathSvg };
-            renderBySheet.set(sheet.sheetIndex, existing);
-          }
-        }
-        return sourceSheets.map((sheet) => {
-          const renderSnapshot = renderBySheet.get(sheet.sheetIndex);
-          if (!renderSnapshot) {
-            throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', `Не создан render snapshot листа ${sheet.sheetIndex}`);
-          }
-          return { ...sheet, renderSnapshot };
-        });
-      };
-
+      const freezeVariant = contract === 'v2'
+        ? <T extends { sheetIndex: number; placements: SheetPlacementsJson }>(variant: 'auto' | 'manual', sourceSheets: T[]) =>
+            this.freezeVariantV2(tx, snapshot.cutJobId, group.cutGroupId, variant, sourceSheets)
+        : <T extends { sheetIndex: number; placements: SheetPlacementsJson }>(variant: 'auto' | 'manual', sourceSheets: T[]) =>
+            this.freezeVariantV1(tx, snapshot.cutJobId, group.cutGroupId, variant, sourceSheets);
       const autoSheets = await freezeVariant('auto', group.sheets);
       const manualLayout = group.manualLayout
         ? {
@@ -2603,6 +2595,91 @@ export class PgCutRepository implements CutRepositoryPort {
       groups.push({ ...group, sheets: autoSheets, manualLayout });
     }
     return { ...snapshot, groups };
+  }
+
+  /** Contract v1: twelve finished views per sheet (kept as the rollback contract). */
+  private async freezeVariantV1<T extends { sheetIndex: number; placements: SheetPlacementsJson }>(
+    tx: TransactionClient,
+    cutJobId: number,
+    cutGroupId: number,
+    variant: 'auto' | 'manual',
+    sourceSheets: T[],
+  ): Promise<Array<T & { renderSnapshot: CutSheetRenderSnapshotDto }>> {
+    const renderBySheet = new Map<number, CutSheetRenderSnapshotV1Dto>();
+    for (const view of FROZEN_SHEET_VIEWS) {
+      const rendered = await this.loadGroupRenderContext(
+        cutGroupId,
+        view.rotate90,
+        view.originTopLeft,
+        view.axisOrigin,
+        variant,
+        cutJobId,
+        view.showLabels,
+        tx,
+        true,
+      );
+      for (const sheet of rendered.sheets) {
+        const existing = renderBySheet.get(sheet.sheetIndex) ?? {
+          contractVersion: FROZEN_SHEET_RENDER_V1,
+          views: {},
+          pdfMeta: sheet.pdfMeta,
+          pdfDetailRows: sheet.pdfDetailRows,
+        };
+        existing.views[frozenRenderViewKey(view)] = { svg: sheet.svg, bathSvg: sheet.bathSvg };
+        renderBySheet.set(sheet.sheetIndex, existing);
+      }
+    }
+    return sourceSheets.map((sheet) => {
+      const renderSnapshot = renderBySheet.get(sheet.sheetIndex);
+      if (!renderSnapshot) {
+        throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', `Не создан render snapshot листа ${sheet.sheetIndex}`);
+      }
+      return { ...sheet, renderSnapshot };
+    });
+  }
+
+  /**
+   * Contract v2: the sheet keeps its coordinates and the render model the live renderer used, plus
+   * the one SVG the label-map projection copies (unrotated, top-left, without labels).
+   */
+  private async freezeVariantV2<T extends { sheetIndex: number; placements: SheetPlacementsJson }>(
+    tx: TransactionClient,
+    cutJobId: number,
+    cutGroupId: number,
+    variant: 'auto' | 'manual',
+    sourceSheets: T[],
+  ): Promise<Array<T & { renderSnapshot: CutSheetRenderSnapshotDto }>> {
+    const stored = frozenSheetView({ rotate90: false, originTopLeft: false, axisOrigin: 'top-left', showLabels: false });
+    const rendered = await this.loadGroupRenderContext(
+      cutGroupId,
+      stored.rotate90,
+      stored.originTopLeft,
+      stored.axisOrigin,
+      variant,
+      cutJobId,
+      stored.showLabels,
+      tx,
+      true,
+    );
+    const renderedBySheet = new Map(rendered.sheets.map((sheet) => [sheet.sheetIndex, sheet]));
+    return sourceSheets.map((sheet) => {
+      const live = renderedBySheet.get(sheet.sheetIndex);
+      if (!live?.renderModel) {
+        throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', `Не создан render snapshot листа ${sheet.sheetIndex}`);
+      }
+      // The model was captured over the live placements; the result keeps the snapshot's own copy.
+      if (stableJson(live.placements) !== stableJson(sheet.placements)) {
+        throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', `Раскладка листа ${sheet.sheetIndex} изменилась при сохранении`);
+      }
+      const renderSnapshot: CutSheetRenderSnapshotV2Dto = {
+        contractVersion: FROZEN_SHEET_RENDER_V2,
+        views: { [FROZEN_SHEET_STORED_VIEW_KEY]: { svg: live.svg } },
+        model: live.renderModel,
+        pdfMeta: live.pdfMeta,
+        pdfDetailRows: live.pdfDetailRows,
+      };
+      return { ...sheet, renderSnapshot };
+    });
   }
 
   private async createCutResult(
@@ -4200,31 +4277,28 @@ export class PgCutRepository implements CutRepositoryPort {
       sheets: rawSheets.map((s) => {
         const includeMaterial = sheetMixesMaterials(s.placements);
         const labelFor = (piece: FreecutPlacement): string[] => labelForPiece(piece, includeMaterial);
+        // The live picture is drawn from the same model a saved result keeps (contract v2), so a
+        // result and the live render of the same state are one function of the same data.
+        const renderModel = buildFrozenSheetRenderModel({
+          sheet: s.placements,
+          labelFor,
+          fillFor,
+          bathDetailInfoFor,
+          renderStyle: renderStyleRule,
+          showBathMeterGuides,
+        });
+        const { svg, bathSvg } = renderFrozenSheetView(s.placements, renderModel, {
+          rotate90,
+          originTopLeft,
+          axisOrigin,
+          showLabels,
+        });
         return {
           sheetIndex: s.sheetIndex,
           placements: s.placements,
-          svg: buildSheetSvg({
-            sheet: s.placements,
-            labelFor,
-            fillFor,
-            rotate90,
-            originTopLeft,
-            axisOrigin,
-            showLabels,
-            showBathMeterGuides,
-            renderStyle: renderStyleRule,
-          }),
-          bathSvg: buildBathProfileSheetSvg({
-            sheet: s.placements,
-            labelFor,
-            bathDetailInfoFor,
-            fillFor,
-            rotate90,
-            originTopLeft,
-            axisOrigin,
-            showBathMeterGuides,
-            renderStyle: renderStyleRule,
-          }),
+          svg,
+          bathSvg,
+          renderModel,
           pdfMeta: buildPdfSheetMeta(s.placements, detailById, detailByItemId),
           pdfDetailRows: buildPdfDetailRows(s.placements, detailById, detailByItemId),
           filmRequirementLinearMeters: showBathMeterGuides
@@ -6602,11 +6676,9 @@ function validateFrozenJobSnapshot(snapshot: CutJobDto): void {
     }
     const autoVariantInstances = new Set<string>();
     for (const sheet of group.sheets) {
-      if (
-        sheet.renderSnapshot?.contractVersion !== 'cut_sheet_render_v1'
-        || Object.keys(sheet.renderSnapshot.views).length !== FROZEN_RENDER_VIEW_COUNT
-      ) {
-        throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', `Лист ${sheet.sheetIndex} не содержит frozen render`);
+      const renderProblem = frozenSheetRenderProblem(sheet.renderSnapshot, sheet.placements);
+      if (renderProblem) {
+        throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', `Лист ${sheet.sheetIndex}: ${renderProblem}`);
       }
       for (const piece of sheet.placements.pieces) {
         if (!expected.has(piece.item_id) || expected.get(piece.item_id)?.cutGroupId !== group.cutGroupId) {
@@ -6631,11 +6703,9 @@ function validateFrozenJobSnapshot(snapshot: CutJobDto): void {
     if (manual) {
       const manualVariantInstances = new Set<string>();
       for (const sheet of manual.sheets) {
-        if (
-          sheet.renderSnapshot?.contractVersion !== 'cut_sheet_render_v1'
-          || Object.keys(sheet.renderSnapshot.views).length !== FROZEN_RENDER_VIEW_COUNT
-        ) {
-          throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', 'Ручной вариант не содержит frozen render');
+        const renderProblem = frozenSheetRenderProblem(sheet.renderSnapshot, sheet.placements);
+        if (renderProblem) {
+          throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', `Ручной вариант, лист ${sheet.sheetIndex}: ${renderProblem}`);
         }
         for (const piece of sheet.placements.pieces) {
           const key = `${piece.item_id}#${piece.instance}`;
@@ -6702,7 +6772,7 @@ function buildCutResultManifest(snapshot: CutJobDto): Record<string, unknown> {
       groupKey: group.groupKey ?? `group:${group.cutGroupId}`,
       autoSheets: group.sheets.map((sheet) => sheet.sheetIndex),
       manualSheets: group.manualLayout?.sheets.map((sheet) => sheet.sheetIndex) ?? [],
-      renderContract: 'cut_sheet_render_v1',
+      renderContract: group.sheets[0]?.renderSnapshot?.contractVersion ?? FROZEN_SHEET_RENDER_V1,
       autoRenderViews: group.sheets.map((sheet) => Object.keys(sheet.renderSnapshot?.views ?? {}).length),
       manualRenderViews: group.manualLayout?.sheets.map((sheet) => Object.keys(sheet.renderSnapshot?.views ?? {}).length) ?? [],
       manualState: group.manualLayout

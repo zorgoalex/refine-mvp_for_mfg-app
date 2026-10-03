@@ -42,14 +42,18 @@ describe('cut result history implementation guards', () => {
   });
 
   it('keeps frozen placements and uses current geometry rendering only for explicit metadata refreshes', () => {
-    expect(repository).toContain("contractVersion: 'cut_sheet_render_v1'");
+    // Both stored contracts are written by the repository (v1 stays behind the rollback switch).
+    expect(repository).toContain('contractVersion: FROZEN_SHEET_RENDER_V1,');
+    expect(repository).toContain('contractVersion: FROZEN_SHEET_RENDER_V2,');
     expect(repository).toContain('renderSnapshot.pdfMeta as PdfSheetMeta');
     expect(repository).toContain('renderSnapshot.pdfDetailRows as PdfSheetDetailRow[]');
     const frozenLoader = repository.slice(
       repository.indexOf('private async loadFrozenRenderContext'),
       repository.indexOf('private async attachFrozenRenderSnapshots'),
     );
-    expect(frozenLoader).toContain('renderSnapshot?.views');
+    // v1 reads the stored view; v2 draws it from the stored coordinates and model.
+    expect(frozenLoader).toContain('view = renderSnapshot.views[frozenRenderViewKey({');
+    expect(frozenLoader).toContain('view = renderFrozenSheetView(placements, renderSnapshot.model, frozenSheetView({');
     expect(frozenLoader).toContain(
       'const rebuildStandardPdfSvgWithCurrentRenderer = args.refreshPdfDynamicFields === true',
     );
