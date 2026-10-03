@@ -595,7 +595,9 @@
   margin: 0;
 }
 
-:root[data-ui-variant="workbench"] .order-card--wb > .order-card__stage-bar {
+:root[data-ui-variant="workbench"] .order-card--wb > .order-card__stage-bar,
+:root[data-ui-variant="workbench"] .order-card--wb > .order-card__header {
+  /* номер и полоса этапов — во всю ширину карточки, размеры материалов не сжимают номер */
   grid-column: 1 / -1;
 }
 

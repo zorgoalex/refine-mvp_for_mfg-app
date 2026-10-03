@@ -120,6 +120,12 @@ test.describe('Calendar frontend', () => {
             return [style.color, style.fontSize];
         })).toEqual(['rgb(25, 118, 210)', '15.5px']);
         await expect(card.locator('.order-card__stage-bar')).toHaveCount(1);
+        // номер занимает всю ширину карточки и не переносится по буквам, даже рядом с размерами материалов
+        expect(await page.locator('.order-card--wb .order-card__number').evaluateAll((numbers) => numbers.map((element) => {
+            const header = element.parentElement!.getBoundingClientRect();
+            const card = element.closest('.order-card')!.getBoundingClientRect();
+            return header.width >= card.width - 24;
+        }).every(Boolean))).toBe(true);
         const emptyDaySends = await page.locator('.calendar-board--wb .day-column').evaluateAll((days) => days
             .filter((day) => day.querySelectorAll('.order-card').length === 0)
             .filter((day) => day.querySelector('.day-column__send')).length);
