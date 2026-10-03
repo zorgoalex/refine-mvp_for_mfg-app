@@ -124,9 +124,16 @@ export async function receiveToFile(
       }
       hash.update(chunk);
       if (!out.write(chunk)) {
+        // Both listeners are removed whichever fires first: one backpressure wait per chunk
+        // must not leave an 'error' listener behind (large batches hit MaxListeners otherwise).
         await new Promise<void>((resolve) => {
-          out.once('drain', resolve);
-          out.once('error', () => resolve());
+          const done = () => {
+            out.off('drain', done);
+            out.off('error', done);
+            resolve();
+          };
+          out.on('drain', done);
+          out.on('error', done);
         });
       }
     }

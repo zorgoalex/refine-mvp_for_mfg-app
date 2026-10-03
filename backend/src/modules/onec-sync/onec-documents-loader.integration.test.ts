@@ -778,6 +778,27 @@ describe.skipIf(!url)('1C documents loader — real PostgreSQL', { timeout: 1200
       await pay('doc_bank_receipts', RCPT, 'ОтПокупателя', [payLine(1, O, 600), payLine(2, O, 400)], { DeletionMark: true });
       await loader3.run(trigger('doc_bank_receipts'));
       expect((await readService().getOrder(orderDoc.id)).paid).toBe('-100.00');
+      // An order without payments or shipments: zero totals keep the same two-decimal format.
+      const EMPTY = K();
+      await order(EMPTY);
+      expect(await loader3.run(trigger('doc_customer_orders'))).toMatchObject({ status: 'succeeded', result: { created: 1 } });
+      const [emptyDoc] = await byRef(EMPTY);
+      expect(await readService().getOrder(emptyDoc.id)).toMatchObject({ paid: '0.00', shipped: '0.00' });
+      expect((await readService().listOrders({ search: `${tag}-O${EMPTY.slice(0, 5)}` })).items)
+        .toEqual([expect.objectContaining({ documentId: emptyDoc.id, paid: '0.00', shipped: '0.00' })]);
+      // Totals are not bounded by the per-line numeric(14,2): two receipts above its limit together still read.
+      const BIG = K();
+      const BIG_R1 = K();
+      const BIG_R2 = K();
+      await order(BIG);
+      await pay('doc_bank_receipts', BIG_R1, 'ОтПокупателя', [payLine(1, BIG, 600000000000)]);
+      await pay('doc_bank_receipts', BIG_R2, 'ОтПокупателя', [payLine(1, BIG, 600000000000)]);
+      expect(await loader3.run(trigger('doc_customer_orders'))).toMatchObject({ status: 'succeeded' });
+      expect(await loader3.run(trigger('doc_bank_receipts'))).toMatchObject({ status: 'succeeded' });
+      const [bigDoc] = await byRef(BIG);
+      expect(await readService().getOrder(bigDoc.id)).toMatchObject({ paid: '1200000000000.00', shipped: '0.00' });
+      expect((await readService().listOrders({ search: `${tag}-O${BIG.slice(0, 5)}` })).items)
+        .toEqual([expect.objectContaining({ documentId: bigDoc.id, paid: '1200000000000.00' })]);
     });
 
     it('v2 → v3: a shipment applied by v2 gets order links and authors without a revision, outbox or consumer events', async () => {

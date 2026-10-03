@@ -47,18 +47,18 @@ const iso = (value: Date | string | null | undefined): string | null => (value ?
 
 /** Сумма по документам-платежам и отгрузкам заказа в валюте заказа (другие валюты — отдельно, без смешения). */
 const ORDER_TOTALS_SQL = `
-  (SELECT COALESCE(sum(CASE WHEN p.doc_kind = ANY($RECEIPTS) THEN l.amount ELSE -l.amount END), 0)
+  (SELECT COALESCE(sum(CASE WHEN p.doc_kind = ANY($RECEIPTS) THEN l.amount ELSE -l.amount END), 0.00)
      FROM onec_document_lines l JOIN onec_documents p ON p.onec_document_id = l.onec_document_id
     WHERE l.onec_order_ref_key = o.onec_ref_key AND p.source_id = o.source_id AND p.currency IS NOT DISTINCT FROM o.currency
       AND p.doc_kind = ANY($PAYMENTS) AND ${LIVE_DOC} AND ${LIVE_LINE})::text AS paid,
-  (SELECT COALESCE(sum(l.amount), 0)
+  (SELECT COALESCE(sum(l.amount), 0.00)
      FROM onec_document_lines l JOIN onec_documents p ON p.onec_document_id = l.onec_document_id
     WHERE l.onec_order_ref_key = o.onec_ref_key AND p.source_id = o.source_id AND p.currency IS NOT DISTINCT FROM o.currency
       AND p.doc_kind = ANY($SHIPMENTS) AND ${LIVE_DOC} AND ${LIVE_LINE})::text AS shipped,
   (SELECT json_agg(x ORDER BY x.currency) FROM (
      SELECT p.currency,
-            sum(CASE WHEN p.doc_kind = ANY($RECEIPTS) THEN l.amount WHEN p.doc_kind = ANY($PAYMENTS) THEN -l.amount ELSE 0 END)::numeric(14,2)::text AS paid,
-            sum(CASE WHEN p.doc_kind = ANY($SHIPMENTS) THEN l.amount ELSE 0 END)::numeric(14,2)::text AS shipped
+            sum(CASE WHEN p.doc_kind = ANY($RECEIPTS) THEN l.amount WHEN p.doc_kind = ANY($PAYMENTS) THEN -l.amount ELSE 0.00 END)::text AS paid,
+            sum(CASE WHEN p.doc_kind = ANY($SHIPMENTS) THEN l.amount ELSE 0.00 END)::text AS shipped
        FROM onec_document_lines l JOIN onec_documents p ON p.onec_document_id = l.onec_document_id
       WHERE l.onec_order_ref_key = o.onec_ref_key AND p.source_id = o.source_id AND p.currency IS DISTINCT FROM o.currency
         AND (p.doc_kind = ANY($PAYMENTS) OR p.doc_kind = ANY($SHIPMENTS)) AND ${LIVE_DOC} AND ${LIVE_LINE}
