@@ -168,3 +168,150 @@
   font-size: 12.5px;
   line-height: 1.4;
 }
+
+/* ================= МДФ-доска (`--cnc`) =================
+   Те же колонки, карточки и действия; убраны цветные заливки и яркие полосы — цвет остаётся
+   только точкой у названия колонки. */
+
+:root[data-ui-variant="workbench"] .status-board-page.status-board-page--cnc {
+  height: calc(100vh - 92px);
+  padding: 18px 24px 16px;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page--cnc .status-board-page__header h1,
+:root[data-ui-variant="workbench"] .status-board-page--cnc .status-board-page__header h2,
+:root[data-ui-variant="workbench"] .status-board-page--cnc .status-board-page__header h3 {
+  color: var(--evo-text);
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+/* панель управления: без тени-подложки */
+:root[data-ui-variant="workbench"] .status-board-page--cnc .status-board-toolbar-disclosure--cnc {
+  background: var(--evo-canvas);
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page--cnc .status-board-toolbar {
+  padding: 2px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* колонки: нейтральный фон, без цветной полосы сверху */
+:root[data-ui-variant="workbench"] .status-board-page--cnc .status-board-column.cnc-today-column {
+  border: 1px solid var(--evo-border);
+  border-top: 1px solid var(--evo-border);
+  border-radius: 12px;
+  background: var(--evo-surface-muted);
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page--cnc .cnc-today-column .status-board-column__header {
+  border-bottom: 0;
+  background: transparent;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page--cnc .cnc-today-column .status-board-column__cards {
+  background: transparent;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page--cnc .status-board-column__title .ant-typography strong {
+  color: var(--evo-text);
+  font-size: 13.5px;
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page--cnc .status-board-column__header .ant-badge-count {
+  min-width: 22px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--evo-surface) !important;
+  box-shadow: 0 0 0 1px var(--evo-border);
+  color: var(--evo-text-secondary) !important;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page--cnc .status-board-column__header .ant-badge-count .ant-scroll-number-only-unit {
+  color: inherit;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page--cnc .cnc-today-column__totals {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* полоса загрузки колонки — приглушённая, одного спокойного цвета */
+:root[data-ui-variant="workbench"] .status-board-page--cnc .cnc-today-column__load > span:first-child {
+  height: 3px;
+  border-radius: 3px;
+  background: var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .status-board-page--cnc .cnc-today-column__load > span:first-child > span {
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--evo-text-secondary) 55%, var(--evo-border)) !important;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page--cnc .status-board-column-help__trigger {
+  color: var(--evo-text-secondary);
+  opacity: 0.6;
+}
+
+/* карточки: сплошная тонкая рамка вместо оранжевого пунктира */
+:root[data-ui-variant="workbench"] .status-board-page--cnc .status-board-card {
+  border: 1px solid var(--evo-border);
+  border-radius: 9px;
+  background: var(--evo-surface);
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page--cnc .status-board-card:hover {
+  border-color: var(--evo-border-strong);
+}
+
+:root[data-ui-variant="workbench"] .status-board-page--cnc .cnc-packet-card__summary-order.ant-btn {
+  color: var(--evo-text);
+  font-weight: 700;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page--cnc .cnc-packet-card__summary-order.ant-btn:hover {
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .status-board-page--cnc .cnc-packet-card__summary-meta {
+  color: var(--evo-text-secondary);
+}
+
+/* номер файла станка / ванны — спокойная метка */
+:root[data-ui-variant="workbench"] .status-board-page--cnc .cnc-bazis-cut-card__badge.ant-btn {
+  border: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--evo-primary) 10%, var(--evo-surface));
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .status-board-page--cnc .cnc-bath-card__cut-result-badge.ant-tag {
+  border: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, #7a4fd6 12%, var(--evo-surface));
+  color: #6a3fc4;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page--cnc .cnc-packet-card__tab.ant-btn,
+:root[data-ui-variant="workbench"] .status-board-page--cnc .cnc-bath-card__tab.ant-btn {
+  border-color: var(--evo-border);
+  background: var(--evo-surface-muted);
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .status-board-page--cnc .status-board-card__footer {
+  border-top-color: var(--evo-border);
+  color: var(--evo-text-secondary);
+}
