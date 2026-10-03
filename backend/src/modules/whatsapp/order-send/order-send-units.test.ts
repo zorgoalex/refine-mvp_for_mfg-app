@@ -91,7 +91,7 @@ describe('order forms', () => {
     const form = await generateOrderForm(order(120), 'production_pdf', true);
     expect(form.mimeType).toBe('application/pdf');
     expect(form.fileName).toBe('Заказ E2E-Тест-PDF Тест Клиент для производства.pdf');
-    const { pages, text } = await pdfText(form.bytes);
+    const { pages, text } = await pdfText(form.pages[0]);
     expect(pages).toBeGreaterThan(1);
     for (let index = 1; index <= 120; index += 1) expect(text).toContain(`Деталь-${index}`);
     expect(text).toContain('Присадка');
@@ -99,7 +99,7 @@ describe('order forms', () => {
   }, 60_000);
 
   it('the order PDF carries prices, totals and payments', async () => {
-    const { text } = await pdfText((await generateOrderForm(order(3), 'order_pdf', true)).bytes);
+    const { text } = await pdfText((await generateOrderForm(order(3), 'order_pdf', true)).pages[0]);
     expect(text).toMatch(/54\s?321/);
     expect(text).toMatch(/987\s?654/);
     expect(text).toContain('ТестКаспи');
@@ -110,7 +110,7 @@ describe('order forms', () => {
     // 0.7 × 0.4 m² × 54 321 = 15 209.88; the first detail has a manual cost of 777.
     data.details[0] = { ...data.details[0], height: 700, width: 400, detailCost: 777, millingCostPerSqm: 54321 };
     data.details[1] = { ...data.details[1], height: 700, width: 400, detailCost: null, millingCostPerSqm: 54321 };
-    const { text } = await pdfText((await generateOrderForm(data, 'order_pdf', true)).bytes);
+    const { text } = await pdfText((await generateOrderForm(data, 'order_pdf', true)).pages[0]);
     expect(text).toContain('777');
     expect(text.match(/15\s?209,88/g)).toHaveLength(1);
   });
@@ -126,7 +126,7 @@ describe('order forms', () => {
     await expect(generateOrderForm(order(3), 'order_excel', false)).rejects.toMatchObject({ code: 'ORDER_SEND_FINANCIALS_REQUIRED' });
     const excel = await generateOrderForm(order(60), 'order_excel', true);
     expect(excel.extension).toBe('xlsx');
-    expect(excel.bytes.subarray(0, 2).toString()).toBe('PK');
+    expect(excel.pages[0].subarray(0, 2).toString()).toBe('PK');
   });
 });
 

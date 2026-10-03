@@ -27,7 +27,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
     <Dropdown
       dropdownRender={() => (
         <div>
-          <MyWhatsAppSendsBlock items={whatsappSends.items} />
+          <MyWhatsAppSendsBlock items={whatsappSends.items} onChanged={whatsappSends.refresh} />
           <NotificationPanel
             notificationsState={notifications}
           />

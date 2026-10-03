@@ -13,7 +13,7 @@ import { ORDER_SEND_FILE_MAX_BYTES } from './order-send.types';
 export const ORDER_SEND_STORE_MAX_BYTES = 512 * 1024 * 1024;
 /** An unreferenced file older than this is a crash remnant (write committed nowhere). */
 const ORPHAN_AGE_MS = 60 * 60_000;
-// png: pictures of the image forms of a newer release; this release only keeps their retention.
+// png: pictures of the image forms (one file per page).
 const KEY = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.(?:pdf|xlsx|png)$/;
 const TEMP = /^\.[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.(?:pdf|xlsx|png)\.[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.tmp$/;
 

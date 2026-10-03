@@ -83,7 +83,23 @@ function cooldownText(error: ApiError): string {
   return [head, next].filter(Boolean).join(' ') || 'Отправлять из карточек можно не чаще заданного интервала. Повторите позже.';
 }
 
+function alreadyQueuedText(error: ApiError): string {
+  const details = (error.details ?? {}) as { estimatedAt?: unknown };
+  const when = typeof details.estimatedAt === 'string' && Number.isFinite(Date.parse(details.estimatedAt))
+    ? `, уйдёт ≈ ${formatScheduleTime(details.estimatedAt)}` : '';
+  return `Эта форма этому получателю уже ждёт отправки${when}. Отменить её можно под колокольчиком.`;
+}
+
+function queueFullText(error: ApiError): string {
+  const details = (error.details ?? {}) as { scope?: unknown; limit?: unknown };
+  return details.scope === 'actor'
+    ? `У вас уже ${typeof details.limit === 'number' ? details.limit : 20} отправок в очереди. Дождитесь их или отмените лишние.`
+    : 'Очередь отправок из карточек заполнена. Повторите позже.';
+}
+
 const CODE_TEXTS: Record<string, { type: OrderSendToastType; text: string }> = {
+  ORDER_SEND_TOO_LONG: { type: 'warning', text: 'Заказ не помещается в 20 изображений. Отправьте PDF или Excel.' },
+  // An older backend refuses instead of queueing (mixed deploy).
   ORDER_SEND_ACTIVE: { type: 'warning', text: 'Предыдущая отправка ещё выполняется, повторите через минуту' },
   ORDER_SEND_DISABLED: { type: 'warning', text: 'Отправка заказов из карточки отключена в настройках' },
   ORDER_SEND_PAUSED: { type: 'warning', text: 'Все рассылки остановлены' },
@@ -103,6 +119,8 @@ const CODE_TEXTS: Record<string, { type: OrderSendToastType; text: string }> = {
 export function orderSendErrorToast(error: unknown): OrderSendToast {
   if (error instanceof ApiError) {
     if (error.code === 'ORDER_SEND_COOLDOWN') return { type: 'warning', text: cooldownText(error) };
+    if (error.code === 'ORDER_SEND_ALREADY_QUEUED') return { type: 'info', text: alreadyQueuedText(error) };
+    if (error.code === 'ORDER_SEND_QUEUE_FULL') return { type: 'warning', text: queueFullText(error) };
     const known = CODE_TEXTS[error.code];
     if (known) return known;
     if (error.status >= 500) return { type: 'error', text: ORDER_SEND_UNCERTAIN_TEXT };
@@ -111,8 +129,11 @@ export function orderSendErrorToast(error: unknown): OrderSendToast {
   return { type: 'error', text: ORDER_SEND_UNCERTAIN_TEXT };
 }
 
-export function orderSendSuccessToast(targetLabel: string, formTitle: string): OrderSendToast {
-  return { type: 'success', text: `Заказ поставлен в очередь на отправку: ${targetLabel} (${formTitle})` };
+export function orderSendSuccessToast(targetLabel: string, formTitle: string,
+  queue: Pick<OrderSendView, 'position' | 'estimatedAt'> = {}): OrderSendToast {
+  const place = typeof queue.position === 'number' && queue.position > 1 ? ` (№${queue.position})` : '';
+  const when = queue.estimatedAt && Number.isFinite(Date.parse(queue.estimatedAt)) ? `, ≈ ${formatScheduleTime(queue.estimatedAt)}` : '';
+  return { type: 'success', text: `Заказ поставлен в очередь на отправку${place}${when}: ${targetLabel} (${formTitle})` };
 }
 
 const FAILURE_TEXTS: Record<string, string> = {
@@ -120,6 +141,7 @@ const FAILURE_TEXTS: Record<string, string> = {
   WAHA_REJECTED: 'WhatsApp не принял файл',
   WAHA_FILE_UNSUPPORTED: 'WhatsApp не принимает файлы такого типа',
   ORDER_SEND_PAYLOAD_MISSING: 'файл отправки недоступен',
+  ORDER_SEND_FORM_UNSUPPORTED: 'эта форма не поддерживается',
 };
 const CANCEL_TEXTS: Record<string, string> = {
   disabled: 'отправка из карточки выключена',
@@ -128,6 +150,7 @@ const CANCEL_TEXTS: Record<string, string> = {
   form_not_allowed: 'форма больше не разрешена получателю',
   permission_revoked: 'у отправителя больше нет прав',
   paused: 'все рассылки остановлены',
+  manual: 'отменена вручную',
 };
 export const ORDER_SEND_UNKNOWN_TEXT = 'Результат отправки неизвестен: WhatsApp не подтвердил доставку. Проверьте чат, прежде чем отправлять снова.';
 
@@ -136,12 +159,13 @@ export function isOrderSendFinal(state: string): boolean {
 }
 
 /** The toast for the state the server returned (a replay may already be final). */
-export function orderSendStateToast(send: Pick<OrderSendView, 'state' | 'errorCode' | 'cancelReason'>, targetLabel: string, formTitle: string): OrderSendToast {
+export function orderSendStateToast(send: Pick<OrderSendView, 'state' | 'errorCode' | 'cancelReason' | 'position' | 'estimatedAt'>, targetLabel: string,
+  formTitle: string): OrderSendToast {
   const what = `${targetLabel} (${formTitle})`;
   switch (send.state) {
     case 'queued':
     case 'sending':
-      return orderSendSuccessToast(targetLabel, formTitle);
+      return orderSendSuccessToast(targetLabel, formTitle, send);
     case 'sent':
       return { type: 'success', text: `Заказ отправлен: ${what}` };
     case 'failed':
@@ -151,6 +175,9 @@ export function orderSendStateToast(send: Pick<OrderSendView, 'state' | 'errorCo
     case 'expired':
       return { type: 'warning', text: `Отправка не состоялась: ${what} — истёк срок ожидания в очереди` };
     default:
+      if (send.errorCode === 'PARTIAL_DELIVERY') {
+        return { type: 'warning', text: `Ушла только часть изображений: ${what}. Проверьте чат, прежде чем отправлять снова.` };
+      }
       return { type: 'warning', text: `${ORDER_SEND_UNKNOWN_TEXT} (${what})` };
   }
 }
