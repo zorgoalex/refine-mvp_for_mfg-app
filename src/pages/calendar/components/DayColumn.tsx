@@ -10,6 +10,7 @@ import { DayColumnProps, DragItem, ViewMode } from '../types/calendar';
 import { getDayName, formatDateKey, isToday } from '../utils/dateUtils';
 import { calculateTotalArea, areAllOrdersIssued } from '../utils/groupOrdersByDate';
 import { useOperationalUi } from '../../../ui-operational/OperationalPrimitives';
+import { useOptionalUiVariant } from '../../../ui-variant/UiVariantProvider';
 
 /**
  * Компонент колонки дня с заказами
@@ -32,6 +33,8 @@ const DayColumn: React.FC<DayColumnProps> = ({
   showFinancials = true,
 }) => {
   const isOperational = useOperationalUi();
+  const uiVariant = useOptionalUiVariant()?.variant;
+  const isWorkbench = !isOperational && uiVariant === 'workbench';
   const dateKey = formatDateKey(date);
   const dayName = getDayName(date);
   const totalArea = calculateTotalArea(orders);
@@ -115,8 +118,9 @@ const DayColumn: React.FC<DayColumnProps> = ({
           <div className="day-column__header-left">
             <span className="day-column__day-name">{dayName}</span>
             <span className="day-column__date">
-              {isOperational ? `${day}.${month}` : `(${formattedDate})`}
+              {isOperational || isWorkbench ? `${day}.${month}` : `(${formattedDate})`}
             </span>
+            {isWorkbench && isTodayDay ? <span className="day-column__today">сегодня</span> : null}
           </div>
           <div className={`day-column__header-right${onDaySend ? ' day-column__header-right--with-send' : ''}`}>
             {onDaySend ? (
@@ -133,9 +137,16 @@ const DayColumn: React.FC<DayColumnProps> = ({
                 </button>
               </Tooltip>
             ) : null}
+            {isWorkbench ? (
+              <span className="day-column__total-area" title={`Заказов: ${orders.length}`}>
+                {totalArea > 0 ? `${totalArea.toLocaleString('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} м²` : '—'}
+                {orders.length > 0 ? <small className="day-column__count">{orders.length}</small> : null}
+              </span>
+            ) : (
             <span className="day-column__total-area">
               {totalArea > 0 ? `${totalArea.toFixed(2)} м²` : '—'}
             </span>
+            )}
           </div>
         </div>
         {isOperational ? (
@@ -167,7 +178,9 @@ const DayColumn: React.FC<DayColumnProps> = ({
             />
           ))
         ) : (
-          isOperational ? (
+          isWorkbench ? (
+            <div className="day-column__empty">Нет заказов</div>
+          ) : isOperational ? (
             <div className="day-column__drop-empty">
               Перетащите заказ сюда
               <span>или добавьте новый</span>

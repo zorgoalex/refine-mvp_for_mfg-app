@@ -33,6 +33,7 @@ import '../../ui-operational/operational.css';
 import '../styles/tablet.css';
 import '../styles/workbench.css';
 import '../styles/workbench-orders.css';
+import '../styles/workbench-calendar.css';
 
 const EvolutionRouteSkeleton: React.FC = () => (
   <div

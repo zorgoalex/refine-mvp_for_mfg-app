@@ -19,6 +19,7 @@ import { formatDateKey } from '../utils/dateUtils';
 import { ProductionStagesDisplay } from '../../../components/ProductionStagesDisplay';
 import { useOperationalUi } from '../../../ui-operational/OperationalPrimitives';
 import { buildCalendarOrderDragPreview } from './calendarDragPreview';
+import { useOptionalUiVariant } from '../../../ui-variant/UiVariantProvider';
 
 /**
  * Компонент карточки заказа (стандартный вид)
@@ -55,6 +56,9 @@ const OrderCard: React.FC<OrderCardProps> = ({
 }) => {
   const navigate = useNavigate();
   const isOperational = useOperationalUi();
+  // «NewLine»: a compact card from the same data and with the same actions
+  const uiVariant = useOptionalUiVariant()?.variant;
+  const isWorkbench = !isOperational && uiVariant === 'workbench';
 
   // AD-mobile: double-tap on the card opens the context menu. We use
   // touchstart/touchend (not `click`) so the gesture works even when
@@ -310,6 +314,93 @@ const OrderCard: React.FC<OrderCardProps> = ({
     : isReadyToIssue
     ? 'order-card--ready-to-issue'
     : '';
+
+  if (isWorkbench) {
+    const orderDate = order.order_date ? formatDateKey(order.order_date).slice(0, 5) : null;
+    return (
+      <div
+        ref={setCardRef}
+        className={`order-card order-card--wb ${isDragging || isDraggingProp ? 'order-card--dragging' : ''} ${borderClass}`}
+        style={{
+          ['--wb-card-stripe' as string]: backgroundColor,
+          transform: cardScale !== 1 ? `scale(${cardScale})` : undefined,
+          transformOrigin: 'top center',
+          marginBottom: marginCompensation,
+        }}
+        onContextMenu={onContextMenu ? (e) => onContextMenu(e, order) : undefined}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchCancel}
+        onClick={handleCardClick}
+      >
+        <div className="order-card__header">
+          <Checkbox
+            checked={isIssued}
+            onChange={handleCheckboxChange}
+            onClick={(e) => e.stopPropagation()}
+            className="order-card__checkbox"
+            aria-label="Отметить как выдан"
+          />
+          <span
+            className={`order-card__number${order.order_name?.startsWith('К') ? ' order-card__number--k' : ''}`}
+            onClick={handleOrderClick}
+          >
+            {order.order_name}
+            {order.basis_project_display && (
+              <span className="order-card__basis">{` - ${order.basis_project_display}`}</span>
+            )}
+          </span>
+          {isDrawn && (
+            <Tooltip title="Отрисован">
+              <EditOutlined className="order-card__edit-icon order-card__edit-icon--indicator" />
+            </Tooltip>
+          )}
+          {orderDate ? <span className="order-card__date" title="Дата заказа">{orderDate}</span> : null}
+        </div>
+        {order.client_name ? (
+          <div className="order-card__client" title={order.client_name}>{order.client_name}</div>
+        ) : null}
+        <div className="order-card__facts">
+          <b>{order.total_area > 0 ? `${order.total_area.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} м²` : '0 м²'}</b>
+          {millingDisplay ? <span title={millingDisplay}>{millingDisplay}</span> : null}
+        </div>
+        {materials.length > 0 && (
+          <div className="order-card__materials">
+            {materials.map((mat, index) => (
+              <Tag
+                key={`${mat.fullName}-${index}`}
+                className="order-card__material-tag"
+                style={{ ['--wb-material' as string]: getMaterialColor(mat.fullName) }}
+              >
+                {mat.name}
+              </Tag>
+            ))}
+          </div>
+        )}
+        {paymentText || passedProductionCodes.length > 0 ? (
+          <div className="order-card__footer">
+            {paymentText ? (
+              <span className={`order-card__payment order-card__payment--${isNotPaid ? 'danger' : 'muted'}`}>{paymentText}</span>
+            ) : null}
+            {passedProductionCodes.length > 0 && (
+              <span className="order-card__production-stages" data-ready={allProductionReady}>
+                <ProductionStagesDisplay
+                  passedCodes={passedProductionCodes}
+                  displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
+                  codeToLetter={productionWorkflowDisplay?.codeToLetter}
+                  codeToName={productionWorkflowDisplay?.codeToName}
+                  fontSize={10.5}
+                  showTooltip={true}
+                  passedColor="var(--wb-cal-stage, #6b7685)"
+                />
+              </span>
+            )}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div

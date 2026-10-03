@@ -58,6 +58,8 @@ import { announceWhatsAppSendQueued, currentOwner } from '../../../components/wh
 import { useCalendarSendSupport } from '../../configuration/components/broadcasts/calendarSendSupport';
 import { useCalendarSendTooltip } from '../../configuration/components/broadcasts/calendarSendTarget';
 import { useResponsive } from '../hooks/useResponsive';
+import { useOptionalUiVariant } from '../../../ui-variant/UiVariantProvider';
+import { buildWorkbenchWeeks, workbenchColumnWidth, workbenchPeriodSummary } from '../utils/workbenchCalendar';
 import { useOperationalUi } from '../../../ui-operational/OperationalPrimitives';
 import {
   isWorkspaceOperationOwnershipLost,
@@ -197,6 +199,9 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   onFiltersChange,
 }) => {
   const isOperational = useOperationalUi();
+  // «NewLine»: weeks Monday–Sunday in rows of seven days; the same orders, menus and drag and drop.
+  const uiVariant = useOptionalUiVariant()?.variant;
+  const isWorkbench = !isOperational && uiVariant === 'workbench';
   const containerRef = useRef<HTMLDivElement>(null);
   const [filterForm] = Form.useForm();
   const [containerWidth, setContainerWidth] = useState(1200);
@@ -243,7 +248,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
     responsive.isMobile ? ViewMode.BRIEF : ViewMode.STANDARD,
   );
   const [mobileControlsExpanded, setMobileControlsExpanded] = useState(false);
-  const [periodDays, setPeriodDays] = useState<7 | 14 | 30>(7);
+  const [periodDays, setPeriodDays] = useState<7 | 14 | 30>(isWorkbench ? 14 : 7);
   const [productionOnly, setProductionOnly] = useState(true);
   // Масштабирование карточек: 1.0 = дефолт (100%), диапазон от 0.7 (70%) до 1.5 (150%)
   const [cardScale, setCardScale] = useState<number>(1.0);
@@ -255,14 +260,22 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
 
   // Генерация дней календаря
   // AD-6: stepDays=1 на mobile (по 1 дню), stepDays=7 на desktop (по неделе)
+  const isWorkbenchGrid = isWorkbench && !isMobile;
   const { days, startDate, endDate, goToToday, goForward, goBackward } =
     useCalendarDays({
-      stepDays: isMobile ? 1 : isOperational ? periodDays : 7,
-      daysAfter: isOperational ? 24 : 10,
+      stepDays: isMobile ? 1 : isOperational || isWorkbenchGrid ? periodDays : 7,
+      daysAfter: isOperational ? 24 : isWorkbenchGrid ? 42 : 10,
+      daysBefore: isWorkbenchGrid ? 7 : 5,
     });
+  const workbenchWeeks = useMemo(
+    () => (isWorkbenchGrid ? buildWorkbenchWeeks(days[7] ?? days[0], periodDays) : []),
+    [days, isWorkbenchGrid, periodDays],
+  );
   const displayedDays = useMemo(
-    () => isOperational ? days.slice(0, periodDays) : days,
-    [days, isOperational, periodDays],
+    () => isWorkbenchGrid
+      ? workbenchWeeks.flatMap((week) => week.days)
+      : isOperational ? days.slice(0, periodDays) : days,
+    [days, isOperational, isWorkbenchGrid, periodDays, workbenchWeeks],
   );
   const periodLabel = useMemo(() => {
     const first = displayedDays[0];
@@ -708,7 +721,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   }, []);
 
   // Вычисляем layout (количество колонок и их ширину) с учетом масштаба
-  const { columnWidth, columnsPerRow } = useMemo(() => {
+  const { columnWidth: baseColumnWidth, columnsPerRow } = useMemo(() => {
     return calculateColumnsPerRow(
       containerWidth,
       isMobileDevice(containerWidth),
@@ -716,11 +729,24 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
       isNarrowDevice(containerWidth),
     );
   }, [containerWidth, cardScale]);
+  const columnWidth = isWorkbenchGrid ? workbenchColumnWidth(containerWidth) : baseColumnWidth;
 
   // Группируем дни по рядам
   const dayRows = useMemo(() => {
+    if (isWorkbenchGrid) return workbenchWeeks.map((week) => week.days);
     return isOperational ? [displayedDays] : groupDaysIntoRows(displayedDays, columnsPerRow);
-  }, [columnsPerRow, displayedDays, isOperational]);
+  }, [columnsPerRow, displayedDays, isOperational, isWorkbenchGrid, workbenchWeeks]);
+  const visibleOrdersOf = (day: Date): CalendarOrder[] => {
+    const allDayOrders = ordersByDate[formatDateKey(day)] || [];
+    return productionOnly
+      ? allDayOrders.filter((order) =>
+          (order.order_details?.length ?? 0) > 0 ||
+          (order.passedProductionCodes?.length ?? 0) > 0)
+      : allDayOrders;
+  };
+  const workbenchSummary = isWorkbenchGrid
+    ? workbenchPeriodSummary(displayedDays.map((day) => visibleOrdersOf(day)))
+    : null;
 
   // Обработка ошибок
   if (error) {
@@ -761,7 +787,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
           : undefined
       }
     >
-      <div className="calendar-board" ref={containerRef}>
+      <div className={isWorkbenchGrid ? 'calendar-board calendar-board--wb' : 'calendar-board'} ref={containerRef}>
         <CalendarOrderDragLayer enabled={isTabletLayout} />
         <MobileCalendarDisclosure
           mobile={isMobile}
@@ -850,6 +876,98 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
               />
             </div>
           </>
+        ) : isWorkbench ? (
+          <div className="wb-cal-toolbar">
+            <div className="wb-cal-toolbar__period">
+              <h2>Производственный календарь</h2>
+              <span>
+                {periodLabel}
+                {workbenchSummary ? (
+                  <>
+                    {' · запланировано '}
+                    {workbenchSummary.area.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} м²
+                    {' · '}
+                    {workbenchSummary.orders} {workbenchSummary.ordersWord}
+                  </>
+                ) : null}
+              </span>
+            </div>
+            <span className="wb-cal-toolbar__grow" />
+            <Space size={4}>
+              <Tooltip title={`Назад на ${periodDays === 30 ? 'месяц' : periodDays === 14 ? 'две недели' : 'неделю'}`}>
+                <Button aria-label="Назад" icon={<LeftOutlined />} onClick={goBackward} />
+              </Tooltip>
+              <Button onClick={goToToday}>Сегодня</Button>
+              <Tooltip title={`Вперёд на ${periodDays === 30 ? 'месяц' : periodDays === 14 ? 'две недели' : 'неделю'}`}>
+                <Button aria-label="Вперёд" icon={<RightOutlined />} onClick={goForward} />
+              </Tooltip>
+            </Space>
+            <Segmented
+              options={[
+                { label: 'Неделя', value: 7 },
+                { label: '2 недели', value: 14 },
+                { label: 'Месяц', value: 30 },
+              ]}
+              value={periodDays}
+              onChange={(value) => setPeriodDays(value as 7 | 14 | 30)}
+            />
+            <Segmented
+              options={[
+                { label: 'Подробно', value: ViewMode.STANDARD },
+                { label: 'Компактно', value: ViewMode.COMPACT },
+                { label: 'Кратко', value: ViewMode.BRIEF },
+              ]}
+              value={viewMode}
+              onChange={(value) => setViewMode(value as ViewMode)}
+            />
+            <span className="wb-cal-toolbar__break" aria-hidden />
+            <Input
+              allowClear
+              className="wb-cal-toolbar__search"
+              prefix={<SearchOutlined />}
+              placeholder="Заказ / клиент"
+              value={filters.quickSearch}
+              onChange={handleQuickSearchChange}
+            />
+            <Button
+              className={productionOnly ? 'wb-cal-toolbar__toggle is-active' : 'wb-cal-toolbar__toggle'}
+              aria-pressed={productionOnly}
+              onClick={() => setProductionOnly((active) => !active)}
+              icon={<ToolOutlined />}
+            >
+              Только производство
+            </Button>
+            {onFiltersToggle ? (
+              <Badge count={activeFilterCount} size="small" offset={[-4, 5]}>
+                <Button
+                  type={filtersOpen || activeFilterCount > 0 ? 'primary' : 'default'}
+                  icon={<FilterOutlined />}
+                  aria-expanded={filtersOpen}
+                  onClick={onFiltersToggle}
+                >
+                  {filtersOpen ? 'Скрыть фильтры' : 'Фильтры'}
+                </Button>
+              </Badge>
+            ) : null}
+            <Tooltip title="Обновить данные">
+              <Button aria-label="Обновить" icon={<ReloadOutlined />} onClick={() => refetch()} loading={isLoading || isMoving} />
+            </Tooltip>
+            {isZoomAvailable ? (
+              <Space size={2} className="wb-cal-toolbar__zoom">
+                <Tooltip title="Уменьшить">
+                  <Button aria-label="Уменьшить масштаб" type="text" icon={<ZoomOutOutlined />} onClick={handleZoomOut} disabled={cardScale <= MIN_SCALE} />
+                </Tooltip>
+                <Tooltip title="Сбросить масштаб">
+                  <Button aria-label="Сбросить масштаб" type="text" onClick={handleZoomReset} disabled={Math.abs(cardScale - DEFAULT_SCALE) < 0.01}>
+                    {Math.round(cardScale * 100)}%
+                  </Button>
+                </Tooltip>
+                <Tooltip title="Увеличить">
+                  <Button aria-label="Увеличить масштаб" type="text" icon={<ZoomInOutlined />} onClick={handleZoomIn} disabled={cardScale >= MAX_SCALE} />
+                </Tooltip>
+              </Space>
+            ) : null}
+          </div>
         ) : isOperational ? (
           <div className="calendar-navigation__operational">
             <Space size="small">
@@ -1122,7 +1240,11 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
       {!isLoading && (
         <div className="calendar-grid" role="region" aria-label="Производственный календарь">
           {dayRows.map((row, rowIndex) => (
-            <div key={`row-${rowIndex}`} className="calendar-row">
+            <React.Fragment key={`row-${rowIndex}`}>
+            {isWorkbenchGrid && workbenchWeeks[rowIndex] ? (
+              <div className="wb-cal-week-label">{workbenchWeeks[rowIndex].label}</div>
+            ) : null}
+            <div className="calendar-row">
               {row.map((day) => {
                 const dateKey = formatDateKey(day);
                 const allDayOrders = ordersByDate[dateKey] || [];
@@ -1154,6 +1276,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
                 );
               })}
             </div>
+            </React.Fragment>
           ))}
         </div>
       )}

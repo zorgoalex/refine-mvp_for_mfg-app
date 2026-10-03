@@ -6,6 +6,7 @@ import type { CalendarFilters } from './types/calendar';
 import { getCalendarActiveFilterCount } from './utils/calendarFilters';
 import { OperationalPageHeader, useOperationalUi } from '../../ui-operational/OperationalPrimitives';
 import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
+import { useOptionalUiVariant } from '../../ui-variant/UiVariantProvider';
 import './styles/calendar.css';
 import './styles/calendar-mobile.css';
 
@@ -16,6 +17,9 @@ import './styles/calendar-mobile.css';
 export const CalendarList: React.FC = () => {
   const { workspaceActive } = useKeepAlive();
   const isOperational = useOperationalUi();
+  // «NewLine»: the title, period and filters live in the calendar toolbar itself
+  const uiVariant = useOptionalUiVariant()?.variant;
+  const isWorkbench = !isOperational && uiVariant === 'workbench';
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState<CalendarFilters>({});
   const activeFilterCount = useMemo(() => getCalendarActiveFilterCount(filters), [filters]);
@@ -57,7 +61,7 @@ export const CalendarList: React.FC = () => {
             </>
           )}
         />
-      ) : (
+      ) : isWorkbench ? null : (
         <div className="calendar-page-header">
           <h2>Производственный календарь</h2>
           <div className="calendar-page-header__actions">

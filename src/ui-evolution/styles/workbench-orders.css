@@ -1915,13 +1915,24 @@
 }
 
 /* подбор деталей — во всю ширину над списком и заданием */
-:root[data-ui-variant="workbench"] .cut-page-modern--wb-split > .ant-space-item:has(> .cut-page-modern__criteria) {
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split > .ant-space-item:has(> .cut-page-modern__criteria),
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split > .ant-space-item:has(> .cut-operational-filters),
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split > .ant-space-item:has(> h3),
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split > .ant-space-item:has(> .operational-page-header) {
   grid-column: 1 / -1;
+}
+
+/* полная страница «Раскрой»: список шире (вкладки «Ванны / Раскрои»), список прокручивается сам */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split.cut-page-modern--standalone {
+  /* на своей странице над списком нет строки заказа */
+  --wb-order-bar-height: 0px;
+  grid-template-columns: 260px minmax(0, 1fr);
 }
 
 :root[data-ui-variant="workbench"] .cut-page-modern--wb-split > .ant-space-item:has(> .cut-page-modern__jobs) {
   grid-column: 1;
-  grid-row: 2 / span 80;
+  /* начинается под блоками во всю ширину (заголовок, подбор, фильтры), сколько бы их ни было */
+  grid-row: span 80;
   position: sticky;
   top: calc(var(--wb-order-sticky-top, 48px) + var(--wb-order-bar-height, 52px) + 12px);
 }

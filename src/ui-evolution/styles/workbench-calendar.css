@@ -1,0 +1,400 @@
+/* «NewLine»: производственный календарь — недели пн–вс по семь дней в ряд, спокойные карточки.
+   Только оформление: данные, меню, перетаскивание и режимы вида — прежние. */
+
+:root[data-ui-variant="workbench"] .calendar-page-header {
+  padding: 18px 24px 0;
+}
+
+:root[data-ui-variant="workbench"] .calendar-page-header h2 {
+  color: var(--evo-text);
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+/* ---------- панель управления ---------- */
+:root[data-ui-variant="workbench"] .calendar-board--wb .calendar-navigation {
+  padding: 18px 24px 12px;
+  border-bottom: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-cal-toolbar {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cal-toolbar__period {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+:root[data-ui-variant="workbench"] .wb-cal-toolbar__period h2 {
+  margin: 0;
+  color: var(--evo-text);
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+
+/* вторая строка: поиск и переключатели прижаты вправо под основными кнопками */
+:root[data-ui-variant="workbench"] .wb-cal-toolbar__break {
+  flex: 1 0 100%;
+  height: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-cal-toolbar__break ~ .wb-cal-toolbar__search {
+  margin-left: auto;
+}
+
+:root[data-ui-variant="workbench"] .wb-cal-toolbar__period span {
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-cal-toolbar__grow {
+  flex: 1 1 auto;
+  min-width: 8px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cal-toolbar__search {
+  width: clamp(160px, 14vw, 220px);
+}
+
+:root[data-ui-variant="workbench"] .wb-cal-toolbar__toggle.is-active {
+  border-color: var(--evo-primary);
+  background: var(--evo-primary-soft, rgba(39, 100, 231, 0.08));
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-cal-toolbar__zoom .ant-btn {
+  padding-inline: 6px;
+  color: var(--evo-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- сетка недель ---------- */
+:root[data-ui-variant="workbench"] .calendar-board--wb .calendar-grid {
+  padding: 4px 24px 24px;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .wb-cal-week-label {
+  margin: 4px 0 8px;
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .calendar-row {
+  flex-wrap: nowrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+/* ---------- день ---------- */
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column {
+  /* семь равных колонок по ширине ряда (с полосой прокрутки и без) */
+  flex: 1 1 0;
+  width: auto !important;
+  min-width: 0;
+  min-height: 140px;
+  border: 1px solid var(--evo-border);
+  border-radius: 10px;
+  background: var(--evo-surface);
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column--today {
+  border-color: var(--evo-primary);
+  box-shadow: 0 0 0 1px var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column--all-issued {
+  border-color: color-mix(in srgb, var(--evo-success, #1f9d55) 55%, var(--evo-border));
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column--sunday {
+  background: var(--evo-surface-muted);
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column--drag-over {
+  border-color: var(--evo-primary) !important;
+  background: color-mix(in srgb, var(--evo-primary) 6%, var(--evo-surface)) !important;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column__header {
+  padding: 9px 10px 8px;
+  border-bottom: 1px solid var(--evo-border);
+  border-radius: 10px 10px 0 0;
+  background: transparent;
+  cursor: default;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column--sunday .day-column__header {
+  background: transparent;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column__header-left {
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column__day-name {
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column__date {
+  color: var(--evo-text);
+  font-size: 14px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column__today {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--evo-primary);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column__total-area {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  color: var(--evo-text);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column__count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--evo-surface-muted);
+  color: var(--evo-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column__orders {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding: 6px;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column__empty {
+  padding: 14px 4px;
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  text-align: center;
+  opacity: 0.75;
+}
+
+/* ---------- карточка заказа ---------- */
+:root[data-ui-variant="workbench"] .order-card--wb {
+  --wb-cal-stage: var(--evo-text-secondary);
+  position: relative;
+  display: grid;
+  gap: 2px;
+  margin: 0 !important;
+  padding: 6px 8px 7px 10px;
+  border: 1px solid var(--evo-border);
+  border-left: 0;
+  border-radius: 8px;
+  background: var(--evo-surface) !important;
+  box-shadow: none;
+  font-size: 12px;
+  line-height: 1.3;
+  cursor: grab;
+}
+
+/* полоска статуса заказа — тихий цвет слева */
+:root[data-ui-variant="workbench"] .order-card--wb::before {
+  content: '';
+  position: absolute;
+  inset: -1px auto -1px -1px;
+  width: 3px;
+  border-radius: 8px 0 0 8px;
+  background: color-mix(in srgb, var(--wb-card-stripe, var(--evo-border-strong)) 70%, var(--evo-text-secondary));
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb:hover {
+  border-color: var(--evo-border-strong);
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb.order-card--dragging {
+  opacity: 0.5;
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb .order-card__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb .order-card__checkbox {
+  flex: none;
+  margin: 0;
+  transform: scale(0.85);
+  transform-origin: left center;
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb .order-card__number {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--evo-text);
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb .order-card__number:hover {
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb .order-card__number--k {
+  color: #8b4513;
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb .order-card__basis {
+  color: var(--evo-danger, #c33b32);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb .order-card__edit-icon {
+  flex: none;
+  color: #d48806;
+  font-size: 11px;
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb .order-card__date {
+  flex: none;
+  margin-left: auto;
+  color: var(--evo-text-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb .order-card__client {
+  overflow: hidden;
+  color: var(--evo-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb .order-card__facts {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb .order-card__facts b {
+  flex: none;
+  color: var(--evo-text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb .order-card__facts span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb .order-card__materials {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin: 1px 0 0;
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb .order-card__material-tag {
+  margin: 0;
+  padding: 0 5px;
+  border: 1px solid color-mix(in srgb, var(--wb-material, var(--evo-border)) 80%, var(--evo-border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--wb-material, var(--evo-surface-muted)) 35%, var(--evo-surface));
+  color: var(--evo-text);
+  font-size: 10.5px;
+  line-height: 15px;
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb .order-card__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2px 8px;
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb .order-card__payment {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb .order-card__payment--muted {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb .order-card__payment--danger {
+  color: var(--evo-danger, #c33b32);
+}
+
+/* этапы производства — приглушённо, без цветной плашки */
+:root[data-ui-variant="workbench"] .order-card--wb .order-card__production-stages {
+  margin-left: auto;
+  padding: 0;
+  background: transparent !important;
+  opacity: 0.85;
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb .order-card__production-stages[data-ready="true"] {
+  --wb-cal-stage: color-mix(in srgb, var(--evo-success, #1f9d55) 75%, var(--evo-text-secondary));
+}
+
+/* компактный и краткий виды — те же тихие поверхности */
+:root[data-ui-variant="workbench"] .calendar-board--wb .order-card--compact {
+  border-radius: 7px;
+  box-shadow: none;
+  border: 1px solid var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column--brief {
+  border: 1px solid var(--evo-border);
+  border-radius: 10px;
+  box-shadow: none;
+}

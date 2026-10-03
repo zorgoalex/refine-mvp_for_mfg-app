@@ -985,8 +985,10 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   // «NewLine»: the jobs list is drawn as cards from the same column renderers.
   const uiVariant = useOptionalUiVariant()?.variant;
   const isWorkbench = !isOperational && uiVariant === 'workbench';
-  // in the order card/form the jobs are a narrow list on the left and the open job fills the right side
-  const isWorkbenchSplit = isWorkbench && embeddedOrderId != null;
+  // the jobs are a narrow list on the left and the open job fills the right side
+  // (the order card/form tab and the full «Раскрой» page alike)
+  const isWorkbenchSplit = isWorkbench;
+  const isWorkbenchOrderTab = isWorkbench && embeddedOrderId != null;
   const canViewCut = can('cut.view');
   const canManage = can('cut.manage');
   const canViewOrders = can('orders.view');
@@ -4020,7 +4022,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       <Checkbox checked={showDeletedJobs} onChange={(event) => setShowDeletedJobs(event.target.checked)}>
         Показывать удалённые
       </Checkbox>
-      {canManage && !isWorkbenchSplit && (
+      {canManage && !isWorkbenchOrderTab && (
         <Button icon={<UploadOutlined />} onClick={() => setSvgUploadOpen(true)}>
           SVG
         </Button>
@@ -4574,8 +4576,10 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           {jobsLoading || busy
             ? 'Загрузка задания…'
             : filteredJobs.length === 0
-              ? 'Для этого заказа ещё нет заданий на раскрой. Выберите плёнки и нажмите «Подбор деталей на раскрой».'
-              : 'Выберите задание в списке слева.'}
+              ? (isEmbeddedOrder
+                ? 'Для этого заказа ещё нет заданий на раскрой. Выберите плёнки и нажмите «Подбор деталей на раскрой».'
+                : 'Заданий по выбранным условиям нет.')
+              : 'Выберите задание в списке слева — оно откроется здесь.'}
         </div>
       ) : null}
 

@@ -55,6 +55,10 @@ async function openCut(page: Page, uiVariant: 'workbench' | 'evolution') {
     }));
   await page.route(/\/api\/v1\/cut-jobs(\?.*)?$/, (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(JOBS) }));
+  await page.route(/\/api\/v1\/cut-jobs\/(1|2|3)$/, (route) => {
+    const id = Number(route.request().url().split('/').pop());
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(JOBS.find((item) => item.cutJobId === id)) });
+  });
   await page.goto('/cut', { waitUntil: 'domcontentloaded' });
   await page.getByRole('tab', { name: 'Раскрои' }).click();
   return pageErrors;
@@ -63,21 +67,39 @@ async function openCut(page: Page, uiVariant: 'workbench' | 'evolution') {
 test.describe('Cut jobs list in NewLine (mocked-local)', () => {
   test.setTimeout(180000);
 
-  test('jobs are cards with every table value and action, sortable', async ({ page }) => {
+  test('jobs are a list on the left; a click opens the job on the right', async ({ page }) => {
     const pageErrors = await openCut(page, 'workbench');
 
     const cards = page.getByTestId('cut-job-card');
     await expect(cards).toHaveCount(3, { timeout: 60000 });
     await expect(page.locator('.cut-jobs-table')).toHaveCount(0);
+    await expect(page.getByTestId('cut-job-empty')).toContainText('Выберите задание в списке слева');
 
     const first = cards.filter({ hasText: 'E2E-Тест раскрой кухня' });
-    for (const label of ['Позиции', 'Детали', 'Площадь', 'Листы']) {
+    for (const label of ['Детали', 'Площадь', 'Листы']) {
       await expect(first.locator('.wb-cut-job__label', { hasText: label }).first()).toBeVisible();
     }
     await expect(first.getByText('Открыть').first()).toBeVisible();
     // карточка не шире своей колонки и ничего не обрезает по горизонтали
     for (const card of await cards.all()) {
       expect(await card.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+    }
+
+    // клик по карточке открывает задание справа от списка, на том же экране
+    await first.locator('.wb-cut-job__name').click();
+    const jobCard = page.locator('.cut-page-modern__job');
+    await expect(jobCard).toBeVisible({ timeout: 30000 });
+    await expect(jobCard).toContainText('E2E-Тест раскрой кухня');
+    await expect(first).toHaveAttribute('data-active', 'true');
+    const layout = await page.evaluate(() => {
+      const rail = document.querySelector('.cut-page-modern__jobs')!.getBoundingClientRect();
+      const job = document.querySelector('.cut-page-modern__job')!.getBoundingClientRect();
+      return { right: job.left >= rail.right, inView: job.top < window.innerHeight };
+    });
+    expect(layout).toEqual({ right: true, inView: true });
+    if (shotsDir) {
+      await page.waitForTimeout(600);
+      await page.screenshot({ path: `${shotsDir}/cut-page-split.png` });
     }
 
     await page.locator('.wb-cut-jobs__toolbar .ant-select').click();

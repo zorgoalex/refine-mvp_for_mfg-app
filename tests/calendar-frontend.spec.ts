@@ -65,6 +65,80 @@ test.describe('Calendar frontend', () => {
         });
     }
 
+    test('NewLine: weeks Monday–Sunday in rows of seven days with calm cards', async ({ page }) => {
+        test.setTimeout(150_000);
+        await page.setViewportSize({ width: 1440, height: 900 });
+        const db = createWorkflowMockDb();
+        const today = new Date();
+        seedCalendarFrontendOrder(db, formatLocalDate(today));
+        const base = db.orders.find((order) => order.order_id === 201)!;
+        base.order_name = 'E2E-Тест календарь';
+        const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+        db.orders.push({ ...base, order_id: 204, order_name: 'E2E-Тест завтра', planned_completion_date: formatLocalDate(tomorrow) });
+        db.order_details.push({ ...db.order_details[0], detail_id: 306, order_id: 204 });
+        const errors: string[] = [];
+        page.on('pageerror', (error) => errors.push(error.message));
+        await setupWorkflowMockApi(page, db, { uiVariant: 'workbench', runtimeConfig: { backendOrdersRead: false } });
+
+        await page.goto('/calendar', { waitUntil: 'domcontentloaded' });
+        const grid = page.getByRole('region', { name: 'Производственный календарь' });
+        await expect(grid).toBeVisible({ timeout: 60_000 });
+        await expect(page.locator('.calendar-board--wb')).toBeVisible();
+
+        // две недели по умолчанию: подписи недель и по семь дней пн–вс в ряду
+        await expect(page.locator('.wb-cal-week-label')).toHaveCount(2);
+        await expect(page.locator('.wb-cal-week-label').first()).toContainText('Эта неделя');
+        const rows = await page.locator('.calendar-board--wb .calendar-row').evaluateAll((elements) => elements.map((row) => {
+            const days = [...row.querySelectorAll(':scope > .day-column')];
+            return {
+                count: days.length,
+                first: days[0]?.querySelector('.day-column__day-name')?.textContent?.trim(),
+                widths: [...new Set(days.map((day) => Math.round(day.getBoundingClientRect().width)))],
+                overflow: row.scrollWidth - row.clientWidth,
+            };
+        }));
+        expect(rows).toHaveLength(2);
+        for (const row of rows) {
+            expect(row.count).toBe(7);
+            expect(row.first).toMatch(/^Пн/);
+            expect(row.widths).toHaveLength(1);
+            expect(row.overflow).toBeLessThanOrEqual(1);
+        }
+        await expect(page.locator('.day-column--today .day-column__today')).toHaveText('сегодня');
+
+        // карточки: номер, клиент, площадь — без горизонтального переполнения
+        const card = page.locator('.order-card--wb').filter({ hasText: 'E2E-Тест календарь' });
+        await expect(card).toBeVisible();
+        await expect(page.locator('.order-card--wb').filter({ hasText: 'E2E-Тест завтра' })).toBeVisible();
+        expect(await card.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+        await expect(page.locator('.wb-cal-toolbar__period span')).toContainText('запланировано');
+
+        // все прежние режимы на месте
+        for (const mode of ['Компактно', 'Кратко', 'Подробно']) {
+            await page.locator('.wb-cal-toolbar .ant-segmented-item').filter({ hasText: mode }).click();
+            const cards = page.locator(mode === 'Кратко' ? '.day-column-brief__order-item' : mode === 'Компактно' ? '.order-card--compact' : '.order-card--wb');
+            await expect(cards.filter({ hasText: 'E2E-Тест календарь' })).toBeVisible();
+        }
+        if (process.env.WORKBENCH_SHOTS_DIR) await page.screenshot({ path: `${process.env.WORKBENCH_SHOTS_DIR}/calendar-workbench.png` });
+
+        await page.locator('.wb-cal-toolbar .ant-segmented-item').filter({ hasText: 'Неделя' }).click();
+        await expect(page.locator('.wb-cal-week-label')).toHaveCount(1);
+        await page.locator('.wb-cal-toolbar .ant-segmented-item').filter({ hasText: 'Месяц' }).click();
+        await expect(page.locator('.wb-cal-week-label')).toHaveCount(5);
+        expect(errors).toEqual([]);
+    });
+
+    test('other variants keep the calendar navigation and day strip', async ({ page }) => {
+        await page.setViewportSize({ width: 1440, height: 900 });
+        const db = createWorkflowMockDb();
+        seedCalendarFrontendOrder(db, formatLocalDate(new Date()));
+        await setupWorkflowMockApi(page, db, { uiVariant: 'evolution', runtimeConfig: { backendOrdersRead: false } });
+        await page.goto('/calendar', { waitUntil: 'domcontentloaded' });
+        await expect(page.getByRole('region', { name: 'Производственный календарь' })).toBeVisible({ timeout: 60_000 });
+        await expect(page.locator('.calendar-navigation__legacy')).toBeVisible();
+        await expect(page.locator('.calendar-board--wb, .wb-cal-week-label, .order-card--wb')).toHaveCount(0);
+    });
+
     test('loads calendar orders through planned completion backend filters', async ({ page }) => {
         const db = createWorkflowMockDb();
         seedCalendarFrontendOrder(db, formatLocalDate(new Date()));
