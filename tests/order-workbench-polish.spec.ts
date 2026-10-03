@@ -509,12 +509,15 @@ test.describe('Workbench orders polish', () => {
         const cards = rail.getByTestId('cut-job-card');
         await expect(cards).toHaveCount(2, { timeout: 60000 });
         await expect(rail.locator('.cut-jobs-table')).toHaveCount(0);
-        // фильтры и действия списка — в самом списке
-        const filters = rail.locator('.wb-cut-rail__filters');
-        await expect(filters.getByText('Показывать удалённые')).toBeVisible();
-        await expect(filters.getByRole('button', { name: 'Обновить' })).toBeVisible();
-        // загрузка SVG в карточке заказа не нужна
-        await expect(rail.getByRole('button', { name: 'SVG' })).toHaveCount(0);
+        // статусы — чипами; действия списка — в меню «⋯»; загрузки SVG в карточке заказа нет
+        await expect(rail.locator('.wb-cut-rail__chip', { hasText: 'Все' })).toContainText('2');
+        await rail.getByRole('button', { name: 'Действия со списком заданий' }).click();
+        await expect(page.getByRole('menuitem', { name: 'Обновить список' })).toBeVisible();
+        await expect(page.getByRole('menuitem', { name: 'Загрузить SVG-раскрой' })).toHaveCount(0);
+        await page.keyboard.press('Escape');
+        await rail.getByRole('button', { name: 'Фильтры заданий' }).click();
+        await expect(page.locator('.wb-cut-drawer--filters').getByText('Показывать удалённые')).toBeVisible();
+        await page.locator('.wb-cut-drawer--filters .ant-drawer-close').click();
 
         // первое задание открывается само; его содержимое — справа от списка
         const jobCard = page.locator('.cut-page-modern__job');
@@ -539,21 +542,24 @@ test.describe('Workbench orders polish', () => {
         await shot(page, 'order-card-cut');
 
         // открытое задание: версии не вылезают за край, заголовок группы виден, у переключателей вида есть подписи
+        await jobCard.getByRole('tab', { name: /Версии расчёта/ }).click();
         await expect(jobCard.locator('.cut-results-block')).toContainText('1-1');
-        const jobLayout = await page.evaluate(() => {
+        const versionsInside = await page.evaluate(() => {
             const job = document.querySelector('.cut-page-modern__job')!.getBoundingClientRect();
-            const versions = document.querySelector('.cut-results-block .ant-table')!.getBoundingClientRect();
-            const visibleRight = Math.min(versions.right, document.querySelector('.cut-results-block')!.getBoundingClientRect().right);
+            const block = document.querySelector('.cut-results-block')!.getBoundingClientRect();
+            return block.right <= job.right + 1;
+        });
+        expect(versionsInside).toBe(true);
+        await jobCard.getByRole('tab', { name: /Листы/ }).click();
+        const jobLayout = await page.evaluate(() => {
             const title = document.querySelector('.cut-page-modern__group .ant-card-head-title') as HTMLElement;
             const item = document.querySelector('.cut-sheet-preview-item') as HTMLElement;
             return {
-                versionsInside: visibleRight <= job.right + 1,
                 titleText: title.innerText.trim(),
                 titleWidth: Math.round(title.getBoundingClientRect().width),
                 itemHeight: Math.round(item.getBoundingClientRect().height),
             };
         });
-        expect(jobLayout.versionsInside).toBe(true);
         expect(jobLayout.titleText).toMatch(/Раскрой|Группа/);
         expect(jobLayout.titleWidth).toBeGreaterThan(150);
         expect(jobLayout.itemHeight).toBeLessThanOrEqual(320);
@@ -567,8 +573,10 @@ test.describe('Workbench orders polish', () => {
         await expect(cards.nth(1)).toHaveAttribute('data-active', 'true');
 
         // подбор деталей можно отменить: блок со списком исчезает, выбор сброшен, список заданий как был
-        await page.getByRole('button', { name: 'Подбор деталей на раскрой' }).click();
-        const preview = page.locator('.cut-page-modern__creation');
+        await rail.getByTestId('cut-new-job').click();
+        const picker = page.locator('.wb-cut-drawer--picker');
+        await picker.getByRole('button', { name: 'Подбор деталей на раскрой' }).click();
+        const preview = picker.locator('.cut-page-modern__creation');
         await expect(preview).toBeVisible({ timeout: 30000 });
         await expect(preview).toContainText('Выбрано: 2');
         await expect(jobCard).toHaveCount(0);

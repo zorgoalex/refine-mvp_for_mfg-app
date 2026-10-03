@@ -1,7 +1,7 @@
 import { cutJobInformationalDetails, type InformationalCutDetailRow } from './cutJobInformationalDetails';
 import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Collapse, DatePicker, Empty, Form, Input, Modal, Popconfirm, Radio, Select, Space, Spin, Tabs, Tag, Typography, message, theme } from 'antd';
+import { Alert, Button, Card, Checkbox, Collapse, DatePicker, Drawer, Empty, Form, Input, Modal, Popconfirm, Radio, Select, Space, Spin, Tabs, Tag, Typography, message, theme } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   CheckOutlined,
@@ -69,6 +69,8 @@ import { pushHistory } from './editorHistory';
 import { CutSheetLabelGenerateAction, type CutSheetLabelDetailInstance } from './CutSheetLabelGenerateAction';
 import { CutSvgUploadModal } from './CutSvgUploadModal';
 import { CutJobCardList } from './CutJobCardList';
+import { CutWorkbenchRail } from './CutWorkbenchRail';
+import { CutWorkbenchJobHead, type CutJobStep } from './CutWorkbenchJobHead';
 import { useOptionalUiVariant } from '../../ui-variant/UiVariantProvider';
 import { CutTelegramImportModal } from './CutTelegramImportModal';
 import { authSession } from '../../api/authSession';
@@ -1261,6 +1263,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const canTelegramImport = canManage && featureFlags.cncTelegram && !isEmbeddedOrder;
   const listFiltersRef = useRef<CutJobListFilters>({});
   const [criteriaOpen, setCriteriaOpen] = useState(false);
+  // «NewLine» cut screen: the new-job picker and the list filters open as side panels,
+  // the open job is split into tabs and its parameters fold into a row of chips
+  const [wbPickerOpen, setWbPickerOpen] = useState(false);
+  const [wbFiltersOpen, setWbFiltersOpen] = useState(false);
+  const [wbJobTab, setWbJobTab] = useState<'sheets' | 'details' | 'versions'>('sheets');
+  const [wbParamsOpen, setWbParamsOpen] = useState(false);
   const [orderOptions, setOrderOptions] = useState<CutOrderSelectOption[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const orderOptionsSeqRef = useRef(0);
@@ -3178,10 +3186,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     resetSheetViews();
   }, [applyPdfTemplateState, jobKindTab, resetSheetViews]);
 
-  const filteredJobs = useMemo(() => {
-    const statusFiltered = statusFilter === 'work'
-      ? jobs.filter((candidate) => candidate.status === 'draft' || candidate.status === 'calculating')
-      : filterJobsByStatus(jobs, statusFilter);
+  // everything the list is narrowed by except the status (the status chips count over this scope)
+  const scopeCutJobs = useCallback((statusFiltered: CutJobDto[]): CutJobDto[] => {
     const kindFiltered = isEmbeddedOrder
       ? statusFiltered
       : statusFiltered.filter((candidate) => cutJobMatchesKindTab(candidate, profiles, jobKindTab));
@@ -3199,7 +3205,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         query &&
         !`${candidate.cutJobId} ${formatCutJobDisplayNumber(candidate, profiles)} ${candidate.name} ${candidate.materialNames.join(' ')}`
           .toLocaleLowerCase('ru-RU')
-          .includes(query)
+          .includes(query) &&
+        // «NewLine»: the one search field also finds a job by its order
+        !(isWorkbench && cutJobMatchesOrderFilter(candidate, jobSearch.trim()))
       ) {
         return false;
       }
@@ -3227,16 +3235,45 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     appliedCutListDateRange,
     appliedJobOrderSearch,
     isEmbeddedOrder,
+    isWorkbench,
     jobSearch,
     jobKindTab,
-    jobs,
-    cutListDateRange,
     operationalFilmFilter,
     operationalSheetFilter,
     profileFilter,
     profiles,
-    statusFilter,
   ]);
+  const filteredJobs = useMemo(() => {
+    const statusFiltered = statusFilter === 'work'
+      ? jobs.filter((candidate) => candidate.status === 'draft' || candidate.status === 'calculating')
+      : filterJobsByStatus(jobs, statusFilter);
+    return scopeCutJobs(statusFiltered);
+  }, [jobs, scopeCutJobs, statusFilter]);
+  const wbRailChips = useMemo(() => {
+    const scope = scopeCutJobs(jobs);
+    const count = (status: string) => scope.filter((candidate) => candidate.status === status).length;
+    return [
+      { value: CUT_JOB_STATUS_FILTER_ALL, label: 'Все', count: scope.length },
+      { value: 'draft', label: 'Черновики', count: count('draft') },
+      ...(count('calculating') > 0 ? [{ value: 'calculating', label: 'В расчёте', count: count('calculating') }] : []),
+      { value: 'ready', label: 'Готовы', count: count('ready') },
+      { value: 'failed', label: 'Ошибка', count: count('failed') },
+    ];
+  }, [jobs, scopeCutJobs]);
+  const wbKindCounts = useMemo(() => ({
+    regular: jobs.filter((candidate) => cutJobMatchesKindTab(candidate, profiles, CUT_JOB_KIND_TAB_REGULAR)).length,
+    vacuum: jobs.filter((candidate) => cutJobMatchesKindTab(candidate, profiles, CUT_JOB_KIND_TAB_VACUUM)).length,
+  }), [jobs, profiles]);
+  const openedJobId = job?.cutJobId ?? null;
+  useEffect(() => {
+    setWbJobTab('sheets');
+    setWbParamsOpen(false);
+    if (openedJobId != null) setWbPickerOpen(false);
+  }, [openedJobId]);
+  useEffect(() => {
+    // «Загрузить подходящие детали» shows its list on the «Детали» tab
+    if (openedJobId != null && eligible !== null) setWbJobTab('details');
+  }, [eligible, openedJobId]);
 
   useEffect(() => {
     if (
@@ -3914,22 +3951,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           ? Math.round(values.reduce((total, value) => total + value, 0) / values.length)
           : null;
       })();
-  const jobCardTitle = job ? (isOperational ? (
-    <div className="cut-job-operational-title">
-      <Text className="cut-job-operational-title__eyebrow">Расчёт и вывод</Text>
-      <Text strong>{job.name}</Text>
-      <Space size={6}>
-        <Tag color={operationalManualMode ? 'orange' : 'blue'}>
-          {operationalManualMode ? 'Ручной раскрой' : 'Автоматический'}
-        </Tag>
-        <Tag color={STATUS_TAG_COLORS[job.status] ?? 'default'}>{cutJobStatusLabel(job.status)}</Tag>
-      </Space>
-    </div>
-  ) : (
-    <Space className="cut-job-card-title" size={8} wrap>
-      <Text strong>Задание на раскрой {jobDisplayNumber}</Text>
-      <Text type="secondary">—</Text>
-      {isEditingJobName ? (
+  // the job name with its inline editor (the card head in every variant)
+  const jobNameNode = job ? (
+      isEditingJobName ? (
         <Space.Compact className="cut-job-name-editor">
           <Input
             size="small"
@@ -3977,7 +4001,24 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             </Tooltip>
           )}
         </>
-      )}
+      )
+  ) : null;
+  const jobCardTitle = job ? (isOperational ? (
+    <div className="cut-job-operational-title">
+      <Text className="cut-job-operational-title__eyebrow">Расчёт и вывод</Text>
+      <Text strong>{job.name}</Text>
+      <Space size={6}>
+        <Tag color={operationalManualMode ? 'orange' : 'blue'}>
+          {operationalManualMode ? 'Ручной раскрой' : 'Автоматический'}
+        </Tag>
+        <Tag color={STATUS_TAG_COLORS[job.status] ?? 'default'}>{cutJobStatusLabel(job.status)}</Tag>
+      </Space>
+    </div>
+  ) : (
+    <Space className="cut-job-card-title" size={8} wrap>
+      <Text strong>Задание на раскрой {jobDisplayNumber}</Text>
+      <Text type="secondary">—</Text>
+      {jobNameNode}
     </Space>
   )) : undefined;
   const jobCardExtra = job ? (
@@ -3999,180 +4040,88 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     return <Alert type="error" message="Недостаточно прав для просмотра раскроя" showIcon />;
   }
 
-  // one set of list controls: the card head in the full page, the top of the jobs rail in the order card
-  const jobsToolbarControls = (
-    <>
-      <Select<string>
-        value={statusFilter}
-        onChange={setStatusFilter}
-        options={[...CUT_JOB_STATUS_FILTER_OPTIONS]}
-        style={{ width: 160 }}
-      />
-      <Select<CutJobProfileFilter>
-        allowClear
-        showSearch
-        optionFilterProp="label"
-        aria-label="Фильтр по профилю раскроя"
-        placeholder="Все профили"
-        options={jobProfileFilterOptions}
-        value={profileFilter}
-        onChange={setProfileFilter}
-        style={{ width: 220 }}
-      />
-      <Checkbox checked={showDeletedJobs} onChange={(event) => setShowDeletedJobs(event.target.checked)}>
-        Показывать удалённые
-      </Checkbox>
-      {canManage && !isWorkbenchOrderTab && (
-        <Button icon={<UploadOutlined />} onClick={() => setSvgUploadOpen(true)}>
-          SVG
-        </Button>
-      )}
-      {canTelegramImport && (
-        <Button
-          icon={<SendOutlined />}
-          onClick={() => setTelegramImportOpen(true)}
-          style={{ minHeight: 40 }}
-        >
-          Импорт из Telegram
-        </Button>
-      )}
-      <Button onClick={() => void loadJobs()} loading={jobsLoading}>
-        Обновить
-      </Button>
-    </>
-  );
-
-  return (
-    <>
-      <Space
-        className={[
-          'cut-page-modern',
-          isEmbeddedOrder ? 'cut-page-modern--embedded' : 'cut-page-modern--standalone',
-          job ? 'cut-page-modern--detail' : 'cut-page-modern--list',
-          isCreationPreview ? 'cut-page-modern--creation-preview' : '',
-          criteriaOpen ? 'cut-page-modern--criteria-open' : '',
-          isWorkbenchSplit ? 'cut-page-modern--wb-split' : '',
-        ].filter(Boolean).join(' ')}
-        direction="vertical"
-        size="large"
-        style={{ width: '100%' }}
-      >
-        {isOperational && !isEmbeddedOrder ? (
-          <>
-            <OperationalPageHeader
-              compact
-              breadcrumbs={job ? `Производство › Раскрой › Задание ${jobDisplayNumber}` : 'Производство › Раскрой'}
-              title={job ? `Задание на раскрой ${jobDisplayNumber}` : 'Раскрой'}
-              description={job
-                ? `${job.name} · рабочая карточка расчёта и печати производственных материалов.`
-                : 'Единый список заданий, версий расчета и производственной готовности.'}
-              actions={job ? (
-                <>
-                  <Button
-                    type="text"
-                    icon={<HistoryOutlined />}
-                    onClick={() => document.querySelector('.cut-results-block')?.scrollIntoView({ behavior: 'smooth' })}
-                  >
-                    История
-                  </Button>
-                  <Button
-                    icon={<UploadOutlined />}
-                    onClick={() => setSvgUploadOpen(true)}
-                    disabled={!canManage}
-                  >
-                    Загрузить SVG
-                  </Button>
-                  {canTelegramImport && (
-                    <Button
-                      icon={<SendOutlined />}
-                      onClick={() => setTelegramImportOpen(true)}
-                      style={{ minHeight: 40 }}
-                    >
-                      Импорт из Telegram
-                    </Button>
-                  )}
-                  <Button
-                    icon={<PrinterOutlined />}
-                    onClick={() => void openJobPdfPreview()}
-                    disabled={job.groups.length === 0 || jobPdfPreviewBlockReason !== null}
-                    loading={busy}
-                  >
-                    Печать
-                  </Button>
-                  <Button
-                    type="primary"
-                    icon={<CheckOutlined />}
-                    disabled={job.status !== 'ready'}
-                    onClick={() => message.success('Задание готово к следующему производственному этапу')}
-                  >
-                    Завершить задание
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <CutImportActionGroup
-                    canManage={canManage}
-                    canTelegramImport={canTelegramImport}
-                    onUpload={() => setSvgUploadOpen(true)}
-                    onTelegramImport={() => setTelegramImportOpen(true)}
-                  />
-                  <Button icon={<DownloadOutlined />} onClick={exportJobs}>
-                    Экспорт
-                  </Button>
-                  <Button
-                    type="primary"
-                    icon={<PlusOutlined />}
-                    onClick={() => setCriteriaOpen((open) => !open)}
-                  >
-                    {criteriaOpen ? 'Скрыть подбор' : 'Подбор деталей на раскрой'}
-                  </Button>
-                </>
-              )}
-            />
-            {job ? (
-              <OperationalKpiGrid columns={5}>
-                <OperationalKpi label="Позиции" value={job.totals.positions} />
-                <OperationalKpi label="Детали" value={job.totals.details} />
-                <OperationalKpi label="Площадь" value={formatArea(job.totals.area)} tone="info" />
-                <OperationalKpi label="Листы" value={job.totals.sheets ?? 0} tone="success" />
-                <OperationalKpi
-                  label="Остаток"
-                  value={operationalWaste == null ? '—' : `${operationalWaste}%`}
-                  hint="по текущему профилю"
-                  tone={operationalWaste != null && operationalWaste > 25 ? 'warning' : 'neutral'}
-                />
-              </OperationalKpiGrid>
-            ) : (
-              <OperationalKpiGrid columns={5}>
-                <OperationalKpi label="Сегодня" value={jobsSummary.total} hint="создано заданий" />
-                <OperationalKpi label="В работе" value={jobsSummary.inProgress} hint="требуют внимания" tone="info" />
-                <OperationalKpi label="Готово" value={jobsSummary.ready} hint="можно печатать" tone="success" />
-                <OperationalKpi label="Листов" value={jobsSummary.sheets} hint="в текущем периоде" />
-                <OperationalKpi label="Средний остаток" value="—" hint="нет данных" />
-              </OperationalKpiGrid>
-            )}
-          </>
-        ) : null}
-        {isOperational && isEmbeddedOrder ? (
-          <OperationalKpiGrid columns={5}>
-            <OperationalKpi label="Заданий на раскрой" value={jobsSummary.total} />
-            <OperationalKpi
-              label="Назначено деталей"
-              value={job ? `${job.totals.details} / ${job.totals.details}` : '0 / 0'}
-              tone="info"
-            />
-            <OperationalKpi label="Площадь" value={job ? formatArea(job.totals.area) : '—'} />
-            <OperationalKpi label="Листов" value={job?.totals.sheets ?? jobsSummary.sheets} />
-            <OperationalKpi
-              label="Готовность"
-              value={jobsSummary.total > 0 ? `${Math.round((jobsSummary.ready / jobsSummary.total) * 100)}%` : '0%'}
-              tone="success"
-            />
-          </OperationalKpiGrid>
-        ) : null}
-        {!isEmbeddedOrder && !isOperational && <Title level={3}>Раскрой</Title>}
-
-      {(!isOperational || isEmbeddedOrder || criteriaOpen) ? (
+  // «NewLine»: the head of the open job — title, steps of the job and its tabs (mockup «Раскрой»)
+  const wbJobSteps: CutJobStep[] = job ? (() => {
+    const hasItems = job.items.length > 0;
+    const calculated = job.status === 'ready';
+    const board = job.mdfBoardStatus?.state;
+    const orderNames = [...new Set(job.items.map((item) => item.orderName?.trim()).filter(Boolean))];
+    const step = (key: string, name: string, hint: string, state: CutJobStep['state']): CutJobStep => ({ key, title: name, hint, state });
+    return [
+      step(
+        'details',
+        'Детали',
+        hasItems ? `${job.totals.details} дет.${orderNames.length > 0 ? ` · ${orderNames.length === 1 ? `заказ ${orderNames[0]}` : `заказов: ${orderNames.length}`}` : ''}` : 'не выбраны',
+        hasItems ? 'done' : 'current',
+      ),
+      step(
+        'params',
+        'Параметры',
+        `профиль «${resolveProfileLabel(job.paramProfileId, profiles, cutSettings)}»`,
+        hasItems ? 'done' : 'todo',
+      ),
+      step(
+        'calc',
+        'Расчёт',
+        job.status === 'failed'
+          ? 'ошибка расчёта'
+          : job.status === 'calculating'
+            ? 'идёт расчёт'
+            : calculated
+              ? (job.currentCutResult ? `версия ${job.currentCutResult.cutNumber}` : 'рассчитан')
+              : job.requiresRecalc ? 'нужен пересчёт' : 'не рассчитан',
+        job.status === 'failed' ? 'error' : calculated && !job.requiresRecalc ? 'done' : hasItems ? 'current' : 'todo',
+      ),
+      step(
+        'check',
+        'Проверка',
+        calculated
+          ? `${job.totals.sheets} л.${operationalWaste != null ? ` · остаток ${operationalWaste}%` : ''}`
+          : 'после расчёта',
+        calculated ? (board === 'created' ? 'done' : 'current') : 'todo',
+      ),
+      step(
+        'board',
+        'На МДФ-доске',
+        board === 'created' ? 'карточка создана' : board === 'hidden' ? 'карточка скрыта' : 'карточка не создана',
+        board === 'created' ? 'done' : 'todo',
+      ),
+    ];
+  })() : [];
+  const wbJobHead = job ? (
+    <CutWorkbenchJobHead
+      number={jobDisplayNumber ?? `#${job.cutJobId}`}
+      status={<Tag color={STATUS_TAG_COLORS[job.status] ?? 'default'}>{cutJobStatusLabel(job.status)}</Tag>}
+      source={cutJobSourceLabel(job.source)}
+      name={jobNameNode}
+      menuItems={[
+        ...(canManage
+          ? [{
+              key: 'delete',
+              danger: true,
+              icon: <DeleteOutlined />,
+              label: 'Удалить задание',
+              disabled: busy || job.status === 'archived',
+              onClick: () => void deleteJob(job),
+            }]
+          : []),
+      ]}
+      steps={wbJobSteps}
+      tabs={[
+        { key: 'sheets', label: 'Листы', count: job.status === 'ready' ? job.totals.sheets : undefined },
+        { key: 'details', label: 'Детали', count: job.items.length + informationalJobDetails.length },
+        { key: 'versions', label: 'Версии расчёта', count: jobCutResults.length },
+      ]}
+      tab={wbJobTab}
+      onTabChange={(key) => setWbJobTab(key as 'sheets' | 'details' | 'versions')}
+    />
+  ) : undefined;
+  const closeWbPicker = () => {
+    if (isCreationPreview) cancelCreationPreview();
+    setWbPickerOpen(false);
+  };
+  // the detail selection for a new cut: a page block, or the «+ Задание» side panel in «NewLine»
+  const criteriaBlocks = (
         <>
       <Card
         className="cut-page-modern__criteria"
@@ -4333,9 +4282,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         </Card>
       )}
         </>
-      ) : null}
-
-      {!isEmbeddedOrder ? (
+  );
+  // list filters: a page block, or the «Фильтры» side panel in «NewLine»
+  const listFiltersSection = (
         <section className="cut-operational-filters operational-panel" aria-label="Фильтры заданий на раскрой">
           <label className="cut-operational-filter cut-operational-filter--period">
             <span>Дата создания</span>
@@ -4426,20 +4375,269 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             </Button>
           </Space>
         </section>
+  );
+
+  // one set of list controls: the card head in the full page, the top of the jobs rail in the order card
+  const jobsToolbarControls = (
+    <>
+      <Select<string>
+        value={statusFilter}
+        onChange={setStatusFilter}
+        options={[...CUT_JOB_STATUS_FILTER_OPTIONS]}
+        style={{ width: 160 }}
+      />
+      <Select<CutJobProfileFilter>
+        allowClear
+        showSearch
+        optionFilterProp="label"
+        aria-label="Фильтр по профилю раскроя"
+        placeholder="Все профили"
+        options={jobProfileFilterOptions}
+        value={profileFilter}
+        onChange={setProfileFilter}
+        style={{ width: 220 }}
+      />
+      <Checkbox checked={showDeletedJobs} onChange={(event) => setShowDeletedJobs(event.target.checked)}>
+        Показывать удалённые
+      </Checkbox>
+      {canManage && !isWorkbenchOrderTab && (
+        <Button icon={<UploadOutlined />} onClick={() => setSvgUploadOpen(true)}>
+          SVG
+        </Button>
+      )}
+      {canTelegramImport && (
+        <Button
+          icon={<SendOutlined />}
+          onClick={() => setTelegramImportOpen(true)}
+          style={{ minHeight: 40 }}
+        >
+          Импорт из Telegram
+        </Button>
+      )}
+      <Button onClick={() => void loadJobs()} loading={jobsLoading}>
+        Обновить
+      </Button>
+    </>
+  );
+
+  return (
+    <>
+      <Space
+        className={[
+          'cut-page-modern',
+          isEmbeddedOrder ? 'cut-page-modern--embedded' : 'cut-page-modern--standalone',
+          job ? 'cut-page-modern--detail' : 'cut-page-modern--list',
+          isCreationPreview ? 'cut-page-modern--creation-preview' : '',
+          criteriaOpen ? 'cut-page-modern--criteria-open' : '',
+          isWorkbenchSplit ? 'cut-page-modern--wb-split' : '',
+        ].filter(Boolean).join(' ')}
+        direction="vertical"
+        size="large"
+        style={{ width: '100%' }}
+        data-wb-tab={isWorkbench && job ? wbJobTab : undefined}
+        data-wb-params={isWorkbench ? (wbParamsOpen ? 'open' : 'closed') : undefined}
+      >
+        {isOperational && !isEmbeddedOrder ? (
+          <>
+            <OperationalPageHeader
+              compact
+              breadcrumbs={job ? `Производство › Раскрой › Задание ${jobDisplayNumber}` : 'Производство › Раскрой'}
+              title={job ? `Задание на раскрой ${jobDisplayNumber}` : 'Раскрой'}
+              description={job
+                ? `${job.name} · рабочая карточка расчёта и печати производственных материалов.`
+                : 'Единый список заданий, версий расчета и производственной готовности.'}
+              actions={job ? (
+                <>
+                  <Button
+                    type="text"
+                    icon={<HistoryOutlined />}
+                    onClick={() => document.querySelector('.cut-results-block')?.scrollIntoView({ behavior: 'smooth' })}
+                  >
+                    История
+                  </Button>
+                  <Button
+                    icon={<UploadOutlined />}
+                    onClick={() => setSvgUploadOpen(true)}
+                    disabled={!canManage}
+                  >
+                    Загрузить SVG
+                  </Button>
+                  {canTelegramImport && (
+                    <Button
+                      icon={<SendOutlined />}
+                      onClick={() => setTelegramImportOpen(true)}
+                      style={{ minHeight: 40 }}
+                    >
+                      Импорт из Telegram
+                    </Button>
+                  )}
+                  <Button
+                    icon={<PrinterOutlined />}
+                    onClick={() => void openJobPdfPreview()}
+                    disabled={job.groups.length === 0 || jobPdfPreviewBlockReason !== null}
+                    loading={busy}
+                  >
+                    Печать
+                  </Button>
+                  <Button
+                    type="primary"
+                    icon={<CheckOutlined />}
+                    disabled={job.status !== 'ready'}
+                    onClick={() => message.success('Задание готово к следующему производственному этапу')}
+                  >
+                    Завершить задание
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <CutImportActionGroup
+                    canManage={canManage}
+                    canTelegramImport={canTelegramImport}
+                    onUpload={() => setSvgUploadOpen(true)}
+                    onTelegramImport={() => setTelegramImportOpen(true)}
+                  />
+                  <Button icon={<DownloadOutlined />} onClick={exportJobs}>
+                    Экспорт
+                  </Button>
+                  <Button
+                    type="primary"
+                    icon={<PlusOutlined />}
+                    onClick={() => setCriteriaOpen((open) => !open)}
+                  >
+                    {criteriaOpen ? 'Скрыть подбор' : 'Подбор деталей на раскрой'}
+                  </Button>
+                </>
+              )}
+            />
+            {job ? (
+              <OperationalKpiGrid columns={5}>
+                <OperationalKpi label="Позиции" value={job.totals.positions} />
+                <OperationalKpi label="Детали" value={job.totals.details} />
+                <OperationalKpi label="Площадь" value={formatArea(job.totals.area)} tone="info" />
+                <OperationalKpi label="Листы" value={job.totals.sheets ?? 0} tone="success" />
+                <OperationalKpi
+                  label="Остаток"
+                  value={operationalWaste == null ? '—' : `${operationalWaste}%`}
+                  hint="по текущему профилю"
+                  tone={operationalWaste != null && operationalWaste > 25 ? 'warning' : 'neutral'}
+                />
+              </OperationalKpiGrid>
+            ) : (
+              <OperationalKpiGrid columns={5}>
+                <OperationalKpi label="Сегодня" value={jobsSummary.total} hint="создано заданий" />
+                <OperationalKpi label="В работе" value={jobsSummary.inProgress} hint="требуют внимания" tone="info" />
+                <OperationalKpi label="Готово" value={jobsSummary.ready} hint="можно печатать" tone="success" />
+                <OperationalKpi label="Листов" value={jobsSummary.sheets} hint="в текущем периоде" />
+                <OperationalKpi label="Средний остаток" value="—" hint="нет данных" />
+              </OperationalKpiGrid>
+            )}
+          </>
+        ) : null}
+        {isOperational && isEmbeddedOrder ? (
+          <OperationalKpiGrid columns={5}>
+            <OperationalKpi label="Заданий на раскрой" value={jobsSummary.total} />
+            <OperationalKpi
+              label="Назначено деталей"
+              value={job ? `${job.totals.details} / ${job.totals.details}` : '0 / 0'}
+              tone="info"
+            />
+            <OperationalKpi label="Площадь" value={job ? formatArea(job.totals.area) : '—'} />
+            <OperationalKpi label="Листов" value={job?.totals.sheets ?? jobsSummary.sheets} />
+            <OperationalKpi
+              label="Готовность"
+              value={jobsSummary.total > 0 ? `${Math.round((jobsSummary.ready / jobsSummary.total) * 100)}%` : '0%'}
+              tone="success"
+            />
+          </OperationalKpiGrid>
+        ) : null}
+        {!isEmbeddedOrder && !isOperational && <Title level={3}>Раскрой</Title>}
+
+      {(!isOperational || isEmbeddedOrder || criteriaOpen) ? (
+        isWorkbench ? (
+          <Drawer
+            className="wb-cut-drawer wb-cut-drawer--picker"
+            title="Новое задание на раскрой"
+            placement="right"
+            width="min(1180px, 94vw)"
+            open={wbPickerOpen}
+            onClose={closeWbPicker}
+            forceRender
+          >
+            {criteriaBlocks}
+          </Drawer>
+        ) : criteriaBlocks
       ) : null}
+
+      {isWorkbench ? (
+        <Drawer
+          className="wb-cut-drawer wb-cut-drawer--filters"
+          title="Фильтры заданий"
+          placement="right"
+          width={400}
+          open={wbFiltersOpen}
+          onClose={() => setWbFiltersOpen(false)}
+        >
+          <div className="wb-cut-filters__extra">
+            <label className="wb-cut-filters__field">
+              <span>Профиль раскроя</span>
+              <Select<CutJobProfileFilter>
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                placeholder="Все профили"
+                options={jobProfileFilterOptions}
+                value={profileFilter}
+                onChange={setProfileFilter}
+              />
+            </label>
+            <Checkbox checked={showDeletedJobs} onChange={(event) => setShowDeletedJobs(event.target.checked)}>
+              Показывать удалённые
+            </Checkbox>
+          </div>
+          {!isEmbeddedOrder ? listFiltersSection : null}
+        </Drawer>
+      ) : !isEmbeddedOrder ? listFiltersSection : null}
 
       <Card
         className="cut-page-modern__jobs"
         size="small"
-        title={isOperational ? undefined : 'Задания на раскрой'}
+        title={isOperational || isWorkbench ? undefined : 'Задания на раскрой'}
         extra={!isOperational && !isWorkbenchSplit ? (
           <Space>
             {jobsToolbarControls}
           </Space>
         ) : undefined}
       >
-        {isWorkbenchSplit ? <div className="wb-cut-rail__filters">{jobsToolbarControls}</div> : null}
-        {!isEmbeddedOrder ? (
+        {isWorkbench ? (
+          <CutWorkbenchRail
+            title={isEmbeddedOrder ? 'Задания на раскрой' : 'Раскрой'}
+            onCreate={canManage ? () => setWbPickerOpen(true) : undefined}
+            menuItems={[
+              ...(canManage && !isWorkbenchOrderTab
+                ? [{ key: 'svg', icon: <UploadOutlined />, label: 'Загрузить SVG-раскрой', onClick: () => setSvgUploadOpen(true) }]
+                : []),
+              ...(canTelegramImport
+                ? [{ key: 'telegram', icon: <SendOutlined />, label: 'Импорт из Telegram', onClick: () => setTelegramImportOpen(true) }]
+                : []),
+              { key: 'export', icon: <DownloadOutlined />, label: 'Экспорт списка (CSV)', onClick: exportJobs },
+              { key: 'refresh', icon: <ReloadOutlined />, label: 'Обновить список', onClick: () => void loadJobs() },
+            ]}
+            kinds={isEmbeddedOrder ? undefined : [
+              { value: CUT_JOB_KIND_TAB_REGULAR, label: 'Раскрои', count: wbKindCounts.regular },
+              { value: CUT_JOB_KIND_TAB_VACUUM, label: 'Ванны', count: wbKindCounts.vacuum },
+            ]}
+            kind={jobKindTab}
+            onKindChange={switchCutJobKindTab}
+            search={jobSearch}
+            onSearchChange={setJobSearch}
+            chips={wbRailChips}
+            status={statusFilter}
+            onStatusChange={setStatusFilter}
+            activeFilterCount={(profileFilter ? 1 : 0) + (showDeletedJobs ? 1 : 0) + (!isEmbeddedOrder && (appliedJobOrderSearch.trim() || appliedCutListDateRange?.[0] || appliedCutListDateRange?.[1] || operationalSheetFilter || operationalFilmFilter) ? 1 : 0)}
+            onOpenFilters={() => setWbFiltersOpen(true)}
+          />
+        ) : null}
+        {!isEmbeddedOrder && !isWorkbench ? (
           <Tabs
             className="cut-job-kind-tabs"
             size="small"
@@ -4587,8 +4785,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         <Card
           className="cut-page-modern__job"
           size="small"
-          title={isOperational && embeddedOrderId == null ? undefined : jobCardTitle}
-          extra={isOperational && embeddedOrderId == null ? undefined : jobCardExtra}
+          title={isWorkbench ? wbJobHead : isOperational && embeddedOrderId == null ? undefined : jobCardTitle}
+          extra={isWorkbench || (isOperational && embeddedOrderId == null) ? undefined : jobCardExtra}
         >
           <Space style={{ marginBottom: 12 }} wrap>
             <Tooltip title={cutJobMdfBoardTooltip(job.mdfBoardStatus)}>
@@ -4782,6 +4980,48 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               : activeOptions;
             return (
               <>
+                {isWorkbench ? (
+                  <>
+                    <div className="wb-cut-params">
+                      <span className="wb-cut-params__title">Параметры</span>
+                      <span className="wb-cut-params__chips">
+                        <span className="wb-cut-chip">профиль «{resolveProfileLabel(job.paramProfileId, profiles, cutSettings)}»</span>
+                        <span className="wb-cut-chip">
+                          лист: {sheetOptions.find((option) => option.sheetMaterialTypeId === job.sheetMaterialTypeId)?.name ?? 'как у деталей'}
+                        </span>
+                        <span className="wb-cut-chip">{job.splitByMaterial ? 'разделять по материалу' : 'все материалы вместе'}</span>
+                        <span className="wb-cut-chip">{job.combineFilms ? 'плёнки объединены' : 'плёнки раздельно'}</span>
+                        <span className="wb-cut-chip">{job.rotationAllowed ? 'поворот разрешён' : 'без поворота'}</span>
+                        <span className="wb-cut-chip">текстура — {cutTextureDirectionLabel(job.textureDirection)}</span>
+                      </span>
+                      <button
+                        type="button"
+                        className="wb-cut-params__toggle"
+                        aria-expanded={wbParamsOpen}
+                        onClick={() => setWbParamsOpen((open) => !open)}
+                      >
+                        {wbParamsOpen ? 'Свернуть' : 'Изменить'}
+                      </button>
+                    </div>
+                    <dl className="wb-cut-kpi">
+                      {job.status === 'ready' ? <div><dt>Листов</dt><dd>{job.totals.sheets}</dd></div> : null}
+                      <div><dt>Деталей</dt><dd>{job.totals.details}</dd></div>
+                      <div><dt>Позиций</dt><dd>{job.totals.positions}</dd></div>
+                      <div><dt>Площадь деталей</dt><dd>{formatArea(job.totals.area)}</dd></div>
+                      {operationalWaste != null ? <div><dt>Остаток</dt><dd>{operationalWaste}<small>%</small></dd></div> : null}
+                      {operationalWaste != null ? <div><dt>Использование</dt><dd>{100 - operationalWaste}<small>%</small></dd></div> : null}
+                      <div><dt>Материалов</dt><dd>{job.totals.materialsCount}</dd></div>
+                      <div><dt>Плёнок</dt><dd>{job.totals.filmsCount}</dd></div>
+                      {totalFilmUsageMeters(job.totals.filmUsage) > 0 ? (
+                        <div><dt>Плёнка</dt><dd>{formatFilmLinearMeters(totalFilmUsageMeters(job.totals.filmUsage))}</dd></div>
+                      ) : null}
+                      <div className="wb-cut-kpi__orders">
+                        <dt>Заказы</dt>
+                        <dd><CutJobOrderLinks items={job.items} refs={jobOrderRefs} onOpen={(orderId) => show('orders_view', orderId, 'push')} /></dd>
+                      </div>
+                    </dl>
+                  </>
+                ) : null}
                 <Space className="cut-job-operational-stats" size="large" style={{ marginBottom: 12 }} wrap>
                   <span>Позиции: <b>{job.totals.positions}</b></span>
                   <span>Заказы: <CutJobOrderLinks items={job.items} refs={jobOrderRefs} onOpen={(orderId) => show('orders_view', orderId, 'push')} /></span>
@@ -5021,7 +5261,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       )}
 
       {job && (
-        <Collapse className="cut-page-modern__details" defaultActiveKey={[]}>
+        <Collapse className="cut-page-modern__details" defaultActiveKey={isWorkbench ? ['cut-job-details'] : []}>
           <Panel header={`Детали задания (${job.items.length + informationalJobDetails.length})`} key="cut-job-details">
             <TableTopScroll>
               {job.items.length > 0 && (

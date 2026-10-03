@@ -60,7 +60,7 @@ async function openCut(page: Page, uiVariant: 'workbench' | 'evolution') {
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(JOBS.find((item) => item.cutJobId === id)) });
   });
   await page.goto('/cut', { waitUntil: 'domcontentloaded' });
-  await page.getByRole('tab', { name: 'Раскрои' }).click();
+  if (uiVariant !== 'workbench') await page.getByRole('tab', { name: 'Раскрои' }).click();
   return pageErrors;
 }
 
@@ -74,6 +74,36 @@ test.describe('Cut jobs list in NewLine (mocked-local)', () => {
     await expect(cards).toHaveCount(3, { timeout: 60000 });
     await expect(page.locator('.cut-jobs-table')).toHaveCount(0);
     await expect(page.getByTestId('cut-job-empty')).toContainText('Выберите задание в списке слева');
+
+    // левая панель по мокапу: заголовок, «+ Задание», виды со счётчиками, поиск, статусы-чипы
+    const rail = page.locator('.wb-cut-rail');
+    await expect(rail.locator('.wb-cut-rail__title')).toHaveText('Раскрой');
+    await expect(rail.getByTestId('cut-new-job')).toBeVisible();
+    await expect(rail.locator('.wb-cut-rail__kinds')).toContainText('Раскрои');
+    await expect(rail.locator('.wb-cut-rail__kinds')).toContainText('Ванны');
+    const chip = (label: string) => rail.locator('.wb-cut-rail__chip', { hasText: label });
+    await expect(chip('Все')).toContainText('3');
+    await expect(chip('Черновики')).toContainText('1');
+    await expect(chip('Готовы')).toContainText('2');
+    await chip('Черновики').click();
+    await expect(cards).toHaveCount(1);
+    await expect(cards.first()).toContainText('E2E-Тест раскрой шкаф');
+    await chip('Все').click();
+    await rail.getByLabel('Поиск задания').fill('фасады');
+    await expect(cards).toHaveCount(1);
+    await rail.getByLabel('Поиск задания').fill('');
+    await expect(cards).toHaveCount(3);
+    // прежние действия списка — в меню «⋯», фильтры — в боковой панели
+    await rail.getByRole('button', { name: 'Действия со списком заданий' }).click();
+    for (const item of ['Загрузить SVG-раскрой', 'Экспорт списка (CSV)', 'Обновить список']) {
+      await expect(page.getByRole('menuitem', { name: item })).toBeVisible();
+    }
+    await page.keyboard.press('Escape');
+    await rail.getByRole('button', { name: 'Фильтры заданий' }).click();
+    const filtersDrawer = page.locator('.wb-cut-drawer--filters');
+    await expect(filtersDrawer.getByText('Показывать удалённые')).toBeVisible();
+    await expect(filtersDrawer.getByRole('button', { name: 'Применить' })).toBeVisible();
+    await filtersDrawer.locator('.ant-drawer-close').click();
 
     const first = cards.filter({ hasText: 'E2E-Тест раскрой кухня' });
     for (const label of ['Детали', 'Площадь', 'Листы']) {
@@ -91,6 +121,21 @@ test.describe('Cut jobs list in NewLine (mocked-local)', () => {
     await expect(jobCard).toBeVisible({ timeout: 30000 });
     await expect(jobCard).toContainText('E2E-Тест раскрой кухня');
     await expect(first).toHaveAttribute('data-active', 'true');
+    // шапка задания: номер, шаги, вкладки
+    await expect(jobCard.locator('.wb-cut-head__title')).toHaveText('Задание #1');
+    await expect(jobCard.locator('.wb-cut-step')).toHaveCount(5);
+    await expect(jobCard.locator('.wb-cut-tabs__item')).toHaveText([/Листы/, /Детали/, /Версии расчёта/]);
+    await expect(jobCard.locator('.wb-cut-kpi')).toContainText('Деталей');
+    // параметры — чипами, форма раскрывается по «Изменить»
+    await expect(jobCard.locator('.cut-job-operational-fields')).toBeHidden();
+    await jobCard.locator('.wb-cut-params__toggle').click();
+    await expect(jobCard.locator('.cut-job-operational-fields')).toBeVisible();
+    await jobCard.getByRole('tab', { name: /Версии расчёта/ }).click();
+    await expect(jobCard.locator('.cut-results-block')).toBeVisible();
+    await expect(jobCard.locator('.cut-job-overview__main')).toBeHidden();
+    await jobCard.getByRole('tab', { name: /Детали/ }).click();
+    await expect(page.locator('.cut-page-modern__details')).toBeVisible();
+    await jobCard.getByRole('tab', { name: /Листы/ }).click();
     const layout = await page.evaluate(() => {
       const rail = document.querySelector('.cut-page-modern__jobs')!.getBoundingClientRect();
       const job = document.querySelector('.cut-page-modern__job')!.getBoundingClientRect();
