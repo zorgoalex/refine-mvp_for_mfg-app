@@ -933,3 +933,36 @@ function hslToHex(hsl: { h: number; s: number; l: number }): string {
 function formatNumber(value: number): string {
   return Number(value.toFixed(3)).toString();
 }
+
+const CUT_RENDER_STYLE_RULE_IDS: readonly string[] = [
+  CUT_RENDER_STYLE_DEFAULT,
+  CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
+  CUT_RENDER_STYLE_VACUUM_TASK_PREVIEW,
+  CUT_RENDER_STYLE_TELEGRAM_PHOTO,
+];
+
+function sortedJson(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) => (
+    item !== null && typeof item === 'object' && !Array.isArray(item)
+      ? Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)))
+      : item
+  ));
+}
+
+/**
+ * A stored, already resolved style (a frozen cut render keeps one) must be complete: every field
+ * present with a valid value and nothing else. It is checked by the same strict parser the
+ * settings use, so no field may come from a fallback. Returns the problem or null.
+ */
+export function cutRenderStyleRuleProblem(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return 'стиль должен быть объектом';
+  const id = (value as { id?: unknown }).id;
+  if (typeof id !== 'string' || !CUT_RENDER_STYLE_RULE_IDS.includes(id)) return 'неизвестный стиль';
+  try {
+    const parsed = parseCutRenderStyleProfile(value, CUT_RENDER_STYLE_RULES[CUT_RENDER_STYLE_DEFAULT], 'renderStyle');
+    const complete = { id, ...cutRenderStyleProfileJson(parsed) };
+    return sortedJson(complete) === sortedJson(value) ? null : 'стиль неполный или с лишними полями';
+  } catch (error) {
+    return error instanceof Error ? error.message : 'некорректный стиль';
+  }
+}
