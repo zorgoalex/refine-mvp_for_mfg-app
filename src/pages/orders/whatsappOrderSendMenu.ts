@@ -3,6 +3,8 @@ import type { OrderFormCode, OrderSendMenu, OrderSendTarget } from '../../api/or
 
 export const NO_CLIENT_PHONE_TITLE = 'У клиента нет телефона';
 export const NO_EMPLOYEE_PHONE_TITLE = 'У сотрудника нет рабочего телефона';
+/** Hint of the grey «Отправить заказ» icon: sending is off or no recipient with a form is set up. */
+export const ORDER_SEND_NOT_CONFIGURED_TITLE = 'Отправка не настроена';
 const KEY_PREFIX = 'wa-send';
 
 /** A menu item in the shape antd's `Menu` takes; `icon` is whatever the caller passes in. */
@@ -56,7 +58,7 @@ export function parseOrderWhatsAppKey(key: string): { target: OrderSendTarget; f
 }
 
 /**
- * The «Отправить в WhatsApp» items of the order card «⋯» menu. Empty while the feature is off or
+ * The «Отправить в WhatsApp» items of the order card «Отправить заказ» icon menu (left of «⋯»). Empty while the feature is off or
  * nothing is allowed. A recipient with one form gets a plain item, with several — a submenu.
  */
 export function buildOrderWhatsAppMenuItems(menu: OrderSendMenu | null | undefined, options: OrderWhatsAppMenuOptions): OrderWhatsAppMenuItem[] {
