@@ -56,7 +56,7 @@ export function parseOrderWhatsAppKey(key: string): { target: OrderSendTarget; f
 }
 
 /**
- * The «Отправить в WhatsApp» items of the order card «⋯» menu. Empty while the feature is off or
+ * The «Отправить в WhatsApp» items of the order card «Отправить заказ» icon menu (left of «⋯»). Empty while the feature is off or
  * nothing is allowed. A recipient with one form gets a plain item, with several — a submenu.
  */
 export function buildOrderWhatsAppMenuItems(menu: OrderSendMenu | null | undefined, options: OrderWhatsAppMenuOptions): OrderWhatsAppMenuItem[] {

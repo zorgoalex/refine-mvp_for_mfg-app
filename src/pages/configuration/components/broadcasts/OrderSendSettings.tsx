@@ -39,7 +39,7 @@ import './broadcasts.css';
 const { Paragraph, Text } = Typography;
 
 /**
- * «Отправка заказа из карточки»: who the «⋯» menu of an order card can send to and which forms.
+ * «Отправка заказа из карточки»: who the «Отправить заказ» icon of an order card can send to and which forms.
  * Renders nothing for users without whatsapp.manage and on a backend that does not have the feature (404).
  */
 export const OrderSendSettings: React.FC = () => {
@@ -156,7 +156,7 @@ export const OrderSendSettings: React.FC = () => {
   } };
 
   return <Card title="Отправка заказа из карточки" extra={<Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading} disabled={saving}>Обновить</Button>}>
-    <Paragraph type="secondary">Команды «Отправить клиенту в WhatsApp» и «Отправить в чат» в меню «⋯» карточки заказа ставят выбранную форму в общую очередь: отправки уходят по одной с порогом частоты и окном. Ожидающая отправка ждёт не больше 24 часов.</Paragraph>
+    <Paragraph type="secondary">Команды «Отправить клиенту в WhatsApp» и «Отправить в чат» под иконкой «Отправить заказ» в карточке заказа (слева от «⋯») ставят выбранную форму в общую очередь: отправки уходят по одной с порогом частоты и окном. Ожидающая отправка ждёт не больше 24 часов.</Paragraph>
     {error && <Alert style={{ marginBottom: 12 }} type={error.startsWith('Настройки изменены') ? 'warning' : 'error'} showIcon message={error} closable onClose={() => setError('')} />}
     <Form form={form} layout="vertical" initialValues={toOrderSendFormValues(settings)} disabled={fieldsLocked} onFinish={(v: OrderSendFormValues) => void save(v)}>
       <Row gutter={[16, 0]}>

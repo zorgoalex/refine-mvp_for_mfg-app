@@ -10,14 +10,20 @@ describe('order card WhatsApp send wiring', () => {
     expect(show).toMatch(/orderWhatsAppItems = canExportOrders && !deletedOrder/);
   });
 
-  it('puts the items into all three «⋯» menus and handles their clicks', () => {
-    // standard desktop + mobile + operational head + workbench = 4 spreads
-    expect(show.match(/\.\.\.orderWhatsAppItems/g)?.length).toBe(4);
-    expect(show.match(/isOrderWhatsAppKey\(key\)/g)?.length).toBe(4);
-    const operational = show.slice(show.indexOf('const productionExcelOverflowAction'), show.indexOf('const productionExcelOverflowAction') + 900);
-    expect(operational).toContain('...orderWhatsAppItems');
-    const workbench = show.slice(show.indexOf('const workbenchMoreItems'), show.indexOf('const workbenchMoreItems') + 600);
-    expect(workbench).toContain('...orderWhatsAppItems');
+  it('offers the sends through their own icon left of every «⋯» menu, never inside it', () => {
+    // One dropdown with the items; the «⋯» menus (standard desktop, mobile, operational head, workbench) carry none.
+    expect(show.match(/\.\.\.orderWhatsAppItems/g)).toBeNull();
+    expect(show.match(/isOrderWhatsAppKey\(key\)/g)?.length).toBe(1);
+    const action = show.slice(show.indexOf('const orderSendAction'), show.indexOf('const productionPdfDisabled'));
+    expect(action).toContain('items: orderWhatsAppItems');
+    expect(action).toContain('aria-label="Отправить заказ"');
+    expect(action).toContain('<SendOutlined />');
+    // Rendered in all four heads, each time right before the «⋯» dropdown of that head.
+    expect(show.match(/\{orderSendAction\}/g)?.length).toBe(4);
+    for (const more of show.split('aria-label="Ещё действия"').slice(0, -1)) {
+      const head = more.slice(more.lastIndexOf('{orderSendAction}'));
+      expect(head.match(/<Dropdown/g)?.length).toBe(1);
+    }
   });
 
   it('sends through the idempotent runner and shows its toast', () => {
