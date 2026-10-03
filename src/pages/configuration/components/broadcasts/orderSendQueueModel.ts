@@ -17,7 +17,7 @@ const STATE_COLORS: Record<string, string> = {
 const CANCEL_LABELS: Record<string, string> = {
   manual: 'вручную',
   disabled: 'отправка выключена',
-  recipient_removed: 'чат убран из настроек',
+  recipient_removed: 'получатель убран из настроек',
   recipient_changed: 'получатель изменился',
   form_not_allowed: 'форма не разрешена',
   permission_revoked: 'нет прав у отправителя',
@@ -26,6 +26,7 @@ const CANCEL_LABELS: Record<string, string> = {
 
 const ERROR_LABELS: Record<string, string> = {
   CLIENT_NOT_ON_WHATSAPP: 'номера нет в WhatsApp',
+  EMPLOYEE_NOT_ON_WHATSAPP: 'номера нет в WhatsApp',
   WAHA_REJECTED: 'WhatsApp не принял',
   WAHA_FILE_UNSUPPORTED: 'тип файла не принят',
   PARTIAL_DELIVERY: 'ушла часть изображений',
@@ -33,6 +34,8 @@ const ERROR_LABELS: Record<string, string> = {
   PROCESS_LOST_AFTER_INTENT: 'прервано',
   ORDER_SEND_PAYLOAD_MISSING: 'файл недоступен',
   ORDER_SEND_FORM_UNSUPPORTED: 'форма не поддерживается',
+  ORDER_SEND_TARGET_UNSUPPORTED: 'этот тип получателя не поддерживается',
+  ORDER_SEND_CHANNEL_UNSUPPORTED: 'этот канал отправки не поддерживается',
 };
 
 export function orderSendStateLabel(state: string): string {
@@ -56,7 +59,9 @@ export function orderSendStateDetail(item: Pick<OrderSendQueueItem, 'state' | 'c
 
 /** «клиенту 7701***2060» / «в чат «Цех ЧПУ»». No full phone or group id ever reaches the browser. */
 export function orderSendRecipientText(item: Pick<OrderSendQueueItem, 'targetKind' | 'recipientLabel' | 'recipientMasked'>): string {
-  return item.targetKind === 'client' ? `клиенту ${item.recipientMasked}` : `в чат «${item.recipientLabel}»`;
+  if (item.targetKind === 'client') return `клиенту ${item.recipientMasked}`;
+  if (item.targetKind === 'chat') return `в чат «${item.recipientLabel}»`;
+  return `сотруднику ${item.recipientLabel === 'Сотрудник' ? item.recipientMasked : item.recipientLabel}`;
 }
 
 /** Date and time in Almaty: «03.10 14:35». */

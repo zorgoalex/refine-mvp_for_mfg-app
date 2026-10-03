@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Button, Card, Modal, Space, Switch, Typography, message } from 'antd';
+import { Alert, Button, Card, Modal, Space, Switch, Tabs, Typography, message } from 'antd';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { broadcastsApi } from '../../../../api/broadcastsApi';
 import type {
@@ -32,6 +32,7 @@ export const BroadcastsPanel: React.FC<BroadcastsPanelProps> = ({ initial }) => 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<number | 'new' | null>(null);
+  const [tab, setTab] = useState<string>('broadcasts');
   const [envelope, setEnvelope] = useState<BroadcastEnvelope | null>(null);
   const [catalog, setCatalog] = useState<BroadcastCaptionVariable[]>([]);
   const [dirty, setDirty] = useState(false);
@@ -158,58 +159,65 @@ export const BroadcastsPanel: React.FC<BroadcastsPanelProps> = ({ initial }) => 
     {error && <Alert type="error" showIcon message={error} closable onClose={() => setError('')} />}
     {paused && <Alert type="warning" showIcon message="Все рассылки остановлены" description={`Автоматическая и ручная отправка не выполняются, пока остановка не снята.${pausedByText(data.control)}`} />}
     {!runtimeAvailable && <Alert type="warning" showIcon message="Автоматическая и ручная отправка сейчас недоступна" description={runtimeReasonText(runtime.unavailableReason)} />}
-    <Card title="Список рассылок">
-      <BroadcastList broadcasts={data.broadcasts} selectedId={typeof selected === 'number' ? selected : null} loading={loading} onSelect={select} />
-    </Card>
-    {selected === 'new' && <BroadcastEditor
-      key="new"
-      broadcast={null}
-      todaySchedule={null}
-      captionVariables={catalog}
-      actorId={actorId}
-      createDisabled={!createAllowed}
-      onSaved={(saved) => {
-        void reloadList();
-        selectRequestRef.current += 1;
-        setEnvelope(saved);
-        setSelected(saved.broadcast.id);
-      }}
-      onEnvelope={() => undefined}
-      onArchived={close}
-      onConflict={() => void reloadList()}
-      onDirtyChange={setDirty}
-      onClose={close}
-    />}
-    {typeof selected === 'number' && !current && <Card loading />}
-    {typeof selected === 'number' && current && <>
-      <BroadcastEditor
-        key={current.id}
-        broadcast={current}
-        todaySchedule={envelope?.todaySchedule ?? null}
-        captionVariables={catalog}
-        actorId={actorId}
-        onSaved={(saved) => { setEnvelope(saved); void reloadList(); }}
-        onEnvelope={(next) => { setEnvelope(next); }}
-        onArchived={() => { close(); void reloadList(); }}
-        onConflict={reloadSelected}
-        onDirtyChange={setDirty}
-        onClose={close}
-      />
-      <BroadcastPreviewSend
-        broadcast={current}
-        actorId={actorId}
-        dirty={dirty}
-        runtimeAvailable={runtimeAvailable}
-        paused={paused}
-        onSent={() => { setHistoryToken((n) => n + 1); void reloadList(); }}
-        onConflict={reloadSelected}
-      />
-      <BroadcastHistory broadcast={current} actorId={actorId} runtimeAvailable={runtimeAvailable && !paused} refreshToken={historyToken} />
-    </>}
-    {calendarSendSupport === 'supported' && <CalendarSendSettings captionVariables={catalog} paused={paused} />}
-    <OrderSendSettings />
-    <OrderSendQueue />
-    <LegacyDigestHistory />
+    <Tabs activeKey={tab} onChange={setTab} items={[
+      { key: 'broadcasts', label: 'Рассылки', children: <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        <Card title="Список рассылок">
+          <BroadcastList broadcasts={data.broadcasts} selectedId={typeof selected === 'number' ? selected : null} loading={loading} onSelect={select} />
+        </Card>
+        {selected === 'new' && <BroadcastEditor
+          key="new"
+          broadcast={null}
+          todaySchedule={null}
+          captionVariables={catalog}
+          actorId={actorId}
+          createDisabled={!createAllowed}
+          onSaved={(saved) => {
+            void reloadList();
+            selectRequestRef.current += 1;
+            setEnvelope(saved);
+            setSelected(saved.broadcast.id);
+          }}
+          onEnvelope={() => undefined}
+          onArchived={close}
+          onConflict={() => void reloadList()}
+          onDirtyChange={setDirty}
+          onClose={close}
+        />}
+        {typeof selected === 'number' && !current && <Card loading />}
+        {typeof selected === 'number' && current && <>
+          <BroadcastEditor
+            key={current.id}
+            broadcast={current}
+            todaySchedule={envelope?.todaySchedule ?? null}
+            captionVariables={catalog}
+            actorId={actorId}
+            onSaved={(saved) => { setEnvelope(saved); void reloadList(); }}
+            onEnvelope={(next) => { setEnvelope(next); }}
+            onArchived={() => { close(); void reloadList(); }}
+            onConflict={reloadSelected}
+            onDirtyChange={setDirty}
+            onClose={close}
+          />
+          <BroadcastPreviewSend
+            broadcast={current}
+            actorId={actorId}
+            dirty={dirty}
+            runtimeAvailable={runtimeAvailable}
+            paused={paused}
+            onSent={() => { setHistoryToken((n) => n + 1); void reloadList(); }}
+            onConflict={reloadSelected}
+          />
+          <BroadcastHistory broadcast={current} actorId={actorId} runtimeAvailable={runtimeAvailable && !paused} refreshToken={historyToken} />
+        </>}
+        <LegacyDigestHistory />
+      </Space> },
+      { key: 'sends', label: 'Отправка из календаря и карточки', children: <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        {calendarSendSupport === 'supported' && <CalendarSendSettings captionVariables={catalog} paused={paused} />}
+        <OrderSendSettings />
+      </Space> },
+      // The journal polls only while its tab is open.
+      { key: 'queue', label: 'Очередь отправок из карточки', children: tab === 'queue' ? <OrderSendQueue /> : null },
+    ]} />
     <Modal open={confirmPause} title="Остановить все рассылки" okText="Остановить" cancelText="Отмена" okButtonProps={{ danger: true }} confirmLoading={controlBusy} onCancel={() => setConfirmPause(false)} onOk={() => void applyControl(true)}>
       <Paragraph>Отправка всех рассылок — автоматических и ручных — будет остановлена немедленно. Сообщения, которые ещё не ушли, не будут отправлены, пока остановку не снимут.</Paragraph>
     </Modal>

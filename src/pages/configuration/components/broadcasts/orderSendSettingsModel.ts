@@ -1,7 +1,9 @@
 import { ApiError } from '../../../../api/apiError';
 import type {
   OrderFormCode,
+  OrderSendChannel,
   OrderSendChatInput,
+  OrderSendEmployeeDirectoryItem,
   OrderSendSettings,
   OrderSendSettingsInput,
 } from '../../../../api/orderSendApiTypes';
@@ -25,6 +27,15 @@ export interface OrderSendChatFormValues {
   caption: string;
 }
 
+export interface OrderSendEmployeeFormValues {
+  /** Hidden: an existing recipient keeps its key (the backend archives it if employee or channel change). */
+  recipientKey: string | null;
+  employeeId: number | null;
+  channel: OrderSendChannel;
+  forms: OrderFormCode[];
+  caption: string;
+}
+
 export interface OrderSendFormValues {
   enabled: boolean;
   minIntervalMinutes: number | null;
@@ -32,6 +43,8 @@ export interface OrderSendFormValues {
   clientForms: OrderFormCode[];
   clientCaption: string;
   chats: OrderSendChatFormValues[];
+  /** undefined on an older backend: then the PUT body has no employees and the backend keeps them. */
+  employees?: OrderSendEmployeeFormValues[];
 }
 
 export function toOrderSendFormValues(settings: OrderSendSettings): OrderSendFormValues {
@@ -48,7 +61,39 @@ export function toOrderSendFormValues(settings: OrderSendSettings): OrderSendFor
       forms: [...chat.forms],
       caption: chat.caption ?? '',
     })),
+    ...(settings.employees ? {
+      employees: settings.employees.map((employee) => ({
+        recipientKey: employee.recipientKey,
+        employeeId: employee.employeeId,
+        channel: employee.channel,
+        forms: [...employee.forms],
+        caption: employee.caption ?? '',
+      })),
+    } : {}),
   };
+}
+
+export const ORDER_SEND_MAX_EMPLOYEES = 20;
+export const ORDER_SEND_CHANNEL_LABELS: Record<OrderSendChannel, string> = { whatsapp: 'WhatsApp', telegram: 'Telegram' };
+/** Channels a send can go through now (Telegram comes with the next stage). */
+export const ORDER_SEND_SUPPORTED_CHANNELS: readonly OrderSendChannel[] = ['whatsapp'];
+
+/** «логин1, логин2 / ФИО» — the user and the employee, as the menu shows them. */
+export function employeeDirectoryLabel(item: Pick<OrderSendEmployeeDirectoryItem, 'fullName' | 'usernames'>): string {
+  return item.usernames.length ? `${item.usernames.join(', ')} / ${item.fullName}` : item.fullName;
+}
+
+/** The same employee with the same channel listed in two rows. */
+export function duplicateEmployeeIndexes(employees: ReadonlyArray<Pick<OrderSendEmployeeFormValues, 'employeeId' | 'channel'>>): Set<number> {
+  const seen = new Set<string>();
+  const duplicates = new Set<number>();
+  employees.forEach((employee, index) => {
+    if (employee.employeeId == null) return;
+    const key = `${employee.employeeId}:${employee.channel}`;
+    if (seen.has(key)) duplicates.add(index);
+    else seen.add(key);
+  });
+  return duplicates;
 }
 
 export function validateOrderSendInterval(value: number | null | undefined): string | null {
@@ -131,6 +176,15 @@ export function buildOrderSendUpdate(version: number, values: OrderSendFormValue
     clientForms: [...(values.clientForms ?? [])],
     clientCaption: values.clientCaption ?? '',
     chats,
+    ...(Array.isArray(values.employees) ? {
+      employees: values.employees.map((employee) => ({
+        recipientKey: employee.recipientKey ?? null,
+        employeeId: Number(employee.employeeId),
+        channel: employee.channel ?? 'whatsapp',
+        forms: [...(employee.forms ?? [])],
+        caption: employee.caption ?? '',
+      })),
+    } : {}),
   };
 }
 
@@ -148,6 +202,7 @@ export function isOrderSendVersionConflict(error: unknown): boolean {
 
 export const ORDER_SEND_SETTINGS_ERRORS: Record<string, string> = {
   VALIDATION_ERROR: 'Проверьте заполнение полей: группа, название и подпись.',
+  ORDER_SEND_CHANNEL_UNSUPPORTED: 'Отправка в Telegram пока недоступна — выберите WhatsApp.',
   PERMISSION_DENIED: 'Недостаточно прав для изменения настроек.',
 };
 

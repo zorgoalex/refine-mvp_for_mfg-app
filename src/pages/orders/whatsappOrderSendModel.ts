@@ -24,7 +24,9 @@ export interface OrderSendToast {
 }
 
 export function orderSendTargetKey(target: OrderSendTarget): string {
-  return target.kind === 'client' ? 'client' : `chat-${target.chatKey}`;
+  if (target.kind === 'client') return 'client';
+  if (target.kind === 'employee') return `employee-${target.recipientKey}-${target.contactId ?? 'primary'}`;
+  return `chat-${target.chatKey}`;
 }
 
 export function pendingOrderSendKey(orderId: number, target: OrderSendTarget, form: OrderFormCode): string {
@@ -41,7 +43,11 @@ export interface PendingOrderSend {
 function sameTarget(a: unknown, b: OrderSendTarget): boolean {
   if (typeof a !== 'object' || a === null) return false;
   const record = a as Record<string, unknown>;
-  return b.kind === 'client' ? record.kind === 'client' : record.kind === 'chat' && record.chatKey === b.chatKey;
+  if (b.kind === 'client') return record.kind === 'client';
+  if (b.kind === 'employee') {
+    return record.kind === 'employee' && record.recipientKey === b.recipientKey && (record.contactId ?? null) === (b.contactId ?? null);
+  }
+  return record.kind === 'chat' && record.chatKey === b.chatKey;
 }
 
 export function readPendingOrderSend(
@@ -106,6 +112,10 @@ const CODE_TEXTS: Record<string, { type: OrderSendToastType; text: string }> = {
   ORDER_SEND_FORM_NOT_ALLOWED: { type: 'warning', text: 'Эта форма больше не разрешена для получателя. Обновите страницу.' },
   ORDER_SEND_FINANCIALS_REQUIRED: { type: 'warning', text: 'Для этой формы нужен доступ к финансовым данным' },
   ORDER_SEND_CHAT_UNKNOWN: { type: 'warning', text: 'Этот чат убран из настроек. Обновите страницу.' },
+  ORDER_SEND_RECIPIENT_UNKNOWN: { type: 'warning', text: 'Этот сотрудник убран из настроек. Обновите страницу.' },
+  ORDER_SEND_CHANNEL_UNSUPPORTED: { type: 'warning', text: 'Этот канал отправки пока недоступен' },
+  EMPLOYEE_INACTIVE: { type: 'warning', text: 'Сотрудник не активен' },
+  EMPLOYEE_CONTACT_MISSING: { type: 'warning', text: 'У сотрудника нет этого рабочего телефона. Проверьте его карточку и обновите страницу.' },
   CLIENT_PHONE_MISSING: { type: 'warning', text: 'У клиента нет телефона' },
   CLIENT_PHONE_INVALID: { type: 'warning', text: 'Телефон клиента указан неверно — отправить в WhatsApp нельзя' },
   IDEMPOTENCY_KEY_REUSED: { type: 'error', text: 'Команда уже была отправлена с другими параметрами. Повторите выбор.' },
@@ -137,7 +147,10 @@ export function orderSendSuccessToast(targetLabel: string, formTitle: string,
 }
 
 const FAILURE_TEXTS: Record<string, string> = {
+  ORDER_SEND_TARGET_UNSUPPORTED: 'этот тип получателя не поддерживается',
+  ORDER_SEND_CHANNEL_UNSUPPORTED: 'этот канал отправки не поддерживается',
   CLIENT_NOT_ON_WHATSAPP: 'номера клиента нет в WhatsApp',
+  EMPLOYEE_NOT_ON_WHATSAPP: 'номера сотрудника нет в WhatsApp',
   WAHA_REJECTED: 'WhatsApp не принял файл',
   WAHA_FILE_UNSUPPORTED: 'WhatsApp не принимает файлы такого типа',
   ORDER_SEND_PAYLOAD_MISSING: 'файл отправки недоступен',
@@ -145,7 +158,7 @@ const FAILURE_TEXTS: Record<string, string> = {
 };
 const CANCEL_TEXTS: Record<string, string> = {
   disabled: 'отправка из карточки выключена',
-  recipient_removed: 'чат убран из настроек',
+  recipient_removed: 'получатель убран из настроек',
   recipient_changed: 'получатель изменился (другой телефон, клиент или группа)',
   form_not_allowed: 'форма больше не разрешена получателю',
   permission_revoked: 'у отправителя больше нет прав',

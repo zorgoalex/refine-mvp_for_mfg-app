@@ -1,5 +1,5 @@
 import { nameRule } from '../../utils/nameRules';
-import { Create, useForm } from "@refinedev/antd";
+import { Create, useForm, useSelect } from "@refinedev/antd";
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { Form, Input, Select, Checkbox, message } from "antd";
 import { authStorage } from "../../utils/auth";
@@ -12,6 +12,7 @@ import { mapBackendCreateUserRequest } from "./userFormMapping";
 export const UserCreate: React.FC<IResourceComponentsProps> = () => {
   const { list } = useNavigation();
   const [loading, setLoading] = useState(false);
+  const { selectProps: employeeSelectProps } = useSelect({ resource: "employees", optionLabel: "full_name", optionValue: "employee_id" });
 
   const handleSubmit = async (values: any) => {
     setLoading(true);
@@ -134,6 +135,13 @@ export const UserCreate: React.FC<IResourceComponentsProps> = () => {
         <Form.Item label="Полное имя" name="full_name" rules={[nameRule("full_name", 255, 0)]}>
           <Input placeholder="Иванов Иван Иванович" />
         </Form.Item>
+
+        {featureFlags.useBackendUsers && (
+          <Form.Item label="Сотрудник" name="employee_id" normalize={(value) => value ?? null}
+            extra="Несколько пользователей могут быть связаны с одним сотрудником">
+            <Select {...employeeSelectProps} allowClear showSearch placeholder="Не связан" />
+          </Form.Item>
+        )}
 
         <Form.Item label="Активен" name="is_active" valuePropName="checked">
           <Checkbox />

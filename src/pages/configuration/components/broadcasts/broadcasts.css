@@ -58,3 +58,14 @@
 .broadcast-settings-grid + .ant-typography {
   margin-top: 4px;
 }
+
+/* Allowed forms: one per line, so a long list never runs under the next field. */
+.order-send-forms {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.order-send-forms .ant-checkbox-wrapper {
+  margin-inline-start: 0;
+}

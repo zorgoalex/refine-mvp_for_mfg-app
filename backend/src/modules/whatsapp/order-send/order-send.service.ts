@@ -21,7 +21,8 @@ import {
 /** Refusals worth a technical trace and a refused-audit row (no phone, no group id). */
 const REFUSALS = new Set(['ORDER_SEND_ALREADY_QUEUED', 'ORDER_SEND_QUEUE_FULL', 'ORDER_SEND_TOO_LONG', 'ORDER_SEND_DISABLED', 'ORDER_SEND_PAUSED', 'ORDER_SEND_FORM_NOT_ALLOWED',
   'ORDER_SEND_FINANCIALS_REQUIRED', 'ORDER_SEND_CHAT_UNKNOWN', 'CLIENT_PHONE_MISSING', 'CLIENT_PHONE_INVALID', 'ORDER_SEND_STORAGE_FULL',
-  'ORDER_SEND_RENDER_FAILED', 'ORDER_SEND_FILE_TOO_LARGE', 'PERMISSION_DENIED', 'ORDER_NOT_FOUND', 'ORDER_SEND_PREVIOUS_UNKNOWN']);
+  'ORDER_SEND_RENDER_FAILED', 'ORDER_SEND_FILE_TOO_LARGE', 'PERMISSION_DENIED', 'ORDER_NOT_FOUND', 'ORDER_SEND_PREVIOUS_UNKNOWN',
+  'ORDER_SEND_RECIPIENT_UNKNOWN', 'ORDER_SEND_CHANNEL_UNSUPPORTED', 'EMPLOYEE_INACTIVE', 'EMPLOYEE_CONTACT_MISSING']);
 
 @Injectable()
 export class OrderSendService {
@@ -34,10 +35,12 @@ export class OrderSendService {
 
   async settings(): Promise<{ settings: OrderSendSettings; forms: typeof ORDER_FORMS; captionVariables: typeof ORDER_SEND_CAPTION_VARIABLES;
     nextAllowedAt: string | null; activeSend: boolean; queueLength: number; nextDeliveryAt: string | null;
+    employeeDirectory: Awaited<ReturnType<OrderSendRepository['employeeDirectory']>>;
     runtime: ReturnType<OrderSendWorker['runtime']> }> {
     const { lastDeliveryAt, ...settings } = await this.repository.getSettings();
     const queue = await this.repository.queueSnapshot();
     return { settings, forms: ORDER_FORMS, captionVariables: ORDER_SEND_CAPTION_VARIABLES,
+      employeeDirectory: await this.repository.employeeDirectory(),
       nextAllowedAt: allowedAtIso(lastDeliveryAt, settings.minIntervalMinutes), activeSend: queue.rows.length > 0,
       queueLength: queue.rows.length, nextDeliveryAt: firstEstimate(queue.estimates), runtime: this.worker.runtime() };
   }
@@ -57,6 +60,9 @@ export class OrderSendService {
       forms: ORDER_FORMS.filter((form) => financial || !form.financial).map((form) => ({ code: form.code, title: form.title, financial: form.financial })),
       client: { forms: visible(settings.clientForms) },
       chats: settings.chats.map((chat) => ({ chatKey: chat.chatKey, label: chat.label, forms: visible(chat.forms) })).filter((chat) => chat.forms.length > 0),
+      employees: (await this.repository.menuEmployees())
+        .map((employee) => ({ ...employee, forms: visible(employee.forms) }))
+        .filter((employee) => employee.forms.length > 0),
       nextAllowedAt: allowedAtIso(lastDeliveryAt, settings.minIntervalMinutes),
       activeSend: await this.repository.activeSendExists(),
       queueLength: (await this.repository.queueSnapshot()).rows.length,
@@ -113,6 +119,7 @@ export class OrderSendService {
           const outcome = await this.repository.enqueue({
             actorId: actor.id, idempotencyKey: input.idempotencyKey, fingerprint,
             chatKey: input.target.kind === 'chat' ? input.target.chatKey : null,
+            employee: input.target.kind === 'employee' ? { recipientKey: input.target.recipientKey, contactId: input.target.contactId ?? null } : null,
             orderId, form: input.form, confirmAfterUnknown: input.confirmAfterUnknown ?? null,
             prepare: async (tx, decision): Promise<NewSend> => {
               const data = await readOrderFormData(tx, orderId);
@@ -124,10 +131,13 @@ export class OrderSendService {
               if (form.financial && !financial) {
                 throw new ApiError(403, 'ORDER_SEND_FINANCIALS_REQUIRED', 'Форма с ценами доступна только при праве видеть финансы');
               }
-              const allowed = decision.chat ? knownForms(decision.chat.forms) : knownForms(decision.settings.client_forms);
+              const employee = decision.employee;
+              const allowed = decision.chat ? knownForms(decision.chat.forms)
+                : employee ? knownForms(employee.recipient.forms) : knownForms(decision.settings.client_forms);
               if (!allowed.includes(input.form)) throw new ApiError(409, 'ORDER_SEND_FORM_NOT_ALLOWED', 'Эта форма не разрешена получателю в настройках');
               let phone: string | null = null;
-              if (!decision.chat) phone = normalizeClientPhone(data.clientPhone);
+              if (employee) phone = employee.phoneNormalized;
+              else if (!decision.chat) phone = normalizeClientPhone(data.clientPhone);
               const generated = await generateOrderForm(data, input.form, financial);
               const stored: StoredPart[] = [];
               for (const page of generated.pages) {
@@ -135,13 +145,15 @@ export class OrderSendService {
                 written.push(file.fileKey);
                 stored.push(file);
               }
-              const caption = renderOrderSendCaption(decision.chat ? decision.chat.caption : decision.settings.client_caption, {
+              const caption = renderOrderSendCaption(decision.chat ? decision.chat.caption
+                : employee ? employee.recipient.caption : decision.settings.client_caption, {
                 order_name: data.orderName, client: data.clientName ?? '', order_date: dateText(data.orderDate),
                 completion_date: data.completionDate ? dateText(data.completionDate) : '', form: form.title,
               });
               return {
                 sendId: randomUUID(), orderId, clientId: data.clientId, actor, requestId, idempotencyKey: input.idempotencyKey, fingerprint,
-                targetKind: decision.chat ? 'chat' : 'client', chatKey: decision.chat?.chat_key ?? null, form: input.form,
+                targetKind: decision.chat ? 'chat' : employee ? 'employee' : 'client', chatKey: decision.chat?.chat_key ?? null, form: input.form,
+                employee,
                 destinationChatId: decision.chat?.group_chat_id ?? null, phoneNormalized: phone,
                 recipientMasked: decision.chat ? maskGroup(decision.chat.group_chat_id) : maskPhone(phone as string),
                 fileKey: stored[0].fileKey, sha256: stored[0].sha256, sizeBytes: stored[0].sizeBytes, fileName: generated.fileName, caption,
@@ -199,11 +211,16 @@ export class OrderSendService {
   /** Refused command: its own committed row (the command transaction rolled back), no recipient data. */
   private async recordRefusal(orderId: number, input: { target: OrderSendTarget; form: OrderFormCode }, actor: CurrentUser, requestId: string,
     error: ApiError) {
+    // A refusal to a known employee recipient is linked to the employee (normalized audit dimension).
+    const employeeId = input.target.kind === 'employee'
+      ? await this.repository.employeeOfRecipient(input.target.recipientKey).catch(() => null) : null;
     await auditService.record(this.database, {
       event: 'whatsapp.order_send.refused', entityType: 'order', entityId: orderId,
       actorUserId: numericId(actor.id), actorUsername: actor.username, actorRole: actor.role, requestId, source: 'erp_whatsapp_order_send',
       relatedOrderId: orderId, statusCode: error.code,
-      metadata: { targetKind: input.target.kind, chatKey: input.target.kind === 'chat' ? input.target.chatKey : null, form: input.form,
+      ...(employeeId !== null ? { relatedEntities: [{ entityType: 'employee', entityId: employeeId }] } : {}),
+      metadata: { employeeId, targetKind: input.target.kind, chatKey: input.target.kind === 'chat' ? input.target.chatKey : null,
+        recipientKey: input.target.kind === 'employee' ? input.target.recipientKey : null, form: input.form,
         errorCode: error.code, source: 'order_card' },
     }).catch(() => undefined);
     await this.worker.logRefusal(error.code, { orderId, targetKind: input.target.kind, form: input.form });
@@ -216,7 +233,8 @@ export function toView(row: SendRow, estimate?: QueueEstimate): OrderSendView {
     orderId: Number(row.order_id),
     targetKind: row.target_kind,
     chatKey: row.chat_key,
-    recipientLabel: row.target_kind === 'client' ? 'Клиент' : row.chat_label ?? 'Чат',
+    // A recipient kind of a newer release (an employee) reads as such, never as a chat.
+    recipientLabel: row.target_kind === 'client' ? 'Клиент' : row.target_kind === 'chat' ? row.chat_label ?? 'Чат' : row.employee_name ?? 'Сотрудник',
     recipientMasked: row.recipient_masked,
     form: row.form_code,
     state: row.state,

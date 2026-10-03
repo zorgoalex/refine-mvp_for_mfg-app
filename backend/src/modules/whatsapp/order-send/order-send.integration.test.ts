@@ -61,7 +61,7 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
       stage_code text,before_json jsonb,after_json jsonb,diff_json jsonb,metadata_json jsonb,created_at timestamptz DEFAULT now());
       CREATE TABLE audit_log_related_entity(audit_id uuid NOT NULL,entity_type text NOT NULL,entity_id bigint NOT NULL,PRIMARY KEY(audit_id,entity_type,entity_id));
       CREATE TABLE roles(role_id int PRIMARY KEY, is_active boolean NOT NULL DEFAULT true);
-      CREATE TABLE users(user_id bigint PRIMARY KEY, username text, role_id int REFERENCES roles, is_active boolean NOT NULL DEFAULT true);
+      CREATE TABLE users(user_id bigint PRIMARY KEY, username text, role_id int REFERENCES roles, is_active boolean NOT NULL DEFAULT true, employee_id bigint);
       INSERT INTO roles VALUES (1, true), (10, true);
       CREATE TABLE permissions_state(id boolean PRIMARY KEY DEFAULT true, version int NOT NULL DEFAULT 1);
       INSERT INTO permissions_state VALUES (true, 1);
@@ -89,7 +89,7 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
         sheet_material_type_id int, delete_flag boolean DEFAULT false);
       CREATE TABLE payment_types(type_paid_id int PRIMARY KEY, type_paid_name text);
       CREATE TABLE payments(payment_id serial PRIMARY KEY, order_id bigint, type_paid_id int, payment_date date, amount numeric, delete_flag boolean DEFAULT false);
-      CREATE TABLE employees(employee_id int PRIMARY KEY, full_name text);
+      CREATE TABLE employees(employee_id bigint PRIMARY KEY, full_name text, is_active boolean NOT NULL DEFAULT true);
       CREATE TABLE doweling_orders(doweling_order_id serial PRIMARY KEY, order_id bigint, doweling_order_name text, design_engineer_id int, delete_flag boolean DEFAULT false);
       CREATE TABLE order_doweling_links(order_doweling_link_id serial PRIMARY KEY, order_id bigint, doweling_order_id int, delete_flag boolean DEFAULT false);
       INSERT INTO clients VALUES (501, 'Тест Клиент'), (502, 'Тест Другой');
@@ -105,6 +105,7 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
     const { readFile } = await import('node:fs/promises');
     await q(await readFile(new URL('../../../../db/migrations/230_whatsapp_order_send.sql', import.meta.url), 'utf8'));
     await q(await readFile(new URL('../../../../db/migrations/233_whatsapp_order_send_queue.sql', import.meta.url), 'utf8'));
+    await q(await readFile(new URL('../../../../db/migrations/235_employee_work_contacts.sql', import.meta.url), 'utf8'));
     database = {
       isConfigured: true,
       query: <T extends QueryResultRow = QueryResultRow>(text: string, params: readonly unknown[] = []) => pool.query<T>(text, [...params]),
@@ -717,7 +718,7 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
   it('an image form goes as pictures one after another, the caption on the first; a later page lost → unknown PARTIAL_DELIVERY', async () => {
     await configure({ clientForms: ['order_image', 'order_pdf'] });
     await q(`INSERT INTO order_details(order_id, detail_number, height, width, quantity, milling_cost_per_sqm, film_id)
-      SELECT 9001, 100 + n, 500, 500, 1, 1000, 1 FROM generate_series(1, 60) n`);
+      SELECT 9001, 100 + n, 500, 500, 1, 1000, 1 FROM generate_series(1, 80) n`);
     try {
       const view = (await send(9001, { target: { kind: 'client' }, form: 'order_image' as never })).send;
       expect(view.partsTotal).toBe(2);
@@ -747,6 +748,129 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
     } finally {
       await q(`DELETE FROM order_details WHERE order_id = 9001 AND detail_number > 100`);
     }
+  });
+
+  // ---- an employee as a recipient (03.10): contacts, identity across retention, never redirected.
+  const EMPLOYEE_PHONE = '77015550101';
+  const setupEmployee = async (opts: { id?: number; phones?: string[]; forms?: string[] } = {}) => {
+    const id = opts.id ?? 7201;
+    await q(`INSERT INTO employees(employee_id, full_name) VALUES ($1, 'Тест Сотрудник Мастер') ON CONFLICT (employee_id) DO UPDATE SET is_active = true`, [id]);
+    await q(`DELETE FROM employee_work_contacts WHERE employee_id = $1`, [id]);
+    for (const [index, phone] of (opts.phones ?? [EMPLOYEE_PHONE]).entries()) {
+      await q(`INSERT INTO employee_work_contacts(employee_id, kind, value, value_normalized, is_primary, position) VALUES ($1, 'phone', $2, $2, $3, $4)`,
+        [id, phone, index === 0, index]);
+    }
+    await q(`UPDATE users SET employee_id = $1 WHERE user_id = 12`, [id]);
+    const current = await settingsInput();
+    await service.updateSettings({ ...current, employees: [{ recipientKey: null, employeeId: id, channel: 'whatsapp',
+      forms: (opts.forms ?? ['production_pdf', 'order_pdf']) as never, caption: 'Мастеру {order_name}' }] } as never, admin, `req-${randomUUID()}`);
+    const recipient = (await service.settings()).settings.employees.find((item) => item.employeeId === id)!;
+    const contacts = (await q(`SELECT contact_id, value_normalized FROM employee_work_contacts WHERE employee_id = $1 ORDER BY position`, [id])).rows;
+    return { id, recipientKey: recipient.recipientKey, contacts };
+  };
+  const toEmployee = (recipientKey: string, contactId?: number) => ({ kind: 'employee', recipientKey, ...(contactId ? { contactId } : {}) }) as never;
+
+  it('the menu offers settings employees as «логин / ФИО» with masked phones; Telegram is refused by the API', async () => {
+    const employee = await setupEmployee({ phones: [EMPLOYEE_PHONE, '77015550102'] });
+    const menu = await service.menu(admin);
+    const item = menu.employees.find((entry) => entry.recipientKey === employee.recipientKey)!;
+    expect(item.label).toBe('order-send-manager / Тест Сотрудник Мастер');
+    expect(item.contacts).toEqual([{ contactId: Number(employee.contacts[0].contact_id), masked: '7701***0101', isPrimary: true },
+      { contactId: Number(employee.contacts[1].contact_id), masked: '7701***0102', isPrimary: false }]);
+    expect(JSON.stringify(menu)).not.toContain(EMPLOYEE_PHONE);
+    const settings = await settingsInput();
+    expect(await code(Promise.resolve().then(() => parseOrderSendSettings({ ...settings, employees: [{ recipientKey: null, employeeId: employee.id,
+      channel: 'telegram', forms: ['order_pdf'], caption: '' }] })))).toBe('ORDER_SEND_CHANNEL_UNSUPPORTED');
+    // A client of the previous release saves settings without «employees»: the employees stay.
+    const legacy = parseOrderSendSettings({ ...(await settingsInput()), employees: undefined });
+    await service.updateSettings(legacy, admin, 'req-legacy');
+    expect((await service.settings()).settings.employees.map((entry) => entry.recipientKey)).toEqual([employee.recipientKey]);
+  });
+
+  it('sends to the primary or a chosen phone of the employee, audited with the employee link', async () => {
+    const employee = await setupEmployee({ phones: [EMPLOYEE_PHONE, '77015550102'] });
+    const first = (await send(9001, { target: toEmployee(employee.recipientKey), form: 'order_pdf' as never })).send;
+    expect(first).toMatchObject({ targetKind: 'employee', recipientLabel: 'Тест Сотрудник Мастер', recipientMasked: '7701***0101' });
+    await worker.work();
+    expect(await row(first.sendId)).toMatchObject({ state: 'sent', destination_chat_id: `${EMPLOYEE_PHONE}@c.us`, employee_id: String(employee.id) });
+    expect(sent[0].caption).toContain('Мастеру');
+    const links = (await q(`SELECT a.event FROM audit_log a JOIN audit_log_related_entity r ON r.audit_id = a.audit_id
+      WHERE a.entity_id = $1 AND r.entity_type = 'employee' AND r.entity_id = $2 ORDER BY a.created_at`, [first.sendId, employee.id])).rows.map((r) => r.event);
+    expect(links).toEqual(expect.arrayContaining(['whatsapp.order_send.requested', 'whatsapp.order_send.intent', 'whatsapp.order_send.sent']));
+    await slotPassed();
+    const second = (await send(9001, { target: toEmployee(employee.recipientKey, Number(employee.contacts[1].contact_id)), form: 'order_pdf' as never })).send;
+    expect(second.recipientMasked).toBe('7701***0102');
+    expect(await code(send(9001, { target: toEmployee(employee.recipientKey, 999999), form: 'order_pdf' as never }))).toBe('EMPLOYEE_CONTACT_MISSING');
+  });
+
+  it('a refusal to an employee recipient (also an archived one) is audited with the employee link', async () => {
+    const employee = await setupEmployee();
+    await send(9001, { target: toEmployee(employee.recipientKey), form: 'order_pdf' as never });
+    expect(await code(send(9001, { target: toEmployee(employee.recipientKey), form: 'order_pdf' as never }))).toBe('ORDER_SEND_ALREADY_QUEUED');
+    await service.updateSettings({ ...(await settingsInput()), employees: [] } as never, admin, `req-${randomUUID()}`);
+    expect(await code(send(9001, { target: toEmployee(employee.recipientKey), form: 'order_pdf' as never }))).toBe('ORDER_SEND_RECIPIENT_UNKNOWN');
+    const refusals = (await q(`SELECT a.status_code, a.metadata_json->>'employeeId' employee, r.entity_id related FROM audit_log a
+      LEFT JOIN audit_log_related_entity r ON r.audit_id = a.audit_id AND r.entity_type = 'employee'
+      WHERE a.event = 'whatsapp.order_send.refused' AND a.metadata_json->>'recipientKey' = $1 ORDER BY a.created_at`, [employee.recipientKey])).rows;
+    expect(refusals).toEqual([
+      { status_code: 'ORDER_SEND_ALREADY_QUEUED', employee: String(employee.id), related: String(employee.id) },
+      { status_code: 'ORDER_SEND_RECIPIENT_UNKNOWN', employee: String(employee.id), related: String(employee.id) },
+    ]);
+  });
+
+  it('the same form to the same employee on the same number is one recipient — across a primary change and retention', async () => {
+    const employee = await setupEmployee({ phones: [EMPLOYEE_PHONE, '77015550102'] });
+    const waiting = (await send(9001, { target: toEmployee(employee.recipientKey), form: 'order_pdf' as never })).send;
+    const duplicate = await send(9001, { target: toEmployee(employee.recipientKey, Number(employee.contacts[0].contact_id)), form: 'order_pdf' as never })
+      .catch((error: ApiError) => error);
+    expect(duplicate).toMatchObject({ code: 'ORDER_SEND_ALREADY_QUEUED', details: { sendId: waiting.sendId } });
+    // Another number of the same employee is another recipient.
+    expect((await send(9001, { target: toEmployee(employee.recipientKey, Number(employee.contacts[1].contact_id)), form: 'order_pdf' as never })).send.state)
+      .toBe('queued');
+    await q(`DELETE FROM whatsapp_order_sends WHERE send_id <> $1`, [waiting.sendId]);
+    // The send ends unknown, retention removes the phone: a repeat to the same number still needs a confirmation,
+    // even after the number became primary under another contact row.
+    await q(`UPDATE whatsapp_order_sends SET state = 'unknown', error_code = 'WAHA_UNCERTAIN', created_at = now() - interval '8 days' WHERE send_id = $1`, [waiting.sendId]);
+    await worker.cleanup(new Date(Date.now() + 2 * 60 * 60_000));
+    expect((await row(waiting.sendId)).phone_normalized).toBeNull();
+    expect((await row(waiting.sendId)).recipient_fingerprint).toMatch(/^[0-9a-f]{64}$/);
+    await q(`DELETE FROM employee_work_contacts WHERE employee_id = $1`, [employee.id]);
+    await q(`INSERT INTO employee_work_contacts(employee_id, kind, value, value_normalized, is_primary) VALUES ($1, 'phone', '8 701 555 01 01', $2, true)`,
+      [employee.id, EMPLOYEE_PHONE]);
+    expect(await code(send(9001, { target: toEmployee(employee.recipientKey), form: 'order_pdf' as never }))).toBe('ORDER_SEND_PREVIOUS_UNKNOWN');
+    expect((await send(9001, { target: toEmployee(employee.recipientKey), form: 'order_pdf' as never, confirmAfterUnknown: waiting.sendId } as never)).send.state)
+      .toBe('queued');
+  });
+
+  it('the worker never redirects: a changed phone, an inactive employee or a removed recipient cancel; a Telegram row fails without WhatsApp', async () => {
+    const employee = await setupEmployee();
+    const changed = (await send(9001, { target: toEmployee(employee.recipientKey), form: 'order_pdf' as never })).send;
+    await q(`UPDATE employee_work_contacts SET value_normalized = '77015550199', value = '77015550199' WHERE contact_id = $1`, [employee.contacts[0].contact_id]);
+    await worker.work();
+    expect(await row(changed.sendId)).toMatchObject({ state: 'cancelled', cancel_reason: 'recipient_changed' });
+    await q(`UPDATE employee_work_contacts SET value_normalized = $2, value = $2 WHERE contact_id = $1`, [employee.contacts[0].contact_id, EMPLOYEE_PHONE]);
+    const inactive = (await send(9001, { target: toEmployee(employee.recipientKey), form: 'order_pdf' as never })).send;
+    await q(`UPDATE employees SET is_active = false WHERE employee_id = $1`, [employee.id]);
+    await worker.work();
+    expect(await row(inactive.sendId)).toMatchObject({ state: 'cancelled', cancel_reason: 'recipient_removed' });
+    await q(`UPDATE employees SET is_active = true WHERE employee_id = $1`, [employee.id]);
+    const telegramKey = randomUUID();
+    await q(`INSERT INTO whatsapp_order_send_employees(recipient_key, employee_id, channel, forms, position) VALUES ($1, $2, 'telegram', '{order_pdf}', 5)`,
+      [telegramKey, employee.id]);
+    const viaTelegram = (await send(9001, { target: toEmployee(employee.recipientKey), form: 'order_pdf' as never })).send;
+    await q(`UPDATE whatsapp_order_sends SET recipient_key = $2 WHERE send_id = $1`, [viaTelegram.sendId, telegramKey]);
+    let checked = 0;
+    const original = checkBehaviour;
+    checkBehaviour = async (phone) => { checked += 1; return original(phone); };
+    try { await worker.work(); } finally { checkBehaviour = original; }
+    expect(await row(viaTelegram.sendId)).toMatchObject({ state: 'failed', error_code: 'ORDER_SEND_CHANNEL_UNSUPPORTED' });
+    expect(checked).toBe(0);
+    // Removing the employee from the settings cancels his waiting sends.
+    const removed = (await send(9001, { target: toEmployee(employee.recipientKey), form: 'order_pdf' as never })).send;
+    await service.updateSettings({ ...(await settingsInput()), employees: [] } as never, admin, 'req-remove');
+    expect(await row(removed.sendId)).toMatchObject({ state: 'cancelled', cancel_reason: 'recipient_removed' });
+    // The archived recipient keeps the employee: deleting the employee is refused (RESTRICT).
+    expect(await code(q(`DELETE FROM employees WHERE employee_id = $1`, [employee.id]))).toContain('foreign key');
   });
 
   // ---- rows of a release this backend does not know (a form added later). These run last: they drop

@@ -17,6 +17,26 @@ export interface OrderSendChatSettings {
   caption: string;
 }
 
+export type OrderSendChannel = 'whatsapp' | 'telegram';
+
+/** An employee offered in the card menu (as a chat). */
+export interface OrderSendEmployeeSettings {
+  recipientKey: string;
+  employeeId: number;
+  employeeName: string;
+  channel: OrderSendChannel;
+  forms: OrderFormCode[];
+  caption: string;
+}
+
+/** An active employee for the recipient picker: linked usernames and the number of work phones. */
+export interface OrderSendEmployeeDirectoryItem {
+  employeeId: number;
+  fullName: string;
+  usernames: string[];
+  phones: number;
+}
+
 export interface OrderSendSettings {
   version: number;
   enabled: boolean;
@@ -26,6 +46,8 @@ export interface OrderSendSettings {
   clientForms: OrderFormCode[];
   clientCaption: string;
   chats: OrderSendChatSettings[];
+  /** Absent on an older backend. */
+  employees?: OrderSendEmployeeSettings[];
   updatedAt: string;
   updatedBy: { id: number | string; username: string | null } | null;
 }
@@ -40,6 +62,8 @@ export interface OrderSendSettingsEnvelope {
   queueLength?: number;
   /** Approximate start of the next delivery; absent on an older backend. */
   nextDeliveryAt?: string | null;
+  /** Absent on an older backend. */
+  employeeDirectory?: OrderSendEmployeeDirectoryItem[];
   runtime: BroadcastRuntime;
 }
 
@@ -61,6 +85,26 @@ export interface OrderSendSettingsInput {
   clientForms: OrderFormCode[];
   clientCaption: string;
   chats: OrderSendChatInput[];
+  /** Sent only to a backend that has employee recipients (omitted = the current ones stay). */
+  employees?: OrderSendEmployeeInput[];
+}
+
+export interface OrderSendEmployeeInput {
+  /** null = a new employee recipient. */
+  recipientKey: string | null;
+  employeeId: number;
+  channel: OrderSendChannel;
+  forms: OrderFormCode[];
+  caption: string;
+}
+
+/** An employee item of the card menu: phones only as masks, the primary first. */
+export interface OrderSendMenuEmployee {
+  recipientKey: string;
+  /** «логин / ФИО» when users are linked. */
+  label: string;
+  forms: OrderFormCode[];
+  contacts: Array<{ contactId: number; masked: string; isPrimary: boolean }>;
 }
 
 /** The menu of the order card: no group ids, already filtered by the user's financial visibility. */
@@ -69,12 +113,16 @@ export interface OrderSendMenu {
   forms: Array<Pick<OrderFormInfo, 'code' | 'title' | 'financial'>>;
   client: { forms: OrderFormCode[] };
   chats: Array<{ chatKey: string; label: string; forms: OrderFormCode[] }>;
+  /** Absent on an older backend. */
+  employees?: OrderSendMenuEmployee[];
   nextAllowedAt: string | null;
   activeSend: boolean;
   runtime: BroadcastRuntime;
 }
 
-export type OrderSendTarget = { kind: 'client' } | { kind: 'chat'; chatKey: string };
+export type OrderSendTarget = { kind: 'client' } | { kind: 'chat'; chatKey: string }
+  /** `contactId` — one of the employee's phones; omitted = the primary one. */
+  | { kind: 'employee'; recipientKey: string; contactId?: number };
 
 export interface OrderSendCommandInput {
   target: OrderSendTarget;
@@ -87,7 +135,7 @@ export interface OrderSendCommandInput {
 export interface OrderSendView {
   sendId: string;
   orderId: number;
-  targetKind: 'client' | 'chat';
+  targetKind: 'client' | 'chat' | 'employee';
   chatKey: string | null;
   recipientLabel: string;
   recipientMasked: string;

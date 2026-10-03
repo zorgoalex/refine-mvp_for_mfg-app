@@ -53,7 +53,22 @@ export const ORDER_SEND_RETENTION_MS = 7 * 24 * 60 * 60_000;
 export type OrderSendState = 'queued' | 'sending' | 'sent' | 'failed' | 'unknown' | 'cancelled' | 'expired';
 export type OrderSendCancelReason = 'disabled' | 'recipient_removed' | 'recipient_changed' | 'form_not_allowed' | 'permission_revoked' | 'paused'
   | 'manual';
-export type OrderSendTarget = { kind: 'client' } | { kind: 'chat'; chatKey: string };
+export type OrderSendTarget = { kind: 'client' } | { kind: 'chat'; chatKey: string }
+  /** An employee from the settings; `contactId` — one of his phones (default: the primary one). */
+  | { kind: 'employee'; recipientKey: string; contactId?: number | null };
+export type OrderSendChannel = 'whatsapp' | 'telegram';
+/** Channels a send can go through in this release (Telegram comes with the next stage). */
+export const ORDER_SEND_SUPPORTED_CHANNELS: readonly OrderSendChannel[] = ['whatsapp'];
+export const ORDER_SEND_MAX_EMPLOYEES = 20;
+
+export interface OrderSendEmployeeRecipient {
+  recipientKey: string;
+  employeeId: number;
+  employeeName: string;
+  channel: OrderSendChannel;
+  forms: OrderFormCode[];
+  caption: string;
+}
 
 export interface OrderSendChat {
   chatKey: string;
@@ -72,6 +87,7 @@ export interface OrderSendSettings {
   clientForms: OrderFormCode[];
   clientCaption: string;
   chats: OrderSendChat[];
+  employees: OrderSendEmployeeRecipient[];
   updatedAt: string;
   updatedBy: { id: string; username: string | null } | null;
 }
@@ -85,6 +101,8 @@ export interface OrderSendSettingsInput {
   clientCaption: string;
   /** chatKey null = a new chat; an existing key keeps its group (a changed group gets a new key). */
   chats: Array<{ chatKey: string | null; groupChatId: string; label: string; forms: OrderFormCode[]; caption: string }>;
+  /** recipientKey null = a new employee recipient; an existing key keeps its employee and channel. */
+  employees: Array<{ recipientKey: string | null; employeeId: number; channel: OrderSendChannel; forms: OrderFormCode[]; caption: string }>;
 }
 
 export interface OrderSendRuntime {
@@ -99,6 +117,9 @@ export interface OrderSendMenu {
   forms: Array<{ code: OrderFormCode; title: string; financial: boolean }>;
   client: { forms: OrderFormCode[] };
   chats: Array<{ chatKey: string; label: string; forms: OrderFormCode[] }>;
+  /** «логин / ФИО» when users are linked to the employee; phones only as masks. */
+  employees: Array<{ recipientKey: string; label: string; forms: OrderFormCode[];
+    contacts: Array<{ contactId: number; masked: string; isPrimary: boolean }> }>;
   nextAllowedAt: string | null;
   activeSend: boolean;
   /** Waiting sends in the queue (queued + sending). */
@@ -109,7 +130,7 @@ export interface OrderSendMenu {
 export interface OrderSendView {
   sendId: string;
   orderId: number;
-  targetKind: 'client' | 'chat';
+  targetKind: 'client' | 'chat' | 'employee';
   chatKey: string | null;
   recipientLabel: string;
   recipientMasked: string;

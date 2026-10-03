@@ -287,6 +287,21 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText.slice(verifyStart, verifyEnd)).toContain('230_whatsapp_order_send*|233_whatsapp_order_send_queue*');
   });
 
+  it('probes employee work contacts and the employee send target before ledgering migration 235', () => {
+    const arm = probeFn.slice(probeFn.indexOf('235_employee_work_contacts*)'), probeFn.indexOf('233_whatsapp_order_send_queue*)'));
+    for (const marker of ['employees work_contacts_version', 'q_tbl employee_work_contacts', 'q_tbl whatsapp_order_send_employees',
+      'whatsapp_order_sends recipient_fingerprint', 'identity_salt', "LIKE '%employee%'", 'trg_whatsapp_order_send_employees_immutable',
+      "tgenabled <> 'D'", "tgfoid = 'public.whatsapp_order_send_employees_immutable()'::regprocedure",
+      "conrelid='public.employee_work_contacts'::regclass AND confrelid='public.employees'::regclass AND confdeltype='r'",
+      "conrelid='public.whatsapp_order_send_employees'::regclass AND confrelid='public.employees'::regclass AND confdeltype='r'",
+      "conrelid='public.whatsapp_order_sends'::regclass AND confrelid='public.whatsapp_order_send_employees'::regclass AND confdeltype='r'",
+      "conname='whatsapp_order_sends_target_kind_check' AND conrelid='public.whatsapp_order_sends'::regclass"])
+      expect(arm).toContain(marker);
+    const verifyStart = scriptText.indexOf('verify_applied_effect() {');
+    const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
+    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('233_whatsapp_order_send_queue*|235_employee_work_contacts*');
+  });
+
   it('requires the complete WhatsApp technical log schema before advancing migration 170', () => {
     const arm = probeFn.slice(
       probeFn.indexOf('170_whatsapp_technical_logs*)'),

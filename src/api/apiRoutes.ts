@@ -353,6 +353,10 @@ export const apiRoutes = {
     configuration: backendApiPath('/message-processing/configuration'),
     test: backendApiPath('/message-processing/test'),
   },
+  employees: {
+    contacts: (employeeId: number) => backendApiPath(`/employees/${employeeId}/contacts`),
+    contactsList: backendApiPath('/employee-contacts'),
+  },
   whatsapp: {
     preview: backendApiPath('/whatsapp/rules/preview'),
     status: backendApiPath('/whatsapp/status'),

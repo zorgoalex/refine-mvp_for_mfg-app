@@ -1,5 +1,5 @@
 import { Table } from '../../ui/tooltipDelay';
-import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
+import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton, DateField } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import { Space, Badge } from "antd";
@@ -14,6 +14,10 @@ export const UserList: React.FC<IResourceComponentsProps> = () => {
     },
   });
   const { show } = useNavigation();
+  // The backend users API returns only employee_id: names come from the employees reference.
+  const employeeIds = [...new Set((tableProps.dataSource ?? []).map((row: any) => row.employee_id).filter((id: unknown) => id != null))];
+  const { data: employees } = useMany({ resource: "employees", ids: employeeIds, queryOptions: { enabled: employeeIds.length > 0 } });
+  const employeeNames = new Map((employees?.data ?? []).map((row: any) => [Number(row.employee_id), row.full_name as string]));
 
   return (
     <LocalizedList>
@@ -30,6 +34,11 @@ export const UserList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column dataIndex="username" title="Логин" sorter />
         <Table.Column dataIndex="email" title="Email" sorter />
         <Table.Column dataIndex="full_name" title="Полное имя" sorter />
+        <Table.Column
+          key="employee"
+          title="Сотрудник"
+          render={(_, record: any) => (record?.employee_id ? record?.employee?.full_name ?? employeeNames.get(Number(record.employee_id)) ?? `#${record.employee_id}` : null)}
+        />
         <Table.Column
           dataIndex={["role", "role_name"]}
           title="Роль"

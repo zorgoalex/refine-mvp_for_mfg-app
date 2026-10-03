@@ -2249,6 +2249,21 @@ probe_file() {
       "SELECT EXISTS (SELECT 1 FROM whatsapp_order_send_settings WHERE singleton);" ;;
     # 233: queue instead of refusals (no «one active» index), manual cancel, image forms + their pages.
     # 230's probe checks its end state: 233 drops the one-active index, so 230 does not require it.
+    # 235: employee work contacts + an employee as an order card send recipient.
+    235_employee_work_contacts*) probe_all \
+      "$(q_col employees work_contacts_version)" "$(q_tbl employee_work_contacts)" "$(q_tbl whatsapp_order_send_employees)" \
+      "$(q_idx uq_employee_work_contacts_primary)" "$(q_idx uq_employee_work_contacts_value)" \
+      "$(q_idx idx_whatsapp_order_send_employees_active)" "$(q_idx idx_whatsapp_order_sends_employee_identity)" \
+      "$(q_col whatsapp_order_send_settings identity_salt)" \
+      "$(q_col whatsapp_order_sends recipient_key)" "$(q_col whatsapp_order_sends employee_id)" \
+      "$(q_col whatsapp_order_sends employee_contact_id)" "$(q_col whatsapp_order_sends recipient_fingerprint)" \
+      "$(q_con_on whatsapp_order_sends chk_whatsapp_order_sends_target_kind)" \
+      "SELECT COALESCE((SELECT pg_get_constraintdef(oid) LIKE '%employee%' FROM pg_constraint WHERE conname='chk_whatsapp_order_sends_target' AND conrelid='public.whatsapp_order_sends'::regclass), false);" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_whatsapp_order_send_employees_immutable' AND NOT tgisinternal AND tgenabled <> 'D' AND tgrelid = 'public.whatsapp_order_send_employees'::regclass AND tgfoid = 'public.whatsapp_order_send_employees_immutable()'::regprocedure);" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE contype='f' AND conrelid='public.employee_work_contacts'::regclass AND confrelid='public.employees'::regclass AND confdeltype='r');" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE contype='f' AND conrelid='public.whatsapp_order_send_employees'::regclass AND confrelid='public.employees'::regclass AND confdeltype='r');" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE contype='f' AND conrelid='public.whatsapp_order_sends'::regclass AND confrelid='public.whatsapp_order_send_employees'::regclass AND confdeltype='r');" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='whatsapp_order_sends_target_kind_check' AND conrelid='public.whatsapp_order_sends'::regclass);" ;;
     233_whatsapp_order_send_queue*) probe_all \
       "SELECT NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='idx_whatsapp_order_sends_one_active');" \
       "$(q_idx idx_whatsapp_order_sends_queue)" "$(q_idx idx_whatsapp_order_send_parts_file)" \
@@ -2301,7 +2316,7 @@ verify_applied_effect() {
     209_whatsapp_broadcasts*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*)
+    224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     173_inbound_signals*)
