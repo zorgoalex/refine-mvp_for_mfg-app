@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Form, Input, InputNumber, Space, Switch, Typography, message } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Form, Input, InputNumber, Row, Space, Switch, Typography, message } from 'antd';
 import { DeleteOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { ApiError } from '../../../../api/apiError';
 import { authSession } from '../../../../api/authSession';
@@ -140,62 +140,82 @@ export const OrderSendSettings: React.FC = () => {
     <Paragraph type="secondary">Команды «Отправить клиенту в WhatsApp» и «Отправить в чат» в меню «⋯» карточки заказа ставят выбранную форму в общую очередь: отправки уходят по одной с порогом частоты и окном. Ожидающая отправка ждёт не больше 24 часов.</Paragraph>
     {error && <Alert style={{ marginBottom: 12 }} type={error.startsWith('Настройки изменены') ? 'warning' : 'error'} showIcon message={error} closable onClose={() => setError('')} />}
     <Form form={form} layout="vertical" initialValues={toOrderSendFormValues(settings)} disabled={fieldsLocked} onFinish={(v: OrderSendFormValues) => void save(v)}>
-      <div className="broadcast-settings-grid">
-        <Form.Item name="enabled" label="Включено" valuePropName="checked">
-          <Switch />
-        </Form.Item>
-        <Form.Item name="minIntervalMinutes" label="Порог частоты, мин" extra="Общий для всех отправок из карточек заказов" rules={[{ validator: async (_, value: number | null | undefined) => {
-          const problem = validateOrderSendInterval(value);
-          if (problem) throw new Error(problem);
-        } }]}>
-          <InputNumber min={ORDER_SEND_MIN_INTERVAL} max={ORDER_SEND_MAX_INTERVAL} precision={0} style={{ width: '100%' }} />
-        </Form.Item>
-        <Form.Item name="sendWindowMinutes" label="Окно отправки, мин" dependencies={['minIntervalMinutes']}
-          extra="Следующая отправка уходит в случайный момент этого окна после порога. Не больше половины порога; 0 — без окна."
-          rules={[({ getFieldValue }) => ({ validator: async (_: unknown, value: number | null | undefined) => {
-            const problem = validateOrderSendWindow(value, getFieldValue('minIntervalMinutes'));
+      <Row gutter={[16, 0]}>
+        <Col xs={24} sm={8} xl={4}>
+          <Form.Item name="enabled" label="Включено" valuePropName="checked">
+            <Switch />
+          </Form.Item>
+        </Col>
+        <Col xs={24} sm={8} xl={5}>
+          <Form.Item name="minIntervalMinutes" label="Порог частоты, мин" extra="Общий для всех отправок из карточек заказов" rules={[{ validator: async (_, value: number | null | undefined) => {
+            const problem = validateOrderSendInterval(value);
             if (problem) throw new Error(problem);
-          } })]}>
-          <InputNumber min={0} max={720} precision={0} style={{ width: '100%' }} />
-        </Form.Item>
-        <Form.Item className="broadcast-settings-wide" name="clientForms" label="Клиенту: разрешённые формы">
-          <Checkbox.Group options={formOptions} />
-        </Form.Item>
-        <Form.Item className="broadcast-settings-wide" name="clientCaption" label="Клиенту: подпись" rules={[captionRule]} extra={variablesHint}>
-          <Input.TextArea rows={2} maxLength={ORDER_SEND_CAPTION_MAX} placeholder="Заказ {order_name}" />
-        </Form.Item>
-      </div>
+          } }]}>
+            <InputNumber min={ORDER_SEND_MIN_INTERVAL} max={ORDER_SEND_MAX_INTERVAL} precision={0} style={{ width: '100%' }} />
+          </Form.Item>
+        </Col>
+        <Col xs={24} sm={8} xl={5}>
+          <Form.Item name="sendWindowMinutes" label="Окно отправки, мин" dependencies={['minIntervalMinutes']}
+            extra="Следующая отправка уходит в случайный момент этого окна после порога. Не больше половины порога; 0 — без окна."
+            rules={[({ getFieldValue }) => ({ validator: async (_: unknown, value: number | null | undefined) => {
+              const problem = validateOrderSendWindow(value, getFieldValue('minIntervalMinutes'));
+              if (problem) throw new Error(problem);
+            } })]}>
+            <InputNumber min={0} max={720} precision={0} style={{ width: '100%' }} />
+          </Form.Item>
+        </Col>
+        <Col xs={24} sm={12} xl={4}>
+          <Form.Item name="clientForms" label="Клиенту: разрешённые формы">
+            <Checkbox.Group className="order-send-forms" options={formOptions} />
+          </Form.Item>
+        </Col>
+        <Col xs={24} sm={12} xl={6}>
+          <Form.Item name="clientCaption" label="Клиенту: подпись" rules={[captionRule]} extra={variablesHint}>
+            <Input.TextArea rows={4} maxLength={ORDER_SEND_CAPTION_MAX} placeholder="Заказ {order_name}" />
+          </Form.Item>
+        </Col>
+      </Row>
       <Typography.Title level={5}>Чаты</Typography.Title>
       <Form.List name="chats">
         {(fields, { add, remove }) => <>
-          {fields.map((field, index) => <Card key={field.key} size="small" style={{ marginBottom: 12 }}
-            title={`Чат ${index + 1}`}
-            extra={<Button type="text" danger icon={<DeleteOutlined />} aria-label={`Удалить чат ${index + 1}`} onClick={() => remove(field.name)} />}>
-            <Form.Item name={[field.name, 'chatKey']} hidden noStyle><Input type="hidden" /></Form.Item>
-            <div className="broadcast-settings-grid">
-              <Form.Item className="broadcast-settings-wide" name={[field.name, 'groupChatId']} label="Группа WhatsApp" rules={[{ validator: async (_, value: string | null | undefined) => {
-                const problem = validateOrderSendGroup(value) ?? (duplicates.has(index) ? 'Эта группа уже указана в другом чате.' : null);
-                if (problem) throw new Error(problem);
-              } }]}>
-                <WhatsAppGroupSelect placeholder="120…@g.us" onChange={(next) => void prefillLabel(index, next)} />
-              </Form.Item>
-              <Form.Item name={[field.name, 'label']} label="Название в меню" rules={[{ validator: async (_, value: string | undefined) => {
-                const problem = validateOrderSendLabel(value);
-                if (problem) throw new Error(problem);
-              } }]}>
-                <Input maxLength={ORDER_SEND_LABEL_MAX} placeholder="Цех ЧПУ" />
-              </Form.Item>
-              <Form.Item className="broadcast-settings-wide" name={[field.name, 'forms']} label="Формы">
-                <Checkbox.Group options={formOptions} />
-              </Form.Item>
-              <Form.Item className="broadcast-settings-wide" name={[field.name, 'caption']} label="Подпись" rules={[captionRule]} extra={variablesHint}>
-                <Input.TextArea rows={2} maxLength={ORDER_SEND_CAPTION_MAX} />
-              </Form.Item>
-            </div>
-          </Card>)}
-          <Button icon={<PlusOutlined />} disabled={fields.length >= ORDER_SEND_MAX_CHATS}
-            onClick={() => add({ chatKey: null, groupChatId: '', label: '', forms: [], caption: '' })}>Добавить чат</Button>
-          {fields.length >= ORDER_SEND_MAX_CHATS && <Text type="secondary" style={{ marginLeft: 8 }}>Не больше {ORDER_SEND_MAX_CHATS} чатов.</Text>}
+          <Row gutter={[12, 12]}>
+            {fields.map((field, index) => <Col key={field.key} xs={24} lg={12} xxl={8}>
+              <Card size="small" style={{ height: '100%' }}
+                title={`Чат ${index + 1}`}
+                extra={<Button type="text" danger icon={<DeleteOutlined />} aria-label={`Удалить чат ${index + 1}`} onClick={() => remove(field.name)} />}>
+                <Form.Item name={[field.name, 'chatKey']} hidden noStyle><Input type="hidden" /></Form.Item>
+                <Form.Item name={[field.name, 'groupChatId']} label="Группа WhatsApp" rules={[{ validator: async (_, value: string | null | undefined) => {
+                  const problem = validateOrderSendGroup(value) ?? (duplicates.has(index) ? 'Эта группа уже указана в другом чате.' : null);
+                  if (problem) throw new Error(problem);
+                } }]}>
+                  <WhatsAppGroupSelect placeholder="120…@g.us" onChange={(next) => void prefillLabel(index, next)} />
+                </Form.Item>
+                <Row gutter={12}>
+                  <Col xs={24} sm={12}>
+                    <Form.Item name={[field.name, 'label']} label="Название в меню" rules={[{ validator: async (_, value: string | undefined) => {
+                      const problem = validateOrderSendLabel(value);
+                      if (problem) throw new Error(problem);
+                    } }]}>
+                      <Input maxLength={ORDER_SEND_LABEL_MAX} placeholder="Цех ЧПУ" />
+                    </Form.Item>
+                    <Form.Item name={[field.name, 'forms']} label="Формы">
+                      <Checkbox.Group className="order-send-forms" options={formOptions} />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} sm={12}>
+                    <Form.Item name={[field.name, 'caption']} label="Подпись" rules={[captionRule]}>
+                      <Input.TextArea rows={7} maxLength={ORDER_SEND_CAPTION_MAX} />
+                    </Form.Item>
+                  </Col>
+                </Row>
+              </Card>
+            </Col>)}
+          </Row>
+          <Space style={{ marginTop: 12 }}>
+            <Button icon={<PlusOutlined />} disabled={fields.length >= ORDER_SEND_MAX_CHATS}
+              onClick={() => add({ chatKey: null, groupChatId: '', label: '', forms: [], caption: '' })}>Добавить чат</Button>
+            {fields.length >= ORDER_SEND_MAX_CHATS && <Text type="secondary">Не больше {ORDER_SEND_MAX_CHATS} чатов.</Text>}
+          </Space>
         </>}
       </Form.List>
       {status && <Alert style={{ margin: '12px 0' }} type="info" showIcon message={status} />}
