@@ -29,6 +29,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-26", title: "МДФ-доска: дата сама переходит на новый день",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: [
+      "Дата на МДФ-доске теперь сама переходит на сегодняшний день после полуночи — в том числе если доска была открыта всю ночь. Сбрасывать её вручную больше не нужно.",
+    ],
+    changed: [
+      "Выбранный период («1 день», «1 нед», «2 нед», «1 м») запоминается для пользователя: при следующем открытии доска открывается на сегодняшний день с этим же периодом.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-22", title: "Карточка клиента: вкладка «Документы 1С»",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

@@ -46,6 +46,7 @@ import { createPortal } from 'react-dom';
 import { DndProvider, useDrag, useDragLayer, useDrop } from 'react-dnd';
 import { TouchBackend } from 'react-dnd-touch-backend';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { readMdfBoardPeriod, writeMdfBoardPeriod } from '../../utils/mdfBoardDailyPeriod';
 import { isApiError } from '../../api/apiError';
 import { cncTelegramApi } from '../../api/cncTelegramApi';
 import { cutApi } from '../../api/cutApi';
@@ -589,7 +590,22 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const workspaceTabsHeight = useWorkspaceTabsHeight();
   const currentUser = authSession.getUser();
   const todayCncWorkday = dayjs().format('YYYY-MM-DD');
+  // re-rendered when the calendar day changes while the board stays open
+  const [, setMdfDayTick] = useState(0);
   const mdfWorkdayOpenSyncedRef = useRef(false);
+  const mdfBoardDayRef = useRef(todayCncWorkday);
+  useEffect(() => {
+    if (fixedView !== 'cnc_today') return undefined;
+    // a board left open past midnight starts the new day like a fresh opening
+    const timer = window.setInterval(() => {
+      const now = dayjs().format('YYYY-MM-DD');
+      if (now === mdfBoardDayRef.current) return;
+      mdfBoardDayRef.current = now;
+      mdfWorkdayOpenSyncedRef.current = false;
+      setMdfDayTick((tick) => tick + 1);
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, [fixedView]);
   const mdfOpeningScrollPendingRef = useRef(true);
   const sortPreferenceBoard: OrderStatusBoardType =
     fixedView === 'production' || (!fixedView && searchParams.get('board') === 'production')
@@ -629,7 +645,11 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const mdfWorkdayTodayOpenPatchNeeded =
     shouldApplyMdfWorkdayTodayOnOpen &&
     !hasExplicitMdfCardDeepLink &&
-    (viewState.cncWorkday !== todayCncWorkday || viewState.cncOrderFilters.length > 0);
+    (viewState.cncWorkday !== todayCncWorkday
+      || viewState.cncOrderFilters.length > 0
+      // the period stays as the user left it; only the date starts from today
+      || (!viewState.cncPlannedTodayOnly
+        && viewState.cncOrderSearchPeriod !== (readMdfBoardPeriod(currentUser?.id) ?? viewState.cncOrderSearchPeriod)));
   const {
     getSetting: getAppSetting,
     refetch: refetchAppSettings,
@@ -841,13 +861,21 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       return;
     }
     // Finish synchronization only after the router reflects the opening date.
-    updateViewState({ cncWorkday: todayCncWorkday, cncOrderFilters: [] });
+    const openingPeriod = readMdfBoardPeriod(currentUser?.id) ?? viewState.cncOrderSearchPeriod;
+    if (viewState.cncPlannedTodayOnly || viewState.cncOrderSearchPeriod === openingPeriod) {
+      updateViewState({ cncWorkday: todayCncWorkday, cncOrderFilters: [] });
+    } else {
+      updateViewState({ cncWorkday: todayCncWorkday, cncOrderFilters: [], cncOrderSearchPeriod: openingPeriod });
+    }
   }, [
     active,
+    currentUser?.id,
     mdfWorkdayTodayOpenPatchNeeded,
     shouldApplyMdfWorkdayTodayOnOpen,
     todayCncWorkday,
     updateViewState,
+    viewState.cncOrderSearchPeriod,
+    viewState.cncPlannedTodayOnly,
   ]);
   const switchStatusBoardView = useCallback(
     (view: OrderStatusBoardType) => {
@@ -2335,6 +2363,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const updateCncWorkday = (date: Dayjs) =>
     updateViewState({ cncWorkday: date.format('YYYY-MM-DD'), cncOrderFilters: [] });
   const updateCncDisplayPeriod = (period: CncOrderSearchPeriod) => {
+    // the choice is remembered for the user
+    writeMdfBoardPeriod(currentUser?.id, period);
     if (period === '1d') {
       updateViewState({
         cncOrderSearchPeriod: period,
