@@ -134,6 +134,11 @@ describe('employee recipients in the settings', () => {
   it('labels «логин / ФИО» and finds the same employee with the same channel twice', () => {
     expect(employeeDirectoryLabel({ fullName: 'Иванов И.', usernames: ['ivanov', 'ivanov2'] })).toBe('ivanov, ivanov2 / Иванов И.');
     expect(employeeDirectoryLabel({ fullName: 'Иванов И.', usernames: [] })).toBe('Иванов И.');
+    // A backend that returns the citext array unparsed must not break the settings screen.
+    expect(employeeDirectoryLabel({ fullName: 'Иванов И.', usernames: '{ivanov,"ivanov2"}' })).toBe('ivanov, ivanov2 / Иванов И.');
+    expect(employeeDirectoryLabel({ fullName: 'Иванов И.', usernames: '{}' })).toBe('Иванов И.');
+    expect(employeeDirectoryLabel({ fullName: 'Иванов И.', usernames: null })).toBe('Иванов И.');
+    expect(employeeDirectoryLabel({ fullName: 'Иванов И.' })).toBe('Иванов И.');
     expect([...duplicateEmployeeIndexes([
       { employeeId: 3, channel: 'whatsapp' }, { employeeId: 3, channel: 'telegram' }, { employeeId: 3, channel: 'whatsapp' }, { employeeId: null, channel: 'whatsapp' },
     ])]).toEqual([2]);
