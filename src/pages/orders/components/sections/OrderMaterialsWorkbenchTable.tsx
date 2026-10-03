@@ -102,7 +102,7 @@ export const OrderMaterialsWorkbenchTable: React.FC<OrderMaterialsWorkbenchTable
             <th className="wb-materials__num">Пог. м</th>
             <th className="wb-materials__num">Листы</th>
             <th>Ванны</th>
-            {filmStock.allowed && <th className="wb-materials__num">На складе, пог. м</th>}
+            {filmStock.allowed && <th className="wb-materials__num">На складе</th>}
             {filmStock.allowed && <th>Склад</th>}
           </tr>
         </thead>
@@ -129,7 +129,7 @@ export const OrderMaterialsWorkbenchTable: React.FC<OrderMaterialsWorkbenchTable
                 <td>{renderBaths(row.cutJobIds)}</td>
                 {filmStock.allowed && (
                   <td className="wb-materials__num" data-negative={stock?.stockLm != null && stock.stockLm < 0}>
-                    {stock?.stockLm == null ? dash : formatNumber(stock.stockLm, 2)}
+                    {stock?.stockLm == null ? dash : `${formatNumber(stock.stockLm, 2)} м`}
                   </td>
                 )}
                 {filmStock.allowed && (
@@ -162,7 +162,7 @@ export const OrderMaterialsWorkbenchTable: React.FC<OrderMaterialsWorkbenchTable
             // Колонки склада есть только вместе с плёночными; остаток листов — в единице 1С (листы пересчитаны в м²).
             const stock = filmStock.allowed && sheetStock?.allowed ? sheetStock.byId.get(row.sheetMaterialTypeId) : undefined;
             const unit = stock?.unitName ? ` ${stock.unitName}` : '';
-            const m2 = stock && stock.quantityM2 !== null && stock.unitName && !/м2|м²/i.test(stock.unitName) ? ` ≈ ${formatNumber(stock.quantityM2, 2)} м²` : '';
+            const m2 = stock && stock.quantityM2 !== null && stock.unitName && !/м2|м²/i.test(stock.unitName) ? `≈ ${formatNumber(stock.quantityM2, 2)} м²` : null;
             return (
               <tr key={row.key}>
                 <td><span className="wb-materials__clamp" title={row.name}>{row.name}</span></td>
@@ -173,8 +173,8 @@ export const OrderMaterialsWorkbenchTable: React.FC<OrderMaterialsWorkbenchTable
                     <td colSpan={3} />
                     <td className="wb-materials__num" data-negative={stock?.quantity != null && stock.quantity < 0}>
                       {stock?.quantity == null ? dash : (
-                        <Tooltip title={<>{[`1С: ${stock.onecName ?? '—'}`, ...stock.warehouses.map((w) => `${w.name}: ${formatNumber(w.quantity, 3)}${unit}`)].map((line) => <div key={line}>{line}</div>)}</>}>
-                          <span className="wb-materials__clamp">{formatNumber(stock.quantity, 3)}{unit}{m2}</span>
+                        <Tooltip title={<>{[`1С: ${stock.onecName ?? '—'}`, ...(m2 ? [m2] : []), ...stock.warehouses.map((w) => `${w.name}: ${formatNumber(w.quantity, 3)}${unit}`)].map((line) => <div key={line}>{line}</div>)}</>}>
+                          <span className="wb-materials__clamp">{formatNumber(stock.quantity, 3)}{unit}</span>
                         </Tooltip>
                       )}
                     </td>
