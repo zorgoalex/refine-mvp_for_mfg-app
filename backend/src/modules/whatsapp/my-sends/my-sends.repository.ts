@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { QueryResultRow } from 'pg';
 import { DatabaseService } from '../../../database/database.service';
 import { deliveryAllowedAt } from '../order-send/order-send.repository';
-import { orderForm, type OrderFormCode } from '../order-send/order-send.types';
+import { orderFormTitle } from '../order-send/order-send.types';
 
 /** One WhatsApp send the current user started himself (order card or calendar). No recipient ids. */
 export interface MySend {
@@ -62,7 +62,7 @@ export class MySendsRepository {
       'SELECT last_delivery_at, min_interval_minutes, next_delivery_at FROM whatsapp_order_send_settings WHERE singleton')).rows[0];
     const gate = settings ? deliveryAllowedAt(settings) : null;
     const rows = (await this.database.query<QueryResultRow & {
-      send_id: string; order_id: string; order_name: string | null; target_kind: 'client' | 'chat'; chat_label: string | null; form_code: OrderFormCode;
+      send_id: string; order_id: string; order_name: string | null; target_kind: 'client' | 'chat'; chat_label: string | null; form_code: string;
       state: string; error_code: string | null; cancel_reason: string | null; next_attempt_at: Date; created_at: Date; sent_at: Date | null; updated_at: Date;
     }>(`SELECT s.send_id, s.order_id, o.order_name, s.target_kind, c.label chat_label, s.form_code, s.state, s.error_code, s.cancel_reason,
           s.next_attempt_at, s.created_at, s.sent_at, s.updated_at
@@ -81,7 +81,7 @@ export class MySendsRepository {
       const recipient = row.target_kind === 'client' ? 'клиенту' : `в чат «${row.chat_label ?? 'чат'}»`;
       return {
         kind: 'order_send', id: row.send_id,
-        title: `Заказ ${row.order_name ?? `#${row.order_id}`} → ${recipient}, ${orderForm(row.form_code).title}`,
+        title: `Заказ ${row.order_name ?? `#${row.order_id}`} → ${recipient}, ${orderFormTitle(row.form_code)}`,
         state: row.state, active,
         estimatedAt: active ? latest(now, row.state === 'queued' ? row.next_attempt_at : null, row.state === 'queued' ? gate : null).toISOString() : null,
         createdAt: row.created_at.toISOString(),

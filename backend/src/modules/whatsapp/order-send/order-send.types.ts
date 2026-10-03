@@ -18,6 +18,16 @@ export function orderForm(code: OrderFormCode) {
   return form;
 }
 
+/** Title for read paths: a code this backend does not know (a newer release) never breaks a list. */
+export function orderFormTitle(code: string): string {
+  return ORDER_FORMS.find((item) => item.code === code)?.title ?? code;
+}
+
+/** Whether this backend can deliver the form (a newer release may queue forms it does not know). */
+export function isDeliverableForm(code: string): code is OrderFormCode {
+  return ORDER_FORMS.some((item) => item.code === code);
+}
+
 export const ORDER_FORM_MIME: Record<OrderFormFormat, string> = {
   pdf: 'application/pdf',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
