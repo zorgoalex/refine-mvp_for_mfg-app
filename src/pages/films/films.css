@@ -31,11 +31,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Узкие колонки: заголовки переносятся, а не обрезаются. */
+/* Узкие колонки: заголовок — до двух строк по словам, остальное за «…» (общие стили `.reference-table`). */
 .films-list .ant-table-thead > tr > th {
   white-space: normal;
   word-break: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   font-size: 0.85em;
   line-height: 1.2;
   padding-inline: 6px;

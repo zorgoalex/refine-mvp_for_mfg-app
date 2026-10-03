@@ -56,11 +56,34 @@ function withDelayedSorterTooltip(showSorterTooltip: AntdTableProps<any>['showSo
   };
 }
 
+/**
+ * Таблицы справочников (внутри `LocalizedList`): заголовок колонки — до двух строк с переносом по словам, остальное за «…»
+ * (полный текст — в подсказке). Стили — `.reference-table` в `styles/app.css`.
+ */
+export const ReferenceTableContext = React.createContext(false);
+
+/** Ячейка заголовка: простой текст оборачивается в блок с обрезкой по двум строкам; сложное содержимое (сортировка, фильтр) не трогается. */
+export const ReferenceHeaderCell: React.FC<React.ThHTMLAttributes<HTMLTableCellElement>> = ({ children, ...rest }) => {
+  const parts = React.Children.toArray(children);
+  const text = parts.every((part) => typeof part === 'string' || typeof part === 'number') ? parts.join('') : '';
+  return (
+    <th {...rest} title={rest.title ?? (text || undefined)}>
+      {text ? <span className="reference-table__title">{children}</span> : children}
+    </th>
+  );
+};
+
 const DelayedTable = React.forwardRef<HTMLDivElement, AntdTableProps<any>>((props, ref) => {
   const { showSorterTooltip, ...rest } = props;
+  const reference = React.useContext(ReferenceTableContext);
+  const referenceProps: Partial<AntdTableProps<any>> = reference ? {
+    className: [rest.className, 'reference-table'].filter(Boolean).join(' '),
+    components: { ...rest.components, header: { cell: ReferenceHeaderCell, ...rest.components?.header } },
+  } : {};
   return (
     <AntdTable
       {...rest}
+      {...referenceProps}
       ref={ref}
       showSorterTooltip={withDelayedSorterTooltip(showSorterTooltip)}
     />
