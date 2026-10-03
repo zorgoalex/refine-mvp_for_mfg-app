@@ -19,6 +19,7 @@ import { parseOrderSendSettings } from './order-send.dto';
 import { OrderSendRepository } from './order-send.repository';
 import { OrderSendService } from './order-send.service';
 import { OrderSendWorker } from './order-send-worker.service';
+import { MySendsRepository } from '../my-sends/my-sends.repository';
 import type { OrderSendSettingsInput } from './order-send.types';
 
 // Real PostgreSQL in an isolated schema: set WHATSAPP_BROADCAST_TEST_DATABASE_URL (or TEST_DATABASE_URL).
@@ -628,5 +629,76 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
     await q(`DELETE FROM order_doweling_links WHERE order_id = 9002`);
     await q(`DELETE FROM doweling_orders WHERE doweling_order_id IN (100, 200)`);
     await q(`DELETE FROM employees WHERE employee_id IN (71, 72)`);
+  });
+  // ---- compatibility with the next release (migration 231: image forms, pages 2..N, manual cancel).
+  // These run last: they widen this schema the way 231 does.
+  describe('rows of a newer release (schema 231)', () => {
+    beforeAll(async () => {
+      await q(`ALTER TABLE whatsapp_order_sends DROP CONSTRAINT IF EXISTS whatsapp_order_sends_form_code_check;
+        ALTER TABLE whatsapp_order_sends DROP CONSTRAINT IF EXISTS whatsapp_order_sends_file_key_check;
+        ALTER TABLE whatsapp_order_sends DROP CONSTRAINT IF EXISTS whatsapp_order_sends_cancel_reason_check;
+        ALTER TABLE whatsapp_order_sends ADD COLUMN IF NOT EXISTS parts_total SMALLINT NOT NULL DEFAULT 1;
+        ALTER TABLE whatsapp_order_sends ADD COLUMN IF NOT EXISTS cancelled_by BIGINT;
+        CREATE TABLE IF NOT EXISTS whatsapp_order_send_parts (send_id UUID NOT NULL REFERENCES whatsapp_order_sends(send_id) ON DELETE CASCADE,
+          part_no SMALLINT NOT NULL, file_key TEXT, sha256 TEXT, size_bytes INTEGER, provider_message_id TEXT, sent_at TIMESTAMPTZ,
+          purged_at TIMESTAMPTZ, PRIMARY KEY (send_id, part_no));`);
+    });
+
+    const png = async () => (await store.withStoreLock((owned) => store.write(Buffer.from(`png-${randomUUID()}`), 'png', owned)))!;
+
+    it('never delivers a form it does not know or a picture send of several pages, and spends no slot', async () => {
+      const unknown = (await send(9001, { target: { kind: 'client' }, form: 'order_pdf' as never })).send;
+      await q(`UPDATE whatsapp_order_sends SET form_code = 'order_image' WHERE send_id = $1`, [unknown.sendId]);
+      await worker.work();
+      expect(await row(unknown.sendId)).toMatchObject({ state: 'failed', error_code: 'ORDER_SEND_FORM_UNSUPPORTED' });
+      const paged = (await send(9001, { target: { kind: 'client' }, form: 'order_pdf' as never })).send;
+      await q(`UPDATE whatsapp_order_sends SET parts_total = 3 WHERE send_id = $1`, [paged.sendId]);
+      await worker.work();
+      expect(await row(paged.sendId)).toMatchObject({ state: 'failed', error_code: 'ORDER_SEND_FORM_UNSUPPORTED' });
+      expect(sent).toHaveLength(0);
+      expect((await q(`SELECT last_delivery_at FROM whatsapp_order_send_settings`)).rows[0].last_delivery_at).toBeNull();
+    });
+
+    it('reads histories with unknown forms and a manual cancel without failing', async () => {
+      const view = (await send(9001, { target: { kind: 'client' }, form: 'order_pdf' as never })).send;
+      await q(`UPDATE whatsapp_order_sends SET form_code = 'order_image', state = 'cancelled', cancel_reason = 'manual', cancelled_by = 11
+        WHERE send_id = $1`, [view.sendId]);
+      expect((await service.listForOrder(9001, admin)).sends.find((item) => item.sendId === view.sendId)).toMatchObject({ form: 'order_image', cancelReason: 'manual' });
+      const mySends = new MySendsRepository(database);
+      // This schema has no calendar tables: only the order card part of «my sends» is read here.
+      (mySends as unknown as { calendarSends: () => Promise<never[]> }).calendarSends = async () => [];
+      const mine = await mySends.list(admin.id);
+      expect(mine.find((item) => item.id === view.sendId)?.title).toContain('order_image');
+    });
+
+    it('retention purges the pages 2..N with their provider ids and removes every picture from the disk', async () => {
+      const view = (await send(9001, { target: { kind: 'client' }, form: 'order_pdf' as never })).send;
+      const first = await png();
+      const second = await png();
+      await q(`UPDATE whatsapp_order_sends SET form_code = 'order_image', parts_total = 2, file_key = $2, sha256 = $3, state = 'sent', provider_ack = true,
+          sent_at = now(), provider_message_id = 'true_77014952060@c.us_A', created_at = now() - interval '8 days' WHERE send_id = $1`,
+      [view.sendId, first.fileKey, first.sha256]);
+      await q(`INSERT INTO whatsapp_order_send_parts (send_id, part_no, file_key, sha256, size_bytes, provider_message_id, sent_at)
+        VALUES ($1, 2, $2, $3, $4, 'true_77014952060@c.us_B', now())`, [view.sendId, second.fileKey, second.sha256, second.sizeBytes]);
+      expect(await repository.fileReferenced(second.fileKey)).toBe(true);
+      await worker.cleanup(new Date(Date.now() + 2 * 60 * 60_000));
+      const part = (await q(`SELECT * FROM whatsapp_order_send_parts WHERE send_id = $1`, [view.sendId])).rows[0];
+      expect(part).toMatchObject({ file_key: null, provider_message_id: null });
+      expect(part.purged_at).not.toBeNull();
+      const files = await readdir(join(directory, 'order-sends'));
+      expect(files).not.toContain(first.fileKey);
+      expect(files).not.toContain(second.fileKey);
+    });
+
+    it('a picture send interrupted while sending becomes unknown once, with one audit event', async () => {
+      const view = (await send(9001, { target: { kind: 'client' }, form: 'order_pdf' as never })).send;
+      await q(`UPDATE whatsapp_order_sends SET form_code = 'order_image', parts_total = 3, state = 'sending', attempt_count = 1, lock_token = gen_random_uuid(),
+          send_started_at = now() - interval '1 hour' WHERE send_id = $1`, [view.sendId]);
+      expect(await repository.markStaleIntentsUnknown(10 * 60_000)).toBe(1);
+      expect(await repository.markStaleIntentsUnknown(10 * 60_000)).toBe(0);
+      expect(await row(view.sendId)).toMatchObject({ state: 'unknown', error_code: 'PROCESS_LOST_AFTER_INTENT' });
+      const events = (await q(`SELECT count(*)::int n FROM audit_log WHERE entity_id = $1 AND event = 'whatsapp.order_send.unknown'`, [view.sendId])).rows[0];
+      expect(events.n).toBe(1);
+    });
   });
 });

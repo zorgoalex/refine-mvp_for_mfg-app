@@ -8,7 +8,7 @@ import { canSendOrder, OrderSendActors, readAccessSubject } from './order-send-a
 import { OrderSendFileStore } from './order-send-file-store';
 import { normalizeClientPhone } from './order-send-phone';
 import { OrderSendRepository, knownForms, type SendRow } from './order-send.repository';
-import { ORDER_FORM_MIME, orderForm, type OrderSendCancelReason, type OrderSendRuntime } from './order-send.types';
+import { ORDER_FORM_MIME, isDeliverableForm, orderForm, type OrderSendCancelReason, type OrderSendRuntime } from './order-send.types';
 
 /** WAHA refused the request itself (validation, unsupported): nothing was sent. */
 const DEFINITE_REJECTIONS = new Set([400, 404, 405, 415, 422, 501]);
@@ -83,6 +83,12 @@ export class OrderSendWorker implements OnModuleInit, OnModuleDestroy {
   private async deliver(row: SendRow, now: Date) {
     if (row.queue_expires_at.getTime() <= now.getTime()) {
       await this.repository.finishBeforeIntent(row.send_id, { state: 'expired' }, now);
+      return;
+    }
+    // A form of a newer release (pictures, several pages): never delivered by this one, no slot spent.
+    const parts = (row as SendRow & { parts_total?: number }).parts_total ?? 1;
+    if (!isDeliverableForm(row.form_code) || parts > 1) {
+      await this.repository.finishBeforeIntent(row.send_id, { state: 'failed', errorCode: 'ORDER_SEND_FORM_UNSUPPORTED' });
       return;
     }
     if (row.target_kind === 'client' && !row.destination_chat_id) {

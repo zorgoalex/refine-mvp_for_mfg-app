@@ -321,17 +321,37 @@ export class OrderSendRepository {
       FROM purged WHERE s.send_id = purged.send_id
       RETURNING purged.file_key`, [new Date(now.getTime() - ORDER_SEND_RETENTION_MS)])).rows
       .map((row) => row.file_key).filter((key): key is string => key !== null);
-    const referenced = new Set((await this.database.query<{ file_key: string }>(
-      'SELECT file_key FROM whatsapp_order_sends WHERE file_key IS NOT NULL')).rows.map((row) => row.file_key));
-    return { referenced, purgedKeys };
+    // Pages 2..N of image forms (a newer release, migration 231): purged together with their send, the
+    // provider id (it may carry the phone) included. Without the table nothing changes.
+    const withParts = await this.partsTableExists();
+    const purgedParts = withParts ? (await this.database.query<{ file_key: string | null }>(`
+      WITH purged AS (
+        SELECT p.send_id, p.part_no, p.file_key FROM whatsapp_order_send_parts p JOIN whatsapp_order_sends s ON s.send_id = p.send_id
+        WHERE p.purged_at IS NULL AND s.purged_at IS NOT NULL LIMIT 2000 FOR UPDATE OF p SKIP LOCKED
+      )
+      UPDATE whatsapp_order_send_parts p SET file_key = NULL, sha256 = NULL, size_bytes = NULL, provider_message_id = NULL, purged_at = now()
+      FROM purged WHERE p.send_id = purged.send_id AND p.part_no = purged.part_no
+      RETURNING purged.file_key`)).rows.map((row) => row.file_key).filter((key): key is string => key !== null) : [];
+    const referenced = new Set((await this.database.query<{ file_key: string }>(withParts
+      ? `SELECT file_key FROM whatsapp_order_sends WHERE file_key IS NOT NULL
+         UNION SELECT file_key FROM whatsapp_order_send_parts WHERE file_key IS NOT NULL`
+      : 'SELECT file_key FROM whatsapp_order_sends WHERE file_key IS NOT NULL')).rows.map((row) => row.file_key));
+    return { referenced, purgedKeys: [...purgedKeys, ...purgedParts] };
+  }
+
+  private async partsTableExists(): Promise<boolean> {
+    return Boolean((await this.database.query<{ ok: boolean }>(`SELECT to_regclass('whatsapp_order_send_parts') IS NOT NULL ok`)).rows[0]?.ok);
   }
 
   // ------------------------------------------------------------------ reads
 
   /** Whether any row still points at a file; an error counts as «referenced» (keep the file for the sweep). */
   async fileReferenced(fileKey: string): Promise<boolean> {
-    return Boolean((await this.database.query<{ referenced: boolean }>(
-      'SELECT EXISTS (SELECT 1 FROM whatsapp_order_sends WHERE file_key = $1) referenced', [fileKey])).rows[0]?.referenced);
+    const sql = (await this.partsTableExists())
+      ? `SELECT EXISTS (SELECT 1 FROM whatsapp_order_sends WHERE file_key = $1)
+          OR EXISTS (SELECT 1 FROM whatsapp_order_send_parts WHERE file_key = $1) referenced`
+      : 'SELECT EXISTS (SELECT 1 FROM whatsapp_order_sends WHERE file_key = $1) referenced';
+    return Boolean((await this.database.query<{ referenced: boolean }>(sql, [fileKey])).rows[0]?.referenced);
   }
 
   async getSend(sendId: string): Promise<SendRow | null> {
