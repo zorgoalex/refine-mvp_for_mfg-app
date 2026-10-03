@@ -61,7 +61,7 @@ describe('notification rules OpenAPI contract', () => {
     expect(section).toContain('type: boolean');
   });
 
-  it('documents extensible notification channels on rules and mutations', () => {
+  it('documents extensible notification channels (incl. balloon + balloonMode) on rules and mutations', () => {
     for (const schemaName of [
       'NotificationRule:',
       'CreateNotificationRuleRequest:',
@@ -71,7 +71,10 @@ describe('notification rules OpenAPI contract', () => {
       const channels = sectionBetweenIn(section, '        channels:', '        conditions:');
       expect(channels).toContain('type: array');
       expect(channels).toContain('minItems: 1');
-      expect(Array.from(new Set(extractEnumValues(channels)))).toEqual(['in_app', 'telegram']);
+      expect(Array.from(new Set(extractEnumValues(channels)))).toEqual(['in_app', 'telegram', 'balloon']);
+      // Свойство исчезновения балуна (миграция 232): auto — 15 с, persistent — только крестиком.
+      expect(channels).toContain('balloonMode:');
+      expect(channels).toContain('enum: [auto, persistent]');
     }
   });
 });
