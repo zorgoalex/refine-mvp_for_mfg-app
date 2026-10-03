@@ -224,7 +224,7 @@ export function SheetPreview({
 
   if (!full) {
     return (
-      <div style={{ marginTop: 4 }}>
+      <div className="cut-sheet-thumb" style={{ marginTop: 4 }}>
         <span style={{ position: 'relative', display: 'inline-block', maxWidth: '100%' }}>
           <Tooltip title="Открыть лист в полном размере">
             <img
@@ -243,7 +243,7 @@ export function SheetPreview({
   }
 
   return (
-    <div style={{ marginTop: 4, maxWidth: '100%', overflow: 'auto' }}>
+    <div className="cut-sheet-full" style={{ marginTop: 4, maxWidth: '100%', overflow: 'auto' }}>
       <Tooltip title="Двойной клик — свернуть до превью">
         {/* padding leaves room for the side-dimension labels */}
         <div style={{ position: 'relative', display: 'inline-block', padding: '22px 56px', cursor: 'zoom-out' }}>

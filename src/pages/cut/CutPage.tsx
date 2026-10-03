@@ -1034,7 +1034,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const { enabled: sheetFilterEnabled, options: sheetTypeOptions, rawOptions: sheetOptions } = useCutSheetTypeOptions();
   // Open orders inside the app's keep-alive workspace tabs (same as the orders
   // list double-click), not a new browser tab.
-  const { show } = useNavigation();
+  const { show, push: navigateTo } = useNavigation();
   const [form] = Form.useForm<CutCriteriaForm>();
   const defaultOrderDateRange = useMemo(defaultCutOrderDateRange, []);
   const watchedOrderDateRange = Form.useWatch('orderDateRange', form) as CutOrderDateRangeValue;
@@ -4096,7 +4096,65 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       status={<Tag color={STATUS_TAG_COLORS[job.status] ?? 'default'}>{cutJobStatusLabel(job.status)}</Tag>}
       source={cutJobSourceLabel(job.source)}
       name={jobNameNode}
+      actions={(
+        <>
+          <Tooltip title={jobPdfPreviewBlockReason ?? 'Предпросмотр PDF всего раскроя; шаблон выбирается ниже, рядом с «Рассчитать»'}>
+            <Button
+              icon={<PrinterOutlined />}
+              onClick={() => void openJobPdfPreview()}
+              disabled={job.groups.length === 0 || jobPdfPreviewBlockReason !== null}
+              data-testid="cut-head-print"
+            >
+              Печать
+            </Button>
+          </Tooltip>
+          {job.mdfBoardStatus?.state === 'created' && job.mdfBoardStatus.target && canViewOrders ? (
+            <Tooltip title={cutJobMdfBoardTooltip(job.mdfBoardStatus)}>
+              <Button onClick={() => navigateTo(cutJobMdfBoardLink(job.mdfBoardStatus!.target!))} data-testid="cut-head-open-board">
+                Открыть на МДФ-доске
+              </Button>
+            </Tooltip>
+          ) : (
+            <Tooltip title={cutJobMdfBoardTooltip(job.mdfBoardStatus)}>
+              <Button
+                type="primary"
+                icon={<SendOutlined />}
+                onClick={() => void createMdfBoardCard(job)}
+                loading={mdfBoardCardActions[job.cutJobId] === 'create'}
+                disabled={
+                  !canManage ||
+                  busy ||
+                  isArchivedJob ||
+                  job.status === 'calculating' ||
+                  job.mdfBoardStatus?.canCreateCard !== true
+                }
+                data-testid="cut-head-create-board-card"
+              >
+                На МДФ-доску
+              </Button>
+            </Tooltip>
+          )}
+        </>
+      )}
       menuItems={[
+        ...(canManage && job.mdfBoardStatus?.state === 'created' && job.mdfBoardStatus.canDeleteCard === true
+          ? [{
+              key: 'delete-board-card',
+              icon: <DeleteOutlined />,
+              label: 'Удалить карточку с МДФ-доски',
+              disabled: mdfBoardCardActions[job.cutJobId] != null,
+              onClick: () => {
+                Modal.confirm({
+                  title: 'Удалить карточку ванны с МДФ-доски?',
+                  content: 'Карточка останется в истории и её можно будет создать снова.',
+                  okText: 'Удалить',
+                  cancelText: 'Отмена',
+                  okButtonProps: { danger: true },
+                  onOk: () => deleteMdfBoardCard(job),
+                });
+              },
+            }]
+          : []),
         ...(canManage
           ? [{
               key: 'delete',
@@ -4795,7 +4853,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           title={isWorkbench ? wbJobHead : isOperational && embeddedOrderId == null ? undefined : jobCardTitle}
           extra={isWorkbench || (isOperational && embeddedOrderId == null) ? undefined : jobCardExtra}
         >
-          <Space style={{ marginBottom: 12 }} wrap>
+          <Space className="cut-job-mdf-create-row" style={{ marginBottom: 12 }} wrap>
             <Tooltip title={cutJobMdfBoardTooltip(job.mdfBoardStatus)}>
               <Button
                 size="small"
@@ -5735,10 +5793,15 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   const vacuumOrientationWarnings = buildSheetVacuumOrientationWarnings(sheet.placements, job.items);
                   const sheetDetailInstances = detailInstancesForSheet(sheet);
                   const bathFilmUsage = showBathMeterGuides ? calculateBathSheetFilmUsage(sheet.placements) : null;
+                  // «NewLine»: how much of the sheet the parts take
+                  const sheetAreaMm2 = widthMm * heightMm;
+                  const sheetUsagePercent = sheetAreaMm2 > 0
+                    ? Math.min(100, Math.round((sheet.placements.pieces.reduce((sum, piece) => sum + piece.width_mm * piece.height_mm, 0) / sheetAreaMm2) * 100))
+                    : null;
                   return (
                     <div
                       key={elemKey}
-                      className="cut-sheet-preview-item"
+                      className={sheetImages[key] ? 'cut-sheet-preview-item cut-sheet-preview-item--open' : 'cut-sheet-preview-item'}
                       style={
                         // Open (enlarged) sheet spans the full previews row so the
                         // image can grow ~2× instead of being capped by the thumbnail
@@ -5777,6 +5840,11 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                             </>
                           )}
                         </div>
+                        {isWorkbench && sheetUsagePercent != null ? (
+                          <div className="wb-cut-sheet-usage">
+                            использование <b>{sheetUsagePercent}%</b> · остаток {100 - sheetUsagePercent}%
+                          </div>
+                        ) : null}
                         <Space className="cut-sheet-preview-actions" size={8}>
                           <Button
                             className="app-hit-area-sm"
@@ -5840,6 +5908,31 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                           onCollapse={() => collapseSheet(key)}
                         />
                       )}
+                      {isWorkbench && sheetImages[key] ? (
+                        <aside className="wb-cut-sheet-parts" aria-label={`Детали листа ${sheetNo}`}>
+                          <div className="wb-cut-sheet-parts__head">
+                            <b>Детали листа</b>
+                            <span>{sheet.placements.pieces.length} шт.</span>
+                          </div>
+                          <ol className="wb-cut-sheet-parts__list">
+                            {sheet.placements.pieces.map((piece, pieceIndex) => {
+                              const label = piece.label;
+                              const width = Math.round(label?.widthMm ?? piece.width_mm);
+                              const height = Math.round(label?.heightMm ?? piece.height_mm);
+                              const ref = [label?.orderName, label?.detailNumber != null ? String(label.detailNumber) : null]
+                                .filter(Boolean)
+                                .join('-');
+                              return (
+                                <li key={`${piece.item_id}:${piece.instance}:${pieceIndex}`}>
+                                  <span className="wb-cut-sheet-parts__no">{pieceIndex + 1}</span>
+                                  <b>{width} × {height}</b>
+                                  <span className="wb-cut-sheet-parts__ref">{ref || '—'}{piece.rotated ? ' · повёрнута' : ''}</span>
+                                </li>
+                              );
+                            })}
+                          </ol>
+                        </aside>
+                      ) : null}
                     </div>
                   );
                 })}

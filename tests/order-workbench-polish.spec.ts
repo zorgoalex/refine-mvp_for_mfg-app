@@ -564,6 +564,17 @@ test.describe('Workbench orders polish', () => {
         expect(jobLayout.titleWidth).toBeGreaterThan(150);
         expect(jobLayout.itemHeight).toBeLessThanOrEqual(320);
         await expect(page.locator('.wb-cut-view-label')).toHaveText(['Лист', 'Отсчёт']);
+        // лист — плиткой с долей использования; в шапке задания «Печать» и «На МДФ-доску»
+        const tile = page.locator('.cut-sheet-preview-item').first();
+        await expect(tile.locator('.wb-cut-sheet-usage')).toContainText('использование');
+        await expect(jobCard.getByTestId('cut-head-print')).toBeVisible();
+        await expect(jobCard.getByTestId('cut-head-create-board-card')).toBeVisible();
+        await expect(jobCard.locator('.cut-job-mdf-create-row')).toBeHidden();
+        // раскрытый лист показывает «Детали листа»
+        await tile.getByRole('button', { name: 'Развернуть' }).click();
+        await expect(page.locator('.cut-sheet-preview-item--open .wb-cut-sheet-parts')).toContainText('Детали листа', { timeout: 20000 });
+        await page.locator('.cut-sheet-preview-item--open').getByRole('button', { name: 'Свернуть' }).click();
+        await expect(page.locator('.wb-cut-sheet-parts')).toHaveCount(0);
         await page.locator('.cut-page-modern__group').scrollIntoViewIfNeeded();
         await shot(page, 'order-card-cut-job');
 

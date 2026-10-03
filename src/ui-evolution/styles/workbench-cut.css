@@ -474,3 +474,169 @@
 :root[data-ui-variant="workbench"] .cut-page-modern--wb-split.cut-page-modern--standalone .wb-cut-jobs__grid {
   max-height: calc(100vh - var(--wb-order-sticky-top, 48px) - 330px);
 }
+
+/* ---------- шапка задания: действия; прежняя строка «Создать карточку…» не нужна ---------- */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-job-mdf-create-row {
+  display: none;
+}
+
+/* ---------- листы плитками: миниатюра слева, сведения справа ---------- */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item:not(.cut-sheet-preview-item--open) {
+  flex: 1 1 260px !important;
+  max-width: 360px !important;
+  min-height: 0 !important;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 12px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid var(--evo-border);
+  border-radius: 10px;
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item:not(.cut-sheet-preview-item--open):hover {
+  border-color: var(--evo-border-strong);
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item:not(.cut-sheet-preview-item--open) > .cut-sheet-thumb {
+  grid-column: 1;
+  grid-row: 1 / span 3;
+  margin-top: 0 !important;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item:not(.cut-sheet-preview-item--open) > .cut-sheet-thumb img {
+  height: 96px !important;
+  border-radius: 4px;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item:not(.cut-sheet-preview-item--open) > :not(.cut-sheet-thumb) {
+  grid-column: 2;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-header {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-title {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-title strong {
+  color: var(--evo-text);
+  font-size: 13.5px;
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-usage {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-usage b {
+  color: var(--evo-text);
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-actions .ant-btn {
+  height: 26px;
+  padding-inline: 8px;
+  font-size: 12px;
+}
+
+/* раскрытый лист: крупный вид слева, «Детали листа» справа */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item--open {
+  min-height: 0 !important;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 248px;
+  column-gap: 14px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--evo-primary) 40%, var(--evo-border));
+  border-radius: 10px;
+  background: var(--evo-surface-muted);
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item--open > * {
+  grid-column: 1;
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item--open > .wb-cut-sheet-parts {
+  grid-column: 2;
+  grid-row: 1 / span 6;
+  max-height: 70vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-parts__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 13.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-parts__head span {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-parts__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-parts__list li {
+  display: grid;
+  grid-template-columns: 26px auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--evo-border);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-parts__list li:last-child {
+  border-bottom: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-parts__no {
+  color: var(--evo-text-secondary);
+  font-weight: 600;
+  text-align: center;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-parts__ref {
+  overflow: hidden;
+  color: var(--evo-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1280px) {
+  :root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item--open {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item--open > .wb-cut-sheet-parts {
+    grid-column: 1;
+    grid-row: auto;
+    max-height: 240px;
+  }
+}
