@@ -10,12 +10,23 @@ describe('order card WhatsApp send wiring', () => {
     expect(show).toMatch(/orderWhatsAppItems = canExportOrders && !deletedOrder/);
   });
 
-  it('puts the items into all three «⋯» menus and handles their clicks', () => {
-    // production overflow + header «⋯» + mobile «⋯» = 3 spreads (main has no «NewLine» workbench menu)
-    expect(show.match(/\.\.\.orderWhatsAppItems/g)?.length).toBe(3);
-    expect(show.match(/isOrderWhatsAppKey\(key\)/g)?.length).toBe(3);
-    const operational = show.slice(show.indexOf('const productionExcelOverflowAction'), show.indexOf('const productionExcelOverflowAction') + 900);
-    expect(operational).toContain('...orderWhatsAppItems');
+  it('offers the sends through their own icon left of every «⋯» menu, never inside it', () => {
+    // One dropdown with the items; the «⋯» menus (production overflow, header, mobile) carry none.
+    expect(show.match(/\.\.\.orderWhatsAppItems/g)).toBeNull();
+    expect(show.match(/isOrderWhatsAppKey\(key\)/g)?.length).toBe(1);
+    const action = show.slice(show.indexOf('const orderSendAction'), show.indexOf('const productionPdfDisabled'));
+    expect(action).toContain('items: orderWhatsAppItems');
+    expect(action).toContain('aria-label="Отправить заказ"');
+    expect(action).toContain('<SendOutlined />');
+    // Nothing to send (sending off, no recipients): the icon stays, grey, with the hint — only for a user who may send.
+    expect(action).toMatch(/orderSendAction = !canExportOrders \|\| deletedOrder \? null : orderWhatsAppItems\.length > 0 \?/);
+    expect(action).toMatch(/<Tooltip title=\{ORDER_SEND_NOT_CONFIGURED_TITLE\}>\s*<Button aria-label="Отправить заказ" icon=\{<SendOutlined \/>\} disabled \/>/);
+    // Rendered in all three heads (main has no «NewLine» head), each time right before the «⋯» dropdown of that head.
+    expect(show.match(/\{orderSendAction\}/g)?.length).toBe(3);
+    for (const more of show.split('aria-label="Ещё действия"').slice(0, -1)) {
+      const head = more.slice(more.lastIndexOf('{orderSendAction}'));
+      expect(head.match(/<Dropdown/g)?.length).toBe(1);
+    }
   });
 
   it('sends through the idempotent runner and shows its toast', () => {

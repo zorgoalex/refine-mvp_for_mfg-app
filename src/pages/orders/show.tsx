@@ -4,7 +4,7 @@ import { useDataProvider, useParsed, IResourceComponentsProps } from "@refinedev
 import type { BaseRecord } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Alert, Button, Card, Checkbox, Breadcrumb, message, Dropdown, Space, Modal, Select } from "antd";
-import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, WhatsAppOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
+import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, WhatsAppOutlined, SendOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { getTableColumnDataIndex, getTableStickyOffsetHeader } from './utils/tableCompatibility';
 import { forwardRef, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
@@ -85,7 +85,7 @@ import { DetailGroupingControls } from './components/DetailGroupingControls';
 import { groupCheckboxState, toggleGroupSelection, filterNumericKeys } from './groupSelection';
 import { authSession } from '../../api/authSession';
 import { orderSendApi } from '../../api/orderSendApi';
-import { buildOrderWhatsAppMenuItems, describeOrderWhatsAppSend, isOrderWhatsAppKey, parseOrderWhatsAppKey } from './whatsappOrderSendMenu';
+import { ORDER_SEND_NOT_CONFIGURED_TITLE, buildOrderWhatsAppMenuItems, describeOrderWhatsAppSend, isOrderWhatsAppKey, parseOrderWhatsAppKey } from './whatsappOrderSendMenu';
 import { runOrderSend } from './whatsappOrderSendModel';
 import { announceWhatsAppSendQueued, currentOwner } from '../../components/whatsapp/myWhatsAppSendsModel';
 import { useOrderSendMenu } from './whatsappOrderSendSupport';
@@ -2965,6 +2965,22 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const orderWhatsAppItems = canExportOrders && !deletedOrder
     ? buildOrderWhatsAppMenuItems(orderSendMenu, { hasClientPhone: Boolean(clientPhone), sending: orderSendBusy, icon: <WhatsAppOutlined /> })
     : [];
+  // «Отправить заказ»: its own icon to the left of «⋯» (client, chats, employees — the «⋯» menu stays short).
+  // Always there for a user who may send: with nothing to offer it is grey with a hint instead of vanishing.
+  const orderSendAction = !canExportOrders || deletedOrder ? null : orderWhatsAppItems.length > 0 ? (
+    <Dropdown
+      trigger={['click']}
+      menu={{ items: orderWhatsAppItems, onClick: ({ key }) => { if (isOrderWhatsAppKey(key)) handleOrderWhatsAppSend(key); } }}
+    >
+      <Tooltip title="Отправить заказ">
+        <Button aria-label="Отправить заказ" icon={<SendOutlined />} loading={orderSendBusy.size > 0} disabled={!record} />
+      </Tooltip>
+    </Dropdown>
+  ) : (
+    <Tooltip title={ORDER_SEND_NOT_CONFIGURED_TITLE}>
+      <Button aria-label="Отправить заказ" icon={<SendOutlined />} disabled />
+    </Tooltip>
+  );
   const productionPdfDisabled = !record || details.length === 0 || isClientResolving;
   const productionExcelDisabled = productionPdfDisabled || isAnyExcelExporting;
   const productionPdfAction = canExportOrders ? (
@@ -2979,6 +2995,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     </Tooltip>
   ) : null;
   const productionExcelOverflowAction = canExportOrders ? (
+    <>
+    {orderSendAction}
     <Dropdown
       trigger={['click']}
       menu={{
@@ -2987,12 +3005,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           icon: <FileExcelOutlined />,
           label: 'Excel для производства',
           disabled: productionExcelDisabled,
-        }, ...orderWhatsAppItems],
+        }],
         onClick: ({ key }) => {
           if (key === 'excel-without-prices') {
             void handleExportExcel('without-prices');
           }
-          if (isOrderWhatsAppKey(key)) handleOrderWhatsAppSend(key);
         },
       }}
     >
@@ -3005,6 +3022,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         />
       </Tooltip>
     </Dropdown>
+    </>
   ) : null;
 
   return (
@@ -3029,6 +3047,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           isMobile ? (
             <>
               {canEditOrderContent && <EditButton>Изменить</EditButton>}
+              {orderSendAction}
               <Dropdown
                 trigger={['click']}
                 menu={{
@@ -3070,7 +3089,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                         label: 'JSON snapshot',
                         disabled: !record || isSnapshotExporting,
                       }] : []),
-                      ...orderWhatsAppItems,
                     ] : []),
                     ...((canMoveOrderProject || canDeleteOrder) && (canViewFinancials || canExportOrders)
                       ? [
@@ -3117,9 +3135,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     }
                     if (key === 'json') {
                       void handleExportSnapshot();
-                    }
-                    if (isOrderWhatsAppKey(key)) {
-                      handleOrderWhatsAppSend(key);
                     }
                     if (key === 'move-project') {
                       setMoveModalOpen(true);
@@ -3171,6 +3186,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   {productionPdfAction}
                 </>
               ) : null}
+              {orderSendAction}
               {canExportOrders || canMoveOrderProject || canDeleteOrder ? (
                 <Dropdown
                   trigger={['click']}
@@ -3202,7 +3218,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                             },
                           ]
                         : []),
-                      ...orderWhatsAppItems,
                       ...(canExportOrders && (canMoveOrderProject || canDeleteOrder)
                         ? [
                             {
@@ -3239,9 +3254,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       }
                       if (key === 'json') {
                         void handleExportSnapshot();
-                      }
-                      if (isOrderWhatsAppKey(key)) {
-                        handleOrderWhatsAppSend(key);
                       }
                       if (key === 'move-project') {
                         setMoveModalOpen(true);

@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-03", title: "Карточка заказа: отдельная иконка «Отправить заказ»",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "Отправка заказа в WhatsApp (клиенту, в чаты, сотрудникам) вынесена из меню «⋯» в отдельную иконку «Отправить заказ» слева от него — меню «⋯» стало короче. Если отправка выключена или получатели не заданы, иконка серая с подсказкой «Отправка не настроена».",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-03", title: "Рабочие контакты сотрудников и отправка заказа сотруднику",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [
