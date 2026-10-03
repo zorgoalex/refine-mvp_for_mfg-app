@@ -113,6 +113,14 @@ html {
   animation-delay: var(--app-tooltip-enter-delay) !important;
 }
 
+/* A confirmation opens on click: it must appear at once, not after the hover-tooltip delay. */
+.ant-popover.ant-popconfirm.ant-zoom-big-enter,
+.ant-popover.ant-popconfirm.ant-zoom-big-appear,
+.ant-popover.ant-popconfirm.ant-zoom-big-enter.ant-zoom-big-enter-active,
+.ant-popover.ant-popconfirm.ant-zoom-big-appear.ant-zoom-big-appear-active {
+  animation-delay: 0s !important;
+}
+
 .app-image-outline {
   outline: 1px solid var(--app-image-outline);
   outline-offset: -1px;

@@ -26,10 +26,10 @@ const height = (png: Buffer) => png.readUInt32BE(20);
 const widthOf = (png: Buffer) => png.readUInt32BE(16);
 
 describe('order image form', () => {
-  it('splits by 55 details, a separator never starts or ends a page', () => {
-    expect(IMAGE_DETAILS_PER_PAGE).toBe(55);
+  it('splits by 70 details, a separator never starts or ends a page', () => {
+    expect(IMAGE_DETAILS_PER_PAGE).toBe(70);
     const pages = paginate(rows(productionProjection(order(130)), false));
-    expect(pages.map((page) => page.filter((row) => row.kind === 'detail').length)).toEqual([55, 55, 20]);
+    expect(pages.map((page) => page.filter((row) => row.kind === 'detail').length)).toEqual([70, 60]);
     for (const page of pages) {
       expect(page[0]?.kind).toBe('detail');
       expect(page.at(-1)?.kind).toBe('detail');
@@ -41,18 +41,36 @@ describe('order image form', () => {
     const short = await renderOrderImages(order(3), true);
     expect(short).toHaveLength(1);
     expect(short[0].subarray(0, 4)).toEqual(PNG);
-    const long = await renderOrderImages(order(120), true);
+    const long = await renderOrderImages(order(160), true);
     expect(long).toHaveLength(3);
     expect(height(long[0])).toBe(height(long[1]));
     expect(height(long[2])).toBeLessThan(height(long[0]));
     expect(new Set(long.map(widthOf))).toEqual(new Set([1400]));
     const dir = process.env.ORDER_IMAGE_PREVIEW_DIR;
     if (dir) {
+      // Previews in the spirit of the sample sheets (13 / 43 / 66 lines, several films, long names).
+      const films = ['vm 01.41', 'черная краска', 'Алатау матовая KZ03-Кира', 'Дуб арден А578-Алер', 'Мокко Кира'];
+      const sample = (count: number): OrderFormData => ({
+        ...order(count),
+        orderName: String(2700 + count), clientName: 'Тест Галым Байтурсунов', clientPhone: '8 701 532 9575', prisadkaName: '1515',
+        totalAmount: 274664, finalAmount: 274664, paidAmount: 274664, prisadkaDesignerName: 'Тест Узакбай Жанара',
+        details: Array.from({ length: count }, (_, index) => ({
+          detailId: index + 1, height: [905, 95, 1866, 1605, 2440, 140][index % 6], width: [100, 2020, 542, 597, 439, 1420][index % 6],
+          quantity: 1 + (index % 4 === 0 ? 1 : 0), millingType: index % 7 === 3 ? 'мелкая лапша' : 'модерн', edgeType: 'р-1',
+          film: films[Math.floor(index / Math.max(1, Math.ceil(count / films.length)))] ?? films[0], material: 'МДФ 16мм',
+          note: index % 5 === 0 ? 'Присадка' : index === 15 ? 'Присадка вырез под микроволновку' : '', doweling: index % 5 === 0,
+          millingCostPerSqm: index % 9 === 0 ? 21600 : 16900, detailCost: null,
+        })),
+      });
+      for (const count of [13, 43, 66]) {
+        (await renderOrderImages(sample(count), true)).forEach((png, index) => writeFileSync(join(dir, `sample-${count}-${index + 1}.png`), png));
+      }
+      (await renderOrderImages(productionProjection(sample(43)), false)).forEach((png, index) => writeFileSync(join(dir, `sample-production-43-${index + 1}.png`), png));
       short.forEach((png, index) => writeFileSync(join(dir, `order-short-${index + 1}.png`), png));
       long.forEach((png, index) => writeFileSync(join(dir, `order-long-${index + 1}.png`), png));
       (await renderOrderImages(productionProjection(order(60)), false)).forEach((png, index) => writeFileSync(join(dir, `production-${index + 1}.png`), png));
     }
-  });
+  }, 60_000);
 
   it('wraps to the line limit with an ellipsis', () => {
     expect(wrap('', 100, 17, 2)).toEqual(['']);

@@ -717,7 +717,7 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
   it('an image form goes as pictures one after another, the caption on the first; a later page lost → unknown PARTIAL_DELIVERY', async () => {
     await configure({ clientForms: ['order_image', 'order_pdf'] });
     await q(`INSERT INTO order_details(order_id, detail_number, height, width, quantity, milling_cost_per_sqm, film_id)
-      SELECT 9001, 100 + n, 500, 500, 1, 1000, 1 FROM generate_series(1, 60) n`);
+      SELECT 9001, 100 + n, 500, 500, 1, 1000, 1 FROM generate_series(1, 80) n`);
     try {
       const view = (await send(9001, { target: { kind: 'client' }, form: 'order_image' as never })).send;
       expect(view.partsTotal).toBe(2);
