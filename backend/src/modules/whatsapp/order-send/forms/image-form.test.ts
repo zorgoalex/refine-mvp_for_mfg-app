@@ -76,4 +76,3 @@ describe('order image form', () => {
     expect(fittingSize('7', 30, 17)).toBe(17);
   });
 });
-

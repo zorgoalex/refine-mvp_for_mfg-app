@@ -235,4 +235,3 @@ describe('queue texts', () => {
     expect(orderSendErrorToast(apiError(422, 'ORDER_SEND_TOO_LONG')).text).toContain('20 изображений');
   });
 });
-
