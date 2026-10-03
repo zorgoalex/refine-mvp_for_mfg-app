@@ -13,13 +13,16 @@ const HOUR = 3600;
 const now = Math.floor(Date.now() / 1000);
 const iso = (secondsAgo: number) => new Date((now - secondsAgo) * 1000).toISOString();
 
-type Image = { ref: string; id: string; ageHours: number };
+type Image = { ref: string; id: string; ageHours: number; parent?: string };
+type Layer = { id: string; parent?: string; tags?: number; digests?: number };
 type Container = { image: string; id: string; running: boolean };
 
-// Fake docker backed by files: images.tsv (ref, id, created ISO),
-// dangling.tsv (id, created ISO, tag count, digest count, image-role label) and containers.tsv
-// (config image, image id, running 0/1). `tag` appends a row, `rmi` deletes
-// one; every call is appended to calls.log.
+// Fake docker backed by files: images.tsv (ref, id, created ISO, parent id),
+// dangling.tsv (id, created ISO, tag count, digest count, image-role label, parent id),
+// layers.tsv (id, parent id, tag count, digest count: untagged step images of legacy
+// builds) and containers.tsv (config image, image id, running 0/1). `tag` appends a
+// row, `rmi` deletes one image and, like the containerd image store, leaves its
+// parents in place; every call is appended to calls.log.
 const fakeDocker = `#!/usr/bin/env bash
 set -euo pipefail
 D="$FAKE_DOCKER_DIR"
@@ -41,6 +44,14 @@ case "$1" in
     done
     exit 0 ;;
   images)
+    if [ "$2" = --filter ] && [ "$3" = dangling=true ] && [ "$4" = --quiet ]; then
+      # Untagged images without children: nothing names them as its parent.
+      [ -f "$D/leaves-fail" ] && exit 1
+      { cut -f4 "$D/images.tsv"; cut -f6 "$D/dangling.tsv"; cut -f2 "$D/layers.tsv"; } | sed '/^$/d' | sort -u > "$D/parents.tmp"
+      { awk -F'\\t' '$3 == 0 {print $1}' "$D/dangling.tsv"; awk -F'\\t' '$3 == 0 {print $1}' "$D/layers.tsv"; } \\
+        | grep -vxFf "$D/parents.tmp" || true
+      exit 0
+    fi
     if [ "$2" = --filter ]; then
       [ "$3" = dangling=true ] && [ "$4" = --filter ] || exit 2
       [ -f "$D/dangling-fails" ] && exit 1
@@ -50,30 +61,50 @@ case "$1" in
     awk -F'\\t' -v repo="$2" '{ split($1, a, ":"); if (a[1] == repo) print $1 }' "$D/images.tsv"
     exit 0 ;;
   image)
+    if [ "$2" = inspect ] && [ "$4" = '{{.Id}}' ]; then
+      [ -f "$D/layer-inspect-fails" ] && { echo "Cannot connect to the Docker daemon" >&2; exit 1; }
+      { cut -f2 "$D/images.tsv"; cut -f1 "$D/dangling.tsv"; cut -f1 "$D/layers.tsv"; } | grep -qxF "$5" \\
+        || { echo "Error response from daemon: No such image: $5" >&2; exit 1; }
+      echo "$5"
+      exit 0
+    fi
+    if [ "$2" = inspect ] && [ "$4" = '{{.Parent}}|{{len .RepoTags}}|{{len .RepoDigests}}' ]; then
+      out="$(awk -F'\\t' -v id="$5" '$1 == id {print $2 "|" $3 "|" $4}' "$D/layers.tsv")"
+      [ -n "$out" ] || out="$(awk -F'\\t' -v id="$5" '$1 == id {print $6 "|" $3 "|" $4}' "$D/dangling.tsv")"
+      [ -n "$out" ] || out="$(awk -F'\\t' -v id="$5" '$2 == id {print $4 "|1|0"; exit}' "$D/images.tsv")"
+      [ -f "$D/layer-inspect-fails" ] && { echo "Cannot connect to the Docker daemon" >&2; exit 1; }
+      [ -n "$out" ] || { echo "Error response from daemon: No such image: $5" >&2; exit 1; }
+      echo "$out"
+      exit 0
+    fi
     if [ "$2" = inspect ] && [ "\${5#sha256:}" != "$5" ] && grep -q "^$5	" "$D/dangling.tsv"; then
-      awk -F'\\t' -v id="$5" '$1 == id {print $2 "|" $3 "|" $4 "|" $5}' "$D/dangling.tsv"
+      awk -F'\\t' -v id="$5" '$1 == id {print $2 "|" $3 "|" $4 "|" $5 "|" $6}' "$D/dangling.tsv"
       exit 0
     fi
     if [ "$2" = inspect ]; then
       line="$(awk -F'\\t' -v ref="$5" '$1 == ref' "$D/images.tsv")"
       [ -n "$line" ] || exit 1
-      printf '%s|%s\\n' "$(cut -f2 <<<"$line")" "$(cut -f3 <<<"$line")"
+      printf '%s|%s|%s\\n' "$(cut -f2 <<<"$line")" "$(cut -f3 <<<"$line")" "$(cut -f4 <<<"$line")"
       exit 0
     fi ;;
   tag)
     [ -f "$D/tag-fails" ] && exit 1
     created="$(awk -F'\\t' -v id="$2" '$2 == id {print $3; exit}' "$D/images.tsv")"
+    parent="$(awk -F'\\t' -v id="$2" '$2 == id {print $4; exit}' "$D/images.tsv")"
     # Docker moves an existing tag to the new image.
     awk -F'\\t' -v ref="$3" '$1 != ref' "$D/images.tsv" > "$D/images.tmp"
     mv "$D/images.tmp" "$D/images.tsv"
-    printf '%s\\t%s\\t%s\\n' "$3" "$2" "$created" >> "$D/images.tsv"
+    printf '%s\\t%s\\t%s\\t%s\\n' "$3" "$2" "$created" "$parent" >> "$D/images.tsv"
     exit 0 ;;
   rmi)
     [ -f "$D/rmi-fails" ] && exit 1
+    [ -f "$D/rmi-fails-for" ] && grep -qxF "$2" "$D/rmi-fails-for" && exit 1
     awk -F'\\t' -v ref="$2" '$1 != ref' "$D/images.tsv" > "$D/images.tmp"
     mv "$D/images.tmp" "$D/images.tsv"
     awk -F'\\t' -v id="$2" '$1 != id' "$D/dangling.tsv" > "$D/dangling.tmp"
     mv "$D/dangling.tmp" "$D/dangling.tsv"
+    awk -F'\\t' -v id="$2" '$1 != id' "$D/layers.tsv" > "$D/layers.tmp"
+    mv "$D/layers.tmp" "$D/layers.tsv"
     # Interleaving: a build starts right after the first removal.
     [ -f "$D/build-starts-on-rmi" ] && echo "docker build -t erp-backend:new /src/backend" > "$D/ps.txt"
     exit 0 ;;
@@ -92,7 +123,7 @@ exit 0
 `;
 
 // role: value of the app.erp.image-role label; the backend build stage by default.
-type Dangling = { id: string; ageHours: number; tags?: number; digests?: number; role?: string };
+type Dangling = { id: string; ageHours: number; tags?: number; digests?: number; role?: string; parent?: string };
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -104,6 +135,7 @@ function setup(
   containers: Container[],
   releaseFiles: Record<string, string> = {},
   dangling: Dangling[] = [],
+  layers: Layer[] = [],
 ) {
   const dir = mkdtempSync(resolve(tmpdir(), 'prune-images-test-'));
   dirs.push(dir);
@@ -118,12 +150,19 @@ function setup(
   writeFileSync(
     resolve(dir, 'dangling.tsv'),
     dangling
-      .map((d) => `${d.id}\t${iso(d.ageHours * HOUR)}\t${d.tags ?? 0}\t${d.digests ?? 0}\t${d.role ?? 'backend-build-stage'}\n`)
+      .map(
+        (d) =>
+          `${d.id}\t${iso(d.ageHours * HOUR)}\t${d.tags ?? 0}\t${d.digests ?? 0}\t${d.role ?? 'backend-build-stage'}\t${d.parent ?? ''}\n`,
+      )
       .join(''),
   );
   writeFileSync(
+    resolve(dir, 'layers.tsv'),
+    layers.map((l) => `${l.id}\t${l.parent ?? ''}\t${l.tags ?? 0}\t${l.digests ?? 0}\n`).join(''),
+  );
+  writeFileSync(
     resolve(dir, 'images.tsv'),
-    images.map((i) => `${i.ref}\t${i.id}\t${iso(i.ageHours * HOUR)}\n`).join(''),
+    images.map((i) => `${i.ref}\t${i.id}\t${iso(i.ageHours * HOUR)}\t${i.parent ?? ''}\n`).join(''),
   );
   setContainers(dir, containers);
   writeFileSync(resolve(dir, 'calls.log'), '');
@@ -138,7 +177,7 @@ function setContainers(dir: string, containers: Container[]) {
   );
 }
 
-function run(dir: string, args: string[]) {
+function run(dir: string, args: string[], env: Record<string, string> = {}) {
   const result = spawnSync('bash', [script, ...args], {
     encoding: 'utf8',
     env: {
@@ -146,6 +185,8 @@ function run(dir: string, args: string[]) {
       PATH: `${resolve(dir, 'bin')}${delimiter}${process.env.PATH}`,
       FAKE_DOCKER_DIR: dir,
       ERP_IMAGE_LOCK_FILE: resolve(dir, 'images.lock'),
+      ERP_IMAGE_ORPHAN_FILE: resolve(dir, 'orphans.list'),
+      ...env,
     },
   });
   const calls = readFileSync(resolve(dir, 'calls.log'), 'utf8').trim().split('\n');
@@ -361,7 +402,7 @@ describe('prune-old-images.sh', () => {
     const { dir, root } = setup([], [], {}, [{ id: 'sha256:relabeled', ageHours: 300, role: 'backend-build-stage' }]);
     writeFileSync(
       resolve(dir, 'dangling.tsv'),
-      readFileSync(resolve(dir, 'dangling.tsv'), 'utf8').replace(/\tbackend-build-stage\n$/, '\tother-role\n'),
+      readFileSync(resolve(dir, 'dangling.tsv'), 'utf8').replace(/\tbackend-build-stage\t\n$/, '\tother-role\t\n'),
     );
     writeFileSync(resolve(dir, 'bin', 'docker'), fakeDocker.replace('"label=app.erp.image-role=" $5 == want', '1'));
     const result = run(dir, ['--root', root, '--dangling']);
@@ -382,6 +423,289 @@ describe('prune-old-images.sh', () => {
     expect(result.rmi).toEqual(['rmi sha256:a-first']);
     expect(result.stdout).toContain('an image build started; stopping dangling cleanup');
     expect(result.stdout).toContain('removed 1 dangling image(s)');
+  });
+
+  // Legacy build of erp-backend:<sha>: runtime steps r3 → r2 → r1 → base (pulled).
+  const chain = (sha: string, base = 'sha256:base'): Layer[] => [
+    { id: `sha256:${sha}-r3`, parent: `sha256:${sha}-r2` },
+    { id: `sha256:${sha}-r2`, parent: `sha256:${sha}-r1` },
+    { id: `sha256:${sha}-r1`, parent: base },
+  ];
+  const baseLayer: Layer = { id: 'sha256:base', digests: 1 };
+
+  it('--dangling removes the orphan layer chain of a removed tag and stops at the pulled base image', () => {
+    const images = [
+      { ...backend('v1', 1), parent: 'sha256:v1-r3' },
+      { ...backend('v0', 100), parent: 'sha256:v0-r3' },
+    ];
+    const { dir, root } = setup(images, [], {}, [], [...chain('v1'), ...chain('v0'), baseLayer]);
+    const result = run(dir, ['--root', root, '--keep', '1', '--dangling']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.rmi).toEqual(['rmi erp-backend:v0', 'rmi sha256:v0-r3', 'rmi sha256:v0-r2', 'rmi sha256:v0-r1']);
+    expect(result.calls.some((c) => c.startsWith('rmi') && / -f( |$)/.test(c))).toBe(false);
+    expect(result.stdout).toContain('remove <none>@v0-r3 (layer of erp-backend:v0)');
+    expect(result.stdout).toContain('removed 3 orphan layer image(s)');
+  });
+
+  it('--dangling keeps layers shared with a kept image', () => {
+    // v0 and v1 share the cached step "shared"; only v0's own step goes.
+    const images = [
+      { ...backend('v1', 1), parent: 'sha256:v1-own' },
+      { ...backend('v0', 100), parent: 'sha256:v0-own' },
+    ];
+    const layers: Layer[] = [
+      { id: 'sha256:v1-own', parent: 'sha256:shared' },
+      { id: 'sha256:v0-own', parent: 'sha256:shared' },
+      { id: 'sha256:shared', parent: 'sha256:base' },
+      baseLayer,
+    ];
+    const { dir, root } = setup(images, [], {}, [], layers);
+    const result = run(dir, ['--root', root, '--keep', '1', '--dangling']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.rmi).toEqual(['rmi erp-backend:v0', 'rmi sha256:v0-own']);
+  });
+
+  it('--dangling stops the layer walk at a layer used by a container, tagged, or refused by docker', () => {
+    const images = [
+      backend('w9', 1),
+      { ...backend('w1', 100), parent: 'sha256:w1-r3' },
+      { ...backend('w2', 110), parent: 'sha256:w2-r3' },
+      { ...backend('w3', 120), parent: 'sha256:w3-r3' },
+    ];
+    const layers: Layer[] = [
+      ...chain('w1'),
+      ...chain('w2').map((l) => (l.id === 'sha256:w2-r2' ? { ...l, tags: 1 } : l)),
+      ...chain('w3'),
+      baseLayer,
+    ];
+    const { dir, root } = setup(images, [{ image: 'sha256:w1-r2', id: 'sha256:w1-r2', running: false }], {}, [], layers);
+    writeFileSync(resolve(dir, 'rmi-fails-for'), 'sha256:w3-r2\n');
+    const result = run(dir, ['--root', root, '--keep', '1', '--dangling']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.rmi.filter((c) => c.startsWith('rmi sha256:')).sort()).toEqual([
+      'rmi sha256:w1-r3',
+      'rmi sha256:w2-r3',
+      'rmi sha256:w3-r2', // refused: the walk ends, r1 is never tried
+      'rmi sha256:w3-r3',
+    ]);
+  });
+
+  it('--dangling starts the walk from the image itself when it survives untagging', () => {
+    // The tag row goes, the image stays as an untagged layer.
+    const images = [backend('y1', 1), { ...backend('y0', 100), parent: 'sha256:y0-r1' }];
+    const layers: Layer[] = [
+      { id: 'sha256:y0', parent: 'sha256:y0-r1' },
+      { id: 'sha256:y0-r1', parent: 'sha256:base' },
+      baseLayer,
+    ];
+    const { dir, root } = setup(images, [], {}, [], layers);
+    const result = run(dir, ['--root', root, '--keep', '1', '--dangling']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.rmi).toEqual(['rmi erp-backend:y0', 'rmi sha256:y0', 'rmi sha256:y0-r1']);
+  });
+
+  it('--dangling leaves the layers alone when the tag removal was refused', () => {
+    const images = [backend('z1', 1), { ...backend('z0', 100), parent: 'sha256:z0-r3' }];
+    const { dir, root } = setup(images, [], {}, [], [...chain('z0'), baseLayer]);
+    writeFileSync(resolve(dir, 'rmi-fails-for'), 'erp-backend:z0\n');
+    const result = run(dir, ['--root', root, '--keep', '1', '--dangling']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.rmi).toEqual(['rmi erp-backend:z0']);
+  });
+
+  it('--dangling removes the layer chain behind a build-stage leftover, up to the shared deps stage', () => {
+    const dangling: Dangling[] = [{ id: 'sha256:stage', ageHours: 30, parent: 'sha256:stage-b1' }];
+    const layers: Layer[] = [
+      { id: 'sha256:stage-b1', parent: 'sha256:deps-old' },
+      { id: 'sha256:deps-old', parent: 'sha256:base' }, // no other build uses it any more → removed
+      baseLayer,
+    ];
+    const { dir, root } = setup([], [], {}, dangling, layers);
+    const result = run(dir, ['--root', root, '--dangling']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.rmi).toEqual(['rmi sha256:stage', 'rmi sha256:stage-b1', 'rmi sha256:deps-old']);
+    expect(result.stdout).toContain('removed 1 dangling image(s)');
+    expect(result.stdout).toContain('removed 2 orphan layer image(s)');
+  });
+
+  it('--dangling stops the layer walk as soon as an image build starts', () => {
+    const images = [backend('t1', 1), { ...backend('t0', 100), parent: 'sha256:t0-r3' }];
+    const { dir, root } = setup(images, [], {}, [{ id: 'sha256:stage', ageHours: 300 }], [...chain('t0'), baseLayer]);
+    writeFileSync(resolve(dir, 'build-starts-on-rmi'), '');
+    const result = run(dir, ['--root', root, '--keep', '1', '--dangling']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.rmi).toEqual(['rmi erp-backend:t0']);
+    expect(result.stdout).toContain('an image build started; stopping layer cleanup');
+    expect(result.stdout).toContain('an image build is running; skipping dangling cleanup');
+  });
+
+  it('--dangling stops the layer walk when the leaf listing fails', () => {
+    const images = [backend('o1', 1), { ...backend('o0', 100), parent: 'sha256:o0-r3' }];
+    const { dir, root } = setup(images, [], {}, [], [...chain('o0'), baseLayer]);
+    writeFileSync(resolve(dir, 'leaves-fail'), '');
+    const result = run(dir, ['--root', root, '--keep', '1', '--dangling']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.rmi).toEqual(['rmi erp-backend:o0']);
+  });
+
+  it('never walks layers without --dangling or in --dry-run', () => {
+    const images = [backend('x1', 1), { ...backend('x0', 100), parent: 'sha256:x0-r3' }];
+    const first = setup(images, [], {}, [], [...chain('x0'), baseLayer]);
+    const plain = run(first.dir, ['--root', first.root, '--keep', '1']);
+    expect(plain.status, plain.stderr).toBe(0);
+    expect(plain.rmi).toEqual(['rmi erp-backend:x0']);
+    const second = setup(images, [], {}, [], [...chain('x0'), baseLayer]);
+    const dry = run(second.dir, ['--root', second.root, '--keep', '1', '--dangling', '--dry-run']);
+    expect(dry.status, dry.stderr).toBe(0);
+    expect(dry.rmi).toEqual([]);
+    expect(dry.stdout).not.toContain('orphan layer');
+  });
+
+  const orphans = (dir: string) =>
+    existsSync(resolve(dir, 'orphans.list')) ? readFileSync(resolve(dir, 'orphans.list'), 'utf8').split('\n').filter(Boolean) : [];
+
+  it('a cleanup without --dangling remembers the parents; the next --dangling run removes the chain', () => {
+    const images = [backend('j1', 1), { ...backend('j0', 100), parent: 'sha256:j0-r3' }];
+    const { dir, root } = setup(images, [], {}, [], [...chain('j0'), baseLayer]);
+    const deploy = run(dir, ['--root', root, '--keep', '1']);
+    expect(deploy.status, deploy.stderr).toBe(0);
+    expect(deploy.rmi).toEqual(['rmi erp-backend:j0']);
+    expect(orphans(dir)).toEqual(['sha256:j0', 'sha256:j0-r3']);
+    const cron = run(dir, ['--root', root, '--keep', '1', '--dangling']);
+    expect(cron.status, cron.stderr).toBe(0);
+    expect(cron.rmi.slice(1)).toEqual(['rmi sha256:j0-r3', 'rmi sha256:j0-r2', 'rmi sha256:j0-r1']);
+    expect(cron.stdout).toContain('remove <none>@j0-r3 (layer of an earlier cleanup)');
+    expect(orphans(dir)).toEqual([]);
+  });
+
+  it('a walk interrupted by a build is finished by the next --dangling run', () => {
+    const images = [backend('i1', 1), { ...backend('i0', 100), parent: 'sha256:i0-r3' }];
+    const { dir, root } = setup(images, [], {}, [], [...chain('i0'), baseLayer]);
+    writeFileSync(resolve(dir, 'build-starts-on-rmi'), '');
+    const first = run(dir, ['--root', root, '--keep', '1', '--dangling']);
+    expect(first.status, first.stderr).toBe(0);
+    expect(first.rmi).toEqual(['rmi erp-backend:i0']);
+    expect(orphans(dir)).toEqual(['sha256:i0-r3']);
+    // Still building: the entry is kept for later.
+    const second = run(dir, ['--root', root, '--keep', '1', '--dangling']);
+    expect(second.rmi.slice(1)).toEqual([]);
+    expect(orphans(dir)).toEqual(['sha256:i0-r3']);
+    rmSync(resolve(dir, 'build-starts-on-rmi'));
+    rmSync(resolve(dir, 'ps.txt'));
+    const third = run(dir, ['--root', root, '--keep', '1', '--dangling']);
+    expect(third.status, third.stderr).toBe(0);
+    expect(third.rmi.slice(1)).toEqual(['rmi sha256:i0-r3', 'rmi sha256:i0-r2', 'rmi sha256:i0-r1']);
+    expect(orphans(dir)).toEqual([]);
+  });
+
+  it('a layer held by a container or refused by docker is retried once it is free', () => {
+    const images = [
+      backend('n9', 1),
+      { ...backend('n1', 100), parent: 'sha256:n1-r3' },
+      { ...backend('n2', 110), parent: 'sha256:n2-r3' },
+    ];
+    const { dir, root } = setup(
+      images,
+      [{ image: 'sha256:n1-r2', id: 'sha256:n1-r2', running: false }],
+      {},
+      [],
+      [...chain('n1'), ...chain('n2'), baseLayer],
+    );
+    writeFileSync(resolve(dir, 'rmi-fails-for'), 'sha256:n2-r2\n');
+    const first = run(dir, ['--root', root, '--keep', '1', '--dangling']);
+    expect(first.status, first.stderr).toBe(0);
+    expect(orphans(dir).sort()).toEqual(['sha256:n1-r2', 'sha256:n2-r2']);
+    setContainers(dir, []);
+    rmSync(resolve(dir, 'rmi-fails-for'));
+    const second = run(dir, ['--root', root, '--keep', '1', '--dangling']);
+    expect(second.status, second.stderr).toBe(0);
+    expect(second.rmi.slice(first.rmi.length).sort()).toEqual([
+      'rmi sha256:n1-r1',
+      'rmi sha256:n1-r2',
+      'rmi sha256:n2-r1',
+      'rmi sha256:n2-r2',
+    ]);
+    expect(orphans(dir)).toEqual([]);
+  });
+
+  it('remembered entries pass the same checks: tagged, pulled, shared, missing and malformed ones are dropped', () => {
+    const images = [{ ...backend('m1', 1), parent: 'sha256:m1-r3' }];
+    const layers: Layer[] = [...chain('m1'), { id: 'sha256:tagged', tags: 1 }, { id: 'sha256:free', parent: 'sha256:base' }, baseLayer];
+    const { dir, root } = setup(images, [], {}, [], layers);
+    writeFileSync(
+      resolve(dir, 'orphans.list'),
+      ['sha256:m1-r3', 'sha256:m1-r2', 'sha256:tagged', 'sha256:base', 'sha256:gone', '-f', 'erp-backend:m1', 'sha256:free', ''].join('\n'),
+    );
+    const result = run(dir, ['--root', root, '--dangling']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.rmi).toEqual(['rmi sha256:free']);
+    expect(orphans(dir)).toEqual([]);
+  });
+
+  it('--dry-run neither writes nor consumes the remembered layers', () => {
+    const images = [backend('q1', 1), { ...backend('q0', 100), parent: 'sha256:q0-r3' }];
+    const { dir, root } = setup(images, [], {}, [], [...chain('q0'), baseLayer]);
+    expect(run(dir, ['--root', root, '--keep', '1', '--dry-run']).status).toBe(0);
+    expect(orphans(dir)).toEqual([]);
+    writeFileSync(resolve(dir, 'orphans.list'), 'sha256:q0-r3\n');
+    const dry = run(dir, ['--root', root, '--keep', '1', '--dangling', '--dry-run']);
+    expect(dry.status, dry.stderr).toBe(0);
+    expect(dry.rmi).toEqual([]);
+    expect(orphans(dir)).toEqual(['sha256:q0-r3']);
+  });
+
+  it('an unwritable orphan file never fails the cleanup', () => {
+    const images = [backend('f9', 1), { ...backend('f0', 100), parent: 'sha256:f0-r3' }];
+    const { dir, root } = setup(images, [], {}, [], [...chain('f0'), baseLayer]);
+    mkdirSync(resolve(dir, 'orphans.list')); // a directory: appending fails
+    const result = run(dir, ['--root', root, '--keep', '1']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.rmi).toEqual(['rmi erp-backend:f0']);
+  });
+
+  it('keeps the orphan file bounded', () => {
+    const images = [backend('b9', 1), { ...backend('b0', 100), parent: 'sha256:b0-r3' }];
+    const { dir, root } = setup(images, [], {}, [], [...chain('b0'), baseLayer]);
+    writeFileSync(resolve(dir, 'orphans.list'), Array.from({ length: 2000 }, (_, i) => `sha256:old${i}\n`).join(''));
+    expect(run(dir, ['--root', root, '--keep', '1']).status).toBe(0);
+    const lines = orphans(dir);
+    expect(lines).toHaveLength(1002);
+    expect(lines.slice(-2)).toEqual(['sha256:b0', 'sha256:b0-r3']);
+  });
+
+  it('an inspect error is not taken for a missing layer: the candidate survives and is retried', () => {
+    const images = [backend('g9', 1), { ...backend('g0', 100), parent: 'sha256:g0-r3' }];
+    const { dir, root } = setup(images, [], {}, [], [...chain('g0'), baseLayer]);
+    writeFileSync(resolve(dir, 'orphans.list'), 'sha256:g0-r9\n'); // really gone → dropped later
+    writeFileSync(resolve(dir, 'layer-inspect-fails'), '');
+    const first = run(dir, ['--root', root, '--keep', '1', '--dangling']);
+    expect(first.status, first.stderr).toBe(0);
+    expect(first.rmi).toEqual(['rmi erp-backend:g0']);
+    expect(orphans(dir).sort()).toEqual(['sha256:g0', 'sha256:g0-r3', 'sha256:g0-r9']);
+    rmSync(resolve(dir, 'layer-inspect-fails'));
+    const second = run(dir, ['--root', root, '--keep', '1', '--dangling']);
+    expect(second.status, second.stderr).toBe(0);
+    expect(second.rmi.slice(1)).toEqual(['rmi sha256:g0-r3', 'rmi sha256:g0-r2', 'rmi sha256:g0-r1']);
+    expect(orphans(dir)).toEqual([]);
+  });
+
+  it('a full orphan file that cannot be compacted takes no new entries', () => {
+    if (process.getuid?.() === 0) return; // root ignores directory permissions
+    const images = [backend('c9', 1), { ...backend('c0', 100), parent: 'sha256:c0-r3' }];
+    const { dir, root } = setup(images, [], {}, [], [...chain('c0'), baseLayer]);
+    const stateDir = resolve(dir, 'state');
+    mkdirSync(stateDir);
+    const file = resolve(stateDir, 'orphans.list');
+    writeFileSync(file, Array.from({ length: 2000 }, (_, i) => `sha256:old${i}\n`).join(''));
+    chmodSync(stateDir, 0o555); // the file stays writable, a .tmp next to it cannot be created
+    try {
+      const result = run(dir, ['--root', root, '--keep', '1'], { ERP_IMAGE_ORPHAN_FILE: file });
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.rmi).toEqual(['rmi erp-backend:c0']);
+      expect(readFileSync(file, 'utf8').split('\n').filter(Boolean)).toHaveLength(2000);
+    } finally {
+      chmodSync(stateDir, 0o755);
+    }
   });
 
   it('backend Dockerfile labels the build stage only, not the runtime image', () => {

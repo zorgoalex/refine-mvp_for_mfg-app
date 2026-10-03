@@ -40,6 +40,26 @@
 # fails and has to be rerun; deployed images are never affected (they are
 # tagged). It runs under the same lock as the tag cleanup.
 #
+# --dangling also removes the layer images behind every image it deletes. A
+# legacy build keeps each Dockerfile step as its own untagged image, linked by
+# .Parent; with the containerd image store `docker rmi` deletes only the image
+# it is given, so the rest of the chain (~0.3 GB per backend build) stayed on
+# disk for good. After removing a tag or a build-stage leftover the script walks
+# up the parents and removes each one that nothing else needs: untagged, not
+# pulled from a registry, not used by a container and without other children.
+# It stops at the first parent that is kept, so base images and layers shared
+# with a kept image stay, and other projects' images are never reached. Not
+# done in --dry-run (a parent is free only once its child is really gone).
+#
+# Layers that could not be checked or removed right away are remembered in
+# ERP_IMAGE_ORPHAN_FILE (default ~/.local/state/erp/image-orphan-layers, one
+# image id per line, at most 2000) and retried by the next --dangling run under
+# the same checks: the parents of images removed by a run without --dangling
+# (the deploy scripts), and the layer a walk stopped at because a build was
+# running, a container still used it, or Docker refused or failed. The file is
+# only a list of candidates: an entry that is tagged, pulled, used, has
+# children or no longer exists is never removed. Writing it is best effort.
+#
 # Concurrency: deploy scripts hold a shared flock on ERP_IMAGE_LOCK_FILE
 # (default /tmp/erp-images.lock, one per host/daemon) from build until the new
 # containers run. Cleanup takes it exclusively without waiting and is skipped
@@ -56,6 +76,7 @@ KEEP="${ERP_IMAGE_PRUNE_KEEP:-3}"
 MIN_AGE_HOURS="${ERP_IMAGE_PRUNE_MIN_AGE_HOURS:-24}"
 PIN_DAYS="${ERP_IMAGE_PRUNE_PIN_DAYS:-7}"
 LOCK_FILE="${ERP_IMAGE_LOCK_FILE:-/tmp/erp-images.lock}"
+ORPHAN_FILE="${ERP_IMAGE_ORPHAN_FILE:-${HOME:+$HOME/.local/state/erp/image-orphan-layers}}"
 DRY_RUN=0
 PIN_RUNNING=0
 DANGLING=0
@@ -73,7 +94,7 @@ while [[ $# -gt 0 ]]; do
     --dry-run) DRY_RUN=1; shift ;;
     --dangling) DANGLING=1; shift ;;
     --pin-running) PIN_RUNNING=1; shift ;;
-    -h|--help) sed -n '2,46p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,66p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -130,17 +151,100 @@ while IFS= read -r -d '' file; do
   release_refs+="$refs"$'\n'
 done < <(find "$ROOT" -maxdepth 1 \( -name 'backend-release*.env' -o -name '*release*.yml' \) -print0)
 
+# True while any client builds an image on this host: docker build, buildx,
+# compose build or `compose up --build`. A false positive only skips cleanup.
+# -ww: an exported COLUMNS would otherwise truncate long command lines.
+build_in_progress() {
+  local procs
+  procs="$(ps -ww -eo args=)" || return 0
+  grep -qE '(^|/)docker(-buildx|-compose)?( [^ ]+)* (build|--build)( |$)' <<<"$procs"
+}
+
+# Remembers layer image $1 for the next --dangling run (see the header). Best
+# effort: a failure to write never fails the cleanup or the deploy calling it.
+queue_orphan() {
+  local id="$1" count
+  [[ -n "$ORPHAN_FILE" && "$id" =~ ^sha256:[A-Za-z0-9._-]+$ ]] || return 0
+  (( DRY_RUN )) && return 0
+  mkdir -p "$(dirname "$ORPHAN_FILE")" 2>/dev/null || return 0
+  # Make room first: a full list that cannot be compacted takes no new entries.
+  count=0
+  if [[ -e "$ORPHAN_FILE" ]]; then count="$(wc -l <"$ORPHAN_FILE" 2>/dev/null)" || return 0; fi
+  if (( count >= 2000 )); then
+    { tail -n 1000 "$ORPHAN_FILE" >"$ORPHAN_FILE.tmp" && mv -f "$ORPHAN_FILE.tmp" "$ORPHAN_FILE"; } 2>/dev/null || return 0
+  fi
+  { printf '%s\n' "$id" >>"$ORPHAN_FILE"; } 2>/dev/null || return 0
+  return 0
+}
+
+# True only when Docker itself reports that image $1 does not exist. Any other
+# inspect failure (daemon busy or unreachable) is not proof that it is gone.
+image_missing() {
+  local err
+  err="$(docker image inspect --format '{{.Id}}' "$1" 2>&1 >/dev/null)" && return 1
+  grep -qiE 'no such (image|object)' <<<"$err"
+}
+
+# Removes the orphan layer images above a deleted image (see --dangling in the
+# header): starts at image $1 and walks up .Parent while the image is an
+# untagged, unpulled, unused leaf. $2 names the deleted image in the log. A
+# layer the walk cannot settle now is queued for the next run.
+build_started=0
+removed_layers=0
+remove_orphan_layers() {
+  local id="$1" owner="$2" meta parent tag_count digest_count leaves short steps=0
+  while [[ -n "$id" ]] && (( steps < 100 )); do
+    steps=$((steps + 1))
+    if (( build_started )); then queue_orphan "$id"; return 0; fi
+    # A layer that is already gone ends the walk; an inspect error is retried later.
+    meta="$(docker image inspect --format '{{.Parent}}|{{len .RepoTags}}|{{len .RepoDigests}}' "$id" 2>/dev/null)" \
+      || { image_missing "$id" || queue_orphan "$id"; return 0; }
+    IFS='|' read -r parent tag_count digest_count <<<"$meta"
+    [[ "$tag_count" == 0 && "$digest_count" == 0 ]] || return 0
+    if grep -qxF "$id" <<<"$used_ids"; then queue_orphan "$id"; return 0; fi
+    # Docker lists an untagged image as dangling only while it has no children.
+    leaves="$(docker images --filter dangling=true --quiet --no-trunc)" || { queue_orphan "$id"; return 0; }
+    grep -qxF "$id" <<<"$leaves" || return 0
+    if build_in_progress; then
+      build_started=1
+      log "an image build started; stopping layer cleanup"
+      queue_orphan "$id"
+      return 0
+    fi
+    docker rmi "$id" >/dev/null 2>&1 || { queue_orphan "$id"; return 0; }
+    short="${id#sha256:}"
+    log "remove <none>@${short:0:12} (layer of $owner)"
+    removed_layers=$((removed_layers + 1))
+    id="$parent"
+  done
+  return 0
+}
+
+# Layers remembered by earlier runs, before this run adds its own. Entries that
+# are still blocked are queued again by the walk; the rest is settled and dropped.
+if (( DANGLING && ! DRY_RUN )) && [[ -n "$ORPHAN_FILE" && -s "$ORPHAN_FILE" ]]; then
+  queued="$(sort -u "$ORPHAN_FILE" 2>/dev/null)" || queued=""
+  if [[ -n "$queued" ]] && : >"$ORPHAN_FILE"; then
+    while IFS= read -r id; do
+      [[ "$id" =~ ^sha256:[A-Za-z0-9._-]+$ ]] || continue
+      remove_orphan_layers "$id" "an earlier cleanup"
+    done <<<"$queued"
+  fi
+fi
+
 min_age_cutoff=$(( now - MIN_AGE_HOURS * 3600 ))
 pin_cutoff=$(( now - PIN_DAYS * 86400 ))
 removed=0
 for repo in "${REPOS[@]}"; do
-  # All tags of the repo, newest image first: "<ref>\t<full id>\t<created epoch>".
+  # All tags of the repo, newest image first:
+  # "<ref>\t<full id>\t<created epoch>\t<parent id, empty if none>".
   rows=""
   while IFS= read -r ref; do
     [[ -n "$ref" ]] || continue
     # A tag that vanished meanwhile is simply ignored.
-    meta="$(docker image inspect --format '{{.Id}}|{{.Created}}' "$ref" 2>/dev/null)" || continue
-    rows+="$ref"$'\t'"${meta%%|*}"$'\t'"$(date -d "${meta#*|}" +%s)"$'\n'
+    meta="$(docker image inspect --format '{{.Id}}|{{.Created}}|{{.Parent}}' "$ref" 2>/dev/null)" || continue
+    IFS='|' read -r image_id created_at parent_id <<<"$meta"
+    rows+="$ref"$'\t'"$image_id"$'\t'"$(date -d "$created_at" +%s)"$'\t'"$parent_id"$'\n'
   done < <(docker images "$repo" --filter dangling=false --format '{{.Repository}}:{{.Tag}}')
   rows="$(sort -t$'\t' -k3,3nr <<<"$rows" | sed '/^$/d')"
   [[ -n "$rows" ]] || continue
@@ -148,7 +252,7 @@ for repo in "${REPOS[@]}"; do
   # Decide per image ID; the reason applies to every tag of that image.
   declare -A keep_reason=()
   rank=0
-  while IFS=$'\t' read -r ref id created; do
+  while IFS=$'\t' read -r ref id created parent; do
     tag="${ref#*:}"
     if [[ -z "${keep_reason[$id]+x}" ]]; then
       rank=$((rank + 1))
@@ -167,7 +271,7 @@ for repo in "${REPOS[@]}"; do
     fi
   done <<<"$rows"
 
-  while IFS=$'\t' read -r ref id created; do
+  while IFS=$'\t' read -r ref id created parent; do
     if [[ -n "${keep_reason[$id]}" ]]; then
       log "keep   $ref (${keep_reason[$id]})"
     elif (( DRY_RUN )); then
@@ -179,17 +283,35 @@ for repo in "${REPOS[@]}"; do
       log "skip   $ref (docker rmi refused)"
     fi
   done <<<"$rows"
+
+  if (( ! DRY_RUN )); then
+    declare -A walked=()
+    while IFS=$'\t' read -r ref id created parent; do
+      [[ -z "${keep_reason[$id]}" && -z "${walked[$id]+x}" ]] || continue
+      walked[$id]=1
+      if (( ! DANGLING )); then
+        # Left to the next --dangling run, which drops whichever is gone or kept.
+        queue_orphan "$id"
+        queue_orphan "$parent"
+        continue
+      fi
+      # Docker deletes the image with its last tag; if it survived untagged,
+      # the walk starts from the image itself (and leaves it if still tagged).
+      if ! docker image inspect --format '{{.Id}}' "$id" >/dev/null 2>&1; then
+        if image_missing "$id"; then
+          id="$parent"
+        else
+          queue_orphan "$id"
+          queue_orphan "$parent"
+          continue
+        fi
+      fi
+      remove_orphan_layers "$id" "$ref"
+    done <<<"$rows"
+    unset walked
+  fi
   unset keep_reason
 done
-
-# True while any client builds an image on this host: docker build, buildx,
-# compose build or `compose up --build`. A false positive only skips cleanup.
-# -ww: an exported COLUMNS would otherwise truncate long command lines.
-build_in_progress() {
-  local procs
-  procs="$(ps -ww -eo args=)" || return 0
-  grep -qE '(^|/)docker(-buildx|-compose)?( [^ ]+)* (build|--build)( |$)' <<<"$procs"
-}
 
 if (( DANGLING )); then
   if build_in_progress; then
@@ -205,9 +327,9 @@ if (( DANGLING )); then
       short="<none>@${short:0:12}"
       # An image that vanished meanwhile is simply ignored.
       meta="$(docker image inspect --format \
-        '{{.Created}}|{{len .RepoTags}}|{{len .RepoDigests}}|{{index .Config.Labels "app.erp.image-role"}}' \
+        '{{.Created}}|{{len .RepoTags}}|{{len .RepoDigests}}|{{index .Config.Labels "app.erp.image-role"}}|{{.Parent}}' \
         "$id" 2>/dev/null)" || continue
-      IFS='|' read -r created_at tag_count digest_count role <<<"$meta"
+      IFS='|' read -r created_at tag_count digest_count role parent <<<"$meta"
       created="$(date -d "$created_at" +%s)" || die "cannot parse the creation time of $short"
       if [[ "$role" != "$BUILD_STAGE_ROLE" ]]; then log "keep   $short (not a backend build stage)"
       elif [[ "$tag_count" != 0 ]]; then log "keep   $short (tagged meanwhile)"
@@ -221,12 +343,15 @@ if (( DANGLING )); then
       elif docker rmi "$id" >/dev/null 2>&1; then
         log "remove $short"
         removed_dangling=$((removed_dangling + 1))
+        remove_orphan_layers "$parent" "$short"
+        (( build_started )) && break
       else
         log "skip   $short (docker rmi refused)"
       fi
     done <<<"$dangling"
     (( DRY_RUN )) || log "removed $removed_dangling dangling image(s)"
   fi
+  (( DRY_RUN )) || log "removed $removed_layers orphan layer image(s)"
 fi
 
 if (( DRY_RUN )); then log "dry-run: nothing removed"; else log "removed $removed tag(s)"; fi

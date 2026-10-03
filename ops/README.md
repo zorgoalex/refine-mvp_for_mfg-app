@@ -400,7 +400,19 @@ sudo ops/setup-vps.sh --yes
   `docker build`, `buildx build`, `compose build` or `compose up --build` client
   runs on the host and stops as soon as one starts; a build that starts in the
   moment before a removal and reuses that stage image as cache fails and has
-  to be rerun. Builds that hold the shared lock are never affected. On a host
+  to be rerun. Builds that hold the shared lock are never affected.
+  `--dangling` also removes the layer images behind every image it deletes: a
+  legacy build keeps each Dockerfile step as an untagged image linked by
+  `.Parent`, and with the containerd image store `docker rmi` leaves those
+  parents on disk. The script walks up from the removed image and removes each
+  parent that is untagged, has no registry digest, is not used by a container
+  and has no other children; it stops at the first parent that is kept, so base
+  images and layers shared with a kept image stay. Not done in `--dry-run`.
+  Layers that cannot be settled at once are listed in `ERP_IMAGE_ORPHAN_FILE`
+  (default `~/.local/state/erp/image-orphan-layers`, best effort, at most 2000
+  ids) and retried by the next `--dangling` run under the same checks: parents
+  of images removed by a run without `--dangling`, and the layer a walk stopped
+  at because of a running build, a container using it or a Docker error. On a host
   that builds images outside these deploy scripts, schedule it, for example
   every 6 hours:
   `17 */6 * * * bash <repo>/ops/prune-old-images.sh --dangling >> <log> 2>&1`.
