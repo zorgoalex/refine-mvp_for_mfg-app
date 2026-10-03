@@ -79,8 +79,16 @@ export const ORDER_SEND_CHANNEL_LABELS: Record<OrderSendChannel, string> = { wha
 export const ORDER_SEND_SUPPORTED_CHANNELS: readonly OrderSendChannel[] = ['whatsapp'];
 
 /** «логин1, логин2 / ФИО» — the user and the employee, as the menu shows them. */
-export function employeeDirectoryLabel(item: Pick<OrderSendEmployeeDirectoryItem, 'fullName' | 'usernames'>): string {
-  return item.usernames.length ? `${item.usernames.join(', ')} / ${item.fullName}` : item.fullName;
+export function employeeDirectoryLabel(item: Pick<OrderSendEmployeeDirectoryItem, 'fullName'> & { usernames?: unknown }): string {
+  const usernames = directoryUsernames(item.usernames);
+  return usernames.length ? `${usernames.join(', ')} / ${item.fullName}` : item.fullName;
+}
+
+/** Usernames as a list whatever the backend sent: an array, a PostgreSQL array literal «{a,b}» (a citext column) or nothing. */
+export function directoryUsernames(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String).filter(Boolean);
+  if (typeof value === 'string') return value.replace(/^\{|\}$/g, '').split(',').map((name) => name.trim().replace(/^"|"$/g, '')).filter(Boolean);
+  return [];
 }
 
 /** The same employee with the same channel listed in two rows. */

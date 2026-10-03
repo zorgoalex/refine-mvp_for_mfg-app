@@ -61,7 +61,8 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
       stage_code text,before_json jsonb,after_json jsonb,diff_json jsonb,metadata_json jsonb,created_at timestamptz DEFAULT now());
       CREATE TABLE audit_log_related_entity(audit_id uuid NOT NULL,entity_type text NOT NULL,entity_id bigint NOT NULL,PRIMARY KEY(audit_id,entity_type,entity_id));
       CREATE TABLE roles(role_id int PRIMARY KEY, is_active boolean NOT NULL DEFAULT true);
-      CREATE TABLE users(user_id bigint PRIMARY KEY, username text, role_id int REFERENCES roles, is_active boolean NOT NULL DEFAULT true, employee_id bigint);
+      CREATE EXTENSION IF NOT EXISTS citext;
+      CREATE TABLE users(user_id bigint PRIMARY KEY, username citext, role_id int REFERENCES roles, is_active boolean NOT NULL DEFAULT true, employee_id bigint);
       INSERT INTO roles VALUES (1, true), (10, true);
       CREATE TABLE permissions_state(id boolean PRIMARY KEY DEFAULT true, version int NOT NULL DEFAULT 1);
       INSERT INTO permissions_state VALUES (true, 1);
@@ -778,6 +779,9 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
     expect(item.contacts).toEqual([{ contactId: Number(employee.contacts[0].contact_id), masked: '7701***0101', isPrimary: true },
       { contactId: Number(employee.contacts[1].contact_id), masked: '7701***0102', isPrimary: false }]);
     expect(JSON.stringify(menu)).not.toContain(EMPLOYEE_PHONE);
+    // users.username is citext as in the real schema: the directory still returns a real array of logins.
+    expect((await service.settings()).employeeDirectory.find((entry) => entry.employeeId === employee.id))
+      .toMatchObject({ usernames: ['order-send-manager'], phones: 2 });
     const settings = await settingsInput();
     expect(await code(Promise.resolve().then(() => parseOrderSendSettings({ ...settings, employees: [{ recipientKey: null, employeeId: employee.id,
       channel: 'telegram', forms: ['order_pdf'], caption: '' }] })))).toBe('ORDER_SEND_CHANNEL_UNSUPPORTED');
