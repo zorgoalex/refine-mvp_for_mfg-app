@@ -607,6 +607,16 @@ export async function setupWorkflowMockApi(
         });
     });
 
+    // «Очередь отправок из карточки» in the configuration: empty in the mock world.
+    await page.route(/\/api\/v1\/whatsapp\/order-send\/queue(?:\?.*)?$/, async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ paused: false, enabled: false, minIntervalMinutes: 1, sendWindowMinutes: 0, nextDeliveryAt: null,
+                queueLength: 0, page: 1, pageSize: 0, total: 0, items: [] }),
+        });
+    });
+
     // The order card asks for the «Отправить в WhatsApp» menu; the feature is off in the mock world.
     await page.route(/\/api\/v1\/whatsapp\/order-send\/menu(?:\?.*)?$/, async (route) => {
         await route.fulfill({
