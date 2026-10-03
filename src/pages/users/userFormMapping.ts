@@ -11,6 +11,8 @@ type UserFormValues = {
   role?: UserRole;
   full_name?: string | null;
   is_active?: boolean;
+  /** The linked employee; null unlinks, undefined leaves it as is. */
+  employee_id?: number | null;
 };
 
 const ROLE_ID_TO_NAME: Record<number, UserRole> = {
@@ -59,6 +61,7 @@ export function mapBackendCreateUserRequest(
     role: requiredRole(values.role),
     fullName: nullableText(values.full_name),
     isActive: values.is_active ?? true,
+    ...(values.employee_id !== undefined ? { employeeId: values.employee_id } : {}),
   };
 }
 
@@ -71,13 +74,15 @@ export function mapBackendUpdateUserRequest(
     role: values.role,
     fullName: nullableText(values.full_name),
     isActive: values.is_active,
+    ...(values.employee_id !== undefined ? { employeeId: values.employee_id } : {}),
   };
 }
 
 export function mapLegacyUserFormToHasuraPayload(
   values: UserFormValues,
 ): Record<string, unknown> {
-  const { role, ...rest } = values;
+  // The employee link is changed only by the backend users command (audited with both employees).
+  const { role, employee_id: _employeeId, ...rest } = values;
 
   return {
     ...rest,

@@ -73,7 +73,8 @@ export class MySendsRepository {
       send_id: string; order_id: string; order_name: string | null; target_kind: string; chat_label: string | null; form_code: string;
       state: string; error_code: string | null; cancel_reason: string | null; next_attempt_at: Date; created_at: Date; sent_at: Date | null; updated_at: Date;
       cancelled_by: string | null;
-    }>(`SELECT s.send_id, s.order_id, o.order_name, s.target_kind, c.label chat_label, s.form_code, s.state, s.error_code, s.cancel_reason,
+      employee_name: string | null;
+    }>(`SELECT s.send_id, s.order_id, o.order_name, s.target_kind, c.label chat_label, e.full_name employee_name, s.form_code, s.state, s.error_code, s.cancel_reason,
           s.next_attempt_at, s.created_at, s.sent_at, s.updated_at, s.cancelled_by
         FROM whatsapp_order_sends s
         JOIN (
@@ -84,10 +85,12 @@ export class MySendsRepository {
         ) picked USING (send_id)
         LEFT JOIN orders o ON o.order_id = s.order_id
         LEFT JOIN whatsapp_order_send_chats c ON c.chat_key = s.chat_key
+        LEFT JOIN employees e ON e.employee_id = s.employee_id
         ORDER BY s.created_at DESC`, [userId, since, LIMIT, ids, followSince])).rows;
     return rows.map((row) => {
       const active = ORDER_ACTIVE.has(row.state);
-      const recipient = row.target_kind === 'client' ? 'клиенту' : row.target_kind === 'chat' ? `в чат «${row.chat_label ?? 'чат'}»` : 'сотруднику';
+      const recipient = row.target_kind === 'client' ? 'клиенту' : row.target_kind === 'chat' ? `в чат «${row.chat_label ?? 'чат'}»`
+        : row.employee_name ? `сотруднику «${row.employee_name}»` : 'сотруднику';
       const estimate = estimates.get(row.send_id);
       return {
         kind: 'order_send', id: row.send_id,

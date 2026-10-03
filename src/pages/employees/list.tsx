@@ -4,6 +4,11 @@ import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import { Space, Badge } from "antd";
 import { LocalizedList } from "../../components/LocalizedList";
+import { useEffect, useMemo, useState } from "react";
+import { employeeContactsApi } from "../../api/employeeContactsApi";
+import type { EmployeeContact } from "../../api/employeeContactsApiTypes";
+import { can } from "../../utils/permissions";
+import { EMPLOYEE_CONTACT_KIND_LABELS, formatContact, isContactsApiMissing, sortContacts } from "./employeeContactsModel";
 
 export const EmployeeList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
@@ -13,6 +18,25 @@ export const EmployeeList: React.FC<IResourceComponentsProps> = () => {
     },
   });
   const { show } = useNavigation();
+  const [contactsApiMissing, setContactsApiMissing] = useState(false);
+  const canViewContacts = can("employees.view") && !contactsApiMissing;
+  const pageIds = useMemo(
+    () => (tableProps.dataSource ?? []).map((row: any) => Number(row.employee_id)).filter((id) => Number.isFinite(id)),
+    [tableProps.dataSource],
+  );
+  const [contacts, setContacts] = useState<Map<number, EmployeeContact[]>>(new Map());
+  const pageKey = pageIds.join(",");
+  useEffect(() => {
+    if (!canViewContacts || !pageKey) return;
+    let cancelled = false;
+    employeeContactsApi.list(pageKey.split(",").map(Number)).then((result) => {
+      if (!cancelled) setContacts(new Map(result.items.map((item) => [item.employeeId, item.contacts])));
+    }).catch((error: unknown) => {
+      // An older backend without the contacts API: the column is hidden; any other error leaves it empty.
+      if (isContactsApiMissing(error)) setContactsApiMissing(true);
+    });
+    return () => { cancelled = true; };
+  }, [canViewContacts, pageKey]);
 
   return (
     <LocalizedList title="Сотрудники">
@@ -43,6 +67,22 @@ export const EmployeeList: React.FC<IResourceComponentsProps> = () => {
             { text: "Неактивен", value: false },
           ]}
         />
+        {canViewContacts ? (
+          <Table.Column
+            key="work_contacts"
+            title="Рабочие контакты"
+            render={(_, record: any) => {
+              const list = sortContacts(contacts.get(Number(record.employee_id)) ?? []).filter((contact) => contact.isPrimary);
+              return list.length ? (
+                <Space direction="vertical" size={0}>
+                  {list.map((contact) => (
+                    <span key={contact.contactId} title={EMPLOYEE_CONTACT_KIND_LABELS[contact.kind]}>{formatContact(contact)}</span>
+                  ))}
+                </Space>
+              ) : null;
+            }}
+          />
+        ) : null}
         <Table.Column dataIndex="note" title="Примечание" />
         <Table.Column dataIndex="ref_key_1c" title="Ключ 1C" />
         <Table.Column

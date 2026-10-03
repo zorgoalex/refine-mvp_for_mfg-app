@@ -2,9 +2,12 @@ import { nameRule } from '../../utils/nameRules';
 import { Edit, useForm } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, Checkbox } from "antd";
+import { can } from "../../utils/permissions";
+import { EmployeeContactsCard } from "./EmployeeContactsCard";
 
 export const EmployeeEdit: React.FC<IResourceComponentsProps> = () => {
-  const { formProps, saveButtonProps } = useForm();
+  const { formProps, saveButtonProps, queryResult } = useForm();
+  const employeeId = Number(queryResult?.data?.data?.employee_id) || null;
 
   return (
     <Edit saveButtonProps={saveButtonProps}>
@@ -25,6 +28,7 @@ export const EmployeeEdit: React.FC<IResourceComponentsProps> = () => {
           <Input placeholder="UUID из 1C" />
         </Form.Item>
       </Form>
+      <EmployeeContactsCard employeeId={employeeId} editable={can("employees.manage")} />
     </Edit>
   );
 };

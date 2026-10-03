@@ -3,6 +3,7 @@ import { Show, TextField, DateField } from "@refinedev/antd";
 import { Typography, Badge, Row, Col, Divider } from "antd";
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
+import { EmployeeContactsCard } from "./EmployeeContactsCard";
 
 const { Title } = Typography;
 
@@ -60,6 +61,10 @@ export const EmployeeShow: React.FC<IResourceComponentsProps> = () => {
           />
         </Col>
       </Row>
+
+      <Divider />
+
+      <EmployeeContactsCard employeeId={Number(record?.employee_id) || null} editable={false} />
 
       <Divider />
 

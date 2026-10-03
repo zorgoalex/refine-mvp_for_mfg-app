@@ -36,6 +36,7 @@ export type PermissionName =
   | 'users.activate'
   | 'users.manage_sso'
   | 'employees.view'
+  | 'employees.manage'
   | 'references.view'
   | 'references.manage'
   | 'finance.analytics.view'

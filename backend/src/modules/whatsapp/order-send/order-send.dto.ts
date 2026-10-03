@@ -1,7 +1,10 @@
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import { validateOrderSendCaption } from './order-send-caption';
-import { ORDER_FORM_CODES, ORDER_SEND_MAX_CHATS, type OrderFormCode, type OrderSendSettingsInput, type OrderSendTarget } from './order-send.types';
+import {
+  ORDER_FORM_CODES, ORDER_SEND_MAX_CHATS, ORDER_SEND_MAX_EMPLOYEES, ORDER_SEND_SUPPORTED_CHANNELS,
+  type OrderFormCode, type OrderSendSettingsInput, type OrderSendTarget,
+} from './order-send.types';
 
 const GROUP_ID = /^\d{5,24}(?:-\d{5,24})?@g\.us$/;
 const form = z.enum(ORDER_FORM_CODES as [OrderFormCode, ...OrderFormCode[]]);
@@ -21,12 +24,21 @@ const settingsInput = z.object({
     forms,
     caption: z.string().max(1000),
   }).strict()).max(ORDER_SEND_MAX_CHATS),
+  // Optional for clients of the previous release (they keep the current employees).
+  employees: z.array(z.object({
+    recipientKey: z.string().uuid().nullable(),
+    employeeId: z.number().int().positive(),
+    channel: z.enum(['whatsapp', 'telegram']),
+    forms,
+    caption: z.string().max(1000),
+  }).strict()).max(ORDER_SEND_MAX_EMPLOYEES).optional(),
 }).strict();
 
 const sendInput = z.object({
   target: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('client') }).strict(),
     z.object({ kind: z.literal('chat'), chatKey: z.string().uuid() }).strict(),
+    z.object({ kind: z.literal('employee'), recipientKey: z.string().uuid(), contactId: z.number().int().positive().nullable().optional() }).strict(),
   ]),
   form,
   idempotencyKey: z.string().uuid(),
@@ -34,10 +46,20 @@ const sendInput = z.object({
   confirmAfterUnknown: z.string().uuid().nullable().optional(),
 }).strict();
 
-export function parseOrderSendSettings(value: unknown): OrderSendSettingsInput {
+export function parseOrderSendSettings(value: unknown): OrderSendSettingsInput & { employeesGiven: boolean } {
   const parsed = settingsInput.safeParse(value);
   if (!parsed.success) throw validation(parsed.error);
-  const input = parsed.data;
+  const input = { ...parsed.data, employees: parsed.data.employees ?? [], employeesGiven: parsed.data.employees !== undefined };
+  for (const employee of input.employees) {
+    if (!ORDER_SEND_SUPPORTED_CHANNELS.includes(employee.channel)) {
+      throw new ApiError(422, 'ORDER_SEND_CHANNEL_UNSUPPORTED', 'Отправка сотрудникам в Telegram пока недоступна');
+    }
+    validateOrderSendCaption(employee.caption);
+  }
+  const employeeChannels = input.employees.map((employee) => `${employee.employeeId}:${employee.channel}`);
+  if (new Set(employeeChannels).size !== employeeChannels.length) throw new ApiError(422, 'VALIDATION_ERROR', 'Сотрудник указан в списке дважды');
+  const recipientKeys = input.employees.map((employee) => employee.recipientKey).filter((key): key is string => key !== null);
+  if (new Set(recipientKeys).size !== recipientKeys.length) throw new ApiError(422, 'VALIDATION_ERROR', 'Сотрудник указан в списке дважды');
   if (input.sendWindowMinutes * 2 > input.minIntervalMinutes) {
     throw new ApiError(422, 'VALIDATION_ERROR', 'Окно отправки — не больше половины порога частоты');
   }

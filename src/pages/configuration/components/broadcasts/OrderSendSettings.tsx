@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Col, Form, Input, InputNumber, Row, Space, Switch, Typography, message } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Form, Input, InputNumber, Row, Select, Space, Switch, Typography, message } from 'antd';
 import { DeleteOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { ApiError } from '../../../../api/apiError';
 import { authSession } from '../../../../api/authSession';
@@ -13,11 +13,16 @@ import { WhatsAppGroupSelect } from '../WhatsAppGroupSelect';
 import {
   ORDER_SEND_CAPTION_MAX,
   ORDER_SEND_LABEL_MAX,
+  ORDER_SEND_CHANNEL_LABELS,
   ORDER_SEND_MAX_CHATS,
+  ORDER_SEND_MAX_EMPLOYEES,
+  ORDER_SEND_SUPPORTED_CHANNELS,
   ORDER_SEND_MAX_INTERVAL,
   ORDER_SEND_MIN_INTERVAL,
   buildOrderSendUpdate,
+  duplicateEmployeeIndexes,
   duplicateGroupIndexes,
+  employeeDirectoryLabel,
   isOrderSendVersionConflict,
   orderSendDirty,
   orderSendSettingsErrorMessage,
@@ -128,6 +133,20 @@ export const OrderSendSettings: React.FC = () => {
   const runtimeAvailable = Boolean(runtime?.enabled && runtime.relayAvailable);
   const fieldsLocked = saving || loading;
   const duplicates = duplicateGroupIndexes(values?.chats ?? []);
+  const employeesSupported = Array.isArray(settings.employees);
+  const employeeDuplicates = duplicateEmployeeIndexes(values?.employees ?? []);
+  const directory = envelope?.employeeDirectory ?? [];
+  // An employee already in the settings stays selectable even when inactive (the directory has active ones only).
+  const employeeOptions = [
+    ...directory.map((item) => ({ value: item.employeeId, label: `${employeeDirectoryLabel(item)}${item.phones === 0 ? ' — нет рабочего телефона' : ''}` })),
+    ...(settings.employees ?? []).filter((item) => !directory.some((entry) => entry.employeeId === item.employeeId))
+      .map((item) => ({ value: item.employeeId, label: `${item.employeeName} (неактивен)` })),
+  ];
+  const channelOptions = (['whatsapp', 'telegram'] as const).map((channel) => ({
+    value: channel,
+    label: ORDER_SEND_SUPPORTED_CHANNELS.includes(channel) ? ORDER_SEND_CHANNEL_LABELS[channel] : `${ORDER_SEND_CHANNEL_LABELS[channel]} (скоро)`,
+    disabled: !ORDER_SEND_SUPPORTED_CHANNELS.includes(channel),
+  }));
   const variablesHint = (envelope?.captionVariables ?? []).length > 0
     ? <Text type="secondary">Переменные: {(envelope?.captionVariables ?? []).map((item) => `{${item.name}} — ${item.label}`).join('; ')}</Text>
     : null;
@@ -212,12 +231,59 @@ export const OrderSendSettings: React.FC = () => {
             </Col>)}
           </Row>
           <Space style={{ marginTop: 12 }}>
-            <Button icon={<PlusOutlined />} disabled={fields.length >= ORDER_SEND_MAX_CHATS}
-              onClick={() => add({ chatKey: null, groupChatId: '', label: '', forms: [], caption: '' })}>Добавить чат</Button>
+            <Button icon={<PlusOutlined />} disabled={fieldsLocked || fields.length >= ORDER_SEND_MAX_CHATS}
+              onClick={() => { if (!fieldsLocked) add({ chatKey: null, groupChatId: '', label: '', forms: [], caption: '' }); }}>Добавить чат</Button>
             {fields.length >= ORDER_SEND_MAX_CHATS && <Text type="secondary">Не больше {ORDER_SEND_MAX_CHATS} чатов.</Text>}
           </Space>
         </>}
       </Form.List>
+      {employeesSupported && <>
+        <Typography.Title level={5} style={{ marginTop: 16 }}>Сотрудники</Typography.Title>
+        <Paragraph type="secondary">Сотрудник получает форму на рабочий телефон из своей карточки: по умолчанию основной, в меню можно выбрать другой.</Paragraph>
+        <Form.List name="employees">
+          {(fields, { add, remove }) => <>
+            <Row gutter={[12, 12]}>
+              {fields.map((field, index) => <Col key={field.key} xs={24} lg={12} xxl={8}>
+                <Card size="small" style={{ height: '100%' }}
+                  title={`Сотрудник ${index + 1}`}
+                  extra={<Button type="text" danger icon={<DeleteOutlined />} aria-label={`Удалить сотрудника ${index + 1}`} onClick={() => remove(field.name)} />}>
+                  <Form.Item name={[field.name, 'recipientKey']} hidden noStyle><Input type="hidden" /></Form.Item>
+                  <Row gutter={12}>
+                    <Col xs={24} sm={16}>
+                      <Form.Item name={[field.name, 'employeeId']} label="Пользователь / сотрудник" rules={[{ validator: async (_, value: number | null | undefined) => {
+                        if (value == null) throw new Error('Выберите сотрудника.');
+                        if (employeeDuplicates.has(index)) throw new Error('Этот сотрудник с этим каналом уже есть в списке.');
+                      } }]}>
+                        <Select showSearch optionFilterProp="label" options={employeeOptions} placeholder="Выберите сотрудника" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={8}>
+                      <Form.Item name={[field.name, 'channel']} label="Канал">
+                        <Select options={channelOptions} />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={12}>
+                      <Form.Item name={[field.name, 'forms']} label="Формы">
+                        <Checkbox.Group className="order-send-forms" options={formOptions} />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={12}>
+                      <Form.Item name={[field.name, 'caption']} label="Подпись" rules={[captionRule]}>
+                        <Input.TextArea rows={7} maxLength={ORDER_SEND_CAPTION_MAX} />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                </Card>
+              </Col>)}
+            </Row>
+            <Space style={{ marginTop: 12 }}>
+              <Button icon={<PlusOutlined />} disabled={fieldsLocked || fields.length >= ORDER_SEND_MAX_EMPLOYEES}
+                onClick={() => { if (!fieldsLocked) add({ recipientKey: null, employeeId: null, channel: 'whatsapp', forms: [], caption: 'Заказ {order_name}' }); }}>Добавить сотрудника</Button>
+              {fields.length >= ORDER_SEND_MAX_EMPLOYEES && <Text type="secondary">Не больше {ORDER_SEND_MAX_EMPLOYEES} сотрудников.</Text>}
+            </Space>
+          </>}
+        </Form.List>
+      </>}
       {status && <Alert style={{ margin: '12px 0' }} type="info" showIcon message={status} />}
       {!runtimeAvailable && <Alert style={{ margin: '12px 0' }} type="warning" showIcon message="Отправка WhatsApp сейчас недоступна" />}
       <Space wrap style={{ marginTop: 12 }}>

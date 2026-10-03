@@ -22,6 +22,8 @@ servers:
     description: Production backend placeholder
 
 tags:
+  - name: Employees
+    description: Сотрудники и их рабочие контакты
   - name: Catalog
     description: Независимый справочник товаров и услуг
   - name: Audit
@@ -958,6 +960,53 @@ paths:
         '200': {description: Menu, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppOrderSendMenu'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/employees/{employeeId}/contacts:
+    get:
+      tags: [Employees]
+      operationId: getEmployeeContacts
+      summary: 'Work contacts of one employee (phones, emails, Telegram accounts) with the set version'
+      security: [{bearerAuth: []}]
+      x-permissions: [employees.view]
+      parameters:
+        - {name: employeeId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Contacts, content: {application/json: {schema: {$ref: '#/components/schemas/EmployeeContacts'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'EMPLOYEE_NOT_FOUND'}
+    put:
+      tags: [Employees]
+      operationId: replaceEmployeeContacts
+      summary: 'Replace the work contacts of an employee'
+      description: 'Version compare-and-swap on the employee (also for an empty set). A contact with contactId keeps its id; missing ones are deleted. One primary per kind (the first by default). Audited with masks only.'
+      security: [{bearerAuth: []}]
+      x-permissions: [employees.manage]
+      parameters:
+        - {name: employeeId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/EmployeeContactsReplace'}}}
+      responses:
+        '200': {description: Contacts, content: {application/json: {schema: {$ref: '#/components/schemas/EmployeeContacts'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'EMPLOYEE_NOT_FOUND'}
+        '409': {description: 'EMPLOYEE_CONTACTS_VERSION_CONFLICT'}
+        '422': {description: 'EMPLOYEE_CONTACT_INVALID, EMPLOYEE_CONTACT_DUPLICATE or VALIDATION_ERROR'}
+  /api/v1/employee-contacts:
+    get:
+      tags: [Employees]
+      operationId: listEmployeeContacts
+      summary: 'Work contacts of several employees (the employees list)'
+      security: [{bearerAuth: []}]
+      x-permissions: [employees.view]
+      parameters:
+        - {name: employeeIds, in: query, required: false, schema: {type: string, description: 'Comma-separated ids, at most 500'}}
+      responses:
+        '200': {description: Contacts, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {type: object, required: [employeeId, contacts], properties: {employeeId: {type: integer}, contacts: {type: array, items: {$ref: '#/components/schemas/EmployeeContact'}}}}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {description: Invalid request}
   /api/v1/whatsapp/order-send/queue:
     get:
       tags: [WhatsApp]
@@ -26035,6 +26084,52 @@ components:
     WhatsAppOrderFormCode:
       type: string
       enum: [production_pdf, order_pdf, production_excel, order_excel, production_image, order_image]
+    EmployeeContact:
+      type: object
+      required: [contactId, kind, value, valueNormalized, isPrimary, note]
+      properties:
+        contactId: {type: integer}
+        kind: {type: string, enum: [phone, email, telegram]}
+        value: {type: string, maxLength: 200}
+        valueNormalized: {type: string, description: 'phone 7XXXXXXXXXX, email lower case, Telegram username without @'}
+        isPrimary: {type: boolean}
+        note: {type: string, nullable: true, maxLength: 200}
+    EmployeeContacts:
+      type: object
+      required: [employeeId, version, contacts]
+      properties:
+        employeeId: {type: integer}
+        version: {type: integer, minimum: 0}
+        contacts: {type: array, items: {$ref: '#/components/schemas/EmployeeContact'}}
+    EmployeeContactsReplace:
+      type: object
+      additionalProperties: false
+      required: [version, contacts]
+      properties:
+        version: {type: integer, minimum: 0}
+        contacts:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            additionalProperties: false
+            required: [contactId, kind, value, isPrimary]
+            properties:
+              contactId: {type: integer, nullable: true}
+              kind: {type: string, enum: [phone, email, telegram]}
+              value: {type: string, minLength: 1, maxLength: 200}
+              isPrimary: {type: boolean}
+              note: {type: string, nullable: true, maxLength: 200}
+    WhatsAppOrderSendEmployee:
+      type: object
+      required: [recipientKey, employeeId, employeeName, channel, forms, caption]
+      properties:
+        recipientKey: {type: string, format: uuid}
+        employeeId: {type: integer}
+        employeeName: {type: string}
+        channel: {type: string, enum: [whatsapp, telegram]}
+        forms: {type: array, items: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}}
+        caption: {type: string, maxLength: 1000}
     WhatsAppOrderSendChat:
       type: object
       additionalProperties: false
@@ -26047,7 +26142,7 @@ components:
         caption: {type: string, maxLength: 1000}
     WhatsAppOrderSendSettings:
       type: object
-      required: [version, enabled, minIntervalMinutes, sendWindowMinutes, clientForms, clientCaption, chats, updatedAt, updatedBy]
+      required: [version, enabled, minIntervalMinutes, sendWindowMinutes, clientForms, clientCaption, chats, employees, updatedAt, updatedBy]
       properties:
         version: {type: integer, minimum: 1}
         enabled: {type: boolean}
@@ -26056,11 +26151,12 @@ components:
         clientForms: {type: array, items: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}}
         clientCaption: {type: string, maxLength: 1000}
         chats: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/WhatsAppOrderSendChat'}}
+        employees: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/WhatsAppOrderSendEmployee'}}
         updatedAt: {type: string, format: date-time}
         updatedBy: {type: object, nullable: true, properties: {id: {type: string}, username: {type: string, nullable: true}}}
     WhatsAppOrderSendSettingsEnvelope:
       type: object
-      required: [settings, forms, captionVariables, nextAllowedAt, activeSend, queueLength, nextDeliveryAt, runtime]
+      required: [settings, forms, captionVariables, nextAllowedAt, activeSend, queueLength, nextDeliveryAt, employeeDirectory, runtime]
       properties:
         settings: {$ref: '#/components/schemas/WhatsAppOrderSendSettings'}
         forms: {type: array, items: {type: object, properties: {code: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}, title: {type: string}, format: {type: string, enum: [pdf, xlsx, png]}, financial: {type: boolean}}}}
@@ -26069,6 +26165,7 @@ components:
         activeSend: {type: boolean}
         queueLength: {type: integer, minimum: 0, description: 'Waiting sends (queued + sending)'}
         nextDeliveryAt: {type: string, format: date-time, nullable: true, description: 'Approximate start of the next delivery'}
+        employeeDirectory: {type: array, description: 'Active employees for the recipient picker', items: {type: object, properties: {employeeId: {type: integer}, fullName: {type: string}, usernames: {type: array, items: {type: string}}, phones: {type: integer}}}}
         runtime: {$ref: '#/components/schemas/WhatsAppBroadcastRuntime'}
     WhatsAppOrderSendSettingsUpdate:
       type: object
@@ -26094,15 +26191,30 @@ components:
               label: {type: string, minLength: 1, maxLength: 100}
               forms: {type: array, items: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}}
               caption: {type: string, maxLength: 1000}
+        employees:
+          type: array
+          maxItems: 20
+          description: 'Optional (a client of the previous release keeps the current employees). Channel telegram is refused with 422 ORDER_SEND_CHANNEL_UNSUPPORTED.'
+          items:
+            type: object
+            additionalProperties: false
+            required: [recipientKey, employeeId, channel, forms, caption]
+            properties:
+              recipientKey: {type: string, format: uuid, nullable: true, description: 'null = a new employee recipient'}
+              employeeId: {type: integer, minimum: 1}
+              channel: {type: string, enum: [whatsapp, telegram]}
+              forms: {type: array, items: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}}
+              caption: {type: string, maxLength: 1000}
     WhatsAppOrderSendMenu:
       type: object
-      required: [enabled, forms, client, chats, nextAllowedAt, activeSend, queueLength, runtime]
+      required: [enabled, forms, client, chats, employees, nextAllowedAt, activeSend, queueLength, runtime]
       properties:
         enabled: {type: boolean}
         queueLength: {type: integer, minimum: 0}
         forms: {type: array, items: {type: object, properties: {code: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}, title: {type: string}, financial: {type: boolean}}}}
         client: {type: object, properties: {forms: {type: array, items: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}}}}
         chats: {type: array, items: {type: object, properties: {chatKey: {type: string, format: uuid}, label: {type: string}, forms: {type: array, items: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}}}}}
+        employees: {type: array, items: {type: object, properties: {recipientKey: {type: string, format: uuid}, label: {type: string, description: '«логин / ФИО» when users are linked'}, forms: {type: array, items: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}}, contacts: {type: array, items: {type: object, properties: {contactId: {type: integer}, masked: {type: string}, isPrimary: {type: boolean}}}}}}}
         nextAllowedAt: {type: string, format: date-time, nullable: true}
         activeSend: {type: boolean}
         runtime: {$ref: '#/components/schemas/WhatsAppBroadcastRuntime'}
@@ -26115,6 +26227,7 @@ components:
           oneOf:
             - {type: object, additionalProperties: false, required: [kind], properties: {kind: {type: string, enum: [client]}}}
             - {type: object, additionalProperties: false, required: [kind, chatKey], properties: {kind: {type: string, enum: [chat]}, chatKey: {type: string, format: uuid}}}
+            - {type: object, additionalProperties: false, required: [kind, recipientKey], properties: {kind: {type: string, enum: [employee]}, recipientKey: {type: string, format: uuid}, contactId: {type: integer, nullable: true, description: 'One of the employee phones; default — the primary one'}}}
         form: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}
         idempotencyKey: {type: string, format: uuid}
         confirmAfterUnknown: {type: string, format: uuid, nullable: true, description: 'Explicit repeat after the latest send of the same order, recipient and form ended unknown: its sendId from 409 ORDER_SEND_PREVIOUS_UNKNOWN details.'}
@@ -26125,7 +26238,7 @@ components:
       properties:
         sendId: {type: string, format: uuid}
         orderId: {type: integer}
-        targetKind: {type: string, enum: [client, chat]}
+        targetKind: {type: string, enum: [client, chat, employee]}
         chatKey: {type: string, format: uuid, nullable: true}
         recipientLabel: {type: string}
         recipientMasked: {type: string, description: 'Phone or group as a mask only'}

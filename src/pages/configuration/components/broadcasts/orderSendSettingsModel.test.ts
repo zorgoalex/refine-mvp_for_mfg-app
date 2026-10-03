@@ -3,7 +3,9 @@ import { ApiError } from '../../../../api/apiError';
 import type { OrderSendSettings } from '../../../../api/orderSendApiTypes';
 import {
   buildOrderSendUpdate,
+  duplicateEmployeeIndexes,
   duplicateGroupIndexes,
+  employeeDirectoryLabel,
   isOrderSendVersionConflict,
   orderSendDirty,
   orderSendSettingsErrorMessage,
@@ -112,4 +114,29 @@ describe('send window', () => {
     expect(validateOrderSendWindow(null, 10)).not.toBeNull();
     expect(validateOrderSendWindow(-1, 10)).not.toBeNull();
   });
+
+describe('employee recipients in the settings', () => {
+  const withEmployees: OrderSendSettings = { ...settings, employees: [
+    { recipientKey: 'r1', employeeId: 3, employeeName: 'Иванов И.', channel: 'whatsapp', forms: ['production_pdf'], caption: 'Заказ {order_name}' }] };
+
+  it('sends employees only to a backend that has them; a new row has recipientKey null', () => {
+    expect(buildOrderSendUpdate(4, toOrderSendFormValues(settings))).not.toHaveProperty('employees');
+    const values = toOrderSendFormValues(withEmployees);
+    values.employees?.push({ recipientKey: null, employeeId: 9, channel: 'whatsapp', forms: [], caption: '' });
+    expect(buildOrderSendUpdate(4, values)?.employees).toEqual([
+      { recipientKey: 'r1', employeeId: 3, channel: 'whatsapp', forms: ['production_pdf'], caption: 'Заказ {order_name}' },
+      { recipientKey: null, employeeId: 9, channel: 'whatsapp', forms: [], caption: '' },
+    ]);
+    expect(orderSendDirty(toOrderSendFormValues(withEmployees), withEmployees)).toBe(false);
+    expect(orderSendDirty(values, withEmployees)).toBe(true);
+  });
+
+  it('labels «логин / ФИО» and finds the same employee with the same channel twice', () => {
+    expect(employeeDirectoryLabel({ fullName: 'Иванов И.', usernames: ['ivanov', 'ivanov2'] })).toBe('ivanov, ivanov2 / Иванов И.');
+    expect(employeeDirectoryLabel({ fullName: 'Иванов И.', usernames: [] })).toBe('Иванов И.');
+    expect([...duplicateEmployeeIndexes([
+      { employeeId: 3, channel: 'whatsapp' }, { employeeId: 3, channel: 'telegram' }, { employeeId: 3, channel: 'whatsapp' }, { employeeId: null, channel: 'whatsapp' },
+    ])]).toEqual([2]);
+  });
+});
 });
