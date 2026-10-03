@@ -5,13 +5,15 @@
 -- new commands while the queue is not empty and drains the queue one by one.
 BEGIN;
 
--- Runs while the backend works: take the tables in the backend's lock order (settings → chats → sends),
--- so a card command or a delivery that holds the settings row never deadlocks with this migration. A busy
--- table makes the migration fail fast (lock_timeout) instead of queueing every request behind it; rerun it.
-SET LOCAL lock_timeout = '30s';
-LOCK TABLE whatsapp_order_send_settings IN ACCESS EXCLUSIVE MODE;
-LOCK TABLE whatsapp_order_send_chats IN ACCESS EXCLUSIVE MODE;
-LOCK TABLE whatsapp_order_sends IN ACCESS EXCLUSIVE MODE;
+-- Runs while the backend works. Every table it changes is locked up front with NOWAIT: the migration never
+-- waits while holding another of these tables, so it can never close a deadlock cycle with a card command,
+-- a delivery or a history read (they take the tables in different orders). A table in use makes it fail at
+-- once («could not obtain lock») without touching anything — just run it again. After these locks the DDL
+-- needs no other lock on an application table.
+SET LOCAL lock_timeout = '5s';
+LOCK TABLE whatsapp_order_send_settings IN ACCESS EXCLUSIVE MODE NOWAIT;
+LOCK TABLE whatsapp_order_send_chats IN ACCESS EXCLUSIVE MODE NOWAIT;
+LOCK TABLE whatsapp_order_sends IN ACCESS EXCLUSIVE MODE NOWAIT;
 
 -- Several sends may now wait at once.
 DROP INDEX IF EXISTS idx_whatsapp_order_sends_one_active;
