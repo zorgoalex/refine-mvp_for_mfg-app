@@ -60,6 +60,14 @@ export class SheetMaterialsController {
     return this.service.list({ ...ctx, includeInactive: includeInactive === 'true' });
   }
 
+  // До ':id': иначе «capabilities» разбирался бы как идентификатор (так отвечает прежний backend — FE считает поля неподдержанными).
+  @ApiOperation({ operationId: 'getSheetMaterialCapabilities', summary: 'Fields this backend supports for sheet material types' })
+  @Get('capabilities')
+  async capabilities(@Req() request: RequestWithCurrentUser): Promise<{ nomenclatureFields: true }> {
+    this.assertEnabled();
+    return this.service.capabilities(this.context(request));
+  }
+
   @ApiOperation({ operationId: 'getSheetMaterialType', summary: 'Get a sheet material type' })
   @Get(':id')
   async getById(@Req() request: RequestWithCurrentUser, @Param('id') id: string): Promise<SheetMaterialTypeDto> {

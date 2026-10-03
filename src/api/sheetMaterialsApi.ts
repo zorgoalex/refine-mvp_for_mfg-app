@@ -54,6 +54,11 @@ export const sheetMaterialsApi = {
     );
   },
 
+  /** Возможности backend; прежний backend отвечает ошибкой («capabilities» как id) — поля считаются неподдержанными. */
+  capabilities(): Promise<{ nomenclatureFields?: boolean }> {
+    return httpClient.get<{ nomenclatureFields?: boolean }>(apiRoutes.sheetMaterials.capabilities);
+  },
+
   get(id: number): Promise<SheetMaterialTypeDto> {
     return httpClient.get<SheetMaterialTypeDto>(apiRoutes.sheetMaterials.byId(id));
   },

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { Client } from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { BackendEnv } from '../../../config/env.validation';
 import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient } from '../../../database/database.types';
@@ -286,6 +286,43 @@ describe.skipIf(!url)('warehouse stock — ERP film + 1C mirror balances', { tim
     } finally {
       hook = null;
       await newer.end();
+    }
+  });
+
+  it('order sheet stock: a warehouse without readable 1C balances makes coverage «incomplete», never a final total', async () => {
+    // Потребность заказа подменена (проекция заказов покрыта своими тестами): здесь — настоящие склады ERP и зеркало 1С.
+    const demand = vi.spyOn((service as unknown as { repository: { orderSheetDemand: () => Promise<unknown> } }).repository, 'orderSheetDemand')
+      .mockResolvedValue([{ sheetMaterialTypeId: sheetId, name: `${tag} МДФ 16мм`, refKey1c: k.mdf, widthMm: 2800, heightMm: 2070, demandM2: 10 }]);
+    const deactivated: number[] = [];
+    try {
+      // Эталон — экран «Остатки на складах» того же склада (предыдущие сценарии уже сменили снимок).
+      const screen = await service.warehouseStock(admin, base());
+      const onHand = screen.items.find((item) => item.sheetMaterialTypeId === sheetId)!.quantity;
+      expect(onHand).toBeGreaterThan(0);
+      const partial = await service.orderSheetStock(admin, 1);
+      // «Склад вне 1С» (ключа нет в зеркале) не прочитан: остаток с прочитанного склада показан, но покрытие не итоговое.
+      expect(partial.incompleteWarehouses).toContainEqual({ warehouseId: otherWarehouseId, name: `${tag} Склад вне 1С`, reason: 'warehouse_not_in_onec' });
+      expect(partial.items).toEqual([expect.objectContaining({ sheetMaterialTypeId: sheetId, quantity: onHand, unitName: 'л.', status: 'incomplete' })]);
+      expect(partial.items[0].warehouses).toEqual([{ warehouseId, name: `${tag} Склад фрезеровки`, quantity: onHand }]);
+      expect(partial.snapshotVersion).toBe(screen.onec.snapshotVersion);
+      // Склад 1С помечен удалённым — то же самое: не «нет на складе», а неполные данные.
+      await watcher.query("UPDATE onec_etl_mirror_rows SET deleted = true WHERE source_id = $1 AND entity_code = 'warehouses' AND source_key = $2", [sourceA, k.whEmpty]);
+      try {
+        expect((await service.orderSheetStock(admin, 1)).incompleteWarehouses.map((row) => row.warehouseId)).toContain(emptyWarehouseId);
+      } finally {
+        await watcher.query("UPDATE onec_etl_mirror_rows SET deleted = false WHERE source_id = $1 AND entity_code = 'warehouses' AND source_key = $2", [sourceA, k.whEmpty]);
+      }
+      // Непрочитанные склады выведены из работы — данные полные, покрытие итоговое (листы × 5,796 м² ≥ 10 м²).
+      for (const row of partial.incompleteWarehouses) {
+        await watcher.query('UPDATE warehouses SET is_active = false WHERE warehouse_id = $1', [row.warehouseId]);
+        deactivated.push(row.warehouseId);
+      }
+      const full = await service.orderSheetStock(admin, 1);
+      expect(full.incompleteWarehouses).toEqual([]);
+      expect(full.items).toEqual([expect.objectContaining({ quantity: onHand, quantityM2: Math.round(onHand * 2.8 * 2.07 * 100) / 100, status: 'enough' })]);
+    } finally {
+      for (const id of deactivated) await watcher.query('UPDATE warehouses SET is_active = true WHERE warehouse_id = $1', [id]);
+      demand.mockRestore();
     }
   });
 

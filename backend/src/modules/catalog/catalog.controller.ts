@@ -20,6 +20,14 @@ export class CatalogController {
   @Get('units')
   units(@Req() req: RequestWithCurrentUser) { return this.service.units(requireCatalogPermission(req.user)); }
 
+  // До ':id' (у прежнего backend «capabilities» — некорректный id: FE считает поля неподдержанными).
+  @ApiOperation({ operationId: 'getCatalogCapabilities', summary: 'Поля, которые поддерживает этот backend' })
+  @Get('capabilities')
+  capabilities(@Req() req: RequestWithCurrentUser): { nomenclatureFields: true } {
+    requireCatalogPermission(req.user);
+    return { nomenclatureFields: true };
+  }
+
   @ApiOperation({ operationId: 'getCatalogItem', summary: 'Карточка товара или услуги' })
   @Get(':id')
   get(@Req() req: RequestWithCurrentUser, @Param('id') id: string) {

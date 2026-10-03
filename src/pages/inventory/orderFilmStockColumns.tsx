@@ -51,6 +51,7 @@ export function OrderFilmStockCaption(props: {
 const SHEET_STATUS: Record<OrderSheetStockItem['status'], string> = {
   enough: 'Хватает', short: 'Не хватает', none: 'Нет на складе', unknown_demand: 'Потребность не рассчитана',
   unlinked: 'Не связан с 1С', unknown_unit: 'Единица 1С не пересчитывается', unavailable: 'Нет данных 1С',
+  incomplete: 'Данные 1С неполные',
 };
 
 /** Колонки остатка листовых материалов (данные 1С) для таблицы «Листовые материалы» заказа. */
@@ -89,6 +90,7 @@ export function orderSheetStockColumns<Row extends { sheetMaterialTypeId: number
 /** Подпись блока листовых материалов: данные 1С, дата снимка, кнопка обновления. */
 export function OrderSheetStockCaption(props: {
   enabled: boolean; updatedAt: string | null; isFetching: boolean; isError: boolean; refresh: () => unknown; snapshotVersion: string | null;
+  incompleteWarehouses?: Array<{ name: string }>; unsupported?: boolean;
 }) {
   const snapshot = props.snapshotVersion
     ? new Date(props.snapshotVersion).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -100,6 +102,8 @@ export function OrderSheetStockCaption(props: {
         ? <Button size="small" loading={props.isFetching} onClick={() => void props.refresh()}>Обновить остатки</Button>
         : <Text type="secondary">· появится после сохранения заказа</Text>}
       {props.isError && <Text type="danger">не удалось получить остатки</Text>}
+      {props.unsupported && <Text type="secondary">остатки листовых материалов недоступны в этой версии сервера</Text>}
+      {(props.incompleteWarehouses?.length ?? 0) > 0 && <Text type="warning">нет данных 1С по складам: {props.incompleteWarehouses!.map((w) => w.name).join(', ')} — остаток неполный</Text>}
     </Space>
   );
 }

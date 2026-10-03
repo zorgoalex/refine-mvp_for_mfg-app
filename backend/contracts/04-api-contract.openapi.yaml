@@ -307,6 +307,14 @@ paths:
                     symbol: {type: string, nullable: true}
         '401': {description: Authentication required}
         '403': {description: Missing reference permissions}
+  /api/v1/catalog-items/capabilities:
+    get:
+      tags: [Catalog]
+      operationId: getCatalogCapabilities
+      summary: Поля, которые поддерживает этот backend (тип/категория номенклатуры, примечание)
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: '{nomenclatureFields: true}'}
   /api/v1/catalog-items/{id}:
     parameters:
       - {name: id, in: path, required: true, schema: {type: integer, minimum: 1, maximum: 9007199254740991}}
@@ -17502,6 +17510,14 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/sheet-material-types/capabilities:
+    get:
+      tags: [SheetMaterials]
+      operationId: getSheetMaterialCapabilities
+      summary: Fields this backend supports for sheet material types (nomenclature type/category, note)
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: '{nomenclatureFields: true}'}
   /api/v1/sheet-material-types/{id}:
     get:
       tags:
@@ -19776,7 +19792,7 @@ paths:
       parameters:
         - {name: orderId, in: path, required: true, schema: {type: integer, minimum: 1}}
       responses:
-        '200': {description: '{items: [{sheetMaterialTypeId, name, refKey1c, onecName, unitName, quantity, quantityM2, demandM2, warehouses[], status}], snapshotVersion}'}
+        '200': {description: '{items: [{sheetMaterialTypeId, name, refKey1c, onecName, unitName, quantity, quantityM2, demandM2, warehouses[], status}], incompleteWarehouses: [{warehouseId, name, reason}], snapshotVersion}; status `incomplete` and a non-empty incompleteWarehouses mean some active ERP warehouses with a 1C key had no readable 1C balances (snapshot not loaded or revoked, ambiguous source, warehouse absent from the 1C mirror), so quantity is partial and coverage is not final'}
         '404': {description: ORDER_NOT_FOUND or NOT_FOUND (inventory disabled)}
   /api/v1/orders/{orderId}/film-stock:
     get:

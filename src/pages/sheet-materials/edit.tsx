@@ -7,8 +7,10 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { can } from '../../utils/permissions';
 import { sheetMaterialsApi, type SheetMaterialTypeInput } from '../../api/sheetMaterialsApi';
 import { useRecordTabTitle } from '../../utils/recordTitle';
-import { NomenclatureFormItems, nomenclaturePayload, supportsNomenclature } from '../../components/NomenclatureFields';
-import { useQuery } from '@tanstack/react-query';
+import { NomenclatureFormItems, nomenclaturePayload } from '../../components/NomenclatureFields';
+import { useSheetMaterialCapabilities } from './useSheetMaterialNomenclature';
+import { sheetMaterialEditSource } from './editSource';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
   const canManage = can('sheet_materials.manage');
@@ -16,6 +18,7 @@ export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
   const { id } = useParams<{ id: string }>();
   const [form] = Form.useForm<SheetMaterialTypeInput>();
   const [saving, setSaving] = useState(false);
+  const queryClient = useQueryClient();
 
   const { data, isLoading } = useOne({
     resource: 'sheet_material_types',
@@ -24,13 +27,23 @@ export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
     meta: { idColumnName: 'sheet_material_type_id' },
   });
   const record = data?.data;
-  // Тип/категория/примечание — из backend (Hasura их не запрашивает); старый backend их не знает — поля скрыты и не шлются.
+  // Черновик и версия — из ОДНОГО снимка backend (GET /sheet-material-types/:id): поля и expectedVersion одной версии,
+  // иначе чужое изменение между двумя чтениями затёрлось бы без 409. Hasura-запись — запасной источник, если backend
+  // не ответил (тогда и новых полей нет).
+  const capabilities = useSheetMaterialCapabilities(canManage);
+  const nomenclatureSupported = capabilities.supported;
   const backendQuery = useQuery({
     queryKey: ['sheet-materials', 'one', Number(id)],
     queryFn: () => sheetMaterialsApi.get(Number(id)),
     enabled: !!id && canManage,
+    retry: false,
+    staleTime: 0,
+    cacheTime: 0,
   });
-  const nomenclatureSupported = supportsNomenclature(backendQuery.data);
+  const snapshotReady = !backendQuery.isLoading;
+  const source = snapshotReady ? sheetMaterialEditSource(backendQuery.data, record) : null;
+  const expectedVersion = source?.expectedVersion;
+  const nomenclatureEditable = nomenclatureSupported && source?.fromBackend === true;
 
   useRecordTabTitle({
     resourceLabel: 'Листовые материалы',
@@ -41,35 +54,10 @@ export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
   });
 
   useEffect(() => {
-    if (record) {
-      form.setFieldsValue({
-        name: record.name,
-        materialTypeId: record.material_type_id,
-        unitId: record.unit_id,
-        thicknessMm: record.thickness_mm,
-        widthMm: record.width_mm,
-        heightMm: record.height_mm,
-        supplierId: record.supplier_id,
-        vendorId: record.vendor_id,
-        supplierArticle: record.supplier_article,
-        texture: record.texture,
-        color: record.color,
-        refKey1c: record.ref_key_1c,
-        isActive: record.is_active,
-        isCuttable: record.is_cuttable ?? true,
-        sortOrder: record.sort_order,
-      });
-    }
-  }, [record, form]);
-  useEffect(() => {
-    if (backendQuery.data && nomenclatureSupported) {
-      form.setFieldsValue({
-        nomenclatureType: backendQuery.data.nomenclatureType ?? undefined,
-        nomenclatureCategory: backendQuery.data.nomenclatureCategory ?? undefined,
-        note: backendQuery.data.note ?? undefined,
-      });
-    }
-  }, [backendQuery.data, nomenclatureSupported, form]);
+    if (!snapshotReady) return;
+    const initial = sheetMaterialEditSource(backendQuery.data, record);
+    if (initial) form.setFieldsValue(initial.values);
+  }, [snapshotReady, backendQuery.data, record, form]);
 
   const { selectProps: typeSelectProps } = useSelect({
     resource: 'material_types',
@@ -100,14 +88,16 @@ export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
     return <Alert type="error" showIcon message="Недостаточно прав для редактирования листового материала" description="Требуется разрешение sheet_materials.manage" />;
   }
 
-  if (isLoading || backendQuery.isLoading) return <Spin />;
+  if (isLoading || backendQuery.isLoading || capabilities.isLoading) return <Spin />;
 
   const submit = async () => {
-    if (!record || !id) return;
+    if (!record || !id || expectedVersion === undefined) return;
     setSaving(true);
     try {
       const { nomenclatureType, nomenclatureCategory, note, ...values } = await form.validateFields();
-      await sheetMaterialsApi.update(Number(id), { ...values, ...nomenclaturePayload({ nomenclatureType, nomenclatureCategory, note }, nomenclatureSupported) }, record.version);
+      await sheetMaterialsApi.update(Number(id), { ...values, ...nomenclaturePayload({ nomenclatureType, nomenclatureCategory, note }, nomenclatureEditable) }, expectedVersion);
+      // Список и карточка читают новые поля из кеша backend-списка: без сброса показали бы прежние значения.
+      await queryClient.invalidateQueries({ queryKey: ['sheet-materials'] });
       message.success('Листовой материал обновлён');
       navigate(`/sheet-material-types/show/${id}`);
     } catch (error: any) {
@@ -203,7 +193,7 @@ export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
               <Switch />
             </Form.Item>
           </Col>
-          {nomenclatureSupported && <NomenclatureFormItems colProps={{ xs: 24, sm: 12, md: 8 }} />}
+          {nomenclatureEditable && <NomenclatureFormItems colProps={{ xs: 24, sm: 12, md: 8 }} />}
         </Row>
         <Form.Item>
           <Space>

@@ -21,4 +21,9 @@ describe('catalog HTTP boundary', () => {
     for (const id of ['-1', '1.2', '1e3', '9007199254740992']) expect(() => controller.get({ user }, id)).toThrow();
     expect(get).not.toHaveBeenCalled();
   });
+  it('reports supported fields to a reader without touching the service; requires login', () => {
+    const controller = new CatalogController({} as unknown as CatalogService);
+    expect(controller.capabilities({ user })).toEqual({ nomenclatureFields: true });
+    expect(() => controller.capabilities({})).toThrow('Требуется вход');
+  });
 });

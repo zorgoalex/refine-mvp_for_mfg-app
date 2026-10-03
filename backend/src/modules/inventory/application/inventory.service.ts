@@ -26,7 +26,7 @@ import type {
   WarehouseStockDto,
   WarehouseStockFilter,
 } from './inventory.types';
-import { buildOrderSheetStock, type OnecItemBalance } from '../domain/order-sheet-stock';
+import { aggregateSheetReadings, buildOrderSheetStock, type WarehouseStockReading } from '../domain/order-sheet-stock';
 
 /** Склад плёнки: флаг BACKEND_INVENTORY_ENABLED и буквальная проверка прав. */
 @Injectable()
@@ -300,9 +300,7 @@ export class InventoryService {
       await tx.query('SET TRANSACTION READ ONLY');
       const sheets = await this.repository.orderSheetDemand(user, orderId, tx);
       const keys = new Set(sheets.map((sheet) => sheet.refKey1c).filter((key): key is string => key !== null));
-      const balances = new Map<string, OnecItemBalance>();
-      let available = false;
-      let snapshotVersion: string | null = null;
+      const readings: WarehouseStockReading[] = [];
       if (keys.size > 0) {
         const warehouses = (await tx.query<{ warehouse_id: number; warehouse_name: string; ref_key_1c: string }>(
           `SELECT warehouse_id, warehouse_name, lower(ref_key_1c::text) AS ref_key_1c FROM warehouses
@@ -310,18 +308,19 @@ export class InventoryService {
         )).rows;
         for (const warehouse of warehouses) {
           const onec = await this.onecStock(tx, warehouse.ref_key_1c);
-          if (onec.reason !== null) continue;
-          available = true;
-          if (onec.state?.snapshotVersion && (!snapshotVersion || onec.state.snapshotVersion > snapshotVersion)) snapshotVersion = onec.state.snapshotVersion;
-          for (const row of onec.rows) {
-            if (!keys.has(row.itemRefKey)) continue;
-            const current = balances.get(row.itemRefKey) ?? { name: row.name, unitName: row.unitName, byWarehouse: [] };
-            current.byWarehouse.push({ warehouseId: Number(warehouse.warehouse_id), name: warehouse.warehouse_name, quantity: row.quantity });
-            balances.set(row.itemRefKey, current);
-          }
+          readings.push({
+            warehouseId: Number(warehouse.warehouse_id), name: warehouse.warehouse_name, reason: onec.reason,
+            snapshotVersion: onec.state?.snapshotVersion ?? null, rows: onec.rows,
+          });
         }
       }
-      return { items: buildOrderSheetStock({ sheets, onecAvailable: available, balances }), snapshotVersion };
+      // Неполные данные (часть складов без остатков 1С) не выдаются за итог: покрытие — `incomplete`, склады — в ответе.
+      const { balances, available, incomplete, snapshotVersion } = aggregateSheetReadings(readings, keys);
+      return {
+        items: buildOrderSheetStock({ sheets, onecAvailable: available, incomplete: available && incomplete.length > 0, balances }),
+        incompleteWarehouses: incomplete,
+        snapshotVersion,
+      };
     }, { isolation: 'repeatable read' });
   }
 

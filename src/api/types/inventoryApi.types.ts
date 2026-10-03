@@ -66,8 +66,10 @@ export interface OrderSheetStockDto {
     sheetMaterialTypeId: number; name: string; refKey1c: string | null; onecName: string | null; unitName: string | null;
     quantity: number | null; quantityM2: number | null; demandM2: number | null;
     warehouses: Array<{ warehouseId: number; name: string; quantity: number }>;
-    status: 'enough' | 'short' | 'none' | 'unknown_demand' | 'unlinked' | 'unknown_unit' | 'unavailable';
+    status: 'enough' | 'short' | 'none' | 'unknown_demand' | 'unlinked' | 'unknown_unit' | 'unavailable' | 'incomplete';
   }>;
+  /** Склады, остатки 1С которых не прочитаны: количество частичное, покрытие не определено. */
+  incompleteWarehouses?: Array<{ warehouseId: number; name: string; reason: string }>;
   snapshotVersion: string | null;
 }
 export interface InventoryPage<T> { total: number; items: T[]; totalQuantity?: number }

@@ -25,6 +25,8 @@ export const catalogApi = {
   },
   units: () => httpClient.get<CatalogUnit[]>(`${path}/units`),
   get: (id: number) => httpClient.get<CatalogItem>(`${path}/${id}`),
+  /** Возможности backend; прежний backend отвечает ошибкой — поля считаются неподдержанными. */
+  capabilities: () => httpClient.get<{ nomenclatureFields?: boolean }>(`${path}/capabilities`),
   create: (input: CatalogInput, key: string) => httpClient.post<CatalogItem>(path, input, { headers: { 'Idempotency-Key': key } }),
   update: (id: number, input: CatalogInput & { expectedVersion: number }, key: string) => httpClient.put<CatalogItem>(`${path}/${id}`, input, { headers: { 'Idempotency-Key': key } }),
 };

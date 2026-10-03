@@ -52,6 +52,14 @@ describe('order film stock guards', () => {
     const sheetHook = readFileSync(new URL('./useOrderSheetStock.ts', import.meta.url), 'utf8');
     expect(sheetHook).toContain('...ORDER_FILM_STOCK_REFRESH');
     expect(sheetHook).toContain('inventoryApi.orderSheetStock(orderId!)');
+    // Старый backend без маршрута (404): опрос выключается до ручного «Обновить остатки».
+    expect(sheetHook).toContain('enabled: enabled && !unsupported,');
+    expect(sheetHook).toContain('if (isRouteMissing(query.error)) setUnsupported(true);');
+    expect(sheetHook).toContain('setUnsupported(false); return queryClient.invalidateQueries');
+    // Неполные данные 1С не выдаются за итог: статус и предупреждение со списком складов.
+    const columns = readFileSync(new URL('./orderFilmStockColumns.tsx', import.meta.url), 'utf8');
+    expect(columns).toContain("incomplete: 'Данные 1С неполные'");
+    expect(columns).toContain('нет данных 1С по складам:');
     expect(stockColumns).toContain("title: 'На складе (1С)'");
     expect(stockColumns).toContain('Остаток по данным 1С');
     for (const source of [materialsTab, showPage]) {

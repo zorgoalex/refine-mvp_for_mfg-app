@@ -40,6 +40,12 @@ export class SheetMaterialsService {
     return this.repo.list(query);
   }
 
+  /** Что умеет этот backend (FE решает, показывать ли поля): тип/категория номенклатуры и примечание — с миграции 234. */
+  async capabilities(query: ListSheetMaterialTypesQuery): Promise<{ nomenclatureFields: true }> {
+    await this.require(query.currentUser, VIEW, query.requestId);
+    return { nomenclatureFields: true };
+  }
+
   async getById(query: GetSheetMaterialTypeQuery): Promise<SheetMaterialTypeDto> {
     await this.require(query.currentUser, VIEW, query.requestId, query.id);
     return this.repo.getById(query);

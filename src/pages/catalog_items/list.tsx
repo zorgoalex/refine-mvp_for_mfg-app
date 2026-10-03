@@ -10,13 +10,15 @@ import { Table } from '../../ui/tooltipDelay';
 import { catalogApi, type CatalogInput, type CatalogItem, type CatalogKind, type CatalogUnit } from '../../api/catalogApi';
 import { can } from '../../utils/permissions';
 import { CATALOG_KIND_OPTIONS, catalogDraft, catalogPayload, catalogFailureState, catalogCommandIdentity } from './catalogForm';
-import { CategoryCell, NomenclatureFormItems, NoteCell, supportsNomenclature } from '../../components/NomenclatureFields';
+import { CategoryCell, NomenclatureFormItems, NoteCell } from '../../components/NomenclatureFields';
 
 export function CatalogItemsList() {
   const canManage = can('references.manage');
   const canView = canManage || can('references.view');
   const [items, setItems] = useState<CatalogItem[]>([]);
   const [units, setUnits] = useState<CatalogUnit[]>([]);
+  // Backend знает тип/категорию/примечание (миграция 234); иначе колонки и поля формы скрыты и в запросах их нет.
+  const [nomenclatureSupported, setNomenclatureSupported] = useState(false);
   const [total, setTotal] = useState(0);
   const [query, setQuery] = useState<{ q: string; kind?: CatalogKind; active: 'true' | 'false' | 'all'; offset: number; limit: number }>({ q: '', active: 'true', offset: 0, limit: 25 });
   const [loading, setLoading] = useState(false);
@@ -39,9 +41,11 @@ export function CatalogItemsList() {
     const current = ++sequence.current;
     setLoading(true); setLoadError('');
     try {
-      const [page, unitList] = await Promise.all([catalogApi.list(query), catalogApi.units()]);
+      // Возможности backend — отдельным запросом: не зависят от того, есть ли записи и какой фильтр. Прежний backend
+      // отвечает ошибкой — поля типа/категории/примечания считаются неподдержанными.
+      const [page, unitList, capabilities] = await Promise.all([catalogApi.list(query), catalogApi.units(), catalogApi.capabilities().catch(() => ({} as { nomenclatureFields?: boolean }))]);
       if (current !== sequence.current) return;
-      setItems(page.items); setTotal(page.total); setUnits(unitList);
+      setItems(page.items); setTotal(page.total); setUnits(unitList); setNomenclatureSupported(capabilities.nomenclatureFields === true);
     } catch (error) {
       if (current === sequence.current) setLoadError(error instanceof Error ? error.message : 'Не удалось загрузить справочник');
     } finally { if (current === sequence.current) setLoading(false); }
@@ -69,8 +73,6 @@ export function CatalogItemsList() {
       try { start(await catalogApi.get(editing.id)); } catch (error) { setFormError(error instanceof Error ? error.message : 'Не удалось загрузить карточку'); }
     } });
   };
-  // Backend знает тип/категорию/примечание — поля есть в ответе (до миграции 234 их нет: колонки и поля формы скрыты).
-  const nomenclatureSupported = items.some((item) => supportsNomenclature(item)) || (editing ? supportsNomenclature(editing) : false);
   const save = async () => {
     if (!canManage || savingRef.current) return;
     savingRef.current = true; setSaving(true);

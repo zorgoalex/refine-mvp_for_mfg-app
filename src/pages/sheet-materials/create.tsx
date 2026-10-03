@@ -8,12 +8,14 @@ import { can } from '../../utils/permissions';
 import { sheetMaterialsApi, type SheetMaterialTypeInput } from '../../api/sheetMaterialsApi';
 import { NomenclatureFormItems, nomenclaturePayload } from '../../components/NomenclatureFields';
 import { useSheetMaterialNomenclature } from './useSheetMaterialNomenclature';
+import { useQueryClient } from '@tanstack/react-query';
 
 export const SheetMaterialCreate: React.FC<IResourceComponentsProps> = () => {
   const canManage = can('sheet_materials.manage');
   const navigate = useNavigate();
   const [form] = Form.useForm<SheetMaterialTypeInput>();
   const [saving, setSaving] = useState(false);
+  const queryClient = useQueryClient();
   const nomenclature = useSheetMaterialNomenclature(canManage);
 
   const { selectProps: typeSelectProps } = useSelect({
@@ -46,6 +48,7 @@ export const SheetMaterialCreate: React.FC<IResourceComponentsProps> = () => {
     try {
       const { nomenclatureType, nomenclatureCategory, note, ...values } = await form.validateFields();
       await sheetMaterialsApi.create({ ...values, ...nomenclaturePayload({ nomenclatureType, nomenclatureCategory, note }, nomenclature.supported) });
+      await queryClient.invalidateQueries({ queryKey: ['sheet-materials'] });
       message.success('Листовой материал создан');
       navigate('/sheet-material-types');
     } catch (error: any) {

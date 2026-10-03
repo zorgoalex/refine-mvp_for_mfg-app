@@ -115,11 +115,14 @@ export interface OrderSheetStockItemDto {
   quantityM2: number | null;
   demandM2: number | null;
   warehouses: Array<{ warehouseId: number; name: string; quantity: number }>;
-  status: 'enough' | 'short' | 'none' | 'unknown_demand' | 'unlinked' | 'unknown_unit' | 'unavailable';
+  /** `incomplete` — часть складов без данных 1С: количество — только по прочитанным складам, покрытие не определено. */
+  status: 'enough' | 'short' | 'none' | 'unknown_demand' | 'unlinked' | 'unknown_unit' | 'unavailable' | 'incomplete';
 }
 
 export interface OrderSheetStockDto {
   items: OrderSheetStockItemDto[];
+  /** Склады ERP, остатки 1С которых прочитать не удалось (причина — как на экране «Остатки на складах»). */
+  incompleteWarehouses: Array<{ warehouseId: number; name: string; reason: OnecStockUnavailableReason }>;
   /** Дата снимка остатков 1С (самая поздняя из прочитанных складов); null — данных 1С нет. */
   snapshotVersion: string | null;
 }
