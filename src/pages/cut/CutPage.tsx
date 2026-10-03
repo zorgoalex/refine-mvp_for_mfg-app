@@ -102,6 +102,8 @@ import {
   type CutJobProfileFilter,
   cutJobCounts,
   cutJobSourceLabel,
+  isImportedCutJob,
+  IMPORTED_CUT_JOB_CALC_HINT,
   cutJobStatusLabel,
   filterJobsByProfile,
   filterJobsByStatus,
@@ -2570,6 +2572,11 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
 
   const calculate = useCallback(async () => {
     if (!job) return;
+    // an imported layout cannot be calculated: the attempt would only put the job into «Ошибка»
+    if (isImportedCutJob(job)) {
+      message.info(IMPORTED_CUT_JOB_CALC_HINT);
+      return;
+    }
     const writeToken = cutPageReadGuard.capture();
     if (!writeToken) return;
     // Single-flight BEFORE any await (including the version refresh): overlapping clicks never mint a
@@ -4045,6 +4052,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     const hasItems = job.items.length > 0;
     const calculated = job.status === 'ready';
     const board = job.mdfBoardStatus?.state;
+    const imported = isImportedCutJob(job);
     const orderNames = [...new Set(job.items.map((item) => item.orderName?.trim()).filter(Boolean))];
     const step = (key: string, name: string, hint: string, state: CutJobStep['state']): CutJobStep => ({ key, title: name, hint, state });
     return [
@@ -4063,7 +4071,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       step(
         'calc',
         'Расчёт',
-        job.status === 'failed'
+        imported && job.status !== 'failed'
+          ? 'раскладка из файла станка'
+          : job.status === 'failed'
           ? 'ошибка расчёта'
           : job.status === 'calculating'
             ? 'идёт расчёт'
@@ -4072,7 +4082,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               : calculated
                 ? (job.currentCutResult ? `версия ${job.currentCutResult.cutNumber}` : 'рассчитан')
                 : 'не рассчитан',
-        job.status === 'failed' ? 'error' : calculated && !job.requiresRecalc ? 'done' : hasItems ? 'current' : 'todo',
+        job.status === 'failed' ? 'error' : calculated && (imported || !job.requiresRecalc) ? 'done' : hasItems ? 'current' : 'todo',
       ),
       step(
         'check',
@@ -5281,9 +5291,17 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             <Button onClick={addToBasket} disabled={!canManage || selected.length === 0 || isArchivedJob} loading={busy}>
               Добавить выбранные ({selected.length})
             </Button>
-            <Button type="primary" onClick={calculate} disabled={!canManage || job.items.length === 0 || isArchivedJob} loading={busy}>
-              {job.status === 'failed' ? 'Повторить расчёт' : 'Рассчитать'}
-            </Button>
+            <Tooltip title={isImportedCutJob(job) ? IMPORTED_CUT_JOB_CALC_HINT : undefined}>
+              <Button
+                type="primary"
+                onClick={calculate}
+                disabled={!canManage || job.items.length === 0 || isArchivedJob || isImportedCutJob(job)}
+                loading={busy}
+                data-testid="cut-calculate"
+              >
+                {job.status === 'failed' ? 'Повторить расчёт' : 'Рассчитать'}
+              </Button>
+            </Tooltip>
             <Select<string>
               value={preset}
               onChange={setPreset}

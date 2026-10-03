@@ -34,7 +34,9 @@ const job = (cutJobId: number, name: string, status: string, totals: Record<stri
 const JOBS = [
   job(1, 'E2E-Тест раскрой кухня', 'ready', { positions: 4, details: 12, area: 3.4, sheets: 2 }),
   job(2, 'E2E-Тест раскрой шкаф', 'draft', { positions: 9, details: 31, area: 8.15, sheets: 0 }),
-  job(3, 'E2E-Тест раскрой фасады', 'ready', { positions: 2, details: 5, area: 1.2, sheets: 1 }),
+  // imported from a machine file: its layout cannot be recalculated
+  { ...job(3, 'E2E-Тест раскрой фасады', 'ready', { positions: 2, details: 5, area: 1.2, sheets: 1 }), source: 'api',
+    items: [{ cutJobItemId: 1, orderDetailId: 1, orderId: 9, qty: 1, cutGroupId: null, detail: null }] },
 ];
 
 async function openCut(page: Page, uiVariant: 'workbench' | 'evolution') {
@@ -136,6 +138,14 @@ test.describe('Cut jobs list in NewLine (mocked-local)', () => {
     await jobCard.getByRole('tab', { name: /Детали/ }).click();
     await expect(page.locator('.cut-page-modern__details')).toBeVisible();
     await jobCard.getByRole('tab', { name: /Листы/ }).click();
+
+    // импортированное из файла станка задание не пересчитывается: кнопка отключена
+    await cards.filter({ hasText: 'E2E-Тест раскрой фасады' }).locator('.wb-cut-job__name').click();
+    await expect(jobCard).toContainText('E2E-Тест раскрой фасады', { timeout: 30000 });
+    await expect(jobCard.getByTestId('cut-calculate')).toBeDisabled();
+    await expect(jobCard.locator('.wb-cut-step').nth(2)).toContainText('раскладка из файла станка');
+    await first.locator('.wb-cut-job__name').click();
+    await expect(jobCard).toContainText('E2E-Тест раскрой кухня', { timeout: 30000 });
     const layout = await page.evaluate(() => {
       const rail = document.querySelector('.cut-page-modern__jobs')!.getBoundingClientRect();
       const job = document.querySelector('.cut-page-modern__job')!.getBoundingClientRect();

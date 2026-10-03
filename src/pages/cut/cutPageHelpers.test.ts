@@ -344,3 +344,13 @@ describe('sheetMaterialFilmNames', () => {
     expect(r.films).toEqual(['Дуб']);
   });
 });
+
+describe('isImportedCutJob', () => {
+  it('marks only the jobs imported from a machine file', async () => {
+    const { isImportedCutJob } = await import('./cutPageHelpers');
+    expect(isImportedCutJob({ source: 'api' })).toBe(true);
+    expect(isImportedCutJob({ source: 'manual' })).toBe(false);
+    expect(isImportedCutJob({ source: 'auto' })).toBe(false);
+    expect(isImportedCutJob(null)).toBe(false);
+  });
+});

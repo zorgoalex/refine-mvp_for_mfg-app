@@ -325,6 +325,16 @@ export const CUT_JOB_SOURCE_LABELS: Record<string, string> = {
   api: 'API',
 };
 
+/**
+ * A job whose layout came ready from a machine file (CNC program / API import): its parameters say
+ * «as imported», the cutting service cannot calculate it, and an attempt only breaks the job.
+ */
+export function isImportedCutJob(job: { source?: string | null } | null | undefined): boolean {
+  return job?.source === 'api';
+}
+
+export const IMPORTED_CUT_JOB_CALC_HINT = 'Раскладка импортирована из файла станка — пересчёт недоступен';
+
 /** Human label for a cut_job source; unknown codes are passed through verbatim. */
 export function cutJobSourceLabel(source: string): string {
   return CUT_JOB_SOURCE_LABELS[source] ?? source;
