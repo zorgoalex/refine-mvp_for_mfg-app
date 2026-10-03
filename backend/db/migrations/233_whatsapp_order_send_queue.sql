@@ -5,6 +5,14 @@
 -- new commands while the queue is not empty and drains the queue one by one.
 BEGIN;
 
+-- Runs while the backend works: take the tables in the backend's lock order (settings → chats → sends),
+-- so a card command or a delivery that holds the settings row never deadlocks with this migration. A busy
+-- table makes the migration fail fast (lock_timeout) instead of queueing every request behind it; rerun it.
+SET LOCAL lock_timeout = '30s';
+LOCK TABLE whatsapp_order_send_settings IN ACCESS EXCLUSIVE MODE;
+LOCK TABLE whatsapp_order_send_chats IN ACCESS EXCLUSIVE MODE;
+LOCK TABLE whatsapp_order_sends IN ACCESS EXCLUSIVE MODE;
+
 -- Several sends may now wait at once.
 DROP INDEX IF EXISTS idx_whatsapp_order_sends_one_active;
 
