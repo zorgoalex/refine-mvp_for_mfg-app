@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Button, Card, Popconfirm, Radio, Space, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Popconfirm, Radio, Space, Tag, Typography, message } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { ApiError } from '../../../../api/apiError';
 import { authSession } from '../../../../api/authSession';
 import { orderSendApi } from '../../../../api/orderSendApi';
 import type { OrderSendQueue as QueueResponse, OrderSendQueueItem } from '../../../../api/orderSendApiTypes';
+import { Table } from '../../../../ui/tooltipDelay';
 import { can } from '../../../../utils/permissions';
 import {
   isOrderSendCancellable,
