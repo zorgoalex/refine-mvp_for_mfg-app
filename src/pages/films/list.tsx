@@ -18,7 +18,7 @@ import './films.css';
 
 // Узкие колонки фиксированной ширины: список помещается без горизонтальной прокрутки, «Название» берёт остаток.
 // Сумма 960px: при ширине окна 1440 «Названию» остаётся ~200px.
-const WIDTH = { id: 56, sort: 60, nomenclatureType: 84, category: 84, note: 110, filmType: 84, vendor: 100, texture: 60, key: 90, active: 92, actions: 76, catalog: 64 } as const;
+const WIDTH = { id: 56, sort: 84, nomenclatureType: 84, category: 84, note: 110, filmType: 84, vendor: 100, texture: 70, key: 90, active: 92, actions: 76, catalog: 64 } as const;
 
 export const FilmList: React.FC<IResourceComponentsProps> = () => {
   const [filtersVisible, setFiltersVisible] = useState(false);
