@@ -1,4 +1,5 @@
 import { Refine, Authenticated } from "@refinedev/core";
+import { mdfBoardDailyPeriodDays, readMdfBoardDailyPeriod } from './utils/mdfBoardDailyPeriod';
 import { WhatsAppSendsProvider } from "./components/whatsapp/WhatsAppSendsProvider";
 import { BalloonCenterProvider } from "./notifications/balloons/BalloonCenter";
 import { RefineKbar, RefineKbarProvider } from "@refinedev/kbar";
@@ -233,7 +234,9 @@ const MDF_PREFETCH_COOLDOWN_MS = 25_000;
 
 function mdfDefaultDateRange(now = new Date()): { dateFrom: string; dateTo: string; operationalWindow: 'two_months' } {
   const dateTo = formatLocalDate(now);
-  const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
+  // the board opens on the period remembered for today, «1 день» on a new day
+  const days = mdfBoardDailyPeriodDays(readMdfBoardDailyPeriod(authSession.getUser()?.id, dateTo));
+  const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1));
   return { dateFrom: formatLocalDate(from), dateTo, operationalWindow: 'two_months' };
 }
 

@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-03", title: "МДФ-доска: период фильтра запоминается на сутки",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "МДФ-доска: каждый новый день открывается с периодом «1 день» и текущей датой. Выбранный период («1нед», «2нед», «1м») запоминается для пользователя до конца суток, после полуночи снова сбрасывается на текущий день — в том числе если доска оставалась открытой.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-03", title: "Карточка заказа: отдельная иконка «Отправить заказ»",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [
