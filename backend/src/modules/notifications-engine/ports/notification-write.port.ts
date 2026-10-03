@@ -1,4 +1,5 @@
 import type { DatabaseClient } from '../../../database/database.types';
+import type { BalloonMode } from '../domain/notification-rule.types';
 
 export interface InsertNotificationInput {
   userId: number;
@@ -10,6 +11,8 @@ export interface InsertNotificationInput {
   sourceType: string;
   sourceId: string | null;
   idempotencyKey: string;
+  /** Балун на момент записи (`balloonFor(rule)`); нет/NULL — без балуна. */
+  balloonMode?: BalloonMode | null;
 }
 
 export interface NotificationWritePort {

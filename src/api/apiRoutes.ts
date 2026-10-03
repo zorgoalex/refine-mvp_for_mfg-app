@@ -363,6 +363,8 @@ export const apiRoutes = {
     byId: (notificationId: string) => backendApiPath(`/notifications/${notificationId}`),
     read: (notificationId: string) => backendApiPath(`/notifications/${notificationId}/read`),
     readAll: backendApiPath('/notifications/read-all'),
+    balloonsClaim: backendApiPath('/notifications/balloons/claim'),
+    balloonsAck: backendApiPath('/notifications/balloons/ack'),
   },
   deadlinePolicies: {
     list: backendApiPath('/deadline-policies'),

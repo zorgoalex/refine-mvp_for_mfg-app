@@ -14,6 +14,8 @@ export interface NotificationDto {
   sourceId: string | null;
   readAt: string | null;
   createdAt: string;
+  /** Балун на момент записи: NULL — без балуна, `auto` — исчезает через 15 с, `persistent` — только крестиком. */
+  balloonMode: 'auto' | 'persistent' | null;
 }
 
 export interface NotificationListQuery {
@@ -58,4 +60,8 @@ export interface NotificationRepositoryPort {
   }): Promise<NotificationDto | null>;
   markAllReadForUser(viewer: NotificationViewer): Promise<number>;
   deleteForUser(input: { notificationId: string; viewer: NotificationViewer }): Promise<boolean>;
+  /** Аренда непоказанных балунов вкладкой (план 2026-10-03 §3.2): свои незавершённые — первыми. */
+  claimBalloonsForUser(input: { viewer: NotificationViewer; token: string; limit: number }): Promise<NotificationDto[]>;
+  /** Подтверждение показа своих арендованных балунов; повтор — no-op. */
+  ackBalloonsForUser(input: { viewer: NotificationViewer; token: string; notificationIds: string[] }): Promise<number>;
 }

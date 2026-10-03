@@ -1,5 +1,7 @@
 export type NotificationLevel = 'info' | 'warning' | 'error';
-export type NotificationChannel = 'in_app' | 'telegram';
+export type NotificationChannel = 'in_app' | 'telegram' | 'balloon';
+/** Исчезновение балуна: auto — через 15 с, persistent — только крестиком. */
+export type BalloonMode = 'auto' | 'persistent';
 export type DeadlineNotificationEntityType = 'order' | 'order_stage';
 
 export type RecipientResolverKind =
@@ -35,6 +37,8 @@ export interface NotificationRuleDto {
   priority: number;
   level: NotificationLevel;
   channels: NotificationChannel[];
+  /** Старый backend не присылает — считать 'auto'. */
+  balloonMode?: BalloonMode;
   conditions: NotificationRuleConditions;
   recipients: NotificationRuleRecipients;
   titleTemplate: string | null;
@@ -60,6 +64,7 @@ export interface CreateNotificationRuleRequest {
   priority: number;
   isEnabled: boolean;
   channels: NotificationChannel[];
+  balloonMode?: BalloonMode;
   conditions: NotificationRuleConditions;
   recipients: NotificationRuleRecipients;
   titleTemplate?: string | null;
@@ -72,6 +77,7 @@ export interface UpdateNotificationRuleRequest {
   priority?: number;
   isEnabled?: boolean;
   channels?: NotificationChannel[];
+  balloonMode?: BalloonMode;
   conditions?: NotificationRuleConditions;
   recipients?: NotificationRuleRecipients;
   titleTemplate?: string | null;

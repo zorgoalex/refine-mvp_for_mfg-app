@@ -189,6 +189,7 @@ describe('notificationRulesView', () => {
         priority: 100,
         isEnabled: true,
         channels: ['in_app', 'telegram'],
+        balloonMode: 'auto',
         excludeCompletedOrders: true,
         deadlineEntityTypes: ['order'],
         requireCurrentDeadlineEvent: true,
@@ -290,5 +291,17 @@ describe('notificationRulesView', () => {
     expect(describeServiceRecipients('procurement.receipt_unallocated', null)).toBe('По умолчанию: все с правом «Закупки: управление»');
     expect(describeServiceRecipients('procurement.receipt_unallocated', 'пользователи: Иван')).toBe('пользователи: Иван (только с правом «Закупки: просмотр»)');
     expect(describeServiceRecipients('procurement.deficit_digest', 'роли: Снабжение')).toBe('роли: Снабжение (только с правом «Закупки: управление»)');
+  });
+
+  it('balloon channel (plan 2026-10-03): draft keeps the rule balloon mode; payloads send channels and balloonMode', () => {
+    const rule = { ruleCode: 'r', eventType: 'order.status_changed', groupId: null, level: 'info', priority: 100, isEnabled: true,
+      channels: ['in_app', 'balloon'], balloonMode: 'persistent', conditions: {}, recipients: { userIds: [1] },
+      titleTemplate: null, messageTemplate: null, notificationRuleId: 'x', createdAt: '', updatedAt: '' } as unknown as NotificationRuleDto;
+    const draft = buildDraftFromRule(rule);
+    expect(draft).toMatchObject({ channels: ['in_app', 'balloon'], balloonMode: 'persistent' });
+    expect(buildUpdatePayload(draft, 'x', '2026-10-03T00:00:00.000Z')).toMatchObject({ channels: ['in_app', 'balloon'], balloonMode: 'persistent' });
+    expect(buildCreatePayload(draft)).toMatchObject({ channels: ['in_app', 'balloon'], balloonMode: 'persistent' });
+    // Старый backend без balloonMode — по умолчанию auto.
+    expect(buildDraftFromRule({ ...rule, balloonMode: undefined }).balloonMode).toBe('auto');
   });
 });

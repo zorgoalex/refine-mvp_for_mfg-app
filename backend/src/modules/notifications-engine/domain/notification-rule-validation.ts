@@ -1,6 +1,8 @@
 import { getEventDefinition } from './notification-event-registry';
 import {
   NOTIFICATION_CHANNELS,
+  BALLOON_MODES,
+  type BalloonMode,
   type NotificationChannel,
   type NotificationRuleConditions,
   type NotificationRuleRecipients,
@@ -17,6 +19,7 @@ export interface NotificationRuleInput {
   level: 'info' | 'warning' | 'error';
   priority: number;
   channels?: NotificationChannel[];
+  balloonMode?: BalloonMode;
   conditions: NotificationRuleConditions;
   recipients: NotificationRuleRecipients;
   titleTemplate?: string | null;
@@ -52,10 +55,17 @@ export function validateNotificationRuleInput(
     if (!(NOTIFICATION_CHANNELS as readonly string[]).includes(channel)) {
       return { ok: false, code: 'UNSUPPORTED_CHANNEL', detail: channel };
     }
-    // События закупа — только in_app (В-4): правило с telegram не сохраняется.
+    // События закупа — только in_app и балун (В-4): правило с telegram не сохраняется.
     if (def.allowedChannels && !def.allowedChannels.includes(channel)) {
       return { ok: false, code: 'UNSUPPORTED_CHANNEL', detail: channel };
     }
+  }
+  // Балун показывает in_app-уведомление (план 2026-10-03 §3.1): без «В приложении» — нельзя.
+  if (channels.includes('balloon') && !channels.includes('in_app')) {
+    return { ok: false, code: 'BALLOON_REQUIRES_IN_APP' };
+  }
+  if (input.balloonMode !== undefined && !(BALLOON_MODES as readonly string[]).includes(input.balloonMode)) {
+    return { ok: false, code: 'INVALID_BALLOON_MODE', detail: String(input.balloonMode) };
   }
 
   const { resolvers = [], roleCodes = [], userIds = [] } = input.recipients ?? {};

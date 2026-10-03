@@ -2537,6 +2537,10 @@ probe_file() {
                            AND pg_get_constraintdef(oid) LIKE '%air%'
                            AND pg_get_constraintdef(oid) LIKE '%neutral%'
                       );" ;;
+    # 232: балуны уведомлений — режим правила, решение и состояние показа в уведомлении, частичный индекс выдачи.
+    232_notification_balloons*) probe_all \
+      "$(q_col notification_rules balloon_mode)" "$(q_col notifications balloon_mode)" "$(q_col notifications balloon_lease_token)" \
+      "$(q_col notifications balloon_leased_at)" "$(q_col notifications balloon_shown_at)" "$(q_idx idx_notifications_balloon_pending)" ;;
     229_supplier_text_templates*) probe_all \
       "$(q_tbl supplier_request_text_templates)" "$(q_idx uq_srtt_active_name)" "$(q_idx uq_srtt_one_default)" \
       "SELECT EXISTS (SELECT 1 FROM supplier_request_text_templates WHERE is_default AND deleted_at IS NULL);" ;;
@@ -2949,6 +2953,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     204_procurement_workspace*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    232_notification_balloons*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     229_supplier_text_templates*)

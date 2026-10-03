@@ -12,6 +12,16 @@ export interface BackendNotificationDto {
   sourceId: string | null;
   readAt: string | null;
   createdAt: string;
+  /** Балун на момент записи; нет (старый backend) или null — без балуна. */
+  balloonMode?: 'auto' | 'persistent' | null;
+}
+
+export interface ClaimBalloonsResponse {
+  items: BackendNotificationDto[];
+}
+
+export interface AckBalloonsResponse {
+  acknowledged: number;
 }
 
 export interface NotificationListQuery {

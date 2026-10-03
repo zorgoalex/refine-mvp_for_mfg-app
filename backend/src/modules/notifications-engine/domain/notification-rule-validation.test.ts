@@ -144,5 +144,15 @@ describe('validateNotificationRuleInput', () => {
     expect(validateNotificationRuleInput({ ...base, eventType: 'order.resource_demand_changed_after_mark', conditions: {} }, { knownRoleCodes: [] }))
       .toEqual({ ok: true });
   });
+  it('balloon channel (plan 2026-10-03): only with in_app; procurement events allow it, still not telegram; modes checked', () => {
+    const order = { ...base, eventType: 'order.production_status_changed', conditions: {}, recipients: { userIds: [1] } };
+    expect(validateNotificationRuleInput({ ...order, channels: ['in_app', 'balloon'], balloonMode: 'persistent' }, { knownRoleCodes: [] })).toEqual({ ok: true });
+    expect(validateNotificationRuleInput({ ...order, channels: ['balloon'] }, { knownRoleCodes: [] })).toEqual({ ok: false, code: 'BALLOON_REQUIRES_IN_APP' });
+    expect(validateNotificationRuleInput({ ...order, channels: ['in_app', 'balloon'], balloonMode: 'never' as never }, { knownRoleCodes: [] }))
+      .toEqual({ ok: false, code: 'INVALID_BALLOON_MODE', detail: 'never' });
+    const digest = { ...base, eventType: 'procurement.deficit_digest', level: 'info' as const, conditions: {}, recipients: {} };
+    expect(validateNotificationRuleInput({ ...digest, channels: ['in_app', 'balloon'] }, { knownRoleCodes: [] })).toEqual({ ok: true });
+    expect(validateNotificationRuleInput({ ...digest, channels: ['in_app', 'telegram'] }, { knownRoleCodes: [] }))
+      .toEqual({ ok: false, code: 'UNSUPPORTED_CHANNEL', detail: 'telegram' });
+  });
 });
-

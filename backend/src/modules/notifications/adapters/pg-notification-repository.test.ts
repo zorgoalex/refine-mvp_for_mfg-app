@@ -53,6 +53,7 @@ describe('PgNotificationRepository', () => {
           sourceId: '22222222-2222-4222-8222-222222222222',
           readAt: null,
           createdAt: '2026-05-23T09:00:00.000Z',
+          balloonMode: null,
         },
       ],
       total: 1,

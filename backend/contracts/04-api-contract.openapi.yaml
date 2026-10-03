@@ -11645,6 +11645,83 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/notifications/balloons/claim:
+    post:
+      tags:
+        - Notifications
+      operationId: claimNotificationBalloons
+      summary: Claim notification balloons for a browser tab
+      description: >-
+        Аренда (2 мин) непоказанных непрочитанных видимых уведомлений текущего пользователя с балуном, не старше 24 ч;
+        свои незавершённые аренды этого токена — первыми (повтор после потерянного ответа). FOR UPDATE SKIP LOCKED.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [token, limit]
+              properties:
+                token: { type: string, format: uuid, description: Токен вкладки (sessionStorage) }
+                limit: { type: integer, minimum: 1, maximum: 5 }
+      responses:
+        '200':
+          description: Leased balloons
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Notification'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v1/notifications/balloons/ack:
+    post:
+      tags:
+        - Notifications
+      operationId: ackNotificationBalloons
+      summary: Acknowledge shown notification balloons
+      description: Подтверждение показа своих арендованных балунов (только аренды этого токена); повтор — no-op.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [token, notificationIds]
+              properties:
+                token: { type: string, format: uuid }
+                notificationIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 20
+                  items: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  acknowledged: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
   /api/v1/notifications/{notificationId}:
     parameters:
       - $ref: '#/components/parameters/NotificationId'
@@ -27513,6 +27590,11 @@ components:
         - readAt
         - createdAt
       properties:
+        balloonMode:
+          type: string
+          nullable: true
+          enum: [auto, persistent]
+          description: Балун на момент записи (NULL — без балуна)
         notificationId:
           type: string
           format: uuid
@@ -27725,6 +27807,11 @@ components:
             enum:
               - in_app
               - telegram
+              - balloon
+        balloonMode:
+          type: string
+          enum: [auto, persistent]
+          description: 'Исчезновение балуна (канал balloon): auto — через 15 с, persistent — только крестиком'
         conditions:
           $ref: '#/components/schemas/NotificationRuleConditions'
         recipients:
@@ -28206,6 +28293,11 @@ components:
             enum:
               - in_app
               - telegram
+              - balloon
+        balloonMode:
+          type: string
+          enum: [auto, persistent]
+          description: 'Исчезновение балуна (канал balloon): auto — через 15 с, persistent — только крестиком'
         conditions:
           $ref: '#/components/schemas/NotificationRuleConditions'
         recipients:
@@ -28239,6 +28331,11 @@ components:
             enum:
               - in_app
               - telegram
+              - balloon
+        balloonMode:
+          type: string
+          enum: [auto, persistent]
+          description: 'Исчезновение балуна (канал balloon): auto — через 15 с, persistent — только крестиком'
         groupId:
           type: string
           format: uuid

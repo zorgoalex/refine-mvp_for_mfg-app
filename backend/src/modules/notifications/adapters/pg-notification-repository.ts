@@ -10,6 +10,9 @@ import type {
 } from '../application/notification.types';
 
 const PROCUREMENT_VIEW = 'procurement.view';
+/** Балун старше суток не всплывает; аренда вкладки — 2 минуты (план 2026-10-03 §3.2). */
+export const BALLOON_MAX_AGE_HOURS = 24;
+export const BALLOON_LEASE_SECONDS = 120;
 
 /**
  * Видимость строки уведомления для читателя (§5.7 R5-1): уведомления закупа — только при буквальном
@@ -43,6 +46,7 @@ interface NotificationRow {
   source_id: string | null;
   read_at: string | Date | null;
   created_at: string | Date;
+  balloon_mode: string | null;
 }
 
 interface NotificationCountRow {
@@ -79,7 +83,7 @@ export class PgNotificationRepository implements NotificationRepositoryPort {
       `
       SELECT
         notification_id, user_id::text, level, title, message, entity_type, entity_id,
-        source_type, source_id, read_at, created_at
+        source_type, source_id, read_at, created_at, balloon_mode
       FROM notifications n
       WHERE user_id = $1
         AND ($2::boolean = false OR is_read = false)
@@ -114,7 +118,7 @@ export class PgNotificationRepository implements NotificationRepositoryPort {
         AND user_id = $2
         AND ${visible}
       RETURNING notification_id, user_id::text, level, title, message, entity_type, entity_id,
-        source_type, source_id, read_at, created_at
+        source_type, source_id, read_at, created_at, balloon_mode
       `,
       params,
     );
@@ -160,6 +164,61 @@ export class PgNotificationRepository implements NotificationRepositoryPort {
 
     return (result.rowCount ?? 0) > 0;
   }
+
+  /**
+   * Балуны (план 2026-10-03 §3.2, R3-1): аренда на 2 минуты токеном вкладки. Выдаются непоказанные непрочитанные
+   * видимые (тот же предикат, что у списка) уведомления с балуном, не старше 24 ч, свободные или арендованные тем же
+   * токеном (повтор после потерянного ответа) либо с истёкшей арендой. FOR UPDATE SKIP LOCKED — две вкладки не берут одно.
+   */
+  async claimBalloonsForUser(input: { viewer: NotificationViewer; token: string; limit: number }): Promise<NotificationDto[]> {
+    const params: unknown[] = [input.viewer.id, input.token, input.limit];
+    const visible = notificationVisibilitySql(input.viewer, params);
+    const result = await this.database.query<NotificationRow & { own: boolean }>(
+      `
+      WITH candidates AS (
+        SELECT n.notification_id, (n.balloon_lease_token = $2::uuid) IS TRUE AS own
+          FROM notifications n
+         WHERE n.user_id = $1
+           AND n.balloon_mode IS NOT NULL
+           AND n.balloon_shown_at IS NULL
+           AND n.is_read = false
+           AND n.created_at > now() - interval '${BALLOON_MAX_AGE_HOURS} hours'
+           AND (n.balloon_leased_at IS NULL
+                OR n.balloon_leased_at < now() - interval '${BALLOON_LEASE_SECONDS} seconds'
+                OR n.balloon_lease_token = $2::uuid)
+           AND ${visible}
+         ORDER BY (n.balloon_lease_token = $2::uuid) IS TRUE DESC, n.created_at, n.notification_id
+         LIMIT $3
+         FOR UPDATE OF n SKIP LOCKED
+      )
+      UPDATE notifications n
+         SET balloon_lease_token = $2::uuid, balloon_leased_at = now()
+        FROM candidates c
+       WHERE n.notification_id = c.notification_id
+      RETURNING n.notification_id, n.user_id::text, n.level, n.title, n.message, n.entity_type, n.entity_id,
+        n.source_type, n.source_id, n.read_at, n.created_at, n.balloon_mode, c.own
+      `,
+      params,
+    );
+    return result.rows
+      .sort((a, b) => Number(b.own) - Number(a.own) || String(a.created_at).localeCompare(String(b.created_at)))
+      .map(mapRow);
+  }
+
+  async ackBalloonsForUser(input: { viewer: NotificationViewer; token: string; notificationIds: string[] }): Promise<number> {
+    if (input.notificationIds.length === 0) return 0;
+    const result = await this.database.query(
+      `
+      UPDATE notifications
+         SET balloon_shown_at = COALESCE(balloon_shown_at, now())
+       WHERE user_id = $1
+         AND notification_id = ANY($3::uuid[])
+         AND balloon_lease_token = $2::uuid
+      `,
+      [input.viewer.id, input.token, input.notificationIds],
+    );
+    return result.rowCount ?? 0;
+  }
 }
 
 function mapRow(row: NotificationRow): NotificationDto {
@@ -175,6 +234,7 @@ function mapRow(row: NotificationRow): NotificationDto {
     sourceId: row.source_id,
     readAt: timestampToIsoString(row.read_at),
     createdAt: timestampToIsoString(row.created_at),
+    balloonMode: row.balloon_mode === 'auto' || row.balloon_mode === 'persistent' ? row.balloon_mode : null,
   };
 }
 

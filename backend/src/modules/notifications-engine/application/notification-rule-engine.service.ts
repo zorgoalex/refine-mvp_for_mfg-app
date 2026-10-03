@@ -1,3 +1,5 @@
+import { balloonFor } from './notification-delivery';
+import { isExternalChannel } from '../domain/notification-rule.types';
 import type { DatabaseClient } from '../../../database/database.types';
 import { resolveEffectiveEventType } from '../domain/deadline-event-extractor';
 import { evaluateRuleConditions } from '../domain/notification-condition-evaluator';
@@ -155,6 +157,8 @@ export class NotificationRuleEngineService {
         ? rule.channels.filter((channel) => definition.allowedChannels!.includes(channel))
         : rule.channels;
       matched += 1;
+      // Балун — свойство in_app-записи (единое решение `balloonFor`), не отдельная доставка.
+      const balloonMode = balloonFor({ channels, balloonMode: rule.balloonMode });
 
       const { title, message } = renderNotificationText(rule, ctx);
       const recipientUserIds = definition.recipientVisibility === 'procurement'
@@ -165,6 +169,7 @@ export class NotificationRuleEngineService {
 
       for (const userId of recipientUserIds) {
         for (const channel of channels) {
+          if (channel === 'balloon') continue;
           const idempotencyKey = buildNotificationDeliveryKey({
             outboxEventId: event.outboxEventId,
             ruleId: rule.notificationRuleId,
@@ -183,10 +188,13 @@ export class NotificationRuleEngineService {
               sourceType,
               sourceId: rule.notificationRuleId,
               idempotencyKey,
+              balloonMode,
             });
             if (result.created) created += 1;
             continue;
           }
+          // Внешние каналы — только через очередь доставок (балун и in_app сюда не попадают).
+          if (!isExternalChannel(channel)) continue;
 
           const result = await this.deps.channelDelivery.enqueueIfAbsent(client, {
             notificationRuleId: rule.notificationRuleId,

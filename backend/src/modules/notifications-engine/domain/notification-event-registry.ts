@@ -27,7 +27,7 @@ export interface NotificationEventDefinition {
   /** `source_type` записи in_app (по умолчанию `notification_rule`); свои типы фильтруются при чтении. */
   sourceType?: string;
   /** Допустимые каналы правил (по умолчанию — все); закуп — только in_app (решение пользователя В-4). */
-  allowedChannels?: readonly ('in_app' | 'telegram')[];
+  allowedChannels?: readonly ('in_app' | 'telegram' | 'balloon')[];
   /** Флаг выключен в момент обработки → событие пропускается (skipped_disabled), уведомлений нет. */
   featureFlag?: NotificationFeatureFlag;
   /**
@@ -93,7 +93,7 @@ export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefini
     supportsDeadlineConditions: false,
     supportsProcurementConditions: true,
     sourceType: PROCUREMENT_ORDER_EVENT_SOURCE,
-    allowedChannels: ['in_app'],
+    allowedChannels: ['in_app', 'balloon'],
     featureFlag: 'procurementNotifications',
     recipientVisibility: 'procurement',
     maxEventAgeHours: 24,
@@ -108,7 +108,7 @@ export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefini
     supportsOrderConditions: true,
     supportsDeadlineConditions: false,
     sourceType: PROCUREMENT_ORDER_EVENT_SOURCE,
-    allowedChannels: ['in_app'],
+    allowedChannels: ['in_app', 'balloon'],
     featureFlag: 'procurementNotifications',
     recipientVisibility: 'procurement',
     maxEventAgeHours: 24,
@@ -124,7 +124,7 @@ export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefini
     supportsOrderConditions: false,
     supportsDeadlineConditions: false,
     sourceType: PROCUREMENT_DIGEST_SOURCE,
-    allowedChannels: ['in_app'],
+    allowedChannels: ['in_app', 'balloon'],
     featureFlag: 'procurementNotifications',
   },
   // Ежедневная сводка нераспределённых приходов на получателя (агрегат — пользователь, план 2026-10-02 §2.2).
@@ -137,7 +137,7 @@ export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefini
     supportsOrderConditions: false,
     supportsDeadlineConditions: false,
     sourceType: PROCUREMENT_DIGEST_SOURCE,
-    allowedChannels: ['in_app'],
+    allowedChannels: ['in_app', 'balloon'],
     featureFlag: 'procurementNotifications',
   },
   DEADLINE_EXPIRED: {

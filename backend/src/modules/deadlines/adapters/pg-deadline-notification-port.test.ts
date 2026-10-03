@@ -34,7 +34,7 @@ describe('PgDeadlineNotificationPort', () => {
     });
 
     expect(normalizeSql(database.queries[0].text)).toContain(
-      'INSERT INTO notifications ( user_id, level, title, message, entity_type, entity_id, source_type, source_id, idempotency_key )',
+      'INSERT INTO notifications (user_id, level, title, message, entity_type, entity_id, source_type, source_id, idempotency_key, balloon_mode)',
     );
     expect(normalizeSql(database.queries[0].text)).toContain(
       'ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING',
@@ -49,6 +49,7 @@ describe('PgDeadlineNotificationPort', () => {
       'deadline',
       'event-1',
       'deadline-notification:event-1:notify_assignee:10',
+      null,
     ]);
   });
 
@@ -84,7 +85,7 @@ describe('PgDeadlineNotificationPort', () => {
     });
 
     expect(normalizeSql(database.queries[1].text)).toContain(
-      'SELECT notification_id, created_at FROM notifications WHERE idempotency_key = $1',
+      'SELECT notification_id FROM notifications WHERE idempotency_key = $1',
     );
     expect(database.queries[1].params).toEqual([
       'deadline-notification:event-1:notify_manager:10',

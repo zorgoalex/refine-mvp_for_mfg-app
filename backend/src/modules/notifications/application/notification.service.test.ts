@@ -5,6 +5,27 @@ import { getPermissionsForRole } from '../../../permissions/permissions';
 import { NotificationService } from './notification.service';
 import type { NotificationRepositoryPort } from './notification.types';
 
+describe('NotificationService balloons (plan 2026-10-03)', () => {
+  const user = { id: '42', username: 'u', role: 'manager', roleId: 10, permissions: [] } as unknown as CurrentUser;
+  const token = '22222222-2222-4222-8222-222222222222';
+  it('claim: auth, uuid token, limit clamped to 1…5, current user as viewer', async () => {
+    const claim = vi.fn(async () => []);
+    const service = new NotificationService({ repository: createRepository({ claimBalloonsForUser: claim }) });
+    await expect(service.claimBalloons({ currentUser: undefined, token, limit: 1 })).rejects.toBeInstanceOf(ApiError);
+    await expect(service.claimBalloons({ currentUser: user, token: 'x', limit: 1 })).rejects.toMatchObject({ statusCode: 400 });
+    await service.claimBalloons({ currentUser: user, token, limit: 50 });
+    expect(claim).toHaveBeenCalledWith({ viewer: user, token, limit: 5 });
+  });
+  it('ack: ids deduplicated and validated', async () => {
+    const ack = vi.fn(async () => 1);
+    const service = new NotificationService({ repository: createRepository({ ackBalloonsForUser: ack }) });
+    const id = '11111111-1111-4111-8111-111111111111';
+    expect(await service.ackBalloons({ currentUser: user, token, notificationIds: [id, id] })).toEqual({ acknowledged: 1 });
+    expect(ack).toHaveBeenCalledWith({ viewer: user, token, notificationIds: [id] });
+    await expect(service.ackBalloons({ currentUser: user, token, notificationIds: ['bad'] })).rejects.toMatchObject({ statusCode: 400 });
+  });
+});
+
 describe('NotificationService', () => {
   it('requires an authenticated user for list reads', async () => {
     const service = new NotificationService({ repository: createRepository() });
@@ -155,6 +176,12 @@ function createRepository(
     },
     async deleteForUser() {
       return true;
+    },
+    async claimBalloonsForUser() {
+      return [];
+    },
+    async ackBalloonsForUser() {
+      return 0;
     },
     ...overrides,
   };

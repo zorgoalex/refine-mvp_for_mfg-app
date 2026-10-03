@@ -1,6 +1,7 @@
 import type {
   CreateNotificationRuleRequest,
   DeadlineNotificationEntityType,
+  BalloonMode,
   NotificationChannel,
   NotificationLevel,
   NotificationRuleConditions,
@@ -18,6 +19,7 @@ export interface NotificationRuleDraft {
   priority: number;
   isEnabled: boolean;
   channels: NotificationChannel[];
+  balloonMode: BalloonMode;
   excludeCompletedOrders: boolean;
   deadlineEntityTypes: DeadlineNotificationEntityType[];
   requireCurrentDeadlineEvent: boolean;
@@ -44,6 +46,7 @@ export function emptyDraft(): NotificationRuleDraft {
     priority: 100,
     isEnabled: true,
     channels: ['in_app'],
+    balloonMode: 'auto',
     excludeCompletedOrders: false,
     deadlineEntityTypes: [],
     requireCurrentDeadlineEvent: true,
@@ -66,6 +69,7 @@ export function buildDraftFromRule(rule: NotificationRuleDto): NotificationRuleD
     priority: rule.priority,
     isEnabled: rule.isEnabled,
     channels: [...(rule.channels ?? ['in_app'])],
+    balloonMode: rule.balloonMode === 'persistent' ? 'persistent' : 'auto',
     excludeCompletedOrders: rule.conditions.excludeCompletedOrders ?? false,
     deadlineEntityTypes: rule.conditions.deadlineEntityTypes ?? [],
     requireCurrentDeadlineEvent: rule.conditions.requireCurrentDeadlineEvent ?? true,
@@ -167,6 +171,7 @@ export function buildCreatePayload(draft: NotificationRuleDraft): CreateNotifica
     priority: draft.priority,
     isEnabled: draft.isEnabled,
     channels: [...draft.channels],
+    balloonMode: draft.balloonMode,
     conditions: buildConditions(draft),
     recipients: buildRecipients(draft),
     titleTemplate: normalizeTemplate(draft.titleTemplate),
@@ -187,6 +192,7 @@ export function buildUpdatePayload(
   if (draft.priority !== undefined) result.priority = draft.priority;
   if (draft.isEnabled !== undefined) result.isEnabled = draft.isEnabled;
   result.channels = [...(draft.channels ?? ['in_app'])];
+  if (draft.balloonMode !== undefined) result.balloonMode = draft.balloonMode;
   if (draft.groupId !== undefined) result.groupId = draft.groupId;
 
   // Always send `conditions` on edit (even `{}`). The backend merge keeps the

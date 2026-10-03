@@ -9,12 +9,13 @@ import { groupsApi } from '../../../api/groupsApi';
 import type {
   DeadlineNotificationEntityType,
   NotificationEventTypeDto,
-  NotificationChannel,
   NotificationLevel,
   NotificationRuleDto,
   RecipientResolverKind,
 } from '../../../api/types/notificationRulesApi.types';
 import type { UserIdentity } from '../../../types/auth';
+import { NotificationChannelsField } from '../../../notifications/balloons/NotificationChannelsField';
+import { channelLabel } from '../../../notifications/balloons/notificationChannels';
 import { normalizeRoleKey } from '../../../utils/resourceVisibility';
 import {
   buildCreatePayload,
@@ -80,11 +81,6 @@ const LEVEL_LABELS: Record<NotificationLevel, string> = {
   info: 'Информационное',
   warning: 'Предупреждение',
   error: 'Ошибка',
-};
-
-const CHANNEL_LABELS: Record<NotificationChannel, string> = {
-  in_app: 'В приложении',
-  telegram: 'Telegram',
 };
 
 const DEADLINE_ENTITY_TYPE_LABELS: Record<DeadlineNotificationEntityType, string> = {
@@ -637,8 +633,8 @@ export function NotificationRulesConfig() {
               render: (_, rule) => (
                 <Space size={[4, 4]} wrap>
                   {(rule.channels ?? ['in_app']).map((channel) => (
-                    <Tag key={channel} color={channel === 'telegram' ? 'cyan' : 'blue'}>
-                      {CHANNEL_LABELS[channel]}
+                    <Tag key={channel} color={channel === 'telegram' ? 'cyan' : channel === 'balloon' ? 'purple' : 'blue'}>
+                      {channelLabel(channel, rule.balloonMode)}
                     </Tag>
                   ))}
                 </Space>
@@ -781,21 +777,18 @@ export function NotificationRulesConfig() {
           <Form.Item
             label="Канал уведомлений"
             required
-            extra="Для Telegram получатель один раз подключает свой аккаунт в личном кабинете. Если Telegram не подключён, доставка этому получателю будет пропущена."
+            extra="Балун — всплывающее окно в углу экрана для уведомления «В приложении». Для Telegram получатель один раз подключает свой аккаунт в личном кабинете; если Telegram не подключён, доставка этому получателю будет пропущена."
           >
-            <Checkbox.Group
-              value={draft.channels}
-              onChange={(values) =>
-                updateDraft({ channels: values as NotificationChannel[] })
-              }
-              style={{ width: '100%' }}
-            >
-              <Space direction="vertical" size={8}>
-                <Checkbox value="in_app">В приложении</Checkbox>
-                {/* Уведомления закупа — только в приложении (бэкенд не сохранит Telegram). */}
-                <Checkbox value="telegram" disabled={isProcurementEventType(draft.eventType)}>Telegram</Checkbox>
-              </Space>
-            </Checkbox.Group>
+            <NotificationChannelsField
+              channels={draft.channels}
+              balloonMode={draft.balloonMode}
+              onChange={(next) => updateDraft(next)}
+              // Уведомления закупа — без Telegram (бэкенд не сохранит).
+              telegramDisabled={isProcurementEventType(draft.eventType)}
+              balloonHint={draft.eventType === 'DEADLINE_EXPIRED'
+                ? 'Для дедлайнов балун работает, когда уведомления дедлайнов создаёт движок правил.'
+                : undefined}
+            />
           </Form.Item>
 
           {!isServiceEventType(draft.eventType) && (

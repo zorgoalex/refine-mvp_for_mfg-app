@@ -1,6 +1,7 @@
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseClient } from '../../../database/database.types';
 import type {
+  BalloonMode,
   NotificationChannel,
   NotificationRule,
   NotificationRuleConditions,
@@ -21,6 +22,7 @@ interface NotificationRuleRow {
   priority: string | number;
   level: string;
   channels_json: unknown;
+  balloon_mode: string | null;
   conditions_json: Record<string, unknown> | null;
   recipients_json: Record<string, unknown> | null;
   title_template: string | null;
@@ -31,7 +33,7 @@ interface NotificationRuleRow {
 
 const RULE_COLUMNS = `
   notification_rule_id, rule_code, event_type, group_id, is_enabled, priority, level,
-  channels_json, conditions_json, recipients_json, title_template, message_template,
+  channels_json, balloon_mode, conditions_json, recipients_json, title_template, message_template,
   created_at, updated_at
 `;
 
@@ -42,9 +44,9 @@ export class PgNotificationRuleRepository implements NotificationRuleRepositoryP
       INSERT INTO notification_rules (
         rule_code, event_type, group_id, level, priority, is_enabled,
         channels_json, conditions_json, recipients_json, title_template, message_template,
-        created_by_user_id, updated_by_user_id
+        created_by_user_id, updated_by_user_id, balloon_mode
       )
-      VALUES ($1, $2, $3::uuid, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11, $12, $12)
+      VALUES ($1, $2, $3::uuid, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11, $12, $12, $13)
       RETURNING ${RULE_COLUMNS}
       `,
       [
@@ -60,6 +62,7 @@ export class PgNotificationRuleRepository implements NotificationRuleRepositoryP
         input.titleTemplate,
         input.messageTemplate,
         input.createdByUserId,
+        input.balloonMode ?? 'auto',
       ],
     );
 
@@ -83,6 +86,7 @@ export class PgNotificationRuleRepository implements NotificationRuleRepositoryP
           recipients_json = COALESCE($9::jsonb, recipients_json),
           title_template = CASE WHEN $10 THEN $11 ELSE title_template END,
           message_template = CASE WHEN $12 THEN $13 ELSE message_template END,
+          balloon_mode = COALESCE($16, balloon_mode),
           updated_by_user_id = $14,
           updated_at = GREATEST(
             date_trunc('milliseconds', clock_timestamp()),
@@ -111,6 +115,7 @@ export class PgNotificationRuleRepository implements NotificationRuleRepositoryP
         patch.messageTemplate ?? null,
         patch.updatedByUserId,
         patch.expectedUpdatedAt ?? null,
+        patch.balloonMode ?? null,
       ],
     );
 
@@ -194,6 +199,7 @@ function mapRow(row: NotificationRuleRow): NotificationRule {
     priority: toNumber(row.priority),
     level: row.level as NotificationRule['level'],
     channels: normalizeChannels(row.channels_json),
+    balloonMode: (row.balloon_mode === 'persistent' ? 'persistent' : 'auto') as BalloonMode,
     conditions: (row.conditions_json ?? {}) as NotificationRuleConditions,
     recipients: (row.recipients_json ?? {}) as NotificationRuleRecipients,
     titleTemplate: row.title_template,
@@ -206,7 +212,7 @@ function mapRow(row: NotificationRuleRow): NotificationRule {
 function normalizeChannels(value: unknown): NotificationChannel[] {
   if (!Array.isArray(value)) return ['in_app'];
   const channels = value.filter(
-    (channel): channel is NotificationChannel => channel === 'in_app' || channel === 'telegram',
+    (channel): channel is NotificationChannel => channel === 'in_app' || channel === 'telegram' || channel === 'balloon',
   );
   return channels.length > 0 ? Array.from(new Set(channels)) : ['in_app'];
 }

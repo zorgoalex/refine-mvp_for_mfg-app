@@ -41,6 +41,7 @@ function rule(overrides: Partial<NotificationRule> = {}): NotificationRule {
     priority: 100,
     level: 'info',
     channels: ['in_app'],
+    balloonMode: 'auto',
     conditions: {},
     recipients: { resolvers: ['order_manager'] },
     titleTemplate: null,
@@ -263,6 +264,26 @@ describe('NotificationRuleEngineService.processEvent', () => {
           'notif-rule:00000000-0000-0000-0000-000000000077:rule-telegram:42:telegram',
       }),
     );
+  });
+
+  it('balloon (plan 2026-10-03): in_app row carries the rule balloon mode; balloon never goes to external delivery', async () => {
+    const balloonRule = rule({ notificationRuleId: 'rule-balloon', channels: ['in_app', 'balloon', 'telegram'], balloonMode: 'persistent', recipients: { userIds: [42] } });
+    const deps = fakes({
+      ruleRepo: { listEnabledByEvent: vi.fn(async () => [balloonRule]) },
+      recipientResolver: { resolve: vi.fn(async () => [42]) },
+    });
+    await service(deps).processEvent(client, event({ outboxEventId: '00000000-0000-0000-0000-000000000078' }));
+    expect(deps.notificationWrite.insertIfAbsent).toHaveBeenCalledTimes(1);
+    expect(deps.notificationWrite.insertIfAbsent).toHaveBeenCalledWith(client, expect.objectContaining({ userId: 42, balloonMode: 'persistent' }));
+    expect(deps.channelDelivery.enqueueIfAbsent).toHaveBeenCalledTimes(1);
+    expect(deps.channelDelivery.enqueueIfAbsent).toHaveBeenCalledWith(client, expect.objectContaining({ channel: 'telegram' }));
+    // Без канала balloon — без балуна.
+    const plain = fakes({
+      ruleRepo: { listEnabledByEvent: vi.fn(async () => [rule({ channels: ['in_app'], balloonMode: 'persistent', recipients: { userIds: [7] } })]) },
+      recipientResolver: { resolve: vi.fn(async () => [7]) },
+    });
+    await service(plain).processEvent(client, event({ outboxEventId: '00000000-0000-0000-0000-000000000079' }));
+    expect(plain.notificationWrite.insertIfAbsent).toHaveBeenCalledWith(client, expect.objectContaining({ balloonMode: null }));
   });
 
   it('redacts unknown placeholders: never emits payload/phone/secret values, only whitelisted fields', () => {

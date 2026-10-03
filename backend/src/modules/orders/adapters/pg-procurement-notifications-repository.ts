@@ -4,6 +4,8 @@ import type { DatabaseClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { mapRoleIdToRole } from '../../../permissions/permissions';
 import { PgNotificationWriteAdapter } from '../../notifications-engine/adapters/pg-notification-write';
+import { balloonFor } from '../../notifications-engine/application/notification-delivery';
+import type { BalloonMode, NotificationChannel } from '../../notifications-engine/domain/notification-rule.types';
 import { loadRoleAuthorizationWith } from '../../notifications-engine/adapters/pg-procurement-recipient-visibility';
 import { PROCUREMENT_DIGEST_SOURCE } from '../../notifications-engine/domain/notification-event-registry';
 import { PROCUREMENT_WORKLIST_DONE_STATUS_CODES } from '../application/procurement-workspace.types';
@@ -300,15 +302,23 @@ export class PgProcurementNotificationsRepository {
    */
   async writeServiceNotification(input: ServiceNotificationInput, guard?: ServiceRuleGuard): Promise<boolean> {
     return this.database.transaction(async (client: DatabaseClient) => {
+      let balloonMode: BalloonMode | null = null;
       if (guard) {
         // Точка сериализации с PATCH правила (R1-4): FOR SHARE строки правила ДО вставок; выключено или получатели
         // сменились после выборки прогона — запись пропускается (следующий прогон выберет заново).
-        const rule = (await client.query<{ is_enabled: boolean; recipients_hash: string }>(
-          `SELECT is_enabled, md5(COALESCE(recipients_json, '{}'::jsonb)::text) AS recipients_hash
+        const rule = (await client.query<{ is_enabled: boolean; recipients_hash: string; channels_json: unknown; balloon_mode: string | null }>(
+          `SELECT is_enabled, md5(COALESCE(recipients_json, '{}'::jsonb)::text) AS recipients_hash, channels_json, balloon_mode
              FROM notification_rules WHERE rule_code = $1 FOR SHARE`,
           [guard.ruleCode],
         )).rows[0];
         if (!rule || rule.is_enabled !== true || rule.recipients_hash !== guard.recipientsHash) return false;
+        // Балун — по строке правила под той же блокировкой (план 2026-10-03 R1-4): смена канала/режима во время прохода
+        // учитывается в момент записи.
+        balloonMode = balloonFor({
+          channels: Array.isArray(rule.channels_json) ? rule.channels_json.filter((channel): channel is NotificationChannel =>
+            channel === 'in_app' || channel === 'balloon' || channel === 'telegram') : ['in_app'],
+          balloonMode: rule.balloon_mode === 'persistent' ? 'persistent' : 'auto',
+        });
         await this.afterRuleLocked?.();
       }
       const event = await client.query(
@@ -330,6 +340,7 @@ export class PgProcurementNotificationsRepository {
         sourceType: PROCUREMENT_DIGEST_SOURCE,
         sourceId: input.eventType,
         idempotencyKey: `${input.key}:in_app`,
+        balloonMode,
       });
       return result.created;
     });

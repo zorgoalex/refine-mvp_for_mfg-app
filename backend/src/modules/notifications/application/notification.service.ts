@@ -10,6 +10,9 @@ import type {
   NotificationRepositoryPort,
 } from './notification.types';
 
+/** Мест на экране балунов вкладки (план 2026-10-03 §2.2): за один claim — не больше. */
+export const MAX_BALLOONS_PER_CLAIM = 5;
+
 const uuidRegex =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -61,6 +64,22 @@ export class NotificationService {
     const currentUser = requireCurrentUser(input.currentUser);
     const updatedCount = await this.deps.repository.markAllReadForUser(currentUser);
     return { updatedCount };
+  }
+
+  async claimBalloons(input: { currentUser: CurrentUser | undefined; token: string; limit: number }) {
+    const currentUser = requireCurrentUser(input.currentUser);
+    const token = parseNotificationId(input.token);
+    const limit = Math.min(Math.max(Math.trunc(input.limit), 1), MAX_BALLOONS_PER_CLAIM);
+    const items = await this.deps.repository.claimBalloonsForUser({ viewer: currentUser, token, limit });
+    return { items };
+  }
+
+  async ackBalloons(input: { currentUser: CurrentUser | undefined; token: string; notificationIds: string[] }) {
+    const currentUser = requireCurrentUser(input.currentUser);
+    const token = parseNotificationId(input.token);
+    const notificationIds = [...new Set(input.notificationIds.map(parseNotificationId))];
+    const acknowledged = await this.deps.repository.ackBalloonsForUser({ viewer: currentUser, token, notificationIds });
+    return { acknowledged };
   }
 
   async delete(input: {
