@@ -17,7 +17,7 @@ const STATE_COLORS: Record<string, string> = {
 const CANCEL_LABELS: Record<string, string> = {
   manual: 'вручную',
   disabled: 'отправка выключена',
-  recipient_removed: 'чат убран из настроек',
+  recipient_removed: 'получатель убран из настроек',
   recipient_changed: 'получатель изменился',
   form_not_allowed: 'форма не разрешена',
   permission_revoked: 'нет прав у отправителя',
@@ -26,6 +26,7 @@ const CANCEL_LABELS: Record<string, string> = {
 
 const ERROR_LABELS: Record<string, string> = {
   CLIENT_NOT_ON_WHATSAPP: 'номера нет в WhatsApp',
+  EMPLOYEE_NOT_ON_WHATSAPP: 'номера нет в WhatsApp',
   WAHA_REJECTED: 'WhatsApp не принял',
   WAHA_FILE_UNSUPPORTED: 'тип файла не принят',
   PARTIAL_DELIVERY: 'ушла часть изображений',

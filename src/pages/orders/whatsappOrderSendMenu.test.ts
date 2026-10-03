@@ -80,4 +80,36 @@ describe('item keys', () => {
     expect(describeOrderWhatsAppSend(menu(), { kind: 'client' }, 'order_pdf')).toEqual({ targetLabel: 'клиенту', formTitle: 'PDF заказа' });
     expect(describeOrderWhatsAppSend(menu(), { kind: 'chat', chatKey: 'c1' }, 'production_pdf')).toEqual({ targetLabel: 'в чат «Цех ЧПУ»', formTitle: 'PDF для производства' });
   });
+
+describe('employee recipients in the card menu', () => {
+  const employees = [
+    { recipientKey: 'e1', label: 'ivanov / Иванов И.', forms: ['production_pdf' as const], contacts: [{ contactId: 5, masked: '7701***0101', isPrimary: true }] },
+    { recipientKey: 'e2', label: 'Петров П.', forms: ['production_pdf' as const, 'production_excel' as const], contacts: [
+      { contactId: 7, masked: '7701***0202', isPrimary: true }, { contactId: 8, masked: '7701***0303', isPrimary: false }] },
+    { recipientKey: 'e3', label: 'Сидоров С.', forms: ['production_pdf' as const], contacts: [] },
+  ];
+
+  it('one phone — like a chat; several — a submenu of phones (primary first); none — locked with a hint', () => {
+    const items = buildOrderWhatsAppMenuItems(menu({ chats: [], employees }), { hasClientPhone: true });
+    expect(items[1]).toMatchObject({ key: 'wa-send:employee:e1:primary:production_pdf', label: 'Отправить сотруднику «ivanov / Иванов И.» — PDF для производства' });
+    expect(items[2].label).toBe('Отправить сотруднику «Петров П.»');
+    expect(items[2].children?.map((child) => child.label)).toEqual(['7701***0202 (основной)', '7701***0303']);
+    expect(items[2].children?.[1].children?.map((child) => child.key)).toEqual([
+      'wa-send:employee:e2:8:production_pdf', 'wa-send:employee:e2:8:production_excel']);
+    expect(items[3]).toMatchObject({ label: 'Отправить сотруднику «Сидоров С.» — PDF для производства', disabled: true, title: 'У сотрудника нет рабочего телефона' });
+  });
+
+  it('round-trips employee keys and describes the send', () => {
+    for (const target of [{ kind: 'employee' as const, recipientKey: 'e2' }, { kind: 'employee' as const, recipientKey: 'e2', contactId: 8 }]) {
+      expect(parseOrderWhatsAppKey(orderWhatsAppItemKey(target, 'production_pdf'))).toEqual({ target, form: 'production_pdf' });
+    }
+    expect(parseOrderWhatsAppKey('wa-send:employee:e2:x:production_pdf')).toBeNull();
+    expect(describeOrderWhatsAppSend(menu({ employees }), { kind: 'employee', recipientKey: 'e2', contactId: 8 }, 'production_pdf'))
+      .toEqual({ targetLabel: 'сотруднику «Петров П.» (7701***0303)', formTitle: 'PDF для производства' });
+  });
+
+  it('an older backend without employees changes nothing', () => {
+    expect(buildOrderWhatsAppMenuItems(menu(), { hasClientPhone: true })).toHaveLength(3);
+  });
+});
 });

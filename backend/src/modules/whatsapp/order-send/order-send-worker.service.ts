@@ -8,7 +8,9 @@ import { canSendOrder, OrderSendActors, readAccessSubject } from './order-send-a
 import { OrderSendFileStore } from './order-send-file-store';
 import { normalizeClientPhone } from './order-send-phone';
 import { OrderSendRepository, knownForms, type SendIntent, type SendRow } from './order-send.repository';
-import { ORDER_FORM_MIME, isDeliverableForm, orderForm, type OrderSendCancelReason, type OrderSendRuntime } from './order-send.types';
+import {
+  ORDER_FORM_MIME, ORDER_SEND_SUPPORTED_CHANNELS, isDeliverableForm, orderForm, type OrderSendCancelReason, type OrderSendRuntime,
+} from './order-send.types';
 
 /** WAHA refused the request itself (validation, unsupported): nothing was sent. */
 const DEFINITE_REJECTIONS = new Set([400, 404, 405, 415, 422, 501]);
@@ -91,12 +93,20 @@ export class OrderSendWorker implements OnModuleInit, OnModuleDestroy {
       await this.repository.finishBeforeIntent(row.send_id, { state: 'failed', errorCode: 'ORDER_SEND_FORM_UNSUPPORTED' });
       return;
     }
-    // A recipient kind of a newer release (an employee): never delivered by this one, no slot spent.
-    if ((row.target_kind as string) !== 'client' && (row.target_kind as string) !== 'chat') {
+    // A recipient kind of a newer release: never delivered by this one, no slot spent.
+    if (!['client', 'chat', 'employee'].includes(row.target_kind as string)) {
       await this.repository.finishBeforeIntent(row.send_id, { state: 'failed', errorCode: 'ORDER_SEND_TARGET_UNSUPPORTED' });
       return;
     }
-    if (row.target_kind === 'client' && !row.destination_chat_id) {
+    // An employee recipient goes only through a channel this release delivers (WhatsApp), before any provider call.
+    if (row.target_kind === 'employee') {
+      const channel = await this.repository.employeeRecipientChannel(row.recipient_key ?? null);
+      if (channel === null || !ORDER_SEND_SUPPORTED_CHANNELS.includes(channel)) {
+        await this.repository.finishBeforeIntent(row.send_id, { state: 'failed', errorCode: 'ORDER_SEND_CHANNEL_UNSUPPORTED' });
+        return;
+      }
+    }
+    if ((row.target_kind === 'client' || row.target_kind === 'employee') && !row.destination_chat_id) {
       if (!row.phone_normalized) {
         await this.repository.finishBeforeIntent(row.send_id, { state: 'failed', errorCode: 'ORDER_SEND_PAYLOAD_MISSING' });
         return;
@@ -104,7 +114,8 @@ export class OrderSendWorker implements OnModuleInit, OnModuleDestroy {
       try {
         const check = await this.waha.checkPhone(row.phone_normalized);
         if (!check.exists || !check.chatId) {
-          await this.repository.finishBeforeIntent(row.send_id, { state: 'failed', errorCode: 'CLIENT_NOT_ON_WHATSAPP' });
+          await this.repository.finishBeforeIntent(row.send_id, {
+            state: 'failed', errorCode: row.target_kind === 'employee' ? 'EMPLOYEE_NOT_ON_WHATSAPP' : 'CLIENT_NOT_ON_WHATSAPP' });
           return;
         }
         await this.repository.setClientDestination(row.send_id, check.chatId);
@@ -143,6 +154,10 @@ export class OrderSendWorker implements OnModuleInit, OnModuleDestroy {
         if (chat.group_chat_id !== current.destination_chat_id) return 'recipient_changed';
         if (!knownForms(chat.forms).includes(current.form_code)) return 'form_not_allowed';
         return null;
+      }
+      if (current.target_kind === 'employee') {
+        // The recipient row, the employee and the contact as they are now: anything different cancels.
+        return this.repository.verifyEmployeeRecipient(tx, current);
       }
       if (!knownForms(settings.client_forms).includes(current.form_code)) return 'form_not_allowed';
       const client = await this.repository.currentClientPhone(tx, Number(current.order_id));

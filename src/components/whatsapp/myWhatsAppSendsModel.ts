@@ -201,7 +201,8 @@ const FORM_TITLES: Record<string, string> = {
  */
 export function fromOrderSendView(view: OrderSendView, userId: string): MyWhatsAppSend | null {
   if (String(view.actor?.id ?? '') !== userId) return null;
-  const recipient = view.targetKind === 'client' ? 'клиенту' : view.targetKind === 'chat' ? `в чат «${view.recipientLabel}»` : 'сотруднику';
+  const recipient = view.targetKind === 'client' ? 'клиенту' : view.targetKind === 'chat' ? `в чат «${view.recipientLabel}»`
+    : view.recipientLabel ? `сотруднику «${view.recipientLabel}»` : 'сотруднику';
   const active = ORDER_SEND_ACTIVE.has(view.state);
   return {
     kind: 'order_send', id: view.sendId, title: `Заказ #${view.orderId} → ${recipient}, ${FORM_TITLES[view.form] ?? view.form}`,
@@ -241,6 +242,7 @@ const FAILURES: Record<string, string> = {
   ORDER_SEND_TARGET_UNSUPPORTED: 'этот тип получателя не поддерживается',
   ORDER_SEND_CHANNEL_UNSUPPORTED: 'этот канал отправки не поддерживается',
   CLIENT_NOT_ON_WHATSAPP: 'номера клиента нет в WhatsApp',
+  EMPLOYEE_NOT_ON_WHATSAPP: 'номера сотрудника нет в WhatsApp',
   WAHA_REJECTED: 'WhatsApp не принял файл',
   WAHA_FILE_UNSUPPORTED: 'WhatsApp не принимает файлы такого типа',
   NO_ORDERS: 'на этот день нет заказов',

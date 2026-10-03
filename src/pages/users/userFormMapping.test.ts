@@ -101,4 +101,15 @@ describe('user form mapping', () => {
       role_id: 11,
     });
   });
+
+  it('never writes the employee link through Hasura (legacy mode)', () => {
+    expect(mapLegacyUserFormToHasuraPayload({ username: 'u1', role: 'viewer', employee_id: 7 })).not.toHaveProperty('employee_id');
+  });
+
+  it('links and unlinks the employee only when the form has the field', () => {
+    expect(mapBackendUpdateUserRequest({ employee_id: 7 })).toMatchObject({ employeeId: 7 });
+    expect(mapBackendUpdateUserRequest({ employee_id: null })).toMatchObject({ employeeId: null });
+    expect(mapBackendUpdateUserRequest({ role: 'admin' })).not.toHaveProperty('employeeId');
+    expect(mapBackendCreateUserRequest({ username: 'u1', password: 'secure-password', role: 'viewer', employee_id: 4 })).toMatchObject({ employeeId: 4 });
+  });
 });

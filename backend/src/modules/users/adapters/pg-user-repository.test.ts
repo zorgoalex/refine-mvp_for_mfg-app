@@ -178,6 +178,24 @@ describe('PgUserRepository', () => {
     expect(diffJson).not.toContain('"isActive"');
   });
 
+  it('links the user audit to the employee before and after a relink', async () => {
+    const database = new FakeUserDatabase([], [
+      { match: 'FROM users u', rows: [userRow({ user_id: 15, employee_id: 5 })] },
+      { match: 'UPDATE users u', rows: [userRow({ user_id: 15, employee_id: 7 })] },
+      { match: 'INSERT INTO audit_log', rows: [{ audit_id: 'audit-relink' }] },
+      { match: 'INSERT INTO audit_log_related_entity', rows: [] },
+      { match: 'INSERT INTO audit_log_related_entity', rows: [] },
+    ]);
+    const repository = new PgUserRepository(database);
+
+    await repository.updateUser({ currentUser: currentUser('admin', '1'), userId: 15, requestId: 'req_relink', dto: { employeeId: 7 } });
+
+    const related = database.queries.filter((q) => q.text.includes('INSERT INTO audit_log_related_entity')).map((q) => q.params);
+    expect(related).toEqual([['audit-relink', 'employee', 5], ['audit-relink', 'employee', 7]]);
+    // The pre-image is read under the row lock (a concurrent relink waits; «before» is the replaced employee).
+    expect(database.queries[0].text).toContain('FOR NO KEY UPDATE OF u');
+  });
+
   it('changes password and revokes active sessions inside one transaction', async () => {
     const database = new FakeUserDatabase([], [
       { match: 'UPDATE users', rows: [{ user_id: 10 }] },

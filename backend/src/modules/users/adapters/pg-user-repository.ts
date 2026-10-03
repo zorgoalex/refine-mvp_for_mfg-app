@@ -141,6 +141,7 @@ export class PgUserRepository implements UserRepositoryPort {
           entityId: user.id,
           after: sanitizeUserForAudit(user),
           diff: computeDiff(null, sanitizeUserForAudit(user)),
+          employeeIds: [user.employeeId],
         });
 
         return user;
@@ -152,7 +153,10 @@ export class PgUserRepository implements UserRepositoryPort {
 
   async updateUser(command: UpdateUserCommand): Promise<UserDto> {
     return this.database.transaction(async (tx) => {
-      const before = await this.getUserByIdInternal(tx, command.userId);
+      // Locked until the audit is written: a concurrent relink cannot slip between the pre-image and the
+      // update, so the audited «before» employee is the one this command really replaced. NO KEY UPDATE keeps
+      // the audit FK key-share of other commands of this user (e.g. a contacts save by him) unblocked.
+      const before = await this.getUserByIdInternal(tx, command.userId, { lock: true });
       const assignments: string[] = [];
       const params: unknown[] = [];
 
@@ -204,6 +208,7 @@ export class PgUserRepository implements UserRepositoryPort {
           entityId: user.id,
           after: sanitizeUserForAudit(user),
           diff: computeDiff(before ? sanitizeUserForAudit(before) : null, sanitizeUserForAudit(user)),
+          employeeIds: [before?.employeeId, user.employeeId],
         });
 
         return user;
@@ -297,7 +302,7 @@ export class PgUserRepository implements UserRepositoryPort {
     });
   }
 
-  private async getUserByIdInternal(database: DatabaseClient, userId: number): Promise<UserDto | null> {
+  private async getUserByIdInternal(database: DatabaseClient, userId: number, options: { lock?: boolean } = {}): Promise<UserDto | null> {
     const result = await database.query<UserRow>(
       `
       SELECT
@@ -307,6 +312,7 @@ export class PgUserRepository implements UserRepositoryPort {
       LEFT JOIN roles r ON r.role_id = u.role_id
       WHERE u.user_id = $1
         AND u.is_service_account = false
+      ${options.lock ? 'FOR NO KEY UPDATE OF u' : ''}
       `,
       [userId],
     );
@@ -451,8 +457,11 @@ async function writeUserAudit(
     after?: Record<string, unknown>;
     diff?: Record<string, unknown> | null;
     metadata?: Record<string, unknown>;
+    /** Employees linked to the user before and after the change (normalized audit links). */
+    employeeIds?: Array<number | null | undefined>;
   },
 ): Promise<void> {
+  const employees = [...new Set((input.employeeIds ?? []).filter((id): id is number => typeof id === 'number' && Number.isFinite(id)))];
   await auditService.record(tx, {
     event: input.action,
     entityType: 'user',
@@ -465,6 +474,7 @@ async function writeUserAudit(
     after: input.after ?? null,
     diff: input.diff ?? null,
     metadata: input.metadata ?? null,
+    ...(employees.length ? { relatedEntities: employees.map((entityId) => ({ entityType: 'employee', entityId })) } : {}),
   });
 }
 

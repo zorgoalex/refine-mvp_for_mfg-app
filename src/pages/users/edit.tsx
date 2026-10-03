@@ -1,5 +1,5 @@
 import { nameRule } from '../../utils/nameRules';
-import { Edit, useForm } from "@refinedev/antd";
+import { Edit, useForm, useSelect } from "@refinedev/antd";
 import { IResourceComponentsProps, useGetIdentity } from "@refinedev/core";
 import {
   Button,
@@ -41,6 +41,13 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
     onMutationSuccess: () => {
       message.success('Данные пользователя обновлены');
     },
+  });
+
+  const { selectProps: employeeSelectProps } = useSelect({
+    resource: "employees",
+    optionLabel: "full_name",
+    optionValue: "employee_id",
+    defaultValue: queryResult?.data?.data?.employee_id ?? undefined,
   });
 
   const [passwordLoading, setPasswordLoading] = useState(false);
@@ -168,6 +175,15 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
               </Select>
             </Form.Item>
           </Col>
+
+          {featureFlags.useBackendUsers && (
+            <Col xs={24} md={12}>
+              <Form.Item label="Сотрудник" name="employee_id" normalize={(value) => value ?? null}
+                extra="Несколько пользователей могут быть связаны с одним сотрудником">
+                <Select {...employeeSelectProps} allowClear showSearch placeholder="Не связан" />
+              </Form.Item>
+            </Col>
+          )}
 
           <Col xs={24} sm={12} md={4}>
             <Form.Item label="Статус" name="is_active" valuePropName="checked">

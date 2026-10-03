@@ -82,6 +82,17 @@ describe('runOrderSend', () => {
     expect(storage.data.has(KEY)).toBe(false);
   });
 
+  it('keys a pending employee send by recipient and phone, apart from other phones', async () => {
+    const storage = memoryStorage();
+    const primary = { kind: 'employee' as const, recipientKey: 'e1' };
+    const chosen = { kind: 'employee' as const, recipientKey: 'e1', contactId: 8 };
+    expect(pendingOrderSendKey(77, primary, 'order_pdf')).toContain('employee-e1-primary');
+    expect(pendingOrderSendKey(77, chosen, 'order_pdf')).toContain('employee-e1-8');
+    await runOrderSend({ ...base, target: chosen, send: async () => { throw apiError(500, 'INTERNAL_ERROR'); }, storage });
+    expect(readPendingOrderSend(77, chosen, 'order_pdf', '11', storage)?.payload.target).toEqual(chosen);
+    expect(readPendingOrderSend(77, primary, 'order_pdf', '11', storage)).toBeNull();
+  });
+
   it('drops the key on a first-attempt refusal (cooldown) and keeps it after an ambiguous attempt', async () => {
     const storage = memoryStorage();
     const refused = await runOrderSend({ ...base, send: async () => { throw apiError(409, 'ORDER_SEND_COOLDOWN', { nextAllowedAt: '2026-10-01T07:30:00Z' }); }, storage });
