@@ -1,0 +1,170 @@
+/* «NewLine»: доски статусов (заказы и производство) — спокойные колонки и карточки по мокапу.
+   Только оформление: перетаскивание, меню, фильтры, настройки колонок — прежние.
+   МДФ-доска (`--cnc`) этими правилами не затрагивается. */
+
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) {
+  /* верхняя панель NewLine ниже прежней шапки с вкладками */
+  height: calc(100vh - 92px);
+  padding: 18px 24px 16px;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-page__header h1,
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-page__header h2,
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-page__header h3 {
+  color: var(--evo-text);
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+/* ---------- панель фильтров: без рамки-карточки ---------- */
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-toolbar {
+  padding: 2px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-toolbar__checkbox {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--evo-border);
+  border-radius: 999px;
+  background: var(--evo-surface);
+  align-items: center;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-toolbar__checkbox.ant-checkbox-wrapper-checked {
+  border-color: color-mix(in srgb, var(--evo-primary) 45%, var(--evo-border));
+  background: color-mix(in srgb, var(--evo-primary) 8%, var(--evo-surface));
+}
+
+/* ---------- колонка ---------- */
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-column {
+  border: 1px solid var(--evo-border);
+  border-top: 1px solid var(--evo-border);
+  border-radius: 12px;
+  background: var(--evo-surface-muted);
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-columns--narrow-cards .status-board-column {
+  /* в узком режиме названия статусов читаются целиком или почти целиком */
+  width: 212px;
+  min-width: 212px;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-column__header {
+  min-height: 44px;
+  padding: 10px 12px 6px;
+  border-bottom: 0;
+  background: transparent;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-column__title .ant-typography strong {
+  color: var(--evo-text);
+  font-size: 13.5px;
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-column__header .ant-badge-count {
+  min-width: 22px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--evo-surface) !important;
+  box-shadow: 0 0 0 1px var(--evo-border);
+  color: var(--evo-text-secondary) !important;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-column-help__trigger {
+  color: var(--evo-text-secondary);
+  opacity: 0.6;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-column__cards {
+  padding: 4px 8px 8px;
+  gap: 8px;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-column__empty {
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+  opacity: 0.8;
+}
+
+/* ---------- карточка заказа ---------- */
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-card {
+  padding: 9px 11px 10px;
+  border: 1px solid var(--evo-border);
+  border-radius: 9px;
+  background: var(--evo-surface);
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-card:hover {
+  border-color: var(--evo-border-strong);
+}
+
+/* плановая дата прошла — красная полоса слева и красная дата */
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-card:has(.status-board-card__overdue-icon) {
+  box-shadow: inset 3px 0 0 var(--evo-danger, #c33b32);
+}
+
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-card__standard-cell:has(.status-board-card__overdue-icon) {
+  color: var(--evo-danger, #c33b32);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-card__top {
+  min-height: 0;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-card__number.ant-btn {
+  min-height: 0;
+  padding: 0;
+  color: var(--evo-text);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-card__number.ant-btn:hover {
+  color: var(--evo-primary);
+}
+
+/* на доске статусов заказов метка статуса повторяет заголовок колонки — её достаточно в заголовке */
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-columns--order .status-board-card__status-badge {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-card__status-badge.ant-tag {
+  border: 0;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-card__client {
+  margin-bottom: 4px;
+  color: var(--evo-text);
+  font-size: 13px;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-card__standard-grid {
+  margin-top: 3px;
+  gap: 3px 10px;
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-card__standard-client {
+  grid-column: 1 / -1;
+}
+
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .status-board-card__compact-text {
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
