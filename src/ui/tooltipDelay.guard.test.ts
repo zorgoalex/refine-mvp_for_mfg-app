@@ -53,7 +53,7 @@ describe('delayed tooltip defaults', () => {
     expect(wrapperSource).toContain('React.forwardRef<unknown, AntdTooltipProps>');
     expect(wrapperSource).toContain('React.forwardRef<unknown, AntdPopoverProps>');
     expect(wrapperSource).toContain('showSorterTooltip={withDelayedSorterTooltip(showSorterTooltip)}');
-    expect(wrapperSource).toContain('Object.assign(DelayedTable, AntdTable)');
+    expect(wrapperSource).toContain('Object.assign(DelayedTable, tableStatics)');
   });
 
   it('delays AntD tooltip and popover motion overlays that bypass app wrappers', () => {

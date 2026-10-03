@@ -90,7 +90,10 @@ const DelayedTable = React.forwardRef<HTMLDivElement, AntdTableProps<any>>((prop
   );
 });
 
-const TableWithStatics = Object.assign(DelayedTable, AntdTable);
+// Статические поля antd-таблицы (Column, Summary, SELECTION_*) — без `$$typeof`/`render`: их копирование подменяло бы
+// рендер обёртки на родной, и обёртка (задержка подсказки сортировки, заголовки справочников) не работала бы.
+const { $$typeof: _nativeType, render: _nativeRender, ...tableStatics } = AntdTable as unknown as Record<string, unknown>;
+const TableWithStatics = Object.assign(DelayedTable, tableStatics) as unknown as typeof AntdTable;
 DelayedTable.displayName = 'Table';
 
 export const Table: typeof AntdTable = TableWithStatics;
