@@ -962,6 +962,37 @@ paths:
         '200': {description: Menu, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppOrderSendMenu'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/whatsapp/order-send/queue:
+    get:
+      tags: [WhatsApp]
+      operationId: getWhatsAppOrderSendQueue
+      summary: 'The order card send queue or the finished sends of 7 days'
+      description: 'Without history: every waiting send (FIFO) with its place and approximate delivery start (threshold + half the window per send ahead; a send expected to expire takes no slot). history=1: finished sends of the last 7 days, 50 per page, newest first. No phones or group ids, masks only.'
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage]
+      parameters:
+        - {name: history, in: query, required: false, schema: {type: string, enum: ['0', '1']}}
+        - {name: page, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 1000}}
+      responses:
+        '200': {description: Queue, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppOrderSendQueue'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {description: Invalid request}
+  /api/v1/whatsapp/order-send/sends/{sendId}/cancel:
+    post:
+      tags: [WhatsApp]
+      operationId: cancelWhatsAppOrderSend
+      summary: 'Cancel a waiting order card send'
+      description: 'Allowed to its author and to a user with whatsapp.manage (any send); a foreign send of anyone else is 404. A waiting send becomes cancelled (reason manual, audited with the canceller); a finished one is returned as is; a send already being delivered is 409 ORDER_SEND_NOT_CANCELLABLE.'
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: sendId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: The send, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppOrderSendEnvelope'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {description: 'ORDER_SEND_NOT_FOUND'}
+        '409': {description: 'ORDER_SEND_NOT_CANCELLABLE'}
+        '422': {description: Invalid request}
   /api/v1/orders/{orderId}/whatsapp-sends:
     get:
       tags: [WhatsApp]
@@ -980,7 +1011,7 @@ paths:
       tags: [WhatsApp]
       operationId: createOrderWhatsAppSend
       summary: 'Queue an order form for the client or a configured chat (idempotent)'
-      description: 'The backend builds the form (PDF or Excel) from the order; production forms never carry prices or payments. Order view and export rights are checked within their scopes, a financial form needs orders.view_financials. The same idempotencyKey with the same order, target and form returns the original send. At most one card send is active in the system, and deliveries start at most once per the configured interval (409 ORDER_SEND_COOLDOWN with details.nextAllowedAt).'
+      description: 'The backend builds the form (PDF or Excel) from the order; production forms never carry prices or payments. Order view and export rights are checked within their scopes, a financial form needs orders.view_financials. The same idempotencyKey with the same order, target and form returns the original send. The send always waits in the FIFO queue (24 hours at most): deliveries start at most once per the configured interval plus the window; the response carries its position and the estimated start. 409 ORDER_SEND_ALREADY_QUEUED when the same form already waits for the same recipient (details.sendId, estimatedAt), 409 ORDER_SEND_QUEUE_FULL (100 in total, 20 per author), 422 ORDER_SEND_TOO_LONG for an image form over 20 pictures. An image form is sent as PNG pictures of up to 55 details each.'
       security: [{bearerAuth: []}]
       x-permissions: [orders.view, orders.export]
       parameters:
@@ -30253,7 +30284,7 @@ components:
           type: array
           items:
             type: object
-            required: [kind, id, title, state, active, estimatedAt, createdAt, finishedAt, errorCode, cancelReason, orderId, targetDate]
+            required: [kind, id, title, state, active, estimatedAt, createdAt, finishedAt, errorCode, cancelReason, orderId, targetDate, cancellable, cancelledByOther]
             properties:
               kind: {type: string, enum: [order_send, calendar_send]}
               id: {type: string, format: uuid}
@@ -30267,9 +30298,11 @@ components:
               cancelReason: {type: string, nullable: true}
               orderId: {type: integer, nullable: true}
               targetDate: {type: string, format: date, nullable: true}
+              cancellable: {type: boolean, description: 'The caller may cancel it now (a waiting order card send)'}
+              cancelledByOther: {type: boolean, description: 'Cancelled by a WhatsApp manager, not by the caller'}
     WhatsAppOrderFormCode:
       type: string
-      enum: [production_pdf, order_pdf, production_excel, order_excel]
+      enum: [production_pdf, order_pdf, production_excel, order_excel, production_image, order_image]
     WhatsAppOrderSendChat:
       type: object
       additionalProperties: false
@@ -30295,13 +30328,15 @@ components:
         updatedBy: {type: object, nullable: true, properties: {id: {type: string}, username: {type: string, nullable: true}}}
     WhatsAppOrderSendSettingsEnvelope:
       type: object
-      required: [settings, forms, captionVariables, nextAllowedAt, activeSend, runtime]
+      required: [settings, forms, captionVariables, nextAllowedAt, activeSend, queueLength, nextDeliveryAt, runtime]
       properties:
         settings: {$ref: '#/components/schemas/WhatsAppOrderSendSettings'}
-        forms: {type: array, items: {type: object, properties: {code: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}, title: {type: string}, format: {type: string, enum: [pdf, xlsx]}, financial: {type: boolean}}}}
+        forms: {type: array, items: {type: object, properties: {code: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}, title: {type: string}, format: {type: string, enum: [pdf, xlsx, png]}, financial: {type: boolean}}}}
         captionVariables: {type: array, items: {type: object, properties: {name: {type: string}, label: {type: string}, example: {type: string}}}}
         nextAllowedAt: {type: string, format: date-time, nullable: true}
         activeSend: {type: boolean}
+        queueLength: {type: integer, minimum: 0, description: 'Waiting sends (queued + sending)'}
+        nextDeliveryAt: {type: string, format: date-time, nullable: true, description: 'Approximate start of the next delivery'}
         runtime: {$ref: '#/components/schemas/WhatsAppBroadcastRuntime'}
     WhatsAppOrderSendSettingsUpdate:
       type: object
@@ -30329,9 +30364,10 @@ components:
               caption: {type: string, maxLength: 1000}
     WhatsAppOrderSendMenu:
       type: object
-      required: [enabled, forms, client, chats, nextAllowedAt, activeSend, runtime]
+      required: [enabled, forms, client, chats, nextAllowedAt, activeSend, queueLength, runtime]
       properties:
         enabled: {type: boolean}
+        queueLength: {type: integer, minimum: 0}
         forms: {type: array, items: {type: object, properties: {code: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}, title: {type: string}, financial: {type: boolean}}}}
         client: {type: object, properties: {forms: {type: array, items: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}}}}
         chats: {type: array, items: {type: object, properties: {chatKey: {type: string, format: uuid}, label: {type: string}, forms: {type: array, items: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}}}}}
@@ -30352,7 +30388,8 @@ components:
         confirmAfterUnknown: {type: string, format: uuid, nullable: true, description: 'Explicit repeat after the latest send of the same order, recipient and form ended unknown: its sendId from 409 ORDER_SEND_PREVIOUS_UNKNOWN details.'}
     WhatsAppOrderSend:
       type: object
-      required: [sendId, orderId, targetKind, chatKey, recipientLabel, recipientMasked, form, state, errorCode, cancelReason, createdAt, sentAt, actor]
+      required: [sendId, orderId, targetKind, chatKey, recipientLabel, recipientMasked, form, state, errorCode, cancelReason, createdAt, sentAt, actor,
+        partsTotal, position, estimatedAt, mayExpire, expiresAt]
       properties:
         sendId: {type: string, format: uuid}
         orderId: {type: integer}
@@ -30363,10 +30400,39 @@ components:
         form: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}
         state: {type: string, enum: [queued, sending, sent, failed, unknown, cancelled, expired]}
         errorCode: {type: string, nullable: true}
-        cancelReason: {type: string, nullable: true, enum: [disabled, recipient_removed, recipient_changed, form_not_allowed, permission_revoked, paused, null]}
+        cancelReason: {type: string, nullable: true, enum: [disabled, recipient_removed, recipient_changed, form_not_allowed, permission_revoked, paused, manual, null]}
         createdAt: {type: string, format: date-time}
         sentAt: {type: string, format: date-time, nullable: true}
         actor: {type: object, properties: {id: {type: string}, username: {type: string, nullable: true}}}
+        partsTotal: {type: integer, minimum: 1, maximum: 20, description: 'Pictures of an image form (1 for a file)'}
+        position: {type: integer, minimum: 1, nullable: true, description: 'Place in the queue while waiting'}
+        estimatedAt: {type: string, format: date-time, nullable: true, description: 'Approximate start of the delivery while waiting'}
+        mayExpire: {type: boolean, description: 'Expected to expire (24 hours from the command) before its turn'}
+        expiresAt: {type: string, format: date-time}
+    WhatsAppOrderSendQueueItem:
+      allOf:
+        - {$ref: '#/components/schemas/WhatsAppOrderSend'}
+        - type: object
+          required: [orderName, formTitle, finishedAt, cancelledBy]
+          properties:
+            orderName: {type: string, nullable: true}
+            formTitle: {type: string}
+            finishedAt: {type: string, format: date-time, nullable: true}
+            cancelledBy: {type: object, nullable: true, properties: {id: {type: string}, username: {type: string, nullable: true}}}
+    WhatsAppOrderSendQueue:
+      type: object
+      required: [paused, enabled, minIntervalMinutes, sendWindowMinutes, nextDeliveryAt, queueLength, page, pageSize, total, items]
+      properties:
+        paused: {type: boolean}
+        enabled: {type: boolean}
+        minIntervalMinutes: {type: integer}
+        sendWindowMinutes: {type: integer}
+        nextDeliveryAt: {type: string, format: date-time, nullable: true}
+        queueLength: {type: integer, minimum: 0}
+        page: {type: integer, minimum: 1}
+        pageSize: {type: integer, minimum: 0}
+        total: {type: integer, minimum: 0}
+        items: {type: array, items: {$ref: '#/components/schemas/WhatsAppOrderSendQueueItem'}}
     WhatsAppOrderSendEnvelope:
       type: object
       required: [send]

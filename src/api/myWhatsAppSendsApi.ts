@@ -16,6 +16,10 @@ export interface MyWhatsAppSend {
   cancelReason: string | null;
   orderId: number | null;
   targetDate: string | null;
+  /** The caller may cancel it now (a waiting order card send); absent on an older backend. */
+  cancellable?: boolean;
+  /** Cancelled by a WhatsApp manager, not by the caller. */
+  cancelledByOther?: boolean;
 }
 
 export interface MyWhatsAppSendsResponse {

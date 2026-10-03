@@ -1,10 +1,10 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Post, Put, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { RequirePermissions } from '../../../permissions/require-permissions.decorator';
 import { WhatsAppPermissionsGuard } from '../whatsapp-permissions.guard';
-import { parseOrderId, parseOrderSendCommand, parseOrderSendSettings } from './order-send.dto';
+import { parseOrderId, parseOrderSendCommand, parseOrderSendSettings, parseQueueQuery, parseSendId } from './order-send.dto';
 import { OrderSendService } from './order-send.service';
 import { ORDER_SEND_PERMISSIONS, ORDER_SEND_SETTINGS_PERMISSIONS } from './order-send.types';
 
@@ -28,6 +28,19 @@ export class OrderSendController {
   @ApiOperation({ summary: 'Order card menu: recipients and forms available to the current user (no group ids)' })
   @Get('whatsapp/order-send/menu') @RequirePermissions(ORDER_SEND_PERMISSIONS)
   menu(@Req() request: RequestWithCurrentUser) { return this.service.menu(user(request)); }
+
+  @ApiOperation({ summary: 'The order card send queue (waiting sends with the estimated time) or the finished ones of 7 days' })
+  @Get('whatsapp/order-send/queue') @RequirePermissions(ORDER_SEND_SETTINGS_PERMISSIONS)
+  queue(@Query('history') history: unknown, @Query('page') page: unknown) {
+    return this.service.queue(parseQueueQuery(history, page));
+  }
+
+  /** The author cancels his own waiting send, a WhatsApp manager any; checked per send (no permission gate here). */
+  @ApiOperation({ summary: 'Cancel a waiting order card send (its author or a WhatsApp manager)' })
+  @Post('whatsapp/order-send/sends/:sendId/cancel') @HttpCode(200)
+  cancel(@Param('sendId') sendId: string, @Req() request: RequestWithCurrentUser) {
+    return this.service.cancel(parseSendId(sendId), user(request), requestId(request));
+  }
 
   @ApiOperation({ summary: 'Latest WhatsApp sends of one order' })
   @Get('orders/:orderId/whatsapp-sends') @RequirePermissions(ORDER_SEND_PERMISSIONS)

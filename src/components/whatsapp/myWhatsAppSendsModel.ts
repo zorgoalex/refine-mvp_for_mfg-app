@@ -245,16 +245,44 @@ export function balloonFor(item: MyWhatsAppSend): WhatsAppBalloon {
     case 'partial':
       return { type: 'warning', title: 'Отправлено частично', text: item.title };
     case 'unknown':
-      return { type: 'warning', title: 'Результат отправки неизвестен', text: `${item.title} — проверьте чат` };
+      return item.errorCode === 'PARTIAL_DELIVERY'
+        ? { type: 'warning', title: 'Ушла только часть изображений', text: `${item.title} — проверьте чат` }
+        : { type: 'warning', title: 'Результат отправки неизвестен', text: `${item.title} — проверьте чат` };
     case 'unconfirmed':
       return { type: 'warning', title: 'Не удалось подтвердить отправку', text: `${item.title} — проверьте чат` };
     case 'cancelled':
+      if (item.cancelReason === 'manual') {
+        return { type: 'warning', title: item.cancelledByOther ? 'Отменено администратором' : 'Отправка отменена', text: item.title };
+      }
+      return { type: 'warning', title: 'Отправка не состоялась', text: item.title };
     case 'expired':
     case 'skipped':
       return { type: 'warning', title: 'Отправка не состоялась', text: item.title };
     default:
       return { type: 'error', title: 'Не отправлено', text: `${item.title}${item.errorCode && FAILURES[item.errorCode] ? ` — ${FAILURES[item.errorCode]}` : ''}` };
   }
+}
+
+/** More finished at once than this — one summary balloon instead of a stack (mass cancel, a long queue). */
+export const BALLOON_SUMMARY_FROM = 4;
+
+/**
+ * The balloons of the sends that finished since the last poll: one each, or — when many finished at
+ * once (the queue was disabled, a long queue left) — a single summary.
+ */
+export function balloonsFor(items: readonly MyWhatsAppSend[]): Array<WhatsAppBalloon & { key: string }> {
+  if (items.length < BALLOON_SUMMARY_FROM) return items.map((item) => ({ ...balloonFor(item), key: `whatsapp-send-${item.id}` }));
+  const sent = items.filter((item) => item.state === 'sent').length;
+  const cancelled = items.filter((item) => item.state === 'cancelled').length;
+  const other = items.length - sent - cancelled;
+  const parts = [sent ? `отправлено ${sent}` : '', cancelled ? `отменено ${cancelled}` : '', other ? `не состоялось или под вопросом ${other}` : '']
+    .filter(Boolean).join(', ');
+  return [{
+    key: `whatsapp-send-summary-${items.map((item) => item.id).sort().join('.').slice(0, 64)}`,
+    type: other || cancelled ? 'warning' : 'success',
+    title: `WhatsApp: завершено ${items.length} отправок`,
+    text: `${parts}. Подробности — в истории отправок.`,
+  }];
 }
 
 /** «≈ 12:45» in Almaty time; «сейчас» when the estimate is within a minute. */

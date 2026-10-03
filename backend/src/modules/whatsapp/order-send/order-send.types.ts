@@ -6,6 +6,8 @@ export const ORDER_FORMS = [
   { code: 'order_pdf', title: 'PDF заказа', format: 'pdf', financial: true },
   { code: 'production_excel', title: 'Excel для производства', format: 'xlsx', financial: false },
   { code: 'order_excel', title: 'Excel заказа', format: 'xlsx', financial: true },
+  { code: 'production_image', title: 'Изображение для производства', format: 'png', financial: false },
+  { code: 'order_image', title: 'Изображение заказа', format: 'png', financial: true },
 ] as const;
 
 export type OrderFormCode = (typeof ORDER_FORMS)[number]['code'];
@@ -31,6 +33,7 @@ export function isDeliverableForm(code: string): code is OrderFormCode {
 export const ORDER_FORM_MIME: Record<OrderFormFormat, string> = {
   pdf: 'application/pdf',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  png: 'image/png',
 };
 
 /** Card command and menu: «как у экспорта» (scope is checked per order). */
@@ -40,11 +43,16 @@ export const ORDER_SEND_SETTINGS_PERMISSIONS: readonly PermissionName[] = ['what
 
 export const ORDER_SEND_MAX_CHATS = 20;
 export const ORDER_SEND_FILE_MAX_BYTES = 10 * 1024 * 1024;
-export const ORDER_SEND_QUEUE_TTL_MS = 30 * 60_000;
+/** A queued send waits at most 24 hours from the command, then expires. */
+export const ORDER_SEND_QUEUE_TTL_MS = 24 * 60 * 60_000;
+/** Waiting sends in the whole queue / of one author (the balloon tracker follows up to 50 ids). */
+export const ORDER_SEND_QUEUE_MAX = 100;
+export const ORDER_SEND_QUEUE_MAX_PER_ACTOR = 20;
 export const ORDER_SEND_RETENTION_MS = 7 * 24 * 60 * 60_000;
 
 export type OrderSendState = 'queued' | 'sending' | 'sent' | 'failed' | 'unknown' | 'cancelled' | 'expired';
-export type OrderSendCancelReason = 'disabled' | 'recipient_removed' | 'recipient_changed' | 'form_not_allowed' | 'permission_revoked' | 'paused';
+export type OrderSendCancelReason = 'disabled' | 'recipient_removed' | 'recipient_changed' | 'form_not_allowed' | 'permission_revoked' | 'paused'
+  | 'manual';
 export type OrderSendTarget = { kind: 'client' } | { kind: 'chat'; chatKey: string };
 
 export interface OrderSendChat {
@@ -93,6 +101,8 @@ export interface OrderSendMenu {
   chats: Array<{ chatKey: string; label: string; forms: OrderFormCode[] }>;
   nextAllowedAt: string | null;
   activeSend: boolean;
+  /** Waiting sends in the queue (queued + sending). */
+  queueLength: number;
   runtime: OrderSendRuntime;
 }
 
@@ -110,4 +120,13 @@ export interface OrderSendView {
   createdAt: string;
   sentAt: string | null;
   actor: { id: string; username: string | null };
+  /** Pictures of an image form (1 for a file). */
+  partsTotal: number;
+  /** 1-based place in the queue while queued/sending, else null. */
+  position: number | null;
+  /** Approximate start of the delivery while queued/sending (ISO), else null. */
+  estimatedAt: string | null;
+  /** The send is expected to expire before its turn. */
+  mayExpire: boolean;
+  expiresAt: string;
 }

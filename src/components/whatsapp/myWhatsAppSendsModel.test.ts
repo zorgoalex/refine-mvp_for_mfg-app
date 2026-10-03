@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { MyWhatsAppSend } from '../../api/myWhatsAppSendsApi';
 import {
-  addedTrackedIds, balloonFor, collectFinished, emptyFollowState, estimateText, fromBroadcastRun, fromOrderSendView, loadState, nextPollDelay,
+  addedTrackedIds, balloonFor, balloonsFor, collectFinished, emptyFollowState, estimateText, fromBroadcastRun, fromOrderSendView, loadState, nextPollDelay,
   trackSend, withFollowLock, type FollowAccess,
 } from './myWhatsAppSendsModel';
 
@@ -165,7 +165,7 @@ describe('wiring', () => {
   it('one tracker in the authenticated shell; the bell reads it; card and calendar register sends with an owner captured before the command', () => {
     const bell = read('../NotificationBell.tsx');
     expect(bell).toContain('useWhatsAppSends()');
-    expect(bell).toContain('<MyWhatsAppSendsBlock items={whatsappSends.items} />');
+    expect(bell).toContain('<MyWhatsAppSendsBlock items={whatsappSends.items} onChanged={whatsappSends.refresh} />');
     const provider = read('./WhatsAppSendsProvider.tsx');
     expect(provider).toContain('useMyWhatsAppSends()');
     expect(provider).toContain('{contextHolder}');
@@ -183,5 +183,34 @@ describe('wiring', () => {
     expect(hook).toContain('useSyncExternalStore(authSession.subscribe, authSession.getSessionGeneration');
     expect(hook).toContain("window.addEventListener('storage', onStorage);");
     expect(hook).toContain('if (legacy.current) next = await legacyItems(followed.tracked, followed.meta, userId);');
+  });
+});
+
+describe('queue balloons', () => {
+  const item = (id: string, state: string, extra: Partial<MyWhatsAppSend> = {}): MyWhatsAppSend => ({
+    kind: 'order_send', id, title: `Заказ ${id}`, state, active: false, estimatedAt: null, createdAt: '', finishedAt: null,
+    errorCode: null, cancelReason: null, orderId: 1, targetDate: null, ...extra,
+  });
+
+  it('a manual cancel says who: the author himself or an administrator', () => {
+    expect(balloonFor(item('a', 'cancelled', { cancelReason: 'manual', cancelledByOther: false })).title).toBe('Отправка отменена');
+    expect(balloonFor(item('a', 'cancelled', { cancelReason: 'manual', cancelledByOther: true })).title).toBe('Отменено администратором');
+    expect(balloonFor(item('a', 'unknown', { errorCode: 'PARTIAL_DELIVERY' })).title).toBe('Ушла только часть изображений');
+  });
+
+  it('many finished at once → one summary balloon; a few → one each', () => {
+    expect(balloonsFor([item('a', 'sent'), item('b', 'cancelled')]).map((balloon) => balloon.key)).toEqual(['whatsapp-send-a', 'whatsapp-send-b']);
+    const summary = balloonsFor([...Array.from({ length: 12 }, (_, index) => item(`c${index}`, 'cancelled', { cancelReason: 'disabled' })), item('s', 'sent')]);
+    expect(summary).toHaveLength(1);
+    expect(summary[0]).toMatchObject({ type: 'warning', title: 'WhatsApp: завершено 13 отправок' });
+    expect(summary[0].text).toContain('отменено 12');
+  });
+
+  it('the bell block cancels a waiting card send of its author, inside the dropdown', () => {
+    const block = readFileSync(new URL('./MyWhatsAppSendsBlock.tsx', import.meta.url), 'utf8');
+    expect(block).toContain("item.cancellable && item.kind === 'order_send'");
+    expect(block).toContain('getPopupContainer');
+    const hook = readFileSync(new URL('./useMyWhatsAppSends.ts', import.meta.url), 'utf8');
+    expect(hook).toContain('const allowed = Boolean(userId);');
   });
 });

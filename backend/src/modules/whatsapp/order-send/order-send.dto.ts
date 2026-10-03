@@ -69,3 +69,18 @@ export function parseOrderId(value: string): number {
 function validation(error: z.ZodError): ApiError {
   return new ApiError(422, 'VALIDATION_ERROR', 'Некорректный запрос', { issues: error.issues.slice(0, 5).map((issue) => ({ path: issue.path.join('.'), message: issue.message })) });
 }
+
+export function parseSendId(value: string): string {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный идентификатор отправки');
+  }
+  return value.toLowerCase();
+}
+
+/** `history=1` — finished sends; `page` — 1..1000 (history only). */
+export function parseQueueQuery(history: unknown, page: unknown): { history: boolean; page: number } {
+  if (history !== undefined && history !== '0' && history !== '1') throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный параметр history');
+  const parsed = page === undefined || page === '' ? 1 : Number(page);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 1000) throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный номер страницы');
+  return { history: history === '1', page: parsed };
+}

@@ -2558,9 +2558,24 @@ probe_file() {
       "$(q_con_on whatsapp_order_sends chk_whatsapp_order_sends_target)" \
       "$(q_con_on whatsapp_order_sends chk_whatsapp_order_sends_sent)" \
       "$(q_con_on whatsapp_order_sends chk_whatsapp_order_sends_purged)" \
-      "$(q_idx idx_whatsapp_order_sends_one_active)" "$(q_idx idx_whatsapp_order_send_chats_group_active)" \
+      "$(q_idx idx_whatsapp_order_send_chats_group_active)" \
       "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_whatsapp_order_send_chats_immutable' AND NOT tgisinternal);" \
       "SELECT EXISTS (SELECT 1 FROM whatsapp_order_send_settings WHERE singleton);" ;;
+    # 233: queue instead of refusals (no «one active» index), manual cancel, image forms + their pages.
+    # 230's probe checks its end state: 233 drops the one-active index, so 230 does not require it.
+    233_whatsapp_order_send_queue*) probe_all \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='idx_whatsapp_order_sends_one_active');" \
+      "$(q_idx idx_whatsapp_order_sends_queue)" "$(q_idx idx_whatsapp_order_send_parts_file)" \
+      "$(q_col whatsapp_order_sends cancelled_by)" "$(q_col whatsapp_order_sends parts_total)" "$(q_tbl whatsapp_order_send_parts)" \
+      "$(q_con_on whatsapp_order_sends chk_whatsapp_order_sends_cancelled_by)" \
+      "$(q_con_on whatsapp_order_sends chk_whatsapp_order_sends_parts_total)" \
+      "$(q_con_on whatsapp_order_send_parts chk_whatsapp_order_send_parts_purged)" \
+      "SELECT COALESCE((SELECT pg_get_constraintdef(oid) LIKE '%manual%' FROM pg_constraint WHERE conname='chk_whatsapp_order_sends_cancel_reason' AND conrelid='public.whatsapp_order_sends'::regclass), false);" \
+      "SELECT COALESCE((SELECT pg_get_constraintdef(oid) LIKE '%order_image%' FROM pg_constraint WHERE conname='chk_whatsapp_order_sends_form_code' AND conrelid='public.whatsapp_order_sends'::regclass), false);" \
+      "SELECT COALESCE((SELECT pg_get_constraintdef(oid) LIKE '%png%' FROM pg_constraint WHERE conname='chk_whatsapp_order_sends_file_key' AND conrelid='public.whatsapp_order_sends'::regclass), false);" \
+      "SELECT COALESCE((SELECT pg_get_constraintdef(oid) LIKE '%order_image%' FROM pg_constraint WHERE conname='chk_whatsapp_order_send_settings_client_forms' AND conrelid='public.whatsapp_order_send_settings'::regclass), false);" \
+      "SELECT COALESCE((SELECT pg_get_constraintdef(oid) LIKE '%order_image%' FROM pg_constraint WHERE conname='chk_whatsapp_order_send_chats_forms' AND conrelid='public.whatsapp_order_send_chats'::regclass), false);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname IN ('whatsapp_order_sends_cancel_reason_check','whatsapp_order_sends_form_code_check','whatsapp_order_sends_file_key_check','whatsapp_order_send_settings_client_forms_check','whatsapp_order_send_chats_forms_check'));" ;;
     224_whatsapp_calendar_send*) probe_all \
       "$(q_col whatsapp_broadcasts purpose)" "$(q_col whatsapp_broadcasts calendar_min_interval_minutes)" \
       "$(q_col whatsapp_broadcasts calendar_last_delivery_at)" "$(q_col whatsapp_broadcast_runs source)" \
@@ -2978,7 +2993,7 @@ verify_applied_effect() {
     205_warehouses_onec_key_required*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*)
+    209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)

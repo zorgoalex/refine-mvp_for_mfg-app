@@ -3,6 +3,7 @@ import { httpClient } from './httpClient';
 import type {
   OrderSendCommandInput,
   OrderSendMenu,
+  OrderSendQueue,
   OrderSendResponse,
   OrderSendSettingsEnvelope,
   OrderSendSettingsInput,
@@ -18,4 +19,7 @@ export const orderSendApi = {
     httpClient.post<OrderSendResponse>(apiRoutes.orders.whatsappSends(orderId), body),
   list: (orderId: number) =>
     httpClient.get<{ sends: OrderSendView[] }>(apiRoutes.orders.whatsappSends(orderId)),
+  queue: (history = false, page = 1) =>
+    httpClient.get<OrderSendQueue>(`${apiRoutes.whatsapp.orderSend.queue}${history ? `?history=1&page=${page}` : ''}`),
+  cancel: (sendId: string) => httpClient.post<OrderSendResponse>(apiRoutes.whatsapp.orderSend.cancel(sendId), {}),
 };

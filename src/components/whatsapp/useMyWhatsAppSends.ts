@@ -5,9 +5,8 @@ import { authSession } from '../../api/authSession';
 import { broadcastsApi } from '../../api/broadcastsApi';
 import { myWhatsAppSendsApi, type MyWhatsAppSend } from '../../api/myWhatsAppSendsApi';
 import { orderSendApi } from '../../api/orderSendApi';
-import { canAny } from '../../utils/permissions';
 import {
-  WHATSAPP_SEND_QUEUED_EVENT, addedTrackedIds, balloonFor, browserStorage, collectFinished, emptyFollowState, followStateKey,
+  WHATSAPP_SEND_QUEUED_EVENT, addedTrackedIds, balloonsFor, browserStorage, collectFinished, emptyFollowState, followStateKey,
   LEGACY_FOLLOW_MS, fromBroadcastRun, fromOrderSendView, loadState, nextPollDelay, trackSend, unconfirmedItem, withFollowLock,
   type FollowAccess, type SendMeta,
 } from './myWhatsAppSendsModel';
@@ -69,7 +68,9 @@ export function useMyWhatsAppSends(): { items: MyWhatsAppSend[]; refresh: () => 
   const session = useSyncExternalStore(authSession.subscribe, authSession.getSessionGeneration, authSession.getSessionGeneration);
   const user = authSession.getUser();
   const userId = user?.id ? String(user.id) : '';
-  const allowed = Boolean(userId) && canAny(['orders.export', 'whatsapp.manage'], user);
+  // Any signed-in user: the backend returns only his own sends (an author keeps cancelling his waiting ones
+  // even after a right was taken away).
+  const allowed = Boolean(userId);
   const [api, contextHolder] = notification.useNotification({ maxCount: BALLOON_MAX });
   const [items, setItems] = useState<MyWhatsAppSend[]>([]);
   const [supported, setSupported] = useState<boolean | null>(null);
@@ -118,10 +119,9 @@ export function useMyWhatsAppSends(): { items: MyWhatsAppSend[]; refresh: () => 
         // The session is re-checked INSIDE the lock, before any write.
         const due = await withFollowLock(userId, () => (current() ? collectFinished(items, userId, access.current) : null));
         if (due === null || !current()) return;
-        for (const finished of due) {
-          const balloon = balloonFor(finished);
+        for (const balloon of balloonsFor(due)) {
           api[balloon.type]({
-            key: `whatsapp-send-${finished.id}`, message: balloon.title, description: balloon.text,
+            key: balloon.key, message: balloon.title, description: balloon.text,
             placement: 'bottomRight', duration: 15, style: { opacity: 0.88 },
           });
         }

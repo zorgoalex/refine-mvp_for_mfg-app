@@ -223,3 +223,16 @@ describe('a repeat after an unknown outcome is decided by the server', () => {
     expect(model.readPendingOrderSend(7, target, 'order_pdf', '11', storage)?.payload.idempotencyKey).toBe(PREVIOUS);
   });
 });
+
+describe('queue texts', () => {
+  it('the queued toast tells the place and «≈ when»; the queue refusals are explained', async () => {
+    const { orderSendSuccessToast, orderSendErrorToast } = await import('./whatsappOrderSendModel');
+    expect(orderSendSuccessToast('клиенту', 'PDF заказа', { position: 3, estimatedAt: '2026-10-03T09:35:00Z' }).text)
+      .toBe('Заказ поставлен в очередь на отправку (№3), ≈ 14:35: клиенту (PDF заказа)');
+    expect(orderSendSuccessToast('клиенту', 'PDF заказа', { position: 1, estimatedAt: null }).text).toBe('Заказ поставлен в очередь на отправку: клиенту (PDF заказа)');
+    expect(orderSendErrorToast(apiError(409, 'ORDER_SEND_ALREADY_QUEUED', { estimatedAt: '2026-10-03T09:35:00Z' })).text).toContain('уйдёт ≈ 14:35');
+    expect(orderSendErrorToast(apiError(409, 'ORDER_SEND_QUEUE_FULL', { scope: 'actor', limit: 20 })).text).toContain('20 отправок');
+    expect(orderSendErrorToast(apiError(422, 'ORDER_SEND_TOO_LONG')).text).toContain('20 изображений');
+  });
+});
+

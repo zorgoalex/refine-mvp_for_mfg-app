@@ -45,6 +45,7 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
   const sent: Array<{ chatId: string; filename: string; mimetype: string; caption: string; bytes: Buffer }> = [];
   let sendBehaviour: () => Promise<{ messageId?: string }> = async () => ({ messageId: `true_7${PHONE_DIGITS}@c.us_ABCDEF` });
   let checkBehaviour: (phone: string) => Promise<{ exists: boolean; chatId: string | null }> = async (phone) => ({ exists: true, chatId: `${phone}@c.us` });
+  let imageBehaviour: (index: number) => Promise<{ messageId?: string }> = async (index) => ({ messageId: `img_${index}` });
   const q = <T extends QueryResultRow = QueryResultRow>(text: string, params: unknown[] = []) => client.query<T>(text, params);
 
   beforeAll(async () => {
@@ -103,6 +104,7 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
     await q(`INSERT INTO order_details(order_id, detail_number, height, width, quantity, milling_cost_per_sqm, film_id) VALUES (9002, 1, 500, 500, 2, 1000, 1)`);
     const { readFile } = await import('node:fs/promises');
     await q(await readFile(new URL('../../../../db/migrations/230_whatsapp_order_send.sql', import.meta.url), 'utf8'));
+    await q(await readFile(new URL('../../../../db/migrations/233_whatsapp_order_send_queue.sql', import.meta.url), 'utf8'));
     database = {
       isConfigured: true,
       query: <T extends QueryResultRow = QueryResultRow>(text: string, params: readonly unknown[] = []) => pool.query<T>(text, [...params]),
@@ -145,6 +147,12 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
       sendFile: async (chatId: string, bytes: Buffer, filename: string, mimetype: string, caption: string) => {
         const result = await sendBehaviour();
         sent.push({ chatId, filename, mimetype, caption, bytes });
+        return result;
+      },
+      sendImage: async (chatId: string, bytes: Buffer, filename: string, caption: string) => {
+        const index = sent.length;
+        const result = await imageBehaviour(index);
+        sent.push({ chatId, filename, mimetype: 'image/png', caption, bytes });
         return result;
       },
     } as unknown as WahaClient;
@@ -192,6 +200,7 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
     sent.length = 0;
     sendBehaviour = async () => ({ messageId: `true_7${PHONE_DIGITS}@c.us_ABCDEF` });
     checkBehaviour = async (phone) => ({ exists: true, chatId: `${phone}@c.us` });
+    imageBehaviour = async (index) => ({ messageId: `img_${index}` });
     await configure({ enabled: true, minIntervalMinutes: 1 });
   });
 
@@ -224,7 +233,7 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
     expect(await code(send(9002, { target: { kind: 'client' }, form: 'order_pdf' as never, idempotencyKey }))).toBe('IDEMPOTENCY_KEY_REUSED');
   });
 
-  it('a same-key race replays once committed (or answers retryable BUSY while the first is in flight); one active send', async () => {
+  it('a same-key race replays once committed (or answers retryable BUSY while the first is in flight); another send queues behind', async () => {
     const idempotencyKey = randomUUID();
     // Hold the settings lock so both commands start before either commits.
     const holder = await pool.connect();
@@ -241,7 +250,8 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
     const retry = await send(9001, { target: { kind: 'client' }, form: 'order_pdf' as never, idempotencyKey });
     expect((await q('SELECT count(*)::int n FROM whatsapp_order_sends')).rows[0].n).toBe(1);
     expect(retry.send.state).toBe('queued');
-    expect(await code(send(9002, { target: { kind: 'chat', chatKey: await chatKey() }, form: 'production_pdf' as never }))).toBe('ORDER_SEND_ACTIVE');
+    const behind = (await send(9002, { target: { kind: 'chat', chatKey: await chatKey() }, form: 'production_pdf' as never })).send;
+    expect(behind).toMatchObject({ state: 'queued', position: 2 });
   });
 
   it('two commands that wait on the settings lock with the same key: the second replays instead of ACTIVE', async () => {
@@ -254,7 +264,7 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
     const enqueue = () => repository.enqueue({ actorId: admin.id, idempotencyKey, fingerprint: 'f'.repeat(64), chatKey: null,
       prepare: async () => ({ sendId: randomUUID(), orderId: 9001, clientId: 501, actor: admin, requestId: 'req', idempotencyKey, fingerprint: 'f'.repeat(64),
         targetKind: 'client', chatKey: null, form: 'order_pdf', destinationChatId: null, phoneNormalized: `7${PHONE_DIGITS}`, recipientMasked: '7701***2060',
-        fileKey: `${randomUUID()}.pdf`, sha256: 'a'.repeat(64), sizeBytes: 10, fileName: 'a.pdf', caption: '' }) });
+        fileKey: `${randomUUID()}.pdf`, sha256: 'a'.repeat(64), sizeBytes: 10, fileName: 'a.pdf', caption: '', parts: [] }) });
     const first = enqueue();
     const second = enqueue();
     await new Promise((resolve) => setTimeout(resolve, 200));
@@ -385,21 +395,20 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
     expect(new Date(redrawn.next_delivery_at).getTime() - new Date(redrawn.last_delivery_at).getTime()).toBe(4 * 60_000);
   });
 
-  it('a window longer than the queue TTL: the queued send lives until the drawn moment + TTL and survives cleanup', async () => {
+  it('a queued send lives 24 hours from the command; a settings change never extends it', async () => {
     await configure({ minIntervalMinutes: 120, sendWindowMinutes: 60 });
-    repository.random = () => 50 * 60_000;
-    const first = (await send(9001, { target: { kind: 'client' }, form: 'order_pdf' as never })).send;
-    await worker.work();
-    expect((await row(first.sendId)).state).toBe('sent');
-    // 121 minutes later: the threshold passed, the drawn moment (170 min) has not.
-    await q(`UPDATE whatsapp_order_send_settings SET last_delivery_at = last_delivery_at - interval '121 minutes',
-      next_delivery_at = next_delivery_at - interval '121 minutes'`);
-    const waiting = (await send(9001, { target: { kind: 'chat', chatKey: await chatKey() }, form: 'production_pdf' as never })).send;
-    const timing = (await q(`SELECT next_delivery_at FROM whatsapp_order_send_settings`)).rows[0];
-    const stored = await row(waiting.sendId);
-    expect(new Date(stored.queue_expires_at).getTime()).toBe(new Date(timing.next_delivery_at).getTime() + 30 * 60_000);
-    await worker.cleanup(new Date(Date.now() + 40 * 60_000));
+    const before = Date.now();
+    const waiting = (await send(9001, { target: { kind: 'client' }, form: 'order_pdf' as never })).send;
+    const expires = new Date((await row(waiting.sendId)).queue_expires_at).getTime();
+    expect(expires).toBeGreaterThanOrEqual(before + 24 * 60 * 60_000);
+    expect(expires).toBeLessThan(Date.now() + 24 * 60 * 60_000 + 1000);
+    expect(waiting.expiresAt).toBe(new Date(expires).toISOString());
+    await configure({ minIntervalMinutes: 600, sendWindowMinutes: 300 });
+    expect(new Date((await row(waiting.sendId)).queue_expires_at).getTime()).toBe(expires);
+    await worker.cleanup(new Date(expires - 1000));
     expect((await row(waiting.sendId)).state).toBe('queued');
+    await worker.cleanup(new Date(expires + 1000));
+    expect((await row(waiting.sendId)).state).toBe('expired');
   });
 
   it('cleanup does not expire a send whose life was extended after it was picked as a candidate', async () => {
@@ -515,7 +524,12 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
     await worker.work();
     expect(await row(first.sendId)).toMatchObject({ state: 'sent', destination_chat_id: `7${PHONE_DIGITS}@c.us`, provider_ack: true });
     expect(sent[0].mimetype).toBe('application/pdf');
-    expect(await code(send(9001, { target: { kind: 'client' }, form: 'order_pdf' as never }))).toBe('ORDER_SEND_COOLDOWN');
+    // Inside the threshold the command queues the send instead of refusing it.
+    const early = (await send(9001, { target: { kind: 'client' }, form: 'order_pdf' as never })).send;
+    expect(early).toMatchObject({ state: 'queued', position: 1 });
+    await worker.work();
+    expect((await row(early.sendId)).state).toBe('queued');
+    await q(`DELETE FROM whatsapp_order_sends WHERE send_id = $1`, [early.sendId]);
     // A send queued before the cooldown was reserved (e.g. after a relay outage) still waits for the gate.
     await q(`UPDATE whatsapp_order_send_settings SET last_delivery_at = now() - interval '2 minutes', next_delivery_at = NULL`);
     const second = (await send(9001, { target: { kind: 'chat', chatKey: await chatKey() }, form: 'production_pdf' as never })).send;
@@ -613,7 +627,7 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
     const menu = await service.menu({ ...admin, permissions: ['orders.view', 'orders.export'] });
     expect(JSON.stringify(menu)).not.toContain('@g.us');
     expect(menu.client.forms).toEqual(['production_pdf']);
-    expect(menu.forms.map((form) => form.code)).toEqual(['production_pdf', 'production_excel']);
+    expect(menu.forms.map((form) => form.code)).toEqual(['production_pdf', 'production_excel', 'production_image']);
     expect(menu.chats[0]).toMatchObject({ label: 'Цех ЧПУ', forms: ['production_pdf', 'production_excel'] });
     const view = (await send(9001, { target: { kind: 'chat', chatKey: menu.chats[0].chatKey }, form: 'production_pdf' as never })).send;
     expect(view).toMatchObject({ recipientLabel: 'Цех ЧПУ', recipientMasked: '1203…@g.us', actor: { username: 'order-send-admin' } });
@@ -630,11 +644,117 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
     await q(`DELETE FROM doweling_orders WHERE doweling_order_id IN (100, 200)`);
     await q(`DELETE FROM employees WHERE employee_id IN (71, 72)`);
   });
-  // ---- compatibility with the next release (migration 231: image forms, pages 2..N, manual cancel).
-  // These run last: they widen this schema the way 231 does.
-  describe('rows of a newer release (schema 231)', () => {
+  // ---- the queue (03.10): FIFO behind the gate, duplicates, limits, manual cancel, image forms.
+  const slotPassed = () => q(`UPDATE whatsapp_order_send_settings SET last_delivery_at = now() - interval '2 minutes', next_delivery_at = NULL`);
+  const wake = () => q(`UPDATE whatsapp_order_sends SET next_attempt_at = now() WHERE state = 'queued'`);
+
+  it('sends made before the threshold wait in the queue and leave one by one in command order', async () => {
+    const a = (await send(9001, { target: { kind: 'client' }, form: 'order_pdf' as never })).send;
+    const b = (await send(9001, { target: { kind: 'chat', chatKey: await chatKey() }, form: 'production_pdf' as never })).send;
+    const c = (await send(9002, { target: { kind: 'chat', chatKey: await chatKey() }, form: 'production_pdf' as never })).send;
+    expect([a.position, b.position, c.position]).toEqual([1, 2, 3]);
+    expect(Date.parse(b.estimatedAt as string)).toBeGreaterThan(Date.parse(a.estimatedAt as string));
+    await worker.work();
+    expect((await row(a.sendId)).state).toBe('sent');
+    await worker.work();
+    expect((await row(b.sendId)).state).toBe('queued');
+    for (const expected of [b, c]) {
+      await slotPassed();
+      await wake();
+      await worker.work();
+      expect((await row(expected.sendId)).state).toBe('sent');
+    }
+    expect(sent[0].chatId).toBe(`7${PHONE_DIGITS}@c.us`);
+    expect(sent.slice(1).map((item) => item.chatId.endsWith('@g.us'))).toEqual([true, true]);
+    expect(sent.slice(1).map((item) => item.filename)).toEqual([expect.stringContaining('для производства'), expect.stringContaining('для производства')]);
+    const audit = (await q(`SELECT metadata_json FROM audit_log WHERE entity_id = $1 AND event = 'whatsapp.order_send.requested'`, [c.sendId])).rows[0];
+    expect(audit.metadata_json).toMatchObject({ position: 3 });
+  });
+
+  it('refuses the same form to the same recipient while it waits, and caps the queue per author and in total', async () => {
+    const first = (await send(9001, { target: { kind: 'client' }, form: 'order_pdf' as never })).send;
+    const duplicate = await send(9001, { target: { kind: 'client' }, form: 'order_pdf' as never }).catch((error: ApiError) => error);
+    expect(duplicate).toMatchObject({ code: 'ORDER_SEND_ALREADY_QUEUED', details: { sendId: first.sendId } });
+    expect((await send(9001, { target: { kind: 'client' }, form: 'order_excel' as never })).send.state).toBe('queued');
+    await q(`INSERT INTO whatsapp_order_sends (send_id, order_id, client_id, actor_id, request_id, idempotency_key, fingerprint, target_kind, form_code,
+        phone_normalized, recipient_masked, file_key, sha256, size_bytes, file_name, queue_expires_at)
+      SELECT gen_random_uuid(), 9002, 502, 11, 'req', gen_random_uuid(), repeat('a', 64), 'client', 'order_pdf', '77014952060', '7701***2060',
+        gen_random_uuid()::text || '.pdf', repeat('b', 64), 10, 'x.pdf', now() + interval '1 day' FROM generate_series(1, 18)`);
+    expect(await code(send(9002, { target: { kind: 'chat', chatKey: await chatKey() }, form: 'production_pdf' as never }))).toBe('ORDER_SEND_QUEUE_FULL');
+    await q(`INSERT INTO whatsapp_order_sends (send_id, order_id, client_id, actor_id, request_id, idempotency_key, fingerprint, target_kind, form_code,
+        phone_normalized, recipient_masked, file_key, sha256, size_bytes, file_name, queue_expires_at)
+      SELECT gen_random_uuid(), 9002, 502, 12, 'req', gen_random_uuid(), repeat('a', 64), 'client', 'order_pdf', '77014952060', '7701***2060',
+        gen_random_uuid()::text || '.pdf', repeat('b', 64), 10, 'x.pdf', now() + interval '1 day' FROM generate_series(1, 80)`);
+    const full = await send(9001, { target: { kind: 'chat', chatKey: await chatKey() }, form: 'production_excel' as never }).catch((error: ApiError) => error);
+    expect(full).toMatchObject({ code: 'ORDER_SEND_QUEUE_FULL', details: { scope: 'total' } });
+    const refused = (await q(`SELECT count(*)::int n FROM audit_log WHERE event = 'whatsapp.order_send.refused' AND status_code = 'ORDER_SEND_ALREADY_QUEUED'`)).rows[0];
+    expect(refused.n).toBeGreaterThan(0);
+  });
+
+  it('the author cancels his waiting send, a WhatsApp manager any; a foreign one is not found; a sending one cannot be cancelled', async () => {
+    await q(`INSERT INTO role_permissions(role_id, permission_name) VALUES (10, 'orders.view'), (10, 'orders.export') ON CONFLICT DO NOTHING`);
+    const own = (await send(9001, { target: { kind: 'client' }, form: 'order_pdf' as never })).send;
+    const other = (await send(9001, { target: { kind: 'chat', chatKey: await chatKey() }, form: 'production_pdf' as never })).send;
+    const stranger: CurrentUser = { id: '12', username: 'order-send-manager', role: 'manager', roleId: 10, permissions: ['orders.view'] };
+    expect(await code(service.cancel(own.sendId, stranger, 'req-x'))).toBe('ORDER_SEND_NOT_FOUND');
+    const byAuthor = await service.cancel(own.sendId, { ...admin, permissions: ['orders.view'] }, 'req-author');
+    expect(byAuthor.send).toMatchObject({ state: 'cancelled', cancelReason: 'manual' });
+    expect((await service.cancel(own.sendId, admin, 'req-again')).send.state).toBe('cancelled');
+    const byManager = await service.cancel(other.sendId, { ...stranger, permissions: ['whatsapp.manage'] }, 'req-manager');
+    expect(byManager.send.state).toBe('cancelled');
+    expect((await row(other.sendId)).cancelled_by).toBe('12');
+    const audit = (await q(`SELECT user_id, related_user_id, request_id, metadata_json FROM audit_log WHERE entity_id = $1 AND event = 'whatsapp.order_send.cancelled'`,
+      [other.sendId])).rows;
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({ user_id: '12', related_user_id: '11', request_id: 'req-manager', metadata_json: { cancelReason: 'manual', byAuthor: false } });
+    const going = (await send(9002, { target: { kind: 'chat', chatKey: await chatKey() }, form: 'production_pdf' as never })).send;
+    await q(`UPDATE whatsapp_order_sends SET state = 'sending', attempt_count = 1, lock_token = gen_random_uuid(), send_started_at = now() WHERE send_id = $1`, [going.sendId]);
+    expect(await code(service.cancel(going.sendId, admin, 'req-late'))).toBe('ORDER_SEND_NOT_CANCELLABLE');
+    await worker.work();
+    expect(sent).toHaveLength(0);
+  });
+
+  it('an image form goes as pictures one after another, the caption on the first; a later page lost → unknown PARTIAL_DELIVERY', async () => {
+    await configure({ clientForms: ['order_image', 'order_pdf'] });
+    await q(`INSERT INTO order_details(order_id, detail_number, height, width, quantity, milling_cost_per_sqm, film_id)
+      SELECT 9001, 100 + n, 500, 500, 1, 1000, 1 FROM generate_series(1, 60) n`);
+    try {
+      const view = (await send(9001, { target: { kind: 'client' }, form: 'order_image' as never })).send;
+      expect(view.partsTotal).toBe(2);
+      await worker.work();
+      const stored = await row(view.sendId);
+      expect(stored.state).toBe('sent');
+      expect(sent.map((item) => [item.mimetype, item.caption !== ''])).toEqual([['image/png', true], ['image/png', false]]);
+      expect(sent[0].filename).toContain('(1 из 2)');
+      const part = (await q(`SELECT provider_message_id FROM whatsapp_order_send_parts WHERE send_id = $1`, [view.sendId])).rows[0];
+      expect(part.provider_message_id).toBe('img_1');
+      sent.length = 0;
+      await slotPassed();
+      imageBehaviour = async (index) => (index === 0 ? { messageId: 'img_0' } : Promise.reject(new ApiError(504, 'WAHA_TIMEOUT', 'timeout')));
+      const partial = (await send(9001, { target: { kind: 'client' }, form: 'order_image' as never })).send;
+      await worker.work();
+      expect(await row(partial.sendId)).toMatchObject({ state: 'unknown', error_code: 'PARTIAL_DELIVERY' });
+      const settled = (await q(`SELECT metadata_json FROM audit_log WHERE entity_id = $1 AND event = 'whatsapp.order_send.unknown'`, [partial.sendId])).rows[0];
+      expect(settled.metadata_json).toMatchObject({ partsTotal: 2, partsSent: 1 });
+      expect(await code(send(9001, { target: { kind: 'client' }, form: 'order_image' as never }))).toBe('ORDER_SEND_PREVIOUS_UNKNOWN');
+      // Nothing delivered on the first page → failed as for a file.
+      await slotPassed();
+      imageBehaviour = async () => Promise.reject(new ApiError(502, 'WAHA_PROVIDER_ERROR', 'rejected', { httpStatus: 422 }));
+      const rejected = (await send(9001, { target: { kind: 'client' }, form: 'order_pdf' as never })).send;
+      await q(`UPDATE whatsapp_order_sends SET form_code = 'order_image' WHERE send_id = $1`, [rejected.sendId]);
+      await worker.work();
+      expect(await row(rejected.sendId)).toMatchObject({ state: 'failed', error_code: 'WAHA_REJECTED' });
+    } finally {
+      await q(`DELETE FROM order_details WHERE order_id = 9001 AND detail_number > 100`);
+    }
+  });
+
+  // ---- rows of a release this backend does not know (a form added later). These run last: they drop
+  // the form CHECK of this schema.
+  describe('rows of a newer release', () => {
     beforeAll(async () => {
-      await q(`ALTER TABLE whatsapp_order_sends DROP CONSTRAINT IF EXISTS whatsapp_order_sends_form_code_check;
+      await q(`ALTER TABLE whatsapp_order_sends DROP CONSTRAINT IF EXISTS chk_whatsapp_order_sends_form_code;
+        ALTER TABLE whatsapp_order_sends DROP CONSTRAINT IF EXISTS whatsapp_order_sends_form_code_check;
         ALTER TABLE whatsapp_order_sends DROP CONSTRAINT IF EXISTS whatsapp_order_sends_file_key_check;
         ALTER TABLE whatsapp_order_sends DROP CONSTRAINT IF EXISTS whatsapp_order_sends_cancel_reason_check;
         ALTER TABLE whatsapp_order_sends ADD COLUMN IF NOT EXISTS parts_total SMALLINT NOT NULL DEFAULT 1;
@@ -646,29 +766,25 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
 
     const png = async () => (await store.withStoreLock((owned) => store.write(Buffer.from(`png-${randomUUID()}`), 'png', owned)))!;
 
-    it('never delivers a form it does not know or a picture send of several pages, and spends no slot', async () => {
+    it('never delivers a form it does not know, and spends no slot', async () => {
       const unknown = (await send(9001, { target: { kind: 'client' }, form: 'order_pdf' as never })).send;
-      await q(`UPDATE whatsapp_order_sends SET form_code = 'order_image' WHERE send_id = $1`, [unknown.sendId]);
+      await q(`UPDATE whatsapp_order_sends SET form_code = 'order_video' WHERE send_id = $1`, [unknown.sendId]);
       await worker.work();
       expect(await row(unknown.sendId)).toMatchObject({ state: 'failed', error_code: 'ORDER_SEND_FORM_UNSUPPORTED' });
-      const paged = (await send(9001, { target: { kind: 'client' }, form: 'order_pdf' as never })).send;
-      await q(`UPDATE whatsapp_order_sends SET parts_total = 3 WHERE send_id = $1`, [paged.sendId]);
-      await worker.work();
-      expect(await row(paged.sendId)).toMatchObject({ state: 'failed', error_code: 'ORDER_SEND_FORM_UNSUPPORTED' });
       expect(sent).toHaveLength(0);
       expect((await q(`SELECT last_delivery_at FROM whatsapp_order_send_settings`)).rows[0].last_delivery_at).toBeNull();
     });
 
     it('reads histories with unknown forms and a manual cancel without failing', async () => {
       const view = (await send(9001, { target: { kind: 'client' }, form: 'order_pdf' as never })).send;
-      await q(`UPDATE whatsapp_order_sends SET form_code = 'order_image', state = 'cancelled', cancel_reason = 'manual', cancelled_by = 11
+      await q(`UPDATE whatsapp_order_sends SET form_code = 'order_video', state = 'cancelled', cancel_reason = 'manual', cancelled_by = 11
         WHERE send_id = $1`, [view.sendId]);
-      expect((await service.listForOrder(9001, admin)).sends.find((item) => item.sendId === view.sendId)).toMatchObject({ form: 'order_image', cancelReason: 'manual' });
+      expect((await service.listForOrder(9001, admin)).sends.find((item) => item.sendId === view.sendId)).toMatchObject({ form: 'order_video', cancelReason: 'manual' });
       const mySends = new MySendsRepository(database);
       // This schema has no calendar tables: only the order card part of «my sends» is read here.
       (mySends as unknown as { calendarSends: () => Promise<never[]> }).calendarSends = async () => [];
       const mine = await mySends.list(admin.id);
-      expect(mine.find((item) => item.id === view.sendId)?.title).toContain('order_image');
+      expect(mine.find((item) => item.id === view.sendId)?.title).toContain('order_video');
     });
 
     it('retention purges the pages 2..N with their provider ids and removes every picture from the disk', async () => {
