@@ -363,6 +363,43 @@ describe('NotificationRuleEngineService.processEvent', () => {
     expect(deps.notificationWrite.insertIfAbsent).toHaveBeenCalledTimes(1);
   });
 
+  it('deadline balloons: a DEADLINE_EXPIRED rule with the balloon channel writes the in_app row with its persistent mode (engine owns deadlines)', async () => {
+    const deadlineEvent = (outboxEventId: string) => event({
+      outboxEventId,
+      eventType: 'deadline.event.created',
+      aggregateType: 'deadline',
+      aggregateId: 'dl-9',
+      payload: { eventType: 'DEADLINE_EXPIRED', orderId: 500, deadlineEventId: 'de-9' },
+    });
+    const run = async (channels: NotificationRule['channels'], ownsDeadline: boolean) => {
+      const deps = fakes({
+        ruleRepo: { listEnabledByEvent: vi.fn(async () => [rule({
+          notificationRuleId: 'rule-deadline-balloon', eventType: 'DEADLINE_EXPIRED', channels, balloonMode: 'persistent',
+          recipients: { resolvers: ['order_manager'] },
+        })]) },
+        contextBuilder: { buildContext: vi.fn(async () => ctx({ eventType: 'DEADLINE_EXPIRED', deadlineInstanceId: 'dl-9' })) },
+        recipientResolver: { resolve: vi.fn(async () => [77]) },
+        runtimeConfig: { isEngineOwnsDeadline: () => ownsDeadline },
+      });
+      await service(deps).processEvent(client, deadlineEvent(`outbox-deadline-balloon-${channels.join('-')}-${ownsDeadline}`));
+      return deps;
+    };
+
+    const withBalloon = await run(['in_app', 'balloon'], true);
+    expect(withBalloon.notificationWrite.insertIfAbsent).toHaveBeenCalledTimes(1);
+    expect(withBalloon.notificationWrite.insertIfAbsent).toHaveBeenCalledWith(client, expect.objectContaining({ userId: 77, balloonMode: 'persistent' }));
+    // Балун — не внешняя доставка.
+    expect(withBalloon.channelDelivery.enqueueIfAbsent).not.toHaveBeenCalled();
+
+    // То же правило без канала балуна — уведомление без балуна (режим правила сам по себе ничего не включает).
+    const plain = await run(['in_app'], true);
+    expect(plain.notificationWrite.insertIfAbsent).toHaveBeenCalledWith(client, expect.objectContaining({ userId: 77, balloonMode: null }));
+
+    // Дедлайнами владеет старый путь — движок ничего не пишет (балунов дедлайнов нет, как и уведомлений движка).
+    const legacy = await run(['in_app', 'balloon'], false);
+    expect(legacy.notificationWrite.insertIfAbsent).not.toHaveBeenCalled();
+  });
+
   it('skips the deadline envelope when ownsDeadline=false (legacy default)', async () => {
     const r = rule({
       notificationRuleId: 'rule-deadline-2',

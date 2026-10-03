@@ -5,7 +5,16 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { BackendEnv } from '../../../config/env.validation';
 import { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
+import { PgNotificationChannelDeliveryAdapter } from '../../notifications-engine/adapters/pg-notification-channel-delivery';
+import { PgNotificationContextBuilder } from '../../notifications-engine/adapters/pg-notification-context';
+import { PgNotificationRuleRepository } from '../../notifications-engine/adapters/pg-notification-rule-repository';
 import { PgNotificationWriteAdapter } from '../../notifications-engine/adapters/pg-notification-write';
+import { PgOutboxRepository } from '../../notifications-engine/adapters/pg-outbox-repository';
+import { PgRecipientSourceAdapter } from '../../notifications-engine/adapters/pg-recipient-source';
+import { PgVisibilityAdapter } from '../../notifications-engine/adapters/pg-visibility';
+import { NotificationRuleEngineService } from '../../notifications-engine/application/notification-rule-engine.service';
+import { OutboxRelayService } from '../../notifications-engine/application/outbox-relay.service';
+import { RecipientResolverService } from '../../notifications-engine/application/recipient-resolver.service';
 import { PgProcurementNotificationsRepository } from '../../orders/adapters/pg-procurement-notifications-repository';
 import { PgNotificationRepository } from './pg-notification-repository';
 
@@ -138,5 +147,72 @@ describe.skipIf(!url)('Notification balloons (plan 2026-10-03) — real PostgreS
     expect(await procurement.writeServiceNotification(input(k2), guard)).toBe(true);
     expect((await conn.query('SELECT balloon_mode FROM notifications WHERE idempotency_key = $1', [`${k2}:in_app`])).rows[0].balloon_mode).toBeNull();
     await conn.query(`DELETE FROM outbox_events WHERE idempotency_key = ANY($1::text[])`, [[k1, k2]]);
+  });
+
+  it('deadline balloon end to end: DEADLINE_EXPIRED rule with a persistent balloon → real relay + engine → notification with the balloon → claimed by a tab', async () => {
+    // Свой админ (видит все заказы) и свой заказ; правило — на этого пользователя, без требований к экземпляру дедлайна.
+    const adminId = Number((await conn.query(
+      `INSERT INTO users (username, email, password_hash, role_id) VALUES ($1, $2, 'E2E-NO-LOGIN', 1) RETURNING user_id`,
+      [`${tag}-admin`, `${tag}-admin@example.invalid`])).rows[0].user_id);
+    const admin: CurrentUser = { id: String(adminId), username: `${tag}-admin`, role: 'admin', roleId: 1, permissions: [] };
+    await conn.query('SELECT set_config($1, $2, false)', ['app.user_id', String(adminId)]);
+    const clientId = Number((await conn.query('INSERT INTO clients (client_name) VALUES ($1) RETURNING client_id', [tag])).rows[0].client_id);
+    const projectId = Number((await conn.query('INSERT INTO projects (code, name, client_id, created_by) VALUES ($1, $2, $3, $4) RETURNING project_id',
+      [('E2E-' + randomUUID().slice(0, 8)).toUpperCase(), tag, clientId, adminId])).rows[0].project_id);
+    // Заказ с деталью — в одной транзакции (отложенная проверка «у производственного заказа есть активная деталь»).
+    await conn.query('BEGIN');
+    const orderId = Number((await conn.query(
+      `INSERT INTO orders (order_name, client_id, project_id, order_status_id, payment_status_id, created_by, manager_id)
+       VALUES ($1, $2, $3, 1, 1, $4, $4) RETURNING order_id`, [`${tag}-дедлайн`, clientId, projectId, adminId])).rows[0].order_id);
+    await conn.query(
+      `INSERT INTO order_details (order_id, detail_number, height, width, quantity, area, sheet_material_type_id, milling_type_id, edge_type_id, created_by)
+       SELECT $1, 1, 1000, 1000, 1, 1,
+              (SELECT sheet_material_type_id FROM sheet_material_types ORDER BY 1 LIMIT 1),
+              (SELECT milling_type_id FROM milling_types ORDER BY 1 LIMIT 1),
+              (SELECT edge_type_id FROM edge_types ORDER BY 1 LIMIT 1), $2`, [orderId, adminId]);
+    await conn.query('COMMIT');
+    const ruleCode = `e2e-deadline-balloon-${randomUUID().slice(0, 8)}`;
+    await conn.query(
+      `INSERT INTO notification_rules (rule_code, event_type, level, priority, is_enabled, channels_json, balloon_mode, conditions_json, recipients_json, created_by_user_id, updated_by_user_id)
+       VALUES ($1, 'DEADLINE_EXPIRED', 'warning', 100, true, '["in_app","balloon"]'::jsonb, 'persistent',
+               '{"requireCurrentDeadlineEvent": false, "excludeCompletedOrders": false}'::jsonb, $2::jsonb, $3, $3)`,
+      [ruleCode, JSON.stringify({ userIds: [adminId] }), adminId]);
+    const engine = new NotificationRuleEngineService({
+      ruleRepo: new PgNotificationRuleRepository(),
+      contextBuilder: new PgNotificationContextBuilder(),
+      recipientResolver: new RecipientResolverService(new PgRecipientSourceAdapter(), new PgVisibilityAdapter()),
+      notificationWrite: new PgNotificationWriteAdapter(),
+      channelDelivery: new PgNotificationChannelDeliveryAdapter(),
+      runtimeConfig: { isEngineOwnsDeadline: () => true },
+    });
+    const relay = new OutboxRelayService({
+      database,
+      outboxRepo: new PgOutboxRepository(),
+      consumers: [{ supports: (type) => type === 'deadline.event.created', process: async (client, event) => { await engine.processEvent(client, event); } }],
+      config: { workerId: tag, batchSize: 500, maxAttempts: 3 },
+    });
+    const key = `${tag}:deadline:${randomUUID()}`;
+    await conn.query(
+      `INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key, next_attempt_at)
+       VALUES ('deadline.event.created', 'deadline', $1, $2::jsonb, $3, now() - interval '1 second')`,
+      [randomUUID(), JSON.stringify({ eventType: 'DEADLINE_EXPIRED', orderId, deadlineEventId: randomUUID() }), key]);
+    try {
+      const summary = await relay.processBatchOnce();
+      expect(summary.failed).toBe(0);
+      const rows = (await conn.query(
+        `SELECT notification_id, balloon_mode, level FROM notifications WHERE user_id = $1 AND entity_id = $2`, [adminId, String(orderId)])).rows;
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ balloon_mode: 'persistent', level: 'warning' });
+      // Балун не уходит во внешнюю доставку.
+      expect(Number((await conn.query('SELECT count(*) AS c FROM notification_channel_deliveries WHERE user_id = $1', [adminId])).rows[0].c)).toBe(0);
+      // Вкладка пользователя получает его балуном «не исчезает».
+      const claimed = await repoOn(conn).claimBalloonsForUser({ viewer: admin, token: randomUUID(), limit: 5 });
+      expect(claimed.map((item) => ({ id: item.notificationId, mode: item.balloonMode, entity: `${item.entityType}:${item.entityId}` })))
+        .toEqual([{ id: String(rows[0].notification_id), mode: 'persistent', entity: `order:${orderId}` }]);
+    } finally {
+      await conn.query('DELETE FROM notifications WHERE user_id = $1', [adminId]);
+      await conn.query('DELETE FROM outbox_events WHERE idempotency_key = $1', [key]);
+      await conn.query('DELETE FROM notification_rules WHERE rule_code = $1', [ruleCode]);
+    }
   });
 });
