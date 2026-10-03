@@ -12,6 +12,8 @@ import {
 import { NOTIFICATIONS_CHANGED_EVENT } from './notificationEvents';
 
 const POLL_MS = 60_000;
+/** CSS-класс балуна центра (оформление — styles/app.css). */
+export const BALLOON_CLASS_NAME = 'app-balloon';
 
 interface BalloonCenterApi {
   /**
@@ -97,6 +99,8 @@ export const BalloonCenterProvider: React.FC<{ children: React.ReactNode }> = ({
     const shown = () => { st.mounted.add(input.key); input.onShown(); };
     api[input.kind]({
       key: input.key, message: input.title, description: <BalloonBody text={input.text} onShown={shown} />,
+      // Вид балуна (мельче текст, серый контур, светло-голубой фон) — `.app-balloon` в styles/app.css.
+      className: BALLOON_CLASS_NAME,
       placement: 'bottomRight', duration: durationFor(input.mode), style: input.onClick ? { cursor: 'pointer' } : undefined,
       onClose: closed,
       onClick: input.onClick ? () => { api.destroy(input.key); closed(); input.onClick!(); } : undefined,

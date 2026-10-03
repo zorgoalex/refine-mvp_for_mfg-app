@@ -382,6 +382,45 @@ html {
   max-height: min(520px, calc(100vh - 180px));
 }
 
+/* Балуны центра уведомлений (BalloonCenter): текст на 20% мельче обычного уведомления antd (16 → 12.8px заголовок,
+   14 → 11.2px текст), заметный серый контур, светло-голубой фон. Тёмная тема — тот же контур на тёмно-синем фоне.
+   `body` в селекторах — чтобы правила были сильнее стилей antd, которые подключаются позже. */
+body .ant-notification .ant-notification-notice.app-balloon {
+  background: #e6f4ff;
+  border: 1px solid #8c8c8c;
+}
+
+body .ant-notification .app-balloon .ant-notification-notice-message {
+  font-size: 12.8px;
+  line-height: 1.4;
+  margin-bottom: 4px;
+  color: #1f1f1f;
+}
+
+body .ant-notification .app-balloon .ant-notification-notice-description {
+  font-size: 11.2px;
+  line-height: 1.45;
+  color: #262626;
+}
+
+body .ant-notification .app-balloon .ant-notification-notice-close {
+  color: #595959;
+}
+
+[data-theme="dark"] body .ant-notification .ant-notification-notice.app-balloon {
+  background: #16304f;
+  border-color: #8c8c8c;
+}
+
+[data-theme="dark"] body .ant-notification .app-balloon .ant-notification-notice-message,
+[data-theme="dark"] body .ant-notification .app-balloon .ant-notification-notice-description {
+  color: #f0f0f0;
+}
+
+[data-theme="dark"] body .ant-notification .app-balloon .ant-notification-notice-close {
+  color: #bfbfbf;
+}
+
 /* Make the main layout container full height */
 .ant-layout {
   min-height: 100vh;
