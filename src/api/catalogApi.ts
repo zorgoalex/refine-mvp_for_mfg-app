@@ -6,6 +6,8 @@ export interface CatalogInput {
   name: string; sku: string | null; kind: CatalogKind; unitId: number;
   basePrice: string | null; description: string; isActive: boolean;
   refKey1c?: string | null; sortOrder?: number;
+  /** Нет у backend до миграции 234: не передано — при изменении сохраняется. */
+  nomenclatureType?: string | null; nomenclatureCategory?: string | null; note?: string | null;
 }
 export interface CatalogItem extends CatalogInput {
   id: number; version: number; currency: 'KZT'; unitName: string; unitSymbol: string | null;

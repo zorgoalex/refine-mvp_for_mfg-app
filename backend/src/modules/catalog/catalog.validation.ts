@@ -17,6 +17,10 @@ export const itemSchema = z.object({
     .refine(value => value === null || /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value), '1C_key должен быть UUID')
     .transform(value => value?.toLowerCase() ?? null).optional(),
   sortOrder: z.number().int().min(-32768).max(32767).optional(),
+  // Тип/категория номенклатуры 1С и примечание (как у плёнок): '' — NULL; не передано — при изменении сохраняется.
+  nomenclatureType: z.string().trim().max(50).nullable().transform(value => value || null).optional(),
+  nomenclatureCategory: z.string().trim().max(150).nullable().transform(value => value || null).optional(),
+  note: z.string().trim().max(2000).nullable().transform(value => value || null).optional(),
 }).strict();
 const updateSchema = itemSchema.extend({ expectedVersion: z.number().int().positive().max(2147483646) }).strict();
 const integerQuery = z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().safe());

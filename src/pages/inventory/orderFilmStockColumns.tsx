@@ -2,6 +2,8 @@ import { Button, Space, Typography } from 'antd';
 import { formatNumber } from '../../utils/numberFormat';
 import { filmStockAvailability } from './filmStock';
 import type { OrderFilmStockItem } from './useOrderFilmStock';
+import type { OrderSheetStockItem } from './useOrderSheetStock';
+import { Tooltip } from '../../ui/tooltipDelay';
 
 const { Text } = Typography;
 
@@ -38,6 +40,62 @@ export function OrderFilmStockCaption(props: {
   return (
     <Space size={8} wrap>
       <Text type="secondary">Остаток на складе, без резерва{props.updatedAt ? ` · обновлено в ${props.updatedAt}` : ''}</Text>
+      {props.enabled
+        ? <Button size="small" loading={props.isFetching} onClick={() => void props.refresh()}>Обновить остатки</Button>
+        : <Text type="secondary">· появится после сохранения заказа</Text>}
+      {props.isError && <Text type="danger">не удалось получить остатки</Text>}
+    </Space>
+  );
+}
+
+const SHEET_STATUS: Record<OrderSheetStockItem['status'], string> = {
+  enough: 'Хватает', short: 'Не хватает', none: 'Нет на складе', unknown_demand: 'Потребность не рассчитана',
+  unlinked: 'Не связан с 1С', unknown_unit: 'Единица 1С не пересчитывается', unavailable: 'Нет данных 1С',
+};
+
+/** Колонки остатка листовых материалов (данные 1С) для таблицы «Листовые материалы» заказа. */
+export function orderSheetStockColumns<Row extends { sheetMaterialTypeId: number }>(byId: ReadonlyMap<number, OrderSheetStockItem>) {
+  return [
+    {
+      title: 'На складе (1С)',
+      key: 'sheetStock',
+      width: ORDER_FILM_COLUMN_WIDTH.stock + 16,
+      align: 'right' as const,
+      render: (_: unknown, row: Row) => {
+        const item = byId.get(row.sheetMaterialTypeId);
+        if (!item || item.quantity === null) return '—';
+        const unit = item.unitName ? ` ${item.unitName}` : '';
+        const m2 = item.quantityM2 !== null && item.unitName && !/м2|м²/i.test(item.unitName) ? ` ≈ ${formatNumber(item.quantityM2, 2)} м²` : '';
+        const tooltip = [`1С: ${item.onecName ?? '—'}`, ...item.warehouses.map((w) => `${w.name}: ${formatNumber(w.quantity, 3)}${unit}`)].join('\n');
+        return (
+          <Tooltip title={<span style={{ whiteSpace: 'pre-line' }}>{tooltip}</span>}>
+            <Text type={item.quantity < 0 ? 'danger' : undefined}>{formatNumber(item.quantity, 3)}{unit}{m2}</Text>
+          </Tooltip>
+        );
+      },
+    },
+    {
+      title: 'Покрытие',
+      key: 'sheetStockStatus',
+      width: ORDER_FILM_COLUMN_WIDTH.coverage,
+      render: (_: unknown, row: Row) => {
+        const item = byId.get(row.sheetMaterialTypeId);
+        return item ? SHEET_STATUS[item.status] : 'Нет данных';
+      },
+    },
+  ];
+}
+
+/** Подпись блока листовых материалов: данные 1С, дата снимка, кнопка обновления. */
+export function OrderSheetStockCaption(props: {
+  enabled: boolean; updatedAt: string | null; isFetching: boolean; isError: boolean; refresh: () => unknown; snapshotVersion: string | null;
+}) {
+  const snapshot = props.snapshotVersion
+    ? new Date(props.snapshotVersion).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+    : null;
+  return (
+    <Space size={8} wrap>
+      <Text type="secondary">Остаток по данным 1С{snapshot ? ` на ${snapshot}` : ''}, без резерва{props.updatedAt ? ` · обновлено в ${props.updatedAt}` : ''}</Text>
       {props.enabled
         ? <Button size="small" loading={props.isFetching} onClick={() => void props.refresh()}>Обновить остатки</Button>
         : <Text type="secondary">· появится после сохранения заказа</Text>}

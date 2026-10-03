@@ -1,5 +1,6 @@
 import type { CatalogInput, CatalogItem, CatalogKind } from '../../api/catalogApi';
 import { ApiError } from '../../api/apiError';
+import { nomenclaturePayload, supportsNomenclature } from '../../components/NomenclatureFields';
 
 export const CATALOG_KIND_OPTIONS: { value: CatalogKind; label: string }[] = [
   { value: 'made_to_order', label: 'Товар под заказ' },
@@ -7,10 +8,12 @@ export const CATALOG_KIND_OPTIONS: { value: CatalogKind; label: string }[] = [
   { value: 'service', label: 'Услуга' },
 ];
 export function catalogDraft(item?: CatalogItem): Partial<CatalogInput> {
-  return item ? { name: item.name, sku: item.sku, kind: item.kind, unitId: item.unitId, basePrice: item.basePrice, description: item.description, isActive: item.isActive, refKey1c: item.refKey1c ?? null, sortOrder: item.sortOrder ?? 100 }
+  return item ? { name: item.name, sku: item.sku, kind: item.kind, unitId: item.unitId, basePrice: item.basePrice, description: item.description, isActive: item.isActive, refKey1c: item.refKey1c ?? null, sortOrder: item.sortOrder ?? 100,
+    ...(supportsNomenclature(item) ? { nomenclatureType: item.nomenclatureType ?? null, nomenclatureCategory: item.nomenclatureCategory ?? null, note: item.note ?? null } : {}) }
     : { name: '', sku: null, kind: 'service', basePrice: null, description: '', isActive: true, refKey1c: null, sortOrder: 100 };
 }
-export function catalogPayload(draft: CatalogInput): CatalogInput {
+/** `nomenclatureSupported` — backend знает тип/категорию/примечание (иначе поля не шлются: старый backend их отклонит). */
+export function catalogPayload(draft: CatalogInput, nomenclatureSupported = false): CatalogInput {
   const raw = draft.basePrice === null || draft.basePrice === undefined || draft.basePrice === '' ? null : String(draft.basePrice).replace(',', '.');
   if (raw !== null && !/^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/.test(raw)) throw new Error('Цена: от 0 до 9999999999.99, максимум два знака после точки');
   const [whole, fraction = ''] = raw?.split('.') ?? [];
@@ -19,7 +22,8 @@ export function catalogPayload(draft: CatalogInput): CatalogInput {
   const sortOrder = draft.sortOrder ?? 100;
   if (!Number.isInteger(sortOrder) || sortOrder < -32768 || sortOrder > 32767) throw new Error('Порядок сортировки: целое число от -32768 до 32767');
   return { name: draft.name.trim(), sku: draft.sku?.trim() || null, kind: draft.kind, unitId: draft.unitId,
-    basePrice: raw === null ? null : `${whole}.${fraction.padEnd(2, '0')}`, description: (draft.description ?? '').trim(), isActive: draft.isActive, refKey1c, sortOrder };
+    basePrice: raw === null ? null : `${whole}.${fraction.padEnd(2, '0')}`, description: (draft.description ?? '').trim(), isActive: draft.isActive, refKey1c, sortOrder,
+    ...nomenclaturePayload(draft, nomenclatureSupported) };
 }
 
 export function catalogFailureState(error: unknown, submitted: boolean) {

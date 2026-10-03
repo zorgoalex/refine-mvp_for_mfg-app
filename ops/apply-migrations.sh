@@ -2500,6 +2500,11 @@ probe_file() {
       "$(q_tbl inventory_onec_issues)" \
       "$(q_con_on inventory_onec_issues chk_inventory_onec_issues_code)" \
       "$(q_tbl inventory_onec_generation)" ;;
+    234_reference_nomenclature_note*) probe_all \
+      "$(q_col sheet_material_types nomenclature_type)" "$(q_col sheet_material_types nomenclature_category)" "$(q_col sheet_material_types note)" \
+      "$(q_col catalog_items nomenclature_type)" "$(q_col catalog_items nomenclature_category)" "$(q_col catalog_items note)" \
+      "$(q_con_on sheet_material_types chk_sheet_material_types_note_length)" \
+      "$(q_con_on catalog_items chk_catalog_items_note_length)" ;;
     212_films_note*) probe_all \
       "$(q_col films note)" \
       "$(q_con_on films chk_films_note_length)" ;;
@@ -3019,7 +3024,7 @@ verify_applied_effect() {
     205_warehouses_onec_key_required*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    231_cut_result_render_v2*|209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*)
+    231_cut_result_render_v2*|209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|234_reference_nomenclature_note*|235_employee_work_contacts*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)

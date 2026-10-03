@@ -126,7 +126,8 @@ import { CUT_JOB_READY_EVENT, cutJobReadyAffects, readCutJobReadyEvent } from ".
 import { buildOrderEditAddPaymentPath } from "./orderPaymentIntent";
 import { OperationalPageHeader, useOperationalUi } from "../../ui-operational/OperationalPrimitives";
 import { buildCutJobNameById, CutJobLinks } from "./CutJobLinks";
-import { ORDER_FILM_COLUMN_WIDTH, OrderFilmStockCaption, orderFilmStockColumns } from "../inventory/orderFilmStockColumns";
+import { ORDER_FILM_COLUMN_WIDTH, OrderFilmStockCaption, orderFilmStockColumns, OrderSheetStockCaption, orderSheetStockColumns } from "../inventory/orderFilmStockColumns";
+import { useOrderSheetStock } from "../inventory/useOrderSheetStock";
 import { useOrderFilmStock } from "../inventory/useOrderFilmStock";
 import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from "./orderMaterialsSummary";
 import { resolveOrderShowHdfDetails } from "./orderShowHdfDetails";
@@ -2021,6 +2022,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const cutJobNameById = useMemo(() => buildCutJobNameById(bathCutJobs), [bathCutJobs]);
   // Остатки плёнки на складе — как во вкладке «Материалы» формы редактирования (тот же запрос и автообновление).
   const filmStock = useOrderFilmStock(record?.order_id == null ? null : Number(record.order_id));
+  const sheetStock = useOrderSheetStock(record?.order_id == null ? null : Number(record.order_id));
   const orderFilmMaterialRows = useMemo(
     () => buildOrderFilmMaterialRows(details as any, bathFilmUsage, filmsMap),
     [bathFilmUsage, details, filmsMap],
@@ -4203,6 +4205,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                         </div>
                         <div>
                           <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Листовые материалы</div>
+                          {sheetStock.allowed && <div style={{ marginBottom: 6 }}><OrderSheetStockCaption {...sheetStock} /></div>}
                           <Table
                             dataSource={orderSheetMaterialRows}
                             rowKey="key"
@@ -4229,6 +4232,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                                 key: 'detailsCount',
                                 align: 'center' as const,
                               },
+                              ...(sheetStock.allowed ? orderSheetStockColumns<(typeof orderSheetMaterialRows)[number]>(sheetStock.byId) : []),
                             ]}
                             summary={(data) => {
                               const totalArea = data.reduce((sum, item) => sum + item.totalArea, 0);
@@ -4245,6 +4249,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                                   <Table.Summary.Cell index={2} align="center">
                                     <strong>{totalDetails}</strong>
                                   </Table.Summary.Cell>
+                                  {sheetStock.allowed && <><Table.Summary.Cell index={3} /><Table.Summary.Cell index={4} /></>}
                                 </Table.Summary.Row>
                               );
                             }}

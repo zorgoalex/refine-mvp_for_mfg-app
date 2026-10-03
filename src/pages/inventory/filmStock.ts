@@ -14,6 +14,7 @@ export const ORDER_FILM_STOCK_REFRESH = {
   refetchIntervalInBackground: false,
 } as const;
 export const orderFilmStockKey = (orderId: number | null | undefined) => ['inventory', 'order-film-stock', orderId] as const;
+export const orderSheetStockKey = (orderId: number | null | undefined) => ['inventory', 'order-sheet-stock', orderId] as const;
 export function filmStockAvailability(status: OrderFilmStockDto['items'][number]['status'] | null | undefined): string {
   switch (status) {
     case 'enough': return 'Хватает';

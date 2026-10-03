@@ -6,6 +6,8 @@ import { useParams } from 'react-router-dom';
 import { can } from '../../utils/permissions';
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { useRecordTabTitle } from '../../utils/recordTitle';
+import { NomenclatureView } from '../../components/NomenclatureFields';
+import { useSheetMaterialNomenclature } from './useSheetMaterialNomenclature';
 
 const { Title } = Typography;
 
@@ -24,6 +26,7 @@ export const SheetMaterialShow: React.FC<IResourceComponentsProps> = () => {
     preferredFields: ['name'],
   });
 
+  const nomenclature = useSheetMaterialNomenclature();
   const { data: typeOne } = useOne({ resource: 'material_types', id: record?.material_type_id, queryOptions: { enabled: !!record?.material_type_id } });
   const { data: unitOne } = useOne({ resource: 'units', id: record?.unit_id, queryOptions: { enabled: !!record?.unit_id } });
   const { data: supplierOne } = useOne({ resource: 'suppliers', id: record?.supplier_id, queryOptions: { enabled: !!record?.supplier_id } });
@@ -65,6 +68,10 @@ export const SheetMaterialShow: React.FC<IResourceComponentsProps> = () => {
         <Col span={8}><Title level={5}>Цвет</Title><TextField value={record?.color ?? '—'} /></Col>
         <Col span={8}><Title level={5}>Активен</Title><Badge status={record?.is_active ? 'success' : 'default'} text={record?.is_active ? 'Активен' : 'Неактивен'} /></Col>
         <Col span={8}><Title level={5}>Версия</Title><TextField value={record?.version} /></Col>
+      </Row>
+      <Divider />
+      <Row gutter={[16, 16]}>
+        <NomenclatureView values={nomenclature.byId.get(Number(record?.sheet_material_type_id))} />
       </Row>
       <Divider />
       <Row gutter={[16, 16]}>

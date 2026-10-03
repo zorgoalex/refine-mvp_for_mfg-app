@@ -48,6 +48,7 @@ import {
   type StockDocType,
   type StockLineState,
 } from '../domain/stock-posting';
+import type { OrderSheetDemand } from '../domain/order-sheet-stock';
 
 export const SOURCE = 'erp_ui';
 
@@ -679,6 +680,34 @@ export class PgInventoryRepository {
       const dto = await readDocument(tx, ctx.currentUser, documentId);
       await completeIdempotent(tx, ctx.idempotencyKey, String(documentId), dto);
       return dto;
+    });
+  }
+
+  /**
+   * Листовые материалы заказа и их потребность (м², та же проекция, что у «Потребностей заказов» и плёнки) с ключом 1С и
+   * размером листа. Видимость заказа — как у остатков плёнки (scope заказов пользователя).
+   */
+  async orderSheetDemand(user: CurrentUser, orderId: number, client: DatabaseClient): Promise<OrderSheetDemand[]> {
+    if (!canViewOrders(user)) throw new ApiError(404, 'ORDER_NOT_FOUND', 'Заказ не найден');
+    const { whereSql, params } = buildScopedOrderWhere(user, orderId);
+    const orders = await client.query<ResourceDemandOrderRow>(`${ORDER_SELECT_SQL} WHERE ${whereSql}`, params);
+    if (orders.rows.length === 0) throw new ApiError(404, 'ORDER_NOT_FOUND', 'Заказ не найден');
+    const [projected] = await loadProjectedOrders(client, orders.rows, undefined);
+    const lines = (projected?.lines ?? []).filter((line) => line.kind === 'sheet_material');
+    if (lines.length === 0) return [];
+    const sheets = await client.query<{ sheet_material_type_id: string; name: string; ref_key_1c: string | null; width_mm: string | null; height_mm: string | null }>(
+      `SELECT sheet_material_type_id, name, lower(ref_key_1c::text) AS ref_key_1c, width_mm, height_mm
+         FROM sheet_material_types WHERE sheet_material_type_id = ANY($1::bigint[])`,
+      [lines.map((line) => line.refId)],
+    );
+    const byId = new Map(sheets.rows.map((row) => [num(row.sheet_material_type_id), row]));
+    return lines.map((line) => {
+      const row = byId.get(line.refId);
+      return {
+        sheetMaterialTypeId: line.refId, name: row?.name ?? line.name, refKey1c: row?.ref_key_1c ?? null,
+        widthMm: row?.width_mm == null ? null : Number(row.width_mm), heightMm: row?.height_mm == null ? null : Number(row.height_mm),
+        demandM2: line.quantity,
+      };
     });
   }
 

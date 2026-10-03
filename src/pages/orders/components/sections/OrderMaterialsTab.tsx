@@ -16,7 +16,8 @@ import { computeOrderBathFilmUsage } from '../../../cut/cutFilmUsage';
 import { buildCutJobNameById, CutJobLinks } from '../../CutJobLinks';
 import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from '../../orderMaterialsSummary';
 import { businessOrderDetails } from '../../../../utils/orderDetailRows';
-import { ORDER_FILM_COLUMN_WIDTH, OrderFilmStockCaption, orderFilmStockColumns } from '../../../inventory/orderFilmStockColumns';
+import { ORDER_FILM_COLUMN_WIDTH, OrderFilmStockCaption, orderFilmStockColumns, OrderSheetStockCaption, orderSheetStockColumns } from '../../../inventory/orderFilmStockColumns';
+import { useOrderSheetStock } from '../../../inventory/useOrderSheetStock';
 import { useOrderFilmStock } from '../../../inventory/useOrderFilmStock';
 
 const { Text } = Typography;
@@ -24,6 +25,7 @@ const { Text } = Typography;
 export const OrderMaterialsTab: React.FC = () => {
   const { details, hdfDetails, header } = useOrderFormStore();
   const filmStock = useOrderFilmStock(header.order_id);
+  const sheetStock = useOrderSheetStock(header.order_id);
   const inventoryViewAllowed = filmStock.allowed;
   const businessDetails = useMemo(
     () => businessOrderDetails(details),
@@ -190,6 +192,7 @@ export const OrderMaterialsTab: React.FC = () => {
       key: 'detailsCount',
       align: 'center' as const,
     },
+    ...(sheetStock.allowed ? orderSheetStockColumns<(typeof sheetMaterialRows)[number]>(sheetStock.byId) : []),
   ];
 
   const filmMaterialColumns = [
@@ -304,6 +307,7 @@ export const OrderMaterialsTab: React.FC = () => {
             <Text strong style={{ fontSize: 14 }}>
               Листовые материалы
             </Text>
+            {sheetStock.allowed && <div><OrderSheetStockCaption {...sheetStock} /></div>}
           </div>
           <Table
             dataSource={sheetMaterialRows}
@@ -330,6 +334,7 @@ export const OrderMaterialsTab: React.FC = () => {
                   <Table.Summary.Cell index={2} align="center">
                     <Text strong style={{ fontSize: '1.1em' }}>{totalDetails}</Text>
                   </Table.Summary.Cell>
+                  {sheetStock.allowed && <><Table.Summary.Cell index={3} /><Table.Summary.Cell index={4} /></>}
                 </Table.Summary.Row>
               );
             }}

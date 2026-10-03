@@ -47,4 +47,17 @@ describe('order film stock guards', () => {
     expect(stockColumns).toContain('Обновить остатки');
     expect(stockHook).toContain('queryClient.invalidateQueries({ queryKey: orderFilmStockKey(orderId) })');
   });
+
+  it('shows sheet material stock from 1C with coverage in both order forms, refreshed the same way as film', () => {
+    const sheetHook = readFileSync(new URL('./useOrderSheetStock.ts', import.meta.url), 'utf8');
+    expect(sheetHook).toContain('...ORDER_FILM_STOCK_REFRESH');
+    expect(sheetHook).toContain('inventoryApi.orderSheetStock(orderId!)');
+    expect(stockColumns).toContain("title: 'На складе (1С)'");
+    expect(stockColumns).toContain('Остаток по данным 1С');
+    for (const source of [materialsTab, showPage]) {
+      expect(source).toContain('useOrderSheetStock(');
+      expect(source).toContain('orderSheetStockColumns<');
+      expect(source).toContain('<OrderSheetStockCaption {...sheetStock} />');
+    }
+  });
 });

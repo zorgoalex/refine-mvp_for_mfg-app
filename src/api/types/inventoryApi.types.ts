@@ -60,6 +60,16 @@ export interface StockDocumentDto extends StockDocumentSummaryDto {
 export interface OrderFilmStockDto {
   items: Array<{ filmId: number; canonicalFilmId: number; canonicalName: string; vendorName: string | null; stockLm: number | null; demandLm: number | null; status: 'enough' | 'short' | 'none' | 'unknown_demand' }>;
 }
+/** Остатки листовых материалов заказа по данным 1С (своего учёта листов в ERP нет). */
+export interface OrderSheetStockDto {
+  items: Array<{
+    sheetMaterialTypeId: number; name: string; refKey1c: string | null; onecName: string | null; unitName: string | null;
+    quantity: number | null; quantityM2: number | null; demandM2: number | null;
+    warehouses: Array<{ warehouseId: number; name: string; quantity: number }>;
+    status: 'enough' | 'short' | 'none' | 'unknown_demand' | 'unlinked' | 'unknown_unit' | 'unavailable';
+  }>;
+  snapshotVersion: string | null;
+}
 export interface InventoryPage<T> { total: number; items: T[]; totalQuantity?: number }
 export interface InventoryDocumentQuery { type?: StockDocKind; status?: StockDocStatus; from?: string; to?: string; filmId?: number; orderId?: number; offset?: number; limit?: number }
 export interface InventoryBalanceQuery { warehouseId?: number; vendorId?: number; search?: string; nonZero?: boolean; negative?: boolean; offset?: number; limit?: number }

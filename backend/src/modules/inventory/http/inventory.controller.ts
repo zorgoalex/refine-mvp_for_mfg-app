@@ -350,6 +350,14 @@ export class InventoryController {
     return this.projection.compensate(this.ctx(request, key), parsedId);
   }
 
+  @ApiOperation({ operationId: 'getOrderSheetStock', summary: 'Stock of the sheet materials used by an order, from 1C balances (no reservation)' })
+  @ApiResponse({ status: 200, description: 'Items with 1C quantity, m² equivalent, order demand and coverage status' })
+  @ApiResponse({ status: 404, description: 'Order not found or outside the user scope' })
+  @Get('orders/:orderId/sheet-stock')
+  orderSheetStock(@Req() request: RequestWithCurrentUser, @Param('orderId') orderId: string) {
+    return this.inventory.orderSheetStock(this.user(request), parseId(orderId, 'orderId'));
+  }
+
   @ApiOperation({ operationId: 'getOrderFilmStock', summary: 'Stock of the films used by an order (physical, no reservation)' })
   @ApiResponse({ status: 200, description: 'Per-film stock and demand' })
   @ApiResponse({ status: 404, description: 'Order not found or outside the user scope' })

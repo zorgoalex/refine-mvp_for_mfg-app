@@ -7,6 +7,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { can } from '../../utils/permissions';
 import { sheetMaterialsApi, type SheetMaterialTypeInput } from '../../api/sheetMaterialsApi';
 import { useRecordTabTitle } from '../../utils/recordTitle';
+import { NomenclatureFormItems, nomenclaturePayload, supportsNomenclature } from '../../components/NomenclatureFields';
+import { useQuery } from '@tanstack/react-query';
 
 export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
   const canManage = can('sheet_materials.manage');
@@ -22,6 +24,13 @@ export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
     meta: { idColumnName: 'sheet_material_type_id' },
   });
   const record = data?.data;
+  // Тип/категория/примечание — из backend (Hasura их не запрашивает); старый backend их не знает — поля скрыты и не шлются.
+  const backendQuery = useQuery({
+    queryKey: ['sheet-materials', 'one', Number(id)],
+    queryFn: () => sheetMaterialsApi.get(Number(id)),
+    enabled: !!id && canManage,
+  });
+  const nomenclatureSupported = supportsNomenclature(backendQuery.data);
 
   useRecordTabTitle({
     resourceLabel: 'Листовые материалы',
@@ -52,6 +61,15 @@ export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
       });
     }
   }, [record, form]);
+  useEffect(() => {
+    if (backendQuery.data && nomenclatureSupported) {
+      form.setFieldsValue({
+        nomenclatureType: backendQuery.data.nomenclatureType ?? undefined,
+        nomenclatureCategory: backendQuery.data.nomenclatureCategory ?? undefined,
+        note: backendQuery.data.note ?? undefined,
+      });
+    }
+  }, [backendQuery.data, nomenclatureSupported, form]);
 
   const { selectProps: typeSelectProps } = useSelect({
     resource: 'material_types',
@@ -82,14 +100,14 @@ export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
     return <Alert type="error" showIcon message="Недостаточно прав для редактирования листового материала" description="Требуется разрешение sheet_materials.manage" />;
   }
 
-  if (isLoading) return <Spin />;
+  if (isLoading || backendQuery.isLoading) return <Spin />;
 
   const submit = async () => {
     if (!record || !id) return;
     setSaving(true);
     try {
-      const values = await form.validateFields();
-      await sheetMaterialsApi.update(Number(id), values, record.version);
+      const { nomenclatureType, nomenclatureCategory, note, ...values } = await form.validateFields();
+      await sheetMaterialsApi.update(Number(id), { ...values, ...nomenclaturePayload({ nomenclatureType, nomenclatureCategory, note }, nomenclatureSupported) }, record.version);
       message.success('Листовой материал обновлён');
       navigate(`/sheet-material-types/show/${id}`);
     } catch (error: any) {
@@ -185,6 +203,7 @@ export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
               <Switch />
             </Form.Item>
           </Col>
+          {nomenclatureSupported && <NomenclatureFormItems colProps={{ xs: 24, sm: 12, md: 8 }} />}
         </Row>
         <Form.Item>
           <Space>

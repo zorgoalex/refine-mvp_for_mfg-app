@@ -6,12 +6,15 @@ import { Form, Input, Select, InputNumber, Switch, Button, message, Space, Alert
 import { useNavigate } from 'react-router-dom';
 import { can } from '../../utils/permissions';
 import { sheetMaterialsApi, type SheetMaterialTypeInput } from '../../api/sheetMaterialsApi';
+import { NomenclatureFormItems, nomenclaturePayload } from '../../components/NomenclatureFields';
+import { useSheetMaterialNomenclature } from './useSheetMaterialNomenclature';
 
 export const SheetMaterialCreate: React.FC<IResourceComponentsProps> = () => {
   const canManage = can('sheet_materials.manage');
   const navigate = useNavigate();
   const [form] = Form.useForm<SheetMaterialTypeInput>();
   const [saving, setSaving] = useState(false);
+  const nomenclature = useSheetMaterialNomenclature(canManage);
 
   const { selectProps: typeSelectProps } = useSelect({
     resource: 'material_types',
@@ -41,8 +44,8 @@ export const SheetMaterialCreate: React.FC<IResourceComponentsProps> = () => {
   const submit = async () => {
     setSaving(true);
     try {
-      const values = await form.validateFields();
-      await sheetMaterialsApi.create(values);
+      const { nomenclatureType, nomenclatureCategory, note, ...values } = await form.validateFields();
+      await sheetMaterialsApi.create({ ...values, ...nomenclaturePayload({ nomenclatureType, nomenclatureCategory, note }, nomenclature.supported) });
       message.success('Листовой материал создан');
       navigate('/sheet-material-types');
     } catch (error: any) {
@@ -133,6 +136,7 @@ export const SheetMaterialCreate: React.FC<IResourceComponentsProps> = () => {
               <Switch defaultChecked />
             </Form.Item>
           </Col>
+          {nomenclature.supported && <NomenclatureFormItems colProps={{ xs: 24, sm: 12, md: 8 }} />}
         </Row>
         <Form.Item>
           <Space>

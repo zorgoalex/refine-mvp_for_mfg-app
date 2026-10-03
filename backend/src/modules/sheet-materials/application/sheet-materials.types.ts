@@ -17,6 +17,10 @@ export interface SheetMaterialTypeDto {
   isActive: boolean;
   isCuttable: boolean;
   sortOrder: number;
+  /** Тип и категория номенклатуры 1С, примечание (как у плёнок). */
+  nomenclatureType: string | null;
+  nomenclatureCategory: string | null;
+  note: string | null;
   version: number;
 }
 
@@ -36,6 +40,10 @@ export interface SheetMaterialTypeInput {
   isActive?: boolean;
   isCuttable?: boolean;
   sortOrder?: number;
+  /** Не передано — при изменении значение сохраняется (старые клиенты PUT без этих полей); null или '' — очистить. */
+  nomenclatureType?: string | null;
+  nomenclatureCategory?: string | null;
+  note?: string | null;
 }
 
 export interface SheetMaterialsContext {

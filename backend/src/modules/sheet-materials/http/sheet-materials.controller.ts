@@ -32,6 +32,9 @@ const inputSchema = z.object({
   isActive: z.boolean().optional(),
   isCuttable: z.boolean().optional(),
   sortOrder: z.number().int().min(-32768).max(32767).optional(),
+  nomenclatureType: z.string().trim().max(50).nullable().optional(),
+  nomenclatureCategory: z.string().trim().max(150).nullable().optional(),
+  note: z.string().trim().max(2000).nullable().optional(),
 });
 const createSchema = inputSchema.strict();
 const updateSchema = inputSchema.extend({ version: z.number().int().min(0) }).strict();

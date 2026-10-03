@@ -20,11 +20,13 @@ import type {
   OnecWarehouseOptionDto,
   UpdateLineInput,
   OnecStockUnavailableReason,
+  OrderSheetStockDto,
   UpdateWarehouseInput,
   WarehouseDto,
   WarehouseStockDto,
   WarehouseStockFilter,
 } from './inventory.types';
+import { buildOrderSheetStock, type OnecItemBalance } from '../domain/order-sheet-stock';
 
 /** Склад плёнки: флаг BACKEND_INVENTORY_ENABLED и буквальная проверка прав. */
 @Injectable()
@@ -285,6 +287,42 @@ export class InventoryService {
   cancel(ctx: CommandContext, documentId: number, version: number) {
     this.require(ctx.currentUser, 'inventory.manage');
     return this.repository.cancel(ctx, documentId, version);
+  }
+
+  /**
+   * Остатки листовых материалов заказа по данным 1С: остаток позиции 1С, к которой привязан материал, по всем активным
+   * складам ERP с ключом 1С (каждый — из своего единственного источника, как «Остатки на складах»), против потребности
+   * заказа в м². Одна транзакция REPEATABLE READ READ ONLY (снимок 1С согласован).
+   */
+  async orderSheetStock(user: CurrentUser, orderId: number): Promise<OrderSheetStockDto> {
+    this.require(user, 'inventory.view');
+    return this.database.transaction(async (tx) => {
+      await tx.query('SET TRANSACTION READ ONLY');
+      const sheets = await this.repository.orderSheetDemand(user, orderId, tx);
+      const keys = new Set(sheets.map((sheet) => sheet.refKey1c).filter((key): key is string => key !== null));
+      const balances = new Map<string, OnecItemBalance>();
+      let available = false;
+      let snapshotVersion: string | null = null;
+      if (keys.size > 0) {
+        const warehouses = (await tx.query<{ warehouse_id: number; warehouse_name: string; ref_key_1c: string }>(
+          `SELECT warehouse_id, warehouse_name, lower(ref_key_1c::text) AS ref_key_1c FROM warehouses
+            WHERE is_active AND ref_key_1c IS NOT NULL ORDER BY warehouse_id`,
+        )).rows;
+        for (const warehouse of warehouses) {
+          const onec = await this.onecStock(tx, warehouse.ref_key_1c);
+          if (onec.reason !== null) continue;
+          available = true;
+          if (onec.state?.snapshotVersion && (!snapshotVersion || onec.state.snapshotVersion > snapshotVersion)) snapshotVersion = onec.state.snapshotVersion;
+          for (const row of onec.rows) {
+            if (!keys.has(row.itemRefKey)) continue;
+            const current = balances.get(row.itemRefKey) ?? { name: row.name, unitName: row.unitName, byWarehouse: [] };
+            current.byWarehouse.push({ warehouseId: Number(warehouse.warehouse_id), name: warehouse.warehouse_name, quantity: row.quantity });
+            balances.set(row.itemRefKey, current);
+          }
+        }
+      }
+      return { items: buildOrderSheetStock({ sheets, onecAvailable: available, balances }), snapshotVersion };
+    }, { isolation: 'repeatable read' });
   }
 
   orderFilmStock(user: CurrentUser, orderId: number) {

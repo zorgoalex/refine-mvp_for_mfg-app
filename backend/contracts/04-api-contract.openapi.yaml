@@ -19766,6 +19766,18 @@ paths:
         '404': {description: WAREHOUSE_NOT_FOUND}
         '409': {description: 'ONEC_COMPENSATION_SUPERSEDED (прерванный откат, а расход снова включён), IDEMPOTENCY_IN_PROGRESS не возвращается — прерванный откат продолжается'}
         '422': {description: IDEMPOTENCY_KEY_REUSED}
+  /api/v1/orders/{orderId}/sheet-stock:
+    get:
+      tags: [Inventory]
+      operationId: getOrderSheetStock
+      summary: Stock of the sheet materials used by an order, from 1C balances (no reservation)
+      security: [{bearerAuth: []}]
+      x-permission: inventory.view
+      parameters:
+        - {name: orderId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: '{items: [{sheetMaterialTypeId, name, refKey1c, onecName, unitName, quantity, quantityM2, demandM2, warehouses[], status}], snapshotVersion}'}
+        '404': {description: ORDER_NOT_FOUND or NOT_FOUND (inventory disabled)}
   /api/v1/orders/{orderId}/film-stock:
     get:
       tags: [Inventory]
@@ -21020,6 +21032,9 @@ components:
         isActive: {type: boolean}
         refKey1c: {type: string, format: uuid, nullable: true, description: '1C reference key; unique including archived items. Omitted on update: preserve; null or empty: clear. Not generated.'}
         sortOrder: {type: integer, minimum: -32768, maximum: 32767, description: 'Default 100 on create; omitted on update preserves value. Lists ordered by sortOrder/name/id.'}
+        nomenclatureType: {type: string, nullable: true, maxLength: 50, description: '1C nomenclature type. Omitted on update: preserve; null or empty: clear.'}
+        nomenclatureCategory: {type: string, nullable: true, maxLength: 150, description: '1C nomenclature category. Omitted on update: preserve; null or empty: clear.'}
+        note: {type: string, nullable: true, maxLength: 2000, description: 'Free note. Omitted on update: preserve; null or empty: clear.'}
     CatalogUpdate:
       type: object
       additionalProperties: false

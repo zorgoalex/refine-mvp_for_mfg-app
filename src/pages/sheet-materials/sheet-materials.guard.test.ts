@@ -76,3 +76,20 @@ describe('sheet-materials resource wiring', () => {
     expect(create).not.toMatch(/name=["']conversion_key["']/);
   });
 });
+
+describe('sheet materials nomenclature fields', () => {
+  const read = (file: string) => readFileSync(new URL(file, import.meta.url), 'utf8');
+  it('reads them through the backend, never through Hasura (a mixed deploy must not break sheet reads)', () => {
+    const provider = read('../../utils/dataProvider.ts');
+    const fields = provider.slice(provider.indexOf('sheet_material_types: ['), provider.indexOf('],', provider.indexOf('sheet_material_types: [')));
+    for (const column of ['nomenclature_type', 'nomenclature_category', '"note"']) expect(fields).not.toContain(column);
+    expect(read('./useSheetMaterialNomenclature.ts')).toContain('sheetMaterialsApi.list(true)');
+    expect(read('./edit.tsx')).toContain('sheetMaterialsApi.get(Number(id))');
+  });
+  it('shows and sends them only when the backend knows them', () => {
+    expect(read('./list.tsx')).toContain('title="Категория номенклатуры"');
+    expect(read('./edit.tsx')).toContain('{nomenclatureSupported && <NomenclatureFormItems');
+    expect(read('./edit.tsx')).toContain('nomenclaturePayload({ nomenclatureType, nomenclatureCategory, note }, nomenclatureSupported)');
+    expect(read('./create.tsx')).toContain('{nomenclature.supported && <NomenclatureFormItems');
+  });
+});

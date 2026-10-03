@@ -18,6 +18,9 @@ export interface SheetMaterialTypeInput {
   isActive?: boolean;
   isCuttable?: boolean;
   sortOrder?: number;
+  nomenclatureType?: string | null;
+  nomenclatureCategory?: string | null;
+  note?: string | null;
 }
 
 export interface SheetMaterialTypeDto {
@@ -37,6 +40,10 @@ export interface SheetMaterialTypeDto {
   isActive: boolean;
   isCuttable: boolean;
   sortOrder: number;
+  /** Нет у backend до миграции 234. */
+  nomenclatureType?: string | null;
+  nomenclatureCategory?: string | null;
+  note?: string | null;
   version: number;
 }
 

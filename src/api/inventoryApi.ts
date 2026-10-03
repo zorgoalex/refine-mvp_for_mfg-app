@@ -3,7 +3,7 @@ import { httpClient } from './httpClient';
 import { withQuery } from './ordersApi';
 import type {
   InventoryBalanceQuery, InventoryDocumentQuery, InventoryPage, ManualStockDocumentInput,
-  OrderFilmStockDto, StockBalanceDto, StockDocumentDto, StockDocumentSummaryDto, StockImportInput,
+  OrderFilmStockDto, OrderSheetStockDto, StockBalanceDto, StockDocumentDto, StockDocumentSummaryDto, StockImportInput,
   OnecCompensateDto, OnecConsumptionRunDto, OnecIssuesPage, OnecIssuesQuery, OnecWarehouseOptionDto, StockLinePatch, WarehouseCreateInput, WarehouseDto, WarehousePatch, WarehouseSyncResultDto,
   WarehouseStockDto, WarehouseStockQuery,
 } from './types/inventoryApi.types';
@@ -67,6 +67,10 @@ export const inventoryApi = {
   /** Откат: расход 1С склада возвращается в 0, дата начала очищается. */
   compensateOnecConsumption(warehouseId: number, key = createInventoryIdempotencyKey()) {
     return httpClient.post<OnecCompensateDto>(`${root}/warehouses/${warehouseId}/onec-consumption/compensate`, {}, commandOptions(key));
+  },
+  /** Остатки листовых материалов заказа по данным 1С. */
+  orderSheetStock(orderId: number) {
+    return httpClient.get<OrderSheetStockDto>(backendApiPath(`/orders/${orderId}/sheet-stock`));
   },
   orderFilmStock(orderId: number) {
     return httpClient.get<OrderFilmStockDto>(backendApiPath(`/orders/${orderId}/film-stock`));

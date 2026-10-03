@@ -51,6 +51,15 @@ export function validateSheetMaterialTypeInput(input: SheetMaterialTypeInput): v
   if (input.refKey1c != null && input.refKey1c !== '' && !UUID_RE.test(input.refKey1c)) {
     errors.push({ field: 'refKey1c', message: 'refKey1c must be a valid UUID' });
   }
+  const tooLong = (field: 'nomenclatureType' | 'nomenclatureCategory' | 'note', max: number) => {
+    const value = input[field];
+    if (value != null && (typeof value !== 'string' || value.trim().length > max)) {
+      errors.push({ field, message: `${field} must be a string up to ${max} characters` });
+    }
+  };
+  tooLong('nomenclatureType', 50);
+  tooLong('nomenclatureCategory', 150);
+  tooLong('note', 2000);
   if (errors.length > 0) {
     throw new ApiError(422, 'VALIDATION_ERROR', 'Sheet material payload validation failed', { errors });
   }

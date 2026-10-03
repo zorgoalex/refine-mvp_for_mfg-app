@@ -102,6 +102,28 @@ export interface OrderFilmStockItemDto {
   status: 'enough' | 'short' | 'none' | 'unknown_demand';
 }
 
+/**
+ * Остаток листового материала заказа по данным 1С (своего учёта листов в ERP нет): сумма остатков 1С позиции, к которой
+ * привязан материал (`ref_key_1c`), по активным складам ERP с ключом 1С; покрытие — в м² против потребности заказа.
+ */
+export interface OrderSheetStockItemDto {
+  sheetMaterialTypeId: number; name: string; refKey1c: string | null;
+  onecName: string | null; unitName: string | null;
+  /** Остаток в единице 1С; null — нет привязки или данных 1С. */
+  quantity: number | null;
+  /** Остаток в м²: листы × площадь листа материала ERP, м² — как есть; null — единица не пересчитывается. */
+  quantityM2: number | null;
+  demandM2: number | null;
+  warehouses: Array<{ warehouseId: number; name: string; quantity: number }>;
+  status: 'enough' | 'short' | 'none' | 'unknown_demand' | 'unlinked' | 'unknown_unit' | 'unavailable';
+}
+
+export interface OrderSheetStockDto {
+  items: OrderSheetStockItemDto[];
+  /** Дата снимка остатков 1С (самая поздняя из прочитанных складов); null — данных 1С нет. */
+  snapshotVersion: string | null;
+}
+
 export interface CommandContext {
   currentUser: CurrentUser;
   requestId: string;
