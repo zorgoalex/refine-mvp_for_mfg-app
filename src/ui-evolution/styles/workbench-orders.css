@@ -2076,3 +2076,22 @@
   /* шапка листа + миниатюра 170px: место держится и пока миниатюра перезагружается */
   min-height: 240px !important;
 }
+
+/* --- «Отправить заказ»: шапка карточки и липкая строка --- */
+:root[data-ui-variant="workbench"] .order-show-page--workbench button[aria-label="Отправить заказ"]:not(:disabled) {
+  border-color: color-mix(in srgb, var(--evo-primary) 34%, var(--evo-border));
+  background: color-mix(in srgb, var(--evo-primary) 8%, var(--evo-surface));
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench button[aria-label="Отправить заказ"]:not(:disabled):hover {
+  border-color: var(--evo-primary);
+  background: color-mix(in srgb, var(--evo-primary) 14%, var(--evo-surface));
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench button[aria-label="Отправить заказ"]:disabled {
+  border-color: var(--evo-border);
+  background: var(--evo-surface);
+  color: var(--evo-text-tertiary, #a3a8b3);
+}

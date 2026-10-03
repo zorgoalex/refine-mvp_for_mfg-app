@@ -1,10 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import {
-  MDF_BOARD_DAY_START_PERIOD,
-  mdfBoardDailyPeriodDays,
-  readMdfBoardDailyPeriod,
-  writeMdfBoardDailyPeriod,
-} from './mdfBoardDailyPeriod';
+import { mdfBoardPeriodDays, readMdfBoardPeriod, writeMdfBoardPeriod } from './mdfBoardDailyPeriod';
 import { cncOrderSearchPeriodDays } from '../pages/orderStatusBoard/model';
 
 const store = new Map<string, string>();
@@ -19,30 +14,30 @@ beforeEach(() => {
   };
 });
 
-describe('MDF board daily period', () => {
-  it('a day starts with the current day', () => {
-    expect(MDF_BOARD_DAY_START_PERIOD).toBe('1d');
-    expect(readMdfBoardDailyPeriod(7, '2026-10-04')).toBe('1d');
+describe('MDF board remembered period', () => {
+  it('has no choice until the user picks one', () => {
+    expect(readMdfBoardPeriod(7)).toBeNull();
   });
 
-  it('keeps the choice until midnight and drops it on the next day', () => {
-    writeMdfBoardDailyPeriod(7, '2026-10-04', '2w');
-    expect(readMdfBoardDailyPeriod(7, '2026-10-04')).toBe('2w');
-    expect(readMdfBoardDailyPeriod(7, '2026-10-05')).toBe('1d');
+  it('keeps the last choice, also the one saved with a day by the previous version', () => {
+    writeMdfBoardPeriod(7, '2w');
+    expect(readMdfBoardPeriod(7)).toBe('2w');
+    store.set('erp.mdfBoard.period.7', '{"day":"2026-10-04","period":"1m"}');
+    expect(readMdfBoardPeriod(7)).toBe('1m');
   });
 
   it('is kept per user and ignores a broken value', () => {
-    writeMdfBoardDailyPeriod(7, '2026-10-04', '1m');
-    expect(readMdfBoardDailyPeriod(8, '2026-10-04')).toBe('1d');
-    store.set('erp.mdfBoard.period.9', '{"day":"2026-10-04","period":"5y"}');
-    expect(readMdfBoardDailyPeriod(9, '2026-10-04')).toBe('1d');
+    writeMdfBoardPeriod(7, '1m');
+    expect(readMdfBoardPeriod(8)).toBeNull();
+    store.set('erp.mdfBoard.period.9', '{"period":"5y"}');
+    expect(readMdfBoardPeriod(9)).toBeNull();
     store.set('erp.mdfBoard.period.9', 'not json');
-    expect(readMdfBoardDailyPeriod(9, '2026-10-04')).toBe('1d');
+    expect(readMdfBoardPeriod(9)).toBeNull();
   });
 
   it('counts days exactly like the board', () => {
     for (const period of ['1d', '1w', '2w', '1m'] as const) {
-      expect(mdfBoardDailyPeriodDays(period)).toBe(cncOrderSearchPeriodDays(period));
+      expect(mdfBoardPeriodDays(period)).toBe(cncOrderSearchPeriodDays(period));
     }
   });
 });

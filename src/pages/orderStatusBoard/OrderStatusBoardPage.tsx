@@ -62,7 +62,7 @@ import { createPortal } from 'react-dom';
 import { DndProvider, useDrag, useDragLayer, useDrop } from 'react-dnd';
 import { TouchBackend } from 'react-dnd-touch-backend';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { readMdfBoardDailyPeriod, writeMdfBoardDailyPeriod } from '../../utils/mdfBoardDailyPeriod';
+import { readMdfBoardPeriod, writeMdfBoardPeriod } from '../../utils/mdfBoardDailyPeriod';
 import { isApiError } from '../../api/apiError';
 import { cncTelegramApi } from '../../api/cncTelegramApi';
 import { cutApi } from '../../api/cutApi';
@@ -687,9 +687,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     !hasExplicitMdfCardDeepLink &&
     (viewState.cncWorkday !== todayCncWorkday
       || viewState.cncOrderFilters.length > 0
-      // the period is remembered for one day: a new day opens on the current day
+      // the period stays as the user left it; only the date starts from today
       || (!viewState.cncPlannedTodayOnly
-        && viewState.cncOrderSearchPeriod !== readMdfBoardDailyPeriod(currentUser?.id, todayCncWorkday)));
+        && viewState.cncOrderSearchPeriod !== (readMdfBoardPeriod(currentUser?.id) ?? viewState.cncOrderSearchPeriod)));
   const {
     getSetting: getAppSetting,
     refetch: refetchAppSettings,
@@ -906,7 +906,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       return;
     }
     // Finish synchronization only after the router reflects the opening date.
-    const openingPeriod = readMdfBoardDailyPeriod(currentUser?.id, todayCncWorkday);
+    const openingPeriod = readMdfBoardPeriod(currentUser?.id) ?? viewState.cncOrderSearchPeriod;
     if (viewState.cncPlannedTodayOnly || viewState.cncOrderSearchPeriod === openingPeriod) {
       updateViewState({ cncWorkday: todayCncWorkday, cncOrderFilters: [] });
     } else {
@@ -2490,8 +2490,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const updateCncWorkday = (date: Dayjs) =>
     updateViewState({ cncWorkday: date.format('YYYY-MM-DD'), cncOrderFilters: [] });
   const updateCncDisplayPeriod = (period: CncOrderSearchPeriod) => {
-    // the choice is kept until the end of the day
-    writeMdfBoardDailyPeriod(currentUser?.id, dayjs().format('YYYY-MM-DD'), period);
+    // the choice is remembered for the user
+    writeMdfBoardPeriod(currentUser?.id, period);
     if (period === '1d') {
       updateViewState({
         cncOrderSearchPeriod: period,

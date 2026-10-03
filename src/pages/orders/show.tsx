@@ -3243,6 +3243,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const workbenchPaymentButton = openAddPayment ? (
     <Button icon={<WalletOutlined />} onClick={openAddPayment}>Добавить платёж</Button>
   ) : null;
+  // NewLine: the same «Отправить заказ» also stays at hand in the sticky order bar
+  const workbenchBarSendAction = isWorkbench ? orderSendAction : null;
   const workbenchHeadActions = isWorkbench ? (
     <>
       {workbenchPaymentButton}
@@ -3595,7 +3597,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   compactSticky
                   showFinancials={canViewFinancials}
                   hdfDetails={hdfDetails}
-                  compactActions={<>{workbenchPaymentButton}{workbenchEditButton}</>}
+                  compactActions={<>{workbenchPaymentButton}{workbenchEditButton}{workbenchBarSendAction}</>}
                 />
               </div>
             </>
