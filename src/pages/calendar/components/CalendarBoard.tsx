@@ -59,7 +59,7 @@ import { useCalendarSendSupport } from '../../configuration/components/broadcast
 import { useCalendarSendTooltip } from '../../configuration/components/broadcasts/calendarSendTarget';
 import { useResponsive } from '../hooks/useResponsive';
 import { useOptionalUiVariant } from '../../../ui-variant/UiVariantProvider';
-import { buildWorkbenchWeeks, workbenchColumnWidth, workbenchPeriodSummary } from '../utils/workbenchCalendar';
+import { buildWorkbenchWeeks, readCalendarScale, workbenchLayout, workbenchPeriodSummary, writeCalendarScale } from '../utils/workbenchCalendar';
 import { useOperationalUi } from '../../../ui-operational/OperationalPrimitives';
 import {
   isWorkspaceOperationOwnershipLost,
@@ -251,7 +251,12 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   const [periodDays, setPeriodDays] = useState<7 | 14 | 30>(isWorkbench ? 14 : 7);
   const [productionOnly, setProductionOnly] = useState(true);
   // Масштабирование карточек: 1.0 = дефолт (100%), диапазон от 0.7 (70%) до 1.5 (150%)
-  const [cardScale, setCardScale] = useState<number>(1.0);
+  // the last zoom the user chose is kept per user and restored when the calendar opens
+  const scaleUserKey = String(authSession.getUser()?.id ?? 'anonymous');
+  const [cardScale, setCardScale] = useState<number>(() => readCalendarScale(scaleUserKey, 1.0, 0.7, 1.5));
+  useEffect(() => {
+    writeCalendarScale(scaleUserKey, cardScale);
+  }, [cardScale, scaleUserKey]);
   const pendingOrderActionsRef = useRef<Map<number, Promise<void>>>(new Map());
   const DEFAULT_SCALE = 1.0;
   const MIN_SCALE = 0.7;
@@ -681,11 +686,11 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
 
   // Обработчики масштабирования карточек
   const handleZoomIn = () => {
-    setCardScale((prev) => Math.min(prev + SCALE_STEP, MAX_SCALE)); // Максимум 150% (шаг 10%)
+    setCardScale((prev) => Math.min(Math.round((prev + SCALE_STEP) * 10) / 10, MAX_SCALE)); // Максимум 150% (шаг 10%)
   };
 
   const handleZoomOut = () => {
-    setCardScale((prev) => Math.max(prev - SCALE_STEP, MIN_SCALE)); // Минимум 70% (шаг 10%)
+    setCardScale((prev) => Math.max(Math.round((prev - SCALE_STEP) * 10) / 10, MIN_SCALE)); // Минимум 70% (шаг 10%)
   };
 
   const handleZoomReset = () => {
@@ -721,21 +726,28 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   }, []);
 
   // Вычисляем layout (количество колонок и их ширину) с учетом масштаба
+  // the saved zoom is a desktop setting; phones always show cards at 100%
+  const appliedScale = isMobile ? 1 : cardScale;
   const { columnWidth: baseColumnWidth, columnsPerRow } = useMemo(() => {
     return calculateColumnsPerRow(
       containerWidth,
       isMobileDevice(containerWidth),
-      cardScale,
+      appliedScale,
       isNarrowDevice(containerWidth),
     );
-  }, [containerWidth, cardScale]);
-  const columnWidth = isWorkbenchGrid ? workbenchColumnWidth(containerWidth) : baseColumnWidth;
+  }, [containerWidth, appliedScale]);
+  const wbLayout = isWorkbenchGrid ? workbenchLayout(containerWidth, appliedScale) : null;
+  const columnWidth = wbLayout ? wbLayout.columnWidth : baseColumnWidth;
 
   // Группируем дни по рядам
   const dayRows = useMemo(() => {
-    if (isWorkbenchGrid) return workbenchWeeks.map((week) => week.days);
+    if (wbLayout) {
+      return wbLayout.weekRows
+        ? workbenchWeeks.map((week) => week.days)
+        : groupDaysIntoRows(displayedDays, wbLayout.perRow);
+    }
     return isOperational ? [displayedDays] : groupDaysIntoRows(displayedDays, columnsPerRow);
-  }, [columnsPerRow, displayedDays, isOperational, isWorkbenchGrid, workbenchWeeks]);
+  }, [columnsPerRow, displayedDays, isOperational, wbLayout?.perRow, wbLayout?.weekRows, workbenchWeeks]);
   const visibleOrdersOf = (day: Date): CalendarOrder[] => {
     const allDayOrders = ordersByDate[formatDateKey(day)] || [];
     return productionOnly
@@ -787,7 +799,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
           : undefined
       }
     >
-      <div className={isWorkbenchGrid ? 'calendar-board calendar-board--wb' : 'calendar-board'} ref={containerRef}>
+      <div className={isWorkbenchGrid ? `calendar-board calendar-board--wb${wbLayout?.weekRows ? ' calendar-board--wb-weeks' : ''}` : 'calendar-board'} ref={containerRef}>
         <CalendarOrderDragLayer enabled={isTabletLayout} />
         <MobileCalendarDisclosure
           mobile={isMobile}
@@ -1241,7 +1253,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
         <div className="calendar-grid" role="region" aria-label="Производственный календарь">
           {dayRows.map((row, rowIndex) => (
             <React.Fragment key={`row-${rowIndex}`}>
-            {isWorkbenchGrid && workbenchWeeks[rowIndex] ? (
+            {wbLayout?.weekRows && workbenchWeeks[rowIndex] ? (
               <div className="wb-cal-week-label">{workbenchWeeks[rowIndex].label}</div>
             ) : null}
             <div className="calendar-row">
@@ -1269,7 +1281,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
                     onDaySendHover={refreshCalendarSendTitle}
                     onCheckboxChange={handleCheckboxChange}
                     viewMode={viewMode}
-                    cardScale={cardScale}
+                    cardScale={appliedScale}
                     productionWorkflowDisplay={productionWorkflowDisplay}
                     showFinancials={canViewFinancials}
                   />

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildWorkbenchWeeks, workbenchColumnWidth, workbenchPeriodSummary } from './workbenchCalendar';
+import { buildWorkbenchWeeks, readCalendarScale, workbenchLayout, workbenchPeriodSummary, writeCalendarScale } from './workbenchCalendar';
 import type { CalendarOrder } from '../types/calendar';
 
 const key = (date: Date) => `${date.getDate()}.${date.getMonth() + 1}`;
@@ -23,9 +23,29 @@ describe('workbench calendar weeks', () => {
     expect(buildWorkbenchWeeks(new Date(2026, 8, 25), 7, today)[0].label).toBe('Прошлая неделя · 21.09 – 27.09');
   });
 
-  it('splits the board into seven equal columns', () => {
-    expect(workbenchColumnWidth(1176)).toBe(154);
-    expect(workbenchColumnWidth(500)).toBe(112);
+  it('columns follow the zoom: wider cards, fewer days in a row; weeks only when seven fit', () => {
+    expect(workbenchLayout(1176, 1)).toEqual({ columnWidth: 170, perRow: 6, weekRows: false });
+    expect(workbenchLayout(1310, 1)).toEqual({ columnWidth: 170, perRow: 7, weekRows: true });
+    expect(workbenchLayout(1176, 1.5)).toEqual({ columnWidth: 255, perRow: 4, weekRows: false });
+    expect(workbenchLayout(1176, 0.7)).toEqual({ columnWidth: 119, perRow: 7, weekRows: true });
+    expect(workbenchLayout(200, 1).perRow).toBe(1);
+  });
+
+  it('remembers the zoom per user', () => {
+    const store = new Map<string, string>();
+    (globalThis as { window?: unknown }).window = {
+      localStorage: {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => { store.set(key, value); },
+      },
+    };
+    expect(readCalendarScale('7', 1, 0.7, 1.5)).toBe(1);
+    writeCalendarScale('7', 1.2000000000000002);
+    expect(store.get('erp.calendar.cardScale.7')).toBe('1.2');
+    expect(readCalendarScale('7', 1, 0.7, 1.5)).toBe(1.2);
+    expect(readCalendarScale('8', 1, 0.7, 1.5)).toBe(1);
+    store.set('erp.calendar.cardScale.9', '5');
+    expect(readCalendarScale('9', 1, 0.7, 1.5)).toBe(1.5);
   });
 
   it('sums the planned area and counts the orders', () => {

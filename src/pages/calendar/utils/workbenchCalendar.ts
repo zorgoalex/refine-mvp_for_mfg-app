@@ -6,7 +6,6 @@ import { calculateTotalArea } from './groupOrdersByDate';
 export const WORKBENCH_DAY_GAP = 8;
 /** Side padding of the grid (24px on each side). */
 export const WORKBENCH_GRID_PADDING = 48;
-const WORKBENCH_MIN_COLUMN_WIDTH = 112;
 
 export interface WorkbenchWeek {
   days: Date[];
@@ -31,12 +30,45 @@ export function buildWorkbenchWeeks(center: Date, periodDays: 7 | 14 | 30, today
   });
 }
 
-/** Seven equal columns across the board (the stylesheet stretches them to the exact row width). */
-export function workbenchColumnWidth(containerWidth: number): number {
-  return Math.max(
-    WORKBENCH_MIN_COLUMN_WIDTH,
-    Math.floor((containerWidth - WORKBENCH_GRID_PADDING - WORKBENCH_DAY_GAP * 6) / 7),
-  );
+/** Default width of a day column (its cards) at 100% zoom. */
+export const WORKBENCH_COLUMN_BASE_WIDTH = 170;
+
+export interface WorkbenchLayout {
+  /** day column width in px, proportional to the zoom */
+  columnWidth: number;
+  /** days that fit in one row */
+  perRow: number;
+  /** a whole week fits in a row: the rows are weeks Monday–Sunday with their labels */
+  weekRows: boolean;
+}
+
+/** Columns follow the zoom: a larger card makes a wider column and fewer columns in a row. */
+export function workbenchLayout(containerWidth: number, scale: number): WorkbenchLayout {
+  const columnWidth = Math.round(WORKBENCH_COLUMN_BASE_WIDTH * scale);
+  const available = Math.max(0, containerWidth - WORKBENCH_GRID_PADDING);
+  const perRow = Math.max(1, Math.floor((available + WORKBENCH_DAY_GAP) / (columnWidth + WORKBENCH_DAY_GAP)));
+  return { columnWidth, perRow: Math.min(perRow, 7), weekRows: perRow >= 7 };
+}
+
+const SCALE_STORAGE_PREFIX = 'erp.calendar.cardScale.';
+
+/** The zoom the user chose last time (per user, in this browser). */
+export function readCalendarScale(userKey: string, fallback: number, min: number, max: number): number {
+  try {
+    const raw = window.localStorage.getItem(SCALE_STORAGE_PREFIX + userKey);
+    const value = raw == null ? NaN : Number(raw);
+    return Number.isFinite(value) ? Math.min(max, Math.max(min, Math.round(value * 10) / 10)) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function writeCalendarScale(userKey: string, scale: number): void {
+  try {
+    window.localStorage.setItem(SCALE_STORAGE_PREFIX + userKey, String(Math.round(scale * 10) / 10));
+  } catch {
+    // the zoom is only a convenience; without storage it starts at 100%
+  }
 }
 
 const ordersWord = (count: number): string => {

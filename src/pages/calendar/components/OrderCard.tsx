@@ -360,7 +360,12 @@ const OrderCard: React.FC<OrderCardProps> = ({
           {orderDate ? <span className="order-card__date" title="Дата заказа">{orderDate}</span> : null}
         </div>
         <div className="order-card__facts">
-          <span title={millingDisplay || undefined}>{millingDisplay}</span>
+          <span
+            className={`order-card__milling${millingDisplay?.trim().toLocaleLowerCase('ru-RU') === 'модерн' ? ' order-card__milling--faint' : ''}`}
+            title={millingDisplay || undefined}
+          >
+            {millingDisplay}
+          </span>
           <b>{order.total_area > 0 ? `${order.total_area.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} м²` : '0 м²'}</b>
         </div>
         {order.client_name ? (

@@ -67,7 +67,8 @@ test.describe('Calendar frontend', () => {
 
     test('NewLine: weeks Monday–Sunday in rows of seven days with calm cards', async ({ page }) => {
         test.setTimeout(150_000);
-        await page.setViewportSize({ width: 1440, height: 900 });
+        // a whole week (7 × 170px) fits at this width
+        await page.setViewportSize({ width: 1600, height: 900 });
         const db = createWorkflowMockDb();
         const today = new Date();
         seedCalendarFrontendOrder(db, formatLocalDate(today));
@@ -125,10 +126,17 @@ test.describe('Calendar frontend', () => {
         expect(emptyDaySends).toBe(0);
         expect(await page.locator('.day-column--today .day-column__total-area').evaluate((element) => getComputedStyle(element).color)).toBe('rgb(212, 56, 13)');
 
-        // масштаб «+» увеличивает карточки, не наезжая на соседние
+        // масштаб «+» увеличивает карточку пропорционально: колонки шире, в ряду меньше дней, без наездов
+        const widthBefore = await card.evaluate((element) => element.getBoundingClientRect().width);
         await page.getByRole('button', { name: 'Увеличить масштаб' }).click();
         await page.getByRole('button', { name: 'Увеличить масштаб' }).click();
         await page.waitForTimeout(300);
+        expect(await card.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(widthBefore * 1.1);
+        const daysInFirstRow = await page.locator('.calendar-board--wb .calendar-row').first().locator(':scope > .day-column').count();
+        expect(daysInFirstRow).toBeLessThan(7);
+        await expect(page.locator('.wb-cal-week-label')).toHaveCount(0);
+        // выбранный масштаб запоминается для пользователя
+        expect(await page.evaluate(() => Object.entries(localStorage).find(([key]) => key.startsWith('erp.calendar.cardScale.'))?.[1])).toBe('1.2');
         const overlaps = await page.locator('.calendar-board--wb .day-column__orders').evaluateAll((columns) => columns.map((column) => {
             const cards = [...column.querySelectorAll('.order-card')].map((item) => item.getBoundingClientRect());
             const box = column.getBoundingClientRect();
@@ -136,6 +144,7 @@ test.describe('Calendar frontend', () => {
         }).filter(Boolean).length);
         expect(overlaps).toBe(0);
         await page.getByRole('button', { name: 'Сбросить масштаб' }).click();
+        await expect(page.locator('.wb-cal-week-label')).toHaveCount(2);
 
         // все прежние режимы на месте
         for (const mode of ['Компактно', 'Кратко', 'Подробно']) {

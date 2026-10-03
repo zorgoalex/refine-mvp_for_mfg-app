@@ -103,9 +103,8 @@
 
 /* ---------- день ---------- */
 :root[data-ui-variant="workbench"] .calendar-board--wb .day-column {
-  /* семь равных колонок по ширине ряда (с полосой прокрутки и без) */
-  flex: 1 1 0;
-  width: auto !important;
+  /* ширина колонки — по масштабу карточек (задаётся в разметке) */
+  flex: 0 0 auto;
   min-width: 0;
   min-height: 140px;
   border: 1px solid var(--evo-border);
@@ -271,7 +270,7 @@
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1.25;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   cursor: pointer;
 }
 
@@ -559,4 +558,50 @@
 :root[data-ui-variant="workbench"] .order-card--wb.order-card--ready-to-issue::before,
 :root[data-ui-variant="workbench"] .order-card--wb.order-card--issued::before {
   display: none;
+}
+
+/* неделя целиком помещается в ряд: семь колонок растягиваются на всю ширину */
+:root[data-ui-variant="workbench"] .calendar-board--wb-weeks .day-column {
+  flex: 1 1 0;
+  width: auto !important;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .calendar-row {
+  flex-wrap: wrap;
+}
+
+/* «Модерн» — самый частый вариант, его почти не видно */
+:root[data-ui-variant="workbench"] .order-card--wb .order-card__milling--faint {
+  color: var(--evo-text-secondary);
+  opacity: 0.45;
+}
+
+/* размеры материалов — столбиком вдоль правого края карточки, контрастно */
+:root[data-ui-variant="workbench"] .order-card--wb {
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 6px;
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb > * {
+  grid-column: 1;
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb > .order-card__materials {
+  grid-column: 2;
+  grid-row: 2 / span 3;
+  flex-direction: column;
+  align-items: flex-end;
+  align-self: start;
+  margin: 0;
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb > .order-card__stage-bar {
+  grid-column: 1 / -1;
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb .order-card__material-tag {
+  border: 1px solid color-mix(in srgb, var(--wb-material, #d9d9d9) 70%, #000 30%);
+  background: var(--wb-material, var(--evo-surface-muted));
+  color: #1f1f1f;
+  font-weight: 650;
 }
