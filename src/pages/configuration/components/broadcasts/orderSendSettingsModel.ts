@@ -160,8 +160,18 @@ export function orderSendSettingsErrorMessage(error: unknown, fallback: string):
   return fallback;
 }
 
-/** The status line under the settings: a running send or the next allowed time. */
-export function orderSendStatusText(nextAllowedAt: string | null, activeSend: boolean, now = Date.now()): string | null {
+/**
+ * The status line under the settings: the queue length and the next delivery; an older backend
+ * (no queueLength) still reports a running send or the next allowed time.
+ */
+export function orderSendStatusText(nextAllowedAt: string | null, activeSend: boolean, now = Date.now(),
+  queue?: { queueLength?: number; nextDeliveryAt?: string | null }): string | null {
+  if (queue && typeof queue.queueLength === 'number') {
+    if (queue.queueLength === 0) return null;
+    const when = queue.nextDeliveryAt && Number.isFinite(Date.parse(queue.nextDeliveryAt))
+      ? `; следующая ≈ ${formatScheduleTime(queue.nextDeliveryAt)}` : '';
+    return `В очереди отправок из карточек: ${queue.queueLength}${when}.`;
+  }
   if (activeSend) return 'Предыдущая отправка из карточки ещё выполняется.';
   const next = nextAllowedAt ? Date.parse(nextAllowedAt) : NaN;
   if (Number.isFinite(next) && next > now) return `Следующая отправка из карточки возможна с ${formatScheduleTime(nextAllowedAt as string)}.`;

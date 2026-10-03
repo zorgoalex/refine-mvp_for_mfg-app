@@ -384,6 +384,8 @@ export const apiRoutes = {
     orderSend: {
       settings: backendApiPath('/whatsapp/order-send/settings'),
       menu: backendApiPath('/whatsapp/order-send/menu'),
+      queue: backendApiPath('/whatsapp/order-send/queue'),
+      cancel: (sendId: string) => backendApiPath(`/whatsapp/order-send/sends/${encodeURIComponent(sendId)}/cancel`),
     },
     broadcasts: {
       list: backendApiPath('/whatsapp/broadcasts'),

@@ -1,8 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { QueryResultRow } from 'pg';
 import { DatabaseService } from '../../../database/database.service';
-import { deliveryAllowedAt } from '../order-send/order-send.repository';
-import { orderForm, type OrderFormCode } from '../order-send/order-send.types';
+import { estimateQueue, type QueueRow } from '../order-send/order-send-queue';
+import { orderFormTitle } from '../order-send/order-send.types';
 
 /** One WhatsApp send the current user started himself (order card or calendar). No recipient ids. */
 export interface MySend {
@@ -20,6 +20,10 @@ export interface MySend {
   cancelReason: string | null;
   orderId: number | null;
   targetDate: string | null;
+  /** The caller may cancel it now (an order card send still waiting in the queue). */
+  cancellable: boolean;
+  /** Cancelled by someone else (a WhatsApp manager), not by the caller. */
+  cancelledByOther: boolean;
 }
 
 const WINDOW_HOURS = 24;
@@ -58,14 +62,19 @@ export class MySendsRepository {
   private async orderSends(userId: string, since: Date, now: Date, followSince: Date, ids: readonly string[]): Promise<MySend[]> {
     const exists = (await this.database.query<{ ok: boolean }>(`SELECT to_regclass('whatsapp_order_sends') IS NOT NULL ok`)).rows[0]?.ok;
     if (!exists) return [];
-    const settings = (await this.database.query<{ last_delivery_at: Date | null; min_interval_minutes: number; next_delivery_at: Date | null } & QueryResultRow>(
-      'SELECT last_delivery_at, min_interval_minutes, next_delivery_at FROM whatsapp_order_send_settings WHERE singleton')).rows[0];
-    const gate = settings ? deliveryAllowedAt(settings) : null;
+    const settings = (await this.database.query<{ last_delivery_at: Date | null; min_interval_minutes: number; next_delivery_at: Date | null;
+      send_window_minutes: number } & QueryResultRow>(
+      'SELECT last_delivery_at, min_interval_minutes, next_delivery_at, send_window_minutes FROM whatsapp_order_send_settings WHERE singleton')).rows[0];
+    // The estimate needs the whole queue (everyone's sends ahead of the caller's), never returned itself.
+    const queue = (await this.database.query<QueueRow & QueryResultRow>(`SELECT send_id, state, created_at, next_attempt_at, queue_expires_at,
+      send_started_at FROM whatsapp_order_sends WHERE state IN ('queued','sending')`)).rows;
+    const estimates = settings ? estimateQueue(settings, queue, now) : new Map();
     const rows = (await this.database.query<QueryResultRow & {
-      send_id: string; order_id: string; order_name: string | null; target_kind: 'client' | 'chat'; chat_label: string | null; form_code: OrderFormCode;
+      send_id: string; order_id: string; order_name: string | null; target_kind: 'client' | 'chat'; chat_label: string | null; form_code: string;
       state: string; error_code: string | null; cancel_reason: string | null; next_attempt_at: Date; created_at: Date; sent_at: Date | null; updated_at: Date;
+      cancelled_by: string | null;
     }>(`SELECT s.send_id, s.order_id, o.order_name, s.target_kind, c.label chat_label, s.form_code, s.state, s.error_code, s.cancel_reason,
-          s.next_attempt_at, s.created_at, s.sent_at, s.updated_at
+          s.next_attempt_at, s.created_at, s.sent_at, s.updated_at, s.cancelled_by
         FROM whatsapp_order_sends s
         JOIN (
           -- Active and followed rows are picked independently of the limited history.
@@ -79,14 +88,17 @@ export class MySendsRepository {
     return rows.map((row) => {
       const active = ORDER_ACTIVE.has(row.state);
       const recipient = row.target_kind === 'client' ? 'клиенту' : `в чат «${row.chat_label ?? 'чат'}»`;
+      const estimate = estimates.get(row.send_id);
       return {
         kind: 'order_send', id: row.send_id,
-        title: `Заказ ${row.order_name ?? `#${row.order_id}`} → ${recipient}, ${orderForm(row.form_code).title}`,
+        title: `Заказ ${row.order_name ?? `#${row.order_id}`} → ${recipient}, ${orderFormTitle(row.form_code)}`,
         state: row.state, active,
-        estimatedAt: active ? latest(now, row.state === 'queued' ? row.next_attempt_at : null, row.state === 'queued' ? gate : null).toISOString() : null,
+        estimatedAt: active ? (estimate?.estimatedAt ?? now).toISOString() : null,
         createdAt: row.created_at.toISOString(),
         finishedAt: active ? null : (row.sent_at ?? row.updated_at).toISOString(),
         errorCode: row.error_code, cancelReason: row.cancel_reason, orderId: Number(row.order_id), targetDate: null,
+        cancellable: row.state === 'queued',
+        cancelledByOther: row.cancel_reason === 'manual' && row.cancelled_by !== null && String(row.cancelled_by) !== String(userId),
       };
     });
   }
@@ -125,6 +137,7 @@ export class MySendsRepository {
         createdAt: row.created_at.toISOString(),
         finishedAt: active ? null : (row.last_sent_at ?? row.updated_at).toISOString(),
         errorCode: row.reason, cancelReason: null, orderId: null, targetDate: row.target_date,
+        cancellable: false, cancelledByOther: false,
       };
     });
   }

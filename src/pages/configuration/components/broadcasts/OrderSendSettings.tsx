@@ -123,7 +123,7 @@ export const OrderSendSettings: React.FC = () => {
     </Card>;
   }
 
-  const status = orderSendStatusText(envelope?.nextAllowedAt ?? null, Boolean(envelope?.activeSend));
+  const status = orderSendStatusText(envelope?.nextAllowedAt ?? null, Boolean(envelope?.activeSend), Date.now(), envelope ?? undefined);
   const runtime = envelope?.runtime;
   const runtimeAvailable = Boolean(runtime?.enabled && runtime.relayAvailable);
   const fieldsLocked = saving || loading;
@@ -137,7 +137,7 @@ export const OrderSendSettings: React.FC = () => {
   } };
 
   return <Card title="Отправка заказа из карточки" extra={<Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading} disabled={saving}>Обновить</Button>}>
-    <Paragraph type="secondary">Команды «Отправить клиенту в WhatsApp» и «Отправить в чат» в меню «⋯» карточки заказа сразу отправляют выбранную форму заказа получателю.</Paragraph>
+    <Paragraph type="secondary">Команды «Отправить клиенту в WhatsApp» и «Отправить в чат» в меню «⋯» карточки заказа ставят выбранную форму в общую очередь: отправки уходят по одной с порогом частоты и окном. Ожидающая отправка ждёт не больше 24 часов.</Paragraph>
     {error && <Alert style={{ marginBottom: 12 }} type={error.startsWith('Настройки изменены') ? 'warning' : 'error'} showIcon message={error} closable onClose={() => setError('')} />}
     <Form form={form} layout="vertical" initialValues={toOrderSendFormValues(settings)} disabled={fieldsLocked} onFinish={(v: OrderSendFormValues) => void save(v)}>
       <div className="broadcast-settings-grid">

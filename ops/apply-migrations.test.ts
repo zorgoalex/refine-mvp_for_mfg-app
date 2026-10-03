@@ -273,6 +273,20 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText.slice(verifyStart, verifyEnd)).toContain('151_*|152_*');
   });
 
+  it('probes 230 by its end state (233 drops the one-active index) and verifies 233 before ledgering it', () => {
+    const arm230 = probeFn.slice(probeFn.indexOf('230_whatsapp_order_send*)'), probeFn.indexOf('233_whatsapp_order_send_queue*)'));
+    expect(arm230).toContain('whatsapp_order_sends uq_whatsapp_order_sends_command');
+    expect(arm230).not.toContain('idx_whatsapp_order_sends_one_active');
+    const arm233 = probeFn.slice(probeFn.indexOf('233_whatsapp_order_send_queue*)'), probeFn.indexOf('224_whatsapp_calendar_send*)'));
+    for (const marker of ["indexname='idx_whatsapp_order_sends_one_active'", 'idx_whatsapp_order_sends_queue', 'whatsapp_order_sends cancelled_by',
+      'whatsapp_order_sends parts_total', 'q_tbl whatsapp_order_send_parts', "LIKE '%manual%'", "LIKE '%order_image%'", "LIKE '%png%'",
+      'whatsapp_order_sends_form_code_check', 'chk_whatsapp_order_send_settings_client_forms', 'chk_whatsapp_order_send_chats_forms'])
+      expect(arm233).toContain(marker);
+    const verifyStart = scriptText.indexOf('verify_applied_effect() {');
+    const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
+    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('230_whatsapp_order_send*|233_whatsapp_order_send_queue*');
+  });
+
   it('requires the complete WhatsApp technical log schema before advancing migration 170', () => {
     const arm = probeFn.slice(
       probeFn.indexOf('170_whatsapp_technical_logs*)'),

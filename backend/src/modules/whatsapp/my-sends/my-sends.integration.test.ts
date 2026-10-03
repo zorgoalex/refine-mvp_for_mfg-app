@@ -33,7 +33,7 @@ describe.skipIf(!databaseUrl)('MySendsRepository (PostgreSQL, isolated schema)',
       CREATE TABLE orders(order_id bigint PRIMARY KEY, order_name text);
       INSERT INTO orders VALUES (9001, 'E2E-Тест-1'), (9002, 'E2E-Тест-2');`);
     for (const file of ['183_whatsapp_daily_digest.sql', '184_whatsapp_daily_digest_schedule.sql', '209_whatsapp_broadcasts.sql',
-      '224_whatsapp_calendar_send.sql', '230_whatsapp_order_send.sql']) {
+      '224_whatsapp_calendar_send.sql', '230_whatsapp_order_send.sql', '233_whatsapp_order_send_queue.sql']) {
       await q(await readFile(new URL(`../../../../db/migrations/${file}`, import.meta.url), 'utf8'));
     }
     calendarId = Number((await q<{ broadcast_id: string }>(`SELECT broadcast_id FROM whatsapp_broadcasts WHERE purpose = 'calendar'`)).rows[0].broadcast_id);
