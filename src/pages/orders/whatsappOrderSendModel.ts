@@ -137,6 +137,8 @@ export function orderSendSuccessToast(targetLabel: string, formTitle: string,
 }
 
 const FAILURE_TEXTS: Record<string, string> = {
+  ORDER_SEND_TARGET_UNSUPPORTED: 'этот тип получателя не поддерживается',
+  ORDER_SEND_CHANNEL_UNSUPPORTED: 'этот канал отправки не поддерживается',
   CLIENT_NOT_ON_WHATSAPP: 'номера клиента нет в WhatsApp',
   WAHA_REJECTED: 'WhatsApp не принял файл',
   WAHA_FILE_UNSUPPORTED: 'WhatsApp не принимает файлы такого типа',

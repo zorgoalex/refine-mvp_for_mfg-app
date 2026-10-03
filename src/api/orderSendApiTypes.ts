@@ -87,7 +87,8 @@ export interface OrderSendCommandInput {
 export interface OrderSendView {
   sendId: string;
   orderId: number;
-  targetKind: 'client' | 'chat';
+  /** 'employee' — a newer release (read only here). */
+  targetKind: 'client' | 'chat' | 'employee';
   chatKey: string | null;
   recipientLabel: string;
   recipientMasked: string;
