@@ -247,16 +247,16 @@
 :root[data-ui-variant="workbench"] .wb-cut-step {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   min-width: 0;
-  padding-right: 14px;
+  padding-right: 8px;
 }
 
 :root[data-ui-variant="workbench"] .wb-cut-step:not(:last-child)::after {
   content: '';
-  width: 26px;
+  width: 14px;
   height: 2px;
-  margin-left: 6px;
+  margin-left: 2px;
   border-radius: 2px;
   background: var(--evo-border);
 }

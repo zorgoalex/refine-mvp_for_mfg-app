@@ -4067,9 +4067,11 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           ? 'ошибка расчёта'
           : job.status === 'calculating'
             ? 'идёт расчёт'
-            : calculated
-              ? (job.currentCutResult ? `версия ${job.currentCutResult.cutNumber}` : 'рассчитан')
-              : job.requiresRecalc ? 'нужен пересчёт' : 'не рассчитан',
+            : job.requiresRecalc
+              ? 'нужен пересчёт'
+              : calculated
+                ? (job.currentCutResult ? `версия ${job.currentCutResult.cutNumber}` : 'рассчитан')
+                : 'не рассчитан',
         job.status === 'failed' ? 'error' : calculated && !job.requiresRecalc ? 'done' : hasItems ? 'current' : 'todo',
       ),
       step(
@@ -4611,7 +4613,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         {isWorkbench ? (
           <CutWorkbenchRail
             title={isEmbeddedOrder ? 'Задания на раскрой' : 'Раскрой'}
-            onCreate={canManage ? () => setWbPickerOpen(true) : undefined}
+            onCreate={canManage ? () => {
+              // a new cut starts from empty criteria, not from those of the job that is open
+              // (in the order tab the order itself is the criterion and stays)
+              if (!isEmbeddedOrder && !isCreationPreview) form.resetFields();
+              setWbPickerOpen(true);
+            } : undefined}
             menuItems={[
               ...(canManage && !isWorkbenchOrderTab
                 ? [{ key: 'svg', icon: <UploadOutlined />, label: 'Загрузить SVG-раскрой', onClick: () => setSvgUploadOpen(true) }]
