@@ -123,7 +123,8 @@ const DayColumn: React.FC<DayColumnProps> = ({
             {isWorkbench && isTodayDay ? <span className="day-column__today">сегодня</span> : null}
           </div>
           <div className={`day-column__header-right${onDaySend ? ' day-column__header-right--with-send' : ''}`}>
-            {onDaySend ? (
+            {/* «NewLine»: an empty day has nothing to send */}
+            {onDaySend && (!isWorkbench || orders.length > 0) ? (
               <Tooltip title={daySendTitle} onOpenChange={(open: boolean) => { if (open) onDaySendHover?.(); }}>
                 <button
                   type="button"
@@ -163,7 +164,11 @@ const DayColumn: React.FC<DayColumnProps> = ({
       </div>
 
       {/* Список заказов */}
-      <div className="day-column__orders">
+      <div
+        className="day-column__orders"
+        // «NewLine»: the zoom resizes the cards in the layout, so they never run over each other
+        style={isWorkbench && cardScale !== 1 ? { zoom: cardScale } : undefined}
+      >
         {orders.length > 0 ? (
           orders.map((order) => (
             <CardComponent
@@ -172,7 +177,7 @@ const DayColumn: React.FC<DayColumnProps> = ({
               sourceDate={dateKey}
               onContextMenu={onContextMenu}
               onCheckboxChange={onCheckboxChange}
-              cardScale={cardScale}
+              cardScale={isWorkbench ? 1 : cardScale}
               productionWorkflowDisplay={productionWorkflowDisplay}
               showFinancials={showFinancials}
             />

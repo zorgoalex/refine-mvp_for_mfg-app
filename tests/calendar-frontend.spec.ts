@@ -113,6 +113,30 @@ test.describe('Calendar frontend', () => {
         expect(await card.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
         await expect(page.locator('.wb-cal-toolbar__period span')).toContainText('запланировано');
 
+        // номер — тёмно-голубой и на 20% крупнее; полоса этапов внизу; у пустых дней нет «отправить в чат»
+        expect(await card.locator('.order-card__number').evaluate((element) => {
+            const style = getComputedStyle(element);
+            return [style.color, style.fontSize];
+        })).toEqual(['rgb(25, 118, 210)', '15.5px']);
+        await expect(card.locator('.order-card__stage-bar')).toHaveCount(1);
+        const emptyDaySends = await page.locator('.calendar-board--wb .day-column').evaluateAll((days) => days
+            .filter((day) => day.querySelectorAll('.order-card').length === 0)
+            .filter((day) => day.querySelector('.day-column__send')).length);
+        expect(emptyDaySends).toBe(0);
+        expect(await page.locator('.day-column--today .day-column__total-area').evaluate((element) => getComputedStyle(element).color)).toBe('rgb(212, 56, 13)');
+
+        // масштаб «+» увеличивает карточки, не наезжая на соседние
+        await page.getByRole('button', { name: 'Увеличить масштаб' }).click();
+        await page.getByRole('button', { name: 'Увеличить масштаб' }).click();
+        await page.waitForTimeout(300);
+        const overlaps = await page.locator('.calendar-board--wb .day-column__orders').evaluateAll((columns) => columns.map((column) => {
+            const cards = [...column.querySelectorAll('.order-card')].map((item) => item.getBoundingClientRect());
+            const box = column.getBoundingClientRect();
+            return cards.some((rect, index) => (index > 0 && rect.top < cards[index - 1].bottom - 0.5) || rect.right > box.right + 0.5);
+        }).filter(Boolean).length);
+        expect(overlaps).toBe(0);
+        await page.getByRole('button', { name: 'Сбросить масштаб' }).click();
+
         // все прежние режимы на месте
         for (const mode of ['Компактно', 'Кратко', 'Подробно']) {
             await page.locator('.wb-cal-toolbar .ant-segmented-item').filter({ hasText: mode }).click();

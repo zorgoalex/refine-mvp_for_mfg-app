@@ -317,16 +317,17 @@ const OrderCard: React.FC<OrderCardProps> = ({
 
   if (isWorkbench) {
     const orderDate = order.order_date ? formatDateKey(order.order_date).slice(0, 5) : null;
+    // stage bar: the share of the workflow stages the order has passed; full once every detail is packed
+    const stageCodes = productionWorkflowDisplay?.displayOrderCodes ?? [];
+    const passedInWorkflow = stageCodes.filter((code) => passedProductionCodes.includes(code)).length;
+    const stagePercent = allProductionReady
+      ? 100
+      : stageCodes.length > 0 ? Math.min(99, Math.round((passedInWorkflow / stageCodes.length) * 100)) : 0;
     return (
       <div
         ref={setCardRef}
         className={`order-card order-card--wb ${isDragging || isDraggingProp ? 'order-card--dragging' : ''} ${borderClass}`}
-        style={{
-          ['--wb-card-stripe' as string]: backgroundColor,
-          transform: cardScale !== 1 ? `scale(${cardScale})` : undefined,
-          transformOrigin: 'top center',
-          marginBottom: marginCompensation,
-        }}
+        style={{ ['--wb-card-stripe' as string]: backgroundColor }}
         onContextMenu={onContextMenu ? (e) => onContextMenu(e, order) : undefined}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
@@ -358,13 +359,13 @@ const OrderCard: React.FC<OrderCardProps> = ({
           )}
           {orderDate ? <span className="order-card__date" title="Дата заказа">{orderDate}</span> : null}
         </div>
+        <div className="order-card__facts">
+          <span title={millingDisplay || undefined}>{millingDisplay}</span>
+          <b>{order.total_area > 0 ? `${order.total_area.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} м²` : '0 м²'}</b>
+        </div>
         {order.client_name ? (
           <div className="order-card__client" title={order.client_name}>{order.client_name}</div>
         ) : null}
-        <div className="order-card__facts">
-          <b>{order.total_area > 0 ? `${order.total_area.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} м²` : '0 м²'}</b>
-          {millingDisplay ? <span title={millingDisplay}>{millingDisplay}</span> : null}
-        </div>
         {materials.length > 0 && (
           <div className="order-card__materials">
             {materials.map((mat, index) => (
@@ -378,24 +379,27 @@ const OrderCard: React.FC<OrderCardProps> = ({
             ))}
           </div>
         )}
-        {paymentText || passedProductionCodes.length > 0 ? (
-          <div className="order-card__footer">
-            {paymentText ? (
-              <span className={`order-card__payment order-card__payment--${isNotPaid ? 'danger' : 'muted'}`}>{paymentText}</span>
+        {paymentText ? (
+          <div className={`order-card__payment order-card__payment--${isNotPaid ? 'danger' : 'muted'}`}>{paymentText}</div>
+        ) : null}
+        {passedProductionCodes.length > 0 || stageCodes.length > 0 ? (
+          <div
+            className="order-card__stage-bar"
+            data-ready={allProductionReady}
+            style={{ ['--wb-stage-fill' as string]: `${stagePercent}%` }}
+            aria-label={allProductionReady ? 'Все этапы производства пройдены' : `Этапы производства: пройдено ${passedInWorkflow} из ${stageCodes.length}`}
+          >
+            {passedProductionCodes.length > 0 ? (
+              <ProductionStagesDisplay
+                passedCodes={passedProductionCodes}
+                displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
+                codeToLetter={productionWorkflowDisplay?.codeToLetter}
+                codeToName={productionWorkflowDisplay?.codeToName}
+                fontSize={11}
+                showTooltip={true}
+                passedColor="#d46b08"
+              />
             ) : null}
-            {passedProductionCodes.length > 0 && (
-              <span className="order-card__production-stages" data-ready={allProductionReady}>
-                <ProductionStagesDisplay
-                  passedCodes={passedProductionCodes}
-                  displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
-                  codeToLetter={productionWorkflowDisplay?.codeToLetter}
-                  codeToName={productionWorkflowDisplay?.codeToName}
-                  fontSize={10.5}
-                  showTooltip={true}
-                  passedColor="var(--wb-cal-stage, #6b7685)"
-                />
-              </span>
-            )}
           </div>
         ) : null}
       </div>
