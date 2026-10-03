@@ -54,6 +54,9 @@ const SHEET_STATUS: Record<OrderSheetStockItem['status'], string> = {
   incomplete: 'Данные 1С неполные',
 };
 
+/** Подпись покрытия листового материала; без данных — «Нет данных». */
+export const sheetStockCoverage = (status: OrderSheetStockItem['status'] | undefined): string => status ? SHEET_STATUS[status] : 'Нет данных';
+
 /** Колонки остатка листовых материалов (данные 1С) для таблицы «Листовые материалы» заказа. */
 export function orderSheetStockColumns<Row extends { sheetMaterialTypeId: number }>(byId: ReadonlyMap<number, OrderSheetStockItem>) {
   return [
@@ -81,7 +84,7 @@ export function orderSheetStockColumns<Row extends { sheetMaterialTypeId: number
       width: ORDER_FILM_COLUMN_WIDTH.coverage,
       render: (_: unknown, row: Row) => {
         const item = byId.get(row.sheetMaterialTypeId);
-        return item ? SHEET_STATUS[item.status] : 'Нет данных';
+        return sheetStockCoverage(item?.status);
       },
     },
   ];

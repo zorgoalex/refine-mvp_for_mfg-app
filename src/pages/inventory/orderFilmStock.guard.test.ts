@@ -60,6 +60,11 @@ describe('order film stock guards', () => {
     const columns = readFileSync(new URL('./orderFilmStockColumns.tsx', import.meta.url), 'utf8');
     expect(columns).toContain("incomplete: 'Данные 1С неполные'");
     expect(columns).toContain('нет данных 1С по складам:');
+    // «NewLine»: единая таблица материалов показывает те же остатки листов.
+    const workbench = readFileSync(new URL('../orders/components/sections/OrderMaterialsWorkbenchTable.tsx', import.meta.url), 'utf8');
+    expect(workbench).toContain('sheetStock.byId.get(row.sheetMaterialTypeId)');
+    expect(workbench).toContain('sheetStockCoverage(stock?.status)');
+    expect(readFileSync(new URL('../orders/show.tsx', import.meta.url), 'utf8')).toContain('sheetStock={sheetStock}');
     expect(stockColumns).toContain("title: 'На складе (1С)'");
     expect(stockColumns).toContain('Остаток по данным 1С');
     for (const source of [materialsTab, showPage]) {

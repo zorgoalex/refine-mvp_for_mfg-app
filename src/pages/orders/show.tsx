@@ -4107,6 +4107,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                           bathRefs={bathCutJobByDetailId.values()}
                           cutJobNameById={cutJobNameById}
                           filmStock={filmStock}
+                          sheetStock={sheetStock}
                           filmEmptyText={cutColumnEnabled ? 'Нет данных по пленке' : 'Нет доступа к данным раскроя'}
                         />
                       ) : (

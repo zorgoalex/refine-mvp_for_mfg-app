@@ -8,9 +8,10 @@ import { formatNumber } from '../../../../utils/numberFormat';
 import type { CutDetailLastReadyJobRef } from '../../../../api/types/cutApi.types';
 import { cutJobDeepLink, cutJobVersionLabel } from '../../cutColumnHelpers';
 import type { OrderFilmMaterialRow, OrderSheetMaterialRow } from '../../orderMaterialsSummary';
-import { OrderFilmStockCaption } from '../../../inventory/orderFilmStockColumns';
+import { OrderFilmStockCaption, OrderSheetStockCaption, sheetStockCoverage } from '../../../inventory/orderFilmStockColumns';
 import { filmStockAvailability } from '../../../inventory/filmStock';
 import type { OrderFilmStockItem } from '../../../inventory/useOrderFilmStock';
+import type { OrderSheetStockItem } from '../../../inventory/useOrderSheetStock';
 
 type BathRef = Pick<CutDetailLastReadyJobRef, 'cutJobId' | 'resultNo' | 'cutNumber' | 'name'>;
 
@@ -24,6 +25,11 @@ interface OrderMaterialsWorkbenchTableProps {
     allowed: boolean;
     byFilmId: ReadonlyMap<number, OrderFilmStockItem>;
   } & React.ComponentProps<typeof OrderFilmStockCaption>;
+  /** Остатки листовых материалов по данным 1С — те же две колонки, что у плёнки (количество с единицей 1С). */
+  sheetStock?: {
+    allowed: boolean;
+    byId: ReadonlyMap<number, OrderSheetStockItem>;
+  } & React.ComponentProps<typeof OrderSheetStockCaption>;
   filmEmptyText: string;
 }
 
@@ -35,6 +41,7 @@ export const OrderMaterialsWorkbenchTable: React.FC<OrderMaterialsWorkbenchTable
   bathRefs,
   cutJobNameById,
   filmStock,
+  sheetStock,
   filmEmptyText,
 }) => {
   const bathRefById = useMemo(() => {
@@ -142,18 +149,41 @@ export const OrderMaterialsWorkbenchTable: React.FC<OrderMaterialsWorkbenchTable
             </tr>
           )}
           <tr className="wb-materials__section">
-            <td colSpan={columnCount}><span className="wb-materials__section-line"><b>Листовые материалы</b></span></td>
+            <td colSpan={columnCount}>
+              <span className="wb-materials__section-line">
+                <b>Листовые материалы</b>
+                {filmStock.allowed && sheetStock?.allowed ? <OrderSheetStockCaption {...sheetStock} /> : null}
+              </span>
+            </td>
           </tr>
           {sheetRows.length === 0 ? (
             <tr className="wb-materials__empty"><td colSpan={columnCount}>Нет данных по листовым материалам</td></tr>
-          ) : sheetRows.map((row) => (
-            <tr key={row.key}>
-              <td><span className="wb-materials__clamp" title={row.name}>{row.name}</span></td>
-              <td className="wb-materials__num">{formatNumber(row.totalArea, 2)}</td>
-              <td className="wb-materials__num">{row.detailsCount}</td>
-              <td colSpan={columnCount - 3} />
-            </tr>
-          ))}
+          ) : sheetRows.map((row) => {
+            // Колонки склада есть только вместе с плёночными; остаток листов — в единице 1С (листы пересчитаны в м²).
+            const stock = filmStock.allowed && sheetStock?.allowed ? sheetStock.byId.get(row.sheetMaterialTypeId) : undefined;
+            const unit = stock?.unitName ? ` ${stock.unitName}` : '';
+            const m2 = stock && stock.quantityM2 !== null && stock.unitName && !/м2|м²/i.test(stock.unitName) ? ` ≈ ${formatNumber(stock.quantityM2, 2)} м²` : '';
+            return (
+              <tr key={row.key}>
+                <td><span className="wb-materials__clamp" title={row.name}>{row.name}</span></td>
+                <td className="wb-materials__num">{formatNumber(row.totalArea, 2)}</td>
+                <td className="wb-materials__num">{row.detailsCount}</td>
+                {filmStock.allowed && sheetStock?.allowed ? (
+                  <>
+                    <td colSpan={3} />
+                    <td className="wb-materials__num" data-negative={stock?.quantity != null && stock.quantity < 0}>
+                      {stock?.quantity == null ? dash : (
+                        <Tooltip title={<>{[`1С: ${stock.onecName ?? '—'}`, ...stock.warehouses.map((w) => `${w.name}: ${formatNumber(w.quantity, 3)}${unit}`)].map((line) => <div key={line}>{line}</div>)}</>}>
+                          <span className="wb-materials__clamp">{formatNumber(stock.quantity, 3)}{unit}{m2}</span>
+                        </Tooltip>
+                      )}
+                    </td>
+                    <td><span className="wb-materials__clamp">{sheetStockCoverage(stock?.status)}</span></td>
+                  </>
+                ) : <td colSpan={columnCount - 3} />}
+              </tr>
+            );
+          })}
           {sheetRows.length > 0 && (
             <tr className="wb-materials__total">
               <td>Итого листовые</td>
