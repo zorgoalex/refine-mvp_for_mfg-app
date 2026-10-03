@@ -99,7 +99,7 @@ import { DetailGroupingControls } from './components/DetailGroupingControls';
 import { groupCheckboxState, toggleGroupSelection, filterNumericKeys } from './groupSelection';
 import { authSession } from '../../api/authSession';
 import { orderSendApi } from '../../api/orderSendApi';
-import { buildOrderWhatsAppMenuItems, describeOrderWhatsAppSend, isOrderWhatsAppKey, parseOrderWhatsAppKey } from './whatsappOrderSendMenu';
+import { ORDER_SEND_NOT_CONFIGURED_TITLE, buildOrderWhatsAppMenuItems, describeOrderWhatsAppSend, isOrderWhatsAppKey, parseOrderWhatsAppKey } from './whatsappOrderSendMenu';
 import { runOrderSend } from './whatsappOrderSendModel';
 import { announceWhatsAppSendQueued, currentOwner } from '../../components/whatsapp/myWhatsAppSendsModel';
 import { useOrderSendMenu } from './whatsappOrderSendSupport';
@@ -3140,7 +3140,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     ? buildOrderWhatsAppMenuItems(orderSendMenu, { hasClientPhone: Boolean(clientPhone), sending: orderSendBusy, icon: <WhatsAppOutlined /> })
     : [];
   // «Отправить заказ»: its own icon to the left of «⋯» (client, chats, employees — the «⋯» menu stays short).
-  const orderSendAction = orderWhatsAppItems.length > 0 ? (
+  // Always there for a user who may send: with nothing to offer it is grey with a hint instead of vanishing.
+  const orderSendAction = !canExportOrders || deletedOrder ? null : orderWhatsAppItems.length > 0 ? (
     <Dropdown
       trigger={['click']}
       menu={{ items: orderWhatsAppItems, onClick: ({ key }) => { if (isOrderWhatsAppKey(key)) handleOrderWhatsAppSend(key); } }}
@@ -3149,7 +3150,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         <Button aria-label="Отправить заказ" icon={<SendOutlined />} loading={orderSendBusy.size > 0} disabled={!record} />
       </Tooltip>
     </Dropdown>
-  ) : null;
+  ) : (
+    <Tooltip title={ORDER_SEND_NOT_CONFIGURED_TITLE}>
+      <Button aria-label="Отправить заказ" icon={<SendOutlined />} disabled />
+    </Tooltip>
+  );
   const productionPdfDisabled = !record || details.length === 0 || isClientResolving;
   const productionExcelDisabled = productionPdfDisabled || isAnyExcelExporting;
   const productionPdfAction = canExportOrders ? (

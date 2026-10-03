@@ -18,6 +18,9 @@ describe('order card WhatsApp send wiring', () => {
     expect(action).toContain('items: orderWhatsAppItems');
     expect(action).toContain('aria-label="Отправить заказ"');
     expect(action).toContain('<SendOutlined />');
+    // Nothing to send (sending off, no recipients): the icon stays, grey, with the hint — only for a user who may send.
+    expect(action).toMatch(/orderSendAction = !canExportOrders \|\| deletedOrder \? null : orderWhatsAppItems\.length > 0 \?/);
+    expect(action).toMatch(/<Tooltip title=\{ORDER_SEND_NOT_CONFIGURED_TITLE\}>\s*<Button aria-label="Отправить заказ" icon=\{<SendOutlined \/>\} disabled \/>/);
     // Rendered in all four heads, each time right before the «⋯» dropdown of that head.
     expect(show.match(/\{orderSendAction\}/g)?.length).toBe(4);
     for (const more of show.split('aria-label="Ещё действия"').slice(0, -1)) {
