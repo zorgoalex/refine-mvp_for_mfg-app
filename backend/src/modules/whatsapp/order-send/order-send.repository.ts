@@ -128,7 +128,7 @@ export class OrderSendRepository {
   async menuEmployees(): Promise<Array<{ recipientKey: string; label: string; forms: OrderFormCode[];
     contacts: Array<{ contactId: number; masked: string; isPrimary: boolean }> }>> {
     const recipients = (await this.database.query<EmployeeRecipientRow & { usernames: string | null }>(`SELECT r.*, e.full_name employee_name,
-        (SELECT string_agg(u.username, ', ' ORDER BY u.username) FROM users u WHERE u.employee_id = e.employee_id AND u.is_active) usernames
+        (SELECT string_agg(u.username::text, ', ' ORDER BY u.username) FROM users u WHERE u.employee_id = e.employee_id AND u.is_active) usernames
       FROM whatsapp_order_send_employees r JOIN employees e ON e.employee_id = r.employee_id
       WHERE r.archived_at IS NULL AND r.channel = 'whatsapp' AND e.is_active IS NOT FALSE ORDER BY r.position, r.created_at`)).rows;
     if (!recipients.length) return [];
@@ -147,12 +147,13 @@ export class OrderSendRepository {
 
   /** Active employees for the settings picker: name, linked users and how many phones they have. */
   async employeeDirectory(): Promise<Array<{ employeeId: number; fullName: string; usernames: string[]; phones: number }>> {
+    // users.username is citext in the real schema: without ::text the driver returns the array unparsed ("{a,b}").
     const rows = (await this.database.query<{ employee_id: string; full_name: string; usernames: string[] | null; phones: number }>(
       `SELECT e.employee_id, e.full_name,
-         (SELECT array_agg(u.username ORDER BY u.username) FROM users u WHERE u.employee_id = e.employee_id AND u.is_active) usernames,
+         (SELECT array_agg(u.username::text ORDER BY u.username) FROM users u WHERE u.employee_id = e.employee_id AND u.is_active) usernames,
          (SELECT count(*)::int FROM employee_work_contacts c WHERE c.employee_id = e.employee_id AND c.kind = 'phone') phones
        FROM employees e WHERE e.is_active IS NOT FALSE ORDER BY e.full_name`)).rows;
-    return rows.map((row) => ({ employeeId: Number(row.employee_id), fullName: row.full_name, usernames: row.usernames ?? [], phones: row.phones }));
+    return rows.map((row) => ({ employeeId: Number(row.employee_id), fullName: row.full_name, usernames: Array.isArray(row.usernames) ? row.usernames : [], phones: row.phones }));
   }
 
   /** The employee of a recipient row (also an archived one: employee and key never change). */
