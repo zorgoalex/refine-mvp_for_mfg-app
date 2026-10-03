@@ -1,3 +1,10 @@
+import {
+  buildFrozenSheetRenderModel,
+  FROZEN_SHEET_RENDER_V2,
+  FROZEN_SHEET_STORED_VIEW_KEY,
+  renderFrozenSheetView,
+} from '../../cut/render/frozen-sheet-render';
+import { readRenderSnapshotContract, type RenderSnapshotContract } from '../../cut/adapters/frozen-render-contract';
 import { normalizeSvgRenderContours, type SvgRenderContour } from '../../../shared/svg-render-contours';
 import { createHash, randomUUID } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
@@ -4835,7 +4842,9 @@ async function createSvgCutJob(
 
   const itemByDetailId = new Map(items.map((item) => [item.orderDetailId, item]));
   const placements = buildSvgSheetPlacements(plan, itemByDetailId, layout.renderOnlyContours);
-  const renderSnapshot = buildSvgRenderSnapshot(placements, itemByDetailId, dto.programName ?? dto.externalPacketKey, plan);
+  const renderSnapshot = buildSvgRenderSnapshot(
+    placements, itemByDetailId, dto.programName ?? dto.externalPacketKey, plan, await readRenderSnapshotContract(tx),
+  );
   const sheet = await tx.query<{ cut_group_sheet_id: string | number }>(
     `
     INSERT INTO cut_group_sheet (
@@ -4986,7 +4995,9 @@ async function refreshImportedSvgCutResult(
   const items = await syncSvgCutJobItemsForPlan(tx, cutJobId, group.cutGroupId, plan, baseSnapshot.items);
   const itemByDetailId = new Map(items.map((item) => [item.orderDetailId, item]));
   const placements = buildSvgSheetPlacements(plan, itemByDetailId, dto.cutLayout?.renderOnlyContours);
-  const renderSnapshot = buildSvgRenderSnapshot(placements, itemByDetailId, dto.programName ?? dto.externalPacketKey, plan);
+  const renderSnapshot = buildSvgRenderSnapshot(
+    placements, itemByDetailId, dto.programName ?? dto.externalPacketKey, plan, await readRenderSnapshotContract(tx),
+  );
   const summary = buildSvgCutSummary(plan, 'cnc_telegram_svg');
   const totals = buildSvgCutTotals(plan);
   const nextSnapshot: CutJobDto = {
@@ -5328,11 +5339,12 @@ function sourceSvgPlacementFragment(
   };
 }
 
-function buildSvgRenderSnapshot(
+export function buildSvgRenderSnapshot(
   placements: SheetPlacementsJson,
   itemByDetailId: ReadonlyMap<number, CutJobItemDto>,
   machineFile: string,
   plan: Extract<SvgCutImportPlan, { ok: true }>,
+  contract: RenderSnapshotContract = 'v2',
 ): CutSheetRenderSnapshotDto {
   const itemByItemId = new Map<string, CutJobItemDto>();
   for (const item of itemByDetailId.values()) itemByItemId.set(freecutItemId(item.orderDetailId), item);
@@ -5378,7 +5390,26 @@ function buildSvgRenderSnapshot(
     const orderId = label?.orderId ?? itemByItemId.get(piece.item_id)?.orderId ?? null;
     return fillForOrder(orderId);
   };
-  const views: CutSheetRenderSnapshotDto['views'] = {};
+  if (contract === 'v2') {
+    // Contract v2: the model captured from these same callbacks; every view is drawn from it.
+    const model = buildFrozenSheetRenderModel({
+      sheet: placements, labelFor, fillFor, bathDetailInfoFor, renderStyle: null, showBathMeterGuides: false,
+    });
+    return {
+      contractVersion: FROZEN_SHEET_RENDER_V2,
+      views: {
+        [FROZEN_SHEET_STORED_VIEW_KEY]: {
+          svg: renderFrozenSheetView(placements, model, {
+            rotate90: false, originTopLeft: false, axisOrigin: 'top-left', showLabels: false,
+          }).svg,
+        },
+      },
+      model,
+      pdfMeta: buildSvgPdfMeta(itemByDetailId, machineFile, plan),
+      pdfDetailRows: buildSvgPdfDetailRows(itemByDetailId, machineFile, plan),
+    };
+  }
+  const views: Record<string, { svg: string; bathSvg: string }> = {};
   for (const rotate90 of [false, true]) {
     for (const originTopLeft of rotate90 ? [false, true] : [false]) {
       for (const axisOrigin of ['top-left', 'bottom-left'] as const) {
@@ -5587,7 +5618,7 @@ function buildSvgCutResultManifest(snapshot: CutJobDto): Record<string, unknown>
       groupKey: group.groupKey ?? `group:${group.cutGroupId}`,
       autoSheets: group.sheets.map((sheet) => sheet.sheetIndex),
       manualSheets: [],
-      renderContract: 'cut_sheet_render_v1',
+      renderContract: group.sheets[0]?.renderSnapshot?.contractVersion ?? 'cut_sheet_render_v1',
       autoRenderViews: group.sheets.map((sheet) => Object.keys(sheet.renderSnapshot?.views ?? {}).length),
       manualRenderViews: [],
       manualState: 'none',

@@ -358,6 +358,8 @@ interface FakeDbOptions {
   profileParams?: Record<string, unknown>;
   /** expired calculate commands returned to the reconciliation worker */
   expiredCommandRows?: FakeRow[];
+  /** cut_settings `render.snapshot_contract` value (undefined = no row) */
+  renderSnapshotContract?: unknown;
 }
 
 function createDatabase(options: FakeDbOptions = {}) {
@@ -379,6 +381,12 @@ function createDatabase(options: FakeDbOptions = {}) {
     const sql = normalize(text);
 
     if (sql.startsWith('SELECT set_session_user')) return { rows: [], rowCount: 0 };
+
+    if (sql.startsWith('SELECT value FROM cut_settings WHERE key = $1') && params[0] === 'render.snapshot_contract') {
+      return options.renderSnapshotContract === undefined
+        ? { rows: [], rowCount: 0 }
+        : { rows: [{ value: options.renderSnapshotContract }], rowCount: 1 };
+    }
 
     if (sql.startsWith('SELECT c.cut_job_id, c.command_id, c.claimed_job_version')) {
       const rows = options.expiredCommandRows ?? [];
@@ -1053,8 +1061,40 @@ describe('PgCutRepository', () => {
       groups: Array<{ sheets: Array<{ renderSnapshot?: { contractVersion: string; views: Record<string, unknown> } }> }>;
     };
     expect(snapshot.unplaced).toEqual([{ itemId: 'det-1', instance: 2, reason: 'no_space' }]);
-    expect(snapshot.groups[0]?.sheets[0]?.renderSnapshot?.contractVersion).toBe('cut_sheet_render_v1');
-    expect(Object.keys(snapshot.groups[0]?.sheets[0]?.renderSnapshot?.views ?? {})).toHaveLength(12);
+    // Contract v2: one label-free SVG + the render model; every other view is drawn on read.
+    const render = snapshot.groups[0]?.sheets[0]?.renderSnapshot as {
+      contractVersion: string; views: Record<string, { svg: string }>; model: { pieces: Array<{ itemId: string; instance: number }> };
+    };
+    expect(render.contractVersion).toBe('cut_sheet_render_v2');
+    expect(Object.keys(render.views)).toEqual(['r0:raw:top-left:labels-off']);
+    expect(Object.keys(render.views['r0:raw:top-left:labels-off'])).toEqual(['svg']);
+    expect(render.model.pieces.map((piece) => `${piece.itemId}#${piece.instance}`)).toEqual(['det-1#1']);
+  });
+
+  it.each([
+    ['switched back to v1', { contract: 'v1' }],
+    ['an unreadable switch value', { contract: 'v9' }],
+  ])('calculate keeps the twelve stored views when the snapshot contract is %s', async (_label, setting) => {
+    const db = createDatabase({
+      cutJob: { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null },
+      calcItems: [{
+        cut_job_item_id: 501, order_detail_id: 1, order_id: 9, qty: 1, width_mm: 600, height_mm: 400,
+        sheet_material_type_id: 9, film_id: null, film_texture: null, smt_width_mm: 2800, smt_height_mm: 2070,
+      }],
+      renderSnapshotContract: setting,
+    });
+    await new PgCutRepository(db.service, fakeFreecut(happyResponse)).calculate({
+      currentUser: currentUser(), cutJobId: 42, version: 0,
+      commandId: '33333333-3333-4333-8333-333333333333', requestId: 'r-contract-v1',
+    });
+    const resultInsert = db.queries.find((query) => normalize(query.text).startsWith('INSERT INTO cut_result ('));
+    const snapshot = JSON.parse(String(resultInsert?.params[9])) as {
+      groups: Array<{ sheets: Array<{ renderSnapshot: { contractVersion: string; views: Record<string, { svg: string; bathSvg: string }> } }> }>;
+    };
+    const manifest = JSON.parse(String(resultInsert?.params[10])) as { variants: Array<{ renderContract: string }> };
+    expect(snapshot.groups[0].sheets[0].renderSnapshot.contractVersion).toBe('cut_sheet_render_v1');
+    expect(Object.keys(snapshot.groups[0].sheets[0].renderSnapshot.views)).toHaveLength(12);
+    expect(manifest.variants[0].renderContract).toBe('cut_sheet_render_v1');
   });
 
   it('calculate freezes PDF detail rows with doweling and merged machine files', async () => {

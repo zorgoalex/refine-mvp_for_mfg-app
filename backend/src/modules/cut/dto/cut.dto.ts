@@ -98,12 +98,28 @@ export interface CutManualSheetDto {
   renderSnapshot?: CutSheetRenderSnapshotDto;
 }
 
-export interface CutSheetRenderSnapshotDto {
+/** Contract v1: twelve finished views per sheet (all results saved before contract v2). */
+export interface CutSheetRenderSnapshotV1Dto {
   contractVersion: 'cut_sheet_render_v1';
   views: Record<string, { svg: string; bathSvg: string }>;
   pdfMeta: unknown;
   pdfDetailRows: unknown[];
 }
+
+/**
+ * Contract v2: the render model (every value the renderer needs beyond the sheet's coordinates)
+ * plus the one unrotated label-free SVG the label-map projection copies; every view is drawn on
+ * read from `placements` + `model`.
+ */
+export interface CutSheetRenderSnapshotV2Dto {
+  contractVersion: 'cut_sheet_render_v2';
+  views: Record<string, { svg: string }>;
+  model: import('../render/frozen-sheet-render').FrozenSheetRenderModel;
+  pdfMeta: unknown;
+  pdfDetailRows: unknown[];
+}
+
+export type CutSheetRenderSnapshotDto = CutSheetRenderSnapshotV1Dto | CutSheetRenderSnapshotV2Dto;
 
 export interface CutManualLayoutDto {
   groupKey: string;

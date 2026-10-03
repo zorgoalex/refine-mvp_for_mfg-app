@@ -2549,6 +2549,10 @@ probe_file() {
     225_procurement_notification_rules*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM notification_rules WHERE rule_code = 'procurement-material-arrived' AND event_type = 'order.resource_procurement_changed');" ;;
     # 224: calendar send = one system broadcast (purpose calendar) + runs source with the widened target window.
+    231_cut_result_render_v2*) probe_all \
+      "SELECT to_regprocedure('public.cut_sheet_render_is_complete(jsonb)') IS NOT NULL;" \
+      "SELECT COALESCE((SELECT pg_get_functiondef(oid) LIKE '%cut_sheet_render_is_complete(sheet_json)%' FROM pg_proc WHERE oid=to_regprocedure('public.cut_result_snapshot_is_complete(jsonb,jsonb,text)')), false);" \
+      "SELECT COALESCE((SELECT pg_get_functiondef(oid) LIKE '%sheets,0,renderSnapshot,contractVersion%' FROM pg_proc WHERE oid=to_regprocedure('public.cut_result_expected_manifest(jsonb)')), false);" ;;
     226_bitrix24_reconcile_retention*) probe_all \
       "SELECT to_regprocedure('public.prune_bitrix24_reconcile_noise(timestamptz,integer)') IS NOT NULL;" \
       "$(q_idx idx_bitrix24_inbound_event_reconcile_processed)" "$(q_idx idx_cad_events_audit_id)" \
@@ -3000,7 +3004,7 @@ verify_applied_effect() {
     205_warehouses_onec_key_required*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*)
+    231_cut_result_render_v2*|209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)
