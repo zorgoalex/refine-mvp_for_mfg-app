@@ -60,6 +60,7 @@ import { useCalendarSendTooltip } from '../../configuration/components/broadcast
 import { useResponsive } from '../hooks/useResponsive';
 import { useOptionalUiVariant } from '../../../ui-variant/UiVariantProvider';
 import { buildWorkbenchWeeks, readCalendarScale, workbenchLayout, workbenchPeriodSummary, writeCalendarScale } from '../utils/workbenchCalendar';
+import { buildMaterialChipColors, WorkbenchMaterialColorsContext } from '../utils/workbenchMaterialColors';
 import { useOperationalUi } from '../../../ui-operational/OperationalPrimitives';
 import {
   isWorkspaceOperationOwnershipLost,
@@ -304,6 +305,20 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
     endDate,
     filters,
   );
+
+  // «NewLine»: one chip colour per material — from the whole materials list plus whatever the orders carry
+  const workbenchMaterialColors = useMemo(() => {
+    const names = new Set<string>(materialOptions.map((option) => String(option.value ?? option.label ?? '')));
+    for (const dayOrders of Object.values(ordersByDate)) {
+      for (const order of dayOrders) {
+        for (const detail of order.order_details ?? []) {
+          const name = detail.material?.material_name;
+          if (name) names.add(name);
+        }
+      }
+    }
+    return buildMaterialChipColors(names);
+  }, [materialOptions, ordersByDate]);
 
   // Hook для перемещения заказов
   const { moveOrder, isMoving } = useOrderMove();
@@ -778,6 +793,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   }
 
   return (
+    <WorkbenchMaterialColorsContext.Provider value={workbenchMaterialColors}>
     <DndProvider
       backend={dndBackend}
       options={
@@ -1337,6 +1353,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
       )}
       </div>
     </DndProvider>
+    </WorkbenchMaterialColorsContext.Provider>
   );
 };
 

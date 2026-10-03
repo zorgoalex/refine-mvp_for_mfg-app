@@ -20,6 +20,7 @@ import { ProductionStagesDisplay } from '../../../components/ProductionStagesDis
 import { useOperationalUi } from '../../../ui-operational/OperationalPrimitives';
 import { buildCalendarOrderDragPreview } from './calendarDragPreview';
 import { useOptionalUiVariant } from '../../../ui-variant/UiVariantProvider';
+import { useWorkbenchMaterialColor } from '../utils/workbenchMaterialColors';
 
 /**
  * Компонент карточки заказа (стандартный вид)
@@ -59,6 +60,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
   // «NewLine»: a compact card from the same data and with the same actions
   const uiVariant = useOptionalUiVariant()?.variant;
   const isWorkbench = !isOperational && uiVariant === 'workbench';
+  const workbenchMaterialColor = useWorkbenchMaterialColor();
 
   // AD-mobile: double-tap on the card opens the context menu. We use
   // touchstart/touchend (not `click`) so the gesture works even when
@@ -377,7 +379,8 @@ const OrderCard: React.FC<OrderCardProps> = ({
               <Tag
                 key={`${mat.fullName}-${index}`}
                 className="order-card__material-tag"
-                style={{ ['--wb-material' as string]: getMaterialColor(mat.fullName) }}
+                style={{ ['--wb-material' as string]: workbenchMaterialColor(mat.fullName) }}
+                title={mat.fullName}
               >
                 {mat.name}
               </Tag>
