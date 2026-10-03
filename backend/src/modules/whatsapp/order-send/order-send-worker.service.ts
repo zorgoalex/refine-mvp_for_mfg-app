@@ -91,6 +91,11 @@ export class OrderSendWorker implements OnModuleInit, OnModuleDestroy {
       await this.repository.finishBeforeIntent(row.send_id, { state: 'failed', errorCode: 'ORDER_SEND_FORM_UNSUPPORTED' });
       return;
     }
+    // A recipient kind of a newer release (an employee): never delivered by this one, no slot spent.
+    if ((row.target_kind as string) !== 'client' && (row.target_kind as string) !== 'chat') {
+      await this.repository.finishBeforeIntent(row.send_id, { state: 'failed', errorCode: 'ORDER_SEND_TARGET_UNSUPPORTED' });
+      return;
+    }
     if (row.target_kind === 'client' && !row.destination_chat_id) {
       if (!row.phone_normalized) {
         await this.repository.finishBeforeIntent(row.send_id, { state: 'failed', errorCode: 'ORDER_SEND_PAYLOAD_MISSING' });

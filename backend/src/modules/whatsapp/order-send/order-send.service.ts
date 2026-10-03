@@ -216,7 +216,8 @@ export function toView(row: SendRow, estimate?: QueueEstimate): OrderSendView {
     orderId: Number(row.order_id),
     targetKind: row.target_kind,
     chatKey: row.chat_key,
-    recipientLabel: row.target_kind === 'client' ? 'Клиент' : row.chat_label ?? 'Чат',
+    // A recipient kind of a newer release (an employee) reads as such, never as a chat.
+    recipientLabel: row.target_kind === 'client' ? 'Клиент' : row.target_kind === 'chat' ? row.chat_label ?? 'Чат' : 'Сотрудник',
     recipientMasked: row.recipient_masked,
     form: row.form_code,
     state: row.state,

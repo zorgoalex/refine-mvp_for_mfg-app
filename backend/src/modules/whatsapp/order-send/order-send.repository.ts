@@ -519,15 +519,19 @@ export class OrderSendRepository {
   /** Audit of one send: no phone, chat id, caption or file content — only masks and codes. */
   private async audit(tx: TransactionClient, row: SendRow, action: string, actor: CurrentUser | null, transition: Record<string, unknown>,
     requestId?: string, relatedUserId?: number) {
+    // An employee recipient (schema 235): a normalized link to the employee, also when this release only refuses it.
+    const employeeId = (row as SendRow & { employee_id?: string | number | null }).employee_id;
+    const employee = employeeId === null || employeeId === undefined ? null : Number(employeeId);
     await auditService.record(tx, {
       event: `whatsapp.order_send.${action}`, entityType: 'whatsapp_order_send', entityId: row.send_id,
       actorUserId: actor ? numericId(actor.id) : Number(row.actor_id), actorUsername: actor?.username ?? null, actorRole: actor?.role ?? null,
       requestId: requestId ?? row.request_id, source: SOURCE, ...(relatedUserId ? { relatedUserId } : {}),
       relatedOrderId: Number(row.order_id), relatedClientId: row.client_id === null ? null : Number(row.client_id),
       statusField: 'order_send_state', statusCode: row.state,
+      ...(employee ? { relatedEntities: [{ entityType: 'employee', entityId: employee }] } : {}),
       metadata: {
         sendId: row.send_id, targetKind: row.target_kind, chatKey: row.chat_key, recipientMasked: row.recipient_masked, form: row.form_code,
-        source: 'order_card', ...transition,
+        ...(employee ? { employeeId: employee } : {}), source: 'order_card', ...transition,
       },
     });
   }

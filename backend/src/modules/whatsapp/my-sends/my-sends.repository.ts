@@ -70,7 +70,7 @@ export class MySendsRepository {
       send_started_at FROM whatsapp_order_sends WHERE state IN ('queued','sending')`)).rows;
     const estimates = settings ? estimateQueue(settings, queue, now) : new Map();
     const rows = (await this.database.query<QueryResultRow & {
-      send_id: string; order_id: string; order_name: string | null; target_kind: 'client' | 'chat'; chat_label: string | null; form_code: string;
+      send_id: string; order_id: string; order_name: string | null; target_kind: string; chat_label: string | null; form_code: string;
       state: string; error_code: string | null; cancel_reason: string | null; next_attempt_at: Date; created_at: Date; sent_at: Date | null; updated_at: Date;
       cancelled_by: string | null;
     }>(`SELECT s.send_id, s.order_id, o.order_name, s.target_kind, c.label chat_label, s.form_code, s.state, s.error_code, s.cancel_reason,
@@ -87,7 +87,7 @@ export class MySendsRepository {
         ORDER BY s.created_at DESC`, [userId, since, LIMIT, ids, followSince])).rows;
     return rows.map((row) => {
       const active = ORDER_ACTIVE.has(row.state);
-      const recipient = row.target_kind === 'client' ? 'клиенту' : `в чат «${row.chat_label ?? 'чат'}»`;
+      const recipient = row.target_kind === 'client' ? 'клиенту' : row.target_kind === 'chat' ? `в чат «${row.chat_label ?? 'чат'}»` : 'сотруднику';
       const estimate = estimates.get(row.send_id);
       return {
         kind: 'order_send', id: row.send_id,

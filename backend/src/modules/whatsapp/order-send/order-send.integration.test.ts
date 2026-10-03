@@ -89,7 +89,7 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
         sheet_material_type_id int, delete_flag boolean DEFAULT false);
       CREATE TABLE payment_types(type_paid_id int PRIMARY KEY, type_paid_name text);
       CREATE TABLE payments(payment_id serial PRIMARY KEY, order_id bigint, type_paid_id int, payment_date date, amount numeric, delete_flag boolean DEFAULT false);
-      CREATE TABLE employees(employee_id int PRIMARY KEY, full_name text);
+      CREATE TABLE employees(employee_id bigint PRIMARY KEY, full_name text, is_active boolean NOT NULL DEFAULT true);
       CREATE TABLE doweling_orders(doweling_order_id serial PRIMARY KEY, order_id bigint, doweling_order_name text, design_engineer_id int, delete_flag boolean DEFAULT false);
       CREATE TABLE order_doweling_links(order_doweling_link_id serial PRIMARY KEY, order_id bigint, doweling_order_id int, delete_flag boolean DEFAULT false);
       INSERT INTO clients VALUES (501, 'Тест Клиент'), (502, 'Тест Другой');
@@ -105,6 +105,7 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
     const { readFile } = await import('node:fs/promises');
     await q(await readFile(new URL('../../../../db/migrations/230_whatsapp_order_send.sql', import.meta.url), 'utf8'));
     await q(await readFile(new URL('../../../../db/migrations/233_whatsapp_order_send_queue.sql', import.meta.url), 'utf8'));
+    await q(await readFile(new URL('../../../../db/migrations/235_employee_work_contacts.sql', import.meta.url), 'utf8'));
     database = {
       isConfigured: true,
       query: <T extends QueryResultRow = QueryResultRow>(text: string, params: readonly unknown[] = []) => pool.query<T>(text, [...params]),
@@ -773,6 +774,55 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
       expect(await row(unknown.sendId)).toMatchObject({ state: 'failed', error_code: 'ORDER_SEND_FORM_UNSUPPORTED' });
       expect(sent).toHaveLength(0);
       expect((await q(`SELECT last_delivery_at FROM whatsapp_order_send_settings`)).rows[0].last_delivery_at).toBeNull();
+    });
+
+    it('an employee recipient (schema 235) is never delivered by this release, is audited with the employee and reads as «Сотрудник»', async () => {
+      await q(`INSERT INTO employees(employee_id, full_name) VALUES (7101, 'Тест Сотрудник') ON CONFLICT DO NOTHING`);
+      const recipientKey = randomUUID();
+      await q(`INSERT INTO whatsapp_order_send_employees(recipient_key, employee_id, channel, forms, position) VALUES ($1, 7101, 'whatsapp', '{order_pdf}', 0)`, [recipientKey]);
+      const make = async () => {
+        const view = (await send(9001, { target: { kind: 'client' }, form: 'order_pdf' as never })).send;
+        // A valid employee row of the next release: recipient, employee, contact, fingerprint, phone.
+        await q(`UPDATE whatsapp_order_sends SET target_kind = 'employee', recipient_key = $2, employee_id = 7101, employee_contact_id = 1,
+            recipient_fingerprint = repeat('f', 64), client_id = NULL WHERE send_id = $1`, [view.sendId, recipientKey]);
+        return view;
+      };
+      const view = await make();
+      let checked = 0;
+      const original = checkBehaviour;
+      checkBehaviour = async (phone) => { checked += 1; return original(phone); };
+      try {
+        await worker.work();
+      } finally {
+        checkBehaviour = original;
+      }
+      expect(await row(view.sendId)).toMatchObject({ state: 'failed', error_code: 'ORDER_SEND_TARGET_UNSUPPORTED' });
+      expect(checked).toBe(0);
+      expect(sent).toHaveLength(0);
+      expect((await q(`SELECT last_delivery_at FROM whatsapp_order_send_settings`)).rows[0].last_delivery_at).toBeNull();
+      const failedAudit = (await q(`SELECT a.request_id, a.metadata_json, r.entity_id FROM audit_log a
+        JOIN audit_log_related_entity r ON r.audit_id = a.audit_id AND r.entity_type = 'employee'
+        WHERE a.entity_id = $1 AND a.event = 'whatsapp.order_send.failed'`, [view.sendId])).rows;
+      expect(failedAudit).toHaveLength(1);
+      expect(failedAudit[0]).toMatchObject({ entity_id: '7101', metadata_json: { employeeId: 7101, errorCode: 'ORDER_SEND_TARGET_UNSUPPORTED' } });
+      expect((await service.listForOrder(9001, admin)).sends.find((item) => item.sendId === view.sendId)?.recipientLabel).toBe('Сотрудник');
+      const mySends = new MySendsRepository(database);
+      (mySends as unknown as { calendarSends: () => Promise<never[]> }).calendarSends = async () => [];
+      expect((await mySends.list(admin.id)).find((item) => item.id === view.sendId)?.title).toContain('сотруднику');
+      // A delivery interrupted on the newer release: recovered as unknown once, audited with the employee.
+      const interrupted = await make();
+      await q(`UPDATE whatsapp_order_sends SET state = 'sending', attempt_count = 1, lock_token = gen_random_uuid(),
+          send_started_at = now() - interval '1 hour' WHERE send_id = $1`, [interrupted.sendId]);
+      expect(await repository.markStaleIntentsUnknown(10 * 60_000)).toBe(1);
+      expect(await repository.markStaleIntentsUnknown(10 * 60_000)).toBe(0);
+      const unknownAudit = (await q(`SELECT r.entity_id FROM audit_log a JOIN audit_log_related_entity r ON r.audit_id = a.audit_id
+        AND r.entity_type = 'employee' WHERE a.entity_id = $1 AND a.event = 'whatsapp.order_send.unknown'`, [interrupted.sendId])).rows;
+      expect(unknownAudit).toEqual([{ entity_id: '7101' }]);
+      // Client and chat sends keep working next to them.
+      await q(`DELETE FROM whatsapp_order_sends WHERE send_id = $1`, [interrupted.sendId]);
+      const client = (await send(9001, { target: { kind: 'client' }, form: 'order_pdf' as never })).send;
+      await worker.work();
+      expect((await row(client.sendId)).state).toBe('sent');
     });
 
     it('reads histories with unknown forms and a manual cancel without failing', async () => {
