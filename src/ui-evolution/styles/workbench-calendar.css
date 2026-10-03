@@ -386,15 +386,126 @@
   --wb-cal-stage: color-mix(in srgb, var(--evo-success, #1f9d55) 75%, var(--evo-text-secondary));
 }
 
-/* компактный и краткий виды — те же тихие поверхности */
-:root[data-ui-variant="workbench"] .calendar-board--wb .order-card--compact {
-  border-radius: 7px;
-  box-shadow: none;
-  border: 1px solid var(--evo-border);
+/* ---------- шапка дня: дата сверху, площадь и отправка строкой ниже (узкие колонки) ---------- */
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column__header-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 3px;
 }
 
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column__header-left {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column__header-right {
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  text-align: left;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column__send {
+  color: var(--evo-text-secondary);
+}
+
+/* ---------- «Компактно»: та же карточка в две-три строки ---------- */
+:root[data-ui-variant="workbench"] .calendar-board--wb .order-card--compact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 4px;
+  margin: 0 !important;
+  padding: 5px 8px 6px;
+  border: 1px solid var(--evo-border);
+  border-left-width: 3px;
+  border-top-color: var(--evo-border) !important;
+  border-right-color: var(--evo-border) !important;
+  border-bottom-color: var(--evo-border) !important;
+  border-radius: 7px;
+  background: var(--evo-surface);
+  box-shadow: none;
+  color: var(--evo-text-secondary);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .order-card--compact .order-card-compact__number {
+  flex: 1 0 100%;
+  color: var(--evo-text) !important;
+  font-size: 12.5px;
+  font-weight: 650 !important;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .order-card--compact > div[style*="border-top"] {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .order-card--compact .order-card-compact__line {
+  display: inline;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .order-card--compact .order-card-compact__line:not(:last-child)::after {
+  content: ' ·';
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .order-card-compact__production-stages {
+  flex: 1 0 100%;
+  filter: saturate(0.35);
+  opacity: 0.85;
+}
+
+/* ---------- «Кратко»: тихие строки; «готов» и «выдан» — цветной полоской слева ---------- */
 :root[data-ui-variant="workbench"] .calendar-board--wb .day-column--brief {
+  padding: 8px 8px 6px;
   border: 1px solid var(--evo-border);
   border-radius: 10px;
+  background: var(--evo-surface);
   box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column-brief__header-date {
+  color: var(--evo-text);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column-brief__header-total {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column--brief > div[style*="border-top"] {
+  border-top: 1px solid var(--evo-border) !important;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column-brief__order-item {
+  color: var(--evo-text);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column-brief__order-item[style*="border-radius"] {
+  border-left-width: 3px !important;
+  border-top-color: var(--evo-border) !important;
+  border-right-color: var(--evo-border) !important;
+  border-bottom-color: var(--evo-border) !important;
+  border-radius: 6px !important;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column--brief .ant-empty-image {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column--brief .ant-empty {
+  margin: 10px 0 !important;
+}
+
+:root[data-ui-variant="workbench"] .calendar-board--wb .day-column--brief .ant-empty-description {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  opacity: 0.75;
 }

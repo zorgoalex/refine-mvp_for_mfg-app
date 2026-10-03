@@ -118,8 +118,11 @@ test.describe('Calendar frontend', () => {
             await page.locator('.wb-cal-toolbar .ant-segmented-item').filter({ hasText: mode }).click();
             const cards = page.locator(mode === 'Кратко' ? '.day-column-brief__order-item' : mode === 'Компактно' ? '.order-card--compact' : '.order-card--wb');
             await expect(cards.filter({ hasText: 'E2E-Тест календарь' })).toBeVisible();
+            if (process.env.WORKBENCH_SHOTS_DIR) {
+                await page.waitForTimeout(400);
+                await page.screenshot({ path: `${process.env.WORKBENCH_SHOTS_DIR}/calendar-workbench-${mode}.png` });
+            }
         }
-        if (process.env.WORKBENCH_SHOTS_DIR) await page.screenshot({ path: `${process.env.WORKBENCH_SHOTS_DIR}/calendar-workbench.png` });
 
         await page.locator('.wb-cal-toolbar .ant-segmented-item').filter({ hasText: 'Неделя' }).click();
         await expect(page.locator('.wb-cal-week-label')).toHaveCount(1);
