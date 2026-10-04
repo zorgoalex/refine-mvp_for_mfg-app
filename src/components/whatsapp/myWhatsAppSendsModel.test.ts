@@ -213,7 +213,7 @@ describe('queue balloons', () => {
   it('a manual cancel says who: the author himself or an administrator', () => {
     expect(balloonFor(item('a', 'cancelled', { cancelReason: 'manual', cancelledByOther: false })).title).toBe('Отправка отменена');
     expect(balloonFor(item('a', 'cancelled', { cancelReason: 'manual', cancelledByOther: true })).title).toBe('Отменено администратором');
-    expect(balloonFor(item('a', 'unknown', { errorCode: 'PARTIAL_DELIVERY' })).title).toBe('Ушла только часть изображений');
+    expect(balloonFor(item('a', 'unknown', { errorCode: 'PARTIAL_DELIVERY' })).title).toBe('Ушла только часть отправки');
   });
 
   it('many finished at once → one summary balloon; a few → one each', () => {

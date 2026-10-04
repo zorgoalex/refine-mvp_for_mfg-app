@@ -14,7 +14,7 @@ import { OrderSendRepository, knownForms, nextAllowed, numericId, type NewSend, 
 import type { QueueEstimate } from './order-send-queue';
 import { OrderSendWorker } from './order-send-worker.service';
 import {
-  ORDER_FORMS, ORDER_SEND_FINANCIAL_PERMISSION, orderForm, orderFormTitle,
+  ORDER_FORMS, ORDER_SEND_FINANCIAL_PERMISSION, SUPPLIER_TEXT_FORM, orderForm, orderFormTitle,
   type OrderFormCode, type OrderSendMenu, type OrderSendSettings, type OrderSendSettingsInput, type OrderSendTarget, type OrderSendView,
 } from './order-send.types';
 
@@ -243,13 +243,16 @@ export class OrderSendService {
 export function toView(row: SendRow, estimate?: QueueEstimate): OrderSendView {
   return {
     sendId: row.send_id,
-    orderId: Number(row.order_id),
+    orderId: row.order_id === null || row.order_id === undefined ? null : Number(row.order_id),
     targetKind: row.target_kind,
     chatKey: row.chat_key,
-    // A recipient kind of a newer release (an employee) reads as such, never as a chat.
-    recipientLabel: row.target_kind === 'client' ? 'Клиент' : row.target_kind === 'chat' ? row.chat_label ?? 'Чат' : row.employee_name ?? 'Сотрудник',
+    // A recipient kind of a newer release reads as such, never as a chat.
+    recipientLabel: row.target_kind === 'client' ? 'Клиент' : row.target_kind === 'chat' ? row.chat_label ?? 'Чат'
+      : row.target_kind === 'supplier' ? row.supplier_name ?? 'Поставщик' : row.employee_name ?? 'Сотрудник',
     recipientMasked: row.recipient_masked,
     form: row.form_code,
+    supplierRequestId: row.supplier_request_id == null ? null : Number(row.supplier_request_id),
+    supplierRequestNumber: row.supplier_request_number ?? null,
     state: row.state,
     errorCode: row.error_code,
     cancelReason: row.cancel_reason,
@@ -269,7 +272,7 @@ function toJournalItem(row: SendRow, estimate: QueueEstimate | undefined) {
   return {
     ...toView(row, estimate),
     orderName: row.order_name ?? null,
-    formTitle: orderFormTitle(row.form_code),
+    formTitle: row.form_code === SUPPLIER_TEXT_FORM ? 'Текст заявки поставщику' : orderFormTitle(row.form_code),
     finishedAt: row.state === 'queued' || row.state === 'sending' ? null : (row.sent_at ?? row.updated_at).toISOString(),
     cancelledBy: row.cancelled_by ? { id: String(row.cancelled_by), username: row.cancelled_by_username ?? null } : null,
   };

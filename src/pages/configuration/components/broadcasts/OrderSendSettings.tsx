@@ -284,6 +284,13 @@ export const OrderSendSettings: React.FC = () => {
           </>}
         </Form.List>
       </>}
+      {typeof settings.supplierRequestsEnabled === 'boolean' && <>
+        <Typography.Title level={5} style={{ marginTop: 16 }}>Заявки поставщикам</Typography.Title>
+        <Form.Item name="supplierRequestsEnabled" valuePropName="checked"
+          extra="Кнопка «Отправить в WhatsApp» в окне «Текст для поставщика» экрана снабжения: текст уходит на телефон поставщика из справочника через эту же очередь и порог. Выключение отменяет ожидающие заявки.">
+          <Checkbox>Отправлять заявки поставщикам в WhatsApp</Checkbox>
+        </Form.Item>
+      </>}
       {status && <Alert style={{ margin: '12px 0' }} type="info" showIcon message={status} />}
       {!runtimeAvailable && <Alert style={{ margin: '12px 0' }} type="warning" showIcon message="Отправка WhatsApp сейчас недоступна" />}
       <Space wrap style={{ marginTop: 12 }}>

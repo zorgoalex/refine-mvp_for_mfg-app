@@ -11,7 +11,9 @@ import { can } from '../../../../utils/permissions';
 import {
   isOrderSendCancellable,
   orderSendMoment,
+  orderSendFormText,
   orderSendRecipientText,
+  orderSendSubjectText,
   orderSendStateColor,
   orderSendStateDetail,
   orderSendStateLabel,
@@ -87,11 +89,11 @@ export const OrderSendQueue: React.FC = () => {
     ...(!history ? [{ title: '№', dataIndex: 'position', key: 'position', width: 48 }] : []),
     { title: history ? 'Завершено' : '≈ Когда', key: 'when', width: 130,
       render: (_: unknown, item: OrderSendQueueItem) => <Text type={item.mayExpire ? 'warning' : undefined}>{orderSendWhenText(item, paused)}</Text> },
-    { title: 'Заказ', key: 'order', render: (_: unknown, item: OrderSendQueueItem) =>
-      <Link to={`/orders/show/${item.orderId}`}>{item.orderName ?? `#${item.orderId}`}</Link> },
+    { title: 'Заказ / заявка', key: 'order', render: (_: unknown, item: OrderSendQueueItem) => (item.orderId === null || item.orderId === undefined
+      ? orderSendSubjectText(item) : <Link to={`/orders/show/${item.orderId}`}>{orderSendSubjectText(item)}</Link>) },
     { title: 'Получатель', key: 'recipient', render: (_: unknown, item: OrderSendQueueItem) => orderSendRecipientText(item) },
     { title: 'Форма', key: 'form', render: (_: unknown, item: OrderSendQueueItem) =>
-      item.partsTotal && item.partsTotal > 1 ? `${item.formTitle} (${item.partsTotal} изобр.)` : item.formTitle },
+      orderSendFormText(item) },
     { title: 'Автор', key: 'actor', render: (_: unknown, item: OrderSendQueueItem) => item.actor.username ?? `#${item.actor.id}` },
     { title: 'Поставлено', key: 'created', width: 110, render: (_: unknown, item: OrderSendQueueItem) => orderSendMoment(item.createdAt) },
     { title: 'Статус', key: 'state', render: (_: unknown, item: OrderSendQueueItem) => {

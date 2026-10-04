@@ -52,7 +52,22 @@ export const ORDER_SEND_RETENTION_MS = 7 * 24 * 60 * 60_000;
 
 export type OrderSendState = 'queued' | 'sending' | 'sent' | 'failed' | 'unknown' | 'cancelled' | 'expired';
 export type OrderSendCancelReason = 'disabled' | 'recipient_removed' | 'recipient_changed' | 'form_not_allowed' | 'permission_revoked' | 'paused'
-  | 'manual';
+  | 'manual'
+  /** A supplier request changed (supplier, date, comment, lines), was cancelled or closed while its text waited. */
+  | 'request_changed';
+
+/** The «form» of a supplier request send: its text (no file). Never offered among the order forms. */
+export const SUPPLIER_TEXT_FORM = 'supplier_text';
+export type OrderSendFormCode = OrderFormCode | typeof SUPPLIER_TEXT_FORM;
+export type OrderSendTargetKind = 'client' | 'chat' | 'employee' | 'supplier';
+/** Sending a supplier request from the procurement screen: as its commands (the scope is checked per request). */
+export const SUPPLIER_SEND_PERMISSIONS: readonly PermissionName[] = ['procurement.view', 'procurement.manage'];
+/**
+ * Whether this backend creates sends of supplier requests (needs migration 238). The compatible release (K3a)
+ * is this very code with `false`: it replays accepted commands, reads, audits, purges, re-checks and delivers
+ * the rows that exist, but makes no new ones — a definite refusal — and its menu says «unavailable».
+ */
+export const ORDER_SEND_SUPPLIER_REQUESTS = true;
 export type OrderSendTarget =
   /** `phoneId` — one of the client's phones (default: primary, else the smallest), with the token the menu gave for it. */
   { kind: 'client'; phoneId?: number | null; phoneToken?: string | null }
@@ -98,6 +113,8 @@ export interface OrderSendSettings {
   clientCaption: string;
   chats: OrderSendChat[];
   employees: OrderSendEmployeeRecipient[];
+  /** Texts of supplier requests may be sent from the procurement screen. */
+  supplierRequestsEnabled: boolean;
   updatedAt: string;
   updatedBy: { id: string; username: string | null } | null;
 }
@@ -113,6 +130,8 @@ export interface OrderSendSettingsInput {
   chats: Array<{ chatKey: string | null; groupChatId: string; label: string; forms: OrderFormCode[]; caption: string }>;
   /** recipientKey null = a new employee recipient; an existing key keeps its employee and channel. */
   employees: Array<{ recipientKey: string | null; employeeId: number; channel: OrderSendChannel; forms: OrderFormCode[]; caption: string }>;
+  /** Absent (a client of the previous release) = kept as it is. */
+  supplierRequestsEnabled?: boolean;
 }
 
 export interface OrderSendRuntime {
@@ -139,19 +158,23 @@ export interface OrderSendMenu {
 
 export interface OrderSendView {
   sendId: string;
-  orderId: number;
-  targetKind: 'client' | 'chat' | 'employee';
+  /** Null for a supplier request send. */
+  orderId: number | null;
+  targetKind: OrderSendTargetKind;
   chatKey: string | null;
   recipientLabel: string;
   recipientMasked: string;
-  form: OrderFormCode;
+  form: OrderSendFormCode;
+  /** A supplier request send: the request and its number. */
+  supplierRequestId: number | null;
+  supplierRequestNumber: string | null;
   state: OrderSendState;
   errorCode: string | null;
   cancelReason: OrderSendCancelReason | null;
   createdAt: string;
   sentAt: string | null;
   actor: { id: string; username: string | null };
-  /** Pictures of an image form (1 for a file). */
+  /** Pictures of an image form or messages of a supplier text (1 for a file). */
   partsTotal: number;
   /** 1-based place in the queue while queued/sending, else null. */
   position: number | null;
@@ -160,4 +183,17 @@ export interface OrderSendView {
   /** The send is expected to expire before its turn. */
   mayExpire: boolean;
   expiresAt: string;
+}
+
+/** What the window «Текст для поставщика» needs to offer the send: the recipient as masks, never a number. */
+export interface SupplierSendMenu {
+  /** The card sends are on, supplier requests are on and this release makes them. */
+  enabled: boolean;
+  /** Why the request cannot be sent now (null = it can): shown as the button hint. */
+  unavailableReason: 'disabled' | 'release' | 'not_linked' | 'no_phone' | 'supplier_inactive' | 'status' | null;
+  supplier: { supplierId: number; name: string } | null;
+  contacts: Array<{ contactId: number; masked: string; isPrimary: boolean; token: string }>;
+  requestVersion: number;
+  queueLength: number;
+  runtime: OrderSendRuntime;
 }

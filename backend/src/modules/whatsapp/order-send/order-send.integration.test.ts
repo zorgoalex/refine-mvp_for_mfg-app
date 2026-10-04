@@ -13,6 +13,7 @@ import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
 import type { WahaClient } from '../waha.client';
 import type { WhatsAppRuntimeConfigService } from '../whatsapp-runtime-config.service';
 import { OrderSendActors } from './order-send-actors';
+import { runMigrationFile } from './migration-file.test-util';
 import { OrderSendFileStore } from './order-send-file-store';
 import { readOrderFormData } from './forms/order-form-data';
 import { parseOrderSendSettings, parseOrderSendCommand } from './order-send.dto';
@@ -108,6 +109,10 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
     await q(await readFile(new URL('../../../../db/migrations/233_whatsapp_order_send_queue.sql', import.meta.url), 'utf8'));
     await q(await readFile(new URL('../../../../db/migrations/235_employee_work_contacts.sql', import.meta.url), 'utf8'));
     await q(await readFile(new URL('../../../../db/migrations/237_whatsapp_order_send_client_phone.sql', import.meta.url), 'utf8'));
+    // Schema 238 (a supplier request as a send): the journal reads the request and the supplier of such rows.
+    await q(`CREATE TABLE suppliers(supplier_id smallint PRIMARY KEY, supplier_name text);
+      CREATE TABLE supplier_requests(supplier_request_id bigint PRIMARY KEY, request_number text)`);
+    await runMigrationFile((sql) => q(sql), await readFile(new URL('../../../../db/migrations/238_whatsapp_supplier_send.sql', import.meta.url), 'utf8'));
     database = {
       isConfigured: true,
       query: <T extends QueryResultRow = QueryResultRow>(text: string, params: readonly unknown[] = []) => pool.query<T>(text, [...params]),

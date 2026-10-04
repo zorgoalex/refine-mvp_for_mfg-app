@@ -2569,6 +2569,22 @@ probe_file() {
     # 233: queue instead of refusals (no «one active» index), manual cancel, image forms + their pages.
     # 230's probe checks its end state: 233 drops the one-active index, so 230 does not require it.
     # 235: employee work contacts + an employee as an order card send recipient.
+    # 238: a supplier request as a card-queue send (text in parts); every re-created CHECK must be validated.
+    238_whatsapp_supplier_send*) probe_all \
+      "$(q_col whatsapp_order_send_settings supplier_requests_enabled)" \
+      "$(q_col whatsapp_order_sends supplier_request_id)" "$(q_col whatsapp_order_sends request_content_sha256)" \
+      "$(q_col whatsapp_order_sends text_body)" "$(q_col whatsapp_order_sends text_sha256)" \
+      "$(q_col whatsapp_order_sends template_version)" "$(q_col whatsapp_order_send_parts text_body)" \
+      "$(q_col whatsapp_order_send_refusals supplier_request_id)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relname = 'idx_whatsapp_order_sends_supplier_request' AND c.relnamespace = 'public'::regnamespace AND i.indisvalid AND i.indisready);" \
+      "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='whatsapp_order_sends' AND column_name='order_id' AND is_nullable='YES');" \
+      "SELECT (SELECT count(*) FROM pg_constraint WHERE conrelid='public.whatsapp_order_sends'::regclass AND convalidated AND conname IN ('chk_whatsapp_order_sends_target_kind','chk_whatsapp_order_sends_form_code','chk_whatsapp_order_sends_cancel_reason','chk_whatsapp_order_sends_target','chk_whatsapp_order_sends_payload','chk_whatsapp_order_sends_purged','chk_whatsapp_order_sends_text_body')) = 7;" \
+      "SELECT (SELECT count(*) FROM pg_constraint WHERE conrelid='public.whatsapp_order_send_parts'::regclass AND convalidated AND conname IN ('chk_whatsapp_order_send_parts_payload','chk_whatsapp_order_send_parts_purged','chk_whatsapp_order_send_parts_text_body')) = 3;" \
+      "SELECT COALESCE((SELECT pg_get_constraintdef(oid) LIKE '%supplier%' FROM pg_constraint WHERE conname='chk_whatsapp_order_sends_target' AND conrelid='public.whatsapp_order_sends'::regclass), false);" \
+      "SELECT COALESCE((SELECT pg_get_constraintdef(oid) LIKE '%text_body%' FROM pg_constraint WHERE conname='chk_whatsapp_order_sends_purged' AND conrelid='public.whatsapp_order_sends'::regclass), false);" ;;
+    237_whatsapp_order_send_client_phone*) probe_all \
+      "$(q_col whatsapp_order_sends client_phone_id)" "$(q_tbl whatsapp_order_send_refusals)" \
+      "$(q_idx idx_whatsapp_order_send_refusals_created)" ;;
     236_party_contacts*) probe_all \
       "$(q_tbl party_contact_versions)" \
       "$(q_tbl supplier_contacts)" "$(q_tbl vendor_contacts)" "$(q_tbl client_contacts)" \
@@ -2579,9 +2595,6 @@ probe_file() {
       "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE contype='f' AND conrelid='public.vendor_contacts'::regclass AND confrelid='public.vendors'::regclass AND confdeltype='r');" \
       "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE contype='f' AND conrelid='public.client_contacts'::regclass AND confrelid='public.clients'::regclass AND confdeltype='r');" \
       "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE contype='c' AND conrelid='public.client_contacts'::regclass AND pg_get_constraintdef(oid) LIKE '%''phone''%');" ;;
-    237_whatsapp_order_send_client_phone*) probe_all \
-      "$(q_col whatsapp_order_sends client_phone_id)" "$(q_tbl whatsapp_order_send_refusals)" \
-      "$(q_idx idx_whatsapp_order_send_refusals_created)" ;;
     235_employee_work_contacts*) probe_all \
       "$(q_col employees work_contacts_version)" "$(q_tbl employee_work_contacts)" "$(q_tbl whatsapp_order_send_employees)" \
       "$(q_idx uq_employee_work_contacts_primary)" "$(q_idx uq_employee_work_contacts_value)" \
@@ -2717,7 +2730,7 @@ verify_applied_effect() {
     193_onec_agent_foundation*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    231_cut_result_render_v2*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*)
+    231_cut_result_render_v2*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     173_inbound_signals*)

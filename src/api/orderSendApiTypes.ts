@@ -48,6 +48,8 @@ export interface OrderSendSettings {
   chats: OrderSendChatSettings[];
   /** Absent on an older backend. */
   employees?: OrderSendEmployeeSettings[];
+  /** Texts of supplier requests may be sent from the procurement screen; absent on an older backend. */
+  supplierRequestsEnabled?: boolean;
   updatedAt: string;
   updatedBy: { id: number | string; username: string | null } | null;
 }
@@ -87,6 +89,8 @@ export interface OrderSendSettingsInput {
   chats: OrderSendChatInput[];
   /** Sent only to a backend that has employee recipients (omitted = the current ones stay). */
   employees?: OrderSendEmployeeInput[];
+  /** Sent only to a backend that has the switch (omitted = it stays). */
+  supplierRequestsEnabled?: boolean;
 }
 
 export interface OrderSendEmployeeInput {
@@ -150,14 +154,21 @@ export interface OrderSendCommandInput {
   confirmAfterUnknown?: string;
 }
 
+/** The «form» of a supplier request send: its text. */
+export const SUPPLIER_TEXT_FORM = 'supplier_text';
+
 export interface OrderSendView {
   sendId: string;
-  orderId: number;
-  targetKind: 'client' | 'chat' | 'employee';
+  /** Null for a supplier request send. */
+  orderId: number | null;
+  targetKind: 'client' | 'chat' | 'employee' | 'supplier';
   chatKey: string | null;
   recipientLabel: string;
   recipientMasked: string;
-  form: OrderFormCode;
+  form: OrderFormCode | typeof SUPPLIER_TEXT_FORM;
+  /** A supplier request send: the request and its number; absent on an older backend. */
+  supplierRequestId?: number | null;
+  supplierRequestNumber?: string | null;
   state: string;
   errorCode: string | null;
   cancelReason: string | null;
