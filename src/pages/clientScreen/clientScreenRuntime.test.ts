@@ -13,15 +13,20 @@ import { startClientScreenViewer, type ClientScreenViewer } from './clientScreen
  */
 /**
  * Web Locks for the test process: exclusive named locks with a waiting queue, `ifAvailable`, abort
- * and `query`, the subset the runtimes use. The test runner's Node may have no navigator.locks; the
- * real browser implementation is exercised by tests/client-screen-browse.mjs.
+ * and `query`, the subset the runtimes use, with the timing the specification requires (callbacks
+ * run in a later task, a pre-aborted request is rejected). The test runner's Node may have no
+ * navigator.locks at all (Node 20 in CI).
  */
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 function createLocks(): ClientScreenLocks {
   const held = new Set<string>();
   const waiting = new Map<string, Array<() => void>>();
+  const aborted = () => new DOMException('The request was aborted', 'AbortError');
+  // The callback runs in a later task, never inside request(); the lock is released when it settles.
   const run = async (name: string, callback: (lock: unknown) => unknown): Promise<unknown> => {
     held.add(name);
     try {
+      await Promise.resolve();
       return await callback({ name });
     } finally {
       held.delete(name);
@@ -31,8 +36,9 @@ function createLocks(): ClientScreenLocks {
   };
   return {
     request(name, options, callback) {
+      if (options.signal?.aborted) return Promise.reject(aborted());
       if (!held.has(name)) return run(name, callback);
-      if (options.ifAvailable) return Promise.resolve(callback(null));
+      if (options.ifAvailable) return Promise.resolve().then(() => callback(null));
       return new Promise((resolve, reject) => {
         const start = () => {
           options.signal?.removeEventListener('abort', onAbort);
@@ -42,12 +48,8 @@ function createLocks(): ClientScreenLocks {
           const queue = waiting.get(name) ?? [];
           const index = queue.indexOf(start);
           if (index >= 0) queue.splice(index, 1);
-          reject(new DOMException('aborted', 'AbortError'));
+          reject(aborted());
         };
-        if (options.signal?.aborted) {
-          onAbort();
-          return;
-        }
         options.signal?.addEventListener('abort', onAbort);
         waiting.set(name, [...(waiting.get(name) ?? []), start]);
       });
@@ -57,6 +59,98 @@ function createLocks(): ClientScreenLocks {
     },
   };
 }
+
+/**
+ * The substitute is checked against what the Web Locks specification requires of the subset used
+ * here. It is not compared with the runner's own navigator.locks: Node's experimental implementation
+ * differs from browsers (it calls the callback inside request() and keeps a lock whose callback
+ * threw). Real browser locks, including two windows claiming at once and a duplicate customer
+ * window, are exercised in Chromium by tests/client-screen-browse.mjs.
+ */
+const lockManagers: Array<[string, () => ClientScreenLocks]> = [['substitute', createLocks]];
+
+async function eventually(check: () => Promise<boolean>, timeout = 1000): Promise<boolean> {
+  const started = Date.now();
+  while (Date.now() - started < timeout) {
+    if (await check()) return true;
+    await wait(10);
+  }
+  return false;
+}
+
+describe.each(lockManagers)('lock manager conformance: %s', (kind, make) => {
+  const name = (suffix: string) => `conformance-${kind}-${process.pid}-${suffix}-${Math.random().toString(36).slice(2)}`;
+
+  it('grants a free lock in a later task and releases it when the callback settles', async () => {
+    const locks = make();
+    const lock = name('free');
+    let entered = false;
+    let release!: () => void;
+    const done = locks.request(lock, {}, () => { entered = true; return new Promise<void>((resolve) => { release = resolve; }); });
+    expect(entered).toBe(false); // never invoked synchronously inside request()
+    await until(() => entered, 'callback invoked');
+    expect((await locks.query()).held?.some((item) => item.name === lock)).toBe(true);
+    release();
+    await done;
+    // The release becomes visible to other requests a moment after the callback settles.
+    expect(await eventually(async () => !(await locks.query()).held?.some((item) => item.name === lock))).toBe(true);
+  });
+
+  it('ifAvailable gets null while the lock is held; a queued request gets it after release, in order', async () => {
+    const locks = make();
+    const lock = name('queue');
+    let release!: () => void;
+    const order: string[] = [];
+    const first = locks.request(lock, {}, () => new Promise<void>((resolve) => { release = resolve; }));
+    await until(() => Boolean(release), 'first holder');
+    await locks.request(lock, { ifAvailable: true }, (granted) => { order.push(granted === null ? 'null' : 'granted'); });
+    const second = locks.request(lock, {}, () => { order.push('second'); });
+    const third = locks.request(lock, {}, () => { order.push('third'); });
+    await wait(20);
+    expect(order).toEqual(['null']);
+    release();
+    await Promise.all([first, second, third]);
+    expect(order).toEqual(['null', 'second', 'third']);
+  });
+
+  it('rejects a request whose signal is already aborted without invoking the callback, even for a free lock', async () => {
+    const locks = make();
+    const controller = new AbortController();
+    controller.abort();
+    let invoked = false;
+    await expect(locks.request(name('pre-aborted'), { signal: controller.signal }, () => { invoked = true; })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(invoked).toBe(false);
+  });
+
+  it('a queued request aborted before its turn is rejected and never runs', async () => {
+    const locks = make();
+    const lock = name('abort-queued');
+    let release!: () => void;
+    const first = locks.request(lock, {}, () => new Promise<void>((resolve) => { release = resolve; }));
+    await until(() => Boolean(release), 'first holder');
+    const controller = new AbortController();
+    let invoked = false;
+    const queued = locks.request(lock, { signal: controller.signal }, () => { invoked = true; });
+    controller.abort();
+    await expect(queued).rejects.toMatchObject({ name: 'AbortError' });
+    release();
+    await first;
+    await wait(20);
+    expect(invoked).toBe(false);
+  });
+
+  it('releases the lock when the callback throws', async () => {
+    const locks = make();
+    const lock = name('throws');
+    await expect(locks.request(lock, {}, () => { throw new Error('boom'); })).rejects.toThrow('boom');
+    expect(await eventually(async () => {
+      let granted: unknown = null;
+      await locks.request(lock, { ifAvailable: true }, (value) => { granted = value; });
+      return granted !== null;
+    })).toBe(true);
+  });
+});
+
 let channelSeq = 0;
 
 function workstationOf() {
@@ -89,7 +183,6 @@ function workstationOf() {
   return { envFor };
 }
 
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 async function until(check: () => boolean, label: string, timeout = 3000): Promise<void> {
   const started = Date.now();
   while (!check()) {

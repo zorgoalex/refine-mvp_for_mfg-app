@@ -142,6 +142,29 @@ try {
   await expect(viewer.getByRole('heading', { name: 'Заказ № 2418' })).toBeVisible({ timeout: 20000 });
   results.push('re-enabled → new press presents again');
 
+  // Real browser locks: a second customer window stays passive, and two manager windows pressing
+  // «Показать клиенту» at the same moment end with exactly one owner and a shown order.
+  const duplicate = await context.newPage();
+  watch(duplicate, 'duplicate');
+  await duplicate.goto(`http://127.0.0.1:${PORT}/client-screen.html`);
+  await expect(duplicate.getByText('Экран клиента уже открыт в другом окне')).toBeVisible({ timeout: 30000 });
+  await expect(viewer.getByRole('heading', { name: 'Заказ № 2418' })).toBeVisible();
+  await duplicate.close();
+  results.push('second customer window stays passive (real Web Locks)');
+
+  const third = await context.newPage();
+  watch(third, 'manager3');
+  await third.goto(`http://127.0.0.1:${PORT}/manager`);
+  await third.waitForFunction(() => Boolean(window.cs), null, { timeout: 60000 });
+  await Promise.all([second.evaluate(() => window.cs.present()), third.evaluate(() => window.cs.present())]);
+  await expect.poll(async () => {
+    const phases = [await second.evaluate(() => window.cs.view().phase), await third.evaluate(() => window.cs.view().phase)];
+    return phases.sort().join(',');
+  }, { timeout: 20000 }).toBe('idle,owner');
+  await expect(viewer.getByRole('heading', { name: 'Заказ № 2418' })).toBeVisible({ timeout: 20000 });
+  results.push('two manager windows claiming at once → exactly one owner, order shown (real Web Locks)');
+  await third.close();
+
   assert.equal(await viewer.evaluate(() => sessionStorage.length), 0, 'customer window sessionStorage stays empty');
   assert.deepEqual(await viewer.evaluate(() => Object.keys(localStorage)), ['erp.clientScreen.workstation'], 'only the workstation record is in localStorage');
   assert.deepEqual([...new Set(requests)], [], 'the customer window made no network request besides its own code and the runtime config');

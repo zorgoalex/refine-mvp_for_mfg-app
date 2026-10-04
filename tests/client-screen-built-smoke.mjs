@@ -1,20 +1,28 @@
 import { chromium, expect } from '@playwright/test';
 import assert from 'node:assert/strict';
+import { printableError } from './helpers/redactSecrets.mjs';
 
 // Smoke of a BUILT deployment (a Vercel preview or the stage site): the main app still starts, a
 // deep route still resolves to it, and /client-screen.html is the isolated customer page.
-// BASE_URL is required; VERCEL_AUTOMATION_BYPASS_SECRET is sent as the protection-bypass header
-// when set (never printed). Read-only: no login, no data.
+// BASE_URL is required. VERCEL_AUTOMATION_BYPASS_SECRET, when set, is added as the protection-bypass
+// header to requests for the deployment's own origin only, and is redacted from anything printed.
+// Read-only: no login, no data.
 const base = (process.env.BASE_URL ?? '').replace(/\/$/, '');
 assert.match(base, /^https:\/\//, 'BASE_URL must be an https URL');
 const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
-const extraHTTPHeaders = bypass ? { 'x-vercel-protection-bypass': bypass, 'x-vercel-set-bypass-cookie': 'true' } : {};
+const origin = new URL(base).origin;
 
 const browser = await chromium.launch({ headless: true });
 const results = [];
 const errors = [];
 try {
-  const context = await browser.newContext({ viewport: { width: 1366, height: 768 }, extraHTTPHeaders });
+  const context = await browser.newContext({ viewport: { width: 1366, height: 768 } });
+  // The credential goes to the deployment only: never to the backend or any other origin the app calls.
+  if (bypass) {
+    await context.route((url) => url.origin === origin, (route) => route.continue({
+      headers: { ...route.request().headers(), 'x-vercel-protection-bypass': bypass },
+    }));
+  }
   const watch = (page, name) => {
     page.on('pageerror', (e) => errors.push(`${name}: ${e.message.split('\n')[0]}`));
   };
@@ -44,12 +52,17 @@ try {
   const page = await context.newPage();
   watch(page, 'customer');
   const requests = [];
-  const scripts = [];
+  const scripts = new Map();
+  page.on('response', (response) => {
+    const url = new URL(response.url());
+    if (response.request().resourceType() === 'script' && url.origin === origin) {
+      scripts.set(url.pathname, response.body().then((body) => body.length, () => 0));
+    }
+  });
   page.on('request', (request) => {
     const url = new URL(request.url());
-    if (request.resourceType() === 'script') scripts.push(url.pathname);
-    if (url.origin === new URL(base).origin && !/^\/(assets\/|client-screen\.html|vite\.svg|favicon)/.test(url.pathname) && !/runtime-config/.test(url.pathname)) requests.push(url.pathname);
-    if (url.origin !== new URL(base).origin) requests.push(url.href.slice(0, 80));
+    if (url.origin === origin && !/^\/(assets\/|client-screen\.html|vite\.svg|favicon)/.test(url.pathname) && !/runtime-config/.test(url.pathname)) requests.push(url.pathname);
+    if (url.origin !== origin) requests.push(`${url.origin}${url.pathname}`.slice(0, 80));
   });
   const response = await page.goto(`${base}/client-screen.html`, { waitUntil: 'domcontentloaded' });
   assert.equal(response.status(), 200, 'GET /client-screen.html');
@@ -73,18 +86,23 @@ try {
 
   assert.ok(configRequests.length >= 3, 'the runtime config was requested on every load');
   assert.deepEqual([...new Set(requests)], [], 'the customer page requested nothing but its assets and the runtime config');
-  const customerScripts = [...new Set(scripts)];
+  const customerScripts = [...scripts.keys()];
   assert.ok(customerScripts.length >= 1 && customerScripts.every((path) => path.startsWith('/assets/')), 'customer scripts are built assets');
-  // The emitted customer entry must not pull the application bundle: size is a cheap proxy checked per script.
+  // The emitted customer entry must not pull the application bundle: total script size is a cheap proxy.
   let bytes = 0;
-  for (const script of customerScripts) bytes += (await (await context.request.get(`${base}${script}`)).body()).length;
+  for (const size of scripts.values()) bytes += await size;
   assert.ok(bytes < 600_000, `customer page scripts are small (${bytes} bytes), so the app bundle is not loaded`);
   results.push(`customer page loads ${customerScripts.length} script(s), ${bytes} bytes, no other requests`);
 
   assert.deepEqual([...new Set(errors)], [], 'no page errors');
   console.log(JSON.stringify({ smoke: 'passed', base: new URL(base).host, results }, null, 1));
 } catch (error) {
-  console.log(JSON.stringify({ smoke: 'failed', results, pageErrors: [...new Set(errors)].slice(0, 5), error: String(error?.message ?? error).slice(0, 700) }, null, 1));
+  // Never the raw error: Playwright call logs may include request headers.
+  console.log(JSON.stringify({
+    smoke: 'failed', results,
+    pageErrors: [...new Set(errors)].slice(0, 5).map((text) => printableError({ name: 'page', message: text }, [bypass])),
+    error: printableError(error, [bypass]),
+  }, null, 1));
   process.exitCode = 1;
 } finally {
   await browser.close();
