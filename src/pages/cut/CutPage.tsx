@@ -1,5 +1,4 @@
 import { cutJobInformationalDetails, type InformationalCutDetailRow } from './cutJobInformationalDetails';
-import { useWorkspaceChromeBottom } from '../orders/useWorkspaceChromeBottom';
 import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Collapse, DatePicker, Drawer, Empty, Form, Input, Modal, Popconfirm, Radio, Select, Space, Spin, Tabs, Tag, Typography, message, theme } from 'antd';
@@ -1274,8 +1273,19 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   // NewLine: the piece pointed at / picked in an open sheet (sheet key + overlay key) — list and sheet stay in sync
   const [wbHoverPiece, setWbHoverPiece] = useState<{ sheet: string; piece: string; from: 'list' | 'sheet' } | null>(null);
   const [wbPickedPiece, setWbPickedPiece] = useState<{ sheet: string; piece: string } | null>(null);
-  // the open sheet's parts list sticks right under the app chrome (top bar with tabs)
-  const wbChromeBottom = useWorkspaceChromeBottom();
+  // NewLine: the open sheet's parts list sticks right under the group's own sticky title row,
+  // whose height varies (wrapping actions) — each group card carries it as a CSS variable.
+  useEffect(() => {
+    if (!isWorkbench || typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const head = entry.target as HTMLElement;
+        head.closest<HTMLElement>('.ant-card')?.style.setProperty('--wb-cut-group-head', `${Math.round(head.getBoundingClientRect().height)}px`);
+      }
+    });
+    document.querySelectorAll('.cut-page-modern--wb-split .ant-card > .ant-card-head').forEach((head) => observer.observe(head));
+    return () => observer.disconnect();
+  }, [isWorkbench, job, wbJobTab]);
   const [wbParamsOpen, setWbParamsOpen] = useState(false);
   const [orderOptions, setOrderOptions] = useState<CutOrderSelectOption[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
@@ -5962,7 +5972,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                         <aside
                           className="wb-cut-sheet-parts"
                           aria-label={`Детали листа ${sheetNo}`}
-                          style={{ '--wb-cut-sticky-top': `${wbChromeBottom}px` } as React.CSSProperties}
+                          style={{ '--wb-cut-sticky-top': `${stickyHeaderTop}px` } as React.CSSProperties}
                         >
                           <div className="wb-cut-sheet-parts__head">
                             <b>Детали листа</b>

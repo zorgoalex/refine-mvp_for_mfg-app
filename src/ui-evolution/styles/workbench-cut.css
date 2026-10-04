@@ -722,8 +722,9 @@
 /* --- «Детали листа» липкие: лист прокручивается, список остаётся под верхней панелью --- */
 :root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item--open > .wb-cut-sheet-parts {
   position: sticky;
-  top: calc(var(--wb-cut-sticky-top, 48px) + 12px);
+  /* под верхней панелью и под липкой строкой заголовка группы */
+  top: calc(var(--wb-cut-sticky-top, 48px) + var(--wb-cut-group-head, 104px) + 10px);
   align-self: start;
-  max-height: calc(100vh - var(--wb-cut-sticky-top, 48px) - 72px);
+  max-height: calc(100vh - var(--wb-cut-sticky-top, 48px) - var(--wb-cut-group-head, 104px) - 70px);
   border: 1px solid var(--evo-border);
 }
