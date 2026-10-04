@@ -4,8 +4,10 @@ import {
   buildAllocatedGroups,
   lineSummaryText,
   matchesReceiptFilter,
+  mergeReceiptPages,
   parseReceiptFilter,
   receiptListParams,
+  shouldLoadNextReceipts,
   worklistForReceiptParams,
 } from './receiptHelpers';
 
@@ -72,5 +74,23 @@ describe('«Распределено по заказам» (замечание 1
   it('переход в рабочий список: набор «Всё» и фильтр документа, прочие фильтры списка сброшены, чужие параметры целы', () => {
     const next = worklistForReceiptParams(new URLSearchParams('tab=supply&section=receipt&receipt=7&q=abc&coverage=none&receipts=full'), 7);
     expect(Object.fromEntries(next)).toEqual({ tab: 'supply', receipt: '7', receipts: 'full', preset: 'all', wlDoc: '7' });
+  });
+});
+
+describe('список приходов: подгрузка следующей страницы при прокрутке до конца', () => {
+  it('конец списка (с запасом) и есть ещё приходы — подгружать; идёт загрузка или всё показано — нет', () => {
+    const at = (scrollTop: number, extra = {}) => shouldLoadNextReceipts({ scrollTop, clientHeight: 250, scrollHeight: 1250, loaded: 30, total: 90, busy: false, ...extra });
+    expect(at(0)).toBe(false);
+    expect(at(900)).toBe(false);
+    expect(at(980)).toBe(true);
+    expect(at(1000)).toBe(true);
+    expect(at(1000, { busy: true })).toBe(false);
+    expect(at(1000, { loaded: 90 })).toBe(false);
+  });
+
+  it('страница дописывается без повторов и без потери порядка', () => {
+    const doc = (documentId: number) => ({ documentId });
+    expect(mergeReceiptPages([doc(1), doc(2)], [doc(2), doc(3)])).toEqual([doc(1), doc(2), doc(3)]);
+    expect(mergeReceiptPages([], [doc(5)])).toEqual([doc(5)]);
   });
 });

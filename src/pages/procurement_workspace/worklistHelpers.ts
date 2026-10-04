@@ -307,3 +307,36 @@ export function clampPage(page: number, total: number, pageSize: number): number
   const pages = Math.max(1, Math.ceil(total / pageSize));
   return Math.min(Math.max(1, page), pages);
 }
+
+/** Свёрнутые группы запоминаются для пользователя отдельно по каждой группировке (замечание 2026-10-04). */
+const COLLAPSED_KEY_PREFIX = 'procurement.worklist.collapsedGroups.';
+type CollapsedStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+const collapsedStorage = (): CollapsedStorage | null => {
+  try { return globalThis.localStorage ?? null; } catch { return null; }
+};
+
+export function loadCollapsedGroups(userId: string, groupBy: WorklistGroupBy, storage: CollapsedStorage | null = collapsedStorage()): Set<string> {
+  try {
+    const parsed: unknown = JSON.parse(storage?.getItem(`${COLLAPSED_KEY_PREFIX}${userId}.${groupBy}`) ?? '[]');
+    return new Set(Array.isArray(parsed) ? parsed.filter((key): key is string => typeof key === 'string').slice(0, 500) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function saveCollapsedGroups(userId: string, groupBy: WorklistGroupBy, collapsed: ReadonlySet<string>, storage: CollapsedStorage | null = collapsedStorage()): void {
+  try {
+    const name = `${COLLAPSED_KEY_PREFIX}${userId}.${groupBy}`;
+    if (collapsed.size === 0) storage?.removeItem(name); else storage?.setItem(name, JSON.stringify([...collapsed].slice(0, 500)));
+  } catch { /* личное удобство — без хранилища состояние живёт до перезагрузки */ }
+}
+
+/**
+ * Где встаёт липкая полоса: под самым нижним из закреплённых сверху элементов приложения (шапка, вкладки). Закреплённый
+ * (`sticky`/`fixed`) элемент в закреплённом положении занимает место от своего `top` на свою высоту.
+ */
+export function pinnedTopOffset(nodes: ReadonlyArray<{ position: string; top: number; height: number }>): number {
+  return Math.round(nodes
+    .filter((node) => (node.position === 'sticky' || node.position === 'fixed') && Number.isFinite(node.top) && node.height > 0 && node.height < 200)
+    .reduce((offset, node) => Math.max(offset, node.top + node.height), 0));
+}

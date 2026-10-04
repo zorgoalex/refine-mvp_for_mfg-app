@@ -6,6 +6,9 @@ import {
   applySelectionChange,
   areAllGroupsCollapsed,
   isLegendCoverageActive,
+  loadCollapsedGroups,
+  pinnedTopOffset,
+  saveCollapsedGroups,
   toggleCollapsedGroup,
   toggleCoverageValue,
   toggleLegendCoverage,
@@ -192,5 +195,43 @@ describe('замечания 2026-10-04: легенда-фильтры, чипы
     expect(areAllGroupsCollapsed(['a', 'b'], new Set(['a', 'b', 'old']))).toBe(true);
     expect([...toggleCollapsedGroup(new Set(['a']), 'b')]).toEqual(['a', 'b']);
     expect([...toggleCollapsedGroup(new Set(['a']), 'a')]).toEqual([]);
+  });
+});
+
+describe('свёрнутые группы запоминаются для пользователя по каждой группировке', () => {
+  const storage = () => {
+    const data = new Map<string, string>();
+    return { data, getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => { data.set(k, v); }, removeItem: (k: string) => { data.delete(k); } };
+  };
+
+  it('сохранённое состояние возвращается; у другого пользователя и другой группировки — своё', () => {
+    const store = storage();
+    saveCollapsedGroups('42', 'supplier', new Set(['s:1', 'none']), store);
+    expect([...loadCollapsedGroups('42', 'supplier', store)]).toEqual(['s:1', 'none']);
+    expect(loadCollapsedGroups('42', 'material', store).size).toBe(0);
+    expect(loadCollapsedGroups('43', 'supplier', store).size).toBe(0);
+    // «Развернуть все» — запись убирается.
+    saveCollapsedGroups('42', 'supplier', new Set(), store);
+    expect(store.data.size).toBe(0);
+  });
+
+  it('испорченная запись или недоступное хранилище — всё развёрнуто, без ошибок', () => {
+    const store = storage();
+    store.setItem('procurement.worklist.collapsedGroups.42.supplier', '{oops');
+    expect(loadCollapsedGroups('42', 'supplier', store).size).toBe(0);
+    store.setItem('procurement.worklist.collapsedGroups.42.supplier', '["a", 5, null]');
+    expect([...loadCollapsedGroups('42', 'supplier', store)]).toEqual(['a']);
+    const broken = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); }, removeItem: () => { throw new Error('denied'); } };
+    expect(loadCollapsedGroups('42', 'supplier', broken).size).toBe(0);
+    expect(() => saveCollapsedGroups('42', 'supplier', new Set(['a']), broken)).not.toThrow();
+  });
+});
+
+describe('липкая полоса фильтров встаёт под закреплённые шапку и вкладки', () => {
+  it('берётся нижний край самого нижнего закреплённого элемента; незакреплённые и высокие (боковое меню) не считаются', () => {
+    expect(pinnedTopOffset([{ position: 'sticky', top: 0, height: 64 }, { position: 'sticky', top: 64, height: 43 }])).toBe(107);
+    expect(pinnedTopOffset([{ position: 'static', top: NaN, height: 64 }])).toBe(0);
+    expect(pinnedTopOffset([{ position: 'fixed', top: 0, height: 950 }, { position: 'sticky', top: 0, height: 56 }])).toBe(56);
+    expect(pinnedTopOffset([])).toBe(0);
   });
 });

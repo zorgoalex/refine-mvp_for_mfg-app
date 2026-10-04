@@ -140,3 +140,15 @@ export function worklistForReceiptParams(current: URLSearchParams, documentId: n
   next.set('wlDoc', String(documentId));
   return next;
 }
+
+/** Дописать страницу к списку без повторов (документ мог «переехать» между страницами, пока список открыт). */
+export function mergeReceiptPages<T extends { documentId: number }>(current: readonly T[], page: readonly T[]): T[] {
+  const seen = new Set(current.map((document) => document.documentId));
+  return [...current, ...page.filter((document) => !seen.has(document.documentId))];
+}
+
+/** Прокрутка списка дошла до конца (с запасом) и есть что подгружать. */
+export function shouldLoadNextReceipts(input: { scrollTop: number; clientHeight: number; scrollHeight: number; loaded: number; total: number; busy: boolean }): boolean {
+  if (input.busy || input.loaded >= input.total) return false;
+  return input.scrollTop + input.clientHeight >= input.scrollHeight - 24;
+}

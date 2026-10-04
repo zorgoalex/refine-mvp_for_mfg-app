@@ -53,6 +53,8 @@ export interface AllocationSuggestionPanelProps {
   documentId: number;
   /** Успешное распределение — родитель перечитывает карточку/список. */
   onDone?: () => void;
+  /** Загрузка предложений завершилась (любым исходом): родитель снимает удержание высоты, чтобы экран не прыгал. */
+  onSettled?: () => void;
 }
 
 type LoadState =
@@ -67,7 +69,7 @@ type LoadState =
  * редактируемые количества, групповая отправка. Черновик правок — localStorage
  * (план §5.4); отправка — `allocateBatch`, всё или ничего.
  */
-export function AllocationSuggestionPanel({ documentId, onDone }: AllocationSuggestionPanelProps) {
+export function AllocationSuggestionPanel({ documentId, onDone, onSettled }: AllocationSuggestionPanelProps) {
   const { data: identity } = useGetIdentity<UserIdentity>();
   const userId = identity?.id ?? 'anon';
   const { canManage, manageLoading } = useProcurementPermission();
@@ -101,6 +103,8 @@ export function AllocationSuggestionPanel({ documentId, onDone }: AllocationSugg
   }, [documentId, canManage, userId]);
 
   useEffect(() => { load(); }, [load]);
+  const settled = state.status !== 'loading';
+  useEffect(() => { if (settled) onSettled?.(); }, [onSettled, settled]);
   const reloadFresh = useCallback(() => load(true), [load]);
 
   // Автосохранение черновика — каждое изменение галочки/количества.

@@ -1,6 +1,6 @@
 import { DownOutlined, RightOutlined } from '@ant-design/icons';
 import { Alert, Button } from 'antd';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 
 import { isApiError } from '../../api/apiError';
@@ -17,14 +17,15 @@ import { allocationStateLabel } from '../onec_purchase_documents/onecDocumentsHe
 import {
   RECEIPT_FILTERS,
   RECEIPT_FILTER_LABELS,
-  RECEIPT_PAGE_SIZE,
   buildAllocatedGroups,
   formatReceiptQuantity,
   lineSummaryText,
   matchesReceiptFilter,
+  mergeReceiptPages,
   parseReceiptFilter,
   receiptListParams,
   receiptSupplier,
+  shouldLoadNextReceipts,
   worklistForReceiptParams,
   type AllocatedLineGroup,
   type AllocatedOrderRow,
@@ -40,7 +41,8 @@ export interface ReceiptSectionProps {
 type ListState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; data: OnecDocumentListItemDto[]; total: number };
+  /** `pages` — сколько страниц уже подгружено в список; `more` — идёт подгрузка следующей. */
+  | { status: 'ready'; data: OnecDocumentListItemDto[]; total: number; pages: number; more: boolean };
 
 const RECEIPT_PARAM = 'receipt';
 const FILTER_PARAM = 'receipts';
@@ -56,30 +58,78 @@ const LIST_SCROLL_Y = 250;
 export function ReceiptSection({ active }: ReceiptSectionProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const filter = parseReceiptFilter(searchParams.get(FILTER_PARAM));
-  const [page, setPage] = useState(1);
+  /** До какой страницы список должен быть загружен: растёт при прокрутке до конца (следующая страница дописывается). */
+  const [wantedPages, setWantedPages] = useState(1);
   const [listOpen, setListOpen] = useState(true);
   const [state, setState] = useState<ListState>({ status: 'loading' });
   /** Старый backend не знает `allocation`/`withLines` — тогда прежний запрос и фильтр на клиенте. */
   const [legacy, setLegacy] = useState(false);
   const [revision, setRevision] = useState(0);
 
+  // Полная перезагрузка (фильтр, после распределения): страницы 1..wanted читаются заново и заменяют список разом —
+  // прежние строки остаются на экране до ответа, поэтому список не мигает и не прыгает.
+  const wantedRef = useRef(wantedPages);
+  wantedRef.current = wantedPages;
   useEffect(() => {
     if (!active) return undefined;
     let alive = true;
     setState((current) => (current.status === 'ready' ? current : { status: 'loading' }));
-    onecDocumentsApi.list(receiptListParams(filter, page, legacy))
-      .then((response) => {
-        if (!alive) return;
-        const data = legacy ? response.data.filter((document) => matchesReceiptFilter(document.allocationState, filter)) : response.data;
-        setState({ status: 'ready', data, total: legacy ? data.length : response.pagination.total });
-      })
-      .catch((error: unknown) => {
+    (async () => {
+      try {
+        if (legacy) {
+          const response = await onecDocumentsApi.list(receiptListParams(filter, 1, true));
+          const data = response.data.filter((document) => matchesReceiptFilter(document.allocationState, filter));
+          if (alive) setState({ status: 'ready', data, total: data.length, pages: 1, more: false });
+          return;
+        }
+        const target = wantedRef.current;
+        let data: OnecDocumentListItemDto[] = [];
+        let total = 0;
+        for (let page = 1; page <= target; page += 1) {
+          const response = await onecDocumentsApi.list(receiptListParams(filter, page));
+          if (!alive) return;
+          data = mergeReceiptPages(data, response.data);
+          total = response.pagination.total;
+          if (data.length >= total) break;
+        }
+        if (alive) setState({ status: 'ready', data, total, pages: target, more: false });
+      } catch (error) {
         if (!alive) return;
         if (!legacy && isApiError(error, 'ONEC_DOCUMENTS_QUERY_INVALID')) { setLegacy(true); return; }
         setState({ status: 'error', message: error instanceof Error ? error.message : 'Не удалось загрузить приходы 1С' });
+      }
+    })();
+    return () => { alive = false; };
+  }, [active, filter, legacy, revision]);
+
+  // Прокрутка дошла до конца списка — подгружается и дописывается следующая страница (замечание 2026-10-04).
+  useEffect(() => {
+    if (!active || legacy || state.status !== 'ready' || state.pages >= wantedPages || state.more) return undefined;
+    let alive = true;
+    const nextPage = state.pages + 1;
+    setState((current) => (current.status === 'ready' ? { ...current, more: true } : current));
+    onecDocumentsApi.list(receiptListParams(filter, nextPage))
+      .then((response) => {
+        if (!alive) return;
+        setState((current) => (current.status === 'ready'
+          ? { status: 'ready', data: mergeReceiptPages(current.data, response.data), total: response.pagination.total, pages: nextPage, more: false }
+          : current));
+      })
+      .catch(() => {
+        // Подгрузка не удалась: список остаётся как есть, следующая прокрутка до конца попробует снова.
+        if (alive) { setWantedPages(nextPage - 1); setState((current) => (current.status === 'ready' ? { ...current, more: false } : current)); }
       });
     return () => { alive = false; };
-  }, [active, filter, legacy, page, revision]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, legacy, wantedPages, state.status === 'ready' ? state.pages : 0]);
+  const onListScroll = (event: UIEvent<HTMLDivElement>) => {
+    const body = event.target as HTMLElement;
+    if (!body.classList?.contains('ant-table-body') || state.status !== 'ready') return;
+    if (shouldLoadNextReceipts({ scrollTop: body.scrollTop, clientHeight: body.clientHeight, scrollHeight: body.scrollHeight,
+      loaded: state.data.length, total: state.total, busy: state.more || state.pages < wantedPages })) {
+      setWantedPages(state.pages + 1);
+    }
+  };
 
   const documents = state.status === 'ready' ? state.data : EMPTY_DOCUMENTS;
   // Выбранный приход не зависит от фильтра списка: после распределения он уходит из «не распределённых», но остаётся открытым.
@@ -101,7 +151,7 @@ export function ReceiptSection({ active }: ReceiptSectionProps) {
     if (value === null) params.delete(key); else params.set(key, value);
     return params;
   }, { replace: true });
-  const changeFilter = (next: ReceiptListFilter) => { setPage(1); setParam(FILTER_PARAM, next === 'open' ? null : next); };
+  const changeFilter = (next: ReceiptListFilter) => { setWantedPages(1); setParam(FILTER_PARAM, next === 'open' ? null : next); };
 
   // Карточка выбранного прихода: заголовок и распределения по заказам.
   const [card, setCard] = useState<{ documentId: number; data: OnecDocumentCardDto } | null>(null);
@@ -118,6 +168,26 @@ export function ReceiptSection({ active }: ReceiptSectionProps) {
     return () => { alive = false; };
   }, [active, revision, selectedId]);
   const selectedCard = card && card.documentId === selectedId ? card.data : null;
+
+  // Экран не должен прыгать при выборе прихода и после «Распределить выбранное»: пока новые данные грузятся (панель
+  // подбора показывает индикатор, блок «Распределено по заказам» ещё пуст), область под списком удерживает прежнюю
+  // высоту; удержание снимается, когда и карточка, и панель загрузились.
+  const detailsRef = useRef<HTMLDivElement | null>(null);
+  const [heldHeight, setHeldHeight] = useState<number | null>(null);
+  const [panelSettled, setPanelSettled] = useState(false);
+  const holdHeight = useCallback(() => {
+    setHeldHeight(detailsRef.current?.offsetHeight ?? null);
+    setPanelSettled(false);
+  }, []);
+  const onPanelSettled = useCallback(() => setPanelSettled(true), []);
+  useEffect(() => {
+    if (heldHeight !== null && panelSettled && (selectedCard !== null || cardError !== null)) setHeldHeight(null);
+  }, [cardError, heldHeight, panelSettled, selectedCard]);
+  const selectReceipt = (documentId: number) => {
+    if (documentId === selectedId) return;
+    holdHeight();
+    setParam(RECEIPT_PARAM, String(documentId));
+  };
   const hasAllocations = selectedCard?.lines.some((line) => line.allocations.length > 0 || line.hiddenAllocationsCount > 0) ?? false;
 
   // Потребность заказов этого прихода — из рабочего списка с фильтром «Документ 1С».
@@ -171,6 +241,7 @@ export function ReceiptSection({ active }: ReceiptSectionProps) {
         </div>
         {listOpen && state.status === 'error' && <div className="rr-pad"><Alert type="error" showIcon message={state.message} /></div>}
         {listOpen && state.status !== 'error' && (
+          <div onScrollCapture={onListScroll}>
           <Table<OnecDocumentListItemDto>
             className="rr-table rr-receipts-table"
             size="small"
@@ -178,12 +249,9 @@ export function ReceiptSection({ active }: ReceiptSectionProps) {
             loading={state.status === 'loading'}
             dataSource={documents}
             scroll={{ y: LIST_SCROLL_Y }}
-            pagination={legacy ? false : {
-              current: page, onChange: setPage, pageSize: RECEIPT_PAGE_SIZE, total: state.status === 'ready' ? state.total : 0,
-              showSizeChanger: false, hideOnSinglePage: true, size: 'small', style: { padding: '0 16px' },
-            }}
-            rowClassName={(document) => (document.documentId === selectedId ? 'ant-table-row-selected rr-receipt-row' : 'rr-receipt-row')}
-            onRow={(document) => ({ onClick: () => setParam(RECEIPT_PARAM, String(document.documentId)) })}
+            pagination={false}
+            rowClassName={(document) => (document.documentId === selectedId ? 'rr-receipt-row rr-receipt-row--picked' : 'rr-receipt-row')}
+            onRow={(document) => ({ onClick: () => selectReceipt(document.documentId), 'aria-selected': document.documentId === selectedId })}
             locale={{ emptyText: filter === 'open' ? 'Не распределённых приходов нет' : 'Нет проведённых приходов' }}
             columns={[
               { title: 'Дата', key: 'date', width: 100, render: (_value, document) => <span className="rr-num">{formatDate(document.date)}</span> },
@@ -216,6 +284,12 @@ export function ReceiptSection({ active }: ReceiptSectionProps) {
               },
             ]}
           />
+          </div>
+        )}
+        {listOpen && state.status === 'ready' && !legacy && state.total > 0 && (
+          <div className="rr-receipts-foot">
+            показано {state.data.length} из {state.total}{state.more ? ' · загружается…' : state.data.length < state.total ? ' · прокрутите до конца, чтобы показать ещё' : ''}
+          </div>
         )}
       </div>
 
@@ -224,6 +298,7 @@ export function ReceiptSection({ active }: ReceiptSectionProps) {
         <div className="rr-pad"><div className="rr-hint-box">Проведённых приходов 1С пока нет — они появятся после загрузки документов из 1С.</div></div>
       )}
 
+      <div ref={detailsRef} style={heldHeight === null ? undefined : { minHeight: heldHeight }}>
       {selectedId != null && groups.length > 0 && (
         <AllocatedOrders groups={groups} worklistSearch={worklistForReceiptParams(searchParams, selectedId).toString()} />
       )}
@@ -232,9 +307,11 @@ export function ReceiptSection({ active }: ReceiptSectionProps) {
         <AllocationSuggestionPanel
           key={`${selectedId}:${revision}`}
           documentId={selectedId}
-          onDone={() => setRevision((value) => value + 1)}
+          onDone={() => { holdHeight(); setRevision((value) => value + 1); }}
+          onSettled={onPanelSettled}
         />
       )}
+      </div>
     </div>
   );
 }

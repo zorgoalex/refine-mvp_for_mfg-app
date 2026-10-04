@@ -24,7 +24,8 @@
   border: 1px solid var(--rr-border);
   border-radius: 10px;
   box-shadow: var(--rr-shadow);
-  overflow: hidden;
+  /* clip, а не hidden: hidden сделал бы рамку областью прокрутки и «липкая» полоса фильтров не держалась бы у верха окна. */
+  overflow: clip;
 }
 .rr-screen .rr-subnav {
   display: flex;
@@ -244,3 +245,24 @@
 .rr-screen .rr-allocated-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--rr-grp-bg); }
 .rr-screen .rr-allocated-line { border-top: 1px solid var(--rr-border); }
 .rr-screen .rr-allocated-title { display: flex; gap: 10px; align-items: baseline; padding: 8px 12px; }
+
+/* Замечания 2026-10-04 (вторая серия). Полоса быстрых фильтров и чипов групп рабочего списка — липкая. */
+.rr-screen .rr-stickybar {
+  position: sticky;
+  top: var(--rr-sticky-top, 0px);
+  z-index: 5;
+  background: var(--rr-surface);
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--rr-border);
+}
+.rr-screen .rr-stickybar + div .rr-table { margin-top: 0; }
+/* Выбранный приход — заметный фон и полоса слева. */
+.rr-screen .ant-table-wrapper.rr-receipts-table .ant-table-tbody > tr.rr-receipt-row--picked > td,
+.rr-screen .ant-table-wrapper.rr-receipts-table .ant-table-tbody > tr.rr-receipt-row--picked:hover > td {
+  background: var(--rr-row-picked);
+  font-weight: 600;
+}
+.rr-screen .ant-table-wrapper.rr-receipts-table .ant-table-tbody > tr.rr-receipt-row--picked > td:first-child {
+  box-shadow: inset 4px 0 0 var(--rr-accent);
+}
+.rr-screen .rr-receipts-foot { padding: 6px 12px; font-size: 12px; color: var(--rr-muted); border-top: 1px solid var(--rr-border); }

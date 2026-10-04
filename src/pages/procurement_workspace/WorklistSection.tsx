@@ -37,8 +37,11 @@ import {
   clampPage,
   isGroupSelected,
   isLegendCoverageActive,
+  loadCollapsedGroups,
   parseWorklistSearch,
+  pinnedTopOffset,
   planBulkMarks,
+  saveCollapsedGroups,
   stateFromViewQuery,
   stateToViewQuery,
   toApiParams,
@@ -224,14 +227,42 @@ export function WorklistSection({ active, onUrgentCount, onCapabilities }: Workl
   // Список мог сократиться (например, после отметки) — страница та же, что показывает таблица (CR3-2).
   const page = clampPage(requestedPage, lines.length, PAGE_SIZE);
   // Свёрнутые группы (по умолчанию все развёрнуты); при смене группировки сбрасываются.
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
-  useEffect(() => { setCollapsed(new Set()); }, [state.groupBy]);
+  // Последнее состояние запоминается для пользователя по каждой группировке (замечание 2026-10-04).
+  const [collapsed, setCollapsedState] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    setCollapsedState(identityId === null || state.groupBy === 'none' ? new Set() : loadCollapsedGroups(identityId, state.groupBy));
+  }, [identityId, state.groupBy]);
+  const groupByRef = useRef(state.groupBy);
+  groupByRef.current = state.groupBy;
+  const setCollapsed = useCallback((update: ReadonlySet<string> | ((current: ReadonlySet<string>) => ReadonlySet<string>)) => {
+    setCollapsedState((current) => {
+      const next = typeof update === 'function' ? update(current) : update;
+      if (next !== current && identityId !== null && groupByRef.current !== 'none') saveCollapsedGroups(identityId, groupByRef.current, next);
+      return next;
+    });
+  }, [identityId]);
   const groups = useMemo(() => (state.groupBy === 'none' || !response ? [] : response.groups), [response, state.groupBy]);
   const groupKeys = useMemo(() => groups.map((group) => group.key), [groups]);
   const allCollapsed = areAllGroupsCollapsed(groupKeys, collapsed);
   const displayKeys = useMemo(() => (state.groupBy === 'none' || !response
     ? lines.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((line) => line.lineKey)
     : response.groups.flatMap((group) => (collapsed.has(group.key) ? [] : group.lineKeys))), [collapsed, lines, page, response, state.groupBy]);
+  // Липкая полоса встаёт под закреплённые сверху шапку и вкладки приложения: их высота зависит от оформления.
+  const stickyBarRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!active) return undefined;
+    const apply = () => {
+      const bar = stickyBarRef.current;
+      if (!bar) return;
+      const pinned = [...document.querySelectorAll<HTMLElement>('.ant-layout-header, .ant-tabs-top')]
+        .filter((node) => !node.contains(bar) && !bar.contains(node))
+        .map((node) => { const style = getComputedStyle(node); return { position: style.position, top: parseFloat(style.top), height: node.getBoundingClientRect().height }; });
+      bar.style.setProperty('--rr-sticky-top', `${pinnedTopOffset(pinned)}px`);
+    };
+    apply();
+    window.addEventListener('resize', apply);
+    return () => window.removeEventListener('resize', apply);
+  }, [active, response === null]);
   // Чип группы: развернуть её и прокрутить список к её строке-заголовку.
   const tableHostRef = useRef<HTMLDivElement | null>(null);
   const jumpToGroup = useCallback((key: string) => {
@@ -445,6 +476,8 @@ export function WorklistSection({ active, onUrgentCount, onCapabilities }: Workl
         )}
       </div>
 
+      {/* Фильтры-пресеты и чипы групп остаются на виду при прокрутке списка. */}
+      <div className="rr-stickybar" ref={stickyBarRef}>
       {/* Легенда цветов — она же быстрые фильтры; рядом чипы значений «Обеспечено». */}
       <div className="rr-legend" role="group" aria-label="Быстрые фильтры">
         {LEGEND_ITEMS.map((item) => (
@@ -497,6 +530,7 @@ export function WorklistSection({ active, onUrgentCount, onCapabilities }: Workl
           </div>
         </div>
       )}
+      </div>
 
       <div ref={tableHostRef}>
       <Table<WorklistRow>

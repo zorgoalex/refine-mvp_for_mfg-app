@@ -52,6 +52,8 @@ export function rrThemeVars(token: RrThemeTokens): Record<string, string> {
     '--rr-row-hover': light ? '#f5f9ff' : 'rgba(255, 255, 255, .04)',
     // Строка-заголовок группы — лёгкий голубой, чтобы выделялась среди позиций.
     '--rr-grp-bg': light ? '#e6f4ff' : 'rgba(64, 150, 255, .18)',
+    // Выбранный приход в списке — контрастнее обычного выделения строки.
+    '--rr-row-picked': light ? '#bae0ff' : 'rgba(64, 150, 255, .34)',
     '--rr-row-selected': light ? '#eef5ff' : 'rgba(64, 150, 255, .12)',
     // Тёмная панель действий как в мокапе; в тёмной теме — «прожекторный» фон темы.
     '--rr-sticky-bg': light ? '#1d2330' : token.colorBgSpotlight,
