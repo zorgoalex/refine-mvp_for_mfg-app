@@ -29,6 +29,14 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-04", title: "Приход 1С: только поставщики из справочника",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "В списке приходов по умолчанию показаны приходы только тех поставщиков, которые есть в справочнике «Поставщики» и связаны там с контрагентом 1С. Флажок «Все контрагенты 1С» показывает остальные.",
+      "Связали поставщика с контрагентом 1С — его прежние приходы появляются в списке сразу.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-04", title: "Платежи: вкладка «Поступления 1С»",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

@@ -155,8 +155,8 @@ describe('OnecDocumentsController.list — query parsing', () => {
   it('passes the allocation filter and withLines for receipts and rejects the filter for payments', async () => {
     const list = vi.fn().mockResolvedValue({ data: [] });
     const controller = makeController({ list }, flags());
-    await controller.list(request(currentUser()), { allocation: 'open', withLines: 'true' });
-    expect(list).toHaveBeenCalledWith(currentUser(), expect.objectContaining({ tab: 'receipts', allocation: 'open', withLines: true }), true);
+    await controller.list(request(currentUser()), { allocation: 'open', withLines: 'true', knownSupplierOnly: 'true' });
+    expect(list).toHaveBeenCalledWith(currentUser(), expect.objectContaining({ tab: 'receipts', allocation: 'open', withLines: true, knownSupplierOnly: true }), true);
     await expect(controller.list(request(currentUser()), { tab: 'payments', allocation: 'full' }))
       .rejects.toMatchObject({ statusCode: 422, code: 'ONEC_DOCUMENTS_QUERY_INVALID' });
     await expect(controller.list(request(currentUser()), { allocation: 'none' }))

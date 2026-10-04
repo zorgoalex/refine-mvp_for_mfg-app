@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import type { OnecDocumentCardDto } from '../../api/types/onecDocumentsApi.types';
 import {
   buildAllocatedGroups,
+  emptyReceiptsText,
   lineSummaryText,
   matchesReceiptFilter,
   mergeReceiptPages,
+  nextReceiptCompat,
   parseReceiptFilter,
   receiptListParams,
   shouldLoadNextReceipts,
@@ -35,8 +37,10 @@ describe('список приходов (замечание 13)', () => {
   });
 
   it('параметры запроса: фильтр и состав строк; для старого backend — прежний запрос', () => {
-    expect(receiptListParams('open', 2)).toEqual({ tab: 'receipts', postedOnly: true, page: 2, pageSize: 30, withLines: true, allocation: 'open' });
-    expect(receiptListParams('all', 1)).toEqual({ tab: 'receipts', postedOnly: true, page: 1, pageSize: 30, withLines: true });
+    // По умолчанию — только поставщики из справочника; «Все контрагенты 1С» снимает этот отбор.
+    expect(receiptListParams('open', 2)).toEqual({ knownSupplierOnly: true, tab: 'receipts', postedOnly: true, page: 2, pageSize: 30, withLines: true, allocation: 'open' });
+    expect(receiptListParams('all', 1)).toEqual({ knownSupplierOnly: true, tab: 'receipts', postedOnly: true, page: 1, pageSize: 30, withLines: true });
+    expect(receiptListParams('all', 1, false, true)).toEqual({ tab: 'receipts', postedOnly: true, page: 1, pageSize: 30, withLines: true });
     expect(receiptListParams('full', 3, true)).toEqual({ tab: 'receipts', postedOnly: true, page: 1, pageSize: 50 });
   });
 
@@ -92,5 +96,23 @@ describe('список приходов: подгрузка следующей �
     const doc = (documentId: number) => ({ documentId });
     expect(mergeReceiptPages([doc(1), doc(2)], [doc(2), doc(3)])).toEqual([doc(1), doc(2), doc(3)]);
     expect(mergeReceiptPages([], [doc(5)])).toEqual([doc(5)]);
+  });
+});
+
+describe('отбор поставщиков из справочника: совместимость и подсказки (code review)', () => {
+  it('backend предыдущей версии отклонил запрос — убирается только отбор поставщиков, страницы и фильтры остаются', () => {
+    expect(nextReceiptCompat('full', false)).toBe('noSupplierFilter');
+    // Запрос без отбора — обычный запрос предыдущей версии: подгрузка страниц дальше 50 приходов работает.
+    expect(receiptListParams('open', 3, false, true)).toEqual({ tab: 'receipts', postedOnly: true, page: 3, pageSize: 30, withLines: true, allocation: 'open' });
+    // Полный legacy — только когда отклонён и запрос без отбора.
+    expect(nextReceiptCompat('noSupplierFilter', false)).toBe('legacy');
+    expect(nextReceiptCompat('full', true)).toBe('legacy');
+  });
+
+  it('пустой список объясняется выбранными фильтрами', () => {
+    expect(emptyReceiptsText('open', false)).toMatch(/Не распределённых приходов от поставщиков из справочника нет — посмотрите «Распределённые» или «Все»/);
+    expect(emptyReceiptsText('open', false)).toContain('Все контрагенты 1С');
+    expect(emptyReceiptsText('full', true)).toBe('Полностью распределённых приходов нет — посмотрите «Не распределённые» или «Все».');
+    expect(emptyReceiptsText('all', true)).toBe('Проведённых приходов нет.');
   });
 });

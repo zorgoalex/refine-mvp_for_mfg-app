@@ -1,5 +1,5 @@
 import { DownOutlined, RightOutlined } from '@ant-design/icons';
-import { Alert, Button } from 'antd';
+import { Alert, Button, Checkbox } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 
@@ -9,7 +9,7 @@ import { procurementWorkspaceApi } from '../../api/procurementWorkspaceApi';
 import type { OnecDocumentCardDto, OnecDocumentListItemDto } from '../../api/types/onecDocumentsApi.types';
 import type { ProcurementWorklistLine } from '../../api/types/procurementWorkspaceApi.types';
 import { Segmented } from '../../ui/Segmented';
-import { Table } from '../../ui/tooltipDelay';
+import { Table, Tooltip } from '../../ui/tooltipDelay';
 import { formatDate } from '../../utils/dateFormat';
 import { OrderNumber } from '../order_resource_requirements/OrderNumber';
 import { AllocationSuggestionPanel } from '../onec_purchase_documents/AllocationSuggestionPanel';
@@ -20,8 +20,10 @@ import {
   buildAllocatedGroups,
   formatReceiptQuantity,
   lineSummaryText,
+  emptyReceiptsText,
   matchesReceiptFilter,
   mergeReceiptPages,
+  nextReceiptCompat,
   parseReceiptFilter,
   receiptListParams,
   receiptSupplier,
@@ -29,6 +31,7 @@ import {
   worklistForReceiptParams,
   type AllocatedLineGroup,
   type AllocatedOrderRow,
+  type ReceiptApiCompat,
   type ReceiptListFilter,
 } from './receiptHelpers';
 import { formatQuantity } from './worklistHelpers';
@@ -46,6 +49,8 @@ type ListState =
 
 const RECEIPT_PARAM = 'receipt';
 const FILTER_PARAM = 'receipts';
+/** `1` — показывать приходы всех контрагентов 1С, а не только поставщиков из справочника. */
+const ALL_SUPPLIERS_PARAM = 'receiptsAll';
 const STATE_TONES: Record<OnecDocumentListItemDto['allocationState'], string> = { none: 'bad', partial: 'warn', full: 'ok' };
 /** Высота списка — примерно пять приходов, дальше прокрутка внутри контейнера. */
 const LIST_SCROLL_Y = 250;
@@ -58,12 +63,18 @@ const LIST_SCROLL_Y = 250;
 export function ReceiptSection({ active }: ReceiptSectionProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const filter = parseReceiptFilter(searchParams.get(FILTER_PARAM));
+  const allSuppliers = searchParams.get(ALL_SUPPLIERS_PARAM) === '1';
   /** До какой страницы список должен быть загружен: растёт при прокрутке до конца (следующая страница дописывается). */
   const [wantedPages, setWantedPages] = useState(1);
   const [listOpen, setListOpen] = useState(true);
   const [state, setState] = useState<ListState>({ status: 'loading' });
   /** Старый backend не знает `allocation`/`withLines` — тогда прежний запрос и фильтр на клиенте. */
-  const [legacy, setLegacy] = useState(false);
+  // Совместимость с backend предыдущих версий, по шагам: «без отбора поставщиков» (остальное работает — страницы,
+  // фильтр распределения, состав строк), и только если отклонён и такой запрос — прежний запрос без параметров.
+  const [compat, setCompat] = useState<ReceiptApiCompat>('full');
+  const legacy = compat === 'legacy';
+  const supplierFilterSupported = compat === 'full';
+  const effectiveAllSuppliers = allSuppliers || !supplierFilterSupported;
   const [revision, setRevision] = useState(0);
 
   // Полная перезагрузка (фильтр, после распределения): страницы 1..wanted читаются заново и заменяют список разом —
@@ -86,7 +97,7 @@ export function ReceiptSection({ active }: ReceiptSectionProps) {
         let data: OnecDocumentListItemDto[] = [];
         let total = 0;
         for (let page = 1; page <= target; page += 1) {
-          const response = await onecDocumentsApi.list(receiptListParams(filter, page));
+          const response = await onecDocumentsApi.list(receiptListParams(filter, page, false, effectiveAllSuppliers));
           if (!alive) return;
           data = mergeReceiptPages(data, response.data);
           total = response.pagination.total;
@@ -95,12 +106,12 @@ export function ReceiptSection({ active }: ReceiptSectionProps) {
         if (alive) setState({ status: 'ready', data, total, pages: target, more: false });
       } catch (error) {
         if (!alive) return;
-        if (!legacy && isApiError(error, 'ONEC_DOCUMENTS_QUERY_INVALID')) { setLegacy(true); return; }
+        if (!legacy && isApiError(error, 'ONEC_DOCUMENTS_QUERY_INVALID')) { setCompat((current) => nextReceiptCompat(current, allSuppliers)); return; }
         setState({ status: 'error', message: error instanceof Error ? error.message : 'Не удалось загрузить приходы 1С' });
       }
     })();
     return () => { alive = false; };
-  }, [active, filter, legacy, revision]);
+  }, [active, compat, effectiveAllSuppliers, filter, revision]);
 
   // Прокрутка дошла до конца списка — подгружается и дописывается следующая страница (замечание 2026-10-04).
   useEffect(() => {
@@ -108,7 +119,7 @@ export function ReceiptSection({ active }: ReceiptSectionProps) {
     let alive = true;
     const nextPage = state.pages + 1;
     setState((current) => (current.status === 'ready' ? { ...current, more: true } : current));
-    onecDocumentsApi.list(receiptListParams(filter, nextPage))
+    onecDocumentsApi.list(receiptListParams(filter, nextPage, false, effectiveAllSuppliers))
       .then((response) => {
         if (!alive) return;
         setState((current) => (current.status === 'ready'
@@ -232,6 +243,16 @@ export function ReceiptSection({ active }: ReceiptSectionProps) {
             Приходы 1С{state.status === 'ready' ? ` · ${state.total}` : ''}
           </Button>
           <span style={{ flex: 1 }} />
+          {supplierFilterSupported && (
+            <Tooltip title="По умолчанию показаны приходы только тех поставщиков, которые есть в справочнике «Поставщики» и связаны там с контрагентом 1С">
+              <Checkbox
+                checked={allSuppliers}
+                onChange={(event) => { setWantedPages(1); setParam(ALL_SUPPLIERS_PARAM, event.target.checked ? '1' : null); }}
+              >
+                Все контрагенты 1С
+              </Checkbox>
+            </Tooltip>
+          )}
           <Segmented
             aria-label="Какие приходы показать"
             value={filter}
@@ -252,7 +273,7 @@ export function ReceiptSection({ active }: ReceiptSectionProps) {
             pagination={false}
             rowClassName={(document) => (document.documentId === selectedId ? 'rr-receipt-row rr-receipt-row--picked' : 'rr-receipt-row')}
             onRow={(document) => ({ onClick: () => selectReceipt(document.documentId), 'aria-selected': document.documentId === selectedId })}
-            locale={{ emptyText: filter === 'open' ? 'Не распределённых приходов нет' : 'Нет проведённых приходов' }}
+            locale={{ emptyText: emptyReceiptsText(filter, effectiveAllSuppliers) }}
             columns={[
               { title: 'Дата', key: 'date', width: 100, render: (_value, document) => <span className="rr-num">{formatDate(document.date)}</span> },
               { title: '№', key: 'number', width: 110, render: (_value, document) => <b>{document.number}</b> },
@@ -294,11 +315,8 @@ export function ReceiptSection({ active }: ReceiptSectionProps) {
       </div>
 
       {cardError && <div className="rr-pad"><Alert type="error" showIcon message={cardError} /></div>}
-      {state.status === 'ready' && selectedId == null && (
-        <div className="rr-pad"><div className="rr-hint-box">Проведённых приходов 1С пока нет — они появятся после загрузки документов из 1С.</div></div>
-      )}
 
-      <div ref={detailsRef} style={heldHeight === null ? undefined : { minHeight: heldHeight }}>
+      <div ref={detailsRef} className="rr-receipt-details" style={heldHeight === null ? undefined : { minHeight: `max(100vh, ${heldHeight}px)` }}>
       {selectedId != null && groups.length > 0 && (
         <AllocatedOrders groups={groups} worklistSearch={worklistForReceiptParams(searchParams, selectedId).toString()} />
       )}

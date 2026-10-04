@@ -28,9 +28,11 @@ export function matchesReceiptFilter(state: OnecAllocationState, filter: Receipt
 }
 
 /** Параметры списка приходов; `legacy` — старый backend без `allocation`/`withLines` (фильтр тогда на клиенте). */
-export function receiptListParams(filter: ReceiptListFilter, page: number, legacy = false): OnecDocumentListParams {
+export function receiptListParams(filter: ReceiptListFilter, page: number, legacy = false, allSuppliers = false): OnecDocumentListParams {
   if (legacy) return { tab: 'receipts', postedOnly: true, page: 1, pageSize: 50 };
   return {
+    // По умолчанию — только приходы поставщиков из справочника «Поставщики» (замечание 2026-10-04).
+    ...(allSuppliers ? {} : { knownSupplierOnly: true }),
     tab: 'receipts',
     postedOnly: true,
     page,
@@ -151,4 +153,29 @@ export function mergeReceiptPages<T extends { documentId: number }>(current: rea
 export function shouldLoadNextReceipts(input: { scrollTop: number; clientHeight: number; scrollHeight: number; loaded: number; total: number; busy: boolean }): boolean {
   if (input.busy || input.loaded >= input.total) return false;
   return input.scrollTop + input.clientHeight >= input.scrollHeight - 24;
+}
+
+/**
+ * Какие параметры списка понимает backend: `full` — все; `noSupplierFilter` — предыдущая версия (страницы, фильтр
+ * распределения и состав строк есть, отбора поставщиков нет); `legacy` — ещё более старая (прежний запрос).
+ */
+export type ReceiptApiCompat = 'full' | 'noSupplierFilter' | 'legacy';
+
+/**
+ * Следующий шаг после отказа 422: сначала убирается только отбор поставщиков — остальные возможности сохраняются
+ * (иначе при раздельной выкладке список обрезался бы первыми 50 приходами); полный legacy — только если отклонён и
+ * запрос без отбора (в том числе когда отбор и так был снят флажком «Все контрагенты 1С»).
+ */
+export function nextReceiptCompat(current: ReceiptApiCompat, allSuppliers: boolean): ReceiptApiCompat {
+  if (current === 'full' && !allSuppliers) return 'noSupplierFilter';
+  return 'legacy';
+}
+
+/** Что написать в пустом списке: причина — выбранные фильтры, а не обязательно несвязанный поставщик. */
+export function emptyReceiptsText(filter: ReceiptListFilter, allSuppliers: boolean): string {
+  const scope = allSuppliers ? '' : ' от поставщиков из справочника';
+  const hint = allSuppliers ? '' : ' Приходы других контрагентов — флажок «Все контрагенты 1С» (или свяжите поставщика с контрагентом 1С в справочнике «Поставщики»).';
+  if (filter === 'open') return `Не распределённых приходов${scope} нет — посмотрите «Распределённые» или «Все».${hint}`;
+  if (filter === 'full') return `Полностью распределённых приходов${scope} нет — посмотрите «Не распределённые» или «Все».${hint}`;
+  return `Проведённых приходов${scope} нет.${hint}`;
 }

@@ -331,6 +331,28 @@ describe.skipIf(!url)('1C documents allocations — real PostgreSQL, committed f
     expect(all.data.find((row) => row.documentId === receiptId)).not.toHaveProperty('lineSummary');
   });
 
+  it('knownSupplierOnly: only documents whose counterparty is linked to an ERP supplier right now (live, not the load-time snapshot)', async () => {
+    const refKey = (await connA.query<{ key: string }>('SELECT gen_random_uuid()::text AS key')).rows[0].key;
+    await connA.query('UPDATE onec_documents SET counterparty_ref_key = $2::uuid, supplier_id = NULL WHERE onec_document_id = $1', [receiptId, refKey]);
+    const known = () => docsA.list(admin, { tab: 'receipts', page: 1, pageSize: 100, knownSupplierOnly: true, search: tag.slice(-8) }, options);
+    // Поставщика с таким контрагентом в справочнике нет — документ скрыт; без фильтра он есть.
+    expect((await known()).data.some((row) => row.documentId === receiptId)).toBe(false);
+    expect((await docsA.list(admin, { tab: 'receipts', page: 1, pageSize: 100, search: tag.slice(-8) }, options)).data.some((row) => row.documentId === receiptId)).toBe(true);
+    // Поставщика связали с контрагентом позже — уже загруженный документ сразу виден (supplier_id документа по-прежнему NULL).
+    const supplierId = Number((await connA.query(
+      'INSERT INTO suppliers (supplier_name, ref_key_1c) VALUES ($1, $2::uuid) RETURNING supplier_id', [`${tag} поставщик`, refKey])).rows[0].supplier_id);
+    try {
+      const listed = await known();
+      expect(listed.data.some((row) => row.documentId === receiptId)).toBe(true);
+      expect(listed.pagination.total).toBe(listed.data.length);
+      // Связь сняли — документ снова скрыт.
+      await connA.query('UPDATE suppliers SET ref_key_1c = NULL WHERE supplier_id = $1', [supplierId]);
+      expect((await known()).data.some((row) => row.documentId === receiptId)).toBe(false);
+    } finally {
+      await connA.query('DELETE FROM suppliers WHERE supplier_id = $1', [supplierId]);
+    }
+  });
+
   it('filters the demand list and by-material summary to orders linked to one document', async () => {
     const linked = (await connA.query<{ order_id: string }>(
       `SELECT DISTINCT p.order_id::text FROM order_resource_onec_allocations a

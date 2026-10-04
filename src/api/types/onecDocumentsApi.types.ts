@@ -21,6 +21,8 @@ export interface OnecDocumentListParams {
   allocation?: 'open' | 'full';
   /** Добавить краткий состав строк (`lineSummary`). */
   withLines?: boolean;
+  /** Только документы поставщиков из справочника ERP (связанных с контрагентом 1С). */
+  knownSupplierOnly?: boolean;
 }
 
 export interface OnecDocumentLineSummaryDto {

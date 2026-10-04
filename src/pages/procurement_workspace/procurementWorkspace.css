@@ -266,3 +266,6 @@
   box-shadow: inset 4px 0 0 var(--rr-accent);
 }
 .rr-screen .rr-receipts-foot { padding: 6px 12px; font-size: 12px; color: var(--rr-muted); border-top: 1px solid var(--rr-border); }
+/* Область под списком приходов всегда не ниже окна: у короткого прихода страница не укорачивается и прокрутка не
+   «отскакивает» вверх при переключении между приходами. */
+.rr-screen .rr-receipt-details { min-height: 100vh; }

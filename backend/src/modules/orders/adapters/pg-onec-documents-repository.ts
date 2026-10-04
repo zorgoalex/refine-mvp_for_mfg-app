@@ -165,6 +165,7 @@ export class PgOnecDocumentsRepository {
           JOIN order_resource_onec_allocations ua ON ua.onec_document_line_id = ul.onec_document_line_id AND ua.removed_at IS NULL
           WHERE ul.onec_document_id = d.onec_document_id)`);
       }
+      if (query.knownSupplierOnly) clauses.push(KNOWN_SUPPLIER_SQL);
       if (query.allocation) clauses.push(query.allocation === 'full' ? RECEIPT_FULL_SQL : `NOT ${RECEIPT_FULL_SQL}`);
       if (query.search) {
         const index = params.push(`%${query.search}%`);
@@ -682,6 +683,12 @@ const RECEIPT_FULL_SQL = `(
       >= (SELECT COALESCE(sum(fl.quantity), 0) FROM onec_document_lines fl
            WHERE fl.onec_document_id = d.onec_document_id AND NOT fl.is_document_total AND fl.removed_in_onec_at IS NULL)
 )`;
+
+/**
+ * Контрагент документа связан с поставщиком справочника ERP — по текущей связи `suppliers.ref_key_1c`, а не по
+ * `onec_documents.supplier_id` (тот — снимок на момент загрузки документа и не меняется, когда поставщика связывают позже).
+ */
+const KNOWN_SUPPLIER_SQL = `EXISTS (SELECT 1 FROM suppliers ks WHERE ks.ref_key_1c IS NOT NULL AND ks.ref_key_1c = d.counterparty_ref_key)`;
 
 /** Сколько строк документа показывать в списке. */
 export const LINE_SUMMARY_LIMIT = 6;

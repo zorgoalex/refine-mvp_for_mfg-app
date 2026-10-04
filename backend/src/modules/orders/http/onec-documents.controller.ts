@@ -75,6 +75,7 @@ const listSchema = z.object({
   postedOnly: flag,
   allocation: z.enum(['open', 'full']).optional(),
   withLines: flag,
+  knownSupplierOnly: flag,
 }).strict();
 
 @ApiTags('Orders')

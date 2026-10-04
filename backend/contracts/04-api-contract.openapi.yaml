@@ -5605,6 +5605,7 @@ paths:
         - { name: postedOnly, in: query, required: false, schema: { type: boolean } }
         - { name: allocation, in: query, required: false, description: 'Только tab=receipts (иначе 422): open — не распределён или частично, full — распределён полностью', schema: { type: string, enum: [open, full] } }
         - { name: withLines, in: query, required: false, description: 'Добавить lineSummary (первые строки: name, quantity, unitName) и lineSummaryMore', schema: { type: boolean } }
+        - { name: knownSupplierOnly, in: query, required: false, description: 'Только документы контрагентов, связанных сейчас с поставщиком справочника ERP (suppliers.ref_key_1c)', schema: { type: boolean } }
       responses:
         '200':
           description: 1C documents page
