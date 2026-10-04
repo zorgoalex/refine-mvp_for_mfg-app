@@ -34,11 +34,16 @@ const settingsInput = z.object({
   }).strict()).max(ORDER_SEND_MAX_EMPLOYEES).optional(),
 }).strict();
 
+/** The opaque token the menu hands out with a masked phone (sha256 hex). */
+const phoneTokenSchema = z.string().regex(/^[0-9a-f]{64}$/);
+
 const sendInput = z.object({
   target: z.discriminatedUnion('kind', [
-    z.object({ kind: z.literal('client') }).strict(),
+    // A chosen phone always comes with the token of the number the menu showed.
+    z.object({ kind: z.literal('client'), phoneId: z.number().int().positive().nullable().optional(), phoneToken: phoneTokenSchema.nullable().optional() }).strict(),
     z.object({ kind: z.literal('chat'), chatKey: z.string().uuid() }).strict(),
-    z.object({ kind: z.literal('employee'), recipientKey: z.string().uuid(), contactId: z.number().int().positive().nullable().optional() }).strict(),
+    z.object({ kind: z.literal('employee'), recipientKey: z.string().uuid(), contactId: z.number().int().positive().nullable().optional(),
+      contactToken: phoneTokenSchema.nullable().optional() }).strict(),
   ]),
   form,
   idempotencyKey: z.string().uuid(),
@@ -78,6 +83,14 @@ export function parseOrderSendSettings(value: unknown): OrderSendSettingsInput &
 export function parseOrderSendCommand(value: unknown): { target: OrderSendTarget; form: OrderFormCode; idempotencyKey: string; confirmAfterUnknown?: string | null } {
   const parsed = sendInput.safeParse(value);
   if (!parsed.success) throw validation(parsed.error);
+  const target = parsed.data.target;
+  // A chosen client phone always comes with the token of the number the menu showed, and never without the phone.
+  if (target.kind === 'client' && (target.phoneId == null) !== (target.phoneToken == null)) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный запрос', { issues: [{ path: 'target.phoneToken', message: 'phoneId and phoneToken go together' }] });
+  }
+  if (target.kind === 'employee' && target.contactToken != null && target.contactId == null) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный запрос', { issues: [{ path: 'target.contactToken', message: 'contactToken needs contactId' }] });
+  }
   return parsed.data;
 }
 

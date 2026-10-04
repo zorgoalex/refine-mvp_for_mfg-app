@@ -2579,6 +2579,9 @@ probe_file() {
       "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE contype='f' AND conrelid='public.vendor_contacts'::regclass AND confrelid='public.vendors'::regclass AND confdeltype='r');" \
       "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE contype='f' AND conrelid='public.client_contacts'::regclass AND confrelid='public.clients'::regclass AND confdeltype='r');" \
       "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE contype='c' AND conrelid='public.client_contacts'::regclass AND pg_get_constraintdef(oid) LIKE '%''phone''%');" ;;
+    237_whatsapp_order_send_client_phone*) probe_all \
+      "$(q_col whatsapp_order_sends client_phone_id)" "$(q_tbl whatsapp_order_send_refusals)" \
+      "$(q_idx idx_whatsapp_order_send_refusals_created)" ;;
     235_employee_work_contacts*) probe_all \
       "$(q_col employees work_contacts_version)" "$(q_tbl employee_work_contacts)" "$(q_tbl whatsapp_order_send_employees)" \
       "$(q_idx uq_employee_work_contacts_primary)" "$(q_idx uq_employee_work_contacts_value)" \
@@ -2714,7 +2717,7 @@ verify_applied_effect() {
     193_onec_agent_foundation*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    231_cut_result_render_v2*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*|236_party_contacts*)
+    231_cut_result_render_v2*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     173_inbound_signals*)

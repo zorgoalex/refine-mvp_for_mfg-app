@@ -160,7 +160,9 @@ export class OrderSendWorker implements OnModuleInit, OnModuleDestroy {
         return this.repository.verifyEmployeeRecipient(tx, current);
       }
       if (!knownForms(settings.client_forms).includes(current.form_code)) return 'form_not_allowed';
-      const client = await this.repository.currentClientPhone(tx, Number(current.order_id));
+      // A phone chosen in the command must still be that phone of the order's client; otherwise the default rule.
+      const client = await this.repository.currentClientPhone(tx, Number(current.order_id),
+        current.client_phone_id == null ? null : Number(current.client_phone_id));
       const sameClient = client && String(client.clientId ?? '') === String(current.client_id ?? '');
       let samePhone = false;
       try { samePhone = Boolean(client?.phone) && normalizeClientPhone(client?.phone) === current.phone_normalized; } catch { samePhone = false; }

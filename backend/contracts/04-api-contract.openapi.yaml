@@ -1245,6 +1245,30 @@ paths:
         '404': {description: 'ORDER_SEND_NOT_FOUND'}
         '409': {description: 'ORDER_SEND_NOT_CANCELLABLE'}
         '422': {description: Invalid request}
+  /api/v1/orders/{orderId}/whatsapp-sends/client-contacts:
+    get:
+      tags: [WhatsApp]
+      operationId: listOrderSendClientContacts
+      summary: 'Phones of the order client a form can be sent to'
+      description: 'Only numbers a send can go to (readable, without repeats), masked, the primary first. The same access as the sends of the order.'
+      security: [{bearerAuth: []}]
+      x-permissions: [orders.view, orders.export]
+      parameters:
+        - {name: orderId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200':
+          description: Contacts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [clientId, contacts]
+                properties:
+                  clientId: {type: integer, nullable: true}
+                  contacts: {type: array, items: {type: object, required: [phoneId, masked, isPrimary, isDefault, token], properties: {phoneId: {type: integer}, masked: {type: string}, isPrimary: {type: boolean}, isDefault: {type: boolean, description: 'The phone a send without a choice goes to'}, token: {type: string, description: 'Opaque; sent back as phoneToken'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'ORDER_NOT_FOUND'}
   /api/v1/orders/{orderId}/whatsapp-sends:
     get:
       tags: [WhatsApp]
@@ -29533,7 +29557,7 @@ components:
         forms: {type: array, items: {type: object, properties: {code: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}, title: {type: string}, financial: {type: boolean}}}}
         client: {type: object, properties: {forms: {type: array, items: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}}}}
         chats: {type: array, items: {type: object, properties: {chatKey: {type: string, format: uuid}, label: {type: string}, forms: {type: array, items: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}}}}}
-        employees: {type: array, items: {type: object, properties: {recipientKey: {type: string, format: uuid}, label: {type: string, description: '«логин / ФИО» when users are linked'}, forms: {type: array, items: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}}, contacts: {type: array, items: {type: object, properties: {contactId: {type: integer}, masked: {type: string}, isPrimary: {type: boolean}}}}}}}
+        employees: {type: array, items: {type: object, properties: {recipientKey: {type: string, format: uuid}, label: {type: string, description: '«логин / ФИО» when users are linked'}, forms: {type: array, items: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}}, contacts: {type: array, items: {type: object, properties: {contactId: {type: integer}, masked: {type: string}, isPrimary: {type: boolean}, token: {type: string, description: 'Opaque; sent back as contactToken'}}}}}}}
         nextAllowedAt: {type: string, format: date-time, nullable: true}
         activeSend: {type: boolean}
         runtime: {$ref: '#/components/schemas/WhatsAppBroadcastRuntime'}
@@ -29544,9 +29568,9 @@ components:
       properties:
         target:
           oneOf:
-            - {type: object, additionalProperties: false, required: [kind], properties: {kind: {type: string, enum: [client]}}}
+            - {type: object, additionalProperties: false, required: [kind], properties: {kind: {type: string, enum: [client]}, phoneId: {type: integer, nullable: true, description: 'One of the phones of the order client (GET …/whatsapp-sends/client-contacts); default — the primary one, else the smallest'}, phoneToken: {type: string, pattern: '^[0-9a-f]{64}$', nullable: true, description: 'The token the contacts list gave for this phone; required with phoneId. A phone edited since is refused with 409 ORDER_SEND_PHONE_CHANGED'}}}
             - {type: object, additionalProperties: false, required: [kind, chatKey], properties: {kind: {type: string, enum: [chat]}, chatKey: {type: string, format: uuid}}}
-            - {type: object, additionalProperties: false, required: [kind, recipientKey], properties: {kind: {type: string, enum: [employee]}, recipientKey: {type: string, format: uuid}, contactId: {type: integer, nullable: true, description: 'One of the employee phones; default — the primary one'}}}
+            - {type: object, additionalProperties: false, required: [kind, recipientKey], properties: {kind: {type: string, enum: [employee]}, recipientKey: {type: string, format: uuid}, contactId: {type: integer, nullable: true, description: 'One of the employee phones; default — the primary one'}, contactToken: {type: string, pattern: '^[0-9a-f]{64}$', nullable: true, description: 'The token the menu gave for this contact (optional; with it a contact edited since is refused with 409 ORDER_SEND_PHONE_CHANGED)'}}}
         form: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}
         idempotencyKey: {type: string, format: uuid}
         confirmAfterUnknown: {type: string, format: uuid, nullable: true, description: 'Explicit repeat after the latest send of the same order, recipient and form ended unknown: its sendId from 409 ORDER_SEND_PREVIOUS_UNKNOWN details.'}

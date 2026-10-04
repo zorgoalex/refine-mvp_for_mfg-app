@@ -330,6 +330,15 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText.slice(verifyStart, verifyEnd)).toContain('235_employee_work_contacts*|236_party_contacts*');
   });
 
+  it('probes the chosen client phone column before ledgering migration 237', () => {
+    const arm = probeFn.slice(probeFn.indexOf('237_whatsapp_order_send_client_phone*)'), probeFn.indexOf('236_party_contacts*)'));
+    expect(arm).toContain('whatsapp_order_sends client_phone_id');
+    expect(arm).toContain('q_tbl whatsapp_order_send_refusals');
+    const verifyStart = scriptText.indexOf('verify_applied_effect() {');
+    const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
+    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('236_party_contacts*|237_whatsapp_order_send_client_phone*');
+  });
+
   it('requires the complete WhatsApp technical log schema before advancing migration 170', () => {
     const arm = probeFn.slice(
       probeFn.indexOf('170_whatsapp_technical_logs*)'),
