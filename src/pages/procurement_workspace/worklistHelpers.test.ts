@@ -7,7 +7,6 @@ import {
   areAllGroupsCollapsed,
   isLegendCoverageActive,
   loadCollapsedGroups,
-  pinnedTopOffset,
   saveCollapsedGroups,
   toggleCollapsedGroup,
   toggleCoverageValue,
@@ -224,17 +223,5 @@ describe('свёрнутые группы запоминаются для пол
     const broken = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); }, removeItem: () => { throw new Error('denied'); } };
     expect(loadCollapsedGroups('42', 'supplier', broken).size).toBe(0);
     expect(() => saveCollapsedGroups('42', 'supplier', new Set(['a']), broken)).not.toThrow();
-  });
-});
-
-describe('липкая полоса фильтров встаёт под закреплённые шапку и вкладки', () => {
-  it('берётся нижний край самого нижнего закреплённого у верха элемента; незакреплённые, высокие и ушедшие за экран не считаются', () => {
-    expect(pinnedTopOffset([{ position: 'sticky', top: 0, bottom: 64 }, { position: 'sticky', top: 64, bottom: 107 }])).toBe(107);
-    // Шапка свернулась при прокрутке — остались только вкладки.
-    expect(pinnedTopOffset([{ position: 'sticky', top: -64, bottom: 0 }, { position: 'sticky', top: 0, bottom: 48 }])).toBe(48);
-    expect(pinnedTopOffset([{ position: 'static', top: 0, bottom: 64 }])).toBe(0);
-    expect(pinnedTopOffset([{ position: 'fixed', top: 0, bottom: 950 }, { position: 'sticky', top: 0, bottom: 56 }])).toBe(56);
-    expect(pinnedTopOffset([{ position: 'sticky', top: 400, bottom: 440 }])).toBe(0);
-    expect(pinnedTopOffset([])).toBe(0);
   });
 });

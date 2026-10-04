@@ -330,14 +330,3 @@ export function saveCollapsedGroups(userId: string, groupBy: WorklistGroupBy, co
     if (collapsed.size === 0) storage?.removeItem(name); else storage?.setItem(name, JSON.stringify([...collapsed].slice(0, 500)));
   } catch { /* личное удобство — без хранилища состояние живёт до перезагрузки */ }
 }
-
-/**
- * Где встаёт липкая полоса: под нижним краем самого нижнего из закреплённых сверху элементов приложения (шапка,
- * вкладки) — по их фактическому положению на экране: закреплённый (`sticky`/`fixed`) элемент у верха окна, невысокий
- * (боковое меню не считается) и видимый.
- */
-export function pinnedTopOffset(nodes: ReadonlyArray<{ position: string; top: number; bottom: number }>): number {
-  return Math.max(0, Math.round(nodes
-    .filter((node) => (node.position === 'sticky' || node.position === 'fixed') && node.top <= 120 && node.bottom > 0 && node.bottom - node.top < 200)
-    .reduce((offset, node) => Math.max(offset, node.bottom), 0)));
-}

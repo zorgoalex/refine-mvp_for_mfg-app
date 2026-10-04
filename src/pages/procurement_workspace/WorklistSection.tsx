@@ -39,7 +39,6 @@ import {
   isLegendCoverageActive,
   loadCollapsedGroups,
   parseWorklistSearch,
-  pinnedTopOffset,
   planBulkMarks,
   saveCollapsedGroups,
   stateFromViewQuery,
@@ -257,10 +256,7 @@ export function WorklistSection({ active, onUrgentCount, onCapabilities }: Workl
       frame = 0;
       const bar = stickyBarRef.current;
       if (!bar) return;
-      const pinned = [...document.querySelectorAll<HTMLElement>('.ant-layout-header, .ant-tabs-top')]
-        .filter((node) => !node.contains(bar) && !bar.contains(node))
-        .map((node) => { const rect = node.getBoundingClientRect(); return { position: getComputedStyle(node).position, top: rect.top, bottom: rect.bottom }; });
-      bar.style.setProperty('--rr-sticky-top', `${pinnedTopOffset(pinned)}px`);
+      bar.style.setProperty('--rr-sticky-top', `${measurePinnedTop(bar)}px`);
     };
     const schedule = () => { if (frame === 0) frame = window.requestAnimationFrame(apply); };
     apply();
@@ -589,6 +585,31 @@ const LEGEND_ITEMS: ReadonlyArray<{ key: LegendCoverageKey; label: string; dot: 
   { key: 'ordered', label: 'заказано поставщику', dot: { background: 'var(--rr-ordered)' } },
   { key: 'deficit', label: 'дефицит', dot: { background: 'var(--rr-none-soft)', outline: '1px solid var(--rr-border)' } },
 ];
+
+/**
+ * Высота того, что приложение закрепило у верха окна над экраном снабжения (шапка, вкладки — в любом оформлении и в
+ * свёрнутом при прокрутке виде): от верха окна вниз по вертикали полосы ищутся закреплённые (`sticky`/`fixed`) чужие
+ * элементы, липкая полоса встаёт под нижний из них.
+ */
+function measurePinnedTop(bar: HTMLElement): number {
+  const rect = bar.getBoundingClientRect();
+  const x = Math.min(window.innerWidth - 1, Math.max(0, rect.left + Math.min(rect.width / 2, 200)));
+  let offset = 0;
+  for (let step = 0; step < 6; step += 1) {
+    let pinned: HTMLElement | null = null;
+    for (let node = document.elementFromPoint(x, offset + 1) as HTMLElement | null; node && node !== document.body; node = node.parentElement) {
+      if (node.closest('.rr-screen')) break;
+      const position = getComputedStyle(node).position;
+      if (position === 'sticky' || position === 'fixed') pinned = node;
+    }
+    if (!pinned) break;
+    const bottom = pinned.getBoundingClientRect().bottom;
+    // Боковые панели и окна на всю высоту — не шапка.
+    if (bottom <= offset || bottom > 240) break;
+    offset = bottom;
+  }
+  return Math.round(offset);
+}
 
 type GroupRow = { rowType: 'group'; lineKey: string; group: NonNullable<ProcurementWorklistResponse['groups']>[number] };
 type WorklistRow = ProcurementWorklistLine | GroupRow;
