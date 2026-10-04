@@ -2546,6 +2546,11 @@ probe_file() {
     232_notification_balloons*) probe_all \
       "$(q_col notification_rules balloon_mode)" "$(q_col notifications balloon_mode)" "$(q_col notifications balloon_lease_token)" \
       "$(q_col notifications balloon_leased_at)" "$(q_col notifications balloon_shown_at)" "$(q_idx idx_notifications_balloon_pending)" ;;
+    # 239: personal templates table (ids from the shared sequence), per-user default choice with a revision and a composite FK.
+    239_personal_supplier_text_templates*) probe_all \
+      "$(q_tbl supplier_request_user_text_templates)" "$(q_tbl supplier_request_text_template_defaults)" \
+      "$(q_idx uq_srutt_owner_active_name)" "$(q_idx idx_srutt_owner)" "$(q_col supplier_request_text_template_defaults revision)" \
+      "$(q_con_on supplier_request_text_template_defaults fk_srttd_own_template)" ;;
     229_supplier_text_templates*) probe_all \
       "$(q_tbl supplier_request_text_templates)" "$(q_idx uq_srtt_active_name)" "$(q_idx uq_srtt_one_default)" \
       "SELECT EXISTS (SELECT 1 FROM supplier_request_text_templates WHERE is_default AND deleted_at IS NULL);" ;;
@@ -3002,6 +3007,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     232_notification_balloons*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    239_personal_supplier_text_templates*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     229_supplier_text_templates*)
