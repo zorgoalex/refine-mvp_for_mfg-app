@@ -37,6 +37,7 @@ import { featureFlags } from '../../../config/featureFlags';
 import { OrderCatalogLinesTable } from './OrderCatalogLinesTable';
 import { orderCatalogSubtotal } from '../../../utils/orderCatalogLines';
 import { can } from '../../../utils/permissions';
+import { ClientScreenOrderHeader } from '../../clientScreen/ClientScreenOrderHeader';
 import { authSession } from '../../../api/authSession';
 import { useOrderFinancialVisibility } from '../../../hooks/useOrderFinancialVisibility';
 import { resolveOrderTabLabel } from '../../../utils/tabLabels';
@@ -2198,6 +2199,16 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     );
   }
 
+  // Customer screen (second monitor): present this order, hide, emergency switch-off. Read-only for the form.
+  const clientScreenControl = (
+    <ClientScreenOrderHeader
+      orderKey={orderKey}
+      orderNumber={(headerNameData?.data as { order_full_number?: string | null } | undefined)?.order_full_number ?? null}
+      activeTab={activeTab}
+      operational={isOperational}
+    />
+  );
+
   if (isOperational) {
     return (
       <OrderDraftStoreProvider orderKey={orderKey}>
@@ -2218,6 +2229,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
             actions={(
               <>
                 <Tag color="orange">Режим редактирования</Tag>
+                {clientScreenControl}
                 {mode === 'edit' && orderId ? (
                   <Button icon={<EyeOutlined />} onClick={() => show('orders_view', orderId)}>
                     Просмотр
@@ -2312,6 +2324,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   const hybridCurrentAnchor = workbenchPinnedSection ?? workbenchSpySection ?? (activeTab === 'dates' ? 'basic' : activeTab);
   const formActions = (
         <Space>
+          {clientScreenControl}
           {mode === 'edit' && orderId && (
             <Button
               className="order-form-action order-form-action--view"
