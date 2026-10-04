@@ -48,6 +48,12 @@ export class OrderSendController {
     return this.service.listForOrder(parseOrderId(orderId), user(request));
   }
 
+  @ApiOperation({ summary: 'Phones of the order client a form can be sent to (masked, the primary first)' })
+  @Get('orders/:orderId/whatsapp-sends/client-contacts') @RequirePermissions(ORDER_SEND_PERMISSIONS)
+  clientContacts(@Param('orderId') orderId: string, @Req() request: RequestWithCurrentUser) {
+    return this.service.clientContacts(parseOrderId(orderId), user(request));
+  }
+
   @ApiOperation({ summary: 'Queue an order form for the client or a configured chat (idempotent)' })
   @Post('orders/:orderId/whatsapp-sends') @HttpCode(202) @RequirePermissions(ORDER_SEND_PERMISSIONS)
   send(@Param('orderId') orderId: string, @Req() request: RequestWithCurrentUser, @Body() body: unknown) {

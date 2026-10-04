@@ -53,9 +53,19 @@ export const ORDER_SEND_RETENTION_MS = 7 * 24 * 60 * 60_000;
 export type OrderSendState = 'queued' | 'sending' | 'sent' | 'failed' | 'unknown' | 'cancelled' | 'expired';
 export type OrderSendCancelReason = 'disabled' | 'recipient_removed' | 'recipient_changed' | 'form_not_allowed' | 'permission_revoked' | 'paused'
   | 'manual';
-export type OrderSendTarget = { kind: 'client' } | { kind: 'chat'; chatKey: string }
+export type OrderSendTarget =
+  /** `phoneId` — one of the client's phones (default: primary, else the smallest), with the token the menu gave for it. */
+  { kind: 'client'; phoneId?: number | null; phoneToken?: string | null }
+  | { kind: 'chat'; chatKey: string }
   /** An employee from the settings; `contactId` — one of his phones (default: the primary one). */
-  | { kind: 'employee'; recipientKey: string; contactId?: number | null };
+  | { kind: 'employee'; recipientKey: string; contactId?: number | null; /** The token the menu gave for this contact. */ contactToken?: string | null };
+/**
+ * Whether this backend creates sends to a chosen phone of the client (needs migration 237). The compatible
+ * release (K2a) is this very code with `false`: it still parses and replays such commands, checks and delivers
+ * the rows that exist, but makes no new ones and offers no phones to choose.
+ */
+export const ORDER_SEND_CLIENT_PHONE_CHOICE = false;
+
 export type OrderSendChannel = 'whatsapp' | 'telegram';
 /** Channels a send can go through in this release (Telegram comes with the next stage). */
 export const ORDER_SEND_SUPPORTED_CHANNELS: readonly OrderSendChannel[] = ['whatsapp'];
@@ -119,7 +129,7 @@ export interface OrderSendMenu {
   chats: Array<{ chatKey: string; label: string; forms: OrderFormCode[] }>;
   /** «логин / ФИО» when users are linked to the employee; phones only as masks. */
   employees: Array<{ recipientKey: string; label: string; forms: OrderFormCode[];
-    contacts: Array<{ contactId: number; masked: string; isPrimary: boolean }> }>;
+    contacts: Array<{ contactId: number; masked: string; isPrimary: boolean; token: string }> }>;
   nextAllowedAt: string | null;
   activeSend: boolean;
   /** Waiting sends in the queue (queued + sending). */
