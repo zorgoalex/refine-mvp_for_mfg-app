@@ -238,5 +238,5 @@
 /* выбранный приход сохраняет свою подсветку поверх общих правил строк */
 :root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper.rr-receipts-table .ant-table-tbody > tr.rr-receipt-row--picked > td,
 :root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper.rr-receipts-table .ant-table-tbody > tr.rr-receipt-row--picked:hover > td {
-  background: var(--rr-row-picked);
+  background: color-mix(in srgb, var(--evo-primary) 10%, var(--evo-surface));
 }
