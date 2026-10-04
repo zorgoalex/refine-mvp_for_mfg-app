@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { sheetMaterialsApi, type SheetMaterialTypeDto } from '../../api/sheetMaterialsApi';
 
 /** Backend знает тип/категорию номенклатуры и примечание: отдельный запрос возможностей — не зависит от наличия записей. */
-export function useSheetMaterialCapabilities(enabled = true): { supported: boolean; isLoading: boolean } {
+export function useSheetMaterialCapabilities(enabled = true): { supported: boolean; onecItemPicker: boolean; isLoading: boolean } {
   const query = useQuery({
     queryKey: ['sheet-materials', 'capabilities'],
     queryFn: () => sheetMaterialsApi.capabilities(),
@@ -11,7 +11,7 @@ export function useSheetMaterialCapabilities(enabled = true): { supported: boole
     retry: false,
     staleTime: 5 * 60_000,
   });
-  return { supported: query.data?.nomenclatureFields === true, isLoading: enabled && query.isLoading };
+  return { supported: query.data?.nomenclatureFields === true, onecItemPicker: query.data?.onecItemPicker === true, isLoading: enabled && query.isLoading };
 }
 
 /**

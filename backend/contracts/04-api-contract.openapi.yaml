@@ -17946,10 +17946,20 @@ paths:
     get:
       tags: [SheetMaterials]
       operationId: getSheetMaterialCapabilities
-      summary: Fields this backend supports for sheet material types (nomenclature type/category, note)
+      summary: What this backend supports for sheet material types (nomenclature type/category and note, 1C item picker)
       security: [{bearerAuth: []}]
       responses:
-        '200': {description: '{nomenclatureFields: true}'}
+        '200': {description: '{nomenclatureFields: true, onecItemPicker: true}'}
+  /api/v1/sheet-material-types/onec-items:
+    get:
+      tags: [SheetMaterials]
+      operationId: listSheetMaterialOnecItems
+      summary: 1C nomenclature items (from the 1C mirror) to link a sheet material type to, with the ERP sheet material already linked
+      security: [{bearerAuth: []}]
+      x-permission: sheet_materials.manage
+      responses:
+        '200': {description: '{available, items: [{refKey, code, name, unitName, categoryName, nomenclatureType, deletionMark, linkedSheetMaterialTypeId, linkedName}]}; available=false (items empty) — the 1C mirror is off or has no nomenclature yet, the key is typed by hand; items marked for deletion in 1C stay in the list with deletionMark=true'}
+        '403': {description: sheet_materials.manage required}
   /api/v1/sheet-material-types/{id}:
     get:
       tags:

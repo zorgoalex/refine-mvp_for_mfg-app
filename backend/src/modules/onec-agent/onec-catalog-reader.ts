@@ -212,6 +212,45 @@ export class OnecCatalogReader {
     }));
   }
 
+  /**
+   * Позиции номенклатуры всех источников (не папки, не пропали из выгрузки) с единицей и категорией — для выбора позиции
+   * 1С в справочниках ERP. Помеченные на удаление остаются с признаком (остатки по ним возможны): пометка 1С приходит
+   * и флагом строки копии (`deleted` — так её сохраняет загрузка), и полем `DeletionMark`. Недоступное зеркало — 409
+   * ONEC_MIRROR_UNAVAILABLE.
+   */
+  async listAllItems(client: DatabaseClient = this.db): Promise<Array<{
+    sourceId: number; refKey: string; code: string | null; name: string; unitName: string | null;
+    categoryName: string | null; nomenclatureType: string | null; deletionMark: boolean;
+  }>> {
+    await this.available(client);
+    const { rows } = await client.query<{
+      source_id: string; source_key: string; deleted: boolean; data: Record<string, unknown>; unit_name: string | null; category_name: string | null;
+    }>(
+      `SELECT i.source_id, i.source_key, i.deleted, i.data,
+              COALESCE(u.data->>'Description', u.data->>'Представление') AS unit_name,
+              COALESCE(c.data->>'Description', c.data->>'Представление') AS category_name
+         FROM onec_etl_mirror_rows i
+         LEFT JOIN onec_etl_mirror_rows u ON u.source_id = i.source_id AND u.entity_code = 'units'
+              AND u.source_key = i.data->>'ЕдиницаИзмерения_Key' AND NOT u.deleted AND u.missing_in_source_at IS NULL
+         LEFT JOIN onec_etl_mirror_rows c ON c.source_id = i.source_id AND c.entity_code = 'item_categories'
+              AND c.source_key = i.data->>'КатегорияНоменклатуры_Key' AND NOT c.deleted AND c.missing_in_source_at IS NULL
+        WHERE i.entity_code = 'items' AND i.missing_in_source_at IS NULL
+          AND COALESCE((i.data->>'IsFolder')::boolean, false) = false
+        ORDER BY i.data->>'Description', i.source_id, i.source_key`,
+    );
+    const text = (value: unknown) => (typeof value === 'string' && value.trim() !== '' ? value.trim() : null);
+    return rows.map((row) => ({
+      sourceId: Number(row.source_id),
+      refKey: row.source_key.toLowerCase(),
+      code: text(row.data.Code),
+      name: text(row.data.Description) ?? row.source_key,
+      unitName: text(row.unit_name),
+      categoryName: text(row.category_name),
+      nomenclatureType: text(row.data.ТипНоменклатуры),
+      deletionMark: row.deleted === true || row.data.DeletionMark === true,
+    }));
+  }
+
   async findRefKeysByDescription(
     description: string,
     categoryName: string | null

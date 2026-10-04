@@ -47,6 +47,19 @@ export interface SheetMaterialTypeDto {
   version: number;
 }
 
+/** Позиция номенклатуры 1С для выбора в форме листового материала. */
+export interface OnecItemOption {
+  refKey: string;
+  code: string | null;
+  name: string;
+  unitName: string | null;
+  categoryName: string | null;
+  nomenclatureType: string | null;
+  deletionMark: boolean;
+  linkedSheetMaterialTypeId: number | null;
+  linkedName: string | null;
+}
+
 export const sheetMaterialsApi = {
   list(includeInactive = false): Promise<SheetMaterialTypeDto[]> {
     return httpClient.get<SheetMaterialTypeDto[]>(
@@ -55,8 +68,13 @@ export const sheetMaterialsApi = {
   },
 
   /** Возможности backend; прежний backend отвечает ошибкой («capabilities» как id) — поля считаются неподдержанными. */
-  capabilities(): Promise<{ nomenclatureFields?: boolean }> {
-    return httpClient.get<{ nomenclatureFields?: boolean }>(apiRoutes.sheetMaterials.capabilities);
+  capabilities(): Promise<{ nomenclatureFields?: boolean; onecItemPicker?: boolean }> {
+    return httpClient.get<{ nomenclatureFields?: boolean; onecItemPicker?: boolean }>(apiRoutes.sheetMaterials.capabilities);
+  },
+
+  /** Позиции номенклатуры 1С для поля «Позиция 1С»; `available: false` — данных 1С нет, ключ вводится вручную. */
+  onecItems(): Promise<{ available: boolean; items: OnecItemOption[] }> {
+    return httpClient.get<{ available: boolean; items: OnecItemOption[] }>(apiRoutes.sheetMaterials.onecItems);
   },
 
   get(id: number): Promise<SheetMaterialTypeDto> {

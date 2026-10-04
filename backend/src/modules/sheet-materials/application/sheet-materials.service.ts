@@ -7,6 +7,8 @@ import type {
   DeactivateSheetMaterialTypeCommand,
   GetSheetMaterialTypeQuery,
   ListSheetMaterialTypesQuery,
+  OnecItemOptionDto,
+  OnecItemsSource,
   SheetMaterialsPort,
   SheetMaterialTypeDto,
   UpdateSheetMaterialTypeCommand,
@@ -15,6 +17,8 @@ import type {
 export interface SheetMaterialsServicePorts {
   repo: SheetMaterialsPort;
   permissions?: PermissionsService;
+  /** Позиции номенклатуры 1С (копия данных); не задан — выбора нет, ключ вводится вручную. */
+  onecItems?: OnecItemsSource;
 }
 
 const VIEW: PermissionName = 'sheet_materials.view';
@@ -29,10 +33,12 @@ const MANAGE: PermissionName = 'sheet_materials.manage';
 export class SheetMaterialsService {
   private readonly repo: SheetMaterialsPort;
   private readonly permissions: PermissionsService;
+  private readonly onecItemsSource: OnecItemsSource | undefined;
 
   constructor(ports: SheetMaterialsServicePorts) {
     this.repo = ports.repo;
     this.permissions = ports.permissions ?? new PermissionsService();
+    this.onecItemsSource = ports.onecItems;
   }
 
   async list(query: ListSheetMaterialTypesQuery): Promise<SheetMaterialTypeDto[]> {
@@ -41,9 +47,35 @@ export class SheetMaterialsService {
   }
 
   /** Что умеет этот backend (FE решает, показывать ли поля): тип/категория номенклатуры и примечание — с миграции 234. */
-  async capabilities(query: ListSheetMaterialTypesQuery): Promise<{ nomenclatureFields: true }> {
+  async capabilities(query: ListSheetMaterialTypesQuery): Promise<{ nomenclatureFields: true; onecItemPicker: true }> {
     await this.require(query.currentUser, VIEW, query.requestId);
-    return { nomenclatureFields: true };
+    return { nomenclatureFields: true, onecItemPicker: true };
+  }
+
+  /**
+   * Позиции номенклатуры 1С для поля «Позиция 1С» формы (только тем, кто правит справочник): каждая — с листовым
+   * материалом ERP, который уже к ней привязан. Одна позиция из нескольких источников 1С показывается один раз.
+   */
+  async onecItems(query: ListSheetMaterialTypesQuery): Promise<{ available: boolean; items: OnecItemOptionDto[] }> {
+    await this.require(query.currentUser, MANAGE, query.requestId);
+    const rows = this.onecItemsSource ? await this.onecItemsSource() : null;
+    // Копии нет или номенклатура ещё не загружена: выбора нет — форма оставляет ручной ввод ключа.
+    if (rows === null || rows.length === 0) return { available: false, items: [] };
+    const linked = new Map<string, { id: number; name: string }>();
+    for (const sheet of await this.repo.list({ ...query, includeInactive: true })) {
+      const key = sheet.refKey1c?.toLowerCase();
+      if (key && !linked.has(key)) linked.set(key, { id: sheet.sheetMaterialTypeId, name: sheet.name });
+    }
+    const seen = new Set<string>();
+    const items: OnecItemOptionDto[] = [];
+    for (const row of rows) {
+      const refKey = row.refKey.toLowerCase();
+      if (seen.has(refKey)) continue;
+      seen.add(refKey);
+      const link = linked.get(refKey);
+      items.push({ ...row, refKey, linkedSheetMaterialTypeId: link?.id ?? null, linkedName: link?.name ?? null });
+    }
+    return { available: true, items };
   }
 
   async getById(query: GetSheetMaterialTypeQuery): Promise<SheetMaterialTypeDto> {

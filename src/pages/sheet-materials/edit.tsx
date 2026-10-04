@@ -10,6 +10,8 @@ import { useRecordTabTitle } from '../../utils/recordTitle';
 import { NomenclatureFormItems, nomenclaturePayload } from '../../components/NomenclatureFields';
 import { useSheetMaterialCapabilities } from './useSheetMaterialNomenclature';
 import { sheetMaterialEditSource } from './editSource';
+import { OnecItemField } from './OnecItemField';
+import { fillNomenclatureFromOnec } from './onecItemFill';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
@@ -164,8 +166,8 @@ export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
             </Form.Item>
           </Col>
           <Col xs={24} sm={12} md={8}>
-            <Form.Item name="refKey1c" label="Ключ 1С">
-              <Input maxLength={36} placeholder="UUID из 1С" allowClear />
+            <Form.Item name="refKey1c" label="Позиция 1С">
+              <OnecItemField sheetId={id ? Number(id) : null} onPick={(item) => { if (nomenclatureEditable) fillNomenclatureFromOnec(form, item); }} />
             </Form.Item>
           </Col>
           <Col xs={24} sm={12} md={8}>

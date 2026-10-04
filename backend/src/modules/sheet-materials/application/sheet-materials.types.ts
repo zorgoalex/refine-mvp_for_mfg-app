@@ -81,6 +81,23 @@ export interface SheetMaterialsPermissionDeniedInput {
   targetId?: number;
 }
 
+/** Позиция номенклатуры 1С для выбора в форме листового материала. */
+export interface OnecItemOptionDto {
+  refKey: string;
+  code: string | null;
+  name: string;
+  unitName: string | null;
+  categoryName: string | null;
+  nomenclatureType: string | null;
+  deletionMark: boolean;
+  /** Листовой материал ERP, уже привязанный к этой позиции (любой, включая отключённые). */
+  linkedSheetMaterialTypeId: number | null;
+  linkedName: string | null;
+}
+
+/** Позиции 1С из копии данных; `null` — копия недоступна (модуль 1С выключен, данных нет): ключ вводится вручную. */
+export type OnecItemsSource = () => Promise<Array<Omit<OnecItemOptionDto, 'linkedSheetMaterialTypeId' | 'linkedName'>> | null>;
+
 export interface SheetMaterialsPort {
   list(query: ListSheetMaterialTypesQuery): Promise<SheetMaterialTypeDto[]>;
   getById(query: GetSheetMaterialTypeQuery): Promise<SheetMaterialTypeDto>;

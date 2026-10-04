@@ -19,6 +19,7 @@ describe.skipIf(!url)('warehouse stock — ERP film + 1C mirror balances', { tim
   let database: DatabaseService;
   let watcher: Client;
   let service: InventoryService;
+  let reader: OnecCatalogReader;
   let admin: CurrentUser;
   let warehouseId: number;
   let otherWarehouseId: number;
@@ -160,7 +161,8 @@ describe.skipIf(!url)('warehouse stock — ERP film + 1C mirror balances', { tim
         return result;
       }
     }
-    service = new InventoryService(database, config, new HookedReader(database, new OnecRuntimeConfigService(config)));
+    reader = new HookedReader(database, new OnecRuntimeConfigService(config));
+    service = new InventoryService(database, config, reader);
   });
 
   afterAll(async () => {
@@ -323,6 +325,28 @@ describe.skipIf(!url)('warehouse stock — ERP film + 1C mirror balances', { tim
     } finally {
       for (const id of deactivated) await watcher.query('UPDATE warehouses SET is_active = true WHERE warehouse_id = $1', [id]);
       demand.mockRestore();
+    }
+  });
+
+  it('1C items for pickers: marked-for-deletion rows stay (flag of the mirror row or of the data), folders and vanished rows do not', async () => {
+    const extra = { envelope: key(), folder: key(), missing: key() };
+    const row = (ref: string, name: string, more: Record<string, unknown> = {}) =>
+      ({ Ref_Key: ref, Code: 'X-1', Description: name, КатегорияНоменклатуры_Key: k.catRaw, ЕдиницаИзмерения_Key: k.unitL, ТипНоменклатуры: 'Запас', DeletionMark: false, ...more });
+    // Загрузка сохраняет пометку удаления 1С флагом строки копии (`deleted`), а не только полем данных.
+    await mirror(watcher, sourceA, 'items', extra.envelope.toUpperCase(), row(extra.envelope, `${tag} Помечена флагом строки`), { deleted: true });
+    await mirror(watcher, sourceA, 'items', extra.folder, row(extra.folder, `${tag} Папка`, { IsFolder: true }));
+    await mirror(watcher, sourceA, 'items', extra.missing, row(extra.missing, `${tag} Пропала из выгрузки`), { missing: true });
+    try {
+      const items = (await reader.listAllItems()).filter((item) => item.name.startsWith(tag));
+      const byName = new Map(items.map((item) => [item.name, item]));
+      expect(byName.get(`${tag} МДФ 16 мм`)).toEqual({ sourceId: sourceA, refKey: k.mdf, code: 'C-' + `${tag} МДФ 16 мм`.length, name: `${tag} МДФ 16 мм`, unitName: 'л.', categoryName: 'Раходные материалы', nomenclatureType: 'Запас', deletionMark: false });
+      expect(byName.get(`${tag} Помеченная`)).toMatchObject({ deletionMark: true, unitName: 'шт' });
+      expect(byName.get(`${tag} Помечена флагом строки`)).toMatchObject({ refKey: extra.envelope, deletionMark: true, categoryName: 'Сырье' });
+      expect(byName.has(`${tag} Папка`)).toBe(false);
+      expect(byName.has(`${tag} Пропала из выгрузки`)).toBe(false);
+      expect(items.map((item) => item.name)).toEqual([...items.map((item) => item.name)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
+    } finally {
+      await watcher.query("DELETE FROM onec_etl_mirror_rows WHERE source_id = $1 AND entity_code = 'items' AND lower(source_key) = ANY($2::text[])", [sourceA, Object.values(extra)]);
     }
   });
 

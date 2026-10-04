@@ -80,5 +80,9 @@ describe('SheetMaterialsController', () => {
     expect(service.capabilities).toHaveBeenCalledTimes(1);
     const off = new SheetMaterialsController(service, { getFeatureFlags: () => ({ sheetMaterialsEnabled: false }) } as any);
     await expect(off.capabilities(reqUser)).rejects.toMatchObject({ statusCode: 503 });
+    // Список позиций 1С — тот же порядок: флаг модуля, затем сервис (право проверяет он).
+    service.onecItems = vi.fn().mockResolvedValue({ available: false, items: [] });
+    await expect(on.onecItems(reqUser)).resolves.toEqual({ available: false, items: [] });
+    await expect(off.onecItems(reqUser)).rejects.toMatchObject({ statusCode: 503 });
   });
 });

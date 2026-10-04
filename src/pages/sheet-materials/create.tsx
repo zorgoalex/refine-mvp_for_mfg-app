@@ -8,6 +8,8 @@ import { can } from '../../utils/permissions';
 import { sheetMaterialsApi, type SheetMaterialTypeInput } from '../../api/sheetMaterialsApi';
 import { NomenclatureFormItems, nomenclaturePayload } from '../../components/NomenclatureFields';
 import { useSheetMaterialNomenclature } from './useSheetMaterialNomenclature';
+import { OnecItemField } from './OnecItemField';
+import { fillNomenclatureFromOnec } from './onecItemFill';
 import { useQueryClient } from '@tanstack/react-query';
 
 export const SheetMaterialCreate: React.FC<IResourceComponentsProps> = () => {
@@ -115,8 +117,8 @@ export const SheetMaterialCreate: React.FC<IResourceComponentsProps> = () => {
             </Form.Item>
           </Col>
           <Col xs={24} sm={12} md={8}>
-            <Form.Item name="refKey1c" label="Ключ 1С">
-              <Input maxLength={36} placeholder="UUID из 1С" allowClear />
+            <Form.Item name="refKey1c" label="Позиция 1С">
+              <OnecItemField onPick={(item) => { if (nomenclature.supported) fillNomenclatureFromOnec(form, item); }} />
             </Form.Item>
           </Col>
           <Col xs={24} sm={12} md={8}>
