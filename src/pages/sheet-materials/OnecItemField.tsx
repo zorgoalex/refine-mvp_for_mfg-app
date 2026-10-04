@@ -59,6 +59,9 @@ export const OnecItemField: React.FC<{
       allowClear
       optionFilterProp="label"
       placeholder="Выберите позицию 1С"
+      // Список шире поля: длинные названия 1С и пометка «привязана к …» видны целиком.
+      dropdownMatchSelectWidth={false}
+      dropdownStyle={{ maxWidth: 'min(760px, 92vw)' }}
       value={value ? value.trim().toLowerCase() : undefined}
       options={options.map(({ value: key, label, disabled }) => ({ value: key, label, disabled }))}
       onChange={(next?: string) => {
