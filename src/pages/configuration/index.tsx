@@ -32,6 +32,7 @@ import {
   SafetyCertificateOutlined,
   MessageOutlined,
   ShoppingOutlined,
+  DesktopOutlined,
 } from '@ant-design/icons';
 import { useAppSettings, SETTING_KEYS, CurrencySettings } from '../../hooks/useAppSettings';
 import { featureFlags } from '../../config/featureFlags';
@@ -49,6 +50,7 @@ import { FinancialLayerAccessMatrix } from './components/FinancialLayerAccessMat
 import { ExportTemplatesConfigTab } from './components/ExportTemplatesConfigTab';
 import { ProductionThresholdsConfigTab } from './components/ProductionThresholdsConfigTab';
 import { ProcurementSettingsTab } from './components/ProcurementSettingsTab';
+import { ClientScreenSettingsTab } from './components/ClientScreenSettingsTab';
 import {
   RolesPermissionsMatrixTab,
   canViewRolesMatrixTab,
@@ -740,6 +742,20 @@ export const ConfigurationPage: React.FC = () => {
       ),
       children: <ProcurementSettingsTab />,
     },
+    ...(featureFlags.clientScreen
+      ? [
+          {
+            key: 'client-screen',
+            label: (
+              <span>
+                <DesktopOutlined />
+                Экран клиента
+              </span>
+            ),
+            children: <ClientScreenSettingsTab />,
+          },
+        ]
+      : []),
     {
       key: 'table-visibility',
       label: (

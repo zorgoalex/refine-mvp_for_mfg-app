@@ -66,6 +66,10 @@ describe('apiRoutes', () => {
     expect(apiRoutes.orders.resourceProcurementBulk).toBe('/api/v1/orders/resource-procurement/bulk');
   });
 
+  it('exposes the client screen settings route', () => {
+    expect(apiRoutes.clientScreen.settings).toBe('/api/v1/client-screen/settings');
+  });
+
   it('exposes 1C purchase/payment document routes under procurement/onec-documents', () => {
     expect(apiRoutes.onecDocuments.list).toBe('/api/v1/procurement/onec-documents');
     expect(apiRoutes.onecDocuments.card(42)).toBe('/api/v1/procurement/onec-documents/42');

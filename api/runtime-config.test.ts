@@ -201,6 +201,26 @@ describe('runtime-config handler', () => {
     expect(explicitOff.body).toMatchObject({ features: { filmCatalogImport: true, inventory: false } });
   });
 
+  it('keeps the customer screen UI off outside stage unless explicitly enabled, and lets stage switch it off', () => {
+    const prodRes = createResponse();
+    handler({ method: 'GET', headers: { host: 'mebelkz.app' } } as VercelRequest, prodRes as unknown as VercelResponse);
+    expect(prodRes.body).toMatchObject({ features: { clientScreen: false } });
+
+    const stageRes = createResponse();
+    handler({ method: 'GET', headers: { host: 'app-test.mebelkz.app' } } as VercelRequest, stageRes as unknown as VercelResponse);
+    expect(stageRes.body).toMatchObject({ features: { clientScreen: true } });
+
+    vi.stubEnv('RUNTIME_CONFIG_CLIENT_SCREEN', 'true');
+    const prodOn = createResponse();
+    handler({ method: 'GET', headers: { host: 'mebelkz.app' } } as VercelRequest, prodOn as unknown as VercelResponse);
+    expect(prodOn.body).toMatchObject({ features: { clientScreen: true } });
+
+    vi.stubEnv('RUNTIME_CONFIG_CLIENT_SCREEN', 'false');
+    const stageOff = createResponse();
+    handler({ method: 'GET', headers: { host: 'app-test.mebelkz.app' } } as VercelRequest, stageOff as unknown as VercelResponse);
+    expect(stageOff.body).toMatchObject({ features: { clientScreen: false } });
+  });
+
   it('uses the stage backend for Vercel previews without overriding explicit env', () => {
     vi.stubEnv('VERCEL_ENV', 'preview');
     const previewRes = createResponse();

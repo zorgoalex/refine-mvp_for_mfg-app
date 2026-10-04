@@ -116,6 +116,9 @@ export const apiRoutes = {
     whatsappSends: (orderId: number) => backendApiPath(`/orders/${orderId}/whatsapp-sends`),
     whatsappSendClientContacts: (orderId: number) => backendApiPath(`/orders/${orderId}/whatsapp-sends/client-contacts`),
   },
+  clientScreen: {
+    settings: backendApiPath('/client-screen/settings'),
+  },
   procurement: {
     worklist: backendApiPath('/procurement/worklist'),
     savedViews: backendApiPath('/procurement/worklist/saved-views'),
