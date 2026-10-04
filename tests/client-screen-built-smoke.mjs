@@ -1,12 +1,13 @@
 import { chromium, expect } from '@playwright/test';
 import assert from 'node:assert/strict';
 import { printableError } from './helpers/redactSecrets.mjs';
+import { vercelBypassCookies } from './helpers/vercelBypass.mjs';
 
 // Smoke of a BUILT deployment (a Vercel preview or the stage site): the main app still starts, a
 // deep route still resolves to it, and /client-screen.html is the isolated customer page.
-// BASE_URL is required. VERCEL_AUTOMATION_BYPASS_SECRET, when set, is added as the protection-bypass
-// header to requests for the deployment's own origin only, and is redacted from anything printed.
-// Read-only: no login, no data.
+// BASE_URL is required. VERCEL_AUTOMATION_BYPASS_SECRET, when set, is exchanged once for the
+// deployment's bypass cookie (one request, no redirects followed); the browser never carries the
+// secret itself, and it is redacted from anything printed. Read-only: no login, no data.
 const base = (process.env.BASE_URL ?? '').replace(/\/$/, '');
 assert.match(base, /^https:\/\//, 'BASE_URL must be an https URL');
 const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
@@ -17,12 +18,9 @@ const results = [];
 const errors = [];
 try {
   const context = await browser.newContext({ viewport: { width: 1366, height: 768 } });
-  // The credential goes to the deployment only: never to the backend or any other origin the app calls.
-  if (bypass) {
-    await context.route((url) => url.origin === origin, (route) => route.continue({
-      headers: { ...route.request().headers(), 'x-vercel-protection-bypass': bypass },
-    }));
-  }
+  // Only the deployment's own cookies go into the browser; no request of the page carries the secret.
+  const cookies = await vercelBypassCookies(base, bypass);
+  if (cookies.length) await context.addCookies(cookies);
   const watch = (page, name) => {
     page.on('pageerror', (e) => errors.push(`${name}: ${e.message.split('\n')[0]}`));
   };
