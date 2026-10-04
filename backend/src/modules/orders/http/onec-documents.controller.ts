@@ -73,6 +73,8 @@ const listSchema = z.object({
   dateTo: dateOnly.optional(),
   unlinkedOnly: flag,
   postedOnly: flag,
+  allocation: z.enum(['open', 'full']).optional(),
+  withLines: flag,
 }).strict();
 
 @ApiTags('Orders')
@@ -93,6 +95,10 @@ export class OnecDocumentsController {
     const query = parse(listSchema, rawQuery, 'ONEC_DOCUMENTS_QUERY_INVALID') as OnecDocumentListQuery;
     if (query.dateFrom && query.dateTo && query.dateFrom > query.dateTo) {
       throw new ApiError(422, 'ONEC_DOCUMENTS_QUERY_INVALID', 'Дата «с» позже даты «по»', { field: 'dateFrom' });
+    }
+    // Полнота распределения считается по количеству — только для приходов.
+    if (query.allocation && query.tab !== 'receipts') {
+      throw new ApiError(422, 'ONEC_DOCUMENTS_QUERY_INVALID', 'Фильтр распределения — только для приходов', { field: 'allocation' });
     }
     return this.documents.list(user, query, true);
   }

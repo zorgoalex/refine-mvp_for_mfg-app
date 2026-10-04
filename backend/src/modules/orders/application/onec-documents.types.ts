@@ -24,6 +24,19 @@ export interface OnecDocumentListQuery {
   unlinkedOnly?: boolean;
   /** Только проведённые и не удалённые в 1С. */
   postedOnly?: boolean;
+  /** Только приходы: `open` — не распределён или распределён частично, `full` — распределён полностью. */
+  allocation?: 'open' | 'full';
+  /** Добавить к каждому документу краткий состав строк (`lineSummary`). */
+  withLines?: boolean;
+}
+
+/** Строка документа для списка: что пришло и сколько. */
+export interface OnecDocumentLineSummaryDto {
+  lineNo: number;
+  /** Материал ERP, если строка сопоставлена, иначе номенклатура 1С. */
+  name: string;
+  quantity: number;
+  unitName: string | null;
 }
 
 export interface OnecDocumentOrderRefDto {
@@ -51,6 +64,10 @@ export interface OnecDocumentListItemDto {
   orders: OnecDocumentOrderRefDto[];
   hiddenOrdersCount: number;
   resourceKinds: OrderResourceKind[];
+  /** Первые строки документа (без итоговых и удалённых в 1С) — только при `withLines`. */
+  lineSummary?: OnecDocumentLineSummaryDto[];
+  /** Сколько строк не вошло в `lineSummary`. */
+  lineSummaryMore?: number;
 }
 
 export interface OnecDocumentListResponseDto {

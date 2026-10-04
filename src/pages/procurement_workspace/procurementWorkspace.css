@@ -232,3 +232,15 @@
 .rr-screen .rr-step--done { background: var(--rr-ok-soft); color: var(--rr-ok); border-color: transparent; }
 .rr-screen .rr-step--part { background: var(--rr-warn-soft); color: var(--rr-warn); border-color: transparent; }
 .rr-screen .rr-step--todo { background: var(--rr-none-soft); color: var(--rr-muted); border-color: transparent; }
+
+/* «Приход 1С»: сворачиваемый список приходов на всю ширину (≈5 строк, прокрутка внутри) и «Распределено по заказам». */
+.rr-screen .rr-receipts { margin: 12px 16px 0; border: 1px solid var(--rr-border); border-radius: 10px; background: var(--rr-surface); overflow: hidden; }
+.rr-screen .rr-receipts-head { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--rr-surface-2); }
+.rr-screen .rr-receipts-head .ant-btn { font-weight: 600; }
+.rr-screen .rr-receipts-table { margin-top: 0; }
+.rr-screen .rr-receipts-table .rr-receipt-row { cursor: pointer; }
+.rr-screen .rr-receipts-table .ant-table-tbody > tr > td { vertical-align: top; }
+.rr-screen .rr-allocated { margin: 12px 16px 0; border: 1px solid var(--rr-border); border-radius: 10px; background: var(--rr-surface); overflow: hidden; }
+.rr-screen .rr-allocated-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--rr-grp-bg); }
+.rr-screen .rr-allocated-line { border-top: 1px solid var(--rr-border); }
+.rr-screen .rr-allocated-title { display: flex; gap: 10px; align-items: baseline; padding: 8px 12px; }

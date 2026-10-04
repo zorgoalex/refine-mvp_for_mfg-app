@@ -5,7 +5,6 @@ import { procurementWorkspaceApi } from '../../../api/procurementWorkspaceApi';
 import type { ProcurementSettings } from '../../../api/types/procurementWorkspaceApi.types';
 import { ApiError } from '../../../api/apiError';
 import { can } from '../../../utils/permissions';
-import { SupplierTextTemplatesEditor } from './SupplierTextTemplatesEditor';
 import {
   buildProcurementSettingsUpdate,
   extractProcurementConflictSettings,
@@ -283,7 +282,7 @@ export const ProcurementSettingsTab: React.FC = () => {
           )}
         </Form>
       </Card>
-      <SupplierTextTemplatesEditor />
+      <Alert type="info" showIcon message="Шаблоны текста поставщику — в экране снабжения: заявка поставщику → «Текст для поставщика» → «Мои шаблоны…». У каждого пользователя свои шаблоны." />
     </Space>
   );
 };

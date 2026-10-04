@@ -20,6 +20,7 @@ import {
   type OnecDocumentCardResponseDto,
   type OnecDocumentLineDto,
   type OnecDocumentListItemDto,
+  type OnecDocumentLineSummaryDto,
   type OnecDocumentListQuery,
   type OnecDocumentListResponseDto,
   type OnecDocumentReadOptions,
@@ -164,6 +165,7 @@ export class PgOnecDocumentsRepository {
           JOIN order_resource_onec_allocations ua ON ua.onec_document_line_id = ul.onec_document_line_id AND ua.removed_at IS NULL
           WHERE ul.onec_document_id = d.onec_document_id)`);
       }
+      if (query.allocation) clauses.push(query.allocation === 'full' ? RECEIPT_FULL_SQL : `NOT ${RECEIPT_FULL_SQL}`);
       if (query.search) {
         const index = params.push(`%${query.search}%`);
         // Поиск по заказу — только среди заказов, видимых пользователю.
@@ -193,8 +195,12 @@ export class PgOnecDocumentsRepository {
       );
       const ids = documents.rows.map((row) => Number(row.onec_document_id));
       const allocations = await loadDocumentAllocations(client, currentUser, ids);
+      const summaries = query.withLines ? await loadLineSummaries(client, ids) : null;
       return {
-        data: documents.rows.map((row) => listItem(row, allocations, options)),
+        data: documents.rows.map((row) => ({
+          ...listItem(row, allocations, options),
+          ...(summaries ? summaries.get(Number(row.onec_document_id)) ?? { lineSummary: [], lineSummaryMore: 0 } : {}),
+        })),
         pagination: {
           page: query.page,
           pageSize: query.pageSize,
@@ -659,6 +665,58 @@ const DOCUMENT_SELECT_SQL = `
     FROM onec_documents d
     JOIN onec_sources src ON src.source_id = d.source_id
     LEFT JOIN suppliers s ON s.supplier_id = d.supplier_id`;
+
+/**
+ * Приход распределён полностью — то же правило, что `allocationState = 'full'` в `listItem`: есть активные
+ * распределения, ёмкость (строки без итоговых и удалённых в 1С) положительна и распределено не меньше ёмкости.
+ */
+const RECEIPT_FULL_SQL = `(
+  EXISTS (SELECT 1 FROM onec_document_lines fl
+            JOIN order_resource_onec_allocations fa ON fa.onec_document_line_id = fl.onec_document_line_id AND fa.removed_at IS NULL
+           WHERE fl.onec_document_id = d.onec_document_id)
+  AND (SELECT COALESCE(sum(fl.quantity), 0) FROM onec_document_lines fl
+        WHERE fl.onec_document_id = d.onec_document_id AND NOT fl.is_document_total AND fl.removed_in_onec_at IS NULL) > 0
+  AND (SELECT COALESCE(sum(fa.quantity), 0) FROM onec_document_lines fl
+         JOIN order_resource_onec_allocations fa ON fa.onec_document_line_id = fl.onec_document_line_id AND fa.removed_at IS NULL
+        WHERE fl.onec_document_id = d.onec_document_id AND fl.removed_in_onec_at IS NULL) + 1e-9
+      >= (SELECT COALESCE(sum(fl.quantity), 0) FROM onec_document_lines fl
+           WHERE fl.onec_document_id = d.onec_document_id AND NOT fl.is_document_total AND fl.removed_in_onec_at IS NULL)
+)`;
+
+/** Сколько строк документа показывать в списке. */
+export const LINE_SUMMARY_LIMIT = 6;
+
+/** Краткий состав документов для списка: первые строки (без итоговых и удалённых в 1С) и число остальных. */
+async function loadLineSummaries(
+  client: DatabaseClient,
+  documentIds: number[],
+): Promise<Map<number, { lineSummary: OnecDocumentLineSummaryDto[]; lineSummaryMore: number }>> {
+  const out = new Map<number, { lineSummary: OnecDocumentLineSummaryDto[]; lineSummaryMore: number }>();
+  if (documentIds.length === 0) return out;
+  const rows = (await client.query<{
+    onec_document_id: string | number; line_no: number; name: string | null; quantity: string | number; unit_name: string | null; total: string | number;
+  }>(
+    `SELECT * FROM (
+       SELECT l.onec_document_id, l.line_no, COALESCE(smt.name, f.film_name, l.nomenclature_name) AS name, l.quantity, l.unit_name,
+              row_number() OVER (PARTITION BY l.onec_document_id ORDER BY l.line_no, l.onec_document_line_id) AS position,
+              count(*) OVER (PARTITION BY l.onec_document_id) AS total
+         FROM onec_document_lines l
+         LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = l.sheet_material_type_id
+         LEFT JOIN films f ON f.film_id = l.film_id
+        WHERE l.onec_document_id = ANY($1::bigint[]) AND NOT l.is_document_total AND l.removed_in_onec_at IS NULL
+     ) ranked
+     WHERE position <= $2
+     ORDER BY onec_document_id, position`,
+    [documentIds, LINE_SUMMARY_LIMIT],
+  )).rows;
+  for (const row of rows) {
+    const id = Number(row.onec_document_id);
+    const entry = out.get(id) ?? { lineSummary: [], lineSummaryMore: Math.max(0, Number(row.total) - LINE_SUMMARY_LIMIT) };
+    entry.lineSummary.push({ lineNo: row.line_no, name: row.name ?? '—', quantity: Number(row.quantity), unitName: row.unit_name });
+    out.set(id, entry);
+  }
+  return out;
+}
 
 /** Активные распределения документов; `visible` — заказ в scope пользователя (R1-1). */
 async function loadDocumentAllocations(

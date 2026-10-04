@@ -6,7 +6,8 @@
 export const SUPPLIER_TEXT_BODY_FIELDS = ['номер', 'поставщик', 'дата', 'ожидаем_к', 'комментарий', 'позиции', 'позиций_всего'] as const;
 export const SUPPLIER_TEXT_LINE_FIELDS = ['№', 'материал', 'количество', 'единица', 'количество_с_единицей'] as const;
 
-export const SUPPLIER_TEXT_LIMITS = { name: 80, body: 4000, line: 500, activeTemplates: 50 } as const;
+/** `ownTemplates` — активных личных шаблонов на пользователя; `activeTemplates` — прежний лимит общих (общие через API не создаются). */
+export const SUPPLIER_TEXT_LIMITS = { name: 80, body: 4000, line: 500, activeTemplates: 50, ownTemplates: 20 } as const;
 
 export type TemplateToken = { kind: 'text'; value: string } | { kind: 'field'; name: string };
 export type TemplateErrorCode = 'UNCLOSED_BRACE' | 'STRAY_BRACE' | 'BAD_FIELD' | 'UNKNOWN_FIELD';

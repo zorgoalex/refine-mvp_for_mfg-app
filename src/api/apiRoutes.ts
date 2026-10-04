@@ -134,6 +134,12 @@ export const apiRoutes = {
       byId: (templateId: number) => backendApiPath(`/procurement/supplier-text-templates/${templateId}`),
       setDefault: (templateId: number) => backendApiPath(`/procurement/supplier-text-templates/${templateId}/default`),
     },
+    // Личные шаблоны: отдельный маршрут — старый backend его не знает и не сохранит личный текст как общий.
+    mySupplierTextTemplates: {
+      list: backendApiPath('/procurement/my-supplier-text-templates'),
+      byId: (templateId: number) => backendApiPath(`/procurement/my-supplier-text-templates/${templateId}`),
+      setDefault: (templateId: number) => backendApiPath(`/procurement/my-supplier-text-templates/${templateId}/default`),
+    },
   },
   onecDocuments: {
     list: backendApiPath('/procurement/onec-documents'),

@@ -72,7 +72,7 @@ import { OrderStatusBoardController } from './http/order-status-board.controller
 import { OrdersRuntimeConfigService } from './http/orders-runtime-config.service';
 import { PgSupplierTextTemplatesRepository } from './adapters/pg-supplier-text-templates-repository';
 import { SupplierTextTemplatesService } from './application/supplier-text-templates.service';
-import { SupplierTextTemplatesController } from './http/supplier-text-templates.controller';
+import { MySupplierTextTemplatesController, SupplierTextTemplatesController } from './http/supplier-text-templates.controller';
 import { PgProcurementNotificationsRepository } from './adapters/pg-procurement-notifications-repository';
 import { ProcurementNotificationsService } from './application/procurement-notifications.service';
 import { ProcurementNotificationsSchedulerService } from './application/procurement-notifications-scheduler.service';
@@ -109,7 +109,7 @@ export function shouldEnableOrderDeadlineSync(input: {
     SupplierRequestsController,
     ProcurementWorkspaceController,
     OrderHdfSettingsController,
-    OrdersController, SupplierTextTemplatesController],
+    OrdersController, SupplierTextTemplatesController, MySupplierTextTemplatesController],
   providers: [
     OnecDocumentsProcurementConsumer,
     OrdersRuntimeConfigService,

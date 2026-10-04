@@ -17,6 +17,17 @@ export interface OnecDocumentListParams {
   unlinkedOnly?: boolean;
   /** Только проведённые и не удалённые в 1С. */
   postedOnly?: boolean;
+  /** Только приходы: `open` — не распределён или частично, `full` — полностью. Старый backend параметр отклоняет (422). */
+  allocation?: 'open' | 'full';
+  /** Добавить краткий состав строк (`lineSummary`). */
+  withLines?: boolean;
+}
+
+export interface OnecDocumentLineSummaryDto {
+  lineNo: number;
+  name: string;
+  quantity: number;
+  unitName: string | null;
 }
 
 export interface OnecDocumentOrderRefDto {
@@ -44,6 +55,9 @@ export interface OnecDocumentListItemDto {
   orders: OnecDocumentOrderRefDto[];
   hiddenOrdersCount: number;
   resourceKinds: OrderResourceKind[];
+  /** Первые строки документа — только при `withLines`. */
+  lineSummary?: OnecDocumentLineSummaryDto[];
+  lineSummaryMore?: number;
 }
 
 export interface OnecDocumentListResponse {

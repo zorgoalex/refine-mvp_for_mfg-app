@@ -313,6 +313,24 @@ describe.skipIf(!url)('1C documents allocations — real PostgreSQL, committed f
     expect(unlinked.data.some((row) => row.documentId === unpostedId)).toBe(true);
   });
 
+  it('filters receipts by allocation completeness exactly as allocationState and returns the line summary', async () => {
+    const all = await docsA.list(admin, { tab: 'receipts', page: 1, pageSize: 100 }, options);
+    const open = await docsA.list(admin, { tab: 'receipts', page: 1, pageSize: 100, allocation: 'open', withLines: true }, options);
+    const full = await docsA.list(admin, { tab: 'receipts', page: 1, pageSize: 100, allocation: 'full' }, options);
+    // Фильтр и поле состояния — одно правило: «open» = none|partial, «full» = full; вместе — весь список.
+    expect(open.data.every((row) => row.allocationState !== 'full')).toBe(true);
+    expect(full.data.every((row) => row.allocationState === 'full')).toBe(true);
+    expect(open.pagination.total + full.pagination.total).toBe(all.pagination.total);
+    expect(open.data.some((row) => row.documentId === receiptId)).toBe(true);
+    expect(full.data.some((row) => row.documentId === receiptId)).toBe(false);
+    const receipt = open.data.find((row) => row.documentId === receiptId)!;
+    expect(receipt.lineSummary?.map((line) => [line.lineNo, line.quantity])).toEqual([[1, 5], [2, 3], [3, 3]]);
+    expect(receipt.lineSummaryMore).toBe(0);
+    expect(receipt.lineSummary?.every((line) => typeof line.name === 'string' && line.name.length > 0)).toBe(true);
+    // Без withLines поля нет — старый контракт не меняется.
+    expect(all.data.find((row) => row.documentId === receiptId)).not.toHaveProperty('lineSummary');
+  });
+
   it('filters the demand list and by-material summary to orders linked to one document', async () => {
     const linked = (await connA.query<{ order_id: string }>(
       `SELECT DISTINCT p.order_id::text FROM order_resource_onec_allocations a

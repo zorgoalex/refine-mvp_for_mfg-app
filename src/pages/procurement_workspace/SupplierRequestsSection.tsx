@@ -28,7 +28,8 @@ import { onecUnitLabel } from '../onec_purchase_documents/onecDocumentsHelpers';
 import { OrderNumber } from '../order_resource_requirements/OrderNumber';
 import { useProcurementPermission } from '../order_resource_requirements/ProcurementParts';
 import { RrScreen } from './RrScreen';
-import { SupplierTextCopy } from './SupplierTextCopy';
+import { SupplierTextDialog } from './SupplierTextDialog';
+import { SupplierTextTemplatesEditor } from './SupplierTextTemplatesEditor';
 import { useSelect } from '../../ui/refineSelect';
 import {
   buildDraftsBody,
@@ -121,6 +122,7 @@ export function SupplierRequestsSection({ active }: SupplierRequestsSectionProps
 
   // Черновик из выделения рабочего списка (план §6): подхватывается, когда известен пользователь — превью и
   // ключ повтора хранятся по его id (CR4-1), чужие не показываются.
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   const { data: identity } = useGetIdentity<UserIdentity>();
   const userId = identity?.id === undefined || identity?.id === null ? null : String(identity.id);
   const [draftPreview, setDraftPreview] = useState<{ items: DraftPreviewItem[]; idState: DraftRequestIdState } | null>(null);
@@ -233,7 +235,13 @@ export function SupplierRequestsSection({ active }: SupplierRequestsSectionProps
       <div className="rr-appbar">
         <span className="rr-ttl">Заявки поставщикам</span>
         <span className="rr-muted">заявка → приход 1С → оплата 1С</span>
+        <span style={{ flex: 1 }} />
+        {/* Свои шаблоны текста можно настроить и без открытой заявки (code review R1-4). */}
+        <Button onClick={() => setTemplatesOpen(true)}>Шаблоны текста</Button>
       </div>
+      <Modal open={templatesOpen} width={820} title="Шаблоны текста поставщику" footer={null} destroyOnClose onCancel={() => setTemplatesOpen(false)}>
+        <SupplierTextTemplatesEditor />
+      </Modal>
 
       <div className="rr-pad">
         {draftPreview && draftGroups.length > 0 && (
@@ -701,7 +709,7 @@ function SupplierRequestDrawer({ requestId, onClose, onChanged, canManage, manag
               <Button danger loading={busyTransition === 'cancel'} disabled={!canManage || manageLoading} onClick={() => void doTransition('cancel')}>Отменить заявку</Button>
             )}
             {/* Копируется сохранённая заявка — при несохранённых правках текст разошёлся бы с экраном (CR4-3). */}
-            <SupplierTextCopy card={card} capability={textTemplatesCapability} dirty={dirty} />
+            <SupplierTextDialog card={card} capability={textTemplatesCapability} dirty={dirty} />
           </Space>
         </div>
         </RrScreen>

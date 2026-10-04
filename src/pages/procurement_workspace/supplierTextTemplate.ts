@@ -9,7 +9,7 @@ import { onecUnitLabel } from '../onec_purchase_documents/onecDocumentsHelpers';
 export const SUPPLIER_TEXT_BODY_FIELDS = ['номер', 'поставщик', 'дата', 'ожидаем_к', 'комментарий', 'позиции', 'позиций_всего'] as const;
 export const SUPPLIER_TEXT_LINE_FIELDS = ['№', 'материал', 'количество', 'единица', 'количество_с_единицей'] as const;
 
-export const SUPPLIER_TEXT_LIMITS = { name: 80, body: 4000, line: 500, activeTemplates: 50 } as const;
+export const SUPPLIER_TEXT_LIMITS = { name: 80, body: 4000, line: 500, activeTemplates: 50, ownTemplates: 20 } as const;
 
 export type TemplateToken = { kind: 'text'; value: string } | { kind: 'field'; name: string };
 export type TemplateErrorCode = 'UNCLOSED_BRACE' | 'STRAY_BRACE' | 'BAD_FIELD' | 'UNKNOWN_FIELD';
@@ -220,4 +220,50 @@ export function readStoredTemplateId(): number | null {
 
 export function storeTemplateId(templateId: number): void {
   try { globalThis.localStorage?.setItem(SUPPLIER_TEXT_TEMPLATE_STORAGE_KEY, String(templateId)); } catch { /* личное удобство */ }
+}
+
+/** Текст окна «Текст для поставщика»: ручная правка, если есть, иначе результат шаблона; `edited` — правка отличается от шаблона. */
+export function supplierTextDialogText(rendered: string | null, manual: string | null): { text: string; edited: boolean } {
+  const base = rendered ?? '';
+  if (manual === null) return { text: base, edited: false };
+  return { text: manual, edited: manual !== base };
+}
+
+/** Варианты выбора шаблона: «Мои» выше «Общих»; действующий по умолчанию помечен. */
+export function templateSelectOptions<T extends SupplierTextTemplateLike & { scope?: 'shared' | 'own' }>(
+  templates: readonly T[],
+): Array<{ label: string; options: Array<{ value: number; label: string }> }> {
+  const option = (template: T) => ({ value: template.templateId, label: template.isDefault ? `${template.name} (по умолчанию)` : template.name });
+  const own = templates.filter((template) => template.scope === 'own').map(option);
+  const shared = templates.filter((template) => template.scope !== 'own').map(option);
+  return [
+    ...(own.length > 0 ? [{ label: 'Мои', options: own }] : []),
+    ...(shared.length > 0 ? [{ label: 'Общие', options: shared }] : []),
+  ];
+}
+
+/**
+ * Почему кнопка «Текст для поставщика» выключена; undefined — доступна. Недоступность шаблонов копирование не
+ * отнимает (plan review R6-1): при выключенном capability, сетевой ошибке и 5xx текст есть (прежний или
+ * «Стандартный»). Выключена только: несохранённые изменения заявки, 401/403 на шаблонах, загрузка.
+ */
+export function supplierTextDisabledReason(dirty: boolean, source: SupplierCopySource): string | undefined {
+  if (dirty) return 'Сначала сохраните изменения';
+  if (source.kind === 'denied') return source.note;
+  if (source.kind === 'loading') return 'Загружаются шаблоны…';
+  return undefined;
+}
+
+/**
+ * Состояние списка шаблонов окна текста при (пере)чтении (code review R2-2): список перечитывается при каждом
+ * открытии; пока идёт обновление и при его сбое (сеть, 5xx) уже прочитанный список остаётся; 401/403 — доступ закрыт.
+ */
+export function nextTemplatesLoad<T extends SupplierTextTemplateLike>(
+  current: SupplierTextTemplatesLoad<T>,
+  event: { kind: 'start' } | { kind: 'ok'; templates: T[] } | { kind: 'failed'; status: number },
+): SupplierTextTemplatesLoad<T> {
+  if (event.kind === 'ok') return { status: 'ready', templates: event.templates };
+  if (event.kind === 'start') return current.status === 'ready' ? current : { status: 'loading' };
+  if (event.status === 401 || event.status === 403) return { status: 'denied' };
+  return current.status === 'ready' ? current : { status: 'error' };
 }
