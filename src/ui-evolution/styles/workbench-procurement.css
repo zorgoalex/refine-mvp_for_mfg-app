@@ -1,0 +1,242 @@
+/* «NewLine»: экран «Потребности заказов в ресурсах» (обе вкладки и все виды).
+   Только оформление: виды, фильтры, наборы, действия и разметка — прежние. */
+
+:root[data-ui-variant="workbench"] .rr-screen {
+  --rr-surface: var(--evo-surface);
+  --rr-surface-2: var(--evo-surface-muted, #f7f8fa);
+  --rr-border: var(--evo-border);
+  --rr-border-strong: var(--evo-border);
+  --rr-text: var(--evo-text);
+  --rr-muted: var(--evo-text-secondary);
+  --rr-grp-bg: var(--evo-surface-muted, #f7f8fa);
+  --rr-shadow: none;
+  font-size: 13px;
+}
+
+/* --- вкладки страницы: подчёркнутые, плотные --- */
+:root[data-ui-variant="workbench"] .rr-screen .rr-page-tabs > .ant-tabs-nav {
+  margin-bottom: 14px;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .rr-page-tabs > .ant-tabs-nav .ant-tabs-tab {
+  padding: 9px 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .rr-page-tabs > .ant-tabs-nav .ant-tabs-tab + .ant-tabs-tab {
+  margin-left: 22px;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .rr-page-tabs > .ant-tabs-nav .ant-tabs-tab:not(.ant-tabs-tab-active) .ant-tabs-tab-btn {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .rr-page-tabs > .ant-tabs-nav .ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .rr-page-tabs > .ant-tabs-nav .ant-tabs-ink-bar {
+  height: 2px;
+  background: var(--evo-text);
+}
+
+/* --- элементы управления: высота 30, текст 13 --- */
+:root[data-ui-variant="workbench"] .rr-screen .ant-btn:not(.ant-btn-sm):not(.ant-btn-lg):not(.ant-btn-icon-only),
+:root[data-ui-variant="workbench"] .rr-screen .ant-input-affix-wrapper,
+:root[data-ui-variant="workbench"] .rr-screen .ant-picker,
+:root[data-ui-variant="workbench"] .rr-screen .ant-select-single:not(.ant-select-sm) .ant-select-selector {
+  font-size: 13px;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .ant-segmented {
+  border-radius: 9px;
+  background: var(--evo-surface-muted, #f1f3f6);
+  font-size: 13px;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .ant-segmented .ant-segmented-item-selected {
+  box-shadow: 0 0 0 1px var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .ant-checkbox-wrapper {
+  font-size: 13px;
+}
+
+/* --- таблицы: карточка с тонкими разделителями, плотные строки --- */
+:root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper {
+  overflow: hidden;
+  border: 1px solid var(--evo-border);
+  border-radius: var(--evo-radius-lg);
+  background: var(--evo-surface);
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .rr-frame .ant-table-wrapper,
+:root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper .ant-table-wrapper {
+  border: 0;
+  border-radius: 0;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper .ant-table {
+  font-size: 13px;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper .ant-table-thead > tr > th {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--evo-border);
+  background: var(--evo-surface);
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper .ant-table-tbody > tr > td {
+  padding: 6px 10px;
+  border-top: 0;
+  border-bottom: 1px solid var(--evo-border);
+  box-shadow: none;
+  font-size: 13px;
+}
+
+/* без «зебры»: строки разделяет только тонкая линия */
+:root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper .ant-table-tbody > tr.ant-table-row > td {
+  /* прозрачно: подсветка выбранной строки задаётся на самой строке */
+  background: transparent;
+}
+
+/* «Панель»: имя клиента под номером заказа — в одну строку */
+:root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper .ant-table-tbody > tr > td > div > .ant-typography-secondary[style*="font-size: 12px"] {
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper .ant-table-tbody > tr > td .ant-typography:not([style*="font-size"]) {
+  font-size: inherit;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper .ant-table-tbody > tr:last-child > td {
+  border-bottom: 0;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper .ant-table-tbody > tr.ant-table-row:hover > td {
+  background: color-mix(in srgb, var(--evo-primary) 4%, var(--evo-surface));
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper .ant-table-tbody > tr.ant-table-row-selected > td {
+  background: color-mix(in srgb, var(--evo-primary) 8%, var(--evo-surface));
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper .ant-table-tbody > tr.ant-table-expanded-row > td {
+  padding: 10px 12px 12px;
+  background: var(--evo-surface-muted, #f7f8fa);
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper .ant-table-tbody > tr > td .ant-typography,
+:root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper .ant-table-tbody > tr > td .ant-tag {
+  line-height: 1.35;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper .ant-table-tbody > tr.rr-grp > td,
+:root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper .ant-table-tbody > tr.rr-grp:hover > td {
+  background: var(--evo-surface-muted, #f7f8fa);
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper .ant-pagination {
+  margin: 0;
+  padding: 8px 12px;
+  border-top: 1px solid var(--evo-border);
+  font-size: 12.5px;
+}
+
+/* --- экран снабжения: одна спокойная карточка без серых полос --- */
+:root[data-ui-variant="workbench"] .rr-screen .rr-frame {
+  border-radius: var(--evo-radius-lg);
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .rr-subnav,
+:root[data-ui-variant="workbench"] .rr-screen .rr-appbar {
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .rr-subnav {
+  padding: 10px 14px;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .rr-appbar {
+  padding: 10px 14px;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .rr-appbar .rr-ttl {
+  font-size: 15px;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .rr-toolbar {
+  padding: 10px 14px;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .rr-pad {
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .rr-pad--top {
+  padding-bottom: 0;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .rr-kpi {
+  padding: 8px 12px;
+  border-radius: var(--evo-radius-md, 10px);
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .rr-kpi .rr-kpi-l {
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .rr-kpi .rr-kpi-v {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .rr-legend {
+  padding: 10px 14px 0;
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .rr-chip {
+  padding: 1px 9px;
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .rr-tag {
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .rr-bar {
+  height: 4px;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .rr-step {
+  padding: 1px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .rr-screen .rr-line,
+:root[data-ui-variant="workbench"] .rr-screen .rr-receipts,
+:root[data-ui-variant="workbench"] .rr-screen .rr-allocated {
+  border-radius: var(--evo-radius-md, 10px);
+}
+
+/* «Приход 1С»: номер документа — в одну строку */
+:root[data-ui-variant="workbench"] .rr-screen .rr-receipts-table .ant-table-tbody > tr > td:nth-child(2) {
+  white-space: nowrap;
+}
+
+/* выбранный приход сохраняет свою подсветку поверх общих правил строк */
+:root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper.rr-receipts-table .ant-table-tbody > tr.rr-receipt-row--picked > td,
+:root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper.rr-receipts-table .ant-table-tbody > tr.rr-receipt-row--picked:hover > td {
+  background: var(--rr-row-picked);
+}

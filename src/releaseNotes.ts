@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-04", title: "NewLine: «Потребности заказов в ресурсах»",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "Вариант NewLine: экран «Потребности заказов в ресурсах» оформлен в стиле нового дизайна — плотные строки, таблицы в карточках с тонкими разделителями, компактные вкладки и показатели. Все виды («Сводка», «Материалы», «Панель»), фильтры, «Экран снабжения» с приходами 1С и заявками поставщикам работают как прежде.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-04", title: "Экран снабжения: липкие фильтры, приходы без «прыжков»",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [
