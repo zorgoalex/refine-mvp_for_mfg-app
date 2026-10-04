@@ -247,22 +247,31 @@ export function WorklistSection({ active, onUrgentCount, onCapabilities }: Workl
   const displayKeys = useMemo(() => (state.groupBy === 'none' || !response
     ? lines.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((line) => line.lineKey)
     : response.groups.flatMap((group) => (collapsed.has(group.key) ? [] : group.lineKeys))), [collapsed, lines, page, response, state.groupBy]);
-  // Липкая полоса встаёт под закреплённые сверху шапку и вкладки приложения: их высота зависит от оформления.
+  // Липкая полоса встаёт под закреплённые сверху шапку и вкладки приложения. Их высота зависит от оформления и
+  // меняется при прокрутке (шапка сворачивается), поэтому отступ пересчитывается по фактическому положению.
   const stickyBarRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!active) return undefined;
+    let frame = 0;
     const apply = () => {
+      frame = 0;
       const bar = stickyBarRef.current;
       if (!bar) return;
       const pinned = [...document.querySelectorAll<HTMLElement>('.ant-layout-header, .ant-tabs-top')]
         .filter((node) => !node.contains(bar) && !bar.contains(node))
-        .map((node) => { const style = getComputedStyle(node); return { position: style.position, top: parseFloat(style.top), height: node.getBoundingClientRect().height }; });
+        .map((node) => { const rect = node.getBoundingClientRect(); return { position: getComputedStyle(node).position, top: rect.top, bottom: rect.bottom }; });
       bar.style.setProperty('--rr-sticky-top', `${pinnedTopOffset(pinned)}px`);
     };
+    const schedule = () => { if (frame === 0) frame = window.requestAnimationFrame(apply); };
     apply();
-    window.addEventListener('resize', apply);
-    return () => window.removeEventListener('resize', apply);
-  }, [active, response === null]);
+    window.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('resize', schedule);
+    return () => {
+      window.removeEventListener('scroll', schedule);
+      window.removeEventListener('resize', schedule);
+      if (frame !== 0) window.cancelAnimationFrame(frame);
+    };
+  }, [active]);
   // Чип группы: развернуть её и прокрутить список к её строке-заголовку.
   const tableHostRef = useRef<HTMLDivElement | null>(null);
   const jumpToGroup = useCallback((key: string) => {

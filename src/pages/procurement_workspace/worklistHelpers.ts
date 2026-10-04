@@ -332,11 +332,12 @@ export function saveCollapsedGroups(userId: string, groupBy: WorklistGroupBy, co
 }
 
 /**
- * Где встаёт липкая полоса: под самым нижним из закреплённых сверху элементов приложения (шапка, вкладки). Закреплённый
- * (`sticky`/`fixed`) элемент в закреплённом положении занимает место от своего `top` на свою высоту.
+ * Где встаёт липкая полоса: под нижним краем самого нижнего из закреплённых сверху элементов приложения (шапка,
+ * вкладки) — по их фактическому положению на экране: закреплённый (`sticky`/`fixed`) элемент у верха окна, невысокий
+ * (боковое меню не считается) и видимый.
  */
-export function pinnedTopOffset(nodes: ReadonlyArray<{ position: string; top: number; height: number }>): number {
-  return Math.round(nodes
-    .filter((node) => (node.position === 'sticky' || node.position === 'fixed') && Number.isFinite(node.top) && node.height > 0 && node.height < 200)
-    .reduce((offset, node) => Math.max(offset, node.top + node.height), 0));
+export function pinnedTopOffset(nodes: ReadonlyArray<{ position: string; top: number; bottom: number }>): number {
+  return Math.max(0, Math.round(nodes
+    .filter((node) => (node.position === 'sticky' || node.position === 'fixed') && node.top <= 120 && node.bottom > 0 && node.bottom - node.top < 200)
+    .reduce((offset, node) => Math.max(offset, node.bottom), 0)));
 }
