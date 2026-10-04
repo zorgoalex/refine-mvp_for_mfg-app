@@ -690,8 +690,8 @@ function SupplierRequestDrawer({ requestId, onClose, onChanged, canManage, manag
               </Tooltip>
             )}
             {card.actions.send && (
-              <Tooltip title={!hasRequestSupplier(card) ? 'Укажите поставщика перед отправкой' : dirty ? 'Сначала сохраните изменения' : undefined}>
-                <Button loading={busyTransition === 'send'} disabled={!canManage || manageLoading || !hasRequestSupplier(card) || dirty} onClick={() => void doTransition('send')}>Отправить</Button>
+              <Tooltip title={!hasRequestSupplier(card) ? 'Укажите поставщика перед отправкой' : dirty ? 'Сначала сохраните изменения' : SEND_HINT}>
+                <Button loading={busyTransition === 'send'} disabled={!canManage || manageLoading || !hasRequestSupplier(card) || dirty} onClick={() => void doTransition('send')}>Отметить отправленной</Button>
               </Tooltip>
             )}
             {card.actions.close && (
@@ -784,7 +784,7 @@ function SupplierRequestLineCard({
             title="Заказ"
             render={(_value, order) => (
               <span>
-                <OrderNumber orderName={order.orderName} fullNumber={order.fullNumber} />
+                <OrderNumber strong orderName={order.orderName} fullNumber={order.fullNumber} />
                 {order.clientName ? ` · ${order.clientName}` : ''}
               </span>
             )}
@@ -1106,20 +1106,24 @@ function PossiblePaymentRow({ possiblePayment, canManage, busy, disabled, onLink
   );
 }
 
+/** Что делает кнопка: только статус — наружу ничего не уходит (замечание пользователя 2026-10-04). */
+const SEND_HINT = 'Меняет статус заявки на «Отправлена»: количество считается заказанным. Поставщику ничего не отправляется';
+
 const TRANSITION_TITLES: Record<'send' | 'close' | 'cancel', string> = {
-  send: 'Отправить заявку',
+  send: 'Отметить заявку отправленной',
   close: 'Закрыть заявку',
   cancel: 'Отменить заявку',
 };
 
 const TRANSITION_SUCCESS: Record<'send' | 'close' | 'cancel', string> = {
-  send: 'Заявка отправлена',
+  send: 'Заявка отмечена отправленной',
   close: 'Заявка закрыта',
   cancel: 'Заявка отменена',
 };
 
 const TRANSITION_CONTENTS: Record<'send' | 'close' | 'cancel', (card: SupplierRequestCardDto) => string> = {
-  send: (card) => `Отправить заявку ${card.requestNumber} поставщику «${card.supplierName}»?`,
+  send: (card) => `Заявка ${card.requestNumber} поставщику «${card.supplierName}» получит статус «Отправлена», её количество в рабочем списке станет «заказано». `
+    + 'Сама программа поставщику ничего не отправляет — передайте ему текст заявки («Текст для поставщика»).',
   close: (card) => `Закрыть заявку ${card.requestNumber}? Непокрытый остаток вернётся в рабочий список.`,
   cancel: (card) => `Отменить заявку ${card.requestNumber}? Позиции вернутся в рабочий список.`,
 };

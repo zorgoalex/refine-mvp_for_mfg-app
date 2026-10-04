@@ -166,7 +166,7 @@ export const OrderResourceRequirementList: React.FC<OrderResourceRequirementList
   const [cardMode, setCardMode] = useStoredViewMode<ResourceCardMode>(
     'order-resource-requirements:card-view',
     RESOURCE_CARD_MODES,
-    'summary',
+    'tabs',
   );
   const [expandedRowKeys, setExpandedRowKeys] = useState<readonly Key[]>([]);
   const [collapsedMaterialOrders, setCollapsedMaterialOrders] = useState<ReadonlySet<number>>(() => new Set());

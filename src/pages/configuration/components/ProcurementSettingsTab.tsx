@@ -145,7 +145,7 @@ export const ProcurementSettingsTab: React.FC = () => {
       <Card size="small" title="Рабочий список снабженца">
         <Form layout="vertical">
           <Form.Item
-            label="Нужно к: за сколько рабочих дней до плановой даты"
+            label="Плановая дата наличия на складе: за сколько рабочих дней до плановой даты заказа"
             validateStatus={errors.leadDays ? 'error' : ''}
             help={errors.leadDays ?? LEAD_DAYS_HELP}
           >
@@ -247,7 +247,7 @@ export const ProcurementSettingsTab: React.FC = () => {
           <Form.Item
             label="Рабочий список: просроченные заказы не старше, дней"
             validateStatus={errors.overdueWindowDays ? 'error' : ''}
-            help={errors.overdueWindowDays ?? 'Более старые незакрытые заказы находятся поиском или фильтром «Нужно к: с».'}
+            help={errors.overdueWindowDays ?? 'Более старые незакрытые заказы находятся поиском или фильтром «Наличие на складе: с».'}
           >
             <InputNumber
               min={1}

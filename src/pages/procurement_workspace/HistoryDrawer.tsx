@@ -91,7 +91,7 @@ export function HistoryDrawer({ line, onClose }: HistoryDrawerProps) {
       title={line ? (
         <Space direction="vertical" size={0}>
           <b>{materialName}</b>
-          <OrderNumber orderName={line.orderName} fullNumber={line.fullNumber} />
+          <OrderNumber strong orderName={line.orderName} fullNumber={line.fullNumber} />
         </Space>
       ) : 'История'}
     >

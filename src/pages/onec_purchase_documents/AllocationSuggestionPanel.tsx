@@ -345,7 +345,7 @@ function SuggestionLineCard({ line, lineDraft, onToggle, onQuantityChange, onRes
           />
           <Table.Column<AllocationSuggestionCandidate>
             key="due"
-            title="Нужно к"
+            title="Наличие на складе к"
             render={(_, candidate) => (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-start' }}>
                 <span className="rr-num">{candidate.dueDate ? formatDateOnly(candidate.dueDate) : '—'}</span>

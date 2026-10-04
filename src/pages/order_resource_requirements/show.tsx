@@ -35,7 +35,7 @@ export const OrderResourceRequirementShow: React.FC<IResourceComponentsProps> = 
   const [cardMode, setCardMode] = useStoredViewMode<ResourceCardMode>(
     'order-resource-requirements:card-view',
     RESOURCE_CARD_MODES,
-    'summary',
+    'tabs',
   );
 
   useEffect(() => {

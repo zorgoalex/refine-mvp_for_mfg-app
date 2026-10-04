@@ -1,7 +1,7 @@
-import { DeleteOutlined, HistoryOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
+import { DeleteOutlined, DownOutlined, HistoryOutlined, ReloadOutlined, RightOutlined, SaveOutlined } from '@ant-design/icons';
 import { Alert, Button, DatePicker, Empty, Input, Modal, Select, Space, Tag, message } from 'antd';
 import dayjs from 'dayjs';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useGetIdentity } from '@refinedev/core';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ordersApi, subscribeOrderDataChanged } from '../../api/ordersApi';
@@ -26,6 +26,8 @@ import {
 import { buildDraftPreviewItems, requestRefTag, saveDraftPreview } from './supplierRequestsHelpers';
 import {
   COVERAGE_LABELS,
+  COVERAGE_ORDER,
+  areAllGroupsCollapsed,
   coveragePercents,
   dueText,
   formatDate,
@@ -34,14 +36,19 @@ import {
   bulkMarkBlockReason,
   clampPage,
   isGroupSelected,
+  isLegendCoverageActive,
   parseWorklistSearch,
   planBulkMarks,
   stateFromViewQuery,
   stateToViewQuery,
   toApiParams,
+  toggleCollapsedGroup,
+  toggleCoverageValue,
   toggleGroupSelection,
+  toggleLegendCoverage,
   worklistExportRows,
   writeWorklistSearch,
+  type LegendCoverageKey,
   type WorklistState,
 } from './worklistHelpers';
 
@@ -216,9 +223,25 @@ export function WorklistSection({ active, onUrgentCount, onCapabilities }: Workl
   useEffect(() => { setPage(1); }, [paramsKey]);
   // Список мог сократиться (например, после отметки) — страница та же, что показывает таблица (CR3-2).
   const page = clampPage(requestedPage, lines.length, PAGE_SIZE);
+  // Свёрнутые группы (по умолчанию все развёрнуты); при смене группировки сбрасываются.
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => { setCollapsed(new Set()); }, [state.groupBy]);
+  const groups = useMemo(() => (state.groupBy === 'none' || !response ? [] : response.groups), [response, state.groupBy]);
+  const groupKeys = useMemo(() => groups.map((group) => group.key), [groups]);
+  const allCollapsed = areAllGroupsCollapsed(groupKeys, collapsed);
   const displayKeys = useMemo(() => (state.groupBy === 'none' || !response
     ? lines.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((line) => line.lineKey)
-    : response.groups.flatMap((group) => group.lineKeys)), [lines, page, response, state.groupBy]);
+    : response.groups.flatMap((group) => (collapsed.has(group.key) ? [] : group.lineKeys))), [collapsed, lines, page, response, state.groupBy]);
+  // Чип группы: развернуть её и прокрутить список к её строке-заголовку.
+  const tableHostRef = useRef<HTMLDivElement | null>(null);
+  const jumpToGroup = useCallback((key: string) => {
+    setCollapsed((current) => { if (!current.has(key)) return current; const next = new Set(current); next.delete(key); return next; });
+    window.requestAnimationFrame(() => {
+      const row = [...(tableHostRef.current?.querySelectorAll('tr[data-row-key]') ?? [])]
+        .find((node) => node.getAttribute('data-row-key') === `group:${key}`);
+      row?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, []);
   const [focusIndex, setFocusIndex] = useState(-1);
   useEffect(() => { setFocusIndex(-1); }, [displayKeys]);
   useEffect(() => {
@@ -265,13 +288,23 @@ export function WorklistSection({ active, onUrgentCount, onCapabilities }: Workl
     if (state.groupBy === 'none' || !response) return lines;
     return response.groups.flatMap((group) => [
       { rowType: 'group' as const, lineKey: `group:${group.key}`, group },
-      ...(group.lineKeys.map((key) => lineByKey.get(key)).filter(Boolean) as ProcurementWorklistLine[]),
+      ...(collapsed.has(group.key) ? [] : group.lineKeys.map((key) => lineByKey.get(key)).filter(Boolean) as ProcurementWorklistLine[]),
     ]);
-  }, [lineByKey, lines, response, state.groupBy]);
+  }, [collapsed, lineByKey, lines, response, state.groupBy]);
   const groupColumns = useMemo(() => withGroupRows(columns ?? [], (group) => {
     const whole = isGroupSelected(group.lineKeys, selected);
+    const folded = collapsed.has(group.key);
     return (
       <span>
+        <Button
+          size="small"
+          type="text"
+          className="rr-grp-toggle"
+          icon={folded ? <RightOutlined /> : <DownOutlined />}
+          aria-expanded={!folded}
+          aria-label={folded ? `Развернуть группу ${group.label}` : `Свернуть группу ${group.label}`}
+          onClick={() => setCollapsed((current) => toggleCollapsedGroup(current, group.key))}
+        />
         {group.label}{' '}
         <span className="rr-grp-info">
           · {group.linesCount} поз. · дефицит {[group.deficitM2 ? formatQuantity(group.deficitM2, 'm2') : '', group.deficitLm ? formatQuantity(group.deficitLm, 'lm') : ''].filter(Boolean).join(' + ') || '0'}
@@ -281,7 +314,7 @@ export function WorklistSection({ active, onUrgentCount, onCapabilities }: Workl
         </Button>
       </span>
     );
-  }), [columns, selected, stale]);
+  }), [collapsed, columns, selected, stale]);
   const worklistSelection: TableProps<WorklistRow>['rowSelection'] = {
     ...(rowSelection as unknown as TableProps<WorklistRow>['rowSelection']),
     getCheckboxProps: (row) => ({ disabled: stale || isGroupRow(row) }),
@@ -333,8 +366,8 @@ export function WorklistSection({ active, onUrgentCount, onCapabilities }: Workl
         />
         <DatePicker.RangePicker
           format="DD.MM.YYYY"
-          placeholder={['Нужно к: с', 'по']}
-          style={{ width: 230 }}
+          placeholder={['Наличие на складе: с', 'по']}
+          style={{ width: 270 }}
           value={state.dueFrom || state.dueTo ? [state.dueFrom ? dayjs(state.dueFrom) : null, state.dueTo ? dayjs(state.dueTo) : null] : null}
           onChange={(range) => setState({
             dueFrom: range?.[0] ? range[0].format('YYYY-MM-DD') : null,
@@ -375,7 +408,7 @@ export function WorklistSection({ active, onUrgentCount, onCapabilities }: Workl
           mode="multiple"
           allowClear
           maxTagCount="responsive"
-          placeholder="Покрытие"
+          placeholder="Обеспечено"
           style={{ minWidth: 150 }}
           value={state.coverage}
           onChange={(value) => setState({ coverage: value })}
@@ -405,21 +438,67 @@ export function WorklistSection({ active, onUrgentCount, onCapabilities }: Workl
         </div>
         {response && (
           <div className="rr-hint">
-            «Нужно к» = плановая дата − {response.settings.leadDays} раб. дн. Заказы: незавершённые и невыданные, без плановой даты или с датой
+            «Плановая дата наличия на складе» = плановая дата заказа − {response.settings.leadDays} раб. дн. Заказы: незавершённые и невыданные, без плановой даты или с датой
             {response.window.plannedFrom ? ` с ${formatDate(response.window.plannedFrom)}` : ''}{response.window.plannedTo ? ` по ${formatDate(response.window.plannedTo)}` : ''}
-            {response.window.plannedFrom ? ' (более старые — через поиск или «Нужно к: с»)' : ''}; всего {response.window.ordersCount}.
+            {response.window.plannedFrom ? ' (более старые — через поиск или «Наличие на складе: с»)' : ''}; всего {response.window.ordersCount}.
           </div>
         )}
       </div>
 
-      <div className="rr-legend">
-        <span><i className="rr-dot" style={{ background: 'var(--rr-ok)' }} />пришло</span>
-        <span><i className="rr-dot" style={{ background: 'var(--rr-ordered)' }} />заказано поставщику</span>
-        <span><i className="rr-dot" style={{ background: 'var(--rr-none-soft)', outline: '1px solid var(--rr-border)' }} />дефицит</span>
-        <span><i className="rr-dot" style={{ background: KIND_COLORS.sheet_material }} />листовой материал</span>
-        <span><i className="rr-dot" style={{ background: KIND_COLORS.film }} />плёнка</span>
+      {/* Легенда цветов — она же быстрые фильтры; рядом чипы значений «Обеспечено». */}
+      <div className="rr-legend" role="group" aria-label="Быстрые фильтры">
+        {LEGEND_ITEMS.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            className={`rr-chip${isLegendCoverageActive(state.coverage, item.key) ? ' rr-chip--on' : ''}`}
+            aria-pressed={isLegendCoverageActive(state.coverage, item.key)}
+            onClick={() => setState(toggleLegendCoverage(state, item.key))}
+          >
+            <i className="rr-dot" style={item.dot} />{item.label}
+          </button>
+        ))}
+        {(['sheet_material', 'film'] as const).map((kind) => (
+          <button
+            key={kind}
+            type="button"
+            className={`rr-chip${state.kind === kind ? ' rr-chip--on' : ''}`}
+            aria-pressed={state.kind === kind}
+            onClick={() => setState({ kind: state.kind === kind ? null : kind })}
+          >
+            <i className="rr-dot" style={{ background: KIND_COLORS[kind] }} />{kind === 'film' ? 'плёнка' : 'листовой материал'}
+          </button>
+        ))}
+        <span className="rr-legend-sep">Обеспечено:</span>
+        {COVERAGE_ORDER.map((value) => (
+          <button
+            key={value}
+            type="button"
+            className={`rr-chip${state.coverage.includes(value) ? ' rr-chip--on' : ''}`}
+            aria-pressed={state.coverage.includes(value)}
+            onClick={() => setState({ coverage: toggleCoverageValue(state.coverage, value) })}
+          >
+            {COVERAGE_LABELS[value].label}
+          </button>
+        ))}
       </div>
 
+      {groups.length > 0 && (
+        <div className="rr-groupbar">
+          <Button size="small" onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(groupKeys))}>
+            {allCollapsed ? 'Развернуть все' : 'Свернуть все'}
+          </Button>
+          <div className="rr-groupchips" role="navigation" aria-label="Переход к группе">
+            {groups.map((group) => (
+              <button key={group.key} type="button" className="rr-chip" onClick={() => jumpToGroup(group.key)}>
+                {group.label}<span className="rr-chip-n">{group.linesCount}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div ref={tableHostRef}>
       <Table<WorklistRow>
         className="rr-table"
         rowKey="lineKey"
@@ -434,18 +513,24 @@ export function WorklistSection({ active, onUrgentCount, onCapabilities }: Workl
         scroll={{ x: 1100 }}
         locale={{ emptyText: <Empty description={state.preset === 'action' ? 'Всё покрыто — действий не требуется' : 'Нет позиций'} /> }}
       />
+      </div>
 
       {selected.size > 0 && (
         <div className="rr-sticky" role="region" aria-label="Действия с выбранным">
           <span>Выбрано <b>{selected.size}</b> поз. · дефицит {selectionDeficit} · поставщиков: {selectedSuppliers}</span>
+          {response?.capabilities.supplierRequests && (
+            <Button type="primary" disabled={stale} onClick={formRequests}>Сформировать заявки</Button>
+          )}
           <Tooltip title={markBlockReason ?? undefined}>
-            <Button type="primary" loading={marking} disabled={markBlockReason !== null} onClick={() => void markPurchased()}>
+            <Button
+              type={response?.capabilities.supplierRequests ? 'default' : 'primary'}
+              loading={marking}
+              disabled={markBlockReason !== null}
+              onClick={() => void markPurchased()}
+            >
               Отметить «Закуплено»
             </Button>
           </Tooltip>
-          {response?.capabilities.supplierRequests && (
-            <Button disabled={stale} onClick={formRequests}>Сформировать заявки</Button>
-          )}
           <Button disabled={stale} onClick={() => void exportExcel()}>Выгрузить XLS</Button>
           <Button onClick={() => setSelected(new Set())}>Снять выделение</Button>
         </div>
@@ -455,6 +540,12 @@ export function WorklistSection({ active, onUrgentCount, onCapabilities }: Workl
     </div>
   );
 }
+
+const LEGEND_ITEMS: ReadonlyArray<{ key: LegendCoverageKey; label: string; dot: CSSProperties }> = [
+  { key: 'received', label: 'пришло', dot: { background: 'var(--rr-ok)' } },
+  { key: 'ordered', label: 'заказано поставщику', dot: { background: 'var(--rr-ordered)' } },
+  { key: 'deficit', label: 'дефицит', dot: { background: 'var(--rr-none-soft)', outline: '1px solid var(--rr-border)' } },
+];
 
 type GroupRow = { rowType: 'group'; lineKey: string; group: NonNullable<ProcurementWorklistResponse['groups']>[number] };
 type WorklistRow = ProcurementWorklistLine | GroupRow;
@@ -496,9 +587,9 @@ function useWorklistColumns(
 ): TableProps<ProcurementWorklistLine>['columns'] {
   return useMemo(() => [
     {
-      title: 'Нужно к',
+      title: <span>Плановая дата<br />наличия на складе</span>,
       key: 'due',
-      width: 130,
+      width: 150,
       render: (_value, line) => (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-start' }}>
           <span className="rr-num">{formatDate(line.dueDate)}</span>
@@ -513,7 +604,7 @@ function useWorklistColumns(
       render: (_value, line) => (
         <div>
           <Link to={`/orders/show/${line.orderId}`}>
-            <OrderNumber orderName={line.orderName} fullNumber={line.fullNumber} />
+            <OrderNumber strong orderName={line.orderName} fullNumber={line.fullNumber} />
           </Link>
           <div className="rr-sub">{[line.clientName, line.orderStatus].filter(Boolean).join(' · ')}</div>
         </div>
@@ -545,7 +636,7 @@ function useWorklistColumns(
       ),
     },
     {
-      title: 'Покрытие',
+      title: 'Обеспечено',
       key: 'coverage',
       width: 230,
       render: (_value, line) => {

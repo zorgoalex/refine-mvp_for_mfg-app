@@ -4,6 +4,11 @@ import { resolveSupplyTab } from '../order_resource_requirements/resourceRequire
 import {
   DEFAULT_WORKLIST_STATE,
   applySelectionChange,
+  areAllGroupsCollapsed,
+  isLegendCoverageActive,
+  toggleCollapsedGroup,
+  toggleCoverageValue,
+  toggleLegendCoverage,
   bulkMarkBlockReason,
   clampPage,
   dueText,
@@ -105,7 +110,7 @@ describe('подписи и выгрузка', () => {
 
   it('строки Excel', () => {
     expect(worklistExportRows([line({ purchased: true, purchaseOrigin: 'onec' })])[0]).toMatchObject({
-      'Заказ': 'A-2972', 'Дефицит': 10, 'Ед.': 'м²', 'Покрытие': 'Не покрыто', 'Закуплено': 'приходом 1С',
+      'Заказ': 'A-2972', 'Дефицит': 10, 'Ед.': 'м²', 'Обеспечено': 'Не покрыто', 'Закуплено': 'приходом 1С',
     });
   });
 });
@@ -159,5 +164,33 @@ describe('CR3-2: страница после сокращения списка',
     expect(clampPage(2, 50, 50)).toBe(1);
     expect(clampPage(2, 60, 50)).toBe(2);
     expect(clampPage(3, 0, 50)).toBe(1);
+  });
+});
+
+describe('замечания 2026-10-04: легенда-фильтры, чипы «Обеспечено», сворачивание групп', () => {
+  it('пункт легенды включает свой фильтр, повторный клик снимает', () => {
+    expect(toggleLegendCoverage({ coverage: [], preset: 'action' }, 'deficit')).toEqual({ coverage: ['partial', 'none'] });
+    expect(isLegendCoverageActive(['none', 'partial'], 'deficit')).toBe(true);
+    expect(toggleLegendCoverage({ coverage: ['none', 'partial'], preset: 'action' }, 'deficit')).toEqual({ coverage: [] });
+    expect(isLegendCoverageActive(['none'], 'deficit')).toBe(false);
+  });
+
+  it('«пришло» переводит набор на «Всё»: полностью пришедшие позиции действий не требуют', () => {
+    expect(toggleLegendCoverage({ coverage: [], preset: 'action' }, 'received')).toEqual({ coverage: ['covered'], preset: 'all' });
+    expect(toggleLegendCoverage({ coverage: [], preset: 'all' }, 'received')).toEqual({ coverage: ['covered'] });
+    expect(toggleLegendCoverage({ coverage: [], preset: 'urgent' }, 'ordered')).toEqual({ coverage: ['ordered'] });
+  });
+
+  it('чип значения добавляет и убирает одно значение, порядок постоянный', () => {
+    expect(toggleCoverageValue(['covered'], 'none')).toEqual(['none', 'covered']);
+    expect(toggleCoverageValue(['none', 'covered'], 'covered')).toEqual(['none']);
+  });
+
+  it('«Свернуть все» становится «Развернуть все», только когда свёрнуты все показанные группы', () => {
+    expect(areAllGroupsCollapsed([], new Set())).toBe(false);
+    expect(areAllGroupsCollapsed(['a', 'b'], new Set(['a']))).toBe(false);
+    expect(areAllGroupsCollapsed(['a', 'b'], new Set(['a', 'b', 'old']))).toBe(true);
+    expect([...toggleCollapsedGroup(new Set(['a']), 'b')]).toEqual(['a', 'b']);
+    expect([...toggleCollapsedGroup(new Set(['a']), 'a')]).toEqual([]);
   });
 });

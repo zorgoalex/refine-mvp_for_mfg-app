@@ -58,15 +58,12 @@ export function KindTitle({ kind, short = false }: { kind: ResourceKind; short?:
   );
 }
 
-const SOURCE_TAG_COLORS: Record<ResourceSource, string | undefined> = {
-  cut: 'success',
-  area: 'warning',
-  none: undefined,
-};
+/** Источник количества — справочная пометка: бледный серый текст на фоне карточки, без цветной заливки. */
+const SOURCE_TAG_STYLE: CSSProperties = { marginInlineEnd: 0, background: 'transparent', color: '#8c8c8c', borderColor: 'rgba(140, 140, 140, .35)' };
 
 export function SourceTag({ source }: { source: ResourceSource }) {
   return (
-    <Tag color={SOURCE_TAG_COLORS[source]} style={{ marginInlineEnd: 0 }}>
+    <Tag style={source === 'none' ? { marginInlineEnd: 0 } : SOURCE_TAG_STYLE}>
       {SOURCE_LABELS[source]}
     </Tag>
   );

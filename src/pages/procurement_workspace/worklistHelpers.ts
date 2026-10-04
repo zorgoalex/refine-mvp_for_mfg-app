@@ -173,6 +173,51 @@ export const COVERAGE_LABELS: Record<WorklistCoverage, { label: string; color: s
   no_data: { label: 'Нет данных', color: 'default' },
 };
 
+/** Порядок чипов-пресетов значений «Обеспечено» над списком. */
+export const COVERAGE_ORDER: readonly WorklistCoverage[] = ['none', 'partial', 'ordered', 'covered', 'no_data'];
+
+/** Пункты легенды цветов полосы «Обеспечено» — одновременно быстрые фильтры. */
+export type LegendCoverageKey = 'received' | 'ordered' | 'deficit';
+export const LEGEND_COVERAGE: Record<LegendCoverageKey, readonly WorklistCoverage[]> = {
+  received: ['covered'],
+  ordered: ['ordered'],
+  deficit: ['partial', 'none'],
+};
+
+function sameCoverage(left: readonly WorklistCoverage[], right: readonly WorklistCoverage[]): boolean {
+  return left.length === right.length && right.every((value) => left.includes(value));
+}
+
+export function isLegendCoverageActive(coverage: readonly WorklistCoverage[], key: LegendCoverageKey): boolean {
+  return sameCoverage(coverage, LEGEND_COVERAGE[key]);
+}
+
+/**
+ * Клик по пункту легенды: включает его фильтр, повторный клик — снимает. Полностью пришедшие позиции
+ * действий не требуют, поэтому «пришло» из набора «Требует действия»/«Срочно» переводит на «Всё».
+ */
+export function toggleLegendCoverage(state: Pick<WorklistState, 'coverage' | 'preset'>, key: LegendCoverageKey): Partial<WorklistState> {
+  if (isLegendCoverageActive(state.coverage, key)) return { coverage: [] };
+  return { coverage: [...LEGEND_COVERAGE[key]], ...(key === 'received' && state.preset !== 'all' ? { preset: 'all' as const } : {}) };
+}
+
+/** Чип значения «Обеспечено»: добавляет/убирает одно значение в фильтре, порядок — как у чипов. */
+export function toggleCoverageValue(coverage: readonly WorklistCoverage[], value: WorklistCoverage): WorklistCoverage[] {
+  const next = coverage.includes(value) ? coverage.filter((item) => item !== value) : [...coverage, value];
+  return COVERAGE_ORDER.filter((item) => next.includes(item));
+}
+
+/** «Свернуть все» ↔ «Развернуть все»: свёрнуты ли все показанные группы. */
+export function areAllGroupsCollapsed(groupKeys: readonly string[], collapsed: ReadonlySet<string>): boolean {
+  return groupKeys.length > 0 && groupKeys.every((key) => collapsed.has(key));
+}
+
+export function toggleCollapsedGroup(collapsed: ReadonlySet<string>, key: string): Set<string> {
+  const next = new Set(collapsed);
+  if (next.has(key)) next.delete(key); else next.add(key);
+  return next;
+}
+
 export const URGENCY_COLORS: Record<WorklistUrgency, string> = {
   overdue: 'error',
   critical: 'error',
@@ -207,7 +252,7 @@ export function formatDate(value: string | null): string {
 /** Строки выгрузки в Excel — ровно то, что видно в списке. */
 export function worklistExportRows(lines: ProcurementWorklistLine[]): Array<Record<string, string | number>> {
   return lines.map((line) => ({
-    'Нужно к': formatDate(line.dueDate),
+    'Плановая дата наличия на складе': formatDate(line.dueDate),
     'Срок': dueText(line),
     'Заказ': line.fullNumber,
     'Клиент': line.clientName ?? '',
@@ -218,7 +263,7 @@ export function worklistExportRows(lines: ProcurementWorklistLine[]): Array<Reco
     'Заказано': line.orderedOpen,
     'Дефицит': line.deficit ?? '',
     'Ед.': unitLabel(line.unit),
-    'Покрытие': COVERAGE_LABELS[line.coverage].label,
+    'Обеспечено': COVERAGE_LABELS[line.coverage].label,
     'Закуплено': line.purchased ? (line.purchaseOrigin === 'onec' ? 'приходом 1С' : 'вручную') : '',
   }));
 }
