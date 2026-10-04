@@ -1,4 +1,5 @@
 import { cutJobInformationalDetails, type InformationalCutDetailRow } from './cutJobInformationalDetails';
+import { useWorkspaceChromeBottom } from '../orders/useWorkspaceChromeBottom';
 import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Collapse, DatePicker, Drawer, Empty, Form, Input, Modal, Popconfirm, Radio, Select, Space, Spin, Tabs, Tag, Typography, message, theme } from 'antd';
@@ -1273,6 +1274,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   // NewLine: the piece pointed at / picked in an open sheet (sheet key + overlay key) — list and sheet stay in sync
   const [wbHoverPiece, setWbHoverPiece] = useState<{ sheet: string; piece: string; from: 'list' | 'sheet' } | null>(null);
   const [wbPickedPiece, setWbPickedPiece] = useState<{ sheet: string; piece: string } | null>(null);
+  // the open sheet's parts list sticks right under the app chrome (top bar with tabs)
+  const wbChromeBottom = useWorkspaceChromeBottom();
   const [wbParamsOpen, setWbParamsOpen] = useState(false);
   const [orderOptions, setOrderOptions] = useState<CutOrderSelectOption[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
@@ -5956,7 +5959,11 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                         />
                       )}
                       {isWorkbench && sheetImages[key] ? (
-                        <aside className="wb-cut-sheet-parts" aria-label={`Детали листа ${sheetNo}`}>
+                        <aside
+                          className="wb-cut-sheet-parts"
+                          aria-label={`Детали листа ${sheetNo}`}
+                          style={{ '--wb-cut-sticky-top': `${wbChromeBottom}px` } as React.CSSProperties}
+                        >
                           <div className="wb-cut-sheet-parts__head">
                             <b>Детали листа</b>
                             <span>{sheet.placements.pieces.length} шт.</span>

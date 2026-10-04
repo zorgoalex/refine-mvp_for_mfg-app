@@ -718,3 +718,12 @@
 :root[data-ui-variant="workbench"] .wb-cut-view-controls .cut-sheet-origin-icon {
   transform: scale(0.72);
 }
+
+/* --- «Детали листа» липкие: лист прокручивается, список остаётся под верхней панелью --- */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item--open > .wb-cut-sheet-parts {
+  position: sticky;
+  top: calc(var(--wb-cut-sticky-top, 48px) + 12px);
+  align-self: start;
+  max-height: calc(100vh - var(--wb-cut-sticky-top, 48px) - 72px);
+  border: 1px solid var(--evo-border);
+}

@@ -7,6 +7,7 @@ import {
   cutPdfPreviewBlockReason,
   displayedSheetExtents,
   formatSheetSide,
+  sheetImageHeadingShare,
   parseCutPieceDetailId,
   parseStoredPortrait,
   parseStoredOriginTopLeft,
@@ -100,6 +101,23 @@ describe('cutPreviewHelpers', () => {
         manualLayoutIsStale: false,
         manualLayoutIsActive: false,
       })).toBe(true);
+    });
+  });
+
+  describe('sheetImageHeadingShare', () => {
+    it('is zero for an image of the bare sheet', () => {
+      expect(sheetImageHeadingShare(960, 1299, 2070, 2800)).toBe(0);
+      expect(sheetImageHeadingShare(0, 0, 2070, 2800)).toBe(0);
+    });
+
+    it('measures the heading band above the sheet', () => {
+      // 960px wide sheet 2070×2800 is 1298.6px tall; the image is 1400px
+      expect(sheetImageHeadingShare(960, 1400, 2070, 2800)).toBeCloseTo(1 - 1298.55 / 1400, 3);
+    });
+
+    it('ignores an image that is wider than the sheet or far too tall', () => {
+      expect(sheetImageHeadingShare(1200, 1299, 2070, 2800)).toBe(0);
+      expect(sheetImageHeadingShare(960, 2600, 2070, 2800)).toBe(0);
     });
   });
 

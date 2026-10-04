@@ -416,3 +416,22 @@ function formatTooltipArea(value: number | null | undefined): string {
 export function sheetUsesSourceSvgRendering(placements?: SheetPlacements): boolean {
   return !!placements && (Array.isArray(placements.renderOnlyContours) || placements.pieces.some(piece => !!piece.source_svg?.body));
 }
+
+/**
+ * The on-screen sheet image may carry a job heading band above the sheet (the backend adds it to the
+ * image only). Returns the share of the image height it takes (0 when the image is the bare sheet),
+ * so piece overlays, which are positioned in sheet coordinates, can be laid over the sheet itself.
+ * An image wider than the sheet (side guides) is left alone: the band is only ever added on top.
+ */
+export function sheetImageHeadingShare(
+  imageWidthPx: number,
+  imageHeightPx: number,
+  horizontalMm: number,
+  verticalMm: number,
+): number {
+  if (!(imageWidthPx > 0 && imageHeightPx > 0 && horizontalMm > 0 && verticalMm > 0)) return 0;
+  const sheetHeightPx = imageWidthPx * (verticalMm / horizontalMm);
+  const share = 1 - sheetHeightPx / imageHeightPx;
+  // under 1% is rounding of the raster size; over 30% is not a heading
+  return share > 0.01 && share < 0.3 ? share : 0;
+}

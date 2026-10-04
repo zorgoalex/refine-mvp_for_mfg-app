@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Space } from 'antd';
 import { CheckCircleFilled } from '@ant-design/icons';
 import { OrderDeletedTag } from '../../components/OrderDeletedTag';
-import { displayedSheetExtents, formatSheetSide, type CutPieceOverlay } from './cutPreviewHelpers';
+import { displayedSheetExtents, formatSheetSide, sheetImageHeadingShare, type CutPieceOverlay } from './cutPreviewHelpers';
 import { fitLabelScale, LINE1_SCALE, splitDimsLine } from './pieceLabel';
 
 const sideLabelStyle: React.CSSProperties = {
@@ -122,6 +122,7 @@ function OverlayLayer({
               data-piece-active={activeKey === overlay.key ? 'true' : undefined}
               style={{
                 ...(activeKey === overlay.key ? ACTIVE_PIECE_STYLE : null),
+                pointerEvents: 'auto',
                 position: 'absolute',
                 left: `${overlay.leftPct}%`,
                 top: `${overlay.topPct}%`,
@@ -245,6 +246,8 @@ export function SheetPreview({
   // Track the full-view image's rendered pixel size (set via onLoad) so
   // OverlayLayer can compute pixel-accurate font sizes for label auto-shrink.
   const [fullImgSize, setFullImgSize] = useState({ w: 0, h: 0 });
+  // Share of the image height taken by the job heading band the backend draws above the sheet.
+  const [headingShare, setHeadingShare] = useState(0);
 
   // For the thumbnail the height is fixed (thumbHeight); width follows aspect ratio.
   const { horizontalMm, verticalMm } = displayedSheetExtents(widthMm, heightMm, landscape);
@@ -286,19 +289,32 @@ export function SheetPreview({
               onLoad={(e) => {
                 const img = e.currentTarget;
                 setFullImgSize({ w: img.clientWidth, h: img.clientHeight });
+                setHeadingShare(sheetImageHeadingShare(img.naturalWidth, img.naturalHeight, horizontalMm, verticalMm));
               }}
               style={{ width: '100%', display: 'block' }}
             />
-            <OverlayLayer
-              overlays={overlays}
-              labelsInImage={labelsInImage}
-              imgWidthPx={fullImgSize.w}
-              imgHeightPx={fullImgSize.h}
-              onDoubleClick={onCollapse}
-              activeKey={activeOverlayKey}
-              onHoverKey={onOverlayHover}
-              onPickKey={onOverlayPick}
-            />
+            {/* overlays cover the sheet itself: the heading band above it is not part of the sheet */}
+            <span
+              style={{
+                position: 'absolute',
+                left: 0,
+                top: `${headingShare * 100}%`,
+                width: '100%',
+                height: `${(1 - headingShare) * 100}%`,
+                pointerEvents: 'none',
+              }}
+            >
+              <OverlayLayer
+                overlays={overlays}
+                labelsInImage={labelsInImage}
+                imgWidthPx={fullImgSize.w}
+                imgHeightPx={fullImgSize.h * (1 - headingShare)}
+                onDoubleClick={onCollapse}
+                activeKey={activeOverlayKey}
+                onHoverKey={onOverlayHover}
+                onPickKey={onOverlayPick}
+              />
+            </span>
           </span>
           <span style={{ ...sideLabelStyle, top: 2, left: '50%', transform: 'translateX(-50%)' }}>
             {formatSheetSide(horizontalMm)}
