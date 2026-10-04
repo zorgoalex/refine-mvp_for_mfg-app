@@ -4,6 +4,8 @@ import { load } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
 
 const API_PREFIX = '/api/v1';
+// Controllers mounted outside the global prefix (excluded in main.ts).
+const UNPREFIXED_CONTROLLER_PREFIXES = ['api/integration/1c-agents/v1'];
 const ROUTE_DECORATOR_PATTERN = /^\s*@(Get|Post|Put|Patch|Delete)\(\s*(?:(['"`])([^'"`]*)\2)?\s*\)/gm;
 
 describe('OpenAPI static contract route parity', () => {
@@ -82,7 +84,8 @@ function parseControllerPrefix(source: string, file: string, routeIndex: number)
 }
 
 function toOpenApiPath(controllerPrefix: string, routePath: string): string {
-  const joinedPath = [API_PREFIX, controllerPrefix, routePath]
+  const prefix = UNPREFIXED_CONTROLLER_PREFIXES.includes(controllerPrefix) ? '/' : API_PREFIX;
+  const joinedPath = [prefix, controllerPrefix, routePath]
     .filter((part) => part.length > 0)
     .join('/')
     .replace(/\/+/g, '/')
@@ -116,7 +119,7 @@ function collectDocumentedRoutes(contract: string): string[] {
   // Strict parsing rejects duplicate path keys; indentation/text scans hid them.
   const document = load(contract) as { paths: Record<string, Record<string, unknown>> };
   return Object.entries(document.paths)
-    .filter(([path]) => path.startsWith('/api/v1/'))
+    .filter(([path]) => path.startsWith('/api/v1/') || UNPREFIXED_CONTROLLER_PREFIXES.some((prefix) => path.startsWith(`/${prefix}/`)))
     .flatMap(([path, item]) => Object.keys(item)
       .filter((method) => /^(get|post|put|patch|delete)$/.test(method))
       .map((method) => `${method.toUpperCase()} ${canonicalizePathParameters(path)}`));

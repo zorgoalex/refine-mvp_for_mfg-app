@@ -288,6 +288,40 @@ fallback profile и в обычном `cnc-telegram` не запускается
 Outer command timeout должен быть больше `GLM_OCR_CLIENT_TIMEOUT_SECONDS` (по
 умолчанию 660); engine входит в source fingerprint.
 
+### Интеграция 1С
+
+Backend: `BACKEND_ENABLE_ONEC_AGENT` (по умолчанию `false`), `ONEC_AGENT_PORT`
+(3001, отдельный listener только для API агента), `ONEC_INGRESS_SECRET` /
+`ONEC_INGRESS_SECRET_PREVIOUS`, `ONEC_CLIENT_CERT_HEADER`,
+`ONEC_AGENT_SESSION_TTL_MS`, `ONEC_AGENT_HEARTBEAT_INTERVAL_MS` (агент считается
+молчащим после трёх интервалов), `BACKEND_ONEC_MONITOR_OWNER`
+(`none` | `in_process`: алерты, сроки сертификатов, очистка) и
+`BACKEND_ONEC_MONITOR_INTERVAL_MS`. `BACKEND_ONEC_NIGHTLY_FULL_SYNC_HOUR_UTC` (час UTC 0–23,
+по умолчанию `-1` — выключено): раз в сутки в этот час процесс-владелец монитора ставит каждому активному агенту
+`start_full_sync` по всем наборам (одна команда на агента за ночь; пропуск, если полная выгрузка уже доставлена агенту
+в эту ночь или открыта и успеет до срока). Окно запуска и срок команды — 4 ч от часа (21:00 UTC → не позже 01:00 UTC),
+команду, не полученную агентом до срока, ERP не выдаёт. Если до срока агент не получил ни одной полной выгрузки по всем
+наборам (ночной или ручной), после окна — алерт «Ночная полная выгрузка не прошла» (событие модуля
+`onec.etl.nightly_full_sync_missed`, закрывает оператор). Проверяются только ночи, когда расписание действовало в этот час:
+включение, смена часа и выключение (`-1`) записываются в аудит (`onec.nightly_full_sync.activated`) как начало нового периода;
+обычный перезапуск с тем же часом период не меняет. Нужна при оконной
+ежечасной выгрузке (`windowField`/`incrementalWindowDays` в конфигурации агента): только полная выгрузка отмечает строки,
+исчезнувшие в 1С. Frontend: `RUNTIME_CONFIG_BACKEND_ONEC`
+(Vercel runtime config → `features.backendOnec`) или `VITE_USE_BACKEND_ONEC`.
+
+Права: `onec.view` (просмотр раздела; подразумевается правами `onec.manage` и
+`onec.commands.send`), `onec.manage` (источники, агенты, сертификаты,
+конфигурация), `onec.commands.send` (служебные команды агенту). Миграция 193
+выдаёт их ролям admin и superadmin.
+
+Конфигурация агента версионируется: черновик сохраняется с `If-Match: <revision>`,
+публикуется только подтверждённая ревизия; опубликованные версии неизменяемы.
+Хеш конфигурации считается по алгоритму агента `agent-payload-sha256-base64-v1`.
+
+Энергонезависимый том `onec-etl-spool` (`ONEC_ETL_SPOOL_DIR`, владелец разбора пакетов — `BACKEND_ONEC_ETL_WORKER_OWNER`,
+`none` | `in_process`) хранит принятые пакеты выгрузки до разбора; `ONEC_ETL_SPOOL_MIN_FREE_BYTES` — порог свободного
+места, ниже которого приём пакета отклоняется с повторяемой ошибкой.
+
 ## JSON snapshot заказов
 
 Snapshot export/import работает через NestJS, когда

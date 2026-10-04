@@ -15,6 +15,7 @@ import { createCorsRuntimeOptions, isOriginAllowed } from './config/cors';
 import type { BackendEnv } from './config/env.validation';
 import { setupSwagger } from './config/swagger';
 import { assertFontAvailable } from './modules/cut/render/sheet-png';
+import { listenOnecAgent, mountOnecAgentHttp, ONEC_AGENT_PREFIX_EXCLUDE } from './modules/onec-agent/onec-agent-http';
 import {
   createPerformanceRumBodyParser,
   createPerformanceRumFormBodyParser,
@@ -59,6 +60,11 @@ async function bootstrap(): Promise<void> {
     `${normalizeApiPrefix(apiPrefix)}/whatsapp/webhook`,
     raw({ type: 'application/json', limit: '256kb' }),
   );
+  // 1C agent API: served only on the dedicated agent listener (behind the
+  // Traefik mTLS router); that listener serves nothing else.
+  const onecAgentEnabled = config.get('BACKEND_ENABLE_ONEC_AGENT', { infer: true });
+  const onecAgentPort = config.get('ONEC_AGENT_PORT', { infer: true });
+  mountOnecAgentHttp(app, { enabled: onecAgentEnabled, agentPort: onecAgentPort });
   app.use(json({ limit: '50mb' }));
   app.use(urlencoded({ limit: '50mb', extended: true }));
   app.use(createRequestIdMiddleware(config.get('REQUEST_ID_HEADER', { infer: true })));
@@ -68,6 +74,7 @@ async function bootstrap(): Promise<void> {
     exclude: [
       { path: 'health/live', method: RequestMethod.GET },
       { path: 'health/ready', method: RequestMethod.GET },
+      ONEC_AGENT_PREFIX_EXCLUDE,
     ],
   });
   app.enableCors({
@@ -98,6 +105,13 @@ async function bootstrap(): Promise<void> {
   });
 
   await app.listen(config.get('PORT', { infer: true }));
+
+  if (onecAgentEnabled) {
+    const agentServer = listenOnecAgent(app, onecAgentPort);
+    const close = () => agentServer.close();
+    process.once('SIGTERM', close);
+    process.once('SIGINT', close);
+  }
 }
 
 void bootstrap();

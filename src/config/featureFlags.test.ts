@@ -38,6 +38,7 @@ describe('featureFlags', () => {
       enableLegacyHasura: true,
       workosAuth: false,
       useBackendWhatsApp: false,
+      useBackendOnec: false,
     });
   });
 
@@ -51,6 +52,13 @@ describe('featureFlags', () => {
     expect(getFeatureFlags({}).useBackendWhatsApp).toBe(false);
     expect(getFeatureFlags({ VITE_USE_BACKEND_WHATSAPP: 'true' }).useBackendWhatsApp).toBe(true);
     expect(getFeatureFlags({}, { backendWhatsApp: true }).useBackendWhatsApp).toBe(true);
+  });
+
+  it('reads the 1C integration flag from build-time and runtime config, default off', () => {
+    expect(getFeatureFlags({}).useBackendOnec).toBe(false);
+    expect(getFeatureFlags({ VITE_USE_BACKEND_ONEC: 'true' }).useBackendOnec).toBe(true);
+    expect(getFeatureFlags({}, { backendOnec: true }).useBackendOnec).toBe(true);
+    expect(getFeatureFlags({ VITE_USE_BACKEND_ONEC: 'true' }, { backendOnec: false }).useBackendOnec).toBe(false);
   });
 
   it('fails closed for the order status board until backend orders reads are enabled', () => {

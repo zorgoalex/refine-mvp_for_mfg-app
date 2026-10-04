@@ -489,7 +489,13 @@ write_env_flags_snapshot "$PACKET_DIR/env_flags_redacted.json"
 write_runtime_snapshot "$PACKET_DIR"
 
 log "Dumping main database"
-pg_exec_main pg_dump -U "$DB_USER" -d "$DB_NAME" -F c -b -v > "$PACKET_DIR/main_db.dump"
+# The 1C data copy is rebuilt by a full export after a restore (plan §6.8): runs, batches,
+# staging and the mirror are dumped as schema only (large, and personal data must not outlive a
+# revocation in a backup). onec_etl_entity_state IS kept: it carries the revocation bans.
+pg_exec_main pg_dump -U "$DB_USER" -d "$DB_NAME" -F c -b -v \
+  --exclude-table-data='public.onec_etl_runs' --exclude-table-data='public.onec_etl_batches' \
+  --exclude-table-data='public.onec_etl_staging_rows' --exclude-table-data='public.onec_etl_mirror_rows' \
+  > "$PACKET_DIR/main_db.dump"
 [[ -s "$PACKET_DIR/main_db.dump" ]] || fail "main_db.dump is empty"
 write_dump_toc "$POSTGRES_SERVICE" "$PACKET_DIR/main_db.dump" "$PACKET_DIR/main_db.toc" || fail "main_db.dump TOC check failed"
 

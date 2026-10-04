@@ -281,6 +281,7 @@ ops/apply-migrations.sh                      # dry-run (default): what is pendin
 ops/apply-migrations.sh status               # applied vs pending + checksum drift, read-only
 ops/apply-migrations.sh apply --yes          # apply pending in order, record in ledger
 ops/apply-migrations.sh apply --to 032 --yes # apply pending only up to v032, then stop
+ops/apply-migrations.sh apply --yes --lock-timeout 5s --statement-timeout 60s  # live DB: fail fast, roll back, record nothing
 ops/apply-migrations.sh baseline --yes       # adopt the ledger on an ALREADY-migrated DB
 ops/apply-migrations.sh mark-applied --upto 005 --yes  # restored dump already at v005
 ops/apply-migrations.sh mark-applied 003 --yes         # skip a single migration (003)
@@ -715,6 +716,21 @@ already exists, drops/recreates `PG_DB`, restores the dump, then starts Hasura.
 or found near the backup. Without a metadata file it tracks restored public
 tables/views as a fallback; this fallback does not replace a full production
 Hasura metadata backup for custom relationships or permission rules.
+
+### 1C agent integration after a restore
+
+The backup packet contains the schema of the 1C data copy (`onec_etl_*`) but not its data. After
+`restore-prod-backup.sh` every 1C source has a new generation and publishing configuration to agents is
+blocked until each agent sends a heartbeat after the restore. Then, per agent:
+
+1. Wait for a fresh heartbeat on «Интеграция 1С → Агенты» (publishing unblocks automatically).
+2. Publish the configuration with mode `PauseEtl`. Wait until the agent reports the new version
+   (`activeConfigVersion`).
+3. On the «ETL» tab start «Полная выгрузка» (`start_full_sync`). Check the new baseline on «Данные 1С».
+4. Publish the configuration with mode `Normal`.
+
+Runs the agent had started before the restore are refused with `409 RUN_GENERATION_CLOSED`. The agent
+blocks them for the operator to resolve.
 
 ## Common Failures
 

@@ -16,6 +16,9 @@
 #   status            Show applied vs pending (+ checksum drift). Read-only.
 #   apply             Apply pending migrations in order, recording each in the
 #                     ledger. Requires confirmation (or --yes).
+#                     --lock-timeout 5s bounds every lock wait: a busy table makes the migration
+#                     fail fast and roll back (nothing recorded) instead of blocking writers.
+#                     --statement-timeout 60s bounds each statement (how long taken locks are held).
 #   baseline          Record ALL current migration files as applied WITHOUT
 #                     running them. For an existing DB (e.g. erp_test) that was
 #                     migrated before this ledger existed — adopt the ledger so
@@ -98,6 +101,8 @@ USER_OVERRIDE=""
 DB_OVERRIDE=""
 MIG_DIR="$MIG_DIR_DEFAULT"
 ASSUME_YES=0
+LOCK_TIMEOUT=""
+STATEMENT_TIMEOUT=""
 APPLY_TO=""               # apply: stop after this version (e.g. 032)
 MARK_UPTO=""              # mark-applied: mark 001..NNN
 declare -a TARGETS=()     # mark-applied: explicit versions/filenames
@@ -142,6 +147,14 @@ while [ $# -gt 0 ]; do
     --db)        DB_OVERRIDE="${2:?}"; shift 2 ;;
     --dir)       MIG_DIR="${2:?}"; shift 2 ;;
     --to)        APPLY_TO="${2:?}"; shift 2 ;;
+    --lock-timeout)
+      LOCK_TIMEOUT="${2:?}"
+      [[ "$LOCK_TIMEOUT" =~ ^[1-9][0-9]{0,5}(ms|s|min)$ ]] || die "--lock-timeout: expected e.g. 5s, 500ms, 1min"
+      shift 2 ;;
+    --statement-timeout)
+      STATEMENT_TIMEOUT="${2:?}"
+      [[ "$STATEMENT_TIMEOUT" =~ ^[1-9][0-9]{0,5}(ms|s|min)$ ]] || die "--statement-timeout: expected e.g. 60s, 5min"
+      shift 2 ;;
     --upto)      MARK_UPTO="${2:?}"; shift 2 ;;
     --yes|-y)    ASSUME_YES=1; shift ;;
     --detect-only)     DETECT_ONLY=1; shift ;;
@@ -178,8 +191,17 @@ APPLY_PRELUDE="DO \$prelude\$ BEGIN
     PERFORM set_session_user((SELECT min(user_id) FROM users));
   END IF;
 END \$prelude\$;"
+# --lock-timeout: every statement (the prelude included) waits for a lock at most that long; on a timeout the
+# migration's transaction rolls back, psql stops (ON_ERROR_STOP) and the ledger is not advanced — re-run later.
+# Without it a migration that needs a lock on a busy table (e.g. an FK to audit_log or users) would queue behind a
+# long transaction and block every writer queued behind it. --statement-timeout bounds how long one statement may
+# run, i.e. how long the locks already taken can be held; it also rolls back and records nothing.
+pg_session_limits() {
+  [ -z "$LOCK_TIMEOUT" ] || printf "SET lock_timeout = '%s';\n" "$LOCK_TIMEOUT"
+  [ -z "$STATEMENT_TIMEOUT" ] || printf "SET statement_timeout = '%s';\n" "$STATEMENT_TIMEOUT"
+}
 pg_apply_file() {
-  { printf '%s\n' "$APPLY_PRELUDE"; cat "$1"; } \
+  { pg_session_limits; printf '%s\n' "$APPLY_PRELUDE"; cat "$1"; } \
     | _exec sh -c 'psql -U "${MIG_USER:-$POSTGRES_USER}" -d "${MIG_DB:-$POSTGRES_DB}" -v ON_ERROR_STOP=1'
 }
 
@@ -2231,6 +2253,66 @@ probe_file() {
       "SELECT EXISTS (SELECT 1 FROM whatsapp_broadcasts WHERE broadcast_id = 1);" \
       "SELECT EXISTS (SELECT 1 FROM whatsapp_broadcast_control WHERE singleton_id = 1);" ;;
     # 224: calendar send = one system broadcast (purpose calendar) + runs source with the widened target window.
+    # 193: 1C agent E1 registry/config/outbox/alerts + onec.* permissions.
+    193_onec_agent_foundation*) probe_all \
+      "$(q_tbl onec_sources)" \
+      "$(q_tbl onec_agents)" \
+      "$(q_tbl onec_agent_certificates)" \
+      "$(q_tbl onec_agent_sessions)" \
+      "$(q_tbl onec_agent_status)" \
+      "$(q_tbl onec_agent_status_history)" \
+      "$(q_tbl onec_agent_config_drafts)" \
+      "$(q_tbl onec_agent_config_versions)" \
+      "$(q_tbl onec_agent_incidents)" \
+      "$(q_tbl onec_outbox_events)" \
+      "$(q_tbl onec_audit_links)" \
+      "$(q_tbl onec_alerts)" \
+      "$(q_col onec_sources generation_ref)" \
+      "$(q_col onec_agents config_publish_blocked)" \
+      "$(q_con_on onec_agents onec_agents_source_id_key)" \
+      "$(q_con_on onec_agent_certificates onec_agent_certificates_sha256_fingerprint_key)" \
+      "$(q_con_on onec_outbox_events onec_outbox_events_idempotency_key_key)" \
+      "$(q_con_on onec_audit_links onec_audit_links_audit_id_fkey)" \
+      "$(q_idx onec_agent_config_versions_one_published)" \
+      "$(q_idx onec_outbox_events_claim_idx)" \
+      "SELECT count(*)=1 FROM pg_trigger t WHERE t.tgrelid=to_regclass('public.onec_agent_config_versions') AND t.tgname='onec_agent_config_version_immutable' AND t.tgfoid=to_regprocedure('public.onec_reject_config_version_change()') AND t.tgenabled='O' AND NOT t.tgisinternal;" \
+      "SELECT count(*)=3 FROM permissions_catalog WHERE permission_name IN ('onec.view','onec.manage','onec.commands.send') AND is_active;" ;;
+    # 196: 1C agent E2 command queue.
+    196_onec_agent_commands*) probe_all \
+      "$(q_tbl onec_agent_commands)" \
+      "$(q_col onec_agent_commands payload_canonical)" \
+      "$(q_col onec_agent_commands result_sha256)" \
+      "$(q_col onec_agent_commands payload_purged_at)" \
+      "$(q_con_on onec_agent_commands onec_agent_commands_pkey)" \
+      "$(q_con_on onec_agent_commands onec_agent_commands_source_module_idempotency_key_key)" \
+      "$(q_con_on onec_agent_commands onec_agent_commands_agent_id_fkey)" \
+      "$(q_con_on onec_agent_commands onec_agent_commands_status_check)" \
+      "$(q_idx onec_agent_commands_lease_idx)" \
+      "$(q_idx onec_agent_commands_ordering_idx)" \
+      "$(q_idx onec_agent_commands_expiry_idx)" ;;
+    # 198: 1C agent E3a ETL — runs, batches, staging, mirror, entity state.
+    198_onec_etl*) probe_all \
+      "$(q_tbl onec_etl_runs)" \
+      "$(q_tbl onec_etl_batches)" \
+      "$(q_tbl onec_etl_staging_rows)" \
+      "$(q_tbl onec_etl_mirror_rows)" \
+      "$(q_tbl onec_etl_entity_state)" \
+      "$(q_col onec_etl_batches receiving_owner)" \
+      "$(q_col onec_etl_mirror_rows missing_in_source_at)" \
+      "$(q_con_on onec_etl_batches onec_etl_batches_status_check)" \
+      "$(q_con_on onec_etl_mirror_rows onec_etl_mirror_rows_pkey)" \
+      "$(q_idx onec_etl_batches_work_idx)" \
+      "SELECT relpersistence = 'u' FROM pg_class WHERE oid = 'public.onec_etl_staging_rows'::regclass;" ;;
+    # 200: 1C agent E3b — snapshot entities, revocation, observed source identity.
+    200_onec_etl_snapshots_revocation*) probe_all \
+      "$(q_col onec_etl_entity_state revoked_at)" \
+      "$(q_col onec_etl_entity_state purged_at)" \
+      "$(q_col onec_etl_entity_state snapshot_version)" \
+      "$(q_col onec_etl_entity_state snapshot_rejected_reason)" \
+      "$(q_col onec_etl_runs revoked_entities)" \
+      "$(q_col onec_etl_batches revoked)" \
+      "$(q_idx onec_etl_batches_entity_idx)" \
+      "$(q_col onec_sources observed_identity)" ;;
     231_cut_result_render_v2*) probe_all \
       "SELECT to_regprocedure('public.cut_sheet_render_is_complete(jsonb)') IS NOT NULL;" \
       "SELECT COALESCE((SELECT pg_get_functiondef(oid) LIKE '%cut_sheet_render_is_complete(sheet_json)%' FROM pg_proc WHERE oid=to_regprocedure('public.cut_result_snapshot_is_complete(jsonb,jsonb,text)')), false);" \
@@ -2318,6 +2400,18 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     209_whatsapp_broadcasts*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    200_onec_etl_snapshots_revocation*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    198_onec_etl*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    196_onec_agent_commands*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    193_onec_agent_foundation*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     231_cut_result_render_v2*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*)

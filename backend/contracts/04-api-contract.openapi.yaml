@@ -16308,6 +16308,934 @@ paths:
               schema:
                 $ref: '#/components/schemas/ReadyHealthResponse'
 
+  /api/v1/onec/overview:
+    get:
+      tags:
+        - 1C integration
+      operationId: getOnecOverview
+      summary: "Overview of 1C agents: connection, state, queues, certificates, configuration"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      responses:
+        '200': {description: "Overview of 1C agents: connection, state, queues, certificates, configuration"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+  /api/v1/onec/sources:
+    get:
+      tags:
+        - 1C integration
+      operationId: listOnecSources
+      summary: "List 1C sources (databases)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      responses:
+        '200': {description: List 1C sources (databases)}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+    post:
+      tags:
+        - 1C integration
+      operationId: createOnecSource
+      summary: "Create a 1C source"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/OnecSourceCreate'}}}
+      responses:
+        '201': {description: Create a 1C source}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '409': {description: Source code already exists}
+        '422': {description: Validation failed}
+  /api/v1/onec/sources/{sourceId}:
+    patch:
+      tags:
+        - 1C integration
+      operationId: updateOnecSource
+      summary: "Rename a 1C source"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      parameters:
+        - {name: sourceId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/OnecSourceUpdate'}}}
+      responses:
+        '200': {description: Rename a 1C source}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '404': {description: Source not found}
+        '422': {description: Validation failed}
+  /api/v1/onec/agents:
+    post:
+      tags:
+        - 1C integration
+      operationId: createOnecAgent
+      summary: "Register a 1C agent for a source"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/OnecAgentCreate'}}}
+      responses:
+        '201': {description: Register a 1C agent for a source}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '404': {description: Source not found}
+        '409': {description: Agent id taken or source already has an agent}
+        '422': {description: Validation failed}
+  /api/v1/onec/agents/{agentId}:
+    get:
+      tags:
+        - 1C integration
+      operationId: getOnecAgent
+      summary: "Get a 1C agent with certificates and state history"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: agentId, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}}
+      responses:
+        '200': {description: Get a 1C agent with certificates and state history}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '404': {description: Agent not found}
+    patch:
+      tags:
+        - 1C integration
+      operationId: updateOnecAgent
+      summary: "Update a 1C agent (optimistic version)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      parameters:
+        - {name: agentId, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/OnecAgentUpdate'}}}
+      responses:
+        '200': {description: Update a 1C agent (optimistic version)}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '404': {description: Agent not found}
+        '409': {description: Stale agent version}
+        '422': {description: Validation failed}
+  /api/v1/onec/agents/{agentId}/block:
+    post:
+      tags:
+        - 1C integration
+      operationId: blockOnecAgent
+      summary: "Block a 1C agent (403 on everything except heartbeat)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      parameters:
+        - {name: agentId, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/OnecVersionedAction'}}}
+      responses:
+        '200': {description: Block a 1C agent (403 on everything except heartbeat)}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '404': {description: Agent not found}
+        '409': {description: Stale agent version}
+  /api/v1/onec/agents/{agentId}/unblock:
+    post:
+      tags:
+        - 1C integration
+      operationId: unblockOnecAgent
+      summary: "Unblock a 1C agent"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      parameters:
+        - {name: agentId, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/OnecVersionedAction'}}}
+      responses:
+        '200': {description: Unblock a 1C agent}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '404': {description: Agent not found}
+        '409': {description: Stale agent version}
+  /api/v1/onec/agents/{agentId}/certificates:
+    post:
+      tags:
+        - 1C integration
+      operationId: addOnecAgentCertificate
+      summary: "Register a client certificate (PEM or SHA-256 fingerprint) for a 1C agent"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      parameters:
+        - {name: agentId, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/OnecCertificateCreate'}}}
+      responses:
+        '201': {description: Register a client certificate (PEM or SHA-256 fingerprint) for a 1C agent}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '404': {description: Agent not found}
+        '409': {description: Certificate already registered}
+        '422': {description: Invalid or expired certificate}
+  /api/v1/onec/agents/{agentId}/certificates/{certId}/revoke:
+    post:
+      tags:
+        - 1C integration
+      operationId: revokeOnecAgentCertificate
+      summary: "Revoke a 1C agent client certificate"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      parameters:
+        - {name: agentId, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}}
+        - {name: certId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Revoke a 1C agent client certificate}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '404': {description: Active certificate not found}
+  /api/v1/onec/agents/{agentId}/config:
+    get:
+      tags:
+        - 1C integration
+      operationId: getOnecAgentConfig
+      summary: "Get draft, published configuration and agent-reported versions"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: agentId, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}}
+      responses:
+        '200': {description: Get draft, published configuration and agent-reported versions}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '404': {description: Agent not found}
+  /api/v1/onec/config/validate:
+    post:
+      tags:
+        - 1C integration
+      operationId: validateOnecAgentConfig
+      summary: "Validate a configuration without saving"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/OnecConfigDraft'}}}
+      responses:
+        '200': {description: Validate a configuration without saving}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+  /api/v1/onec/agents/{agentId}/config/draft:
+    put:
+      tags:
+        - 1C integration
+      operationId: saveOnecAgentConfigDraft
+      summary: "Save the configuration draft (If-Match: draft revision)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      parameters:
+        - {name: agentId, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}}
+        - {name: If-Match, in: header, required: false, description: Draft revision; omit only when no draft exists, schema: {type: string}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/OnecConfigDraft'}}}
+      responses:
+        '200': {description: "Save the configuration draft (If-Match: draft revision)"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '404': {description: Agent not found}
+        '409': {description: Stale draft revision}
+        '422': {description: Configuration invalid}
+  /api/v1/onec/agents/{agentId}/config/publish:
+    post:
+      tags:
+        - 1C integration
+      operationId: publishOnecAgentConfig
+      summary: "Publish the confirmed draft revision as a new configuration version"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      parameters:
+        - {name: agentId, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/OnecConfigPublish'}}}
+      responses:
+        '200': {description: Publish the confirmed draft revision as a new configuration version}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '404': {description: Agent not found}
+        '409': {description: Stale draft, unchanged configuration or publication blocked after restore}
+  /api/v1/onec/agents/{agentId}/config/versions:
+    get:
+      tags:
+        - 1C integration
+      operationId: listOnecAgentConfigVersions
+      summary: "List published configuration versions of a 1C agent"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: agentId, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}}
+      responses:
+        '200': {description: List published configuration versions of a 1C agent}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+  /api/v1/onec/agents/{agentId}/journal/daily:
+    get:
+      tags:
+        - 1C integration
+      operationId: getOnecAgentDailyJournal
+      summary: "Daily journal of the 1C agent connection: sessions, states, runs, batches, commands, alerts (last 24 h)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: agentId, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}}
+      responses:
+        '200': {description: Aggregated summary of the last 24 hours, computed on request (no stored journal)}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {description: Agent not found}
+        '503': {description: 1C integration is disabled}
+  /api/v1/onec/incidents:
+    get:
+      tags:
+        - 1C integration
+      operationId: listOnecIncidents
+      summary: "List 1C integration incidents"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: agentId, in: query, required: false, schema: {type: string}}
+        - {name: open, in: query, required: false, schema: {type: boolean}}
+        - {name: limit, in: query, required: false, schema: {type: integer}}
+      responses:
+        '200': {description: List 1C integration incidents}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+  /api/v1/onec/incidents/{incidentId}/resolve:
+    post:
+      tags:
+        - 1C integration
+      operationId: resolveOnecIncident
+      summary: "Resolve a 1C integration incident"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      parameters:
+        - {name: incidentId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Resolve a 1C integration incident}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '404': {description: Open incident not found}
+  /api/v1/onec/alerts:
+    get:
+      tags:
+        - 1C integration
+      operationId: listOnecAlerts
+      summary: "List 1C integration alerts"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: agentId, in: query, required: false, schema: {type: string}}
+        - {name: state, in: query, required: false, schema: {type: string, enum: [open, acknowledged, resolved]}}
+        - {name: limit, in: query, required: false, schema: {type: integer}}
+      responses:
+        '200': {description: List 1C integration alerts}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+  /api/v1/onec/alerts/{alertId}/acknowledge:
+    post:
+      tags:
+        - 1C integration
+      operationId: acknowledgeOnecAlert
+      summary: "Acknowledge a 1C integration alert"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: alertId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Acknowledge a 1C integration alert}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '404': {description: Open alert not found}
+  /api/v1/onec/alerts/{alertId}/resolve:
+    post:
+      tags:
+        - 1C integration
+      operationId: resolveOnecAlert
+      summary: "Resolve a handled one-shot 1C command alert"
+      description: >-
+        Only command alerts (command_dead_letter, command_expired_undelivered) can be closed by an
+        operator; state-derived alerts resolve themselves when the condition clears.
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      parameters:
+        - {name: alertId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Resolve a handled one-shot 1C command alert}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '404': {description: Unresolved command alert not found}
+  /api/integration/1c-agents/v1/session/start:
+    post:
+      tags:
+        - 1C agent protocol
+      operationId: onecAgentSessionStart
+      summary: "Start an agent session and check version compatibility"
+      description: >-
+        Served only on the dedicated mutual-TLS host (Traefik verifies the client certificate;
+        ERP matches its SHA-256 fingerprint to X-Agent-Id). Not reachable through the regular API host.
+      security: []
+      x-auth: onec-agent-mtls
+      parameters:
+        - {name: X-Agent-Id, in: header, required: true, schema: {type: string}}
+        - {name: X-Agent-Version, in: header, required: false, schema: {type: string}}
+        - {name: X-Request-Id, in: header, required: false, schema: {type: string}}
+        - {name: X-Correlation-Id, in: header, required: false, schema: {type: string}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/OnecSessionStartRequest'}}}
+      responses:
+        '200':
+          description: OK
+          content: {application/json: {schema: {$ref: '#/components/schemas/OnecSessionStartResponse'}}}
+        '400': {description: Invalid request or agentId mismatch}
+        '403': {description: Certificate unknown, mismatched or agent blocked}
+        '404': {description: Not served on this listener}
+  /api/integration/1c-agents/v1/heartbeat:
+    post:
+      tags:
+        - 1C agent protocol
+      operationId: onecAgentHeartbeat
+      summary: "Accept an agent heartbeat (allowed for blocked agents)"
+      description: >-
+        Served only on the dedicated mutual-TLS host (Traefik verifies the client certificate;
+        ERP matches its SHA-256 fingerprint to X-Agent-Id). Not reachable through the regular API host.
+      security: []
+      x-auth: onec-agent-mtls
+      parameters:
+        - {name: X-Agent-Id, in: header, required: true, schema: {type: string}}
+        - {name: X-Agent-Version, in: header, required: false, schema: {type: string}}
+        - {name: X-Request-Id, in: header, required: false, schema: {type: string}}
+        - {name: X-Correlation-Id, in: header, required: false, schema: {type: string}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/OnecHeartbeat'}}}
+      responses:
+        '204': {description: OK}
+        '400': {description: Invalid request or agentId mismatch}
+        '403': {description: Certificate unknown, mismatched or agent blocked}
+        '404': {description: Not served on this listener}
+  /api/integration/1c-agents/v1/configuration:
+    get:
+      tags:
+        - 1C agent protocol
+      operationId: onecAgentConfiguration
+      summary: "Return the published agent configuration or 304 when unchanged"
+      description: >-
+        Served only on the dedicated mutual-TLS host (Traefik verifies the client certificate;
+        ERP matches its SHA-256 fingerprint to X-Agent-Id). Not reachable through the regular API host.
+      security: []
+      x-auth: onec-agent-mtls
+      parameters:
+        - {name: X-Agent-Id, in: header, required: true, schema: {type: string}}
+        - {name: X-Agent-Version, in: header, required: false, schema: {type: string}}
+        - {name: X-Request-Id, in: header, required: false, schema: {type: string}}
+        - {name: X-Correlation-Id, in: header, required: false, schema: {type: string}}
+        - {name: currentVersion, in: query, required: false, schema: {type: integer, format: int64, minimum: 0}}
+      responses:
+        '200':
+          description: OK
+          content: {application/json: {schema: {$ref: '#/components/schemas/OnecAgentConfigurationEnvelope'}}}
+        '304': {description: Configuration unchanged}
+        '400': {description: Invalid request or agentId mismatch}
+        '403': {description: Certificate unknown, mismatched or agent blocked}
+        '404': {description: Not served on this listener}
+
+  /api/v1/onec/commands:
+    get:
+      tags:
+        - 1C integration
+      operationId: listOnecCommands
+      summary: "List 1C agent commands (journal; no payload/result bodies)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: agentId, in: query, required: false, schema: {type: string}}
+        - {name: status, in: query, required: false, schema: {type: string}}
+        - {name: commandType, in: query, required: false, schema: {type: string}}
+        - {name: limit, in: query, required: false, schema: {type: integer}}
+      responses:
+        '200': {description: "List 1C agent commands (journal; no payload/result bodies)"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+  /api/v1/onec/commands/{commandId}:
+    get:
+      tags:
+        - 1C integration
+      operationId: getOnecCommand
+      summary: "Get a 1C agent command; payload/result bodies only with onec.manage or onec.commands.send"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: commandId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: "Get a 1C agent command; payload/result bodies only with onec.manage or onec.commands.send"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '400': {description: "Invalid command id"}
+        '404': {description: "Command not found"}
+  /api/v1/onec/agents/{agentId}/commands:
+    post:
+      tags:
+        - 1C integration
+      operationId: sendOnecCommand
+      summary: "Queue an admin command or the integration probe for a 1C agent (Idempotency-Key required)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.commands.send
+      parameters:
+        - {name: agentId, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 200}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/OnecOperatorCommand'}}}
+      responses:
+        '201': {description: "Queue an admin command or the integration probe for a 1C agent (Idempotency-Key required)"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '400': {description: "Idempotency-Key missing"}
+        '404': {description: "Agent not found"}
+        '409': {description: "Idempotency key reused for a different command"}
+        '422': {description: "Type not allowed, invalid payload or payload over the agent limits"}
+  /api/v1/onec/commands/{commandId}/cancel:
+    post:
+      tags:
+        - 1C integration
+      operationId: cancelOnecCommand
+      summary: "Cancel a 1C agent command that the agent has not received yet"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.commands.send
+      parameters:
+        - {name: commandId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: "Cancel a 1C agent command that the agent has not received yet"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '404': {description: "Command not found"}
+        '409': {description: "Already received by the agent or completed"}
+  /api/integration/1c-agents/v1/commands/lease:
+    post:
+      tags:
+        - 1C agent protocol
+      operationId: onecAgentCommandLease
+      summary: "Long poll for the next command (up to maxWaitSeconds); one command per response"
+      description: >-
+        Served only on the dedicated mutual-TLS host; see onecAgentSessionStart.
+      security: []
+      x-auth: onec-agent-mtls
+      parameters:
+        - {name: X-Agent-Id, in: header, required: true, schema: {type: string}}
+        - {name: X-Request-Id, in: header, required: false, schema: {type: string}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/OnecLeaseRequest'}}}
+      responses:
+        '200':
+          description: OK
+          content: {application/json: {schema: {$ref: '#/components/schemas/OnecLeaseResponse'}}}
+        '400': {description: "Invalid request"}
+        '409': {description: "SESSION_EXPIRED: start a new session"}
+        '403': {description: Certificate unknown, mismatched or agent blocked}
+  /api/integration/1c-agents/v1/commands/{commandId}/received:
+    post:
+      tags:
+        - 1C agent protocol
+      operationId: onecAgentCommandReceived
+      summary: "Acknowledge a leased command as durably received (idempotent)"
+      description: >-
+        Served only on the dedicated mutual-TLS host; see onecAgentSessionStart.
+      security: []
+      x-auth: onec-agent-mtls
+      parameters:
+        - {name: X-Agent-Id, in: header, required: true, schema: {type: string}}
+        - {name: X-Request-Id, in: header, required: false, schema: {type: string}}
+        - {name: commandId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/OnecReceivedRequest'}}}
+      responses:
+        '204': {description: OK}
+        '404': {description: "Command not found"}
+        '409': {description: "PAYLOAD_HASH_MISMATCH"}
+        '403': {description: Certificate unknown, mismatched or agent blocked}
+  /api/integration/1c-agents/v1/commands/{commandId}/result:
+    put:
+      tags:
+        - 1C agent protocol
+      operationId: onecAgentCommandResult
+      summary: "Store the command result byte for byte (repeat of the same bytes -> 204)"
+      description: >-
+        Served only on the dedicated mutual-TLS host; see onecAgentSessionStart.
+      security: []
+      x-auth: onec-agent-mtls
+      parameters:
+        - {name: X-Agent-Id, in: header, required: true, schema: {type: string}}
+        - {name: X-Request-Id, in: header, required: false, schema: {type: string}}
+        - {name: commandId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/OnecCommandResult'}}}
+      responses:
+        '204': {description: OK}
+        '400': {description: "Invalid result body"}
+        '404': {description: "Command not found"}
+        '409': {description: "RESULT_CONFLICT: a different result is stored"}
+        '403': {description: Certificate unknown, mismatched or agent blocked}
+  /api/integration/1c-agents/v1/etl/batches:
+    post:
+      tags:
+        - 1C agent protocol
+      operationId: onecAgentUploadEtlBatch
+      summary: "Receive one gzip NDJSON batch; ACK only after it is durably stored (idempotent by batchId)"
+      description: >-
+        Served only on the dedicated mutual-TLS host; see onecAgentSessionStart. The body is streamed to
+        a spool volume (compressed <= 100 MB, uncompressed <= 256 MiB, rows <= 1,000,000, row <= 8 MB);
+        parsing happens after the ACK. 503 BATCH_NOT_STORED_RETRYABLE attests nothing was stored.
+      security: []
+      x-auth: onec-agent-mtls
+      parameters:
+        - {name: X-Agent-Id, in: header, required: true, schema: {type: string}}
+        - {name: X-Request-Id, in: header, required: false, schema: {type: string}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, format: uuid}}
+        - {name: X-Batch-Id, in: header, required: true, schema: {type: string, format: uuid}}
+        - {name: X-Run-Id, in: header, required: true, schema: {type: string, format: uuid}}
+        - {name: X-Entity, in: header, required: true, schema: {type: string}}
+        - {name: X-Schema-Version, in: header, required: true, schema: {type: integer}}
+        - {name: X-Row-Count, in: header, required: true, schema: {type: integer}}
+        - {name: X-Content-SHA256, in: header, required: true, schema: {type: string}}
+        - {name: Content-Encoding, in: header, required: true, schema: {type: string, enum: [gzip]}}
+        - {name: X-Source-Namespace, in: header, required: false, schema: {type: string}}
+        - {name: X-Source-Generation, in: header, required: false, schema: {type: string}}
+      requestBody:
+        required: true
+        content: {application/x-ndjson: {schema: {type: string, format: binary}}}
+      responses:
+        '200': {description: Batch ACK, content: {application/json: {schema: {$ref: '#/components/schemas/OnecEtlBatchAck'}}}}
+        '400': {description: "Invalid batch headers"}
+        '403': {description: Certificate unknown, mismatched or agent blocked}
+        '404': {description: "Run or batch of another agent"}
+        '409': {description: "BATCH_CONFLICT, BATCH_SUPERSEDED, RUN_CLOSED, RUN_GENERATION_CLOSED, SOURCE_IDENTITY_MISMATCH"}
+        '413': {description: "BATCH_LIMIT_EXCEEDED"}
+        '422': {description: "BATCH_CHECKSUM_MISMATCH, BATCH_ROW_COUNT_MISMATCH, BATCH_GZIP_INVALID"}
+        '503': {description: "BATCH_NOT_STORED_RETRYABLE (Retry-After)"}
+  /api/integration/1c-agents/v1/etl/batches/{batchId}:
+    get:
+      tags:
+        - 1C agent protocol
+      operationId: onecAgentGetEtlBatch
+      summary: "Look up a batch: the original ACK, or 404 when ERP has not stored it"
+      description: >-
+        Served only on the dedicated mutual-TLS host; see onecAgentSessionStart.
+      security: []
+      x-auth: onec-agent-mtls
+      parameters:
+        - {name: X-Agent-Id, in: header, required: true, schema: {type: string}}
+        - {name: X-Request-Id, in: header, required: false, schema: {type: string}}
+        - {name: batchId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Original ACK, content: {application/json: {schema: {$ref: '#/components/schemas/OnecEtlBatchAck'}}}}
+        '404': {description: "Not stored (also another agent's batch)"}
+        '403': {description: Certificate unknown, mismatched or agent blocked}
+  /api/integration/1c-agents/v1/etl/runs/{runId}/complete:
+    post:
+      tags:
+        - 1C agent protocol
+      operationId: onecAgentCompleteEtlRun
+      summary: "Complete a run: its staging becomes the mirror atomically (idempotent by runId)"
+      description: >-
+        Served only on the dedicated mutual-TLS host; see onecAgentSessionStart. Accepts RunCompletionV2,
+        RunCompletionPartialV1 and RunCompletionV1 (agent OpenAPI 1.3.0). Rows absent from a full read are
+        only marked missing in the mirror; nothing is deleted.
+      security: []
+      x-auth: onec-agent-mtls
+      parameters:
+        - {name: X-Agent-Id, in: header, required: true, schema: {type: string}}
+        - {name: X-Request-Id, in: header, required: false, schema: {type: string}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, format: uuid}}
+        - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object}}}
+      responses:
+        '204': {description: OK (also a byte-identical repeat)}
+        '400': {description: "Invalid body"}
+        '403': {description: Certificate unknown, mismatched or agent blocked}
+        '409': {description: "RUN_UNKNOWN, RUN_BATCHES_MISMATCH, RUN_COMPLETION_CONFLICT, RUN_GENERATION_CLOSED, SOURCE_IDENTITY_MISMATCH"}
+        '422': {description: "BATCH_PAYLOAD_INVALID {batchId, reason}"}
+        '503': {description: "RUN_NOT_READY, RUN_MODE_PENDING (the agent repeats)"}
+  /api/v1/onec/etl/runs:
+    get:
+      tags:
+        - 1C integration
+      operationId: listOnecEtlRuns
+      summary: "List 1C ETL runs (journal; no row data)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: agentId, in: query, required: false, schema: {type: string}}
+        - {name: limit, in: query, required: false, schema: {type: integer}}
+      responses:
+        '200': {description: "List 1C ETL runs (journal; no row data)"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+  /api/v1/onec/etl/runs/{runId}:
+    get:
+      tags:
+        - 1C integration
+      operationId: getOnecEtlRun
+      summary: "One 1C ETL run with its batches"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: "One 1C ETL run with its batches"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '404': {description: "Run not found"}
+  /api/v1/onec/etl/entities:
+    get:
+      tags:
+        - 1C integration
+      operationId: listOnecEtlEntities
+      summary: "State of every 1C ETL entity (rows, missing, last run, errors)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: agentId, in: query, required: false, schema: {type: string}}
+      responses:
+        '200': {description: "State of every 1C ETL entity (rows, missing, last run, errors)"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+  /api/v1/onec/etl/matching/counterparties:
+    get:
+      tags:
+        - 1C integration
+      operationId: matchOnecCounterparties
+      summary: "1C counterparties matched against ERP clients and suppliers (read-only report)"
+      description: >-
+        Match by 1C key (clients/suppliers.ref_key_1c), normalized name (case, quotes, legal-form words, punctuation
+        ignored) and, for clients, phone (last 10 digits). matched = at most one ERP row per kind; ambiguous = more;
+        unmatched rows get up to 3 similar-name suggestions when pg_trgm is installed. Nothing is written.
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: agentId, in: query, required: true, schema: {type: string}}
+        - {name: status, in: query, required: false, schema: {type: string, enum: [all, matched, ambiguous, unmatched]}}
+        - {name: role, in: query, required: false, schema: {type: string, enum: [all, buyer, supplier]}}
+        - {name: search, in: query, required: false, schema: {type: string}}
+        - {name: offset, in: query, required: false, schema: {type: integer}}
+        - {name: limit, in: query, required: false, schema: {type: integer}}
+      responses:
+        '200': {description: "Summary, page of counterparties with their ERP matches and suggestions"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '400': {description: "Agent is required"}
+        '404': {description: "Agent not found"}
+  /api/v1/onec/etl/matching/items:
+    get:
+      tags:
+        - 1C integration
+      operationId: onecItemDistribution
+      summary: "1C items per category and item type, with price/stock presence (read-only report)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: agentId, in: query, required: true, schema: {type: string}}
+      responses:
+        '200': {description: "Categories with totals by item type, deleted, with price, with stock"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '400': {description: "Agent is required"}
+        '404': {description: "Agent not found"}
+  /api/v1/onec/etl/mirror:
+    get:
+      tags:
+        - 1C integration
+      operationId: listOnecEtlMirror
+      summary: "1C data copy of one entity (paged list; «Данные 1С»)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: agentId, in: query, required: true, schema: {type: string}}
+        - {name: entity, in: query, required: true, schema: {type: string}}
+        - {name: search, in: query, required: false, schema: {type: string}}
+        - {name: state, in: query, required: false, schema: {type: string, enum: [all, active, missing, deleted]}}
+        - {name: offset, in: query, required: false, schema: {type: integer}}
+        - {name: limit, in: query, required: false, schema: {type: integer}}
+      responses:
+        '200': {description: "1C data copy of one entity (paged list; «Данные 1С»)"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '400': {description: "Agent and entity are required"}
+  /api/v1/onec/etl/mirror/row:
+    get:
+      tags:
+        - 1C integration
+      operationId: getOnecEtlMirrorRow
+      summary: "One row of the 1C data copy with its data"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: agentId, in: query, required: true, schema: {type: string}}
+        - {name: entity, in: query, required: true, schema: {type: string}}
+        - {name: key, in: query, required: true, schema: {type: string}}
+      responses:
+        '200': {description: "One row of the 1C data copy with its data"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '404': {description: "Row not found"}
+  /api/v1/onec/agents/{agentId}/etl/entities/{entity}/revoke:
+    post:
+      tags:
+        - 1C integration
+      operationId: revokeOnecEtlEntity
+      summary: "Revoke the data of a personal-data entity: write ban, configuration without it, purge"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      parameters:
+        - {name: agentId, in: path, required: true, schema: {type: string}}
+        - {name: entity, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: "Revoke the data of a personal-data entity: write ban, configuration without it, purge"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '400': {description: "Entity is not revocable"}
+        '409': {description: "Already revoked or publication blocked"}
+  /api/v1/onec/agents/{agentId}/etl/entities/{entity}/restore:
+    post:
+      tags:
+        - 1C integration
+      operationId: restoreOnecEtlEntity
+      summary: "Allow a revoked entity again once all its data is removed"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      parameters:
+        - {name: agentId, in: path, required: true, schema: {type: string}}
+        - {name: entity, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: "Allow a revoked entity again once all its data is removed"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '409': {description: "Not revoked or data not purged yet"}
+  /api/v1/onec/sources/{sourceId}/rebaseline:
+    post:
+      tags:
+        - 1C integration
+      operationId: rebaselineOnecSource
+      summary: "Rebaseline a 1C source: new generation, open runs abandoned, copy cleared, configuration republished"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      parameters:
+        - {name: sourceId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      description: >-
+        Destructive; safe to repeat: `expectedGeneration` must equal the current source generation (a repeat after a
+        lost response gets 409 ONEC_GENERATION_CHANGED instead of clearing the new baseline). When the 1C database
+        identity changed, `acceptIdentity` must equal the identity the agent reported last (`observedIdentity`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedGeneration]
+              additionalProperties: false
+              properties:
+                expectedGeneration: {type: integer, minimum: 1}
+                acceptIdentity:
+                  type: object
+                  required: [databaseId, exportEpoch, environment]
+                  additionalProperties: false
+                  properties:
+                    databaseId: {type: string, maxLength: 128}
+                    exportEpoch: {type: string, maxLength: 128}
+                    environment: {type: string, maxLength: 32}
+            example: {expectedGeneration: 2, acceptIdentity: {databaseId: "d4a2cd60-0000-4000-8000-000000000000", exportEpoch: "ae33eb2e-0000-4000-8000-000000000000", environment: test}}
+      responses:
+        '200': {description: "Rebaseline a 1C source: new generation, open runs abandoned, copy cleared, configuration republished"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+        '400': {description: "Invalid body (expectedGeneration required)"}
+        '404': {description: "Source or its agent not found"}
+        '409': {description: "ONEC_GENERATION_CHANGED (details.currentGeneration) or ONEC_IDENTITY_CONFIRMATION_REQUIRED (details.observedIdentity)"}
 components:
   securitySchemes:
     bitrixWidgetSession:
@@ -26619,3 +27547,221 @@ components:
         sentAt: {type: string, format: date-time, nullable: true}
         imageAvailable: {type: boolean}
         expiresAt: {type: string, format: date-time}
+
+    OnecOperatorCommand:
+      type: object
+      additionalProperties: false
+      required: [commandType]
+      properties:
+        commandType: {type: string, enum: [start_full_sync, reload_entity, pause_etl, resume_etl, run_connectivity_test, collect_diagnostics, rotate_certificate_hint, integration_probe]}
+        payload: {type: object, description: 'Per type: start_full_sync {entities: string[]}, reload_entity {entity}, integration_probe {marker 1..256}, others {}'}
+        priority: {type: integer, minimum: -1000, maximum: 1000, default: 0}
+        orderingKey: {type: string, nullable: true, maxLength: 200}
+        notBeforeUtc: {type: string, format: date-time, nullable: true}
+        expiresAtUtc: {type: string, format: date-time, nullable: true}
+    OnecLeaseRequest:
+      type: object
+      required: [sessionId]
+      properties:
+        sessionId: {type: string, format: uuid}
+        supportedCommandTypes: {type: array, items: {type: string}}
+        maxWaitSeconds: {type: integer, minimum: 1, maximum: 120, default: 25}
+        currentLoad:
+          type: object
+          properties:
+            executing: {type: integer, minimum: 0}
+            capacity: {type: integer, minimum: 0}
+    OnecLeaseResponse:
+      type: object
+      required: [hasCommand]
+      properties:
+        hasCommand: {type: boolean}
+        leaseId: {type: string, format: uuid}
+        leaseExpiresAtUtc: {type: string, format: date-time}
+        command:
+          type: object
+          description: 'Envelope; payload is the stored canonical JSON (agent-payload-sha256-base64-v1) sent verbatim.'
+          properties:
+            commandId: {type: string, format: uuid}
+            commandType: {type: string}
+            payloadVersion: {type: integer}
+            priority: {type: integer}
+            orderingKey: {type: string, nullable: true}
+            correlationId: {type: string, format: uuid, nullable: true}
+            createdAtUtc: {type: string, format: date-time}
+            notBeforeUtc: {type: string, format: date-time, nullable: true}
+            expiresAtUtc: {type: string, format: date-time, nullable: true}
+            requestedBy: {type: object, nullable: true}
+            payloadHash: {type: string}
+            payload: {type: object}
+    OnecReceivedRequest:
+      type: object
+      required: [leaseId, payloadHash]
+      properties:
+        leaseId: {type: string, format: uuid}
+        receivedAtUtc: {type: string, format: date-time}
+        payloadHash: {type: string}
+    OnecEtlBatchAck:
+      type: object
+      required: [batchId, status, rowsAccepted, checksumValid, acknowledgedAtUtc]
+      properties:
+        batchId: {type: string, format: uuid}
+        status: {type: string, enum: [acknowledged]}
+        rowsAccepted: {type: integer}
+        checksumValid: {type: boolean}
+        acknowledgedAtUtc: {type: string, format: date-time}
+    OnecCommandResult:
+      type: object
+      required: [commandId, status, resultVersion]
+      properties:
+        commandId: {type: string, format: uuid}
+        status: {type: string, enum: [succeeded, business_error, dead_letter, expired]}
+        resultVersion: {type: integer, enum: [1]}
+        completedAtUtc: {type: string, format: date-time}
+        document: {type: object}
+        data: {type: object}
+        warnings: {type: array, items: {type: object}}
+        error: {type: object, nullable: true}
+    OnecSourceCreate:
+      type: object
+      additionalProperties: false
+      required: [code, displayName]
+      properties:
+        code: {type: string, pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'}
+        displayName: {type: string, minLength: 1, maxLength: 200}
+    OnecSourceUpdate:
+      type: object
+      additionalProperties: false
+      required: [displayName]
+      properties:
+        displayName: {type: string, minLength: 1, maxLength: 200}
+    OnecAgentCreate:
+      type: object
+      additionalProperties: false
+      required: [agentId, sourceId, siteId, displayName]
+      properties:
+        agentId: {type: string, pattern: '^[A-Za-z0-9._-]{1,64}$'}
+        sourceId: {type: integer, minimum: 1}
+        siteId: {type: string, minLength: 1, maxLength: 64}
+        displayName: {type: string, minLength: 1, maxLength: 200}
+        minimumAgentVersion: {type: string, pattern: '^[0-9]{1,9}\.[0-9]{1,9}(\.[0-9]{1,9})?$', default: '1.0'}
+    OnecAgentUpdate:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: {type: integer, minimum: 1}
+        siteId: {type: string, minLength: 1, maxLength: 64}
+        displayName: {type: string, minLength: 1, maxLength: 200}
+        minimumAgentVersion: {type: string, pattern: '^[0-9]{1,9}\.[0-9]{1,9}(\.[0-9]{1,9})?$'}
+    OnecVersionedAction:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: {type: integer, minimum: 1}
+    OnecCertificateCreate:
+      type: object
+      additionalProperties: false
+      description: Public certificate only (PEM) or its SHA-256 fingerprint; private keys are rejected.
+      properties:
+        pem: {type: string, maxLength: 65536}
+        sha256Fingerprint: {type: string, maxLength: 200}
+    OnecEtlEntity:
+      type: object
+      additionalProperties: false
+      required: [entityCode, oDataPath, select, syncMode, pageSize, overlapMinutes]
+      properties:
+        entityCode: {type: string, pattern: '^[a-z][a-z0-9_]{0,63}$'}
+        oDataPath: {type: string}
+        keyField: {type: string}
+        keyFields: {type: array, minItems: 1, maxItems: 8, items: {type: string}}
+        updatedAtField: {type: string, nullable: true}
+        updatedAtEdmType: {type: string, nullable: true, enum: [Edm.DateTimeOffset, Edm.DateTime]}
+        deletedField: {type: string, nullable: true}
+        select: {type: array, minItems: 1, maxItems: 200, items: {type: string}}
+        syncMode: {type: string}
+        pageSize: {type: integer, minimum: 1, maximum: 10000}
+        overlapMinutes: {type: integer, minimum: 0, maximum: 10080}
+        schemaVersion: {type: integer, minimum: 1}
+        oDataVersion: {type: integer, enum: [3, 4]}
+        enabled: {type: boolean}
+        deleteBatchAfterAck: {type: boolean, description: "Agent deletes the batch file right after the ACK (personal data)"}
+        filter: {type: string, minLength: 1, maxLength: 512, pattern: '^(?=.*\S)[^\x00-\x1F\x7F]+$', description: "Static OData $filter over the set; not blank, no control characters; part of the entity domain"}
+    OnecAgentConfiguration:
+      type: object
+      additionalProperties: false
+      required: [mode, commandTypes, etlIntervalMinutes, etlEntities]
+      properties:
+        mode: {type: string, enum: [Normal, PauseEtl, PauseCommands, Drain, Maintenance, Disabled]}
+        commandTypes: {type: array, maxItems: 64, items: {type: string}}
+        etlIntervalMinutes: {type: integer, minimum: 1, maximum: 10080}
+        etlEntities: {type: array, maxItems: 64, items: {$ref: '#/components/schemas/OnecEtlEntity'}}
+    OnecConfigDraft:
+      type: object
+      additionalProperties: false
+      required: [configuration]
+      properties:
+        configuration: {$ref: '#/components/schemas/OnecAgentConfiguration'}
+    OnecConfigPublish:
+      type: object
+      additionalProperties: false
+      required: [revision, configHash]
+      properties:
+        revision: {type: integer, minimum: 1}
+        configHash: {type: string}
+    OnecAgentConfigurationEnvelope:
+      type: object
+      required: [configVersion, configHash, configuration]
+      properties:
+        configVersion: {type: integer, format: int64}
+        configHash: {type: string, description: 'base64(SHA-256(canonical configuration)), agent-payload-sha256-base64-v1'}
+        configuration: {$ref: '#/components/schemas/OnecAgentConfiguration'}
+    OnecSourceIdentity:
+      type: object
+      nullable: true
+      required: [databaseId, exportEpoch, environment]
+      properties:
+        databaseId: {type: string, maxLength: 128}
+        exportEpoch: {type: string, maxLength: 128}
+        environment: {type: string, maxLength: 32}
+    OnecSessionStartRequest:
+      type: object
+      required: [agentId, siteId, agentVersion]
+      properties:
+        agentId: {type: string}
+        siteId: {type: string}
+        agentVersion: {type: string}
+        localSchemaVersion: {type: integer, nullable: true}
+        capabilities: {type: array, items: {type: string}}
+        systemTimeUtc: {type: string, format: date-time, nullable: true}
+        sourceIdentity: {$ref: '#/components/schemas/OnecSourceIdentity'}
+    OnecSessionStartResponse:
+      type: object
+      required: [sessionId, serverTimeUtc, accepted, minimumAgentVersion, configVersion, maintenanceMode]
+      properties:
+        sessionId: {type: string, format: uuid}
+        serverTimeUtc: {type: string, format: date-time}
+        accepted: {type: boolean}
+        minimumAgentVersion: {type: string}
+        configVersion: {type: integer, format: int64}
+        maintenanceMode: {type: boolean}
+    OnecHeartbeat:
+      type: object
+      required: [agentId, version, state]
+      description: Unknown fields are ignored; free-text fields are clipped.
+      properties:
+        agentId: {type: string}
+        version: {type: string}
+        state: {type: string, enum: [healthy, degraded, offline_onec, storage_critical, maintenance, incompatible_version]}
+        stateReason: {type: string, nullable: true}
+        uptimeSeconds: {type: integer}
+        oneC: {type: object}
+        queues: {type: object}
+        etl: {type: object}
+        machine: {type: object}
+        certificate: {type: object}
+        activeConfigVersion: {type: integer, format: int64, nullable: true}
+        rejectedConfigVersion: {type: integer, format: int64, nullable: true}
+        rejectedReason: {type: string, nullable: true}
+        sourceIdentity: {$ref: '#/components/schemas/OnecSourceIdentity'}
