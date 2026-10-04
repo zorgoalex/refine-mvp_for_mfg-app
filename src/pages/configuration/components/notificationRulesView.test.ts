@@ -6,7 +6,9 @@ import {
   buildUpdatePayload,
   canManageNotificationRules,
   canViewNotificationRules,
+  creatableEventTypes,
   emptyDraft,
+  isProcurementEventType,
   generateNotificationRuleCode,
   type NotificationRuleDraft,
 } from './notificationRulesView';
@@ -187,6 +189,7 @@ describe('notificationRulesView', () => {
         priority: 100,
         isEnabled: true,
         channels: ['in_app', 'telegram'],
+        balloonMode: 'auto',
         excludeCompletedOrders: true,
         deadlineEntityTypes: ['order'],
         requireCurrentDeadlineEvent: true,
@@ -241,5 +244,64 @@ describe('notificationRulesView', () => {
       expect(canViewNotificationRules({ permissions: ['orders.view'] })).toBe(false);
       expect(canViewNotificationRules(undefined)).toBe(false);
     });
+  });
+
+  it('keeps procurement conditions the form does not edit, so enabling the rule does not widen it (phase 4b)', () => {
+    const procurementRule: NotificationRuleDto = {
+      ...baseRule,
+      eventType: 'order.resource_procurement_changed',
+      isEnabled: false,
+      channels: ['in_app'],
+      conditions: { procurementChangeTypes: ['allocation_added'], allocationRoles: ['receipt'] },
+    };
+    const draft = buildDraftFromRule(procurementRule);
+    draft.isEnabled = true;
+    expect(buildUpdatePayload(draft, 'включить', procurementRule.updatedAt).conditions)
+      .toEqual({ procurementChangeTypes: ['allocation_added'], allocationRoles: ['receipt'] });
+  });
+
+  it('procurement events cannot be created from the form (no change-type picker) and are recognised for in_app-only (phase 4b CR1-2)', () => {
+    const types = [{ eventType: 'order.status_changed' }, { eventType: 'order.resource_procurement_changed' }];
+    expect(creatableEventTypes(types)).toEqual([{ eventType: 'order.status_changed' }]);
+    expect(isProcurementEventType('order.resource_procurement_changed')).toBe(true);
+    expect(isProcurementEventType('DEADLINE_EXPIRED')).toBe(false);
+  });
+
+  it('scheduled procurement events (phase 4b-2): not creatable, in_app only, recipients by permission', async () => {
+    const { isServiceEventType } = await import('./notificationRulesView');
+    const types = ['order.status_changed', 'order.resource_demand_changed_after_mark', 'procurement.deficit_digest', 'procurement.receipt_unallocated']
+      .map((eventType) => ({ eventType }));
+    expect(creatableEventTypes(types)).toEqual([{ eventType: 'order.status_changed' }]);
+    expect(isProcurementEventType('procurement.deficit_digest')).toBe(true);
+    expect(isServiceEventType('procurement.receipt_unallocated')).toBe(true);
+    expect(isServiceEventType('order.resource_demand_changed_after_mark')).toBe(false);
+  });
+
+  it('service rules (plan 2026-10-02): recipients ALWAYS sent — roles/users or {} to reset to the default; resolvers never', async () => {
+    const { describeServiceRecipients } = await import('./notificationRulesView');
+    const base = { eventType: 'procurement.receipt_unallocated', priority: 100, isEnabled: true, channels: ['in_app'] } as unknown as NotificationRuleDraft;
+    const chosen = buildUpdatePayload({ ...base, resolvers: [], roleCodes: ['manager'], userIds: [7] } as NotificationRuleDraft, 'кому', '2026-10-02T00:00:00.000Z');
+    expect(chosen.recipients).toEqual({ roleCodes: ['manager'], userIds: [7] });
+    const cleared = buildUpdatePayload({ ...base, resolvers: [], roleCodes: [], userIds: [] } as NotificationRuleDraft, 'сброс', '2026-10-02T00:00:00.000Z');
+    expect(cleared.recipients).toEqual({});
+    const stray = buildUpdatePayload({ ...base, resolvers: ['order_manager'], roleCodes: [], userIds: [3] } as unknown as NotificationRuleDraft, 'x', '2026-10-02T00:00:00.000Z');
+    expect(stray.recipients).toEqual({ userIds: [3] });
+    // Обычное правило: пустые получатели по-прежнему не отправляются.
+    expect(buildUpdatePayload({ ...base, eventType: 'order.status_changed', resolvers: [], roleCodes: [], userIds: [] } as NotificationRuleDraft, 'x', '2026-10-02T00:00:00.000Z').recipients).toBeUndefined();
+    expect(describeServiceRecipients('procurement.receipt_unallocated', null)).toBe('По умолчанию: все с правом «Закупки: управление»');
+    expect(describeServiceRecipients('procurement.receipt_unallocated', 'пользователи: Иван')).toBe('пользователи: Иван (только с правом «Закупки: просмотр»)');
+    expect(describeServiceRecipients('procurement.deficit_digest', 'роли: Снабжение')).toBe('роли: Снабжение (только с правом «Закупки: управление»)');
+  });
+
+  it('balloon channel (plan 2026-10-03): draft keeps the rule balloon mode; payloads send channels and balloonMode', () => {
+    const rule = { ruleCode: 'r', eventType: 'order.status_changed', groupId: null, level: 'info', priority: 100, isEnabled: true,
+      channels: ['in_app', 'balloon'], balloonMode: 'persistent', conditions: {}, recipients: { userIds: [1] },
+      titleTemplate: null, messageTemplate: null, notificationRuleId: 'x', createdAt: '', updatedAt: '' } as unknown as NotificationRuleDto;
+    const draft = buildDraftFromRule(rule);
+    expect(draft).toMatchObject({ channels: ['in_app', 'balloon'], balloonMode: 'persistent' });
+    expect(buildUpdatePayload(draft, 'x', '2026-10-03T00:00:00.000Z')).toMatchObject({ channels: ['in_app', 'balloon'], balloonMode: 'persistent' });
+    expect(buildCreatePayload(draft)).toMatchObject({ channels: ['in_app', 'balloon'], balloonMode: 'persistent' });
+    // Старый backend без balloonMode — по умолчанию auto.
+    expect(buildDraftFromRule({ ...rule, balloonMode: undefined }).balloonMode).toBe('auto');
   });
 });

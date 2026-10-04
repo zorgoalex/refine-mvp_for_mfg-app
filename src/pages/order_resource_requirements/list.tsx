@@ -2,27 +2,45 @@ import { Table } from '../../ui/tooltipDelay';
 import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, } from 'react';
 import type { Key } from 'react';
 import type { IResourceComponentsProps } from '@refinedev/core';
-import { DownloadOutlined, FileTextOutlined, FilterFilled, ReloadOutlined } from '@ant-design/icons';
-import { Alert, Button, Checkbox, DatePicker, Input, Modal, Select, Space, Tag, Typography } from 'antd';
+import {
+  DownloadOutlined,
+  FileTextOutlined,
+  FilterFilled,
+  MinusSquareOutlined,
+  PlusSquareOutlined,
+  ReloadOutlined,
+} from '@ant-design/icons';
+import { Alert, Button, Checkbox, DatePicker, Drawer, Input, Modal, Pagination, Select, Space, Tag, Typography } from 'antd';
 import { Segmented } from "../../ui/Segmented";
-import type { TableProps } from 'antd';
+import type { TablePaginationConfig, TableProps } from 'antd';
 import type { FilterDropdownProps, SortOrder } from 'antd/es/table/interface';
 import dayjs, { type Dayjs } from 'dayjs';
-import { Link } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
+import { onecDocumentsApi } from '../../api/onecDocumentsApi';
 import {
   ordersApi,
   subscribeOrderDataChanged,
 } from '../../api/ordersApi';
 import type {
-  OrderFilmDemandDto,
+  OrderResourceByMaterialQuery,
+  OrderResourceDemandOnecDocumentsQuery,
   OrderResourceDemandQuery,
   OrderResourceDemandResponse,
-  OrderSheetMaterialDemandDto,
 } from '../../api/types/orderApi.types';
 import { LocalizedList } from '../../components/LocalizedList';
 import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
 import { formatDate, formatDateTime } from '../../utils/dateFormat';
 import { subscribeCutJobReady } from '../cut/cutJobEvents';
+import {
+  buildOnecDocumentFilterOptionGroups,
+  onecDocumentFilterFallbackLabel,
+  onecDocumentFilterOptionLabel,
+  onecDocumentFilterTagText,
+  onecDocumentFilterTruncatedHint,
+  parseOnecDocumentIdParam,
+  type OnecDocumentFilterDoc,
+  type OnecDocumentFilterValue,
+} from './onecDocumentFilter';
 import {
   buildResourceDemandReport,
   type ResourceDemandReport,
@@ -30,18 +48,33 @@ import {
   type ResourceDemandReportFormat,
   type ResourceDemandReportMaterial,
 } from './resourceDemandReport';
+import { MaterialRowsView } from './MaterialRowsView';
+import { OrderNumber } from './OrderNumber';
+import { orderNumberText } from './orderNumber';
+import { OnecDocChips, ProcurementCheckbox, ProcurementProgressTag, useProcurementPermission } from './ProcurementParts';
+import { RESOURCE_CARD_MODES, ResourceDemandCard, type ResourceCardMode } from './ResourceDemandCard';
+import { KindSummaryCell, ResourceDemandBreakdown } from './ResourceDemandParts';
+import { resolveByMaterialPeriod, resolveResourceCapabilities, resourceDemandLines, type ResourceDemandLine } from './resourceKinds';
+import { SplitPanelView } from './SplitPanelView';
+import { useStoredViewMode } from './useStoredViewMode';
+
+const ONEC_DOCUMENT_FILTER_DEBOUNCE_MS = 300;
 
 const LIVE_REFRESH_INTERVAL_MS = 5_000;
-const numberFormatter = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 });
-const meterFormatter = new Intl.NumberFormat('ru-RU', {
-  minimumFractionDigits: 1,
-  maximumFractionDigits: 1,
-});
 const numericStyle = { fontVariantNumeric: 'tabular-nums' } as const;
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
 const RESOURCE_FILTER_EMPTY = '__order_resource_requirement_filter_empty__';
 const RESOURCE_FILTER_NONE = '__order_resource_requirement_filter_none__';
+type ResourceListViewMode = 'summary' | 'materials' | 'panel';
+const RESOURCE_LIST_VIEW_MODES: readonly ResourceListViewMode[] = ['summary', 'materials', 'panel'];
+const RESOURCE_LIST_VIEW_OPTIONS = [
+  { value: 'summary', label: 'Сводка' },
+  { value: 'materials', label: 'Материалы' },
+  { value: 'panel', label: 'Панель' },
+];
+const EMPTY_LIST_TEXT = 'Заказы по выбранным условиям не найдены';
+
 const REPORT_MATERIAL_OPTIONS: Array<{ value: ResourceDemandReportMaterial; label: string }> = [
   { value: 'films', label: 'Плёнка' },
   { value: 'sheetMaterials', label: 'Листовые материалы' },
@@ -64,7 +97,9 @@ type HeaderSortKey = 'order' | 'date' | 'sheetMaterials' | 'films';
 
 interface HeaderFilterOption {
   value: string;
-  label: string;
+  label: React.ReactNode;
+  /** Текстовая форма для сортировки списка значений (label — ReactNode у колонки «Заказ»). */
+  sortText: string;
 }
 
 interface HeaderSortState {
@@ -84,7 +119,14 @@ function createDefaultHeaderFilters(): HeaderFilterState {
   };
 }
 
-export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = () => {
+export interface OrderResourceRequirementListProps extends IResourceComponentsProps {
+  /** Внутри вкладок страницы: заголовок страницы рисует оболочка (план §1.1). */
+  embedded?: boolean;
+  /** Вкладка скрыта — live-опрос на паузе, состояние экрана сохраняется. */
+  active?: boolean;
+}
+
+export const OrderResourceRequirementList: React.FC<OrderResourceRequirementListProps> = ({ embedded = false, active = true }) => {
   const [page, setPage] = useState(DEFAULT_PAGE);
   const { pageSize, setPageSize: rememberPageSize } = usePageSizePreference(
     'order-resource-requirements:list',
@@ -93,6 +135,15 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
   const [searchInput, setSearchInput] = useState('');
   const [dateRange, setDateRange] = useState<DateRange>(null);
   const [readyCutsOnly, setReadyCutsOnly] = useState(false);
+  const [unpurchasedOnly, setUnpurchasedOnly] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [onecDocumentFilter, setOnecDocumentFilter] = useState<OnecDocumentFilterValue | null>(null);
+  // Инициализация из URL идёт асинхронно (карточка документа) — синхронизация фильтра
+  // обратно в URL ждёт этого шага, иначе очистила бы ?onecDocumentId= до её завершения.
+  const [onecDocumentUrlInitialized, setOnecDocumentUrlInitialized] = useState(
+    () => parseOnecDocumentIdParam(searchParams.get('onecDocumentId')) == null,
+  );
+  const { canManage, manageLoading } = useProcurementPermission();
   const [reportOpen, setReportOpen] = useState(false);
   const [reportRows, setReportRows] = useState<OrderResourceDemandRow[]>(EMPTY_RESOURCE_DEMAND_ROWS);
   const [reportSelectedOnly, setReportSelectedOnly] = useState(false);
@@ -107,6 +158,20 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
   );
   const [sortState, setSortState] = useState<HeaderSortState>(DEFAULT_SORT_STATE);
   const [refreshRevision, setRefreshRevision] = useState(0);
+  const [viewMode, setViewMode] = useStoredViewMode<ResourceListViewMode>(
+    'order-resource-requirements:list-view',
+    RESOURCE_LIST_VIEW_MODES,
+    'summary',
+  );
+  const [cardMode, setCardMode] = useStoredViewMode<ResourceCardMode>(
+    'order-resource-requirements:card-view',
+    RESOURCE_CARD_MODES,
+    'tabs',
+  );
+  const [expandedRowKeys, setExpandedRowKeys] = useState<readonly Key[]>([]);
+  const [collapsedMaterialOrders, setCollapsedMaterialOrders] = useState<ReadonlySet<number>>(() => new Set());
+  const [drawerSnapshot, setDrawerSnapshot] = useState<OrderResourceDemandRow | null>(null);
+  const [panelOrderId, setPanelOrderId] = useState<number | null>(null);
   const deferredSearch = useDeferredValue(searchInput.trim());
   const query = useMemo<OrderResourceDemandQuery>(() => ({
     page,
@@ -114,14 +179,81 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
     ...(deferredSearch ? { search: deferredSearch } : {}),
     ...(dateRange?.[0] ? { dateFrom: dateRange[0].format('YYYY-MM-DD') } : {}),
     ...(dateRange?.[1] ? { dateTo: dateRange[1].format('YYYY-MM-DD') } : {}),
-  }), [dateRange, deferredSearch, page, pageSize]);
-  const { response, loading, error } = useLiveOrderResourceDemands(query, refreshRevision);
+    ...(unpurchasedOnly ? { unpurchasedOnly: true } : {}),
+    ...(onecDocumentFilter ? { onecDocumentId: onecDocumentFilter.documentId } : {}),
+  }), [dateRange, deferredSearch, onecDocumentFilter, page, pageSize, unpurchasedOnly]);
+  const { response, loading, error } = useLiveOrderResourceDemands(query, refreshRevision, !active);
   const rows = response?.data ?? EMPTY_RESOURCE_DEMAND_ROWS;
+  const capabilities = useMemo(() => resolveResourceCapabilities(response?.capabilities), [response]);
+  const triggerRefresh = useCallback(() => setRefreshRevision((value) => value + 1), []);
+  const todayKey = dayjs().format('YYYY-MM-DD');
+  const byMaterialPeriod = useMemo(() => resolveByMaterialPeriod(
+    dateRange?.[0]?.format('YYYY-MM-DD'),
+    dateRange?.[1]?.format('YYYY-MM-DD'),
+    dayjs(todayKey).subtract(1, 'month').format('YYYY-MM-DD'),
+    todayKey,
+    onecDocumentFilter != null,
+  ), [dateRange, onecDocumentFilter, todayKey]);
+  const byMaterialQuery = useMemo<OrderResourceByMaterialQuery>(() => ({
+    ...(deferredSearch ? { search: deferredSearch } : {}),
+    ...(byMaterialPeriod.dateFrom ? { dateFrom: byMaterialPeriod.dateFrom } : {}),
+    ...(byMaterialPeriod.dateTo ? { dateTo: byMaterialPeriod.dateTo } : {}),
+    ...(unpurchasedOnly ? { unpurchasedOnly: true } : {}),
+    ...(onecDocumentFilter ? { onecDocumentId: onecDocumentFilter.documentId } : {}),
+  }), [byMaterialPeriod, deferredSearch, onecDocumentFilter, unpurchasedOnly]);
+  const byMaterialPeriodNote = byMaterialPeriod.isDefault && byMaterialPeriod.dateFrom && byMaterialPeriod.dateTo
+    ? `Период по умолчанию — последний месяц: ${formatDate(byMaterialPeriod.dateFrom)} – ${formatDate(byMaterialPeriod.dateTo)}. Чтобы изменить, выберите даты в фильтре «Заказы с даты — по дату».`
+    : null;
+  // «Документ 1С»-фильтр: список опций Select — документы, привязанные к заказам ЭТОЙ
+  // выборки (те же условия, что у основного списка, без paging и onecDocumentId).
+  const onecDocumentPickerQuery = useMemo<OrderResourceDemandOnecDocumentsQuery>(() => ({
+    ...(deferredSearch ? { search: deferredSearch } : {}),
+    ...(dateRange?.[0] ? { dateFrom: dateRange[0].format('YYYY-MM-DD') } : {}),
+    ...(dateRange?.[1] ? { dateTo: dateRange[1].format('YYYY-MM-DD') } : {}),
+    ...(unpurchasedOnly ? { unpurchasedOnly: true } : {}),
+  }), [dateRange, deferredSearch, unpurchasedOnly]);
+  const onecDocumentOptionsState = useOnecDocumentFilterOptions(
+    onecDocumentPickerQuery,
+    capabilities.onecDocuments,
+  );
+  const onecDocumentOptionGroups = useMemo(
+    () => buildOnecDocumentFilterOptionGroups(onecDocumentOptionsState.documents),
+    [onecDocumentOptionsState.documents],
+  );
+  const onecDocumentTruncatedHint = onecDocumentFilterTruncatedHint(onecDocumentOptionsState.truncated);
   const filterOptions = useMemo(() => buildResourceDemandFilterOptions(rows), [rows]);
   const tableRows = useMemo(
     () => sortResourceDemandRows(filterResourceDemandRows(rows, headerFilters, readyCutsOnly), sortState),
     [headerFilters, readyCutsOnly, rows, sortState],
   );
+  // Карточка берёт свежую строку из live-обновлений, а если заказ ушёл со страницы — последний снимок.
+  const drawerRow = useMemo(
+    () => (drawerSnapshot == null
+      ? null
+      : rows.find((row) => row.orderId === drawerSnapshot.orderId) ?? drawerSnapshot),
+    [drawerSnapshot, rows],
+  );
+  const openCard = useCallback((row: OrderResourceDemandRow) => setDrawerSnapshot(row), []);
+
+  const toggleMaterialOrder = useCallback((orderId: number) => {
+    setCollapsedMaterialOrders((current) => {
+      const next = new Set(current);
+      if (next.has(orderId)) next.delete(orderId);
+      else next.add(orderId);
+      return next;
+    });
+  }, []);
+  // «Сводка»: строки свёрнуты по умолчанию; «Материалы»: группы развёрнуты по умолчанию.
+  const collapseAllState = resolveCollapseAll(viewMode, tableRows, expandedRowKeys, collapsedMaterialOrders);
+  const handleCollapseAll = useCallback(() => {
+    const allOrderIds = tableRows.map((row) => row.orderId);
+    if (viewMode === 'summary') {
+      setExpandedRowKeys(collapseAllState.collapse ? [] : allOrderIds);
+    } else if (viewMode === 'materials') {
+      setCollapsedMaterialOrders(collapseAllState.collapse ? new Set(allOrderIds) : new Set());
+    }
+  }, [collapseAllState.collapse, tableRows, viewMode]);
+
   const report = useMemo(
     () => buildResourceDemandReport({
       rows: reportRows,
@@ -143,7 +275,9 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
     searchInput.trim().length > 0 ||
     hasDateRange ||
     hasActiveListFilters ||
+    unpurchasedOnly ||
     hasActiveSort ||
+    onecDocumentFilter != null ||
     page !== DEFAULT_PAGE;
 
   const resetPage = useCallback(() => setPage(DEFAULT_PAGE), []);
@@ -151,6 +285,50 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
   useEffect(() => {
     setPage(DEFAULT_PAGE);
   }, [pageSize]);
+
+  // Deep link ?onecDocumentId=<id> — читаем один раз при монтировании; карточка документа
+  // даёт подпись фильтра, ошибка/404 не блокируют фильтр — заглушка «Документ #<id>».
+  useEffect(() => {
+    const initialDocumentId = parseOnecDocumentIdParam(searchParams.get('onecDocumentId'));
+    if (initialDocumentId == null) return;
+    let active = true;
+    onecDocumentsApi.getCard(initialDocumentId)
+      .then((response) => {
+        if (!active) return;
+        setOnecDocumentFilter({
+          documentId: initialDocumentId,
+          label: onecDocumentFilterOptionLabel({
+            kind: response.data.kind,
+            number: response.data.number,
+            date: response.data.date,
+          }),
+        });
+      })
+      .catch(() => {
+        if (!active) return;
+        setOnecDocumentFilter({ documentId: initialDocumentId, label: onecDocumentFilterFallbackLabel(initialDocumentId) });
+      })
+      .finally(() => {
+        if (active) setOnecDocumentUrlInitialized(true);
+      });
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Держим ?onecDocumentId= в адресной строке в согласии с фильтром (replace — не добавляем
+  // записи истории на каждый выбор/сброс).
+  useEffect(() => {
+    if (!onecDocumentUrlInitialized) return;
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (onecDocumentFilter) next.set('onecDocumentId', String(onecDocumentFilter.documentId));
+      else next.delete('onecDocumentId');
+      return next;
+    }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onecDocumentFilter, onecDocumentUrlInitialized]);
 
   useEffect(() => {
     if (selectedRowKeys.length === 0) {
@@ -183,10 +361,17 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
     setSearchInput('');
     setDateRange(null);
     setReadyCutsOnly(false);
+    setUnpurchasedOnly(false);
+    setOnecDocumentFilter(null);
     setHeaderFilters(createDefaultHeaderFilters());
     setSortState(DEFAULT_SORT_STATE);
     setPage(DEFAULT_PAGE);
     setRefreshRevision((value) => value + 1);
+  }, []);
+
+  const handleOnecDocumentFilterChange = useCallback((value: OnecDocumentFilterValue | null) => {
+    setOnecDocumentFilter(value);
+    setPage(DEFAULT_PAGE);
   }, []);
 
   const handleRowSelectionChange = useCallback((keys: Key[], selectedRows: OrderResourceDemandRow[]) => {
@@ -205,6 +390,11 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
       setSelectedRowKeys([]);
       setSelectedRowsByKey(new Map());
     }
+    setPage(DEFAULT_PAGE);
+  }, []);
+
+  const handleUnpurchasedOnlyChange = useCallback((checked: boolean) => {
+    setUnpurchasedOnly(checked);
     setPage(DEFAULT_PAGE);
   }, []);
 
@@ -233,6 +423,25 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
     [],
   );
 
+  const paginationConfig: TablePaginationConfig = {
+    current: response?.pagination.page ?? page,
+    pageSize: response?.pagination.pageSize ?? pageSize,
+    total: response?.pagination.total ?? 0,
+    showSizeChanger: true,
+    pageSizeOptions: PAGE_SIZE_OPTIONS,
+    showTotal: (total) => (
+      hasActiveListFilters ? `Заказов: ${total}; показано: ${tableRows.length}` : `Заказов: ${total}`
+    ),
+    onChange: (nextPage, nextPageSize) => {
+      if (nextPageSize !== pageSize) {
+        rememberPageSize(nextPageSize);
+        setPage(DEFAULT_PAGE);
+        return;
+      }
+      setPage(nextPage);
+    },
+  };
+
   const filterProps = (field: HeaderFilterField, options: HeaderFilterOption[]) => ({
     filteredValue: headerFilters[field],
     filterIcon: (filtered: boolean) => (
@@ -248,9 +457,25 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
   });
 
   return (
-    <LocalizedList title="Потребности заказов в ресурсах">
+    <ListFrame embedded={embedded}>
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
-        <Space wrap={false} size={8} style={{ width: '100%', overflowX: 'auto', whiteSpace: 'nowrap' }}>
+        {/* Панель фильтров в одну строку, пока помещается; на узком окне элементы переносятся, без горизонтальной прокрутки. */}
+        <Space wrap size={[8, 8]} style={{ width: '100%' }}>
+          <Segmented
+            aria-label="Вид списка"
+            value={viewMode}
+            options={RESOURCE_LIST_VIEW_OPTIONS}
+            onChange={(value) => setViewMode(value as ResourceListViewMode)}
+          />
+          {viewMode !== 'panel' && (
+            <Button
+              icon={collapseAllState.collapse ? <MinusSquareOutlined /> : <PlusSquareOutlined />}
+              disabled={tableRows.length === 0}
+              onClick={handleCollapseAll}
+            >
+              {collapseAllState.collapse ? 'Свернуть все' : 'Развернуть все'}
+            </Button>
+          )}
           <Input.Search
             allowClear
             aria-label="Поиск заказа"
@@ -289,6 +514,48 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
           >
             Готовые раскрои
           </Checkbox>
+          {capabilities.procurement && (
+            <Checkbox
+              checked={unpurchasedOnly}
+              style={{ whiteSpace: 'nowrap' }}
+              onChange={(event) => handleUnpurchasedOnlyChange(event.target.checked)}
+            >
+              Есть незакупленное
+            </Checkbox>
+          )}
+          {capabilities.onecDocuments && (
+            <Select
+              labelInValue
+              showSearch
+              allowClear
+              optionFilterProp="label"
+              aria-label="Документ 1С"
+              placeholder="Документ 1С"
+              style={{ width: 260 }}
+              loading={onecDocumentOptionsState.loading}
+              notFoundContent={onecDocumentOptionsState.loading ? 'Загрузка…' : 'Документы не найдены'}
+              value={onecDocumentFilter ? { value: onecDocumentFilter.documentId, label: onecDocumentFilter.label } : undefined}
+              options={onecDocumentOptionGroups}
+              onChange={(selected) => handleOnecDocumentFilterChange(
+                selected ? { documentId: Number(selected.value), label: String(selected.label) } : null,
+              )}
+            />
+          )}
+          {capabilities.onecDocuments && onecDocumentFilter && (
+            <Tag
+              closable
+              color="blue"
+              style={{ maxWidth: '100%', whiteSpace: 'normal', marginInlineEnd: 0 }}
+              onClose={() => handleOnecDocumentFilterChange(null)}
+            >
+              {onecDocumentFilterTagText(onecDocumentFilter.label)}
+            </Tag>
+          )}
+          {capabilities.onecDocuments && onecDocumentTruncatedHint && (
+            <Typography.Text type="secondary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+              {onecDocumentTruncatedHint}
+            </Typography.Text>
+          )}
           <Button icon={<FileTextOutlined />} onClick={openReportModal}>
             Отчёт
           </Button>
@@ -319,88 +586,162 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
           />
         )}
 
-        <Table
-          rowKey="orderId"
-          rowSelection={{
-            selectedRowKeys,
-            onChange: handleRowSelectionChange,
-            preserveSelectedRowKeys: true,
-            columnWidth: 48,
-          }}
-          dataSource={tableRows}
-          loading={loading && !response}
-          scroll={{ x: 1080 }}
-          onChange={handleTableChange}
-          pagination={{
-            current: response?.pagination.page ?? page,
-            pageSize: response?.pagination.pageSize ?? pageSize,
-            total: response?.pagination.total ?? 0,
-            showSizeChanger: true,
-            pageSizeOptions: PAGE_SIZE_OPTIONS,
-            showTotal: (total) => (
-              hasActiveListFilters ? `Заказов: ${total}; показано: ${tableRows.length}` : `Заказов: ${total}`
-            ),
-            onChange: (nextPage, nextPageSize) => {
-              if (nextPageSize !== pageSize) {
-                rememberPageSize(nextPageSize);
-                setPage(DEFAULT_PAGE);
-                return;
-              }
-              setPage(nextPage);
-            },
-          }}
-          locale={{ emptyText: 'Заказы по выбранным условиям не найдены' }}
+        {viewMode === 'summary' && (
+          <Table
+            rowKey="orderId"
+            rowSelection={{
+              selectedRowKeys,
+              onChange: handleRowSelectionChange,
+              preserveSelectedRowKeys: true,
+              columnWidth: 48,
+            }}
+            dataSource={tableRows}
+            loading={loading && !response}
+            scroll={{ x: 1080 }}
+            onChange={handleTableChange}
+            pagination={paginationConfig}
+            expandable={{
+              expandedRowKeys,
+              onExpandedRowsChange: setExpandedRowKeys,
+              expandedRowRender: (row: OrderResourceDemandRow) => (
+                <ResourceDemandBreakdown
+                  lines={resourceDemandLines(row)}
+                  renderProcurement={capabilities.procurement ? (line: ResourceDemandLine) => (
+                    <ProcurementCheckbox
+                      orderId={row.orderId}
+                      line={line}
+                      canManage={canManage}
+                      manageLoading={manageLoading}
+                      onChanged={triggerRefresh}
+                    />
+                  ) : undefined}
+                  renderOnecDocs={capabilities.onecDocuments ? (line: ResourceDemandLine) => (
+                    <OnecDocChips line={line} />
+                  ) : undefined}
+                />
+              ),
+            }}
+            locale={{ emptyText: EMPTY_LIST_TEXT }}
+          >
+            <Table.Column
+              key="order"
+              title="Заказ"
+              width={210}
+              sorter
+              sortOrder={sortState.columnKey === 'order' ? sortState.order : null}
+              {...filterProps('order', filterOptions.order)}
+              render={(_, row: OrderResourceDemandRow) => (
+                <Space direction="vertical" size={0}>
+                  <OrderNumber orderName={row.orderName} orderId={row.orderId} projectCode={row.projectCode} onClick={() => openCard(row)} />
+                  <Typography.Text type="secondary">
+                    {row.clientName || 'Клиент не указан'}
+                  </Typography.Text>
+                </Space>
+              )}
+            />
+            <Table.Column
+              key="date"
+              title="Дата заказа"
+              width={125}
+              sorter
+              sortOrder={sortState.columnKey === 'date' ? sortState.order : null}
+              {...filterProps('date', filterOptions.date)}
+              render={(_, row: OrderResourceDemandRow) => (
+                <span style={numericStyle}>{row.orderDate ? formatDate(row.orderDate) : '—'}</span>
+              )}
+            />
+            <Table.Column
+              key="sheetMaterials"
+              title="Листовые материалы"
+              width={280}
+              sorter
+              sortOrder={sortState.columnKey === 'sheetMaterials' ? sortState.order : null}
+              {...filterProps('sheetMaterials', filterOptions.sheetMaterials)}
+              render={(_, row: OrderResourceDemandRow) => (
+                <KindSummaryCell lines={resourceDemandLines(row)} kind="sheet_material" />
+              )}
+            />
+            <Table.Column
+              key="films"
+              title="Плёнка"
+              width={280}
+              sorter
+              sortOrder={sortState.columnKey === 'films' ? sortState.order : null}
+              {...filterProps('films', filterOptions.films)}
+              render={(_, row: OrderResourceDemandRow) => (
+                <KindSummaryCell lines={resourceDemandLines(row)} kind="film" />
+              )}
+            />
+            {capabilities.procurement && (
+              <Table.Column
+                key="procurement"
+                title="Закуп"
+                width={140}
+                render={(_, row: OrderResourceDemandRow) => <ProcurementProgressTag summary={row.procurementSummary} />}
+              />
+            )}
+          </Table>
+        )}
+        {viewMode === 'materials' && (
+          <MaterialRowsView
+            rows={tableRows}
+            loading={loading && !response}
+            emptyText={EMPTY_LIST_TEXT}
+            onOpenCard={openCard}
+            collapsed={collapsedMaterialOrders}
+            onToggleGroup={toggleMaterialOrder}
+            capabilities={capabilities}
+            canManage={canManage}
+            manageLoading={manageLoading}
+            onProcurementChanged={triggerRefresh}
+          />
+        )}
+        {viewMode === 'panel' && (
+          <SplitPanelView
+            rows={tableRows}
+            loading={loading && !response}
+            emptyText={EMPTY_LIST_TEXT}
+            selectedOrderId={panelOrderId}
+            onSelectOrder={setPanelOrderId}
+            selectedRowKeys={selectedRowKeys}
+            onSelectionChange={handleRowSelectionChange}
+            cardMode={cardMode}
+            onCardModeChange={setCardMode}
+            capabilities={capabilities}
+            canManage={canManage}
+            manageLoading={manageLoading}
+            onProcurementChanged={triggerRefresh}
+            byMaterialQuery={byMaterialQuery}
+            clientFiltersActive={hasActiveListFilters}
+            byMaterialPeriodNote={byMaterialPeriodNote}
+            refreshRevision={refreshRevision}
+          />
+        )}
+        {viewMode !== 'summary' && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Pagination {...paginationConfig} />
+          </div>
+        )}
+        <Drawer
+          open={drawerRow != null}
+          width={1100}
+          title="Потребности заказа в ресурсах"
+          onClose={() => setDrawerSnapshot(null)}
+          destroyOnClose
         >
-          <Table.Column
-            key="order"
-            title="Заказ"
-            width={230}
-            sorter
-            sortOrder={sortState.columnKey === 'order' ? sortState.order : null}
-            {...filterProps('order', filterOptions.order)}
-            render={(_, row: OrderResourceDemandRow) => (
-              <Space direction="vertical" size={0}>
-                <Link to={`/orders/show/${row.orderId}`}>{orderDisplayNumber(row)}</Link>
-                <Typography.Text type="secondary">
-                  {row.clientName || 'Клиент не указан'}
-                </Typography.Text>
-              </Space>
-            )}
-          />
-          <Table.Column
-            key="date"
-            title="Дата заказа"
-            width={125}
-            sorter
-            sortOrder={sortState.columnKey === 'date' ? sortState.order : null}
-            {...filterProps('date', filterOptions.date)}
-            render={(_, row: OrderResourceDemandRow) => (
-              <span style={numericStyle}>{row.orderDate ? formatDate(row.orderDate) : '—'}</span>
-            )}
-          />
-          <Table.Column
-            key="sheetMaterials"
-            title="Листовые материалы"
-            width={360}
-            sorter
-            sortOrder={sortState.columnKey === 'sheetMaterials' ? sortState.order : null}
-            {...filterProps('sheetMaterials', filterOptions.sheetMaterials)}
-            render={(_, row: OrderResourceDemandRow) => (
-              <SheetMaterialCell rows={row.sheetMaterials} />
-            )}
-          />
-          <Table.Column
-            key="films"
-            title="Плёнка"
-            width={360}
-            sorter
-            sortOrder={sortState.columnKey === 'films' ? sortState.order : null}
-            {...filterProps('films', filterOptions.films)}
-            render={(_, row: OrderResourceDemandRow) => (
-              <FilmCell rows={row.films} />
-            )}
-          />
-        </Table>
+          {drawerRow && (
+            <ResourceDemandCard
+              row={drawerRow}
+              mode={cardMode}
+              onModeChange={setCardMode}
+              capabilities={capabilities}
+              canManage={canManage}
+              manageLoading={manageLoading}
+              onProcurementChanged={triggerRefresh}
+              showOpenInNewTabLink
+            />
+          )}
+        </Drawer>
         <ResourceDemandReportModal
           open={reportOpen}
           report={report}
@@ -415,9 +756,15 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
           onDownload={() => downloadResourceDemandReport(report)}
         />
       </Space>
-    </LocalizedList>
+    </ListFrame>
   );
 };
+
+function ListFrame({ embedded, children }: { embedded: boolean; children: React.ReactNode }) {
+  return embedded
+    ? <>{children}</>
+    : <LocalizedList title="Потребности заказов в ресурсах">{children}</LocalizedList>;
+}
 
 const ResourceDemandFilterDropdown: React.FC<
   FilterDropdownProps & {
@@ -663,6 +1010,26 @@ function downloadResourceDemandReport(report: ResourceDemandReport) {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * Что делает кнопка «Свернуть все»: пока на странице есть хоть одна раскрытая строка,
+ * она сворачивает всё; когда всё свёрнуто — становится «Развернуть все».
+ */
+export function resolveCollapseAll(
+  viewMode: 'summary' | 'materials' | 'panel',
+  rows: Array<{ orderId: number }>,
+  expandedRowKeys: readonly Key[],
+  collapsedMaterialOrders: ReadonlySet<number>,
+): { collapse: boolean } {
+  if (viewMode === 'summary') {
+    const visible = new Set(rows.map((row) => String(row.orderId)));
+    return { collapse: expandedRowKeys.some((key) => visible.has(String(key))) };
+  }
+  if (viewMode === 'materials') {
+    return { collapse: rows.some((row) => !collapsedMaterialOrders.has(row.orderId)) };
+  }
+  return { collapse: false };
+}
+
 function normalizeFilterKeys(keys: Key[] | null): Key[] | null {
   if (!keys || keys.length === 0) return null;
   return keys.map(String);
@@ -686,11 +1053,20 @@ function buildResourceDemandFilterOptions(rows: OrderResourceDemandRow[]): Recor
   let hasRowsWithoutFilms = false;
 
   for (const row of rows) {
-    const orderLabel = [orderDisplayNumber(row), row.clientName?.trim()].filter(Boolean).join(' · ');
-    orders.set(String(row.orderId), { value: String(row.orderId), label: orderLabel || `#${row.orderId}` });
+    const orderSortText = [orderNumberText(row), row.clientName?.trim()].filter(Boolean).join(' · ') || `#${row.orderId}`;
+    orders.set(String(row.orderId), {
+      value: String(row.orderId),
+      label: (
+        <span>
+          <OrderNumber orderName={row.orderName} orderId={row.orderId} projectCode={row.projectCode} />
+          {row.clientName?.trim() ? ` · ${row.clientName.trim()}` : ''}
+        </span>
+      ),
+      sortText: orderSortText,
+    });
 
     if (row.orderDate) {
-      dates.set(row.orderDate, { value: row.orderDate, label: formatDate(row.orderDate) });
+      dates.set(row.orderDate, { value: row.orderDate, label: formatDate(row.orderDate), sortText: formatDate(row.orderDate) });
     } else {
       hasRowsWithoutDate = true;
     }
@@ -700,7 +1076,7 @@ function buildResourceDemandFilterOptions(rows: OrderResourceDemandRow[]): Recor
     } else {
       for (const material of row.sheetMaterials) {
         const value = String(material.sheetMaterialTypeId);
-        sheetMaterials.set(value, { value, label: material.name });
+        sheetMaterials.set(value, { value, label: material.name, sortText: material.name });
       }
     }
 
@@ -709,21 +1085,21 @@ function buildResourceDemandFilterOptions(rows: OrderResourceDemandRow[]): Recor
     } else {
       for (const film of row.films) {
         const value = String(film.filmId);
-        films.set(value, { value, label: film.name });
+        films.set(value, { value, label: film.name, sortText: film.name });
       }
     }
   }
 
   const dateOptions = sortHeaderFilterOptions([...dates.values()]);
-  if (hasRowsWithoutDate) dateOptions.push({ value: RESOURCE_FILTER_EMPTY, label: '(без даты)' });
+  if (hasRowsWithoutDate) dateOptions.push({ value: RESOURCE_FILTER_EMPTY, label: '(без даты)', sortText: '(без даты)' });
 
   const sheetMaterialOptions = sortHeaderFilterOptions([...sheetMaterials.values()]);
   if (hasRowsWithoutSheetMaterials) {
-    sheetMaterialOptions.push({ value: RESOURCE_FILTER_EMPTY, label: '(без листовых материалов)' });
+    sheetMaterialOptions.push({ value: RESOURCE_FILTER_EMPTY, label: '(без листовых материалов)', sortText: '(без листовых материалов)' });
   }
 
   const filmOptions = sortHeaderFilterOptions([...films.values()]);
-  if (hasRowsWithoutFilms) filmOptions.push({ value: RESOURCE_FILTER_EMPTY, label: '(без плёнки)' });
+  if (hasRowsWithoutFilms) filmOptions.push({ value: RESOURCE_FILTER_EMPTY, label: '(без плёнки)', sortText: '(без плёнки)' });
 
   return {
     order: sortHeaderFilterOptions([...orders.values()]),
@@ -734,7 +1110,7 @@ function buildResourceDemandFilterOptions(rows: OrderResourceDemandRow[]): Recor
 }
 
 function sortHeaderFilterOptions(options: HeaderFilterOption[]): HeaderFilterOption[] {
-  return [...options].sort((a, b) => compareText(a.label, b.label));
+  return [...options].sort((a, b) => compareText(a.sortText, b.sortText));
 }
 
 function filterResourceDemandRows(
@@ -816,91 +1192,7 @@ function compareText(left: string | null | undefined, right: string | null | und
   return (left ?? '').localeCompare(right ?? '', 'ru', { numeric: true, sensitivity: 'base' });
 }
 
-function SheetMaterialCell({ rows }: { rows: OrderSheetMaterialDemandDto[] }) {
-  if (rows.length === 0) return <Typography.Text type="secondary">—</Typography.Text>;
-  const totalArea = rows.reduce((sum, row) => sum + row.totalArea, 0);
-  return (
-    <Space direction="vertical" size={6} style={{ width: '100%' }}>
-      {rows.map((row) => (
-        <ResourceLine
-          key={row.sheetMaterialTypeId}
-          name={row.name}
-          provider={row.supplierName ? `Поставщик: ${row.supplierName}` : null}
-          quantity={`${numberFormatter.format(row.totalArea)} м²`}
-          detailsCount={row.detailsCount}
-        />
-      ))}
-      {rows.length > 1 && (
-        <Typography.Text strong style={numericStyle}>
-          Итого: {numberFormatter.format(totalArea)} м²
-        </Typography.Text>
-      )}
-    </Space>
-  );
-}
-
-function FilmCell({ rows }: { rows: OrderFilmDemandDto[] }) {
-  if (rows.length === 0) return <Typography.Text type="secondary">—</Typography.Text>;
-  const totalMeters = rows.reduce((sum, row) => sum + row.linearMeters, 0);
-  return (
-    <Space direction="vertical" size={6} style={{ width: '100%' }}>
-      {rows.map((row) => (
-        <ResourceLine
-          key={row.filmId}
-          name={row.name}
-          provider={row.vendorName ? `Производитель: ${row.vendorName}` : null}
-          quantity={row.hasCutData ? `${meterFormatter.format(row.linearMeters)} пог. м` : 'Нет готового раскроя'}
-          detailsCount={row.detailsCount}
-          secondaryQuantity={`${numberFormatter.format(row.totalArea)} м²`}
-        />
-      ))}
-      {rows.length > 1 && totalMeters > 0 && (
-        <Typography.Text strong style={numericStyle}>
-          Итого: {meterFormatter.format(totalMeters)} пог. м
-        </Typography.Text>
-      )}
-    </Space>
-  );
-}
-
-function ResourceLine({
-  name,
-  provider,
-  quantity,
-  detailsCount,
-  secondaryQuantity,
-}: {
-  name: string;
-  provider: string | null;
-  quantity: string;
-  detailsCount: number;
-  secondaryQuantity?: string;
-}) {
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', columnGap: 12 }}>
-      <div style={{ minWidth: 0 }}>
-        <Typography.Text>{name}</Typography.Text>
-        {(provider || secondaryQuantity) && (
-          <div>
-            <Typography.Text type="secondary">
-              {[provider, secondaryQuantity].filter(Boolean).join(' · ')}
-            </Typography.Text>
-          </div>
-        )}
-      </div>
-      <div style={{ textAlign: 'right' }}>
-        <Typography.Text strong style={numericStyle}>{quantity}</Typography.Text>
-        <div>
-          <Typography.Text type="secondary" style={numericStyle}>
-            Позиций: {detailsCount}
-          </Typography.Text>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function useLiveOrderResourceDemands(query: OrderResourceDemandQuery, refreshRevision: number) {
+function useLiveOrderResourceDemands(query: OrderResourceDemandQuery, refreshRevision: number, paused = false) {
   const [response, setResponse] = useState<OrderResourceDemandResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -908,6 +1200,8 @@ function useLiveOrderResourceDemands(query: OrderResourceDemandQuery, refreshRev
   const queryKey = JSON.stringify(query);
 
   useEffect(() => {
+    // Скрытая вкладка не опрашивает сервер; при возврате вкладки данные перечитываются.
+    if (paused) return undefined;
     let active = true;
     let inFlight = false;
 
@@ -950,9 +1244,71 @@ function useLiveOrderResourceDemands(query: OrderResourceDemandQuery, refreshRev
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [query, queryKey, refreshRevision]);
+  }, [query, queryKey, refreshRevision, paused]);
 
   return { response, loading, error };
+}
+
+interface OnecDocumentFilterOptionsState {
+  documents: OnecDocumentFilterDoc[];
+  loading: boolean;
+  error: string | null;
+  truncated: boolean;
+}
+
+const EMPTY_ONEC_DOCUMENT_FILTER_DOCS: OnecDocumentFilterDoc[] = [];
+const INITIAL_ONEC_DOCUMENT_FILTER_OPTIONS_STATE: OnecDocumentFilterOptionsState = {
+  documents: EMPTY_ONEC_DOCUMENT_FILTER_DOCS,
+  loading: false,
+  error: null,
+  truncated: false,
+};
+
+/**
+ * Опции Select «Документ 1С»: документы, привязанные к заказам ТЕКУЩЕЙ выборки списка
+ * (те же фильтры, что и основной список, без paging). Перезагружаются с debounce при
+ * смене фильтров; устаревший ответ игнорируется по номеру запроса.
+ */
+function useOnecDocumentFilterOptions(
+  query: OrderResourceDemandOnecDocumentsQuery,
+  enabled: boolean,
+): OnecDocumentFilterOptionsState {
+  const [state, setState] = useState<OnecDocumentFilterOptionsState>(INITIAL_ONEC_DOCUMENT_FILTER_OPTIONS_STATE);
+  const requestSequence = useRef(0);
+
+  useEffect(() => {
+    if (!enabled) {
+      setState(INITIAL_ONEC_DOCUMENT_FILTER_OPTIONS_STATE);
+      return;
+    }
+    let active = true;
+    const timer = window.setTimeout(() => {
+      const requestId = requestSequence.current + 1;
+      requestSequence.current = requestId;
+      setState((current) => ({ ...current, loading: true, error: null }));
+      ordersApi.listResourceDemandOnecDocuments(query)
+        .then((response) => {
+          if (!active || requestSequence.current !== requestId) return;
+          setState({ documents: response.data, loading: false, error: null, truncated: response.truncated });
+        })
+        .catch((loadError: unknown) => {
+          if (!active || requestSequence.current !== requestId) return;
+          setState({
+            documents: EMPTY_ONEC_DOCUMENT_FILTER_DOCS,
+            loading: false,
+            error: errorMessage(loadError),
+            truncated: false,
+          });
+        });
+    }, ONEC_DOCUMENT_FILTER_DEBOUNCE_MS);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, query]);
+
+  return state;
 }
 
 function errorMessage(error: unknown): string {

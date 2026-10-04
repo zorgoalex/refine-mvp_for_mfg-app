@@ -1,15 +1,19 @@
 import type { DatabaseClient } from '../../../database/database.types';
 import type { InsertNotificationInput, NotificationWritePort } from '../ports/notification-write.port';
 
+/**
+ * ЕДИНСТВЕННЫЙ писатель строк `notifications` (план 2026-10-03 §2.1): движок правил, сервис закупа, дедлайны и группы
+ * пишут только через него (guard-тест `notification-write-single-writer.test.ts`).
+ */
 export class PgNotificationWriteAdapter implements NotificationWritePort {
   async insertIfAbsent(client: DatabaseClient, input: InsertNotificationInput): Promise<{ created: boolean; notificationId: string }> {
     const inserted = await client.query<{ notification_id: string }>(
       `INSERT INTO notifications
-         (user_id, level, title, message, entity_type, entity_id, source_type, source_id, idempotency_key)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         (user_id, level, title, message, entity_type, entity_id, source_type, source_id, idempotency_key, balloon_mode)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
        RETURNING notification_id`,
-      [input.userId, input.level, input.title, input.message, input.entityType, input.entityId, input.sourceType, input.sourceId, input.idempotencyKey],
+      [input.userId, input.level, input.title, input.message, input.entityType, input.entityId, input.sourceType, input.sourceId, input.idempotencyKey, input.balloonMode ?? null],
     );
     if (inserted.rows[0]) {
       return { created: true, notificationId: String(inserted.rows[0].notification_id) };

@@ -70,6 +70,14 @@ describe('PgNotificationWriteAdapter', () => {
       input.sourceType,
       input.sourceId,
       input.idempotencyKey,
+      null,
     ]);
+  });
+
+  it('writes the balloon decision (план 2026-10-03): balloonMode as the 10th parameter', async () => {
+    const query = vi.fn(async () => ({ rows: [{ notification_id: 'new-id-3' }] }));
+    await new PgNotificationWriteAdapter().insertIfAbsent({ query } as any, { ...fakeInput({}), balloonMode: 'persistent' });
+    expect(query.mock.calls[0][0]).toMatch(/idempotency_key, balloon_mode\)/);
+    expect((query.mock.calls[0][1] as unknown[])[9]).toBe('persistent');
   });
 });

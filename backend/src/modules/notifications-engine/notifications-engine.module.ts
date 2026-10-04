@@ -7,6 +7,7 @@ import type { TransactionClient } from '../../database/database.types';
 import { PgNotificationRuleRepository } from './adapters/pg-notification-rule-repository';
 import { PgRecipientSourceAdapter } from './adapters/pg-recipient-source';
 import { PgVisibilityAdapter } from './adapters/pg-visibility';
+import { PgProcurementRecipientVisibility } from './adapters/pg-procurement-recipient-visibility';
 import { PgNotificationWriteAdapter } from './adapters/pg-notification-write';
 import { PgNotificationChannelDeliveryAdapter } from './adapters/pg-notification-channel-delivery';
 import { PgNotificationContextBuilder } from './adapters/pg-notification-context';
@@ -62,6 +63,8 @@ import { ROLE_TO_ROLE_ID, type UserRole } from '../../permissions/permissions';
           notificationWrite: new PgNotificationWriteAdapter(),
           channelDelivery: new PgNotificationChannelDeliveryAdapter(),
           runtimeConfig,
+          // Закуп: права/scope получателя — из текущей матрицы ролей (4б CR1-1), через соединение транзакции реле (CR2-1).
+          procurementVisibility: new PgProcurementRecipientVisibility(),
         }),
       inject: [NotificationsRuntimeConfigService],
     },

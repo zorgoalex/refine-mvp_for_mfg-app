@@ -1,4 +1,5 @@
 export const RESOURCE_LABELS: Record<string, string> = {
+  onec_purchase_documents: 'Документы 1С',
   orders_view: 'Заказы',
   'orders-trash': 'Корзина',
   calendar: 'Календарь',
@@ -81,7 +82,14 @@ const ACTION_LABELS: Record<string, string> = {
 
 const resourceKeyFromSegment = (seg: string): string => PATH_TO_RESOURCE[seg] ?? seg.replace(/-/g, '_');
 
+// «Документы 1С» живёт под /procurement/onec-documents — resource-имя не совпадает
+// с первым сегментом пути, поэтому первый сегмент один сюда не отображается.
+const ONEC_DOCUMENTS_PATH_PREFIX = '/procurement/onec-documents';
+
 export const resourceFromPath = (pathname: string): string | undefined => {
+  if (pathname === ONEC_DOCUMENTS_PATH_PREFIX || pathname.startsWith(`${ONEC_DOCUMENTS_PATH_PREFIX}/`)) {
+    return 'onec_purchase_documents';
+  }
   const seg = pathname.split('/').filter(Boolean)[0];
   return seg ? resourceKeyFromSegment(seg) : undefined;
 };
@@ -112,6 +120,16 @@ export const resolveTabLabel = (pathname: string): string => {
   const orderMatch = pathname.match(/^\/orders\/(edit|show)\/\d+/);
   if (orderMatch) {
     return resolveOrderTabLabel(undefined);
+  }
+  if (segs[0] === 'procurement' && segs[1] === 'onec-documents') {
+    const resourceLabel = RESOURCE_LABELS.onec_purchase_documents;
+    const action = segs[2];
+    const actionLabel = action ? ACTION_LABELS[action] : undefined;
+    if (actionLabel) {
+      const id = segs[3];
+      return id ? `${resourceLabel} · ${actionLabel} #${id}` : `${resourceLabel} · ${actionLabel}`;
+    }
+    return resourceLabel;
   }
   const resource = resourceFromPath(pathname);
   const resourceLabel = resource ? RESOURCE_LABELS[resource] : undefined;

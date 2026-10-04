@@ -24,6 +24,15 @@ import type {
   SaveOrderResponse,
   TransferOrderDetailsRequest,
   TransferOrderDetailsResponse,
+  OrderResourceByMaterialQuery,
+  OrderResourceByMaterialResponse,
+  OrderResourceDemandOnecDocumentsQuery,
+  OrderResourceDemandOnecDocumentsResponse,
+  OrderResourceCardResponse,
+  SetOrderResourceProcurementRequest,
+  OrderResourceProcurementResultDto,
+  BulkOrderResourceProcurementRequest,
+  BulkOrderResourceProcurementResponse,
 } from './types/orderApi.types';
 
 export const ordersApi = {
@@ -39,6 +48,44 @@ export const ordersApi = {
 
   listResourceDemands(params: OrderResourceDemandQuery = {}): Promise<OrderResourceDemandResponse> {
     return httpClient.get<OrderResourceDemandResponse>(withQuery(apiRoutes.orders.resourceDemands, params));
+  },
+
+  listResourceDemandsByMaterial(params: OrderResourceByMaterialQuery = {}): Promise<OrderResourceByMaterialResponse> {
+    return httpClient.get<OrderResourceByMaterialResponse>(
+      withQuery(apiRoutes.orders.resourceDemandsByMaterial, params),
+    );
+  },
+
+  /** Документы 1С, привязанные к заказам текущей выборки списка потребностей («Документ 1С»-фильтр). */
+  listResourceDemandOnecDocuments(
+    params: OrderResourceDemandOnecDocumentsQuery = {},
+  ): Promise<OrderResourceDemandOnecDocumentsResponse> {
+    return httpClient.get<OrderResourceDemandOnecDocumentsResponse>(
+      withQuery(apiRoutes.orders.resourceDemandsOnecDocuments, params),
+    );
+  },
+
+  getResourceDemandCard(orderId: number): Promise<OrderResourceCardResponse> {
+    return httpClient.get<OrderResourceCardResponse>(
+      apiRoutes.orders.resourceDemandCard(validateOrderId(orderId)),
+    );
+  },
+
+  setResourceProcurement(
+    orderId: number,
+    resourceKey: string,
+    body: SetOrderResourceProcurementRequest,
+  ): Promise<OrderResourceProcurementResultDto> {
+    return httpClient.put<OrderResourceProcurementResultDto>(
+      apiRoutes.orders.resourceProcurement(validateOrderId(orderId), resourceKey),
+      body,
+    );
+  },
+
+  bulkSetResourceProcurement(
+    body: BulkOrderResourceProcurementRequest,
+  ): Promise<BulkOrderResourceProcurementResponse> {
+    return httpClient.post<BulkOrderResourceProcurementResponse>(apiRoutes.orders.resourceProcurementBulk, body);
   },
 
   getNextOrderName(): Promise<OrderNameSuggestionResponse> {

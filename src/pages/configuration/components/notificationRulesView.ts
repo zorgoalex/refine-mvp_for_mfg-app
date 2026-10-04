@@ -1,8 +1,10 @@
 import type {
   CreateNotificationRuleRequest,
   DeadlineNotificationEntityType,
+  BalloonMode,
   NotificationChannel,
   NotificationLevel,
+  NotificationRuleConditions,
   NotificationRuleDto,
   RecipientResolverKind,
   UpdateNotificationRuleRequest,
@@ -17,6 +19,7 @@ export interface NotificationRuleDraft {
   priority: number;
   isEnabled: boolean;
   channels: NotificationChannel[];
+  balloonMode: BalloonMode;
   excludeCompletedOrders: boolean;
   deadlineEntityTypes: DeadlineNotificationEntityType[];
   requireCurrentDeadlineEvent: boolean;
@@ -27,6 +30,11 @@ export interface NotificationRuleDraft {
   userIds: number[];
   titleTemplate: string;
   messageTemplate: string;
+  /**
+   * Условия, которые форма не редактирует (закуп: procurementChangeTypes/allocationRoles). Сохраняются как есть:
+   * иначе правка правила (например, включение) стёрла бы их и правило сработало бы на любые изменения (ф.4б).
+   */
+  preservedConditions?: Pick<NotificationRuleConditions, 'procurementChangeTypes' | 'allocationRoles'>;
 }
 
 export function emptyDraft(): NotificationRuleDraft {
@@ -38,6 +46,7 @@ export function emptyDraft(): NotificationRuleDraft {
     priority: 100,
     isEnabled: true,
     channels: ['in_app'],
+    balloonMode: 'auto',
     excludeCompletedOrders: false,
     deadlineEntityTypes: [],
     requireCurrentDeadlineEvent: true,
@@ -60,6 +69,7 @@ export function buildDraftFromRule(rule: NotificationRuleDto): NotificationRuleD
     priority: rule.priority,
     isEnabled: rule.isEnabled,
     channels: [...(rule.channels ?? ['in_app'])],
+    balloonMode: rule.balloonMode === 'persistent' ? 'persistent' : 'auto',
     excludeCompletedOrders: rule.conditions.excludeCompletedOrders ?? false,
     deadlineEntityTypes: rule.conditions.deadlineEntityTypes ?? [],
     requireCurrentDeadlineEvent: rule.conditions.requireCurrentDeadlineEvent ?? true,
@@ -70,6 +80,12 @@ export function buildDraftFromRule(rule: NotificationRuleDto): NotificationRuleD
     userIds: [...(rule.recipients.userIds ?? [])],
     titleTemplate: rule.titleTemplate ?? '',
     messageTemplate: rule.messageTemplate ?? '',
+    ...(rule.conditions.procurementChangeTypes || rule.conditions.allocationRoles ? {
+      preservedConditions: {
+        ...(rule.conditions.procurementChangeTypes ? { procurementChangeTypes: [...rule.conditions.procurementChangeTypes] } : {}),
+        ...(rule.conditions.allocationRoles ? { allocationRoles: [...rule.conditions.allocationRoles] } : {}),
+      },
+    } : {}),
   };
 }
 
@@ -91,13 +107,13 @@ function normalizeTemplate(value: string): string | null {
 }
 
 function buildConditions(draft: Partial<NotificationRuleDraft>) {
-  const conditions: {
-    allowedFromOrderStatusIds?: number[];
-    deadlineEntityTypes?: DeadlineNotificationEntityType[];
-    excludeOrderStatusIds?: number[];
-    excludeCompletedOrders?: boolean;
-    requireCurrentDeadlineEvent?: boolean;
-  } = {};
+  const conditions: NotificationRuleConditions = {};
+  if (draft.preservedConditions?.procurementChangeTypes?.length) {
+    conditions.procurementChangeTypes = [...draft.preservedConditions.procurementChangeTypes];
+  }
+  if (draft.preservedConditions?.allocationRoles?.length) {
+    conditions.allocationRoles = [...draft.preservedConditions.allocationRoles];
+  }
 
   if (draft.deadlineEntityTypes && draft.deadlineEntityTypes.length > 0) {
     conditions.deadlineEntityTypes = [...draft.deadlineEntityTypes];
@@ -155,6 +171,7 @@ export function buildCreatePayload(draft: NotificationRuleDraft): CreateNotifica
     priority: draft.priority,
     isEnabled: draft.isEnabled,
     channels: [...draft.channels],
+    balloonMode: draft.balloonMode,
     conditions: buildConditions(draft),
     recipients: buildRecipients(draft),
     titleTemplate: normalizeTemplate(draft.titleTemplate),
@@ -175,6 +192,7 @@ export function buildUpdatePayload(
   if (draft.priority !== undefined) result.priority = draft.priority;
   if (draft.isEnabled !== undefined) result.isEnabled = draft.isEnabled;
   result.channels = [...(draft.channels ?? ['in_app'])];
+  if (draft.balloonMode !== undefined) result.balloonMode = draft.balloonMode;
   if (draft.groupId !== undefined) result.groupId = draft.groupId;
 
   // Always send `conditions` on edit (even `{}`). The backend merge keeps the
@@ -184,7 +202,14 @@ export function buildUpdatePayload(
   result.conditions = buildConditions(draft);
 
   const recipients = buildRecipients(draft);
-  if (Object.keys(recipients).length > 0) {
+  if (draft.eventType && isServiceEventType(draft.eventType)) {
+    // Сервисное правило закупа: получатели отправляются ВСЕГДА — пустой выбор `{}` сбрасывает к умолчанию
+    // (иначе backend оставил бы прежних получателей, план 2026-10-02 R1-1); способы определения не применимы.
+    result.recipients = {
+      ...(recipients.roleCodes ? { roleCodes: recipients.roleCodes } : {}),
+      ...(recipients.userIds ? { userIds: recipients.userIds } : {}),
+    };
+  } else if (Object.keys(recipients).length > 0) {
     result.recipients = recipients;
   }
 
@@ -208,4 +233,49 @@ function createRuleCodeEntropy(): string {
   }
 
   return Math.random().toString(36).slice(2);
+}
+
+/**
+ * События закупа (ф.4б): правило нельзя создать формой (нет выбора изменений закупа — бэкенд потребует
+ * procurementChangeTypes), только засеянное правило правится/включается; канал — только «в приложении».
+ */
+export const PROCUREMENT_EVENT_TYPES: readonly string[] = [
+  'order.resource_procurement_changed',
+  'order.resource_demand_changed_after_mark',
+  'procurement.deficit_digest',
+  'procurement.receipt_unallocated',
+];
+
+/**
+ * События сервиса закупа (ф.4б-2, план 2026-10-02): уведомления пишет сервис по расписанию (раз в день); получатели —
+ * роли и/или пользователи правила, пусто — умолчание. Получает только тот, у кого есть нужное право.
+ */
+export const SERVICE_EVENT_RECIPIENTS: Readonly<Record<string, string>> = {
+  'procurement.deficit_digest': 'По умолчанию: все с правом «Закупки: управление» — каждому по его заказам',
+  'procurement.receipt_unallocated': 'По умолчанию: все с правом «Закупки: управление»',
+};
+
+/** Право, без которого сервис не пошлёт уведомление выбранному получателю. */
+export const SERVICE_EVENT_REQUIRED_RIGHT: Readonly<Record<string, string>> = {
+  'procurement.deficit_digest': 'Закупки: управление',
+  'procurement.receipt_unallocated': 'Закупки: просмотр',
+};
+
+/** Описание получателей сервисного правила в таблице: свои — с оговоркой о праве; пусто — умолчание. */
+export function describeServiceRecipients(eventType: string, custom: string | null): string {
+  if (!custom) return SERVICE_EVENT_RECIPIENTS[eventType] ?? '—';
+  const right = SERVICE_EVENT_REQUIRED_RIGHT[eventType];
+  return right ? `${custom} (только с правом «${right}»)` : custom;
+}
+
+export function isServiceEventType(eventType: string): boolean {
+  return eventType in SERVICE_EVENT_RECIPIENTS;
+}
+
+export function isProcurementEventType(eventType: string): boolean {
+  return PROCUREMENT_EVENT_TYPES.includes(eventType);
+}
+
+export function creatableEventTypes<T extends { eventType: string }>(eventTypes: readonly T[]): T[] {
+  return eventTypes.filter((eventType) => !isProcurementEventType(eventType.eventType));
 }

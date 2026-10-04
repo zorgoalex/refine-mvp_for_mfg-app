@@ -166,4 +166,13 @@ describe('parity: lenient deadline-action condition gate vs. evaluateRuleConditi
       }
     });
   }
+  it('procurement conditions: change type and role from the payload; missing field with a condition → no match', () => {
+    const base = { orderStatusId: null, isOrderCompleted: false, deadlineEntityType: null, isCurrentDeadlineEvent: true };
+    const conditions = { procurementChangeTypes: ['allocation_added' as const], allocationRoles: ['receipt' as const] };
+    expect(evaluateRuleConditions(conditions, { ...base, payload: { changeType: 'allocation_added', role: 'receipt' } })).toEqual({ matched: true });
+    expect(evaluateRuleConditions(conditions, { ...base, payload: { changeType: 'allocation_added', role: 'payment' } }).matched).toBe(false);
+    expect(evaluateRuleConditions(conditions, { ...base, payload: { changeType: 'marked' } }).matched).toBe(false);
+    expect(evaluateRuleConditions(conditions, { ...base, payload: {} }).matched).toBe(false);
+    expect(evaluateRuleConditions({ procurementChangeTypes: ['marked'] }, { ...base, payload: { changeType: 'marked' } })).toEqual({ matched: true });
+  });
 });

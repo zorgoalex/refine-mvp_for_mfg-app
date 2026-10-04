@@ -1,6 +1,8 @@
 import { getEventDefinition } from './notification-event-registry';
 import {
   NOTIFICATION_CHANNELS,
+  BALLOON_MODES,
+  type BalloonMode,
   type NotificationChannel,
   type NotificationRuleConditions,
   type NotificationRuleRecipients,
@@ -17,6 +19,7 @@ export interface NotificationRuleInput {
   level: 'info' | 'warning' | 'error';
   priority: number;
   channels?: NotificationChannel[];
+  balloonMode?: BalloonMode;
   conditions: NotificationRuleConditions;
   recipients: NotificationRuleRecipients;
   titleTemplate?: string | null;
@@ -52,10 +55,32 @@ export function validateNotificationRuleInput(
     if (!(NOTIFICATION_CHANNELS as readonly string[]).includes(channel)) {
       return { ok: false, code: 'UNSUPPORTED_CHANNEL', detail: channel };
     }
+    // События закупа — только in_app и балун (В-4): правило с telegram не сохраняется.
+    if (def.allowedChannels && !def.allowedChannels.includes(channel)) {
+      return { ok: false, code: 'UNSUPPORTED_CHANNEL', detail: channel };
+    }
+  }
+  // Балун показывает in_app-уведомление (план 2026-10-03 §3.1): без «В приложении» — нельзя.
+  if (channels.includes('balloon') && !channels.includes('in_app')) {
+    return { ok: false, code: 'BALLOON_REQUIRES_IN_APP' };
+  }
+  if (input.balloonMode !== undefined && !(BALLOON_MODES as readonly string[]).includes(input.balloonMode)) {
+    return { ok: false, code: 'INVALID_BALLOON_MODE', detail: String(input.balloonMode) };
   }
 
   const { resolvers = [], roleCodes = [], userIds = [] } = input.recipients ?? {};
-  if (resolvers.length === 0 && roleCodes.length === 0 && userIds.length === 0) {
+  // Событие сервиса (сводки закупа): получатели — роли и/или пользователи (пусто — умолчание сервиса: право
+  // «Закупки: управление»); способы определения (resolvers) не применимы. Сервис всегда сверяет право получателя.
+  if (def.owner === 'service') {
+    if (resolvers.length > 0) {
+      return { ok: false, code: 'SERVICE_EVENT_RECIPIENTS_FIXED' };
+    }
+    // Правило сервиса — только включатель (4б-2 CR2-2): группа, важность и тексты задаёт сервис, их правка не действует.
+    if ((input.groupId ?? null) !== null || input.level !== 'info'
+      || (input.titleTemplate ?? null) !== null || (input.messageTemplate ?? null) !== null) {
+      return { ok: false, code: 'SERVICE_EVENT_FIELDS_FIXED' };
+    }
+  } else if (resolvers.length === 0 && roleCodes.length === 0 && userIds.length === 0) {
     return { ok: false, code: 'EMPTY_RECIPIENTS' };
   }
   for (const resolver of resolvers) {
@@ -80,6 +105,16 @@ export function validateNotificationRuleInput(
     input.conditions.excludeCompletedOrders === true;
   if (usesOrderConditions && !def.supportsOrderConditions) {
     return { ok: false, code: 'ORDER_CONDITION_UNSUPPORTED' };
+  }
+
+  const usesProcurementConditions =
+    input.conditions.procurementChangeTypes !== undefined || input.conditions.allocationRoles !== undefined;
+  if (usesProcurementConditions && !def.supportsProcurementConditions) {
+    return { ok: false, code: 'PROCUREMENT_CONDITION_UNSUPPORTED' };
+  }
+  // Правило закупа без списка изменений сработало бы на всё (отметки, оплаты, отвязки) — так нельзя.
+  if (def.supportsProcurementConditions && (input.conditions.procurementChangeTypes?.length ?? 0) === 0) {
+    return { ok: false, code: 'PROCUREMENT_CHANGE_TYPES_REQUIRED' };
   }
 
   const usesDeadlineConditions = (input.conditions.deadlineEntityTypes?.length ?? 0) > 0;

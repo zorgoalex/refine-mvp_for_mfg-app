@@ -10,8 +10,11 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { OrderResourceDemandService } from '../application/order-resource-demand.service';
 import type {
+  OrderResourceOnecDocumentOptionsResponseDto,
+  OrderResourceByMaterialResponseDto,
   OrderResourceDemandQuery,
   OrderResourceDemandResponseDto,
+  OrderResourceReadOptions,
 } from '../application/order-resource-demand.types';
 import { OrdersRuntimeConfigService } from './orders-runtime-config.service';
 
@@ -35,6 +38,8 @@ export class OrderResourceDemandController {
   @ApiQuery({ name: 'filmId', required: false, type: Number })
   @ApiQuery({ name: 'supplierId', required: false, type: Number })
   @ApiQuery({ name: 'vendorId', required: false, type: Number })
+  @ApiQuery({ name: 'unpurchasedOnly', required: false, type: Boolean })
+  @ApiQuery({ name: 'onecDocumentId', required: false, type: Number })
   @ApiResponse({ status: 200, description: 'Live order resource demand projection' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
@@ -46,6 +51,59 @@ export class OrderResourceDemandController {
     @Req() request: RequestWithCurrentUser,
     @Query() rawQuery: Record<string, unknown>,
   ): Promise<OrderResourceDemandResponseDto> {
+    const user = this.requireReadable(request);
+    return this.demands.list({
+      currentUser: user,
+      query: parseOrderResourceDemandQuery(rawQuery),
+    }, this.readOptions(user));
+  }
+
+  @ApiQuery({ name: 'search', required: false, type: String })
+  @ApiQuery({ name: 'dateFrom', required: false, type: String, description: 'Order date from, YYYY-MM-DD' })
+  @ApiQuery({ name: 'dateTo', required: false, type: String, description: 'Order date to, YYYY-MM-DD' })
+  @ApiQuery({ name: 'unpurchasedOnly', required: false, type: Boolean })
+  @ApiQuery({ name: 'onecDocumentId', required: false, type: Number })
+  @ApiResponse({ status: 200, description: 'Resource demand aggregated by material across filtered orders' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 422, description: 'Invalid query or too many orders' })
+  @ApiResponse({ status: 503, description: 'Orders API is disabled' })
+  @ApiOperation({ operationId: 'listOrderResourceDemandsByMaterial', summary: 'Aggregate live resource demand by material' })
+  @Get('by-material')
+  async byMaterial(
+    @Req() request: RequestWithCurrentUser,
+    @Query() rawQuery: Record<string, unknown>,
+  ): Promise<OrderResourceByMaterialResponseDto> {
+    const user = this.requireReadable(request);
+    return this.demands.listByMaterial({
+      currentUser: user,
+      query: parseOrderResourceDemandQuery(rawQuery),
+    }, this.readOptions(user));
+  }
+
+  @ApiQuery({ name: 'search', required: false, type: String })
+  @ApiQuery({ name: 'dateFrom', required: false, type: String, description: 'Order date from, YYYY-MM-DD' })
+  @ApiQuery({ name: 'dateTo', required: false, type: String, description: 'Order date to, YYYY-MM-DD' })
+  @ApiQuery({ name: 'unpurchasedOnly', required: false, type: Boolean })
+  @ApiResponse({ status: 200, description: '1C documents allocated to the orders of the current selection' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 422, description: 'Invalid query' })
+  @ApiResponse({ status: 503, description: 'Orders API is disabled' })
+  @ApiOperation({ operationId: 'listOrderResourceOnecDocumentOptions', summary: 'Filter options: 1C documents of the listed orders' })
+  @Get('onec-documents')
+  async onecDocumentOptions(
+    @Req() request: RequestWithCurrentUser,
+    @Query() rawQuery: Record<string, unknown>,
+  ): Promise<OrderResourceOnecDocumentOptionsResponseDto> {
+    const user = this.requireReadable(request);
+    return this.demands.listOnecDocumentOptions({
+      currentUser: user,
+      query: parseOrderResourceDemandQuery(rawQuery),
+    }, this.readOptions(user));
+  }
+
+  private requireReadable(request: RequestWithCurrentUser) {
     if (!this.runtimeConfig.getFeatureFlags().ordersEnabled) {
       throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Orders API is disabled', {
         feature: 'orders',
@@ -54,11 +112,16 @@ export class OrderResourceDemandController {
     if (!request.user) {
       throw new ApiError(401, 'AUTH_REQUIRED', 'Authentication required');
     }
+    return request.user;
+  }
 
-    return this.demands.list({
-      currentUser: request.user,
-      query: parseOrderResourceDemandQuery(rawQuery),
-    });
+  private readOptions(user: { permissions: readonly string[] }): OrderResourceReadOptions {
+    const flags = this.runtimeConfig.getFeatureFlags();
+    return {
+      procurementEnabled: flags.resourceProcurementEnabled === true,
+      canSeeAmounts: user.permissions.includes('finance.view'),
+      supplyWorkspaceEnabled: flags.procurementWorkspaceEnabled === true,
+    };
   }
 }
 
@@ -86,12 +149,21 @@ export function parseOrderResourceDemandQuery(raw: Record<string, unknown>): Ord
     ...optionalId(raw.filmId, 'filmId'),
     ...optionalId(raw.supplierId, 'supplierId'),
     ...optionalId(raw.vendorId, 'vendorId'),
+    ...optionalBoolean(raw.unpurchasedOnly, 'unpurchasedOnly'),
+    ...optionalId(raw.onecDocumentId, 'onecDocumentId'),
   };
+}
+
+function optionalBoolean(value: unknown, field: 'unpurchasedOnly'): Partial<OrderResourceDemandQuery> {
+  const raw = single(value, field);
+  if (raw === undefined || raw.trim() === '' || raw === 'false') return {};
+  if (raw !== 'true') throw invalidQuery(field, `${field} must be true or false`);
+  return { [field]: true };
 }
 
 function optionalId(
   value: unknown,
-  field: 'sheetMaterialTypeId' | 'filmId' | 'supplierId' | 'vendorId',
+  field: 'sheetMaterialTypeId' | 'filmId' | 'supplierId' | 'vendorId' | 'onecDocumentId',
 ): Partial<OrderResourceDemandQuery> {
   const raw = single(value, field);
   if (raw === undefined || raw.trim() === '') return {};

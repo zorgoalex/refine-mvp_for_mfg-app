@@ -9,12 +9,13 @@ import { groupsApi } from '../../../api/groupsApi';
 import type {
   DeadlineNotificationEntityType,
   NotificationEventTypeDto,
-  NotificationChannel,
   NotificationLevel,
   NotificationRuleDto,
   RecipientResolverKind,
 } from '../../../api/types/notificationRulesApi.types';
 import type { UserIdentity } from '../../../types/auth';
+import { NotificationChannelsField } from '../../../notifications/balloons/NotificationChannelsField';
+import { channelLabel } from '../../../notifications/balloons/notificationChannels';
 import { normalizeRoleKey } from '../../../utils/resourceVisibility';
 import {
   buildCreatePayload,
@@ -22,8 +23,14 @@ import {
   buildUpdatePayload,
   canManageNotificationRules,
   canViewNotificationRules,
+  creatableEventTypes,
   emptyDraft,
   generateNotificationRuleCode,
+  isProcurementEventType,
+  isServiceEventType,
+  SERVICE_EVENT_RECIPIENTS,
+  SERVICE_EVENT_REQUIRED_RIGHT,
+  describeServiceRecipients,
   type NotificationRuleDraft,
 } from './notificationRulesView';
 
@@ -38,7 +45,22 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   'order.payment_status_changed': 'Изменение статуса оплаты',
   DEADLINE_EXPIRED: 'Истечение срока',
   GROUP_DEADLINE_OVERDUE: 'Просрочка срока группы',
+  'order.resource_procurement_changed': 'Закуп материала заказа',
+  'order.resource_demand_changed_after_mark': 'Потребность изменилась после закупа',
+  'procurement.deficit_digest': 'Сводка дефицита закупа (утром)',
+  'procurement.receipt_unallocated': 'Приход 1С не распределён',
 };
+
+const PROCUREMENT_CHANGE_LABELS: Record<string, string> = {
+  marked: 'отмечено «Закуплено»',
+  unmarked: 'снята отметка',
+  allocation_added: 'распределение документа 1С',
+  allocation_removed: 'снятие распределения',
+  allocation_linked: 'привязка к заявке',
+  allocation_unlinked: 'отвязка от заявки',
+};
+
+const ALLOCATION_ROLE_LABELS: Record<string, string> = { receipt: 'приход', payment: 'оплата' };
 
 const TEMPLATE_PLACEHOLDER_LABELS: Record<string, string> = {
   '{orderId}': 'заказ',
@@ -59,11 +81,6 @@ const LEVEL_LABELS: Record<NotificationLevel, string> = {
   info: 'Информационное',
   warning: 'Предупреждение',
   error: 'Ошибка',
-};
-
-const CHANNEL_LABELS: Record<NotificationChannel, string> = {
-  in_app: 'В приложении',
-  telegram: 'Telegram',
 };
 
 const DEADLINE_ENTITY_TYPE_LABELS: Record<DeadlineNotificationEntityType, string> = {
@@ -136,6 +153,12 @@ function describeRecipients(
 
 function describeConditions(rule: NotificationRuleDto, orderStatusNameById: ReadonlyMap<number, string>): string {
   const parts: string[] = [];
+  if (rule.conditions.procurementChangeTypes?.length) {
+    parts.push(`закуп: ${rule.conditions.procurementChangeTypes.map((type) => PROCUREMENT_CHANGE_LABELS[type] ?? type).join(', ')}`);
+  }
+  if (rule.conditions.allocationRoles?.length) {
+    parts.push(`документ: ${rule.conditions.allocationRoles.map((role) => ALLOCATION_ROLE_LABELS[role] ?? role).join(', ')}`);
+  }
   if (rule.conditions.deadlineEntityTypes?.length) {
     parts.push(
       `сроки: ${rule.conditions.deadlineEntityTypes
@@ -167,6 +190,8 @@ function describeConditions(rule: NotificationRuleDto, orderStatusNameById: Read
 }
 
 function isRecipientDraftValid(draft: NotificationRuleDraft): boolean {
+  // Событие сервиса закупа: получатели — по праву, своих не бывает.
+  if (isServiceEventType(draft.eventType)) return true;
   if (draft.resolvers.length > 0) return true;
   if (draft.roleCodes.length > 0) return true;
   if (draft.userIds.length > 0) return true;
@@ -608,8 +633,8 @@ export function NotificationRulesConfig() {
               render: (_, rule) => (
                 <Space size={[4, 4]} wrap>
                   {(rule.channels ?? ['in_app']).map((channel) => (
-                    <Tag key={channel} color={channel === 'telegram' ? 'cyan' : 'blue'}>
-                      {CHANNEL_LABELS[channel]}
+                    <Tag key={channel} color={channel === 'telegram' ? 'cyan' : channel === 'balloon' ? 'purple' : 'blue'}>
+                      {channelLabel(channel, rule.balloonMode)}
                     </Tag>
                   ))}
                 </Space>
@@ -625,7 +650,9 @@ export function NotificationRulesConfig() {
               title: 'Получатели',
               key: 'recipients',
               render: (_, rule) => (
-                <Text type="secondary">{describeRecipients(rule, roleNameByCode, userNameById)}</Text>
+                <Text type="secondary">{isServiceEventType(rule.eventType)
+                  ? describeServiceRecipients(rule.eventType, (rule.recipients.roleCodes?.length || rule.recipients.userIds?.length) ? describeRecipients(rule, roleNameByCode, userNameById) : null)
+                  : describeRecipients(rule, roleNameByCode, userNameById)}</Text>
               ),
             },
             {
@@ -690,7 +717,7 @@ export function NotificationRulesConfig() {
               value={draft.eventType || undefined}
               onChange={(value) => updateDraft({ eventType: value })}
               disabled={editor.kind === 'edit'}
-              options={eventTypes.map((eventType) => ({
+              options={(editor.kind === 'create' ? creatableEventTypes(eventTypes) : eventTypes).map((eventType) => ({
                 value: eventType.eventType,
                 label: eventTypeLabel(eventType.eventType),
               }))}
@@ -700,6 +727,7 @@ export function NotificationRulesConfig() {
             />
           </Form.Item>
 
+          {!isServiceEventType(draft.eventType) && (
           <Form.Item label="Группа">
             <Select
               allowClear
@@ -714,8 +742,10 @@ export function NotificationRulesConfig() {
               notFoundContent={groupOptionsLoading ? <Spin size="small" /> : null}
             />
           </Form.Item>
+          )}
 
           <Space size={12} style={{ width: '100%' }}>
+            {!isServiceEventType(draft.eventType) && (
             <Form.Item label="Важность" style={{ width: 180 }}>
               <Select<NotificationLevel>
                 value={draft.level}
@@ -727,6 +757,8 @@ export function NotificationRulesConfig() {
                 ]}
               />
             </Form.Item>
+            )}
+            {!isServiceEventType(draft.eventType) && (
             <Form.Item label="Приоритет" style={{ width: 160 }}>
               <InputNumber
                 min={0}
@@ -736,6 +768,7 @@ export function NotificationRulesConfig() {
                 style={{ width: 120 }}
               />
             </Form.Item>
+            )}
             <Form.Item label="Включено" style={{ width: 100 }}>
               <Switch checked={draft.isEnabled} onChange={(checked) => updateDraft({ isEnabled: checked })} />
             </Form.Item>
@@ -744,22 +777,21 @@ export function NotificationRulesConfig() {
           <Form.Item
             label="Канал уведомлений"
             required
-            extra="Для Telegram получатель один раз подключает свой аккаунт в личном кабинете. Если Telegram не подключён, доставка этому получателю будет пропущена."
+            extra="Балун — всплывающее окно в углу экрана для уведомления «В приложении». Для Telegram получатель один раз подключает свой аккаунт в личном кабинете; если Telegram не подключён, доставка этому получателю будет пропущена."
           >
-            <Checkbox.Group
-              value={draft.channels}
-              onChange={(values) =>
-                updateDraft({ channels: values as NotificationChannel[] })
-              }
-              style={{ width: '100%' }}
-            >
-              <Space direction="vertical" size={8}>
-                <Checkbox value="in_app">В приложении</Checkbox>
-                <Checkbox value="telegram">Telegram</Checkbox>
-              </Space>
-            </Checkbox.Group>
+            <NotificationChannelsField
+              channels={draft.channels}
+              balloonMode={draft.balloonMode}
+              onChange={(next) => updateDraft(next)}
+              // Уведомления закупа — без Telegram (бэкенд не сохранит).
+              telegramDisabled={isProcurementEventType(draft.eventType)}
+              balloonHint={draft.eventType === 'DEADLINE_EXPIRED'
+                ? 'Для дедлайнов балун работает, когда уведомления дедлайнов создаёт движок правил.'
+                : undefined}
+            />
           </Form.Item>
 
+          {!isServiceEventType(draft.eventType) && (
           <Form.Item label="Условия">
             <Space direction="vertical" size={6} style={{ width: '100%' }}>
               <Checkbox
@@ -818,7 +850,39 @@ export function NotificationRulesConfig() {
               />
             </Space>
           </Form.Item>
+          )}
 
+          {isServiceEventType(draft.eventType) ? (
+            <Form.Item
+              label="Получатели"
+              extra={`Пусто — ${SERVICE_EVENT_RECIPIENTS[draft.eventType].replace(/^По умолчанию: /, '')}. Получают только те, у кого есть право «${SERVICE_EVENT_REQUIRED_RIGHT[draft.eventType]}».`}
+            >
+              <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                <Select<string[]>
+                  mode="multiple"
+                  value={draft.roleCodes}
+                  onChange={(values) => updateDraft({ roleCodes: values })}
+                  options={selectedRoleOptions}
+                  placeholder="Роли получателей (пусто — по умолчанию)"
+                  loading={rolesLoading}
+                  optionFilterProp="label"
+                  showSearch
+                  allowClear
+                />
+                <Select<number[]>
+                  mode="multiple"
+                  value={draft.userIds}
+                  onChange={(values) => updateDraft({ userIds: values })}
+                  options={selectedUserOptions}
+                  placeholder="Пользователи-получатели (пусто — по умолчанию)"
+                  loading={usersLoading}
+                  optionFilterProp="label"
+                  showSearch
+                  allowClear
+                />
+              </Space>
+            </Form.Item>
+          ) : (
           <Form.Item label="Получатели" required>
             <Space direction="vertical" size={6} style={{ width: '100%' }}>
               <Select<RecipientResolverKind[]>
@@ -857,7 +921,10 @@ export function NotificationRulesConfig() {
               />
             </Space>
           </Form.Item>
+          )}
 
+          {!isServiceEventType(draft.eventType) && (
+            <>
           <Form.Item label="Заголовок уведомления">
             <Input
               value={draft.titleTemplate}
@@ -885,6 +952,8 @@ export function NotificationRulesConfig() {
               placeholder="У заказа {orderId} истёк срок"
             />
           </Form.Item>
+            </>
+          )}
 
           {editor.kind === 'edit' && (
             <Form.Item label="Причина изменения" required>

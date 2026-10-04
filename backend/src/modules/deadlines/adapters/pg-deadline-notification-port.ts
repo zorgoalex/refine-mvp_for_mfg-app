@@ -1,64 +1,35 @@
 import type { DatabaseClient } from '../../../database/database.types';
+import { PgNotificationWriteAdapter } from '../../notifications-engine/adapters/pg-notification-write';
 import type {
   DeadlineNotificationInput,
   DeadlineNotificationPort,
   DeadlineNotificationResult,
 } from '../application/deadline.types';
 
-interface NotificationRow {
-  notification_id: string;
-  created_at: string;
-}
 
+/**
+ * Старый путь уведомлений дедлайнов (владелец `legacy_inline`): пишет через единый адаптер записи уведомлений (план
+ * 2026-10-03 §2.1). Балуна нет — эти уведомления создают действия дедлайнов, а не правила экрана уведомлений
+ * (балуны дедлайнов — в правилах `DEADLINE_EXPIRED`, когда уведомлениями дедлайнов владеет движок).
+ */
 export class PgDeadlineNotificationPort implements DeadlineNotificationPort {
+  private readonly write = new PgNotificationWriteAdapter();
+
   constructor(private readonly database: DatabaseClient) {}
 
   async createNotification(input: DeadlineNotificationInput): Promise<DeadlineNotificationResult> {
-    const inserted = await this.database.query<NotificationRow>(
-      `
-      INSERT INTO notifications (
-        user_id, level, title, message, entity_type, entity_id, source_type, source_id,
-        idempotency_key
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
-      RETURNING notification_id, created_at
-      `,
-      [
-        input.userId,
-        input.level,
-        input.title,
-        input.message,
-        input.entityType ?? null,
-        input.entityId ?? null,
-        input.sourceType,
-        input.sourceId,
-        input.idempotencyKey,
-      ],
-    );
-
-    const insertedRow = inserted.rows[0];
-    if (insertedRow) {
-      return {
-        created: true,
-        notificationId: String(insertedRow.notification_id),
-      };
-    }
-
-    const existing = await this.database.query<NotificationRow>(
-      `
-      SELECT notification_id, created_at
-      FROM notifications
-      WHERE idempotency_key = $1
-      `,
-      [input.idempotencyKey],
-    );
-
-    return {
-      created: false,
-      notificationId: existing.rows[0]?.notification_id
-        ? String(existing.rows[0].notification_id)
-        : null,
-    };
+    const result = await this.write.insertIfAbsent(this.database, {
+      userId: input.userId,
+      level: input.level,
+      title: input.title,
+      message: input.message,
+      entityType: input.entityType ?? null,
+      entityId: input.entityId ?? null,
+      sourceType: input.sourceType,
+      sourceId: input.sourceId,
+      idempotencyKey: input.idempotencyKey,
+      balloonMode: null,
+    });
+    return { created: result.created, notificationId: result.notificationId };
   }
 }

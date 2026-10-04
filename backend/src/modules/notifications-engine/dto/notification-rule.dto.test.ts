@@ -31,6 +31,7 @@ describe('parseCreateNotificationRuleRequest', () => {
       priority: 100,
       isEnabled: true,
       channels: ['in_app'],
+      balloonMode: 'auto',
       conditions: {},
       recipients: {},
     });
@@ -66,6 +67,7 @@ describe('parseCreateNotificationRuleRequest', () => {
       priority: 50,
       isEnabled: false,
       channels: ['in_app', 'telegram'],
+      balloonMode: 'auto',
       conditions: {
         allowedFromOrderStatusIds: [1, 2],
         excludeOrderStatusIds: [7],

@@ -1,5 +1,6 @@
 import { Refine, Authenticated } from "@refinedev/core";
 import { WhatsAppSendsProvider } from "./components/whatsapp/WhatsAppSendsProvider";
+import { BalloonCenterProvider } from "./notifications/balloons/BalloonCenter";
 import { RefineKbar, RefineKbarProvider } from "@refinedev/kbar";
 import { VariantWorkspaceLayout } from "./ui-variant/shellRegistry";
 import routerProvider, { CatchAllNavigate } from "@refinedev/react-router-v6";
@@ -205,7 +206,11 @@ const OrderWorkshopCreate = lazy(async () => ({ default: (await import("./pages/
 const OrderWorkshopEdit = lazy(async () => ({ default: (await import("./pages/order_workshops/edit")).OrderWorkshopEdit }));
 const OrderWorkshopShow = lazy(async () => ({ default: (await import("./pages/order_workshops/show")).OrderWorkshopShow }));
 
-const OrderResourceRequirementList = lazy(async () => ({ default: (await import("./pages/order_resource_requirements/list")).OrderResourceRequirementList }));
+const ResourceRequirementsPage = lazy(async () => ({ default: (await import("./pages/order_resource_requirements/ResourceRequirementsPage")).ResourceRequirementsPage }));
+const OrderResourceRequirementShow = lazy(async () => ({ default: (await import("./pages/order_resource_requirements/show")).OrderResourceRequirementShow }));
+
+const OnecPurchaseDocumentList = lazy(async () => ({ default: (await import("./pages/onec_purchase_documents/list")).OnecPurchaseDocumentList }));
+const OnecPurchaseDocumentShow = lazy(async () => ({ default: (await import("./pages/onec_purchase_documents/show")).OnecPurchaseDocumentShow }));
 
 // clients_analytics and payments_analytics each export two named components from one module.
 const ClientsAnalyticsList = lazy(async () => ({ default: (await import("./pages/clients_analytics")).ClientsAnalyticsList }));
@@ -725,7 +730,14 @@ const ThemedApp = () => {
                 {
                   name: "order_resource_requirements",
                   list: "/order-resource-requirements",
-                  meta: { label: "Потребности заказов в ресурсах" },
+                  show: "/order-resource-requirements/show/:orderId",
+                  meta: { idColumnName: "orderId", label: "Потребности заказов в ресурсах" },
+                },
+                {
+                  name: "onec_purchase_documents",
+                  list: "/procurement/onec-documents",
+                  show: "/procurement/onec-documents/show/:documentId",
+                  meta: { idColumnName: "documentId", label: "Документы 1С" },
                 },
                 {
                   name: "order_doweling_links",
@@ -783,9 +795,11 @@ const ThemedApp = () => {
                       key="authenticated-routes"
                       fallback={<CatchAllNavigate to="/login" />}
                     >
-                      <WhatsAppSendsProvider>
-                        <VariantWorkspaceLayout />
-                      </WhatsAppSendsProvider>
+                      <BalloonCenterProvider>
+                        <WhatsAppSendsProvider>
+                          <VariantWorkspaceLayout />
+                        </WhatsAppSendsProvider>
+                      </BalloonCenterProvider>
                     </Authenticated>
                   }
                 >
@@ -1071,7 +1085,12 @@ const ThemedApp = () => {
                     <Route path="show/:id" element={<OrderWorkshopShow />} />
                   </Route>
                   <Route path="/order-resource-requirements" >
-                    <Route index element={<OrderResourceRequirementList />} />
+                    <Route index element={<ResourceRequirementsPage />} />
+                    <Route path="show/:orderId" element={<OrderResourceRequirementShow />} />
+                  </Route>
+                  <Route path="/procurement/onec-documents" >
+                    <Route index element={<OnecPurchaseDocumentList />} />
+                    <Route path="show/:documentId" element={<OnecPurchaseDocumentShow />} />
                   </Route>
                 </Route>
                 <Route

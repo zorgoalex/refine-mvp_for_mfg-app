@@ -2098,3 +2098,482 @@ html {
   white-space: normal;
   overflow-wrap: break-word;
 }
+
+/* Балуны центра уведомлений (BalloonCenter): текст на 20% мельче обычного уведомления antd (16 → 12.8px заголовок,
+   14 → 11.2px текст), заметный серый контур, светло-голубой фон. Тёмная тема — тот же контур на тёмно-синем фоне.
+   `body` в селекторах — чтобы правила были сильнее стилей antd, которые подключаются позже. */
+body .ant-notification .ant-notification-notice.app-balloon {
+  background: #e6f4ff;
+  border: 1px solid #8c8c8c;
+}
+
+body .ant-notification .app-balloon .ant-notification-notice-message {
+  font-size: 12.8px;
+  line-height: 1.4;
+  margin-bottom: 4px;
+  color: #1f1f1f;
+}
+
+body .ant-notification .app-balloon .ant-notification-notice-description {
+  font-size: 11.2px;
+  line-height: 1.45;
+  color: #262626;
+}
+
+body .ant-notification .app-balloon .ant-notification-notice-close {
+  color: #595959;
+}
+
+[data-theme="dark"] body .ant-notification .ant-notification-notice.app-balloon {
+  background: #16304f;
+  border-color: #8c8c8c;
+}
+
+[data-theme="dark"] body .ant-notification .app-balloon .ant-notification-notice-message,
+[data-theme="dark"] body .ant-notification .app-balloon .ant-notification-notice-description {
+  color: #f0f0f0;
+}
+
+[data-theme="dark"] body .ant-notification .app-balloon .ant-notification-notice-close {
+  color: #bfbfbf;
+}
+
+/* Make the main layout container full height */
+.ant-layout {
+  min-height: 100vh;
+  display: flex;
+  background: var(--app-bg);
+}
+
+/* Fixed sidebar */
+.ant-layout-sider {
+  position: fixed !important;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  height: 100vh !important;
+  overflow-y: auto !important;
+  overflow-x: hidden;
+  z-index: 10;
+  box-shadow: 2px 0 8px var(--app-shadow);
+}
+
+/* Scrollbar styling for sidebar */
+.ant-layout-sider::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ant-layout-sider::-webkit-scrollbar-track {
+  background: var(--app-border-soft);
+}
+
+.ant-layout-sider::-webkit-scrollbar-thumb {
+  background: var(--app-text-muted);
+  border-radius: 3px;
+}
+
+.ant-layout-sider::-webkit-scrollbar-thumb:hover {
+  background: var(--app-text);
+}
+
+/* Adjust content area to account for fixed sidebar.
+   On mobile the sider is hidden (drawer + burger), so the content
+   must start at x:0. Calendar page owns the mobile-only styles. */
+@media (min-width: 769px) {
+  .ant-layout-content {
+    margin-left: 176px !important; /* Expanded width */
+    transition: margin-left 0.2s;
+    /* overflow must stay `visible`: with min-height (not a fixed height)
+       the content never scrolls internally — the window is the real
+       scroll container. An `overflow-y:auto` here would instead make this
+       box a sticky scroll-context that itself never scrolls, which traps
+       position:sticky children (the workspace tab-bar) and lets them
+       scroll away. Keep the window as the single scroll container. */
+    overflow: visible;
+    min-height: 100vh;
+  }
+
+  /* When sidebar is expanded */
+  .ant-layout-sider:not(.ant-layout-sider-collapsed) + * .ant-layout-content,
+  .ant-layout-has-sider .ant-layout-content {
+    margin-left: 176px !important;
+  }
+
+  /* When sidebar is collapsed */
+  .ant-layout-sider-collapsed + * .ant-layout-content {
+    margin-left: 48px !important;
+  }
+}
+
+/* Ensure the layout wrapper doesn't add extra scrollbars */
+.ant-layout-has-sider {
+  overflow: visible !important;
+}
+
+/* Header should stay with content, not fixed */
+.ant-layout-header {
+  position: relative;
+  z-index: 5;
+}
+
+/* Highlighted row animation after create/edit */
+.highlighted-row,
+.highlighted-row > td {
+  background-color: var(--app-highlight) !important;
+  animation: fadeHighlight 2s ease-out;
+}
+
+@keyframes fadeHighlight {
+  0% {
+    background-color: var(--app-highlight);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+/* Hover state should still work */
+.highlighted-row:hover td {
+  background-color: var(--app-row-hover) !important;
+}
+
+/* Orders table: allow header titles to wrap within constrained widths */
+.orders-table .ant-table-thead > tr > th {
+  white-space: normal !important;
+  word-break: break-word;
+  line-height: 1.1;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+/* Narrow columns fine-tuning */
+.orders-table td.col-order-id,
+.orders-table th.col-order-id {
+  font-size: 12px;
+}
+
+.orders-table td.col-priority,
+.orders-table th.col-priority {
+  font-size: 12px;
+}
+
+/* Zebra striping for details table - alternating row colors */
+.table-row-light {
+  background-color: var(--app-surface) !important;
+}
+
+.table-row-dark {
+  background-color: var(--app-surface-soft) !important;
+}
+
+.table-row-light:hover td,
+.table-row-dark:hover td {
+  background-color: var(--app-row-hover) !important;
+}
+
+/* Darker horizontal borders for details table */
+.table-row-light td,
+.table-row-dark td {
+  border-bottom: 1px solid var(--app-border) !important;
+}
+
+/* Глобальное чередование цветов строк во всех таблицах для улучшения читаемости */
+.ant-table-tbody > tr:nth-child(even) > td {
+  background-color: var(--app-surface-soft);
+}
+
+.ant-table-tbody > tr:nth-child(odd) > td {
+  background-color: var(--app-surface);
+}
+
+/* Сохраняем цвет при наведении */
+.ant-table-tbody > tr:nth-child(even):hover > td {
+  background-color: var(--app-row-hover) !important;
+}
+
+.ant-table-tbody > tr:nth-child(odd):hover > td {
+  background-color: var(--app-surface-muted) !important;
+}
+
+[data-theme="dark"] .ant-card,
+[data-theme="dark"] .ant-descriptions,
+[data-theme="dark"] .ant-table,
+[data-theme="dark"] .ant-table-container,
+[data-theme="dark"] .ant-table-content,
+[data-theme="dark"] .ant-table-thead > tr > th,
+[data-theme="dark"] .ant-table-tbody > tr > td,
+[data-theme="dark"] .ant-table-summary > tr > td,
+[data-theme="dark"] .ant-table-wrapper .ant-table-footer,
+[data-theme="dark"] .ant-tabs-content-holder,
+[data-theme="dark"] .ant-collapse,
+[data-theme="dark"] .ant-collapse-content {
+  background: var(--app-surface) !important;
+  color: var(--app-text) !important;
+  border-color: var(--app-border) !important;
+}
+
+[data-theme="dark"] .ant-card {
+  border-color: transparent !important;
+  box-shadow: var(--app-shadow-border);
+}
+
+[data-theme="dark"] .ant-table-summary > tr,
+[data-theme="dark"] .ant-table-summary > tr > td,
+[data-theme="dark"] .ant-table-tfoot > tr > td {
+  background: var(--app-surface-muted) !important;
+}
+
+[data-theme="dark"] .ant-table-cell-row-hover,
+[data-theme="dark"] .ant-table-row:hover > td {
+  background: var(--app-row-hover) !important;
+}
+
+[data-theme="dark"] .ant-tabs-tab,
+[data-theme="dark"] .ant-tabs-nav,
+[data-theme="dark"] .ant-tabs-card > .ant-tabs-nav .ant-tabs-tab {
+  background: var(--app-surface-muted) !important;
+  border-color: var(--app-border) !important;
+}
+
+[data-theme="dark"] .ant-tabs-tab-active,
+[data-theme="dark"] .ant-tabs-card > .ant-tabs-nav .ant-tabs-tab-active {
+  background: var(--app-surface) !important;
+}
+
+[data-theme="dark"] [style*="background: var(--app-surface)"],
+[data-theme="dark"] [style*="backgroundColor: var(--app-surface)"] {
+  color: var(--app-text);
+}
+
+/* ГЛОБАЛЬНЫЙ стандарт высоты спойлеров: заголовок Collapse вдвое ниже
+   antd-дефолта (46px → ~24px). Значения = проверенный .compact-collapse
+   (форма заказа); применяется ко всем спойлерам приложения, включая новые.
+   !important — antd 5 задаёт padding через CSS-in-JS на компоненте. */
+.ant-collapse > .ant-collapse-item > .ant-collapse-header {
+  min-height: 24px !important;
+  padding: 4px 12px !important;
+  line-height: 1.2 !important;
+}
+
+.ant-collapse .ant-collapse-expand-icon {
+  padding-inline-end: 6px !important;
+}
+
+.ant-collapse .ant-collapse-arrow {
+  font-size: 10px !important;
+}
+
+/* Компактные Collapse панели для формы просмотра заказа (значения совпадают
+   с глобальным стандартом; класс оставлен для совместимости) */
+.compact-collapse .ant-collapse-header {
+  min-height: 24px !important;
+  padding: 4px 12px !important;
+  line-height: 1.2 !important;
+}
+
+.compact-collapse .ant-collapse-expand-icon {
+  padding-inline-end: 6px !important;
+}
+
+.compact-collapse .ant-collapse-arrow {
+  font-size: 10px !important;
+}
+
+/* Тёмные границы для таблицы платежей */
+.payments-table-dark-borders.ant-table-wrapper .ant-table {
+  border: 1px solid var(--app-border) !important;
+}
+
+.payments-table-dark-borders .ant-table-thead > tr > th {
+  border-bottom: 1px solid var(--app-border) !important;
+  border-right: 1px solid var(--app-border) !important;
+}
+
+.payments-table-dark-borders .ant-table-tbody > tr > td {
+  border-bottom: 1px solid var(--app-border) !important;
+  border-right: 1px solid var(--app-border) !important;
+}
+
+.payments-table-dark-borders .ant-table-summary > tr > td {
+  border-bottom: 1px solid var(--app-border) !important;
+  border-right: 1px solid var(--app-border) !important;
+}
+
+/* ========================================
+   Drag Selection Styles
+   ======================================== */
+
+/* Pending selection - dashed border and light background */
+.drag-selection-pending > td {
+  background-color: var(--app-selection-bg) !important;
+  border-top: 1px dashed var(--app-selection-border) !important;
+  border-bottom: 1px dashed var(--app-selection-border) !important;
+}
+
+.drag-selection-pending:first-of-type > td {
+  border-top: 2px dashed var(--app-selection-border) !important;
+}
+
+.drag-selection-pending:last-of-type > td {
+  border-bottom: 2px dashed var(--app-selection-border) !important;
+}
+
+/* Pending selection - left/right indicators */
+.drag-selection-pending > td:first-child {
+  border-left: 2px dashed var(--app-selection-border) !important;
+}
+
+.drag-selection-pending > td:last-child {
+  border-right: 2px dashed var(--app-selection-border) !important;
+}
+
+/* Confirmation toolbar animation */
+.drag-selection-confirm-bar {
+  animation: slideInFromTop 0.2s ease-out;
+}
+
+.order-details-toolbar {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  margin-bottom: 6px;
+}
+
+.order-details-toolbar__content {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  min-width: 100%;
+  white-space: nowrap;
+}
+
+.order-details-toolbar__content .ant-btn {
+  min-width: 40px;
+  min-height: 40px;
+}
+
+.order-details-toolbar__content--compact .order-details-toolbar__label {
+  display: none;
+}
+
+.order-details-toolbar__content--measure {
+  position: fixed;
+  inset: -10000px auto auto -10000px;
+  z-index: -1;
+  width: max-content;
+  min-width: 0;
+  contain: layout style;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.order-details-toolbar__content--measure .order-details-toolbar__label {
+  display: inline;
+}
+
+.order-details-toolbar__summary {
+  margin-left: auto;
+  color: var(--app-text-muted, #666);
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes slideInFromTop {
+  from {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Cursor during drag */
+.drag-selection-active {
+  cursor: crosshair !important;
+  user-select: none;
+}
+
+.drag-selection-active * {
+  cursor: crosshair !important;
+}
+
+/* Disable text selection during drag */
+.drag-selection-active .ant-table-tbody {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+/* Order details: selected row hover (teal, darker than default blue) */
+.order-details-table-scroll-shell--initializing {
+  pointer-events: none;
+}
+
+.order-details-table .ant-table-tbody > tr.ant-table-row-selected:hover > td {
+  background: #5cdbd3 !important;
+}
+
+/* Wide lists keep their native bottom scrollbar and gain a synchronized one
+   above the table, so columns remain reachable from either end of the list. */
+.app-table-top-scrollbar {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin-bottom: 4px;
+}
+
+.app-table-top-scrollbar[hidden] {
+  display: none;
+}
+
+.app-table-top-scrollbar__spacer {
+  height: 1px;
+}
+
+.app-table-top-scroll-container {
+  position: relative;
+}
+
+.app-table-horizontal-edge-button {
+  position: absolute;
+  top: var(--app-table-horizontal-edge-button-top, 50%);
+  right: 8px;
+  z-index: 7;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 22px;
+  background: rgba(24, 144, 255, 0.24);
+  color: #0958d9;
+  box-shadow:
+    0 0 0 1px rgba(24, 144, 255, 0.24),
+    0 8px 20px rgba(15, 23, 42, 0.16);
+  cursor: pointer;
+  opacity: 0.74;
+  transform: translateY(-50%);
+  transition-property: opacity, transform, background-color, box-shadow;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.app-table-horizontal-edge-button:hover,
+.app-table-horizontal-edge-button:focus-visible {
+  background: rgba(24, 144, 255, 0.34);
+  box-shadow:
+    0 0 0 1px rgba(24, 144, 255, 0.34),
+    0 10px 24px rgba(15, 23, 42, 0.2);
+  opacity: 0.96;
+  transform: translateY(-50%) scale(1.03);
+}
+
+.app-table-horizontal-edge-button:active {
+  transform: translateY(-50%) scale(0.96);
+}

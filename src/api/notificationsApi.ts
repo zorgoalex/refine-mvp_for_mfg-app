@@ -2,6 +2,8 @@ import { apiRoutes } from './apiRoutes';
 import { httpClient } from './httpClient';
 import { withQuery } from './ordersApi';
 import type {
+  AckBalloonsResponse,
+  ClaimBalloonsResponse,
   DeleteNotificationResponse,
   MarkAllNotificationsReadResponse,
   NotificationListQuery,
@@ -18,6 +20,16 @@ export const notificationsApi = {
     return httpClient.patch<NotificationResponse>(
       apiRoutes.notifications.read(validateNotificationId(notificationId)),
     );
+  },
+
+  /** Аренда непоказанных балунов вкладкой (план 2026-10-03 §3.2). */
+  claimBalloons(body: { token: string; limit: number }): Promise<ClaimBalloonsResponse> {
+    return httpClient.post<ClaimBalloonsResponse>(apiRoutes.notifications.balloonsClaim, body);
+  },
+
+  /** Подтверждение показа арендованных балунов. */
+  ackBalloons(body: { token: string; notificationIds: string[] }): Promise<AckBalloonsResponse> {
+    return httpClient.post<AckBalloonsResponse>(apiRoutes.notifications.balloonsAck, body);
   },
 
   markAllRead(): Promise<MarkAllNotificationsReadResponse> {

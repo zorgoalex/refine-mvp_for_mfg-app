@@ -244,6 +244,7 @@ describe('NotificationRulesController', () => {
             priority: 50,
             isEnabled: true,
             channels: ['in_app'],
+            balloonMode: 'auto',
             conditions: {},
             recipients: { roleCodes: ['manager'] },
           },

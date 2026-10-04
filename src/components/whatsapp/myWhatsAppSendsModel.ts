@@ -155,6 +155,17 @@ export async function announceWhatsAppSendQueued(id: string, meta: SendMeta, own
 }
 
 /**
+ * The sends of a poll response whose balloon is due — the same set `collectFinished` would return — WITHOUT writing
+ * the state: the balloons are put into the durable balloon queue first, only then marked announced (план 2026-10-03 R2-2).
+ */
+export function finishedDue(items: readonly MyWhatsAppSend[], userId: string, access: FollowAccess): MyWhatsAppSend[] {
+  const base = loadState(userId, access);
+  const announced = new Set(base.announced);
+  const tracked = new Set(base.tracked.filter((id) => !announced.has(id)));
+  return items.filter((item) => !item.active && tracked.has(item.id));
+}
+
+/**
  * Applies one poll response: active sends become tracked (unless already announced); a tracked send
  * that is final is marked announced FIRST and returned once. One read and one write of the state.
  */

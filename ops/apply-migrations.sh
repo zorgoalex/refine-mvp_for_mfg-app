@@ -207,6 +207,11 @@ pg_session_limits() {
 needs_single_transaction() {
   case "$(basename "$1")" in
     202_film_catalog_import.sql|212_films_note.sql|234_reference_nomenclature_note.sql) return 0 ;;
+    # Закупки и загрузчик документов 1С: файлы без собственных BEGIN/COMMIT — одной транзакцией, иначе отказ по
+    # lock/statement timeout посреди файла оставил бы половину изменений (например, DROP старого CHECK без нового).
+    194_order_resource_procurement.sql|197_onec_purchase_documents.sql|204_procurement_workspace.sql) return 0 ;;
+    207_onec_allocation_origin_suggested.sql|214_supplier_requests.sql|215_allocation_request_links.sql|218_request_payment_links.sql) return 0 ;;
+    213_onec_documents_loader.sql|216_onec_consumption_documents.sql|219_onec_currency_conflict.sql|227_onec_customer_documents.sql) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -2378,6 +2383,144 @@ probe_file() {
       "$(q_col catalog_items nomenclature_type)" "$(q_col catalog_items nomenclature_category)" "$(q_col catalog_items note)" \
       "$(q_con_on sheet_material_types chk_sheet_material_types_note_length)" \
       "$(q_con_on catalog_items chk_catalog_items_note_length)" ;;
+    # 239: personal templates table (ids from the shared sequence), per-user default choice with a revision and a composite FK.
+    239_personal_supplier_text_templates*) probe_all \
+      "$(q_tbl supplier_request_user_text_templates)" "$(q_tbl supplier_request_text_template_defaults)" \
+      "$(q_idx uq_srutt_owner_active_name)" "$(q_idx idx_srutt_owner)" "$(q_col supplier_request_text_template_defaults revision)" \
+      "$(q_con_on supplier_request_text_template_defaults fk_srttd_own_template)" ;;
+    # 232: балуны уведомлений — режим правила, решение и состояние показа в уведомлении, частичный индекс выдачи.
+    232_notification_balloons*) probe_all \
+      "$(q_col notification_rules balloon_mode)" "$(q_col notifications balloon_mode)" "$(q_col notifications balloon_lease_token)" \
+      "$(q_col notifications balloon_leased_at)" "$(q_col notifications balloon_shown_at)" "$(q_idx idx_notifications_balloon_pending)" ;;
+    229_supplier_text_templates*) probe_all \
+      "$(q_tbl supplier_request_text_templates)" "$(q_idx uq_srtt_active_name)" "$(q_idx uq_srtt_one_default)" \
+      "SELECT EXISTS (SELECT 1 FROM supplier_request_text_templates WHERE is_default AND deleted_at IS NULL);" ;;
+    228_procurement_scheduled_notification_rules*) probe_all \
+      "SELECT (SELECT count(*) FROM notification_rules WHERE rule_code IN ('procurement-demand-changed', 'procurement-deficit-digest', 'procurement-receipt-unallocated')) = 3;" ;;
+    227_onec_customer_documents*) probe_all \
+      "$(q_col onec_documents author_ref_key)" \
+      "$(q_col onec_documents onec_order_ref_key)" \
+      "$(q_col onec_documents basis_ref_key)" \
+      "$(q_col onec_document_lines line_section)" \
+      "$(q_col onec_document_lines settlement_doc_ref_key)" \
+      "$(q_tbl onec_customer_orders)" \
+      "$(q_tbl onec_document_audit_refs)" \
+      "$(q_con_on onec_documents chk_onec_documents_kind_v3)" \
+      "$(q_con_on onec_document_lines chk_onec_document_lines_section)" \
+      "$(q_con_on onec_document_audit_refs chk_onec_document_audit_refs_role)" \
+      "$(q_idx idx_onec_document_lines_order_ref)" \
+      "$(q_idx idx_onec_document_audit_refs_ref)" ;;
+    225_procurement_notification_rules*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM notification_rules WHERE rule_code = 'procurement-material-arrived' AND event_type = 'order.resource_procurement_changed');" ;;
+    219_onec_currency_conflict*) probe_all \
+      "$(q_con_on onec_document_lines chk_onec_document_lines_conflict_code_v2)" ;;
+    218_request_payment_links*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'allocation_request_link_invariant' AND prosrc LIKE '%payment links exceed the allocated amount%');" \
+      "$(q_trg trg_allocation_request_link_invariant)" ;;
+    216_onec_consumption_documents*) probe_all \
+      "$(q_col onec_sources time_zone)" \
+      "$(q_col onec_documents doc_at)" \
+      "$(q_col onec_documents destination_warehouse_ref_key)" \
+      "$(q_col onec_documents normalizer_version)" \
+      "$(q_col onec_document_lines warehouse_ref_key)" \
+      "$(q_col onec_document_lines is_stock_item)" \
+      "$(q_col onec_document_lines unit_is_package)" \
+      "$(q_con_on onec_sources chk_onec_sources_time_zone)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.onec_documents'::regclass AND conname IN ('chk_onec_documents_kind_v2','chk_onec_documents_kind_v3'));" \
+      "$(q_con_on onec_documents chk_onec_documents_currency_kind)" \
+      "$(q_con_on onec_documents chk_onec_documents_destination_kind)" \
+      "$(q_idx idx_onec_document_lines_warehouse)" ;;
+    215_allocation_request_links*) probe_all \
+      "$(q_tbl order_resource_allocation_request_links)" \
+      "$(q_con_on order_resource_allocation_request_links chk_orarl_measure)" \
+      "$(q_con_on order_resource_allocation_request_links chk_orarl_currency)" \
+      "$(q_idx uq_orarl_active)" "$(q_idx idx_orarl_line_order_active)" \
+      "$(q_trg trg_allocation_request_link_invariant)" ;;
+    214_supplier_requests*) probe_all \
+      "$(q_tbl supplier_requests)" "$(q_tbl supplier_request_lines)" "$(q_tbl supplier_request_line_orders)" \
+      "$(q_tbl supplier_request_counters)" "$(q_tbl procurement_command_keys)" \
+      "$(q_con_on supplier_requests chk_supplier_requests_supplier)" \
+      "$(q_con_on supplier_request_lines chk_supplier_request_lines_stock)" \
+      "$(q_idx uq_supplier_request_lines_sheet)" "$(q_idx uq_supplier_request_lines_film)" \
+      "$(q_trg trg_supplier_request_lines_invariant)" "$(q_trg trg_supplier_request_line_orders_invariant)" ;;
+    213_onec_documents_loader*) probe_all \
+      "$(q_col onec_documents applied_revision)" \
+      "$(q_col onec_documents missing_in_source_at)" \
+      "$(q_col onec_document_lines load_conflict_code)" \
+      "$(q_col onec_document_lines removed_in_onec_at)" \
+      "$(q_tbl onec_documents_load_state)" \
+      "$(q_tbl onec_currency_map)" ;;
+    207_onec_allocation_origin_suggested*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='order_resource_onec_allocations' AND column_name='origin' AND character_maximum_length=16);" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='chk_orp_alloc_origin' AND conrelid='public.order_resource_onec_allocations'::regclass AND pg_get_constraintdef(oid) LIKE '%suggested%');" ;;
+    204_procurement_workspace*) probe_all \
+      "$(q_tbl procurement_settings)" \
+      "SELECT EXISTS (SELECT 1 FROM public.procurement_settings WHERE config_id = 1);" \
+      "$(q_con_on procurement_settings chk_procurement_settings_singleton)" \
+      "$(q_con_on procurement_settings chk_procurement_settings_lead_days)" \
+      "$(q_con_on procurement_settings chk_procurement_settings_urgency)" \
+      "$(q_con_on procurement_settings chk_procurement_settings_waste)" \
+      "$(q_con_on procurement_settings chk_procurement_settings_unallocated)" \
+      "$(q_con_on procurement_settings chk_procurement_settings_overdue_window)" \
+      "$(q_con_on procurement_settings chk_procurement_settings_version)" \
+      "$(q_tbl resource_suppliers)" \
+      "$(q_con_on resource_suppliers chk_resource_suppliers_kind)" \
+      "$(q_con_on resource_suppliers chk_resource_suppliers_one_ref)" \
+      "$(q_con_on resource_suppliers chk_resource_suppliers_key)" \
+      "$(q_con_on resource_suppliers chk_resource_suppliers_source)" \
+      "$(q_idx uq_resource_suppliers_sheet_material)" \
+      "$(q_idx uq_resource_suppliers_film)" \
+      "$(q_col user_preferences procurement_saved_views)" \
+      "$(q_con_on user_preferences chk_user_preferences_procurement_saved_views)" ;;
+    # record_mdf_board_history_from_audit[_relation] are created by 141. 192
+    # conditionally REDEFINES both in place (once mdf_board_history_events
+    # exists) to resolve the §5.6 engine-history card subject; the guard below
+    # requires the post-192 body only when that table (i.e. 141) is present —
+    # same conditional-redefinition pattern as 191's seal-guard check above.
+    197_onec_purchase_documents*) probe_all \
+      "$(q_tbl onec_documents)" \
+      "$(q_tbl onec_document_lines)" \
+      "$(q_tbl order_resource_onec_allocations)" \
+      "SELECT count(*)=17 FROM information_schema.columns WHERE table_schema='public' AND table_name='onec_documents';" \
+      "SELECT count(*)=14 FROM information_schema.columns WHERE table_schema='public' AND table_name='onec_document_lines';" \
+      "SELECT count(*)=12 FROM information_schema.columns WHERE table_schema='public' AND table_name='order_resource_onec_allocations';" \
+      "$(q_con_on onec_documents chk_onec_documents_kind)" \
+      "$(q_con_on onec_documents chk_onec_documents_number)" \
+      "$(q_con_on onec_documents chk_onec_documents_amount)" \
+      "$(q_con_on onec_documents uq_onec_documents_ref)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.onec_documents'::regclass AND contype='f' AND convalidated AND confrelid='public.onec_sources'::regclass);" \
+      "$(q_con_on onec_document_lines chk_onec_document_lines_no)" \
+      "$(q_con_on onec_document_lines chk_onec_document_lines_quantity)" \
+      "$(q_con_on onec_document_lines chk_onec_document_lines_amount)" \
+      "$(q_con_on onec_document_lines chk_onec_document_lines_unit)" \
+      "$(q_con_on onec_document_lines chk_onec_document_lines_one_material)" \
+      "$(q_con_on onec_document_lines uq_onec_document_lines_no)" \
+      "$(q_con_on order_resource_onec_allocations chk_orp_alloc_role)" \
+      "$(q_con_on order_resource_onec_allocations chk_orp_alloc_origin)" \
+      "$(q_con_on order_resource_onec_allocations chk_orp_alloc_quantity)" \
+      "$(q_con_on order_resource_onec_allocations chk_orp_alloc_amount)" \
+      "$(q_con_on order_resource_onec_allocations chk_orp_alloc_measure)" \
+      "$(q_con_on order_resource_onec_allocations chk_orp_alloc_unit)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.order_resource_onec_allocations'::regclass AND contype='f' AND convalidated AND confrelid='public.order_resource_procurement'::regclass);" \
+      "$(q_idx idx_onec_documents_kind_date)" \
+      "$(q_idx uq_onec_document_lines_total)" \
+      "$(q_idx uq_orp_alloc_active)" \
+      "$(q_idx idx_orp_alloc_line_active)" \
+      "$(q_idx idx_orp_alloc_procurement)" ;;
+    194_order_resource_procurement*) probe_all \
+      "$(q_tbl order_resource_procurement)" \
+      "SELECT count(*)=17 FROM information_schema.columns WHERE table_schema='public' AND table_name='order_resource_procurement';" \
+      "$(q_con_on order_resource_procurement chk_orp_resource_kind)" \
+      "$(q_con_on order_resource_procurement chk_orp_one_ref)" \
+      "$(q_con_on order_resource_procurement chk_orp_origin)" \
+      "$(q_con_on order_resource_procurement chk_orp_unit)" \
+      "$(q_con_on order_resource_procurement chk_orp_version)" \
+      "$(q_con_on order_resource_procurement chk_orp_fingerprint)" \
+      "$(q_con_on order_resource_procurement chk_orp_marked_snapshot)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.order_resource_procurement'::regclass AND contype='f' AND convalidated AND confrelid='public.orders'::regclass);" \
+      "$(q_idx uq_orp_order_sheet_material)" \
+      "$(q_idx uq_orp_order_film)" \
+      "$(q_idx idx_orp_order)" ;;
     198_onec_etl*) probe_all \
       "$(q_tbl onec_etl_runs)" \
       "$(q_tbl onec_etl_batches)" \
@@ -2499,6 +2642,54 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     234_reference_nomenclature_note*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    239_personal_supplier_text_templates*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    232_notification_balloons*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    229_supplier_text_templates*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    228_procurement_scheduled_notification_rules*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    227_onec_customer_documents*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    225_procurement_notification_rules*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    219_onec_currency_conflict*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    218_request_payment_links*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    216_onec_consumption_documents*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    215_allocation_request_links*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    214_supplier_requests*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    213_onec_documents_loader*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    207_onec_allocation_origin_suggested*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    204_procurement_workspace*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    197_onec_purchase_documents*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    194_order_resource_procurement*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     198_onec_etl*)
