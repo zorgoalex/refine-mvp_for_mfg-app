@@ -259,7 +259,9 @@
 /* Выбранный приход — заметный фон и полоса слева. */
 .rr-screen .ant-table-wrapper.rr-receipts-table .ant-table-tbody > tr.rr-receipt-row--picked > td,
 .rr-screen .ant-table-wrapper.rr-receipts-table .ant-table-tbody > tr.rr-receipt-row--picked:hover > td {
-  background: var(--rr-row-picked);
+  /* !important: общий стиль таблиц (app.css) красит нечётные строки под курсором с !important — без него выбранный
+     приход бледнел бы именно под курсором, сразу после клика. */
+  background: var(--rr-row-picked) !important;
   font-weight: 600;
 }
 .rr-screen .ant-table-wrapper.rr-receipts-table .ant-table-tbody > tr.rr-receipt-row--picked > td:first-child {
