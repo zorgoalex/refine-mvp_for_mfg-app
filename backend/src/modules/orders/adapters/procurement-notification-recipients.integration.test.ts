@@ -16,6 +16,9 @@ const targetEnv = process.env.ERP_PROCUREMENT_RACE_TARGET_ENV;
 const DIGEST = 'procurement-deficit-digest';
 const UNALLOCATED = 'procurement-receipt-unallocated';
 
+/** Контрагент 1С тестовых приходов, связанный с поставщиком справочника. */
+const LINKED_COUNTERPARTY = randomUUID();
+
 describe.skipIf(!url)('Procurement notification recipients + daily unallocated summary (plan 2026-10-02) — real PostgreSQL', { timeout: 90000 }, () => {
   let pool: Pool;
   let conn: PoolClient;
@@ -60,6 +63,8 @@ describe.skipIf(!url)('Procurement notification recipients + daily unallocated s
     expect(decodeURIComponent(new URL(url!).pathname.slice(1)).startsWith('procurement_race_')).toBe(true);
     pool = new Pool({ connectionString: url, max: 3, connectionTimeoutMillis: 5000, statement_timeout: 20000 });
     conn = await pool.connect();
+    // Сводка считает только приходы поставщиков из справочника: контрагент фикстур связан с поставщиком ERP.
+    await conn.query('INSERT INTO suppliers (supplier_name, ref_key_1c) VALUES ($1, $2::uuid)', [`${tag} связанный поставщик`, LINKED_COUNTERPARTY]);
     other = await pool.connect();
     // Роль 10 (менеджер): view + manage; роль без procurement.view — для проверки отсечения по праву.
     await grant(10, 'procurement.view', true);
@@ -203,8 +208,8 @@ describe.skipIf(!url)('Procurement notification recipients + daily unallocated s
       [`e2e-${randomUUID().slice(0, 8)}`, tag])).rows[0].source_id);
     for (const daysAgo of [4, 12]) {
       const documentId = Number((await conn.query(
-        `INSERT INTO onec_documents (source_id, doc_kind, onec_ref_key, number, doc_date, posted, counterparty_name, amount)
-         VALUES ($1, 'purchase_receipt', $2, $3, $4::date, true, $5, 100) RETURNING onec_document_id`,
+        `INSERT INTO onec_documents (source_id, doc_kind, onec_ref_key, number, doc_date, posted, counterparty_name, amount, counterparty_ref_key)
+         VALUES ($1, 'purchase_receipt', $2, $3, $4::date, true, $5, 100, '${LINKED_COUNTERPARTY}'::uuid) RETURNING onec_document_id`,
         [sourceId, randomUUID(), `${tag.slice(-8)}-${daysAgo}`, addDays(today, -daysAgo), `${tag} Поставщик`])).rows[0].onec_document_id);
       await conn.query(`INSERT INTO onec_document_lines (onec_document_id, line_no, nomenclature_name, quantity, unit_code, sheet_material_type_id)
         VALUES ($1, 1, 'лист', 2, 'sheet', $2)`, [documentId, smt]);

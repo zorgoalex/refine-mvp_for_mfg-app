@@ -1,3 +1,4 @@
+import { KNOWN_SUPPLIER_SQL } from './pg-onec-documents-repository';
 import type { QueryResultRow } from 'pg';
 import type { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient } from '../../../database/database.types';
@@ -252,7 +253,9 @@ export class PgProcurementNotificationsRepository {
 
   /**
    * Нераспределённые приходы §5.7 п.4: проведённый, действующий (не удалён, есть в выгрузке) приход старше порога, не
-   * старше окна, с материальными строками, у которых остался нераспределённый остаток.
+   * старше окна, с материальными строками, у которых остался нераспределённый остаток. Только приходы поставщиков
+   * из справочника ERP (решение пользователя 2026-10-04): контрагент документа сейчас связан с поставщиком
+   * (`suppliers.ref_key_1c`) — тот же отбор, что в списке приходов экрана снабжения.
    */
   async unallocatedReceipts(
     olderThan: string,
@@ -279,6 +282,7 @@ export class PgProcurementNotificationsRepository {
           AND l.removed_in_onec_at IS NULL AND NOT l.is_document_total
           AND (l.sheet_material_type_id IS NOT NULL OR l.film_id IS NOT NULL)
           AND l.quantity - COALESCE(alloc.quantity, 0) > 0.0005
+          AND ${KNOWN_SUPPLIER_SQL}
           -- Порции по курсору (дата, id) — обход всех документов окна (CR1-1).
           AND ($4::date IS NULL OR (d.doc_date, d.onec_document_id) > ($4::date, $5::bigint))
         GROUP BY d.onec_document_id, d.number, d.doc_date, s.supplier_name, d.counterparty_name

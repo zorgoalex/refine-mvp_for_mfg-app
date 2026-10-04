@@ -46,7 +46,7 @@ import {
   type ResourceDemandOrderRow,
 } from './pg-order-resource-demand-repository';
 import { lockActor } from './pg-order-resource-procurement-repository';
-import { documentSupplierKeys } from './pg-onec-documents-repository';
+import { documentSupplierKeys, KNOWN_SUPPLIER_SQL } from './pg-onec-documents-repository';
 import { pairKey, planAllocationSuggestions, type OpenRequestLineInput } from '../domain/allocation-suggestions';
 import { openThousandths } from '../domain/supplier-request-links';
 import { FULFILLED_SQL, LINKED_SQL, onecLiveSql } from '../domain/onec-document-state';
@@ -84,6 +84,7 @@ interface SuggestionDocumentRow extends QueryResultRow {
   doc_counterparty_ref_key: string | null;
   doc_counterparty_name: string | null;
   supplier_name: string | null;
+  supplier_linked: boolean;
 }
 
 interface SuggestionLineRow extends QueryResultRow {
@@ -309,7 +310,8 @@ export class PgProcurementWorkspaceRepository {
         `SELECT d.onec_document_id, d.doc_kind, d.number, d.doc_date::text AS doc_date, d.posted, d.deleted_in_onec,
                 d.missing_in_source_at IS NOT NULL AS missing_in_source,
                 d.supplier_id AS doc_supplier_id, d.counterparty_ref_key::text AS doc_counterparty_ref_key,
-                d.counterparty_name AS doc_counterparty_name, s.supplier_name
+                d.counterparty_name AS doc_counterparty_name, s.supplier_name,
+                (${KNOWN_SUPPLIER_SQL}) AS supplier_linked
            FROM onec_documents d
            LEFT JOIN suppliers s ON s.supplier_id = d.supplier_id
           WHERE d.onec_document_id = $1`,
@@ -419,6 +421,7 @@ export class PgProcurementWorkspaceRepository {
         number: doc.number,
         date: doc.doc_date.slice(0, 10),
         supplierName: doc.supplier_name?.trim() || doc.doc_counterparty_name?.trim() || null,
+        supplierLinked: doc.supplier_linked === true,
         wastePercent: settings.wastePercent,
         proposalLimit: ONEC_ALLOCATION_BATCH_LIMIT,
         proposalLimitReached: plan.limitReached,

@@ -688,7 +688,7 @@ const RECEIPT_FULL_SQL = `(
  * Контрагент документа связан с поставщиком справочника ERP — по текущей связи `suppliers.ref_key_1c`, а не по
  * `onec_documents.supplier_id` (тот — снимок на момент загрузки документа и не меняется, когда поставщика связывают позже).
  */
-const KNOWN_SUPPLIER_SQL = `EXISTS (SELECT 1 FROM suppliers ks WHERE ks.ref_key_1c IS NOT NULL AND ks.ref_key_1c = d.counterparty_ref_key)`;
+export const KNOWN_SUPPLIER_SQL = `EXISTS (SELECT 1 FROM suppliers ks WHERE ks.ref_key_1c IS NOT NULL AND ks.ref_key_1c = d.counterparty_ref_key)`;
 
 /** Сколько строк документа показывать в списке. */
 export const LINE_SUMMARY_LIMIT = 6;

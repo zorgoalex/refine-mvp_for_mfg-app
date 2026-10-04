@@ -27,6 +27,9 @@ import { PgOrderResourceDemandRepository } from './pg-order-resource-demand-repo
 const url = process.env.ERP_PROCUREMENT_RACE_DATABASE_URL;
 const targetEnv = process.env.ERP_PROCUREMENT_RACE_TARGET_ENV;
 
+/** Контрагент 1С тестовых приходов, связанный с поставщиком справочника. */
+const LINKED_COUNTERPARTY = randomUUID();
+
 describe.skipIf(!url)('Procurement notifications (phase 4b) — real PostgreSQL', { timeout: 60000 }, () => {
   let pool: Pool;
   let conn: PoolClient;
@@ -73,6 +76,8 @@ describe.skipIf(!url)('Procurement notifications (phase 4b) — real PostgreSQL'
     expect(decodeURIComponent(new URL(url!).pathname.slice(1)).startsWith('procurement_race_')).toBe(true);
     pool = new Pool({ connectionString: url, max: 2, connectionTimeoutMillis: 5000, statement_timeout: 20000 });
     conn = await pool.connect();
+    // Сводка считает только приходы поставщиков из справочника: контрагент фикстур связан с поставщиком ERP.
+    await conn.query('INSERT INTO suppliers (supplier_name, ref_key_1c) VALUES ($1, $2::uuid)', [`${tag} связанный поставщик`, LINKED_COUNTERPARTY]);
     adminId = await user('admin', 1);
     managerId = await user('manager', 10);
     await conn.query('SELECT set_config($1, $2, false)', ['app.user_id', String(adminId)]);
@@ -351,8 +356,8 @@ describe.skipIf(!url)('Procurement notifications (phase 4b) — real PostgreSQL'
       const docs: number[] = [];
       for (const daysAgo of [6, 7]) {
         const documentId = Number((await conn.query(
-          `INSERT INTO onec_documents (source_id, doc_kind, onec_ref_key, number, doc_date, posted, counterparty_name, amount)
-           VALUES ($1, 'purchase_receipt', $2, $3, $4::date, true, $5, 100) RETURNING onec_document_id`,
+          `INSERT INTO onec_documents (source_id, doc_kind, onec_ref_key, number, doc_date, posted, counterparty_name, amount, counterparty_ref_key)
+           VALUES ($1, 'purchase_receipt', $2, $3, $4::date, true, $5, 100, '${LINKED_COUNTERPARTY}'::uuid) RETURNING onec_document_id`,
           [sourceId, randomUUID(), `${tag.slice(-8)}-b${daysAgo}`, addDays(today, -daysAgo), `${tag} Поставщик`])).rows[0].onec_document_id);
         await conn.query(`INSERT INTO onec_document_lines (onec_document_id, line_no, nomenclature_name, quantity, unit_code, sheet_material_type_id)
           VALUES ($1, 1, 'лист', 1, 'sheet', $2)`, [documentId, smt]);
@@ -389,8 +394,8 @@ describe.skipIf(!url)('Procurement notifications (phase 4b) — real PostgreSQL'
         [`e2e-${randomUUID().slice(0, 8)}`, tag])).rows[0].source_id);
       const receipt = async (daysAgo: number) => {
         const documentId = Number((await conn.query(
-          `INSERT INTO onec_documents (source_id, doc_kind, onec_ref_key, number, doc_date, posted, counterparty_name, amount)
-           VALUES ($1, 'purchase_receipt', $2, $3, $4::date, true, $5, 100) RETURNING onec_document_id`,
+          `INSERT INTO onec_documents (source_id, doc_kind, onec_ref_key, number, doc_date, posted, counterparty_name, amount, counterparty_ref_key)
+           VALUES ($1, 'purchase_receipt', $2, $3, $4::date, true, $5, 100, '${LINKED_COUNTERPARTY}'::uuid) RETURNING onec_document_id`,
           [sourceId, randomUUID(), `${tag.slice(-8)}-${daysAgo}`, addDays(today, -daysAgo), `${tag} Поставщик`])).rows[0].onec_document_id);
         const lineId = Number((await conn.query(
           `INSERT INTO onec_document_lines (onec_document_id, line_no, nomenclature_name, quantity, unit_code, sheet_material_type_id)
@@ -405,6 +410,13 @@ describe.skipIf(!url)('Procurement notifications (phase 4b) — real PostgreSQL'
       const before = await found();
       expect(before.map((row) => row.documentId)).toEqual([due.documentId]);
       expect(before[0]).toMatchObject({ lines: 1, supplierName: `${tag} Поставщик` });
+      // Контрагент не связан с поставщиком справочника — приход в сводку не попадает; связь вернули — попадает снова.
+      await conn.query('UPDATE onec_documents SET counterparty_ref_key = $2::uuid WHERE onec_document_id = $1', [due.documentId, randomUUID()]);
+      expect(await found()).toEqual([]);
+      await conn.query('UPDATE onec_documents SET counterparty_ref_key = NULL WHERE onec_document_id = $1', [due.documentId]);
+      expect(await found()).toEqual([]);
+      await conn.query('UPDATE onec_documents SET counterparty_ref_key = $2::uuid WHERE onec_document_id = $1', [due.documentId, LINKED_COUNTERPARTY]);
+      expect((await found()).map((row) => row.documentId)).toEqual([due.documentId]);
       // Распределили часть — другой остаток (новый хеш); всё — документ уходит.
       const procurementId = Number((await conn.query(
         `INSERT INTO order_resource_procurement (order_id, resource_kind, sheet_material_type_id) VALUES ($1, 'sheet_material', $2) RETURNING order_resource_procurement_id`,

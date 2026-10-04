@@ -170,6 +170,15 @@ describe.skipIf(!url)('1C receipt suggestions + batch allocation — real Postgr
   it('suggestions → unchanged batch passes; origin «suggested», sequential versions, one audit + event per allocation', async () => {
     const doc = await receipt([{ lineNo: 1, quantity: 3 }, { lineNo: 2, quantity: 10 }]);
     const suggestions = await workspace.allocationSuggestions(admin, doc.documentId);
+    // Контрагент фикстуры не связан с поставщиком справочника: подбор считается, но помечен — экран его не предлагает.
+    expect(suggestions.supplierLinked).toBe(false);
+    const refKey = randomUUID();
+    await connA.query('UPDATE onec_documents SET counterparty_ref_key = $2::uuid WHERE onec_document_id = $1', [doc.documentId, refKey]);
+    const linkedSupplier = Number((await connA.query('INSERT INTO suppliers (supplier_name, ref_key_1c) VALUES ($1, $2::uuid) RETURNING supplier_id',
+      [`${tag} связанный ${refKey.slice(0, 6)}`, refKey])).rows[0].supplier_id);
+    expect((await workspace.allocationSuggestions(admin, doc.documentId)).supplierLinked).toBe(true);
+    await connA.query('UPDATE onec_documents SET counterparty_ref_key = NULL WHERE onec_document_id = $1', [doc.documentId]);
+    await connA.query('DELETE FROM suppliers WHERE supplier_id = $1', [linkedSupplier]);
     const items = itemsFromSuggestions(suggestions);
     // Заказ 0 (раньше срок) получает 3 из строки 1 и остаток из строки 2 — две записи на один закуп.
     expect(items.filter((item) => item.orderId === orderIds[0]).map((item) => item.lineId)).toEqual(doc.lineIds);

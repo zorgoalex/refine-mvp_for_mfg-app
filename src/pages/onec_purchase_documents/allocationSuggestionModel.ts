@@ -569,3 +569,11 @@ export function candidateDisplay(
     quantityInDemandUnit: convertDocUnitToDemandUnit(state.quantity, line.docUnit, line.demandUnit, line.sheetAreaM2),
   };
 }
+
+/**
+ * Предлагать ли подбор заказов: только для приходов поставщиков из справочника ERP (решение пользователя 2026-10-04).
+ * Backend прежней версии признак не присылает — подбор работает как раньше.
+ */
+export function isSuggestionAllowed(response: Pick<AllocationSuggestionsResponse, 'supplierLinked'>): boolean {
+  return response.supplierLinked !== false;
+}

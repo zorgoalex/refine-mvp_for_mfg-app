@@ -592,3 +592,12 @@ describe('ф.3б: связи автоподбора с заявками пост
     expect(reconcileDraftWithResponse(edited, response).lines[1].candidates[2971]).toMatchObject({ quantity: 0.5, edited: true });
   });
 });
+
+describe('подбор только для приходов поставщиков из справочника', () => {
+  it('несвязанный контрагент — подбор не предлагается; признака нет (прежний backend) или true — предлагается', async () => {
+    const { isSuggestionAllowed } = await import('./allocationSuggestionModel');
+    expect(isSuggestionAllowed({ supplierLinked: false })).toBe(false);
+    expect(isSuggestionAllowed({ supplierLinked: true })).toBe(true);
+    expect(isSuggestionAllowed({})).toBe(true);
+  });
+});

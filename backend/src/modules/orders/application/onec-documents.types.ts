@@ -258,6 +258,11 @@ export interface AllocationSuggestionsResponseDto {
   number: string;
   date: string;
   supplierName: string | null;
+  /**
+   * Контрагент прихода сейчас связан с поставщиком справочника ERP. false — подбор заказов для такого прихода экран
+   * снабжения не предлагает (решение пользователя 2026-10-04); ручное распределение из карточки документа остаётся.
+   */
+  supplierLinked: boolean;
   wastePercent: number;
   /** Не больше стольких предложенных распределений — лимит одной групповой команды. */
   proposalLimit: number;

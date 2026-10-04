@@ -16,6 +16,7 @@ import { dueText } from '../procurement_workspace/worklistHelpers';
 import { onecUnitLabel } from './onecDocumentsHelpers';
 import {
   buildBatchRequest,
+  isSuggestionAllowed,
   candidateDisplay,
   candidateRequestLinkNote,
   clearSuggestionDraft,
@@ -164,6 +165,21 @@ export function AllocationSuggestionPanel({ documentId, onDone, onSettled }: All
     return <Alert showIcon type="error" message="Не удалось открыть подбор заказов" description={state.message} />;
   }
   if (!response || !summary) return null;
+  // Подбор — только для приходов поставщиков из справочника (решение пользователя 2026-10-04).
+  if (!isSuggestionAllowed(response)) {
+    return (
+      <RrScreen>
+        <div className="rr-pad">
+          <Alert
+            showIcon
+            type="info"
+            message="Подбор заказов недоступен: поставщик этого прихода не связан со справочником «Поставщики»"
+            description={`Контрагент 1С «${response.supplierName ?? '—'}» не связан ни с одним поставщиком справочника. Откройте поставщика в справочнике «Поставщики» и укажите «Контрагент 1С» — подбор для его приходов появится сразу. Распределить приход вручную можно из карточки документа 1С.`}
+          />
+        </div>
+      </RrScreen>
+    );
+  }
 
   const eligibleLines = response.lines.filter((line) => line.skipReason === null);
   const check = overallCheck(summary);

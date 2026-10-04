@@ -194,6 +194,8 @@ export interface AllocationSuggestionsResponse {
   number: string;
   date: string;
   supplierName: string | null;
+  /** Контрагент прихода связан с поставщиком справочника ERP; false — подбор не предлагается. Старый backend поле не присылает — считать true. */
+  supplierLinked?: boolean;
   wastePercent: number;
   proposalLimit: number;
   proposalLimitReached: boolean;
