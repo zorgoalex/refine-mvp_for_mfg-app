@@ -1270,6 +1270,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [wbPickerOpen, setWbPickerOpen] = useState(false);
   const [wbFiltersOpen, setWbFiltersOpen] = useState(false);
   const [wbJobTab, setWbJobTab] = useState<'sheets' | 'details' | 'versions'>('sheets');
+  // NewLine: the piece pointed at / picked in an open sheet (sheet key + overlay key) — list and sheet stay in sync
+  const [wbHoverPiece, setWbHoverPiece] = useState<{ sheet: string; piece: string; from: 'list' | 'sheet' } | null>(null);
+  const [wbPickedPiece, setWbPickedPiece] = useState<{ sheet: string; piece: string } | null>(null);
   const [wbParamsOpen, setWbParamsOpen] = useState(false);
   const [orderOptions, setOrderOptions] = useState<CutOrderSelectOption[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
@@ -4048,6 +4051,65 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   }
 
   // «NewLine»: the head of the open job — title, steps of the job and its tabs (mockup «Раскрой»)
+  const wbActivePieceOf = (sheetKey: string): string | null =>
+    wbHoverPiece?.sheet === sheetKey ? wbHoverPiece.piece
+      : wbPickedPiece?.sheet === sheetKey ? wbPickedPiece.piece
+        : null;
+  const toggleWbPickedPiece = (sheetKey: string, piece: string) =>
+    setWbPickedPiece((current) => (current?.sheet === sheetKey && current.piece === piece ? null : { sheet: sheetKey, piece }));
+  // a piece pointed at on the sheet is brought into view in the parts list
+  // (inside the list only: the page itself must not jump)
+  const scrollWbPieceIntoView = (node: HTMLLIElement | null) => {
+    const list = node?.closest<HTMLElement>('.wb-cut-sheet-parts');
+    if (!node || !list) return;
+    const box = list.getBoundingClientRect();
+    const row = node.getBoundingClientRect();
+    if (row.top < box.top) list.scrollTop -= box.top - row.top;
+    else if (row.bottom > box.bottom) list.scrollTop += row.bottom - box.bottom;
+  };
+  // Sheet orientation and axis origin: a row of their own, in NewLine — in each group's title row.
+  const sheetViewControls = (
+    <>
+          {isWorkbench ? <span className="wb-cut-view-label">Лист</span> : null}
+          <Radio.Group
+            className="cut-sheet-icon-radio"
+            value={sheetPortrait}
+            onChange={(event) => toggleSheetPortrait(event.target.value as boolean)}
+            buttonStyle="solid"
+            aria-label="Ориентация листа"
+          >
+            <Tooltip title="Книжная ориентация">
+              <Radio.Button value={true} aria-label="Книжная ориентация">
+                <SheetOrientationIcon portrait />
+              </Radio.Button>
+            </Tooltip>
+            <Tooltip title="Альбомная ориентация">
+              <Radio.Button value={false} aria-label="Альбомная ориентация">
+                <SheetOrientationIcon portrait={false} />
+              </Radio.Button>
+            </Tooltip>
+          </Radio.Group>
+          {isWorkbench ? <span className="wb-cut-view-label">Отсчёт</span> : null}
+          <Radio.Group
+            className="cut-sheet-icon-radio"
+            value={sheetAxisOrigin}
+            onChange={(event) => changeSheetAxisOrigin(event.target.value as CutAxisOrigin)}
+            buttonStyle="solid"
+            aria-label="Точка отсчёта"
+          >
+            <Tooltip title="Точка отсчёта слева снизу">
+              <Radio.Button value="bottom-left" aria-label="Точка отсчёта слева снизу">
+                <SheetOriginIcon axisOrigin="bottom-left" />
+              </Radio.Button>
+            </Tooltip>
+            <Tooltip title="Точка отсчёта слева сверху">
+              <Radio.Button value="top-left" aria-label="Точка отсчёта слева сверху">
+                <SheetOriginIcon axisOrigin="top-left" />
+              </Radio.Button>
+            </Tooltip>
+          </Radio.Group>
+    </>
+  );
   const wbJobSteps: CutJobStep[] = job ? (() => {
     const hasItems = job.items.length > 0;
     const calculated = job.status === 'ready';
@@ -5415,46 +5477,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         </Card>
       )}
 
-      {job && job.groups.length > 0 && (
+      {job && job.groups.length > 0 && !isWorkbench && (
         <Space size={12} wrap className="cut-sheet-view-controls">
-          {isWorkbench ? <span className="wb-cut-view-label">Лист</span> : null}
-          <Radio.Group
-            className="cut-sheet-icon-radio"
-            value={sheetPortrait}
-            onChange={(event) => toggleSheetPortrait(event.target.value as boolean)}
-            buttonStyle="solid"
-            aria-label="Ориентация листа"
-          >
-            <Tooltip title="Книжная ориентация">
-              <Radio.Button value={true} aria-label="Книжная ориентация">
-                <SheetOrientationIcon portrait />
-              </Radio.Button>
-            </Tooltip>
-            <Tooltip title="Альбомная ориентация">
-              <Radio.Button value={false} aria-label="Альбомная ориентация">
-                <SheetOrientationIcon portrait={false} />
-              </Radio.Button>
-            </Tooltip>
-          </Radio.Group>
-          {isWorkbench ? <span className="wb-cut-view-label">Отсчёт</span> : null}
-          <Radio.Group
-            className="cut-sheet-icon-radio"
-            value={sheetAxisOrigin}
-            onChange={(event) => changeSheetAxisOrigin(event.target.value as CutAxisOrigin)}
-            buttonStyle="solid"
-            aria-label="Точка отсчёта"
-          >
-            <Tooltip title="Точка отсчёта слева снизу">
-              <Radio.Button value="bottom-left" aria-label="Точка отсчёта слева снизу">
-                <SheetOriginIcon axisOrigin="bottom-left" />
-              </Radio.Button>
-            </Tooltip>
-            <Tooltip title="Точка отсчёта слева сверху">
-              <Radio.Button value="top-left" aria-label="Точка отсчёта слева сверху">
-                <SheetOriginIcon axisOrigin="top-left" />
-              </Radio.Button>
-            </Tooltip>
-          </Radio.Group>
+          {sheetViewControls}
         </Space>
       )}
 
@@ -5555,6 +5580,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             }
             extra={
               <div style={cutActionToolbarStyle}>
+                {isWorkbench ? <div className="wb-cut-view-controls">{sheetViewControls}</div> : null}
                 {isEditingGroup && (
                   <Space size={4} data-testid="sticky-editor-zoom-controls">
                     <Tooltip
@@ -5924,6 +5950,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                           overlays={overlays}
                           labelsInImage={sheetUsesSourceSvgRendering(sheet.placements)}
                           onCollapse={() => collapseSheet(key)}
+                          activeOverlayKey={isWorkbench ? wbActivePieceOf(key) : undefined}
+                          onOverlayHover={isWorkbench ? (piece) => setWbHoverPiece(piece ? { sheet: key, piece, from: 'sheet' } : null) : undefined}
+                          onOverlayPick={isWorkbench ? (piece) => toggleWbPickedPiece(key, piece) : undefined}
                         />
                       )}
                       {isWorkbench && sheetImages[key] ? (
@@ -5940,8 +5969,18 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                               const ref = [label?.orderName, label?.detailNumber != null ? String(label.detailNumber) : null]
                                 .filter(Boolean)
                                 .join('-');
+                              const pieceKey = `${piece.item_id}:${piece.instance}`;
+                              const pieceActive = wbActivePieceOf(key) === pieceKey;
                               return (
-                                <li key={`${piece.item_id}:${piece.instance}:${pieceIndex}`}>
+                                <li
+                                  key={`${pieceKey}:${pieceIndex}`}
+                                  data-active={pieceActive ? 'true' : undefined}
+                                  data-picked={wbPickedPiece?.sheet === key && wbPickedPiece.piece === pieceKey ? 'true' : undefined}
+                                  ref={pieceActive && wbHoverPiece?.from !== 'list' ? scrollWbPieceIntoView : undefined}
+                                  onMouseEnter={() => setWbHoverPiece({ sheet: key, piece: pieceKey, from: 'list' })}
+                                  onMouseLeave={() => setWbHoverPiece(null)}
+                                  onClick={() => toggleWbPickedPiece(key, pieceKey)}
+                                >
                                   <span className="wb-cut-sheet-parts__no">{pieceIndex + 1}</span>
                                   <b>{width} × {height}</b>
                                   <span className="wb-cut-sheet-parts__ref">{ref || '—'}{piece.rotated ? ' · повёрнута' : ''}</span>

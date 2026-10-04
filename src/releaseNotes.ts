@@ -29,6 +29,14 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-05", title: "NewLine, «Раскрой»: детали листа связаны с листом",
+    services: ["ERP", "Cutting"], repositories: ["repo_erp"],
+    changed: [
+      "Вариант NewLine: в открытом листе раскроя список «Детали листа» стал интерактивным — при наведении на строку деталь подсвечивается на листе, при наведении на деталь на листе подсвечивается её строка; клик закрепляет выделение.",
+      "Вариант NewLine: переключатели ориентации листа и точки отсчёта оформлены в новом стиле и перенесены в строку заголовка группы листов, рядом с «Редактировать раскрой» и «Шаблон PDF».",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-04", title: "Заявка поставщику — в WhatsApp",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

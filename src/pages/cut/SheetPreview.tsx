@@ -32,6 +32,12 @@ export interface SheetPreviewProps {
   labelsInImage?: boolean;
   onOpen?: () => void;
   onCollapse?: () => void;
+  /** Piece highlighted on the sheet (overlay key), e.g. the one pointed at in a parts list. */
+  activeOverlayKey?: string | null;
+  /** Pointer entered a piece on the sheet (`null` — left it). */
+  onOverlayHover?: (key: string | null) => void;
+  /** A piece on the sheet was clicked. */
+  onOverlayPick?: (key: string) => void;
 }
 
 function renderOverlayTooltip(overlay: CutPieceOverlay): React.ReactNode {
@@ -55,6 +61,14 @@ function renderOverlayTooltip(overlay: CutPieceOverlay): React.ReactNode {
 
 const BASE_FONT_PX = 11;
 
+/** A piece pointed at in the parts list (or on the sheet itself): contour + tint. */
+const ACTIVE_PIECE_STYLE: React.CSSProperties = {
+  outline: '2px solid #1f5fe0',
+  outlineOffset: -2,
+  background: 'rgba(31, 95, 224, 0.18)',
+  zIndex: 1,
+};
+
 function OverlayLayer({
   overlays,
   labelsInImage = false,
@@ -62,6 +76,9 @@ function OverlayLayer({
   imgHeightPx,
   onClick,
   onDoubleClick,
+  activeKey,
+  onHoverKey,
+  onPickKey,
 }: {
   overlays?: CutPieceOverlay[];
   labelsInImage?: boolean;
@@ -71,6 +88,9 @@ function OverlayLayer({
   imgHeightPx: number;
   onClick?: () => void;
   onDoubleClick?: () => void;
+  activeKey?: string | null;
+  onHoverKey?: (key: string | null) => void;
+  onPickKey?: (key: string) => void;
 }) {
   if (!overlays || overlays.length === 0) return null;
   return (
@@ -95,15 +115,19 @@ function OverlayLayer({
           <Tooltip key={overlay.key} title={renderOverlayTooltip(overlay)}>
             <span
               aria-label={`Заказ ${overlay.orderId ?? '—'}, позиция ${overlay.detailNumber ?? '—'}`}
-              onClick={onClick}
+              onClick={onPickKey ? () => { onPickKey(overlay.key); onClick?.(); } : onClick}
               onDoubleClick={onDoubleClick}
+              onMouseEnter={onHoverKey ? () => onHoverKey(overlay.key) : undefined}
+              onMouseLeave={onHoverKey ? () => onHoverKey(null) : undefined}
+              data-piece-active={activeKey === overlay.key ? 'true' : undefined}
               style={{
+                ...(activeKey === overlay.key ? ACTIVE_PIECE_STYLE : null),
                 position: 'absolute',
                 left: `${overlay.leftPct}%`,
                 top: `${overlay.topPct}%`,
                 width: `${overlay.widthPct}%`,
                 height: `${overlay.heightPct}%`,
-                cursor: 'help',
+                cursor: onPickKey ? 'pointer' : 'help',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
@@ -214,6 +238,9 @@ export function SheetPreview({
   labelsInImage = false,
   onOpen,
   onCollapse,
+  activeOverlayKey,
+  onOverlayHover,
+  onOverlayPick,
 }: SheetPreviewProps) {
   // Track the full-view image's rendered pixel size (set via onLoad) so
   // OverlayLayer can compute pixel-accurate font sizes for label auto-shrink.
@@ -268,6 +295,9 @@ export function SheetPreview({
               imgWidthPx={fullImgSize.w}
               imgHeightPx={fullImgSize.h}
               onDoubleClick={onCollapse}
+              activeKey={activeOverlayKey}
+              onHoverKey={onOverlayHover}
+              onPickKey={onOverlayPick}
             />
           </span>
           <span style={{ ...sideLabelStyle, top: 2, left: '50%', transform: 'translateX(-50%)' }}>
