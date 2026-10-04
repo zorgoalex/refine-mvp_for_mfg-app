@@ -1,4 +1,6 @@
 import { cutJobInformationalDetails, type InformationalCutDetailRow } from './cutJobInformationalDetails';
+import { CutSheetMiniMapView } from './CutSheetMiniMapView';
+import { sheetMiniColor } from './cutSheetMiniMap';
 import { createPortal } from 'react-dom';
 import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -5991,13 +5993,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                             }
                           }}
                         >
-                          <span className="wb-cut-sheet-tile__thumb" data-portrait={isPortraitPreview ? 'true' : undefined}>
-                            {sheetThumbs[key] ? <img src={sheetThumbs[key]} alt="" /> : null}
-                          </span>
+                          <CutSheetMiniMapView placements={sheet.placements} color={sheetMiniColor(filmText ?? matName)} />
                           <span className="wb-cut-sheet-tile__body">
                             <b>Лист {sheetNo}</b>
                             <span className="wb-cut-sheet-tile__mat" title={[matName, filmText].filter(Boolean).join(' · ') || undefined}>
-                              {filmText ?? matName ?? 'материал не задан'}
+                              <i className="wb-cut-sheet-tile__swatch" style={{ background: sheetMiniColor(filmText ?? matName) }} />
+                              <span>{filmText ?? matName ?? 'материал не задан'}</span>
                             </span>
                             {sheetUsagePercent != null ? (
                               <span className="wb-cut-sheet-tile__bar" data-level={sheetUsagePercent > 75 ? 'high' : sheetUsagePercent < 50 ? 'low' : undefined}>
