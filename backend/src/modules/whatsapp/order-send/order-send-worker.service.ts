@@ -9,8 +9,10 @@ import { OrderSendFileStore } from './order-send-file-store';
 import { normalizeClientPhone } from './order-send-phone';
 import { OrderSendRepository, knownForms, type SendIntent, type SendRow } from './order-send.repository';
 import {
-  ORDER_FORM_MIME, ORDER_SEND_SUPPORTED_CHANNELS, isDeliverableForm, orderForm, type OrderSendCancelReason, type OrderSendRuntime,
+  ORDER_FORM_MIME, ORDER_SEND_SUPPORTED_CHANNELS, SUPPLIER_TEXT_FORM, isDeliverableForm, orderForm,
+  type OrderFormCode, type OrderSendCancelReason, type OrderSendRuntime,
 } from './order-send.types';
+import { SupplierSendRepository } from './supplier-send.repository';
 
 /** WAHA refused the request itself (validation, unsupported): nothing was sent. */
 const DEFINITE_REJECTIONS = new Set([400, 404, 405, 415, 422, 501]);
@@ -38,6 +40,7 @@ export class OrderSendWorker implements OnModuleInit, OnModuleDestroy {
     @Inject(WhatsAppRuntimeConfigService) private readonly runtimeConfig: WhatsAppRuntimeConfigService,
     @Inject(WahaClient) private readonly waha: WahaClient,
     @Optional() @Inject(WhatsAppTechnicalLogService) private readonly technicalLogs?: WhatsAppTechnicalLogService,
+    @Optional() @Inject(SupplierSendRepository) private readonly suppliers?: SupplierSendRepository,
   ) {}
 
   onModuleInit() {
@@ -88,13 +91,15 @@ export class OrderSendWorker implements OnModuleInit, OnModuleDestroy {
       await this.repository.finishBeforeIntent(row.send_id, { state: 'expired' }, now);
       return;
     }
+    // A supplier request: its text to the supplier's phone (no file, no order).
+    const supplier = row.target_kind === 'supplier' && row.form_code === SUPPLIER_TEXT_FORM && this.suppliers !== undefined;
     // A form of a newer release: never delivered by this one, no slot spent.
-    if (!isDeliverableForm(row.form_code)) {
+    if (!supplier && !isDeliverableForm(row.form_code)) {
       await this.repository.finishBeforeIntent(row.send_id, { state: 'failed', errorCode: 'ORDER_SEND_FORM_UNSUPPORTED' });
       return;
     }
     // A recipient kind of a newer release: never delivered by this one, no slot spent.
-    if (!['client', 'chat', 'employee'].includes(row.target_kind as string)) {
+    if (!supplier && !['client', 'chat', 'employee'].includes(row.target_kind as string)) {
       await this.repository.finishBeforeIntent(row.send_id, { state: 'failed', errorCode: 'ORDER_SEND_TARGET_UNSUPPORTED' });
       return;
     }
@@ -106,7 +111,7 @@ export class OrderSendWorker implements OnModuleInit, OnModuleDestroy {
         return;
       }
     }
-    if ((row.target_kind === 'client' || row.target_kind === 'employee') && !row.destination_chat_id) {
+    if ((row.target_kind === 'client' || row.target_kind === 'employee' || supplier) && !row.destination_chat_id) {
       if (!row.phone_normalized) {
         await this.repository.finishBeforeIntent(row.send_id, { state: 'failed', errorCode: 'ORDER_SEND_PAYLOAD_MISSING' });
         return;
@@ -115,7 +120,8 @@ export class OrderSendWorker implements OnModuleInit, OnModuleDestroy {
         const check = await this.waha.checkPhone(row.phone_normalized);
         if (!check.exists || !check.chatId) {
           await this.repository.finishBeforeIntent(row.send_id, {
-            state: 'failed', errorCode: row.target_kind === 'employee' ? 'EMPLOYEE_NOT_ON_WHATSAPP' : 'CLIENT_NOT_ON_WHATSAPP' });
+            state: 'failed', errorCode: supplier ? 'SUPPLIER_NOT_ON_WHATSAPP'
+              : row.target_kind === 'employee' ? 'EMPLOYEE_NOT_ON_WHATSAPP' : 'CLIENT_NOT_ON_WHATSAPP' });
           return;
         }
         await this.repository.setClientDestination(row.send_id, check.chatId);
@@ -124,6 +130,14 @@ export class OrderSendWorker implements OnModuleInit, OnModuleDestroy {
         return;
       }
     }
+    if (supplier) {
+      const suppliers = this.suppliers as SupplierSendRepository;
+      const intent = await this.repository.createIntent(row.send_id,
+        (tx, current, settings) => suppliers.verify(tx, current, settings, (client, userId) => this.actors.load(client, userId)), this.clock);
+      if (intent) await this.deliverTexts(row.send_id, intent);
+      return;
+    }
+    const formCode = row.form_code as OrderFormCode;
     let bytes: Buffer;
     let partBytes: Map<number, Buffer>;
     try {
@@ -147,19 +161,19 @@ export class OrderSendWorker implements OnModuleInit, OnModuleDestroy {
       // Locks held until the intent commits: the order (scope, client) and, for a client send, the
       // client row (blocks a new phone via the FK) and its phones (block edits and deletions).
       const subject = await readAccessSubject(tx, Number(current.order_id), true);
-      if (!actor || !subject || !canSendOrder(actor, subject, current.form_code)) return 'permission_revoked';
+      if (!actor || !subject || !canSendOrder(actor, subject, formCode)) return 'permission_revoked';
       if (current.target_kind === 'chat') {
         const chat = current.chat_key ? await this.repository.chat(tx, current.chat_key) : null;
         if (!chat || chat.archived_at) return 'recipient_removed';
         if (chat.group_chat_id !== current.destination_chat_id) return 'recipient_changed';
-        if (!knownForms(chat.forms).includes(current.form_code)) return 'form_not_allowed';
+        if (!knownForms(chat.forms).includes(formCode)) return 'form_not_allowed';
         return null;
       }
       if (current.target_kind === 'employee') {
         // The recipient row, the employee and the contact as they are now: anything different cancels.
         return this.repository.verifyEmployeeRecipient(tx, current);
       }
-      if (!knownForms(settings.client_forms).includes(current.form_code)) return 'form_not_allowed';
+      if (!knownForms(settings.client_forms).includes(formCode)) return 'form_not_allowed';
       // A phone chosen in the command must still be that phone of the order's client; otherwise the default rule.
       const client = await this.repository.currentClientPhone(tx, Number(current.order_id),
         current.client_phone_id == null ? null : Number(current.client_phone_id));
@@ -169,12 +183,12 @@ export class OrderSendWorker implements OnModuleInit, OnModuleDestroy {
       return sameClient && samePhone ? null : 'recipient_changed';
     }, this.clock);
     if (!intent) return;
-    if (orderForm(intent.form).format === 'png') {
+    if (orderForm(formCode).format === 'png') {
       await this.deliverPictures(row.send_id, intent, bytes, partBytes);
       return;
     }
     try {
-      const sent = await this.waha.sendFile(intent.destinationChatId, bytes, intent.fileName, ORDER_FORM_MIME[orderForm(intent.form).format], intent.caption);
+      const sent = await this.waha.sendFile(intent.destinationChatId, bytes, intent.fileName, ORDER_FORM_MIME[orderForm(formCode).format], intent.caption);
       await this.repository.settle(row.send_id, intent.token, sent.messageId
         ? { state: 'sent', providerMessageId: sent.messageId }
         : { state: 'unknown', errorCode: 'PROVIDER_ACK_MISSING_ID' });
@@ -211,6 +225,42 @@ export class OrderSendWorker implements OnModuleInit, OnModuleDestroy {
         messageId = undefined;
       }
       if (!messageId || !(await this.repository.recordPartSent(sendId, intent.token, part.partNo, messageId))) {
+        await this.repository.settle(sendId, intent.token, { state: 'unknown', errorCode: 'PARTIAL_DELIVERY', providerMessageId: firstId },
+          { partsSent: sent });
+        return;
+      }
+      sent += 1;
+    }
+    await this.repository.settle(sendId, intent.token, { state: 'sent', providerMessageId: firstId }, { partsSent: sent });
+  }
+
+  /**
+   * A supplier text: its messages one after another, never repeated. Nothing sent → the WhatsApp outcome as for
+   * a file. The first message delivered and a later one not (or its outcome unknown) → `unknown/PARTIAL_DELIVERY`
+   * with how many went: a repeat needs the explicit confirmation. The threshold slot is spent once per send.
+   */
+  private async deliverTexts(sendId: string, intent: SendIntent) {
+    const messages = intent.texts ?? [];
+    let firstId: string | undefined;
+    try {
+      firstId = (await this.waha.sendText(intent.destinationChatId, messages[0] ?? '')).messageId;
+    } catch (error) {
+      await this.repository.settle(sendId, intent.token, failure(error));
+      return;
+    }
+    if (!firstId) {
+      await this.repository.settle(sendId, intent.token, { state: 'unknown', errorCode: 'PROVIDER_ACK_MISSING_ID' });
+      return;
+    }
+    let sent = 1;
+    for (const [index, message] of messages.slice(1).entries()) {
+      let messageId: string | undefined;
+      try {
+        messageId = (await this.waha.sendText(intent.destinationChatId, message)).messageId;
+      } catch {
+        messageId = undefined;
+      }
+      if (!messageId || !(await this.repository.recordPartSent(sendId, intent.token, index + 2, messageId))) {
         await this.repository.settle(sendId, intent.token, { state: 'unknown', errorCode: 'PARTIAL_DELIVERY', providerMessageId: firstId },
           { partsSent: sent });
         return;

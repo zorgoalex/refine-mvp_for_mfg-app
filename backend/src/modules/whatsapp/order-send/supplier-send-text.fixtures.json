@@ -1,0 +1,138 @@
+{
+  "comment": "Shared by the backend split (supplier-send-text.ts) and its frontend port (src/pages/procurement_workspace/supplierSendText.ts). The text of a case: every piece repeated `repeat` times, the pieces joined by `join`; `lengths` — the lengths of the expected messages.",
+  "limit": 4096,
+  "cases": [
+    {
+      "name": "a short text is one message",
+      "pieces": [
+        {
+          "text": "Заявка № 26-0001\n1. МДФ 16 — 5 листов",
+          "repeat": 1
+        }
+      ],
+      "join": "",
+      "lengths": [
+        37
+      ]
+    },
+    {
+      "name": "blank lines at the edges are dropped",
+      "pieces": [
+        {
+          "text": "\n\nТест\n\n",
+          "repeat": 1
+        }
+      ],
+      "join": "",
+      "lengths": [
+        4
+      ]
+    },
+    {
+      "name": "exactly one message",
+      "pieces": [
+        {
+          "text": "а",
+          "repeat": 4096
+        }
+      ],
+      "join": "",
+      "lengths": [
+        4096
+      ]
+    },
+    {
+      "name": "one character over the limit without spaces is cut by characters",
+      "pieces": [
+        {
+          "text": "а",
+          "repeat": 4097
+        }
+      ],
+      "join": "",
+      "lengths": [
+        4096,
+        1
+      ]
+    },
+    {
+      "name": "lines are kept whole: 100 lines of 99 characters",
+      "pieces": [
+        {
+          "text": "123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789\n",
+          "repeat": 100
+        }
+      ],
+      "join": "",
+      "lengths": [
+        3999,
+        3999,
+        1999
+      ]
+    },
+    {
+      "name": "a long line is cut at a space",
+      "pieces": [
+        {
+          "text": "слово ",
+          "repeat": 1000
+        }
+      ],
+      "join": "",
+      "lengths": [
+        4091,
+        1908
+      ]
+    },
+    {
+      "name": "a surrogate pair is never split",
+      "pieces": [
+        {
+          "text": "😀",
+          "repeat": 2049
+        }
+      ],
+      "join": "",
+      "lengths": [
+        4096,
+        2
+      ]
+    },
+    {
+      "name": "a surrogate pair at the cut moves the cut back",
+      "pieces": [
+        {
+          "text": "a",
+          "repeat": 1
+        },
+        {
+          "text": "😀",
+          "repeat": 2048
+        }
+      ],
+      "join": "",
+      "lengths": [
+        4095,
+        2
+      ]
+    },
+    {
+      "name": "a line that does not fit the rest of a message starts the next one",
+      "pieces": [
+        {
+          "text": "б",
+          "repeat": 4000
+        },
+        {
+          "text": "в",
+          "repeat": 200
+        }
+      ],
+      "join": "\n",
+      "lengths": [
+        4000,
+        200
+      ]
+    }
+  ]
+}

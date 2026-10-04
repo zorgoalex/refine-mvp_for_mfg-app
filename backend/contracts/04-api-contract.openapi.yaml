@@ -1315,6 +1315,42 @@ paths:
         '422': {description: 'Invalid request or CLIENT_PHONE_INVALID'}
         '503': {description: 'BROADCAST_RUNTIME_UNAVAILABLE, ORDER_SEND_BUSY or ORDER_SEND_STORE_UNAVAILABLE'}
         '507': {description: 'ORDER_SEND_STORAGE_FULL'}
+  /api/v1/procurement/supplier-requests/{supplierRequestId}/whatsapp-menu:
+    get:
+      tags: [WhatsApp]
+      operationId: supplierRequestWhatsappMenu
+      summary: 'Recipient of a supplier request in WhatsApp: the supplier and his phones as masks'
+      description: 'The supplier of the directory the request key points at (s:<id> — the row, c:<uuid> — the one supplier linked to that 1C counterparty) and his phones as masks with opaque tokens. The whole scope of the request is required, as for its commands.'
+      security: [{bearerAuth: []}]
+      x-permissions: [procurement.view, procurement.manage]
+      parameters:
+        - {name: supplierRequestId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Menu, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppSupplierSendMenu'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {description: 'PERMISSION_DENIED or SUPPLIER_REQUEST_SCOPE'}
+        '404': {description: 'SUPPLIER_REQUEST_NOT_FOUND'}
+  /api/v1/procurement/supplier-requests/{supplierRequestId}/whatsapp-sends:
+    post:
+      tags: [WhatsApp]
+      operationId: sendSupplierRequestToWhatsapp
+      summary: 'Queue the text of a supplier request for the supplier phone (idempotent)'
+      description: 'The text of the window «Текст для поставщика» goes as it is, through the queue and the frequency gate of the order card sends; a text longer than 4096 characters is split into up to 8 messages. The request status does not change. The same idempotencyKey replays the stored send. A refusal with details.final is recorded against the key for good: the request or its recipient is not what the window showed.'
+      security: [{bearerAuth: []}]
+      x-permissions: [procurement.view, procurement.manage]
+      parameters:
+        - {name: supplierRequestId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppSupplierSendRequest'}}}
+      responses:
+        '202': {description: Queued send, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppOrderSendEnvelope'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {description: 'PERMISSION_DENIED, SUPPLIER_REQUEST_SCOPE or PROCUREMENT_ACTOR_INVALID'}
+        '404': {description: 'SUPPLIER_REQUEST_NOT_FOUND'}
+        '409': {description: 'SUPPLIER_SEND_DISABLED, ORDER_SEND_PAUSED, ORDER_SEND_QUEUE_FULL, ORDER_SEND_ALREADY_QUEUED, ORDER_SEND_PREVIOUS_UNKNOWN (details.sendId, details.createdAt), IDEMPOTENCY_KEY_REUSED; final (details.final): SUPPLIER_REQUEST_VERSION_CONFLICT, SUPPLIER_REQUEST_NOT_SENDABLE, SUPPLIER_NOT_LINKED, SUPPLIER_INACTIVE, SUPPLIER_CONTACT_MISSING, ORDER_SEND_PHONE_CHANGED, SUPPLIER_SEND_UNAVAILABLE'}
+        '422': {description: 'Invalid request or SUPPLIER_SEND_TEXT_INVALID (details.reason: empty, too_long, control_characters, too_many_messages)'}
+        '503': {description: 'BROADCAST_RUNTIME_UNAVAILABLE'}
   /api/v1/whatsapp/broadcasts/{id}:
     get:
       tags: [WhatsApp]
@@ -31192,6 +31228,7 @@ components:
         clientCaption: {type: string, maxLength: 1000}
         chats: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/WhatsAppOrderSendChat'}}
         employees: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/WhatsAppOrderSendEmployee'}}
+        supplierRequestsEnabled: {type: boolean, description: 'Texts of supplier requests may be sent from the procurement screen'}
         updatedAt: {type: string, format: date-time}
         updatedBy: {type: object, nullable: true, properties: {id: {type: string}, username: {type: string, nullable: true}}}
     WhatsAppOrderSendSettingsEnvelope:
@@ -31218,6 +31255,7 @@ components:
         sendWindowMinutes: {type: integer, minimum: 0, maximum: 720, description: 'Random extra delay of the next delivery after the threshold, at most half of minIntervalMinutes'}
         clientForms: {type: array, items: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}}
         clientCaption: {type: string, maxLength: 1000}
+        supplierRequestsEnabled: {type: boolean, description: 'Texts of supplier requests may be sent from the procurement screen; omitted — the switch stays. Switching it off cancels the waiting supplier sends.'}
         chats:
           type: array
           maxItems: 20
@@ -31271,25 +31309,52 @@ components:
         form: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}
         idempotencyKey: {type: string, format: uuid}
         confirmAfterUnknown: {type: string, format: uuid, nullable: true, description: 'Explicit repeat after the latest send of the same order, recipient and form ended unknown: its sendId from 409 ORDER_SEND_PREVIOUS_UNKNOWN details.'}
+    WhatsAppSupplierSendMenu:
+      type: object
+      required: [enabled, unavailableReason, supplier, contacts, requestVersion, queueLength, runtime]
+      properties:
+        enabled: {type: boolean, description: 'The card sends are on, supplier requests are on and this release makes them'}
+        unavailableReason: {type: string, nullable: true, enum: [disabled, release, not_linked, no_phone, supplier_inactive, status, null]}
+        supplier: {type: object, nullable: true, required: [supplierId, name], properties: {supplierId: {type: integer}, name: {type: string}}}
+        contacts: {type: array, items: {type: object, required: [contactId, masked, isPrimary, token], properties: {contactId: {type: integer}, masked: {type: string}, isPrimary: {type: boolean}, token: {type: string, description: 'Opaque; sent back as contactToken'}}}}
+        requestVersion: {type: integer, minimum: 0}
+        queueLength: {type: integer, minimum: 0}
+        runtime: {$ref: '#/components/schemas/WhatsAppBroadcastRuntime'}
+    WhatsAppSupplierSendRequest:
+      type: object
+      additionalProperties: false
+      required: [text, edited, templateId, templateVersion, textVersion, contactId, contactToken, idempotencyKey]
+      properties:
+        text: {type: string, description: 'The text of the window as it is: not blank, at most 20000 characters after line endings are normalized, no control characters but line breaks and tabs'}
+        edited: {type: boolean, description: 'The text was edited by hand (for the audit)'}
+        templateId: {type: integer, minimum: 1, nullable: true}
+        templateVersion: {type: integer, minimum: 0, nullable: true}
+        textVersion: {type: integer, minimum: 0, description: 'The version of the request the text was built from; must be the current one'}
+        contactId: {type: integer, minimum: 1, description: 'A phone of the supplier from the menu (also for the primary one)'}
+        contactToken: {type: string, pattern: '^[0-9a-f]{64}$', description: 'The token the menu gave for this phone'}
+        idempotencyKey: {type: string, format: uuid}
+        confirmAfterUnknown: {type: string, format: uuid, nullable: true, description: 'Explicit repeat after the latest send of this text to this number ended unknown'}
     WhatsAppOrderSend:
       type: object
       required: [sendId, orderId, targetKind, chatKey, recipientLabel, recipientMasked, form, state, errorCode, cancelReason, createdAt, sentAt, actor,
-        partsTotal, position, estimatedAt, mayExpire, expiresAt]
+        partsTotal, position, estimatedAt, mayExpire, expiresAt, supplierRequestId, supplierRequestNumber]
       properties:
         sendId: {type: string, format: uuid}
-        orderId: {type: integer}
-        targetKind: {type: string, enum: [client, chat, employee]}
+        orderId: {type: integer, nullable: true, description: 'Null for a supplier request send'}
+        targetKind: {type: string, enum: [client, chat, employee, supplier]}
         chatKey: {type: string, format: uuid, nullable: true}
         recipientLabel: {type: string}
         recipientMasked: {type: string, description: 'Phone or group as a mask only'}
-        form: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}
+        form: {type: string, enum: [production_pdf, order_pdf, production_excel, order_excel, production_image, order_image, supplier_text]}
+        supplierRequestId: {type: integer, nullable: true}
+        supplierRequestNumber: {type: string, nullable: true}
         state: {type: string, enum: [queued, sending, sent, failed, unknown, cancelled, expired]}
         errorCode: {type: string, nullable: true}
-        cancelReason: {type: string, nullable: true, enum: [disabled, recipient_removed, recipient_changed, form_not_allowed, permission_revoked, paused, manual, null]}
+        cancelReason: {type: string, nullable: true, enum: [disabled, recipient_removed, recipient_changed, form_not_allowed, permission_revoked, paused, manual, request_changed, null]}
         createdAt: {type: string, format: date-time}
         sentAt: {type: string, format: date-time, nullable: true}
         actor: {type: object, properties: {id: {type: string}, username: {type: string, nullable: true}}}
-        partsTotal: {type: integer, minimum: 1, maximum: 20, description: 'Pictures of an image form (1 for a file)'}
+        partsTotal: {type: integer, minimum: 1, maximum: 20, description: 'Pictures of an image form or messages of a supplier text (1 for a file)'}
         position: {type: integer, minimum: 1, nullable: true, description: 'Place in the queue while waiting'}
         estimatedAt: {type: string, format: date-time, nullable: true, description: 'Approximate start of the delivery while waiting'}
         mayExpire: {type: boolean, description: 'Expected to expire (24 hours from the command) before its turn'}

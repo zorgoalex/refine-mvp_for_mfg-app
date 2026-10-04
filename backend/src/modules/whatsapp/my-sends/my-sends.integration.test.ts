@@ -4,6 +4,7 @@ import { Pool, type PoolClient, type QueryResultRow } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
 import { MySendsRepository } from './my-sends.repository';
+import { runMigrationFile } from '../order-send/migration-file.test-util';
 
 // Real PostgreSQL in an isolated schema: set WHATSAPP_BROADCAST_TEST_DATABASE_URL (or TEST_DATABASE_URL).
 const databaseUrl = process.env.WHATSAPP_BROADCAST_TEST_DATABASE_URL ?? process.env.TEST_DATABASE_URL;
@@ -32,11 +33,16 @@ describe.skipIf(!databaseUrl)('MySendsRepository (PostgreSQL, isolated schema)',
       INSERT INTO users VALUES (11, 'me'), (12, 'someone-else');
       CREATE TABLE orders(order_id bigint PRIMARY KEY, order_name text);
       INSERT INTO orders VALUES (9001, 'E2E-Тест-1'), (9002, 'E2E-Тест-2');
-      CREATE TABLE employees(employee_id bigint PRIMARY KEY, full_name text NOT NULL, is_active boolean NOT NULL DEFAULT true);`);
+      CREATE TABLE employees(employee_id bigint PRIMARY KEY, full_name text NOT NULL, is_active boolean NOT NULL DEFAULT true);
+      CREATE TABLE suppliers(supplier_id smallint PRIMARY KEY, supplier_name text NOT NULL);
+      CREATE TABLE supplier_requests(supplier_request_id bigint PRIMARY KEY, request_number text NOT NULL);
+      INSERT INTO suppliers VALUES (1, 'Тест Поставщик');
+      INSERT INTO supplier_requests VALUES (501, '26-0012');`);
     for (const file of ['183_whatsapp_daily_digest.sql', '184_whatsapp_daily_digest_schedule.sql', '209_whatsapp_broadcasts.sql',
       '224_whatsapp_calendar_send.sql', '230_whatsapp_order_send.sql', '233_whatsapp_order_send_queue.sql',
-      '235_employee_work_contacts.sql']) {
-      await q(await readFile(new URL(`../../../../db/migrations/${file}`, import.meta.url), 'utf8'));
+      '235_employee_work_contacts.sql', '237_whatsapp_order_send_client_phone.sql', '238_whatsapp_supplier_send.sql']) {
+      const sql = await readFile(new URL(`../../../../db/migrations/${file}`, import.meta.url), 'utf8');
+      if (file.startsWith('238_')) await runMigrationFile((text) => q(text), sql); else await q(sql);
     }
     calendarId = Number((await q<{ broadcast_id: string }>(`SELECT broadcast_id FROM whatsapp_broadcasts WHERE purpose = 'calendar'`)).rows[0].broadcast_id);
     const database = {
@@ -106,6 +112,19 @@ describe.skipIf(!databaseUrl)('MySendsRepository (PostgreSQL, isolated schema)',
       estimatedAt: null, orderId: 9001 });
     expect(items.find((item) => item.id === myRun)).toMatchObject({ kind: 'calendar_send', title: 'Календарь, 02.10.2026 → чат', active: false });
     expect(JSON.stringify(items)).not.toMatch(/@g\.us|@c\.us|7014952060/);
+  });
+
+  it('a supplier request send reads as the request and the supplier, with the number of messages and no order', async () => {
+    const sendId = randomUUID();
+    await q(`INSERT INTO whatsapp_order_sends (send_id, order_id, actor_id, request_id, idempotency_key, fingerprint, target_kind, form_code,
+        phone_normalized, recipient_masked, file_name, state, queue_expires_at, parts_total, recipient_fingerprint, supplier_request_id,
+        supplier_request_version, supplier_key, supplier_id, supplier_contact_id, request_content_sha256, text_body, text_sha256, text_length, text_edited)
+      VALUES ($1, NULL, 11, 'req', gen_random_uuid(), $2, 'supplier', 'supplier_text', '77014952060', '7701***2060', 'Заявка № 26-0012', 'queued',
+        now() + interval '1 hour', 3, $2, 501, 0, 's:1', 1, 7, $2, 'Тест текст', $2, 10, false)`, [sendId, 'a'.repeat(64)]);
+    const item = (await repository.list('11')).find((entry) => entry.id === sendId);
+    expect(item).toMatchObject({ kind: 'order_send', title: 'Заявка № 26-0012 → поставщику «Тест Поставщик», сообщений: 3', active: true,
+      orderId: null, cancellable: true });
+    expect(JSON.stringify(item)).not.toMatch(/7014952060|Тест текст/);
   });
 
   it('estimates a queued card send from the delivery gate (threshold + drawn window moment)', async () => {

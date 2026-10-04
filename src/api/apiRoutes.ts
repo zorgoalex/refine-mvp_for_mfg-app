@@ -128,6 +128,8 @@ export const apiRoutes = {
       send: (supplierRequestId: number) => backendApiPath(`/procurement/supplier-requests/${supplierRequestId}/send`),
       close: (supplierRequestId: number) => backendApiPath(`/procurement/supplier-requests/${supplierRequestId}/close`),
       cancel: (supplierRequestId: number) => backendApiPath(`/procurement/supplier-requests/${supplierRequestId}/cancel`),
+      whatsappMenu: (supplierRequestId: number) => backendApiPath(`/procurement/supplier-requests/${supplierRequestId}/whatsapp-menu`),
+      whatsappSends: (supplierRequestId: number) => backendApiPath(`/procurement/supplier-requests/${supplierRequestId}/whatsapp-sends`),
     },
     supplierTextTemplates: {
       list: backendApiPath('/procurement/supplier-text-templates'),

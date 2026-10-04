@@ -29,6 +29,7 @@ import { OrderNumber } from '../order_resource_requirements/OrderNumber';
 import { useProcurementPermission } from '../order_resource_requirements/ProcurementParts';
 import { RrScreen } from './RrScreen';
 import { SupplierTextDialog } from './SupplierTextDialog';
+import { SupplierWhatsAppSend } from './SupplierWhatsAppSend';
 import { SupplierTextTemplatesEditor } from './SupplierTextTemplatesEditor';
 import { useSelect } from '../../ui/refineSelect';
 import {
@@ -709,7 +710,16 @@ function SupplierRequestDrawer({ requestId, onClose, onChanged, canManage, manag
               <Button danger loading={busyTransition === 'cancel'} disabled={!canManage || manageLoading} onClick={() => void doTransition('cancel')}>Отменить заявку</Button>
             )}
             {/* Копируется сохранённая заявка — при несохранённых правках текст разошёлся бы с экраном (CR4-3). */}
-            <SupplierTextDialog card={card} capability={textTemplatesCapability} dirty={dirty} />
+            <SupplierTextDialog
+              card={card}
+              capability={textTemplatesCapability}
+              dirty={dirty}
+              // Текст с экрана — в WhatsApp на телефон поставщика из справочника; статус заявки не меняется.
+              renderActions={canManage ? (context) => (
+                <SupplierWhatsAppSend context={context} requestNumber={card.requestNumber} requestStatus={card.status}
+                  supplierKey={card.supplierKey} supplierName={card.supplierName} />
+              ) : undefined}
+            />
           </Space>
         </div>
         </RrScreen>

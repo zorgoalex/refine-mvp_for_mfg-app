@@ -45,6 +45,8 @@ export interface OrderSendFormValues {
   chats: OrderSendChatFormValues[];
   /** undefined on an older backend: then the PUT body has no employees and the backend keeps them. */
   employees?: OrderSendEmployeeFormValues[];
+  /** undefined on an older backend: then the PUT body has no switch. */
+  supplierRequestsEnabled?: boolean;
 }
 
 export function toOrderSendFormValues(settings: OrderSendSettings): OrderSendFormValues {
@@ -70,6 +72,7 @@ export function toOrderSendFormValues(settings: OrderSendSettings): OrderSendFor
         caption: employee.caption ?? '',
       })),
     } : {}),
+    ...(typeof settings.supplierRequestsEnabled === 'boolean' ? { supplierRequestsEnabled: settings.supplierRequestsEnabled } : {}),
   };
 }
 
@@ -193,6 +196,7 @@ export function buildOrderSendUpdate(version: number, values: OrderSendFormValue
         caption: employee.caption ?? '',
       })),
     } : {}),
+    ...(typeof values.supplierRequestsEnabled === 'boolean' ? { supplierRequestsEnabled: values.supplierRequestsEnabled } : {}),
   };
 }
 

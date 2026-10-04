@@ -592,6 +592,17 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText.slice(verifyStart, verifyEnd)).toContain('236_party_contacts*|237_whatsapp_order_send_client_phone*');
   });
 
+  it('probes the supplier send schema and every validated CHECK before ledgering migration 238', () => {
+    const arm = probeFn.slice(probeFn.indexOf('238_whatsapp_supplier_send*)'), probeFn.indexOf('237_whatsapp_order_send_client_phone*)'));
+    for (const marker of ['whatsapp_order_send_settings supplier_requests_enabled', 'whatsapp_order_sends supplier_request_id',
+      'whatsapp_order_sends request_content_sha256', 'whatsapp_order_sends text_body', 'whatsapp_order_send_parts text_body',
+      'whatsapp_order_send_refusals supplier_request_id', 'idx_whatsapp_order_sends_supplier_request', 'i.indisvalid', "is_nullable='YES'",
+      'convalidated', ') = 7;', ') = 3;']) expect(arm).toContain(marker);
+    const verifyStart = scriptText.indexOf('verify_applied_effect() {');
+    const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
+    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*');
+  });
+
   it('requires the complete WhatsApp technical log schema before advancing migration 170', () => {
     const arm = probeFn.slice(
       probeFn.indexOf('170_whatsapp_technical_logs*)'),

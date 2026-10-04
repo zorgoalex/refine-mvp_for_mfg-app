@@ -8,7 +8,7 @@ describe('order send queue journal', () => {
     expect(orderSendStateLabel('queued')).toBe('Ждёт');
     expect(orderSendStateLabel('future_state')).toBe('future_state');
     expect(orderSendStateDetail({ state: 'cancelled', cancelReason: 'manual', errorCode: null, cancelledBy: { id: '1', username: 'admin' } })).toBe('вручную, admin');
-    expect(orderSendStateDetail({ state: 'unknown', cancelReason: null, errorCode: 'PARTIAL_DELIVERY', cancelledBy: null })).toBe('ушла часть изображений');
+    expect(orderSendStateDetail({ state: 'unknown', cancelReason: null, errorCode: 'PARTIAL_DELIVERY', cancelledBy: null })).toBe('ушла только часть');
     expect(orderSendStateDetail({ state: 'sent', cancelReason: null, errorCode: null, cancelledBy: null })).toBeNull();
     expect(orderSendRecipientText({ targetKind: 'client', recipientLabel: 'Клиент', recipientMasked: '7701***2060' })).toBe('клиенту 7701***2060');
     expect(orderSendRecipientText({ targetKind: 'chat', recipientLabel: 'Цех ЧПУ', recipientMasked: '1203…@g.us' })).toBe('в чат «Цех ЧПУ»');

@@ -220,6 +220,7 @@ const FAILURE_TEXTS: Record<string, string> = {
   ORDER_SEND_CHANNEL_UNSUPPORTED: 'этот канал отправки не поддерживается',
   CLIENT_NOT_ON_WHATSAPP: 'номера клиента нет в WhatsApp',
   EMPLOYEE_NOT_ON_WHATSAPP: 'номера сотрудника нет в WhatsApp',
+  SUPPLIER_NOT_ON_WHATSAPP: 'номера поставщика нет в WhatsApp',
   WAHA_REJECTED: 'WhatsApp не принял файл',
   WAHA_FILE_UNSUPPORTED: 'WhatsApp не принимает файлы такого типа',
   ORDER_SEND_PAYLOAD_MISSING: 'файл отправки недоступен',
@@ -233,6 +234,7 @@ const CANCEL_TEXTS: Record<string, string> = {
   permission_revoked: 'у отправителя больше нет прав',
   paused: 'все рассылки остановлены',
   manual: 'отменена вручную',
+  request_changed: 'заявка изменилась',
 };
 export const ORDER_SEND_UNKNOWN_TEXT = 'Результат отправки неизвестен: WhatsApp не подтвердил доставку. Проверьте чат, прежде чем отправлять снова.';
 
@@ -358,7 +360,7 @@ const STALE_RECIPIENT_CODES = new Set(['ORDER_SEND_PHONE_CHANGED', 'ORDER_SEND_P
  * then may a stored command be dropped after an attempt whose answer was lost. A refusal without the mark (an
  * older backend, or a reason that may pass later) keeps the key, as before.
  */
-function isFinalRefusal(error: unknown): boolean {
+export function isFinalRefusal(error: unknown): boolean {
   return error instanceof ApiError && typeof error.details === 'object' && error.details !== null
     && (error.details as { final?: unknown }).final === true;
 }

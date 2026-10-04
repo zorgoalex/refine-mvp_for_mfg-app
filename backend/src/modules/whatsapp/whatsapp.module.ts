@@ -29,10 +29,13 @@ import { OrderSendFileStore } from './order-send/order-send-file-store';
 import { OrderSendRepository } from './order-send/order-send.repository';
 import { OrderSendService } from './order-send/order-send.service';
 import { OrderSendWorker } from './order-send/order-send-worker.service';
+import { SupplierSendController } from './order-send/supplier-send.controller';
+import { SupplierSendRepository } from './order-send/supplier-send.repository';
+import { SupplierSendService } from './order-send/supplier-send.service';
 
 @Module({
   imports: [DatabaseModule, PermissionsModule, InboundSignalsModule],
-  controllers: [WhatsAppController, BroadcastController, OrderSendController, MySendsController],
+  controllers: [WhatsAppController, BroadcastController, OrderSendController, SupplierSendController, MySendsController],
   providers: [
     WhatsAppRuntimeConfigService,
     WahaClient,
@@ -53,6 +56,8 @@ import { OrderSendWorker } from './order-send/order-send-worker.service';
     OrderSendActors,
     OrderSendWorker,
     OrderSendService,
+    SupplierSendRepository,
+    SupplierSendService,
     MySendsRepository,
     DailyDigestOrderReader,
     DailyDigestRenderer,
