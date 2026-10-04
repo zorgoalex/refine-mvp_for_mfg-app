@@ -14,6 +14,9 @@ export interface ClientScreenViewer {
   stop(): void;
 }
 
+const VIEWER_LOCK_ATTEMPTS = 6;
+const VIEWER_LOCK_RETRY_MS = 250;
+
 export function startClientScreenViewer(env: ClientScreenEnvironment, hooks: { close?: () => void } = {}): ClientScreenViewer {
   let workstation = env.readWorkstation();
   let state = createViewerState(env.randomId(), workstation);
@@ -58,9 +61,15 @@ export function startClientScreenViewer(env: ClientScreenEnvironment, hooks: { c
     dispatch({ type: 'workstation', workstation, previousGen });
   };
 
-  env.locks.request(CLIENT_SCREEN_VIEWER_LOCK, { ifAvailable: true }, (lock) => {
+  // The lock of a window that has just been closed or reloaded is released a moment later, so a busy
+  // lock is retried a few times before this window decides it is a duplicate.
+  const acquire = (attempt: number): void => void env.locks.request(CLIENT_SCREEN_VIEWER_LOCK, { ifAvailable: true }, (lock) => {
     if (stopped) return undefined;
     if (!lock) {
+      if (attempt < VIEWER_LOCK_ATTEMPTS) {
+        setTimeout(() => acquire(attempt + 1), VIEWER_LOCK_RETRY_MS);
+        return undefined;
+      }
       role = 'duplicate';
       notify();
       return undefined;
@@ -82,6 +91,7 @@ export function startClientScreenViewer(env: ClientScreenEnvironment, hooks: { c
     // The viewer lock is held for the life of the window.
     return new Promise<void>((resolve) => { releaseViewerLock = resolve; });
   }).catch(() => undefined);
+  acquire(1);
 
   return {
     getState: () => state,

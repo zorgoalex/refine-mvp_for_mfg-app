@@ -113,6 +113,8 @@ export default defineConfig(({ mode }) => {
     build: {
       chunkSizeWarningLimit: 1100,
       rollupOptions: {
+        // client-screen.html is the customer window: a page of its own that never loads the app.
+        input: { main: "index.html", clientScreen: "client-screen.html" },
         output: {
           manualChunks(id) {
             if (!id.includes("node_modules")) return;

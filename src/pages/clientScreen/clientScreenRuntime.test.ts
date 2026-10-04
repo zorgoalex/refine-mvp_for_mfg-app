@@ -11,10 +11,56 @@ import { startClientScreenViewer, type ClientScreenViewer } from './clientScreen
  * Two kinds of "windows" in one process: real BroadcastChannel and real Web Locks (Node provides
  * both), a shared in-memory localStorage with storage events. Each test uses its own channel name.
  */
-const locks = (globalThis.navigator as unknown as { locks: ClientScreenLocks }).locks;
+/**
+ * Web Locks for the test process: exclusive named locks with a waiting queue, `ifAvailable`, abort
+ * and `query`, the subset the runtimes use. The test runner's Node may have no navigator.locks; the
+ * real browser implementation is exercised by tests/client-screen-browse.mjs.
+ */
+function createLocks(): ClientScreenLocks {
+  const held = new Set<string>();
+  const waiting = new Map<string, Array<() => void>>();
+  const run = async (name: string, callback: (lock: unknown) => unknown): Promise<unknown> => {
+    held.add(name);
+    try {
+      return await callback({ name });
+    } finally {
+      held.delete(name);
+      const next = waiting.get(name)?.shift();
+      if (next) next();
+    }
+  };
+  return {
+    request(name, options, callback) {
+      if (!held.has(name)) return run(name, callback);
+      if (options.ifAvailable) return Promise.resolve(callback(null));
+      return new Promise((resolve, reject) => {
+        const start = () => {
+          options.signal?.removeEventListener('abort', onAbort);
+          run(name, callback).then(resolve, reject);
+        };
+        const onAbort = () => {
+          const queue = waiting.get(name) ?? [];
+          const index = queue.indexOf(start);
+          if (index >= 0) queue.splice(index, 1);
+          reject(new DOMException('aborted', 'AbortError'));
+        };
+        if (options.signal?.aborted) {
+          onAbort();
+          return;
+        }
+        options.signal?.addEventListener('abort', onAbort);
+        waiting.set(name, [...(waiting.get(name) ?? []), start]);
+      });
+    },
+    async query() {
+      return { held: [...held].map((name) => ({ name })) };
+    },
+  };
+}
 let channelSeq = 0;
 
 function workstationOf() {
+  const locks = createLocks();
   const data = new Map<string, string>();
   const listeners = new Set<(key: string | null) => void>();
   const channelName = `erp-client-screen-test-${process.pid}-${++channelSeq}`;
