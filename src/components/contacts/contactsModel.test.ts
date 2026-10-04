@@ -3,7 +3,7 @@ import { ApiError } from '../../api/apiError';
 import {
   isContactsApiMissing,
   addDraftRow, changeDraftKind, contactsToDraft, draftToInput, formatContact, removeDraftRow, setDraftPrimary, sortContacts,
-} from './employeeContactsModel';
+} from './contactsModel';
 
 const contacts = [
   { contactId: 1, kind: 'email' as const, value: 'a@b.kz', valueNormalized: 'a@b.kz', isPrimary: true, note: null },
@@ -36,6 +36,9 @@ describe('employee contacts editor model', () => {
     expect(isContactsApiMissing(new ApiError({ status: 404, code: 'HTTP_404', message: 'Not Found' }))).toBe(true);
     expect(isContactsApiMissing(new ApiError({ status: 404, code: 'NOT_FOUND', message: 'Cannot GET' }))).toBe(true);
     expect(isContactsApiMissing(new ApiError({ status: 404, code: 'EMPLOYEE_NOT_FOUND', message: 'Сотрудник не найден' }))).toBe(false);
+    for (const code of ['SUPPLIER_NOT_FOUND', 'VENDOR_NOT_FOUND', 'CLIENT_NOT_FOUND']) {
+      expect(isContactsApiMissing(new ApiError({ status: 404, code, message: 'x' }))).toBe(false);
+    }
     expect(isContactsApiMissing(new ApiError({ status: 403, code: 'PERMISSION_DENIED', message: 'x' }))).toBe(false);
     expect(isContactsApiMissing(new Error('network'))).toBe(false);
   });

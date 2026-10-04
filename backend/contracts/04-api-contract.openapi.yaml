@@ -24,6 +24,8 @@ servers:
 tags:
   - name: Employees
     description: Сотрудники и их рабочие контакты
+  - name: Party contacts
+    description: Контакты поставщиков, производителей и клиентов; связь поставщика с контрагентом 1С
   - name: Catalog
     description: Независимый справочник товаров и услуг
   - name: Reference catalog import
@@ -972,6 +974,207 @@ paths:
         '200': {description: Menu, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppOrderSendMenu'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/suppliers/{id}/contacts:
+    get:
+      tags: [Party contacts]
+      operationId: getSupplierContacts
+      summary: 'Contacts of a supplier with the set version'
+      security: [{bearerAuth: []}]
+      x-permissions: [suppliers.view]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Contacts, content: {application/json: {schema: {$ref: '#/components/schemas/PartyContacts'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'Owner not found'}
+    put:
+      tags: [Party contacts]
+      operationId: replaceSupplierContacts
+      summary: 'Replace the contacts of a supplier'
+      description: 'Version compare-and-swap on the set (also for an empty one). A contact with contactId keeps its id; missing ones are deleted. One primary per kind (the first by default). Audited with masks only. The owner row itself is not updated.'
+      security: [{bearerAuth: []}]
+      x-permissions: [suppliers.manage]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/EmployeeContactsReplace'}}}
+      responses:
+        '200': {description: Contacts, content: {application/json: {schema: {$ref: '#/components/schemas/PartyContacts'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'Owner not found'}
+        '409': {description: 'PARTY_CONTACTS_VERSION_CONFLICT'}
+        '422': {description: 'PARTY_CONTACT_INVALID, PARTY_CONTACT_DUPLICATE or VALIDATION_ERROR'}
+  /api/v1/supplier-contacts:
+    get:
+      tags: [Party contacts]
+      operationId: listSupplierContacts
+      summary: 'Contacts of several suppliers (the list column)'
+      security: [{bearerAuth: []}]
+      x-permissions: [suppliers.view]
+      parameters:
+        - {name: ids, in: query, required: false, schema: {type: string, description: 'Comma-separated ids, at most 500'}}
+      responses:
+        '200': {description: Contacts, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {type: object, required: [id, contacts], properties: {id: {type: integer}, contacts: {type: array, items: {$ref: '#/components/schemas/EmployeeContact'}}}}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {description: Invalid request}
+  /api/v1/vendors/{id}/contacts:
+    get:
+      tags: [Party contacts]
+      operationId: getVendorContacts
+      summary: 'Contacts of a vendor with the set version'
+      security: [{bearerAuth: []}]
+      x-permissions: [vendors.view]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Contacts, content: {application/json: {schema: {$ref: '#/components/schemas/PartyContacts'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'Owner not found'}
+    put:
+      tags: [Party contacts]
+      operationId: replaceVendorContacts
+      summary: 'Replace the contacts of a vendor'
+      description: 'Version compare-and-swap on the set (also for an empty one). A contact with contactId keeps its id; missing ones are deleted. One primary per kind (the first by default). Audited with masks only. The owner row itself is not updated.'
+      security: [{bearerAuth: []}]
+      x-permissions: [vendors.manage]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/EmployeeContactsReplace'}}}
+      responses:
+        '200': {description: Contacts, content: {application/json: {schema: {$ref: '#/components/schemas/PartyContacts'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'Owner not found'}
+        '409': {description: 'PARTY_CONTACTS_VERSION_CONFLICT'}
+        '422': {description: 'PARTY_CONTACT_INVALID, PARTY_CONTACT_DUPLICATE or VALIDATION_ERROR'}
+  /api/v1/vendor-contacts:
+    get:
+      tags: [Party contacts]
+      operationId: listVendorContacts
+      summary: 'Contacts of several vendors (the list column)'
+      security: [{bearerAuth: []}]
+      x-permissions: [vendors.view]
+      parameters:
+        - {name: ids, in: query, required: false, schema: {type: string, description: 'Comma-separated ids, at most 500'}}
+      responses:
+        '200': {description: Contacts, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {type: object, required: [id, contacts], properties: {id: {type: integer}, contacts: {type: array, items: {$ref: '#/components/schemas/EmployeeContact'}}}}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {description: Invalid request}
+  /api/v1/clients/{id}/contacts:
+    get:
+      tags: [Party contacts]
+      operationId: getClientContacts
+      summary: 'Contacts of a client with the set version (emails and Telegram accounts; phones stay in client phones)'
+      security: [{bearerAuth: []}]
+      x-permissions: [clients.view]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Contacts, content: {application/json: {schema: {$ref: '#/components/schemas/PartyContacts'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'Owner not found'}
+    put:
+      tags: [Party contacts]
+      operationId: replaceClientContacts
+      summary: 'Replace the contacts of a client (emails and Telegram accounts; phones stay in client phones)'
+      description: 'Version compare-and-swap on the set (also for an empty one). A contact with contactId keeps its id; missing ones are deleted. One primary per kind (the first by default). Audited with masks only. The owner row itself is not updated.'
+      security: [{bearerAuth: []}]
+      x-permissions: [clients.update]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/EmployeeContactsReplace'}}}
+      responses:
+        '200': {description: Contacts, content: {application/json: {schema: {$ref: '#/components/schemas/PartyContacts'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'Owner not found'}
+        '409': {description: 'PARTY_CONTACTS_VERSION_CONFLICT'}
+        '422': {description: 'PARTY_CONTACT_INVALID, PARTY_CONTACT_DUPLICATE or VALIDATION_ERROR'}
+  /api/v1/supplier-counterparties:
+    get:
+      tags: [Party contacts]
+      operationId: listSupplierCounterparties
+      summary: '1C counterparties a supplier can be linked to'
+      description: 'From the 1C mirror when it is loaded (not folders, not marked for deletion, still in the source; suppliers first), else the counterparties seen in procurement documents, else empty. At most 50.'
+      security: [{bearerAuth: []}]
+      x-permissions: [suppliers.view]
+      parameters:
+        - {name: search, in: query, required: false, schema: {type: string, maxLength: 100}}
+      responses:
+        '200': {description: Counterparties, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/SupplierCounterparty'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/suppliers/{id}/counterparty:
+    get:
+      tags: [Party contacts]
+      operationId: getSupplierCounterparty
+      summary: 'The 1C counterparty a supplier is linked to'
+      security: [{bearerAuth: []}]
+      x-permissions: [suppliers.view]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Link, content: {application/json: {schema: {$ref: '#/components/schemas/SupplierLink'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'SUPPLIER_NOT_FOUND'}
+    put:
+      tags: [Party contacts]
+      operationId: setSupplierCounterparty
+      summary: 'Link, relink or unlink a supplier and a 1C counterparty'
+      description: 'Compare-and-swap on the key the caller saw (expectedRefKey1c). The key already being the new one is a silent repeat. The 1C documents loader applies the link on its next pass (a one-off wave of document revisions for the counterparty). Audited.'
+      security: [{bearerAuth: []}]
+      x-permissions: [suppliers.manage]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [refKey1c, expectedRefKey1c]
+              properties:
+                refKey1c: {type: string, format: uuid, nullable: true, description: 'null = unlink'}
+                expectedRefKey1c: {type: string, format: uuid, nullable: true}
+      responses:
+        '200': {description: Link, content: {application/json: {schema: {$ref: '#/components/schemas/SupplierLink'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'SUPPLIER_NOT_FOUND'}
+        '409': {description: 'SUPPLIER_COUNTERPARTY_CONFLICT (details.refKey1c = the current key) or SUPPLIER_COUNTERPARTY_TAKEN'}
+        '422': {description: 'SUPPLIER_COUNTERPARTY_UNKNOWN or VALIDATION_ERROR'}
+  /api/v1/suppliers/from-counterparty:
+    post:
+      tags: [Party contacts]
+      operationId: createSupplierFromCounterparty
+      summary: 'Add a 1C counterparty to the suppliers directory'
+      description: 'Creates a supplier named after the counterparty with its key. Idempotent by the key: an existing supplier with it is returned (created=false).'
+      security: [{bearerAuth: []}]
+      x-permissions: [suppliers.manage]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [refKey1c], properties: {refKey1c: {type: string, format: uuid}}}
+      responses:
+        '200': {description: Supplier, content: {application/json: {schema: {allOf: [{$ref: '#/components/schemas/SupplierLink'}, {type: object, required: [created], properties: {created: {type: boolean}}}]}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {description: 'SUPPLIER_NAME_TAKEN (details.supplierId)'}
+        '422': {description: 'SUPPLIER_COUNTERPARTY_UNKNOWN or VALIDATION_ERROR'}
   /api/v1/employees/{employeeId}/contacts:
     get:
       tags: [Employees]
@@ -30490,6 +30693,31 @@ components:
         valueNormalized: {type: string, description: 'phone 7XXXXXXXXXX, email lower case, Telegram username without @'}
         isPrimary: {type: boolean}
         note: {type: string, nullable: true, maxLength: 200}
+    PartyContacts:
+      type: object
+      required: [party, partyId, version, contacts]
+      properties:
+        party: {type: string, enum: [supplier, vendor, client]}
+        partyId: {type: integer}
+        version: {type: integer, minimum: 0, description: 'Version of the whole set (0 = never saved); for a client — of emails and Telegram accounts only'}
+        contacts: {type: array, items: {$ref: '#/components/schemas/EmployeeContact'}}
+    SupplierCounterparty:
+      type: object
+      required: [refKey1c, name, isSupplier, supplierId, supplierName]
+      properties:
+        refKey1c: {type: string, format: uuid}
+        name: {type: string}
+        isSupplier: {type: boolean, nullable: true}
+        supplierId: {type: integer, nullable: true, description: 'The supplier already linked to this counterparty'}
+        supplierName: {type: string, nullable: true}
+    SupplierLink:
+      type: object
+      required: [supplierId, supplierName, refKey1c, counterpartyName]
+      properties:
+        supplierId: {type: integer}
+        supplierName: {type: string}
+        refKey1c: {type: string, format: uuid, nullable: true}
+        counterpartyName: {type: string, nullable: true}
     EmployeeContacts:
       type: object
       required: [employeeId, version, contacts]

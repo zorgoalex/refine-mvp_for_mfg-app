@@ -8,6 +8,8 @@ import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { ReferenceSortOrderShow } from "../../components/ReferenceSortOrder";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 import { CLIENT_PERSON_TYPE_LABELS, ClientPersonType } from "../../types/clients";
+import { ContactsCard } from "../../components/contacts/ContactsCard";
+import { CLIENT_CONTACTS } from "../../components/contacts/partyContactsSources";
 
 const { Title, Text } = Typography;
 
@@ -93,8 +95,8 @@ export const ClientShow: React.FC<IResourceComponentsProps> = () => {
 
       <Divider />
 
-      {/* Phone numbers section */}
-      <Title level={5}>Телефоны</Title>
+      {/* «Контакты»: телефоны и ниже email/Telegram */}
+      <Title level={5}>Контакты: телефоны</Title>
       <Table
         dataSource={phones}
         columns={phoneColumns}
@@ -105,6 +107,7 @@ export const ClientShow: React.FC<IResourceComponentsProps> = () => {
         locale={{ emptyText: "Нет телефонов" }}
         style={{ marginBottom: 16 }}
       />
+      <ContactsCard ownerId={Number(record?.client_id) || null} editable={false} source={CLIENT_CONTACTS} />
 
       <Divider />
 

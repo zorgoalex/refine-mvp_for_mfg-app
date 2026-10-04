@@ -2577,6 +2577,16 @@ probe_file() {
     # 233: queue instead of refusals (no «one active» index), manual cancel, image forms + their pages.
     # 230's probe checks its end state: 233 drops the one-active index, so 230 does not require it.
     # 235: employee work contacts + an employee as an order card send recipient.
+    236_party_contacts*) probe_all \
+      "$(q_tbl party_contact_versions)" \
+      "$(q_tbl supplier_contacts)" "$(q_tbl vendor_contacts)" "$(q_tbl client_contacts)" \
+      "$(q_idx uq_supplier_contacts_primary)" "$(q_idx uq_supplier_contacts_value)" \
+      "$(q_idx uq_vendor_contacts_primary)" "$(q_idx uq_vendor_contacts_value)" \
+      "$(q_idx uq_client_contacts_primary)" "$(q_idx uq_client_contacts_value)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE contype='f' AND conrelid='public.supplier_contacts'::regclass AND confrelid='public.suppliers'::regclass AND confdeltype='r');" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE contype='f' AND conrelid='public.vendor_contacts'::regclass AND confrelid='public.vendors'::regclass AND confdeltype='r');" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE contype='f' AND conrelid='public.client_contacts'::regclass AND confrelid='public.clients'::regclass AND confdeltype='r');" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE contype='c' AND conrelid='public.client_contacts'::regclass AND pg_get_constraintdef(oid) LIKE '%''phone''%');" ;;
     235_employee_work_contacts*) probe_all \
       "$(q_col employees work_contacts_version)" "$(q_tbl employee_work_contacts)" "$(q_tbl whatsapp_order_send_employees)" \
       "$(q_idx uq_employee_work_contacts_primary)" "$(q_idx uq_employee_work_contacts_value)" \
@@ -3024,7 +3034,7 @@ verify_applied_effect() {
     205_warehouses_onec_key_required*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    231_cut_result_render_v2*|209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|234_reference_nomenclature_note*|235_employee_work_contacts*)
+    231_cut_result_render_v2*|209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|234_reference_nomenclature_note*|235_employee_work_contacts*|236_party_contacts*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)

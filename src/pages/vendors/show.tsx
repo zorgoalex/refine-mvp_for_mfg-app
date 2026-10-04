@@ -4,6 +4,8 @@ import { Typography, Badge, Row, Col, Divider } from "antd";
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 import { ReferenceSortOrderShow } from "../../components/ReferenceSortOrder";
+import { ContactsCard } from "../../components/contacts/ContactsCard";
+import { VENDOR_CONTACTS } from "../../components/contacts/partyContactsSources";
 
 const { Title } = Typography;
 
@@ -31,6 +33,10 @@ export const VendorShow: React.FC<IResourceComponentsProps> = () => {
           <TextField value={record?.contact_info} />
         </Col>
       </Row>
+
+      <Divider />
+
+      <ContactsCard ownerId={Number(record?.vendor_id) || null} editable={false} source={VENDOR_CONTACTS} />
 
       <Divider />
 

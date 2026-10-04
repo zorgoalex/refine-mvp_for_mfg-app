@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 // No DOM in unit tests: the editor's lock while saving is checked on the source.
-const source = readFileSync(new URL('./EmployeeContactsCard.tsx', import.meta.url), 'utf8');
+const source = readFileSync(new URL('./ContactsCard.tsx', import.meta.url), 'utf8');
 
-describe('EmployeeContactsCard locks the set while a save is in flight', () => {
+describe('ContactsCard locks the set while a save is in flight', () => {
   it('every editing control is disabled while saving and changes are ignored', () => {
     const editor = source.slice(source.indexOf('{rows.map((row) => ('), source.indexOf('<Typography.Text type="secondary" style={{ fontSize: 12 }}>'));
     for (const control of ['<Select', '<Input', '<Checkbox', 'aria-label="Удалить контакт"', 'icon={<PlusOutlined />}']) {

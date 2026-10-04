@@ -566,7 +566,21 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       expect(arm).toContain(marker);
     const verifyStart = scriptText.indexOf('verify_applied_effect() {');
     const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
-    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('233_whatsapp_order_send_queue*|235_employee_work_contacts*');
+    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('|235_employee_work_contacts*');
+  });
+
+  it('probes party contacts (suppliers, vendors, clients) before ledgering migration 236', () => {
+    const arm = probeFn.slice(probeFn.indexOf('236_party_contacts*)'), probeFn.indexOf('235_employee_work_contacts*)'));
+    for (const marker of ['q_tbl party_contact_versions',
+      'q_tbl supplier_contacts', 'q_tbl vendor_contacts', 'q_tbl client_contacts',
+      'uq_supplier_contacts_primary', 'uq_vendor_contacts_value', 'uq_client_contacts_primary',
+      "conrelid='public.supplier_contacts'::regclass AND confrelid='public.suppliers'::regclass AND confdeltype='r'",
+      "conrelid='public.vendor_contacts'::regclass AND confrelid='public.vendors'::regclass AND confdeltype='r'",
+      "conrelid='public.client_contacts'::regclass AND confrelid='public.clients'::regclass AND confdeltype='r'"])
+      expect(arm).toContain(marker);
+    const verifyStart = scriptText.indexOf('verify_applied_effect() {');
+    const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
+    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('235_employee_work_contacts*|236_party_contacts*');
   });
 
   it('requires the complete WhatsApp technical log schema before advancing migration 170', () => {
