@@ -6,7 +6,9 @@ const show = readFileSync(new URL('./show.tsx', import.meta.url), 'utf8');
 describe('order card WhatsApp send wiring', () => {
   it('builds the items once with the shared builder and gates them like export', () => {
     expect(show).toContain('buildOrderWhatsAppMenuItems(orderSendMenu');
-    expect(show).toMatch(/useOrderSendMenu\(canExportOrders && \(!featureFlags\.useBackendPermissions \|\| can\('orders\.view'\)\)\)/);
+    expect(show).toMatch(/useOrderSendMenu\(canExportOrders && \(!featureFlags\.useBackendPermissions \|\| can\('orders\.view'\)\), orderSendRefresh\)/);
+    // A chosen phone is sent with the token of the number the menu showed, and nothing is sent when the choice is gone.
+    expect(show).toMatch(/const target = withPhoneToken\(parsed\.target, orderSendMenu, orderClientContacts\);\s*if \(!target\) \{[^}]*return; \}/);
     expect(show).toMatch(/orderWhatsAppItems = canExportOrders && !deletedOrder/);
   });
 

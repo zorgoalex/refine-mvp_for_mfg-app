@@ -99,10 +99,10 @@ import { DetailGroupingControls } from './components/DetailGroupingControls';
 import { groupCheckboxState, toggleGroupSelection, filterNumericKeys } from './groupSelection';
 import { authSession } from '../../api/authSession';
 import { orderSendApi } from '../../api/orderSendApi';
-import { ORDER_SEND_NOT_CONFIGURED_TITLE, buildOrderWhatsAppMenuItems, describeOrderWhatsAppSend, isOrderWhatsAppKey, parseOrderWhatsAppKey } from './whatsappOrderSendMenu';
+import { ORDER_SEND_NOT_CONFIGURED_TITLE, buildOrderWhatsAppMenuItems, describeOrderWhatsAppSend, isOrderWhatsAppKey, parseOrderWhatsAppKey, withPhoneToken } from './whatsappOrderSendMenu';
 import { runOrderSend } from './whatsappOrderSendModel';
 import { announceWhatsAppSendQueued, currentOwner } from '../../components/whatsapp/myWhatsAppSendsModel';
-import { useOrderSendMenu } from './whatsappOrderSendSupport';
+import { invalidateOrderSendMenu, useOrderClientContacts, useOrderSendMenu } from './whatsappOrderSendSupport';
 import { OrderCatalogLinesTable } from './components/OrderCatalogLinesTable';
 import { useIsMobile } from '../../hooks/useDeviceTier';
 import { DetailCardList } from './mobile/DetailCardList';
@@ -1620,19 +1620,29 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   })();
 
   // «Отправить в WhatsApp» из меню «⋯»: меню грузится в фоне и не блокирует карточку.
-  const orderSendMenu = useOrderSendMenu(canExportOrders && (!featureFlags.useBackendPermissions || can('orders.view')));
+  // Растёт, когда сервер ответил, что показанный получатель устарел: меню и телефоны перечитываются.
+  const [orderSendRefresh, setOrderSendRefresh] = useState(0);
+  const orderSendMenu = useOrderSendMenu(canExportOrders && (!featureFlags.useBackendPermissions || can('orders.view')), orderSendRefresh);
+  // Телефоны клиента этого заказа — только когда клиенту вообще можно что-то отправить.
+  const { contacts: orderClientContacts, loading: orderClientContactsLoading } = useOrderClientContacts(
+    Boolean(orderSendMenu?.enabled && orderSendMenu.client.forms.length > 0),
+    Number(record?.order_id) || null, Number(record?.client_id) || null, orderSendRefresh,
+  );
   const [orderSendBusy, setOrderSendBusy] = useState<ReadonlySet<string>>(() => new Set<string>());
   const handleOrderWhatsAppSend = (key: string, confirmAfterUnknown?: string) => {
     const parsed = parseOrderWhatsAppKey(key);
     const orderId = Number(record?.order_id);
     if (!parsed || !orderSendMenu || !Number.isFinite(orderId) || orderSendBusy.has(key)) return;
-    const { targetLabel, formTitle } = describeOrderWhatsAppSend(orderSendMenu, parsed.target, parsed.form);
+    const { targetLabel, formTitle } = describeOrderWhatsAppSend(orderSendMenu, parsed.target, parsed.form, orderClientContacts);
     // Who sends: captured before the command, so a re-login while it runs cannot take over its result.
     const owner = currentOwner();
+    // Выбранный телефон уходит вместе с меткой номера, который показало меню; выбора уже нет в списках — не отправляем.
+    const target = withPhoneToken(parsed.target, orderSendMenu, orderClientContacts);
+    if (!target) { message.warning('Список получателей обновился — выберите получателя заново'); return; }
     setOrderSendBusy((keys) => new Set(keys).add(key));
     void runOrderSend({
       orderId,
-      target: parsed.target,
+      target,
       form: parsed.form,
       actorId: String(authSession.getUser()?.id ?? ''),
       targetLabel,
@@ -1657,6 +1667,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           });
           return;
         }
+        if (result.refreshRecipients) { invalidateOrderSendMenu(); setOrderSendRefresh((value) => value + 1); }
         message[result.type](result.text);
       })
       .finally(() => setOrderSendBusy((keys) => { const next = new Set(keys); next.delete(key); return next; }));
@@ -3137,7 +3148,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     ? visibleOrderInfoTabs.find((tab) => tab.key === activeOperationalTab)?.label
     : visibleOrderInfoTabs.find((tab) => tab.panel === activeInfoPanel)?.label;
   const orderWhatsAppItems = canExportOrders && !deletedOrder
-    ? buildOrderWhatsAppMenuItems(orderSendMenu, { hasClientPhone: Boolean(clientPhone), sending: orderSendBusy, icon: <WhatsAppOutlined /> })
+    ? buildOrderWhatsAppMenuItems(orderSendMenu, {
+      hasClientPhone: Boolean(clientPhone), clientContacts: orderClientContacts, clientContactsLoading: orderClientContactsLoading,
+      sending: orderSendBusy, icon: <WhatsAppOutlined />,
+    })
     : [];
   // «Отправить заказ»: its own icon to the left of «⋯» (client, chats, employees — the «⋯» menu stays short).
   // Always there for a user who may send: with nothing to offer it is grey with a hint instead of vanishing.

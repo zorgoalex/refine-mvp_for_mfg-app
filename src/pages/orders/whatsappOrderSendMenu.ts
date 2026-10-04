@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react';
-import type { OrderFormCode, OrderSendMenu, OrderSendTarget } from '../../api/orderSendApiTypes';
+import type { OrderFormCode, OrderSendClientContact, OrderSendMenu, OrderSendTarget } from '../../api/orderSendApiTypes';
 
 export const NO_CLIENT_PHONE_TITLE = 'У клиента нет телефона';
 export const NO_EMPLOYEE_PHONE_TITLE = 'У сотрудника нет рабочего телефона';
+export const CLIENT_PHONES_LOADING_TITLE = 'Загружаются телефоны клиента';
 /** Hint of the grey «Отправить заказ» icon: sending is off or no recipient with a form is set up. */
 export const ORDER_SEND_NOT_CONFIGURED_TITLE = 'Отправка не настроена';
 const KEY_PREFIX = 'wa-send';
@@ -20,6 +21,10 @@ export interface OrderWhatsAppMenuItem {
 export interface OrderWhatsAppMenuOptions {
   /** The order's client has a phone (the client item is disabled otherwise). */
   hasClientPhone: boolean;
+  /** Phones of the order's client; with several of them the client item becomes a submenu of phones. */
+  clientContacts?: readonly OrderSendClientContact[];
+  /** The phones are still being loaded: the client item waits (no default send meanwhile). */
+  clientContactsLoading?: boolean;
   /** Keys of the leaf items being sent right now (disabled while in flight). */
   sending?: ReadonlySet<string>;
   /** Icon for the top-level items. */
@@ -27,13 +32,13 @@ export interface OrderWhatsAppMenuOptions {
 }
 
 export function orderWhatsAppItemKey(target: OrderSendTarget, form: OrderFormCode): string {
-  if (target.kind === 'client') return `${KEY_PREFIX}:client:${form}`;
+  if (target.kind === 'client') return target.phoneId ? `${KEY_PREFIX}:client-phone:${target.phoneId}:${form}` : `${KEY_PREFIX}:client:${form}`;
   if (target.kind === 'employee') return `${KEY_PREFIX}:employee:${target.recipientKey}:${target.contactId ?? 'primary'}:${form}`;
   return `${KEY_PREFIX}:chat:${target.chatKey}:${form}`;
 }
 
 function groupKey(target: OrderSendTarget): string {
-  if (target.kind === 'client') return `${KEY_PREFIX}:group:client`;
+  if (target.kind === 'client') return target.phoneId ? `${KEY_PREFIX}:group:client-phone:${target.phoneId}` : `${KEY_PREFIX}:group:client`;
   if (target.kind === 'employee') return `${KEY_PREFIX}:group:employee:${target.recipientKey}:${target.contactId ?? 'primary'}`;
   return `${KEY_PREFIX}:group:${target.chatKey}`;
 }
@@ -48,6 +53,10 @@ export function parseOrderWhatsAppKey(key: string): { target: OrderSendTarget; f
   if (parts[0] !== KEY_PREFIX || parts.length < 3) return null;
   const form = parts[parts.length - 1] as OrderFormCode;
   if (parts[1] === 'client' && parts.length === 3) return { target: { kind: 'client' }, form };
+  if (parts[1] === 'client-phone' && parts.length === 4) {
+    const phoneId = Number(parts[2]);
+    return Number.isInteger(phoneId) && phoneId > 0 ? { target: { kind: 'client', phoneId }, form } : null;
+  }
   if (parts[1] === 'employee' && parts.length === 5) {
     const contact = parts[3] === 'primary' ? undefined : Number(parts[3]);
     if (contact !== undefined && !Number.isInteger(contact)) return null;
@@ -91,8 +100,28 @@ export function buildOrderWhatsAppMenuItems(menu: OrderSendMenu | null | undefin
     });
   };
 
+  const clientHead = 'Отправить клиенту в WhatsApp';
+  const clientPhones = options.clientContacts ?? [];
+  // Several phones: a submenu of phones (the primary first), each with its forms; otherwise the default send.
+  // The only readable phone is not the one a default send would take (e.g. the primary number is unreadable):
+  // it is offered as a chosen phone, otherwise the default send would be refused.
+  const soleChosen = clientPhones.length === 1 && !clientPhones[0].isDefault ? clientPhones[0] : null;
+  const clientItem = options.clientContactsLoading && options.hasClientPhone
+    ? recipient({ kind: 'client' }, clientHead, menu.client.forms, true, CLIENT_PHONES_LOADING_TITLE)
+    : soleChosen
+    ? recipient({ kind: 'client', phoneId: soleChosen.phoneId }, clientHead, menu.client.forms, false)
+    : options.hasClientPhone && clientPhones.length > 1 && known(menu.client.forms).length > 0
+    ? withIcon({
+      key: `${KEY_PREFIX}:group:client-phones`,
+      label: clientHead,
+      disabled: false,
+      children: clientPhones.map((contact) => recipient({ kind: 'client', phoneId: contact.phoneId },
+        `${contact.masked}${contact.isPrimary ? ' (основной)' : ''}`, menu.client.forms, false))
+        .filter((item): item is OrderWhatsAppMenuItem => item !== null).map(({ icon: _icon, ...item }) => item),
+    })
+    : recipient({ kind: 'client' }, clientHead, menu.client.forms, !options.hasClientPhone, NO_CLIENT_PHONE_TITLE);
   const items: Array<OrderWhatsAppMenuItem | null> = [
-    recipient({ kind: 'client' }, 'Отправить клиенту в WhatsApp', menu.client.forms, !options.hasClientPhone, NO_CLIENT_PHONE_TITLE),
+    clientItem,
     ...menu.chats.map((chat) => recipient({ kind: 'chat', chatKey: chat.chatKey }, `Отправить в чат «${chat.label}»`, chat.forms, false)),
     ...(menu.employees ?? []).map((employee) => {
       const head = `Отправить сотруднику «${employee.label}»`;
@@ -115,9 +144,13 @@ export function buildOrderWhatsAppMenuItems(menu: OrderSendMenu | null | undefin
 }
 
 /** Display data for the toast: who and which form a leaf key stands for. */
-export function describeOrderWhatsAppSend(menu: OrderSendMenu, target: OrderSendTarget, form: OrderFormCode): { targetLabel: string; formTitle: string } {
+export function describeOrderWhatsAppSend(menu: OrderSendMenu, target: OrderSendTarget, form: OrderFormCode,
+  clientContacts: readonly OrderSendClientContact[] = []): { targetLabel: string; formTitle: string } {
   const formTitle = menu.forms.find((item) => item.code === form)?.title ?? form;
-  if (target.kind === 'client') return { targetLabel: 'клиенту', formTitle };
+  if (target.kind === 'client') {
+    const phone = target.phoneId ? clientContacts.find((item) => item.phoneId === target.phoneId) : undefined;
+    return { targetLabel: `клиенту${phone ? ` (${phone.masked})` : ''}`, formTitle };
+  }
   if (target.kind === 'employee') {
     const employee = (menu.employees ?? []).find((item) => item.recipientKey === target.recipientKey);
     const contact = target.contactId !== undefined ? employee?.contacts.find((item) => item.contactId === target.contactId) : undefined;
@@ -125,4 +158,23 @@ export function describeOrderWhatsAppSend(menu: OrderSendMenu, target: OrderSend
   }
   const chat = menu.chats.find((item) => item.chatKey === target.chatKey);
   return { targetLabel: `в чат «${chat?.label ?? 'чат'}»`, formTitle };
+}
+
+/**
+ * The target as the command sends it: a chosen phone goes with the token the server gave for the number shown
+ * in the menu. Null when the choice is no longer in the lists (they were refreshed) — nothing is sent then.
+ */
+export function withPhoneToken(target: OrderSendTarget, menu: OrderSendMenu, clientContacts: readonly OrderSendClientContact[]): OrderSendTarget | null {
+  if (target.kind === 'client' && target.phoneId !== undefined) {
+    const contact = clientContacts.find((item) => item.phoneId === target.phoneId);
+    return contact ? { ...target, phoneToken: contact.token } : null;
+  }
+  if (target.kind === 'employee' && target.contactId !== undefined) {
+    const contact = (menu.employees ?? []).find((item) => item.recipientKey === target.recipientKey)?.contacts
+      .find((item) => item.contactId === target.contactId);
+    if (!contact) return null;
+    // An older backend gives no token: the send goes as before.
+    return contact.token ? { ...target, contactToken: contact.token } : target;
+  }
+  return target;
 }

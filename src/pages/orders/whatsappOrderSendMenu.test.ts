@@ -7,6 +7,7 @@ import {
   isOrderWhatsAppKey,
   orderWhatsAppItemKey,
   parseOrderWhatsAppKey,
+  withPhoneToken,
 } from './whatsappOrderSendMenu';
 
 const runtime = { enabled: true, relayAvailable: true, unavailableReason: null };
@@ -112,4 +113,60 @@ describe('employee recipients in the card menu', () => {
     expect(buildOrderWhatsAppMenuItems(menu(), { hasClientPhone: true })).toHaveLength(3);
   });
 });
+});
+
+describe('a chosen phone of the client in the card menu', () => {
+  const clientContacts = [{ phoneId: 11, masked: '7701***2060', isPrimary: true, isDefault: true, token: 't11' },
+    { phoneId: 12, masked: '7777***4567', isPrimary: false, isDefault: false, token: 't12' }];
+
+  it('several phones: a submenu of phones (the primary first), each with the client forms; one phone: the default send', () => {
+    const items = buildOrderWhatsAppMenuItems(menu({ chats: [] }), { hasClientPhone: true, clientContacts });
+    expect(items[0]).toMatchObject({ key: 'wa-send:group:client-phones', label: 'Отправить клиенту в WhatsApp' });
+    expect(items[0].children?.map((child) => child.label)).toEqual(['7701***2060 (основной)', '7777***4567']);
+    expect(items[0].children?.[1].children?.map((child) => child.key)).toEqual([
+      'wa-send:client-phone:12:production_pdf', 'wa-send:client-phone:12:order_pdf']);
+    const single = buildOrderWhatsAppMenuItems(menu({ chats: [] }), { hasClientPhone: true, clientContacts: clientContacts.slice(0, 1) });
+    expect(single[0].children?.map((child) => child.key)).toEqual(['wa-send:client:production_pdf', 'wa-send:client:order_pdf']);
+    // No phone at all: locked with the hint, whatever the list says.
+    const none = buildOrderWhatsAppMenuItems(menu({ chats: [] }), { hasClientPhone: false, clientContacts });
+    expect(none[0]).toMatchObject({ key: 'wa-send:group:client', disabled: true, title: NO_CLIENT_PHONE_TITLE });
+  });
+
+  it('while the phones are loading the client item waits: no default send that could double a later choice', () => {
+    const items = buildOrderWhatsAppMenuItems(menu({ chats: [] }), { hasClientPhone: true, clientContacts: [], clientContactsLoading: true });
+    expect(items[0]).toMatchObject({ key: 'wa-send:group:client', disabled: true, title: 'Загружаются телефоны клиента' });
+    expect(items[0].children).toBeUndefined();
+    // Loaded with nothing (an older backend, a failure): the default send is back.
+    const loaded = buildOrderWhatsAppMenuItems(menu({ chats: [] }), { hasClientPhone: true, clientContacts: [], clientContactsLoading: false });
+    expect(loaded[0].children?.map((child) => child.key)).toEqual(['wa-send:client:production_pdf', 'wa-send:client:order_pdf']);
+  });
+
+  it('the only readable phone is not the default one (unreadable primary): it is offered as a chosen phone', () => {
+    const sole = buildOrderWhatsAppMenuItems(menu({ chats: [] }), { hasClientPhone: true, clientContacts: clientContacts.slice(1) });
+    expect(sole[0].label).toBe('Отправить клиенту в WhatsApp');
+    expect(sole[0].children?.map((child) => child.key)).toEqual(['wa-send:client-phone:12:production_pdf', 'wa-send:client-phone:12:order_pdf']);
+  });
+
+  it('a chosen phone is sent with the token of the number the menu showed; a choice gone from the lists sends nothing', () => {
+    expect(withPhoneToken({ kind: 'client', phoneId: 12 }, menu(), clientContacts)).toEqual({ kind: 'client', phoneId: 12, phoneToken: 't12' });
+    expect(withPhoneToken({ kind: 'client' }, menu(), clientContacts)).toEqual({ kind: 'client' });
+    expect(withPhoneToken({ kind: 'client', phoneId: 99 }, menu(), clientContacts)).toBeNull();
+    const employees = [{ recipientKey: 'e1', label: 'x', forms: ['production_pdf' as const], contacts: [
+      { contactId: 7, masked: 'm', isPrimary: true, token: 'te7' }, { contactId: 8, masked: 'm', isPrimary: false }] }];
+    expect(withPhoneToken({ kind: 'employee', recipientKey: 'e1', contactId: 7 }, menu({ employees }), [])).toEqual({ kind: 'employee', recipientKey: 'e1', contactId: 7, contactToken: 'te7' });
+    // An older backend gives no token: the employee send goes as before.
+    expect(withPhoneToken({ kind: 'employee', recipientKey: 'e1', contactId: 8 }, menu({ employees }), [])).toEqual({ kind: 'employee', recipientKey: 'e1', contactId: 8 });
+    expect(withPhoneToken({ kind: 'employee', recipientKey: 'e1', contactId: 9 }, menu({ employees }), [])).toBeNull();
+    expect(withPhoneToken({ kind: 'employee', recipientKey: 'e1' }, menu({ employees }), [])).toEqual({ kind: 'employee', recipientKey: 'e1' });
+    expect(withPhoneToken({ kind: 'chat', chatKey: 'c1' }, menu(), [])).toEqual({ kind: 'chat', chatKey: 'c1' });
+  });
+
+  it('round-trips the phone keys and names the phone in the toast', () => {
+    const target = { kind: 'client' as const, phoneId: 12 };
+    expect(parseOrderWhatsAppKey(orderWhatsAppItemKey(target, 'order_pdf'))).toEqual({ target, form: 'order_pdf' });
+    expect(parseOrderWhatsAppKey(orderWhatsAppItemKey({ kind: 'client' }, 'order_pdf'))).toEqual({ target: { kind: 'client' }, form: 'order_pdf' });
+    expect(parseOrderWhatsAppKey('wa-send:client-phone:x:order_pdf')).toBeNull();
+    expect(describeOrderWhatsAppSend(menu(), target, 'order_pdf', clientContacts)).toEqual({ targetLabel: 'клиенту (7777***4567)', formTitle: 'PDF заказа' });
+    expect(describeOrderWhatsAppSend(menu(), { kind: 'client' }, 'order_pdf', clientContacts).targetLabel).toBe('клиенту');
+  });
 });
