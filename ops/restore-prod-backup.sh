@@ -343,6 +343,58 @@ END $$;
 SQL
 fi
 
+# 1C agent integration (plan §6.8): the 1C data copy (onec_etl_*) is not in the dump, and
+# agents may already hold configuration versions/runs newer than the backup. Every source gets
+# a new generation (runs of the old one are refused 409 RUN_GENERATION_CLOSED) and publishing
+# to agents stays blocked until each agent's first heartbeat after the restore (fresh
+# activeConfigVersion). Then: publish with PauseEtl, start_full_sync, mode Normal (ops/README).
+log "1C agent: new source generations, configuration publishing blocked until fresh heartbeats"
+ONEC_RESTORE_ID="restore-$(date -u +%Y%m%dT%H%M%SZ)"
+"${compose[@]}" exec -T -e PGPASSWORD="$PG_PASSWORD" postgresdb \
+  psql -U "$PG_USER" -d "$PG_DB" -v ON_ERROR_STOP=1 -v restore_id="$ONEC_RESTORE_ID" <<'SQL'
+SELECT set_config('erp.onec_restore_id', :'restore_id', false);
+DO $$
+DECLARE
+  r record;
+  restore_id text := current_setting('erp.onec_restore_id');
+  audit uuid;
+BEGIN
+  IF to_regclass('public.onec_sources') IS NULL THEN
+    RETURN;
+  END IF;
+  FOR r IN
+    UPDATE onec_sources s SET generation = s.generation + 1, generation_ref = gen_random_uuid(), updated_at = now()
+      FROM (SELECT source_id, generation AS old_generation FROM onec_sources) o
+     WHERE o.source_id = s.source_id
+     RETURNING s.source_id, o.old_generation, s.generation
+  LOOP
+    -- Audit of the transition (plan §8.1): system actor, the restore operation id, before/after.
+    INSERT INTO audit_log (event, entity_type, entity_id, username, request_id, source, before_json, after_json)
+    VALUES ('onec.source.generation_bumped', 'onec_source', r.source_id::text, 'restore-prod-backup', restore_id, 'ops_restore',
+            jsonb_build_object('generation', r.old_generation), jsonb_build_object('generation', r.generation, 'reason', 'restore'))
+    RETURNING audit_id INTO audit;
+    INSERT INTO onec_audit_links (audit_id, actor_kind, source_id, source_generation, request_id)
+    VALUES (audit, 'system', r.source_id, r.generation, restore_id);
+  END LOOP;
+  UPDATE onec_agents SET config_publish_blocked = true, config_publish_blocked_at = now();
+  IF to_regclass('public.onec_etl_runs') IS NOT NULL THEN
+    UPDATE onec_etl_runs SET status = 'abandoned', updated_at = now() WHERE status = 'receiving';
+  END IF;
+  -- Entity state survives the dump (revocation bans stay); what described the missing copy is reset.
+  IF to_regclass('public.onec_etl_entity_state') IS NOT NULL THEN
+    UPDATE onec_etl_entity_state SET last_run_id = NULL, last_run_at = NULL, last_status = NULL, last_read_scope = NULL,
+           last_completeness = NULL, last_completeness_reason = NULL, last_snapshot_at = NULL, last_full_run_id = NULL,
+           last_full_at = NULL, last_error_code = NULL, last_error_message = NULL, row_count = 0, deleted_count = 0,
+           missing_count = 0, updated_at = now();
+    -- Snapshot columns exist from migration 200 on (the dump may predate it).
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'onec_etl_entity_state' AND column_name = 'snapshot_version') THEN
+      EXECUTE 'UPDATE onec_etl_entity_state SET snapshot_version = NULL, snapshot_rejected_reason = NULL';
+    END IF;
+  END IF;
+END $$;
+SQL
+
 services_to_restart=()
 for service in "${stopped_services[@]}"; do
   if [[ "$service" == "hasura" && "$START_HASURA" == "1" ]]; then

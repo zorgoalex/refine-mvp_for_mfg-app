@@ -20,6 +20,20 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     .filter((f) => !/_(preflight|verify|rollback)\.sql$/.test(f))
     .sort();
 
+  it('bounds lock waits and statement time only when asked, before the prelude, and rejects malformed values', () => {
+    expect(scriptText).toContain(`[ -z "$LOCK_TIMEOUT" ] || printf "SET lock_timeout = '%s';\\n" "$LOCK_TIMEOUT"`);
+    expect(scriptText).toContain(`[ -z "$STATEMENT_TIMEOUT" ] || printf "SET statement_timeout = '%s';\\n" "$STATEMENT_TIMEOUT"`);
+    // The prelude reads `users`: the limits must already be in force when it runs.
+    expect(scriptText).toContain(`{ pg_session_limits; printf '%s\\n' "$APPLY_PRELUDE"; cat "$1"; }`);
+    for (const option of ['--lock-timeout', '--statement-timeout']) {
+      for (const bad of ['0s', '5', '5 s', "1s'; DROP TABLE x; --", '']) {
+        let message = '';
+        try { run(['dry-run', option, bad]); } catch (error) { message = String((error as { stderr?: string }).stderr ?? error); }
+        expect(message, `${option} ${bad}`).toMatch(/--(lock|statement)-timeout: expected|parameter null or not set/);
+      }
+    }
+  });
+
   it('finds the migration set (sanity)', () => {
     expect(files.length).toBeGreaterThan(50);
     expect(files).toContain('034_order_material_sunset_legacy.sql');

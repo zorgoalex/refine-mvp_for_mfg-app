@@ -1,0 +1,40 @@
+# 1C agent mTLS ingress. Applied by ops/deploy-stack.sh only when
+# BACKEND_ENABLE_ONEC_AGENT=true (requires ONEC_AGENT_FQDN, ONEC_INGRESS_SECRET).
+# Self-contained: an existing <project>/docker-compose.yml is never rewritten
+# from the template, so this overlay also carries the backend environment.
+services:
+  backend:
+    environment:
+      BACKEND_ENABLE_ONEC_AGENT: ${BACKEND_ENABLE_ONEC_AGENT:-false}
+      ONEC_AGENT_PORT: ${ONEC_AGENT_PORT:-3001}
+      ONEC_INGRESS_SECRET: ${ONEC_INGRESS_SECRET:-}
+      ONEC_INGRESS_SECRET_PREVIOUS: ${ONEC_INGRESS_SECRET_PREVIOUS:-}
+      ONEC_AGENT_SESSION_TTL_MS: ${ONEC_AGENT_SESSION_TTL_MS:-600000}
+      ONEC_AGENT_HEARTBEAT_INTERVAL_MS: ${ONEC_AGENT_HEARTBEAT_INTERVAL_MS:-60000}
+      BACKEND_ONEC_MONITOR_OWNER: ${BACKEND_ONEC_MONITOR_OWNER:-none}
+      BACKEND_ONEC_MONITOR_INTERVAL_MS: ${BACKEND_ONEC_MONITOR_INTERVAL_MS:-60000}
+      BACKEND_ONEC_NIGHTLY_FULL_SYNC_HOUR_UTC: ${BACKEND_ONEC_NIGHTLY_FULL_SYNC_HOUR_UTC:--1}
+      BACKEND_ONEC_PAYMENT_MATCHING_VIEW: ${BACKEND_ONEC_PAYMENT_MATCHING_VIEW:-false}
+      BACKEND_ONEC_ORDER_NUMBER_SERIES: ${BACKEND_ONEC_ORDER_NUMBER_SERIES:-}
+      BACKEND_ONEC_ETL_WORKER_OWNER: ${BACKEND_ONEC_ETL_WORKER_OWNER:-none}
+      ONEC_ETL_SPOOL_DIR: /data/onec-etl-spool
+      ONEC_ETL_SPOOL_MIN_FREE_BYTES: ${ONEC_ETL_SPOOL_MIN_FREE_BYTES:-2147483648}
+    volumes:
+      - onec-etl-spool:/data/onec-etl-spool
+    labels:
+      - traefik.http.routers.onec-agent.rule=Host(`${ONEC_AGENT_FQDN}`)
+      - traefik.http.routers.onec-agent.entrypoints=onecsecure
+      - traefik.http.routers.onec-agent.tls.certresolver=letsencrypt
+      - traefik.http.routers.onec-agent.tls.options=onec-mtls@file
+      - traefik.http.routers.onec-agent.middlewares=onec-ratelimit,onec-client-cert,onec-ingress-auth
+      - traefik.http.routers.onec-agent.service=onec-agent
+      # Per source IP; the agent sends ~2 requests/min plus long polls.
+      - traefik.http.middlewares.onec-ratelimit.ratelimit.average=20
+      - traefik.http.middlewares.onec-ratelimit.ratelimit.burst=50
+      - traefik.http.middlewares.onec-client-cert.passtlsclientcert.pem=true
+      # Proves to the backend that the request passed this mTLS router.
+      - traefik.http.middlewares.onec-ingress-auth.headers.customrequestheaders.X-Onec-Ingress-Auth=${ONEC_INGRESS_SECRET}
+      - traefik.http.services.onec-agent.loadbalancer.server.port=${ONEC_AGENT_PORT:-3001}
+
+volumes:
+  onec-etl-spool:

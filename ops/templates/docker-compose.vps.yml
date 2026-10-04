@@ -12,12 +12,23 @@ services:
       - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
       - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
       - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      # 1C agent API (mTLS host, see docker-compose.onec-agent.yml): its own
+      # entrypoint so long uploads (<=300 s) do not relax websecure timeouts.
+      - --entrypoints.onecsecure.address=:8443
+      - --entrypoints.onecsecure.transport.respondingTimeouts.readTimeout=330s
+      - --entrypoints.onecsecure.transport.respondingTimeouts.writeTimeout=330s
+      - --entrypoints.onecsecure.transport.respondingTimeouts.idleTimeout=180s
+      # TLS options (client-certificate policy) exist only in the file provider.
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
     ports:
       - "80:80"
       - "443:443"
+      - "8443:8443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./data/traefik:/letsencrypt
+      - ./data/traefik/dynamic:/etc/traefik/dynamic:ro
     networks:
       - edge
 
@@ -235,6 +246,18 @@ services:
       BACKEND_WHATSAPP_RELAY_MAX_ATTEMPTS: ${BACKEND_WHATSAPP_RELAY_MAX_ATTEMPTS:-5}
       BACKEND_WHATSAPP_RELAY_STALE_LOCK_MS: ${BACKEND_WHATSAPP_RELAY_STALE_LOCK_MS:-600000}
       BACKEND_WHATSAPP_CLEANUP_OWNER: ${BACKEND_WHATSAPP_CLEANUP_OWNER:-none}
+      BACKEND_ENABLE_ONEC_AGENT: ${BACKEND_ENABLE_ONEC_AGENT:-false}
+      ONEC_AGENT_PORT: ${ONEC_AGENT_PORT:-3001}
+      ONEC_INGRESS_SECRET: ${ONEC_INGRESS_SECRET:-}
+      ONEC_INGRESS_SECRET_PREVIOUS: ${ONEC_INGRESS_SECRET_PREVIOUS:-}
+      ONEC_AGENT_SESSION_TTL_MS: ${ONEC_AGENT_SESSION_TTL_MS:-600000}
+      ONEC_AGENT_HEARTBEAT_INTERVAL_MS: ${ONEC_AGENT_HEARTBEAT_INTERVAL_MS:-60000}
+      BACKEND_ONEC_MONITOR_OWNER: ${BACKEND_ONEC_MONITOR_OWNER:-none}
+      BACKEND_ONEC_MONITOR_INTERVAL_MS: ${BACKEND_ONEC_MONITOR_INTERVAL_MS:-60000}
+      BACKEND_ONEC_NIGHTLY_FULL_SYNC_HOUR_UTC: ${BACKEND_ONEC_NIGHTLY_FULL_SYNC_HOUR_UTC:--1}
+      BACKEND_ONEC_ETL_WORKER_OWNER: ${BACKEND_ONEC_ETL_WORKER_OWNER:-none}
+      ONEC_ETL_SPOOL_DIR: /data/onec-etl-spool
+      ONEC_ETL_SPOOL_MIN_FREE_BYTES: ${ONEC_ETL_SPOOL_MIN_FREE_BYTES:-2147483648}
       BACKEND_ENABLE_SHEET_MATERIALS: ${BACKEND_ENABLE_SHEET_MATERIALS:-false}
       BACKEND_SHEET_ORDERS_READS: ${BACKEND_SHEET_ORDERS_READS:-false}
       BACKEND_ENABLE_CUT_JOBS: ${BACKEND_ENABLE_CUT_JOBS:-false}
@@ -344,10 +367,19 @@ services:
       - traefik.http.routers.backend.rule=Host(`${BACKEND_FQDN}`)
       - traefik.http.routers.backend.entrypoints=websecure
       - traefik.http.routers.backend.tls.certresolver=letsencrypt
+      # Explicit service: the backend container may also expose the onec-agent service.
+      - traefik.http.routers.backend.service=backend
+      # The regular API host never forwards 1C agent trust headers from clients.
+      - traefik.http.routers.backend.middlewares=backend-strip-onec-headers
+      - traefik.http.middlewares.backend-strip-onec-headers.headers.customrequestheaders.X-Onec-Ingress-Auth=
+      - traefik.http.middlewares.backend-strip-onec-headers.headers.customrequestheaders.X-Forwarded-Tls-Client-Cert=
+      - traefik.http.middlewares.backend-strip-onec-headers.headers.customrequestheaders.X-Forwarded-Tls-Client-Cert-Info=
       - traefik.http.services.backend.loadbalancer.server.port=3000
     volumes:
       - cnc-telegram-media:/data/cnc-telegram-media
       - whatsapp-daily-digest:/data/whatsapp-daily-digest
+      # 1C ETL batches between ACK and parsing (7 days); not part of DB backups.
+      - onec-etl-spool:/data/onec-etl-spool
     networks:
       - back
       - edge
@@ -717,5 +749,6 @@ volumes:
   cnc-telegram-worker-data:
   cnc-telegram-media:
   whatsapp-daily-digest:
+  onec-etl-spool:
   glm-ocr-model-cache:
   waha-sessions:

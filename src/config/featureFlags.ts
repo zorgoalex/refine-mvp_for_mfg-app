@@ -37,6 +37,8 @@ export interface FrontendFeatureFlags {
   workosAuth: boolean;
   /** WhatsApp administration backed by ERP API and WAHA. */
   useBackendWhatsApp: boolean;
+  /** "Интеграция 1С" admin section (agents, configuration, alerts/incidents). */
+  useBackendOnec: boolean;
 }
 
 type EnvSource = Record<string, string | boolean | undefined>;
@@ -71,6 +73,7 @@ export type RuntimeFeatureFlagSource = Partial<{
   legacyHasura: string | boolean;
   workosAuth: string | boolean;
   backendWhatsApp: string | boolean;
+  backendOnec: string | boolean;
 }>;
 
 export function getFeatureFlags(
@@ -107,6 +110,7 @@ export function getFeatureFlags(
     enableLegacyHasura: readBooleanFlag(env.VITE_ENABLE_LEGACY_HASURA, true),
     workosAuth: readBooleanFlag(env.VITE_WORKOS_AUTH, false),
     useBackendWhatsApp: readBooleanFlag(env.VITE_USE_BACKEND_WHATSAPP, false),
+    useBackendOnec: readBooleanFlag(env.VITE_USE_BACKEND_ONEC, false),
   };
 
   return mergeRuntimeFeatureFlags(envFlags, runtimeFeatures);
@@ -176,6 +180,7 @@ export function mergeRuntimeFeatureFlags(
     workosAuth: readOptionalBooleanFlag(runtimeFeatures.workosAuth) ?? fallback.workosAuth,
     useBackendWhatsApp:
       readOptionalBooleanFlag(runtimeFeatures.backendWhatsApp) ?? fallback.useBackendWhatsApp,
+    useBackendOnec: readOptionalBooleanFlag(runtimeFeatures.backendOnec) ?? fallback.useBackendOnec,
   });
 }
 

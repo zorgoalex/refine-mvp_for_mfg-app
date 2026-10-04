@@ -36,6 +36,7 @@ import { RateLimitModule } from './rate-limit/rate-limit.module';
 import { RequestContextModule } from './common/request-context/request-context.module';
 import { PerformanceModule } from './performance/performance.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
+import { OnecAgentModule } from './modules/onec-agent/onec-agent.module';
 import { MdfBoardModule } from './modules/mdf-board/mdf-board.module';
 
 @Module({
@@ -79,6 +80,7 @@ import { MdfBoardModule } from './modules/mdf-board/mdf-board.module';
     VlmModule,
     PermissionsModule,
     WhatsAppModule,
+    OnecAgentModule,
     MdfBoardModule,
   ],
 })
