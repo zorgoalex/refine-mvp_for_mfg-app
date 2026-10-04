@@ -267,3 +267,17 @@ export function nextTemplatesLoad<T extends SupplierTextTemplateLike>(
   if (event.status === 401 || event.status === 403) return { status: 'denied' };
   return current.status === 'ready' ? current : { status: 'error' };
 }
+
+/** Ручная правка текста и версия заявки, при которой её начали. */
+export interface ManualText { text: string; version: number }
+
+/** Версия правки фиксируется при первом изменении и держится до возврата к шаблону (null). */
+export function nextManualText(current: ManualText | null, text: string | null, cardVersion: number): ManualText | null {
+  if (text === null) return null;
+  return { text, version: current?.version ?? cardVersion };
+}
+
+/** Версия заявки, по которой построен текст окна: по шаблону — текущая, при ручной правке — версия начала правки. */
+export function supplierTextVersion(manual: ManualText | null, cardVersion: number): number {
+  return manual?.version ?? cardVersion;
+}

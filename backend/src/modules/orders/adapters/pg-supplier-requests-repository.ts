@@ -446,7 +446,7 @@ async function insertProcurementAnchor(tx: DatabaseClient, orderId: number, kind
  * разрешены только пользователю, которому видны все заказы заявки (§5.5, scope; CR1-1). Вызывается после
  * блокировки заявки: состав заказов под ней не меняется.
  */
-async function requireFullScope(tx: DatabaseClient, currentUser: CurrentUser, supplierRequestId: number): Promise<void> {
+export async function requireFullScope(tx: DatabaseClient, currentUser: CurrentUser, supplierRequestId: number): Promise<void> {
   // Все заказы заявки, включая заказы в корзине: удаление не даёт прав на чужую заявку (CR3-1).
   const orderIds = await requestOrderIds(tx, supplierRequestId);
   const owned = await ownedOrderIds(tx, currentUser, orderIds);
@@ -482,13 +482,13 @@ async function ownedOrderIds(client: DatabaseClient, currentUser: CurrentUser, o
   )).rows.map((row) => Number(row.order_id)));
 }
 
-async function lockRequest(tx: DatabaseClient, supplierRequestId: number): Promise<RequestRow> {
+export async function lockRequest(tx: DatabaseClient, supplierRequestId: number): Promise<RequestRow> {
   const row = (await tx.query<RequestRow>(`${REQUEST_SELECT} WHERE r.supplier_request_id = $1 FOR UPDATE OF r`, [supplierRequestId])).rows[0];
   if (!row) throw requestNotFound();
   return row;
 }
 
-async function loadLines(client: DatabaseClient, requestIds: number[]): Promise<LineRow[]> {
+export async function loadLines(client: DatabaseClient, requestIds: number[]): Promise<LineRow[]> {
   if (requestIds.length === 0) return [];
   return (await client.query<LineRow>(
     `SELECT sl.supplier_request_line_id, sl.supplier_request_id, sl.line_no, sl.resource_kind,

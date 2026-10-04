@@ -9,13 +9,16 @@ import { Tooltip } from '../../ui/tooltipDelay';
 import { SupplierTextTemplatesEditor } from './SupplierTextTemplatesEditor';
 import { buildSupplierCopyText } from './supplierRequestsHelpers';
 import {
+  nextManualText,
   nextTemplatesLoad,
   renderSupplierTextForCard,
   STANDARD_SUPPLIER_TEXT_TEMPLATE,
   supplierCopySource,
   supplierTextDialogText,
   supplierTextDisabledReason,
+  supplierTextVersion,
   templateSelectOptions,
+  type ManualText,
   type SupplierTextTemplatesLoad,
 } from './supplierTextTemplate';
 
@@ -28,6 +31,11 @@ export interface SupplierTextActionContext {
   templateVersion: number | null;
   requestId: number;
   requestVersion: number;
+  /**
+   * Версия заявки, по которой построен текст в окне: текст по шаблону — текущая (он перестраивается сам), ручная
+   * правка — версия на момент начала правки. `textVersion !== requestVersion` — заявка изменилась после правки.
+   */
+  textVersion: number;
   /** В заявке есть несохранённые изменения — действие должно быть недоступно. */
   dirty: boolean;
   /** Текст готов: шаблоны загружены и заявка сохранена. */
@@ -54,8 +62,10 @@ export function SupplierTextDialog({ card, capability, dirty, renderActions }: S
   const [chosenId, setChosenId] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
-  /** Ручная правка; null — текст следует за шаблоном. */
-  const [manual, setManual] = useState<string | null>(null);
+  /** Ручная правка и версия заявки, при которой её начали; null — текст следует за шаблоном. */
+  const [manualState, setManualState] = useState<ManualText | null>(null);
+  const manual = manualState?.text ?? null;
+  const setManual = (text: string | null) => setManualState((current) => nextManualText(current, text, card.version));
 
   /** Растёт при каждом открытии окна: список шаблонов перечитывается, чтобы выбрать действующий по умолчанию (code review R2-2). */
   const [refresh, setRefresh] = useState(0);
@@ -82,6 +92,9 @@ export function SupplierTextDialog({ card, capability, dirty, renderActions }: S
     return null;
   }, [source, card]);
   const { text, edited } = supplierTextDialogText(rendered, manual);
+  const textVersion = supplierTextVersion(manualState, card.version);
+  /** Заявку изменили после начала ручной правки — текст мог устареть. */
+  const outdated = textVersion !== card.version;
   const template = source.kind === 'template' ? source.template : null;
   const templates = load.status === 'ready' ? load.templates : [];
 
@@ -126,7 +139,7 @@ export function SupplierTextDialog({ card, capability, dirty, renderActions }: S
             <Button onClick={() => setOpen(false)}>Закрыть</Button>
             {renderActions?.({
               text, edited, templateId: template?.templateId ?? null, templateVersion: template?.version ?? null,
-              requestId: card.requestId, requestVersion: card.version, dirty, ready,
+              requestId: card.requestId, requestVersion: card.version, textVersion, dirty, ready,
             })}
             <Button type="primary" icon={<CopyOutlined />} disabled={!ready || text.length === 0} onClick={() => void copy()}>Скопировать</Button>
           </Space>
@@ -150,6 +163,15 @@ export function SupplierTextDialog({ card, capability, dirty, renderActions }: S
             />
             <Button onClick={() => setEditorOpen(true)}>Мои шаблоны…</Button>
           </Space>
+        )}
+        {outdated && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 8 }}
+            message="Заявка изменилась после того, как вы начали править текст"
+            action={<Button size="small" onClick={() => setManual(null)}>Перестроить по шаблону</Button>}
+          />
         )}
         <Input.TextArea
           aria-label="Текст для поставщика"

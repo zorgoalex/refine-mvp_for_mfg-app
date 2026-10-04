@@ -4,12 +4,14 @@ import { httpClient } from '../../api/httpClient';
 import { isRouteMissing, supplierTextTemplatesApi } from '../../api/supplierTextTemplatesApi';
 import type { SupplierRequestCardDto } from '../../api/types/supplierRequestsApi.types';
 import {
+  nextManualText,
   nextTemplatesLoad,
   renderSupplierTextForCard,
   STANDARD_SUPPLIER_TEXT_TEMPLATE,
   supplierCopySource,
   supplierTextDialogText,
   supplierTextDisabledReason,
+  supplierTextVersion,
   templateSelectOptions,
 } from './supplierTextTemplate';
 
@@ -109,6 +111,25 @@ describe('code review R2-2: список шаблонов перечитывае
     expect(nextTemplatesLoad({ status: 'loading' }, { kind: 'failed', status: 0 })).toEqual({ status: 'error' });
     expect(nextTemplatesLoad({ status: 'error' }, { kind: 'start' })).toEqual({ status: 'loading' });
     expect(nextTemplatesLoad(ready, { kind: 'failed', status: 403 })).toEqual({ status: 'denied' });
+  });
+});
+
+describe('версия текста окна (для действий: отправка в WhatsApp)', () => {
+  it('текст по шаблону — текущая версия заявки; ручная правка держит версию начала правки, пока её не сбросили', () => {
+    expect(supplierTextVersion(null, 1)).toBe(1);
+    const started = nextManualText(null, 'правка', 1);
+    expect(started).toEqual({ text: 'правка', version: 1 });
+    // Заявка обновилась до версии 2, пользователь продолжает править: версия текста остаётся 1.
+    const continued = nextManualText(started, 'правка 2', 2);
+    expect(continued).toEqual({ text: 'правка 2', version: 1 });
+    expect(supplierTextVersion(continued, 2)).toBe(1);
+    // «Перестроить по шаблону» / возврат к шаблону: текст снова соответствует текущей версии.
+    expect(nextManualText(continued, null, 2)).toBeNull();
+    expect(supplierTextVersion(null, 2)).toBe(2);
+    expect(nextManualText(null, 'снова', 2)).toEqual({ text: 'снова', version: 2 });
+    const dialog = readFileSync('src/pages/procurement_workspace/SupplierTextDialog.tsx', 'utf8');
+    expect(dialog).toContain('requestVersion: card.version, textVersion, dirty, ready');
+    expect(dialog).toContain('Перестроить по шаблону');
   });
 });
 
