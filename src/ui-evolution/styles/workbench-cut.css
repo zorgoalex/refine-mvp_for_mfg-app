@@ -728,3 +728,125 @@
   max-height: calc(100vh - var(--wb-cut-sticky-top, 48px) - var(--wb-cut-group-head, 104px) - 70px);
   border: 1px solid var(--evo-border);
 }
+
+/* --- лента листов под итогами: плитка на каждый лист, клик открывает лист --- */
+:root[data-ui-variant="workbench"] .wb-cut-sheet-strip {
+  display: flex;
+  gap: 10px;
+  margin: 2px 0 14px;
+  padding: 2px 2px 6px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-strip:empty {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile {
+  display: grid;
+  flex: 0 0 260px;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  border: 0;
+  border-radius: var(--evo-radius-lg);
+  background: var(--evo-surface-muted);
+  color: var(--evo-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile:hover {
+  background: color-mix(in srgb, var(--evo-primary) 6%, var(--evo-surface-muted));
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile[aria-current="true"] {
+  background: color-mix(in srgb, var(--evo-primary) 10%, var(--evo-surface));
+  box-shadow: 0 0 0 1.5px var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: 2px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile__thumb {
+  display: flex;
+  width: 88px;
+  height: 60px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 5px;
+  background: var(--evo-surface);
+  box-shadow: inset 0 0 0 1px var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile__thumb img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile__body {
+  display: block;
+  min-width: 0;
+  font-size: 12.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile__body b {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile__mat {
+  display: block;
+  overflow: hidden;
+  color: var(--evo-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile__bar {
+  display: block;
+  height: 4px;
+  margin-top: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile__bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile__bar[data-level="high"] i {
+  background: #2f9e62;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile__bar[data-level="low"] i {
+  background: #d9952b;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 5px;
+  color: var(--evo-text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* лист, открытый из ленты, встаёт под липкие строки, а не под них */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item {
+  scroll-margin-top: calc(var(--wb-cut-group-head, 104px) + 64px);
+}

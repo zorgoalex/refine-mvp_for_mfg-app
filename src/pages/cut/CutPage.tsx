@@ -1,4 +1,5 @@
 import { cutJobInformationalDetails, type InformationalCutDetailRow } from './cutJobInformationalDetails';
+import { createPortal } from 'react-dom';
 import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Collapse, DatePicker, Drawer, Empty, Form, Input, Modal, Popconfirm, Radio, Select, Space, Spin, Tabs, Tag, Typography, message, theme } from 'antd';
@@ -1273,6 +1274,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   // NewLine: the piece pointed at / picked in an open sheet (sheet key + overlay key) — list and sheet stay in sync
   const [wbHoverPiece, setWbHoverPiece] = useState<{ sheet: string; piece: string; from: 'list' | 'sheet' } | null>(null);
   const [wbPickedPiece, setWbPickedPiece] = useState<{ sheet: string; piece: string } | null>(null);
+  // NewLine: strip of sheet tiles under the totals; the tiles are rendered from the groups below via a portal
+  const [wbSheetStripEl, setWbSheetStripEl] = useState<HTMLDivElement | null>(null);
   // NewLine: the open sheet's parts list sticks right under the group's own sticky title row,
   // whose height varies (wrapping actions) — each group card carries it as a CSS variable.
   useEffect(() => {
@@ -5170,6 +5173,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                         <dd><CutJobOrderLinks items={job.items} refs={jobOrderRefs} onOpen={(orderId) => show('orders_view', orderId, 'push')} /></dd>
                       </div>
                     </dl>
+                    <div className="wb-cut-sheet-strip" role="tablist" aria-label="Листы раскроя" ref={setWbSheetStripEl} />
                   </>
                 ) : null}
                 <Space className="cut-job-operational-stats" size="large" style={{ marginBottom: 12 }} wrap>
@@ -5858,6 +5862,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   return (
                     <div
                       key={elemKey}
+                      data-wb-sheet={elemKey}
                       className={sheetImages[key] ? 'cut-sheet-preview-item cut-sheet-preview-item--open' : 'cut-sheet-preview-item'}
                       style={
                         // Open (enlarged) sheet spans the full previews row so the
@@ -5968,6 +5973,46 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                           onOverlayPick={isWorkbench ? (piece) => toggleWbPickedPiece(key, piece) : undefined}
                         />
                       )}
+                      {isWorkbench && wbSheetStripEl ? createPortal(
+                        <button
+                          type="button"
+                          role="tab"
+                          className="wb-cut-sheet-tile"
+                          aria-current={Boolean(sheetImages[key])}
+                          data-testid={`cut-sheet-tile-${elemKey}`}
+                          onClick={() => {
+                            if (!sheetImages[key]) void loadSheet(group, sheet.sheetIndex, displayVariant, renderVersion);
+                            setWbJobTab('sheets');
+                            // once right away and once more when the large image has arrived and moved the layout
+                            for (const delay of [120, 1200]) {
+                              window.setTimeout(() => {
+                                document.querySelector(`[data-wb-sheet="${elemKey}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                              }, delay);
+                            }
+                          }}
+                        >
+                          <span className="wb-cut-sheet-tile__thumb" data-portrait={isPortraitPreview ? 'true' : undefined}>
+                            {sheetThumbs[key] ? <img src={sheetThumbs[key]} alt="" /> : null}
+                          </span>
+                          <span className="wb-cut-sheet-tile__body">
+                            <b>Лист {sheetNo}</b>
+                            <span className="wb-cut-sheet-tile__mat" title={[matName, filmText].filter(Boolean).join(' · ') || undefined}>
+                              {filmText ?? matName ?? 'материал не задан'}
+                            </span>
+                            {sheetUsagePercent != null ? (
+                              <span className="wb-cut-sheet-tile__bar" data-level={sheetUsagePercent > 75 ? 'high' : sheetUsagePercent < 50 ? 'low' : undefined}>
+                                <i style={{ width: `${sheetUsagePercent}%` }} />
+                              </span>
+                            ) : null}
+                            <span className="wb-cut-sheet-tile__meta">
+                              <span>{sheet.placements.pieces.length} дет.</span>
+                              {sheetUsagePercent != null ? <span>остаток {100 - sheetUsagePercent}%</span> : null}
+                            </span>
+                          </span>
+                        </button>,
+                        wbSheetStripEl,
+                        `tile:${elemKey}`,
+                      ) : null}
                       {isWorkbench && sheetImages[key] ? (
                         <aside
                           className="wb-cut-sheet-parts"
