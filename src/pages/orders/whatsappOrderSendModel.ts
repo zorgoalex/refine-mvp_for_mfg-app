@@ -24,13 +24,42 @@ export interface OrderSendToast {
 }
 
 export function orderSendTargetKey(target: OrderSendTarget): string {
+  // One pending slot per recipient and form, whichever phone was picked: «the default phone» and «this phone
+  // from the list» may be the same number, and an unresolved command must be settled before another is made.
   if (target.kind === 'client') return 'client';
-  if (target.kind === 'employee') return `employee-${target.recipientKey}-${target.contactId ?? 'primary'}`;
+  if (target.kind === 'employee') return `employee-${target.recipientKey}`;
   return `chat-${target.chatKey}`;
 }
 
 export function pendingOrderSendKey(orderId: number, target: OrderSendTarget, form: OrderFormCode): string {
   return `${PENDING_ORDER_SEND_PREFIX}.${orderId}.${orderSendTargetKey(target)}.${form}`;
+}
+
+/**
+ * Every storage slot a pending command of this recipient and form may sit in: the current one and the slots
+ * of the previous interface, which keyed an employee by contact (`employee-<key>-primary`, `employee-<key>-<id>`).
+ * A command left there by the old interface must be settled before a new one is made, never lost.
+ */
+function pendingSlots(orderId: number, target: OrderSendTarget, form: OrderFormCode, storage: StorageLike | null): string[] {
+  const current = pendingOrderSendKey(orderId, target, form);
+  if (target.kind !== 'employee') return [current];
+  const prefix = `${PENDING_ORDER_SEND_PREFIX}.${orderId}.employee-${target.recipientKey}-`;
+  const suffix = `.${form}`;
+  const legacy = new Set<string>();
+  const enumerable = storage as Partial<Pick<Storage, 'length' | 'key'>> | null;
+  try {
+    if (enumerable && typeof enumerable.length === 'number' && typeof enumerable.key === 'function') {
+      for (let index = 0; index < enumerable.length; index += 1) {
+        const key = enumerable.key(index);
+        if (key && key.startsWith(prefix) && key.endsWith(suffix)) legacy.add(key);
+      }
+    }
+  } catch {
+    // Storage that cannot be listed: the well-known legacy slots below are still checked.
+  }
+  legacy.add(`${prefix}primary${suffix}`);
+  if (target.contactId !== undefined) legacy.add(`${prefix}${target.contactId}${suffix}`);
+  return [current, ...[...legacy].sort()];
 }
 
 export interface PendingOrderSend {
@@ -43,24 +72,63 @@ export interface PendingOrderSend {
 function sameTarget(a: unknown, b: OrderSendTarget): boolean {
   if (typeof a !== 'object' || a === null) return false;
   const record = a as Record<string, unknown>;
+  // The same recipient, whichever of its phones: the stored command is the one to settle first.
   if (b.kind === 'client') return record.kind === 'client';
-  if (b.kind === 'employee') {
-    return record.kind === 'employee' && record.recipientKey === b.recipientKey && (record.contactId ?? null) === (b.contactId ?? null);
-  }
+  if (b.kind === 'employee') return record.kind === 'employee' && record.recipientKey === b.recipientKey;
   return record.kind === 'chat' && record.chatKey === b.chatKey;
+}
+
+const TOKEN_PATTERN = /^[0-9a-f]{64}$/;
+
+/** The target of a stored command, field by field (storage is not trusted); null when it is not a valid target. */
+function storedTarget(value: unknown): OrderSendTarget | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const record = value as Record<string, unknown>;
+  const id = (field: unknown) => (typeof field === 'number' && Number.isInteger(field) && field > 0 ? field : undefined);
+  const token = (field: unknown) => (typeof field === 'string' && TOKEN_PATTERN.test(field) ? field : undefined);
+  if (record.kind === 'client') {
+    const phoneId = id(record.phoneId);
+    const phoneToken = token(record.phoneToken);
+    if (record.phoneId != null && phoneId === undefined) return null;
+    return phoneId === undefined ? { kind: 'client' } : { kind: 'client', phoneId, ...(phoneToken ? { phoneToken } : {}) };
+  }
+  if (record.kind === 'chat') return typeof record.chatKey === 'string' ? { kind: 'chat', chatKey: record.chatKey } : null;
+  if (record.kind === 'employee') {
+    if (typeof record.recipientKey !== 'string') return null;
+    const contactId = id(record.contactId);
+    const contactToken = token(record.contactToken);
+    if (record.contactId != null && contactId === undefined) return null;
+    return { kind: 'employee', recipientKey: record.recipientKey, ...(contactId !== undefined ? { contactId } : {}),
+      ...(contactId !== undefined && contactToken ? { contactToken } : {}) };
+  }
+  return null;
 }
 
 export function readPendingOrderSend(
   orderId: number, target: OrderSendTarget, form: OrderFormCode, actorId: string, storage: StorageLike | null = defaultStorage(),
 ): PendingOrderSend | null {
-  const record = readRecord(pendingOrderSendKey(orderId, target, form), storage);
+  for (const slot of pendingSlots(orderId, target, form, storage)) {
+    const pending = readPendingSlot(slot, orderId, target, form, actorId, storage);
+    if (pending) return pending;
+  }
+  return null;
+}
+
+function readPendingSlot(slot: string, orderId: number, target: OrderSendTarget, form: OrderFormCode, actorId: string,
+  storage: StorageLike | null): PendingOrderSend | null {
+  const record = readRecord(slot, storage);
   const payload = record?.payload as Record<string, unknown> | undefined;
   if (!record || !payload || typeof payload !== 'object') return null;
   if (record.actorId !== actorId || record.orderId !== orderId || payload.form !== form || !sameTarget(payload.target, target)
     || typeof payload.idempotencyKey !== 'string' || !UUID_PATTERN.test(payload.idempotencyKey)
     || typeof record.ambiguous !== 'boolean') return null;
   const confirm = typeof payload.confirmAfterUnknown === 'string' && UUID_PATTERN.test(payload.confirmAfterUnknown) ? payload.confirmAfterUnknown : undefined;
-  return { actorId, orderId, payload: { target, form, idempotencyKey: payload.idempotencyKey, ...(confirm ? { confirmAfterUnknown: confirm } : {}) },
+  // The stored command is replayed exactly as it was sent — its own target with its own token (or without one,
+  // from an older interface): the server compares the whole command, and a changed token would turn a replay of
+  // a lost answer into a refused key and then into a second delivery.
+  const stored = storedTarget(payload.target);
+  if (!stored) return null;
+  return { actorId, orderId, payload: { target: stored, form, idempotencyKey: payload.idempotencyKey, ...(confirm ? { confirmAfterUnknown: confirm } : {}) },
     ambiguous: record.ambiguous };
 }
 
@@ -71,13 +139,12 @@ export function persistPendingOrderSend(request: PendingOrderSend, storage: Stor
 /** Clears the pending record; with `idempotencyKey`, only if it is still that command's record. */
 export function clearPendingOrderSend(orderId: number, target: OrderSendTarget, form: OrderFormCode, storage: StorageLike | null = defaultStorage(),
   idempotencyKey?: string): void {
-  const key = pendingOrderSendKey(orderId, target, form);
-  if (idempotencyKey !== undefined) {
-    const record = readRecord(key, storage);
-    const payload = record?.payload as { idempotencyKey?: unknown } | undefined;
-    if (payload?.idempotencyKey !== idempotencyKey) return;
+  if (idempotencyKey === undefined) { removeRecord(pendingOrderSendKey(orderId, target, form), storage); return; }
+  // The command's record may sit in the current slot or in a slot of the previous interface: wherever it is.
+  for (const slot of pendingSlots(orderId, target, form, storage)) {
+    const payload = readRecord(slot, storage)?.payload as { idempotencyKey?: unknown } | undefined;
+    if (payload?.idempotencyKey === idempotencyKey) removeRecord(slot, storage);
   }
-  removeRecord(key, storage);
 }
 
 function cooldownText(error: ApiError): string {
@@ -112,6 +179,8 @@ const CODE_TEXTS: Record<string, { type: OrderSendToastType; text: string }> = {
   ORDER_SEND_FORM_NOT_ALLOWED: { type: 'warning', text: 'Эта форма больше не разрешена для получателя. Обновите страницу.' },
   ORDER_SEND_FINANCIALS_REQUIRED: { type: 'warning', text: 'Для этой формы нужен доступ к финансовым данным' },
   ORDER_SEND_CHAT_UNKNOWN: { type: 'warning', text: 'Этот чат убран из настроек. Обновите страницу.' },
+  ORDER_SEND_PHONE_CHANGED: { type: 'warning', text: 'Телефон получателя изменился. Список телефонов обновлён — выберите его заново.' },
+  ORDER_SEND_PHONE_CHOICE_UNAVAILABLE: { type: 'warning', text: 'Выбор телефона клиента сейчас недоступен. Отправьте на основной телефон.' },
   ORDER_SEND_RECIPIENT_UNKNOWN: { type: 'warning', text: 'Этот сотрудник убран из настроек. Обновите страницу.' },
   ORDER_SEND_CHANNEL_UNSUPPORTED: { type: 'warning', text: 'Этот канал отправки пока недоступен' },
   EMPLOYEE_INACTIVE: { type: 'warning', text: 'Сотрудник не активен' },
@@ -274,7 +343,25 @@ export interface RunOrderSendInput {
 }
 
 /** The toast, plus a question when the server needs a confirmation after an unknown outcome. */
-export type OrderSendRunResult = OrderSendToast & { confirmUnknown?: OrderSendUnknownConfirmation };
+export type OrderSendRunResult = OrderSendToast & {
+  confirmUnknown?: OrderSendUnknownConfirmation;
+  /** The recipients the card shows are stale (a phone was edited or removed): reload the menu and the phones. */
+  refreshRecipients?: boolean;
+};
+
+const STALE_RECIPIENT_CODES = new Set(['ORDER_SEND_PHONE_CHANGED', 'ORDER_SEND_PHONE_CHOICE_UNAVAILABLE', 'CLIENT_PHONE_MISSING', 'EMPLOYEE_CONTACT_MISSING',
+  'ORDER_SEND_RECIPIENT_UNKNOWN']);
+
+/**
+ * A refusal the server has recorded against the command's key (`details.final`): the command is not committed
+ * and never will be — any later request with this key, whatever changes meanwhile, gets the same refusal. Only
+ * then may a stored command be dropped after an attempt whose answer was lost. A refusal without the mark (an
+ * older backend, or a reason that may pass later) keeps the key, as before.
+ */
+function isFinalRefusal(error: unknown): boolean {
+  return error instanceof ApiError && typeof error.details === 'object' && error.details !== null
+    && (error.details as { final?: unknown }).final === true;
+}
 
 /** One attempt of a card send under the pending-key protocol; null when the same send is already in flight. */
 export async function runOrderSend(input: RunOrderSendInput): Promise<OrderSendRunResult | null> {
@@ -295,17 +382,23 @@ export async function runOrderSend(input: RunOrderSendInput): Promise<OrderSendR
       clear: () => clearPendingOrderSend(orderId, target, form, storage, commandKey ?? undefined),
       send: (request) => input.send(orderId, request.payload),
       // ORDER_SEND_PREVIOUS_UNKNOWN is decided after the ledger check: this key is not committed.
-      isDefinite: (error, prior) => previousUnknownOf(error) !== null || isKnownCalendarSendNotQueuedError(error, prior),
+      isDefinite: (error, prior) => previousUnknownOf(error) !== null || isKnownCalendarSendNotQueuedError(error, prior)
+        || isFinalRefusal(error),
     });
     if (outcome.status === 'done') {
       const send = outcome.result.send;
       if (!isOrderSendFinal(send.state)) input.onQueued?.(send);
-      return orderSendStateToast(send, input.targetLabel, input.formTitle);
+      // A settled earlier command went where it went — maybe to another number than the menu shows now (another
+      // phone, or the same row edited since): the toast names the number from the server's answer.
+      const label = pending !== null && target.kind !== 'chat' && send.recipientMasked
+        ? `${input.targetLabel.replace(/ \([^()]*\)$/, '')} (${send.recipientMasked})` : input.targetLabel;
+      return orderSendStateToast(send, label, input.formTitle);
     }
     if (outcome.status === 'not-stored') return { type: 'error', text: STORAGE_UNAVAILABLE_MESSAGE };
     const confirmUnknown = outcome.status === 'refused' ? previousUnknownOf(outcome.error) : null;
     if (confirmUnknown) return { type: 'warning', text: previousUnknownQuestion(confirmUnknown, input.targetLabel, input.formTitle), confirmUnknown };
-    return orderSendErrorToast(outcome.error);
+    const stale = outcome.error instanceof ApiError && STALE_RECIPIENT_CODES.has(outcome.error.code);
+    return { ...orderSendErrorToast(outcome.error), ...(stale ? { refreshRecipients: true } : {}) };
   } finally {
     inFlight.delete(guardKey);
   }

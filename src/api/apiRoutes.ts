@@ -110,6 +110,7 @@ export const apiRoutes = {
       backendApiPath(`/orders/${orderId}/deadline-overrides/${overrideId}`),
     groups: orderGroupsRoute,
     whatsappSends: (orderId: number) => backendApiPath(`/orders/${orderId}/whatsapp-sends`),
+    whatsappSendClientContacts: (orderId: number) => backendApiPath(`/orders/${orderId}/whatsapp-sends/client-contacts`),
   },
   orderDetails: {
     productionStageEvent: (detailId: number, productionStatusId: number) =>

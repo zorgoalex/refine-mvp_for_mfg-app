@@ -64,7 +64,7 @@ export type OrderSendTarget =
  * release (K2a) is this very code with `false`: it still parses and replays such commands, checks and delivers
  * the rows that exist, but makes no new ones and offers no phones to choose.
  */
-export const ORDER_SEND_CLIENT_PHONE_CHOICE = false;
+export const ORDER_SEND_CLIENT_PHONE_CHOICE = true;
 
 export type OrderSendChannel = 'whatsapp' | 'telegram';
 /** Channels a send can go through in this release (Telegram comes with the next stage). */

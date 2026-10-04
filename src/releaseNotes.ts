@@ -29,6 +29,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-04", title: "Отправка заказа клиенту: выбор телефона",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "Если у клиента несколько телефонов, в меню «Отправить заказ» у пункта «Отправить клиенту в WhatsApp» появляется список телефонов (основной первым) — можно выбрать, на какой отправить. С одним телефоном всё как раньше.",
+    ],
+    changed: [
+      "Ожидающая отправка клиенту не уходит на другой номер: если выбранный телефон изменили или удалили, отправка отменяется.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-04", title: "Контакты поставщиков, производителей и клиентов",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [
