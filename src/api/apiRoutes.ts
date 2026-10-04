@@ -367,6 +367,13 @@ export const apiRoutes = {
     contacts: (employeeId: number) => backendApiPath(`/employees/${employeeId}/contacts`),
     contactsList: backendApiPath('/employee-contacts'),
   },
+  partyContacts: {
+    contacts: (party: 'supplier' | 'vendor' | 'client', id: number) => backendApiPath(`/${party}s/${id}/contacts`),
+    contactsList: (party: 'supplier' | 'vendor') => backendApiPath(`/${party}-contacts`),
+    supplierCounterparties: backendApiPath('/supplier-counterparties'),
+    supplierCounterparty: (supplierId: number) => backendApiPath(`/suppliers/${supplierId}/counterparty`),
+    supplierFromCounterparty: backendApiPath('/suppliers/from-counterparty'),
+  },
   whatsapp: {
     preview: backendApiPath('/whatsapp/rules/preview'),
     status: backendApiPath('/whatsapp/status'),

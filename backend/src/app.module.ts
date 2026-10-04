@@ -12,6 +12,7 @@ import { StatusAutomationModule } from './modules/status-automation/status-autom
 import { HealthModule } from './modules/health/health.module';
 import { ClientPhonesModule } from './modules/client-phones/client-phones.module';
 import { EmployeesModule } from './modules/employees/employees.module';
+import { PartyContactsModule } from './modules/party-contacts/party-contacts.module';
 import { CncTelegramModule } from './modules/cnc-telegram/cnc-telegram.module';
 import { CrmSyncModule } from './modules/crm-sync/crm-sync.module';
 import { BazisModule } from './modules/bazis/bazis.module';
@@ -56,6 +57,7 @@ import { MdfBoardModule } from './modules/mdf-board/mdf-board.module';
     AuthModule,
     ClientPhonesModule,
     EmployeesModule,
+    PartyContactsModule,
     CncTelegramModule,
     CrmSyncModule,
     BazisModule,

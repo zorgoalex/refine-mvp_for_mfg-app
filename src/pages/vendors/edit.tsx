@@ -4,9 +4,12 @@ import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, Select, Checkbox } from "antd";
 import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
 import { ReferenceSortOrderFormItem } from "../../components/ReferenceSortOrder";
+import { ContactsCard } from "../../components/contacts/ContactsCard";
+import { VENDOR_CONTACTS } from "../../components/contacts/partyContactsSources";
+import { can } from "../../utils/permissions";
 
 export const VendorEdit: React.FC<IResourceComponentsProps> = () => {
-  const { formProps, saveButtonProps } = useFormWithHighlight({
+  const { formProps, saveButtonProps, queryResult } = useFormWithHighlight({
     resource: "vendors",
     idField: "vendor_id",
     action: "edit",
@@ -38,6 +41,7 @@ export const VendorEdit: React.FC<IResourceComponentsProps> = () => {
         </Form.Item>
         <ReferenceSortOrderFormItem />
       </Form>
+      <ContactsCard ownerId={Number(queryResult?.data?.data?.vendor_id) || null} editable={can("vendors.manage")} source={VENDOR_CONTACTS} />
     </Edit>
   );
 };

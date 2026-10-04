@@ -6298,7 +6298,20 @@
                                 "set": {
                                     "created_by": "x-hasura-User-Id"
                                 },
-                                "columns": "*"
+                                "columns": [
+                                    "address",
+                                    "contact_person",
+                                    "created_at",
+                                    "created_by",
+                                    "description",
+                                    "edited_by",
+                                    "is_active",
+                                    "phone",
+                                    "sort_order",
+                                    "supplier_id",
+                                    "supplier_name",
+                                    "updated_at"
+                                ]
                             },
                             "comment": ""
                         },
@@ -6309,7 +6322,20 @@
                                 "set": {
                                     "created_by": "x-hasura-User-Id"
                                 },
-                                "columns": "*"
+                                "columns": [
+                                    "address",
+                                    "contact_person",
+                                    "created_at",
+                                    "created_by",
+                                    "description",
+                                    "edited_by",
+                                    "is_active",
+                                    "phone",
+                                    "sort_order",
+                                    "supplier_id",
+                                    "supplier_name",
+                                    "updated_at"
+                                ]
                             },
                             "comment": ""
                         },
@@ -6320,7 +6346,20 @@
                                 "set": {
                                     "created_by": "x-hasura-User-Id"
                                 },
-                                "columns": "*"
+                                "columns": [
+                                    "address",
+                                    "contact_person",
+                                    "created_at",
+                                    "created_by",
+                                    "description",
+                                    "edited_by",
+                                    "is_active",
+                                    "phone",
+                                    "sort_order",
+                                    "supplier_id",
+                                    "supplier_name",
+                                    "updated_at"
+                                ]
                             },
                             "comment": ""
                         },
@@ -6331,7 +6370,20 @@
                                 "set": {
                                     "created_by": "x-hasura-User-Id"
                                 },
-                                "columns": "*"
+                                "columns": [
+                                    "address",
+                                    "contact_person",
+                                    "created_at",
+                                    "created_by",
+                                    "description",
+                                    "edited_by",
+                                    "is_active",
+                                    "phone",
+                                    "sort_order",
+                                    "supplier_id",
+                                    "supplier_name",
+                                    "updated_at"
+                                ]
                             },
                             "comment": ""
                         }
@@ -6387,7 +6439,20 @@
                         {
                             "role": "manager",
                             "permission": {
-                                "columns": "*",
+                                "columns": [
+                                    "address",
+                                    "contact_person",
+                                    "created_at",
+                                    "created_by",
+                                    "description",
+                                    "edited_by",
+                                    "is_active",
+                                    "phone",
+                                    "sort_order",
+                                    "supplier_id",
+                                    "supplier_name",
+                                    "updated_at"
+                                ],
                                 "filter": {},
                                 "check": {},
                                 "set": {
@@ -6399,7 +6464,20 @@
                         {
                             "role": "operator",
                             "permission": {
-                                "columns": "*",
+                                "columns": [
+                                    "address",
+                                    "contact_person",
+                                    "created_at",
+                                    "created_by",
+                                    "description",
+                                    "edited_by",
+                                    "is_active",
+                                    "phone",
+                                    "sort_order",
+                                    "supplier_id",
+                                    "supplier_name",
+                                    "updated_at"
+                                ],
                                 "filter": {},
                                 "check": {},
                                 "set": {
@@ -6411,7 +6489,20 @@
                         {
                             "role": "superadmin",
                             "permission": {
-                                "columns": "*",
+                                "columns": [
+                                    "address",
+                                    "contact_person",
+                                    "created_at",
+                                    "created_by",
+                                    "description",
+                                    "edited_by",
+                                    "is_active",
+                                    "phone",
+                                    "sort_order",
+                                    "supplier_id",
+                                    "supplier_name",
+                                    "updated_at"
+                                ],
                                 "filter": {},
                                 "check": {},
                                 "set": {
@@ -6423,7 +6514,20 @@
                         {
                             "role": "top_manager",
                             "permission": {
-                                "columns": "*",
+                                "columns": [
+                                    "address",
+                                    "contact_person",
+                                    "created_at",
+                                    "created_by",
+                                    "description",
+                                    "edited_by",
+                                    "is_active",
+                                    "phone",
+                                    "sort_order",
+                                    "supplier_id",
+                                    "supplier_name",
+                                    "updated_at"
+                                ],
                                 "filter": {},
                                 "check": {}
                             },

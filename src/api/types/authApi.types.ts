@@ -61,6 +61,12 @@ export type PermissionName =
   | 'labels.manage_templates'
   | 'labels.generate'
   | 'doweling.create'
+  | 'suppliers.view'
+  | 'suppliers.manage'
+  | 'vendors.view'
+  | 'vendors.manage'
+  | 'clients.view'
+  | 'clients.update'
   | string;
 
 export interface BackendUserIdentity {

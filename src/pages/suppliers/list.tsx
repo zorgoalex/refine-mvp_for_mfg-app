@@ -6,6 +6,8 @@ import { Space, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { LocalizedList } from "../../components/LocalizedList";
 import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
+import { PrimaryContactsCell, usePrimaryContacts } from "../../components/contacts/usePrimaryContacts";
+import { can } from "../../utils/permissions";
 
 export const SupplierList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
@@ -20,6 +22,7 @@ export const SupplierList: React.FC<IResourceComponentsProps> = () => {
     tableProps.dataSource,
   );
   const { show } = useNavigation();
+  const { contacts, supported: contactsSupported } = usePrimaryContacts("supplier", tableProps.dataSource, "supplier_id", can("suppliers.view"));
 
   return (
     <LocalizedList title="Поставщики">
@@ -38,7 +41,15 @@ export const SupplierList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column dataIndex="supplier_name" title="Поставщик" sorter />
         <Table.Column dataIndex="address" title="Адрес поставщика" />
         <Table.Column dataIndex="contact_person" title="Контактное лицо" />
-        <Table.Column dataIndex="phone" title="Телефон" />
+        {contactsSupported ? (
+          <Table.Column
+            key="contacts"
+            title="Контакты"
+            render={(_, record: any) => <PrimaryContactsCell contacts={contacts.get(Number(record.supplier_id))} />}
+          />
+        ) : (
+          <Table.Column dataIndex="phone" title="Телефон" />
+        )}
         <Table.Column dataIndex="ref_key_1c" title="1C-key" />
         <Table.Column
           dataIndex="is_active"

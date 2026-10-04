@@ -4,6 +4,9 @@ import { Typography, Badge, Row, Col, Divider } from "antd";
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 import { ReferenceSortOrderShow } from "../../components/ReferenceSortOrder";
+import { ContactsCard } from "../../components/contacts/ContactsCard";
+import { SUPPLIER_CONTACTS } from "../../components/contacts/partyContactsSources";
+import { SupplierCounterpartyCard } from "./SupplierCounterpartyCard";
 
 const { Title } = Typography;
 
@@ -39,11 +42,20 @@ export const SupplierShow: React.FC<IResourceComponentsProps> = () => {
           <Title level={5}>Контактное лицо</Title>
           <TextField value={record?.contact_person} />
         </Col>
-        <Col span={8}>
-          <Title level={5}>Телефон</Title>
-          <TextField value={record?.phone} />
-        </Col>
+        {record?.phone ? (
+          <Col span={8}>
+            <Title level={5}>Телефон (прежнее поле)</Title>
+            <TextField value={record?.phone} />
+          </Col>
+        ) : null}
       </Row>
+
+      <Divider />
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <ContactsCard ownerId={Number(record?.supplier_id) || null} editable={false} source={SUPPLIER_CONTACTS} />
+        <SupplierCounterpartyCard supplierId={Number(record?.supplier_id) || null} editable={false} />
+      </div>
 
       <Divider />
 
@@ -63,10 +75,6 @@ export const SupplierShow: React.FC<IResourceComponentsProps> = () => {
             status={record?.is_active ? "success" : "default"}
             text={record?.is_active ? "Активен" : "Неактивен"}
           />
-        </Col>
-        <Col span={8}>
-          <Title level={5}>Ключ 1C</Title>
-          <TextField value={record?.ref_key_1c} />
         </Col>
       </Row>
 

@@ -23,12 +23,7 @@ export const SupplierCreate: React.FC<IResourceComponentsProps> = () => {
         <Form.Item label="Contact Person" name="contact_person">
           <Input />
         </Form.Item>
-        <Form.Item label="Phone" name="phone">
-          <Input />
-        </Form.Item>
-        <Form.Item label="Ref Key 1C" name="ref_key_1c">
-          <Input />
-        </Form.Item>
+        {/* Контакты и связь с контрагентом 1С добавляются в «Изменить» после создания поставщика. */}
         <Form.Item label="Description" name="description">
           <Input.TextArea rows={3} />
         </Form.Item>

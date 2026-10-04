@@ -7,6 +7,8 @@ import { LocalizedList } from "../../components/LocalizedList";
 import { useMemo } from "react";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
+import { PrimaryContactsCell, usePrimaryContacts } from "../../components/contacts/usePrimaryContacts";
+import { can } from "../../utils/permissions";
 
 export const VendorList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
@@ -21,6 +23,8 @@ export const VendorList: React.FC<IResourceComponentsProps> = () => {
     tableProps.dataSource,
   );
   const { show } = useNavigation();
+
+  const { contacts, supported: contactsSupported } = usePrimaryContacts("vendor", tableProps.dataSource, "vendor_id", can("vendors.view"));
 
   const materialTypeIds = useMemo(
     () =>
@@ -63,6 +67,13 @@ export const VendorList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column dataIndex="vendor_id" title="id" sorter />
         <ReferenceSortOrderColumn />
         <Table.Column dataIndex="vendor_name" title="Производитель" sorter />
+        {contactsSupported ? (
+          <Table.Column
+            key="contacts"
+            title="Контакты"
+            render={(_, record: any) => <PrimaryContactsCell contacts={contacts.get(Number(record.vendor_id))} />}
+          />
+        ) : null}
         <Table.Column
           dataIndex="contact_info"
           title="Контактная информация"

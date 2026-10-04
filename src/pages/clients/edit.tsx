@@ -8,8 +8,11 @@ import {
   useDelete,
 } from "@refinedev/core";
 import { ReferenceSortOrderFormItem } from "../../components/ReferenceSortOrder";
-import { Form, Input, Checkbox, notification, Spin, Radio } from "antd";
+import { Form, Input, Checkbox, notification, Spin, Radio, Typography } from "antd";
 import { ClientPhonesSection } from "./components/ClientPhonesSection";
+import { ContactsCard } from "../../components/contacts/ContactsCard";
+import { CLIENT_CONTACTS } from "../../components/contacts/partyContactsSources";
+import { can } from "../../utils/permissions";
 import { ClientPhone } from "../../types/clients";
 import { useState, useEffect, useCallback } from "react";
 
@@ -168,7 +171,8 @@ export const ClientEdit: React.FC<IResourceComponentsProps> = () => {
         <ReferenceSortOrderFormItem />
       </Form>
 
-      {/* Phones Section */}
+      {/* «Контакты» клиента — один блок: телефоны (сохраняются вместе с формой) и email/Telegram (своя кнопка сохранения). */}
+      <Typography.Title level={5} style={{ marginTop: 16 }}>Контакты</Typography.Title>
       {phonesLoading ? (
         <Spin style={{ display: "block", marginTop: 16 }} />
       ) : (
@@ -179,6 +183,9 @@ export const ClientEdit: React.FC<IResourceComponentsProps> = () => {
           deletedPhones={deletedPhones}
         />
       )}
+      <div style={{ marginTop: 12 }}>
+        <ContactsCard ownerId={Number(id) || null} editable={can("clients.update")} source={CLIENT_CONTACTS} />
+      </div>
     </Edit>
   );
 };
