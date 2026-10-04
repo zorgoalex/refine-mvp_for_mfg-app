@@ -112,6 +112,10 @@ export const apiRoutes = {
     whatsappSends: (orderId: number) => backendApiPath(`/orders/${orderId}/whatsapp-sends`),
     whatsappSendClientContacts: (orderId: number) => backendApiPath(`/orders/${orderId}/whatsapp-sends/client-contacts`),
   },
+  paymentsOnec: {
+    receipts: backendApiPath('/payments/onec-receipts'),
+    receipt: (lineId: number) => backendApiPath(`/payments/onec-receipts/${lineId}`),
+  },
   orderDetails: {
     productionStageEvent: (detailId: number, productionStatusId: number) =>
       backendApiPath(`/order-details/${detailId}/production-stage-events/${productionStatusId}`),

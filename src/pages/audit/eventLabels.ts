@@ -301,6 +301,7 @@ export const AUDIT_EVENT_TITLES: Record<string, string> = {
   'orders.production_status_mode_restore': 'Включён авторасчёт производственного статуса',
   'orders.production_status_mode_manual': 'Включён ручной производственный статус',
   'payments.create': 'Добавлен платёж',
+  'payments.onec_denied': 'Отказано в доступе к поступлениям 1С',
   'payments.update': 'Изменён платёж',
   'payments.delete': 'Удалён платёж',
   'payments.restore': 'Восстановлен платёж',
