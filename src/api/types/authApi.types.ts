@@ -40,6 +40,8 @@ export type PermissionName =
   | 'references.view'
   | 'references.manage'
   | 'finance.analytics.view'
+  | 'payments.onec.view'
+  | 'payments.onec.manage'
   | 'clients.analytics.view'
   | 'vlm.use'
   | 'vlm.configure'

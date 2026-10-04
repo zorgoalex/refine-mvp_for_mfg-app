@@ -19021,6 +19021,50 @@ paths:
         '403': {description: Permission denied}
         '404': {description: Agent not found}
         '503': {description: 1C integration is disabled}
+  /api/v1/payments/onec-receipts:
+    get:
+      tags:
+        - Payments
+      operationId: listOnecReceipts
+      summary: "1C customer receipts and refunds with the state of their matching against ERP order payments (read-only)"
+      security:
+        - {bearerAuth: []}
+      x-permission: payments.onec.view
+      description: >-
+        Requires payments.onec.view and payments.view; rows are limited by the payment scope of the user (own/all by
+        the order's creator/manager); rows without a resolved ERP order are returned only for the scope «all».
+        Enabled by BACKEND_ONEC_PAYMENT_MATCHING_VIEW.
+      parameters:
+        - {name: page, in: query, required: false, schema: {type: integer, minimum: 1, default: 1}}
+        - {name: pageSize, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: group, in: query, required: false, schema: {type: string, enum: [review, to_create, matched, dismissed, no_erp_order, refunds, other]}, description: State group (counter filter)}
+        - {name: kind, in: query, required: false, schema: {type: string, enum: [receipts, refunds]}}
+        - {name: dateFrom, in: query, required: false, schema: {type: string, format: date}}
+        - {name: dateTo, in: query, required: false, schema: {type: string, format: date}}
+        - {name: search, in: query, required: false, schema: {type: string, maxLength: 100}, description: "Document number, counterparty, 1C order number or ERP order name (substring)"}
+      responses:
+        '200': {description: "{data[], pagination, counters{group: n}, capabilities{commands}}; a row carries state, reason, onecOrder, erpOrder, match, payment ({hidden: true} when the payment is outside the user's scope) and an opaque stateToken; amounts are NUMERIC strings"}
+        '400': {description: Invalid filter}
+        '401': {description: Authentication required}
+        '403': {description: "Permission denied (audited as payments.onec_denied)"}
+        '503': {description: "ONEC_PAYMENT_MATCHING_DISABLED — the feature or the 1C integration is off"}
+  /api/v1/payments/onec-receipts/{lineId}:
+    get:
+      tags:
+        - Payments
+      operationId: getOnecReceipt
+      summary: "One 1C receipt/refund line: order link, candidate payments of the ERP order, refunds, paid by 1C, match history"
+      security:
+        - {bearerAuth: []}
+      x-permission: payments.onec.view
+      parameters:
+        - {name: lineId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: "{line, candidates[] (with paymentToken), refunds[], onecPaid, history[], capabilities}"}
+        '401': {description: Authentication required}
+        '403': {description: "Permission denied (audited as payments.onec_denied)"}
+        '404': {description: "ONEC_RECEIPT_NOT_FOUND — no such line or it is outside the user's payment scope"}
+        '503': {description: "ONEC_PAYMENT_MATCHING_DISABLED — the feature or the 1C integration is off"}
   /api/v1/onec/customer-orders:
     get:
       tags:
@@ -22582,6 +22626,8 @@ components:
         - payments.delete
         - finance.view
         - finance.analytics.view
+        - payments.onec.view
+        - payments.onec.manage
         - clients.view
         - clients.create
         - clients.update

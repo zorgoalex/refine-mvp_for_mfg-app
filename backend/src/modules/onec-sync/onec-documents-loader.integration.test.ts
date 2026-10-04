@@ -693,7 +693,7 @@ describe.skipIf(!url)('1C documents loader — real PostgreSQL', { timeout: 1200
     };
     const readService = () => {
       const config = new ConfigService<BackendEnv, true>({ BACKEND_ENABLE_ONEC_AGENT: true, ONEC_CLIENT_CERT_HEADER: 'x-client-cert' } as Partial<BackendEnv>);
-      return new OnecCustomerDocumentsReadService(database, new OnecRuntimeConfigService(config));
+      return new OnecCustomerDocumentsReadService(database, new OnecRuntimeConfigService(config), config);
     };
     const order = (key: string, extra: Record<string, unknown> = {}) => mirror('doc_customer_orders', key, {
       Ref_Key: key, Number: `${tag}-O${key.slice(0, 5)}`, Date: '2026-09-01T10:00:00', Posted: true, DeletionMark: false, ВидОперации: 'ЗаказНаПродажу',

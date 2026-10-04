@@ -141,6 +141,10 @@ export const apiRoutes = {
       setDefault: (templateId: number) => backendApiPath(`/procurement/my-supplier-text-templates/${templateId}/default`),
     },
   },
+  paymentsOnec: {
+    receipts: backendApiPath('/payments/onec-receipts'),
+    receipt: (lineId: number) => backendApiPath(`/payments/onec-receipts/${lineId}`),
+  },
   onecDocuments: {
     list: backendApiPath('/procurement/onec-documents'),
     card: (documentId: number) => backendApiPath(`/procurement/onec-documents/${documentId}`),

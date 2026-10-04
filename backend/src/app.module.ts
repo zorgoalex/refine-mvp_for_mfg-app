@@ -24,6 +24,7 @@ import { SheetMaterialsModule } from './modules/sheet-materials/sheet-materials.
 import { OrdersModule } from './modules/orders/orders.module';
 import { OrderRealtimeModule } from './modules/order-realtime/order-realtime.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { PaymentsOnecModule } from './modules/payments-onec/payments-onec.module';
 import { ProductionActionsModule } from './modules/production-actions/production-actions.module';
 import { ProjectsModule } from './modules/projects/projects.module';
 import { GroupsModule } from './modules/groups/groups.module';
@@ -75,6 +76,7 @@ import { OnecSyncModule } from './modules/onec-sync/onec-sync.module';
     OrderRealtimeModule,
     OrdersModule,
     PaymentsModule,
+    PaymentsOnecModule,
     ProductionActionsModule,
     ProjectsModule,
     GroupsModule,

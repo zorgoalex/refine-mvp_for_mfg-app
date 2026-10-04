@@ -468,6 +468,16 @@ export const envSchema = z
     BACKEND_ONEC_MONITOR_INTERVAL_MS: z.coerce.number().int().min(5000).max(3600000).default(60000),
     /** Hour (UTC, 0–23) of the nightly start_full_sync per active agent; -1 = off. Runs in the monitor owner process. */
     BACKEND_ONEC_NIGHTLY_FULL_SYNC_HOUR_UTC: z.coerce.number().int().min(-1).max(23).default(-1),
+    /**
+     * 1C incoming payments (plan 2026-10-04-onec-incoming-payments): the «Поступления 1С» tab and its read API, and
+     * refunds reducing «Оплачено» of a 1C order through the refunded receipt. Read-only; default off.
+     */
+    BACKEND_ONEC_PAYMENT_MATCHING_VIEW: booleanFromEnv.default(false),
+    /**
+     * Number series of the 1C customer orders that are ERP orders (`<series>-<order_name>`), e.g. «Ф25».
+     * Letters and digits only; empty = the rule is off (only manual links resolve an ERP order).
+     */
+    BACKEND_ONEC_ORDER_NUMBER_SERIES: z.string().trim().max(20).regex(/^[\p{L}\p{N}]*$/u).default(''),
     /** 1C agent E3: owner of the ETL batch parser (one process parses). */
     BACKEND_ONEC_ETL_WORKER_OWNER: z.enum(['none', 'in_process']).default('none'),
     /** Durable spool for received ETL batches (a volume; not in DB backups). */

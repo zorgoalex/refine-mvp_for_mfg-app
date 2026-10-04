@@ -1,4 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import type { BackendEnv } from '../../../config/env.validation';
 import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import { OnecRuntimeConfigService } from '../../onec-agent/onec-runtime-config.service';
@@ -45,12 +47,33 @@ function bounded(value: string | undefined, fallback: number, max: number): numb
 
 const iso = (value: Date | string | null | undefined): string | null => (value ? new Date(value).toISOString() : null);
 
+/**
+ * Возврат покупателю в 1С ссылается на поступление, а не на заказ (план 2026-10-04-onec-incoming-payments §5):
+ * заказ возврата — тот, к которому относятся ВСЕ действующие строки оплаты возвращаемого поступления. Условие для
+ * строки возврата `l` документа `p` и ключа заказа `$ORDER`.
+ */
+const REFUND_VIA_RECEIPT = (order: string) => `l.onec_order_ref_key IS NULL AND l.settlement_doc_ref_key IS NOT NULL
+      AND p.doc_kind = ANY('{${REFUND_KINDS.join(',')}}'::text[])
+      AND EXISTS (SELECT 1 FROM onec_documents r
+                   WHERE r.source_id = p.source_id AND r.onec_ref_key = l.settlement_doc_ref_key
+                     AND r.doc_kind = ANY('{${RECEIPT_KINDS.join(',')}}'::text[])
+                     AND (SELECT count(*) > 0 AND count(*) = count(rl.onec_order_ref_key) AND bool_and(rl.onec_order_ref_key = ${order})
+                            FROM onec_document_lines rl
+                           WHERE rl.onec_document_id = r.onec_document_id AND rl.line_section = 'payment'
+                             AND rl.removed_in_onec_at IS NULL))`;
+
+/** Возвраты через поступление в валюте заказа: вычитаются из «Оплачено» один раз на уровне заказа. */
+const DERIVED_REFUNDS_SQL = `(SELECT COALESCE(sum(l.amount), 0.00)
+     FROM onec_document_lines l JOIN onec_documents p ON p.onec_document_id = l.onec_document_id
+    WHERE p.source_id = o.source_id AND p.currency IS NOT DISTINCT FROM o.currency AND ${LIVE_DOC} AND ${LIVE_LINE}
+      AND ${REFUND_VIA_RECEIPT('o.onec_ref_key')})`;
+
 /** Сумма по документам-платежам и отгрузкам заказа в валюте заказа (другие валюты — отдельно, без смешения). */
 const ORDER_TOTALS_SQL = `
-  (SELECT COALESCE(sum(CASE WHEN p.doc_kind = ANY($RECEIPTS) THEN l.amount ELSE -l.amount END), 0.00)
+  ((SELECT COALESCE(sum(CASE WHEN p.doc_kind = ANY($RECEIPTS) THEN l.amount ELSE -l.amount END), 0.00)
      FROM onec_document_lines l JOIN onec_documents p ON p.onec_document_id = l.onec_document_id
     WHERE l.onec_order_ref_key = o.onec_ref_key AND p.source_id = o.source_id AND p.currency IS NOT DISTINCT FROM o.currency
-      AND p.doc_kind = ANY($PAYMENTS) AND ${LIVE_DOC} AND ${LIVE_LINE})::text AS paid,
+      AND p.doc_kind = ANY($PAYMENTS) AND ${LIVE_DOC} AND ${LIVE_LINE}) - $DERIVED_REFUNDS)::text AS paid,
   (SELECT COALESCE(sum(l.amount), 0.00)
      FROM onec_document_lines l JOIN onec_documents p ON p.onec_document_id = l.onec_document_id
     WHERE l.onec_order_ref_key = o.onec_ref_key AND p.source_id = o.source_id AND p.currency IS NOT DISTINCT FROM o.currency
@@ -69,7 +92,13 @@ export class OnecCustomerDocumentsReadService {
   constructor(
     @Inject(DatabaseService) private readonly database: DatabaseService,
     @Inject(OnecRuntimeConfigService) private readonly runtime: OnecRuntimeConfigService,
+    @Inject(ConfigService) private readonly config: ConfigService<BackendEnv, true>,
   ) {}
+
+  /** Возвраты через поступление учитываются только при включённом `BACKEND_ONEC_PAYMENT_MATCHING_VIEW` (иначе — прежняя формула). */
+  private refundsViaReceipt(): boolean {
+    return this.config.get('BACKEND_ONEC_PAYMENT_MATCHING_VIEW', { infer: true }) === true;
+  }
 
   async listOrders(query: CustomerOrdersQuery) {
     this.runtime.requireEnabled();
@@ -243,6 +272,7 @@ export class OnecCustomerDocumentsReadService {
     const at = params.length;
     return {
       totals: ORDER_TOTALS_SQL
+        .replaceAll('$DERIVED_REFUNDS', this.refundsViaReceipt() ? DERIVED_REFUNDS_SQL : '0.00')
         .replaceAll('$RECEIPTS', `$${at - 2}::text[]`)
         .replaceAll('$PAYMENTS', `$${at - 1}::text[]`)
         .replaceAll('$SHIPMENTS', `$${at}::text[]`),
@@ -251,13 +281,16 @@ export class OnecCustomerDocumentsReadService {
 
   /** Документы видов `kinds`, строки которых ссылаются на заказ: сумма по заказу, аванс, документы расчётов. */
   private async linkedByLines(sourceId: number, orderRef: string, kinds: string[]) {
+    // Возвраты, отнесённые к заказу через поступление, показываются в том же списке, что и уменьшают «Оплачено».
+    const viaReceipt = this.refundsViaReceipt() && kinds.some((kind) => REFUND_KINDS.includes(kind));
     const { rows } = await this.database.query<LinkedRow & { settlements: Array<{ ref: string; type: string | null }> | null }>(
       `SELECT p.onec_document_id::text AS id, p.doc_kind, p.number, to_char(p.doc_date, 'YYYY-MM-DD') AS doc_date, p.posted, p.deleted_in_onec,
               p.missing_in_source_at IS NOT NULL AS missing, p.currency, p.author_name, sum(l.amount)::text AS amount, bool_or(l.is_advance) AS advance,
               json_agg(DISTINCT jsonb_build_object('ref', l.settlement_doc_ref_key::text, 'type', l.settlement_doc_type))
                 FILTER (WHERE l.settlement_doc_ref_key IS NOT NULL) AS settlements
          FROM onec_document_lines l JOIN onec_documents p ON p.onec_document_id = l.onec_document_id
-        WHERE l.onec_order_ref_key = $2::uuid AND p.source_id = $1 AND p.doc_kind = ANY($3::text[]) AND ${LIVE_LINE}
+        WHERE (l.onec_order_ref_key = $2::uuid${viaReceipt ? ` OR (${REFUND_VIA_RECEIPT('$2::uuid')})` : ''})
+          AND p.source_id = $1 AND p.doc_kind = ANY($3::text[]) AND ${LIVE_LINE}
         GROUP BY p.onec_document_id ORDER BY p.doc_date, p.onec_document_id`,
       [sourceId, orderRef, kinds],
     );
