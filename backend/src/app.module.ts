@@ -11,6 +11,7 @@ import { NotificationsEngineModule } from './modules/notifications-engine/notifi
 import { StatusAutomationModule } from './modules/status-automation/status-automation.module';
 import { HealthModule } from './modules/health/health.module';
 import { ClientPhonesModule } from './modules/client-phones/client-phones.module';
+import { ClientScreenModule } from './modules/client-screen/client-screen.module';
 import { EmployeesModule } from './modules/employees/employees.module';
 import { PartyContactsModule } from './modules/party-contacts/party-contacts.module';
 import { CncTelegramModule } from './modules/cnc-telegram/cnc-telegram.module';
@@ -58,6 +59,7 @@ import { OnecSyncModule } from './modules/onec-sync/onec-sync.module';
     AuditModule,
     AuthModule,
     ClientPhonesModule,
+    ClientScreenModule,
     EmployeesModule,
     PartyContactsModule,
     CncTelegramModule,

@@ -2591,6 +2591,13 @@ probe_file() {
       "$(q_con_on payment_onec_matches chk_pom_active_payment)" "$(q_con_on payment_onec_matches chk_pom_matched_fields)" \
       "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE contype='f' AND conrelid='public.payment_onec_matches'::regclass AND confrelid='public.payments'::regclass AND confdeltype='n');" \
       "SELECT (SELECT count(*) FROM permissions_catalog WHERE permission_name IN ('payments.onec.view','payments.onec.manage') AND is_active) = 2;" ;;
+    # 241: customer screen settings (singleton row with the master switch and the visible codes).
+    241_client_screen_settings*) probe_all \
+      "$(q_tbl client_screen_settings)" \
+      "$(q_col client_screen_settings enabled)" "$(q_col client_screen_settings visible_codes)" \
+      "$(q_con_on client_screen_settings chk_client_screen_settings_singleton)" \
+      "$(q_con_on client_screen_settings chk_client_screen_settings_codes)" \
+      "SELECT EXISTS (SELECT 1 FROM client_screen_settings WHERE config_id = 1);" ;;
     237_whatsapp_order_send_client_phone*) probe_all \
       "$(q_col whatsapp_order_sends client_phone_id)" "$(q_tbl whatsapp_order_send_refusals)" \
       "$(q_idx idx_whatsapp_order_send_refusals_created)" ;;
@@ -3054,7 +3061,7 @@ verify_applied_effect() {
     205_warehouses_onec_key_required*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    231_cut_result_render_v2*|209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|234_reference_nomenclature_note*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|240_payment_onec_matches*)
+    231_cut_result_render_v2*|209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|234_reference_nomenclature_note*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|240_payment_onec_matches*|241_client_screen_settings*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)

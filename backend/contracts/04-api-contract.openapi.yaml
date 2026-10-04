@@ -26,6 +26,8 @@ tags:
     description: Сотрудники и их рабочие контакты
   - name: Party contacts
     description: Контакты поставщиков, производителей и клиентов; связь поставщика с контрагентом 1С
+  - name: Client screen
+    description: Настройки экрана клиента — зеркала заказа на втором мониторе
   - name: Catalog
     description: Независимый справочник товаров и услуг
   - name: Reference catalog import
@@ -10230,6 +10232,70 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/client-screen/settings:
+    get:
+      tags: [Client screen]
+      operationId: getClientScreenSettings
+      summary: Настройки экрана клиента
+      description: Общий выключатель показа и коды вкладок и полей заказа, которые видит клиент. version — версия политики показа.
+      security:
+        - bearerAuth: []
+      x-permissions-any:
+        - orders.view
+        - settings.manage
+      responses:
+        '200':
+          description: enabled, visibleCodes, version, updatedAt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientScreenSettings' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      tags: [Client screen]
+      operationId: updateClientScreenSettings
+      summary: Изменить настройки экрана клиента
+      description: Повтор с теми же значениями — 200 changed=false, версия не растёт. Устаревшая версия — 409 CLIENT_SCREEN_SETTINGS_VERSION_CONFLICT (details.settings — актуальные). Неизвестный или повторяющийся код — 422 CLIENT_SCREEN_SETTINGS_INVALID.
+      security:
+        - bearerAuth: []
+      x-permission: settings.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enabled, visibleCodes, expectedVersion]
+              properties:
+                enabled: { type: boolean }
+                visibleCodes:
+                  type: array
+                  uniqueItems: true
+                  items: { $ref: '#/components/schemas/ClientScreenCode' }
+                expectedVersion: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Настройки после команды и признак changed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ClientScreenSettings'
+                  - type: object
+                    required: [changed]
+                    properties:
+                      changed: { type: boolean, description: 'false — значения совпали с сохранёнными, версия не изменилась' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
   /api/v1/client-phones:
     post:
       tags:
@@ -20887,6 +20953,70 @@ components:
                   requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
 
   schemas:
+    ClientScreenSettings:
+      type: object
+      required: [enabled, visibleCodes, version, updatedAt]
+      properties:
+        enabled: { type: boolean, description: Общий выключатель показа на всю организацию }
+        visibleCodes:
+          type: array
+          items: { $ref: '#/components/schemas/ClientScreenCode' }
+        version: { type: integer, minimum: 1, description: Версия политики показа }
+        updatedAt: { type: string, format: date-time }
+    ClientScreenCode:
+      type: string
+      description: Код вкладки (tab.<ключ>) или поля заказа, которое может видеть клиент. Реестр — backend/src/modules/client-screen/client-screen.registry.ts.
+      enum:
+        - summary.number
+        - summary.client
+        - summary.parts
+        - summary.area
+        - summary.final
+        - summary.debt
+        - tab.basic
+        - basic.client
+        - basic.order_name
+        - basic.order_date
+        - basic.order_status
+        - basic.payment_status
+        - basic.production_status
+        - basic.manager
+        - basic.priority
+        - basic.doweling
+        - basic.notes
+        - tab.details
+        - details.n
+        - details.name
+        - details.height
+        - details.width
+        - details.quantity
+        - details.area
+        - details.material
+        - details.milling_type
+        - details.edge_type
+        - details.film
+        - details.price_per_sqm
+        - details.cost
+        - details.note
+        - details.production_status
+        - tab.dates
+        - dates.planned
+        - dates.completion
+        - dates.issue
+        - tab.finance
+        - finance.total
+        - finance.discount
+        - finance.surcharge
+        - finance.final
+        - finance.paid
+        - finance.debt
+        - finance.payments
+        - finance.payments_note
+        - tab.services
+        - services.name
+        - services.quantity
+        - services.price
+        - services.sum
     CatalogImportCreate:
       oneOf:
         - type: object
