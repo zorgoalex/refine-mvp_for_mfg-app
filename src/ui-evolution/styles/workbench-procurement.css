@@ -8,7 +8,6 @@
   --rr-border-strong: var(--evo-border);
   --rr-text: var(--evo-text);
   --rr-muted: var(--evo-text-secondary);
-  --rr-grp-bg: var(--evo-surface-muted, #f7f8fa);
   --rr-shadow: none;
   font-size: 13px;
 }
@@ -138,7 +137,8 @@
 
 :root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper .ant-table-tbody > tr.rr-grp > td,
 :root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper .ant-table-tbody > tr.rr-grp:hover > td {
-  background: var(--evo-surface-muted, #f7f8fa);
+  /* лёгкий голубой заголовок группы — как в остальных вариантах */
+  background: var(--rr-grp-bg, #e6f4ff);
 }
 
 :root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper .ant-pagination {
@@ -238,5 +238,5 @@
 /* выбранный приход сохраняет свою подсветку поверх общих правил строк */
 :root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper.rr-receipts-table .ant-table-tbody > tr.rr-receipt-row--picked > td,
 :root[data-ui-variant="workbench"] .rr-screen .ant-table-wrapper.rr-receipts-table .ant-table-tbody > tr.rr-receipt-row--picked:hover > td {
-  background: color-mix(in srgb, var(--evo-primary) 10%, var(--evo-surface));
+  background: var(--rr-row-picked, #bae0ff);
 }
