@@ -739,15 +739,17 @@ describe('ONEC_ETL_ENTITY_PRESETS', () => {
 });
 
 describe('snapshot entities and revocation (E3b)', () => {
-  it('treats stock_balances and counterparty_phones as snapshot entities, others not', () => {
-    expect(ONEC_ETL_SNAPSHOT_ENTITIES).toEqual(['stock_balances', 'counterparty_phones']);
+  it('treats stock_balances and the personal-data sets as snapshot entities, others not', () => {
+    expect(ONEC_ETL_SNAPSHOT_ENTITIES).toEqual(['stock_balances', 'counterparty_phones', 'counterparty_contacts']);
+    expect(onecEtlIsSnapshotEntity('counterparty_contacts')).toBe(true);
     expect(onecEtlIsSnapshotEntity('stock_balances')).toBe(true);
     expect(onecEtlIsSnapshotEntity('counterparty_phones')).toBe(true);
     expect(onecEtlIsSnapshotEntity('items')).toBe(false);
   });
 
-  it('only counterparty_phones is revocable', () => {
-    expect(ONEC_ETL_REVOCABLE_ENTITIES).toEqual(['counterparty_phones']);
+  it('only the personal-data sets are revocable', () => {
+    expect(ONEC_ETL_REVOCABLE_ENTITIES).toEqual(['counterparty_phones', 'counterparty_contacts']);
+    expect(onecEtlEntityRevocable('counterparty_contacts')).toBe(true);
     expect(onecEtlEntityRevocable('counterparty_phones')).toBe(true);
     expect(onecEtlEntityRevocable('stock_balances')).toBe(false);
   });

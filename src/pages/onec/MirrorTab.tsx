@@ -4,7 +4,7 @@ import { Table } from '../../ui/tooltipDelay';
 import { ApiError } from '../../api/apiError';
 import { onecApi } from './onecApi';
 import type { OnecAgentView, OnecEtlEntityState, OnecMirrorRow, OnecMirrorRowDetail, OnecMirrorState } from './onecApi.types';
-import { ONEC_MIRROR_STATE_OPTIONS, onecEtlEntityLabel } from './onecFormat';
+import { ONEC_MIRROR_STATE_OPTIONS, onecEtlEntityLabel, onecEtlEntityRevocable } from './onecFormat';
 
 const { Text } = Typography;
 
@@ -192,7 +192,7 @@ export function MirrorTab({ agents }: MirrorTabProps) {
         <Select style={{ minWidth: 240 }} value={state} onChange={setState} options={ONEC_MIRROR_STATE_OPTIONS} />
       </Space>
 
-      {entity === 'counterparty_phones' && (
+      {onecEtlEntityRevocable(entity) && (
         <Alert
           type="warning"
           showIcon

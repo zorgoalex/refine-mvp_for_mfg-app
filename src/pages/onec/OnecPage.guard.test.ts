@@ -254,8 +254,16 @@ describe('Onec (1C integration) UI wiring', () => {
     expect(mirrorTab).toMatch(/setTimeout\(\(\) => \{\s*setSearch\(searchInput\.trim\(\)\);\s*setPage\(1\);\s*\}, ONEC_MIRROR_SEARCH_DEBOUNCE_MS\);/);
   });
 
-  it('shows the personal-data notice only for counterparty_phones', () => {
-    expect(mirrorTab).toMatch(/entity === 'counterparty_phones' &&[\s\S]{0,200}Персональные данные/);
+  it('shows the personal-data notice for every revocable (personal-data) entity', () => {
+    expect(mirrorTab).toMatch(/onecEtlEntityRevocable\(entity\) &&[\s\S]{0,200}Персональные данные/);
+  });
+
+  it('offers the contacts preset without a filter, without the raw value fields, with deleteBatchAfterAck', () => {
+    const preset = format.match(/counterparty_contacts:\s*\{[\s\S]{0,700}?enabled: true,\s*\}/)?.[0] ?? '';
+    expect(preset).toContain("oDataPath: 'Catalog_Контрагенты_КонтактнаяИнформация'");
+    expect(preset).toContain('deleteBatchAfterAck: true');
+    expect(preset).not.toContain('filter:');
+    expect(preset).not.toMatch(/'Значение'|'ЗначенияПолей'/);
   });
 
   it('offers the phones preset only with the phone filter and deleteBatchAfterAck', () => {

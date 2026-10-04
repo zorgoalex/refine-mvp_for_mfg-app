@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { DatabaseService } from '../../database/database.service';
 import type { DatabaseClient } from '../../database/database.types';
 import { ApiError } from '../../common/errors/api-error';
+import { PERSONAL_DATA_TTL_MS } from './domain/onec-etl';
 import { OnecRuntimeConfigService } from './onec-runtime-config.service';
 
 export interface OnecCatalogItem {
@@ -44,6 +45,58 @@ export interface OnecStockBalance {
   categoryName: string | null;
   quantity: number;
 }
+/** Контрагент 1С из зеркала (справочник «Контрагенты», без групп). */
+export interface OnecCounterparty {
+  refKey: string;
+  code: string | null;
+  name: string;
+  fullName: string | null;
+  isSupplier: boolean;
+  isCustomer: boolean;
+  /** БИН/ИИН как в 1С (без проверки). */
+  identificationNumber: string | null;
+  /** Помечен на удаление в 1С. */
+  deletionMark: boolean;
+  /** Пропал из выгрузки 1С (строка копии осталась). */
+  missing: boolean;
+}
+/**
+ * Состояние набора контактов контрагентов (персональные данные, снимок целиком).
+ * `available` — есть свежий применённый снимок и набор не отозван; только в этом состоянии отсутствие контакта
+ * означает, что его нет в 1С. `revoked` — отозван оператором. `expired` — снимок не подтверждался дольше срока
+ * хранения персональных данных (30 дней), копия удалена по сроку. `not_loaded` — снимка ещё не было: это НЕ
+ * «контактов нет», потребитель ничего не удаляет. Вне `available` строки не отдаются.
+ */
+export interface OnecContactsState {
+  sourceId: number;
+  status: 'available' | 'revoked' | 'expired' | 'not_loaded';
+  /** As-of последнего применённого снимка. */
+  snapshotVersion: string | null;
+  /** Причина отклонения последнего пришедшего снимка (прежний остаётся в силе). */
+  rejectedReason: string | null;
+}
+export type OnecContactType = 'phone' | 'email' | 'address' | 'other';
+/** Строка контактной информации контрагента 1С; ключ строки — (контрагент, номер строки). */
+export interface OnecCounterpartyContact {
+  counterpartyRefKey: string;
+  lineNo: number;
+  type: OnecContactType;
+  /** «Тип» как в 1С (для `other` и диагностики). */
+  typeRaw: string | null;
+  /** Вид контактной информации 1С (ссылка; названия видов в копии нет). */
+  kindRefKey: string | null;
+  /** Представление 1С — то, что видит пользователь 1С. */
+  presentation: string | null;
+  phoneNumber: string | null;
+  email: string | null;
+  country: string | null;
+  region: string | null;
+  city: string | null;
+}
+const CONTACTS_ENTITY = 'counterparty_contacts';
+const CONTACT_TYPES: Record<string, OnecContactType> = { Телефон: 'phone', АдресЭлектроннойПочты: 'email', Адрес: 'address' };
+const UUID_RE = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+const text = (value: unknown): string | null => (typeof value === 'string' && value.trim() !== '' ? value.trim() : null);
 const ZERO_GUID = '00000000-0000-0000-0000-000000000000';
 
 @Injectable()
@@ -194,6 +247,106 @@ export class OnecCatalogReader {
     const ids = locked.rows.map((row) => Number(row.source_id));
     if (ids.length === 0) return [];
     return this.listWarehouses(tx, ids);
+  }
+
+  /**
+   * Контрагенты 1С источника (без групп). `refKeys` — только эти ключи; иначе все. Помеченные на удаление и
+   * пропавшие из выгрузки отдаются с признаками: решает потребитель.
+   */
+  async listCounterparties(
+    sourceId: number,
+    refKeys: readonly string[] | null = null,
+    client: DatabaseClient = this.db,
+  ): Promise<OnecCounterparty[]> {
+    await this.available(client);
+    if (refKeys !== null && refKeys.length === 0) return [];
+    const { rows } = await client.query<{ source_key: string; data: Record<string, unknown>; deleted: boolean; missing: boolean }>(
+      `SELECT source_key, data, deleted, missing_in_source_at IS NOT NULL AS missing
+         FROM onec_etl_mirror_rows
+        WHERE source_id = $1 AND entity_code = 'counterparties'
+          AND NOT COALESCE((data->>'IsFolder')::boolean, false)
+          AND ($2::text[] IS NULL OR lower(source_key) = ANY($2::text[]))
+        ORDER BY data->>'Description', source_key`,
+      [sourceId, refKeys === null ? null : [...new Set(refKeys.map((key) => key.toLowerCase()))]],
+    );
+    return rows.map((row) => ({
+      refKey: row.source_key.toLowerCase(),
+      code: text(row.data.Code),
+      name: text(row.data.Description) ?? '',
+      fullName: text(row.data['НаименованиеПолное']),
+      isSupplier: row.data['Поставщик'] === true,
+      isCustomer: row.data['Покупатель'] === true,
+      identificationNumber: text(row.data['ИдентификационныйНомер']),
+      // Признак удаления агент кладёт в конверт строки (`deletedField`), в данных он тоже может быть.
+      deletionMark: row.deleted || row.data.DeletionMark === true,
+      missing: row.missing,
+    }));
+  }
+
+  /** Состояние набора контактов контрагентов источника (см. `OnecContactsState`). */
+  async counterpartyContactsState(sourceId: number, client: DatabaseClient = this.db): Promise<OnecContactsState> {
+    return (await this.counterpartyContacts(sourceId, [], client)).state;
+  }
+
+  /**
+   * Контакты контрагентов из последнего применённого снимка. `refKeys` — только эти контрагенты; иначе все.
+   * Вне состояния `available` строк нет: отозванные и истёкшие данные до очистки ещё лежат в копии и никому не
+   * отдаются. Состояние и строки читаются ОДНИМ запросом (один снимок БД): отзыв, очистка или замена снимка между
+   * «прочитал состояние» и «прочитал строки» невозможны, поэтому `available` с пустым списком — это ответ 1С.
+   */
+  async counterpartyContacts(
+    sourceId: number,
+    refKeys: readonly string[] | null = null,
+    client: DatabaseClient = this.db,
+  ): Promise<{ state: OnecContactsState; contacts: OnecCounterpartyContact[] }> {
+    await this.available(client);
+    const { rows } = await client.query<{
+      known: boolean; revoked: boolean | null; expired: boolean | null; snapshot_version: Date | string | null;
+      snapshot_rejected_reason: string | null; data: Record<string, unknown> | null;
+    }>(
+      // Срок — по часам БД и тем же правилом, что очистка (`expirePersonalData`).
+      `WITH st AS (
+         SELECT revoked_at IS NOT NULL AS revoked, snapshot_version, snapshot_rejected_reason,
+                COALESCE(snapshot_version < now() - ($5::bigint * interval '1 millisecond'), false) AS expired
+           FROM onec_etl_entity_state WHERE source_id = $1 AND entity_code = $2)
+       SELECT st.revoked IS NOT NULL AS known, st.revoked, st.expired, st.snapshot_version, st.snapshot_rejected_reason, m.data
+         FROM (SELECT 1) one
+         LEFT JOIN st ON true
+         LEFT JOIN onec_etl_mirror_rows m
+           ON NOT st.revoked AND NOT st.expired AND st.snapshot_version IS NOT NULL
+          AND m.source_id = $1 AND m.entity_code = $2 AND NOT m.deleted AND m.missing_in_source_at IS NULL
+          AND lower(m.data->>'Ref_Key') ~ $3 AND m.data->>'LineNumber' ~ '^[0-9]{1,9}$'
+          AND ($4::text[] IS NULL OR lower(m.data->>'Ref_Key') = ANY($4::text[]))
+        ORDER BY lower(m.data->>'Ref_Key'), (m.data->>'LineNumber')::int`,
+      [sourceId, CONTACTS_ENTITY, UUID_RE, refKeys === null ? null : [...new Set(refKeys.map((key) => key.toLowerCase()))], PERSONAL_DATA_TTL_MS],
+    );
+    const head = rows[0];
+    const version = head?.known ? head.snapshot_version : null;
+    const state: OnecContactsState = {
+      sourceId,
+      status: head?.revoked ? 'revoked' : version === null ? 'not_loaded' : head?.expired ? 'expired' : 'available',
+      snapshotVersion: version === null ? null : new Date(version).toISOString(),
+      rejectedReason: head?.known ? head.snapshot_rejected_reason : null,
+    };
+    const contacts = rows.flatMap(({ data }) => {
+      if (data === null) return [];
+      const typeRaw = text(data['Тип']);
+      const kind = text(data['Вид_Key'])?.toLowerCase() ?? null;
+      return [{
+        counterpartyRefKey: String(data.Ref_Key).toLowerCase(),
+        lineNo: Number(data.LineNumber),
+        type: (typeRaw && CONTACT_TYPES[typeRaw]) || 'other',
+        typeRaw,
+        kindRefKey: kind === ZERO_GUID ? null : kind,
+        presentation: text(data['Представление']),
+        phoneNumber: text(data['НомерТелефона']),
+        email: text(data['АдресЭП']),
+        country: text(data['Страна']),
+        region: text(data['Регион']),
+        city: text(data['Город']),
+      } satisfies OnecCounterpartyContact];
+    });
+    return { state, contacts };
   }
 
   /** Источники, по которым выгружалась сущность (часовые проходы потребителей копии). */

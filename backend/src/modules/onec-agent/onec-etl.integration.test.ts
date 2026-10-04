@@ -30,6 +30,7 @@ import { OnecEtlCompletionService } from './application/onec-etl-completion.serv
 import { OnecEtlIngestService } from './application/onec-etl-ingest.service';
 import { OnecEtlParserService } from './application/onec-etl-parser.service';
 import { OnecMonitorService } from './application/onec-monitor.service';
+import { OnecCatalogReader } from './onec-catalog-reader';
 import type { OnecRuntimeConfig, OnecRuntimeConfigService } from './onec-runtime-config.service';
 
 const actor = { id: '1', username: 'E2E-Тест', role: 'admin', roleId: 1, permissions: ['onec.manage', 'onec.view'] } as CurrentUser;
@@ -729,6 +730,101 @@ suite('1C agent E3a ETL — isolated PostgreSQL + real spool', () => {
     await pool.query(`UPDATE onec_etl_entity_state SET snapshot_version = now() - interval '31 days' WHERE entity_code = 'counterparty_phones'`);
     expect(await revocation.cleanupAll()).toMatchObject({ personalRowsExpired: 1 });
     expect(await mirror('counterparty_phones')).toEqual([]);
+  });
+
+  it('counterparty contacts: a personal-data snapshot read through the catalog reader; nothing is served once revoked or expired', async () => {
+    const reader = new OnecCatalogReader(db, runtime);
+    const CP1 = '11111111-1111-4111-8111-111111111111';
+    // Letters in the key: the copy holds it in upper case, the lookups come in lower and mixed case.
+    const CP2 = 'abcdefab-2222-4222-8222-abcdefabcdef';
+    const line = (cp: string, no: number, data: Record<string, unknown>) => row(JSON.stringify([cp, String(no)]), { Ref_Key: cp, LineNumber: String(no), ...data });
+    // No snapshot yet: «not loaded» is not «the counterparty has no contacts».
+    expect(await reader.counterpartyContacts(1)).toEqual({ state: { sourceId: 1, status: 'not_loaded', snapshotVersion: null, rejectedReason: null }, contacts: [] });
+    const first = new Date(Date.now() - 60_000).toISOString();
+    await snapshotRun([
+      line(CP1, 2, { Тип: 'АдресЭлектроннойПочты', Вид_Key: '33333333-3333-4333-8333-333333333333', Представление: 'a@example.test', АдресЭП: 'a@example.test' }),
+      line(CP1, 1, { Тип: 'Телефон', Вид_Key: '00000000-0000-0000-0000-000000000000', Представление: '+7 700 000 00 00', НомерТелефона: '+7 700 000 00 00' }),
+      line(CP2.toUpperCase(), 1, { Тип: 'Адрес', Представление: 'Казахстан, Алматы', Страна: 'Казахстан', Регион: '', Город: 'Алматы' }),
+      line(CP2, 2, { Тип: 'Skype', Представление: 'x' }),
+    ], { snapshotAtUtc: first }, 'counterparty_contacts');
+    const all = await reader.counterpartyContacts(1);
+    expect(all.state).toEqual({ sourceId: 1, status: 'available', snapshotVersion: first, rejectedReason: null });
+    expect(all.contacts.map((c) => [c.counterpartyRefKey, c.lineNo, c.type, c.typeRaw])).toEqual([
+      [CP1, 1, 'phone', 'Телефон'], [CP1, 2, 'email', 'АдресЭлектроннойПочты'], [CP2, 1, 'address', 'Адрес'], [CP2, 2, 'other', 'Skype'],
+    ]);
+    expect(all.contacts[0]).toMatchObject({ kindRefKey: null, phoneNumber: '+7 700 000 00 00', email: null });
+    expect(all.contacts[1]).toMatchObject({ kindRefKey: '33333333-3333-4333-8333-333333333333', email: 'a@example.test' });
+    expect(all.contacts[2]).toMatchObject({ country: 'Казахстан', region: null, city: 'Алматы', presentation: 'Казахстан, Алматы' });
+    // Only the requested counterparties; another source sees nothing.
+    expect((await reader.counterpartyContacts(1, [CP2])).contacts.map((c) => c.lineNo)).toEqual([1, 2]);
+    expect((await reader.counterpartyContacts(1, ['ABCDEFAB-2222-4222-8222-abcdefabcdef'])).contacts.map((c) => c.counterpartyRefKey)).toEqual([CP2, CP2]);
+    expect((await reader.counterpartyContacts(1, [])).contacts).toEqual([]);
+    expect((await reader.counterpartyContacts(2)).state.status).toBe('not_loaded');
+    // A newer snapshot without a line removes it from the copy (no «missing» marks).
+    const second = new Date().toISOString();
+    await snapshotRun([line(CP1, 1, { Тип: 'Телефон', Представление: '+7 700 000 00 01', НомерТелефона: '+7 700 000 00 01' })], { snapshotAtUtc: second }, 'counterparty_contacts');
+    const replaced = await reader.counterpartyContacts(1);
+    expect(replaced.state.snapshotVersion).toBe(second);
+    expect(replaced.contacts.map((c) => [c.counterpartyRefKey, c.lineNo, c.phoneNumber])).toEqual([[CP1, 1, '+7 700 000 00 01']]);
+    // Not confirmed for 30 days: «expired», nothing is served even before the cleanup tick removes the rows.
+    await pool.query(`UPDATE onec_etl_entity_state SET snapshot_version = now() - interval '31 days' WHERE entity_code = 'counterparty_contacts'`);
+    expect(await keys('counterparty_contacts')).toHaveLength(1);
+    expect(await reader.counterpartyContacts(1)).toMatchObject({ state: { status: 'expired' }, contacts: [] });
+    expect(await revocation.cleanupAll()).toMatchObject({ personalRowsExpired: 1 });
+    expect(await keys('counterparty_contacts')).toEqual([]);
+    // Revoked by an operator: «revoked», and the revocation is allowed for this set.
+    await snapshotRun([line(CP1, 1, { Тип: 'Телефон', Представление: '+7 700 000 00 02' })], { snapshotAtUtc: new Date().toISOString() }, 'counterparty_contacts');
+    expect((await reader.counterpartyContacts(1)).contacts).toHaveLength(1);
+    // Revocation committed but the purge has not run yet (it is a separate step): rows are still in the copy and are not served.
+    await pool.query(`UPDATE onec_etl_entity_state SET revoked_at = now() WHERE source_id = 1 AND entity_code = 'counterparty_contacts'`);
+    expect(await keys('counterparty_contacts')).toHaveLength(1);
+    expect(await reader.counterpartyContacts(1)).toMatchObject({ state: { status: 'revoked' }, contacts: [] });
+    expect(await reader.counterpartyContactsState(1)).toMatchObject({ status: 'revoked' });
+    await pool.query(`UPDATE onec_etl_entity_state SET revoked_at = NULL WHERE source_id = 1 AND entity_code = 'counterparty_contacts'`);
+    // An applied snapshot with no lines at all is an answer from 1C: «available», empty.
+    const empty = new Date().toISOString();
+    await snapshotRun([], { snapshotAtUtc: empty }, 'counterparty_contacts');
+    expect(await reader.counterpartyContacts(1)).toEqual({ state: { sourceId: 1, status: 'available', snapshotVersion: empty, rejectedReason: null }, contacts: [] });
+    await snapshotRun([line(CP1, 1, { Тип: 'Телефон', Представление: '+7 700 000 00 03' }), row('not-a-key', { Ref_Key: 'x', LineNumber: 'y', Тип: 'Телефон' })],
+      { snapshotAtUtc: new Date().toISOString() }, 'counterparty_contacts');
+    // A malformed line is skipped, not thrown.
+    expect((await reader.counterpartyContacts(1)).contacts.map((c) => c.lineNo)).toEqual([1]);
+    await onecAdmin.revokeEntity('agent-a', 'counterparty_contacts', actor, actx('revoke-contacts'));
+    expect(await reader.counterpartyContacts(1)).toMatchObject({ state: { status: 'revoked' }, contacts: [] });
+    expect(await keys('counterparty_contacts')).toEqual([]);
+  });
+
+  it('counterparties from the copy: no folders, flags and identification number, filter by keys', async () => {
+    const reader = new OnecCatalogReader(db, runtime);
+    const A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    const F = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+    const runId = randomUUID();
+    await upload({ runId, entity: 'counterparties', lines: [
+      row(A, { Description: 'Бета', Code: '002', НаименованиеПолное: 'ТОО Бета', Поставщик: true, Покупатель: false, ИдентификационныйНомер: '123456789012', IsFolder: false, DeletionMark: false }),
+      // Marked for deletion the way the agent sends it: the envelope flag (`deletedField: 'DeletionMark'`).
+      row(B, { Description: 'Альфа', Code: '', Поставщик: false, Покупатель: true, IsFolder: false, DeletionMark: true }, null, true),
+      row(F, { Description: 'Группа', IsFolder: true }),
+    ] });
+    await parser.drainQueue();
+    await complete(runId, v2(runId, [entityV2('counterparties')]));
+    const list = await reader.listCounterparties(1);
+    expect(list).toEqual([
+      { refKey: B, code: null, name: 'Альфа', fullName: null, isSupplier: false, isCustomer: true, identificationNumber: null, deletionMark: true, missing: false },
+      { refKey: A, code: '002', name: 'Бета', fullName: 'ТОО Бета', isSupplier: true, isCustomer: false, identificationNumber: '123456789012', deletionMark: false, missing: false },
+    ]);
+    expect((await reader.listCounterparties(1, [A.toUpperCase(), F])).map((c) => c.refKey)).toEqual([A]);
+    expect(await reader.listCounterparties(1, [])).toEqual([]);
+    expect(await reader.listCounterparties(2)).toEqual([]);
+    // A deletion mark only in the data is a flag too.
+    await pool.query(`UPDATE onec_etl_mirror_rows SET deleted = false WHERE source_id = 1 AND entity_code = 'counterparties' AND lower(source_key) = $1`, [B]);
+    expect((await reader.listCounterparties(1, [B]))[0]).toMatchObject({ deletionMark: true });
+    // A counterparty absent from a later full read stays in the copy with the «missing» flag.
+    const full = randomUUID();
+    await upload({ runId: full, entity: 'counterparties', lines: [row(B, { Description: 'Альфа', IsFolder: false, DeletionMark: false })] });
+    await parser.drainQueue();
+    await complete(full, v2(full, [entityV2('counterparties')]));
+    expect((await reader.listCounterparties(1)).map((c) => [c.refKey, c.deletionMark, c.missing])).toEqual([[B, false, false], [A, false, true]]);
   });
 
   // ---------------------------------------------------------------- E3b: rebaseline (§3.2)

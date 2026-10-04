@@ -573,7 +573,7 @@ export function onecStripSourceGeneration(configuration: OnecPublishedAgentConfi
 
 /** Ready-made ETL entities for the 1C catalogs/registers agreed with the agent team (agent to-erp/0003, E3b). */
 export const ONEC_ETL_ENTITY_PRESETS: Record<
-  'items' | 'counterparties' | 'units' | 'item_categories' | 'warehouses' | 'stock_balances' | 'counterparty_phones',
+  'items' | 'counterparties' | 'units' | 'item_categories' | 'warehouses' | 'stock_balances' | 'counterparty_phones' | 'counterparty_contacts',
   OnecEtlEntity
 > = {
   items: {
@@ -694,6 +694,24 @@ export const ONEC_ETL_ENTITY_PRESETS: Record<
     overlapMinutes: 0,
     enabled: true,
   },
+  // Personal data (agent to-erp/0142): every contact line of a counterparty — phones, e-mail, addresses; no filter.
+  counterparty_contacts: {
+    entityCode: 'counterparty_contacts',
+    oDataPath: 'Catalog_Контрагенты_КонтактнаяИнформация',
+    keyField: 'Ref_Key',
+    keyFields: ['Ref_Key', 'LineNumber'],
+    updatedAtField: null,
+    deletedField: null,
+    select: [
+      'Ref_Key', 'LineNumber', 'Тип', 'Вид_Key', 'Представление', 'Страна', 'Регион', 'Город',
+      'АдресЭП', 'ДоменноеИмяСервера', 'НомерТелефона', 'НомерТелефонаБезКодов',
+    ],
+    deleteBatchAfterAck: true,
+    syncMode: 'incremental',
+    pageSize: 1000,
+    overlapMinutes: 0,
+    enabled: true,
+  },
 };
 
 export const ONEC_ETL_ENTITY_PRESET_LABELS: Record<keyof typeof ONEC_ETL_ENTITY_PRESETS, string> = {
@@ -704,6 +722,7 @@ export const ONEC_ETL_ENTITY_PRESET_LABELS: Record<keyof typeof ONEC_ETL_ENTITY_
   warehouses: 'Склады (warehouses)',
   stock_balances: 'Остатки (stock_balances)',
   counterparty_phones: 'Телефоны контрагентов (counterparty_phones, персональные данные)',
+  counterparty_contacts: 'Контакты контрагентов (counterparty_contacts, персональные данные)',
 };
 
 // ---------------------------------------------------------------- ETL tab labels
@@ -716,6 +735,7 @@ export const ONEC_ETL_ENTITY_LABELS: Record<string, string> = {
   warehouses: 'Склады',
   stock_balances: 'Остатки',
   counterparty_phones: 'Телефоны контрагентов',
+  counterparty_contacts: 'Контакты контрагентов',
   price_kinds: 'Виды цен',
   price_types: 'Виды цен',
   item_prices: 'Цены',
@@ -847,14 +867,14 @@ export function onecEtlEntityStatusColor(status: OnecEtlLastStatus | string | nu
 // ---------------------------------------------------------------- Snapshot entities, revocation, mirror (E3b)
 
 /** Entities whose whole copy is replaced by a newer verified snapshot rather than merged incrementally. */
-export const ONEC_ETL_SNAPSHOT_ENTITIES: readonly string[] = ['stock_balances', 'counterparty_phones'];
+export const ONEC_ETL_SNAPSHOT_ENTITIES: readonly string[] = ['stock_balances', 'counterparty_phones', 'counterparty_contacts'];
 
 export function onecEtlIsSnapshotEntity(entity: string): boolean {
   return ONEC_ETL_SNAPSHOT_ENTITIES.includes(entity);
 }
 
 /** Personal-data entities the operator may revoke (data purge + write ban) from the ETL tab. */
-export const ONEC_ETL_REVOCABLE_ENTITIES: readonly string[] = ['counterparty_phones'];
+export const ONEC_ETL_REVOCABLE_ENTITIES: readonly string[] = ['counterparty_phones', 'counterparty_contacts'];
 
 export function onecEtlEntityRevocable(entity: string): boolean {
   return ONEC_ETL_REVOCABLE_ENTITIES.includes(entity);
