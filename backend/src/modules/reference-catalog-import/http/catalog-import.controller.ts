@@ -1,16 +1,4 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Headers,
-  HttpCode,
-  Param,
-  Patch,
-  Post,
-  Query,
-  Req,
-  Res,
-} from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { z } from 'zod';
@@ -18,6 +6,7 @@ import { DECISIONS_FORMAT, DECISIONS_MAX_ROWS } from '../domain/catalog-decision
 import { CATALOG_MAX_ROWS } from '../../../shared/film-catalog';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
+import { PermissionsGuard } from '../../../permissions/permissions.guard';
 import { RequirePermissions } from '../../../permissions/require-permissions.decorator';
 import { CatalogImportService } from '../application/catalog-import.service';
 import { CatalogImportRuntimeConfigService } from '../application/catalog-import-runtime-config.service';
@@ -171,6 +160,8 @@ const versionSchema = z
 @ApiTags('Reference catalog import')
 @ApiBearerAuth()
 @Controller('catalog-imports')
+// Без guard декоратор RequirePermissions — только метаданные: права проверяет PermissionsGuard.
+@UseGuards(PermissionsGuard)
 @RequirePermissions('references.manage')
 export class CatalogImportController {
   constructor(
@@ -451,6 +442,7 @@ export class CatalogImportController {
 @ApiTags('Films')
 @ApiBearerAuth()
 @Controller('films')
+@UseGuards(PermissionsGuard)
 @RequirePermissions('references.view')
 export class FilmReferenceController {
   constructor(private readonly service: CatalogImportService) {}
