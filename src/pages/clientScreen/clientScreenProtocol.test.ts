@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  CLIENT_SCREEN_CHANNEL, CLIENT_SCREEN_OWNER_LOCK_PREFIX, CLIENT_SCREEN_PROTOCOL_VERSION, CLIENT_SCREEN_RETIRED_VIEWERS, CLIENT_SCREEN_VIEWER_LOCK,
+  CLIENT_SCREEN_ANY_OWNER_LOCK_PREFIX, CLIENT_SCREEN_CHANNEL, CLIENT_SCREEN_OWNER_LOCK_PREFIX, CLIENT_SCREEN_PROTOCOL_VERSION, CLIENT_SCREEN_RETIRED_VIEWERS, CLIENT_SCREEN_VIEWER_LOCK,
   clientScreenMessage, clientScreenOwnerLock, clientScreenRandomId, parseClientScreenMessage, type ClientScreenMessage,
 } from './clientScreenProtocol';
 import { CLIENT_SCREEN_CODES } from './clientScreenRegistry';
@@ -106,6 +106,10 @@ describe('wire version', () => {
     expect(CLIENT_SCREEN_VIEWER_LOCK).toBe('erp-client-screen-viewer-v2');
     expect(clientScreenOwnerLock(7)).toBe('erp-client-screen-owner-v2-7');
     expect(clientScreenOwnerLock(7).startsWith(CLIENT_SCREEN_OWNER_LOCK_PREFIX)).toBe(true);
+    // Presence of a presentation is recognised for every build: this one and the previous one.
+    expect(clientScreenOwnerLock(7).startsWith(CLIENT_SCREEN_ANY_OWNER_LOCK_PREFIX)).toBe(true);
+    expect('erp-client-screen-owner-7'.startsWith(CLIENT_SCREEN_ANY_OWNER_LOCK_PREFIX)).toBe(true);
+    expect(CLIENT_SCREEN_VIEWER_LOCK.startsWith(CLIENT_SCREEN_ANY_OWNER_LOCK_PREFIX)).toBe(false);
     const retired = CLIENT_SCREEN_RETIRED_VIEWERS.map((item) => item.channel);
     expect(retired).toEqual(['erp-client-screen']);
     expect(retired).not.toContain(CLIENT_SCREEN_CHANNEL);

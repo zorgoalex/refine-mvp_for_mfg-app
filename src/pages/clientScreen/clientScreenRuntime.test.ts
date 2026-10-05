@@ -6,6 +6,7 @@ import type { ClientScreenPolicy } from './clientScreenPublisherCore';
 import { CLIENT_SCREEN_CODES } from './clientScreenRegistry';
 import type { ClientScreenUi } from './clientScreenSnapshotSchema';
 import { startClientScreenViewer, type ClientScreenViewer } from './clientScreenViewerRuntime';
+import { CLIENT_SCREEN_WORKSTATION_KEY } from './clientScreenWorkstation';
 
 /**
  * Two kinds of "windows" in one process: real BroadcastChannel and real Web Locks (Node provides
@@ -698,6 +699,32 @@ describe('customer screen: manager windows and the customer window together', ()
     expect(JSON.stringify(viewer.getState().shown)).toContain('8 701 000 0000');
     expect(received).toHaveLength(1);
   });
+
+  it('a window of this build sees a presentation run by a window of the previous build, and its emergency switch-off reaches that build', async () => {
+    const { presenter } = setup();
+    let env: ClientScreenEnvironment | null = null;
+    const idle = presenter({ tweakEnv: (value) => { env = value; return value; } });
+    // The other tab still runs the previous build and presents: it holds an owner lock of that build.
+    let releaseOldOwner: () => void = () => undefined;
+    void env!.locks.request('erp-client-screen-owner-5', {}, () => new Promise<void>((resolve) => { releaseOldOwner = resolve; }));
+    disposables.push(() => releaseOldOwner());
+    await until(() => idle.getView().presentingElsewhere, 'presentation of the previous build is seen', 6000);
+    expect(idle.getView().presentedOrderKey).toBeNull();
+
+    // The switch-off goes through the workstation record, which every build reads under the same key.
+    const before = env!.readWorkstation();
+    await idle.disableWorkstation();
+    const after = env!.readWorkstation();
+    expect(after.disabled).toBe(true);
+    expect(after.gen).toBeGreaterThan(before.gen);
+    expect(CLIENT_SCREEN_WORKSTATION_KEY).toBe('erp.clientScreen.workstation');
+    // A window that only reads that record (as the previous build's owner and customer window do) sees it.
+    const witness = presenter();
+    expect(witness.getView().workstationDisabled).toBe(true);
+    // When that old owner lets go, the indicator has nothing to show any more.
+    releaseOldOwner();
+    await until(() => !idle.getView().presentingElsewhere, 'old presentation gone', 6000);
+  }, 20000);
 
   it('a second customer window stays passive', async () => {
     const { startViewer } = setup();

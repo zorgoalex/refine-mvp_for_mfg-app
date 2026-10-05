@@ -85,3 +85,9 @@ export function clientScreenRandomId(length = 16): string {
 export const CLIENT_SCREEN_VIEWER_LOCK = `erp-client-screen-viewer-v${CLIENT_SCREEN_PROTOCOL_VERSION}`;
 export const CLIENT_SCREEN_OWNER_LOCK_PREFIX = `erp-client-screen-owner-v${CLIENT_SCREEN_PROTOCOL_VERSION}-`;
 export const clientScreenOwnerLock = (ownerEpoch: number) => `${CLIENT_SCREEN_OWNER_LOCK_PREFIX}${ownerEpoch}`;
+/**
+ * Owner locks of every build start like this. Knowing THAT something is presented on this
+ * workstation must not depend on the wire version: the emergency switch-off (which works through
+ * the shared workstation record) has to be at hand also while a window of another build presents.
+ */
+export const CLIENT_SCREEN_ANY_OWNER_LOCK_PREFIX = 'erp-client-screen-owner-';

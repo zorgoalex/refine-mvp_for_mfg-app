@@ -4,7 +4,7 @@ import {
 } from './buildClientScreenSnapshot';
 import type { ClientScreenEnvironment } from './clientScreenEnvironment';
 import {
-  CLIENT_SCREEN_OWNER_LOCK_PREFIX, CLIENT_SCREEN_VIEWER_LOCK, clientScreenMessage, clientScreenOwnerLock, type ClientScreenMessage,
+  CLIENT_SCREEN_ANY_OWNER_LOCK_PREFIX, CLIENT_SCREEN_VIEWER_LOCK, clientScreenMessage, clientScreenOwnerLock, type ClientScreenMessage,
 } from './clientScreenProtocol';
 import {
   POLICY_REFRESH_MS, createPublisherState, publisherApplyPolicy, publisherCanPublish, publisherClaim, publisherConfirm, publisherOnLockHeld,
@@ -247,6 +247,8 @@ export class ClientScreenPresenter {
     try {
       await this.deps.env.updateWorkstation('disable');
       this.send(clientScreenMessage('shutdown', {}));
+      // A customer window of an earlier build reads the same record; its own closing message speeds that up.
+      this.deps.env.retireOldViewers();
     } finally {
       // Local cleanup never depends on the channel or the storage.
       this.forget('disabled');
@@ -337,8 +339,9 @@ export class ClientScreenPresenter {
   }
 
   /**
-   * Whether another window holds an owner lock: the app header of every window shows the emergency
-   * switch-off while an order is presented from any of them. Read-only; a failure means "unknown".
+   * Whether another window holds an owner lock — of this build or of any other: the app header of
+   * every window shows the emergency switch-off while an order is presented from any of them.
+   * Read-only; a failure means "unknown".
    */
   private lookElsewhere(): void {
     const now = this.deps.env.now();
@@ -347,7 +350,7 @@ export class ClientScreenPresenter {
     const mine = this.lockedEpoch ? clientScreenOwnerLock(this.lockedEpoch) : null;
     void this.deps.env.locks.query().then((snapshot) => {
       const next = (snapshot.held ?? []).some((lock) => typeof lock.name === 'string'
-        && lock.name.startsWith(CLIENT_SCREEN_OWNER_LOCK_PREFIX) && lock.name !== mine);
+        && lock.name.startsWith(CLIENT_SCREEN_ANY_OWNER_LOCK_PREFIX) && lock.name !== mine);
       if (next === this.elsewhere) return;
       this.elsewhere = next;
       this.refresh();
