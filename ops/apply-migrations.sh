@@ -2598,6 +2598,14 @@ probe_file() {
       "$(q_con_on client_screen_settings chk_client_screen_settings_singleton)" \
       "$(q_con_on client_screen_settings chk_client_screen_settings_codes)" \
       "SELECT EXISTS (SELECT 1 FROM client_screen_settings WHERE config_id = 1);" ;;
+    # 242: the old supplier phone field keeps the copied phone contact in step until the set is saved.
+    242_supplier_phone_contact_sync*) probe_all \
+      "$(q_col party_contact_versions saved_by_command)" \
+      "SELECT to_regprocedure('public.party_contact_versions_saved()') IS NOT NULL;" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_party_contact_versions_saved' AND tgrelid = 'public.party_contact_versions'::regclass AND tgenabled = 'O' AND NOT tgisinternal);" \
+      "SELECT to_regprocedure('public.supplier_phone_number(text)') IS NOT NULL;" \
+      "SELECT to_regprocedure('public.supplier_phone_contact_sync()') IS NOT NULL;" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_supplier_phone_contact_sync' AND tgrelid = 'public.suppliers'::regclass AND tgenabled = 'O' AND NOT tgisinternal);" ;;
     # 238: a supplier request as a card-queue send (text in parts); every re-created CHECK must be validated.
     238_whatsapp_supplier_send*) probe_all \
       "$(q_col whatsapp_order_send_settings supplier_requests_enabled)" \
@@ -3074,7 +3082,7 @@ verify_applied_effect() {
     205_warehouses_onec_key_required*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    231_cut_result_render_v2*|209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|234_reference_nomenclature_note*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|240_payment_onec_matches*|241_client_screen_settings*)
+    231_cut_result_render_v2*|209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|234_reference_nomenclature_note*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|240_payment_onec_matches*|241_client_screen_settings*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)
