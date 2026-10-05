@@ -12,6 +12,8 @@ export const SETTINGS_CATEGORY_PERMISSIONS: PermissionName[] = [
   'whatsapp.view',
   'whatsapp.manage',
   'message_signals.manage_config',
+  // «Интеграция 1С» lives in this category: its operator role has no settings.* permission.
+  'onec.view',
 ];
 
 export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {

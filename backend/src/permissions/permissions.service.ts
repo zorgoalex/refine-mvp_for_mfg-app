@@ -517,10 +517,16 @@ export class PermissionsService {
       catalogParams,
     );
 
+    // Only roles that exist in `roles`: a static role whose migration has not run yet (new backend, old database)
+    // must not break authorization of everybody else with a foreign-key error.
+    const existingRoles = await target.query<{ role_id: number | string } & QueryResultRow>('SELECT role_id FROM roles');
+    const existingRoleIds = new Set(existingRoles.rows.map((row) => Number(row.role_id)));
+
     const rolePermissionParams: unknown[] = [];
     const rolePermissionValues: string[] = [];
     for (const role of Object.keys(ROLE_PERMISSIONS) as UserRole[]) {
       const roleId = mapRoleToRoleId(role);
+      if (!existingRoleIds.has(roleId)) continue;
       const enabled = new Set(ROLE_PERMISSIONS[role]);
       for (const permission of PERMISSIONS) {
         const base = rolePermissionParams.length;
@@ -528,19 +534,22 @@ export class PermissionsService {
         rolePermissionValues.push(`($${base + 1}, $${base + 2}, $${base + 3})`);
       }
     }
-    await target.query(
-      `
-      INSERT INTO role_permissions (role_id, permission_name, is_enabled)
-      VALUES ${rolePermissionValues.join(', ')}
-      ON CONFLICT (role_id, permission_name) DO NOTHING
-      `,
-      rolePermissionParams,
-    );
+    if (rolePermissionValues.length > 0) {
+      await target.query(
+        `
+        INSERT INTO role_permissions (role_id, permission_name, is_enabled)
+        VALUES ${rolePermissionValues.join(', ')}
+        ON CONFLICT (role_id, permission_name) DO NOTHING
+        `,
+        rolePermissionParams,
+      );
+    }
 
     const scopeParams: unknown[] = [];
     const scopeValues: string[] = [];
     for (const role of Object.keys(ROLE_POLICIES) as UserRole[]) {
       const roleId = mapRoleToRoleId(role);
+      if (!existingRoleIds.has(roleId)) continue;
       const flat = flattenRolePolicy(ROLE_POLICIES[role]);
       for (const key of ROLE_POLICY_SCOPE_KEYS) {
         const base = scopeParams.length;
@@ -548,14 +557,16 @@ export class PermissionsService {
         scopeValues.push(`($${base + 1}, $${base + 2}, $${base + 3})`);
       }
     }
-    await target.query(
-      `
-      INSERT INTO role_policy_scopes (role_id, scope_key, scope_value)
-      VALUES ${scopeValues.join(', ')}
-      ON CONFLICT (role_id, scope_key) DO NOTHING
-      `,
-      scopeParams,
-    );
+    if (scopeValues.length > 0) {
+      await target.query(
+        `
+        INSERT INTO role_policy_scopes (role_id, scope_key, scope_value)
+        VALUES ${scopeValues.join(', ')}
+        ON CONFLICT (role_id, scope_key) DO NOTHING
+        `,
+        scopeParams,
+      );
+    }
 
     await target.query(
       `

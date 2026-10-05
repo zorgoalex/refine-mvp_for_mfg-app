@@ -1300,6 +1300,7 @@ const USER_ROLE_ID_MAP: Record<number, UserRole> = {
   15: 'top_manager',
   20: 'worker',
   30: 'packer',
+  32: 'onec_operator',
   100: 'viewer',
 };
 
@@ -1312,6 +1313,7 @@ const USER_ROLE_LABELS: Record<UserRole, string> = {
   worker: 'Работник',
   packer: 'Упаковщик',
   viewer: 'Наблюдатель',
+  onec_operator: 'Оператор интеграции 1С',
 };
 
 function mapUsersQueryToBackend(
