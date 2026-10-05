@@ -522,6 +522,10 @@ describe('customer screen: manager windows and the customer window together', ()
     // The owner lock is released, so the customer window sees the owner gone and blanks.
     await until(() => viewer.getState().screen !== 'order', 'customer window no longer shows the order');
     await until(() => a.getView().phase === 'idle' && a.getView().presentedOrderKey === null && a.getView().lost === 'error', 'presenter cleaned up');
+    // What could not be delivered is not offered as "what the customer sees".
+    expect(a.getPreview()).toBeNull();
+    await wait(80);
+    expect(a.getPreview()).toBeNull();
   });
 
   it('a tab hidden by the settings, or not mirrored at all, leaves the customer on the last tab shown', async () => {

@@ -68,6 +68,18 @@ export function clientScreenPhone(phone: string): string {
   return phone;
 }
 
+/**
+ * The loaded phone rows that belong to this client. A list that holds a phone of another client is
+ * a stale answer (the client of the order was just changed): it is treated as not loaded.
+ */
+export function clientScreenPhonesOf<T extends { client_id?: unknown }>(
+  clientId: number | null | undefined,
+  rows: readonly T[] | null | undefined,
+): readonly T[] | undefined {
+  if (clientId === null || clientId === undefined || !rows) return undefined;
+  return rows.every((row) => Number(row.client_id) === Number(clientId)) ? rows : undefined;
+}
+
 /** Phones of one client as the customer screen shows them; `undefined` while they are not loaded. */
 export function clientScreenClientContacts(
   phones: ReadonlyArray<{ phone_number?: string | null; is_primary?: boolean | null }> | null | undefined,

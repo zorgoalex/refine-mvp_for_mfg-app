@@ -390,7 +390,10 @@ export class ClientScreenPresenter {
     this.blanked = snapshot === null;
     this.lastSnapshot = snapshot;
     this.send(next.message);
+    // A send that failed has ended the presentation and erased everything: nothing is set after it.
+    if (this.lastSnapshot !== snapshot || this.state.phase !== 'owner') return;
     if (snapshot) this.sendUi();
+    if (this.lastSnapshot !== snapshot || this.state.phase !== 'owner') return;
     // sendUi sets the preview with the interface state; a blank or a state without one is set here.
     if (!snapshot || this.preview?.snapshot !== snapshot) this.setPreview(snapshot ? { snapshot, ui: null } : null);
     this.refresh();
@@ -407,6 +410,8 @@ export class ClientScreenPresenter {
     const ui = filterClientScreenUi({ ...raw, tab }, this.lastSnapshot, this.state.policy.visibleCodes);
     const message = publisherUi(this.state, ui);
     if (message) this.send(message);
+    // The preview is what was delivered: after a failed send the presentation is over and it stays empty.
+    if (!this.lastSnapshot || this.state.phase !== 'owner') return;
     this.setPreview({ snapshot: this.lastSnapshot, ui });
   }
 

@@ -4,7 +4,7 @@ import { buildMirrorView } from './mirrorView';
 import { CLIENT_SCREEN_CODES, CLIENT_SCREEN_DEFAULT_VISIBLE_CODES } from './clientScreenRegistry';
 import { clientScreenSnapshotSchema } from './clientScreenSnapshotSchema';
 import {
-  buildOrderEditSource, clientScreenClientContacts, clientScreenPhone, DETAIL_COLUMN_FIELDS, GROUPING_FIELDS, orderEditEditingValues,
+  buildOrderEditSource, clientScreenClientContacts, clientScreenPhone, clientScreenPhonesOf, DETAIL_COLUMN_FIELDS, GROUPING_FIELDS, orderEditEditingValues,
   type OrderEditSourceInput,
 } from './orderEditSnapshotSource';
 
@@ -289,6 +289,23 @@ describe('contact data of the client', () => {
       { code: 'summary.client_phones', label: 'Доп. телефоны клиента', value: '8 701 111 2233, 8 727 333 4455' },
     ]);
     expect(wire(clientScreenClientContacts([]), CLIENT_SCREEN_CODES).find((field) => field.code === 'summary.client_phone')?.value).toBe('—');
+  });
+
+  it('an answer with phones of another client (the client was just changed) is not loaded data', () => {
+    const ofA = [{ client_id: 5, phone_number: '87051111111', is_primary: true }];
+    expect(clientScreenPhonesOf(5, ofA)).toBe(ofA);
+    // The order now has client 6, the list on hand is still client 5's: nothing is sent.
+    expect(clientScreenPhonesOf(6, ofA)).toBeUndefined();
+    expect(clientScreenClientContacts(clientScreenPhonesOf(6, ofA))).toEqual({ phone: undefined, otherPhones: undefined });
+    expect(clientScreenPhonesOf(6, [...ofA, { client_id: 6, phone_number: '87052222222', is_primary: true }])).toBeUndefined();
+    // Client 6 really has no phones: an empty answer is loaded data.
+    expect(clientScreenClientContacts(clientScreenPhonesOf(6, []))).toEqual({ phone: null, otherPhones: null });
+    expect(clientScreenPhonesOf(null, ofA)).toBeUndefined();
+    expect(clientScreenPhonesOf(5, undefined)).toBeUndefined();
+    const wire = JSON.stringify(buildClientScreenSnapshot(
+      buildOrderEditSource(input({ clientContacts: clientScreenClientContacts(clientScreenPhonesOf(6, ofA)) })), CLIENT_SCREEN_CODES, createClientScreenIdMap(() => 'idaaaaaa'),
+    ));
+    expect(wire).not.toContain('705 111');
   });
 
   it('phones are hidden until ticked: neither the default set nor a set without their codes sends them', () => {
