@@ -29,6 +29,14 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-06", title: "Видимость экранов для отдельных пользователей",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "«Конфигурация → Видимость экранов → По пользователям»: для выбранного пользователя каждый пункт меню можно оставить «как у роли», показать или скрыть. Персональная настройка важнее настройки роли; рядом видно, что даёт роль и что получится в итоге.",
+      "В списке пользователей отмечено, у кого есть персональные настройки; «Сбросить всё» возвращает пользователя к настройкам роли.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-05", title: "Роль «Оператор интеграции 1С»",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

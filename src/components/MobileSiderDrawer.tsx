@@ -15,8 +15,7 @@ import { bitrix24MenuConfig } from "../config/bitrix24";
 import { useAppSettings, SETTING_KEYS } from "../hooks/useAppSettings";
 import { useSidebarMenuPreferences } from "../hooks/useSidebarMenuPreferences";
 import {
-  canViewResourceByRoleVisibility,
-  getCurrentUserRoleKey,
+  canViewResourceForUser,
   normalizeRoleVisibilityMatrix,
 } from "../utils/resourceVisibility";
 import {
@@ -62,7 +61,6 @@ export const MobileSiderDrawer: React.FC<MobileSiderDrawerProps> = ({ open, onCl
     ? authSession.getUser()
     : authStorage.getUser();
   const { canViewFinancials } = useOrderFinancialVisibility(currentUser);
-  const currentRoleKey = getCurrentUserRoleKey(currentUser);
   const roleVisibilityMatrix = normalizeRoleVisibilityMatrix(
     getSetting(SETTING_KEYS.RESOURCE_VISIBILITY_BY_ROLE),
   );
@@ -82,8 +80,8 @@ export const MobileSiderDrawer: React.FC<MobileSiderDrawerProps> = ({ open, onCl
   const canViewNavigation = useCallback(
     (name: string) =>
       canViewNavigationResource(name, currentUser, featureFlags.useBackendPermissions, canViewFinancials) &&
-      canViewResourceByRoleVisibility(name, currentRoleKey, roleVisibilityMatrix),
-    [canViewFinancials, currentRoleKey, currentUser, roleVisibilityMatrix],
+      canViewResourceForUser(name, currentUser, roleVisibilityMatrix),
+    [canViewFinancials, currentUser, roleVisibilityMatrix],
   );
 
   const sider = useSiderMenuItems({

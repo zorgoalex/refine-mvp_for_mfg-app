@@ -5,7 +5,7 @@ import {
   canViewSettingsCategory,
   isLegacyAdminUser,
 } from '../../utils/navigationPermissions';
-import { canViewResourceByRoleVisibility } from '../../utils/resourceVisibility';
+import { canViewResourceForUser } from '../../utils/resourceVisibility';
 import { buildCategorizedResources } from '../../utils/siderMenuItems';
 import {
   EVOLUTION_CATEGORY_MAP,
@@ -38,7 +38,7 @@ function visibleCategories(input: {
     canViewSettings,
     canViewNavigation: (name) =>
       canViewNavigationResource(name, input.user, input.backendPermissions) &&
-      canViewResourceByRoleVisibility(name, input.user.role, input.roleVisibility),
+      canViewResourceForUser(name, input.user, input.roleVisibility),
   });
 }
 
